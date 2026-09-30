@@ -54,7 +54,8 @@ code { font-family: inherit; font-weight: 700; }
 
 /* ---- The hero: the main menu. ------------------------------------------------------ */
 
-.menu { min-height: 100vh; padding: 4.5rem 1.25rem 3.5rem; text-align: center; position: relative; }
+/* A little less than the screen, so the top of the video shows under it. */
+.menu { min-height: calc(100vh - 9rem); padding: 4.5rem 1.25rem 2.5rem; text-align: center; position: relative; }
 
 .logo {
   font-family: "Kurale", serif;
@@ -118,10 +119,11 @@ code { font-family: inherit; font-weight: 700; }
     0 0 26px 6px rgba(255, 160, 60, 0.75);
   outline: none;
 }
-/* The video under the buttons, 16:9, in the windows' silver frame. */
+.oval-video { font-size: 1.4rem; }
+
+/* The video opens the page's main part, as wide as it, 16:9, in the windows' silver frame. */
 .video {
-  width: min(48rem, 100%);
-  margin: 2.5rem auto 0;
+  margin: 0 0 3.5rem;
   aspect-ratio: 16 / 9;
   border: 3px solid var(--silver);
   background: #000;
@@ -268,4 +270,14 @@ main { padding: 0 1.25rem 2rem; }
   body { font-size: 1rem; }
   .menu { padding-top: 3.5rem; }
   .window h2 { font-size: 1.15rem; padding-inline: 2.4rem; background-size: 3rem 100%; }
+}
+
+/* Laptop screens: a tighter menu, so the video still shows at the bottom of the first screen. */
+@media (min-width: 30.01rem) and (max-height: 56rem) {
+  .menu { padding-top: 2.5rem; padding-bottom: 1.75rem; }
+  .logo { font-size: clamp(4.5rem, 17vh, 10rem); }
+  .tagline { margin: 0.6rem auto 1.5rem; }
+  .ovals { gap: 0.65rem; }
+  .oval { height: 3.3rem; font-size: 1.2rem; }
+  .oval-video { font-size: 1.3rem; }
 }
