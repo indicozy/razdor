@@ -66,7 +66,7 @@
     <div class="parchment">
       <ol>
         <li>Install <i>Discord Times</i> and the Community Update 1.2, if you haven't yet.</li>
-        <li>Get a Razdor build: <strong>Razdor.exe</strong> for Windows or <strong>razdor</strong> for Linux. For now builds are shared on request: ask on <a href="#discord">Discord</a>.</li>
+        <li>Download Razdor from the <a href="https://github.com/indicozy/razdor/releases/latest">releases page</a>: <strong>Razdor.exe</strong> for Windows or <strong>razdor</strong> for Linux.</li>
         <li>Put it into the game folder, next to <strong>DiscordTimes.exe</strong>.</li>
         <li>Start it. Razdor finds the game in its own folder; it keeps its saves and settings apart and leaves the game untouched.</li>
       </ol>
@@ -79,6 +79,42 @@
   <h2 id="changes-title">Changelog</h2>
   <a class="close" href="#top" aria-label="Back to the menu">×</a>
   <div class="window-body">
+    <article class="box">
+      <h3>0.2.0 <span class="date">30 September 2026</span></h3>
+      <h4>New</h4>
+      <ul>
+        <li>Following an army: after a click on an army the hero goes after it until they meet.</li>
+        <li>Units on the army screen and in the barracks can be rearranged by dragging.</li>
+        <li>Route preview: the first click shows the route and its time, a second one (or a double click) walks it; a click while walking stops.</li>
+        <li>Armies on the minimap, edge scrolling, and dragging the map with the right button.</li>
+        <li>The defeat screen: «Загрузить последнее сохранение» and «Начать карту заново».</li>
+        <li>A play log, <code>razdor-play.log</code>, for tracking down bugs.</li>
+      </ul>
+      <h4>Changed</h4>
+      <ul>
+        <li>A meeting's words are read before the fight; the battle opens after «ОК».</li>
+        <li>The map zoom follows the screen size, as the original at 1024×768.</li>
+        <li>Computer armies go around castles, forts and ruins not theirs, as the hero does.</li>
+      </ul>
+      <h4>Fixed</h4>
+      <ul>
+        <li>The invulnerable and ghosts lose exactly 1 hit from any blow.</li>
+        <li>A percent bonus to a protection adds up: 44% + 20% = 64%.</li>
+        <li>Reading a spell on the map plays in real time; spell pictures have the right colours.</li>
+        <li>An item that raises maximum HP brings the hit points with it; battle cards show the actions left.</li>
+        <li>Messengers come to the hero; no more crash on the map with Russian building names.</li>
+      </ul>
+    </article>
+    <article class="box">
+      <h3>0.1.2 <span class="date">30 September 2026</span></h3>
+      <ul>
+        <li>Battle AI, easy or expert, as the original's «Улучшенный интеллект противника в битве».</li>
+        <li>Quests show places on the map; the original's ships; buildings no longer hide behind hills.</li>
+        <li>Item restrictions as in the original; building defence in friendly buildings.</li>
+        <li>With the front row empty, the back row steps forward, also at the start of a battle.</li>
+        <li>Fixed Esc in battle and the music after loading a game.</li>
+      </ul>
+    </article>
     <article class="box">
       <h3>0.1.1 <span class="date">30 September 2026</span></h3>
       <h4>New</h4>
@@ -124,7 +160,7 @@
 </main>
 
 <footer class="foot">
-  <p>Razdor 0.1.1 // for Community Update 1.2</p>
+  <p>Razdor 0.2.0 // for Community Update 1.2 // <a href="https://github.com/indicozy/razdor">source code on GitHub</a></p>
   <p>Made by <a href="https://github.com/indicozy">@indicozy</a>. Not affiliated with Aterdux or the rights holders of <i>Discord Times</i>; no warranty.</p>
 </footer>
 
