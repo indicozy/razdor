@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Razdor — an engine for Discord Times</title>
+<meta name="description" content="Razdor is an open engine for Discord Times. It plays the original scenarios and campaigns from your own copy of the game on today's Windows and Linux.">
+<link rel="alternate" hreflang="ru" href="index.html">
+<link rel="stylesheet" href="style.css">
+</head>
+<body id="top">
+
+<p class="lang"><b>EN</b> / <a href="index.html" lang="ru">RU</a></p>
+
+<header class="menu">
+  <h1 class="logo">Razdor</h1>
+  <p class="tagline">An engine for <i>Discord Times</i>: the original scenarios on today's Windows and Linux</p>
+  <nav aria-label="Sections">
+    <ul class="ovals">
+      <li><a class="oval oval-video" href="https://www.youtube.com/watch?v=KNOogezmMmM">Watch the video</a></li>
+      <li><a class="oval" href="#how">How it works</a></li>
+      <li><a class="oval" href="#install">Installation</a></li>
+      <li><a class="oval" href="#changes">Changelog</a></li>
+      <li><a class="oval" href="#discord">Discord</a></li>
+    </ul>
+  </nav>
+</header>
+
+<main>
+
+<section class="window" id="how" aria-labelledby="how-title">
+  <h2 id="how-title">How it works</h2>
+  <a class="close" href="#top" aria-label="Back to the menu">×</a>
+  <div class="window-body">
+    <div class="box">
+      <p>Razdor is a new engine for <i>Discord Times</i> («Времена раздора», Aterdux, 2004). It is written from scratch and contains nothing from the original game itself. It reads the maps, data, art, sounds, music and texts from your installed copy while you play, and changes nothing in it.</p>
+      <p>The rules follow the original: battles on the 2×6 field, initiative, rows and magic, experience and promotions, the economy, events and quests work as in the game, the Community Update's included.</p>
+    </div>
+    <div class="pair">
+      <div class="box">
+        <h3>What Razdor plays</h3>
+        <ul>
+          <li>Every scenario and campaign in the game folder: «Раменское королевство», «Сказка странствий» and the rest.</li>
+          <li>The world map with its fog of war, towns, castles and villages, armies with goals of their own, ships.</li>
+          <li>Items, spells, the quest journal, saves.</li>
+          <li>A map editor whose maps the original opens too.</li>
+          <li>Russian and English interface.</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>What you bring</h3>
+        <ul>
+          <li>Your own copy of <i>Discord Times</i> with the Community Update 1.2.</li>
+          <li>Windows 10 or newer, or Linux (x86_64).</li>
+          <li>A graphics card with OpenGL 2, which almost any computer has.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="window" id="install" aria-labelledby="install-title">
+  <h2 id="install-title">Installation</h2>
+  <a class="close" href="#top" aria-label="Back to the menu">×</a>
+  <div class="window-body">
+    <div class="parchment">
+      <ol>
+        <li>Install <i>Discord Times</i> and the Community Update 1.2, if you haven't yet.</li>
+        <li>Get a Razdor build: <strong>Razdor.exe</strong> for Windows or <strong>razdor</strong> for Linux. For now builds are shared on request: ask on <a href="#discord">Discord</a>.</li>
+        <li>Put it into the game folder, next to <strong>DiscordTimes.exe</strong>.</li>
+        <li>Start it. Razdor finds the game in its own folder; it keeps its saves and settings apart and leaves the game untouched.</li>
+      </ol>
+      <p class="note">If the game is somewhere else, give its folder in a <code>.env</code> file next to the program: <code>RAZDOR_DT_DIR="C:\Games\Discord Times"</code>. If something does not start, send the <code>razdor.log</code> file from <code>%APPDATA%\razdor\</code> (Windows) or <code>~/.local/share/razdor/</code> (Linux).</p>
+    </div>
+  </div>
+</section>
+
+<section class="window" id="changes" aria-labelledby="changes-title">
+  <h2 id="changes-title">Changelog</h2>
+  <a class="close" href="#top" aria-label="Back to the menu">×</a>
+  <div class="window-body">
+    <article class="box">
+      <h3>0.1.1 <span class="date">30 September 2026</span></h3>
+      <h4>New</h4>
+      <ul>
+        <li>New game: the maps are grouped as in the original. A campaign is one row with its chapters listed under it.</li>
+        <li>Each map shows its own picture in the frame, as in the original, with the terrain beside it.</li>
+        <li>The first new game offers the tutorial scenario.</li>
+        <li>Without an OpenGL driver (Remote Desktop, virtual machines) Razdor explains what to do.</li>
+      </ul>
+      <h4>Changed</h4>
+      <ul>
+        <li>Battle: the enemy under the mouse is framed green, as in the original.</li>
+        <li>World map: no army, friendly or hostile, can be walked through.</li>
+      </ul>
+      <h4>Fixed</h4>
+      <ul>
+        <li>The «Рестарт» question no longer closes by itself, and deleting a save always asks first.</li>
+        <li>Builds are reproducible: the same commit gives the same files on any computer.</li>
+      </ul>
+    </article>
+    <article class="box">
+      <h3>0.1.0 <span class="date">29 September 2026</span></h3>
+      <ul>
+        <li>The first release: Razdor.exe for Windows and razdor for Linux.</li>
+        <li>The original scenarios from your copy of the game: world map, buildings, armies, battles, economy, events, spells, saves, sounds and music.</li>
+        <li>The map editor, a built-in demo map without the game installed, Russian and English interface.</li>
+        <li>Army screen: items are dragged from the backpack onto the units' cards.</li>
+        <li>An FPS counter in the settings; fixed a crash with the window minimized.</li>
+      </ul>
+    </article>
+  </div>
+</section>
+
+<section class="window" id="discord" aria-labelledby="discord-title">
+  <h2 id="discord-title">Discord</h2>
+  <a class="close" href="#top" aria-label="Back to the menu">×</a>
+  <div class="window-body join">
+    <p>The project's server: news, builds, questions, and reports of where Razdor plays differently from the original.</p>
+    <a class="oval" href="https://discord.gg/cdTtYz5dH">Join the Discord</a>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">
+  <p>Razdor 0.1.1 // for Community Update 1.2</p>
+  <p>Made by <a href="https://github.com/indicozy">@indicozy</a>. Not affiliated with Aterdux or the rights holders of <i>Discord Times</i>; no warranty.</p>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Razdor — движок для «Времён раздора»</title>
+<meta name="description" content="Razdor — открытый движок для «Времён раздора». Играет оригинальные сценарии и кампании с вашей копии игры на современных Windows и Linux.">
+<link rel="alternate" hreflang="en" href="en.html">
+<link rel="stylesheet" href="style.css">
+</head>
+<body id="top">
+
+<p class="lang"><a href="en.html" lang="en">EN</a> / <b>RU</b></p>
+
+<header class="menu">
+  <h1 class="logo">Razdor</h1>
+  <p class="tagline">Движок для «Времён раздора»: оригинальные сценарии на современных Windows и Linux</p>
+  <nav aria-label="Разделы">
+    <ul class="ovals">
+      <li><a class="oval oval-video" href="https://www.youtube.com/watch?v=KNOogezmMmM">Смотреть видео</a></li>
+      <li><a class="oval" href="#how">Как это работает</a></li>
+      <li><a class="oval" href="#install">Установка</a></li>
+      <li><a class="oval" href="#changes">Изменения</a></li>
+      <li><a class="oval" href="#discord">Discord</a></li>
+    </ul>
+  </nav>
+</header>
+
+<main>
+
+<section class="window" id="how" aria-labelledby="how-title">
+  <h2 id="how-title">Как это работает</h2>
+  <a class="close" href="#top" aria-label="К меню">×</a>
+  <div class="window-body">
+    <div class="box">
+      <p>Razdor — это новый движок для «Времён раздора» (Aterdux, 2004). Он написан заново и сам не содержит ничего из оригинальной игры. Карты, данные, графику, звуки, музыку и тексты он читает из вашей установленной копии прямо во время игры и ничего в ней не меняет.</p>
+      <p>Правила восстановлены по оригиналу: бои на поле 2×6, инициатива, ряды и магия, опыт и повышения, экономика, события и задания работают так же, как в игре, с Community Update включительно.</p>
+    </div>
+    <div class="pair">
+      <div class="box">
+        <h3>Что умеет Razdor</h3>
+        <ul>
+          <li>Все сценарии и кампании из папки игры: «Раменское королевство», «Сказка странствий» и остальные.</li>
+          <li>Карта мира с туманом войны, города, замки и деревни, армии со своими целями, корабли.</li>
+          <li>Предметы, заклинания, журнал заданий, сохранения.</li>
+          <li>Редактор карт, файлы которого открывает и оригинал.</li>
+          <li>Русский и английский интерфейс.</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>Что нужно от вас</h3>
+        <ul>
+          <li>Своя копия «Времён раздора» с Community Update 1.2.</li>
+          <li>Windows 10 или новее, либо Linux (x86_64).</li>
+          <li>Видеокарта с OpenGL 2 — есть почти на любом компьютере.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="window" id="install" aria-labelledby="install-title">
+  <h2 id="install-title">Установка</h2>
+  <a class="close" href="#top" aria-label="К меню">×</a>
+  <div class="window-body">
+    <div class="parchment">
+      <ol>
+        <li>Установите «Времена раздора» и Community Update 1.2, если их ещё нет.</li>
+        <li>Возьмите сборку Razdor: <strong>Razdor.exe</strong> для Windows или <strong>razdor</strong> для Linux. Сборки пока выдаются по запросу: напишите в <a href="#discord">Discord</a>.</li>
+        <li>Положите её в папку игры, рядом с <strong>DiscordTimes.exe</strong>.</li>
+        <li>Запустите. Razdor сам найдёт игру в своей папке; сохранения и настройки он хранит отдельно, а игру не трогает.</li>
+      </ol>
+      <p class="note">Если игра лежит в другом месте, укажите путь к ней в файле <code>.env</code> рядом с программой: <code>RAZDOR_DT_DIR="C:\Games\Discord Times"</code>. Если что-то не запускается, пришлите файл <code>razdor.log</code> из <code>%APPDATA%\razdor\</code> (Windows) или <code>~/.local/share/razdor/</code> (Linux).</p>
+    </div>
+  </div>
+</section>
+
+<section class="window" id="changes" aria-labelledby="changes-title">
+  <h2 id="changes-title">Изменения</h2>
+  <a class="close" href="#top" aria-label="К меню">×</a>
+  <div class="window-body">
+    <article class="box">
+      <h3>0.1.1 <span class="date">30 сентября 2026</span></h3>
+      <h4>Новое</h4>
+      <ul>
+        <li>Новая игра: карты сгруппированы, как в оригинале. Кампания — одна строка со списком глав под ней.</li>
+        <li>У каждой карты своя картинка в рамке, как в оригинале, а карта местности — рядом.</li>
+        <li>При первой новой игре предлагается обучающий сценарий.</li>
+        <li>Если нет драйвера OpenGL (удалённый рабочий стол, виртуальная машина), Razdor объясняет, что делать.</li>
+      </ul>
+      <h4>Изменено</h4>
+      <ul>
+        <li>Бой: враг под курсором обведён зелёной рамкой, как в оригинале.</li>
+        <li>Карта мира: сквозь армию, свою или чужую, пройти нельзя.</li>
+      </ul>
+      <h4>Исправлено</h4>
+      <ul>
+        <li>Вопрос «Рестарт» больше не закрывается сам, а удаление сохранения всегда спрашивает подтверждение.</li>
+        <li>Сборки воспроизводимы: один и тот же коммит даёт одинаковые файлы на любом компьютере.</li>
+      </ul>
+    </article>
+    <article class="box">
+      <h3>0.1.0 <span class="date">29 сентября 2026</span></h3>
+      <ul>
+        <li>Первый выпуск: Razdor.exe для Windows и razdor для Linux.</li>
+        <li>Оригинальные сценарии с вашей копии игры: карта мира, здания, армии, бои, экономика, события, заклинания, сохранения, звуки и музыка.</li>
+        <li>Редактор карт, встроенная демо-карта без установленной игры, русский и английский интерфейс.</li>
+        <li>Экран армии: предметы перетаскиваются из рюкзака на карточки воинов.</li>
+        <li>Счётчик кадров в настройках; исправлен вылет при свёрнутом окне.</li>
+      </ul>
+    </article>
+  </div>
+</section>
+
+<section class="window" id="discord" aria-labelledby="discord-title">
+  <h2 id="discord-title">Discord</h2>
+  <a class="close" href="#top" aria-label="К меню">×</a>
+  <div class="window-body join">
+    <p>Сервер проекта: новости, сборки, вопросы и сообщения о том, где Razdor играет не так, как оригинал.</p>
+    <a class="oval" href="https://discord.gg/cdTtYz5dH">Войти в Discord</a>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">
+  <p>Razdor 0.1.1 // для Community Update 1.2</p>
+  <p>Сделал <a href="https://github.com/indicozy">@indicozy</a>. Не связан с Aterdux и правообладателями «Времён раздора»; без гарантий.</p>
+</footer>
+
+</body>
+</html>
