@@ -55,10 +55,10 @@ code { font-family: inherit; font-weight: 700; }
 /* ---- The hero: the main menu. ------------------------------------------------------ */
 
 /* The menu leaves room for 45% of the video on the first screen (the video is as wide as
-   the page less main's padding, 16:9); --menu-h is how tall its content gets at most. */
-:root { --menu-h: 40rem; }
+   the windows below it, 16:9); --menu-h is how tall its content gets at most. */
+:root { --menu-h: 40rem; --video-w: min(100vw - 2.5rem, 50rem); }
 .menu {
-  min-height: calc(100vh - 0.45 * (100vw - 2.5rem) * 9 / 16);
+  min-height: calc(100vh - 0.45 * var(--video-w) * 9 / 16);
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -131,11 +131,12 @@ code { font-family: inherit; font-weight: 700; }
 }
 .oval-video { font-size: 1.4rem; }
 
-/* The video opens the page's main part, as wide as it, 16:9, in the windows' silver frame. */
+/* The video opens the page's main part, as wide as the windows below it, 16:9, in their
+   silver frame. */
 .video {
   margin: 0 auto 3.5rem;
   /* Narrower only where the menu would otherwise leave less than 40% of it in view. */
-  max-width: max(18rem, calc((100vh - var(--menu-h)) / 0.4 * 16 / 9));
+  max-width: min(50rem, max(18rem, calc((100vh - var(--menu-h)) / 0.4 * 16 / 9)));
   aspect-ratio: 16 / 9;
   border: 3px solid var(--silver);
   background: #000;
