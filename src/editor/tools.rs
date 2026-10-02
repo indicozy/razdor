@@ -26,7 +26,8 @@ pub enum Tool {
     Building { kind: u8, picture_type: u8, variant: u8 },
     /// Place an army of map model 4–7 (feudal, rogue, peasant, inactive).
     Army { model: u8 },
-    Point { lantern: bool },
+    /// Place a point of model 8 (lantern), 9 (event point) or 10 (AI target).
+    Point { model: u8 },
     /// Click the start cell of a hero preset (0 knight, 1 archmage, 2 ranger).
     HeroStart(usize),
 }
@@ -190,8 +191,8 @@ impl ToolState {
                     self.selected = Some(Target::Army(id as u8));
                 }
             }
-            Tool::Point { lantern } => {
-                if let Some(id) = self.run(doc, Command::PlacePoint { x, y, lantern }) {
+            Tool::Point { model } => {
+                if let Some(id) = self.run(doc, Command::PlacePoint { x, y, model }) {
                     self.selected = Some(Target::Point(id as u8));
                 }
             }
@@ -349,7 +350,7 @@ mod tests {
         let (mut d, p, mut t) = (doc(), Palette::fallback(), ToolState::default());
         t.set_tool(Tool::Army { model: 4 });
         t.press(&mut d, &p, (3, 3));
-        t.set_tool(Tool::Point { lantern: true });
+        t.set_tool(Tool::Point { model: 8 });
         t.press(&mut d, &p, (4, 4));
         assert_eq!(t.selected, Some(Target::Point(1)));
         t.set_tool(Tool::HeroStart(1));

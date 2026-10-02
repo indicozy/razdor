@@ -435,13 +435,15 @@ and names units, artefacts and spells from your install; without one it uses pla
   (the original editor's 20 map-check rules, which never block saving, then Razdor's file
   checks, whose errors do; click a row to go to its record), Playability (the original
   editor's score, kept in the map and shown at the foot of the tool column; each scoring adds
-  a line to `MapData.Txt` in your maps folder), Test play, Exit.
+  a line to `MapData.Txt` in your maps folder), Options (the original's text size, bold and
+  "new events repeat", kept in `DTMapEdit.Ini` in Razdor's editor folder, `RAZDOR_EDITOR_DIR`
+  or `~/.local/share/razdor/editor`), Test play, Exit.
 - **Tools** (right column, keys in brackets): Select and move (V), Terrain (T: 16 surfaces,
   brush 1/3/5/9, flood fill, rectangle), Objects (O: hills, mountains, stones, trees by class
   and picture; several per cell), Erase (E), Building (B: type and picture; the cell you click
   is the bottom-right corner, the preview is red if it does not fit), Army (A: feudal, rogue,
   peasant or inactive), Point (P:
-  lantern or event point).
+  lantern, which asks for its radius, event point or AI target point).
 - **Panels**: click a building, army or point to edit every field (names and descriptions in
   any script, garrison, barracks, goods, spells, incomes, factions and attitudes, AI settings,
   local events picked by title). Delete removes it; later ids and references are renumbered.

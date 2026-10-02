@@ -75,6 +75,10 @@ enum Modal {
     Settings,
     Events,
     TestPlay,
+    /// The original's number dialog for a new lantern's radius (records.md §2).
+    Radius { id: u8, value: i64 },
+    /// The original's options window.
+    Options(razdor::editor::options::Options),
 }
 
 pub struct EditorScreen {
@@ -104,6 +108,8 @@ pub struct EditorScreen {
     pressing: bool,
     last_cell: Option<(i32, i32)>,
     panning: Option<Vec2>,
+    /// The original editor's options (records.md §11).
+    options: razdor::editor::options::Options,
 }
 
 fn ctrl() -> bool {
@@ -122,6 +128,7 @@ impl EditorScreen {
         let palette = art.map(|a| Palette::from_sprites(a.objects())).filter(|p| !p.buildings.is_empty()).unwrap_or_else(Palette::fallback);
         let game_dir = art.and_then(|a| install::find_path(&a.install.dir, install::MAPS_DIR).ok());
         let play_content = dt_content.clone().unwrap_or(demo);
+        let options = razdor::editor::options::Options::load(razdor::editor::options::editor_dir().as_deref(), art.map(|a| a.install.dir.as_path()));
         let mut pal = PaletteState::default();
         pal.fit(&palette);
         EditorScreen {
@@ -133,7 +140,7 @@ impl EditorScreen {
             overlays: Overlays { grid: false, cover: false, patrols: false },
             panel: PanelState::default(),
             settings: SettingsState::default(),
-            events: EventsState::default(),
+            events: EventsState::with_options(&options),
             modal: None,
             status: Some(tr("New 50 x 50 map. Maps are saved to your own folder; see Save as.").into()),
             issues: Vec::new(),
@@ -147,6 +154,7 @@ impl EditorScreen {
             pressing: false,
             last_cell: None,
             panning: None,
+            options,
         }
     }
 
@@ -170,7 +178,7 @@ impl EditorScreen {
         self.cam = None;
         self.issues.clear();
         self.check_rows.clear();
-        self.events = EventsState::default();
+        self.events = EventsState::with_options(&self.options);
     }
 
     fn open_file(&mut self, path: PathBuf) {
@@ -622,6 +630,12 @@ impl EditorScreen {
         if self.tools.selected.is_some() && !matches!(self.tools.tool, Tool::Select) {
             // A record just placed: its panel opens at the first tab.
             self.panel.tab = 0;
+            // A new lantern asks for its radius, as the original's number dialog does.
+            if let (Tool::Point { model: 8 }, Some(Target::Point(id))) = (self.tools.tool, self.tools.selected) {
+                if let Some(p) = self.doc.scenario.points.get(id as usize - 1) {
+                    self.modal = Some(Modal::Radius { id, value: p.radius as i64 });
+                }
+            }
         }
     }
 
@@ -642,6 +656,7 @@ impl EditorScreen {
             (tr("Events"), true),
             (tr("Check"), true),
             (tr("Playability"), true),
+            (tr("Options"), true),
             (tr("Test play"), true),
             (tr("Exit"), true),
         ];
@@ -690,8 +705,9 @@ impl EditorScreen {
             Some(8) => self.modal = Some(Modal::Events),
             Some(9) => self.check(),
             Some(10) => self.score(),
-            Some(11) => self.modal = Some(Modal::TestPlay),
-            Some(12) => action = self.guarded(Then::Exit),
+            Some(11) => self.modal = Some(Modal::Options(self.options)),
+            Some(12) => self.modal = Some(Modal::TestPlay),
+            Some(13) => action = self.guarded(Then::Exit),
             _ => {}
         }
         let s = &self.doc.scenario;
@@ -772,6 +788,8 @@ impl EditorScreen {
         draw_rectangle(0.0, 0.0, sw, sh, Color::new(0.0, 0.0, 0.0, 0.55));
         let (w, h) = match &modal {
             Modal::Confirm { .. } => (560.0, 200.0),
+            Modal::Radius { .. } => (420.0, 190.0),
+            Modal::Options(_) => (520.0, 300.0),
             Modal::TestPlay => (560.0, 230.0),
             Modal::SaveAs { .. } => (620.0, 300.0),
             Modal::NewMap { .. } => (560.0, 330.0),
@@ -999,6 +1017,55 @@ impl EditorScreen {
                     return action;
                 }
                 if button(r.right() - 140.0, r.bottom() - 54.0, 120.0, 40.0, tr("Close"), true) || esc {
+                    keep = false;
+                }
+            }
+            Modal::Radius { id, value } => {
+                text(tr("Lantern radius"), x, y, 22.0, ACCENT);
+                text_fit(tr("Radius (0-24)"), x, y + 40.0, 160.0, 17.0, INK);
+                if let Some(v) = number_field("radius:value", x + 170.0, y + 22.0, 150.0, *value, 0, razdor::editor::records::LANTERN_MAX as i64) {
+                    *value = v;
+                }
+                let ok = button(r.right() - 270.0, r.bottom() - 54.0, 120.0, 40.0, tr("OK"), true) || (is_key_pressed(KeyCode::Enter) && !popup_open());
+                if ok {
+                    let (id, v) = (*id, *value as u8);
+                    if let Some(p) = self.doc.scenario.points.get(id as usize - 1) {
+                        let p = razdor::dt::dtm::Point { radius: v, ..p.clone() };
+                        self.apply(Command::SetPoint { id, point: Box::new(p) }, "");
+                    }
+                    keep = false;
+                }
+                // Cancel keeps the default the dialog was given.
+                if cancel(&r) || esc {
+                    keep = false;
+                }
+            }
+            Modal::Options(o) => {
+                use razdor::editor::options::{self, SIZES};
+                text(tr("Options"), x, y, 22.0, ACCENT);
+                text_fit(tr("Text size of the event window's message and question"), x, y + 30.0, r.w - 40.0, 16.0, INK);
+                for (k, size) in SIZES.iter().enumerate() {
+                    if toggle_button(x + k as f32 * 90.0, y + 44.0, 84.0, 28.0, &size.to_string(), o.text_size == *size) {
+                        o.text_size = *size;
+                    }
+                }
+                if let Some(on) = checkbox(x, y + 84.0, r.w - 40.0, tr("Bold text"), o.bold) {
+                    o.bold = on;
+                }
+                if let Some(on) = checkbox(x, y + 114.0, r.w - 40.0, tr("New events can happen many times"), o.new_events_repeat) {
+                    o.new_events_repeat = on;
+                }
+                if button(r.right() - 270.0, r.bottom() - 54.0, 120.0, 40.0, tr("OK"), true) {
+                    self.options = *o;
+                    self.events.set_options(o);
+                    self.status = Some(match options::editor_dir().map(|d| o.save(&d)) {
+                        Some(Ok(path)) => trf!("Options saved to {path}.", path = path.display()),
+                        Some(Err(e)) => trf!("Options not saved: {e}", e),
+                        None => tr("Options kept for this session (no data folder).").into(),
+                    });
+                    keep = false;
+                }
+                if cancel(&r) || esc {
                     keep = false;
                 }
             }

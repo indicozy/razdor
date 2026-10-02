@@ -94,15 +94,26 @@ pub fn new_army(id: u8, x: u16, y: u16, model: u8) -> Army {
     }
 }
 
-/// A new lantern (lit at the start, radius 5) or event point.
-pub fn new_point(id: u8, serial: u16, x: u16, y: u16, lantern: bool) -> Point {
+/// Point models: a lantern, an event point and an AI target point (records.md §10).
+pub const LANTERN: u8 = 8;
+pub const EVENT_POINT: u8 = 9;
+pub const TARGET_POINT: u8 = 10;
+/// A new lantern's radius (the number dialog then asks, with this default).
+pub const LANTERN_RADIUS: u8 = 10;
+
+/// A new point as the original places one (0x595390, mode 4): a zeroed record with its
+/// position and the word `id | model << 8` at byte 4, so the 256th point (id 256) stores id
+/// 0 and its model plus 1 there (the original's overflow, kept; Razdor's file check then
+/// refuses the map). A lantern is lit at the start with radius [`LANTERN_RADIUS`].
+pub fn new_point(id: u16, x: u16, y: u16, model: u8) -> Point {
+    let word = id | (model as u16) << 8;
+    let lantern = model == LANTERN;
     Point {
         x,
         y,
-        id,
-        model: if lantern { 8 } else { 9 },
-        serial,
-        radius: if lantern { 5 } else { 0 },
+        id: word as u8,
+        model: (word >> 8) as u8,
+        radius: if lantern { LANTERN_RADIUS } else { 0 },
         active: lantern as u8,
         ..Point::default()
     }
@@ -136,8 +147,13 @@ mod tests {
         let i = new_army(4, 5, 6, 7);
         assert_eq!((i.model, i.behaviour, i.inactive), (7, 0, 1));
         assert_eq!(new_army(1, 0, 0, 4).behaviour, 0);
-        let l = new_point(2, 7, 1, 1, true);
-        assert_eq!((l.model, l.radius, l.active, l.serial), (8, 5, 1, 7));
-        assert_eq!(new_point(1, 1, 0, 0, false).model, 9);
+        let l = new_point(2, 1, 1, LANTERN);
+        assert_eq!((l.id, l.model, l.radius, l.active, l.serial), (2, 8, 10, 1, 0));
+        assert_eq!((new_point(1, 0, 0, EVENT_POINT).model, new_point(1, 0, 0, EVENT_POINT).radius), (9, 0));
+        assert_eq!(new_point(3, 0, 0, TARGET_POINT).model, 10);
+        // The 256th point overflows its id into the model byte.
+        let p = new_point(256, 0, 0, LANTERN);
+        assert_eq!((p.id, p.model), (0, 9));
+        assert_eq!(new_point(256, 0, 0, TARGET_POINT).model, 11);
     }
 }

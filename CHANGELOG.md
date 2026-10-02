@@ -524,6 +524,15 @@ old id, and their versions give both.
   (kept only if it decodes); titles and character names are cut at 64 characters, the next
   map keeps its file name only. Removing a named character renumbers nothing, as in the
   original.
+- **Points as the original's**: the point tool places lanterns, event points and AI target
+  points (model 10); a new point is the original's zeroed record (no serial), a new lantern
+  is lit with radius 10 and asks for its radius in the original's number dialog; the event
+  point's panel edits the four target priorities and the active time, the target point's
+  panel only those; at most 256 points (the 256th overflows its id as in the original).
+- **Options** (toolbar): the original's text size and bold for the event window's message
+  and question boxes and whether new events repeat, kept as the original's `[Option]`
+  section in `DTMapEdit.Ini` in Razdor's editor folder (`RAZDOR_EDITOR_DIR`, else
+  `razdor/editor` in the data folder), read from the install's editor ini until then.
 
 ## 0.2.2 — 2026-10-01
 

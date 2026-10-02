@@ -421,35 +421,54 @@ pub fn point_panel(state: &mut PanelState, s: &Scenario, id: u8, rect: Rect) -> 
     let orig = s.points.get((id as usize).checked_sub(1)?)?;
     let mut p: Point = orig.clone();
     state.show(&format!("p{id}"));
-    let kind = if p.model == 8 { tr("Lantern") } else { tr("Event point") };
+    let kind = match p.model {
+        8 => tr("Lantern"),
+        10 => tr("AI target point"),
+        _ => tr("Event point"),
+    };
     let area = frame(rect, &format!("{kind} #{id}"), &[], state);
     let mut f = Form::new(&format!("p{id}"), area, state.scroll);
-    let mut lantern = (p.model == 8) as u8;
-    f.flag("lantern", tr("Lantern (reveals the area around it)"), &mut lantern);
-    p.model = if lantern != 0 { 8 } else { 9 };
-    f.flag("active", tr("Active at the start"), &mut p.active);
-    f.num("radius", tr("Radius at the start"), &mut p.radius, 0, 24);
     f.num("x", "X", &mut p.x, 0, s.width() as i64 - 1);
     f.num("y", "Y", &mut p.y, 0, s.height() as i64 - 1);
-    f.heading(tr("Attached events"));
-    f.note(tr("Up to 5, as in the original editor."), DIM);
-    let used = records::used_events(&p.event_slots, p.event_count).to_vec();
-    let mut slots5 = [0u16; 5];
-    slots5.copy_from_slice(&p.event_slots[..5]);
-    match f.event_list("events", &used, &event_options(s), false) {
-        EventListEdit::Add(e) => {
-            let mut n = p.event_count.min(5);
-            if records::add_event(&mut slots5, &mut n, e) {
-                p.event_slots[..5].copy_from_slice(&slots5);
-                p.event_count = n;
-                f.changed = Some("events".into());
+    // The original's windows: the number dialog for a lantern, the target window for an AI
+    // target, the point window for an event point (records.md §10).
+    let priorities = |f: &mut Form, p: &mut Point| {
+        f.heading(tr("Target priorities"));
+        for (i, side) in palette::FACTIONS.iter().enumerate() {
+            f.num(&format!("prio{i}"), side, &mut p.priorities[i], 0, 65_535);
+        }
+        f.num("active_time", tr("Active time"), &mut p.active_duration, 0, 65_535);
+    };
+    match p.model {
+        8 => {
+            f.num("radius", tr("Radius"), &mut p.radius, 0, records::LANTERN_MAX as i64);
+        }
+        10 => priorities(&mut f, &mut p),
+        _ => {
+            f.num("radius", tr("Radius at the start"), &mut p.radius, 0, 255);
+            f.flag("active", tr("Active at the start"), &mut p.active);
+            priorities(&mut f, &mut p);
+            f.heading(tr("Attached events"));
+            f.note(tr("Up to 5, as in the original editor."), DIM);
+            let used = records::used_events(&p.event_slots, p.event_count).to_vec();
+            let mut slots5 = [0u16; 5];
+            slots5.copy_from_slice(&p.event_slots[..5]);
+            match f.event_list("events", &used, &event_options(s), false) {
+                EventListEdit::Add(e) => {
+                    let mut n = p.event_count.min(5);
+                    if records::add_event(&mut slots5, &mut n, e) {
+                        p.event_slots[..5].copy_from_slice(&slots5);
+                        p.event_count = n;
+                        f.changed = Some("events".into());
+                    }
+                }
+                EventListEdit::Remove(i) => {
+                    records::remove_event(&mut p.event_slots[..5], &mut p.event_count, i);
+                    f.changed = Some("events".into());
+                }
+                EventListEdit::None => {}
             }
         }
-        EventListEdit::Remove(i) => {
-            records::remove_event(&mut p.event_slots, &mut p.event_count, i);
-            f.changed = Some("events".into());
-        }
-        EventListEdit::None => {}
     }
     let content_h = f.content_height();
     scroll(state, area, content_h);
@@ -457,5 +476,6 @@ pub fn point_panel(state: &mut PanelState, s: &Scenario, id: u8, rect: Rect) -> 
         return Some((Command::DeletePoint { id }, String::new()));
     }
     let key = changed(orig, &p, &f)?;
+    let p = if p.model == 9 { records::save_point(&p) } else { p };
     Some((Command::SetPoint { id, point: Box::new(p) }, key))
 }

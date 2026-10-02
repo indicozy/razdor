@@ -293,7 +293,6 @@ a record's id is its position and cannot change = номер записи — е
 the map has errors ({n}); fix them first = на карте есть ошибки ({n}); сначала исправьте их
 cannot write the map: {e} = не удалось записать карту: {e}
 armies (at most 255) = армии (не больше 255)
-points (at most 255) = точки (не больше 255)
 named characters (32) = именные персонажи (32)
 events in this list = события в этом списке
 events (at most 5000) = события (не больше 5000)
@@ -404,3 +403,19 @@ Own picture: {n} bytes = Своя картинка: {n} байт
 Picture file (path) = Файл картинки (путь)
 Previous picture = Предыдущая картинка
 War = Война
+
+# Map editor: points and options
+AI target point = Точка цели ИИ
+Active time = Время активности
+Bold text = Жирный текст
+Lantern radius = Радиус фонаря
+New events can happen many times = Новые события могут случаться много раз
+Options kept for this session (no data folder). = Настройки действуют до выхода (нет папки данных).
+Options not saved: {e} = Настройки не сохранены: {e}
+Options saved to {path}. = Настройки сохранены в {path}.
+Radius = Радиус
+Radius (0-24) = Радиус (0-24)
+Target priorities = Приоритеты цели
+Text size of the event window's message and question = Размер текста сообщения и вопроса в окне событий
+model {model} is none of 8 (lantern), 9 (event point) and 10 (AI target) = модель {model} — ни 8 (фонарь), ни 9 (точка события), ни 10 (цель ИИ)
+points (at most 256) = точек (не больше 256)

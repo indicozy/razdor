@@ -363,8 +363,8 @@ impl Checker<'_> {
             if !self.inside(p.x, p.y) {
                 self.error(place, trf!("({x}, {y}) is outside the map", x = p.x, y = p.y));
             }
-            if !matches!(p.model, 8 | 9) {
-                self.error(place, trf!("model {model} is neither 8 (lantern) nor 9 (event point)", model = p.model));
+            if !matches!(p.model, 8..=10) {
+                self.error(place, trf!("model {model} is none of 8 (lantern), 9 (event point) and 10 (AI target)", model = p.model));
             }
             if p.event_count as usize > p.event_slots.len() {
                 self.error(place, trf!("{n} events; at most {max} fit", n = p.event_count, max = p.event_slots.len()));

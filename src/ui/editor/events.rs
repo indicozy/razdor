@@ -32,8 +32,9 @@ pub struct EventsState {
     shown: Option<u16>,
     /// The event being moved: the next click on a row puts it there.
     moving: Option<u16>,
-    /// The editor option "new events repeat" (a new event's "once" is its inverse).
-    pub new_events_repeat: bool,
+    /// The editor's options: "new events repeat" (a new event's "once" is its inverse) and
+    /// the text size and boldness of the message and question boxes.
+    options: razdor::editor::options::Options,
 }
 
 impl Default for EventsState {
@@ -47,12 +48,20 @@ impl Default for EventsState {
             picture_path: String::new(),
             shown: None,
             moving: None,
-            new_events_repeat: true,
+            options: razdor::editor::options::Options::default(),
         }
     }
 }
 
 impl EventsState {
+    pub fn with_options(o: &razdor::editor::options::Options) -> EventsState {
+        EventsState { options: *o, ..EventsState::default() }
+    }
+
+    pub fn set_options(&mut self, o: &razdor::editor::options::Options) {
+        self.options = *o;
+    }
+
     /// Opens the window on event `id`.
     pub fn select(&mut self, id: u16) {
         self.selected = Some(id);
@@ -263,7 +272,7 @@ fn event_list(state: &mut EventsState, s: &Scenario, r: Rect) -> Option<EventsAc
     let full = s.events.len() >= ev::MAX_EVENTS;
     if small_button(r.x, by, bw, 30.0, tr("New"), !full) {
         let kind = state.filter.kind.unwrap_or(1);
-        return Some(EventsAction::Apply(Command::NewEvent { kind, repeat: state.new_events_repeat }, String::new()));
+        return Some(EventsAction::Apply(Command::NewEvent { kind, repeat: state.options.new_events_repeat }, String::new()));
     }
     if small_button(r.x + bw + 4.0, by, bw, 30.0, tr("Duplicate"), state.selected.is_some() && !full) {
         let id = state.selected?;
@@ -303,9 +312,9 @@ fn properties(state: &mut EventsState, s: &Scenario, names: &Names, id: u16, r: 
     f.label_w = (area.w * 0.36).min(230.0);
     let mut action = EventsAction::None;
     match state.tab {
-        0 => tab_player(&mut f, s, &mut e),
+        0 => tab_player(&mut f, s, &mut e, &state.options),
         1 => tab_heroes(&mut f, s, names, &mut e),
-        2 => tab_result1(&mut f, s, names, &mut e),
+        2 => tab_result1(&mut f, s, names, &mut e, &state.options),
         3 => action = tab_result2(&mut f, s, names, &mut e, &mut state.picture_path),
         4 => {
             if let Some(a) = tab_places(&mut f, s, id) {
@@ -334,7 +343,17 @@ fn properties(state: &mut EventsState, s: &Scenario, names: &Names, id: u16, r: 
 
 /// Tab 1: type, group, time window, archetype, event and flag conditions, the question,
 /// defeated and met armies, the hero's stats.
-fn tab_player(f: &mut Form, s: &Scenario, e: &mut Event) {
+/// The options' text size in points as Razdor's pixels: 8, 10 and 12 points read as 15, 17
+/// and 20 (17 is the editor's usual size).
+fn text_px(o: &razdor::editor::options::Options) -> f32 {
+    match o.text_size {
+        12 => 20.0,
+        10 => 17.0,
+        _ => 15.0,
+    }
+}
+
+fn tab_player(f: &mut Form, s: &Scenario, e: &mut Event, o: &razdor::editor::options::Options) {
     f.heading(tr("Event"));
     f.pick("kind", tr("Event type"), &mut e.kind, &kind_options());
     f.pick("group", tr("Group (list colour)"), &mut e.group_colour, &group_options());
@@ -401,7 +420,7 @@ fn tab_player(f: &mut Form, s: &Scenario, e: &mut Event) {
     let c = &mut e.conditions;
     f.flag("ask", tr("Ask a yes/no question first"), &mut c.confirm_question);
     f.flag("repeat_yes", tr("Ask again after a yes"), &mut e.results.repeat_after_yes);
-    f.memo("question", tr("Question text"), &mut e.question, 3);
+    f.memo_styled("question", tr("Question text"), &mut e.question, 3, text_px(o), o.bold);
 
     f.heading(tr("Armies"));
     let armies = army_options(s);
@@ -466,8 +485,8 @@ fn tab_heroes(f: &mut Form, s: &Scenario, names: &Names, e: &mut Event) {
 
 /// Tab 3: the message, chained event, quest, resources, relative event, delay, flag,
 /// units added, spells, artefacts gained.
-fn tab_result1(f: &mut Form, s: &Scenario, names: &Names, e: &mut Event) {
-    f.memo("message", tr("Message (empty: the event happens silently)"), &mut e.message, 5);
+fn tab_result1(f: &mut Form, s: &Scenario, names: &Names, e: &mut Event, o: &razdor::editor::options::Options) {
+    f.memo_styled("message", tr("Message (empty: the event happens silently)"), &mut e.message, 5, text_px(o), o.bold);
     let events = event_options_none(s);
     let r = &mut e.results;
     f.pick("chained", tr("Chained event (runs at once)"), &mut r.chained_event, &events);

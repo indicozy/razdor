@@ -466,6 +466,13 @@ fn typed() -> (Vec<char>, usize, bool) {
 /// ends a one-line field or breaks the line in a multi-line one; Esc or a click elsewhere
 /// ends typing. Edits `value` as it is typed; true when it changed.
 pub fn text_field(key: &str, x: f32, y: f32, w: f32, h: f32, value: &mut String, multiline: bool) -> bool {
+    text_field_styled(key, x, y, w, h, value, multiline, 17.0, false)
+}
+
+/// [`text_field`] with its own text size (pixels) and, for `bold`, the text drawn twice a
+/// pixel apart.
+#[allow(clippy::too_many_arguments)]
+pub fn text_field_styled(key: &str, x: f32, y: f32, w: f32, h: f32, value: &mut String, multiline: bool, size: f32, bold: bool) -> bool {
     let id = field_id(key);
     let hover = mouse_in(x, y, w, h);
     if hover && clicked() {
@@ -485,14 +492,18 @@ pub fn text_field(key: &str, x: f32, y: f32, w: f32, h: f32, value: &mut String,
     }
     draw_rectangle(x, y, w, h, FIELD_BG);
     draw_rectangle_lines(x, y, w, h, if active { 2.0 } else { 1.0 }, if active { ACCENT } else if hover { INK } else { DIM });
-    let size = 17.0;
     let caret = if active && (get_time() * 2.0) as i64 % 2 == 0 { "|" } else { "" };
     if multiline {
         let lines = wrap(&format!("{value}{caret}"), w - 10.0, size);
-        let fit = ((h - 6.0) / 19.0).floor().max(1.0) as usize;
+        let step = size + 2.0;
+        let fit = ((h - 6.0) / step).floor().max(1.0) as usize;
         let skip = if active { lines.len().saturating_sub(fit) } else { 0 };
         for (i, line) in lines.iter().skip(skip).take(fit).enumerate() {
-            text(line, x + 5.0, y + 17.0 + i as f32 * 19.0, size, INK);
+            let ly = y + size + i as f32 * step;
+            text(line, x + 5.0, ly, size, INK);
+            if bold {
+                text(line, x + 6.0, ly, size, INK);
+            }
         }
     } else {
         // Show the end of a long line.

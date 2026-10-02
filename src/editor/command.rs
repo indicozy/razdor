@@ -55,8 +55,8 @@ pub enum Command {
     MoveArmy { id: u8, x: u16, y: u16 },
     DeleteArmy { id: u8 },
     SetArmy { id: u8, army: Box<Army> },
-    /// A new lantern (lit, radius 5) or event point.
-    PlacePoint { x: u16, y: u16, lantern: bool },
+    /// A new point of model `model`: 8 lantern, 9 event point, 10 AI target point.
+    PlacePoint { x: u16, y: u16, model: u8 },
     MovePoint { id: u8, x: u16, y: u16 },
     DeletePoint { id: u8 },
     SetPoint { id: u8, point: Box<Point> },

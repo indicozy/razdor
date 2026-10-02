@@ -122,6 +122,18 @@ impl Form {
         self.next(h + 4.0);
     }
 
+    /// [`Form::memo`] in the text size (pixels) and boldness of the editor's options.
+    pub fn memo_styled(&mut self, k: &str, label: &str, v: &mut String, lines: usize, size: f32, bold: bool) {
+        let h = 20.0 + lines as f32 * (size + 2.0) + 8.0;
+        if self.shown(h + 4.0) {
+            text_fit(tr(label), self.x, self.y + 15.0, self.w, 16.0, DIM);
+            if text_field_styled(&self.key(k), self.x, self.y + 20.0, self.w, h - 20.0, v, true, size, bold) {
+                self.mark(k);
+            }
+        }
+        self.next(h + 4.0);
+    }
+
     pub fn num<T: Copy + Into<i64> + TryFrom<i64>>(&mut self, k: &str, label: &str, v: &mut T, min: i64, max: i64) {
         self.num_step(k, label, v, min, max, 1);
     }

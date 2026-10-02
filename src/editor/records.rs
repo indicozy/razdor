@@ -419,6 +419,25 @@ pub fn market_test(s: &Scenario, id: u16, b: &Building, c: std::sync::Arc<Conten
 }
 
 // ------------------------------------------------------------------------------------------
+// Points (records.md §10)
+// ------------------------------------------------------------------------------------------
+
+/// The lantern's number dialog keeps its radius within 0..24 (0x528bd0).
+pub const LANTERN_MAX: u8 = 24;
+
+/// An event point as its window's OK writes it (0x550a7c): the first five slots (bytes
+/// 8–17) cleared and the list written back with its count; the model byte as it is.
+pub fn save_point(p: &crate::dt::dtm::Point) -> crate::dt::dtm::Point {
+    let mut p = p.clone();
+    let n = (p.event_count as usize).min(crate::editor::doc::POINT_EVENTS);
+    let list: Vec<u16> = p.event_slots[..n].to_vec();
+    p.event_slots[..crate::editor::doc::POINT_EVENTS].fill(0);
+    p.event_slots[..n].copy_from_slice(&list);
+    p.event_count = n as u8;
+    p
+}
+
+// ------------------------------------------------------------------------------------------
 // The scenario parameters (records.md §8)
 // ------------------------------------------------------------------------------------------
 
@@ -631,6 +650,14 @@ mod tests {
         assert_eq!((a.faction, a.relations), (2, [2, 3, 1, -2]));
         pick_named_character(&mut a, &s, 1);
         assert_eq!((a.named_character, a.leader_unit, a.leader_name.as_str()), (1, 9, "Ольга"));
+    }
+
+    #[test]
+    fn points_save_their_first_five_slots() {
+        let mut p = crate::dt::dtm::Point { event_count: 2, ..Default::default() };
+        p.event_slots = [4, 5, 6, 7, 8, 9, 1, 2, 3, 4];
+        let s = save_point(&p);
+        assert_eq!((s.event_slots, s.event_count), ([4, 5, 0, 0, 0, 9, 1, 2, 3, 4], 2), "bytes 8-17 only");
     }
 
     #[test]

@@ -651,7 +651,7 @@ These points refine [dtm-format.md](../dtm-format.md):
 | Building event list | as the original; an event can be inserted only at the end (Razdor's list has no selected line) | duplicates allowed, up to 64 |
 | Garrison rating, market test | as the original: the garrison's tactical cost and side strength, and the market test with the game's restock (Razdor's random numbers, so the goods drawn are an example, as in the original) | shown in the building window |
 | Event pickers of buildings | as the original | towns not offered |
-| New event | as the original (`src/editor/events.rs`); the option is the editor option's default, Y, until the Options commit wires it | repeat 1 day, duration 1,440, once from the option |
+| New event | as the original (`src/editor/events.rs`), with the options' new-events-repeat | repeat 1 day, duration 1,440, once from the option |
 | Copy event | as the original, the filtered-list quirk included; a name whose `#` is last and the last row of a filtered list that is not the last event are refused, where the original stops with a range error | inserted after the original, references renumbered, name numbered, custom picture dropped |
 | Event order | as the original: Move, or Ctrl+click, then a click on the target row | move with renumbering |
 | Event delete | as the original; a list longer than the original's range check (64, or 5 on a point) refuses the delete, where the original stops part-way | zeroes the entry without closing up, no prompt |
@@ -660,12 +660,12 @@ These points refine [dtm-format.md](../dtm-format.md):
 | Alliance presets | as the original | the four matrices in §8.3 (neutral self 2, war not symmetric) |
 | Hero presets | as the original: the page writes only the original's bytes; the position comes from the map | experience, gold and mana 0..32,000, five spells, start army at most 11 units, position from the map |
 | Scenario picture | as the original: the index cycles 0..5; a picture file is kept only if it decodes | index 0..5 cycled, plus import of a custom picture |
-| Lantern radius | inline spin 0..24, new lantern radius 5 | number dialog 0..24, new lantern radius 10 |
-| AI target points | absent (model 10 rejected) | target window for bytes 28–36; the point window edits them too |
-| Options | none | text size, bold, new-events-repeat |
+| Lantern radius | as the original: a new lantern gets radius 10 and the number dialog; a lantern's panel holds only its radius | number dialog 0..24, new lantern radius 10 |
+| AI target points | as the original: the point tool places them, their panel is the target window; the event point's panel edits the five words too | target window for bytes 28–36; the point window edits them too |
+| Options | as the original: the Options button; kept in `DTMapEdit.Ini` in Razdor's editor folder (read from the install's until then); the text size and bold apply to the message and question boxes | text size, bold, new-events-repeat |
 | Named character delete | as the original, but the open event's combos are not remapped (Razdor's character list lives in the settings window, not opened from an event); Razdor's file check reports references past the end | only the open event's combos; stored bytes not remapped |
 | Map deletes | renumbers homes, links, presets, patrol and battle armies | leaves those references untouched (§12) |
-| Limits | 255 buildings, armies, points | 254 buildings, 255 armies, 256 points |
+| Limits | as the original: 254 buildings, 255 armies, 256 points (the 256th point's id overflows into its model byte, as in the original, and Razdor's file check refuses it) | 254 buildings, 255 armies, 256 points |
 
 ## Unknowns
 

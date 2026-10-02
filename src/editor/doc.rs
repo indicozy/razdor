@@ -20,7 +20,7 @@ use super::geometry::{brush_indices, flood_region, is_massif, rect_indices, Cell
 use super::mapfile::{self, Container};
 use super::records;
 use super::refs;
-use super::validate::{has_errors, self_check, validate, Issue, MAX_RECORDS};
+use super::validate::{has_errors, self_check, validate, Issue};
 use super::{Names, Palette};
 
 /// Where the document came from.
@@ -177,6 +177,8 @@ pub const POINT_EVENTS: usize = 5;
 pub const MAX_BUILDINGS: usize = 254;
 /// Armies the original places at most.
 pub const MAX_ARMIES: usize = 255;
+/// Points the original places at most (the 256th overflows its id, [`new_point`]).
+pub const MAX_POINTS: usize = 256;
 
 /// Undo steps kept.
 pub const UNDO_LIMIT: usize = 200;
@@ -666,14 +668,13 @@ impl EditorDoc {
                 }
                 self.scenario.armies[i] = *army;
             }
-            Command::PlacePoint { x, y, lantern } => {
-                if self.scenario.points.len() >= MAX_RECORDS {
-                    return Err(EditError::Full(n_("points (at most 255)")));
+            Command::PlacePoint { x, y, model } => {
+                if self.scenario.points.len() >= MAX_POINTS {
+                    return Err(EditError::Full(n_("points (at most 256)")));
                 }
                 self.check_cell(x as i64, y as i64)?;
-                let id = self.scenario.points.len() as u8 + 1;
-                let serial = self.scenario.points.iter().map(|p| p.serial).max().unwrap_or(0).saturating_add(1);
-                self.scenario.points.push(new_point(id, serial, x, y, lantern));
+                let id = self.scenario.points.len() as u16 + 1;
+                self.scenario.points.push(new_point(id, x, y, model.clamp(8, 10)));
                 out.new_id = Some(id as u32);
             }
             Command::MovePoint { id, x, y } => {
@@ -981,6 +982,19 @@ mod tests {
             d.apply(Command::PlaceArmy { x: 1, y: 1, model: 4 }).unwrap();
         }
         assert_eq!(d.apply(Command::PlaceArmy { x: 1, y: 1, model: 4 }), Err(EditError::Full("armies (at most 255)")));
+        // 256 points; the 256th stores id 0 and model 9 (the original's overflow), which
+        // Razdor's file check refuses.
+        for _ in 0..MAX_POINTS {
+            d.apply(Command::PlacePoint { x: 2, y: 2, model: 8 }).unwrap();
+        }
+        assert_eq!(d.apply(Command::PlacePoint { x: 2, y: 2, model: 8 }), Err(EditError::Full("points (at most 256)")));
+        let last = d.scenario.points.last().unwrap();
+        assert_eq!((last.id, last.model), (0, 9));
+        assert!(d.issues(None, None).iter().any(|i| i.severity == crate::editor::Severity::Error && i.place == crate::editor::Place::Point(255)));
+        d.scenario.points.pop();
+        d.apply(Command::DeletePoint { id: 255 }).unwrap();
+        assert_eq!(d.apply(Command::PlacePoint { x: 3, y: 3, model: 10 }).unwrap().new_id, Some(255));
+        assert_eq!(d.scenario.points[254].model, 10, "an AI target point");
     }
 
     #[test]
@@ -1001,9 +1015,9 @@ mod tests {
         let mut a = d.scenario.armies[0].clone();
         a.id = 5;
         assert_eq!(d.apply(Command::SetArmy { id: 1, army: Box::new(a) }), Err(EditError::IdChanged));
-        assert_eq!(d.apply(Command::PlacePoint { x: 1, y: 1, lantern: true }).unwrap().new_id, Some(1));
-        d.apply(Command::PlacePoint { x: 2, y: 1, lantern: false }).unwrap();
-        assert_eq!(d.scenario.points.iter().map(|p| (p.id, p.serial, p.model)).collect::<Vec<_>>(), [(1, 1, 8), (2, 2, 9)]);
+        assert_eq!(d.apply(Command::PlacePoint { x: 1, y: 1, model: 8 }).unwrap().new_id, Some(1));
+        d.apply(Command::PlacePoint { x: 2, y: 1, model: 9 }).unwrap();
+        assert_eq!(d.scenario.points.iter().map(|p| (p.id, p.serial, p.model, p.radius)).collect::<Vec<_>>(), [(1, 0, 8, 10), (2, 0, 9, 0)]);
         d.apply(Command::DeletePoint { id: 1 }).unwrap();
         assert_eq!(d.scenario.points[0].id, 1);
         assert_eq!(d.hit(2, 1), Some(Target::Point(1)));
@@ -1096,7 +1110,7 @@ mod tests {
         let mut a = d.scenario.armies[0].clone();
         (a.leader_unit, a.name) = (1, "Отряд".into());
         d.apply(Command::SetArmy { id: 1, army: Box::new(a) }).unwrap();
-        d.apply(Command::PlacePoint { x: 2, y: 2, lantern: true }).unwrap();
+        d.apply(Command::PlacePoint { x: 2, y: 2, model: 8 }).unwrap();
         let path = dir.join("Новая.DTm");
         d.save_to(&path, None, None).unwrap();
         let back = EditorDoc::open(&path, None).unwrap();
@@ -1222,7 +1236,7 @@ mod tests {
         d.apply(Command::PlaceBuilding { x: 10, y: 10, kind: 3, picture_type: 3, variant: 2, size: (4, 4) }).unwrap();
         d.apply(Command::PlaceBuilding { x: 16, y: 16, kind: 2, picture_type: 2, variant: 0, size: (3, 3) }).unwrap();
         d.apply(Command::PlaceArmy { x: 3, y: 4, model: 4 }).unwrap();
-        d.apply(Command::PlacePoint { x: 7, y: 8, lantern: true }).unwrap();
+        d.apply(Command::PlacePoint { x: 7, y: 8, model: 8 }).unwrap();
         let mut b = d.scenario.buildings[1].clone();
         b.gold_per_day = 0x1234;
         b.gold_max = 700;
@@ -1383,7 +1397,7 @@ mod tests {
         e1.conditions.not_happened = [2, 3];
         d.apply(Command::SetEvent { id: 1, event: Box::new(e1) }).unwrap();
         d.apply(Command::PlaceBuilding { x: 5, y: 5, kind: 3, picture_type: 3, variant: 0, size: (2, 2) }).unwrap();
-        d.apply(Command::PlacePoint { x: 9, y: 9, lantern: false }).unwrap();
+        d.apply(Command::PlacePoint { x: 9, y: 9, model: 9 }).unwrap();
         d.apply(Command::AttachEvent { place: Target::Building(1), event: 3 }).unwrap();
         d.apply(Command::AttachEvent { place: Target::Point(1), event: 2 }).unwrap();
         d.apply(Command::AttachEvent { place: Target::Point(1), event: 3 }).unwrap();
@@ -1456,7 +1470,7 @@ mod tests {
         for _ in 0..7 {
             d.apply(Command::NewEvent { kind: 2, repeat: false }).unwrap();
         }
-        d.apply(Command::PlacePoint { x: 1, y: 1, lantern: false }).unwrap();
+        d.apply(Command::PlacePoint { x: 1, y: 1, model: 9 }).unwrap();
         d.apply(Command::PlaceBuilding { x: 5, y: 5, kind: 3, picture_type: 3, variant: 0, size: (2, 2) }).unwrap();
         d.apply(Command::PlaceArmy { x: 8, y: 8, model: 4 }).unwrap();
         for id in 1..=5 {

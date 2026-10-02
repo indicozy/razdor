@@ -24,7 +24,8 @@ pub struct PaletteState {
     pub filter: ObjectFilter,
     pub kind: u8,
     pub variant: u8,
-    pub lantern: bool,
+    /// The model of a new point: 8 lantern, 9 event point, 10 AI target.
+    pub point_model: u8,
     /// The map model of a new army (4 feudal, 5 rogue, 6 peasant, 7 inactive).
     pub army_model: u8,
     /// Scroll of the sprite grids, in rows.
@@ -43,7 +44,7 @@ impl Default for PaletteState {
             filter: ObjectFilter::All,
             kind: 3,
             variant: 0,
-            lantern: true,
+            point_model: 8,
             army_model: 4,
             scroll: 0,
         }
@@ -70,7 +71,7 @@ impl PaletteState {
             3 => Tool::Erase { size: self.erase_size, filter: self.filter },
             4 => Tool::Building { kind: self.kind, picture_type: self.kind, variant: self.variant },
             5 => Tool::Army { model: self.army_model },
-            6 => Tool::Point { lantern: self.lantern },
+            6 => Tool::Point { model: self.point_model },
             _ => Tool::Select,
         }
     }
@@ -305,15 +306,15 @@ pub fn tool_panel(state: &mut PaletteState, tools: &mut ToolState, palette: &Pal
             text_fit(tr("Click: the cell is the bottom-right corner."), x, r.bottom() - 10.0, w, 14.0, DIM);
         }
         Tool::Point { .. } => {
-            if toggle_button(x, y, w, 26.0, tr("Lantern (reveals an area)"), state.lantern) {
-                state.lantern = true;
-                changed = true;
+            // The original's three kinds of point.
+            let kinds = [(8, tr("Lantern (reveals an area)")), (9, tr("Event point")), (10, tr("AI target point"))];
+            for (i, (m, label)) in kinds.iter().enumerate() {
+                if toggle_button(x, y + i as f32 * 30.0, w, 26.0, label, state.point_model == *m) {
+                    state.point_model = *m;
+                    changed = true;
+                }
             }
-            if toggle_button(x, y + 30.0, w, 26.0, tr("Event point"), !state.lantern) {
-                state.lantern = false;
-                changed = true;
-            }
-            note(tr("Click the map to place one."), x, y + 64.0, w, DIM);
+            note(tr("Click the map to place one."), x, y + 94.0, w, DIM);
         }
         Tool::Army { .. } => {
             // The original's army menu: the model of the new army.
