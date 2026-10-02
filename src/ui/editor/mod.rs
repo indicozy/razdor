@@ -13,6 +13,7 @@ mod newmap;
 mod palette_panel;
 mod props;
 mod settings;
+mod worldgen;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -86,6 +87,8 @@ struct Generated {
 enum Modal {
     /// The new-map dialog (its state is [`EditorScreen::newmap`]).
     NewMap,
+    /// The world generator (its state is [`EditorScreen::worldgen`]).
+    WorldGen,
     Open { path: String, scroll: usize, format: OpenFormat },
     SaveAs { name: String, format: SaveFormat },
     Confirm { message: String, then: Then },
@@ -150,6 +153,8 @@ pub struct EditorScreen {
     catalog_state: catalog::CatalogState,
     /// The new-map dialog while it is open.
     newmap: Option<newmap::NewMapState>,
+    /// The world generator while it is open.
+    worldgen: Option<worldgen::WorldGenState>,
 }
 
 fn ctrl() -> bool {
@@ -207,6 +212,7 @@ impl EditorScreen {
             catalog: play_content.clone(),
             catalog_state: catalog::CatalogState::default(),
             newmap: None,
+            worldgen: None,
         }
     }
 
@@ -454,6 +460,14 @@ impl EditorScreen {
             }
             "fog" => self.overlays.fog = true,
             "records" => self.modal = Some(Modal::Records { buildings: true, scroll: 0 }),
+            // The world generator on its tab (0–2).
+            w if w.starts_with("worldgen") => {
+                let s = &self.doc.scenario;
+                let mut st = worldgen::WorldGenState::new(s.width(), razdor::editor::worldgen::existing(s));
+                st.tab = w[8..].parse::<usize>().unwrap_or(0).min(2);
+                self.worldgen = Some(st);
+                self.modal = Some(Modal::WorldGen);
+            }
             // The new-map dialog; with a map type (0–7), a 200 × 200 run of it started.
             w if w.starts_with("newmap") => {
                 let shares = newmap::load_shares();
@@ -884,6 +898,7 @@ impl EditorScreen {
         let buttons: Vec<(&str, bool, Option<bool>)> = vec![
             (tr("New"), true, None),
             (tr("Generate"), true, None),
+            (tr("World"), true, None),
             (tr("Open"), true, None),
             // As the original's, enabled only while the map is modified.
             (tr("Save"), dirty, None),
@@ -924,8 +939,8 @@ impl EditorScreen {
             }
             // Undo / Redo: what they would undo or redo.
             let what = match i {
-                6 => self.doc.undo_label(),
-                7 => self.doc.redo_label(),
+                7 => self.doc.undo_label(),
+                8 => self.doc.redo_label(),
                 _ => None,
             };
             if let Some(what) = what.filter(|_| mouse_in(x, 8.0, bw, 28.0)) {
@@ -941,44 +956,49 @@ impl EditorScreen {
                 self.newmap = Some(newmap::NewMapState::new(shares));
                 self.modal = Some(Modal::NewMap);
             }
-            Some(2) => self.modal = Some(Modal::Open { path: String::new(), scroll: 0, format: OpenFormat::Normal }),
-            Some(3) => self.quick_save(),
-            Some(4) => self.modal = Some(Modal::SaveAs { name: self.doc.suggested_name(), format: SaveFormat::Normal }),
-            Some(5) => {
+            Some(2) => {
+                let s = &self.doc.scenario;
+                self.worldgen = Some(worldgen::WorldGenState::new(s.width(), razdor::editor::worldgen::existing(s)));
+                self.modal = Some(Modal::WorldGen);
+            }
+            Some(3) => self.modal = Some(Modal::Open { path: String::new(), scroll: 0, format: OpenFormat::Normal }),
+            Some(4) => self.quick_save(),
+            Some(5) => self.modal = Some(Modal::SaveAs { name: self.doc.suggested_name(), format: SaveFormat::Normal }),
+            Some(6) => {
                 let name = self.doc.suggested_name();
                 self.save(&name, SaveFormat::Normal, Destination::GameFolder, Consent::default());
             }
-            Some(6) => {
+            Some(7) => {
                 self.doc.undo();
                 self.tools.check_selection(&mut self.doc);
             }
-            Some(7) => {
+            Some(8) => {
                 self.doc.redo();
                 self.tools.check_selection(&mut self.doc);
             }
-            Some(8) => {
+            Some(9) => {
                 self.settings.tab = 0;
                 self.modal = Some(Modal::Settings);
             }
-            Some(9) => self.modal = Some(Modal::Events),
-            Some(10) => self.modal = Some(Modal::Records { buildings: true, scroll: 0 }),
-            Some(11) => self.modal = Some(Modal::Records { buildings: false, scroll: 0 }),
-            Some(12) => self.check(),
-            Some(13) => self.score(),
-            Some(14) => self.modal = Some(Modal::Options(self.options)),
-            Some(15) => self.modal = Some(Modal::Units),
-            Some(16) => self.modal = Some(Modal::Artefacts),
-            Some(17) => {
+            Some(10) => self.modal = Some(Modal::Events),
+            Some(11) => self.modal = Some(Modal::Records { buildings: true, scroll: 0 }),
+            Some(12) => self.modal = Some(Modal::Records { buildings: false, scroll: 0 }),
+            Some(13) => self.check(),
+            Some(14) => self.score(),
+            Some(15) => self.modal = Some(Modal::Options(self.options)),
+            Some(16) => self.modal = Some(Modal::Units),
+            Some(17) => self.modal = Some(Modal::Artefacts),
+            Some(18) => {
                 self.overlays.grid = !self.overlays.grid;
                 // Switching the grid on builds the marks again (0x5a37a8).
                 if self.overlays.grid {
                     self.doc.cells.rebuild_marks(&self.doc.scenario);
                 }
             }
-            Some(18) => self.overlays.patrols = !self.overlays.patrols,
-            Some(19) => self.overlays.fog = !self.overlays.fog,
-            Some(20) => self.modal = Some(Modal::TestPlay),
-            Some(21) => action = self.guarded(Then::Exit),
+            Some(19) => self.overlays.patrols = !self.overlays.patrols,
+            Some(20) => self.overlays.fog = !self.overlays.fog,
+            Some(21) => self.modal = Some(Modal::TestPlay),
+            Some(22) => action = self.guarded(Then::Exit),
             _ => {}
         }
         let s = &self.doc.scenario;
@@ -1075,6 +1095,41 @@ impl EditorScreen {
         None
     }
 
+    /// The world generator's window in `r`; a run changes the open map (one undo step).
+    fn worldgen_window(&mut self, r: Rect) {
+        let Some(mut st) = self.worldgen.take() else { return };
+        match worldgen::window(&mut st, r) {
+            worldgen::WorldGenAction::None => {}
+            worldgen::WorldGenAction::Close => return,
+            worldgen::WorldGenAction::Run(step) => {
+                let report = self.run_world_step(step, &st.options);
+                st.ran(step, &report);
+                self.status = st.note.clone();
+            }
+        }
+        self.worldgen = Some(st);
+    }
+
+    /// One step of the world generator with the editor's data: the install's pictures and
+    /// building names, the session's unit and spell tables, the brush size and the clock.
+    fn run_world_step(&mut self, step: razdor::editor::WorldStep, options: &razdor::editor::worldgen::Options) -> razdor::editor::worldgen::Report {
+        use razdor::editor::worldgen::{Inputs, Pictures, Units};
+        let pictures = Pictures::from_palette(&self.palette);
+        let units = Units::from_content(&self.catalog);
+        let last = self.catalog.spells.iter().map(|sp| sp.id).max().unwrap_or(0) as usize;
+        let mut prices = vec![0; last];
+        for sp in &self.catalog.spells {
+            if sp.id >= 1 {
+                prices[sp.id as usize - 1] = sp.cost_gold;
+            }
+        }
+        let clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.subsec_nanos() ^ d.as_secs() as u32);
+        let inputs = Inputs { pictures: &pictures, names: self.name_pools.as_deref(), units: &units, spell_prices: &prices, brush: self.tools.brush.max(1) as u32, clock };
+        let report = self.doc.world_step(step, &inputs, options);
+        self.tools.check_selection(&mut self.doc);
+        report
+    }
+
     fn modal_frame(&mut self, assets: &Assets) -> EditorAction {
         let (sw, sh) = (screen_width(), screen_height());
         let mut action = EditorAction::None;
@@ -1137,6 +1192,7 @@ impl EditorScreen {
             Modal::TestPlay => (560.0, 230.0),
             Modal::SaveAs { .. } => (620.0, 300.0),
             Modal::NewMap => (900.0f32.min(sw - 20.0), 680.0f32.min(sh - 20.0)),
+            Modal::WorldGen => (820.0f32.min(sw - 20.0), 640.0f32.min(sh - 20.0)),
             _ => (720.0f32.min(sw - 40.0), (sh - 100.0).max(300.0)),
         };
         let r = Rect::new((sw - w) / 2.0, ((sh - h) / 2.0).max(10.0), w, h);
@@ -1211,6 +1267,10 @@ impl EditorScreen {
                     return a;
                 }
                 keep = self.newmap.is_some();
+            }
+            Modal::WorldGen => {
+                self.worldgen_window(r);
+                keep = self.worldgen.is_some();
             }
             Modal::Open { path, scroll, format } => {
                 text(tr("Open a map"), x, y, 22.0, ACCENT);
