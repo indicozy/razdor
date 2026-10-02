@@ -182,6 +182,8 @@ pub struct EditorDoc {
     /// The editor's random generator (the forest brush, the building names, the burn). The
     /// original seeds it from the clock at start-up and its map drawing reseeds it.
     pub rng: Rng,
+    /// The file name a new map is offered under (the generator's), before its title.
+    pub file_name: Option<String>,
 }
 
 /// Events a point can hold in the original editor.
@@ -230,6 +232,7 @@ impl EditorDoc {
             next_serial: 1,
             saved_serial: 0,
             revision: 0,
+            file_name: None,
         }
     }
 
@@ -244,6 +247,16 @@ impl EditorDoc {
     /// The original's File › New: an empty map of this size ([`cleared_scenario`]), unsaved.
     pub fn cleared(width: u32, height: u32, seed: u32) -> EditorDoc {
         let mut d = EditorDoc::with(cleared_scenario(width, height, seed), Origin::New);
+        d.saved_serial = u64::MAX;
+        d
+    }
+
+    /// A map the new-map generator made ([`super::newmap::new_scenario`]), with the marks it
+    /// left and its file name, unsaved.
+    pub fn generated(scenario: Scenario, marks: &[i8]) -> EditorDoc {
+        let mut d = EditorDoc::with(scenario, Origin::New);
+        d.cells.set_marks(marks);
+        d.file_name = Some(super::newmap::FILE_NAME.to_string());
         d.saved_serial = u64::MAX;
         d
     }
@@ -282,7 +295,7 @@ impl EditorDoc {
             Origin::New => None,
         };
         let stem = self.saved_path.as_ref().or(path).and_then(|p| p.file_stem()).map(|s| s.to_string_lossy().into_owned());
-        stem.unwrap_or_else(|| if self.scenario.title.trim().is_empty() { tr("New map").into() } else { self.scenario.title.trim().to_string() })
+        stem.or_else(|| self.file_name.clone()).unwrap_or_else(|| if self.scenario.title.trim().is_empty() { tr("New map").into() } else { self.scenario.title.trim().to_string() })
     }
 
     // ---------------------------------------------------------------------------------

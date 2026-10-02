@@ -123,6 +123,18 @@ impl CellLayer {
         self.index(x, y).map_or(0, |i| self.marks[i])
     }
 
+    /// Every mark at once, row by row (as a generator leaves them); nothing for another size.
+    pub fn set_marks(&mut self, marks: &[i8]) {
+        if marks.len() == self.marks.len() {
+            self.marks.copy_from_slice(marks);
+        }
+    }
+
+    /// Every cell's mark, row by row.
+    pub fn marks(&self) -> &[i8] {
+        &self.marks
+    }
+
     pub fn set_mark(&mut self, x: i64, y: i64, v: i8) {
         if let Some(i) = self.index(x, y) {
             self.marks[i] = v;

@@ -2,7 +2,7 @@
 # \n is a line break, {name} a value filled in by the game. See src/i18n.rs.
 
 # Map editor: toolbar
-New of size = Новая заданного размера
+Generate = Создать карту
 Grid = Сетка
 Patrol zones = Зоны патруля
 Fog = Туман
@@ -55,10 +55,6 @@ Map name: = Имя карты:
 Use "Save to game folder" in the toolbar to put it where the game finds it. = Кнопка «Сохранить в папку игры» на панели положит карту туда, где её найдёт игра.
 New map = Новая карта
 Size = Размер
-Custom = Свой
-Width = Ширина
-Height = Высота
-Ground = Почва
 Create = Создать
 Open a map = Открыть карту
 Game: {name} = Игра: {name}
@@ -483,6 +479,22 @@ Events: {n} = События: {n}
 Lantern radius: {r} = Радиус фонаря: {r}
 
 # Map editor: the new-map dialog
+Map type = Тип карты
+Blur = Размытие
+Seed = Зерно
+Keep: use this seed (0 takes the clock) and the last relief = Старая: взять это зерно (0 — от часов) и прежний рельеф
+Rebuild the relief = Рассчитать рельеф заново
+Generating... = Создаётся карта...
+{w} x {h}, seed {seed}. = {w} x {h}, зерно {seed}.
+Create makes a map; Exit then takes it. = «Создать» делает карту, затем «Выход» принимает её.
+Break = Прервать
+Water | land = Вода | суша
+Shallows | coastal water | deep sea = Отмели | прибрежные воды | глубокое море
+Coast band | inland = Прибрежная полоса | внутренние земли
+Plain | hills | mountains | stony soil = Равнина | холмы | горы | каменная почва
+Sand | lowland | marsh (of the band) = Пески | низина | болото (доли полосы)
+Marsh | impassable swamp (of the marsh) = Болото | непроходимое болото (доли болота)
+No forest | forest | dense forest = Без леса | лес | густой лес
 Land = Суша
 Lake = Озеро
 River valley = Речная долина
@@ -495,3 +507,16 @@ North = Север
 South = Юг
 West = Запад
 East = Восток
+Stopped by the break button: the map is half made. = Прервано кнопкой: карта сделана наполовину.
+The relief is flat, so the run stopped (the original divides 0 by 0 there). = Рельеф плоский, создание остановлено (оригинал делит там 0 на 0).
+Every share of a bar is 0, so the run stopped (a division by zero in the original). = Все доли полосы равны 0, создание остановлено (в оригинале деление на ноль).
+A list outgrew the original's limit, so the run stopped. = Список превысил предел оригинала, создание остановлено.
+Too few forest cells for the original's progress bar: it stopped after the first cluster of trees, as the original does. = Слишком мало лесных клеток для индикатора оригинала: создание остановилось после первой группы деревьев, как в оригинале.
+growing the lowland = рост низины
+taking back sand = возврат песков
+placing marsh = размещение болот
+placing swamp = размещение непроходимых болот
+placing trees (some have no picture) = посадку деревьев (у некоторых нет картинки)
+The original would never finish {what}; Razdor stopped the run there. = Оригинал никогда не закончил бы {what}; Razdor остановил создание там.
+New {w} x {h} map from seed {seed}. = Новая карта {w} x {h} из зерна {seed}.
+The share widths were not saved: {e} = Доли не сохранены: {e}

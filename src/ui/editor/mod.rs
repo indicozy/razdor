@@ -9,6 +9,7 @@ mod canvas;
 mod catalog;
 mod events;
 mod form;
+mod newmap;
 mod palette_panel;
 mod props;
 mod settings;
@@ -20,7 +21,6 @@ use macroquad::prelude::*;
 
 use razdor::dt::dtm::Scenario;
 use razdor::dt::install::{self, MapEntry};
-use razdor::editor::defaults::MAP_SIZES;
 use razdor::editor::files::{self, Consent, Destination, SaveBlock};
 use razdor::editor::mapcheck::{self, CheckRow};
 use razdor::editor::mapfile::{OpenFormat, SaveFormat};
@@ -31,7 +31,7 @@ use razdor::editor::options::Session;
 use razdor::editor::palette::{object_class_label, SURFACE_LABELS};
 use razdor::editor::tools::Open;
 use razdor::editor::validate::has_errors;
-use razdor::editor::{Command, EditorDoc, Issue, Kit, Names, NewMap, Origin, Page, Palette, Place, Press, SaveError, Severity, Target, ToolState};
+use razdor::editor::{Command, EditorDoc, Issue, Kit, Names, Origin, Page, Palette, Place, Press, SaveError, Severity, Target, ToolState};
 use razdor::i18n::tr;
 use razdor::rules::content::{Content, HeroClass};
 use razdor::trf;
@@ -65,7 +65,8 @@ pub enum EditorAction {
 enum Then {
     /// The original's New: an empty map of the current size.
     Clear,
-    New(NewMap),
+    /// The new-map dialog's map.
+    Generated(Box<Generated>),
     Open(PathBuf),
     Exit,
     Save { name: String, format: SaveFormat, dest: Destination, consent: Consent },
@@ -73,8 +74,17 @@ enum Then {
     DeleteEvent(u16),
 }
 
+/// A map the new-map dialog made, with the marks it left.
+#[derive(Clone)]
+struct Generated {
+    scenario: Scenario,
+    marks: Vec<i8>,
+    status: String,
+}
+
 enum Modal {
-    NewMap { size: usize, w: u32, h: u32, fill: u8 },
+    /// The new-map dialog (its state is [`EditorScreen::newmap`]).
+    NewMap,
     Open { path: String, scroll: usize, format: OpenFormat },
     SaveAs { name: String, format: SaveFormat },
     Confirm { message: String, then: Then },
@@ -137,6 +147,9 @@ pub struct EditorScreen {
     /// every cost the editor shows reads them (test play keeps the install's).
     catalog: Arc<Content>,
     catalog_state: catalog::CatalogState,
+    /// The new-map dialog while it is open.
+    newmap: Option<newmap::NewMapState>,
+    install_dir: Option<PathBuf>,
 }
 
 fn ctrl() -> bool {
@@ -159,7 +172,7 @@ impl EditorScreen {
         let session = Session::load(razdor::editor::options::editor_dir().as_deref());
         let mut tools = ToolState::with_check(session.find_building_place);
         tools.choose_page(Page::Terrain, &palette);
-        let mut doc = EditorDoc::new_map(NewMap::default());
+        let mut doc = EditorDoc::new_map(razdor::editor::NewMap::default());
         // The original seeds its generator from the clock at start-up.
         let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.subsec_nanos() ^ d.as_secs() as u32);
         doc.rng = razdor::rules::rng::Rng::new(seed);
@@ -193,6 +206,8 @@ impl EditorScreen {
             options,
             catalog: play_content.clone(),
             catalog_state: catalog::CatalogState::default(),
+            newmap: None,
+            install_dir: art.map(|a| a.install.dir.clone()),
         }
     }
 
@@ -253,9 +268,9 @@ impl EditorScreen {
                 self.set_doc(EditorDoc::cleared(w, h, seed));
                 self.status = Some(trf!("New {w} x {h} map.", w, h));
             }
-            Then::New(o) => {
-                self.set_doc(EditorDoc::new_map(o));
-                self.status = Some(trf!("New {w} x {h} map.", w = o.width, h = o.height));
+            Then::Generated(g) => {
+                self.set_doc(EditorDoc::generated(g.scenario, &g.marks));
+                self.status = Some(g.status);
             }
             Then::Open(p) => self.open_file(p),
             Then::Exit => {
@@ -440,6 +455,19 @@ impl EditorScreen {
             }
             "fog" => self.overlays.fog = true,
             "records" => self.modal = Some(Modal::Records { buildings: true, scroll: 0 }),
+            // The new-map dialog; with a map type (0–7), a 200 × 200 run of it started.
+            w if w.starts_with("newmap") => {
+                let shares = newmap::load_shares(self.install_dir.as_deref());
+                let mut st = newmap::NewMapState::new(shares);
+                if let Some(kind) = w.strip_prefix("newmap").filter(|k| !k.is_empty()) {
+                    st.options.kind = kind.parse::<u8>().map_err(|e| e.to_string())?.min(7);
+                    st.options.size = 200;
+                    let cells = razdor::editor::newmap::Cells::of_map(&self.doc.scenario, self.doc.cells.marks(), 200);
+                    st.start(razdor::editor::newmap::Sprites::from_palette(&self.palette), cells);
+                }
+                self.newmap = Some(st);
+                self.modal = Some(Modal::NewMap);
+            }
             w if w.starts_with("page") => {
                 let k = w[4..].parse::<usize>().map_err(|e| e.to_string())?;
                 let page = palette_panel::PAGES.get(k).ok_or("no such page")?.0;
@@ -856,7 +884,7 @@ impl EditorScreen {
         // (label, enabled, lit: a toggle's state).
         let buttons: Vec<(&str, bool, Option<bool>)> = vec![
             (tr("New"), true, None),
-            (tr("New of size"), true, None),
+            (tr("Generate"), true, None),
             (tr("Open"), true, None),
             // As the original's, enabled only while the map is modified.
             (tr("Save"), dirty, None),
@@ -910,8 +938,9 @@ impl EditorScreen {
         match hit {
             Some(0) => action = self.guarded(Then::Clear),
             Some(1) => {
-                let s = &self.doc.scenario;
-                self.modal = Some(Modal::NewMap { size: 3, w: s.width(), h: s.height(), fill: 6 });
+                let shares = newmap::load_shares(self.install_dir.as_deref());
+                self.newmap = Some(newmap::NewMapState::new(shares));
+                self.modal = Some(Modal::NewMap);
             }
             Some(2) => self.modal = Some(Modal::Open { path: String::new(), scroll: 0, format: OpenFormat::Normal }),
             Some(3) => self.quick_save(),
@@ -1008,6 +1037,45 @@ impl EditorScreen {
         }
     }
 
+    /// The new-map dialog in `r`; `Some` when it leads somewhere (its map, after asking about
+    /// unsaved changes).
+    fn newmap_window(&mut self, r: Rect) -> Option<EditorAction> {
+        let mut st = self.newmap.take()?;
+        let palette = &self.palette;
+        let (doc, cells) = (&self.doc.scenario, &self.doc.cells);
+        let a = newmap::window(&mut st, r, || razdor::editor::newmap::Sprites::from_palette(palette), |size| razdor::editor::newmap::Cells::of_map(doc, cells.marks(), size));
+        match a {
+            newmap::NewMapAction::None => {}
+            newmap::NewMapAction::Ran(rng) => self.doc.rng = rng,
+            newmap::NewMapAction::Close(rng) => {
+                if let Some(rng) = rng {
+                    self.doc.rng = rng;
+                }
+                self.status = Some(tr("Cancelled.").into());
+                return None;
+            }
+            newmap::NewMapAction::Accept(out, shares) => {
+                // The exit button writes the widths (0x528438).
+                let saved = match razdor::editor::options::editor_dir().map(|d| shares.save(&d)) {
+                    Some(Err(e)) => format!(" {}", trf!("The share widths were not saved: {e}", e)),
+                    _ => String::new(),
+                };
+                let scenario = razdor::editor::newmap::new_scenario(&out, &self.doc.scenario, tr("New scenario"));
+                let mut status = trf!("New {w} x {h} map from seed {seed}.", w = out.cells.w, h = out.cells.h, seed = out.seed);
+                if let Some(stop) = out.stop {
+                    status.push(' ');
+                    status.push_str(&newmap::stop_text(stop));
+                }
+                status.push_str(&saved);
+                let g = Generated { scenario, marks: out.cells.mark.clone(), status };
+                self.modal = None;
+                return Some(self.guarded(Then::Generated(Box::new(g))));
+            }
+        }
+        self.newmap = Some(st);
+        None
+    }
+
     fn modal_frame(&mut self, assets: &Assets) -> EditorAction {
         let (sw, sh) = (screen_width(), screen_height());
         let mut action = EditorAction::None;
@@ -1069,7 +1137,7 @@ impl EditorScreen {
             Modal::Options(_) => (520.0, 300.0),
             Modal::TestPlay => (560.0, 230.0),
             Modal::SaveAs { .. } => (620.0, 300.0),
-            Modal::NewMap { .. } => (560.0, 330.0),
+            Modal::NewMap => (900.0f32.min(sw - 20.0), 680.0f32.min(sh - 20.0)),
             _ => (720.0f32.min(sw - 40.0), (sh - 100.0).max(300.0)),
         };
         let r = Rect::new((sw - w) / 2.0, ((sh - h) / 2.0).max(10.0), w, h);
@@ -1139,44 +1207,11 @@ impl EditorScreen {
                     keep = false;
                 }
             }
-            Modal::NewMap { size, w: mw, h: mh, fill } => {
-                text(tr("New map"), x, y, 22.0, ACCENT);
-                y += 20.0;
-                text_fit(tr("Size"), x, y + 18.0, 86.0, 17.0, INK);
-                for (k, n) in MAP_SIZES.iter().enumerate() {
-                    if toggle_button(x + 90.0 + k as f32 * 94.0, y, 88.0, 28.0, &format!("{n} x {n}"), *size == k) {
-                        *size = k;
-                        (*mw, *mh) = (*n, *n);
-                    }
+            Modal::NewMap => {
+                if let Some(a) = self.newmap_window(r) {
+                    return a;
                 }
-                if toggle_button(x + 90.0 + 3.0 * 94.0, y, 88.0, 28.0, tr("Custom"), *size == 3) {
-                    *size = 3;
-                }
-                y += 40.0;
-                if *size == 3 {
-                    text_fit(tr("Width"), x, y + 18.0, 86.0, 17.0, INK);
-                    if let Some(v) = number_field("new:w", x + 90.0, y, 150.0, *mw as i64, 10, 800) {
-                        *mw = v as u32;
-                    }
-                    text_fit(tr("Height"), x + 250.0, y + 18.0, 76.0, 17.0, INK);
-                    if let Some(v) = number_field("new:h", x + 330.0, y, 150.0, *mh as i64, 10, 800) {
-                        *mh = v as u32;
-                    }
-                }
-                y += 40.0;
-                text_fit(tr("Ground"), x, y + 18.0, 86.0, 17.0, INK);
-                let surfaces: Vec<(i64, String)> = SURFACE_LABELS.iter().enumerate().map(|(i, l)| (i as i64, tr(l).to_string())).collect();
-                if let Some(v) = dropdown("new:fill", x + 90.0, y, 240.0, *fill as i64, &surfaces) {
-                    *fill = v as u8;
-                }
-                if button(r.right() - 270.0, r.bottom() - 54.0, 120.0, 40.0, tr("Create"), true) {
-                    let o = NewMap { width: *mw, height: *mh, fill: *fill };
-                    self.modal = None;
-                    return self.guarded(Then::New(o));
-                }
-                if cancel(&r) || esc {
-                    keep = false;
-                }
+                keep = self.newmap.is_some();
             }
             Modal::Open { path, scroll, format } => {
                 text(tr("Open a map"), x, y, 22.0, ACCENT);
