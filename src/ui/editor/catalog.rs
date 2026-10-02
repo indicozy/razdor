@@ -37,6 +37,8 @@ pub struct CatalogState {
     item: Option<ArtefactDef>,
     /// The automatic price's last label: units that can wear it and those that gain.
     price_note: Option<String>,
+    /// The unit window's gold field, the price a store writes ([`catalog::window_gold`]).
+    window_gold: i64,
 }
 
 const STATS: [(Stat, &str); 13] = [
@@ -155,34 +157,37 @@ pub fn units_window(state: &mut CatalogState, c: &Content, names: &Names) -> Cat
     let rows: Vec<(String, Color)> = c.units.iter().map(|u| (format!("{:>3} {}", u.id, u.name), nature_ink(u.nature))).collect();
     let lr = Rect::new(r.x + 10.0, r.y + 40.0, 260.0f32.min(r.w * 0.3), r.h - 100.0);
     state.selected = state.selected.min(c.units.len().saturating_sub(1));
-    let draft_of = |state: &CatalogState| state.unit.clone();
-    // Choosing another unit stores the current one first (0x55a268).
-    let stored = |state: &CatalogState| draft_of(state).map(|d| Box::new(catalog::store_unit(c, &d)));
+    // Storing writes the window's gold field as the price (0x559c20).
+    let store = |state: &CatalogState, d: &UnitDef| Box::new(catalog::store_unit(c, d, state.window_gold));
+    let shown = |state: &CatalogState| state.unit.clone().or_else(|| c.units.get(state.selected).cloned());
+    // Choosing another unit stores the shown one first, edited or not (0x55a268), so its
+    // price becomes the formula's: the original's behaviour, kept (the export too).
     if let Some(i) = list(lr, &rows, state.selected, &mut state.list_scroll) {
         if i != state.selected {
-            let store = stored(state);
+            let stored = shown(state).map(|d| store(state, &d));
             state.selected = i;
             state.unit = None;
             state.scroll = 0.0;
-            if let Some(s) = store {
+            if let Some(s) = stored {
                 return CatalogAction::Store(s);
             }
         }
     }
     let by = r.bottom() - 52.0;
-    if button(r.x + 10.0, by, 150.0, 40.0, tr("Store"), state.unit.is_some()) {
-        if let Some(s) = stored(state) {
+    if button(r.x + 10.0, by, 150.0, 40.0, tr("Store"), true) {
+        if let Some(d) = shown(state) {
+            let s = store(state, &d);
             state.unit = None;
             return CatalogAction::Store(s);
         }
     }
     if button(r.x + 170.0, by, 190.0, 40.0, tr("Export the list"), true) {
-        let s = stored(state).unwrap_or_else(|| Box::new(c.clone()));
+        let s = shown(state).map(|d| store(state, &d)).unwrap_or_else(|| Box::new(c.clone()));
         state.unit = None;
         return CatalogAction::Export(s);
     }
     if button(r.right() - 130.0, by, 116.0, 40.0, tr("Close"), true) || (!typing() && !popup_open() && is_key_pressed(KeyCode::Escape)) {
-        let s = stored(state);
+        let s = state.unit.clone().map(|d| store(state, &d));
         state.unit = None;
         return CatalogAction::Close(s);
     }
@@ -192,6 +197,8 @@ pub fn units_window(state: &mut CatalogState, c: &Content, names: &Names) -> Cat
     let mut f = Form::new(&format!("unit{}", d.id), area, state.scroll);
     f.label_w = (area.w * 0.4).min(220.0);
     let cost = catalog::unit_cost(c, &d);
+    // The cost routine runs after every change (0x55c860), updating the gold field.
+    state.window_gold = catalog::window_gold(c, &d, state.window_gold);
     match cost.gold {
         Some(g) => f.note(&trf!("Tactical cost {t}, price {g}", t = cost.tactical, g), ACCENT),
         None => f.note(&trf!("Tactical cost {t}; the price passes 65,535 (the original stops with a range error)", t = cost.tactical), RED),
@@ -282,13 +289,7 @@ pub fn artefacts_window(state: &mut CatalogState, c: &Content) -> CatalogAction 
     state.selected = state.selected.min(c.items.len().saturating_sub(1));
     let store_draft = |state: &CatalogState| -> Option<Box<Content>> {
         let d = state.item.clone()?;
-        let mut items = c.items.clone();
-        match items.iter_mut().find(|a| a.id == d.id) {
-            Some(slot) => *slot = d,
-            // A copy becomes real when it is stored.
-            None => items.push(d),
-        }
-        Some(Box::new(catalog::with_items(c, items)))
+        Some(Box::new(catalog::with_items(c, catalog::store_artefact(&c.items, &d))))
     };
     if let Some(i) = list(lr, &rows, state.selected, &mut state.list_scroll) {
         if i != state.selected {
@@ -325,7 +326,7 @@ pub fn artefacts_window(state: &mut CatalogState, c: &Content) -> CatalogAction 
             }
         }
         Some(1) => {
-            match catalog::copy_artefact(&c.items, d.id) {
+            match catalog::copy_artefact(&c.items, &d) {
                 Some(copy) => {
                     state.selected = c.items.len();
                     state.item = Some(copy);
@@ -342,8 +343,13 @@ pub fn artefacts_window(state: &mut CatalogState, c: &Content) -> CatalogAction 
         }
         Some(3) => match catalog::auto_price(c, &d) {
             Ok((p, n, m)) => {
+                // The original stores the artefact first, then puts the price into the
+                // field (0x555bc8): the stored record keeps the old price until stored again.
+                let stored = Box::new(catalog::with_items(c, catalog::store_artefact(&c.items, &d)));
                 d.cost = p as i32;
                 state.price_note = Some(if n == 0 { tr("No unit can wear it.").to_string() } else { trf!("Worn by {n} unit types, {pct}% of them gain", n, pct = m * 100 / n) });
+                state.item = Some(d);
+                return CatalogAction::Store(stored);
             }
             Err(PriceSkip::NotPriced) => state.price_note = Some(tr("Not priced: its price is 1, or it is a potion or an item.").into()),
             Err(PriceSkip::NoGain) => state.price_note = Some(tr("No unit gains from it: the original's price is undefined here (it divides by a counter it never sets).").into()),

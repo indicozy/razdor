@@ -21,7 +21,7 @@ pub const ARTEFACTS_FILE: &str = "Rus_Artefacts.New.Ini";
 pub const ARTEFACTS_TEXTS: &str = "Artefacts.Rus";
 /// Artefact ids stop here (the copy's range check).
 pub const MAX_ARTEFACTS: usize = 255;
-/// The copy marker the original adds to a copied artefact's name (Razdor's own).
+/// The marker the original's copy appends to the name, in every language (0x552e34).
 pub const COPY_MARK: &str = " (copy)";
 
 /// The content with `def` in place of the unit of its id (the editor's in-memory table).
@@ -92,6 +92,11 @@ pub struct UnitCost {
     /// bands, doubled for the three hero classes. `None` when it passes 65,535 (the
     /// original stops with a range error there).
     pub gold: Option<i64>,
+    /// What the window's gold field (form +0x46a, the price a store writes) holds after the
+    /// routine; `None` when the routine leaves it as it was: below a tactical cost of 1, or
+    /// when the gold passes 65,535 before the bands. A hero whose doubled price passes
+    /// 65,535 leaves the banded, undoubled value there (the range error comes after it).
+    pub window: Option<i64>,
 }
 
 /// The original's bands of a unit price: below 100 to 5, 100–250 to 10, 251–500 to 20,
@@ -112,19 +117,29 @@ pub fn unit_price_bands(g: i64) -> i64 {
 pub fn unit_cost(c: &Content, d: &UnitDef) -> UnitCost {
     let s = experience::strength(&level_stats(c, d, 0), 0, c.options.shot_weapon_range) as f64;
     let t = round_half_even(s * d.cost_multiplier as f64 / 100.0);
+    cost_of_tactical(t, d.cost_gold_div, (1..=3).contains(&d.id))
+}
+
+/// The price steps of [`unit_cost`] from the tactical cost `t` on, for a gold divisor and
+/// whether the unit is one of the three hero classes.
+pub fn cost_of_tactical(t: i64, gold_div: i32, hero: bool) -> UnitCost {
     if t < 1 {
-        return UnitCost { tactical: 0, gold: Some(0) };
+        return UnitCost { tactical: 0, gold: Some(0), window: None };
     }
     // The gold uses T, the tactical cost already scaled by the multiplier (0x55c95d).
-    let g = round_half_even((t as f64 / 2.2 + 21.0) / d.cost_gold_div.max(1) as f64);
+    let g = round_half_even((t as f64 / 2.2 + 21.0) / gold_div.max(1) as f64);
     if g > u16::MAX as i64 {
-        return UnitCost { tactical: t, gold: None };
+        return UnitCost { tactical: t, gold: None, window: None };
     }
-    let mut g = unit_price_bands(g);
-    if (1..=3).contains(&d.id) {
-        g *= 2;
+    let banded = unit_price_bands(g);
+    if !hero {
+        return UnitCost { tactical: t, gold: Some(banded), window: Some(banded) };
     }
-    UnitCost { tactical: t, gold: Some(g) }
+    let doubled = banded * 2;
+    if doubled > u16::MAX as i64 {
+        return UnitCost { tactical: t, gold: None, window: Some(banded) };
+    }
+    UnitCost { tactical: t, gold: Some(doubled), window: Some(doubled) }
 }
 
 /// The window's level table: the tactical cost at levels 1 to 5, each in percent of the
@@ -141,13 +156,18 @@ pub fn level_table(c: &Content, d: &UnitDef) -> [i64; 5] {
     })
 }
 
-/// Storing the unit (0x559c20, 0x55a268): its price becomes the window's gold, and it
-/// replaces its type in the session's table.
-pub fn store_unit(c: &Content, d: &UnitDef) -> Content {
+/// The window's gold field after the cost routine ran on `d`: `window` is what it held
+/// before. The routine leaves it untouched below a tactical cost of 1 or on a range error,
+/// so the field keeps the last unit's price (the original's behaviour, kept).
+pub fn window_gold(c: &Content, d: &UnitDef, window: i64) -> i64 {
+    unit_cost(c, d).window.unwrap_or(window)
+}
+
+/// Storing the unit (0x559c20, 0x55a268): its price becomes the window's gold field
+/// ([`window_gold`]), whatever it holds, and it replaces its type in the session's table.
+pub fn store_unit(c: &Content, d: &UnitDef, window: i64) -> Content {
     let mut d = d.clone();
-    if let Some(g) = unit_cost(c, &d).gold {
-        d.cost = g as i32;
-    }
+    d.cost = window as i32;
     with_unit(c, &d)
 }
 
@@ -171,14 +191,25 @@ pub fn artefact_type_code(t: ArtefactType) -> u8 {
     }
 }
 
-/// The copy (0x552e34): a new artefact at id = count + 1 with the copy marker; `None` once
-/// ids reach 255.
-pub fn copy_artefact(items: &[ArtefactDef], id: u32) -> Option<ArtefactDef> {
+/// The copy (0x552e34): the window's fields as they are (`shown`, unsaved edits included)
+/// get id = count + 1 and the copy marker after the name; `None` once ids reach 255. A copy
+/// of a copy not stored yet takes the same id again.
+pub fn copy_artefact(items: &[ArtefactDef], shown: &ArtefactDef) -> Option<ArtefactDef> {
     if items.len() >= MAX_ARTEFACTS {
         return None;
     }
-    let src = items.iter().find(|a| a.id == id)?;
-    Some(ArtefactDef { id: items.len() as u32 + 1, name: format!("{}{}", src.name, crate::i18n::tr(COPY_MARK)), ..src.clone() })
+    Some(ArtefactDef { id: items.len() as u32 + 1, name: format!("{}{COPY_MARK}", shown.name), ..shown.clone() })
+}
+
+/// The table with `a` stored: in place of its id, or appended (a copy becomes real when it
+/// is stored).
+pub fn store_artefact(items: &[ArtefactDef], a: &ArtefactDef) -> Vec<ArtefactDef> {
+    let mut items = items.to_vec();
+    match items.iter_mut().find(|x| x.id == a.id) {
+        Some(slot) => *slot = a.clone(),
+        None => items.push(a.clone()),
+    }
+    items
 }
 
 /// The delete (0x5538b4): later artefacts move down one id. Nothing in the map is
@@ -223,12 +254,13 @@ pub enum PriceSkip {
 /// The automatic price (0x555bc8): every unit type tries the artefact on as a fresh unit;
 /// for each that can wear it, `v = Round(gain ÷ 2)` of its tactical gain, and every positive
 /// `v` adds `v × Round(√v + 2)`; the price is the mean of those plus 10, at least 20 (20 when
-/// nobody can wear it), rounded down in bands. Returns (price, n wearers, m gainers).
+/// nobody can wear it), rounded down in bands. Returns (price, n wearers, m gainers). The
+/// original stores the artefact first, so a copy not stored yet is priced as itself.
 pub fn auto_price(c: &Content, a: &ArtefactDef) -> Result<(i64, usize, usize), PriceSkip> {
     if a.cost == 1 || matches!(artefact_type_code(a.kind), 8..=10) {
         return Err(PriceSkip::NotPriced);
     }
-    let c = with_items(c, c.items.iter().map(|x| if x.id == a.id { a.clone() } else { x.clone() }).collect());
+    let c = with_items(c, store_artefact(&c.items, a));
     let item = ItemId(a.id);
     let (mut n, mut m, mut sum) = (0usize, 0usize, 0i64);
     for u in &c.units {
@@ -504,14 +536,19 @@ mod tests {
         hero.id = 2;
         let g = unit_cost(&with_unit(&c, &d), &d).gold.unwrap();
         assert_eq!(unit_cost(&c, &hero).gold.unwrap(), 2 * g);
-        // A multiplier of 0: both costs 0.
+        // A multiplier of 0: both costs show 0, and the window's gold field keeps the price
+        // it held (0x55c860 skips its store), which a store then writes.
         d.cost_multiplier = 0;
-        assert_eq!(unit_cost(&c, &d), UnitCost { tactical: 0, gold: Some(0) });
+        assert_eq!(unit_cost(&c, &d), UnitCost { tactical: 0, gold: Some(0), window: None });
+        assert_eq!(window_gold(&c, &d, 345), 345);
+        assert_eq!(store_unit(&c, &d, 345).unit(UnitId(d.id)).cost, 345);
         // Storing sets the price.
         let mut d = c.units.iter().find(|u| u.id > 3).unwrap().clone();
         d.hits += 50;
-        let stored = store_unit(&c, &d);
-        assert_eq!(stored.unit(UnitId(d.id)).cost as i64, unit_cost(&c, &d).gold.unwrap());
+        let gold = window_gold(&c, &d, 0);
+        assert_eq!(gold, unit_cost(&c, &d).gold.unwrap());
+        let stored = store_unit(&c, &d, gold);
+        assert_eq!(stored.unit(UnitId(d.id)).cost as i64, gold);
         assert_eq!(stored.unit(UnitId(d.id)).hits, d.hits);
         let table = level_table(&c, &d);
         assert!(table[0] >= 100 && table.windows(2).all(|w| w[0] <= w[1]), "{table:?}");
@@ -522,18 +559,48 @@ mod tests {
     }
 
     #[test]
+    fn unit_gold_from_the_tactical_cost() {
+        let c = |t, div, hero| cost_of_tactical(t, div, hero);
+        // (100 / 2.2 + 21) / 2 = 33.2 → 33 → 30; a hero class twice that.
+        assert_eq!(c(100, 2, false), UnitCost { tactical: 100, gold: Some(30), window: Some(30) });
+        assert_eq!(c(100, 2, true).gold, Some(60));
+        // (5000 / 2.2 + 21) / 1 = 2293.7 → 2294 → 2250 (steps of 50 up to 5,000).
+        assert_eq!(c(5000, 1, false).gold, Some(2250));
+        // (11 / 2.2 + 21) / 2 = 13 → 10; (550 / 2.2 + 21) / 1 = 271 → 260.
+        assert_eq!((c(11, 2, false).gold, c(550, 1, false).gold), (Some(10), Some(260)));
+        // Above 5,000 unchanged: 87,956 / 2.2 + 21 = 40,001.
+        assert_eq!(c(87_956, 1, false).gold, Some(40_001));
+        // A hero's doubled 80,002 is a range error, after the field took 40,001.
+        assert_eq!(c(87_956, 1, true), UnitCost { tactical: 87_956, gold: None, window: Some(40_001) });
+        // Past 65,535 before the bands: the field is left alone.
+        assert_eq!(c(200_000, 1, false), UnitCost { tactical: 200_000, gold: None, window: None });
+        assert_eq!(c(0, 1, false).window, None);
+    }
+
+    #[test]
     fn artefacts_copy_delete_and_price() {
         let c = Content::builtin();
         let mut items = c.items.clone();
         let n = items.len();
-        let copy = copy_artefact(&items, 1).unwrap();
-        assert_eq!((copy.id as usize, copy.name.ends_with(COPY_MARK)), (n + 1, true));
-        items.push(copy);
+        // The copy takes the window's fields, unsaved edits included.
+        let shown = ArtefactDef { cost: 777, ..items[0].clone() };
+        let copy = copy_artefact(&items, &shown).unwrap();
+        assert_eq!((copy.id as usize, copy.name.clone(), copy.cost), (n + 1, format!("{} (copy)", items[0].name), 777));
+        // A copy of the unsaved copy takes the same id again.
+        assert_eq!(copy_artefact(&items, &copy).unwrap().id as usize, n + 1);
+        // Pricing an unsaved copy prices it as itself (the original stores first).
+        let mut fresh = c.items.iter().find(|a| a.kind == ArtefactType::BlowWeapon).unwrap().clone();
+        fresh.add.insert(Stat::AttackBlow, 20);
+        let fresh_copy = copy_artefact(&items, &fresh).unwrap();
+        assert_eq!(auto_price(&c, &fresh_copy).unwrap(), auto_price(&c, &fresh).unwrap());
+        items = store_artefact(&items, &copy);
+        assert_eq!(items.len(), n + 1);
         assert!(delete_artefact(&mut items, 1));
         assert_eq!(items.len(), n);
         assert!(items.iter().enumerate().all(|(i, a)| a.id as usize == i + 1), "later ids move down");
         let full: Vec<ArtefactDef> = (0..255).map(|k| ArtefactDef { id: k + 1, ..c.items[0].clone() }).collect();
-        assert!(copy_artefact(&full, 1).is_none(), "ids stop at 255");
+        assert!(copy_artefact(&full, &full[0]).is_none(), "ids stop at 255");
+        assert_eq!(copy_artefact(&full[..254], &full[0]).unwrap().id, 255);
         let b = artefact_price_bands;
         assert_eq!((b(149), b(152), b(533), b(1049), b(2549), b(6249), b(15_499), b(50_999), b(600_001)), (145, 150, 525, 1000, 2500, 6000, 15_000, 50_000, 600_001));
         // A price of 1, potions and items are left alone.
