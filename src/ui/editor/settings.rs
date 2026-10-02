@@ -4,8 +4,8 @@
 
 use macroquad::prelude::*;
 
-use razdor::dt::dtm::{GameDate, Scenario};
-use razdor::editor::defaults::DEFAULT_RELATIONS;
+use razdor::dt::dtm::Scenario;
+use razdor::editor::records;
 use razdor::editor::palette::{self, Names};
 use razdor::editor::{Command, Settings};
 use razdor::i18n::{n_, tr};
@@ -18,6 +18,8 @@ use crate::ui::widgets::*;
 pub struct SettingsState {
     pub tab: usize,
     pub scroll: f32,
+    /// The scenario picture file to import.
+    picture_path: String,
 }
 
 /// What the window asks for.
@@ -26,22 +28,13 @@ pub enum SettingsAction {
     Apply(Command, String),
     /// Close the window and let the user click the start of hero preset `k`.
     PickStart(usize),
+    /// A message for the status line.
+    Status(String),
     Close,
 }
 
 const TABS: [&str; 7] = [n_("Scenario"), n_("Knight"), n_("Archmage"), n_("Ranger"), n_("Factions"), n_("Campaign"), n_("Characters")];
 
-/// Relation presets of the factions tab (our own): the default, everyone allied, everyone
-/// neutral, everyone at war (a faction always loves itself).
-fn preset(k: usize) -> [[i8; 4]; 4] {
-    let fill = |v: i8| std::array::from_fn(|r| std::array::from_fn(|c| if r == c { 3 } else { v }));
-    match k {
-        0 => DEFAULT_RELATIONS,
-        1 => fill(2),
-        2 => fill(0),
-        _ => fill(-3),
-    }
-}
 
 pub fn window(state: &mut SettingsState, s: &Scenario, names: &Names) -> SettingsAction {
     let (sw, sh) = (screen_width(), screen_height());
@@ -65,6 +58,7 @@ pub fn window(state: &mut SettingsState, s: &Scenario, names: &Names) -> Setting
         campaign_name: s.campaign_name.clone(),
         next_map: s.next_map.clone(),
         named_characters: s.named_characters.clone(),
+        scenario_picture: s.scenario_picture.clone(),
     };
     let mut st = orig.clone();
     let mut f = Form::new("settings", area, state.scroll);
@@ -73,37 +67,42 @@ pub fn window(state: &mut SettingsState, s: &Scenario, names: &Names) -> Setting
     match state.tab {
         0 => {
             f.text("title", tr("Title"), &mut st.title);
+            st.title = records::cut(&st.title, records::TITLE_LEN);
             f.memo("description", tr("Description"), &mut st.description, 6);
             f.note(&trf!("Map size {w} x {h} cells.", w = s.width(), h = s.height()), DIM);
             f.heading(tr("The clock starts at"));
-            let mut d = GameDate::from_minutes(st.header.start_time);
-            f.num("year", tr("Year"), &mut d.year, 0, 9999);
-            f.num("month", tr("Month"), &mut d.month, 1, 12);
-            // The game shows days from 0.
-            let mut day = d.day - 1;
-            f.num("day", tr("Day (0-29)"), &mut day, 0, 29);
-            d.day = day + 1;
-            f.num("hour", tr("Hour"), &mut d.hour, 0, 23);
-            st.header.start_time = d.to_minutes();
+            f.date("start", &mut st.header.start_time);
+            f.note(tr("A new start date moves every event's start by as much (but for relative-only events)."), DIM);
             f.heading(tr("End of the scenario"));
             let events = event_options_none(s);
             f.pick("victory", tr("Victory event"), &mut st.header.victory_event, &events);
             f.pick("defeat", tr("Defeat event"), &mut st.header.defeat_event, &events);
             f.note(tr("The scenario ends when one of these events fires. Events are edited with the Events button."), DIM);
+            let (castles, villages) = records::income_sums(s);
+            f.note(&trf!("Daily gold of castles and forts: {castles}; of villages: {villages}", castles, villages), DIM);
         }
         k @ 1..=3 => {
+            let before = st.header.heroes[k - 1].clone();
             let hero = &mut st.header.heroes[k - 1];
             f.heading(&trf!("Start of the {class}", class = tr(palette::HERO_CLASSES[k - 1])));
-            f.num("x", "X", &mut hero.x, 0, s.width() as i64 - 1);
-            f.num("y", "Y", &mut hero.y, 0, s.height() as i64 - 1);
+            // The start is set by placing the hero on the map, as in the original.
+            f.note(&trf!("At ({x}, {y})", x = hero.x, y = hero.y), INK);
             if f.button(tr("Pick the start on the map"), true) {
                 action = SettingsAction::PickStart(k - 1);
             }
-            f.num("gold", tr("Gold"), &mut hero.gold, 0, i16::MAX as i64);
-            f.num("mana", tr("Mana"), &mut hero.mana, 0, i16::MAX as i64);
-            f.pick("building", tr("Start building"), &mut hero.start_building, &building_options(s));
+            let mut xp = records::preset_experience(hero);
+            f.num("xp", tr("Experience"), &mut xp, 0, records::PRESET_MAX);
+            records::set_preset_experience(hero, xp);
+            let (mut gold, mut mana) = (records::preset_word(hero.gold), records::preset_word(hero.mana));
+            f.num("gold", tr("Gold"), &mut gold, 0, records::PRESET_MAX);
+            f.num("mana", tr("Mana"), &mut mana, 0, records::PRESET_MAX);
+            records::set_preset_word(&mut hero.gold, gold);
+            records::set_preset_word(&mut hero.mana, mana);
+            f.pick("building", tr("Start building"), &mut hero.start_building, &building_options_of(s, &records::START_TYPES));
             f.heading(tr("Troops"));
-            f.troops("troops", &units, &mut hero.troops);
+            f.troops_raw("troops", &units, &mut hero.troops, 9);
+            records::limit_preset_troops(&before, hero);
+            f.note(tr("At most 11 units besides the hero."), DIM);
             f.heading(tr("Artefacts"));
             let arts = artefact_options(names);
             for i in 0..3 {
@@ -111,14 +110,14 @@ pub fn window(state: &mut SettingsState, s: &Scenario, names: &Names) -> Setting
             }
             f.heading(tr("Spells and prayers"));
             let spells = spell_options(names);
-            for i in 0..6 {
+            for i in 0..records::PRESET_SPELLS {
                 f.pick(&format!("spell{i}"), &trf!("Spell {n}", n = i + 1), &mut hero.spells[i], &spells);
             }
         }
         4 => {
             f.note(tr("How each faction (row) feels about each faction, -3 (war) to 3 (friends)."), DIM);
-            if let Some(k) = f.buttons(&[tr("Default"), tr("All allied"), tr("All neutral"), tr("All at war")]) {
-                st.header.relations = preset(k);
+            if let Some(k) = f.buttons(&[tr("Default"), tr("Allied"), tr("Neutral"), tr("War")]) {
+                st.header.relations = records::ALLIANCE_PRESETS[k];
                 f.changed = Some("relations".into());
             }
             for (i, row) in palette::FACTIONS.iter().enumerate() {
@@ -130,18 +129,45 @@ pub fn window(state: &mut SettingsState, s: &Scenario, names: &Names) -> Setting
             f.pick("kind", tr("Scenario kind"), &mut st.header.scenario_kind, &list_options(&palette::SCENARIO_KINDS, 0));
             f.text("campaign", tr("Campaign name"), &mut st.campaign_name);
             f.text("next", tr("Next map file"), &mut st.next_map);
-            f.num("picture", tr("Built-in picture"), &mut st.header.scenario_picture_index, 0, 255);
+            st.next_map = records::file_name_only(&st.next_map);
+            f.heading(tr("Picture"));
+            let index = st.header.scenario_picture_index;
+            if let Some(b) = f.buttons(&[tr("Previous picture"), tr("Next picture")]) {
+                st.header.scenario_picture_index = records::cycle_picture(index, b == 1);
+            }
+            f.note(&if index == 0 { tr("Built-in picture: none").to_string() } else { trf!("Built-in picture {n}", n = index) }, INK);
+            match st.scenario_picture.as_ref() {
+                Some(p) => f.note(&trf!("Own picture: {n} bytes", n = p.len()), INK),
+                None => f.note(tr("No own picture."), DIM),
+            }
+            f.text("pic_path", tr("Picture file (path)"), &mut state.picture_path);
+            match f.buttons(&[tr("Import picture"), tr("Remove own picture")]) {
+                Some(0) => match std::fs::read(state.picture_path.trim()).ok().and_then(records::scenario_picture) {
+                    Some(p) => {
+                        st.scenario_picture = Some(p);
+                        f.changed = Some("picture_file".into());
+                    }
+                    // The original keeps a file only if it decodes as a picture.
+                    None => action = SettingsAction::Status(trf!("Cannot read a picture from \"{path}\".", path = state.picture_path.trim())),
+                },
+                Some(_) => {
+                    st.scenario_picture = None;
+                    f.changed = Some("picture_file".into());
+                }
+                None => {}
+            }
             f.heading(tr("The hero keeps from the previous map"));
             for (i, what) in palette::CARRY_OVER.iter().enumerate() {
                 f.flag(&format!("carry{i}"), what, &mut st.header.carry_over[i]);
             }
         }
         _ => {
-            f.note(tr("Named characters are unit types with a name; armies, events and the hero's squad can use them."), DIM);
+            f.note(tr("Named characters are unit types with a name; armies, events and the hero's squad can use them. Removing one renumbers nothing, as in the original."), DIM);
             let mut remove = None;
             for (i, nc) in st.named_characters.iter_mut().enumerate() {
                 f.heading(&trf!("Character {n}", n = i + 1));
                 f.text(&format!("name{i}"), tr("Character's name"), &mut nc.name);
+                nc.name = records::cut(&nc.name, records::TITLE_LEN);
                 f.pick(&format!("unit{i}"), tr("Unit"), &mut nc.unit, &units);
                 if f.button(tr("Remove"), true) {
                     remove = Some(i);

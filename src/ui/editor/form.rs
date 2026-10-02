@@ -200,22 +200,6 @@ impl Form {
         self.next(20.0);
     }
 
-    /// Six troops with levels shown 1-based (stored 0-based).
-    pub fn troops(&mut self, k: &str, units: &[(i64, String)], troops: &mut [Troop; 6]) {
-        self.slot_header(tr("Unit"), tr("Level"), tr("Count"));
-        for (i, t) in troops.iter_mut().enumerate() {
-            let mut level = t.level + 1;
-            let (mut unit, mut count) = (t.unit, t.count);
-            self.slot(&format!("{k}{i}"), units, &mut unit, &mut level, 10, &mut count, 255);
-            let level = level.max(1) - 1;
-            if (unit, level, count) != (t.unit, t.level, t.count) {
-                // A new unit in an empty slot starts with one of it.
-                let count = if t.unit == 0 && unit != 0 && count == 0 { 1 } else { count };
-                *t = if unit == 0 { Troop::default() } else { Troop { unit, level, count } };
-            }
-        }
-    }
-
     /// Six troops as the original's army window edits them: levels as stored (0-based) and
     /// counts, both up to `max`; picking a unit raises a count of 0 to 1, picking none or a
     /// count of 0 clears the slot (records.md §1).
@@ -228,6 +212,20 @@ impl Form {
                 let count = if unit != t.unit && unit != 0 && count == 0 { 1 } else { count };
                 *t = if unit == 0 || count == 0 { Troop::default() } else { Troop { unit, level, count } };
             }
+        }
+    }
+
+    /// A start date as the original's masked field edits it: hour, day, month (both shown
+    /// 1-based, two digits) and a four-digit year, read by [`records::date_minutes`].
+    pub fn date(&mut self, k: &str, minutes: &mut u32) {
+        let d = razdor::dt::dtm::GameDate::from_minutes(*minutes);
+        let (mut hour, mut day, mut month, mut year) = (d.hour, d.day, d.month, d.year);
+        self.num(&format!("{k}h"), tr("Hour"), &mut hour, 0, 99);
+        self.num(&format!("{k}d"), tr("Day"), &mut day, 0, 99);
+        self.num(&format!("{k}m"), tr("Month"), &mut month, 0, 99);
+        self.num(&format!("{k}y"), tr("Year"), &mut year, 0, 9999);
+        if (hour, day, month, year) != (d.hour, d.day, d.month, d.year) {
+            *minutes = razdor::editor::records::date_minutes(hour, day, month, year);
         }
     }
 

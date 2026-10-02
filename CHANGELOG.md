@@ -515,6 +515,15 @@ old id, and their versions give both.
   the original's ranges and steps (open at most 99 hours; a gold "at most" up to 32,768);
   the building pickers offer no towns; a named character brings its class and a new unit
   clears the character; the hidden "generate the battle army" box is no longer shown.
+- **Scenario settings as the original's scenario window**: dates are read by the original's
+  rule (hour, day, month and year, unchecked, minutes dropped); a new start date moves every
+  event's start with it; the hero presets edit experience, gold and mana (0..32,000, written
+  as words), five spells and at most 11 starting units, the start building from the
+  original's types and the position only from the map; the four alliance presets are the
+  original's matrices; the built-in picture cycles 0..5 and a picture file can be imported
+  (kept only if it decodes); titles and character names are cut at 64 characters, the next
+  map keeps its file name only. Removing a named character renumbers nothing, as in the
+  original.
 
 ## 0.2.2 — 2026-10-01
 

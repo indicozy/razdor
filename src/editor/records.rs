@@ -3,7 +3,7 @@
 //! other fields; plus the slot lists with a count (local events of buildings and points)
 //! and the market goods the property panels share.
 
-use crate::dt::dtm::{Army, Building, Header, Scenario};
+use crate::dt::dtm::{Army, Building, Header, HeroPreset, Scenario, RELATIVE_START};
 use crate::rules::battle::{Battle, Team};
 use crate::rules::content::{Content, ItemId, UnitId};
 use crate::rules::experience::{self, SideUnit};
@@ -418,6 +418,112 @@ pub fn market_test(s: &Scenario, id: u16, b: &Building, c: std::sync::Arc<Conten
     shop.places.iter().map(|p| p.map(|g| (g.item.0, c.try_item(g.item).map_or(0, |d| d.cost)))).collect()
 }
 
+// ------------------------------------------------------------------------------------------
+// The scenario parameters (records.md §8)
+// ------------------------------------------------------------------------------------------
+
+/// Building types a hero preset's starting building can be: town, village, castle, fort,
+/// church, altar and ruins.
+pub const START_TYPES: [u8; 7] = [1, 2, 3, 4, 7, 10, 12];
+/// The preset spins' range for experience, gold and mana.
+pub const PRESET_MAX: i64 = 32_000;
+/// A preset's six starting troops may total this many units (12 with the hero).
+pub const PRESET_TROOPS: usize = 11;
+/// Spells a preset page edits (bytes 44–48; byte 49 has no control).
+pub const PRESET_SPELLS: usize = 5;
+/// The longest title the original keeps (a 64-character string).
+pub const TITLE_LEN: usize = 64;
+
+/// The alliance page's four preset matrices (rows and columns player, ally, neighbour,
+/// enemy): default (0x541b44), allied (0x541c84), neutral (0x541dc4), war (0x541ee0). The
+/// war matrix is not symmetric, as in the original.
+pub const ALLIANCE_PRESETS: [[[i8; 4]; 4]; 4] = [
+    [[3, 2, 1, -2], [2, 3, 1, -2], [1, 1, 3, 1], [-2, -2, 1, 3]],
+    [[3, 2, 2, 1], [2, 3, 2, 1], [2, 2, 3, 2], [1, 1, 2, 3]],
+    [[2, 0, 0, 0], [0, 2, 0, 0], [0, 0, 2, 0], [0, 0, 0, 2]],
+    [[1, -1, -2, -3], [-1, 1, -2, -3], [-1, -1, 1, -1], [-3, -3, -2, 1]],
+];
+
+/// A preset's experience: the signed word at bytes 6–7.
+pub fn preset_experience(h: &HeroPreset) -> i16 {
+    (h.unknown_4 >> 16) as u16 as i16
+}
+
+/// Writes a preset's experience word (bytes 4–5 stay).
+pub fn set_preset_experience(h: &mut HeroPreset, v: i16) {
+    h.unknown_4 = (h.unknown_4 & 0xFFFF) | ((v as u16 as u32) << 16);
+}
+
+/// Writes the low word of a preset's gold or mana field, as the page stores them (bytes
+/// 10–11 and 14–15 stay).
+pub fn set_preset_word(field: &mut u32, v: i16) {
+    *field = (*field & 0xFFFF_0000) | v as u16 as u32;
+}
+
+/// The low word of a preset's gold or mana field, as the page reads it.
+pub fn preset_word(field: u32) -> i16 {
+    field as u16 as i16
+}
+
+/// The preset's troop limit (0x54145c): a change that takes the six counts past
+/// [`PRESET_TROOPS`] is rolled back (the original drops the count just raised by one).
+pub fn limit_preset_troops(before: &HeroPreset, after: &mut HeroPreset) {
+    let total = |h: &HeroPreset| h.troops.iter().map(|t| t.count as usize).sum::<usize>();
+    if total(after) > PRESET_TROOPS && total(after) > total(before) {
+        after.troops = before.troops;
+    }
+}
+
+/// The built-in scenario picture after a click of its spin button: 0..5 round
+/// (`(x + d + 6) mod 6`).
+pub fn cycle_picture(index: u8, up: bool) -> u8 {
+    ((index as i32 + if up { 1 } else { -1 } + 6).rem_euclid(6)) as u8
+}
+
+/// A changed start date moves every event's start by the same number of minutes, but for
+/// the "relative only" marker (the window's close, 0x53df3c). The original adds in 32 bits.
+pub fn shift_event_starts(events: &mut [crate::dt::dtm::Event], old: u32, new: u32) {
+    let delta = new.wrapping_sub(old);
+    if delta == 0 {
+        return;
+    }
+    for e in events.iter_mut().filter(|e| e.start_time != RELATIVE_START) {
+        e.start_time = e.start_time.wrapping_add(delta);
+    }
+}
+
+/// The two read-only income sums of the general page (0x53df3c): the daily gold of castles
+/// and forts, and of villages (towns are not counted).
+pub fn income_sums(s: &Scenario) -> (u32, u32) {
+    let sum = |kinds: &[u8]| s.buildings.iter().filter(|b| kinds.contains(&b.kind)).map(|b| b.gold_per_day as u32).sum();
+    (sum(&[3, 4]), sum(&[2]))
+}
+
+/// A scenario picture file as the page takes it (0x5423dc, 0x53ddd0): the file's bytes,
+/// kept only if they decode as a picture.
+pub fn scenario_picture(bytes: Vec<u8>) -> Option<Vec<u8>> {
+    crate::dt::gfx::decode_lit(&bytes).ok().map(|_| bytes)
+}
+
+/// A date as the original's masked date field reads it (0x5941d0): `hour × 60 + (day − 1)
+/// × 1,440 + (month − 1) × 43,200 + year × 518,400` minutes, the day and month 1-based, no
+/// digit checked against a range (a day of 31 or a month of 13 just adds more minutes, the
+/// minutes of a stored start are dropped) and the sum taken in 32 bits.
+pub fn date_minutes(hour: u32, day: u32, month: u32, year: u32) -> u32 {
+    let m = hour as i64 * 60 + (day as i64 - 1) * 1440 + (month as i64 - 1) * 43_200 + year as i64 * 518_400;
+    m as u32
+}
+
+/// A text cut to `n` characters, as the original's fixed strings keep it.
+pub fn cut(s: &str, n: usize) -> String {
+    s.chars().take(n).collect()
+}
+
+/// The next-map field keeps only the file name of the file chosen.
+pub fn file_name_only(path: &str) -> String {
+    path.rsplit(['/', '\\']).next().unwrap_or("").to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -525,6 +631,63 @@ mod tests {
         assert_eq!((a.faction, a.relations), (2, [2, 3, 1, -2]));
         pick_named_character(&mut a, &s, 1);
         assert_eq!((a.named_character, a.leader_unit, a.leader_name.as_str()), (1, 9, "Ольга"));
+    }
+
+    #[test]
+    fn hero_presets_as_the_page_writes_them() {
+        let mut h = HeroPreset { unknown_4: 0x0000_1234, gold: 0xAAAA_0000, mana: 0x5555_0005, ..HeroPreset::default() };
+        set_preset_experience(&mut h, 3000);
+        set_preset_word(&mut h.gold, 32_000);
+        set_preset_word(&mut h.mana, 7);
+        assert_eq!((h.unknown_4, h.gold, h.mana), (0x0BB8_1234, 0xAAAA_7D00, 0x5555_0007), "only bytes 6, 8 and 12 as words");
+        assert_eq!((preset_experience(&h), preset_word(h.gold), preset_word(h.mana)), (3000, 32_000, 7));
+        let mut a = HeroPreset::default();
+        a.troops[0] = Troop { unit: 5, level: 0, count: 9 };
+        a.troops[1] = Troop { unit: 6, level: 0, count: 2 };
+        let mut b = a.clone();
+        b.troops[2] = Troop { unit: 7, level: 0, count: 1 };
+        limit_preset_troops(&a, &mut b);
+        assert_eq!(b.troops, a.troops, "12 troops: rolled back");
+        let mut c = a.clone();
+        c.troops[1].count = 1;
+        limit_preset_troops(&a, &mut c);
+        assert_eq!(c.troops[1].count, 1);
+    }
+
+    #[test]
+    fn alliance_presets() {
+        assert_eq!(ALLIANCE_PRESETS[0], crate::editor::defaults::DEFAULT_RELATIONS);
+        let war = ALLIANCE_PRESETS[3];
+        assert_eq!((war[0][2], war[2][0], war[2][3], war[3][2]), (-2, -1, -1, -2), "not symmetric");
+        assert!((0..4).all(|k| ALLIANCE_PRESETS[2][k][k] == 2));
+    }
+
+    #[test]
+    fn the_start_date_moves_the_events() {
+        let mut ev = vec![crate::dt::dtm::Event { start_time: 1000, ..Default::default() }, crate::dt::dtm::Event { start_time: RELATIVE_START, ..Default::default() }, crate::dt::dtm::Event::default()];
+        shift_event_starts(&mut ev, 600, 1600);
+        assert_eq!(ev.iter().map(|e| e.start_time).collect::<Vec<_>>(), [2000, RELATIVE_START, 1000], "a start of 0 moves too");
+        shift_event_starts(&mut ev, 1600, 600);
+        assert_eq!(ev[0].start_time, 1000);
+        assert_eq!((cycle_picture(5, true), cycle_picture(0, false), cycle_picture(2, true)), (0, 5, 3));
+        let d = crate::dt::dtm::GameDate { year: 1200, month: 3, day: 7, hour: 9, minute: 0 };
+        assert_eq!(date_minutes(9, 7, 3, 1200), d.to_minutes());
+        assert_eq!(date_minutes(0, 31, 1, 1200), date_minutes(0, 1, 2, 1200), "a day of 31 is the next month's first");
+        assert_eq!(date_minutes(0, 1, 13, 1200), date_minutes(0, 1, 1, 1201));
+        assert_eq!(file_name_only("C:\\Maps\\Next.DTm"), "Next.DTm");
+        assert_eq!(file_name_only("/home/a/b.DTm"), "b.DTm");
+        assert_eq!(cut(&"я".repeat(70), TITLE_LEN).chars().count(), 64);
+        let s = Scenario {
+            buildings: vec![
+                Building { kind: 1, gold_per_day: 100, ..Building::default() },
+                Building { kind: 3, gold_per_day: 30, ..Building::default() },
+                Building { kind: 4, gold_per_day: 20, ..Building::default() },
+                Building { kind: 2, gold_per_day: 5, ..Building::default() },
+            ],
+            ..Scenario::default()
+        };
+        assert_eq!(income_sums(&s), (50, 5));
+        assert!(scenario_picture(b"not a picture".to_vec()).is_none());
     }
 
     #[test]

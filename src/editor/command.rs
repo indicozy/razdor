@@ -27,6 +27,8 @@ pub struct Settings {
     pub campaign_name: String,
     pub next_map: String,
     pub named_characters: Vec<NamedCharacter>,
+    /// The scenario's own picture (raw, as the file holds it).
+    pub scenario_picture: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,11 +60,12 @@ pub enum Command {
     MovePoint { id: u8, x: u16, y: u16 },
     DeletePoint { id: u8 },
     SetPoint { id: u8, point: Box<Point> },
-    /// Replaces the scenario settings.
+    /// Replaces the scenario settings; a new start date moves the events' starts.
     SetSettings(Box<Settings>),
     /// A named character at the end of the list.
     AddNamedCharacter { unit: u8, name: String },
-    /// Removes named character `index` (1-based); armies and events follow.
+    /// Removes named character `index` (1-based); as in the original, armies and events keep
+    /// their numbers ([`super::refs::remove_named_character`]).
     RemoveNamedCharacter { index: u8 },
     /// A new event of type `kind` (1 global … 4 rumour) at the end of the list, with the
     /// editor option "new events repeat" ([`super::events::new_event`]).
@@ -130,8 +133,8 @@ impl Command {
             Command::DeleteArmy { .. } => S::ARMIES | S::BUILDINGS | S::EVENTS,
             Command::PlacePoint { .. } | Command::MovePoint { .. } | Command::SetPoint { .. } => S::POINTS,
             Command::DeletePoint { .. } => S::POINTS | S::EVENTS,
-            Command::SetSettings(_) | Command::AddNamedCharacter { .. } => S::META,
-            Command::RemoveNamedCharacter { .. } => S::META | S::ARMIES | S::EVENTS,
+            Command::SetSettings(_) => S::META | S::EVENTS,
+            Command::AddNamedCharacter { .. } | Command::RemoveNamedCharacter { .. } => S::META,
             Command::NewEvent { .. } | Command::SetEvent { .. } => S::EVENTS,
             Command::DeleteEvent { .. } | Command::DuplicateEvent { .. } | Command::MoveEvent { .. } => S::EVENTS | S::BUILDINGS | S::POINTS | S::META,
             Command::AttachEvent { place, .. } | Command::DetachEvent { place, .. } => match place {

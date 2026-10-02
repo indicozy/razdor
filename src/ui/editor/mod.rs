@@ -757,6 +757,10 @@ impl EditorScreen {
                     self.status = Some(tr("Click the hero's start cell on the map.").into());
                 }
                 SettingsAction::Close => {}
+                SettingsAction::Status(m) => {
+                    self.status = Some(m);
+                    self.modal = Some(Modal::Settings);
+                }
                 SettingsAction::None => self.modal = Some(Modal::Settings),
             }
             return action;

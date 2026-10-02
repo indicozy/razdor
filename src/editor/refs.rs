@@ -108,8 +108,11 @@ pub fn remove_point(s: &mut Scenario, id: u8) -> bool {
     true
 }
 
-/// Removes named character `index` (1-based) and remaps armies' named characters and the
-/// named-unit fields of events.
+/// Removes named character `index` (1-based) as the original's character window does
+/// (0x52eac8): later characters move up, but army byte 58 and the events' named-character
+/// bytes are not renumbered (its old-to-new table serves only the event being edited), so
+/// they point at the next character, or past the end of the list (the original's
+/// behaviour, kept; Razdor's file check reports a reference past the end).
 pub fn remove_named_character(s: &mut Scenario, index: u8) -> bool {
     let Some(i) = (index as usize).checked_sub(1).filter(|i| *i < s.named_characters.len()) else { return false };
     s.named_characters.remove(i);
@@ -117,15 +120,6 @@ pub fn remove_named_character(s: &mut Scenario, index: u8) -> bool {
     let slots = &mut s.header.named_character_slots;
     slots.copy_within(i + 1.., i);
     slots[31] = 0;
-    let r = index as u32;
-    for a in &mut s.armies {
-        shift_u8(&mut a.named_character, r);
-    }
-    for e in &mut s.events {
-        for n in e.conditions.units_named.iter_mut().chain(e.results.units_add_named.iter_mut()).chain(e.results.units_remove_named.iter_mut()) {
-            shift_u8(n, r);
-        }
-    }
     true
 }
 
@@ -404,7 +398,7 @@ mod tests {
     }
 
     #[test]
-    fn removing_a_named_character_remaps() {
+    fn removing_a_named_character_renumbers_nothing() {
         let mut s = scenario();
         s.named_characters = (0..3).map(|k| NamedCharacter { unit: 10 + k, name: format!("n{k}") }).collect();
         s.header.named_character_slots[..3].copy_from_slice(&[10, 11, 12]);
@@ -414,7 +408,8 @@ mod tests {
         assert!(remove_named_character(&mut s, 2));
         assert_eq!(s.named_characters.iter().map(|n| n.unit).collect::<Vec<_>>(), [10, 12]);
         assert_eq!(&s.header.named_character_slots[..3], &[10, 12, 0]);
-        assert_eq!((s.armies[0].named_character, s.armies[1].named_character), (2, 1));
-        assert_eq!(s.events[0].results.units_add_named, [1, 0, 2, 0]);
+        // Not renumbered: army 1 now points past the end, the event's 3 too.
+        assert_eq!((s.armies[0].named_character, s.armies[1].named_character), (3, 1));
+        assert_eq!(s.events[0].results.units_add_named, [1, 2, 3, 0]);
     }
 }

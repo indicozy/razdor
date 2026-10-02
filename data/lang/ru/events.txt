@@ -321,7 +321,6 @@ Group (list colour) = Группа (цвет в списке)
 For which hero = Для какого героя
 When = Когда
 Relative time only (another event sets its start) = Только относительное время (начало задаёт другое событие)
-Start: year = Начало: год
 Open for (hours) = Открыто (часов)
 As the game reads it: {hours} hours (it takes the stored minutes as hours). = Как прочтёт игра: {hours} ч (записанные минуты она считает часами).
 Repeat every (days, 0 \= no) = Повтор каждые (дней, 0 = нет)

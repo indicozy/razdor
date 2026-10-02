@@ -9,7 +9,7 @@
 
 use macroquad::prelude::*;
 
-use razdor::dt::dtm::{Event, GameDate, Scenario};
+use razdor::dt::dtm::{Event, Scenario};
 use razdor::editor::events::{self as ev, Arg, EventFilter};
 use razdor::i18n::{n_, tr};
 use razdor::trf;
@@ -355,14 +355,8 @@ fn tab_player(f: &mut Form, s: &Scenario, e: &mut Event) {
     // The original's date, repeat, duration and "many times" are locked for a relative or
     // subordinate event (0x53aa10, 0x53ac54).
     if !ev::is_relative(e) && e.subordinate == 0 {
-        let mut d = GameDate::from_minutes(e.start_time);
-        f.num("year", tr("Start: year"), &mut d.year, 0, 2999);
-        f.num("month", tr("Month"), &mut d.month, 1, 12);
-        let mut day = d.day - 1;
-        f.num("day", tr("Day (0-29)"), &mut day, 0, 29);
-        d.day = day + 1;
-        f.num("hour", tr("Hour"), &mut d.hour, 0, 23);
-        e.start_time = d.to_minutes();
+        f.note(tr("Start"), DIM);
+        f.date("start", &mut e.start_time);
     }
     if e.subordinate == 0 {
         let mut hours = ev::duration_hours(e);

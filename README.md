@@ -429,8 +429,9 @@ and names units, artefacts and spells from your install; without one it uses pla
   or a path; as a map, a map with its text dump, or a demo map), Save (Ctrl+S), Save as
   (Ctrl+Shift+S; a map, a map with its text dump, an uncompressed or a demo map, as the
   original editor writes them), Save to game folder, Undo (Ctrl+Z), Redo
-  (Ctrl+Y / Ctrl+Shift+Z), Settings (title, description, start date, victory/defeat event,
-  the three hero starts, faction relations, campaign, named characters), Events (below), Check
+  (Ctrl+Y / Ctrl+Shift+Z), Settings (title, description, start date, which moves the
+  events with it, victory/defeat event, the three hero presets, faction relations with the
+  original's four presets, campaign and picture, named characters), Events (below), Check
   (the original editor's 20 map-check rules, which never block saving, then Razdor's file
   checks, whose errors do; click a row to go to its record), Playability (the original
   editor's score, kept in the map and shown at the foot of the tool column; each scoring adds

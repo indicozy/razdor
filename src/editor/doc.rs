@@ -189,6 +189,7 @@ fn settings_of(s: &Scenario) -> Settings {
         campaign_name: s.campaign_name.clone(),
         next_map: s.next_map.clone(),
         named_characters: s.named_characters.clone(),
+        scenario_picture: s.scenario_picture.clone(),
     }
 }
 
@@ -199,6 +200,7 @@ fn put_settings(s: &mut Scenario, m: Settings) {
     s.campaign_name = m.campaign_name;
     s.next_map = m.next_map;
     s.named_characters = m.named_characters;
+    s.scenario_picture = m.scenario_picture;
 }
 
 impl EditorDoc {
@@ -696,6 +698,9 @@ impl EditorDoc {
                 if (m.header.width, m.header.height) != (hd.width, hd.height) {
                     return Err(EditError::Resize);
                 }
+                // A new start date moves every event's start with it (records.md §8.4).
+                let old = hd.start_time;
+                records::shift_event_starts(&mut self.scenario.events, old, m.header.start_time);
                 put_settings(&mut self.scenario, *m);
             }
             Command::AddNamedCharacter { unit, name } => {
@@ -1042,9 +1047,26 @@ mod tests {
         a.named_character = 2;
         d.apply(Command::SetArmy { id: 1, army: Box::new(a) }).unwrap();
         d.apply(Command::RemoveNamedCharacter { index: 1 }).unwrap();
-        assert_eq!(d.scenario.armies[0].named_character, 1);
+        assert_eq!(d.scenario.armies[0].named_character, 2, "as the original: not renumbered");
         assert_eq!(d.scenario.named_characters[0].name, "B");
         assert_eq!(d.apply(Command::RemoveNamedCharacter { index: 5 }), Err(EditError::NoSuchNamedCharacter(5)));
+    }
+
+    #[test]
+    fn a_new_start_date_moves_the_events() {
+        let mut d = doc();
+        d.apply(Command::NewEvent { kind: 1, repeat: false }).unwrap();
+        d.apply(Command::NewEvent { kind: 1, repeat: false }).unwrap();
+        let mut e = d.scenario.events[1].clone();
+        crate::editor::events::set_relative(&mut e, true, 0);
+        d.apply(Command::SetEvent { id: 2, event: Box::new(e) }).unwrap();
+        let start = d.scenario.header.start_time;
+        let mut st = d.settings();
+        st.header.start_time += 1440;
+        d.apply(Command::SetSettings(Box::new(st))).unwrap();
+        assert_eq!((d.scenario.events[0].start_time, d.scenario.events[1].start_time), (start + 1440, crate::dt::dtm::RELATIVE_START));
+        d.undo();
+        assert_eq!(d.scenario.events[0].start_time, start, "one undo step");
     }
 
     #[test]

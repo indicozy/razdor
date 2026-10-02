@@ -201,6 +201,27 @@ mod real_maps {
     }
 
     #[test]
+    fn shipped_scenario_parameters_fit_the_original_page() {
+        let Some(dt) = install() else { return };
+        for m in &dt.maps {
+            let s = crate::dt::dtm::Scenario::load(&m.path).unwrap();
+            // The built-in picture is one of the page's six; every preset's experience is 0
+            // (records.md §13) and its gold and mana are words of the page's range.
+            assert!(s.header.scenario_picture_index < 6, "{}", m.name);
+            for h in &s.header.heroes {
+                assert_eq!(records::preset_experience(h), 0, "{}", m.name);
+                assert!((0..=records::PRESET_MAX).contains(&(records::preset_word(h.gold) as i64)) && h.gold >> 16 == 0, "{}", m.name);
+            }
+            // Shifting the start and back leaves every event as it was.
+            let mut events = s.events.clone();
+            records::shift_event_starts(&mut events, s.header.start_time, s.header.start_time.wrapping_add(43_200));
+            assert!(events.iter().zip(&s.events).all(|(a, b)| a.start_time == b.start_time || a.start_time == b.start_time.wrapping_add(43_200)));
+            records::shift_event_starts(&mut events, s.header.start_time.wrapping_add(43_200), s.header.start_time);
+            assert!(events == s.events, "{}", m.name);
+        }
+    }
+
+    #[test]
     fn the_estuary_map_opens_with_its_blank_questions_trimmed() {
         // Events 36 to 38 of "Устье Трейна" have a question that is only a line break: the
         // loader trims it to nothing and keeps all 211 events (§3.5).

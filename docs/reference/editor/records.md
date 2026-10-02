@@ -656,14 +656,14 @@ These points refine [dtm-format.md](../dtm-format.md):
 | Event order | as the original: Move, or Ctrl+click, then a click on the target row | move with renumbering |
 | Event delete | as the original; a list longer than the original's range check (64, or 5 on a point) refuses the delete, where the original stops part-way | zeroes the entry without closing up, no prompt |
 | Event duration range | as the original, with the other ranges and steps of §9.1 | 0..99 hours |
-| Start date change | events stay | every event start shifts by the change |
-| Alliance presets | allied 2 / neutral 0 / war −3, self 3 | the four matrices in §8.3 (neutral self 2, war not symmetric) |
-| Hero presets | gold and mana 0..32,767, six spells, no experience, start position editable | experience, gold and mana 0..32,000, five spells, start army at most 11 units, position from the map |
-| Scenario picture | index 0..255 only | index 0..5 cycled, plus import of a custom picture |
+| Start date change | as the original, one undo step with the date (Razdor applies each typed field, so a start that passes the relative-only marker on the way would stop moving) | every event start shifts by the change |
+| Alliance presets | as the original | the four matrices in §8.3 (neutral self 2, war not symmetric) |
+| Hero presets | as the original: the page writes only the original's bytes; the position comes from the map | experience, gold and mana 0..32,000, five spells, start army at most 11 units, position from the map |
+| Scenario picture | as the original: the index cycles 0..5; a picture file is kept only if it decodes | index 0..5 cycled, plus import of a custom picture |
 | Lantern radius | inline spin 0..24, new lantern radius 5 | number dialog 0..24, new lantern radius 10 |
 | AI target points | absent (model 10 rejected) | target window for bytes 28–36; the point window edits them too |
 | Options | none | text size, bold, new-events-repeat |
-| Named character delete | remaps armies and events | only the open event's combos; stored bytes not remapped |
+| Named character delete | as the original, but the open event's combos are not remapped (Razdor's character list lives in the settings window, not opened from an event); Razdor's file check reports references past the end | only the open event's combos; stored bytes not remapped |
 | Map deletes | renumbers homes, links, presets, patrol and battle armies | leaves those references untouched (§12) |
 | Limits | 255 buildings, armies, points | 254 buildings, 255 armies, 256 points |
 
