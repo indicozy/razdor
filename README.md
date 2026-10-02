@@ -227,15 +227,15 @@ system font is found automatically, or set `RAZDOR_FONT=/path/to/font.ttf` (with
 names are transliterated).
 
 ## Keys
-Press **F1** on any screen for the list of its keys. No key acts while you type (the hero's
+Press **F1** on any screen but the map editor for the list of its keys. No key acts while you type (the hero's
 name, a save name, an editor field) or while a dialog or question is open (there Esc is
 "No" and any other key but Tab, Alt and the Up and Down arrows "Yes", as in the original).
 
 | Where | Key | Does |
 |---|---|---|
-| Everywhere | F1 | the key list of this screen (F1, Esc or a click closes it) |
+| Everywhere but the map editor (its keys: "View" under Map editor) | F1 | the key list of this screen (F1, Esc or a click closes it) |
 | Everywhere but the map editor (there: quick save) | F2 | interface language: English / Russian |
-| Everywhere | F9 | quick load: loads the quick save |
+| Everywhere but the map editor | F9 | quick load: loads the quick save |
 | Everywhere | N | music off / on |
 | Main menu | Esc | quits the game at once, as in the original |
 | Hero choice | Esc | back to the main menu |

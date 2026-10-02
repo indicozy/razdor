@@ -29,7 +29,7 @@ pub mod world_view;
 
 use std::collections::VecDeque;
 
-use macroquad::prelude::{is_key_pressed, KeyCode};
+use macroquad::prelude::{is_key_down, is_key_pressed, KeyCode};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -408,8 +408,10 @@ impl App {
                 audio::cue(Cue::Panel);
             }
         }
-        // N: music on/off (not while typing or answering a question: there any key answers).
-        if !self.help && hotkeys::shortcuts_allowed(self.guard()) && is_key_pressed(KeyCode::N) {
+        // N: music on/off (not while typing or answering a question: there any key answers;
+        // not with Ctrl, the editor's Ctrl+N).
+        let ctrl = is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl);
+        if !self.help && hotkeys::music_key_allowed(self.guard(), ctrl) && is_key_pressed(KeyCode::N) {
             self.audio.settings.music_muted = !self.audio.settings.music_muted;
         }
         let mood = self.mood();

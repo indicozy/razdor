@@ -576,6 +576,9 @@ old id, and their versions give both.
   language), Space returns to Info, the arrows move one cell, Save is enabled only when the
   map is modified, New keeps the current size (the old dialog is "New of size"), and the
   last map and the building check are kept in Razdor's editor `DTMapEdit.Ini`.
+- An undo or redo while an army or point is held keeps it off the map (a delete or Info click
+  at its old cell no longer reads it as there); Ctrl+N no longer switches the music too; the
+  editor's status message stays clear of the counts and shows in full on hover.
 
 ## 0.2.2 — 2026-10-01
 

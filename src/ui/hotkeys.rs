@@ -90,6 +90,12 @@ pub fn shortcuts_allowed(g: Guard) -> bool {
     !g.typing && !g.dialog
 }
 
+/// Whether N may switch the music: as the single-key shortcuts, and not with Ctrl held (the
+/// map editor's Ctrl+N makes a new map).
+pub fn music_key_allowed(g: Guard, ctrl: bool) -> bool {
+    shortcuts_allowed(g) && !ctrl
+}
+
 /// Whether `key` may fire at `place`. The editor has its own keys: there F2 is the original
 /// editor's quick save, not the language.
 pub fn allowed(place: Place, key: Global, g: Guard) -> bool {
@@ -266,10 +272,18 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_n_leaves_the_music_alone() {
+        assert!(music_key_allowed(Guard::default(), false));
+        assert!(!music_key_allowed(Guard::default(), true), "Ctrl+N is the editor's new map");
+        assert!(!music_key_allowed(Guard { typing: true, ..Guard::default() }, false));
+    }
+
+    #[test]
     fn quick_load_and_help_work_everywhere_but_the_editor() {
         for place in ALL_PLACES.into_iter().filter(|p| *p != Place::Editor && !always_typing(*p)) {
             assert!(allowed(place, Global::QuickLoad, in_game()), "{place:?}");
             assert!(allowed(place, Global::Help, in_game()), "{place:?}");
+            assert!(allowed(place, Global::Language, in_game()), "F2 switches the language on {place:?}");
         }
         assert!(!allowed(Place::Editor, Global::Help, in_game()));
         assert!(!allowed(Place::Editor, Global::Language, in_game()), "F2 saves in the editor, as in the original");

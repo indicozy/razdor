@@ -12,7 +12,7 @@ use crate::trf;
 
 pub use super::brush::{Held, Page};
 use super::brush::{army_at, building_at, pick_up, Placed};
-use super::cells::{figure_index, figure_kind};
+use super::cells::{army_word, figure_index, figure_kind, point_word};
 use super::command::Command;
 use super::doc::{EditorDoc, Target};
 use super::geometry::brush_centre;
@@ -485,8 +485,11 @@ impl ToolState {
         self.run(doc, cmd);
     }
 
-    /// After undo/redo: drop a selection or a held object whose record is gone.
-    pub fn check_selection(&mut self, doc: &EditorDoc) {
+    /// After an edit, an undo or a redo: drop a selection or a held object whose record is
+    /// gone. An army or point still held stays off the map: the cells an undo or redo built
+    /// again as a load does would show its figure word at its old cell, which a later delete
+    /// or Info click there would read as the record.
+    pub fn check_selection(&mut self, doc: &mut EditorDoc) {
         let s = &doc.scenario;
         let exists = |t: Target| match t {
             Target::Building(id) => (id as usize) <= s.buildings.len() && id > 0,
@@ -504,6 +507,16 @@ impl ToolState {
         if held.is_some_and(|t| !exists(t)) {
             self.held = None;
             self.brush = INFO;
+        }
+        let figure = match self.held {
+            Some(Held::Army(id)) => s.army(id).map(|a| (a.x, a.y, army_word(a))),
+            Some(Held::Point(id)) => s.points.get(id as usize - 1).map(|p| (p.x, p.y, point_word(p))),
+            _ => None,
+        };
+        if let Some((x, y, word)) = figure {
+            if doc.cells.figure(x as i64, y as i64) == word {
+                doc.cells.set_figure(x as i64, y as i64, 0);
+            }
         }
     }
 
@@ -738,6 +751,33 @@ mod tests {
         t.press(&mut d, kit(&p), press((0, 0)));
         t.space();
         assert!(!t.move_mode && t.held.is_some());
+    }
+
+    #[test]
+    fn an_undo_while_holding_keeps_the_held_army_off_the_map() {
+        let p = Palette::fallback();
+        let (mut d, mut t) = (doc(), ToolState::default());
+        t.choose_page(Page::Items, &p);
+        t.click_palette(3, &p);
+        t.press(&mut d, kit(&p), press((2, 2)));
+        t.choose_page(Page::Terrain, &p);
+        t.terrain = 4;
+        t.press(&mut d, kit(&p), press((9, 9)));
+        t.release(&mut d, (9, 9));
+        t.press_size(INFO);
+        t.press(&mut d, kit(&p), Press { right: true, ..press((2, 2)) });
+        assert_eq!(t.held, Some(Held::Army(1)));
+        // The undo builds the cells again as a load does; the held army's word stays off.
+        assert!(d.undo());
+        t.check_selection(&mut d);
+        assert_eq!((t.held, d.cells.figure(2, 2)), (Some(Held::Army(1)), 0));
+        t.press(&mut d, kit(&p), press((6, 6)));
+        assert_eq!((d.scenario.armies[0].x, d.cells.figure(6, 6), d.cells.figure(2, 2)), (6, 0x0401, 0));
+        // So a delete at the old cell finds nothing to take for the army.
+        t.choose_page(Page::Items, &p);
+        t.press_size(DELETE);
+        t.press(&mut d, kit(&p), press((2, 2)));
+        assert_eq!(d.scenario.armies.len(), 1);
     }
 
     #[test]

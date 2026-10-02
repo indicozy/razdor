@@ -349,7 +349,7 @@ impl EditorScreen {
         if let Err(e) = self.doc.apply_merging(cmd, key) {
             self.status = Some(trf!("Refused: {e}.", e));
         }
-        self.tools.check_selection(&self.doc);
+        self.tools.check_selection(&mut self.doc);
     }
 
     fn check(&mut self) {
@@ -491,7 +491,7 @@ impl EditorScreen {
                     }
                     Err(e) => self.status = Some(trf!("Refused: {e}.", e)),
                 }
-                self.tools.check_selection(&self.doc);
+                self.tools.check_selection(&mut self.doc);
             }
             EventsAction::Delete(id) => {
                 self.run(Then::DeleteEvent(id));
@@ -653,10 +653,10 @@ impl EditorScreen {
             } else {
                 self.doc.undo();
             }
-            self.tools.check_selection(&self.doc);
+            self.tools.check_selection(&mut self.doc);
         } else if c && is_key_pressed(KeyCode::Y) {
             self.doc.redo();
-            self.tools.check_selection(&self.doc);
+            self.tools.check_selection(&mut self.doc);
         } else if c && is_key_pressed(KeyCode::S) {
             if shift() {
                 self.modal = Some(Modal::SaveAs { name: self.doc.suggested_name(), format: SaveFormat::Normal });
@@ -922,11 +922,11 @@ impl EditorScreen {
             }
             Some(6) => {
                 self.doc.undo();
-                self.tools.check_selection(&self.doc);
+                self.tools.check_selection(&mut self.doc);
             }
             Some(7) => {
                 self.doc.redo();
-                self.tools.check_selection(&self.doc);
+                self.tools.check_selection(&mut self.doc);
             }
             Some(8) => {
                 self.settings.tab = 0;
@@ -994,9 +994,17 @@ impl EditorScreen {
         let label = trf!("quests {q}, playability {p}", q = s.header.quest_count(), p = score);
         // At the foot of the tool column, clear of the messages.
         text_fit(&label, w - RIGHT_W + 8.0, y - 8.0, RIGHT_W - 16.0, 16.0, band);
+        // The message right of the counts, ending at the window's edge, shrunk to the room left.
         if let Some(m) = &self.status {
-            let tw = measure(m, 16.0).width;
-            text(m, (w - RIGHT_W - tw - 10.0).max(w * 0.45), y + 18.0, 16.0, ACCENT);
+            let from = 8.0 + measure(&line, 16.0).width + 24.0;
+            let room = (w - 10.0 - from).max(0.0);
+            let tw = measure(m, 16.0).width.min(room);
+            text_fit(m, w - 10.0 - tw, y + 18.0, room, 16.0, ACCENT);
+            // Shortened: the whole message on hover.
+            let (mx, my) = crate::ui::widgets::pointer();
+            if measure(m, 16.0).width > room && my >= y && mx >= w - 10.0 - tw {
+                tooltip(&wrap(m, 560.0, 17.0).into_iter().map(|l| (l, INK)).collect::<Vec<_>>());
+            }
         }
     }
 
