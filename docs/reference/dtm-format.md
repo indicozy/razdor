@@ -25,8 +25,8 @@ Reference implementation: `dtm_decode.py`. It parses every shipped map with zero
 | off | type | value | conf |
 |---|---|---|---|
 | 0 | char[6] | `AIpf\r\n` | C |
-| 6 | u8 | compression code: 19 in all maps = 10 + bzip2 level 9 | C |
-| 7 | u8 | scramble mode, 0 in all maps (1 = XOR byte i with i+1, 2 = XOR with a random byte) | C |
+| 6 | u8 | compression code: 19 in all maps = 10 + bzip2 level 9. Below 10 the data is a zlib (deflate) stream at that level; the Community editor writes its demo maps (`.DTs`) with code 9 (DTMapEdit 0x4d5790, 0x4c2938) | C |
+| 7 | u8 | scramble mode, 0 in all maps (1 = XOR byte i with i+1, 2 = XOR with a random byte). The editor's demo maps use mode 1 | C |
 | 8 | u32 | size of the uncompressed payload | C |
 | 12 | … | a bzip2 stream (`BZh…`) running to EOF | C |
 
@@ -46,12 +46,17 @@ Buildings         buildings_size   bytes  (358 per building)
 Armies            armies_size      bytes  (89 per army)
 Points            points_size      bytes  (99 per lantern / event point)
 Events            events_size      bytes  (171 per event)
+Custom artefacts  header 0x34 bytes (230 per artefact; always empty)
 Text marker       08 3E 2D 54 65 78 74 2D   ("\x08>-Text-")
 Strings           NUL-terminated cp1251 strings (see section 9)
 Scenario picture  scenario_picture_size bytes (optional, a LIT image)
 Event pictures    each event's custom_picture_size, in event order (optional)
 EOF
 ```
+
+A demo map from the Community editor (header 0x117 = 1, saved as `.DTs`) stores the same sections in the order
+objects, custom artefacts, points, terrain, events, armies, buildings; the editor writes and reads that order, and
+also writes a payload with no container at all when asked for an uncompressed save (DTMapEdit 0x5a50f2, 0x5a6fe0) (C).
 
 The following invariants hold for all 15 maps (C):
 - `0x12F + sum(section sizes) + 8 == text_offset`.
@@ -61,7 +66,7 @@ The following invariants hold for all 15 maps (C):
 
 | off | type | field | conf |
 |---|---|---|---|
-| 0x00 | char[12] | `MapLDV V.4\r\n` | C |
+| 0x00 | char[12] | `MapLDV V.4\r\n`. Byte 9 is the version digit; the Community editor also opens versions 1–3 and converts them (DTMapEdit 0x5a8424) | C |
 | 0x0C | u32 | width in cells (50 / 100 / 200) | C |
 | 0x10 | u32 | height in cells (all shipped maps are square) | C |
 | 0x14 | u32 | random-generator seed from the "generate map" dialog. Several maps share one value. | L |
@@ -72,7 +77,7 @@ The following invariants hold for all 15 maps (C):
 | 0x28 | u32 | armies size (a multiple of 89) | C |
 | 0x2C | u32 | points size (a multiple of 99) | C |
 | 0x30 | u32 | events size (a multiple of 171) | C |
-| 0x34 | u32 | always 0; not read by the game | U |
+| 0x34 | u32 | size of the custom-artefact section (230-byte artefact records after the events, each with a name and a description string). Always 0: the Community editor reads the section but always writes 0 and drops the artefacts (DTMapEdit 0x5a5028, 0x5a76d1). Not read by the game | C |
 | 0x38 | u32 | scenario start time, in minutes (see *Game clock*). 0 means unset. | C |
 | 0x3C | 3 × 50 B | starting-hero presets: knight, archmage, ranger (see below) | C/L |
 | 0xD2 | u16 | victory event (1-based event id, 0 = none) | C |
@@ -84,11 +89,15 @@ The following invariants hold for all 15 maps (C):
 | 0xEF | u8[32] | unit id (class) of each named character. Only the first N entries are meaningful; the rest can hold stale data. | C |
 | 0x10F | u8 | scenario kind: 0 = standalone, 1 = first map of a campaign, 2 = later campaign map | C |
 | 0x110 | u8[7] | values carried over from the previous campaign map: gold, gods' favour, fame, experience/level, personal artifacts, whole inventory, whole army | L (order follows the UI) |
-| 0x117 | 5 B | always 0 | U |
+| 0x117 | u8 | demo flag: 0 in all maps; 1 in the editor's demo maps (`.DTs`), whose sections are stored in another order (section 2) | C |
+| 0x118 | 4 B | always 0 | U |
 | 0x11C | u32 | size of the embedded scenario picture (0 = none) | C |
 | 0x120 | u8 | scenario picture index (a built-in picture choice) | L |
 | 0x121 | u8 | always 0 in maps. The game overwrites it at load with its wide-front-row option (6 units per row when set, else 4); in a save it stores that option and restores it | C |
-| 0x122 | 12 B | always 0 | U |
+| 0x122 | u16 | playability score, written by the Community editor's score button (DTMapEdit 0x5a2c45); 0 in all shipped maps | C |
+| 0x124 | u16 | save counter: the Community editor adds 1 on every save (0x5a4fc8); 0 in all shipped maps | C |
+| 0x126 | u8 | number of quests, written with the score (0x5a2c5a); 0 in all shipped maps | C |
+| 0x127 | 7 B | always 0 | U |
 | 0x12E | u8 | always 0 in maps; in a save the save kind (1 manual, 2 autosave) | C |
 
 ### Hero preset (50 bytes, at 0x3C + 50·k)
@@ -163,8 +172,10 @@ the axes swapped, about 7% would.
 
 ## 5. Objects: hills, mountains, trees, stones (C layout, L meaning)
 
-Each object is 6 bytes: `u16 x, u16 y, u8 sprite, u8 class`. The records are sorted by (y, x), and one cell can hold
-several objects.
+Each object is 6 bytes: `u16 x, u16 y, u8 sprite, u8 class`. The records are sorted by (y, x), and one cell holds at
+most two: the Community editor keeps one object of classes 1–8 and one of the other classes per cell and writes them
+from its cell grid in that order, so a later record for the same group replaces an earlier one (DTMapEdit 0x5a4c44,
+0x5a8c00) (C).
 
 | class | count (all maps) | typical terrain underneath | sprite ids | likely meaning |
 |---|---|---|---|---|
@@ -204,9 +215,9 @@ Buildings have 1-based ids in file order. Events refer to buildings by that id.
 | 291 | u8 | always 0 (U) |
 | 292 | u8 | owner army (army id; 0xFF = none, so the neutral owner applies) |
 | 293 | u8 | linked building (1-based). For a village, the castle it belongs to. For a dungeon entrance, probably the tunnel target (L). |
-| 294 | u8 | has barracks |
+| 294 | u8 | has barracks: 1 exactly when a barracks slot (264) holds a unit. The Community editor derives it when its building window stores the record (DTMapEdit 0x54c3fc); all 1,082 shipped buildings agree |
 | 295 | u8 | number of random artifacts for sale |
-| 296 | u8[6] | stale u8 copy of the artifact list. Often out of date; ignore it (L). |
+| 296 | u8[6] | stale u8 copy of the artifact list. Often out of date; ignore it (L). The Community editor also reads and writes 296 (i8), 297 (u16) and 299 (u16) through three hidden controls of its building window (DTMapEdit 0x54c3fc) |
 | 302 | 6 B | always 0 (U) |
 | 308 | u8[6] | spells for sale (1-based spell index) |
 | 314 | 6 × (u8 unit, u8 level, u8 count) | garrison (0-based levels) |
@@ -443,7 +454,8 @@ The strings follow the text marker, in this order (C):
 5. three strings per building: name, neutral owner name, description
 6. three strings per army: name, leader name, description
 7. three strings per event: title with flags, question, message
-8. N named-character names (N from header byte 0xEE; their classes are at 0xEF+i)
+8. two strings per custom artefact (name, description), when header 0x34 is non-zero
+9. N named-character names (N from header byte 0xEE; their classes are at 0xEF+i)
 
 When the game loads the map (0x4b2504), every run of two or more spaces in the description and in
 the building, army and event strings is collapsed to one space, and `#HERONAME` in the third
