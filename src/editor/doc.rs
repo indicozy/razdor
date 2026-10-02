@@ -957,13 +957,14 @@ mod tests {
         assert_eq!(d.hit(6, 6), Some(Target::Building(1)));
         assert_eq!(d.hit(10, 10), Some(Target::Building(2)));
         assert_eq!(d.hit(0, 0), None);
-        // Deleting building 1 renumbers building 2 and remaps the preset's start building.
+        // Deleting building 1 renumbers building 2; as in the original, the preset's start
+        // building keeps its number (now past the end, which the file check reports).
         let mut st = d.settings();
         st.header.heroes[0].start_building = 2;
         d.apply(Command::SetSettings(Box::new(st))).unwrap();
         d.apply(Command::DeleteBuilding { id: 1 }).unwrap();
         assert_eq!(d.scenario.buildings.len(), 1);
-        assert_eq!(d.scenario.header.heroes[0].start_building, 1);
+        assert_eq!(d.scenario.header.heroes[0].start_building, 2);
         d.undo();
         assert_eq!(d.scenario.buildings.len(), 2);
         assert_eq!(d.scenario.header.heroes[0].start_building, 2);

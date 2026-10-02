@@ -885,7 +885,7 @@ behaviour, not the same look.
 | Occupied-cell check | Lanterns and points refused on figures (but tested at the unscrolled view cell); armies and starts overwrite | Not checked | unknown | `src/editor/doc.rs` |
 | Hero start | Placed from the item palette; reveals radius 5 | Settings button, then a map click | differs | `src/editor/tools.rs`, `src/ui/editor/settings.rs` |
 | Back to Info after an item | Yes | Selects the new record | differs | `src/ui/editor/mod.rs` |
-| Delete | Per page at one cell; event refs renumbered; home buildings not renumbered | Erase brush for objects; Delete key for records with all refs renumbered | differs | `src/editor/doc.rs`, `src/editor/refs.rs` |
+| Delete | Per page at one cell; event refs renumbered; home buildings not renumbered | Erase brush for objects; Delete key for records, renumbering what the original renumbers (records.md §12) | differs | `src/editor/doc.rs`, `src/editor/refs.rs` |
 | Pick-up order | Army, building, point; right press, or left in move mode | Army, point, building; left drag with Select | differs | `src/editor/doc.rs` |
 | Drop checks | None | Must stay on the map | differs | `src/editor/tools.rs` |
 | Info hover hint | Building, army and point details | Status line shows cell, terrain and objects | differs | `src/ui/editor/mod.rs` |

@@ -4,13 +4,10 @@
 //! records refer to them by those ids (`docs/reference/dtm-format.md` §6–10). Removing
 //! record `k` shifts every later id down by one; references to `k` itself are cleared
 //! (0 = none; a building's owner army becomes 0xFF, the neutral owner). The fields remapped
-//! here are every reference the format doc lists. Arguments of the Community opcodes
-//! (events whose "no meeting" switch carries an opcode) are not ids of this kind and are
-//! left alone, except that the patrol-army byte of such events is not treated as an army.
-//! Events are removed and moved as the original's event window does it.
+//! here are the ones the original editor renumbers: records are deleted as its delete brush
+//! deletes them, and events removed and moved as its event window does.
 
 use crate::dt::dtm::Scenario;
-use crate::rules::events::{extension, Extension};
 
 /// `old` after removing id `removed`: 0 stays 0, `removed` becomes 0, later ids shift down.
 fn shift(old: u32, removed: u32) -> u32 {
@@ -30,21 +27,15 @@ fn shift_u16(v: &mut u16, removed: u32) {
     *v = shift(*v as u32, removed) as u16;
 }
 
-/// Removes building `id` (1-based) and remaps: army home buildings, buildings' linked
-/// buildings, hero presets' start buildings, event building conditions.
+/// Removes building `id` (1-based) as the original's delete brush does (0x597588): only the
+/// building conditions of events (bytes 30–32) are renumbered. Army home buildings (25),
+/// buildings' links (293) and the hero presets' starting buildings keep their numbers and so
+/// point at the next building or past the end (the original's behaviour, kept; Razdor's file
+/// check reports a reference past the end).
 pub fn remove_building(s: &mut Scenario, id: u16) -> bool {
     let Some(i) = (id as usize).checked_sub(1).filter(|i| *i < s.buildings.len()) else { return false };
     s.buildings.remove(i);
     let r = id as u32;
-    for a in &mut s.armies {
-        shift_u8(&mut a.home_building, r);
-    }
-    for b in &mut s.buildings {
-        shift_u8(&mut b.linked_building, r);
-    }
-    for h in &mut s.header.heroes {
-        shift_u8(&mut h.start_building, r);
-    }
     for e in &mut s.events {
         for b in &mut e.conditions.buildings {
             shift_u8(b, r);
@@ -53,8 +44,11 @@ pub fn remove_building(s: &mut Scenario, id: u16) -> bool {
     true
 }
 
-/// Removes army `id` and renumbers the rest (the army id is its 1-based index). Remaps
-/// building owners (1..=254; 0 and 0xFF are kept) and every army reference of the events.
+/// Removes army `id` and renumbers the rest (the army id is its 1-based index), as the
+/// original's delete brush does: building owners (1..=254; 0 and 0xFF are kept; the deleted
+/// one becomes 0xFF) and the event bytes 15, 54, 55, 67, 68, 74, 75, 121, 122, 123, 136, 142
+/// and 144 follow. The patrol-change army (16), the army-at-home condition (146) and the
+/// battle army (147) do not (the original's behaviour, kept).
 pub fn remove_army(s: &mut Scenario, id: u8) -> bool {
     let Some(i) = (id as usize).checked_sub(1).filter(|i| *i < s.armies.len()) else { return false };
     s.armies.remove(i);
@@ -71,23 +65,19 @@ pub fn remove_army(s: &mut Scenario, id: u8) -> bool {
         }
     }
     for e in &mut s.events {
-        let opcode = matches!(extension(e), Some(Extension::Opcode(_)));
         let c = &mut e.conditions;
         for a in c.defeated_armies.iter_mut().chain(c.beaten_armies.iter_mut()) {
             shift_u8(a, r);
         }
-        for a in [&mut c.meet_army, &mut c.army_inactive, &mut c.army_active, &mut c.army_at_home] {
+        for a in [&mut c.army_inactive, &mut c.meet_army, &mut c.army_active] {
             shift_u8(a, r);
         }
         let x = &mut e.results;
         for a in x.activate_armies.iter_mut() {
             shift_u8(a, r);
         }
-        for a in [&mut x.deactivate_army, &mut x.removed_units_to_army, &mut x.units_from_army, &mut x.show_army, &mut x.start_battle_with] {
+        for a in [&mut x.deactivate_army, &mut x.removed_units_to_army, &mut x.units_from_army, &mut x.show_army] {
             shift_u8(a, r);
-        }
-        if !opcode {
-            shift_u8(&mut x.patrol_army, r);
         }
     }
     true
@@ -274,9 +264,10 @@ mod tests {
         s.events[0].conditions.buildings = [1, 2, 4];
         assert!(remove_building(&mut s, 2));
         assert_eq!(s.buildings.len(), 3);
-        assert_eq!([s.armies[0].home_building, s.armies[1].home_building, s.armies[2].home_building], [2, 0, 1]);
-        assert_eq!(s.buildings[2].linked_building, 3);
-        assert_eq!([s.header.heroes[0].start_building, s.header.heroes[1].start_building], [2, 0]);
+        // Only the event conditions follow, as in the original.
+        assert_eq!([s.armies[0].home_building, s.armies[1].home_building, s.armies[2].home_building], [3, 2, 1]);
+        assert_eq!(s.buildings[2].linked_building, 4);
+        assert_eq!([s.header.heroes[0].start_building, s.header.heroes[1].start_building], [3, 2]);
         assert_eq!(s.events[0].conditions.buildings, [1, 0, 3]);
         assert!(!remove_building(&mut s, 9));
         assert!(!remove_building(&mut s, 0));
@@ -301,18 +292,10 @@ mod tests {
         assert_eq!(s.buildings.iter().map(|b| b.owner_army).collect::<Vec<_>>(), [2, 0xFF, 0xFF, 0]);
         let e = &s.events[0];
         assert_eq!(e.conditions.defeated_armies, [0, 3]);
-        assert_eq!((e.conditions.meet_army, e.conditions.army_at_home), (2, 0));
+        // The army at home, the battle army and the patrol army keep their numbers.
+        assert_eq!((e.conditions.meet_army, e.conditions.army_at_home), (2, 2));
         assert_eq!(e.results.activate_armies, [3, 1]);
-        assert_eq!((e.results.start_battle_with, e.results.patrol_army), (2, 3));
-    }
-
-    #[test]
-    fn opcode_events_keep_their_patrol_byte() {
-        let mut s = scenario();
-        let e = &mut s.events[0];
-        (e.results.no_meeting, e.results.patrol_delta, e.results.patrol_army) = (1, 6, 4);
-        remove_army(&mut s, 1);
-        assert_eq!(s.events[0].results.patrol_army, 4);
+        assert_eq!((e.results.start_battle_with, e.results.patrol_army), (3, 4));
     }
 
     #[test]

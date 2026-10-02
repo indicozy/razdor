@@ -533,6 +533,10 @@ old id, and their versions give both.
   and question boxes and whether new events repeat, kept as the original's `[Option]`
   section in `DTMapEdit.Ini` in Razdor's editor folder (`RAZDOR_EDITOR_DIR`, else
   `razdor/editor` in the data folder), read from the install's editor ini until then.
+- **Deleting a record renumbers what the original's delete renumbers**: a building only the
+  events' building conditions (no longer army homes, links and preset start buildings), an
+  army the owners and the event army fields but the patrol army, the army at home and the
+  battle army; the references left past the end are reported by the map check.
 - **Unit and artefact editors** (toolbar: Units, Artefacts), as the original's: they edit
   the session's tables, never the map, with the original's ranges; the unit window shows
   the tactical cost and the price by the original's formula (its bands, doubled for the hero

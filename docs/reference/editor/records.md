@@ -664,7 +664,7 @@ These points refine [dtm-format.md](../dtm-format.md):
 | AI target points | as the original: the point tool places them, their panel is the target window; the event point's panel edits the five words too | target window for bytes 28–36; the point window edits them too |
 | Options | as the original: the Options button; kept in `DTMapEdit.Ini` in Razdor's editor folder (read from the install's until then); the text size and bold apply to the message and question boxes | text size, bold, new-events-repeat |
 | Named character delete | as the original, but the open event's combos are not remapped (Razdor's character list lives in the settings window, not opened from an event); Razdor's file check reports references past the end | only the open event's combos; stored bytes not remapped |
-| Map deletes | renumbers homes, links, presets, patrol and battle armies | leaves those references untouched (§12) |
+| Map deletes | as the original (`src/editor/refs.rs`); Razdor's file check then reports the references left past the end | leaves those references untouched (§12) |
 | Limits | as the original: 254 buildings, 255 armies, 256 points (the 256th point's id overflows into its model byte, as in the original, and Razdor's file check refuses it) | 254 buildings, 255 armies, 256 points |
 
 ## Unknowns

@@ -448,7 +448,8 @@ and names units, artefacts and spells from your install; without one it uses pla
   lantern, which asks for its radius, event point or AI target point).
 - **Panels**: click a building, army or point to edit every field (names and descriptions in
   any script, garrison, barracks, goods, spells, incomes, factions and attitudes, AI settings,
-  local events picked by title). Delete removes it; later ids and references are renumbered.
+  local events picked by title). Delete removes it; later ids and the references the original
+  renumbers follow.
   The panels work as the original's record windows (`docs/reference/editor/records.md`): the
   army panel keeps the 12-unit limit, shows the gold cost, upkeep, tactical cost and side
   strength, takes faction, attitudes and leader name from a home building or a faction, and
