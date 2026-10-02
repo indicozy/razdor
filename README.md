@@ -438,11 +438,16 @@ and names units, artefacts and spells from your install; without one it uses pla
 - **Tools** (right column, keys in brackets): Select and move (V), Terrain (T: 16 surfaces,
   brush 1/3/5/9, flood fill, rectangle), Objects (O: hills, mountains, stones, trees by class
   and picture; several per cell), Erase (E), Building (B: type and picture; the cell you click
-  is the bottom-right corner, the preview is red if it does not fit), Army (A), Point (P:
+  is the bottom-right corner, the preview is red if it does not fit), Army (A: feudal, rogue,
+  peasant or inactive), Point (P:
   lantern or event point).
 - **Panels**: click a building, army or point to edit every field (names and descriptions in
   any script, garrison, barracks, goods, spells, incomes, factions and attitudes, AI settings,
   local events picked by title). Delete removes it; later ids and references are renumbered.
+  The panels work as the original's record windows (`docs/reference/editor/records.md`): the
+  army panel keeps the 12-unit limit, shows the gold cost, upkeep, tactical cost and side
+  strength, takes faction, attitudes and leader name from a home building or a faction, and
+  writes the derived model byte and the two stored costs.
 - **Events**: the event list (filter by type, group colour and title; New, Duplicate, Delete)
   and every field of the original editor's event window, on its tabs: *Event and player*
   (type, group, start date or "relative only", hours open, repeat every N days, once or many

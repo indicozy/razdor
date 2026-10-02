@@ -620,13 +620,13 @@ impl EditorDoc {
                 let i = self.building_index(id)?;
                 self.scenario.buildings[i] = *building;
             }
-            Command::PlaceArmy { x, y } => {
+            Command::PlaceArmy { x, y, model } => {
                 if self.scenario.armies.len() >= MAX_RECORDS {
                     return Err(EditError::Full(n_("armies (at most 255)")));
                 }
                 self.check_cell(x as i64, y as i64)?;
                 let id = self.scenario.armies.len() as u8 + 1;
-                let a = new_army(&self.scenario.header, id, x, y);
+                let a = new_army(id, x, y, model);
                 self.scenario.armies.push(a);
                 out.new_id = Some(id as u32);
             }
@@ -790,6 +790,14 @@ mod tests {
         EditorDoc::new_map(NewMap { width: 20, height: 20, fill: 6 })
     }
 
+    /// Places an army and saves its window as the original's save button does (a new army
+    /// has no faction until then).
+    fn place_army(d: &mut EditorDoc, x: u16, y: u16) {
+        let id = d.apply(Command::PlaceArmy { x, y, model: 4 }).unwrap().new_id.unwrap() as u8;
+        let a = records::save_army(d.scenario.army(id).unwrap(), None, 2);
+        d.apply(Command::SetArmy { id, army: Box::new(a) }).unwrap();
+    }
+
     fn cell(d: &EditorDoc, x: u32, y: u32) -> u8 {
         d.scenario.terrain_at(x, y).unwrap()
     }
@@ -911,8 +919,8 @@ mod tests {
     #[test]
     fn armies_and_points() {
         let mut d = doc();
-        assert_eq!(d.apply(Command::PlaceArmy { x: 3, y: 4 }).unwrap().new_id, Some(1));
-        assert_eq!(d.apply(Command::PlaceArmy { x: 5, y: 4 }).unwrap().new_id, Some(2));
+        assert_eq!(d.apply(Command::PlaceArmy { x: 3, y: 4, model: 4 }).unwrap().new_id, Some(1));
+        assert_eq!(d.apply(Command::PlaceArmy { x: 5, y: 4, model: 4 }).unwrap().new_id, Some(2));
         d.apply(Command::PlaceBuilding { x: 12, y: 12, kind: 3, picture_type: 3, variant: 0, size: (2, 2) }).unwrap();
         let mut b = d.scenario.buildings[0].clone();
         b.owner_army = 2;
@@ -967,7 +975,7 @@ mod tests {
         assert_eq!(d.apply(Command::SetSettings(Box::new(st))), Err(EditError::Resize));
         d.apply(Command::AddNamedCharacter { unit: 7, name: "A".into() }).unwrap();
         d.apply(Command::AddNamedCharacter { unit: 8, name: "B".into() }).unwrap();
-        d.apply(Command::PlaceArmy { x: 1, y: 1 }).unwrap();
+        d.apply(Command::PlaceArmy { x: 1, y: 1, model: 4 }).unwrap();
         let mut a = d.scenario.armies[0].clone();
         a.named_character = 2;
         d.apply(Command::SetArmy { id: 1, army: Box::new(a) }).unwrap();
@@ -1000,7 +1008,7 @@ mod tests {
         d.apply(Command::PaintTerrain { x: 5, y: 5, size: 5, code: 12 }).unwrap();
         d.apply(Command::PlaceObjects { x: 5, y: 5, size: 1, class: 5, sprite: 20 }).unwrap();
         d.apply(Command::PlaceBuilding { x: 10, y: 10, kind: 3, picture_type: 3, variant: 0, size: (4, 4) }).unwrap();
-        d.apply(Command::PlaceArmy { x: 15, y: 15 }).unwrap();
+        place_army(&mut d, 15, 15);
         let mut a = d.scenario.armies[0].clone();
         (a.leader_unit, a.name) = (1, "Отряд".into());
         d.apply(Command::SetArmy { id: 1, army: Box::new(a) }).unwrap();
@@ -1021,7 +1029,7 @@ mod tests {
     fn saves_follow_the_extension_rules() {
         let dir = temp_dir("variants");
         let mut d = doc();
-        d.apply(Command::PlaceArmy { x: 3, y: 3 }).unwrap();
+        place_army(&mut d, 3, 3);
         // Uncompressed: the raw payload under the normal name.
         let written = d.save_to(&dir.join("m.DTZ"), None, None).unwrap();
         assert_eq!(written, dir.join("m.DTm"));
@@ -1063,7 +1071,7 @@ mod tests {
     fn the_emergency_save_writes_error_save() {
         let dir = temp_dir("emergency");
         let mut d = doc();
-        d.apply(Command::PlaceArmy { x: 2, y: 2 }).unwrap();
+        place_army(&mut d, 2, 2);
         let path = d.emergency_save(&dir, None, None).unwrap();
         assert_eq!(path, dir.join("ErrorSave.DTm"));
         assert_eq!(Scenario::load(&path).unwrap().armies.len(), 1);
@@ -1073,7 +1081,7 @@ mod tests {
     fn old_versions_open_modified() {
         let dir = temp_dir("old");
         let mut d = doc();
-        d.apply(Command::PlaceArmy { x: 3, y: 3 }).unwrap();
+        d.apply(Command::PlaceArmy { x: 3, y: 3, model: 4 }).unwrap();
         let mut p = d.scenario.to_payload();
         p[9] = b'3';
         let path = dir.join("old.DTm");
@@ -1129,7 +1137,7 @@ mod tests {
         let mut d = doc();
         d.apply(Command::PlaceBuilding { x: 10, y: 10, kind: 3, picture_type: 3, variant: 2, size: (4, 4) }).unwrap();
         d.apply(Command::PlaceBuilding { x: 16, y: 16, kind: 2, picture_type: 2, variant: 0, size: (3, 3) }).unwrap();
-        d.apply(Command::PlaceArmy { x: 3, y: 4 }).unwrap();
+        d.apply(Command::PlaceArmy { x: 3, y: 4, model: 4 }).unwrap();
         d.apply(Command::PlacePoint { x: 7, y: 8, lantern: true }).unwrap();
         let mut b = d.scenario.buildings[1].clone();
         b.gold_per_day = 0x1234;
@@ -1317,7 +1325,7 @@ mod tests {
         }
         d.apply(Command::PlacePoint { x: 1, y: 1, lantern: false }).unwrap();
         d.apply(Command::PlaceBuilding { x: 5, y: 5, kind: 3, picture_type: 3, variant: 0, size: (2, 2) }).unwrap();
-        d.apply(Command::PlaceArmy { x: 8, y: 8 }).unwrap();
+        d.apply(Command::PlaceArmy { x: 8, y: 8, model: 4 }).unwrap();
         for id in 1..=5 {
             d.apply(Command::AttachEvent { place: Target::Point(1), event: id }).unwrap();
         }

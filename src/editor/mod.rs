@@ -141,6 +141,34 @@ mod real_maps {
     }
 
     #[test]
+    fn shipped_armies_save_as_the_army_window_saves_them() {
+        let Some(dt) = install() else { return };
+        let c = Content::from_dt(&dt);
+        let div = Names::from_content(&c).facts.recruit_div;
+        let (mut armies, mut rated, mut same_cost, mut same_side) = (0, 0, 0, 0);
+        for m in &dt.maps {
+            let s = crate::dt::dtm::Scenario::load(&m.path).unwrap();
+            for a in &s.armies {
+                armies += 1;
+                // The model byte and the faction are derived (records.md §13: all agree).
+                let saved = records::save_army(a, Some(&c), div);
+                assert_eq!((saved.model, saved.faction), (a.model, a.faction), "{} army {}", m.name, a.id);
+                assert!(a.tactical_cost_1 <= records::COST_CAP && a.tactical_cost_2 <= records::COST_CAP);
+                let cost = records::army_cost(a, &c, div).expect("no shipped army passes 12 units");
+                rated += 1;
+                // Where the unit table still rates the army as when it was saved, the side
+                // strength mostly agrees too (older editor builds formed sides differently).
+                if records::stored_cost(cost.tactical) == a.tactical_cost_1 {
+                    same_cost += 1;
+                    same_side += (records::stored_cost(cost.side) == a.tactical_cost_2) as usize;
+                }
+            }
+        }
+        assert_eq!((armies, rated), (403, 403));
+        assert!(same_cost >= 140 && same_side * 10 >= same_cost * 9, "{same_cost} / {same_side}");
+    }
+
+    #[test]
     fn the_estuary_map_opens_with_its_blank_questions_trimmed() {
         // Events 36 to 38 of "Устье Трейна" have a question that is only a line break: the
         // loader trims it to nothing and keeps all 211 events (§3.5).

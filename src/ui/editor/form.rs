@@ -123,10 +123,15 @@ impl Form {
     }
 
     pub fn num<T: Copy + Into<i64> + TryFrom<i64>>(&mut self, k: &str, label: &str, v: &mut T, min: i64, max: i64) {
+        self.num_step(k, label, v, min, max, 1);
+    }
+
+    /// [`Form::num`] whose buttons move by `step` (the original's spin increment).
+    pub fn num_step<T: Copy + Into<i64> + TryFrom<i64>>(&mut self, k: &str, label: &str, v: &mut T, min: i64, max: i64, step: i64) {
         if self.shown(ROW) {
             self.label(label);
             let (fx, fw) = self.field_x();
-            if let Some(n) = number_field(&self.key(k), fx, self.y, fw.min(150.0), (*v).into(), min, max) {
+            if let Some(n) = number_field_step(&self.key(k), fx, self.y, fw.min(150.0), (*v).into(), min, max, step) {
                 if let Ok(n) = T::try_from(n) {
                     *v = n;
                     self.mark(k);
@@ -207,6 +212,21 @@ impl Form {
                 // A new unit in an empty slot starts with one of it.
                 let count = if t.unit == 0 && unit != 0 && count == 0 { 1 } else { count };
                 *t = if unit == 0 { Troop::default() } else { Troop { unit, level, count } };
+            }
+        }
+    }
+
+    /// Six troops as the original's army window edits them: levels as stored (0-based) and
+    /// counts, both up to `max`; picking a unit raises a count of 0 to 1, picking none or a
+    /// count of 0 clears the slot (records.md §1).
+    pub fn troops_raw(&mut self, k: &str, units: &[(i64, String)], troops: &mut [Troop; 6], max: i64) {
+        self.slot_header(tr("Unit"), tr("Level"), tr("Count"));
+        for (i, t) in troops.iter_mut().enumerate() {
+            let (mut unit, mut level, mut count) = (t.unit, t.level, t.count);
+            self.slot(&format!("{k}{i}"), units, &mut unit, &mut level, max, &mut count, max);
+            if (unit, level, count) != (t.unit, t.level, t.count) {
+                let count = if unit != t.unit && unit != 0 && count == 0 { 1 } else { count };
+                *t = if unit == 0 || count == 0 { Troop::default() } else { Troop { unit, level, count } };
             }
         }
     }
@@ -365,6 +385,12 @@ pub fn building_options(s: &Scenario) -> Options {
             (i as i64 + 1, format!("#{} {name}", i + 1))
         }),
     )
+}
+
+/// [`building_options`] limited to buildings of the given types (the original's lists).
+pub fn building_options_of(s: &Scenario, types: &[u8]) -> Options {
+    let all = building_options(s);
+    all.into_iter().filter(|(id, _)| *id == 0 || s.building(*id as u16).is_some_and(|b| types.contains(&b.kind))).collect()
 }
 
 pub fn army_label(s: &Scenario, id: u8) -> String {

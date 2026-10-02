@@ -144,7 +144,9 @@ The window also shows the building's picture and the centre of its footprint.
   - byte 6 holds the sum over all units of each unit's current tactical cost (the battle core's evaluator in
     its "current" mode, 0x57faf8);
   - byte 74 holds a value that the battle core's side evaluation (0x58af74, 0x4f61f4) leaves in the side
-    record. Its exact meaning is **unknown**.
+    record. The battle tester shows the same field as the side strength (testers.md); Razdor computes it
+    as the game's side strength of the army auto-arranged on the wide grid, which reproduces the shipped
+    values of the armies the unit table still rates as when they were saved, nine times in ten.
 - Shown but not stored (0x547070):
   - the army's gold cost, which is the sum of the unit types' prices;
   - its upkeep: the sum of price ÷ d (integer division) over every unit except the first one added. The
@@ -633,14 +635,14 @@ These points refine [dtm-format.md](../dtm-format.md):
 |---|---|---|
 | Unit editor | none | edits the session's unit table, live gold and tactical cost (§5.2), exports a new ini |
 | Artefact editor | none | edits, copies and deletes artefacts, automatic price (§6.3), exports a new ini |
-| Army model byte | chosen freely from 12 models | derived: 7 if inactive, else style + 4 |
-| Army byte 8 | kept as loaded | always written 0 |
-| Army tactical costs (6, 74) | shown read-only, never recomputed | recomputed on every save, capped at 65,000 |
-| Army size | six slots of 0..255 each | at most 12 units with the leader, edit rolled back |
-| Army spin ranges | aggression −128..127, speed −10..10, respawn 0..255, XP correction 0..255, garrison strength 0..255, leader level 1..10 | −100..100, −3..5, 0..30, 10..250, 0..90 (step 5), level unbounded raw |
-| Home building choice | sets only the id | also copies the building's faction, attitudes and owner name |
-| Faction change | separate "attitudes from row" button | picking a faction reloads the attitudes |
-| New army | model 4, patrol on, faction 4 with the enemy row, garrison 50 | zero record, model from the menu, XP correction 100, window opens |
+| Army model byte | as the original, on every save of the army panel (`src/editor/records.rs`) | derived: 7 if inactive, else style + 4 |
+| Army byte 8 | as the original | always written 0 |
+| Army tactical costs (6, 74) | as the original: the tactical sum and the battle core's side strength on the wide grid (on the shipped armies whose byte 6 still matches the unit table, byte 74 matches nine times in ten) | recomputed on every save, capped at 65,000 |
+| Army size | as the original; a typed count past the limit rolls back to the value before | at most 12 units with the leader, edit rolled back |
+| Army spin ranges | as the original, with its steps; starting gold as a signed word, levels as stored | −100..100, −3..5, 0..30, 10..250, 0..90 (step 5), level unbounded raw |
+| Home building choice | as the original, from the original's list of types | also copies the building's faction, attitudes and owner name |
+| Faction change | as the original | picking a faction reloads the attitudes |
+| New army | as the original: the army tool offers the four models and the panel opens; Razdor's file check refuses faction 0 until the army is saved | zero record, model from the menu, XP correction 100, window opens |
 | Building byte 294 | manual check box | derived: any barracks unit |
 | Building footprint | editable 1..12 | always taken from the picture |
 | Building bytes 296–300 | overwritten with a byte copy of the goods | Community limits, kept unchanged |

@@ -509,10 +509,17 @@ pub fn text_field(key: &str, x: f32, y: f32, w: f32, h: f32, value: &mut String,
 /// it too, and a click on the number lets you type one (Enter or a click elsewhere takes
 /// it). Returns the new value when it changed.
 pub fn number_field(key: &str, x: f32, y: f32, w: f32, value: i64, min: i64, max: i64) -> Option<i64> {
+    number_field_step(key, x, y, w, value, min, max, 1)
+}
+
+/// [`number_field`] whose buttons and wheel move by `step` (ten steps with Shift), as the
+/// original's spin controls with an increment do; typing takes any value in range.
+#[allow(clippy::too_many_arguments)]
+pub fn number_field_step(key: &str, x: f32, y: f32, w: f32, value: i64, min: i64, max: i64, step: i64) -> Option<i64> {
     let id = field_id(key);
     let h = 24.0;
     let bw = 22.0;
-    let step = if is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift) { 10 } else { 1 };
+    let step = step.max(1) * if is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift) { 10 } else { 1 };
     let mut out = None;
     let clamp = |v: i64| v.clamp(min, max);
     if small_button(x, y, bw, h, "-", value > min) {

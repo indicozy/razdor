@@ -21,9 +21,20 @@ pub struct PanelState {
     pub scroll: f32,
     /// What the panel showed last (a new selection starts at the top).
     shown: Option<String>,
+    /// The army window's cost figures of the army last rated.
+    army_cost: Option<(Army, Option<records::ArmyCost>)>,
 }
 
 impl PanelState {
+    /// The army window's cost figures ([`records::army_cost`]), kept while the army is
+    /// unchanged.
+    fn cost(&mut self, a: &Army, c: &Content, recruit_div: i32) -> Option<records::ArmyCost> {
+        if self.army_cost.as_ref().is_none_or(|(x, _)| x != a) {
+            self.army_cost = Some((a.clone(), records::army_cost(a, c, recruit_div)));
+        }
+        self.army_cost.as_ref().and_then(|x| x.1)
+    }
+
     fn show(&mut self, what: &str) {
         if self.shown.as_deref() != Some(what) {
             self.shown = Some(what.to_string());
@@ -216,57 +227,102 @@ pub fn army_panel(state: &mut PanelState, s: &Scenario, id: u8, ctx: &Ctx, rect:
     let orig = s.army(id)?;
     let mut a: Army = orig.clone();
     state.show(&format!("a{id}"));
-    let area = frame(rect, &trf!("Army {army}", army = army_label(s, id)), &[tr("Leader"), tr("Troops"), tr("AI"), tr("Faction")], state);
+    // The extra leader entry hides the troop and AI pages (records.md §3.3).
+    let special = a.leader_unit == records::SPECIAL_LEADER;
+    let pages: Vec<usize> = if special { vec![0, 3] } else { vec![0, 1, 2, 3] };
+    let labels = [tr("Leader"), tr("Troops"), tr("AI"), tr("Faction")];
+    let shown: Vec<&str> = pages.iter().map(|p| labels[*p]).collect();
+    state.tab = state.tab.min(shown.len() - 1);
+    let area = frame(rect, &trf!("Army {army}", army = army_label(s, id)), &shown, state);
     let mut f = Form::new(&format!("a{id}"), area, state.scroll);
     let n = ctx.names;
     let (w, h) = (s.width() as i64, s.height() as i64);
-    match state.tab {
+    match pages[state.tab] {
         0 => {
             f.text("name", tr("Army name"), &mut a.name);
-            f.text("leader_name", tr("Leader's name"), &mut a.leader_name);
-            let units = unit_options(n);
-            f.pick("leader", tr("Leader"), &mut a.leader_unit, &units);
-            let mut lv = a.leader_level + 1;
-            f.num("leader_level", tr("Leader's level"), &mut lv, 1, 10);
-            a.leader_level = lv - 1;
-            f.pick("named", tr("Named character"), &mut a.named_character, &named_options(s));
-            f.pick("home", tr("Home building"), &mut a.home_building, &building_options(s));
-            let models = list_options(&palette::ARMY_MODELS.iter().map(|m| tr(m.1)).collect::<Vec<_>>(), 1);
-            f.pick("model", tr("Map figure"), &mut a.model, &models);
+            if a.named_character == 0 {
+                f.text("leader_name", tr("Leader's name"), &mut a.leader_name);
+            } else {
+                f.note(&trf!("Leader's name: {name} (the named character's)", name = a.leader_name), DIM);
+            }
+            let mut leaders = unit_options(n);
+            leaders.push((records::SPECIAL_LEADER as i64, tr("(the extra empty entry)").into()));
+            let mut leader = a.leader_unit;
+            f.pick("leader", tr("Leader"), &mut leader, &leaders);
+            if leader != a.leader_unit {
+                if leader == records::SPECIAL_LEADER {
+                    records::pick_special_leader(&mut a);
+                } else {
+                    a.leader_unit = leader;
+                }
+            }
+            if special {
+                f.note(tr("The extra leader entry: the army is inactive and patrols on the spot; what the game does with it is unknown."), DIM);
+            } else {
+                f.num("leader_level", tr("Leader's level (as stored, from 0)"), &mut a.leader_level, 0, 255);
+                let mut named = a.named_character;
+                f.pick("named", tr("Named character"), &mut named, &named_options(s));
+                if named != a.named_character {
+                    records::pick_named_character(&mut a, s, named);
+                }
+                let mut home = a.home_building;
+                f.pick("home", tr("Home building"), &mut home, &building_options_of(s, &records::HOME_TYPES));
+                if home != a.home_building {
+                    records::pick_home(&mut a, s, home);
+                }
+                if let Some(b) = s.building(a.home_building as u16) {
+                    let (cx, cy) = (b.x as i32 - (b.size_x as i32 - 1) / 2, b.y as i32 - (b.size_y as i32 - 1) / 2);
+                    f.note(&trf!("Home at ({x}, {y})", x = cx, y = cy), DIM);
+                }
+            }
             f.pick("ship", tr("Ship"), &mut a.ship, &list_options(&palette::SHIPS.iter().map(|l| tr(l)).collect::<Vec<_>>(), 0));
             f.num("x", "X", &mut a.x, 0, w - 1);
             f.num("y", "Y", &mut a.y, 0, h - 1);
-            f.heading(tr("Carries"));
-            let arts = artefact_options(n);
-            for k in 0..3 {
-                f.pick(&format!("art{k}"), &trf!("Artefact {n}", n = k + 1), &mut a.artifacts[k], &arts);
+            if !special {
+                let mut gold = a.gold_income as i16;
+                f.num_step("gold", tr("Starting gold"), &mut gold, i16::MIN as i64, i16::MAX as i64, 50);
+                a.gold_income = gold as u16;
+                f.heading(tr("Carries"));
+                let arts = artefact_options(n);
+                for k in 0..3 {
+                    f.pick(&format!("art{k}"), &trf!("Artefact {n}", n = k + 1), &mut a.artifacts[k], &arts);
+                }
+                f.pick("spell", tr("Spell on the army"), &mut a.spell, &spell_options(n));
             }
-            f.pick("spell", tr("Spell on the army"), &mut a.spell, &spell_options(n));
         }
         1 => {
             f.memo("description", tr("Description"), &mut a.description, 3);
             f.heading(tr("Troops"));
-            f.troops("t", &unit_options(n), &mut a.troops);
+            f.troops_raw("t", &unit_options(n), &mut a.troops, 255);
             if let Some(c) = ctx.content {
-                f.note(&trf!("Strength (tactical cost): {n}", n = records::army_strength(&a, c)), INK);
+                f.note(&trf!("Units: {n} of {max} (the leader counts)", n = records::army_units(&a, c), max = records::ARMY_UNITS), DIM);
+                match state.cost(&a, c, n.facts.recruit_div) {
+                    Some(cost) => {
+                        f.note(&trf!("Cost / upkeep: {gold} / {upkeep}", gold = cost.gold, upkeep = cost.upkeep), INK);
+                        f.note(&trf!("Tactical cost / side strength: {t} / {side}", t = cost.tactical, side = cost.side), INK);
+                    }
+                    None => f.note(tr("More than 12 units: the cost cannot be computed."), RED),
+                }
             }
-            f.note(&trf!("Stored editor values: {a} / {b}", a = a.tactical_cost_1, b = a.tactical_cost_2), DIM);
-            f.num("gold", tr("Starting gold"), &mut a.gold_income, 0, 65_535);
+            f.note(&trf!("Stored: {a} / {b} (recomputed when the army is saved)", a = a.tactical_cost_1, b = a.tactical_cost_2), DIM);
             f.heading(tr("Hiring and garrison"));
-            f.num("hire_xp", tr("Experience for hired units"), &mut a.hire_bonus_exp, 0, 65_535);
-            f.flag("xp_like", tr("Hired units get the player's experience"), &mut a.exp_like_player);
-            f.num("garrison", tr("Garrison strength"), &mut a.garrison_strength, 0, 255);
+            let mut income = a.unknown_80 as i64 * 10;
+            f.num_step("income", tr("Base gold income"), &mut income, 0, 2500, 10);
+            a.unknown_80 = (income / 10) as u8;
+            f.num_step("hire_xp", tr("Experience for hired units"), &mut a.hire_bonus_exp, 0, 1000, 10);
+            f.flag("xp_like", tr("Hired units start like the player's"), &mut a.exp_like_player);
+            f.num_step("garrison", tr("Garrison strength"), &mut a.garrison_strength, 0, 90, 5);
         }
         2 => {
             let behaviours = list_options(&palette::BEHAVIOURS.iter().map(|l| tr(l)).collect::<Vec<_>>(), 0);
             f.pick("behaviour", tr("Behaviour"), &mut a.behaviour, &behaviours);
             f.pick("target", tr("Target choice"), &mut a.target_model, &list_options(&palette::TARGET_MODELS.iter().map(|l| tr(l)).collect::<Vec<_>>(), 0));
-            f.num("aggression", tr("Aggression"), &mut a.aggression, -128, 127);
+            f.num_step("aggression", tr("Aggression"), &mut a.aggression, -100, 100, 10);
             f.heading(tr("Movement"));
             f.flag("inactive", tr("Inactive at the start"), &mut a.inactive);
             f.flag("patrols", tr("Patrols"), &mut a.patrols);
-            f.num("radius", tr("Patrol radius"), &mut a.patrol_radius, 0, 255);
-            f.num("speed", tr("Speed correction"), &mut a.speed_correction, -10, 10);
+            f.num_step("radius", tr("Patrol radius"), &mut a.patrol_radius, 0, 250, 5);
+            f.num("speed", tr("Speed correction"), &mut a.speed_correction, -3, 5);
             f.heading(tr("Targets"));
             f.flag("ignored", tr("Ignored by the AI"), &mut a.ignored_by_ai);
             f.flag("hunts", tr("Hunts only the player"), &mut a.hunts_player_only);
@@ -274,18 +330,20 @@ pub fn army_panel(state: &mut PanelState, s: &Scenario, id: u8, ctx: &Ctx, rect:
             f.flag("no_social", tr("Does not meet other armies"), &mut a.no_socialising);
             f.flag("no_buildings", tr("No interest in buildings"), &mut a.no_building_interest);
             f.heading(tr("Respawn and spoils"));
-            f.num("respawn", tr("Respawn after (days)"), &mut a.respawn_days, 0, 255);
+            f.num("respawn", tr("Respawn after (days)"), &mut a.respawn_days, 0, 30);
             f.flag("respawn_all", tr("Respawn the whole army"), &mut a.respawn_all);
-            f.num("exp", tr("Experience correction (%)"), &mut a.exp_correction, 0, 255);
+            f.num_step("exp", tr("Experience correction (%)"), &mut a.exp_correction, 10, 250, 5);
             f.flag("no_money", tr("Units carry no money"), &mut a.no_money);
         }
         _ => {
-            f.pick("faction", tr("Faction"), &mut a.faction, &list_options(&palette::FACTIONS.iter().map(|l| tr(l)).collect::<Vec<_>>(), 1));
-            if f.button(tr("Attitudes from the faction's row"), true) {
-                if let Some(row) = s.header.relations.get((a.faction as usize).wrapping_sub(1)) {
-                    a.relations = *row;
-                    f.changed = Some("relations".into());
-                }
+            let mut faction = a.faction;
+            f.pick("faction", tr("Faction"), &mut faction, &list_options(&palette::FACTIONS.iter().map(|l| tr(l)).collect::<Vec<_>>(), 1));
+            if faction != a.faction {
+                // As the original: a new faction brings its row of attitudes.
+                records::pick_army_faction(&mut a, &s.header, faction);
+            }
+            if !(1..=4).contains(&a.faction) {
+                f.note(tr("No faction yet: saving the army makes it the enemy."), DIM);
             }
             f.heading(tr("Attitude towards"));
             f.relations("rel", &mut a.relations);
@@ -297,7 +355,12 @@ pub fn army_panel(state: &mut PanelState, s: &Scenario, id: u8, ctx: &Ctx, rect:
         return Some((Command::DeleteArmy { id }, String::new()));
     }
     let key = changed(orig, &a, &f)?;
-    Some((Command::SetArmy { id, army: Box::new(a) }, key))
+    // Saved as the original's window saves it: the 12-unit limit, then the derived bytes.
+    if let Some(c) = ctx.content {
+        records::limit_army(orig, &mut a, c);
+    }
+    let a = records::save_army(&a, ctx.content, n.facts.recruit_div);
+    (a != *orig).then(|| (Command::SetArmy { id, army: Box::new(a) }, key))
 }
 
 pub fn point_panel(state: &mut PanelState, s: &Scenario, id: u8, rect: Rect) -> Option<(Command, String)> {

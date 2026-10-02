@@ -322,7 +322,13 @@ impl Checker<'_> {
             if a.named_character as usize > s.named_characters.len() {
                 self.error(place, trf!("named character {n} does not exist", n = a.named_character));
             }
-            self.unit(place, tr("the leader"), a.leader_unit);
+            if a.leader_unit == super::records::SPECIAL_LEADER {
+                // The original's extra leader entry (records.md §3.3); what the game does
+                // with it is unknown.
+                self.warn(place, tr("the leader is the original editor's extra empty entry (255)").into());
+            } else {
+                self.unit(place, tr("the leader"), a.leader_unit);
+            }
             for t in a.troops.iter().filter(|t| t.unit != 0) {
                 self.unit(place, tr("troops"), t.unit);
             }

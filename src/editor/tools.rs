@@ -24,7 +24,8 @@ pub enum Tool {
     Objects { class: u8, sprite: u8, size: u32 },
     Erase { size: u32, filter: ObjectFilter },
     Building { kind: u8, picture_type: u8, variant: u8 },
-    Army,
+    /// Place an army of map model 4–7 (feudal, rogue, peasant, inactive).
+    Army { model: u8 },
     Point { lantern: bool },
     /// Click the start cell of a hero preset (0 knight, 1 archmage, 2 ranger).
     HeroStart(usize),
@@ -38,7 +39,7 @@ impl Tool {
             Tool::Objects { .. } => n_("Objects"),
             Tool::Erase { .. } => n_("Erase objects"),
             Tool::Building { .. } => n_("Buildings"),
-            Tool::Army => n_("Armies"),
+            Tool::Army { .. } => n_("Armies"),
             Tool::Point { .. } => n_("Points and lanterns"),
             Tool::HeroStart(_) => n_("Hero start"),
         })
@@ -184,8 +185,8 @@ impl ToolState {
                     self.selected = Some(Target::Building(id as u16));
                 }
             }
-            Tool::Army => {
-                if let Some(id) = self.run(doc, Command::PlaceArmy { x, y }) {
+            Tool::Army { model } => {
+                if let Some(id) = self.run(doc, Command::PlaceArmy { x, y, model }) {
                     self.selected = Some(Target::Army(id as u8));
                 }
             }
@@ -346,7 +347,7 @@ mod tests {
     #[test]
     fn armies_points_hero_start_and_delete() {
         let (mut d, p, mut t) = (doc(), Palette::fallback(), ToolState::default());
-        t.set_tool(Tool::Army);
+        t.set_tool(Tool::Army { model: 4 });
         t.press(&mut d, &p, (3, 3));
         t.set_tool(Tool::Point { lantern: true });
         t.press(&mut d, &p, (4, 4));
@@ -388,7 +389,7 @@ mod tests {
     #[test]
     fn presses_outside_the_map_do_nothing() {
         let (mut d, p, mut t) = (doc(), Palette::fallback(), ToolState::default());
-        t.set_tool(Tool::Army);
+        t.set_tool(Tool::Army { model: 4 });
         t.press(&mut d, &p, (-1, 3));
         t.press(&mut d, &p, (3, 20));
         assert!(d.scenario.armies.is_empty() && !d.can_undo());

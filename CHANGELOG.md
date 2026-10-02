@@ -486,6 +486,14 @@ old id, and their versions give both.
   not scored.
 - If drawing the map fails, the editor saves it to `ErrorSave.DTm` in its folder before the
   program ends, as the original's emergency save.
+- **The army panel works as the original's army window**: a new army is the original's
+  (model from the tool's four choices, XP correction 100, no faction until saved); saving
+  writes the model from the behaviour and the inactive box, byte 8 as 0 and the two stored
+  tactical costs (the sum and the side strength, capped at 65,000); at most 12 units with the
+  leader; the original's ranges and steps; a home building brings its faction, attitudes and
+  owner name, a faction its row of attitudes, a named character its class and name; the
+  gold cost and upkeep use the install's recruit divisor and put the artefacts on the first
+  unit only; the extra leader entry (255) is offered.
 
 ## 0.2.2 — 2026-10-01
 

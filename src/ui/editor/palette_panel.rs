@@ -25,6 +25,8 @@ pub struct PaletteState {
     pub kind: u8,
     pub variant: u8,
     pub lantern: bool,
+    /// The map model of a new army (4 feudal, 5 rogue, 6 peasant, 7 inactive).
+    pub army_model: u8,
     /// Scroll of the sprite grids, in rows.
     pub scroll: usize,
 }
@@ -42,6 +44,7 @@ impl Default for PaletteState {
             kind: 3,
             variant: 0,
             lantern: true,
+            army_model: 4,
             scroll: 0,
         }
     }
@@ -66,7 +69,7 @@ impl PaletteState {
             2 => Tool::Objects { class: self.class, sprite: self.sprite, size: self.size },
             3 => Tool::Erase { size: self.erase_size, filter: self.filter },
             4 => Tool::Building { kind: self.kind, picture_type: self.kind, variant: self.variant },
-            5 => Tool::Army,
+            5 => Tool::Army { model: self.army_model },
             6 => Tool::Point { lantern: self.lantern },
             _ => Tool::Select,
         }
@@ -103,7 +106,7 @@ fn tool_index(t: &Tool) -> usize {
         Tool::Objects { .. } => 2,
         Tool::Erase { .. } => 3,
         Tool::Building { .. } => 4,
-        Tool::Army => 5,
+        Tool::Army { .. } => 5,
         Tool::Point { .. } => 6,
     }
 }
@@ -312,8 +315,16 @@ pub fn tool_panel(state: &mut PaletteState, tools: &mut ToolState, palette: &Pal
             }
             note(tr("Click the map to place one."), x, y + 64.0, w, DIM);
         }
-        Tool::Army => {
-            note(tr("Click the map to place an army; set it up in its panel."), x, y, w, DIM);
+        Tool::Army { .. } => {
+            // The original's army menu: the model of the new army.
+            let models = [(4, palette::ARMY_MODELS[3].1), (5, palette::ARMY_MODELS[4].1), (6, palette::ARMY_MODELS[5].1), (7, palette::ARMY_MODELS[6].1)];
+            for (i, (m, label)) in models.iter().enumerate() {
+                if toggle_button(x, y + i as f32 * 30.0, w, 26.0, tr(label), state.army_model == *m) {
+                    state.army_model = *m;
+                    changed = true;
+                }
+            }
+            note(tr("Click the map to place an army; set it up in its panel."), x, y + 124.0, w, DIM);
         }
         Tool::HeroStart(k) => {
             note(&trf!("Click the start cell of the {class}.", class = tr(palette::HERO_CLASSES[k])), x, y, w, ACCENT);

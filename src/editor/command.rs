@@ -48,8 +48,8 @@ pub enum Command {
     DeleteBuilding { id: u16 },
     /// Replaces a building's record (its property panel).
     SetBuilding { id: u16, building: Box<Building> },
-    /// A new army with the defaults.
-    PlaceArmy { x: u16, y: u16 },
+    /// A new army of map model `model` (4–7) with the original's defaults.
+    PlaceArmy { x: u16, y: u16, model: u8 },
     MoveArmy { id: u8, x: u16, y: u16 },
     DeleteArmy { id: u8 },
     SetArmy { id: u8, army: Box<Army> },

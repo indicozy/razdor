@@ -358,3 +358,20 @@ No playability: a point lists an empty event slot or more than five events (the 
 quests {q}, playability {p} = заданий {q}, играбельность {p}
 The map could not be drawn; it was saved to {path}. = Карту не удалось нарисовать; она сохранена в {path}.
 The map could not be drawn, and the emergency save failed: {e} = Карту не удалось нарисовать, и аварийное сохранение не удалось: {e}
+
+# Map editor: the army window
+(the extra empty entry) = (дополнительная пустая строка)
+Army {n} = Армия {n}
+Base gold income = Базовый доход золотом
+Cost / upkeep: {gold} / {upkeep} = Цена / содержание: {gold} / {upkeep}
+Hired units start like the player's = Нанятые воины начинают как у игрока
+Home at ({x}, {y}) = Дом в ({x}, {y})
+Leader's level (as stored, from 0) = Уровень предводителя (как хранится, с 0)
+Leader's name: {name} (the named character's) = Имя предводителя: {name} (именного персонажа)
+More than 12 units: the cost cannot be computed. = Больше 12 воинов: цену не посчитать.
+No faction yet: saving the army makes it the enemy. = Фракция не выбрана: при сохранении армия станет врагом.
+Stored: {a} / {b} (recomputed when the army is saved) = Записано: {a} / {b} (пересчитывается при сохранении армии)
+Tactical cost / side strength: {t} / {side} = Тактическая цена / сила стороны: {t} / {side}
+The extra leader entry: the army is inactive and patrols on the spot; what the game does with it is unknown. = Дополнительная строка предводителя: армия неактивна и патрулирует на месте; что с ней делает игра, неизвестно.
+Units: {n} of {max} (the leader counts) = Воинов: {n} из {max} (предводитель считается)
+the leader is the original editor's extra empty entry (255) = предводитель — дополнительная пустая строка оригинального редактора (255)

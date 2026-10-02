@@ -417,7 +417,7 @@ pub fn draw_overlays(doc: &EditorDoc, tools: &ToolState, palette: &Palette, art:
             let from = tools.rect_start().unwrap_or((hx, hy));
             outline(cam, CellRect::spanning(from, (hx, hy)), 2.0, white);
         }
-        Tool::Terrain { shape: TerrainShape::Fill, .. } | Tool::Army | Tool::Point { .. } | Tool::HeroStart(_) => {
+        Tool::Terrain { shape: TerrainShape::Fill, .. } | Tool::Army { .. } | Tool::Point { .. } | Tool::HeroStart(_) => {
             outline(cam, CellRect::brush(hx, hy, 1), 1.5, white);
         }
         Tool::Building { kind, picture_type, variant } if inside => {
