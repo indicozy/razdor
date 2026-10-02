@@ -165,16 +165,24 @@ pub fn round_div(num: i64, den: i64) -> i64 {
 
 // --- The cosine and sine of the generator's headings -------------------------------------
 //
-// The original takes `fcos`/`fsin` of x = (a·π) ÷ 180 in extended precision. They are
-// modelled as correctly rounded: x differs from the exact a° by a tiny ε, so
-// cos x = cos a° · cos ε − sin a° · sin ε, with cos a° and sin a° in 116-bit fixed point.
-// A processor's fcos may differ from this in the last bit; that only shows where cos·len is
-// within a bit of a half (a heading at a multiple of 30° with an odd step).
+// The original takes `fcos`/`fsin` of x = (a·π) ÷ 180 in extended precision. The x87 takes
+// whole quarter turns off x with π held to 66 bits only, x − k·π₆₆/2, and rotates the result
+// by k: it returns cos(x + k·δ), δ = (π − π₆₆)/2, which is modelled correctly rounded. x
+// differs from the exact a° by a tiny ε, so with ε' = ε + k·δ,
+// cos(x + kδ) = cos a° · cos ε' − sin a° · sin ε', cos a° and sin a° in 116-bit fixed point.
+// Measured on an x86 processor over −4000…4000°: the model rounds every step as the
+// processor does where the value is ±½, the only place a step's rounding can tell (a
+// multiple of 30° with an odd step: sin 750° is ½ + 2⁻⁶⁴ there, which a correctly rounded
+// sine misses). Elsewhere, and in a few of those, it may be a last bit off, which no step
+// of up to 40 cells sees.
 
 const FX: i32 = 116;
 /// π · 2^116 and π/180 · 2^116.
 const PI_FX: u128 = 0x3243f6a8885a308d313198a2e03707;
 const PI180_FX: u128 = 0x477d1a894a74e4570762fb374a42;
+/// π to 66 bits (the x87's reduction constant) · 2^116: the bits of π past the 66th dropped
+/// (the 67th is 0, so it is also π rounded to 66 bits).
+const PI66_FX: u128 = (PI_FX >> 52) << 52;
 
 /// `(a × b) >> s` for 128-bit `a`, `b` whose shifted product fits 128 bits.
 fn mul_shr(a: u128, b: u128, s: u32) -> u128 {
@@ -275,7 +283,11 @@ pub fn cos_sin(a: i32) -> (Ext, Ext) {
     // ε = x − a·π/180, from π to 116 bits; full turns taken off first so it fits.
     let turns = a.div_euclid(360) as i128;
     let exact = 2 * PI_FX as i128 * turns + PI180_FX as i128 * a.rem_euclid(360) as i128;
-    let eps = to_fx(x) - exact;
+    // The processor's quarter turns k = round(x ÷ (π₆₆/2)) and their shortfall k·δ.
+    let fx = to_fx(x);
+    let quarter = (PI66_FX / 2) as i128;
+    let k = (2 * fx + quarter).div_euclid(2 * quarter);
+    let eps = fx - exact + k * ((PI_FX - PI66_FX) / 2) as i128;
     let eps2 = fx_mul(eps, eps) / 2;
     (from_fx(c - fx_mul(s, eps) - fx_mul(c, eps2)), from_fx(s + fx_mul(c, eps) - fx_mul(s, eps2)))
 }
@@ -334,5 +346,27 @@ mod tests {
         let (c60, _) = cos_sin(60);
         assert_ne!(c60, e(1).div(e(2)).unwrap());
         assert_eq!(cos_sin(0), (e(1), Ext::ZERO));
+    }
+
+    #[test]
+    fn halves_carry_the_processors_last_bits() {
+        // fcos/fsin bits read on an x86 processor (exponent and mantissa as here): where
+        // the value is ±½ the reduction by a 66-bit π decides the last bits.
+        let bits = |v: Ext| (v.neg, v.exp, v.mant);
+        let cases = [
+            (30, false, -1, 0x8000_0000_0000_0001u64, false),
+            (60, false, -2, 0xFFFF_FFFF_FFFF_FFFD, true),
+            (150, false, -1, 0x8000_0000_0000_0000, false),
+            (750, false, -1, 0x8000_0000_0000_0001, false),
+            (-750, true, -1, 0x8000_0000_0000_0001, false),
+            (1110, false, -1, 0x8000_0000_0000_0009, false),
+            (3930, true, -2, 0xFFFF_FFFF_FFFF_FFFE, false),
+        ];
+        for (a, neg, exp, mant, is_cos) in cases {
+            let (c, s) = cos_sin(a);
+            assert_eq!(bits(if is_cos { c } else { s }), (neg, exp, mant), "{a}°");
+        }
+        // sin 750° just above ½: a step of 5 goes 3 cells, not the tie's even 2.
+        assert_eq!(cos_sin(750).1.mul(e(5)).round_int(), 3);
     }
 }

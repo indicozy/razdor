@@ -463,7 +463,9 @@ Trees can thus stand on hill-covered plain cells (their ground is 6).
 
 ### 10.1 Reusing the relief ("keep" on, "rebuild relief" off): code
 
-The relief steps are skipped and the heights left in the work grid are used. Those are the
+The relief steps are skipped and the heights left in the work grid are used: the code jumps
+from the check (0x51f4d5) straight to the last cut of §6.4 (0x5210da), so the water stamps of
+§5 and the rivers of §6 are skipped as well and the map type has no effect. Those heights are the
 **forest field** of the previous run (§9.4 step 1 overwrote the relief), so the reused terrain is
 cut from the last forest noise. Only the dialog's own grid is reused (it lives as long as the
 dialog). The progress divisor `(W div 50)² × 30` of §9.4 step 4 is set only in the relief path, so
@@ -527,18 +529,18 @@ If the dialog is left without a generation, the old map size is restored.
 | New map | the generator of this file (toolbar: Generate), replacing Razdor's "New of size" | the random generator of this file | matches |
 | Sizes | 50, 100, 200, 400, 800 | 50, 100, 200, 400, 800 | matches |
 | Map types, orientation, ratios, blur, seed | §1, the bars with the splitters' minimum and snap to 0 | §1 | matches |
-| Draws, roundings, fractal, lines, stamps, rivers, cut | §2–§6; the float formulas in software extended precision (`ext.rs`) | x87, 64-bit mantissa | matches (fcos/fsin modelled as correctly rounded) |
+| Draws, roundings, fractal, lines, stamps, rivers, cut | §2–§6; the float formulas in software extended precision (`ext.rs`) | x87, 64-bit mantissa | matches (fcos/fsin modelled on the x87's 66-bit π reduction, §13) |
 | Coast band, swamp, mountains, hills, forest | §7–§9 with the shared point list (a draw of `Random(0)` reads its stale entry 0) | §7–§9 | matches |
 | Endless loops (§8 steps 2, 5, 6, 7; §9.4 step 6) | the run stops and says where | loops until the break button | Razdor stops cleanly |
 | Forest progress divisor on reuse (§10.1) | the value the last run of the dialog counted down to (0 after a full run, so a reuse run stops before its first cluster) | an uninitialised stack value | Razdor's reading of an unknown |
-| Relief reuse (§10.1) | the dialog's grid, so the last forest field; the cells start from the open map (or the last run's), trees kept | the same | matches |
+| Relief reuse (§10.1) | the dialog's grid, so the last forest field, cut without the water and rivers of the map type; the cells start from the open map (or the last run's), trees kept | the same | matches |
 | Exit before a run | does nothing (Cancel closes) | does nothing | matches |
 | Closing without Exit after a run | the open map stays as it was | the cells are already written in place (unknown, §13) | Razdor keeps the map |
 | Relation matrix | `DEFAULT_RELATIONS` on Exit | §11 | matches |
 | Header defaults | after a complete run: zeroed, size, seed at 0x14; after a stopped run: the old header with the new size, the clock seed and the relations | §11 (the header block is skipped after an error) | matches (the size kept in step) |
 | Title and file name | a fixed title, the file name `New` | fixed placeholders | matches (Razdor's own title text) |
 | Seed in the header | 0x14 | the generator seed at 0x14 | matches |
-| Settings file `[MakeMap]` | read from Razdor's editor `DTMapEdit.Ini` (else the install's, else its shipped values), written on Exit after a run | twelve panel widths | matches |
+| Settings file `[MakeMap]` | read from Razdor's editor `DTMapEdit.Ini` (else the install's shipped values; the install's own file is never read or written), written on Exit after a run | twelve panel widths | matches |
 | Break | the Create button breaks a run (it runs in the background) | the exit button breaks | matches |
 
 ## 13. Unknowns
@@ -550,5 +552,9 @@ If the dialog is left without a generation, the old map size is restored.
   the value the slot held at the end of the dialog's last run.
 - The variant counts for the shipped graphics (they follow from the object graphics index).
 - Rounding: the products and quotients are evaluated in 80-bit precision; Razdor emulates it.
-  `fcos` and `fsin` are processor-specific in their last bit; Razdor takes the correctly rounded
-  value, which can matter only where a river heading is a multiple of 30° with an odd step.
+  `fcos` and `fsin` are processor-specific in their last bit, which can matter only where a
+  river heading is a multiple of 30° with an odd step (the value is then ±½). The x87 reduces
+  its argument by multiples of π/2 with π held to 66 bits; Razdor models that (then rounds
+  correctly), which gives the same steps as an x86 processor measured over −4000…4000°
+  (sin 750° = ½ + 2⁻⁶⁴, so a step of 5 there goes 3 cells, not 2). Another processor family
+  may still differ.

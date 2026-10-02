@@ -585,10 +585,11 @@ old id, and their versions give both.
   the seven share bars as the original's panel widths (with its splitters' snapping),
   blur, the seed with "keep" and "rebuild relief". It makes the same map as DTMapEdit for
   the same seed, options and installed pictures: the original's draws, roundings (in the
-  x87's extended precision where it uses it), fractal, lines, stamps, rivers, coast-band
-  sweeps, swamp, mountains, hills and forest, and its quirks (the reseed after the relief,
-  the relief reuse that cuts the last forest field, the small forest pool that stops after
-  one cluster, old trees kept on reuse). Where the original would loop for ever, the run
+  x87's extended precision where it uses it, with its cosine and sine as an x86 processor
+  gives them), fractal, lines, stamps, rivers, coast-band sweeps, swamp, mountains, hills
+  and forest, and its quirks (the reseed after the relief, the relief reuse that cuts the
+  last forest field without the map type's water and rivers, the small forest pool that
+  stops after one cluster, old trees kept on reuse). Where the original would loop for ever, the run
   stops and says so. The bar widths are read from and written to `[MakeMap]` of Razdor's
   editor `DTMapEdit.Ini`; Exit takes the map with the original's new-map header, relation
   matrix, title and file name, and the seed in the header. An 800 × 800 map takes about a

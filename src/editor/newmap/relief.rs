@@ -55,20 +55,22 @@ impl Bounds {
 }
 
 /// §3–§6 in order; returns the cut the terrain classes use. With `relief` off the heights
-/// the grid holds are used as they are (§10.1).
+/// the grid holds are cut as they are (§10.1): the original jumps past the water and the
+/// rivers too (0x51f4d5 to 0x5210da), so the map type does not show in a reused relief.
 pub fn relief(c: &mut Ctx, relief: bool) -> Step<Bounds> {
-    if relief {
-        // §3.1 (the map cells were cleared by the caller) and the forest's progress divisor.
-        c.grid.h.iter_mut().for_each(|v| *v = 0);
-        c.grid.v.iter_mut().for_each(|v| *v = 0);
-        c.grid.r.iter_mut().for_each(|v| *v = 0);
-        c.grid.kind.iter_mut().for_each(|v| *v = 0);
-        *c.divisor = (c.w / 50) * (c.w / 50) * 30;
-        midpoint(c, 0, 0, c.w - 1, c.h - 1, 1, 1)?;
-        blur(c, c.o.blur as i32);
-        copy_values(c);
-        levels(c, 1)?;
+    if !relief {
+        return levels(c, 1);
     }
+    // §3.1 (the map cells were cleared by the caller) and the forest's progress divisor.
+    c.grid.h.iter_mut().for_each(|v| *v = 0);
+    c.grid.v.iter_mut().for_each(|v| *v = 0);
+    c.grid.r.iter_mut().for_each(|v| *v = 0);
+    c.grid.kind.iter_mut().for_each(|v| *v = 0);
+    *c.divisor = (c.w / 50) * (c.w / 50) * 30;
+    midpoint(c, 0, 0, c.w - 1, c.h - 1, 1, 1)?;
+    blur(c, c.o.blur as i32);
+    copy_values(c);
+    levels(c, 1)?;
     let kind = c.o.kind;
     if kind == LAKE || (ESTUARY..=ARCHIPELAGO).contains(&kind) {
         sea_stamps(c);

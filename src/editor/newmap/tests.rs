@@ -155,12 +155,14 @@ fn the_make_map_section_reads_and_writes_as_the_original() {
     let own = crate::editor::files::tests::temp_dir("makemap-own");
     let install = crate::editor::files::tests::temp_dir("makemap-install");
     std::fs::write(install.join(super::super::options::FILE), b"[MakeMap]\r\nW0=50\r\n").unwrap();
-    assert_eq!(Shares::load(Some(&own), Some(&install)).w0, 50);
-    assert_eq!(Shares::load(Some(&own), None), Shares::default());
+    // The install's ini is never read for it: the shipped values until Razdor has its own.
+    assert_eq!(Shares::load(Some(&own)), Shares::default());
+    assert_eq!(Shares::load(None), Shares::default());
     crate::editor::options::Options::default().save(&own).unwrap();
     let mine = Shares { w0: 33, f2: 10, ..Shares::default() };
     mine.save(&own).unwrap();
-    assert_eq!(Shares::load(Some(&own), Some(&install)), mine);
+    assert_eq!(Shares::load(Some(&own)), mine);
+    assert_eq!(std::fs::read(install.join(super::super::options::FILE)).unwrap(), b"[MakeMap]\r\nW0=50\r\n");
     assert_eq!(crate::editor::options::Options::load(Some(&own), None), crate::editor::options::Options::default());
 }
 
@@ -554,6 +556,25 @@ fn reusing_the_relief_cuts_the_last_forest_field_and_keeps_old_trees() {
 }
 
 #[test]
+fn a_reused_relief_skips_the_water_and_the_rivers() {
+    // The original jumps from the reuse check straight to the last cut (0x51f4d5 to
+    // 0x5210da): no sea stamps, no rivers, so every map type cuts the same heights.
+    let mut g = Generator::new();
+    let first = run_with(&mut g, options(50, LAND), 10, Cells::zero(50));
+    let (grid, divisor) = (g.grid.clone(), 30);
+    let reuse = |kind: u8| {
+        let mut g = Generator { grid: grid.clone(), divisor };
+        run_with(&mut g, Options { rebuild: false, orient: 1, ..options(50, kind) }, 10, first.cells.clone()).cells
+    };
+    let land = reuse(LAND);
+    for kind in [LAKE, VALLEY, ESTUARY, COAST, SKERRIES, ISLAND, ARCHIPELAGO] {
+        assert_eq!(reuse(kind), land, "kind {kind}");
+    }
+    // A relief run of the same type does carve its water.
+    assert_ne!(run(options(50, ISLAND), 10).cells.terrain(), run(options(50, LAND), 10).cells.terrain());
+}
+
+#[test]
 fn the_break_button_stops_a_run() {
     let out = Generator::new().run(Job { options: options(200, LAND), seed: 1, sprites: sprites(), start: Cells::zero(200), clock: 1 }, &AtomicBool::new(true));
     assert_eq!(out.stop, Some(Stop::Break));
@@ -590,3 +611,16 @@ fn the_install_sprites_give_a_pinned_map() {
     assert_eq!(hash(&out.cells), 0xfa37bae8d5550c8a);
 }
 
+
+#[test]
+fn every_map_type_finishes_at_400_with_the_install_sprites() {
+    let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+    let dt = crate::dt::install::DtInstall::load(std::path::Path::new(&dir)).expect("install loads");
+    let sprites = Sprites::from_palette(&Palette::from_sprites(&dt.map_objects().unwrap()));
+    for kind in 0..8u8 {
+        let o = Options { orient: kind % 4, ..options(400, kind) };
+        let out = Generator::new().run(Job { options: o, seed: 77, sprites: sprites.clone(), start: Cells::zero(400), clock: 1 }, &AtomicBool::new(false));
+        assert!(out.complete(), "kind {kind}: {:?}", out.stop);
+        assert!(out.cells.tree.iter().filter(|&&t| t != 0).count() > 50_000, "kind {kind}");
+    }
+}
