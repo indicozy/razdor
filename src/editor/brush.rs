@@ -236,6 +236,39 @@ pub fn place_building(
     brush: u32,
     pools: Option<&NamePools>,
 ) -> Result<u16, Refused> {
+    let mut objects = Objects::of(s);
+    let placed = place_building_in(s, &mut objects.grid, cells, rng, BuildingAt { x: cx, y: cy, picture, size, brush }, pools, false);
+    if let Ok((_, cleared)) = placed {
+        objects.changed = cleared;
+        objects.store(s);
+    }
+    placed.map(|p| p.0)
+}
+
+/// Where and what [`place_building_in`] places.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BuildingAt {
+    pub x: i64,
+    pub y: i64,
+    pub picture: (u8, u8),
+    pub size: (u8, u8),
+    pub brush: u32,
+}
+
+/// [`place_building`] on an object grid the caller keeps (the world generator places
+/// hundreds), with the original's "generating" flag (0x5bee90): while it is on, the footprint
+/// cells of a building of type below 13 take the temporary terrain 16 and keep their plants;
+/// while it is off they lose their plants. Returns the id and whether a plant was cleared.
+pub fn place_building_in(
+    s: &mut Scenario,
+    objects: &mut ObjectGrid,
+    cells: &mut CellLayer,
+    rng: &mut Rng,
+    at: BuildingAt,
+    pools: Option<&NamePools>,
+    generating: bool,
+) -> Result<(u16, bool), Refused> {
+    let BuildingAt { x: cx, y: cy, picture, size, brush } = at;
     if s.buildings.len() >= MAX_BUILDINGS {
         return Err(Refused::Full);
     }
@@ -254,12 +287,13 @@ pub fn place_building(
     if pools.is_none() {
         (name, owner_name) = (String::new(), String::new());
     }
+    let kind = building_kind(picture_type, variant);
     let b = Building {
         x,
         y,
         picture_type,
         picture_variant: variant,
-        kind: building_kind(picture_type, variant),
+        kind,
         size_x: size.0,
         size_y: size.1,
         owner_army: 0,
@@ -271,20 +305,29 @@ pub fn place_building(
         ..Building::default()
     };
     s.buildings.push(b);
-    let mut objects = Objects::of(s);
+    let mut cleared = false;
+    let w = s.width() as usize;
     for fx in (cx - size.0 as i64 + 1)..=cx {
         for fy in (cy - size.1 as i64 + 1)..=cy {
             // A footprint reaching left of or above the map stops the original with a range
             // error after the record is made; Razdor skips those cells.
-            if inside(s, fx, fy) {
-                objects.set(fx, fy, 1, None);
-                cells.set_mark(fx, fy, MARK_BUILDING);
+            if !inside(s, fx, fy) {
+                continue;
             }
+            if !generating {
+                cleared |= objects.at(fx, fy)[1].is_some();
+                objects.set(fx, fy, 1, None);
+            } else if kind < 13 {
+                s.terrain[fy as usize * w + fx as usize] = TEMPORARY_TERRAIN;
+            }
+            cells.set_mark(fx, fy, MARK_BUILDING);
         }
     }
-    objects.store(s);
-    Ok(s.buildings.len() as u16)
+    Ok((s.buildings.len() as u16, cleared))
 }
+
+/// The terrain the generator's buildings stand on until its step ends (worldgen.md §3.5).
+pub const TEMPORARY_TERRAIN: u8 = 16;
 
 /// What an item placement made.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -753,6 +796,25 @@ mod tests {
         assert_eq!([1, 2, 3, 4, 5, 12].map(building_defence), [20, 2, 15, 10, 0, 5]);
         s.buildings.resize(MAX_BUILDINGS, Building::default());
         assert_eq!(place_building(&mut s, &mut c, &mut rng, 18, 18, (2, 0), (1, 1), 1, None), Err(Refused::Full));
+    }
+
+    #[test]
+    fn while_generating_footprints_take_terrain_16_and_keep_their_plants() {
+        let mut s = scenario(20);
+        s.objects = vec![object(9, 9, 9, 1), object(4, 4, 9, 1)];
+        let mut c = CellLayer::load(&s);
+        let mut grid = ObjectGrid::from_objects(20, 20, &s.objects);
+        let mut rng = Rng::new(0);
+        let at = BuildingAt { x: 10, y: 10, picture: (3, 0), size: (2, 2), brush: 2 };
+        assert_eq!(place_building_in(&mut s, &mut grid, &mut c, &mut rng, at, None, true), Ok((1, false)));
+        assert_eq!((s.terrain[9 * 20 + 9], s.terrain[8 * 20 + 9], grid.at(9, 9)[1].is_some(), c.mark(9, 9)), (TEMPORARY_TERRAIN, 6, true, MARK_BUILDING));
+        // Bridges (type 13 and up) keep their terrain; with the flag off plants go.
+        let bridge = BuildingAt { x: 5, y: 5, picture: (13, 1), size: (1, 1), brush: 1 };
+        place_building_in(&mut s, &mut grid, &mut c, &mut rng, bridge, None, true).unwrap();
+        assert_eq!(s.terrain[5 * 20 + 5], 6);
+        let fort = BuildingAt { x: 4, y: 4, picture: (4, 0), size: (1, 1), brush: 1 };
+        assert_eq!(place_building_in(&mut s, &mut grid, &mut c, &mut rng, fort, None, false), Ok((3, true)));
+        assert!(grid.at(4, 4)[1].is_none() && s.terrain[4 * 20 + 4] == 6);
     }
 
     #[test]

@@ -251,11 +251,12 @@ impl EditorDoc {
         d
     }
 
-    /// A map the new-map generator made ([`super::newmap::new_scenario`]), with the marks it
-    /// left and its file name, unsaved.
-    pub fn generated(scenario: Scenario, marks: &[i8]) -> EditorDoc {
+    /// A map the new-map generator made ([`super::newmap::new_scenario`]), with the marks and
+    /// scratch flags it left and its file name, unsaved.
+    pub fn generated(scenario: Scenario, marks: &[i8], flags: &[u8]) -> EditorDoc {
         let mut d = EditorDoc::with(scenario, Origin::New);
         d.cells.set_marks(marks);
+        d.cells.set_scratch(flags);
         d.file_name = Some(super::newmap::FILE_NAME.to_string());
         d.saved_serial = u64::MAX;
         d

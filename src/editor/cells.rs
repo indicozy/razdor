@@ -53,6 +53,10 @@ pub struct CellLayer {
     marks: Vec<i8>,
     figures: Vec<u16>,
     reveal: Vec<u8>,
+    /// The cells' scratch byte (+0xc), which the new-map generator leaves its flags in and
+    /// the world generator its placement mask; cleared on a load (whether the original's
+    /// load clears it is not known).
+    scratch: Vec<u8>,
 }
 
 impl CellLayer {
@@ -63,7 +67,7 @@ impl CellLayer {
     pub fn load(s: &Scenario) -> CellLayer {
         let (w, h) = (s.width(), s.height());
         let n = w as usize * h as usize;
-        let mut c = CellLayer { width: w, height: h, marks: vec![0; n], figures: vec![0; n], reveal: vec![0; n] };
+        let mut c = CellLayer { width: w, height: h, marks: vec![0; n], figures: vec![0; n], reveal: vec![0; n], scratch: vec![0; n] };
         c.rebuild_marks(s);
         c.place_figures(s, true);
         c
@@ -138,6 +142,22 @@ impl CellLayer {
     pub fn set_mark(&mut self, x: i64, y: i64, v: i8) {
         if let Some(i) = self.index(x, y) {
             self.marks[i] = v;
+        }
+    }
+
+    /// Every cell's scratch byte, row by row.
+    pub fn scratch(&self) -> &[u8] {
+        &self.scratch
+    }
+
+    pub fn scratch_mut(&mut self) -> &mut [u8] {
+        &mut self.scratch
+    }
+
+    /// Every scratch byte at once (as a generator leaves them); nothing for another size.
+    pub fn set_scratch(&mut self, v: &[u8]) {
+        if v.len() == self.scratch.len() {
+            self.scratch.copy_from_slice(v);
         }
     }
 

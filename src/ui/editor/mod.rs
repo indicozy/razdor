@@ -79,6 +79,7 @@ enum Then {
 struct Generated {
     scenario: Scenario,
     marks: Vec<i8>,
+    flags: Vec<u8>,
     status: String,
 }
 
@@ -267,7 +268,7 @@ impl EditorScreen {
                 self.status = Some(trf!("New {w} x {h} map.", w, h));
             }
             Then::Generated(g) => {
-                self.set_doc(EditorDoc::generated(g.scenario, &g.marks));
+                self.set_doc(EditorDoc::generated(g.scenario, &g.marks, &g.flags));
                 self.status = Some(g.status);
             }
             Then::Open(p) => self.open_file(p),
@@ -1065,7 +1066,7 @@ impl EditorScreen {
                     status.push_str(&newmap::stop_text(stop));
                 }
                 status.push_str(&saved);
-                let g = Generated { scenario, marks: out.cells.mark.clone(), status };
+                let g = Generated { scenario, marks: out.cells.mark.clone(), flags: out.cells.flag.clone(), status };
                 self.modal = None;
                 return Some(self.guarded(Then::Generated(Box::new(g))));
             }
