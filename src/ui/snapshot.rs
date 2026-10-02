@@ -13,6 +13,11 @@
 //! puts the pointer there; `RAZDOR_SCENE_SPELLS=<id>,…` puts those spells on every unit; `RAZDOR_SCENE_POTION=1` gives every unit of the army a
 //! drunk potion. `replay:<step>` with `RAZDOR_REPLAY=<actions.jsonl>`: the diff
 //! test's action list played to that step.
+//!
+//! Every map scene starts its map as a new game (`Game::from_scenario`): nothing is carried
+//! over from a campaign's map before, so a later map whose opening events check for what it
+//! should have brought ends at once by its own defeat event (РК2 does without the herald,
+//! so `battle:РК2-…:0` shows the defeat screen). The game is not at fault there.
 
 use razdor::rules::content::HeroClass;
 use razdor::rules::game::{Foe, Game};
