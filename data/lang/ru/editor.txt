@@ -481,3 +481,17 @@ Army {id}: {name} = Армия {id}: {name}
 Tactical cost: {a} / {b} = Тактическая стоимость: {a} / {b}
 Events: {n} = События: {n}
 Lantern radius: {r} = Радиус фонаря: {r}
+
+# Map editor: the new-map dialog
+Land = Суша
+Lake = Озеро
+River valley = Речная долина
+Estuary = Устье
+Coast = Побережье
+Skerries = Шхеры
+Island = Остров
+Archipelago = Архипелаг
+North = Север
+South = Юг
+West = Запад
+East = Восток

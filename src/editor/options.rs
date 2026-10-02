@@ -111,10 +111,15 @@ pub fn set_keys(text: &str, section: &str, keys: &[(&str, String)]) -> String {
 
 /// Sets keys of `[Option]` in Razdor's file in `dir`, which is made if it is not there.
 fn update(dir: &Path, keys: &[(&str, String)]) -> std::io::Result<PathBuf> {
+    update_section(dir, "Option", keys)
+}
+
+/// Sets keys of `[section]` in Razdor's file in `dir`, which is made if it is not there.
+pub fn update_section(dir: &Path, section: &str, keys: &[(&str, String)]) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
     let path = dir.join(FILE);
     let old = std::fs::read(&path).map(|b| crate::dt::text::decode(&b)).unwrap_or_default();
-    super::files::write_atomically(&path, &crate::dt::text::encode(&set_keys(&old, "Option", keys)))?;
+    super::files::write_atomically(&path, &crate::dt::text::encode(&set_keys(&old, section, keys)))?;
     Ok(path)
 }
 
