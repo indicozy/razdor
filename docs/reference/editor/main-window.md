@@ -841,65 +841,65 @@ behaviour, not the same look.
 | Entry | Separate exe; `NewMap`, `Battle`, `.DTM` arguments | `--editor` flag or the menu link; no map argument | differs | `src/main.rs`, `src/ui/mod.rs` |
 | Single instance | Window-title check plus clipboard hand-off of a map path | A lock file, and the second copy exits; no hand-off | differs | `src/main.rs` |
 | Start-up checks | Colour depth, install files, version, DDraw size, screen size, word list | None | differs (by design) | — |
-| Settings file | `DTmapEdit.Ini` `[Option]` `WorkMap`, `PathMap`, `FindBuildingPlace` | No settings file | missing | — |
-| Reopen last map | `WorkMap` loads at start; a new map on failure | Always a new map | missing | `src/ui/editor/mod.rs` |
+| Settings file | `DTmapEdit.Ini` `[Option]` `WorkMap`, `PathMap`, `FindBuildingPlace` | `DTMapEdit.Ini` in Razdor's editor folder: `WorkMap` and `FindBuildingPlace` written on close, `PathMap` never | matches | `src/editor/options.rs` |
+| Reopen last map | `WorkMap` loads at start; a new map on failure | The same | matches | `src/ui/editor/mod.rs` |
 | Default map folder | Exe folder `Maps_Rus\` (or `Maps\`) | User data folder; install maps read-only | differs (by design) | `src/editor/files.rs` |
 | Close with unsaved changes | Yes/no/cancel prompt | Prompt on Exit only; closing the window skips it | differs | `src/ui/editor/mod.rs`, `src/main.rs` |
 | Menu bar | File / Edit / Scenario / Help | None; a toolbar only | differs | `src/ui/editor/mod.rs` |
-| New map | Keeps the current size, terrain 0, no dialog | Asks size and terrain (default 50 × 50, terrain 6) | differs | `src/ui/editor/mod.rs`, `src/editor/defaults.rs` |
+| New map | Keeps the current size, terrain 0, no dialog | The same (seed from the generator, our own title); Razdor's sized dialog is "New of size" | matches | `src/editor/defaults.rs`, `src/ui/editor/mod.rs` |
 | Generate / world filler | Yes | No | missing | — |
-| Save without dialog | Ctrl+S to the map folder; F2 quick save | Ctrl+S quick save to the last file; no F2 save (F2 switches language) | differs | `src/ui/editor/mod.rs` |
+| Save without dialog | Ctrl+S to the map folder; F2 quick save | Ctrl+S; F2 saves under the map's name without a dialog (Razdor's folder rules and confirmations stay) | matches | `src/ui/editor/mod.rs` |
 | Save formats in dialog | Normal, text dump, uncompressed, demo | The same four, by the same extension rules | matches | `src/editor/files.rs`, `src/editor/mapfile.rs` |
 | Options, units, artefacts, named-characters windows | Yes | Named characters is a settings tab; the others are missing | differs / missing | `src/ui/editor/settings.rs` |
 | Test AI, test battle, help, about | Yes | Test play only | missing | `src/ui/editor/mod.rs` |
 | Undo / redo | No | 200 steps | differs (extra) | `src/editor/doc.rs` |
-| Tool model | 5 pages × brush (−1/0/1–6) + move mode | Tools Select / Terrain / Objects / Erase / Building / Army / Point / HeroStart | differs | `src/editor/tools.rs` |
-| Brush sizes | 1–6, square ending at centre (even sizes lean down-right) | 1, 3, 5, 9, centred | differs | `src/editor/geometry.rs` |
+| Tool model | 5 pages × brush (−1/0/1–6) + move mode | The same, plus Razdor's flood fill and rectangle on the terrain page | matches | `src/editor/tools.rs` |
+| Brush sizes | 1–6, square ending at centre (even sizes lean down-right) | The same | matches | `src/editor/geometry.rs` |
 | Fill and rectangle terrain | No | Yes | differs (extra) | `src/editor/tools.rs` |
-| Drag behaviour | Drag paints only terrain and forests | Drag strokes with every brush tool | differs | `src/editor/tools.rs` |
-| Modifier keys | A press with Shift, Ctrl or Alt does nothing | Ignored | differs | `src/ui/editor/mod.rs` |
-| Keyboard | Arrows (one cell), Space, F2, Ctrl+N/G/O/S/Q | Arrows (smooth), Ctrl+Z/Y/S/O/N, Delete, Esc, tool letters, G/H/R, zoom keys | differs | `src/ui/editor/mod.rs`, `src/ui/editor/palette_panel.rs` |
+| Drag behaviour | Drag paints only terrain and forests | The same, once per cell entered | matches | `src/editor/tools.rs` |
+| Modifier keys | A press with Shift, Ctrl or Alt does nothing | The same | matches | `src/editor/tools.rs` |
+| Keyboard | Arrows (one cell), Space, F2, Ctrl+N/G/O/S/Q | Arrows (one cell, repeating), Space, F2, Ctrl+N/O/S/Q; plus Ctrl+Z/Y, Delete, Esc, zoom keys | matches (Ctrl+G: no generator yet) | `src/ui/editor/mod.rs` |
 | Camera | Whole-cell scroll, scrollbars, rulers, no zoom | Smooth pan, zoom 0.12–2.5, no scrollbars, no rulers | differs | `src/ui/editor/canvas.rs` |
 | Cell size | 32 × 22 | 32 × 22 at zoom 1 | matches | `src/ui/editor/canvas.rs` |
 | Draw order | Low hills; then per cell: forest, mountains, buildings (diagonal sort), figures | Objects, buildings and armies sorted by y; bridges first | differs | `src/ui/editor/canvas.rs` |
 | Tree position jitter | A per-cell hash offset | Not checked | unknown | `src/ui/editor/canvas.rs` |
-| Fog overlay | Yes, with reveal radii for starts and lanterns | No | missing | — |
-| Passability grid | 7 coloured tiles from terrain and marks | A plain grid; massif cover in red | differs | `src/ui/editor/canvas.rs` |
-| Patrol overlay | Hovered army only; everything shaded when its radius is 0 | All armies, or the selected one, drawn as a radius outline | differs | `src/ui/editor/canvas.rs` |
+| Fog overlay | Yes, with reveal radii for starts and lanterns | The same reveal counters (load, placements, drops, the lantern dialog; deletes leave them) | matches | `src/editor/cells.rs` |
+| Passability grid | 7 coloured tiles from terrain and marks | The same 7 kinds; marks rebuilt when switched on, written by the brushes | matches | `src/editor/cells.rs`, `src/ui/editor/canvas.rs` |
+| Patrol overlay | Hovered army only; everything shaded when its radius is 0 | The same (the selected army's radius is outlined too) | matches | `src/ui/editor/canvas.rs` |
 | Brush preview | Ghost for 10 ticks; forest scatter preview | Brush, footprint and ghost always shown | differs | `src/ui/editor/canvas.rs` |
 | Minimap | 257 × 257, two colour modes, hover frame, drag | Aspect-kept, terrain overview plus dots, click or drag | differs | `src/ui/editor/canvas.rs` |
-| Terrain brush side effects | Water and lava clear forests; deep sea clears hills | Not checked | unknown | `src/editor/doc.rs` |
-| Hill placement | One object at the centre; size = footprint group | One object per brush cell; footprint = sprite ÷ 10 | differs | `src/editor/doc.rs`, `src/editor/geometry.rs` |
-| Forest placement | Random family member per cell, one-in-five "+120" alternate | The same sprite on every cell | differs | `src/editor/doc.rs` |
-| Tree replacement mode | Yes | No | missing | — |
-| Building fit | Anchor cell free and square inside the map; nothing else | Footprint inside the map only | differs | `src/editor/doc.rs` |
-| Building limit | 254 | 255 | differs | `src/editor/doc.rs` |
-| Building defaults | Faction 3 with its attitudes, defence by type, owner 0, seeded random names | Faction 3 with its attitudes, owner 0xFF, barracks and AI-only flags, no names, no defence | differs | `src/editor/defaults.rs` |
-| House picture → type | Pictures 2–4 obelisk, 5–6 ruins (also at save) | Not checked | unknown | `src/editor/doc.rs` |
-| Forest cleared under a building | Yes | No | missing | `src/editor/doc.rs` |
-| Army defaults | Zeroed; style = kind − 4; inactive kind; experience correction 100; numbered name; editor opens | Model 4, style 0, faction 4, patrols 1, experience correction 100, garrison 50, empty name; panel opens | differs | `src/editor/defaults.rs` |
-| Army kinds in palette | Feudal, robbers, peasants, inactive | One army tool | differs | `src/editor/tools.rs` |
-| Lantern | Radius 10 then a radius prompt; lit | Radius 5, lit, no prompt | differs | `src/editor/defaults.rs` |
-| Event point | Zeroed; editor opens | Model 9, radius 0; panel opens | matches (roughly) | `src/editor/defaults.rs` |
-| Point limit | 256 | 255 | differs | `src/editor/doc.rs` |
-| Occupied-cell check | Lanterns and points refused on figures (but tested at the unscrolled view cell); armies and starts overwrite | Not checked | unknown | `src/editor/doc.rs` |
-| Hero start | Placed from the item palette; reveals radius 5 | Settings button, then a map click | differs | `src/editor/tools.rs`, `src/ui/editor/settings.rs` |
-| Back to Info after an item | Yes | Selects the new record | differs | `src/ui/editor/mod.rs` |
-| Delete | Per page at one cell; event refs renumbered; home buildings not renumbered | Erase brush for objects; Delete key for records, renumbering what the original renumbers (records.md §12) | differs | `src/editor/doc.rs`, `src/editor/refs.rs` |
-| Pick-up order | Army, building, point; right press, or left in move mode | Army, point, building; left drag with Select | differs | `src/editor/doc.rs` |
-| Drop checks | None | Must stay on the map | differs | `src/editor/tools.rs` |
-| Info hover hint | Building, army and point details | Status line shows cell, terrain and objects | differs | `src/ui/editor/mod.rs` |
-| Info click opens editors | Yes, plus a lantern radius dialog | Select opens the panel | differs | `src/ui/editor/mod.rs` |
-| Ignore-mountains check | Warning cursor only, with the inverted toggle | No | missing | — |
-| Burn everything | Yes | No | missing | — |
+| Terrain brush side effects | Water and lava clear forests; deep sea clears hills | The same, marks as the original writes them | matches | `src/editor/brush.rs` |
+| Hill placement | One object at the centre; size = footprint group | The same; whole square inside the map | matches | `src/editor/brush.rs` |
+| Forest placement | Random family member per cell, one-in-five "+120" alternate | The same draws, row by row | matches | `src/editor/brush.rs` |
+| Tree replacement mode | Yes | Yes, with the family rules | matches | `src/editor/brush.rs` |
+| Building fit | Anchor cell free and square inside the map; nothing else | The same | matches | `src/editor/brush.rs` |
+| Building limit | 254 | 254 | matches | `src/editor/brush.rs` |
+| Building defaults | Faction 3 with its attitudes, defence by type, owner 0, seeded random names | The same, names from the install's `DTMapEdit_Rus.Ini` | matches | `src/editor/brush.rs`, `src/editor/naming.rs` |
+| House picture → type | Pictures 2–4 obelisk, 5–6 ruins (also at save) | The same | matches | `src/editor/brush.rs` |
+| Forest cleared under a building | Yes | Yes | matches | `src/editor/brush.rs` |
+| Army defaults | Zeroed; style = kind − 4; inactive kind; experience correction 100; numbered name; editor opens | The same; the panel opens | matches | `src/editor/defaults.rs` |
+| Army kinds in palette | Feudal, robbers, peasants, inactive | The same | matches | `src/ui/editor/palette_panel.rs` |
+| Lantern | Radius 10 then a radius prompt; lit | The same; the dialog's radius is revealed | matches | `src/editor/brush.rs` |
+| Event point | Zeroed; editor opens | The same | matches | `src/editor/defaults.rs` |
+| Point limit | 256 | 256 | matches | `src/editor/brush.rs` |
+| Occupied-cell check | Lanterns and points refused on figures (but tested at the unscrolled view cell); armies and starts overwrite | The same, bug included | matches | `src/editor/tools.rs` |
+| Hero start | Placed from the item palette; reveals radius 5 | The same (the settings' button picks it on the palette) | matches | `src/editor/brush.rs` |
+| Back to Info after an item | Yes | Yes (not when the list is full, as in the original) | matches | `src/editor/tools.rs` |
+| Delete | Per page at one cell; event refs renumbered; home buildings not renumbered | The same delete brush (target place deleted as an army); the Delete key and panels also delete a record | matches | `src/editor/brush.rs`, `src/editor/refs.rs` |
+| Pick-up order | Army, building, point; right press, or left in move mode | The same | matches | `src/editor/brush.rs`, `src/editor/tools.rs` |
+| Drop checks | None | None | matches | `src/editor/brush.rs` |
+| Info hover hint | Building, army and point details | The same details, in Razdor's words | matches | `src/editor/tools.rs` |
+| Info click opens editors | Yes, plus a lantern radius dialog | The same (panels, the dialog, the scenario window on the hero's tab) | matches | `src/editor/tools.rs`, `src/ui/editor/mod.rs` |
+| Ignore-mountains check | Warning cursor only, with the inverted toggle | The same (red preview) | matches | `src/editor/tools.rs` |
+| Burn everything | Yes | Yes, without the nine renamed nouns (the original's own text) | matches (names) | `src/editor/brush.rs` |
 | Hidden tools | Tree re-roll, renumber button | No | missing (by design) | — |
-| Buildings / armies submenus | Grouped by type or style, centre and open | No | missing | — |
-| Unit list order | Sorted by group, role, school, cost; portraits | Content order; text only | differs | `src/ui/editor/form.rs`, `src/ui/widgets.rs` |
-| Artefact list order | By type, then dearest first; icons | Content order | differs | `src/ui/editor/form.rs` |
-| Army-troop unit list skips heroes | Yes | Not checked | unknown | `src/ui/editor/form.rs` |
+| Buildings / armies submenus | Grouped by type or style, centre and open | The same, as two toolbar lists | matches | `src/editor/menus.rs` |
+| Unit list order | Sorted by group, role, school, cost; portraits | The same order; text only | matches (order) | `src/editor/menus.rs`, `src/ui/editor/form.rs` |
+| Artefact list order | By type, then dearest first; icons | The same order; text only | matches (order) | `src/editor/menus.rs` |
+| Army-troop unit list skips heroes | Yes | Yes (troop, garrison, barracks and preset slots) | matches | `src/ui/editor/form.rs` |
 | Event list look | Group colour text, bold quests, italic rumours, filters | Group swatch, kind initial, filters, search | differs | `src/ui/editor/events.rs` |
 | Caption | Main caption, version, file, format number | Fixed app title; name shown in the toolbar with `*` | differs | `src/ui/editor/mod.rs` |
-| Save enabled only when modified | Yes | Always enabled | differs | `src/ui/editor/mod.rs` |
+| Save enabled only when modified | Yes | Yes | matches | `src/ui/editor/mod.rs` |
 | Playability label | Yes | Quest count and score at the foot of the tool column, in the original's colour bands | matches | `src/ui/editor/mod.rs` |
 
 ---

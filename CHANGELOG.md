@@ -550,6 +550,32 @@ old id, and their versions give both.
   price the window shows, as the original's store does. Each list exports in the original's format to `Rus_Units.New.Ini` and
   `Units.Rus`, or `Rus_Artefacts.New.Ini` and `Artefacts.Rus`, in Razdor's editor folder.
   The file check still uses the install's tables, which the game reads.
+- **The main window's tools as the original editor's** (`docs/reference/editor/main-window.md`):
+  five pages (terrain, hills, forests, buildings, items) with brush sizes 1–6 on the square
+  that ends at the brush centre (even sizes lean down-right), Info, Delete and Move. Only the
+  terrain and forest pages paint while dragging; a press with Shift, Ctrl or Alt does
+  nothing. Water and lava clear plants, deep sea hills too; a hill is one object of the size
+  group, only when its whole square is on the map; forests draw a random member of the
+  family per cell, row by row, with the one-in-five alternate picture, and tree replacement
+  mode re-rolls only trees of the same family. New buildings take the original's defaults
+  (faction 3 and its attitudes, defence by picture, owner 0, house pictures turned into
+  obelisks or ruins) and names drawn from the install's `DTMapEdit_Rus.Ini`, seeded by the
+  spot; the place check is the anchor cell and the brush square, at most 254. Items (hero
+  starts with their radius-5 reveal, the four army kinds, lanterns with the radius dialog,
+  event points) open their editor and return to Info. A right press in Info mode (or a left
+  one in move mode) picks up an army, a building or a point, the next press drops it
+  anywhere. Delete works per page at one cell, every covering building included, and leaves
+  fog revealed; the original's quirks are kept: a lantern or event point is refused on a
+  figure at the unscrolled view cell, a target place is deleted as an army, the "ignore
+  mountains" box inverts after its first toggle and only warns.
+- The grid shows the original's seven passability tiles, the fog its reveal counters, the
+  patrol zone the hovered army's square; the Info mode shows the original's hints. Burn
+  everything (without the original's renamed nouns, its own text), the buildings and armies
+  submenus, unit lists by group, role, school and cost (troop slots without the hero
+  classes), artefacts by type and price. F2 is the quick save in the editor (not the
+  language), Space returns to Info, the arrows move one cell, Save is enabled only when the
+  map is modified, New keeps the current size (the old dialog is "New of size"), and the
+  last map and the building check are kept in Razdor's editor `DTMapEdit.Ini`.
 
 ## 0.2.2 — 2026-10-01
 

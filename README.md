@@ -234,7 +234,7 @@ name, a save name, an editor field) or while a dialog or question is open (there
 | Where | Key | Does |
 |---|---|---|
 | Everywhere | F1 | the key list of this screen (F1, Esc or a click closes it) |
-| Everywhere (and in the map editor) | F2 | interface language: English / Russian |
+| Everywhere but the map editor (there: quick save) | F2 | interface language: English / Russian |
 | Everywhere | F9 | quick load: loads the quick save |
 | Everywhere | N | music off / on |
 | Main menu | Esc | quits the game at once, as in the original |
@@ -425,7 +425,8 @@ Start it with **Map editor** on the title screen or `cargo run --release -- --ed
 `RAZDOR_DT_DIR` set it draws the original art, offers the game's object and building pictures
 and names units, artefacts and spells from your install; without one it uses placeholders.
 
-- **Toolbar**: New (50/100/200 or custom size, one surface), Open (the game's maps, your maps
+- **Toolbar**: New (an empty map of the current size, as the original's), New of size
+  (50/100/200 or custom size, one surface), Open (the game's maps, your maps
   or a path; as a map, a map with its text dump, or a demo map), Save (Ctrl+S), Save as
   (Ctrl+Shift+S; a map, a map with its text dump, an uncompressed or a demo map, as the
   original editor writes them), Save to game folder, Undo (Ctrl+Z), Redo
@@ -440,12 +441,14 @@ and names units, artefacts and spells from your install; without one it uses pla
   or `~/.local/share/razdor/editor`), Units and Artefacts (the original's unit and artefact
   editors: they change the session's tables and the costs the editor shows, never the map,
   and export new ini files into that editor folder), Test play, Exit.
-- **Tools** (right column, keys in brackets): Select and move (V), Terrain (T: 16 surfaces,
-  brush 1/3/5/9, flood fill, rectangle), Objects (O: hills, mountains, stones, trees by class
-  and picture; several per cell), Erase (E), Building (B: type and picture; the cell you click
-  is the bottom-right corner, the preview is red if it does not fit), Army (A: feudal, rogue,
-  peasant or inactive), Point (P:
-  lantern, which asks for its radius, event point or AI target point).
+- **Tools** (right column), as the original editor's: five pages, Terrain (16 surfaces;
+  Razdor's flood fill and rectangle besides the brush), Hills, Forests (tree replacement
+  mode), Buildings (the cell is the bottom-right corner; "ignore mountains" warns over
+  mountains) and Items (hero starts, four army kinds, lantern, event point); sizes 1–6 (the
+  square ends at the brush centre), Del (per page, at the cell), Info (click opens a record's
+  panel, the hint shows what stands there) and Move. A right click in Info mode picks a
+  record up, the next click drops it. Burn everything at the foot. Toolbar: Buildings and
+  Armies (the original's submenus: centre and open), Grid, Patrol zones, Fog.
 - **Panels**: click a building, army or point to edit every field (names and descriptions in
   any script, garrison, barracks, goods, spells, incomes, factions and attitudes, AI settings,
   local events picked by title). Delete removes it; later ids and the references the original
@@ -474,8 +477,10 @@ and names units, artefacts and spells from your install; without one it uses pla
   renumbers (other events' conditions, relative, quest and chained events, the victory and
   defeat events, the buildings' and points' lists); as in the original, a deleted entry of a
   list becomes an empty slot, and nothing is asked.
-- **View**: wheel zooms, right or middle drag and the arrow keys move, Home shows the whole
-  map, the minimap moves the view; G grid, H hill and mountain cover, R patrol radii.
+- **View**: wheel zooms, right (where nothing is picked up) or middle drag moves, the arrow
+  keys move one cell, Home shows the whole map, the minimap moves the view. Space: Info,
+  F2: quick save under the map's name, Ctrl+N: a new empty map of the same size, Ctrl+Q: exit.
+  The last map reopens at start-up.
 - **Test play** plays the map as it is in the editor; Esc > Main menu returns to it.
 
 Opening and saving follow the original editor: a save derives building types, owners and
