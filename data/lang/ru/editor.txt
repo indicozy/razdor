@@ -301,7 +301,6 @@ the map size cannot change here = здесь нельзя менять разм�
 a record's id is its position and cannot change = номер записи — её место в списке, его нельзя менять
 the map has errors ({n}); fix them first = на карте есть ошибки ({n}); сначала исправьте их
 cannot write the map: {e} = не удалось записать карту: {e}
-buildings (at most 255) = здания (не больше 255)
 armies (at most 255) = армии (не больше 255)
 points (at most 255) = точки (не больше 255)
 named characters (32) = именные персонажи (32)
@@ -375,3 +374,13 @@ Tactical cost / side strength: {t} / {side} = Тактическая цена / 
 The extra leader entry: the army is inactive and patrols on the spot; what the game does with it is unknown. = Дополнительная строка предводителя: армия неактивна и патрулирует на месте; что с ней делает игра, неизвестно.
 Units: {n} of {max} (the leader counts) = Воинов: {n} из {max} (предводитель считается)
 the leader is the original editor's extra empty entry (255) = предводитель — дополнительная пустая строка оригинального редактора (255)
+
+# Map editor: the building window
+Footprint {w} x {h}, from the picture = Размер {w} x {h}, по картинке
+Garrison defence (0-50) = Защита гарнизона (0-50)
+Local events, quests and rumours checked here, in this order; one may be listed twice (edit them with the Events button). = Местные события, задания и слухи, проверяемые здесь по порядку; одно может стоять дважды (правятся кнопкой «События»).
+More than 12 units: the garrison cannot be rated. = Больше 12 воинов: гарнизон не оценить.
+Tactical cost / strength: {t} / {side} = Тактическая цена / сила: {t} / {side}
+Test the market = Проверить рынок
+Treasure = Сокровища
+buildings (at most 254) = зданий (не больше 254)

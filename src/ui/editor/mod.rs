@@ -461,7 +461,7 @@ impl EditorScreen {
 
         // The selected record's panel.
         if let (Some(t), Some(pr)) = (self.tools.selected, panel_rect) {
-            let ctx = Ctx { names: self.install_names.as_ref().unwrap_or(&self.play_names), palette: &self.palette, content: Some(&*self.play_content) };
+            let ctx = Ctx { names: self.install_names.as_ref().unwrap_or(&self.play_names), palette: &self.palette, content: Some(&*self.play_content), shared: Some(self.play_content.clone()) };
             let s = &self.doc.scenario;
             let edit = match t {
                 Target::Building(id) => props::building_panel(&mut self.panel, s, id, &ctx, pr),

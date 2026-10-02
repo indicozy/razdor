@@ -305,8 +305,9 @@ impl Form {
         hit
     }
 
-    /// An event list with a remove button per row and an "add" picker (local events).
-    pub fn event_list(&mut self, k: &str, used: &[u16], events: &[(i64, String)]) -> EventListEdit {
+    /// An event list with a remove button per row and an "add" picker (local events);
+    /// `duplicates`: the picker also offers the events already listed.
+    pub fn event_list(&mut self, k: &str, used: &[u16], events: &[(i64, String)], duplicates: bool) -> EventListEdit {
         let mut out = EventListEdit::None;
         for (i, id) in used.iter().enumerate() {
             if self.shown(ROW) {
@@ -320,7 +321,7 @@ impl Form {
         }
         let mut add: i64 = 0;
         let mut options = vec![(0, tr("Add an event...").to_string())];
-        options.extend(events.iter().filter(|e| !used.contains(&(e.0 as u16))).cloned());
+        options.extend(events.iter().filter(|e| duplicates || !used.contains(&(e.0 as u16))).cloned());
         if self.shown(ROW) {
             if let Some(n) = dropdown(&self.key(&format!("{k}add")), self.x, self.y, self.w, add, &options) {
                 add = n;

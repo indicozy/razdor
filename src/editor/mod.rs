@@ -169,6 +169,38 @@ mod real_maps {
     }
 
     #[test]
+    fn shipped_buildings_save_as_the_building_window_saves_them() {
+        let Some(dt) = install() else { return };
+        let palette = Palette::from_sprites(&dt.map_objects().unwrap());
+        let content = std::sync::Arc::new(Content::from_dt(&dt));
+        let (mut buildings, mut above_50, mut clamped, mut tested) = (0, 0, 0, 0);
+        for m in &dt.maps {
+            let d = EditorDoc::open_with(&m.path, None, Some(&palette), 0).unwrap();
+            let s = &d.scenario;
+            for (i, b) in s.buildings.iter().enumerate() {
+                buildings += 1;
+                let footprint = palette.picture(b.picture_type, b.picture_variant).map(|p| p.size);
+                let saved = records::save_building(b, s, footprint);
+                // Byte 294 is derived (records.md §13: every shipped building agrees); the
+                // footprint is the picture's, as the loader set it.
+                assert_eq!((saved.has_barracks, saved.size_x, saved.size_y), (b.has_barracks, b.size_x, b.size_y), "{} building {}", m.name, i + 1);
+                // The stale goods copy at 296–301 survives a save but for the 0..12 clamp.
+                assert_eq!(saved.stale_artifacts[1..], b.stale_artifacts[1..]);
+                clamped += (saved.stale_artifacts[0] != b.stale_artifacts[0]) as usize;
+                above_50 += (saved.garrison_extra_defence != b.garrison_extra_defence) as usize;
+                if records::BuildingPages::of(b.kind).market && records::market_test_ready(b) && tested < 3 {
+                    let goods = records::market_test(s, i as u16 + 1, b, content.clone());
+                    assert_eq!(goods.len(), 12);
+                    assert!(goods.iter().flatten().count() > 0, "{} building {}: the restock stocks something", m.name, i + 1);
+                    tested += 1;
+                }
+            }
+        }
+        assert_eq!((buildings, above_50, tested), (1082, 6, 3));
+        assert!(clamped > 0, "some shipped buildings hold a stale byte above 12 at 296");
+    }
+
+    #[test]
     fn the_estuary_map_opens_with_its_blank_questions_trimmed() {
         // Events 36 to 38 of "Устье Трейна" have a question that is only a line break: the
         // loader trims it to nothing and keeps all 211 events (§3.5).

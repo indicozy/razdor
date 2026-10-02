@@ -161,6 +161,11 @@ pub struct EditorDoc {
 /// Events a point can hold in the original editor.
 pub const POINT_EVENTS: usize = 5;
 
+/// The original places a building only while fewer than this many exist (0x595390).
+pub const MAX_BUILDINGS: usize = 254;
+/// Armies the original places at most.
+pub const MAX_ARMIES: usize = 255;
+
 /// Undo steps kept.
 pub const UNDO_LIMIT: usize = 200;
 
@@ -597,8 +602,8 @@ impl EditorDoc {
                 });
             }
             Command::PlaceBuilding { x, y, kind, picture_type, variant, size } => {
-                if self.scenario.buildings.len() >= MAX_RECORDS {
-                    return Err(EditError::Full(n_("buildings (at most 255)")));
+                if self.scenario.buildings.len() >= MAX_BUILDINGS {
+                    return Err(EditError::Full(n_("buildings (at most 254)")));
                 }
                 self.check_footprint(x, y, size)?;
                 let b = new_building(&self.scenario.header, x, y, kind, picture_type, variant, size);
@@ -621,7 +626,7 @@ impl EditorDoc {
                 self.scenario.buildings[i] = *building;
             }
             Command::PlaceArmy { x, y, model } => {
-                if self.scenario.armies.len() >= MAX_RECORDS {
+                if self.scenario.armies.len() >= MAX_ARMIES {
                     return Err(EditError::Full(n_("armies (at most 255)")));
                 }
                 self.check_cell(x as i64, y as i64)?;
@@ -914,6 +919,21 @@ mod tests {
         d.undo();
         assert_eq!(d.scenario.buildings.len(), 2);
         assert_eq!(d.scenario.header.heroes[0].start_building, 2);
+    }
+
+    #[test]
+    fn the_original_limits() {
+        let mut d = EditorDoc::new_map(NewMap { width: 100, height: 100, fill: 6 });
+        for k in 0..MAX_BUILDINGS {
+            d.scenario.buildings.push(crate::dt::dtm::Building { x: (k % 90) as u16 + 2, y: (k / 90) as u16 + 2, size_x: 1, size_y: 1, ..Default::default() });
+        }
+        assert_eq!(d.apply(Command::PlaceBuilding { x: 50, y: 50, kind: 3, picture_type: 3, variant: 0, size: (1, 1) }), Err(EditError::Full("buildings (at most 254)")));
+        d.scenario.buildings.pop();
+        assert!(d.apply(Command::PlaceBuilding { x: 50, y: 50, kind: 3, picture_type: 3, variant: 0, size: (1, 1) }).is_ok());
+        for _ in 0..MAX_ARMIES {
+            d.apply(Command::PlaceArmy { x: 1, y: 1, model: 4 }).unwrap();
+        }
+        assert_eq!(d.apply(Command::PlaceArmy { x: 1, y: 1, model: 4 }), Err(EditError::Full("armies (at most 255)")));
     }
 
     #[test]

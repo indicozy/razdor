@@ -494,6 +494,16 @@ old id, and their versions give both.
   owner name, a faction its row of attitudes, a named character its class and name; the
   gold cost and upkeep use the install's recruit divisor and put the artefacts on the first
   unit only; the extra leader entry (255) is offered.
+- **The building panel works as the original's building window**: its pages follow the
+  type; saving takes the footprint from the picture, sets "has barracks" exactly when a
+  barracks slot holds a unit, clears the event area past the list, stores no owner as 255,
+  keeps only the links the type offers (a village's castle, a dungeon's entrance) and the
+  garrison defence within the original's slider (a stored value above 50 comes back as 50);
+  bytes 296–300 are no longer overwritten with a copy of the goods (only byte 296 is clamped
+  to 0..12, as the original's hidden control does); ruins have five treasure slots; the
+  incomes and prices have the original's ranges and steps; a building may list an event
+  twice, up to 64; the garrison's tactical cost and strength are shown and a market test
+  shows the goods the game's restock draws. At most 254 buildings, as in the original.
 
 ## 0.2.2 — 2026-10-01
 

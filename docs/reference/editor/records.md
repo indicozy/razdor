@@ -643,13 +643,13 @@ These points refine [dtm-format.md](../dtm-format.md):
 | Home building choice | as the original, from the original's list of types | also copies the building's faction, attitudes and owner name |
 | Faction change | as the original | picking a faction reloads the attitudes |
 | New army | as the original: the army tool offers the four models and the panel opens; Razdor's file check refuses faction 0 until the army is saved | zero record, model from the menu, XP correction 100, window opens |
-| Building byte 294 | manual check box | derived: any barracks unit |
-| Building footprint | editable 1..12 | always taken from the picture |
-| Building bytes 296–300 | overwritten with a byte copy of the goods | Community limits, kept unchanged |
-| Ruins treasure | six artefact slots | five slots |
-| Building income ranges | gold 0..2,500, max gold 0..25,000, defence 0..255 | gold 0..250, max gold 0..2,500, defence slider 0..50 saved as 50 − position |
-| Building event list | no duplicates, closes up | duplicates allowed, up to 64 |
-| Garrison rating, market test | none | shown in the building window |
+| Building byte 294 | as the original, on every save of the building panel (`src/editor/records.rs`) | derived: any barracks unit |
+| Building footprint | as the original: taken from the install's picture on save, shown read-only | always taken from the picture |
+| Building bytes 296–300 | as the original: kept, but for the 0..12 clamp of byte 296 on save | Community limits, kept unchanged |
+| Ruins treasure | as the original | five slots |
+| Building income ranges | as the original, with its steps; the most mana kept stops at 255, where the original's save stops with a range error | gold 0..250, max gold 0..2,500, defence slider 0..50 saved as 50 − position |
+| Building event list | as the original; an event can be inserted only at the end (Razdor's list has no selected line) | duplicates allowed, up to 64 |
+| Garrison rating, market test | as the original: the garrison's tactical cost and side strength, and the market test with the game's restock (Razdor's random numbers, so the goods drawn are an example, as in the original) | shown in the building window |
 | Event pickers of buildings | every building | towns not offered |
 | New event | repeat 0, duration 0, once on | repeat 1 day, duration 1,440, once from the option |
 | Copy event | clone at the end, picture kept, name kept | inserted after the original, references renumbered, name numbered, custom picture dropped |

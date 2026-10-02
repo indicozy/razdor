@@ -40,17 +40,8 @@ pub fn used_events(slots: &[u16], count: u8) -> &[u16] {
     &slots[..(count as usize).min(slots.len())]
 }
 
-/// Market goods / ruin treasure: the first six artefact slots.
+/// Market goods: the first six artefact slots (ruins use five, [`TREASURE`]).
 pub const GOODS: usize = 6;
-
-/// Sets goods slot `k` and keeps the byte copy at offset 296 in step (the original editor
-/// writes one; the game's use of it is unknown).
-pub fn set_goods(b: &mut Building, k: usize, artefact: u16) {
-    if k < GOODS {
-        b.artifact_slots[k] = artefact;
-        b.stale_artifacts[k] = artefact as u8;
-    }
-}
 
 /// The army's strength as the game sums it: the tactical cost of its leader and of every
 /// unit of its troops at their levels (`docs/reference/original-mechanics/experience.md` §1).
@@ -153,19 +144,26 @@ pub fn army_cost(a: &Army, c: &Content, recruit_div: i32) -> Option<ArmyCost> {
     let gold = units.iter().map(price).sum();
     let upkeep = units.iter().skip(1).map(|u| price(u) / div).sum();
     let tactical = units.iter().map(|u| u.tactical(c, 0) as i64).sum();
-    let side = if units.is_empty() {
-        0
-    } else {
-        let mut b = Battle::new(std::sync::Arc::new(c.with_formation(Formation::WIDE)), &[], &units, Team::Enemy);
-        b.auto_arrange(Team::Enemy);
-        let side: Vec<SideUnit> = b
-            .fighters
-            .iter()
-            .map(|f| SideUnit { tactical: experience::tactical(c, f.unit, &f.base, 0), hp: f.hp, max_hp: f.max_hp(), row: f.slot.row, role: experience::role(&f.base) })
-            .collect();
-        experience::side_strength(&side)
-    };
+    let side = side_strength_of(&units, c, 0);
     Some(ArmyCost { gold, upkeep, tactical, side })
+}
+
+/// The battle core's strength of the side `units` form, auto-arranged on the editor's wide
+/// grid (its battle core always has the 6/4/2 rows, testers.md §2.1), standing in a building
+/// of defence `bd`.
+fn side_strength_of(units: &[Unit], c: &Content, bd: i32) -> i64 {
+    if units.is_empty() {
+        return 0;
+    }
+    let mut b = Battle::new(std::sync::Arc::new(c.with_formation(Formation::WIDE)), &[], units, Team::Enemy);
+    b.set_building_defence(Team::Enemy, bd);
+    b.auto_arrange(Team::Enemy);
+    let side: Vec<SideUnit> = b
+        .fighters
+        .iter()
+        .map(|f| SideUnit { tactical: experience::tactical(c, f.unit, &f.base, bd), hp: f.hp, max_hp: f.max_hp(), row: f.slot.row, role: experience::role(&f.base) })
+        .collect();
+    experience::side_strength(&side)
 }
 
 /// The number of units the army window counts towards [`ARMY_UNITS`]: the leader (a unit
@@ -256,6 +254,168 @@ pub fn save_army(a: &Army, c: Option<&Content>, recruit_div: i32) -> Army {
 /// A cost as bytes 6 and 74 store it: at most [`COST_CAP`].
 pub fn stored_cost(v: i64) -> u16 {
     v.clamp(0, COST_CAP as i64) as u16
+}
+
+// ------------------------------------------------------------------------------------------
+// The building window (records.md §4)
+// ------------------------------------------------------------------------------------------
+
+/// Local events a building lists (its 128-byte event area).
+pub const BUILDING_EVENTS: usize = 64;
+/// Treasure slots of ruins (bytes 136–145).
+pub const TREASURE: usize = 5;
+/// The garrison defence slider's range: the byte stored is 50 − its position.
+pub const DEFENCE_SLIDER: u8 = 50;
+
+/// The pages the building window shows for a type (0x549210).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BuildingPages {
+    /// The troops group, with its barracks and garrison sub-pages.
+    pub barracks: bool,
+    pub garrison: bool,
+    /// Ruins: the treasure page.
+    pub treasure: bool,
+    /// The trade group: market goods and the library.
+    pub market: bool,
+    pub library: bool,
+}
+
+impl BuildingPages {
+    pub fn of(kind: u8) -> BuildingPages {
+        BuildingPages {
+            barracks: matches!(kind, 1..=4 | 7 | 8 | 10 | 12),
+            garrison: matches!(kind, 1..=4 | 12),
+            treasure: kind == 12,
+            market: matches!(kind, 1 | 6 | 7 | 10),
+            library: matches!(kind, 1 | 7 | 10),
+        }
+    }
+}
+
+/// The garrison defence slider's position for a stored defence (the load, 0x549210): 50 −
+/// the byte, at least 0.
+pub fn defence_slider(defence: u8) -> u8 {
+    DEFENCE_SLIDER.saturating_sub(defence)
+}
+
+/// The defence the save writes for a slider position (0x54c3fc): 50 − the position.
+pub fn defence_of_slider(position: u8) -> u8 {
+    DEFENCE_SLIDER - position.min(DEFENCE_SLIDER)
+}
+
+/// What the linked-building list offers a type (0x54b1ac): a village its castles, a dungeon
+/// entrance every dungeon entrance (itself included), other types nothing.
+pub fn link_types(kind: u8) -> &'static [u8] {
+    match kind {
+        2 => &[3],
+        11 => &[11],
+        _ => &[],
+    }
+}
+
+/// The building as the window's save button writes it (0x54c3fc): the footprint from the
+/// picture (`footprint`, the install's when known); "has barracks" (294) exactly when a
+/// barracks slot holds a unit; the event area cleared past the list; no owner stored as
+/// 255; a faction that is none of the first three buttons the enemy; the link only to what
+/// its list offers; the garrison defence through the slider (a stored value above 50 comes
+/// back as 50); the hidden Community spin of byte 296 clamped to 0..12 on the way, bytes
+/// 297–300 written back as they are (records.md §13: the shipped maps hold a stale copy of
+/// the goods there, which a save keeps, but for that clamp).
+pub fn save_building(b: &Building, s: &Scenario, footprint: Option<(u8, u8)>) -> Building {
+    let mut b = b.clone();
+    if let Some((w, h)) = footprint {
+        (b.size_x, b.size_y) = (w.max(1), h.max(1));
+    }
+    b.has_barracks = b.barracks.iter().any(|r| r.unit != 0) as u8;
+    let n = (b.event_count as usize).min(BUILDING_EVENTS);
+    b.event_slots[n..].fill(0);
+    if b.owner_army == 0 {
+        b.owner_army = 0xFF;
+    }
+    if !(1..=3).contains(&b.faction) {
+        b.faction = 4;
+    }
+    let link_ok = s.building(b.linked_building as u16).is_some_and(|l| link_types(b.kind).contains(&l.kind));
+    if !link_ok {
+        b.linked_building = 0;
+    }
+    b.garrison_extra_defence = defence_of_slider(defence_slider(b.garrison_extra_defence));
+    b.stale_artifacts[0] = (b.stale_artifacts[0] as i8).clamp(0, 12) as u8;
+    b
+}
+
+/// Adds event `id` to a building's list (0x54e404): at `at` (the selected line) or at the
+/// end. The same event may be listed twice. A list of 64 takes no more (the original stops
+/// with a range error).
+pub fn add_building_event(b: &mut Building, id: u16, at: Option<usize>) -> bool {
+    let n = (b.event_count as usize).min(BUILDING_EVENTS);
+    if id == 0 || n >= BUILDING_EVENTS {
+        return false;
+    }
+    let at = at.filter(|k| *k < n).unwrap_or(n);
+    b.event_slots.copy_within(at..n, at + 1);
+    b.event_slots[at] = id;
+    b.event_count = n as u8 + 1;
+    true
+}
+
+/// Takes entry `index` out of a building's list (a double click, 0x54e66c); the list closes
+/// up.
+pub fn remove_building_event(b: &mut Building, index: usize) -> bool {
+    remove_event(&mut b.event_slots, &mut b.event_count, index)
+}
+
+/// What the garrison page shows (0x54f03c): the garrison's summed tactical cost and its side
+/// strength, its units standing in the building's defence and, in ruins, wearing the
+/// treasure. Shown only. `None` when the garrison has more than 12 units.
+pub fn garrison_rating(b: &Building, c: &Content) -> Option<(i64, i64)> {
+    let a = Army { troops: b.garrison, ..Army::default() };
+    let mut units = scratch_army(&a, c)?;
+    if b.kind == 12 {
+        for item in b.artifact_slots[..TREASURE].iter().filter(|x| **x != 0).map(|x| ItemId(*x as u32)) {
+            give_to_best(&mut units, item, c);
+        }
+    }
+    let bd = b.garrison_extra_defence as i32;
+    let tactical = units.iter().map(|u| u.tactical(c, bd) as i64).sum();
+    Some((tactical, side_strength_of(&units, c, bd)))
+}
+
+/// An item goes to the unit whose tactical cost it raises most (strictly, the first of
+/// equals), as the AI hands out an army's items (0x5834e0); nobody gains: nobody wears it.
+fn give_to_best(units: &mut [Unit], item: ItemId, c: &Content) {
+    let mut best: Option<(usize, i32)> = None;
+    for (k, u) in units.iter().enumerate() {
+        let Ok(slot) = items::slot_for(c, u, item) else { continue };
+        let mut w = u.clone();
+        items::put_on(c, &mut w, slot, item);
+        let gain = w.tactical(c, 0) - u.tactical(c, 0);
+        if gain > best.map_or(0, |b| b.1) {
+            best = Some((k, gain));
+        }
+    }
+    if let Some((k, _)) = best {
+        if let Ok(slot) = items::slot_for(c, &units[k], item) {
+            items::put_on(c, &mut units[k], slot, item);
+        }
+    }
+}
+
+/// The market test (0x54f9f4) can run: random goods, a highest price of at least 50 and not
+/// below the lowest.
+pub fn market_test_ready(b: &Building) -> bool {
+    b.random_artifacts_for_sale > 0 && b.price_max >= 50 && b.price_max >= b.price_min
+}
+
+/// The market test (0x54f9f4): the game's restock run on a copy of the scenario with this
+/// building, its own goods fixed; the twelve places it fills, with each good's price.
+pub fn market_test(s: &Scenario, id: u16, b: &Building, c: std::sync::Arc<Content>) -> Vec<Option<(u32, i32)>> {
+    let mut copy = s.clone();
+    let Some(slot) = (id as usize).checked_sub(1).and_then(|i| copy.buildings.get_mut(i)) else { return Vec::new() };
+    *slot = b.clone();
+    let g = crate::rules::game::Game::from_scenario(c.clone(), &copy, crate::rules::content::HeroClass::Knight);
+    let Some(shop) = g.world.locations.get(id as usize - 1).and_then(|l| l.shop.as_ref()) else { return Vec::new() };
+    shop.places.iter().map(|p| p.map(|g| (g.item.0, c.try_item(g.item).map_or(0, |d| d.cost)))).collect()
 }
 
 #[cfg(test)]
@@ -388,12 +548,90 @@ mod tests {
     }
 
     #[test]
-    fn goods_keep_the_byte_copy() {
+    fn saving_a_building_derives_its_bytes() {
+        let s = Scenario { buildings: vec![Building { kind: 3, ..Building::default() }, Building { kind: 2, ..Building::default() }, Building { kind: 11, ..Building::default() }], ..Scenario::default() };
+        let mut b = Building { kind: 2, size_x: 9, size_y: 9, has_barracks: 1, owner_army: 0, faction: 0, linked_building: 1, ..Building::default() };
+        b.event_count = 2;
+        b.event_slots[..4].copy_from_slice(&[5, 6, 7, 8]);
+        let saved = save_building(&b, &s, Some((4, 3)));
+        assert_eq!((saved.size_x, saved.size_y, saved.has_barracks, saved.owner_army, saved.faction, saved.linked_building), (4, 3, 0, 0xFF, 4, 1));
+        assert_eq!(&saved.event_slots[..4], &[5, 6, 0, 0], "the event area is rewritten from the list");
+        b.barracks[2].unit = 9;
+        b.linked_building = 3;
+        let saved = save_building(&b, &s, None);
+        assert_eq!((saved.size_x, saved.has_barracks, saved.linked_building), (9, 1, 0), "a village links to a castle only");
+        let tunnel = Building { kind: 11, linked_building: 3, ..Building::default() };
+        assert_eq!(save_building(&tunnel, &s, None).linked_building, 3, "a dungeon entrance may link to itself");
+        assert_eq!(save_building(&Building { kind: 5, linked_building: 1, ..Building::default() }, &s, None).linked_building, 0);
+    }
+
+    #[test]
+    fn the_defence_slider_is_inverted() {
+        assert_eq!((defence_slider(0), defence_slider(20), defence_slider(50), defence_slider(80)), (50, 30, 0, 0));
+        assert_eq!((defence_of_slider(50), defence_of_slider(30), defence_of_slider(0)), (0, 20, 50));
+        let s = Scenario::default();
+        for (stored, saved) in [(0, 0), (15, 15), (50, 50), (51, 50), (200, 50)] {
+            let b = Building { garrison_extra_defence: stored, ..Building::default() };
+            assert_eq!(save_building(&b, &s, None).garrison_extra_defence, saved, "{stored}");
+        }
+    }
+
+    #[test]
+    fn the_hidden_community_spins_round_trip() {
+        // Bytes 296–300: what the shipped maps hold there (a stale copy of the goods) comes
+        // back, but for byte 296, which the hidden 0..12 spin clamps.
+        let s = Scenario::default();
+        let mut b = Building { stale_artifacts: [44, 7, 1, 9, 2, 33], ..Building::default() };
+        let saved = save_building(&b, &s, None);
+        assert_eq!(saved.stale_artifacts, [12, 7, 1, 9, 2, 33]);
+        b.stale_artifacts[0] = 0xF0;
+        assert_eq!(save_building(&b, &s, None).stale_artifacts[0], 0, "a negative byte clamps to 0");
+        b.stale_artifacts[0] = 5;
+        assert_eq!(save_building(&b, &s, None).stale_artifacts[0], 5);
+    }
+
+    #[test]
+    fn building_event_lists_take_duplicates() {
         let mut b = Building::default();
-        set_goods(&mut b, 2, 300);
-        assert_eq!((b.artifact_slots[2], b.stale_artifacts[2]), (300, 44));
-        set_goods(&mut b, 6, 1);
-        assert_eq!(b.artifact_slots[6], 0);
+        assert!(add_building_event(&mut b, 4, None));
+        assert!(add_building_event(&mut b, 4, None), "no duplicate check");
+        assert!(add_building_event(&mut b, 9, Some(0)), "inserted at the selected line");
+        assert!(!add_building_event(&mut b, 0, None));
+        assert_eq!((&b.event_slots[..3], b.event_count), (&[9, 4, 4][..], 3));
+        assert!(remove_building_event(&mut b, 1));
+        assert_eq!((&b.event_slots[..3], b.event_count), (&[9, 4, 0][..], 2));
+        for k in 0..62 {
+            assert!(add_building_event(&mut b, 100 + k, None));
+        }
+        assert!(!add_building_event(&mut b, 1, None), "64 at most");
+        assert_eq!(b.event_count, 64);
+    }
+
+    #[test]
+    fn pages_by_type() {
+        let p = |k| BuildingPages::of(k);
+        assert_eq!(p(1), BuildingPages { barracks: true, garrison: true, treasure: false, market: true, library: true });
+        assert_eq!(p(12), BuildingPages { barracks: true, garrison: true, treasure: true, market: false, library: false });
+        assert_eq!(p(6), BuildingPages { market: true, ..BuildingPages::default() });
+        assert_eq!(p(8), BuildingPages { barracks: true, ..BuildingPages::default() });
+        assert_eq!(p(10), BuildingPages { barracks: true, market: true, library: true, ..BuildingPages::default() });
+        assert_eq!(p(5), BuildingPages::default());
+    }
+
+    #[test]
+    fn garrisons_are_rated() {
+        let c = Content::builtin();
+        let u = c.units[4].id as u8;
+        let mut b = Building { kind: 3, ..Building::default() };
+        assert_eq!(garrison_rating(&b, &c), Some((0, 0)));
+        b.garrison[0] = Troop { unit: u, level: 0, count: 3 };
+        let (t0, s0) = garrison_rating(&b, &c).unwrap();
+        assert!(t0 > 0 && s0 > 0);
+        b.garrison_extra_defence = 30;
+        let (t1, _) = garrison_rating(&b, &c).unwrap();
+        assert!(t1 > t0, "the defence counts");
+        b.garrison[1] = Troop { unit: u, level: 0, count: 10 };
+        assert_eq!(garrison_rating(&b, &c), None);
     }
 
     #[test]

@@ -447,7 +447,8 @@ and names units, artefacts and spells from your install; without one it uses pla
   The panels work as the original's record windows (`docs/reference/editor/records.md`): the
   army panel keeps the 12-unit limit, shows the gold cost, upkeep, tactical cost and side
   strength, takes faction, attitudes and leader name from a home building or a faction, and
-  writes the derived model byte and the two stored costs.
+  writes the derived model byte and the two stored costs; the building panel shows the pages
+  of its type, rates the garrison, tests the market and writes the derived bytes.
 - **Events**: the event list (filter by type, group colour and title; New, Duplicate, Delete)
   and every field of the original editor's event window, on its tabs: *Event and player*
   (type, group, start date or "relative only", hours open, repeat every N days, once or many

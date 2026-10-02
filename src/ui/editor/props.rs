@@ -14,6 +14,9 @@ use razdor::rules::content::Content;
 use super::form::*;
 use crate::ui::widgets::*;
 
+/// The places of a market test: (artefact, price) or empty.
+type MarketTest = Vec<Option<(u32, i32)>>;
+
 /// Panel state kept between frames.
 #[derive(Default)]
 pub struct PanelState {
@@ -23,6 +26,8 @@ pub struct PanelState {
     shown: Option<String>,
     /// The army window's cost figures of the army last rated.
     army_cost: Option<(Army, Option<records::ArmyCost>)>,
+    /// The last market test: the building and the twelve places with their prices.
+    market: Option<(u16, MarketTest)>,
 }
 
 impl PanelState {
@@ -48,6 +53,8 @@ pub struct Ctx<'a> {
     pub names: &'a Names,
     pub palette: &'a Palette,
     pub content: Option<&'a Content>,
+    /// The same content, shared (the market test builds a game on it).
+    pub shared: Option<std::sync::Arc<Content>>,
 }
 
 /// The panel's frame and title; returns the area under the title and tabs for the form.
@@ -96,41 +103,49 @@ pub fn building_panel(state: &mut PanelState, s: &Scenario, id: u16, ctx: &Ctx, 
     let orig = s.building(id)?;
     let mut b: Building = orig.clone();
     state.show(&format!("b{id}"));
+    // The original's pages for the type (records.md §4.1).
+    let pages = records::BuildingPages::of(b.kind);
+    let mut tabs: Vec<(usize, &str)> = vec![(0, tr("General"))];
+    if pages.barracks || pages.garrison {
+        tabs.push((1, tr("Troops")));
+    }
+    if pages.treasure {
+        tabs.push((2, tr("Treasure")));
+    }
+    if pages.market || pages.library {
+        tabs.push((3, tr("Trade")));
+    }
+    tabs.push((4, tr("Faction")));
+    tabs.push((5, tr("Events")));
+    state.tab = state.tab.min(tabs.len() - 1);
     let title = format!("{} #{id}  {}", tr(building_type_label(b.kind)), b.name.trim());
-    let area = frame(rect, &title, &[tr("General"), tr("Troops"), tr("Trade"), tr("Faction"), tr("Events")], state);
+    let labels: Vec<&str> = tabs.iter().map(|t| t.1).collect();
+    let area = frame(rect, &title, &labels, state);
     let mut f = Form::new(&format!("b{id}"), area, state.scroll);
     let n = ctx.names;
     let (w, h) = (s.width() as i64, s.height() as i64);
-    match state.tab {
+    match tabs[state.tab].0 {
         0 => {
             f.text("name", tr("Name"), &mut b.name);
             f.text("owner_name", tr("Neutral owner"), &mut b.owner_name);
             f.memo("description", tr("Description"), &mut b.description, 4);
-            let kinds = list_options(&(0..16).map(|k| tr(building_type_label(k))).collect::<Vec<_>>(), 0);
+            let kinds = list_options(&(1..16).map(|k| tr(building_type_label(k))).collect::<Vec<_>>(), 1);
             f.pick("kind", tr("Building type"), &mut b.kind, &kinds);
             let variants: Options = ctx
                 .palette
                 .pictures_of(b.picture_type)
                 .map(|p| (p.variant as i64, trf!("Picture {n} ({w}x{h})", n = p.variant, w = p.size.0, h = p.size.1)))
                 .collect();
-            let before = b.picture_variant;
             if variants.is_empty() {
                 f.num("variant", tr("Picture"), &mut b.picture_variant, 0, 255);
             } else {
                 f.pick("variant", tr("Picture"), &mut b.picture_variant, &variants);
             }
-            if b.picture_variant != before {
-                // A new picture brings its footprint.
-                (b.size_x, b.size_y) = ctx.palette.footprint(b.picture_type, b.picture_variant);
-            }
-            f.num("picture_type", tr("Picture type"), &mut b.picture_type, 0, 15);
+            f.num("picture_type", tr("Picture type"), &mut b.picture_type, 1, 14);
+            f.note(&trf!("Footprint {w} x {h}, from the picture", w = b.size_x, h = b.size_y), DIM);
             f.num("x", tr("X (bottom-right)"), &mut b.x, 0, w - 1);
             f.num("y", tr("Y (bottom-right)"), &mut b.y, 0, h - 1);
-            f.num("size_x", tr("Footprint width"), &mut b.size_x, 1, 12);
-            f.num("size_y", tr("Footprint height"), &mut b.size_y, 1, 12);
             f.pick("owner", tr("Owner army"), &mut b.owner_army, &owner_options(s));
-            f.pick("linked", tr("Linked building"), &mut b.linked_building, &building_options(s));
-            f.note(tr("A village's castle; a dungeon's other end."), DIM);
             f.heading(tr("Starts as the player's for"));
             for (k, class) in palette::HERO_CLASSES.iter().enumerate() {
                 f.flag(&format!("start{k}"), tr(class), &mut b.start_for[k]);
@@ -138,76 +153,112 @@ pub fn building_panel(state: &mut PanelState, s: &Scenario, id: u16, ctx: &Ctx, 
         }
         1 => {
             let units = unit_options(n);
-            f.heading(tr("Barracks"));
-            f.flag("has_barracks", tr("Has barracks"), &mut b.has_barracks);
-            f.flag("all_types", tr("Recruits all types (bandits too)"), &mut b.recruit_all_types);
-            f.slot_header(tr("Unit"), tr("At start"), tr("Most"));
-            for (i, r) in b.barracks.iter_mut().enumerate() {
-                let (mut u, mut a, mut m) = (r.unit, r.start_count, r.max_count);
-                f.slot(&format!("bar{i}"), &units, &mut u, &mut a, 9, &mut m, 9);
-                if (u, a, m) != (r.unit, r.start_count, r.max_count) {
-                    *r = if u == 0 { Default::default() } else { razdor::dt::dtm::RecruitSlot { unit: u, start_count: a, max_count: m } };
+            if pages.barracks {
+                f.heading(tr("Barracks"));
+                f.flag("all_types", tr("Recruits all types (bandits too)"), &mut b.recruit_all_types);
+                f.slot_header(tr("Unit"), tr("At start"), tr("Most"));
+                for (i, r) in b.barracks.iter_mut().enumerate() {
+                    let (mut u, mut a, mut m) = (r.unit, r.start_count, r.max_count);
+                    f.slot(&format!("bar{i}"), &units, &mut u, &mut a, 9, &mut m, 9);
+                    if (u, a, m) != (r.unit, r.start_count, r.max_count) {
+                        *r = if u == 0 { Default::default() } else { razdor::dt::dtm::RecruitSlot { unit: u, start_count: a, max_count: m } };
+                    }
                 }
             }
-            f.heading(tr("Garrison"));
-            f.troops("gar", &units, &mut b.garrison);
-            f.num("defence", tr("Extra defence (%)"), &mut b.garrison_extra_defence, 0, 255);
-            f.flag("ai_only", tr("Garrison serves the AI only"), &mut b.garrison_ai_only);
+            if pages.garrison {
+                f.heading(tr("Garrison"));
+                f.troops_raw("gar", &units, &mut b.garrison, 9);
+                let mut defence = b.garrison_extra_defence.min(records::DEFENCE_SLIDER);
+                f.num("defence", tr("Garrison defence (0-50)"), &mut defence, 0, records::DEFENCE_SLIDER as i64);
+                if defence != b.garrison_extra_defence.min(records::DEFENCE_SLIDER) {
+                    b.garrison_extra_defence = records::defence_of_slider(records::defence_slider(defence));
+                }
+                f.flag("ai_only", tr("Garrison serves the AI only"), &mut b.garrison_ai_only);
+                if let Some(c) = ctx.content {
+                    match records::garrison_rating(&b, c) {
+                        Some((t, side)) => f.note(&trf!("Tactical cost / strength: {t} / {side}", t, side), INK),
+                        None => f.note(tr("More than 12 units: the garrison cannot be rated."), RED),
+                    }
+                }
+            }
         }
         2 => {
             let arts = artefact_options(n);
-            let is_ruin = b.kind == 12;
-            f.heading(if is_ruin { tr("Treasure (artefacts)") } else { tr("Goods always for sale") });
-            for k in 0..records::GOODS {
-                let mut a = b.artifact_slots[k];
-                f.pick(&format!("goods{k}"), &trf!("Slot {n}", n = k + 1), &mut a, &arts);
-                if a != b.artifact_slots[k] {
-                    records::set_goods(&mut b, k, a);
-                }
+            f.heading(tr("Treasure (artefacts)"));
+            for k in 0..records::TREASURE {
+                f.pick(&format!("goods{k}"), &trf!("Slot {n}", n = k + 1), &mut b.artifact_slots[k], &arts);
             }
-            if is_ruin {
-                f.num("treasure", tr("Treasure gold"), &mut b.price_max, 0, 50_000);
-            } else {
-                f.heading(tr("Random goods"));
-                f.num("random", tr("How many"), &mut b.random_artifacts_for_sale, 0, 12);
-                f.num("price_min", tr("Lowest price"), &mut b.price_min, 0, 50_000);
-                f.num("price_max", tr("Highest price"), &mut b.price_max, 0, 50_000);
-            }
-            f.heading(tr("Spells to learn"));
-            let spells = spell_options(n);
-            for k in 0..6 {
-                f.pick(&format!("spell{k}"), &trf!("Spell {n}", n = k + 1), &mut b.spells_for_sale[k], &spells);
-            }
+            f.num_step("treasure", tr("Treasure gold"), &mut b.price_max, 0, 50_000, 50);
         }
         3 => {
+            if pages.market {
+                let arts = artefact_options(n);
+                f.heading(tr("Goods always for sale"));
+                for k in 0..records::GOODS {
+                    f.pick(&format!("goods{k}"), &trf!("Slot {n}", n = k + 1), &mut b.artifact_slots[k], &arts);
+                }
+                f.heading(tr("Random goods"));
+                f.num("random", tr("How many"), &mut b.random_artifacts_for_sale, 0, 12);
+                f.num_step("price_min", tr("Lowest price"), &mut b.price_min, 0, 50_000, 500);
+                f.num_step("price_max", tr("Highest price"), &mut b.price_max, 0, 50_000, 500);
+                if let Some(c) = &ctx.shared {
+                    if f.button(tr("Test the market"), records::market_test_ready(&b)) {
+                        state.market = Some((id, records::market_test(s, id, &b, c.clone())));
+                    }
+                    if let Some((_, goods)) = state.market.as_ref().filter(|m| m.0 == id) {
+                        for g in goods.iter().flatten() {
+                            f.note(&format!("{}: {}", n.artefact(g.0), g.1), INK);
+                        }
+                    }
+                }
+            }
+            if pages.library {
+                f.heading(tr("Spells to learn"));
+                let spells = spell_options(n);
+                for k in 0..6 {
+                    f.pick(&format!("spell{k}"), &trf!("Spell {n}", n = k + 1), &mut b.spells_for_sale[k], &spells);
+                }
+            }
+        }
+        4 => {
             let factions = list_options(&palette::FACTIONS.iter().map(|l| tr(l)).collect::<Vec<_>>(), 1);
-            f.pick("faction", tr("Faction"), &mut b.faction, &factions);
-            if f.button(tr("Attitudes from the faction's row"), true) {
-                if let Some(row) = s.header.relations.get((b.faction as usize).wrapping_sub(1)) {
+            let mut faction = b.faction;
+            f.pick("faction", tr("Faction"), &mut faction, &factions);
+            if faction != b.faction {
+                // As the original: a new faction brings its row of attitudes.
+                b.faction = faction;
+                if let Some(row) = s.header.relations.get((faction as usize).wrapping_sub(1)) {
                     b.relations = *row;
-                    f.changed = Some("relations".into());
                 }
             }
             f.heading(tr("Attitude towards"));
             f.relations("rel", &mut b.relations);
             f.heading(tr("Gold"));
-            f.num("gold", tr("Income per day"), &mut b.gold_per_day, 0, 2500);
-            f.num("gold_max", tr("Most kept (villages)"), &mut b.gold_max, 0, 25_000);
+            f.num_step("gold", tr("Income per day"), &mut b.gold_per_day, 0, 250, 10);
+            f.num_step("gold_max", tr("Most kept"), &mut b.gold_max, 0, 2500, 10);
             f.heading(tr("Mana"));
-            f.num("mana", tr("Income per day"), &mut b.mana_per_day, 0, 255);
-            f.num("mana_max", tr("Most kept"), &mut b.mana_max, 0, 255);
+            f.num_step("mana", tr("Income per day"), &mut b.mana_per_day, 0, 250, 10);
+            // The original's spin goes to 2,500, but the byte holds 255: more stops its save
+            // with a range error.
+            f.num_step("mana_max", tr("Most kept"), &mut b.mana_max, 0, 255, 10);
+            let links = records::link_types(b.kind);
+            if !links.is_empty() {
+                f.pick("linked", tr("Linked building"), &mut b.linked_building, &building_options_of(s, links));
+                f.note(tr("A village's castle; a dungeon's other end."), DIM);
+            }
         }
         _ => {
             f.heading(tr("Local events"));
-            f.note(tr("Local events, quests and rumours checked here, in this order (edit them with the Events button)."), DIM);
+            f.note(tr("Local events, quests and rumours checked here, in this order; one may be listed twice (edit them with the Events button)."), DIM);
             let used = records::used_events(&b.event_slots, b.event_count).to_vec();
-            match f.event_list("events", &used, &event_options(s)) {
+            match f.event_list("events", &used, &event_options(s), true) {
                 EventListEdit::Add(e) => {
-                    records::add_event(&mut b.event_slots, &mut b.event_count, e);
-                    f.changed = Some("events".into());
+                    if records::add_building_event(&mut b, e, None) {
+                        f.changed = Some("events".into());
+                    }
                 }
                 EventListEdit::Remove(i) => {
-                    records::remove_event(&mut b.event_slots, &mut b.event_count, i);
+                    records::remove_building_event(&mut b, i);
                     f.changed = Some("events".into());
                 }
                 EventListEdit::None => {}
@@ -220,7 +271,10 @@ pub fn building_panel(state: &mut PanelState, s: &Scenario, id: u16, ctx: &Ctx, 
         return Some((Command::DeleteBuilding { id }, String::new()));
     }
     let key = changed(orig, &b, &f)?;
-    Some((Command::SetBuilding { id, building: Box::new(b) }, key))
+    // Saved as the original's window saves it (records.md §4.3).
+    let footprint = ctx.palette.picture(b.picture_type, b.picture_variant).map(|p| p.size);
+    let b = records::save_building(&b, s, footprint);
+    (b != *orig).then(|| (Command::SetBuilding { id, building: Box::new(b) }, key))
 }
 
 pub fn army_panel(state: &mut PanelState, s: &Scenario, id: u8, ctx: &Ctx, rect: Rect) -> Option<(Command, String)> {
@@ -382,7 +436,7 @@ pub fn point_panel(state: &mut PanelState, s: &Scenario, id: u8, rect: Rect) -> 
     let used = records::used_events(&p.event_slots, p.event_count).to_vec();
     let mut slots5 = [0u16; 5];
     slots5.copy_from_slice(&p.event_slots[..5]);
-    match f.event_list("events", &used, &event_options(s)) {
+    match f.event_list("events", &used, &event_options(s), false) {
         EventListEdit::Add(e) => {
             let mut n = p.event_count.min(5);
             if records::add_event(&mut slots5, &mut n, e) {
