@@ -288,11 +288,11 @@ impl Shares {
         v.into_iter().map(|(k, n)| (k, n.to_string())).collect()
     }
 
-    /// `[MakeMap]` of Razdor's editor ini in `dir`, else of the install's (read only), else
-    /// the install's shipped values.
-    pub fn load(dir: Option<&Path>, install: Option<&Path>) -> Shares {
+    /// `[MakeMap]` of Razdor's editor ini in `dir`, else the install's shipped values. The
+    /// install's own ini is never read or written for it.
+    pub fn load(dir: Option<&Path>) -> Shares {
         let read = |p: PathBuf| std::fs::read(p).ok().and_then(|b| Ini::from_cp1251(&b).section(SECTION).map(Shares::from_section));
-        dir.and_then(|d| read(d.join(super::options::FILE))).or_else(|| install.and_then(|i| read(i.join(super::options::FILE)))).unwrap_or_default()
+        dir.and_then(|d| read(d.join(super::options::FILE))).unwrap_or_default()
     }
 
     /// Writes the section to Razdor's editor ini in `dir`, keeping its other keys.

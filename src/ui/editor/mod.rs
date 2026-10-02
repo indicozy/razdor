@@ -149,7 +149,6 @@ pub struct EditorScreen {
     catalog_state: catalog::CatalogState,
     /// The new-map dialog while it is open.
     newmap: Option<newmap::NewMapState>,
-    install_dir: Option<PathBuf>,
 }
 
 fn ctrl() -> bool {
@@ -207,7 +206,6 @@ impl EditorScreen {
             catalog: play_content.clone(),
             catalog_state: catalog::CatalogState::default(),
             newmap: None,
-            install_dir: art.map(|a| a.install.dir.clone()),
         }
     }
 
@@ -457,7 +455,7 @@ impl EditorScreen {
             "records" => self.modal = Some(Modal::Records { buildings: true, scroll: 0 }),
             // The new-map dialog; with a map type (0–7), a 200 × 200 run of it started.
             w if w.starts_with("newmap") => {
-                let shares = newmap::load_shares(self.install_dir.as_deref());
+                let shares = newmap::load_shares();
                 let mut st = newmap::NewMapState::new(shares);
                 if let Some(kind) = w.strip_prefix("newmap").filter(|k| !k.is_empty()) {
                     st.options.kind = kind.parse::<u8>().map_err(|e| e.to_string())?.min(7);
@@ -938,7 +936,7 @@ impl EditorScreen {
         match hit {
             Some(0) => action = self.guarded(Then::Clear),
             Some(1) => {
-                let shares = newmap::load_shares(self.install_dir.as_deref());
+                let shares = newmap::load_shares();
                 self.newmap = Some(newmap::NewMapState::new(shares));
                 self.modal = Some(Modal::NewMap);
             }

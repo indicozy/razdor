@@ -326,7 +326,7 @@ fn share_bar(st: &mut NewMapState, bar: usize, x: f32, y: f32, names: &[&str]) {
     }
 }
 
-/// The share widths a new dialog starts with: Razdor's editor ini, else the install's.
-pub fn load_shares(install: Option<&std::path::Path>) -> Shares {
-    Shares::load(razdor::editor::options::editor_dir().as_deref(), install)
+/// The share widths a new dialog starts with: Razdor's editor ini, else the shipped ones.
+pub fn load_shares() -> Shares {
+    Shares::load(razdor::editor::options::editor_dir().as_deref())
 }
