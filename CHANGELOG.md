@@ -611,6 +611,8 @@ old id, and their versions give both.
   the town budget from the castle's low end, garrisons that pile up, and others). Where the
   original stops a step with a range error or loops for ever, the step stops and says why.
   An 800 × 800 map's buildings and roads take about half a second.
+- A building whose footprint reaches past the map's left or top edge leaves all of its cells
+  as they were (plants and marks), as the original's placement stops at the first of them.
 
 ## 0.2.2 — 2026-10-01
 

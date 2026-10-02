@@ -223,7 +223,8 @@ pub fn building_defence(t: u8) -> u8 {
 /// checked. The record is zeroed, then: the type ([`building_kind`]), names
 /// ([`building_names`], which reseeds `rng`), faction 3 with the scenario's attitude row of
 /// faction 3, the defence ([`building_defence`]), owner 0. The footprint's cells lose their
-/// plants and get the building mark. Returns the new id.
+/// plants and get the building mark, none of them when the footprint reaches past the map's
+/// left or top edge. Returns the new id.
 #[allow(clippy::too_many_arguments)]
 pub fn place_building(
     s: &mut Scenario,
@@ -307,17 +308,23 @@ pub fn place_building_in(
     s.buildings.push(b);
     let mut cleared = false;
     let w = s.width() as usize;
-    for fx in (cx - size.0 as i64 + 1)..=cx {
-        for fy in (cy - size.1 as i64 + 1)..=cy {
-            // A footprint reaching left of or above the map stops the original with a range
-            // error after the record is made; Razdor skips those cells.
+    let (x0, y0) = (cx - size.0 as i64 + 1, cy - size.1 as i64 + 1);
+    // A footprint reaching left of or above the map stops the original with a range error
+    // after the record is made, at its first (top-left) cell: no footprint cell is written.
+    if x0 < 0 || y0 < 0 {
+        return Ok((s.buildings.len() as u16, false));
+    }
+    for fx in x0..=cx {
+        for fy in y0..=cy {
             if !inside(s, fx, fy) {
                 continue;
             }
             if !generating {
                 cleared |= objects.at(fx, fy)[1].is_some();
                 objects.set(fx, fy, 1, None);
-            } else if kind < 13 {
+            } else if picture_type < 13 {
+                // The picture type, not the record's (0x596c10): a house made an obelisk
+                // (type 15) still stands on terrain 16.
                 s.terrain[fy as usize * w + fx as usize] = TEMPORARY_TERRAIN;
             }
             cells.set_mark(fx, fy, MARK_BUILDING);
@@ -815,6 +822,30 @@ mod tests {
         let fort = BuildingAt { x: 4, y: 4, picture: (4, 0), size: (1, 1), brush: 1 };
         assert_eq!(place_building_in(&mut s, &mut grid, &mut c, &mut rng, fort, None, false), Ok((3, true)));
         assert!(grid.at(4, 4)[1].is_none() && s.terrain[4 * 20 + 4] == 6);
+        // The picture type decides, not the record's: a house made an obelisk (type 15)
+        // stands on terrain 16 too.
+        let obelisk = BuildingAt { x: 15, y: 15, picture: (8, 3), size: (1, 1), brush: 1 };
+        place_building_in(&mut s, &mut grid, &mut c, &mut rng, obelisk, None, true).unwrap();
+        assert_eq!((s.buildings[3].kind, s.terrain[15 * 20 + 15]), (15, TEMPORARY_TERRAIN));
+    }
+
+    #[test]
+    fn a_footprint_past_the_left_or_top_edge_writes_none_of_its_cells() {
+        // The original's range error comes at the footprint's first, top-left cell, after
+        // the record and its names.
+        let mut s = scenario(20);
+        s.objects = vec![object(0, 5, 9, 1), object(1, 5, 9, 1)];
+        let mut c = CellLayer::load(&s);
+        let mut rng = Rng::new(0);
+        let id = place_building(&mut s, &mut c, &mut rng, 1, 5, (3, 0), (3, 3), 1, None).unwrap();
+        let mut e = Rng::new(0);
+        building_names(&NamePools::default(), &mut e, 1, 5, 3, 0);
+        assert_eq!((id, rng.state()), (1, e.state()));
+        assert_eq!((objects_at(&s, 0, 5), objects_at(&s, 1, 5), c.mark(1, 5), c.mark(0, 4)), (vec![(9, 1)], vec![(9, 1)], -9, 6));
+        let mut grid = ObjectGrid::from_objects(20, 20, &s.objects);
+        let top = BuildingAt { x: 8, y: 0, picture: (3, 0), size: (2, 2), brush: 1 };
+        place_building_in(&mut s, &mut grid, &mut c, &mut rng, top, None, true).unwrap();
+        assert_eq!((s.terrain[8], c.mark(8, 0), s.buildings.len()), (6, 6, 2));
     }
 
     #[test]

@@ -531,7 +531,9 @@ The new record is zeroed and then filled:
 | Defence | by picture type: town 20, village 2, castle 15, fort 10, ruins 5, all others 0. House pictures turned into ruins keep 0. |
 | Owner army | 0 (none) |
 
-The footprint cells lose their forest objects and get the building mark.
+The footprint cells lose their forest objects and get the building mark. A footprint that reaches past the
+map's left or top edge stops at its first (top-left) cell with a range error, after the record and its names
+are made, so none of its cells change.
 
 **Names:** before naming, the random generator is reseeded with
 x·11 + y·7 + variant·3 + picture type. The same spot always gives the same names. From the type's
@@ -876,7 +878,7 @@ behaviour, not the same look.
 | Building limit | 254 | 254 | matches | `src/editor/brush.rs` |
 | Building defaults | Faction 3 with its attitudes, defence by type, owner 0, seeded random names | The same, names from the install's `DTMapEdit_Rus.Ini` | matches | `src/editor/brush.rs`, `src/editor/naming.rs` |
 | House picture → type | Pictures 2–4 obelisk, 5–6 ruins (also at save) | The same | matches | `src/editor/brush.rs` |
-| Forest cleared under a building | Yes | Yes | matches | `src/editor/brush.rs` |
+| Forest cleared under a building | Yes; none of the cells of a footprint past the left or top edge (range error at its first cell) | The same, without the error | matches | `src/editor/brush.rs` |
 | Army defaults | Zeroed; style = kind − 4; inactive kind; experience correction 100; numbered name; editor opens | The same; the panel opens | matches | `src/editor/defaults.rs` |
 | Army kinds in palette | Feudal, robbers, peasants, inactive | The same | matches | `src/ui/editor/palette_panel.rs` |
 | Lantern | Radius 10 then a radius prompt; lit | The same; the dialog's radius is revealed | matches | `src/editor/brush.rs` |
