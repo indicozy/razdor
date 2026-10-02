@@ -324,3 +324,26 @@ Texts read from {path}. = Тексты прочитаны из {path}.
 {path} does not start with [Head]; it was not read. = {path} не начинается с [Head]; файл не прочитан.
 Error in the text file {path} at line {line}; the texts after it were not read. = Ошибка в текстовом файле {path} в строке {line}; тексты после неё не прочитаны.
 There is no text file {path}. = Текстового файла {path} нет.
+
+# Map editor: the original's map check
+Point = Точка
+The original editor's check: {n} remarks; they do not block saving. = Проверка оригинального редактора: замечаний — {n}; сохранению они не мешают.
+the army stands on an impassable place = армия стоит в непроходимом месте
+the army is never activated: no event activates it, starts a battle with it or takes units from it = армия никогда не активируется: ни одно событие не активирует её, не начинает с ней бой и не берёт из неё отряды
+there is no event for meeting the army = нет события встречи с армией
+the upkeep {upkeep} is above the average income {income} = содержание {upkeep} больше среднего дохода {income}
+the patrol reaches past the bottom edge of the map, which may crash the game = патруль выходит за нижний край карты, игра может упасть
+there is no description text = нет текста описания
+no money income is set = не задан денежный доход
+the market's highest price is above the dearest artefact = наибольшая цена рынка выше самого дорогого артефакта
+the garrison is empty = гарнизон пуст
+no recruitment is set = не задан найм
+the market is not set up = рынок не настроен
+a local event that no point and no building lists = местное событие, которого нет ни у одной точки и ни у одного здания
+a quest that no event completes = задание, которое не закрывает ни одно событие
+a rumour that no building lists = слух, которого нет ни у одного здания
+a subordinate event that no event chains to = подчинённое событие, на которое не ссылается ни одно событие
+a relative-only event that no event starts = относительное событие, которое не запускает ни одно событие
+there is no text for the reward = нет текста для награды
+the artefact {item} is not on the map, so the event can never fire = артефакта «{item}» нет на карте, событие никогда не сработает
+an empty point: no events and no radius = пустая точка: нет событий и радиуса

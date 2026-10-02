@@ -431,7 +431,8 @@ and names units, artefacts and spells from your install; without one it uses pla
   original editor writes them), Save to game folder, Undo (Ctrl+Z), Redo
   (Ctrl+Y / Ctrl+Shift+Z), Settings (title, description, start date, victory/defeat event,
   the three hero starts, faction relations, campaign, named characters), Events (below), Check
-  (the list of problems; errors block saving; click one to go there), Test play, Exit.
+  (the original editor's 20 map-check rules, which never block saving, then Razdor's file
+  checks, whose errors do; click a row to go to its record), Test play, Exit.
 - **Tools** (right column, keys in brackets): Select and move (V), Terrain (T: 16 surfaces,
   brush 1/3/5/9, flood fill, rectangle), Objects (O: hills, mountains, stones, trees by class
   and picture; several per cell), Erase (E), Building (B: type and picture; the cell you click

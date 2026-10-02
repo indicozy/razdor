@@ -15,6 +15,7 @@ pub mod events;
 pub mod files;
 pub mod geometry;
 pub mod grid;
+pub mod mapcheck;
 pub mod mapfile;
 pub mod palette;
 pub mod records;
@@ -89,6 +90,30 @@ mod real_maps {
             }
             assert!(d.file_bytes(Some(&names), Some(&palette)).unwrap() == again, "{}: undo is not exact", m.name);
         }
+    }
+
+    #[test]
+    fn the_map_check_runs_on_every_shipped_map() {
+        let Some(dt) = install() else { return };
+        let names = Names::from_content(&Content::from_dt(&dt));
+        assert_eq!(names.facts.recruit_div, 2);
+        let mut total = 0;
+        for m in &dt.maps {
+            let d = EditorDoc::open(&m.path, None).unwrap();
+            let rows = mapcheck::check_map(&d.scenario, &names);
+            for r in &rows {
+                // Every row leads to an existing record.
+                let n = match r.kind {
+                    mapcheck::CheckKind::Army => d.scenario.armies.len(),
+                    mapcheck::CheckKind::Building => d.scenario.buildings.len(),
+                    mapcheck::CheckKind::Event => d.scenario.events.len(),
+                    mapcheck::CheckKind::Point => d.scenario.points.len(),
+                };
+                assert!((1..=n).contains(&(r.id as usize)), "{}: {r:?}", m.name);
+            }
+            total += rows.len();
+        }
+        assert!(total > 0, "the shipped maps have remarks");
     }
 
     #[test]

@@ -474,6 +474,11 @@ old id, and their versions give both.
   `.DTm` plus `.Eng`/`.Rus` with every text), an uncompressed map (`.DTZ`, written as
   `.DTm`) and a demo map (`.DTs`, zlib and the demo section order); Open reads all of them
   and imports a text dump.
+- **The original's map check**: Check lists the 20 rules of the original editor (armies on
+  impassable cells, never activated or without a meeting event, upkeep above income, patrols
+  past the edge, missing descriptions and incomes, empty garrisons, markets not set up,
+  unused local events, rumours and subordinate events, unclosed quests, rewards without text,
+  artefacts nothing gives). They never block saving; a click opens the record.
 
 ## 0.2.2 — 2026-10-01
 

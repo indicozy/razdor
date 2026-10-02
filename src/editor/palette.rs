@@ -222,6 +222,78 @@ pub struct Names {
     pub artefacts: Vec<Choice>,
     /// By 1-based index.
     pub spells: Vec<Choice>,
+    /// The numbers the map check and the playability score read.
+    pub facts: Facts,
+}
+
+/// An artefact's price and type as the original editor keeps them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ArtefactFact {
+    pub id: u32,
+    pub cost: i32,
+    /// The editor's type code (DTMapEdit 0x59bc78): 0 BlowWeapon, 1 ShotWeapon, 2 Armor,
+    /// 3 Helm, 4 Shield, 5 Staff, 6 Amulet, 7 Ring, 8 Potion, 9 Item.
+    pub kind: u8,
+}
+
+/// The install's numbers the original editor's map check and score read: artefact prices
+/// and types, unit prices, the spells' fixed hit-point change and `CostRecrutDiv`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Facts {
+    /// In list order (by `GlobalIndex`).
+    pub artefacts: Vec<ArtefactFact>,
+    /// (`GlobalIndex`, `Cost`).
+    pub unit_costs: Vec<(u32, i32)>,
+    /// `DeltaFixedHits` by 1-based spell index.
+    pub spell_fixed_hits: Vec<Option<i32>>,
+    /// `CostRecrutDiv` of `_Global.ini` (2 in the install).
+    pub recruit_div: i32,
+}
+
+impl Facts {
+    pub fn from_content(c: &Content) -> Facts {
+        use crate::dt::data::ArtefactType as T;
+        let kind = |a: &crate::dt::data::ArtefactDef| -> u8 {
+            // The loader reads the type only of an artefact with a name and a description;
+            // the others keep the default, Item.
+            if a.name.is_empty() || a.description.is_empty() {
+                return 9;
+            }
+            match a.kind {
+                T::BlowWeapon => 0,
+                T::ShotWeapon => 1,
+                T::Armor => 2,
+                T::Helm => 3,
+                T::Shield => 4,
+                T::Staff => 5,
+                T::Amulet => 6,
+                T::Ring => 7,
+                T::Potion => 8,
+                T::Item => 9,
+            }
+        };
+        Facts {
+            artefacts: c.items.iter().map(|a| ArtefactFact { id: a.id, cost: a.cost, kind: kind(a) }).collect(),
+            unit_costs: c.units.iter().map(|u| (u.id, u.cost)).collect(),
+            spell_fixed_hits: c.spells.iter().map(|s| s.delta_fixed_hits).collect(),
+            recruit_div: c.options.cost_recrut_div,
+        }
+    }
+
+    /// An artefact by `GlobalIndex`; one the list does not have reads as the original's
+    /// empty record (price 0, type 0).
+    pub fn artefact(&self, id: u32) -> ArtefactFact {
+        self.artefacts.iter().copied().find(|a| a.id == id).unwrap_or(ArtefactFact { id, cost: 0, kind: 0 })
+    }
+
+    pub fn unit_cost(&self, id: u32) -> i32 {
+        self.unit_costs.iter().find(|u| u.0 == id).map_or(0, |u| u.1)
+    }
+
+    /// The fixed hit-point change of a spell (1-based), 0 when it has none.
+    pub fn spell_fixed_hits(&self, id: u32) -> i32 {
+        (id as usize).checked_sub(1).and_then(|i| self.spell_fixed_hits.get(i).copied().flatten()).unwrap_or(0)
+    }
 }
 
 impl Names {
@@ -230,6 +302,7 @@ impl Names {
             units: c.units.iter().map(|u| Choice { id: u.id, name: u.name.clone() }).collect(),
             artefacts: c.items.iter().map(|a| Choice { id: a.id, name: a.name.clone() }).collect(),
             spells: c.spells.iter().enumerate().map(|(i, s)| Choice { id: i as u32 + 1, name: s.name.clone() }).collect(),
+            facts: Facts::from_content(c),
         }
     }
 

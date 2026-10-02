@@ -528,11 +528,13 @@ The score itself is not in the line.
 
 ## Razdor editor now → original
 
-- **Map check.** Razdor's check (`src/editor/validate.rs`) tests file integrity: sizes, ids in range,
-  dangling references, pictures, string encoding. It blocks saving on errors. The original's check is a
-  separate window of 20 design rules (§2.2) that never blocks saving, and the original has no integrity
-  check at all. None of the 20 rules exists in Razdor, and Razdor has no go-to from an issue to the record
-  window.
+- **Map check.** Now as the original (`src/editor/mapcheck.rs`): the 20 rules of §2.2 with
+  their conditions and order, over marks built as §1 (`src/editor/grid.rs`), listed in the
+  Check window with kind, id, name and message; they never block saving, and clicking a row
+  opens the record (Razdor's own window behaviour, not the original's button). Razdor's
+  integrity check (`src/editor/validate.rs`) stays below them and still refuses a broken file.
+  Still differs: marks are rebuilt for every check, where the original's can be stale after
+  edits it does not rebuild them for; the window is refreshed on every Check.
 - **Formats.** Now as the original (`src/editor/mapfile.rs`, `src/dt/container.rs`): the
   save dialog offers the four file types and the extension rules of §4.2 pick the file
   (`.DTZ` raw under `.DTm`, `.DTS` a zlib, scramble-1, demo-order `.DTs` with header 0x117 = 1,

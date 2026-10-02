@@ -21,6 +21,7 @@ use razdor::dt::dtm::Scenario;
 use razdor::dt::install::{self, MapEntry};
 use razdor::editor::defaults::MAP_SIZES;
 use razdor::editor::files::{self, Consent, Destination, SaveBlock};
+use razdor::editor::mapcheck::{self, CheckRow};
 use razdor::editor::mapfile::{OpenFormat, SaveFormat};
 use razdor::editor::palette::{object_class_label, SURFACE_LABELS};
 use razdor::editor::validate::has_errors;
@@ -88,6 +89,8 @@ pub struct EditorScreen {
     modal: Option<Modal>,
     status: Option<String>,
     issues: Vec<Issue>,
+    /// The rows of the original editor's map check (they never block saving).
+    check_rows: Vec<CheckRow>,
     palette: Palette,
     /// Names from the install (checks and pickers); `None` without one.
     install_names: Option<Names>,
@@ -133,6 +136,7 @@ impl EditorScreen {
             modal: None,
             status: Some(tr("New 50 x 50 map. Maps are saved to your own folder; see Save as.").into()),
             issues: Vec::new(),
+            check_rows: Vec::new(),
             palette,
             install_names: dt_content.as_deref().map(Names::from_content),
             play_names: Names::from_content(&play_content),
@@ -164,6 +168,7 @@ impl EditorScreen {
         self.tools.set_tool(tool);
         self.cam = None;
         self.issues.clear();
+        self.check_rows.clear();
         self.events = EventsState::default();
     }
 
@@ -228,6 +233,7 @@ impl EditorScreen {
                 Ok(written) => self.status = Some(trf!("Saved {path}.", path = written.display())),
                 Err(SaveError::Invalid(issues)) => {
                     self.issues = issues;
+                    self.check_rows.clear();
                     self.modal = Some(Modal::Issues { scroll: 0 });
                     self.status = Some(tr("Not saved: the map has errors.").into());
                 }
@@ -266,6 +272,8 @@ impl EditorScreen {
                         Ok(written) => self.status = Some(trf!("Saved {path}.", path = written.display())),
                         Err(SaveError::Invalid(issues)) => {
                             self.issues = issues;
+                            self.check_rows.clear();
+                    self.check_rows.clear();
                             self.modal = Some(Modal::Issues { scroll: 0 });
                         }
                         Err(e) => self.status = Some(trf!("Not saved: {e}", e)),
@@ -286,6 +294,7 @@ impl EditorScreen {
 
     fn check(&mut self) {
         self.issues = self.doc.issues(self.install_names.as_ref(), Some(&self.palette));
+        self.check_rows = mapcheck::check_map(&self.doc.scenario, self.names());
         self.modal = Some(Modal::Issues { scroll: 0 });
     }
 
@@ -361,6 +370,7 @@ impl EditorScreen {
         let issues = self.doc.issues(Some(&self.play_names), None);
         if has_errors(&issues) {
             self.issues = issues;
+            self.check_rows.clear();
             self.modal = Some(Modal::Issues { scroll: 0 });
             self.status = Some(tr("Fix the errors before test play.").into());
             return EditorAction::None;
@@ -883,11 +893,28 @@ impl EditorScreen {
             Modal::Issues { scroll } => {
                 let errors = self.issues.iter().filter(|i| i.severity == Severity::Error).count();
                 let warnings = self.issues.len() - errors;
-                let head = if self.issues.is_empty() { tr("No problems found.").to_string() } else { trf!("Errors: {errors}, warnings: {warnings}. Errors block saving. Click one to go there.", errors, warnings) };
+                let head = if self.issues.is_empty() && self.check_rows.is_empty() {
+                    tr("No problems found.").to_string()
+                } else {
+                    trf!("Errors: {errors}, warnings: {warnings}. Errors block saving. Click one to go there.", errors, warnings)
+                };
                 text(tr("Map check"), x, y, 22.0, ACCENT);
                 text_fit(&head, x, y + 26.0, r.w - 40.0, 16.0, if errors > 0 { RED } else { INK });
                 y += 40.0;
-                let list = Rect::new(x, y, r.w - 40.0, r.h - 130.0);
+                if !self.check_rows.is_empty() {
+                    let n = self.check_rows.len();
+                    text_fit(&trf!("The original editor's check: {n} remarks; they do not block saving.", n), x, y + 2.0, r.w - 40.0, 15.0, DIM);
+                    y += 22.0;
+                }
+                // The original's rows (kind, id, name, message), then Razdor's file checks.
+                let mut lines: Vec<(String, Color, Place)> = self
+                    .check_rows
+                    .iter()
+                    .map(|c| (format!("{} {}  {}: {}", c.kind.label(), c.id, c.name, c.message), Color::new(0.95, 0.85, 0.55, 1.0), c.place()))
+                    .collect();
+                let error_ink = Color::new(1.0, 0.5, 0.45, 1.0);
+                lines.extend(self.issues.iter().map(|i| (i.to_string(), if i.severity == Severity::Error { error_ink } else { INK }, i.place)));
+                let list = Rect::new(x, y, r.w - 40.0, r.bottom() - 74.0 - y);
                 let rows = (list.h / 24.0).floor() as usize;
                 if mouse_in(list.x, list.y, list.w, list.h) {
                     let wh = mouse_wheel().1;
@@ -897,11 +924,11 @@ impl EditorScreen {
                         *scroll += 2;
                     }
                 }
-                *scroll = (*scroll).min(self.issues.len().saturating_sub(rows));
+                *scroll = (*scroll).min(lines.len().saturating_sub(rows));
                 let mut go = None;
-                for (i, issue) in self.issues.iter().enumerate().skip(*scroll).take(rows) {
+                for (i, (line, ink, place)) in lines.iter().enumerate().skip(*scroll).take(rows) {
                     let ry = y + (i - *scroll) as f32 * 24.0;
-                    let mut line = issue.to_string();
+                    let mut line = line.clone();
                     while measure(&line, 15.0).width > list.w - 10.0 && !line.is_empty() {
                         line.pop();
                     }
@@ -909,9 +936,9 @@ impl EditorScreen {
                     if hover {
                         draw_rectangle(list.x, ry, list.w, 22.0, Color::new(0.3, 0.25, 0.15, 1.0));
                     }
-                    text(&line, list.x + 4.0, ry + 16.0, 15.0, if issue.severity == Severity::Error { Color::new(1.0, 0.5, 0.45, 1.0) } else { INK });
+                    text(&line, list.x + 4.0, ry + 16.0, 15.0, *ink);
                     if hover && clicked() {
-                        go = Some(issue.place);
+                        go = Some(*place);
                     }
                 }
                 if let Some(p) = go {
