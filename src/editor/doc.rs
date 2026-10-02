@@ -830,9 +830,51 @@ impl EditorDoc {
             .map(|b| Target::Building(b as u16 + 1))
     }
 
+    /// Runs one step of the world generator ([`super::worldgen`]) on the map as one undo
+    /// step, with the editor's generator and cell state.
+    pub fn world_step(&mut self, step: WorldStep, inputs: &super::worldgen::Inputs, options: &super::worldgen::Options) -> super::worldgen::Report {
+        use super::worldgen;
+        self.end_group();
+        let sections = Sections::TERRAIN | Sections::OBJECTS | Sections::BUILDINGS | Sections::ARMIES;
+        let before = self.snapshot(sections);
+        let (s, cells, rng) = (&mut self.scenario, &mut self.cells, &mut self.rng);
+        let report = match step {
+            WorldStep::BuildingsAndRoads => worldgen::buildings_and_roads(s, cells, rng, inputs, options),
+            WorldStep::Economy => worldgen::economy(s, rng, inputs, options),
+            WorldStep::Armies => worldgen::armies(s, cells, rng, inputs, options),
+        };
+        let before = self.changed(before);
+        if !before.is_empty() {
+            self.revision += 1;
+            self.push(Entry { label: step.label().to_string(), merge_key: None, serial: 0, snaps: before });
+        }
+        report
+    }
+
     /// Objects on a cell, in file order.
     pub fn objects_at(&self, x: u16, y: u16) -> impl Iterator<Item = &MapObject> + '_ {
         self.scenario.objects.iter().filter(move |o| o.x == x && o.y == y)
+    }
+}
+
+/// The world generator's three steps, one per tab of its window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorldStep {
+    BuildingsAndRoads,
+    Economy,
+    Armies,
+}
+
+impl WorldStep {
+    pub const ALL: [WorldStep; 3] = [WorldStep::BuildingsAndRoads, WorldStep::Economy, WorldStep::Armies];
+
+    /// The tab's (and the undo step's) label (English; shown through `i18n::tr`).
+    pub fn label(self) -> &'static str {
+        match self {
+            WorldStep::BuildingsAndRoads => n_("Buildings and roads"),
+            WorldStep::Economy => n_("Economy"),
+            WorldStep::Armies => n_("Armies and garrisons"),
+        }
     }
 }
 

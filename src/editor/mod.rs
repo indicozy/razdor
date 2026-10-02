@@ -30,10 +30,11 @@ pub mod records;
 pub mod refs;
 pub mod tools;
 pub mod validate;
+pub mod worldgen;
 
 pub use command::{Command, Settings};
 pub use defaults::NewMap;
-pub use doc::{Applied, EditError, EditorDoc, Origin, SaveError, Target};
+pub use doc::{Applied, EditError, EditorDoc, Origin, SaveError, Target, WorldStep};
 pub use palette::{Names, Palette};
 pub use tools::{Held, Kit, Page, Press, TerrainShape, ToolState};
 pub use validate::{Issue, Place, Severity};

@@ -520,3 +520,16 @@ placing trees (some have no picture) = посадку деревьев (у не�
 The original would never finish {what}; Razdor stopped the run there. = Оригинал никогда не закончил бы {what}; Razdor остановил создание там.
 New {w} x {h} map from seed {seed}. = Новая карта {w} x {h} из зерна {seed}.
 The share widths were not saved: {e} = Доли не сохранены: {e}
+
+# Map editor: the world generator's steps and armies
+Buildings and roads = Здания и дороги
+Economy = Экономика
+Armies and garrisons = Армии и гарнизоны
+Band of {who} = Дружина: {who}
+Army of {who} = Рать: {who}
+Host of {who} = Полчище: {who}
+Robbers = Грабители
+Travellers = Путники
+Assassins = Наёмные убийцы
+Holy host = Святая рать
+Vampires = Кровопийцы

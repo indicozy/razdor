@@ -163,6 +163,101 @@ pub fn round_div(num: i64, den: i64) -> i64 {
     (q + up as i128) as i64
 }
 
+// --- Constants and `Exp` -------------------------------------------------------------------
+
+impl Ext {
+    /// A value from its parts as the x87 stores them: the sign, the biased exponent (16383
+    /// for 1) and the 64-bit mantissa (the original's 10-byte constants).
+    pub const fn from_parts(neg: bool, biased: i32, mant: u64) -> Ext {
+        if mant == 0 {
+            return Ext::ZERO;
+        }
+        Ext { neg, exp: biased - 16383, mant }
+    }
+
+    /// `self · 2^n`, exactly (`fscale`).
+    fn scale(self, n: i64) -> Ext {
+        if self.is_zero() {
+            return self;
+        }
+        Ext { exp: self.exp + n as i32, ..self }
+    }
+
+    /// `frndint` with the default control word: to the nearest integer, ties to even.
+    fn round_to_int(self) -> Ext {
+        Ext::int(self.round_int())
+    }
+
+    /// Delphi's `Exp` (0x402fd4): `t = x · log₂e` (the processor's `fldl2e`), split into
+    /// `n = frndint(t)` and `f = t − n`, then `(f2xm1(f) + 1) · 2ⁿ`. `f2xm1` is modelled
+    /// correctly rounded (the processor's own is within one unit of the last place).
+    pub fn exp(self) -> Ext {
+        let t = self.mul(LOG2_E);
+        let n = t.round_to_int();
+        let f = t.sub(n);
+        f2xm1(f).add(Ext::int(1)).scale(n.round_int())
+    }
+
+    /// The value of the x87's 10 bytes (finite values only).
+    #[cfg(test)]
+    pub fn from_bytes(b: [u8; 10]) -> Ext {
+        let mant = u64::from_le_bytes(b[..8].try_into().expect("8 bytes"));
+        let e = u16::from_le_bytes([b[8], b[9]]);
+        Ext::from_parts(e & 0x8000 != 0, (e & 0x7fff) as i32, mant)
+    }
+
+    /// The value as the x87's 10 bytes, little-endian.
+    #[cfg(test)]
+    pub fn to_bytes(self) -> [u8; 10] {
+        let mut b = [0; 10];
+        if !self.is_zero() {
+            b[..8].copy_from_slice(&self.mant.to_le_bytes());
+            let e = (self.exp + 16383) as u16 | if self.neg { 0x8000 } else { 0 };
+            b[8..].copy_from_slice(&e.to_le_bytes());
+        }
+        b
+    }
+}
+
+/// log₂e as `fldl2e` loads it with rounding to nearest.
+const LOG2_E: Ext = Ext::from_parts(false, 16383, 0xB8AA_3B29_5C17_F0BC);
+/// ln 2 · 2^128.
+const LN2_128: u128 = 0xB172_17F7_D1CF_79AB_C9E3_B398_03F2_F6AF;
+
+/// `(a · b) >> s` of signed values whose product fits 256 bits.
+fn mul_signed(a: i128, b: i128, s: u32) -> i128 {
+    let m = mul_shr(a.unsigned_abs(), b.unsigned_abs(), s) as i128;
+    if (a < 0) != (b < 0) {
+        -m
+    } else {
+        m
+    }
+}
+
+/// 2^f − 1 for |f| ≤ ½, correctly rounded: the series of e^y − 1, y = f·ln 2, in fixed point
+/// scaled to f's own magnitude (about 120 bits of it), so small arguments keep their
+/// precision.
+fn f2xm1(f: Ext) -> Ext {
+    if f.is_zero() {
+        return Ext::ZERO;
+    }
+    // f = m·2^(e−63); y·2^s = m·LN2_128·2^(e − 191 + s) = m·LN2_128 >> 70 for s = 121 − e.
+    let s = (121 - f.exp) as u32;
+    let mut y = mul_shr(f.mant as u128, LN2_128, 70) as i128;
+    if f.neg {
+        y = -y;
+    }
+    let (mut sum, mut term) = (y, y);
+    for k in 2..60i128 {
+        term = mul_signed(term, y, s) / k;
+        if term == 0 {
+            break;
+        }
+        sum += term;
+    }
+    Ext::round(sum < 0, sum.unsigned_abs(), -(s as i32), true)
+}
+
 // --- The cosine and sine of the generator's headings -------------------------------------
 //
 // The original takes `fcos`/`fsin` of x = (a·π) ÷ 180 in extended precision. The x87 takes
@@ -292,6 +387,35 @@ pub fn cos_sin(a: i32) -> (Ext, Ext) {
     (from_fx(c - fx_mul(s, eps) - fx_mul(c, eps2)), from_fx(s + fx_mul(c, eps) - fx_mul(s, eps2)))
 }
 
+/// The x87 itself: the same instructions on the processor running the tests.
+#[cfg(all(test, target_arch = "x86_64"))]
+pub(crate) fn processor_exp(x: Ext) -> Ext {
+    let mut buf = x.to_bytes();
+    // SAFETY: the instructions read and write the ten bytes of `buf` and leave the x87
+    // stack as they found it.
+    unsafe {
+        std::arch::asm!(
+            "fld tbyte ptr [{p}]",
+            "fldl2e",
+            "fmulp",
+            "fld st(0)",
+            "frndint",
+            "fsub st(1), st(0)",
+            "fxch",
+            "f2xm1",
+            "fld1",
+            "faddp",
+            "fscale",
+            "fstp st(1)",
+            "fstp tbyte ptr [{p}]",
+            p = in(reg) buf.as_mut_ptr(),
+            out("st(0)") _, out("st(1)") _, out("st(2)") _, out("st(3)") _,
+            out("st(4)") _, out("st(5)") _, out("st(6)") _, out("st(7)") _,
+        );
+    }
+    Ext::from_bytes(buf)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -368,5 +492,37 @@ mod tests {
         }
         // sin 750° just above ½: a step of 5 goes 3 cells, not the tie's even 2.
         assert_eq!(cos_sin(750).1.mul(e(5)).round_int(), 3);
+    }
+
+    #[test]
+    fn exp_follows_the_processor() {
+        // Delphi's Exp is fldl2e, fmul, frndint, fsub, f2xm1, fld1, fadd, fscale.
+        let x = e(43).div(e(2)).unwrap();
+        assert!((e(30).div(x).unwrap().exp().to_f64() - (30.0f64 / 21.5).exp()).abs() < 1e-14);
+        assert_eq!(Ext::ZERO.exp(), e(1));
+        assert_eq!(e(1).exp().mant, 0xADF8_5458_A2BB_4A9B, "e rounded to 64 bits");
+        assert!((e(-7).div(e(3)).unwrap().exp().to_f64() - (-7.0f64 / 3.0).exp()).abs() < 1e-15);
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn exp_is_within_a_last_bit_of_this_processor() {
+        // The strength formula's arguments: integers over 21.5 and 30.3, and some others. The
+        // processor's f2xm1 is not correctly rounded: about one argument in a hundred ends a
+        // unit of the last place away (no strength changes for it, see worldgen's tests).
+        let c303 = Ext::from_parts(false, 16387, 0xF266_6666_6666_6666);
+        let (mut total, mut off) = (0, 0);
+        for v in -200..3000i64 {
+            for x in [e(v).div(e(43)).unwrap().mul(e(2)), e(v).div(c303).unwrap(), e(v).div(e(1000)).unwrap()] {
+                let (ours, cpu) = (x.exp(), processor_exp(x));
+                total += 1;
+                if ours != cpu {
+                    off += 1;
+                    assert_eq!((ours.neg, ours.exp), (cpu.neg, cpu.exp), "{v}");
+                    assert_eq!(ours.mant.abs_diff(cpu.mant), 1, "{v}: more than a last bit");
+                }
+            }
+        }
+        assert!(off * 40 < total, "{off} of {total} a last bit off");
     }
 }

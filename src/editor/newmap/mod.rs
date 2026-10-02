@@ -11,7 +11,7 @@
 //! never be placed) or stops with an error it swallows (a flat field, the small forest pool),
 //! the run stops cleanly at the same point and says why ([`Stop`]).
 
-mod ext;
+pub(crate) mod ext;
 mod land;
 mod relief;
 #[cfg(test)]
