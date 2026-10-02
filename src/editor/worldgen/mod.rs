@@ -207,6 +207,11 @@ impl Pictures {
         serial.and_then(|s| self.list.get(s)).copied()
     }
 
+    /// The largest side of a footprint of type `t` (0 without pictures).
+    pub fn largest(&self, t: u8) -> u8 {
+        self.list.iter().filter(|b| b.picture_type == t).map(|b| b.size.0.max(b.size.1)).max().unwrap_or(0)
+    }
+
     /// The footprint of picture `(t, variant)`.
     pub fn size(&self, t: u8, variant: u8) -> Option<(u8, u8)> {
         self.list.iter().find(|b| (b.picture_type, b.variant) == (t, variant)).map(|b| b.size)
@@ -269,12 +274,18 @@ pub fn existing(s: &Scenario) -> Counters {
 /// Why a step stopped before its end.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stop {
+    /// Building `building`'s footprint reaches past the map's left or top edge: the
+    /// original's clearing reads the cell there with a range error (§3.1).
+    FootprintOffMap { building: u16 },
     /// The map is narrower than 50 cells: the sector count is 0 and the original divides by
     /// it (§3.2).
     NarrowMap,
     /// A town of the sector loop's extra visit on a map 800 or more cells wide: its row is
     /// outside the town table (§3.2).
     TownTable,
+    /// A town's search succeeded but its placement was refused while no building stood yet:
+    /// its table entry names record 0, which the road pass reads with a range error (§3.6).
+    TownRecord,
     /// A junction building at `(x, y)` whose mask box (or neighbour read) reaches column or
     /// row −1 (§3.9).
     JunctionAtEdge { x: i32, y: i32 },
@@ -283,6 +294,9 @@ pub enum Stop {
     /// The daily income of building `building`'s army, `value` tens, does not fit its byte
     /// (§5.4).
     ArmyIncome { building: u16, value: i32 },
+    /// The gold of building `building`'s army, `value`, is outside the army's signed 16-bit
+    /// field (a maximum gold or a ruin budget above 32767, §5.4).
+    ArmyGold { building: u16, value: i32 },
     /// A theme lists a unit id above 255, which an army's byte cannot hold.
     UnitId { building: u16 },
     /// The builder's window for building `building` can never take a unit of the theme: the

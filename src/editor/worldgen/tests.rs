@@ -737,6 +737,34 @@ fn an_endless_builder_loop_stops_the_step() {
 }
 
 #[test]
+fn army_gold_past_a_signed_16_bit_field_stops_the_step() {
+    let kit = Kit::new();
+    // A maximum gold of 32768 or more (grid values the economy accepts): right after the
+    // placement, before any budget draw.
+    let (mut s, mut cells) = town_map(&[4, 1]);
+    s.buildings[0].gold_max = 32_768;
+    let mut rng = Rng::new(5);
+    let r = armies(&mut s, &mut cells, &mut rng, &kit.inputs(0), &army_options(0));
+    assert_eq!(r.stop, Some(Stop::ArmyGold { building: 1, value: 32_768 }));
+    let mut e = Rng::new(5);
+    e.random(100);
+    assert_eq!((s.armies.len(), rng.state(), s.armies[0].leader_unit), (1, e.state(), 0));
+    // 32767 still fits.
+    let (mut s, mut cells) = town_map(&[4]);
+    s.buildings[0].gold_max = 32_767;
+    assert_eq!(armies(&mut s, &mut cells, &mut Rng::new(5), &kit.inputs(0), &army_options(0)).stop, None);
+    assert_eq!(s.armies[0].gold_income, 32_767);
+    // A ruin army's gold is its budget, checked after its troops are in.
+    let (mut s, mut cells) = town_map(&[12]);
+    let mut o = army_options(0);
+    o.budgets[budget::R1] = 40_000;
+    o.budgets[budget::R2] = 40_000;
+    let r = armies(&mut s, &mut cells, &mut Rng::new(5), &kit.inputs(0), &o);
+    assert_eq!(r.stop, Some(Stop::ArmyGold { building: 1, value: 40_000 }));
+    assert!(s.armies[0].leader_unit != 0 && s.buildings[0].owner_army == 0xFF);
+}
+
+#[test]
 fn a_full_army_table_sends_buildings_to_the_garrison_path() {
     let kit = Kit::new();
     let (mut s, mut cells) = town_map(&[1]);

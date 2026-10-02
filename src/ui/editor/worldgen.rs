@@ -48,11 +48,14 @@ impl WorldGenState {
 /// Why a step stopped, for the window and the status line.
 pub fn stop_text(s: Stop) -> String {
     match s {
+        Stop::FootprintOffMap { building } => trf!("Building {building} reaches past the map's left or top edge: the original's clearing stops the step there with a range error, and so did Razdor.", building),
         Stop::NarrowMap => tr("The map is narrower than 50 cells: the original divides by its sector count, 0, so the step stopped after clearing the buildings.").into(),
         Stop::TownTable => tr("A town of the extra sector visit fell outside the original's town table (a map 800 wide and taller): the step stopped there with a range error, as the original's does.").into(),
+        Stop::TownRecord => tr("A town found its place but was refused (check the brush size) before any building stood: the original's road pass stops with a range error, and so did Razdor.").into(),
         Stop::JunctionAtEdge { x, y } => trf!("The junction building at ({x}, {y}) reaches past the map's top or left edge: the original stops the step there with a range error, and so did Razdor.", x, y),
         Stop::EconomyValue { building } => trf!("A value of building {building} does not fit its field (check the grids): the original stops the step there with a range error, and so did Razdor.", building),
         Stop::ArmyIncome { building, value } => trf!("The army of building {building} would earn {value} tens a day, more than its byte holds: the original stops the step there with a range error, and so did Razdor.", building, value),
+        Stop::ArmyGold { building, value } => trf!("The army of building {building} would get {value} gold, more than its field holds: the original stops the step there with a range error, and so did Razdor.", building, value),
         Stop::UnitId { building } => trf!("A theme lists a unit above 255 (building {building}): the original stops the step there with a range error, and so did Razdor.", building),
         Stop::Hang { building, slot, lo, hi } => {
             trf!("No unit of the theme costs {lo} to {hi} (building {building}, slot {slot}) and the window cannot widen: the original would never finish; Razdor stopped the step there.", building, slot, lo, hi)

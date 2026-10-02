@@ -609,8 +609,10 @@ old id, and their versions give both.
   placement, the spiral that only grows toward the bottom right, the extra sector visit, the
   picture drawn before the roll, the six-bridge limit, the village gold from the mana base,
   the town budget from the castle's low end, garrisons that pile up, and others). Where the
-  original stops a step with a range error or loops for ever, the step stops and says why.
-  An 800 × 800 map's buildings and roads take about half a second.
+  original stops a step with a range error or loops for ever, the step stops and says why
+  (also for an old building past the map's edge, a first town refused by a wide brush and
+  army gold past 32767). Buildings and roads build the marks again before and after, as the
+  original does. An 800 × 800 map's buildings and roads take about half a second.
 - A building whose footprint reaches past the map's left or top edge leaves all of its cells
   as they were (plants and marks), as the original's placement stops at the first of them.
 

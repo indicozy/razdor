@@ -38,7 +38,7 @@ draw of the random generator in §1 (0 when n = 0).
   clean-up) use whatever state the editor already had.
 - **code** The generator code is compiled with range checking. An array index outside its declared range
   raises a run-time error that aborts the step half-way, leaving whatever it had already written. The cases
-  that matter here are noted where they occur (§3.2, §3.9, §4, §5.4).
+  that matter here are noted where they occur (§3.1, §3.2, §3.6, §3.9, §4, §5.4).
 
 ## 2. Settings and their defaults
 
@@ -85,8 +85,12 @@ tabs. Run executes only the step of the active tab.
 road layer, then builds new ones. Armies are left alone, so their home and owner links go stale.
 
 ### 3.1 Clearing the old layer
-1. All ten counters are set to 0, and the "generating" flag is switched on (0x5700b7).
+1. All ten counters are set to 0, the marks are built again from the map (0x5a2ed4, called at 0x5700b2, the
+   routine of `mapcheck-files.md` §1), and the "generating" flag is switched on (0x5700b7).
 2. Every road cell inside an existing building's footprint becomes grass plain (6), and its mark is set to 6.
+   Buildings go in table order, each footprint x outer and y inner. The cell reads are range-checked, so a
+   footprint that reaches past the left or top edge (a building placed at the edge, see §3.5) aborts the step
+   at that cell.
 3. Every interior cell is visited, x from 1 to W−2 in the outer loop and y from 1 to H−2 in the inner loop.
    For a **road cell**:
    - If more than 4 of its 8 neighbours have a forest-layer object, the step draws a direction R(8) until it
@@ -106,9 +110,10 @@ road layer, then builds new ones. Armies are left alone, so their home and owner
 5. The building table is emptied (count 0, all 256 records zeroed). The view is scrolled to (0, 0), because
    placements are given relative to the view (0x5a3864). Randomize is called (§1).
 
-Old footprints keep their building mark on the cells, which counts as negative, so a second run in the same
-session cannot place buildings where earlier ones stood. Only their former road cells are freed, by item 2
-(**code**). Whether loading a map rebuilds those marks is **unknown**.
+The buildings standing when the step starts keep their footprint marks from item 1, which count as negative,
+so a second run cannot place buildings where earlier ones stood, even after a load (which rebuilds the marks,
+`mapcheck-files.md` §3.8). Only their former road cells are freed, by item 2 (**code**). Stale marks of
+earlier edits, on the other hand, do not count, since item 1 replaces them.
 
 ### 3.2 Sectors and quadrants
 - The map is cut into sectors of 50 × 50 cells, with n = W div 50 sectors per side. The **same n is used for
@@ -167,6 +172,12 @@ placement itself was refused.
 - A stone bridge sets its footprint to the road cost and a wooden bridge to the grass-plain cost, each plus
   1000.
 
+The reads are bounds-checked (0 off the map) but the writes are not (0x4da2ec): a square reaching past the left
+edge writes 0 + its cost at the end of the row above. Two cells before the grid hold its own width and height,
+so a square reaching cell (−1, 0), (−2, 0), (W − 1, −1) or (W − 2, −1) would change the grid's size for every
+later read and write. No object's square ever leaves the map (the hills brush keeps it inside, and a load moves
+it inside, `mapcheck-files.md`), so only a bridge code left on the border by an earlier map could do this.
+
 The second pass subtracts 1000, raises negative values to 0 and sets every border cell to 0. A value of 0 is
 **blocked**, and **100 or more counts as water**. So shallows and coastal water can be crossed at a high cost,
 and deep sea cannot.
@@ -185,8 +196,11 @@ If it is accepted:
 - the faction is set to neighbour, with the map's neighbour attitudes;
 - the extra garrison defence is set by type: town 20, village 2, castle 15, fort 10, ruins 5;
 - the owner byte is **left at 0**, not at "none";
-- every footprint cell gets the building mark. While the generating flag is on, footprint cells of types
-  below 13 also get the temporary terrain 16. While it is off, their forest layer is cleared instead.
+- every footprint cell gets the building mark. While the generating flag is on, footprint cells of picture
+  types below 13 also get the temporary terrain 16 (0x596c10; the picture type, so a house made an obelisk
+  counts). While it is off, their forest layer is cleared instead. The footprint loop is range-checked and
+  starts at the top-left cell, so a footprint reaching past the left or top edge writes none of its cells
+  and aborts with a range error, after the record and its names are made.
 
 Then comes the reseed of §1, followed by the name draws. These depend on the picture type and variant:
 - **Default case** (towns, castles, forts, taverns, markets, churches, bridges, …): R(size of the type's name
@@ -224,6 +238,11 @@ are set up and the cost grid is built (0x571713–0x571747).
    - the next town further down the same column, skipping empty sectors, gets a road from its centre to this
      town's centre;
    - then the next town to the right in the same row gets one the same way.
+
+   A table entry is the building count right after the search, so a search whose placement was refused
+   (§3.3) names the building placed before it. When none was placed yet the entry is 0, and reading record
+   0 − 1 aborts the step with a range error. With the default brush size this needs a refused anchor cell;
+   a brush wider than a town's distance from the top or left edge refuses every placement.
 2. **Nearest-neighbour roads.** The building count is taken once at this point; bridges built in item 1 are
    already part of it. For each building i of that count that is not a town (type > 1, bridges included):
    - take the building j ≠ i with the smallest distance from anchor to anchor, scanning all current buildings
@@ -299,7 +318,8 @@ never recomputed by §3.1, so this depends on the stale mask state (see Unknowns
 5. For k = 0..n² (again n² + 1 sectors): a picture R(ruin pictures) + first ruin picture, then a roll
    R(100) < the ruins chance (0x572e2e). On success the spiral search of §3.3 runs with radius 30, starting
    from the **sector centre** itself.
-6. The step redraws the map and shows the counters.
+6. The marks are built again from the new map (0x572eaa), and the step redraws the map and shows the
+   counters.
 
 ### 3.11 Draw order of the step, summed up
 1. Road clean-up: R(8) repeats, cell by cell.
@@ -429,7 +449,12 @@ building's maximum gold. Then, by type:
     to the army.
   - Garrison slots 4 to 6 of the building are emptied.
 - **Tavern.** The leader is unit 74 or 75, chosen by R(2) (0x576015). There are no troops and no budget draw.
-- **Ruins.** R(3) is drawn after the budget (0x5761d4).
+- **Ruins.** R(3) is drawn after the budget (0x5761d4). The army's gold, the budget, is written after its
+  troops.
+- **Gold.** The army's gold is a signed 16-bit field and both writes are range-checked: a building's maximum
+  gold of 32768 or more aborts the step right after the placement, before any budget draw (0x574c3d), and so
+  does a ruin budget outside −32768…32767 once the troops are in (0x57628f). Both need values past the
+  defaults (grid cells, spin boxes).
 - **Shared tail, for every army.**
   - model = style + 4 (4 feudal, 5 bandits, 6 peasants);
   - home = the building;
@@ -552,8 +577,9 @@ All **code** unless noted.
 16. The leader of a Normal army comes from the Hero list at 40–50 % of the budget (§6.2).
 17. The economy step moves a goods count by −1, 0 or +1, never 0 to +2, and then caps it at 12 (§4).
 18. A cost window whose high end is 4 or less never widens, so the builder can hang (§6.3).
-19. Range checks abort a step half-way in a few edge cases: a junction near the top or left edge, an army
-    income byte above 255, negative economy values (§1, §3.9, §4, §5.4).
+19. Range checks abort a step half-way in a few edge cases: an old footprint past the top or left edge, a
+    first town refused after its search, a junction near the top or left edge, an army income byte above 255,
+    army gold above 32767, negative economy values (§1, §3.1, §3.6, §3.9, §4, §5.4).
 
 ## Razdor editor now → original
 
@@ -564,24 +590,24 @@ All **code** unless noted.
 | Counters | the open map's counts on opening (bridges never counted), the step's after a run | §2 | matches |
 | Random generator | the game's (`rules/rng.rs`), the editor's one stream; Randomize from the clock after the road clean-up | §1 | matches |
 | Reseed on placement, name draws | the shared placement of the buildings brush (`brush::place_building_in`, `naming.rs`), with the generating flag (terrain 16, trees kept) | §1, §3.5 | matches |
-| Clearing, mask, erosion | §3.1; the mask is the cells' scratch byte, which the new-map generator's flags fill and a load clears | §3.1 | matches (the load's clearing is Razdor's reading of an unknown) |
+| Clearing, mask, erosion | §3.1; the marks built again at the start and the end; the mask is the cells' scratch byte, which the new-map generator's flags fill and a load clears | §3.1 | matches |
 | Sectors, quadrants, spiral | §3.2, §3.3, n² + 1 visits | §3.2, §3.3 | matches |
-| Cost map | §3.4, unchecked writes past the left edge wrapping to the row above as the original's do; rebuilt after every attempt (only the changed cells are computed again, each as the whole build leaves it) | §3.4 | matches |
+| Cost map | §3.4, unchecked writes past the left edge wrapping to the row above as the original's do, writes before the grid skipped; rebuilt after every attempt (only the changed cells are computed again, each as the whole build leaves it) | §3.4 | matches (a write into the grid's own size, which only a stale border bridge could make, is not followed) |
 | Road flood and path | the game's planner (`TileMap::flood_maps`, `descend`) | the editor's copy of it | matches |
 | Roads, bridges, junctions, ruins | §3.6–§3.10 | §3.6–§3.10 | matches |
 | Economy | §4 and §4.1 | §4 | matches |
 | Armies and garrisons | §5, the army placed with the items brush's placement; names our own words (the budget's three words, the fixed army names), the owner name cut at the Russian particles | §5 | matches (Razdor's own texts) |
 | Army builder, roles, widening | §6 with the themes of `[AIArmyGeneration]` up to the first 0 | §6 | matches (a non-number in a list is skipped, where the original's reader may stop) |
 | Strength | §6.5 in software 80-bit precision with the editor's constants and Delphi's `Exp`; `f2xm1` modelled correctly rounded | x87 | matches (an x86 processor's `f2xm1` is a last bit off for about 1 % of arguments; no unit's strength of the install changes) |
-| Range errors (§3.2 n = 16, §3.9, §4, §5.4) and the divide by zero (W < 50) | the step stops there and says why; what it wrote stays, but terrain 16 goes back to grass plain | the step aborts half-way, terrain 16 and the generating flag left | Razdor stops cleanly |
+| Range errors (§3.1 footprint, §3.2 n = 16, §3.6 record 0, §3.9, §4, §5.4 income and gold) and the divide by zero (W < 50) | the step stops there and says why; what it wrote stays, but terrain 16 goes back to grass plain | the step aborts half-way, terrain 16 and the generating flag left | Razdor stops cleanly |
 | Endless builder loop (§6.3) | the step stops when the window can no longer widen and holds no unit of the theme | loops for ever | Razdor stops cleanly |
 | Undo | one step per run; afterwards the cell state is built again as a load builds it | no undo | Razdor's own |
 
 ## Unknowns
 
 - Whether the pictures of a type are always numbered consecutively, which the picture draw assumes (§3.11).
-- Whether loading a map rebuilds the building marks on footprint cells, and whether the scratch mask starts
-  cleared (§3.1).
+- What the scratch mask holds after the editor's own new map without its generator (a load clears the whole
+  cell grid, `mapcheck-files.md` §3.8; the generator leaves its flags there).
 - What the user sees after the divide-by-zero on maps narrower than 50 cells.
 - The meaning of army byte 8, which the generator sets to 4.
 - Which units, if any, get a different strength in the editor than in the game because of the constant

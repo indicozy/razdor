@@ -151,7 +151,9 @@ fn building(s: &mut Scenario, cells: &mut CellLayer, rng: &mut Rng, inp: &Inputs
         let army = &mut s.armies[a];
         army.leader_name.clear();
         army.unknown_8 = 4;
-        army.gold_income = gold_max;
+        // The army's gold is a signed 16-bit field, range-checked (0x574c3d).
+        let gold = i16::try_from(gold_max).map_err(|_| Stop::ArmyGold { building: id, value: gold_max as i32 })?;
+        army.gold_income = gold as u16;
     }
     // (name, style, patrols, radius, aggression, gold, theme, leader name from the owner).
     struct Shape {
@@ -205,7 +207,7 @@ fn building(s: &mut Scenario, cells: &mut CellLayer, rng: &mut Rng, inp: &Inputs
             c = budget(rng, o, place, (R1, R2, R1));
             let vampires = rng.random(3) == 0;
             let (name, theme) = if vampires { (n_("Vampires"), VAMPIRES) } else { (n_("Undead"), UNDEAD) };
-            fixed(name, 1, 1, 25, 25, Some(c as u16), Some(theme), false)
+            fixed(name, 1, 1, 25, 25, None, Some(theme), false)
         }
     };
     {
@@ -233,6 +235,11 @@ fn building(s: &mut Scenario, cells: &mut CellLayer, rng: &mut Rng, inp: &Inputs
         }
         // A tavern's army is a lone leader, unit 74 or 75 (0x576015).
         None => s.armies[a].leader_unit = rng.random(2) as u8 + 74,
+    }
+    if kind == 12 {
+        // A ruin army's gold is its budget, set after its troops, range-checked as above (0x57628f).
+        let gold = i16::try_from(c).map_err(|_| Stop::ArmyGold { building: id, value: c })?;
+        s.armies[a].gold_income = gold as u16;
     }
     if matches!(kind, 1 | 3) {
         // The daily income: the troops' wages less 50 and the building's own income, in

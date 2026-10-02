@@ -70,13 +70,20 @@ pub(super) struct World<'a> {
     ones: Vec<u16>,
     /// The cost cells a change since the last rebuild may have changed.
     dirty: Vec<usize>,
+    /// How far right and down of a cell a square written over it can stand: an object's
+    /// (sprite div 10, at most 25) or a bridge's footprint.
+    reach: i32,
 }
 
 /// Tests set this to check every incremental rebuild of the cost map against a full one.
 #[cfg(test)]
 pub(super) static VERIFY_COSTS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-pub(super) fn run<'a>(s: &'a mut Scenario, cells: &'a mut CellLayer, rng: &'a mut Rng, inp: &'a Inputs<'a>, o: &Options) -> Report {
+pub(super) fn run(s: &mut Scenario, cells: &mut CellLayer, rng: &mut Rng, inp: &Inputs, o: &Options) -> Report {
+    // The step starts and ends by building the marks again from the map (0x5a2ed4 at
+    // 0x5700b2 and 0x572eaa): stale marks of earlier edits do not count, the old buildings'
+    // footprints do.
+    cells.rebuild_marks(s);
     let mut w = World::new(s, cells, rng, inp);
     let stop = w.step(o).err();
     // The original leaves the flag on and terrain 16 under its buildings when it stops half
@@ -86,6 +93,9 @@ pub(super) fn run<'a>(s: &'a mut Scenario, cells: &'a mut CellLayer, rng: &'a mu
     }
     let counters = w.counters;
     w.finish();
+    if stop.is_none() {
+        cells.rebuild_marks(s);
+    }
     Report { counters, stop }
 }
 
@@ -115,6 +125,7 @@ impl<'a> World<'a> {
             map: TileMap::from_codes(Grid::Square8, w, h, &vec![0; n], Vec::new()),
             ones: vec![1; n],
             dirty: Vec::new(),
+            reach: 26.max(inp.pictures.largest(13).max(inp.pictures.largest(14)) as i32),
         }
     }
 
@@ -268,7 +279,7 @@ impl<'a> World<'a> {
 
     fn step(&mut self, o: &Options) -> Result<(), Stop> {
         self.generating = true;
-        self.free_footprint_roads();
+        self.free_footprint_roads()?;
         self.clean_roads();
         for _ in 0..5 {
             self.erode();
@@ -285,7 +296,7 @@ impl<'a> World<'a> {
         }
         let towns = self.sectors(o, n)?;
         self.build_costs();
-        self.town_roads(&towns, n);
+        self.town_roads(&towns, n)?;
         self.nearest_roads();
         self.generating = false;
         self.junctions(o)?;
@@ -296,11 +307,17 @@ impl<'a> World<'a> {
     }
 
     /// §3.1 item 2: road cells inside an existing building's footprint become grass plain.
-    fn free_footprint_roads(&mut self) {
+    /// The cell reads are range-checked: a footprint reaching past the left or top edge (a
+    /// building placed at the edge, whose own placement stopped there) stops the step at
+    /// that cell.
+    fn free_footprint_roads(&mut self) -> Result<(), Stop> {
         let feet: Vec<(i32, i32, i32, i32)> = self.s.buildings.iter().map(|b| (b.x as i32, b.y as i32, b.size_x as i32, b.size_y as i32)).collect();
-        for (bx, by, sx, sy) in feet {
+        for (k, (bx, by, sx, sy)) in feet.into_iter().enumerate() {
             for x in (bx - sx + 1)..=bx {
                 for y in (by - sy + 1)..=by {
+                    if x < 0 || y < 0 {
+                        return Err(Stop::FootprintOffMap { building: k as u16 + 1 });
+                    }
                     if self.inside(x, y) && self.terrain(x, y) == ROAD {
                         self.set_terrain(x, y, GRASS_PLAIN);
                         self.set_mark(x, y, GRASS_PLAIN as i8);
@@ -308,6 +325,7 @@ impl<'a> World<'a> {
                 }
             }
         }
+        Ok(())
     }
 
     /// §3.1 item 3: the road layer taken off the interior cells, and the placement mask.
@@ -407,8 +425,13 @@ impl<'a> World<'a> {
     /// object's cost added over its square (up and left of it), a forest object's on its own
     /// cell, a bridge's footprint set to the road's (stone) or grass plain's (wooden) cost
     /// plus 1000. The writes are not bounds-checked: a square reaching left of the map lands
-    /// at the end of the row above (kept), one above the map in memory the map does not use.
-    /// Then 1000 is taken off, negative values made 0 and the border set to 0.
+    /// at the end of the row above (kept), one above the map before the cost image. The two
+    /// cells just before it are the image's own height and width, which a square at the top
+    /// left (or a top-right one reaching above row 0) overwrites in the original, after which
+    /// its reads and writes go by the broken size; Razdor skips those writes too. No
+    /// object's square leaves the map (the hills brush keeps it on the map and a load moves
+    /// it onto it), so only a bridge's code left on the border by an earlier map can reach
+    /// past it. Then 1000 is taken off, negative values made 0 and the border set to 0.
     fn build_costs(&mut self) {
         let (w, h) = (self.w, self.h);
         let n = self.cost.len() as i64;
@@ -506,16 +529,19 @@ impl<'a> World<'a> {
     fn cost_cell(&self, i: usize) -> u16 {
         let (w, h) = (self.w, self.h);
         let (cx, cy) = ((i as i32) % w, (i as i32) / w);
-        const REACH: i32 = 26;
+        let reach = self.reach;
+        // Every write lands at or before its source in the scan, and a square aliases at
+        // most one row up: the map is 50 cells wide or more here (a narrower one stops before
+        // the cost map), wider than any square.
         let mut sources: Vec<(i32, i32)> = Vec::new();
-        for y in cy..(cy + REACH).min(h) {
-            for x in cx..(cx + REACH).min(w) {
+        for y in cy..(cy + reach).min(h) {
+            for x in cx..(cx + reach).min(w) {
                 sources.push((y, x));
             }
         }
-        if cx >= w - REACH {
-            for y in (cy + 1)..(cy + 1 + REACH).min(h) {
-                for x in 0..REACH.min(w) {
+        if cx >= w - reach {
+            for y in (cy + 1)..(cy + 1 + reach).min(h) {
+                for x in 0..reach.min(w) {
                     sources.push((y, x));
                 }
             }
@@ -576,26 +602,34 @@ impl<'a> World<'a> {
     }
 
     /// §3.6 item 1: per town of the table, column by column, a road from the next town down
-    /// its column, then from the next town right in its row.
-    fn town_roads(&mut self, table: &[u8; 256], n: i32) {
+    /// its column, then from the next town right in its row. An entry is the building count
+    /// after its placement, so a refused placement names the building before it, and record
+    /// 0 when there was none, which the original reads with a range error.
+    fn town_roads(&mut self, table: &[u8; 256], n: i32) -> Result<(), Stop> {
         let at = |row: i32, col: i32| table[(row + 16 * col) as usize];
+        let centre = |w: &World, id: u8| if id == 0 { Err(Stop::TownRecord) } else { Ok(w.centre(id as usize)) };
         for col in 0..n {
             for row in 0..n {
                 let here = at(row, col);
                 if here == 0xff {
                     continue;
                 }
-                let Some(goal) = self.centre(here as usize) else { continue };
+                let goal = centre(self, here)?;
                 let down = (row + 1..n).map(|r| at(r, col)).find(|&t| t != 0xff);
-                if let Some(start) = down.and_then(|t| self.centre(t as usize)) {
-                    self.road(start, goal);
+                if let Some(t) = down {
+                    if let (Some(start), Some(goal)) = (centre(self, t)?, goal) {
+                        self.road(start, goal);
+                    }
                 }
                 let right = (col + 1..n).map(|c| at(row, c)).find(|&t| t != 0xff);
-                if let Some(start) = right.and_then(|t| self.centre(t as usize)) {
-                    self.road(start, goal);
+                if let Some(t) = right {
+                    if let (Some(start), Some(goal)) = (centre(self, t)?, goal) {
+                        self.road(start, goal);
+                    }
                 }
             }
         }
+        Ok(())
     }
 
     /// §3.6 item 2: every building of the count taken now that is not a town gets a road from
@@ -1160,6 +1194,65 @@ mod tests {
         assert_eq!(r.stop, Some(Stop::NarrowMap));
         assert!(s.buildings.is_empty());
         assert_eq!(rng.state(), 77, "Randomize ran, nothing drew after it");
+    }
+
+    #[test]
+    fn a_footprint_past_the_left_edge_stops_the_clearing() {
+        let k = Kit::new();
+        let inp = k.inputs();
+        let mut s = map(60, 60, 6);
+        s.terrain[60 + 5] = ROAD;
+        s.terrain[2 * 60] = ROAD;
+        for (x, size) in [(6, 2), (1, 3)] {
+            s.buildings.push(crate::dt::dtm::Building { x, y: 2, size_x: size, size_y: size, kind: 1, ..Default::default() });
+        }
+        let (mut cells, mut rng) = (CellLayer::load(&s), Rng::new(3));
+        let r = run(&mut s, &mut cells, &mut rng, &inp, &Options::new(60));
+        assert_eq!(r.stop, Some(Stop::FootprintOffMap { building: 2 }));
+        // The first building's road was freed; the second stopped at its first cell, so the
+        // road at (0, 2) stays; nothing else ran.
+        assert_eq!((s.terrain[60 + 5], s.terrain[2 * 60], s.buildings.len(), rng.state()), (6, ROAD, 2, 3));
+    }
+
+    #[test]
+    fn the_step_builds_the_marks_again_before_and_after() {
+        let k = Kit::new();
+        let inp = k.inputs();
+        // Deep sea with a grass island whose marks are stale (a tree paved away earlier, say).
+        let mut s = map(50, 50, 2);
+        for y in 15..35 {
+            for x in 15..35 {
+                s.terrain[y * 50 + x] = 6;
+            }
+        }
+        let mut cells = CellLayer::load(&s);
+        for y in 15..35 {
+            for x in 15..35 {
+                cells.set_mark(x, y, -9);
+            }
+        }
+        let mut o = Options::new(50);
+        o.chances[Chance::Towns as usize] = 0;
+        let r = run(&mut s, &mut cells, &mut Rng::new(3), &inp, &o);
+        assert_eq!((r.stop, r.counters.towns), (None, 1));
+        let fresh = CellLayer::load(&s);
+        assert!((0..50).all(|x| (0..50).all(|y| cells.mark(x, y) == fresh.mark(x, y))));
+    }
+
+    #[test]
+    fn a_first_town_refused_after_its_search_stops_the_road_pass() {
+        let k = Kit::new();
+        let mut inp = k.inputs();
+        // A brush wider than any town's distance from the edge refuses every placement:
+        // the town table's entry is the building count, 0.
+        inp.brush = 50;
+        let mut s = map(50, 50, 6);
+        let mut o = Options::new(50);
+        o.chances[Chance::Towns as usize] = 0;
+        let (mut cells, mut rng) = (CellLayer::load(&s), Rng::new(3));
+        let r = run(&mut s, &mut cells, &mut rng, &inp, &o);
+        assert_eq!(r.stop, Some(Stop::TownRecord));
+        assert_eq!((s.buildings.len(), r.counters.towns), (0, 1));
     }
 
     #[test]
