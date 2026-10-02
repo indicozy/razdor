@@ -100,7 +100,7 @@ pub fn window(state: &mut SettingsState, s: &Scenario, names: &Names) -> Setting
             records::set_preset_word(&mut hero.mana, mana);
             f.pick("building", tr("Start building"), &mut hero.start_building, &building_options_of(s, &records::START_TYPES));
             f.heading(tr("Troops"));
-            f.troops_raw("troops", &units, &mut hero.troops, 9);
+            f.troops_raw("troops", &troop_options(names), &mut hero.troops, 9);
             records::limit_preset_troops(&before, hero);
             f.note(tr("At most 11 units besides the hero."), DIM);
             f.heading(tr("Artefacts"));

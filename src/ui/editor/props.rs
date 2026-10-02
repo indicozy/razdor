@@ -152,7 +152,7 @@ pub fn building_panel(state: &mut PanelState, s: &Scenario, id: u16, ctx: &Ctx, 
             }
         }
         1 => {
-            let units = unit_options(n);
+            let units = troop_options(n);
             if pages.barracks {
                 f.heading(tr("Barracks"));
                 f.flag("all_types", tr("Recruits all types (bandits too)"), &mut b.recruit_all_types);
@@ -347,7 +347,7 @@ pub fn army_panel(state: &mut PanelState, s: &Scenario, id: u8, ctx: &Ctx, rect:
         1 => {
             f.memo("description", tr("Description"), &mut a.description, 3);
             f.heading(tr("Troops"));
-            f.troops_raw("t", &unit_options(n), &mut a.troops, 255);
+            f.troops_raw("t", &troop_options(n), &mut a.troops, 255);
             if let Some(c) = ctx.content {
                 f.note(&trf!("Units: {n} of {max} (the leader counts)", n = records::army_units(&a, c), max = records::ARMY_UNITS), DIM);
                 match state.cost(&a, c, n.facts.recruit_div) {

@@ -18,6 +18,8 @@ pub mod geometry;
 pub mod grid;
 pub mod mapcheck;
 pub mod mapfile;
+pub mod menus;
+pub mod naming;
 pub mod options;
 pub mod playability;
 pub mod palette;

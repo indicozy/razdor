@@ -361,12 +361,20 @@ fn with_none(none: &str, items: impl Iterator<Item = (i64, String)>) -> Options 
     std::iter::once((0, tr(none).to_string())).chain(items).collect()
 }
 
+/// The units in the original's list order (group, role, school, cost: main-window.md §19.1).
 pub fn unit_options(n: &Names) -> Options {
-    with_none(tr("(none)"), n.units.iter().map(|c| (c.id as i64, format!("{} ({})", c.name, c.id))))
+    with_none(tr("(none)"), n.units_sorted().into_iter().map(|c| (c.id as i64, format!("{} ({})", c.name, c.id))))
 }
 
+/// The units for troop slots (armies, garrisons, barracks, hero presets): the original's
+/// troop lists leave out the first three sorted entries (the hero classes).
+pub fn troop_options(n: &Names) -> Options {
+    with_none(tr("(none)"), n.units_sorted().into_iter().skip(3).map(|c| (c.id as i64, format!("{} ({})", c.name, c.id))))
+}
+
+/// The artefacts by type, then dearest first (§19.2).
 pub fn artefact_options(n: &Names) -> Options {
-    with_none(tr("(none)"), n.artefacts.iter().map(|c| (c.id as i64, format!("{} ({})", c.name, c.id))))
+    with_none(tr("(none)"), n.artefacts_sorted().into_iter().map(|c| (c.id as i64, format!("{} ({})", c.name, c.id))))
 }
 
 pub fn spell_options(n: &Names) -> Options {

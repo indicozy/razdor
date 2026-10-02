@@ -224,6 +224,12 @@ pub struct Names {
     pub spells: Vec<Choice>,
     /// The numbers the map check and the playability score read.
     pub facts: Facts,
+    /// Unit ids in the order of the original's unit lists ([`super::menus::unit_order`]).
+    pub unit_order: Vec<u32>,
+    /// Artefact ids in the order of its artefact lists ([`super::menus::artefact_order`]).
+    pub artefact_order: Vec<u32>,
+    /// The undead units (the armies submenu files armies they lead apart).
+    pub undead: Vec<u32>,
 }
 
 /// An artefact's price and type as the original editor keeps them.
@@ -296,6 +302,13 @@ impl Facts {
     }
 }
 
+/// `list` in the order of `order` (ids), then whatever `order` does not name.
+fn sorted<'a>(list: &'a [Choice], order: &[u32]) -> Vec<&'a Choice> {
+    let mut out: Vec<&Choice> = order.iter().filter_map(|id| list.iter().find(|c| c.id == *id)).collect();
+    out.extend(list.iter().filter(|c| !order.contains(&c.id)));
+    out
+}
+
 impl Names {
     pub fn from_content(c: &Content) -> Names {
         Names {
@@ -303,7 +316,20 @@ impl Names {
             artefacts: c.items.iter().map(|a| Choice { id: a.id, name: a.name.clone() }).collect(),
             spells: c.spells.iter().enumerate().map(|(i, s)| Choice { id: i as u32 + 1, name: s.name.clone() }).collect(),
             facts: Facts::from_content(c),
+            unit_order: super::menus::unit_order(&c.units),
+            artefact_order: super::menus::artefact_order(&Facts::from_content(c).artefacts),
+            undead: c.units.iter().filter(|u| u.nature == crate::dt::data::Nature::Undead).map(|u| u.id).collect(),
         }
+    }
+
+    /// The units in the lists' order (those the order does not know at the end).
+    pub fn units_sorted(&self) -> Vec<&Choice> {
+        sorted(&self.units, &self.unit_order)
+    }
+
+    /// The artefacts in the lists' order.
+    pub fn artefacts_sorted(&self) -> Vec<&Choice> {
+        sorted(&self.artefacts, &self.artefact_order)
     }
 
     fn name(list: &[Choice], id: u32, what: &str) -> String {
