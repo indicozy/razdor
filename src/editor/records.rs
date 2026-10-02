@@ -172,15 +172,20 @@ pub fn army_units(a: &Army, c: &Content) -> usize {
     real_leader(a, c) as usize + a.troops.iter().filter(|t| t.unit != 0 && c.try_unit(UnitId(t.unit as u32)).is_some()).map(|t| t.count as usize).sum::<usize>()
 }
 
-/// An edit of the troops or the leader as the window takes it: one that makes the army pass
-/// [`ARMY_UNITS`] is rolled back to `before` (the original drops the count just raised by
-/// one, 0x546f94 / 0x546af0; its spins step by one, so that is the value before).
+/// An edit of the troops as the window takes it (0x546af0): a count that makes the army pass
+/// [`ARMY_UNITS`] drops by one, and as setting it runs the same handler again, it keeps
+/// dropping until the army fits; a count that reaches 0 clears its unit. So a typed 9 next to
+/// 9 others becomes 3 with a leader, not the value before. A leader picked onto a full army
+/// is not taken back (only the count handler drops anything; the cost routine then fails, so
+/// the stored costs are not recomputed, [`save_army`]).
 pub fn limit_army(before: &Army, after: &mut Army, c: &Content) {
-    if army_units(after, c) > ARMY_UNITS && army_units(after, c) > army_units(before, c) {
-        after.leader_unit = before.leader_unit;
-        after.leader_level = before.leader_level;
-        after.troops = before.troops;
+    if army_units(after, c) <= ARMY_UNITS || army_units(after, c) <= army_units(before, c) {
+        return;
     }
+    let Some(k) = (0..after.troops.len()).find(|&k| after.troops[k].unit != 0 && (after.troops[k].count > before.troops[k].count || after.troops[k].unit != before.troops[k].unit)) else { return };
+    let others = army_units(after, c) - after.troops[k].count as usize;
+    let count = ARMY_UNITS.saturating_sub(others) as u8;
+    after.troops[k] = if count == 0 { crate::dt::dtm::Troop::default() } else { crate::dt::dtm::Troop { count, ..after.troops[k] } };
 }
 
 /// Picking the extra leader entry (0x546c68): the army becomes inactive and patrols with
@@ -484,13 +489,19 @@ pub fn preset_word(field: u32) -> i16 {
     field as u16 as i16
 }
 
-/// The preset's troop limit (0x54145c): a change that takes the six counts past
-/// [`PRESET_TROOPS`] is rolled back (the original drops the count just raised by one).
+/// The preset's troop limit (0x54145c): a count that takes the six counts past
+/// [`PRESET_TROOPS`] drops by one, and as setting it runs the same handler again, it keeps
+/// dropping until the total fits; a count that reaches 0 clears its unit (records.md §1).
+/// So a typed 9 next to 9 others becomes 2, not the value before.
 pub fn limit_preset_troops(before: &HeroPreset, after: &mut HeroPreset) {
     let total = |h: &HeroPreset| h.troops.iter().map(|t| t.count as usize).sum::<usize>();
-    if total(after) > PRESET_TROOPS && total(after) > total(before) {
-        after.troops = before.troops;
+    if total(after) <= PRESET_TROOPS || total(after) <= total(before) {
+        return;
     }
+    let Some(k) = (0..6).find(|&k| after.troops[k].count > before.troops[k].count) else { return };
+    let others = total(after) - after.troops[k].count as usize;
+    let count = PRESET_TROOPS.saturating_sub(others) as u8;
+    after.troops[k] = if count == 0 { crate::dt::dtm::Troop::default() } else { crate::dt::dtm::Troop { count, ..after.troops[k] } };
 }
 
 /// The built-in scenario picture after a click of its spin button: 0..5 round
@@ -628,6 +639,30 @@ mod tests {
         assert!(army_cost(&more, &c, 2).is_none(), "13 units");
         limit_army(&a, &mut more, &c);
         assert_eq!(more.troops[1].count, 5, "the count drops back");
+        // A typed count drops until the army fits, not to the value before: 1 + 6 + 9 → 1 + 6 + 5.
+        let mut typed = a.clone();
+        typed.troops[1].count = 9;
+        limit_army(&a, &mut typed, &c);
+        assert_eq!(typed.troops[1], Troop { unit: u, level: 1, count: 5 });
+        let mut few = a.clone();
+        few.troops[1].count = 2;
+        let mut typed = few.clone();
+        typed.troops[1].count = 9;
+        limit_army(&few, &mut typed, &c);
+        assert_eq!(typed.troops[1].count, 5, "2 raised to 9 next to 1 + 6 becomes 5");
+        // A unit picked into a full army gets no count that fits: its slot is cleared.
+        let mut picked = a.clone();
+        picked.troops[2] = Troop { unit: u, level: 0, count: 1 };
+        limit_army(&a, &mut picked, &c);
+        assert_eq!(picked.troops[2], Troop::default());
+        // A leader picked onto twelve troops is not taken back.
+        let mut twelve = Army::default();
+        twelve.troops[0] = Troop { unit: u, level: 0, count: 12 };
+        let mut led = twelve.clone();
+        led.leader_unit = c.units[0].id as u8;
+        limit_army(&twelve, &mut led, &c);
+        assert_eq!((led.leader_unit, led.troops[0].count), (c.units[0].id as u8, 12));
+        assert!(army_cost(&led, &c, 2).is_none());
         // The extra entry is no unit: it does not count.
         let mut after = more.clone();
         pick_special_leader(&mut after);
@@ -674,11 +709,22 @@ mod tests {
         let mut b = a.clone();
         b.troops[2] = Troop { unit: 7, level: 0, count: 1 };
         limit_preset_troops(&a, &mut b);
-        assert_eq!(b.troops, a.troops, "12 troops: rolled back");
+        assert_eq!(b.troops, a.troops, "a new unit's first count does not fit: the slot is cleared");
         let mut c = a.clone();
         c.troops[1].count = 1;
         limit_preset_troops(&a, &mut c);
         assert_eq!(c.troops[1].count, 1);
+        // A typed count drops one at a time until the total fits, not back to the old value.
+        let mut d = a.clone();
+        d.troops[0].count = 1;
+        let mut e = d.clone();
+        e.troops[1].count = 9;
+        limit_preset_troops(&d, &mut e);
+        assert_eq!((e.troops[0].count, e.troops[1]), (1, Troop { unit: 6, level: 0, count: 9 }), "10 fits");
+        let mut e = a.clone();
+        e.troops[1].count = 9;
+        limit_preset_troops(&a, &mut e);
+        assert_eq!(e.troops[1].count, 2, "9 + 9 drops to 9 + 2");
     }
 
     #[test]

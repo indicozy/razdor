@@ -49,7 +49,7 @@ impl CheckRow {
             CheckKind::Army => Place::Army(self.id as u8),
             CheckKind::Building => Place::Building(self.id),
             CheckKind::Event => Place::Event(self.id),
-            CheckKind::Point => Place::Point(self.id as u8),
+            CheckKind::Point => Place::Point(self.id),
         }
     }
 }

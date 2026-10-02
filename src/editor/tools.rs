@@ -193,7 +193,7 @@ impl ToolState {
             }
             Tool::Point { model } => {
                 if let Some(id) = self.run(doc, Command::PlacePoint { x, y, model }) {
-                    self.selected = Some(Target::Point(id as u8));
+                    self.selected = Some(Target::Point(id as u16));
                 }
             }
             Tool::HeroStart(k) => {

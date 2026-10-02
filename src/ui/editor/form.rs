@@ -425,7 +425,8 @@ pub fn army_options(s: &Scenario) -> Options {
 pub fn point_options(s: &Scenario) -> Options {
     with_none(
         tr("(none)"),
-        s.points.iter().map(|p| (p.id as i64, format!("#{} {} ({}, {})", p.id, if p.model == 8 { tr("lantern") } else { tr("event point") }, p.x, p.y))),
+        // By position: the 256th point stores id 0 (the original's overflow).
+        s.points.iter().enumerate().map(|(i, p)| (i as i64 + 1, format!("#{} {} ({}, {})", i + 1, if p.model == 8 { tr("lantern") } else { tr("event point") }, p.x, p.y))),
     )
 }
 

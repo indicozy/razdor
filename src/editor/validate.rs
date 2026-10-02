@@ -30,7 +30,7 @@ pub enum Place {
     Object(usize),
     Building(u16),
     Army(u8),
-    Point(u8),
+    Point(u16),
     Event(u16),
 }
 
@@ -109,6 +109,32 @@ impl Checker<'_> {
     fn army_ref(&mut self, place: Place, what: &str, id: u32) {
         if id as usize > self.s.armies.len() {
             self.error(place, trf!("{what} refers to army {id}, which does not exist", what, id));
+        }
+    }
+
+    /// A building reference the original editor's building delete leaves as it is (army
+    /// home, building link, preset start building, records.md §12): past the end it is the
+    /// original's own output, which the game ignores (no such building), so a warning.
+    fn stale_building_ref(&mut self, place: Place, what: &str, id: u32) {
+        if id as usize > self.s.buildings.len() {
+            self.warn(place, trf!("{what} refers to building {id}, past the end (a building delete leaves it, as in the original editor); the game ignores it", what, id));
+        }
+    }
+
+    /// An army reference the original editor's army delete leaves as it is (the patrol
+    /// change, the army at home, the battle army, records.md §12): a warning, as
+    /// [`Checker::stale_building_ref`].
+    fn stale_army_ref(&mut self, place: Place, what: &str, id: u32) {
+        if id as usize > self.s.armies.len() {
+            self.warn(place, trf!("{what} refers to army {id}, past the end (an army delete leaves it, as in the original editor); the game ignores it", what, id));
+        }
+    }
+
+    /// A named character the original editor's character delete leaves as it is (army byte
+    /// 58 and the events' bytes, records.md §7): a warning, as [`Checker::stale_building_ref`].
+    fn stale_named(&mut self, place: Place, what: &str, n: u8) {
+        if n as usize > self.s.named_characters.len() {
+            self.warn(place, trf!("{what}: named character {n} is past the end (a character delete leaves it, as in the original editor); the game finds no one", what, n));
         }
     }
 
@@ -211,7 +237,7 @@ impl Checker<'_> {
             if !self.inside(p.x, p.y) {
                 self.error(place, trf!("the start ({x}, {y}) is outside the map", x = p.x, y = p.y));
             }
-            self.building_ref(place, tr("the start building"), p.start_building as u32);
+            self.stale_building_ref(place, tr("the start building"), p.start_building as u32);
             for t in p.troops.iter().filter(|t| t.unit != 0) {
                 self.unit(place, tr("starting troops"), t.unit);
             }
@@ -272,7 +298,7 @@ impl Checker<'_> {
             if b.owner_army != 0 && b.owner_army != 0xFF {
                 self.army_ref(place, tr("the owner"), b.owner_army as u32);
             }
-            self.building_ref(place, tr("the linked building"), b.linked_building as u32);
+            self.stale_building_ref(place, tr("the linked building"), b.linked_building as u32);
             if b.linked_building as u16 == id {
                 self.warn(place, tr("is linked to itself").into());
             }
@@ -318,10 +344,8 @@ impl Checker<'_> {
             if !(1..=12).contains(&a.model) {
                 self.error(place, trf!("map model {model} is not one of 1-12", model = a.model));
             }
-            self.building_ref(place, tr("the home building"), a.home_building as u32);
-            if a.named_character as usize > s.named_characters.len() {
-                self.error(place, trf!("named character {n} does not exist", n = a.named_character));
-            }
+            self.stale_building_ref(place, tr("the home building"), a.home_building as u32);
+            self.stale_named(place, tr("the leader"), a.named_character);
             if a.leader_unit == super::records::SPECIAL_LEADER {
                 // The original's extra leader entry (records.md §3.3); what the game does
                 // with it is unknown.
@@ -352,18 +376,27 @@ impl Checker<'_> {
 
     fn points(&mut self) {
         let s = self.s;
-        if s.points.len() > MAX_RECORDS {
-            self.error(Place::Map, trf!("{n} points; at most {max} fit", n = s.points.len(), max = MAX_RECORDS));
+        if s.points.len() > super::doc::MAX_POINTS {
+            self.error(Place::Map, trf!("{n} points; at most {max} fit", n = s.points.len(), max = super::doc::MAX_POINTS));
         }
         for (i, p) in s.points.iter().enumerate() {
-            let place = Place::Point(i.min(254) as u8 + 1);
-            if p.id as usize != i + 1 {
+            let place = Place::Point(i.min(super::doc::MAX_POINTS - 1) as u16 + 1);
+            // The original's 256th point stores id 0 and its model plus 1
+            // ([`super::defaults::new_point`]), and a point delete then makes it id 255 with
+            // that model (its renumbering keeps the high byte): the original editor's own
+            // output, which the game reads (it finds points by the stored id and does not look
+            // at the model), so warnings.
+            if i + 1 == super::doc::MAX_POINTS && p.id == 0 {
+                self.warn(place, tr("stores id 0: the original editor's 256th point overflows its id; no event can light it").into());
+            } else if p.id as usize != i + 1 {
                 self.error(place, trf!("stores id {id}; points must be numbered in order", id = p.id));
             }
             if !self.inside(p.x, p.y) {
                 self.error(place, trf!("({x}, {y}) is outside the map", x = p.x, y = p.y));
             }
-            if !matches!(p.model, 8..=10) {
+            if p.model == 11 {
+                self.warn(place, tr("model 11: an AI target point the original editor placed as the 256th point; the game reads it as a point").into());
+            } else if !matches!(p.model, 8..=10) {
                 self.error(place, trf!("model {model} is none of 8 (lantern), 9 (event point) and 10 (AI target)", model = p.model));
             }
             if p.event_count as usize > p.event_slots.len() {
@@ -399,14 +432,16 @@ impl Checker<'_> {
             for b in c.buildings {
                 self.building_ref(place, tr("a building condition"), b as u32);
             }
-            for a in c.defeated_armies.into_iter().chain(c.beaten_armies).chain([c.meet_army, c.army_active, c.army_inactive, c.army_at_home]) {
+            for a in c.defeated_armies.into_iter().chain(c.beaten_armies).chain([c.meet_army, c.army_active, c.army_inactive]) {
                 self.army_ref(place, tr("a condition"), a as u32);
             }
-            for a in r.activate_armies.into_iter().chain([r.deactivate_army, r.show_army, r.start_battle_with, r.removed_units_to_army, r.units_from_army]) {
+            self.stale_army_ref(place, tr("the army-at-home condition"), c.army_at_home as u32);
+            for a in r.activate_armies.into_iter().chain([r.deactivate_army, r.show_army, r.removed_units_to_army, r.units_from_army]) {
                 self.army_ref(place, tr("a result"), a as u32);
             }
+            self.stale_army_ref(place, tr("the battle"), r.start_battle_with as u32);
             if opcode.is_none() {
-                self.army_ref(place, tr("the patrol change"), r.patrol_army as u32);
+                self.stale_army_ref(place, tr("the patrol change"), r.patrol_army as u32);
             }
             for x in c.happened_yes.into_iter().chain(c.happened_no).chain(c.not_happened).chain([r.relative_event, r.completes_quest, r.chained_event]) {
                 self.event_ref(place, tr("a condition or result"), x as u32);
@@ -420,8 +455,8 @@ impl Checker<'_> {
                 }
             }
             for (what, list) in [(tr("named squads"), &c.units_named[..]), (tr("units added"), &r.units_add_named[..]), (tr("units removed"), &r.units_remove_named[..])] {
-                for n in list.iter().filter(|n| **n as usize > named) {
-                    self.error(place, trf!("{what}: named character {n} does not exist", what, n));
+                for &n in list {
+                    self.stale_named(place, what, n);
                 }
             }
             for o in c.buildings_owner.into_iter().chain(c.units_owner).chain(c.artifacts_owner) {
@@ -623,7 +658,76 @@ mod tests {
         s.armies = vec![Army { id: 1, x: 1, y: 1, model: 4, faction: 4, home_building: 9, leader_unit: 1, ..Army::default() }];
         s.points = vec![Point { id: 1, model: 9, event_count: 1, event_slots: [5, 0, 0, 0, 0, 0, 0, 0, 0, 0], ..Point::default() }];
         let e = errors(&s).join("\n");
-        for needle in ["victory event refers to event 1", "Archmage start (error): the start building refers to building 4", "local event refers to event 2", "owner refers to army 3", "linked building refers to building 7", "home building refers to building 9", "Point 1 (error): an attached event refers to event 5"] {
+        for needle in ["victory event refers to event 1", "local event refers to event 2", "owner refers to army 3", "Point 1 (error): an attached event refers to event 5"] {
+            assert!(e.contains(needle), "{needle} missing in\n{e}");
+        }
+        // What the original's deletes leave past the end is a warning, not an error.
+        let w: Vec<String> = validate(&s, None, None).iter().filter(|i| i.severity == Severity::Warning).map(|i| i.to_string()).collect();
+        let w = w.join("\n");
+        for needle in ["Archmage start (warning): the start building refers to building 4, past the end", "linked building refers to building 7, past the end", "home building refers to building 9, past the end"] {
+            assert!(w.contains(needle), "{needle} missing in\n{w}");
+        }
+    }
+
+    /// The references the original editor's deletes leave as they are (records.md §7, §12)
+    /// do not stop the save: a map whose last building, army or named character was deleted
+    /// still saves, with warnings. The references the original renumbers stay errors.
+    #[test]
+    fn what_the_original_deletes_leave_saves() {
+        use crate::editor::refs;
+        let mut s = map(10, 10);
+        s.buildings = vec![building(2, 2, (1, 1)), building(5, 5, (1, 1))];
+        s.buildings[0].kind = 2;
+        s.buildings[0].linked_building = 2;
+        s.armies = vec![Army { id: 1, x: 1, y: 1, model: 4, faction: 4, leader_unit: 1, home_building: 2, named_character: 1, ..Army::default() }, Army { id: 2, x: 3, y: 3, model: 4, faction: 4, leader_unit: 1, ..Army::default() }];
+        s.header.heroes[2].start_building = 2;
+        s.named_characters = vec![NamedCharacter { unit: 1, name: "N".into() }];
+        let mut e = Event { kind: 1, ..Event::default() };
+        e.conditions.army_at_home = 2;
+        e.conditions.units_named[0] = 1;
+        e.results.start_battle_with = 2;
+        e.results.patrol_army = 2;
+        e.results.units_add_named[0] = 1;
+        e.results.units_remove_named[0] = 1;
+        s.events = vec![e];
+        assert!(errors(&s).is_empty(), "{:?}", errors(&s));
+        assert!(refs::remove_building(&mut s, 2));
+        assert!(refs::remove_army(&mut s, 2));
+        assert!(refs::remove_named_character(&mut s, 1));
+        assert!(errors(&s).is_empty(), "{:?}", errors(&s));
+        let w = validate(&s, None, None).iter().filter(|i| i.message.contains("past the end")).count();
+        // Link, home, start building; army at home, battle, patrol; army 1's character and
+        // the event's three.
+        assert_eq!(w, 10);
+        assert!(self_check(&s).is_ok());
+        // A renumbered reference past the end is still an error.
+        s.events[0].conditions.meet_army = 5;
+        assert!(errors(&s).iter().any(|m| m.contains("refers to army 5, which does not exist")));
+    }
+
+    /// The original's 256th point stores id 0 (and a target point model 11; a later point
+    /// delete makes it id 255 with that model): warnings, as the game reads such a point.
+    #[test]
+    fn the_original_256th_point_saves() {
+        use crate::editor::defaults::{new_point, LANTERN, TARGET_POINT};
+        let mut s = map(10, 10);
+        s.points = (1..=256).map(|k| new_point(k, 1, 1, if k == 256 { TARGET_POINT } else { LANTERN })).collect();
+        assert_eq!((s.points[255].id, s.points[255].model), (0, 11));
+        assert!(errors(&s).is_empty(), "{:?}", errors(&s));
+        let w: Vec<String> = validate(&s, None, None).iter().map(|i| i.to_string()).collect();
+        assert!(w.iter().any(|m| m.starts_with("Point 256 (warning): stores id 0")), "{w:?}");
+        assert!(w.iter().any(|m| m.starts_with("Point 256 (warning): model 11")), "{w:?}");
+        assert!(self_check(&s).is_ok());
+        crate::editor::refs::remove_point(&mut s, 1);
+        assert_eq!((s.points[254].id, s.points[254].model), (255, 11));
+        assert!(errors(&s).is_empty(), "{:?}", errors(&s));
+        // Any other point with a wrong id, a 257th point or another model is an error.
+        s.points[3].id = 0;
+        s.points.push(new_point(256, 1, 1, LANTERN));
+        s.points.push(new_point(257, 1, 1, LANTERN));
+        s.points[0].model = 12;
+        let e = errors(&s).join("\n");
+        for needle in ["257 points; at most 256 fit", "Point 4 (error): stores id 0", "Point 1 (error): model 12"] {
             assert!(e.contains(needle), "{needle} missing in\n{e}");
         }
     }
@@ -706,10 +810,11 @@ mod tests {
         e.title = "Bad%Foo".into();
         let other = Event { kind: 9, archetype: 4, ..Event::default() };
         s.events = vec![e, quest, other];
+        let all: Vec<String> = validate(&s, None, None).iter().map(|i| i.to_string()).collect();
+        assert!(all.iter().any(|m| m.contains("(warning): units added: named character 1 is past the end")), "{all:?}");
         let e = errors(&s).join("\n");
         for needle in [
             "Event 1 (error): completes event 3, which is not a quest",
-            "named character 1 does not exist",
             "owner code 7",
             "flag script: the flag action \"Foo\" must start with +",
             "Event 3 (error): type 9 is not one of 1-4",
@@ -747,7 +852,9 @@ mod tests {
         assert!(w.iter().any(|m| m.contains("Target event") && m.contains("-5")) && w.iter().any(|m| m.contains("Field") && m.contains("84")), "{w:?}");
         set_opcode(&mut s.events[1], None);
         s.events[1].results.no_meeting = 0;
-        assert!(errors(&s).iter().any(|m| m.contains("patrol change refers to army 99")));
+        // The patrol army is not renumbered by the original's army delete: a warning.
+        assert!(errors(&s).is_empty());
+        assert!(validate(&s, None, None).iter().any(|i| i.severity == Severity::Warning && i.message.contains("patrol change refers to army 99, past the end")));
     }
 
     #[test]

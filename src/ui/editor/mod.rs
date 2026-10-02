@@ -77,7 +77,7 @@ enum Modal {
     Events,
     TestPlay,
     /// The original's number dialog for a new lantern's radius (records.md §2).
-    Radius { id: u8, value: i64 },
+    Radius { id: u16, value: i64 },
     /// The original's options window.
     Options(razdor::editor::options::Options),
     /// The unit editor and the artefact editor.
@@ -101,10 +101,14 @@ pub struct EditorScreen {
     /// The rows of the original editor's map check (they never block saving).
     check_rows: Vec<CheckRow>,
     palette: Palette,
-    /// Names from the install (checks and pickers); `None` without one.
+    /// Names from the install, as the game reads them (the file check); `None` without one.
     install_names: Option<Names>,
     /// Names of the content test play uses (the install's, else the demo's).
     play_names: Names,
+    /// Names of the session's tables (the pickers): the install's, else the demo's, as the
+    /// unit and artefact editors leave them. The checks keep the game's: an artefact deleted
+    /// in the session is still the game's, and the map still names it.
+    session_names: Names,
     play_content: Arc<Content>,
     user_dir: Option<PathBuf>,
     game_dir: Option<PathBuf>,
@@ -156,6 +160,7 @@ impl EditorScreen {
             palette,
             install_names: dt_content.as_deref().map(Names::from_content),
             play_names: Names::from_content(&play_content),
+            session_names: Names::from_content(&play_content),
             play_content: play_content.clone(),
             user_dir: files::user_maps_dir(),
             game_dir,
@@ -169,7 +174,7 @@ impl EditorScreen {
     }
 
     fn names(&self) -> &Names {
-        self.install_names.as_ref().unwrap_or(&self.play_names)
+        &self.session_names
     }
 
     fn install_maps(&self, assets: &Assets) -> Vec<MapEntry> {
@@ -193,7 +198,7 @@ impl EditorScreen {
 
     fn open_file(&mut self, path: PathBuf) {
         let palette = self.palette.from_install.then_some(&self.palette);
-        let base_artefacts = self.names().artefacts.iter().map(|a| a.id as usize).max().unwrap_or(0);
+        let base_artefacts = self.play_names.artefacts.iter().map(|a| a.id as usize).max().unwrap_or(0);
         match EditorDoc::open_with(&path, self.game_dir.as_deref(), palette, base_artefacts) {
             Ok(d) => {
                 let (Origin::Game(read) | Origin::File(read)) = &d.origin else { unreachable!("opened from a file") };
@@ -397,7 +402,7 @@ impl EditorScreen {
             "events" => self.modal = Some(Modal::Events),
             w if w.starts_with('a') => self.tools.selected = Some(Target::Army(id(w)? as u8)),
             w if w.starts_with('b') => self.tools.selected = Some(Target::Building(id(w)?)),
-            w if w.starts_with('p') => self.tools.selected = Some(Target::Point(id(w)? as u8)),
+            w if w.starts_with('p') => self.tools.selected = Some(Target::Point(id(w)?)),
             w => return Err(format!("no editor window {w}")),
         }
         Ok(())
@@ -406,11 +411,7 @@ impl EditorScreen {
     /// The unit or artefact editor stored its draft: the session's tables change, and so do
     /// the names the pickers offer.
     fn set_catalog(&mut self, c: Content) {
-        let names = Names::from_content(&c);
-        if self.install_names.is_some() {
-            self.install_names = Some(names.clone());
-        }
-        self.play_names = names;
+        self.session_names = Names::from_content(&c);
         self.catalog = Arc::new(c);
     }
 
@@ -517,7 +518,7 @@ impl EditorScreen {
 
         // The selected record's panel.
         if let (Some(t), Some(pr)) = (self.tools.selected, panel_rect) {
-            let ctx = Ctx { names: self.install_names.as_ref().unwrap_or(&self.play_names), palette: &self.palette, content: Some(&*self.catalog), shared: Some(self.catalog.clone()) };
+            let ctx = Ctx { names: &self.session_names, palette: &self.palette, content: Some(&*self.catalog), shared: Some(self.catalog.clone()) };
             let s = &self.doc.scenario;
             let edit = match t {
                 Target::Building(id) => props::building_panel(&mut self.panel, s, id, &ctx, pr),

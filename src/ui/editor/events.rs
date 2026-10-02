@@ -359,8 +359,11 @@ fn tab_player(f: &mut Form, s: &Scenario, e: &mut Event, o: &razdor::editor::opt
     f.pick("group", tr("Group (list colour)"), &mut e.group_colour, &group_options());
     f.pick("archetype", tr("For which hero"), &mut e.archetype, &list_options(&ev::ARCHETYPES.map(tr), 0));
     f.heading(tr("When"));
+    // Each box is disabled while the other is on (0x53aa10, 0x53ac54).
     let mut relative = ev::is_relative(e) as u8;
-    f.flag("relative", tr("Relative time only (another event sets its start)"), &mut relative);
+    if e.subordinate == 0 || ev::is_relative(e) {
+        f.flag("relative", tr("Relative time only (another event sets its start)"), &mut relative);
+    }
     if (relative != 0) != ev::is_relative(e) {
         ev::set_relative(e, relative != 0, s.header.start_time);
     }
@@ -638,10 +641,10 @@ fn tab_places(f: &mut Form, s: &Scenario, id: u16) -> Option<EventsAction> {
     }
     let mut add: i64 = 0;
     let mut o: Options = vec![(0, tr("Attach to a point...").into())];
-    o.extend(popts.into_iter().skip(1).filter(|p| !points.contains(&(p.0 as u8))));
+    o.extend(popts.into_iter().skip(1).filter(|p| !points.contains(&(p.0 as u16))));
     f.pick("attach_p", "", &mut add, &o);
     if add > 0 {
-        return Some(EventsAction::Apply(Command::AttachEvent { place: Target::Point(add as u8), event: id }, String::new()));
+        return Some(EventsAction::Apply(Command::AttachEvent { place: Target::Point(add as u16), event: id }, String::new()));
     }
     f.note(tr("A point holds at most 5 events. Global events need no place."), DIM);
     f.heading(tr("Referred to by"));

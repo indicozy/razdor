@@ -57,9 +57,9 @@ pub enum Command {
     SetArmy { id: u8, army: Box<Army> },
     /// A new point of model `model`: 8 lantern, 9 event point, 10 AI target point.
     PlacePoint { x: u16, y: u16, model: u8 },
-    MovePoint { id: u8, x: u16, y: u16 },
-    DeletePoint { id: u8 },
-    SetPoint { id: u8, point: Box<Point> },
+    MovePoint { id: u16, x: u16, y: u16 },
+    DeletePoint { id: u16 },
+    SetPoint { id: u16, point: Box<Point> },
     /// Replaces the scenario settings; a new start date moves the events' starts.
     SetSettings(Box<Settings>),
     /// A named character at the end of the list.

@@ -490,7 +490,7 @@ old id, and their versions give both.
   (model from the tool's four choices, XP correction 100, no faction until saved); saving
   writes the model from the behaviour and the inactive box, byte 8 as 0 and the two stored
   tactical costs (the sum and the side strength, capped at 65,000); at most 12 units with the
-  leader; the original's ranges and steps; a home building brings its faction, attitudes and
+  leader (a count typed past it drops until the army fits, as the original's does); the original's ranges and steps; a home building brings its faction, attitudes and
   owner name, a faction its row of attitudes, a named character its class and name; the
   gold cost and upkeep use the install's recruit divisor and put the artefacts on the first
   unit only; the extra leader entry (255) is offered.
@@ -518,7 +518,8 @@ old id, and their versions give both.
 - **Scenario settings as the original's scenario window**: dates are read by the original's
   rule (hour, day, month and year, unchecked, minutes dropped); a new start date moves every
   event's start with it; the hero presets edit experience, gold and mana (0..32,000, written
-  as words), five spells and at most 11 starting units, the start building from the
+  as words), five spells and at most 11 starting units (a count typed past it drops until
+  they fit), the start building from the
   original's types and the position only from the map; the four alliance presets are the
   original's matrices; the built-in picture cycles 0..5 and a picture file can be imported
   (kept only if it decodes); titles and character names are cut at 64 characters, the next
@@ -528,7 +529,8 @@ old id, and their versions give both.
   points (model 10); a new point is the original's zeroed record (no serial), a new lantern
   is lit with radius 10 and asks for its radius in the original's number dialog; the event
   point's panel edits the four target priorities and the active time, the target point's
-  panel only those; at most 256 points (the 256th overflows its id as in the original).
+  panel only those; at most 256 points (the 256th overflows its id as in the original; it
+  can be selected and deleted, and the map saves with a warning).
 - **Options** (toolbar): the original's text size and bold for the event window's message
   and question boxes and whether new events repeat, kept as the original's `[Option]`
   section in `DTMapEdit.Ini` in Razdor's editor folder (`RAZDOR_EDITOR_DIR`, else
@@ -536,14 +538,18 @@ old id, and their versions give both.
 - **Deleting a record renumbers what the original's delete renumbers**: a building only the
   events' building conditions (no longer army homes, links and preset start buildings), an
   army the owners and the event army fields but the patrol army, the army at home and the
-  battle army; the references left past the end are reported by the map check.
+  battle army. The references the original leaves past the end (those, and a deleted named
+  character's) are warnings of the file check, so the map still saves; Razdor's game ignores
+  them.
 - **Unit and artefact editors** (toolbar: Units, Artefacts), as the original's: they edit
   the session's tables, never the map, with the original's ranges; the unit window shows
   the tactical cost and the price by the original's formula (its bands, doubled for the hero
   classes) and the level table; the artefact window copies (ids up to 255), deletes (later
   ids move down, nothing in the map is renumbered) and prices an artefact automatically by
-  the original's rule. Each list exports in the original's format to `Rus_Units.New.Ini` and
+  the original's rule (on the window's fields, an unsaved copy included); storing writes the
+  price the window shows, as the original's store does. Each list exports in the original's format to `Rus_Units.New.Ini` and
   `Units.Rus`, or `Rus_Artefacts.New.Ini` and `Artefacts.Rus`, in Razdor's editor folder.
+  The file check still uses the install's tables, which the game reads.
 
 ## 0.2.2 — 2026-10-01
 

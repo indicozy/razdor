@@ -124,7 +124,10 @@ The window also shows the building's picture and the centre of its footprint.
 - **Size limit.** Every change of a unit, level, count, artefact, spell or leader recomputes the cost
   (0x547070). That routine builds a scratch army with the leader and every troop unit, one unit at a time.
   More than 12 units makes it fail, and the count that was just raised drops back by one (0x546f94,
-  0x546af0). The limit is therefore 12 units with the leader included.
+  0x546af0). Setting the count runs the same handler again, so a typed count keeps dropping until the army
+  fits, and a count that reaches 0 clears its unit. The limit is therefore 12 units with the leader included.
+  Only the count handler drops anything: a leader picked onto twelve troops stays, and the cost routine then
+  fails, so the costs are not recomputed.
 - **Special leader entry.** The extra entry at the end of the leader list (stored as 255) changes the window
   (0x546c68):
   - it disables the start-parameter group, the spell, the named character, the home building and the
@@ -411,7 +414,8 @@ Each page shows the class portrait and these fields:
 
 Rules for the presets:
 - The six troop counts may total at most 11, so 12 with the hero. A count that would pass 11 drops back by one
-  (0x54145c).
+  (0x54145c); setting the spin runs the same handler again, so it keeps dropping until the total fits, and a
+  count that reaches 0 clears its unit. A typed 9 next to 9 other units therefore becomes 2.
 - The start position (37–40) is not edited here. It is set by placing the hero figure on the map.
 - Leaving a class page stores it back (0x540864, read in the disassembly). It writes exactly the bytes above:
   6, 8 and 12 as words, 16, 19–36 and 41–48. Bytes 0–5, 10–11, 14–15, 17–18, 37–40 and 49 are left as they
@@ -638,7 +642,7 @@ These points refine [dtm-format.md](../dtm-format.md):
 | Army model byte | as the original, on every save of the army panel (`src/editor/records.rs`) | derived: 7 if inactive, else style + 4 |
 | Army byte 8 | as the original | always written 0 |
 | Army tactical costs (6, 74) | as the original: the tactical sum and the battle core's side strength on the wide grid (on the shipped armies whose byte 6 still matches the unit table, byte 74 matches nine times in ten) | recomputed on every save, capped at 65,000 |
-| Army size | as the original; a typed count past the limit rolls back to the value before | at most 12 units with the leader, edit rolled back |
+| Army size | as the original: a count past the limit drops until the army fits, a leader picked onto a full army stays | at most 12 units with the leader, the raised count dropped until it fits |
 | Army spin ranges | as the original, with its steps; starting gold as a signed word, levels as stored | −100..100, −3..5, 0..30, 10..250, 0..90 (step 5), level unbounded raw |
 | Home building choice | as the original, from the original's list of types | also copies the building's faction, attitudes and owner name |
 | Faction change | as the original | picking a faction reloads the attitudes |
@@ -663,9 +667,9 @@ These points refine [dtm-format.md](../dtm-format.md):
 | Lantern radius | as the original: a new lantern gets radius 10 and the number dialog; a lantern's panel holds only its radius | number dialog 0..24, new lantern radius 10 |
 | AI target points | as the original: the point tool places them, their panel is the target window; the event point's panel edits the five words too | target window for bytes 28–36; the point window edits them too |
 | Options | as the original: Editor options in the toolbar; kept in `DTMapEdit.Ini` in Razdor's editor folder (read from the install's until then); the text size and bold apply to the message and question boxes | text size, bold, new-events-repeat |
-| Named character delete | as the original, but the open event's combos are not remapped (Razdor's character list lives in the settings window, not opened from an event); Razdor's file check reports references past the end | only the open event's combos; stored bytes not remapped |
-| Map deletes | as the original (`src/editor/refs.rs`); Razdor's file check then reports the references left past the end | leaves those references untouched (§12) |
-| Limits | as the original: 254 buildings, 255 armies, 256 points (the 256th point's id overflows into its model byte, as in the original, and Razdor's file check refuses it) | 254 buildings, 255 armies, 256 points |
+| Named character delete | as the original, but the open event's combos are not remapped (Razdor's character list lives in the settings window, not opened from an event); Razdor's file check warns about a character past the end and still saves (the game finds no one there) | only the open event's combos; stored bytes not remapped |
+| Map deletes | as the original (`src/editor/refs.rs`); Razdor's file check warns about the references the original leaves past the end (home, link and start buildings; the patrol, at-home and battle armies) and still saves, as Razdor's game ignores them; a renumbered reference past the end is still an error | leaves those references untouched (§12) |
+| Limits | as the original: 254 buildings, 255 armies, 256 points (the 256th point's id overflows into its model byte, as in the original; Razdor's file check warns and saves it, as the game reads it, and it can be selected and deleted) | 254 buildings, 255 armies, 256 points |
 
 ## Unknowns
 

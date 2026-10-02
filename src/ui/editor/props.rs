@@ -417,7 +417,7 @@ pub fn army_panel(state: &mut PanelState, s: &Scenario, id: u8, ctx: &Ctx, rect:
     (a != *orig).then(|| (Command::SetArmy { id, army: Box::new(a) }, key))
 }
 
-pub fn point_panel(state: &mut PanelState, s: &Scenario, id: u8, rect: Rect) -> Option<(Command, String)> {
+pub fn point_panel(state: &mut PanelState, s: &Scenario, id: u16, rect: Rect) -> Option<(Command, String)> {
     let orig = s.points.get((id as usize).checked_sub(1)?)?;
     let mut p: Point = orig.clone();
     state.show(&format!("p{id}"));

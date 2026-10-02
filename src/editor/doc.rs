@@ -42,7 +42,7 @@ pub enum EditError {
     FootprintOutside,
     NoSuchBuilding(u16),
     NoSuchArmy(u8),
-    NoSuchPoint(u8),
+    NoSuchPoint(u16),
     NoSuchNamedCharacter(u8),
     NoSuchEvent(u16),
     /// Armies have no local events.
@@ -550,7 +550,7 @@ impl EditorDoc {
         (id as usize).checked_sub(1).filter(|i| *i < self.scenario.armies.len()).ok_or(EditError::NoSuchArmy(id))
     }
 
-    fn point_index(&self, id: u8) -> Result<usize, EditError> {
+    fn point_index(&self, id: u16) -> Result<usize, EditError> {
         (id as usize).checked_sub(1).filter(|i| *i < self.scenario.points.len()).ok_or(EditError::NoSuchPoint(id))
     }
 
@@ -689,7 +689,8 @@ impl EditorDoc {
             }
             Command::SetPoint { id, point } => {
                 let i = self.point_index(id)?;
-                if point.id != id {
+                // The stored id is the low byte of the position (the 256th point stores 0).
+                if point.id != id as u8 {
                     return Err(EditError::IdChanged);
                 }
                 self.scenario.points[i] = *point;
@@ -804,7 +805,7 @@ impl EditorDoc {
             return Some(Target::Army(a as u8 + 1));
         }
         if let Some(p) = s.points.iter().rposition(|p| (p.x as i32, p.y as i32) == (x, y)) {
-            return Some(Target::Point(p as u8 + 1));
+            return Some(Target::Point(p as u16 + 1));
         }
         s.buildings
             .iter()
@@ -823,7 +824,7 @@ impl EditorDoc {
 pub enum Target {
     Building(u16),
     Army(u8),
-    Point(u8),
+    Point(u16),
 }
 
 /// Inserts `o` keeping the (y, x) order, after the objects already on its cell.
@@ -984,15 +985,22 @@ mod tests {
         }
         assert_eq!(d.apply(Command::PlaceArmy { x: 1, y: 1, model: 4 }), Err(EditError::Full("armies (at most 255)")));
         // 256 points; the 256th stores id 0 and model 9 (the original's overflow), which
-        // Razdor's file check refuses.
+        // Razdor's file check lets through with a warning; it can be selected and deleted.
         for _ in 0..MAX_POINTS {
             d.apply(Command::PlacePoint { x: 2, y: 2, model: 8 }).unwrap();
         }
         assert_eq!(d.apply(Command::PlacePoint { x: 2, y: 2, model: 8 }), Err(EditError::Full("points (at most 256)")));
         let last = d.scenario.points.last().unwrap();
         assert_eq!((last.id, last.model), (0, 9));
-        assert!(d.issues(None, None).iter().any(|i| i.severity == crate::editor::Severity::Error && i.place == crate::editor::Place::Point(255)));
-        d.scenario.points.pop();
+        // (The test's buildings and armies have no faction: only the points matter here.)
+        let issues: Vec<_> = d.issues(None, None).into_iter().filter(|i| matches!(i.place, crate::editor::Place::Point(_))).collect();
+        assert!(!crate::editor::validate::has_errors(&issues), "{issues:?}");
+        assert!(issues.iter().any(|i| i.severity == crate::editor::Severity::Warning && i.place == crate::editor::Place::Point(256)));
+        assert_eq!(d.hit(2, 2), Some(Target::Point(256)), "the 256th is the top one on its cell");
+        let mut p = d.scenario.points[255].clone();
+        p.radius = 7;
+        d.apply(Command::SetPoint { id: 256, point: Box::new(p) }).unwrap();
+        d.apply(Command::DeletePoint { id: 256 }).unwrap();
         d.apply(Command::DeletePoint { id: 255 }).unwrap();
         assert_eq!(d.apply(Command::PlacePoint { x: 3, y: 3, model: 10 }).unwrap().new_id, Some(255));
         assert_eq!(d.scenario.points[254].model, 10, "an AI target point");

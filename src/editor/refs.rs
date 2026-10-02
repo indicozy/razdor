@@ -84,7 +84,7 @@ pub fn remove_army(s: &mut Scenario, id: u8) -> bool {
 }
 
 /// Removes point `id` and renumbers the rest; remaps the lanterns events light.
-pub fn remove_point(s: &mut Scenario, id: u8) -> bool {
+pub fn remove_point(s: &mut Scenario, id: u16) -> bool {
     let Some(i) = (id as usize).checked_sub(1).filter(|i| *i < s.points.len()) else { return false };
     s.points.remove(i);
     for (k, p) in s.points.iter_mut().enumerate() {

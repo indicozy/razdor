@@ -542,10 +542,10 @@ pub fn references_to(s: &Scenario, id: u16) -> Vec<RefSite> {
     out
 }
 
-/// The buildings and points whose lists hold event `id`.
-pub fn places_of(s: &Scenario, id: u16) -> (Vec<u16>, Vec<u8>) {
+/// The buildings and points whose lists hold event `id` (1-based positions).
+pub fn places_of(s: &Scenario, id: u16) -> (Vec<u16>, Vec<u16>) {
     let buildings = s.buildings.iter().enumerate().filter(|(_, b)| b.events().any(|x| x == id)).map(|(i, _)| i as u16 + 1).collect();
-    let points = s.points.iter().filter(|p| p.events().any(|x| x == id)).map(|p| p.id).collect();
+    let points = s.points.iter().enumerate().filter(|(_, p)| p.events().any(|x| x == id)).map(|(i, _)| i as u16 + 1).collect();
     (buildings, points)
 }
 
