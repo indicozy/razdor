@@ -662,7 +662,7 @@ These points refine [dtm-format.md](../dtm-format.md):
 | Scenario picture | as the original: the index cycles 0..5; a picture file is kept only if it decodes | index 0..5 cycled, plus import of a custom picture |
 | Lantern radius | as the original: a new lantern gets radius 10 and the number dialog; a lantern's panel holds only its radius | number dialog 0..24, new lantern radius 10 |
 | AI target points | as the original: the point tool places them, their panel is the target window; the event point's panel edits the five words too | target window for bytes 28–36; the point window edits them too |
-| Options | as the original: the Options button; kept in `DTMapEdit.Ini` in Razdor's editor folder (read from the install's until then); the text size and bold apply to the message and question boxes | text size, bold, new-events-repeat |
+| Options | as the original: Editor options in the toolbar; kept in `DTMapEdit.Ini` in Razdor's editor folder (read from the install's until then); the text size and bold apply to the message and question boxes | text size, bold, new-events-repeat |
 | Named character delete | as the original, but the open event's combos are not remapped (Razdor's character list lives in the settings window, not opened from an event); Razdor's file check reports references past the end | only the open event's combos; stored bytes not remapped |
 | Map deletes | as the original (`src/editor/refs.rs`); Razdor's file check then reports the references left past the end | leaves those references untouched (§12) |
 | Limits | as the original: 254 buildings, 255 armies, 256 points (the 256th point's id overflows into its model byte, as in the original, and Razdor's file check refuses it) | 254 buildings, 255 armies, 256 points |
@@ -670,7 +670,9 @@ These points refine [dtm-format.md](../dtm-format.md):
 ## Unknowns
 
 1. What the game does with army leader 255 (the extra leader entry, §3.3).
-2. The meaning of the second tactical cost (army byte 74; the side evaluation 0x4f61f4).
+2. (Partly resolved.) The second tactical cost (army byte 74) is the field the battle tester shows as the side
+   strength (0x4f61f4); computed so, it reproduces nine in ten of the shipped values whose byte 6 still matches
+   the unit table. The rest may come from older editor builds.
 3. Whether the uninitialised counter of the artefact price (§6.3) is 0 in practice.
 4. (Resolved.) The hero-preset store-back 0x540864 is missing from the decompile but was read in the
    disassembly: it is the inverse of 0x53fd3c (§8.2).
