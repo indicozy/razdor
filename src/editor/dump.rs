@@ -97,10 +97,26 @@ impl<'a> Lines<'a> {
     }
 }
 
+/// The number between `#` and `]`, read as Delphi's `StrToIntDef` reads it: leading
+/// blanks skipped, an optional sign, decimal or `$`/`0x` hexadecimal digits, and nothing
+/// after them.
 fn tag_number(line: &str) -> Option<i64> {
     let (_, rest) = line.split_once('#')?;
     let (n, _) = rest.split_once(']')?;
-    n.trim().parse().ok()
+    let n = n.trim_start_matches(' ');
+    let (negative, n) = match n.as_bytes().first() {
+        Some(b'-') => (true, &n[1..]),
+        Some(b'+') => (false, &n[1..]),
+        _ => (false, n),
+    };
+    let hex = n.strip_prefix('$').or_else(|| n.strip_prefix("0x")).or_else(|| n.strip_prefix("0X"));
+    let v = match hex {
+        Some(h) if !h.is_empty() && h.bytes().all(|b| b.is_ascii_hexdigit()) => i64::from_str_radix(h, 16).ok()?,
+        None if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) => n.parse().ok()?,
+        _ => return None,
+    };
+    let v = if negative { -v } else { v };
+    i32::try_from(v).ok().map(i64::from)
 }
 
 fn starts_block(line: &str) -> bool {
@@ -298,6 +314,16 @@ mod tests {
         let zero = b"[Head]\r\nT\r\nD\r\n[B#1]\r\nA\r\n[A#0]\r\nB\r\n";
         assert_eq!(read_dump(&mut s, &mut [], 0, zero), Err(DumpError::ZeroNumber(6)));
         assert_eq!(s.buildings[0].name, "A", "what came before stays read");
+    }
+
+    #[test]
+    fn tag_numbers_read_as_str_to_int() {
+        assert_eq!(tag_number("[B#12]"), Some(12));
+        assert_eq!(tag_number("[B#  7]"), Some(7), "leading blanks are skipped");
+        assert_eq!(tag_number("[B#7 ]"), None, "trailing ones are not");
+        assert_eq!((tag_number("[B#$1F]"), tag_number("[B#0x10]"), tag_number("[B#+3]")), (Some(31), Some(16), Some(3)));
+        assert_eq!((tag_number("[B#-2]"), tag_number("[B#]"), tag_number("[B#1a]")), (Some(-2), None, None));
+        assert_eq!(tag_number("[B#99999999999]"), None, "past an Integer");
     }
 
     #[test]

@@ -119,6 +119,9 @@ pub enum ScoreError {
     TooNarrow,
     /// The score or the quest count does not fit its header field: a range error.
     OutOfRange,
+    /// A point lists an empty event slot or more than five events: the original's walk
+    /// over its events stops with a range error.
+    PointEvents,
 }
 
 /// An artefact by id: the install's list, then the map's custom artefacts after it.
@@ -166,8 +169,10 @@ fn event_value(names: &Names, custom: &[CustomArtefact], e: &Event, quests: &mut
             v += if ids[1] == 0 { 10 } else { 15 };
         }
     }
-    // A flag test (`=X` or `=/X`) in the title's script.
-    let test = e.title.split_once('%').and_then(|(_, script)| script.split_once('=')).map_or("", |(_, t)| t);
+    // A flag test (`=X` or `=/X`) in the title's script: the text after its `=`, the
+    // script being the part between the first `%` and the next (0x4dc938).
+    let script = e.title.split_once('%').map(|(_, rest)| rest.split_once('%').map_or(rest, |(s, _)| s));
+    let test = script.and_then(|s| s.split_once('=')).map_or("", |(_, t)| t);
     if !test.is_empty() {
         v += 15;
     }
@@ -378,9 +383,16 @@ pub fn score(s: &Scenario, names: &Names, custom: &[CustomArtefact]) -> Result<S
             if p.event_count == 0 {
                 continue;
             }
-            // The original's list has five slots; a longer count stops it with a range
-            // error, so the walk ends at the fifth.
-            let slots = &p.event_slots[..(p.event_count as usize).min(5)];
+            // The original's list has five slots, and it reads event (id − 1) of each: a
+            // longer count or an empty slot (or one past its 5000 events) stops it with a
+            // range error, so nothing is scored.
+            if p.event_count > 5 {
+                return Err(ScoreError::PointEvents);
+            }
+            let slots = &p.event_slots[..p.event_count as usize];
+            if slots.iter().any(|id| !(1..=5000).contains(id)) {
+                return Err(ScoreError::PointEvents);
+            }
             for &id in slots {
                 if event(id).is_some_and(|e| e.kind == 1) {
                     points -= 25;
@@ -400,6 +412,10 @@ pub fn score(s: &Scenario, names: &Names, custom: &[CustomArtefact]) -> Result<S
                     }
                     walked.push_str(&format!("{id}~"));
                     id = next;
+                    // The original reads event (id − 1) next: past its 5000 a range error.
+                    if id > 5000 {
+                        return Err(ScoreError::PointEvents);
+                    }
                     if walked.contains(&id.to_string()) {
                         looped = true;
                         let spell = event(id).map_or(0, |e| e.results.cast_spell);
@@ -410,8 +426,7 @@ pub fn score(s: &Scenario, names: &Names, custom: &[CustomArtefact]) -> Result<S
                         }
                     }
                 }
-                // A walk ending on the defeat event is deadly; so is an empty slot (id 0)
-                // when the map has no defeat event, which the original reads as event 0.
+                // A walk ending on the defeat event is deadly.
                 if s.header.defeat_event == id {
                     deadly += 1;
                 }
@@ -533,6 +548,11 @@ mod tests {
         assert_eq!((quests, rewards), (1, vec![10, 0, 15, 3]));
         let set_only = Event { title: "T%+A".into(), ..Event::default() };
         assert_eq!(event_value(&n, &[], &set_only, &mut quests, &mut vec![]), 0, "only a flag test counts");
+        // The script ends at the next `%`: an `=` after it is not a flag test.
+        let later = Event { title: "T%+A%=B".into(), ..Event::default() };
+        assert_eq!(event_value(&n, &[], &later, &mut quests, &mut vec![]), 0);
+        let test = Event { title: "T%=B%x".into(), ..Event::default() };
+        assert_eq!(event_value(&n, &[], &test, &mut quests, &mut vec![]), 15);
     }
 
     #[test]
@@ -634,5 +654,17 @@ mod tests {
         let r = score(&s, &names(), &[]).unwrap();
         // One loop (500 × 1 / 1 point) and two deadly chains (25 each).
         assert_eq!(r.stages[3], base - 500 - 50);
+        // An empty slot within the count, more than five events, or a chain past event
+        // 5000 stop the original with a range error: nothing is scored.
+        let mut q = s.clone();
+        q.points[0].event_slots[1] = 0;
+        assert_eq!(score(&q, &names(), &[]), Err(ScoreError::PointEvents));
+        let mut q = s.clone();
+        q.points[0].event_count = 6;
+        q.points[0].event_slots[3..6].copy_from_slice(&[6, 7, 8]);
+        assert_eq!(score(&q, &names(), &[]), Err(ScoreError::PointEvents));
+        let mut q = s.clone();
+        q.events[3].results.chained_event = 5001;
+        assert_eq!(score(&q, &names(), &[]), Err(ScoreError::PointEvents));
     }
 }

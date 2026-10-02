@@ -481,7 +481,9 @@ old id, and their versions give both.
   artefacts nothing gives). They never block saving; a click opens the record.
 - **Playability**: the original editor's score, with all its weights, penalties and its
   curve, stored in the map with the quest count and shown in the original's colours; each
-  scoring appends its line to `MapData.Txt` in the maps folder.
+  scoring appends its line to `MapData.Txt` in the maps folder. A map the original stops on
+  (narrower than 50 cells, a point with an empty event slot or more than five events) is
+  not scored.
 - If drawing the map fails, the editor saves it to `ErrorSave.DTm` in its folder before the
   program ends, as the original's emergency save.
 

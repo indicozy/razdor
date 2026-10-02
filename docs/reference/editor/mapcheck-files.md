@@ -540,7 +540,8 @@ The score itself is not in the line.
   (`.DTZ` raw under `.DTm`, `.DTS` a zlib, scramble-1, demo-order `.DTs` with header 0x117 = 1,
   `.DTD` the map and its dump); the open dialog's three types follow §3.1, and the editor's
   stream reader takes raw, zlib and bzip2 files (§3.2). Normal saves always use code 19. The
-  text dump is written and read as §5 (`src/editor/dump.rs`); where the original's reader would
+  text dump is written and read as §5 (`src/editor/dump.rs`), tag numbers as `StrToIntDef`
+  reads them; where the original's reader would
   loop forever on a tag number it cannot read, or stop on block 0, Razdor stops the import and
   says at which line.
 - **Round trip.** Now as the original: a save makes the changes of §4.3–4.5 in memory (one undo
@@ -562,7 +563,8 @@ The score itself is not in the line.
   quest count at 0x126 (one undo step), shows both with the colour bands of §6.8, and
   appends the `MapData.Txt` line of §6.9 in the user's maps folder rather than next to the
   program. Where the original stops (a map narrower than 50 cells, a score or quest count
-  that does not fit its field) Razdor says so and stores nothing. The percentages use a
+  that does not fit its field, a point listing more than five events or an empty slot, a
+  chain past event 5000) Razdor says so and stores nothing. The percentages use a
   decimal comma, as the original under a Russian locale.
 - **Saving place and safety.** Razdor still saves to the user's folder through a temporary file
   and asks before touching the game's folder (by design). The emergency save is now there: a

@@ -274,7 +274,6 @@ impl EditorScreen {
                         Err(SaveError::Invalid(issues)) => {
                             self.issues = issues;
                             self.check_rows.clear();
-                    self.check_rows.clear();
                             self.modal = Some(Modal::Issues { scroll: 0 });
                         }
                         Err(e) => self.status = Some(trf!("Not saved: {e}", e)),
@@ -326,6 +325,9 @@ impl EditorScreen {
             }
             Err(ScoreError::TooNarrow) => self.status = Some(tr("No playability for a map narrower than 50 cells (the original stops with a division by zero).").into()),
             Err(ScoreError::OutOfRange) => self.status = Some(tr("No playability: the score does not fit its field (the original stops with a range error).").into()),
+            Err(ScoreError::PointEvents) => {
+                self.status = Some(tr("No playability: a point lists an empty event slot or more than five events (the original stops with a range error).").into())
+            }
         }
     }
 
