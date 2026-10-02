@@ -69,6 +69,7 @@ Turn {round} ends the battle = Ход {round} завершает битву
 {name} gives its life = {name}: жизнь отдана
 {name} strikes first for {dmg} = {name}: упреждающий удар, урон {dmg}
 {name} hits back for {dmg} = {name}: ответный удар, урон {dmg}
+{name} pulls {tname} forward = {name} вытягивает {tname} вперёд
 {name} kills {tname} ({dealt}) = {name} сражает: {tname} ({dealt})
 {name} kills {tname} with a long strike ({dealt}) = {name} сражает длинным ударом: {tname} ({dealt})
 {name} hits {tname} for {dealt} = {name} бьёт: {tname}, урон {dealt}

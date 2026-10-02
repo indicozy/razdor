@@ -2550,3 +2550,288 @@ fn community_row21_the_ai_scores_a_manevres_0_target_with_the_wrapping_constant(
     assert_eq!(experience::round_half_even(2.0 * MANEVRES_0_FACTOR) as i32, -801_329_149);
     assert_eq!(experience::round_half_even(MANEVRES_0_FACTOR), 1_746_819_074, "r = 0: .5 to even");
 }
+
+// --- the map editor's battle engine (docs/reference/editor/testers.md §4) ----------------------
+
+mod editor_rules {
+    use super::*;
+
+    /// A begun battle under the editor's rules with `sw`.
+    fn ed_with(extra: Vec<UnitDef>, player: &[(u32, Slot)], enemies: &[(u32, Slot)], sw: Switches) -> Battle {
+        let c = content_with(extra, Formation::WIDE);
+        let squad: Vec<Unit> = player.iter().map(|&(id, s)| Unit::new(&c, UnitId(id), s)).collect();
+        let p: Vec<_> = squad.iter().enumerate().collect();
+        let e: Vec<Unit> = enemies.iter().map(|&(id, s)| Unit::new(&c, UnitId(id), s)).collect();
+        let mut bt = Battle::with_rules(c.clone(), &p, &e, Team::Player, Rules::Editor(sw));
+        bt.begin();
+        bt
+    }
+
+    fn ed(extra: Vec<UnitDef>, player: &[(u32, Slot)], enemies: &[(u32, Slot)]) -> Battle {
+        ed_with(extra, player, enemies, Switches::default())
+    }
+
+    fn editor_unit(id: u32, bonus: u8, base: UnitDef) -> UnitDef {
+        UnitDef { id, editor_bonus: Some(bonus), ..base }
+    }
+
+    #[test]
+    fn the_editors_bonus_table_has_four_names_past_the_vanilla_ones() {
+        use crate::dt::data::editor_bonus;
+        assert_eq!(editor_bonus("Counterblow"), Some(20));
+        assert_eq!(editor_bonus("OldVampiressGist"), Some(22));
+        assert_eq!(editor_bonus("Parrying"), Some(25));
+        assert_eq!(editor_bonus("Hunger"), None, "the game's id 22 is no bonus to the editor");
+        assert_eq!(EditorBonus::of_id(24), Some(EditorBonus::Terrible));
+        assert_eq!(EditorBonus::of_id(21), None);
+    }
+
+    #[test]
+    fn the_switches_default_to_the_games_fixed_values() {
+        let s = Switches::default();
+        assert_eq!((s.counterblow, s.short_range, s.collapse, s.long_strike, s.initiative_cost), (true, false, true, true, false));
+        assert_eq!(battle(&[(10, f(2))], &[(10, f(2))]).rules(), Rules::Game);
+    }
+
+    #[test]
+    fn poison_sets_minus_15_and_skips_undead_and_elementals() {
+        let viper = bonus(71, Bonus::Poison, warrior(71, 30, 0));
+        let golem = UnitDef { hits: 200, ..warrior(17, 1, 0) };
+        let golem = UnitDef { nature: Nature::Elemental, ..golem };
+        let mut bt = ed(vec![viper.clone(), golem.clone()], &[(71, f(1)), (71, f(2)), (71, f(3))], &[(18, f(1)), (16, f(2)), (17, f(3))]);
+        bt.act(3).unwrap();
+        bt.act(4).unwrap();
+        bt.act(5).unwrap();
+        assert_eq!([3, 4, 5].map(|i| bt.fighters[i].regen), [-15, 0, 0]);
+        to_round(&mut bt, 2);
+        assert_eq!(bt.fighters[3].hp, 200 - 30 - 30, "15% of 200 a turn");
+        // The game's: −20, on an elemental too.
+        let mut bt = with(vec![viper, golem], &[(71, f(1)), (71, f(3))], &[(18, f(1)), (17, f(3))]);
+        bt.act(2).unwrap();
+        bt.act(3).unwrap();
+        assert_eq!([2, 3].map(|i| bt.fighters[i].regen), [-20, -20]);
+    }
+
+    #[test]
+    fn a_knight_army_takes_90_percent() {
+        let bt = ed(vec![], &[(1, f(0)), (18, f(2))], &[(10, f(2))]);
+        assert_eq!(bt.physical_damage(2, 1, ActionKind::Melee), 27, "30 × 90/100");
+        let bt = battle(&[(1, f(0)), (18, f(2))], &[(10, f(2))]);
+        assert_eq!(bt.physical_damage(2, 1, ActionKind::Melee), 24, "the game's 80 %");
+    }
+
+    #[test]
+    fn community_bonuses_and_evasion_do_nothing() {
+        let sting = bonus(85, Bonus::PoisonArmorIgnore, warrior(85, 30, 0));
+        let dodger = UnitDef { evasion: Some(50), hits: 100, ..warrior(36, 1, 0) };
+        let first = bonus(86, Bonus::FirstShot, shooter(86, 20));
+        let bt = ed(vec![sting.clone(), dodger.clone(), armour(), first.clone()], &[(85, f(2)), (11, b(2)), (86, b(3))], &[(84, f(2)), (36, f(3))]);
+        assert_eq!(bt.physical_damage(0, 3, ActionKind::Melee), 10, "no piercing: 30 − 20");
+        assert_eq!(bt.physical_damage(1, 4, ActionKind::Shot), 20, "no Evasion");
+        assert!(bt.fighters[2].base.bonuses.is_empty() && bt.fighters[2].stats[Stat::Initiative] == 11, "no FirstShot");
+        let bt = with(vec![sting, dodger, armour(), first], &[(85, f(2)), (11, b(2)), (86, b(3))], &[(84, f(2)), (36, f(3))]);
+        assert_eq!((bt.physical_damage(0, 3, ActionKind::Melee), bt.physical_damage(1, 4, ActionKind::Shot)), (30, 10));
+        assert_eq!(bt.fighters[2].stats[Stat::Initiative], 41);
+    }
+
+    #[test]
+    fn an_editor_battle_leaves_the_community_globals_alone() {
+        let before = patch_globals();
+        let mut bt = ed(vec![hammer()], &[(69, f(2))], &[(10, f(2)), (10, f(3))]);
+        bt.act(1).unwrap();
+        assert_eq!(patch_globals(), before);
+    }
+
+    #[test]
+    fn old_vampiress_gist_evades_hides_on_turn_1_and_feeds_uncapped() {
+        let lady = editor_unit(40, 22, UnitDef { hits: 100, ..warrior(40, 1, 0) });
+        let mut bt = ed(vec![lady.clone()], &[(10, f(2))], &[(40, f(2))]);
+        assert_eq!(bt.physical_damage(0, 1, ActionKind::Melee), 20, "30 × 2/3");
+        assert!(bt.options(0, 1).is_empty(), "turn 1 with its action left");
+        bt.skip();
+        bt.skip();
+        assert_eq!(bt.options(0, 1), vec![ActionKind::Melee], "turn 2: the rule is turn 1's only");
+        let biter = editor_unit(41, 22, UnitDef { vampirism: 50, ..warrior(41, 30, 0) });
+        let plain = UnitDef { vampirism: 50, ..warrior(43, 30, 0) };
+        let snack = UnitDef { hits: 20, ..warrior(44, 1, 0) };
+        let mut bt = ed(vec![biter, plain, snack], &[(41, f(1)), (43, f(2))], &[(44, f(1)), (44, f(2))]);
+        bt.act(2).unwrap();
+        assert_eq!((bt.fighters[0].hp, bt.fighters[0].actions), (65, 1), "50 + 15, over its max, and an action for the kill");
+        assert_eq!(bt.active(), Some(0));
+        bt.skip();
+        bt.act(3).unwrap();
+        assert_eq!(bt.fighters[1].hp, 50, "capped");
+    }
+
+    #[test]
+    fn terrible_takes_the_actions_of_the_enemy_front_unit_in_its_column() {
+        let dread = editor_unit(45, 24, warrior(45, 1, 0));
+        let mut bt = ed(vec![dread], &[(45, f(2))], &[(10, f(2)), (10, f(3)), (10, b(2))]);
+        assert_eq!([1, 2, 3].map(|i| bt.fighters[i].actions), [0, 1, 1]);
+        to_round(&mut bt, 2);
+        assert_eq!(bt.fighters[1].actions, 1, "turn 1 only");
+    }
+
+    #[test]
+    fn parrying_after_a_pass_takes_1_in_melee_until_hit_or_acting() {
+        let fencer = editor_unit(42, 25, UnitDef { hits: 100, initiative: 30, ..warrior(42, 1, 0) });
+        let mut bt = ed(vec![fencer], &[(10, f(2)), (11, b(2))], &[(42, f(2))]);
+        assert_eq!(bt.active(), Some(2));
+        bt.pass();
+        assert_eq!(bt.physical_damage(0, 2, ActionKind::Melee), 1);
+        assert_eq!(bt.physical_damage(1, 2, ActionKind::Shot), 20, "not against shots");
+        assert_eq!(bt.act(2).unwrap().amount, 1);
+        assert_eq!(bt.physical_damage(0, 2, ActionKind::Melee), 30, "a melee hit drops the guard");
+    }
+
+    #[test]
+    fn the_editors_nature_sets() {
+        use MagicDirection::*;
+        let leech = UnitDef { vampirism: 50, ..warrior(43, 30, 0) };
+        let rogue = UnitDef { nature: Nature::Rogue, hits: 200, ..warrior(44, 1, 0) };
+        let mut bt = ed(vec![leech.clone(), rogue.clone()], &[(43, f(2))], &[(44, f(2))]);
+        bt.fighters[0].hp = 20;
+        bt.act(1).unwrap();
+        assert_eq!(bt.fighters[0].hp, 20, "no vampirism on a Rogue");
+        let mut bt = with(vec![leech, rogue.clone()], &[(43, f(2))], &[(44, f(2))]);
+        bt.fighters[0].hp = 20;
+        bt.act(1).unwrap();
+        assert_eq!(bt.fighters[0].hp, 35, "the game's: all but undead and elementals");
+        let reaper = mage(45, 30, MagicSchool::Death, ToAlly);
+        let units = vec![rogue, reaper];
+        // Life healer 13 and Death healer 45 on an elemental 17, a Rogue 44 and a Normal 10.
+        let mut bt = ed(units.clone(), &[(13, b(1)), (45, b(2)), (17, f(1)), (44, f(2)), (10, f(3))], &[(18, f(2))]);
+        for i in [2, 3, 4] {
+            bt.fighters[i].hp = 5;
+        }
+        assert_eq!(bt.heal_amount(0, 2, 20), 20, "Life heals an elemental");
+        assert_eq!(bt.heal_amount(1, 3, 30), 30, "Death heals a Rogue");
+        assert_eq!(bt.heal_amount(1, 4, 30), 0, "but not a Normal unit");
+        assert_eq!(bt.bless_of(0, 3, 20), Buff::default(), "Life blesses only Normal and Hero");
+        assert_ne!(bt.bless_of(0, 4, 20), Buff::default());
+        let mut bt = battle_in(&content_with(units, Formation::WIDE), &[(13, b(1)), (45, b(2)), (17, f(1)), (44, f(2)), (10, f(3))], &[(18, f(2))]);
+        bt.fighters[2].hp = 5;
+        assert_eq!((bt.heal_amount(0, 2, 20), bt.heal_amount(1, 3, 30)), (0, 0));
+        assert_ne!(bt.bless_of(0, 3, 20), Buff::default());
+        // A Life strike on an elemental is whole; the game's is ¾.
+        let bt = ed(vec![], &[(15, b(2))], &[(17, f(2))]);
+        assert_eq!(bt.strike_damage(0, 1, 30), 30);
+        let bt = battle(&[(15, b(2))], &[(17, f(2))]);
+        assert_eq!(bt.strike_damage(0, 1, 30), 22);
+    }
+
+    #[test]
+    fn the_ai_values_a_target_with_actions_left_more() {
+        // Score dmg × round((R + 1) × M), both targets of two Manevres, the second with no
+        // actions left: the editor's M is 2 + 2/2 for the first, so 30 × 11 × 3 = 990 against
+        // 30 × 14 × 2 = 840; the game's M is 2 for both, 660 against 840.
+        let striker = UnitDef { initiative: 20, hits: 300, ..warrior(46, 30, 0) };
+        let nimble = UnitDef { manevres: 2, hits: 200, ..warrior(47, 10, 0) };
+        let spent = UnitDef { manevres: 2, hits: 200, ..warrior(48, 13, 0) };
+        let units = vec![striker, nimble, spent];
+        let mut bt = ed(units.clone(), &[(46, f(2))], &[(47, f(1)), (48, f(3))]);
+        bt.fighters[2].actions = 0;
+        assert_eq!(bt.ai_choice(), Some((1, ActionKind::Melee)));
+        let mut bt = with(units, &[(46, f(2))], &[(47, f(1)), (48, f(3))]);
+        bt.fighters[2].actions = 0;
+        assert_eq!(bt.ai_choice(), Some((2, ActionKind::Melee)));
+    }
+
+    #[test]
+    fn vanilla_mana_drain() {
+        use MagicDirection::*;
+        let lich = UnitDef { nature: Nature::Undead, ..mage(50, 3, MagicSchool::Elemental, ToEnemy) };
+        let weak = mage(51, 10, MagicSchool::Life, ToEnemy);
+        let dark = mage(52, 3, MagicSchool::Death, ToEnemy);
+        let ghoul = UnitDef { nature: Nature::Undead, ..mage(53, 10, MagicSchool::Death, ToEnemy) };
+        let wisp = mage(54, 3, MagicSchool::Elemental, ToEnemy);
+        let units = vec![lich, weak, dark, ghoul, wisp];
+        let cast = [(50, b(1)), (51, b(2)), (52, b(3)), (53, b(4)), (54, f(0))];
+        let mut bt = ed(units.clone(), &cast, &[(18, f(5))]);
+        to_round(&mut bt, 2);
+        assert_eq!([0, 1, 2, 3, 4].map(|i| bt.fighters[i].power), [0, 15, 1, 25, 15]);
+        let mut bt = battle_in(&content_with(units, Formation::WIDE), &cast, &[(18, f(5))]);
+        to_round(&mut bt, 2);
+        assert_eq!(bt.fighters[0].power, 15, "the game's floor raises it");
+    }
+
+    #[test]
+    fn the_counterblow_and_long_strike_switches() {
+        let chief = bonus(37, Bonus::Counterblow, UnitDef { hits: 100, ..warrior(37, 25, 0) });
+        let off = Switches { counterblow: false, long_strike: false, ..Switches::default() };
+        let mut bt = ed_with(vec![chief.clone()], &[(10, f(2))], &[(37, f(2))], off);
+        assert_eq!(bt.act(1).unwrap().counter, None);
+        let mut bt = ed(vec![chief], &[(10, f(2))], &[(37, f(2))]);
+        assert_eq!(bt.act(1).unwrap().counter, Some(20));
+        let bt = ed_with(vec![], &[(10, f(0))], &[(10, f(4))], off);
+        assert!(bt.options(0, 1).is_empty(), "no long strike");
+        let bt = ed(vec![], &[(10, f(0))], &[(10, f(4))]);
+        assert_eq!(bt.options(0, 1), vec![ActionKind::LongStrike]);
+    }
+
+    #[test]
+    fn short_range_shots_and_spells_reach_columns_c_minus_1_to_c_plus_1() {
+        use MagicDirection::*;
+        let near = Switches { short_range: true, ..Switches::default() };
+        let enemies = [(18, f(2)), (18, f(4)), (18, b(1)), (18, b(3))];
+        let bt = ed_with(vec![], &[(11, b(1)), (12, b(2))], &enemies, near);
+        assert_eq!(bt.targets(0), vec![2, 4], "columns 0–2 of rows 1–2");
+        assert_eq!(bt.targets(1), vec![2, 4, 5]);
+        let bt = ed(vec![], &[(11, b(1)), (12, b(2))], &enemies);
+        assert_eq!(bt.targets(0), vec![2, 3, 4, 5]);
+        // From a front row with a clear front, the same narrowing.
+        let bt = ed_with(vec![mage(55, 30, MagicSchool::Death, ToEnemy)], &[(55, f(2))], &[(18, f(5)), (18, b(2)), (18, b(4))], near);
+        assert_eq!(bt.targets(0), vec![2]);
+    }
+
+    #[test]
+    fn collapse_off_keeps_the_rows_and_brings_back_the_pull() {
+        let off = Switches { collapse: false, ..Switches::default() };
+        let mut bt = ed_with(vec![hammer()], &[(69, f(2))], &[(10, f(2)), (11, b(2))], off);
+        assert_eq!(bt.pull_target(0), None, "the front cell is held");
+        bt.act(1).unwrap();
+        assert_eq!(bt.fighters[2].slot, b(2), "no collapse");
+        let mut bt = ed(vec![hammer()], &[(69, f(2))], &[(10, f(2)), (11, b(2))]);
+        bt.act(1).unwrap();
+        assert_eq!(bt.fighters[2].slot, f(2));
+        // The AI pulls a non-warrior forward for free when it has no blow to strike.
+        let mut bt = ed_with(vec![], &[(10, f(2))], &[(11, b(2)), (10, b(3))], off);
+        assert_eq!(bt.pull_target(0), Some(1));
+        let step = bt.ai_step();
+        assert_eq!(step, Some(Step::Move { actor: 1, from: b(2), to: f(2) }));
+        assert_eq!((bt.active(), bt.fighters[0].actions), (Some(0), 1), "the AI's pull costs nothing");
+        assert_eq!(bt.ai_choice(), Some((1, ActionKind::Melee)));
+        // The player's pull costs its action.
+        let mut bt = ed_with(vec![], &[(10, f(3))], &[(10, b(3))], off);
+        bt.pull_active(1).unwrap();
+        assert_eq!((bt.fighters[1].slot, bt.fighters[0].actions), (f(3), 0));
+    }
+
+    #[test]
+    fn long_strike_off_scores_the_retreat_by_columns() {
+        // A two-action archer in front, an ally further along, an enemy warrior (power 30)
+        // opposite column 4: the back cells 1–3 it can step to score 1000 each, plus their
+        // column's value, 1000 − 30 for column 3 (its front cell is a step with that enemy
+        // near) and 1000 for the others, so the centre-out picker takes column 2.
+        let archer = acts(57, 2, shooter(57, 20));
+        let setup = (&[(57, f(2)), (10, f(4))][..], &[(10, f(4))][..]);
+        let off = Switches { long_strike: false, ..Switches::default() };
+        let bt = ed_with(vec![archer.clone()], setup.0, setup.1, off);
+        assert_eq!(bt.ai_plan(), Some(Plan::Move(b(2))));
+        // With the switch on, the edge rule: the back cells tie and column 3 comes first.
+        let bt = ed(vec![archer], setup.0, setup.1);
+        assert_eq!(bt.ai_plan(), Some(Plan::Move(b(3))));
+    }
+
+    #[test]
+    fn the_initiative_cost_switch() {
+        let cost = Switches { initiative_cost: true, ..Switches::default() };
+        let pair = acts(56, 2, warrior(56, 1, 0));
+        let mut bt = ed_with(vec![pair.clone()], &[(56, f(2))], &[(18, f(5))], cost);
+        bt.pass();
+        assert_eq!(bt.fighters[0].stats[Stat::Initiative], 10, "11 − 1");
+        let mut bt = ed(vec![pair], &[(56, f(2))], &[(18, f(5))]);
+        bt.pass();
+        assert_eq!(bt.fighters[0].stats[Stat::Initiative], 11);
+    }
+}

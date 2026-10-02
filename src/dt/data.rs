@@ -703,6 +703,10 @@ pub struct UnitDef {
     pub magic_direction: Option<MagicDirection>,
     pub nature: Nature,
     pub bonus: Option<Bonus>,
+    /// The bonus as the map editor reads it, with its own name table (DTMapEdit 0x5baf1c,
+    /// docs/reference/editor/testers.md §4): the editor knows four names the game does not,
+    /// ids 22–25 ([`EDITOR_BONUSES`]); only the editor's battle tester uses them.
+    pub editor_bonus: Option<u8>,
     /// Editor "captivity" value.
     pub surrender: i32,
     pub upgrades: Vec<Upgrade>,
@@ -756,6 +760,7 @@ impl UnitDef {
             // `People`, the editor's name, is no name the exe knows: 0, as is no value.
             nature: f.enum_opt("Nature", |v| if v == "People" { Some(Nature::Normal) } else { Nature::parse(v) }).unwrap_or_default(),
             bonus: f.enum_opt("Bonus", Bonus::known_token),
+            editor_bonus: f.str("Bonus").and_then(editor_bonus),
             surrender: f.int("Surrender"),
             upgrades: Vec::new(),
             level_up: f.mods("d-"),
@@ -786,6 +791,18 @@ impl UnitDef {
             Stat::Vampirizm => self.vampirism,
         }
     }
+}
+
+/// The editor's bonus names past the 21 vanilla ones, ids 22–25 (DTMapEdit 0x5baf1c); the
+/// game uses those ids for Hunger, Berserk, Exhaustion and Drying.
+pub const EDITOR_BONUSES: [&str; 4] = ["OldVampiressGist", "Chatty", "Terrible", "Parrying"];
+
+/// A `Bonus` token's id in the editor's name table: 1–21 the vanilla bonuses, 22–25
+/// [`EDITOR_BONUSES`], `None` for any other (the Community tokens included).
+pub fn editor_bonus(token: &str) -> Option<u8> {
+    Bonus::known_token(token)
+        .and_then(|b| b.vanilla_index())
+        .or_else(|| EDITOR_BONUSES.iter().position(|n| *n == token).map(|i| i as u8 + 22))
 }
 
 /// A section the unit loader takes (0x4e0448): its `Name`, `StartExpirience` and `Cost` are

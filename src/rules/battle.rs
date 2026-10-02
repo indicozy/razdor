@@ -286,11 +286,29 @@ pub struct Fighter {
     pub lost: i32,
     ai_power: i32,
     ai_role: AiRole,
+    /// The editor's ruleset: its bonus 22–25, if any (the game has none of them).
+    extra: Option<EditorBonus>,
+    /// The editor's ruleset: a Parrying unit's guard, up after its pass (+0xa9).
+    guard: bool,
+    /// The strength field the side's strength and the auto-arrange weigh, when it is not the
+    /// tactical cost: the battle tester's catalogue units count their gold cost.
+    value: Option<i32>,
 }
 
 impl Fighter {
-    fn new(content: &Content, unit: &Unit, team: Team, squad_index: Option<usize>) -> Fighter {
+    fn new(content: &Content, unit: &Unit, team: Team, squad_index: Option<usize>, editor: bool) -> Fighter {
         let mut base = unit.stats(content);
+        let mut extra = None;
+        if editor {
+            // The editor reads bonus tokens with its own name table: the Community ones are no
+            // bonus, so they neither act nor overwrite; ids 22–25 come from the unit's type,
+            // unless an item's bonus overwrites it.
+            let own = usize::from(content.unit(unit.def).bonus.is_some());
+            let from_items = base.bonuses.iter().skip(own).any(|b| b.vanilla_index().is_some());
+            base.bonuses.retain(|b| b.vanilla_index().is_some());
+            base.evasion = 0;
+            extra = content.unit(unit.def).editor_bonus.and_then(EditorBonus::of_id).filter(|_| !from_items);
+        }
         // One bonus per unit: each worn item with a bonus overwrites the unit's, the last one
         // wins (4919f0).
         if let Some(b) = base.bonuses.last().cloned() {
@@ -330,6 +348,9 @@ impl Fighter {
             lost: 0,
             ai_power: 0,
             ai_role: AiRole::Warrior,
+            extra,
+            guard: false,
+            value: None,
         }
     }
 
@@ -463,6 +484,8 @@ enum Plan {
     Act(usize, ActionKind),
     Move(Slot),
     Pass,
+    /// The editor's pull (map code 3) of this enemy back-row unit.
+    Pull(usize),
 }
 
 /// The Community `Splash` state, globals in `.mod` (c26f16 …): the kind of action being
@@ -604,6 +627,8 @@ pub struct Battle {
     /// Cells of the player's army formation held by units that do not fight (the dead, and
     /// the unpaid when he attacks): the original's start fix sees them (4d2141).
     bench: Vec<Slot>,
+    /// The game's rules, or the map editor's battle engine with its switches.
+    rules: Rules,
 }
 
 /// A fighter in its side's strength sum.
@@ -670,9 +695,16 @@ impl Battle {
     /// `player` entries are (squad index, unit); squad index 0 is the hero. Starts in the
     /// deploy phase; call [`Battle::begin`] to fight.
     pub fn new(content: Arc<Content>, player: &[(usize, &Unit)], enemies: &[Unit], attacker: Team) -> Battle {
+        Battle::with_rules(content, player, enemies, attacker, Rules::Game)
+    }
+
+    /// [`Battle::new`] under `rules`: the game's, or the map editor's battle engine
+    /// (testers.md §4), which the editor's battle tester and AI viewer run.
+    pub fn with_rules(content: Arc<Content>, player: &[(usize, &Unit)], enemies: &[Unit], attacker: Team, rules: Rules) -> Battle {
+        let editor = rules != Rules::Game;
         let mut fighters: Vec<Fighter> =
-            player.iter().map(|&(idx, u)| Fighter::new(&content, u, Team::Player, Some(idx))).collect();
-        fighters.extend(enemies.iter().map(|u| Fighter::new(&content, u, Team::Enemy, None)));
+            player.iter().map(|&(idx, u)| Fighter::new(&content, u, Team::Player, Some(idx), editor)).collect();
+        fighters.extend(enemies.iter().map(|u| Fighter::new(&content, u, Team::Enemy, None, editor)));
         let knight_led = |u: Option<&Unit>| u.is_some_and(|u| HeroClass::of_unit(u.def) == Some(HeroClass::Knight));
         let knight = [knight_led(player.first().map(|p| p.1)), knight_led(enemies.first())];
         let formation = content.formation;
@@ -681,7 +713,9 @@ impl Battle {
             for (r, &row) in [Row::Front, Row::Back, Row::Reserve].iter().enumerate() {
                 for c in 0..formation.cols.min(6) {
                     let open = formation.rows().contains(&row);
-                    side[r][c as usize] = open && (t == Team::Player.index() || formation.contains(Slot::new(row, c)));
+                    // The editor's sides are placed by hand, with no blocked cells in their grids
+                    // (its cell test is the shape, `is_open`); the auto-arrange blocks them.
+                    side[r][c as usize] = open && (editor || t == Team::Player.index() || formation.contains(Slot::new(row, c)));
                 }
             }
         }
@@ -715,7 +749,13 @@ impl Battle {
             turn_lost: [0; 2],
             max_turn_lost: [0; 2],
             bench: Vec::new(),
+            rules,
         };
+        if editor {
+            // No Community globals: nothing the editor's battles do reaches them.
+            b.interactive = false;
+            b.screen_object = false;
+        }
         b.fit_to_formation();
         b
     }
@@ -810,7 +850,7 @@ impl Battle {
             })
             .collect();
         let roles: Vec<AiRole> = built.iter().map(|s| ai_power_role(s).1).collect();
-        let strength: Vec<i64> = ids.iter().map(|&i| experience::tactical(&self.content, self.fighters[i].unit, &self.fighters[i].base, building) as i64).collect();
+        let strength: Vec<i64> = ids.iter().map(|&i| self.strength_field(i, building) as i64).collect();
         let mut cell: Vec<Option<Slot>> = vec![None; ids.len()];
         let order = formation.col_order();
         let place = |cell: &mut Vec<Option<Slot>>, k: usize, row: Row, open: &dyn Fn(Slot) -> bool| -> bool {
@@ -868,6 +908,13 @@ impl Battle {
                 self.fighters[i].slot = s;
             }
         }
+    }
+
+    /// The strength field of fighter `i` (unit +0x6c): its tactical cost in `building`, or
+    /// the value set with [`Battle::set_values`].
+    fn strength_field(&self, i: usize, building: i32) -> i32 {
+        let f = &self.fighters[i];
+        f.value.unwrap_or_else(|| experience::tactical(&self.content, f.unit, &f.base, building))
     }
 
     /// Both sides as the battle began.
@@ -942,7 +989,8 @@ impl Battle {
         // battle. The reserve does not move, and the enemy needs no fix. There is no other
         // collapse before the first action. The test reads the army's formation, so a corpse
         // or a unit sitting out in the front row counts as somebody there (the original's).
-        if !self.row_occupied(Team::Player, Row::Front) && !self.bench.iter().any(|s| s.row == Row::Front) {
+        // The editor's battles have no such window, so no fix.
+        if self.rules == Rules::Game && !self.row_occupied(Team::Player, Row::Front) && !self.bench.iter().any(|s| s.row == Row::Front) {
             for f in self.fighters.iter_mut().filter(|f| f.alive() && f.team == Team::Player && f.slot.row == Row::Back) {
                 f.slot.row = Row::Front;
             }
@@ -952,8 +1000,10 @@ impl Battle {
         }
         // Strength at the start, from the stats the units bring (items, spells) and the
         // building they stand in.
-        for f in &mut self.fighters {
-            f.tactical = experience::tactical(&self.content, f.unit, &f.base, self.building_defence[f.team.index()]);
+        for i in 0..self.fighters.len() {
+            let tactical = self.strength_field(i, self.building_defence[self.fighters[i].team.index()]);
+            let f = &mut self.fighters[i];
+            f.tactical = tactical;
             f.role = experience::role(&f.base);
         }
         for team in Team::BOTH {
@@ -1155,6 +1205,9 @@ impl Battle {
                 self.regenerate(i);
             }
         }
+        if round == 1 && self.rules != Rules::Game {
+            self.terrible();
+        }
         for team in Team::BOTH {
             let n = self.living(team).count();
             let mean = if n > 0 { initiative[team.index()] / n as f64 } else { initiative[team.index()] };
@@ -1170,6 +1223,10 @@ impl Battle {
     /// drain instead.
     fn drain(&mut self, i: usize) {
         if self.fighters[i].power <= 0 {
+            return;
+        }
+        if self.rules != Rules::Game {
+            self.editor_drain(i);
             return;
         }
         let (dec, floor) = self.drain_of(self.fighters[i].unit);
@@ -1261,7 +1318,7 @@ impl Battle {
             f.mods.defence += (f.base[Stat::DefenceBlow] * FORTIFY_PERCENT / 100).max(1) * (round - 1).min(FORTIFY_TURNS);
         }
         // The Community Garrison fix: +AttackShot to the attack modifier.
-        if f.has(Bonus::Garrison) && own_building == 10 {
+        if f.has(Bonus::Garrison) && own_building == 10 && self.rules == Rules::Game {
             f.mods.attack += f.base[Stat::AttackShot];
         }
         // Bastion doubles its attacks and defences every turn, with no building check; the
@@ -1372,7 +1429,7 @@ impl Battle {
     /// column) and loses its remaining actions; with only row 1 empty row 2 moves up and
     /// keeps them.
     fn collapse(&mut self, team: Team) {
-        if self.row_occupied(team, Row::Front) {
+        if self.row_occupied(team, Row::Front) || !self.switches().collapse {
             return;
         }
         let back = self.row_occupied(team, Row::Back);
@@ -1420,12 +1477,14 @@ impl Battle {
         }
         let living = self.fighters.iter().filter(|f| f.listed()).count();
         let own = self.screen_object;
-        patch_update(|g| {
-            if own {
-                g.screen_living = living;
-            }
-            g.hunger_counter = g.screen_living;
-        });
+        if self.rules == Rules::Game {
+            patch_update(|g| {
+                if own {
+                    g.screen_living = living;
+                }
+                g.hunger_counter = g.screen_living;
+            });
+        }
         self.collapse(team);
     }
 
@@ -1496,7 +1555,9 @@ impl Battle {
 
     /// The cell exists on `team`'s grid (it is not blocked).
     pub fn is_open(&self, team: Team, s: Slot) -> bool {
-        s.col < self.formation.cols && self.cells[team.index()][(s.row.number() - 1) as usize][s.col as usize]
+        // The editor's cell test is the grid's shape (0x4f752c), on top of the blocked cells.
+        let shaped = self.rules == Rules::Game || self.formation.contains(s);
+        shaped && s.col < self.formation.cols && self.cells[team.index()][(s.row.number() - 1) as usize][s.col as usize]
     }
 
     /// The cells of `team`'s grid that exist, row by row.
@@ -1519,7 +1580,13 @@ impl Battle {
         if !f.standing() || !t.standing() {
             return None;
         }
+        // The editor's OldVampiressGist cannot be targeted on turn 1 while it still has
+        // actions: its cell keeps only the codes 0–3 (0x4f7c98).
+        if self.round == 1 && t.extra == Some(EditorBonus::OldVampiressGist) && t.actions > 0 {
+            return None;
+        }
         let s = &f.stats;
+        let sw = self.switches();
         if t.team != f.team {
             if !t.slot.row.is_active() {
                 return None;
@@ -1532,16 +1599,19 @@ impl Battle {
             if f.is_warrior() && from.row == Row::Front {
                 if adjacent {
                     kind = Some(Melee);
-                } else if near.is_empty() && self.long_strike_targets(t.team, from.col).contains(&target) {
+                } else if sw.long_strike && near.is_empty() && self.long_strike_targets(t.team, from.col).contains(&target) {
                     kind = Some(LongStrike);
                 }
             }
+            // The editor's short-range switch: the whole enemy rows 1–2 become their cells in
+            // columns c−1..c+1, for shooters and casters of both rows (0x4f84f2 …).
+            let whole = !sw.short_range || t.slot.col.abs_diff(from.col) <= 1;
             // From the front row a shooter reaches everyone only past a clear front, else just
             // the occupied cells c−1..c+1; a mage there casts only past a clear front.
-            if f.is_shooter() && (from.row == Row::Back || (from.row == Row::Front && (clear || adjacent))) {
+            if f.is_shooter() && (((from.row == Row::Back || (from.row == Row::Front && clear)) && whole) || (from.row == Row::Front && !clear && adjacent)) {
                 kind = Some(Shot);
             }
-            if s.is_mage() && s.magic_direction().hits_enemies() && (from.row == Row::Back || (from.row == Row::Front && clear)) {
+            if s.is_mage() && s.magic_direction().hits_enemies() && (from.row == Row::Back || (from.row == Row::Front && clear)) && whole {
                 kind = Some(magic);
             }
             // Flying writes melee on the three front cells opposite after the shots and spells,
@@ -1695,7 +1765,7 @@ impl Battle {
         // 1–127, or in the open with a modifier below 0 or from 4096 (the original's).
         let probe = (((self.building_defence[af.team.index()] as u8 as u32) << 24) | (af.mods.initiative as u32 >> 8)) as i32;
         let assaulted = ts.has(&Bonus::Assault) && probe >= 16;
-        if ts.has_any(&[Bonus::Evasive, Bonus::VampirsGist, Bonus::OldVampirsGist]) || assaulted {
+        if ts.has_any(&[Bonus::Evasive, Bonus::VampirsGist, Bonus::OldVampirsGist]) || assaulted || tf.extra == Some(EditorBonus::OldVampiressGist) {
             dmg = dmg.wrapping_mul(2) / 3;
         }
         if ts.has(&Bonus::Garrison) && building >= 10 {
@@ -1705,7 +1775,8 @@ impl Battle {
             dmg = dmg.wrapping_mul(3) / 10;
         }
         if self.has_knight(tf.team) {
-            dmg = dmg.wrapping_mul(KNIGHT_PERCENT) / 100;
+            let percent = if self.rules == Rules::Game { KNIGHT_PERCENT } else { EDITOR_KNIGHT_PERCENT };
+            dmg = dmg.wrapping_mul(percent) / 100;
         }
         // The invulnerable (and ghosts, immune to weapons) are hit for 1, whatever the blow
         // pierces; GodAnger and GodStrike still add their 10 or 20 on top (485a8e).
@@ -1713,6 +1784,10 @@ impl Battle {
             dmg = 1;
         }
         dmg = dmg.wrapping_add(god_bonus(s));
+        // The editor's Parrying: a guarded unit takes 1 from anything but a shot (0x4f9428).
+        if !shot && tf.extra == Some(EditorBonus::Parrying) && tf.guard {
+            dmg = 1;
+        }
         if dmg == 0 {
             dmg = 1;
         }
@@ -1781,8 +1856,14 @@ impl Battle {
     /// `Potent` caster); plus GodAnger/GodStrike.
     fn strike_damage(&self, a: usize, t: usize, p: i32) -> i32 {
         let nature = self.fighters[t].stats.nature;
+        let editor = self.rules != Rules::Game;
         let dmg = match (self.school(a), nature) {
             _ if self.fighters[a].has(Bonus::Potent) => p,
+            // The editor's table (0x4f9688): no ×3/4 on elementals for Life and Death.
+            (Some(MagicSchool::Life), Nature::Undead) if editor => 2 * p,
+            (Some(MagicSchool::Death), Nature::Undead) if editor => p / 2,
+            (Some(MagicSchool::Elemental), _) if editor => p * 3 / 4,
+            _ if editor => p,
             (None, _) => p,
             (Some(MagicSchool::Life), Nature::Undead) => 2 * p,
             (Some(MagicSchool::Death), Nature::Undead) => p / 2,
@@ -1818,6 +1899,16 @@ impl Battle {
     /// Elemental P/2, Death P on undead only.
     fn heal_amount(&self, a: usize, t: usize, p: i32) -> i32 {
         let nature = self.fighters[t].stats.nature;
+        if self.rules != Rules::Game {
+            // The editor's (0x4f9688): Life 0 only on undead, Death 0 on Normal and Hero.
+            return match self.school(a) {
+                Some(MagicSchool::Life) if nature == Nature::Undead => 0,
+                Some(MagicSchool::Life) | None => p,
+                Some(MagicSchool::Elemental) => p / 2,
+                Some(MagicSchool::Death) if vampire_nature(nature) => 0,
+                Some(MagicSchool::Death) => p,
+            };
+        }
         match self.school(a) {
             Some(MagicSchool::Life) if matches!(nature, Nature::Undead | Nature::Elemental) => 0,
             Some(MagicSchool::Life) | None => p,
@@ -1832,6 +1923,8 @@ impl Battle {
     fn bless_of(&self, a: usize, t: usize, p: i32) -> Buff {
         let target = &self.fighters[t];
         match self.school(a) {
+            // The editor's Life blessing changes only Normal and Hero units (0x501054).
+            Some(MagicSchool::Life) if self.rules != Rules::Game && !vampire_nature(target.stats.nature) => Buff::default(),
             Some(MagicSchool::Life) if matches!(target.stats.nature, Nature::Undead | Nature::Elemental) => Buff::default(),
             Some(school) => bless_effect(self.opt(), school, p),
             None => Buff::default(),
@@ -1881,9 +1974,18 @@ impl Battle {
     /// Every action starts by spending one action; a bleeding unit then bleeds, and dies
     /// before acting if that kills it. False if the actor died.
     fn start_action(&mut self, id: usize) -> bool {
+        let cost = self.switches().initiative_cost;
         let f = &mut self.fighters[id];
         f.actions -= 1;
         f.taken += 1;
+        // The editor's: every action drops the Parrying guard, and with the initiative-cost
+        // switch also costs 1 current initiative (0x501054).
+        f.guard = false;
+        if cost {
+            f.cur_initiative -= 1;
+            self.refresh(id);
+        }
+        let f = &mut self.fighters[id];
         if f.bleed > 0 {
             // `(AB + AS + MP) × bleed / 100`, divided unsigned: a negative sum (EternalGift
             // curses) bleeds about 43 million, so the unit dies (c2a53c, the original's).
@@ -1944,7 +2046,10 @@ impl Battle {
     /// The active fighter passes one action (a click on its own cell).
     pub fn pass(&mut self) {
         if let Some(id) = self.active() {
-            self.start_action(id);
+            if self.start_action(id) && self.fighters[id].extra == Some(EditorBonus::Parrying) {
+                // The editor's Parrying: a pass raises its guard (0x5012e7).
+                self.fighters[id].guard = true;
+            }
             self.finish_action(id);
         }
     }
@@ -2120,6 +2225,10 @@ impl Battle {
         let raw = self.physical_damage(id, target, kind);
         out.amount = raw.min(self.fighters[target].hp);
         self.wound(target, out.amount);
+        if self.rules != Rules::Game {
+            self.editor_melee(id, target, raw);
+            return self.melee_end(id, target, kind, out, counter);
+        }
         if raw > 1 && self.fighters[id].has(Bonus::Poison) {
             self.fighters[target].regen = POISON_REGEN;
         }
@@ -2150,6 +2259,11 @@ impl Battle {
             let f = &mut self.fighters[id];
             f.hp = f.max_hp();
         }
+        self.melee_end(id, target, kind, out, counter)
+    }
+
+    /// The melee case's end: the message, the counter blow and the kill check.
+    fn melee_end(&mut self, id: usize, target: usize, kind: ActionKind, mut out: Struck, counter: &mut Option<i32>) -> Struck {
         let long = kind == ActionKind::LongStrike;
         let (name, tname) = (&self.fighters[id].name, &self.fighters[target].name);
         let killed = !self.fighters[target].alive();
@@ -2164,7 +2278,7 @@ impl Battle {
         // Counterblow: a surviving target answers with a blow, even a Suicide striker waiting
         // for its removal; a striker it kills is removed with no on-kill effects (48b4b3).
         let t = &self.fighters[target];
-        if t.alive() && t.has(Bonus::Counterblow) {
+        if t.alive() && t.has(Bonus::Counterblow) && self.switches().counterblow {
             let dmg = self.physical_damage(target, id, ActionKind::Melee).min(self.fighters[id].hp.max(0));
             self.fighters[id].hp -= dmg;
             *counter = Some(counter.unwrap_or(0) + dmg);
@@ -2189,7 +2303,9 @@ impl Battle {
         let raw = self.physical_damage(id, target, ActionKind::Shot);
         out.amount = raw.min(self.fighters[target].hp);
         self.wound(target, out.amount);
-        if raw > 1 && self.fighters[id].has(Bonus::Poison) {
+        if self.rules != Rules::Game {
+            self.editor_poison(id, target, raw);
+        } else if raw > 1 && self.fighters[id].has(Bonus::Poison) {
             self.fighters[target].regen = POISON_REGEN;
         }
         self.berserk_target(target);
@@ -2230,7 +2346,11 @@ impl Battle {
             self.log.push(crate::trf!("{name} hits {tname} with magic for {dealt}", name, tname, dealt = out.amount));
             // Vampirism on magic: Death strikes only, not from undead or elementals.
             let vamp = self.fighters[id].stats[Stat::Vampirizm];
-            if school == Some(MagicSchool::Death) && vamp > 0 && !matches!(self.fighters[target].stats.nature, Nature::Undead | Nature::Elemental) {
+            if self.rules != Rules::Game {
+                if school == Some(MagicSchool::Death) && vamp > 0 {
+                    self.editor_vampirism(id, target, raw);
+                }
+            } else if school == Some(MagicSchool::Death) && vamp > 0 && !matches!(self.fighters[target].stats.nature, Nature::Undead | Nature::Elemental) {
                 let f = &mut self.fighters[id];
                 f.hp = f.hp.wrapping_add(raw.wrapping_mul(vamp) / 100).min(f.max_hp());
             }
@@ -2259,7 +2379,8 @@ impl Battle {
             self.fighters[target].hp -= dry;
             out.amount += dry;
         }
-        let poisoned = self.poison_power(id, target) > MAGE_POISON_POWER;
+        // The mage poison is the Community's: the editor's spells never poison.
+        let poisoned = self.rules == Rules::Game && self.poison_power(id, target) > MAGE_POISON_POWER;
         if poisoned && self.fighters[id].has(Bonus::Poison) {
             self.fighters[target].regen = POISON_REGEN;
         }
@@ -2546,6 +2667,9 @@ impl Battle {
         if self.fighters[id].slot.row == Row::Reserve {
             return Some(self.ai_move(id, &opts));
         }
+        if let Some(plan) = self.ai_pull(id) {
+            return Some(plan);
+        }
         if let Some(plan) = self.ai_retreat(id, &opts) {
             return Some(plan);
         }
@@ -2559,7 +2683,11 @@ impl Battle {
             let dmg = self.physical_damage(id, t, k);
             let tf = &self.fighters[t];
             let manevres = tf.base[Stat::Manevres];
-            let m = if manevres == 0 {
+            let m = if self.rules != Rules::Game {
+                // The editor's code adds half the actions left when there are some (0x4fab03);
+                // the game's, only when negative, so never.
+                manevres as f64 + if tf.actions > 0 { tf.actions as f64 / 2.0 } else { 0.0 }
+            } else if manevres == 0 {
                 // Community c25b63: 1.5 × K for a target with 0 Manevres, K being four bytes
                 // that are mostly the next instruction, so about 1.75e9. Only the low 32 bits
                 // of the rounded product are kept and the score wraps (the original's).
@@ -2650,11 +2778,14 @@ impl Battle {
             }));
         }
         let cols = self.formation.cols;
+        if !self.switches().long_strike {
+            self.retreat_scores(id, &mut cands);
+        }
         let enemy_front = |c: u8| self.at(f.team.other(), Slot::new(Row::Front, c)).is_some();
-        if others && f.slot.col == 1 && enemy_front(cols - 1) {
+        if self.switches().long_strike && others && f.slot.col == 1 && enemy_front(cols - 1) {
             cands.push((Slot::new(Row::Front, 0), 1.0, Slot::new(Row::Front, 0)));
         }
-        if others && f.slot.col + 2 == cols && enemy_front(0) {
+        if self.switches().long_strike && others && f.slot.col + 2 == cols && enemy_front(0) {
             cands.push((Slot::new(Row::Front, cols - 1), 1.0, Slot::new(Row::Front, cols - 1)));
         }
         let (_, to) = self.pick(cands)?;
@@ -2986,7 +3117,7 @@ impl Battle {
                 } else {
                     // The nearest back-row cell; with 6 columns the Community starts the scan at
                     // the second column (c26c7e).
-                    let skip_first = cols == 6;
+                    let skip_first = cols == 6 && self.rules == Rules::Game;
                     self.pick(moves.iter().filter(|m| m.row == Row::Back && !(skip_first && m.col == 0)).map(|&m| (m, (3 - m.col.abs_diff(from.col) as i32) as f64, Some(m))))
                 }
             }
@@ -3021,6 +3152,11 @@ impl Battle {
             Plan::Pass => {
                 self.pass();
                 Some(Step::Wait { actor })
+            }
+            Plan::Pull(t) => {
+                let from = self.fighters[t].slot;
+                self.pull(t, true).ok()?;
+                Some(Step::Move { actor: t, from, to: self.fighters[t].slot })
             }
         }
     }
@@ -3156,6 +3292,10 @@ fn berserk(f: &Fighter) -> i32 {
     let max = f.base.max_hp().max(1);
     (max - f.hp.clamp(0, max)).wrapping_mul(BERSERK_PERCENT).wrapping_mul(f.base[Stat::AttackBlow]) / max / 100
 }
+
+mod editor;
+pub use editor::{EditorBonus, Rules, Switches};
+use editor::{vampire_nature, EDITOR_KNIGHT_PERCENT};
 
 #[cfg(test)]
 mod tests;

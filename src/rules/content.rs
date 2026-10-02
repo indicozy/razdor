@@ -379,6 +379,7 @@ pub(crate) mod testkit {
             magic_direction: None,
             nature: Nature::Normal,
             bonus: None,
+            editor_bonus: None,
             surrender: 0,
             upgrades: Vec::new(),
             level_up: StatMods::new(),
