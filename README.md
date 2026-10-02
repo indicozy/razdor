@@ -431,7 +431,10 @@ and names units, artefacts and spells from your install; without one it uses pla
   the same seed and options give the same map as the original editor; "keep" without
   "rebuild" reuses the last run's relief as the original does; the bar widths are kept in
   `[MakeMap]` of Razdor's editor `DTMapEdit.Ini`; Exit takes the map, Cancel leaves the open
-  one), Open (the game's maps, your maps
+  one), World (the original's world generator: on its three tabs, buildings and roads by
+  sector with bridges, junction buildings and ruins; the economy; armies and garrisons from
+  the random army builder; each Run is one undo step and gives the same world as the
+  original editor for the same map, options and generator state), Open (the game's maps, your maps
   or a path; as a map, a map with its text dump, or a demo map), Save (Ctrl+S), Save as
   (Ctrl+Shift+S; a map, a map with its text dump, an uncompressed or a demo map, as the
   original editor writes them), Save to game folder, Undo (Ctrl+Z), Redo
@@ -498,8 +501,7 @@ Where maps go: your maps folder, `RAZDOR_MAPS_DIR` or `~/.local/share/razdor/map
 `Maps_Rus` is saved there too, never back over the game's copy. Only **Save to game folder**
 writes into `Maps_Rus`, after a confirmation, and replacing a map that is already there (such
 as a shipped one) asks a second time. Design and what is left:
-`docs/superpowers/specs/2026-09-25-map-editor-design.md` (a random map generator is not
-planned).
+`docs/superpowers/specs/2026-09-25-map-editor-design.md`.
 
 ## Custom sprites
 All art is placeholder tokens. To use your own, put PNGs named after the units' and items'

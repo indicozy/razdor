@@ -557,18 +557,25 @@ All **code** unless noted.
 
 ## Razdor editor now → original
 
-- Razdor has no world generator at all: none of the three steps exists in `src/editor/`.
-- Razdor has no random army builder. It parses `[AIArmyGeneration]` (`dt/data.rs`) but the editor never uses
-  it.
-- Razdor has no path-cost grid, road flood, bridge builder or junction placement in the editor.
-- Razdor does not reseed from the building position on placement, and has no name/owner-name draws from the
-  `[Names]` and `[Heros]` lists.
-- Razdor sets a new building's owner to none (0xFF) on placement, where the original leaves 0. This changes
-  how the unowned-only box behaves (§5.1).
-- Razdor has no minimum-point distance scaling, no budget ranges and no economy defaults (income, trade and
-  library grids).
-- The generator itself already exists in Razdor (`rules/rng.rs`, the same sequence) and can be reused for
-  parity.
+| Topic | Razdor now (`src/editor/worldgen/`) | Original | Status |
+|---|---|---|---|
+| The window | toolbar: World; three tabs, Run runs the tab shown (one undo step), made anew at every opening | TMakeWorld, §2 | matches (Razdor's layout) |
+| Chances, grids, budgets, minimum point, the two boxes | §2: the six entries of every drop-down, the grids as text with the step's fallbacks for a cell that is not a number, the sixteen budgets from W, the keypad, the boxes | §2 | matches |
+| Counters | the open map's counts on opening (bridges never counted), the step's after a run | §2 | matches |
+| Random generator | the game's (`rules/rng.rs`), the editor's one stream; Randomize from the clock after the road clean-up | §1 | matches |
+| Reseed on placement, name draws | the shared placement of the buildings brush (`brush::place_building_in`, `naming.rs`), with the generating flag (terrain 16, trees kept) | §1, §3.5 | matches |
+| Clearing, mask, erosion | §3.1; the mask is the cells' scratch byte, which the new-map generator's flags fill and a load clears | §3.1 | matches (the load's clearing is Razdor's reading of an unknown) |
+| Sectors, quadrants, spiral | §3.2, §3.3, n² + 1 visits | §3.2, §3.3 | matches |
+| Cost map | §3.4, unchecked writes past the left edge wrapping to the row above as the original's do; rebuilt after every attempt (only the changed cells are computed again, each as the whole build leaves it) | §3.4 | matches |
+| Road flood and path | the game's planner (`TileMap::flood_maps`, `descend`) | the editor's copy of it | matches |
+| Roads, bridges, junctions, ruins | §3.6–§3.10 | §3.6–§3.10 | matches |
+| Economy | §4 and §4.1 | §4 | matches |
+| Armies and garrisons | §5, the army placed with the items brush's placement; names our own words (the budget's three words, the fixed army names), the owner name cut at the Russian particles | §5 | matches (Razdor's own texts) |
+| Army builder, roles, widening | §6 with the themes of `[AIArmyGeneration]` up to the first 0 | §6 | matches (a non-number in a list is skipped, where the original's reader may stop) |
+| Strength | §6.5 in software 80-bit precision with the editor's constants and Delphi's `Exp`; `f2xm1` modelled correctly rounded | x87 | matches (an x86 processor's `f2xm1` is a last bit off for about 1 % of arguments; no unit's strength of the install changes) |
+| Range errors (§3.2 n = 16, §3.9, §4, §5.4) and the divide by zero (W < 50) | the step stops there and says why; what it wrote stays, but terrain 16 goes back to grass plain | the step aborts half-way, terrain 16 and the generating flag left | Razdor stops cleanly |
+| Endless builder loop (§6.3) | the step stops when the window can no longer widen and holds no unit of the theme | loops for ever | Razdor stops cleanly |
+| Undo | one step per run; afterwards the cell state is built again as a load builds it | no undo | Razdor's own |
 
 ## Unknowns
 

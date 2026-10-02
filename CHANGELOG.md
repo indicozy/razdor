@@ -595,6 +595,23 @@ old id, and their versions give both.
   matrix, title and file name, and the seed in the header. An 800 × 800 map takes about a
   second.
 
+- **The original's world generator** (toolbar: World, `docs/reference/editor/worldgen.md`):
+  its three steps, each run from its tab on the open map as one undo step. *Buildings and
+  roads* clears the buildings and the road layer, places towns, castles and villages sector
+  by sector with the original's square search, links them by roads over the game's path
+  planner with bridges over water, puts forts, taverns, markets and churches on road
+  junctions and ruins in the wild; *Economy* sets incomes, goods, spells, barracks and
+  factions from the income, trade and library grids; *Armies and garrisons* gives every
+  building an army or a garrison from the original's random army builder (themes from
+  `[AIArmyGeneration]`, the budget ranges, the minimum point, the two boxes), its units
+  priced by the editor's own strength formula in 80-bit precision. The same map, options and
+  generator state give the same world as DTMapEdit, quirks included (the reseed at every
+  placement, the spiral that only grows toward the bottom right, the extra sector visit, the
+  picture drawn before the roll, the six-bridge limit, the village gold from the mana base,
+  the town budget from the castle's low end, garrisons that pile up, and others). Where the
+  original stops a step with a range error or loops for ever, the step stops and says why.
+  An 800 × 800 map's buildings and roads take about half a second.
+
 ## 0.2.2 — 2026-10-01
 
 Commit `b01b492` (tag `v0.2.2`).
