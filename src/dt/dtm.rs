@@ -283,15 +283,53 @@ pub struct Header {
     /// 0x110: carried over from the previous campaign map, in UI order: gold, gods' favour,
     /// fame, experience/level, personal artifacts, whole inventory, whole army (L).
     pub carry_over: [u8; 7],
-    /// 0x117: always 0 (U).
+    /// 0x117: the editor's demo flag ([`Header::demo_flag`]), then 4 bytes always 0 (U).
     pub unknown_0x117: [u8; 5],
     /// 0x120: built-in scenario picture choice (L).
     pub scenario_picture_index: u8,
-    /// 0x121: always 0 (U).
+    /// 0x121: the game's row-width byte, then the editor's playability score, save counter
+    /// and quest count ([`Header::playability`] and the next two), then zeros (U).
     pub unknown_0x121: [u8; 14],
 }
 
 impl Header {
+    /// 0x117: the Community editor's demo flag (1 in its `.DTs` maps, whose sections are
+    /// stored in another order).
+    pub fn demo_flag(&self) -> u8 {
+        self.unknown_0x117[0]
+    }
+
+    pub fn set_demo_flag(&mut self, v: u8) {
+        self.unknown_0x117[0] = v;
+    }
+
+    /// 0x122: the playability score of the Community editor's last scoring.
+    pub fn playability(&self) -> u16 {
+        u16::from_le_bytes([self.unknown_0x121[1], self.unknown_0x121[2]])
+    }
+
+    pub fn set_playability(&mut self, v: u16) {
+        self.unknown_0x121[1..3].copy_from_slice(&v.to_le_bytes());
+    }
+
+    /// 0x124: the Community editor's save counter.
+    pub fn save_counter(&self) -> u16 {
+        u16::from_le_bytes([self.unknown_0x121[3], self.unknown_0x121[4]])
+    }
+
+    pub fn set_save_counter(&mut self, v: u16) {
+        self.unknown_0x121[3..5].copy_from_slice(&v.to_le_bytes());
+    }
+
+    /// 0x126: the number of quests, written with the score.
+    pub fn quest_count(&self) -> u8 {
+        self.unknown_0x121[5]
+    }
+
+    pub fn set_quest_count(&mut self, v: u8) {
+        self.unknown_0x121[5] = v;
+    }
+
     pub fn kind(&self) -> ScenarioKind {
         match self.scenario_kind {
             0 => ScenarioKind::Standalone,
@@ -1515,6 +1553,243 @@ impl<'a> Cursor<'a> {
     }
 }
 
+/// Size of one record of the custom-artefact section (header 0x34).
+pub const CUSTOM_ARTEFACT_SIZE: usize = 230;
+
+/// A map-specific artefact of the Community editor's custom-artefact section: the raw
+/// 230-byte artefact record and its two strings.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CustomArtefact {
+    pub record: Vec<u8>,
+    pub name: String,
+    pub description: String,
+}
+
+/// What the Community editor's loader reads ([`Scenario::parse_editor_payload`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EditorRead {
+    pub scenario: Scenario,
+    /// Header byte 9, the version digit (`b'4'` in current maps).
+    pub version: u8,
+    /// The first 12 bytes are exactly the version-4 signature.
+    pub signature_is_current: bool,
+    pub custom_artefacts: Vec<CustomArtefact>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Section {
+    Terrain,
+    Objects,
+    Buildings,
+    Armies,
+    Points,
+    Events,
+    CustomArtefacts,
+}
+
+/// The order of the binary sections in a payload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SectionOrder {
+    /// File order, the custom-artefact section after the events.
+    File,
+    /// The Community editor's demo maps (header 0x117 = 1): objects, custom artefacts,
+    /// points, terrain, events, armies, buildings (DTMapEdit 0x5a6fe0, 0x5a50f2).
+    Demo,
+}
+
+impl SectionOrder {
+    fn sections(self) -> [Section; 7] {
+        use Section::*;
+        match self {
+            SectionOrder::File => [Terrain, Objects, Buildings, Armies, Points, Events, CustomArtefacts],
+            SectionOrder::Demo => [Objects, CustomArtefacts, Points, Terrain, Events, Armies, Buildings],
+        }
+    }
+}
+
+/// The binary sections as read, before they become records (old versions are upgraded on
+/// the raw bytes, whose layout they change).
+#[derive(Default)]
+struct RawSections<'a> {
+    terrain: &'a [u8],
+    objects: Vec<Rec<'a>>,
+    buildings: Vec<Vec<u8>>,
+    armies: Vec<Vec<u8>>,
+    points: Vec<Vec<u8>>,
+    events: Vec<Rec<'a>>,
+    custom: Vec<Vec<u8>>,
+    /// The custom-artefact section was read (the editor's loader); the game skips it and
+    /// its strings.
+    custom_read: bool,
+}
+
+impl<'a> RawSections<'a> {
+    fn read(&mut self, c: &mut Cursor<'a>, data: &[u8], section: Section) -> Result<(), DtError> {
+        let size = |o: usize| u32::from_le_bytes(data[o..o + 4].try_into().expect("in the header"));
+        let owned = |v: Vec<Rec>| v.into_iter().map(|r| r.0.to_vec()).collect::<Vec<_>>();
+        match section {
+            Section::Terrain => self.terrain = c.take(size(0x1C) as usize, "terrain")?,
+            Section::Objects => self.objects = c.records(size(0x20), OBJECT_SIZE, "objects")?,
+            Section::Buildings => self.buildings = owned(c.records(size(0x24), BUILDING_SIZE, "buildings")?),
+            Section::Armies => self.armies = owned(c.records(size(0x28), ARMY_SIZE, "armies")?),
+            Section::Points => self.points = owned(c.records(size(0x2C), POINT_SIZE, "points")?),
+            Section::Events => self.events = c.records(size(0x30), EVENT_SIZE, "events")?,
+            Section::CustomArtefacts => {
+                self.custom = owned(c.records(size(0x34), CUSTOM_ARTEFACT_SIZE, "custom artefacts")?);
+                self.custom_read = true;
+            }
+        }
+        Ok(())
+    }
+
+    /// The Community editor's upgrade of an old map by its version digit (0x5a8424); each
+    /// digit gets only its own step, so a version-1 map is not given the steps of 2 and 3.
+    fn upgrade(&mut self, version: u8) {
+        match version {
+            b'1' => {
+                // Event lists were 64 (buildings) and 5 (points) four-byte ids: their low
+                // words become the two-byte ids. A building's goods were 6 signed bytes at
+                // 301; the 128 bytes at 136 are cleared and the six slots filled from them.
+                for b in &mut self.buildings {
+                    for k in 0..64 {
+                        let low = [b[8 + 4 * k], b[9 + 4 * k]];
+                        b[8 + 2 * k..10 + 2 * k].copy_from_slice(&low);
+                    }
+                    b[136..264].fill(0);
+                    for k in 0..6 {
+                        let v = b[301 + k] as i8 as i16;
+                        b[136 + 2 * k..138 + 2 * k].copy_from_slice(&v.to_le_bytes());
+                    }
+                }
+                for p in &mut self.points {
+                    for k in 0..5 {
+                        let low = [p[8 + 4 * k], p[9 + 4 * k]];
+                        p[8 + 2 * k..10 + 2 * k].copy_from_slice(&low);
+                    }
+                }
+            }
+            b'2' => {
+                // Point model 6 became 8; an army's id and map model (bytes 4 and 5) are
+                // set: its style + 4 when active, 7 when inactive.
+                for p in &mut self.points {
+                    if p[5] == 6 {
+                        p[5] = 8;
+                    }
+                }
+                for (i, a) in self.armies.iter_mut().enumerate() {
+                    a[5] = if a[63] == 0 { a[59].wrapping_add(4) } else { 7 };
+                    a[4] = (i + 1) as u8;
+                }
+            }
+            b'3' => {
+                // The garrison strength: 0 becomes 50, and any other value 0 (the original's
+                // code; why is not known).
+                for a in &mut self.armies {
+                    a[82] = if a[82] == 0 { 50 } else { 0 };
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The records, then the strings from the header's text offset (the game seeks there,
+    /// 0x4b27a8, and never reads the text marker), then the pictures.
+    fn into_scenario(self, c: &mut Cursor, data: &[u8], header: Header, named_count: u8) -> Result<EditorRead, DtError> {
+        let h = Rec(&data[..HEADER_SIZE]);
+        let terrain = expand_terrain(self.terrain, header.width, header.height)?;
+        let objects = self.objects.iter().map(|r| MapObject { x: r.u16(0), y: r.u16(2), sprite: r.u8(4), class: r.u8(5) }).collect();
+        let mut buildings: Vec<Building> = self.buildings.iter().map(|b| Building::read(&Rec(b))).collect();
+        let mut armies: Vec<Army> = self.armies.iter().map(|a| Army::read(&Rec(a))).collect();
+        let points = self.points.iter().map(|p| Point::read(&Rec(p))).collect();
+        let (mut events, picture_sizes): (Vec<Event>, Vec<i32>) = self.events.iter().map(Event::read).unzip();
+        c.pos = h.u32(0x18) as usize;
+
+        let title = c.cstr();
+        let description = c.cstr();
+        let campaign_name = c.cstr();
+        let next_map = c.cstr();
+        for b in &mut buildings {
+            (b.name, b.owner_name, b.description) = (c.cstr(), c.cstr(), c.cstr());
+        }
+        for a in &mut armies {
+            (a.name, a.leader_name, a.description) = (c.cstr(), c.cstr(), c.cstr());
+        }
+        for e in &mut events {
+            (e.title, e.question, e.message) = (c.cstr(), c.cstr(), c.cstr());
+            e.flags = FlagScript::from_title(&e.title);
+        }
+        let mut custom_artefacts = Vec::new();
+        if self.custom_read {
+            for record in self.custom {
+                let (name, description) = (c.cstr(), c.cstr());
+                custom_artefacts.push(CustomArtefact { record, name, description });
+            }
+        }
+        let mut named_characters = Vec::with_capacity(named_count as usize);
+        for &unit in &header.named_character_slots[..named_count as usize] {
+            named_characters.push(NamedCharacter { unit, name: c.cstr() });
+        }
+
+        let scenario_picture = match h.u32(0x11C) {
+            0 => None,
+            n => Some(c.take(n as usize, "scenario picture")?.to_vec()),
+        };
+        for (e, n) in events.iter_mut().zip(picture_sizes) {
+            if n > 0 {
+                e.custom_picture = Some(c.take(n as usize, "event picture")?.to_vec());
+            }
+        }
+        let scenario = Scenario {
+            header,
+            terrain,
+            objects,
+            buildings,
+            armies,
+            points,
+            events,
+            title,
+            description,
+            campaign_name,
+            next_map,
+            named_characters,
+            scenario_picture,
+        };
+        Ok(EditorRead { scenario, version: data[9], signature_is_current: true, custom_artefacts })
+    }
+}
+
+/// The header fields and the named-character count (checked against the 32 slots).
+fn read_header(data: &[u8]) -> Result<(Header, u8), DtError> {
+    let h = Rec(&data[..HEADER_SIZE]);
+    let named_count = h.u8(0xEE);
+    let header = Header {
+        width: h.u32(0x0C),
+        height: h.u32(0x10),
+        generator_seed: h.u32(0x14),
+        unknown_0x34: h.u32(0x34),
+        start_time: h.u32(0x38),
+        heroes: std::array::from_fn(|k| {
+            let o = 0x3C + HERO_PRESET_SIZE * k;
+            HeroPreset::read(&Rec(&data[o..o + HERO_PRESET_SIZE]))
+        }),
+        victory_event: h.u16(0xD2),
+        unknown_0xd4: h.arr(0xD4),
+        defeat_event: h.u16(0xD8),
+        unknown_0xda: h.arr(0xDA),
+        relations: std::array::from_fn(|k| h.i8s(0xDE + 4 * k)),
+        named_character_slots: h.arr(0xEF),
+        scenario_kind: h.u8(0x10F),
+        carry_over: h.arr(0x110),
+        unknown_0x117: h.arr(0x117),
+        scenario_picture_index: h.u8(0x120),
+        unknown_0x121: h.arr(0x121),
+    };
+    if named_count as usize > header.named_character_slots.len() {
+        return Err(DtError::BadValue { section: "header".into(), key: "named character count".into(), value: named_count.to_string() });
+    }
+    Ok((header, named_count))
+}
+
 impl Scenario {
     /// Read a `.DTm` file.
     pub fn load(path: &Path) -> Result<Scenario, DtError> {
@@ -1547,107 +1822,61 @@ impl Scenario {
         if data[9] < b'4' {
             return Err(DtError::BadMagic { what: "DTm payload" });
         }
-        let h = Rec(&data[..HEADER_SIZE]);
-        let (width, height, text_offset) = (h.u32(0x0C), h.u32(0x10), h.u32(0x18));
-        let sizes: [u32; 6] = std::array::from_fn(|k| h.u32(0x1C + 4 * k));
-        let [terrain_size, objects_size, buildings_size, armies_size, points_size, events_size] = sizes;
-        let picture_size = h.u32(0x11C);
-        let named_count = h.u8(0xEE);
-        let header = Header {
-            width,
-            height,
-            generator_seed: h.u32(0x14),
-            unknown_0x34: h.u32(0x34),
-            start_time: h.u32(0x38),
-            heroes: std::array::from_fn(|k| {
-                let o = 0x3C + HERO_PRESET_SIZE * k;
-                HeroPreset::read(&Rec(&data[o..o + HERO_PRESET_SIZE]))
-            }),
-            victory_event: h.u16(0xD2),
-            unknown_0xd4: h.arr(0xD4),
-            defeat_event: h.u16(0xD8),
-            unknown_0xda: h.arr(0xDA),
-            relations: std::array::from_fn(|k| h.i8s(0xDE + 4 * k)),
-            named_character_slots: h.arr(0xEF),
-            scenario_kind: h.u8(0x10F),
-            carry_over: h.arr(0x110),
-            unknown_0x117: h.arr(0x117),
-            scenario_picture_index: h.u8(0x120),
-            unknown_0x121: h.arr(0x121),
-        };
-        if named_count as usize > header.named_character_slots.len() {
-            return Err(DtError::BadValue {
-                section: "header".into(),
-                key: "named character count".into(),
-                value: named_count.to_string(),
-            });
-        }
-
+        let (header, named_count) = read_header(data)?;
         let mut c = Cursor { data, pos: HEADER_SIZE };
-        let terrain = expand_terrain(c.take(terrain_size as usize, "terrain")?, width, height)?;
-        let objects = c
-            .records(objects_size, OBJECT_SIZE, "objects")?
-            .iter()
-            .map(|r| MapObject { x: r.u16(0), y: r.u16(2), sprite: r.u8(4), class: r.u8(5) })
-            .collect();
-        let mut buildings: Vec<Building> =
-            c.records(buildings_size, BUILDING_SIZE, "buildings")?.iter().map(Building::read).collect();
-        let mut armies: Vec<Army> = c.records(armies_size, ARMY_SIZE, "armies")?.iter().map(Army::read).collect();
-        let points = c.records(points_size, POINT_SIZE, "points")?.iter().map(Point::read).collect();
-        let (mut events, picture_sizes): (Vec<Event>, Vec<i32>) =
-            c.records(events_size, EVENT_SIZE, "events")?.iter().map(Event::read).unzip();
-        // Seek to the header's text offset (0x4b27a8).
-        c.pos = text_offset as usize;
+        let mut raw = RawSections::default();
+        // The game reads neither the custom-artefact section nor its strings.
+        for section in &SectionOrder::File.sections()[..6] {
+            raw.read(&mut c, data, *section)?;
+        }
+        let read = raw.into_scenario(&mut c, data, header, named_count)?;
+        Ok(read.scenario)
+    }
 
-        let title = c.cstr();
-        let description = c.cstr();
-        let campaign_name = c.cstr();
-        let next_map = c.cstr();
-        for b in &mut buildings {
-            (b.name, b.owner_name, b.description) = (c.cstr(), c.cstr(), c.cstr());
+    /// Parse an uncompressed payload as the Community editor's loader reads it (DTMapEdit
+    /// 0x5a6c20, docs/reference/editor/mapcheck-files.md §3): the first nine bytes must be
+    /// the signature up to the version digit and both sides below 801; the demo flag (header
+    /// 0x117) picks the section order; the custom-artefact section (header 0x34) and its two
+    /// strings per artefact are read; maps of versions 1 to 3 are upgraded (§3.7). The
+    /// strings come as stored: the editor's trimming is the caller's step. A demo flag other
+    /// than 0 or 1 makes the original read no section at all and its strings from the wrong
+    /// place; that is refused here.
+    pub fn parse_editor_payload(data: &[u8]) -> Result<EditorRead, DtError> {
+        if data.len() < HEADER_SIZE {
+            return Err(DtError::Truncated { what: "header", offset: data.len() });
         }
-        for a in &mut armies {
-            (a.name, a.leader_name, a.description) = (c.cstr(), c.cstr(), c.cstr());
+        let h = Rec(&data[..HEADER_SIZE]);
+        if &data[..9] != b"MapLDV V." || h.u32(0x0C) >= 801 || h.u32(0x10) >= 801 {
+            return Err(DtError::BadMagic { what: "DTm payload" });
         }
-        for e in &mut events {
-            (e.title, e.question, e.message) = (c.cstr(), c.cstr(), c.cstr());
-            e.flags = FlagScript::from_title(&e.title);
-        }
-        let mut named_characters = Vec::with_capacity(named_count as usize);
-        for &unit in &header.named_character_slots[..named_count as usize] {
-            named_characters.push(NamedCharacter { unit, name: c.cstr() });
-        }
-
-        let scenario_picture = match picture_size {
-            0 => None,
-            n => Some(c.take(n as usize, "scenario picture")?.to_vec()),
+        let order = match data[0x117] {
+            0 => SectionOrder::File,
+            1 => SectionOrder::Demo,
+            v => return Err(DtError::BadValue { section: "header".into(), key: "demo flag".into(), value: v.to_string() }),
         };
-        for (e, n) in events.iter_mut().zip(picture_sizes) {
-            if n > 0 {
-                e.custom_picture = Some(c.take(n as usize, "event picture")?.to_vec());
-            }
+        let version = data[9];
+        let (header, named_count) = read_header(data)?;
+        let mut c = Cursor { data, pos: HEADER_SIZE };
+        let mut raw = RawSections::default();
+        for section in order.sections() {
+            raw.read(&mut c, data, section)?;
         }
-
-        Ok(Scenario {
-            header,
-            terrain,
-            objects,
-            buildings,
-            armies,
-            points,
-            events,
-            title,
-            description,
-            campaign_name,
-            next_map,
-            named_characters,
-            scenario_picture,
-        })
+        raw.upgrade(version);
+        let mut read = raw.into_scenario(&mut c, data, header, named_count)?;
+        read.version = version;
+        read.signature_is_current = &data[..12] == PAYLOAD_MAGIC;
+        Ok(read)
     }
 
     /// Serialise back to an uncompressed payload. For a parsed map this reproduces the
     /// original bytes (the terrain is recompressed with greedy runs).
     pub fn to_payload(&self) -> Vec<u8> {
+        self.to_payload_in(SectionOrder::File)
+    }
+
+    /// Serialise with the sections in `order` (the custom-artefact section is written
+    /// empty). The header and the strings are the same in either order.
+    pub fn to_payload_in(&self, order: SectionOrder) -> Vec<u8> {
         fn records<T>(items: &[T], size: usize, write: impl Fn(&T, &mut Put)) -> Vec<u8> {
             let mut out = vec![0u8; items.len() * size];
             for (item, chunk) in items.iter().zip(out.chunks_exact_mut(size)) {
@@ -1707,8 +1936,17 @@ impl Scenario {
         p.bytes(0x121, &hd.unknown_0x121);
 
         let mut out = header;
-        for s in sections {
-            out.extend_from_slice(s);
+        for section in order.sections() {
+            let bytes: &[u8] = match section {
+                Section::Terrain => &terrain,
+                Section::Objects => &objects,
+                Section::Buildings => &buildings,
+                Section::Armies => &armies,
+                Section::Points => &points,
+                Section::Events => &events,
+                Section::CustomArtefacts => &[],
+            };
+            out.extend_from_slice(bytes);
         }
         out.extend_from_slice(TEXT_MARKER);
         let mut put_str = |s: &str| {
@@ -1879,6 +2117,122 @@ mod tests {
         out.extend_from_slice(b"LIT\0!");
         out.extend_from_slice(&[1, 0, 1, 0, 0xAB, 0xCD]);
         out
+    }
+
+    #[test]
+    fn the_editor_reads_what_the_game_reads() {
+        let p = sample_payload();
+        let r = Scenario::parse_editor_payload(&p).unwrap();
+        assert_eq!(r.scenario, Scenario::parse_payload(&p).unwrap());
+        assert!(r.signature_is_current && r.custom_artefacts.is_empty());
+        assert_eq!(r.version, b'4');
+    }
+
+    #[test]
+    fn the_editor_checks_the_signature_and_the_size() {
+        let mut p = sample_payload();
+        p[8] = b'X';
+        assert!(Scenario::parse_editor_payload(&p).is_err(), "the dot before the version digit is checked");
+        let mut p = sample_payload();
+        p[10] = b'?';
+        let r = Scenario::parse_editor_payload(&p).unwrap();
+        assert!(!r.signature_is_current, "only the first nine bytes must match; the rest marks the map modified");
+        let mut p = sample_payload();
+        w32(&mut p, 0x10, 801);
+        assert!(Scenario::parse_editor_payload(&p).is_err());
+        let mut p = sample_payload();
+        p[0x117] = 2;
+        assert!(Scenario::parse_editor_payload(&p).is_err(), "a demo flag of 2 makes the original read no section");
+    }
+
+    #[test]
+    fn demo_maps_store_the_sections_in_another_order() {
+        let s = Scenario::parse_payload(&sample_payload()).unwrap();
+        let mut demo = s.clone();
+        demo.header.set_demo_flag(1);
+        let bytes = demo.to_payload_in(SectionOrder::Demo);
+        // Objects first, right after the header.
+        assert_eq!(&bytes[HEADER_SIZE..HEADER_SIZE + OBJECT_SIZE], &[2, 0, 1, 0, 42, 9]);
+        assert_eq!(bytes.len(), s.to_payload().len());
+        let back = Scenario::parse_editor_payload(&bytes).unwrap().scenario;
+        assert_eq!(back, demo);
+        // The game reads them in file order and gets other records.
+        assert_ne!(Scenario::parse_payload(&bytes).map(|g| g.objects).ok(), Some(s.objects.clone()));
+    }
+
+    #[test]
+    fn the_editor_reads_custom_artefacts_and_their_strings() {
+        let s = Scenario::parse_payload(&sample_payload()).unwrap();
+        let mut p = s.to_payload();
+        // Insert one 230-byte record after the events and its two strings before the named
+        // character's name.
+        let events_end = p.len() - (p.len() - u32::from_le_bytes(p[0x18..0x1C].try_into().unwrap()) as usize) - TEXT_MARKER.len();
+        let mut record = vec![0u8; CUSTOM_ARTEFACT_SIZE];
+        record[0x20] = 77;
+        p.splice(events_end..events_end, record.iter().copied());
+        w32(&mut p, 0x34, CUSTOM_ARTEFACT_SIZE as u32);
+        let text_at = u32::from_le_bytes(p[0x18..0x1C].try_into().unwrap()) + CUSTOM_ARTEFACT_SIZE as u32;
+        w32(&mut p, 0x18, text_at);
+        let hero = p.windows(5).rposition(|w| w == b"Hero\0").unwrap();
+        p.splice(hero..hero, b"Sword\0Sharp\0".iter().copied());
+        let r = Scenario::parse_editor_payload(&p).unwrap();
+        assert_eq!(r.custom_artefacts, [CustomArtefact { record, name: "Sword".into(), description: "Sharp".into() }]);
+        assert_eq!(r.scenario.named_characters[0].name, "Hero");
+        assert_eq!(r.scenario.events, s.events);
+    }
+
+    #[test]
+    fn old_versions_are_upgraded() {
+        let base = Scenario::parse_payload(&sample_payload()).unwrap();
+        let at = |p: &[u8], what: usize| {
+            let u = |o: usize| u32::from_le_bytes(p[o..o + 4].try_into().unwrap()) as usize;
+            HEADER_SIZE + u(0x1C) + u(0x20) + [0, u(0x24), u(0x24) + u(0x28)][what]
+        };
+        // Version 1: four-byte event ids, goods as signed bytes at 301.
+        let mut p = sample_payload();
+        p[9] = b'1';
+        let b = at(&p, 0);
+        p[b + 8..b + 16].copy_from_slice(&[5, 0, 9, 9, 6, 0, 0, 0]);
+        p[b + 301..b + 307].copy_from_slice(&[3, 0xFF, 0, 0, 0, 4]);
+        let pt = at(&p, 2);
+        p[pt + 8..pt + 16].copy_from_slice(&[2, 0, 7, 7, 3, 0, 0, 0]);
+        let s = Scenario::parse_editor_payload(&p).unwrap().scenario;
+        assert_eq!(&s.buildings[0].event_slots[..3], &[5, 6, 0]);
+        assert_eq!(&s.buildings[0].artifact_slots[..7], &[3, 0xFFFF, 0, 0, 0, 4, 0]);
+        assert_eq!(&s.points[0].event_slots[..3], &[2, 3, 0]);
+        assert_eq!(s.armies, base.armies, "version 1 gets only its own step");
+        // Version 2: point model 6 becomes 8, armies get their id and model.
+        let mut p = sample_payload();
+        p[9] = b'2';
+        let pt = at(&p, 2);
+        p[pt + 5] = 6;
+        let a = at(&p, 1);
+        (p[a + 4], p[a + 59]) = (9, 1);
+        let s = Scenario::parse_editor_payload(&p).unwrap().scenario;
+        assert_eq!((s.points[0].model, s.armies[0].id, s.armies[0].model), (8, 1, 5));
+        p[a + 63] = 1;
+        assert_eq!(Scenario::parse_editor_payload(&p).unwrap().scenario.armies[0].model, 7);
+        // Version 3: garrison strength 0 becomes 50, anything else 0.
+        let mut p = sample_payload();
+        p[9] = b'3';
+        let a = at(&p, 1);
+        assert_eq!(Scenario::parse_editor_payload(&p).unwrap().scenario.armies[0].garrison_strength, 50);
+        p[a + 82] = 60;
+        assert_eq!(Scenario::parse_editor_payload(&p).unwrap().scenario.armies[0].garrison_strength, 0);
+        // The game does not load them at all.
+        assert!(Scenario::parse_payload(&p).is_err());
+    }
+
+    #[test]
+    fn header_fields_of_the_editor() {
+        let mut h = Header::default();
+        h.set_demo_flag(1);
+        h.set_playability(0x1234);
+        h.set_save_counter(7);
+        h.set_quest_count(3);
+        let s = Scenario { header: h, ..Scenario::default() };
+        let p = s.to_payload();
+        assert_eq!((p[0x117], &p[0x122..0x127]), (1, &[0x34, 0x12, 7, 0, 3][..]));
     }
 
     #[test]

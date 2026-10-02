@@ -9,8 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::dt::container;
-use crate::dt::dtm::{Army, Building, Event, MapObject, Point, Scenario, CONTAINER_VERSION};
+use crate::dt::dtm::{Army, Building, CustomArtefact, Event, MapObject, Point, Scenario};
 use crate::dt::DtError;
 use crate::i18n::{n_, tr};
 use crate::trf;
@@ -18,6 +17,7 @@ use crate::trf;
 use super::command::{Command, ObjectFilter, Sections, Settings};
 use super::defaults::{new_army, new_building, new_point, new_scenario, NewMap};
 use super::geometry::{brush_indices, flood_region, is_massif, rect_indices, CellRect, Footprint};
+use super::mapfile::{self, Container};
 use super::records;
 use super::refs;
 use super::validate::{has_errors, self_check, validate, Issue, MAX_RECORDS};
@@ -144,7 +144,11 @@ pub struct EditorDoc {
     /// The file this document was last saved to (the user's folder or, by explicit action,
     /// the game's), used by "save" without a dialog.
     pub saved_path: Option<PathBuf>,
-    container_version: u16,
+    /// The map's custom artefacts, as the original's loader appends them to its artefact
+    /// list; the next save drops them.
+    pub custom_artefacts: Vec<CustomArtefact>,
+    /// What opening the map had to say (a large map, the text dump).
+    pub load_notes: Vec<String>,
     undo: Vec<Entry>,
     redo: Vec<Entry>,
     group: Option<Entry>,
@@ -181,12 +185,13 @@ fn put_settings(s: &mut Scenario, m: Settings) {
 }
 
 impl EditorDoc {
-    fn with(scenario: Scenario, origin: Origin, container_version: u16) -> EditorDoc {
+    fn with(scenario: Scenario, origin: Origin) -> EditorDoc {
         EditorDoc {
             scenario,
             origin,
             saved_path: None,
-            container_version,
+            custom_artefacts: Vec::new(),
+            load_notes: Vec::new(),
             undo: Vec::new(),
             redo: Vec::new(),
             group: None,
@@ -198,28 +203,35 @@ impl EditorDoc {
 
     /// A new, empty map.
     pub fn new_map(o: NewMap) -> EditorDoc {
-        let mut d = EditorDoc::with(new_scenario(o), Origin::New, CONTAINER_VERSION);
+        let mut d = EditorDoc::with(new_scenario(o), Origin::New);
         // A new map is unsaved.
         d.saved_serial = u64::MAX;
         d
     }
 
-    /// Opens a `.DTm` file. `game_dir` is the install's maps folder: a map from there is
-    /// marked as a game map so saving goes to the user's folder.
+    /// Opens a map as the original editor does ([`mapfile::load`]), without the install's
+    /// palette (footprints stay as stored). `game_dir` is the install's maps folder: a map
+    /// from there is marked as a game map so saving goes to the user's folder.
     pub fn open(path: &Path, game_dir: Option<&Path>) -> Result<EditorDoc, DtError> {
-        let bytes = std::fs::read(path).map_err(|source| DtError::Io { path: path.to_path_buf(), source })?;
-        let (payload, version) = if container::has_magic(&bytes) {
-            let c = container::decode(&bytes)?;
-            (c.payload, c.version)
-        } else {
-            (bytes, CONTAINER_VERSION)
-        };
-        let scenario = Scenario::parse_payload(&payload)?;
-        let from_game = game_dir.is_some_and(|g| super::files::is_inside(path, g));
-        let origin = if from_game { Origin::Game(path.to_path_buf()) } else { Origin::File(path.to_path_buf()) };
-        let mut d = EditorDoc::with(scenario, origin, version);
+        EditorDoc::open_with(path, game_dir, None, 0)
+    }
+
+    /// [`EditorDoc::open`] with the install's palette, which gives buildings their
+    /// footprints, and the size of its artefact list (for a text dump's artefact blocks).
+    pub fn open_with(path: &Path, game_dir: Option<&Path>, palette: Option<&Palette>, base_artefacts: usize) -> Result<EditorDoc, DtError> {
+        let loaded = mapfile::load(path, palette, base_artefacts)?;
+        let file = loaded.path;
+        let from_game = game_dir.is_some_and(|g| super::files::is_inside(&file, g));
+        let origin = if from_game { Origin::Game(file.clone()) } else { Origin::File(file.clone()) };
+        let mut d = EditorDoc::with(loaded.scenario, origin);
+        d.custom_artefacts = loaded.custom_artefacts;
+        d.load_notes = loaded.notes;
         if !from_game {
-            d.saved_path = Some(path.to_path_buf());
+            d.saved_path = Some(file);
+        }
+        // An old version's signature marks the map modified at once.
+        if loaded.modified {
+            d.saved_serial = u64::MAX;
         }
         Ok(d)
     }
@@ -243,23 +255,54 @@ impl EditorDoc {
         validate(&self.scenario, names, palette)
     }
 
-    /// The file bytes (`AIpf` container around the payload), if the map has no errors.
-    pub fn file_bytes(&self, names: Option<&Names>, palette: Option<&Palette>) -> Result<Vec<u8>, SaveError> {
-        let issues = self.issues(names, palette);
+    /// The scenario as a save to a map of `container` leaves it ([`mapfile::prepare_save`]),
+    /// if Razdor's integrity check passes it.
+    fn prepared(&self, container: Container, names: Option<&Names>, palette: Option<&Palette>) -> Result<Scenario, SaveError> {
+        let mut s = self.scenario.clone();
+        mapfile::prepare_save(&mut s, container == Container::Demo);
+        let issues = validate(&s, names, palette);
         if has_errors(&issues) {
             return Err(SaveError::Invalid(issues));
         }
-        let payload = self_check(&self.scenario).map_err(|_| SaveError::Invalid(issues))?;
-        Ok(container::encode(self.container_version, &payload))
+        self_check(&s).map_err(|_| SaveError::Invalid(issues))?;
+        Ok(s)
     }
 
-    /// Validates and writes the map to `path` (chosen by [`super::files::plan_save`]).
-    pub fn save_to(&mut self, path: &Path, names: Option<&Names>, palette: Option<&Palette>) -> Result<(), SaveError> {
-        let bytes = self.file_bytes(names, palette)?;
-        super::files::write_atomically(path, &bytes).map_err(SaveError::Io)?;
-        self.saved_path = Some(path.to_path_buf());
+    /// The bytes a normal save would write (`AIpf` container around the payload), if the map
+    /// has no errors. The document is not changed.
+    pub fn file_bytes(&self, names: Option<&Names>, palette: Option<&Palette>) -> Result<Vec<u8>, SaveError> {
+        Ok(mapfile::encode(&self.prepared(Container::Normal, names, palette)?, Container::Normal))
+    }
+
+    /// Saves as the original editor does to the name `path` (chosen by
+    /// [`super::files::plan_save`]): the extension picks the file actually written
+    /// ([`mapfile::save_target`]), the save's changes stay in the document as one undo step,
+    /// and a `.DTD` name also writes the text dump. Returns the map file written.
+    pub fn save_to(&mut self, path: &Path, names: Option<&Names>, palette: Option<&Palette>) -> Result<PathBuf, SaveError> {
+        let target = mapfile::save_target(path);
+        let s = self.prepared(target.container, names, palette)?;
+        super::files::write_atomically(&target.map, &mapfile::encode(&s, target.container)).map_err(SaveError::Io)?;
+        if target.dump {
+            let text = super::dump::dump_path(&target.map, &s.title);
+            super::files::write_atomically(&text, &super::dump::write_dump(&s)).map_err(SaveError::Io)?;
+        }
+        self.commit(n_("Save"), s);
+        self.custom_artefacts.clear();
+        self.saved_path = Some(target.map.clone());
         self.saved_serial = self.current_serial();
-        Ok(())
+        Ok(target.map)
+    }
+
+    /// Replaces the scenario as one undo step (if anything changed).
+    pub(crate) fn commit(&mut self, label: &str, s: Scenario) {
+        self.end_group();
+        let before = self.snapshot(Sections(127));
+        self.scenario = s;
+        let before = self.changed(before);
+        if !before.is_empty() {
+            self.push(Entry { label: label.to_string(), merge_key: None, serial: 0, snaps: before });
+            self.revision += 1;
+        }
     }
 
     fn current_serial(&self) -> u64 {
@@ -949,10 +992,67 @@ mod tests {
         assert_eq!(back.scenario, d.scenario);
         assert_eq!(back.origin, Origin::File(path.clone()));
         assert_eq!(back.saved_path.as_deref(), Some(path.as_path()));
-        assert!(std::fs::read(&path).unwrap().starts_with(container::MAGIC));
+        assert!(std::fs::read(&path).unwrap().starts_with(crate::dt::container::MAGIC));
         // The game reads the same bytes back.
         let s = Scenario::load(&path).unwrap();
         assert_eq!(s.armies[0].name, "Отряд");
+    }
+
+    #[test]
+    fn saves_follow_the_extension_rules() {
+        let dir = temp_dir("variants");
+        let mut d = doc();
+        d.apply(Command::PlaceArmy { x: 3, y: 3 }).unwrap();
+        // Uncompressed: the raw payload under the normal name.
+        let written = d.save_to(&dir.join("m.DTZ"), None, None).unwrap();
+        assert_eq!(written, dir.join("m.DTm"));
+        let raw = std::fs::read(&written).unwrap();
+        assert!(raw.starts_with(b"MapLDV V.4"));
+        assert_eq!(Scenario::from_file_bytes(&raw).unwrap().header.save_counter(), 1);
+        assert_eq!(d.saved_path.as_deref(), Some(written.as_path()));
+        // Demo: zlib, scramble 1, the demo order; it opens as a demo map and saves back as
+        // a normal one.
+        let demo = d.save_to(&dir.join("m.DTS"), None, None).unwrap();
+        assert_eq!(demo, dir.join("m.DTs"));
+        let bytes = std::fs::read(&demo).unwrap();
+        assert_eq!((bytes[6], bytes[7]), (9, 1));
+        assert_eq!(d.scenario.header.demo_flag(), 1, "the flag stays in memory");
+        let back = EditorDoc::open(&dir.join("m.DTS"), None).unwrap();
+        assert_eq!((back.scenario.armies.len(), back.scenario.header.save_counter()), (1, 2));
+        assert_eq!(back.saved_path.as_deref(), Some(demo.as_path()));
+        let mut back = back;
+        assert_eq!(back.save_to(&demo, None, None).unwrap(), dir.join("m.DTm"));
+        assert_eq!(back.scenario.header.demo_flag(), 0);
+        // Dump: the map and its text file.
+        let mut st = d.settings();
+        st.title = "Trip".into();
+        d.apply(Command::SetSettings(Box::new(st))).unwrap();
+        assert_eq!(d.save_to(&dir.join("t.DTD"), None, None).unwrap(), dir.join("t.DTm"));
+        let text = std::fs::read(dir.join("t.Eng")).unwrap();
+        assert!(text.starts_with(b"[Head]\r\nTrip\r\n"));
+        // Opening the .DTD name reads the map and the texts.
+        std::fs::write(dir.join("t.Eng"), b"[Head]\r\nTrip\r\nNew description\r\n").unwrap();
+        let t = EditorDoc::open(&dir.join("t.DTD"), None).unwrap();
+        assert_eq!(t.scenario.description, "New description");
+        assert!(t.load_notes.iter().any(|n| n.contains("t.Eng")));
+        // A save is one undo step with the save's changes.
+        assert_eq!(d.undo_label(), Some("Save"));
+        assert!(!d.dirty());
+    }
+
+    #[test]
+    fn old_versions_open_modified() {
+        let dir = temp_dir("old");
+        let mut d = doc();
+        d.apply(Command::PlaceArmy { x: 3, y: 3 }).unwrap();
+        let mut p = d.scenario.to_payload();
+        p[9] = b'3';
+        let path = dir.join("old.DTm");
+        std::fs::write(&path, &p).unwrap();
+        let old = EditorDoc::open(&path, None).unwrap();
+        assert!(old.dirty(), "an old signature marks the map modified");
+        assert_eq!(old.scenario.armies[0].garrison_strength, if d.scenario.armies[0].garrison_strength == 0 { 50 } else { 0 });
+        assert!(Scenario::load(&path).is_err(), "the game does not load it");
     }
 
     #[test]

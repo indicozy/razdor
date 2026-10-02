@@ -426,7 +426,9 @@ Start it with **Map editor** on the title screen or `cargo run --release -- --ed
 and names units, artefacts and spells from your install; without one it uses placeholders.
 
 - **Toolbar**: New (50/100/200 or custom size, one surface), Open (the game's maps, your maps
-  or a path), Save (Ctrl+S), Save as (Ctrl+Shift+S), Save to game folder, Undo (Ctrl+Z), Redo
+  or a path; as a map, a map with its text dump, or a demo map), Save (Ctrl+S), Save as
+  (Ctrl+Shift+S; a map, a map with its text dump, an uncompressed or a demo map, as the
+  original editor writes them), Save to game folder, Undo (Ctrl+Z), Redo
   (Ctrl+Y / Ctrl+Shift+Z), Settings (title, description, start date, victory/defeat event,
   the three hero starts, faction relations, campaign, named characters), Events (below), Check
   (the list of problems; errors block saving; click one to go there), Test play, Exit.
@@ -457,6 +459,11 @@ and names units, artefacts and spells from your install; without one it uses pla
 - **View**: wheel zooms, right or middle drag and the arrow keys move, Home shows the whole
   map, the minimap moves the view; G grid, H hill and mountain cover, R patrol radii.
 - **Test play** plays the map as it is in the editor; Esc > Main menu returns to it.
+
+Opening and saving follow the original editor: a save derives building types, owners and
+goods slots and rebuilds the objects as it does, raises its save counter and drops custom
+artefacts; opening trims texts, repairs object and building positions and upgrades old map
+versions (`docs/reference/editor/mapcheck-files.md`).
 
 Where maps go: your maps folder, `RAZDOR_MAPS_DIR` or `~/.local/share/razdor/maps`
 (`razdor/maps` in the platform data folder elsewhere). A map opened from the game's

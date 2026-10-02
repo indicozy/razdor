@@ -462,6 +462,19 @@ old id, and their versions give both.
 - Restart on a campaign map starts it again with what the map before carried over (army,
   gold, mana, book, pack, flags), as the original's restart snapshot, which saves keep.
 
+### Map editor
+- **Maps open and save as in the original editor.** Saving makes the original's changes:
+  buildings of type 0 take their picture's type, houses with obelisk or ruin pictures become
+  them, home buildings take their army as owner with its faction and attitudes, an empty
+  first goods slot closes up, objects are written from the cell grid (one hill or mountain
+  and one plant a cell), the save counter goes up and custom artefacts are dropped. Opening
+  trims every text, clamps and moves objects and buildings as the original's loader does,
+  takes building footprints from the install's pictures, and upgrades maps of versions 1–3.
+- The original's four file types: Save as offers a normal map, map and text dump (`.DTD`:
+  `.DTm` plus `.Eng`/`.Rus` with every text), an uncompressed map (`.DTZ`, written as
+  `.DTm`) and a demo map (`.DTs`, zlib and the demo section order); Open reads all of them
+  and imports a text dump.
+
 ## 0.2.2 — 2026-10-01
 
 Commit `b01b492` (tag `v0.2.2`).

@@ -104,6 +104,42 @@ pub fn encode(version: u16, payload: &[u8]) -> Vec<u8> {
     enc.finish().expect("writing to a Vec cannot fail")
 }
 
+/// The Community editor's stream reader (DTMapEdit 0x4d54c4): a file shorter than 12 bytes
+/// or without the `AIpf` magic is the raw payload; otherwise the scramble of byte 7 is undone
+/// and byte 6 picks the decompressor: below 10 zlib, 10 to 19 bzip2 (code `C` counts as 0).
+/// The size at byte 8 is not checked (the reader sets a flag nothing reads).
+pub fn decode_editor(bytes: &[u8]) -> Result<Vec<u8>, DtError> {
+    if bytes.len() < HEADER_LEN || &bytes[..4] != b"AIpf" {
+        return Ok(bytes.to_vec());
+    }
+    let mut data = bytes[HEADER_LEN..].to_vec();
+    unscramble(&mut data, bytes[7])?;
+    match bytes[6] {
+        b'C' | 0..=9 => {
+            let mut out = Vec::new();
+            flate2::read::ZlibDecoder::new(&data[..]).read_to_end(&mut out).map_err(|e| DtError::Zlib(e.to_string()))?;
+            Ok(out)
+        }
+        10..=19 => bunzip(&data),
+        code => Err(DtError::BadValue { section: "container".into(), key: "compression code".into(), value: code.to_string() }),
+    }
+}
+
+/// A Community editor demo map's container (0x4d5790 mode 7): `AIpf`, code 9 (zlib deflate
+/// at level 9), scramble mode 1, then the stream XORed byte by byte with (i + 1) mod 256.
+pub fn encode_demo(payload: &[u8]) -> Vec<u8> {
+    let mut enc = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::new(9));
+    enc.write_all(payload).expect("writing to a Vec cannot fail");
+    let mut data = enc.finish().expect("writing to a Vec cannot fail");
+    data.iter_mut().enumerate().for_each(|(i, b)| *b ^= (i as u8).wrapping_add(1));
+    let mut out = Vec::with_capacity(HEADER_LEN + data.len());
+    out.extend_from_slice(MAGIC);
+    out.extend_from_slice(&[9, 1]);
+    out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    out.extend(data);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -200,6 +236,31 @@ mod tests {
         exact[8..12].copy_from_slice(&1024u32.to_le_bytes());
         chunk(&mut exact, &payload[..1024]);
         assert!(matches!(decode(&exact), Err(DtError::Truncated { .. })));
+    }
+
+    #[test]
+    fn the_editor_reads_raw_bzip2_and_zlib_maps() {
+        let payload = b"MapLDV V.4\r\nsome map".to_vec();
+        // No container, or too short for one: the bytes are the payload.
+        assert_eq!(decode_editor(&payload).unwrap(), payload);
+        assert_eq!(decode_editor(b"AIpf").unwrap(), b"AIpf");
+        // The normal save: code 19, no scramble.
+        assert_eq!(decode_editor(&encode(19, &payload)).unwrap(), payload);
+        // The demo save: code 9, zlib, scramble 1.
+        let demo = encode_demo(&payload);
+        assert_eq!((&demo[..6], demo[6], demo[7]), (&MAGIC[..], 9, 1));
+        assert_eq!(&demo[8..12], &(payload.len() as u32).to_le_bytes());
+        // The first stream byte, a zlib header 0x78, is XORed with 1.
+        assert_eq!(demo[12], 0x78 ^ 1);
+        assert_eq!(decode_editor(&demo).unwrap(), payload);
+        // Code 'C' is zlib too; codes from 20 are not known.
+        let mut c = demo.clone();
+        c[6] = b'C';
+        assert_eq!(decode_editor(&c).unwrap(), payload);
+        c[6] = 20;
+        assert!(decode_editor(&c).is_err());
+        // The game's reader takes only bzip2.
+        assert!(decode(&demo).is_err());
     }
 
     #[test]

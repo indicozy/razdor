@@ -311,3 +311,16 @@ events (at most 5000) = события (не больше 5000)
 # Map editor: default names of new records
 New scenario = Новый сценарий
 New character = Новый персонаж
+
+# Map editor: the original's file types and loader messages
+Map (.DTm) = Карта (.DTm)
+Map and text dump (.DTD) = Карта и текстовый файл (.DTD)
+Uncompressed map (.DTZ) = Карта без сжатия (.DTZ)
+Demo map (.DTS) = Демо-карта (.DTS)
+Map and its text dump = Карта и её текстовый файл
+Demo map (.DTs) = Демо-карта (.DTs)
+Maps wider than 200 cells may be slow in the game. = Карты шире 200 клеток могут тормозить в игре.
+Texts read from {path}. = Тексты прочитаны из {path}.
+{path} does not start with [Head]; it was not read. = {path} не начинается с [Head]; файл не прочитан.
+Error in the text file {path} at line {line}; the texts after it were not read. = Ошибка в текстовом файле {path} в строке {line}; тексты после неё не прочитаны.
+There is no text file {path}. = Текстового файла {path} нет.

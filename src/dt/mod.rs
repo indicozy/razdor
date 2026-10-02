@@ -29,6 +29,8 @@ pub enum DtError {
     Truncated { what: &'static str, offset: usize },
     /// The bzip2 stream is corrupt.
     Bzip2(String),
+    /// The zlib stream of a Community editor demo map is corrupt.
+    Zlib(String),
     /// The map is too big to expand its terrain.
     Terrain(String),
     /// Bytes remain after the last known part of the payload.
@@ -51,6 +53,7 @@ impl fmt::Display for DtError {
             DtError::BadMagic { what } => write!(f, "not a {what} (bad magic bytes)"),
             DtError::Truncated { what, offset } => write!(f, "{what} truncated at offset {offset:#x}"),
             DtError::Bzip2(e) => write!(f, "bzip2: {e}"),
+            DtError::Zlib(e) => write!(f, "zlib: {e}"),
             DtError::Terrain(e) => write!(f, "terrain: {e}"),
             DtError::TrailingBytes { offset, count } => write!(f, "{count} trailing bytes at {offset:#x}"),
             DtError::BadValue { section, key, value } => write!(f, "[{section}] {key}={value}: bad value"),

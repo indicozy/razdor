@@ -12,6 +12,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::dt::install::{list_maps, MapEntry, MAP_EXTENSION};
+use super::mapfile::{change_ext, save_target, SaveFormat};
 use crate::i18n::tr;
 use crate::trf;
 
@@ -28,10 +29,16 @@ pub fn user_maps_dir() -> Option<PathBuf> {
 
 /// The `.DTm` files of a folder, sorted by name (empty if the folder does not exist).
 pub fn list_dir(dir: &Path) -> Vec<MapEntry> {
+    list_dir_with(dir, MAP_EXTENSION)
+}
+
+/// The files of a folder with the extension `ext` (ignoring case), sorted by name: `DTm`
+/// for maps, `DTs` for the original editor's demo maps.
+pub fn list_dir_with(dir: &Path, ext: &str) -> Vec<MapEntry> {
     let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
     let mut maps: Vec<MapEntry> = entries
         .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.is_file() && p.extension().is_some_and(|e| e.to_string_lossy().eq_ignore_ascii_case(MAP_EXTENSION)))
+        .filter(|p| p.is_file() && p.extension().is_some_and(|e| e.to_string_lossy().eq_ignore_ascii_case(ext)))
         .map(|path| MapEntry { name: path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(), path })
         .collect();
     maps.sort_by(|a, b| a.name.cmp(&b.name));
@@ -119,29 +126,49 @@ pub fn plan_save(
     current: Option<&Path>,
     consent: Consent,
 ) -> Result<PathBuf, SaveBlock> {
+    plan_save_as(name, SaveFormat::Normal, dest, user_dir, game_dir, current, consent)
+}
+
+/// [`plan_save`] for one of the save dialog's file types: the returned name carries the
+/// type's extension, which [`EditorDoc::save_to`](super::EditorDoc::save_to) turns into the
+/// file it writes (a `.DTD` or `.DTZ` save writes `<name>.DTm`, a `.DTS` save `<name>.DTs`);
+/// the confirmations are about that file.
+pub fn plan_save_as(
+    name: &str,
+    format: SaveFormat,
+    dest: Destination,
+    user_dir: Option<&Path>,
+    game_dir: Option<&Path>,
+    current: Option<&Path>,
+    consent: Consent,
+) -> Result<PathBuf, SaveBlock> {
     let file = file_name(name)?;
+    let dir = match dest {
+        Destination::UserFolder => user_dir,
+        Destination::GameFolder => game_dir,
+    }
+    .ok_or(SaveBlock::NoFolder)?;
+    let request = |p: PathBuf| if format == SaveFormat::Normal { p } else { change_ext(&p, format.extension()) };
+    let written = save_target(&request(dir.join(&file))).map;
+    let written_name = written.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let path = existing_case(dir, &written_name).unwrap_or(written);
     match dest {
         Destination::UserFolder => {
-            let dir = user_dir.ok_or(SaveBlock::NoFolder)?;
-            let path = existing_case(dir, &file).unwrap_or_else(|| dir.join(&file));
             let same_as_current = current.is_some_and(|c| same_file(c, &path));
             if path.exists() && !same_as_current && !consent.replace_own_map {
                 return Err(SaveBlock::ConfirmReplaceOwnMap(path));
             }
-            Ok(path)
         }
         Destination::GameFolder => {
-            let dir = game_dir.ok_or(SaveBlock::NoFolder)?;
-            let path = existing_case(dir, &file).unwrap_or_else(|| dir.join(&file));
             if !consent.game_folder {
                 return Err(SaveBlock::ConfirmGameFolder(path));
             }
             if path.exists() && !consent.replace_game_map {
                 return Err(SaveBlock::ConfirmReplaceGameMap(path));
             }
-            Ok(path)
         }
     }
+    Ok(request(path))
 }
 
 /// The file in `dir` whose name matches `file` ignoring case (the game comes from Windows,
@@ -253,6 +280,25 @@ pub(crate) mod tests {
         assert_eq!(p, user.join("Map.DTm"));
         assert!(!is_inside(&p, &game));
         assert!(is_inside(&opened, &game));
+    }
+
+    #[test]
+    fn save_formats_plan_the_file_they_write() {
+        let user = temp_dir("formats");
+        let c = Consent::default();
+        let plan = |f| plan_save_as("m", f, Destination::UserFolder, Some(&user), None, None, c);
+        assert_eq!(plan(SaveFormat::Normal).unwrap(), user.join("m.DTm"));
+        assert_eq!(plan(SaveFormat::Dump).unwrap(), user.join("m.DTD"));
+        assert_eq!(plan(SaveFormat::Uncompressed).unwrap(), user.join("m.DTZ"));
+        assert_eq!(plan(SaveFormat::Demo).unwrap(), user.join("m.DTS"));
+        // The confirmations are about the file written: m.DTm for the dump and the
+        // uncompressed save, m.DTs for the demo.
+        write_atomically(&user.join("m.DTm"), b"x").unwrap();
+        assert_eq!(plan(SaveFormat::Uncompressed), Err(SaveBlock::ConfirmReplaceOwnMap(user.join("m.DTm"))));
+        assert_eq!(plan(SaveFormat::Demo).unwrap(), user.join("m.DTS"));
+        write_atomically(&user.join("m.DTs"), b"x").unwrap();
+        assert_eq!(plan(SaveFormat::Demo), Err(SaveBlock::ConfirmReplaceOwnMap(user.join("m.DTs"))));
+        assert_eq!(list_dir_with(&user, "DTs").len(), 1);
     }
 
     #[test]

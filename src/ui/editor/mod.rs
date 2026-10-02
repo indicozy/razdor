@@ -21,6 +21,7 @@ use razdor::dt::dtm::Scenario;
 use razdor::dt::install::{self, MapEntry};
 use razdor::editor::defaults::MAP_SIZES;
 use razdor::editor::files::{self, Consent, Destination, SaveBlock};
+use razdor::editor::mapfile::{OpenFormat, SaveFormat};
 use razdor::editor::palette::{object_class_label, SURFACE_LABELS};
 use razdor::editor::validate::has_errors;
 use razdor::editor::{Command, EditorDoc, Issue, Names, NewMap, Origin, Palette, Place, SaveError, Severity, Target, Tool, ToolState};
@@ -58,15 +59,15 @@ enum Then {
     New(NewMap),
     Open(PathBuf),
     Exit,
-    Save { name: String, dest: Destination, consent: Consent },
+    Save { name: String, format: SaveFormat, dest: Destination, consent: Consent },
     /// Delete an event that is still referred to (then back to the event window).
     DeleteEvent(u16),
 }
 
 enum Modal {
     NewMap { size: usize, w: u32, h: u32, fill: u8 },
-    Open { path: String, scroll: usize },
-    SaveAs { name: String },
+    Open { path: String, scroll: usize, format: OpenFormat },
+    SaveAs { name: String, format: SaveFormat },
     Confirm { message: String, then: Then },
     Issues { scroll: usize },
     Settings,
@@ -167,14 +168,22 @@ impl EditorScreen {
     }
 
     fn open_file(&mut self, path: PathBuf) {
-        match EditorDoc::open(&path, self.game_dir.as_deref()) {
+        let palette = self.palette.from_install.then_some(&self.palette);
+        let base_artefacts = self.names().artefacts.iter().map(|a| a.id as usize).max().unwrap_or(0);
+        match EditorDoc::open_with(&path, self.game_dir.as_deref(), palette, base_artefacts) {
             Ok(d) => {
-                let path = path.display();
-                self.status = Some(if matches!(d.origin, Origin::Game(_)) {
+                let (Origin::Game(read) | Origin::File(read)) = &d.origin else { unreachable!("opened from a file") };
+                let path = read.display();
+                let mut status = if matches!(d.origin, Origin::Game(_)) {
                     trf!("Opened {path} (a game map: saving goes to your own folder).", path)
                 } else {
                     trf!("Opened {path}.", path)
-                });
+                };
+                for note in &d.load_notes {
+                    status.push(' ');
+                    status.push_str(note);
+                }
+                self.status = Some(status);
                 self.set_doc(d);
             }
             Err(e) => self.status = Some(trf!("Cannot open {path}: {e}", path = path.display(), e)),
@@ -190,7 +199,7 @@ impl EditorScreen {
             }
             Then::Open(p) => self.open_file(p),
             Then::Exit => return EditorAction::Exit,
-            Then::Save { name, dest, consent } => self.save(&name, dest, consent),
+            Then::Save { name, format, dest, consent } => self.save(&name, format, dest, consent),
             Then::DeleteEvent(id) => {
                 self.apply(Command::DeleteEvent { id }, "");
                 self.status = Some(trf!("Deleted event {id}; later events moved up one and every reference followed.", id));
@@ -210,12 +219,13 @@ impl EditorScreen {
         }
     }
 
-    /// Saves under `name` to `dest`, asking for every confirmation the rules need first.
-    fn save(&mut self, name: &str, dest: Destination, consent: Consent) {
+    /// Saves under `name` as `format` to `dest`, asking for every confirmation the rules need
+    /// first.
+    fn save(&mut self, name: &str, format: SaveFormat, dest: Destination, consent: Consent) {
         let current = self.doc.saved_path.clone();
-        match files::plan_save(name, dest, self.user_dir.as_deref(), self.game_dir.as_deref(), current.as_deref(), consent) {
+        match files::plan_save_as(name, format, dest, self.user_dir.as_deref(), self.game_dir.as_deref(), current.as_deref(), consent) {
             Ok(path) => match self.doc.save_to(&path, self.install_names.as_ref(), Some(&self.palette)) {
-                Ok(()) => self.status = Some(trf!("Saved {path}.", path = path.display())),
+                Ok(written) => self.status = Some(trf!("Saved {path}.", path = written.display())),
                 Err(SaveError::Invalid(issues)) => {
                     self.issues = issues;
                     self.modal = Some(Modal::Issues { scroll: 0 });
@@ -235,7 +245,7 @@ impl EditorScreen {
                     }
                 }
                 let message = block.to_string();
-                self.modal = Some(Modal::Confirm { message, then: Then::Save { name: name.to_string(), dest, consent: next } });
+                self.modal = Some(Modal::Confirm { message, then: Then::Save { name: name.to_string(), format, dest, consent: next } });
             }
         }
     }
@@ -247,13 +257,13 @@ impl EditorScreen {
                 let name = p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
                 let in_game = self.game_dir.as_deref().is_some_and(|g| files::is_inside(&p, g));
                 if in_game {
-                    self.save(&name, Destination::GameFolder, Consent::default());
+                    self.save(&name, SaveFormat::Normal, Destination::GameFolder, Consent::default());
                 } else if self.user_dir.as_deref().is_some_and(|u| files::is_inside(&p, u)) {
-                    self.save(&name, Destination::UserFolder, Consent::default());
+                    self.save(&name, SaveFormat::Normal, Destination::UserFolder, Consent::default());
                 } else {
                     // A file opened from elsewhere: saved where it is.
                     match self.doc.save_to(&p, self.install_names.as_ref(), Some(&self.palette)) {
-                        Ok(()) => self.status = Some(trf!("Saved {path}.", path = p.display())),
+                        Ok(written) => self.status = Some(trf!("Saved {path}.", path = written.display())),
                         Err(SaveError::Invalid(issues)) => {
                             self.issues = issues;
                             self.modal = Some(Modal::Issues { scroll: 0 });
@@ -262,7 +272,7 @@ impl EditorScreen {
                     }
                 }
             }
-            None => self.modal = Some(Modal::SaveAs { name: self.doc.suggested_name() }),
+            None => self.modal = Some(Modal::SaveAs { name: self.doc.suggested_name(), format: SaveFormat::Normal }),
         }
     }
 
@@ -449,12 +459,12 @@ impl EditorScreen {
             self.tools.check_selection(&self.doc);
         } else if c && is_key_pressed(KeyCode::S) {
             if shift() {
-                self.modal = Some(Modal::SaveAs { name: self.doc.suggested_name() });
+                self.modal = Some(Modal::SaveAs { name: self.doc.suggested_name(), format: SaveFormat::Normal });
             } else {
                 self.quick_save();
             }
         } else if c && is_key_pressed(KeyCode::O) {
-            self.modal = Some(Modal::Open { path: String::new(), scroll: 0 });
+            self.modal = Some(Modal::Open { path: String::new(), scroll: 0, format: OpenFormat::Normal });
         } else if c && is_key_pressed(KeyCode::N) {
             self.modal = Some(Modal::NewMap { size: 0, w: 50, h: 50, fill: 6 });
         } else if !c {
@@ -619,12 +629,12 @@ impl EditorScreen {
         let mut action = EditorAction::None;
         match hit {
             Some(0) => self.modal = Some(Modal::NewMap { size: 0, w: 50, h: 50, fill: 6 }),
-            Some(1) => self.modal = Some(Modal::Open { path: String::new(), scroll: 0 }),
+            Some(1) => self.modal = Some(Modal::Open { path: String::new(), scroll: 0, format: OpenFormat::Normal }),
             Some(2) => self.quick_save(),
-            Some(3) => self.modal = Some(Modal::SaveAs { name: self.doc.suggested_name() }),
+            Some(3) => self.modal = Some(Modal::SaveAs { name: self.doc.suggested_name(), format: SaveFormat::Normal }),
             Some(4) => {
                 let name = self.doc.suggested_name();
-                self.save(&name, Destination::GameFolder, Consent::default());
+                self.save(&name, SaveFormat::Normal, Destination::GameFolder, Consent::default());
             }
             Some(5) => {
                 self.doc.undo();
@@ -700,7 +710,7 @@ impl EditorScreen {
         let (w, h) = match &modal {
             Modal::Confirm { .. } => (560.0, 200.0),
             Modal::TestPlay => (560.0, 230.0),
-            Modal::SaveAs { .. } => (620.0, 260.0),
+            Modal::SaveAs { .. } => (620.0, 300.0),
             Modal::NewMap { .. } => (560.0, 330.0),
             _ => (720.0f32.min(sw - 40.0), (sh - 100.0).max(300.0)),
         };
@@ -744,20 +754,27 @@ impl EditorScreen {
                     keep = false;
                 }
             }
-            Modal::SaveAs { name } => {
+            Modal::SaveAs { name, format } => {
                 text(tr("Save as"), x, y, 22.0, ACCENT);
                 let folder = self.user_dir.as_ref().map_or(tr("(no data folder)").to_string(), |d| d.display().to_string());
                 text_fit(&trf!("Into your maps folder: {folder}", folder), x, y + 26.0, r.w - 40.0, 15.0, DIM);
                 text_fit(tr("Map name:"), x, y + 60.0, 116.0, 17.0, INK);
                 text_field("saveas:name", x + 120.0, y + 44.0, r.w - 160.0, 26.0, name, false);
+                // The original's four file types.
+                let bw = (r.w - 40.0 - 3.0 * 6.0) / 4.0;
+                for (k, f) in SaveFormat::ALL.into_iter().enumerate() {
+                    if toggle_button(x + k as f32 * (bw + 6.0), y + 82.0, bw, 28.0, f.label(), *format == f) {
+                        *format = f;
+                    }
+                }
                 for (i, line) in wrap(tr("Use \"Save to game folder\" in the toolbar to put it where the game finds it."), r.w - 40.0, 15.0).iter().enumerate() {
-                    text(line, x, y + 100.0 + i as f32 * 18.0, 15.0, DIM);
+                    text(line, x, y + 136.0 + i as f32 * 18.0, 15.0, DIM);
                 }
                 let go = button(r.right() - 270.0, r.bottom() - 54.0, 120.0, 40.0, tr("Save"), true) || (is_key_pressed(KeyCode::Enter) && !popup_open());
                 if go {
-                    let n = name.clone();
+                    let (n, f) = (name.clone(), *format);
                     self.modal = None;
-                    self.save(&n, Destination::UserFolder, Consent::default());
+                    self.save(&n, f, Destination::UserFolder, Consent::default());
                     return action;
                 }
                 if cancel(&r) || esc {
@@ -803,19 +820,29 @@ impl EditorScreen {
                     keep = false;
                 }
             }
-            Modal::Open { path, scroll } => {
+            Modal::Open { path, scroll, format } => {
                 text(tr("Open a map"), x, y, 22.0, ACCENT);
-                y += 16.0;
+                // The original's three file types: a demo map lists the .DTs files.
+                let bw = (r.w - 40.0 - 2.0 * 6.0) / 3.0;
+                for (k, f) in OpenFormat::ALL.into_iter().enumerate() {
+                    if toggle_button(x + k as f32 * (bw + 6.0), y + 10.0, bw, 28.0, f.label(), *format == f) {
+                        *format = f;
+                    }
+                }
+                y += 50.0;
                 let mut entries: Vec<(String, PathBuf)> = Vec::new();
-                for m in self.install_maps(assets) {
-                    entries.push((trf!("Game: {name}", name = m.name), m.path));
+                if *format != OpenFormat::Demo {
+                    for m in self.install_maps(assets) {
+                        entries.push((trf!("Game: {name}", name = m.name), m.path));
+                    }
                 }
                 if let Some(d) = &self.user_dir {
-                    for m in files::list_dir(d) {
+                    let ext = if *format == OpenFormat::Demo { "DTs" } else { "DTm" };
+                    for m in files::list_dir_with(d, ext) {
                         entries.push((trf!("Yours: {name}", name = m.name), m.path));
                     }
                 }
-                let list = Rect::new(x, y, r.w - 40.0, r.h - 190.0);
+                let list = Rect::new(x, y, r.w - 40.0, r.h - 224.0);
                 let rows = (list.h / 26.0).floor() as usize;
                 if mouse_in(list.x, list.y, list.w, list.h) {
                     let wh = mouse_wheel().1;
@@ -845,6 +872,7 @@ impl EditorScreen {
                     pick = Some(PathBuf::from(path.trim()));
                 }
                 if let Some(p) = pick {
+                    let p = format.request(&p);
                     self.modal = None;
                     return self.guarded(Then::Open(p));
                 }

@@ -350,8 +350,9 @@ space on either side) back into a line break, and counts lines for its error mes
   does not start with `[`, so missing trailing strings keep their old value.
 - In an event block the line replaces the title, and the old title's flag script (from its first `%`) is
   appended again. The question is read only when the event's question flag is set; then the message.
-- A tag whose number cannot be read shows an error naming the line, once per file; what happens next is
-  unknown (the id is then out of range).
+- A tag whose number cannot be read shows an error naming the line, once per file, and reads no
+  further line, so the loop sees the same tag again and never ends (code, 0x5a7acf–0x5a7c63). A
+  block numbered 0 stops with a range error.
 - Ids are not checked against the record counts.
 
 ---
@@ -532,30 +533,36 @@ The score itself is not in the line.
   separate window of 20 design rules (§2.2) that never blocks saving, and the original has no integrity
   check at all. None of the 20 rules exists in Razdor, and Razdor has no go-to from an issue to the record
   window.
-- **Formats.** Razdor reads the `AIpf` container with bzip2 only and writes `.DTm` with the code read from
-  the file. The original also writes uncompressed and demo maps (zlib, scramble mode 1, shuffled section
-  order, header 0x117 = 1) and reads them back, and writes and reads the text dump. Razdor cannot read a
-  demo map.
-- **Round trip.** Razdor writes an unchanged map back byte for byte. The original changes it on every save
-  (§4.3–4.5): building types from pictures, owners and factions from home armies, a closed-up first
-  goods slot, dropped custom artefacts, objects rebuilt from the grid, and a save counter raised by one.
-  On load it
-  also trims every string (§3.4), moves colliding buildings, resets footprints from the pictures, sets
-  byte 357 for towns and ruins, fills byte 71 = 100, and clamps objects and buildings.
-- **Custom artefacts.** Razdor keeps header 0x34 as an unknown value. The original reads that section as
-  map-specific artefacts with two strings each and drops them when saving.
-- **Old versions.** Razdor refuses a version digit below 4; the original upgrades versions 1–3 (§3.7).
+- **Formats.** Now as the original (`src/editor/mapfile.rs`, `src/dt/container.rs`): the
+  save dialog offers the four file types and the extension rules of §4.2 pick the file
+  (`.DTZ` raw under `.DTm`, `.DTS` a zlib, scramble-1, demo-order `.DTs` with header 0x117 = 1,
+  `.DTD` the map and its dump); the open dialog's three types follow §3.1, and the editor's
+  stream reader takes raw, zlib and bzip2 files (§3.2). Normal saves always use code 19. The
+  text dump is written and read as §5 (`src/editor/dump.rs`); where the original's reader would
+  loop forever on a tag number it cannot read, or stop on block 0, Razdor stops the import and
+  says at which line.
+- **Round trip.** Now as the original: a save makes the changes of §4.3–4.5 in memory (one undo
+  step), with objects written from the cell grid (`src/editor/grid.rs`) and the save counter
+  raised; the shipped maps change only at 0x124 (and the trimmed strings of "Устье Трейна").
+  Loading trims strings, cuts the title and named characters to 64 characters, clamps and
+  moves objects and buildings, resets footprints from the install's pictures, sets byte 357 for
+  towns and ruins and fills byte 71 = 100 (§3.8). Razdor's integrity check still refuses a file
+  that would not read back. A missing or unreadable file leaves the open map untouched (the
+  original first empties its building strings and renames it, §3.1).
+- **Custom artefacts.** Now as the original: the loader reads the section of header 0x34 with
+  two strings per artefact; a save drops them and writes 0x34 = 0.
+- **Old versions.** Now as the original: versions 1–3 open with the upgrades of §3.7 (each
+  digit only its own step) and are marked modified; the game itself still refuses them.
 - **Playability.** Razdor has no score, no header 0x122/0x126 writing and no `MapData.Txt`.
 - **Saving place and safety.** Razdor saves to the user's folder through a temporary file, asks before
   touching the game's folder, and has no emergency save. The original writes in place in its map folder
   and saves `ErrorSave.DTm` on a DirectDraw failure.
-- **Strings with leading or trailing blanks.** Razdor keeps strings as stored; the original trims them on
-  load, so the three questions of "Устье Трейна" that are only a line break become empty. Both open all
-  211 events of that map (§3.5).
+- **Strings with leading or trailing blanks.** Now as the original: trimmed on load, so the
+  three questions of "Устье Трейна" that are only a line break become empty; all 211 events
+  open (§3.5).
 
 ## Unknowns
 
-- What the text-dump reader does after a block number it cannot read (§5.2).
 - Whether the open dialog's visible filter entries match the three positions the code expects; the
   filter text is built from a translated label at start-up and was not decoded fully.
 - What the stream reader does with compression code `C` (it is treated as 0) and why.

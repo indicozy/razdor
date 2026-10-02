@@ -849,7 +849,7 @@ behaviour, not the same look.
 | New map | Keeps the current size, terrain 0, no dialog | Asks size and terrain (default 50 × 50, terrain 6) | differs | `src/ui/editor/mod.rs`, `src/editor/defaults.rs` |
 | Generate / world filler | Yes | No | missing | — |
 | Save without dialog | Ctrl+S to the map folder; F2 quick save | Ctrl+S quick save to the last file; no F2 save (F2 switches language) | differs | `src/ui/editor/mod.rs` |
-| Save formats in dialog | Normal, uncompressed, demo | Normal only | missing | `src/editor/files.rs` |
+| Save formats in dialog | Normal, text dump, uncompressed, demo | The same four, by the same extension rules | matches | `src/editor/files.rs`, `src/editor/mapfile.rs` |
 | Options, units, artefacts, named-characters windows | Yes | Named characters is a settings tab; the others are missing | differs / missing | `src/ui/editor/settings.rs` |
 | Test AI, test battle, help, about | Yes | Test play only | missing | `src/ui/editor/mod.rs` |
 | Undo / redo | No | 200 steps | differs (extra) | `src/editor/doc.rs` |
