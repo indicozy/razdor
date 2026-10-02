@@ -580,6 +580,20 @@ old id, and their versions give both.
   at its old cell no longer reads it as there); Ctrl+N no longer switches the music too; the
   editor's status message stays clear of the counts and shows in full on hover.
 
+- **The original's new-map generator** (toolbar: Generate, `docs/reference/editor/newmap.md`),
+  in place of "New of size": sizes 50 to 800, the eight map types and their orientation,
+  the seven share bars as the original's panel widths (with its splitters' snapping),
+  blur, the seed with "keep" and "rebuild relief". It makes the same map as DTMapEdit for
+  the same seed, options and installed pictures: the original's draws, roundings (in the
+  x87's extended precision where it uses it), fractal, lines, stamps, rivers, coast-band
+  sweeps, swamp, mountains, hills and forest, and its quirks (the reseed after the relief,
+  the relief reuse that cuts the last forest field, the small forest pool that stops after
+  one cluster, old trees kept on reuse). Where the original would loop for ever, the run
+  stops and says so. The bar widths are read from and written to `[MakeMap]` of Razdor's
+  editor `DTMapEdit.Ini`; Exit takes the map with the original's new-map header, relation
+  matrix, title and file name, and the seed in the header. An 800 × 800 map takes about a
+  second.
+
 ## 0.2.2 — 2026-10-01
 
 Commit `b01b492` (tag `v0.2.2`).

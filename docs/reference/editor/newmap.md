@@ -136,8 +136,10 @@ One procedure is called on the rectangle `(x1, y1)–(x2, y2)` = `(0, 0)–(W−
    The centre is (top + bottom + left + right) div 4.
 4. With `mx = (x1 + x2) div 2` and `my = (y1 + y2) div 2`, the values are written to (mx, y1),
    (x1, my), (mx, y2), (x2, my) and (mx, my), in that order, **each only if that cell still holds
-   0**. A cell whose value happens to be exactly 0 can be overwritten later. The four corners of
-   the map are never written and stay 0.
+   0**. A cell whose value happens to be exactly 0 can be overwritten later. The writes come
+   before the recursion test, so a quarter one cell wide still writes: its midpoints fall on
+   its own corners, which is how three corners of the map get a value. The bottom-right
+   corner (W−1, H−1) is never a midpoint and stays 0.
 5. If both `x2 − x1 ≠ 1` and `y2 − y1 ≠ 1`, the procedure calls itself on the four quarters in this
    order: top-left (x1,y1)–(mx,my), bottom-right (mx,my)–(x2,y2), bottom-left (x1,my)–(mx,y2),
    top-right (mx,y1)–(x2,my).
@@ -520,24 +522,33 @@ If the dialog is left without a generation, the old map size is restored.
 
 ## 12. Razdor editor now → original
 
-| Topic | Razdor now (`src/editor/`) | Original | Status |
+| Topic | Razdor now (`src/editor/newmap/`) | Original | Status |
 |---|---|---|---|
-| New map | an empty map of one terrain code (`defaults.rs`, `NewMap`) | the random generator of this file | missing |
-| Sizes | 50, 100, 200 offered; up to 800 accepted (`validate.rs`) | 50, 100, 200, 400, 800 | partly |
-| Map types, orientation, ratios, blur, seed | none | §1 | missing |
-| Relation matrix | same values (`DEFAULT_RELATIONS`) | §11 | matches |
-| Header defaults | a start date, hero presets with gold, a translated title | header zeroed except signature, size and seed; placeholder title and file name | differs |
-| Seed in the header | not written | the generator seed at 0x14 | missing |
-| Settings file `[MakeMap]` | not read | twelve panel widths | missing |
-
----
+| New map | the generator of this file (toolbar: Generate), replacing Razdor's "New of size" | the random generator of this file | matches |
+| Sizes | 50, 100, 200, 400, 800 | 50, 100, 200, 400, 800 | matches |
+| Map types, orientation, ratios, blur, seed | §1, the bars with the splitters' minimum and snap to 0 | §1 | matches |
+| Draws, roundings, fractal, lines, stamps, rivers, cut | §2–§6; the float formulas in software extended precision (`ext.rs`) | x87, 64-bit mantissa | matches (fcos/fsin modelled as correctly rounded) |
+| Coast band, swamp, mountains, hills, forest | §7–§9 with the shared point list (a draw of `Random(0)` reads its stale entry 0) | §7–§9 | matches |
+| Endless loops (§8 steps 2, 5, 6, 7; §9.4 step 6) | the run stops and says where | loops until the break button | Razdor stops cleanly |
+| Forest progress divisor on reuse (§10.1) | the value the last run of the dialog counted down to (0 after a full run, so a reuse run stops before its first cluster) | an uninitialised stack value | Razdor's reading of an unknown |
+| Relief reuse (§10.1) | the dialog's grid, so the last forest field; the cells start from the open map (or the last run's), trees kept | the same | matches |
+| Exit before a run | does nothing (Cancel closes) | does nothing | matches |
+| Closing without Exit after a run | the open map stays as it was | the cells are already written in place (unknown, §13) | Razdor keeps the map |
+| Relation matrix | `DEFAULT_RELATIONS` on Exit | §11 | matches |
+| Header defaults | after a complete run: zeroed, size, seed at 0x14; after a stopped run: the old header with the new size, the clock seed and the relations | §11 (the header block is skipped after an error) | matches (the size kept in step) |
+| Title and file name | a fixed title, the file name `New` | fixed placeholders | matches (Razdor's own title text) |
+| Seed in the header | 0x14 | the generator seed at 0x14 | matches |
+| Settings file `[MakeMap]` | read from Razdor's editor `DTMapEdit.Ini` (else the install's, else its shipped values), written on Exit after a run | twelve panel widths | matches |
+| Break | the Create button breaks a run (it runs in the background) | the exit button breaks | matches |
 
 ## 13. Unknowns
 
 - What the main window does with the dialog's result and its refresh call (0x5ab588), and whether
   closing the dialog by its title bar after a generation keeps the half-applied document (the map
   cells are written in place, but the defaults of §11 are not applied).
-- The stale progress-bar divisor in the reuse path (§10.1): its value at run time.
+- The stale progress-bar divisor in the reuse path (§10.1): its value at run time. Razdor takes
+  the value the slot held at the end of the dialog's last run.
 - The variant counts for the shipped graphics (they follow from the object graphics index).
-- Rounding: the products and quotients are evaluated in 80-bit precision; a 64-bit reimplementation
-  can differ only when a value falls within rounding error of a .5 boundary. Not measured.
+- Rounding: the products and quotients are evaluated in 80-bit precision; Razdor emulates it.
+  `fcos` and `fsin` are processor-specific in their last bit; Razdor takes the correctly rounded
+  value, which can matter only where a river heading is a multiple of 30° with an odd step.

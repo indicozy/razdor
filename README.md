@@ -425,8 +425,13 @@ Start it with **Map editor** on the title screen or `cargo run --release -- --ed
 `RAZDOR_DT_DIR` set it draws the original art, offers the game's object and building pictures
 and names units, artefacts and spells from your install; without one it uses placeholders.
 
-- **Toolbar**: New (an empty map of the current size, as the original's), New of size
-  (50/100/200 or custom size, one surface), Open (the game's maps, your maps
+- **Toolbar**: New (an empty map of the current size, as the original's), Generate (the
+  original's random map generator: 50 to 800 cells, eight map types from land to
+  archipelago facing any side, the seven share bars, blur, and a seed that "keep" replays;
+  the same seed and options give the same map as the original editor; "keep" without
+  "rebuild" reuses the last run's relief as the original does; the bar widths are kept in
+  `[MakeMap]` of Razdor's editor `DTMapEdit.Ini`; Exit takes the map, Cancel leaves the open
+  one), Open (the game's maps, your maps
   or a path; as a map, a map with its text dump, or a demo map), Save (Ctrl+S), Save as
   (Ctrl+Shift+S; a map, a map with its text dump, an uncompressed or a demo map, as the
   original editor writes them), Save to game folder, Undo (Ctrl+Z), Redo
