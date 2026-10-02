@@ -53,6 +53,15 @@ pub enum EditError {
     Resize,
     /// A record's id must stay its position.
     IdChanged,
+    /// A building lists more than 64 events or a point more than 5: the original's event
+    /// delete and move stop with a range error there.
+    EventListTooLong,
+    /// The copy's name has its only `#` at the end: the original's copy stops with a range
+    /// error.
+    CopyNameEndsInHash,
+    /// The event copied is the last row of a filtered list but not the last event: the
+    /// original's copy reads past its list and stops with a range error.
+    CopyWithoutNextRow,
 }
 
 impl std::fmt::Display for EditError {
@@ -69,6 +78,9 @@ impl std::fmt::Display for EditError {
             EditError::Full(what) => f.write_str(&trf!("no room for more {what}", what = tr(what))),
             EditError::Resize => f.write_str(tr("the map size cannot change here")),
             EditError::IdChanged => f.write_str(tr("a record's id is its position and cannot change")),
+            EditError::EventListTooLong => f.write_str(tr("a building lists more than 64 events or a point more than 5 (the original stops with a range error)")),
+            EditError::CopyNameEndsInHash => f.write_str(tr("the name ends in # (the original's copy stops with a range error)")),
+            EditError::CopyWithoutNextRow => f.write_str(tr("the event is the last one the list shows but not the last event (the original's copy stops with a range error)")),
         }
     }
 }
@@ -700,17 +712,21 @@ impl EditorDoc {
                     return Err(EditError::NoSuchNamedCharacter(index));
                 }
             }
-            Command::NewEvent { kind } => {
-                let e = super::events::new_event(&self.scenario, kind);
+            Command::NewEvent { kind, repeat } => {
+                let e = super::events::new_event(&self.scenario, kind, repeat);
                 out.new_id = Some(self.push_event(e)? as u32);
             }
-            Command::DuplicateEvent { id } => {
-                let e = self.scenario.events[self.event_index(id)?].clone();
-                out.new_id = Some(self.push_event(e)? as u32);
+            Command::DuplicateEvent { id, next } => {
+                out.new_id = Some(self.copy_event(id, next)? as u32);
+            }
+            Command::MoveEvent { from, to } => {
+                self.event_index(from)?;
+                self.event_index(to)?;
+                refs::move_event(&mut self.scenario, from, to).map_err(|_| EditError::EventListTooLong)?;
             }
             Command::DeleteEvent { id } => {
                 self.event_index(id)?;
-                refs::remove_event(&mut self.scenario, id);
+                refs::remove_event(&mut self.scenario, id).map_err(|_| EditError::EventListTooLong)?;
             }
             Command::SetEvent { id, mut event } => {
                 let i = self.event_index(id)?;
@@ -734,6 +750,32 @@ impl EditorDoc {
             }
         }
         Ok(out)
+    }
+
+    /// The original's copy (0x539214); returns the copy's id.
+    fn copy_event(&mut self, id: u16, next: Option<u16>) -> Result<u16, EditError> {
+        let i = self.event_index(id)?;
+        let name = super::events::split_title(&self.scenario.events[i].title).name;
+        let name = super::events::copy_name(&name).map_err(|_| EditError::CopyNameEndsInHash)?;
+        let n = self.scenario.events.len() as u16;
+        let (at, from) = if id == n {
+            (self.push_event(self.scenario.events[i].clone())?, i)
+        } else {
+            // Appended, then moved to the place of the event on the next row; the record is
+            // then taken from the event just before that place, which is the original only
+            // when the next row shows the next event (the original's quirk, kept).
+            let target = next.ok_or(EditError::CopyWithoutNextRow)?;
+            self.event_index(target)?;
+            let copy = self.push_event(self.scenario.events[i].clone())?;
+            refs::move_event(&mut self.scenario, copy, target).map_err(|_| EditError::EventListTooLong)?;
+            (target, target as usize - 2)
+        };
+        let mut e = self.scenario.events[from].clone();
+        e.custom_picture = None;
+        e.title = super::events::with_name(&e.title, &name);
+        e.flags = crate::dt::dtm::FlagScript::from_title(&e.title);
+        self.scenario.events[at as usize - 1] = e;
+        Ok(at)
     }
 
     fn push_event(&mut self, e: Event) -> Result<u16, EditError> {
@@ -1297,16 +1339,22 @@ mod tests {
     #[test]
     fn events_new_duplicate_delete_undo() {
         let mut d = doc();
-        assert_eq!(d.apply(Command::NewEvent { kind: 1 }).unwrap().new_id, Some(1));
-        assert_eq!(d.apply(Command::NewEvent { kind: 3 }).unwrap().new_id, Some(2));
+        assert_eq!(d.apply(Command::NewEvent { kind: 1, repeat: false }).unwrap().new_id, Some(1));
+        assert_eq!(d.apply(Command::NewEvent { kind: 3, repeat: false }).unwrap().new_id, Some(2));
         let mut e = d.scenario.events[1].clone();
         e.title = "Quest%+Q".into();
         e.custom_picture = Some(vec![1, 0, 1, 0, 9, 9]);
         d.apply(Command::SetEvent { id: 2, event: Box::new(e) }).unwrap();
         assert_eq!(d.scenario.events[1].flags.as_ref().and_then(|f| f.set.as_deref()), Some("Q"), "flags follow the title");
-        assert_eq!(d.apply(Command::DuplicateEvent { id: 2 }).unwrap().new_id, Some(3));
-        assert_eq!(d.scenario.events[2], d.scenario.events[1]);
-        assert_eq!(d.apply(Command::DuplicateEvent { id: 7 }), Err(EditError::NoSuchEvent(7)));
+        assert_eq!(d.apply(Command::DuplicateEvent { id: 2, next: None }).unwrap().new_id, Some(3));
+        // The copy is numbered and has no picture of its own.
+        let (a, b) = (&d.scenario.events[1], &d.scenario.events[2]);
+        assert_eq!((b.title.as_str(), b.custom_picture.as_ref(), b.flags.as_ref().and_then(|f| f.set.as_deref())), ("Quest #1%+Q", None, Some("Q")));
+        assert_eq!(Event { title: a.title.clone(), custom_picture: None, flags: a.flags.clone(), ..b.clone() }, Event { custom_picture: None, ..a.clone() });
+        let mut e = d.scenario.events[2].clone();
+        e.title = "Quest%+Q".into();
+        d.apply(Command::SetEvent { id: 3, event: Box::new(e) }).unwrap();
+        assert_eq!(d.apply(Command::DuplicateEvent { id: 7, next: None }), Err(EditError::NoSuchEvent(7)));
         // Event 1 completes quest 3; building 1 and point 1 list event 3; it is the victory.
         let mut e1 = d.scenario.events[0].clone();
         e1.results.completes_quest = 3;
@@ -1327,7 +1375,8 @@ mod tests {
         assert_eq!(s.events.len(), 2);
         assert_eq!((s.events[0].results.completes_quest, s.events[0].conditions.not_happened), (2, [0, 2]));
         assert_eq!((s.buildings[0].event_count, s.buildings[0].event_slots[0]), (1, 2));
-        assert_eq!((s.points[0].event_count, &s.points[0].event_slots[..2]), (1, &[2, 0][..]));
+        // The point's entry is zeroed in place and the count drops: as the original.
+        assert_eq!((s.points[0].event_count, &s.points[0].event_slots[..2]), (1, &[0, 2][..]));
         assert_eq!((s.header.victory_event, s.header.defeat_event), (2, 1));
         assert_eq!(d.undo_label(), Some("Delete event"));
         d.undo();
@@ -1338,10 +1387,52 @@ mod tests {
     }
 
     #[test]
+    fn copies_go_after_the_original() {
+        let mut d = doc();
+        for k in 0..4 {
+            d.apply(Command::NewEvent { kind: 1, repeat: true }).unwrap();
+            let mut e = d.scenario.events[k].clone();
+            e.group_colour = k as u8;
+            d.apply(Command::SetEvent { id: k as u16 + 1, event: Box::new(e) }).unwrap();
+        }
+        assert_eq!(d.scenario.events[0].title, "Event 1");
+        // Event 4 refers to event 3; the victory is event 4.
+        let mut e = d.scenario.events[3].clone();
+        e.results.chained_event = 3;
+        d.apply(Command::SetEvent { id: 4, event: Box::new(e) }).unwrap();
+        let mut st = d.settings();
+        st.header.victory_event = 4;
+        d.apply(Command::SetSettings(Box::new(st))).unwrap();
+        // Copying event 2 with the whole list shown: the copy is event 3, later ones move.
+        assert_eq!(d.apply(Command::DuplicateEvent { id: 2, next: Some(3) }).unwrap().new_id, Some(3));
+        let groups: Vec<u8> = d.scenario.events.iter().map(|e| e.group_colour).collect();
+        assert_eq!(groups, [0, 1, 1, 2, 3]);
+        assert_eq!((d.scenario.events[2].title.as_str(), d.scenario.events[4].results.chained_event, d.scenario.header.victory_event), ("Event 2 #1", 4, 5));
+        // With a filter hiding events 2 and 3, the next row after event 1 is event 4: the copy
+        // takes the place of event 4 and the record of event 3, under event 1's new name.
+        assert_eq!(d.apply(Command::DuplicateEvent { id: 1, next: Some(4) }).unwrap().new_id, Some(4));
+        let c = &d.scenario.events[3];
+        assert_eq!((c.title.as_str(), c.group_colour), ("Event 1 #1", 1));
+        // The last row of a filtered list that is not the last event: the original stops.
+        assert_eq!(d.apply(Command::DuplicateEvent { id: 2, next: None }), Err(EditError::CopyWithoutNextRow));
+        let mut e = d.scenario.events[0].clone();
+        e.title = "Сон #".into();
+        d.apply(Command::SetEvent { id: 1, event: Box::new(e) }).unwrap();
+        assert_eq!(d.apply(Command::DuplicateEvent { id: 1, next: Some(2) }), Err(EditError::CopyNameEndsInHash));
+        assert_eq!(d.scenario.events.len(), 6, "a refused copy leaves nothing");
+        // Moving and its undo.
+        let before = d.scenario.clone();
+        d.apply(Command::MoveEvent { from: 6, to: 1 }).unwrap();
+        assert_eq!(d.scenario.header.victory_event, 1);
+        d.undo();
+        assert_eq!(d.scenario, before);
+    }
+
+    #[test]
     fn attaching_and_detaching_local_events() {
         let mut d = doc();
         for _ in 0..7 {
-            d.apply(Command::NewEvent { kind: 2 }).unwrap();
+            d.apply(Command::NewEvent { kind: 2, repeat: false }).unwrap();
         }
         d.apply(Command::PlacePoint { x: 1, y: 1, lantern: false }).unwrap();
         d.apply(Command::PlaceBuilding { x: 5, y: 5, kind: 3, picture_type: 3, variant: 0, size: (2, 2) }).unwrap();
@@ -1373,7 +1464,7 @@ mod tests {
     #[test]
     fn typing_an_event_title_merges() {
         let mut d = doc();
-        d.apply(Command::NewEvent { kind: 1 }).unwrap();
+        d.apply(Command::NewEvent { kind: 1, repeat: false }).unwrap();
         for t in ["В", "Во", "Вол"] {
             let mut e = d.scenario.events[0].clone();
             e.title = crate::editor::events::with_name(&e.title, t);
@@ -1388,8 +1479,8 @@ mod tests {
     fn event_fields_land_at_documented_offsets() {
         use crate::editor::events::*;
         let mut d = doc();
-        d.apply(Command::NewEvent { kind: 1 }).unwrap();
-        d.apply(Command::NewEvent { kind: 3 }).unwrap();
+        d.apply(Command::NewEvent { kind: 1, repeat: false }).unwrap();
+        d.apply(Command::NewEvent { kind: 3, repeat: false }).unwrap();
         let mut e = d.scenario.events[1].clone();
         e.group_colour = 4;
         e.kind = 2;

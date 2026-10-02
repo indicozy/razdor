@@ -250,6 +250,8 @@ impl Form {
                 *v = Threshold { at_least: !t.at_least, ..t }.raw();
                 self.mark(&format!("{k}s"));
             }
+            // The signed word holds 32,767 "at least" and 32,768 "at most" (records.md §9.1).
+            let max = max.min(Threshold::max(t.at_least) as i64);
             if let Some(n) = number_field(&self.key(k), fx + 42.0, self.y, 110.0, t.value as i64, 0, max) {
                 *v = Threshold { value: n as u16, ..t }.raw();
                 self.mark(k);

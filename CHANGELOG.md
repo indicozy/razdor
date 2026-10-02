@@ -504,6 +504,17 @@ old id, and their versions give both.
   incomes and prices have the original's ranges and steps; a building may list an event
   twice, up to 64; the garrison's tactical cost and strength are shown and a market test
   shows the goods the game's restock draws. At most 254 buildings, as in the original.
+- **Events as in the original's event window**: a new event repeats every day and is open
+  for 1,440, its title numbered; Duplicate numbers the copy by the original's `#` rule, drops
+  its own picture and puts it where the event on the list's next row is, renumbering (with a
+  filter, the original's quirk: the copy takes the record of the event before that place);
+  Move (or Ctrl+click) reorders events with renumbering; Delete asks nothing, renumbers what
+  the original renumbers (no longer the Community opcodes' relative targets) and leaves a
+  deleted entry of a building's or point's list as an empty slot, dropping the count, as the
+  original does; subordinate and relative-only events lock their time as in the original;
+  the original's ranges and steps (open at most 99 hours; a gold "at most" up to 32,768);
+  the building pickers offer no towns; a named character brings its class and a new unit
+  clears the character; the hidden "generate the battle army" box is no longer shown.
 
 ## 0.2.2 — 2026-10-01
 

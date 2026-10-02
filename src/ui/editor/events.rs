@@ -21,7 +21,6 @@ use super::form::*;
 use crate::ui::widgets::*;
 
 /// The window's state between frames.
-#[derive(Default)]
 pub struct EventsState {
     pub selected: Option<u16>,
     pub filter: EventFilter,
@@ -31,6 +30,26 @@ pub struct EventsState {
     /// The picture file to import.
     picture_path: String,
     shown: Option<u16>,
+    /// The event being moved: the next click on a row puts it there.
+    moving: Option<u16>,
+    /// The editor option "new events repeat" (a new event's "once" is its inverse).
+    pub new_events_repeat: bool,
+}
+
+impl Default for EventsState {
+    fn default() -> Self {
+        EventsState {
+            selected: None,
+            filter: EventFilter::default(),
+            list_scroll: 0,
+            tab: 0,
+            scroll: 0.0,
+            picture_path: String::new(),
+            shown: None,
+            moving: None,
+            new_events_repeat: true,
+        }
+    }
 }
 
 impl EventsState {
@@ -45,7 +64,7 @@ impl EventsState {
 pub enum EventsAction {
     None,
     Apply(Command, String),
-    /// Delete this event (the caller confirms when it is still referred to).
+    /// Delete this event (no question, as the original).
     Delete(u16),
     /// A message for the status line.
     Status(String),
@@ -212,6 +231,9 @@ fn event_list(state: &mut EventsState, s: &Scenario, r: Rect) -> Option<EventsAc
         if on || hover {
             draw_rectangle(r.x, ry, r.w, 23.0, if on { Color::new(0.45, 0.34, 0.16, 1.0) } else { Color::new(0.25, 0.2, 0.13, 1.0) });
         }
+        if state.moving == Some(*id) {
+            draw_rectangle_lines(r.x, ry, r.w, 23.0, 2.0, ACCENT);
+        }
         draw_rectangle(r.x + 3.0, ry + 5.0, 8.0, 13.0, group_colour(e.group_colour));
         let kind = ev::kind_label(e.kind).chars().next().unwrap_or('?');
         let mut l = format!("{id:>4} {kind}  {}", e.title_text().trim());
@@ -220,22 +242,39 @@ fn event_list(state: &mut EventsState, s: &Scenario, r: Rect) -> Option<EventsAc
         }
         text(&l, r.x + 15.0, ry + 17.0, 16.0, INK);
         if hover && clicked() {
+            // A move in progress drops the event here; Ctrl+click starts one (0x53bacc).
+            if let Some(from) = state.moving.take() {
+                if from != *id {
+                    state.selected = Some(*id);
+                    return Some(EventsAction::Apply(Command::MoveEvent { from, to: *id }, String::new()));
+                }
+            } else if is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl) {
+                state.moving = Some(*id);
+            }
             state.selected = Some(*id);
         }
     }
     text(&trf!("{shown} of {total} events", shown = ids.len(), total = s.events.len()), r.x, r.bottom() - 58.0, 15.0, DIM);
+    if state.moving.is_some() {
+        text_fit(tr("Click the row to move the event to."), r.x, r.bottom() - 44.0 - 18.0, r.w, 15.0, ACCENT);
+    }
     let by = r.bottom() - 40.0;
-    let bw = (r.w - 8.0) / 3.0;
+    let bw = (r.w - 12.0) / 4.0;
     let full = s.events.len() >= ev::MAX_EVENTS;
     if small_button(r.x, by, bw, 30.0, tr("New"), !full) {
         let kind = state.filter.kind.unwrap_or(1);
-        return Some(EventsAction::Apply(Command::NewEvent { kind }, String::new()));
+        return Some(EventsAction::Apply(Command::NewEvent { kind, repeat: state.new_events_repeat }, String::new()));
     }
     if small_button(r.x + bw + 4.0, by, bw, 30.0, tr("Duplicate"), state.selected.is_some() && !full) {
         let id = state.selected?;
-        return Some(EventsAction::Apply(Command::DuplicateEvent { id }, String::new()));
+        // The copy goes where the event on the next row of the list (as filtered) is.
+        let next = ids.iter().position(|x| *x == id).and_then(|k| ids.get(k + 1)).copied();
+        return Some(EventsAction::Apply(Command::DuplicateEvent { id, next }, String::new()));
     }
-    if small_button(r.x + 2.0 * (bw + 4.0), by, bw, 30.0, tr("Delete"), state.selected.is_some()) {
+    if small_button(r.x + 2.0 * (bw + 4.0), by, bw, 30.0, tr("Move"), state.selected.is_some()) {
+        state.moving = if state.moving.is_some() { None } else { state.selected };
+    }
+    if small_button(r.x + 3.0 * (bw + 4.0), by, bw, 30.0, tr("Delete"), state.selected.is_some()) {
         return Some(EventsAction::Delete(state.selected?));
     }
     None
@@ -306,7 +345,16 @@ fn tab_player(f: &mut Form, s: &Scenario, e: &mut Event) {
     if (relative != 0) != ev::is_relative(e) {
         ev::set_relative(e, relative != 0, s.header.start_time);
     }
+    let mut subordinate = e.subordinate;
     if !ev::is_relative(e) {
+        f.flag("subordinate", tr("Subordinate (runs only when another event chains it)"), &mut subordinate);
+    }
+    if subordinate != e.subordinate {
+        ev::set_subordinate(e, subordinate != 0, s.header.start_time);
+    }
+    // The original's date, repeat, duration and "many times" are locked for a relative or
+    // subordinate event (0x53aa10, 0x53ac54).
+    if !ev::is_relative(e) && e.subordinate == 0 {
         let mut d = GameDate::from_minutes(e.start_time);
         f.num("year", tr("Start: year"), &mut d.year, 0, 2999);
         f.num("month", tr("Month"), &mut d.month, 1, 12);
@@ -316,25 +364,28 @@ fn tab_player(f: &mut Form, s: &Scenario, e: &mut Event) {
         f.num("hour", tr("Hour"), &mut d.hour, 0, 23);
         e.start_time = d.to_minutes();
     }
-    let mut hours = ev::duration_hours(e);
-    f.num("duration", tr("Open for (hours)"), &mut hours, 0, ev::MAX_DURATION_HOURS as i64);
-    if hours != ev::duration_hours(e) {
-        ev::set_duration_hours(e, hours);
+    if e.subordinate == 0 {
+        let mut hours = ev::duration_hours(e);
+        f.num("duration", tr("Open for (hours)"), &mut hours, 0, ev::MAX_DURATION_HOURS as i64);
+        if hours != ev::duration_hours(e) {
+            ev::set_duration_hours(e, hours);
+        }
+        if e.duration > 0 {
+            f.note(&trf!("As the game reads it: {hours} hours (it takes the stored minutes as hours).", hours = e.duration), DIM);
+        }
+        let mut days = ev::repeat_days(e);
+        f.num("repeat", tr("Repeat every (days, 0 = no)"), &mut days, 0, ev::MAX_REPEAT_DAYS as i64);
+        if days != ev::repeat_days(e) {
+            ev::set_repeat_days(e, days);
+        }
+        let mut many = ev::repeatable(e) as u8;
+        f.flag("many", tr("Can happen many times"), &mut many);
+        if (many != 0) != ev::repeatable(e) {
+            ev::set_repeatable(e, many != 0);
+        }
+    } else {
+        f.note(tr("A subordinate event has no time of its own and can happen many times."), DIM);
     }
-    if e.duration > 0 {
-        f.note(&trf!("As the game reads it: {hours} hours (it takes the stored minutes as hours).", hours = e.duration), DIM);
-    }
-    let mut days = ev::repeat_days(e);
-    f.num("repeat", tr("Repeat every (days, 0 = no)"), &mut days, 0, ev::MAX_REPEAT_DAYS as i64);
-    if days != ev::repeat_days(e) {
-        ev::set_repeat_days(e, days);
-    }
-    let mut many = ev::repeatable(e) as u8;
-    f.flag("many", tr("Can happen many times"), &mut many);
-    if (many != 0) != ev::repeatable(e) {
-        ev::set_repeatable(e, many != 0);
-    }
-    f.flag("subordinate", tr("Subordinate (runs only when another event chains it)"), &mut e.subordinate);
 
     f.heading(tr("Other events"));
     let events = event_options_none(s);
@@ -369,10 +420,10 @@ fn tab_player(f: &mut Form, s: &Scenario, e: &mut Event) {
     f.heading(tr("The hero"));
     f.flag("stats", tr("Check the current stats"), &mut c.stats_check);
     f.threshold("level", tr("Level (from 0)"), &mut c.level, 99);
-    f.threshold("gold", tr("Gold"), &mut c.gold, i16::MAX as i64);
-    f.threshold("mana", tr("Holiness and mana"), &mut c.holiness_mana, i16::MAX as i64);
+    f.threshold("gold", tr("Gold"), &mut c.gold, 99_999);
+    f.threshold("mana", tr("Holiness and mana"), &mut c.holiness_mana, 99_999);
     f.threshold("squads", tr("Squads in the army"), &mut c.squad_count, 12);
-    f.threshold("strength", tr("Army strength"), &mut c.army_strength, i16::MAX as i64);
+    f.threshold("strength", tr("Army strength"), &mut c.army_strength, 99_999);
     f.note(tr("A value of 0 is not checked; the switch picks at least or at most."), DIM);
     f.flag("one_hp", tr("Condition: the hero has exactly 1 HP"), &mut e.results.hero_one_hp);
 }
@@ -384,7 +435,8 @@ fn tab_heroes(f: &mut Form, s: &Scenario, names: &Names, e: &mut Event) {
     let c = &mut e.conditions;
     f.heading(tr("Buildings"));
     f.flag("bld_c", tr("These buildings belong to"), &mut c.buildings_check);
-    let buildings = building_options(s);
+    // The original's pickers offer no towns.
+    let buildings = building_options_of(s, &ev::PICKER_BUILDINGS);
     for k in 0..3 {
         let (mut b, mut o) = (c.buildings[k] as i64, c.buildings_owner[k] as i64);
         f.pick_row(&format!("bld{k}"), &mut [(&mut b, &buildings, 2.0), (&mut o, &owners, 1.0)]);
@@ -400,12 +452,14 @@ fn tab_heroes(f: &mut Form, s: &Scenario, names: &Names, e: &mut Event) {
     }
     f.heading(tr("Named squads"));
     f.flag("unit_c", tr("Squads of this unit and name are in the army of"), &mut c.units_check);
-    let units = unit_options(names);
+    let mut units = unit_options(names);
+    units.push((ev::CONDITION_EXTRA_UNIT as i64, tr("(the extra entry: an added unit)").into()));
     let named = named_options(s);
     for k in 0..3 {
         let (mut u, mut n, mut o) = (c.units[k] as i64, c.units_named[k] as i64, c.units_owner[k] as i64);
         f.pick_row(&format!("unit{k}"), &mut [(&mut u, &units, 1.4), (&mut n, &named, 1.2), (&mut o, &owners, 1.0)]);
-        (c.units[k], c.units_named[k], c.units_owner[k]) = (u as u8, n as u8, o as u8);
+        (c.units[k], c.units_named[k]) = ev::pick_unit_and_named(s, (c.units[k], c.units_named[k]), (u as u8, n as u8));
+        c.units_owner[k] = o as u8;
     }
     f.heading(tr("Armies"));
     let armies = army_options(s);
@@ -430,12 +484,12 @@ fn tab_result1(f: &mut Form, s: &Scenario, names: &Names, e: &mut Event) {
         f.note(tr("This event runs a Community opcode: these three fields are its arguments (see Community)."), ACCENT);
     }
     let r = &mut e.results;
-    f.num("xp", tr("Experience"), &mut r.experience, -32000, 32000);
-    f.num("gold", tr("Gold"), &mut r.gold, -32000, 32000);
-    f.num("mana", tr("Mana"), &mut r.mana, -32000, 32000);
+    f.num_step("xp", tr("Experience"), &mut r.experience, -32000, 32000, 10);
+    f.num_step("gold", tr("Gold"), &mut r.gold, -32000, 32000, 10);
+    f.num_step("mana", tr("Mana"), &mut r.mana, -32000, 32000, 10);
     f.heading(tr("Time"));
     f.pick("rel_event", tr("Relative event"), &mut r.relative_event, &events);
-    f.num("relative_h", tr("... starts in (hours)"), &mut r.relative_delay_hours, 0, 5000);
+    f.num_step("relative_h", tr("... starts in (hours)"), &mut r.relative_delay_hours, 0, 5000, 6);
     f.num("delay", tr("The hero waits (hours)"), &mut r.delay_hours, 0, 65535);
     let parts = ev::split_title(&e.title);
     let mut set = parts.set.clone();
@@ -453,7 +507,7 @@ fn tab_result1(f: &mut Form, s: &Scenario, names: &Names, e: &mut Event) {
     for k in 0..4 {
         let (mut u, mut n) = (r.units_add[k] as i64, r.units_add_named[k] as i64);
         f.pick_row(&format!("add{k}"), &mut [(&mut u, &units, 1.0), (&mut n, &named, 1.0)]);
-        (r.units_add[k], r.units_add_named[k]) = (u as u8, n as u8);
+        (r.units_add[k], r.units_add_named[k]) = ev::pick_unit_and_named(s, (r.units_add[k], r.units_add_named[k]), (u as u8, n as u8));
     }
     f.pick("from_army", tr("Taken from army"), &mut r.units_from_army, &army_options(s));
     f.heading(tr("Spells learned"));
@@ -474,7 +528,7 @@ fn tab_result2(f: &mut Form, s: &Scenario, names: &Names, e: &mut Event, picture
     for k in 0..4 {
         let (mut u, mut n) = (r.units_remove[k] as i64, r.units_remove_named[k] as i64);
         f.pick_row(&format!("rem{k}"), &mut [(&mut u, &removed, 1.0), (&mut n, &named, 1.0)]);
-        (r.units_remove[k], r.units_remove_named[k]) = (u as u8, n as u8);
+        (r.units_remove[k], r.units_remove_named[k]) = ev::pick_unit_and_named(s, (r.units_remove[k], r.units_remove_named[k]), (u as u8, n as u8));
     }
     f.pick("to_army", tr("They go to army"), &mut r.removed_units_to_army, &armies);
     f.flag("to_hero", tr("Move that army to the hero"), &mut r.move_to_hero);
@@ -499,11 +553,10 @@ fn tab_result2(f: &mut Form, s: &Scenario, names: &Names, e: &mut Event, picture
         f.note(tr("Patrol change: this event's patrol value selects a Community opcode (see Community)."), ACCENT);
     } else {
         f.pick("patrol_army", tr("Change the patrol of"), &mut r.patrol_army, &armies);
-        f.num("patrol", tr("... by"), &mut r.patrol_delta, -120, 120);
+        f.num_step("patrol", tr("... by"), &mut r.patrol_delta, -120, 120, 5);
     }
+    // The original's "generate the battle army" box is hidden and disabled (its byte is kept).
     f.pick("battle", tr("Start a battle with"), &mut r.start_battle_with, &armies);
-    f.flag("generate", tr("Generate that army to match the player"), &mut e.generate_battle_army);
-    let r = &mut e.results;
     f.flag("no_meeting", tr("No meeting with the army (for later checks)"), &mut r.no_meeting);
     if r.no_meeting != 0 && e.conditions.meet_army != 0 {
         f.note(tr("! This event also needs a meeting with an army."), ACCENT);

@@ -16,7 +16,6 @@ Yellow = Жёлтый
 Red = Красный
 Not the player = Не игрок
 Every hero = Любой герой
-New {kind} event = Новое событие ({kind})
 
 # Event editor: flag scripts in titles
 a flag name is empty = пустое имя флага
@@ -384,7 +383,6 @@ Patrol change: this event's patrol value selects a Community opcode (see Communi
 Change the patrol of = Сменить патруль армии
 ... by = ... на
 Start a battle with = Начать битву с
-Generate that army to match the player = Подобрать эту армию под силу игрока
 No meeting with the army (for later checks) = Без встречи с армией (для последующих проверок)
 ! This event also needs a meeting with an army. = ! Этому событию нужна ещё и встреча с армией.
 Spell on the player's army = Заклинание на армию игрока

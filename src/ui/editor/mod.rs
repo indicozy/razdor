@@ -207,8 +207,11 @@ impl EditorScreen {
             Then::Exit => return EditorAction::Exit,
             Then::Save { name, format, dest, consent } => self.save(&name, format, dest, consent),
             Then::DeleteEvent(id) => {
+                let before = self.doc.scenario.events.len();
                 self.apply(Command::DeleteEvent { id }, "");
-                self.status = Some(trf!("Deleted event {id}; later events moved up one and every reference followed.", id));
+                if self.doc.scenario.events.len() < before {
+                    self.status = Some(trf!("Deleted event {id}; later events moved up one, and the lists that held it keep an empty slot, as in the original.", id));
+                }
                 self.modal = Some(Modal::Events);
             }
         }
@@ -380,19 +383,7 @@ impl EditorScreen {
                 self.tools.check_selection(&self.doc);
             }
             EventsAction::Delete(id) => {
-                let refs = razdor::editor::events::references_to(&self.doc.scenario, id);
-                if refs.is_empty() {
-                    self.run(Then::DeleteEvent(id));
-                } else {
-                    let list: Vec<String> = refs.iter().take(6).map(|r| r.to_string()).collect();
-                    let list = list.join(", ");
-                    let message = if refs.len() > 6 {
-                        trf!("Event {id} is still used by {list} and {more} more. Delete it and clear those references?", id, list, more = refs.len() - 6)
-                    } else {
-                        trf!("Event {id} is still used by {list}. Delete it and clear those references?", id, list)
-                    };
-                    self.modal = Some(Modal::Confirm { message, then: Then::DeleteEvent(id) });
-                }
+                self.run(Then::DeleteEvent(id));
             }
             EventsAction::Status(m) => self.status = Some(m),
             EventsAction::Close => self.modal = None,

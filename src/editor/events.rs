@@ -20,8 +20,13 @@ const DAY: u32 = 1440;
 const HOUR: u32 = 60;
 /// The repeat period the original offers: every 1–31 days.
 pub const MAX_REPEAT_DAYS: u32 = 31;
-/// Longest active duration the field can store (65535 minutes).
-pub const MAX_DURATION_HOURS: u32 = u16::MAX as u32 / HOUR;
+/// Longest active duration the original's spin offers.
+pub const MAX_DURATION_HOURS: u32 = 99;
+/// The building types the event window's building pickers offer (0x532654): villages,
+/// castles, forts, churches, altars and ruins; no towns.
+pub const PICKER_BUILDINGS: [u8; 6] = [2, 3, 4, 7, 10, 12];
+/// The extra entry at the end of the condition unit lists.
+pub const CONDITION_EXTRA_UNIT: u8 = 0xFF;
 
 /// Event type labels (byte 1), Razdor's own words (translated where shown).
 pub const KIND_LABELS: [(u8, &str); 4] = [(1, n_("Global")), (2, n_("Local")), (3, n_("Quest")), (4, n_("Rumour"))];
@@ -48,9 +53,54 @@ pub const PICTURE_VICTORY: u8 = 201;
 /// Editor groups (byte 0): six colours.
 pub const GROUPS: u8 = 6;
 
-/// A new event of `kind`: open from the scenario's start, once, for every hero, silent.
-pub fn new_event(s: &Scenario, kind: u8) -> Event {
-    Event { kind, start_time: s.header.start_time, once: 1, title: trf!("New {kind} event", kind = kind_label(kind).to_lowercase()), ..Event::default() }
+/// A new event as the original's New button prepares it (0x538fe4): a zeroed record of
+/// type `kind` with a default title ending in its number, from the scenario's start,
+/// repeating every day and open for 1,440 (as stored), "once" the inverse of the editor's
+/// "new events repeat" option.
+pub fn new_event(s: &Scenario, kind: u8, new_events_repeat: bool) -> Event {
+    Event {
+        kind,
+        start_time: s.header.start_time,
+        repeat: DAY as u16,
+        duration: DAY as u16,
+        once: (!new_events_repeat) as u8,
+        title: trf!("Event {n}", n = s.events.len() + 1),
+        ..Event::default()
+    }
+}
+
+/// Why the original's copy stops: a name whose only `#` is its last character (reading the
+/// character after it is a range error).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HashAtEnd;
+
+/// The name a copy gets (0x539214): with a `#`, the character after the first `#` is raised
+/// by one character code in the map's code page (so a 9 becomes `:`, not 10); without one,
+/// ` #1` is appended.
+pub fn copy_name(name: &str) -> Result<String, HashAtEnd> {
+    let mut bytes = crate::dt::text::encode(name);
+    match bytes.iter().position(|b| *b == b'#') {
+        None => Ok(format!("{name} #1")),
+        Some(k) if k + 1 >= bytes.len() => Err(HashAtEnd),
+        Some(k) => {
+            bytes[k + 1] = bytes[k + 1].wrapping_add(1);
+            Ok(crate::dt::text::decode(&bytes))
+        }
+    }
+}
+
+/// A unit picker and its named-character picker as the event window links them (0x53b2dc,
+/// 0x53b39c): picking a character sets the unit to the character's class; changing the
+/// unit clears the character. `before` and `after` are (unit, character).
+pub fn pick_unit_and_named(s: &Scenario, before: (u8, u8), after: (u8, u8)) -> (u8, u8) {
+    if after.1 != before.1 && after.1 != 0 {
+        let class = (after.1 as usize).checked_sub(1).and_then(|i| s.named_characters.get(i)).map_or(after.0, |n| n.unit);
+        return (class, after.1);
+    }
+    if after.0 != before.0 {
+        return (after.0, 0);
+    }
+    after
 }
 
 // ------------------------------------------------------------------------------------------
@@ -61,13 +111,26 @@ pub fn is_relative(e: &Event) -> bool {
     e.start_time == RELATIVE_START
 }
 
-/// "Relative only": the event waits until another event moves its start. Turning it off
-/// gives the event the start `start`.
+/// "Relative only" (0x53ac54): the event waits until another event moves its start, and
+/// it is not subordinate. Turning it off gives the event the scenario's start `start`.
 pub fn set_relative(e: &mut Event, on: bool, start: u32) {
     if on {
         e.start_time = RELATIVE_START;
+        e.subordinate = 0;
     } else if is_relative(e) {
         e.start_time = start;
+    }
+}
+
+/// "Subordinate" (0x53aa10): on, the start, repeat and duration are 0 and the event can
+/// happen many times (once 0), and it is not "relative only"; off, they become the scenario's
+/// start `start`, one day and 24 hours, and the event happens once.
+pub fn set_subordinate(e: &mut Event, on: bool, start: u32) {
+    e.subordinate = on as u8;
+    if on {
+        (e.start_time, e.repeat, e.duration, e.once) = (0, 0, 0, 0);
+    } else {
+        (e.start_time, e.repeat, e.duration, e.once) = (start, DAY as u16, (24 * HOUR) as u16, 1);
     }
 }
 
@@ -115,12 +178,23 @@ impl Threshold {
         Threshold { at_least: v >= 0, value: v.unsigned_abs() }
     }
 
+    /// The stored value. The original keeps a signed word: "at least" holds up to 32,767,
+    /// "at most" (negated) up to 32,768; a larger value stops its save with a range error,
+    /// here it is held at those ends.
     pub fn raw(self) -> i16 {
-        let v = self.value.min(i16::MAX as u16) as i16;
         if self.at_least {
-            v
+            self.value.min(i16::MAX as u16) as i16
         } else {
-            -v
+            (-(self.value.min(32_768) as i32)) as i16
+        }
+    }
+
+    /// The largest value the switch's side can store.
+    pub fn max(at_least: bool) -> u16 {
+        if at_least {
+            i16::MAX as u16
+        } else {
+            32_768
         }
     }
 }
@@ -566,7 +640,7 @@ mod tests {
         set_repeat_days(&mut e, 100);
         assert_eq!(e.repeat, 45 * 1440, "clamped to what u16 minutes hold");
         set_duration_hours(&mut e, 5000);
-        assert_eq!(duration_hours(&e), MAX_DURATION_HOURS);
+        assert_eq!(duration_hours(&e), 99, "the original's spin stops at 99 hours");
         e.start_time = 777;
         set_relative(&mut e, true, 5);
         assert!(is_relative(&e));
@@ -579,6 +653,31 @@ mod tests {
         assert_eq!(e.once, 0);
         set_repeatable(&mut e, false);
         assert!(!repeatable(&e) && e.once == 1);
+        // Subordinate and relative-only exclude each other.
+        set_subordinate(&mut e, true, 5);
+        assert_eq!((e.subordinate, e.start_time, e.repeat, e.duration, e.once), (1, 0, 0, 0, 0));
+        set_relative(&mut e, true, 5);
+        assert_eq!((e.subordinate, e.start_time), (0, RELATIVE_START));
+        set_subordinate(&mut e, false, 5);
+        assert_eq!((e.subordinate, e.start_time, e.repeat, e.duration, e.once), (0, 5, 1440, 1440, 1));
+    }
+
+    #[test]
+    fn named_characters_follow_their_class() {
+        let s = Scenario { named_characters: vec![crate::dt::dtm::NamedCharacter { unit: 12, name: "Эд".into() }], ..Scenario::default() };
+        assert_eq!(pick_unit_and_named(&s, (5, 0), (5, 1)), (12, 1), "a character brings its class");
+        assert_eq!(pick_unit_and_named(&s, (12, 1), (7, 1)), (7, 0), "a new unit clears the character");
+        assert_eq!(pick_unit_and_named(&s, (12, 1), (12, 0)), (12, 0));
+    }
+
+    #[test]
+    fn copies_are_numbered_as_the_original() {
+        assert_eq!(copy_name("Встреча").unwrap(), "Встреча #1");
+        assert_eq!(copy_name("Встреча #1").unwrap(), "Встреча #2");
+        assert_eq!(copy_name("Встреча #9").unwrap(), "Встреча #:", "one character code up, not 10");
+        assert_eq!(copy_name("A#1 B#5").unwrap(), "A#2 B#5", "the first #");
+        assert_eq!(copy_name("Сон#а").unwrap(), "Сон#б", "in the map's code page");
+        assert_eq!(copy_name("Сон #"), Err(HashAtEnd));
     }
 
     #[test]
@@ -587,6 +686,9 @@ mod tests {
         assert_eq!(Threshold::from_raw(7).raw(), 7);
         assert_eq!(Threshold { at_least: false, value: 12 }.raw(), -12);
         assert_eq!(Threshold { at_least: true, value: 40000 }.raw(), i16::MAX);
+        assert_eq!(Threshold { at_least: false, value: 32768 }.raw(), i16::MIN, "at most stores 32,768");
+        assert_eq!(Threshold { at_least: false, value: 40000 }.raw(), i16::MIN);
+        assert_eq!((Threshold::max(true), Threshold::max(false)), (32767, 32768));
         assert_eq!(Threshold::from_raw(i16::MIN).value, 32768);
     }
 
@@ -730,7 +832,9 @@ mod tests {
     fn new_events() {
         let mut s = Scenario::default();
         s.header.start_time = 12345;
-        let e = new_event(&s, 3);
-        assert_eq!((e.kind, e.start_time, e.once, e.title.as_str()), (3, 12345, 1, "New quest event"));
+        s.events = vec![Event::default(); 4];
+        let e = new_event(&s, 3, true);
+        assert_eq!((e.kind, e.start_time, e.repeat, e.duration, e.once, e.title.as_str()), (3, 12345, 1440, 1440, 0, "Event 5"));
+        assert_eq!(new_event(&s, 1, false).once, 1);
     }
 }

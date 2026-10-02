@@ -449,7 +449,8 @@ and names units, artefacts and spells from your install; without one it uses pla
   strength, takes faction, attitudes and leader name from a home building or a faction, and
   writes the derived model byte and the two stored costs; the building panel shows the pages
   of its type, rates the garrison, tests the market and writes the derived bytes.
-- **Events**: the event list (filter by type, group colour and title; New, Duplicate, Delete)
+- **Events**: the event list (filter by type, group colour and title; New, Duplicate, Move or
+  Ctrl+click, Delete, as the original's event window)
   and every field of the original editor's event window, on its tabs: *Event and player*
   (type, group, start date or "relative only", hours open, repeat every N days, once or many
   times, subordinate, hero archetype, events happened with yes / no / not happened, the flag
@@ -462,9 +463,10 @@ and names units, artefacts and spells from your install; without one it uses pla
   patrol change, battle, "no meeting", new hero class, a spell on the player, the standard
   picture or an imported PNG), *Places* (attach to or detach from buildings and points, and
   what refers to the event) and *Community* (the Community Update opcodes 1–20 with their
-  arguments named). Deleting an event renumbers the later ones and fixes every reference
-  (other events, buildings' and points' lists, the victory and defeat events, the opcodes'
-  relative targets); if the event is still used, the editor lists where and asks first.
+  arguments named). Deleting or moving an event renumbers the references the original
+  renumbers (other events' conditions, relative, quest and chained events, the victory and
+  defeat events, the buildings' and points' lists); as in the original, a deleted entry of a
+  list becomes an empty slot, and nothing is asked.
 - **View**: wheel zooms, right or middle drag and the arrow keys move, Home shows the whole
   map, the minimap moves the view; G grid, H hill and mountain cover, R patrol radii.
 - **Test play** plays the map as it is in the editor; Esc > Main menu returns to it.

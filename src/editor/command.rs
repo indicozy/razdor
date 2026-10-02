@@ -64,12 +64,17 @@ pub enum Command {
     AddNamedCharacter { unit: u8, name: String },
     /// Removes named character `index` (1-based); armies and events follow.
     RemoveNamedCharacter { index: u8 },
-    /// A new event of type `kind` (1 global … 4 rumour) at the end of the list.
-    NewEvent { kind: u8 },
-    /// A copy of event `id` (its picture included) at the end of the list.
-    DuplicateEvent { id: u16 },
-    /// Removes an event; later ids shift down and every reference follows
-    /// ([`super::refs::remove_event`]).
+    /// A new event of type `kind` (1 global … 4 rumour) at the end of the list, with the
+    /// editor option "new events repeat" ([`super::events::new_event`]).
+    NewEvent { kind: u8, repeat: bool },
+    /// The original's copy of event `id` (0x539214): numbered by [`super::events::copy_name`],
+    /// without its own picture, placed where the event on the list's next row is (`next`,
+    /// the list as filtered; `None` when `id` is the last row), with the record of the event
+    /// just before that place.
+    DuplicateEvent { id: u16, next: Option<u16> },
+    /// Moves event `from` to position `to`, renumbering ([`super::refs::move_event`]).
+    MoveEvent { from: u16, to: u16 },
+    /// Removes an event as the original's delete does ([`super::refs::remove_event`]).
     DeleteEvent { id: u16 },
     /// Replaces an event's record (its property panel).
     SetEvent { id: u16, event: Box<Event> },
@@ -105,6 +110,7 @@ impl Command {
             Command::RemoveNamedCharacter { .. } => n_("Remove named character"),
             Command::NewEvent { .. } => n_("New event"),
             Command::DuplicateEvent { .. } => n_("Duplicate event"),
+            Command::MoveEvent { .. } => n_("Move event"),
             Command::DeleteEvent { .. } => n_("Delete event"),
             Command::SetEvent { .. } => n_("Edit event"),
             Command::AttachEvent { .. } => n_("Attach event"),
@@ -126,8 +132,8 @@ impl Command {
             Command::DeletePoint { .. } => S::POINTS | S::EVENTS,
             Command::SetSettings(_) | Command::AddNamedCharacter { .. } => S::META,
             Command::RemoveNamedCharacter { .. } => S::META | S::ARMIES | S::EVENTS,
-            Command::NewEvent { .. } | Command::DuplicateEvent { .. } | Command::SetEvent { .. } => S::EVENTS,
-            Command::DeleteEvent { .. } => S::EVENTS | S::BUILDINGS | S::POINTS | S::META,
+            Command::NewEvent { .. } | Command::SetEvent { .. } => S::EVENTS,
+            Command::DeleteEvent { .. } | Command::DuplicateEvent { .. } | Command::MoveEvent { .. } => S::EVENTS | S::BUILDINGS | S::POINTS | S::META,
             Command::AttachEvent { place, .. } | Command::DetachEvent { place, .. } => match place {
                 Target::Building(_) => S::BUILDINGS,
                 Target::Point(_) => S::POINTS,

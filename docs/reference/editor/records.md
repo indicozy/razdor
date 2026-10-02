@@ -650,12 +650,12 @@ These points refine [dtm-format.md](../dtm-format.md):
 | Building income ranges | as the original, with its steps; the most mana kept stops at 255, where the original's save stops with a range error | gold 0..250, max gold 0..2,500, defence slider 0..50 saved as 50 − position |
 | Building event list | as the original; an event can be inserted only at the end (Razdor's list has no selected line) | duplicates allowed, up to 64 |
 | Garrison rating, market test | as the original: the garrison's tactical cost and side strength, and the market test with the game's restock (Razdor's random numbers, so the goods drawn are an example, as in the original) | shown in the building window |
-| Event pickers of buildings | every building | towns not offered |
-| New event | repeat 0, duration 0, once on | repeat 1 day, duration 1,440, once from the option |
-| Copy event | clone at the end, picture kept, name kept | inserted after the original, references renumbered, name numbered, custom picture dropped |
-| Event order | cannot be changed | move with renumbering |
-| Event delete | closes up building and point lists, asks when the event is referenced | zeroes the entry without closing up, no prompt |
-| Event duration range | 0..1,092 hours | 0..99 hours |
+| Event pickers of buildings | as the original | towns not offered |
+| New event | as the original (`src/editor/events.rs`); the option is the editor option's default, Y, until the Options commit wires it | repeat 1 day, duration 1,440, once from the option |
+| Copy event | as the original, the filtered-list quirk included; a name whose `#` is last and the last row of a filtered list that is not the last event are refused, where the original stops with a range error | inserted after the original, references renumbered, name numbered, custom picture dropped |
+| Event order | as the original: Move, or Ctrl+click, then a click on the target row | move with renumbering |
+| Event delete | as the original; a list longer than the original's range check (64, or 5 on a point) refuses the delete, where the original stops part-way | zeroes the entry without closing up, no prompt |
+| Event duration range | as the original, with the other ranges and steps of §9.1 | 0..99 hours |
 | Start date change | events stay | every event start shifts by the change |
 | Alliance presets | allied 2 / neutral 0 / war −3, self 3 | the four matrices in §8.3 (neutral self 2, war not symmetric) |
 | Hero presets | gold and mana 0..32,767, six spells, no experience, start position editable | experience, gold and mana 0..32,000, five spells, start army at most 11 units, position from the map |

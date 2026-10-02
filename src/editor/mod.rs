@@ -219,18 +219,50 @@ mod real_maps {
         let names = Names::from_content(&Content::from_dt(&dt));
         let palette = Palette::from_sprites(&dt.map_objects().unwrap());
         let content = std::sync::Arc::new(Content::from_dt(&dt));
+        let mut quirks = 0;
         for m in &dt.maps {
             let mut d = EditorDoc::open(&m.path, None).unwrap();
             let original = d.file_bytes(Some(&names), Some(&palette)).unwrap();
             let n = d.scenario.events.len() as u16;
+            // A list holding a 0 in its counted part is shortened by every event delete (the
+            // original's quirk): such maps are compared but for those counts.
+            let zero_lists = |s: &crate::dt::dtm::Scenario| {
+                s.buildings.iter().filter(|b| b.event_slots[..b.event_count as usize].contains(&0)).count()
+                    + s.points.iter().filter(|p| p.event_slots[..p.event_count as usize].contains(&0)).count()
+            };
+            let quirk = zero_lists(&d.scenario) > 0;
+            let start = d.scenario.clone();
+            let same = |d: &EditorDoc, what: &str| {
+                if quirk {
+                    let strip = |s: &crate::dt::dtm::Scenario| {
+                        let mut s = s.clone();
+                        s.buildings.iter_mut().for_each(|b| b.event_count = 0);
+                        s.points.iter_mut().for_each(|p| p.event_count = 0);
+                        s
+                    };
+                    assert!(strip(&d.scenario) == strip(&start), "{}: {what}", m.name);
+                } else {
+                    assert!(d.file_bytes(Some(&names), Some(&palette)).unwrap() == original, "{}: {what}", m.name);
+                }
+            };
             // Adding and deleting an event, or duplicating one and deleting the copy, gives
             // the same file.
-            d.apply(Command::NewEvent { kind: 1 }).unwrap();
+            d.apply(Command::NewEvent { kind: 1, repeat: false }).unwrap();
             d.apply(Command::DeleteEvent { id: n + 1 }).unwrap();
-            assert!(d.file_bytes(Some(&names), Some(&palette)).unwrap() == original, "{}: add + delete", m.name);
-            d.apply(Command::DuplicateEvent { id: 1 }).unwrap();
+            same(&d, "add + delete");
+            d.apply(Command::DuplicateEvent { id: n, next: None }).unwrap();
             d.apply(Command::DeleteEvent { id: n + 1 }).unwrap();
-            assert!(d.file_bytes(Some(&names), Some(&palette)).unwrap() == original, "{}: duplicate + delete", m.name);
+            same(&d, "duplicate + delete");
+            // A copy of event 1 goes in at 2, renumbering every later reference; deleting it
+            // renumbers them back.
+            assert_eq!(d.apply(Command::DuplicateEvent { id: 1, next: Some(2) }).unwrap().new_id, Some(2));
+            d.apply(Command::DeleteEvent { id: 2 }).unwrap();
+            same(&d, "copy in the middle + delete");
+            // Moving the last event to the top and back.
+            d.apply(Command::MoveEvent { from: n, to: 1 }).unwrap();
+            d.apply(Command::MoveEvent { from: 1, to: n }).unwrap();
+            same(&d, "move and back");
+            quirks += quirk as usize;
             // Deleting the most referred-to event leaves no dangling reference.
             let busiest = (1..=n).max_by_key(|id| events::references_to(&d.scenario, *id).len()).unwrap();
             let refs = events::references_to(&d.scenario, busiest).len();
@@ -258,6 +290,8 @@ mod real_maps {
             }
             assert!(g.script().is_some(), "{}", m.name);
         }
+        // Some shipped map has a list with an empty slot that event deletes shorten.
+        assert!(quirks > 0);
     }
 
     #[test]
