@@ -347,3 +347,11 @@ a relative-only event that no event starts = относительное собы
 there is no text for the reward = нет текста для награды
 the artefact {item} is not on the map, so the event can never fire = артефакта «{item}» нет на карте, событие никогда не сработает
 an empty point: no events and no radius = пустая точка: нет событий и радиуса
+
+# Map editor: the original's playability score
+Playability = Играбельность
+Playability {score}, quests {quests}. = Играбельность {score}, заданий {quests}.
+Playability {score}, quests {quests}; the scoring is in {path}. = Играбельность {score}, заданий {quests}; расчёт записан в {path}.
+No playability for a map narrower than 50 cells (the original stops with a division by zero). = Играбельность не считается для карты уже 50 клеток (оригинал останавливается на делении на ноль).
+No playability: the score does not fit its field (the original stops with a range error). = Играбельность не посчитана: оценка не помещается в своё поле (оригинал останавливается с ошибкой диапазона).
+quests {q}, playability {p} = заданий {q}, играбельность {p}

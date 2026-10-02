@@ -900,7 +900,7 @@ behaviour, not the same look.
 | Event list look | Group colour text, bold quests, italic rumours, filters | Group swatch, kind initial, filters, search | differs | `src/ui/editor/events.rs` |
 | Caption | Main caption, version, file, format number | Fixed app title; name shown in the toolbar with `*` | differs | `src/ui/editor/mod.rs` |
 | Save enabled only when modified | Yes | Always enabled | differs | `src/ui/editor/mod.rs` |
-| Playability label | Yes | No | missing | — |
+| Playability label | Yes | Quest count and score at the foot of the tool column, in the original's colour bands | matches | `src/ui/editor/mod.rs` |
 
 ---
 

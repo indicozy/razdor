@@ -432,7 +432,9 @@ and names units, artefacts and spells from your install; without one it uses pla
   (Ctrl+Y / Ctrl+Shift+Z), Settings (title, description, start date, victory/defeat event,
   the three hero starts, faction relations, campaign, named characters), Events (below), Check
   (the original editor's 20 map-check rules, which never block saving, then Razdor's file
-  checks, whose errors do; click a row to go to its record), Test play, Exit.
+  checks, whose errors do; click a row to go to its record), Playability (the original
+  editor's score, kept in the map and shown at the foot of the tool column; each scoring adds
+  a line to `MapData.Txt` in your maps folder), Test play, Exit.
 - **Tools** (right column, keys in brackets): Select and move (V), Terrain (T: 16 surfaces,
   brush 1/3/5/9, flood fill, rectangle), Objects (O: hills, mountains, stones, trees by class
   and picture; several per cell), Erase (E), Building (B: type and picture; the cell you click

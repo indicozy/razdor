@@ -23,6 +23,7 @@ use razdor::editor::defaults::MAP_SIZES;
 use razdor::editor::files::{self, Consent, Destination, SaveBlock};
 use razdor::editor::mapcheck::{self, CheckRow};
 use razdor::editor::mapfile::{OpenFormat, SaveFormat};
+use razdor::editor::playability::{self, ScoreError};
 use razdor::editor::palette::{object_class_label, SURFACE_LABELS};
 use razdor::editor::validate::has_errors;
 use razdor::editor::{Command, EditorDoc, Issue, Names, NewMap, Origin, Palette, Place, SaveError, Severity, Target, Tool, ToolState};
@@ -296,6 +297,23 @@ impl EditorScreen {
         self.issues = self.doc.issues(self.install_names.as_ref(), Some(&self.palette));
         self.check_rows = mapcheck::check_map(&self.doc.scenario, self.names());
         self.modal = Some(Modal::Issues { scroll: 0 });
+    }
+
+    /// The original's score button: the score and quest count go into the header, and a line
+    /// into `MapData.Txt` in the user's maps folder (the original writes it next to itself).
+    fn score(&mut self) {
+        let names = self.names().clone();
+        match self.doc.score_playability(&names) {
+            Ok(r) => {
+                let written = self.user_dir.as_deref().map(|d| playability::append_map_data(d, &r.line));
+                self.status = Some(match written {
+                    Some(Ok(path)) => trf!("Playability {score}, quests {quests}; the scoring is in {path}.", score = r.score, quests = r.quests, path = path.display()),
+                    _ => trf!("Playability {score}, quests {quests}.", score = r.score, quests = r.quests),
+                });
+            }
+            Err(ScoreError::TooNarrow) => self.status = Some(tr("No playability for a map narrower than 50 cells (the original stops with a division by zero).").into()),
+            Err(ScoreError::OutOfRange) => self.status = Some(tr("No playability: the score does not fit its field (the original stops with a range error).").into()),
+        }
     }
 
     /// Centres the view on what an issue is about and selects it.
@@ -610,6 +628,7 @@ impl EditorScreen {
             (tr("Settings"), true),
             (tr("Events"), true),
             (tr("Check"), true),
+            (tr("Playability"), true),
             (tr("Test play"), true),
             (tr("Exit"), true),
         ];
@@ -657,8 +676,9 @@ impl EditorScreen {
             Some(7) => self.modal = Some(Modal::Settings),
             Some(8) => self.modal = Some(Modal::Events),
             Some(9) => self.check(),
-            Some(10) => self.modal = Some(Modal::TestPlay),
-            Some(11) => action = self.guarded(Then::Exit),
+            Some(10) => self.score(),
+            Some(11) => self.modal = Some(Modal::TestPlay),
+            Some(12) => action = self.guarded(Then::Exit),
             _ => {}
         }
         let s = &self.doc.scenario;
@@ -685,7 +705,23 @@ impl EditorScreen {
             }
         }
         parts.push(trf!("buildings {b}, armies {a}, points {p}, events {e}", b = s.buildings.len(), a = s.armies.len(), p = s.points.len(), e = s.events.len()));
-        text(&parts.join("   |   "), 8.0, y + 18.0, 16.0, DIM);
+        let line = parts.join("   |   ");
+        text(&line, 8.0, y + 18.0, 16.0, DIM);
+        // The quest count and score of the last scoring, coloured by the original's bands.
+        let score = s.header.playability();
+        let band = [
+            Color::new(0.9, 0.25, 0.2, 1.0),
+            Color::new(0.95, 0.55, 0.15, 1.0),
+            Color::new(0.65, 0.65, 0.2, 1.0),
+            Color::new(0.45, 0.75, 0.3, 1.0),
+            Color::new(0.25, 0.8, 0.45, 1.0),
+            Color::new(0.35, 0.55, 0.95, 1.0),
+            Color::new(0.65, 0.4, 0.9, 1.0),
+            Color::new(0.9, 0.35, 0.8, 1.0),
+        ][playability::band(score)];
+        let label = trf!("quests {q}, playability {p}", q = s.header.quest_count(), p = score);
+        // At the foot of the tool column, clear of the messages.
+        text_fit(&label, w - RIGHT_W + 8.0, y - 8.0, RIGHT_W - 16.0, 16.0, band);
         if let Some(m) = &self.status {
             let tw = measure(m, 16.0).width;
             text(m, (w - RIGHT_W - tw - 10.0).max(w * 0.45), y + 18.0, 16.0, ACCENT);

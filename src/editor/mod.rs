@@ -17,6 +17,7 @@ pub mod geometry;
 pub mod grid;
 pub mod mapcheck;
 pub mod mapfile;
+pub mod playability;
 pub mod palette;
 pub mod records;
 pub mod refs;
@@ -114,6 +115,29 @@ mod real_maps {
             total += rows.len();
         }
         assert!(total > 0, "the shipped maps have remarks");
+    }
+
+    #[test]
+    fn every_shipped_map_scores() {
+        let Some(dt) = install() else { return };
+        let names = Names::from_content(&Content::from_dt(&dt));
+        let mut scores = Vec::new();
+        for m in &dt.maps {
+            let mut d = EditorDoc::open(&m.path, None).unwrap();
+            // The shipped maps were never scored, or were cleaned.
+            assert_eq!((d.scenario.header.playability(), d.scenario.header.quest_count()), (0, 0), "{}", m.name);
+            let r = d.score_playability(&names).unwrap_or_else(|e| panic!("{}: {e:?}", m.name));
+            let quests = d.scenario.events.iter().filter(|e| e.kind == 3).count();
+            assert_eq!((r.quests as usize, d.scenario.header.quest_count() as usize), (quests, quests), "{}", m.name);
+            assert_eq!(d.scenario.header.playability(), r.score);
+            assert!(r.line.starts_with(&d.scenario.title) && r.line.ends_with('|'), "{}", r.line);
+            if (r.score, r.quests) != (0, 0) {
+                assert!(d.undo() && d.scenario.header.playability() == 0, "scoring is one undo step");
+            }
+            scores.push(r.score);
+        }
+        // The campaign and story maps score above the tutorials' floor.
+        assert!(scores.iter().filter(|s| **s > 0).count() >= 10, "{scores:?}");
     }
 
     #[test]

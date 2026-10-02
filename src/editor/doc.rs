@@ -293,6 +293,18 @@ impl EditorDoc {
         Ok(target.map)
     }
 
+    /// Scores the map as the original's score button does ([`super::playability::score`])
+    /// and stores the score and the quest count in the header (header 0x122 and 0x126), as
+    /// one undo step. Saving and loading never score.
+    pub fn score_playability(&mut self, names: &Names) -> Result<super::playability::Score, super::playability::ScoreError> {
+        let r = super::playability::score(&self.scenario, names, &self.custom_artefacts)?;
+        let mut s = self.scenario.clone();
+        s.header.set_playability(r.score);
+        s.header.set_quest_count(r.quests);
+        self.commit(n_("Playability"), s);
+        Ok(r)
+    }
+
     /// Replaces the scenario as one undo step (if anything changed).
     pub(crate) fn commit(&mut self, label: &str, s: Scenario) {
         self.end_group();

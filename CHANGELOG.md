@@ -479,6 +479,9 @@ old id, and their versions give both.
   past the edge, missing descriptions and incomes, empty garrisons, markets not set up,
   unused local events, rumours and subordinate events, unclosed quests, rewards without text,
   artefacts nothing gives). They never block saving; a click opens the record.
+- **Playability**: the original editor's score, with all its weights, penalties and its
+  curve, stored in the map with the quest count and shown in the original's colours; each
+  scoring appends its line to `MapData.Txt` in the maps folder.
 
 ## 0.2.2 — 2026-10-01
 

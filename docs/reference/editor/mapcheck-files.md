@@ -555,7 +555,15 @@ The score itself is not in the line.
   two strings per artefact; a save drops them and writes 0x34 = 0.
 - **Old versions.** Now as the original: versions 1–3 open with the upgrades of §3.7 (each
   digit only its own step) and are marked modified; the game itself still refuses them.
-- **Playability.** Razdor has no score, no header 0x122/0x126 writing and no `MapData.Txt`.
+- **Playability.** Now as the original (`src/editor/playability.rs`): the Playability button
+  scores with every weight of §6.2–6.6 (word-level near duplicates, text length, terrain
+  rings over the marks with 16-bit counters, building spacing, reward spread, the penalties
+  and the substring chain walk) and the curve of §6.7, stores the score at 0x122 and the
+  quest count at 0x126 (one undo step), shows both with the colour bands of §6.8, and
+  appends the `MapData.Txt` line of §6.9 in the user's maps folder rather than next to the
+  program. Where the original stops (a map narrower than 50 cells, a score or quest count
+  that does not fit its field) Razdor says so and stores nothing. The percentages use a
+  decimal comma, as the original under a Russian locale.
 - **Saving place and safety.** Razdor saves to the user's folder through a temporary file, asks before
   touching the game's folder, and has no emergency save. The original writes in place in its map folder
   and saves `ErrorSave.DTm` on a DirectDraw failure.
