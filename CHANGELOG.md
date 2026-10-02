@@ -482,6 +482,8 @@ old id, and their versions give both.
 - **Playability**: the original editor's score, with all its weights, penalties and its
   curve, stored in the map with the quest count and shown in the original's colours; each
   scoring appends its line to `MapData.Txt` in the maps folder.
+- If drawing the map fails, the editor saves it to `ErrorSave.DTm` in its folder before the
+  program ends, as the original's emergency save.
 
 ## 0.2.2 — 2026-10-01
 

@@ -299,6 +299,19 @@ impl EditorScreen {
         self.modal = Some(Modal::Issues { scroll: 0 });
     }
 
+    /// Saves the map to `ErrorSave.DTm` in its folder (the user's maps folder for a map of
+    /// the game's folder or a new one), then lets the drawing failure end the program.
+    fn emergency_exit(&mut self, failure: Box<dyn std::any::Any + Send>) -> ! {
+        let own = self.doc.saved_path.as_deref().and_then(|p| p.parent()).filter(|d| !self.game_dir.as_deref().is_some_and(|g| files::is_inside(d, g)));
+        if let Some(dir) = own.map(PathBuf::from).or_else(|| self.user_dir.clone()) {
+            match self.doc.emergency_save(&dir, self.install_names.as_ref(), Some(&self.palette)) {
+                Ok(p) => eprintln!("{}", trf!("The map could not be drawn; it was saved to {path}.", path = p.display())),
+                Err(e) => eprintln!("{}", trf!("The map could not be drawn, and the emergency save failed: {e}", e)),
+            }
+        }
+        std::panic::resume_unwind(failure)
+    }
+
     /// The original's score button: the score and quest count go into the header, and a line
     /// into `MapData.Txt` in the user's maps folder (the original writes it next to itself).
     fn score(&mut self) {
@@ -422,14 +435,21 @@ impl EditorScreen {
         let panel_rect = self.tools.selected.map(|_| Rect::new(8.0, TOP + 8.0, PANEL_W, view.h - 16.0));
         self.canvas_input(view, panel_rect);
         let cam = self.cam.expect("set above");
-        canvas::draw_map(&self.doc, art, &cam, overview.as_ref());
+        // As the original's emergency save: a failure while drawing the map or the minimap
+        // saves the map to ErrorSave.DTm and ends the program.
+        let drawn = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| canvas::draw_map(&self.doc, art, &cam, overview.as_ref())));
+        if let Err(e) = drawn {
+            self.emergency_exit(e);
+        }
         let hover = (!modal_open && view.contains(Vec2::from(crate::ui::widgets::pointer()))).then(|| cam.cell_at(Vec2::from(crate::ui::widgets::pointer())));
         canvas::draw_overlays(&self.doc, &self.tools, &self.palette, art, &cam, hover, &self.overlays);
 
         // Right column: minimap and tools.
         let rx = screen_width() - RIGHT_W;
         let mini = Rect::new(rx + 6.0, TOP + 6.0, RIGHT_W - 12.0, MINIMAP_H);
-        if let Some(at) = canvas::minimap(&self.doc, overview.as_ref(), &cam, mini) {
+        let picked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| canvas::minimap(&self.doc, overview.as_ref(), &cam, mini)));
+        let picked = picked.unwrap_or_else(|e| self.emergency_exit(e));
+        if let Some(at) = picked {
             if let Some(c) = self.cam.as_mut() {
                 c.centre = at;
             }

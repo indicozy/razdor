@@ -305,6 +305,13 @@ impl EditorDoc {
         Ok(r)
     }
 
+    /// The original's emergency save after a failed map drawing (0x5a5fa4): the map, as a
+    /// normal save makes it, to `ErrorSave.DTm` in `dir`. Razdor's integrity check still
+    /// applies.
+    pub fn emergency_save(&mut self, dir: &Path, names: Option<&Names>, palette: Option<&Palette>) -> Result<PathBuf, SaveError> {
+        self.save_to(&dir.join("ErrorSave.DTm"), names, palette)
+    }
+
     /// Replaces the scenario as one undo step (if anything changed).
     pub(crate) fn commit(&mut self, label: &str, s: Scenario) {
         self.end_group();
@@ -1050,6 +1057,16 @@ mod tests {
         // A save is one undo step with the save's changes.
         assert_eq!(d.undo_label(), Some("Save"));
         assert!(!d.dirty());
+    }
+
+    #[test]
+    fn the_emergency_save_writes_error_save() {
+        let dir = temp_dir("emergency");
+        let mut d = doc();
+        d.apply(Command::PlaceArmy { x: 2, y: 2 }).unwrap();
+        let path = d.emergency_save(&dir, None, None).unwrap();
+        assert_eq!(path, dir.join("ErrorSave.DTm"));
+        assert_eq!(Scenario::load(&path).unwrap().armies.len(), 1);
     }
 
     #[test]

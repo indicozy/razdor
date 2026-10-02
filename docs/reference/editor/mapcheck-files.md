@@ -564,9 +564,11 @@ The score itself is not in the line.
   program. Where the original stops (a map narrower than 50 cells, a score or quest count
   that does not fit its field) Razdor says so and stores nothing. The percentages use a
   decimal comma, as the original under a Russian locale.
-- **Saving place and safety.** Razdor saves to the user's folder through a temporary file, asks before
-  touching the game's folder, and has no emergency save. The original writes in place in its map folder
-  and saves `ErrorSave.DTm` on a DirectDraw failure.
+- **Saving place and safety.** Razdor still saves to the user's folder through a temporary file
+  and asks before touching the game's folder (by design). The emergency save is now there: a
+  failure while drawing the map or the minimap saves `ErrorSave.DTm` in the map's own folder
+  (the user's maps folder for a new map or one of the game's) and ends the program, as the
+  original does on a DirectDraw error.
 - **Strings with leading or trailing blanks.** Now as the original: trimmed on load, so the
   three questions of "Устье Трейна" that are only a line break become empty; all 211 events
   open (§3.5).

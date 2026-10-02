@@ -355,3 +355,5 @@ Playability {score}, quests {quests}; the scoring is in {path}. = Играбел
 No playability for a map narrower than 50 cells (the original stops with a division by zero). = Играбельность не считается для карты уже 50 клеток (оригинал останавливается на делении на ноль).
 No playability: the score does not fit its field (the original stops with a range error). = Играбельность не посчитана: оценка не помещается в своё поле (оригинал останавливается с ошибкой диапазона).
 quests {q}, playability {p} = заданий {q}, играбельность {p}
+The map could not be drawn; it was saved to {path}. = Карту не удалось нарисовать; она сохранена в {path}.
+The map could not be drawn, and the emergency save failed: {e} = Карту не удалось нарисовать, и аварийное сохранение не удалось: {e}
