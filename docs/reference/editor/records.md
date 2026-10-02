@@ -633,8 +633,8 @@ These points refine [dtm-format.md](../dtm-format.md):
 
 | Area | Razdor's editor now | Original editor |
 |---|---|---|
-| Unit editor | none | edits the session's unit table, live gold and tactical cost (§5.2), exports a new ini |
-| Artefact editor | none | edits, copies and deletes artefacts, automatic price (§6.3), exports a new ini |
+| Unit editor | as the original (`src/editor/catalog.rs`): Units in the toolbar; the price is the formula's for 90 of the 102 shipped units; the export goes to Razdor's editor folder; test play keeps the install's table. Not kept: the magic directions the game does not read (CurseOnly and the others) and the original's comment texts | edits the session's unit table, live gold and tactical cost (§5.2), exports a new ini |
+| Artefact editor | as the original: Artefacts in the toolbar; a price without any unit gaining is refused, where the original divides by an unset counter; the list's order of the pickers is not re-sorted | edits, copies and deletes artefacts, automatic price (§6.3), exports a new ini |
 | Army model byte | as the original, on every save of the army panel (`src/editor/records.rs`) | derived: 7 if inactive, else style + 4 |
 | Army byte 8 | as the original | always written 0 |
 | Army tactical costs (6, 74) | as the original: the tactical sum and the battle core's side strength on the wide grid (on the shipped armies whose byte 6 still matches the unit table, byte 74 matches nine times in ten) | recomputed on every save, capped at 65,000 |

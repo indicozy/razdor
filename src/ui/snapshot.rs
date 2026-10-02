@@ -4,7 +4,9 @@
 //! e.g. `xvfb-run -s "-screen 0 1024x768x24" razdor` with `RAZDOR_SIZE=1024x768`.
 //!
 //! Scenes (`<map>` is a map file name of the install without `.DTm`, e.g. `РК3-Столица`):
-//! `title`, `authors`, `options`, `scenarios`, `tutorial`, `load`, `editor`, `classes:<map>`, `map:<map>[:x,y]`, `minimap:<map>`, `walk:<map>:dx,dy` (the
+//! `title`, `authors`, `options`, `scenarios`, `tutorial`, `load`, `editor[:<what>[:<map>]]`
+//! (`<what>`: `units`, `artefacts`, `options`, `settings`, `events`, or a record `a<n>`, `b<n>`,
+//! `p<n>` of `<map>` opened in the editor), `classes:<map>`, `map:<map>[:x,y]`, `minimap:<map>`, `walk:<map>:dx,dy` (the
 //! hero sets off that many cells away), `building:<map>:<n>`
 //! (the hero in the n-th building), `army:<map>`, `journal:<map>`, `spells:<map>`,
 //! `menu:<map>`, `battle:<map>:<n>` (against the n-th army). `RAZDOR_SCENE_SHOW=x,y,r` shows
@@ -84,6 +86,11 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
         }
         "editor" => {
             app.open_editor();
+            let what = parts.next().unwrap_or_default();
+            let map = parts.next().map(|m| app.scenarios.iter().find(|e| e.file == m).map(|e| e.path.clone()).ok_or_else(|| format!("no map {m} in the install"))).transpose()?;
+            if let Some(ed) = app.editor.as_mut() {
+                ed.stage(what, map)?;
+            }
             return Ok(());
         }
         _ => {}

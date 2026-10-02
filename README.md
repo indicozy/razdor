@@ -437,7 +437,9 @@ and names units, artefacts and spells from your install; without one it uses pla
   editor's score, kept in the map and shown at the foot of the tool column; each scoring adds
   a line to `MapData.Txt` in your maps folder), Options (the original's text size, bold and
   "new events repeat", kept in `DTMapEdit.Ini` in Razdor's editor folder, `RAZDOR_EDITOR_DIR`
-  or `~/.local/share/razdor/editor`), Test play, Exit.
+  or `~/.local/share/razdor/editor`), Units and Artefacts (the original's unit and artefact
+  editors: they change the session's tables and the costs the editor shows, never the map,
+  and export new ini files into that editor folder), Test play, Exit.
 - **Tools** (right column, keys in brackets): Select and move (V), Terrain (T: 16 surfaces,
   brush 1/3/5/9, flood fill, rectangle), Objects (O: hills, mountains, stones, trees by class
   and picture; several per cell), Erase (E), Building (B: type and picture; the cell you click

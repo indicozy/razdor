@@ -7,6 +7,7 @@
 //! they load in the original game and in Razdor; opening and saving an unchanged shipped
 //! map gives the same bytes.
 
+pub mod catalog;
 pub mod command;
 pub mod defaults;
 pub mod doc;

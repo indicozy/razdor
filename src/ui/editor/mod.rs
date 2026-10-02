@@ -6,6 +6,7 @@
 //! record's panel over the left of the map, a status line at the bottom.
 
 mod canvas;
+mod catalog;
 mod events;
 mod form;
 mod palette_panel;
@@ -79,6 +80,9 @@ enum Modal {
     Radius { id: u8, value: i64 },
     /// The original's options window.
     Options(razdor::editor::options::Options),
+    /// The unit editor and the artefact editor.
+    Units,
+    Artefacts,
 }
 
 pub struct EditorScreen {
@@ -110,6 +114,10 @@ pub struct EditorScreen {
     panning: Option<Vec2>,
     /// The original editor's options (records.md §11).
     options: razdor::editor::options::Options,
+    /// The session's unit and artefact tables, as the unit and artefact editors leave them:
+    /// every cost the editor shows reads them (test play keeps the install's).
+    catalog: Arc<Content>,
+    catalog_state: catalog::CatalogState,
 }
 
 fn ctrl() -> bool {
@@ -148,13 +156,15 @@ impl EditorScreen {
             palette,
             install_names: dt_content.as_deref().map(Names::from_content),
             play_names: Names::from_content(&play_content),
-            play_content,
+            play_content: play_content.clone(),
             user_dir: files::user_maps_dir(),
             game_dir,
             pressing: false,
             last_cell: None,
             panning: None,
             options,
+            catalog: play_content.clone(),
+            catalog_state: catalog::CatalogState::default(),
         }
     }
 
@@ -371,6 +381,53 @@ impl EditorScreen {
         self.modal = None;
     }
 
+    /// A debug snapshot's scene (`ui::snapshot`): `map` opened, then a window or a record
+    /// selected.
+    pub fn stage(&mut self, what: &str, map: Option<PathBuf>) -> Result<(), String> {
+        if let Some(p) = map {
+            self.open_file(p);
+        }
+        let id = |s: &str| s[1..].parse::<u16>().map_err(|e| e.to_string());
+        match what {
+            "" => {}
+            "units" => self.modal = Some(Modal::Units),
+            "artefacts" => self.modal = Some(Modal::Artefacts),
+            "options" => self.modal = Some(Modal::Options(self.options)),
+            "settings" => self.modal = Some(Modal::Settings),
+            "events" => self.modal = Some(Modal::Events),
+            w if w.starts_with('a') => self.tools.selected = Some(Target::Army(id(w)? as u8)),
+            w if w.starts_with('b') => self.tools.selected = Some(Target::Building(id(w)?)),
+            w if w.starts_with('p') => self.tools.selected = Some(Target::Point(id(w)? as u8)),
+            w => return Err(format!("no editor window {w}")),
+        }
+        Ok(())
+    }
+
+    /// The unit or artefact editor stored its draft: the session's tables change, and so do
+    /// the names the pickers offer.
+    fn set_catalog(&mut self, c: Content) {
+        let names = Names::from_content(&c);
+        if self.install_names.is_some() {
+            self.install_names = Some(names.clone());
+        }
+        self.play_names = names;
+        self.catalog = Arc::new(c);
+    }
+
+    /// The export of the unit or artefact list into Razdor's editor folder.
+    fn export_catalog(&mut self, units: bool) {
+        use razdor::editor::catalog as cat;
+        let Some(dir) = razdor::editor::options::editor_dir() else {
+            self.status = Some(tr("Not exported: no data folder.").into());
+            return;
+        };
+        let written = if units { cat::export_units(&dir, &self.catalog.units) } else { cat::export_artefacts(&dir, &self.catalog.items) };
+        self.status = Some(match written {
+            Ok([ini, texts]) => trf!("Exported to {ini} and {texts}.", ini = ini.display(), texts = texts.display()),
+            Err(e) => trf!("Not exported: {e}", e),
+        });
+    }
+
     /// One frame of the event window (it is the open modal).
     fn events_window(&mut self) {
         let names = self.names().clone();
@@ -460,7 +517,7 @@ impl EditorScreen {
 
         // The selected record's panel.
         if let (Some(t), Some(pr)) = (self.tools.selected, panel_rect) {
-            let ctx = Ctx { names: self.install_names.as_ref().unwrap_or(&self.play_names), palette: &self.palette, content: Some(&*self.play_content), shared: Some(self.play_content.clone()) };
+            let ctx = Ctx { names: self.install_names.as_ref().unwrap_or(&self.play_names), palette: &self.palette, content: Some(&*self.catalog), shared: Some(self.catalog.clone()) };
             let s = &self.doc.scenario;
             let edit = match t {
                 Target::Building(id) => props::building_panel(&mut self.panel, s, id, &ctx, pr),
@@ -656,7 +713,9 @@ impl EditorScreen {
             (tr("Events"), true),
             (tr("Check"), true),
             (tr("Playability"), true),
-            (tr("Options"), true),
+            (tr("Editor options"), true),
+            (tr("Units"), true),
+            (tr("Artefacts"), true),
             (tr("Test play"), true),
             (tr("Exit"), true),
         ];
@@ -706,8 +765,10 @@ impl EditorScreen {
             Some(9) => self.check(),
             Some(10) => self.score(),
             Some(11) => self.modal = Some(Modal::Options(self.options)),
-            Some(12) => self.modal = Some(Modal::TestPlay),
-            Some(13) => action = self.guarded(Then::Exit),
+            Some(12) => self.modal = Some(Modal::Units),
+            Some(13) => self.modal = Some(Modal::Artefacts),
+            Some(14) => self.modal = Some(Modal::TestPlay),
+            Some(15) => action = self.guarded(Then::Exit),
             _ => {}
         }
         let s = &self.doc.scenario;
@@ -783,6 +844,29 @@ impl EditorScreen {
         }
         if matches!(modal, Modal::Events) {
             self.events_window();
+            return action;
+        }
+        if matches!(modal, Modal::Units | Modal::Artefacts) {
+            let names = self.names().clone();
+            let a = if matches!(modal, Modal::Units) {
+                catalog::units_window(&mut self.catalog_state, &self.catalog, &names)
+            } else {
+                catalog::artefacts_window(&mut self.catalog_state, &self.catalog)
+            };
+            let keep = !matches!(a, catalog::CatalogAction::Close(_));
+            match a {
+                catalog::CatalogAction::None => {}
+                catalog::CatalogAction::Store(c) | catalog::CatalogAction::Close(Some(c)) => self.set_catalog(*c),
+                catalog::CatalogAction::Close(None) => {}
+                catalog::CatalogAction::Export(c) => {
+                    self.set_catalog(*c);
+                    self.export_catalog(matches!(modal, Modal::Units));
+                }
+                catalog::CatalogAction::Status(m) => self.status = Some(m),
+            }
+            if keep {
+                self.modal = Some(modal);
+            }
             return action;
         }
         draw_rectangle(0.0, 0.0, sw, sh, Color::new(0.0, 0.0, 0.0, 0.55));
@@ -1042,7 +1126,7 @@ impl EditorScreen {
             }
             Modal::Options(o) => {
                 use razdor::editor::options::{self, SIZES};
-                text(tr("Options"), x, y, 22.0, ACCENT);
+                text(tr("Editor options"), x, y, 22.0, ACCENT);
                 text_fit(tr("Text size of the event window's message and question"), x, y + 30.0, r.w - 40.0, 16.0, INK);
                 for (k, size) in SIZES.iter().enumerate() {
                     if toggle_button(x + k as f32 * 90.0, y + 44.0, 84.0, 28.0, &size.to_string(), o.text_size == *size) {
@@ -1069,7 +1153,7 @@ impl EditorScreen {
                     keep = false;
                 }
             }
-            Modal::Settings | Modal::Events => unreachable!("handled above"),
+            Modal::Settings | Modal::Events | Modal::Units | Modal::Artefacts => unreachable!("handled above"),
         }
         if keep {
             self.modal = Some(next);

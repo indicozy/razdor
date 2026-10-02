@@ -533,6 +533,13 @@ old id, and their versions give both.
   and question boxes and whether new events repeat, kept as the original's `[Option]`
   section in `DTMapEdit.Ini` in Razdor's editor folder (`RAZDOR_EDITOR_DIR`, else
   `razdor/editor` in the data folder), read from the install's editor ini until then.
+- **Unit and artefact editors** (toolbar: Units, Artefacts), as the original's: they edit
+  the session's tables, never the map, with the original's ranges; the unit window shows
+  the tactical cost and the price by the original's formula (its bands, doubled for the hero
+  classes) and the level table; the artefact window copies (ids up to 255), deletes (later
+  ids move down, nothing in the map is renumbered) and prices an artefact automatically by
+  the original's rule. Each list exports in the original's format to `Rus_Units.New.Ini` and
+  `Units.Rus`, or `Rus_Artefacts.New.Ini` and `Artefacts.Rus`, in Razdor's editor folder.
 
 ## 0.2.2 — 2026-10-01
 
