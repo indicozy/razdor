@@ -90,9 +90,10 @@ pub fn shortcuts_allowed(g: Guard) -> bool {
     !g.typing && !g.dialog
 }
 
-/// Whether `key` may fire at `place`. The editor has its own keys (and F2).
+/// Whether `key` may fire at `place`. The editor has its own keys: there F2 is the original
+/// editor's quick save, not the language.
 pub fn allowed(place: Place, key: Global, g: Guard) -> bool {
-    if !shortcuts_allowed(g) || (place == Place::Editor && key != Global::Language) {
+    if !shortcuts_allowed(g) || place == Place::Editor {
         return false;
     }
     match key {
@@ -271,8 +272,7 @@ mod tests {
             assert!(allowed(place, Global::Help, in_game()), "{place:?}");
         }
         assert!(!allowed(Place::Editor, Global::Help, in_game()));
-        assert!(allowed(Place::Editor, Global::Language, in_game()), "F2 works in the editor too");
-        assert!(!allowed(Place::Editor, Global::Language, Guard { typing: true, ..in_game() }));
+        assert!(!allowed(Place::Editor, Global::Language, in_game()), "F2 saves in the editor, as in the original");
     }
 
     #[test]

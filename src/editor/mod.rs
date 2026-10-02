@@ -7,7 +7,9 @@
 //! they load in the original game and in Razdor; opening and saving an unchanged shipped
 //! map gives the same bytes.
 
+pub mod brush;
 pub mod catalog;
+pub mod cells;
 pub mod command;
 pub mod defaults;
 pub mod doc;
@@ -28,11 +30,11 @@ pub mod refs;
 pub mod tools;
 pub mod validate;
 
-pub use command::{Command, ObjectFilter, Settings};
+pub use command::{Command, Settings};
 pub use defaults::NewMap;
 pub use doc::{Applied, EditError, EditorDoc, Origin, SaveError, Target};
 pub use palette::{Names, Palette};
-pub use tools::{TerrainShape, Tool, ToolState};
+pub use tools::{Held, Kit, Page, Press, TerrainShape, ToolState};
 pub use validate::{Issue, Place, Severity};
 
 #[cfg(test)]
@@ -46,6 +48,20 @@ mod real_maps {
     fn install() -> Option<DtInstall> {
         let dir = std::env::var_os(crate::dt::install::ENV_VAR)?;
         Some(DtInstall::load(std::path::Path::new(&dir)).expect("install loads"))
+    }
+
+    #[test]
+    fn the_install_palette_as_the_original_groups_it() {
+        let Some(dt) = install() else { return };
+        let palette = Palette::from_sprites(&dt.map_objects().unwrap());
+        // Every picture's brush (its width in cells) covers at least one cell.
+        assert!(palette.buildings.iter().all(|b| b.brush >= 1 && b.brush >= b.size.0.min(b.size.1)));
+        // Plants by family of twelve: live trees, dead trees (all in the last family),
+        // thickets; no bushes below sprite 120.
+        let f = palette.forest_facts();
+        assert_eq!(f.counts, [[9, 9, 6, 6, 3, 6, 9, 3, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 9], [9, 9, 6, 6, 0, 0, 0, 3, 0, 9], [0; 10]]);
+        assert_eq!((1..=6).map(|n| palette.hills(n).len()).collect::<Vec<_>>(), [38, 36, 24, 16, 16, 3]);
+        assert_eq!((palette.forests(1).len(), palette.forests(2).len()), (102, 15));
     }
 
     #[test]

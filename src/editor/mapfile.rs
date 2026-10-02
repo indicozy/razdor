@@ -442,7 +442,7 @@ mod tests {
         let ruins = Building { x: 2, y: 2, kind: 12, picture_type: 12, picture_variant: 0, ..Building::default() };
         s.buildings = vec![castle, town, ruins];
         s.armies = vec![Army { exp_correction: 0, ..Army::default() }, Army { exp_correction: 130, ..Army::default() }];
-        let palette = Palette { objects: vec![], buildings: vec![BuildingPicture { picture_type: 3, variant: 1, size: (4, 3) }], from_install: true };
+        let palette = Palette { objects: vec![], buildings: vec![BuildingPicture { picture_type: 3, variant: 1, size: (4, 3), brush: 4 }], from_install: true };
         normalise(&mut s, Some(&palette));
         assert_eq!(s.objects, [MapObject { x: 2, y: 5, sprite: 31, class: 1 }, MapObject { x: 6, y: 6, sprite: 2, class: 10 }]);
         // The castle is moved to the last column; the town, now on the same cell, one step

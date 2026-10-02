@@ -759,7 +759,7 @@ mod tests {
         let mut s = map(10, 10);
         s.objects = vec![crate::dt::dtm::MapObject { x: 1, y: 1, class: 9, sprite: 7 }];
         s.buildings = vec![building(5, 5, (2, 2))];
-        let p = Palette { objects: vec![ObjectKey { class: 9, sprite: 1 }], buildings: vec![BuildingPicture { picture_type: 3, variant: 0, size: (4, 4) }], from_install: true };
+        let p = Palette { objects: vec![ObjectKey { class: 9, sprite: 1 }], buildings: vec![BuildingPicture { picture_type: 3, variant: 0, size: (4, 4), brush: 4 }], from_install: true };
         let all = validate(&s, None, Some(&p));
         assert!(all.iter().any(|i| i.severity == Severity::Error && i.message.contains("object class 9 sprite 7")));
         assert!(all.iter().any(|i| i.severity == Severity::Warning && i.message.contains("differs from its picture's 4x4")));

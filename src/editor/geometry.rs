@@ -3,8 +3,15 @@
 
 use crate::dt::dtm::MapObject;
 
-/// Brush sizes of the terrain and object tools (square brushes, centred on the cell).
-pub const BRUSH_SIZES: [u32; 4] = [1, 3, 5, 9];
+/// The original editor's brush sizes: buttons 1 to 6 (docs/reference/editor/main-window.md
+/// §4.2).
+pub const BRUSH_SIZES: [u32; 6] = [1, 2, 3, 4, 5, 6];
+
+/// The brush centre of the original (§6.1): the hovered cell plus `size div 2` on both axes
+/// (the delete brush, −1, keeps the hovered cell, as `−1 div 2` is 0).
+pub fn brush_centre(hovered: (i32, i32), size: i32) -> (i32, i32) {
+    (hovered.0 + size / 2, hovered.1 + size / 2)
+}
 
 /// An inclusive cell rectangle; may reach outside the map (see [`CellRect::clip`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,11 +28,12 @@ impl CellRect {
         CellRect { x0: a.0.min(b.0), y0: a.1.min(b.1), x1: a.0.max(b.0), y1: a.1.max(b.1) }
     }
 
-    /// A `size`×`size` square centred on `(x, y)` (even sizes lean up-left).
+    /// The original's brush square: `size`×`size` cells ending at the brush centre
+    /// `(x, y)`, its bottom-right cell ([`brush_centre`]: odd sizes are centred on the
+    /// hovered cell, even ones reach one cell further right and down).
     pub fn brush(x: i32, y: i32, size: u32) -> CellRect {
         let s = size.max(1) as i32;
-        let (x0, y0) = (x - (s - 1) / 2, y - (s - 1) / 2);
-        CellRect { x0, y0, x1: x0 + s - 1, y1: y0 + s - 1 }
+        CellRect { x0: x - s + 1, y0: y - s + 1, x1: x, y1: y }
     }
 
     pub fn contains(&self, x: i32, y: i32) -> bool {
@@ -164,12 +172,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn brushes_are_centred_and_clipped() {
-        assert_eq!(CellRect::brush(5, 5, 1), CellRect { x0: 5, y0: 5, x1: 5, y1: 5 });
-        assert_eq!(CellRect::brush(5, 5, 3), CellRect { x0: 4, y0: 4, x1: 6, y1: 6 });
-        assert_eq!(CellRect::brush(5, 5, 9), CellRect { x0: 1, y0: 1, x1: 9, y1: 9 });
-        assert_eq!(brush_indices(4, 4, 0, 0, 3), vec![0, 1, 4, 5]);
-        assert_eq!(brush_indices(4, 4, 3, 3, 5).len(), 9);
+    fn brush_squares_end_at_the_centre() {
+        // Odd sizes are centred on the hovered cell, even ones lean down-right.
+        for (size, hovered, square) in [
+            (1, (5, 5), CellRect { x0: 5, y0: 5, x1: 5, y1: 5 }),
+            (2, (5, 5), CellRect { x0: 5, y0: 5, x1: 6, y1: 6 }),
+            (3, (5, 5), CellRect { x0: 4, y0: 4, x1: 6, y1: 6 }),
+            (4, (5, 5), CellRect { x0: 4, y0: 4, x1: 7, y1: 7 }),
+            (5, (5, 5), CellRect { x0: 3, y0: 3, x1: 7, y1: 7 }),
+            (6, (5, 5), CellRect { x0: 3, y0: 3, x1: 8, y1: 8 }),
+        ] {
+            let (cx, cy) = brush_centre(hovered, size as i32);
+            assert_eq!(CellRect::brush(cx, cy, size), square, "size {size}");
+        }
+        // The delete brush (−1) keeps the hovered cell.
+        assert_eq!(brush_centre((5, 5), -1), (5, 5));
+        assert_eq!(brush_indices(4, 4, 1, 1, 3), vec![0, 1, 4, 5]);
+        assert_eq!(brush_indices(4, 4, 3, 3, 5).len(), 16);
         assert!(brush_indices(4, 4, 10, 10, 3).is_empty());
         for size in BRUSH_SIZES {
             assert_eq!(brush_indices(20, 20, 10, 10, size).len(), (size * size) as usize);

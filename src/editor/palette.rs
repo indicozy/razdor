@@ -26,6 +26,9 @@ pub struct BuildingPicture {
     pub picture_type: u8,
     pub variant: u8,
     pub size: (u8, u8),
+    /// The brush a palette click on it sets (0x5aaa7c): the picture's width in pixels div
+    /// 32, the square the placement must fit and its preview.
+    pub brush: u8,
 }
 
 /// The objects and building pictures that can be placed.
@@ -154,7 +157,9 @@ impl Palette {
             .iter()
             .filter(|s| s.section == ObjectSprite::BUILDINGS)
             .filter_map(|s| {
-                Some(BuildingPicture { picture_type: u8::try_from(s.cat).ok()?, variant: u8::try_from(s.idx).ok()?, size: s.footprint()? })
+                let size = s.footprint()?;
+                let brush = u8::try_from(s.image.width >> 5).unwrap_or(u8::MAX);
+                Some(BuildingPicture { picture_type: u8::try_from(s.cat).ok()?, variant: u8::try_from(s.idx).ok()?, size, brush })
             })
             .collect();
         buildings.sort_by_key(|b| (b.picture_type, b.variant));
@@ -171,7 +176,7 @@ impl Palette {
             let ids: Vec<u8> = if is_massif(class) { (10..=13).collect() } else { (0..=8).collect() };
             objects.extend(ids.into_iter().map(|sprite| ObjectKey { class, sprite }));
         }
-        let buildings = (1..=15u8).map(|t| BuildingPicture { picture_type: t, variant: 0, size: fallback_size(t) }).collect();
+        let buildings = (1..=15u8).map(|t| BuildingPicture { picture_type: t, variant: 0, size: fallback_size(t), brush: fallback_size(t).0 }).collect();
         Palette { objects, buildings, from_install: false }
     }
 
@@ -202,6 +207,63 @@ impl Palette {
     /// The footprint of a picture, else the fallback size of its type.
     pub fn footprint(&self, picture_type: u8, variant: u8) -> (u8, u8) {
         self.picture(picture_type, variant).map_or(fallback_size(picture_type), |p| p.size)
+    }
+
+    /// The hills page's palette at brush size `size` (0x59a718 groups, 0x5aaa7c): the
+    /// objects of classes 1–8 whose sprite div 10 is `size` (their footprint side), by
+    /// class, then sprite.
+    pub fn hills(&self, size: u32) -> Vec<ObjectKey> {
+        self.objects.iter().copied().filter(|o| is_massif(o.class) && (o.sprite / 10) as u32 == size).collect()
+    }
+
+    /// The forests page's palette: at size 1 every sprite below 120 of classes 9–12, at
+    /// larger sizes one entry per family of twelve (the sprites that are a multiple of 12).
+    pub fn forests(&self, size: u32) -> Vec<ObjectKey> {
+        let trees = self.objects.iter().copied().filter(|o| (9..=12).contains(&o.class) && o.sprite < 120);
+        if size < 2 {
+            trees.collect()
+        } else {
+            trees.filter(|o| o.sprite % 12 == 0).collect()
+        }
+    }
+
+    /// What the forest brush and the burn read about the plant sprites.
+    pub fn forest_facts(&self) -> ForestFacts {
+        let mut f = ForestFacts::default();
+        for o in &self.objects {
+            if (9..=12).contains(&o.class) && o.sprite < 120 {
+                let c = (o.class - 9) as usize;
+                f.counts[c][(o.sprite / 12) as usize] += 1;
+                if self.has_object(o.class, o.sprite + 120) {
+                    f.alternates[c] |= 1 << o.sprite;
+                }
+            }
+        }
+        f
+    }
+}
+
+/// The plant sprites as the original's palette counts them (0x59a718), for classes 9–12.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ForestFacts {
+    /// Sprites of each family of twelve (sprite div 12), below sprite 120.
+    pub counts: [[u8; 10]; 4],
+    /// Bit `s`: sprite `s + 120` exists (the "+120" alternate picture).
+    pub alternates: [u128; 4],
+}
+
+impl ForestFacts {
+    /// Sprites in family `family` of `class` (0 for another class).
+    pub fn count(&self, class: u8, family: u8) -> u8 {
+        match (class.checked_sub(9), family) {
+            (Some(c @ 0..=3), f @ 0..=9) => self.counts[c as usize][f as usize],
+            _ => 0,
+        }
+    }
+
+    /// Whether sprite `sprite` of `class` has a "+120" alternate.
+    pub fn has_alternate(&self, class: u8, sprite: u8) -> bool {
+        matches!(class.checked_sub(9), Some(c @ 0..=3) if sprite < 120 && self.alternates[c as usize] >> sprite & 1 == 1)
     }
 }
 
@@ -398,6 +460,21 @@ mod tests {
         assert_eq!(p.footprint(9, 0), (4, 3));
         // Unknown pictures fall back to our own size.
         assert_eq!(p.footprint(1, 7), fallback_size(1));
+    }
+
+    #[test]
+    fn hill_and_forest_palettes_and_families() {
+        let key = |class, sprite| ObjectKey { class, sprite };
+        let mut objects = vec![key(1, 10), key(1, 25), key(5, 21), key(8, 3), key(9, 0), key(9, 1), key(9, 2), key(9, 12), key(9, 13), key(9, 121), key(9, 132), key(11, 108), key(11, 109), key(12, 24)];
+        objects.sort();
+        let p = Palette { objects, buildings: vec![], from_install: true };
+        assert_eq!(p.hills(2), [key(1, 25), key(5, 21)]);
+        assert_eq!(p.hills(1), [key(1, 10)]);
+        assert_eq!(p.forests(1).len(), 8, "every plant sprite below 120");
+        assert_eq!(p.forests(3), [key(9, 0), key(9, 12), key(11, 108), key(12, 24)], "one per family");
+        let f = p.forest_facts();
+        assert_eq!((f.count(9, 0), f.count(9, 1), f.count(11, 9), f.count(12, 2), f.count(10, 0), f.count(5, 0)), (3, 2, 2, 1, 0, 0));
+        assert!(f.has_alternate(9, 1) && f.has_alternate(9, 12) && !f.has_alternate(9, 0) && !f.has_alternate(11, 108));
     }
 
     #[test]

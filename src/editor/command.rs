@@ -1,21 +1,16 @@
 //! Typed edits of a scenario. Every change the editor makes is one of these, applied by
 //! [`super::EditorDoc::apply`] so it can be undone.
 
+use std::sync::Arc;
+
 use crate::dt::dtm::{Army, Building, Event, Header, NamedCharacter, Point};
 
 use crate::i18n::n_;
 
+use super::brush::{Held, Page};
 use super::doc::Target;
-
-/// Which objects an erase removes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ObjectFilter {
-    All,
-    /// Hills, mountains, stones (classes 1–8).
-    Massifs,
-    /// Trees and thickets (classes 9–12).
-    Plants,
-}
+use super::naming::NamePools;
+use super::palette::ForestFacts;
 
 /// The scenario settings edited together: the header (minus the size, which never changes
 /// here) and the scenario's own strings.
@@ -33,31 +28,37 @@ pub struct Settings {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
-    /// A square brush of terrain `code` centred on the cell.
+    /// The original's terrain brush: the square of side `size` ending at the brush centre
+    /// `(x, y)` ([`super::brush::paint_terrain`]).
     PaintTerrain { x: i32, y: i32, size: u32, code: u8 },
-    /// The 4-connected region of the cell's surface becomes `code`.
+    /// The 4-connected region of the cell's surface becomes `code` (Razdor's), each cell as
+    /// the terrain brush paints it.
     FillTerrain { x: u32, y: u32, code: u8 },
-    /// A rectangle of `code` between two corners.
+    /// A rectangle of `code` between two corners (Razdor's), each cell as the terrain brush
+    /// paints it.
     RectTerrain { from: (i32, i32), to: (i32, i32), code: u8 },
-    /// One object on every cell of the brush (a cell holding this very object is skipped).
-    PlaceObjects { x: i32, y: i32, size: u32, class: u8, sprite: u8 },
-    /// Every object (of the filter) standing on a cell of the brush.
-    EraseObjects { x: i32, y: i32, size: u32, filter: ObjectFilter },
-    /// A new building with the defaults of its type; `(x, y)` is the bottom-right cell.
-    PlaceBuilding { x: u16, y: u16, kind: u8, picture_type: u8, variant: u8, size: (u8, u8) },
-    MoveBuilding { id: u16, x: u16, y: u16 },
+    /// The hills and forests brush ([`super::brush::place_object`]).
+    PlaceObject { x: i32, y: i32, size: u32, class: u8, sprite: u8, facts: ForestFacts, replace: bool },
+    /// The buildings brush ([`super::brush::place_building`]): picture, footprint, the
+    /// picture's brush and the name lists.
+    PlaceBuilding { x: i32, y: i32, picture_type: u8, variant: u8, size: (u8, u8), brush: u32, names: Option<Arc<NamePools>> },
+    /// The items brush ([`super::brush::place_item`]): kind 1–3 hero start, 4–7 army, 8–10
+    /// point.
+    PlaceItem { x: u16, y: u16, kind: u8 },
+    /// The delete brush of a page at a cell ([`super::brush::delete_at`]).
+    DeleteAt { x: u16, y: u16, page: Page },
+    /// A held object dropped with its anchor at `(x, y)` ([`super::brush::drop`]).
+    Drop { held: Held, x: i32, y: i32 },
+    /// A lantern's radius from the number dialog ([`super::brush::lantern_radius`]).
+    LanternRadius { id: u16, radius: u8, placed: bool },
+    /// "Burn everything" ([`super::brush::burn`]).
+    Burn { facts: ForestFacts },
     /// Removes a building; later ids shift down and references follow ([`super::refs`]).
     DeleteBuilding { id: u16 },
     /// Replaces a building's record (its property panel).
     SetBuilding { id: u16, building: Box<Building> },
-    /// A new army of map model `model` (4–7) with the original's defaults.
-    PlaceArmy { x: u16, y: u16, model: u8 },
-    MoveArmy { id: u8, x: u16, y: u16 },
     DeleteArmy { id: u8 },
     SetArmy { id: u8, army: Box<Army> },
-    /// A new point of model `model`: 8 lantern, 9 event point, 10 AI target point.
-    PlacePoint { x: u16, y: u16, model: u8 },
-    MovePoint { id: u16, x: u16, y: u16 },
     DeletePoint { id: u16 },
     SetPoint { id: u16, point: Box<Point> },
     /// Replaces the scenario settings; a new start date moves the events' starts.
@@ -94,18 +95,17 @@ impl Command {
             Command::PaintTerrain { .. } => n_("Paint terrain"),
             Command::FillTerrain { .. } => n_("Fill terrain"),
             Command::RectTerrain { .. } => n_("Terrain rectangle"),
-            Command::PlaceObjects { .. } => n_("Place objects"),
-            Command::EraseObjects { .. } => n_("Erase objects"),
+            Command::PlaceObject { .. } => n_("Place objects"),
             Command::PlaceBuilding { .. } => n_("Place building"),
-            Command::MoveBuilding { .. } => n_("Move building"),
+            Command::PlaceItem { .. } => n_("Place item"),
+            Command::DeleteAt { .. } => n_("Delete"),
+            Command::Drop { .. } => n_("Move"),
+            Command::LanternRadius { .. } => n_("Lantern radius"),
+            Command::Burn { .. } => n_("Burn everything"),
             Command::DeleteBuilding { .. } => n_("Delete building"),
             Command::SetBuilding { .. } => n_("Edit building"),
-            Command::PlaceArmy { .. } => n_("Place army"),
-            Command::MoveArmy { .. } => n_("Move army"),
             Command::DeleteArmy { .. } => n_("Delete army"),
             Command::SetArmy { .. } => n_("Edit army"),
-            Command::PlacePoint { .. } => n_("Place point"),
-            Command::MovePoint { .. } => n_("Move point"),
             Command::DeletePoint { .. } => n_("Delete point"),
             Command::SetPoint { .. } => n_("Edit point"),
             Command::SetSettings(_) => n_("Edit scenario settings"),
@@ -125,13 +125,19 @@ impl Command {
     pub(super) fn sections(&self) -> Sections {
         use Sections as S;
         match self {
-            Command::PaintTerrain { .. } | Command::FillTerrain { .. } | Command::RectTerrain { .. } => S::TERRAIN,
-            Command::PlaceObjects { .. } | Command::EraseObjects { .. } => S::OBJECTS,
-            Command::PlaceBuilding { .. } | Command::MoveBuilding { .. } | Command::SetBuilding { .. } => S::BUILDINGS,
+            Command::PaintTerrain { .. } | Command::FillTerrain { .. } | Command::RectTerrain { .. } => S::TERRAIN | S::OBJECTS,
+            Command::PlaceObject { .. } => S::OBJECTS,
+            Command::PlaceBuilding { .. } => S::BUILDINGS | S::OBJECTS,
+            Command::PlaceItem { .. } => S::META | S::ARMIES | S::POINTS,
+            Command::DeleteAt { .. } => S::OBJECTS | S::BUILDINGS | S::ARMIES | S::POINTS | S::EVENTS | S::META,
+            Command::Drop { .. } => S::BUILDINGS | S::ARMIES | S::POINTS,
+            Command::LanternRadius { .. } => S::POINTS,
+            Command::Burn { .. } => S::TERRAIN | S::OBJECTS | S::BUILDINGS,
+            Command::SetBuilding { .. } => S::BUILDINGS,
             Command::DeleteBuilding { .. } => S::BUILDINGS | S::ARMIES | S::EVENTS | S::META,
-            Command::PlaceArmy { .. } | Command::MoveArmy { .. } | Command::SetArmy { .. } => S::ARMIES,
+            Command::SetArmy { .. } => S::ARMIES,
             Command::DeleteArmy { .. } => S::ARMIES | S::BUILDINGS | S::EVENTS,
-            Command::PlacePoint { .. } | Command::MovePoint { .. } | Command::SetPoint { .. } => S::POINTS,
+            Command::SetPoint { .. } => S::POINTS,
             Command::DeletePoint { .. } => S::POINTS | S::EVENTS,
             Command::SetSettings(_) => S::META | S::EVENTS,
             Command::AddNamedCharacter { .. } | Command::RemoveNamedCharacter { .. } => S::META,

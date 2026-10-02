@@ -6,8 +6,11 @@
 use macroquad::prelude::*;
 
 use razdor::dt::dtm::Scenario;
-use razdor::editor::geometry::{object_cover, CellRect, Footprint};
-use razdor::editor::{EditorDoc, Palette, TerrainShape, Tool, ToolState, Target};
+use razdor::editor::brush::building_at;
+use razdor::editor::cells::{building_cover, figure_index, figure_kind, grid_kind};
+use razdor::editor::geometry::{brush_centre, CellRect, Footprint};
+use razdor::editor::tools::{Cursor, DELETE, INFO};
+use razdor::editor::{EditorDoc, Held, Page, Palette, TerrainShape, ToolState, Target};
 
 use crate::ui::dt_art::DtArt;
 use crate::ui::widgets::*;
@@ -46,6 +49,13 @@ impl Cam {
     /// The point in cell units under a screen position.
     pub fn to_cells(self, s: Vec2) -> Vec2 {
         self.centre + (s - self.view.center()) / self.cell_size()
+    }
+
+    /// The map cell at the view's top-left corner (the original's view origin), not left of
+    /// or above the map.
+    pub fn origin(&self) -> (i32, i32) {
+        let p = self.to_cells(self.view.point());
+        (p.x.floor().max(0.0) as i32, p.y.floor().max(0.0) as i32)
     }
 
     /// The cell under a screen position (may be outside the map).
@@ -126,13 +136,13 @@ impl Overview {
     }
 }
 
-/// What the view shows besides the map itself.
+/// The original's overlays (§8.1): the passability grid, the patrol zone of the army under
+/// the cursor and the fog.
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Overlays {
     pub grid: bool,
-    /// Squares covered by hills and mountains.
-    pub cover: bool,
-    /// Patrol radii of every army (the selected one's is always shown).
     pub patrols: bool,
+    pub fog: bool,
 }
 
 fn draw_terrain(s: &Scenario, art: Option<&DtArt>, cam: &Cam, vis: CellRect, overview: Option<&Texture2D>) {
@@ -242,8 +252,9 @@ fn draw_army_figure(art: Option<&DtArt>, cam: &Cam, x: u16, y: u16, model: u8, f
     draw_circle_lines(p.x, p.y + 3.0 * cam.zoom, 8.0 * cam.zoom + 2.0, 2.0, faction_color(faction));
 }
 
-/// The map: terrain, then objects, buildings and armies in painter's order.
-pub fn draw_map(doc: &EditorDoc, art: Option<&DtArt>, cam: &Cam, overview: Option<&Texture2D>) {
+/// The map: terrain, then objects, buildings and armies in painter's order; a held object is
+/// off the map.
+pub fn draw_map(doc: &EditorDoc, art: Option<&DtArt>, cam: &Cam, overview: Option<&Texture2D>, held: Option<Held>) {
     let s = &doc.scenario;
     let Some(vis) = cam.visible(s.width(), s.height()) else { return };
     draw_terrain(s, art, cam, vis, overview);
@@ -261,13 +272,13 @@ pub fn draw_map(doc: &EditorDoc, art: Option<&DtArt>, cam: &Cam, overview: Optio
     }
     for (i, b) in s.buildings.iter().enumerate() {
         let f = Footprint::of(b.x as i32, b.y as i32, b.size_x, b.size_y).bounds();
-        if f.overlaps(&reach) {
+        if f.overlaps(&reach) && held != Some(Held::Building(i as u16 + 1)) {
             let key = if matches!(b.kind, 13 | 14) { b.y as f32 - 1000.0 } else { b.y as f32 + 0.01 };
             items.push((key, Item::Building(i)));
         }
     }
     for (i, a) in s.armies.iter().enumerate() {
-        if reach.contains(a.x as i32, a.y as i32) {
+        if reach.contains(a.x as i32, a.y as i32) && held != Some(Held::Army(i as u8 + 1)) {
             items.push((a.y as f32 + 0.02, Item::Army(i)));
         }
     }
@@ -321,36 +332,98 @@ fn circle_cells(cam: &Cam, x: u16, y: u16, radius: f32, color: Color) {
     }
 }
 
-/// Grid, points, hero starts, selection, patrols and the tool's preview under the mouse.
-pub fn draw_overlays(doc: &EditorDoc, tools: &ToolState, palette: &Palette, art: Option<&DtArt>, cam: &Cam, hover: Option<(i32, i32)>, o: &Overlays) {
+/// The passability grid's tile colours (§8.4): normal, hard, harder, impassable, building,
+/// shallow water, deep sea.
+const GRID_COLOURS: [(f32, f32, f32, f32); 7] = [
+    (0.3, 0.9, 0.3, 0.10),
+    (0.95, 0.85, 0.2, 0.30),
+    (1.0, 0.55, 0.15, 0.38),
+    (0.9, 0.15, 0.1, 0.42),
+    (0.7, 0.3, 0.9, 0.42),
+    (0.35, 0.7, 1.0, 0.30),
+    (0.1, 0.2, 0.75, 0.42),
+];
+
+fn fill(cam: &Cam, x: i32, y: i32, c: Color) {
+    let r = cam.rect(CellRect { x0: x, y0: y, x1: x, y1: y });
+    draw_rectangle(r.x, r.y, r.w, r.h, c);
+}
+
+/// The figure a held or previewed item shows: a hero start, an army, a point.
+fn item_ghost(cam: &Cam, x: i32, y: i32, kind: u8) {
+    let c = cam.to_screen(vec2(x as f32 + 0.5, y as f32 + 0.5));
+    let r = (8.0 * cam.zoom).max(4.0);
+    let col = match kind {
+        1..=3 => Color::new(0.2, 0.8, 0.3, 0.6),
+        4..=7 => Color::new(0.9, 0.3, 0.25, 0.6),
+        8 => Color::new(1.0, 0.85, 0.2, 0.6),
+        _ => Color::new(0.35, 0.6, 1.0, 0.6),
+    };
+    draw_circle(c.x, c.y, r, col);
+}
+
+/// The grid, fog and patrol overlays, points, hero starts, the selection and the tool's
+/// preview under the mouse (§6.4, §8.1). `origin` is the view's top-left map cell.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_overlays(doc: &EditorDoc, tools: &ToolState, palette: &Palette, art: Option<&DtArt>, cam: &Cam, hover: Option<(i32, i32)>, origin: (i32, i32), o: &Overlays) {
     let s = &doc.scenario;
     let Some(vis) = cam.visible(s.width(), s.height()) else { return };
-    let cs = cam.cell_size();
-    if o.grid && cs.x >= 8.0 {
-        let line = Color::new(0.0, 0.0, 0.0, 0.25);
-        for x in vis.x0..=vis.x1 + 1 {
-            let a = cam.to_screen(vec2(x as f32, vis.y0 as f32));
-            let b = cam.to_screen(vec2(x as f32, vis.y1 as f32 + 1.0));
-            draw_line(a.x, a.y, b.x, b.y, 1.0, line);
-        }
-        for y in vis.y0..=vis.y1 + 1 {
-            let a = cam.to_screen(vec2(vis.x0 as f32, y as f32));
-            let b = cam.to_screen(vec2(vis.x1 as f32 + 1.0, y as f32));
-            draw_line(a.x, a.y, b.x, b.y, 1.0, line);
+    let held_building = match tools.held {
+        Some(Held::Building(id)) => Some(id),
+        _ => None,
+    };
+    // Fog: every cell whose reveal counter is 0; an event point with a radius under the
+    // cursor shows its radius.
+    if o.fog {
+        let shown = hover.filter(|_| tools.brush == INFO).and_then(|(x, y)| {
+            let w = doc.cells.figure(x as i64, y as i64);
+            let p = (figure_kind(w) == 9).then(|| s.points.get((figure_index(w) as usize).checked_sub(1)?)).flatten()?;
+            (p.radius > 0).then_some((p.x as i32, p.y as i32, p.radius as i32))
+        });
+        for (x, y) in vis.cells() {
+            let near = shown.is_some_and(|(px, py, r)| (((x - px).pow(2) + (y - py).pow(2)) as f64).sqrt().round() as i32 <= r);
+            if doc.cells.revealed(x as i64, y as i64) == 0 && !near {
+                fill(cam, x, y, Color::new(0.0, 0.0, 0.0, 0.55));
+            }
         }
     }
-    if o.cover {
-        for ob in s.objects.iter().filter(|ob| razdor::editor::geometry::is_massif(ob.class)) {
-            let r = object_cover(ob);
-            if r.overlaps(&vis) {
-                let sr = cam.rect(r);
-                draw_rectangle(sr.x, sr.y, sr.w, sr.h, Color::new(0.8, 0.2, 0.1, 0.18));
+    // Patrol zone of the army under the cursor: everything outside its square is shaded, the
+    // whole view when its radius is 0.
+    if o.patrols {
+        if let Some(a) = hover.and_then(|h| tools.hovered_army(doc, h)).and_then(|id| s.army(id)) {
+            let r = a.patrol_radius as i32;
+            for (x, y) in vis.cells() {
+                let inside = r > 0 && (x - a.x as i32).abs() <= r && (y - a.y as i32).abs() <= r;
+                if !inside {
+                    fill(cam, x, y, Color::new(0.0, 0.0, 0.0, 0.5));
+                }
+            }
+        }
+    }
+    let cs = cam.cell_size();
+    if o.grid {
+        let cover = building_cover(s, held_building);
+        for (x, y) in vis.cells() {
+            let (r, g, b, a) = GRID_COLOURS[grid_kind(s, &doc.cells, &cover, x as i64, y as i64) as usize];
+            fill(cam, x, y, Color::new(r, g, b, a));
+        }
+        if cs.x >= 8.0 {
+            let line = Color::new(0.0, 0.0, 0.0, 0.25);
+            for x in vis.x0..=vis.x1 + 1 {
+                let a = cam.to_screen(vec2(x as f32, vis.y0 as f32));
+                let b = cam.to_screen(vec2(x as f32, vis.y1 as f32 + 1.0));
+                draw_line(a.x, a.y, b.x, b.y, 1.0, line);
+            }
+            for y in vis.y0..=vis.y1 + 1 {
+                let a = cam.to_screen(vec2(vis.x0 as f32, y as f32));
+                let b = cam.to_screen(vec2(vis.x1 as f32 + 1.0, y as f32));
+                draw_line(a.x, a.y, b.x, b.y, 1.0, line);
             }
         }
     }
     // Points: lanterns yellow with their radius, event points blue.
     for (i, p) in s.points.iter().enumerate() {
-        if !vis.contains(p.x as i32, p.y as i32) {
+        if !vis.contains(p.x as i32, p.y as i32) || tools.held == Some(Held::Point(i as u16 + 1)) {
             continue;
         }
         let c = cam.to_screen(vec2(p.x as f32 + 0.5, p.y as f32 + 0.5));
@@ -376,19 +449,11 @@ pub fn draw_overlays(doc: &EditorDoc, tools: &ToolState, palette: &Palette, art:
         let initial: String = razdor::editor::palette::HERO_CLASSES.get(k).map(|n| razdor::i18n::tr(n)).and_then(|n| n.chars().next()).map(String::from).unwrap_or_default();
         text_centered(&initial, c.x, c.y + r * 0.45, r * 1.3, BLACK);
     }
-    for a in s.armies.iter() {
-        if o.patrols && a.patrols != 0 && a.patrol_radius > 0 {
-            circle_cells(cam, a.x, a.y, a.patrol_radius as f32, Color::new(1.0, 0.4, 0.3, 0.35));
-        }
-    }
     match tools.selected {
         Some(Target::Building(id)) => {
             if let Some(b) = s.building(id) {
                 let f = Footprint::of(b.x as i32, b.y as i32, b.size_x, b.size_y);
                 outline(cam, f.main, 2.5, ACCENT);
-                if let Some(e) = f.extra_row {
-                    outline(cam, e, 1.5, Color::new(0.95, 0.78, 0.3, 0.6));
-                }
             }
         }
         Some(Target::Army(id)) => {
@@ -408,44 +473,82 @@ pub fn draw_overlays(doc: &EditorDoc, tools: &ToolState, palette: &Palette, art:
     }
     let Some((hx, hy)) = hover else { return };
     let inside = hx >= 0 && hy >= 0 && (hx as u32) < s.width() && (hy as u32) < s.height();
+    if !inside {
+        return;
+    }
     let white = Color::new(1.0, 1.0, 1.0, 0.8);
-    match tools.tool {
-        Tool::Terrain { shape: TerrainShape::Brush(size), .. } | Tool::Objects { size, .. } | Tool::Erase { size, .. } => {
-            outline(cam, CellRect::brush(hx, hy, size), 1.5, white);
-        }
-        Tool::Terrain { shape: TerrainShape::Rect, .. } => {
-            let from = tools.rect_start().unwrap_or((hx, hy));
-            outline(cam, CellRect::spanning(from, (hx, hy)), 2.0, white);
-        }
-        Tool::Terrain { shape: TerrainShape::Fill, .. } | Tool::Army { .. } | Tool::Point { .. } | Tool::HeroStart(_) => {
-            outline(cam, CellRect::brush(hx, hy, 1), 1.5, white);
-        }
-        Tool::Building { kind, picture_type, variant } if inside => {
-            let size = palette.footprint(picture_type, variant);
-            let f = Footprint::of(hx, hy, size.0, size.1);
-            let ok = f.inside(s.width(), s.height());
-            draw_building_sprite(art, cam, hx as u16, hy as u16, size, (picture_type, variant), razdor::editor::palette::building_type_label(kind), 0.55);
-            let col = if ok { Color::new(0.3, 1.0, 0.4, 0.9) } else { Color::new(1.0, 0.25, 0.2, 0.9) };
-            outline(cam, f.main, 2.0, col);
-            if let Some(e) = f.extra_row {
-                outline(cam, e, 1.0, col);
-            }
-        }
-        Tool::Select => {
-            if let Some(t) = doc.hit(hx, hy) {
-                let r = match t {
-                    Target::Building(id) => s.building(id).map(|b| Footprint::of(b.x as i32, b.y as i32, b.size_x, b.size_y).bounds()),
-                    Target::Army(id) => s.army(id).map(|a| CellRect::brush(a.x as i32, a.y as i32, 1)),
-                    Target::Point(id) => s.points.get(id as usize - 1).map(|p| CellRect::brush(p.x as i32, p.y as i32, 1)),
-                };
-                if let Some(r) = r {
-                    outline(cam, r, 1.5, white);
+    let red = Color::new(1.0, 0.25, 0.2, 0.9);
+    let cursor = tools.cursor(doc, (hx, hy), origin);
+    let forbidden = cursor == Cursor::Forbidden;
+    let (cx, cy) = brush_centre((hx, hy), tools.brush);
+    // While holding: the held object at the brush centre.
+    if let Some(h) = tools.held {
+        match h {
+            Held::Building(id) => {
+                if let Some(b) = s.building(id) {
+                    draw_building_sprite(art, cam, cx as u16, cy as u16, (b.size_x, b.size_y), (b.picture_type, b.picture_variant), "", 0.55);
+                    outline(cam, Footprint::of(cx, cy, b.size_x, b.size_y).main, 2.0, if forbidden { red } else { white });
                 }
-            } else {
-                outline(cam, CellRect::brush(hx, hy, 1), 1.0, Color::new(1.0, 1.0, 1.0, 0.4));
+            }
+            Held::Army(id) => item_ghost(cam, cx, cy, s.army(id).map_or(4, |a| a.model)),
+            Held::Point(id) => item_ghost(cam, cx, cy, s.points.get(id as usize - 1).map_or(9, |p| p.model)),
+        }
+        return;
+    }
+    match tools.brush {
+        DELETE => outline(cam, CellRect::brush(hx, hy, 1), 2.0, Color::new(1.0, 0.55, 0.15, 0.9)),
+        INFO => {
+            let (x, y) = (hx as i64, hy as i64);
+            let r = match building_at(s, x, y, None) {
+                Some(id) if doc.cells.figure(x, y) == 0 => s.building(id).map(|b| Footprint::of(b.x as i32, b.y as i32, b.size_x, b.size_y).main),
+                _ => (doc.cells.figure(x, y) != 0).then(|| CellRect::brush(hx, hy, 1)),
+            };
+            let col = if cursor == Cursor::OverObjectMove { ACCENT } else { white };
+            outline(cam, r.unwrap_or(CellRect::brush(hx, hy, 1)), 1.5, if r.is_some() { col } else { Color::new(1.0, 1.0, 1.0, 0.4) });
+        }
+        n => {
+            let square = CellRect::brush(cx, cy, n as u32);
+            match tools.page {
+                Page::Terrain => match tools.shape {
+                    TerrainShape::Brush => outline(cam, square, 1.5, white),
+                    TerrainShape::Fill => outline(cam, CellRect::brush(hx, hy, 1), 1.5, white),
+                    TerrainShape::Rect => {
+                        let from = tools.rect_start().unwrap_or((hx, hy));
+                        outline(cam, CellRect::spanning(from, (hx, hy)), 2.0, white);
+                    }
+                },
+                Page::Hills | Page::Forests => {
+                    let key = if tools.page == Page::Hills { tools.hill } else { tools.forest };
+                    if let Some(k) = key {
+                        let base = cam.to_screen(vec2(cx as f32 + 0.5, cy as f32 + 1.0));
+                        match art.and_then(|a| a.map_atlas()).and_then(|at| Some((at, at.decoration(k.class, k.sprite)?))) {
+                            Some((at, r)) => {
+                                let (w, h) = (r.w * cam.zoom, r.h * cam.zoom);
+                                draw_texture_ex(&at.texture, base.x - w / 2.0, base.y - h, Color::new(1.0, 1.0, 1.0, 0.55), DrawTextureParams { dest_size: Some(vec2(w, h)), source: Some(r), ..Default::default() });
+                            }
+                            None => placeholder_object(k.class, k.sprite, base, cs.x),
+                        }
+                    }
+                    let fits = square.inside(s.width(), s.height());
+                    outline(cam, square, 1.5, if fits { white } else { red });
+                }
+                Page::Buildings => {
+                    if let Some(b) = tools.building {
+                        let label = razdor::editor::palette::building_type_label(b.picture_type);
+                        draw_building_sprite(art, cam, cx.max(0) as u16, cy.max(0) as u16, b.size, (b.picture_type, b.variant), label, 0.55);
+                        let ok = square.inside(s.width(), s.height()) && !forbidden;
+                        outline(cam, Footprint::of(cx, cy, b.size.0, b.size.1).main, 2.0, if ok { Color::new(0.3, 1.0, 0.4, 0.9) } else { red });
+                    }
+                    let _ = palette;
+                }
+                Page::Items => {
+                    if tools.item > 0 {
+                        item_ghost(cam, cx, cy, tools.item);
+                    }
+                    outline(cam, CellRect::brush(cx, cy, 1), 1.5, if forbidden { red } else { white });
+                }
             }
         }
-        _ => {}
     }
 }
 

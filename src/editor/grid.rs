@@ -59,6 +59,14 @@ impl ObjectGrid {
         self.cells[y as usize * self.width as usize + x as usize]
     }
 
+    /// Puts `o` into slot `slot` of a cell (`None` empties it); nothing outside the map.
+    pub fn set(&mut self, x: i64, y: i64, slot: usize, o: Option<MapObject>) {
+        if x < 0 || y < 0 || x >= self.width as i64 || y >= self.height as i64 {
+            return;
+        }
+        self.cells[y as usize * self.width as usize + x as usize][slot] = o;
+    }
+
     /// The object list a save writes (0x5a4c44): the grid row by row, per cell the first
     /// slot, then the second.
     pub fn objects(&self) -> Vec<MapObject> {
@@ -153,6 +161,11 @@ impl Marks {
             return None;
         }
         self.cells.get_mut(y as usize * self.width as usize + x as usize)
+    }
+
+    /// Every cell's mark, row by row.
+    pub fn values(&self) -> &[i8] {
+        &self.cells
     }
 
     /// The mark of a cell; 0 outside the map (the original's cleared grid).

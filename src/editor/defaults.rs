@@ -51,6 +51,18 @@ pub fn new_scenario(o: NewMap) -> Scenario {
     }
 }
 
+/// The original's File › New (0x5a4274) at the current size: a zeroed header with the size
+/// and the generator's state as its seed (header 0x14), terrain 0 everywhere, no objects or
+/// records, empty texts and a default title (Razdor's own wording).
+pub fn cleared_scenario(width: u32, height: u32, seed: u32) -> Scenario {
+    Scenario {
+        header: Header { width, height, generator_seed: seed, ..Header::default() },
+        terrain: vec![0; width as usize * height as usize],
+        title: crate::i18n::tr("New scenario").into(),
+        ..Scenario::default()
+    }
+}
+
 /// A new building of type `kind` with its picture and footprint; `(x, y)` is the
 /// bottom-right cell.
 pub fn new_building(header: &Header, x: u16, y: u16, kind: u8, picture_type: u8, variant: u8, size: (u8, u8)) -> Building {
@@ -102,11 +114,11 @@ pub const TARGET_POINT: u8 = 10;
 pub const LANTERN_RADIUS: u8 = 10;
 
 /// A new point as the original places one (0x595390, mode 4): a zeroed record with its
-/// position and the word `id | model << 8` at byte 4, so the 256th point (id 256) stores id
+/// position and the word `model·256 + id` at byte 4, so the 256th point (id 256) stores id
 /// 0 and its model plus 1 there (the original's overflow, kept; Razdor's file check then
 /// refuses the map). A lantern is lit at the start with radius [`LANTERN_RADIUS`].
 pub fn new_point(id: u16, x: u16, y: u16, model: u8) -> Point {
-    let word = id | (model as u16) << 8;
+    let word = ((model as u16) << 8).wrapping_add(id);
     let lantern = model == LANTERN;
     Point {
         x,
@@ -135,6 +147,15 @@ mod tests {
     }
 
     #[test]
+    fn the_original_new_keeps_the_size_only() {
+        let s = cleared_scenario(80, 60, 1234);
+        assert_eq!((s.width(), s.height(), s.header.generator_seed, s.header.start_time), (80, 60, 1234, 0));
+        assert!(s.terrain.len() == 4800 && s.terrain.iter().all(|t| *t == 0));
+        assert!(s.header.heroes.iter().all(|h| (h.x, h.y, h.gold) == (0, 0, 0)) && s.header.relations == [[0; 4]; 4]);
+        assert!(s.buildings.is_empty() && s.objects.is_empty() && s.events.is_empty());
+    }
+
+    #[test]
     fn new_records() {
         let h = new_scenario(NewMap::default()).header;
         let b = new_building(&h, 10, 10, 3, 3, 2, (4, 4));
@@ -155,5 +176,6 @@ mod tests {
         let p = new_point(256, 0, 0, LANTERN);
         assert_eq!((p.id, p.model), (0, 9));
         assert_eq!(new_point(256, 0, 0, TARGET_POINT).model, 11);
+        assert_eq!(new_point(256, 0, 0, EVENT_POINT).model, 10);
     }
 }

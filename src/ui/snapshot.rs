@@ -5,8 +5,9 @@
 //!
 //! Scenes (`<map>` is a map file name of the install without `.DTm`, e.g. `РК3-Столица`):
 //! `title`, `authors`, `options`, `scenarios`, `tutorial`, `load`, `editor[:<what>[:<map>]]`
-//! (`<what>`: `units`, `artefacts`, `options`, `settings`, `events`, or a record `a<n>`, `b<n>`,
-//! `p<n>` of `<map>` opened in the editor), `classes:<map>`, `map:<map>[:x,y]`, `minimap:<map>`, `walk:<map>:dx,dy` (the
+//! (`<what>`: `units`, `artefacts`, `options`, `settings`, `events`, `grid`, `fog`, `records`
+//! (the buildings submenu), `page<k>` (tool page 0–4), or a record `a<n>`, `b<n>`, `p<n>` of
+//! `<map>` opened in the editor), `classes:<map>`, `map:<map>[:x,y]`, `minimap:<map>`, `walk:<map>:dx,dy` (the
 //! hero sets off that many cells away), `building:<map>:<n>`
 //! (the hero in the n-th building), `army:<map>`, `journal:<map>`, `spells:<map>`,
 //! `menu:<map>`, `battle:<map>:<n>` (against the n-th army). `RAZDOR_SCENE_SHOW=x,y,r` shows

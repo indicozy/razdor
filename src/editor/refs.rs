@@ -49,11 +49,20 @@ pub fn remove_building(s: &mut Scenario, id: u16) -> bool {
 /// one becomes 0xFF) and the event bytes 15, 54, 55, 67, 68, 74, 75, 121, 122, 123, 136, 142
 /// and 144 follow. The patrol-change army (16), the army-at-home condition (146) and the
 /// battle army (147) do not (the original's behaviour, kept).
+///
+/// As the brush deletes by the figure word's index, an index past the end removes the last
+/// army (its loop shifts nothing, then the count drops) and renumbers no record; `false` only
+/// for an empty list or index 0.
 pub fn remove_army(s: &mut Scenario, id: u8) -> bool {
-    let Some(i) = (id as usize).checked_sub(1).filter(|i| *i < s.armies.len()) else { return false };
-    s.armies.remove(i);
-    for (k, a) in s.armies.iter_mut().enumerate() {
-        a.id = (k + 1) as u8;
+    let n = s.armies.len();
+    if n == 0 || id == 0 {
+        return false;
+    }
+    s.armies.remove((id as usize - 1).min(n - 1));
+    if id as usize <= n {
+        for (k, a) in s.armies.iter_mut().enumerate() {
+            a.id = (k + 1) as u8;
+        }
     }
     let r = id as u32;
     for b in &mut s.buildings {
@@ -84,11 +93,20 @@ pub fn remove_army(s: &mut Scenario, id: u8) -> bool {
 }
 
 /// Removes point `id` and renumbers the rest; remaps the lanterns events light.
+///
+/// As the brush deletes by the figure word's index: index 0 (the 256th point stores id 0)
+/// removes the first point (the original copies every later record one place down), an
+/// index past the end the last one; `false` only for an empty list.
 pub fn remove_point(s: &mut Scenario, id: u16) -> bool {
-    let Some(i) = (id as usize).checked_sub(1).filter(|i| *i < s.points.len()) else { return false };
-    s.points.remove(i);
-    for (k, p) in s.points.iter_mut().enumerate() {
-        p.id = (k + 1) as u8;
+    let n = s.points.len();
+    if n == 0 {
+        return false;
+    }
+    s.points.remove((id as usize).saturating_sub(1).min(n - 1));
+    if id as usize <= n {
+        for (k, p) in s.points.iter_mut().enumerate() {
+            p.id = (k + 1) as u8;
+        }
     }
     for e in &mut s.events {
         for l in e.results.light_lanterns.iter_mut() {

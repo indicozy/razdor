@@ -2,6 +2,10 @@
 # \n is a line break, {name} a value filled in by the game. See src/i18n.rs.
 
 # Map editor: toolbar
+New of size = Новая заданного размера
+Grid = Сетка
+Patrol zones = Зоны патруля
+Fog = Туман
 New = Новая
 Open = Открыть
 Save = Сохранить
@@ -68,31 +72,28 @@ Errors: {errors}, warnings: {warnings}. Errors block saving. Click one to go the
 Close = Закрыть
 
 # Map editor: tool palette
-Select (V) = Выбор (V)
-Terrain (T) = Местность (T)
-Objects (O) = Объекты (O)
-Erase (E) = Ластик (E)
-Building (B) = Здание (B)
-Army (A) = Армия (A)
-Point (P) = Точка (P)
+Hills = Холмы
+Forests = Леса
+Items = Предметы
+Del = Удал.
+Info = Инфо
+Tree replacement = Замена деревьев
+Ignore mountains = Не учитывать горы
+Nothing of this size. = Ничего такого размера.
+Knight's start = Начало рыцаря
+Archmage's start = Начало архимага
+Ranger's start = Начало следопыта
+Feudal army = Армия феодала
+Robber band = Шайка разбойников
+Peasant crowd = Толпа крестьян
+Inactive army = Неактивная армия
+Burn everything = Сжечь всё
+Everything burnt (the building names keep their words). = Всё сожжено (названия зданий остались прежними).
 wheel: more ({page}/{pages}) = колесо: ещё ({page}/{pages})
-Surface = Поверхность
 Brush = Кисть
 Flood fill = Заливка
 Rectangle = Прямоугольник
-Erase = Стереть
-Everything = Всё
-Hills, mountains, stones = Холмы, горы, камни
-Trees and thickets = Деревья и чащи
-Buildings, armies and points: select them and press Delete. = Здания, армии и точки: выделите и нажмите Delete.
-Click: the cell is the bottom-right corner. = Щелчок: клетка станет нижним правым углом.
-Lantern (reveals an area) = Фонарь (открывает местность)
 Event point = Точка события
-Click the map to place one. = Щёлкните по карте, чтобы поставить.
-Click the map to place an army; set it up in its panel. = Щёлкните по карте, чтобы поставить армию; настройте её в панели.
-Click the start cell of the {class}. = Щёлкните по начальной клетке: {class}.
-Click a building, army or point to edit it; drag to move it. Delete: remove it. = Щёлкните по зданию, армии или точке, чтобы изменить; тащите, чтобы передвинуть. Delete — удалить.
-Wheel: zoom. Right or middle drag, or arrow keys: move the view. G grid, H hill cover, R patrols, Home: whole map. = Колесо — масштаб. Правая или средняя кнопка, стрелки — сдвиг вида. G — сетка, H — покров холмов, R — патрули, Home — вся карта.
 
 # Map editor: scenario settings
 Scenario settings = Настройки сценария
@@ -238,28 +239,19 @@ Whole inventory = Всё снаряжение
 Whole army = Вся армия
 
 # Map editor: tools and undo steps
-Select and move = Выбор и перемещение
 Terrain = Местность
-Objects = Объекты
-Erase objects = Стереть объекты
 Buildings = Здания
 Armies = Армии
-Points and lanterns = Точки и фонари
-Hero start = Начало героя
 Paint terrain = Рисовать местность
 Fill terrain = Залить местность
 Terrain rectangle = Прямоугольник местности
 Place objects = Поставить объекты
+Place item = Поставить предмет
 Place building = Поставить здание
-Move building = Передвинуть здание
 Delete building = Удалить здание
 Edit building = Изменить здание
-Place army = Поставить армию
-Move army = Передвинуть армию
 Delete army = Удалить армию
 Edit army = Изменить армию
-Place point = Поставить точку
-Move point = Передвинуть точку
 Delete point = Удалить точку
 Edit point = Изменить точку
 Edit scenario settings = Изменить настройки сценария
@@ -280,7 +272,8 @@ Save into the game's maps folder as {path}? = Сохранить в папку �
 type a name for the map = введите имя карты
 a map name cannot contain {c} = имя карты не может содержать {c}
 ({x}, {y}) is outside the map = ({x}, {y}) за пределами карты
-the building would reach outside the map = здание выйдет за пределы карты
+the brush square reaches outside the map = квадрат кисти выходит за пределы карты
+a building already stands on this cell = на этой клетке уже стоит здание
 there is no building {id} = нет здания {id}
 there is no army {id} = нет армии {id}
 there is no point {id} = нет точки {id}
@@ -476,3 +469,15 @@ Worn by {n} unit types, {pct}% of them gain = Носят {n} типов воин
 
 # Map editor: options
 Editor options = Параметры
+
+# Map editor: hints over the map
+Hero start: {class} = Начало героя: {class}
+Building {id}: {name} (type {kind}, picture {t}, {v}) = Здание {id}: {name} (тип {kind}, рисунок {t}, {v})
+Owner: army {o}, {name} ({leader}) = Владелец: армия {o}, {name} ({leader})
+Owner: {name} = Владелец: {name}
+Income: {gold} gold, {mana} mana = Доход: {gold} золота, {mana} маны
+Has a description = Есть описание
+Army {id}: {name} = Армия {id}: {name}
+Tactical cost: {a} / {b} = Тактическая стоимость: {a} / {b}
+Events: {n} = События: {n}
+Lantern radius: {r} = Радиус фонаря: {r}

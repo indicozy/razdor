@@ -25,9 +25,13 @@ use razdor::editor::files::{self, Consent, Destination, SaveBlock};
 use razdor::editor::mapcheck::{self, CheckRow};
 use razdor::editor::mapfile::{OpenFormat, SaveFormat};
 use razdor::editor::playability::{self, ScoreError};
+use razdor::editor::menus;
+use razdor::editor::naming::NamePools;
+use razdor::editor::options::Session;
 use razdor::editor::palette::{object_class_label, SURFACE_LABELS};
+use razdor::editor::tools::Open;
 use razdor::editor::validate::has_errors;
-use razdor::editor::{Command, EditorDoc, Issue, Names, NewMap, Origin, Palette, Place, SaveError, Severity, Target, Tool, ToolState};
+use razdor::editor::{Command, EditorDoc, Issue, Kit, Names, NewMap, Origin, Page, Palette, Place, Press, SaveError, Severity, Target, ToolState};
 use razdor::i18n::tr;
 use razdor::rules::content::{Content, HeroClass};
 use razdor::trf;
@@ -36,7 +40,7 @@ use crate::ui::assets::Assets;
 use crate::ui::widgets::*;
 
 use canvas::{Cam, Overlays, Overview};
-use palette_panel::{PaletteState, TOOL_KEYS};
+use palette_panel::PaletteState;
 use props::{Ctx, PanelState};
 use events::{EventsAction, EventsState};
 use settings::{SettingsAction, SettingsState};
@@ -59,6 +63,8 @@ pub enum EditorAction {
 /// What a confirmation leads to.
 #[derive(Clone)]
 enum Then {
+    /// The original's New: an empty map of the current size.
+    Clear,
     New(NewMap),
     Open(PathBuf),
     Exit,
@@ -76,8 +82,11 @@ enum Modal {
     Settings,
     Events,
     TestPlay,
-    /// The original's number dialog for a new lantern's radius (records.md §2).
-    Radius { id: u16, value: i64 },
+    /// The original's number dialog for a lantern's radius (records.md §2): a new lantern's
+    /// (`placed`) or one clicked in Info mode; cancel keeps `initial`.
+    Radius { id: u16, value: i64, initial: i64, placed: bool },
+    /// The buildings or armies submenu (main-window.md §18).
+    Records { buildings: bool, scroll: usize },
     /// The original's options window.
     Options(razdor::editor::options::Options),
     /// The unit editor and the artefact editor.
@@ -116,6 +125,12 @@ pub struct EditorScreen {
     pressing: bool,
     last_cell: Option<(i32, i32)>,
     panning: Option<Vec2>,
+    /// The building name lists of the install's editor ini.
+    name_pools: Option<Arc<NamePools>>,
+    /// The original's `[Option]` keys of its own: the last map, the building-place check.
+    session: Session,
+    /// When a held arrow key moves the view one more cell.
+    arrow_repeat: f64,
     /// The original editor's options (records.md §11).
     options: razdor::editor::options::Options,
     /// The session's unit and artefact tables, as the unit and artefact editors leave them:
@@ -141,15 +156,20 @@ impl EditorScreen {
         let game_dir = art.and_then(|a| install::find_path(&a.install.dir, install::MAPS_DIR).ok());
         let play_content = dt_content.clone().unwrap_or(demo);
         let options = razdor::editor::options::Options::load(razdor::editor::options::editor_dir().as_deref(), art.map(|a| a.install.dir.as_path()));
-        let mut pal = PaletteState::default();
-        pal.fit(&palette);
+        let session = Session::load(razdor::editor::options::editor_dir().as_deref());
+        let mut tools = ToolState::with_check(session.find_building_place);
+        tools.choose_page(Page::Terrain, &palette);
+        let mut doc = EditorDoc::new_map(NewMap::default());
+        // The original seeds its generator from the clock at start-up.
+        let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.subsec_nanos() ^ d.as_secs() as u32);
+        doc.rng = razdor::rules::rng::Rng::new(seed);
         EditorScreen {
-            doc: EditorDoc::new_map(NewMap::default()),
-            tools: ToolState::default(),
-            pal,
+            doc,
+            tools,
+            pal: PaletteState::default(),
             cam: None,
             overview: Overview::default(),
-            overlays: Overlays { grid: false, cover: false, patrols: false },
+            overlays: Overlays::default(),
             panel: PanelState::default(),
             settings: SettingsState::default(),
             events: EventsState::with_options(&options),
@@ -167,6 +187,9 @@ impl EditorScreen {
             pressing: false,
             last_cell: None,
             panning: None,
+            name_pools: art.and_then(|a| NamePools::load(&a.install.dir)).map(Arc::new),
+            session,
+            arrow_repeat: 0.0,
             options,
             catalog: play_content.clone(),
             catalog_state: catalog::CatalogState::default(),
@@ -185,11 +208,13 @@ impl EditorScreen {
         Rect::new(0.0, TOP, screen_width() - RIGHT_W, screen_height() - TOP - STATUS_H)
     }
 
-    fn set_doc(&mut self, doc: EditorDoc) {
+    fn set_doc(&mut self, mut doc: EditorDoc) {
+        // One generator for the whole session, as the original's.
+        doc.rng = self.doc.rng.clone();
         self.doc = doc;
-        let tool = self.tools.tool;
-        self.tools = ToolState::default();
-        self.tools.set_tool(tool);
+        self.tools.held = None;
+        self.tools.selected = None;
+        self.tools.opened.clear();
         self.cam = None;
         self.issues.clear();
         self.check_rows.clear();
@@ -222,12 +247,21 @@ impl EditorScreen {
     /// Runs a confirmed (or unneeded) follow-up.
     fn run(&mut self, then: Then) -> EditorAction {
         match then {
+            Then::Clear => {
+                let s = &self.doc.scenario;
+                let (w, h, seed) = (s.width(), s.height(), self.doc.rng.state());
+                self.set_doc(EditorDoc::cleared(w, h, seed));
+                self.status = Some(trf!("New {w} x {h} map.", w, h));
+            }
             Then::New(o) => {
                 self.set_doc(EditorDoc::new_map(o));
                 self.status = Some(trf!("New {w} x {h} map.", w = o.width, h = o.height));
             }
             Then::Open(p) => self.open_file(p),
-            Then::Exit => return EditorAction::Exit,
+            Then::Exit => {
+                self.close();
+                return EditorAction::Exit;
+            }
             Then::Save { name, format, dest, consent } => self.save(&name, format, dest, consent),
             Then::DeleteEvent(id) => {
                 let before = self.doc.scenario.events.len();
@@ -400,6 +434,17 @@ impl EditorScreen {
             "options" => self.modal = Some(Modal::Options(self.options)),
             "settings" => self.modal = Some(Modal::Settings),
             "events" => self.modal = Some(Modal::Events),
+            "grid" => {
+                self.overlays.grid = true;
+                self.doc.cells.rebuild_marks(&self.doc.scenario);
+            }
+            "fog" => self.overlays.fog = true,
+            "records" => self.modal = Some(Modal::Records { buildings: true, scroll: 0 }),
+            w if w.starts_with("page") => {
+                let k = w[4..].parse::<usize>().map_err(|e| e.to_string())?;
+                let page = palette_panel::PAGES.get(k).ok_or("no such page")?.0;
+                self.tools.choose_page(page, &self.palette);
+            }
             w if w.starts_with('a') => self.tools.selected = Some(Target::Army(id(w)? as u8)),
             w if w.starts_with('b') => self.tools.selected = Some(Target::Building(id(w)?)),
             w if w.starts_with('p') => self.tools.selected = Some(Target::Point(id(w)?)),
@@ -496,12 +541,13 @@ impl EditorScreen {
         let cam = self.cam.expect("set above");
         // As the original's emergency save: a failure while drawing the map or the minimap
         // saves the map to ErrorSave.DTm and ends the program.
-        let drawn = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| canvas::draw_map(&self.doc, art, &cam, overview.as_ref())));
+        let held = self.tools.held;
+        let drawn = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| canvas::draw_map(&self.doc, art, &cam, overview.as_ref(), held)));
         if let Err(e) = drawn {
             self.emergency_exit(e);
         }
         let hover = (!modal_open && view.contains(Vec2::from(crate::ui::widgets::pointer()))).then(|| cam.cell_at(Vec2::from(crate::ui::widgets::pointer())));
-        canvas::draw_overlays(&self.doc, &self.tools, &self.palette, art, &cam, hover, &self.overlays);
+        canvas::draw_overlays(&self.doc, &self.tools, &self.palette, art, &cam, hover, cam.origin(), &self.overlays);
 
         // Right column: minimap and tools.
         let rx = screen_width() - RIGHT_W;
@@ -514,7 +560,10 @@ impl EditorScreen {
             }
         }
         let tools_rect = Rect::new(rx, mini.bottom() + 6.0, RIGHT_W, screen_height() - mini.bottom() - 6.0 - STATUS_H);
-        palette_panel::tool_panel(&mut self.pal, &mut self.tools, &self.palette, art, tools_rect);
+        let panel = palette_panel::tool_panel(&mut self.pal, &mut self.tools, &self.palette, art, tools_rect);
+        if panel.burn {
+            self.burn();
+        }
 
         // The selected record's panel.
         if let (Some(t), Some(pr)) = (self.tools.selected, panel_rect) {
@@ -537,6 +586,13 @@ impl EditorScreen {
             action = bar;
         }
         self.status_line(hover);
+        // The Info mode's hint over the map (outside move mode).
+        if let Some(cell) = hover.filter(|_| !modal_open && !popup_open() && !panel_rect.is_some_and(|p| p.contains(Vec2::from(crate::ui::widgets::pointer())))) {
+            let lines = self.tools.hint(&self.doc, &self.session_names, cell);
+            if !lines.is_empty() {
+                tooltip(&lines.into_iter().map(|l| (l, INK)).collect::<Vec<_>>());
+            }
+        }
 
         // Dialogs on top.
         set_input_blocked(popup_open());
@@ -550,6 +606,43 @@ impl EditorScreen {
         draw_popup();
         fields_end_frame();
         action
+    }
+
+    /// "Burn everything" (main-window.md §15): no question, and the modified flag stays as it
+    /// was.
+    fn burn(&mut self) {
+        let clean = !self.doc.dirty();
+        let facts = self.palette.forest_facts();
+        self.apply(Command::Burn { facts }, "");
+        if clean {
+            self.doc.mark_unmodified();
+        }
+        self.status = Some(tr("Everything burnt (the building names keep their words).").into());
+    }
+
+    /// F2 (main-window.md §17.1): the map saved straight to its folder under its current
+    /// name, without a dialog even for a new map. Razdor's checks and confirmations still
+    /// apply.
+    fn f2_save(&mut self) {
+        let path = self.doc.saved_path.clone();
+        let name = path.as_ref().and_then(|p| p.file_stem()).map_or("New".to_string(), |s| s.to_string_lossy().into_owned());
+        let in_game = path.as_deref().zip(self.game_dir.as_deref()).is_some_and(|(p, g)| files::is_inside(p, g));
+        let outside = path.as_deref().is_some_and(|p| !in_game && !self.user_dir.as_deref().is_some_and(|u| files::is_inside(p, u)));
+        if outside {
+            self.quick_save();
+        } else {
+            let dest = if in_game { Destination::GameFolder } else { Destination::UserFolder };
+            self.save(&name, SaveFormat::Normal, dest, Consent::default());
+        }
+    }
+
+    /// Moves the view by whole cells (the original's arrow keys).
+    fn step_view(&mut self, dx: f32, dy: f32) {
+        let (w, h) = (self.doc.scenario.width(), self.doc.scenario.height());
+        if let Some(cam) = self.cam.as_mut() {
+            cam.centre += vec2(dx, dy);
+            cam.clamp(w, h);
+        }
     }
 
     fn shortcuts(&mut self) -> EditorAction {
@@ -573,53 +666,42 @@ impl EditorScreen {
         } else if c && is_key_pressed(KeyCode::O) {
             self.modal = Some(Modal::Open { path: String::new(), scroll: 0, format: OpenFormat::Normal });
         } else if c && is_key_pressed(KeyCode::N) {
-            self.modal = Some(Modal::NewMap { size: 0, w: 50, h: 50, fill: 6 });
+            return self.guarded(Then::Clear);
+        } else if c && is_key_pressed(KeyCode::Q) {
+            return self.guarded(Then::Exit);
         } else if !c {
+            if is_key_pressed(KeyCode::F2) {
+                self.f2_save();
+            }
+            if is_key_pressed(KeyCode::Space) {
+                self.tools.space();
+            }
             if is_key_pressed(KeyCode::Delete) {
                 self.tools.delete_selected(&mut self.doc);
             }
             if is_key_pressed(KeyCode::Escape) {
-                if self.tools.selected.is_some() {
-                    self.tools.selected = None;
-                } else {
-                    self.tools.set_tool(Tool::Select);
+                self.tools.selected = None;
+            }
+            // The arrows move the view one cell (held down, again and again).
+            let now = get_time();
+            let mut d = Vec2::ZERO;
+            for (k, v) in [(KeyCode::Left, vec2(-1.0, 0.0)), (KeyCode::Right, vec2(1.0, 0.0)), (KeyCode::Up, vec2(0.0, -1.0)), (KeyCode::Down, vec2(0.0, 1.0))] {
+                if is_key_pressed(k) {
+                    d += v;
+                    self.arrow_repeat = now + 0.4;
+                } else if is_key_down(k) && now >= self.arrow_repeat {
+                    d += v;
                 }
             }
-            for (k, (_, key)) in TOOL_KEYS.iter().enumerate() {
-                if is_key_pressed(*key) {
-                    self.tools.set_tool(self.pal.tool(k));
+            if d != Vec2::ZERO {
+                if now >= self.arrow_repeat {
+                    self.arrow_repeat = now + 0.05;
                 }
-            }
-            if is_key_pressed(KeyCode::G) {
-                self.overlays.grid = !self.overlays.grid;
-            }
-            if is_key_pressed(KeyCode::H) {
-                self.overlays.cover = !self.overlays.cover;
-            }
-            if is_key_pressed(KeyCode::R) {
-                self.overlays.patrols = !self.overlays.patrols;
+                self.step_view(d.x, d.y);
             }
             let s = &self.doc.scenario;
             let (w, h) = (s.width(), s.height());
             if let Some(cam) = self.cam.as_mut() {
-                let step = 600.0 * get_frame_time();
-                let mut d = Vec2::ZERO;
-                if is_key_down(KeyCode::Left) {
-                    d.x += step;
-                }
-                if is_key_down(KeyCode::Right) {
-                    d.x -= step;
-                }
-                if is_key_down(KeyCode::Up) {
-                    d.y += step;
-                }
-                if is_key_down(KeyCode::Down) {
-                    d.y -= step;
-                }
-                if d != Vec2::ZERO {
-                    cam.pan(d);
-                    cam.clamp(w, h);
-                }
                 if is_key_pressed(KeyCode::Equal) || is_key_pressed(KeyCode::KpAdd) {
                     cam.zoom_at(1.25, cam.view.center());
                 }
@@ -634,8 +716,9 @@ impl EditorScreen {
         EditorAction::None
     }
 
-    /// Mouse on the map: tools with the left button, panning with the right or middle one,
-    /// zoom with the wheel.
+    /// Mouse on the map (main-window.md §6): the left button works the tool, the right one
+    /// picks up in Info mode; Razdor's own: the right or middle button drags the view where
+    /// nothing is picked up, the wheel zooms.
     fn canvas_input(&mut self, view: Rect, panel: Option<Rect>) {
         let m = Vec2::from(crate::ui::widgets::pointer());
         let over = view.contains(m) && !panel.is_some_and(|p| p.contains(m)) && !input_blocked();
@@ -647,31 +730,41 @@ impl EditorScreen {
                 cam.zoom_at(if wh > 0.0 { 1.12 } else { 1.0 / 1.12 }, m);
             }
         }
-        // Panning.
-        let pan_button = is_mouse_button_down(MouseButton::Right) || is_mouse_button_down(MouseButton::Middle);
-        if pan_button {
-            if let Some(last) = self.panning {
+        let cam = *cam;
+        let cell = cam.cell_at(m);
+        let modifiers = shift() || ctrl() || is_key_down(KeyCode::LeftAlt) || is_key_down(KeyCode::RightAlt);
+        let kit = Kit { palette: &self.palette, names: self.name_pools.as_ref() };
+        let press = |right| Press { cell, view_origin: cam.origin(), right, modifiers };
+        // The right button: a pick-up when there is one, else the view drags.
+        if over && is_mouse_button_pressed(MouseButton::Right) {
+            let before = self.tools.held;
+            self.tools.press(&mut self.doc, kit, press(true));
+            if self.tools.held == before {
+                self.panning = Some(m);
+            }
+        } else if over && is_mouse_button_pressed(MouseButton::Middle) {
+            self.panning = Some(m);
+        }
+        if is_mouse_button_down(MouseButton::Right) || is_mouse_button_down(MouseButton::Middle) {
+            if let (Some(last), Some(cam)) = (self.panning, self.cam.as_mut()) {
                 cam.pan(m - last);
                 cam.clamp(w, h);
-                self.panning = Some(m);
-            } else if over && (is_mouse_button_pressed(MouseButton::Right) || is_mouse_button_pressed(MouseButton::Middle)) {
                 self.panning = Some(m);
             }
         } else {
             self.panning = None;
         }
-        let cell = cam.cell_at(m);
         if over && is_mouse_button_pressed(MouseButton::Left) {
             clear_focus();
             self.pressing = true;
             self.last_cell = Some(cell);
-            self.tools.press(&mut self.doc, &self.palette, cell);
+            self.tools.press(&mut self.doc, kit, press(false));
             self.after_tool();
         } else if self.pressing {
             if is_mouse_button_down(MouseButton::Left) {
                 if self.last_cell != Some(cell) {
                     self.last_cell = Some(cell);
-                    self.tools.drag_to(&mut self.doc, cell);
+                    self.tools.drag_to(&mut self.doc, kit, cell);
                 }
             } else {
                 self.pressing = false;
@@ -681,19 +774,74 @@ impl EditorScreen {
         }
     }
 
+    /// What a press asked to open: a record's panel, the lantern dialog, the scenario window.
     fn after_tool(&mut self) {
         if let Some(m) = self.tools.message.take() {
             self.status = Some(trf!("Refused: {m}.", m));
         }
-        if self.tools.selected.is_some() && !matches!(self.tools.tool, Tool::Select) {
-            // A record just placed: its panel opens at the first tab.
-            self.panel.tab = 0;
-            // A new lantern asks for its radius, as the original's number dialog does.
-            if let (Tool::Point { model: 8 }, Some(Target::Point(id))) = (self.tools.tool, self.tools.selected) {
-                if let Some(p) = self.doc.scenario.points.get(id as usize - 1) {
-                    self.modal = Some(Modal::Radius { id, value: p.radius as i64 });
+        for open in std::mem::take(&mut self.tools.opened) {
+            match open {
+                Open::Building(id) => self.select(Target::Building(id)),
+                Open::Army(id) => self.select(Target::Army(id)),
+                Open::Point(id) | Open::Target(id) => self.select(Target::Point(id)),
+                Open::LanternRadius { id, placed } => {
+                    if let Some(p) = self.doc.scenario.points.get(id as usize - 1) {
+                        let r = p.radius as i64;
+                        self.modal = Some(Modal::Radius { id, value: r, initial: r, placed });
+                    }
+                }
+                Open::HeroSettings(k) => {
+                    self.settings.tab = k + 1;
+                    self.modal = Some(Modal::Settings);
                 }
             }
+        }
+    }
+
+    /// Opens a record's panel at its first tab.
+    fn select(&mut self, t: Target) {
+        self.tools.selected = Some(t);
+        self.panel.tab = 0;
+    }
+
+    /// The submenus' choice (0x5af960, 0x5afadc): the view centred on the record (a building
+    /// on its footprint) and its editor opened.
+    fn centre_on(&mut self, t: Target) {
+        let s = &self.doc.scenario;
+        let at = match t {
+            Target::Building(id) => s.building(id).map(|b| vec2(b.x as f32 + 1.0 - b.size_x as f32 / 2.0, b.y as f32 + 1.0 - b.size_y as f32 / 2.0)),
+            Target::Army(id) => s.army(id).map(|a| vec2(a.x as f32 + 0.5, a.y as f32 + 0.5)),
+            Target::Point(id) => s.points.get(id as usize - 1).map(|p| vec2(p.x as f32 + 0.5, p.y as f32 + 0.5)),
+        };
+        if let (Some(at), Some(cam)) = (at, self.cam.as_mut()) {
+            cam.centre = at;
+        }
+        self.select(t);
+    }
+
+    /// The map of the last session (`WorkMap`), as the original opens it at start-up; a new
+    /// map when it cannot be opened.
+    pub fn reopen_last(&mut self) {
+        if let Some(p) = self.session.work_map.clone() {
+            if p.is_file() {
+                self.open_file(p);
+            }
+        }
+    }
+
+    /// Closing (main-window.md §1.3): the last map's file and the building-place check go to
+    /// Razdor's editor settings.
+    pub fn close(&mut self) {
+        let file = self.doc.saved_path.clone().or(match &self.doc.origin {
+            Origin::Game(p) | Origin::File(p) => Some(p.clone()),
+            Origin::New => None,
+        });
+        if file.is_some() {
+            self.session.work_map = file;
+        }
+        self.session.find_building_place = self.tools.building_check;
+        if let Some(dir) = razdor::editor::options::editor_dir() {
+            let _ = self.session.save(&dir);
         }
     }
 
@@ -702,40 +850,55 @@ impl EditorScreen {
         draw_rectangle(0.0, 0.0, w, TOP, Color::new(0.14, 0.12, 0.1, 1.0));
         draw_line(0.0, TOP, w, TOP, 1.0, DIM);
         let (cu, cr) = (self.doc.can_undo(), self.doc.can_redo());
-        let buttons = [
-            (tr("New"), true),
-            (tr("Open"), true),
-            (tr("Save"), true),
-            (tr("Save as"), true),
-            (tr("Save to game folder"), self.game_dir.is_some()),
-            (tr("Undo"), cu),
-            (tr("Redo"), cr),
-            (tr("Settings"), true),
-            (tr("Events"), true),
-            (tr("Check"), true),
-            (tr("Playability"), true),
-            (tr("Editor options"), true),
-            (tr("Units"), true),
-            (tr("Artefacts"), true),
-            (tr("Test play"), true),
-            (tr("Exit"), true),
+        let dirty = self.doc.dirty();
+        let has_b = !self.doc.scenario.buildings.is_empty();
+        let has_a = !self.doc.scenario.armies.is_empty();
+        // (label, enabled, lit: a toggle's state).
+        let buttons: Vec<(&str, bool, Option<bool>)> = vec![
+            (tr("New"), true, None),
+            (tr("New of size"), true, None),
+            (tr("Open"), true, None),
+            // As the original's, enabled only while the map is modified.
+            (tr("Save"), dirty, None),
+            (tr("Save as"), true, None),
+            (tr("Save to game folder"), self.game_dir.is_some(), None),
+            (tr("Undo"), cu, None),
+            (tr("Redo"), cr, None),
+            (tr("Settings"), true, None),
+            (tr("Events"), true, None),
+            (tr("Buildings"), has_b, None),
+            (tr("Armies"), has_a, None),
+            (tr("Check"), true, None),
+            (tr("Playability"), true, None),
+            (tr("Editor options"), true, None),
+            (tr("Units"), true, None),
+            (tr("Artefacts"), true, None),
+            (tr("Grid"), true, Some(self.overlays.grid)),
+            (tr("Patrol zones"), true, Some(self.overlays.patrols)),
+            (tr("Fog"), true, Some(self.overlays.fog)),
+            (tr("Test play"), true, None),
+            (tr("Exit"), true, None),
         ];
         // Each button as wide as its label; all narrower (smaller labels) if the row would
         // not fit the window.
-        let natural: Vec<f32> = buttons.iter().map(|(l, _)| measure(l, 17.0).width + 16.0).collect();
+        let natural: Vec<f32> = buttons.iter().map(|(l, _, _)| measure(l, 17.0).width + 16.0).collect();
         let room = w - 12.0 - 4.0 * (buttons.len() - 1) as f32;
         let k = (room / natural.iter().sum::<f32>()).min(1.0);
         let mut x = 6.0;
         let mut hit = None;
-        for (i, ((label, enabled), nw)) in buttons.iter().zip(&natural).enumerate() {
+        for (i, ((label, enabled, lit), nw)) in buttons.iter().zip(&natural).enumerate() {
             let bw = nw * k;
-            if small_button(x, 8.0, bw, 28.0, label, *enabled) {
+            let pressed = match lit {
+                Some(on) => toggle_button(x, 8.0, bw, 28.0, label, *on),
+                None => small_button(x, 8.0, bw, 28.0, label, *enabled),
+            };
+            if pressed {
                 hit = Some(i);
             }
             // Undo / Redo: what they would undo or redo.
             let what = match i {
-                5 => self.doc.undo_label(),
-                6 => self.doc.redo_label(),
+                6 => self.doc.undo_label(),
+                7 => self.doc.redo_label(),
                 _ => None,
             };
             if let Some(what) = what.filter(|_| mouse_in(x, 8.0, bw, 28.0)) {
@@ -745,31 +908,49 @@ impl EditorScreen {
         }
         let mut action = EditorAction::None;
         match hit {
-            Some(0) => self.modal = Some(Modal::NewMap { size: 0, w: 50, h: 50, fill: 6 }),
-            Some(1) => self.modal = Some(Modal::Open { path: String::new(), scroll: 0, format: OpenFormat::Normal }),
-            Some(2) => self.quick_save(),
-            Some(3) => self.modal = Some(Modal::SaveAs { name: self.doc.suggested_name(), format: SaveFormat::Normal }),
-            Some(4) => {
+            Some(0) => action = self.guarded(Then::Clear),
+            Some(1) => {
+                let s = &self.doc.scenario;
+                self.modal = Some(Modal::NewMap { size: 3, w: s.width(), h: s.height(), fill: 6 });
+            }
+            Some(2) => self.modal = Some(Modal::Open { path: String::new(), scroll: 0, format: OpenFormat::Normal }),
+            Some(3) => self.quick_save(),
+            Some(4) => self.modal = Some(Modal::SaveAs { name: self.doc.suggested_name(), format: SaveFormat::Normal }),
+            Some(5) => {
                 let name = self.doc.suggested_name();
                 self.save(&name, SaveFormat::Normal, Destination::GameFolder, Consent::default());
             }
-            Some(5) => {
+            Some(6) => {
                 self.doc.undo();
                 self.tools.check_selection(&self.doc);
             }
-            Some(6) => {
+            Some(7) => {
                 self.doc.redo();
                 self.tools.check_selection(&self.doc);
             }
-            Some(7) => self.modal = Some(Modal::Settings),
-            Some(8) => self.modal = Some(Modal::Events),
-            Some(9) => self.check(),
-            Some(10) => self.score(),
-            Some(11) => self.modal = Some(Modal::Options(self.options)),
-            Some(12) => self.modal = Some(Modal::Units),
-            Some(13) => self.modal = Some(Modal::Artefacts),
-            Some(14) => self.modal = Some(Modal::TestPlay),
-            Some(15) => action = self.guarded(Then::Exit),
+            Some(8) => {
+                self.settings.tab = 0;
+                self.modal = Some(Modal::Settings);
+            }
+            Some(9) => self.modal = Some(Modal::Events),
+            Some(10) => self.modal = Some(Modal::Records { buildings: true, scroll: 0 }),
+            Some(11) => self.modal = Some(Modal::Records { buildings: false, scroll: 0 }),
+            Some(12) => self.check(),
+            Some(13) => self.score(),
+            Some(14) => self.modal = Some(Modal::Options(self.options)),
+            Some(15) => self.modal = Some(Modal::Units),
+            Some(16) => self.modal = Some(Modal::Artefacts),
+            Some(17) => {
+                self.overlays.grid = !self.overlays.grid;
+                // Switching the grid on builds the marks again (0x5a37a8).
+                if self.overlays.grid {
+                    self.doc.cells.rebuild_marks(&self.doc.scenario);
+                }
+            }
+            Some(18) => self.overlays.patrols = !self.overlays.patrols,
+            Some(19) => self.overlays.fog = !self.overlays.fog,
+            Some(20) => self.modal = Some(Modal::TestPlay),
+            Some(21) => action = self.guarded(Then::Exit),
             _ => {}
         }
         let s = &self.doc.scenario;
@@ -831,7 +1012,9 @@ impl EditorScreen {
                     self.modal = Some(Modal::Settings);
                 }
                 SettingsAction::PickStart(k) => {
-                    self.tools.set_tool(Tool::HeroStart(k));
+                    // The original places a start from the items palette.
+                    self.tools.choose_page(Page::Items, &self.palette);
+                    self.tools.click_palette(k, &self.palette);
                     self.status = Some(tr("Click the hero's start cell on the map.").into());
                 }
                 SettingsAction::Close => {}
@@ -874,6 +1057,7 @@ impl EditorScreen {
         let (w, h) = match &modal {
             Modal::Confirm { .. } => (560.0, 200.0),
             Modal::Radius { .. } => (420.0, 190.0),
+            Modal::Records { .. } => (560.0f32.min(sw - 40.0), (sh - 100.0).max(300.0)),
             Modal::Options(_) => (520.0, 300.0),
             Modal::TestPlay => (560.0, 230.0),
             Modal::SaveAs { .. } => (620.0, 300.0),
@@ -1105,23 +1289,93 @@ impl EditorScreen {
                     keep = false;
                 }
             }
-            Modal::Radius { id, value } => {
+            Modal::Radius { id, value, initial, placed } => {
                 text(tr("Lantern radius"), x, y, 22.0, ACCENT);
                 text_fit(tr("Radius (0-24)"), x, y + 40.0, 160.0, 17.0, INK);
                 if let Some(v) = number_field("radius:value", x + 170.0, y + 22.0, 150.0, *value, 0, razdor::editor::records::LANTERN_MAX as i64) {
                     *value = v;
                 }
                 let ok = button(r.right() - 270.0, r.bottom() - 54.0, 120.0, 40.0, tr("OK"), true) || (is_key_pressed(KeyCode::Enter) && !popup_open());
-                if ok {
-                    let (id, v) = (*id, *value as u8);
-                    if let Some(p) = self.doc.scenario.points.get(id as usize - 1) {
-                        let p = razdor::dt::dtm::Point { radius: v, ..p.clone() };
-                        self.apply(Command::SetPoint { id, point: Box::new(p) }, "");
-                    }
+                // Cancel gives the dialog's starting value; either way the area is revealed
+                // with the radius (an existing lantern's old area removed first).
+                let cancelled = cancel(&r) || esc;
+                if ok || cancelled {
+                    let radius = if ok { *value } else { *initial } as u8;
+                    self.apply(Command::LanternRadius { id: *id, radius, placed: *placed }, "");
                     keep = false;
                 }
-                // Cancel keeps the default the dialog was given.
-                if cancel(&r) || esc {
+            }
+            Modal::Records { buildings, scroll } => {
+                text(if *buildings { tr("Buildings") } else { tr("Armies") }, x, y, 22.0, ACCENT);
+                y += 16.0;
+                let s = &self.doc.scenario;
+                // (caption, target): group headers have no target; a separator is a blank row.
+                let mut rows: Vec<(String, Option<Target>)> = Vec::new();
+                let group_label = |b: bool, key: u8| -> String {
+                    if b {
+                        razdor::editor::palette::building_type_label(key).to_string()
+                    } else if key == menus::ARMY_UNDEAD {
+                        tr("Undead").to_string()
+                    } else {
+                        tr(razdor::editor::palette::BEHAVIOURS[key as usize]).to_string()
+                    }
+                };
+                if *buildings {
+                    for (k, sec) in menus::building_menu(s).into_iter().enumerate() {
+                        if k > 0 {
+                            rows.push((String::new(), None));
+                        }
+                        for g in sec {
+                            rows.push((group_label(true, g.key), None));
+                            rows.extend(g.items.into_iter().map(|(id, name)| (format!("    #{id} {name}"), Some(Target::Building(id)))));
+                        }
+                    }
+                } else {
+                    let undead = &self.session_names.undead;
+                    for (k, sec) in menus::army_menu(s, |u| undead.contains(&(u as u32))).into_iter().enumerate() {
+                        if k > 0 {
+                            rows.push((String::new(), None));
+                        }
+                        for g in sec {
+                            rows.push((group_label(false, g.key), None));
+                            rows.extend(g.items.into_iter().map(|(id, name)| (format!("    #{id} {name}"), Some(Target::Army(id)))));
+                        }
+                    }
+                }
+                let list = Rect::new(x, y + 10.0, r.w - 40.0, r.bottom() - 74.0 - y - 10.0);
+                let fit = (list.h / 24.0).floor() as usize;
+                if mouse_in(list.x, list.y, list.w, list.h) {
+                    let wh = mouse_wheel().1;
+                    if wh > 0.0 {
+                        *scroll = scroll.saturating_sub(2);
+                    } else if wh < 0.0 {
+                        *scroll += 2;
+                    }
+                }
+                *scroll = (*scroll).min(rows.len().saturating_sub(fit));
+                let mut go = None;
+                for (i, (label, t)) in rows.iter().enumerate().skip(*scroll).take(fit) {
+                    let ry = list.y + (i - *scroll) as f32 * 24.0;
+                    match t {
+                        Some(t) => {
+                            let hover = mouse_in(list.x, ry, list.w, 22.0);
+                            if hover {
+                                draw_rectangle(list.x, ry, list.w, 22.0, Color::new(0.3, 0.25, 0.15, 1.0));
+                            }
+                            text_fit(label, list.x + 4.0, ry + 16.0, list.w - 8.0, 15.0, INK);
+                            if hover && clicked() {
+                                go = Some(*t);
+                            }
+                        }
+                        None => text_fit(label, list.x + 4.0, ry + 16.0, list.w - 8.0, 16.0, ACCENT),
+                    }
+                }
+                if let Some(t) = go {
+                    self.modal = None;
+                    self.centre_on(t);
+                    return action;
+                }
+                if button(r.right() - 140.0, r.bottom() - 54.0, 120.0, 40.0, tr("Close"), true) || esc {
                     keep = false;
                 }
             }

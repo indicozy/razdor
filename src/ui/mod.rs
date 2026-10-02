@@ -205,7 +205,13 @@ impl App {
     /// Opens the map editor (the title screen's button and `--editor`).
     pub fn open_editor(&mut self) {
         if self.editor.is_none() {
-            self.editor = Some(Box::new(editor::EditorScreen::new(&self.assets, self.dt_content.clone(), self.demo.clone())));
+            let mut ed = editor::EditorScreen::new(&self.assets, self.dt_content.clone(), self.demo.clone());
+            // The original opens the last map at start-up (not in a debug snapshot, whose
+            // scene says what to show).
+            if snapshot::target().is_none() {
+                ed.reopen_last();
+            }
+            self.editor = Some(Box::new(ed));
         }
         self.screen = Screen::Editor;
     }
@@ -222,12 +228,8 @@ impl App {
 
     /// A frame of the editor; test play starts a game on the edited map.
     fn editor_frame(&mut self) {
-        if hotkeys::allowed(hotkeys::Place::Editor, hotkeys::Global::Language, self.guard())
-            && !widgets::popup_open()
-            && is_key_pressed(language::KEY)
-        {
-            language::toggle();
-        }
+        // F2 is the editor's quick save there (the original's); the language switches on the
+        // title screen.
         let Some(ed) = self.editor.as_mut() else {
             self.open_editor();
             return;
@@ -315,6 +317,10 @@ impl App {
     /// Before the process ends: the music stops and the settings are written.
     pub fn shutdown(&mut self) {
         self.audio.shutdown();
+        // The editor writes its settings as the original's does when it closes.
+        if let (Some(ed), None) = (self.editor.as_mut(), snapshot::target()) {
+            ed.close();
+        }
     }
 
     /// The music the current screen wants.

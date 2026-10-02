@@ -14,14 +14,17 @@ use crate::dt::DtError;
 use crate::i18n::{n_, tr};
 use crate::trf;
 
-use super::command::{Command, ObjectFilter, Sections, Settings};
-use super::defaults::{new_army, new_building, new_point, new_scenario, NewMap};
-use super::geometry::{brush_indices, flood_region, is_massif, rect_indices, CellRect, Footprint};
+use super::brush::{self, Placed, Refused};
+use super::cells::{army_word, point_word, CellLayer};
+use super::command::{Command, Sections, Settings};
+use super::defaults::{cleared_scenario, new_scenario, NewMap};
+use super::geometry::{flood_region, CellRect, Footprint};
 use super::mapfile::{self, Container};
 use super::records;
 use super::refs;
 use super::validate::{has_errors, self_check, validate, Issue};
 use super::{Names, Palette};
+use crate::rules::rng::Rng;
 
 /// Where the document came from.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -38,8 +41,11 @@ pub enum Origin {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EditError {
     OutOfMap { x: i64, y: i64 },
-    /// A building's footprint would reach outside the map.
-    FootprintOutside,
+    /// The brush square reaches outside the map (hills, forests and buildings need all of
+    /// it inside).
+    SquareOutside,
+    /// A building is already anchored on the cell.
+    Occupied,
     NoSuchBuilding(u16),
     NoSuchArmy(u8),
     NoSuchPoint(u16),
@@ -68,7 +74,8 @@ impl std::fmt::Display for EditError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             EditError::OutOfMap { x, y } => f.write_str(&trf!("({x}, {y}) is outside the map", x, y)),
-            EditError::FootprintOutside => f.write_str(tr("the building would reach outside the map")),
+            EditError::SquareOutside => f.write_str(tr("the brush square reaches outside the map")),
+            EditError::Occupied => f.write_str(tr("a building already stands on this cell")),
             EditError::NoSuchBuilding(id) => f.write_str(&trf!("there is no building {id}", id)),
             EditError::NoSuchArmy(id) => f.write_str(&trf!("there is no army {id}", id)),
             EditError::NoSuchPoint(id) => f.write_str(&trf!("there is no point {id}", id)),
@@ -110,6 +117,8 @@ impl std::fmt::Display for SaveError {
 pub struct Applied {
     /// The id of a placed record.
     pub new_id: Option<u32>,
+    /// What an item placement made.
+    pub placed: Option<Placed>,
     /// Whether anything changed.
     pub changed: bool,
 }
@@ -168,17 +177,17 @@ pub struct EditorDoc {
     saved_serial: u64,
     /// Bumped by every change, undo and redo (for views that cache what they draw).
     pub revision: u64,
+    /// The original's per-cell marks, figure words and reveal counters ([`CellLayer`]).
+    pub cells: CellLayer,
+    /// The editor's random generator (the forest brush, the building names, the burn). The
+    /// original seeds it from the clock at start-up and its map drawing reseeds it.
+    pub rng: Rng,
 }
 
 /// Events a point can hold in the original editor.
 pub const POINT_EVENTS: usize = 5;
 
-/// The original places a building only while fewer than this many exist (0x595390).
-pub const MAX_BUILDINGS: usize = 254;
-/// Armies the original places at most.
-pub const MAX_ARMIES: usize = 255;
-/// Points the original places at most (the 256th overflows its id, [`new_point`]).
-pub const MAX_POINTS: usize = 256;
+pub use super::brush::{MAX_ARMIES, MAX_BUILDINGS, MAX_POINTS};
 
 /// Undo steps kept.
 pub const UNDO_LIMIT: usize = 200;
@@ -208,6 +217,8 @@ fn put_settings(s: &mut Scenario, m: Settings) {
 impl EditorDoc {
     fn with(scenario: Scenario, origin: Origin) -> EditorDoc {
         EditorDoc {
+            cells: CellLayer::load(&scenario),
+            rng: Rng::new(0),
             scenario,
             origin,
             saved_path: None,
@@ -226,6 +237,13 @@ impl EditorDoc {
     pub fn new_map(o: NewMap) -> EditorDoc {
         let mut d = EditorDoc::with(new_scenario(o), Origin::New);
         // A new map is unsaved.
+        d.saved_serial = u64::MAX;
+        d
+    }
+
+    /// The original's File › New: an empty map of this size ([`cleared_scenario`]), unsaved.
+    pub fn cleared(width: u32, height: u32, seed: u32) -> EditorDoc {
+        let mut d = EditorDoc::with(cleared_scenario(width, height, seed), Origin::New);
         d.saved_serial = u64::MAX;
         d
     }
@@ -354,6 +372,19 @@ impl EditorDoc {
         self.group.is_some() || self.current_serial() != self.saved_serial
     }
 
+    /// Counts as changed until the next save, even with nothing changed (the original's
+    /// delete brush and size brushes mark the map modified on every press).
+    pub fn mark_modified(&mut self) {
+        self.saved_serial = u64::MAX;
+    }
+
+    /// Takes the current state for the saved one (the original's "burn everything" leaves
+    /// the modified flag as it was).
+    pub fn mark_unmodified(&mut self) {
+        self.end_group();
+        self.saved_serial = self.current_serial();
+    }
+
     // ---------------------------------------------------------------------------------
     // Undo
     // ---------------------------------------------------------------------------------
@@ -438,6 +469,8 @@ impl EditorDoc {
             self.undo.push(entry);
         }
         self.revision += 1;
+        // The original has no undo: its cell state is built again as a load builds it.
+        self.cells = CellLayer::load(&self.scenario);
         true
     }
 
@@ -534,14 +567,6 @@ impl EditorDoc {
         Ok(())
     }
 
-    fn check_footprint(&self, x: u16, y: u16, size: (u8, u8)) -> Result<(), EditError> {
-        self.check_cell(x as i64, y as i64)?;
-        if !Footprint::of(x as i32, y as i32, size.0, size.1).inside(self.scenario.width(), self.scenario.height()) {
-            return Err(EditError::FootprintOutside);
-        }
-        Ok(())
-    }
-
     fn building_index(&self, id: u16) -> Result<usize, EditError> {
         (id as usize).checked_sub(1).filter(|i| *i < self.scenario.buildings.len()).ok_or(EditError::NoSuchBuilding(id))
     }
@@ -581,117 +606,95 @@ impl EditorDoc {
         let mut out = Applied::default();
         match cmd {
             Command::PaintTerrain { x, y, size, code } => {
-                for i in brush_indices(w, h, x, y, size) {
-                    self.scenario.terrain[i] = code.min(15);
-                }
+                brush::paint_terrain(&mut self.scenario, &mut self.cells, x as i64, y as i64, size, code);
             }
             Command::FillTerrain { x, y, code } => {
                 self.check_cell(x as i64, y as i64)?;
-                for i in flood_region(&self.scenario.terrain, w, h, x, y) {
-                    self.scenario.terrain[i] = code.min(15);
-                }
+                let region = flood_region(&self.scenario.terrain, w, h, x, y);
+                let at = region.into_iter().map(|i| ((i as u32 % w) as i64, (i as u32 / w) as i64));
+                brush::paint_cells(&mut self.scenario, &mut self.cells, at, code);
             }
             Command::RectTerrain { from, to, code } => {
-                for i in rect_indices(w, h, CellRect::spanning(from, to)) {
-                    self.scenario.terrain[i] = code.min(15);
+                let r = CellRect::spanning(from, to);
+                brush::paint_cells(&mut self.scenario, &mut self.cells, r.cells().map(|(x, y)| (x as i64, y as i64)), code);
+            }
+            Command::PlaceObject { x, y, size, class, sprite, facts, replace } => {
+                if !brush::place_object(&mut self.scenario, &mut self.cells, &mut self.rng, x as i64, y as i64, size, class, sprite, &facts, replace) {
+                    return Err(EditError::SquareOutside);
                 }
             }
-            Command::PlaceObjects { x, y, size, class, sprite } => {
-                let Some(r) = CellRect::brush(x, y, size).clip(w, h) else { return Err(EditError::OutOfMap { x: x as i64, y: y as i64 }) };
-                for (cx, cy) in r.cells() {
-                    let o = MapObject { x: cx as u16, y: cy as u16, sprite, class };
-                    if !self.scenario.objects.contains(&o) {
-                        insert_object(&mut self.scenario.objects, o);
-                    }
-                }
+            Command::PlaceBuilding { x, y, picture_type, variant, size, brush: n, names } => {
+                let placed = brush::place_building(&mut self.scenario, &mut self.cells, &mut self.rng, x as i64, y as i64, (picture_type, variant), size, n, names.as_deref());
+                out.new_id = Some(placed.map_err(|e| refused(e, n_("buildings (at most 254)")))? as u32);
             }
-            Command::EraseObjects { x, y, size, filter } => {
-                let r = CellRect::brush(x, y, size);
-                self.scenario.objects.retain(|o| {
-                    let hit = r.contains(o.x as i32, o.y as i32);
-                    let kind = match filter {
-                        ObjectFilter::All => true,
-                        ObjectFilter::Massifs => is_massif(o.class),
-                        ObjectFilter::Plants => !is_massif(o.class),
-                    };
-                    !(hit && kind)
-                });
+            Command::PlaceItem { x, y, kind } => {
+                self.check_cell(x as i64, y as i64)?;
+                let what = if (4..=7).contains(&kind) { n_("armies (at most 255)") } else { n_("points (at most 256)") };
+                let placed = brush::place_item(&mut self.scenario, &mut self.cells, x as i64, y as i64, kind).map_err(|e| refused(e, what))?;
+                out.new_id = match placed {
+                    Placed::HeroStart(_) => None,
+                    Placed::Army(id) => Some(id as u32),
+                    Placed::Point(id) => Some(id as u32),
+                };
+                out.placed = Some(placed);
             }
-            Command::PlaceBuilding { x, y, kind, picture_type, variant, size } => {
-                if self.scenario.buildings.len() >= MAX_BUILDINGS {
-                    return Err(EditError::Full(n_("buildings (at most 254)")));
-                }
-                self.check_footprint(x, y, size)?;
-                let b = new_building(&self.scenario.header, x, y, kind, picture_type, variant, size);
-                self.scenario.buildings.push(b);
-                out.new_id = Some(self.scenario.buildings.len() as u32);
+            Command::DeleteAt { x, y, page } => {
+                brush::delete_at(&mut self.scenario, &mut self.cells, x as i64, y as i64, page);
             }
-            Command::MoveBuilding { id, x, y } => {
-                let i = self.building_index(id)?;
-                let b = &self.scenario.buildings[i];
-                self.check_footprint(x, y, (b.size_x, b.size_y))?;
-                let b = &mut self.scenario.buildings[i];
-                (b.x, b.y) = (x, y);
+            Command::Drop { held, x, y } => {
+                brush::drop(&mut self.scenario, &mut self.cells, held, x as i64, y as i64);
+            }
+            Command::LanternRadius { id, radius, placed } => {
+                self.point_index(id)?;
+                brush::lantern_radius(&mut self.scenario, &mut self.cells, id, radius, placed);
+            }
+            Command::Burn { facts } => {
+                brush::burn(&mut self.scenario, &mut self.rng, &facts);
             }
             Command::DeleteBuilding { id } => {
                 self.building_index(id)?;
                 refs::remove_building(&mut self.scenario, id);
+                self.cells.rebuild_marks(&self.scenario);
             }
             Command::SetBuilding { id, building } => {
                 let i = self.building_index(id)?;
                 self.scenario.buildings[i] = *building;
             }
-            Command::PlaceArmy { x, y, model } => {
-                if self.scenario.armies.len() >= MAX_ARMIES {
-                    return Err(EditError::Full(n_("armies (at most 255)")));
-                }
-                self.check_cell(x as i64, y as i64)?;
-                let id = self.scenario.armies.len() as u8 + 1;
-                let a = new_army(id, x, y, model);
-                self.scenario.armies.push(a);
-                out.new_id = Some(id as u32);
-            }
-            Command::MoveArmy { id, x, y } => {
-                let i = self.army_index(id)?;
-                self.check_cell(x as i64, y as i64)?;
-                let a = &mut self.scenario.armies[i];
-                (a.x, a.y) = (x, y);
-            }
             Command::DeleteArmy { id } => {
                 self.army_index(id)?;
                 refs::remove_army(&mut self.scenario, id);
+                self.cells.rebuild_figures(&self.scenario);
             }
             Command::SetArmy { id, army } => {
                 let i = self.army_index(id)?;
                 if army.id != id {
                     return Err(EditError::IdChanged);
                 }
-                self.scenario.armies[i] = *army;
-            }
-            Command::PlacePoint { x, y, model } => {
-                if self.scenario.points.len() >= MAX_POINTS {
-                    return Err(EditError::Full(n_("points (at most 256)")));
+                // The army window's save writes the figure word (records.md §3), the old one
+                // cleared first.
+                let old = &self.scenario.armies[i];
+                if (old.x, old.y, army_word(old)) != (army.x, army.y, army_word(&army)) {
+                    self.cells.set_figure(old.x as i64, old.y as i64, 0);
+                    self.cells.set_figure(army.x as i64, army.y as i64, army_word(&army));
                 }
-                self.check_cell(x as i64, y as i64)?;
-                let id = self.scenario.points.len() as u16 + 1;
-                self.scenario.points.push(new_point(id, x, y, model.clamp(8, 10)));
-                out.new_id = Some(id as u32);
-            }
-            Command::MovePoint { id, x, y } => {
-                let i = self.point_index(id)?;
-                self.check_cell(x as i64, y as i64)?;
-                let p = &mut self.scenario.points[i];
-                (p.x, p.y) = (x, y);
+                self.scenario.armies[i] = *army;
             }
             Command::DeletePoint { id } => {
                 self.point_index(id)?;
                 refs::remove_point(&mut self.scenario, id);
+                self.cells.rebuild_figures(&self.scenario);
             }
             Command::SetPoint { id, point } => {
                 let i = self.point_index(id)?;
                 // The stored id is the low byte of the position (the 256th point stores 0).
                 if point.id != id as u8 {
                     return Err(EditError::IdChanged);
+                }
+                // Razdor's panel can move a point: its figure word goes along.
+                let old = &self.scenario.points[i];
+                if (old.x, old.y, point_word(old)) != (point.x, point.y, point_word(&point)) {
+                    self.cells.set_figure(old.x as i64, old.y as i64, 0);
+                    self.cells.set_figure(point.x as i64, point.y as i64, point_word(&point));
                 }
                 self.scenario.points[i] = *point;
             }
@@ -827,10 +830,13 @@ pub enum Target {
     Point(u16),
 }
 
-/// Inserts `o` keeping the (y, x) order, after the objects already on its cell.
-fn insert_object(objects: &mut Vec<MapObject>, o: MapObject) {
-    let at = objects.partition_point(|p| (p.y, p.x) <= (o.y, o.x));
-    objects.insert(at, o);
+/// The command error of a refused placement.
+fn refused(e: Refused, what: &'static str) -> EditError {
+    match e {
+        Refused::Full => EditError::Full(what),
+        Refused::Occupied => EditError::Occupied,
+        Refused::Outside => EditError::SquareOutside,
+    }
 }
 
 #[cfg(test)]
@@ -847,7 +853,7 @@ mod tests {
     /// Places an army and saves its window as the original's save button does (a new army
     /// has no faction until then).
     fn place_army(d: &mut EditorDoc, x: u16, y: u16) {
-        let id = d.apply(Command::PlaceArmy { x, y, model: 4 }).unwrap().new_id.unwrap() as u8;
+        let id = d.apply(Command::PlaceItem { x, y, kind: 4 }).unwrap().new_id.unwrap() as u8;
         let a = records::save_army(d.scenario.army(id).unwrap(), None, 2);
         d.apply(Command::SetArmy { id, army: Box::new(a) }).unwrap();
     }
@@ -919,42 +925,42 @@ mod tests {
     }
 
     #[test]
-    fn objects_stack_and_erase() {
+    fn objects_follow_the_cell_grid() {
         let mut d = doc();
-        d.apply(Command::PlaceObjects { x: 3, y: 3, size: 1, class: 9, sprite: 1 }).unwrap();
-        d.apply(Command::PlaceObjects { x: 3, y: 3, size: 1, class: 5, sprite: 20 }).unwrap();
-        d.apply(Command::PlaceObjects { x: 1, y: 1, size: 3, class: 9, sprite: 2 }).unwrap();
-        // The same object twice on a cell is not stacked.
-        let again = d.apply(Command::PlaceObjects { x: 3, y: 3, size: 1, class: 9, sprite: 1 }).unwrap();
+        let facts = crate::editor::palette::ForestFacts::default();
+        let obj = |x, y, size, class, sprite| Command::PlaceObject { x, y, size, class, sprite, facts, replace: false };
+        d.apply(obj(3, 3, 1, 9, 1)).unwrap();
+        d.apply(obj(3, 3, 2, 5, 20)).unwrap();
+        // One plant per cell: a second one replaces the first.
+        d.apply(obj(3, 3, 1, 9, 2)).unwrap();
+        assert_eq!(d.objects_at(3, 3).map(|o| (o.class, o.sprite)).collect::<Vec<_>>(), [(5, 20), (9, 2)]);
+        let again = d.apply(obj(3, 3, 1, 9, 2)).unwrap();
         assert!(!again.changed);
-        assert_eq!(d.objects_at(3, 3).count(), 2);
-        assert_eq!(d.scenario.objects.len(), 11);
-        // Sorted by (y, x); a cell's stack keeps its order.
-        let keys: Vec<(u16, u16)> = d.scenario.objects.iter().map(|o| (o.y, o.x)).collect();
-        assert!(keys.windows(2).all(|w| w[0] <= w[1]));
-        assert_eq!(d.objects_at(3, 3).map(|o| o.class).collect::<Vec<_>>(), [9, 5]);
-        d.apply(Command::EraseObjects { x: 3, y: 3, size: 1, filter: ObjectFilter::Plants }).unwrap();
+        // A square reaching out of the map does nothing.
+        assert_eq!(d.apply(obj(0, 3, 2, 5, 20)), Err(EditError::SquareOutside));
+        // The delete brush of each page.
+        d.apply(Command::DeleteAt { x: 3, y: 3, page: crate::editor::brush::Page::Forests }).unwrap();
         assert_eq!(d.objects_at(3, 3).map(|o| o.class).collect::<Vec<_>>(), [5]);
-        d.apply(Command::EraseObjects { x: 1, y: 1, size: 9, filter: ObjectFilter::All }).unwrap();
+        d.apply(Command::DeleteAt { x: 2, y: 2, page: crate::editor::brush::Page::Hills }).unwrap();
         assert!(d.scenario.objects.is_empty());
         d.undo();
         d.undo();
         assert_eq!(d.objects_at(3, 3).count(), 2);
+        assert_eq!(d.cells.mark(3, 3), -5, "the cells are built again after an undo");
     }
 
     #[test]
     fn buildings_place_move_delete() {
         let mut d = doc();
-        let a = d.apply(Command::PlaceBuilding { x: 5, y: 5, kind: 3, picture_type: 3, variant: 1, size: (4, 4) }).unwrap();
+        let a = d.apply(Command::PlaceBuilding { x: 5, y: 5, picture_type: 3, variant: 1, size: (4, 4), brush: 4, names: None }).unwrap();
         assert_eq!(a.new_id, Some(1));
-        // Footprints must fit: 4x4 anchored at (2, 5) reaches x = -1.
-        assert_eq!(d.apply(Command::PlaceBuilding { x: 2, y: 5, kind: 3, picture_type: 3, variant: 0, size: (4, 4) }), Err(EditError::FootprintOutside));
-        assert_eq!(d.apply(Command::PlaceBuilding { x: 30, y: 5, kind: 3, picture_type: 3, variant: 0, size: (1, 1) }), Err(EditError::OutOfMap { x: 30, y: 5 }));
-        d.apply(Command::PlaceBuilding { x: 12, y: 12, kind: 2, picture_type: 2, variant: 0, size: (3, 3) }).unwrap();
-        d.apply(Command::MoveBuilding { id: 1, x: 8, y: 8 }).unwrap();
+        // The brush square must fit: 4 cells ending at x = 2 reach x = -1.
+        assert_eq!(d.apply(Command::PlaceBuilding { x: 2, y: 5, picture_type: 3, variant: 0, size: (4, 4), brush: 4, names: None }), Err(EditError::SquareOutside));
+        assert_eq!(d.apply(Command::PlaceBuilding { x: 30, y: 5, picture_type: 3, variant: 0, size: (1, 1), brush: 1, names: None }), Err(EditError::SquareOutside));
+        assert_eq!(d.apply(Command::PlaceBuilding { x: 5, y: 5, picture_type: 2, variant: 0, size: (1, 1), brush: 1, names: None }), Err(EditError::Occupied));
+        d.apply(Command::PlaceBuilding { x: 12, y: 12, picture_type: 2, variant: 0, size: (3, 3), brush: 3, names: None }).unwrap();
+        d.apply(Command::Drop { held: crate::editor::brush::Held::Building(1), x: 8, y: 8 }).unwrap();
         assert_eq!((d.scenario.buildings[0].x, d.scenario.buildings[0].y), (8, 8));
-        assert_eq!(d.apply(Command::MoveBuilding { id: 1, x: 1, y: 1 }), Err(EditError::FootprintOutside));
-        assert_eq!(d.apply(Command::MoveBuilding { id: 9, x: 8, y: 8 }), Err(EditError::NoSuchBuilding(9)));
         assert_eq!(d.hit(6, 6), Some(Target::Building(1)));
         assert_eq!(d.hit(10, 10), Some(Target::Building(2)));
         assert_eq!(d.hit(0, 0), None);
@@ -977,19 +983,19 @@ mod tests {
         for k in 0..MAX_BUILDINGS {
             d.scenario.buildings.push(crate::dt::dtm::Building { x: (k % 90) as u16 + 2, y: (k / 90) as u16 + 2, size_x: 1, size_y: 1, ..Default::default() });
         }
-        assert_eq!(d.apply(Command::PlaceBuilding { x: 50, y: 50, kind: 3, picture_type: 3, variant: 0, size: (1, 1) }), Err(EditError::Full("buildings (at most 254)")));
+        assert_eq!(d.apply(Command::PlaceBuilding { x: 50, y: 50, picture_type: 3, variant: 0, size: (1, 1), brush: 1, names: None }), Err(EditError::Full("buildings (at most 254)")));
         d.scenario.buildings.pop();
-        assert!(d.apply(Command::PlaceBuilding { x: 50, y: 50, kind: 3, picture_type: 3, variant: 0, size: (1, 1) }).is_ok());
+        assert!(d.apply(Command::PlaceBuilding { x: 50, y: 50, picture_type: 3, variant: 0, size: (1, 1), brush: 1, names: None }).is_ok());
         for _ in 0..MAX_ARMIES {
-            d.apply(Command::PlaceArmy { x: 1, y: 1, model: 4 }).unwrap();
+            d.apply(Command::PlaceItem { x: 1, y: 1, kind: 4 }).unwrap();
         }
-        assert_eq!(d.apply(Command::PlaceArmy { x: 1, y: 1, model: 4 }), Err(EditError::Full("armies (at most 255)")));
+        assert_eq!(d.apply(Command::PlaceItem { x: 1, y: 1, kind: 4 }), Err(EditError::Full("armies (at most 255)")));
         // 256 points; the 256th stores id 0 and model 9 (the original's overflow), which
         // Razdor's file check lets through with a warning; it can be selected and deleted.
         for _ in 0..MAX_POINTS {
-            d.apply(Command::PlacePoint { x: 2, y: 2, model: 8 }).unwrap();
+            d.apply(Command::PlaceItem { x: 2, y: 2, kind: 8 }).unwrap();
         }
-        assert_eq!(d.apply(Command::PlacePoint { x: 2, y: 2, model: 8 }), Err(EditError::Full("points (at most 256)")));
+        assert_eq!(d.apply(Command::PlaceItem { x: 2, y: 2, kind: 8 }), Err(EditError::Full("points (at most 256)")));
         let last = d.scenario.points.last().unwrap();
         assert_eq!((last.id, last.model), (0, 9));
         // (The test's buildings and armies have no faction: only the points matter here.)
@@ -1002,20 +1008,20 @@ mod tests {
         d.apply(Command::SetPoint { id: 256, point: Box::new(p) }).unwrap();
         d.apply(Command::DeletePoint { id: 256 }).unwrap();
         d.apply(Command::DeletePoint { id: 255 }).unwrap();
-        assert_eq!(d.apply(Command::PlacePoint { x: 3, y: 3, model: 10 }).unwrap().new_id, Some(255));
+        assert_eq!(d.apply(Command::PlaceItem { x: 3, y: 3, kind: 10 }).unwrap().new_id, Some(255));
         assert_eq!(d.scenario.points[254].model, 10, "an AI target point");
     }
 
     #[test]
     fn armies_and_points() {
         let mut d = doc();
-        assert_eq!(d.apply(Command::PlaceArmy { x: 3, y: 4, model: 4 }).unwrap().new_id, Some(1));
-        assert_eq!(d.apply(Command::PlaceArmy { x: 5, y: 4, model: 4 }).unwrap().new_id, Some(2));
-        d.apply(Command::PlaceBuilding { x: 12, y: 12, kind: 3, picture_type: 3, variant: 0, size: (2, 2) }).unwrap();
+        assert_eq!(d.apply(Command::PlaceItem { x: 3, y: 4, kind: 4 }).unwrap().new_id, Some(1));
+        assert_eq!(d.apply(Command::PlaceItem { x: 5, y: 4, kind: 4 }).unwrap().new_id, Some(2));
+        d.apply(Command::PlaceBuilding { x: 12, y: 12, picture_type: 3, variant: 0, size: (2, 2), brush: 2, names: None }).unwrap();
         let mut b = d.scenario.buildings[0].clone();
         b.owner_army = 2;
         d.apply(Command::SetBuilding { id: 1, building: Box::new(b) }).unwrap();
-        d.apply(Command::MoveArmy { id: 2, x: 6, y: 6 }).unwrap();
+        d.apply(Command::Drop { held: crate::editor::brush::Held::Army(2), x: 6, y: 6 }).unwrap();
         assert_eq!(d.hit(6, 6), Some(Target::Army(2)));
         d.apply(Command::DeleteArmy { id: 1 }).unwrap();
         assert_eq!(d.scenario.armies.len(), 1);
@@ -1024,19 +1030,19 @@ mod tests {
         let mut a = d.scenario.armies[0].clone();
         a.id = 5;
         assert_eq!(d.apply(Command::SetArmy { id: 1, army: Box::new(a) }), Err(EditError::IdChanged));
-        assert_eq!(d.apply(Command::PlacePoint { x: 1, y: 1, model: 8 }).unwrap().new_id, Some(1));
-        d.apply(Command::PlacePoint { x: 2, y: 1, model: 9 }).unwrap();
+        assert_eq!(d.apply(Command::PlaceItem { x: 1, y: 1, kind: 8 }).unwrap().new_id, Some(1));
+        d.apply(Command::PlaceItem { x: 2, y: 1, kind: 9 }).unwrap();
         assert_eq!(d.scenario.points.iter().map(|p| (p.id, p.serial, p.model, p.radius)).collect::<Vec<_>>(), [(1, 0, 8, 10), (2, 0, 9, 0)]);
         d.apply(Command::DeletePoint { id: 1 }).unwrap();
         assert_eq!(d.scenario.points[0].id, 1);
         assert_eq!(d.hit(2, 1), Some(Target::Point(1)));
-        assert_eq!(d.apply(Command::MovePoint { id: 3, x: 1, y: 1 }), Err(EditError::NoSuchPoint(3)));
+        assert_eq!(d.apply(Command::LanternRadius { id: 3, radius: 1, placed: false }), Err(EditError::NoSuchPoint(3)));
     }
 
     #[test]
     fn typing_merges_into_one_step() {
         let mut d = doc();
-        d.apply(Command::PlaceBuilding { x: 5, y: 5, kind: 5, picture_type: 5, variant: 0, size: (2, 2) }).unwrap();
+        d.apply(Command::PlaceBuilding { x: 5, y: 5, picture_type: 5, variant: 0, size: (2, 2), brush: 2, names: None }).unwrap();
         for name in ["T", "Ta", "Tav"] {
             let mut b = d.scenario.buildings[0].clone();
             b.name = name.into();
@@ -1065,7 +1071,7 @@ mod tests {
         assert_eq!(d.apply(Command::SetSettings(Box::new(st))), Err(EditError::Resize));
         d.apply(Command::AddNamedCharacter { unit: 7, name: "A".into() }).unwrap();
         d.apply(Command::AddNamedCharacter { unit: 8, name: "B".into() }).unwrap();
-        d.apply(Command::PlaceArmy { x: 1, y: 1, model: 4 }).unwrap();
+        d.apply(Command::PlaceItem { x: 1, y: 1, kind: 4 }).unwrap();
         let mut a = d.scenario.armies[0].clone();
         a.named_character = 2;
         d.apply(Command::SetArmy { id: 1, army: Box::new(a) }).unwrap();
@@ -1113,13 +1119,13 @@ mod tests {
         let dir = temp_dir("roundtrip");
         let mut d = doc();
         d.apply(Command::PaintTerrain { x: 5, y: 5, size: 5, code: 12 }).unwrap();
-        d.apply(Command::PlaceObjects { x: 5, y: 5, size: 1, class: 5, sprite: 20 }).unwrap();
-        d.apply(Command::PlaceBuilding { x: 10, y: 10, kind: 3, picture_type: 3, variant: 0, size: (4, 4) }).unwrap();
+        d.apply(Command::PlaceObject { x: 5, y: 5, size: 1, class: 5, sprite: 20, facts: Default::default(), replace: false }).unwrap();
+        d.apply(Command::PlaceBuilding { x: 10, y: 10, picture_type: 3, variant: 0, size: (4, 4), brush: 4, names: None }).unwrap();
         place_army(&mut d, 15, 15);
         let mut a = d.scenario.armies[0].clone();
         (a.leader_unit, a.name) = (1, "Отряд".into());
         d.apply(Command::SetArmy { id: 1, army: Box::new(a) }).unwrap();
-        d.apply(Command::PlacePoint { x: 2, y: 2, model: 8 }).unwrap();
+        d.apply(Command::PlaceItem { x: 2, y: 2, kind: 8 }).unwrap();
         let path = dir.join("Новая.DTm");
         d.save_to(&path, None, None).unwrap();
         let back = EditorDoc::open(&path, None).unwrap();
@@ -1188,7 +1194,7 @@ mod tests {
     fn old_versions_open_modified() {
         let dir = temp_dir("old");
         let mut d = doc();
-        d.apply(Command::PlaceArmy { x: 3, y: 3, model: 4 }).unwrap();
+        d.apply(Command::PlaceItem { x: 3, y: 3, kind: 4 }).unwrap();
         let mut p = d.scenario.to_payload();
         p[9] = b'3';
         let path = dir.join("old.DTm");
@@ -1242,10 +1248,10 @@ mod tests {
     #[test]
     fn property_edits_land_at_documented_offsets() {
         let mut d = doc();
-        d.apply(Command::PlaceBuilding { x: 10, y: 10, kind: 3, picture_type: 3, variant: 2, size: (4, 4) }).unwrap();
-        d.apply(Command::PlaceBuilding { x: 16, y: 16, kind: 2, picture_type: 2, variant: 0, size: (3, 3) }).unwrap();
-        d.apply(Command::PlaceArmy { x: 3, y: 4, model: 4 }).unwrap();
-        d.apply(Command::PlacePoint { x: 7, y: 8, model: 8 }).unwrap();
+        d.apply(Command::PlaceBuilding { x: 10, y: 10, picture_type: 3, variant: 2, size: (4, 4), brush: 4, names: None }).unwrap();
+        d.apply(Command::PlaceBuilding { x: 16, y: 16, picture_type: 2, variant: 0, size: (3, 3), brush: 3, names: None }).unwrap();
+        d.apply(Command::PlaceItem { x: 3, y: 4, kind: 4 }).unwrap();
+        d.apply(Command::PlaceItem { x: 7, y: 8, kind: 8 }).unwrap();
         let mut b = d.scenario.buildings[1].clone();
         b.gold_per_day = 0x1234;
         b.gold_max = 700;
@@ -1405,8 +1411,8 @@ mod tests {
         e1.results.completes_quest = 3;
         e1.conditions.not_happened = [2, 3];
         d.apply(Command::SetEvent { id: 1, event: Box::new(e1) }).unwrap();
-        d.apply(Command::PlaceBuilding { x: 5, y: 5, kind: 3, picture_type: 3, variant: 0, size: (2, 2) }).unwrap();
-        d.apply(Command::PlacePoint { x: 9, y: 9, model: 9 }).unwrap();
+        d.apply(Command::PlaceBuilding { x: 5, y: 5, picture_type: 3, variant: 0, size: (2, 2), brush: 2, names: None }).unwrap();
+        d.apply(Command::PlaceItem { x: 9, y: 9, kind: 9 }).unwrap();
         d.apply(Command::AttachEvent { place: Target::Building(1), event: 3 }).unwrap();
         d.apply(Command::AttachEvent { place: Target::Point(1), event: 2 }).unwrap();
         d.apply(Command::AttachEvent { place: Target::Point(1), event: 3 }).unwrap();
@@ -1479,9 +1485,9 @@ mod tests {
         for _ in 0..7 {
             d.apply(Command::NewEvent { kind: 2, repeat: false }).unwrap();
         }
-        d.apply(Command::PlacePoint { x: 1, y: 1, model: 9 }).unwrap();
-        d.apply(Command::PlaceBuilding { x: 5, y: 5, kind: 3, picture_type: 3, variant: 0, size: (2, 2) }).unwrap();
-        d.apply(Command::PlaceArmy { x: 8, y: 8, model: 4 }).unwrap();
+        d.apply(Command::PlaceItem { x: 1, y: 1, kind: 9 }).unwrap();
+        d.apply(Command::PlaceBuilding { x: 5, y: 5, picture_type: 3, variant: 0, size: (2, 2), brush: 2, names: None }).unwrap();
+        d.apply(Command::PlaceItem { x: 8, y: 8, kind: 4 }).unwrap();
         for id in 1..=5 {
             d.apply(Command::AttachEvent { place: Target::Point(1), event: id }).unwrap();
         }
@@ -1668,7 +1674,7 @@ mod tests {
     fn a_new_map_plays() {
         // The in-memory scenario builds a game as the test-play button does.
         let mut d = doc();
-        d.apply(Command::PlaceBuilding { x: 12, y: 12, kind: 3, picture_type: 3, variant: 0, size: (2, 2) }).unwrap();
+        d.apply(Command::PlaceBuilding { x: 12, y: 12, picture_type: 3, variant: 0, size: (2, 2), brush: 2, names: None }).unwrap();
         let content = std::sync::Arc::new(crate::rules::content::Content::builtin());
         let g = crate::rules::game::Game::from_scenario(content, &d.scenario, crate::rules::content::HeroClass::Knight);
         assert_eq!(g.world.locations.len(), 1);
