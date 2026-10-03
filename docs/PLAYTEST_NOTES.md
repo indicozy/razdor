@@ -51,3 +51,15 @@ was seen on and what to check.
    follows the hero only while he walks), and in Razdor the camera-follow logic in
    `src/ui/world_view.rs` (the camera following the hero unless moved by the minimap) and the
    route preview's first click.
+
+7. **Second campaign map: the "send the peasants to the mines" offers.** There are three offers to
+   send a group of peasants to the mines. The player accepted two and declined one. The declined
+   offer never came back, although all three should be accepted (the declined one asked again).
+   After the second accepted group, the quest was reported as completed, although only two of
+   three groups were sent. To check, on both branches: the events behind these offers on the
+   second map (their repeat and once flags, the "No" result, the follow-up and the quest's
+   completion condition), against events.md (the ask / Yes / No flow, which results apply on No,
+   repeats and the once flag) and the original under Wine. Related: dt-feat fixed the original's
+   bug "a repeating question without a message asks again next time" (events step), so the
+   branches may differ here; and whether the quest's completion counts groups sent or fires on
+   another condition.
