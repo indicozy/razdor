@@ -439,6 +439,11 @@ building's maximum gold. Then, by type:
   budget, one of three words for a small, a middle and a large force: the first for 1–1000, the second for
   1001–3000 and the third for 3001–9000. **Any other budget (0 or less, or above 9000) leaves the default
   numbered name** (**code**; the words are the game's own and are not given here).
+  - *Razdor's choice (2026-10-03):* on `dt-original` the cut uses the three Russian particles exactly as the
+    original does (ordinary words, kept as code constants). On `dt-feat` Razdor may name armies its own way
+    instead, for example cutting any particle the install's name lists use, picking the prefix from the
+    army's theme as well as its budget, or using the owner's full name with a title by building type.
+    Not implemented yet.
 - **Town and castle extras.**
   - Daily base income: let v = Σ over troop slots of wage(unit price) × count, minus 50, minus the building's
     daily income. If v > 0 it is stored as v div 10 in the army's byte at offset 0x50; a v of 2560 or more
