@@ -34,3 +34,11 @@ was seen on and what to check.
    back-row unit in both games.
    First finding: Razdor does apply it in the damage (`src/rules/battle.rs`, `row2_def` added for
    a row-2 target of a shot), so this is most likely the card and panel not showing the bonus.
+
+5. **Feature request: a setting for the front row's width.** In the settings, a choice between a
+   wide front row (6 cells) and a short one (4 cells). With the short row, the 2 edge cells of the
+   front row become inactive cells, as the back row's edge cells already are. Today the width
+   comes from the install's `OptValue11` (wide by default, see the restored "wide row" choice and
+   battle.md §6), with no in-game switch. To work out: where the setting lives (Razdor's
+   `settings.json` vs the install's option), whether it applies to a battle or a whole game
+   (saves record the row width), and how the reserve row changes with it.
