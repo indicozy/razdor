@@ -31,3 +31,28 @@ differs. Those tables are the work list for bringing Razdor in line.
 Not covered here: the file formats, which are in [../dtm-format.md](../dtm-format.md) and
 [../graphics-formats.md](../graphics-formats.md).
 The older overview with the data-file semantics is [../mechanics.md](../mechanics.md).
+
+## How far this is verified (status 2026-10-03)
+
+Razdor's game logic on the `dt-original` branch was rewritten from these specs and the raw
+decompiler notes, one subsystem at a time, each reviewed against them; `dt-feat` is the same
+rules code with the original's bugs fixed and Razdor's extras on top. That makes Razdor
+*based on* the reverse engineering, not *proven identical* to the original:
+
+- **Nothing was compared with the running original.** Every check was a static reading of the
+  exe plus tests built from the specs' numbers. A misread rule gives a test that agrees with
+  the misreading. The automated comparison under Wine was dropped; side-by-side play of the same
+  map in both games is the real check, and has not been done yet.
+- **Code the parity pass did not touch** is still Razdor's earlier implementation. Much of it
+  already followed earlier readings of the exe, but it was not re-checked line by line.
+- **Unknowns stay guesses.** Where a spec says unknown, Razdor keeps a documented guess.
+- **Coverage is uneven.** Rows marked as matching in the "Razdor now → original" tables, at the
+  time of writing: battle 49 of 50, AI 30 of 30, events 41 of 44, magic and items 45 of 48,
+  saves and data 32 of 36, economy 25 of 34, Community patches 21 of 27, world 25 of 44,
+  experience 12 of 24, interface 19 of 55, engine 8 of 24. Some unmarked rows use other wording
+  ("same", "deviation kept") and do match; the engine and interface gaps are mostly
+  presentation (animation frames, cursors, fonts, music fades), left out on purpose.
+
+**To pick up later:** go through the unmarked world, experience and interface rows and sort the
+ones that change gameplay from presentation; then compare by hand, map by map, with the
+original under Wine.
