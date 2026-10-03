@@ -151,7 +151,7 @@ fn panel(v: &Viewer, s: Subject, x: f32, mut y: f32, w: f32) {
             line(&trf!("Gold {gold}; bank {bank} min", gold = a.gold, bank = a.budget), &mut y, INK);
             for t in &a.troops {
                 let items: Vec<String> = t.worn.iter().flatten().map(|i| c.item(*i).name.clone()).collect();
-                let mut l = format!("{} {} ({} XP)", c.unit(t.unit).name, t.level, t.xp);
+                let mut l = trf!("{name} {level} ({xp} XP)", name = c.unit(t.unit).name, level = t.level, xp = t.xp);
                 if !items.is_empty() {
                     l.push_str(&format!(": {}", items.join(", ")));
                 }

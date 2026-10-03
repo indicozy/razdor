@@ -627,6 +627,7 @@ I refuse to fight with such an army. = С такой армией я воева�
 
 # Map editor: the AI viewer
 AI view = Просмотр ИИ
+{name} {level} ({xp} XP) = {name} {level} ({xp} опыта)
 AI viewer = Просмотр ИИ
 6 min = 6 мин
 1 hour = 1 час
