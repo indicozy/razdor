@@ -63,3 +63,4 @@ was seen on and what to check.
    bug "a repeating question without a message asks again next time" (events step), so the
    branches may differ here; and whether the quest's completion counts groups sent or fires on
    another condition.
+   **To fix** (the user, 2026-10-03): the quest must follow the original's offers and completion.
