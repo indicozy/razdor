@@ -2849,7 +2849,13 @@ mod editor_rules {
         let mut bt = Battle::with_rules(c.clone(), &p, &[Unit::new(&c, UnitId(18), f(2))], Team::Player, Rules::Editor(Switches::default()));
         bt.weaken_unpaid(Team::Player, &[true, true]);
         bt.begin();
-        assert_eq!((bt.fighters[0].base[Stat::AttackBlow], bt.fighters[0].base[Stat::Initiative]), (22, 5 + 1), "30 × 3 >> 2; 10 / 2, then side 1's +1");
+        assert_eq!((bt.fighters[0].base[Stat::AttackBlow], bt.fighters[0].base[Stat::Initiative]), (22, 5 + 1), "30 × 3 / 4; 10 / 2, then side 1's +1");
         assert_eq!(bt.fighters[1].power, 22);
+        // A signed division (0x58b0bb: +3 before the shift when negative), toward zero.
+        let mut bt = Battle::with_rules(c.clone(), &p, &[Unit::new(&c, UnitId(18), f(2))], Team::Player, Rules::Editor(Switches::default()));
+        bt.fighters[0].base[Stat::AttackBlow] = -5;
+        bt.fighters[0].base[Stat::Initiative] = -3;
+        bt.weaken_unpaid(Team::Player, &[true, false]);
+        assert_eq!((bt.fighters[0].base[Stat::AttackBlow], bt.fighters[0].base[Stat::Initiative]), (-3, -1), "−15 / 4 and −3 / 2, not −4 and −2");
     }
 }

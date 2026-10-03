@@ -298,16 +298,16 @@ impl Battle {
 
     /// The editor's battle side of an army built at less than full strength (0x58af74,
     /// `fullStrength` 0): its unpaid units fight, with melee, ranged and magic attack ×3/4
-    /// (×3, then shifted right by 2) and their base initiative halved. `unpaid` follows
+    /// (×3, then divided by 4 rounding toward zero, as is the halved base initiative). `unpaid` follows
     /// `team`'s units in list order. Before [`Battle::begin`].
     pub fn weaken_unpaid(&mut self, team: Team, unpaid: &[bool]) {
         let ids: Vec<usize> = (0..self.fighters.len()).filter(|&i| self.fighters[i].team == team).collect();
         for (&i, _) in ids.iter().zip(unpaid).filter(|(_, &u)| u) {
             let f = &mut self.fighters[i];
             for st in [Stat::AttackBlow, Stat::AttackShot, Stat::MagicPower] {
-                f.base[st] = f.base[st].wrapping_mul(3) >> 2;
+                f.base[st] = f.base[st].wrapping_mul(3) / 4;
             }
-            f.power = f.power.wrapping_mul(3) >> 2;
+            f.power = f.power.wrapping_mul(3) / 4;
             f.base[Stat::Initiative] /= 2;
             f.at_start = f.base.clone();
             self.refresh(i);
