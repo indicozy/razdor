@@ -91,7 +91,7 @@ impl Viewer {
     /// be repeated, or from the clock when `rnd` brings a seed; the armies and buildings from
     /// the editor's records, the events copied, no hero.
     pub fn open(content: Arc<Content>, scenario: &Scenario, switches: Switches, rnd: Option<u32>) -> Viewer {
-        let mut game = Game::for_editor(content, scenario, EditorAi { switches, hero: None });
+        let mut game = Game::for_editor(tester::on_editor_grid(content), scenario, EditorAi { switches, hero: None });
         game.rng = Rng::new(rnd.unwrap_or(1));
         let start = game.clock.total_minutes() as u64;
         Viewer {

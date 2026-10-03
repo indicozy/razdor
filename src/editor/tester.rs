@@ -35,6 +35,16 @@ const MIN_COST: i32 = 10;
 /// The step delay with the delay box on, ms (0x504280).
 pub const STEP_DELAY_MS: u64 = 500;
 
+/// `content` on the editor's battle grid: its front is always 6 wide (0x5bee80), whatever
+/// the player's wide-row option makes the game's.
+pub fn on_editor_grid(content: Arc<Content>) -> Arc<Content> {
+    if content.formation == Formation::WIDE {
+        content
+    } else {
+        Arc::new(content.with_formation(Formation::WIDE))
+    }
+}
+
 /// A tester army's unit: the unit and its strength field (unit +0x6c), which the side
 /// strength and the cost total weigh. A catalogue unit's is its type's gold `Cost`; an army
 /// from the AI viewer brings its tactical costs.
@@ -133,6 +143,7 @@ pub struct Tester {
 
 impl Tester {
     pub fn new(content: Arc<Content>) -> Tester {
+        let content = on_editor_grid(content);
         let mut catalogue: Vec<UnitId> = content.unit_ids().collect();
         catalogue.sort_by_key(|u| u.0);
         Tester { content, catalogue, armies: Default::default(), armed: false, switches: Switches::default(), super_ai: false, all_ai: false, delay: true }
@@ -507,6 +518,22 @@ mod tests {
         assert!(!t.click(0, Slot::new(Row::Front, 2), None), "an empty cell and no type");
         t.swap();
         assert_eq!((t.armies[0].units.len(), t.armies[1].cost), (0, 120));
+    }
+
+    #[test]
+    fn the_grid_is_six_wide_whatever_the_games_option() {
+        let narrow = Arc::new(content().with_formation(Formation::VANILLA));
+        let mut t = Tester::new(narrow);
+        t.clear();
+        assert!(t.click(0, Slot::new(Row::Front, 5), Some(UnitId(3))));
+        assert!(t.click(1, Slot::new(Row::Front, 5), Some(UnitId(1))));
+        t.all_ai = true;
+        let mut run = t.start();
+        assert!(run.battle.is_open(Team::Player, Slot::new(Row::Front, 5)));
+        while !run.over() {
+            run.ai_step();
+        }
+        assert_eq!(run.closing(), vec![Closing::Praise { band: 0, turns: run.battle.round }], "the column-6 units fought");
     }
 
     #[test]
