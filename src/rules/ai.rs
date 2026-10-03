@@ -31,7 +31,7 @@ use std::sync::Arc;
 
 use crate::dt::dtm::Army as DtArmy;
 
-use super::battle::{Battle, Outcome, Team};
+use super::battle::{Battle, Outcome, Rules, Switches, Team};
 use super::clock::MINUTES_PER_DAY;
 use super::content::{Bonus, Content, GlobalOptions, ItemId, Nature, UnitId, WageKind};
 use super::economy::{delphi_round, rear_service, relation_price};
@@ -634,10 +634,20 @@ pub struct Side {
 /// Sets up the off-screen battle between `a` (attacking) and `b` (0x4a0710): the battle
 /// engine on both sides, AI mode 0, both sides auto-arranged, each with its own building
 /// defence; played to its end.
+#[cfg(test)]
 fn fight(c: &Arc<Content>, a: &Side, b: &Side, predict: bool) -> Battle {
+    fight_with(c, a, b, predict, Rules::Game)
+}
+
+/// [`fight`] under `rules`. Under the editor's, the attacker's unpaid units take part,
+/// weakened (0x58af74): its side is built at less than full strength.
+fn fight_with(c: &Arc<Content>, a: &Side, b: &Side, predict: bool, rules: Rules) -> Battle {
     let side: Vec<(usize, &Unit)> = a.units.iter().enumerate().map(|(k, u)| (k + 1, u)).collect();
-    let mut bt = Battle::new(c.clone(), &side, &b.units, Team::Player);
+    let mut bt = Battle::with_rules(c.clone(), &side, &b.units, Team::Player, rules);
     bt.set_simulation();
+    if rules != Rules::Game {
+        bt.weaken_unpaid(Team::Player, &a.units.iter().map(|u| u.unpaid).collect::<Vec<_>>());
+    }
     if !predict {
         bt.skip_prediction();
     }
@@ -670,7 +680,12 @@ fn sim_result(bt: &Battle, na: usize, a: &[Unit], b: &[Unit]) -> SimResult {
 
 /// Plays a simulated battle (the AI's scoring) and returns its HP totals.
 pub fn simulate(c: &Arc<Content>, a: &Side, b: &Side) -> SimResult {
-    let bt = fight(c, a, b, false);
+    simulate_with(c, a, b, Rules::Game)
+}
+
+/// [`simulate`] under `rules`.
+pub fn simulate_with(c: &Arc<Content>, a: &Side, b: &Side, rules: Rules) -> SimResult {
+    let bt = fight_with(c, a, b, false, rules);
     sim_result(&bt, a.units.len(), &a.units, &b.units)
 }
 
@@ -684,12 +699,12 @@ pub struct SimKey {
 
 /// A side of a [`SimKey`]: (type, level, HP, worn items, spells, drain) of each unit, the
 /// defence.
-type UnitKey = (u32, i32, i32, [Option<ItemId>; items::SLOTS], [Option<crate::rules::units::SpellSlot>; crate::rules::units::SPELL_SLOTS], i32);
+type UnitKey = (u32, i32, i32, [Option<ItemId>; items::SLOTS], [Option<crate::rules::units::SpellSlot>; crate::rules::units::SPELL_SLOTS], i32, bool);
 type SideKey = (Vec<UnitKey>, i32);
 
 impl SimKey {
     fn of(a: &Side, b: &Side) -> SimKey {
-        let side = |s: &Side| (s.units.iter().map(|u| (u.def.0, u.level, u.hp, u.items, u.spells, u.drain)).collect(), s.defence);
+        let side = |s: &Side| (s.units.iter().map(|u| (u.def.0, u.level, u.hp, u.items, u.spells, u.drain, u.unpaid)).collect(), s.defence);
         SimKey { sides: [side(a), side(b)] }
     }
 }
@@ -702,7 +717,7 @@ pub struct SimCache(std::collections::HashMap<SimKey, SimResult>);
 const SIM_CACHE_SIZE: usize = 50_000;
 
 impl SimCache {
-    fn get(&mut self, c: &Arc<Content>, a: &Side, b: &Side) -> SimResult {
+    fn get(&mut self, c: &Arc<Content>, a: &Side, b: &Side, rules: Rules) -> SimResult {
         let key = SimKey::of(a, b);
         if let Some(&r) = self.0.get(&key) {
             return r;
@@ -710,7 +725,7 @@ impl SimCache {
         if self.0.len() >= SIM_CACHE_SIZE {
             self.0.clear();
         }
-        let r = simulate(c, a, b);
+        let r = simulate_with(c, a, b, rules);
         self.0.insert(key, r);
         r
     }
@@ -816,6 +831,18 @@ pub enum Party {
     Army(usize),
 }
 
+/// The map editor's copy of the world AI (docs/reference/editor/testers.md §5), which its AI
+/// viewer runs on a [`Game`] of the edited map: battles under the editor's battle engine,
+/// the attacker's unpaid units fighting at three quarters, no mana wages, a step bank in
+/// whole minutes fed in 24-minute ticks ([`Game::editor_step`]) and the editor's promotion
+/// picks. The hero is an army the AI steers too (`hero`, its uid), or there is none; the
+/// game's own hero party takes no part.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EditorAi {
+    pub switches: Switches,
+    pub hero: Option<u32>,
+}
+
 /// Who beat an army.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Beaten {
@@ -831,6 +858,16 @@ pub enum Defender {
 }
 
 impl Game {
+    /// The battle engine the AI's battles run: the game's, or the editor's in its viewer.
+    pub(crate) fn battle_rules(&self) -> Rules {
+        self.editor_ai.map_or(Rules::Game, |e| Rules::Editor(e.switches))
+    }
+
+    /// Army `j` is the editor viewer's hero.
+    fn viewer_hero(&self, j: usize) -> bool {
+        self.editor_ai.and_then(|e| e.hero).is_some_and(|uid| self.world.armies[j].uid == uid)
+    }
+
     /// Anyone (the player or an AI army) beat this scenario army.
     pub fn army_beaten_by_anyone(&self, id: ArmyId) -> bool {
         self.beaten_armies.contains(&id) || self.ai_beaten.contains(&id)
@@ -875,7 +912,9 @@ impl Game {
     /// over army records 0..N.
     fn parties(&self) -> Vec<Party> {
         let on_map = |a: &Army| managed(a) && !a.mind.fallen;
-        std::iter::once(Party::Hero).chain((0..self.world.armies.len()).filter(|&j| on_map(&self.world.armies[j])).map(Party::Army)).collect()
+        // The editor's viewer has no hero party: its hero, if any, is an army.
+        let hero = self.editor_ai.is_none().then_some(Party::Hero);
+        hero.into_iter().chain((0..self.world.armies.len()).filter(|&j| on_map(&self.world.armies[j])).map(Party::Army)).collect()
     }
 
     /// Faction and attitudes: the hero is faction 1 with the header's first row.
@@ -957,7 +996,9 @@ impl Game {
     fn army_side(&self, i: usize, attacking: bool) -> (Side, Vec<usize>) {
         let c = &self.content;
         let a = &self.world.armies[i];
-        let fought: Vec<usize> = (0..a.troops.len()).filter(|&k| a.troops[k].alive() && (!attacking || !a.troops[k].unpaid)).collect();
+        // The editor's copy takes the unpaid along, weakened ([`fight_with`]).
+        let all = self.editor_ai.is_some();
+        let fought: Vec<usize> = (0..a.troops.len()).filter(|&k| a.troops[k].alive() && (!attacking || all || !a.troops[k].unpaid)).collect();
         let units = fought.iter().map(|&k| troop_unit(c, &a.troops[k])).collect();
         (Side { units, defence: a.mind.defence }, fought)
     }
@@ -1001,7 +1042,7 @@ impl Game {
             Party::Hero => (self.hero_side(), self.hero_speed()),
             Party::Army(j) => (self.army_side(j, false).0, self.world.armies[j].speed.max(1)),
         };
-        let s = self.sims.borrow_mut().get(c, &side, &theirs);
+        let s = self.sims.borrow_mut().get(c, &side, &theirs, self.battle_rules());
         let a = &self.world.armies[i];
         let pr = Priorities::of(&c.options, a.ai.model);
         let o = &c.options;
@@ -1119,7 +1160,7 @@ impl Game {
                 attack = attack / 4 + 1;
             } else {
                 let (side, _) = self.army_side(i, true);
-                let s = self.sims.borrow_mut().get(c, &side, &self.garrison_side(l));
+                let s = self.sims.borrow_mut().get(c, &side, &self.garrison_side(l), self.battle_rules());
                 let (a0, b0) = (s.own, s.theirs);
                 let (a1, b1) = (s.own_left.min(a0), s.theirs_left.min(b0));
                 if !((a1 == a0 && b1 == b0) || s.turn as i32 == o.battle_end_turn) {
@@ -1369,6 +1410,8 @@ impl Game {
                     Some(t) => step_minutes(map.grid, here, t, left, a.speed.max(1)),
                     None => left as f32 * a.speed.max(1) as f32,
                 };
+                // The editor's bank is in whole minutes (0x584b60).
+                let need = if self.editor_ai.is_some() { need.floor() } else { need };
                 (need, next, !hero.cells.contains(&Some(to)))
             };
             if self.world.armies[i].budget < need {
@@ -1670,6 +1713,9 @@ impl Game {
             }
         }
         let path = (field.kept > 0).then(|| world.map.descend(&field, here));
+        if self.editor_ai.is_some() {
+            self.editor_plan = Some((uid, mult, field.dist.clone()));
+        }
 
         let a = &mut self.world.armies[i];
         // A path read puts its index back at its start; with no seed the path is one cell
@@ -1791,6 +1837,9 @@ impl Game {
                     if self.cached(i, key) > 0 && !self.ignored(p) {
                         match p {
                             Party::Hero => result = Some(Contact::Attack),
+                            // The viewer's hero is met, not fought: the game would open the
+                            // player's battle.
+                            Party::Army(j) if self.viewer_hero(j) => result = Some(Contact::Attack),
                             Party::Army(j) => {
                                 self.ai_battle(i, Defender::Army(j));
                             }
@@ -1806,6 +1855,9 @@ impl Game {
                         self.world.armies[j].mind.scores.insert(uid, v);
                     }
                 }
+            } else if matches!(p, Party::Army(j) if self.viewer_hero(j)) {
+                // A friendly hero is greeted only after his step, and the viewer's never
+                // steps as the player does.
             } else if p != Party::Hero || hero_step {
                 let mine = self.talk_of(i, key);
                 if p == Party::Hero && mine > 0 {
@@ -2259,7 +2311,7 @@ impl Game {
         let xp = self.hire_xp(i, unit, p);
         let mut pool = Vec::new();
         if xp > 0 {
-            ai_hire_gain(&c, &mut self.rng, &mut t, xp, &mut pool);
+            ai_hire_gain(&c, &mut self.rng, &mut t, xp, &mut pool, self.editor_ai.is_some());
         }
         let a = &mut self.world.armies[i];
         a.gold -= price;
@@ -2297,7 +2349,7 @@ impl Game {
                         let xp = self.hire_xp(i, r.unit, p);
                         let mut pool = Vec::new();
                         if xp > 0 {
-                            ai_hire_gain(&c, &mut self.rng, &mut t, xp, &mut pool);
+                            ai_hire_gain(&c, &mut self.rng, &mut t, xp, &mut pool, self.editor_ai.is_some());
                         }
                         self.world.locations[l].garrison.push(t);
                         self.ai_stats.hired += 1;
@@ -2527,6 +2579,7 @@ impl Game {
     /// goes to the attacker when its end strength is strictly greater, else to the defender.
     /// Returns true when the defender was wiped out (or had nobody).
     pub fn ai_battle(&mut self, att: usize, def: Defender) -> bool {
+        let editor = self.editor_ai.is_some();
         let c = self.content.clone();
         let o = c.options.clone();
         let now = self.clock.total_minutes();
@@ -2562,7 +2615,7 @@ impl Game {
             Defender::Garrison(l) => (0..self.world.locations[l].stationed.len()).filter(|&k| self.world.locations[l].stationed[k].unit.alive()).collect(),
             Defender::Army(_) => Vec::new(),
         };
-        let bt = fight(&c, &side_a, &side_b, true);
+        let bt = fight_with(&c, &side_a, &side_b, true, self.battle_rules());
         let na = side_a.units.len();
         drop((side_a, side_b));
         self.ai_stats.battles += 1;
@@ -2640,7 +2693,7 @@ impl Game {
             for (n, &k) in fought_a.iter().enumerate().filter(|&(n, _)| bt.fighters[n].alive()) {
                 let xp = award(Team::Player, n);
                 let t = &mut self.world.armies[att].troops[k];
-                ai_gain_xp(&c, &mut self.rng, t, xp, pct, &mut pool);
+                ai_gain_xp_as(&c, &mut self.rng, t, xp, pct, &mut pool, editor);
             }
             let a = &mut self.world.armies[att];
             revive_leader(&c, &mut a.troops);
@@ -2698,7 +2751,7 @@ impl Game {
                 Defender::Army(j) => {
                     for (n, &k) in fought_b.iter().enumerate().filter(|&(n, _)| bt.fighters[na + n].alive()) {
                         let xp = award(Team::Enemy, na + n);
-                        ai_gain_xp(&c, &mut self.rng, &mut self.world.armies[j].troops[k], xp, pct, &mut pool);
+                        ai_gain_xp_as(&c, &mut self.rng, &mut self.world.armies[j].troops[k], xp, pct, &mut pool, self.editor_ai.is_some());
                     }
                     let b = &mut self.world.armies[j];
                     revive_leader(&c, &mut b.troops);
@@ -2709,14 +2762,14 @@ impl Game {
                 Defender::Garrison(l) => {
                     for (n, &k) in fought_b.iter().enumerate().filter(|&(n, _)| bt.fighters[na + n].alive()) {
                         let xp = award(Team::Enemy, na + n);
-                        ai_gain_xp(&c, &mut self.rng, &mut self.world.locations[l].garrison[k], xp, pct, &mut pool);
+                        ai_gain_xp_as(&c, &mut self.rng, &mut self.world.locations[l].garrison[k], xp, pct, &mut pool, self.editor_ai.is_some());
                     }
                     // The player's units left here are in the same garrison record in the
                     // original: its survivors gain, and roll for promotion, by the AI's rule.
                     let first = na + fought_b.len();
                     let loc = &mut self.world.locations[l];
                     for (m, &k) in fought_s.iter().enumerate().filter(|&(m, _)| bt.fighters.get(first + m).is_some_and(|f| f.alive())) {
-                        stationed_gain_xp(&c, &mut self.rng, &mut loc.stationed[k].unit, award(Team::Enemy, first + m), pct, &mut pool);
+                        stationed_gain_xp(&c, &mut self.rng, &mut loc.stationed[k].unit, award(Team::Enemy, first + m), pct, &mut pool, editor);
                     }
                     for t in loc.garrison.iter_mut().filter(|t| !t.alive()) {
                         pool.extend(t.worn.iter_mut().filter_map(Option::take));
@@ -2979,6 +3032,9 @@ impl Game {
     /// every unit last paid more than `MaxTimeNotUpkeep` ago leaves.
     fn ai_pay_wages(&mut self, i: usize, now: u64) {
         let c = self.content.clone();
+        // The editor's copy has no Community mana wages (0x5855b4).
+        let editor = self.editor_ai.is_some();
+        let in_mana = |u: UnitId| !editor && c.paid_in_mana(u);
         let mut bill = self.army_totals(i).wages;
         if self.squad_has_any(&Bonus::AddPayment) {
             bill = rear_service(bill, self.stored_income);
@@ -2988,7 +3044,7 @@ impl Game {
         let mana_bill: i32 = self.world.armies[i]
             .troops
             .iter()
-            .filter(|t| t.alive() && t.kind == WageKind::Recruit && c.paid_in_mana(t.unit))
+            .filter(|t| t.alive() && t.kind == WageKind::Recruit && in_mana(t.unit))
             .map(|t| c.wage_for(t.unit, t.kind))
             .sum();
         self.pay_mana_bill(mana_bill);
@@ -3000,7 +3056,7 @@ impl Game {
                 t.last_paid = now;
                 if !flag {
                     t.unpaid = false;
-                } else if c.paid_in_mana(t.unit) {
+                } else if in_mana(t.unit) {
                     t.unpaid = true;
                 }
             }
@@ -3013,11 +3069,11 @@ impl Game {
             let pick = (0..a.troops.len())
                 .filter(|&k| {
                     let t = &a.troops[k];
-                    !t.unpaid && t.kind.is_paid() && !c.paid_in_mana(t.unit)
+                    !t.unpaid && t.kind.is_paid() && !in_mana(t.unit)
                 })
                 .min_by_key(|&k| (c.wage_for(a.troops[k].unit, a.troops[k].kind), k));
             if flag {
-                for t in a.troops.iter_mut().take(11).filter(|t| c.paid_in_mana(t.unit)) {
+                for t in a.troops.iter_mut().take(11).filter(|t| in_mana(t.unit)) {
                     t.unpaid = true;
                 }
                 flag = false;
@@ -3053,6 +3109,90 @@ impl Game {
         }
     }
 }
+
+impl Game {
+    /// Puts this game under the editor's world AI (the AI viewer's).
+    pub(crate) fn set_editor_ai(&mut self, e: Option<EditorAi>) {
+        self.editor_ai = e;
+        self.sims.borrow_mut().0.clear();
+    }
+
+    /// One 6-minute step of the editor's AI viewer (0x58eaf0, after its event scan): a new
+    /// 24-minute AI tick opens when the clock is a multiple of 24, then the clock moves on,
+    /// midnight's work runs, the beaten armies whose time has come return, and every army
+    /// the AI steers, in order, banks 24 minutes on a new tick (up to 200) and takes the
+    /// steps its bank covers, each an arrival. Returns the uid of the army that met the
+    /// hero in this step (the last in order, as the original's one global keeps).
+    pub(crate) fn editor_step(&mut self) -> Option<u32> {
+        let new_tick = (self.clock.total_minutes() as u64).is_multiple_of(EDITOR_TICK);
+        let ticks = self.clock.advance(EDITOR_STEP as f64);
+        for t in ticks {
+            if matches!(t, super::clock::Tick::Midnight(_)) {
+                self.midnight();
+            }
+        }
+        let now = self.clock.total_minutes();
+        self.ai_respawns(now);
+        let hero = HeroCells { cells: [None, None], at: (-1, -1) };
+        for a in &mut self.world.armies {
+            a.mind.contact = None;
+        }
+        let uids: Vec<u32> = self.world.armies.iter().filter(|a| managed(a)).map(|a| a.uid).collect();
+        for uid in uids {
+            let Some(i) = self.army_by_uid(uid) else { continue };
+            let a = &mut self.world.armies[i];
+            if stationary(a) || now <= a.mind.busy_until {
+                continue;
+            }
+            if new_tick {
+                a.budget = (a.budget + EDITOR_TICK as f32).min(super::world::AI_BUDGET_CAP);
+            }
+            self.ai_walk(uid, &hero);
+        }
+        self.world.armies.iter().rev().find(|a| managed(a) && a.mind.contact.is_some()).map(|a| a.uid)
+    }
+}
+
+impl Game {
+    /// Army `i` plans now, as the viewer's density and flood overlays make it (0x583c6c):
+    /// its distances to everyone else, then [`Game::ai_plan`]; the maps are kept in
+    /// `editor_plan`.
+    pub(crate) fn editor_replan(&mut self, i: usize) {
+        let here = self.world.armies[i].tile(&self.world.map);
+        let grid = self.world.map.grid;
+        let dist: Vec<(Party, i32)> = self.parties().into_iter().filter(|&p| p != Party::Army(i)).map(|p| (p, grid.octile(here, self.cell_of(p)))).collect();
+        let hero = HeroCells { cells: [None, None], at: (-1, -1) };
+        self.ai_plan(i, &dist, &hero);
+    }
+
+    /// The viewer's predicted battle of army `a` attacking army `b` (0x58f930): `a` built at
+    /// less than full strength, `b` at full, the editor's battle engine headless.
+    pub(crate) fn editor_predict(&self, a: usize, b: usize) -> SimResult {
+        let (side_a, _) = self.army_side(a, true);
+        let (side_b, _) = self.army_side(b, false);
+        let bt = fight_with(&self.content, &side_a, &side_b, true, self.battle_rules());
+        sim_result(&bt, side_a.units.len(), &side_a.units, &side_b.units)
+    }
+
+    /// The viewer's cached scores between army `a` and party key `key` (its army–army score
+    /// and its talk counter) and between `a` and building `l`.
+    pub(crate) fn editor_scores(&self, a: usize, key: u32) -> (i32, i32) {
+        (self.cached(a, key), self.talk_of(a, key))
+    }
+
+    pub(crate) fn editor_building_score(&self, a: usize, l: usize) -> i32 {
+        self.stored_building(a, l)
+    }
+
+    /// The viewer's debug button (0x592f00): a fresh army–army score, thrown away.
+    pub(crate) fn editor_test_score(&self, a: usize, b: usize) -> i32 {
+        self.army_score_of(a, Party::Army(b))
+    }
+}
+
+/// The AI viewer's step and the AI tick that feeds the editor's step bank, in minutes.
+pub const EDITOR_STEP: u64 = 6;
+pub const EDITOR_TICK: u64 = 24;
 
 /// Writes a fighter's end HP `hp` into troop `t`: dead (the time of death now, unless it was
 /// already dead or keeps one from an earlier death: 0x4a4c68 sets it only when it is 0), or
@@ -3109,13 +3249,18 @@ const MAX_LEVELS_AT_ONCE: i32 = 200;
 /// An AI unit's gain (0x4a4a7c): `award × pct div 100` XP, then one try at the upgrade tree
 /// ([`ai_promote`]), the roll made even when nothing was gained.
 pub fn ai_gain_xp(c: &Content, rng: &mut Rng, t: &mut Troop, award: i32, pct: i32, pool: &mut Vec<ItemId>) {
+    ai_gain_xp_as(c, rng, t, award, pct, pool, false);
+}
+
+/// [`ai_gain_xp`], with the editor's promotion picks when `editor`.
+fn ai_gain_xp_as(c: &Content, rng: &mut Rng, t: &mut Troop, award: i32, pct: i32, pool: &mut Vec<ItemId>, editor: bool) {
     troop_gain_xp(c, t, (pct as i64 * award as i64 / 100) as i32);
-    ai_promote(c, rng, t, pool);
+    ai_promote(c, rng, t, pool, editor);
 }
 
 /// XP a newly hired AI unit starts with (0x4a4c04): fed level by level, each level a gain
 /// with a promotion try; what does not reach a level stays as its XP.
-fn ai_hire_gain(c: &Content, rng: &mut Rng, t: &mut Troop, xp: i32, pool: &mut Vec<ItemId>) {
+fn ai_hire_gain(c: &Content, rng: &mut Rng, t: &mut Troop, xp: i32, pool: &mut Vec<ItemId>, editor: bool) {
     let mut left = xp.max(0).saturating_add(t.xp);
     for _ in 0..MAX_LEVELS_AT_ONCE {
         let need = c.xp_to_next(t.unit, t.level);
@@ -3123,7 +3268,7 @@ fn ai_hire_gain(c: &Content, rng: &mut Rng, t: &mut Troop, xp: i32, pool: &mut V
             t.xp = left;
             return;
         }
-        ai_gain_xp(c, rng, t, need, 100, pool);
+        ai_gain_xp_as(c, rng, t, need, 100, pool, editor);
         left -= need;
         if left == 0 {
             return;
@@ -3136,8 +3281,8 @@ fn ai_hire_gain(c: &Content, rng: &mut Rng, t: &mut Troop, xp: i32, pool: &mut V
 /// slot 1 otherwise, any other class `Rand(3) + 1` until it hits a filled slot. The pick is
 /// taken when its `NextUnitNLevel` is at most the unit's 0-based level: the unit becomes that
 /// class at level 1 (the original's 0) with no XP, its worn items to the pool.
-fn ai_promote(c: &Content, rng: &mut Rng, t: &mut Troop, pool: &mut Vec<ItemId>) -> bool {
-    let Some(target) = ai_pick(c, rng, t.unit, t.level) else { return false };
+fn ai_promote(c: &Content, rng: &mut Rng, t: &mut Troop, pool: &mut Vec<ItemId>, editor: bool) -> bool {
+    let Some(target) = ai_pick(c, rng, t.unit, t.level, editor) else { return false };
     let before = troop_hp(c, t);
     t.unit = target;
     t.level = 1;
@@ -3150,23 +3295,27 @@ fn ai_promote(c: &Content, rng: &mut Rng, t: &mut Troop, pool: &mut Vec<ItemId>)
 /// The class a unit of type `unit` at `level` (1 = as hired) takes by the AI's roll in the
 /// upgrade tree ([`ai_promote`]), if the pick is open to it. The roll is made whenever the
 /// type has an option, so it always advances the seed then.
-fn ai_pick(c: &Content, rng: &mut Rng, unit: UnitId, level: i32) -> Option<UnitId> {
+///
+/// The editor's copy (0x585f08) takes option 2 where the game takes option 3 for the two
+/// fixed picks: Militia 1 or 2, Infantry 2 or 1.
+fn ai_pick(c: &Content, rng: &mut Rng, unit: UnitId, level: i32, editor: bool) -> Option<UnitId> {
     let def = c.unit(unit);
     let slots: [Option<&super::content::Upgrade>; 3] = [1u8, 2, 3].map(|n| def.upgrades.iter().find(|u| u.slot == n && u.target.is_some()));
     if slots.iter().all(Option::is_none) {
         return None;
     }
+    let other = if editor { 2 } else { 3 };
     let pick = match unit.0 {
         4 => {
             if rng.random(3) == 0 {
                 1
             } else {
-                3
+                other
             }
         }
         8 => {
             if rng.random(3) == 0 {
-                3
+                other
             } else {
                 1
             }
@@ -3191,9 +3340,9 @@ fn ai_pick(c: &Content, rng: &mut Rng, unit: UnitId, level: i32) -> Option<UnitI
 /// div 100, then the AI's roll in the upgrade tree, which may promote it, its worn items to
 /// the battle's pool. The original keeps the player's units in the garrison record, so the
 /// AI's rule reaches them too.
-fn stationed_gain_xp(c: &Content, rng: &mut Rng, u: &mut Unit, award: i32, pct: i32, pool: &mut Vec<ItemId>) {
+fn stationed_gain_xp(c: &Content, rng: &mut Rng, u: &mut Unit, award: i32, pct: i32, pool: &mut Vec<ItemId>, editor: bool) {
     u.gain_xp(c, (pct as i64 * award as i64 / 100) as i32);
-    if let Some(target) = ai_pick(c, rng, u.def, u.level) {
+    if let Some(target) = ai_pick(c, rng, u.def, u.level, editor) {
         let before = u.max_hp(c);
         u.def = target;
         u.level = 1;
@@ -3228,3 +3377,6 @@ mod tests;
 #[cfg(test)]
 mod real_maps;
 
+
+#[cfg(test)]
+mod editor_tests;

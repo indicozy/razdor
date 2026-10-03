@@ -2840,4 +2840,16 @@ mod editor_rules {
         bt.pass();
         assert_eq!(bt.fighters[0].stats[Stat::Initiative], 11);
     }
+
+    #[test]
+    fn unpaid_units_fight_at_three_quarters_with_half_initiative() {
+        let c = content_with(vec![mage(58, 30, MagicSchool::Death, MagicDirection::ToEnemy)], Formation::WIDE);
+        let squad = [Unit::new(&c, UnitId(10), f(2)), Unit::new(&c, UnitId(58), b(2))];
+        let p: Vec<_> = squad.iter().enumerate().collect();
+        let mut bt = Battle::with_rules(c.clone(), &p, &[Unit::new(&c, UnitId(18), f(2))], Team::Player, Rules::Editor(Switches::default()));
+        bt.weaken_unpaid(Team::Player, &[true, true]);
+        bt.begin();
+        assert_eq!((bt.fighters[0].base[Stat::AttackBlow], bt.fighters[0].base[Stat::Initiative]), (22, 5 + 1), "30 × 3 >> 2; 10 / 2, then side 1's +1");
+        assert_eq!(bt.fighters[1].power, 22);
+    }
 }

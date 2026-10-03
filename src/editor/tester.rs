@@ -42,6 +42,9 @@ pub const STEP_DELAY_MS: u64 = 500;
 pub struct Placed {
     pub unit: Unit,
     pub value: i32,
+    /// Built for battle at less than full strength while unpaid (an AI viewer army's
+    /// attacker, 0x58af74): it fights weakened wherever it stands.
+    pub weak: bool,
 }
 
 /// One army: its units in list order, the cost label's total and the building defence its
@@ -77,6 +80,23 @@ impl Army {
     fn sum(&self) -> i32 {
         self.units.iter().fold(0i32, |a, p| a.wrapping_add(p.value))
     }
+}
+
+/// An army of `units` in building defence `defence`, auto-arranged (0x4f5d50) by their
+/// values, its cost total summed.
+pub fn arrange(c: &Arc<Content>, units: Vec<Placed>, defence: i32) -> Army {
+    let plain: Vec<Unit> = units.iter().map(|p| p.unit.clone()).collect();
+    let squad: Vec<(usize, &Unit)> = plain.iter().enumerate().collect();
+    let mut bt = Battle::with_rules(c.clone(), &squad, &[], Team::Player, Rules::Editor(Switches::default()));
+    bt.set_values(Team::Player, &units.iter().map(|p| p.value).collect::<Vec<_>>());
+    bt.set_building_defence(Team::Player, defence);
+    bt.auto_arrange(Team::Player);
+    let mut army = Army { units, building_defence: defence, ..Army::default() };
+    for (p, f) in army.units.iter_mut().zip(&bt.fighters) {
+        p.unit.slot = f.slot;
+    }
+    army.cost = army.sum();
+    army
 }
 
 /// The grid cells of the battle grid that exist (`row ≤ col ≤ 7 − row`, 1-based).
@@ -125,7 +145,7 @@ impl Tester {
     /// A catalogue unit of type `id` on `slot` (0x5771c0): the type's base stats, no level
     /// gains, no items, full HP; its strength field is the gold cost.
     pub fn catalogue_unit(&self, id: UnitId, slot: Slot) -> Placed {
-        Placed { unit: Unit::new(&self.content, id, slot), value: self.content.unit(id).cost }
+        Placed { unit: Unit::new(&self.content, id, slot), value: self.content.unit(id).cost, weak: false }
     }
 
     /// Super AI (0x57ebac): ticking it ticks all-AI as well; unticking leaves all-AI on.
@@ -219,17 +239,7 @@ impl Tester {
     /// Catalogue units of `ids`, auto-arranged (0x4f5d50) by their gold costs.
     fn arranged(&self, ids: &[UnitId]) -> Army {
         let units: Vec<Placed> = ids.iter().map(|&id| self.catalogue_unit(id, Slot::new(Row::Front, 0))).collect();
-        let plain: Vec<Unit> = units.iter().map(|p| p.unit.clone()).collect();
-        let squad: Vec<(usize, &Unit)> = plain.iter().enumerate().collect();
-        let mut bt = Battle::with_rules(self.content.clone(), &squad, &[], Team::Player, Rules::Editor(self.switches));
-        bt.set_values(Team::Player, &units.iter().map(|p| p.value).collect::<Vec<_>>());
-        bt.auto_arrange(Team::Player);
-        let mut army = Army { units, ..Army::default() };
-        for (p, f) in army.units.iter_mut().zip(&bt.fighters) {
-            p.unit.slot = f.slot;
-        }
-        army.cost = army.sum();
-        army
+        arrange(&self.content, units, 0)
     }
 
     /// The type number (1-based catalogue place) of a unit, 0 if its type is not there.
@@ -270,7 +280,7 @@ impl Tester {
                     let v = sec.map_or(0, |sec| sec.get(&format!("U{r}{c}")).map_or(0, crate::dt::ini::loose_int));
                     let Some(&id) = usize::try_from(v).ok().filter(|&v| v > 0).and_then(|v| self.catalogue.get(v - 1)) else { continue };
                     let row = [Row::Front, Row::Back, Row::Reserve][r as usize - 1];
-                    let p = Placed { unit: Unit::new(&self.content, id, Slot::new(row, c - 1)), value: self.content.unit(id).cost };
+                    let p = Placed { unit: Unit::new(&self.content, id, Slot::new(row, c - 1)), value: self.content.unit(id).cost, weak: false };
                     army.units.push(p);
                 }
             }
@@ -365,6 +375,7 @@ impl Run {
         for (s, team) in TEAMS.into_iter().enumerate() {
             bt.set_values(team, &values[s]);
             bt.set_building_defence(team, t.armies[s].building_defence);
+            bt.weaken_unpaid(team, &t.armies[s].units.iter().map(|p| p.weak).collect::<Vec<_>>());
         }
         // Super AI is mode 1: side 1, the bottom army, gets the full killable test.
         bt.set_ai_level(u8::from(t.super_ai));

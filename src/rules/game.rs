@@ -362,6 +362,14 @@ pub struct Game {
     /// The AI's simulated battles already played (`rules::ai`).
     #[serde(skip)]
     pub(crate) sims: std::cell::RefCell<ai::SimCache>,
+    /// The map editor's AI viewer runs the editor's copy of the world AI on this game
+    /// (`rules::ai::EditorAi`); `None` in the game.
+    #[serde(skip)]
+    pub(crate) editor_ai: Option<ai::EditorAi>,
+    /// The editor viewer's last plan: the army's uid, its density map and its flood
+    /// distances (the AI viewer's overlays).
+    #[serde(skip)]
+    pub(crate) editor_plan: Option<(u32, Vec<u16>, Vec<u16>)>,
 }
 
 /// What an AI army's step needs of the hero: the cells it may not enter (his own and the
@@ -481,6 +489,8 @@ impl Game {
             improved_ai: false,
             ai_events: Vec::new(),
             sims: Default::default(),
+            editor_ai: None,
+            editor_plan: None,
         };
         // The hero draws no wage; everyone counts as paid at the start.
         let now = clock.total_minutes() as u64;
@@ -526,6 +536,25 @@ impl Game {
     pub fn from_scenario(content: Arc<Content>, scenario: &Scenario, hero: HeroClass) -> Self {
         let mut g = Game::unstarted(content, scenario, hero);
         g.start_script();
+        g
+    }
+
+    /// A game for the map editor's AI viewer (testers.md §3): the edited map's world with no
+    /// hero party, run by the editor's world AI ([`ai::EditorAi`]). Its armies' speed is
+    /// their record's byte 13 + 4 (0x58b9d0), not the game's 5 − byte 13.
+    pub(crate) fn for_editor(content: Arc<Content>, scenario: &Scenario, editor: ai::EditorAi) -> Game {
+        let world = World::from_scenario(scenario, &content);
+        let leader = Unit::new(&content, HeroClass::Knight.unit(), content.formation.new_unit_slot(&[]).expect("empty formation"));
+        let mut g = Game::with_world(content, world, vec![leader], (-1, -1));
+        g.editor_ai = Some(editor);
+        // The viewer's clock starts at the header's start time (the game's a minute later).
+        g.clock = Clock::at_minutes(scenario.header.start_time as u64);
+        for a in g.world.armies.iter_mut().chain(g.world.inactive.iter_mut()) {
+            if let Some(d) = scenario.armies.iter().find(|d| d.id == a.id) {
+                a.speed = (d.speed_correction as i32 + 4).max(0) as u32;
+            }
+        }
+        g.ai_init(false);
         g
     }
 
@@ -1277,7 +1306,7 @@ impl Game {
 
     /// 00:00 (world.md §6): villages refill (slower as they fill), barracks may gain a unit,
     /// garrisons heal `GarrisonAutoHeal`% — the player's and the AI's.
-    fn midnight(&mut self) {
+    pub(crate) fn midnight(&mut self) {
         // Village refill, barracks growth, market redraw and garrison/medic healing
         // (economy.md), then the AI's night (world.md §6).
         self.economy_midnight();

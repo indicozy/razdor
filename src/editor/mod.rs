@@ -29,6 +29,7 @@ pub mod palette;
 pub mod records;
 pub mod refs;
 pub mod tester;
+pub mod viewer;
 pub mod tools;
 pub mod validate;
 pub mod worldgen;
