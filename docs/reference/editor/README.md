@@ -20,3 +20,13 @@ manual or the shipped maps, not traced), **unknown** (not determined).
 
 Each file ends with a **"Razdor editor now → original"** table: the work list for Razdor's
 editor. The map file format itself is in [../dtm-format.md](../dtm-format.md).
+
+## How far this is verified (status 2026-10-03)
+
+Razdor's editor on `dt-original` was rebuilt from these specs in six reviewed steps (files and
+map check, record windows, main window and tools, new-map generator, world generator, testers).
+As with the game, this is static reading plus tests from the specs' numbers: no map was made in
+the original editor and compared cell by cell with Razdor's, so "same map for the same seed" is
+the aim the code follows, not a measured fact. The specs still list 34 unknowns, most of which
+need the original editor running to settle. `dt-feat` does not have this editor work yet; carrying
+it over (fixing the original editor's bugs there instead of copying them) is the next step.
