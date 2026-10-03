@@ -702,6 +702,8 @@ pub struct UnitDef {
     pub magic: Option<MagicSchool>,
     pub magic_direction: Option<MagicDirection>,
     pub nature: Nature,
+    /// `Nature=People`: the editor's own nature 6 (0x5baf84), which the game reads as 0.
+    pub people: bool,
     pub bonus: Option<Bonus>,
     /// The bonus as the map editor reads it, with its own name table (DTMapEdit 0x5baf1c,
     /// docs/reference/editor/testers.md §4): the editor knows four names the game does not,
@@ -759,6 +761,7 @@ impl UnitDef {
             magic_direction: f.enum_opt("MagicDirection", MagicDirection::parse),
             // `People`, the editor's name, is no name the exe knows: 0, as is no value.
             nature: f.enum_opt("Nature", |v| if v == "People" { Some(Nature::Normal) } else { Nature::parse(v) }).unwrap_or_default(),
+            people: f.str("Nature") == Some("People"),
             bonus: f.enum_opt("Bonus", Bonus::known_token),
             editor_bonus: f.str("Bonus").and_then(editor_bonus),
             surrender: f.int("Surrender"),
@@ -771,6 +774,15 @@ impl UnitDef {
         };
         f.warnings_into(warnings);
         Some(UnitDef { extra: f.extra(), ..unit })
+    }
+
+    /// The nature as the map editor reads it: `People` is its own (6), not Normal.
+    pub fn editor_nature(&self) -> Nature {
+        if self.people {
+            Nature::People
+        } else {
+            self.nature
+        }
     }
 
     /// The unit's value of a base stat.

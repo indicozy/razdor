@@ -307,6 +307,7 @@ impl Fighter {
             let from_items = base.bonuses.iter().skip(own).any(|b| b.vanilla_index().is_some());
             base.bonuses.retain(|b| b.vanilla_index().is_some());
             base.evasion = 0;
+            base.nature = content.unit(unit.def).editor_nature();
             extra = content.unit(unit.def).editor_bonus.and_then(EditorBonus::of_id).filter(|_| !from_items);
         }
         // One bonus per unit: each worn item with a bonus overwrites the unit's, the last one

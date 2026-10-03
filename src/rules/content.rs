@@ -378,6 +378,7 @@ pub(crate) mod testkit {
             magic: None,
             magic_direction: None,
             nature: Nature::Normal,
+            people: false,
             bonus: None,
             editor_bonus: None,
             surrender: 0,

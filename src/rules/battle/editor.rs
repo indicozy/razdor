@@ -271,4 +271,28 @@ impl Battle {
             cands.push((front, (v + i64::from(front == f.slot)) as f64, front));
         }
     }
+
+    /// The AI's level (battle B+8): 0, nobody gets the full killable test; 1, side 1 (the
+    /// player's side) does; 2, both.
+    pub fn set_ai_level(&mut self, level: u8) {
+        self.ai_level = level;
+    }
+
+    /// HP `team` has lost through the damage routine (side +0xC).
+    pub fn hp_lost(&self, team: Team) -> i64 {
+        self.side_lost(team)
+    }
+
+    /// The cell the AI would act on with the active fighter: a target's, a step's, the own
+    /// cell for a pass, the empty enemy front cell for a pull.
+    pub fn ai_target_cell(&self) -> Option<(Team, Slot)> {
+        let id = self.active()?;
+        let f = &self.fighters[id];
+        Some(match self.ai_plan()? {
+            Plan::Act(t, _) => (self.fighters[t].team, self.fighters[t].slot),
+            Plan::Move(s) => (f.team, s),
+            Plan::Pass => (f.team, f.slot),
+            Plan::Pull(t) => (self.fighters[t].team, Slot::new(Row::Front, self.fighters[t].slot.col)),
+        })
+    }
 }

@@ -7,7 +7,7 @@
 //! `title`, `authors`, `options`, `scenarios`, `tutorial`, `load`, `editor[:<what>[:<map>]]`
 //! (`<what>`: `units`, `artefacts`, `options`, `settings`, `events`, `grid`, `fog`, `newmap[<type>]`
 //! (the new-map dialog; with a map type 0–7 a run of it), `records`
-//! (the buildings submenu), `page<k>` (tool page 0–4), or a record `a<n>`, `b<n>`, `p<n>` of
+//! (the buildings submenu), `tester` (the battle tester), `page<k>` (tool page 0–4), or a record `a<n>`, `b<n>`, `p<n>` of
 //! `<map>` opened in the editor), `classes:<map>`, `map:<map>[:x,y]`, `minimap:<map>`, `walk:<map>:dx,dy` (the
 //! hero sets off that many cells away), `building:<map>:<n>`
 //! (the hero in the n-th building), `army:<map>`, `journal:<map>`, `spells:<map>`,

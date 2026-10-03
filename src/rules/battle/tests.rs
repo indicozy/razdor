@@ -2697,6 +2697,12 @@ mod editor_rules {
         bt.fighters[0].hp = 20;
         bt.act(1).unwrap();
         assert_eq!(bt.fighters[0].hp, 35, "the game's: all but undead and elementals");
+        // `People` is the editor's own nature (the game reads Normal): no vampirism either.
+        let folk = UnitDef { people: true, hits: 200, ..warrior(49, 1, 0) };
+        let mut bt = ed(vec![UnitDef { vampirism: 50, ..warrior(43, 30, 0) }, folk], &[(43, f(2))], &[(49, f(2))]);
+        bt.fighters[0].hp = 20;
+        bt.act(1).unwrap();
+        assert_eq!((bt.fighters[0].hp, bt.fighters[1].stats.nature), (20, Nature::People));
         let reaper = mage(45, 30, MagicSchool::Death, ToAlly);
         let units = vec![rogue, reaper];
         // Life healer 13 and Death healer 45 on an elemental 17, a Rogue 44 and a Normal 10.

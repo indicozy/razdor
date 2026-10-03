@@ -13,6 +13,7 @@ mod newmap;
 mod palette_panel;
 mod props;
 mod settings;
+mod tester;
 mod worldgen;
 
 use std::path::PathBuf;
@@ -106,6 +107,8 @@ enum Modal {
     /// The unit editor and the artefact editor.
     Units,
     Artefacts,
+    /// The battle tester (its state is [`EditorScreen::tester`]).
+    Tester,
 }
 
 pub struct EditorScreen {
@@ -155,6 +158,9 @@ pub struct EditorScreen {
     newmap: Option<newmap::NewMapState>,
     /// The world generator while it is open.
     worldgen: Option<worldgen::WorldGenState>,
+    /// The battle tester, made at its first opening and kept for the session (the
+    /// original's window is made once).
+    tester: Option<tester::TesterState>,
 }
 
 fn ctrl() -> bool {
@@ -213,6 +219,7 @@ impl EditorScreen {
             catalog_state: catalog::CatalogState::default(),
             newmap: None,
             worldgen: None,
+            tester: None,
         }
     }
 
@@ -460,6 +467,7 @@ impl EditorScreen {
             }
             "fog" => self.overlays.fog = true,
             "records" => self.modal = Some(Modal::Records { buildings: true, scroll: 0 }),
+            "tester" => self.open_tester(),
             // The world generator on its tab (0–2).
             w if w.starts_with("worldgen") => {
                 let s = &self.doc.scenario;
@@ -496,6 +504,14 @@ impl EditorScreen {
 
     /// The unit or artefact editor stored its draft: the session's tables change, and so do
     /// the names the pickers offer.
+    /// The battle tester's window, made at the first opening from the session's unit table.
+    fn open_tester(&mut self) {
+        if self.tester.is_none() {
+            self.tester = Some(tester::TesterState::new(razdor::editor::tester::Tester::new(self.catalog.clone())));
+        }
+        self.modal = Some(Modal::Tester);
+    }
+
     fn set_catalog(&mut self, c: Content) {
         self.session_names = Names::from_content(&c);
         self.catalog = Arc::new(c);
@@ -918,6 +934,7 @@ impl EditorScreen {
             (tr("Grid"), true, Some(self.overlays.grid)),
             (tr("Patrol zones"), true, Some(self.overlays.patrols)),
             (tr("Fog"), true, Some(self.overlays.fog)),
+            (tr("Battle test"), true, None),
             (tr("Test play"), true, None),
             (tr("Exit"), true, None),
         ];
@@ -997,8 +1014,9 @@ impl EditorScreen {
             }
             Some(19) => self.overlays.patrols = !self.overlays.patrols,
             Some(20) => self.overlays.fog = !self.overlays.fog,
-            Some(21) => self.modal = Some(Modal::TestPlay),
-            Some(22) => action = self.guarded(Then::Exit),
+            Some(21) => self.open_tester(),
+            Some(22) => self.modal = Some(Modal::TestPlay),
+            Some(23) => action = self.guarded(Then::Exit),
             _ => {}
         }
         let s = &self.doc.scenario;
@@ -1193,6 +1211,7 @@ impl EditorScreen {
             Modal::SaveAs { .. } => (620.0, 300.0),
             Modal::NewMap => (900.0f32.min(sw - 20.0), 680.0f32.min(sh - 20.0)),
             Modal::WorldGen => (820.0f32.min(sw - 20.0), 640.0f32.min(sh - 20.0)),
+            Modal::Tester => (1040.0f32.min(sw - 20.0), 690.0f32.min(sh - 20.0)),
             _ => (720.0f32.min(sw - 40.0), (sh - 100.0).max(300.0)),
         };
         let r = Rect::new((sw - w) / 2.0, ((sh - h) / 2.0).max(10.0), w, h);
@@ -1271,6 +1290,11 @@ impl EditorScreen {
             Modal::WorldGen => {
                 self.worldgen_window(r);
                 keep = self.worldgen.is_some();
+            }
+            Modal::Tester => {
+                if let Some(st) = &mut self.tester {
+                    keep = matches!(tester::window(st, r), tester::TesterAction::None);
+                }
             }
             Modal::Open { path, scroll, format } => {
                 text(tr("Open a map"), x, y, 22.0, ACCENT);
