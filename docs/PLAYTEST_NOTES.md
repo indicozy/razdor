@@ -32,3 +32,5 @@ was seen on and what to check.
    in the damage (a test on a row-2 target hit by a shot), and whether the original shows it on
    the unit card and panel while Razdor does not (display only). Compare the card of the same
    back-row unit in both games.
+   First finding: Razdor does apply it in the damage (`src/rules/battle.rs`, `row2_def` added for
+   a row-2 target of a shot), so this is most likely the card and panel not showing the bonus.
