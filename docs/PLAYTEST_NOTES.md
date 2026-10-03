@@ -24,3 +24,11 @@ was seen on and what to check.
    shot, spell, hit, death) and the level-up effect, from the install's art (Graphics/Battle,
    Graphics/Spells) and interface.md / engine.md (animation timings). Presentation was left out
    of the parity pass on purpose, so this is open work, not a regression.
+
+4. **No ranged defence (Защита стрелковая) on the back row.** Seen in battle: units in the back
+   row show or get no ranged defence. The spec says the original adds Row2Def (+5 in the
+   shipped `_Global.ini`) to a row-2 target's defence against shots, after any piercing, in the
+   damage formula (battle.md, Row 2 defence, 0x485a04). To check: whether Razdor applies the +5
+   in the damage (a test on a row-2 target hit by a shot), and whether the original shows it on
+   the unit card and panel while Razdor does not (display only). Compare the card of the same
+   back-row unit in both games.
