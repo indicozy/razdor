@@ -42,3 +42,12 @@ was seen on and what to check.
    battle.md §6), with no in-game switch. To work out: where the setting lives (Razdor's
    `settings.json` vs the install's option), whether it applies to a battle or a whole game
    (saves record the row width), and how the reserve row changes with it.
+
+6. **The camera jumps back to the hero on the first click.** With the hero off screen (the map
+   scrolled away), a single click on a place moves the view straight back to the hero. Wanted:
+   the view stays where it is while the route is chosen, so a second click on the same place
+   (the route preview's confirm, a double click) can be made there; only once the hero starts
+   walking does the view go back to him. To check: what the original does (whether its camera
+   follows the hero only while he walks), and in Razdor the camera-follow logic in
+   `src/ui/world_view.rs` (the camera following the hero unless moved by the minimap) and the
+   route preview's first click.
