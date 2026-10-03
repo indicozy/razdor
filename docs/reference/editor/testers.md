@@ -288,8 +288,10 @@ Overlays for a picked army:
   the flood map runs the army's planning.
 
 The mouse readout gives the cell and its value. A click fills a 9×9 table of the values around
-the cell. The table has a bug: near the top edge the column start is clamped instead of the row
-start (0x592144).
+the cell. The window is cut at the map's right and bottom edges, not moved inside, so the table
+then fills only partly (the rest keeps the last click's text); a cell off the map reads 0. The
+table has a bug: near the top edge the column start is clamped instead of the row start
+(0x592144).
 
 Buttons:
 - two buttons open the **battle tester** with the two picked armies, either one as side 1
@@ -315,9 +317,23 @@ Buttons:
   - the meet army;
   - the flag string, without the game's counter stripping and without its tutorial keyword.
   **code**
-- **Meet quirk:** a meet event passes only on the step in which that army met the hero. The
-  army's "met" flag, however, is set as soon as the other conditions pass, even without a
-  meeting. **code** (disassembly 0x58e83a–0x58e869)
+- **Meet quirk:** a meet event passes only while that army is the last one to have met the
+  hero. The viewer notes the army at the meeting and never clears the note, so the event keeps
+  passing on later scans until another army meets the hero. The army's "met" flag is set as
+  soon as the conditions checked before it pass, even without a meeting. **code** (disassembly
+  0x58e83a–0x58e869; the only write to the note is 0x58ecaa)
+- **Order and details** (0x58deac): the done byte, the 60-minute rule, the window (a start
+  below 0 counts from 0; with a repeat the window opens every `repeat div 1440` days at the
+  start's minute of the day), the once flag, the hero class, the hero's figures (they fail
+  without a hero), buildings (a slot with owner code 0 is skipped; codes 1 and 6 also pass on
+  a building of faction 0 or 5), units, artefacts (the faction searches leave the hero's army
+  out; a faction's unit must carry exactly the slot's name; any unnamed unit an event brought
+  fills a hero slot), happened, not happened, defeated, active, inactive, beaten, the meet
+  army, "happened, answer no" (it reads only the answer, which the viewer never sets), then
+  the flag test (a `/` anywhere in the test is taken out and turns it into "absent"; the
+  script ends at a second `%`). **code**
+- **Flag quirk:** `-X^` for a name that is not in the flag string lowers the byte at the
+  name's length less one from the string's start. **code** (0x58d9d8)
 - **Repeat quirk:** a repeating event with a period under one day divides by zero.
   **code** (decompile)
 - **Results** (0x58d9d8):
@@ -393,7 +409,7 @@ The AI viewer and the world generator use a copy of the game's world AI (0x57ec1
 
 1. **Unpaid units fight at three quarters.** When an army is built for battle as the attacking
    side, every living unit takes part. An unpaid unit has its melee, ranged and magic attack
-   ×3/4 and its base initiative halved (0x58af74). In the game the attacker's unpaid units stay
+   ×3/4 and its base initiative halved, both rounded toward zero (0x58af74). In the game the attacker's unpaid units stay
    out (game 49855c). This applies in the AI's simulated battles (0x580410), the viewer's
    predictions and the viewer's battle buttons. The army window's figure (§6) uses full strength.
 2. **No Community economy.** Elementals are not paid in mana, and the hero's gold has no checksum
@@ -458,8 +474,8 @@ The tactical cost formula matches the game's (experience.md §1), but there are 
 | Opening and seed | a `Game` of the map under `EditorAi` (`src/rules/ai.rs`), the generator set to 1 after the load, or from the clock with the seed box (at the next opening); clock at the header's start time; income totals | §3.1 | matches; the market roll at the load is the game loader's |
 | Hero | none, or a class whose preset has a position, before time runs: an army the AI steers (preset troops above type 3, items worn, faction 1, aggression −20, speed 4, start buildings the hero's) | §3.1 | matches |
 | Time | 6-minute steps, the 1/10/60-step buttons, run and stop; a 24-minute AI tick banks 24 minutes up to 200, whole minutes | §3.2 | matches |
-| Event engine | global events on the ticks with the events box; the conditions and results listed; meet only on the step of the meeting, the army marked met anyway; the 60-minute rule; chains; victory and defeat stop the clock | §3.4 | matches; a repeat under a day (the original divides by zero) and an event firing again within one scan (endless in the original) stop the clock with a message; the hero's strength condition uses the summed tactical costs |
-| Overlays, grid, predictions | route, density (the plan's multiplier map) and flood distances, planning the army; mouse readout; 9 × 9 grid with the top-edge clamp bug; two predicted battles; battle buttons; debug score | §3.3 | matches |
+| Event engine | global events on the ticks with the events box; the conditions in the original's order with the details of §3.4 (done byte, start below 0, the daily window, figures need a hero, owner code 0, faction searches without the hero, exact names, the answer-only "answer no", the `/` and second-`%` reading, the `-X^` quirk); meet while the army is the last to have met the hero, the army marked met anyway; the 60-minute rule; chains; victory and defeat stop the clock | §3.4 | matches; a repeat under a day (the original divides by zero) and an event firing again within one scan (endless in the original) stop the clock with a message; the hero's strength condition uses the summed tactical costs; the meeting note starts empty at each opening (the original's lasts the session) |
+| Overlays, grid, predictions | route, density (the plan's multiplier map) and flood distances, planning the army; mouse readout; 9 × 9 grid cut at the edges, 0 off the map, with the top-edge clamp bug; two predicted battles; battle buttons; debug score | §3.3 | matches; cells the window does not reach are blank, not the last click's text |
 | World AI copy | `EditorAi`: editor battle rules with the switches, unpaid units ×3/4 attack and ½ initiative on the attacking side, speed byte 13 + 4, no mana wages, the editor's promotion picks | §5 | partly: the editor's stat recomputation (no item-id guard, no HP rescale) and its own cost-map build order are the game's |
 | Game unchanged | the game's battles and world AI run as before; their tests pass unchanged | — | — |
 

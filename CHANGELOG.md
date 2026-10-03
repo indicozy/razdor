@@ -639,11 +639,14 @@ old id, and their versions give both.
   runs) or none; armies at their record's speed byte + 4, banking 24 minutes every
   24-minute AI tick, the attacker's unpaid units fighting at three quarters, the editor's
   promotion picks, no mana wages. Its cut-down event engine runs the global events on those
-  ticks (flags, activation, artefacts lost, relative starts, chains, meetings only on the
-  step of the meeting, the 60-minute rule); a repeat under a day, where the original divides
-  by zero, stops the clock. Two subjects with their panels, scores, predicted battles both
-  ways and buttons that open the battle tester with the pair; the route, density and flood
-  overlays with the 9 × 9 grid and its top-edge bug.
+  ticks, its conditions in the original's order and reading (flags, activation, artefacts
+  lost, relative starts, chains, a meeting passing until another army meets the hero, the
+  60-minute rule, the daily window, figures that need a hero, faction searches without the
+  hero); a repeat under a day, where the original divides by zero, stops the clock. Two
+  subjects with their panels, scores, predicted battles both ways and buttons that open the
+  battle tester with the pair; the route, density and flood overlays with the 9 × 9 grid,
+  cut at the map's edges, and its top-edge bug. Both testers fight on the editor's 6-wide
+  grid whatever the game's wide-row option.
 
 ## 0.2.2 — 2026-10-01
 

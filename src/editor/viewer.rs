@@ -10,7 +10,7 @@ use std::sync::Arc;
 use crate::dt::dtm::{Archetype, Army as DtArmy, Event, Scenario};
 use crate::rules::ai::{self, EditorAi, SimResult, EDITOR_STEP, EDITOR_TICK};
 use crate::rules::battle::Switches;
-use crate::rules::content::{Content, HeroClass, ItemId, UnitId};
+use crate::rules::content::{Content, HeroClass, ItemId, UnitId, WageKind};
 use crate::rules::events::EventWorld;
 use crate::rules::game::Game;
 use crate::rules::rng::Rng;
@@ -75,7 +75,7 @@ pub struct Viewer {
     states: Vec<EvState>,
     /// The viewer's flag string (entries end in a non-breaking space).
     flags: Vec<u8>,
-    /// The army (id) that met the hero in the last step.
+    /// The army (id) that met the hero last (0x104f924, never cleared).
     met: Option<u8>,
     /// Messages of the events fired, oldest first.
     pub messages: Vec<String>,
@@ -170,8 +170,12 @@ impl Viewer {
                 return;
             }
         }
+        // The original's global is only ever written by a meeting: the last army to have met
+        // the hero stays "met" for every later scan until another one meets him.
         let met = self.game.editor_step();
-        self.met = met.filter(|&u| u != HERO_UID).and_then(|u| self.game.world.armies.iter().find(|a| a.uid == u)).map(|a| a.id);
+        if let Some(id) = met.filter(|&u| u != HERO_UID).and_then(|u| self.game.world.armies.iter().find(|a| a.uid == u)).map(|a| a.id) {
+            self.met = Some(id);
+        }
     }
 
     /// `n` steps (the buttons: 1 = 6 minutes, 10 = 1 hour, 60 = 6 hours), stopping with the
@@ -223,35 +227,44 @@ impl Viewer {
         }
     }
 
-    /// The conditions (0x58deac). `Err` where the original divides by zero.
+    /// The conditions (0x58deac), in the original's order. `Err` where the original divides
+    /// by zero.
     fn passes(&mut self, k: usize) -> Result<bool, ViewerStop> {
         let e = &self.scenario.events[k];
         let st = self.states[k];
-        let now = self.now();
+        let now = self.now() as i64;
         let c = &e.conditions;
-        if c.meet_army == 0 && st.last + REFIRE_MINUTES >= now {
+        // A subordinate event (its "done" byte) fires only through a chain.
+        if e.subordinate != 0 {
             return Ok(false);
         }
+        if c.meet_army == 0 && st.last as i64 + REFIRE_MINUTES as i64 >= now {
+            return Ok(false);
+        }
+        // A start before 0 counts from 0.
         let start = match st.start {
             Some(s) => s as i64,
             None => e.start_time as i32 as i64,
-        };
-        if start < 0 || start > now as i64 {
+        }
+        .max(0);
+        if start > now {
             return Ok(false);
         }
         let duration = if e.duration == 0 { 1 } else { e.duration as i64 };
+        // The window opens on the start's day, or every `repeat div 1440` days from it, at the
+        // start's minute of the day, for `duration` × 60 minutes.
+        let days = (now - start) / 1440;
+        let opened = start + days * 1440;
         if e.repeat != 0 {
-            // The period in days, `repeat div 1440`: under a day it is 0 and the original
-            // divides by it.
+            // The period in days: under a day it is 0 and the original divides by it.
             let period = e.repeat as i64 / 1440;
             if period == 0 {
                 return Err(ViewerStop::RepeatUnderADay { event: k as u16 + 1 });
             }
-            let days = (now as i64 - start) / 1440;
-            if days % period != 0 || (now as i64).rem_euclid(1440) > start.rem_euclid(1440) + duration * 60 {
+            if days % period != 0 || now > opened + duration * 60 {
                 return Ok(false);
             }
-        } else if now as i64 > start + duration * 60 {
+        } else if now > start + duration * 60 {
             return Ok(false);
         }
         if e.once != 0 && st.fired != 0 {
@@ -262,64 +275,43 @@ impl Viewer {
             return Ok(false);
         }
         let hero = self.hero_index().map(|i| &self.game.world.armies[i]);
+        // The hero's figures: with no hero the check fails.
         if c.stats_check != 0 {
-            if let Some(h) = hero {
-                let level = h.troops.first().map_or(0, |t| t.level as i64 - 1);
-                let strength: i64 = h.troops.iter().map(|t| ai::tactical_modes(&self.game.content, t, 0).1 as i64).sum();
-                let ok = threshold(c.level, level) && threshold(c.gold, h.gold as i64) && threshold(c.squad_count, h.troops.len() as i64) && threshold(c.army_strength, strength);
-                if !ok {
-                    return Ok(false);
-                }
+            let Some(h) = hero else { return Ok(false) };
+            let level = h.troops.first().map_or(0, |t| t.level as i64 - 1);
+            let strength: i64 = h.troops.iter().map(|t| ai::tactical_modes(&self.game.content, t, 0).1 as i64).sum();
+            let ok = threshold(c.level, level) && threshold(c.gold, h.gold as i64) && threshold(c.squad_count, h.troops.len() as i64) && threshold(c.army_strength, strength);
+            if !ok {
+                return Ok(false);
             }
         }
         let g = &self.game;
         if c.buildings_check != 0 {
             for (&b, &code) in c.buildings.iter().zip(&c.buildings_owner) {
-                if b == 0 {
+                if b == 0 || code == 0 {
                     continue;
                 }
                 let Some(l) = g.world.locations.iter().find(|l| l.id == b as u16) else { return Ok(false) };
                 let mine = matches!(l.owner, Owner::Player | Owner::Army(0));
-                let ok = match code {
-                    1 => mine,
-                    6 => !mine,
-                    _ => l.faction == code.wrapping_sub(1),
-                };
+                // Codes 1 and 6 also pass on a building of faction 0 or 5.
+                let ok = (code == 1 && mine) || (code == 6 && !mine) || l.faction == code.wrapping_sub(1);
                 if !ok {
                     return Ok(false);
                 }
             }
         }
-        if c.units_check != 0 {
-            let mut used: Vec<usize> = Vec::new();
-            for k in 0..3 {
-                let (t, named, code) = (c.units[k], c.units_named[k], c.units_owner[k]);
-                if t == 0 {
-                    continue;
-                }
-                let ok = match code {
-                    1 | 6 => {
-                        let found = hero.and_then(|h| (0..h.troops.len()).find(|&j| !used.contains(&j) && h.troops[j].alive() && h.troops[j].unit == UnitId(t as u32) && (named == 0 || (j == 0 && h.named == named))));
-                        if let Some(j) = found {
-                            used.push(j);
-                        }
-                        (code == 1) == found.is_some()
-                    }
-                    _ => g.faction_units(code.wrapping_sub(1)).iter().flatten().any(|u| u.unit == t as u32 && (named == 0 || u.named == named)),
-                };
-                if !ok {
-                    return Ok(false);
-                }
-            }
+        if c.units_check != 0 && !self.units_hold(c) {
+            return Ok(false);
         }
         if c.artifacts_check != 0 {
             for (&item, &code) in c.artifacts.iter().zip(&c.artifacts_owner) {
-                if item != 0 && !g.faction_worn_items(code.wrapping_sub(1)).contains(&item) {
+                let worn = |a: &Army| a.faction == code.wrapping_sub(1) && a.troops.iter().any(|t| t.worn.contains(&Some(ItemId(item as u32))));
+                if item != 0 && !self.records().any(worn) {
                     return Ok(false);
                 }
             }
         }
-        let fired = |id: u16| id == 0 || self.states.get(id as usize - 1).is_some_and(|s| s.fired > 0);
+        let fired = |id: u16| self.states.get((id as usize).wrapping_sub(1)).is_some_and(|s| s.fired > 0);
         let answer = |id: u16| self.states.get((id as usize).wrapping_sub(1)).map_or(0, |s| s.answer);
         if c.happened_yes_check != 0 && !c.happened_yes.iter().all(|&id| id == 0 || (fired(id) && answer(id) != 1)) {
             return Ok(false);
@@ -327,13 +319,7 @@ impl Viewer {
         if c.not_happened_check != 0 && !c.not_happened.iter().all(|&id| id == 0 || !fired(id)) {
             return Ok(false);
         }
-        if c.happened_no_check != 0 && !c.happened_no.iter().all(|&id| id == 0 || (fired(id) && answer(id) == 1)) {
-            return Ok(false);
-        }
         if c.defeated_check != 0 && !c.defeated_armies.iter().all(|&a| a == 0 || g.player_defeated(a)) {
-            return Ok(false);
-        }
-        if c.beaten_check != 0 && !c.beaten_armies.iter().all(|&a| a == 0 || g.army_beaten(a)) {
             return Ok(false);
         }
         if c.army_active != 0 && !g.army_active(c.army_active) {
@@ -342,18 +328,87 @@ impl Viewer {
         if c.army_inactive != 0 && !g.army_inactive(c.army_inactive) {
             return Ok(false);
         }
-        if let Some(test) = flag_parts(e).1 {
+        if c.beaten_check != 0 && !c.beaten_armies.iter().all(|&a| a == 0 || g.army_beaten(a)) {
+            return Ok(false);
+        }
+        if c.meet_army != 0 {
+            // The army's met flag is set as soon as everything before passed, meeting or not;
+            // the event passes only while that army is the last to have met the hero
+            // (0x58e83a).
+            self.game.met_armies.insert(c.meet_army);
+            if self.met != Some(c.meet_army) {
+                return Ok(false);
+            }
+        }
+        // "Happened, answer no" reads only the answer, which the viewer never sets.
+        if c.happened_no_check != 0 && !c.happened_no.iter().all(|&id| id == 0 || answer(id) != 0) {
+            return Ok(false);
+        }
+        if let Some(test) = flag_parts(&self.scenario.events[k]).1 {
             if !self.flag_test(test) {
                 return Ok(false);
             }
         }
-        if c.meet_army != 0 {
-            // The army's met flag is set as soon as everything else passed, meeting or not;
-            // the event passes only on the step that army met the hero (0x58e83a).
-            self.game.met_armies.insert(c.meet_army);
-            return Ok(self.met == Some(c.meet_army));
-        }
         Ok(true)
+    }
+
+    /// Every army record but the hero's (the original's armies 1 on): on the map, waiting
+    /// off it, or waiting to come back.
+    fn records(&self) -> impl Iterator<Item = &Army> {
+        let w = &self.game.world;
+        w.armies.iter().chain(&w.inactive).chain(w.respawns.iter().map(|r| &r.army)).filter(|a| a.uid != HERO_UID)
+    }
+
+    /// The named-squad condition (0x58deac): each slot looks for its own unit, the units
+    /// taken noted in a list of three places (a full list overwrites the third). Codes 1 and
+    /// 6 search the hero's army for a living unit of the slot's type when the slot has no
+    /// name, or carrying the slot's name, or any unnamed unit an event brought (whatever the
+    /// slot's type); code 1 needs one, 6 none. Codes 2–5 search the armies of faction
+    /// code − 1 for a unit of the slot's type carrying exactly the slot's name, dead or alive.
+    /// Code 0 fails.
+    fn units_hold(&self, c: &crate::dt::dtm::EventConditions) -> bool {
+        let named = |a: &Army, j: usize| if j == 0 { a.named } else { 0 };
+        let mut used: [Option<(usize, usize)>; 3] = [None; 3];
+        let note = |used: &mut [Option<(usize, usize)>; 3], at: (usize, usize)| {
+            let k = used.iter().position(Option::is_none).unwrap_or(2);
+            used[k] = Some(at);
+        };
+        let hero = self.hero_index().map(|i| &self.game.world.armies[i]);
+        for k in 0..3 {
+            let (t, name, code) = (c.units[k], c.units_named[k], c.units_owner[k]);
+            if t == 0 {
+                continue;
+            }
+            let ok = match code {
+                1 | 6 => {
+                    let fits = |h: &Army, j: usize| {
+                        let (u, n) = (&h.troops[j], named(h, j));
+                        u.alive() && ((u.unit == UnitId(t as u32) && name == 0) || (n > 0 && n == name) || (u.kind == WageKind::Event && n == 0))
+                    };
+                    let found = hero.and_then(|h| (0..h.troops.len()).find(|&j| !used.contains(&Some((0, j))) && fits(h, j)));
+                    if let Some(j) = found {
+                        note(&mut used, (0, j));
+                    }
+                    (code == 1) == found.is_some()
+                }
+                2..=5 => {
+                    let mut any = false;
+                    for (a, army) in self.records().enumerate().filter(|(_, a)| a.faction == code - 1) {
+                        let fits = |j: usize| army.troops[j].unit == UnitId(t as u32) && named(army, j) == name;
+                        if let Some(j) = (0..army.troops.len()).find(|&j| !used.contains(&Some((a + 1, j))) && fits(j)) {
+                            note(&mut used, (a + 1, j));
+                            any = true;
+                        }
+                    }
+                    any
+                }
+                _ => false,
+            };
+            if !ok {
+                return false;
+            }
+        }
+        true
     }
 
     /// The results (0x58d9d8): the message, the flag script, armies activated and
@@ -420,15 +475,19 @@ impl Viewer {
         }
     }
 
-    /// The flag test: `/X` holds when X does not occur in the flag string, `X` when it does;
-    /// no `^` stripping and no tutorial keyword, unlike the game.
+    /// The flag test: with a `/` anywhere in it, that `/` taken out, it holds when the rest
+    /// does not occur in the flag string; without one, when the test does. No `^` stripping
+    /// and no tutorial keyword, unlike the game.
     fn flag_test(&self, test: &str) -> bool {
-        let s = crate::dt::text::encode(test);
+        let mut s = crate::dt::text::encode(test);
         if s.is_empty() {
             return true;
         }
-        match s.strip_prefix(b"/") {
-            Some(x) => find(&self.flags, x).is_none(),
+        match s.iter().position(|&b| b == b'/') {
+            Some(k) => {
+                s.remove(k);
+                find(&self.flags, &s).is_none()
+            }
             None => find(&self.flags, &s).is_some(),
         }
     }
@@ -459,6 +518,14 @@ impl Viewer {
             (b'+', false, None) => {
                 self.flags.extend_from_slice(&s);
                 self.flags.push(NBSP);
+            }
+            // Not there: the original decrements the byte at the name's length less 1 from
+            // the string's start, and its removal at position 0 deletes nothing (its bug, kept;
+            // past the string's end it writes outside it, which Razdor skips).
+            (b'-', true, None) => {
+                if let Some(c) = self.flags.get_mut(s.len() - 1) {
+                    *c = c.wrapping_sub(1);
+                }
             }
             (b'-', true, Some(p)) => {
                 if let Some(c) = self.flags.get_mut(p + s.len()) {
@@ -590,7 +657,7 @@ fn hero_army(g: &Game, s: &Scenario, c: HeroClass) -> Army {
     let content = &g.content;
     let start = g.world.hero_start(s, content, c);
     let mut leader = Troop::new(c.unit(), 1, start.hero_slot);
-    leader.kind = crate::rules::content::WageKind::Leader;
+    leader.kind = WageKind::Leader;
     // The preset's three items are worn by the hero, not packed as in the game.
     for (slot, &item) in leader.worn.iter_mut().zip(start.items.iter().take(3)) {
         *slot = Some(item);
@@ -647,12 +714,14 @@ pub fn threshold(v: i16, x: i64) -> bool {
     }
 }
 
-/// The title script's action (before `=`) and test (after it).
+/// The title script's action (before `=`) and test (after it), in the text between the
+/// first `%` and a second one (0x4dc938).
 fn flag_parts(e: &Event) -> (Option<&str>, Option<&str>) {
     let Some(f) = &e.flags else { return (None, None) };
-    match f.raw.split_once('=') {
+    let script = f.raw.split('%').next().unwrap_or_default();
+    match script.split_once('=') {
         Some((a, t)) => ((!a.is_empty()).then_some(a), Some(t)),
-        None => ((!f.raw.is_empty()).then_some(f.raw.as_str()), None),
+        None => ((!script.is_empty()).then_some(script), None),
     }
 }
 
@@ -664,10 +733,12 @@ fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
     hay.windows(needle.len()).position(|w| w == needle)
 }
 
-/// The 9 × 9 values around cell (x, y) of a `w` × `h` map (0x592144), row by row, `None`
-/// off the map. The window is moved inside the map, but when it starts above the top edge
-/// the original zeroes its column start instead of its row start (its bug, kept): the rows
-/// above the map then show nothing.
+/// The 9 × 9 values around cell (x, y) of a `w` × `h` map (0x592144), row by row. The
+/// window x−4..x+4, y−4..y+4 is cut at the map's right and bottom edges (not moved inside)
+/// and its start at the left edge, but when it starts above the top edge the original zeroes
+/// its column start instead of its row start (its bug, kept): the rows above the map show 0,
+/// as every cell off the map reads, and the columns from 0 on. A cell the window does not
+/// reach is `None` (the original's grid keeps the last click's text there).
 pub fn grid9(values: &[u16], w: i32, h: i32, x: i32, y: i32) -> [[Option<u16>; 9]; 9] {
     let (mut x0, y0) = (x - 4, y - 4);
     if x0 < 0 {
@@ -676,14 +747,14 @@ pub fn grid9(values: &[u16], w: i32, h: i32, x: i32, y: i32) -> [[Option<u16>; 9
     if y0 < 0 {
         x0 = 0;
     }
-    let x0 = x0.min((w - 9).max(0));
-    let y0 = if y0 >= 0 { y0.min((h - 9).max(0)) } else { y0 };
+    let (x1, y1) = ((x + 4).min(w - 1), (y + 4).min(h - 1));
     let mut out = [[None; 9]; 9];
     for (r, row) in out.iter_mut().enumerate() {
         for (c, v) in row.iter_mut().enumerate() {
             let (cx, cy) = (x0 + c as i32, y0 + r as i32);
-            if (0..w).contains(&cx) && (0..h).contains(&cy) {
-                *v = values.get((cy * w + cx) as usize).copied();
+            if cx <= x1 && cy <= y1 {
+                let on_map = (0..w).contains(&cx) && (0..h).contains(&cy);
+                *v = Some(if on_map { values.get((cy * w + cx) as usize).copied().unwrap_or(0) } else { 0 });
             }
         }
     }
