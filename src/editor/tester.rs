@@ -191,7 +191,7 @@ impl Tester {
     }
 
     /// Two armies from the AI viewer, as built for battle (0x5770f8): side 1 then side 2.
-    pub fn from_viewer(&mut self, side1: Army, side2: Army) {
+    pub fn set_viewer_armies(&mut self, side1: Army, side2: Army) {
         self.armies = [side1, side2];
         self.armed = true;
     }

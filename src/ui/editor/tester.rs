@@ -50,6 +50,14 @@ impl TesterState {
         TesterState { tester, selected: None, scroll: 0, run: None, pending: None, results: None, options: None, messages: Vec::new(), note: None }
     }
 
+    /// Armies from the AI viewer (0x5770f8): the start button enabled, ready to fight.
+    pub fn set_viewer_armies(&mut self, side1: tester::Army, side2: tester::Army) {
+        self.stop();
+        self.tester.set_viewer_armies(side1, side2);
+        self.results = None;
+        self.messages.clear();
+    }
+
     fn stop(&mut self) {
         self.run = None;
         self.pending = None;

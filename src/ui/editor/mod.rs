@@ -14,6 +14,7 @@ mod palette_panel;
 mod props;
 mod settings;
 mod tester;
+mod viewer;
 mod worldgen;
 
 use std::path::PathBuf;
@@ -109,6 +110,8 @@ enum Modal {
     Artefacts,
     /// The battle tester (its state is [`EditorScreen::tester`]).
     Tester,
+    /// The AI viewer (its state is [`EditorScreen::viewer`]).
+    Viewer,
 }
 
 pub struct EditorScreen {
@@ -161,6 +164,12 @@ pub struct EditorScreen {
     /// The battle tester, made at its first opening and kept for the session (the
     /// original's window is made once).
     tester: Option<tester::TesterState>,
+    /// The AI viewer while it is open, the picks of its lists and its seed box between
+    /// openings, and whether the tester was opened from it (closing it goes back there).
+    viewer: Option<viewer::ViewerState>,
+    viewer_picks: (usize, usize),
+    viewer_rnd: bool,
+    tester_from_viewer: bool,
 }
 
 fn ctrl() -> bool {
@@ -220,6 +229,10 @@ impl EditorScreen {
             newmap: None,
             worldgen: None,
             tester: None,
+            viewer: None,
+            viewer_picks: (0, 0),
+            viewer_rnd: false,
+            tester_from_viewer: false,
         }
     }
 
@@ -468,6 +481,7 @@ impl EditorScreen {
             "fog" => self.overlays.fog = true,
             "records" => self.modal = Some(Modal::Records { buildings: true, scroll: 0 }),
             "tester" => self.open_tester(),
+            "viewer" => self.open_viewer(),
             // The world generator on its tab (0–2).
             w if w.starts_with("worldgen") => {
                 let s = &self.doc.scenario;
@@ -510,6 +524,16 @@ impl EditorScreen {
             self.tester = Some(tester::TesterState::new(razdor::editor::tester::Tester::new(self.catalog.clone())));
         }
         self.modal = Some(Modal::Tester);
+    }
+
+    /// The AI viewer's window on the map as it is now (0x58cc84): seeded to 1, or from the
+    /// clock with its seed box; the tester's switches are the session's.
+    fn open_viewer(&mut self) {
+        let switches = self.tester.as_ref().map_or_else(Default::default, |t| t.tester.switches);
+        let seed = self.viewer_rnd.then(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.subsec_nanos() ^ d.as_secs() as u32));
+        let v = razdor::editor::viewer::Viewer::open(self.catalog.clone(), &self.doc.scenario, switches, seed);
+        self.viewer = Some(viewer::ViewerState::new(v, self.viewer_picks, self.viewer_rnd));
+        self.modal = Some(Modal::Viewer);
     }
 
     fn set_catalog(&mut self, c: Content) {
@@ -935,6 +959,7 @@ impl EditorScreen {
             (tr("Patrol zones"), true, Some(self.overlays.patrols)),
             (tr("Fog"), true, Some(self.overlays.fog)),
             (tr("Battle test"), true, None),
+            (tr("AI view"), true, None),
             (tr("Test play"), true, None),
             (tr("Exit"), true, None),
         ];
@@ -1015,8 +1040,9 @@ impl EditorScreen {
             Some(19) => self.overlays.patrols = !self.overlays.patrols,
             Some(20) => self.overlays.fog = !self.overlays.fog,
             Some(21) => self.open_tester(),
-            Some(22) => self.modal = Some(Modal::TestPlay),
-            Some(23) => action = self.guarded(Then::Exit),
+            Some(22) => self.open_viewer(),
+            Some(23) => self.modal = Some(Modal::TestPlay),
+            Some(24) => action = self.guarded(Then::Exit),
             _ => {}
         }
         let s = &self.doc.scenario;
@@ -1212,6 +1238,7 @@ impl EditorScreen {
             Modal::NewMap => (900.0f32.min(sw - 20.0), 680.0f32.min(sh - 20.0)),
             Modal::WorldGen => (820.0f32.min(sw - 20.0), 640.0f32.min(sh - 20.0)),
             Modal::Tester => (1040.0f32.min(sw - 20.0), 690.0f32.min(sh - 20.0)),
+            Modal::Viewer => (1180.0f32.min(sw - 20.0), 720.0f32.min(sh - 20.0)),
             _ => (720.0f32.min(sw - 40.0), (sh - 100.0).max(300.0)),
         };
         let r = Rect::new((sw - w) / 2.0, ((sh - h) / 2.0).max(10.0), w, h);
@@ -1294,6 +1321,33 @@ impl EditorScreen {
             Modal::Tester => {
                 if let Some(st) = &mut self.tester {
                     keep = matches!(tester::window(st, r), tester::TesterAction::None);
+                }
+                if !keep && std::mem::take(&mut self.tester_from_viewer) && self.viewer.is_some() {
+                    next = Modal::Viewer;
+                    keep = true;
+                }
+            }
+            Modal::Viewer => {
+                let overview = self.overview.texture(&self.doc);
+                if let Some(st) = &mut self.viewer {
+                    match viewer::window(st, r, overview.as_ref()) {
+                        viewer::ViewerAction::None => {}
+                        viewer::ViewerAction::Close => {
+                            self.viewer_picks = st.picks;
+                            self.viewer_rnd = st.rnd;
+                            self.viewer = None;
+                            keep = false;
+                        }
+                        viewer::ViewerAction::Battle(a, b) => {
+                            let (side1, side2) = st.viewer.battle_armies(a, b);
+                            self.open_tester();
+                            if let Some(t) = &mut self.tester {
+                                t.set_viewer_armies(side1, side2);
+                            }
+                            self.tester_from_viewer = true;
+                            next = Modal::Tester;
+                        }
+                    }
                 }
             }
             Modal::Open { path, scroll, format } => {
