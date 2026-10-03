@@ -442,13 +442,26 @@ The tactical cost formula matches the game's (experience.md §1), but there are 
 
 ## 7. Razdor editor now → original
 
-| Original | Razdor (branch dt-original) |
-|---|---|
-| Battle tester: grid placement, type catalogue, random armies, rule switches, Super AI, swap, `Battle.Sav`, closing message | None in the editor. Branch dt-feat has a separate main-menu custom battle (`src/rules/custom.rs`): game (Community) rules, auto-arranged sides, levels and items, an improved-AI switch, player or AI per side |
-| AI viewer: world AI on the edited map, 6-minute steps, overlays, predicted battles, reduced events | None |
-| Vanilla battle engine and world AI copies (§4, §5) | Not reproduced; Razdor has only the game's rules |
-| Army window: cost / upkeep and tactical sum / side strength, with artefacts and spell | One figure: the sum of tactical costs at level stats, ignoring artefacts, spell and formation (`src/editor/records.rs`, shown in `src/ui/editor/props.rs`) |
-| Army bytes 6 and 74 rewritten on save | Read and written back unchanged, never recomputed (`src/dt/dtm.rs`) |
+| Topic | Razdor now | Original | Status |
+|---|---|---|---|
+| Battle tester window | toolbar: Battle test (`src/editor/tester.rs`, `src/ui/editor/tester.rs`), made once per session; the AI's army on top, the player's below, the right panel | §2.1 | matches (Razdor's layout) |
+| Type catalogue | the session's unit types by number, level-0 stats, strength field = gold `Cost`, surrender kept | §2.2 | matches |
+| Building an army | click removes or adds only while the start button is enabled; later units move down; cost total; Clear, Swap; Redraw not needed (Razdor redraws every frame) | §2.3 | matches |
+| Random armies | budget Tag·1000+100 per side, the one-in-nine nature roll and its three sets (People is the editor's own nature, outside the first set), Cost ≥ 10 and < budget left, stop at ≤ 100 or 12 units, auto-arrange by cost; seeded from the clock | §2.3 | matches; where no type can be drawn the original hangs, Razdor stops that army and says so |
+| `Battle.Sav` | sections `Army1`/`Army2`, keys `U<r><c>` with the type number or 0, in Razdor's editor folder; load rebuilds catalogue units row then column; a missing file is reported | §2.3 | matches; a number past the catalogue leaves its cell empty (the original copies an empty template) |
+| Rule switches | the five switches, defaults 1, 0, 1, 1, 0, OK/Cancel, session-wide (the AI viewer's battles use them too) | §2.4 | matches |
+| Running a battle | Super AI = mode 1 (side 1 gets the full killable test), else 0; Super AI ticks all-AI; side 1 waits for a legal click unless all-AI; 500 ms delay with the delay box; Stop/Esc ends at once; the setup is replayed | §2.5 | matches; the pointer is not moved, the actor's and the AI target's cells are marked with an arrow |
+| Figures and closing message | cost, side strength, remaining value (16-bit), the bands of `round(2·S/S')` half to even, the turn-limit refusal, only with the delay box; diagnostic line with the turn, the XP pool and HP lost against predicted | §2.6 | partly: the diagnostic line leaves out the two figures whose meaning is unknown (§8); a side of strength 0 gives no message where the original's division fails |
+| Battle engine | `Rules::Editor(switches)` of Razdor's battle engine (`src/rules/battle/editor.rs`): every point of §4, the pull and the long-strike-off retreat scores included; the game's battles keep `Rules::Game` | §4 | matches; a pull onto an occupied cell is not offered (it would put two units on one cell); Chatty does nothing |
+| Army window figures | cost / upkeep and tactical / side strength with artefacts and spell, bytes 6 and 74 written on save (`src/editor/records.rs`) | §6 | matches |
+| AI viewer window | toolbar: AI view (`src/editor/viewer.rs`, `src/ui/editor/viewer.rs`), new at every opening, list picks kept | §3 | matches (Razdor's layout) |
+| Opening and seed | a `Game` of the map under `EditorAi` (`src/rules/ai.rs`), the generator set to 1 after the load, or from the clock with the seed box (at the next opening); clock at the header's start time; income totals | §3.1 | matches; the market roll at the load is the game loader's |
+| Hero | none, or a class whose preset has a position, before time runs: an army the AI steers (preset troops above type 3, items worn, faction 1, aggression −20, speed 4, start buildings the hero's) | §3.1 | matches |
+| Time | 6-minute steps, the 1/10/60-step buttons, run and stop; a 24-minute AI tick banks 24 minutes up to 200, whole minutes | §3.2 | matches |
+| Event engine | global events on the ticks with the events box; the conditions and results listed; meet only on the step of the meeting, the army marked met anyway; the 60-minute rule; chains; victory and defeat stop the clock | §3.4 | matches; a repeat under a day (the original divides by zero) and an event firing again within one scan (endless in the original) stop the clock with a message; the hero's strength condition uses the summed tactical costs |
+| Overlays, grid, predictions | route, density (the plan's multiplier map) and flood distances, planning the army; mouse readout; 9 × 9 grid with the top-edge clamp bug; two predicted battles; battle buttons; debug score | §3.3 | matches |
+| World AI copy | `EditorAi`: editor battle rules with the switches, unpaid units ×3/4 attack and ½ initiative on the attacking side, speed byte 13 + 4, no mana wages, the editor's promotion picks | §5 | partly: the editor's stat recomputation (no item-id guard, no HP rescale) and its own cost-map build order are the game's |
+| Game unchanged | the game's battles and world AI run as before; their tests pass unchanged | — | — |
 
 ## 8. Unknowns
 

@@ -615,6 +615,35 @@ old id, and their versions give both.
   original does. An 800 × 800 map's buildings and roads take about half a second.
 - A building whose footprint reaches past the map's left or top edge leaves all of its cells
   as they were (plants and marks), as the original's placement stops at the first of them.
+- **The original's battle tester** (toolbar: Battle test, `docs/reference/editor/testers.md`
+  §2): two armies on the 6/4/2 grid, the AI's on top; the unit types with their gold cost
+  (the strength the tester weighs), a click to add or remove while the start button is
+  enabled, Clear and Swap, the two random-army buttons (1100 and 2100: one roll of nine for
+  the natures, types from 10 to below the budget left, until 100 is left or 12 stand; a
+  draw that could never succeed stops with a note instead of hanging), `Battle.Sav` in
+  Razdor's editor folder in the original's format, Super AI (which ticks all-AI too),
+  all-AI, the 500 ms delay with the pointer's jumps marked on the cells, the five rule
+  switches (counterblow, short-range shots and spells, rows stepping forward with the pull
+  when off, long strike, actions costing initiative) and the closing message by strength
+  ratio and turn count, the remaining value and the diagnostic line.
+- **The editor's own battle engine**: the tester and the AI viewer fight under the
+  editor's vanilla rules, a ruleset of Razdor's battle engine that the game never uses: no
+  Community bonuses, Evasion or Garrison fix; the editor's bonuses OldVampiressGist,
+  Chatty, Terrible and Parrying; poison −15 that spares undead and elementals; vampirism,
+  the Life blessing and the Death heal on the editor's narrower nature sets (People being
+  its own nature); the AI valuing targets with actions left; the knight's 90 %; the
+  vanilla mana drain.
+- **The original's AI viewer** (toolbar: AI view, testers.md §3): the world AI on the map
+  being edited, in 6-minute steps (6 min, 1 hour, 6 hours, run, stop), repeatable (seeded to
+  1, or from the clock with its box), with a hero the AI steers too (picked before time
+  runs) or none; armies at their record's speed byte + 4, banking 24 minutes every
+  24-minute AI tick, the attacker's unpaid units fighting at three quarters, the editor's
+  promotion picks, no mana wages. Its cut-down event engine runs the global events on those
+  ticks (flags, activation, artefacts lost, relative starts, chains, meetings only on the
+  step of the meeting, the 60-minute rule); a repeat under a day, where the original divides
+  by zero, stops the clock. Two subjects with their panels, scores, predicted battles both
+  ways and buttons that open the battle tester with the pair; the route, density and flood
+  overlays with the 9 × 9 grid and its top-edge bug.
 
 ## 0.2.2 — 2026-10-01
 

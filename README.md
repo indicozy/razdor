@@ -448,7 +448,11 @@ and names units, artefacts and spells from your install; without one it uses pla
   "new events repeat", kept in `DTMapEdit.Ini` in Razdor's editor folder, `RAZDOR_EDITOR_DIR`
   or `~/.local/share/razdor/editor`), Units and Artefacts (the original's unit and artefact
   editors: they change the session's tables and the costs the editor shows, never the map,
-  and export new ini files into that editor folder), Test play, Exit.
+  and export new ini files into that editor folder), Battle test (the original's battle
+  tester: armies by hand, at random or from `Battle.Sav`, fought under the editor's own
+  vanilla battle rules with its five switches), AI view (the original's AI viewer: the
+  world AI on the edited map in 6-minute steps, with its overlays, predicted battles and
+  global events; `docs/reference/editor/testers.md`), Test play, Exit.
 - **Tools** (right column), as the original editor's: five pages, Terrain (16 surfaces;
   Razdor's flood fill and rectangle besides the brush), Hills, Forests (tree replacement
   mode), Buildings (the cell is the bottom-right corner; "ignore mountains" warns over
