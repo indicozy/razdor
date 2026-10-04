@@ -1,0 +1,307 @@
+/* Razdor's page, drawn after Discord Times' own interface: the main menu over burning
+   ruins with its oval buttons, green marble windows in silver frames with a title strip,
+   dark text boxes and parchment. Everything is CSS: none of the game's art is used.
+   Fonts: Kurale and PT Sans, the two free fonts Razdor ships (SIL OFL). */
+
+@font-face { font-family: "Kurale"; src: url("fonts/Kurale-Regular.ttf") format("truetype"); font-display: swap; }
+@font-face { font-family: "PT Sans"; src: url("fonts/PT_Sans-Regular.ttf") format("truetype"); font-display: swap; }
+@font-face { font-family: "PT Sans"; src: url("fonts/PT_Sans-Bold.ttf") format("truetype"); font-weight: 700; font-display: swap; }
+
+:root {
+  --ember: #2a1307;
+  --fire: #b8591c;
+  --marble: #24473b;
+  --marble-dark: #142b24;
+  --silver: #c7ccd0;
+  --silver-dark: #5f686d;
+  --box: #3b220f;
+  --gold: #f0c96a;
+  --cream: #f1e6c9;
+  --parchment: #dcb97c;
+  --ink: #2c1b0b;
+  --oval: #4b3a9e;
+}
+
+* { box-sizing: border-box; }
+
+html { color-scheme: dark; scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+body {
+  margin: 0;
+  color: var(--cream);
+  font: 1.0625rem/1.6 "PT Sans", system-ui, sans-serif;
+  /* The main menu's backdrop: ruins in firelight. Warm smoke over a dark ember ground,
+     brighter at the top where the title burns. */
+  background-color: var(--ember);
+  background-image:
+    radial-gradient(ellipse 70% 38rem at 50% 14rem, rgba(236, 132, 40, 0.55), rgba(236, 132, 40, 0) 70%),
+    radial-gradient(ellipse 40% 30rem at 12% 30rem, rgba(150, 60, 14, 0.5), rgba(150, 60, 14, 0) 70%),
+    radial-gradient(ellipse 40% 30rem at 88% 24rem, rgba(170, 72, 18, 0.45), rgba(170, 72, 18, 0) 70%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='700' height='700'%3E%3Cfilter id='s' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' stitchTiles='stitch' baseFrequency='0.004 0.011' numOctaves='5' seed='11'/%3E%3CfeColorMatrix values='0 0 0 0 0.55  0 0 0 0 0.24  0 0 0 0 0.07  1.4 0 0 0 -0.55'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23s)'/%3E%3C/svg%3E");
+  background-attachment: fixed, fixed, fixed, scroll;
+}
+
+a { color: var(--gold); text-underline-offset: 0.18em; }
+a:hover { color: #fff3cf; }
+:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+code { font-family: inherit; font-weight: 700; }
+
+/* The language link, where the game has its EN / RU switch. */
+.lang { position: absolute; z-index: 2; top: 0.9rem; right: 1.1rem; font-size: 0.95rem; color: var(--silver); text-shadow: 0 1px 2px #000; }
+.lang a { color: var(--silver); }
+.lang b { color: var(--gold); font-weight: 400; }
+
+/* ---- The hero: the main menu. ------------------------------------------------------ */
+
+/* The menu leaves room for 45% of the video on the first screen (the video is as wide as
+   the windows below it, 16:9); --menu-h is how tall its content gets at most. */
+:root { --menu-h: 40rem; --video-w: min(100vw - 2.5rem, 50rem); }
+.menu {
+  min-height: calc(100vh - 0.45 * var(--video-w) * 9 / 16);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 3.5rem 1.25rem 2rem;
+  text-align: center;
+  position: relative;
+}
+
+.logo {
+  font-family: "Kurale", serif;
+  font-weight: 400;
+  font-size: clamp(4.5rem, 19vw, 10rem);
+  line-height: 0.9;
+  margin: 0;
+  /* Chrome letters with a dark rim and a fire glow behind, like the game's logo. */
+  background: linear-gradient(180deg, #ffffff 0%, #e4e8eb 30%, #8a949a 50%, #f4f6f7 60%, #a7afb4 80%, #6e777c 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-stroke: 1px rgba(40, 30, 25, 0.55);
+  filter: drop-shadow(0 3px 0 #1a0d05) drop-shadow(0 0 22px rgba(255, 150, 60, 0.45));
+}
+.tagline {
+  font-family: "Kurale", serif;
+  font-size: clamp(1.15rem, 3.6vw, 1.5rem);
+  color: var(--cream);
+  text-shadow: 0 2px 3px #000, 0 0 12px rgba(0, 0, 0, 0.7);
+  margin: 0.9rem auto 2.4rem;
+  max-width: 34rem;
+}
+
+/* The oval menu buttons: a violet stone in an ornate silver ring. */
+.ovals { list-style: none; margin: 0 auto; padding: 0; display: grid; gap: 0.9rem; justify-items: center; }
+.oval {
+  display: grid;
+  place-items: center;
+  width: min(17.5rem, 78vw);
+  height: 4.1rem;
+  border-radius: 50%;
+  text-decoration: none;
+  font-family: "Kurale", serif;
+  font-size: 1.3rem;
+  color: #fff7e2;
+  text-shadow: 0 0 3px #10072e, 0 2px 2px #10072e, 0 0 10px rgba(16, 7, 46, 0.9);
+  background:
+    radial-gradient(ellipse 60% 55% at 50% 38%, rgba(190, 170, 255, 0.55), rgba(190, 170, 255, 0) 70%),
+    radial-gradient(ellipse at 30% 70%, #6a3fb0, rgba(106, 63, 176, 0) 60%),
+    radial-gradient(ellipse at 70% 30%, #2f58b8, rgba(47, 88, 184, 0) 60%),
+    var(--oval);
+  border: 3px solid #e7ebee;
+  box-shadow:
+    0 0 0 2px #4e575c,
+    0 0 0 5px #b7bec3,
+    0 0 0 7px #3a4246,
+    inset 0 0 0 2px rgba(0, 0, 0, 0.45),
+    inset 0 -8px 16px rgba(10, 5, 40, 0.55),
+    0 6px 14px rgba(0, 0, 0, 0.6);
+}
+.oval:hover, .oval:focus-visible {
+  color: #fff;
+  /* The picked button of the original glows orange. */
+  box-shadow:
+    0 0 0 2px #4e575c,
+    0 0 0 5px #f2d6a0,
+    0 0 0 7px #3a4246,
+    inset 0 0 0 2px rgba(0, 0, 0, 0.45),
+    inset 0 -8px 16px rgba(10, 5, 40, 0.55),
+    0 0 26px 6px rgba(255, 160, 60, 0.75);
+  outline: none;
+}
+.oval-video { font-size: 1.4rem; }
+
+/* The video opens the page's main part, as wide as the windows below it, 16:9, in their
+   silver frame. */
+.video {
+  margin: 0 auto 3.5rem;
+  /* Narrower only where the menu would otherwise leave less than 40% of it in view. */
+  max-width: min(50rem, max(18rem, calc((100vh - var(--menu-h)) / 0.4 * 16 / 9)));
+  aspect-ratio: 16 / 9;
+  border: 3px solid var(--silver);
+  background: #000;
+  box-shadow: 0 0 0 1px #111, 0 1.25rem 2.5rem rgba(0, 0, 0, 0.65);
+}
+.video iframe { display: block; width: 100%; height: 100%; border: 0; }
+
+/* ---- Windows: green marble, silver frame, title strip. ----------------------------- */
+
+main { padding: 0 1.25rem 2rem; }
+
+.window {
+  max-width: 50rem;
+  margin: 0 auto 3.5rem;
+  scroll-margin-top: 1.5rem;
+  position: relative;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='520' height='520'%3E%3Cfilter id='v' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' stitchTiles='stitch' baseFrequency='0.011 0.028' numOctaves='4' seed='4'/%3E%3CfeColorMatrix values='0 0 0 0 0.5  0 0 0 0 0.7  0 0 0 0 0.62  0 0 -2.6 1.55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23v)'/%3E%3C/svg%3E"),
+    linear-gradient(180deg, #2d5648, var(--marble-dark));
+  border: 3px solid var(--silver);
+  box-shadow:
+    0 0 0 1px #111,
+    inset 0 0 0 1px #0a1411,
+    inset 0 0 0 5px rgba(199, 204, 208, 0.22),
+    0 1.25rem 2.5rem rgba(0, 0, 0, 0.65);
+}
+.window h2 {
+  margin: 0;
+  padding: 0.5rem 3rem 0.45rem;
+  text-align: center;
+  font-family: "Kurale", serif;
+  font-weight: 400;
+  font-size: 1.3rem;
+  color: var(--cream);
+  text-shadow: 0 1px 2px #000;
+  border-bottom: 2px solid var(--silver);
+  /* The strip's ornaments: silver lattice at both ends. */
+  background:
+    repeating-linear-gradient(45deg, rgba(199, 204, 208, 0.5) 0 2px, transparent 2px 7px) left / 6.5rem 100% no-repeat,
+    repeating-linear-gradient(-45deg, rgba(199, 204, 208, 0.5) 0 2px, transparent 2px 7px) left / 6.5rem 100% no-repeat,
+    repeating-linear-gradient(45deg, rgba(199, 204, 208, 0.5) 0 2px, transparent 2px 7px) right / 6.5rem 100% no-repeat,
+    repeating-linear-gradient(-45deg, rgba(199, 204, 208, 0.5) 0 2px, transparent 2px 7px) right / 6.5rem 100% no-repeat,
+    linear-gradient(180deg, rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0.4));
+}
+/* The green close box of the game's windows: back to the menu. */
+.close {
+  position: absolute;
+  top: 0.45rem;
+  right: 0.5rem;
+  width: 1.6rem;
+  height: 1.6rem;
+  display: grid;
+  place-items: center;
+  text-decoration: none;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: #6dff6d;
+  background: #0d240d;
+  border: 2px solid var(--silver);
+}
+.close:hover { color: #fff; background: #1d4a1d; }
+.window-body { padding: 1.4rem clamp(1rem, 4vw, 2rem) 1.6rem; }
+
+/* The dark brown text box with silver corners, as the game's description boxes. */
+.box {
+  background:
+    radial-gradient(ellipse at 20% 0%, rgba(110, 62, 20, 0.5), rgba(110, 62, 20, 0) 60%),
+    var(--box);
+  color: var(--gold);
+  border: 1px solid #1a0e05;
+  box-shadow: inset 0 0 0 1px rgba(199, 204, 208, 0.35), inset 0 0 1.5rem rgba(0, 0, 0, 0.6);
+  padding: 1.1rem 1.4rem;
+  position: relative;
+}
+.box::before, .box::after {
+  content: "";
+  position: absolute;
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 2px solid var(--silver);
+  pointer-events: none;
+}
+.box::before { top: 4px; left: 4px; border-right: 0; border-bottom: 0; }
+.box::after { bottom: 4px; right: 4px; border-left: 0; border-top: 0; }
+.box p { margin: 0 0 0.8rem; max-width: 42rem; }
+.box p:last-child { margin-bottom: 0; }
+.box + .box { margin-top: 1rem; }
+.box h3 {
+  margin: 0 0 0.6rem;
+  font-family: "Kurale", serif;
+  font-weight: 400;
+  font-size: 1.35rem;
+  color: var(--cream);
+}
+.box h4 { margin: 0.9rem 0 0.3rem; font-size: 1rem; color: var(--cream); }
+.box ul { margin: 0; padding-left: 1.2rem; }
+.box li { margin: 0 0 0.35rem; }
+.box li::marker { color: var(--silver-dark); }
+.date { font-family: "PT Sans", sans-serif; font-size: 0.95rem; color: var(--silver); }
+
+/* How it works: two columns on wide screens (what Razdor does / what you bring). */
+.pair { display: grid; gap: 1rem; margin-top: 1rem; }
+@media (min-width: 46rem) { .pair { grid-template-columns: 1fr 1fr; } .pair .box + .box { margin-top: 0; } }
+
+/* Installation: steps on parchment, like the game's unit panel. */
+.parchment {
+  color: var(--ink);
+  background:
+    radial-gradient(ellipse at 25% 15%, rgba(255, 245, 215, 0.6), rgba(255, 245, 215, 0) 55%),
+    radial-gradient(ellipse at 85% 95%, rgba(115, 66, 16, 0.4), rgba(115, 66, 16, 0) 55%),
+    var(--parchment);
+  box-shadow: inset 0 0 2.5rem rgba(95, 52, 10, 0.5);
+  border: 1px solid #2a1807;
+  padding: 1.4rem clamp(1rem, 4vw, 2rem) 1.2rem;
+}
+.parchment ol { margin: 0; padding-left: 1.6rem; }
+.parchment li { margin: 0 0 0.9rem; padding-left: 0.3rem; max-width: 40rem; }
+.parchment li::marker { font-family: "Kurale", serif; font-size: 1.2rem; color: #6d3e0b; }
+.parchment strong { color: #5a300a; }
+.parchment a { color: #6d3e0b; font-weight: 700; }
+.parchment .note { margin: 1rem 0 0; font-size: 0.95rem; color: #4a2f14; }
+
+/* Discord: the window's one button, an oval like the menu's. */
+.join { display: grid; justify-items: center; gap: 1.1rem; text-align: center; }
+.join p { margin: 0; max-width: 34rem; color: var(--cream); text-shadow: 0 1px 2px #000; }
+
+/* ---- The bottom line, as the game's version and copyright strip. ------------------- */
+
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem 2rem;
+  padding: 0.7rem 1.25rem 0.8rem;
+  font-size: 0.9rem;
+  color: #e8e2d4;
+  background: rgba(0, 0, 0, 0.72);
+  border-top: 1px solid rgba(199, 204, 208, 0.3);
+}
+.foot p { margin: 0; }
+.foot a { color: #e8e2d4; }
+
+@media (max-width: 30rem) {
+  body { font-size: 1rem; }
+  .menu { padding-top: 3.5rem; }
+  .window h2 { font-size: 1.15rem; padding-inline: 2.4rem; background-size: 3rem 100%; }
+}
+
+/* Computers: a compact menu, so at least 40% of the video shows on the first screen even
+   on a 1366 × 768 laptop; a larger one on tall screens. */
+@media (min-width: 30.01rem) {
+  :root { --menu-h: 29rem; }
+  .menu { padding: 1.25rem 1.25rem 1.25rem; }
+  .logo { font-size: 5rem; }
+  .tagline { font-size: 1.15rem; margin: 0.5rem auto 1rem; }
+  .ovals { gap: 0.5rem; }
+  .oval { width: 15rem; height: 2.8rem; font-size: 1.1rem; }
+  .oval-video { font-size: 1.2rem; }
+}
+@media (min-width: 30.01rem) and (min-height: 62rem) {
+  :root { --menu-h: 37rem; }
+  .menu { padding: 2rem 1.25rem 1.5rem; }
+  .logo { font-size: 7rem; }
+  .tagline { font-size: 1.35rem; margin: 0.7rem auto 1.5rem; }
+  .ovals { gap: 0.7rem; }
+  .oval { width: 16.5rem; height: 3.4rem; font-size: 1.25rem; }
+  .oval-video { font-size: 1.35rem; }
+}

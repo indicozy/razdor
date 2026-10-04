@@ -2,767 +2,171 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="description" content="Razdor: новый движок для «Времён раздора». Ваша копия игры на Windows, Linux и macOS, в любом разрешении.">
-<meta property="og:title" content="Razdor: движок для «Времён раздора»">
-<meta property="og:description" content="Ваша копия «Времён раздора» на Windows, Linux и macOS, в любом разрешении. Быстрые бои, F5/F9, исправленные ошибки оригинала.">
-<meta property="og:image" content="https://img.youtube.com/vi/p7g0yvwtEeM/maxresdefault.jpg">
-<meta property="og:url" content="https://indicozy.github.io/razdor/">
-<meta property="og:type" content="website">
-<meta name="theme-color" content="#0d0704">
-<style>body{margin:0}[hidden]{display:none!important}</style>
-<title>Razdor: движок для «Времён раздора»</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Kurale&family=PT+Sans:wght@400;700&family=Ruslan+Display&display=swap">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Razdor — движок для «Времён раздора»</title>
+<meta name="description" content="Razdor — открытый движок для «Времён раздора». Играет оригинальные сценарии и кампании с вашей копии игры на современных Windows и Linux.">
+<link rel="alternate" hreflang="en" href="en.html">
+<link rel="stylesheet" href="style.css">
 </head>
-<body>
-<style>
-  /* Layout: the game's main menu as the whole site. One screen of burning ruins, a silver
-     title, a column of five oval buttons; each button opens a game-style window. */
-  :root {
-    --ink: #0d0704;        /* the night behind the fire */
-    --ember: #f0a24a;      /* fire light, links */
-    --gold: #e9c27a;       /* headings, hovered frames */
-    --parch: #eadfcf;      /* running text */
-    --muted: #b9a68d;      /* small print */
-    --silver: #dcdae4;     /* frames, title */
-    --violet-rim: #1f0d40; /* the dark rim around button words */
-    --panel: #1a120c;      /* window ground */
-    --panel-line: #6f6a78; /* window inner line */
-    --display: "Ruslan Display", "Kurale", Georgia, serif;
-    --menu: "Kurale", Georgia, "Times New Roman", serif;
-    --body: "PT Sans", "Segoe UI", Roboto, Arial, sans-serif;
-    --bw: clamp(160px, min(24vw, 22vh), 250px);
-    color-scheme: dark;
-  }
-  html, body { height: 100%; }
-  body {
-    background: var(--ink) radial-gradient(ellipse at 50% 60%, #6a2c0b 0%, #2a1206 55%, var(--ink) 100%);
-    color: var(--parch);
-    font-family: var(--body);
-    font-size: 16px;
-    overflow-x: hidden;
-  }
-  #fx { position: fixed; inset: 0; width: 100%; height: 100%; display: block; z-index: 0; }
-  .stage {
-    position: relative; z-index: 1;
-    min-height: 100%;
-    box-sizing: border-box;
-    padding-inline: 16px;
-    padding-block: clamp(14px, 4vh, 44px) 14px;
-    display: flex; flex-direction: column; align-items: center;
-    gap: clamp(8px, 2.4vh, 28px);
-  }
+<body id="top">
 
-  /* The title: silver letters, flames come from the shader behind them. */
-  .crest { text-align: center; display: grid; gap: .35em; }
-  #title {
-    margin: 0;
-    font-family: var(--display);
-    font-weight: 400;
-    font-size: clamp(56px, min(13vw, 15vh), 150px);
-    line-height: 1;
-    letter-spacing: .02em;
-    background: linear-gradient(180deg, #ffffff 0%, #c6c5d0 34%, #f6f6fa 50%, #6e6c7a 68%, #d9d8e2 86%, #8f8d99 100%);
-    -webkit-background-clip: text; background-clip: text;
-    color: transparent;
-    -webkit-text-stroke: 1px rgba(30, 16, 10, .55);
-    filter: drop-shadow(0 3px 2px rgba(0, 0, 0, .85)) drop-shadow(0 0 18px rgba(0, 0, 0, .45));
-    text-wrap: balance;
-  }
-  .tagline {
-    margin: 0;
-    font-family: var(--menu);
-    font-size: clamp(16px, 2.4vh, 21px);
-    color: var(--gold);
-    text-shadow: 0 1px 2px #000, 0 0 12px rgba(0, 0, 0, .8);
-    text-wrap: balance;
-  }
-  .tagline small {
-    display: block; margin-top: .25em;
-    font-family: var(--body); font-size: .72em; letter-spacing: .08em;
-    color: var(--parch); opacity: .85;
-    font-variant-numeric: tabular-nums;
-  }
+<p class="lang"><a href="en.html" lang="en">EN</a> / <b>RU</b></p>
 
-  /* The five oval buttons, stacked the way the game stacks them: frames overlap a little. */
-  .menu { display: flex; flex-direction: column; align-items: center; }
-  .btn {
-    position: relative;
-    width: var(--bw); aspect-ratio: 214 / 112;
-    margin-top: calc(var(--bw) * -0.085);
-    padding: 0; border: 0; background: none; cursor: pointer;
-    color: #f0eaff;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .btn:first-child { margin-top: 0; }
-  .btn svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible;
-    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .95)) drop-shadow(0 2px 5px rgba(0, 0, 0, .6)); }
-  .btn .metal { stroke: url(#silver); }
-  .btn .leaf { fill: url(#silver); }
-  .btn.hot .metal { stroke: url(#gold); }
-  .btn.hot .leaf { fill: url(#gold); }
-  .btn .still { fill: url(#marble); display: none; }
-  .btn.hot .still { fill: url(#marble-hot); }
-  .no-fire .btn .still { display: inline; }
-  .btn .label {
-    position: absolute; inset: 0; display: grid; place-items: center;
-    font-family: var(--menu);
-    font-size: calc(var(--bw) * .1);
-    letter-spacing: .02em;
-    text-shadow: -1.5px 0 var(--violet-rim), 1.5px 0 var(--violet-rim), 0 -1.5px var(--violet-rim), 0 1.5px var(--violet-rim), 0 2px 6px rgba(0, 0, 0, .7);
-    pointer-events: none;
-    transition: color .15s;
-  }
-  .btn.hot .label { color: #fff0d6; }
-  .btn:focus-visible { outline: none; }
-  .btn:focus-visible .label { text-decoration: underline; text-decoration-color: var(--gold); text-underline-offset: .2em; }
+<header class="menu">
+  <h1 class="logo">Razdor</h1>
+  <p class="tagline">Движок для «Времён раздора»: оригинальные сценарии на современных Windows и Linux</p>
+  <nav aria-label="Разделы">
+    <ul class="ovals">
+      <li><a class="oval oval-video" href="https://www.youtube.com/watch?v=p7g0yvwtEeM">Смотреть видео</a></li>
+      <li><a class="oval" href="#how">Как это работает</a></li>
+      <li><a class="oval" href="#install">Установка</a></li>
+      <li><a class="oval" href="#changes">Изменения</a></li>
+      <li><a class="oval" href="#discord">Discord</a></li>
+    </ul>
+  </nav>
+</header>
 
-  /* The corners: what's new on the left, the language on the right, as in the game. */
-  .corners {
-    margin-top: auto;
-    width: 100%;
-    display: grid; grid-template-columns: 1fr auto 1fr; align-items: end; gap: 12px;
-    font-size: 15px;
-  }
-  .corners a, .lang button {
-    color: var(--parch); text-decoration: none; text-shadow: 0 1px 2px #000, 0 0 8px #000;
-  }
-  .corners a:hover, .corners a:focus-visible { color: var(--gold); }
-  .links { display: flex; flex-wrap: wrap; gap: 4px 16px; }
-  .video { position: relative; aspect-ratio: 16 / 9; width: 100%; max-width: calc((82vh - 190px) * 16 / 9); margin-inline: auto; background: #000; border: 1px solid var(--panel-line); margin-bottom: 12px; }
-  .video iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
-  dialog.wide { width: min(1120px, calc(100vw - 32px)); }
-  .fine { margin: 0; text-align: center; font-size: 12.5px; color: var(--muted); text-shadow: 0 1px 2px #000; max-width: 52ch; }
-  .lang { justify-self: end; display: flex; gap: .35em; color: var(--muted); text-shadow: 0 1px 2px #000; }
-  .lang button { background: none; border: 0; padding: 2px 0; font: inherit; cursor: pointer; opacity: .6; }
-  .lang button[aria-pressed="true"] { opacity: 1; color: var(--gold); }
-  .lang button:focus-visible, .corners a:focus-visible { outline: 1px solid var(--gold); outline-offset: 3px; }
-  @media (max-width: 620px) {
-    .corners { grid-template-columns: 1fr 1fr; }
-    .fine { grid-column: 1 / -1; grid-row: 2; justify-self: center; }
-  }
+<main>
 
-  /* A game-style window for each button. */
-  dialog {
-    width: min(660px, calc(100vw - 32px));
-    max-height: min(82vh, 760px);
-    padding: 0; border: 0; color: var(--parch); background: transparent;
-    overflow: visible;
-  }
-  dialog::backdrop { background: rgba(8, 3, 1, .62); backdrop-filter: blur(2px); }
-  .win {
-    position: relative;
-    max-height: min(82vh, 760px);
-    overflow: auto;
-    box-sizing: border-box;
-    padding: 30px clamp(18px, 4vw, 40px) 30px;
-    background:
-      radial-gradient(ellipse at 50% 0%, rgba(240, 162, 74, .10), transparent 60%),
-      linear-gradient(180deg, #221710, var(--panel));
-    border: 2px solid var(--silver);
-    box-shadow: inset 0 0 0 4px var(--panel), inset 0 0 0 5px var(--panel-line), 0 18px 60px rgba(0, 0, 0, .7);
-    border-radius: 3px;
-  }
-  .win h2 {
-    margin: 0 2em .6em 0;
-    font-family: var(--menu); font-weight: 400;
-    font-size: clamp(26px, 4vw, 34px);
-    color: var(--gold);
-    text-wrap: balance;
-  }
-  .win h3 { margin: 1.4em 0 .5em; font-family: var(--menu); font-weight: 400; font-size: 21px; color: var(--gold); }
-  .win p, .win li { line-height: 1.55; max-width: 62ch; }
-  .win p { margin: 0 0 .8em; }
-  .win ul, .win ol { margin: 0 0 1em; padding-left: 1.25em; display: grid; gap: .45em; }
-  .win li::marker { color: var(--ember); }
-  .win b { color: #fff3e2; font-weight: 700; }
-  .win a { color: var(--ember); }
-  .win a:hover { color: var(--gold); }
-  .win .was { color: var(--muted); font-size: .92em; display: block; }
-  .close {
-    position: absolute; top: 12px; right: 14px;
-    width: 36px; height: 36px; border-radius: 50%;
-    border: 1px solid var(--panel-line); background: rgba(0, 0, 0, .3);
-    color: var(--silver); font: 22px/1 var(--body); cursor: pointer;
-  }
-  .close:hover, .close:focus-visible { color: var(--gold); border-color: var(--gold); outline: none; }
-  .get {
-    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: .4em 0 1.2em;
-  }
-  .get a {
-    display: grid; gap: 2px; padding: 12px 14px; text-decoration: none;
-    border: 1px solid var(--panel-line); background: rgba(255, 255, 255, .03); border-radius: 2px;
-  }
-  .get a:hover, .get a:focus-visible { border-color: var(--gold); background: rgba(240, 162, 74, .08); outline: none; }
-  .get b { font-family: var(--menu); font-weight: 400; font-size: 19px; color: var(--gold); }
-  .get span { color: var(--parch); font-size: 13px; font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; overflow-wrap: anywhere; }
-  @media (max-width: 520px) { .get { grid-template-columns: 1fr; } }
-  .cmd { display: flex; gap: 8px; align-items: stretch; margin: .4em 0 1em; }
-  .cmd code {
-    flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap;
-    padding: 9px 12px; background: rgba(0, 0, 0, .45); border: 1px solid var(--panel-line);
-    font: 13.5px ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; color: var(--parch);
-  }
-  .cmd button {
-    border: 1px solid var(--panel-line); background: rgba(255, 255, 255, .04); color: var(--parch);
-    font: 14px var(--body); padding: 0 12px; cursor: pointer;
-  }
-  .cmd button:hover, .cmd button:focus-visible { border-color: var(--gold); color: var(--gold); outline: none; }
-
-  @media (prefers-reduced-motion: reduce) { .btn .label { transition: none; } }
-</style>
-
-<canvas id="fx" aria-hidden="true"></canvas>
-
-<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
-  <defs>
-    <linearGradient id="silver" gradientUnits="userSpaceOnUse" x1="0" y1="2" x2="0" y2="110">
-      <stop offset="0" stop-color="#ffffff"/>
-      <stop offset=".3" stop-color="#a9a7b4"/>
-      <stop offset=".46" stop-color="#f4f3f8"/>
-      <stop offset=".62" stop-color="#5f5d6b"/>
-      <stop offset=".8" stop-color="#dddce6"/>
-      <stop offset="1" stop-color="#7b7987"/>
-    </linearGradient>
-    <radialGradient id="marble" cx=".42" cy=".38" r=".75">
-      <stop offset="0" stop-color="#b9a6ff"/><stop offset=".55" stop-color="#5a3fc4"/><stop offset="1" stop-color="#22105a"/>
-    </radialGradient>
-    <radialGradient id="marble-hot" cx=".42" cy=".38" r=".75">
-      <stop offset="0" stop-color="#ffd09a"/><stop offset=".55" stop-color="#b8542a"/><stop offset="1" stop-color="#4a1a0e"/>
-    </radialGradient>
-    <linearGradient id="gold" gradientUnits="userSpaceOnUse" x1="0" y1="2" x2="0" y2="110">
-      <stop offset="0" stop-color="#fff6d8"/>
-      <stop offset=".3" stop-color="#c08d34"/>
-      <stop offset=".46" stop-color="#ffe9ad"/>
-      <stop offset=".62" stop-color="#6e4a12"/>
-      <stop offset=".8" stop-color="#f0c96f"/>
-      <stop offset="1" stop-color="#93681f"/>
-    </linearGradient>
-  </defs>
-</svg>
-
-<div class="stage">
-  <header class="crest">
-    <h1 id="title">Раздор</h1>
-    <p class="tagline"><span data-t="tagline"></span><small data-t="platforms"></small></p>
-  </header>
-
-  <nav class="menu" id="menu"></nav>
-
-  <footer class="corners">
-    <div class="links">
-      <a href="https://github.com/indicozy/razdor/blob/main/CHANGELOG.md" target="_blank" rel="noopener" data-t="changelog"></a>
-      <a href="https://discord.gg/cdTtYz5dH" target="_blank" rel="noopener">Discord</a>
-      <a href="https://github.com/indicozy/razdor/issues" target="_blank" rel="noopener" data-t="bugs"></a>
-    </div>
-    <p class="fine" data-t="fine"></p>
-    <div class="lang" role="group" aria-label="Language">
-      <button type="button" data-lang="en" aria-pressed="false">EN</button><span>/</span><button type="button" data-lang="ru" aria-pressed="true">RU</button>
-    </div>
-  </footer>
+<div class="video">
+  <iframe src="https://www.youtube-nocookie.com/embed/p7g0yvwtEeM" title="Razdor: видео" loading="lazy" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
 </div>
 
-<dialog id="panel" aria-labelledby="panel-title">
-  <div class="win">
-    <button class="close" type="button" id="close" aria-label="Close">×</button>
-    <h2 id="panel-title"></h2>
-    <div id="panel-body"></div>
+<section class="window" id="how" aria-labelledby="how-title">
+  <h2 id="how-title">Как это работает</h2>
+  <a class="close" href="#top" aria-label="К меню">×</a>
+  <div class="window-body">
+    <div class="box">
+      <p>Razdor — это новый движок для «Времён раздора» (Aterdux, 2004). Он написан заново и сам не содержит ничего из оригинальной игры. Карты, данные, графику, звуки, музыку и тексты он читает из вашей установленной копии прямо во время игры и ничего в ней не меняет.</p>
+      <p>Правила восстановлены по оригиналу: бои на поле 2×6, инициатива, ряды и магия, опыт и повышения, экономика, события и задания работают так же, как в игре, с Community Update включительно.</p>
+    </div>
+    <div class="pair">
+      <div class="box">
+        <h3>Что умеет Razdor</h3>
+        <ul>
+          <li>Все сценарии и кампании из папки игры: «Раменское королевство», «Сказка странствий» и остальные.</li>
+          <li>Карта мира с туманом войны, города, замки и деревни, армии со своими целями, корабли.</li>
+          <li>Предметы, заклинания, журнал заданий, сохранения.</li>
+          <li>Редактор карт, файлы которого открывает и оригинал.</li>
+          <li>Русский и английский интерфейс.</li>
+        </ul>
+      </div>
+      <div class="box">
+        <h3>Что нужно от вас</h3>
+        <ul>
+          <li>Своя копия «Времён раздора» с Community Update 1.2.</li>
+          <li>Windows 10 или новее, либо Linux (x86_64).</li>
+          <li>Видеокарта с OpenGL 2 — есть почти на любом компьютере.</li>
+        </ul>
+      </div>
+    </div>
   </div>
-</dialog>
+</section>
 
-<script>
-(() => {
-  const REPO = "https://github.com/indicozy/razdor";
-  const LATEST = REPO + "/releases/latest";
-  const VERSION = "0.3.0";
-  const VIDEO = "p7g0yvwtEeM";
-  const DISCORD = "https://discord.gg/cdTtYz5dH";
-  const ISSUES = REPO + "/issues";
-  const QUARANTINE = "xattr -d com.apple.quarantine razdor-macos";
+<section class="window" id="install" aria-labelledby="install-title">
+  <h2 id="install-title">Установка</h2>
+  <a class="close" href="#top" aria-label="К меню">×</a>
+  <div class="window-body">
+    <div class="parchment">
+      <ol>
+        <li>Установите «Времена раздора» и Community Update 1.2, если их ещё нет.</li>
+        <li>Скачайте Razdor со <a href="https://github.com/indicozy/razdor/releases/latest">страницы выпусков</a>: <strong>Razdor.exe</strong> для Windows или <strong>razdor</strong> для Linux.</li>
+        <li>Положите её в папку игры, рядом с <strong>DiscordTimes.exe</strong>.</li>
+        <li>Запустите. Razdor сам найдёт игру в своей папке; сохранения и настройки он хранит отдельно, а игру не трогает.</li>
+      </ol>
+      <p class="note">Если игра лежит в другом месте, укажите путь к ней в файле <code>.env</code> рядом с программой: <code>RAZDOR_DT_DIR="C:\Games\Discord Times"</code>. Если что-то не запускается или играет не так, как оригинал, напишите об этом на <a href="https://github.com/indicozy/razdor/issues">GitHub</a> и приложите файл <code>razdor.log</code> из <code>%APPDATA%\razdor\</code> (Windows) или <code>~/.local/share/razdor/</code> (Linux).</p>
+    </div>
+  </div>
+</section>
 
-  // The menu: the game's ovals, the last one pointed. Each opens a window.
-  const BUTTONS = ["trailer", "download", "features", "start", "source", "credits"];
+<section class="window" id="changes" aria-labelledby="changes-title">
+  <h2 id="changes-title">Изменения</h2>
+  <a class="close" href="#top" aria-label="К меню">×</a>
+  <div class="window-body">
+    <article class="box">
+      <h3>0.2.0 <span class="date">30 сентября 2026</span></h3>
+      <h4>Новое</h4>
+      <ul>
+        <li>Преследование армии: после щелчка по армии герой идёт за ней, пока они не встретятся.</li>
+        <li>Воинов в окне армии и в казарме можно переставлять перетаскиванием.</li>
+        <li>Предпросмотр пути: первый щелчок показывает путь и время, второй (или двойной щелчок) отправляет героя; щелчок во время ходьбы останавливает.</li>
+        <li>Армии на миникарте, прокрутка у краёв экрана и перетаскивание карты правой кнопкой.</li>
+        <li>Экран поражения: «Загрузить последнее сохранение» и «Начать карту заново».</li>
+        <li>Журнал игры <code>razdor-play.log</code> для разбора ошибок.</li>
+      </ul>
+      <h4>Изменено</h4>
+      <ul>
+        <li>Слова встречи читаются до боя, битва начинается после «ОК».</li>
+        <li>Масштаб карты зависит от размера экрана, как в оригинале при 1024×768.</li>
+        <li>Армии компьютера обходят чужие замки, форты и руины, как и герой.</li>
+      </ul>
+      <h4>Исправлено</h4>
+      <ul>
+        <li>Неуязвимые и призраки теряют ровно 1 жизнь от любого удара.</li>
+        <li>Процентная прибавка к защите складывается: 44% + 20% = 64%.</li>
+        <li>Чтение заклинания на карте идёт в реальном времени; картинки заклинаний в правильных цветах.</li>
+        <li>Вещь, увеличивающая жизнь, добавляет и сами жизни; на карточках в бою видно оставшиеся действия.</li>
+        <li>Посыльные идут к герою; больше нет вылета на карте со зданиями с русскими названиями.</li>
+      </ul>
+    </article>
+    <article class="box">
+      <h3>0.1.2 <span class="date">30 сентября 2026</span></h3>
+      <ul>
+        <li>ИИ в бою: простой или улучшенный, как «Улучшенный интеллект противника в битве» в оригинале.</li>
+        <li>Задания показывают места на карте; корабли как в оригинале; здания не прячутся за холмами.</li>
+        <li>Ограничения вещей как в оригинале; защита зданий для союзных построек.</li>
+        <li>Если передний ряд пуст, задний выходит вперёд, в том числе в начале боя.</li>
+        <li>Исправлены Esc в бою и музыка после загрузки.</li>
+      </ul>
+    </article>
+    <article class="box">
+      <h3>0.1.1 <span class="date">30 сентября 2026</span></h3>
+      <h4>Новое</h4>
+      <ul>
+        <li>Новая игра: карты сгруппированы, как в оригинале. Кампания — одна строка со списком глав под ней.</li>
+        <li>У каждой карты своя картинка в рамке, как в оригинале, а карта местности — рядом.</li>
+        <li>При первой новой игре предлагается обучающий сценарий.</li>
+        <li>Если нет драйвера OpenGL (удалённый рабочий стол, виртуальная машина), Razdor объясняет, что делать.</li>
+      </ul>
+      <h4>Изменено</h4>
+      <ul>
+        <li>Бой: враг под курсором обведён зелёной рамкой, как в оригинале.</li>
+        <li>Карта мира: сквозь армию, свою или чужую, пройти нельзя.</li>
+      </ul>
+      <h4>Исправлено</h4>
+      <ul>
+        <li>Вопрос «Рестарт» больше не закрывается сам, а удаление сохранения всегда спрашивает подтверждение.</li>
+        <li>Сборки воспроизводимы: один и тот же коммит даёт одинаковые файлы на любом компьютере.</li>
+      </ul>
+    </article>
+    <article class="box">
+      <h3>0.1.0 <span class="date">29 сентября 2026</span></h3>
+      <ul>
+        <li>Первый выпуск: Razdor.exe для Windows и razdor для Linux.</li>
+        <li>Оригинальные сценарии с вашей копии игры: карта мира, здания, армии, бои, экономика, события, заклинания, сохранения, звуки и музыка.</li>
+        <li>Редактор карт, встроенная демо-карта без установленной игры, русский и английский интерфейс.</li>
+        <li>Экран армии: предметы перетаскиваются из рюкзака на карточки воинов.</li>
+        <li>Счётчик кадров в настройках; исправлен вылет при свёрнутом окне.</li>
+      </ul>
+    </article>
+  </div>
+</section>
 
-  const T = {
-    ru: {
-      title: "Раздор",
-      tagline: "Новый движок для «Времён раздора»",
-      platforms: "Версия " + VERSION + " · Windows · Linux · macOS",
-      changelog: "Что нового", bugs: "Сообщить об ошибке",
-      fine: "Неофициальный фанатский проект. Не содержит файлов игры: нужна ваша копия «Времён раздора».",
-      close: "Закрыть",
-      copy: "Копировать", copied: "Скопировано", copyFail: "Выделите и скопируйте вручную",
-      trailer: {
-        label: "Трейлер",
-        title: "Трейлер",
-        body: () => video("Смотреть на YouTube")
-      },
-      download: {
-        label: "Скачать",
-        title: "Скачать Razdor " + VERSION,
-        body: () => `
-          <p>Одна программа без установщика. Положите её рядом с <b>DiscordTimes.exe</b> и запустите.</p>
-          <div class="get">
-            <a href="${LATEST}" target="_blank" rel="noopener"><b>Windows</b><span>Razdor.exe</span></a>
-            <a href="${LATEST}" target="_blank" rel="noopener"><b>Linux</b><span>razdor</span></a>
-            <a href="${LATEST}" target="_blank" rel="noopener"><b>macOS</b><span>razdor-macos</span></a>
-          </div>
-          <p>Нужна установленная игра «Времена раздора» с Community Update 1.2 (игра 1.8.1). Razdor читает её файлы при запуске и ничего в них не меняет.</p>
-          <h3>macOS</h3>
-          <p>Программа не подписана, поэтому macOS блокирует её после загрузки. Перед первым запуском выполните в Терминале:</p>
-          ${cmd(QUARANTINE)}
-          <p>Контрольные суммы SHA-256 всех трёх программ есть в описании каждого выпуска. Одинаковый коммит даёт одинаковый Razdor.exe на любой машине.</p>`
-      },
-      features: {
-        label: "Возможности",
-        title: "Что лучше оригинала",
-        body: () => `
-          <ul>
-            <li><b>Чёткая картинка на любом экране.</b> Окно любого размера, поддержка HiDPI.<span class="was">Оригинал: только полный экран 1024×768 в 16-битном цвете.</span></li>
-            <li><b>Нативно на Windows, Linux и macOS.</b> Без Wine и обёрток DirectDraw.</li>
-            <li><b>Быстрое сохранение и загрузка:</b> F5 и F9.</li>
-            <li><b>Быстрый бой.</b> Q или Enter решают бой сразу, W показывает, как его играет ИИ.</li>
-            <li><b>Свои бои из главного меню:</b> любые армии друг против друга.</li>
-            <li><b>Поиск по рюкзаку и рынку</b> по первым буквам.</li>
-            <li><b>Консоль читов</b> на клавише ~ и <b>редактор карт</b> с поиском по карте (Ctrl+F).</li>
-            <li><b>Исправлены ошибки оригинала.</b> Победа больше не превращается в сдачу. ИИ не покупает вещи, которые его бойцы не наденут. Запас маны не уходит за максимум. Призрак колдует при любой силе.</li>
-            <li><b>Если что-то пошло не так,</b> журнал razdor.log показывает, на каком шаге, а сбой записывается в него вместе с подробностями.</li>
-            <li><b>Моды:</b> поддерживается Evolution 9.0.</li>
-          </ul>
-          <h3>Что осталось как было</h3>
-          <ul>
-            <li>Правила боя, экономика, ИИ и события восстановлены по коду оригинала и сверены с ним на одинаковых прогонах.</li>
-            <li>Тот же генератор случайных чисел: те же броски.</li>
-            <li>Ваши карты и кампании из установленной игры.</li>
-          </ul>`
-      },
-      start: {
-        label: "Как начать",
-        title: "Как начать",
-        body: () => `
-          <ol>
-            <li>Установите «Времена раздора» с Community Update 1.2.</li>
-            <li><a href="${LATEST}" target="_blank" rel="noopener">Скачайте Razdor</a> для своей системы.</li>
-            <li>Положите программу в папку игры, рядом с <b>DiscordTimes.exe</b>. На Mac это папка игры внутри бутылки Wine или CrossOver.</li>
-            <li>Запустите. Если игра лежит в другом месте, укажите путь в переменной <b>RAZDOR_DT_DIR</b>.</li>
-          </ol>
-          <h3>Если не запускается</h3>
-          <p>Каждый запуск пишет журнал <b>razdor.log</b>: последняя строка показывает, где остановился запуск.</p>
-          <ul>
-            <li>Windows: <b>%APPDATA%\\razdor\\</b></li>
-            <li>Linux: <b>~/.local/share/razdor/</b></li>
-            <li>macOS: <b>~/Library/Application Support/razdor/</b></li>
-          </ul>`
-      },
-      source: {
-        label: "Исходники",
-        title: "Открытый код",
-        body: () => `
-          <p>Razdor написан на Rust и открыт под лицензией MIT.</p>
-          <p><a href="${REPO}" target="_blank" rel="noopener">github.com/indicozy/razdor</a></p>
-          <ul>
-            <li>Выпуски собираются на GitHub из тега версии, с SHA-256 каждой программы.</li>
-            <li>Механика оригинала описана своими словами в docs/reference: адреса, разбор кода, проверки. Лицензия игры разрешает изучать её код.</li>
-            <li>В репозитории никогда нет файлов игры: ни карт, ни текстов, ни графики, ни звуков.</li>
-          </ul>`
-      },
-      credits: {
-        label: "Авторы",
-        title: "Авторы",
-        body: () => `
-          <p>Razdor делает <a href="https://github.com/indicozy" target="_blank" rel="noopener">@indicozy</a>.</p>
-          <p>Игроки общаются в <a href="${DISCORD}" target="_blank" rel="noopener">Discord</a>. Ошибки пишите на <a href="${ISSUES}" target="_blank" rel="noopener">GitHub</a> и прикладывайте razdor.log.</p>
-          <p>«Времена раздора» (Discord Times) создала студия Aterdux в 2004 году. Razdor — независимый некоммерческий фанатский проект, не связанный с Aterdux и другими правообладателями. Название игры используется только чтобы сказать, с какой игрой работает движок.</p>
-          <p>Razdor не содержит кода, данных, текстов, графики, звуков, музыки и карт оригинала. Чтобы играть, нужна ваша законно полученная копия игры.</p>
-          <h3>Шрифты</h3>
-          <p>Kurale, PT Sans и Ruslan Display, под лицензией SIL Open Font License 1.1.</p>`
-      }
-    },
-    en: {
-      title: "Razdor",
-      tagline: "A new engine for Discord Times",
-      platforms: "Version " + VERSION + " · Windows · Linux · macOS",
-      changelog: "What's new", bugs: "Report a bug",
-      fine: "An unofficial fan project. It has none of the game's files: you need your own copy of Discord Times.",
-      close: "Close",
-      copy: "Copy", copied: "Copied", copyFail: "Select and copy it by hand",
-      trailer: {
-        label: "Trailer",
-        title: "Trailer",
-        body: () => video("Watch on YouTube")
-      },
-      download: {
-        label: "Download",
-        title: "Download Razdor " + VERSION,
-        body: () => `
-          <p>One program, no installer. Put it next to <b>DiscordTimes.exe</b> and run it.</p>
-          <div class="get">
-            <a href="${LATEST}" target="_blank" rel="noopener"><b>Windows</b><span>Razdor.exe</span></a>
-            <a href="${LATEST}" target="_blank" rel="noopener"><b>Linux</b><span>razdor</span></a>
-            <a href="${LATEST}" target="_blank" rel="noopener"><b>macOS</b><span>razdor-macos</span></a>
-          </div>
-          <p>You need Discord Times installed with the Community Update 1.2 (game 1.8.1). Razdor reads its files at start and never changes them.</p>
-          <h3>macOS</h3>
-          <p>The program isn't signed, so macOS blocks it once downloaded. Before the first start, run this in Terminal:</p>
-          ${cmd(QUARANTINE)}
-          <p>Each release lists the SHA-256 of all three programs. The same commit builds the same Razdor.exe on any machine.</p>`
-      },
-      features: {
-        label: "Features",
-        title: "Better than the original",
-        body: () => `
-          <ul>
-            <li><b>A sharp picture on any screen.</b> A window of any size, HiDPI support.<span class="was">The original: full screen only, 1024×768 in 16-bit colour.</span></li>
-            <li><b>Native on Windows, Linux and macOS.</b> No Wine, no DirectDraw wrappers.</li>
-            <li><b>Quick save and load:</b> F5 and F9.</li>
-            <li><b>Quick battles.</b> Q or Enter settles a battle at once; W lets you watch the AI play it.</li>
-            <li><b>Custom battles from the main menu:</b> any armies against each other.</li>
-            <li><b>Search the backpack and the market</b> by the first letters.</li>
-            <li><b>A cheat console</b> on the ~ key, and a <b>map editor</b> that searches the map (Ctrl+F).</li>
-            <li><b>The original's bugs fixed.</b> A won battle no longer turns into a surrender. The AI no longer buys items its units can't wear. The mana stock stops at its maximum. A Ghost casts at any power.</li>
-            <li><b>When something goes wrong,</b> razdor.log shows the step it stopped at, and a crash is written there with its details.</li>
-            <li><b>Mods:</b> Evolution 9.0 is supported.</li>
-          </ul>
-          <h3>What stays the same</h3>
-          <ul>
-            <li>Battle rules, economy, AI and events rebuilt from the original's code and checked against it on identical runs.</li>
-            <li>The same random number generator: the same rolls.</li>
-            <li>Your maps and campaigns, from your installed game.</li>
-          </ul>`
-      },
-      start: {
-        label: "Get started",
-        title: "Get started",
-        body: () => `
-          <ol>
-            <li>Install Discord Times with the Community Update 1.2.</li>
-            <li><a href="${LATEST}" target="_blank" rel="noopener">Download Razdor</a> for your system.</li>
-            <li>Put the program in the game's folder, next to <b>DiscordTimes.exe</b>. On a Mac, that's the game folder inside a Wine or CrossOver bottle.</li>
-            <li>Run it. If the game is somewhere else, set its folder in <b>RAZDOR_DT_DIR</b>.</li>
-          </ol>
-          <h3>If it doesn't start</h3>
-          <p>Every start writes <b>razdor.log</b>; its last line shows where the start stopped.</p>
-          <ul>
-            <li>Windows: <b>%APPDATA%\\razdor\\</b></li>
-            <li>Linux: <b>~/.local/share/razdor/</b></li>
-            <li>macOS: <b>~/Library/Application Support/razdor/</b></li>
-          </ul>`
-      },
-      source: {
-        label: "Source",
-        title: "Open source",
-        body: () => `
-          <p>Razdor is written in Rust and released under the MIT License.</p>
-          <p><a href="${REPO}" target="_blank" rel="noopener">github.com/indicozy/razdor</a></p>
-          <ul>
-            <li>Releases are built on GitHub from the version tag, with each program's SHA-256.</li>
-            <li>The original's mechanics are described in our own words in docs/reference: addresses, code readings, checks. The game's licence allows studying its code.</li>
-            <li>The repository never holds the game's files: no maps, texts, art or sounds.</li>
-          </ul>`
-      },
-      credits: {
-        label: "Credits",
-        title: "Credits",
-        body: () => `
-          <p>Razdor is made by <a href="https://github.com/indicozy" target="_blank" rel="noopener">@indicozy</a>.</p>
-          <p>Players talk on <a href="${DISCORD}" target="_blank" rel="noopener">Discord</a>. Report bugs on <a href="${ISSUES}" target="_blank" rel="noopener">GitHub</a> with your razdor.log.</p>
-          <p>Discord Times («Времена раздора») was made by Aterdux in 2004. Razdor is an independent, non-commercial fan project, not affiliated with Aterdux or any other rights holder. The game's name is used only to say which game the engine works with.</p>
-          <p>Razdor contains no code, data, text, art, sounds, music or maps of the original. To play, you need your own legally obtained copy of the game.</p>
-          <h3>Fonts</h3>
-          <p>Kurale, PT Sans and Ruslan Display, under the SIL Open Font License 1.1.</p>`
-      }
-    }
-  };
+<section class="window" id="discord" aria-labelledby="discord-title">
+  <h2 id="discord-title">Discord</h2>
+  <a class="close" href="#top" aria-label="К меню">×</a>
+  <div class="window-body join">
+    <p>Неофициальное сообщество игроков «Времён раздора». Это не сервер Razdor: о его ошибках лучше писать на <a href="https://github.com/indicozy/razdor/issues">GitHub</a>.</p>
+    <a class="oval" href="https://discord.gg/cdTtYz5dH">Войти в Discord</a>
+  </div>
+</section>
 
-  function video(label) {
-    return `<div class="video"><iframe src="https://www.youtube-nocookie.com/embed/${VIDEO}?autoplay=1&rel=0" title="Razdor" referrerpolicy="strict-origin-when-cross-origin"
-      allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></div>
-      <p><a href="https://youtu.be/${VIDEO}" target="_blank" rel="noopener">${label}</a></p>`;
-  }
+</main>
 
-  function cmd(text) {
-    return `<div class="cmd"><code>${text}</code><button type="button" data-copy="${text}">${t().copy}</button></div>`;
-  }
+<footer class="foot">
+  <p>Razdor 0.2.0 // для Community Update 1.2 // <a href="https://github.com/indicozy/razdor">исходный код на GitHub</a></p>
+  <p>Сделал <a href="https://github.com/indicozy">@indicozy</a>. Не связан с Aterdux и правообладателями «Времён раздора»; без гарантий.</p>
+</footer>
 
-  // The oval frame, in the 214×112 box of the game's button picture. One quarter of the
-  // ornament, mirrored four ways; the last button gets a pointed tip below.
-  const QUARTER = `
-    <path class="metal" fill="none" stroke-width="3" stroke-linecap="round" d="M35 56 C27 55 21 49 22 42 C23 35 32 34 34 40 C35 44 30 46 28 43"/>
-    <path class="leaf" d="M34 56 C24 51 13 52 3 56 C13 58 24 59 34 56Z"/>
-    <path class="metal" fill="none" stroke-width="2.6" stroke-linecap="round" d="M60 29 C49 23 49 12 57 11 C63 10 64 18 59 19"/>
-    <path class="metal" fill="none" stroke-width="2.6" stroke-linecap="round" d="M107 24 C96 24 88 18 91 11 C93 6 100 7 100 12"/>
-    <path class="leaf" d="M107 25 C102 19 100 11 107 3 L107 25Z"/>`;
-  function frame(pointed) {
-    const q = (m) => `<g transform="${m}">${QUARTER}</g>`;
-    return `<svg viewBox="0 0 214 112" aria-hidden="true">
-      ${q("")}${q("matrix(-1 0 0 1 214 0)")}${q("matrix(1 0 0 -1 0 112)")}${q("matrix(-1 0 0 -1 214 112)")}
-      ${pointed ? `<path class="leaf" d="M107 84 C99 93 100 104 107 116 C114 104 115 93 107 84Z"/>` : ""}
-      <ellipse class="still" cx="107" cy="56" rx="68" ry="27.5"/>
-      <ellipse cx="107" cy="56" rx="77" ry="36" fill="none" stroke="rgba(20,12,8,.8)" stroke-width="1.4"/>
-      <ellipse class="metal" cx="107" cy="56" rx="72" ry="31.5" fill="none" stroke-width="9"/>
-      <ellipse cx="107" cy="56" rx="72" ry="31.5" fill="none" stroke="rgba(255,255,255,.75)" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="0.1 7.2"/>
-      <ellipse cx="107" cy="56" rx="67" ry="26.6" fill="none" stroke="rgba(20,12,8,.85)" stroke-width="1.6"/>
-    </svg>`;
-  }
-
-  // ---- language ---------------------------------------------------------------------
-  let lang = "ru";
-  try {
-    const asked = new URLSearchParams(location.search).get("lang");
-    const saved = asked || localStorage.getItem("razdor-lang");
-    if (saved === "ru" || saved === "en") lang = saved;
-    else if (!/^ru|^uk|^be|^kk/i.test(navigator.language || "ru")) lang = "en";
-  } catch (e) { /* no storage: keep the default */ }
-  const t = () => T[lang];
-
-  const menu = document.getElementById("menu");
-  menu.setAttribute("aria-label", "Menu");
-  BUTTONS.forEach((id, i) => {
-    const b = document.createElement("button");
-    b.className = "btn"; b.type = "button"; b.dataset.panel = id;
-    b.innerHTML = frame(i === BUTTONS.length - 1) + `<span class="label"></span>`;
-    menu.appendChild(b);
-  });
-  const buttons = [...menu.children];
-
-  function applyLang() {
-    document.documentElement.lang = lang;
-    document.getElementById("title").textContent = t().title;
-    document.querySelectorAll("[data-t]").forEach((el) => { el.textContent = t()[el.dataset.t]; });
-    buttons.forEach((b) => { b.querySelector(".label").textContent = t()[b.dataset.panel].label; });
-    document.querySelectorAll("[data-lang]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.lang === lang)));
-    document.getElementById("close").setAttribute("aria-label", t().close);
-    if (dialog.open && current) fill(current);
-    requestAnimationFrame(measure);
-  }
-  document.querySelectorAll("[data-lang]").forEach((b) => b.addEventListener("click", () => {
-    lang = b.dataset.lang;
-    try { localStorage.setItem("razdor-lang", lang); } catch (e) { /* fine */ }
-    applyLang();
-  }));
-
-  // ---- windows ----------------------------------------------------------------------
-  const dialog = document.getElementById("panel");
-  let current = null;
-  function fill(id) {
-    document.getElementById("panel-title").textContent = t()[id].title;
-    document.getElementById("panel-body").innerHTML = t()[id].body();
-  }
-  function open(id) {
-    current = id; fill(id);
-    dialog.classList.toggle("wide", id === "trailer");
-    if (!dialog.open) dialog.showModal();
-    dialog.querySelector(".win").scrollTop = 0;
-  }
-  buttons.forEach((b) => b.addEventListener("click", () => open(b.dataset.panel)));
-  document.getElementById("close").addEventListener("click", () => dialog.close());
-  // Closing the window stops the video.
-  dialog.addEventListener("close", () => { document.getElementById("panel-body").innerHTML = ""; current = null; });
-  dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
-  dialog.addEventListener("click", (e) => {
-    const c = e.target.closest("[data-copy]");
-    if (!c) return;
-    const done = (msg) => { c.textContent = msg; setTimeout(() => { c.textContent = t().copy; }, 1600); };
-    const fallback = () => {
-      const code = c.previousElementSibling, r = document.createRange();
-      r.selectNodeContents(code); const s = getSelection(); s.removeAllRanges(); s.addRange(r);
-      done(t().copyFail);
-    };
-    try { navigator.clipboard.writeText(c.dataset.copy).then(() => done(t().copied), fallback); }
-    catch (err) { fallback(); }
-  });
-  const hash = location.hash.slice(1);
-  if (BUTTONS.includes(hash)) requestAnimationFrame(() => open(hash));
-
-  // ---- hover: the hovered oval turns gold and its middle warms -------------------------
-  let hot = -1;
-  const setHot = (i) => { hot = i; buttons.forEach((b, j) => b.classList.toggle("hot", j === i)); if (still) draw(); };
-  buttons.forEach((b, i) => {
-    b.addEventListener("pointerenter", () => setHot(i));
-    b.addEventListener("pointerleave", () => { if (hot === i) setHot(-1); });
-    b.addEventListener("focus", () => setHot(i));
-    b.addEventListener("blur", () => { if (hot === i) setHot(-1); });
-  });
-
-  // ---- the fire --------------------------------------------------------------------
-  const canvas = document.getElementById("fx");
-  const gl = canvas.getContext("webgl", { antialias: false, alpha: false, premultipliedAlpha: false });
-  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  if (!gl) { canvas.hidden = true; document.body.classList.add("no-fire"); applyLang(); return; }
-
-  const VS = `attribute vec2 a; void main(){ gl_Position = vec4(a, 0., 1.); }`;
-  const FS = `
-  #ifdef GL_FRAGMENT_PRECISION_HIGH
-  precision highp float;
-  #else
-  precision mediump float;
-  #endif
-  uniform vec2 R; uniform float T; uniform vec4 B[6]; uniform float H; uniform vec4 TT; uniform float S;
-
-  float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
-  float noise(vec2 p){
-    vec2 i = floor(p), f = fract(p), u = f * f * (3. - 2. * f);
-    return mix(mix(hash(i), hash(i + vec2(1., 0.)), u.x), mix(hash(i + vec2(0., 1.)), hash(i + vec2(1., 1.)), u.x), u.y);
-  }
-  float fbm(vec2 p){
-    float v = 0., a = .5; mat2 m = mat2(1.6, 1.2, -1.2, 1.6);
-    for (int i = 0; i < 5; i++) { v += a * noise(p); p = m * p; a *= .5; }
-    return v;
-  }
-  // A soft rectangle from x0 to x1, from y0 down to the bottom (y grows downward).
-  float block(vec2 q, float x0, float x1, float y0){
-    return smoothstep(x0 - .003, x0 + .003, q.x) * smoothstep(x1 + .003, x1 - .003, q.x) * smoothstep(y0 - .004, y0 + .004, q.y);
-  }
-  float hole(vec2 q, float x0, float x1, float y0, float y1){
-    return block(q, x0, x1, y0) * (1. - block(q, x0, x1, y1));
-  }
-  float teeth(vec2 q, float x0, float w){ return step(.5, fract((q.x - x0) / w)); }
-  // Ruined towers and a broken wall, after the game's burning ruins.
-  float ruins(vec2 q0){
-    // Weathered, broken edges: shake the sides a little and break the tops.
-    vec2 q = q0 + vec2((noise(q0 * vec2(5., 18.)) - .5) * .006, (noise(vec2(q0.x * 34., 3.)) - .5) * .045);
-    float m = 0.;
-    m = max(m, block(q, .02, .17, .30)); m = max(m, block(q, .02, .17, .265) * teeth(q, .02, .03));
-    m = max(m, block(q, .25, .35, .12)); m = max(m, block(q, .25, .35, .09) * teeth(q, .25, .025));
-    m = max(m, block(q, .17, .25, .52));
-    m = max(m, block(q, .35, .43, .66)); m = max(m, block(q, .60, .69, .70));
-    m = max(m, block(q, .69, .79, .17)); m = max(m, block(q, .69, .79, .14) * teeth(q, .69, .025));
-    m = max(m, block(q, .79, .86, .58));
-    m = max(m, block(q, .86, .98, .38)); m = max(m, block(q, .86, .98, .345) * teeth(q, .86, .03));
-    m = max(m, block(q, 0., 1., .84));
-    float w = hole(q, .07, .10, .42, .50) + hole(q, .28, .31, .24, .31) + hole(q, .28, .31, .44, .50)
-            + hole(q, .72, .75, .30, .37) + hole(q, .90, .93, .50, .57) + hole(q, .73, .76, .55, .62);
-    return m * (1. - clamp(w, 0., 1.) * .8);
-  }
-
-  void main(){
-    vec2 p = vec2(gl_FragCoord.x, R.y - gl_FragCoord.y);
-    vec2 q = p / R;
-    vec2 n = p / min(R.x, R.y);
-
-    // Smoke and fire rising through the whole picture.
-    vec2 w = vec2(fbm(n * 2. + vec2(0., T * .05)), fbm(n * 2. + vec2(5.2, 1.3) + vec2(0., T * .04)));
-    float f = fbm(n * 2.6 + w * 1.6 + vec2(0., T * .09));
-    float heat = (.55 + .45 * (1. - abs(q.x - .5) * 1.6)) * (.55 + .6 * q.y);
-    float v = f * heat * 1.25;
-    vec3 col = mix(vec3(.07, .03, .012), vec3(.45, .18, .045), smoothstep(.2, .55, v));
-    col = mix(col, vec3(.93, .52, .15), smoothstep(.5, .85, v));
-    col = mix(col, vec3(1., .84, .5), smoothstep(.82, 1.05, v) * .6);
-
-    // The stones, darker than the haze, lit by it at the edges.
-    float ru = ruins(q);
-    float stone = fbm(p * .03 * S) * .6 + fbm(p * .11 * S) * .4;
-    vec3 sc = vec3(.24, .13, .055) * (.45 + stone * 1.1) + col * .22;
-    col = mix(col, sc, ru * (.8 - f * .4));
-
-    // Darker toward the corners.
-    vec2 c = q - .5;
-    col *= 1. - .9 * dot(c, c);
-
-    // Flames licking up behind the title's letters.
-    vec2 d = (p - TT.xy) / TT.zw;
-    if (d.x > -.05 && d.x < 1.05 && d.y > -1. && d.y < 1.1) {
-      float hx = smoothstep(0., .14, d.x) * smoothstep(1., .86, d.x);
-      float vy = smoothstep(-.95, .05, d.y) * smoothstep(.72, .3, d.y);
-      float fl = fbm(vec2(p.x * .018 / S, p.y * .016 / S + T * 2.)) * .7 + fbm(vec2(p.x * .05 / S, p.y * .04 / S + T * 3.2)) * .5;
-      float tongue = smoothstep(.42, .8, fl - (.25 - d.y) * .55) * hx * vy;
-      col += vec3(1., .46, .12) * tongue * 1.1 + vec3(1., .85, .5) * tongue * tongue * .55;
-    }
-
-    // Fire around the column of buttons, and each button's swirling marble middle.
-    for (int i = 0; i < 6; i++) {
-      vec4 b = B[i];
-      vec2 e = (p - b.xy) / b.zw;
-      float r = length(e);
-      col += vec3(1., .45, .12) * exp(-r * r * .3) * .16 * (.8 + .2 * sin(T * 3. + float(i) * 1.7));
-      if (r < 1.05) {
-        float hot = 1. - step(.1, abs(H - float(i)));
-        float a = atan(e.y, e.x) + r * 2.4 - T * .55;
-        vec2 sw = vec2(cos(a), sin(a)) * r;
-        float m = fbm(sw * 2.3 + fbm(sw * 3. + T * .15 + float(i)) * 1.6 + float(i) * 3.1);
-        vec3 vi = mix(vec3(.17, .09, .5), vec3(.6, .47, 1.), smoothstep(.3, .75, m));
-        vi += vec3(.85, .8, 1.) * smoothstep(.68, .9, m) * .55;
-        vec3 wa = mix(vec3(.45, .15, .1), vec3(1., .66, .38), smoothstep(.3, .75, m));
-        wa += vec3(1., .9, .7) * smoothstep(.68, .9, m) * .55;
-        vec3 mc = mix(vi, wa, hot) * (.62 + .38 * (1. - r * r));
-        col = mix(col, mc, smoothstep(1.03, .96, r));
-      }
-    }
-    gl_FragColor = vec4(col, 1.);
-  }`;
-
-  function shader(type, src) {
-    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
-    return s;
-  }
-  let prog;
-  try {
-    prog = gl.createProgram();
-    gl.attachShader(prog, shader(gl.VERTEX_SHADER, VS));
-    gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, FS));
-    gl.linkProgram(prog);
-    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
-  } catch (err) {
-    console.warn("Razdor site: no fire, the shader failed:", err);
-    canvas.hidden = true; document.body.classList.add("no-fire"); applyLang(); return;
-  }
-  gl.useProgram(prog);
-  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-  const loc = gl.getAttribLocation(prog, "a");
-  gl.enableVertexAttribArray(loc);
-  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-  const U = {};
-  ["R", "T", "B", "H", "TT", "S"].forEach((k) => { U[k] = gl.getUniformLocation(prog, k); });
-
-  // The page lays the title and the ovals out; the shader is told where they are.
-  let scale = 1;
-  const rects = new Float32Array(24);
-  const title = document.getElementById("title");
-  function measure() {
-    if (!gl || canvas.hidden) return;
-    scale = Math.min(window.devicePixelRatio || 1, 1.5);
-    const w = Math.round(innerWidth * scale), h = Math.round(innerHeight * scale);
-    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
-    gl.viewport(0, 0, w, h);
-    buttons.forEach((b, i) => {
-      const r = b.getBoundingClientRect();
-      rects[i * 4] = (r.left + r.width / 2) * scale;
-      rects[i * 4 + 1] = (r.top + r.height / 2) * scale;
-      // The marble middle inside the frame's inner ring (67 × 26.6 of the 214 × 112 box).
-      rects[i * 4 + 2] = r.width * (67 / 214) * scale;
-      rects[i * 4 + 3] = r.height * (26.6 / 112) * scale;
-    });
-    const range = document.createRange(); range.selectNodeContents(title);
-    const tr = range.getBoundingClientRect();
-    gl.uniform4f(U.TT, tr.left * scale, tr.top * scale, tr.width * scale, tr.height * scale);
-    gl.uniform2f(U.R, w, h);
-    gl.uniform4fv(U.B, rects);
-    gl.uniform1f(U.S, 1 / scale);
-    if (still) draw();
-  }
-
-  const t0 = performance.now();
-  function draw() {
-    gl.uniform1f(U.T, still ? 12.0 : (performance.now() - t0) / 1000);
-    gl.uniform1f(U.H, hot);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-  }
-  function loop() {
-    if (!document.hidden) draw();
-    requestAnimationFrame(loop);
-  }
-
-  addEventListener("resize", measure);
-  addEventListener("scroll", measure, { passive: true });
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(measure);
-  applyLang();
-  measure();
-  if (!still) requestAnimationFrame(loop);
-})();
-</script>
 </body>
 </html>
