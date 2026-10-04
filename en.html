@@ -7,28 +7,98 @@
 <meta name="description" content="Razdor is an open engine for Discord Times. It plays the original scenarios and campaigns from your own copy of the game on today's Windows and Linux.">
 <link rel="alternate" hreflang="ru" href="index.html">
 <link rel="stylesheet" href="style.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ruslan+Display&display=swap">
+<style>
+  /* The new header: the game's main menu over a live fire (canvas#fx, fixed behind the
+     whole page). The windows below keep style.css. */
+  :root { --bw: clamp(168px, min(26vw, 19vh), 250px); --rim: #1f0d40; }
+  #fx { position: fixed; inset: 0; width: 100%; height: 100%; display: block; z-index: 0; }
+  .hero, main, .foot { position: relative; z-index: 1; }
+  .hero { display: grid; justify-items: center; gap: clamp(6px, 1.4vh, 16px);
+    padding: clamp(14px, 3vh, 36px) 1.25rem clamp(18px, 3.5vh, 40px); text-align: center; }
+  #title {
+    margin: 0; font-family: "Ruslan Display", "Kurale", Georgia, serif; font-weight: 400;
+    font-size: clamp(56px, min(12vw, 12vh), 140px); line-height: 1; letter-spacing: .02em;
+    background: linear-gradient(180deg, #fff 0%, #c6c5d0 34%, #f6f6fa 50%, #6e6c7a 68%, #d9d8e2 86%, #8f8d99 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    -webkit-text-stroke: 1px rgba(30, 16, 10, .55);
+    filter: drop-shadow(0 3px 2px rgba(0, 0, 0, .85)) drop-shadow(0 0 18px rgba(0, 0, 0, .45));
+  }
+  .hero .tag { margin: 0; max-width: 40rem; font-family: "Kurale", Georgia, serif; font-size: clamp(16px, 2.3vh, 21px);
+    color: var(--gold); text-shadow: 0 1px 2px #000, 0 0 12px rgba(0, 0, 0, .8); text-wrap: balance; }
+  .hero nav { display: flex; flex-direction: column; align-items: center; margin-top: 4px; }
+  .btn { position: relative; display: block; width: var(--bw); aspect-ratio: 214 / 112;
+    margin-top: calc(var(--bw) * -0.085); color: #f0eaff; text-decoration: none; -webkit-tap-highlight-color: transparent; }
+  .btn:first-child { margin-top: 0; }
+  .btn:hover { color: #fff0d6; }
+  .btn svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible;
+    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .95)) drop-shadow(0 2px 5px rgba(0, 0, 0, .6)); }
+  .btn .metal { stroke: url(#silver); }
+  .btn .leaf { fill: url(#silver); }
+  .btn.hot .metal { stroke: url(#gold); }
+  .btn.hot .leaf { fill: url(#gold); }
+  .btn .still { fill: url(#marble); display: none; }
+  .btn.hot .still { fill: url(#marble-hot); }
+  .no-fire .btn .still { display: inline; }
+  .btn .label { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+  .btn .label span { font-family: "Kurale", Georgia, serif; font-size: calc(var(--bw) * .1); white-space: nowrap; letter-spacing: .01em;
+    text-shadow: -1.5px 0 var(--rim), 1.5px 0 var(--rim), 0 -1.5px var(--rim), 0 1.5px var(--rim), 0 2px 6px rgba(0, 0, 0, .7); }
+  .btn.hot .label span { color: #fff0d6; }
+  .btn:focus-visible { outline: none; }
+  .btn:focus-visible .label span { text-decoration: underline; text-decoration-color: var(--gold); text-underline-offset: .2em; }
+  .video { scroll-margin-top: 1.5rem; }
+</style>
+
 </head>
 <body id="top">
 
 <p class="lang"><b>EN</b> / <a href="index.html" lang="ru">RU</a></p>
 
-<header class="menu">
-  <h1 class="logo">Razdor</h1>
-  <p class="tagline">An engine for <i>Discord Times</i>: the original scenarios on today's Windows and Linux</p>
+<canvas id="fx" aria-hidden="true"></canvas>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="silver" gradientUnits="userSpaceOnUse" x1="0" y1="2" x2="0" y2="110">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset=".3" stop-color="#a9a7b4"/>
+      <stop offset=".46" stop-color="#f4f3f8"/>
+      <stop offset=".62" stop-color="#5f5d6b"/>
+      <stop offset=".8" stop-color="#dddce6"/>
+      <stop offset="1" stop-color="#7b7987"/>
+    </linearGradient>
+    <radialGradient id="marble" cx=".42" cy=".38" r=".75">
+      <stop offset="0" stop-color="#b9a6ff"/><stop offset=".55" stop-color="#5a3fc4"/><stop offset="1" stop-color="#22105a"/>
+    </radialGradient>
+    <radialGradient id="marble-hot" cx=".42" cy=".38" r=".75">
+      <stop offset="0" stop-color="#ffd09a"/><stop offset=".55" stop-color="#b8542a"/><stop offset="1" stop-color="#4a1a0e"/>
+    </radialGradient>
+    <linearGradient id="gold" gradientUnits="userSpaceOnUse" x1="0" y1="2" x2="0" y2="110">
+      <stop offset="0" stop-color="#fff6d8"/>
+      <stop offset=".3" stop-color="#c08d34"/>
+      <stop offset=".46" stop-color="#ffe9ad"/>
+      <stop offset=".62" stop-color="#6e4a12"/>
+      <stop offset=".8" stop-color="#f0c96f"/>
+      <stop offset="1" stop-color="#93681f"/>
+    </linearGradient>
+  </defs>
+</svg>
+
+<header class="hero">
+  <h1 id="title">Razdor</h1>
+  <p class="tag">An engine for <i>Discord Times</i>: the original scenarios on today's Windows and Linux</p>
   <nav aria-label="Sections">
-    <ul class="ovals">
-      <li><a class="oval oval-video" href="https://www.youtube.com/watch?v=p7g0yvwtEeM">Watch the video</a></li>
-      <li><a class="oval" href="#how">How it works</a></li>
-      <li><a class="oval" href="#install">Installation</a></li>
-      <li><a class="oval" href="#changes">Changelog</a></li>
-      <li><a class="oval" href="#discord">Discord</a></li>
-    </ul>
+    <a class="btn" href="#video"><span class="label"><span>Watch the video</span></span></a>
+    <a class="btn" href="#how"><span class="label"><span>How it works</span></span></a>
+    <a class="btn" href="#install"><span class="label"><span>Installation</span></span></a>
+    <a class="btn" href="#changes"><span class="label"><span>Changelog</span></span></a>
+    <a class="btn" href="#discord"><span class="label"><span>Discord</span></span></a>
   </nav>
 </header>
 
 <main>
 
-<div class="video">
+<div class="video" id="video">
   <iframe src="https://www.youtube-nocookie.com/embed/p7g0yvwtEeM" title="Razdor: the video" loading="lazy" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
 </div>
 
@@ -168,5 +238,232 @@
   <p>Made by <a href="https://github.com/indicozy">@indicozy</a>. Not affiliated with Aterdux or the rights holders of <i>Discord Times</i>; no warranty.</p>
 </footer>
 
+<script>
+(() => {
+  // The oval frame, in the 214×112 box of the game's button picture. One quarter of the
+  // ornament, mirrored four ways; the last button gets a pointed tip below.
+  const QUARTER = `
+    <path class="metal" fill="none" stroke-width="3" stroke-linecap="round" d="M35 56 C27 55 21 49 22 42 C23 35 32 34 34 40 C35 44 30 46 28 43"/>
+    <path class="leaf" d="M34 56 C24 51 13 52 3 56 C13 58 24 59 34 56Z"/>
+    <path class="metal" fill="none" stroke-width="2.6" stroke-linecap="round" d="M60 29 C49 23 49 12 57 11 C63 10 64 18 59 19"/>
+    <path class="metal" fill="none" stroke-width="2.6" stroke-linecap="round" d="M107 24 C96 24 88 18 91 11 C93 6 100 7 100 12"/>
+    <path class="leaf" d="M107 25 C102 19 100 11 107 3 L107 25Z"/>`;
+  function frame(pointed) {
+    const q = (m) => `<g transform="${m}">${QUARTER}</g>`;
+    return `<svg viewBox="0 0 214 112" aria-hidden="true">
+      ${q("")}${q("matrix(-1 0 0 1 214 0)")}${q("matrix(1 0 0 -1 0 112)")}${q("matrix(-1 0 0 -1 214 112)")}
+      ${pointed ? `<path class="leaf" d="M107 84 C99 93 100 104 107 116 C114 104 115 93 107 84Z"/>` : ""}
+      <ellipse class="still" cx="107" cy="56" rx="68" ry="27.5"/>
+      <ellipse cx="107" cy="56" rx="77" ry="36" fill="none" stroke="rgba(20,12,8,.8)" stroke-width="1.4"/>
+      <ellipse class="metal" cx="107" cy="56" rx="72" ry="31.5" fill="none" stroke-width="9"/>
+      <ellipse cx="107" cy="56" rx="72" ry="31.5" fill="none" stroke="rgba(255,255,255,.75)" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="0.1 7.2"/>
+      <ellipse cx="107" cy="56" rx="67" ry="26.6" fill="none" stroke="rgba(20,12,8,.85)" stroke-width="1.6"/>
+    </svg>`;
+  }
+
+
+
+  // The ovals: a frame each, the last one pointed; the word shrinks to fit the oval.
+  const buttons = [...document.querySelectorAll(".hero .btn")];
+  buttons.forEach((b, i) => b.insertAdjacentHTML("afterbegin", frame(i === buttons.length - 1)));
+  function fit() {
+    buttons.forEach((b) => {
+      const s = b.querySelector(".label span");
+      s.style.fontSize = "";
+      const room = b.getBoundingClientRect().width * 0.6;
+      let size = parseFloat(getComputedStyle(s).fontSize);
+      while (s.getBoundingClientRect().width > room && size > 9) { size -= 0.5; s.style.fontSize = size + "px"; }
+    });
+    // The video's width keeps 40% of it on the first screen under the menu (style.css).
+    document.documentElement.style.setProperty("--menu-h", document.querySelector(".hero").offsetHeight + "px");
+  }
+
+  let hot = -1;
+  const setHot = (i) => { hot = i; buttons.forEach((b, j) => b.classList.toggle("hot", j === i)); if (still) draw(); };
+  buttons.forEach((b, i) => {
+    b.addEventListener("pointerenter", () => setHot(i));
+    b.addEventListener("pointerleave", () => { if (hot === i) setHot(-1); });
+    b.addEventListener("focus", () => setHot(i));
+    b.addEventListener("blur", () => { if (hot === i) setHot(-1); });
+  });
+
+  // ---- the fire --------------------------------------------------------------------
+  const canvas = document.getElementById("fx");
+  const gl = canvas.getContext("webgl", { antialias: false, alpha: false, premultipliedAlpha: false });
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const fail = () => { canvas.hidden = true; document.body.classList.add("no-fire"); };
+  addEventListener("resize", fit);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+  fit();
+  if (!gl) { fail(); return; }
+
+  const VS = `attribute vec2 a; void main(){ gl_Position = vec4(a, 0., 1.); }`;
+  const FS = `
+  #ifdef GL_FRAGMENT_PRECISION_HIGH
+  precision highp float;
+  #else
+  precision mediump float;
+  #endif
+  uniform vec2 R; uniform float T; uniform vec4 B[5]; uniform float H; uniform vec4 TT; uniform float S;
+
+  float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+  float noise(vec2 p){
+    vec2 i = floor(p), f = fract(p), u = f * f * (3. - 2. * f);
+    return mix(mix(hash(i), hash(i + vec2(1., 0.)), u.x), mix(hash(i + vec2(0., 1.)), hash(i + vec2(1., 1.)), u.x), u.y);
+  }
+  float fbm(vec2 p){
+    float v = 0., a = .5; mat2 m = mat2(1.6, 1.2, -1.2, 1.6);
+    for (int i = 0; i < 5; i++) { v += a * noise(p); p = m * p; a *= .5; }
+    return v;
+  }
+  // A soft rectangle from x0 to x1, from y0 down to the bottom (y grows downward).
+  float block(vec2 q, float x0, float x1, float y0){
+    return smoothstep(x0 - .003, x0 + .003, q.x) * smoothstep(x1 + .003, x1 - .003, q.x) * smoothstep(y0 - .004, y0 + .004, q.y);
+  }
+  float hole(vec2 q, float x0, float x1, float y0, float y1){
+    return block(q, x0, x1, y0) * (1. - block(q, x0, x1, y1));
+  }
+  float teeth(vec2 q, float x0, float w){ return step(.5, fract((q.x - x0) / w)); }
+  // Ruined towers and a broken wall, after the game's burning ruins.
+  float ruins(vec2 q0){
+    // Weathered, broken edges: shake the sides a little and break the tops.
+    vec2 q = q0 + vec2((noise(q0 * vec2(5., 18.)) - .5) * .006, (noise(vec2(q0.x * 34., 3.)) - .5) * .045);
+    float m = 0.;
+    m = max(m, block(q, .02, .17, .30)); m = max(m, block(q, .02, .17, .265) * teeth(q, .02, .03));
+    m = max(m, block(q, .25, .35, .12)); m = max(m, block(q, .25, .35, .09) * teeth(q, .25, .025));
+    m = max(m, block(q, .17, .25, .52));
+    m = max(m, block(q, .35, .43, .66)); m = max(m, block(q, .60, .69, .70));
+    m = max(m, block(q, .69, .79, .17)); m = max(m, block(q, .69, .79, .14) * teeth(q, .69, .025));
+    m = max(m, block(q, .79, .86, .58));
+    m = max(m, block(q, .86, .98, .38)); m = max(m, block(q, .86, .98, .345) * teeth(q, .86, .03));
+    m = max(m, block(q, 0., 1., .84));
+    float w = hole(q, .07, .10, .42, .50) + hole(q, .28, .31, .24, .31) + hole(q, .28, .31, .44, .50)
+            + hole(q, .72, .75, .30, .37) + hole(q, .90, .93, .50, .57) + hole(q, .73, .76, .55, .62);
+    return m * (1. - clamp(w, 0., 1.) * .8);
+  }
+
+  void main(){
+    vec2 p = vec2(gl_FragCoord.x, R.y - gl_FragCoord.y);
+    vec2 q = p / R;
+    vec2 n = p / min(R.x, R.y);
+
+    // Smoke and fire rising through the whole picture.
+    vec2 w = vec2(fbm(n * 2. + vec2(0., T * .05)), fbm(n * 2. + vec2(5.2, 1.3) + vec2(0., T * .04)));
+    float f = fbm(n * 2.6 + w * 1.6 + vec2(0., T * .09));
+    float heat = (.55 + .45 * (1. - abs(q.x - .5) * 1.6)) * (.55 + .6 * q.y);
+    float v = f * heat * 1.25;
+    vec3 col = mix(vec3(.07, .03, .012), vec3(.45, .18, .045), smoothstep(.2, .55, v));
+    col = mix(col, vec3(.93, .52, .15), smoothstep(.5, .85, v));
+    col = mix(col, vec3(1., .84, .5), smoothstep(.82, 1.05, v) * .6);
+
+    // The stones, darker than the haze, lit by it at the edges.
+    float ru = ruins(q);
+    float stone = fbm(p * .03 * S) * .6 + fbm(p * .11 * S) * .4;
+    vec3 sc = vec3(.24, .13, .055) * (.45 + stone * 1.1) + col * .22;
+    col = mix(col, sc, ru * (.8 - f * .4));
+
+    // Darker toward the corners.
+    vec2 c = q - .5;
+    col *= 1. - .9 * dot(c, c);
+
+    // Flames licking up behind the title's letters.
+    vec2 d = (p - TT.xy) / TT.zw;
+    if (d.x > -.05 && d.x < 1.05 && d.y > -1. && d.y < 1.1) {
+      float hx = smoothstep(0., .14, d.x) * smoothstep(1., .86, d.x);
+      float vy = smoothstep(-.95, .05, d.y) * smoothstep(.72, .3, d.y);
+      float fl = fbm(vec2(p.x * .018 / S, p.y * .016 / S + T * 2.)) * .7 + fbm(vec2(p.x * .05 / S, p.y * .04 / S + T * 3.2)) * .5;
+      float tongue = smoothstep(.42, .8, fl - (.25 - d.y) * .55) * hx * vy;
+      col += vec3(1., .46, .12) * tongue * 1.1 + vec3(1., .85, .5) * tongue * tongue * .55;
+    }
+
+    // Fire around the column of buttons, and each button's swirling marble middle.
+    for (int i = 0; i < 5; i++) {
+      vec4 b = B[i];
+      vec2 e = (p - b.xy) / b.zw;
+      float r = length(e);
+      col += vec3(1., .45, .12) * exp(-r * r * .3) * .16 * (.8 + .2 * sin(T * 3. + float(i) * 1.7));
+      if (r < 1.05) {
+        float hot = 1. - step(.1, abs(H - float(i)));
+        float a = atan(e.y, e.x) + r * 2.4 - T * .55;
+        vec2 sw = vec2(cos(a), sin(a)) * r;
+        float m = fbm(sw * 2.3 + fbm(sw * 3. + T * .15 + float(i)) * 1.6 + float(i) * 3.1);
+        vec3 vi = mix(vec3(.17, .09, .5), vec3(.6, .47, 1.), smoothstep(.3, .75, m));
+        vi += vec3(.85, .8, 1.) * smoothstep(.68, .9, m) * .55;
+        vec3 wa = mix(vec3(.45, .15, .1), vec3(1., .66, .38), smoothstep(.3, .75, m));
+        wa += vec3(1., .9, .7) * smoothstep(.68, .9, m) * .55;
+        vec3 mc = mix(vi, wa, hot) * (.62 + .38 * (1. - r * r));
+        col = mix(col, mc, smoothstep(1.03, .96, r));
+      }
+    }
+    gl_FragColor = vec4(col, 1.);
+  }`;
+
+
+  function shader(type, src) {
+    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  }
+  let prog;
+  try {
+    prog = gl.createProgram();
+    gl.attachShader(prog, shader(gl.VERTEX_SHADER, VS));
+    gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, FS));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  } catch (err) {
+    console.warn("Razdor site: no fire, the shader failed:", err);
+    fail(); return;
+  }
+  gl.useProgram(prog);
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(prog, "a");
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  const U = {};
+  ["R", "T", "B", "H", "TT", "S"].forEach((k) => { U[k] = gl.getUniformLocation(prog, k); });
+
+  // Where the title and the ovals are on screen; read every frame, as the page scrolls.
+  const rects = new Float32Array(20);
+  const title = document.getElementById("title");
+  function measure() {
+    const scale = Math.min(window.devicePixelRatio || 1, 1.5);
+    const w = Math.round(innerWidth * scale), h = Math.round(innerHeight * scale);
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; gl.viewport(0, 0, w, h); }
+    buttons.forEach((b, i) => {
+      const r = b.getBoundingClientRect();
+      rects[i * 4] = (r.left + r.width / 2) * scale;
+      rects[i * 4 + 1] = (r.top + r.height / 2) * scale;
+      rects[i * 4 + 2] = r.width * (67 / 214) * scale;
+      rects[i * 4 + 3] = r.height * (26.6 / 112) * scale;
+    });
+    const range = document.createRange(); range.selectNodeContents(title);
+    const tr = range.getBoundingClientRect();
+    gl.uniform4f(U.TT, tr.left * scale, tr.top * scale, tr.width * scale, tr.height * scale);
+    gl.uniform2f(U.R, w, h);
+    gl.uniform4fv(U.B, rects);
+    gl.uniform1f(U.S, 1 / scale);
+  }
+  const t0 = performance.now();
+  function draw() {
+    measure();
+    gl.uniform1f(U.T, still ? 12.0 : (performance.now() - t0) / 1000);
+    gl.uniform1f(U.H, hot);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+  function loop() {
+    if (!document.hidden) draw();
+    requestAnimationFrame(loop);
+  }
+  if (still) {
+    draw();
+    addEventListener("resize", draw);
+    addEventListener("scroll", draw, { passive: true });
+  } else {
+    requestAnimationFrame(loop);
+  }
+})();
+</script>
 </body>
 </html>
