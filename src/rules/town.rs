@@ -61,7 +61,8 @@ pub enum ServiceError {
 /// - the player's castles and forts: the garrison;
 /// - a building with goods (only towns, markets and churches keep them): the market; with
 ///   spells: the sanctuary;
-/// - villages: the tribute; friendly shipyards: ships for rent.
+/// - villages: the tribute; shipyards: ships for rent, whatever their attitude (the
+///   original's ship window, 0x4bbc84, tests neither attitude nor owner).
 ///
 /// Bridges, the obelisk, the demo's camps and a garrison still to be beaten have none.
 pub fn tabs(l: &Location, c: &Content) -> Vec<Tab> {
@@ -84,7 +85,7 @@ pub fn tabs(l: &Location, c: &Content) -> Vec<Tab> {
     if l.kind == LocationKind::Village {
         tabs.push(Tab::Tribute);
     }
-    if l.kind == LocationKind::Shipyard && !l.hostile() {
+    if l.kind == LocationKind::Shipyard {
         tabs.push(Tab::Shipyard);
     }
     tabs
@@ -513,7 +514,8 @@ mod tests {
         altar.recruit_all_types = 1;
         altar.random_artifacts_for_sale = 2;
         let obelisk = town(BuildingType::Obelisk, 9, 7, 1);
-        s.buildings = vec![t, castle, fort, village, church, tavern, market, hostile, bridge, altar, obelisk];
+        let yard = town(BuildingType::Shipyard, 11, 7, -2);
+        s.buildings = vec![t, castle, fort, village, church, tavern, market, hostile, bridge, altar, obelisk, yard];
         let g = start(&s);
         let c = g.content.clone();
         let tabs: Vec<Vec<Tab>> = g.world.locations.iter().map(|l| tabs(l, &c)).collect();
@@ -529,6 +531,8 @@ mod tests {
         assert!(tabs[8].is_empty());
         assert_eq!(tabs[9], [MainHall, Barracks], "the all-types byte opens it; an altar keeps no goods");
         assert!(tabs[10].is_empty(), "the obelisk has no window");
+        assert!(g.world.locations[11].hostile());
+        assert_eq!(tabs[11], [MainHall, Shipyard], "an ill-disposed shipyard rents ships: no attitude test (0x4bbc84)");
     }
 
     #[test]
