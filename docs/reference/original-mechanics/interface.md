@@ -672,17 +672,24 @@ Outside battle the formation is edited by clicking cards, never by dragging; act
 - Pressing a unit with nothing selected selects it (its card pulses).
 - Pressing another unit while one is selected **swaps the two cells at once** (`Card-Move`
   plays; no slide) and clears the selection.
-- Pressing an empty cell while a unit is selected queues a card slide (4b0c04); when it ends
-  the unit is placed in that cell.
-- Every press then switches the right side to the pack or the promotion view of the selected
-  unit (498d0c).
+- Pressing an empty cell while a unit is selected queues a card slide (4b0c04, `Card-Move`,
+  `round(0.7 × distance)` ms, at most 200); when it ends the unit is placed in that cell and the
+  selection is cleared. Presses wait while the card slides.
+- A press then switches the right side to the pack or the promotion view of the selected unit
+  (498d0c): after a select, the unit's tree; after a swap or a press on an empty cell with
+  nothing selected, the pack. A **deselection skips it**, and so does the end of a slide: the
+  deselected (or slid) unit's promotion tree and Dismiss button stay up with nothing selected,
+  until a later press switches them. **code**
+- "Nothing selected" and "the hero selected" both show the pack (498d0c: unit < 2), but with
+  the hero selected a press on another unit swaps it with the hero.
 
 There is no restriction on cells: any unit, **the hero included**, can be put in any of the 12
 cells, the reserve included, and any two units can swap. **code** (no unit test in 4c346c or
 in the same-army end of 4b0c04)
 
 **Building window** (4c653c hero grid, 4c6f50 garrison grid): the same select, swap and slide
-rules inside one army. Across the hero's army and the garrison a swap exchanges the two unit
+rules inside one army, the hero grid in every tab that shows it (the hire tab too), each swap
+and slide with `Card-Move`. Across the hero's army and the garrison a swap exchanges the two unit
 records in place, and a move into an empty cell slides; the hero and named characters can
 never be swapped or moved into a garrison, and an unpaid garrison unit moved to the hero first
 asks for its price. Details are in economy.md §2 (garrison moves). **code**
@@ -1101,7 +1108,7 @@ parity rule they are candidates to hide or remove, not bugs to copy.
 | 47 | Info card magic | Own formula set (strike and curses for ToEnemy, heal and blessings for ToAlly; Death heals 0) | Ten lines from 49f8a0 by school, nature and direction (Death heals for Undead, Elemental and Hero natures; Life also strikes and curses; Life and Death write the two Atk/Def numbers in opposite orders) | 9.1 |
 | 48 | Info card wage | Shown when the wage is above 0 | Recruit wage of the type's Cost; hidden for hero classes, named characters, wage kind 3 and Undead | 9.1 |
 | 49 | Card stat strip | Labels match: "Pwr:" for a caster (attack kind 0x11) with no melee attack or outside the places 1–4, else "A:" with the larger attack (`unit_sheet::attack_piece`); the attack line blue when any of the three attacks is above, red when any is below; `Row2Def` on r in the back row as the original; colours against the start-of-battle value (none outside battle); D colour by the sum of both defences | "Pwr:" for a caster outside the front or with no melee, else "A:" with the larger attack; colours against the current value; D colour from one defence only | 9.5 |
-| 50 | Formation editing | Drag a card onto another cell (swap or move) | Click to select, click another unit to swap at once, click an empty cell to slide there; acts on the press; the hero may go anywhere | 9.6 |
+| 50 | Formation editing | Matches: presses as the original's, in the army window (`items_view::ArmySel`, `unit_drag::grid_press`; the deselection and the slide's end leave the right side as it was), the hire tab's hero grid and the garrison grids (a refused hero or named unit keeps the selection), `Card-Move` on every swap and slide, the army window's and hire tab's slides timed as 0x4b0c04. Extra: a card can also be dragged onto another cell (a press that swaps starts no drag) | Click to select, click another unit to swap at once, click an empty cell to slide there; acts on the press; the hero may go anywhere | 9.6 |
 | 51 | Item text | Kind name, then f-, d-, p- values and the bonus, comma-joined | Name, usage line by type and school, description, then "label value" entries with "=" (f-), "+" (d-), "%" (p-), potion heal/revive rules, defence merging with its lost-value quirks, bonus name | 9.2 |
 | 52 | Spell text | Effect summary, school, mana and casting time, duration and target | Name, effect entries (heal/curse label by the sign of DeltaFixedHits, AB = AS and DB = DS merged), `Mana`/`Reading`, duration; red when unaffordable, blue for own-army spells | 9.3 |
 | 53 | Pack scrolling | Wheel by one row over the whole 256-slot pack | Scroll bar over `max(0, length div 5 − 4)` rows of the used part, rounded | 9.7 |

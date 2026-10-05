@@ -69,7 +69,7 @@ pub enum Screen {
     Building(BuildingView),
     /// Hero and army screen: selected squad member, backpack scroll, and the building window
     /// "Back" returns to (the map if none).
-    Squad { selected: usize, scroll: usize, back: Option<BuildingView> },
+    Squad { selected: items_view::ArmySel, scroll: usize, back: Option<BuildingView> },
     Battle(Box<BattleView>),
     /// The journal: its tab, selected line and scrolling.
     Journal(story::JournalView),

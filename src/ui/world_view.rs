@@ -1330,7 +1330,7 @@ pub fn window_backdrop(game: &Game, assets: &Assets, lit: Option<BarButton>) -> 
         BarButton::Save => Screen::Save(SaveView::new(game, Back::Map)),
         BarButton::Load => Screen::Load(LoadView::new(Back::Map)),
         BarButton::Journal => Screen::Journal(Default::default()),
-        BarButton::Squad => Screen::Squad { selected: 0, scroll: 0, back: None },
+        BarButton::Squad => Screen::Squad { selected: Default::default(), scroll: 0, back: None },
         BarButton::Spells => Screen::Spellbook { selected: 0 },
         BarButton::Map => Screen::WorldMap,
     })
@@ -1371,7 +1371,7 @@ fn bottom_bar(game: &mut Game, message: &mut Option<String>, minimap_open: bool,
         Some(BarButton::Journal) => Some(Screen::Journal(Default::default())),
         Some(BarButton::Squad) => {
             *message = None;
-            Some(Screen::Squad { selected: 0, scroll: 0, back: None })
+            Some(Screen::Squad { selected: Default::default(), scroll: 0, back: None })
         }
         Some(BarButton::Spells) => {
             *message = None;

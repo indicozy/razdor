@@ -20,7 +20,7 @@ use razdor::rules::world::LocationKind;
 
 use super::assets::Assets;
 use super::chrome;
-use super::audio::{cue, Cue};
+use super::audio::{cue, cued, Cue};
 use super::dialog::{resource_icon, Dialog, Resource, MANA};
 use super::items_view::{level_gains, unit_stat_lines};
 use super::screens::stat_lines;
@@ -67,6 +67,9 @@ enum CardAnimKind {
     Hired { unit: usize, recruit: usize },
     /// The cure over a healed or raised unit's card.
     Cured { unit: usize },
+    /// A unit (squad index) of the hero's grid slides from (x, y) to its new cell, pressed
+    /// there with it selected (0x4c653c → 0x4b0c04), in `ms`.
+    Slid { unit: usize, from: (i32, i32), ms: i64 },
 }
 
 /// How long a hired card slides, and the cure plays over a card.
@@ -92,6 +95,7 @@ impl BuildingView {
         let len = match a.kind {
             CardAnimKind::Hired { .. } => HIRE_SLIDE_MS,
             CardAnimKind::Cured { .. } => CURE_MS,
+            CardAnimKind::Slid { ms, .. } => ms.max(1),
         };
         let p = (now_ms() - a.t0_ms) as f32 / len as f32;
         (p < 1.0).then_some((a.kind, p.max(0.0)))
@@ -453,14 +457,20 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
         let (line, col) = form.display(slot);
         vec2(gx + col as f32 * pitch.x, grid.y + line as f32 * pitch.y).round()
     };
+    // A press on a card or an empty cell of the hero's grid (0x4c653c), acted on below.
+    let mut pressed = None;
     for slot in form.slots() {
         if !game.squad.iter().any(|u| u.slot == slot) {
             let p = cell_at(slot);
             chrome::empty_cell(Rect::new(p.x, p.y, card.x, card.y), chrome::CellIcon::of(form, slot), true);
+            if mouse_in(p.x, p.y, card.x, card.y) && clicked() {
+                pressed = Some((None, slot));
+            }
         }
     }
     let mut action = None;
     let anim = view.anim_at();
+    let selected = view.garrison_sel.filter(|&(g, i)| !g && i < game.squad.len()).map(|s| s.1);
     for i in 0..game.squad.len() {
         let u = game.squad[i].clone();
         let mut p = cell_at(u.slot);
@@ -468,6 +478,11 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
             if unit == i {
                 let from = at(f, 258.0 + recruit as f32 * 96.0, 74.0, 88.0, 88.0);
                 p = vec2(from.x, from.y).lerp(p, t).round();
+            }
+        }
+        if let Some((CardAnimKind::Slid { unit, from, .. }, t)) = anim {
+            if unit == i {
+                p = vec2(from.0 as f32, from.1 as f32).lerp(p, t).round();
             }
         }
         let sq = Rect::new(p.x, p.y, card.x, card.x);
@@ -511,19 +526,51 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
                 chrome::effect("Battle/--CURE.ugs", sq.center(), sq.w * 1.6, t, WHITE);
             }
         }
+        if selected == Some(i) {
+            chrome::glow_frame(sq, Color::new(0.35, 1.0, 0.35, 1.0), true);
+        }
         if mouse_in(sq.x, sq.y, sq.w, sq.h) {
-            // A press on the portrait may drag the unit to another cell.
             if clicked() {
-                super::unit_drag::press(i, u.def);
+                pressed = Some((Some(i), u.slot));
             }
             chrome::glow_frame(sq, Color::new(0.35, 0.55, 1.0, 0.9), false);
             hover_lines = vec![(u.name(&c).to_string(), ACCENT)];
             hover_lines.extend(unit_stat_lines(&c, &u, game.wage(i)).into_iter().map(|s| (s, INK)));
         }
     }
+    // The press, as the original's hero grid within the hero's army (0x4c653c); none while a
+    // card moves (busy 0x68dc63).
+    if let (Some((on, slot)), None) = (pressed, anim) {
+        let press = super::unit_drag::grid_press(selected, on);
+        view.garrison_sel = match press {
+            super::unit_drag::GridPress::Select(i) => Some((false, i)),
+            super::unit_drag::GridPress::Nothing => view.garrison_sel,
+            _ => None,
+        };
+        match press {
+            super::unit_drag::GridPress::Swap { selected: s, pressed: p } => {
+                cue(Cue::CardMove);
+                game.move_unit(s, game.squad[p].slot);
+            }
+            super::unit_drag::GridPress::Slide(s) => {
+                cue(Cue::CardMove);
+                let from = cell_at(game.squad[s].slot);
+                let ms = super::unit_drag::slide_ms(from, cell_at(slot), k);
+                game.move_unit(s, slot);
+                view.anim = Some(CardAnim { kind: CardAnimKind::Slid { unit: s, from: (from.x as i32, from.y as i32), ms }, t0_ms: now_ms() });
+            }
+            // Razdor's drag starts from a press that does not swap.
+            _ => {
+                if let Some(i) = on {
+                    super::unit_drag::press(i, game.squad[i].def);
+                }
+            }
+        }
+    }
     let cells: Vec<(Slot, Rect)> = form.slots().map(|s| (s, Rect::new(cell_at(s).x, cell_at(s).y, card.x, card.y))).collect();
     if let Some((unit, slot)) = super::unit_drag::update(assets, &cells, card) {
         game.move_unit(unit, slot);
+        view.garrison_sel = None;
     }
     let mut next = None;
     if let Some((i, raise)) = action {
@@ -658,7 +705,7 @@ fn garrison(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
         if button(r.x + r.w - 190.0 * k, r.y + 6.0 * k, 85.0 * k, 32.0 * k, tr("Yes"), true) {
             view.garrison_buy = None;
             *message = Some(match game.take_from_garrison(j, Some(cell), true) {
-                Ok(()) => tr("Back in your army.").into(),
+                Ok(()) => cued(Cue::CardMove, tr("Back in your army.").to_string()),
                 Err(e) => service_error(e),
             });
         } else if button(r.x + r.w - 95.0 * k, r.y + 6.0 * k, 85.0 * k, 32.0 * k, tr("No"), true) {
@@ -682,20 +729,26 @@ fn garrison(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
                 done = false;
                 None
             }
+            // Within one army: a swap or a slide, both with `Card-Move` (0x4c7029, 0x4c65f8;
+            // the slide's own at 0x4b0d19).
             (Some((true, j)), Some(Hit::Unit(n)), _) => {
                 game.move_guard(j, guards[n].unit.slot);
+                cue(Cue::CardMove);
                 None
             }
             (Some((true, j)), Some(Hit::Cell(cell)), _) => {
                 game.move_guard(j, cell);
+                cue(Cue::CardMove);
                 None
             }
             (Some((false, i)), _, Some(Hit::Unit(n))) => {
                 game.move_unit(i, squad[n].slot);
+                cue(Cue::CardMove);
                 None
             }
             (Some((false, i)), _, Some(Hit::Cell(cell))) => {
                 game.move_unit(i, cell);
+                cue(Cue::CardMove);
                 None
             }
             (Some((false, i)), Some(Hit::Unit(j)), _) => Some(game.swap_with_garrison(i, j, false)),
@@ -714,12 +767,17 @@ fn garrison(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
                 None
             }
         };
-        if done {
+        // The hero and named units are refused without a word and the selection stays, as in
+        // the original (0x4c667e, 0x4c70d6, 0x4c7233 jump past the deselection).
+        let refused = matches!(result, Some(Err(ServiceError::Hero | ServiceError::Named)));
+        if done && !refused {
             view.garrison_sel = None;
         }
-        // The hero and named units are refused without a word, as in the original.
-        if let Some(Err(e)) = result.filter(|r| !matches!(r, Err(ServiceError::Hero | ServiceError::Named))) {
-            *message = Some(service_error(e));
+        match result {
+            // A move across plays `Card-Move` too (the swap's 0x4c66a0 / 0x4c70fe, the slide's).
+            Some(Ok(())) => cue(Cue::CardMove),
+            Some(Err(e)) if !refused => *message = Some(service_error(e)),
+            _ => {}
         }
     }
     tooltip(&hover);
@@ -842,7 +900,7 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
     let by = y + dh + 10.0 * k;
     let mut next = None;
     if button(x, by, 150.0 * k, 40.0 * k, tr("Inventory"), true) {
-        next = Some(Screen::Squad { selected: 0, scroll: 0, back: Some(view.clone()) });
+        next = Some(Screen::Squad { selected: Default::default(), scroll: 0, back: Some(view.clone()) });
     }
     resource_icon(Resource::Gold, x + 180.0 * k, by + 20.0 * k, 34.0 * k);
     text(&trf!("Gold {gold}", gold = game.gold), x + 202.0 * k, by + 27.0 * k, 20.0 * k, ACCENT);

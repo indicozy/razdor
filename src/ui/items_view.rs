@@ -13,6 +13,7 @@ use super::assets::Assets;
 use super::audio::{cue, cued, Cue};
 use super::building_view::{service_error, BuildingView};
 use super::screens::attack_line;
+use super::unit_drag::{grid_press, GridPress};
 use super::chrome;
 use super::unit_sheet;
 use super::widgets::*;
@@ -126,6 +127,8 @@ thread_local! {
     static HELD: std::cell::Cell<Option<Held>> = const { std::cell::Cell::new(None) };
     /// The unit whose Dismiss (or Bury) was pressed: confirm or cancel (0x4c3744).
     static CONFIRM: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    /// The card sliding after a press on an empty cell.
+    static SLIDE: std::cell::Cell<Option<Slide>> = const { std::cell::Cell::new(None) };
 }
 
 /// Squad member `unit` wears or drinks the pack item at `i`; the message to show, if any.
@@ -287,31 +290,100 @@ fn pack_view(game: &Game, assets: &Assets, r: Rect, scroll: &mut usize, hover: &
     hit
 }
 
-/// The selection after a press on card `i` with `sel` selected (0x4c346c): pressing the
-/// selected unit deselects it, any other unit is selected. With nothing selected the original
-/// shows the pack and the hero's panel, as with the hero selected (0x498d0c: unit < 2), so
-/// Razdor's "nothing selected" is the hero, index 0. Without this the pack was out of reach
-/// behind a selected unit's promotion tree until the hero's card was pressed.
-fn pressed_selection(sel: usize, i: usize) -> usize {
-    if i == sel { 0 } else { i }
+/// The army window's selection (0x668a08: `None`, or a squad index, the hero 0) and the unit
+/// its right side and Dismiss row were last switched to (0x498d0c; `None` the pack).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ArmySel {
+    pub selected: Option<usize>,
+    pub shown: Option<usize>,
+}
+
+impl ArmySel {
+    /// A press on card `pressed` (`None`: an empty cell), as 0x4c346c: the selection changes
+    /// and the right side is switched to the selected unit (0x498d0c), except on a
+    /// deselection, which the original jumps past: the deselected unit's promotion tree stays
+    /// up (original behaviour) until a later press switches it. A swap leaves nothing
+    /// selected and the pack up; a slide keeps the unit selected (and its tree up) until the
+    /// slide ends ([`ArmySel::slide_done`]).
+    fn press(&mut self, pressed: Option<usize>) -> GridPress {
+        let p = grid_press(self.selected, pressed);
+        match p {
+            GridPress::Deselect => self.selected = None,
+            GridPress::Select(u) => {
+                self.selected = Some(u);
+                self.shown = Some(u);
+            }
+            GridPress::Swap { .. } => {
+                self.selected = None;
+                self.shown = None;
+            }
+            GridPress::Slide(s) => self.shown = Some(s),
+            GridPress::Nothing => self.shown = None,
+        }
+        p
+    }
+
+    /// The end of a slide (0x4b0c04) clears the selection without switching the right side.
+    fn slide_done(&mut self) {
+        self.selected = None;
+    }
+
+    /// Indices beyond the army (after a dismissal) are dropped.
+    fn clamp(&mut self, len: usize) {
+        self.selected = self.selected.filter(|&i| i < len);
+        self.shown = self.shown.filter(|&i| i < len);
+    }
+
+    /// The unit whose promotion tree the right side shows: none for the hero (unit < 2 in
+    /// 0x498d0c: no unit or the hero, the pack).
+    fn tree(&self) -> Option<usize> {
+        self.shown.filter(|&i| i > 0)
+    }
+}
+
+/// A card sliding to its new cell after a press on an empty cell (0x4b0c04): the squad index,
+/// where it starts (screen px), when (ms of the clock) and for how long. The move itself is
+/// already made; presses on the grid wait for the slide (busy flag 0x68dc63).
+#[derive(Clone, Copy)]
+struct Slide {
+    unit: usize,
+    from: Vec2,
+    t0_ms: i64,
+    ms: i64,
+}
+
+fn now_ms() -> i64 {
+    (get_time() * 1000.0) as i64
 }
 
 /// The hero and army screen, as the original's (refs 11 and 12): the selected unit's panel
 /// with its four item slots on the left; the backpack (or the upgrade tree) and the item
 /// description at the top; the army's 2×6 cards below. Click a card to select it, a pack
 /// item to wear or drink it, a worn item to take it off; drag a pack or worn item onto a
-/// card to give it to that unit, or a worn one onto the pack to take it off. `back` is the
+/// card to give it to that unit, or a worn one onto the pack to take it off. Cards are
+/// pressed as in the original ([`ArmySel::press`]) or dragged (Razdor's). `back` is the
 /// building window to return to, if it was opened from one.
 pub fn squad(
     game: &mut Game,
     assets: &Assets,
-    selected: &mut usize,
+    selected: &mut ArmySel,
     scroll: &mut usize,
     back: &Option<BuildingView>,
     message: &mut Option<String>,
 ) -> Option<Screen> {
     let bar = super::world_view::window_backdrop(game, assets, Some(super::game_bar::BarButton::Squad));
-    *selected = (*selected).min(game.squad.len() - 1);
+    selected.clamp(game.squad.len());
+    // A slide that has ended clears the selection (0x4b0c04).
+    let slide = SLIDE.with(|s| s.get()).filter(|s| s.unit < game.squad.len());
+    let slide = match slide {
+        Some(s) if now_ms() - s.t0_ms < s.ms => Some(s),
+        Some(_) => {
+            selected.slide_done();
+            None
+        }
+        None => None,
+    };
+    SLIDE.with(|s| s.set(slide));
     let c = game.content.clone();
     let k = chrome::k();
     let (sw, sh) = (screen_width(), screen_height());
@@ -321,7 +393,10 @@ pub fn squad(
     let (_, close) = chrome::window(win, &title, chrome::Skin::Marble, true);
     let at = |x: f32, y: f32, w: f32, h: f32| Rect::new(win.x + x * k, win.y + y * k, w * k, h * k);
     let mut hover = None;
-    let sel = *selected;
+    // The left panel: the selected unit, else the hero; items go to it (0x4c280c).
+    let sel = selected.selected.unwrap_or(0);
+    // The right side: the pack, or this unit's promotion tree and Dismiss row (0x498d0c).
+    let tree_of = selected.tree();
     let u = game.squad[sel].clone();
     let mut held = HELD.with(|h| h.get());
 
@@ -368,7 +443,7 @@ pub fn squad(
 
     // Top middle, as the original switches it: the hero's backpack, or the selected unit's
     // upgrade tree under its title.
-    let show_tree = sel > 0;
+    let show_tree = tree_of.is_some();
     let head = (13.0 * k).round();
     let own = |key: &str, ours: &'static str| chrome::ui_text("Army", key).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr(ours).to_string());
     if show_tree {
@@ -378,8 +453,9 @@ pub fn squad(
         });
     }
     let content = at(258.0, 54.0, 300.0, 242.0);
-    if show_tree {
-        tree_view(game, assets, sel, &u, content, message);
+    if let Some(t) = tree_of {
+        let tu = game.squad[t].clone();
+        tree_view(game, assets, t, &tu, content, message);
     } else if let Some(i) = pack_view(game, assets, content, scroll, &mut hover) {
         cue(Cue::Item(c.item(game.pack[i]).kind));
         held = Some(Held { from: From::Pack(i), item: game.pack[i], at: pointer().into(), moved: false });
@@ -397,13 +473,14 @@ pub fn squad(
     super::dt_font::with_face(super::dt_font::Face::Title, || {
         chrome::shadow_centered(&item_title, win.x + 697.0 * k, win.y + 40.0 * k + head * 0.36, 15.0 * k, chrome::CREAM);
     });
-    let desc = if sel > 0 { at(570.0, 54.0, 256.0, 172.0) } else { at(570.0, 54.0, 256.0, 242.0) };
+    let desc = if show_tree { at(570.0, 54.0, 256.0, 172.0) } else { at(570.0, 54.0, 256.0, 242.0) };
     match hover {
         Some(item) => super::building_view::item_description(game, assets, item, desc.x, desc.y, desc.w, desc.h),
         None => chrome::text_box(desc),
     }
     let row = at(570.0, 234.0, 256.0, 62.0);
-    if sel > 0 {
+    if let Some(sel) = tree_of {
+        let u = game.squad[sel].clone();
         draw_rectangle(row.x, row.y, row.w, row.h, Color::new(0.25, 0.04, 0.02, 0.55));
         chrome::silver_frame(row, 1.0);
         let face = Rect::new(row.x + 4.0 * k, row.y + 4.0 * k, row.h - 8.0 * k, row.h - 8.0 * k);
@@ -428,8 +505,8 @@ pub fn squad(
                     Ok(()) => razdor::trf!("{name} is laid to rest.", name),
                     Err(e) => service_error(e),
                 });
-                // The hero is selected after it.
-                *selected = 0;
+                // Nothing is selected after it, the pack up (0x4b1778).
+                *selected = ArmySel::default();
             } else if button(b.x + half + 6.0 * k, b.y, half, b.h, tr("Cancel"), true) {
                 CONFIRM.with(|c| c.set(None));
             }
@@ -456,23 +533,31 @@ pub fn squad(
         let (line, col) = f.display(slot);
         vec2(gx + col as f32 * pitch.x, strip.y + strip.h + 10.0 * k + line as f32 * pitch.y).round()
     };
+    // A press on a card or an empty cell, acted on after the grid is drawn.
+    let mut pressed = None;
     for slot in f.slots() {
         if game.squad.iter().any(|u| u.slot == slot) {
             continue;
         }
         let p = cell_at(slot);
         chrome::empty_cell(Rect::new(p.x, p.y, card.x, card.y), chrome::CellIcon::of(f, slot), true);
+        if mouse_in(p.x, p.y, card.x, card.y) && clicked() {
+            pressed = Some((None, slot));
+        }
     }
     let mut card_under = None;
     for (i, v) in game.squad.iter().enumerate() {
-        let p = cell_at(v.slot);
+        let mut p = cell_at(v.slot);
+        if let Some(s) = slide.filter(|s| s.unit == i) {
+            p = s.from.lerp(p, (now_ms() - s.t0_ms) as f32 / s.ms.max(1) as f32).round();
+        }
         let sq = Rect::new(p.x, p.y, card.x, card.x);
         draw_rectangle(p.x + 4.0 * k, p.y + 4.0 * k, card.x, card.y, Color::new(0.0, 0.0, 0.0, 0.45));
         assets.draw_portrait(v.def, Team::Player, sq);
         chrome::wounds(sq, v.hp, v.max_hp(&c));
         draw_rectangle_lines(sq.x, sq.y, sq.w, sq.h, 1.0, Color::new(0.85, 0.85, 0.85, 0.8));
         let vs = v.stats(&c);
-        unit_sheet::stat_strip(Rect::new(p.x, p.y + card.x, card.x, card.y - card.x), &vs, &vs, vs[Stat::MagicPower], unit_sheet::caster(&c, v.def), unit_sheet::strip_place(f, v.slot), v.hp, super::building_view::back_row_def(&c, v.slot), i == sel);
+        unit_sheet::stat_strip(Rect::new(p.x, p.y + card.x, card.x, card.y - card.x), &vs, &vs, vs[Stat::MagicPower], unit_sheet::caster(&c, v.def), unit_sheet::strip_place(f, v.slot), v.hp, super::building_view::back_row_def(&c, v.slot), selected.selected == Some(i));
         if !v.alive() {
             draw_rectangle(sq.x, sq.y, sq.w, sq.h, Color::new(0.0, 0.0, 0.0, 0.55));
             draw_line(sq.x + 10.0, sq.y + 10.0, sq.x + sq.w - 10.0, sq.y + sq.h - 10.0, 3.0, RED);
@@ -492,25 +577,45 @@ pub fn squad(
         if over {
             card_under = Some(i);
         }
-        if i == sel {
+        if selected.selected == Some(i) {
             chrome::glow_frame(sq, Color::new(0.35, 1.0, 0.35, 1.0), true);
         } else if over {
             chrome::glow_frame(sq, Color::new(0.35, 0.55, 1.0, 0.9), false);
         }
         if over && clicked() {
-            // A press: select the unit, or deselect it when it is the selected one; moved
-            // while held, it is dragged to another cell.
-            super::unit_drag::press(i, v.def);
-            *selected = pressed_selection(sel, i);
-            *message = None;
+            pressed = Some((Some(i), v.slot));
+        }
+    }
+    // The press, as the original's (0x4c346c), ignored while a card slides (busy 0x68dc63).
+    if let (Some((on, slot)), None) = (pressed, slide) {
+        *message = None;
+        match selected.press(on) {
+            GridPress::Swap { selected: s, pressed: p } => {
+                // At once, no slide; no drag starts from this press.
+                cue(Cue::CardMove);
+                game.move_unit(s, game.squad[p].slot);
+            }
+            GridPress::Slide(s) => {
+                cue(Cue::CardMove);
+                let from = cell_at(game.squad[s].slot);
+                let ms = super::unit_drag::slide_ms(from, cell_at(slot), k);
+                game.move_unit(s, slot);
+                SLIDE.with(|c| c.set(Some(Slide { unit: s, from, t0_ms: now_ms(), ms })));
+            }
+            // Razdor's drag: a card pressed and moved while held goes to another cell.
+            GridPress::Select(_) | GridPress::Deselect => {
+                if let Some(i) = on {
+                    super::unit_drag::press(i, game.squad[i].def);
+                }
+            }
+            GridPress::Nothing => {}
         }
     }
     let cells: Vec<(razdor::rules::formation::Slot, Rect)> = f.slots().map(|s| (s, Rect::new(cell_at(s).x, cell_at(s).y, card.x, card.y))).collect();
     if let Some((unit, slot)) = super::unit_drag::update(assets, &cells, card) {
         game.move_unit(unit, slot);
-        // The original's swap (0x4c346c) and slide (0x4b0c04) both end with nothing
-        // selected, so the right side goes back to the pack (0x498d0c).
-        *selected = 0;
+        // A drag (Razdor's) ends as the original's swap: nothing selected, the pack up.
+        *selected = ArmySel::default();
     }
 
     // The held item follows the mouse; let go, it goes to the card or the pack under it.
@@ -550,6 +655,7 @@ pub fn squad(
     if close || key(KeyCode::Escape) || key(KeyCode::A) {
         HELD.with(|c| c.set(None));
         super::unit_drag::cancel();
+        SLIDE.with(|c| c.set(None));
         *message = None;
         return Some(match back {
             Some(v) => Screen::Building(v.clone()),
@@ -566,22 +672,62 @@ pub fn squad(
     };
     if next.is_some() {
         HELD.with(|c| c.set(None));
+        SLIDE.with(|c| c.set(None));
+        super::unit_drag::cancel();
     }
     next
 }
 
 #[cfg(test)]
 mod tests {
-    use super::pressed_selection;
+    use super::{ArmySel, GridPress};
+
+    fn sel(selected: Option<usize>, shown: Option<usize>) -> ArmySel {
+        ArmySel { selected, shown }
+    }
 
     #[test]
-    fn pressing_the_selected_unit_gives_the_pack_back() {
-        // 0x4c346c: pressed = selected → deselect; 0x498d0c(0) shows the pack.
-        assert_eq!(pressed_selection(3, 3), 0);
-        assert_eq!(pressed_selection(0, 0), 0);
-        // Another unit, or one with nothing (the hero) selected, is selected.
-        assert_eq!(pressed_selection(0, 3), 3);
-        assert_eq!(pressed_selection(3, 5), 5);
-        assert_eq!(pressed_selection(3, 0), 0);
+    fn a_press_switches_the_right_side_as_the_original() {
+        // A unit with nothing selected: selected, its tree up (0x498d0c(unit)).
+        let mut s = ArmySel::default();
+        assert_eq!(s.press(Some(3)), GridPress::Select(3));
+        assert_eq!(s, sel(Some(3), Some(3)));
+        assert_eq!(s.tree(), Some(3));
+        // Pressed again: deselected, but 0x4c346c jumps past 0x498d0c, so its tree stays up.
+        assert_eq!(s.press(Some(3)), GridPress::Deselect);
+        assert_eq!(s, sel(None, Some(3)));
+        assert_eq!(s.tree(), Some(3));
+        // An empty cell with nothing selected: 0x498d0c(0), the pack.
+        assert_eq!(s.press(None), GridPress::Nothing);
+        assert_eq!(s, sel(None, None));
+    }
+
+    #[test]
+    fn the_hero_selected_is_not_nothing_selected() {
+        // Selecting the hero shows the pack, as nothing selected (unit < 2)...
+        let mut s = ArmySel::default();
+        assert_eq!(s.press(Some(0)), GridPress::Select(0));
+        assert_eq!(s.tree(), None);
+        // ...but a press on another unit swaps it with the hero; nothing selected, the pack up.
+        assert_eq!(s.press(Some(4)), GridPress::Swap { selected: 0, pressed: 4 });
+        assert_eq!(s, sel(None, None));
+    }
+
+    #[test]
+    fn a_slide_keeps_the_unit_selected_until_it_ends() {
+        let mut s = ArmySel::default();
+        s.press(Some(2));
+        assert_eq!(s.press(None), GridPress::Slide(2));
+        assert_eq!(s, sel(Some(2), Some(2)));
+        // 0x4b0c04 clears the selection at its end and does not switch the right side.
+        s.slide_done();
+        assert_eq!(s, sel(None, Some(2)));
+    }
+
+    #[test]
+    fn a_dismissal_drops_indices_beyond_the_army() {
+        let mut s = sel(Some(5), Some(5));
+        s.clamp(5);
+        assert_eq!(s, ArmySel::default());
     }
 }

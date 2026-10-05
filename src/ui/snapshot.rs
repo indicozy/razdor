@@ -224,7 +224,7 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             game.location = Some(l);
             Screen::Building(BuildingView::new(tab))
         }
-        "army" => Screen::Squad { selected: 0, scroll: 0, back: None },
+        "army" => Screen::Squad { selected: Default::default(), scroll: 0, back: None },
         "journal" => Screen::Journal(JournalView::default()),
         "spells" => {
             // A book full of the install's spells, to see their pictures.

@@ -22,6 +22,14 @@ old id, and their versions give both.
   sea it opens nothing. Hiring the ship closes the window, so you can click the water next to
   the shipyard to sail. The shipyard's main hall and "Корабли" tab are gone, as the original
   has none.
+- **Army cards are arranged by clicks, as in the original:** with a unit selected, pressing
+  another unit swaps the two at once, and pressing an empty cell slides the card there; both
+  play the card sound and end with none selected. The hero is a unit like any other here:
+  selected, a press on another unit swaps it with the hero (before, it only selected that
+  unit). Pressing the selected unit deselects it but, as in the original, leaves its promotion
+  tree up until the next press; a press on an empty cell with nothing selected brings the pack
+  back. The barracks' army grid takes the same clicks, and in the garrison a refused hero or
+  named unit stays selected. Dragging a card still works.
 
 ### Changed
 - **A building is guarded only by an army standing in it, as in the original:** stepping onto
