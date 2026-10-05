@@ -881,13 +881,6 @@ fn draw_hero(game: &Game, assets: &Assets, art: Option<&DtArt>, cam: &Camera) {
 fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>) {
     let art = assets.dt.as_ref();
     draw_terrain(game, art, cam);
-    // The route being walked, or the one a first click shows, lies on the ground under the
-    // figures.
-    if game.moving() {
-        draw_route(game, &game.path, cam);
-    } else if let Some(path) = preview {
-        draw_route(game, path, cam);
-    }
     let map = &game.world.map;
     let ((c0, c1), (r0, r1)) = cam.visible(map);
     let rh = cam.grid.row_height();
@@ -895,10 +888,25 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
     let (below, side) = (10, 8);
     let mut items: Vec<(f32, Drawable)> = Vec::new();
     let fog = &game.fog;
+    // The original (0x4c8864) draws the hills of classes 1-3 in a pass of their own before
+    // anything else, so they lie under every tree, mountain, building and army, the ones
+    // above them included. Its test is `0x100 < class·256 + sprite < 0x401`: class 4's
+    // sprites are 10 and up, so the yellow hills are drawn with the mountains, row by row.
     for o in map.objects_in_rows(r0 - 1, r1 + below) {
         if o.tile.0 >= c0 - side && o.tile.0 < c1 + side && razdor::rules::map::object_cells(o).any(|t| fog.explored_near(t, minimap::FEATHER)) {
-            items.push((o.tile.1 as f32 * rh, Drawable::Object(*o)));
+            if (object_class::HILLS..=object_class::ROCKY_HILLS).contains(&o.class) {
+                draw_object(o, art, cam);
+            } else {
+                items.push((o.tile.1 as f32 * rh, Drawable::Object(*o)));
+            }
         }
+    }
+    // The route being walked, or the one a first click shows, lies on the ground under the
+    // figures (the original's second pass, over the hills).
+    if game.moving() {
+        draw_route(game, &game.path, cam);
+    } else if let Some(path) = preview {
+        draw_route(game, path, cam);
     }
     // Buildings stand in front of the scenery: hills, rocks and trees south of one would
     // hide it, so they are drawn after every object, sorted among themselves. Bridges lie
