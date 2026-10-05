@@ -644,8 +644,14 @@ pub struct Army {
     pub leader_name: String,
     #[serde(skip)]
     pub description: String,
-    /// Map model (`.DTm` army byte 5): 4 feudal, 5 bandits, 6 peasants, …
+    /// Map model (`.DTm` army byte 5): 4 feudal, 5 bandits, 6 peasants, … The editor's
+    /// picture only: the game's loader never reads it; the figure on the map is [`Army::figure`].
     pub model: u8,
+    /// The figure on the map (army +0x169d): an index into the 13 sprite names at 0x4ed238
+    /// (`ui::world_view::FIGURES`), from [`Army::figure_for`] at load, set by event opcode 17.
+    /// [`NO_FIGURE`] in saves from before it: [`World::restore_statics`] takes the scenario's.
+    #[serde(default = "no_figure")]
+    pub figure: u8,
     /// Position in world units (see `map::center`).
     pub pos: (f32, f32),
     /// Home building, index into `locations`.
@@ -743,6 +749,56 @@ impl Army {
         let s = if leader == ARCHMAGE_UNIT { s - 1 } else { s };
         s.max(1) as u32
     }
+
+    /// The figure the loader gives a map army on land (0x4b4824, the code at 0x4b4a10):
+    /// 5, then by its style (byte 59) 0 → 6 (Knight), 1 → 4 (Rogue), 2 → 5 (Peasant). Then
+    /// its leader's type t (unit 1, 0-based: GlobalIndex − 1; 0 with no leader, the record
+    /// being cleared) overrides it: an Undead leader is 8 (Zombie) for t 42–44 and 46, 9
+    /// (Ghost) for t 50–52, else 7 (Necromant); any other leader whose bit is set in the
+    /// 88-bit table at 0x4b5afc (the priests, mages and witches) is 10 (Mage). Byte 5 (the
+    /// editor's picture) is never read. A ship army's figure is set after this
+    /// ([`Army::ship_figure`]).
+    pub fn figure_for(content: &Content, a: &dtm::Army) -> u8 {
+        let mut figure = match a.behaviour {
+            0 => 6,
+            1 => 4,
+            _ => 5,
+        };
+        let t = u32::from(a.leader_unit.saturating_sub(1));
+        let nature = content.try_unit(UnitId(t + 1)).map_or(Nature::Normal, |u| u.nature);
+        if nature == Nature::Undead {
+            figure = match t {
+                42..=44 | 46 => 8,
+                50..=52 => 9,
+                _ => 7,
+            };
+        } else if t < 88 && MAGE_FIGURE_BITS[(t >> 3) as usize] >> (t & 7) & 1 != 0 {
+            figure = 10;
+        }
+        figure
+    }
+
+    /// The figure of an army loaded afloat, by its ship byte 72 (0x4b4a90): 0 and 1 the
+    /// hero's galley (3), 2 the pirate (12), 3 the merchant (11); another value keeps its
+    /// land figure.
+    pub fn ship_figure(byte_72: u8, land: u8) -> u8 {
+        match byte_72 {
+            0 | 1 => 3,
+            2 => 12,
+            3 => 11,
+            _ => land,
+        }
+    }
+}
+
+/// The leader types (0-based) that get the Mage figure: the bit table at 0x4b5afc.
+const MAGE_FIGURE_BITS: [u8; 11] = [0x02, 0x00, 0x00, 0xfe, 0x73, 0x00, 0x00, 0x00, 0x40, 0x08, 0x0c];
+
+/// [`Army::figure`] not known yet (a save from before it).
+pub const NO_FIGURE: u8 = 0xFF;
+
+fn no_figure() -> u8 {
+    NO_FIGURE
 }
 
 /// The end minute of a map army's own spell (army byte 84): 0x3dcc5000, "for good".
@@ -1058,6 +1114,8 @@ impl World {
             let on_bridge = world.location_covering(at).is_some_and(|l| world.locations[l].kind.is_bridge());
             let afloat = world.map.in_bounds(at) && is_water(world.map.surface(at)) && !on_bridge;
             let ship = if afloat { a.ship.max(super::ships::kind::HERO) } else { 0 };
+            let figure = Army::figure_for(content, a);
+            let figure = if afloat { Army::ship_figure(a.ship, figure) } else { figure };
             // Exactly the file's cell (0x4b2504): no search for a free or passable one.
             let tile = at;
             // Merchant ships trade and never attack (guess; one shipped merchant is marked
@@ -1076,6 +1134,7 @@ impl World {
                 leader_name: text(&a.leader_name),
                 description: text(&a.description),
                 model: a.model,
+                figure,
                 pos: world.map.center(tile),
                 home,
                 post: tile,
@@ -1298,6 +1357,9 @@ impl World {
             match texts.get(&a.id) {
                 _ if a.id == 0 => {
                     a.name = tr(GANG_NAME).to_string();
+                    if a.figure == NO_FIGURE {
+                        a.figure = 4;
+                    }
                     if a.speed == 0 {
                         a.speed = GANG_SPEED;
                     }
@@ -1305,6 +1367,9 @@ impl World {
                 Some(f) => {
                     if a.speed == 0 {
                         a.speed = f.speed;
+                    }
+                    if a.figure == NO_FIGURE {
+                        a.figure = f.figure;
                     }
                     a.name.clone_from(&f.name);
                     a.leader_name.clone_from(&f.leader_name);
@@ -1375,6 +1440,8 @@ impl World {
             leader_name: String::new(),
             description: String::new(),
             model: 5,
+            // The Rogue figure (0x4ed238).
+            figure: 4,
             pos: self.map.center(at),
             home: Some(home),
             post: self.locations[home].tile,
@@ -1723,6 +1790,37 @@ mod tests {
     }
 
     #[test]
+    fn an_armys_figure_is_its_style_or_its_leaders_never_byte_5() {
+        use crate::rules::content::{testkit as ck, UnitDef};
+        // GlobalIndex = type + 1: 2 the Archmage (bit 1 of 0x4b5afc), 43 and 47 zombies, 46
+        // a death knight, 51 a shade, 64 a rogue, 65 a cursed undead of no group.
+        let undead = |id| UnitDef { nature: Nature::Undead, ..ck::warrior(id, 5, 5) };
+        let rogue = UnitDef { nature: Nature::Rogue, ..ck::warrior(64, 5, 5) };
+        let units = vec![ck::warrior(1, 5, 5), ck::warrior(2, 5, 5), undead(43), undead(46), undead(47), undead(51), rogue, undead(65)];
+        let c = ck::content(units, Vec::new());
+        let figure = |behaviour, leader_unit, model| Army::figure_for(&c, &dtm::Army { behaviour, leader_unit, model, ..dtm::Army::default() });
+        // Byte 5 is never read: model 7 ("inactive") and 4 alike.
+        assert_eq!([figure(0, 1, 7), figure(1, 64, 7), figure(2, 64, 4), figure(9, 1, 4)], [6, 4, 5, 5], "Knight, Rogue, Peasant, else 5");
+        assert_eq!(figure(1, 0, 5), 4, "no leader: type 0, an ordinary unit");
+        assert_eq!(figure(0, 2, 4), 10, "a mage leader whatever the style");
+        assert_eq!([figure(1, 43, 7), figure(2, 47, 6), figure(1, 46, 7), figure(1, 51, 5), figure(0, 65, 4)], [8, 8, 7, 9, 7]);
+        assert_eq!([Army::ship_figure(0, 6), Army::ship_figure(1, 6), Army::ship_figure(2, 6), Army::ship_figure(3, 6), Army::ship_figure(4, 6)], [3, 3, 12, 11, 6]);
+    }
+
+    #[test]
+    fn a_save_without_figures_takes_the_scenarios() {
+        let mut s = scenario(8, 8);
+        let mut rogue = army(1, 2, 2, -2, &[troop(4, 0, 1)]);
+        (rogue.behaviour, rogue.model) = (1, 7);
+        s.armies = vec![rogue];
+        let mut w = World::from_scenario(&s, &content());
+        assert_eq!(w.armies[0].figure, 4, "the Rogue figure, not byte 5's 7");
+        w.armies[0].figure = NO_FIGURE;
+        w.restore_statics(World::from_scenario(&s, &content())).unwrap();
+        assert_eq!(w.armies[0].figure, 4);
+    }
+
+    #[test]
     fn only_active_armies_start_on_the_map_and_hostility_follows_attitude() {
         let mut s = scenario(12, 12);
         let mut foe = army(1, 2, 2, -2, &[troop(4, 0, 3), troop(5, 2, 2)]);
@@ -1930,6 +2028,13 @@ mod real_maps {
             for a in w.armies.iter().chain(&w.inactive) {
                 let d = s.armies.iter().find(|d| d.id == a.id).expect("its record");
                 assert_eq!(a.tile(&w.map), (d.x as i32, d.y as i32), "{}", m.name);
+                assert!(a.figure <= 12, "{}: army {} figure {}", m.name, a.id, a.figure);
+            }
+            // Другой берег's "Разбойники у дороги" (army 40, editor picture 7, style 1, a
+            // rogue leader) walks as the Rogue, not the Knight.
+            if m.name.contains("Другой берег") {
+                let a = w.armies.iter().chain(&w.inactive).find(|a| a.id == 40).unwrap();
+                assert_eq!((a.model, a.figure), (7, 4), "{}", a.name);
             }
             stuck += w.armies.iter().filter(|a| if a.sails() { !w.is_sea(a.tile(&w.map)) } else { !w.map.passable(a.tile(&w.map)) }).count();
             assert!(w.locations.iter().all(|l| w.map.passable(l.tile)), "{}", m.name);

@@ -717,7 +717,27 @@ fn draw_building(l: &Location, art: Option<&DtArt>, cam: &Camera) {
     }
 }
 
-/// `Graphics/Units/*.ugs` figure for an army's map model or the hero's class.
+/// The game's 13 map figures (`Graphics/Units/*.ugs`), by an army's figure (army +0x169d,
+/// [`razdor::rules::world::Army::figure`]): the names at 0x4ed238, loaded in this order by
+/// 0x4ce30c and drawn by 0x4ad314 (`0x71c430 + figure·0x2c00`).
+pub(super) const FIGURES: [&str; 13] = [
+    "Hero-Knight",
+    "Hero-Mage",
+    "Hero-Ranger",
+    "Hero-Ship-Vesla",
+    "Rogue",
+    "Peasant",
+    "Knight",
+    "Necromant",
+    "Zombie",
+    "Ghost",
+    "Mage",
+    "Ship-Merchant",
+    "Ship-Pirat",
+];
+
+/// `Graphics/Units/*.ugs` figure for the editor's army picture (`.DTm` byte 5) or the hero's
+/// class (1–3). The game draws an army by its own figure ([`FIGURES`]), not by byte 5.
 pub(super) fn figure_stem(model: u8) -> &'static str {
     match model {
         1 => "Hero-Knight",
@@ -822,7 +842,9 @@ fn draw_army(game: &Game, a: &Army, assets: &Assets, art: Option<&DtArt>, cam: &
             let sail = if a.hostile() { Color::new(0.15, 0.12, 0.12, 1.0) } else { Color::new(0.92, 0.9, 0.82, 1.0) };
             draw_ship(cam, pos, sail);
         }
-    } else if !draw_figure(art, figure_stem(a.model), pos, next, frame, cam, Stand::Feet) {
+    } else if !FIGURES.get(a.figure as usize).is_some_and(|stem| draw_figure(art, stem, pos, next, frame, cam, Stand::Feet)) {
+        // A figure past the table (an event's opcode 17 can set any byte) reads past the
+        // original's sprites; Razdor draws the leader instead *(guess)*.
         let c = cam.to_screen(pos);
         if let Some(leader) = a.leader() {
             assets.draw_unit(leader, if a.hostile() { Team::Enemy } else { Team::Player }, c.x, c.y - 8.0, 26.0);

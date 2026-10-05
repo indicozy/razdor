@@ -987,7 +987,8 @@ impl EventWorld for Game {
     fn set_army_model(&mut self, holder: Holder, model: u8) {
         if let Holder::Army(a) = holder {
             if let Some(a) = self.army_mut(a) {
-                a.model = model;
+                // Army +0x169d, the figure itself (c28662), not the editor's byte 5.
+                a.figure = model;
             }
         }
     }
@@ -2161,7 +2162,7 @@ mod tests {
         assert_eq!((a.faction, a.attitude), (4, -2), "enemy group: hostile whatever its own attitude");
         let end = g.map_start() + crate::rules::magic::OPCODE_SPELL_END;
         assert!(a.troops.iter().all(|t| t.spells[0] == Some(SpellSlot { spell: 3, until: end })), "every unit of it");
-        assert_eq!((a.named, a.model), (1, 12));
+        assert_eq!((a.named, a.figure), (1, 12));
         assert_eq!(a.post, (14, 10));
         assert!(!a.path.is_empty(), "it sets off");
         assert!(g.has_spells(Holder::Army(2), None, &[3]));
