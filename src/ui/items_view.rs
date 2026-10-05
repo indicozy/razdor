@@ -287,6 +287,15 @@ fn pack_view(game: &Game, assets: &Assets, r: Rect, scroll: &mut usize, hover: &
     hit
 }
 
+/// The selection after a press on card `i` with `sel` selected (0x4c346c): pressing the
+/// selected unit deselects it, any other unit is selected. With nothing selected the original
+/// shows the pack and the hero's panel, as with the hero selected (0x498d0c: unit < 2), so
+/// Razdor's "nothing selected" is the hero, index 0. Without this the pack was out of reach
+/// behind a selected unit's promotion tree until the hero's card was pressed.
+fn pressed_selection(sel: usize, i: usize) -> usize {
+    if i == sel { 0 } else { i }
+}
+
 /// The hero and army screen, as the original's (refs 11 and 12): the selected unit's panel
 /// with its four item slots on the left; the backpack (or the upgrade tree) and the item
 /// description at the top; the army's 2×6 cards below. Click a card to select it, a pack
@@ -489,17 +498,19 @@ pub fn squad(
             chrome::glow_frame(sq, Color::new(0.35, 0.55, 1.0, 0.9), false);
         }
         if over && clicked() {
-            // A press: select the unit; moved while held, it is dragged to another cell.
+            // A press: select the unit, or deselect it when it is the selected one; moved
+            // while held, it is dragged to another cell.
             super::unit_drag::press(i, v.def);
-            if i != sel {
-                *selected = i;
-                *message = None;
-            }
+            *selected = pressed_selection(sel, i);
+            *message = None;
         }
     }
     let cells: Vec<(razdor::rules::formation::Slot, Rect)> = f.slots().map(|s| (s, Rect::new(cell_at(s).x, cell_at(s).y, card.x, card.y))).collect();
     if let Some((unit, slot)) = super::unit_drag::update(assets, &cells, card) {
         game.move_unit(unit, slot);
+        // The original's swap (0x4c346c) and slide (0x4b0c04) both end with nothing
+        // selected, so the right side goes back to the pack (0x498d0c).
+        *selected = 0;
     }
 
     // The held item follows the mouse; let go, it goes to the card or the pack under it.
@@ -557,4 +568,20 @@ pub fn squad(
         HELD.with(|c| c.set(None));
     }
     next
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pressed_selection;
+
+    #[test]
+    fn pressing_the_selected_unit_gives_the_pack_back() {
+        // 0x4c346c: pressed = selected → deselect; 0x498d0c(0) shows the pack.
+        assert_eq!(pressed_selection(3, 3), 0);
+        assert_eq!(pressed_selection(0, 0), 0);
+        // Another unit, or one with nothing (the hero) selected, is selected.
+        assert_eq!(pressed_selection(0, 3), 3);
+        assert_eq!(pressed_selection(3, 5), 5);
+        assert_eq!(pressed_selection(3, 0), 0);
+    }
 }
