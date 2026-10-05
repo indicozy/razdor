@@ -46,6 +46,9 @@ pub enum Close {
 pub struct Dialog {
     pub title: String,
     pub text: Vec<String>,
+    /// The event's own text, read as the original's markup (0x4a9d88 → 0x48e438): drawn
+    /// instead of [`Dialog::text`], line by line with its fonts, centred or justified.
+    pub marked: Option<String>,
     /// Resource icons with a caption such as "Gold + 30".
     pub resources: Vec<(Resource, String)>,
     pub items: Vec<ItemId>,
@@ -74,6 +77,7 @@ impl Dialog {
         Dialog {
             title: title.into(),
             text: Vec::new(),
+            marked: None,
             resources: Vec::new(),
             items: Vec::new(),
             notice: None,
@@ -247,12 +251,17 @@ pub fn draw(d: &Dialog, assets: &Assets) -> Option<Close> {
     let (sw, sh) = (screen_width(), screen_height());
     chrome::under_message();
     // A long story text widens the window rather than running off the screen.
-    let fit = |w: f32| -> (f32, Vec<String>) { (w, d.text.iter().flat_map(|t| wrap(t, w - 80.0, 19.0)).collect()) };
-    let (mut w, mut lines) = fit(620.0f32.min(sw - 20.0));
-    if lines.len() as f32 * 23.0 > sh * 0.45 {
-        (w, lines) = fit(980.0f32.min(sw - 20.0));
+    let fit = |w: f32| -> (f32, Vec<String>, Vec<MarkupRow>) {
+        match &d.marked {
+            Some(t) => (w, Vec::new(), markup_rows(t, w - 80.0, 19.0)),
+            None => (w, d.text.iter().flat_map(|t| wrap(t, w - 80.0, 19.0)).collect(), Vec::new()),
+        }
+    };
+    let (mut w, mut lines, mut rows) = fit(620.0f32.min(sw - 20.0));
+    if (lines.len() + rows.len()) as f32 * 23.0 > sh * 0.45 {
+        (w, lines, rows) = fit(980.0f32.min(sw - 20.0));
     }
-    let text_h = lines.len() as f32 * 23.0 + 24.0;
+    let text_h = (lines.len() + rows.len()) as f32 * 23.0 + 24.0;
     let res_h = if d.resources.is_empty() { 0.0 } else { 104.0 };
     let items_h = if d.items.is_empty() { 0.0 } else { 60.0 };
     let notice_h = if d.notice.is_some() { 26.0 } else { 0.0 };
@@ -280,6 +289,9 @@ pub fn draw(d: &Dialog, assets: &Assets) -> Option<Close> {
     chrome::text_box(Rect::new(x + 16.0, cy, w - 32.0, text_h));
     for (i, line) in lines.iter().enumerate() {
         chrome::shadow_centered(line, x + w / 2.0, cy + 30.0 + i as f32 * 23.0, 19.0, Color::new(1.0, 0.9, 0.66, 1.0));
+    }
+    for (i, row) in rows.iter().enumerate() {
+        draw_markup_row(row, x + 40.0, cy + 30.0 + i as f32 * 23.0, w - 80.0, 19.0);
     }
     cy += text_h + 10.0;
     if !d.resources.is_empty() {

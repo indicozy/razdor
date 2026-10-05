@@ -10,6 +10,7 @@ pub mod dtm;
 pub mod gfx;
 pub mod ini;
 pub mod install;
+pub mod markup;
 pub mod sound;
 pub mod text;
 

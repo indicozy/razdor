@@ -451,9 +451,12 @@ fn delete_question(name: String) -> Option<bool> {
     let q = (razdor::i18n::lang() == razdor::i18n::Lang::Ru)
         .then(|| super::chrome::ui_text("MessageBox", "DeleteSave_Text"))
         .flatten()
-        .map(|t| t.trim_start_matches('^').replace("#SAVENAME", &name))
-        .unwrap_or_else(|| razdor::trf!("Do you really want to delete the saved game \"{name}\"?", name));
-    question(&title, &q)
+        // 0x4c05ac: `#SAVENAME` filled in (0x471f0c), then read as markup (0x48e438), so
+        // the marks of a save's name are read too. Razdor's own text is centred as the
+        // install's (`^`).
+        .map(|t| t.replace("#SAVENAME", &name))
+        .unwrap_or_else(|| format!("^{}", razdor::trf!("Do you really want to delete the saved game \"{name}\"?", name)));
+    marked_question(&title, &q)
 }
 
 /// What the "Выход из игры" window chose.
@@ -530,8 +533,13 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool) -> (Option<ExitCho
     }
     if was_asking {
         let t = own("MessageBox", "Restart_Title", n_("Restart the game"));
-        let q = own("MessageBox", "Restart_Text", n_("Do you really want to start the scenario under way again from the beginning?"));
-        match question(&t, q.trim_start_matches('^')) {
+        // The restart box reads its text as markup (0x4bf748 → 0x48e438); Razdor's own text
+        // is centred as the install's (`^`).
+        let q = (razdor::i18n::lang() == razdor::i18n::Lang::Ru)
+            .then(|| super::chrome::ui_text("MessageBox", "Restart_Text"))
+            .flatten()
+            .unwrap_or_else(|| format!("^{}", tr(n_("Do you really want to start the scenario under way again from the beginning?"))));
+        match marked_question(&t, &q) {
             Some(true) => {
                 *asking = false;
                 return (Some(ExitChoice::Restart), false);
@@ -550,13 +558,32 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool) -> (Option<ExitCho
 /// A question with Yes / No, `None` until answered (Esc: no, any other key: yes, as the
 /// original's box: `answer_key`).
 fn question(title: &str, text: &str) -> Option<bool> {
+    question_box(title, text, false)
+}
+
+/// [`question`] for the original's boxes whose text is markup (the restart and delete-save
+/// boxes, 0x48e438): each line in its font, centred or justified, no shadow.
+fn marked_question(title: &str, text: &str) -> Option<bool> {
+    question_box(title, text, true)
+}
+
+fn question_box(title: &str, text: &str, marked: bool) -> Option<bool> {
     let k = super::chrome::k();
     let (w, h) = (380.0 * k, 150.0 * k);
     let r = Rect::new((screen_width() - w) / 2.0, (screen_height() - h) / 2.0, w, h);
     let (inner, _) = super::chrome::window(r, title, super::chrome::Skin::Marble, false);
-    let text = text.replace(['#', '\\', '|'], "");
-    for (i, line) in wrap(&text, inner.w - 20.0 * k, 13.0 * k).iter().take(3).enumerate() {
-        super::chrome::shadow_centered(line, inner.center().x, inner.y + 24.0 * k + i as f32 * 17.0 * k, 13.0 * k, super::chrome::CREAM);
+    let size = 13.0 * k;
+    let (room, step) = (inner.w - 20.0 * k, 17.0 * k);
+    if marked {
+        // `ui_text` gave the install's `#\` breaks as new lines: back to a break for 0x48e438.
+        let rows = markup_rows(&text.replace('\n', "#\\"), room, size);
+        for (i, row) in rows.iter().take(3).enumerate() {
+            draw_markup_row(row, inner.x + 10.0 * k, inner.y + 24.0 * k + i as f32 * step, room, size);
+        }
+    } else {
+        for (i, line) in wrap(text, room, size).iter().take(3).enumerate() {
+            super::chrome::shadow_centered(line, inner.center().x, inner.y + 24.0 * k + i as f32 * step, size, super::chrome::CREAM);
+        }
     }
     let bw = 90.0 * k;
     let by = inner.y + inner.h - 38.0 * k;

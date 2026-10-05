@@ -360,12 +360,6 @@ pub fn tutorial_map(scenarios: &[ScenarioEntry]) -> Option<usize> {
     scenarios.iter().position(|e| e.file.eq_ignore_ascii_case(name.trim()) || e.file == name.trim())
 }
 
-/// The paragraphs of an ini text: its lines, without the original's layout marks (`*`, `^`
-/// at the start), empty lines kept as the gaps between them.
-fn paragraphs(text: &str) -> Vec<&str> {
-    text.split('\n').map(|l| l.trim().trim_start_matches(['*', '^']).trim_start()).collect()
-}
-
 /// "Обучающий сценарий", before the first new game: the install's picture (`Как Играть`) on
 /// the left and its text on the right. «Да» starts the tutorial map (the hero choice next),
 /// «Нет» opens the scenario list; it comes again at the next new game until the tutorial is
@@ -394,23 +388,15 @@ pub fn tutorial_offer(scenarios: &[ScenarioEntry]) -> Option<Screen> {
     let (x0, width) = (text.x + 20.0 * k, text.w - 40.0 * k);
     let mut y = text.y + 26.0 * k;
     let body = own("Tutorial", "Text", n_("Welcome to the world of \"A Time of Discord\"!\n\nThe tutorial scenario shows you the game's interface and how to play it with each of the heroes.\n\n\n\nPress \"No\" to open the list of all scenarios and campaigns.\n\nPress \"Yes\" to start the tutorial and choose your hero."));
-    for para in paragraphs(&body) {
-        if para.is_empty() {
-            y += size * 0.9;
-            continue;
+    // The original asks this in the event window (0x4ac748 makes it an event's question,
+    // 0x4a8ae8 shows it), so its text is markup (0x48e438): each line in its font, justified
+    // behind the indent or centred. `ui_text` gave the `#\` breaks as new lines.
+    for row in markup_rows(&body.replace('\n', "#\\"), width, size) {
+        if y > text.y + text.h - 8.0 * k {
+            break;
         }
-        // The first line of a paragraph is indented, as in the original.
-        let indent = 26.0 * k;
-        let first = wrap(para, width - indent, size).into_iter().next().unwrap_or_default();
-        let rest: Vec<&str> = para.split_whitespace().skip(first.split_whitespace().count()).collect();
-        let lines = std::iter::once((indent, first)).chain(wrap(&rest.join(" "), width, size).into_iter().map(|l| (0.0, l)));
-        for (dx, line) in lines.filter(|(_, l)| !l.is_empty()) {
-            if y > text.y + text.h - 8.0 * k {
-                break;
-            }
-            chrome::shadow_text(&line, x0 + dx, y, size, GOLD);
-            y += size * 1.3;
-        }
+        draw_markup_row(&row, x0, y, width, size);
+        y += size * 1.3;
     }
     let yes = win.button(92.0, 116.0, &own("Buttons", "Yes", n_("Yes")), true) || key(KeyCode::Enter) || key(KeyCode::Y);
     let no = win.button(386.0, 116.0, &own("Buttons", "No", n_("No")), true) || key(KeyCode::N) || key(KeyCode::Escape) || closed;

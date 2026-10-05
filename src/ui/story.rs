@@ -27,11 +27,6 @@ pub fn event_title(game: &Game, id: EventId) -> String {
     game.event_title(id)
 }
 
-/// Paragraphs of a scenario text.
-fn paragraphs(game: &Game, s: &str) -> Vec<String> {
-    game.fill_text(s).lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect()
-}
-
 /// An event's own picture: `width`, `height` (u16 each) and 16-bit pixels, taken as RGB565
 /// *(guess, dtm-format.md §9)*.
 fn custom_picture(data: &[u8]) -> Option<Texture2D> {
@@ -61,7 +56,9 @@ pub fn event_dialog(game: &Game, id: EventId, asking: bool) -> Dialog {
     d.question = asking;
     let Some(e) = game.script().and_then(|s| s.event(id)) else { return d };
     let body = if asking && !e.question.trim().is_empty() { &e.question } else { &e.message };
-    d.text = paragraphs(game, body);
+    // The original fills in `#HERONAME` (0x471f0c) and reads the result as markup (0x48e438:
+    // lines at CR LF or `#\`, the marks `*` `|` `@` `^`); the CR is kept for that.
+    d.marked = Some(body.replace("#HERONAME", &game.hero_name()));
     let r = &e.results;
     d.picture = match (&e.custom_picture, r.picture) {
         (Some(data), _) if custom_picture(data).is_some() => custom_picture(data).map(Picture::Image),

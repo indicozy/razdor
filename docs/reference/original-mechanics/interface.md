@@ -848,6 +848,27 @@ nothing (there is no status-line fallback). **code** (callers 4b933e, 4b9586)
 - **Event dialogs** (events subsystem): 634 px wide, height from the content, centred on the
   map view. Their text uses line breaks, colour markers, a centring marker and justified
   paragraphs with an indent. **code** (48e438, 4a9b75)
+- **Text markup** (48e438 with its inner line reader 48e1cc): read in four places only: the
+  event window's own text (an event's message, or its question when it asks; the tutorial
+  offer, the village offers and a unit's pay demand are shown as events too), the restart box
+  and the delete-save box. The victory, defeat and resource texts of the event window and the
+  journal's quest text are not read: there the marks show as typed. **code** (4aa3e6,
+  4aa427, 4bf818, 4c05ac; journal 49c388)
+  - Lines end at CR LF or at the two characters `#\`; an empty text adds nothing, a text
+    ending in a break gets an empty last line, shown as a blank row.
+  - In each line every `*`, `|` and `@` is removed wherever it stands, and picks the line's
+    font: `*` plain white, `|` blue (55, 180, 255), `@` orange (255, 175, 85), else pale
+    yellow (255, 255, 155); the fonts are tints of the white `Benguiat.lit` (red, green, blue
+    deltas 0/0/0, −200/−75/0, 0/−80/−170, 0/0/−100). With several kinds the last in the order
+    `*`, `|`, `@` wins.
+  - A `^` anywhere (every one removed) centres the line. Any other line is justified, behind
+    six `_` that the font draws as spaces (it has no `_`): an indent that does not stretch.
+  - Each line is word-wrapped: characters are added until the width passes the box, the row
+    ends after the last space seen and drops its trailing spaces (after a run of spaces only
+    the first is skipped). Justified rows share the free room equally between their spaces,
+    each space's position rounded half up; the last row of a line is left aligned.
+  - The line keeps its break's first character (the CR or the `#`); neither has a glyph, so
+    it draws as nothing.
 - **Text lists**: the wheel scrolls one line per wheel step; a click gives the list the
   keyboard, and the Up and Down keys then repeat every 50 ms. Scroll bars move by 0.1 of the
   range per arrow and 0.5 per page. **code** (47ede0, 47eb84, 47b8d4)
@@ -1059,7 +1080,7 @@ call in the game code; the process functions found are library code)
 
 Razdor files: `src/ui/world_view.rs`, `hotkeys.rs`, `main_menu.rs`, `game_bar.rs`,
 `minimap.rs`, `battle_view.rs`, `audio.rs`, `jukebox.rs`, `dialog.rs`, `saves.rs`,
-`screens.rs`. Rows marked "extra" are Razdor features the original does not have; per the
+`screens.rs`, `story.rs`, `new_game.rs`, `src/dt/markup.rs`. Rows marked "extra" are Razdor features the original does not have; per the
 parity rule they are candidates to hide or remove, not bugs to copy.
 
 | # | Topic | Razdor now | Original | § |
@@ -1122,6 +1143,7 @@ parity rule they are candidates to hide or remove, not bugs to copy.
 | 56 | Spell badges | Matches: up to four badges along the portrait's bottom on the army, building and battle cards, from the units' slots (running spells with a mana cost, slot order), composed from the install's art (a coloured disc without one), added on hover; the hint with the picture, name, effect text (49b63c), `LifeLost` line and time left with the original's words and quirks (`spell_hint`, `ui::spell_badges`); the box is Razdor's parchment, flipped and clamped to the screen | Four 22 px badges 23 px apart at card + 0x47; 420 px hint box | 9.4 |
 | 57 | Battle card signs | Matches: potion and blessing from the top left, poison and curse from the top right, 23 px apart; the curse and blessing signs set as a magic or a blessing effect ends on the card and kept to the battle's end (the turn order number, Razdor's, moved to the bottom right). The army and building cards show the promotion (the hero's army) and then the potion sign from the top left in the same places (`chrome::card_signs`; the hero's helm, Razdor's, takes the first place); their payment sign is still Razdor's and they show no poison sign yet | `Sign-*` badges by the unit's potion, +0xc9, regeneration < 0, +0xc5; outside battle (493a64) also `Sign-Upgrade` first from the left (the hero's army, a promotion to take) and `Sign-Payment` first from the right (unpaid), poison on any card | 12 |
 | 58 | Shipyard window | Matches: a shipyard opens the original's small ship window on land and nothing at sea (no main hall, no other tab): its picture, the install's `AboutShipyard` text with the owner's name, `NoMoneyForShip` when the gold is short, the price line, "Нанять корабль" (enabled iff ShipCost ≤ gold) and "Отмена"; Buy closes it (`building_view::ship_window`, `Game::window_at`). The text box's font is Razdor's, so its lines wrap a little differently | The ship window on land, nothing at sea; Buy closes it (4bbc84, 4d3ec0, 4c60ac) | 9.8 |
+| 59 | Text markup | Matches: event windows, the tutorial offer and the restart and delete-save boxes read the marks (`dt::markup`): the lines at CR LF and `#\`, the four fonts' colours, `^` centred, the rest justified behind the six-space indent, blank lines kept; the journal shows the marks as typed, as the original's. The text keeps Razdor's face (the original draws it in Benguiat) | `*` `\|` `@` pick the font, `^` centres, other lines justified with an indent; only in the event window's own text and the restart and delete-save boxes | 11 |
 
 ## Unknowns
 

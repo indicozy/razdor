@@ -350,6 +350,73 @@ pub fn wrap(s: &str, width: f32, size: f32) -> Vec<String> {
     lines
 }
 
+/// One row of a marked-up text (0x48e438) laid out in a box.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MarkupRow {
+    pub text: String,
+    pub ink: razdor::dt::markup::Ink,
+    pub align: razdor::dt::markup::Align,
+    /// The last row of its line: left aligned when the line is justified.
+    pub last: bool,
+}
+
+/// A character's advance at `size`: `_` has the space's glyph (0x47866c).
+fn glyph_width(c: char, size: f32) -> f32 {
+    let c = if c == '_' { ' ' } else { c };
+    measure(c.encode_utf8(&mut [0; 4]), size).width
+}
+
+/// The rows of `text` read as the original's markup (see [`razdor::dt::markup`]) in a box
+/// `room` wide at `size`: each line word-wrapped as TextList.AddText 0x47e46c does.
+pub fn markup_rows(text: &str, room: f32, size: f32) -> Vec<MarkupRow> {
+    razdor::dt::markup::parse(text)
+        .into_iter()
+        .flat_map(|line| {
+            razdor::dt::markup::wrap(&line.text, room, |c| glyph_width(c, size))
+                .into_iter()
+                .map(move |r| MarkupRow { text: r.text, ink: line.ink, align: line.align, last: r.last })
+        })
+        .collect()
+}
+
+/// The colour of a markup font (the original's tints of Benguiat).
+pub fn ink_color(ink: razdor::dt::markup::Ink) -> Color {
+    let [r, g, b] = ink.rgb();
+    Color::from_rgba(r, g, b, 255)
+}
+
+/// Draws a row of [`markup_rows`] in the box from `x`, `room` wide: centred, justified
+/// (TextDrawJustified 0x478a9c) or, the last row of a justified line, left aligned. No
+/// shadow: these lists get no shadow font (0x48e1cc passes 0). `_` draws as a space.
+pub fn draw_markup_row(row: &MarkupRow, x: f32, y: f32, room: f32, size: f32) {
+    use razdor::dt::markup::Align;
+    let color = ink_color(row.ink);
+    let shown = row.text.replace('_', " ");
+    match row.align {
+        Align::Centre => {
+            let w: f32 = row.text.chars().map(|c| glyph_width(c, size)).sum();
+            text(&shown, x + ((room - w) / 2.0).trunc(), y, size, color);
+        }
+        Align::Justify if row.last || !row.text.contains(' ') => text(&shown, x, y, size, color),
+        Align::Justify => {
+            let xs = razdor::dt::markup::justify(&row.text, room, |c| glyph_width(c, size));
+            let chars: Vec<char> = shown.chars().collect();
+            let raw: Vec<char> = row.text.chars().collect();
+            let mut i = 0;
+            while i < raw.len() {
+                if raw[i] == ' ' {
+                    i += 1;
+                    continue;
+                }
+                let j = (i..raw.len()).find(|&j| raw[j] == ' ').unwrap_or(raw.len());
+                let word: String = chars[i..j].iter().collect();
+                text(&word, x + xs[i], y, size, color);
+                i = j;
+            }
+        }
+    }
+}
+
 /// Colour of experience: bars, badges, level labels.
 pub const XP_COLOR: Color = Color::new(0.35, 0.95, 0.95, 1.0);
 

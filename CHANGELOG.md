@@ -34,6 +34,12 @@ old id, and their versions give both.
   its first level, or in a final class, every portrait of the tree, the unit's own included,
   is greyed, tinted dark brown and darkened at the edges. Razdor showed the unit's portrait
   plainly with a note of its own ("The final class…"), which the original does not have.
+- **Scenario texts are laid out as in the original, without the stray `*`, `^`, `|` and
+  `@`:** an event's window reads these marks as the original does: a line with `*` is white,
+  with `|` blue, with `@` orange, the others pale yellow; a line with `^` is centred (the
+  tutorials' headings), the others are justified paragraphs with an indent, and blank lines
+  stay. The tutorial offer and the restart and delete-save questions read them too. The
+  journal still shows them as typed, as the original's does.
 
 ### Changed
 - **A building is guarded only by an army standing in it, as in the original:** stepping onto
