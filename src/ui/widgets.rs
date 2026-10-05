@@ -243,6 +243,24 @@ pub fn wheel() -> f32 {
     }
 }
 
+/// Drawing clipped to a rectangle (screen coordinates) while the guard lives.
+pub struct Clip;
+
+impl Clip {
+    pub fn new(r: Rect) -> Clip {
+        let dpi = screen_dpi_scale();
+        let gl = unsafe { get_internal_gl() }.quad_gl;
+        gl.scissor(Some(((r.x * dpi) as i32, (r.y * dpi) as i32, (r.w * dpi).ceil() as i32, (r.h * dpi).ceil() as i32)));
+        Clip
+    }
+}
+
+impl Drop for Clip {
+    fn drop(&mut self) {
+        unsafe { get_internal_gl() }.quad_gl.scissor(None);
+    }
+}
+
 /// A translucent panel of lines next to the mouse.
 pub fn tooltip(lines: &[(String, Color)]) {
     if lines.is_empty() {

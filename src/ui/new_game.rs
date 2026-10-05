@@ -202,6 +202,13 @@ fn listed_chapters<'a>(scenarios: &[ScenarioEntry], g: &'a Group) -> &'a [usize]
 }
 
 /// "Сценарий для Новой Игры".
+/// The list's scroll after the wheel turned by `turned` this frame: 30 px a notch. A frame
+/// without a turn leaves it (`signum` of 0.0 is 1.0, which pulled the list back to its top
+/// every frame, so it could not be scrolled).
+fn wheel_scroll(scroll: f32, turned: f32) -> f32 {
+    if turned == 0.0 { scroll } else { scroll - turned.signum() * 30.0 }
+}
+
 pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option<Screen> {
     if !has_install || chrome::win("Win-marble").is_none() {
         return screens::scenario_select(scenarios, has_install);
@@ -222,16 +229,20 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
     let mut scroll = SCROLL.with(|s| s.get());
     let over_list = !input_blocked() && rows.contains(crate::ui::widgets::pointer().into());
     if over_list {
-        scroll -= wheel().signum() * 30.0;
+        scroll = wheel_scroll(scroll, wheel());
     }
     scroll = scroll.clamp(0.0, max_scroll);
     SCROLL.with(|s| s.set(scroll));
     let mut next = None;
     let mut y = rows.y + 6.0 * k - scroll * k;
+    // The rows are clipped to the box, so a block only partly in view shows its part (a
+    // campaign taller than the room left was hidden, with the gap it left).
+    let inside = Rect::new(rows.x, rows.y + 2.0 * k, rows.w, rows.h - 4.0 * k);
+    let clip = crate::ui::widgets::Clip::new(inside);
     for (row, g) in list.iter().enumerate() {
         let r = Rect::new(rows.x + 4.0 * k, y, rows.w - 8.0 * k, block_h(g) - 2.0 * k);
         y += block_h(g);
-        if r.y + r.h > rows.y + rows.h + 1.0 || r.y < rows.y {
+        if r.y >= inside.y + inside.h || r.y + r.h <= inside.y {
             continue;
         }
         let hover = over_list && r.contains(crate::ui::widgets::pointer().into());
@@ -261,6 +272,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
             picked = row;
         }
     }
+    drop(clip);
     PICKED.with(|p| p.set(picked));
     // The map and what it is.
     if let Some(g) = list.get(picked) {
@@ -562,6 +574,13 @@ fn choose_class(offered: [bool; 3], pick: usize, clicked: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_scenario_list_keeps_its_scroll_between_turns_of_the_wheel() {
+        assert_eq!(wheel_scroll(60.0, 0.0), 60.0, "no turn, no move");
+        assert_eq!(wheel_scroll(60.0, -1.0), 90.0, "down a notch");
+        assert_eq!(wheel_scroll(60.0, 2.5), 30.0, "up a notch, whatever the wheel's step");
+    }
 
     #[test]
     fn a_class_the_map_does_not_offer_cannot_be_clicked() {
