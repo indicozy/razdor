@@ -19,6 +19,7 @@ use super::world_view::surface_color;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Key {
     Portrait(u32),
+    LockedPortrait(u32),
     Figure(u32),
     Item(u32),
     Terrain(u8),
@@ -123,6 +124,18 @@ impl DtArt {
             let sheet = self.portraits.get_or_init(|| or_log("unit portraits", self.install.unit_portraits()));
             let mut img = sheet.get(gfx::portrait_frame(unit_id)?)?.clone();
             img.rgba.chunks_exact_mut(4).for_each(|p| p[3] = 255);
+            texture(&img)
+        })
+    }
+
+    /// The bust of [`DtArt::unit_portrait`] as the promotion screen shows it when the unit
+    /// cannot be promoted ([`super::chrome::lock_portrait`]).
+    pub fn unit_portrait_locked(&self, unit_id: u32) -> Option<Texture2D> {
+        self.cached(Key::LockedPortrait(unit_id), || {
+            let sheet = self.portraits.get_or_init(|| or_log("unit portraits", self.install.unit_portraits()));
+            let mut img = sheet.get(gfx::portrait_frame(unit_id)?)?.clone();
+            img.rgba.chunks_exact_mut(4).for_each(|p| p[3] = 255);
+            super::chrome::lock_portrait(&mut img);
             texture(&img)
         })
     }

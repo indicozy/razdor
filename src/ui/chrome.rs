@@ -70,6 +70,29 @@ pub fn subtract(img: &mut Image, minus: [i32; 3]) {
     }
 }
 
+/// The promotion screen's locked portrait (494340), for a unit that cannot be promoted (level
+/// 0 in the original, or no next type): grey weighted 100/200/100 (48db5c), each channel
+/// then scaled by 1600/1024 and shifted by −48 red, −176 green, −256 blue (48da5c: a dark
+/// brown), and the 92×92 vignette 0xae26b8 subtracted (476790 mode 1): squares inset by d
+/// px, d = 0..18, filled with grey 96 − d·5334/1000, so the edge loses 96 and the middle
+/// nothing. The original's 16-bit colour depth is left out.
+pub fn lock_portrait(img: &mut Image) {
+    let (w, h) = (img.width as i32, img.height as i32);
+    for (n, p) in img.rgba.chunks_exact_mut(4).enumerate() {
+        let (x, y) = (n as i32 % w.max(1), n as i32 / w.max(1));
+        // The vignette is the original's 92 px square; a portrait of another size is mapped.
+        let (vx, vy) = (x * 92 / w.max(1), y * 92 / h.max(1));
+        let d = vx.min(vy).min(91 - vx).min(91 - vy).min(18);
+        let vignette = 96 - d * 5334 / 1000;
+        let grey = (p[0] as i32 * 100 + p[1] as i32 * 200 + p[2] as i32 * 100) / 400;
+        let scaled = (grey * 1600) >> 10;
+        for (c, off) in p[..3].iter_mut().zip([-48, -176, -256]) {
+            let v = (scaled + off).clamp(0, 255);
+            *c = (v - vignette).max(0) as u8;
+        }
+    }
+}
+
 /// Applies `fx` to `img` in place.
 pub fn transform(img: &mut Image, fx: Fx) {
     for p in img.rgba.chunks_exact_mut(4) {
@@ -1077,6 +1100,22 @@ mod tests {
 
     fn img(px: &[[u8; 4]]) -> Image {
         Image { width: px.len() as u32, height: 1, rgba: px.iter().flatten().copied().collect() }
+    }
+
+    #[test]
+    fn a_locked_portrait_is_dark_brown_with_a_dark_edge() {
+        // 92×92 white: the middle (inset ≥ 18) keeps 255·1600/1024 − offsets, clamped.
+        let mut white = Image { width: 92, height: 92, rgba: vec![255; 92 * 92 * 4] };
+        lock_portrait(&mut white);
+        let at = |i: &Image, x: usize, y: usize| { let o = (y * 92 + x) * 4; [i.rgba[o], i.rgba[o + 1], i.rgba[o + 2]] };
+        assert_eq!(at(&white, 46, 46), [255, 222, 142]);
+        // The edge loses 96 more, inset 1 loses 96 − 5.
+        assert_eq!(at(&white, 0, 46), [159, 126, 46]);
+        assert_eq!(at(&white, 46, 1), [164, 131, 51]);
+        // Mid grey: 128 → 200, then −48 / −176 / −256.
+        let mut grey = Image { width: 92, height: 92, rgba: vec![128; 92 * 92 * 4] };
+        lock_portrait(&mut grey);
+        assert_eq!(at(&grey, 46, 46), [152, 24, 0]);
     }
 
     #[test]

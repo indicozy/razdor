@@ -6,7 +6,7 @@
 //! Scenes (`<map>` is a map file name of the install without `.DTm`, e.g. `РК3-Столица`):
 //! `title`, `authors`, `options`, `scenarios`, `tutorial`, `load`, `editor`, `classes:<map>`, `map:<map>[:x,y]`, `minimap:<map>`, `walk:<map>:dx,dy` (the
 //! hero sets off that many cells away), `building:<map>:<n>`
-//! (the hero in the n-th building), `army:<map>`, `journal:<map>`, `spells:<map>`,
+//! (the hero in the n-th building), `army:<map>[:<n>[:<unit id>[:<level>]]]` (squad member n selected, made that unit at that level), `journal:<map>`, `spells:<map>`,
 //! `menu:<map>`, `battle:<map>:<n>` (against the n-th army). `RAZDOR_SCENE_SHOW=x,y,r` shows
 //! a place as a lantern event does; `RAZDOR_SCENE_QUIET=1` drops
 //! the scenario's messages every frame, to see the screen under them; `RAZDOR_MOUSE=x,y`
@@ -224,7 +224,26 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             game.location = Some(l);
             Screen::Building(BuildingView::new(tab))
         }
-        "army" => Screen::Squad { selected: Default::default(), scroll: 0, back: None },
+        "army" => {
+            // `army:<map>:<n>[:<unit id>[:<level>]]`: squad member n pressed (its promotion
+            // tree up), first made a unit of that `GlobalIndex` at that level (default 2).
+            let mut selected = super::items_view::ArmySel::default();
+            if let Some(i) = arg.and_then(|a| a.parse::<usize>().ok()) {
+                if i >= game.squad.len() {
+                    return Err("no such squad member".into());
+                }
+                if let Some(id) = parts.next().and_then(|v| v.parse::<u32>().ok()) {
+                    let def = razdor::rules::content::UnitId(id);
+                    game.content.try_unit(def).ok_or("no such unit")?;
+                    let slot = game.squad[i].slot;
+                    let mut u = razdor::rules::units::Unit::new(&game.content, def, slot);
+                    u.level = parts.next().and_then(|v| v.parse().ok()).unwrap_or(2);
+                    game.squad[i] = u;
+                }
+                selected = super::items_view::ArmySel { selected: Some(i), shown: Some(i) };
+            }
+            Screen::Squad { selected, scroll: 0, back: None }
+        }
         "journal" => Screen::Journal(JournalView::default()),
         "spells" => {
             // A book full of the install's spells, to see their pictures.

@@ -30,6 +30,10 @@ old id, and their versions give both.
   tree up until the next press; a press on an empty cell with nothing selected brings the pack
   back. The barracks' army grid takes the same clicks, and in the garrison a refused hero or
   named unit stays selected. Dragging a card still works.
+- **A unit that cannot be promoted shows its promotion tree locked, as in the original:** at
+  its first level, or in a final class, every portrait of the tree, the unit's own included,
+  is greyed, tinted dark brown and darkened at the edges. Razdor showed the unit's portrait
+  plainly with a note of its own ("The final class…"), which the original does not have.
 
 ### Changed
 - **A building is guarded only by an army standing in it, as in the original:** stepping onto

@@ -178,13 +178,15 @@ fn give_on_card(game: &mut Game, from: From, to: usize) -> Option<String> {
     }
 }
 
-/// The promotion tree of squad member `sel` in `r`, as the original's: the current class at
-/// the bottom, arrows up to its options (portraits; the ones open now glow and promote on a
-/// click, free of charge).
+/// The promotion tree of squad member `sel` (not the hero) in `r`, as the original's: the
+/// current class at the bottom, arrows up to its options (portraits; open now, they glow and
+/// promote on a click, free of charge). A unit that cannot be promoted, at its first level
+/// or of a class with no next type, has every portrait locked, its own included (494340).
 fn tree_view(game: &mut Game, assets: &Assets, sel: usize, u: &Unit, r: Rect, message: &mut Option<String>) {
     let c = game.content.clone();
     let k = chrome::k();
-    let tree = if sel == 0 { Vec::new() } else { u.upgrade_tree(&c) };
+    let tree = u.upgrade_tree(&c);
+    let locked = !tree.iter().any(|&(_, _, ok)| ok);
     if let Some(t) = chrome::win_fx("UpgradeTree", chrome::Fx::KeyBlack) {
         chrome::tex(&t, r, WHITE);
     }
@@ -197,9 +199,10 @@ fn tree_view(game: &mut Game, assets: &Assets, sel: usize, u: &Unit, r: Rect, me
             draw_line(cur.x + cur.w / 2.0, cur.y, o.x + o.w / 2.0, o.y + o.h, 3.0, if ok { chrome::GOLD } else { DIM });
         }
         draw_rectangle(o.x - 2.0, o.y - 2.0, o.w + 4.0, o.h + 4.0, Color::new(0.0, 0.0, 0.0, 0.6));
-        assets.draw_portrait(to, Team::Player, o);
-        if !ok {
-            draw_rectangle(o.x, o.y, o.w, o.h, Color::new(0.0, 0.0, 0.0, 0.45));
+        if locked {
+            assets.draw_portrait_locked(to, Team::Player, o);
+        } else {
+            assets.draw_portrait(to, Team::Player, o);
         }
         draw_rectangle_lines(o.x, o.y, o.w, o.h, 1.0, Color::new(0.85, 0.85, 0.85, 0.8));
         let label = razdor::trf!("Lv {level}", level);
@@ -219,21 +222,14 @@ fn tree_view(game: &mut Game, assets: &Assets, sel: usize, u: &Unit, r: Rect, me
         }
     }
     draw_rectangle(cur.x - 2.0, cur.y - 2.0, cur.w + 4.0, cur.h + 4.0, Color::new(0.0, 0.0, 0.0, 0.6));
-    assets.draw_portrait(u.def, Team::Player, cur);
+    // The original draws no note here (no such text in the ini): the locked portraits say it.
+    if locked {
+        assets.draw_portrait_locked(u.def, Team::Player, cur);
+    } else {
+        assets.draw_portrait(u.def, Team::Player, cur);
+    }
     chrome::wounds(cur, u.hp, u.max_hp(&c));
     draw_rectangle_lines(cur.x, cur.y, cur.w, cur.h, 1.0, Color::new(0.85, 0.85, 0.85, 0.8));
-    let note = if sel == 0 {
-        tr("The hero rises by levels only.")
-    } else if tree.is_empty() {
-        tr("The final class: it improves by levels only.")
-    } else if tree.iter().any(|&(_, _, ok)| ok) {
-        tr("Click a lit class to promote (free; back to level 1).")
-    } else {
-        tr("Not enough experience to promote yet.")
-    };
-    for (i, line) in wrap(note, r.w - 12.0, (12.0 * k).round()).iter().enumerate() {
-        chrome::shadow_centered(line, r.x + r.w / 2.0, r.y + r.h * 0.5 + i as f32 * 14.0 * k, (12.0 * k).round(), chrome::CREAM);
-    }
 }
 
 /// The backpack: 5 columns of the original's inventory squares, scrolling. Returns the

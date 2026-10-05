@@ -727,8 +727,13 @@ other unit selected it shows the promotion choice instead: the four tree portrai
 272×191 description box. **code**
 
 **Promotion portraits** (494340): portrait 0 is the unit, 1–3 its next types. When the unit's
-level is 0 or its type has no next type, every portrait (the unit's own included) is greyed
-and darkened with a lock on top; an empty option is a plain background. **code**
+level is 0 or its type has no next type, every portrait (the unit's own included) is locked:
+turned grey (weights 100/200/100 for red, green, blue), each channel scaled by 1600/1024 and
+lowered by 48 (red), 176 (green) and 256 (blue), which gives a dark brown, and darkened at
+the edges by subtracting a 92×92 vignette built at start-up (squares inset by d = 0..18 px of
+grey 96 − d·5334/1000: the border loses 96, the middle nothing). The "lock" is this vignette,
+no picture of the install. Otherwise each portrait is plain under a glow frame. An empty
+option is a plain background. The original writes no text on this view. **code**
 
 **Pack scrolling** (49a718). The pack holds 256 slots; its length is the last used slot + 1.
 The first shown slot is `5 × Round(max(0, length div 5 − 4) × s)`, where s is the scroll bar
@@ -1112,7 +1117,7 @@ parity rule they are candidates to hide or remove, not bugs to copy.
 | 51 | Item text | Kind name, then f-, d-, p- values and the bonus, comma-joined | Name, usage line by type and school, description, then "label value" entries with "=" (f-), "+" (d-), "%" (p-), potion heal/revive rules, defence merging with its lost-value quirks, bonus name | 9.2 |
 | 52 | Spell text | Effect summary, school, mana and casting time, duration and target | Name, effect entries (heal/curse label by the sign of DeltaFixedHits, AB = AS and DB = DS merged), `Mana`/`Reading`, duration; red when unaffordable, blue for own-army spells | 9.3 |
 | 53 | Pack scrolling | Wheel by one row over the whole 256-slot pack | Scroll bar over `max(0, length div 5 − 4)` rows of the used part, rounded | 9.7 |
-| 54 | Army window right side | Gear, pack and promotion views | Pack when nothing or the hero is selected, the promotion tree for any other unit (greyed with a lock when it cannot be promoted) | 9.7 |
+| 54 | Army window right side | Matches: the pack with nothing or the hero selected, the promotion tree for any other unit, every portrait locked as the original's (grey, dark brown, vignette: `chrome::lock_portrait`) when the unit is at its first level or of a final class, no note under it; the "Lv" labels and the arrows' colours are Razdor's | Pack when nothing or the hero is selected, the promotion tree for any other unit (every portrait greyed, browned and vignetted when it cannot be promoted) | 9.7 |
 | 55 | Panel icon hover | (see row 42) | A hint box with the icon's name only when hints are on; nothing otherwise | 6, 10 |
 | 56 | Spell badges | Matches: up to four badges along the portrait's bottom on the army, building and battle cards, from the units' slots (running spells with a mana cost, slot order), composed from the install's art (a coloured disc without one), added on hover; the hint with the picture, name, effect text (49b63c), `LifeLost` line and time left with the original's words and quirks (`spell_hint`, `ui::spell_badges`); the box is Razdor's parchment, flipped and clamped to the screen | Four 22 px badges 23 px apart at card + 0x47; 420 px hint box | 9.4 |
 | 57 | Battle card signs | Matches: potion and blessing from the top left, poison and curse from the top right, 23 px apart; the curse and blessing signs set as a magic or a blessing effect ends on the card and kept to the battle's end (the turn order number, Razdor's, moved to the bottom right). The army and building cards show the promotion (the hero's army) and then the potion sign from the top left in the same places (`chrome::card_signs`; the hero's helm, Razdor's, takes the first place); their payment sign is still Razdor's and they show no poison sign yet | `Sign-*` badges by the unit's potion, +0xc9, regeneration < 0, +0xc5; outside battle (493a64) also `Sign-Upgrade` first from the left (the hero's army, a promotion to take) and `Sign-Payment` first from the right (unpaid), poison on any card | 12 |

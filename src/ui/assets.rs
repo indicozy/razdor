@@ -118,6 +118,17 @@ impl Assets {
         self.dt.as_ref()?.unit_figure(self.dt_id(kind)?)
     }
 
+    /// The promotion screen's locked portrait (494340) filling `r`: the original's bust
+    /// greyed, darkened and vignetted; without it the plain portrait under a dark veil.
+    pub fn draw_portrait_locked(&self, kind: UnitId, team: Team, r: Rect) {
+        if let Some(tex) = self.dt_id(kind).and_then(|id| self.dt.as_ref()?.unit_portrait_locked(id)) {
+            draw_texture_ex(&tex, r.x, r.y, WHITE, DrawTextureParams { dest_size: Some(vec2(r.w, r.h)), ..Default::default() });
+            return;
+        }
+        self.draw_portrait(kind, team, r);
+        draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.2, 0.1, 0.0, 0.6));
+    }
+
     /// A card portrait filling the square `r`: the original's bust, a custom sprite, or a
     /// placeholder (a sky in the team's colour with the unit's token).
     pub fn draw_portrait(&self, kind: UnitId, team: Team, r: Rect) {
