@@ -28,7 +28,8 @@ pub enum Tab {
     Sanctuary,
     /// A village's tribute and its alternatives.
     Tribute,
-    /// Rent a ship (`rules::ships`).
+    /// Not a tab: a shipyard opens the original's small ship window instead of the building
+    /// window (0x4bbc84, 0x4d3ec0), with "Нанять корабль" (`rules::ships`) and "Отмена".
     Shipyard,
 }
 
@@ -61,13 +62,18 @@ pub enum ServiceError {
 /// - the player's castles and forts: the garrison;
 /// - a building with goods (only towns, markets and churches keep them): the market; with
 ///   spells: the sanctuary;
-/// - villages: the tribute; shipyards: ships for rent, whatever their attitude (the
-///   original's ship window, 0x4bbc84, tests neither attitude nor owner).
+/// - villages: the tribute.
 ///
-/// Bridges, the obelisk, the demo's camps and a garrison still to be beaten have none.
+/// A shipyard has no building window: only [`Tab::Shipyard`], the original's ship window,
+/// whatever its attitude, owner, barracks, goods or spells (0x4bbc84 opens it for every
+/// type-9 building and tests neither attitude nor owner). Bridges, the obelisk, the demo's
+/// camps and a garrison still to be beaten have none.
 pub fn tabs(l: &Location, c: &Content) -> Vec<Tab> {
     if l.kind.is_bridge() || matches!(l.kind, LocationKind::Obelisk | LocationKind::Camp) || l.defended() {
         return Vec::new();
+    }
+    if l.kind == LocationKind::Shipyard {
+        return vec![Tab::Shipyard];
     }
     let mut tabs = vec![Tab::MainHall];
     if l.hires(c) {
@@ -85,14 +91,11 @@ pub fn tabs(l: &Location, c: &Content) -> Vec<Tab> {
     if l.kind == LocationKind::Village {
         tabs.push(Tab::Tribute);
     }
-    if l.kind == LocationKind::Shipyard {
-        tabs.push(Tab::Shipyard);
-    }
     tabs
 }
 
-/// The tab a building window opens on: a village's tribute, a shipyard's ships, else the
-/// main hall.
+/// The tab a building window opens on: a village's tribute, a shipyard's ship window, else
+/// the main hall.
 pub fn first_tab(l: &Location, c: &Content) -> Option<Tab> {
     let t = tabs(l, c);
     t.iter().copied().find(|&t| matches!(t, Tab::Tribute | Tab::Shipyard)).or_else(|| t.first().copied())
@@ -103,9 +106,25 @@ impl Game {
         self.location.map(|l| &self.world.locations[l])
     }
 
-    /// Tabs of the building the hero stands in.
+    /// Tabs of the building the hero stands in: none in a shipyard while he is at sea (the
+    /// original opens nothing there, 0x4bbc84).
     pub fn tabs_here(&self) -> Vec<Tab> {
-        self.here().map_or_else(Vec::new, |l| tabs(l, &self.content))
+        match self.here() {
+            Some(l) if l.kind == LocationKind::Shipyard && self.aboard() => Vec::new(),
+            Some(l) => tabs(l, &self.content),
+            None => Vec::new(),
+        }
+    }
+
+    /// The window building `l` opens for the hero, by its first tab ([`first_tab`]): none
+    /// for a shipyard while he is at sea (0x4bbc84 tests the at-sea flag there and opens
+    /// nothing; on land it opens the ship window).
+    pub fn window_at(&self, l: usize) -> Option<Tab> {
+        let loc = &self.world.locations[l];
+        if loc.kind == LocationKind::Shipyard && self.aboard() {
+            return None;
+        }
+        first_tab(loc, &self.content)
     }
 
     fn offers(&self, tab: Tab) -> bool {
@@ -514,7 +533,9 @@ mod tests {
         altar.recruit_all_types = 1;
         altar.random_artifacts_for_sale = 2;
         let obelisk = town(BuildingType::Obelisk, 9, 7, 1);
-        let yard = town(BuildingType::Shipyard, 11, 7, -2);
+        let mut yard = town(BuildingType::Shipyard, 11, 7, -2);
+        yard.barracks[0] = RecruitSlot { unit: 9, start_count: 1, max_count: 1 };
+        yard.recruit_all_types = 1;
         s.buildings = vec![t, castle, fort, village, church, tavern, market, hostile, bridge, altar, obelisk, yard];
         let g = start(&s);
         let c = g.content.clone();
@@ -532,7 +553,7 @@ mod tests {
         assert_eq!(tabs[9], [MainHall, Barracks], "the all-types byte opens it; an altar keeps no goods");
         assert!(tabs[10].is_empty(), "the obelisk has no window");
         assert!(g.world.locations[11].hostile());
-        assert_eq!(tabs[11], [MainHall, Shipyard], "an ill-disposed shipyard rents ships: no attitude test (0x4bbc84)");
+        assert_eq!(tabs[11], [Shipyard], "an ill-disposed shipyard opens its ship window, no attitude test, and nothing else even with a barracks slot (0x4bbc84)");
     }
 
     #[test]

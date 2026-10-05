@@ -428,6 +428,21 @@ mod tests {
     }
 
     #[test]
+    fn a_shipyard_opens_its_ship_window_on_land_and_nothing_at_sea() {
+        // 0x4bbc84: type 9 with the at-sea flag clear opens the ship window (0x4d3ec0), with
+        // it set nothing at all.
+        let s = strait();
+        let mut g = at_yard(&s);
+        use crate::rules::town::Tab;
+        assert_eq!(g.window_at(0), Some(Tab::Shipyard));
+        assert_eq!(g.tabs_here(), [Tab::Shipyard], "no main hall, no other tab");
+        g.ship = Some(Ship { tile: g.tile(), aboard: true });
+        assert!(g.aboard());
+        assert_eq!(g.window_at(0), None);
+        assert!(g.tabs_here().is_empty());
+    }
+
+    #[test]
     fn an_ill_disposed_shipyard_rents_a_ship_too() {
         // Twelve of the shipped maps' 30 shipyards start ill-disposed (ДС1's «Старый причал» at
         // −2, Проклятое озеро's two ports at −1 …); the original's window has no attitude

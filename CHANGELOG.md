@@ -16,6 +16,12 @@ old id, and their versions give both.
 - **Hills lie under everything, as in the original:** the green and rocky hills are drawn
   before the trees, mountains, buildings and armies, and the route over them, so nothing
   standing above a hill is hidden by it.
+- **A shipyard opens the original's ship window, not the building window:** on land it
+  shows the shipyard's picture, the harbour master's words with the owner's name, the price
+  of a ship and "Нанять корабль" and "Отмена" (with a warning when your gold is short); at
+  sea it opens nothing. Hiring the ship closes the window, so you can click the water next to
+  the shipyard to sail. The shipyard's main hall and "Корабли" tab are gone, as the original
+  has none.
 
 ### Changed
 - **A building is guarded only by an army standing in it, as in the original:** stepping onto

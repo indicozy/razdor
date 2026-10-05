@@ -199,15 +199,11 @@ The village pays {gold} gold and {mana} mana. = Деревня платит: з�
 The village pays with a {item}. = Деревня платит предметом «{item}».
 The tribute grows every midnight, slower as it nears the village's maximum. = Дань растёт каждую полночь, тем медленнее, чем ближе к пределу деревни.
 
-# Building window: shipyard
-The shipwright rents out ships. One ship at a time: a new one sends the old one home. = Корабел сдаёт корабли внаём. Лишь один за раз: новый отсылает прежний домой.
-A ship: {price} gold = Корабль: {price} золота
-Rent a new ship = Нанять новый корабль
-Rent a ship = Нанять корабль
-The ship is ready. Click the water next to the shipyard to sail; leaving on foot loses it. = Корабль готов. Щёлкните по воде у верфи, чтобы отплыть; уйдя пешком, вы его потеряете.
-The shipwright will not deal with you. = Корабел не желает иметь с вами дела.
-With a ship, click the water to sail; click the shore to land. = С кораблём щёлкните по воде, чтобы плыть, и по берегу, чтобы высадиться.
-The ship waits where you land; walk back onto it to sail again. = Корабль ждёт там, где вы сошли; взойдите на него, чтобы плыть дальше.
+# Shipyard window (the install's [Building] texts when it has them)
+You have entered a harbour owned by #NAME1. The harbour master tells you that a ship can be hired here.\n\nThe terms are simple: for a fixed price the ship takes you anywhere on the coast. When you go ashore, it stays and waits for you to come back. = Это пристань, хозяин которой — #NAME1. Здесь сдают корабли внаём.\n\nУсловия просты: за твёрдую плату корабль отвезёт вас к любому месту на побережье, а пока вы на берегу, будет ждать вашего возвращения.
+You have no money to hire a ship right now! = Сейчас вам не хватает денег на корабль!
+Price of hiring a ship = Цена корабля
+Hire a ship = Нанять корабль
 
 Left click: {left} = Левый щелчок: {left}
 Right click: {right} = Правый щелчок: {right}

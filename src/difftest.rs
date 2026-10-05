@@ -655,7 +655,7 @@ impl<'a> Runner<'a> {
                 }
                 if loc.defended() {
                     g.foe = Some(crate::rules::game::Foe::Garrison(l));
-                } else if crate::rules::town::first_tab(loc, &g.content).is_some() {
+                } else if g.window_at(l).is_some() {
                     self.screen = Screen::Building;
                 }
                 return;
@@ -1180,7 +1180,7 @@ impl<'a> Runner<'a> {
                     if g.foe.is_none() && g.village_offer().is_some() {
                         // The offer is a question in the event window, before any village window.
                         self.dialogs.push_back(Dialog { event: true, question: true, cued: false, offer: true, id: None });
-                    } else if g.foe.is_none() && crate::rules::town::first_tab(&g.world.locations[l], &g.content).is_some() {
+                    } else if g.foe.is_none() && g.window_at(l).is_some() {
                         self.screen = Screen::Building;
                     }
                 }
@@ -1212,7 +1212,7 @@ impl<'a> Runner<'a> {
                 // The building window opens on its first tab, highlighted (interface.md §14).
                 self.av.sfx("InterfaceCastSpell");
             }
-            self.tab = g.location.and_then(|l| crate::rules::town::first_tab(&g.world.locations[l], &g.content));
+            self.tab = g.location.and_then(|l| g.window_at(l));
             self.selling = false;
         }
         if !building && self.last_screen_building {

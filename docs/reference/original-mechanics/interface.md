@@ -774,6 +774,24 @@ wage total. **code**
   while one of those two tabs is open. Esc (with the shared latch) closes the window through
   its close button (4cd930). **code**
 
+- **The shipyard's ship window** (built by 4d3ec0, opened by 4bbc84, drawn by 4d1314): a
+  shipyard (type 9) never opens the building window. With the hero on land it opens this
+  small window; at sea it opens nothing. The window is the generated 634×516 frame (the one
+  of the exit dialogs) centred over the map area (195, 83 at 1024×768), titled with the
+  building's name. Inside: the `S_ShipYard` picture at (5, 32); a text box at (18, 45), 598
+  wide and as tall as its text plus 14 above and below, at most 193 (a longer text is
+  centred in it); `[Building] AboutShipyard` with `#NAME1` replaced by the building's owner
+  name and, when the gold is below `[Costs] ShipCost`, an empty line and `NoMoneyForShip` in
+  red; under the box (17 px) the line "`CostShip` = ShipCost", centred with a shadow. At the
+  bottom, 10 px from the edges, two `Btn3` buttons: `BuyShip` on the left, enabled only when
+  ShipCost ≤ gold (fixed as it opens), and `[Buttons] Cancel` on the right; the close box at
+  the top right. No attitude or owner test. Every button plays the button sound as it is
+  pressed. Buying (4c60ac) closes the window, removes any old ship, switches the planner to
+  the MIXED map, takes ShipCost (read again) and plays `Item-Gold`. Cancel, the close box and
+  Esc (4c6118, 4cd8d0) only close it: the hero still stands in the shipyard. Its frame only
+  keeps the sound and the map music going (no timeline). It opens with an event chord (§14).
+  The village window (4d3a38) is a separate window of the same frame. **code**
+
 ### 9.9 After a won battle: the experience cards (4b09e8, 4b0684)
 
 During the 2.5 s hold after a win (§12) the battle screen rebuilds every unit's stats, clears
@@ -1073,7 +1091,7 @@ parity rule they are candidates to hide or remove, not bugs to copy.
 | 37 | Hover bells |  Matches: `MainMenuSelect-1` as the pointer comes onto an item  | Main-menu hover: the same `MainMenuSelect-1` sound for every item | 4, 14 |
 | 38 | `InterfaceCastSpell` |  Matches: world spell cast, the building window's opening and tab switches (Razdor's load window has no tabs)  | Spell book cast, building tab switch, load window tab switch | 14 |
 | 39 | `InterfaceBarScroll` | Unused | Options slider test sound | 14 |
-| 40 | `Item-Gold` |  Matches: the money buttons (trade, hire, heal, learn, a ship), the village tribute as its window closes; a hire plays it on the press and restarts it on the release, as the original's two calls  | Presses of money buttons (trade, hire), event dialog button, village tribute, ship purchase | 14 |
+| 40 | `Item-Gold` |  Matches: the money buttons (trade, hire, heal, learn), the ship window's Buy after its button sound, the village tribute as its window closes; a hire plays it on the press and restarts it on the release, as the original's two calls  | Presses of money buttons (trade, hire), event dialog button, village tribute, ship purchase | 14 |
 | 41 | Random generator | Matches: the music picks and the event chord draw from the game's generator | Music picks and the event chord use the game's generator | 13, 14 |
 | 42 | Hints | Razdor tooltips at once | Hint boxes with a 300 ms fade, flip-and-clamp placement, off when option 6 is ticked | 10 |
 | 43 | Options window | Music and sound volume, battle AI, the front row's width for new games (6 or 4: a switch for `OptValue11`, which stays the default until chosen; a save keeps its own width) | Five sliders and eight checkboxes; slider test sound | 16 |
@@ -1091,6 +1109,7 @@ parity rule they are candidates to hide or remove, not bugs to copy.
 | 55 | Panel icon hover | (see row 42) | A hint box with the icon's name only when hints are on; nothing otherwise | 6, 10 |
 | 56 | Spell badges | Matches: up to four badges along the portrait's bottom on the army, building and battle cards, from the units' slots (running spells with a mana cost, slot order), composed from the install's art (a coloured disc without one), added on hover; the hint with the picture, name, effect text (49b63c), `LifeLost` line and time left with the original's words and quirks (`spell_hint`, `ui::spell_badges`); the box is Razdor's parchment, flipped and clamped to the screen | Four 22 px badges 23 px apart at card + 0x47; 420 px hint box | 9.4 |
 | 57 | Battle card signs | Matches: potion and blessing from the top left, poison and curse from the top right, 23 px apart; the curse and blessing signs set as a magic or a blessing effect ends on the card and kept to the battle's end (the turn order number, Razdor's, moved to the bottom right). The army and building cards show the promotion (the hero's army) and then the potion sign from the top left in the same places (`chrome::card_signs`; the hero's helm, Razdor's, takes the first place); their payment sign is still Razdor's and they show no poison sign yet | `Sign-*` badges by the unit's potion, +0xc9, regeneration < 0, +0xc5; outside battle (493a64) also `Sign-Upgrade` first from the left (the hero's army, a promotion to take) and `Sign-Payment` first from the right (unpaid), poison on any card | 12 |
+| 58 | Shipyard window | Matches: a shipyard opens the original's small ship window on land and nothing at sea (no main hall, no other tab): its picture, the install's `AboutShipyard` text with the owner's name, `NoMoneyForShip` when the gold is short, the price line, "Нанять корабль" (enabled iff ShipCost ≤ gold) and "Отмена"; Buy closes it (`building_view::ship_window`, `Game::window_at`). The text box's font is Razdor's, so its lines wrap a little differently | The ship window on land, nothing at sea; Buy closes it (4bbc84, 4d3ec0, 4c60ac) | 9.8 |
 
 ## Unknowns
 
