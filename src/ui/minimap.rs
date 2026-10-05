@@ -6,8 +6,8 @@
 //!   how much dark lies around them, so the edge is a soft feathered band like the original's.
 //! - Minimap: a toggle window in the top-right corner of the map view (bottom-bar "Map" button
 //!   or M). The whole map scaled down, explored cells in their terrain colour and the rest
-//!   black, locations as small icons in their owner's colour, the armies and the hero as
-//!   marks, and a light rectangle for the view. A click on it moves the camera there (as in the video); walking still
+//!   black, locations as small icons in the colours the original gives their types, the
+//!   armies and the hero as shields, and a light rectangle for the view. A click on it moves the camera there (as in the video); walking still
 //!   needs a click on the map.
 //!
 //! Both textures are rebuilt only when the explored set changes.
@@ -16,7 +16,7 @@ use std::cell::RefCell;
 
 use macroquad::prelude::*;
 
-use razdor::rules::fog::{location_side, Fog, Side};
+use razdor::rules::fog::Fog;
 use razdor::rules::game::Game;
 use razdor::rules::map::TileMap;
 use razdor::rules::world::LocationKind;
@@ -160,39 +160,88 @@ fn symbol_rect(sym: Symbol, size: usize) -> Rect {
     }
 }
 
-/// The symbol of a location kind on the minimap, if it has one.
-fn symbol(kind: LocationKind) -> Option<Symbol> {
+/// The symbol of a location on the minimap, if it has one, for icons of `size`: the tables
+/// 0x4ed520 (x) and 0x4ed5d4 (y) by building type that Minimap_BuildBuildingMarkers 0x49da20
+/// reads. Bridges and obelisks (types 13–15) get no marker. Towns have the castle; castles
+/// and forts the tower; taverns, markets and smithies the village's house; altars the skull,
+/// the gravestone for picture variant 2 (0x4ed5bc / 0x4ed670). The church's small icon is the
+/// house with a cross (x 0, y 48), its medium and large ones the arch.
+fn symbol(kind: LocationKind, variant: u8, size: usize) -> Option<Symbol> {
     use LocationKind as K;
     Some(match kind {
-        K::Castle | K::Palace | K::Town => Symbol::Castle,
-        K::Village => Symbol::Grid(0, 2),
-        K::Fort => Symbol::Grid(0, 3),
+        K::Palace | K::Town => Symbol::Castle,
+        K::Village | K::Tavern | K::Market | K::Smithy => Symbol::Grid(0, 2),
+        K::Castle | K::Fort => Symbol::Grid(0, 3),
         K::Ruins => Symbol::Grid(1, 3),
+        K::Church if size == 0 => Symbol::Grid(0, 4),
         K::Church => Symbol::Grid(1, 4),
-        K::Tavern | K::Market | K::Smithy => Symbol::Grid(0, 4),
         K::Shipyard => Symbol::Grid(1, 1),
         K::Entrance => Symbol::Grid(1, 2),
-        K::Altar | K::Obelisk => Symbol::Grid(1, 0),
+        K::Altar if variant == 2 => Symbol::Grid(1, 0),
+        K::Altar => Symbol::Grid(0, 1),
+        // The demo's bandit camp has no original type: the skull.
         K::Camp => Symbol::Grid(0, 1),
-        K::StoneBridge | K::WoodenBridge => return None,
+        K::StoneBridge | K::WoodenBridge | K::Obelisk => return None,
     })
 }
 
-/// The colour of a location on the minimap, as the original's options give them: villages
-/// yellow (orange once their tribute is taken), buildings by owner, ruins grey, harbours blue.
-fn location_color(l: &razdor::rules::world::Location) -> Color {
-    match l.kind {
-        LocationKind::Village if l.tribute_gold <= 0 && l.tribute_mana <= 0 => option_color("ColorVillageEmpty", [255, 160, 0]),
-        LocationKind::Village => option_color("ColorVillageFull", [255, 255, 0]),
-        LocationKind::Ruins => option_color("ColorRuin", [195, 195, 195]),
-        LocationKind::Shipyard => option_color("ColorHarbor", [40, 160, 255]),
-        _ => match location_side(l) {
-            Side::Player => option_color("ColorBuildingPlayer", [64, 223, 64]),
-            Side::Ally => option_color("ColorBuildingAlly", [0, 160, 255]),
-            Side::Enemy | Side::Neighbour => option_color("ColorBuildingEnemy", [255, 66, 0]),
-            Side::Neutral => option_color("ColorNeutral", [255, 255, 255]),
-        },
+/// The army and hero marker of `MM_Icons.ugs`: the 9 × 9 px quad of 0x49e458 at UV
+/// (1/128, 61/128)–(10/128, 70/128) of the 128 px texture, the first shield.
+const ARMY_MARK: Rect = Rect { x: 1.0, y: 61.0, w: 9.0, h: 9.0 };
+
+/// Which of the options' colours a building marker takes (Minimap_Refresh 0x49e28c with the
+/// Community hooks 0xc276eb–0xc27762).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Mark {
+    Neutral,
+    VillageEmpty,
+    VillageFull,
+    Harbor,
+    Ruin,
+    Player,
+    Ally,
+    Enemy,
+}
+
+/// The colour of a building marker: a village by its gold stock (+0x11e = 0 empty; the
+/// mana stock is not read), a shipyard the harbour's, smithies, altars, dungeon entrances and
+/// ruins (types 8, 10–12) the ruin grey, castles and forts (3–4) the player's when he owns
+/// them (+0x124 = 0), else the ally's when their attitude to the player (+0x152) is above 0,
+/// else the enemy's. Every other building (palace, town, tavern, market, church) keeps the
+/// neutral colour 0xc276eb sets first, whoever owns it.
+fn building_mark(kind: LocationKind, owned: bool, attitude: i8, gold_stock: i32) -> Mark {
+    use LocationKind as K;
+    match kind {
+        K::Village if gold_stock == 0 => Mark::VillageEmpty,
+        K::Village => Mark::VillageFull,
+        K::Shipyard => Mark::Harbor,
+        K::Smithy | K::Altar | K::Entrance | K::Ruins => Mark::Ruin,
+        K::Castle | K::Fort if owned => Mark::Player,
+        K::Castle | K::Fort if attitude > 0 => Mark::Ally,
+        K::Castle | K::Fort => Mark::Enemy,
+        _ => Mark::Neutral,
     }
+}
+
+/// The colour of a location on the minimap (`Rus_DiscordTimes.ini [Options]`, else ours).
+fn location_color(l: &razdor::rules::world::Location) -> Color {
+    match building_mark(l.kind, l.owned(), l.attitude, l.tribute_gold) {
+        Mark::VillageEmpty => option_color("ColorVillageEmpty", [255, 160, 0]),
+        Mark::VillageFull => option_color("ColorVillageFull", [255, 255, 0]),
+        Mark::Ruin => option_color("ColorRuin", [195, 195, 195]),
+        Mark::Harbor => option_color("ColorHarbor", [40, 160, 255]),
+        Mark::Player => option_color("ColorBuildingPlayer", [64, 223, 64]),
+        Mark::Ally => option_color("ColorBuildingAlly", [0, 160, 255]),
+        Mark::Enemy => option_color("ColorBuildingEnemy", [255, 66, 0]),
+        Mark::Neutral => option_color("ColorNeutral", [255, 255, 255]),
+    }
+}
+
+/// An army's marker is in the ally colour only when a meeting event waits for it (+0x3826)
+/// and its attitude to the player (+0x16af) is above 0; every other army, friends included,
+/// has the enemy colour (0x49e3c9 with the hooks 0xc27773 / 0xc27784).
+fn army_is_ally(attitude: i8, meeting_waiting: bool) -> bool {
+    meeting_waiting && attitude > 0
 }
 
 /// Draws the minimap window. `view_world` is the part of the world the map view shows (world
@@ -274,7 +323,7 @@ pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_
         let (ax, ay) = map.center(l.anchor);
         let c = to_mini((ax - (l.size.0 - 1) as f32 / 2.0, ay - (l.size.1 - 1) as f32 * rh / 2.0));
         let col = location_color(l);
-        match (&icons, symbol(l.kind)) {
+        match (&icons, symbol(l.kind, l.picture.1, size)) {
             (Some(t), Some(sym)) => {
                 let src = symbol_rect(sym, size);
                 let (w, h) = (src.w * zoom, src.h * zoom);
@@ -287,21 +336,34 @@ pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_
         }
     }
 
-    // The armies on explored ground, as the map shows them: marks in the original's enemy
-    // or ally colour (`ColorMarkEnemy`, `ColorMarkAlly`).
-    let (enemy, ally) = (option_color("ColorMarkEnemy", [255, 66, 0]), option_color("ColorMarkAlly", [0, 160, 255]));
-    for a in game.world.armies.iter().filter(|a| fog.explored(a.tile(map))) {
-        let p = to_mini(game.army_display_pos(a));
-        draw_circle(p.x, p.y, 3.5 * zoom.max(1.0), BLACK);
-        draw_circle(p.x, p.y, 2.5 * zoom.max(1.0), if a.hostile() { enemy } else { ally });
+    // The hero, then every army on the map and outside a building (+0x16a1 set, +0x3788 = 0),
+    // as the army loop of 0x49e381 draws them: the 9 px shield at the centre of its cell
+    // (+0x1724/+0x1728 + 0.5), the hero in `ColorMarkPlayer`, an army in `ColorMarkAlly` or
+    // `ColorMarkEnemy` ([`army_is_ally`]). The original draws them all and lays the fog
+    // over them (0x49c700); ours leaves out the ones on unexplored ground.
+    let (player, enemy, ally) = (option_color("ColorMarkPlayer", [255, 255, 255]), option_color("ColorMarkEnemy", [255, 66, 0]), option_color("ColorMarkAlly", [0, 160, 255]));
+    let mut marks = vec![(game.tile(), player)];
+    for a in game.world.armies.iter() {
+        let t = a.tile(map);
+        if !fog.explored(t) || game.world.location_at(t).is_some() {
+            continue;
+        }
+        let waits = game.script().is_some_and(|e| e.meeting_waiting(game, a.id));
+        marks.push((t, if army_is_ally(a.attitude, waits) { ally } else { enemy }));
     }
-
-    // The hero: a blinking mark in the player's colour.
-    let h = to_mini(game.display_pos());
-    let pulse = 0.6 + 0.4 * (get_time() as f32 * 5.0).sin().abs();
-    let mark = option_color("ColorMarkPlayer", [255, 255, 255]);
-    draw_circle(h.x, h.y, 3.5 * zoom.max(1.0), BLACK);
-    draw_circle(h.x, h.y, 2.5 * zoom.max(1.0), Color::new(mark.r, mark.g, mark.b, pulse));
+    for (t, col) in marks {
+        let p = to_mini(map.center(t));
+        match &icons {
+            Some(tex) => {
+                let s = ARMY_MARK.w * zoom;
+                super::chrome::tex_src(tex, ARMY_MARK, Rect::new(p.x - s / 2.0, p.y - s / 2.0, s, s), col);
+            }
+            None => {
+                draw_circle(p.x, p.y, 3.5 * zoom.max(1.0), BLACK);
+                draw_circle(p.x, p.y, 2.5 * zoom.max(1.0), col);
+            }
+        }
+    }
 
     // The view: a light grey box, as the original's.
     let a = to_mini((view_world.x, view_world.y));
@@ -362,6 +424,51 @@ mod tests {
     }
 
     #[test]
+    fn building_markers_take_the_originals_colours_by_type() {
+        // 0x49e28c: only castles and forts are coloured by owner and attitude; taverns,
+        // markets, churches and towns stay neutral whoever owns them.
+        use LocationKind as K;
+        assert_eq!(building_mark(K::Castle, true, -3, 0), Mark::Player);
+        assert_eq!(building_mark(K::Fort, false, 1, 0), Mark::Ally);
+        assert_eq!(building_mark(K::Castle, false, 0, 0), Mark::Enemy, "attitude 0 is the enemy's");
+        for k in [K::Tavern, K::Market, K::Church, K::Town, K::Palace] {
+            assert_eq!(building_mark(k, false, -3, 0), Mark::Neutral, "{k:?}");
+            assert_eq!(building_mark(k, true, 3, 0), Mark::Neutral, "{k:?}");
+        }
+        for k in [K::Smithy, K::Altar, K::Entrance, K::Ruins] {
+            assert_eq!(building_mark(k, false, -3, 0), Mark::Ruin, "{k:?}");
+        }
+        assert_eq!(building_mark(K::Shipyard, false, -3, 0), Mark::Harbor);
+        assert_eq!(building_mark(K::Village, false, 0, 0), Mark::VillageEmpty);
+        assert_eq!(building_mark(K::Village, false, 0, 40), Mark::VillageFull);
+    }
+
+    #[test]
+    fn only_a_friend_with_a_meeting_waiting_is_marked_as_an_ally() {
+        // 0x49e3c9: +0x3826 and +0x16af > 0; a friend without a meeting is red.
+        assert!(army_is_ally(1, true));
+        assert!(!army_is_ally(3, false));
+        assert!(!army_is_ally(0, true) && !army_is_ally(-2, true));
+    }
+
+    #[test]
+    fn minimap_symbols_follow_the_originals_type_tables() {
+        // 0x4ed520 / 0x4ed5d4: (x, y) of the small icons by type.
+        use LocationKind as K;
+        let at = |k, v, size| symbol(k, v, size).map(|s| symbol_rect(s, size).point());
+        assert_eq!(at(K::Castle, 0, 0), Some(vec2(0.0, 36.0)), "a castle has the tower");
+        assert_eq!(at(K::Tavern, 0, 0), Some(vec2(0.0, 24.0)), "a tavern has the house");
+        assert_eq!(at(K::Smithy, 0, 0), Some(vec2(0.0, 24.0)));
+        assert_eq!(at(K::Altar, 0, 0), Some(vec2(0.0, 12.0)), "an altar has the skull");
+        assert_eq!(at(K::Altar, 2, 0), Some(vec2(12.0, 0.0)), "variant 2 the gravestone");
+        assert_eq!(at(K::Church, 0, 0), Some(vec2(0.0, 48.0)));
+        assert_eq!(at(K::Church, 0, 1), Some(vec2(42.0, 72.0)));
+        assert_eq!(at(K::Church, 0, 2), Some(vec2(84.0, 96.0)));
+        assert_eq!(at(K::Town, 0, 0), Some(vec2(0.0, 72.0)));
+        assert_eq!(at(K::Obelisk, 0, 0), None, "types 13-15 have no marker");
+    }
+
+    #[test]
     fn minimap_symbols_lie_inside_the_atlas() {
         for size in 0..3 {
             for sym in [Symbol::Castle, Symbol::Grid(0, 0), Symbol::Grid(1, 4)] {
@@ -369,5 +476,7 @@ mod tests {
                 assert!(r.x >= 0.0 && r.y >= 0.0 && r.x + r.w <= 108.0 && r.y + r.h <= 128.0, "{size} {r:?}");
             }
         }
+        let m = ARMY_MARK;
+        assert!(m.x >= 0.0 && m.x + m.w <= 12.0 && m.y >= 60.0 && m.y + m.h <= 72.0, "inside the first shield");
     }
 }

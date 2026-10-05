@@ -690,10 +690,11 @@ fn draw_building(l: &Location, art: Option<&DtArt>, cam: &Camera) {
     let base = cam.to_screen(footprint_base(cam.grid, l));
     let zoom = cam.scale / PX;
     let sprite = art.and_then(|a| a.map_atlas()).and_then(|at| Some((at, at.building(l.picture.0, l.picture.1)?)));
-    let (w, h) = if let Some((atlas, r)) = sprite {
+    // Just the sprite: the original draws no owner's mark over a building (RenderWorld_
+    // BuildingAndRest 0x4c9b5b); its owner shows only on the minimap.
+    if let Some((atlas, r)) = sprite {
         let (w, h) = (r.w * zoom, r.h * zoom);
         draw_texture_ex(&atlas.texture, base.x - w / 2.0, base.y - h, WHITE, DrawTextureParams { dest_size: Some(vec2(w, h)), source: Some(r), ..Default::default() });
-        (w, h)
     } else {
         let (w, h) = (l.size.0 as f32 * cam.scale, (l.size.1 as f32 * cam.cell_size().y).max(cam.scale * 0.8));
         let wall = match l.kind {
@@ -713,14 +714,6 @@ fn draw_building(l: &Location, art: Option<&DtArt>, cam: &Camera) {
             let letter: String = l.kind.label().chars().take(1).collect();
             text_centered(&letter, base.x, base.y - h * 0.3, (h * 0.6).clamp(10.0, 30.0), BLACK);
         }
-        (w, h)
-    };
-    // A pennant in the owner's colour over castles, forts, towns and villages.
-    if matches!(l.kind, LocationKind::Castle | LocationKind::Fort | LocationKind::Town | LocationKind::Village) {
-        let (px, py) = (base.x - w * 0.3, base.y - h * 0.9);
-        let col = if l.owned() { faction_color(1) } else { faction_color(l.faction) };
-        draw_line(px, py, px, py + 16.0 * zoom, 2.0, BLACK);
-        draw_triangle(vec2(px, py), vec2(px + 12.0 * zoom, py + 4.0 * zoom), vec2(px, py + 8.0 * zoom), col);
     }
 }
 
