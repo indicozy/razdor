@@ -3,6 +3,16 @@
 Things noticed while playing Razdor, to look into. Newest first. Each note says which branch it
 was seen on and what to check.
 
+## 2026-10-06, main: РК3 → РК4 keeps the army and the items
+
+1. **"The move from the capital to the eastern province takes away your soldiers and all
+   items but the hero's own; now the army stayed (and the items would have, had I not sold
+   them)."** Done. The hand-over (0x4b5b64) reads the carry-over bytes 0x110–0x116 of the map
+   it has just loaded, the **next** one (events.md §12); Razdor read the old map's. РК3 has
+   `[1,1,1,1,1,1,1]`, РК4 `[1,1,1,1,1,0,0]`: no pack, no army. `Game::next_map` now hands
+   over everything and `Game::apply_carry_over` takes what the new map's bytes allow; a test
+   on the install's РК3 → РК4 checks it (`rk4_takes_neither_the_army_nor_the_pack_of_rk3`).
+
 ## 2026-10-06, main: abilities missing from the unit panel
 
 1. **"Not all abilities are marked: Wrath of God does not show on healers, nor custom

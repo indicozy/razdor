@@ -1054,7 +1054,9 @@ fn army_units(a: &Army) -> Vec<UnitRecord> {
 const AI_TARGET_NODES: usize = 4000;
 
 /// What the next map of a campaign starts with ([`Game::next_map`]): the hand-over of the
-/// original (0x4b5b64). A field is `None` when the scenario does not carry it over.
+/// original (0x4b5b64). It holds all the old map could hand over; the **next** map's header
+/// bytes choose what is taken ([`Game::apply_carry_over`], events.md §12). A field is `None`
+/// in a hand-over saved before that (which read the old map's bytes).
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NextMap {
     /// The map to load: the scenario's next-map name; after an opcode 15 branch its leading
@@ -1123,21 +1125,25 @@ impl Game {
             None if engine.next_map_name().trim().is_empty() => return None,
             None => engine.next_map_name().trim().to_string(),
         };
-        let carry = engine.carry_over().map(|b| b != 0);
+        Some(self.hand_over(name, branch))
+    }
+
+    /// All this game hands over to map `name`: the next map's header chooses what it takes.
+    fn hand_over(&self, name: String, branch: Option<(i16, i16)>) -> NextMap {
         // Every unit of the army loses its lasting spells at the hand-over.
         let unspelled = |u: &Unit| Unit { spells: [None; SPELL_SLOTS], ..u.clone() };
-        Some(NextMap {
+        NextMap {
             name,
             branch,
-            gold: carry[0].then_some(self.gold),
-            mana: carry[1].then_some(self.mana),
-            fame: carry[2],
+            gold: Some(self.gold),
+            mana: Some(self.mana),
+            fame: true,
             hero: unspelled(self.hero()),
-            spells: carry[3].then(|| self.spells.clone()),
-            hero_items: carry[4],
-            inventory: carry[5].then(|| self.pack.clone()),
-            army: carry[6].then(|| self.squad.iter().skip(1).map(unspelled).collect()),
-            flags: engine.flag_string(),
+            spells: Some(self.spells.clone()),
+            hero_items: true,
+            inventory: Some(self.pack.clone()),
+            army: Some(self.squad.iter().skip(1).map(unspelled).collect()),
+            flags: self.script().map(|e| e.flag_string()).unwrap_or_default(),
             class: match self.archetype {
                 2 => HeroClass::Archmage,
                 3 => HeroClass::Ranger,
@@ -1145,7 +1151,7 @@ impl Game {
             },
             hero_name: self.hero_name.clone(),
             journal: self.journal.clone(),
-        })
+        }
     }
 
     /// The next map of a campaign, started with what the last one carries over
@@ -1195,6 +1201,15 @@ impl Game {
     pub fn apply_carry_over(&mut self, prev: &NextMap) {
         let c = self.content.clone();
         let now = self.clock.total_minutes() as u64;
+        // This (the next) map's header bytes say what is taken (0x4b5b64 reads the map it
+        // has just loaded): РК4 takes neither the pack nor the army of РК3.
+        let carry = self.script.as_ref().map_or([1; 7], |e| e.carry_over()).map(|b| b != 0);
+        let gold = prev.gold.filter(|_| carry[0]);
+        let mana = prev.mana.filter(|_| carry[1]);
+        let spells = prev.spells.as_ref().filter(|_| carry[3]);
+        let hero_items = prev.hero_items && carry[4];
+        let inventory = prev.inventory.as_ref().filter(|_| carry[5]);
+        let army = prev.army.as_ref().filter(|_| carry[6]);
         if let Some(engine) = self.script.as_mut() {
             engine.set_flag_string(&prev.flags);
         }
@@ -1209,27 +1224,27 @@ impl Game {
             hero.def = self.squad[0].def;
         }
         // With the old army he keeps his place among it; else he leads this map's preset.
-        if prev.army.is_none() {
+        if army.is_none() {
             hero.slot = slot;
         }
         self.squad[0] = hero;
-        if let Some(g) = prev.gold {
+        if let Some(g) = gold {
             self.gold = g;
         }
-        if let Some(m) = prev.mana {
+        if let Some(m) = mana {
             self.mana = m;
         }
-        match &prev.spells {
+        match spells {
             Some(book) => self.spells = book.clone(),
             None => (self.squad[0].level, self.squad[0].xp) = (1, 0),
         }
-        if !prev.hero_items {
+        if !hero_items {
             self.squad[0].items = [None; crate::rules::items::SLOTS];
         }
-        if let Some(pack) = &prev.inventory {
+        if let Some(pack) = inventory {
             self.pack = pack.clone();
         }
-        if let Some(army) = &prev.army {
+        if let Some(army) = army {
             self.squad.truncate(1);
             for u in army.iter().filter(|u| u.alive()) {
                 let mut u = u.clone();
@@ -2236,7 +2251,10 @@ mod tests {
             hero_name: None,
             journal: crate::rules::journal::History::default(),
         };
-        let mut fresh = start(&world(vec![]));
+        // The next map's header takes it all.
+        let mut all = world(vec![]);
+        all.header.carry_over = [1; 7];
+        let mut fresh = start(&all);
         fresh.pack = vec![ItemId(3)];
         let hp = g.squad[0].hp;
         fresh.apply_carry_over(&next);
@@ -2249,15 +2267,18 @@ mod tests {
         assert_eq!(fresh.squad.len(), 2, "the old army replaces the preset's; its dead are dropped");
         assert_eq!(fresh.squad[1].level, 3, "the army keeps its levels");
         assert_eq!(fresh.pack, vec![ItemId(7)], "the old pack replaces the new one");
-        // Without the bytes: level 1 with no XP and this map's book, no worn items, this
-        // map's pack and preset army behind the old hero.
+        // Without the next map's bytes (РК4 has no pack and no army): level 1 with no XP and
+        // this map's book, no worn items, this map's pack and preset army behind the old
+        // hero, whatever the old map offered.
         let mut again = start(&world(vec![]));
         again.pack = vec![ItemId(3)];
         let book = again.spells.clone();
         let preset = again.squad.len();
-        again.apply_carry_over(&NextMap { spells: None, hero_items: false, army: None, inventory: None, gold: None, mana: None, ..next });
+        let gold = again.gold;
+        again.apply_carry_over(&next);
         assert_eq!((again.squad[0].level, again.squad[0].xp), (1, 0));
         assert_eq!((again.spells.clone(), again.squad[0].items), (book, [None; 4]));
+        assert_eq!((again.gold, again.pack.clone()), (gold, vec![ItemId(3)]));
         assert_eq!((again.squad.len(), again.pack.clone()), (preset, vec![ItemId(3)]));
     }
 
@@ -2338,6 +2359,7 @@ mod tests {
         reward.results.gold = 5;
         let mut s2 = world(vec![died, reward]);
         s2.header.defeat_event = 1;
+        s2.header.carry_over = [1; 7];
         s2.named_characters = s.named_characters.clone();
         let mut g2 = Game::from_campaign(Arc::new(content()), &s2, &next);
         assert_eq!(fired(&g2.drain_events()), vec![2], "the herald came along; the band's flag holds");
@@ -2364,6 +2386,34 @@ mod tests {
         assert_eq!((fresh.carried.is_none(), fresh.archetype, fresh.squad.len()), (true, 2, 2));
     }
 
+    /// The install's РК3 → РК4: РК4's header takes neither the pack nor the army (events.md
+    /// §12: the next map's bytes 0x110–0x116), so the hero arrives with РК4's preset troops
+    /// and pack, his own worn items still on him.
+    #[test]
+    fn rk4_takes_neither_the_army_nor_the_pack_of_rk3() {
+        let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+        let dt = crate::dt::install::DtInstall::load(std::path::Path::new(&dir)).expect("install loads");
+        let load = |prefix: &str| dt.maps.iter().find(|m| m.name.starts_with(prefix)).expect("map present").load().unwrap();
+        let (rk3, rk4) = (load("РК3"), load("РК4"));
+        assert_eq!(rk4.header.carry_over, [1, 1, 1, 1, 1, 0, 0]);
+        let content = Arc::new(crate::rules::content::Content::from_dt(&dt));
+        let mut g = Game::from_scenario(content.clone(), &rk3, HeroClass::Knight);
+        g.pack = vec![ItemId(content.items[0].id)];
+        g.squad[0].items[0] = Some(ItemId(content.items[0].id));
+        g.gold = 1234;
+        // A soldier hired on РК3.
+        let soldier = UnitId(content.units[10].id);
+        let free = content.formation.new_unit_slot(&g.squad.iter().map(|u| u.slot).collect::<Vec<_>>()).unwrap();
+        g.squad.push(Unit::new(&content, soldier, free));
+        let next = g.hand_over("РК4".into(), None);
+        let preset = Game::from_scenario(content.clone(), &rk4, HeroClass::Knight);
+        let g4 = Game::from_campaign(content, &rk4, &next);
+        assert_eq!(g4.squad.len(), preset.squad.len(), "РК4's own preset army");
+        assert_eq!(g4.pack, preset.pack, "РК4's own pack");
+        assert_eq!(g4.gold, 1234, "byte 0: the gold");
+        assert_eq!(g4.squad[0].items[0], g.squad[0].items[0], "byte 4: his worn items");
+    }
+
     #[test]
     fn next_map_after_a_campaign_victory() {
         let mut branch = op(15, 3, 2, 0);
@@ -2384,11 +2434,12 @@ mod tests {
         assert_eq!((army[0].spells, army[0].drain, next.hero.drain), ([None; SPELL_SLOTS], 20, 36));
         assert_eq!(next.name, "3-2 Road");
         assert_eq!(next.branch, Some((3, 2)));
-        assert_eq!((next.gold, next.mana, next.fame), (Some(100), None, false));
+        // The hand-over offers everything; the next map's bytes choose (events.md §12).
+        assert_eq!((next.gold, next.mana), (Some(100), Some(g.mana)));
         assert_eq!((next.hero.level, next.hero.xp), (1, 0));
         assert_eq!(army.len(), 1);
-        assert!(next.inventory.is_some() && !next.hero_items);
-        assert_eq!(next.spells, Some(g.spells.clone()), "byte 3: the book goes with the level");
+        assert!(next.inventory.is_some() && next.hero_items);
+        assert_eq!(next.spells, Some(g.spells.clone()));
 
         // No branch: the scenario's next map; none before a victory.
         let mut win = ev(EventKind::Global);
@@ -2399,7 +2450,7 @@ mod tests {
         let mut g = start(&s);
         assert_eq!(g.next_map(), None);
         g.wait(4);
-        assert_eq!(g.next_map().map(|n| (n.name, n.gold, n.army)), Some(("Road".to_string(), None, None)));
+        assert_eq!(g.next_map().map(|n| n.name), Some("Road".to_string()));
         assert_eq!(branch_name("Road", (4, 1)), "4-1");
         assert_eq!(branch_name("12-3.DTm", (4, 1)), "4-1.DTm");
     }

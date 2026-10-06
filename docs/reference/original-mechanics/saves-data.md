@@ -620,6 +620,7 @@ id, army occupant, two transient mark bytes, the anchor cell index.
 | Battle autosave name | Matches: the army's or building's name cut at the first `#`, trailing spaces trimmed (no leader-name fallback) | the same | `save::autosave_foe` |
 | Restart | Matches: a campaign map restarts from what it was handed over (kept in saves), a new-game map from its preset in the starting class | the restart snapshot of §15 | `Game::restart` |
 | Carry-over gold | Matches: set to the old amount | set to the old amount, not added | `Game::apply_carry_over` |
+| Carry-over bytes | Matches: the next map's header bytes 0x110–0x116 choose what is taken (until 0.3.10 Razdor read the old map's, so РК3 → РК4 kept the army and pack) | the map just loaded (the next one) | `Game::apply_carry_over` |
 | Play options | Matches: `OptValue9`/`10`/`11` and `[Tutorial] Completed` on when they read 1 (loosely); `OptValue11` picks the 6- or 4-wide front row, and a loaded game keeps the width it was saved with, which holds for the rest of the session (next new game, restart, campaign map) | flags read at start, 1 = on; the wide row 6 or 4 per row; a save load sets the row width for the session | `dt/install.rs` `PlayOptions`, `Content::from_dt`, `save::restore` |
 
 ## Unknowns
