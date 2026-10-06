@@ -871,7 +871,7 @@ fn draw_hero(game: &Game, assets: &Assets, art: Option<&DtArt>, cam: &Camera) {
         Some(HeroClass::Ranger) => 3,
         _ => 1,
     };
-    let next = game.path.first().map(|&t| game.world.map.center(t));
+    let next = game.display_heading();
     let c = cam.to_screen(game.display_pos());
     draw_circle(c.x, c.y + 4.0, 9.0 * cam.scale / PX + 3.0, Color::new(0.3, 0.9, 0.4, 0.35));
     if game.aboard() {
@@ -1555,7 +1555,7 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     // Time stands still while a window is open.
     let mut events = game.drain_events();
     if !input_blocked() && events.is_empty() {
-        events = game.tick(get_frame_time().min(0.1));
+        events = game.tick_shown(get_frame_time().min(0.1));
     }
     let mut next = handle_events(game, events, message, dialogs).or(reopened);
 

@@ -748,9 +748,10 @@ impl App {
         }
         self.fly_from_building(next.is_some());
         // A fight decided on the map or in a building begins once the messages of that moment
-        // are read (the original shows a meeting's words over the map, then the battle).
+        // are read (the original shows a meeting's words over the map, then the battle), and
+        // on the map once the step that brought it has played: the attacker is seen arriving.
         if next.is_none() && self.dialogs.is_empty() && matches!(self.screen, Screen::WorldMap | Screen::Building(_)) {
-            if let Some(game) = self.game.as_mut().filter(|g| g.foe.is_some()) {
+            if let Some(game) = self.game.as_mut().filter(|g| g.foe.is_some() && !(matches!(self.screen, Screen::WorldMap) && g.step_playing())) {
                 next = Some(saves::battle(game));
             }
         }

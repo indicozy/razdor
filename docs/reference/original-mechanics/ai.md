@@ -654,7 +654,8 @@ or a greeting) is dropped, where the original would open a battle or a meeting w
 beaten army; the Community's mana bill taken from the player's mana at every AI noon, and its
 short-mana flag (economy.md §1); the frame effects of the step clock (world.md §5: a step
 lost to coarse frames, two arrivals sharing a frame); an AI army's attack on the hero comes
-after his whole step, where the original stops him in the frame of the arrival. An AI
+after his whole step, where the original stops him in the frame of the arrival (on screen
+the step's window now plays out first, the attacker seen arriving, `Game::tick_shown`). An AI
 army's noon takes its castles'
 and forts' gold stock, which Razdor's economy grows only for villages so far (economy.md §3,
 "Stock growth").

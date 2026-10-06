@@ -40,6 +40,11 @@ old id, and their versions give both.
   tutorials' headings), the others are justified paragraphs with an indent, and blank lines
   stay. The tutorial offer and the restart and delete-save questions read them too. The
   journal still shows them as typed, as the original's does.
+- **An attacking army no longer comes out of nowhere:** the other armies' steps were drawn
+  one step after the hero's, and an attack opened the battle before the attacker's last
+  steps were drawn, so it seemed to jump in from far away. The hero and the armies now move
+  together, and the battle opens once the attacker is seen arriving next to the hero, as in
+  the original. Walking into an army no longer slides the hero towards it first.
 
 ### Changed
 - **A building is guarded only by an army standing in it, as in the original:** stepping onto

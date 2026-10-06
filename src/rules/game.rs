@@ -395,6 +395,16 @@ pub struct Game {
     /// Real seconds since the world last moved, for drawing armies between cells.
     #[serde(skip)]
     pub(crate) since_step: f32,
+    /// The hero's last step for drawing: from and to (map points), played over the same
+    /// window as the armies' walks of that step ([`Game::display_pos`]).
+    #[serde(skip)]
+    pub(crate) hero_glide: Option<((f32, f32), (f32, f32))>,
+    /// Stretches of time so far (a hero's step, a wait tick): which window an event came in.
+    #[serde(skip)]
+    pub(crate) stretches: u64,
+    /// The events of a stretch whose window still plays on screen ([`Game::tick_shown`]).
+    #[serde(skip)]
+    pub(crate) held: Vec<(u64, Event)>,
     /// Game minutes of the last stretch (a hero's step or a wait tick), for drawing: the
     /// armies' walk frames follow the game time inside it ([`Game::army_walk_frame`]).
     #[serde(skip)]
@@ -544,6 +554,9 @@ impl Game {
             reading: None,
             queued_casts: Vec::new(),
             since_step: 0.0,
+            hero_glide: None,
+            stretches: 0,
+            held: Vec::new(),
             stretch_minutes: 0.0,
             snap_due: false,
             snapped: false,
@@ -1104,16 +1117,33 @@ impl Game {
         self.wait_ticks > 0 && self.reading.is_none()
     }
 
-    /// Where to draw the hero: between his cell and the next as the step plays.
+    /// Where to draw the hero: his last step plays over the window after it was taken, the
+    /// same window the armies' steps of that time play in ([`Game::army_display_pos`]), so
+    /// the hero and the armies move together as in the original (world.md §2.2).
     pub fn display_pos(&self) -> (f32, f32) {
-        match self.path.first() {
-            Some(&next) => {
-                let k = (self.step_elapsed / STEP_SECONDS).clamp(0.0, 1.0);
-                let b = self.world.map.center(next);
-                (self.pos.0 + (b.0 - self.pos.0) * k, self.pos.1 + (b.1 - self.pos.1) * k)
+        match self.hero_glide {
+            // Moved otherwise since (a battle, an event, a ship): drawn where he is.
+            Some((a, b)) if b == self.pos && self.since_step < STEP_SECONDS => {
+                let k = (self.since_step / STEP_SECONDS).clamp(0.0, 1.0);
+                (a.0 + (b.0 - a.0) * k, a.1 + (b.1 - a.1) * k)
             }
-            None => self.pos,
+            _ => self.pos,
         }
+    }
+
+    /// Where the hero is heading on screen: the cell of the step being drawn, else the next
+    /// of his route.
+    pub fn display_heading(&self) -> Option<(f32, f32)> {
+        match self.hero_glide {
+            Some((_, b)) if b == self.pos && self.since_step < STEP_SECONDS => Some(b),
+            _ => self.path.first().map(|&t| self.world.map.center(t)),
+        }
+    }
+
+    /// The last step's window is still playing on screen: what it brought (a battle, the
+    /// windows of its events) waits for its end, as the original's come at the step's end.
+    pub fn step_playing(&self) -> bool {
+        self.since_step < STEP_SECONDS && (self.hero_glide.is_some_and(|(_, b)| b == self.pos) || self.world.armies.iter().any(|a| !a.walk.minutes.is_empty() && a.walk.points.last() == Some(&a.pos)))
     }
 
     /// Where to draw army `a`: along the steps it took in the last step or wait tick, played
@@ -1141,6 +1171,20 @@ impl Game {
         Some(3 + tens.rem_euclid(4) as u32)
     }
 
+    /// [`Game::tick`] for the screen: the events of a step or wait tick come once its window
+    /// has played (the hero's and the armies' steps drawn to their cells), as the original's
+    /// come at the end of the step; an attacking army is seen arriving. The rules' order is
+    /// the same; only what the player sees waits.
+    pub fn tick_shown(&mut self, real_dt: f32) -> Vec<Event> {
+        let events = self.tick(real_dt);
+        let now = self.stretches;
+        self.held.extend(events.into_iter().map(|e| (now, e)));
+        let playing = self.step_playing();
+        let (out, keep): (Vec<_>, Vec<_>) = std::mem::take(&mut self.held).into_iter().partition(|&(w, _)| w < now || !playing);
+        self.held = keep;
+        out.into_iter().map(|(_, e)| e).collect()
+    }
+
     /// Advance the world by `real_dt` seconds (world.md §2): each hero step and each wait
     /// tick plays over [`STEP_SECONDS`]; the game time a step takes is its own cost. Time only
     /// flows while the party walks or waits.
@@ -1163,7 +1207,6 @@ impl Game {
         self.snapped = false;
         while self.step_elapsed >= STEP_SECONDS && (self.moving() || self.wait_ticks > 0) {
             self.step_elapsed -= STEP_SECONDS;
-            self.since_step = 0.0;
             let stepping = self.moving();
             let go = if stepping {
                 walked = true;
@@ -1277,7 +1320,9 @@ impl Game {
             self.land(from);
         }
         self.path.remove(0);
+        let was = self.pos;
         self.pos = self.world.map.center(next);
+        self.hero_glide = Some((was, self.pos));
         self.move_to_cell(from, next);
         self.look_around();
         // His facing stays the step's direction until the next one (0x4ae8e0).
@@ -1519,6 +1564,9 @@ impl Game {
     fn pass_time_as(&mut self, minutes: f32, slice: f32, events: &mut Vec<Event>) {
         let mut left = minutes.max(0.0);
         self.stretch_minutes = left;
+        // The new stretch plays from the start of a window.
+        self.since_step = 0.0;
+        self.stretches += 1;
         // A new stretch for drawing: the steps of this time play in the next window.
         for a in &mut self.world.armies {
             a.walk.points.clear();
@@ -3387,6 +3435,52 @@ mod tests {
         g.world.armies[0].patrol_radius = 0;
         g.wait(4);
         assert_eq!((g.world.armies[0].tile(&g.world.map), g.world.armies[0].budget), ((4, 2), 0.0));
+    }
+
+    #[test]
+    fn an_attack_is_shown_after_the_step_that_brought_it_has_played() {
+        // The original's armies walk while the hero's step plays and their attack comes at
+        // its end (0x4ade3c): on screen the step's window plays out, hero and attacker drawn
+        // onto their cells, before the attack's events (and the battle) come.
+        let mut g = with_walker(-2, (4, 2), vec![(3, 2), (2, 2), (1, 2)]);
+        g.world.armies[0].mind.scores.insert(ai::HERO, 1);
+        g.wait(2);
+        assert!(g.set_destination((2, 3)));
+        let mut set_at = None;
+        for frame in 0..1000 {
+            let events = g.tick_shown(0.01);
+            if g.foe.is_some() && set_at.is_none() {
+                set_at = Some(frame);
+                assert!(g.step_playing(), "the attack's step has its window to play");
+                assert!(events.is_empty(), "its events wait for it");
+            }
+            if events.contains(&Event::Encounter(0)) {
+                assert!(frame > set_at.unwrap(), "shown after the step");
+                assert!(!g.step_playing());
+                assert_eq!(g.display_pos(), g.pos, "the hero drawn on his cell");
+                let a = &g.world.armies[0];
+                assert_eq!(g.army_display_pos(a), a.pos, "the attacker drawn on its cell");
+                return;
+            }
+        }
+        panic!("no attack");
+    }
+
+    #[test]
+    fn the_hero_is_drawn_along_his_step_with_the_armies() {
+        // His step plays over the window after it was taken, from the cell he left.
+        let mut g = with_walker(-2, (20, 2), vec![]);
+        g.fog = Fog::disabled(g.world.map.w, g.world.map.h);
+        let start = g.pos;
+        assert!(g.set_destination((3, 2)));
+        g.tick(STEP_SECONDS);
+        assert_ne!(g.pos, start, "the first step is taken");
+        assert_eq!(g.display_pos(), start, "and drawn from where he stood");
+        g.since_step = STEP_SECONDS / 2.0;
+        let mid = g.display_pos();
+        assert!((mid.0 - (start.0 + g.pos.0) / 2.0).abs() < 1e-3 && (mid.1 - (start.1 + g.pos.1) / 2.0).abs() < 1e-3);
+        g.since_step = STEP_SECONDS;
+        assert_eq!(g.display_pos(), g.pos);
     }
 
     #[test]
