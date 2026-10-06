@@ -683,6 +683,12 @@ old id, and their versions give both.
 - The AI armies' battles among themselves, and the ones they imagine to choose their way,
   pick their targets as the original's do, including its slip of reading leftovers of an
   earlier battle: the same two armies can fight out differently as the game goes on.
+## 0.3.8 — 2026-10-06
+
+### Fixed
+- **The map no longer shakes during a wait:** since 0.3.5 every wait tick replayed the hero's
+  last step, and the view, which follows him, slid one cell and jumped back each half hour of
+  the wait. Thanks to the player who sent the video.
 
 ## 0.2.2 — 2026-10-01
 

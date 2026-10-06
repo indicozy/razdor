@@ -1330,12 +1330,14 @@ impl Game {
         self.path.remove(0);
         let was = self.pos;
         self.pos = self.world.map.center(next);
-        self.hero_glide = Some((was, self.pos));
         self.move_to_cell(from, next);
         self.look_around();
         // His facing stays the step's direction until the next one (0x4ae8e0).
         self.facing = Some((next.0 - from.0, next.1 - from.1));
         self.pass_time_walking(minutes, from, events);
+        // His step plays over the window its time opened (an event that moved him meanwhile
+        // drops it: drawn where he is).
+        self.hero_glide = Some((was, self.world.map.center(next)));
         if let Some(e) = self.ai_contact() {
             let attack = matches!(e, Event::Encounter(_));
             // The stop snaps the armies (0x4ad8a0) before an attack's events run, after a
@@ -1572,8 +1574,10 @@ impl Game {
     fn pass_time_as(&mut self, minutes: f32, slice: f32, events: &mut Vec<Event>) {
         let mut left = minutes.max(0.0);
         self.stretch_minutes = left;
-        // The new stretch plays from the start of a window.
+        // The new stretch plays from the start of a window; only a step of his own glides
+        // the hero ([`Game::hero_step`] sets it after), a wait tick does not replay the last.
         self.since_step = 0.0;
+        self.hero_glide = None;
         self.stretches += 1;
         // A new stretch for drawing: the steps of this time play in the next window.
         for a in &mut self.world.armies {
@@ -3483,6 +3487,21 @@ mod tests {
             }
         }
         panic!("no attack");
+    }
+
+    #[test]
+    fn a_wait_tick_does_not_replay_the_heros_last_step() {
+        // A wait's ticks restart the drawing window: the hero stays on his cell (the view
+        // follows him, so a replayed step shook the map every tick).
+        let mut g = with_walker(-2, (20, 2), vec![]);
+        g.fog = Fog::disabled(g.world.map.w, g.world.map.h);
+        assert!(g.set_destination((3, 2)));
+        walk_until_stopped(&mut g);
+        g.since_step = STEP_SECONDS * 2.0;
+        g.begin_wait(1);
+        g.tick(STEP_SECONDS);
+        assert!(g.since_step < STEP_SECONDS, "a tick ran");
+        assert_eq!(g.display_pos(), g.pos);
     }
 
     #[test]
