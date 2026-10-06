@@ -1759,6 +1759,25 @@ fn the_heros_starting_army_is_auto_arranged_at_the_map_load() {
 }
 
 #[test]
+fn garrisons_and_armies_are_auto_arranged_at_the_map_load_too() {
+    // saves-data.md §10.1 step 9: every garrison and army goes through the round trip, so a
+    // castle's shooters stand in the back row, not in front where adding them put them
+    // (Проклятое озеро's castles).
+    let mut s = map();
+    let mut castle = building(BuildingType::Castle, 10, 10, (2, 2));
+    castle.garrison[0] = troop(5, 0, 2);
+    castle.garrison[1] = troop(6, 0, 2);
+    s.buildings = vec![castle];
+    s.armies = vec![army(1, (30, 10), 4, ENEMY, 0, &[troop(5, 0, 2), troop(6, 0, 2)])];
+    let g = start(&s);
+    for troops in [&g.world.locations[0].garrison, &g.world.armies[0].troops] {
+        let rows = |kind: u32| troops.iter().filter(|t| t.unit == UnitId(kind)).map(|t| t.slot.row).collect::<Vec<_>>();
+        assert!(rows(5).iter().all(|&r| r == Row::Back), "{:?}", rows(5));
+        assert!(rows(6).iter().all(|&r| r == Row::Front), "{:?}", rows(6));
+    }
+}
+
+#[test]
 fn the_ruins_garrison_wears_the_ruins_goods_and_gives_them_back_as_loot() {
     // 0x4b2504 (0x4b554e): the ruins' first 5 goods go to their garrison, each to the unit
     // it helps most (0x4a273c), else into its pack; with no garrison units, all into the pack.

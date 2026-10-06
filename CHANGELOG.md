@@ -50,6 +50,10 @@ old id, and their versions give both.
   list left no room for its ability (Wrath of God on the priests and bishops of the Evolution
   mod), and long ability texts of mods were cut short. Now the text moves up over the figure
   to make room, and in battle the description gives way first.
+- **Garrisons and armies start in a sensible formation:** at a map's start the original
+  arranges every army and garrison as it does a side in battle. Razdor did it only for the
+  hero's army, so a castle's archers stood in front and its infantry in the reserve's edge
+  places (seen on Проклятое озеро).
 
 ### Changed
 - **A building is guarded only by an army standing in it, as in the original:** stepping onto

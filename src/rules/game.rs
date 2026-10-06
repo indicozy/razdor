@@ -707,13 +707,21 @@ impl Game {
     /// auto-arrange puts it, not where adding the units put it (reserve first, 0x495ce0).
     /// His building defence is still 0 then (he enters his cell after, 0x497c68). A campaign
     /// map's carried-over army brings its own formation back after it (0x4b5b64).
+    /// The map's armies and every garrison go through the same round trip (saves-data.md
+    /// §10.1 step 9), so a castle's archers do not start in front where adding put them.
     fn arrange_at_load(&mut self) {
         let player: Vec<(usize, &Unit)> = self.squad.iter().enumerate().filter(|(_, u)| u.alive()).collect();
-        let mut b = Battle::new(self.content.clone(), &player, &[], Team::Player);
-        b.auto_arrange(Team::Player);
-        let slots: Vec<(usize, Slot)> = b.fighters.iter().filter_map(|f| Some((f.squad_index?, f.slot))).collect();
-        for (i, s) in slots {
+        for (i, s) in arranged(&self.content, &player) {
             self.squad[i].slot = s;
+        }
+        let content = self.content.clone();
+        let troops = self.world.armies.iter_mut().map(|a| &mut a.troops).chain(self.world.locations.iter_mut().map(|l| &mut l.garrison));
+        for troops in troops {
+            let units: Vec<Unit> = troops.iter().map(|t| troop_unit(&content, t)).collect();
+            let side: Vec<(usize, &Unit)> = units.iter().enumerate().filter(|(k, _)| troops[*k].alive()).collect();
+            for (k, s) in arranged(&content, &side) {
+                troops[k].slot = s;
+            }
         }
     }
 
@@ -2284,6 +2292,17 @@ pub(crate) fn archetype_of(hero: HeroClass) -> u8 {
         HeroClass::Archmage => 2,
         HeroClass::Ranger => 3,
     }
+}
+
+/// The cells the original's auto-arrange (483b3c) gives `side`, by their indices: the side
+/// put through a battle and back (0x49855c, 0x4988c0).
+fn arranged(content: &Arc<Content>, side: &[(usize, &Unit)]) -> Vec<(usize, Slot)> {
+    if side.is_empty() {
+        return Vec::new();
+    }
+    let mut b = Battle::new(content.clone(), side, &[], Team::Player);
+    b.auto_arrange(Team::Player);
+    b.fighters.iter().filter_map(|f| Some((f.squad_index?, f.slot))).collect()
 }
 
 /// The unit of an army or garrison troop: its level and XP, its worn items, its pay and
