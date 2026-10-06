@@ -92,6 +92,27 @@ fn hero_trait(h: HeroClass) -> (String, String) {
     (format!("HeroBonus{n}"), chrome::ui_text("NewHero", &format!("Bonus{n}")).unwrap_or_else(|| english.to_string()))
 }
 
+/// The traits the panel lists: the hero's class, the unit's bonuses (its items' too), the
+/// back row's and the building's.
+fn traits_of(s: &Sheet) -> Vec<(String, String)> {
+    let mut traits: Vec<(String, String)> = s.start.bonuses.iter().map(trait_line).collect();
+    if let Some(h) = s.hero {
+        traits.insert(0, hero_trait(h));
+    }
+    if s.back_row {
+        traits.push(("Bonus-2Row".into(), chrome::ui_text("Army", "Hint1").unwrap_or_else(|| tr("In the second row the unit gets a bonus to its ranged defence!").into())));
+    }
+    if s.building > 0 {
+        traits.push(("Bonus-InCastle".into(), chrome::ui_text("Army", "Hint2").unwrap_or_else(|| tr("In its own building the unit gets a bonus to all defences!").into())));
+    }
+    traits
+}
+
+/// The height a trait of `lines` wrapped lines takes in the list (as `draw` lays it out).
+fn trait_height(lines: usize, slh: f32, k: f32) -> f32 {
+    5.0 * k + slh * lines as f32 + if lines == 1 { slh * 0.6 } else { 0.0 }
+}
+
 /// A stat line: label, value, colour.
 type Line = (String, String, Color);
 
@@ -352,7 +373,18 @@ pub fn draw(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: bool,
     // gold down to about a quarter, then (115, 62, 0)); the figure's lower part shows through.
     // In battle the name and the stats run over the figure's lower part; on the army screen
     // they stand under the figure.
-    let name_y = if s.battle { r.y + r.h * 0.375 } else { fig_bottom + 6.0 * k };
+    let natural_y = if s.battle { r.y + r.h * 0.375 } else { fig_bottom + 6.0 * k };
+    // The traits always get their room: when the name, the stats and the traits do not fit
+    // under the figure, the text starts higher, over the figure (a caster's long stat list
+    // with a trait, a mod's long trait texts).
+    let traits = traits_of(s);
+    let (small, slh, icon) = ((12.0 * k).round(), 13.2 * k, 24.0 * k);
+    let trait_w = r.w - 44.0 * k - icon;
+    let traits_h: f32 = traits.iter().map(|(_, line)| trait_height(wrap(line, trait_w, small).len(), slh, k)).sum();
+    let lh = 13.6 * k;
+    let text_h = 17.0 * k + lh * (1 + stat_lines(content, s).len() + s.status.len()) as f32 + 6.0 * k + traits_h;
+    let bottom = r.y + r.h - 6.0 * k;
+    let name_y = natural_y.min(bottom - text_h).max(r.y + 0.25 * r.h);
     // From 50 px above the name the parchment turns dark brown (both screens of the video:
     // light gold, then (115, 62, 0)); the figure shows through.
     let (fade0, fade1) = (name_y - 50.0 * k, name_y - 15.0 * k);
@@ -397,7 +429,6 @@ pub fn draw(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: bool,
     super::dt_font::with_face(super::dt_font::Face::Title, || shadow_centered(s.name, r.x + r.w / 2.0, y, name_size, CREAM));
     y += 17.0 * k;
     let size = (12.0 * k).round();
-    let lh = 13.6 * k;
     // Level and experience on one line.
     shadow_text(&razdor::trf!("Level {level}", level = s.level), x0, y, size, CREAM);
     shadow_right(&razdor::trf!("XP {xp} / {need}", xp = s.xp, need = s.need), x1, y, size, CREAM);
@@ -413,38 +444,26 @@ pub fn draw(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: bool,
         shadow_text(line, x0, y, super::widgets::fit_size(line, x1 - x0, size), *color);
         y += lh;
     }
-    // The description, then the traits with their icons.
+    // The description in what the traits leave, then the traits with their icons.
     y += 6.0 * k;
-    let bottom = r.y + r.h - 6.0 * k;
     // The battle's panel shows the unit's description; the army screen only its traits.
     let desc = if s.battle { content.unit(s.kind).description.as_str() } else { "" };
-    let small = (12.0 * k).round();
-    let slh = 13.2 * k;
-    for line in wrap(desc, r.w - 44.0 * k, small) {
-        if y > bottom {
-            return clicked;
-        }
+    let desc_bottom = bottom - traits_h;
+    let desc_lines = wrap(desc, r.w - 44.0 * k, small);
+    let fits = ((desc_bottom - y) / slh).floor().max(0.0) as usize;
+    for (i, line) in desc_lines.iter().take(fits).enumerate() {
+        // A description cut short ends in an ellipsis.
+        let line = if i + 1 == fits && fits < desc_lines.len() { format!("{}…", line.trim_end()) } else { line.clone() };
         shadow_text(&line, x0 - 4.0 * k, y, small, CREAM);
         y += slh;
     }
-    let mut traits: Vec<(String, String)> = s.start.bonuses.iter().map(trait_line).collect();
-    if let Some(h) = s.hero {
-        traits.insert(0, hero_trait(h));
-    }
-    if s.back_row {
-        traits.push(("Bonus-2Row".into(), chrome::ui_text("Army", "Hint1").unwrap_or_else(|| tr("In the second row the unit gets a bonus to its ranged defence!").into())));
-    }
-    if s.building > 0 {
-        traits.push(("Bonus-InCastle".into(), chrome::ui_text("Army", "Hint2").unwrap_or_else(|| tr("In its own building the unit gets a bonus to all defences!").into())));
-    }
-    let icon = 24.0 * k;
     for (art, line) in traits {
         y += 5.0 * k;
-        if y + slh > bottom {
+        if y + slh > bottom + slh * 0.5 {
             break;
         }
         chrome::trait_icon(&art, x0 - 8.0 * k, y - slh + 2.0 * k, icon);
-        let lines = wrap(&line, r.w - 44.0 * k - icon, small);
+        let lines = wrap(&line, trait_w, small);
         for (i, l) in lines.iter().enumerate() {
             if y > bottom {
                 break;

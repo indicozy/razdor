@@ -45,6 +45,11 @@ old id, and their versions give both.
   steps were drawn, so it seemed to jump in from far away. The hero and the armies now move
   together, and the battle opens once the attacker is seen arriving next to the hero, as in
   the original. Walking into an army no longer slides the hero towards it first.
+- **A unit's abilities are always shown on its panel:** they came last, under the stats and
+  the description, and were cut off at the panel's bottom. A healer's or caster's long stat
+  list left no room for its ability (Wrath of God on the priests and bishops of the Evolution
+  mod), and long ability texts of mods were cut short. Now the text moves up over the figure
+  to make room, and in battle the description gives way first.
 
 ### Changed
 - **A building is guarded only by an army standing in it, as in the original:** stepping onto

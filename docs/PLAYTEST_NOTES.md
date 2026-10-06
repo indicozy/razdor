@@ -3,6 +3,17 @@
 Things noticed while playing Razdor, to look into. Newest first. Each note says which branch it
 was seen on and what to check.
 
+## 2026-10-06, main: abilities missing from the unit panel
+
+1. **"Not all abilities are marked: Wrath of God does not show on healers, nor custom
+   abilities of mods."** Done. Seen with the Community Update Evolution install, whose
+   priests and bishops (units 32, 33) have `Bonus=GodAnger`: the unit panel drew the traits
+   last and cut them at its bottom, and a caster's stat list (the magic lines) left one or
+   two lines of room, none at smaller windows. The panel now measures the traits first and
+   starts the name and stats higher, over the figure, when they would not fit; in battle the
+   description takes only what is left (`unit_sheet::draw`). A token the loader does not
+   know is no bonus in the original (0x48efd0) and stays unshown.
+
 ## 2026-10-06, main: an attacker comes out of nowhere
 
 1. **"Sometimes you walk and the battle opens: an enemy ran into you, but while you walked he
