@@ -58,6 +58,10 @@ old id, and their versions give both.
   arranges every army and garrison as it does a side in battle. Razdor did it only for the
   hero's army, so a castle's archers stood in front and its infantry in the reserve's edge
   places (seen on Проклятое озеро).
+- **A building's tooltip shows its garrison whoever holds it:** holding the right button on
+  your own or a friendly castle or fort now shows its defenders (your units left there
+  too), as the original does; before, only a hostile building showed them. As in the
+  original, ruins say they are guarded but hide by whom, and towns show none.
 
 ### Changed
 - **A building is guarded only by an army standing in it, as in the original:** stepping onto
