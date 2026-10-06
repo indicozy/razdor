@@ -12,6 +12,10 @@ old id, and their versions give both.
 
 ## Unreleased
 
+### Added
+- **A close button on the battle window,** as in the original: the red cross in its title bar
+  opens the leave-battle window, as Esc does.
+
 ### Fixed
 - **Hills lie under everything, as in the original:** the green and rocky hills are drawn
   before the trees, mountains, buildings and armies, and the route over them, so nothing
