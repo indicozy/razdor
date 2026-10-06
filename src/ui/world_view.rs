@@ -45,6 +45,14 @@ const HERO_SAIL: Color = Color::new(0.35, 0.8, 0.45, 1.0);
 fn bar_h() -> f32 {
     super::chrome::bar_height()
 }
+/// The map view: the window above the bottom bar.
+fn map_area() -> Rect {
+    map_area_in(screen_width(), screen_height(), bar_h())
+}
+/// Never less than nothing: a minimized window on Windows is 1 pixel high, under the bar.
+fn map_area_in(w: f32, h: f32, bar: f32) -> Rect {
+    Rect::new(0.0, 0.0, w.max(0.0), (h - bar).max(0.0))
+}
 use super::dialog::MANA;
 
 /// World-map view state kept between frames.
@@ -434,7 +442,7 @@ impl Camera {
     /// Centred on world position `at` (clamped to the map), in the map view left of the
     /// side panel.
     fn looking_at(game: &Game, zoom: f32, at: (f32, f32)) -> Camera {
-        Camera::looking_in(game, zoom, at, Rect::new(0.0, 0.0, screen_width(), screen_height() - bar_h()))
+        Camera::looking_in(game, zoom, at, map_area())
     }
 
     fn looking_in(game: &Game, zoom: f32, at: (f32, f32), view: Rect) -> Camera {
@@ -1293,7 +1301,7 @@ pub(super) fn handle_events(game: &mut Game, events: Vec<Event>, message: &mut O
 /// interactive, with the bar's buttons greyed (`lit`: the open screen's button).
 pub fn backdrop_lit(game: &Game, assets: &Assets, lit: Option<BarButton>) {
     clear_background(rgb(10, 12, 10));
-    let full = Rect::new(0.0, 0.0, screen_width(), screen_height() - bar_h());
+    let full = map_area();
     let cam = Camera::looking_in(game, 1.0, game.display_pos(), full);
     draw_world(game, assets, &cam, None);
     cam.draw_fog(game);
@@ -1310,7 +1318,7 @@ pub fn backdrop(game: &Game, assets: &Assets) {
 /// the screen it opens (the lit one, or the map button, closes the window).
 pub fn window_backdrop(game: &Game, assets: &Assets, lit: Option<BarButton>) -> Option<Screen> {
     clear_background(rgb(10, 12, 10));
-    let full = Rect::new(0.0, 0.0, screen_width(), screen_height() - bar_h());
+    let full = map_area();
     let cam = Camera::looking_in(game, 1.0, game.display_pos(), full);
     draw_world(game, assets, &cam, None);
     cam.draw_fog(game);
@@ -1759,6 +1767,15 @@ mod tests {
         assert_eq!(scroll_step(0, 5.0), (2.0, 2.0));
         // F = 1.25 at 50.
         assert_eq!(scroll_step(50, 10.0), (8.0, 6.0));
+    }
+
+    /// A minimized window (1 pixel high on Windows) left the map view −39 high, and the
+    /// fog's border panicked on `clamp` (crash report, 0.3.2).
+    #[test]
+    fn a_minimized_window_leaves_an_empty_map_view() {
+        let v = map_area_in(1920.0, 1.0, 40.0);
+        assert_eq!((v.w, v.h), (1920.0, 0.0));
+        assert_eq!(map_area_in(1280.0, 800.0, 40.0).h, 760.0);
     }
 
     #[test]
