@@ -14,6 +14,15 @@ old id, and their versions give both.
 
 ## 0.3.11 — 2026-10-07
 
+Commit `c0cbefb` (tag `v0.3.11`).
+
+SHA-256 of the released programs (built by the release pipeline):
+```
+cb7943334f2414e2442c3518b8e69d06aeacf56495aacbeeea4d32bc1aaf670c  razdor
+b815288c77dfa128c43170951d9ad97a3493fe60482f71a0f955a05251286a42  Razdor.exe
+632da85a3a9d7604d597d1e7f4b3e9c609158fc88da7831d863f20005cdcb8ca  razdor-macos
+```
+
 ### Fixed
 - **No crash on a meeting with an army that has just left the map:** the message of a
   meeting on the road ("… lets you pass") or of an attack looked the army up by its place in
