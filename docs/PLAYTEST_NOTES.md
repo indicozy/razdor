@@ -3,6 +3,22 @@
 Things noticed while playing Razdor, to look into. Newest first. Each note says which branch it
 was seen on and what to check.
 
+## 2026-10-07, main: crash after the courier's meeting (0.3.10)
+
+1. **"The game crashes"** (Другой берег, Evolution install, Windows build of 0.3.10): `index
+   out of bounds: the len is 20 but the index is 20` at `world_view.rs:1377`, right after
+   E108 «Встреча с посыльным» (meets army 49, deactivates it) and, as its window closed,
+   E162 «В Таверне» with a `MET` of an army no longer on the map. The crash is fixed:
+   `describe` looks the army up with `get` as `play_event` already did (test
+   `a_meeting_with_an_army_gone_from_the_map_is_told_without_its_name`). **Still open:**
+   how a `Met(i)` reached the screen after its army left. `meet_as` takes the index after
+   the events ran, so it should be fresh; suspects are `Game::held` (a stretch's events
+   wait for its step to play while later code changes the armies) and the events delivered
+   around an event window's close. Not reproduced from the player's save (taken an hour
+   earlier, day 5 2 h): walks to every cell within 20, waits of 1/4/8 h, the endless wait and
+   a chase of the courier all fire E108 cleanly, and E162 never fires (no tavern near). Worth
+   carrying armies by uid in `Event::Met`/`Encounter` if it shows up again.
+
 ## 2026-10-06, main: РК3 → РК4 keeps the army and the items
 
 1. **"The move from the capital to the eastern province takes away your soldiers and all
