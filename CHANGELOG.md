@@ -683,6 +683,15 @@ old id, and their versions give both.
 - The AI armies' battles among themselves, and the ones they imagine to choose their way,
   pick their targets as the original's do, including its slip of reading leftovers of an
   earlier battle: the same two armies can fight out differently as the game goes on.
+## 0.3.11 — 2026-10-07
+
+### Fixed
+- **No crash on a meeting with an army that has just left the map:** the message of a
+  meeting on the road ("… lets you pass") or of an attack looked the army up by its place in
+  the list of armies, and if an event had taken it off the map in between (as on Другой
+  берег, around the courier's meeting and a tavern's event), the game stopped with "index
+  out of bounds" (src\ui\world_view.rs:1377). Such a message now says "an army". Thanks to
+  the player who sent the log and the save.
 ## 0.3.10 — 2026-10-06
 
 ### Fixed

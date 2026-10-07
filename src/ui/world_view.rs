@@ -1246,13 +1246,15 @@ fn describe(event: &Event, game: &Game) -> Option<String> {
             let loc = &game.world.locations[*l];
             game.foe.is_some().then(|| trf!("{place}: the garrison bars your way!", place = loc.name))
         }
+        // The army may have left the map since the meeting was recorded (an event took it
+        // away): then it is "an army" (Razdor 0.3.10 crashed on such a meeting).
         Event::Encounter(i) => {
-            let a = &game.world.armies[*i];
-            Some(if a.name.is_empty() { tr("An army attacks!").to_string() } else { trf!("{name} attacks!", name = a.name) })
+            let name = game.world.armies.get(*i).map_or("", |a| a.name.as_str());
+            Some(if name.is_empty() { tr("An army attacks!").to_string() } else { trf!("{name} attacks!", name) })
         }
         Event::Met(i) => {
-            let a = &game.world.armies[*i];
-            let who = if a.name.is_empty() { tr("An army") } else { a.name.as_str() };
+            let name = game.world.armies.get(*i).map_or("", |a| a.name.as_str());
+            let who = if name.is_empty() { tr("An army") } else { name };
             Some(trf!("A meeting on the road: {who} lets you pass.", who))
         }
     }
@@ -1792,6 +1794,18 @@ mod tests {
         let v = map_area_in(1920.0, 1.0, 40.0);
         assert_eq!((v.w, v.h), (1920.0, 0.0));
         assert_eq!(map_area_in(1280.0, 800.0, 40.0).h, 760.0);
+    }
+
+    /// A meeting or an attack whose army has left the map by the time it is read (Razdor
+    /// 0.3.10 crashed on one): it speaks of "an army".
+    #[test]
+    fn a_meeting_with_an_army_gone_from_the_map_is_told_without_its_name() {
+        use std::sync::Arc;
+        use razdor::rules::content::Content;
+        let g = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        let gone = g.world.armies.len();
+        assert_eq!(describe(&Event::Met(gone), &g), Some(trf!("A meeting on the road: {who} lets you pass.", who = tr("An army"))));
+        assert_eq!(describe(&Event::Encounter(gone), &g), Some(tr("An army attacks!").to_string()));
     }
 
     #[test]
