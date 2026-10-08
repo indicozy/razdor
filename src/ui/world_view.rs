@@ -685,13 +685,32 @@ fn building_sprite_origin(l: &Location, w: f32, h: f32, cam: &Camera) -> Vec2 {
     corner + vec2(dx - w - 0.5, dy - h - raise - 0.5) * (cam.scale / PX)
 }
 
+/// Screen top-left of a map object's `w`×`h` px sprite, placed as the original places it: the
+/// loader 0x4ce30c puts the quad of classes 1–8 (hills, mountains, rocks) at `(48 − w, 33 − h)`
+/// from the cell's top-left, its bottom-right corner 16 px right of and 11 px below the cell's,
+/// and that of the plants at `(32 − w, 22 − h)`, less half a pixel; the renderer 0x4c8864 then
+/// moves the plants of classes 9–11 by their jitter ([`razdor::rules::rng::plant_offset`]).
+fn object_sprite_origin(o: &Decoration, w: f32, h: f32, cam: &Camera) -> Vec2 {
+    let (x, y) = cam.grid.center(o.tile);
+    let corner = cam.to_screen((x + 0.5, y + cam.grid.row_height() / 2.0));
+    let (dx, dy) = match o.class {
+        1..=8 => (16.0, 11.0),
+        object_class::TREES..=object_class::THICKET => {
+            let (dx, dy) = razdor::rules::rng::plant_offset(o.tile.0, o.tile.1, u16::from(o.class) << 8 | u16::from(o.sprite));
+            (dx as f32, dy as f32)
+        }
+        _ => (0.0, 0.0),
+    };
+    corner + vec2(dx - w - 0.5, dy - h - 0.5) * (cam.scale / PX)
+}
+
 fn draw_object(o: &Decoration, art: Option<&DtArt>, cam: &Camera) {
     let c = cam.cell_centre(o.tile);
     let base = vec2(c.x, c.y + cam.cell_size().y / 2.0);
     let zoom = cam.scale / PX;
     if let Some((atlas, r)) = art.and_then(|a| a.map_atlas()).and_then(|at| Some((at, at.decoration(o.class, o.sprite)?))) {
-        let (w, h) = (r.w * zoom, r.h * zoom);
-        draw_texture_ex(&atlas.texture, base.x - w / 2.0, base.y - h, WHITE, DrawTextureParams { dest_size: Some(vec2(w, h)), source: Some(r), ..Default::default() });
+        let at = object_sprite_origin(o, r.w, r.h, cam);
+        draw_texture_ex(&atlas.texture, at.x, at.y, WHITE, DrawTextureParams { dest_size: Some(vec2(r.w * zoom, r.h * zoom)), source: Some(r), ..Default::default() });
         return;
     }
     let s = cam.scale;
