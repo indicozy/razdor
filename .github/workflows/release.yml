@@ -1,7 +1,9 @@
 # The release pipeline: pushing a tag vX.Y.Z builds razdor (Linux) and Razdor.exe (Windows)
 # with scripts/dist.sh, razdor-macos (macOS, universal) with scripts/dist-macos.sh on a Mac,
 # and publishes them as the GitHub release vX.Y.Z, with that version's section of
-# CHANGELOG.md and the programs' SHA-256 as its notes.
+# CHANGELOG.md and the programs' SHA-256 as its notes. The game's update window
+# (src/update.rs) shows the notes up to their first `## ` heading: keep the pipeline's own
+# part (downloads, SHA-256) under such headings, after the changelog section.
 #
 #   1. Set `version` in Cargo.toml and turn "Unreleased" in CHANGELOG.md into
 #      "## X.Y.Z — date"; commit.
@@ -109,18 +111,18 @@ jobs:
           awk -v v="$version" '$0 ~ "^## "v" " {on=1; next} /^## / {on=0} on' CHANGELOG.md > notes.md
           {
             echo
-            echo "## Downloads"
-            echo "- **Razdor.exe**: Windows (x86_64). **razdor**: Linux (x86_64). **razdor-macos**: macOS 11+ (Apple Silicon and Intel). **SHA256SUMS**: their checksums."
-            echo "- Put the program next to \`DiscordTimes.exe\` in your game folder and start it."
-            echo "- macOS: the program is not signed by a developer; once downloaded, run \`xattr -d com.apple.quarantine razdor-macos\` (or right click → Open) before the first start."
+            echo "## Загрузка"
+            echo "- **Razdor.exe**: Windows (x86_64). **razdor**: Linux (x86_64). **razdor-macos**: macOS 11+ (Apple Silicon и Intel). **SHA256SUMS**: их контрольные суммы."
+            echo "- Положите программу рядом с \`DiscordTimes.exe\` в папке игры и запустите её. Дальше Раздор обновляется сам (Настройки → «Ещё…» → «Обновления»)."
+            echo "- macOS: программа не подписана разработчиком; после загрузки выполните \`xattr -d com.apple.quarantine razdor-macos\` (или правый щелчок → «Открыть») перед первым запуском."
             echo
             echo "## SHA-256"
-            echo "Built from commit ${GITHUB_SHA::7}."
+            echo "Собрано из коммита ${GITHUB_SHA::7}."
             echo '```'
             cat dist/SHA256SUMS
             echo '```'
             echo
-            echo "Provided as is, without warranty; see the Disclaimer in the README. MIT License."
+            echo "Предоставляется как есть, без каких-либо гарантий; см. раздел Disclaimer в README. Лицензия MIT."
           } >> notes.md
           cat notes.md
 

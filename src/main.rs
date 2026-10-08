@@ -15,9 +15,11 @@ use ui::App;
 /// until the process ends (the OS drops it on exit or crash). A second copy says so and quits
 /// before opening a window. `conf` runs before the window exists, so the check lives there.
 #[cfg(unix)]
+static LOCK: std::sync::OnceLock<std::fs::File> = std::sync::OnceLock::new();
+
+#[cfg(unix)]
 fn single_instance() {
     use std::os::unix::io::AsRawFd;
-    static LOCK: std::sync::OnceLock<std::fs::File> = std::sync::OnceLock::new();
     let dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir);
     let path = dir.join("razdor.lock");
     let Ok(file) = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path) else {
@@ -34,6 +36,16 @@ fn single_instance() {
 #[cfg(not(unix))]
 fn single_instance() {}
 
+/// Lets the next Razdor take the lock (the updated program started again as this one ends).
+fn release_instance() {
+    #[cfg(unix)]
+    if let Some(file) = LOCK.get() {
+        use std::os::unix::io::AsRawFd;
+        // SAFETY: flock on a descriptor we own; it only drops the advisory lock.
+        unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
+    }
+}
+
 fn conf() -> Conf {
     // `--replay <actions.jsonl>`: the diff test's script mode, played without a window
     // (`razdor::difftest`). `conf` runs before the window opens, so it ends here.
@@ -46,6 +58,8 @@ fn conf() -> Conf {
     // `RAZDOR_DT_DIR` and the other settings may come from a `.env` file.
     razdor::dt::install::load_dotenv();
     single_instance();
+    // Updates: the program's file, and what an update left behind.
+    razdor::update::init();
     let (window_width, window_height) = ui::snapshot::size().unwrap_or((1280, 800));
     razdor::diag::step(&format!("opening the window ({window_width}x{window_height}, OpenGL)"));
     // On Linux the WM_CLASS is how `ui::display` finds the game's own X11 window.
@@ -78,6 +92,9 @@ fn quit_after() -> Option<u64> {
 fn exit_now(app: &mut App) -> ! {
     razdor::diag::step("quitting");
     app.shutdown();
+    // "Restart now" after an update: the new program, once the lock is free.
+    release_instance();
+    razdor::update::restart();
     use std::io::Write;
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();

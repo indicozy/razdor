@@ -13,6 +13,7 @@ libc = "0.2"
 macroquad = "0.4"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["float_roundtrip"] }
+sha2 = "0.10.9"
 
 [features]
 default = ["audio"]

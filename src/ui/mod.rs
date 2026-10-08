@@ -29,6 +29,7 @@ pub mod story;
 pub mod terrain;
 pub mod unit_drag;
 pub mod unit_sheet;
+pub mod update_view;
 pub mod widgets;
 pub mod world_view;
 
@@ -173,6 +174,8 @@ pub struct App {
     lang: razdor::i18n::Lang,
     /// "Выход" was picked in the main menu: the process ends after this frame.
     pub quit: bool,
+    /// The update window (`update_view`) is over the screen this frame.
+    update_open: bool,
 }
 
 impl App {
@@ -216,6 +219,7 @@ impl App {
             console_held: false,
             lang: razdor::i18n::lang(),
             quit: false,
+            update_open: false,
         };
         app.follow_row_setting();
         app
@@ -521,7 +525,7 @@ impl App {
     fn guard(&self) -> hotkeys::Guard {
         hotkeys::Guard {
             typing: hotkeys::typing(self.place(), widgets::typing()) || self.console.open || self.console_held,
-            dialog: !self.dialogs.is_empty() || self.map_view.back_to.is_some(),
+            dialog: !self.dialogs.is_empty() || self.map_view.back_to.is_some() || self.update_open,
             game: self.game.is_some(),
             foe: self.game.as_ref().is_some_and(|g| g.foe.is_some()),
             endless: self.game.as_ref().is_some_and(|g| g.endless_waiting()),
@@ -700,6 +704,8 @@ impl App {
         }
         // The front row's width from the settings: the next new game uses it.
         self.follow_row_setting();
+        // Updates: the check at start, and "Always" putting a new release in place.
+        update_view::tick(self.audio.settings.updates);
         if matches!(self.screen, Screen::Editor) {
             self.editor_frame();
             return;
@@ -707,7 +713,18 @@ impl App {
         // The cheat console on the map and in battle: while it is open the screen takes no keys.
         let place = self.place();
         let console_here = matches!(place, hotkeys::Place::WorldMap | hotkeys::Place::Battle) && (self.game.is_some() || self.in_custom());
-        let (held, entered) = self.console.input(console_here && self.dialogs.is_empty() && !self.help && !widgets::typing());
+        // The update window opens only at a calm moment: nothing else on top, no battle due.
+        let calm = match &self.screen {
+            Screen::MainMenu | Screen::Options | Screen::Settings => true,
+            Screen::WorldMap => self.game.as_ref().is_some_and(|g| g.foe.is_none() && !g.step_playing()),
+            _ => false,
+        } && self.dialogs.is_empty()
+            && !self.help
+            && !self.console.open
+            && self.map_view.back_to.is_none()
+            && !widgets::popup_open();
+        self.update_open = update_view::wanted(self.audio.settings.updates, calm);
+        let (held, entered) = self.console.input(console_here && self.dialogs.is_empty() && !self.help && !self.update_open && !widgets::typing());
         self.console_held = held;
         if held {
             // A key the console took is not held for the map once it closes.
@@ -717,7 +734,7 @@ impl App {
         // A dialog or the key list on top: the screen below is drawn but takes no input.
         let guard = self.guard();
         // The flights of an event read in a building window take no input either.
-        widgets::set_input_blocked(!self.dialogs.is_empty() || self.help || held || self.map_view.back_to.is_some());
+        widgets::set_input_blocked(!self.dialogs.is_empty() || self.help || held || self.map_view.back_to.is_some() || self.update_open);
         let mut restart = false;
         let mut custom_round = false;
         let custom_content = self.custom_content();
@@ -907,6 +924,10 @@ impl App {
         }
         self.fly_from_building(next.is_some());
         self.console.draw();
+        // A newer release on offer, or how the update the player chose went.
+        if self.update_open && next.is_none() && update_view::frame(matches!(self.screen, Screen::MainMenu | Screen::Options)) {
+            self.quit = true;
+        }
         // A fight decided on the map or in a building begins once the messages of that moment
         // are read (the original shows a meeting's words over the map, then the battle), and
         // on the map once the step that brought it has played: the attacker is seen arriving.

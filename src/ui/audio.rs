@@ -174,11 +174,14 @@ pub struct Settings {
     /// Advanced: stepping onto a friendly army with no event for the meeting lets the hero
     /// pass (`Game::friends_let_pass`); off, the original's battle.
     pub friends_let_pass: bool,
+    /// Advanced: new releases are offered (`Ask`), put in place without a word (`Always`), or
+    /// not looked for (`Off`); `razdor::update`.
+    pub updates: razdor::update::Mode,
 }
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, expert_ai: None, wide_row: None, display: Default::default(), ui_scale: 0.0, minimap_size: None, friends_let_pass: false }
+        Settings { music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, expert_ai: None, wide_row: None, display: Default::default(), ui_scale: 0.0, minimap_size: None, friends_let_pass: false, updates: Default::default() }
     }
 }
 

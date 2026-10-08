@@ -232,6 +232,8 @@ pub fn frame() -> Option<Pick> {
     if link(&lang, screen_width() - 16.0 * k, y, true) {
         super::language::toggle();
     }
+    // An update put in place says so (an "Always" update has no window of its own).
+    super::update_view::title_line();
     // Esc quits the game at once, without a question, as in the original (0x4c8059).
     if key(KeyCode::Escape) {
         pick = Some(Pick::Exit);
@@ -364,7 +366,7 @@ pub fn open_advanced() {
 /// Razdor's advanced settings (the settings window's "Advanced…"): rules where Razdor can
 /// differ from the original. Returns true when closed.
 fn advanced_window(audio: &mut super::audio::Settings) -> bool {
-    let (inner, closed) = window(tr("Advanced settings"), 594.0, 260.0);
+    let (inner, closed) = window(tr("Advanced settings"), 594.0, 370.0);
     let k = chrome::k();
     let y = inner.y + 30.0 * k;
     chrome::shadow_text(tr("Stepping onto a friendly army"), inner.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
@@ -379,6 +381,36 @@ fn advanced_window(audio: &mut super::audio::Settings) -> bool {
     let hint = tr("With no event of the map for the meeting, the original opens a battle against a friendly army the hero steps onto; Razdor can let him pass instead.");
     for (i, line) in wrap(hint, inner.w - 48.0 * k, 12.0 * k).iter().enumerate() {
         chrome::shadow_text(line, inner.x + 24.0 * k, y + 56.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
+    }
+    // Updates from the GitHub releases (`razdor::update`): offered, put in place quietly, or
+    // not looked for; "Check now" asks at once and shows the answer.
+    let y = y + 110.0 * k;
+    chrome::shadow_text(tr("Updates"), inner.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
+    let ur = Rect::new(br.x, y, br.w, br.h);
+    let mode = match audio.updates {
+        razdor::update::Mode::Ask => tr("Ask"),
+        razdor::update::Mode::Always => tr("Always"),
+        razdor::update::Mode::Off => tr("Off"),
+    };
+    let over_mode = ur.contains(crate::ui::widgets::pointer().into()) && !input_blocked();
+    chrome::marble_button(ur, mode, true, over_mode);
+    if over_mode && clicked() {
+        cue(Cue::Button);
+        audio.updates = audio.updates.next();
+    }
+    let cr = Rect::new(ur.x, y + 40.0 * k, ur.w, ur.h);
+    let over_check = cr.contains(crate::ui::widgets::pointer().into()) && !input_blocked();
+    chrome::marble_button(cr, tr("Check now"), true, over_check);
+    if over_check && clicked() {
+        cue(Cue::Button);
+        super::update_view::check_by_hand();
+    }
+    let state = super::update_view::status_label();
+    let sw = measure(&state, 13.0 * k).width;
+    chrome::shadow_text(&state, cr.x - 16.0 * k - sw, cr.y + 19.0 * k, 13.0 * k, chrome::GOLD);
+    let hint = tr("Ask: a newer release is offered in a window. Always: it is downloaded and starts the next time. The check never holds up the game.");
+    for (i, line) in wrap(hint, inner.w - 48.0 * k, 12.0 * k).iter().enumerate() {
+        chrome::shadow_text(line, inner.x + 24.0 * k, y + 92.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
     }
     let ok = Rect::new(inner.x + inner.w - 120.0 * k, inner.y + inner.h - 44.0 * k, 96.0 * k, 28.0 * k);
     let over_ok = ok.contains(crate::ui::widgets::pointer().into()) && !input_blocked();

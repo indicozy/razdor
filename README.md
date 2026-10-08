@@ -229,6 +229,19 @@ start building when the map names one, and the class screen takes a name for him
 system font is found automatically, or set `RAZDOR_FONT=/path/to/font.ttf` (without one,
 names are transliterated).
 
+## Updates
+
+Razdor looks for a newer release on GitHub at each start, on a thread of its own: the game
+never waits for it, and nothing is shown unless a newer version is out (`src/update.rs`).
+Then, at a calm moment (the title screen, the settings, the map with no other window, never in
+a battle), a window offers it with its changes since your version: **Update** downloads it
+while you play, checks it against the release's `SHA256SUMS` and puts it in place of the
+program; it runs from the next start (the title screen also offers **Restart now**). Settings →
+"Advanced…" → "Updates": **Ask** (the default), **Always** (no window) or **Off**, and **Check
+now**. It needs the system's `curl` (Windows 10 and later, macOS and almost every Linux have
+one). A `cargo` build (under `target/`) never checks; `RAZDOR_UPDATE_AS=0.3.0` makes it count
+as that version, to try the whole update against the real releases.
+
 ## Keys
 Press **F1** on any screen for the list of its keys. No key acts while you type (the hero's
 name, a save name, an editor field) or while a dialog or question is open (there Esc and
