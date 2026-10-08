@@ -234,7 +234,8 @@ names are transliterated).
 Razdor looks for a newer release on GitHub at each start, on a thread of its own: the game
 never waits for it, and nothing is shown unless a newer version is out (`src/update.rs`).
 Then, at a calm moment (the title screen, the settings, the map with no other window, never in
-a battle), a window offers it with its changes since your version: **Update** downloads it
+a battle), a window offers it with its changes since your version (**Always update** does the
+same and switches the setting to Always): **Update** downloads it
 while you play, checks it against the release's `SHA256SUMS` and puts it in place of the
 program; it runs from the next start (the title screen also offers **Restart now**). Settings →
 "Advanced…" → "Updates": **Ask** (the default), **Always** (no window) or **Off**, and **Check

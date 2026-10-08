@@ -9,7 +9,8 @@ it, checks it and puts it in its own place. The release pipeline stays as it is.
   button with its result next to it ("Checking…", "Up to date", "Could not check",
   "Razdor X.Y.Z is out").
 - **Ask:** when a newer release is found, a window "Razdor X.Y.Z is out (you have A.B.C)"
-  with **Update**, **What's new** (the release page in the browser) and **Later** (until
+  and the changes since this version, with **Update**, **Always update** (the same, and the
+  setting becomes Always) and **Later** (until
   the next start). It opens only at a calm moment: the title screen, or the world map with
   no dialog, key list, console or battle pending. **Update** downloads in the background
   while the game goes on; once it is in place a window says it starts the next time

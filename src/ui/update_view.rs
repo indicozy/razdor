@@ -179,7 +179,8 @@ fn notes(r: Rect, notes: &[Note]) {
 /// Draws the update window over the screen and takes its clicks and keys. `on_title`: the
 /// title screen or its settings, where "Restart now" loses no game. True when the player
 /// asked to restart into the new version (the caller quits; `update::restart` starts it).
-pub fn frame(on_title: bool) -> bool {
+/// "Always update" sets the settings' `mode` to [`Mode::Always`] and updates now.
+pub fn frame(on_title: bool, mode: &mut Mode) -> bool {
     let k = chrome::k();
     let status = update::status();
     let offer = matches!(&status, Status::Found(r) if !r.notes.is_empty());
@@ -208,13 +209,15 @@ pub fn frame(on_title: bool) -> bool {
     let close = closed || key(KeyCode::Escape);
     match status {
         Status::Found(rel) => {
-            let picked = buttons(inner, &[tr("Update"), tr("Release page"), tr("Later")]);
-            if picked == Some(0) || (picked.is_none() && key(KeyCode::Enter)) {
+            let picked = buttons(inner, &[tr("Update"), tr("Always update"), tr("Later")]);
+            if picked == Some(0) || picked == Some(1) || (picked.is_none() && key(KeyCode::Enter)) {
+                // "Always update": from now on without this window.
+                if picked == Some(1) {
+                    *mode = Mode::Always;
+                }
                 ASKED.with(|a| a.set(true));
                 TOLD.with(|t| t.set(false));
                 update::install(rel);
-            } else if picked == Some(1) {
-                update::open_in_browser(&rel.page);
             } else if picked == Some(2) || close {
                 LATER.with(|l| l.set(true));
             }

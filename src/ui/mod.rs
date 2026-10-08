@@ -925,7 +925,7 @@ impl App {
         self.fly_from_building(next.is_some());
         self.console.draw();
         // A newer release on offer, or how the update the player chose went.
-        if self.update_open && next.is_none() && update_view::frame(matches!(self.screen, Screen::MainMenu | Screen::Options)) {
+        if self.update_open && next.is_none() && update_view::frame(matches!(self.screen, Screen::MainMenu | Screen::Options), &mut self.audio.settings.updates) {
             self.quit = true;
         }
         // A fight decided on the map or in a building begins once the messages of that moment
