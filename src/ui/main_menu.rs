@@ -351,8 +351,49 @@ pub fn options(audio: &mut super::audio::Settings, install_wide: bool) -> bool {
     options_window(audio, install_wide)
 }
 
+thread_local! {
+    /// The advanced settings window is open over the settings.
+    static ADVANCED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Opens the advanced settings over the settings window (a snapshot scene).
+pub fn open_advanced() {
+    ADVANCED.with(|a| a.set(true));
+}
+
+/// Razdor's advanced settings (the settings window's "Advanced…"): rules where Razdor can
+/// differ from the original. Returns true when closed.
+fn advanced_window(audio: &mut super::audio::Settings) -> bool {
+    let (inner, closed) = window(tr("Advanced settings"), 594.0, 260.0);
+    let k = chrome::k();
+    let y = inner.y + 30.0 * k;
+    chrome::shadow_text(tr("Stepping onto a friendly army"), inner.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
+    let br = Rect::new(inner.x + inner.w - 24.0 * k - 170.0 * k, y, 170.0 * k, 28.0 * k);
+    let label = if audio.friends_let_pass { tr("Let pass") } else { tr("Battle (original)") };
+    let over = br.contains(crate::ui::widgets::pointer().into()) && !input_blocked();
+    chrome::marble_button(br, label, true, over);
+    if over && clicked() {
+        cue(Cue::Button);
+        audio.friends_let_pass = !audio.friends_let_pass;
+    }
+    let hint = tr("With no event of the map for the meeting, the original opens a battle against a friendly army the hero steps onto; Razdor can let him pass instead.");
+    for (i, line) in wrap(hint, inner.w - 48.0 * k, 12.0 * k).iter().enumerate() {
+        chrome::shadow_text(line, inner.x + 24.0 * k, y + 56.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
+    }
+    let ok = Rect::new(inner.x + inner.w - 120.0 * k, inner.y + inner.h - 44.0 * k, 96.0 * k, 28.0 * k);
+    let over_ok = ok.contains(crate::ui::widgets::pointer().into()) && !input_blocked();
+    chrome::marble_button(ok, &own("Buttons", "Ok", n_("OK")), true, over_ok);
+    closed || key(KeyCode::Escape) || key(KeyCode::Enter) || (over_ok && clicked())
+}
+
 /// The settings window alone (over the main menu, or over the map from the bar's gears).
 pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool) -> bool {
+    if ADVANCED.with(|a| a.get()) {
+        if advanced_window(audio) {
+            ADVANCED.with(|a| a.set(false));
+        }
+        return false;
+    }
     let title = own("Options", "Title", n_("Sound, graphics and gameplay settings"));
     let (inner, closed) = window(&title, 594.0, 484.0);
     let k = chrome::k();
@@ -392,6 +433,15 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool) ->
     if over_fps && clicked() {
         cue(Cue::Button);
         audio.show_fps = !audio.show_fps;
+    }
+    // Razdor's advanced settings, in a window of their own.
+    let xr = Rect::new(fr.x + fr.w + 16.0 * k, lr.y, inner.x + inner.w - 136.0 * k - (fr.x + fr.w + 16.0 * k), lr.h);
+    let over_adv = xr.contains(crate::ui::widgets::pointer().into()) && !input_blocked();
+    chrome::marble_button(xr, tr("Advanced…"), true, over_adv);
+    if over_adv && clicked() {
+        cue(Cue::Button);
+        ADVANCED.with(|a| a.set(true));
+        return false;
     }
     // The battle AI, as the original's "Улучшенный интеллект противника в битве": easy or
     // expert, from the install's setting until chosen here.

@@ -171,11 +171,14 @@ pub struct Settings {
     /// The minimap window's size dragged by the player, in pixels of the 960×720 video;
     /// `None`: the original's square.
     pub minimap_size: Option<(f32, f32)>,
+    /// Advanced: stepping onto a friendly army with no event for the meeting lets the hero
+    /// pass (`Game::friends_let_pass`); off, the original's battle.
+    pub friends_let_pass: bool,
 }
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, expert_ai: None, wide_row: None, display: Default::default(), ui_scale: 0.0, minimap_size: None }
+        Settings { music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, expert_ai: None, wide_row: None, display: Default::default(), ui_scale: 0.0, minimap_size: None, friends_let_pass: false }
     }
 }
 

@@ -12,6 +12,12 @@ old id, and their versions give both.
 
 ## Unreleased
 
+### Changed
+- **Stepping onto a friendly army is a battle again when the map has no event for it**, as
+  in the original (seen on a fort garrison that only said "lets you pass"). Razdor had let
+  the hero pass. The new advanced setting (Settings → "Advanced…": "Stepping onto a friendly
+  army") brings that back: "Battle (original)" by default, or "Let pass".
+
 ## 0.3.12 — 2026-10-08
 
 Commit `6fa8f52` (tag `v0.3.12`).

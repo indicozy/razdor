@@ -422,6 +422,12 @@ pub struct Game {
     /// settings): the player's choice, set by the interface, not part of the save.
     #[serde(skip)]
     pub improved_ai: bool,
+    /// Razdor's option: stepping onto a friendly army (attitude above 0) with no event for
+    /// the meeting lets the hero pass. Off (the default) is the original: every army he
+    /// steps onto is engaged, and with no event firing the battle opens (world.md §4.2).
+    /// Set by the interface, not part of the save.
+    #[serde(skip)]
+    pub friends_let_pass: bool,
     /// Reports of AI battles to hand to the interface with the slice's events.
     #[serde(skip)]
     pub(crate) ai_events: Vec<Event>,
@@ -565,6 +571,7 @@ impl Game {
             snap_due: false,
             snapped: false,
             improved_ai: false,
+            friends_let_pass: false,
             ai_events: Vec::new(),
             sims: Default::default(),
             cheats: Default::default(),
@@ -1302,7 +1309,9 @@ impl Game {
                 self.path.clear();
                 self.goal = None;
                 self.talk_to = None;
-                let e = if self.world.armies[i].attitude <= 0 { Event::Encounter(i) } else { Event::Met(i) };
+                // The original engages any army stepped onto (world.md §4.2); Razdor's option
+                // lets a friend pass instead.
+                let e = if self.world.armies[i].attitude <= 0 || !self.friends_let_pass { Event::Encounter(i) } else { Event::Met(i) };
                 if let Event::Encounter(i) = e {
                     self.foe = Some(Foe::Army(i));
                 }
@@ -3537,9 +3546,9 @@ mod tests {
 
     #[test]
     fn stepping_onto_an_army_engages_it() {
-        // §4.2: the cell he is about to enter holds an army: he stays where he is. Hostile, a
-        // battle; well disposed, a meeting (Razdor's guess for what the original's battle
-        // screen does with a friend met on open ground).
+        // §4.2: the cell he is about to enter holds an army: he stays where he is and it is
+        // engaged, friendly or not: with no event firing, a battle. Razdor's option lets a
+        // friend pass instead (a meeting).
         let mut g = with_walker(-2, (5, 2), vec![]);
         // A stationary guard: it does not come for him.
         g.world.armies[0].patrols = true;
@@ -3550,7 +3559,12 @@ mod tests {
         let mut g = with_walker(2, (5, 2), vec![]);
         assert!(g.set_destination((5, 2)));
         let events = walk_until_stopped(&mut g);
-        assert_eq!((events.last(), g.tile(), g.foe), (Some(&Event::Met(0)), (4, 2), None));
+        assert_eq!((events.last(), g.tile(), g.foe), (Some(&Event::Encounter(0)), (4, 2), Some(Foe::Army(0))), "a friend too, as the original");
+        let mut g = with_walker(2, (5, 2), vec![]);
+        g.friends_let_pass = true;
+        assert!(g.set_destination((5, 2)));
+        let events = walk_until_stopped(&mut g);
+        assert_eq!((events.last(), g.tile(), g.foe), (Some(&Event::Met(0)), (4, 2), None), "the option: a friend lets him pass");
     }
 
     #[test]
@@ -3558,6 +3572,7 @@ mod tests {
         // It walks away east; after each of its steps his route is planned again to its new
         // cell (0x4aedd1), until he steps onto it.
         let mut g = with_walker(1, (8, 2), (9..=14).map(|x| (x, 2)).collect());
+        g.friends_let_pass = true;
         g.world.armies[0].speed = 10;
         assert!(g.set_destination((8, 2)));
         let events = walk_until_stopped(&mut g);
@@ -3601,8 +3616,9 @@ mod tests {
     #[test]
     fn clicking_a_friendly_army_meets_it_again() {
         // The help: "click it to talk or fight": stepping onto it engages it, whatever its
-        // talk counter.
+        // talk counter (with Razdor's option on, a friend is met each time).
         let mut g = with_walker(1, (10, 2), vec![]);
+        g.friends_let_pass = true;
         for _ in 0..2 {
             let at = g.world.armies[0].tile(&g.world.map);
             assert!(g.set_destination(at));

@@ -696,6 +696,7 @@ impl App {
         // The battle AI's level from the settings: the next battle uses it.
         if let Some(g) = self.game.as_mut() {
             g.improved_ai = main_menu::expert_ai(&self.audio.settings);
+            g.friends_let_pass = self.audio.settings.friends_let_pass;
         }
         // The front row's width from the settings: the next new game uses it.
         self.follow_row_setting();
