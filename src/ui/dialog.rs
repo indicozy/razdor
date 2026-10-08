@@ -70,6 +70,9 @@ pub struct Dialog {
     /// Not shown before this clock time (seconds, `get_time`): the won battle's report comes
     /// 250 ms after the battle screen closes (the chained step 0x4af658).
     pub not_before: Option<f64>,
+    /// The first text line shown when the text is taller than the screen allows (Razdor's
+    /// scrolling: the wheel over the text, the arrow and page keys).
+    pub scroll: std::cell::Cell<usize>,
 }
 
 impl Dialog {
@@ -89,6 +92,7 @@ impl Dialog {
             chord: false,
             cued: false,
             not_before: None,
+            scroll: std::cell::Cell::new(0),
         }
     }
 
@@ -245,6 +249,47 @@ fn unit_row(assets: &Assets, label: &str, units: &[UnitId], x: f32, y: f32) -> f
     60.0
 }
 
+/// Text lines that fit: all `total` when the window (`fixed` plus the text) fits in
+/// `max_h`, else as many as the rest leaves, at least three.
+fn visible_lines(total: usize, fixed: f32, max_h: f32) -> usize {
+    let room = ((max_h - fixed - 24.0) / 23.0).floor().max(3.0) as usize;
+    total.min(room)
+}
+
+/// The first line shown of a text of `total` lines with `shown` in sight in box `tb`: the
+/// wheel over the box, Up/Down, Page Up/Page Down, Home/End move it; a scroll bar on the
+/// right shows where it is.
+fn scrolled(d: &Dialog, total: usize, shown: usize, tb: Rect) -> usize {
+    let last = total.saturating_sub(shown);
+    let mut first = d.scroll.get().min(last);
+    if last > 0 && !input_blocked() {
+        let wh = if tb.contains(pointer().into()) { wheel() } else { 0.0 };
+        let page = shown.saturating_sub(1).max(1);
+        if wh < 0.0 || key(KeyCode::Down) {
+            first = (first + 1).min(last);
+        } else if wh > 0.0 || key(KeyCode::Up) {
+            first = first.saturating_sub(1);
+        } else if key(KeyCode::PageDown) {
+            first = (first + page).min(last);
+        } else if key(KeyCode::PageUp) {
+            first = first.saturating_sub(page);
+        } else if key(KeyCode::Home) {
+            first = 0;
+        } else if key(KeyCode::End) {
+            first = last;
+        }
+    }
+    d.scroll.set(first);
+    if last > 0 {
+        let track = Rect::new(tb.x + tb.w - 9.0, tb.y + 8.0, 4.0, tb.h - 16.0);
+        draw_rectangle(track.x, track.y, track.w, track.h, Color::new(0.0, 0.0, 0.0, 0.35));
+        let thumb_h = (track.h * shown as f32 / total as f32).max(16.0);
+        let ty = track.y + (track.h - thumb_h) * first as f32 / last as f32;
+        draw_rectangle(track.x, ty, track.w, thumb_h, chrome::SILVER);
+    }
+    first
+}
+
 /// Draws `d` centred on the screen; returns how it was closed: OK (or Enter, Escape), or for
 /// a question Yes or No (Esc or N No, any other key Yes: `answer_key`).
 pub fn draw(d: &Dialog, assets: &Assets) -> Option<Close> {
@@ -261,13 +306,19 @@ pub fn draw(d: &Dialog, assets: &Assets) -> Option<Close> {
     if (lines.len() + rows.len()) as f32 * 23.0 > sh * 0.45 {
         (w, lines, rows) = fit(980.0f32.min(sw - 20.0));
     }
-    let text_h = (lines.len() + rows.len()) as f32 * 23.0 + 24.0;
+    let total = lines.len() + rows.len();
+    let mut text_h = total as f32 * 23.0 + 24.0;
     let res_h = if d.resources.is_empty() { 0.0 } else { 104.0 };
     let items_h = if d.items.is_empty() { 0.0 } else { 60.0 };
     let notice_h = if d.notice.is_some() { 26.0 } else { 0.0 };
     let pic_h = if d.picture.is_some() { 140.0 } else { 0.0 };
     let units_h = [&d.joined, &d.left].iter().filter(|u| !u.is_empty()).count() as f32 * 60.0;
-    let h = 34.0 + 16.0 + pic_h + text_h + res_h + items_h + units_h + notice_h + 64.0;
+    let fixed = 34.0 + 16.0 + pic_h + res_h + items_h + units_h + notice_h + 64.0;
+    // Too tall for the screen: the text scrolls inside a shorter box, so the buttons stay
+    // in sight.
+    let shown = visible_lines(total, fixed, sh - 20.0);
+    text_h = text_h.min(shown as f32 * 23.0 + 24.0);
+    let h = fixed + text_h;
     let (x, y) = ((sw - w) / 2.0, ((sh - h) / 2.0).max(10.0));
     chrome::window(Rect::new(x, y, w, h), &d.title, chrome::Skin::Marble, false);
     let mut cy = y + 44.0;
@@ -286,12 +337,14 @@ pub fn draw(d: &Dialog, assets: &Assets) -> Option<Close> {
         None => {}
     }
     cy += pic_h;
-    chrome::text_box(Rect::new(x + 16.0, cy, w - 32.0, text_h));
-    for (i, line) in lines.iter().enumerate() {
-        chrome::shadow_centered(line, x + w / 2.0, cy + 30.0 + i as f32 * 23.0, 19.0, Color::new(1.0, 0.9, 0.66, 1.0));
+    let tb = Rect::new(x + 16.0, cy, w - 32.0, text_h);
+    chrome::text_box(tb);
+    let first = scrolled(d, total, shown, tb);
+    for (i, line) in lines.iter().enumerate().skip(first).take(shown) {
+        chrome::shadow_centered(line, x + w / 2.0, cy + 30.0 + (i - first) as f32 * 23.0, 19.0, Color::new(1.0, 0.9, 0.66, 1.0));
     }
-    for (i, row) in rows.iter().enumerate() {
-        draw_markup_row(row, x + 40.0, cy + 30.0 + i as f32 * 23.0, w - 80.0, 19.0);
+    for (i, row) in rows.iter().enumerate().skip(first).take(shown) {
+        draw_markup_row(row, x + 40.0, cy + 30.0 + (i - first) as f32 * 23.0, w - 80.0, 19.0);
     }
     cy += text_h + 10.0;
     if !d.resources.is_empty() {
@@ -343,6 +396,14 @@ mod tests {
     use super::*;
 
     /// The won battle's report waits its 250 ms after the screen closes (0x4af658), then shows.
+    #[test]
+    fn a_text_taller_than_the_screen_scrolls_in_a_shorter_box() {
+        // 10 lines and 200 px of the rest fit a 700 px screen; 60 lines do not.
+        assert_eq!(visible_lines(10, 200.0, 700.0), 10);
+        assert_eq!(visible_lines(60, 200.0, 700.0), 20, "(700 − 200 − 24) / 23");
+        assert_eq!(visible_lines(60, 200.0, 250.0), 3, "at least three lines");
+    }
+
     #[test]
     fn a_dialog_with_a_time_waits_for_it() {
         let gap = razdor::av::BATTLE_REPORT_GAP_MS as f64 / 1000.0;
