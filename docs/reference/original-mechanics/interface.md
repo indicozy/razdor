@@ -418,8 +418,10 @@ The window contents follow the rules in economy.md (prices, hiring, market, garr
 exchange), experience.md (promotion) and magic-items.md (wearing items, spells); what the
 windows show and how they are operated is in §9.1–§9.9 below. Interaction rules shared by
 several windows:
-- **Unit grids** (building, army, battle): two rows of six 94×133 cards (rows mirrored for the
-  opponent). Hover shows the unit card and a hint line; the row labels say front (slots 1–4),
+- **Unit grids** (building, army, battle): two rows of six 94×133 cards: the player's army with
+  its front line on top, the opponent's in battle and the garrison above the hero's grid in the
+  building window mirrored, front line at the bottom, so the two fronts face each other; the
+  map tooltips' 2×6 portraits also put the front at the bottom (4d9060, 4daa80, 4ca9f0). Hover shows the unit card and a hint line; the row labels say front (slots 1–4),
   back (7–10) or reserve (0, 5, 6, 11). Highlighted cards pulse: brightness level
   `8 + tri((ms / 100) mod 15)` with `tri(v) = v` for v ≤ 7 else `15 − v`. **code** (4c612c,
   4cd704)

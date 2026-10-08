@@ -10,7 +10,7 @@ use razdor::i18n::{n_, tr};
 use razdor::rules::battle::Team;
 use razdor::trf;
 use razdor::rules::content::{ArtefactType, ItemId, SpellDef};
-use razdor::rules::formation::Slot;
+use razdor::rules::formation::{Formation, Slot};
 use razdor::rules::game::{Currency, Game, HireError, TradeError, SPELL_BOOK_SIZE};
 use razdor::rules::items::describe;
 use razdor::rules::script::HallEntry;
@@ -616,8 +616,20 @@ fn top_left_signs(c: &razdor::rules::content::Content, sq: Rect, u: &Unit, own: 
     chrome::card_signs(sq, true, &[(upgrade, "Sign-Upgrade", GREEN), (!u.potions.is_empty(), "sign-potion", GREEN)]);
 }
 
+/// The line on screen, from the top, of display line `line` (0 the front): the hero's grid
+/// has its front on top, the garrison's grid above it is mirrored so the two fronts face each
+/// other (0x4d9060: the garrison's card k at line 1 − k div 6, the hero's at k div 6).
+fn screen_line(form: Formation, line: usize, own: bool) -> usize {
+    if own {
+        line
+    } else {
+        form.display_lines() - 1 - line
+    }
+}
+
 /// The army screen's cards for `units` in the formation, `rel_y` below the content's top;
-/// `own`: the hero's army. `selected` is framed. Returns what the pointer is over.
+/// `own`: the hero's army (else a garrison, mirrored: [`screen_line`]). `selected` is framed.
+/// Returns what the pointer is over.
 fn card_grid(game: &Game, assets: &Assets, f: &Frame, rel_y: f32, units: &[&Unit], own: bool, selected: Option<usize>) -> Option<Hit> {
     let k = chrome::k();
     let c = &game.content;
@@ -629,7 +641,7 @@ fn card_grid(game: &Game, assets: &Assets, f: &Frame, rel_y: f32, units: &[&Unit
     let gx = (grid.x + (grid.w - (form.display_cols() as f32 * pitch.x - 8.0 * cs * k)) / 2.0).round();
     let cell_at = |slot: Slot| {
         let (line, col) = form.display(slot);
-        vec2(gx + col as f32 * pitch.x, grid.y + line as f32 * pitch.y).round()
+        vec2(gx + col as f32 * pitch.x, grid.y + screen_line(form, line, own) as f32 * pitch.y).round()
     };
     let mut hovered = None;
     for slot in form.slots() {
@@ -1236,7 +1248,20 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut BuildingView, message:
 
 #[cfg(test)]
 mod tests {
-    use super::next_pick;
+    use super::{next_pick, screen_line};
+    use razdor::rules::formation::{Formation, Row, Slot};
+
+    #[test]
+    fn the_garrison_grid_is_mirrored_the_heros_is_not() {
+        // 0x4d9060: the hero's front on the top line of his grid, the garrison's on the bottom
+        // line of its grid, the two fronts facing each other across the divider.
+        for form in [Formation::WIDE, Formation::VANILLA] {
+            let front = form.display(Slot::new(Row::Front, 1)).0;
+            let back = form.display(Slot::new(Row::Back, 1)).0;
+            assert_eq!((screen_line(form, front, true), screen_line(form, back, true)), (0, 1));
+            assert_eq!((screen_line(form, front, false), screen_line(form, back, false)), (1, 0));
+        }
+    }
 
     #[test]
     fn after_a_buy_the_selection_moves_to_the_next_item_or_the_one_above() {
