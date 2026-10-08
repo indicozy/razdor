@@ -12,6 +12,37 @@ old id, and their versions give both.
 
 ## Unreleased
 
+## 0.3.12 — 2026-10-08
+
+### Added
+- **Pin a save:** in the load window, the pin icon next to the delete sign (or P) pins the
+  selected save. A pinned save stays at the top of its list, is never overwritten by an
+  autosave, a quick save or a save of the same name, and does not count towards the limits
+  below. Unpin it the same way.
+- **More saves:** up to 50 saves of your own (a new name is refused when they are full;
+  saving over one always works), 30 autosaves instead of the original's 12, and five quick
+  saves: F5 writes a new one each time, over the oldest, and F9 loads the newest. The save
+  window's list now scrolls with the wheel like the load window's.
+- **A resizable minimap:** drag its left edge, its bottom edge or their corner. The size is
+  kept between games; a double click on an edge brings back the original's square.
+- **Debug overlay (F3 on the map):** every event point and lantern with its number, cell and
+  radius, and the events of each point and building (number, title, times fired), shown
+  through the fog; a panel gives the hero's and the pointer's cells and the full event list
+  of the place under the pointer.
+
+### Fixed
+- **A lantern of radius 1 lights up:** the fog was drawn as a blur of the explored cells, so
+  the few cells such a lantern opens stayed almost black on the map and the minimap (seen on
+  a mod map: a burning building on the minimap, nothing on the map). Explored ground is now
+  clear away from the dark and at least a third lit at its edge, as in the original.
+- **Cleaner sound:** every sound and track is brought to 44100 Hz with a proper filter; the
+  sound library repeated samples instead, which added a metallic buzz to the game's 22050 Hz
+  sounds at any volume. This should take away the crackling reported on Windows; please tell
+  us if it is still there.
+- **Long messages scroll:** a message taller than the window (a long scroll text in a small
+  window) ran off the screen with its buttons. Its text now scrolls (the wheel, the arrow
+  keys, Page Up/Page Down, Home/End, with a scroll bar) and the buttons stay in sight.
+
 ## 0.3.11 — 2026-10-07
 
 Commit `c0cbefb` (tag `v0.3.11`).
