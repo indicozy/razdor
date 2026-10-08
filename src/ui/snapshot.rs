@@ -4,7 +4,7 @@
 //! e.g. `xvfb-run -s "-screen 0 1024x768x24" razdor` with `RAZDOR_SIZE=1024x768`.
 //!
 //! Scenes (`<map>` is a map file name of the install without `.DTm`, e.g. `РК3-Столица`):
-//! `title`, `update` (a made-up release on offer), `authors`, `options[:advanced]`, `scenarios`, `tutorial`, `load`, `editor[:<map>[:<text to find>]]`, `classes:<map>`, `map:<map>[:x,y]`, `minimap:<map>`, `walk:<map>:dx,dy` (the
+//! `title`, `update` (a made-up release on offer), `authors[:<seconds>]`, `options[:advanced]`, `scenarios`, `tutorial`, `load`, `editor[:<map>[:<text to find>]]`, `classes:<map>`, `map:<map>[:x,y]`, `minimap:<map>`, `walk:<map>:dx,dy` (the
 //! hero sets off that many cells away), `building:<map>:<n>`
 //! (the hero in the n-th building; `:barracks`, `:garrison`, `:market` open that tab), `army:<map>[:<n>[:<unit id>[:<level>]]]` (squad member n selected, made that unit at that level), `journal:<map>`, `spells:<map>`,
 //! `menu:<map>`, `battle:<map>:<n>` (against the n-th army), `custom` (the custom battle
@@ -128,7 +128,9 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             return Ok(());
         }
         "authors" => {
-            app.screen = Screen::Authors(-25.0);
+            // `authors:<seconds>`: that far into the credits' scroll (25 by default).
+            let into = parts.next().and_then(|t| t.parse::<f64>().ok()).unwrap_or(25.0);
+            app.screen = Screen::Authors(macroquad::prelude::get_time() - into);
             return Ok(());
         }
         "options" => {
