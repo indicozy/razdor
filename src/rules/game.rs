@@ -1206,9 +1206,10 @@ impl Game {
     }
 
     /// [`Game::tick_shown`] still holds events of a step being drawn: their windows are not
-    /// on screen yet, though the rules already ran them (a victory event among them).
+    /// on screen yet, though the rules already ran them (a victory event among them), or the
+    /// places their lanterns showed.
     pub fn holds_events(&self) -> bool {
-        !self.held.is_empty()
+        !self.held.is_empty() || !self.held_shown.is_empty()
     }
 
     /// Advance the world by `real_dt` seconds (world.md §2): each hero step and each wait
