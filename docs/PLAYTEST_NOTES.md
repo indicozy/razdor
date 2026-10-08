@@ -3,6 +3,19 @@
 Things noticed while playing Razdor, to look into. Newest first. Each note says which branch it
 was seen on and what to check.
 
+## 2026-10-08, main: a small lantern stays dark; the sound crackles
+
+1. **"The lantern did not work: the minimap shows a burning red building, but the map keeps it
+   in the fog of war"** (a mod map, screenshot only). The camera did fly there and the cells
+   were explored, but Razdor draws the fog as a 5×5 blur of the explored cells: a radius-1
+   lantern opens 9 cells and the blur kept their centre at darkness 245 of 255, on the map
+   and on the minimap. In the original the soft fog is full up to the radius (world.md §3).
+   Now an explored cell with no dark neighbour is clear, and one at the edge is at least a
+   third lit (`minimap::darkness_of`, test `a_small_lantern_shows_through_the_dark`).
+2. **"The sound crackles at any volume; now and then it stops for a few seconds, then starts
+   again."** Open: platform not known yet. Suspect quad-snd's output loop (ALSA: writes its
+   whole 4096-frame buffer at a time; prints "Underrun occured" to stdout when it starves).
+
 ## 2026-10-07, main: crash after the courier's meeting (0.3.10)
 
 1. **"The game crashes"** (Другой берег, Evolution install, Windows build of 0.3.10): `index
