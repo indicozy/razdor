@@ -95,6 +95,71 @@ impl Pcm {
         self.frames() as f64 / self.rate.max(1) as f64
     }
 
+    /// Sample `i` of the interleaved data as -1..1.
+    fn sample(&self, i: usize) -> f32 {
+        match self.bits {
+            8 => (self.data[i] as f32 - 128.0) / 128.0,
+            _ => i16::from_le_bytes([self.data[2 * i], self.data[2 * i + 1]]) as f32 / 32768.0,
+        }
+    }
+
+    /// These samples at `rate`, 16-bit, by a windowed-sinc (Lanczos, 4 lobes) interpolator.
+    /// The player's own resampler repeats the nearest sample, which adds a metallic buzz
+    /// above the source's top frequency; the original's DirectSound filtered it out.
+    pub fn resampled(&self, rate: u32) -> Pcm {
+        const LOBES: i64 = 4;
+        let (ch, frames) = (self.channels.max(1) as usize, self.frames());
+        if self.rate == 0 || frames == 0 {
+            return Pcm { rate, channels: self.channels, bits: 16, data: Vec::new() };
+        }
+        let (from, to) = (self.rate as u64, rate as u64);
+        let out_frames = (frames as u64 * to / from) as usize;
+        // Down-sampling narrows the filter to the new top frequency.
+        let scale = (to as f64 / from as f64).min(1.0);
+        let reach = (LOBES as f64 / scale).ceil() as i64;
+        let lanczos = |x: f64| -> f64 {
+            if x.abs() < 1e-9 {
+                1.0
+            } else if x.abs() >= LOBES as f64 {
+                0.0
+            } else {
+                let px = std::f64::consts::PI * x;
+                LOBES as f64 * px.sin() * (px / LOBES as f64).sin() / (px * px)
+            }
+        };
+        // The filter has one phase per distinct fraction: o × from mod to, a multiple of
+        // gcd(from, to) (two phases from 22050 Hz to 44100 Hz).
+        let gcd = |mut a: u64, mut b: u64| {
+            while b != 0 {
+                (a, b) = (b, a % b);
+            }
+            a
+        };
+        let g = gcd(from, to);
+        let phases: Vec<Vec<(i64, f32)>> = (0..to / g)
+            .map(|ph| {
+                let frac = (ph * g) as f64 / to as f64;
+                let taps: Vec<(i64, f64)> = (1 - reach..=reach).map(|k| (k, lanczos((k as f64 - frac) * scale))).filter(|&(_, w)| w != 0.0).collect();
+                let sum: f64 = taps.iter().map(|t| t.1).sum();
+                taps.into_iter().map(|(k, w)| (k, (w / sum) as f32)).collect()
+            })
+            .collect();
+        let src: Vec<f32> = (0..frames * ch).map(|i| self.sample(i)).collect();
+        let last = frames as i64 - 1;
+        let mut data = Vec::with_capacity(out_frames * ch * 2);
+        for o in 0..out_frames {
+            // Exact position: o × from / to source frames.
+            let num = o as u64 * from;
+            let base = (num / to) as i64;
+            let taps = &phases[((num % to) / g) as usize];
+            for c in 0..ch {
+                let v: f32 = taps.iter().map(|&(k, w)| src[(base + k).clamp(0, last) as usize * ch + c] * w).sum();
+                data.extend_from_slice(&((v * 32768.0).round().clamp(-32768.0, 32767.0) as i16).to_le_bytes());
+            }
+        }
+        Pcm { rate, channels: self.channels, bits: 16, data }
+    }
+
     /// A canonical 44-byte-header RIFF WAVE file of these samples.
     pub fn to_wav(&self) -> Vec<u8> {
         let align = self.block_align() as u16;
@@ -336,5 +401,49 @@ mod tests {
         // About 10½ minutes of music at 22050 Hz.
         assert!((600.0..680.0).contains(&music), "{music}");
         assert_eq!(dt.read_sound("MUS_9.wav", 22050).unwrap().rate, 11025);
+    }
+
+    fn sine(rate: u32, hz: f64, frames: usize) -> Pcm {
+        let data = (0..frames).flat_map(|i| (((i as f64 * hz / rate as f64 * std::f64::consts::TAU).sin() * 16000.0) as i16).to_le_bytes()).collect();
+        Pcm { rate, channels: 1, bits: 16, data }
+    }
+
+    fn samples(p: &Pcm) -> Vec<f64> {
+        (0..p.frames()).map(|i| p.sample(i) as f64).collect()
+    }
+
+    #[test]
+    fn resampling_doubles_the_rate_without_a_buzz() {
+        // An 8 kHz tone at 22050 Hz: repeating samples would leave its 14 kHz image at about
+        // two thirds of its level; the filter keeps the tone and drops the image.
+        let src = sine(22050, 8000.0, 22050);
+        let up = src.resampled(44100);
+        assert_eq!((up.rate, up.channels, up.bits, up.frames()), (44100, 1, 16, 44100));
+        let s = samples(&up);
+        // The source samples come back as they were.
+        let orig = samples(&src);
+        assert!((1000..2000).all(|i| (s[2 * i] - orig[i]).abs() < 1e-4));
+        let level = |x: &[f64], hz: f64| {
+            let (mut re, mut im) = (0.0, 0.0);
+            for (i, v) in x.iter().enumerate() {
+                let a = i as f64 * hz / 44100.0 * std::f64::consts::TAU;
+                re += v * a.cos();
+                im += v * a.sin();
+            }
+            (re * re + im * im).sqrt() / x.len() as f64
+        };
+        let mid = &s[4000..40000];
+        let (tone, image) = (level(mid, 8000.0), level(mid, 14050.0));
+        assert!(image < tone / 30.0, "tone {tone}, image {image}");
+    }
+
+    #[test]
+    fn resampling_keeps_channels_and_reads_8_bit() {
+        let p = Pcm { rate: 11025, channels: 2, bits: 8, data: vec![128, 255, 128, 255, 128, 255, 128, 255] };
+        let up = p.resampled(44100);
+        assert_eq!((up.channels, up.bits, up.frames()), (2, 16, 16));
+        let s = samples(&up);
+        assert!(s.chunks(2).all(|f| f[0].abs() < 1e-4 && (f[1] - 127.0 / 128.0).abs() < 1e-3), "{s:?}");
+        assert_eq!(Pcm { rate: 22050, channels: 1, bits: 16, data: vec![] }.resampled(44100).frames(), 0);
     }
 }

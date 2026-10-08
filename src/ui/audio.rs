@@ -227,6 +227,9 @@ impl Settings {
     }
 }
 
+/// The mixer's rate: sounds are resampled to it here, as its own resampler repeats samples.
+const OUTPUT_RATE: u32 = 44100;
+
 /// Loads a sound from WAV bytes. On native targets macroquad's loader never waits, so one
 /// poll finishes it; a decoder panic is caught and gives `None`.
 fn load_now(wav: &[u8]) -> Option<Sound> {
@@ -407,7 +410,7 @@ impl Backend {
         let mut sfx = HashMap::new();
         for (key, file) in &table.effects {
             match sound::read_sound(dir, file, raw_rate) {
-                Ok(pcm) => match load_now(&pcm.to_wav()) {
+                Ok(pcm) => match load_now(&pcm.resampled(OUTPUT_RATE).to_wav()) {
                     Some(s) => {
                         sfx.insert(key.to_ascii_lowercase(), s);
                     }
@@ -460,7 +463,7 @@ impl Backend {
                 let t0 = std::time::Instant::now();
                 let loaded = sound::read_sound(&self.dir, &file, self.raw_rate)
                     .map_err(|e| e.to_string())
-                    .and_then(|pcm| load_now(&pcm.to_wav()).map(|s| (s, pcm.duration())).ok_or_else(|| "cannot be played".into()));
+                    .and_then(|pcm| load_now(&pcm.resampled(OUTPUT_RATE).to_wav()).map(|s| (s, pcm.duration())).ok_or_else(|| "cannot be played".into()));
                 match loaded {
                     Ok((s, secs)) => {
                         let gain = settings.music_gain();
