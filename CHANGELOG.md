@@ -17,6 +17,10 @@ old id, and their versions give both.
   opens the leave-battle window, as Esc does.
 
 ### Fixed
+- **«Авторы» больше не пустые первые 14 секунд:** титры начинались ниже страницы, и первые
+  имена появлялись только через ~14 с, так что окно казалось сломанным. Теперь, как в
+  оригинале, они поднимаются снизу сразу, со скоростью оригинала (35 точек в секунду), и
+  останавливаются на последнем кадре, а не начинаются заново.
 - **Hills lie under everything, as in the original:** the green and rocky hills are drawn
   before the trees, mountains, buildings and armies, and the route over them, so nothing
   standing above a hill is hidden by it.

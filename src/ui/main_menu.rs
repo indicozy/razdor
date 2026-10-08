@@ -287,11 +287,14 @@ pub fn authors(started: f64) -> bool {
         None => chrome::surface(inner, chrome::Skin::Brown),
     }
     if let Some((shadow, t)) = credits() {
-        // 30 video pixels a second, from below the page to past its top, then again.
-        let w = t.width() * k * 0.9375;
-        let h = t.height() * k * 0.9375;
-        let travel = h + inner.h;
-        let y = inner.y + inner.h - ((get_time() - started) as f32 * 30.0 * k) % travel;
+        // As the original (0x4c82c4): the picture's top at the page's top to begin with (its
+        // own blank start lets the first lines rise from below), 35 of its pixels a second,
+        // and it stays on its last view once the end is in sight.
+        let px = k * 0.9375;
+        let w = t.width() * px;
+        let h = t.height() * px;
+        let scrolled = ((get_time() - started) as f32 * 35.0 * px).min((h - inner.h).max(0.0));
+        let y = inner.y - scrolled;
         // Only the part inside the page.
         let top = y.max(inner.y);
         let bottom = (y + h).min(inner.y + inner.h);
