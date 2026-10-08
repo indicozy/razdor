@@ -168,11 +168,14 @@ pub struct Settings {
     pub display: super::display::DisplayMode,
     /// The interface scale (`display::SCALES`); `0` is Auto, the largest that fits.
     pub ui_scale: f32,
+    /// The minimap window's size dragged by the player, in pixels of the 960×720 video;
+    /// `None`: the original's square.
+    pub minimap_size: Option<(f32, f32)>,
 }
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, expert_ai: None, wide_row: None, display: Default::default(), ui_scale: 0.0 }
+        Settings { music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, expert_ai: None, wide_row: None, display: Default::default(), ui_scale: 0.0, minimap_size: None }
     }
 }
 

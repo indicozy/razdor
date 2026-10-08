@@ -191,6 +191,7 @@ impl App {
             })
             .collect();
         let audio = Audio::new(assets.dt.as_ref().map(|d| &d.install));
+        minimap::set_size(audio.settings.minimap_size);
         let mut app = App {
             assets,
             demo,
@@ -676,6 +677,10 @@ impl App {
 
     pub fn frame(&mut self) {
         display::follow_settings(&self.audio.settings);
+        // A minimap resized by the player is kept once the drag ends (saved with the settings).
+        if !minimap::resizing() && minimap::size() != self.audio.settings.minimap_size {
+            self.audio.settings.minimap_size = minimap::size();
+        }
         chrome::begin_frame();
         widgets::track_held_key();
         self.follow_language();

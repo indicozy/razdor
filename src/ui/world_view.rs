@@ -1655,7 +1655,7 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     // While he walks the view is locked on him (interface.md §8).
     view.look = camera_look(view.look, game.moving(), !view.shows.is_empty());
     let cam = Camera::looking_at(game, view.zoom, view.look.unwrap_or(game.display_pos()));
-    let on_minimap = view.minimap && minimap::outer(&game.world.map, cam.view).contains(Vec2::from(crate::ui::widgets::pointer()));
+    let on_minimap = view.minimap && minimap::under_pointer(&game.world.map, cam.view);
     let clock = game_bar::time_panel();
     let on_clock = !input_blocked() && clock.contains(crate::ui::widgets::pointer().into());
     let hovered = cam.tile_under_mouse().filter(|_| !on_minimap);

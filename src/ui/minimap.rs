@@ -141,8 +141,140 @@ pub fn outer(_map: &TileMap, view: Rect) -> Rect {
 }
 
 fn outer_at(view: Rect, k: f32) -> Rect {
-    let side = (WINDOW * k).min(view.w - 4.0).min(view.h - 4.0);
-    Rect::new(view.x + view.w - side - 10.0 * k, view.y + 2.0 * k, side, side)
+    outer_sized(view, k, SIZE.with(|s| s.get()))
+}
+
+/// The window of size `size` (in pixels of the 960×720 video; `None`: the original's
+/// square), kept in the top-right corner of `view` and within it.
+fn outer_sized(view: Rect, k: f32, size: Option<(f32, f32)>) -> Rect {
+    let (w, h) = size.unwrap_or((WINDOW, WINDOW));
+    let w = (w * k).min(view.w - 14.0 * k).max(MIN_SIDE * k);
+    let h = (h * k).min(view.h - 4.0 * k).max(MIN_SIDE * k);
+    Rect::new(view.x + view.w - w - 10.0 * k, view.y + 2.0 * k, w, h)
+}
+
+/// Smallest side of the window (Razdor's resizing), in pixels of the 960×720 video.
+const MIN_SIDE: f32 = 120.0;
+
+/// A resize under way: which edges (left, bottom), where the pointer and the size started.
+type Drag = ((bool, bool), Vec2, (f32, f32));
+
+thread_local! {
+    /// Razdor's own size of the window (dragged by its left and bottom edges), `None` for
+    /// the original's.
+    static SIZE: std::cell::Cell<Option<(f32, f32)>> = const { std::cell::Cell::new(None) };
+    static DRAG: std::cell::Cell<Option<Drag>> = const { std::cell::Cell::new(None) };
+    /// When an edge was last pressed (a second press soon after restores the original size).
+    static LAST_PRESS: std::cell::Cell<f64> = const { std::cell::Cell::new(f64::NEG_INFINITY) };
+    /// The resize cursor is shown.
+    static CURSOR: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The window's size (`None`: the original's), for the settings.
+pub fn size() -> Option<(f32, f32)> {
+    SIZE.with(|s| s.get())
+}
+
+/// Sets the window's size from the settings.
+pub fn set_size(size: Option<(f32, f32)>) {
+    SIZE.with(|s| s.set(size.filter(|&(w, h)| w.is_finite() && h.is_finite())));
+}
+
+/// The window is being resized: the map takes no pointer meanwhile.
+pub fn resizing() -> bool {
+    DRAG.with(|d| d.get().is_some())
+}
+
+/// The pointer is the minimap's: over the window or its edges' grip, or resizing it.
+pub fn under_pointer(map: &TileMap, view: Rect) -> bool {
+    let o = outer(map, view);
+    let band = (BORDER * super::chrome::k()).max(6.0);
+    let grown = Rect::new(o.x - band, o.y, o.w + band, o.h + band);
+    resizing() || grown.contains(Vec2::from(crate::ui::widgets::pointer()))
+}
+
+/// Which edges of `o` the pointer `m` grips: (left, bottom), within `band` of them.
+fn grip(o: Rect, m: Vec2, band: f32) -> (bool, bool) {
+    let inside_y = m.y >= o.y && m.y <= o.y + o.h + band;
+    let inside_x = m.x >= o.x - band && m.x <= o.x + o.w;
+    let left = inside_y && (m.x - o.x).abs() <= band;
+    let bottom = inside_x && (m.y - (o.y + o.h)).abs() <= band;
+    (left, bottom)
+}
+
+/// The size a drag of the edges `edges` by `d` (screen pixels) gives, from `from`
+/// (pixels of the video) at scale `k`: the left edge widens to the left, the bottom one
+/// grows down.
+fn dragged(from: (f32, f32), edges: (bool, bool), d: Vec2, k: f32) -> (f32, f32) {
+    let w = if edges.0 { from.0 - d.x / k } else { from.0 };
+    let h = if edges.1 { from.1 + d.y / k } else { from.1 };
+    (w.max(MIN_SIDE), h.max(MIN_SIDE))
+}
+
+/// Resizing by the left and bottom edges and their corner; a double click on an edge
+/// restores the original's size. Returns true while the pointer
+/// grips an edge or drags one (the click is the resize's, not the minimap's).
+fn resize(view: Rect, o: Rect) -> bool {
+    use macroquad::miniquad::{window::set_mouse_cursor, CursorIcon};
+    let k = super::chrome::k();
+    let m = Vec2::from(crate::ui::widgets::pointer());
+    let edges = match DRAG.with(|d| d.get()) {
+        Some((edges, start, from)) => {
+            if is_mouse_button_down(MouseButton::Left) {
+                let want = dragged(from, edges, m - start, k);
+                // Kept within the view: what is shown is what is stored.
+                let shown = outer_sized(view, k, Some(want));
+                SIZE.with(|s| s.set(Some((shown.w / k, shown.h / k))));
+            } else {
+                DRAG.with(|d| d.set(None));
+            }
+            edges
+        }
+        None => {
+            let edges = if input_blocked() { (false, false) } else { grip(o, m, (BORDER * k).max(6.0)) };
+            if (edges.0 || edges.1) && clicked() {
+                let now = get_time();
+                if now - LAST_PRESS.with(|t| t.replace(now)) < 0.4 {
+                    // A double click on an edge: the original's square again.
+                    SIZE.with(|s| s.set(None));
+                } else {
+                    DRAG.with(|d| d.set(Some((edges, m, (o.w / k, o.h / k)))));
+                }
+            }
+            edges
+        }
+    };
+    let gripped = edges.0 || edges.1;
+    if gripped || CURSOR.with(|c| c.get()) {
+        set_mouse_cursor(match edges {
+            (true, true) => CursorIcon::NESWResize,
+            (true, false) => CursorIcon::EWResize,
+            (false, true) => CursorIcon::NSResize,
+            _ => CursorIcon::Default,
+        });
+        CURSOR.with(|c| c.set(gripped));
+    }
+    gripped
+}
+
+/// The frame art over `o`: its corners kept, its sides stretched (a nine-slice), so a
+/// window of any shape keeps the original's ornaments.
+fn draw_frame(t: &Texture2D, o: Rect, k: f32) {
+    let (tw, th) = (t.width(), t.height());
+    let c = 32.0_f32.min(tw / 2.0).min(th / 2.0);
+    // Screen pixels per texel as at the original's size: the art spans WINDOW.
+    let d = (c * WINDOW * k / tw.max(1.0)).min(o.w / 2.0).min(o.h / 2.0);
+    let xs = [(0.0, c, o.x, d), (c, tw - 2.0 * c, o.x + d, o.w - 2.0 * d), (tw - c, c, o.x + o.w - d, d)];
+    let ys = [(0.0, c, o.y, d), (c, th - 2.0 * c, o.y + d, o.h - 2.0 * d), (th - c, c, o.y + o.h - d, d)];
+    for (i, &(sx, sw, dx, dw)) in xs.iter().enumerate() {
+        for (j, &(sy, sh, dy, dh)) in ys.iter().enumerate() {
+            // The middle is the map's: the frame's inside is not drawn.
+            if i == 1 && j == 1 {
+                continue;
+            }
+            super::chrome::tex_src(t, Rect::new(sx, sy, sw, sh), Rect::new(dx, dy, dw, dh), WHITE);
+        }
+    }
 }
 
 /// The original's colours (`Rus_DiscordTimes.ini [Options]`, 0xRRGGBB), else ours.
@@ -387,11 +519,12 @@ pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_
     }
 
     if let Some(t) = frame_art {
-        super::chrome::tex(&t, o, WHITE);
+        draw_frame(&t, o, super::chrome::k());
     }
 
+    let gripped = resize(view, o);
     let m = Vec2::from(crate::ui::widgets::pointer());
-    (clicked() && r.contains(m)).then(|| ((m.x - r.x) / k.x - 0.5, ((m.y - r.y) / k.y - 0.5) * rh))
+    (!gripped && clicked() && r.contains(m)).then(|| ((m.x - r.x) / k.x - 0.5, ((m.y - r.y) / k.y - 0.5) * rh))
 }
 
 #[cfg(test)]
@@ -444,6 +577,25 @@ mod tests {
         let square = TileMap::from_codes(Grid::Square8, 50, 50, &vec![0u8; 2500], vec![]);
         let r = rect_at(&square, view, 1.0);
         assert!((r.w - r.h).abs() < 1e-3);
+    }
+
+    #[test]
+    fn the_window_resizes_by_its_left_and_bottom_edges() {
+        let o = Rect::new(500.0, 2.0, 400.0, 400.0);
+        assert_eq!(grip(o, vec2(502.0, 200.0), 8.0), (true, false), "the left edge");
+        assert_eq!(grip(o, vec2(700.0, 405.0), 8.0), (false, true), "the bottom edge");
+        assert_eq!(grip(o, vec2(498.0, 404.0), 8.0), (true, true), "the corner");
+        assert_eq!(grip(o, vec2(700.0, 200.0), 8.0), (false, false), "the map inside");
+        // Dragged left and down at scale 2: wider and taller by half the screen distance.
+        assert_eq!(dragged((400.0, 400.0), (true, true), vec2(-100.0, 60.0), 2.0), (450.0, 430.0));
+        assert_eq!(dragged((400.0, 400.0), (false, true), vec2(-100.0, -1000.0), 1.0), (400.0, MIN_SIDE));
+        // Kept in the view's top-right corner and within it.
+        let view = Rect::new(0.0, 0.0, 1000.0, 700.0);
+        let w = outer_sized(view, 1.0, Some((600.0, 250.0)));
+        assert_eq!((w.x + w.w, w.y, w.w, w.h), (990.0, 2.0, 600.0, 250.0));
+        let big = outer_sized(view, 1.0, Some((5000.0, 5000.0)));
+        assert!(big.x >= 0.0 && big.y + big.h <= 700.0, "{big:?}");
+        assert_eq!(outer_sized(view, 1.0, None).w, WINDOW, "the original's square by default");
     }
 
     #[test]
