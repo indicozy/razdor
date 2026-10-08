@@ -13,8 +13,14 @@ was seen on and what to check.
    Now an explored cell with no dark neighbour is clear, and one at the edge is at least a
    third lit (`minimap::darkness_of`, test `a_small_lantern_shows_through_the_dark`).
 2. **"The sound crackles at any volume; now and then it stops for a few seconds, then starts
-   again."** Open: platform not known yet. Suspect quad-snd's output loop (ALSA: writes its
-   whole 4096-frame buffer at a time; prints "Underrun occured" to stdout when it starves).
+   again."** (Windows.) quad-snd's WASAPI loop looks sound and neither it nor macroquad has a
+   Windows crackling report. What it does wrong on every platform: it brings every sound to
+   44100 Hz by repeating the nearest sample, and all of DT's sounds are 22050 or 11025 Hz,
+   so a tone at 8 kHz keeps an image at 14 kHz at about two thirds of its level: a metallic
+   buzz at any volume. Razdor now resamples every sound to 44100 Hz itself with a Lanczos
+   filter (`Pcm::resampled`, 64 ms for the longest track), so quad-snd's resampler is not
+   used. **To confirm with the player** on the next build; if it still crackles, look at the
+   WASAPI output loop next.
 
 ## 2026-10-07, main: crash after the courier's meeting (0.3.10)
 
