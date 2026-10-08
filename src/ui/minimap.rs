@@ -50,6 +50,9 @@ fn cached(cache: &'static std::thread::LocalKey<RefCell<Option<Cached>>>, key: u
     })
 }
 
+/// Most darkness an explored cell at the edge of the dark keeps.
+const EDGE_DARK: u8 = 170;
+
 /// Darkness (0 lit … 255 black) of every cell: the share of unexplored cells within
 /// [`FEATHER`] cells (a box blur through a summed-area table), eased by a smoothstep. The
 /// 0.5 contour runs along the border of the explored ground with its corners rounded, so
@@ -80,7 +83,15 @@ pub fn darkness_of(w: i32, h: i32, explored: impl Fn((i32, i32)) -> bool) -> Vec
             let dark = sum[y1 * (w + 1) + x1] + sum[y0 * (w + 1) + x0] - sum[y0 * (w + 1) + x1] - sum[y1 * (w + 1) + x0];
             let share = dark as f32 / ((x1 - x0) * (y1 - y0)) as f32;
             let t = ((share - 0.2) / 0.5).clamp(0.0, 1.0);
-            out[y * w + x] = (t * t * (3.0 - 2.0 * t) * 255.0).round() as u8;
+            let mut v = (t * t * (3.0 - 2.0 * t) * 255.0).round() as u8;
+            if explored((x as i32, y as i32)) {
+                // An explored cell is at least a third lit (world.md §3: the explored mask
+                // takes cells whose half-cells add up to over a third of full brightness),
+                // and one with no dark neighbour is clear: a small lantern shows too.
+                let edge = (y.saturating_sub(1)..(y + 2).min(h)).any(|ny| (x.saturating_sub(1)..(x + 2).min(w)).any(|nx| !explored((nx as i32, ny as i32))));
+                v = v.min(if edge { EDGE_DARK } else { 0 });
+            }
+            out[y * w + x] = v;
         }
     }
     out
@@ -406,6 +417,18 @@ mod tests {
         assert!(at(20, 10) >= 128 && at(20, 10) < 255, "dark edge cell mostly dark: {}", at(20, 10));
         assert!(at(17, 10) <= at(19, 10) && at(20, 10) <= at(22, 10), "darker outwards");
         assert!(darkness(&Fog::disabled(3, 3)).iter().all(|&a| a == 0));
+    }
+
+    #[test]
+    fn a_small_lantern_shows_through_the_dark() {
+        // A radius-1 lantern opens 9 cells; the blur alone kept their centre near black.
+        let mut fog = Fog::new(30, 30);
+        fog.reveal(15, 15, 1);
+        let d = darkness(&fog);
+        let at = |x: i32, y: i32| d[(y * 30 + x) as usize];
+        assert_eq!(at(15, 15), 0, "its centre is clear");
+        assert!(at(16, 15) <= EDGE_DARK, "an explored edge cell is at least a third lit: {}", at(16, 15));
+        assert_eq!(at(25, 25), 255);
     }
 
     #[test]
