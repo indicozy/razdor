@@ -85,7 +85,7 @@ impl LoadView {
         v
     }
 
-    fn refresh(&mut self) {
+    pub fn refresh(&mut self) {
         self.entries = save::default_dir().map_or_else(Vec::new, |d| save::list(&d, self.tab));
         self.selected = 0;
         self.scroll = 0;
@@ -264,7 +264,8 @@ impl Book {
     /// icon clicked (`deletable`: the selected row has both icons).
     fn rows(&self, rows: &[Row], selected: Option<usize>, scroll: &mut usize, deletable: bool) -> (Option<usize>, Option<usize>, Option<usize>) {
         let k = self.k;
-        let list = self.rect(17.0, 64.0, 560.0, 29.0 * Book::ROWS as f32);
+        // The rows and the scrollbar right of them.
+        let list = self.rect(17.0, 60.0, 574.0, 350.0);
         if list.contains(crate::ui::widgets::pointer().into()) && !input_blocked() {
             let wh = wheel();
             if wh < 0.0 && *scroll + Book::ROWS < rows.len() {
@@ -273,6 +274,8 @@ impl Book {
                 *scroll -= 1;
             }
         }
+        // Razdor's scrollbar right of the page, when the rows do not all fit.
+        scrollbar(self.rect(579.0, 60.0, 12.0, 350.0), scroll, Book::ROWS, rows.len());
         let (mut picked, mut delete, mut pin) = (None, None, None);
         for (i, row) in rows.iter().enumerate().skip(*scroll).take(Book::ROWS) {
             let r = self.row_rect(i - *scroll);

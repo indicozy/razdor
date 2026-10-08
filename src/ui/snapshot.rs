@@ -4,7 +4,7 @@
 //! e.g. `xvfb-run -s "-screen 0 1024x768x24" razdor` with `RAZDOR_SIZE=1024x768`.
 //!
 //! Scenes (`<map>` is a map file name of the install without `.DTm`, e.g. `РК3-Столица`):
-//! `title`, `update` (a made-up release on offer), `authors[:<seconds>]`, `options[:advanced]`, `scenarios`, `tutorial`, `load`, `editor[:<map>[:<text to find>]]`, `classes:<map>`, `map:<map>[:x,y]`, `minimap:<map>`, `walk:<map>:dx,dy` (the
+//! `title`, `update` (a made-up release on offer), `authors[:<seconds>]`, `options[:advanced]`, `scenarios`, `tutorial`, `load[:manual|auto[:<row>]]`, `editor[:<map>[:<text to find>]]`, `classes:<map>`, `map:<map>[:x,y]`, `minimap:<map>`, `walk:<map>:dx,dy` (the
 //! hero sets off that many cells away), `building:<map>:<n>`
 //! (the hero in the n-th building; `:barracks`, `:garrison`, `:market` open that tab), `army:<map>[:<n>[:<unit id>[:<level>]]]` (squad member n selected, made that unit at that level), `journal:<map>`, `spells:<map>`,
 //! `menu:<map>`, `battle:<map>:<n>` (against the n-th army), `custom` (the custom battle
@@ -150,7 +150,16 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             return Ok(());
         }
         "load" => {
-            app.screen = Screen::Load(LoadView::new(Back::Title));
+            let mut view = LoadView::new(Back::Title);
+            // `load:auto`: the autosaves' tab; `load:<tab>:<row>`: scrolled to that row.
+            if parts.next() == Some("auto") {
+                view.tab = razdor::rules::save::SaveKind::Auto;
+                view.refresh();
+            }
+            if let Some(n) = parts.next().and_then(|n| n.parse().ok()) {
+                view.scroll = n;
+            }
+            app.screen = Screen::Load(view);
             return Ok(());
         }
         "editor" => {

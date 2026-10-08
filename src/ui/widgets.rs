@@ -885,6 +885,74 @@ pub fn tabs(x: f32, y: f32, w: f32, labels: &[&str], selected: &mut usize) -> f3
     30.0
 }
 
+thread_local! {
+    /// A scrollbar's knob held by the mouse: the bar's rectangle (to know which bar) and the
+    /// knob's grab point below its top.
+    static SCROLL_DRAG: std::cell::Cell<Option<(Rect, f32)>> = const { std::cell::Cell::new(None) };
+}
+
+/// A vertical scrollbar in the original's art (`VArrowUp` / `VArrowDown`, the `VSTexture`
+/// track, the `VSlider` knob) for a list of `total` rows showing `shown` from `first`. The
+/// arrows move one row, a click on the track a page, and the knob drags. Nothing is drawn
+/// when everything fits. Returns true when `first` changed.
+pub fn scrollbar(r: Rect, first: &mut usize, shown: usize, total: usize) -> bool {
+    use super::chrome;
+    if total <= shown {
+        return false;
+    }
+    let most = total - shown;
+    let before = *first;
+    let w = r.w;
+    let up = Rect::new(r.x, r.y, w, w);
+    let down = Rect::new(r.x, r.y + r.h - w, w, w);
+    let track = Rect::new(r.x, r.y + w, w, r.h - 2.0 * w);
+    match chrome::win("VSTexture") {
+        Some(t) => chrome::tex(&t, track, WHITE),
+        None => draw_rectangle(track.x + w / 3.0, track.y, w / 3.0, track.h, chrome::SILVER_DARK),
+    }
+    let knob_h = chrome::win("VSlider").map_or(w * 1.8, |t| w * t.height() / t.width()).min(track.h / 2.0);
+    let room = track.h - knob_h;
+    let at = |first: usize| track.y + room * first as f32 / most as f32;
+    let (mx, my) = pointer();
+    let free = !input_blocked() && !input_swallowed();
+    let held = is_mouse_button_down(MouseButton::Left);
+    // Dragging the knob: the row whose place is nearest.
+    let drag = SCROLL_DRAG.with(|d| d.get()).filter(|(dr, _)| *dr == r);
+    if let (Some((_, grab)), true) = (drag, held) {
+        let t = ((my - grab - track.y) / room).clamp(0.0, 1.0);
+        *first = (t * most as f32).round() as usize;
+    } else if drag.is_some() {
+        SCROLL_DRAG.with(|d| d.set(None));
+    }
+    let knob = Rect::new(track.x, at((*first).min(most)), w, knob_h);
+    if free && is_mouse_button_pressed(MouseButton::Left) {
+        let p = vec2(mx, my);
+        if knob.contains(p) {
+            SCROLL_DRAG.with(|d| d.set(Some((r, my - knob.y))));
+        } else if up.contains(p) {
+            *first = first.saturating_sub(1);
+        } else if down.contains(p) {
+            *first = (*first + 1).min(most);
+        } else if track.contains(p) {
+            *first = if my < knob.y { first.saturating_sub(shown) } else { (*first + shown).min(most) };
+        }
+    }
+    *first = (*first).min(most);
+    let knob = Rect::new(track.x, at(*first), w, knob_h);
+    for (name, rect, pressed) in [("VArrowUp", up, held && up.contains(vec2(mx, my))), ("VArrowDown", down, held && down.contains(vec2(mx, my)))] {
+        let tint = if pressed { Color::new(0.8, 0.8, 0.8, 1.0) } else { WHITE };
+        match chrome::win(name) {
+            Some(t) => chrome::tex(&t, rect, tint),
+            None => draw_rectangle(rect.x, rect.y, rect.w, rect.h, chrome::SILVER),
+        }
+    }
+    match chrome::win("VSlider") {
+        Some(t) => chrome::tex(&t, knob, WHITE),
+        None => draw_rectangle(knob.x, knob.y, knob.w, knob.h, chrome::SILVER),
+    }
+    *first != before
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
