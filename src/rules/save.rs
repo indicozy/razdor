@@ -127,6 +127,8 @@ pub enum SaveError {
     Mismatch(String),
     /// [`MANUAL_SAVES_KEPT`] saves already: replace or delete one.
     Full,
+    /// The save to replace is pinned.
+    Pinned,
 }
 
 impl std::fmt::Display for SaveError {
@@ -140,6 +142,7 @@ impl std::fmt::Display for SaveError {
             SaveError::MapMissing(m) => f.write_str(&trf!("the map \"{m}\" is not in your install any more", m)),
             SaveError::MapChanged(m) => f.write_str(&trf!("the map \"{m}\" has changed since the game was saved", m)),
             SaveError::Mismatch(e) => f.write_str(&trf!("the save does not fit the map or the data: {e}", e)),
+            SaveError::Pinned => f.write_str(tr("that save is pinned: unpin it first")),
             SaveError::Full => f.write_str(&trf!("there are {n} saves already: save over one or delete one", n = MANUAL_SAVES_KEPT)),
         }
     }
@@ -297,7 +300,10 @@ pub fn write(dir: &Path, kind: SaveKind, name: &str, game: &Game) -> Result<Path
             let folder = kind_dir(dir, kind);
             std::fs::create_dir_all(&folder)?;
             let path = folder.join(format!("{}.{EXTENSION}", slug(name)));
-            let own = list(dir, kind).iter().filter(|e| e.meta.name != QUICK_SAVE).count();
+            if is_pinned(&path) {
+                return Err(SaveError::Pinned);
+            }
+            let own = list(dir, kind).iter().filter(|e| e.meta.name != QUICK_SAVE && !e.pinned).count();
             if !path.exists() && own >= MANUAL_SAVES_KEPT {
                 return Err(SaveError::Full);
             }
@@ -311,11 +317,11 @@ pub fn write(dir: &Path, kind: SaveKind, name: &str, game: &Game) -> Result<Path
 /// of the same name is reused, otherwise the one of the same name **and** the same map title
 /// (when several match, the last in the list, newest first, so the oldest of them); with no
 /// match a new one is made while there are fewer than [`AUTOSAVES_KEPT`], else the last of
-/// the list, the oldest, is overwritten.
+/// the list, the oldest, is overwritten. Pinned autosaves are left out of all of it.
 pub fn write_autosave(dir: &Path, name: &str, game: &Game, in_battle: bool) -> Result<PathBuf, SaveError> {
     let folder = kind_dir(dir, SaveKind::Auto);
     std::fs::create_dir_all(&folder)?;
-    let saves = list(dir, SaveKind::Auto);
+    let saves: Vec<SaveEntry> = by_time(dir, SaveKind::Auto).into_iter().filter(|e| !e.pinned).collect();
     let same = |e: &&SaveEntry| e.meta.name == name && (in_battle || e.meta.title == game.world.title);
     let reused = saves.iter().filter(same).last().or_else(|| saves.get(AUTOSAVES_KEPT - 1));
     let path = match reused {
@@ -343,21 +349,22 @@ fn put(path: &Path, kind: SaveKind, name: &str, game: &Game) -> Result<PathBuf, 
 /// The name of the quick saves (F5): manual saves kept apart from the player's own.
 pub const QUICK_SAVE: &str = crate::i18n::n_("Quick save");
 
-/// The quick saves, newest first.
+/// The quick saves, newest first, pinned ones too.
 fn quick_saves(dir: &Path) -> Vec<SaveEntry> {
-    list(dir, SaveKind::Manual).into_iter().filter(|e| e.meta.name == QUICK_SAVE).collect()
+    by_time(dir, SaveKind::Manual).into_iter().filter(|e| e.meta.name == QUICK_SAVE).collect()
 }
 
 /// Writes a quick save (F5): a new one while there are fewer than [`QUICK_SAVES_KEPT`],
-/// else over the oldest.
+/// else over the oldest. Pinned quick saves are left out of it.
 pub fn quick_save(dir: &Path, game: &Game) -> Result<PathBuf, SaveError> {
     let folder = kind_dir(dir, SaveKind::Manual);
     std::fs::create_dir_all(&folder)?;
-    let quick = quick_saves(dir);
+    let all = quick_saves(dir);
+    let quick: Vec<&SaveEntry> = all.iter().filter(|e| !e.pinned).collect();
     let path = match quick.get(QUICK_SAVES_KEPT - 1) {
         Some(oldest) => oldest.path.clone(),
         None => {
-            let taken: Vec<&Path> = quick.iter().map(|e| e.path.as_path()).collect();
+            let taken: Vec<&Path> = all.iter().map(|e| e.path.as_path()).collect();
             (1..)
                 .map(|k| folder.join(format!("{}-{k}.{EXTENSION}", slug(QUICK_SAVE))))
                 .find(|p| !taken.contains(&p.as_path()) && !p.exists())
@@ -381,21 +388,79 @@ pub fn quick_save_path(dir: &Path) -> Option<PathBuf> {
 pub struct SaveEntry {
     pub path: PathBuf,
     pub meta: SaveMeta,
+    /// Pinned by the player: never overwritten, first in the list (Razdor's).
+    pub pinned: bool,
 }
 
-/// Save files of one kind, newest first. Unreadable files are skipped.
+/// Save files of one kind, pinned first, then newest first. Unreadable files are skipped.
 pub fn list(dir: &Path, kind: SaveKind) -> Vec<SaveEntry> {
-    let Ok(read) = std::fs::read_dir(kind_dir(dir, kind)) else { return Vec::new() };
+    let mut v = by_time(dir, kind);
+    v.sort_by_key(|e| !e.pinned);
+    v
+}
+
+/// Save files of one kind, newest first, pinned or not.
+fn by_time(dir: &Path, kind: SaveKind) -> Vec<SaveEntry> {
+    let folder = kind_dir(dir, kind);
+    let Ok(read) = std::fs::read_dir(&folder) else { return Vec::new() };
+    let pins = pins(&folder);
     let mut v: Vec<SaveEntry> = read
         .flatten()
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|x| x == EXTENSION))
-        .filter_map(|path| Some(SaveEntry { meta: read_meta(&path).ok()?, path }))
+        .filter_map(|path| {
+            let pinned = file_name(&path).is_some_and(|n| pins.contains(&n));
+            Some(SaveEntry { meta: read_meta(&path).ok()?, path, pinned })
+        })
         .collect();
     // Within a second, the file written last first (a reused autosave keeps an old name).
     let written = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
     v.sort_by(|a, b| b.meta.saved_at.cmp(&a.meta.saved_at).then_with(|| written(&b.path).cmp(&written(&a.path))).then_with(|| b.path.cmp(&a.path)));
     v
+}
+
+/// The list of pinned saves of a kind's folder: one file name per line.
+const PINS_FILE: &str = "pinned.txt";
+
+fn file_name(path: &Path) -> Option<String> {
+    path.file_name().and_then(|n| n.to_str()).map(str::to_string)
+}
+
+/// The pinned file names of `folder` whose files are there (a pin of a file gone, deleted
+/// by hand, is forgotten so a new file of that name is not pinned).
+fn pins(folder: &Path) -> std::collections::BTreeSet<String> {
+    std::fs::read_to_string(folder.join(PINS_FILE))
+        .unwrap_or_default()
+        .lines()
+        .map(str::trim)
+        .filter(|n| !n.is_empty() && folder.join(n).is_file())
+        .map(str::to_string)
+        .collect()
+}
+
+/// The save file is pinned.
+pub fn is_pinned(path: &Path) -> bool {
+    let (Some(folder), Some(name)) = (path.parent(), file_name(path)) else { return false };
+    pins(folder).contains(&name)
+}
+
+/// Pins or unpins a save file.
+pub fn set_pinned(path: &Path, on: bool) -> std::io::Result<()> {
+    let (Some(folder), Some(name)) = (path.parent(), file_name(path)) else { return Ok(()) };
+    let mut pins = pins(folder);
+    if on {
+        pins.insert(name);
+    } else {
+        pins.remove(&name);
+    }
+    let text: String = pins.iter().map(|n| format!("{n}\n")).collect();
+    std::fs::write(folder.join(PINS_FILE), text)
+}
+
+/// Deletes a save file, and its pin.
+pub fn delete(path: &Path) -> std::io::Result<()> {
+    std::fs::remove_file(path)?;
+    set_pinned(path, false)
 }
 
 /// Where a map save finds its scenario: the install folder and its content.
@@ -705,6 +770,51 @@ pub(crate) mod tests {
         let path = quick_save_path(&dir).unwrap();
         assert_eq!(path, paths[QUICK_SAVES_KEPT + 1]);
         assert_eq!(load(&path, c, None).unwrap().gold, 1000 + QUICK_SAVES_KEPT as i32 + 1, "the newest quick save");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_pinned_save_is_never_overwritten_and_comes_first() {
+        let dir = temp_dir("pins");
+        let mut g = Game::new(demo(), HeroClass::Knight);
+        let tick = || std::thread::sleep(std::time::Duration::from_millis(10));
+        // The oldest autosave pinned: the rotation goes around it.
+        let first = write(&dir, SaveKind::Auto, "auto 0", &g).unwrap();
+        tick();
+        set_pinned(&first, true).unwrap();
+        for k in 1..=AUTOSAVES_KEPT + 3 {
+            write(&dir, SaveKind::Auto, &format!("auto {k}"), &g).unwrap();
+            tick();
+        }
+        let autos = list(&dir, SaveKind::Auto);
+        assert_eq!(autos.len(), AUTOSAVES_KEPT + 1, "the pin is not counted");
+        assert_eq!((autos[0].path.clone(), autos[0].meta.name.as_str(), autos[0].pinned), (first.clone(), "auto 0", true), "first in the list");
+        // Its name reused before a battle: a new autosave, the pinned one stays.
+        write_autosave(&dir, "auto 0", &g, true).unwrap();
+        assert_eq!(read_meta(&first).unwrap().saved_at, autos[0].meta.saved_at);
+        // A pinned quick save is kept, and F9 still loads the newest.
+        let q = quick_save(&dir, &g).unwrap();
+        set_pinned(&q, true).unwrap();
+        tick();
+        for _ in 0..QUICK_SAVES_KEPT + 1 {
+            g.gold += 1;
+            quick_save(&dir, &g).unwrap();
+            tick();
+        }
+        assert!(q.exists() && is_pinned(&q));
+        assert_eq!(list(&dir, SaveKind::Manual).len(), QUICK_SAVES_KEPT + 1);
+        let newest = quick_save_path(&dir).unwrap();
+        assert_ne!(newest, q);
+        // A pinned own save cannot be saved over; unpinned, it can.
+        let mine = write(&dir, SaveKind::Manual, "Mine", &g).unwrap();
+        set_pinned(&mine, true).unwrap();
+        assert!(matches!(write(&dir, SaveKind::Manual, "Mine", &g), Err(SaveError::Pinned)));
+        set_pinned(&mine, false).unwrap();
+        write(&dir, SaveKind::Manual, "Mine", &g).unwrap();
+        // Deleting drops the pin: a new file of that name is not pinned.
+        set_pinned(&mine, true).unwrap();
+        delete(&mine).unwrap();
+        assert!(!is_pinned(&write(&dir, SaveKind::Manual, "Mine", &g).unwrap()));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -170,6 +170,7 @@ struct Row {
     name: String,
     scenario: String,
     time: String,
+    pinned: bool,
 }
 
 fn row_of(e: &SaveEntry) -> Row {
@@ -177,7 +178,19 @@ fn row_of(e: &SaveEntry) -> Row {
     let name = if m.name == save::QUICK_SAVE { tr(save::QUICK_SAVE).to_string() } else { m.name.clone() };
     // A game in which the cheat console worked says so after its scenario.
     let scenario = if m.cheats { razdor::trf!("{title} (cheats)", title = m.title) } else { m.title.clone() };
-    Row { name, scenario, time: razdor::trf!("Time: {date}", date = saved_label(m.saved_at)) }
+    Row { name, scenario, time: razdor::trf!("Time: {date}", date = saved_label(m.saved_at)), pinned: e.pinned }
+}
+
+/// Razdor's pin of a save: a round head with a needle, gold when pinned, grey when not.
+fn draw_pin(r: Rect, on: bool, hover: bool) {
+    let gold = Color::new(0.95, 0.78, 0.3, 1.0);
+    let grey = Color::new(0.75, 0.75, 0.75, if hover { 1.0 } else { 0.7 });
+    let c = if on { gold } else { grey };
+    let head = vec2(r.x + r.w * 0.62, r.y + r.h * 0.38);
+    let tip = vec2(r.x + r.w * 0.18, r.y + r.h * 0.85);
+    draw_line(head.x, head.y, tip.x, tip.y, (r.w * 0.09).max(1.5), Color::new(0.85, 0.85, 0.85, 1.0));
+    draw_circle(head.x, head.y, r.w * 0.27, Color::new(0.0, 0.0, 0.0, 0.6));
+    draw_circle(head.x, head.y, r.w * 0.22, c);
 }
 
 /// "2023 год, 1 месяц, 31 день, 13:01": when a file was saved, in the original's words.
@@ -247,8 +260,9 @@ impl Book {
         self.rect(17.0, 64.0 + i as f32 * 29.0, 560.0, 27.0)
     }
 
-    /// The rows from `scroll` on; returns the row clicked and the delete icon clicked.
-    fn rows(&self, rows: &[Row], selected: Option<usize>, scroll: &mut usize, deletable: bool) -> (Option<usize>, Option<usize>) {
+    /// The rows from `scroll` on; returns the row clicked, the delete icon clicked and the pin
+    /// icon clicked (`deletable`: the selected row has both icons).
+    fn rows(&self, rows: &[Row], selected: Option<usize>, scroll: &mut usize, deletable: bool) -> (Option<usize>, Option<usize>, Option<usize>) {
         let k = self.k;
         let list = self.rect(17.0, 64.0, 560.0, 29.0 * Book::ROWS as f32);
         if list.contains(crate::ui::widgets::pointer().into()) && !input_blocked() {
@@ -259,7 +273,7 @@ impl Book {
                 *scroll -= 1;
             }
         }
-        let (mut picked, mut delete) = (None, None);
+        let (mut picked, mut delete, mut pin) = (None, None, None);
         for (i, row) in rows.iter().enumerate().skip(*scroll).take(Book::ROWS) {
             let r = self.row_rect(i - *scroll);
             let hover = !input_blocked() && r.contains(crate::ui::widgets::pointer().into());
@@ -276,6 +290,16 @@ impl Book {
                     super::chrome::tex(&t, Rect::new(r.x + 4.0 * k, r.y + (r.h - sign) / 2.0, sign, sign), WHITE);
                 }
                 if deletable {
+                    // Razdor's pin, left of the delete sign.
+                    let p = Rect::new(r.x + r.w - 2.0 * sign - 10.0 * k, r.y + (r.h - sign) / 2.0, sign, sign);
+                    let over = p.contains(crate::ui::widgets::pointer().into()) && !input_blocked();
+                    draw_pin(p, row.pinned, over);
+                    if over {
+                        tooltip(&[(if row.pinned { tr("Unpin the save (P)") } else { tr("Pin the save (P): it is never overwritten and stays on top") }.to_string(), INK)]);
+                        if clicked() {
+                            pin = Some(i);
+                        }
+                    }
                     let d = Rect::new(r.x + r.w - sign - 4.0 * k, r.y + (r.h - sign) / 2.0, sign, sign);
                     let over = d.contains(crate::ui::widgets::pointer().into()) && !input_blocked();
                     if let Some(t) = super::chrome::win(if over && is_mouse_button_down(MouseButton::Left) { "LSign-Delete-Down" } else { "LSign-Delete" }) {
@@ -291,6 +315,10 @@ impl Book {
             } else if hover {
                 draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.1, 0.15, 0.45, 0.35));
             }
+            if row.pinned && !(deletable && selected == Some(i)) {
+                let sign = 18.0 * k;
+                draw_pin(Rect::new(r.x + 6.0 * k, r.y + (r.h - sign) / 2.0, sign, sign), true, false);
+            }
             let lh = r.h;
             super::dt_font::with_face(super::dt_font::Face::Title, || {
                 let size = fit_size(&row.name, 250.0 * k, 16.0 * k);
@@ -301,11 +329,11 @@ impl Book {
                 super::chrome::shadow_centered(&ellipsize(&row.scenario, 250.0 * k, 11.0 * k), cx, r.y + lh * 0.42, 11.0 * k, WHITE);
             });
             super::chrome::shadow_centered(&ellipsize(&row.time, 250.0 * k, 11.0 * k), cx, r.y + lh * 0.9, 11.0 * k, Color::new(0.85, 0.75, 0.45, 1.0));
-            if hover && clicked() && delete.is_none() {
+            if hover && clicked() && delete.is_none() && pin.is_none() {
                 picked = Some(i);
             }
         }
-        (picked, delete)
+        (picked, delete, pin)
     }
 
     /// A torn-parchment tab hanging under the book (`load-button-1/2.lit`: grey, and orange
@@ -359,9 +387,9 @@ pub fn save_screen(game: &Game, assets: &Assets, view: &mut SaveView, message: &
     // The first row is the name being typed (a new save, or the one it replaces).
     let caret = if (get_time() * 2.0) as i64 % 2 == 0 { "|" } else { " " };
     let typed = if view.name.is_empty() { own("Buttons", "NewSave", n_("(save anew)")) } else { format!("{}{caret}", view.name) };
-    let mut rows = vec![Row { name: typed, scenario: game.world.title.clone(), time: razdor::trf!("Time: {date}", date = game.clock.label()) }];
+    let mut rows = vec![Row { name: typed, scenario: game.world.title.clone(), time: razdor::trf!("Time: {date}", date = game.clock.label()), pinned: false }];
     rows.extend(view.entries.iter().map(row_of));
-    if let (Some(k), _) = book.rows(&rows, Some(same.map_or(0, |i| i + 1)), &mut view.scroll, false) {
+    if let (Some(k), _, _) = book.rows(&rows, Some(same.map_or(0, |i| i + 1)), &mut view.scroll, false) {
         view.name = if k == 0 { String::new() } else { view.entries[k - 1].meta.name.clone() };
     }
     let dir = save::default_dir();
@@ -407,7 +435,21 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
         super::chrome::shadow_centered(tr("No saves here yet."), p.x, p.y, 16.0 * book.k, super::chrome::CREAM);
     }
     let asking = view.confirm_delete.is_some();
-    let (picked, delete) = book.rows(&rows, Some(view.selected), &mut view.scroll, true);
+    let (picked, delete, pin) = book.rows(&rows, Some(view.selected), &mut view.scroll, true);
+    // Razdor's pin: the icon, or P for the selected save.
+    let pin = pin.or_else(|| key(KeyCode::P).then_some(view.selected));
+    if let Some(e) = pin.filter(|_| !asking).and_then(|k| view.entries.get(k)) {
+        let (path, on) = (e.path.clone(), !e.pinned);
+        if let Err(err) = save::set_pinned(&path, on) {
+            razdor::diag!("{}: {err}", path.display());
+        }
+        view.refresh();
+        // The save stays selected where the list now puts it.
+        if let Some(k) = view.entries.iter().position(|e| e.path == path) {
+            view.selected = k;
+            view.scroll = k.saturating_sub(Book::ROWS - 1);
+        }
+    }
     if let Some(k) = picked.filter(|_| !asking) {
         if k == view.selected {
             *pending = view.entries.get(k).map(|e| e.path.clone());
@@ -441,7 +483,7 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
         match delete_question(view.entries.get(k).map(|e| row_of(e).name).unwrap_or_default()) {
             Some(true) => {
                 if let Some(e) = view.entries.get(k) {
-                    if let Err(err) = std::fs::remove_file(&e.path) {
+                    if let Err(err) = save::delete(&e.path) {
                         razdor::diag!("{}: {err}", e.path.display());
                     }
                 }

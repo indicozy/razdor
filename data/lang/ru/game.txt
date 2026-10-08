@@ -345,3 +345,6 @@ Type, Ctrl+F = Набор, Ctrl+F
 market: filter the list (Enter picks the first, Esc clears) = рынок: отбор списка (Enter — первый, Esc — сброс)
 filter the backpack (Enter: the first to the unit, Esc clears) = отбор рюкзака (Enter — первый воину, Esc — сброс)
 there are {n} saves already: save over one or delete one = сохранений уже {n}: запишите поверх одного или удалите одно
+that save is pinned: unpin it first = это сохранение закреплено: сначала открепите его
+Unpin the save (P) = Открепить сохранение (P)
+Pin the save (P): it is never overwritten and stays on top = Закрепить сохранение (P): его ничто не перезапишет, и оно всегда сверху
