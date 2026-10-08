@@ -667,7 +667,7 @@ Razdor's code read for this table: `src/rules/map.rs`, `fog.rs`, `game.rs`, `wor
 | AI attack while waiting | AI attacks and greetings while his step flag is set: at the end of a step of his, and after a walk while he stands or waits (`Game::step_flag`, `HeroCells::boundary`); an attack's events run first and one that fires means no battle; no attack in a step with a greeting | the same: the flag (0x75e0c7) is written only by the walk timer (§4.3) | Matches |
 | Chase target unreachable | chase ends and the hero stops, also when the army's cell is in the dark; the new plan keeps the original click's buildings | chase ends and the hero stops (target cell tested after the fog is laid) | Matches |
 | Show army reveal | 3 cells | 3 cells (6 half-cells), growing | none |
-| Minimap size | 400×400 frame | 200 px under 100 cells wide, else 400 | small |
+| Minimap size | 400×400 frame by default; the player can drag its left and bottom edges or their corner to any size (kept in the settings; a double click on an edge restores the square), a player's request 2026-10-08 | 200 px under 100 cells wide, else 400 | small |
 | Minimap click | centres the view | clicked cell ~15 cells from the view corner | small |
 | Hero class change by event | sight, speed and cast divisor keep the starting class; a Community speed event sets his speed (`Game::start_class`, `speed_set`) | sight, speed and cast divisor keep the starting class (Community: an event may set the hero's speed directly) | Matches |
 
