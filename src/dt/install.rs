@@ -157,11 +157,18 @@ impl DtInstall {
 
     /// Load the install named by `RAZDOR_DT_DIR`.
     pub fn from_env() -> Result<DtInstall, DtError> {
-        let dir = locate().ok_or(DtError::NoInstallDir)?;
+        let Some(dir) = locate() else {
+            let own = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf));
+            set_problem(own.map(|dir| Problem::NotInstall { missing: missing(&dir), dir }));
+            return Err(DtError::NoInstallDir);
+        };
         let loaded = DtInstall::load(&dir);
         match &loaded {
             Ok(dt) => crate::diag!("install loaded: {} units, {} items, {} spells, {} maps", dt.units.len(), dt.artefacts.len(), dt.spells.len(), dt.maps.len()),
-            Err(e) => crate::diag!("install failed to load: {e}"),
+            Err(e) => {
+                crate::diag!("install failed to load: {e}");
+                set_problem(Some(Problem::Load(e.to_string())));
+            }
         }
         loaded
     }
@@ -187,6 +194,28 @@ impl DtInstall {
     }
 }
 
+/// Why no install could be used, for the player.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Problem {
+    /// The program's folder is not an install: what it lacks.
+    NotInstall { dir: PathBuf, missing: Vec<String> },
+    /// The install was found but a file of it failed to load.
+    Load(String),
+}
+
+static PROBLEM: std::sync::Mutex<Option<Problem>> = std::sync::Mutex::new(None);
+
+fn set_problem(why: Option<Problem>) {
+    if let Ok(mut p) = PROBLEM.lock() {
+        *p = why;
+    }
+}
+
+/// Why the last [`DtInstall::from_env`] found no install or could not load it.
+pub fn problem() -> Option<Problem> {
+    PROBLEM.lock().ok().and_then(|p| p.clone())
+}
+
 /// A Discord Times install: a folder holding the maps folder and the unit list.
 pub fn is_install(dir: &Path) -> bool {
     dir.join(MAPS_DIR).is_dir() && dir.join(UNITS_FILE).is_file()
@@ -197,6 +226,11 @@ pub fn why_not_install(dir: &Path) -> String {
     if !dir.is_dir() {
         return "no such folder".into();
     }
+    format!("missing {}", missing(dir).join(", "))
+}
+
+/// The folder and file of an install that `dir` lacks.
+pub fn missing(dir: &Path) -> Vec<String> {
     let mut missing = Vec::new();
     if !dir.join(MAPS_DIR).is_dir() {
         missing.push(format!("{MAPS_DIR}/"));
@@ -204,7 +238,7 @@ pub fn why_not_install(dir: &Path) -> String {
     if !dir.join(UNITS_FILE).is_file() {
         missing.push(UNITS_FILE.to_string());
     }
-    format!("missing {}", missing.join(", "))
+    missing
 }
 
 /// Where Razdor remembers the install folder: `$RAZDOR_CONFIG_DIR`, else the platform's

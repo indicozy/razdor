@@ -3,6 +3,7 @@ use macroquad::prelude::*;
 use std::sync::Arc;
 
 use razdor::dt::data::MagicSchool;
+use razdor::dt::install::Problem;
 use razdor::i18n::tr;
 use razdor::rules::battle::Team;
 use razdor::trf;
@@ -134,8 +135,18 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
             text(line, x, y + i as f32 * 22.0, 18.0, INK);
         }
     } else if !has_install {
-        let hint = tr("Discord Times not found: put the game in ~/Games, or start once with RAZDOR_DT_DIR set.");
+        let hint = tr("Discord Times not found: put Razdor into the game folder, next to DiscordTimes.exe.");
         text_centered(hint, screen_width() / 2.0, y + 20.0, 20.0, DIM);
+        let why = match razdor::dt::install::problem() {
+            Some(Problem::NotInstall { dir, missing }) => {
+                Some(trf!("This folder has no {missing}: {dir}", missing = missing.join(", "), dir = dir.display()))
+            }
+            Some(Problem::Load(e)) => Some(e),
+            None => None,
+        };
+        if let Some(why) = why {
+            text_fit(&why, x, y + 48.0, w, 16.0, DIM);
+        }
     }
     None
 }
