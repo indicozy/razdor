@@ -8,7 +8,7 @@
 //! hero sets off that many cells away), `building:<map>:<n>`
 //! (the hero in the n-th building; `:barracks`, `:garrison`, `:market` open that tab), `army:<map>[:<n>[:<unit id>[:<level>]]]` (squad member n selected, made that unit at that level), `journal:<map>`, `spells:<map>`,
 //! `menu:<map>`, `battle:<map>:<n>` (against the n-th army), `custom` (the custom battle
-//! setup), `custom-battle` (its first round; `custom-battle:watch` watches the AI play it). `RAZDOR_SCENE_SHOW=x,y,r` shows
+//! setup), `custom-battle` (its first round; `custom-battle:watch` watches the AI play it). `RAZDOR_SCENE_DEBUG=1` turns the map's debug overlay (F3) on; `RAZDOR_SCENE_SHOW=x,y,r` shows
 //! a place as a lantern event does; `RAZDOR_SCENE_CONSOLE=help;gold 100` opens the cheat
 //! console after those commands; `RAZDOR_SCENE_FILTER=text` fills the inventory filter
 //! (army screen, market); `RAZDOR_SCENE_QUIET=1` drops
@@ -218,6 +218,10 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
         (n.len() == 3).then(|| (n[0], n[1], n[2]))
     }) {
         game.reveal_area((x, y), r);
+    }
+    // `RAZDOR_SCENE_DEBUG=1`: the map's debug overlay (F3) on.
+    if std::env::var("RAZDOR_SCENE_DEBUG").is_ok_and(|v| !v.is_empty()) {
+        app.map_view.debug = true;
     }
     let arg = parts.next();
     let n = || arg.and_then(|a| a.parse::<usize>().ok()).ok_or("no index given");

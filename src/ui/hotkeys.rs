@@ -125,6 +125,7 @@ pub fn screen_keys(place: Place) -> Vec<(&'static str, &'static str)> {
             (n_("Click / any key while waiting"), n_("stop after the half hour under way")),
             (n_("Click where you stand"), n_("the building again, or its garrison's battle")),
             ("M", n_("minimap")),
+            ("F3", n_("debug: event points, lanterns, events of places")),
             ("Tab", n_("centre the camera on the hero")),
             ("J", n_("journal")),
             ("B", n_("spell book")),

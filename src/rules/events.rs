@@ -903,6 +903,11 @@ impl EventEngine {
         }
     }
 
+    /// The events listed at a place (a building or an event point), in the map's order.
+    pub fn events_at(&self, place: Place) -> &[EventId] {
+        self.places.get(&place).map_or(&[], Vec::as_slice)
+    }
+
     /// How many times the event fired (a No answer included).
     pub fn times_fired(&self, id: EventId) -> u32 {
         self.event(id).map_or(0, |_| self.st(id).times)

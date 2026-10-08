@@ -60,6 +60,8 @@ pub struct MapView {
     pub zoom: f32,
     /// The minimap window is open.
     pub minimap: bool,
+    /// Razdor's debug overlay (F3): event points, lanterns and the events of each place.
+    pub debug: bool,
     /// Where the camera looks when moved by the minimap (world units); `None` follows the hero.
     pub look: Option<(f32, f32)>,
     /// Places the scenario's events have shown (lanterns, shown armies), first in line: the
@@ -96,7 +98,7 @@ pub struct MapView {
 
 impl Default for MapView {
     fn default() -> Self {
-        MapView { zoom: 1.0, minimap: false, look: None, shows: VecDeque::new(), returning: None, opening: None, spell_fx: VecDeque::new(), preview: None, last_frame_ms: None, back_to: None, centring: None, grab: None, toasts: VecDeque::new() }
+        MapView { zoom: 1.0, minimap: false, debug: false, look: None, shows: VecDeque::new(), returning: None, opening: None, spell_fx: VecDeque::new(), preview: None, last_frame_ms: None, back_to: None, centring: None, grab: None, toasts: VecDeque::new() }
     }
 }
 
@@ -1615,9 +1617,12 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
         view.zoom = (view.zoom / 1.2).max(0.4);
     }
 
-    // M toggles the minimap.
+    // M toggles the minimap; F3 Razdor's debug overlay.
     if key(KeyCode::M) {
         view.minimap = !view.minimap;
+    }
+    if key(KeyCode::F3) {
+        view.debug = !view.debug;
     }
     // Places the scenario has just shown wait in line (dark until their turn). Tab or a
     // click on the map skips the showing; Tab: the camera back on the hero (after the
@@ -1833,6 +1838,9 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
         }
     }
 
+    if view.debug {
+        draw_debug(game, &cam);
+    }
     let (bar, toggle_map, timed) = bottom_bar(game, message, view.minimap, time_buttons && !game.waiting());
     next = next.or(bar);
     // A time button pressed (its sound played): a wait, or the view's glide back to the hero
@@ -1899,6 +1907,108 @@ fn draw_toasts(toasts: &mut VecDeque<(String, f64)>, now: f64) {
         draw_rectangle_lines(cx - w / 2.0, y, w, h, 1.0, Color { a: 0.5 * a, ..super::chrome::SILVER });
         text_centered(m, cx, y + h * 0.5 + size * 0.36, size, Color { a, ..ACCENT });
         y -= h + gap;
+    }
+}
+
+/// The events listed at `place` as lines "E12 «title» ×2" (`×n`: times fired).
+fn debug_events(game: &Game, place: razdor::rules::events::Place) -> Vec<String> {
+    let Some(e) = game.script() else { return Vec::new() };
+    e.events_at(place)
+        .iter()
+        .map(|&id| {
+            let title = e.event(id).map_or("", |ev| ev.title_text().trim());
+            let times = e.times_fired(id);
+            if times > 0 {
+                format!("E{id} «{title}» ×{times}")
+            } else {
+                format!("E{id} «{title}»")
+            }
+        })
+        .collect()
+}
+
+/// Razdor's debug overlay (F3): every event point and lantern with its id, radius and
+/// events, the buildings' events, and a panel with the hero's and the pointer's cells and the
+/// events of the place under the pointer. Drawn through the fog.
+fn draw_debug(game: &Game, cam: &Camera) {
+    use razdor::rules::events::Place;
+    let size = 13.0;
+    let label_rect = |lines: &[String], at: Vec2| {
+        let w = lines.iter().map(|l| measure(l, size).width).fold(0.0, f32::max) + 8.0;
+        Rect::new(at.x, at.y, w, lines.len() as f32 * (size + 2.0) + 4.0)
+    };
+    let label = |lines: &[String], at: Vec2, colour: Color| {
+        let r = label_rect(lines, at);
+        draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, 0.0, 0.0, 0.7));
+        for (i, l) in lines.iter().enumerate() {
+            text(l, at.x + 4.0, at.y + (i as f32 + 1.0) * (size + 2.0) - 2.0, size, if i == 0 { colour } else { WHITE });
+        }
+    };
+    // Labels in the way of one drawn already shrink to their first line, or are left out
+    // (the panel shows the place under the pointer in full).
+    let mut taken: Vec<Rect> = Vec::new();
+    let mut place_label = |lines: &[String], at: Vec2, colour: Color| {
+        for n in [lines.len(), 1] {
+            let r = label_rect(&lines[..n], at);
+            if !taken.iter().any(|t| t.overlaps(&r)) {
+                label(&lines[..n], at, colour);
+                taken.push(r);
+                return;
+            }
+        }
+    };
+    let cell = cam.cell_size();
+    let under = cam.tile_under_mouse();
+    let mut place_under = None;
+    for p in &game.world.points {
+        let c = cam.cell_centre(p.tile);
+        if !cam.view.contains(c) {
+            continue;
+        }
+        let colour = if p.radius > 0 { Color::new(1.0, 0.85, 0.2, 1.0) } else { Color::new(0.3, 0.9, 1.0, 1.0) };
+        if p.radius > 0 {
+            draw_circle_lines(c.x, c.y, (p.radius as f32 + 0.5) * cell.x, 1.0, Color::new(colour.r, colour.g, colour.b, 0.5));
+        }
+        draw_rectangle_lines(c.x - cell.x / 2.0, c.y - cell.y / 2.0, cell.x, cell.y, 2.0, colour);
+        draw_circle(c.x, c.y, 4.0, colour);
+        let kind = if p.radius > 0 { trf!("lantern r{r}{lit}", r = p.radius, lit = if p.lit { tr(", lit") } else { "" }) } else { tr("event point").to_string() };
+        let mut lines = vec![format!("#{} {kind} ({}, {})", p.id, p.tile.0, p.tile.1)];
+        lines.extend(debug_events(game, Place::Point(p.id)));
+        place_label(&lines, c + vec2(6.0, 6.0), colour);
+        if under == Some(p.tile) {
+            place_under = Some((lines, colour));
+        }
+    }
+    for (l, loc) in game.world.locations.iter().enumerate() {
+        if loc.id == 0 {
+            continue;
+        }
+        let events = debug_events(game, Place::Building(loc.id));
+        let over = under.is_some_and(|t| game.world.location_covering(t) == Some(l));
+        if events.is_empty() && !over {
+            continue;
+        }
+        let c = cam.cell_centre(loc.anchor);
+        let mut lines = vec![format!("B{} {} ({}, {})", loc.id, loc.name.trim(), loc.anchor.0, loc.anchor.1)];
+        lines.extend(events);
+        let colour = Color::new(1.0, 0.55, 0.85, 1.0);
+        if cam.view.contains(c) && lines.len() > 1 {
+            place_label(&lines, c + vec2(-40.0, -cell.y), colour);
+        }
+        if over {
+            place_under = Some((lines, colour));
+        }
+    }
+    // The panel.
+    let mut lines = vec![tr("Debug (F3)").to_string()];
+    lines.push(trf!("Hero at ({x}, {y}), {time}", x = game.tile().0, y = game.tile().1, time = game.clock.label()));
+    if let Some(t) = under {
+        lines.push(trf!("Pointer at ({x}, {y})", x = t.0, y = t.1));
+    }
+    let panel = vec2(cam.view.x + 8.0, cam.view.y + 8.0);
+    label(&lines, panel, Color::new(1.0, 0.4, 0.4, 1.0));
+    if let Some((under, colour)) = place_under {
+        label(&under, panel + vec2(0.0, lines.len() as f32 * (size + 2.0) + 10.0), colour);
     }
 }
 
