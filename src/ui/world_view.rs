@@ -1036,6 +1036,7 @@ struct Tooltip {
     troops: Vec<Troop>,
     team: Team,
     footer: Vec<(String, Color)>,
+    style: TipStyle,
 }
 
 /// A text of the install (`[Info] <key>`) in Russian, else ours.
@@ -1046,8 +1047,13 @@ fn info(key: &str, ours: &'static str) -> String {
 
 /// The name colour of the original's tooltips (the leader, the owner).
 const TIP_NAME: Color = Color::new(0.45, 1.0, 0.5, 1.0);
-/// Its orange notes ("(дань уже собрана)").
+/// Its orange notes ("(дань уже собрана)"), and the names in the hostile frame.
 const TIP_NOTE: Color = Color::new(1.0, 0.62, 0.25, 1.0);
+/// The labels ("Владелец") in the hostile frame: white less (20, 90, 180) (font 0xae24c4).
+const TIP_LABEL_HOSTILE: Color = Color::new(0.92, 0.65, 0.29, 1.0);
+/// Names and labels in the neutral frame: white less (80, 80, ...) and (100, 100, 100).
+const TIP_NAME_NEUTRAL: Color = Color::new(0.69, 0.69, 0.69, 1.0);
+const TIP_LABEL_NEUTRAL: Color = Color::new(0.61, 0.61, 0.61, 1.0);
 
 /// The original's army tooltip: its name, its 2×6 cards, "Предводитель" and the leader's
 /// name, the description; world spells on it and their wounds (Razdor's) under that.
@@ -1075,7 +1081,10 @@ fn army_tooltip(game: &Game, a: &Army) -> Tooltip {
     if hurt > 0 {
         footer.push((trf!("Wounded by magic: -{hurt} hits", hurt), MANA));
     }
-    Tooltip { title, lines: Vec::new(), troops: a.troops.clone(), team: if a.hostile() { Team::Enemy } else { Team::Player }, footer }
+    // 0x4ca9f0: the hostile frame and colours for an army whose attitude to the player is
+    // below 1, neutral ones (0) included.
+    let style = if a.attitude < 1 { TipStyle::Hostile } else { TipStyle::Normal };
+    Tooltip { title, lines: Vec::new(), troops: a.troops.clone(), team: if a.hostile() { Team::Enemy } else { Team::Player }, footer, style }
 }
 
 /// The original's building tooltip: its name, "Владелец" and the owner's name, the
@@ -1115,7 +1124,29 @@ fn location_tooltip(game: &Game, l: &Location) -> Tooltip {
         }
     }
     let team = if l.owned() { Team::Player } else { Team::Enemy };
-    Tooltip { title, lines, troops, team, footer: Vec::new() }
+    Tooltip { title, lines, troops, team, footer: Vec::new(), style: location_tip_style(l) }
+}
+
+/// The frame of a building's tooltip (0x4cb18c): neutral for bridges; for a castle, fort or
+/// ruins the player does not own, hostile when its attitude to him is below 1 and always for
+/// ruins, but neutral for ruins with no one left in them. Every other building (villages,
+/// churches, taverns, towns...) keeps the normal frame, whoever holds it.
+fn location_tip_style(l: &Location) -> TipStyle {
+    use LocationKind as K;
+    match l.kind {
+        K::StoneBridge | K::WoodenBridge => TipStyle::Neutral,
+        K::Castle | K::Fort | K::Ruins if !l.owned() => {
+            let guarded = !l.cleared && l.garrison.iter().any(|t| t.alive());
+            if l.kind == K::Ruins && !guarded {
+                TipStyle::Neutral
+            } else if l.attitude < 1 || l.kind == K::Ruins {
+                TipStyle::Hostile
+            } else {
+                TipStyle::Normal
+            }
+        }
+        _ => TipStyle::Normal,
+    }
 }
 
 fn draw_tooltip(game: &Game, assets: &Assets, t: &Tooltip) {
@@ -1131,7 +1162,16 @@ fn draw_tooltip(game: &Game, assets: &Assets, t: &Tooltip) {
     let big = |c: Color| c == TIP_NAME || c == TIP_NOTE;
     let size = |c: Color| if big(c) { 16.0 * k } else { 12.0 * k };
     let face = |c: Color| if big(c) { Face::Title } else { Face::Body };
-    let shown = |c: Color| if c == INK { CREAM } else { c };
+    // The style's colours (0x4ca9f0, 0x4cb18c): in the hostile frame names and labels are
+    // orange (fonts 0xae24a4, 0xae24c4), in the neutral one grey (0xae24b8, 0xae24d0).
+    let shown = |c: Color| match (t.style, c) {
+        (_, c) if c == INK => CREAM,
+        (TipStyle::Hostile, c) if c == TIP_NAME => TIP_NOTE,
+        (TipStyle::Hostile, c) if c == DIM => TIP_LABEL_HOSTILE,
+        (TipStyle::Neutral, c) if c == TIP_NAME => TIP_NAME_NEUTRAL,
+        (TipStyle::Neutral, c) if c == DIM => TIP_LABEL_NEUTRAL,
+        (_, c) => c,
+    };
     let width = |s: &str, c: Color| with_face(face(c), || measure(s, size(c)).width);
     let title_size = 16.0 * k;
     let w = [with_face(Face::Title, || measure(&t.title, title_size).width) + 90.0 * k, grid_w + 24.0 * k, 250.0 * k]
@@ -1146,13 +1186,15 @@ fn draw_tooltip(game: &Game, assets: &Assets, t: &Tooltip) {
     let (mx, my) = crate::ui::widgets::pointer();
     let x = (mx + 18.0).min(screen_width() - w - 4.0);
     let y = (my + 18.0).min(screen_height() - bar_h() - h - 4.0).max(2.0);
-    tooltip_panel(Rect::new(x, y, w, h));
+    tooltip_panel_styled(Rect::new(x, y, w, h), t.style);
     // The title strip with the ornaments at its ends.
     draw_rectangle(x + 2.0, y + 2.0, w - 4.0, bar - 2.0, Color::new(0.0, 0.0, 0.0, 0.25));
     if let Some(orn) = super::chrome::win_fx("Corner-Left", super::chrome::Fx::KeyBlack) {
         let oh = bar * 0.8;
         let ow = orn.width() * oh / orn.height();
-        let tint = Color::new(0.55, 0.8, 0.7, 0.8);
+        // The hostile frame has its own pair of end pieces (0xae255c/60), tinted as in
+        // Razdor's red windows; the neutral one keeps the normal pair (0xae2554/58).
+        let tint = if t.style == TipStyle::Hostile { Color::new(1.0, 0.45, 0.1, 0.9) } else { Color::new(0.55, 0.8, 0.7, 0.8) };
         super::chrome::tex(&orn, Rect::new(x + 4.0 * k, y + (bar - oh) / 2.0, ow, oh), tint);
         if let Some(r) = super::chrome::win_fx("Corner-Right", super::chrome::Fx::KeyBlack) {
             super::chrome::tex(&r, Rect::new(x + w - ow - 4.0 * k, y + (bar - oh) / 2.0, ow, oh), tint);
@@ -1724,6 +1766,38 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// РК1's buildings get the original's tooltip frames (0x4cb18c): its two ruins, guarded
+    /// and hostile, the red one, as the player saw «Развалины» should be; Bonitur's castle,
+    /// friendly (2), the normal one; the bridges the neutral one; the villages and the church
+    /// the normal one whoever holds them.
+    #[test]
+    fn rk1_buildings_take_the_originals_tooltip_frames() {
+        let Some(dir) = std::env::var_os(razdor::dt::install::ENV_VAR) else { return };
+        let dt = razdor::dt::install::DtInstall::load(std::path::Path::new(&dir)).unwrap();
+        let m = dt.maps.iter().find(|m| m.name.starts_with("РК1")).unwrap();
+        let content = std::sync::Arc::new(razdor::rules::content::Content::from_dt(&dt));
+        let g = Game::from_scenario(content, &m.load().unwrap(), HeroClass::Knight);
+        let style = |name: &str| location_tip_style(g.world.locations.iter().find(|l| l.name == name).unwrap());
+        assert_eq!(style("Развалины"), TipStyle::Hostile);
+        assert_eq!(style("Древние руины"), TipStyle::Hostile);
+        assert_eq!(style("Замок Бонитур"), TipStyle::Normal);
+        assert_eq!(style("Замок Черной скалы"), TipStyle::Normal, "the hero's own");
+        assert_eq!(style("Каменный мост"), TipStyle::Neutral);
+        for name in ["Деревня Упокоище", "Церковь Трех Святых", "Деревня Васильки"] {
+            assert_eq!(style(name), TipStyle::Normal, "{name}");
+        }
+        // Ruins nobody guards any more: neutral.
+        let mut ruins = g.world.locations.iter().find(|l| l.name == "Развалины").unwrap().clone();
+        ruins.cleared = true;
+        assert_eq!(location_tip_style(&ruins), TipStyle::Neutral);
+        // A castle not owned and at attitude 0 is hostile; owned, normal whatever its attitude.
+        let mut castle = g.world.locations.iter().find(|l| l.name == "Замок Бонитур").unwrap().clone();
+        castle.attitude = 0;
+        assert_eq!(location_tip_style(&castle), TipStyle::Hostile);
+        castle.owner = razdor::rules::world::Owner::Player;
+        assert_eq!(location_tip_style(&castle), TipStyle::Normal);
+    }
 
     /// The centre button's glide (0x4af96c): 900 ms, the cosine ease in the original's
     /// whole steps of 1/900.

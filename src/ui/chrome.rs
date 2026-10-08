@@ -638,6 +638,18 @@ pub fn surface_alpha(r: Rect, skin: Skin, alpha: f32) {
     tile(&noise_texture(), r, 2.0, Color::new(lift(base.r), lift(base.g), lift(base.b), alpha));
 }
 
+/// The original's neutral frame (style 2 of 0x48d3f8): the green marble with its green
+/// channel in all three (0x48dd40) scaled ×1, ×0.67, ×0.44 (0x48da5c), a dull brown. Razdor
+/// greys the marble by its brightness, near enough to its green.
+pub fn neutral_surface_alpha(r: Rect, alpha: f32) {
+    let (r_, g, b) = (1.0, 0x2aa as f32 / 1024.0, 0x1c7 as f32 / 1024.0);
+    if let Some(t) = win_fx("Win-marble", Fx::Grey) {
+        tile(&t, r, k().min(1.4), Color::new(r_, g, b, alpha));
+        return;
+    }
+    tile(&noise_texture(), r, 2.0, Color::new(0.6 * r_, 0.6 * g, 0.6 * b, alpha));
+}
+
 /// The silver edge of windows and panels (outer light line, inner dark line).
 pub fn silver_frame(r: Rect, width: f32) {
     draw_rectangle_lines(r.x, r.y, r.w, r.h, width, SILVER);

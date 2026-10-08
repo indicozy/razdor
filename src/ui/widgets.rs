@@ -279,9 +279,39 @@ pub fn tooltip(lines: &[(String, Color)]) {
 
 /// The translucent green-marble panel of hover tooltips, with a silver edge.
 pub fn tooltip_panel(r: Rect) {
+    tooltip_panel_styled(r, TipStyle::Normal);
+}
+
+/// The three frames of the original's map tooltips (0x4ca8ac → 0x48d3f8 styles 0, 1, 2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TipStyle {
+    /// Green marble (`Win-marble`).
+    Normal,
+    /// Red marble (`Win-red`): an army or building that is not friendly.
+    Hostile,
+    /// Dull brown marble: bridges, ruins nobody guards.
+    Neutral,
+}
+
+/// [`tooltip_panel`] in one of the original's styles.
+pub fn tooltip_panel_styled(r: Rect, style: TipStyle) {
+    use super::chrome::Skin;
     // Translucent marble: the ground shows through, as in the original's map tooltips.
-    super::chrome::surface_alpha(r, super::chrome::Skin::Marble, 0.72);
-    draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, 0.05, 0.03, 0.2));
+    let shade = match style {
+        TipStyle::Normal => {
+            super::chrome::surface_alpha(r, Skin::Marble, 0.72);
+            Color::new(0.0, 0.05, 0.03, 0.2)
+        }
+        TipStyle::Hostile => {
+            super::chrome::surface_alpha(r, Skin::Red, 0.72);
+            Color::new(0.05, 0.0, 0.0, 0.2)
+        }
+        TipStyle::Neutral => {
+            super::chrome::neutral_surface_alpha(r, 0.72);
+            Color::new(0.03, 0.02, 0.0, 0.2)
+        }
+    };
+    draw_rectangle(r.x, r.y, r.w, r.h, shade);
     super::chrome::silver_frame(r, 1.5);
 }
 
