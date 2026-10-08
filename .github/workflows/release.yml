@@ -131,5 +131,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" --title "Razdor ${GITHUB_REF_NAME#v}" --notes-file notes.md \
+          gh release create "$GITHUB_REF_NAME" --title "Раздор ${GITHUB_REF_NAME#v}" --notes-file notes.md \
             dist/Razdor.exe dist/razdor dist/razdor-macos dist/SHA256SUMS
