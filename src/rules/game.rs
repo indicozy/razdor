@@ -405,6 +405,9 @@ pub struct Game {
     /// The events of a stretch whose window still plays on screen ([`Game::tick_shown`]).
     #[serde(skip)]
     pub(crate) held: Vec<(u64, Event)>,
+    /// The places events showed in such a stretch: their flights wait with the windows.
+    #[serde(skip)]
+    pub(crate) held_shown: Vec<(u64, Shown)>,
     /// Game minutes of the last stretch (a hero's step or a wait tick), for drawing: the
     /// armies' walk frames follow the game time inside it ([`Game::army_walk_frame`]).
     #[serde(skip)]
@@ -557,6 +560,7 @@ impl Game {
             hero_glide: None,
             stretches: 0,
             held: Vec::new(),
+            held_shown: Vec::new(),
             stretch_minutes: 0.0,
             snap_due: false,
             snapped: false,
@@ -1184,12 +1188,20 @@ impl Game {
     /// come at the end of the step; an attacking army is seen arriving. The rules' order is
     /// the same; only what the player sees waits.
     pub fn tick_shown(&mut self, real_dt: f32) -> Vec<Event> {
+        let before = self.shown.len();
         let events = self.tick(real_dt);
         let now = self.stretches;
         self.held.extend(events.into_iter().map(|e| (now, e)));
+        // A lantern or a shown army of the stretch waits too: its flight comes at its
+        // event's OK (0x4ab1ec), so its window must be up first.
+        let shown: Vec<Shown> = self.shown.drain(before..).collect();
+        self.held_shown.extend(shown.into_iter().map(|s| (now, s)));
         let playing = self.step_playing();
         let (out, keep): (Vec<_>, Vec<_>) = std::mem::take(&mut self.held).into_iter().partition(|&(w, _)| w < now || !playing);
         self.held = keep;
+        let (due, keep): (Vec<_>, Vec<_>) = std::mem::take(&mut self.held_shown).into_iter().partition(|&(w, _)| w < now || !playing);
+        self.held_shown = keep;
+        self.shown.extend(due.into_iter().map(|(_, s)| s));
         out.into_iter().map(|(_, e)| e).collect()
     }
 
