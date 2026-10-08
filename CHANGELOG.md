@@ -14,6 +14,15 @@ old id, and their versions give both.
 
 ## 0.3.13 — 2026-10-08
 
+Commit `c61cbfa` (tag `v0.3.13`).
+
+SHA-256 of the released programs (built by the release pipeline):
+```
+0ee5086163ff517b9d2c951447fbb3bc0584c61babbfad95054cc4fa5f10574e  razdor
+033d56b5818f8c6120a95011a536e726206dc74059ee687ab2073ae106f03e72  Razdor.exe
+48fea8d168a07c9a573e45a1d53bf1b01ab56c7e32b180d6080390fe05295d3b  razdor-macos
+```
+
 ### Changed
 - **Stepping onto a friendly army is a battle again when the map has no event for it**, as
   in the original (seen on a fort garrison that only said "lets you pass"). Razdor had let
