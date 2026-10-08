@@ -382,7 +382,8 @@ fn advanced_window(audio: &mut super::audio::Settings) -> bool {
     }
     let ok = Rect::new(inner.x + inner.w - 120.0 * k, inner.y + inner.h - 44.0 * k, 96.0 * k, 28.0 * k);
     let over_ok = ok.contains(crate::ui::widgets::pointer().into()) && !input_blocked();
-    chrome::marble_button(ok, &own("Buttons", "Ok", n_("OK")), true, over_ok);
+    let ok_label = own("Buttons", "Ok", n_("OK"));
+    chrome::marble_button(ok, &ok_label, true, over_ok);
     closed || key(KeyCode::Escape) || key(KeyCode::Enter) || (over_ok && clicked())
 }
 
