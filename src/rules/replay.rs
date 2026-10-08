@@ -491,6 +491,59 @@ fn play_rk3(d: &mut Driver) {
     d.step("an hour on", &[32]);
 }
 
+/// РК1, the church's first visit as the screen plays it ([`Game::tick_shown`], a frame at a
+/// time, time standing still while a window is open, each window read in turn): event 8
+/// chains 9 (the priest's request, a quest, with a lantern on Bonitur's castle), whose OK
+/// chains 10 (his advice). The original shows 9's window, at its OK the lantern's flight,
+/// then 10's window (FINDINGS §22). The step's windows came after its playback while the
+/// lantern's place, and the release of a window not yet queued, did not wait: the flight
+/// came first and 10's window before 9's.
+#[test]
+fn rk1_church_windows_come_in_the_originals_order() {
+    let Some(dt) = install() else { return };
+    let c = content(&dt);
+    let mut d = Driver::new(&dt, &c, "РК1", HeroClass::Knight);
+    d.enter(1);
+    d.enter(4);
+    assert!(!d.has_fired(9));
+    let church = d.loc_index(5);
+    assert!(d.g.set_destination(d.g.world.locations[church].tile));
+    let mut windows: Vec<EventId> = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
+    let take = |events: Vec<Event>, windows: &mut Vec<EventId>, seen: &mut Vec<String>| {
+        for e in events {
+            if let Event::Script(EventOutcome::Fired { event, message: true }) = e {
+                windows.push(event);
+                seen.push(format!("window {event}"));
+            }
+        }
+    };
+    for frame in 0..20_000 {
+        if windows.is_empty() {
+            let mut ev = d.g.drain_events();
+            if ev.is_empty() {
+                ev = d.g.tick_shown(1.0 / 60.0);
+            }
+            take(ev, &mut windows, &mut seen);
+        }
+        for s in std::mem::take(&mut d.g.shown) {
+            seen.push(format!("show {}", s.event.unwrap_or(0)));
+        }
+        take(d.g.release_unshown_window(!windows.is_empty()), &mut windows, &mut seen);
+        // A window is read a few frames after it opens.
+        if frame % 10 == 9 && !windows.is_empty() {
+            let id = windows.remove(0);
+            seen.push(format!("ok {id}"));
+            take(d.g.event_window_closed(), &mut windows, &mut seen);
+        }
+        if d.has_fired(10) && windows.is_empty() && !d.g.moving() && d.g.held.is_empty() {
+            break;
+        }
+    }
+    let church: Vec<&str> = seen.iter().map(String::as_str).skip_while(|s| *s != "window 9" && *s != "show 9" && *s != "window 10").collect();
+    assert_eq!(church, ["window 9", "show 9", "ok 9", "window 10", "ok 10"], "{seen:?}");
+}
+
 /// РК1 both ways: the Yes to the herald and the No (the herald waits at the inn; the inn's
 /// event chains the victory, whose own condition is the Yes).
 #[test]

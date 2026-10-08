@@ -145,10 +145,11 @@ impl Game {
     }
 
     /// The interface shows no scenario event's window (`shown` false) though the engine waits
-    /// for one to be closed, and no event waits to be drained: the scan goes on as if it had
-    /// been closed (a safety net for an outcome the screen did not turn into a window).
+    /// for one to be closed, and no event waits to be drained or for its step to play
+    /// ([`Game::tick_shown`]): the scan goes on as if it had been closed (a safety net for an
+    /// outcome the screen did not turn into a window).
     pub fn release_unshown_window(&mut self, shown: bool) -> Vec<Event> {
-        if shown || !self.pending.is_empty() || !self.script.as_ref().is_some_and(|s| s.holds_window()) {
+        if shown || !self.pending.is_empty() || !self.held.is_empty() || !self.script.as_ref().is_some_and(|s| s.holds_window()) {
             return Vec::new();
         }
         self.event_window_closed()
