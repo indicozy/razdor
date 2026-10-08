@@ -81,6 +81,12 @@ impl Rng {
     #[track_caller]
     pub fn random(&mut self, n: i32) -> i32 {
         trace::record(self.0, n);
+        self.untraced(n)
+    }
+
+    /// [`Rng::random`] left out of the draw trace, for drawing (which the original does not
+    /// do with this generator).
+    fn untraced(&mut self, n: i32) -> i32 {
         self.0 = self.0.wrapping_mul(214_013).wrapping_add(2_531_011);
         if n == 0 {
             return 0;
@@ -101,7 +107,7 @@ impl Rng {
     /// array) in row-major order whose object word (class in the high byte) is a plant
     /// (classes 9–11), the state is set from the cell's hash, then the x offset, the y offset
     /// and the sway phase are drawn. The hash takes the column in that wider row, as the
-    /// original does. Only the stream is kept (the offsets are not drawn on the map yet).
+    /// original does. Only the stream is kept here; the map draws the offsets by [`plant_offset`].
     /// Returns whether any plant re-seeded it.
     pub fn jitter_plants(&mut self, w: i32, cells: &[u16]) -> bool {
         let stride = (w + CELL_PAD_X).max(1);
@@ -150,6 +156,16 @@ pub fn plant_hash(x: i32, y: i32, word: u16) -> u32 {
     let (x, y) = (x as f64, y as f64);
     let v = (800.0 * y + x).sin() * 1e6 + (600.0 * x + y).cos() * 1e4 + word as f64;
     v.trunc() as i64 as u32
+}
+
+/// The offset in pixels, right and down, at which the original draws plant `word` (classes
+/// 9–11) on cell `(x, y)` (0x4cfb24, 0x483344): from the cell's seed, `28 − Random(16)` on
+/// even rows or `4 + Random(16)` on odd ones, then `Random(11)`. The same draws as
+/// [`Rng::jitter_plants`], made again for the picture and kept out of the draw trace.
+pub fn plant_offset(x: i32, y: i32, word: u16) -> (i32, i32) {
+    let mut r = Rng::new(plant_hash(x, y, word));
+    let dx = if y % 2 == 0 { 28 - r.untraced(16) } else { 4 + r.untraced(16) };
+    (dx, r.untraced(11))
 }
 
 /// The original's cell array is 8 cells wider and 2 rows taller than the map (saves-data
