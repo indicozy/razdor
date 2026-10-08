@@ -56,8 +56,8 @@ pub const OLDEST_VERSION: u32 = 1;
 pub const EXTENSION: &str = "rzsave";
 /// Overrides the save folder (tests, portable installs).
 pub const DIR_ENV: &str = "RAZDOR_SAVE_DIR";
-/// Autosaves kept, as the original's 12 slots.
-pub const AUTOSAVES_KEPT: usize = 12;
+/// Autosaves kept: 30, Razdor's (the original keeps 12), reused as the original reuses them.
+pub const AUTOSAVES_KEPT: usize = 30;
 const MANUAL_DIR: &str = "manual";
 const AUTO_DIR: &str = "auto";
 
@@ -688,22 +688,22 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn autosaves_take_the_originals_twelve_slots() {
+    fn autosaves_reuse_slots_as_the_original() {
         // 0x4b7410: the same name (and map) is reused; with no match a new one while there
-        // are fewer than 12, else the oldest is overwritten.
+        // are fewer than AUTOSAVES_KEPT (Razdor 30, the original 12), else the oldest is overwritten.
         let dir = temp_dir("auto");
         let g = Game::new(demo(), HeroClass::Ranger);
         let names = |dir: &Path| list(dir, SaveKind::Auto).iter().map(|s| s.meta.name.clone()).collect::<Vec<_>>();
         for k in 0..AUTOSAVES_KEPT {
             write(&dir, SaveKind::Auto, &format!("auto {k}"), &g).unwrap();
         }
-        assert_eq!(names(&dir).len(), 12);
+        assert_eq!(names(&dir).len(), AUTOSAVES_KEPT);
         write(&dir, SaveKind::Auto, "auto 3", &g).unwrap();
         let now = names(&dir);
-        assert_eq!((now.len(), now[0].as_str(), now.iter().filter(|n| *n == "auto 3").count()), (12, "auto 3", 1), "reused");
+        assert_eq!((now.len(), now[0].as_str(), now.iter().filter(|n| *n == "auto 3").count()), (AUTOSAVES_KEPT, "auto 3", 1), "reused");
         write(&dir, SaveKind::Auto, "new", &g).unwrap();
         let now = names(&dir);
-        assert_eq!((now.len(), now[0].as_str()), (12, "new"));
+        assert_eq!((now.len(), now[0].as_str()), (AUTOSAVES_KEPT, "new"));
         assert!(!now.contains(&"auto 0".to_string()), "the oldest was overwritten");
         // Outside a battle the map title must match too; before a battle the name alone.
         let mut other = Game::new(demo(), HeroClass::Ranger);
@@ -714,7 +714,7 @@ pub(crate) mod tests {
         assert!(!now.contains(&"auto 1".to_string()));
         write_autosave(&dir, "auto 6", &other, true).unwrap();
         let now = names(&dir);
-        assert_eq!((now.len(), now.iter().filter(|n| *n == "auto 6").count(), now.contains(&"auto 2".to_string())), (12, 1, true));
+        assert_eq!((now.len(), now.iter().filter(|n| *n == "auto 6").count(), now.contains(&"auto 2".to_string())), (AUTOSAVES_KEPT, 1, true));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
