@@ -2059,6 +2059,41 @@ mod tests {
     }
 
     #[test]
+    fn a_victory_met_on_a_step_is_over_before_its_window_is_on_screen() {
+        // Обучающий1 ends with victory event 21, "meet army 11" (the royal herald walking up).
+        // The rules end the scenario inside the step, but the screen gets the step's events,
+        // the event's window among them, only once the step has played (`tick_shown`): until
+        // then the game holds them, and the end must wait for that window (events.md §11:
+        // the window is read, then the hand-over).
+        let mut win = ev(EventKind::Global);
+        win.conditions.meet_army = 2;
+        let mut s = world(vec![win]);
+        s.header.victory_event = 1;
+        s.armies = vec![army(2, 5, 2, 1, &[troop(4, 0, 1)])];
+        let mut g = start(&s);
+        read(&mut g);
+        let a = &mut g.world.armies[0];
+        a.mind.scripted = true;
+        a.path = vec![(4, 2)];
+        assert!(g.set_destination((8, 4)));
+        let mut ended_unshown = false;
+        for _ in 0..10_000 {
+            let events = g.tick_shown(0.01);
+            if fired(&events).contains(&1) {
+                assert!(events.contains(&Event::Script(EventOutcome::Fired { event: 1, message: true })), "{events:?}");
+                assert!(!g.holds_events());
+                assert!(ended_unshown, "the scenario ended while its window was still held");
+                return;
+            }
+            if g.script_end().is_some() {
+                assert!(g.holds_events(), "over, with no window held or shown");
+                ended_unshown = true;
+            }
+        }
+        panic!("no meeting");
+    }
+
+    #[test]
     fn an_attack_whose_event_fires_brings_no_battle() {
         // 0x4ade3c: an AI attack runs the events with the attacker first; the battle opens
         // only if none fired. Unlike an army stepped onto, it keeps its talk counter.
@@ -2419,6 +2454,29 @@ mod tests {
         assert_eq!(g4.pack, preset.pack, "РК4's own pack");
         assert_eq!(g4.gold, 1234, "byte 0: the gold");
         assert_eq!(g4.squad[0].items[0], g.squad[0].items[0], "byte 4: his worn items");
+    }
+
+    #[test]
+    fn the_tutorial_ends_on_meeting_the_herald_and_hands_over_to_its_second_map() {
+        // Обучающий1: victory event 21 «Встреча с королевским гонцом» fires on meeting army 11
+        // and has its window; the next map, Обучающий2, is in the install, so the original
+        // hands over to it once that window is read (events.md §11).
+        let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+        let dt = crate::dt::install::DtInstall::load(std::path::Path::new(&dir)).expect("install loads");
+        let load = |prefix: &str| dt.maps.iter().find(|m| m.name.starts_with(prefix)).expect("map present").load().unwrap();
+        let t1 = load("Обучающий1");
+        assert_eq!(t1.header.victory_event, 21);
+        let win = &t1.events[20];
+        assert_eq!((win.conditions.meet_army, win.message.is_empty()), (11, false));
+        assert_eq!(t1.next_map.trim(), "Обучающий2.DTm");
+        let content = Arc::new(crate::rules::content::Content::from_dt(&dt));
+        let mut g = Game::from_scenario(content.clone(), &t1, HeroClass::Knight);
+        g.script.as_mut().unwrap().end_for_test(EventOutcome::Victory(21));
+        let next = g.next_map().expect("a next map after the victory");
+        let stem = next.name.trim().strip_suffix(".DTm").unwrap();
+        let entry = dt.maps.iter().find(|m| m.name == stem).expect("Обучающий2 in the install");
+        let g2 = Game::from_campaign(content, &entry.load().unwrap(), &next);
+        assert_eq!(g2.script_end(), None);
     }
 
     #[test]

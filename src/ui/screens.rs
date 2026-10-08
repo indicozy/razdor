@@ -10,7 +10,7 @@ use razdor::trf;
 use razdor::rules::content::{Content, HeroClass, Stat, UnitId};
 use razdor::rules::game::Game;
 use razdor::rules::save::ScenarioRef;
-use razdor::rules::script::ScriptEnd;
+use razdor::rules::script::{NextMap, ScriptEnd};
 use razdor::rules::units::Stats;
 
 use super::assets::Assets;
@@ -332,16 +332,40 @@ pub fn game_over(game: &mut Option<Game>) -> (Option<Screen>, Option<EndChoice>)
     (None, None)
 }
 
+/// After a campaign victory whose next map is in the install: what carries over (header
+/// 0x110), with the flags, and that map's entry.
+fn next_campaign_map<'a>(game: &Option<Game>, scenarios: &'a [ScenarioEntry]) -> Option<(NextMap, &'a ScenarioEntry)> {
+    let next = game.as_ref().and_then(Game::next_map)?;
+    let stem = next.name.trim();
+    let stem = stem.strip_suffix(".DTm").or_else(|| stem.strip_suffix(".dtm")).unwrap_or(stem).to_lowercase();
+    let entry = scenarios.iter().find(|e| e.file.to_lowercase() == stem)?;
+    Some((next, entry))
+}
+
+/// The next campaign map's game, started from `prev`'s hand-over.
+fn campaign_game(content: Arc<Content>, prev: &NextMap, e: &ScenarioEntry) -> Game {
+    let mut g = Game::from_campaign(content, &e.scenario, prev);
+    match ScenarioRef::of_map(&e.path, &e.file) {
+        Ok(origin) => g.set_origin(origin),
+        Err(err) => razdor::diag!("{}: {err}; this game cannot be saved", e.file),
+    }
+    razdor::diag::play(&g.clock.label(), &super::play_game_line(&g, "next campaign map"));
+    g
+}
+
+/// The original's campaign hand-over (events.md §11, 0x4b5b64): once the victory event's
+/// window is read, the next map starts at once, with no screen between. `None` when the map
+/// names no next map or the install lacks it (then the victory screen).
+pub fn hand_over(game: &Option<Game>, scenarios: &[ScenarioEntry], content: Option<Arc<Content>>) -> Option<Game> {
+    let (prev, e) = next_campaign_map(game, scenarios)?;
+    Some(campaign_game(content?, &prev, e))
+}
+
 /// The victory screen. After a campaign map whose next map is in the install, "Next map"
 /// starts it with what carries over (header 0x110) and the flags, as the original does.
 pub fn victory(game: &mut Option<Game>, scenarios: &[ScenarioEntry], content: Option<Arc<Content>>) -> Option<Screen> {
     let days = days_played(game);
-    let next = game.as_ref().and_then(Game::next_map);
-    let entry = next.as_ref().and_then(|n| {
-        let stem = n.name.trim();
-        let stem = stem.strip_suffix(".DTm").or_else(|| stem.strip_suffix(".dtm")).unwrap_or(stem).to_lowercase();
-        scenarios.iter().find(|e| e.file.to_lowercase() == stem)
-    });
+    let next = next_campaign_map(game, scenarios);
     let shown = match end_event(game) {
         Some(title) => end_screen(tr("Victory!"), &trf!("{title}, after {days} days.", title, days), ACCENT, game),
         None => end_screen(tr("The bandits are broken"), &trf!("Peace returns to the land after {days} days.", days), ACCENT, game),
@@ -349,16 +373,10 @@ pub fn victory(game: &mut Option<Game>, scenarios: &[ScenarioEntry], content: Op
     if shown.is_some() {
         return shown;
     }
-    if let (Some(prev), Some(e), Some(c)) = (next, entry, content) {
+    if let (Some((prev, e)), Some(c)) = (next, content) {
         if button(screen_width() / 2.0 - 160.0, 450.0, 320.0, 50.0, &trf!("Next map: {title}", title = e.scenario.title), true) {
             cue(Cue::MenuPress);
-            let mut g = Game::from_campaign(c, &e.scenario, &prev);
-            match ScenarioRef::of_map(&e.path, &e.file) {
-                Ok(origin) => g.set_origin(origin),
-                Err(err) => razdor::diag!("{}: {err}; this game cannot be saved", e.file),
-            }
-            razdor::diag::play(&g.clock.label(), &super::play_game_line(&g, "next campaign map"));
-            *game = Some(g);
+            *game = Some(campaign_game(c, &prev, e));
             return Some(Screen::WorldMap);
         }
     }

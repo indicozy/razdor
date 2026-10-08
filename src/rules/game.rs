@@ -1219,6 +1219,12 @@ impl Game {
         out.into_iter().map(|(_, e)| e).collect()
     }
 
+    /// [`Game::tick_shown`] still holds events of a step being drawn: their windows are not
+    /// on screen yet, though the rules already ran them (a victory event among them).
+    pub fn holds_events(&self) -> bool {
+        !self.held.is_empty()
+    }
+
     /// Advance the world by `real_dt` seconds (world.md §2): each hero step and each wait
     /// tick plays over [`STEP_SECONDS`]; the game time a step takes is its own cost. Time only
     /// flows while the party walks or waits.

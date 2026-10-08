@@ -1052,6 +1052,12 @@ impl EventEngine {
         self.ended.as_ref()
     }
 
+    /// Ends the scenario as `end` would have, for tests of what follows an end.
+    #[cfg(test)]
+    pub(crate) fn end_for_test(&mut self, end: EventOutcome) {
+        self.ended = Some(end);
+    }
+
     /// Community extensions in the scenario.
     pub fn extensions(&self) -> &[(EventId, Extension)] {
         &self.extensions
