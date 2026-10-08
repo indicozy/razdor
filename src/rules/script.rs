@@ -377,7 +377,7 @@ impl Game {
         let dark: Vec<(i32, i32)> = if self.fog.enabled { square(&self.fog).into_iter().filter(|&t| !self.fog.explored(t)).collect() } else { Vec::new() };
         self.reveal(at.0, at.1, r);
         let cells: Vec<(i32, i32)> = dark.into_iter().filter(|&t| self.fog.explored(t)).collect();
-        self.shown.push(super::game::Shown { at, cells, event: None });
+        self.shown.push(super::game::Shown { at, cells, radius: r, event: None });
     }
 }
 

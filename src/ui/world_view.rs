@@ -275,6 +275,8 @@ struct Showing {
     reach: f32,
     /// When the camera set off, and from where.
     started: Option<(f64, (f32, f32))>,
+    /// The radius shown, in world units.
+    radius: f32,
 }
 
 /// Width of the soft rim of the opening circle, in world units (cells).
@@ -295,7 +297,7 @@ impl Showing {
             t
         });
         let reach = shown.cells.iter().map(|&t| (Vec2::from(map.center(t)) - Vec2::from(at)).length()).fold(0.0, f32::max) + SHOW_RIM + 1.0;
-        Showing { at, event: shown.event, before, mask, reach, started: None }
+        Showing { at, event: shown.event, before, mask, reach, started: None, radius: shown.radius as f32 + 0.5 }
     }
 
     /// Its event's window is closed (a place shown with no window waits for all of them).
@@ -342,7 +344,7 @@ impl MapView {
         self.forget_shows();
         let (at, r) = (game.tile(), game.sight_radius() + 1);
         let cells = (at.1 - r..=at.1 + r).flat_map(|y| (at.0 - r..=at.0 + r).map(move |x| (x, y))).filter(|&t| game.fog.explored(t)).collect();
-        let mut s = Showing::new(game, &razdor::rules::game::Shown { at, cells, event: None });
+        let mut s = Showing::new(game, &razdor::rules::game::Shown { at, cells, radius: r, event: None });
         // No flight: the fog opens at once.
         s.started = Some((get_time() - SHOW_PAN, s.at));
         self.opening = Some(s);
@@ -626,6 +628,38 @@ impl Camera {
     /// The fog still over places being shown, as dark as each one's fade has left it.
     /// The fog kept over places being shown. The one being revealed opens like an iris: a
     /// circle from its centre out to its edges, with a soft rim, clears the old fog.
+    /// Razdor's mark of a place an event shows that was explored already (nothing opens
+    /// there): a pulsing red circle of the radius shown, once the camera has arrived.
+    fn draw_known_place(&self, s: &Showing, now: f64) {
+        let Some((t0, _)) = s.started else { return };
+        if s.mask.is_some() {
+            return;
+        }
+        let t = now - t0 - SHOW_PAN;
+        if t < 0.0 {
+            return;
+        }
+        let fade = (t / 0.3).min(1.0) as f32;
+        let pulse = 0.75 + 0.25 * (t * std::f64::consts::TAU * 1.5).sin() as f32;
+        let c = self.to_screen(s.at);
+        // The radius in cells: rows are closer together on screen than columns.
+        let (rx, ry) = (s.radius * self.scale, s.radius * self.scale * self.grid.row_height());
+        let red = Color::new(0.95, 0.15, 0.1, 0.9 * fade * pulse);
+        let ring = |width: f32, colour: Color| {
+            let n = 72;
+            let at = |i: usize| {
+                let a = i as f32 / n as f32 * std::f32::consts::TAU;
+                c + vec2(rx * a.cos(), ry * a.sin())
+            };
+            for i in 0..n {
+                let (p, q) = (at(i), at(i + 1));
+                draw_line(p.x, p.y, q.x, q.y, width, colour);
+            }
+        };
+        ring(4.0, Color::new(0.0, 0.0, 0.0, 0.5 * fade));
+        ring(2.5, red);
+    }
+
     fn draw_showing<'s>(&self, game: &Game, shows: impl IntoIterator<Item = &'s Showing>, now: f64) {
         let (tl, br) = self.fog_corners(game);
         let map = &game.world.map;
@@ -1777,6 +1811,9 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     draw_world(game, assets, &cam, view.preview.as_ref().map(|p| p.1.as_slice()));
     cam.draw_fog(game);
     cam.draw_showing(game, view.opening.iter().chain(&view.shows), now);
+    if let Some(s) = view.shows.front() {
+        cam.draw_known_place(s, now);
+    }
     // A spell's effect over the army it landed on.
     if let Some(SpellFx::Effect { army, art, started: Some(t0) }) = view.spell_fx.front() {
         if let Some(at) = army_pos(game, *army) {

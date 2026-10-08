@@ -215,14 +215,6 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             u.potions.extend(potion);
         }
     }
-    // `RAZDOR_SCENE_SHOW=x,y,r`: an event shows that place (as a lantern does), to see the
-    // camera fly there and the area fade in.
-    if let Some((x, y, r)) = std::env::var("RAZDOR_SCENE_SHOW").ok().and_then(|v| {
-        let n: Vec<i32> = v.split(',').filter_map(|p| p.trim().parse().ok()).collect();
-        (n.len() == 3).then(|| (n[0], n[1], n[2]))
-    }) {
-        game.reveal_area((x, y), r);
-    }
     // `RAZDOR_SCENE_DEBUG=1`: the map's debug overlay (F3) on.
     if std::env::var("RAZDOR_SCENE_DEBUG").is_ok_and(|v| !v.is_empty()) {
         app.map_view.debug = true;
@@ -311,6 +303,14 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
         _ => return Err(format!("unknown scene {kind}")),
     };
     game.look_around();
+    // `RAZDOR_SCENE_SHOW=x,y,r`: an event shows that place (as a lantern does), to see the
+    // camera fly there and the area fade in (or, explored already, Razdor's red ring).
+    if let Some((x, y, r)) = std::env::var("RAZDOR_SCENE_SHOW").ok().and_then(|v| {
+        let n: Vec<i32> = v.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+        (n.len() == 3).then(|| (n[0], n[1], n[2]))
+    }) {
+        game.reveal_area((x, y), r);
+    }
     app.assets.set_content(game.content.clone());
     app.game = Some(game);
     Ok(())

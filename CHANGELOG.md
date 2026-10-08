@@ -18,6 +18,10 @@ old id, and their versions give both.
   raised. Burying or dismissing a unit that wears items now says first that they will be
   lost, so you can take them off.
 
+### Added
+- **A red ring around a place an event shows that you have seen already:** nothing opens
+  there, so the ring marks it while the camera rests on it.
+
 ## 0.3.13 — 2026-10-08
 
 Commit `c61cbfa` (tag `v0.3.13`).
