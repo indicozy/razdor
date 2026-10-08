@@ -14,6 +14,15 @@ old id, and their versions give both.
 
 ## 0.3.12 — 2026-10-08
 
+Commit `6fa8f52` (tag `v0.3.12`).
+
+SHA-256 of the released programs (built by the release pipeline):
+```
+6610ad3aa31827cc8e8ec7f3b87302618d87d6fe9161c53072b80e16e1726790  razdor
+4a66cf287fc1362ec7017148de78b46aed8d3594fb3c3ea8ed06582fbbc5dada  Razdor.exe
+48251f3e860c300182e9da7424f8fc89150d726ffa9a7ca877cf4bacf99a5f0f  razdor-macos
+```
+
 ### Added
 - **Pin a save:** in the load window, the pin icon next to the delete sign (or P) pins the
   selected save. A pinned save stays at the top of its list, is never overwritten by an
