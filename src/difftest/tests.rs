@@ -1101,3 +1101,36 @@ fn rk1_an_event_on_the_way_into_a_building_opens_it_after_its_window() {
     r.apply(&actions[5]).unwrap();
     assert_eq!(r.look()["screen"].as_str(), Some("building"), "{:?}", r.notes);
 }
+
+/// Обучающий1: the ghost (army 4) asks event 6; a Yes sends it away (deactivate 4), which ends
+/// the meeting (0x496900), so event 7 ("meet army 4" and "Yes to 6", the lightning of a
+/// return to the valley) does not fire as the hero walks on: it waits for event 8 to bring
+/// the ghost back and a new meeting.
+#[test]
+fn tutorial_the_ghost_sent_away_does_not_strike_at_once() {
+    let Some(dt) = install() else { return };
+    let mut r = Runner::new(Source::Install(&dt));
+    let start = parse_actions(r#"{"op":"new_game","map":"Обучающий1","hero":3}"#).unwrap();
+    r.apply(&start[0]).unwrap();
+    // Reads the windows up to a question; the events shown are noted.
+    let read = |r: &mut Runner, seen: &mut Vec<u16>| {
+        while let Some(d) = r.dialogs.front() {
+            seen.extend(d.id);
+            if d.question {
+                break;
+            }
+            r.apply(&Action::Ok).unwrap();
+        }
+    };
+    let mut seen = Vec::new();
+    read(&mut r, &mut seen);
+    for (x, y) in [(18, 42), (20, 36), (20, 29), (20, 28)] {
+        r.apply(&Action::ClickMap { x, y }).unwrap();
+        read(&mut r, &mut seen);
+    }
+    assert_eq!(r.game().unwrap().pending_question(), Some(6), "{seen:?} {:?}", r.notes);
+    seen.clear();
+    r.apply(&Action::Answer { yes: true }).unwrap();
+    read(&mut r, &mut seen);
+    assert!(!seen.contains(&7), "the lightning of event 7 at once: {seen:?}");
+}

@@ -1376,6 +1376,12 @@ impl EventEngine {
                 w.add_unit(*u, r.units_add_named[i], from);
             }
         }
+        // A source army left empty is deactivated (0x496900), which ends a meeting with it.
+        if let Some(a) = from {
+            if self.meeting == Some(a) && w.army_inactive(a) {
+                self.meeting = None;
+            }
+        }
         // Units removed: nothing happens unless one slot finds a unit. The search would
         // reach the hero by a type match; Razdor never removes him *(guess: whether the
         // original could, events.md Unknowns)*.
@@ -1395,6 +1401,17 @@ impl EventEngine {
             for s in nonzero(&r.spells_learned) {
                 w.learn_spell(s);
             }
+        }
+    }
+
+    /// Deactivate `army` (0x496900): it also stops being the army met, so the meet-army
+    /// events of the rest of the run fail for it. Event 6 of the first tutorial map asks the
+    /// ghost (army 4) and a Yes sends it away; event 7, "meet army 4 and Yes to 6", waits for
+    /// the next meeting, after event 8 has brought it back.
+    fn deactivate(&mut self, w: &mut dyn EventWorld, army: ArmyId) {
+        w.deactivate_army(army);
+        if self.meeting == Some(army) {
+            self.meeting = None;
         }
     }
 
@@ -1445,7 +1462,7 @@ impl EventEngine {
             w.activate_army(a);
         }
         if r.deactivate_army != 0 {
-            w.deactivate_army(r.deactivate_army);
+            self.deactivate(w, r.deactivate_army);
         }
         // 8. The patrol; in opcode mode the opcode is the delta all the same (the patch
         // reuses the byte and leaves this step alone).
@@ -2855,6 +2872,25 @@ mod tests {
         w.now = 10;
         assert_eq!(g.meet(&mut w, 4), vec![EventOutcome::Question(1)]);
         assert_eq!(fired(&g.answer(&mut w, true)), vec![1, 2]);
+    }
+
+    /// Deactivating the army met ends the meeting (0x496900): the first tutorial map's ghost,
+    /// sent away by a Yes, is not met again in the same run.
+    #[test]
+    fn a_meeting_ends_when_its_army_is_deactivated() {
+        let mut ask = asking(global());
+        (ask.conditions.meet_army, ask.results.deactivate_army) = (4, 4);
+        let mut then = with_message(global());
+        (then.conditions.meet_army, then.conditions.happened_yes_check, then.conditions.happened_yes) = (4, 1, [1, 0]);
+        let mut g = engine(vec![ask, then]);
+        let mut w = MockWorld::new();
+        w.now = 10;
+        assert_eq!(g.meet(&mut w, 4), vec![EventOutcome::Question(1)]);
+        assert_eq!(fired(&g.answer(&mut w, true)), vec![1]);
+        assert_eq!(g.meeting(), None);
+        // Met again later (event 8 brought it back): now event 2 fires.
+        w.now = 100;
+        assert_eq!(fired(&meet_read(&mut g, &mut w, 4)), vec![2]);
     }
 
     #[test]

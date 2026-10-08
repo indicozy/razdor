@@ -417,7 +417,11 @@ its question if it asks one. The exe has no depth limit or cycle guard for chain
   and runs the scan (§1). If an event fires, the contact's battle is cancelled and the dialog
   shown; otherwise the battle starts (0x4adccf–0x4add27). **code**
 - The meet-army condition holds only for the met army. The met army is cleared when the scan
-  goes idle and when an event with "no meeting" (148) finishes. **code**
+  goes idle, when an event with "no meeting" (148) finishes, and when that army is
+  deactivated (0x496900: the deactivate result, or a "take from army" that empties it), so a
+  question that sends the met army away ends the meeting for the rest of the run (Обучающий1:
+  event 6's Yes deactivates the ghost, and event 7, "meet the ghost and Yes to 6", waits for
+  a new meeting). **code**
 - Whenever every condition before the meet-army test holds for a meet-army event, that army
   is marked "meeting event waiting" (0x4a801a). The marks are cleared and recomputed for all
   meet-army events after each dialog (0x4abf44). The contact code uses the mark to treat the
