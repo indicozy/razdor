@@ -549,6 +549,11 @@ pub fn squad(
         if !confirming {
             if button(b.x, b.y, b.w, b.h, label, true) {
                 CONFIRM.with(|c| c.set(Some(sel)));
+                // Its worn items go with it: said before it is confirmed.
+                let worn = u.items.iter().flatten().count();
+                if worn > 0 {
+                    *message = Some(razdor::trf!("{name} wears {n} item(s): they will be lost with it. Take them off first to keep them.", name = u.name(&c), n = worn));
+                }
             }
         } else {
             let half = (b.w - 6.0 * k) / 2.0;

@@ -360,3 +360,4 @@ Stepping onto a friendly army = Шаг на дружественный отря�
 Let pass = Пропускает
 Battle (original) = Бой (как в оригинале)
 With no event of the map for the meeting, the original opens a battle against a friendly army the hero steps onto; Razdor can let him pass instead. = Если у карты нет события для такой встречи, оригинал начинает бой с дружественным отрядом, на который ступил герой; Раздор может вместо этого пропустить героя.
+{name} wears {n} item(s): they will be lost with it. Take them off first to keep them. = У «{name}» надето предметов: {n}, они пропадут вместе с ним. Чтобы сохранить, сначала снимите их.

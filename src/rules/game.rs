@@ -1926,7 +1926,9 @@ impl Game {
 
     /// Writes the battle back into the squad: HP, deployed cells, XP and levels. The dead
     /// (except the hero, who survives while his army does) stay in the army as corpses until
-    /// resurrected or buried; the dead hold no items, so theirs go to the pack. Potion effects
+    /// resurrected or buried, and keep their worn items (Razdor's: the original moves them to
+    /// the pack, losing what does not fit; the army screen warns before a corpse with items
+    /// is buried). Potion effects
     /// end. A won garrison fight captures a castle or fort (owner = player, its income counts
     /// at once, and one day of it is paid as the prize, as in the footage) and gives ruins'
     /// treasure; a beaten army leaves the map and pays [`Game::victory_gold`] and its items.
@@ -2032,18 +2034,16 @@ impl Game {
             u.spells = Default::default();
         }
         let now = self.clock.total_minutes() as u64;
-        let mut dropped = Vec::new();
         let mut lost = 0;
         for u in self.squad.iter_mut().skip(1) {
             if u.hp <= 0 && u.died_at.is_none() {
                 u.hp = 0;
                 u.died_at = Some(now);
                 u.unpaid = false;
-                dropped.extend(u.items.iter_mut().filter_map(Option::take));
                 lost += 1;
             }
         }
-        let (_, mut dropped_left) = self.take_items(dropped);
+        let mut dropped_left = 0;
         let foe = self.foe.take();
         // The opponent's record is recounted too (0x4d21fd), a garrison's as well.
         if let Some(Foe::Garrison(l)) = foe {
@@ -3160,7 +3160,7 @@ mod tests {
     }
 
     #[test]
-    fn dead_recruits_stay_as_corpses_and_drop_their_gear() {
+    fn dead_recruits_stay_as_corpses_and_keep_their_gear() {
         let mut g = quiet_game(HeroClass::Knight);
         g.hire(unit(&g, "spearman")).unwrap();
         let mail = item(&g, "chainmail");
@@ -3173,8 +3173,8 @@ mod tests {
         wipe_all_but_hero(&mut b);
         g.resolve_battle(&b);
         assert_eq!(g.squad.len(), 2);
-        assert!(!g.squad[1].alive() && g.squad[1].items[0].is_none());
-        assert!(g.pack.contains(&mail), "the dead hold no items");
+        assert!(!g.squad[1].alive());
+        assert_eq!((g.squad[1].items[0], g.pack.contains(&mail)), (Some(mail), false), "Razdor's: the corpse keeps its gear");
         // 0x4c50ec: the dead lose their spell slots, the living keep theirs.
         assert_eq!((g.squad[0].spells[0], g.squad[1].spells[0]), (held, None));
     }

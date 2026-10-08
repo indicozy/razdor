@@ -633,7 +633,7 @@ mod tests {
         assert_eq!(g.squad.len(), 3, "the corpse stays in the army");
         let corpse = &g.squad[1];
         assert!(!corpse.alive() && corpse.died_at.is_some());
-        assert!(corpse.items.iter().all(Option::is_none) && g.pack.contains(&ItemId(20)), "the dead hold no items");
+        assert!(corpse.items[0] == Some(ItemId(20)) && !g.pack.contains(&ItemId(20)), "Razdor's: the corpse keeps its items");
         assert_eq!(g.heal_price(1), None);
         // Resurrection: Round(Cost × 300% × 100 / F) = 50 × 3 / 1.2.
         assert_eq!(g.resurrect_price(1), Some(Price::gold(125)));

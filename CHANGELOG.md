@@ -12,6 +12,12 @@ old id, and their versions give both.
 
 ## Unreleased
 
+### Changed
+- **A unit that falls in battle keeps its items:** they stay on the corpse instead of going
+  to the pack (where they were lost if the pack was full), and come back with it when it is
+  raised. Burying or dismissing a unit that wears items now says first that they will be
+  lost, so you can take them off.
+
 ## 0.3.13 — 2026-10-08
 
 Commit `c61cbfa` (tag `v0.3.13`).
