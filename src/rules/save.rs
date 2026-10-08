@@ -58,6 +58,11 @@ pub const EXTENSION: &str = "rzsave";
 pub const DIR_ENV: &str = "RAZDOR_SAVE_DIR";
 /// Autosaves kept: 30, Razdor's (the original keeps 12), reused as the original reuses them.
 pub const AUTOSAVES_KEPT: usize = 30;
+/// The player's own saves (quick saves not counted): Razdor's limit (the original has 12
+/// slots). A save of a new name is refused when they are full; replacing one always works.
+pub const MANUAL_SAVES_KEPT: usize = 50;
+/// Quick saves (F5), reused oldest first: Razdor's (the original has none).
+pub const QUICK_SAVES_KEPT: usize = 5;
 const MANUAL_DIR: &str = "manual";
 const AUTO_DIR: &str = "auto";
 
@@ -120,6 +125,8 @@ pub enum SaveError {
     MapChanged(String),
     /// The saved game does not fit the map or the install's data any more.
     Mismatch(String),
+    /// [`MANUAL_SAVES_KEPT`] saves already: replace or delete one.
+    Full,
 }
 
 impl std::fmt::Display for SaveError {
@@ -133,6 +140,7 @@ impl std::fmt::Display for SaveError {
             SaveError::MapMissing(m) => f.write_str(&trf!("the map \"{m}\" is not in your install any more", m)),
             SaveError::MapChanged(m) => f.write_str(&trf!("the map \"{m}\" has changed since the game was saved", m)),
             SaveError::Mismatch(e) => f.write_str(&trf!("the save does not fit the map or the data: {e}", e)),
+            SaveError::Full => f.write_str(&trf!("there are {n} saves already: save over one or delete one", n = MANUAL_SAVES_KEPT)),
         }
     }
 }
@@ -279,14 +287,21 @@ fn slug(name: &str) -> String {
 }
 
 /// Writes `game` into save folder `dir` as `name`. A manual save of the same name is
-/// replaced; an autosave goes where [`write_autosave`] puts one outside a battle. Returns the
-/// file written.
+/// replaced; a new one is refused when there are [`MANUAL_SAVES_KEPT`]; the quick save's
+/// name goes to [`quick_save`]; an autosave goes where [`write_autosave`] puts one outside a
+/// battle. Returns the file written.
 pub fn write(dir: &Path, kind: SaveKind, name: &str, game: &Game) -> Result<PathBuf, SaveError> {
     match kind {
+        SaveKind::Manual if name == QUICK_SAVE => quick_save(dir, game),
         SaveKind::Manual => {
             let folder = kind_dir(dir, kind);
             std::fs::create_dir_all(&folder)?;
-            put(&folder.join(format!("{}.{EXTENSION}", slug(name))), kind, name, game)
+            let path = folder.join(format!("{}.{EXTENSION}", slug(name)));
+            let own = list(dir, kind).iter().filter(|e| e.meta.name != QUICK_SAVE).count();
+            if !path.exists() && own >= MANUAL_SAVES_KEPT {
+                return Err(SaveError::Full);
+            }
+            put(&path, kind, name, game)
         }
         SaveKind::Auto => write_autosave(dir, name, game, false),
     }
@@ -325,18 +340,40 @@ fn put(path: &Path, kind: SaveKind, name: &str, game: &Game) -> Result<PathBuf, 
     Ok(path.to_path_buf())
 }
 
-/// The name of the quick save (F5): a manual save that each quick save replaces.
+/// The name of the quick saves (F5): manual saves kept apart from the player's own.
 pub const QUICK_SAVE: &str = crate::i18n::n_("Quick save");
 
-/// Writes the quick save (F5), replacing the last one.
-pub fn quick_save(dir: &Path, game: &Game) -> Result<PathBuf, SaveError> {
-    write(dir, SaveKind::Manual, QUICK_SAVE, game)
+/// The quick saves, newest first.
+fn quick_saves(dir: &Path) -> Vec<SaveEntry> {
+    list(dir, SaveKind::Manual).into_iter().filter(|e| e.meta.name == QUICK_SAVE).collect()
 }
 
-/// The quick save's file (F9), if there is one.
+/// Writes a quick save (F5): a new one while there are fewer than [`QUICK_SAVES_KEPT`],
+/// else over the oldest.
+pub fn quick_save(dir: &Path, game: &Game) -> Result<PathBuf, SaveError> {
+    let folder = kind_dir(dir, SaveKind::Manual);
+    std::fs::create_dir_all(&folder)?;
+    let quick = quick_saves(dir);
+    let path = match quick.get(QUICK_SAVES_KEPT - 1) {
+        Some(oldest) => oldest.path.clone(),
+        None => {
+            let taken: Vec<&Path> = quick.iter().map(|e| e.path.as_path()).collect();
+            (1..)
+                .map(|k| folder.join(format!("{}-{k}.{EXTENSION}", slug(QUICK_SAVE))))
+                .find(|p| !taken.contains(&p.as_path()) && !p.exists())
+                .expect("a free name")
+        }
+    };
+    // Quick saves beyond the limit (an older Razdor's) go.
+    for extra in quick.iter().skip(QUICK_SAVES_KEPT) {
+        let _ = std::fs::remove_file(&extra.path);
+    }
+    put(&path, SaveKind::Manual, QUICK_SAVE, game)
+}
+
+/// The newest quick save's file (F9), if there is one.
 pub fn quick_save_path(dir: &Path) -> Option<PathBuf> {
-    let path = kind_dir(dir, SaveKind::Manual).join(format!("{}.{EXTENSION}", slug(QUICK_SAVE)));
-    path.is_file().then_some(path)
+    quick_saves(dir).into_iter().next().map(|e| e.path)
 }
 
 /// A save found in the folder.
@@ -649,22 +686,40 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_quick_save_replaces_the_last_and_is_found_again() {
+    fn quick_saves_take_five_slots_and_f9_finds_the_newest() {
         let dir = temp_dir("quick");
         let c = demo();
         let mut g = Game::new(c.clone(), HeroClass::Knight);
         assert_eq!(quick_save_path(&dir), None);
         write(&dir, SaveKind::Manual, "Mine", &g).unwrap();
-        let first = quick_save(&dir, &g).unwrap();
-        g.gold = 4321;
-        let second = quick_save(&dir, &g).unwrap();
-        assert_eq!(first, second, "the same file");
+        let mut paths = Vec::new();
+        for k in 0..QUICK_SAVES_KEPT + 2 {
+            g.gold = 1000 + k as i32;
+            paths.push(quick_save(&dir, &g).unwrap());
+            // Within a second, the order is the files' write times.
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
         let saves = list(&dir, SaveKind::Manual);
-        assert_eq!(saves.len(), 2, "one quick save next to the player's own");
-        assert_eq!(saves.iter().filter(|s| s.meta.name == QUICK_SAVE).count(), 1);
+        assert_eq!(saves.len(), QUICK_SAVES_KEPT + 1, "five quick saves next to the player's own");
+        assert_eq!(paths[QUICK_SAVES_KEPT], paths[0], "the sixth reuses the oldest");
         let path = quick_save_path(&dir).unwrap();
-        assert_eq!(path, second);
-        assert_eq!(load(&path, c, None).unwrap().gold, 4321, "the newest quick save");
+        assert_eq!(path, paths[QUICK_SAVES_KEPT + 1]);
+        assert_eq!(load(&path, c, None).unwrap().gold, 1000 + QUICK_SAVES_KEPT as i32 + 1, "the newest quick save");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn own_saves_stop_at_fifty_but_can_be_replaced() {
+        let dir = temp_dir("full");
+        let g = Game::new(demo(), HeroClass::Knight);
+        for k in 0..MANUAL_SAVES_KEPT {
+            write(&dir, SaveKind::Manual, &format!("save {k}"), &g).unwrap();
+        }
+        quick_save(&dir, &g).unwrap();
+        assert!(matches!(write(&dir, SaveKind::Manual, "one more", &g), Err(SaveError::Full)));
+        write(&dir, SaveKind::Manual, "save 7", &g).unwrap();
+        quick_save(&dir, &g).unwrap();
+        assert_eq!(list(&dir, SaveKind::Manual).len(), MANUAL_SAVES_KEPT + 2, "quick saves do not count");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

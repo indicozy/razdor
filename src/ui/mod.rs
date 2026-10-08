@@ -565,7 +565,7 @@ impl App {
         }
     }
 
-    /// F5: writes the quick save (a manual save named "Quick save", replacing the last).
+    /// F5: writes a quick save (one of five, over the oldest; `save::quick_save`).
     fn quick_save(&mut self) {
         let Some(game) = &self.game else { return };
         self.message = Some(match save::default_dir() {
@@ -577,7 +577,7 @@ impl App {
         });
     }
 
-    /// F9: loads the quick save, if there is one.
+    /// F9: loads the newest quick save, if there is one.
     fn quick_load(&mut self) {
         match save::default_dir().and_then(|d| save::quick_save_path(&d)) {
             Some(path) => {

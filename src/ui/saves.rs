@@ -47,13 +47,17 @@ impl Back {
 pub struct SaveView {
     pub name: String,
     pub entries: Vec<SaveEntry>,
+    /// The first row shown (the wheel scrolls the list).
+    pub scroll: usize,
+    /// Why the last save was refused (shown in the window).
+    pub error: Option<String>,
     pub back: Back,
 }
 
 impl SaveView {
     pub fn new(game: &Game, back: Back) -> SaveView {
         let name = format!("{} {}", game.world.title.trim(), save::date_name(&game.clock));
-        SaveView { name, entries: save::default_dir().map_or_else(Vec::new, |d| save::list(&d, SaveKind::Manual)), back }
+        SaveView { name, entries: save::default_dir().map_or_else(Vec::new, |d| save::list(&d, SaveKind::Manual)), scroll: 0, error: None, back }
     }
 }
 
@@ -357,23 +361,26 @@ pub fn save_screen(game: &Game, assets: &Assets, view: &mut SaveView, message: &
     let typed = if view.name.is_empty() { own("Buttons", "NewSave", n_("(save anew)")) } else { format!("{}{caret}", view.name) };
     let mut rows = vec![Row { name: typed, scenario: game.world.title.clone(), time: razdor::trf!("Time: {date}", date = game.clock.label()) }];
     rows.extend(view.entries.iter().map(row_of));
-    let mut scroll = 0;
-    if let (Some(k), _) = book.rows(&rows, Some(same.map_or(0, |i| i + 1)), &mut scroll, false) {
+    if let (Some(k), _) = book.rows(&rows, Some(same.map_or(0, |i| i + 1)), &mut view.scroll, false) {
         view.name = if k == 0 { String::new() } else { view.entries[k - 1].meta.name.clone() };
     }
     let dir = save::default_dir();
-    if dir.is_none() {
+    let warning = if dir.is_none() { Some(tr("No data folder for saves: set RAZDOR_SAVE_DIR.")) } else { view.error.as_deref() };
+    if let Some(w) = warning {
         let p = book.p(22.0, 435.0);
-        text(tr("No data folder for saves: set RAZDOR_SAVE_DIR."), p.x, p.y, 13.0 * book.k, RED);
+        text(&ellipsize(w, 330.0 * book.k, 13.0 * book.k), p.x, p.y, 13.0 * book.k, RED);
     }
     let ok = !view.name.trim().is_empty() && dir.is_some();
     if book.button(369.0, 116.0, &own("SaveGame", "Save", n_("Save")), ok) || (ok && key(KeyCode::Enter)) {
         let dir = dir.expect("checked");
-        *message = Some(match save::write(&dir, SaveKind::Manual, view.name.trim(), game) {
-            Ok(_) => razdor::trf!("Saved: {name}", name = view.name.trim()),
-            Err(e) => razdor::trf!("Not saved: {e}.", e),
-        });
-        return Some(Screen::WorldMap);
+        match save::write(&dir, SaveKind::Manual, view.name.trim(), game) {
+            Ok(_) => {
+                *message = Some(razdor::trf!("Saved: {name}", name = view.name.trim()));
+                return Some(Screen::WorldMap);
+            }
+            // The window stays: a save to replace can be picked.
+            Err(e) => view.error = Some(razdor::trf!("Not saved: {e}.", e)),
+        }
     }
     if book.button(492.0, 95.0, &own("Buttons", "Cancel", n_("Cancel")), true) || closed {
         return Some(view.back.screen());

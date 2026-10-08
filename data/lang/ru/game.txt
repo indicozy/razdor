@@ -344,3 +344,4 @@ Enter gives the first to the selected unit: = Enter отдаёт первый в
 Type, Ctrl+F = Набор, Ctrl+F
 market: filter the list (Enter picks the first, Esc clears) = рынок: отбор списка (Enter — первый, Esc — сброс)
 filter the backpack (Enter: the first to the unit, Esc clears) = отбор рюкзака (Enter — первый воину, Esc — сброс)
+there are {n} saves already: save over one or delete one = сохранений уже {n}: запишите поверх одного или удалите одно
