@@ -678,11 +678,16 @@ fn building_sprite_origin(l: &Location, w: f32, h: f32, cam: &Camera) -> Vec2 {
     let (x, y) = cam.grid.center(l.anchor);
     let corner = cam.to_screen((x + 0.5, y + cam.grid.row_height() / 2.0));
     let raise = if l.size.0 > l.size.1 { 11.0 } else { 0.0 };
-    let (dx, dy) = match l.picture {
+    let (dx, dy) = bridge_offset(l.picture);
+    corner + vec2(dx - w - 0.5, dy - h - raise - 0.5) * (cam.scale / PX)
+}
+
+/// [`BRIDGE_OFFSETS`] of a building picture (type, variant): nothing for other pictures.
+pub(super) fn bridge_offset(picture: (u8, u8)) -> (f32, f32) {
+    match picture {
         (t @ 13..=14, v) => BRIDGE_OFFSETS[usize::from(t - 13)].get(usize::from(v)).copied().unwrap_or_default(),
         _ => (0.0, 0.0),
-    };
-    corner + vec2(dx - w - 0.5, dy - h - raise - 0.5) * (cam.scale / PX)
+    }
 }
 
 /// Screen top-left of a map object's `w`×`h` px sprite, placed as the original places it: the
