@@ -122,3 +122,63 @@ fn thirty_days_on_every_map() {
     println!("total: {totals:?}");
     assert!(totals.paths > 0 && totals.hired > 0, "the AI moved and hired somewhere");
 }
+
+/// РК1's sea robbers (army 9, a ship) sail into the shore village Соленая, as in the original
+/// (building footprints are open on the SHIP map, world.md §1; ai.md §13), and are caught
+/// there: from next to the village one step onto any of its cells engages the army standing
+/// in it (world.md §4.2 rule 2, 0x4ad94c); with the hero inside his village they assault it
+/// and fight him (ai.md §9.1, 0x4a548c). Playtest 2026-10-08: "they cannot be caught".
+#[test]
+fn rk1_sea_robbers_are_caught_in_the_village() {
+    let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+    let dt = DtInstall::load(std::path::Path::new(&dir)).unwrap();
+    let c = Arc::new(Content::from_dt(&dt));
+    let s = dt.maps.iter().find(|m| m.name.starts_with("РК1")).unwrap().load().unwrap();
+    let robbers = |g: &Game| g.world.armies.iter().position(|a| a.id == 9).expect("the robbers");
+    // Hours waited (1 h at a time) until `done`, at most 10 days.
+    let wait_until = |g: &mut Game, done: &dyn Fn(&Game) -> bool| {
+        for h in 0..240 {
+            if g.pending_question().is_some() {
+                g.answer_question(true);
+            }
+            g.drain_events();
+            if done(g) {
+                return h;
+            }
+            g.wait(1);
+        }
+        panic!("not within 10 days");
+    };
+    // The hero waits next to the village; once they stand in it, one step in catches them.
+    let mut g = Game::from_scenario(c.clone(), &s, HeroClass::Knight);
+    let village = g.world.locations.iter().position(|l| l.name == "Деревня Соленая").unwrap();
+    assert!(g.world.armies[robbers(&g)].sails());
+    g.pos = g.world.map.center((27, 38));
+    wait_until(&mut g, &|g| g.world.armies[robbers(g)].mind.standing == Some(village));
+    let i = robbers(&g);
+    let inside = g.world.armies[i].tile(&g.world.map);
+    assert_eq!(g.world.location_covering(inside), Some(village));
+    assert_ne!(inside, (26, 38), "on another cell than the one stepped onto");
+    assert!(g.set_destination((26, 38)));
+    for _ in 0..100 {
+        g.tick(0.05);
+        if g.foe.is_some() || !g.moving() {
+            break;
+        }
+    }
+    assert_eq!(g.foe, Some(Foe::Army(i)));
+    assert_eq!(g.tile(), (27, 38), "he stays on the cell he was leaving");
+    // The hero waits inside his village: they sail in and attack him.
+    let mut g = Game::from_scenario(c, &s, HeroClass::Knight);
+    g.pos = g.world.map.center((28, 36));
+    assert!(g.set_destination((25, 36)));
+    for _ in 0..400 {
+        g.tick(0.05);
+        if !g.moving() {
+            break;
+        }
+    }
+    assert_eq!(g.location, Some(village));
+    wait_until(&mut g, &|g| g.foe.is_some());
+    assert_eq!(g.foe, Some(Foe::Army(robbers(&g))));
+}
