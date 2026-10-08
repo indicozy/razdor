@@ -301,6 +301,13 @@ impl Driver {
         // clicks the army ("click it to talk or fight"), so an army met before talks again.
         let meetings = self.met_log.iter().filter(|&&m| m == id).count();
         let beaten = self.g.beaten_armies.contains(&id);
+        // Stepped onto, a friend is engaged as a foe is (world.md §4.2): no `Met` comes, and
+        // an event fired while he stands by it, stopped, stands for the meeting.
+        let fired = self.fired.len();
+        let engaged = |d: &Driver| {
+            let by = d.g.world.armies.iter().find(|a| a.id == id).is_some_and(|a| d.g.world.map.distance(d.g.tile(), a.tile(&d.g.world.map)) <= 1);
+            d.fired.len() > fired && by && !d.g.moving()
+        };
         for _ in 0..200 {
             let Some(a) = self.g.world.armies.iter().find(|a| a.id == id) else { return false };
             let (t, hostile, uid) = (a.tile(&self.g.world.map), a.hostile(), a.uid);
@@ -338,7 +345,7 @@ impl Driver {
                     break;
                 }
             }
-            if self.g.beaten_armies.contains(&id) && !beaten || self.met_log.iter().filter(|&&m| m == id).count() > meetings {
+            if self.g.beaten_armies.contains(&id) && !beaten || self.met_log.iter().filter(|&&m| m == id).count() > meetings || engaged(self) {
                 return true;
             }
         }
