@@ -12,6 +12,8 @@ old id, and their versions give both.
 
 ## Unreleased
 
+## 0.3.13 — 2026-10-08
+
 ### Changed
 - **Stepping onto a friendly army is a battle again when the map has no event for it**, as
   in the original (seen on a fort garrison that only said "lets you pass"). Razdor had let
