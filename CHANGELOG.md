@@ -1,16 +1,16 @@
-# Changelog
+# Список изменений
 
-What changed in each version of Razdor. The newest version comes first; changes not released
-yet are under "Unreleased". Each release lists the SHA-256 of its programs, which anyone
-can rebuild from the same commit with `scripts/dist.sh` (see the README). From 0.1.2 the
-release pipeline (`.github/workflows/release.yml`) builds and publishes a version when its
-tag is pushed, and the SHA-256 are in the release's notes.
+Что изменилось в каждой версии «Раздора». Новые версии идут первыми; изменения, которые ещё
+не выпущены, — в разделе «Не выпущено». Для каждого выпуска указаны SHA-256 его программ:
+любой может пересобрать их из того же коммита скриптом `scripts/dist.sh` (см. README). Начиная
+с 0.1.2 конвейер выпуска (`.github/workflows/release.yml`) собирает и публикует версию, когда
+отправлен её тег, и SHA-256 есть в описании выпуска.
 
-Each version names its commit. On 2026-09-30 the history was rewritten to a new author
-email and every commit got a new id: the programs released before then show their commit's
-old id, and their versions give both.
+У каждой версии указан её коммит. 2026-09-30 история была переписана на новый адрес почты
+автора, и все коммиты получили новые идентификаторы: программы, выпущенные до этого,
+показывают старый идентификатор своего коммита, а у их версий указаны оба.
 
-## Unreleased
+## Не выпущено
 
 ## 0.3.15 — 2026-10-08
 
@@ -59,538 +59,566 @@ f1fbd9193e09b3e22dce664705a169b4e474a30622cd6a48459dccd5dd2ff1c4  Razdor.exe
 
 ## 0.3.13 — 2026-10-08
 
-Commit `c61cbfa` (tag `v0.3.13`).
+Коммит `c61cbfa` (тег `v0.3.13`).
 
-SHA-256 of the released programs (built by the release pipeline):
+SHA-256 выпущенных программ (собраны конвейером выпуска):
 ```
 0ee5086163ff517b9d2c951447fbb3bc0584c61babbfad95054cc4fa5f10574e  razdor
 033d56b5818f8c6120a95011a536e726206dc74059ee687ab2073ae106f03e72  Razdor.exe
 48fea8d168a07c9a573e45a1d53bf1b01ab56c7e32b180d6080390fe05295d3b  razdor-macos
 ```
 
-### Changed
-- **Stepping onto a friendly army is a battle again when the map has no event for it**, as
-  in the original (seen on a fort garrison that only said "lets you pass"). Razdor had let
-  the hero pass. The new advanced setting (Settings → "Advanced…": "Stepping onto a friendly
-  army") brings that back: "Battle (original)" by default, or "Let pass".
+### Изменено
+- **Шаг на дружественную армию снова ведёт к бою, если на карте нет события для этого,** как
+  в оригинале (замечено на гарнизоне крепости, который только сообщал «пропускает вас»).
+  «Раздор» пропускал героя. Новая дополнительная настройка (Настройки → «Ещё…»: «Шаг на
+  дружественный отряд») возвращает это: по умолчанию «Бой (как в оригинале)», либо «Пропускает».
 
 ## 0.3.12 — 2026-10-08
 
-Commit `6fa8f52` (tag `v0.3.12`).
+Коммит `6fa8f52` (тег `v0.3.12`).
 
-SHA-256 of the released programs (built by the release pipeline):
+SHA-256 выпущенных программ (собраны конвейером выпуска):
 ```
 6610ad3aa31827cc8e8ec7f3b87302618d87d6fe9161c53072b80e16e1726790  razdor
 4a66cf287fc1362ec7017148de78b46aed8d3594fb3c3ea8ed06582fbbc5dada  Razdor.exe
 48251f3e860c300182e9da7424f8fc89150d726ffa9a7ca877cf4bacf99a5f0f  razdor-macos
 ```
 
-### Added
-- **Pin a save:** in the load window, the pin icon next to the delete sign (or P) pins the
-  selected save. A pinned save stays at the top of its list, is never overwritten by an
-  autosave, a quick save or a save of the same name, and does not count towards the limits
-  below. Unpin it the same way.
-- **More saves:** up to 50 saves of your own (a new name is refused when they are full;
-  saving over one always works), 30 autosaves instead of the original's 12, and five quick
-  saves: F5 writes a new one each time, over the oldest, and F9 loads the newest. The save
-  window's list now scrolls with the wheel like the load window's.
-- **A resizable minimap:** drag its left edge, its bottom edge or their corner. The size is
-  kept between games; a double click on an edge brings back the original's square.
-- **Debug overlay (F3 on the map):** every event point and lantern with its number, cell and
-  radius, and the events of each point and building (number, title, times fired), shown
-  through the fog; a panel gives the hero's and the pointer's cells and the full event list
-  of the place under the pointer.
+### Добавлено
+- **Закрепление сохранений:** в окне загрузки значок булавки рядом со знаком удаления (или P)
+  закрепляет выбранное сохранение. Закреплённое сохранение остаётся вверху своего списка,
+  его никогда не перезапишет автосохранение, быстрое сохранение или сохранение с тем же
+  именем, и оно не учитывается в ограничениях ниже. Открепляется так же.
+- **Больше сохранений:** до 50 собственных сохранений (когда они заполнены, новое имя не
+  принимается; сохранить поверх существующего можно всегда), 30 автосохранений вместо 12 в
+  оригинале и пять быстрых сохранений: F5 каждый раз записывает новое поверх самого старого,
+  а F9 загружает самое новое. Список в окне сохранения теперь прокручивается колёсиком, как
+  в окне загрузки.
+- **Мини-карта меняет размер:** тяните её левый край, нижний край или угол между ними.
+  Размер сохраняется между играми; двойной щелчок по краю возвращает квадрат оригинала.
+- **Отладочный слой (F3 на карте):** каждая точка событий и каждый фонарь с номером, клеткой
+  и радиусом, а также события каждой точки и постройки (номер, заголовок, сколько раз
+  сработало) — видны сквозь туман; панель показывает клетки героя и указателя и полный
+  список событий места под указателем.
 
-### Fixed
-- **A lantern of radius 1 lights up:** the fog was drawn as a blur of the explored cells, so
-  the few cells such a lantern opens stayed almost black on the map and the minimap (seen on
-  a mod map: a burning building on the minimap, nothing on the map). Explored ground is now
-  clear away from the dark and at least a third lit at its edge, as in the original.
-- **Cleaner sound:** every sound and track is brought to 44100 Hz with a proper filter; the
-  sound library repeated samples instead, which added a metallic buzz to the game's 22050 Hz
-  sounds at any volume. This should take away the crackling reported on Windows; please tell
-  us if it is still there.
-- **Long messages scroll:** a message taller than the window (a long scroll text in a small
-  window) ran off the screen with its buttons. Its text now scrolls (the wheel, the arrow
-  keys, Page Up/Page Down, Home/End, with a scroll bar) and the buttons stay in sight.
+### Исправлено
+- **Фонарь с радиусом 1 светит:** туман рисовался как размытие разведанных клеток, поэтому
+  те немногие клетки, что открывает такой фонарь, оставались почти чёрными на карте и
+  мини-карте (замечено на карте мода: на мини-карте горящая постройка, на карте — ничего).
+  Теперь разведанная земля чиста вдали от темноты и хотя бы на треть освещена у края, как в
+  оригинале.
+- **Чище звук:** каждый звук и каждая мелодия приводятся к 44100 Гц правильным фильтром;
+  звуковая библиотека вместо этого повторяла отсчёты, что добавляло металлическое жужжание
+  к звукам игры в 22050 Гц на любой громкости. Это должно убрать треск, о котором сообщали
+  на Windows; если он остался, пожалуйста, напишите нам.
+- **Длинные сообщения прокручиваются:** сообщение выше окна (длинный текст свитка в
+  маленьком окне) уходило за край экрана вместе с кнопками. Теперь его текст прокручивается
+  (колёсиком, стрелками, Page Up/Page Down, Home/End, с полосой прокрутки), а кнопки остаются
+  на виду.
 
 ## 0.3.11 — 2026-10-07
 
-Commit `c0cbefb` (tag `v0.3.11`).
+Коммит `c0cbefb` (тег `v0.3.11`).
 
-SHA-256 of the released programs (built by the release pipeline):
+SHA-256 выпущенных программ (собраны конвейером выпуска):
 ```
 cb7943334f2414e2442c3518b8e69d06aeacf56495aacbeeea4d32bc1aaf670c  razdor
 b815288c77dfa128c43170951d9ad97a3493fe60482f71a0f955a05251286a42  Razdor.exe
 632da85a3a9d7604d597d1e7f4b3e9c609158fc88da7831d863f20005cdcb8ca  razdor-macos
 ```
 
-### Fixed
-- **No crash on a meeting with an army that has just left the map:** the message of a
-  meeting on the road ("… lets you pass") or of an attack looked the army up by its place in
-  the list of armies, and if an event had taken it off the map in between (as on Другой
-  берег, around the courier's meeting and a tavern's event), the game stopped with "index
-  out of bounds" (src\ui\world_view.rs:1377). Such a message now says "an army". Thanks to
-  the player who sent the log and the save.
+### Исправлено
+- **Нет падения при встрече с армией, которая только что ушла с карты:** сообщение о
+  встрече в пути («… пропускает вас») или о нападении искало армию по её месту в списке
+  армий, и если событие за это время убирало её с карты (как на карте Другой берег — вокруг
+  встречи с гонцом и события в таверне), игра останавливалась с «index out of bounds»
+  (src\ui\world_view.rs:1377). Теперь такое сообщение говорит «армия». Спасибо игроку,
+  приславшему журнал и сохранение.
 
 ## 0.3.10 — 2026-10-06
 
-Commit `b20b510` (tag `v0.3.10`).
+Коммит `b20b510` (тег `v0.3.10`).
 
-SHA-256 of the released programs (built by the release pipeline):
+SHA-256 выпущенных программ (собраны конвейером выпуска):
 ```
 7b8faa1259b0aae7351f9d1105c65479eba7f8b8fff025cf3bce35249335fb7a  razdor
 6e61cf37575605439189b3ceb8b26a96dccfc5ddcffc2ec59c942c74102bf81d  Razdor.exe
 710e1ae800e335805083f3bd38991ff45adb6841910a1c95bf891adc9421c465  razdor-macos
 ```
 
-### Fixed
-- **A campaign's next map decides what carries over:** Razdor read the carry-over settings of
-  the map being left, the original those of the map being entered. So going from Столица
-  (РК3) to Восточная провинция (РК4) kept the army and the pack, where the original takes
-  both away and leaves only the hero with his own items, gold and mana. Thanks to the player
-  who noticed.
+### Исправлено
+- **Что переходит дальше, решает следующая карта кампании:** «Раздор» читал настройки
+  переноса покидаемой карты, а оригинал — той, на которую входят. Поэтому при переходе с
+  карты Столица (РК3) на карту Восточная провинция (РК4) сохранялись армия и рюкзак, тогда
+  как оригинал забирает и то и другое, оставляя только героя с его собственными предметами,
+  золотом и маной. Спасибо игроку, который это заметил.
 
 ## 0.3.9 — 2026-10-06
 
-Commit `895599e` (tag `v0.3.9`).
+Коммит `895599e` (тег `v0.3.9`).
 
-SHA-256 of the released programs (built by the release pipeline):
+SHA-256 выпущенных программ (собраны конвейером выпуска):
 ```
 68c74fcf1beecfdd17ec92771e2c2b26c4775c6598c6b736a53f3531fd724af8  razdor
 ce4d1a8b7a30d386581836cf76152ec1b49909341a3e2431c4af10895b52a03d  Razdor.exe
 9eca1e7c621009ffd276f4709a308c69953f010e64636b79449a3cc0e7e2ccbb  razdor-macos
 ```
 
-### Fixed
-- **A message for a building's window is shown in it again:** since 0.3.7 the map took the
-  message into its stack even when a building's window opened in the same moment, so the
-  window did not show it.
+### Исправлено
+- **Сообщение для окна постройки снова показывается в нём:** начиная с 0.3.7 карта забирала
+  сообщение в свою стопку, даже когда в тот же момент открывалось окно постройки, и окно его
+  не показывало.
 
 ## 0.3.8 — 2026-10-06
 
-Commit `dc8037d` (tag `v0.3.8`).
+Коммит `dc8037d` (тег `v0.3.8`).
 
-SHA-256 of the released programs (built by the release pipeline):
+SHA-256 выпущенных программ (собраны конвейером выпуска):
 ```
 230f826d6313c93ae07655ec32e22df0f528cd951cd28d72f6c373d50dc3b83f  razdor
 e6ec8fcbd3d5ff5405afd1afb8e80a289c291311f99a029cf4d8d94101520adc  Razdor.exe
 d06581c682ec61162b8864dcd4b89a19f041c7aa880d93fa30ffedca26f915e4  razdor-macos
 ```
 
-### Fixed
-- **The map no longer shakes during a wait:** since 0.3.5 every wait tick replayed the hero's
-  last step, and the view, which follows him, slid one cell and jumped back each half hour of
-  the wait. Thanks to the player who sent the video.
+### Исправлено
+- **Карта больше не трясётся во время ожидания:** начиная с 0.3.5 каждый такт ожидания
+  повторял последний шаг героя, и вид, который следует за ним, сдвигался на клетку и прыгал
+  обратно каждые полчаса ожидания. Спасибо игроку, приславшему видео.
 
 ## 0.3.7 — 2026-10-06
 
-Commit `7f097b5` (tag `v0.3.7`).
+Коммит `7f097b5` (тег `v0.3.7`).
 
-SHA-256 of the released programs (built by the release pipeline):
+SHA-256 выпущенных программ (собраны конвейером выпуска):
 ```
 350b1eeba1c66cb402688682143a57c109f0db9649554aec66f05dbacba70445  razdor
 2b4a3420a90fa24af9e68650b59a8ea417f52b0cec34ae7287c10cc4f4ef0dc2  Razdor.exe
 fb5390acdd928274fe70023f9951acb4f388255d17eb3995fcbb1bfb715f23c4  razdor-macos
 ```
 
-### Changed
-- **The map's messages stack and fade out:** each message above the bottom bar now stays
-  for 5 seconds and then fades; new ones stack on top of the older ones (up to five), instead
-  of one message that stayed until the next replaced it.
+### Изменено
+- **Сообщения на карте складываются в стопку и гаснут:** каждое сообщение над нижней
+  панелью теперь держится 5 секунд, а затем исчезает; новые ложатся поверх старых (до пяти),
+  вместо одного сообщения, которое держалось, пока его не сменит следующее.
 
 ## 0.3.6 — 2026-10-06
 
-Commit `b6b8ede` (tag `v0.3.6`).
+Коммит `b6b8ede` (тег `v0.3.6`).
 
-SHA-256 of the released programs (built by the release pipeline):
+SHA-256 выпущенных программ (собраны конвейером выпуска):
 ```
 796769fe97f84a95d4be1bdbdf89aab419eb84afa5ea95f3d714820cd2b6dca5  razdor
 4000b70fd4f60ff87476b53d1a209611294b0855ed7e4fa1cd0d6bb93649c84b  Razdor.exe
 01abfe7e1e8f5e0c3674ccd84ad147a254ae8fca5ddcd8ebf45ba9884089d35e  razdor-macos
 ```
 
-### Added
-- **A close button on the battle window,** as in the original: the red cross in its title bar
-  opens the leave-battle window, as Esc does.
+### Добавлено
+- **Кнопка закрытия у окна боя,** как в оригинале: красный крестик в его заголовке
+  открывает окно выхода из боя, как и Esc.
 
-### Fixed
-- **A building's tooltip shows its garrison whoever holds it:** holding the right button on
-  your own or a friendly castle or fort now shows its defenders (your units left there
-  too), as the original does; before, only a hostile building showed them. As in the
-  original, ruins say they are guarded but hide by whom, and towns show none.
-- **Garrisons and armies start in a sensible formation:** at a map's start the original
-  arranges every army and garrison as it does a side in battle. Razdor did it only for the
-  hero's army, so a castle's archers stood in front and its infantry in the reserve's edge
-  places (seen on Проклятое озеро).
+### Исправлено
+- **Подсказка постройки показывает гарнизон, кто бы ею ни владел:** если удерживать правую
+  кнопку на своём или дружественном замке или крепости, теперь видны их защитники (и ваши
+  оставленные там отряды), как в оригинале; раньше их показывала только враждебная
+  постройка. Как и в оригинале, руины сообщают, что они охраняются, но не говорят кем, а
+  города не показывают никого.
+- **Гарнизоны и армии начинают в разумном построении:** в начале карты оригинал
+  расставляет каждую армию и каждый гарнизон так же, как сторону в бою. «Раздор» делал это
+  только для армии героя, поэтому лучники замка стояли впереди, а его пехота — на крайних
+  местах резерва (замечено на карте Проклятое озеро).
 
 ## 0.3.5 — 2026-10-06
 
-Commit `0fa9ebf` (tag `v0.3.5`).
+Коммит `0fa9ebf` (тег `v0.3.5`).
 
-SHA-256 of the released programs (built by the release pipeline):
+SHA-256 выпущенных программ (собраны конвейером выпуска):
 ```
 3ec767509f84b86eab63a1f82f8e9d7671081710a8a6d22420678477022cfec3  razdor
 b185bc528d07e1d8e2ac1419bcec9c13626eff1039c20e8fc368a633544a3334  Razdor.exe
 c39614e1db7b26d93397d15ffd52fa3990ee0cc5a0935f38cf3c3676543e07b1  razdor-macos
 ```
 
-### Added
-- **Windowed, borderless or full screen:** a new "Screen" setting. Borderless is a window
-  without a frame over the whole monitor; full screen is the system's own. The choice is kept
-  for the next start.
-- **Interface scale, as in Minecraft:** "Auto" makes the interface as large as the window
-  allows, as before; 1×, 1.5×, 2×, 2.5×, 3× or 4× keep it smaller on a big screen. A scale
-  larger than the window allows is not offered.
+### Добавлено
+- **В окне, без рамки или на полный экран:** новая настройка «Экран». «Окно без рамки» —
+  это окно без обрамления на весь монитор; «Полный экран» — системный. Выбор сохраняется до
+  следующего запуска.
+- **Масштаб интерфейса, как в Minecraft:** «Авто» делает интерфейс настолько крупным,
+  насколько позволяет окно, как раньше; 1×, 1.5×, 2×, 2.5×, 3× или 4× оставляют его
+  мельче на большом экране. Масштаб крупнее, чем позволяет окно, не предлагается.
 
-### Fixed
-- **An attacking army no longer comes out of nowhere:** the other armies' steps were drawn
-  one step after the hero's, and an attack opened the battle before the attacker's last
-  steps were drawn, so it seemed to jump in from far away. The hero and the armies now move
-  together, and the battle opens once the attacker is seen arriving next to the hero, as in
-  the original. Walking into an army no longer slides the hero towards it first.
-- **A unit's abilities are always shown on its panel:** they came last, under the stats and
-  the description, and were cut off at the panel's bottom. A healer's or caster's long stat
-  list left no room for its ability (Wrath of God on the priests and bishops of the Evolution
-  mod), and long ability texts of mods were cut short. Now the text moves up over the figure
-  to make room, and in battle the description gives way first.
+### Исправлено
+- **Нападающая армия больше не появляется из ниоткуда:** шаги других армий рисовались на
+  шаг позже шагов героя, а нападение открывало бой раньше, чем были нарисованы последние
+  шаги нападающего, и казалось, что он прыгает издалека. Теперь герой и армии движутся
+  вместе, а бой открывается, когда видно, как нападающий подошёл к герою, как в оригинале.
+  Если герой сам идёт на армию, он больше не съезжает сначала к ней.
+- **Способности отряда всегда видны на его панели:** они шли последними, под
+  характеристиками и описанием, и обрезались нижним краем панели. Длинный список
+  характеристик лекаря или заклинателя не оставлял места для способности (Гнев Божий у
+  жрецов и епископов мода Evolution), а длинные тексты способностей в модах обрезались.
+  Теперь текст сдвигается вверх поверх фигуры, освобождая место, а в бою первым уступает
+  описание.
 
 ## 0.3.4 — 2026-10-06
 
-Commit `068db21` (tag `v0.3.4`).
+Коммит `068db21` (тег `v0.3.4`).
 
-SHA-256 of the released programs (built by the release pipeline):
+SHA-256 выпущенных программ (собраны конвейером выпуска):
 ```
 d4b9885e42efc410bd6ff4f7bacddfb379c7556b9ce9d91a9896564d23172f1d  razdor
 dad2043a599ef3c841f6e43b9c54658cffeaec770954ef355040d863ae9746c7  Razdor.exe
 9ce8b6da21f12e6450e408151cb775e1a49d56dff0b2d70dcc8efdea9511b7ad  razdor-macos
 ```
 
-### Fixed
-- **No crash when the window is minimized on the world map:** Windows makes a minimized
-  window 1 pixel high, which left the map's view less than nothing high, and the game failed
-  with "min > max, or either was NaN. min = 0.0, max = -39.0". The view is now empty
-  instead. Thanks to the player who sent the crash report.
+### Исправлено
+- **Нет падения при сворачивании окна на карте мира:** Windows делает свёрнутое окно высотой
+  в 1 пиксель, из-за чего высота вида карты становилась меньше нуля, и игра падала с
+  «min > max, or either was NaN. min = 0.0, max = -39.0». Теперь вид в этом случае просто
+  пуст. Спасибо игроку, приславшему отчёт о падении.
 
 ## 0.3.3 — 2026-10-05
 
-Commit `7b0180d` (tag `v0.3.3`).
+Коммит `7b0180d` (тег `v0.3.3`).
 
-SHA-256 of the released programs (built by the release pipeline):
+SHA-256 выпущенных программ (собраны конвейером выпуска):
 ```
 c45c30f8dcffd700c9f2f819999322c08d912c2b338b6b6fd0e21a527e5b3075  razdor
 6eae0e522499f67348da8b98eb5ecab96100ff8a134db74c9af9207659dafc2b  Razdor.exe
 0551851a7d0f52370cf3b294261822be888a7a7754758a2088f99170f6ae2bc6  razdor-macos
 ```
 
-### Fixed
-- **The new game's map list scrolls:** the wheel over the list moves it again (every frame
-  pulled it back to the top, so with more maps than fit the lower ones could not be reached),
-  and a campaign only partly in view shows its part instead of vanishing with the maps after
-  it.
+### Исправлено
+- **Список карт новой игры прокручивается:** колёсико над списком снова его двигает (каждый
+  кадр возвращал его наверх, поэтому, если карт больше, чем помещается, до нижних было не
+  добраться), а кампания, видимая лишь частично, показывает эту часть, а не исчезает вместе
+  с картами после неё.
 
 ## 0.3.2 — 2026-10-05
 
-Commit `e3fba2d` (tag `v0.3.2`).
+Коммит `e3fba2d` (тег `v0.3.2`).
 
-SHA-256 of the released programs (built by the release pipeline):
+SHA-256 выпущенных программ (собраны конвейером выпуска):
 ```
 f85267fbbfc061d3cfb901891d87db1ebbfa00a7fa31e9177e5e0f42b167525f  razdor
 41dc27bbcd3972d1671bc65b4d130664045fce45c976397604506a2ab2c1a898  Razdor.exe
 75f93ba6cb2901aced6cd9729ff07da812bde63b354f16c30008e60f2f449d1c  razdor-macos
 ```
 
-### Fixed
-- **A shipyard opens the original's ship window, not the building window:** on land it
-  shows the shipyard's picture, the harbour master's words with the owner's name, the price
-  of a ship and "Нанять корабль" and "Отмена" (with a warning when your gold is short); at
-  sea it opens nothing. Hiring the ship closes the window, so you can click the water next to
-  the shipyard to sail. The shipyard's main hall and "Корабли" tab are gone, as the original
-  has none.
-- **Army cards are arranged by clicks, as in the original:** with a unit selected, pressing
-  another unit swaps the two at once, and pressing an empty cell slides the card there; both
-  play the card sound and end with none selected. The hero is a unit like any other here:
-  selected, a press on another unit swaps it with the hero (before, it only selected that
-  unit). Pressing the selected unit deselects it but, as in the original, leaves its promotion
-  tree up until the next press; a press on an empty cell with nothing selected brings the pack
-  back. The barracks' army grid takes the same clicks, and in the garrison a refused hero or
-  named unit stays selected. Dragging a card still works.
-- **A unit that cannot be promoted shows its promotion tree locked, as in the original:** at
-  its first level, or in a final class, every portrait of the tree, the unit's own included,
-  is greyed, tinted dark brown and darkened at the edges. Razdor showed the unit's portrait
-  plainly with a note of its own ("The final class…"), which the original does not have.
-- **Scenario texts are laid out as in the original, without the stray `*`, `^`, `|` and
-  `@`:** an event's window reads these marks as the original does: a line with `*` is white,
-  with `|` blue, with `@` orange, the others pale yellow; a line with `^` is centred (the
-  tutorials' headings), the others are justified paragraphs with an indent, and blank lines
-  stay. The tutorial offer and the restart and delete-save questions read them too. The
-  journal still shows them as typed, as the original's does.
+### Исправлено
+- **Верфь открывает окно корабля из оригинала, а не окно постройки:** на суше оно
+  показывает картинку верфи, слова начальника пристани с именем владельца, цену корабля и
+  «Нанять корабль» и «Отмена» (с предупреждением, если не хватает золота); на море оно не
+  открывается. Наём корабля закрывает окно, и можно щёлкнуть по воде рядом с верфью, чтобы
+  отплыть. Главный зал верфи и вкладка «Корабли» убраны — в оригинале их нет.
+- **Карточки армии расставляются щелчками, как в оригинале:** если отряд выбран, нажатие на
+  другой отряд сразу меняет их местами, а нажатие на пустую клетку переносит туда карточку;
+  в обоих случаях звучит звук карточки, и выбор снимается. Герой здесь — такой же отряд, как
+  остальные: если он выбран, нажатие на другой отряд меняет его с героем местами (раньше
+  тот отряд просто выбирался). Нажатие на выбранный отряд снимает выбор, но, как в
+  оригинале, оставляет его дерево повышений до следующего нажатия; нажатие на пустую клетку,
+  когда ничего не выбрано, возвращает рюкзак. Сетка армии в казармах понимает те же щелчки,
+  а в гарнизоне отвергнутый герой или именной отряд остаётся выбранным. Перетаскивание
+  карточки по-прежнему работает.
+- **Отряд, который нельзя повысить, показывает дерево повышений закрытым, как в
+  оригинале:** на первом уровне или в конечном классе каждый портрет дерева, включая портрет
+  самого отряда, обесцвечен, тонирован в тёмно-коричневый и затемнён по краям. «Раздор»
+  показывал портрет отряда как есть, со своей пометкой («The final class…»), которой в
+  оригинале нет.
+- **Тексты сценариев оформлены как в оригинале, без лишних `*`, `^`, `|` и `@`:** окно
+  события читает эти знаки так же, как оригинал: строка с `*` белая, с `|` синяя, с `@`
+  оранжевая, остальные бледно-жёлтые; строка с `^` выровнена по центру (заголовки
+  обучения), остальные — абзацы по ширине с отступом, а пустые строки сохраняются.
+  Предложение пройти обучение и вопросы о перезапуске и удалении сохранения тоже их
+  понимают. Журнал по-прежнему показывает их как есть, как и в оригинале.
 
 ## 0.3.1 — 2026-10-05
 
-Commit `563eaa3` (tag `v0.3.1`).
+Коммит `563eaa3` (тег `v0.3.1`).
 
-SHA-256 of the released programs (built by the release pipeline):
+SHA-256 выпущенных программ (собраны конвейером выпуска):
 ```
 3f6f60171809508ee8453d2bb88a820c31bce36db10649e9568348e61defe558  razdor
 c4d020209d2586d9534da0cb8e686bd5891e1ecb5136265c9012711b38c3afd8  Razdor.exe
 879c37c18f64d52441fdc8d29628b1186e1f2fe613a13447b71e29231d2573b9  razdor-macos
 ```
 
-### Fixed
-- **A building is guarded only by an army standing in it, as in the original:** stepping onto
-  a castle, fort, village or ruins whose own army is away on patrol storms its garrison (or
-  takes it); that army no longer comes from across the map to fight you before you move.
-- **Hills lie under everything, as in the original:** the green and rocky hills are drawn
-  before the trees, mountains, buildings and armies, and the route over them, so nothing
-  standing above a hill is hidden by it.
-- **Every shipyard rents a ship, whatever its attitude to you,** as in the original: an
-  ill-disposed shipyard showed only its main hall, so 12 of the 30 shipyards of the shipped
-  maps (both ports of Проклятое озеро among them) could not rent one.
-- **Armies walk as the original's figures:** an army's figure comes from its style and its
-  leader, as the original's map loader picks it (knight, rogue or peasant; zombie, ghost or
-  necromancer under an undead leader; mage under a priest, mage or witch). Razdor read the
-  map editor's picture code instead, and 188 of the 391 armies of the shipped maps walked
-  as the wrong figure, most of them as a knight.
-- **The pack comes back on the army screen:** pressing the selected unit again deselects it,
-  and moving a unit ends with none selected, as in the original, so the pack replaces the
-  unit's promotion tree again (it stayed hidden until the hero's card was pressed).
-- **The minimap's markers as the original's:** only castles and forts take a side's colour;
-  villages show full or empty by their gold, shipyards the harbour colour, ruins, smithies,
-  altars and dungeons grey, towns, taverns, markets and churches white (all were coloured by
-  their faction, so taverns and markets showed red). Taverns, markets and smithies have the
-  plain house, an altar the skull or the gravestone. Armies are small shields, red unless a
-  meeting with a friendly one waits; armies inside buildings are not shown, and the hero's
-  mark no longer pulses.
+### Исправлено
+- **Постройку охраняет только армия, стоящая в ней, как в оригинале:** шаг на замок,
+  крепость, деревню или руины, чья собственная армия ушла в дозор, ведёт к штурму гарнизона
+  (или к захвату); эта армия больше не приходит через всю карту, чтобы сразиться с вами,
+  прежде чем вы сделаете ход.
+- **Холмы лежат под всем остальным, как в оригинале:** зелёные и скалистые холмы рисуются
+  раньше деревьев, гор, построек и армий и проложенного по ним пути, так что ничто,
+  стоящее над холмом, им не закрывается.
+- **Любая верфь сдаёт корабль, как бы она к вам ни относилась,** как в оригинале:
+  недружелюбная верфь показывала только главный зал, поэтому 12 из 30 верфей на картах из
+  комплекта игры (в том числе обе пристани карты Проклятое озеро) не могли сдать корабль.
+- **Армии ходят фигурами оригинала:** фигура армии зависит от её стиля и предводителя — так
+  её выбирает загрузчик карт оригинала (рыцарь, разбойник или крестьянин; зомби, призрак или
+  некромант при предводителе-нежити; маг при жреце, маге или ведьме). «Раздор» вместо этого
+  читал код картинки из редактора карт, и 188 из 391 армии на картах из комплекта игры ходили
+  не той фигурой, большинство — рыцарем.
+- **Рюкзак возвращается на экране армии:** повторное нажатие на выбранный отряд снимает
+  выбор, а перемещение отряда заканчивается без выбора, как в оригинале, так что рюкзак
+  снова заменяет дерево повышений отряда (оно оставалось скрытым, пока не нажать на карточку
+  героя).
+- **Метки на мини-карте как в оригинале:** цвет стороны получают только замки и крепости;
+  деревни показаны полными или пустыми по своему золоту, верфи — цветом пристани, руины,
+  кузницы, алтари и подземелья — серым, города, таверны, рынки и церкви — белым (раньше все
+  окрашивались по фракции, и таверны с рынками были красными). У таверн, рынков и кузниц —
+  простой домик, у алтаря — череп или надгробие. Армии — маленькие щиты, красные, если
+  только вас не ждёт встреча с дружественной; армии внутри построек не показываются, а метка
+  героя больше не пульсирует.
 
-### Changed
-- **A ring under castles, forts, towns and villages in their owner's colour,** as under the
-  armies (a Razdor extra), replacing the pennant Razdor drew over them; the original marks
-  owners only on the minimap.
+### Изменено
+- **Кольцо под замками, крепостями, городами и деревнями в цвете владельца,** как под
+  армиями (дополнение «Раздора»), вместо флажка, который «Раздор» рисовал над ними; оригинал
+  отмечает владельцев только на мини-карте.
 
 ## 0.3.0 — 2026-10-04
 
-Commit `eeaa582` (tag `v0.3.0`).
+Коммит `eeaa582` (тег `v0.3.0`).
 
-Razdor now plays by the original Discord Times' own rules, read from the original game and
-checked against it running side by side: the map, the AI armies, battles, the economy,
-spells, items, scenario events and saves. Where the original has a bug, Razdor plays what
-the original evidently meant (see Fixed). Razdor's own extras stay, and a few new ones join
-them.
+Теперь «Раздор» играет по правилам самих «Времён раздора», взятым из оригинальной игры и
+сверенным с ней при запуске бок о бок: карта, армии ИИ, бои, экономика, заклинания,
+предметы, события сценариев и сохранения. Где в оригинале ошибка, «Раздор» играет так, как
+оригинал явно задумывал (см. «Исправлено»). Собственные дополнения «Раздора» остаются, и к
+ним добавляются несколько новых.
 
-### New
-- **Custom battle**: a main-menu link opens a setup for a battle outside any campaign: both
-  armies from the install's unit types (the demo's without an install), each unit with its
-  level and items, the wide or vanilla formation, the battle AI's level and who plays each
-  side (you or the AI; the AI on both to watch). Its result box offers the same armies
-  again, a change of armies or the main menu, and counts the rounds. Games and saves are
-  untouched.
-- **Watched quick battle** (W, or **Watch** under the unit panel): the AI plays both sides
-  on the battle screen with the normal animations at 1×, 2× or 4× (S), skippable to the end
-  (Q) with the same result as the instant quick battle; W again takes the control back.
-- **Inventory filter**: on the army screen's backpack and the market's lists, typing (or
-  Ctrl+F) filters the items live by name, type, stats, bonus and description, in any case
-  (Ё as Е), with the match lit; Enter takes the first match, Esc clears.
-- **Find in the map editor** (Ctrl+F): finds buildings, armies, points, events, the hero
-  starts and objects by name or id, and the units, items and spells they hold; a click,
-  Enter or F3 (Shift+F3 back) jumps the view to the hit and selects it.
-- **Cheat console** (~, Ё on a Russian layout, on the world map and in battle): `help`,
-  `gold N`, `mana N`, `reveal`, `heal`, `xp N`, `level N`, `item`, `spell`, `unit <id or
-  name> [level]`, `time H`, `win`, `lose`, `god` and `speed N`, with a scroll-back and the
-  earlier commands on Up / Down. A game in which a cheat worked is marked in its saves
-  ("(cheats)" in the load list) and in the play log.
-- **Spell badges on the unit cards**: the army screen, the building windows and the battle
-  show, as the original, up to four round badges along each portrait, one per running spell
-  that costs mana; hovering one shows the spell's picture, name, effect, the unit's life loss
-  and the time left. In battle the potion, blessing, poison and curse signs sit where the
-  original puts them, and a unit that drank a potion shows its sign on the army and building
-  cards too.
-- **The wait and centre buttons**: hovering the time panel's message box on the idle map
-  shows the original's three buttons over it: wait 1 hour, centre the view on the hero, wait
-  4 hours. The centre button (and Tab) glides the view back to the hero.
-- **Stop a wait with a click or a key** (Razdor's choice; the original's waits always run to
-  their end): a left click anywhere or a key during a 1 h, 4 h or endless wait ends it after
-  the half hour under way and does nothing else. Space and a right click still end it at
-  once; the view keys (zoom, minimap, Tab) leave it running.
-- **Front-row width setting**: the settings window chooses 6 or 4 front-row cells (the
-  install's "wide front row" until chosen). It applies to new games and to the game under
-  way from its next battle; its saves record the width. With 4 the formation is the
-  original's 4-column one, drawn as the original draws it.
+### Добавлено
+- **Свой бой**: ссылка в главном меню открывает настройку боя вне всякой кампании: обе
+  армии из типов воинов установленной игры (без неё — из демо), у каждого воина уровень и
+  предметы, широкий или обычный строй, уровень боевого ИИ и кто играет за каждую сторону
+  (вы или ИИ; ИИ за обе — чтобы смотреть). Окно итога предлагает те же армии ещё раз, смену
+  армий или главное меню и считает раунды. Игры и сохранения не затрагиваются.
+- **Быстрый бой с просмотром** (W или **Смотреть** под панелью воина): ИИ играет за обе
+  стороны на экране боя с обычной анимацией на скорости 1×, 2× или 4× (S); можно сразу
+  перейти к концу (Q) с тем же итогом, что у мгновенного быстрого боя; повторное W
+  возвращает управление.
+- **Отбор снаряжения**: в рюкзаке на экране армии и в списках рынка набор текста (или
+  Ctrl+F) на лету отбирает предметы по названию, типу, характеристикам, бонусу и описанию,
+  без учёта регистра (Ё как Е), с подсветкой совпадения; Enter берёт первое совпадение, Esc
+  сбрасывает отбор.
+- **Поиск в редакторе карт** (Ctrl+F): находит постройки, армии, точки, события, стартовые
+  клетки героев и объекты по названию или номеру, а также воинов, предметы и заклинания в
+  них; щелчок, Enter или F3 (Shift+F3 — назад) переносит взгляд к найденному и выделяет его.
+- **Консоль читов** (~, на русской раскладке Ё, на карте мира и в бою): `help`, `gold N`,
+  `mana N`, `reveal`, `heal`, `xp N`, `level N`, `item`, `spell`, `unit <номер или
+  название> [уровень]`, `time H`, `win`, `lose`, `god` и `speed N`, с прокруткой назад и
+  прежними командами по стрелкам вверх / вниз. Игра, в которой сработал чит, помечается в
+  своих сохранениях («(читы)» в списке загрузки) и в журнале игры.
+- **Значки заклинаний на карточках воинов**: экран армии, окна построек и бой показывают,
+  как в оригинале, до четырёх круглых значков вдоль каждого портрета — по одному на каждое
+  действующее заклинание, требующее маны; при наведении видны картинка заклинания,
+  название, действие, потеря жизни воина и оставшееся время. В бою знаки зелья,
+  благословения, яда и проклятия стоят там, где их ставит оригинал, а воин, выпивший зелье,
+  показывает его знак и на карточках армии и построек.
+- **Кнопки ожидания и центровки**: при наведении на окно сообщений панели времени, пока
+  герой стоит на карте, над ним появляются три кнопки оригинала: ждать 1 час, навести
+  взгляд на героя, ждать 4 часа. Кнопка центровки (и Tab) плавно возвращает взгляд к герою.
+- **Остановка ожидания щелчком или клавишей** (выбор «Раздора»; в оригинале ожидание всегда
+  идёт до конца): щелчок левой кнопкой в любом месте или клавиша во время ожидания в 1 ч,
+  4 ч или бесконечного завершает его после текущего получаса и больше ничего не делает.
+  Пробел и щелчок правой кнопкой по-прежнему прерывают его сразу; клавиши обзора (масштаб,
+  мини-карта, Tab) его не прерывают.
+- **Настройка ширины первого ряда**: в окне настроек выбирается 6 или 4 клетки первого
+  ряда (пока не выбрано — по опции «широкий первый ряд» установленной игры). Настройка
+  действует на новые игры и на текущую — со следующего боя; её сохранения запоминают
+  ширину. При 4 строй — оригинальный, в 4 столбца, и рисуется так, как рисует его оригинал.
 
-### Changed
-- **The map and the hero's walk**
-  - The route is planned as the original plans it (a little dearer than the cheapest at
-    times) and goes to the very cell clicked, also inside a building. It goes around only
-    castles and forts whose attitude is 0 or less and ruins not his, and crosses moving
-    armies: only stationary guards, and an army a meeting waits for, close the way.
-  - A click on an unexplored cell does nothing; water is a target only with a ship. The view
-    stays where it is while you choose a route and follows the hero once he sets off.
-  - Stepping onto an army engages it before he moves (a hostile one fights, a friend meets
-    him); stepping onto a village, castle, fort, ruins or bridge meets the army that lives
-    there or the garrison at its gate, and an empty one is taken. A village taken on the way
-    opens no window and does not stop the walk.
-  - A building is entered on its second cell crossed or where the walk ends; its window opens
-    only there. After winning a building from its garrison you stand where you attacked
-    from, and a click on it walks you in. A building reached while an event's window opens
-    is entered once the window is read.
-  - Ships as in the original: buying one puts no ship on the water; he steps out of the
-    shipyard onto the water to sail, and landing parks the ship on the water he left.
-  - Sight and lanterns explore exactly the original's cells; the hero's sight, speed and
-    casting time stay his class's whatever unit an event makes him. His step time is set as
-    he comes onto a cell.
-  - Maps start a minute after their start time (maps without one at minute 1 of year 0), and
-    the first noon report is always the next day's.
-  - The map's keys and mouse as in the original, Razdor's own kept: a click or a key while he
-    walks stops him at the end of the step under way (the view keys, the music and the help
-    leave him walking); the right button held still shows the tooltip, held and moved it
-    drags the map; Space or a right click ends a wait or a reading at once; Esc closes the
-    minimap first. Opening a window while he walks lets him finish the step afterwards.
-  - F4 waits without end, half an hour at a time, until F5 (the Community's endless wait).
-    The map scrolls with the arrow keys and the screen edges at the install's scroll speed.
-  - Armies' walk frames follow the game time, so a figure no longer marches in place while
-    the world stands still.
-- **AI armies**
-  - The world-map AI is the original's: armies keep no goal and plan again as they step,
-    with one flood over everything they want; they score armies, the hero and buildings by
-    battles played in secret, judged by the sides' strengths as last counted. They still keep
-    to the hero's roads (Razdor's choice since 0.2.0).
-  - Their moves come at the end of each step's play time, in the order of those times. They
-    attack or greet the hero when he ends a step, and while he stands or waits after a walk
-    (an army reaching him then stops the wait); while he takes a step they see him on the
-    cell he is leaving. Stationary guards no longer move, plan or get paid.
-  - In a building an AI army assaults, captures, collects tribute, sells its pack and buys by
-    what helps its units, heals, raises its dead, hires by battle role and buys its castles'
-    garrisons, as the original; it keeps its worn items, its dead and its pay.
-  - Battles between AI armies, their loot and promotions, beaten armies' respawns, and armies
-    an event brings or moves follow the original's rules. A beaten army pays the wage bill it
-    last counted, even when none of its units survives.
-- **Battles**
-  - A battle starts as its window opens, with no deployment step. Until anyone has acted,
-    Quick battle (Q / Enter) plays it out at once; later Finish automatically (Q) plays out
-    the rest. Space does what a click on the unit's own card does.
-  - Rows collapse only after a death or a unit's last action; the wide row's blocked cells
-    move with them. The enemy is arranged anew for every battle as the original does, and
-    after a battle the army keeps the cells its units ended on.
-  - The battle AI's scores and moves, the turn start, initiative, Community bonuses (Splash,
-    Stun, ArmorBreaker, Berserk, Flock, Hunger, Poison, Assault, Suicide and the rest),
-    magic protection and drain, vampirism, counter blows and preventive strikes all follow
-    the original and the Community patch.
-  - A new unit takes the first free cell of the reserve, then the back row, then the front
-    row; a new map starts the hero's army auto-arranged, as the original's map load does.
-  - The battle XP follows the original's formula, with a secret pre-battle simulation and
-    the install's experience rate (`HeroExpirienceModificator`). The armies carry their
-    battle HP after every action.
-  - Counterblows are seen and heard: the unit strikes back with the blow's effect and sound.
-    A won battle stays on screen 2.5 seconds with each unit's experience on its card, then
-    the victory report opens on the map; a level gained plays no sound outside the
-    promotion screen. A pass is a short pause.
-  - The card's stat strip writes a shooter's attack "A:", as the original; the back row's
-    ranged defence bonus shows on the card and the panel.
-- **Economy, buildings and markets**
-  - Noon as in the original: castles and forts pay the stock they grew, towns nothing, no
-    building pays mana; corpses draw no wage; Rear Service cuts the whole bill once; a short
-    noon refunds full wages, cheapest first. The noon report shows the nominal income and
-    warns when the gold does not cover the wages; it ends a wait.
-  - Building tabs as in the original, without an attitude test; the garrison tab moves and
-    swaps units by clicks; Dismiss and Bury ask first. The player's dead can always be
-    raised in a town or church.
-  - Market stock as in the original: 12 places, random goods drawn by price bands and the
-    original's type and school rules, redrawn at a midnight 12 hours after the last restock.
-    Unaffordable prices show in red; a price of exactly half a gold rounds as the original's.
-  - Village offers roll as the original's, and the furs, the witch and the innkeeper show
-    their result in a window of their own.
-  - A ruins' garrison wears the ruins' goods and is weighed by the AI without them until its
-    first battle.
-- **Spells and items**
-  - World spells per unit: every unit holds up to four lasting spells; a life-draining curse
-    is a lasting drain. Enemy spells reach any army on explored ground; the mana is paid when
-    the spell lands; only the first 15 spells of the book can be cast.
-  - Stats are rebuilt as the original's (flat changes before percents, initiative and
-    actions in hundredths, one bonus per unit). Item wear rules, potions and a level's or
-    promotion's HP follow the original.
-  - An item dropped on the hero's card goes to the pack (a potion is drunk), as in the
-    original; the hero wears items through his panel's slots.
-- **Scenario events and campaigns**
-  - Conditions, flags (one string, tested by substring), Yes and No, delays, chains and the
-    Community opcodes run as the original runs them. Events after a window wait for it to
-    close; places an event shows are flown to right after its window, also from a building's
-    main hall, where quests are now taken.
-  - Events are checked as a building window closes (after a heal, raise or purchase).
-  - The next campaign map gets the hero's whole record and what the map carries over; a
-    restart replays that hand-over. The new-game hero window offers only the classes the map
-    gives a start cell, as the original.
-- **The install, maps and saves**
-  - The install's ini files and maps are read by the original's rules, as leniently as it
-    reads them; a key missing from `_Global.ini` reads 0.
-  - The front row is 4 wide when the install turns its wide-row option off; otherwise 6,
-    Razdor's default. A saved game keeps its width.
-  - Random numbers are the original's generator, started afresh on every map, so a map's
-    rolls come out the same each time; a load seeds it as the original does.
-  - Autosaves use the original's 12 slots and names; an install that turns autosaves off gets
-    none (without the option Razdor autosaves). Saves of every earlier format still load.
-- **Menus and windows**
-  - Esc in the main menu quits at once; Back or Esc on the hero choice returns to the main
-    menu. A Yes / No question takes Esc and Razdor's N as No and any other key as Yes. The
-    tutorial is offered at every new game until it is finished.
-  - The windows of one moment open one at a time, in the original's order; the victory
-    report comes a moment after the battle screen closes.
-- **Sound and music**
-  - The music, its tracks and the event, village and victory chords are the original's.
-  - Sounds as the original's: building windows, their money buttons and hires, the wait
-    keys, the main menu, the bar's icons and items picked up and worn. A sound played again
-    starts over instead of piling up.
-  - World spells show where they land: the camera glides to the army and the effect plays
-    over it.
+### Изменено
+- **Карта и передвижение героя**
+  - Путь прокладывается так, как прокладывает его оригинал (порой чуть дороже самого
+    дешёвого), и ведёт точно в ту клетку, по которой щёлкнули, в том числе внутри
+    постройки. Он обходит только замки и крепости с отношением 0 и ниже и чужие руины, а
+    сквозь движущиеся армии проходит: путь закрывают лишь стоящие на месте стражи и армия,
+    встречи с которой ждёт событие.
+  - Щелчок по неразведанной клетке ничего не делает; вода годится целью только при наличии
+    корабля. Пока вы выбираете путь, взгляд остаётся на месте и следует за героем, как
+    только тот трогается.
+  - Шаг на армию вступает с ней в контакт до движения (враждебная нападает, дружественная
+    встречает героя); шаг на деревню, замок, крепость, руины или мост приводит к встрече с
+    живущей там армией или гарнизоном у ворот, а пустая постройка захватывается. Деревня,
+    взятая по пути, не открывает окна и не прерывает движение.
+  - В постройку герой входит на второй пройденной её клетке или там, где кончается путь;
+    только там открывается её окно. Отбив постройку у гарнизона, вы стоите там, откуда
+    атаковали, и щелчок по ней ведёт вас внутрь. Постройка, достигнутая в момент, когда
+    открывается окно события, посещается после прочтения окна.
+  - Корабли как в оригинале: покупка не ставит корабль на воду; чтобы отплыть, герой
+    выходит из верфи на воду, а при высадке корабль остаётся на воде, которую он покинул.
+  - Обзор и фонари разведывают ровно те клетки, что и в оригинале; обзор, скорость и время
+    чтения заклинаний героя остаются от его класса, каким бы воином его ни сделало событие.
+    Время его шага задаётся, когда он ступает на клетку.
+  - Карты начинаются через минуту после своего стартового времени (карты без него — в
+    1-ю минуту года 0), а первый полуденный отчёт всегда приходит на следующий день.
+  - Клавиши и мышь на карте как в оригинале, собственные «Раздора» сохранены: щелчок или
+    клавиша во время движения останавливает героя в конце текущего шага (клавиши обзора,
+    музыка и справка его не останавливают); правая кнопка, удерживаемая неподвижно,
+    показывает подсказку, а удерживаемая с движением — тащит карту; Пробел или щелчок правой
+    кнопкой сразу прерывает ожидание или чтение; Esc сначала закрывает мини-карту. Если во
+    время движения открыть окно, герой потом доделает текущий шаг.
+  - F4 ждёт без конца, по получасу, до F5 (бесконечное ожидание из Community). Карта
+    прокручивается стрелками и краями экрана со скоростью прокрутки установленной игры.
+  - Кадры ходьбы армий следуют игровому времени, так что фигура больше не марширует на
+    месте, пока мир стоит.
+- **Армии ИИ**
+  - ИИ на карте мира — оригинальный: армии не хранят цели и планируют заново на каждом
+    шаге, одной волной по всему, что им нужно; армии, героя и постройки они оценивают по
+    боям, разыгранным втайне, судя по силам сторон на момент последнего подсчёта. Дорог
+    героя они по-прежнему придерживаются (выбор «Раздора» с 0.2.0).
+  - Их ходы происходят в конце игрового времени каждого шага, в порядке этих времён. Они
+    нападают на героя или приветствуют его, когда он заканчивает шаг, а также пока он
+    стоит или ждёт после движения (армия, добравшаяся до него, прерывает ожидание); пока он
+    делает шаг, они видят его в клетке, которую он покидает. Стоящие на месте стражи больше
+    не ходят, не планируют и не получают жалованья.
+  - В постройке армия ИИ штурмует, захватывает, собирает дань, продаёт свой рюкзак и
+    покупает то, что поможет её воинам, лечится, воскрешает павших, нанимает по боевой роли
+    и покупает гарнизоны своих замков, как в оригинале; надетые предметы, павшие и
+    жалованье остаются при ней.
+  - Бои между армиями ИИ, их добыча и повышения, возрождение разбитых армий и армии,
+    которых приводит или перемещает событие, следуют правилам оригинала. Разбитая армия
+    платит жалованье по последнему подсчёту, даже если ни один её воин не выжил.
+- **Бои**
+  - Бой начинается, как только открывается его окно, без этапа расстановки. Пока никто не
+    действовал, «Быстрый бой» (Q / Enter) сразу разыгрывает его; позже «Доиграть самим» (Q)
+    разыгрывает остаток. Пробел делает то же, что щелчок по собственной карточке воина.
+  - Ряды смыкаются только после гибели или последнего действия воина; заблокированные
+    клетки широкого ряда сдвигаются вместе с ними. Враг расставляется заново перед каждым
+    боем, как в оригинале, а после боя армия сохраняет клетки, на которых закончили её
+    воины.
+  - Оценки и ходы боевого ИИ, начало хода, инициатива, бонусы Community (Splash, Stun,
+    ArmorBreaker, Berserk, Flock, Hunger, Poison, Assault, Suicide и прочие), защита от
+    магии и её высасывание, вампиризм, ответные удары и упреждающие удары — всё следует
+    оригиналу и патчу Community.
+  - Новый воин занимает первую свободную клетку резерва, затем заднего ряда, затем первого;
+    на новой карте армия героя расставляется автоматически, как при загрузке карты в
+    оригинале.
+  - Опыт за бой считается по формуле оригинала, с тайной симуляцией перед боем и
+    множителем опыта установленной игры (`HeroExpirienceModificator`). Армии несут свою
+    боевую жизнь после каждого действия.
+  - Ответные удары видны и слышны: воин бьёт в ответ с эффектом и звуком удара. Выигранный
+    бой остаётся на экране 2,5 секунды с опытом каждого воина на его карточке, затем на
+    карте открывается отчёт о победе; полученный уровень не звучит вне экрана повышения.
+    Пропуск хода — короткая пауза.
+  - Полоса характеристик на карточке пишет атаку стрелка как «A:», как в оригинале; бонус
+    заднего ряда к защите от стрел виден на карточке и на панели.
+- **Экономика, постройки и рынки**
+  - Полдень как в оригинале: замки и крепости выплачивают накопленный запас, города —
+    ничего, ни одна постройка не даёт маны; трупы не получают жалованья; Rear Service
+    сокращает весь счёт один раз; при нехватке в полдень полное жалованье возвращается,
+    начиная с самого дешёвого. Полуденный отчёт показывает номинальный доход и
+    предупреждает, когда золота не хватает на жалованье; он прерывает ожидание.
+  - Вкладки построек как в оригинале, без проверки отношения; во вкладке гарнизона воины
+    перемещаются и меняются местами щелчками; «Распустить» и «Похоронить» сначала
+    спрашивают. Павших воинов игрока всегда можно воскресить в городе или храме.
+  - Товары рынка как в оригинале: 12 мест, случайные товары по ценовым диапазонам и
+    правилам оригинала о типах и школах, обновляются в полночь через 12 часов после
+    последнего завоза. Недоступные цены показаны красным; цена ровно в полмонеты
+    округляется, как в оригинале.
+  - Предложения деревень выпадают как в оригинале, а меха, ведьма и трактирщик показывают
+    свой итог в отдельном окне.
+  - Гарнизон руин носит товары руин, а ИИ оценивает его без них до первого боя.
+- **Заклинания и предметы**
+  - Заклинания на карте мира — для каждого воина: на каждом может держаться до четырёх
+    длительных заклинаний; проклятие, отнимающее жизнь, — длительное высасывание. Вражеские
+    заклинания достают любую армию на разведанной земле; мана тратится, когда заклинание
+    достигает цели; читать можно только первые 15 заклинаний книги.
+  - Характеристики пересчитываются как в оригинале (сначала прямые изменения, потом
+    проценты; инициатива и действия в сотых долях; один бонус на воина). Правила износа
+    предметов, зелья и жизнь, получаемая с уровнем или повышением, следуют оригиналу.
+  - Предмет, брошенный на карточку героя, уходит в рюкзак (зелье выпивается), как в
+    оригинале; герой надевает предметы через ячейки своей панели.
+- **События сценариев и кампании**
+  - Условия, флаги (одна строка, проверка по подстроке), «Да» и «Нет», задержки, цепочки и
+    опкоды Community работают так же, как в оригинале. События после окна ждут его
+    закрытия; к местам, которые показывает событие, взгляд перелетает сразу после его окна,
+    в том числе из главного зала постройки, где теперь и берутся задания.
+  - События проверяются при закрытии окна постройки (после лечения, воскрешения или
+    покупки).
+  - Следующая карта кампании получает весь послужной список героя и то, что карта переносит
+    дальше; перезапуск повторяет эту передачу. Окно героя новой игры предлагает только те
+    классы, которым карта даёт стартовую клетку, как в оригинале.
+- **Установленная игра, карты и сохранения**
+  - ini-файлы и карты установленной игры читаются по правилам оригинала, так же
+    снисходительно; отсутствующий в `_Global.ini` ключ читается как 0.
+  - Первый ряд шириной 4, если в установленной игре отключена опция широкого ряда; иначе
+    6, по умолчанию в «Раздоре». Сохранённая игра сохраняет свою ширину.
+  - Случайные числа — генератор оригинала, запускаемый заново на каждой карте, так что
+    броски карты каждый раз выходят одинаковыми; загрузка задаёт его начальное значение, как
+    в оригинале.
+  - Автосохранения используют 12 ячеек и имена оригинала; если установленная игра отключает
+    автосохранения, их нет (без этой опции «Раздор» сохраняется автоматически). Сохранения
+    всех прежних форматов по-прежнему загружаются.
+- **Меню и окна**
+  - Esc в главном меню сразу выходит из игры; «Назад» или Esc при выборе героя возвращает в
+    главное меню. Вопрос «Да / Нет» принимает Esc и N (клавиша «Раздора») как «Нет», а
+    любую другую клавишу — как «Да». Обучение предлагается в каждой новой игре, пока оно не
+    пройдено.
+  - Окна одного момента открываются по одному, в порядке оригинала; отчёт о победе
+    появляется через мгновение после закрытия экрана боя.
+- **Звук и музыка**
+  - Музыка, её треки и аккорды событий, деревень и победы — из оригинала.
+  - Звуки как в оригинале: окна построек, их денежные кнопки и наём, клавиши ожидания,
+    главное меню, значки панели и подобранные и надетые предметы. Повторно проигранный звук
+    начинается заново, а не накладывается.
+  - Заклинания на карте мира видно там, где они срабатывают: камера плавно переходит к армии,
+    и над ней проигрывается эффект.
 
-### Fixed
-Bugs of the original game that Razdor reproduced while it followed the original one to one,
-now fixed with the rule the original evidently meant:
-- Battle: a side whose last action wins the battle no longer surrenders: a player whose
-  priests or mages kill the last enemy wins (the original made it a defeat).
-- Battle: an EternalGift Life blessing raises the defences, as every blessing does, and a
-  Ghost casts with any magic power (the original read only part of it).
-- Battle AI: the normal AI judges a kill by the target's own hit points (the original read
-  another unit, past its list even leftovers of an earlier battle), and a Life mage scores a
-  curse on both defences (the original counted the melee defence twice).
-- Battle: bleeding with a negative attack sum bleeds nothing (the original killed the unit),
-  the player's twelfth unit's death no longer stops the enemy's first unit bleeding, a
-  Poison mage no longer poisons through a protection above 99, an Evasion above 100 leaves
-  1 damage, a Splash or Flock unit cursed below 0 attack no longer strikes for a huge amount,
-  and Bastion, Berserk and the damage stop at the largest value instead of wrapping negative.
-- Noon: with no mana, an enough-gold noon leaves only the elementals unpaid and pays everyone
-  else, and an AI army's wages are cut by its own Rear Service, not the player's.
-- A unit whose Cost is 2 more than a multiple of 256 is raised for gold (the Community raised
-  it for mana after checking the gold), and an elemental's healing is checked against the
-  mana it is paid in.
-- The sanctuary refuses a spell to a book of 15 or more (the original refused only a book of
-  exactly 15).
-- A market whose list of candidates runs out leaves the place empty (the original gave the
-  game's first item), and a building's mana stock stops at its maximum instead of wrapping.
-- World spells: a spell the hero reads lands on its target even when an event casts a spell
-  meanwhile (the original turned it onto his own army, for free), a new cast no longer
-  raises a dead unit still holding the spell, and a spell on an enemy army that leaves a
-  survivor raises that army's fallen leader, not the player's fallen hero. The Caster
-  discount keeps a negative cost negative.
-- The crown is worn by the unit types its list names (the original gave it to the next type
-  of each), and a potion's magic power takes effect.
-- The hero lands on the shore he walks onto (the original tested a cell further south, so he
-  could lose his ship). A walk to the map's corner cell (0, 0) starts, a click on a planned
-  cell whose route was dropped plans it again, and the route planner keeps the lower of two
-  targets on one cell.
-- A campaign's next map that does not offer the hero's class starts him where its first
-  offered hero would, keeping his class and record (the original dropped him on cell (0, 0)
-  of the empty preset).
-- Events: a repeating question without a message asks again on its next firing (the original
-  fired it without its question), and `-X^` on a counter that is not set changes nothing.
-  The Community event generator keeps its limit when it retries.
-- XP: a gain levels up while the next level's need is covered (a `LevelMultipler` below 100
-  stopped a level early), and a huge battle award no longer wraps around before the cap.
-- AI armies: a unit raised again counts from its latest death if it falls again (the
-  original kept its first time of death), and an army shopping values its buyer again after
-  each purchase (the original paid for a good the unit could no longer wear).
-- The noon autosave on day 9 of a month is named with its leading zero.
+### Исправлено
+Ошибки оригинальной игры, которые «Раздор» воспроизводил, следуя оригиналу один в один,
+теперь исправлены по правилу, которое оригинал явно задумывал:
+- Бой: сторона, чьё последнее действие выигрывает бой, больше не сдаётся: игрок, чьи жрецы
+  или маги убивают последнего врага, побеждает (в оригинале это было поражением).
+- Бой: благословение Life от EternalGift повышает защиты, как и любое благословение, а
+  Призрак колдует при любой силе магии (оригинал читал только её часть).
+- Боевой ИИ: обычный ИИ судит об убийстве по жизни самой цели (оригинал читал другого
+  воина, за концом списка — даже остатки прежнего боя), а маг Жизни учитывает проклятие на
+  обеих защитах (оригинал дважды считал защиту в ближнем бою).
+- Бой: кровотечение при отрицательной сумме атаки ничего не отнимает (оригинал убивал
+  воина), гибель двенадцатого воина игрока больше не останавливает кровотечение первого
+  воина врага, маг Poison больше не отравляет сквозь защиту выше 99, Evasion выше 100
+  оставляет 1 урона, воин со Splash или Flock, проклятый ниже 0 атаки, больше не наносит
+  огромный урон, а Bastion, Berserk и урон останавливаются на наибольшем значении, а не
+  переходят в отрицательные.
+- Полдень: без маны полдень с достаточным золотом оставляет без оплаты только элементалей
+  и платит всем остальным, а жалованье армии ИИ сокращает её собственный Rear Service, а не
+  игрока.
+- Воин, чей Cost на 2 больше числа, кратного 256, воскрешается за золото (Community
+  воскрешал его за ману после проверки золота), а лечение элементаля проверяется по мане,
+  которой ему платят.
+- Святилище отказывает в заклинании книге из 15 и более (оригинал отказывал только книге
+  ровно из 15).
+- Рынок, у которого кончился список кандидатов, оставляет место пустым (оригинал давал
+  первый предмет игры), а запас маны постройки останавливается на максимуме, а не
+  переполняется.
+- Заклинания на карте мира: заклинание, которое читает герой, достигает своей цели, даже
+  если тем временем событие читает заклинание (оригинал обращал его на собственную армию
+  героя, бесплатно), новое прочтение больше не воскрешает павшего воина, на котором ещё
+  держится заклинание, а заклинание на вражескую армию, после которого остаётся выживший,
+  воскрешает павшего предводителя этой армии, а не павшего героя игрока. Скидка Caster
+  оставляет отрицательную стоимость отрицательной.
+- Корону носят те типы воинов, что названы в её списке (оригинал отдавал её следующему за
+  каждым типу), а сила магии зелья действует.
+- Герой высаживается на тот берег, на который ступает (оригинал проверял клетку южнее, так
+  что герой мог лишиться корабля). Путь в угловую клетку карты (0, 0) начинается, щелчок по
+  запланированной клетке, чей путь был сброшен, прокладывает его заново, а планировщик пути
+  оставляет меньшую из двух целей в одной клетке.
+- Если следующая карта кампании не предлагает класс героя, он начинает там, где начал бы
+  её первый предлагаемый герой, сохраняя свой класс и послужной список (оригинал ставил его
+  в клетку (0, 0) пустой заготовки).
+- События: повторяющийся вопрос без сообщения снова задаётся при следующем срабатывании
+  (оригинал срабатывал без вопроса), а `-X^` на неустановленном счётчике ничего не меняет.
+  Генератор событий Community сохраняет свой предел при повторных попытках.
+- Опыт: прирост повышает уровень, пока покрыта потребность следующего уровня
+  (`LevelMultipler` ниже 100 останавливал на уровень раньше), а огромная награда за бой
+  больше не переполняется до достижения предела.
+- Армии ИИ: воин, воскрешённый снова, при новой гибели отсчитывается от последней смерти
+  (оригинал хранил время первой), а армия за покупками заново оценивает покупателя после
+  каждой покупки (оригинал платил за товар, который воин уже не мог надеть).
+- Полуденное автосохранение 9-го числа месяца называется с ведущим нулём.
 
-SHA-256 of the released programs (built by the release pipeline):
+SHA-256 выпущенных программ (собраны конвейером выпуска):
 ```
 41e172907809972b16cdfaa46f42ce4aaa45958743cb0b880059d0c63604f179  razdor
 8ab4b5cbda58478ecc3f84deef0abc02a07dbec076bf41bcdc084be9218544b2  Razdor.exe
@@ -599,22 +627,24 @@ SHA-256 of the released programs (built by the release pipeline):
 
 ## 0.2.2 — 2026-10-01
 
-Commit `b01b492` (tag `v0.2.2`).
+Коммит `b01b492` (тег `v0.2.2`).
 
-### New
-- **Discord Times mods**: an install with a mod in it (its own `Rus_*.ini`, art and maps)
-  plays with the mod's units, upgrade tree, items and spells, e.g. the Evolution mod (161
-  units). The ini files are read as leniently as the original reads them: a value that
-  cannot be read takes its default, an entry without a usable `GlobalIndex` (or an item
-  without a `Type`) is skipped, and each case is written to `razdor.log`, as is an upgrade
-  naming a unit that does not exist. Only a missing or unreadable file refuses the install.
+### Добавлено
+- **Моды «Времён раздора»**: установленная игра с модом (свои `Rus_*.ini`, графика и
+  карты) играется с воинами, деревом улучшений, предметами и заклинаниями мода, например
+  мода Evolution (161 воин). ini-файлы читаются так же снисходительно, как их читает
+  оригинал: значение, которое не удаётся прочесть, принимает значение по умолчанию, запись
+  без пригодного `GlobalIndex` (или предмет без `Type`) пропускается, и каждый такой случай
+  записывается в `razdor.log`, как и улучшение, называющее несуществующего воина.
+  Установленная игра отклоняется только из-за отсутствующего или нечитаемого файла.
 
-### Fixed
-- One value Razdor could not read made it drop the whole install and fall back to the demo
-  with placeholder art. The Evolution mod's spell «Сангвинаре Вампирис» ends an effect line
-  with an empty start time (`Effect2=…,1500,`), which now reads as 0.
+### Исправлено
+- Одно значение, которое «Раздор» не мог прочесть, заставляло его отбросить всю
+  установленную игру и перейти на демо с графикой-заглушкой. Заклинание мода Evolution
+  «Сангвинаре Вампирис» заканчивает строку эффекта пустым временем начала
+  (`Effect2=…,1500,`), которое теперь читается как 0.
 
-SHA-256 of the released programs (built by the release pipeline):
+SHA-256 выпущенных программ (собраны конвейером выпуска):
 ```
 994ecb4309cbfd932280b37fe4a3fd6bfe89cd0c84b605f207d11d434d0fc1d8  razdor
 a6f42ab99ad4968b6af2181db53ea022a59260f2ce4b4d0147c8d0afad5ac4d7  Razdor.exe
@@ -623,16 +653,17 @@ a6f42ab99ad4968b6af2181db53ea022a59260f2ce4b4d0147c8d0afad5ac4d7  Razdor.exe
 
 ## 0.2.1 — 2026-10-01
 
-Commit `68cc569` (tag `v0.2.1`).
+Коммит `68cc569` (тег `v0.2.1`).
 
-### New
-- **A macOS program**, `razdor-macos`: one universal file for Apple Silicon and Intel Macs
-  (macOS 11 and later), built by the release pipeline on a Mac (`scripts/dist-macos.sh`) and
-  published with the Linux and Windows programs. It is not signed by a developer: lift the
-  quarantine once (`xattr -d com.apple.quarantine razdor-macos`) after downloading it.
-- The release pipeline can be run by hand, to build a commit's programs without publishing.
+### Добавлено
+- **Программа для macOS**, `razdor-macos`: один универсальный файл для Mac на Apple Silicon
+  и Intel (macOS 11 и новее), собираемый конвейером выпуска на Mac
+  (`scripts/dist-macos.sh`) и публикуемый вместе с программами для Linux и Windows. Она не
+  подписана разработчиком: после скачивания один раз снимите карантин
+  (`xattr -d com.apple.quarantine razdor-macos`).
+- Конвейер выпуска можно запустить вручную, чтобы собрать программы коммита без публикации.
 
-SHA-256 of the released programs (built by the release pipeline):
+SHA-256 выпущенных программ (собраны конвейером выпуска):
 ```
 ce4e76a42cf85a37b16c638782013f0994fb686ae323c26c0a1a5d3d91883768  razdor
 c63e6bd7544c836df4afc84ecdffb456fcf8c9ce77ee9194ebdc353b420198c6  Razdor.exe
@@ -641,100 +672,102 @@ ca3ce480dc84634988249aacad2c6ad73b8d10996c139230d1dba63753f739f3  razdor-macos
 
 ## 0.2.0 — 2026-09-30
 
-Commit `610a898` (tag `v0.2.0`); its programs show `85b063f`, the id before the history
-was rewritten.
+Коммит `610a898` (тег `v0.2.0`); его программы показывают `85b063f` — идентификатор до
+переписывания истории.
 
-### New
-- **Following an army** as in the original («Автоматически преследовать выбранную армию»):
-  after a click on an army (a second click, with the route preview) the hero keeps going to
-  where it is now, until they meet; a right click or Space stops him.
-- **Rearranging the army by dragging**: on the army screen and in the barracks a unit's card
-  dragged onto another cell goes there, swapping with a unit standing in it.
-- **The play log** (`razdor-play.log`, next to `razdor.log`): the session's games, screens,
-  messages, walks, world and scenario events, and every battle in full with both armies'
-  units, stats and items, for reading back when something plays wrong.
-- **Route preview** (a Razdor extra): a click on the map shows the route and its travel
-  time; clicking the same spot again, or a double click, walks it. A right click, Space or
-  a move of the hero drops the preview.
-- **A click while the hero walks stops him**, as in the original (a right click and Space
-  still do too).
-- **Armies on the minimap:** every army on explored ground shows as a mark in the original's
-  colours (`ColorMarkEnemy` for hostile ones, `ColorMarkAlly` for the others), under the
-  hero's blinking mark.
-- **Drag the map with the right button** (a hand cursor while it moves); a right click that
-  does not move still stops the walk.
-- **Edge scrolling** as in the original: the mouse at an edge or a corner of the window pans
-  the map; a click on the map or Tab brings the view back to the hero.
-- **After a quest shows places on the map** the camera flies back to the hero by itself
-  (a click or Tab still skips straight back).
-- **The defeat screen** offers «Загрузить последнее сохранение» (the newest save, manual or
-  automatic, of the same map) and «Начать карту заново» (the same map, the same hero),
-  besides a new game.
-- **A shown place opens like an iris:** a circle grows from its centre to its edges, with a
-  soft rim, instead of the whole area fading in at once.
+### Добавлено
+- **Преследование армии**, как в оригинале («Автоматически преследовать выбранную армию»):
+  после щелчка по армии (второго щелчка, при показанном маршруте) герой идёт туда, где она
+  находится сейчас, пока они не встретятся; правый щелчок или пробел его останавливают.
+- **Перестановка армии перетаскиванием**: в окне армии и в казармах карточка воина,
+  перетащенная на другую клетку, встаёт туда и меняется местами с воином, который там стоял.
+- **Журнал игры** (`razdor-play.log`, рядом с `razdor.log`): игры за сеанс, экраны,
+  сообщения, переходы, события мира и сценария и каждая битва целиком — с воинами обеих
+  армий, их характеристиками и предметами, чтобы перечитать, если что-то пошло не так.
+- **Показ маршрута** (дополнение «Раздора»): щелчок по карте показывает маршрут и время в
+  пути; повторный щелчок по той же точке или двойной щелчок отправляет героя в путь. Правый
+  щелчок, пробел или движение героя убирают показанный маршрут.
+- **Щелчок во время ходьбы останавливает героя**, как в оригинале (правый щелчок и пробел
+  тоже по-прежнему работают).
+- **Армии на мини-карте:** каждая армия на разведанной земле видна меткой в цветах оригинала
+  (`ColorMarkEnemy` для враждебных, `ColorMarkAlly` для остальных), под мигающей меткой
+  героя.
+- **Перетаскивание карты правой кнопкой** (пока карта движется, курсор — рука); правый щелчок
+  без движения по-прежнему останавливает ходьбу.
+- **Прокрутка у краёв**, как в оригинале: мышь у края или в углу окна сдвигает карту; щелчок
+  по карте или Tab возвращает вид к герою.
+- **После того как задание показало места на карте**, камера сама возвращается к герою
+  (щелчок или Tab, как и раньше, сразу возвращают её).
+- **Экран поражения** предлагает, кроме новой игры, «Загрузить последнее сохранение» (самое
+  новое сохранение той же карты, ручное или автоматическое) и «Начать карту заново» (та же
+  карта, тот же герой).
+- **Показанное место раскрывается диафрагмой:** круг растёт от его центра к краям, с мягкой
+  каймой, вместо того чтобы вся область проявлялась разом.
 
-### Changed
-- **A meeting's words come before the fight:** when an army comes at the hero with an
-  event's message («Встреча с Блэки»), the message is read over the map and the battle opens
-  after «ОК», instead of the battle opening under the message.
-- **No ship hints** in the map's top left corner («Корабль ждёт…», «В море…»): the original
-  has none.
-- **Map zoom** follows the screen size: at zoom 1 the map shows as much ground as the
-  original at its 1024×768 (about 32 cells across), with larger cells and figures on larger
-  screens, instead of fixed 32 px cells that made everything small on big screens. The mouse
-  wheel and +/- still zoom from there.
-- **AI armies keep to the same roads as the hero:** their routes go around castles and
-  forts that aren't their own or a friend's, ruins that aren't theirs, and any other building
-  hostile to them. The building an army heads for (to take it, heal, hire…) and the one it
-  stands in stay open. Before, armies walked straight through any building.
+### Изменено
+- **Слова при встрече звучат до боя:** когда на героя выходит армия с сообщением события
+  («Встреча с Блэки»), сообщение читается поверх карты, а битва начинается после «ОК», а не
+  под сообщением.
+- **Нет подсказок о корабле** в левом верхнем углу карты («Корабль ждёт…», «В море…»): в
+  оригинале их нет.
+- **Масштаб карты** зависит от размера экрана: при масштабе 1 карта показывает столько же
+  земли, сколько оригинал при 1024×768 (около 32 клеток в ширину), а на больших экранах клетки
+  и фигуры крупнее — вместо постоянных клеток в 32 пикселя, из-за которых на больших экранах
+  всё было мелким. Колесо мыши и +/- по-прежнему меняют масштаб от этой отправной точки.
+- **Армии ИИ ходят по тем же дорогам, что и герой:** их маршруты обходят чужие (не свои и не
+  союзные) замки и форты, чужие руины и любые другие враждебные им здания. Здание, к которому
+  армия направляется (чтобы захватить его, вылечиться, нанять воинов…), и то, в котором она
+  стоит, остаются открытыми. Раньше армии проходили прямо сквозь любые здания.
 
-### Fixed
-- **The invulnerable take 1 hit from any blow or shot:** units with «Неуязвимость» and
-  ghosts («Яростный Дух») lose exactly 1 hit however hard they are hit, piercing blow
-  («Проникающий Удар») or not. «Кара Господня» and «Гнев Господен» added their 10 or 20 on
-  top of that 1.
-- **Spell pictures in the book and the sanctuary** take each layer's `ColorC` away, as the
-  ini says ("colour correction (-RGB)"): «Исцеление» is green, the lightnings purple and
-  cyan. They were multiplied by it, which tinted every picture towards that colour.
-- **A percent bonus to a protection adds its points:** 44% magic protection with +20% from a
-  spell or a potion is 64%, not 55% (the rest of the way to 100 closed by a fifth), up to
-  100%. The same for regeneration and vampirism.
-- **Casting on the map takes its time in front of you:** the hero reads the spell while the
-  clock runs, as a rest does (the time panel shows «Чтение: 2 час» counting down), the armies
-  move meanwhile, and the spell lands at the end. Before, the whole reading passed in one
-  frame and the clock only jumped. An enemy reaching the hero loses the spell; a message
-  pauses the reading; walking, resting or Space drops it. Mana is only spent when the spell
-  lands.
-- **Battle cards show the actions left:** "Mnvr" on the card and in the panel counts down as
-  the unit acts and shows extra actions (haste, a first-turn bonus) in blue and lost ones in
-  red, refilled every turn. It used to show the unchanging stat.
-- **An item that raises maximum HP brings the hit points with it:** a unit at 70/70 given
-  +10 HP is 80/80, not 70/80 (from the pack, handed from another unit, or given by a quest).
-  Hit points already lost stay lost: 60/70 becomes 70/80.
-- **Objects at the edge of the dark** (trees, hills, bridges, buildings) are drawn and fade
-  into it with the fog's soft edge, instead of vanishing while part of the edge still showed
-  ground.
-- **Messengers come to the hero:** a friendly army that hunts only the player (such as
-  «Посыльный» on «Тихая пристань») stood still in its castle, because the AI let armies go
-  for the player only to attack him. It now comes to meet him once he is within its view
-  range, and the meeting's event runs.
-- **A crash on the map** ("byte index 1 is not a char boundary … `Деревня`"): a building
-  drawn without its picture showed the first letter of its type, cut as a byte, which broke
-  on Russian names.
-- **The sell shop** shows items the market does not buy (personal and quest items such as
-  «Проклятые кости», a price of 1 or less) as «не продаётся», and «Продать» stays off for
-  them; before they looked sellable and the button only said no.
-- **Enemies' items in battle:** the unit panel showed worn items for the player's units only;
-  an enemy's now show too (a Тень wearing «Проклятые кости» looked as if it wore nothing).
-- **Past the map's right edge** a strip of half a cell showed terrain without fog; the view
-  now ends at the map's edge, and anything beyond the map is black.
-- **A shown place** no longer shows a faint ring before it fades in: the fog over it is kept
-  exactly as it was, soft edges included, until the reveal.
-- **Builds:** a local build could differ from the release pipeline's when the Rust source
-  component was installed (its real paths went into the programs); `scripts/dist.sh` maps
-  them back, and a local build of v0.1.2 gives the released `Razdor.exe` bit for bit.
+### Исправлено
+- **Неуязвимые теряют 1 жизнь от любого удара или выстрела:** воины с «Неуязвимостью» и
+  призраки («Яростный Дух») теряют ровно 1 жизнь, как бы сильно их ни били, с проникающим
+  ударом («Проникающий Удар») или без. «Кара Господня» и «Гнев Господен» добавляли к этой 1
+  свои 10 или 20.
+- **Картинки заклинаний в книге и в святилище** вычитают `ColorC` каждого слоя, как сказано в
+  ini ("colour correction (-RGB)"): «Исцеление» зелёное, молнии фиолетовые и голубые. Раньше
+  на него умножали, и каждая картинка окрашивалась в этот цвет.
+- **Процентная прибавка к защите добавляет свои пункты:** 44% защиты от магии с +20% от
+  заклинания или зелья дают 64%, а не 55% (где закрывалась пятая часть остатка до 100), и не
+  больше 100%. То же для регенерации и вампиризма.
+- **Заклинание на карте читается у вас на глазах:** герой читает заклинание, пока идут часы,
+  как при отдыхе (панель времени показывает обратный отсчёт «Чтение: 2 час»), армии тем
+  временем ходят, а заклинание срабатывает в конце. Раньше всё чтение проходило за один кадр,
+  и часы просто перескакивали. Если враг доберётся до героя, заклинание теряется; сообщение
+  приостанавливает чтение; ходьба, отдых или пробел его прерывают. Мана тратится, только когда
+  заклинание срабатывает.
+- **Карточки в бою показывают оставшиеся действия:** "Mnvr" на карточке и на панели
+  уменьшается по мере действий воина, показывает лишние действия (ускорение, бонус первого
+  хода) синим, а потерянные — красным, и восполняется каждый ход. Раньше там была неизменная
+  характеристика.
+- **Предмет, повышающий максимум жизней, добавляет и сами жизни:** воин с 70/70, получивший
+  +10 жизней, имеет 80/80, а не 70/80 (из рюкзака, от другого воина или по заданию). Уже
+  потерянные жизни остаются потерянными: 60/70 становится 70/80.
+- **Объекты на границе темноты** (деревья, холмы, мосты, здания) рисуются и растворяются в
+  ней вместе с мягким краем тумана, а не исчезают, пока часть края ещё показывает землю.
+- **Посыльные приходят к герою:** дружественная армия, которая преследует только игрока
+  (например, «Посыльный» на карте «Тихая пристань»), стояла в своём замке, потому что ИИ
+  отправлял армии к игроку только для нападения. Теперь она выходит ему навстречу, как только
+  он оказывается в пределах её обзора, и событие встречи срабатывает.
+- **Вылет на карте** ("byte index 1 is not a char boundary … `Деревня`"): здание, нарисованное
+  без своей картинки, показывало первую букву своего типа, отрезанную по байту, и на русских
+  названиях это ломалось.
+- **Окно продажи** показывает предметы, которые рынок не покупает (личные и предметы заданий,
+  например «Проклятые кости», с ценой 1 и меньше), как «не продаётся», и кнопка «Продать» для
+  них недоступна; раньше они выглядели продаваемыми, и кнопка лишь отказывала.
+- **Предметы врагов в бою:** панель воина показывала надетые предметы только у воинов игрока;
+  теперь видны и вражеские (Тень с «Проклятыми костями» выглядела так, будто на ней ничего
+  нет).
+- **За правым краем карты** виднелась полоса в полклетки с местностью без тумана; теперь вид
+  заканчивается на краю карты, а всё за картой — чёрное.
+- **Показанное место** больше не показывает бледное кольцо перед проявлением: туман над ним
+  сохраняется в точности таким, как был, вместе с мягкими краями, до самого раскрытия.
+- **Сборки:** локальная сборка могла отличаться от сборки конвейера выпуска, если был
+  установлен компонент исходников Rust (его настоящие пути попадали в программы);
+  `scripts/dist.sh` подменяет их обратно, и локальная сборка v0.1.2 даёт выпущенный
+  `Razdor.exe` бит в бит.
 
-SHA-256 of the released programs (built by the release pipeline):
+SHA-256 выпущенных программ (собраны конвейером выпуска):
 ```
 066579d52a7d5862d766c64d50deb97d13547b2cb52fe25dc1d0457a17dcf989  razdor
 2f77bab02e97413fce47bbf39ebb328d95a4c613e5c83541239f6e94ca44bd84  Razdor.exe
@@ -742,84 +775,87 @@ SHA-256 of the released programs (built by the release pipeline):
 
 ## 0.1.2 — 2026-09-30
 
-Commit `bb09967` (tag `v0.1.2`); its programs show `378c873`, the id before the history
-was rewritten.
+Коммит `bb09967` (тег `v0.1.2`); его программы показывают `378c873` — идентификатор до
+переписывания истории.
 
-### New
-- **Battle AI, easy or expert:** the settings window has the original's «Улучшенный
-  интеллект противника в битве». Expert lets the enemy count a unit as killable when the
-  actions it has left can finish it, not only with one hit. Until changed it follows the
-  install's own setting (`OptValue9`).
+### Добавлено
+- **ИИ в бою — обычный или опытный:** в окне настроек есть «Улучшенный интеллект противника
+  в битве» из оригинала. Опытный ИИ считает воина убиваемым, если оставшихся у него действий
+  хватит, чтобы добить его, а не только одним ударом. Пока настройку не поменяли, она следует
+  настройке самой установки (`OptValue9`).
 
-- **Quests show places on the map:** when an event lights a lantern or shows an army, the
-  camera flies there once its message is read and the uncovered area fades in from the fog,
-  one place after another. A click on the map or Tab skips it.
-- **Unit cards in battle** show every gain or loss against the start of the battle (blue
-  raised, red lowered), also the lasting ones, and the building's defence in the D values;
-  the unit panel writes it apart, as the original does («15 + 12»).
+- **Задания показывают места на карте:** когда событие зажигает фонарь или показывает армию,
+  камера летит туда после прочтения сообщения, и открытая область проявляется из тумана —
+  одно место за другим. Щелчок по карте или Tab пропускают показ.
+- **Карточки воинов в бою** показывают каждую прибавку или потерю по сравнению с началом боя
+  (синим — повышенное, красным — пониженное), в том числе длительные, а в значениях D —
+  защиту здания; панель воина пишет её отдельно, как в оригинале («15 + 12»).
 
-### Changed
-- **Ships** on the map are the original's: the hero's galley (at sea and waiting at the
-  shore), pirate ships and merchant cogs, rowing and turning as they move. The drawn
-  placeholder is left only for playing without an install.
-- **The noon report** no longer opens when nothing came in or went out that day (no
-  income, no wages, nobody unpaid or gone).
-- **Item restrictions** follow the original: shields need a melee attack (warriors only),
-  artillery cannot use bows, the undead cannot wear holy items («Святое писание», icons…),
-  and «Королевская корона» is for the hero and a few noble units.
-- **Building defence** also counts in a friendly building for the hero's side, and for an
-  enemy army attacked in a building of its own side (before: the hero's own buildings and
-  castle garrisons only).
-- **Battle:** a side with nobody in the front row steps forward at once, also at the start
-  of the battle (as the player sees in the original), not only after a death.
-- **Map:** buildings are drawn in front of hills, rocks and trees, which no longer hide them.
-- **Market:** after a buy or a sale the selection moves to the next item (or the one
-  above), for many trades in a row.
-- **The autosave before a battle** is the moment just before it: loading it puts the hero
-  on the map next to the enemy, not straight into the fight.
+### Изменено
+- **Корабли** на карте — из оригинала: галера героя (в море и у берега в ожидании),
+  пиратские корабли и торговые когги, гребущие и поворачивающие на ходу. Нарисованная
+  заглушка осталась только для игры без установленной игры.
+- **Полуденный отчёт** больше не открывается, если за день ничего не пришло и не ушло (нет
+  дохода, нет жалованья, никто не остался без платы и не ушёл).
+- **Ограничения предметов** — как в оригинале: щитам нужна рукопашная атака (только
+  воинам), артиллерия не может пользоваться луками, нежить не может носить святые предметы
+  («Святое писание», иконы…), а «Королевская корона» — для героя и немногих знатных воинов.
+- **Защита здания** учитывается и в дружественном здании для стороны героя, и для вражеской
+  армии, атакованной в здании своей стороны (раньше — только в собственных зданиях героя и
+  для гарнизонов замков).
+- **Бой:** сторона, у которой никого нет в первом ряду, сразу выходит вперёд, в том числе в
+  начале боя (как видит игрок в оригинале), а не только после чьей-то гибели.
+- **Карта:** здания рисуются перед холмами, скалами и деревьями, которые больше их не
+  закрывают.
+- **Рынок:** после покупки или продажи выбор переходит к следующему предмету (или к тому, что
+  выше), чтобы торговать много раз подряд.
+- **Автосохранение перед битвой** делается за миг до неё: при загрузке герой стоит на карте
+  рядом с врагом, а не сразу в бою.
 
-### Fixed
-- **Item and spell bonuses on protections, regeneration and vampirism** (`p-` values) did
-  nothing for a unit starting at 0%: «Святое писание», «Меч "Кровопийца"», «Латы
-  крестоносца», «Шлем Героя» and others now give their percent.
-- **Esc in battle** opened the ways out and closed them in the same moment, and did nothing
-  while an animation played.
-- **Music after loading a game:** the triumph of a battle won before no longer carries on;
-  the map music starts again.
+### Исправлено
+- **Бонусы предметов и заклинаний к защитам, регенерации и вампиризму** (значения `p-`) не
+  действовали на воина, у которого было 0%: «Святое писание», «Меч "Кровопийца"», «Латы
+  крестоносца», «Шлем Героя» и другие теперь дают свои проценты.
+- **Esc в бою** открывал выбор выхода из боя и тут же его закрывал, а пока шла анимация, не
+  делал ничего.
+- **Музыка после загрузки игры:** торжественная музыка выигранной раньше битвы больше не
+  продолжает играть; снова начинается музыка карты.
 
 ## 0.1.1 — 2026-09-30
 
-Commit `8d42bff` (tag `v0.1.1`); its programs show `48af7af`, the id before the history
-was rewritten.
+Коммит `8d42bff` (тег `v0.1.1`); его программы показывают `48af7af` — идентификатор до
+переписывания истории.
 
-### New
-- **New game:** the scenario list groups the maps as the original does. A campaign is one
-  row under its name («Раменское королевство», «Сказка странствий»), with its chapters
-  listed under it in play order; single scenarios are rows of their own. The list scrolls
-  with the mouse wheel when it is longer than the window.
-- **New game:** each map shows its own picture in the map frame, as in the original; the
-  terrain preview moves to a small square next to the name, status and size.
-- **The tutorial offer:** the first «Новая игра» opens «Обучающий сценарий», the original's
-  window with its picture and text. «Да» starts the tutorial map and the hero choice, «Нет»
-  opens the scenario list. It comes once (remembered in `settings.json`), and not at all when
-  the install says the tutorial is done.
-- **No OpenGL driver:** when Windows offers only its OpenGL 1.1 fallback (a Remote Desktop
-  session, or no graphics driver, as in many virtual machines), Razdor explains what to do,
-  in Russian and English, instead of showing the bare "WGL_ARB_pixel_format is required".
+### Добавлено
+- **Новая игра:** список сценариев группирует карты, как в оригинале. Кампания — одна строка
+  под своим названием («Раменское королевство», «Сказка странствий»), а её главы перечислены
+  под ней в порядке прохождения; отдельные сценарии — собственные строки. Если список длиннее
+  окна, он прокручивается колесом мыши.
+- **Новая игра:** каждая карта показывает в рамке карты свою картинку, как в оригинале;
+  превью местности переехало в маленький квадрат рядом с названием, состоянием и размером.
+- **Предложение обучения:** первая «Новая игра» открывает «Обучающий сценарий» — окно
+  оригинала с его картинкой и текстом. «Да» запускает обучающую карту и выбор героя, «Нет»
+  открывает список сценариев. Оно появляется один раз (это запоминается в `settings.json`) и
+  не появляется вовсе, если установка сообщает, что обучение пройдено.
+- **Нет драйвера OpenGL:** когда Windows предлагает только свой запасной OpenGL 1.1 (сеанс
+  удалённого рабочего стола или нет графического драйвера, как во многих виртуальных
+  машинах), «Раздор» объясняет по-русски и по-английски, что делать, вместо голого
+  "WGL_ARB_pixel_format is required".
 
-### Changed
-- **Battle:** the enemy under the mouse is framed green, as in the original, not red.
-- **World map:** the hero cannot walk through any army, friendly or hostile; he goes
-  around it, or stops if there is no way. Before, only armies standing guard blocked him.
+### Изменено
+- **Бой:** враг под мышью обведён зелёной рамкой, как в оригинале, а не красной.
+- **Карта мира:** герой не может пройти сквозь армию, ни дружественную, ни враждебную; он
+  обходит её или останавливается, если пути нет. Раньше его задерживали только армии,
+  стоящие на страже.
 
-### Fixed
-- **Menu:** the «Рестарт» question closed at once, because the click that opened it also
-  answered «Нет». A question now takes clicks only from the frame after it opens.
-- **Load window:** the same flaw in the «Удаление сохранения» question could delete a save
-  with one click, without showing the question.
-- **Builds:** the programs' SHA-256 depended on the folder they were built in (the order of
-  the path remappings in `scripts/dist.sh`). The same commit and tools now give the same
-  files anywhere.
+### Исправлено
+- **Меню:** вопрос «Рестарт» сразу закрывался, потому что щелчок, который его открыл, тут же
+  отвечал «Нет». Теперь вопрос принимает щелчки только со следующего кадра после открытия.
+- **Окно загрузки:** та же ошибка в вопросе «Удаление сохранения» могла удалить сохранение
+  одним щелчком, даже не показав вопроса.
+- **Сборки:** SHA-256 программ зависел от папки, в которой их собирали (от порядка
+  переназначений путей в `scripts/dist.sh`). Теперь тот же коммит и те же инструменты дают
+  одинаковые файлы где угодно.
 
 SHA-256:
 ```
@@ -829,20 +865,22 @@ SHA-256:
 
 ## 0.1.0 — 2026-09-29
 
-Commit `bf01d7a` (tag `v0.1.0`); its programs show `8593815`, the id before the history
-was rewritten.
+Коммит `bf01d7a` (тег `v0.1.0`); его программы показывают `8593815` — идентификатор до
+переписывания истории.
 
-The first release: `Razdor.exe` (Windows x86_64) and `razdor` (Linux x86_64).
+Первый выпуск: `Razdor.exe` (Windows x86_64) и `razdor` (Linux x86_64).
 
-- Plays the original's scenarios from the player's own copy of *Discord Times*
-  (Community Update 1.2): world map, buildings, armies, battles, economy, events and quests,
-  spells, saves, sounds and music, with the original's art and texts read at runtime.
-- The map editor, the built-in demo without an install, English and Russian interface.
-- Army screen: items are dragged from the backpack onto a unit's card to give them to it,
-  and between units.
-- Settings: an optional FPS counter in the top right corner.
-- Fixed a crash when the window is minimized or very small.
-- The author's credit in the programs, the MIT license and the disclaimer.
+- Играет сценарии оригинала с собственной копии *«Времён раздора»* у игрока
+  (Community Update 1.2): карта мира, здания, армии, битвы, экономика, события и задания,
+  заклинания, сохранения, звуки и музыка, с графикой и текстами оригинала, читаемыми во время
+  работы.
+- Редактор карт, встроенная демонстрация без установленной игры, русский и английский
+  интерфейс.
+- Окно армии: предметы перетаскиваются из рюкзака на карточку воина, чтобы отдать их ему, и
+  между воинами.
+- Настройки: необязательный счётчик FPS в правом верхнем углу.
+- Исправлен вылет при свёрнутом или очень маленьком окне.
+- Указание автора в программах, лицензия MIT и отказ от ответственности.
 
 SHA-256:
 ```

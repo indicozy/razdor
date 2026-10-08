@@ -5,7 +5,7 @@
 # (src/update.rs) shows the notes up to their first `## ` heading: keep the pipeline's own
 # part (downloads, SHA-256) under such headings, after the changelog section.
 #
-#   1. Set `version` in Cargo.toml and turn "Unreleased" in CHANGELOG.md into
+#   1. Set `version` in Cargo.toml and turn "Не выпущено" in CHANGELOG.md into
 #      "## X.Y.Z — date"; commit.
 #   2. git tag vX.Y.Z && git push origin vX.Y.Z
 #
@@ -122,7 +122,7 @@ jobs:
             cat dist/SHA256SUMS
             echo '```'
             echo
-            echo "Предоставляется как есть, без каких-либо гарантий; см. раздел Disclaimer в README. Лицензия MIT."
+            echo "Предоставляется как есть, без каких-либо гарантий; см. раздел «Отказ от ответственности» в README. Лицензия MIT."
           } >> notes.md
           cat notes.md
 

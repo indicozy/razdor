@@ -1,590 +1,620 @@
 # Razdor
 
-A small Rust prototype inspired by *Discord Times* («Времена раздора», Aterdux, 2004):
-travel a kingdom map, hire a squad in towns, fight turn-based tactical battles on a grid.
+Небольшой прототип на Rust по мотивам *Discord Times* («Времена раздора», Aterdux, 2004):
+путешествуйте по карте королевства, нанимайте отряд в городах, сражайтесь в пошаговых
+тактических боях на клетчатом поле.
 
-**Site:** [indicozy.github.io/razdor](https://indicozy.github.io/razdor/) · **Trailer:** [youtu.be/p7g0yvwtEeM](https://youtu.be/p7g0yvwtEeM)
+**Сайт:** [indicozy.github.io/razdor](https://indicozy.github.io/razdor/) · **Трейлер:** [youtu.be/p7g0yvwtEeM](https://youtu.be/p7g0yvwtEeM)
 
 ```sh
 cargo run --release
-cargo test          # game rules
+cargo test          # правила игры
 ```
 
-## Disclaimer
-- Razdor is an independent, non-commercial fan project, made by @indicozy. It is not
-  affiliated with, endorsed or sponsored by Aterdux or any other holder of rights to
-  *Discord Times*. The game's name and trademarks belong to their owners and are used only to
-  say which game the engine works with.
-- Razdor contains no code, data, text, art, sounds, music or maps of the original game. To
-  play the original's scenarios you need your own legally obtained copy of it. Do not
-  distribute the game's files together with Razdor.
-- Razdor is provided **"as is", without warranty of any kind**, express or implied,
-  including the warranties of merchantability, fitness for a particular purpose and
-  non-infringement. You use it entirely at your own risk.
-- By downloading, building or running Razdor you accept sole responsibility for how you use
-  it, and for making sure that doing so is lawful where you live and allowed by the licence
-  of your copy of the game. To the fullest extent permitted by law, the authors and
-  contributors are not liable for any claim, damages or other liability, whether direct,
-  indirect, incidental or consequential, including the loss of data, saves or game files,
-  arising from or in connection with Razdor or its use. Any such damages are yours to bear.
-- If you hold rights to *Discord Times* and have a concern about this project, contact the
-  author (@indicozy) and it will be addressed.
+## Отказ от ответственности
+- «Раздор» — независимый некоммерческий фанатский проект, созданный @indicozy. Он не связан
+  с Aterdux или иными правообладателями *Discord Times*, не одобрен и не спонсируется ими.
+  Название игры и товарные знаки принадлежат их владельцам и используются только для того,
+  чтобы указать, с какой игрой работает движок.
+- «Раздор» не содержит кода, данных, текстов, графики, звуков, музыки или карт оригинальной
+  игры. Чтобы играть в сценарии оригинала, нужна ваша собственная законно приобретённая копия
+  игры. Не распространяйте файлы игры вместе с «Раздором».
+- «Раздор» предоставляется **«как есть», без каких-либо гарантий**, явных или подразумеваемых,
+  включая гарантии товарной пригодности, пригодности для определённой цели и ненарушения прав.
+  Вы используете его целиком на свой страх и риск.
+- Скачивая, собирая или запуская «Раздор», вы принимаете на себя единоличную ответственность
+  за то, как вы его используете, и за то, чтобы это было законно там, где вы живёте, и
+  разрешено лицензией вашей копии игры. В максимальной степени, допускаемой законом, авторы и
+  участники проекта не несут ответственности ни по каким претензиям, за убытки или иную
+  ответственность, будь то прямые, косвенные, случайные или последующие, включая потерю
+  данных, сохранений или файлов игры, возникающие из «Раздора» или его использования либо в
+  связи с ними. Любые такие убытки несёте вы.
+- Если вы обладаете правами на *Discord Times* и у вас есть претензии к этому проекту,
+  свяжитесь с автором (@indicozy), и они будут рассмотрены.
 
-## License
-Razdor's code is under the [MIT License](LICENSE). The fonts in `data/fonts/` keep their own
-licence, the SIL Open Font License 1.1 (the `*-OFL.txt` files next to them).
+## Лицензия
+Код «Раздора» распространяется по [лицензии MIT](LICENSE). Шрифты в `data/fonts/` сохраняют
+свою лицензию — SIL Open Font License 1.1 (файлы `*-OFL.txt` рядом с ними).
 
-## What the repository never contains
-No commit may add any of the following, and anyone contributing keeps to it too:
-- **Anything from the game:** maps, ini data, texts, art, sounds, music, decoded or converted
-  assets, screenshots or recordings of the original (the content boundary above).
-- **Sensitive things:** credentials, tokens, keys, personal data (email addresses, home-folder
-  paths, names), logs (`razdor.log`, `razdor-play.log`), saves, settings files, and anything
-  else local to a machine.
+## Чего никогда нет в репозитории
+Ни один коммит не может добавлять ничего из перечисленного ниже, и это соблюдает каждый, кто
+вносит вклад:
+- **Ничего из игры:** карты, ini-данные, тексты, графика, звуки, музыка, декодированные или
+  сконвертированные ресурсы, снимки экрана или записи оригинала (граница содержимого выше).
+- **Ничего чувствительного:** учётные данные, токены, ключи, личные данные (адреса почты, пути
+  к домашней папке, имена), логи (`razdor.log`, `razdor-play.log`), сохранения, файлы
+  настроек и всё остальное, что относится к конкретной машине.
 
-If something like this is ever committed, it has to be removed from the history (rewritten
-and force-pushed), not only deleted in a new commit: an old commit keeps it. The whole
-history was checked against these rules on 2026-09-30 and holds none of it.
+Если что-то такое всё же попадёт в коммит, его нужно удалить из истории (переписать её и
+сделать force-push), а не просто удалить новым коммитом: старый коммит его сохраняет. Вся
+история была проверена на соответствие этим правилам 2026-09-30 и ничего такого не содержит.
 
-The reverse-engineering notes may stay: executable addresses, memory offsets, disassembly and
-how the executable was read (`docs/reference/original-mechanics/`, the `[exe]`/**code**
-evidence in `docs/reference/mechanics.md`). The game's licence (`License.txt` in the install,
-clause 5) allows using, copying, emulating, decompiling, disassembling and studying its code
-by any means. It still keeps distributing the game to its authors (clause 3) and forbids
-renting, leasing or selling it (clause 6), so the notes describe the original in our own
-words and don't quote its texts or data at length (that falls under the game's content
-above).
+Заметки по обратной разработке могут оставаться: адреса в исполняемом файле, смещения в
+памяти, дизассемблированный код и то, как исполняемый файл был прочитан
+(`docs/reference/original-mechanics/`, свидетельства `[exe]`/**code** в
+`docs/reference/mechanics.md`). Лицензия игры (`License.txt` в установленной игре, пункт 5)
+разрешает использовать, копировать, эмулировать, декомпилировать, дизассемблировать и изучать
+её код любыми средствами. При этом распространение игры она по-прежнему оставляет за её
+авторами (пункт 3) и запрещает сдавать её в прокат, в аренду или продавать (пункт 6), поэтому
+заметки описывают оригинал нашими словами и не цитируют подробно его тексты или данные (это
+относится к содержимому игры, см. выше).
 
-## How to play
-- Pick a hero: Knight (melee; his army takes 10% less physical damage), Archmage
-  (Elemental magic: slows or burns the enemy), Ranger (long bow; the army heals 20% a day).
-- The demo kingdom is a hex map (`data/kingdom.txt`, one character per hex,
-  odd rows shifted half a hex): click anywhere to see the cheapest route and its time, click the same spot again (or double click) to walk it. Roads are fast, forest and swamp slow, water and mountains
-  impassable. Right click or Space stops.
-- Time runs only while you travel or wait (**Wait 1 h / 4 h**, keys 1 and 4), as in the
-  original. At noon the report window shows your gold and mana, the income of your
-  buildings and the wages paid (from each unit's cost); units you can't pay refuse to fight
-  and leave after a week unpaid. Villages refill their tribute at midnight.
-- Stepping into a building opens its window, with the original's tabs: **Main hall**
-  (description, quests and rumours), **Barracks** (hire from the building's stock, which
-  regrows over the days; heal a wounded unit for part of its cost and an hour; raise the
-  dead in towns and churches within a week, for three times its cost), **Garrison** (your
-  castles and forts: leave units there, they are paid for their first day only and heal
-  10% a day), **Market** (goods and a sell shop; prices rise when the building dislikes
-  you), **Sanctuary** (learn spells into the hero's book of 15), and a village's
-  **Tribute** (gold and mana, or the priest's healing, or the innkeeper paying off your
-  unpaid men).
-- Bandit gangs roam the map, chase you when you're close ("!") and attack on contact.
-  Surviving camps send out new gangs every few days.
-- Battles follow the original's rules (`docs/reference/mechanics.md`). Each side stands in a
-  2×6 formation (the Community Update's wide row; the vanilla 3×4 with a reserve row when
-  the install's `OptValue11` is set to anything but 1). As in the original the battle starts
-  when its window opens: the formation is the one set in the army window beforehand. Until
-  anyone has acted, **Quick battle** (Q / Enter) plays it out at once; later **Finish
-  automatically** (Q) plays the rest; **Watch** (W) lets you see the AI play it (see below).
-- Units act by initiative (the attacker gets +1). The green-framed card acts; it has as many
-  actions as its `Mnvr` value, each spent on an attack, a spell or a step. Hover a framed
-  card to preview the action ("strike: -12 hits", a curse's effect), left click to do it,
-  right click for the alternative (a mage's strike instead of its curse). Click a lit cell
-  to step there (columns c−1..c+1); Space does what a click on the unit's own card does.
-- Warriors fight only from the front row and hit the three enemy front cells opposite; with
-  those three empty, a long strike reaches the nearest enemy front card, halving its
-  defence. Shooters and mages in the back row reach anyone outside the reserve. Damage is
-  attack minus defence, at least 1, no dice; the back row has +5 defence against shots.
-  Mages strike, curse, heal or bless by their school; their power drains each turn.
-- When a front row falls, the rear steps forward. There is no retreat; after 25 turns an
-  undecided battle ends and both sides pull back. Your hero survives with 1 HP as long as
-  anyone in his army does; you lose when the whole army is dead. Army cap: 12.
-- Survivors gain XP ("XP +N" on the cards). Levels add stats; some units can be promoted
-  from the hero and army screen, the crossed swords of the bottom bar (the spearman becomes a swordsman at level 2).
-  The fallen stay in the army as bodies until raised or buried; their items go to the
-  backpack. A victory window shows the gold, mana and items taken, and any castle captured.
-- Items, as in the original: every unit has 4 slots, one weapon, never two of the same
-  type; melee weapons for warriors, bows for shooters, staffs for mages. Buy them at
-  markets (new random goods every 7 days, sell for a quarter of the price), loot them from
-  camps and gangs, or get them as village tribute. Manage gear from the hero and army screen (4
-  slots per unit, a scrolling backpack of 40); potions are drunk there (healing at once,
-  other effects last until the end of the next battle). As in the original, drag an item
-  from the backpack onto a unit's card to give it to that unit (a potion: it drinks it),
-  from one unit's slots onto another's card to hand it over, or onto the backpack to take it
-  off. Units can be dismissed there.
-- Units and items of the demo are our own content in `data/units.ini` and `data/items.ini`,
-  written in the same format the engine reads from a Discord Times install.
-- Clear both bandit camps to win. If your whole army falls, it's over.
+## Как играть
+- Выберите героя: «Рыцарь» (ближний бой; его армия получает на 10% меньше физического урона),
+  «Архимаг» (магия стихий: замедляет или сжигает врага), «Следопыт» (длинный лук; армия
+  излечивается на 20% в день).
+- Демонстрационное королевство — карта из шестиугольников (`data/kingdom.txt`, один символ на
+  клетку, нечётные ряды сдвинуты на полклетки): щёлкните в любом месте, чтобы увидеть самый дешёвый путь и его время, щёлкните туда же ещё раз (или дважды) — чтобы пройти его. Дороги быстрые, лес и болото медленные, вода и горы
+  непроходимы. Правая кнопка мыши или Space останавливает.
+- Время идёт, только пока вы в пути или ждёте (**Ждать 1 ч / 4 ч**, клавиши 1 и 4), как в
+  оригинале. В полдень окно отчёта показывает ваше золото и ману, доход ваших зданий и
+  выплаченное жалованье (от стоимости каждого отряда); отряды, которым вы не можете заплатить,
+  отказываются сражаться и уходят после недели без жалованья. Деревни пополняют дань в полночь.
+- Если войти в здание, открывается его окно с вкладками оригинала: **«Главный зал»**
+  (описание, задания и слухи), **«Казармы»** (наём из запаса здания, который восполняется
+  со временем; лечение раненого отряда за часть его стоимости и час; воскрешение павших в
+  городах и церквях в течение недели, за тройную стоимость), **«Гарнизон»** (ваши замки и
+  форты: оставляйте там отряды, им платят только за первый день, и они излечиваются на 10% в
+  день), **«Рынок»** (товары и лавка для продажи; цены растут, если здание вас недолюбливает),
+  **«Святилище»** (изучение заклинаний в книгу героя на 15 мест) и **«Дань»** деревни (золото и
+  мана, или исцеление у священника, или трактирщик, который расплачивается с вашими
+  неоплаченными людьми).
+- По карте бродят банды разбойников; они преследуют вас, когда вы рядом («!»), и нападают при
+  встрече. Уцелевшие лагеря каждые несколько дней высылают новые банды.
+- Бои идут по правилам оригинала (`docs/reference/mechanics.md`). Каждая сторона стоит в
+  построении 2×6 (широкий ряд Community Update; ванильное 3×4 с резервным рядом, если в
+  установленной игре `OptValue11` равно чему-либо, кроме 1). Как в оригинале, бой начинается,
+  когда открывается его окно: построение — то, что было заранее задано в окне армии. Пока
+  никто не сходил, **«Быстрый бой»** (Q / Enter) сразу разыгрывает его; позже **«Доиграть
+  самим»** (Q) доигрывает остаток; **«Смотреть»** (W) позволяет посмотреть, как его играет ИИ (см. ниже).
+- Отряды ходят по инициативе (нападающий получает +1). Ходит карточка в зелёной рамке; у неё
+  столько действий, сколько её значение `Mnvr`, и каждое тратится на атаку, заклинание или шаг.
+  Наведите курсор на карточку в рамке, чтобы увидеть действие заранее («удар: -12 жизней»,
+  действие проклятия), щёлкните левой кнопкой, чтобы выполнить его, правой — для
+  альтернативы (удар мага вместо проклятия). Щёлкните подсвеченную клетку, чтобы шагнуть туда
+  (столбцы c−1..c+1); Space делает то же, что щелчок по собственной карточке отряда.
+- Воины сражаются только из переднего ряда и бьют три передние клетки врага напротив; если
+  эти три пусты, дальний удар достаёт ближайшую переднюю карточку врага, вдвое снижая её
+  защиту. Стрелки и маги в заднем ряду достают любого вне резерва. Урон — это атака минус
+  защита, не меньше 1, без случайности; задний ряд получает +5 к защите от выстрелов.
+  Маги бьют, проклинают, лечат или благословляют в зависимости от школы; их сила убывает с каждым ходом.
+- Когда передний ряд падёт, задний выходит вперёд. Отступления нет; через 25 ходов
+  нерешённый бой заканчивается, и обе стороны отходят. Ваш герой выживает с 1 жизнью, пока
+  жив хоть кто-то в его армии; вы проигрываете, когда погибла вся армия. Предел армии: 12.
+- Выжившие получают опыт («XP +N» на карточках). Уровни повышают характеристики; некоторые
+  отряды можно повысить на экране героя и армии — скрещённые мечи на нижней панели (копейщик на 2-м уровне становится мечником).
+  Павшие остаются в армии телами, пока их не воскресят или не похоронят; их предметы
+  переходят в рюкзак. Окно победы показывает добытые золото, ману и предметы, а также
+  захваченный замок, если он есть.
+- Предметы, как в оригинале: у каждого отряда 4 ячейки, одно оружие, никогда не два предмета
+  одного типа; оружие ближнего боя для воинов, луки для стрелков, посохи для магов. Покупайте
+  их на рынках (новые случайные товары каждые 7 дней, продажа за четверть цены), добывайте в
+  лагерях и у банд или получайте как дань деревни. Снаряжением управляют на экране героя и
+  армии (4 ячейки на отряд, прокручиваемый рюкзак на 40); зелья выпивают там же (лечение
+  сразу, прочие действия длятся до конца следующего боя). Как в оригинале, перетащите
+  предмет из рюкзака на карточку отряда, чтобы отдать его этому отряду (зелье: он его выпьет),
+  из ячеек одного отряда на карточку другого, чтобы передать его, или в рюкзак, чтобы снять
+  его. Там же можно распускать отряды.
+- Отряды и предметы демо — наше собственное содержимое в `data/units.ini` и `data/items.ini`,
+  записанное в том же формате, который движок читает из установленной Discord Times.
+- Чтобы победить, уничтожьте оба лагеря разбойников. Если погибнет вся ваша армия, игра окончена.
 
-## Using your Discord Times install
-Razdor is becoming an engine for the original game's scenarios. It reads the data from **your
-own installed copy** of *Discord Times* (Community Update) at runtime; the repo contains no
-original maps, data, text or art, and nothing from your install is ever copied or written.
+## Ваша копия Discord Times
+«Раздор» становится движком для сценариев оригинальной игры. Он читает данные из **вашей
+собственной установленной копии** *Discord Times* (Community Update) во время работы; в
+репозитории нет оригинальных карт, данных, текстов или графики, и ничего из вашей установки
+никогда не копируется и не записывается.
 
 ```sh
 export RAZDOR_DT_DIR="/path/to/Discord Times"   # the folder with DiscordTimes.exe
 cargo test                                      # also checks the readers against your files
 ```
 
-The install is found, in order: `RAZDOR_DT_DIR` (also read from a `.env` file in the current
-folder or next to the program, `RAZDOR_DT_DIR="/path/to/Discord Times"`); the program's own
-folder, so `Razdor.exe` (Windows), `razdor` (Linux) or `razdor-macos` (macOS) copied next to
-`DiscordTimes.exe` plays that copy (on a Mac, in the game folder of a Wine or CrossOver
-bottle); the folder remembered from an earlier run; a search of `~/Games`, `~/Downloads` and
-the home folder. Made for the Community Update 1.2 (game 1.8.1).
+Установленная игра ищется по порядку: `RAZDOR_DT_DIR` (читается также из файла `.env` в
+текущей папке или рядом с программой, `RAZDOR_DT_DIR="/path/to/Discord Times"`); собственная
+папка программы, так что `Razdor.exe` (Windows), `razdor` (Linux) или `razdor-macos` (macOS),
+скопированные рядом с `DiscordTimes.exe`, играют эту копию (на Mac — в папке игры внутри
+бутылки Wine или CrossOver); папка, запомненная с прошлого запуска; поиск в `~/Games`,
+`~/Downloads` и домашней папке. Сделано для Community Update 1.2 (игра 1.8.1).
 
-**Mods.** Supported: the **Evolution** mod (checked with version 9.0 on the Community
-Update: 161 units, its upgrade tree, items, spells and maps). A Discord Times mod is a
-changed install (its own `Rus_*.ini` files, art sheets and maps), so point `RAZDOR_DT_DIR`
-at a copy of the game with the mod in it. Razdor reads the ini files as leniently as the
-original: a value it cannot read counts as absent, an entry without a usable `GlobalIndex`
-(or an item without a `Type`) is skipped, and each case is written to `razdor.log` instead
-of refusing the install. Mods that patch `DiscordTimes.exe` itself are not supported. The
-checks `cargo test` runs against your install expect the plain Community Update, so many of
-them fail on a modded one.
+**Моды.** Поддерживается мод **Evolution** (проверен с версией 9.0 на Community Update: 161
+отряд, его дерево улучшений, предметы, заклинания и карты). Мод Discord Times — это изменённая
+установка (свои файлы `Rus_*.ini`, листы графики и карты), поэтому укажите в `RAZDOR_DT_DIR`
+копию игры с установленным модом. «Раздор» читает ini-файлы так же снисходительно, как
+оригинал: значение, которое он не может прочитать, считается отсутствующим, запись без
+пригодного `GlobalIndex` (или предмет без `Type`) пропускается, и каждый такой случай
+записывается в `razdor.log`, а не приводит к отказу от установки. Моды, которые изменяют сам
+`DiscordTimes.exe`, не поддерживаются. Проверки, которые `cargo test` запускает на вашей
+установке, рассчитаны на чистый Community Update, поэтому многие из них не проходят на
+модифицированной.
 
-`scripts/dist.sh` builds both programs into `dist/`: `razdor` for Linux and `Razdor.exe` for
-Windows (x86_64, one file with no DLLs of its own; cross-built with
-[llvm-mingw](https://github.com/mstorsjo/llvm-mingw), see the script), with their SHA-256 in `dist/SHA256SUMS`.
-Releases are built on GitHub (`.github/workflows/release.yml`): set the version in
-`Cargo.toml`, turn "Unreleased" in `CHANGELOG.md` into that version's section, commit, then
-push the tag `vX.Y.Z`. The pipeline runs the tests, builds both programs with the same
-script and the same pinned tools (Rust in `rust-toolchain.toml`, llvm-mingw in the
-workflow), and publishes the release with the changelog section and the SHA-256.
-`Razdor.exe` comes out the same from the same commit on any machine. The Linux program also
-depends on the system it is linked on (its C library and linker): the pipeline builds it on
-Ubuntu 22.04, which makes it run on older distributions too, so releases take it from there.
+`scripts/dist.sh` собирает обе программы в `dist/`: `razdor` для Linux и `Razdor.exe` для
+Windows (x86_64, один файл без собственных DLL; кросс-сборка с помощью
+[llvm-mingw](https://github.com/mstorsjo/llvm-mingw), см. скрипт), с их SHA-256 в `dist/SHA256SUMS`.
+Выпуски собираются на GitHub (`.github/workflows/release.yml`): укажите версию в
+`Cargo.toml`, превратите «Не выпущено» в `CHANGELOG.md` в раздел этой версии, сделайте коммит,
+затем отправьте тег `vX.Y.Z`. Конвейер запускает тесты, собирает обе программы тем же
+скриптом и теми же зафиксированными инструментами (Rust в `rust-toolchain.toml`, llvm-mingw в
+workflow) и публикует выпуск с разделом журнала изменений и SHA-256.
+`Razdor.exe` получается одинаковым из одного и того же коммита на любой машине. Программа для
+Linux зависит ещё и от системы, на которой она компонуется (её библиотеки C и компоновщика):
+конвейер собирает её на Ubuntu 22.04, благодаря чему она работает и на более старых
+дистрибутивах, поэтому выпуски берут её оттуда.
 
-`scripts/dist-macos.sh` builds `razdor-macos` on a Mac (it needs Apple's SDK, from Xcode or
-its Command Line Tools): one universal program for Apple Silicon and Intel, macOS 11 and
-later, added to `dist/SHA256SUMS`. The pipeline builds it on GitHub's macOS 15 runner. Like
-the Linux program it depends on the system it is linked on (here Xcode's SDK and linker): the
-same commit on the same runner image gives the same SHA-256, another Xcode may not. It is
-not signed by a developer, so macOS blocks it once downloaded: run
-`xattr -d com.apple.quarantine razdor-macos` (or right click → Open in Finder) before the
-first start. Started by a double click, it opens in Terminal. Running the pipeline by hand
-(Actions → Release → Run workflow) builds the three programs of a commit as the run's
-artifacts without publishing anything.
+`scripts/dist-macos.sh` собирает `razdor-macos` на Mac (нужен SDK от Apple из Xcode или его
+Command Line Tools): одна универсальная программа для Apple Silicon и Intel, macOS 11 и
+новее, добавляется в `dist/SHA256SUMS`. Конвейер собирает её на раннере GitHub с macOS 15. Как
+и программа для Linux, она зависит от системы, на которой компонуется (здесь — SDK и
+компоновщик Xcode): один и тот же коммит на одном и том же образе раннера даёт тот же SHA-256,
+другой Xcode может дать другой. Она не подписана разработчиком, поэтому macOS блокирует её
+после скачивания: перед первым запуском выполните
+`xattr -d com.apple.quarantine razdor-macos` (или правая кнопка → Open в Finder). При запуске
+двойным щелчком она открывается в Terminal. Запуск конвейера вручную
+(Actions → Release → Run workflow) собирает три программы коммита как артефакты запуска,
+ничего не публикуя.
 
-**When it fails to start or play**: every start writes `razdor.log` (`%APPDATA%\razdor\` on
-Windows, `~/.local/share/razdor/` on Linux, `~/Library/Application Support/razdor/` on macOS;
-the one before is `razdor.previous.log`): the version and commit, the system, the program and working folders, the `RAZDOR_*` variables and
-`.env` files, how the install was found or why a folder is not one, the OpenGL version, then
-each step of the start, so the last line shows where it stopped. A panic (with its backtrace)
-or a crash is written there too and, on Windows, shown in a message box. Started without a
-terminal, everything the program and its libraries print goes into the log; from `cmd` or a
-terminal it is printed there as well. `RAZDOR_LOG=<file>` moves the log;
-`RAZDOR_CRASH_TEST=panic` or `crash` fails on purpose to try the report.
+**Если не запускается или не играется**: каждый запуск пишет `razdor.log` (`%APPDATA%\razdor\` в
+Windows, `~/.local/share/razdor/` в Linux, `~/Library/Application Support/razdor/` в macOS;
+предыдущий — `razdor.previous.log`): версию и коммит, систему, папку программы и рабочую папку, переменные `RAZDOR_*` и
+файлы `.env`, как была найдена установленная игра или почему папка ею не является, версию
+OpenGL, затем каждый шаг запуска, так что последняя строка показывает, где он остановился.
+Паника (с трассировкой стека) или падение тоже записываются туда, а в Windows ещё и
+показываются в окне сообщения. При запуске без терминала всё, что выводят программа и её
+библиотеки, попадает в лог; при запуске из `cmd` или терминала оно выводится и туда.
+`RAZDOR_LOG=<file>` переносит лог; `RAZDOR_CRASH_TEST=panic` или `crash` намеренно вызывает
+сбой, чтобы проверить отчёт.
 
-**The play log**, `razdor-play.log` in the same folder (the one before is
-`razdor-play.previous.log`), records a session for reading back when something plays wrong,
-each line with the in-game date: the game started or loaded (map, hero, money), every
-screen, every message, each walk ordered, the world's events (encounters, meetings,
-buildings entered and taken, noon reports, scenario events and quests by number and title),
-and every battle in full: both sides unit by unit (slot, level, hits, all stats,
-protections, bonuses, worn items), the whole battle log and the result. It stays on the
-player's computer.
+**Журнал игры**, `razdor-play.log` в той же папке (предыдущий —
+`razdor-play.previous.log`), записывает сеанс, чтобы его можно было перечитать, когда что-то
+играется не так, каждую строку — с игровой датой: начало или загрузку игры (карта, герой,
+деньги), каждый экран, каждое сообщение, каждый заданный переход, события мира (столкновения,
+встречи, посещённые и захваченные здания, полуденные отчёты, события сценария и задания по
+номеру и названию) и каждый бой полностью: обе стороны отряд за отрядом (ячейка, уровень,
+жизни, все характеристики, защиты, бонусы, надетые предметы), весь журнал боя и итог. Он
+остаётся на компьютере игрока.
 
-**"WGL_ARB_pixel_format is required" / no OpenGL driver** (Windows): Razdor needs OpenGL 2,
-and the machine offers only Windows' OpenGL 1.1 fallback. That happens in a Remote Desktop
-(RDP) session, which hides the GPU from OpenGL programs, or without a graphics driver (often
-in virtual machines). Put Mesa's software OpenGL (`opengl32.dll`, and `libgallium_wgl.dll` in
-newer releases, from the `x64` folder of
-[mesa-dist-win](https://github.com/pal1000/mesa-dist-win/releases)) next to `Razdor.exe`, or
-connect another way than RDP (Parsec, VNC, the VM's console), or install the graphics driver.
-Razdor then shows this advice itself instead of the bare error.
+**«WGL_ARB_pixel_format is required» / нет драйвера OpenGL** (Windows): «Раздору» нужен
+OpenGL 2, а машина предлагает только запасной OpenGL 1.1 из Windows. Так бывает в сеансе
+удалённого рабочего стола (RDP), который скрывает видеокарту от программ OpenGL, или без
+графического драйвера (часто в виртуальных машинах). Положите программный OpenGL от Mesa
+(`opengl32.dll`, а в новых выпусках ещё и `libgallium_wgl.dll`, из папки `x64`
+[mesa-dist-win](https://github.com/pal1000/mesa-dist-win/releases)) рядом с `Razdor.exe`, или
+подключитесь не через RDP (Parsec, VNC, консоль виртуальной машины), или установите
+графический драйвер. Тогда «Раздор» сам покажет этот совет вместо голой ошибки.
 
-What is read (only read, never modified): `Rus_Units.ini`, `Rus_Artefacts.ini`,
-`Rus_Spells.ini`, `_Global.ini` and the scenario maps `Maps_Rus/*.DTm`. The readers live in
-`src/dt/` (`dt::install::DtInstall::from_env()`); the formats are described in
-`docs/reference/`. `rules::content::Content::from_dt` turns them into the definitions the
-rules use. Without the variable everything still works, and the tests that need the
-real files are skipped.
+Что читается (только читается, никогда не изменяется): `Rus_Units.ini`, `Rus_Artefacts.ini`,
+`Rus_Spells.ini`, `_Global.ini` и карты сценариев `Maps_Rus/*.DTm`. Код чтения находится в
+`src/dt/` (`dt::install::DtInstall::from_env()`); форматы описаны в
+`docs/reference/`. `rules::content::Content::from_dt` превращает их в определения, которыми
+пользуются правила. Без переменной всё по-прежнему работает, а тесты, которым нужны
+настоящие файлы, пропускаются.
 
-With the variable set, the game opens on the original's main menu; "Новая игра" lists the
-single scenarios and the first map of each campaign of your `Maps_Rus` with the map, its
-status, size and description (read from your files at runtime). Pick one, then one of the
-map's three heroes. The world map uses the original's terrain
-textures, objects, buildings and map figures; hover an army or a building for its tooltip
-(formation, leader, owner, "tribute already collected"); while you walk white arrows mark
-the route and the bar shows the time left; mouse wheel or +/- to zoom. Hostile armies chase you and fight on contact, friendly ones
-greet you; hostile castles, forts and ruins with a garrison fight when you step into their
-gate, and a won castle or fort is yours with its income (an empty hostile one is taken by
-walking in). Towns, castles, forts, churches, villages, markets and taverns open their
-building windows with the stock, prices and spells of the map.
+Если переменная задана, игра открывается главным меню оригинала; «Новая игра» перечисляет
+одиночные сценарии и первую карту каждой кампании из вашей `Maps_Rus` с картой, её
+статусом, размером и описанием (прочитанными из ваших файлов во время работы). Выберите
+одну, затем одного из трёх героев карты. Карта мира использует текстуры местности,
+объекты, здания и фигурки на карте из оригинала; наведите курсор на армию или здание, чтобы
+увидеть подсказку (построение, предводитель, владелец, «дань уже собрана»); пока вы идёте,
+белые стрелки отмечают путь, а полоска показывает оставшееся время; колесо мыши или +/- — масштаб. Враждебные армии преследуют вас и сражаются при встрече, дружественные
+приветствуют; враждебные замки, форты и руины с гарнизоном сражаются, когда вы входите в их
+ворота, и завоёванный замок или форт становится вашим вместе с доходом (пустой враждебный
+захватывается простым входом). Города, замки, форты, церкви, деревни, рынки и таверны
+открывают окна зданий с запасами, ценами и заклинаниями карты.
 
-The map's events and quests run as in the original's editor manual: story windows (title,
-text, picture, what you got, OK) open as time passes, when you step into a building or onto
-an event point, after a battle, or when you meet an army on the road; the walk stops so you
-can read them, and time stands still while one is open. Questions have **Yes** / **No**.
-Accepted quests go into the **Journal** (bottom bar, key J) with their texts, and finished
-ones are marked there; the main hall lists the building's quests and the rumours on offer
-(10 gold each). The scenario's victory or defeat event ends the game. The fog of war hides what the hero
-has not seen yet (unexplored ground is black, cannot be walked and cannot be clicked); M or the spiral "map" button of the bottom bar opens the minimap of the
-explored land, and a click on it moves the camera. A **shipyard** sells a ship for
-`ShipCost` gold (250): click the water next to it to sail out, click the shore to land; the
-ship waits where you left it until you walk back onto it (one ship at a time; leaving the
-shipyard on foot loses it). Pirate
-ships sail and attack like hostile armies, merchant ships never attack. Villages offer,
-once a day and instead of the tribute, the priest's healing, paying off the unpaid, a long
-blessing, furs worth more gold, or a magic ritual for mana. The hero starts in the preset's
-start building when the map names one, and the class screen takes a name for him
-(`#HERONAME`; empty means the class's name). Russian text needs a TrueType font with Cyrillic: a common
-system font is found automatically, or set `RAZDOR_FONT=/path/to/font.ttf` (without one,
-names are transliterated).
+События и задания карты работают, как описано в руководстве к редактору оригинала: окна
+сюжета (заголовок, текст, картинка, полученное, OK) открываются с течением времени, когда вы
+входите в здание или ступаете на точку события, после боя или когда вы встречаете армию в
+пути; движение останавливается, чтобы вы могли их прочитать, и пока окно открыто, время стоит.
+У вопросов есть **«Да»** / **«Нет»**. Принятые задания попадают в **«Журнал»** (нижняя панель,
+клавиша J) со своими текстами, а выполненные там отмечаются; главный зал перечисляет задания
+здания и предлагаемые слухи (по 10 золотых). Событие победы или поражения сценария завершает игру. Туман войны скрывает то, чего герой
+ещё не видел (неисследованная земля чёрная, по ней нельзя пройти и по ней нельзя щёлкнуть); M или спиральная кнопка «карта» на нижней панели открывает мини-карту
+исследованных земель, а щелчок по ней перемещает камеру. **«Верфь»** продаёт корабль за
+`ShipCost` золотых (250): щёлкните по воде рядом с ней, чтобы выйти в море, щёлкните по
+берегу, чтобы высадиться; корабль ждёт там, где вы его оставили, пока вы снова на него не
+взойдёте (только один корабль за раз; если уйти с верфи пешком, он теряется). Пиратские
+корабли плавают и нападают, как враждебные армии, торговые корабли никогда не нападают.
+Деревни раз в день вместо дани предлагают исцеление у священника, расплату с неоплаченными,
+долгое благословение, меха, стоящие больше золота, или магический ритуал ради маны. Герой
+начинает в стартовом здании заготовки, если карта его называет, а экран выбора класса
+принимает для него имя (`#HERONAME`; пустое — имя класса). Для русского текста нужен шрифт
+TrueType с кириллицей: распространённый системный шрифт находится автоматически, или задайте
+`RAZDOR_FONT=/path/to/font.ttf` (без него имена пишутся транслитом).
 
-## Updates
+## Обновления
 
-Razdor looks for a newer release on GitHub at each start, on a thread of its own: the game
-never waits for it, and nothing is shown unless a newer version is out (`src/update.rs`).
-Then, at a calm moment (the title screen, the settings, the map with no other window, never in
-a battle), a window offers it with its changes since your version (**Always update** does the
-same and switches the setting to Always): **Update** downloads it
-while you play, checks it against the release's `SHA256SUMS` and puts it in place of the
-program; it runs from the next start (the title screen also offers **Restart now**). Settings →
-"Advanced…" → "Updates": **Ask** (the default), **Always** (no window) or **Off**, and **Check
-now**. It needs the system's `curl` (Windows 10 and later, macOS and almost every Linux have
-one). A `cargo` build (under `target/`) never checks; `RAZDOR_UPDATE_AS=0.3.0` makes it count
-as that version, to try the whole update against the real releases.
+«Раздор» при каждом запуске ищет на GitHub более новый выпуск в отдельном потоке: игра никогда
+его не ждёт, и ничего не показывается, если новой версии нет (`src/update.rs`).
+Затем в спокойный момент (титульный экран, настройки, карта без других окон, никогда — в
+бою) окно предлагает её вместе с изменениями с вашей версии (**«Обновлять всегда»** делает то
+же самое и переключает настройку на «Всегда»): **«Обновить»** скачивает её,
+пока вы играете, сверяет с `SHA256SUMS` выпуска и ставит на место программы;
+она работает со следующего запуска (титульный экран также предлагает **«Перезапустить»**).
+«Настройки» → «Ещё…» → «Обновления»: **«Спрашивать»** (по умолчанию), **«Всегда»** (без окна)
+или **«Выключены»**, и **«Проверить»**. Нужен системный `curl` (он есть в Windows 10 и новее,
+macOS и почти любом Linux). Сборка через `cargo` (в `target/`) никогда не проверяет обновления;
+`RAZDOR_UPDATE_AS=0.3.0` заставляет её считать себя этой версией, чтобы проверить всё
+обновление на настоящих выпусках.
 
-## Keys
-Press **F1** on any screen for the list of its keys. No key acts while you type (the hero's
-name, a save name, an editor field) or while a dialog or question is open (there Esc and
-**N** are "No" and any other key but Tab, Alt and the Up and Down arrows "Yes", as in the
-original but for Razdor's N).
+## Клавиши
+Нажмите **F1** на любом экране, чтобы увидеть список его клавиш. Клавиши не действуют, пока вы
+набираете текст (имя героя, название сохранения, поле редактора) или пока открыт диалог или
+вопрос (там Esc и **N** означают «Нет», а любая другая клавиша, кроме Tab, Alt и стрелок вверх и
+вниз, — «Да», как в оригинале, если не считать N, добавленной Раздором).
 
-| Where | Key | Does |
+| Где | Клавиша | Что делает |
 |---|---|---|
-| Everywhere | F1 | the key list of this screen (F1, Esc or a click closes it) |
-| Everywhere (and in the map editor) | F2 | interface language: English / Russian |
-| Everywhere | F9 | quick load: loads the quick save |
-| Everywhere | N | music off / on |
-| Main menu | Esc | quits the game at once, as in the original |
-| Hero choice | Esc | back to the main menu |
-| World map | click, then click the same spot again | show the route and its time, then walk it |
-| World map, while walking | click or any key | stop at the end of the step under way (the keys below that only change the view, the music or the help leave him walking) |
-| World map | right click, Space | stop: a walk at the end of the step under way, a wait or a spell being read at once; drops the route shown |
-| World map | right button held | the tooltip of the army or building under the mouse |
-| World map | right button held and moved | drag the map with the hand |
-| World map | wheel, + / − | zoom (also while walking) |
-| World map | arrow keys, the mouse at a window edge or corner | scroll the map by the original's scroll speed (a click on the map or Tab brings the view back) |
-| World map | 1 / 4, or left / right click on the time panel | wait 1 or 4 hours |
-| World map | F4 / F5 | wait without end (the Community's endless wait) / end it |
-| World map | M | minimap |
-| World map | Tab | centre the camera on the hero |
-| World map | J / B / A | journal / spell book / hero and army (also while walking or waiting, as the bar's buttons) |
-| World map and its windows | F5 | quick save: a manual save named "Quick save" that replaces the last one (during the endless wait F5 ends the wait instead) |
-| World map | Esc | closes the minimap, else opens "Выход из игры" (quit, main menu, restart) |
-| Any window (building, army, journal, spell book, menu, save, load) | Esc | back to the map (the army screen opened from a building: back to the building) |
-| Journal | Left / Right, Up / Down, wheel, PgUp / PgDn, J | tabs, entries, scrolling, close |
-| Spell book | click / B | cast the spell (an enemy spell: pick the army) / close |
-| Army | A | close |
-| Army, market | a letter, Ctrl+F | the inventory filter: type to filter the backpack or the market's list; Enter takes the first match, Esc clears |
-| Battle, before anyone acts | Q / Enter | quick battle |
-| Battle | Space / Q / Enter | as a click on the unit's own card / finish automatically / OK on the result |
-| Battle | W | watch the AI play both sides / take control back |
-| Battle, while watching | S / Q | speed 1×, 2×, 4× / skip to the end (the same result) |
-| Custom battle setup | Enter / Esc | fight / back to the main menu |
-| Custom battle, its result | Enter / Esc | again / change armies |
-| Battle | Esc | ways out of the battle (quit, main menu, restart) |
-| World map, battle | ~ (the key left of 1; Ё on a Russian layout) | the cheat console (~ or Esc closes it; see below) |
+| Везде | F1 | список клавиш этого экрана (закрывается F1, Esc или щелчком) |
+| Везде (и в редакторе карт) | F2 | язык интерфейса: английский / русский |
+| Везде | F9 | быстрая загрузка: загружает быстрое сохранение |
+| Везде | N | музыка выкл. / вкл. |
+| Главное меню | Esc | сразу выходит из игры, как в оригинале |
+| Выбор героя | Esc | назад в главное меню |
+| Карта мира | щелчок, затем щелчок по тому же месту | показать путь и время на него, затем пройти его |
+| Карта мира, в пути | щелчок или любая клавиша | остановиться в конце текущего шага (клавиши ниже, которые меняют только вид, музыку или справку, его не останавливают) |
+| Карта мира | правый щелчок, пробел | стоп: путь — в конце текущего шага, ожидание или чтение заклинания — сразу; убирает показанный путь |
+| Карта мира | правая кнопка зажата | подсказка об армии или здании под мышью |
+| Карта мира | правая кнопка зажата и мышь движется | тащить карту рукой |
+| Карта мира | колесо, + / − | масштаб (и в пути) |
+| Карта мира | стрелки, мышь у края или угла окна | прокрутка карты со скоростью прокрутки оригинала (щелчок по карте или Tab возвращает вид) |
+| Карта мира | 1 / 4 или левый / правый щелчок по панели времени | ждать 1 или 4 часа |
+| Карта мира | F4 / F5 | ждать без конца (бесконечное ожидание из Community) / прекратить |
+| Карта мира | M | мини-карта |
+| Карта мира | Tab | навести камеру на героя |
+| Карта мира | J / B / A | журнал / книга заклинаний / герой и армия (и в пути или при ожидании, как кнопки панели) |
+| Карта мира и её окна | F5 | быстрое сохранение: ручное сохранение с именем «Быстрое сохранение», заменяющее прежнее (во время бесконечного ожидания F5 вместо этого прекращает ожидание) |
+| Карта мира | Esc | закрывает мини-карту, иначе открывает «Выход из игры» (выход, главное меню, рестарт) |
+| Любое окно (здание, армия, журнал, книга заклинаний, меню, сохранение, загрузка) | Esc | назад на карту (экран армии, открытый из здания, — назад в здание) |
+| Журнал | влево / вправо, вверх / вниз, колесо, PgUp / PgDn, J | вкладки, записи, прокрутка, закрыть |
+| Книга заклинаний | щелчок / B | сотворить заклинание (вражеское — выбрать армию) / закрыть |
+| Армия | A | закрыть |
+| Армия, рынок | буква, Ctrl+F | отбор снаряжения: набирайте, чтобы отобрать вещи в рюкзаке или в списке рынка; Enter берёт первое совпадение, Esc очищает |
+| Битва, пока никто не ходил | Q / Enter | быстрый бой |
+| Битва | пробел / Q / Enter | как щелчок по собственной карточке воина / доиграть автоматически / «ОК» в итогах |
+| Битва | W | смотреть, как ИИ играет за обе стороны / вернуть управление |
+| Битва, при просмотре | S / Q | темп 1×, 2×, 4× / сразу к концу (с тем же итогом) |
+| Подготовка своего боя | Enter / Esc | в бой / назад в главное меню |
+| Свой бой, его итоги | Enter / Esc | ещё раз / сменить армии |
+| Битва | Esc | способы выйти из битвы (выход, главное меню, рестарт) |
+| Карта мира, битва | ~ (клавиша слева от 1; Ё в русской раскладке) | консоль читов (~ или Esc закрывает её; см. ниже) |
 
-## Fonts
-Razdor draws its text with three free fonts that ship with it (`data/fonts/`, SIL Open Font
-License 1.1, the licences next to the files) and are built into the program: **PT Sans** and
-**PT Sans Bold** (ParaType) for text, **Kurale** for titles and names. They stay sharp at any
-window size, where the original's small bitmap fonts would blur. `RAZDOR_FONT`,
-`RAZDOR_FONT_BOLD` and `RAZDOR_FONT_TITLE` point to other font files, e.g. a bought
-Benguiat Cyrillic (`docs/superpowers/specs/2026-09-28-interface-fonts.md`).
+## Шрифты
+Раздор рисует текст тремя свободными шрифтами, которые идут вместе с ним (`data/fonts/`, SIL
+Open Font License 1.1, лицензии лежат рядом с файлами) и встроены в программу: **PT Sans** и
+**PT Sans Bold** (ParaType) для текста, **Kurale** для заголовков и имён. Они остаются чёткими
+при любом размере окна, тогда как мелкие растровые шрифты оригинала расплылись бы.
+`RAZDOR_FONT`, `RAZDOR_FONT_BOLD` и `RAZDOR_FONT_TITLE` указывают на другие файлы шрифтов,
+например купленный Benguiat Cyrillic (`docs/superpowers/specs/2026-09-28-interface-fonts.md`).
 
-## Language
-Razdor's own interface (buttons, windows, hints, messages, the battle log, the map editor, the
-built-in demo's names and texts) is in **Russian** or **English**. Switch with the **EN / RU**
-link in the main menu's corner and in the settings window, or **F2** on any screen. The choice is
-kept in `settings.json` in the save folder (next to `audio.json`); when nothing is saved the
-game starts in Russian (in English if no font with Cyrillic was found). Scenario texts and the
-names of units, items and spells from your install are the original's and stay as they are.
-The demo's names switch for the next new game or load; a running game keeps its own.
+## Язык
+Собственный интерфейс Раздора (кнопки, окна, подсказки, сообщения, журнал битвы, редактор карт,
+имена и тексты встроенного демо) бывает **русским** или **английским**. Переключается ссылкой
+**EN / RU** в углу главного меню и в окне настроек или клавишей **F2** на любом экране. Выбор
+хранится в `settings.json` в папке сохранений (рядом с `audio.json`); если ничего не сохранено,
+игра запускается на русском (на английском, если не нашлось шрифта с кириллицей). Тексты
+сценариев и названия воинов, предметов и заклинаний из вашей установки — оригинальные и
+остаются как есть. Имена демо переключаются для следующей новой игры или загрузки; идущая игра
+сохраняет свои.
 
-The Russian is our own translation: `data/lang/ru/*.txt`, one `English = Русский` line per
-text (the English is the key and the fallback), embedded at build time; `src/i18n.rs` has
-`tr("…")`, `trf!("… {name} …", name)` and the `n_("…")` marker. A test checks that every text
-the code translates is in the catalog, every catalog line is used and the placeholders agree,
-and another that no English literal is handed straight to a drawing helper in `src/ui`.
+Русский текст — наш собственный перевод: `data/lang/ru/*.txt`, по строке `English = Русский` на
+каждый текст (английский служит ключом и запасным вариантом), встраивается при сборке; в
+`src/i18n.rs` есть `tr("…")`, `trf!("… {name} …", name)` и метка `n_("…")`. Один тест проверяет,
+что каждый текст, который переводит код, есть в каталоге, каждая строка каталога используется,
+а подстановки совпадают; другой — что ни одна английская строка не передаётся напрямую в
+функцию рисования в `src/ui`.
 
-## Quick battle
-A Razdor extra, like the auto-combat of other strategy games: as a battle opens, before
-anyone has acted, **Quick battle** (Q / Enter) plays the whole battle at once with the
-battle AI on both sides, and later **Finish automatically** (Q) does the same for the rest
-of it.
-Your units follow exactly the rules of any AI side (one reserve move a turn, never into the
-reserve, no shortcuts of the AI's off-screen battles); only the watching is skipped. The
-result box comes at once and the battle resolves as a played one: losses, experience and
-level-ups, loot, captured castles, the events that follow. The same battle always ends
-the same way (`Battle::auto_play_to_end`).
+## Быстрый бой
+Дополнение Раздора, как автобой в других стратегиях: когда битва открывается и никто ещё не
+ходил, **«Быстрый бой»** (Q / Enter) разом разыгрывает всю битву боевым ИИ за обе стороны, а
+позже **«Доиграть самим»** (Q) делает то же для оставшейся части.
+Ваши воины следуют ровно тем же правилам, что и любая сторона ИИ (один ход резерва за ход,
+никогда в резерв, никаких упрощений, как в закадровых битвах ИИ); пропускается только
+просмотр. Окно итогов появляется сразу, а битва завершается как сыгранная: потери, опыт и
+новые уровни, добыча, захваченные замки, последующие события. Одна и та же битва всегда
+кончается одинаково (`Battle::auto_play_to_end`).
 
-**Watch** (W) is the same quick battle played on the battle screen: the AI plays your side
-too, move by move with the normal animations, at 1×, 2× or 4× the pace (S, or the speed
-button). **Skip** (Q) finishes it at once, **Take over** (W) gives you your units back where
-the watching stopped. Watched, skipped or instant, the battle ends the same way: each move is
-the quick battle's own step (`Battle::auto_step`), and a test plays a battle all three ways.
+**«Смотреть»** (W) — тот же быстрый бой, сыгранный на экране битвы: ИИ играет и за вас, ход за
+ходом с обычной анимацией, в темпе 1×, 2× или 4× (S или кнопка темпа). **«К концу»** (Q)
+сразу завершает его, **«Управлять»** (W) возвращает вам ваших воинов там, где остановился
+просмотр. Просмотренная, пропущенная или мгновенная — битва кончается одинаково: каждый ход —
+это шаг самого быстрого боя (`Battle::auto_step`), и тест играет битву всеми тремя способами.
 
-## Custom battle
-A Razdor extra (issue #1): **Custom battle** in the main menu's corner opens a setup window
-for a battle outside any campaign. Pick the units of your army (below on the battle screen)
-and of the enemy's (above) from the unit types of your install (the demo's without one): a
-click on a type adds it to the army framed in gold (a click on an army's name picks it),
-up to the formation's 12 cells. Each unit gets a level (− / +, 1 to 30) and items (pick the
-unit, step through what it may wear with ‹ › and **Put on**; a click on a worn item takes it
-off; the game's wear rules apply). Choose the formation (the wide row of 6 or the vanilla
-3 × 4), the battle AI's level (the settings' "improved enemy AI in battle") and who plays
-each side: you or the AI (the AI on both to watch, you on both to play both sides in turn).
-**Fight!** (Enter) starts the battle on the normal battle screen with the normal rules; both
-sides are placed by the original's auto-arrange, and the quick and watched battles work as
-in any battle. The result box offers **Again** (Enter, the same armies), **Change armies**
-(Esc) and **Main menu**; it counts the rounds won and lost. The setup is kept until the game
-is closed. Nothing of it touches a game or a save: no experience, no loot, and the Community
-patch's battle counters (Hunger, Flock) are put back as the round found them.
+## Свой бой
+Дополнение Раздора (issue #1): **«Свой бой»** в углу главного меню открывает окно подготовки
+битвы вне всякой кампании. Выберите воинов своей армии (внизу на экране битвы) и вражеской
+(вверху) из типов воинов вашей установки (без неё — из типов демо): щелчок по типу добавляет
+его в армию, обведённую золотом (щелчок по названию армии выбирает её), до 12 клеток строя.
+Каждому воину задаётся уровень (− / +, от 1 до 30) и предметы (выберите воина, перебирайте
+то, что он может надеть, стрелками ‹ › и **«Надеть»**; щелчок по надетому предмету снимает
+его; действуют правила ношения из игры). Выберите строй (широкий ряд из 6 или обычный 3 × 4),
+уровень боевого ИИ («Улучшенный интеллект противника в бою» из настроек) и кто играет за
+каждую сторону: вы или ИИ (ИИ за обе — чтобы смотреть, вы за обе — чтобы играть за обе
+стороны по очереди). **«В бой!»** (Enter) начинает битву на обычном экране битвы по обычным
+правилам; обе стороны расставляются авторасстановкой оригинала, а быстрый и просматриваемый
+бой работают как в любой битве. Окно итогов предлагает **«Ещё раз»** (Enter, те же армии),
+**«Сменить армии»** (Esc) и **«Главное меню»**; оно считает выигранные и проигранные раунды.
+Подготовка хранится, пока игра не закрыта. Ничто из этого не затрагивает игру или сохранение:
+ни опыта, ни добычи, а боевые счётчики патча Community (Голод, Стая) возвращаются к тому
+состоянию, в каком их застал раунд.
 
-## Inventory filter
-A Razdor extra (issue #1), like a Spotlight search: on the hero and army screen a filter line
-stands over the backpack, and on a market's tab over its list (the goods and the sell shop).
-Start typing (A and N keep their meaning on an empty line: Ctrl+F or a click on the line
-starts it then) and the list keeps, as you type, the items whose name, type, stats, bonus or
-description hold every word you typed, in any case and any script (Ё counts as Е). The
-matched part of each name is lit (in the backpack, the matches are listed in the description
-box until you point at an item). Enter takes the first match: on the army screen it is worn
-or drunk by the selected unit, on the market it is picked for Buy or Sell. Esc clears the
-line; a second Esc closes the window as usual.
+## Отбор снаряжения
+Дополнение Раздора (issue #1), похожее на поиск Spotlight: на экране героя и армии над
+рюкзаком стоит строка отбора, а на вкладке рынка — над его списком (товары и продажа).
+Начните набирать (на пустой строке A и N сохраняют своё значение: тогда начинайте с Ctrl+F
+или щелчка по строке), и список по мере набора оставляет предметы, в названии, типе,
+характеристиках, бонусе или описании которых есть все набранные слова, в любом регистре и
+любой раскладке (Ё считается как Е). Совпавшая часть каждого названия подсвечивается (в
+рюкзаке совпадения перечислены в поле описания, пока вы не наведёте на предмет). Enter берёт
+первое совпадение: на экране армии его надевает или выпивает выбранный воин, на рынке оно
+выбирается для «Купить» или «Продать». Esc очищает строку; второй Esc, как обычно, закрывает
+окно.
 
-## Cheat console
-A Razdor extra (issue #1): **~** (the key left of 1, Ё on a Russian layout) on the world
-map and in battle opens a command line over the top of the screen with a short scroll-back
-(PgUp / PgDn, the wheel). While it is open every key goes to it, none to the game; Up and
-Down bring back earlier commands, ~ or Esc closes it. Command names are English, any case;
-`help` lists them with what they do in the interface language.
+## Консоль читов
+Дополнение Раздора (issue #1): **~** (клавиша слева от 1, Ё в русской раскладке) на карте мира
+и в битве открывает командную строку поверх верхней части экрана с короткой историей вывода
+(PgUp / PgDn, колесо). Пока она открыта, все клавиши идут в неё, а не в игру; стрелки вверх и
+вниз возвращают прежние команды, ~ или Esc закрывает её. Названия команд английские, в любом
+регистре; `help` перечисляет их с описанием на языке интерфейса.
 
-| Command | Does |
+| Команда | Что делает |
 |---|---|
-| `help` | the list of commands |
-| `gold N`, `mana N` | gives N gold or mana (a negative N takes it) |
-| `reveal` | explores the whole map |
-| `heal` | heals the army and raises its dead |
-| `xp N` | N experience to every living unit of the army (levels follow as after a battle) |
-| `level N` | puts the hero at level N |
-| `item <id or name>` | puts the item into the pack |
-| `spell <id or name>` | writes the spell into the book (up to its 15) |
-| `unit <id or name> [level]` | the unit joins the army at that level, if there is room |
-| `time H` | lets H hours pass as a wait does (the noons, the AI armies, the events) |
-| `win`, `lose` | in battle: the other side, or yours, falls; the battle ends as any won or lost battle (result box, experience, losses) |
-| `god` | on / off: your army takes no damage in battle |
-| `speed N` | the hero walks N times faster on the map (1: normal) |
+| `help` | список команд |
+| `gold N`, `mana N` | даёт N золота или маны (отрицательное N отнимает) |
+| `reveal` | открывает всю карту |
+| `heal` | лечит армию и поднимает её павших |
+| `xp N` | N опыта каждому живому воину армии (уровни растут, как после битвы) |
+| `level N` | ставит герою уровень N |
+| `item <номер или название>` | кладёт предмет в рюкзак |
+| `spell <номер или название>` | вписывает заклинание в книгу (до её 15) |
+| `unit <номер или название> [уровень]` | воин вступает в армию с этим уровнем, если есть место |
+| `time H` | проходит H часов, как при ожидании (полдни, армии ИИ, события) |
+| `win`, `lose` | в битве: падает другая сторона или ваша; битва кончается, как любая выигранная или проигранная (окно итогов, опыт, потери) |
+| `god` | вкл. / выкл.: ваша армия не получает урона в битве |
+| `speed N` | герой ходит по карте в N раз быстрее (1 — обычно) |
 
-A name is matched in any case (Ё as Е): the exact name first, then one that starts with what
-you typed, then one that holds it; with several the console says how many matched. The army,
-its experience and the time do not change during a battle; `win` and `lose` work in custom
-battles too. A game in which a cheat worked keeps a mark in its saves (the load list shows
-"(cheats)" after the scenario), and every command goes into the play log.
+Название ищется в любом регистре (Ё как Е): сперва точное совпадение, затем название,
+начинающееся с набранного, затем содержащее его; если подходят несколько, консоль говорит,
+сколько. Армия, её опыт и время не меняются во время битвы; `win` и `lose` работают и в своём
+бою. Игра, в которой сработал чит, хранит отметку в своих сохранениях (список загрузки
+показывает «(читы)» после сценария), и каждая команда попадает в журнал игры.
 
-## Journal
-The journal (J, or the journal button of the bottom bar) keeps, with the in-game date, everything the
-hero learns: quests received (**Active quests**), quests completed (**Completed**), rumours
-heard (**Rumours**) and the story messages of scripted events (**Messages**; silent events
-are left out), newest first. Pick an entry for its full text and date. The history is part
-of the save (older saves start with an empty one; their active and completed quests still
-show, without a date) and carries over from map to map in a campaign. This is a Razdor
-extra: the original's journal lists only the quests.
+## Журнал
+Журнал (J или кнопка журнала на нижней панели) хранит с игровой датой всё, что узнаёт герой:
+полученные задания (**«Текущие задания»**), выполненные (**«Выполненные»**), услышанные слухи
+(**«Слухи»**) и сюжетные сообщения скриптовых событий (**«Послания»**; молчаливые события не
+попадают), новые сверху. Выберите запись, чтобы увидеть её полный текст и дату. История —
+часть сохранения (старые сохранения начинают с пустой; их текущие и выполненные задания всё
+равно видны, без даты) и переходит с карты на карту в кампании. Это дополнение Раздора:
+журнал оригинала перечисляет только задания.
 
-## Interface
-The screens follow the original's layout (the 960×720 gameplay video, scaled to the window;
-`docs/reference/video-notes.md`). The **bottom bar** has the original's oval buttons: menu,
-settings, save, load on the left, journal, hero and army, spell book and map on the right
-(blue; grey while a window is open, green for the open screen, orange while the minimap
-shows), the time panel in the middle and mana, gold, income and wages under them. The map
-fills the screen above the bar, as in the original. The **battle** is a window over the map titled with both armies:
-the acting (or hovered) unit's full-body figure, stat list and traits on the left; the
-enemy's formation on top, a hint strip, and yours below, each card the portrait with the
-stat strip (`A: 45 D: 35/40`, `Mnvr: 1 Ini: 12`, `Hits: 70`; `Pwr` for casters); empty
-cells show swords (front), a bow (back) or a tent (reserve). The acting card is framed
-green, cells it can step to blue, its targets red (green under the mouse) or blue; hovering one previews the action
-("Click to curse X / Initiative: -5 Actions: -1"), and hits and spells play the original's
-battle and spell animations. Building windows (tab column and content), the hero and army
-screen (unit panel with four item slots, backpack or upgrade tree, item description, army
-cards), dialogs, tooltips and the minimap use the same frames.
+## Интерфейс
+Экраны повторяют раскладку оригинала (видео игрового процесса 960×720, масштабированное под
+окно; `docs/reference/video-notes.md`). На **нижней панели** — овальные кнопки оригинала:
+меню, настройки, сохранение, загрузка слева, журнал, герой и армия, книга заклинаний и карта
+справа (синие; серые, пока открыто окно, зелёные для открытого экрана, оранжевые, пока
+показана мини-карта), посередине панель времени, а под ними мана, золото, доход и жалованье.
+Карта занимает экран над панелью, как в оригинале. **Битва** — окно поверх карты с названиями
+обеих армий в заголовке: слева фигура в полный рост, список характеристик и особенности
+ходящего (или наведённого) воина; сверху строй врага, полоса подсказок, снизу ваш, каждая
+карточка — портрет с полосой характеристик (`A: 45 D: 35/40`, `Mnvr: 1 Ini: 12`, `Hits: 70`;
+`Pwr` у магов); пустые клетки показывают мечи (передний ряд), лук (задний) или шатёр
+(резерв). Карточка ходящего обведена зелёным, клетки, куда он может шагнуть, — синим, его
+цели — красным (зелёным под мышью) или синим; наведение на цель показывает действие заранее
+(«Щёлкните, чтобы проклясть: «X» / Инициатива: -5 Действия: -1»), а удары и заклинания
+проигрывают анимации битвы и заклинаний из оригинала. Окна зданий (столбец вкладок и
+содержимое), экран героя и армии (панель воина с четырьмя ячейками предметов, рюкзак или
+древо развития, описание предмета, карточки армии), диалоги, подсказки и мини-карта
+используют те же рамки.
 
-With an install, all of this is the original's art, decoded at runtime from
-`Graphics/Windows`, `Graphics/Battle`, `Graphics/Spells` and the unit portraits and figures
-(`src/ui/chrome.rs`, `src/dt/gfx.rs`); trait descriptions come from the install's
-`Rus_DiscordTimes.ini`. Nothing decoded is stored. Without one, the same layout is drawn in
-our own placeholder style (procedural marble and parchment, drawn icons and silhouettes).
-All text uses the TrueType font when one is found.
+С установленной игрой всё это — графика оригинала, расшифрованная во время работы из
+`Graphics/Windows`, `Graphics/Battle`, `Graphics/Spells` и портретов и фигур воинов
+(`src/ui/chrome.rs`, `src/dt/gfx.rs`); описания особенностей берутся из
+`Rus_DiscordTimes.ini` установки. Ничего расшифрованного не сохраняется. Без установки та же
+раскладка рисуется в нашем собственном временном стиле (процедурный мрамор и пергамент,
+нарисованные значки и силуэты). Весь текст использует шрифт TrueType, если он найден.
 
-## AI armies
-The scenario's armies live their own lives while you walk (`src/rules/ai.rs`). Each one
-picks a goal about every game hour from its behaviour style (feudal lord, rogue, peasant),
-its target model (standard, aggressive, passive, hoarding, trading) and the priorities in
-your `_Global.ini`: attack you or a hostile army it sees, take a hostile castle or fort,
-heal, fill its garrison, hire, buy an item, collect a village's tribute, talk to a friend,
-patrol, go home; the editor's flags (ignored by the AI, hunts only the player, no random
-targets, no socialising, no interest in buildings) are respected. Feudal lords earn their
-buildings' income, pay wages and keep five days of them in reserve; rogues pay no wages and
-hire only rogues; peasants just wander. Hostile armies that meet fight it out with the
-battle engine (both sides played by the AI), off-screen; castles and forts change hands and
-their income with them, and your own castles can be lost. You hear of battles within your
-sight and of attacks on your buildings. AI armies keep to the same roads as the hero (a Razdor choice): they go
-around castles and forts that are not their own or a friend's, ruins that are not theirs
-and buildings they would assault, unless they head for it or stand in it. A beaten lord who still owns a building retreats
-there and comes back after three days; armies with a respawn time come back after it (the
-leader alone, or the whole army when the map says so).
+## Армии ИИ
+Армии сценария живут своей жизнью, пока вы ходите (`src/rules/ai.rs`). Каждая примерно раз в
+игровой час выбирает цель исходя из своего стиля поведения (феодал, разбойник, крестьянин),
+своей модели целей (стандартная, агрессивная, пассивная, накопительская, торговая) и
+приоритетов в вашем `_Global.ini`: напасть на вас или на враждебную армию, которую видит,
+взять враждебный замок или крепость, подлечиться, пополнить свой гарнизон, нанять воинов,
+купить предмет, собрать дань с деревни, поговорить с другом, патрулировать, вернуться домой;
+флаги редактора (ИИ её не трогает, охотится только на игрока, без случайных целей, без
+общения, без интереса к зданиям) соблюдаются. Феодалы получают доход со своих зданий,
+платят жалованье и держат его запас на пять дней; разбойники жалованья не платят и нанимают
+только разбойников; крестьяне просто бродят. Встретившиеся враждебные армии сражаются движком
+битвы (обе стороны играет ИИ) за кадром; замки и крепости переходят из рук в руки, а с ними
+и их доход, и ваши собственные замки тоже можно потерять. Вы узнаёте о битвах в пределах
+вашего обзора и о нападениях на ваши здания. Армии ИИ держатся тех же дорог, что и герой
+(решение Раздора): они обходят замки и крепости, не принадлежащие им или другу, чужие
+руины и здания, на которые они напали бы, если только не направляются туда или не стоят там.
+Побеждённый феодал, у которого ещё есть здание, отступает туда и возвращается через три дня;
+армии со временем возрождения возвращаются по его истечении (один предводитель или вся
+армия, если так указано на карте).
 
-## Experience and levels
-Experience follows the original's code (docs/reference/original-mechanics/experience.md,
-`src/rules/experience.rs`). A won battle pays the survivors of your army: the pool is a
-twentieth of the beaten side's strength (computed from the units' stats, not their price),
-shrunk by the hit points you lost; each survivor's share depends on its row and on how many
-of its actions were attacks or spells, and the dead still count in the divisor. Your gain is
-the share × `HeroExpirienceModificator` × the difficulty factor (100 with your "impossible
-difficulty" setting, else 120) × the beaten army's experience correction, at most 5256 per
-battle. A stalemate or a defeat pays nothing. XP needed per level is
-`StartExpirience × (LevelMultipler/100)^(level−1)`; each level adds the class's `d-*` gains
-(protections and regeneration close the gap to 100 instead). Any unit but the hero can be
-promoted once it has gained a level, free, back to level 1. Scenario XP goes to the hero.
-Cards, the battle panel, the army screen, barracks and garrisons show "Lv N · XP a/b" with a
-progress bar; after a win the cards show "XP +N" and "Level up!", and the army screen shows
-the next level, the per-level gains and the upgrade tree. AI armies gain XP in their own
-battles, bank it and take their upgrade tree; the units they hire can start with the XP the
-map gives them.
+## Опыт и уровни
+Опыт следует коду оригинала (docs/reference/original-mechanics/experience.md,
+`src/rules/experience.rs`). Выигранная битва вознаграждает выживших в вашей армии: общий
+запас — двадцатая часть силы побеждённой стороны (считается по характеристикам воинов, а не
+по их цене), уменьшенная на потерянную вами жизнь; доля каждого выжившего зависит от его ряда
+и от того, сколько его действий было атаками или заклинаниями, а павшие всё равно учитываются
+в делителе. Ваша прибавка — это доля × `HeroExpirienceModificator` × коэффициент сложности
+(100 при вашей настройке «невозможной сложности», иначе 120) × поправка опыта побеждённой
+армии, не более 5256 за битву. Ничья или поражение не дают ничего. Опыт для уровня —
+`StartExpirience × (LevelMultipler/100)^(level−1)`; каждый уровень добавляет прибавки класса
+`d-*` (защиты и регенерация вместо этого сокращают разрыв до 100). Любого воина, кроме героя,
+можно повысить, как только он получил уровень, бесплатно, обратно на уровень 1. Опыт от
+сценария получает герой. Карточки, панель битвы, экран армии, казармы и гарнизоны показывают
+«Ур. N · Опыт a/b» с полосой прогресса; после победы карточки показывают «Опыт +N» и
+«Новый уровень!», а экран армии показывает следующий уровень, прибавки за уровень и древо
+развития. Армии ИИ получают опыт в своих битвах, копят его и идут по своему древу развития;
+нанятые ими воины могут начинать с опытом, который им даёт карта.
 
-## Spells
-Learn spells for gold at a sanctuary (the **Sanctuary** tab of towns and churches; the book
-holds 15). Open the spell book from the map with the book button or B: every spell shows its
-mana cost and casting time for your hero, how long it lasts and what it does. Blessings and
-heals go on your own army; curses and bolts on a hostile army within 3 cells that you can
-see. Casting costs mana **and game time**: armies move meanwhile, and an enemy reaching you
-breaks the spell. The Archmage casts twice as fast for half the mana, a unit with the
-Community `Caster` bonus takes another 20% off. Lasting spells change your units' (or the
-cursed army's) stats in the battles while they last; the side panel and the book show the
-time left. Healing and bolts act at once. The demo has five spells of its own
-(`data/spells.ini`) at St. Beor's church and Greywall; its Archmage starts with two, and
-villages pay mana. Scenario events that cast spells on your army use the same rules.
+## Заклинания
+Заклинания изучаются за золото в святилище (вкладка **«Святилище»** в городах и храмах; в
+книге помещается 15). Откройте книгу заклинаний с карты кнопкой книги или B: каждое заклинание
+показывает свою цену в мане и время сотворения для вашего героя, сколько оно длится и что
+делает. Благословения и лечение накладываются на вашу армию; проклятия и молнии — на
+враждебную армию в пределах 3 клеток, которую вы видите. Сотворение стоит маны **и игрового
+времени**: армии тем временем движутся, и враг, добравшийся до вас, срывает заклинание.
+Архимаг творит вдвое быстрее за половину маны, воин с бонусом `Caster` из Community сбрасывает
+ещё 20%. Длительные заклинания меняют характеристики ваших воинов (или проклятой армии) в
+битвах, пока действуют; боковая панель и книга показывают оставшееся время. Лечение и молнии
+действуют сразу. В демо пять собственных заклинаний (`data/spells.ini`) в храме Св. Беора и в
+Серостене; его Архимаг начинает с двумя, а деревни платят ману. События сценария, которые
+накладывают заклинания на вашу армию, следуют тем же правилам.
 
-## Saves
-**Save** and **Load** on the bottom bar, the **Menu (Esc)**, and **Load a game** on the
-title screen. **F5** writes the quick save (a manual save named "Quick save", replacing the
-previous one) and **F9** loads it. The load window has two tabs, your saves and the autosaves, newest first,
-with the scenario, the hero and the in-game date. The game autosaves before every battle
-and at every 12:00 report (named by the date, "1204.06.03, 12 h"), in the original's 12
-slots: an autosave of the same name (on the same map) is overwritten, and once there are 12
-the oldest is. An install whose autosave option (`OptValue8`) is off gets no autosaves.
+## Сохранения
+**«Сохранить»** и **«Загрузить»** на нижней панели, **«Меню (Esc)»** и **«Загрузить игру»** на
+титульном экране. **F5** записывает быстрое сохранение (ручное сохранение с именем «Быстрое
+сохранение», заменяющее предыдущее), а **F9** загружает его. В окне загрузки две вкладки, ваши
+сохранения и автосохранения, новые сверху, со сценарием, героем и игровой датой. Игра
+автоматически сохраняется перед каждой битвой и при каждом отчёте в 12:00 (с датой в имени,
+«1204.06.03, 12 ч»), в 12 ячеек, как в оригинале: автосохранение с тем же именем (на той же
+карте) перезаписывается, а когда их 12 — перезаписывается самое старое. Установка, в которой
+выключен параметр автосохранения (`OptValue8`), автосохранений не получает.
 
-Saves are your data and live in your data folder, never in the repo or the game folder:
-`$XDG_DATA_HOME/razdor/saves` (usually `~/.local/share/razdor/saves`) on Linux,
-`~/Library/Application Support/razdor/saves` on macOS, `%APPDATA%\razdor\saves` on
-Windows, or wherever `RAZDOR_SAVE_DIR` points. A save of a scenario stores the map's file
-name and a hash of its bytes, not the map: loading reads the map again from
-`RAZDOR_DT_DIR` and refuses if it is missing or has changed. Demo saves need no install.
-The journal's history is saved with the texts the hero read (from your install, in your
-save only).
+Сохранения — ваши данные и лежат в вашей папке данных, а не в репозитории и не в папке игры:
+`$XDG_DATA_HOME/razdor/saves` (обычно `~/.local/share/razdor/saves`) в Linux,
+`~/Library/Application Support/razdor/saves` в macOS, `%APPDATA%\razdor\saves` в Windows или
+там, куда указывает `RAZDOR_SAVE_DIR`. Сохранение сценария хранит имя файла карты и хеш её
+байтов, а не саму карту: при загрузке карта снова читается из `RAZDOR_DT_DIR`, и загрузка
+отказывает, если карты нет или она изменилась. Сохранениям демо установка не нужна. История
+журнала сохраняется вместе с текстами, которые прочёл герой (из вашей установки, только в
+вашем сохранении).
 
-## Sounds and music
-With an install, Razdor plays the original's sounds and music, read at runtime from
-`_Sounds.ini` and the `Sounds/` folder (nothing is copied; the `.raw` music is wrapped in a
-WAV header in memory). The menu theme plays on the title, scenario and class screens, the
-credits theme on the credits. On the world map and its windows the music follows the
-original's rotation: `BkgMap2` when a map starts or loads, then a track drawn on a timer
-among the seven map themes and the credits theme, with the game's own random numbers (so,
-as in the original, it shifts the rolls that follow). `BkgBattle1` plays against a garrison,
-`BkgBattle2` against an army; the triumph piece from a won battle's result until a dialog
-is closed, and at the scenario's victory; the defeat piece when the hero falls. Effects: buttons, windows
-opening, the battle horn, melee, shots (cannon for shooters with ranged attack of at least
-`ShotWeaponRange`), heals, blessings, curses and magic strikes, cards moving, event chords,
-level-ups and promotions, casting a spell (good or evil by the target), items bought,
-equipped or drunk (by type) and gold coming in.
+## Звуки и музыка
+Если игра установлена, Раздор играет её звуки и музыку, читая их во время работы из
+`_Sounds.ini` и папки `Sounds/` (ничего не копируется; музыка `.raw` в памяти получает
+заголовок WAV). Тема меню звучит на заставке, в выборе сценария и класса, тема титров — в
+титрах. На карте мира и в её окнах музыка сменяется, как в оригинале: `BkgMap2` при начале
+или загрузке карты, затем по таймеру выбирается одна из семи тем карты или тема титров —
+собственными случайными числами игры (поэтому, как и в оригинале, сдвигаются последующие
+броски). `BkgBattle1` звучит в бою с гарнизоном, `BkgBattle2` — с армией; торжественная тема —
+от итогов выигранного боя до закрытия окна и при победе в сценарии; тема поражения — когда
+герой гибнет. Эффекты: кнопки, открытие окон, боевой рог, ближний бой, выстрелы (пушечный — у стрелков с дальностью атаки не меньше
+`ShotWeaponRange`), лечение, благословения, проклятия и удары магией, движение карт, аккорды
+событий, новые уровни и повышения, сотворение заклинания (доброго или злого — по цели),
+покупка, надевание или выпивание предмета (по его типу) и поступление золота.
 
-- **N** turns the music off and on (anywhere except while typing a save name).
-- The **Esc menu** has music and sound volume (**−** / **+**, keys **+** / **−** for the
-  music) and **Off** / **On** for each. They are kept in `audio.json` in the save folder.
-- The `.raw` files do not store their sample rate; Razdor plays them at 22050 Hz. If the
-  music sounds too low or slow, try `RAZDOR_MUSIC_RATE=44100`.
-- The settings window (gears on the bottom bar, or **Settings** on the title screen) also has
-  **FPS**: the frame rate in the top right corner, off by default and kept in `audio.json`;
-  and the **battle AI**, easy or expert (the original's "improved enemy AI in battle": the
-  enemy also finishes off a unit it can kill with the actions it has left), at first as your
-  install has it.
-- `RAZDOR_NO_AUDIO=1` turns sound off; `RAZDOR_AUDIO_LOG=1` prints each sound as it plays.
-  The demo (no install) is silent.
-- On Linux the sound goes through ALSA (`libasound.so.2`, present on any desktop; PipeWire
-  and PulseAudio provide the `default` device); on macOS through Core Audio.
-  `cargo build --no-default-features` builds without sound.
+- **N** выключает и включает музыку (везде, кроме ввода имени сохранения).
+- В **меню Esc** есть громкость музыки и звуков (**−** / **+**, для музыки — клавиши **+** /
+  **−**) и **Выкл.** / **Вкл.** для каждой. Они хранятся в `audio.json` в папке сохранений.
+- Файлы `.raw` не хранят частоту дискретизации; Раздор играет их на 22050 Гц. Если музыка
+  звучит слишком низко или медленно, попробуйте `RAZDOR_MUSIC_RATE=44100`.
+- В окне настроек (шестерёнки на нижней панели или **«Настройки»** на заставке) есть ещё
+  **FPS** — частота кадров в правом верхнем углу, по умолчанию выключена и хранится в
+  `audio.json`; и **ИИ в бою**, «Лёгкий» или «Эксперт» (в оригинале — «Улучшенный интеллект
+  противника в бою»: враг ещё и добивает воина, которого может убить оставшимися действиями),
+  сначала — как в вашей установленной игре.
+- `RAZDOR_NO_AUDIO=1` выключает звук; `RAZDOR_AUDIO_LOG=1` печатает каждый звук при
+  проигрывании. Демо (без установленной игры) беззвучно.
+- В Linux звук идёт через ALSA (`libasound.so.2`, есть на любом десктопе; PipeWire и
+  PulseAudio дают устройство `default`); в macOS — через Core Audio.
+  `cargo build --no-default-features` собирает без звука.
 
-## Map editor
-Razdor has a scenario editor that writes `.DTm` maps the original game and Razdor both load.
-Start it with **Map editor** on the title screen or `cargo run --release -- --editor`. With
-`RAZDOR_DT_DIR` set it draws the original art, offers the game's object and building pictures
-and names units, artefacts and spells from your install; without one it uses placeholders.
+## Редактор карт
+В Раздоре есть редактор сценариев, который пишет карты `.DTm`, открываемые и оригинальной
+игрой, и Раздором. Запустите его кнопкой **«Редактор карт»** на заставке или командой
+`cargo run --release -- --editor`. Если задан `RAZDOR_DT_DIR`, он рисует оригинальную графику,
+предлагает картинки объектов и зданий из игры и берёт названия воинов, артефактов и заклинаний
+из вашей установленной игры; без неё — заглушки.
 
-- **Toolbar**: New (50/100/200 or custom size, one surface), Open (the game's maps, your maps
-  or a path), Save (Ctrl+S), Save as (Ctrl+Shift+S), Save to game folder, Undo (Ctrl+Z), Redo
-  (Ctrl+Y / Ctrl+Shift+Z), Settings (title, description, start date, victory/defeat event,
-  the three hero starts, faction relations, campaign, named characters), Events (below), Check
-  (the list of problems; errors block saving; click one to go there), Test play, Exit.
-- **Tools** (right column, keys in brackets): Select and move (V), Terrain (T: 16 surfaces,
-  brush 1/3/5/9, flood fill, rectangle), Objects (O: hills, mountains, stones, trees by class
-  and picture; several per cell), Erase (E), Building (B: type and picture; the cell you click
-  is the bottom-right corner, the preview is red if it does not fit), Army (A), Point (P:
-  lantern or event point).
-- **Panels**: click a building, army or point to edit every field (names and descriptions in
-  any script, garrison, barracks, goods, spells, incomes, factions and attitudes, AI settings,
-  local events picked by title). Delete removes it; later ids and references are renumbered.
-- **Events**: the event list (filter by type, group colour and title; New, Duplicate, Delete)
-  and every field of the original editor's event window, on its tabs: *Event and player*
-  (type, group, start date or "relative only", hours open, repeat every N days, once or many
-  times, subordinate, hero archetype, events happened with yes / no / not happened, the flag
-  check `X` or `/X`, the yes/no question, beaten and met armies, level, gold, mana, squads and
-  strength with a ≥/≤ switch), *Event and heroes* (owners of buildings, artefacts and named
-  squads; armies beaten by anyone, active, inactive, at home), *Result 1* (message, chained
-  event, quest completed, XP/gold/mana, relative event and its delay, the hero's wait, the flag
-  `+X`/`-X`, units joining and where from, spells learned, artefacts gained), *Result 2*
-  (units leaving and where to, artefacts lost, lanterns, armies shown, activated, deactivated,
-  patrol change, battle, "no meeting", new hero class, a spell on the player, the standard
-  picture or an imported PNG), *Places* (attach to or detach from buildings and points, and
-  what refers to the event) and *Community* (the Community Update opcodes 1–20 with their
-  arguments named). Deleting an event renumbers the later ones and fixes every reference
-  (other events, buildings' and points' lists, the victory and defeat events, the opcodes'
-  relative targets); if the event is still used, the editor lists where and asks first.
-- **View**: wheel zooms, right or middle drag and the arrow keys move, Home shows the whole
-  map, the minimap moves the view; G grid, H hill and mountain cover, R patrol radii.
-- **Find** (Ctrl+F, a Razdor extra from issue #1): a window over the map's top right finds
-  buildings (by name, id, type, owner, garrison, barracks, goods, spells), armies (by name,
-  id, leader, troops, items), points and events (by id, title, question, message), the hero
-  starts and the map objects (by class), in any case (Ё as Е); every word typed must match,
-  `#N` finds the records with id N. A click on a hit, Enter or F3 (Shift+F3 back) moves the
-  view to the next hit and selects it (an event opens in the event window); F3 goes on after
-  the window is closed; Esc closes it.
-- **Test play** plays the map as it is in the editor; Esc > Main menu returns to it.
+- **Панель инструментов**: «Новая» (50/100/200 или свой размер, одна поверхность), «Открыть»
+  (карты игры, ваши карты или путь), «Сохранить» (Ctrl+S), «Сохранить как» (Ctrl+Shift+S),
+  «Сохранить в папку игры», «Отменить» (Ctrl+Z), «Вернуть» (Ctrl+Y / Ctrl+Shift+Z),
+  «Настройки» (название, описание, начальная дата, события победы и поражения, три начала
+  героя, отношения фракций, кампания, именные персонажи), «События» (см. ниже), «Проверка»
+  (список ошибок; ошибки не дают сохранить; щелчок по строке переходит к ней), «Пробная игра»,
+  «Выход».
+- **Инструменты** (правая колонка, клавиши в скобках): «Выбор и перемещение» (V), «Местность»
+  (T: 16 поверхностей, кисть 1/3/5/9, заливка, прямоугольник), «Объекты» (O: холмы, горы,
+  камни, деревья по классу и рисунку; несколько на клетку), «Ластик» (E), «Здание» (B: тип и
+  картинка; клетка, по которой щёлкнули, станет нижним правым углом, предпросмотр красный, если
+  здание не помещается), «Армия» (A), «Точка» (P: фонарь или точка события).
+- **Панели**: щёлкните по зданию, армии или точке, чтобы изменить любое поле (названия и
+  описания на любом алфавите, гарнизон, казармы, товары, заклинания, доходы, фракции и
+  отношения, настройки ИИ, местные события по названию). Delete удаляет; номера и ссылки после
+  него перенумеровываются.
+- **События**: список событий (фильтр по типу, цвету группы и названию; «Новое», «Копия»,
+  «Удалить») и все поля окна события из оригинального редактора по вкладкам: *«Событие и
+  игрок»* (тип, группа, начальная дата или «только относительное», сколько часов открыто,
+  повтор каждые N дней, однократное или многократное, подчинённое, архетип героя, произошедшие
+  события с да / нет / не произошло, проверка флага `X` или `/X`, вопрос «да/нет», разбитые и
+  встреченные армии, уровень, золото, мана, отряды и сила с переключателем ≥/≤), *«Событие и
+  герои»* (владельцы зданий, артефактов и именных отрядов; армии, разбитые кем угодно,
+  активные, неактивные, дома), *«Итог 1»* (сообщение, следующее событие в цепочке, выполненный
+  квест, опыт/золото/мана, относительное событие и его задержка, ожидание героя, флаг
+  `+X`/`-X`, присоединяющиеся воины и откуда, выученные заклинания, полученные артефакты),
+  *«Итог 2»* (уходящие воины и куда, потерянные артефакты, фонари, показанные, включённые и
+  выключенные армии, смена патруля, бой, «без встречи», новый класс героя, заклинание на
+  игрока, стандартная картинка или импортированный PNG), *«Места»* (привязка к зданиям и
+  точкам и отвязка от них, а также что ссылается на событие) и *«Коды Community»* (коды
+  Community Update 1–20 с подписанными аргументами). Удаление события перенумеровывает
+  следующие и исправляет все ссылки (другие события, списки зданий и точек, события победы и
+  поражения, относительные цели кодов); если событие ещё используется, редактор покажет где и
+  сначала спросит.
+- **Вид**: колесо меняет масштаб, правая или средняя кнопка и стрелки сдвигают вид, Home
+  показывает всю карту, мини-карта перемещает вид; G — сетка, H — покров холмов и гор, R —
+  радиусы патрулей.
+- **Поиск** (Ctrl+F, дополнение Раздора по issue #1): окно в правом верхнем углу карты находит
+  здания (по названию, номеру, типу, владельцу, гарнизону, казармам, товарам, заклинаниям),
+  армии (по названию, номеру, предводителю, войску, предметам), точки и события (по номеру,
+  названию, вопросу, сообщению), начала героя и объекты карты (по классу) без учёта регистра
+  (Ё как Е); должно совпасть каждое набранное слово, `#N` находит записи с номером N. Щелчок по
+  результату, Enter или F3 (Shift+F3 — назад) переводит вид к следующему результату и выделяет
+  его (событие открывается в окне события); F3 работает и после закрытия окна; Esc закрывает
+  его.
+- **«Пробная игра»** запускает карту в том виде, в каком она в редакторе; Esc > «Главное
+  меню» возвращает в редактор.
 
-Where maps go: your maps folder, `RAZDOR_MAPS_DIR` or `~/.local/share/razdor/maps`
-(`razdor/maps` in the platform data folder elsewhere). A map opened from the game's
-`Maps_Rus` is saved there too, never back over the game's copy. Only **Save to game folder**
-writes into `Maps_Rus`, after a confirmation, and replacing a map that is already there (such
-as a shipped one) asks a second time. Design and what is left:
-`docs/superpowers/specs/2026-09-25-map-editor-design.md` (a random map generator is not
-planned).
+Куда сохраняются карты: в вашу папку карт, `RAZDOR_MAPS_DIR` или `~/.local/share/razdor/maps`
+(на других системах — `razdor/maps` в папке данных платформы). Карта, открытая из `Maps_Rus`
+игры, тоже сохраняется туда и никогда не записывается поверх копии игры. Только **«Сохранить в
+папку игры»** пишет в `Maps_Rus`, после подтверждения, а замена уже лежащей там карты (например,
+из поставки) спрашивает второй раз. Устройство редактора и что осталось сделать:
+`docs/superpowers/specs/2026-09-25-map-editor-design.md` (генератор случайных карт не
+планируется).
 
-## Custom sprites
-All art is placeholder tokens. To use your own, put PNGs named after the units' and items'
-`Key=` in `data/units.ini` / `data/items.ini` (`knight.png`, `archmage.png`, `ranger.png`,
-`spearman.png`, `archer.png`, `swordsman.png`, `healer.png`, `bandit.png`,
-`bandit_archer.png`, `bandit_chief.png`, `short_sword.png`, …) in a folder and run:
+## Свои спрайты
+Вся графика — жетоны-заглушки. Чтобы использовать свою, положите в папку PNG с именами по
+`Key=` воинов и предметов из `data/units.ini` / `data/items.ini` (`knight.png`, `archmage.png`,
+`ranger.png`, `spearman.png`, `archer.png`, `swordsman.png`, `healer.png`, `bandit.png`,
+`bandit_archer.png`, `bandit_chief.png`, `short_sword.png`, …) и запустите:
 
 ```sh
 RAZDOR_ASSETS=./assets-local cargo run --release
 ```
 
-`assets-local/` is git-ignored — keep third-party art there.
+`assets-local/` игнорируется git — держите стороннюю графику там.
 
-## Layout
-- `src/dt/` — readers for the original's files (ini data, `.DTm` maps). Pure, no macroquad.
-- `src/rules/` — pure game logic (no macroquad), unit-tested.
-- `src/editor/` — the map editor's model (documents, commands, undo, validation, saving). Pure, unit-tested.
-- `src/i18n.rs`, `data/lang/ru/` — the interface languages and the Russian catalog.
-- `src/ui/` — macroquad screens; `assets.rs` is the only place that draws units and items,
-  `chrome.rs` the window art (original or placeholder), `unit_sheet.rs` the unit panel and
-  card strip, `game_bar.rs` the bottom bar.
-- Design: `docs/superpowers/specs/2026-09-24-razdor-prototype-design.md`.
+## Устройство кода
+- `src/dt/` — чтение файлов оригинала (данные ini, карты `.DTm`). Чистый код, без macroquad.
+- `src/rules/` — чистая игровая логика (без macroquad), покрыта модульными тестами.
+- `src/editor/` — модель редактора карт (документы, команды, отмена, проверка, сохранение). Чистый код, с модульными тестами.
+- `src/i18n.rs`, `data/lang/ru/` — языки интерфейса и русский каталог.
+- `src/ui/` — экраны на macroquad; `assets.rs` — единственное место, где рисуются воины и
+  предметы, `chrome.rs` — графика окон (оригинальная или заглушки), `unit_sheet.rs` — панель
+  воина и полоса карт, `game_bar.rs` — нижняя панель.
+- Устройство: `docs/superpowers/specs/2026-09-24-razdor-prototype-design.md`.
