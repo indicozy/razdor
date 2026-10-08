@@ -11,7 +11,7 @@ use razdor::editor::{EditorDoc, Palette, TerrainShape, Tool, ToolState, Target};
 
 use crate::ui::dt_art::DtArt;
 use crate::ui::widgets::*;
-use crate::ui::world_view::{draw_wrapped, faction_color, figure_stem, surface_color};
+use crate::ui::world_view::{bridge_offset, draw_wrapped, faction_color, figure_stem, surface_color};
 
 /// A cell's size on screen at zoom 1: the original's 32×22 px.
 pub const CW: f32 = 32.0;
@@ -203,14 +203,17 @@ fn placeholder_object(class: u8, sprite: u8, base: Vec2, s: f32) {
     }
 }
 
-/// Draws the building picture (or a placeholder) bottom-centred under its footprint.
+/// Draws the building picture (or a placeholder) at its anchor cell `(x, y)`, as the original
+/// editor does (RedrawMap 0x5ab588): the picture's bottom-right corner at the anchor cell's,
+/// moved by the game's bridge offsets for bridges (its own copy of the table, rounded). Unlike
+/// the game it neither raises a building wider than tall nor takes off half a pixel.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_building_sprite(art: Option<&DtArt>, cam: &Cam, x: u16, y: u16, size: (u8, u8), picture: (u8, u8), label: &str, alpha: f32) {
-    let base = cam.to_screen(vec2(x as f32 + 1.0 - size.0 as f32 / 2.0, y as f32 + 1.0));
     let tint = Color::new(1.0, 1.0, 1.0, alpha);
     if let Some((atlas, r)) = art.and_then(|a| a.map_atlas()).and_then(|at| Some((at, at.building(picture.0, picture.1)?))) {
-        let (w, h) = (r.w * cam.zoom, r.h * cam.zoom);
-        draw_texture_ex(&atlas.texture, base.x - w / 2.0, base.y - h, tint, DrawTextureParams { dest_size: Some(vec2(w, h)), source: Some(r), ..Default::default() });
+        let (dx, dy) = bridge_offset(picture);
+        let at = cam.to_screen(vec2(x as f32 + 1.0, y as f32 + 1.0)) + vec2(dx.round() - r.w, dy.round() - r.h) * cam.zoom;
+        draw_texture_ex(&atlas.texture, at.x, at.y, tint, DrawTextureParams { dest_size: Some(vec2(r.w * cam.zoom, r.h * cam.zoom)), source: Some(r), ..Default::default() });
         return;
     }
     let fr = cam.rect(Footprint::of(x as i32, y as i32, size.0, size.1).main);
