@@ -387,3 +387,4 @@ Razdor {v} = Раздор {v}
 Later = Позже
 Restart now = Перезапустить
 Open the release page = Открыть страницу выпуска
+RAZDOR modder = Моддер «Раздора»

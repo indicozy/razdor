@@ -245,13 +245,28 @@ pub fn frame() -> Option<Pick> {
     pick
 }
 
-thread_local! {
-    /// The credits scroll: its dark outline (`Credits_Alpha` as the alpha of black) and its
-    /// letters (`Credits_Color`, drawn additively), made once.
-    static CREDITS: std::cell::OnceCell<Option<(Texture2D, Texture2D)>> = const { std::cell::OnceCell::new() };
+/// The credits picture of the install: its dark outline (`Credits_Alpha` as the alpha of
+/// black), its letters (`Credits_Color`, drawn additively), and the row of its first letters
+/// (it starts with a blank stretch).
+#[derive(Clone)]
+struct Credits {
+    shadow: Texture2D,
+    letters: Texture2D,
+    first_row: f32,
 }
 
-fn credits() -> Option<(Texture2D, Texture2D)> {
+thread_local! {
+    /// The credits, made once.
+    static CREDITS: std::cell::OnceCell<Option<Credits>> = const { std::cell::OnceCell::new() };
+    /// The credits window the player scrolled (when it opened, how far from the timed scroll
+    /// in the picture's pixels).
+    static CREDITS_NUDGE: std::cell::Cell<(f64, f32)> = const { std::cell::Cell::new((f64::NAN, 0.0)) };
+}
+
+/// Razdor's own lines over the original's credits: their height in the picture's pixels.
+const OWN_CREDITS_H: f32 = 96.0;
+
+fn credits() -> Option<Credits> {
     CREDITS.with(|c| {
         c.get_or_init(|| {
             let mut color = chrome::image("Windows/Credits_Color.lit")?;
@@ -267,7 +282,11 @@ fn credits() -> Option<(Texture2D, Texture2D)> {
                 t.set_filter(FilterMode::Linear);
                 t
             };
-            Some((make(&shadow), make(&color.rgba)))
+            let width = color.width as usize;
+            let first_row = color.rgba.chunks_exact(width * 4).position(|row| row.chunks_exact(4).any(|p| p[0].max(p[1]).max(p[2]) > 60)).unwrap_or(0);
+            // A margin above, for the faint edges of the first letters.
+            let first_row = first_row.saturating_sub(16);
+            Some(Credits { shadow: make(&shadow), letters: make(&color.rgba), first_row: first_row as f32 })
         })
         .clone()
     })
@@ -299,24 +318,60 @@ pub fn authors(started: f64) -> bool {
         Some(t) => chrome::tex(&t, inner, WHITE),
         None => chrome::surface(inner, chrome::Skin::Brown),
     }
-    if let Some((shadow, t)) = credits() {
+    if let Some(c) = credits() {
         // As the original (0x4c82c4): the picture's top at the page's top to begin with (its
         // own blank start lets the first lines rise from below), 35 of its pixels a second,
-        // and it stays on its last view once the end is in sight.
+        // and it stays on its last view once the end is in sight. Razdor's own lines come
+        // first, before the original's; the wheel and the arrow keys scroll by hand, and the
+        // scroll goes on from there.
         let px = k * 0.9375;
-        let w = t.width() * px;
-        let h = t.height() * px;
-        let scrolled = ((get_time() - started) as f32 * 35.0 * px).min((h - inner.h).max(0.0));
-        let y = inner.y - scrolled;
-        // Only the part inside the page.
-        let top = y.max(inner.y);
-        let bottom = (y + h).min(inner.y + inner.h);
-        if bottom > top {
-            let src = Rect::new(0.0, (top - y) / (k * 0.9375), t.width(), (bottom - top) / (k * 0.9375));
-            let dst = Rect::new(inner.center().x - w / 2.0, top, w, bottom - top);
-            chrome::tex_src(&shadow, src, dst, WHITE);
-            chrome::additive(|| chrome::tex_src(&t, src, dst, WHITE));
+        let w = c.letters.width() * px;
+        let total = c.letters.height() + OWN_CREDITS_H;
+        let most = (total - inner.h / px).max(0.0);
+        let (opened, mut nudge) = CREDITS_NUDGE.with(|n| n.get());
+        if opened != started {
+            nudge = 0.0;
         }
+        let over = inner.contains(crate::ui::widgets::pointer().into());
+        let step = 48.0;
+        nudge -= if over { wheel() * step } else { 0.0 };
+        if key(KeyCode::Down) {
+            nudge += step;
+        }
+        if key(KeyCode::Up) {
+            nudge -= step;
+        }
+        if key(KeyCode::PageDown) {
+            nudge += inner.h / px * 0.8;
+        }
+        if key(KeyCode::PageUp) {
+            nudge -= inner.h / px * 0.8;
+        }
+        let timed = (get_time() - started) as f32 * 35.0;
+        let scrolled = (timed + nudge).clamp(0.0, most);
+        // Held at an end, the scroll owes nothing: turning back moves at once.
+        CREDITS_NUDGE.with(|n| n.set((started, scrolled - timed)));
+        let _clip = Clip::new(inner);
+        // The picture's part from row `from` (its pixels), drawn from page row `at`.
+        let picture = |from: f32, to: f32, at: f32| {
+            let top = (inner.y + (at - scrolled) * px).max(inner.y);
+            let bottom = (inner.y + (at + to - from - scrolled) * px).min(inner.y + inner.h);
+            if bottom > top {
+                let skip = (top - (inner.y + (at - scrolled) * px)) / px;
+                let src = Rect::new(0.0, from + skip, c.letters.width(), (bottom - top) / px);
+                let dst = Rect::new(inner.center().x - w / 2.0, top, w, bottom - top);
+                chrome::tex_src(&c.shadow, src, dst, WHITE);
+                chrome::additive(|| chrome::tex_src(&c.letters, src, dst, WHITE));
+            }
+        };
+        picture(0.0, c.first_row, 0.0);
+        // Razdor's modder, in the credits' colours: the role in gold, the name in white.
+        let y = inner.y + (c.first_row + 24.0 - scrolled) * px;
+        for (line, dy, size, color) in [(tr("RAZDOR modder"), 0.0, 20.0, chrome::GOLD), ("indicozy", 26.0, 22.0, WHITE)] {
+            let lw = measure(line, size * px).width;
+            chrome::shadow_text(line, inner.center().x - lw / 2.0, y + dy * px, size * px, color);
+        }
+        picture(c.first_row, c.letters.height(), c.first_row + OWN_CREDITS_H);
     }
     closed || key(KeyCode::Escape) || (clicked() && inner.contains(crate::ui::widgets::pointer().into()))
 }
