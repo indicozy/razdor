@@ -808,6 +808,30 @@ fn footprint_base(grid: Grid, l: &Location) -> (f32, f32) {
     (x - (l.size.0 - 1) as f32 / 2.0, y + rh / 2.0)
 }
 
+/// The offsets the original adds to the sprites of picture types 13 (stone road and bridge
+/// pieces) and 14 (wooden bridges), in pixels, by variant: the exe's table at 0x4ecd88
+/// (`type·0x50 + variant·8`, two floats), read by 0x4c9b5b for picture types ≥ 13 only.
+const BRIDGE_OFFSETS: [[(f32, f32); 10]; 2] = [
+    [(2.0, 27.0), (11.0, 22.0), (0.0, 22.0), (11.0, 22.0), (11.0, 26.0), (1.0, 22.0), (13.0, 23.0), (18.0, 27.0), (22.0, 22.0), (16.0, 24.0)],
+    [(11.0, 24.0), (10.0, 25.0), (11.0, 24.0), (10.0, 24.0), (8.0, 22.0), (9.0, 27.0), (9.0, 23.0), (9.0, 32.0), (35.0, 21.0), (36.0, 34.0)],
+];
+
+/// Screen top-left of a building's `w`×`h` px sprite, placed as the original places it: the
+/// loader 0x4ce30c puts the quad at `(32·sx − w, 22·sy − h)` from the footprint's top-left
+/// cell, 11 px higher when the footprint is wider than tall, less half a pixel, and 0x4c9b5b
+/// adds [`BRIDGE_OFFSETS`] to the bridges. So the sprite's bottom-right corner is the anchor
+/// cell's.
+fn building_sprite_origin(l: &Location, w: f32, h: f32, cam: &Camera) -> Vec2 {
+    let (x, y) = cam.grid.center(l.anchor);
+    let corner = cam.to_screen((x + 0.5, y + cam.grid.row_height() / 2.0));
+    let raise = if l.size.0 > l.size.1 { 11.0 } else { 0.0 };
+    let (dx, dy) = match l.picture {
+        (t @ 13..=14, v) => BRIDGE_OFFSETS[usize::from(t - 13)].get(usize::from(v)).copied().unwrap_or_default(),
+        _ => (0.0, 0.0),
+    };
+    corner + vec2(dx - w - 0.5, dy - h - raise - 0.5) * (cam.scale / PX)
+}
+
 fn draw_object(o: &Decoration, art: Option<&DtArt>, cam: &Camera) {
     let c = cam.cell_centre(o.tile);
     let base = vec2(c.x, c.y + cam.cell_size().y / 2.0);
@@ -859,8 +883,8 @@ fn draw_building(l: &Location, art: Option<&DtArt>, cam: &Camera) {
         draw_ellipse_lines(base.x, base.y - ry, rx, ry, 0.0, 2.0, ring);
     }
     if let Some((atlas, r)) = sprite {
-        let (w, h) = (r.w * zoom, r.h * zoom);
-        draw_texture_ex(&atlas.texture, base.x - w / 2.0, base.y - h, WHITE, DrawTextureParams { dest_size: Some(vec2(w, h)), source: Some(r), ..Default::default() });
+        let at = building_sprite_origin(l, r.w, r.h, cam);
+        draw_texture_ex(&atlas.texture, at.x, at.y, WHITE, DrawTextureParams { dest_size: Some(vec2(r.w * zoom, r.h * zoom)), source: Some(r), ..Default::default() });
     } else {
         let (w, h) = (l.size.0 as f32 * cam.scale, (l.size.1 as f32 * cam.cell_size().y).max(cam.scale * 0.8));
         let wall = match l.kind {
