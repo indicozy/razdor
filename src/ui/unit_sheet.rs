@@ -211,7 +211,16 @@ fn stat_lines(content: &Content, s: &Sheet) -> Vec<Line> {
         let pc = cmp_color(p, start[Stat::MagicPower]);
         let dir = now.magic_direction();
         if matches!(dir, MagicDirection::ToEnemy | MagicDirection::ToAll) {
-            lines.push((label("StrikeHit", n_("Magic strike (- hits)")), format!("-{p}"), pc));
+            // The kind of magic it strikes with in the brackets, not "(−hits)" (Razdor's: the
+            // original says only that hits are lost; the defences name the three kinds).
+            let kind = match school {
+                MagicSchool::Life => tr("Life"),
+                MagicSchool::Elemental => tr("Elemental"),
+                MagicSchool::Death => tr("Death"),
+            };
+            let strike = label("StrikeHit", n_("Magic strike (- hits)"));
+            let strike = format!("{} ({kind})", strike.split('(').next().unwrap_or(&strike).trim_end());
+            lines.push((strike, format!("-{p}"), pc));
             buff_lines(&mut lines, curse_effect(o, school, p), false);
         }
         if matches!(dir, MagicDirection::ToAlly | MagicDirection::ToAll) {
