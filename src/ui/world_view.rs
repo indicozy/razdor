@@ -16,7 +16,7 @@ use razdor::rules::content::HeroClass;
 use razdor::rules::game::{Event, Foe, Game};
 use razdor::rules::magic::{CastOutcome, CastTarget};
 use razdor::rules::map::{object_class, Decoration, Grid, Tile, TileMap};
-use razdor::rules::world::{Army, Location, LocationKind, Troop};
+use razdor::rules::world::{Army, Location, LocationKind, Owner, Troop};
 
 use super::assets::Assets;
 use super::audio::{cue, Cue};
@@ -1135,13 +1135,24 @@ fn army_tooltip(game: &Game, a: &Army) -> Tooltip {
     Tooltip { title, lines: Vec::new(), troops: a.troops.clone(), team: if a.hostile() { Team::Enemy } else { Team::Player }, footer, style }
 }
 
+/// The owner line of a building's tooltip. The holder is named only for a castle, fort or
+/// ruins (0x4cb18c): the hero, an army's leader or the map's owner. Any other building, a
+/// captured village too, always names the map's owner.
+fn tooltip_owner(game: &Game, l: &Location) -> String {
+    match (l.kind, l.owner) {
+        (LocationKind::Castle | LocationKind::Fort | LocationKind::Ruins, Owner::Player) => game.hero_name.clone().unwrap_or_else(|| tr("you").to_string()),
+        (LocationKind::Castle | LocationKind::Fort | LocationKind::Ruins, Owner::Army(k)) => game.world.armies.iter().find(|a| a.id == k).map_or_else(String::new, |a| a.leader_name.clone()),
+        _ => l.owner_name.clone(),
+    }
+}
+
 /// The original's building tooltip: its name, "Владелец" and the owner's name, the
 /// description, "(дань уже собрана)" for a village already emptied; a garrison under
 /// "Состав гарнизона защитников:".
 fn location_tooltip(game: &Game, l: &Location) -> Tooltip {
     let title = if l.name.is_empty() { info("NoNameBuilding", n_("Unknown building")) } else { l.name.clone() };
     let mut lines = Vec::new();
-    let owner = if l.owned() { game.hero_name.clone().unwrap_or_else(|| tr("you").to_string()) } else { l.owner_name.clone() };
+    let owner = tooltip_owner(game, l);
     if !owner.trim().is_empty() {
         lines.push((info("Owner", n_("Owner")), DIM));
         lines.push((owner, TIP_NAME));
@@ -1845,6 +1856,30 @@ mod tests {
         assert_eq!(location_tip_style(&castle), TipStyle::Hostile);
         castle.owner = razdor::rules::world::Owner::Player;
         assert_eq!(location_tip_style(&castle), TipStyle::Normal);
+    }
+
+    /// A village the hero stepped on is his (0x4ad94c), but its tooltip still names the
+    /// map's owner (0x4cb18c names the holder only for castles, forts and ruins); a castle
+    /// he holds names him.
+    #[test]
+    fn a_captured_village_still_names_the_maps_owner() {
+        let Some(dir) = std::env::var_os(razdor::dt::install::ENV_VAR) else { return };
+        let dt = razdor::dt::install::DtInstall::load(std::path::Path::new(&dir)).unwrap();
+        let m = dt.maps.iter().find(|m| m.name.starts_with("РК1")).unwrap();
+        let content = std::sync::Arc::new(razdor::rules::content::Content::from_dt(&dt));
+        let mut g = Game::from_scenario(content, &m.load().unwrap(), HeroClass::Knight);
+        g.set_hero_name("Иво");
+        let owner = |g: &Game, name: &str| {
+            let l = g.world.locations.iter().find(|l| l.name == name).unwrap();
+            (l.owner_name.clone(), tooltip_owner(g, l))
+        };
+        for l in g.world.locations.iter_mut().filter(|l| l.name == "Деревня Васильки" || l.name == "Замок Бонитур") {
+            l.owner = Owner::Player;
+        }
+        let (map, shown) = owner(&g, "Деревня Васильки");
+        assert!(!map.is_empty());
+        assert_eq!(shown, map);
+        assert_eq!(owner(&g, "Замок Бонитур").1, "Иво");
     }
 
     /// The centre button's glide (0x4af96c): 900 ms, the cosine ease in the original's
