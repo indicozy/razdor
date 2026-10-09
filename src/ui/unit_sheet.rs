@@ -330,10 +330,11 @@ pub fn stat_strip(strip: Rect, now: &Stats, base: &Stats, power: i32, caster: bo
     let k = k();
     chrome::surface(strip, chrome::Skin::Strip);
     // The original recolours the strip itself (0x48da5c): red for the hero, blue for a named
-    // character; a tint over it here.
+    // character; a tint over it here. The hero's red is a deeper one than the original's
+    // (about 160,50,0 on this paper), which glared (a choice over the original).
     match panel {
         StripPanel::Plain => {}
-        StripPanel::Hero => draw_rectangle(strip.x, strip.y, strip.w, strip.h, Color::new(0.85, 0.08, 0.02, 0.55)),
+        StripPanel::Hero => draw_rectangle(strip.x, strip.y, strip.w, strip.h, Color::new(0.5, 0.05, 0.03, 0.55)),
         StripPanel::Named => draw_rectangle(strip.x, strip.y, strip.w, strip.h, Color::new(0.05, 0.3, 0.95, 0.6)),
     }
     if lit {
