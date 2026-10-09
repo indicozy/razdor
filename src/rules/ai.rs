@@ -1427,6 +1427,12 @@ impl Game {
     pub(crate) fn ai_init(&mut self, from_save: bool) {
         let now = self.clock.total_minutes();
         let day = MINUTES_PER_DAY as f64;
+        // Every army's building is the one under its cell (0x4a1ff0 step 2, armies 1..N), the
+        // ones no AI moves too (a king at home: his castle's tooltip and guard).
+        for i in 0..self.world.armies.len() {
+            let cell = self.world.armies[i].tile(&self.world.map);
+            self.world.armies[i].mind.standing = self.world.location_covering(cell);
+        }
         let ids: Vec<usize> = (0..self.world.armies.len()).filter(|&i| managed(&self.world.armies[i])).collect();
         for &i in &ids {
             let cell = self.world.armies[i].tile(&self.world.map);
