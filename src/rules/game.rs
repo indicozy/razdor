@@ -177,6 +177,9 @@ pub enum Event {
     Tribute { at: usize, paid: Tribute, mana: i32 },
     /// A spell read on the map landed, or was lost (`Game::begin_cast`).
     SpellCast { spell: u32, target: magic::CastTarget, outcome: magic::CastOutcome },
+    /// A scenario event cast `spell` on the hero's army (0x4ab1ec): its effect plays over him
+    /// and his walk ends on this cell; no window opens.
+    EventSpell { spell: u32 },
 }
 
 /// Who the next battle is against.

@@ -47,6 +47,8 @@ impl Event {
             Event::Script(EventOutcome::Fired { message, .. }) => *message,
             Event::Script(EventOutcome::Declined(_) | EventOutcome::LoopGuard) => false,
             Event::Script(_) => true,
+            // An event's spell stops the walk on its cell (0x4ab1ec clears the route).
+            Event::EventSpell { .. } => true,
             _ => false,
         }
     }
@@ -666,6 +668,7 @@ impl EventWorld for Game {
             self.queued_casts.push(id);
         } else if let Some(def) = self.spell(id).cloned() {
             self.apply_spell_to_army_ext(&def, true);
+            self.effect_events.push(Event::EventSpell { spell: id });
         }
     }
 
