@@ -33,12 +33,14 @@ pub enum Fx {
     Grey,
     /// A dark overlay whose opacity is the picture's brightness (ornaments on parchment).
     Shade,
+    /// Green and blue swapped (0x48dd40 with 1, 3, 2): the blue pill made the green one.
+    SwapGreenBlue,
 }
 
 struct Chrome {
     dir: PathBuf,
     /// By path, then by [`Fx`] (its index).
-    textures: HashMap<String, [Option<Option<Texture2D>>; 5]>,
+    textures: HashMap<String, [Option<Option<Texture2D>>; 6]>,
     animations: HashMap<String, Option<Vec<Texture2D>>>,
     texts: Option<Option<Ini>>,
 }
@@ -125,6 +127,7 @@ pub fn transform(img: &mut Image, fx: Fx) {
                 p[..3].copy_from_slice(&[20, 10, 4]);
                 p[3] = a.min(p[3]);
             }
+            Fx::SwapGreenBlue => p.swap(1, 2),
         }
     }
 }
@@ -864,12 +867,12 @@ pub fn pill_button(r: Rect, label: &str, enabled: bool, green: bool) -> bool {
     } else {
         "smb-up"
     };
-    let tint = if green && enabled { Color::new(0.35, 1.0, 0.35, 1.0) } else { WHITE };
     match win(name) {
         Some(t) if green && enabled => {
-            // The blue pill, recoloured green.
-            let g = win_fx(name, Fx::Grey).unwrap_or(t);
-            three_slice(&g, r, 12.0, tint);
+            // The blue pill with its green and blue swapped, as the original makes the green
+            // one from smb-up and smb-down at start (0x48dd40(…, 1, 3, 2)).
+            let g = win_fx(name, Fx::SwapGreenBlue).unwrap_or(t);
+            three_slice(&g, r, 12.0, WHITE);
         }
         Some(t) => three_slice(&t, r, 12.0, WHITE),
         None => {
