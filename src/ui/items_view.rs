@@ -262,9 +262,11 @@ fn tree_view(game: &mut Game, assets: &Assets, sel: usize, u: &Unit, r: Rect, me
 /// the pack indices `kept`, in their order. Returns the pack index pressed.
 fn pack_view(game: &Game, assets: &Assets, r: Rect, scroll: &mut usize, hover: &mut Option<ItemId>, kept: Option<&[usize]>) -> Option<usize> {
     let k = chrome::k();
-    let cell = ((r.w - 18.0 * k) / PACK_COLS as f32).floor();
+    // As many of the original's squares as the width takes (5 in its 300 px).
+    let cols = (((r.w - 18.0 * k) / (56.0 * k)).floor() as usize).max(PACK_COLS);
+    let cell = ((r.w - 18.0 * k) / cols as f32).floor();
     let rows_shown = ((r.h / cell).floor() as usize).max(1);
-    let rows = kept.map_or(PACK_SIZE, |v| v.len().max(1)).div_ceil(PACK_COLS).max(rows_shown);
+    let rows = kept.map_or(PACK_SIZE, |v| v.len().max(1)).div_ceil(cols).max(rows_shown);
     let max_scroll = rows.saturating_sub(rows_shown);
     if mouse_in(r.x, r.y, r.w, r.h) {
         let w = wheel();
@@ -278,13 +280,13 @@ fn pack_view(game: &Game, assets: &Assets, r: Rect, scroll: &mut usize, hover: &
     let inv = chrome::win("Inventory");
     let mut hit = None;
     for row in 0..rows_shown {
-        for col in 0..PACK_COLS {
-            let i = (*scroll + row) * PACK_COLS + col;
+        for col in 0..cols {
+            let i = (*scroll + row) * cols + col;
             let cr = Rect::new(r.x + col as f32 * cell, r.y + row as f32 * cell, cell, cell);
             match &inv {
                 Some(t) => {
                     let s = t.width() / 5.0;
-                    chrome::tex_src(t, Rect::new(col as f32 * s, ((row + *scroll) % 5) as f32 * s, s, s), cr, WHITE);
+                    chrome::tex_src(t, Rect::new((col % 5) as f32 * s, ((row + *scroll) % 5) as f32 * s, s, s), cr, WHITE);
                 }
                 None => {
                     chrome::surface(cr, chrome::Skin::Paper);
@@ -304,7 +306,7 @@ fn pack_view(game: &Game, assets: &Assets, r: Rect, scroll: &mut usize, hover: &
         }
     }
     // The scroll bar.
-    let bx = r.x + PACK_COLS as f32 * cell + 4.0 * k;
+    let bx = r.x + cols as f32 * cell + 4.0 * k;
     let bh = rows_shown as f32 * cell;
     draw_rectangle(bx, r.y, 12.0 * k, bh, Color::new(0.05, 0.05, 0.05, 0.8));
     let th = bh * rows_shown as f32 / rows.max(1) as f32;
@@ -494,7 +496,9 @@ pub fn squad(
             chrome::shadow_centered(&title, win.x + 408.0 * k, win.y + 40.0 * k + head * 0.36, 15.0 * k, chrome::CREAM);
         });
     }
-    let content = at(258.0, 54.0, 300.0, 242.0);
+    // Razdor gives the backpack the whole top right (the user's choice, 2026-10-09: no item
+    // description box; an item's description pops up by the pointer, as a spell badge's).
+    let content = if show_tree { at(258.0, 54.0, 300.0, 242.0) } else { at(258.0, 54.0, 568.0, 242.0) };
     // The backpack's filter line above it: typing a letter starts it.
     let mut query = FILTER.with(|f| f.borrow().clone());
     let mut filter = item_filter::Reply::default();
@@ -541,35 +545,7 @@ pub fn squad(
         }
     }
 
-    // Top right: the item under the mouse; under it, for a unit other than the hero, its
-    // face and the button that sends it away.
-    let item_title = own("ItemDescript", n_("Item description"));
-    super::dt_font::with_face(super::dt_font::Face::Title, || {
-        chrome::shadow_centered(&item_title, win.x + 697.0 * k, win.y + 40.0 * k + head * 0.36, 15.0 * k, chrome::CREAM);
-    });
-    let desc = if show_tree { at(570.0, 54.0, 256.0, 172.0) } else { at(570.0, 54.0, 256.0, 242.0) };
-    match hover {
-        Some(item) => super::building_view::item_description(game, assets, item, desc.x, desc.y, desc.w, desc.h),
-        // While filtering: the matches by name, their matched part lit; Enter takes the first.
-        None if filtering => {
-            chrome::text_box(desc);
-            let size = (15.0 * k).round();
-            let pitch = (size * 1.35).round();
-            let x = desc.x + 12.0 * k;
-            let mut y = desc.y + 12.0 * k + size;
-            let head = if kept.is_empty() { tr("Nothing in the pack matches.") } else { tr("Enter gives the first to the selected unit:") };
-            text_fit(head, x, y, desc.w - 24.0 * k, size, chrome::CREAM);
-            for (n, (i, m)) in kept.iter().enumerate() {
-                y += pitch;
-                if y > desc.bottom() - 8.0 * k {
-                    break;
-                }
-                let name = &c.item(game.pack[*i]).name;
-                item_filter::marked_name(name, m, x, y, desc.w - 24.0 * k, size, if n == 0 { chrome::GOLD } else { chrome::CREAM });
-            }
-        }
-        None => chrome::text_box(desc),
-    }
+    // Top right: for a unit other than the hero, its face and the button that sends it away.
     let row = at(570.0, 234.0, 256.0, 62.0);
     if let Some(sel) = tree_of {
         let u = game.squad[sel].clone();
@@ -783,6 +759,17 @@ pub fn squad(
                 _ => {}
             }
         }
+    }
+
+    // The item under the pointer, in the pack or worn: its description pops up by the pointer
+    // (not while one is carried).
+    if let Some(item) = hover.filter(|_| held.is_none()) {
+        let (pw, ph) = (272.0 * k, 240.0 * k);
+        let (mx, my) = pointer();
+        let px = if mx + 21.0 * k + pw > sw { mx - 21.0 * k - pw } else { mx + 21.0 * k };
+        let py = (my + 37.0 * k).min(sh - ph - 4.0).max(4.0);
+        draw_rectangle(px + 6.0 * k, py + 6.0 * k, pw, ph, Color::new(0.0, 0.0, 0.0, 0.45));
+        super::building_view::item_description(game, assets, item, px, py, pw, ph);
     }
 
     if close || (!filter.keys_taken && (key(KeyCode::Escape) || key(KeyCode::A))) {

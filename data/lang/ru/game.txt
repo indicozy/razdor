@@ -344,8 +344,6 @@ Nothing is called "{query}". = Ничего не называется «{query}�
 # The inventory filter
 Search: type a name (Ctrl+F) = Поиск: наберите название (Ctrl+F)
 {found} of {of} = {found} из {of}
-Nothing in the pack matches. = В рюкзаке ничего не подходит.
-Enter gives the first to the selected unit: = Enter отдаёт первый выбранному воину:
 Type, Ctrl+F = Набор, Ctrl+F
 market: filter the list (Enter picks the first, Esc clears) = рынок: отбор списка (Enter — первый, Esc — сброс)
 filter the backpack (Enter: the first to the unit, Esc clears) = отбор рюкзака (Enter — первый воину, Esc — сброс)

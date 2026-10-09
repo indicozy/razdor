@@ -198,7 +198,6 @@ Unpaid: refuses to fight = Без жалованья: отказывается �
 Upgrade tree = Древо развития
 {name} drinks it: +{healed} hits. = {name} выпивает зелье: +{healed} жизни.
 {name} drinks it. The effect lasts until the next battle ends. = {name} выпивает зелье. Действие продлится до конца следующего боя.
-Item description = Описание предмета
 Dismiss = Распустить
 Bury = Похоронить
 {name} leaves your army. = {name} покидает вашу армию.

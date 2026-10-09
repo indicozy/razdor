@@ -94,8 +94,3 @@ pub fn field(key: &str, query: &mut String, r: Rect, shortcuts: &[KeyCode], foun
     reply
 }
 
-/// A matched name with its match lit, fitted into `width`.
-pub fn marked_name(name: &str, m: &Match, x: f32, y: f32, width: f32, size: f32, color: Color) {
-    let size = fit_size(name, width, size);
-    text_marked(name, m.name_range.clone(), x, y, size, color, chrome::GOLD);
-}
