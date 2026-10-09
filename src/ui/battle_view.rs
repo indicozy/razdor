@@ -290,7 +290,7 @@ fn effect_number(battle: &Battle, actor: usize, kind: ActionKind) -> usize {
 /// (`elapsed × 24 / 350`) of 220 × 110 drawn at double height, 220 × 220 original pixels,
 /// centred on the card and moved down by the effect's own `y` (0x4afe7c); blended as the
 /// original's 5-bit alpha masks. False without the picture.
-fn draw_effect(content: &razdor::rules::content::Content, n: usize, sq: Rect, t: f32) -> bool {
+pub(super) fn draw_effect(content: &razdor::rules::content::Content, n: usize, sq: Rect, t: f32) -> bool {
     let Some(e) = content.options.battle_effects.get(n) else { return false };
     let Some(frames) = chrome::battle_effect(e) else { return false };
     let i = ((t.clamp(0.0, 1.0) * 24.0) as usize).min(frames.len() - 1);
@@ -450,7 +450,7 @@ impl BattleView {
                         self.ai_timer = 0.0;
                         self.fx = match self.battle.ai_step() {
                             Some(Step::Act { actor, hit }) => {
-                                let px = card_distance(l, &self.battle, actor, hit.target);
+                                let px = card_distance(&l, &self.battle, actor, hit.target);
                                 Some(Fx::act(&self.battle, actor, hit, px))
                             }
                             Some(Step::Move { actor, from, to }) => {

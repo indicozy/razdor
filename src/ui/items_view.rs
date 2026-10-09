@@ -127,12 +127,34 @@ thread_local! {
     static HELD: std::cell::Cell<Option<Held>> = const { std::cell::Cell::new(None) };
     /// The unit whose Dismiss (or Bury) was pressed: confirm or cancel (0x4c3744).
     static CONFIRM: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    /// A battle effect playing over a unit's card (0x4b11cc).
+    static CARD_FX: std::cell::Cell<Option<CardFx>> = const { std::cell::Cell::new(None) };
     /// The card sliding after a press on an empty cell.
     static SLIDE: std::cell::Cell<Option<Slide>> = const { std::cell::Cell::new(None) };
     /// The class a promotion portrait under the pointer put on the left panel (0x4c39d8
     /// repaints it as a fresh unit of that type); it stays when the pointer leaves, as the
     /// original's, until a card is hovered or pressed.
     static PANEL_TYPE: std::cell::Cell<Option<razdor::rules::content::UnitId>> = const { std::cell::Cell::new(None) };
+}
+
+/// The army window's timed card actions (0x4b11cc): a potion drunk (`--POTION`, 420 ms) or
+/// a unit sent away (`--PAR`, 350 ms, the unit leaving when it ends); the window takes no
+/// input meanwhile.
+#[derive(Clone, Copy)]
+struct CardFx {
+    effect: usize,
+    unit: usize,
+    t0_ms: i64,
+    ms: i64,
+    dismiss: bool,
+}
+
+/// Starts a card action's effect over squad member `unit`, with its sound: `Battle-Cure` for a
+/// potion, `Card-Move` for a dismissal (0x4b11cc).
+fn card_fx(effect: usize, unit: usize, dismiss: bool) {
+    let ms = if dismiss { 350 } else { 420 };
+    cue(if dismiss { Cue::CardMove } else { Cue::Cure });
+    CARD_FX.with(|f| f.set(Some(CardFx { effect, unit, t0_ms: now_ms(), ms, dismiss })));
 }
 
 /// Squad member `unit` wears or drinks the pack item at `i`; the message to show, if any.
@@ -142,9 +164,13 @@ fn use_pack_item(game: &mut Game, unit: usize, i: usize) -> Option<String> {
     let kind = c.item(item).kind;
     let name = game.squad.get(unit)?.name(&c).to_string();
     if kind == ArtefactType::Potion {
-        Some(match game.drink(unit, i) {
-            Ok(healed) if healed > 0 => cued(Cue::Item(kind), razdor::trf!("{name} drinks it: +{healed} hits.", name, healed)),
-            Ok(_) => cued(Cue::Item(kind), razdor::trf!("{name} drinks it. The effect lasts until the next battle ends.", name)),
+        let drunk = game.drink(unit, i);
+        if drunk.is_ok() {
+            card_fx(5, unit, false);
+        }
+        Some(match drunk {
+            Ok(healed) if healed > 0 => razdor::trf!("{name} drinks it: +{healed} hits.", name, healed),
+            Ok(_) => razdor::trf!("{name} drinks it. The effect lasts until the next battle ends.", name),
             Err(e) => equip_error(e),
         })
     } else {
@@ -172,8 +198,14 @@ fn give_on_card(game: &mut Game, from: From, to: usize) -> Option<String> {
     let kind = c.item(item).kind;
     let name = game.squad.get(to)?.name(&c).to_string();
     match game.give_item(source, to) {
-        Ok(Given::Drunk(healed)) if healed > 0 => Some(cued(Cue::Item(kind), razdor::trf!("{name} drinks it: +{healed} hits.", name, healed))),
-        Ok(Given::Drunk(_)) => Some(cued(Cue::Item(kind), razdor::trf!("{name} drinks it. The effect lasts until the next battle ends.", name))),
+        Ok(Given::Drunk(healed)) => {
+            card_fx(5, to, false);
+            Some(if healed > 0 {
+                razdor::trf!("{name} drinks it: +{healed} hits.", name, healed)
+            } else {
+                razdor::trf!("{name} drinks it. The effect lasts until the next battle ends.", name)
+            })
+        }
         Ok(_) => {
             cue(Cue::Item(kind));
             None
@@ -389,6 +421,27 @@ pub fn squad(
         None => None,
     };
     SLIDE.with(|s| s.set(slide));
+    // A card action that has ended: a dismissed unit leaves now, nothing selected, the pack up
+    // (0x4b1778).
+    if let Some(fx) = CARD_FX.with(|f| f.get()) {
+        if now_ms() - fx.t0_ms >= fx.ms {
+            CARD_FX.with(|f| f.set(None));
+            if fx.dismiss {
+                if let Some(u) = game.squad.get(fx.unit).cloned() {
+                    let name = u.name(&game.content).to_string();
+                    *message = Some(match game.dismiss(fx.unit) {
+                        Ok(()) if u.alive() => razdor::trf!("{name} leaves your army.", name),
+                        Ok(()) => razdor::trf!("{name} is laid to rest.", name),
+                        Err(e) => service_error(e),
+                    });
+                }
+                *selected = ArmySel::default();
+                selected.clamp(game.squad.len());
+            }
+        } else {
+            set_input_blocked(true);
+        }
+    }
     let c = game.content.clone();
     let k = chrome::k();
     let (sw, sh) = (screen_width(), screen_height());
@@ -532,14 +585,8 @@ pub fn squad(
             let half = (b.w - 6.0 * k) / 2.0;
             if button(b.x, b.y, half, b.h, tr("Confirm"), true) {
                 CONFIRM.with(|c| c.set(None));
-                let name = u.name(&c).to_string();
-                *message = Some(match game.dismiss(sel) {
-                    Ok(()) if u.alive() => razdor::trf!("{name} leaves your army.", name),
-                    Ok(()) => razdor::trf!("{name} is laid to rest.", name),
-                    Err(e) => service_error(e),
-                });
-                // Nothing is selected after it, the pack up (0x4b1778).
-                *selected = ArmySel::default();
+                // It leaves when the effect over its card ends (0x4b11cc kind 2).
+                card_fx(2, sel, true);
             } else if button(b.x + half + 6.0 * k, b.y, half, b.h, tr("Cancel"), true) {
                 CONFIRM.with(|c| c.set(None));
             }
@@ -602,6 +649,9 @@ pub fn squad(
         let upgrade = i > 0 && v.upgrade_tree(&c).iter().any(|&(_, _, ok)| ok);
         chrome::card_signs(sq, true, &[(i == 0, "SI_Helm", chrome::GOLD), (upgrade, "Sign-Upgrade", GREEN), (!v.potions.is_empty(), "sign-potion", GREEN)]);
         super::spell_badges::draw(sq, &v.spells, v.drain, game.clock.total_minutes() as u64, &c);
+        if let Some(fx) = CARD_FX.with(|f| f.get()).filter(|fx| fx.unit == i) {
+            super::battle_view::draw_effect(&c, fx.effect, sq, (now_ms() - fx.t0_ms) as f32 / fx.ms as f32);
+        }
         if super::unit_drag::dragged() == Some(i) {
             draw_rectangle(p.x, p.y, card.x, card.y, Color::new(0.0, 0.0, 0.0, 0.55));
         }
