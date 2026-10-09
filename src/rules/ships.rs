@@ -296,10 +296,21 @@ impl Game {
 
     /// At sea, the hero's next step lands him (world.md §4.2 d, 0x4ad94c) when the cell is
     /// land or a building other than a bridge ([`World::landing_terrain_is_land`]; Razdor
-    /// fixes the original's bug there, which read a cell further south).
+    /// fixes the original's bug there, which read a cell further south). Razdor also fixes
+    /// its shipyard trap: a step inside the shipyard he just bought his ship in, from one of
+    /// its cells to another, is no landing. The original puts him at sea on the first such
+    /// step (0x497c68), lands him on the next (0x4ad94c) and parks no ship in a shipyard
+    /// (0x496ec4), so a route to the water across the yard lost the ship he had just paid for.
     pub(crate) fn landing(&self, next: Tile) -> bool {
         let w = &self.world;
-        self.aboard() && (w.landing_terrain_is_land(next) || w.location_at(next).is_some())
+        if !self.aboard() {
+            return false;
+        }
+        let yard = |t: Tile| w.location_at(t).filter(|&l| w.locations[l].kind == LocationKind::Shipyard);
+        if yard(self.tile()).is_some() && yard(self.tile()) == yard(next) {
+            return false;
+        }
+        w.landing_terrain_is_land(next) || w.location_at(next).is_some()
     }
 
     /// The hero lands from `from` (world.md §8): he is no longer at sea and his ship is
@@ -497,6 +508,28 @@ mod tests {
         assert_eq!(g.tile(), (5, 5));
         assert!(g.ship.is_none() && !g.plans_at_sea(), "the purchase is lost");
         assert!(!g.can_target((12, 5)));
+    }
+
+    /// Razdor's fix of the shipyard trap: across a yard of several cells to the water, the
+    /// ship is kept (the original landed him on the yard's next cell and lost it).
+    #[test]
+    fn a_route_across_a_wide_shipyard_keeps_the_ship() {
+        let mut s = strait();
+        let mut yard = building(BuildingType::Shipyard, 9, 6, (3, 3));
+        yard.relations = [1, 0, 0, 0];
+        s.buildings = vec![yard];
+        let mut g = start(&s);
+        let cells: Vec<Tile> = (0..30).flat_map(|y| (0..30).map(move |x| (x, y))).filter(|&t| g.world.location_at(t).is_some()).collect();
+        assert!(cells.len() > 2, "{cells:?}");
+        // Into the yard's westmost cell, the farthest from the water.
+        let west = *cells.iter().min_by_key(|t| (t.0, (t.1 - 5).abs())).unwrap();
+        assert!(g.set_destination(west));
+        walk_until_stopped(&mut g);
+        assert_eq!(g.tile(), west);
+        g.rent_ship().unwrap();
+        assert!(g.set_destination((12, 5)));
+        let ev = walk_until_stopped(&mut g);
+        assert!(g.aboard() && g.tile() == (12, 5), "{:?} {:?} {ev:?}", g.tile(), g.ship);
     }
 
     /// Going to sea (0x496d28) adds `Sea` and removes `EnterShipyard`, should a script have

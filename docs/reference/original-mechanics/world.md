@@ -585,6 +585,11 @@ map or is destroyed during the ticks (0x4ae536).
   cell; he leaves the sea and the ship (army slot N+1) is **parked** on the water cell he
   left, facing his direction. If he walks straight from a shipyard's footprint onto land
   after buying, no ship is parked and the purchase is lost.
+  The same happens inside a shipyard of several cells: the first step inside it after
+  buying puts him at sea (0x497c68), the next one onto another of its cells lands him there
+  (0x4ad94c), and no ship is parked in a shipyard (0x496ec4), so a route to the water across
+  the yard loses the ship. Razdor fixes this: a step between two cells of the shipyard he
+  stands in is no landing (`Game::landing`).
 - **Re-boarding**: the parked ship's cell is a valid click even though water costs 0 on LAND;
   walking onto it puts him at sea again. How the parked ship's own marker is cleared when he
   boards it is **unknown** (not found).
