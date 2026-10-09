@@ -129,6 +129,10 @@ thread_local! {
     static CONFIRM: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
     /// The card sliding after a press on an empty cell.
     static SLIDE: std::cell::Cell<Option<Slide>> = const { std::cell::Cell::new(None) };
+    /// The class a promotion portrait under the pointer put on the left panel (0x4c39d8
+    /// repaints it as a fresh unit of that type); it stays when the pointer leaves, as the
+    /// original's, until a card is hovered or pressed.
+    static PANEL_TYPE: std::cell::Cell<Option<razdor::rules::content::UnitId>> = const { std::cell::Cell::new(None) };
 }
 
 /// Squad member `unit` wears or drinks the pack item at `i`; the message to show, if any.
@@ -182,7 +186,8 @@ fn give_on_card(game: &mut Game, from: From, to: usize) -> Option<String> {
 /// current class at the bottom, arrows up to its options (portraits; open now, they glow and
 /// promote on a click, free of charge). A unit that cannot be promoted, at its first level
 /// or of a class with no next type, has every portrait locked, its own included (494340).
-fn tree_view(game: &mut Game, assets: &Assets, sel: usize, u: &Unit, r: Rect, message: &mut Option<String>) {
+fn tree_view(game: &mut Game, assets: &Assets, sel: usize, u: &Unit, r: Rect, message: &mut Option<String>) -> Option<razdor::rules::content::UnitId> {
+    let mut pointed = None;
     let c = game.content.clone();
     let k = chrome::k();
     let tree = u.upgrade_tree(&c);
@@ -212,10 +217,10 @@ fn tree_view(game: &mut Game, assets: &Assets, sel: usize, u: &Unit, r: Rect, me
             chrome::glow_frame(o, Color::new(0.35, 1.0, 0.35, if over { 1.0 } else { 0.6 }), over);
         }
         if over {
-            tooltip(&[(c.unit(to).name.clone(), chrome::GOLD), (level_gains(&c, to), chrome::CREAM)]);
+            pointed = Some(to);
             if ok && clicked() {
                 *message = Some(match game.promote(sel, to) {
-                    Ok(()) => cued(Cue::Upgrade, razdor::trf!("{name} is now a {class} (level 1, XP 0).", name = u.name(&c), class = c.unit(to).name)),
+                    Ok(()) => cued(Cue::Upgrade, razdor::trf!("{name} is now a {class} (level 1, XP 0).", name = game.squad_label(sel), class = c.unit(to).name)),
                     Err(_) => tr("Not possible.").into(),
                 });
             }
@@ -230,6 +235,10 @@ fn tree_view(game: &mut Game, assets: &Assets, sel: usize, u: &Unit, r: Rect, me
     }
     chrome::wounds(cur, u.hp, u.max_hp(&c));
     draw_rectangle_lines(cur.x, cur.y, cur.w, cur.h, 1.0, Color::new(0.85, 0.85, 0.85, 0.8));
+    if mouse_in(cur.x, cur.y, cur.w, cur.h) {
+        pointed = Some(u.def);
+    }
+    pointed
 }
 
 /// The backpack: 5 columns of the original's inventory squares, scrolling. Returns the
@@ -395,6 +404,18 @@ pub fn squad(
     let tree_of = selected.tree();
     let u = game.squad[sel].clone();
     let mut held = HELD.with(|h| h.get());
+    // A promotion portrait hovered shows its class on the left panel, as a fresh unit of it
+    // (0x4c39d8: level 1, no items, no status or row bonus).
+    let panel_type = PANEL_TYPE.with(|p| p.get()).filter(|_| tree_of.is_some());
+    let u = match panel_type {
+        Some(id) if c.try_unit(id).is_some() => {
+            let mut fresh = Unit::new(&c, id, u.slot);
+            fresh.heal_full(&c);
+            fresh
+        }
+        _ => u,
+    };
+    let showing_type = panel_type.is_some();
 
     // The unit's panel; a click on a worn item takes it off.
     let stats = u.stats(&c);
@@ -409,11 +430,11 @@ pub fn squad(
     } else if u.unpaid {
         status.push((tr("Unpaid: refuses to fight").to_string(), chrome::RED_TEXT));
     }
-    let label = game.squad_label(sel);
+    let label = if showing_type { c.unit(u.def).name.clone() } else { game.squad_label(sel) };
     let sheet = unit_sheet::Sheet {
         kind: u.def,
         name: &label,
-        named: u.named > 0,
+        named: !showing_type && u.named > 0,
         level: u.level,
         xp: u.xp,
         need: u.xp_to_next(&c),
@@ -421,7 +442,7 @@ pub fn squad(
         now: &stats,
         start: &stats,
         power: stats[Stat::MagicPower],
-        wage: game.wage(sel),
+        wage: if showing_type { 0 } else { game.wage(sel) },
         items: u.items,
         back_row: u.slot.row == razdor::rules::formation::Row::Back,
         building: 0,
@@ -432,7 +453,7 @@ pub fn squad(
     let sheet_rect = at(2.0, 27.0, 244.0, 570.0);
     // A living unit's first `personal` worn slots are his own: not taken up (0x4c24f4), and
     // hovering one says so (0x4c280c, `[Army] ItemI`).
-    let locked = |slot: usize| u.alive() && slot < u.personal as usize;
+    let locked = |slot: usize| showing_type || (u.alive() && slot < u.personal as usize);
     let pressed_slot = unit_sheet::draw(assets, &c, sheet_rect, &sheet, true, &mut hover);
     let personal_hover = hover.is_some_and(|h| u.items.iter().enumerate().any(|(s, i)| *i == Some(h) && locked(s)));
     if let Some(slot) = pressed_slot.filter(|&s| !locked(s)) {
@@ -456,9 +477,18 @@ pub fn squad(
         });
     }
     let content = at(258.0, 54.0, 300.0, 242.0);
+    let mut tree_hint = None;
     if let Some(t) = tree_of {
         let tu = game.squad[t].clone();
-        tree_view(game, assets, t, &tu, content, message);
+        if let Some(to) = tree_view(game, assets, t, &tu, content, message) {
+            PANEL_TYPE.with(|p| p.set(Some(to)));
+            // The hint line (0x4c39d8): `[Army]` line 4 when it lacks the level, 5 to choose,
+            // 6 when it has no further class.
+            let tree = tu.upgrade_tree(&c);
+            let n = if tree.is_empty() { 6 } else if tu.level <= 1 { 4 } else { 5 };
+            let who = game.squad_label(t);
+            tree_hint = chrome::ui_line("Army", n).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).map(|line| line.replace("#NAME1", &format!("\"{who}\"")));
+        }
     } else if let Some(i) = pack_view(game, assets, content, scroll, &mut hover) {
         cue(Cue::Item(c.item(game.pack[i]).kind));
         held = Some(Held { from: From::Pack(i), item: game.pack[i], at: pointer().into(), moved: false });
@@ -602,7 +632,13 @@ pub fn squad(
         };
         chrome::ui_text("Army", key).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru)
     };
-    let pointed = if personal_hover {
+    // Hovering or pressing a card puts its own unit back on the left panel.
+    if card_under.is_some() {
+        PANEL_TYPE.with(|p| p.set(None));
+    }
+    let pointed = if let Some(t) = tree_hint {
+        Some(t)
+    } else if personal_hover && !showing_type {
         chrome::ui_text("Army", "ItemI").filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).or_else(|| Some(tr("His own item: it cannot be taken off while he lives.").to_string()))
     } else {
         match (card_under, selected.selected) {
