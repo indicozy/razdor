@@ -1547,14 +1547,15 @@ fn hover_tooltip(game: &Game, cam: &Camera) -> Option<Tooltip> {
 
 /// The army a building's tooltip shows instead of the building's (0x4cc2a5–0x4cc31a): for a
 /// village, castle, fort, ruins or bridge, the last army in the scenario's order that is on
-/// the map and has it for home, whatever its attitude (the king in his castle).
+/// the map and stands in it (army +0x3788, the building it is in, as the step's guard),
+/// whatever its attitude (the king in his castle).
 fn tooltip_guard(game: &Game, l: usize) -> Option<&Army> {
     use LocationKind as K;
     let kind = game.world.locations[l].kind;
     if !matches!(kind, K::Village | K::Castle | K::Fort | K::Ruins | K::StoneBridge | K::WoodenBridge) {
         return None;
     }
-    game.world.armies.iter().filter(|a| a.home == Some(l)).max_by_key(|a| a.id)
+    game.world.armies.iter().filter(|a| a.mind.standing == Some(l)).max_by_key(|a| a.id)
 }
 
 /// A click on the building the party stands in (`t` one of its cells): its window again, or
@@ -2332,27 +2333,25 @@ mod tests {
         assert_eq!(location_tip_style(&castle), TipStyle::Normal);
     }
 
-    /// A building with an army at home on the map shows that army's panel (0x4cc2a5): the
-    /// king's castle shows King August's army, wherever the pointer is over it.
+    /// A building with an army standing in it shows that army's panel (0x4cc2a5), the last
+    /// in order of those standing there: on «Другой берег» Castle Waston shows von Waston's
+    /// troop (and the capital King August once he is in it).
     #[test]
-    fn the_kings_castle_shows_the_kings_army() {
+    fn a_building_shows_the_army_standing_in_it() {
         let Some(dir) = std::env::var_os(razdor::dt::install::ENV_VAR) else { return };
         let dt = razdor::dt::install::DtInstall::load(std::path::Path::new(&dir)).unwrap();
         let content = std::sync::Arc::new(razdor::rules::content::Content::from_dt(&dt));
-        let mut seen = 0;
-        for m in &dt.maps {
-            let Ok(s) = m.load() else { continue };
-            let g = Game::from_scenario(content.clone(), &s, HeroClass::Knight);
-            for a in g.world.armies.iter().filter(|a| a.name.starts_with("Король Август")) {
-                let Some(home) = a.home else { continue };
-                if !matches!(g.world.locations[home].kind, LocationKind::Castle) {
-                    continue;
-                }
-                assert_eq!(tooltip_guard(&g, home).map(|g| g.uid), Some(a.uid), "{}", m.name);
-                seen += 1;
-            }
-        }
-        assert!(seen > 0, "no map has the king at home in a castle");
+        let m = dt.maps.iter().find(|m| m.name.starts_with("Другой берег")).unwrap();
+        let mut g = Game::from_scenario(content, &m.load().unwrap(), HeroClass::Knight);
+        let castle = g.world.locations.iter().position(|l| l.name == "Замок Вастон").unwrap();
+        let guard = tooltip_guard(&g, castle).map(|a| a.name.clone());
+        assert_eq!(guard.as_deref(), Some("Отряд фон Вастон"));
+        // The king walks into his castle: it shows him.
+        let lakwood = g.world.locations.iter().position(|l| l.name == "Замок Лаквуд").unwrap();
+        assert!(tooltip_guard(&g, lakwood).is_none_or(|a| !a.name.starts_with("Король")), "not in it yet");
+        let king = g.world.armies.iter().position(|a| a.name.starts_with("Король Август")).unwrap();
+        g.world.armies[king].mind.standing = Some(lakwood);
+        assert!(tooltip_guard(&g, lakwood).is_some_and(|a| a.name.starts_with("Король Август")));
     }
 
     /// A village the hero stepped on is his (0x4ad94c), but its tooltip still names the

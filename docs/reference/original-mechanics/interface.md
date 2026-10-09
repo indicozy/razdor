@@ -310,7 +310,7 @@ the walk loop (world.md).
 Holding the right button (left button up) over an army or a building shows its tooltip: the
 army's panel, or for a village, castle, fort, ruins or bridge with a guard army the guard's
 panel, otherwise the building's. For the tooltip the "guard" is the last army (in army order)
-that is on the map and whose home is that building, whatever its attitude (the hover pointer
+that is on the map and stands in that building (army +0x3788), whatever its attitude (the hover pointer
 of §7.2 also requires hostility; the tooltip does not). While it is up the pointer is hidden and frozen (mouse moves
 are ignored); releasing the right button or pressing the left one closes it, and the pointer
 jumps to where the mouse really is. The tooltip fades in over 500 ms. The right button never
