@@ -855,10 +855,8 @@ fn draw_figure(art: Option<&DtArt>, stem: &str, pos: (f32, f32), next: Option<(f
     let frame = frame.min(7) as f32;
     let size = n * cam.scale / PX;
     let dest = match stand {
-        Stand::Feet => {
-            draw_ellipse(p.x, p.y + size * 0.1, size * 0.22, size * 0.08, 0.0, Color::new(0.0, 0.0, 0.0, 0.25));
-            vec2(p.x - size / 2.0, p.y - size * 0.8)
-        }
+        // The figure's own alpha holds its shadow (the .ugs frames); nothing is added under it.
+        Stand::Feet => vec2(p.x - size / 2.0, p.y - size * 0.8),
         Stand::Afloat => vec2(p.x - size / 2.0, p.y - size * 0.55),
     };
     draw_texture_ex(
@@ -887,6 +885,26 @@ fn draw_ship(cam: &Camera, pos: (f32, f32), sail: Color) {
     draw_triangle(vec2(c.x + 1.0, top - 28.0 * k), vec2(c.x + 1.0, top - 6.0 * k), vec2(c.x + 16.0 * k, top - 8.0 * k), sail);
 }
 
+/// The mark under the hero (yellow) and under an army (red), as the original's screen
+/// shows them.
+const MARK_HERO: Color = Color::new(1.0, 0.92, 0.1, 1.0);
+const MARK_ARMY: Color = Color::new(0.95, 0.15, 0.1, 1.0);
+
+/// A thin dashed ring on the ground at `pos` (the original's `Selection-*.lit` marks,
+/// 0x4ce30c), the ring's light added to the ground (its blend
+/// 0x4c9459, SRCCOLOR / INVSRCCOLOR). Without the picture, a thin ellipse. *(The original
+/// turns it 5.625° every 100 ms; Razdor's stays still.)*
+fn draw_mark(cam: &Camera, pos: (f32, f32), color: Color) {
+    let p = cam.to_screen(pos);
+    let zoom = cam.scale / PX;
+    // Sized as the original's screen shows it (about 30 × 20 at 1:1).
+    let (w, h) = (32.0 * zoom, 22.0 * zoom);
+    match super::chrome::win_fx("Selection-1", super::chrome::Fx::Glow) {
+        Some(t) => draw_texture_ex(&t, p.x - w / 2.0, p.y - h / 2.0, color, DrawTextureParams { dest_size: Some(vec2(w, h)), ..Default::default() }),
+        None => draw_ellipse_lines(p.x, p.y, 15.0 * zoom, 10.0 * zoom, 0.0, 1.0, color),
+    }
+}
+
 fn draw_army(game: &Game, a: &Army, assets: &Assets, art: Option<&DtArt>, cam: &Camera) {
     let next = a.path.first().map(|&t| game.world.map.center(t));
     let pos = game.army_display_pos(a);
@@ -906,8 +924,6 @@ fn draw_army(game: &Game, a: &Army, assets: &Assets, art: Option<&DtArt>, cam: &
         }
     }
     let c = cam.to_screen(pos);
-    let ring = if a.hostile() { faction_color(4) } else { faction_color(a.faction) };
-    draw_circle_lines(c.x, c.y + 4.0, 7.0 * cam.scale / PX + 3.0, 2.0, ring);
     if a.chasing {
         text_centered("!", c.x + 14.0, c.y - 30.0, 26.0, RED);
     }
@@ -921,7 +937,6 @@ fn draw_hero(game: &Game, assets: &Assets, art: Option<&DtArt>, cam: &Camera) {
     };
     let next = game.display_heading();
     let c = cam.to_screen(game.display_pos());
-    draw_circle(c.x, c.y + 4.0, 9.0 * cam.scale / PX + 3.0, Color::new(0.3, 0.9, 0.4, 0.35));
     if game.aboard() {
         if !draw_figure(art, ship_stem(razdor::rules::ships::kind::HERO), game.display_pos(), next, hero_frame(next), cam, Stand::Afloat) {
             draw_ship(cam, game.display_pos(), HERO_SAIL);
@@ -955,6 +970,15 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
                 items.push((o.tile.1 as f32 * rh, Drawable::Object(*o)));
             }
         }
+    }
+    // The marks under the hero and every army (cell byte +0xA, 0x48eeb0: the hero's kind 1,
+    // an army's 3) lie on the ground in the same pass, under every tree, building and
+    // figure (0x4c9459), so the figures' shadows fall over them.
+    for a in game.world.armies.iter().filter(|a| fog.explored(a.tile(map)) && !a.sails()) {
+        draw_mark(cam, game.army_display_pos(a), MARK_ARMY);
+    }
+    if !game.aboard() {
+        draw_mark(cam, game.display_pos(), MARK_HERO);
     }
     // The route being walked, or the one a first click shows, lies on the ground under the
     // figures (the original's second pass, over the hills).
