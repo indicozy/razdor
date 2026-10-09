@@ -80,6 +80,9 @@ pub struct Dialog {
     /// The first text line shown when the text is taller than the screen allows (Razdor's
     /// scrolling: the wheel over the text, the arrow and page keys).
     pub scroll: std::cell::Cell<usize>,
+    /// A key that closes it went down while it was shown: its release presses OK (0x4cd558).
+    /// A key already held as it opened does nothing (0x47f358).
+    pub key_down: std::cell::Cell<bool>,
 }
 
 impl Dialog {
@@ -102,6 +105,7 @@ impl Dialog {
             cued: false,
             not_before: None,
             scroll: std::cell::Cell::new(0),
+            key_down: std::cell::Cell::new(false),
         }
     }
 
@@ -449,7 +453,13 @@ pub fn draw(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Close> {
         };
     }
     let ok = button(x + w / 2.0 - 60.0, by, 120.0, 38.0, "OK", true);
-    (ok || key(KeyCode::Enter) || key(KeyCode::Escape)).then_some(Close::Ok)
+    // Any key but Tab, Alt and the Up and Down arrows, on its release (0x4cd558): Space,
+    // Enter and Esc alike. Closed on the release, the key is no longer held when the map
+    // takes over, so the hero walks on.
+    if super::widgets::ok_key_pressed() {
+        d.key_down.set(true);
+    }
+    (ok || (d.key_down.get() && super::widgets::ok_key_released())).then_some(Close::Ok)
 }
 
 #[cfg(test)]

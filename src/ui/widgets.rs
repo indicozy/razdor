@@ -229,9 +229,27 @@ pub fn answer_key() -> Option<bool> {
     answer_of(get_keys_pressed().into_iter())
 }
 
+/// A key of the original's one-button event window went down this frame (0x4cd558): any key
+/// but Tab, Alt and the Up and Down arrows, and Razdor's scroll keys of a long text.
+pub fn ok_key_pressed() -> bool {
+    !input_blocked() && !input_swallowed() && get_keys_pressed().into_iter().any(|k| !ok_ignored(&k))
+}
+
+/// Such a key came up this frame: the window's OK is clicked (0x4cd68c).
+pub fn ok_key_released() -> bool {
+    !input_blocked() && !input_swallowed() && get_keys_released().into_iter().any(|k| !ok_ignored(&k))
+}
+
+fn ok_ignored(k: &KeyCode) -> bool {
+    answer_ignored(k) || matches!(k, KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End)
+}
+
+fn answer_ignored(k: &KeyCode) -> bool {
+    matches!(k, KeyCode::Tab | KeyCode::LeftAlt | KeyCode::RightAlt | KeyCode::F10 | KeyCode::Up | KeyCode::Down)
+}
+
 fn answer_of(keys: impl Iterator<Item = KeyCode>) -> Option<bool> {
-    let ignored = |k: &KeyCode| matches!(k, KeyCode::Tab | KeyCode::LeftAlt | KeyCode::RightAlt | KeyCode::F10 | KeyCode::Up | KeyCode::Down);
-    let keys: Vec<KeyCode> = keys.filter(|k| !ignored(k)).collect();
+    let keys: Vec<KeyCode> = keys.filter(|k| !answer_ignored(k)).collect();
     if keys.contains(&KeyCode::Escape) || keys.contains(&KeyCode::N) {
         Some(false)
     } else if keys.is_empty() {
