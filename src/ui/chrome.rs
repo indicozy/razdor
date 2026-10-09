@@ -72,6 +72,16 @@ pub fn subtract(img: &mut Image, minus: [i32; 3]) {
     }
 }
 
+/// Scales and shifts every channel of `img` as the original's loaders and 48da5c do:
+/// `c·k/1024 + offset`, clamped to a byte (r, g, b).
+pub fn scale_channels(img: &mut Image, k: [i32; 3], offset: [i32; 3]) {
+    for p in img.rgba.chunks_exact_mut(4) {
+        for ((c, k), o) in p[..3].iter_mut().zip(k).zip(offset) {
+            *c = (*c as i32 * k / 1024 + o).clamp(0, 255) as u8;
+        }
+    }
+}
+
 /// The promotion screen's locked portrait (494340), for a unit that cannot be promoted (level
 /// 0 in the original, or no next type): grey weighted 100/200/100 (48db5c), each channel
 /// then scaled by 1600/1024 and shifted by −48 red, −176 green, −256 blue (48da5c: a dark
@@ -206,6 +216,31 @@ fn spell_layer(name: &str, minus: [i32; 3]) -> Option<Texture2D> {
                 to_texture(img)
             });
         c.textures.entry(key).or_default()[Fx::Glow as usize] = Some(t.clone());
+        t
+    })
+}
+
+/// Windows art `name` with its channels scaled and shifted as loaded ([`scale_channels`]),
+/// cached by both.
+fn win_scaled(name: &str, k: [i32; 3], offset: [i32; 3]) -> Option<Texture2D> {
+    let rel = format!("Windows/{name}.lit");
+    let key = format!("{rel}#{k:?}{offset:?}");
+    CHROME.with(|c| {
+        let mut c = c.borrow_mut();
+        let c = c.as_mut()?;
+        if let Some(t) = c.textures.get(&key).and_then(|v| v[Fx::Plain as usize].as_ref()) {
+            return t.clone();
+        }
+        let t = find_path(&c.dir, &format!("Graphics/{rel}"))
+            .and_then(|p| gfx::decode_file(&p))
+            .map_err(|e| razdor::diag!("Discord Times art: {rel}: {e}"))
+            .ok()
+            .and_then(|mut frames| {
+                let img = frames.get_mut(0)?;
+                scale_channels(img, k, offset);
+                to_texture(img)
+            });
+        c.textures.entry(key).or_default()[Fx::Plain as usize] = Some(t.clone());
         t
     })
 }
@@ -450,6 +485,31 @@ pub fn multiply(draw: impl FnOnce()) {
             .clone()
     });
     with_material(material, draw);
+}
+
+/// Runs `draw` with subtractive blending: the colour drawn is taken off what is below, the
+/// original's blend mode 1 (476790, 4768f8), the window's alpha kept. Without the material,
+/// normal blending.
+pub fn subtractive(draw: impl FnOnce()) {
+    use macroquad::miniquad::{BlendFactor, BlendState, Equation, PipelineParams};
+    let material = SUBTRACT.with(|m| {
+        m.get_or_init(|| {
+            let pipeline_params = PipelineParams {
+                color_blend: Some(BlendState::new(Equation::ReverseSubtract, BlendFactor::One, BlendFactor::One)),
+                alpha_blend: Some(BlendState::new(Equation::Add, BlendFactor::Zero, BlendFactor::One)),
+                ..Default::default()
+            };
+            load_material(ShaderSource::Glsl { vertex: ADD_VERTEX, fragment: ADD_FRAGMENT }, MaterialParams { pipeline_params, ..Default::default() })
+                .map_err(|e| razdor::diag!("subtractive material: {e}"))
+                .ok()
+        })
+        .clone()
+    });
+    with_material(material, draw);
+}
+
+thread_local! {
+    static SUBTRACT: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
 }
 
 fn with_material(material: Option<Material>, draw: impl FnOnce()) {
@@ -1112,6 +1172,58 @@ pub fn wound_share(hp: i32, max: i32) -> f32 {
     (1.0 - hp.max(0) as f32 / max as f32).clamp(0.0, 1.0)
 }
 
+/// A dead unit's portrait `sq` (493a64, at HP 0, over the wounds' red): `Army-Death` loaded
+/// with 64 off each channel (48d02c at 4dbc26) and added (476790 mode 0). Without the art,
+/// a dark veil and a red cross.
+pub fn death_veil(sq: Rect) {
+    if let Some(t) = win_scaled("Army-Death", [1024; 3], [-64; 3]) {
+        additive(|| tex(&t, sq, WHITE));
+    } else {
+        let red = Color::new(0.9, 0.1, 0.1, 1.0);
+        draw_rectangle(sq.x, sq.y, sq.w, sq.h, Color::new(0.0, 0.0, 0.0, 0.55));
+        draw_line(sq.x + 10.0, sq.y + 10.0, sq.x + sq.w - 10.0, sq.y + sq.h - 10.0, 3.0, red);
+        draw_line(sq.x + sq.w - 10.0, sq.y + 10.0, sq.x + 10.0, sq.y + sq.h - 10.0, 3.0, red);
+    }
+}
+
+/// The shadow under an occupied card `r` (49462c, `r.w` the original's 92 px portrait):
+/// `Shadow-Unit` (101×141, its alpha the mask, 476a3c) from the card's corner, 1 px up and
+/// left of the portrait, its mask cleared over the card's 94×133 (47650c at 4dbc26), so
+/// only the 7 px band on the right and the 8 rows below show. Without the art, a dark box.
+pub fn unit_shadow(r: Rect) {
+    let s = r.w / 92.0;
+    if let Some(t) = win("Shadow-Unit") {
+        let (x0, y0) = (r.x - s, r.y - s);
+        tex_src(&t, Rect::new(94.0, 0.0, 7.0, 141.0), Rect::new(x0 + 94.0 * s, y0, 7.0 * s, 141.0 * s), WHITE);
+        tex_src(&t, Rect::new(0.0, 133.0, 94.0, 8.0), Rect::new(x0, y0 + 133.0 * s, 94.0 * s, 8.0 * s), WHITE);
+    } else {
+        let k = k();
+        draw_rectangle(r.x + 4.0 * k, r.y + 4.0 * k, r.w, r.h, Color::new(0.0, 0.0, 0.0, 0.45));
+    }
+}
+
+/// The row of `exp` an experience card shows `elapsed_ms` into the won battle's hold
+/// (4b09e8: `(now − start) / 3 mod 512`).
+pub fn xp_strip_row(elapsed_ms: i64) -> i32 {
+    (elapsed_ms / 3).rem_euclid(512) as i32
+}
+
+/// The experience card's picture over the portrait `sq` (4b0684): the portrait darkened
+/// (grey 64 taken off, 4768f8 mode 1), the 92 rows of `exp` from `row` added (476790 mode 0;
+/// the 92×604 strip loaded with red −250, green and blue −30), `exp-hole` at half
+/// (48da5c, 512/1024) taken off (mode 1). False, and nothing drawn, without the art.
+pub fn xp_veil(sq: Rect, row: i32) -> bool {
+    let (Some(strip), Some(hole)) = (win_scaled("exp", [1024; 3], [-250, -30, -30]), win_scaled("exp-hole", [512; 3], [0; 3])) else {
+        return false;
+    };
+    let grey = 64.0 / 255.0;
+    subtractive(|| draw_rectangle(sq.x, sq.y, sq.w, sq.h, Color::new(grey, grey, grey, 1.0)));
+    let row = row.clamp(0, (strip.height() as i32 - 92).max(0)) as f32;
+    additive(|| tex_src(&strip, Rect::new(0.0, row, 92.0, 92.0), sq, WHITE));
+    subtractive(|| tex(&hole, sq, WHITE));
+    true
+}
+
 /// Just the icon of an empty cell, filling `sq`.
 pub fn cell_icon(icon: CellIcon, sq: Rect) {
     if let Some(t) = win(icon.art()) {
@@ -1273,6 +1385,29 @@ mod tests {
     }
 
     #[test]
+    fn channels_scale_then_shift_clamped() {
+        // Army-Death: −64 each; exp: −250 / −30 / −30; exp-hole: half.
+        let mut a = img(&[[200, 40, 64, 255]]);
+        scale_channels(&mut a, [1024; 3], [-64; 3]);
+        assert_eq!(a.pixel(0, 0), [136, 0, 0, 255]);
+        let mut e = img(&[[255, 100, 20, 255]]);
+        scale_channels(&mut e, [1024; 3], [-250, -30, -30]);
+        assert_eq!(e.pixel(0, 0), [5, 70, 0, 255]);
+        let mut h = img(&[[255, 101, 0, 7]]);
+        scale_channels(&mut h, [512; 3], [0; 3]);
+        assert_eq!(h.pixel(0, 0), [127, 50, 0, 7], "alpha untouched");
+    }
+
+    #[test]
+    fn the_xp_strip_runs_a_row_every_3_ms_over_512() {
+        assert_eq!(xp_strip_row(0), 0);
+        assert_eq!(xp_strip_row(5), 1);
+        assert_eq!(xp_strip_row(3 * 511), 511);
+        assert_eq!(xp_strip_row(3 * 512), 0);
+        assert_eq!(xp_strip_row(2500), 321);
+    }
+
+    #[test]
     fn a_spell_layers_colour_correction_is_taken_away() {
         // «Исцеление»'s rays: 160,40,100 off white leaves green.
         let mut a = img(&[[255, 255, 255, 255], [100, 30, 200, 255]]);
@@ -1290,7 +1425,8 @@ mod tests {
             "Win-marble", "Win-red", "Win-paper", "Win2a", "SteelLine", "DownCorner", "HintFrame", "Corner-Left", "Corner-Right",
             "Corner_Frame-LU", "Corner_Frame-RU", "Corner_Frame-LD", "Corner_Frame-RD", "CloseButtonRed-Up", "CloseButtonGreen-Up",
             "CloseButtonRed-Down2", "CloseButtonGreen-Down2", "UnitFrame", "Shadow-Empty", "wb1", "wb2", "wb3", "army-2", "army-3",
-            "sign-poison", "sign-payment", "Sign-Upgrade", "SI_Helm", "Bonus-2Row", "Bonus-InCastle", "Btn1Up", "Btn2Up", "Btn3Up",
+            "sign-poison", "sign-payment", "Sign-Upgrade", "SI_Helm", "Bonus-2Row", "Bonus-InCastle", "Bonus-Ressurrect", "Bonus-NoPayment",
+            "Army-Death", "Shadow-Unit", "exp", "exp-hole", "Btn1Up", "Btn2Up", "Btn3Up",
             "Btn1Down", "Btn2Down", "Btn3Down", "smb-up", "smb-down", "smb-disable", "MLBtn1Up", "MLBtn2Up", "MRBtn1Up", "MRBtn2Up",
             "MLBtn1Down", "MLBtn2Down", "MRBtn1Down", "MRBtn2Down", "Res-Magic", "Res-Money", "Res-Income", "Res-Payment",
             "MiniMap_Frame_400x400", "Inventory", "UpgradeTree", "BI_Town", "BI_Castle", "BI_Church", "BI_Ruin", "S_Town", "S_Castle",

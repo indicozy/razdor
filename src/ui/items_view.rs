@@ -478,11 +478,7 @@ pub fn squad(
         let names: Vec<&str> = u.potions.iter().map(|&p| c.item(p).name.as_str()).collect();
         status.push((razdor::trf!("Until the next battle: {names}", names = names.join(", ")), chrome::BLUE_TEXT));
     }
-    if !u.alive() {
-        status.push((tr("Dead").to_string(), chrome::RED_TEXT));
-    } else if u.unpaid {
-        status.push((tr("Unpaid: refuses to fight").to_string(), chrome::RED_TEXT));
-    }
+    // Dead and unpaid are the original's trait lines (`unit_sheet::state_lines`).
     let label = if showing_type { c.unit(u.def).name.clone() } else { game.squad_label(sel) };
     let sheet = unit_sheet::Sheet {
         kind: u.def,
@@ -498,6 +494,7 @@ pub fn squad(
         wage: if showing_type { 0 } else { game.wage(sel) },
         items: u.items,
         back_row: u.slot.row == razdor::rules::formation::Row::Back,
+        unpaid: !showing_type && u.unpaid,
         building: 0,
         hero,
         status,
@@ -631,16 +628,14 @@ pub fn squad(
             p = s.from.lerp(p, (now_ms() - s.t0_ms) as f32 / s.ms.max(1) as f32).round();
         }
         let sq = Rect::new(p.x, p.y, card.x, card.x);
-        draw_rectangle(p.x + 4.0 * k, p.y + 4.0 * k, card.x, card.y, Color::new(0.0, 0.0, 0.0, 0.45));
+        chrome::unit_shadow(Rect::new(p.x, p.y, card.x, card.y));
         assets.draw_portrait(v.def, Team::Player, sq);
         chrome::wounds(sq, v.hp, v.max_hp(&c));
         draw_rectangle_lines(sq.x, sq.y, sq.w, sq.h, 1.0, Color::new(0.85, 0.85, 0.85, 0.8));
         let vs = v.stats(&c);
         unit_sheet::stat_strip(Rect::new(p.x, p.y + card.x, card.x, card.y - card.x), &vs, &vs, vs[Stat::MagicPower], unit_sheet::caster(&c, v.def), unit_sheet::strip_place(f, v.slot), v.hp, super::building_view::back_row_def(&c, v.slot), selected.selected == Some(i), unit_sheet::StripPanel::of_squad(i, v.named));
         if !v.alive() {
-            draw_rectangle(sq.x, sq.y, sq.w, sq.h, Color::new(0.0, 0.0, 0.0, 0.55));
-            draw_line(sq.x + 10.0, sq.y + 10.0, sq.x + sq.w - 10.0, sq.y + sq.h - 10.0, 3.0, RED);
-            draw_line(sq.x + sq.w - 10.0, sq.y + 10.0, sq.x + 10.0, sq.y + sq.h - 10.0, 3.0, RED);
+            chrome::death_veil(sq);
         } else if v.unpaid {
             chrome::badge("sign-payment", sq.x + sq.w - 12.0 * k, sq.y + 12.0 * k, 20.0 * k, RED);
         }
