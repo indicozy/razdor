@@ -25,7 +25,6 @@ Quick battle (Q) = Быстрый бой (Q)
 Finish automatically (Q) = Доиграть самим (Q)
 Turn {round}/{limit} = Ход {round}/{limit}
 XP +{xp} = Опыт +{xp}
-Level up! = Новый уровень!
 The battle is over = Битва окончена
 Nothing in reach: step to a lit cell, or press SPACE = Никого не достать: шагните на светлую клетку или нажмите Пробел
 Nothing to do: press SPACE to pass an action = Делать нечего: нажмите Пробел, чтобы пропустить действие
@@ -118,6 +117,7 @@ The army of this hero takes 10% less damage from enemy attacks (magic excepted).
 The Archmage casts spells twice as fast for 50% less mana, but his army gets no bonuses. = Архимаг творит заклинания вдвое быстрее и тратит вдвое меньше маны, но его армия не получает преимуществ.
 The army of this hero travels 20% faster, and the wounded heal 20% of their hits every day. = Армия этого героя движется на 20% быстрее, а раненые ежедневно восстанавливают 20% жизни.
 In the second row the unit gets a bonus to its ranged defence! = Во втором ряду воин получает прибавку к защите от выстрелов!
+A dead unit can be raised only in a church or a town! = Мёртвого воина можно воскресить только в церкви или в городе!
 In its own building the unit gets a bonus to all defences! = В своём здании воин получает прибавку ко всем защитам!
 
 # Unit panel: stat list
@@ -196,8 +196,6 @@ Lv {level} = Ур. {level}
 Not possible. = Невозможно.
 The hero's characteristics and army = Характеристики героя и армия
 Until the next battle: {names} = До следующего боя: {names}
-Dead = Мёртв
-Unpaid: refuses to fight = Без жалованья: отказывается сражаться
 Upgrade tree = Древо развития
 {name} drinks it: +{healed} hits. = {name} выпивает зелье: +{healed} жизни.
 {name} drinks it. The effect lasts until the next battle ends. = {name} выпивает зелье. Действие продлится до конца следующего боя.

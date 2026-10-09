@@ -33,6 +33,9 @@ pub struct Sheet<'a> {
     pub wage: i32,
     pub items: [Option<ItemId>; 4],
     pub back_row: bool,
+    /// Unpaid, in the player's army outside battle (not a type's preview): the no-payment
+    /// line (492f24: paid flag +0x1a5 clear, not a template, not in battle).
+    pub unpaid: bool,
     /// The defence the building adds to both defences (0 outside one); `now` includes it.
     pub building: i32,
     pub hero: Option<HeroClass>,
@@ -94,20 +97,71 @@ fn hero_trait(h: HeroClass) -> (String, String) {
     (format!("HeroBonus{n}"), chrome::ui_text("NewHero", &format!("Bonus{n}")).unwrap_or_else(|| english.to_string()))
 }
 
-/// The traits the panel lists: the hero's class, the unit's bonuses (its items' too), the
-/// back row's and the building's.
+/// The state lines closing the panel's traits (492f24), each with its icon of the table
+/// c36000.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StateLine {
+    /// `Bonus-Ressurrect` (c36000[3]) with `[Army] Hint3`.
+    Resurrect,
+    /// `Bonus-NoPayment` (c36000[4]) with ae6c0c.
+    NoPayment,
+    /// `Bonus-2Row` (c36000[6]) with `Hint1`.
+    BackRow,
+    /// `Bonus-InCastle` (c36000[5]) with `Hint2`.
+    InCastle,
+}
+
+/// Which state lines the panel shows (492f24): a dead unit (HP 0) only the resurrection
+/// line, else an unpaid one only the no-payment line, else the back row's, then the
+/// building's.
+fn state_lines(dead: bool, unpaid: bool, back_row: bool, in_building: bool) -> Vec<StateLine> {
+    if dead {
+        return vec![StateLine::Resurrect];
+    }
+    if unpaid {
+        return vec![StateLine::NoPayment];
+    }
+    let mut v = Vec::new();
+    if back_row {
+        v.push(StateLine::BackRow);
+    }
+    if in_building {
+        v.push(StateLine::InCastle);
+    }
+    v
+}
+
+fn state_trait(line: StateLine) -> (String, String) {
+    let own = |key: &str| chrome::ui_text("Army", key);
+    match line {
+        StateLine::Resurrect => ("Bonus-Ressurrect".into(), own("Hint3").unwrap_or_else(|| tr("A dead unit can be raised only in a church or a town!").into())),
+        // The original's no-payment text ae6c0c is never set: `Hint4` is read into c35000[0]
+        // instead (4e3dad), so the line is the icon over an empty row (bug kept).
+        StateLine::NoPayment => ("Bonus-NoPayment".into(), String::new()),
+        StateLine::BackRow => ("Bonus-2Row".into(), own("Hint1").unwrap_or_else(|| tr("In the second row the unit gets a bonus to its ranged defence!").into())),
+        StateLine::InCastle => ("Bonus-InCastle".into(), own("Hint2").unwrap_or_else(|| tr("In its own building the unit gets a bonus to all defences!").into())),
+    }
+}
+
+/// The traits the panel lists: the hero's class, the unit's bonuses (its items' too), then
+/// its state ([`state_lines`]).
 fn traits_of(s: &Sheet) -> Vec<(String, String)> {
     let mut traits: Vec<(String, String)> = s.start.bonuses.iter().map(trait_line).collect();
     if let Some(h) = s.hero {
         traits.insert(0, hero_trait(h));
     }
-    if s.back_row {
-        traits.push(("Bonus-2Row".into(), chrome::ui_text("Army", "Hint1").unwrap_or_else(|| tr("In the second row the unit gets a bonus to its ranged defence!").into())));
-    }
-    if s.building > 0 {
-        traits.push(("Bonus-InCastle".into(), chrome::ui_text("Army", "Hint2").unwrap_or_else(|| tr("In its own building the unit gets a bonus to all defences!").into())));
-    }
+    traits.extend(state_lines(s.hp <= 0, s.unpaid, s.back_row, s.building > 0).into_iter().map(state_trait));
     traits
+}
+
+/// A trait's wrapped rows; an empty text still takes one (0x47e46c adds an empty line).
+fn trait_rows(line: &str, width: f32, size: f32) -> Vec<String> {
+    let rows = wrap(line, width, size);
+    if rows.is_empty() {
+        vec![String::new()]
+    } else {
+        rows
+    }
 }
 
 /// The height a trait of `lines` wrapped lines takes in the list (as `draw` lays it out).
@@ -424,7 +478,7 @@ pub fn draw(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: bool,
     let traits = traits_of(s);
     let (small, slh, icon) = ((12.0 * k).round(), 13.2 * k, 24.0 * k);
     let trait_w = r.w - 44.0 * k - icon;
-    let traits_h: f32 = traits.iter().map(|(_, line)| trait_height(wrap(line, trait_w, small).len(), slh, k)).sum();
+    let traits_h: f32 = traits.iter().map(|(_, line)| trait_height(trait_rows(line, trait_w, small).len(), slh, k)).sum();
     let lh = 13.6 * k;
     let text_h = 17.0 * k + lh * (1 + stat_lines(content, s).len() + s.status.len()) as f32 + 6.0 * k + traits_h;
     let bottom = r.y + r.h - 6.0 * k;
@@ -509,7 +563,7 @@ pub fn draw(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: bool,
             break;
         }
         chrome::trait_icon(&art, x0 - 8.0 * k, y - slh + 2.0 * k, icon);
-        let lines = wrap(&line, trait_w, small);
+        let lines = trait_rows(&line, trait_w, small);
         for (i, l) in lines.iter().enumerate() {
             if y > bottom {
                 break;
@@ -549,6 +603,7 @@ mod tests {
             wage: 0,
             items: [None; 4],
             back_row,
+            unpaid: false,
             building,
             hero: None,
             status: Vec::new(),
@@ -598,6 +653,19 @@ mod tests {
         assert_eq!(attack_piece(&s, &start, 0, false, 1).1, BLUE_TEXT);
         start[Stat::AttackShot] = 6;
         assert_eq!(attack_piece(&s, &start, 0, false, 1).1, RED_TEXT);
+    }
+
+    /// The original's state lines (492f24): death shuts out the rest, then no payment, else
+    /// the back row before the building.
+    #[test]
+    fn a_dead_or_unpaid_unit_shows_only_its_state() {
+        use StateLine::*;
+        assert_eq!(state_lines(true, true, true, true), vec![Resurrect]);
+        assert_eq!(state_lines(false, true, true, true), vec![NoPayment]);
+        assert_eq!(state_lines(false, false, true, true), vec![BackRow, InCastle]);
+        assert_eq!(state_lines(false, false, false, true), vec![InCastle]);
+        assert!(state_lines(false, false, false, false).is_empty());
+        assert_eq!(state_trait(NoPayment).1, "", "the original never sets the text");
     }
 
     /// The original's places: the front line 0–5, the back line 6–11, as drawn.

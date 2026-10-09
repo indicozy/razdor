@@ -439,7 +439,9 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
     let shown = recruits.len().min(6);
     for (i, r) in recruits.iter().take(6).enumerate() {
         let face = at(f, recruit_x(i, shown), 74.0, 88.0, 88.0);
-        draw_rectangle(face.x + 3.0 * k, face.y + 3.0 * k, face.w, face.h, Color::new(0.0, 0.0, 0.0, 0.45));
+        // A hire offer is a card of the type (49462c, the hire view's template): its shadow
+        // takes the card's height under the face.
+        chrome::unit_shadow(Rect::new(face.x, face.y, face.w, face.w * 128.0 / 88.0));
         assets.draw_portrait(r.unit, Team::Player, face);
         draw_rectangle_lines(face.x, face.y, face.w, face.h, 1.0, Color::new(0.85, 0.85, 0.85, 0.9));
         if mouse_in(face.x, face.y, face.w, face.h) {
@@ -525,7 +527,7 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
             }
         }
         let sq = Rect::new(p.x, p.y, card.x, card.x);
-        draw_rectangle(p.x + 4.0 * k, p.y + 4.0 * k, card.x, card.y, Color::new(0.0, 0.0, 0.0, 0.45));
+        chrome::unit_shadow(Rect::new(p.x, p.y, card.x, card.y));
         assets.draw_portrait(u.def, Team::Player, sq);
         chrome::wounds(sq, u.hp, u.max_hp(&c));
         draw_rectangle_lines(sq.x, sq.y, sq.w, sq.h, 1.0, Color::new(0.85, 0.85, 0.85, 0.8));
@@ -549,9 +551,7 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
             _ => super::unit_sheet::stat_strip(strip, &vs, &vs, vs[razdor::rules::content::Stat::MagicPower], super::unit_sheet::caster(&c, u.def), super::unit_sheet::strip_place(form, u.slot), u.hp, back_row_def(&c, u.slot), false, super::unit_sheet::StripPanel::of_squad(i, u.named)),
         }
         if !u.alive() {
-            draw_rectangle(sq.x, sq.y, sq.w, sq.h, Color::new(0.0, 0.0, 0.0, 0.55));
-            draw_line(sq.x + 10.0, sq.y + 10.0, sq.x + sq.w - 10.0, sq.y + sq.h - 10.0, 3.0, RED);
-            draw_line(sq.x + sq.w - 10.0, sq.y + 10.0, sq.x + 10.0, sq.y + sq.h - 10.0, 3.0, RED);
+            chrome::death_veil(sq);
         } else if u.unpaid {
             chrome::badge("sign-payment", sq.x + sq.w - 12.0 * k, sq.y + 12.0 * k, 20.0 * k, RED);
         }
@@ -696,14 +696,14 @@ fn card_grid(game: &Game, assets: &Assets, f: &Frame, rel_y: f32, units: &[&Unit
     for (i, u) in units.iter().enumerate() {
         let p = cell_at(u.slot);
         let sq = Rect::new(p.x, p.y, card.x, card.x);
-        draw_rectangle(p.x + 4.0 * k, p.y + 4.0 * k, card.x, card.y, Color::new(0.0, 0.0, 0.0, 0.45));
+        chrome::unit_shadow(Rect::new(p.x, p.y, card.x, card.y));
         assets.draw_portrait(u.def, Team::Player, sq);
         chrome::wounds(sq, u.hp, u.max_hp(c));
         draw_rectangle_lines(sq.x, sq.y, sq.w, sq.h, 1.0, Color::new(0.85, 0.85, 0.85, 0.8));
         let vs = u.stats(c);
         super::unit_sheet::stat_strip(Rect::new(p.x, p.y + card.x, card.x, card.y - card.x), &vs, &vs, vs[razdor::rules::content::Stat::MagicPower], super::unit_sheet::caster(c, u.def), super::unit_sheet::strip_place(form, u.slot), u.hp, back_row_def(c, u.slot), false, if own { super::unit_sheet::StripPanel::of_squad(i, u.named) } else { super::unit_sheet::StripPanel::Plain });
         if !u.alive() {
-            draw_rectangle(sq.x, sq.y, sq.w, sq.h, Color::new(0.0, 0.0, 0.0, 0.55));
+            chrome::death_veil(sq);
         } else if u.unpaid {
             chrome::badge("sign-payment", sq.x + sq.w - 12.0 * k, sq.y + 12.0 * k, 20.0 * k, RED);
         }

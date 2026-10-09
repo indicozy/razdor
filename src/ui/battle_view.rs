@@ -37,6 +37,8 @@ const MOVE_TIME: f32 = 0.25;
 const ACTIVE: Color = Color::new(0.35, 1.0, 0.35, 1.0);
 const FRIENDLY: Color = Color::new(0.35, 0.55, 1.0, 1.0);
 const HOSTILE: Color = Color::new(1.0, 0.35, 0.35, 1.0);
+/// The experience cards' font (ae24a8): Benguiat with red −200, green −75.
+const XP_INK: Color = Color::new(55.0 / 255.0, 180.0 / 255.0, 1.0, 1.0);
 /// The paces of the watched battle.
 const SPEEDS: [u8; 3] = [1, 2, 4];
 
@@ -260,6 +262,12 @@ impl BattleView {
     pub fn battle_mut(&mut self) -> &mut Battle {
         &mut self.battle
     }
+}
+
+/// The experience card's promotion sign (4b0684): the unit's level after the award is past
+/// its first (Razdor's level 2, the original's L > 0) and its type has a next one (492dd4).
+fn promotable_after(level: i32, has_next: bool) -> bool {
+    level >= 2 && has_next
 }
 
 fn all_cells(battle: &Battle) -> Vec<(Team, Slot)> {
@@ -861,16 +869,30 @@ impl BattleView {
             self.draw_fx(l, fx);
         }
         if let Some(xp) = &self.xp {
-            for a in xp {
+            // The experience cards of the won battle's hold (4b0684), for a unit that gained:
+            // the darkened portrait with the running `exp` strip, «Опыт» at y + 31 and "+ N"
+            // at y + 47 centred in the light blue Benguiat (font ae24a8), and `Sign-Upgrade`
+            // at (+3, +3) once the unit has a level to spend on a next type.
+            let row = chrome::xp_strip_row((self.hold.unwrap_or(0.0) * 1000.0) as i64);
+            for a in xp.iter().filter(|a| a.xp > 0) {
                 let f = &b.fighters[a.fighter];
                 let sq = l.portrait(l.cell_pos(f.team, f.slot));
-                let y = sq.y + sq.h * 0.38;
-                draw_rectangle(sq.x + 4.0 * k, y, sq.w - 8.0 * k, 20.0 * k, Color::new(0.0, 0.12, 0.16, 0.8));
-                shadow_centered(&razdor::trf!("XP +{xp}", xp = a.xp), sq.x + sq.w / 2.0, y + 15.0 * k, (15.0 * k).round(), XP_COLOR);
-                if self.levels_gained(a) > 0 {
-                    let y = y + 22.0 * k;
-                    draw_rectangle(sq.x + 4.0 * k, y, sq.w - 8.0 * k, 18.0 * k, Color::new(0.3, 0.22, 0.02, 0.85));
-                    shadow_centered(tr("Level up!"), sq.x + sq.w / 2.0, y + 14.0 * k, (13.0 * k).round(), GOLD);
+                let s = sq.w / 92.0;
+                if chrome::xp_veil(sq, row) {
+                    let label = chrome::ui_text("Battle", "Expirience").filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr("Experience").to_string());
+                    let size = (14.0 * s).round();
+                    // The card is 1 px up and left of the portrait; the text's top at y + 31, y + 47.
+                    super::dt_font::with_face(super::dt_font::Face::Title, || {
+                        shadow_centered(&label, sq.x + sq.w / 2.0, sq.y - s + 31.0 * s + size * 0.8, size, XP_INK);
+                        shadow_centered(&format!("+ {}", a.xp), sq.x + sq.w / 2.0, sq.y - s + 47.0 * s + size * 0.8, size, XP_INK);
+                    });
+                } else {
+                    let y = sq.y + sq.h * 0.38;
+                    draw_rectangle(sq.x + 4.0 * k, y, sq.w - 8.0 * k, 20.0 * k, Color::new(0.0, 0.12, 0.16, 0.8));
+                    shadow_centered(&razdor::trf!("XP +{xp}", xp = a.xp), sq.x + sq.w / 2.0, y + 15.0 * k, (15.0 * k).round(), XP_COLOR);
+                }
+                if self.can_promote_after(a) {
+                    chrome::badge("Sign-Upgrade", sq.x - s + 3.0 * s + 11.0 * s, sq.y - s + 3.0 * s + 11.0 * s, 22.0 * s, GREEN);
                 }
             }
         }
@@ -933,6 +955,14 @@ impl BattleView {
         razdor::rules::experience::add_xp(f.level, f.xp, a.xp, |l| c.xp_to_next(f.unit, l)).2
     }
 
+    /// The experience card's `Sign-Upgrade` (4b0684): after the award the unit is past its
+    /// first level (the original's L > 0) and its type has a next one (492dd4).
+    fn can_promote_after(&self, a: &XpAward) -> bool {
+        let f = &self.battle.fighters[a.fighter];
+        let c = self.battle.content();
+        promotable_after(f.level + self.levels_gained(a), c.unit(f.unit).upgrades.iter().any(|u| u.target.is_some()))
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn draw_card(&self, l: &Layout, assets: &Assets, id: usize, p: Vec2, frame: Option<(Color, bool)>, aimed: bool, order: Option<usize>, friendly: bool, now: u64) {
         let f = &self.battle.fighters[id];
@@ -944,7 +974,7 @@ impl BattleView {
         let p = p.round();
         let (w, h) = (l.card.x, l.card.y);
         // The card's shadow, the portrait, the stat strip.
-        draw_rectangle(p.x + 4.0 * k, p.y + 4.0 * k, w, h, Color::new(0.0, 0.0, 0.0, 0.45));
+        chrome::unit_shadow(Rect::new(p.x, p.y, w, h));
         let sq = l.portrait(p);
         assets.draw_portrait(f.unit, f.team, sq);
         chrome::wounds(sq, f.hp, f.max_hp());
@@ -1133,6 +1163,8 @@ impl BattleView {
             wage: if f.is_hero || f.team == Team::Enemy || self.custom { 0 } else { b.content().wage(f.unit) },
             items,
             back_row: f.slot.row == Row::Back,
+            // No payment line in battle (492f24: 4ed424).
+            unpaid: false,
             building: b.building_defence(f.team),
             hero,
             status,
@@ -1252,6 +1284,13 @@ mod tests {
     use razdor::rules::game::{Foe, Game};
 
     use super::*;
+
+    #[test]
+    fn the_xp_card_signs_a_promotion_past_the_first_level_with_a_next_type() {
+        assert!(!promotable_after(1, true));
+        assert!(promotable_after(2, true));
+        assert!(!promotable_after(3, false));
+    }
 
     #[test]
     fn the_battle_starts_as_its_window_opens() {

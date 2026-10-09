@@ -473,6 +473,16 @@ shows the portrait, the title (hero class or type name), the bonus name, status 
 unpaid outside battle, standing in the back row, garrison or at home), the name, the level
 (shown as L + 1) with "XP / XP needed", and the four worn-item slots as buttons. **code**
 
+**State lines** (492f24 via 492e70, icons c36000[3..6] loaded at 4e36cc). After the class line
+and the bonus line comes one chain: a unit with HP 0 gets `Bonus-Ressurrect` with `[Army] Hint3`
+(any window, battle too); else an unpaid unit (+0x1a5 = 0) that is not a hire offer or a type
+preview, outside an interactive battle (4ed424), gets `Bonus-NoPayment` with the text ae6c0c;
+else `Bonus-2Row` with `Hint1` (back-row slot, not a template), then `Bonus-InCastle` with
+`Hint2` (a garrison, or an army standing in its own building). So a dead or unpaid unit shows
+neither the row nor the building line. Bug: ae6c0c is never written, `Hint4` is read into
+c35000[0] (4e3dad) instead, so the no-payment line is the icon over an empty row (the text
+list adds an empty line, 47e46c). **code**
+
 **Three values per stat.** The list (491fa4) first rebuilds the unit's stats (4908a8). Outside
 an interactive battle it copies the current block into the battle block, so the shown values
 are the current ones (items, potions, spells included); in battle they are the battle values.
@@ -672,6 +682,14 @@ defence: the melee one, or the ranged one when the row bonus applies; blue above
 value, red below the current **or** the level value. Unhurt Hits use an orange tint, wounded
 Hits red. **code**
 
+**Shadows and the dead** (49462c, 493a64, art loaded at 4dbc26). Before the card the slot
+draws its shadow at the card's corner through the picture's alpha (476a3c): `Shadow-Unit`
+(101×141) under a card that shows a unit, `Shadow-Empty` otherwise (an empty slot, a hidden
+dead or unpaid unit in battle). Their masks are cleared over the card at load (47650c):
+94×133 for `Shadow-Unit`, 94×94 for `Shadow-Empty`, so only the 7 px band on the right and
+the rows below show. A unit at HP 0 outside battle gets `Army-Death` (92×92, loaded with 64
+off each channel) added (476790 mode 0) at (+1, +1) over its all-red wounds. **code**
+
 **Who gets a strip.** In battle a dead unit, or an unpaid unit of a side that leaves unpaid
 units out, shows an empty slot. In the player's army, and in battle, the strip of the hero and
 of a named character is drawn on its own background panel. **code** (49462c, panels ae269c /
@@ -865,10 +883,13 @@ wage total. **code**
 
 During the 2.5 s hold after a win (§12) the battle screen rebuilds every unit's stats, clears
 the highlights and redraws all 24 cards; then, each frame, for each of the player's 12 cards
-whose unit has a last gain above 0: the card darkened, an animated overlay strip (row
-`(elapsed / 3) mod 512`), the `Expirience` label at y + 31 and "+ N" (the last gain) at y + 47,
-centred, and the promotion marker at (+3, +3) when the unit has a level to spend and a next
-type. When the hold ends, a dead hero is set to 1 HP before the screen closes. **code**
+whose unit has a last gain above 0: the card, its portrait darkened (grey 64 subtracted,
+4768f8 mode 1), the 92 rows of `exp` (92×604, loaded with red −250, green and blue −30) from row
+`(elapsed / 3) mod 512` added (476790 mode 0), `exp-hole` at half (48da5c 512/1024) subtracted
+(mode 1), the `Expirience` label at y + 31 and "+ N" (the last gain) at y + 47, centred, font
+ae24a8 (Benguiat 55, 180, 255), and `Sign-Upgrade` at (+3, +3) when the unit's level is above
+its first (L > 0) and its type has a next one (492dd4). The same overlay runs on the army
+screen's card during the promotion animation (4b05a8 from 4b1f05, inside 4b1a04). When the hold ends, a dead hero is set to 1 HP before the screen closes. **code**
 
 ## 10. Hints and tooltips
 
@@ -1204,6 +1225,10 @@ parity rule they are candidates to hide or remove, not bugs to copy.
 | 59 | Text markup | Matches: event windows, the tutorial offer and the restart and delete-save boxes read the marks (`dt::markup`): the lines at CR LF and `#\`, the four fonts' colours, `^` centred, the rest justified behind the six-space indent, blank lines kept; the journal shows the marks as typed, as the original's. The text keeps Razdor's face (the original draws it in Benguiat) | `*` `\|` `@` pick the font, `^` centres, other lines justified with an indent; only in the event window's own text and the restart and delete-save boxes | 11 |
 | 60 | Village window | Matches: a village opens the original's small window (no main hall, no tabs): `S_Village`, the `AboutVillage` box with the `VillageEmpty` / `VillageFullGold` / `VillageFullMana` lines in their fonts' colours, the two 160×160 stock pictures (`_Empty` at 0) with "Деньги + N" / "Магия + N" captions, `Ok` and the close box (`building_view::village_window`). Razdor takes the tribute as the hero enters, so the window shows what was taken | 4d3a38, 4d0e28: the stocks shown as the window opens, paid as it closes (4c6000) | 9.8 |
 | 61 | Village offers | Matches: the offer is a Yes/No question in the event window before any village window, titled with the village's name, the install's `VillageBonusN` texts, its `Village_Bonus_N` picture left of the text (`Picture::Side`); Yes to the furs, witch or innkeeper shows its result window with the same picture; No opens the village window. Other events' own pictures are still drawn over the text | 4aca80, 4a9d88, 4d179b: the picture left of the text box, 1 px frame | 9.8 |
+| 62 | Dead card | Matches: `Army-Death` with 64 off each channel, added over the portrait at HP 0 on the army and building cards (`chrome::death_veil`); in battle a dead unit's cell is empty. Without the art, a dark veil and a red cross | `Army-Death` −64, additive at (+1, +1), outside battle; in battle the slot shows empty | 9.5 |
+| 63 | Card shadows | Matches: `Shadow-Unit` through its alpha under every occupied card (army, building, battle, the barracks' hire offers), only its band right of and below the card (`chrome::unit_shadow`). `Shadow-Empty` under empty cells is drawn whole at 55 % (Razdor's), not masked over the card | `Shadow-Unit` / `Shadow-Empty` through their alpha, masks cleared over 94×133 / 94×94 | 9.5 |
+| 64 | Experience cards | Matches: the darkened portrait, the running `exp` strip and `exp-hole` (`chrome::xp_veil`), «Опыт» and "+ N" in light blue Benguiat at y + 31 / y + 47, `Sign-Upgrade` at (+3, +3) for a unit past its first level with a next type; without the art Razdor's "XP +N" box. The army screen has no promotion animation, so no overlay there | 4b0684 during the won hold; 4b05a8 in the promotion animation | 9.9 |
+| 65 | Unit panel state lines | Matches: dead → `Bonus-Ressurrect` with `Hint3`; else unpaid (army window, not a type preview, not in battle) → `Bonus-NoPayment` over an empty row (the original's bug); else `Bonus-2Row`, `Bonus-InCastle` (`unit_sheet::state_lines`). Razdor's red "Dead" / "Unpaid" status lines are gone | The same chain; the no-payment text never set | 9.1 |
 
 ## Unknowns
 
