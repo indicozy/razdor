@@ -240,6 +240,27 @@ fn description_box(desc: &str, x: f32, y: f32, w: f32, h: f32) {
     }
 }
 
+/// The main hall's picture (0x4baa30, by the building type): the town, castle and fort,
+/// tavern, market and church their own; an altar the graveyard when its map picture is
+/// variant 2 (the cemetery), else the ruin; ruins the ruined house for the map pictures
+/// (8, 5), (12, 3) and (12, 8), else the ruin. The palace, the smithy and the dungeon have
+/// none. The village's is its own window's (`S_Village`).
+fn hall_picture(kind: LocationKind, (picture_type, variant): (u8, u8)) -> Option<&'static str> {
+    Some(match kind {
+        LocationKind::Town => "S_Town",
+        LocationKind::Castle | LocationKind::Fort => "S_Castle",
+        LocationKind::Tavern => "S_Tavern",
+        LocationKind::Market => "S_Market",
+        LocationKind::Church => "S_Church",
+        LocationKind::Village => "S_Village",
+        LocationKind::Altar if variant == 2 => "S_Grave",
+        LocationKind::Altar => "S_Ruin",
+        LocationKind::Ruins if matches!((picture_type, variant), (8, 5) | (12, 3) | (12, 8)) => "S_RuinedHouse",
+        LocationKind::Ruins => "S_Ruin",
+        _ => return None,
+    })
+}
+
 /// Main hall: the building's picture, the rumours on offer (heard for free; a rumour's own event may cost gold) and this
 /// building's quests, the description.
 fn main_hall(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) -> Option<Screen> {
@@ -251,17 +272,8 @@ fn main_hall(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingVie
         let loc = &game.world.locations[l];
         draw_rectangle(x, y, w, pic_h, Color::new(0.35, 0.5, 0.65, 1.0));
         draw_rectangle(x, y + pic_h * 0.62, w, pic_h * 0.38, Color::new(0.35, 0.5, 0.3, 1.0));
-        // The original's picture of this kind of building, else its map sprite.
-        let scene = match loc.kind {
-            LocationKind::Town | LocationKind::Palace => Some("S_Town"),
-            LocationKind::Castle | LocationKind::Fort => Some("S_Castle"),
-            LocationKind::Church => Some("S_Church"),
-            LocationKind::Market | LocationKind::Smithy => Some("S_Market"),
-            LocationKind::Tavern => Some("S_Tavern"),
-            LocationKind::Village => Some("S_Village"),
-            LocationKind::Ruins => Some("S_Ruin"),
-            _ => None,
-        };
+        // The original's picture of this kind of building, else (Razdor's) its map sprite.
+        let scene = hall_picture(loc.kind, loc.picture);
         if let Some(t) = scene.and_then(chrome::win) {
             let src_h = (t.width() * pic_h / w).min(t.height());
             chrome::tex_src(&t, Rect::new(0.0, (t.height() - src_h) / 2.0, t.width(), src_h), Rect::new(x, y, w, pic_h), WHITE);
