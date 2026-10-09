@@ -786,6 +786,8 @@ pub fn squad(
         if h.moved {
             let s = 48.0 * k;
             assets.draw_item(h.item, mx - s / 2.0, my - s / 2.0, s);
+            // The item held is the pointer (0x4c24f4: its picture in the pointer's record).
+            super::cursor::set(super::cursor::Shape::Hidden);
         }
         if is_mouse_button_down(MouseButton::Left) {
             HELD.with(|c| c.set(Some(h)));

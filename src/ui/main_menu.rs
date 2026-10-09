@@ -348,6 +348,11 @@ pub fn authors(started: f64) -> bool {
             nudge -= inner.h / px * 0.8;
         }
         let timed = (get_time() - started) as f32 * 35.0;
+        // The clock while the credits roll on their own (Credits_OnOpen 0x4cfc6c calls
+        // 0x48ecf0); the arrow once their time is up (0x4c84e7), whatever the hand scroll.
+        if timed < most {
+            super::cursor::set(super::cursor::Shape::Clock);
+        }
         let scrolled = (timed + nudge).clamp(0.0, most);
         // Held at an end, the scroll owes nothing: turning back moves at once.
         CREDITS_NUDGE.with(|n| n.set((started, scrolled - timed)));

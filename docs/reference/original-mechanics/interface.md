@@ -262,11 +262,37 @@ over the minimap:
 | Over ruins whose owner is not a map army, or building type 15 | animated question mark | (ms / 25) mod 50 |
 | Busy (loading, glides, battle pauses) | clock | (ms / 30) mod 50 |
 
-Over a village, castle, fort, ruins or bridge the game first looks for a guard: an army on the
-map whose home is that building and that is hostile (attitude ≤ 0), or any such army on a
-bridge. A castle, fort or ruins with a garrison counts as hostile when its attitude to the
-player is ≤ 0 (ruins always). A guard or a hostile garrison gives the swords; ruins with an
-empty garrison do not. **code** (4ccc56–4ccdeb)
+Over a village, castle, fort, ruins or bridge the game first looks for a guard: the last army
+on the map standing in that building (+0x3788) that is hostile (attitude ≤ 0), or any such
+army on a bridge. A castle, fort or ruins with a garrison counts as hostile when its attitude
+to the player is ≤ 0 (ruins always). A guard or a hostile garrison gives the swords (a
+friendly guard of a bridge with a meeting waiting, the animated question mark); ruins with an
+empty garrison have no guard. An unguarded bridge gives the arrow. The army standing in the
+hovered cell of a building is not looked at; the hero's cell and his parked ship give the
+arrow, also in a building. **code** (4ccc56–4ccdeb)
+
+The hover runs only when the pointer enters another cell (0x4ccab3) above the bottom panel;
+over the panel the arrow (0x4cceeb). Then, only while the arrow is up (state 0), a cell that
+is no target off the minimap swaps the arrow's picture for the still "Ask" (unexplored) or
+"Denied" (explored), with the arrow's hotspot (0x4cce5b–0x4ccead). The house and the animated
+question mark of a building stay when the pointer moves straight onto another building that
+would give the other one (0x48ed1d). While the hero sails, bridges are neither hovered nor
+targets (0x4cc108), so they get "Denied". **code**
+
+Pictures and hotspots (0x4db278): the stills `Cursor-Normal.lit`, `Cursor-Ask.lit`,
+`Cursor-Denied.lit` share the arrow's record, hotspot (0, 0); the strips (0x4db07c, 50 frames)
+are drawn centred: `Clock.ugs` and `House.ugs` 42 px at (−21, −21), `Swords.ugs` 48 px at
+(−24, −24), `Ask.ugs` 40 px at (−20, −20). A record of the arrow at (−27, −27), 55 px
+(0xae1da0), takes the picture of an item picked up in the army window (0x4c24f4): the item is
+the pointer. **code**
+
+The clock (0x48ecf0) comes with a wait (0x4ae311), a glide (0x4af99a), a place being shown
+(0x4af86a), a world spell (0x4af32a), a battle pass (0x4afb7d), the enemy's turn in battle
+(0x4c5fee; the player's turn gives the arrow, 0x4c5ab0), the won battle's hold (0x4b0a17),
+the credits while they roll (0x4cfc6c; the arrow once their time is up, 0x4c84e7), and the
+instant saves and loads. The end of a glide, of a place shown or of a wait gives the arrow
+(0x4b9060, 0x4ae24c), which stays until the pointer enters another cell. While the map's
+right-button tooltip is up the pointer is not drawn (0x474a81 on 0x4ecd88). **code**
 
 The hovered cell also gets a ring marker (normal, hostile, spell target or "no target"
 colours). **code** (48eeb0 calls)
@@ -1092,7 +1118,7 @@ parity rule they are candidates to hide or remove, not bugs to copy.
 | 3 | Stop walking | Matches: left click or any key held; the step under way is finished (`Game::cut_walk`); no other input while he walks or waits | Left click or any key; the hero stops at the end of the current step | 7.3 |
 | 4 | Right button | Matches: held, the tooltip of the army or building under it; never a command (the pointer is not frozen: presentation, left out) | Held: tooltip of the army or building under it, pointer frozen; never a command | 7.4 |
 | 5 | Map tooltips | Only while the right button is held (left up), on the idle map; no fade-in (presentation, left out) | Only while the right button is held, 500 ms fade-in | 7.4 |
-| 6 | Pointer | System pointer | Own pointers: arrow, ask, denied, swords, house, clock, with animated frames | 7.2 |
+| 6 | Pointer | Matches: the original's pointers from the install, drawn last over everything at the original's hotspots, the strips at their frame times (`ui/cursor.rs`); the map's hover as §7.2, worked out again only on entering another cell (`cursor::map_pointer`, `world_view::update_pointer`); the clock while the map is busy (a wait, a glide, a place shown, a spell), while the enemy acts, during a pass and the won battle's hold, while the credits roll; hidden under the right-button tooltip and while an item is carried (its picture is the pointer). The system pointer stays for Razdor's own minimap resize and map drag, in the editor, out of focus and without the art | Own pointers: arrow, ask, denied, swords, house, clock, with animated frames | 7.2 |
 | 7 | Edge scroll | Matches: 5 px margin (scaled with the screen), `round(dt / F)` and `round(dt × 0.6875 / F)` original px per frame, dt the whole ms since the map's last frame, `ScrollSpeed` from the install | 5 px margin, `dt / F` px per ms with F from ScrollSpeed (62.5 cells/s at 100) | 7.6 |
 | 8 | Arrow keys | Matches: the held arrow scrolls (only the last key down counts) | Held arrow scrolls | 7.6 |
 | 9 | Zoom | Wheel and +/− (extra) | None | 7.7 |
@@ -1167,9 +1193,6 @@ parity rule they are candidates to hide or remove, not bugs to copy.
   code at 481554).
 - **Hint box layout.** The font and inner layout of hint boxes, and which controls use which
   hint kind, were not mapped one by one.
-- **Pointer hotspots.** The six pointer records have offsets (0,0), (−27,−27), (−21,−21),
-  (−21,−21), (−24,−24) and (−20,−20) in build order; which offset belongs to which animated
-  pointer is only partly checked.
 - **Event-window chord.** The three window open handlers that play the chord (4d128a,
   4d1567, 4d1666) were assigned to the village, shipyard and event windows by their address
   ranges, not by tracing.

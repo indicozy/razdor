@@ -192,8 +192,6 @@ thread_local! {
     static DRAG: std::cell::Cell<Option<Drag>> = const { std::cell::Cell::new(None) };
     /// When an edge was last pressed (a second press soon after restores the original size).
     static LAST_PRESS: std::cell::Cell<f64> = const { std::cell::Cell::new(f64::NEG_INFINITY) };
-    /// The resize cursor is shown.
-    static CURSOR: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// The window's size (`None`: the original's), for the settings.
@@ -256,7 +254,7 @@ fn dragged_in_proportion(from: (f32, f32), edges: (bool, bool), d: Vec2, k: f32,
 /// restores the original's size. Returns true while the pointer
 /// grips an edge or drags one (the click is the resize's, not the minimap's).
 fn resize(view: Rect, o: Rect, aspect: f32) -> bool {
-    use macroquad::miniquad::{window::set_mouse_cursor, CursorIcon};
+    use macroquad::miniquad::CursorIcon;
     let k = super::chrome::k();
     let m = Vec2::from(crate::ui::widgets::pointer());
     let edges = match DRAG.with(|d| d.get()) {
@@ -286,14 +284,13 @@ fn resize(view: Rect, o: Rect, aspect: f32) -> bool {
         }
     };
     let gripped = edges.0 || edges.1;
-    if gripped || CURSOR.with(|c| c.get()) {
-        set_mouse_cursor(match edges {
+    // The resize is Razdor's: the system's resize pointers, not the original's.
+    if gripped {
+        super::cursor::system(match edges {
             (true, true) => CursorIcon::NESWResize,
             (true, false) => CursorIcon::EWResize,
-            (false, true) => CursorIcon::NSResize,
-            _ => CursorIcon::Default,
+            _ => CursorIcon::NSResize,
         });
-        CURSOR.with(|c| c.set(gripped));
     }
     gripped
 }
