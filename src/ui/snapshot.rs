@@ -196,6 +196,10 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
     }
     let content = app.dt_content.clone().ok_or("no install content")?;
     let mut game = Game::from_scenario(content, &app.scenarios[index].scenario, HeroClass::Knight);
+    // `RAZDOR_SCENE_QUIET=1`: the map's opening windows are not shown.
+    if std::env::var_os("RAZDOR_SCENE_QUIET").is_some() {
+        game.drain_events();
+    }
     // `RAZDOR_SCENE_HURT=<percent>`: the hero's army keeps that share of its hits (wounds).
     if let Some(pct) = std::env::var("RAZDOR_SCENE_HURT").ok().and_then(|v| v.trim().parse::<i32>().ok()) {
         let content = game.content.clone();
