@@ -479,6 +479,7 @@ impl BattleView {
 
         world_view::backdrop(game, assets);
         self.close_clicked |= self.draw(&l, game, assets);
+        super::cursor::set(self.pointer());
 
         // Quick battle (a Razdor extra the players asked for): the battle under way finished
         // at once.
@@ -501,7 +502,9 @@ impl BattleView {
             }
             if outcome == Outcome::Victory {
                 // The won battle's hold: 2.5 s with the experience on the cards and no input,
-                // then the screen closes and the report follows (interface.md §9.9, §12).
+                // then the screen closes and the report follows (interface.md §9.9, §12);
+                // the clock meanwhile (0x4b0a17).
+                super::cursor::set(super::cursor::battle_pointer(false, false, true));
                 let held = self.hold.get_or_insert(0.0);
                 *held += dt;
                 let done = *held * 1000.0 >= razdor::av::BATTLE_END_HOLD_MS as f32;
@@ -521,6 +524,18 @@ impl BattleView {
             }
         }
         None
+    }
+
+    /// The pointer (`cursor::battle_pointer`): the clock while the enemy acts and during a
+    /// pass's pause; the arrow over the ways out.
+    fn pointer(&self) -> super::cursor::Shape {
+        let b = &self.battle;
+        if self.exiting {
+            return super::cursor::Shape::Arrow;
+        }
+        let enemy = b.outcome() == Outcome::Ongoing && b.active().is_some_and(|a| b.fighters[a].team != Team::Player);
+        let pausing = self.fx.as_ref().is_some_and(|f| matches!(f.kind, FxKind::Pass));
+        super::cursor::battle_pointer(enemy, pausing, self.hold.is_some())
     }
 
     fn player_input(&mut self, l: &Layout, active: usize) {

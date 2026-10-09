@@ -117,6 +117,8 @@ async fn main() {
         let before = app.screen_name();
         app.frame();
         app.draw_fps();
+        // The original draws its pointer last, over everything (0x474a81).
+        ui::cursor::draw();
         if quiet {
             app.dialogs.clear();
         }

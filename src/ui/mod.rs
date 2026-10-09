@@ -4,6 +4,7 @@ pub mod audio;
 pub mod battle_view;
 pub mod building_view;
 pub mod chrome;
+pub mod cursor;
 pub mod dialog;
 pub mod dt_art;
 pub mod dt_font;
@@ -578,6 +579,7 @@ impl App {
 
     pub fn frame(&mut self) {
         chrome::begin_frame();
+        cursor::begin_frame();
         widgets::track_held_key();
         self.follow_language();
         self.sounds();
@@ -588,6 +590,8 @@ impl App {
         // The front row's width from the settings: the next new game uses it.
         self.follow_row_setting();
         if matches!(self.screen, Screen::Editor) {
+            // The map editor is DTMapEdit's: a Windows program with the system's pointers.
+            cursor::system(macroquad::miniquad::CursorIcon::Default);
             self.editor_frame();
             return;
         }
@@ -702,6 +706,8 @@ impl App {
         let held = matches!(self.screen, Screen::WorldMap) && self.map_view.holds_dialogs(&self.dialogs);
         let clock = macroquad::prelude::get_time();
         if let Some(d) = self.dialogs.front().filter(|d| !held && !d.waiting(clock)) {
+            // A message window takes the arrow (EventDialog_OpenModal 0x4ac427).
+            cursor::set(cursor::Shape::Arrow);
             if let Some(close) = dialog::draw(d, &self.assets, self.game.as_ref()) {
                 let closed = self.dialogs.pop_front();
                 let asked = closed.as_ref().is_some_and(|d| d.question);

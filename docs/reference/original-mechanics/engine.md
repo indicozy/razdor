@@ -461,7 +461,7 @@ silent.
 | Hero walk frames | 8 frames at 10 per second while moving (`world_view::draw_figure`) | frames 3–6 at half the WalkDelay (75 ms default); AI walk frames by game time; land idle 20 × 250 ms | differs |
 | AI walk frames | Frames 3–6, the next every 10 game minutes (`(time_cs div 1000) and 3` + 3) while the army has a step to take, by the game time interpolated inside the stretch, so they stand still with it; its standing frame without a step (`Game::army_walk_frame`) | 0x4ad660 → 0x4ad314 with `[0x68dcb8] div 1000`, from the AI's per-frame advance 0x4ade3c (only while the hero walks or waits) | Matches |
 | Water | frame `(t div 100) mod 32` multiplied twice into the ground of codes 0–2, ⅓ frame per cell, frames uploaded once and picked per draw (`ui::terrain`); its share of Razdor's bilinear blend is animated too, where the original leaves the edge overlays still; still water without the BMPs and in the editor | 32 frames at 100 ms on terrain codes 0–2, MODULATE2X on the cell quads | Matches (blend edges differ) |
-| Cursor animation | system cursor (no animated cursors found in `src/ui`) | 50-frame cursors at 25/30/50 ms from raw time, hotspots per cursor | missing |
+| Cursor animation | the original's pointers drawn last each frame over the hidden system pointer; the 50-frame strips at 30/50/30/25 ms from the clock, hotspots (0,0) for the arrow and its stills, (−21,−21) clock and house, (−24,−24) swords, (−20,−20) question mark (`ui/cursor.rs`); the system pointer without the install's art or out of focus | 50-frame cursors at 25/30/50 ms from raw time, hotspots per cursor | Matches |
 | Main menu background | 9 frames at 100 ms, not cross-faded (`main_menu.rs`) | 9 frames at 150 ms cross-faded + 16 frames at 100 ms | differs |
 | Credits scroll | 30 px/s × UI scale | 35 px/s | differs |
 | Font sheets | glyph boxes found by colour heuristics; order string lacks the 150th glyph (underscore); text scaled to a TrueType cap height (`ui/dt_font.rs`) | separator colour from pixel (0,0), fixed slicing rule, 150 glyphs ending with underscore, pixel-exact | differs (layout scale is a Razdor choice) |
@@ -484,7 +484,8 @@ silent.
   are lost in the decompiler); assumed one copy per dirty rectangle.
 - The Direct3D render and texture-stage states set at start (texture filtering of the world
   quads).
-- The writer of the "cursor hidden" flag (0x4ecd88).
+- The "cursor hidden" flag (0x4ecd88): its writers are the map's right-button tooltip (0x4cc269,
+  0x4cc299, 0x4cc348, 0x4ccf3d/49) and three not traced (0x4c2008, 0x4c2064, 0x4cd5f1).
 - Which files use the scrambled "A?pf" container (probably saves).
 - The two ship-frame formulas (100 ms in 0x4ad314, 200 ms with an offset in 0x4c868c): which
   one wins for AI ships each frame.

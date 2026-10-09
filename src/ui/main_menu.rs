@@ -293,7 +293,14 @@ pub fn authors(started: f64) -> bool {
         let px = k * 0.9375;
         let w = t.width() * px;
         let h = t.height() * px;
-        let scrolled = ((get_time() - started) as f32 * 35.0 * px).min((h - inner.h).max(0.0));
+        let timed = (get_time() - started) as f32 * 35.0 * px;
+        let most = (h - inner.h).max(0.0);
+        // The clock while the credits roll on their own (Credits_OnOpen 0x4cfc6c calls
+        // 0x48ecf0); the arrow once their time is up (0x4c84e7).
+        if timed < most {
+            super::cursor::set(super::cursor::Shape::Clock);
+        }
+        let scrolled = timed.min(most);
         let y = inner.y - scrolled;
         // Only the part inside the page.
         let top = y.max(inner.y);

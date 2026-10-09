@@ -21,6 +21,7 @@ use razdor::rules::world::{Army, Location, LocationKind, Owner, Troop};
 use super::assets::Assets;
 use super::audio::{cue, Cue};
 use super::building_view::BuildingView;
+use super::cursor::{self, BuildingHover, CellArmy, MapHover, Shape};
 use super::dialog::Dialog;
 use super::dt_art::DtArt;
 use super::game_bar::{self, BarButton, Look, TimeButton};
@@ -87,11 +88,18 @@ pub struct MapView {
     /// The view gliding back to the hero (the centre button or Tab, 0x4af96c): when it set
     /// off and from where. The map takes no input meanwhile.
     centring: Option<(f64, (f32, f32))>,
+    /// The map's pointer (interface.md §7.2), kept between frames as the original keeps it
+    /// (0xae1d7c): the hover changes it only on entering another cell.
+    pointer: Shape,
+    /// The cell the pointer was last worked out for (0x68dca0/a4); `None` looks again.
+    pointer_cell: Option<Tile>,
+    /// The map was busy last frame (the clock was up).
+    was_busy: bool,
 }
 
 impl Default for MapView {
     fn default() -> Self {
-        MapView { zoom: 1.0, minimap: false, look: None, shows: VecDeque::new(), returning: None, opening: None, spell_fx: VecDeque::new(), preview: None, last_frame_ms: None, back_to: None, centring: None }
+        MapView { zoom: 1.0, minimap: false, look: None, shows: VecDeque::new(), returning: None, opening: None, spell_fx: VecDeque::new(), preview: None, last_frame_ms: None, back_to: None, centring: None, pointer: Shape::Arrow, pointer_cell: None, was_busy: false }
     }
 }
 
@@ -1411,6 +1419,104 @@ fn tooltip_guard(game: &Game, l: usize) -> Option<&Army> {
     game.world.armies.iter().filter(|a| a.mind.standing == Some(l)).max_by_key(|a| a.id)
 }
 
+/// The map file's number of a building type (0x4ccc7a reads it): 0 palace … 12 ruins, 13
+/// and 14 the bridges, 15 the obelisk. The demo's camp is taken for a fort.
+fn building_type(k: LocationKind) -> u8 {
+    use LocationKind as K;
+    match k {
+        K::Palace => 0,
+        K::Town => 1,
+        K::Village => 2,
+        K::Castle => 3,
+        K::Fort | K::Camp => 4,
+        K::Tavern => 5,
+        K::Market => 6,
+        K::Church => 7,
+        K::Smithy => 8,
+        K::Shipyard => 9,
+        K::Altar => 10,
+        K::Entrance => 11,
+        K::Ruins => 12,
+        K::StoneBridge => 13,
+        K::WoodenBridge => 14,
+        K::Obelisk => 15,
+    }
+}
+
+/// What the world's hit test (0x4cbf20) finds at cell `t`: unexplored (the explored map's
+/// pixel 0), a target ([`Game::can_target`]), and on explored ground off the minimap the
+/// cell's army (the hero, an army, the hero's parked ship) and the building over it; while
+/// the hero sails a bridge is neither (0x4cc108).
+fn map_hover(game: &Game, t: Tile, on_minimap: bool) -> MapHover {
+    let w = &game.world;
+    let map = &w.map;
+    let unexplored = !map.in_bounds(t) || !game.fog.explored(t);
+    let mut h = MapHover { on_minimap, unexplored, valid: !on_minimap && game.can_target(t), ..Default::default() };
+    if on_minimap || unexplored {
+        return h;
+    }
+    let meeting = |a: &Army| game.script().is_some_and(|e| e.meeting_waiting(game, a.id));
+    h.army = if t == game.tile() {
+        CellArmy::Hero
+    } else if let Some(a) = w.armies.iter().find(|a| a.tile(map) == t) {
+        CellArmy::Army { attitude: a.attitude, meeting: meeting(a) }
+    } else if game.parked_ship() == Some(t) {
+        CellArmy::Ship
+    } else {
+        CellArmy::None
+    };
+    if let Some(l) = w.location_covering(t) {
+        let loc = &w.locations[l];
+        if game.aboard() && loc.kind.is_bridge() {
+            return MapHover { army: CellArmy::None, valid: false, ..h };
+        }
+        h.building = Some(BuildingHover {
+            kind: building_type(loc.kind),
+            standing: w.armies.iter().filter(|a| a.mind.standing == Some(l)).map(|a| (a.attitude, meeting(a))).collect(),
+            garrison: !loc.cleared && loc.garrison.iter().any(|t| t.alive()),
+            attitude: loc.attitude,
+            ownerless: loc.owner == Owner::Neutral,
+        });
+    }
+    h
+}
+
+/// The world map's pointer this frame (0x4cc148). While the map is busy (a wait or a
+/// spell's reading 0x4ae311, a glide 0x4af99a, a place or the start's fog opening 0x4af86a,
+/// a spell's effect 0x4af32a) the clock; once it is done the arrow (0x4b9060, 0x4ae24c →
+/// 0x48ecbc). As the hero sets off the arrow (0x4cd184) and no hover. On the idle map the
+/// pointer is worked out again only when it enters another cell (0x4ccab3-0x4ccacb):
+/// [`cursor::map_pointer`]; below the map (the bar) the arrow (0x4cceeb). A wait or a walk
+/// makes the next hover look again (0x4ae302, 0x4adc26).
+fn update_pointer(game: &Game, view: &mut MapView, cam: &Camera, on_minimap: bool) {
+    let waits = game.waiting() || game.endless_waiting() || game.reading().is_some();
+    let showing = view.shows.front().is_some_and(|s| s.started.is_some());
+    if waits || showing || view.centring.is_some() || view.returning.is_some() || view.opening.is_some() || !view.spell_fx.is_empty() {
+        view.pointer = Shape::Clock;
+        view.was_busy = true;
+        if waits {
+            view.pointer_cell = None;
+        }
+        return;
+    }
+    if std::mem::take(&mut view.was_busy) {
+        view.pointer = Shape::Arrow;
+    }
+    if game.moving() {
+        view.pointer = Shape::Arrow;
+        view.pointer_cell = None;
+        return;
+    }
+    let Some(t) = cam.tile_under_mouse() else {
+        view.pointer = Shape::Arrow;
+        return;
+    };
+    if view.pointer_cell != Some(t) {
+        view.pointer_cell = Some(t);
+        view.pointer = cursor::map_pointer(view.pointer, &map_hover(game, t, on_minimap));
+    }
+}
+
 /// A click on the building the party stands in (`t` one of its cells): its window again, or
 /// the battle with a garrison still to beat. Nothing for a burnt camp.
 fn reopen_here(game: &mut Game, t: Tile) -> Option<Screen> {
@@ -1942,11 +2048,16 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
             view.look = Some(at);
         }
     }
+    // The pointer (interface.md §7.2); a window or message on top takes the arrow.
+    update_pointer(game, view, &cam, on_minimap);
+    cursor::set(if input_blocked() { Shape::Arrow } else { view.pointer });
     // The right button held (the left one up) shows the tooltip of the army or building
-    // under it; it is never a command (interface.md §7.4).
+    // under it; it is never a command (interface.md §7.4). The pointer is not drawn
+    // meanwhile (0x4cc269, 0x474a81).
     let right_held = !input_blocked() && is_mouse_button_down(MouseButton::Right) && !is_mouse_button_down(MouseButton::Left);
     if let Some(t) = hover_tooltip(game, &cam).filter(|_| idle && right_held && !on_minimap) {
         draw_tooltip(game, assets, &t);
+        cursor::set(Shape::Hidden);
     }
     if on_clock && can_wait {
         let hint = |key: &str, ours: &'static str| super::chrome::ui_text("GameMenu", key).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr(ours).to_string());
