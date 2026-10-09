@@ -1224,6 +1224,8 @@ impl Game {
         }
         self.journal = prev.journal.clone();
         self.journal.next_chapter();
+        let title = self.world.title.clone();
+        self.journal.name_chapter(&title);
         let slot = self.squad[0].slot;
         let mut hero = prev.hero.clone();
         if c.try_unit(hero.def).is_none() {

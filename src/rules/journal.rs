@@ -58,6 +58,9 @@ pub struct History {
     /// The chapter being played.
     #[serde(default)]
     pub chapter: u32,
+    /// The map title of each chapter, by number (empty in saves made before they were kept).
+    #[serde(default)]
+    pub titles: Vec<String>,
 }
 
 impl History {
@@ -84,6 +87,23 @@ impl History {
     /// The next campaign map begins.
     pub fn next_chapter(&mut self) {
         self.chapter += 1;
+    }
+
+    /// Names the chapter being played after its map.
+    pub fn name_chapter(&mut self, title: &str) {
+        let n = self.chapter as usize;
+        if self.titles.len() <= n {
+            self.titles.resize(n + 1, String::new());
+        }
+        self.titles[n] = title.trim().to_string();
+    }
+
+    /// The heading of chapter `n` in the journal: its map's title, else its number.
+    pub fn chapter_heading(&self, n: u32) -> String {
+        match self.titles.get(n as usize).filter(|t| !t.is_empty()) {
+            Some(t) => t.clone(),
+            None => crate::trf!("Chapter {n}", n = n + 1),
+        }
     }
 }
 
@@ -119,6 +139,8 @@ pub struct Row {
     /// An active quest: minutes since its event last fired, as the original's journal shows
     /// it (0x49c388: no deadline, the time since the latest firing).
     pub elapsed: Option<u64>,
+    /// The campaign map it belongs to ([`Entry::chapter`]).
+    pub chapter: u32,
 }
 
 impl Game {
@@ -145,7 +167,7 @@ impl Game {
     /// (the stored text keeps it), and the time since the event last fired.
     fn quest_row(&self, id: EventId) -> Row {
         let Some((script, e)) = self.script().and_then(|s| Some((s, s.event(id)?))) else {
-            return Row { title: tr("Event").to_string(), text: String::new(), date: None, elapsed: None };
+            return Row { title: tr("Event").to_string(), text: String::new(), date: None, elapsed: None, chapter: self.journal.chapter };
         };
         let title = e.display_title().trim();
         let text = if e.question.is_empty() { e.message.clone() } else { format!("{}\n{}", e.question, e.message) };
@@ -155,6 +177,7 @@ impl Game {
             text: text.replace('\r', ""),
             date: self.journal.find(EntryKind::Quest, id).map(Entry::date),
             elapsed: script.last_fired(id).map(|l| now.saturating_sub(l)),
+            chapter: self.journal.chapter,
         }
     }
 
@@ -187,12 +210,12 @@ impl Game {
     /// their date from the history); completed ones the history's, then any the engine lists
     /// that the history lacks (older saves).
     pub fn journal_rows(&self, tab: Tab) -> Vec<Row> {
-        let shown = |e: &Entry| Row { title: self.fill_title(&e.title), text: self.fill_text(&e.text), date: Some(e.date()), elapsed: None };
+        let shown = |e: &Entry| Row { title: self.fill_title(&e.title), text: self.fill_text(&e.text), date: Some(e.date()), elapsed: None, chapter: e.chapter };
         let from_engine = |id: EventId, kind: EntryKind| match self.journal.find(kind, id) {
             Some(e) => shown(e),
             None => {
                 let (_, text) = self.event_texts(id);
-                Row { title: self.event_title(id), text: self.fill_text(&text), date: None, elapsed: None }
+                Row { title: self.event_title(id), text: self.fill_text(&text), date: None, elapsed: None, chapter: self.journal.chapter }
             }
         };
         let (active, done) = self.script().map_or((&[][..], &[][..]), |s| (s.journal(), s.completed_quests()));
@@ -245,6 +268,18 @@ mod tests {
         assert!(h.find(EntryKind::Quest, 1).is_none(), "event 1 of the last map is another event");
         h.record(EntryKind::Quest, 1, 9, "c", "");
         assert_eq!(h.find(EntryKind::Quest, 1).map(|e| e.title.as_str()), Some("c"));
+    }
+
+    #[test]
+    fn chapters_are_headed_by_their_maps() {
+        let mut h = History::default();
+        h.name_chapter(" РК1-Начало пути ");
+        h.next_chapter();
+        h.next_chapter();
+        h.name_chapter("РК3");
+        assert_eq!(h.chapter_heading(0), "РК1-Начало пути");
+        assert_eq!(h.chapter_heading(2), "РК3");
+        assert_ne!(h.chapter_heading(1), "", "a chapter of an older save is headed by its number");
     }
 
     #[test]

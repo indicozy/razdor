@@ -647,6 +647,8 @@ impl Game {
         let mut squad = vec![leader];
         squad.extend(start.troops.iter().map(|t| troop_unit(&content, t)));
         let mut g = Game::with_world(content, world, squad, start.tile);
+        let title = g.world.title.clone();
+        g.journal.name_chapter(&title);
         g.arrange_at_load();
         // The class's speed is set first (0x4b4300: 0x68dcd8, copied to the hero's +0x1694),
         // then the map load puts him on his cell (0x4b5913 → 0x497c68), before he is at sea:

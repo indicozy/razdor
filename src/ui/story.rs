@@ -135,6 +135,27 @@ fn empty_note(tab: Tab) -> &'static str {
     }
 }
 
+/// A line of the journal's list: a chapter's heading or an entry (by index in the rows).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Line {
+    Heading(u32),
+    Row(usize),
+}
+
+/// The list's lines: the rows, each run of one chapter under its heading when the rows come
+/// from more than one.
+fn journal_lines(rows: &[razdor::rules::journal::Row]) -> Vec<Line> {
+    let several = rows.windows(2).any(|w| w[0].chapter != w[1].chapter);
+    let mut lines = Vec::with_capacity(rows.len() + 4);
+    for (k, row) in rows.iter().enumerate() {
+        if several && (k == 0 || rows[k - 1].chapter != row.chapter) {
+            lines.push(Line::Heading(row.chapter));
+        }
+        lines.push(Line::Row(k));
+    }
+    lines
+}
+
 /// The journal (a Razdor extra on top of the original's quest list): tabs for the active
 /// quests, those completed, the rumours heard and the story messages, newest first; the
 /// list on the left, the selected entry's date and full text on the right. Wheel or arrows
@@ -170,26 +191,45 @@ pub fn journal(game: &Game, assets: &super::assets::Assets, view: &mut JournalVi
     let ink = Color::new(0.45, 0.28, 0.14, 1.0);
     let rh = 42.0;
     let fits = (((lh - 12.0) / rh).floor() as usize).max(1);
+    // A campaign's history runs over several maps: each map's entries go under a heading
+    // with its title, as soon as the list holds more than one.
+    let lines = journal_lines(&rows);
+    let line_of = |k: usize| lines.iter().position(|l| *l == Line::Row(k)).unwrap_or(0);
     if mouse_in(lx, ly, lw, lh) {
         let wh = wheel();
-        if wh < 0.0 && view.scroll + fits < rows.len() {
+        if wh < 0.0 && view.scroll + fits < lines.len() {
             view.scroll += 1;
         } else if wh > 0.0 {
             view.scroll = view.scroll.saturating_sub(1);
         }
     }
-    // Keep the selected line in sight.
-    if view.selected < view.scroll {
-        view.scroll = view.selected;
-    } else if view.selected >= view.scroll + fits {
-        view.scroll = view.selected + 1 - fits;
+    // Keep the selected line in sight, with its chapter's heading when it is just above.
+    let sel = line_of(view.selected);
+    let top = if sel > 0 && matches!(lines[sel - 1], Line::Heading(_)) { sel - 1 } else { sel };
+    if top < view.scroll {
+        view.scroll = top;
+    } else if sel >= view.scroll + fits {
+        view.scroll = sel + 1 - fits;
     }
-    view.scroll = view.scroll.min(rows.len().saturating_sub(fits));
+    view.scroll = view.scroll.min(lines.len().saturating_sub(fits));
     if rows.is_empty() {
         text_fit(empty_note(view.tab), lx + 16.0, ly + 30.0, lw - 28.0, 18.0, ink);
     }
-    for (k, row) in rows.iter().enumerate().skip(view.scroll).take(fits) {
-        let ry = ly + 6.0 + (k - view.scroll) as f32 * rh;
+    for (n, line) in lines.iter().enumerate().skip(view.scroll).take(fits) {
+        let ry = ly + 6.0 + (n - view.scroll) as f32 * rh;
+        let k = match *line {
+            Line::Heading(chapter) => {
+                let mut head = game.journal.chapter_heading(chapter);
+                while measure(&head, 19.0).width > lw - 30.0 && head.chars().count() > 3 {
+                    head.pop();
+                }
+                text_centered(&head, lx + lw / 2.0, ry + 27.0, 19.0, Color::new(0.55, 0.12, 0.06, 1.0));
+                draw_line(lx + 14.0, ry + rh - 6.0, lx + lw - 14.0, ry + rh - 6.0, 1.0, Color::new(0.55, 0.36, 0.2, 0.7));
+                continue;
+            }
+            Line::Row(k) => k,
+        };
+        let row = &rows[k];
         if view.selected == k {
             draw_rectangle(lx + 4.0, ry, lw - 8.0, rh - 2.0, Color::new(0.72, 0.6, 0.4, 1.0));
         }
@@ -205,8 +245,8 @@ pub fn journal(game: &Game, assets: &super::assets::Assets, view: &mut JournalVi
             view.text_scroll = 0;
         }
     }
-    if rows.len() > fits {
-        let line = trf!("{first}–{last} of {total}", first = view.scroll + 1, last = (view.scroll + fits).min(rows.len()), total = rows.len());
+    if lines.len() > fits {
+        let line = trf!("{first}–{last} of {total}", first = view.scroll + 1, last = (view.scroll + fits).min(lines.len()), total = lines.len());
         text(&line, lx + 8.0, ly + lh + 18.0, 15.0, DIM);
     }
 
@@ -288,4 +328,23 @@ pub fn journal(game: &Game, assets: &super::assets::Assets, view: &mut JournalVi
         view.text_scroll = 0;
     }
     bar_pick
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use razdor::rules::journal::Row;
+
+    fn row(chapter: u32) -> Row {
+        Row { title: String::new(), text: String::new(), date: None, elapsed: None, chapter }
+    }
+
+    #[test]
+    fn the_journal_list_heads_each_chapter_when_there_are_several() {
+        assert_eq!(journal_lines(&[row(0), row(0)]), [Line::Row(0), Line::Row(1)], "one map: no heading");
+        assert_eq!(
+            journal_lines(&[row(2), row(2), row(0)]),
+            [Line::Heading(2), Line::Row(0), Line::Row(1), Line::Heading(0), Line::Row(2)]
+        );
+    }
 }

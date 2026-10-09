@@ -202,6 +202,7 @@ No rumours heard yet. = Слухов пока не слышно.
 No messages yet. = Посланий пока нет.
 The hero's journal = Журнал героя
 date unknown = дата неизвестна
+Chapter {n} = Глава {n}
 Date unknown = Дата неизвестна
 Time since it was received: {t} = Получено: {t} назад
 {first}–{last} of {total} = {first}–{last} из {total}
