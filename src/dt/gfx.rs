@@ -470,9 +470,11 @@ pub fn item_icon_frame(icon: &str) -> Option<usize> {
     digits.parse().ok()
 }
 
-/// Packs images into one atlas `width` pixels wide (shelves, tallest first, 1 px apart).
-/// Returns the atlas and each image's top-left corner, in input order. `None` if an image
-/// is wider than the atlas.
+/// Packs images into one atlas `width` pixels wide (shelves, tallest first). Each image has
+/// a 1 px ring around it repeating its edge pixels, so a sprite scaled with linear filtering
+/// never blends in the empty atlas around it (seams between sprites drawn side by side, a
+/// bridge's pieces, at a zoom between whole steps). Returns the atlas and each image's
+/// top-left corner, in input order. `None` if an image is wider than the atlas.
 pub fn pack_atlas(images: &[&Image], width: u32) -> Option<(Image, Vec<(u32, u32)>)> {
     let mut order: Vec<usize> = (0..images.len()).collect();
     order.sort_by_key(|&i| std::cmp::Reverse((images[i].height, images[i].width)));
@@ -480,25 +482,33 @@ pub fn pack_atlas(images: &[&Image], width: u32) -> Option<(Image, Vec<(u32, u32
     let (mut x, mut y, mut shelf) = (0u32, 0u32, 0u32);
     for &i in &order {
         let im = images[i];
-        if im.width > width {
+        if im.width + 2 > width {
             return None;
         }
-        if x + im.width > width {
+        if x + im.width + 2 > width {
             x = 0;
-            y += shelf + 1;
+            y += shelf + 2;
             shelf = 0;
         }
-        pos[i] = (x, y);
-        x += im.width + 1;
+        pos[i] = (x + 1, y + 1);
+        x += im.width + 2;
         shelf = shelf.max(im.height);
     }
-    let height = (y + shelf).max(1);
+    let height = (y + shelf + 2).max(1);
     let mut rgba = vec![0u8; (width * height * 4) as usize];
     for (im, &(px, py)) in images.iter().zip(&pos) {
-        for row in 0..im.height {
-            let src = (row * im.width * 4) as usize;
-            let dst = (((py + row) * width + px) * 4) as usize;
-            rgba[dst..dst + (im.width * 4) as usize].copy_from_slice(&im.rgba[src..src + (im.width * 4) as usize]);
+        if im.width == 0 || im.height == 0 {
+            continue;
+        }
+        // Rows −1..=h, columns −1..=w, each from the nearest pixel of the image.
+        for row in -1..=im.height as i64 {
+            let sy = row.clamp(0, im.height as i64 - 1) as u32;
+            for col in -1..=im.width as i64 {
+                let sx = col.clamp(0, im.width as i64 - 1) as u32;
+                let src = ((sy * im.width + sx) * 4) as usize;
+                let dst = ((((py as i64 + row) as u32) * width + (px as i64 + col) as u32) * 4) as usize;
+                rgba[dst..dst + 4].copy_from_slice(&im.rgba[src..src + 4]);
+            }
         }
     }
     Some((Image { width, height, rgba }, pos))
@@ -595,14 +605,19 @@ mod tests {
     fn atlas_packs_images_without_overlap() {
         let img = |w: u32, h: u32, v: u8| Image { width: w, height: h, rgba: vec![v; (w * h * 4) as usize] };
         let (a, b, c) = (img(3, 2, 10), img(4, 3, 20), img(2, 1, 30));
-        let (atlas, pos) = pack_atlas(&[&a, &b, &c], 8).unwrap();
-        assert_eq!(pos, vec![(5, 0), (0, 0), (0, 4)]);
-        assert_eq!((atlas.width, atlas.height), (8, 5));
-        assert_eq!(atlas.pixel(5, 0)[0], 10);
-        assert_eq!(atlas.pixel(3, 2)[0], 20);
-        assert_eq!(atlas.pixel(1, 4)[0], 30);
-        assert_eq!(atlas.pixel(4, 0)[0], 0, "1 px gap");
-        assert!(pack_atlas(&[&b], 3).is_none());
+        let (atlas, pos) = pack_atlas(&[&a, &b, &c], 12).unwrap();
+        assert_eq!(pos, vec![(7, 1), (1, 1), (1, 6)]);
+        assert_eq!((atlas.width, atlas.height), (12, 8));
+        assert_eq!(atlas.pixel(7, 1)[0], 10);
+        assert_eq!(atlas.pixel(4, 3)[0], 20);
+        assert_eq!(atlas.pixel(1, 6)[0], 30);
+        // Each image's ring repeats its edge: no empty pixel is ever sampled at its border.
+        assert_eq!(atlas.pixel(5, 1)[0], 20, "b's right ring");
+        assert_eq!(atlas.pixel(6, 1)[0], 10, "a's left ring");
+        assert_eq!(atlas.pixel(0, 0)[0], 20, "b's corner");
+        assert_eq!(atlas.pixel(10, 1)[0], 10, "a's right ring");
+        assert_eq!(atlas.pixel(11, 1)[0], 0, "beyond the rings");
+        assert!(pack_atlas(&[&b], 5).is_none());
     }
 
     /// Encode an ARGB4444 value the way UGS stores it.
