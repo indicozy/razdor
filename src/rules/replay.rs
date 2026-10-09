@@ -792,3 +792,21 @@ fn tutorial2_yoshka_keeps_his_name_and_pitchfork_through_the_events() {
     assert_eq!((u.personal, u.xp), (1, 17));
     assert_eq!(d.g.unit_label(u), "Крестьянин Йошка");
 }
+
+/// РК1's event 26 «- Молния» casts lightning (spell 13) on the hero's army on the western
+/// road (points 11 and 12) with no window: the original plays its effect over him and his
+/// walk ends there (0x4ab1ec). The damage lands and the map is told to show it.
+#[test]
+fn rk1_the_road_lightning_is_shown_and_stops_the_walk() {
+    use crate::rules::events::EventWorld;
+    let Some(dt) = install() else { return };
+    let c = content(&dt);
+    let mut d = Driver::new(&dt, &c, "РК1", HeroClass::Knight);
+    let before: i32 = d.g.squad.iter().map(|u| u.hp).sum();
+    EventWorld::apply_spell(&mut d.g, 13);
+    // What the event engine's step hands on with its own outcomes (`Game::run_script`).
+    let events = std::mem::take(&mut d.g.effect_events);
+    assert!(events.iter().any(|e| matches!(e, Event::EventSpell { spell: 13 })), "{events:?}");
+    assert!(events.iter().filter(|e| matches!(e, Event::EventSpell { .. })).all(Event::needs_reading), "it ends the walk");
+    assert!(d.g.squad.iter().map(|u| u.hp).sum::<i32>() < before, "the lightning hurts");
+}

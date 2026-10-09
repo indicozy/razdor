@@ -467,6 +467,7 @@ impl Game {
         for id in queued {
             if let Some(def) = self.spell(id).cloned() {
                 self.apply_spell_to_army_ext(&def, true);
+                events.push(Event::EventSpell { spell: id });
             }
         }
     }
@@ -810,8 +811,8 @@ mod tests {
         assert_eq!(g.squad[1].hp, max - 10, "the event's heal waits behind the reading");
         let mut events = Vec::new();
         g.end_reading(&mut events);
-        assert!(matches!(events[..], [Event::SpellCast { spell: 3, target: CastTarget::Own, outcome: CastOutcome::Done { killed: 0, .. } }]), "{events:?}");
-        assert_eq!(g.squad[1].hp, max, "−15, then +30 (the heal first would leave max − 15)");
+        assert!(matches!(events[..], [Event::SpellCast { spell: 3, target: CastTarget::Own, outcome: CastOutcome::Done { killed: 0, .. } }, Event::EventSpell { spell: 1 }]), "{events:?}");
+        assert_eq!(g.squad[1].hp, max, "−15, then +30 (the heal first would leave max − 15); the event's effect is shown");
         assert_eq!((g.mana, g.world.armies[0].troops[0].hurt), (1000, 0), "free; the enemy is untouched");
         // An own-army spell read meanwhile lands as an event's cast: 5 × its 10 h.
         let t = now(&g);

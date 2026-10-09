@@ -289,12 +289,46 @@ impl MapView {
 
 /// A world spell's part on the map: the camera's glide to the target army when it is more
 /// than 300 px away (0x4afa98, 900 ms cosine), then the spell's effect over it (0x4af2f8).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 enum SpellFx {
     /// To this army (`None`: the hero's), from where the camera was when it set off.
     Look { army: Option<u32>, started: Option<(f64, (f32, f32))> },
     /// The effect `art` over this army (`None`: the hero's).
     Effect { army: Option<u32>, art: &'static str, started: Option<f64> },
+    /// The spell's own effects (`Effect1..3`) over this army (`None`: the hero's), as the
+    /// original plays them (0x4af2f8).
+    Layers { army: Option<u32>, layers: Vec<FxLayer>, started: Option<f64> },
+}
+
+/// One of a spell's `EffectN`: its animation, when it starts and how long it runs (ms), its
+/// tint, how far up it is drawn and its scale (× 1000).
+#[derive(Clone, Debug)]
+struct FxLayer {
+    art: String,
+    start_ms: f64,
+    duration_ms: f64,
+    tint: Color,
+    y_offset: f32,
+    scale: f32,
+}
+
+impl FxLayer {
+    fn of(e: &razdor::dt::data::SpellEffect) -> FxLayer {
+        let c = |v: i32| v.clamp(0, 255) as f32 / 255.0;
+        FxLayer {
+            art: format!("Spells/{}.ugs", e.file),
+            start_ms: e.start_ms.max(0) as f64,
+            duration_ms: e.duration_ms.max(1) as f64,
+            tint: Color::new(c(e.rgb[0]), c(e.rgb[1]), c(e.rgb[2]), 1.0),
+            y_offset: e.y_offset as f32,
+            scale: e.scale_milli.max(1) as f32 / 1000.0,
+        }
+    }
+}
+
+/// How long a spell's effects run: the latest start plus its length (0x4af2f8).
+fn layers_ms(layers: &[FxLayer]) -> f64 {
+    layers.iter().map(|l| l.start_ms + l.duration_ms).fold(0.0, f64::max)
 }
 
 /// The glide's length, and the spell effect's.
@@ -325,8 +359,18 @@ pub(super) fn look_at(target: CastTarget) {
     SPELL_FX.with(|q| q.borrow_mut().push(SpellFx::Look { army, started: None }));
 }
 
-/// Spell `s` lands on `target`: its effect over the army, queued for the map.
+/// Spell `s` lands on `target`: its effect over the army, queued for the map. The spell's
+/// own `Effect1..3` when it has them, else a stand-in by its school.
 pub(super) fn spell_effect(s: &razdor::rules::content::SpellDef, target: CastTarget) {
+    let layers: Vec<FxLayer> = s.effects.iter().flatten().filter(|e| !e.file.trim().is_empty()).map(FxLayer::of).collect();
+    if !layers.is_empty() && layers.iter().all(|l| super::chrome::animation(&l.art).is_some()) {
+        let army = match target {
+            CastTarget::Own => None,
+            CastTarget::Army(uid) => Some(uid),
+        };
+        SPELL_FX.with(|q| q.borrow_mut().push(SpellFx::Layers { army, layers, started: None }));
+        return;
+    }
     let (army, art) = match target {
         CastTarget::Own => (None, "Spells/S-Swirl.ugs"),
         CastTarget::Army(uid) => (
@@ -386,6 +430,7 @@ fn play_spell_fx(game: &Game, view: &mut MapView, now: f64) {
             }
         },
         SpellFx::Effect { started, .. } => now - *started.get_or_insert(now) >= SPELL_FX_SECS,
+        SpellFx::Layers { layers, started, .. } => (now - *started.get_or_insert(now)) * 1000.0 >= layers_ms(layers),
     };
     if done {
         view.spell_fx.pop_front();
@@ -1359,7 +1404,8 @@ fn play_event(game: &Game, event: &Event) {
 
 fn describe(event: &Event, game: &Game) -> Option<String> {
     match event {
-        Event::NewDay(_) | Event::Captured(_) | Event::Script(_) => None,
+        // An event's spell writes nothing: the original shows only its effect.
+        Event::NewDay(_) | Event::Captured(_) | Event::Script(_) | Event::EventSpell { .. } => None,
         Event::SpellCast { spell, target, outcome } => game.spell(*spell).map(|s| super::spellbook::landed(s, *target, *outcome)),
         Event::Tribute { paid, mana, .. } => Some(match paid {
             razdor::rules::game::Tribute::Gold(g) => trf!("The village pays its tribute: {g} gold and {mana} mana.", g, mana),
@@ -1419,6 +1465,14 @@ pub(super) fn handle_events(game: &mut Game, events: Vec<Event>, message: &mut O
                         look_at(target);
                     }
                     spell_effect(&s, target);
+                }
+            }
+            // An event's spell on the hero: its effect over him, its sound by the spell's own
+            // target (0x4af392 / 0x4af3a2: a spell for an enemy plays `Spell-Evil` even here).
+            Event::EventSpell { spell } => {
+                if let Some(s) = game.spell(spell).cloned() {
+                    super::audio::cue(if razdor::rules::magic::targets_enemy(&s) { super::audio::Cue::SpellEvil } else { super::audio::Cue::SpellGood });
+                    spell_effect(&s, CastTarget::Own);
                 }
             }
             Event::Captured(_) | Event::Met(_) | Event::Battle(_) => {}
@@ -1750,6 +1804,20 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
             let c = cam.to_screen(at);
             let t = ((now - t0) / SPELL_FX_SECS) as f32;
             super::chrome::effect(art, c, cam.cell_size().x * 3.0, t, WHITE);
+        }
+    }
+    // A spell's own effects: each layer while it runs, its 50 frames over its length, in its
+    // tint, raised by its offset and at its scale (0x4af2f8).
+    if let Some(SpellFx::Layers { army, layers, started: Some(t0) }) = view.spell_fx.front() {
+        if let Some(at) = army_pos(game, *army) {
+            let c = cam.to_screen(at);
+            let zoom = cam.scale / PX;
+            let ms = (now - t0) * 1000.0;
+            for l in layers.iter().filter(|l| ms >= l.start_ms && ms <= l.start_ms + l.duration_ms) {
+                let Some(w) = super::chrome::animation(&l.art).and_then(|f| f.first().map(|t| t.width())) else { continue };
+                let t = ((ms - l.start_ms) / l.duration_ms) as f32;
+                super::chrome::effect(&l.art, vec2(c.x, c.y - l.y_offset * zoom), w * zoom * l.scale, t, l.tint);
+            }
         }
     }
     // The shown route's travel time, at its end.
