@@ -726,7 +726,17 @@ pub struct Army {
     pub mind: AiMind,
 }
 
+fn shown_army_name(name: &str) -> &str {
+    name.split('#').next().unwrap_or_default().trim_end_matches(' ')
+}
+
 impl Army {
+    /// The name the player sees (0x4973a0): the scenario's name up to its first `#` (the
+    /// editor's numbering, `Призрак#2`), trailing spaces dropped.
+    pub fn shown_name(&self) -> &str {
+        shown_army_name(&self.name)
+    }
+
     pub fn tile(&self, map: &TileMap) -> Tile {
         map.tile_at(self.pos)
     }
@@ -1590,6 +1600,14 @@ mod tests {
     use super::testkit::*;
     use super::*;
     use crate::dt::dtm::Surface;
+
+    #[test]
+    fn an_army_s_name_is_shown_up_to_its_hash() {
+        assert_eq!(shown_army_name("Призрак#2"), "Призрак");
+        assert_eq!(shown_army_name("Призрак #2"), "Призрак");
+        assert_eq!(shown_army_name("Банда Хромого"), "Банда Хромого");
+        assert_eq!(shown_army_name("#3"), "");
+    }
     use crate::rules::content::Content;
     use crate::rules::game::Game;
     use crate::rules::map::object_class;

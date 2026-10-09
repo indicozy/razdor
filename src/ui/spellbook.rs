@@ -218,7 +218,7 @@ pub fn frame(
         let can = game.mana >= game.cast_cost(s).mana && game.foe.is_none();
         for (i, &a) in armies.iter().take(4).enumerate() {
             let army = &game.world.armies[a];
-            let name = if army.name.is_empty() { tr("an army").to_string() } else { army.name.clone() };
+            let name = if army.shown_name().is_empty() { tr("an army").to_string() } else { army.shown_name().to_string() };
             let d = game.world.map.distance(army.tile(&game.world.map), here);
             let label = trf!("Cast on {name} ({d} cells)", name, d);
             let b = Rect::new(lr.x + 10.0 * k, lr.y + 32.0 * k + i as f32 * 30.0 * k, lr.w - 20.0 * k, 26.0 * k);
