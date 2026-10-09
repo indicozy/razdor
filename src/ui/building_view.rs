@@ -886,8 +886,6 @@ pub(super) fn item_description(game: &Game, assets: &Assets, item: ItemId, x: f3
     let d = c.item(item);
     chrome::text_box(Rect::new(x, y, w, h));
     draw_rectangle_lines(x, y, w, h, 2.0 * k, Color::new(0.6, 0.42, 0.25, 1.0));
-    assets.draw_item(item, x + w / 2.0 - 28.0 * k, y + 10.0 * k, 56.0 * k);
-    text_centered(&d.name, x + w / 2.0, y + 90.0 * k, 20.0 * k, BOX_INK);
     let limit = match d.kind {
         ArtefactType::BlowWeapon => Some(tr("warriors only")),
         ArtefactType::ShotWeapon => Some(tr("shooters only")),
@@ -895,18 +893,44 @@ pub(super) fn item_description(game: &Game, assets: &Assets, item: ItemId, x: f3
         ArtefactType::Item => Some(tr("trade goods: cannot be worn")),
         _ => None,
     };
-    let mut ly = y + 112.0 * k;
+    let props = describe(c, item);
+    // Everything in the box: the picture, the name, the description and the properties at
+    // the largest size that fits its height (the army window's box under the promotion tree
+    // is a small one), the description cut short only at the smallest.
+    let layout = |s: f32| {
+        let desc = wrap(&d.description, w - 24.0 * k, 15.0 * k * s);
+        let lines = wrap(&props, w - 24.0 * k, 16.0 * k * s);
+        let height = (10.0 + 56.0 * s + 6.0 + 22.0 * s + if limit.is_some() { 20.0 * s } else { 0.0 } + 18.0 * s * desc.len() as f32 + 4.0 + 19.0 * s * lines.len() as f32 + 6.0) * k;
+        (desc, lines, height)
+    };
+    let scales = [1.0, 0.9, 0.8, 0.72, 0.65];
+    let s = scales.iter().copied().find(|&s| layout(s).2 <= h).unwrap_or(0.65);
+    let (mut desc, lines, _) = layout(s);
+    let icon = 56.0 * k * s;
+    assets.draw_item(item, x + w / 2.0 - icon / 2.0, y + 10.0 * k, icon);
+    let mut ly = y + 10.0 * k + icon + 6.0 * k + 18.0 * k * s;
+    text_centered(&d.name, x + w / 2.0, ly, 20.0 * k * s, BOX_INK);
+    ly += 4.0 * k * s;
     if let Some(limit) = limit {
-        text_centered(limit, x + w / 2.0, ly, 16.0 * k, Color::new(1.0, 0.6, 0.4, 1.0));
-        ly += 20.0 * k;
+        ly += 20.0 * k * s;
+        text_centered(limit, x + w / 2.0, ly, 16.0 * k * s, Color::new(1.0, 0.6, 0.4, 1.0));
     }
-    for line in wrap(&d.description, w - 24.0 * k, 15.0 * k).into_iter().take(4) {
-        text_centered(&line, x + w / 2.0, ly, 15.0 * k, BOX_INK);
-        ly += 18.0 * k;
+    // At the smallest size the description gives way to the properties.
+    let room = ((y + h - 6.0 * k - ly - 4.0 * k - 19.0 * k * s * lines.len() as f32) / (18.0 * k * s)).floor().max(0.0) as usize;
+    if desc.len() > room {
+        desc.truncate(room);
+        if let Some(last) = desc.last_mut() {
+            *last = format!("{}…", last.trim_end());
+        }
     }
-    for line in wrap(&describe(c, item), w - 24.0 * k, 16.0 * k).into_iter().take(3) {
-        text_centered(&line, x + w / 2.0, ly + 4.0 * k, 16.0 * k, MANA);
-        ly += 19.0 * k;
+    for line in &desc {
+        ly += 18.0 * k * s;
+        text_centered(line, x + w / 2.0, ly, 15.0 * k * s, BOX_INK);
+    }
+    ly += 4.0 * k;
+    for line in &lines {
+        ly += 19.0 * k * s;
+        text_centered(line, x + w / 2.0, ly, 16.0 * k * s, MANA);
     }
 }
 
