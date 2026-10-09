@@ -619,10 +619,10 @@ pub fn back_row_def(c: &razdor::rules::content::Content, slot: Slot) -> i32 {
     }
 }
 
-/// The signs from a card's top left (493a64): the promotion for a unit of the hero's army
-/// (`own`, not the hero) that can take one, then a drunk potion.
-fn top_left_signs(c: &razdor::rules::content::Content, sq: Rect, u: &Unit, own: bool) {
-    let upgrade = own && u.upgrade_tree(c).iter().any(|&(_, _, ok)| ok);
+/// The signs from a card's top left (493a64): the promotion for a unit that can take one
+/// (`promotable`: of the hero's army, not the hero, or of a garrison), then a drunk potion.
+fn top_left_signs(c: &razdor::rules::content::Content, sq: Rect, u: &Unit, promotable: bool) {
+    let upgrade = promotable && u.upgrade_tree(c).iter().any(|&(_, _, ok)| ok);
     chrome::card_signs(sq, true, &[(upgrade, "Sign-Upgrade", GREEN), (!u.potions.is_empty(), "sign-potion", GREEN)]);
 }
 
@@ -677,7 +677,9 @@ fn card_grid(game: &Game, assets: &Assets, f: &Frame, rel_y: f32, units: &[&Unit
         } else if u.unpaid {
             chrome::badge("sign-payment", sq.x + sq.w - 12.0 * k, sq.y + 12.0 * k, 20.0 * k, RED);
         }
-        top_left_signs(c, sq, u, own && i > 0);
+        // The hero's army but its hero, and every garrison unit (493a64: army 0 or a
+        // building's, < 0, outside a battle).
+        top_left_signs(c, sq, u, !own || i > 0);
         super::spell_badges::draw(sq, &u.spells, u.drain, game.clock.total_minutes() as u64, c);
         if selected == Some(i) {
             chrome::glow_frame(sq, Color::new(1.0, 0.85, 0.3, 0.95), false);
