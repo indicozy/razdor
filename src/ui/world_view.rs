@@ -930,10 +930,11 @@ fn draw_ship(cam: &Camera, pos: (f32, f32), sail: Color) {
     draw_triangle(vec2(c.x + 1.0, top - 28.0 * k), vec2(c.x + 1.0, top - 6.0 * k), vec2(c.x + 16.0 * k, top - 8.0 * k), sail);
 }
 
-/// The mark under the hero (yellow) and under an army (red), as the original's screen
-/// shows them.
+/// The mark under the hero (yellow), under an army (red) and on the route's end (green), as
+/// the original's screen shows them.
 const MARK_HERO: Color = Color::new(1.0, 0.92, 0.1, 1.0);
 const MARK_ARMY: Color = Color::new(0.95, 0.15, 0.1, 1.0);
+const MARK_ROUTE_END: Color = Color::new(0.2, 0.95, 0.2, 1.0);
 
 /// A thin dashed ring on the ground at `pos` (the original's `Selection-*.lit` marks,
 /// 0x4ce30c), the ring's light added to the ground (its blend
@@ -1083,7 +1084,12 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
 /// The route being walked, as the original draws it: a white arrow on every cell ahead
 /// (`Windows/Way_Arrows.ugs`, 32×22, one frame per direction in the exe's order: up-left,
 /// up, up-right, right, down-right, down, down-left, left). The time left is in the bar.
+/// The cell the route leads to has a green ring, as the hero's and the armies' cells have
+/// theirs (0x48eeb0 with kind 2: the rings' second colour).
 fn draw_route(game: &Game, path: &[Tile], cam: &Camera) {
+    if let Some(&end) = path.last() {
+        draw_mark(cam, game.world.map.center(end), MARK_ROUTE_END);
+    }
     let arrows = super::chrome::animation("Windows/Way_Arrows.ugs").filter(|a| a.len() == 8);
     let zoom = cam.scale / PX;
     let mut from = game.tile();
