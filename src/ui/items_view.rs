@@ -262,10 +262,13 @@ fn tree_view(game: &mut Game, assets: &Assets, sel: usize, u: &Unit, r: Rect, me
 /// the pack indices `kept`, in their order. Returns the pack index pressed.
 fn pack_view(game: &Game, assets: &Assets, r: Rect, scroll: &mut usize, hover: &mut Option<ItemId>, kept: Option<&[usize]>) -> Option<usize> {
     let k = chrome::k();
-    // As many of the original's squares as the width takes (5 in its 300 px).
-    let cols = (((r.w - 18.0 * k) / (56.0 * k)).floor() as usize).max(PACK_COLS);
-    let cell = ((r.w - 18.0 * k) / cols as f32).floor();
-    let rows_shown = ((r.h / cell).floor() as usize).max(1);
+    // As many of the original's squares as the width takes (5 in its 300 px), then as many
+    // rows as fill the height, the squares shrunk to fit them: no empty band under the pack.
+    let room = r.w - 18.0 * k;
+    let wide = (room / ((room / (56.0 * k)).floor().max(PACK_COLS as f32))).floor();
+    let rows_shown = ((r.h / wide).round() as usize).max(1);
+    let cell = wide.min(r.h / rows_shown as f32).floor();
+    let cols = ((room / cell).floor() as usize).max(PACK_COLS);
     let rows = kept.map_or(PACK_SIZE, |v| v.len().max(1)).div_ceil(cols).max(rows_shown);
     let max_scroll = rows.saturating_sub(rows_shown);
     if mouse_in(r.x, r.y, r.w, r.h) {
