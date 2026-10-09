@@ -395,3 +395,6 @@ Open the release page = Открыть страницу выпуска
 RAZDOR modder = Моддер «Раздора»
 A unique character cannot be moved into a garrison! = Уникальный персонаж не может быть перемещен в гарнизон!
 You cannot change places with the selected character! = Нельзя обменяться местом с выбранным персонажем!
+Restart the battle = Перезапуск битвы
+Do you really want to start this battle again? = Вы действительно хотите начать эту битву заново?
+Attention!\n\nYou cannot go back to the map without finishing the battle!\nTo stop the game under way, leave to the main menu (the game is not saved), or start this battle again (restart). = Внимание!!!\n\nНельзя выйти в режим игрового поля, не завершив битву!\nЕсли Вы желаете прервать активную игру, воспользуйтесь возможностью выйти в главное меню (без сохранения данных активной игры) или начните эту битву заново (рестарт).

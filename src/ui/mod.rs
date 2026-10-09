@@ -317,6 +317,21 @@ impl App {
 
     /// Loads save file `path`: the demo from the built-in data, a map from the install (the
     /// same map file only). A pending battle starts again; a pending question is asked again.
+    /// The battle under way played again from the game as it began (`BattleView::restart_state`).
+    fn restart_battle(&mut self, meta: &save::SaveMeta, bytes: &[u8]) {
+        let install = self.assets.dt.as_ref().zip(self.dt_content.clone()).map(|(d, content)| Install { dir: &d.install.dir, content });
+        let restored = save::decode(bytes).and_then(|(_, game)| save::restore(meta, game, self.demo.clone(), install.as_ref()));
+        match restored {
+            Ok(mut game) => {
+                self.dialogs.clear();
+                self.message = None;
+                self.screen = saves::battle(&mut game);
+                self.game = Some(game);
+            }
+            Err(e) => self.message = Some(razdor::trf!("Cannot load: {e}.", e)),
+        }
+    }
+
     fn load(&mut self, path: &std::path::Path) {
         let install = self.assets.dt.as_ref().zip(self.dt_content.clone()).map(|(d, content)| Install { dir: &d.install.dir, content });
         match save::load(path, self.demo.clone(), install.as_ref()) {
@@ -844,7 +859,15 @@ impl App {
             match v.exit.take() {
                 Some(saves::ExitChoice::Quit) => self.quit = true,
                 Some(saves::ExitChoice::MainMenu) => next = Some(Screen::MainMenu),
-                Some(saves::ExitChoice::Restart) => restart = true,
+                // «Рестарт» in a battle: this battle again from the moment it began (Razdor's;
+                // the scenario's restart when that moment was not kept).
+                Some(saves::ExitChoice::Restart) => match v.restart_state.take() {
+                    Some((meta, bytes)) => {
+                        self.restart_battle(&meta, &bytes);
+                        return;
+                    }
+                    None => restart = true,
+                },
                 None => {}
             }
         }

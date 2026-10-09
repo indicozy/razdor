@@ -155,7 +155,11 @@ pub fn battle(game: &mut Game) -> Screen {
     let foe = game.foe.take();
     autosave(game, &name, true);
     game.foe = foe;
-    Screen::Battle(Box::new(BattleView::new(game.start_battle())))
+    // The moment just before it, its foe pending, kept for «Рестарт» (this battle again).
+    let state = save::meta_of(game, SaveKind::Auto, &name).ok().and_then(|m| save::encode(&m, game).ok().map(|b| (m, b)));
+    let mut view = BattleView::new(game.start_battle());
+    view.restart_state = state;
+    Screen::Battle(Box::new(view))
 }
 
 /// "2026-09-25 13:08" (UTC) from seconds since 1970.
@@ -544,7 +548,7 @@ pub fn exit_window(game: &Game, assets: &Assets, asking: &mut bool) -> (Option<E
     world_view::backdrop_lit(game, assets, Some(super::game_bar::BarButton::Menu));
     let title = own("ExitGame", "Title", n_("Leave the game"));
     let warning = own("ExitGame", "Warning", n_("Attention!\n\nThe game under way will end.\nTo go on with it another time, save it from the map's bar first."));
-    match exit_dialog(&title, &warning, asking) {
+    match exit_dialog(&title, &warning, asking, false) {
         (_, true) => (None, Some(Screen::WorldMap)),
         (choice, false) => (choice, None),
     }
@@ -555,17 +559,15 @@ pub fn exit_window(game: &Game, assets: &Assets, asking: &mut bool) -> (Option<E
 /// whether it was cancelled.
 pub fn battle_exit_dialog(asking: &mut bool) -> (Option<ExitChoice>, bool) {
     let title = own("ExitBattle", "Title", n_("Ways out of the battle"));
-    let warning = own(
-        "ExitBattle",
-        "Warning",
-        n_("Attention!\n\nYou cannot go back to the map without finishing the battle!\nTo stop the game under way, leave to the main menu (the game is not saved) or start the scenario again (restart)."),
-    );
-    exit_dialog(&title, &warning, asking)
+    // Razdor's «Рестарт» here plays this battle again (the user's choice; the original's
+    // restarts the scenario, and says so): its own text.
+    let warning = tr(n_("Attention!\n\nYou cannot go back to the map without finishing the battle!\nTo stop the game under way, leave to the main menu (the game is not saved), or start this battle again (restart)."));
+    exit_dialog(&title, warning, asking, true)
 }
 
 /// The window of [`exit_window`] and [`battle_exit_dialog`]: the warning and "Выйти из
 /// игры", "Выйти в меню", "Рестарт" (after a question), "Отмена".
-fn exit_dialog(title: &str, warning: &str, asking: &mut bool) -> (Option<ExitChoice>, bool) {
+fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool) -> (Option<ExitChoice>, bool) {
     let k = super::chrome::k();
     let (w, h) = (560.0 * k, 250.0 * k);
     let r = Rect::new((screen_width() - w) / 2.0, (screen_height() - super::chrome::bar_height() - h) / 2.0, w, h);
@@ -602,13 +604,18 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool) -> (Option<ExitCho
         }
     }
     if was_asking {
-        let t = own("MessageBox", "Restart_Title", n_("Restart the game"));
-        // The restart box reads its text as markup (0x4bf748 → 0x48e438); Razdor's own text
-        // is centred as the install's (`^`).
-        let q = (razdor::i18n::lang() == razdor::i18n::Lang::Ru)
-            .then(|| super::chrome::ui_text("MessageBox", "Restart_Text"))
-            .flatten()
-            .unwrap_or_else(|| format!("^{}", tr(n_("Do you really want to start the scenario under way again from the beginning?"))));
+        let (t, q) = if battle {
+            (tr(n_("Restart the battle")).to_string(), format!("^{}", tr(n_("Do you really want to start this battle again?"))))
+        } else {
+            let t = own("MessageBox", "Restart_Title", n_("Restart the game"));
+            // The restart box reads its text as markup (0x4bf748 → 0x48e438); Razdor's own
+            // text is centred as the install's (`^`).
+            let q = (razdor::i18n::lang() == razdor::i18n::Lang::Ru)
+                .then(|| super::chrome::ui_text("MessageBox", "Restart_Text"))
+                .flatten()
+                .unwrap_or_else(|| format!("^{}", tr(n_("Do you really want to start the scenario under way again from the beginning?"))));
+            (t, q)
+        };
         match marked_question(&t, &q) {
             Some(true) => {
                 *asking = false;

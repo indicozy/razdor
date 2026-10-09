@@ -173,6 +173,9 @@ pub struct BattleView {
     exit_asking: bool,
     /// What that window chose, for the app to carry out.
     pub exit: Option<super::saves::ExitChoice>,
+    /// The game as the battle began, its foe pending: «Рестарт» plays this battle again from
+    /// it (Razdor's, on the user's word; the original's button restarts the scenario).
+    pub restart_state: Option<(razdor::rules::save::SaveMeta, Vec<u8>)>,
     /// The battle as it began (the log's length, who acts, his actions left, the turn):
     /// until one changes nobody has acted, and the quick battle of Razdor's old deploy
     /// screen (Q / Enter) is offered.
@@ -309,6 +312,7 @@ impl BattleView {
             close_clicked: false,
             exit_asking: false,
             exit: None,
+            restart_state: None,
             hold: None,
             signs: Vec::new(),
             begun,

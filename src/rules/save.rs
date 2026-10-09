@@ -659,6 +659,17 @@ pub(crate) mod tests {
         Arc::new(Content::builtin())
     }
 
+    /// The battle's restart keeps the game as the battle began, its foe pending: restored,
+    /// it comes back with the same foe, so the battle opens again.
+    #[test]
+    fn a_game_kept_as_its_battle_began_comes_back_with_its_foe() {
+        let c = demo();
+        let mut g = Game::new(c.clone(), HeroClass::Knight);
+        g.foe = Some(crate::rules::game::Foe::Garrison(g.world.index_of("Bandit lair")));
+        let loaded = roundtrip(&g, c, None);
+        assert_eq!(loaded.foe, g.foe);
+    }
+
     fn walk(g: &mut Game, frames: usize) {
         for _ in 0..frames {
             if !g.moving() {

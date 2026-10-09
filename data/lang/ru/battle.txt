@@ -287,7 +287,6 @@ Lasting gift = Долгий дар
 Gift of fate = Дар судьбы
 Concentration = Сосредоточение
 
-Attention!\n\nYou cannot go back to the map without finishing the battle!\nTo stop the game under way, leave to the main menu (the game is not saved) or start the scenario again (restart). = Внимание!\n\nНельзя вернуться на карту, не закончив битву!\nЧтобы прервать игру, выйдите в главное меню (игра не сохранится) или начните сценарий заново (рестарт).
 To leave the battle, press ESC = Чтобы выйти из битвы, нажмите ESC
 Ways out of the battle = Выход из битвы
 ways out of the battle = выход из битвы
