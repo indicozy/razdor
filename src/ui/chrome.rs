@@ -224,6 +224,42 @@ pub fn win_ugs(name: &str) -> Option<Texture2D> {
     art(&format!("Windows/{name}.ugs"), Fx::Plain)
 }
 
+/// The frames of a battle effect (`Graphics/Battle/<file>.ugs`) with its colour and alpha
+/// offsets applied (0x4e1148), for [`premultiplied`] drawing; `None` without the file.
+pub fn battle_effect(e: &razdor::dt::data::BattleEffect) -> Option<Vec<Texture2D>> {
+    if e.file.trim().is_empty() {
+        return None;
+    }
+    let key = format!("battle-effect:{}:{:?}:{}", e.file, e.rgb, e.alpha);
+    CHROME.with(|c| {
+        let mut c = c.borrow_mut();
+        let c = c.as_mut()?;
+        if let Some(t) = c.animations.get(&key) {
+            return t.clone();
+        }
+        let t = find_path(&c.dir, &format!("Graphics/Battle/{}.ugs", e.file.trim()))
+            .and_then(|p| gfx::decode_file(&p))
+            .map_err(|err| razdor::diag!("Discord Times art: {}: {err}", e.file))
+            .ok()
+            .map(|mut frames| {
+                frames
+                    .iter_mut()
+                    .filter_map(|f| {
+                        for p in f.rgba.chunks_exact_mut(4) {
+                            let (rgb, a5) = e.pixel([p[0], p[1], p[2], p[3]]);
+                            p[..3].copy_from_slice(&rgb);
+                            p[3] = (a5 as u32 * 255 / 31) as u8;
+                        }
+                        to_texture(f)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .filter(|v| !v.is_empty());
+        c.animations.insert(key, t.clone());
+        t
+    })
+}
+
 /// Every frame of an animation (`Graphics/<rel>`); additive ones are made to glow.
 pub fn animation(rel: &str) -> Option<Vec<Texture2D>> {
     CHROME.with(|c| {
@@ -346,6 +382,20 @@ void main() {
 thread_local! {
     static ADDITIVE: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
     static MULTIPLY: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
+    static PREMULTIPLIED: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
+}
+
+/// Runs `draw` blending as the original's 5-bit alpha masks (engine.md §6): what is below
+/// is kept by `1 − alpha` and the colour drawn is added as it is (premultiplied).
+pub fn premultiplied(draw: impl FnOnce()) {
+    use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation};
+    let material = PREMULTIPLIED.with(|m| {
+        m.get_or_init(|| {
+            blend_material(BlendState::new(Equation::Add, BlendFactor::One, BlendFactor::OneMinusValue(BlendValue::SourceAlpha)), "premultiplied")
+        })
+        .clone()
+    });
+    with_material(material, draw);
 }
 
 fn blend_material(blend: macroquad::miniquad::BlendState, what: &str) -> Option<Material> {

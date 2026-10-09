@@ -1141,11 +1141,60 @@ pub struct GlobalOptions {
     pub item_sale_cost: i32,
     /// `[Costs] ShipCost`: ship rent.
     pub ship_cost: i32,
+    /// `[BattleEffects] Effect0..6` (0x4e1148): shot, melee, hostile magic, blessing, cure,
+    /// potion, promotion.
+    pub battle_effects: [BattleEffect; 7],
     pub ai_targets: AiTargets,
     /// `[AIArmyGeneration]`: army theme → unit ids, in file order.
     pub army_generation: Vec<(String, Vec<u32>)>,
     /// Other `[GlobalOptions]` keys.
     pub extra: BTreeMap<String, String>,
+}
+
+/// A battle effect's picture (`Graphics/Battle/<file>.ugs`), its colour and alpha offsets and
+/// its vertical offset on the card (`[BattleEffects] EffectN`, saves-data.md §6).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BattleEffect {
+    pub file: String,
+    pub rgb: [i32; 3],
+    pub alpha: i32,
+    pub y: i32,
+}
+
+impl BattleEffect {
+    /// The shipped `_Global.ini`'s, for content without the file.
+    const SHIPPED: [(&'static str, i32, i32, i32, i32, i32); 7] = [
+        ("--KUSKI", 0, -70, -150, -200, 20),
+        ("--KUSKIBIG", 0, -70, -150, -200, 20),
+        ("--PAR", 0, -100, -200, -200, 0),
+        ("--RAYS", -70, -200, 0, -200, 0),
+        ("--CURE", -200, 0, 0, -150, 0),
+        ("--POTION", -100, 0, 0, 0, 0),
+        ("--UPGRADE", -100, 0, -100, -100, 0),
+    ];
+
+    /// `file,r,g,b,alpha,y`; a missing or bad number reads 0.
+    fn parse(v: &str) -> BattleEffect {
+        let mut parts = v.split(',').map(str::trim);
+        let file = parts.next().unwrap_or_default().to_string();
+        let mut n = || parts.next().and_then(|x| x.parse().ok()).unwrap_or(0);
+        let (r, g, b, alpha, y) = (n(), n(), n(), n(), n());
+        BattleEffect { file, rgb: [r, g, b], alpha, y }
+    }
+
+    /// One pixel of its picture (8-bit channels from 4-bit nibbles, `nibble × 17`) as the
+    /// original keeps it (0x4e1148): each colour `+ offset`, clamped to 0..255; alpha the
+    /// same, raised to at least 8 when any colour nibble is not 0, then kept in 5 bits.
+    /// Returns the colour and the alpha in 0..=31.
+    pub fn pixel(&self, p: [u8; 4]) -> ([u8; 3], u8) {
+        let c = |v: u8, off: i32| (v as i32 + off).clamp(0, 255) as u8;
+        let rgb = [c(p[0], self.rgb[0]), c(p[1], self.rgb[1]), c(p[2], self.rgb[2])];
+        let mut a = (p[3] as i32 + self.alpha).clamp(0, 255);
+        if p[..3].iter().any(|&v| v >= 17) {
+            a = a.max(8);
+        }
+        (rgb, (a / 8) as u8)
+    }
 }
 
 impl Default for GlobalOptions {
@@ -1188,6 +1237,7 @@ impl Default for GlobalOptions {
             difficulty_factor: 120,
             item_sale_cost: 25,
             ship_cost: 250,
+            battle_effects: BattleEffect::SHIPPED.map(|(f, r, g, b, a, y)| BattleEffect { file: f.to_string(), rgb: [r, g, b], alpha: a, y }),
             ai_targets: AiTargets::default(),
             army_generation: Vec::new(),
             extra: BTreeMap::new(),
@@ -1225,6 +1275,12 @@ impl GlobalOptions {
         let none = Section::default();
         let at = |i: Option<usize>| i.map_or(&none, |i| &ini.sections[i]);
         o.ship_cost = at(costs).int("ShipCost");
+        // The effects come from the section selected after `[GlobalOptions]` (0x4e1148): a
+        // missing key reads as empty, so that effect has no picture.
+        let effects = at(ini.select("BattleEffects", general));
+        for (n, e) in o.battle_effects.iter_mut().enumerate() {
+            *e = BattleEffect::parse(effects.get(&format!("Effect{n}")).unwrap_or_default());
+        }
         let f = Fields::new(at(general));
         let set = |v: &mut i32, key: &str| *v = f.int(key);
         set(&mut o.wizard_main_spell, "WizardMainSpell");
@@ -1630,6 +1686,19 @@ Generated=1\r\n";
         assert_eq!(loaded.value.row2_def, 0);
         assert_eq!(loaded.value.army_generation, vec![("Normal".to_string(), vec![4, 6])]);
         assert_eq!(loaded.warnings, ["[AIArmyGeneration] Normal=4,x,6,: x is not a unit id, ignored"]);
+    }
+
+    #[test]
+    fn battle_effects_read_their_offsets_and_adjust_pixels() {
+        let o = GlobalOptions::from_ini(&Ini::parse("[GlobalOptions]\nRow2Def=5\n[BattleEffects]\nEffect0=--KUSKI,0,-70,-150,-200,20\nEffect4=--CURE,-200,0,0,-150,0\n")).value;
+        assert_eq!(o.battle_effects[0], BattleEffect { file: "--KUSKI".into(), rgb: [0, -70, -150], alpha: -200, y: 20 });
+        assert_eq!(o.battle_effects[1].file, "", "a missing key: no picture");
+        // A white pixel with no alpha: red kept, green and blue lowered, alpha raised to 8.
+        assert_eq!(o.battle_effects[0].pixel([255, 255, 255, 0]), ([255, 185, 105], 1));
+        // Black stays transparent.
+        assert_eq!(o.battle_effects[0].pixel([0, 0, 0, 0]), ([0, 0, 0], 0));
+        assert_eq!(o.battle_effects[4].pixel([255, 255, 255, 255]), ([55, 255, 255], 13));
+        assert_eq!(GlobalOptions::default().battle_effects[6].file, "--UPGRADE");
     }
 
     #[test]
