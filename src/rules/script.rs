@@ -356,7 +356,20 @@ impl Game {
         s.replace("#HERONAME", &self.hero_name()).replace('\r', "")
     }
 
-    /// The name shown for squad member `u`: a named character's own name, else its class.
+    /// The name the original shows for member `i` of the hero's army (0x49747c, and the
+    /// card's header 0x492f24): the hero is his class and his name, «(нет имени)» when he
+    /// has none (`[NewHero] PrivateHeroName`, what the new-hero window starts with); a named
+    /// character his own name; any other unit its class.
+    pub fn squad_label(&self, i: usize) -> String {
+        let Some(u) = self.squad.get(i) else { return String::new() };
+        if i == 0 && u.named == 0 {
+            let name = self.hero_name.as_deref().map(str::trim).filter(|n| !n.is_empty()).map_or_else(|| crate::i18n::tr("(no name)").to_string(), str::to_string);
+            return format!("{} {name}", u.name(&self.content));
+        }
+        self.unit_label(u)
+    }
+
+    /// The name shown for unit `u`: a named character's own name, else its class.
     pub fn unit_label(&self, u: &Unit) -> String {
         let named = (u.named as usize).checked_sub(1).and_then(|k| self.world.named_characters.get(k));
         match named {

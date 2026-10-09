@@ -183,6 +183,8 @@ No rumours heard yet. = Слухов пока не слышно.
 No messages yet. = Посланий пока нет.
 The hero's journal = Журнал героя
 date unknown = дата неизвестна
+(no name) = (нет имени)
+His own item: it cannot be taken off while he lives. = Это личная вещь персонажа: пока он жив, её не снять.
 Date unknown = Дата неизвестна
 Time since it was received: {t} = Получено: {t} назад
 {first}–{last} of {total} = {first}–{last} из {total}
@@ -265,3 +267,5 @@ The map of this game is not in the install. = Карты этой игры не�
 To the menu = Выйти в меню
 
 the menu's buttons; a scenario twice: go on = кнопки меню; сценарий дважды — дальше
+A unique character cannot be moved into a garrison! = Уникальный персонаж не может быть перемещен в гарнизон!
+You cannot change places with the selected character! = Нельзя обменяться местом с выбранным персонажем!

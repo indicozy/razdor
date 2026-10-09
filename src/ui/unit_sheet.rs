@@ -18,6 +18,8 @@ use super::widgets::{measure, mouse_in, wrap};
 pub struct Sheet<'a> {
     pub kind: UnitId,
     pub name: &'a str,
+    /// A named character's name is written in its own font (0x492f24: ae24a0).
+    pub named: bool,
     pub level: i32,
     pub xp: i32,
     pub need: i32,
@@ -244,6 +246,8 @@ fn stat_lines(content: &Content, s: &Sheet) -> Vec<Line> {
 }
 
 /// The stat strip's text.
+/// A named character's name on his card (the original's ae24a0 font, gold).
+const NAMED_INK: Color = Color::new(1.0, 0.86, 0.35, 1.0);
 const STRIP_INK: Color = Color::new(0.98, 0.92, 0.72, 1.0);
 const HITS_INK: Color = Color::new(1.0, 0.78, 0.35, 1.0);
 
@@ -293,15 +297,45 @@ pub fn caster(c: &Content, unit: UnitId) -> bool {
     razdor::rules::ai::attack_kind(c, unit) == 0x11
 }
 
+/// The panel a card's strip is drawn on (0x49462c): in the hero's army and in battle the
+/// hero (and in battle the enemy's first unit) has the red one (ae269c), a named character
+/// the blue one (ae26a0); everyone else, and any garrison outside battle, the plain strip.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StripPanel {
+    Plain,
+    Hero,
+    Named,
+}
+
+impl StripPanel {
+    /// The panel of a unit of the hero's army: index 0 is the hero.
+    pub fn of_squad(index: usize, named: u8) -> StripPanel {
+        if index == 0 {
+            StripPanel::Hero
+        } else if named > 0 {
+            StripPanel::Named
+        } else {
+            StripPanel::Plain
+        }
+    }
+}
+
 /// The strip under a card's portrait, as the original's: "A: 45  D: 35/40", "Mnvr: 1
 /// Ini: 12", "Hits: 70" (or "Hits: 45/70"). `row2` is added to the ranged defence shown
 /// (the back row's `Row2Def`, 0 elsewhere: 0x49462c). `lit` reddens it (the unit acting, or
 /// the one selected on the army screen). `caster` and `place` choose the attack piece
 /// ([`caster`], [`strip_place`]).
 #[allow(clippy::too_many_arguments)]
-pub fn stat_strip(strip: Rect, now: &Stats, base: &Stats, power: i32, caster: bool, place: usize, hp: i32, row2: i32, lit: bool) {
+pub fn stat_strip(strip: Rect, now: &Stats, base: &Stats, power: i32, caster: bool, place: usize, hp: i32, row2: i32, lit: bool, panel: StripPanel) {
     let k = k();
     chrome::surface(strip, chrome::Skin::Strip);
+    // The original recolours the strip itself (0x48da5c): red for the hero, blue for a named
+    // character; a tint over it here.
+    match panel {
+        StripPanel::Plain => {}
+        StripPanel::Hero => draw_rectangle(strip.x, strip.y, strip.w, strip.h, Color::new(0.85, 0.08, 0.02, 0.55)),
+        StripPanel::Named => draw_rectangle(strip.x, strip.y, strip.w, strip.h, Color::new(0.05, 0.3, 0.95, 0.6)),
+    }
     if lit {
         draw_rectangle(strip.x, strip.y, strip.w, strip.h, Color::new(0.75, 0.25, 0.0, 0.4));
     }
@@ -426,7 +460,8 @@ pub fn draw(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: bool,
     let x1 = r.x + r.w - 16.0 * k;
     let name_size = (17.0 * k).round();
     let mut y = name_y;
-    super::dt_font::with_face(super::dt_font::Face::Title, || shadow_centered(s.name, r.x + r.w / 2.0, y, name_size, CREAM));
+    let name_ink = if s.named { NAMED_INK } else { CREAM };
+    super::dt_font::with_face(super::dt_font::Face::Title, || shadow_centered(s.name, r.x + r.w / 2.0, y, name_size, name_ink));
     y += 17.0 * k;
     let size = (12.0 * k).round();
     // Level and experience on one line.
@@ -492,6 +527,7 @@ mod tests {
         let sheet = Sheet {
             kind,
             name: "",
+            named: false,
             level: 0,
             xp: 0,
             need: 0,
