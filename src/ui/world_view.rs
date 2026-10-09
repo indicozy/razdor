@@ -1227,23 +1227,33 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
     }
 }
 
-/// Route dots and, at the end, the travel time.
-/// The route being walked, as the original draws it: a white arrow on every cell ahead
-/// (`Windows/Way_Arrows.ugs`, 32×22, one frame per direction in the exe's order: up-left,
-/// up, up-right, right, down-right, down, down-left, left). The time left is in the bar.
-/// The cell the route leads to has a green ring, as the hero's and the armies' cells have
-/// theirs (0x48eeb0 with kind 2: the rings' second colour).
+/// The route being walked, as the original draws it (0x49e520): a white arrow on every cell
+/// ahead but the last (`Windows/Way_Arrows.ugs`, 32×22, one frame per direction in the exe's
+/// order: up-left, up, up-right, right, down-right, down, down-left, left). Inside a building
+/// only the cell the route leaves it from has one. The last cell has a green ring instead
+/// (0x48eeb0 with kind 2), unless an army stands there to be met: its own ring stays. The
+/// arrows' brightness runs along the route ([`route_arrow_light`]). The time left is in the
+/// bar.
 fn draw_route(game: &Game, path: &[Tile], cam: &Camera) {
+    let w = &game.world;
+    let building = |t: Tile| w.location_covering(t).is_some();
     if let Some(&end) = path.last() {
-        draw_mark(cam, game.world.map.center(end), MARK_ROUTE_END);
+        let target = !building(end) && w.armies.iter().any(|a| a.tile(&w.map) == end);
+        if !building(end) && !target {
+            draw_mark(cam, w.map.center(end), MARK_ROUTE_END);
+        }
     }
     let arrows = super::chrome::animation("Windows/Way_Arrows.ugs").filter(|a| a.len() == 8);
     let zoom = cam.scale / PX;
+    let ms = get_time() * 1000.0;
     let mut from = game.tile();
-    for &t in path {
-        let c = cam.cell_centre(t);
+    for (i, &t) in path.iter().enumerate() {
         let (dx, dy) = ((t.0 - from.0).signum(), (t.1 - from.1).signum());
         from = t;
+        if !route_arrow(i, path.len(), building(t), path.get(i + 1).is_some_and(|&n| building(n))) {
+            continue;
+        }
+        let c = cam.cell_centre(t);
         let dir = match (dx, dy) {
             (-1, -1) => 0,
             (0, -1) => 1,
@@ -1254,17 +1264,34 @@ fn draw_route(game: &Game, path: &[Tile], cam: &Camera) {
             (-1, 1) => 6,
             _ => 7,
         };
+        // The original numbers its phases from the route's start; counted from the end here,
+        // so they stay put while the hero walks it down (only the wave's start time differs).
+        let v = route_arrow_light(ms, (path.len() - 1 - i) % 10);
         match &arrows {
             Some(a) => {
                 let (w, h) = (a[dir].width() * zoom, a[dir].height() * zoom);
-                draw_texture_ex(&a[dir], c.x - w / 2.0, c.y - h / 2.0, WHITE, DrawTextureParams { dest_size: Some(vec2(w, h)), ..Default::default() });
+                draw_texture_ex(&a[dir], c.x - w / 2.0, c.y - h / 2.0, Color::new(v, v, v, 1.0), DrawTextureParams { dest_size: Some(vec2(w, h)), ..Default::default() });
             }
             None => {
                 draw_circle(c.x, c.y, 3.5, Color::new(0.0, 0.0, 0.0, 0.5));
-                draw_circle(c.x, c.y, 2.5, WHITE);
+                draw_circle(c.x, c.y, 2.5, Color::new(v, v, v, 1.0));
             }
         }
     }
+}
+
+/// Whether the route's step `i` of `len` has an arrow (0x49e520): not the last one, and in a
+/// building only the one the next step leaves it from.
+fn route_arrow(i: usize, len: usize, in_building: bool, next_in_building: bool) -> bool {
+    i + 1 < len && (!in_building || !next_in_building)
+}
+
+/// A route arrow's brightness at `ms` for its phase 0..9 (map renderer, 0x4c612c chunk):
+/// `x = (ms / 10 + 18 · phase) mod 181`, folded at 90, plus 150, as a grey of 255.
+fn route_arrow_light(ms: f64, phase: usize) -> f32 {
+    let x = ((ms / 10.0) as i64 + 18 * phase as i64).rem_euclid(181);
+    let x = if x > 90 { 180 - x } else { x };
+    (x + 150) as f32 / 255.0
 }
 
 /// A 2×6 (or 3×4) mini formation of portraits, the front row at the bottom as the enemy's
@@ -2239,6 +2266,24 @@ fn draw_debug(game: &Game, cam: &Camera) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_route_s_last_cell_has_no_arrow() {
+        let arrows = |b: &[bool]| (0..b.len()).filter(|&i| route_arrow(i, b.len(), b[i], b.get(i + 1).copied().unwrap_or(false))).collect::<Vec<_>>();
+        assert_eq!(arrows(&[false, false, false]), [0, 1]);
+        // Through a building: only the cell it is left from.
+        assert_eq!(arrows(&[false, true, true, false, false]), [0, 2, 3]);
+        assert!(arrows(&[false]).is_empty());
+    }
+
+    #[test]
+    fn route_arrows_glow_from_150_to_240() {
+        assert_eq!(route_arrow_light(0.0, 0), 150.0 / 255.0);
+        assert_eq!(route_arrow_light(900.0, 0), 240.0 / 255.0);
+        assert_eq!(route_arrow_light(1000.0, 0), 230.0 / 255.0);
+        assert_eq!(route_arrow_light(0.0, 5), 240.0 / 255.0);
+        assert_eq!(route_arrow_light(1810.0, 0), 150.0 / 255.0);
+    }
 
     /// РК1's buildings get the original's tooltip frames (0x4cb18c): its two ruins, guarded
     /// and hostile, the red one, as the player saw «Развалины» should be; Bonitur's castle,
