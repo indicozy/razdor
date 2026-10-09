@@ -877,9 +877,15 @@ impl BattleView {
         // The original's signs (493a64): a drunk potion, then the blessing, from the top
         // left; poison (a negative regeneration), then the curse, from the top right; 23 px
         // apart, 1 px below the portrait's top. The spell badges along its bottom.
+        // The original keeps the blessing and curse signs to the battle's end; Razdor shows
+        // them only while the effect lasts, until the round start clears the modifiers (a
+        // choice of the user's, 2026-10-09).
         let signs = self.signs.get(id).copied().unwrap_or_default();
-        chrome::card_signs(sq, true, &[(f.potion, "sign-potion", GREEN), (signs.bless, "sign-bless", BLUE_TEXT)]);
-        chrome::card_signs(sq, false, &[(f.poisoned(), "sign-poison", GREEN), (signs.curse, "sign-curse", PURPLE)]);
+        let m = f.mods;
+        let blessed = signs.bless && (m.attack > 0 || m.defence > 0 || m.initiative > 0 || m.actions > 0);
+        let cursed = signs.curse && (m.attack < 0 || m.defence < 0 || m.initiative < 0 || m.actions < 0);
+        chrome::card_signs(sq, true, &[(f.potion, "sign-potion", GREEN), (blessed, "sign-bless", BLUE_TEXT)]);
+        chrome::card_signs(sq, false, &[(f.poisoned(), "sign-poison", GREEN), (cursed, "sign-curse", PURPLE)]);
         // The turn order (Razdor's) in the bottom right corner, clear of the spell badges.
         if let Some(n) = order {
             let (ox, oy) = (sq.x + sq.w - 16.0 * k, sq.y + sq.h - 16.0 * k);
