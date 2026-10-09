@@ -170,7 +170,8 @@ impl DtArt {
             .get_or_init(|| {
                 let textures = std::array::from_fn(|code| self.install.terrain_texture(code as u8).ok());
                 let fill = std::array::from_fn(|code| surface_color(code as u8).into());
-                TerrainLayer::new(&textures, &fill)
+                let water = or_log("water frames", self.install.water_frames());
+                TerrainLayer::new(&textures, &fill, &water)
             })
             .as_ref()
     }

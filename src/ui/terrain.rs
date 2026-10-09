@@ -7,12 +7,20 @@
 //! The 16 terrain textures sit in one atlas (4×4 slots, each padded with a wrapped border so
 //! linear filtering never bleeds between slots); the map's surface codes are a small texture
 //! with one texel per cell.
+//!
+//! Water (codes 0–2) is animated as the original's (0x4c8864): a second texture stage holds
+//! water frame `(t div 100) mod 32` (0x4c8db2) and is multiplied into the ground twice over
+//! (D3D MODULATE2X), with its own coordinates of ⅓ texture per cell, so a 64×64 frame spans
+//! 3×3 cells. The original applies it on the water cells' own quads only, not on the soft
+//! edges a water cell lays over its neighbours; here it goes with each water code's share of
+//! the blend.
 
 use std::cell::RefCell;
 
 use macroquad::prelude::*;
 
-use razdor::dt::gfx::Image;
+use macroquad::miniquad::TextureWrap;
+use razdor::dt::gfx::{water_frame, Image, WATER_FRAMES};
 
 const VERTEX: &str = r#"#version 100
 attribute vec3 position;
@@ -31,6 +39,9 @@ precision highp float;
 varying highp vec2 uv;
 uniform sampler2D Cells;
 uniform sampler2D Atlas;
+uniform sampler2D Water;
+// 1.0 when Water holds the current water frame.
+uniform float WaterOn;
 // The part of the map under the quad, in cells (cell centres at integers): x0, y0, x1, y1.
 uniform vec4 View;
 uniform vec2 MapSize;
@@ -46,10 +57,11 @@ float code_at(vec2 c) {
     return floor(texture2D(Cells, (c + 0.5) / MapSize).r * 15.0 + 0.5);
 }
 
-vec3 ground(float code, vec2 px) {
+vec3 ground(float code, vec2 px, vec3 water) {
     vec2 slot = vec2(mod(code, 4.0), floor(code / 4.0));
     vec2 t = mod(px, Tile);
-    return texture2D(Atlas, (slot * Slot + (Slot - Tile) * 0.5 + t) / AtlasSize).rgb;
+    vec3 c = texture2D(Atlas, (slot * Slot + (Slot - Tile) * 0.5 + t) / AtlasSize).rgb;
+    return code < 2.5 && WaterOn > 0.5 ? min(c * water * 2.0, 1.0) : c;
 }
 
 void main() {
@@ -57,8 +69,11 @@ void main() {
     vec2 i = floor(p);
     vec2 f = p - i;
     vec2 px = p * CellPx;
-    vec3 top = mix(ground(code_at(i), px), ground(code_at(i + vec2(1.0, 0.0)), px), f.x);
-    vec3 bottom = mix(ground(code_at(i + vec2(0.0, 1.0)), px), ground(code_at(i + vec2(1.0, 1.0)), px), f.x);
+    // The water stage's coordinates: 1/3 per cell from the corner of the cell before map cell 0
+    // (the original's terrain has a 1-cell border); the frame texture repeats.
+    vec3 w = texture2D(Water, (p + 1.5) / 3.0).rgb;
+    vec3 top = mix(ground(code_at(i), px, w), ground(code_at(i + vec2(1.0, 0.0)), px, w), f.x);
+    vec3 bottom = mix(ground(code_at(i + vec2(0.0, 1.0)), px, w), ground(code_at(i + vec2(1.0, 1.0)), px, w), f.x);
     gl_FragColor = vec4(mix(top, bottom, f.y), 1.0);
 }
 "#;
@@ -75,6 +90,8 @@ pub struct TerrainLayer {
     atlas: Texture2D,
     tile: Vec2,
     slot: Vec2,
+    /// The water frames ([`WATER_FRAMES`] or none, then water is still).
+    water: Vec<Texture2D>,
     /// Surface codes and size of the map in `cells`, to rebuild it when the map changes.
     cells: RefCell<CellCache>,
 }
@@ -109,6 +126,16 @@ pub fn pack_terrain_atlas(textures: &[Option<Image>; 16], fill: &[[u8; 4]; 16]) 
     Some((Image { width: aw, height: ah, rgba }, (tw, th)))
 }
 
+/// A water frame's texture: linear and repeating, as the frame tiles every 3 cells.
+fn water_texture(img: &Image) -> Texture2D {
+    let tex = Texture2D::from_rgba8(img.width as u16, img.height as u16, &img.rgba);
+    tex.set_filter(FilterMode::Linear);
+    // SAFETY: called on the main thread while macroquad runs, as every texture upload.
+    let gl = unsafe { get_internal_gl() };
+    gl.quad_context.texture_set_wrap(tex.raw_miniquad_id(), TextureWrap::Repeat, TextureWrap::Repeat);
+    tex
+}
+
 /// The cell texture's texel for a surface code (red = code / 15).
 fn code_texel(code: u8) -> [u8; 4] {
     [(code & 15) * 17, 0, 0, 255]
@@ -116,18 +143,27 @@ fn code_texel(code: u8) -> [u8; 4] {
 
 impl TerrainLayer {
     /// A layer over the given textures, or `None` without any texture or if the shader
-    /// does not compile (callers then draw square cells).
-    pub fn new(textures: &[Option<Image>; 16], fill: &[[u8; 4]; 16]) -> Option<TerrainLayer> {
+    /// does not compile (callers then draw square cells). `water` are the animated water
+    /// frames, uploaded once; without all [`WATER_FRAMES`] of them water stays still.
+    pub fn new(textures: &[Option<Image>; 16], fill: &[[u8; 4]; 16], water: &[Image]) -> Option<TerrainLayer> {
         let (image, (tw, th)) = pack_terrain_atlas(textures, fill)?;
         let material = load_material(
             ShaderSource::Glsl { vertex: VERTEX, fragment: FRAGMENT },
             MaterialParams {
-                uniforms: ["View", "MapSize", "CellPx", "Tile", "Slot", "AtlasSize"]
+                uniforms: ["View", "MapSize", "CellPx", "Tile", "Slot", "AtlasSize", "WaterOn"]
                     .iter()
-                    .zip([UniformType::Float4, UniformType::Float2, UniformType::Float2, UniformType::Float2, UniformType::Float2, UniformType::Float2])
+                    .zip([
+                        UniformType::Float4,
+                        UniformType::Float2,
+                        UniformType::Float2,
+                        UniformType::Float2,
+                        UniformType::Float2,
+                        UniformType::Float2,
+                        UniformType::Float1,
+                    ])
                     .map(|(n, t)| UniformDesc::new(n, t))
                     .collect(),
-                textures: vec!["Cells".into(), "Atlas".into()],
+                textures: vec!["Cells".into(), "Atlas".into(), "Water".into()],
                 ..Default::default()
             },
         )
@@ -135,11 +171,17 @@ impl TerrainLayer {
         .ok()?;
         let atlas = Texture2D::from_rgba8(image.width as u16, image.height as u16, &image.rgba);
         atlas.set_filter(FilterMode::Linear);
+        let water = if water.len() == WATER_FRAMES && water.iter().all(|f| f.width > 0 && f.height > 0) {
+            water.iter().map(water_texture).collect()
+        } else {
+            Vec::new()
+        };
         Some(TerrainLayer {
             material,
             atlas,
             tile: vec2(tw as f32, th as f32),
             slot: vec2((tw + 2 * PAD) as f32, (th + 2 * PAD) as f32),
+            water,
             cells: RefCell::new(None),
         })
     }
@@ -161,8 +203,9 @@ impl TerrainLayer {
 
     /// Draws the terrain of a `w`×`h` map (`codes` row by row) into screen rectangle `dest`,
     /// which shows the map area `view` in cells (x0, y0, x1, y1; cell centres at integers).
-    /// `cell_px` is the texture pixels per cell (the textures' scale).
-    pub fn draw(&self, codes: &[u8], (w, h): (u32, u32), dest: Rect, view: Vec4, cell_px: Vec2) {
+    /// `cell_px` is the texture pixels per cell (the textures' scale). `water_ms` is the clock
+    /// (ms) that animates the water, `None` for still water.
+    pub fn draw(&self, codes: &[u8], (w, h): (u32, u32), dest: Rect, view: Vec4, cell_px: Vec2, water_ms: Option<i64>) {
         if w == 0 || h == 0 || w > u16::MAX as u32 || h > u16::MAX as u32 || codes.len() != (w * h) as usize {
             return;
         }
@@ -171,6 +214,10 @@ impl TerrainLayer {
         gl_use_material(m);
         m.set_texture("Cells", cells.clone());
         m.set_texture("Atlas", self.atlas.clone());
+        // Without frames the stage samples the atlas and is switched off.
+        let water = water_ms.filter(|_| !self.water.is_empty()).map(|ms| self.water[water_frame(ms)].clone());
+        m.set_uniform("WaterOn", if water.is_some() { 1.0f32 } else { 0.0 });
+        m.set_texture("Water", water.unwrap_or_else(|| self.atlas.clone()));
         m.set_uniform("View", view);
         m.set_uniform("MapSize", vec2(w as f32, h as f32));
         m.set_uniform("CellPx", cell_px);

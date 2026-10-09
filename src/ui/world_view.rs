@@ -800,7 +800,7 @@ fn draw_terrain(game: &Game, art: Option<&DtArt>, cam: &Camera) {
         if tl.x < br.x && tl.y < br.y {
             let (a, b) = (cam.to_screen(tl.into()), cam.to_screen(br.into()));
             let view = vec4(tl.x, tl.y / rh, br.x, br.y / rh);
-            layer.draw(map.surface_codes(), (map.w as u32, map.h as u32), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(PX, PX * rh));
+            layer.draw(map.surface_codes(), (map.w as u32, map.h as u32), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(PX, PX * rh), Some((get_time() * 1000.0) as i64));
         }
         return;
     }
