@@ -77,6 +77,9 @@ pub struct Dialog {
     /// Not shown before this clock time (seconds, `get_time`): the won battle's report comes
     /// 250 ms after the battle screen closes (the chained step 0x4af658).
     pub not_before: Option<f64>,
+    /// A key that closes it went down while it was shown: its release presses OK (0x4cd558).
+    /// A key already held as it opened does nothing (0x47f358).
+    pub key_down: std::cell::Cell<bool>,
 }
 
 impl Dialog {
@@ -98,6 +101,7 @@ impl Dialog {
             chord: false,
             cued: false,
             not_before: None,
+            key_down: std::cell::Cell::new(false),
         }
     }
 
@@ -396,7 +400,13 @@ pub fn draw(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Close> {
         };
     }
     let ok = button(x + w / 2.0 - 60.0, by, 120.0, 38.0, "OK", true);
-    (ok || key(KeyCode::Enter) || key(KeyCode::Escape)).then_some(Close::Ok)
+    // Any key but Tab, Alt and the Up and Down arrows, on its release (0x4cd558): Space,
+    // Enter and Esc alike. Closed on the release, the key is no longer held when the map
+    // takes over, so the hero walks on.
+    if super::widgets::ok_key_pressed() {
+        d.key_down.set(true);
+    }
+    (ok || (d.key_down.get() && super::widgets::ok_key_released())).then_some(Close::Ok)
 }
 
 #[cfg(test)]
