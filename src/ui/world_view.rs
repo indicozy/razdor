@@ -1812,7 +1812,7 @@ fn describe(event: &Event, game: &Game) -> Option<String> {
 /// next screen, if any.
 pub(super) fn handle_events(game: &mut Game, events: Vec<Event>, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) -> Option<Screen> {
     let mut next = None;
-    let mut tribute = false;
+    let mut tribute = None;
     for event in events {
         play_event(game, &event);
         if let Some(m) = describe(&event, game) {
@@ -1824,6 +1824,11 @@ pub(super) fn handle_events(game: &mut Game, events: Vec<Event>, message: &mut O
             Event::Encounter(_) => {}
             Event::Arrived(l) => {
                 if game.foe.is_some() {
+                } else if let Some(o) = game.village_offer() {
+                    // A village's offer is a question in the event window, before any village
+                    // window (0x4aca80).
+                    *message = None;
+                    dialogs.push_back(super::building_view::offer_dialog(game, o, false));
                 } else if let Some(first) = game.window_at(l) {
                     *message = None;
                     next = Some(Screen::Building(BuildingView::new(first)));
@@ -1833,7 +1838,13 @@ pub(super) fn handle_events(game: &mut Game, events: Vec<Event>, message: &mut O
             // A building taken on the way opens no window and does not stop the walk
             // (0x4ad94c); the village's own window opens when he ends his walk in it.
             // The tribute's gold sound plays as the village window closes (`building_view`).
-            Event::Tribute { .. } => tribute = true,
+            Event::Tribute { paid, mana, .. } => {
+                let gold = match paid {
+                    razdor::rules::game::Tribute::Gold(g) => g,
+                    razdor::rules::game::Tribute::Item(_) => 0,
+                };
+                tribute = Some((gold, mana));
+            }
             // A spell read to its end: the camera to an enemy target, then the effect.
             Event::SpellCast { spell, target, outcome } => {
                 if let (Some(s), CastOutcome::Done { .. }) = (game.spell(spell).cloned(), outcome) {
@@ -1858,7 +1869,10 @@ pub(super) fn handle_events(game: &mut Game, events: Vec<Event>, message: &mut O
         }
     }
     if let Some(Screen::Building(v)) = next.as_mut() {
-        v.tribute_paid |= tribute;
+        if let Some(t) = tribute {
+            v.tribute_paid = true;
+            v.tribute = t;
+        }
     }
     // The tutorial's end mark (0x4ac9fc): kept in the settings, so it is not offered again.
     if game.script().is_some_and(|s| s.tutorial_done()) {
