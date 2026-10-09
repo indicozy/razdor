@@ -556,13 +556,8 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool) -> (Option<ExitCho
 }
 
 /// A question with Yes / No, `None` until answered (Esc: no, any other key: yes, as the
-/// original's box: `answer_key`).
-fn question(title: &str, text: &str) -> Option<bool> {
-    question_box(title, text, false)
-}
-
-/// [`question`] for the original's boxes whose text is markup (the restart and delete-save
-/// boxes, 0x48e438): each line in its font, centred or justified, no shadow.
+/// original's box: `answer_key`), for the original's boxes whose text is markup (the restart
+/// and delete-save boxes, 0x48e438): each line in its font, centred or justified, no shadow.
 fn marked_question(title: &str, text: &str) -> Option<bool> {
     question_box(title, text, true)
 }
