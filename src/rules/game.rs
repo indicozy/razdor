@@ -3521,6 +3521,30 @@ mod tests {
     }
 
     #[test]
+    fn the_hero_hides_from_an_attacker_in_someone_elses_building() {
+        // ai.md §8: a hostile army next to him attacks only when he stands in no building, on
+        // a bridge or in his own; in a town or market not his, nothing happens (0x4a548c).
+        for kind in [BuildingType::Town, BuildingType::Market] {
+            let mut s = strip();
+            s.buildings = vec![building(kind, 2, 3, (1, 1))];
+            s.armies = vec![army(1, 4, 2, -2, &[troop(4, 0, 1)])];
+            let mut g = start(&s);
+            g.fog = Fog::disabled(24, 6);
+            g.world.armies[0].mind.scripted = true;
+            g.world.armies[0].path = vec![(3, 2), (2, 2), (1, 2)];
+            g.world.armies[0].mind.scores.insert(ai::HERO, 1);
+            g.wait(2);
+            assert_eq!(g.world.armies[0].tile(&g.world.map), (3, 2));
+            assert!(g.set_destination((2, 3)));
+            let events = walk_until_stopped(&mut g);
+            assert!(!events.iter().any(|e| matches!(e, Event::Encounter(_))), "{kind:?}: {events:?}");
+            assert_eq!((g.tile(), g.foe), ((2, 3), None), "{kind:?}");
+            g.wait(4);
+            assert!(g.foe.is_none(), "{kind:?}: still hidden");
+        }
+    }
+
+    #[test]
     fn an_attack_is_shown_after_the_step_that_brought_it_has_played() {
         // The original's armies walk while the hero's step plays and their attack comes at
         // its end (0x4ade3c): on screen the step's window plays out, hero and attacker drawn
