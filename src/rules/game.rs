@@ -2887,7 +2887,8 @@ mod tests {
         assert_eq!(g.promote(0, sword), Err(PromoteError::NotAvailable), "the hero rises by levels only");
         let gold = g.gold;
         g.promote(1, sword).unwrap();
-        assert_eq!((g.squad[1].def, g.squad[1].level, g.squad[1].xp, g.gold), (sword, 1, 0, gold));
+        // The 40 XP are kept (a Razdor choice) and pay the swordsman's first level (35).
+        assert_eq!((g.squad[1].def, g.squad[1].level, g.squad[1].xp, g.gold), (sword, 2, 5, gold));
     }
 
     #[test]

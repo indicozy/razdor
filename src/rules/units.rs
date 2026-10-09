@@ -392,7 +392,9 @@ impl Unit {
     }
 
     /// Switch to class `to` from the upgrade tree, free of charge. The unit starts the new
-    /// class at level 1 with no XP (experience.md §4, 0x4b1df0). Its worn items stay worn,
+    /// class at level 1 (experience.md §4, 0x4b1df0). The original drops its XP there; Razdor
+    /// keeps it, banked into the new class by the gain rule, as the hero keeps what is left
+    /// over a level (a choice of the user's, 2026-10-09). Its worn items stay worn,
     /// whether the new class could put them on or not (the original never checks), and the
     /// stat rebuild after it rescales a wounded unit's HP to the new maximum.
     pub fn promote(&mut self, content: &Content, to: UnitId) -> Result<(), PromoteError> {
@@ -400,9 +402,9 @@ impl Unit {
             return Err(PromoteError::NotAvailable);
         }
         let before = self.max_hp(content);
+        let banked = self.xp;
         self.def = to;
-        self.level = 1;
-        self.xp = 0;
+        (self.level, self.xp, _) = experience::add_xp(1, 0, banked, |l| content.xp_to_next(to, l));
         self.follow_max(content, before);
         Ok(())
     }
@@ -490,7 +492,7 @@ mod tests {
         u.hp = 30; // of 55
         assert_eq!(u.promote(&c, UnitId(2)), Ok(()));
         // The guard's maximum is 50 against the militia's 55: 50 × 30 / 55 = 27.27.
-        assert_eq!((u.def, u.level, u.xp, u.hp), (UnitId(2), 1, 0, 27), "level 1, XP reset, HP rescaled");
+        assert_eq!((u.def, u.level, u.xp, u.hp), (UnitId(2), 1, 20, 27), "level 1, XP kept, HP rescaled");
         assert!((u.carry.0 - 0.272_727).abs() < 1e-4, "{}", u.carry.0);
     }
 
