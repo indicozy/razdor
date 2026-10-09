@@ -48,7 +48,7 @@ impl DisplayMode {
 
 /// The interface scales the player can pick, in screen pixels per pixel of the 960×720
 /// reference (`chrome::k`); `0` is "Auto", the largest that fits the window.
-pub const SCALES: [f32; 7] = [0.0, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0];
+pub const SCALES: [f32; 9] = [0.0, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0];
 
 /// The chosen scale as `f32` bits (`0.0`: auto), read by `chrome::k` every call.
 static SCALE: AtomicU32 = AtomicU32::new(0);
@@ -651,7 +651,9 @@ mod tests {
     #[test]
     fn scale_never_exceeds_the_fit_and_skips_what_does_not_fit() {
         assert_eq!(next_scale(0.0, 1.5), 1.0);
-        assert_eq!(next_scale(1.0, 1.5), 0.0, "1.5 is the fit itself: Auto");
+        assert_eq!(next_scale(1.0, 1.5), 1.25, "a full HD screen's step between 1× and its fit");
+        assert_eq!(next_scale(1.25, 1.5), 0.0, "1.5 is the fit itself: Auto");
+        assert_eq!(scale_label(1.25, 1.5), "1.25×");
         assert_eq!(next_scale(0.0, 3.2), 1.0);
         assert_eq!(next_scale(3.0, 3.2), 0.0);
         assert_eq!(next_scale(2.0, 1.5), 0.0, "a scale that no longer fits moves on to Auto");
