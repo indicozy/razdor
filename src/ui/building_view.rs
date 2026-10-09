@@ -1134,9 +1134,12 @@ fn gold_group(game: &Game, r: Rect) {
 }
 
 /// A village: its waiting tribute and what may be asked instead.
-fn tribute(game: &mut Game, f: &Frame, view: &mut BuildingView, message: &mut Option<String>) {
+/// Returns whether the village window closes: a Yes to the blessing or the priest finishes
+/// the offer at once with no window (0x4ab966), its spell played over the hero on the map.
+fn tribute(game: &mut Game, f: &Frame, view: &mut BuildingView, message: &mut Option<String>) -> bool {
+    let mut leave = false;
     let k = chrome::k();
-    let Some(l) = game.location else { return };
+    let Some(l) = game.location else { return false };
     let (x, y, w) = (f.cx, f.cy, f.cw);
     let v = game.world.locations[l].clone();
     draw_rectangle(x, y, w, 120.0 * k, Color::new(0.2, 0.12, 0.07, 1.0));
@@ -1179,6 +1182,18 @@ fn tribute(game: &mut Game, f: &Frame, view: &mut BuildingView, message: &mut Op
                 let k = game.event_chord();
                 cue(Cue::Event(k as u8));
             }
+            // The blessing's and the priest's spell is cast as an event's (0x4aca80 builds the
+            // offer as an event record): its effect over the hero, its sound by its target.
+            let cast = match result {
+                Some(OfferResult::Blessing(id)) => Some(id),
+                Some(OfferResult::Healed(_)) => Some(PRIEST_SPELL),
+                _ => None,
+            };
+            if let Some(s) = cast.and_then(|id| game.spell(id).cloned()) {
+                cue(if razdor::rules::magic::targets_enemy(&s) { Cue::SpellEvil } else { Cue::SpellGood });
+                super::world_view::spell_effect(&s, razdor::rules::magic::CastTarget::Own);
+                leave = true;
+            }
             let spell_name = |id: u32| game.spell(id).map_or(String::new(), |s| s.name.clone());
             *message = result.map(|r| match r {
                 OfferResult::Paid(n) => trf!("The innkeeper pays off your {n} men.", n),
@@ -1204,6 +1219,7 @@ fn tribute(game: &mut Game, f: &Frame, view: &mut BuildingView, message: &mut Op
     text_fit(tr("The tribute grows every midnight, slower as it nears the village's maximum."), x, by, w, 16.0 * k, DIM);
     let dy = by + 24.0 * k;
     description_box(&v.description, x, dy, w, f.y + f.h - dy - 10.0 * k);
+    leave
 }
 
 /// The shipyard's ship window (0x4d3ec0, opened by 0x4bbc84 when the hero is on land), in
@@ -1337,7 +1353,11 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut BuildingView, message:
         Tab::Garrison => garrison(game, assets, &f, view, message),
         Tab::Market => next = market(game, assets, &f, view, message),
         Tab::Sanctuary => sanctuary(game, &f, view, message),
-        Tab::Tribute => tribute(game, &f, view, message),
+        Tab::Tribute => {
+            if tribute(game, &f, view, message) {
+                return Some(Screen::WorldMap);
+            }
+        }
         Tab::Shipyard => {}
     }
     if let Some(m) = message {
