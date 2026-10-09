@@ -545,7 +545,8 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
         }
         if let Some((CardAnimKind::Cured { unit }, t)) = anim {
             if unit == i {
-                chrome::effect("Battle/--CURE.ugs", sq.center(), sq.w * 1.6, t, WHITE);
+                // `[BattleEffects] Effect4`, its colours and blend as in battle (0x4b11cc).
+                super::battle_view::draw_effect(&c, 4, sq, t);
             }
         }
         if selected == Some(i) {
