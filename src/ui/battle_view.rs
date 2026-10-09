@@ -1016,11 +1016,6 @@ impl BattleView {
             draw_rectangle(ox, oy, 13.0 * k, 13.0 * k, Color::new(0.0, 0.0, 0.0, 0.55));
             shadow_centered(&(n + 1).to_string(), ox + 6.5 * k, oy + 11.0 * k, (11.0 * k).round(), CREAM);
         }
-        let fighting = self.battle.outcome() == Outcome::Ongoing;
-        if fighting && f.alive() && f.slot.row != Row::Reserve && self.battle.helpless(id) {
-            draw_rectangle(sq.x, sq.y + sq.h - 16.0 * k, sq.w, 15.0 * k, Color::new(0.0, 0.0, 0.0, 0.5));
-            shadow_centered(tr("can't reach"), sq.x + sq.w / 2.0, sq.y + sq.h - 4.0 * k, (11.0 * k).round(), Color::new(0.8, 0.8, 0.75, 1.0));
-        }
         // In battle a dead unit's card shows no badges (493a64: HP 0).
         if f.alive() {
             super::spell_badges::draw(sq, &f.spells, f.drain, now, self.battle.content());

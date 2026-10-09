@@ -408,10 +408,14 @@ pub fn stat_strip(strip: Rect, now: &Stats, base: &Stats, power: i32, caster: bo
     let lh = strip.h / 3.0;
     let (x0, x1) = (strip.x + 3.0 * k, strip.x + strip.w - 3.0 * k);
     let (att, ac) = attack_piece(now, base, power, caster, place);
-    shadow_text(&att, x0, strip.y + lh - 2.0 * k, fs, ac);
     let d = razdor::trf!("D: {blow}/{shot}", blow = now[Stat::DefenceBlow], shot = now[Stat::DefenceShot] + row2);
+    // The two pieces of the first line kept apart: smaller when together they are too wide.
+    let room = x1 - x0 - 4.0 * k;
+    let wide = measure(&att, fs).width + measure(&d, fs).width;
+    let fs1 = if wide > room { (fs * room / wide).floor().max(7.0) } else { fs };
+    shadow_text(&att, x0, strip.y + lh - 2.0 * k, fs1, ac);
     let dc = strip_color(now[Stat::DefenceBlow] + now[Stat::DefenceShot], base[Stat::DefenceBlow] + base[Stat::DefenceShot]);
-    shadow_right(&d, x1, strip.y + lh - 2.0 * k, fs, dc);
+    shadow_right(&d, x1, strip.y + lh - 2.0 * k, fs1, dc);
     let (mn, ini) = (now[Stat::Manevres], now[Stat::Initiative]);
     shadow_text(&razdor::trf!("Mnvr: {mn}", mn), x0, strip.y + 2.0 * lh - 2.0 * k, fs, strip_color(mn, base[Stat::Manevres]));
     shadow_right(&razdor::trf!("Ini: {ini}", ini), x1, strip.y + 2.0 * lh - 2.0 * k, fs, strip_color(ini, base[Stat::Initiative]));
