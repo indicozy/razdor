@@ -121,8 +121,9 @@ LIT files, used as a mask for the matching colour file (M).
   **Transitions (M):** the video shows no cell edges: neighbouring surfaces fade into each other over about one
   cell (fields into grass, roads as soft bands, sand along rivers). Razdor draws this by mixing, per pixel, the
   textures of the four nearest cell centres with bilinear weights (`src/ui/terrain.rs`).
-  `Textures/Water/TEXTURE000–031.BMP` are standard 64×64 24-bit BMPs: a 32-frame animated water
-  overlay (exe string `Graphics\Textures\water\texture0%d`).
+  `Textures/Water/TEXTURE000–031.BMP` are standard 64×64 24-bit BMPs: 32 water frames (10 per
+  second) multiplied twice into the ground of water codes 0–2, one frame over 3×3 cells (exe
+  string `Graphics\Textures\water\texture0%d`; engine.md §7).
 - `Spells/*.lit` (100×100): spell book icons. `Windows/*.lit`: every UI window, frame, button, cursor,
   font, splash screen, building interior (`S_*.lit`, `BI_*.lit`), and hero portraits (`Hero0/hero1/hero2.lit`, 160×160).
 - `Logo/AE_Logo.lit`: Aterdux logo (type 2).

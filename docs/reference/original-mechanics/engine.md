@@ -342,7 +342,7 @@ animate.
 
 | What | Rule | Where | Tag |
 |---|---|---|---|
-| Water terrain (codes 0–2) | texture frame `(t div 100) mod 32`: 32 frames at 10 per second | 0x4c8db2 | code |
+| Water terrain (codes 0–2) | texture frame `(t div 100) mod 32`: 32 frames at 10 per second. The frames (`Textures/Water/TEXTURE000–031.BMP`, 64×64, loaded at 0x4cdbb0) go in texture stage 1 over the cell's own ground texture (Shallow/Water/DeepWater) with MODULATE2X, so the colour is `ground × frame × 2`; the stage's coordinates advance ⅓ per cell, so one frame covers 3×3 cells (96×66 px). The soft edges a water cell lays over its neighbours (second pass, stage 1 off) are not animated | 0x4c8db2, 0x4c8de5, 0x4c8b78 | code |
 | Tree sway (class 9) | `s = (t div 70 + phase) mod 51`; offset `0.2·(s − 12.5)` for s < 25, else `0.2·(37.5 − s)`; added to the x coordinate of the sprite's first two vertices, so the top edge leans left and right (−2.5 … +2.5 px, period 3.57 s) | 0x4c99d0 | code |
 | Hero walking | frame `((t − step start) div (WalkDelay div 2)) and 3`, plus 3: figure frames 3–6, two frames per step at the default 150 ms; standing = frame 0 | 0x4ae8f7 | code |
 | AI army walking | frame `((game time div 1000) and 3) + 3`: it changes every 10 **game** minutes | 0x4ad779 | code |
@@ -460,7 +460,7 @@ silent.
 | Clock pause on focus loss | not modelled | Now freezes while inactive (walks, waits, music, fades stop) | missing |
 | Hero walk frames | 8 frames at 10 per second while moving (`world_view::draw_figure`) | frames 3–6 at half the WalkDelay (75 ms default); AI walk frames by game time; land idle 20 × 250 ms | differs |
 | AI walk frames | Frames 3–6, the next every 10 game minutes (`(time_cs div 1000) and 3` + 3) while the army has a step to take, by the game time interpolated inside the stretch, so they stand still with it; its standing frame without a step (`Game::army_walk_frame`) | 0x4ad660 → 0x4ad314 with `[0x68dcb8] div 1000`, from the AI's per-frame advance 0x4ade3c (only while the hero walks or waits) | Matches |
-| Water | static textures | 32 frames at 100 ms on terrain codes 0–2 | missing |
+| Water | frame `(t div 100) mod 32` multiplied twice into the ground of codes 0–2, ⅓ frame per cell, frames uploaded once and picked per draw (`ui::terrain`); its share of Razdor's bilinear blend is animated too, where the original leaves the edge overlays still; still water without the BMPs and in the editor | 32 frames at 100 ms on terrain codes 0–2, MODULATE2X on the cell quads | Matches (blend edges differ) |
 | Cursor animation | system cursor (no animated cursors found in `src/ui`) | 50-frame cursors at 25/30/50 ms from raw time, hotspots per cursor | missing |
 | Main menu background | 9 frames at 100 ms, not cross-faded (`main_menu.rs`) | 9 frames at 150 ms cross-faded + 16 frames at 100 ms | differs |
 | Credits scroll | 30 px/s × UI scale | 35 px/s | differs |

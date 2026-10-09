@@ -441,6 +441,20 @@ pub const TERRAIN_TEXTURES: [&str; 16] = [
     "Ice.lit",
 ];
 
+/// Animated water frames, 64×64 24-bit BMPs loaded at 0x4cdbb0 as `Graphics\Textures\water\`
+/// `texture00<i>.bmp` (i < 10) or `texture0<i>.bmp`, i.e. three digits.
+pub const WATER_FRAMES: usize = 32;
+
+/// The install path of water frame `i` (0..[`WATER_FRAMES`]).
+pub fn water_frame_file(i: usize) -> String {
+    format!("{TEXTURES_DIR}/Water/TEXTURE{i:03}.BMP")
+}
+
+/// The water frame shown at clock `ms`: `(t div 100) mod 32` (0x4c8db2).
+pub fn water_frame(ms: i64) -> usize {
+    (ms.div_euclid(100)).rem_euclid(WATER_FRAMES as i64) as usize
+}
+
 /// Frame of [`UNIT_PORTRAITS`] / [`UNIT_FIGURES`] for a unit `GlobalIndex` (not `IconIndex`).
 pub fn portrait_frame(unit_id: u32) -> Option<usize> {
     (unit_id as usize).checked_sub(1)
@@ -560,6 +574,11 @@ impl DtInstall {
     pub fn terrain_texture(&self, code: u8) -> Result<Image, DtError> {
         let name = TERRAIN_TEXTURES.get(code as usize).ok_or(bad("terrain code", code as usize))?;
         decode_lit(&self.read(&format!("{TEXTURES_DIR}/{name}"))?)
+    }
+
+    /// The 32 animated water frames ([`water_frame_file`]); an error if any is missing.
+    pub fn water_frames(&self) -> Result<Vec<Image>, DtError> {
+        (0..WATER_FRAMES).map(|i| decode_bmp(&self.read(&water_frame_file(i))?)).collect()
     }
 
     /// Any graphics file of the install by relative path, see [`decode_file`].
@@ -789,6 +808,17 @@ mod tests {
     }
 
     #[test]
+    fn water_frame_names_and_clock() {
+        assert_eq!(water_frame_file(0), "Graphics/Textures/Water/TEXTURE000.BMP");
+        assert_eq!(water_frame_file(31), "Graphics/Textures/Water/TEXTURE031.BMP");
+        assert_eq!(water_frame(0), 0);
+        assert_eq!(water_frame(99), 0);
+        assert_eq!(water_frame(100), 1);
+        assert_eq!(water_frame(3199), 31);
+        assert_eq!(water_frame(3200), 0);
+    }
+
+    #[test]
     fn icon_frames() {
         assert_eq!(item_icon_frame("A000.Tga"), Some(0));
         assert_eq!(item_icon_frame("A166.tga"), Some(166));
@@ -928,6 +958,9 @@ mod tests {
             assert_eq!((t.width, t.height), (256, 242), "terrain {code}");
         }
         assert!(dt.terrain_texture(16).is_err());
+        let water = dt.water_frames().unwrap();
+        assert_eq!(water.len(), WATER_FRAMES);
+        assert!(water.iter().all(|w| (w.width, w.height) == (64, 64)));
         let objects = dt.map_objects().unwrap();
         assert_eq!(objects.sprites.len(), 370);
         assert_eq!(objects.sprites.iter().filter(|s| s.section == ObjectSprite::BUILDINGS).count(), 85);

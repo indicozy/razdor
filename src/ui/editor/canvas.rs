@@ -154,7 +154,7 @@ fn draw_terrain(s: &Scenario, art: Option<&DtArt>, cam: &Cam, vis: CellRect, ove
         if tl.x < br.x && tl.y < br.y {
             let (a, b) = (cam.to_screen(tl), cam.to_screen(br));
             let view = vec4(tl.x - 0.5, tl.y - 0.5, br.x - 0.5, br.y - 0.5);
-            layer.draw(&s.terrain, (s.width(), s.height()), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(CW, CH));
+            layer.draw(&s.terrain, (s.width(), s.height()), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(CW, CH), None);
         }
         return;
     }
