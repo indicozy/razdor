@@ -396,3 +396,10 @@ You cannot change places with the selected character! = Нельзя обмен�
 Restart the battle = Перезапуск битвы
 Do you really want to start this battle again? = Вы действительно хотите начать эту битву заново?
 Attention!\n\nYou cannot go back to the map without finishing the battle!\nTo stop the game under way, leave to the main menu (the game is not saved), or start this battle again (restart). = Внимание!!!\n\nНельзя выйти в режим игрового поля, не завершив битву!\nЕсли Вы желаете прервать активную игру, воспользуйтесь возможностью выйти в главное меню (без сохранения данных активной игры) или начните эту битву заново (рестарт).
+
+# Advanced settings: the map's zoom
+Map zoom = Масштаб карты
+Locked = Зафиксирован
+Wheel and +/- = Колесо и +/−
+The zoom the map plays at. The wheel steps away from it and the 0 key comes back to it; locked, the map always shows it. = Масштаб, в котором идёт игра. Колесо мыши отходит от него, клавиша 0 возвращает к нему; зафиксированный, он не меняется.
+back to the map's zoom from the settings = вернуть масштаб карты из настроек

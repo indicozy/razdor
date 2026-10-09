@@ -56,9 +56,60 @@ fn map_area_in(w: f32, h: f32, bar: f32) -> Rect {
 }
 use super::dialog::MANA;
 
+/// The player's own map zoom (the settings, Razdor's): the zoom the wheel steps from and the
+/// 0 key comes back to, and whether the wheel and the +/- keys may change it.
+static HOME_ZOOM: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x3f80_0000);
+static ZOOM_LOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The zoom range the wheel and the settings keep to.
+pub const ZOOM_RANGE: (f32, f32) = (0.4, 2.0);
+
+/// Takes the settings' map zoom and lock in (every frame).
+pub fn set_zoom_prefs(home: f32, locked: bool) {
+    let home = if home.is_finite() { home.clamp(ZOOM_RANGE.0, ZOOM_RANGE.1) } else { 1.0 };
+    HOME_ZOOM.store(home.to_bits(), std::sync::atomic::Ordering::Relaxed);
+    ZOOM_LOCKED.store(locked, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn home_zoom() -> f32 {
+    f32::from_bits(HOME_ZOOM.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// The zoom `steps` wheel notches from `home` (×1.1 each), within [`ZOOM_RANGE`]; locked,
+/// always `home`.
+fn zoom_at(home: f32, steps: i32, locked: bool) -> f32 {
+    if locked {
+        home
+    } else {
+        (home * 1.1f32.powi(steps)).clamp(ZOOM_RANGE.0, ZOOM_RANGE.1)
+    }
+}
+
+/// `steps` moved by `by`, kept where it still changes the zoom.
+fn step_zoom(home: f32, steps: i32, by: i32) -> i32 {
+    let next = steps + by;
+    let z = home * 1.1f32.powi(next);
+    if (z < ZOOM_RANGE.0 && by < 0) || (z > ZOOM_RANGE.1 && by > 0) {
+        steps
+    } else {
+        next
+    }
+}
+
+/// A camera's zoom and where it looked (`None`: the hero).
+type CamState = (f32, Option<(f32, f32)>);
+
+thread_local! {
+    /// The map's camera as last drawn (its zoom and where it looked, `None` the hero): the
+    /// windows over the map draw it so, not re-centred and re-zoomed under them.
+    static LAST_CAM: std::cell::Cell<Option<CamState>> = const { std::cell::Cell::new(None) };
+}
+
 /// World-map view state kept between frames.
 pub struct MapView {
     pub zoom: f32,
+    /// Wheel notches from the settings' zoom (0: that zoom, the 0 key's).
+    zoom_steps: i32,
     /// The minimap window is open.
     pub minimap: bool,
     /// Razdor's debug overlay (F3): event points, lanterns and the events of each place.
@@ -106,7 +157,7 @@ pub struct MapView {
 
 impl Default for MapView {
     fn default() -> Self {
-        MapView { zoom: 1.0, minimap: false, debug: false, look: None, shows: VecDeque::new(), returning: None, opening: None, spell_fx: VecDeque::new(), preview: None, last_frame_ms: None, back_to: None, centring: None, grab: None, toasts: VecDeque::new(), pointer: Shape::Arrow, pointer_cell: None, was_busy: false }
+        MapView { zoom: 1.0, zoom_steps: 0, minimap: false, debug: false, look: None, shows: VecDeque::new(), returning: None, opening: None, spell_fx: VecDeque::new(), preview: None, last_frame_ms: None, back_to: None, centring: None, grab: None, toasts: VecDeque::new(), pointer: Shape::Arrow, pointer_cell: None, was_busy: false }
     }
 }
 
@@ -323,6 +374,7 @@ impl Showing {
 impl MapView {
     pub fn reset(&mut self) {
         self.look = None;
+        LAST_CAM.with(|c| c.set(None));
     }
 
     /// The map is left (a window, a battle): a right-button press under way ends with it, so
@@ -1884,12 +1936,19 @@ pub(super) fn handle_events(game: &mut Game, events: Vec<Event>, message: &mut O
     next
 }
 
+/// The camera of the map under a window: as the map was last drawn (its zoom, where it
+/// looked), so opening a window neither moves nor re-zooms it; the hero at zoom 1 before.
+fn backdrop_camera(game: &Game, full: Rect) -> Camera {
+    let (zoom, look) = LAST_CAM.with(|c| c.get()).unwrap_or((1.0, None));
+    Camera::looking_in(game, zoom, look.unwrap_or(game.display_pos()), full)
+}
+
 /// The map under a building window or a dialog: drawn over the whole screen, not
 /// interactive, with the bar's buttons greyed (`lit`: the open screen's button).
 pub fn backdrop_lit(game: &Game, assets: &Assets, lit: Option<BarButton>) {
     clear_background(rgb(10, 12, 10));
     let full = map_area();
-    let cam = Camera::looking_in(game, 1.0, game.display_pos(), full);
+    let cam = backdrop_camera(game, full);
     draw_world(game, assets, &cam, None, None);
     cam.draw_fog(game);
     draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.2));
@@ -1906,7 +1965,7 @@ pub fn backdrop(game: &Game, assets: &Assets) {
 pub fn window_backdrop(game: &Game, assets: &Assets, lit: Option<BarButton>) -> Option<Screen> {
     clear_background(rgb(10, 12, 10));
     let full = map_area();
-    let cam = Camera::looking_in(game, 1.0, game.display_pos(), full);
+    let cam = backdrop_camera(game, full);
     draw_world(game, assets, &cam, None, None);
     cam.draw_fog(game);
     draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.2));
@@ -2049,17 +2108,25 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     let dt_ms = now_ms - view.last_frame_ms.unwrap_or(now_ms);
     view.last_frame_ms = Some(now_ms);
 
-    // Zoom: mouse wheel or +/- (Razdor's, also while he walks or waits).
-    let wheel = wheel();
-    if wheel != 0.0 {
-        view.zoom = (view.zoom * if wheel > 0.0 { 1.1 } else { 1.0 / 1.1 }).clamp(0.4, 2.0);
+    // Zoom: mouse wheel or +/- (Razdor's, also while he walks or waits), in notches from the
+    // settings' zoom; 0 comes back to it. Locked in the settings, the zoom stays theirs.
+    let (home, locked) = (home_zoom(), ZOOM_LOCKED.load(std::sync::atomic::Ordering::Relaxed));
+    if !locked {
+        let wheel = wheel();
+        if wheel != 0.0 {
+            view.zoom_steps = step_zoom(home, view.zoom_steps, if wheel > 0.0 { 1 } else { -1 });
+        }
+        if key(KeyCode::Equal) || key(KeyCode::KpAdd) {
+            view.zoom_steps = step_zoom(home, step_zoom(home, view.zoom_steps, 1), 1);
+        }
+        if key(KeyCode::Minus) || key(KeyCode::KpSubtract) {
+            view.zoom_steps = step_zoom(home, step_zoom(home, view.zoom_steps, -1), -1);
+        }
+        if key(KeyCode::Key0) || key(KeyCode::Kp0) {
+            view.zoom_steps = 0;
+        }
     }
-    if key(KeyCode::Equal) || key(KeyCode::KpAdd) {
-        view.zoom = (view.zoom * 1.2).min(2.0);
-    }
-    if key(KeyCode::Minus) || key(KeyCode::KpSubtract) {
-        view.zoom = (view.zoom / 1.2).max(0.4);
-    }
+    view.zoom = zoom_at(home, view.zoom_steps, locked);
 
     // M toggles the minimap; F3 Razdor's debug overlay.
     if key(KeyCode::M) {
@@ -2103,6 +2170,7 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     }
     // While he walks the view is locked on him (interface.md §8).
     view.look = camera_look(view.look, game.moving(), !view.shows.is_empty());
+    LAST_CAM.with(|c| c.set(Some((view.zoom, view.look))));
     let cam = Camera::looking_at(game, view.zoom, view.look.unwrap_or(game.display_pos()));
     let on_minimap = view.minimap && minimap::under_pointer(&game.world.map, cam.view);
     let clock = game_bar::time_panel();
@@ -2481,6 +2549,20 @@ fn draw_debug(game: &Game, cam: &Camera) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_zoom_steps_from_the_settings_zoom_and_locks() {
+        assert_eq!(zoom_at(1.2, 0, false), 1.2, "0 is the settings' zoom");
+        assert!((zoom_at(1.0, 2, false) - 1.21).abs() < 1e-5);
+        assert_eq!(zoom_at(1.2, 5, true), 1.2, "locked");
+        // The steps stop where the zoom stops changing.
+        let mut s = 0;
+        for _ in 0..40 {
+            s = step_zoom(1.0, s, -1);
+        }
+        assert!(zoom_at(1.0, s, false) >= ZOOM_RANGE.0 && step_zoom(1.0, s, 1) == s + 1);
+        assert_eq!(zoom_at(1.0, s, false), (1.1f32.powi(s)).max(ZOOM_RANGE.0));
+    }
 
     #[test]
     fn the_route_s_last_cell_has_no_arrow() {

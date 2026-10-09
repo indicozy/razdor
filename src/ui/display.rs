@@ -111,6 +111,7 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
         return; // Offscreen snapshots keep their fixed size and the automatic scale.
     }
     set_scale(settings.ui_scale);
+    crate::ui::world_view::set_zoom_prefs(settings.map_zoom, settings.zoom_locked);
     follow(settings.display);
 }
 

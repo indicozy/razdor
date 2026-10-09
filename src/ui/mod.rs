@@ -1027,7 +1027,13 @@ impl App {
             if matches!(next, Screen::MainMenu | Screen::ScenarioSelect) {
                 self.dialogs.clear();
             }
-            if matches!(next, Screen::WorldMap) && !matches!(self.screen, Screen::WorldMap) {
+            // Back from a window over the map, the camera stays where it was (it never moved
+            // under the window); from a battle or a menu it is on the hero again.
+            let over_map = matches!(
+                self.screen,
+                Screen::Building(_) | Screen::Squad { .. } | Screen::Journal(_) | Screen::Spellbook { .. } | Screen::Menu(_) | Screen::Settings | Screen::Save(_) | Screen::Load(_)
+            );
+            if matches!(next, Screen::WorldMap) && !matches!(self.screen, Screen::WorldMap) && !over_map {
                 self.map_view.reset();
             }
             if matches!(self.screen, Screen::WorldMap) && !matches!(next, Screen::WorldMap) {

@@ -119,6 +119,7 @@ pub fn screen_keys(place: Place) -> Vec<(&'static str, &'static str)> {
             (n_("Right button held and moved"), n_("drag the map")),
             (n_("Arrow keys, screen edges"), n_("scroll the map")),
             (n_("Wheel, + / -"), n_("zoom")),
+            ("0", n_("back to the map's zoom from the settings")),
             ("1 / 4", n_("wait 1 or 4 hours")),
             ("F4 / F5", n_("wait without end / stop waiting")),
             (n_("Time panel"), n_("hover: buttons to wait 1 hour, see the hero, wait 4 hours; elsewhere left click 1 hour, right click 4 hours")),

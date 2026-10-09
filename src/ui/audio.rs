@@ -177,11 +177,15 @@ pub struct Settings {
     /// Advanced: new releases are offered (`Ask`), put in place without a word (`Always`), or
     /// not looked for (`Off`); `razdor::update`.
     pub updates: razdor::update::Mode,
+    /// The map's own zoom (Razdor's): the wheel steps from it and 0 comes back to it.
+    pub map_zoom: f32,
+    /// The wheel and the +/- keys leave the map's zoom alone: it stays `map_zoom`.
+    pub zoom_locked: bool,
 }
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, expert_ai: None, wide_row: None, display: Default::default(), ui_scale: 0.0, minimap_size: None, friends_let_pass: false, updates: Default::default() }
+        Settings { music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, expert_ai: None, wide_row: None, display: Default::default(), ui_scale: 0.0, minimap_size: None, friends_let_pass: false, updates: Default::default(), map_zoom: 1.0, zoom_locked: false }
     }
 }
 
@@ -206,7 +210,9 @@ impl Settings {
     fn clamped(self) -> Settings {
         let fix = |v: f32| if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.5 };
         let ui_scale = if super::display::SCALES.contains(&self.ui_scale) { self.ui_scale } else { 0.0 };
-        Settings { music_volume: fix(self.music_volume), sfx_volume: fix(self.sfx_volume), ui_scale, ..self }
+        let (lo, hi) = super::world_view::ZOOM_RANGE;
+        let map_zoom = if self.map_zoom.is_finite() { self.map_zoom.clamp(lo, hi) } else { 1.0 };
+        Settings { music_volume: fix(self.music_volume), sfx_volume: fix(self.sfx_volume), ui_scale, map_zoom, ..self }
     }
 
     fn save(&self) {

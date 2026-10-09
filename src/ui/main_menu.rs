@@ -433,7 +433,7 @@ pub fn open_advanced() {
 /// Razdor's advanced settings (the settings window's "Advanced…"): rules where Razdor can
 /// differ from the original. Returns true when closed.
 fn advanced_window(audio: &mut super::audio::Settings) -> bool {
-    let (inner, closed) = window(tr("Advanced settings"), 594.0, 370.0);
+    let (inner, closed) = window(tr("Advanced settings"), 594.0, 470.0);
     let k = chrome::k();
     let y = inner.y + 30.0 * k;
     chrome::shadow_text(tr("Stepping onto a friendly army"), inner.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
@@ -478,6 +478,29 @@ fn advanced_window(audio: &mut super::audio::Settings) -> bool {
     let hint = tr("Ask: a newer release is offered in a window. Always: it is downloaded and starts the next time. The check never holds up the game.");
     for (i, line) in wrap(hint, inner.w - 48.0 * k, 12.0 * k).iter().enumerate() {
         chrome::shadow_text(line, inner.x + 24.0 * k, y + 92.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
+    }
+    // The map's own zoom (Razdor's): the wheel steps from it, 0 comes back to it; locked, the
+    // wheel and +/- leave it alone.
+    let y = y + 140.0 * k;
+    chrome::shadow_text(tr("Map zoom"), inner.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
+    let zr = Rect::new(br.x, y, br.w, br.h);
+    let lock_label = if audio.zoom_locked { tr("Locked") } else { tr("Wheel and +/-") };
+    let over_lock = zr.contains(crate::ui::widgets::pointer().into()) && !input_blocked();
+    chrome::marble_button(zr, lock_label, true, over_lock);
+    if over_lock && clicked() {
+        cue(Cue::Button);
+        audio.zoom_locked = !audio.zoom_locked;
+    }
+    let (lo, hi) = super::world_view::ZOOM_RANGE;
+    let value = format!("×{:.2}", audio.map_zoom);
+    let track = Rect::new(inner.x + 24.0 * k, y + 44.0 * k, inner.w - 48.0 * k - 70.0 * k, 18.0 * k);
+    chrome::shadow_text(&value, track.x + track.w + 16.0 * k, track.y + 14.0 * k, 14.0 * k, chrome::GOLD);
+    if let Some(v) = slider(track, (audio.map_zoom - lo) / (hi - lo)) {
+        audio.map_zoom = ((lo + v * (hi - lo)) / 0.05).round() * 0.05;
+    }
+    let hint = tr("The zoom the map plays at. The wheel steps away from it and the 0 key comes back to it; locked, the map always shows it.");
+    for (i, line) in wrap(hint, inner.w - 48.0 * k, 12.0 * k).iter().enumerate() {
+        chrome::shadow_text(line, inner.x + 24.0 * k, y + 80.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
     }
     let ok = Rect::new(inner.x + inner.w - 120.0 * k, inner.y + inner.h - 44.0 * k, 96.0 * k, 28.0 * k);
     let over_ok = ok.contains(crate::ui::widgets::pointer().into()) && !input_blocked();
