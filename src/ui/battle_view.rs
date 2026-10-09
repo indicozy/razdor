@@ -279,7 +279,7 @@ fn effect_art(kind: ActionKind, school: Option<MagicSchool>) -> (&'static str, f
 /// "Battle: the army of hero Stings against Castle Morgen!"
 fn battle_title(game: &Game) -> String {
     let enemy = match game.foe {
-        Some(Foe::Army(i)) => game.world.armies.get(i).map(|a| if a.name.trim().is_empty() { a.leader_name.clone() } else { a.name.clone() }),
+        Some(Foe::Army(i)) => game.world.armies.get(i).map(|a| if a.shown_name().trim().is_empty() { a.leader_name.clone() } else { a.shown_name().to_string() }),
         Some(Foe::Garrison(l)) => game.world.locations.get(l).map(|l| l.name.clone()),
         None => None,
     }

@@ -1355,7 +1355,7 @@ const TIP_LABEL_NEUTRAL: Color = Color::new(0.61, 0.61, 0.61, 1.0);
 /// The original's army tooltip: its name, its 2×6 cards, "Предводитель" and the leader's
 /// name, the description; world spells on it and their wounds (Razdor's) under that.
 fn army_tooltip(game: &Game, a: &Army) -> Tooltip {
-    let title = if a.name.is_empty() { info("NoNameArmy", n_("Unknown army")) } else { a.name.clone() };
+    let title = if a.shown_name().is_empty() { info("NoNameArmy", n_("Unknown army")) } else { a.shown_name().to_string() };
     let mut footer = Vec::new();
     if !a.leader_name.is_empty() {
         footer.push((info("Commander", n_("Leader")), DIM));
@@ -1600,11 +1600,11 @@ fn describe(event: &Event, game: &Game) -> Option<String> {
         // The army may have left the map since the meeting was recorded (an event took it
         // away): then it is "an army" (Razdor 0.3.10 crashed on such a meeting).
         Event::Encounter(i) => {
-            let name = game.world.armies.get(*i).map_or("", |a| a.name.as_str());
+            let name = game.world.armies.get(*i).map_or("", |a| a.shown_name());
             Some(if name.is_empty() { tr("An army attacks!").to_string() } else { trf!("{name} attacks!", name) })
         }
         Event::Met(i) => {
-            let name = game.world.armies.get(*i).map_or("", |a| a.name.as_str());
+            let name = game.world.armies.get(*i).map_or("", |a| a.shown_name());
             let who = if name.is_empty() { tr("An army") } else { name };
             Some(trf!("A meeting on the road: {who} lets you pass.", who))
         }
