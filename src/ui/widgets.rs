@@ -288,6 +288,16 @@ impl Drop for Clip {
 
 /// A translucent panel of lines next to the mouse.
 pub fn tooltip(lines: &[(String, Color)]) {
+    tooltip_at_alpha(lines, 0.72);
+}
+
+/// The bottom panel's hint box (49d5ac): a pushed hint, which the original draws at full
+/// opacity (49ee4b), so the bar under it does not show through.
+pub fn panel_hint(lines: &[(String, Color)]) {
+    tooltip_at_alpha(lines, 1.0);
+}
+
+fn tooltip_at_alpha(lines: &[(String, Color)], alpha: f32) {
     if lines.is_empty() {
         return;
     }
@@ -296,15 +306,13 @@ pub fn tooltip(lines: &[(String, Color)]) {
     let (mx, my) = pointer();
     let x = (mx + 18.0).min(screen_width() - w - 4.0);
     let y = (my + 18.0).min(screen_height() - h - 4.0);
-    tooltip_panel(Rect::new(x, y, w, h));
+    let r = Rect::new(x, y, w, h);
+    super::chrome::surface_alpha(r, super::chrome::Skin::Marble, alpha);
+    draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, 0.05, 0.03, 0.2));
+    super::chrome::silver_frame(r, 1.5);
     for (i, (s, c)) in lines.iter().enumerate() {
         super::chrome::shadow_text(s, x + 12.0, y + 24.0 + i as f32 * 21.0, 17.0, *c);
     }
-}
-
-/// The translucent green-marble panel of hover tooltips, with a silver edge.
-pub fn tooltip_panel(r: Rect) {
-    tooltip_panel_styled(r, TipStyle::Normal);
 }
 
 /// The three frames of the original's map tooltips (0x4ca8ac → 0x48d3f8 styles 0, 1, 2).
@@ -318,7 +326,8 @@ pub enum TipStyle {
     Neutral,
 }
 
-/// [`tooltip_panel`] in one of the original's styles.
+/// The translucent marble panel of hover tooltips, with a silver edge, in one of the
+/// original's styles.
 pub fn tooltip_panel_styled(r: Rect, style: TipStyle) {
     use super::chrome::Skin;
     // Translucent marble: the ground shows through, as in the original's map tooltips.
