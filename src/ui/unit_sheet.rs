@@ -481,8 +481,9 @@ pub fn draw(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: bool,
     }
     // The description in what the traits leave, then the traits with their icons.
     y += 6.0 * k;
-    // The battle's panel shows the unit's description; the army screen only its traits.
-    let desc = if s.battle { content.unit(s.kind).description.as_str() } else { "" };
+    // Any unit but the hero shows its class's description (0x492f24: the type's text, the
+    // `Descript` of Rus_Units.ini), in battle and in the army and building windows alike.
+    let desc = if s.hero.is_none() { content.unit(s.kind).description.as_str() } else { "" };
     let desc_bottom = bottom - traits_h;
     let desc_lines = wrap(desc, r.w - 44.0 * k, small);
     let fits = ((desc_bottom - y) / slh).floor().max(0.0) as usize;
