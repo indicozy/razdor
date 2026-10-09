@@ -737,3 +737,28 @@ fn smoke_every_map() {
         prev = Some(d);
     }
 }
+
+/// Baron Balthazar's army on РК1 (id 8: a knight leading two sergeants, two archers and two
+/// monks) waits off the map until an event brings it. The load arranges every army record,
+/// the waiting ones too (0x4b56a8), and the activation again (0x4969b8): the knight and the
+/// sergeants stand in front, the archers and monks behind, not in the reserve-first cells
+/// adding them gave.
+#[test]
+fn rk1_balthazars_waiting_army_stands_arranged() {
+    use crate::rules::events::EventWorld;
+    use crate::rules::formation::Row;
+    let Some(dt) = install() else { return };
+    let c = content(&dt);
+    let mut d = Driver::new(&dt, &c, "РК1", HeroClass::Knight);
+    let rows = |troops: &[crate::rules::world::Troop]| {
+        let mut r: Vec<(u32, Row)> = troops.iter().map(|t| (t.unit.0, t.slot.row)).collect();
+        r.sort_by_key(|&(u, row)| (u, row as u8));
+        r
+    };
+    let expected = vec![(21, Row::Back), (21, Row::Back), (41, Row::Front), (41, Row::Front), (42, Row::Front), (71, Row::Back), (71, Row::Back)];
+    let waiting = d.g.world.inactive.iter().find(|a| a.id == 8).expect("army 8 waits at the start");
+    assert_eq!(rows(&waiting.troops), expected, "arranged at load");
+    EventWorld::activate_army(&mut d.g, 8);
+    let a = d.g.world.armies.iter().find(|a| a.id == 8).expect("army 8 on the map");
+    assert_eq!(rows(&a.troops), expected, "arranged on activation");
+}

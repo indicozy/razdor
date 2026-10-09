@@ -307,6 +307,11 @@ impl Game {
         a.pos = self.world.map.center(tile);
         a.path.clear();
         a.chasing = false;
+        // 0x4969b8 enters the cell, then puts the army through a battle side and back, so it
+        // stands as the auto-arrange puts it with the building's defence.
+        let here = self.world.location_covering(tile);
+        let defence = here.map_or(0, |l| self.world.locations[l].garrison_defence);
+        super::game::arrange_troops(&self.content, &mut a.troops, defence);
         if !super::ai::managed(&a) {
             self.world.armies.push(a);
             return Some(self.world.armies.len() - 1);
@@ -328,7 +333,6 @@ impl Game {
         a.mind.walked = 0;
         a.mind.no_path = true;
         a.mind.free_step = true;
-        let here = self.world.location_covering(tile);
         a.mind.standing = here;
         if let Some(l) = here {
             a.mind.defence = self.world.locations[l].garrison_defence;
