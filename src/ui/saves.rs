@@ -71,15 +71,25 @@ pub struct LoadView {
     pub back: Back,
 }
 
+thread_local! {
+    /// The tab the load window was last left on: it opens there again, the autosaves the
+    /// first time (players mostly load an autosave; the original always opens on its own
+    /// saves — a choice of the user's, 2026-10-09).
+    static LAST_TAB: std::cell::Cell<SaveKind> = const { std::cell::Cell::new(SaveKind::Auto) };
+}
+
 impl LoadView {
     pub fn new(back: Back) -> LoadView {
-        let mut v = LoadView { confirm_delete: None, tab: SaveKind::Manual, entries: Vec::new(), selected: 0, scroll: 0, back };
+        let first = LAST_TAB.with(|t| t.get());
+        let other = if first == SaveKind::Auto { SaveKind::Manual } else { SaveKind::Auto };
+        let mut v = LoadView { confirm_delete: None, tab: first, entries: Vec::new(), selected: 0, scroll: 0, back };
         v.refresh();
         if v.entries.is_empty() {
-            v.tab = SaveKind::Auto;
+            v.tab = other;
             v.refresh();
             if v.entries.is_empty() {
-                v.tab = SaveKind::Manual;
+                v.tab = first;
+                v.refresh();
             }
         }
         v
@@ -466,6 +476,7 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     for (x, tab, label) in [(17.0, SaveKind::Manual, own("LoadGame", "PrivateSave", n_("Private"))), (172.0, SaveKind::Auto, own("LoadGame", "AutoSave", n_("Autosaves")))] {
         if book.tab(x, &label, view.tab == tab) && view.tab != tab && !asking {
             view.tab = tab;
+            LAST_TAB.with(|t| t.set(tab));
             view.refresh();
         }
     }
