@@ -231,6 +231,8 @@ pub struct Fighter {
     pub is_hero: bool,
     /// Index into the player's squad, for writing results back.
     pub squad_index: Option<usize>,
+    /// The named character it is (unit +0x14), 0 for none: its strip is the blue one.
+    pub named: u8,
     pub level: i32,
     /// XP towards the next level as the battle began (for display).
     pub xp: i32,
@@ -310,6 +312,7 @@ impl Fighter {
             hp: unit.hp.min(base.max_hp()),
             slot: unit.slot,
             is_hero: squad_index == Some(0),
+            named: unit.named,
             squad_index,
             level: unit.level,
             xp: unit.xp,

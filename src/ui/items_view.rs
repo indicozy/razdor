@@ -427,9 +427,11 @@ pub fn squad(
     } else if u.unpaid {
         status.push((tr("Unpaid: refuses to fight").to_string(), chrome::RED_TEXT));
     }
+    let label = game.squad_label(sel);
     let sheet = unit_sheet::Sheet {
         kind: u.def,
-        name: u.name(&c),
+        name: &label,
+        named: u.named > 0,
         level: u.level,
         xp: u.xp,
         need: u.xp_to_next(&c),
@@ -446,7 +448,12 @@ pub fn squad(
         battle: false,
     };
     let sheet_rect = at(2.0, 27.0, 244.0, 570.0);
-    if let Some(slot) = unit_sheet::draw(assets, &c, sheet_rect, &sheet, true, &mut hover) {
+    // A living unit's first `personal` worn slots are his own: not taken up (0x4c24f4), and
+    // hovering one says so (0x4c280c, `[Army] ItemI`).
+    let locked = |slot: usize| u.alive() && slot < u.personal as usize;
+    let pressed_slot = unit_sheet::draw(assets, &c, sheet_rect, &sheet, true, &mut hover);
+    let personal_hover = hover.is_some_and(|h| u.items.iter().enumerate().any(|(s, i)| *i == Some(h) && locked(s)));
+    if let Some(slot) = pressed_slot.filter(|&s| !locked(s)) {
         if let Some(item) = u.items[slot] {
             // An item taken up plays its sound, and again where it goes (interface.md §14).
             cue(Cue::Item(c.item(item).kind));
@@ -573,14 +580,9 @@ pub fn squad(
         }
     }
 
-    // The strip: the last message, or what to do.
+    // The strip under the top half: the last message, or what to do (drawn after the grid,
+    // which says what the pointer is over).
     let strip = at(248.0, 302.0, 586.0, 20.0);
-    let (hint, hc) = match message {
-        Some(m) => (m.clone(), chrome::GOLD),
-        None if show_tree => (tr("Click a unit to select it; Esc returns").to_string(), Color::new(1.0, 0.55, 0.25, 1.0)),
-        None => (tr("Drag an item onto a unit to give it; Esc returns").to_string(), Color::new(1.0, 0.55, 0.25, 1.0)),
-    };
-    chrome::hint_strip(strip, &hint, hc);
 
     // The army: the cards as in battle, the selected one lit.
     let f = c.formation;
@@ -605,6 +607,10 @@ pub fn squad(
             pressed = Some((None, slot));
         }
     }
+    let empty_under = f.slots().filter(|&slot| !game.squad.iter().any(|u| u.slot == slot)).find(|&slot| {
+        let p = cell_at(slot);
+        mouse_in(p.x, p.y, card.x, card.y)
+    });
     let mut card_under = None;
     for (i, v) in game.squad.iter().enumerate() {
         let mut p = cell_at(v.slot);
@@ -617,7 +623,7 @@ pub fn squad(
         chrome::wounds(sq, v.hp, v.max_hp(&c));
         draw_rectangle_lines(sq.x, sq.y, sq.w, sq.h, 1.0, Color::new(0.85, 0.85, 0.85, 0.8));
         let vs = v.stats(&c);
-        unit_sheet::stat_strip(Rect::new(p.x, p.y + card.x, card.x, card.y - card.x), &vs, &vs, vs[Stat::MagicPower], unit_sheet::caster(&c, v.def), unit_sheet::strip_place(f, v.slot), v.hp, super::building_view::back_row_def(&c, v.slot), selected.selected == Some(i));
+        unit_sheet::stat_strip(Rect::new(p.x, p.y + card.x, card.x, card.y - card.x), &vs, &vs, vs[Stat::MagicPower], unit_sheet::caster(&c, v.def), unit_sheet::strip_place(f, v.slot), v.hp, super::building_view::back_row_def(&c, v.slot), selected.selected == Some(i), unit_sheet::StripPanel::of_squad(i, v.named));
         if !v.alive() {
             draw_rectangle(sq.x, sq.y, sq.w, sq.h, Color::new(0.0, 0.0, 0.0, 0.55));
             draw_line(sq.x + 10.0, sq.y + 10.0, sq.x + sq.w - 10.0, sq.y + sq.h - 10.0, 3.0, RED);
@@ -646,6 +652,37 @@ pub fn squad(
             pressed = Some((Some(i), v.slot));
         }
     }
+    // The hint line (0x4c2f54): `[Army]` line 0 over the selected unit, line 2 over another
+    // one while a unit is selected (naming the selected one), line 1 over a unit with none
+    // selected, the quoted name in #NAME1; over an empty cell its row's text by the fixed
+    // card numbers (Line1 for cards 1–4, Line2 for 7–10, Line3 for 0, 5, 6, 11). A personal
+    // item under the pointer says it is his own (0x4c280c).
+    let army_line = |n: usize, who: usize| chrome::ui_line("Army", n).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).map(|t| t.replace("#NAME1", &format!("\"{}\"", game.squad_label(who))));
+    let row_text = |slot: razdor::rules::formation::Slot| {
+        let key = match unit_sheet::strip_place(f, slot) {
+            1..=4 => "Line1",
+            7..=10 => "Line2",
+            _ => "Line3",
+        };
+        chrome::ui_text("Army", key).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru)
+    };
+    let pointed = if personal_hover {
+        chrome::ui_text("Army", "ItemI").filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).or_else(|| Some(tr("His own item: it cannot be taken off while he lives.").to_string()))
+    } else {
+        match (card_under, selected.selected) {
+            (Some(i), Some(s)) if i == s => army_line(0, s),
+            (Some(_), Some(s)) => army_line(2, s),
+            (Some(i), None) => army_line(1, i),
+            (None, _) => empty_under.and_then(row_text),
+        }
+    };
+    let (hint, hc) = match (message.as_ref(), pointed) {
+        (Some(m), _) => (m.clone(), chrome::GOLD),
+        (None, Some(p)) => (p, Color::new(1.0, 0.55, 0.25, 1.0)),
+        (None, None) if show_tree => (tr("Click a unit to select it; Esc returns").to_string(), Color::new(1.0, 0.55, 0.25, 1.0)),
+        (None, None) => (tr("Drag an item onto a unit to give it; Esc returns").to_string(), Color::new(1.0, 0.55, 0.25, 1.0)),
+    };
+    chrome::hint_strip(strip, &hint, hc);
     // The press, as the original's (0x4c346c), ignored while a card slides (busy 0x68dc63).
     if let (Some((on, slot)), None) = (pressed, slide) {
         *message = None;

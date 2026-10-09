@@ -266,6 +266,19 @@ pub fn ui_text(section: &str, key: &str) -> Option<String> {
     })
 }
 
+/// Line `n` (0-based) of the unnamed lines of a section of the install's interface texts,
+/// e.g. `[Army]`'s «Кликните, что бы выделить #NAME1» (line 1).
+pub fn ui_line(section: &str, n: usize) -> Option<String> {
+    CHROME.with(|c| {
+        let mut c = c.borrow_mut();
+        let c = c.as_mut()?;
+        if c.texts.is_none() {
+            c.texts = Some(read_texts(&c.dir));
+        }
+        c.texts.as_ref()?.as_ref()?.section(section)?.lines.get(n).cloned()
+    })
+}
+
 /// A raw value of the install's `[Options]` (`Rus_DiscordTimes.ini`), e.g. the minimap colours.
 pub fn options_value(key: &str) -> Option<String> {
     CHROME.with(|c| {

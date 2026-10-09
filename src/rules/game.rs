@@ -1876,6 +1876,17 @@ impl Game {
         let player: Vec<_> = self.squad.iter().enumerate().filter(|(i, u)| *i == 0 || (u.alive() && (attacker != Team::Player || !u.unpaid))).collect();
         self.battles += 1;
         let mut b = Battle::new(self.content.clone(), &player, &enemies, attacker);
+        // In battle every side names its units as 0x49747c does: the hero by his class and
+        // name, a named character by his own name (an AI leader or a garrison's too).
+        let np = player.len();
+        for f in b.fighters.iter_mut().take(np) {
+            if let Some(i) = f.squad_index {
+                f.name = self.squad_label(i);
+            }
+        }
+        for (f, u) in b.fighters.iter_mut().skip(np).zip(&enemies) {
+            f.name = self.unit_label(u);
+        }
         if let Some(Foe::Garrison(l)) = self.foe {
             if self.world.locations[l].strengths_bare {
                 b.set_bare_strengths(Team::Enemy);

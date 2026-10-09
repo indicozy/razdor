@@ -521,7 +521,7 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
                 let cost = trf!("Price {price}", price = pr.amount);
                 chrome::shadow_centered(&cost, strip.center().x, pill.y + pill.h + 13.0 * k, 12.0 * k, chrome::GOLD);
             }
-            _ => super::unit_sheet::stat_strip(strip, &vs, &vs, vs[razdor::rules::content::Stat::MagicPower], super::unit_sheet::caster(&c, u.def), super::unit_sheet::strip_place(form, u.slot), u.hp, back_row_def(&c, u.slot), false),
+            _ => super::unit_sheet::stat_strip(strip, &vs, &vs, vs[razdor::rules::content::Stat::MagicPower], super::unit_sheet::caster(&c, u.def), super::unit_sheet::strip_place(form, u.slot), u.hp, back_row_def(&c, u.slot), false, super::unit_sheet::StripPanel::of_squad(i, u.named)),
         }
         if !u.alive() {
             draw_rectangle(sq.x, sq.y, sq.w, sq.h, Color::new(0.0, 0.0, 0.0, 0.55));
@@ -548,7 +548,7 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
                 pressed = Some((Some(i), u.slot));
             }
             chrome::glow_frame(sq, Color::new(0.35, 0.55, 1.0, 0.9), false);
-            hover_lines = vec![(u.name(&c).to_string(), ACCENT)];
+            hover_lines = vec![(game.squad_label(i), ACCENT)];
             hover_lines.extend(unit_stat_lines(&c, &u, game.wage(i)).into_iter().map(|s| (s, INK)));
         }
     }
@@ -675,7 +675,7 @@ fn card_grid(game: &Game, assets: &Assets, f: &Frame, rel_y: f32, units: &[&Unit
         chrome::wounds(sq, u.hp, u.max_hp(c));
         draw_rectangle_lines(sq.x, sq.y, sq.w, sq.h, 1.0, Color::new(0.85, 0.85, 0.85, 0.8));
         let vs = u.stats(c);
-        super::unit_sheet::stat_strip(Rect::new(p.x, p.y + card.x, card.x, card.y - card.x), &vs, &vs, vs[razdor::rules::content::Stat::MagicPower], super::unit_sheet::caster(c, u.def), super::unit_sheet::strip_place(form, u.slot), u.hp, back_row_def(c, u.slot), false);
+        super::unit_sheet::stat_strip(Rect::new(p.x, p.y + card.x, card.x, card.y - card.x), &vs, &vs, vs[razdor::rules::content::Stat::MagicPower], super::unit_sheet::caster(c, u.def), super::unit_sheet::strip_place(form, u.slot), u.hp, back_row_def(c, u.slot), false, if own { super::unit_sheet::StripPanel::of_squad(i, u.named) } else { super::unit_sheet::StripPanel::Plain });
         if !u.alive() {
             draw_rectangle(sq.x, sq.y, sq.w, sq.h, Color::new(0.0, 0.0, 0.0, 0.55));
         } else if u.unpaid {
@@ -720,7 +720,21 @@ fn garrison(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
     if let Some(Hit::Unit(i)) = bottom {
         let u = &squad[i];
         let lv = level_label(u.level, u.xp, u.xp_to_next(&c));
-        hover = vec![(u.name(&c).to_string(), ACCENT), (lv, XP_COLOR), (trf!("{hp}/{max} HP, wage {wage}", hp = u.hp.max(0), max = u.max_hp(&c), wage = game.wage(i)), INK)];
+        hover = vec![(game.squad_label(i), ACCENT), (lv, XP_COLOR), (trf!("{hp}/{max} HP, wage {wage}", hp = u.hp.max(0), max = u.max_hp(&c), wage = game.wage(i)), INK)];
+    }
+    // The hero and named characters never go into a garrison: with one selected the
+    // garrison's grid says so (0x4c6964, `[Army]` line 9); with a garrison unit selected the
+    // hero or a named character under the pointer cannot change places with it (0x4c612c,
+    // line 11).
+    let unique = |i: usize| i == 0 || squad.get(i).is_some_and(|u| u.named > 0);
+    let refusal = match (sel, top, bottom) {
+        (Some((false, n)), Some(_), _) if unique(n) => Some((9, n_("A unique character cannot be moved into a garrison!"))),
+        (Some((true, _)), _, Some(Hit::Unit(i))) if unique(i) => Some((11, n_("You cannot change places with the selected character!"))),
+        _ => None,
+    };
+    if let Some((line, ours)) = refusal {
+        let t = chrome::ui_line("Army", line).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr(ours).to_string());
+        hover.insert(0, (t, chrome::RED_TEXT));
     }
     if let Some((j, cell, price)) = view.garrison_buy {
         // The purchase question (the garrison move event, 0x4acff4).

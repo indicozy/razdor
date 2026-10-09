@@ -862,7 +862,17 @@ impl BattleView {
         let strip = Rect::new(p.x, p.y + w, w, h - w);
         let row2 = if f.slot.row == Row::Back { self.battle.content().options.row2_def } else { 0 };
         let (caster, place) = (unit_sheet::caster(self.battle.content(), f.unit), unit_sheet::strip_place(self.battle.formation, f.slot));
-        unit_sheet::stat_strip(strip, s, base, f.power, caster, place, f.hp, row2, frame.is_some_and(|(c, _)| c == ACTIVE));
+        // The hero's and the enemy's first unit's strip is red, a named character's blue
+        // (0x49462c, in battle for both sides).
+        let first_enemy = f.team == Team::Enemy && self.battle.fighters.iter().find(|x| x.team == Team::Enemy).is_some_and(|x| std::ptr::eq(x, f));
+        let panel = if f.is_hero || first_enemy {
+            unit_sheet::StripPanel::Hero
+        } else if f.named > 0 {
+            unit_sheet::StripPanel::Named
+        } else {
+            unit_sheet::StripPanel::Plain
+        };
+        unit_sheet::stat_strip(strip, s, base, f.power, caster, place, f.hp, row2, frame.is_some_and(|(c, _)| c == ACTIVE), panel);
 
         // The original's signs (493a64): a drunk potion, then the blessing, from the top
         // left; poison (a negative regeneration), then the curse, from the top right; 23 px
@@ -993,6 +1003,7 @@ impl BattleView {
         let sheet = Sheet {
             kind: f.unit,
             name: &f.name,
+            named: f.named > 0,
             level: f.level,
             xp: f.xp,
             need: self.need(f),
