@@ -2846,7 +2846,10 @@ impl Game {
         // Recounted, then passed through the first side (0x4a7972).
         self.world.locations[l].strengths_bare = false;
         // The army, then the garrison, are passed through the first static side and back
-        // (0x4a7923, 0x4a7989: 49855c, 4988c0).
+        // (0x4a7923, 0x4a7989: 49855c, 4988c0), each arranged anew in the building.
+        let defence = self.world.locations[l].garrison_defence;
+        super::game::arrange_troops(&c, &mut self.world.armies[i].troops, defence);
+        super::game::arrange_troops(&c, &mut self.world.locations[l].garrison, defence);
         let army_hp: Vec<i32> = self.world.armies[i].troops.iter().map(|t| troop_unit(&c, t).hp).collect();
         let held_hp: Vec<i32> = self.world.locations[l].garrison.iter().map(|t| troop_unit(&c, t).hp).collect();
         let mut sims = self.sims.borrow_mut();
@@ -3340,6 +3343,7 @@ impl Game {
             self.beaten_armies.remove(&army.id);
             self.ai_beaten.remove(&army.id);
             // Rearranged through the first static side and back (0x4a28d0: 49855c, 4988c0).
+            super::game::arrange_troops(&self.content, &mut army.troops, m.defence);
             let hps: Vec<i32> = army.troops.iter().map(|t| troop_unit(&self.content, t).hp).collect();
             self.sims.borrow_mut().pass_through(hps);
             let uid = army.uid;

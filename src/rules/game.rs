@@ -729,17 +729,16 @@ impl Game {
     /// §10.1 step 9), so a castle's archers do not start in front where adding put them.
     fn arrange_at_load(&mut self) {
         let player: Vec<(usize, &Unit)> = self.squad.iter().enumerate().filter(|(_, u)| u.alive()).collect();
-        for (i, s) in arranged(&self.content, &player) {
+        for (i, s) in arranged(&self.content, &player, 0) {
             self.squad[i].slot = s;
         }
+        // Every army record, those waiting off the map too (0x4b56a8 loops over all of them).
         let content = self.content.clone();
-        let troops = self.world.armies.iter_mut().map(|a| &mut a.troops).chain(self.world.locations.iter_mut().map(|l| &mut l.garrison));
+        let w = &mut self.world;
+        let armies = w.armies.iter_mut().chain(w.inactive.iter_mut()).chain(w.respawns.iter_mut().map(|r| &mut r.army));
+        let troops = armies.map(|a| &mut a.troops).chain(w.locations.iter_mut().map(|l| &mut l.garrison));
         for troops in troops {
-            let units: Vec<Unit> = troops.iter().map(|t| troop_unit(&content, t)).collect();
-            let side: Vec<(usize, &Unit)> = units.iter().enumerate().filter(|(k, _)| troops[*k].alive()).collect();
-            for (k, s) in arranged(&content, &side) {
-                troops[k].slot = s;
-            }
+            arrange_troops(&content, troops, 0);
         }
     }
 
@@ -2336,13 +2335,24 @@ pub(crate) fn archetype_of(hero: HeroClass) -> u8 {
 
 /// The cells the original's auto-arrange (483b3c) gives `side`, by their indices: the side
 /// put through a battle and back (0x49855c, 0x4988c0).
-fn arranged(content: &Arc<Content>, side: &[(usize, &Unit)]) -> Vec<(usize, Slot)> {
+fn arranged(content: &Arc<Content>, side: &[(usize, &Unit)], defence: i32) -> Vec<(usize, Slot)> {
     if side.is_empty() {
         return Vec::new();
     }
     let mut b = Battle::new(content.clone(), side, &[], Team::Player);
+    b.set_building_defence(Team::Player, defence);
     b.auto_arrange(Team::Player);
     b.fighters.iter().filter_map(|f| Some((f.squad_index?, f.slot))).collect()
+}
+
+/// An army's or a garrison's troops put through a battle side and back (0x49855c, 0x4988c0)
+/// in a building of defence `defence`: the living take the cells the auto-arrange gives them.
+pub(crate) fn arrange_troops(content: &Arc<Content>, troops: &mut [Troop], defence: i32) {
+    let units: Vec<Unit> = troops.iter().map(|t| troop_unit(content, t)).collect();
+    let side: Vec<(usize, &Unit)> = units.iter().enumerate().filter(|(k, _)| troops[*k].alive()).collect();
+    for (k, s) in arranged(content, &side, defence) {
+        troops[k].slot = s;
+    }
 }
 
 /// The unit of an army or garrison troop: its level and XP, its worn items, its pay and
