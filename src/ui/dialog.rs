@@ -16,6 +16,8 @@ use super::widgets::*;
 
 const MARBLE_EDGE: Color = Color::new(0.38, 0.58, 0.46, 1.0);
 pub const MANA: Color = Color::new(0.55, 0.72, 1.0, 1.0);
+/// The captions of the event window's icon rows (the original's green font ae249c).
+const CAPTION: Color = Color::new(0.45, 0.95, 0.45, 1.0);
 
 /// A resource icon with its label.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,6 +54,11 @@ pub struct Dialog {
     /// Resource icons with a caption such as "Gold + 30".
     pub resources: Vec<(Resource, String)>,
     pub items: Vec<ItemId>,
+    /// Spells the event teaches (shown as their pictures under «Выучены новые заклинания:»).
+    pub spells: Vec<u32>,
+    /// The item or spell a press on its icon shows while the button is held (0x4c1fec,
+    /// 0x4c2048): (a spell, its id, where the press was).
+    pub preview: std::cell::Cell<Option<(bool, u32, Vec2)>>,
     /// An extra line in blue (system notices).
     pub notice: Option<String>,
     /// The scenario event this dialog shows, if any.
@@ -83,6 +90,8 @@ impl Dialog {
             marked: None,
             resources: Vec::new(),
             items: Vec::new(),
+            spells: Vec::new(),
+            preview: std::cell::Cell::new(None),
             notice: None,
             event: None,
             question: false,
@@ -292,7 +301,7 @@ fn scrolled(d: &Dialog, total: usize, shown: usize, tb: Rect) -> usize {
 
 /// Draws `d` centred on the screen; returns how it was closed: OK (or Enter, Escape), or for
 /// a question Yes or No (Esc or N No, any other key Yes: `answer_key`).
-pub fn draw(d: &Dialog, assets: &Assets) -> Option<Close> {
+pub fn draw(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Close> {
     let (sw, sh) = (screen_width(), screen_height());
     chrome::under_message();
     // A long story text widens the window rather than running off the screen.
@@ -309,11 +318,14 @@ pub fn draw(d: &Dialog, assets: &Assets) -> Option<Close> {
     let total = lines.len() + rows.len();
     let mut text_h = total as f32 * 23.0 + 24.0;
     let res_h = if d.resources.is_empty() { 0.0 } else { 104.0 };
-    let items_h = if d.items.is_empty() { 0.0 } else { 60.0 };
+    // An icon row grows the window by its caption and icons (0x4a8e66: 87 for items, 82
+    // for spells).
+    let items_h = if d.items.is_empty() { 0.0 } else { 87.0 };
+    let spells_h = if d.spells.is_empty() { 0.0 } else { 82.0 };
     let notice_h = if d.notice.is_some() { 26.0 } else { 0.0 };
     let pic_h = if d.picture.is_some() { 140.0 } else { 0.0 };
     let units_h = [&d.joined, &d.left].iter().filter(|u| !u.is_empty()).count() as f32 * 60.0;
-    let fixed = 34.0 + 16.0 + pic_h + res_h + items_h + units_h + notice_h + 64.0;
+    let fixed = 34.0 + 16.0 + pic_h + res_h + items_h + spells_h + units_h + notice_h + 64.0;
     // Too tall for the screen: the text scrolls inside a shorter box, so the buttons stay
     // in sight.
     let shown = visible_lines(total, fixed, sh - 20.0);
@@ -358,23 +370,72 @@ pub fn draw(d: &Dialog, assets: &Assets) -> Option<Close> {
         }
         cy += res_h;
     }
+    // The original stacks its rows from the bottom up (0x4a8ae8): the items gained lowest,
+    // the units above them, the spells above those; each row its green caption centred over
+    // the window and its icons spread by their count, centre i at W·(i+1)/(n+1).
+    let spread = |n: usize, i: usize| x + w * (i + 1) as f32 / (n + 1) as f32;
+    let caption = |key: &str, ours: &'static str, cy: f32| {
+        let t = chrome::ui_text("Event", key).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr(ours).to_string());
+        chrome::shadow_centered(&t, x + w / 2.0, cy + 18.0, 18.0, CAPTION);
+    };
+    let mut icons: Vec<(bool, u32, Rect)> = Vec::new();
+    if !d.spells.is_empty() {
+        caption("NewSpell", razdor::i18n::n_("New spells learnt:"), cy);
+        let n = d.spells.len().min(4);
+        for (i, &s) in d.spells.iter().enumerate().take(4) {
+            let r = Rect::new(spread(n, i) - 25.0, cy + 26.0, 50.0, 50.0);
+            if let Some(def) = game.and_then(|g| g.content.spells.iter().find(|x| x.id == s)) {
+                chrome::spell_icon(&def.icons, r);
+                chrome::silver_frame(r, 1.0);
+            }
+            icons.push((true, s, r));
+        }
+        cy += spells_h;
+    }
+    cy += unit_row(assets, tr("Left the army:"), &d.left, x, cy);
+    cy += unit_row(assets, tr("Joined the army:"), &d.joined, x, cy);
     if !d.items.is_empty() {
-        let label = tr("Items found:");
-        text(label, x + 30.0, cy + 30.0, 18.0, INK);
-        let lx = (x + 40.0 + measure(label, 18.0).width).max(x + 150.0);
-        for (k, &item) in d.items.iter().enumerate().take(8) {
-            assets.draw_item(item, lx + k as f32 * 54.0, cy + 4.0, 48.0);
+        caption("AddItem", razdor::i18n::n_("Items received:"), cy);
+        let n = d.items.len().min(8);
+        for (i, &item) in d.items.iter().enumerate().take(8) {
+            let r = Rect::new(spread(n, i) - 27.0, cy + 26.0, 55.0, 55.0);
+            assets.draw_item(item, r.x, r.y, r.w);
+            icons.push((false, item.0, r));
         }
         cy += items_h;
     }
-    cy += unit_row(assets, tr("Joined the army:"), &d.joined, x, cy);
-    cy += unit_row(assets, tr("Left the army:"), &d.left, x, cy);
     if let Some(n) = &d.notice {
         chrome::shadow_centered(n, x + w / 2.0, cy + 18.0, 18.0, Color::new(0.3, 0.72, 1.0, 1.0));
     }
     let by = y + h - 52.0;
     // The silver line over the buttons.
     draw_line(x + 2.0, by - 10.0, x + w - 2.0, by - 10.0, 1.5, chrome::SILVER);
+    // A left or right press on an icon shows its item or spell centred on the press, kept
+    // inside the window, until the button is let go (0x4c1fec / 0x4c2048, the frame handler
+    // 0x4cd558); the window's buttons wait meanwhile.
+    let held = is_mouse_button_down(MouseButton::Left) || is_mouse_button_down(MouseButton::Right);
+    if d.preview.get().is_some() && !held {
+        d.preview.set(None);
+    } else if d.preview.get().is_none() && (is_mouse_button_pressed(MouseButton::Left) || is_mouse_button_pressed(MouseButton::Right)) {
+        let p: Vec2 = pointer().into();
+        if let Some(&(spell, id, _)) = icons.iter().find(|(_, _, r)| r.contains(p)) {
+            d.preview.set(Some((spell, id, p)));
+        }
+    }
+    if let (Some((spell, id, at)), Some(game)) = (d.preview.get(), game) {
+        let (pw, ph) = if spell { (286.0, 112.0) } else { (272.0, 230.0) };
+        let px = (at.x - pw / 2.0).clamp(x + 10.0, (x + w - 10.0 - pw).max(x + 10.0));
+        let py = (at.y - ph / 2.0).clamp(y + 10.0, (y + h - 10.0 - ph).max(y + 10.0));
+        draw_rectangle(px + 8.0, py + 8.0, pw, ph, Color::new(0.0, 0.0, 0.0, 0.45));
+        if spell {
+            if let Some(s) = game.content.spells.iter().find(|s| s.id == id) {
+                super::spellbook::spell_card(game, s, Rect::new(px, py, pw, ph));
+            }
+        } else {
+            super::building_view::item_description(game, assets, ItemId(id), px, py, pw, ph);
+        }
+        return None;
+    }
     if d.question {
         let answer = answer_key();
         let yes = button(x + w / 2.0 - 140.0, by, 120.0, 38.0, tr("Yes"), true) || answer == Some(true);

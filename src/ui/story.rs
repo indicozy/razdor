@@ -65,9 +65,22 @@ pub fn event_dialog(game: &Game, id: EventId, asking: bool) -> Dialog {
         (_, 0 | PICTURE_DEFEAT | PICTURE_VICTORY) => None,
         (_, u) => game.content.try_unit(UnitId(u as u32)).map(|_| Picture::Unit(UnitId(u as u32))),
     };
+    if asking {
+        return d;
+    }
+    // The spells it teaches are shown even with no meeting (c28604 skips only the learning).
+    d.spells = r.spells_learned.iter().filter(|&&s| s != 0).map(|&s| s as u32).filter(|&s| game.content.spells.iter().any(|x| x.id == s)).collect();
+    let known = |u: u8| game.content.try_unit(UnitId(u as u32)).map(|_| UnitId(u as u32));
+    d.joined = r.units_add.iter().filter_map(|&u| known(u)).collect();
+    d.left = r.units_remove.iter().filter(|&&u| u != 0xFE && u != 0xFF).filter_map(|&u| known(u)).collect();
+    // The items gained are left out only for opcode 6, whose fields are its arguments
+    // (c278e8).
+    if !(r.no_meeting == 1 && r.patrol_delta == 6) {
+        d.items = r.artifacts_add.iter().filter(|&&a| a != 0).map(|&a| ItemId(a as u32)).filter(|&i| game.content.try_item(i).is_some()).collect();
+    }
     // "No meeting" events show no resource row (the Community hook 0xc2831f; opcodes use
     // the fields as arguments).
-    if asking || r.no_meeting == 1 {
+    if r.no_meeting == 1 {
         return d;
     }
     let signed = |v: i16| if v < 0 { format!("- {}", -(v as i32)) } else { format!("+ {v}") };
@@ -80,10 +93,6 @@ pub fn event_dialog(game: &Game, id: EventId, asking: bool) -> Dialog {
     if r.experience != 0 {
         d.resources.push((Resource::Experience, trf!("Experience {n}", n = signed(r.experience))));
     }
-    d.items = r.artifacts_add.iter().filter(|&&a| a != 0).map(|&a| ItemId(a as u32)).filter(|&i| game.content.try_item(i).is_some()).collect();
-    let known = |u: u8| game.content.try_unit(UnitId(u as u32)).map(|_| UnitId(u as u32));
-    d.joined = r.units_add.iter().filter_map(|&u| known(u)).collect();
-    d.left = r.units_remove.iter().filter(|&&u| u != 0xFE && u != 0xFF).filter_map(|&u| known(u)).collect();
     d
 }
 
