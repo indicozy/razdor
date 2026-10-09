@@ -126,7 +126,7 @@ pub fn rect(map: &TileMap, view: Rect) -> Rect {
 
 /// [`rect`] at interface scale `k`.
 fn rect_at(map: &TileMap, view: Rect, k: f32) -> Rect {
-    let o = outer_at(view, k);
+    let o = outer_at(map, view, k);
     let b = BORDER * k;
     let inner = Rect::new(o.x + b, o.y + b, o.w - 2.0 * b, o.h - 2.0 * b);
     let (w, h) = (map.w.max(1) as f32, map.h.max(1) as f32);
@@ -136,18 +136,44 @@ fn rect_at(map: &TileMap, view: Rect, k: f32) -> Rect {
 }
 
 /// Frame included.
-pub fn outer(_map: &TileMap, view: Rect) -> Rect {
-    outer_at(view, super::chrome::k())
+pub fn outer(map: &TileMap, view: Rect) -> Rect {
+    outer_at(map, view, super::chrome::k())
 }
 
-fn outer_at(view: Rect, k: f32) -> Rect {
-    outer_sized(view, k, SIZE.with(|s| s.get()))
+fn outer_at(map: &TileMap, view: Rect, k: f32) -> Rect {
+    outer_sized(view, k, SIZE.with(|s| s.get()), aspect(map))
+}
+
+/// The map's width over its height.
+fn aspect(map: &TileMap) -> f32 {
+    map.w.max(1) as f32 / map.h.max(1) as f32
 }
 
 /// The window of size `size` (in pixels of the 960×720 video; `None`: the original's
-/// square), kept in the top-right corner of `view` and within it.
-fn outer_sized(view: Rect, k: f32, size: Option<(f32, f32)>) -> Rect {
-    let (w, h) = size.unwrap_or((WINDOW, WINDOW));
+/// square), kept in the top-right corner of `view` and within it. A size of Razdor's own
+/// keeps the map's proportions inside the frame (`aspect`, width over height): it shrinks to
+/// fit them, so the map fills the frame with no empty band.
+fn outer_sized(view: Rect, k: f32, size: Option<(f32, f32)>, aspect: f32) -> Rect {
+    let b = 2.0 * BORDER;
+    let (mut w, mut h) = size.unwrap_or((WINDOW, WINDOW));
+    let fitted = size.is_some();
+    if fitted {
+        let (iw, ih) = ((w - b).max(1.0), (h - b).max(1.0));
+        if iw / ih > aspect {
+            w = ih * aspect + b;
+        } else {
+            h = iw / aspect + b;
+        }
+    }
+    let (max_w, max_h) = ((view.w - 14.0 * k) / k, (view.h - 4.0 * k) / k);
+    if fitted {
+        // Within the view and at least the smallest side, the proportions kept.
+        let s = ((max_w - b) / (w - b)).min((max_h - b) / (h - b)).min(1.0);
+        let grow = ((MIN_SIDE - b) / (w - b)).max((MIN_SIDE - b) / (h - b)).max(1.0);
+        let s = if s < 1.0 { s } else { grow };
+        w = (w - b) * s + b;
+        h = (h - b) * s + b;
+    }
     let w = (w * k).min(view.w - 14.0 * k).max(MIN_SIDE * k);
     let h = (h * k).min(view.h - 4.0 * k).max(MIN_SIDE * k);
     Rect::new(view.x + view.w - w - 10.0 * k, view.y + 2.0 * k, w, h)
@@ -211,19 +237,34 @@ fn dragged(from: (f32, f32), edges: (bool, bool), d: Vec2, k: f32) -> (f32, f32)
     (w.max(MIN_SIDE), h.max(MIN_SIDE))
 }
 
+/// [`dragged`] kept to the map's proportions (`aspect`): the edge dragged leads, the other
+/// side follows; dragging the corner, the side that grew more leads.
+fn dragged_in_proportion(from: (f32, f32), edges: (bool, bool), d: Vec2, k: f32, aspect: f32) -> (f32, f32) {
+    let b = 2.0 * BORDER;
+    let (w, h) = dragged(from, edges, d, k);
+    let by_w = (w, (w - b) / aspect + b);
+    let by_h = ((h - b) * aspect + b, h);
+    match edges {
+        (true, false) => by_w,
+        (false, true) => by_h,
+        _ if by_w.0 * by_w.1 >= by_h.0 * by_h.1 => by_w,
+        _ => by_h,
+    }
+}
+
 /// Resizing by the left and bottom edges and their corner; a double click on an edge
 /// restores the original's size. Returns true while the pointer
 /// grips an edge or drags one (the click is the resize's, not the minimap's).
-fn resize(view: Rect, o: Rect) -> bool {
+fn resize(view: Rect, o: Rect, aspect: f32) -> bool {
     use macroquad::miniquad::{window::set_mouse_cursor, CursorIcon};
     let k = super::chrome::k();
     let m = Vec2::from(crate::ui::widgets::pointer());
     let edges = match DRAG.with(|d| d.get()) {
         Some((edges, start, from)) => {
             if is_mouse_button_down(MouseButton::Left) {
-                let want = dragged(from, edges, m - start, k);
+                let want = dragged_in_proportion(from, edges, m - start, k, aspect);
                 // Kept within the view: what is shown is what is stored.
-                let shown = outer_sized(view, k, Some(want));
+                let shown = outer_sized(view, k, Some(want), aspect);
                 SIZE.with(|s| s.set(Some((shown.w / k, shown.h / k))));
             } else {
                 DRAG.with(|d| d.set(None));
@@ -522,7 +563,7 @@ pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_
         draw_frame(&t, o, super::chrome::k());
     }
 
-    let gripped = resize(view, o);
+    let gripped = resize(view, o, aspect(map));
     let m = Vec2::from(crate::ui::widgets::pointer());
     (!gripped && clicked() && r.contains(m)).then(|| ((m.x - r.x) / k.x - 0.5, ((m.y - r.y) / k.y - 0.5) * rh))
 }
@@ -571,7 +612,7 @@ mod tests {
         let view = Rect::new(0.0, 0.0, 1000.0, 700.0);
         let r = rect_at(&map, view, 1.0);
         assert!((r.w / r.h - 2.0).abs() < 1e-3, "one cell per texel: {r:?}");
-        let o = outer_at(view, 1.0);
+        let o = outer_at(&map, view, 1.0);
         assert!(o.contains(r.point()) && r.x + r.w <= o.x + o.w && o.x + o.w <= 1000.0 && o.y >= 0.0);
         assert!((o.w - o.h).abs() < 1e-3, "the frame is square");
         let square = TileMap::from_codes(Grid::Square8, 50, 50, &vec![0u8; 2500], vec![]);
@@ -589,13 +630,20 @@ mod tests {
         // Dragged left and down at scale 2: wider and taller by half the screen distance.
         assert_eq!(dragged((400.0, 400.0), (true, true), vec2(-100.0, 60.0), 2.0), (450.0, 430.0));
         assert_eq!(dragged((400.0, 400.0), (false, true), vec2(-100.0, -1000.0), 1.0), (400.0, MIN_SIDE));
-        // Kept in the view's top-right corner and within it.
+        // Kept in the view's top-right corner and within it, the map's proportions kept
+        // inside the frame.
         let view = Rect::new(0.0, 0.0, 1000.0, 700.0);
-        let w = outer_sized(view, 1.0, Some((600.0, 250.0)));
-        assert_eq!((w.x + w.w, w.y, w.w, w.h), (990.0, 2.0, 600.0, 250.0));
-        let big = outer_sized(view, 1.0, Some((5000.0, 5000.0)));
-        assert!(big.x >= 0.0 && big.y + big.h <= 700.0, "{big:?}");
-        assert_eq!(outer_sized(view, 1.0, None).w, WINDOW, "the original's square by default");
+        let b = 2.0 * BORDER;
+        let w = outer_sized(view, 1.0, Some((600.0, 250.0)), 1.0);
+        assert!((w.x + w.w - 990.0).abs() < 1e-3 && w.y == 2.0 && (w.w - w.h).abs() < 1e-3, "a square map: a square frame {w:?}");
+        let wide = outer_sized(view, 1.0, Some((600.0, 600.0)), 2.0);
+        assert!(((wide.w - b) / (wide.h - b) - 2.0).abs() < 1e-3, "{wide:?}");
+        let big = outer_sized(view, 1.0, Some((5000.0, 5000.0)), 1.5);
+        assert!(big.x >= 0.0 && big.y + big.h <= 700.0 && ((big.w - b) / (big.h - b) - 1.5).abs() < 1e-3, "{big:?}");
+        assert_eq!(outer_sized(view, 1.0, None, 2.0).w, WINDOW, "the original's square by default");
+        // Dragging an edge: the other side follows.
+        let (dw, dh) = dragged_in_proportion((400.0, 400.0), (true, false), vec2(-100.0, 0.0), 1.0, 1.0);
+        assert!((dw - 500.0).abs() < 1e-3 && (dh - 500.0).abs() < 1e-3);
     }
 
     #[test]
