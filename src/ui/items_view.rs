@@ -817,7 +817,8 @@ pub fn squad(
     // The item under the pointer, in the pack or worn: its description pops up by the pointer
     // (not while one is carried).
     if let Some(item) = hover.filter(|_| held.is_none()) {
-        let (pw, ph) = (272.0 * k, 240.0 * k);
+        // Taller for an item with a special bonus, whose text follows its properties.
+        let (pw, ph) = (272.0 * k, if game.content.item(item).bonus.is_some() { 330.0 } else { 240.0 } * k);
         let (mx, my) = pointer();
         let px = if mx + 21.0 * k + pw > sw { mx - 21.0 * k - pw } else { mx + 21.0 * k };
         let py = (my + 37.0 * k).min(sh - ph - 4.0).max(4.0);

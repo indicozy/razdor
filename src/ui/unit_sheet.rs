@@ -77,7 +77,7 @@ fn bonus_english(b: &Bonus) -> String {
     s.to_string()
 }
 
-fn trait_line(b: &Bonus) -> (String, String) {
+pub(super) fn trait_line(b: &Bonus) -> (String, String) {
     match bonus_number(b) {
         Some(n) => (format!("Bonus{n}"), chrome::ui_text("Army", &format!("Bonus{n}")).unwrap_or_else(|| bonus_english(b))),
         None => ("Bonus1".to_string(), bonus_english(b)),

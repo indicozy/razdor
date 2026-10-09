@@ -909,18 +909,22 @@ pub(super) fn item_description(game: &Game, assets: &Assets, item: ItemId, x: f3
         _ => None,
     };
     let props = describe(c, item);
-    // Everything in the box: the picture, the name, the description and the properties at
-    // the largest size that fits its height (the army window's box under the promotion tree
-    // is a small one), the description cut short only at the smallest.
+    // What the item's special bonus does, under the properties in its own colour: the text the
+    // unit panel shows for it (`[Army] Bonus<N>`), so a buyer knows it before buying (Razdor's;
+    // the original names the bonus only).
+    let bonus = d.bonus.as_ref().map(|b| super::unit_sheet::trait_line(b).1);
     let layout = |s: f32| {
         let desc = wrap(&d.description, w - 24.0 * k, 15.0 * k * s);
-        let lines = wrap(&props, w - 24.0 * k, 16.0 * k * s);
+        let mut lines = wrap(&props, w - 24.0 * k, 16.0 * k * s);
+        let bonus_lines = bonus.as_deref().map_or(Vec::new(), |b| wrap(b, w - 24.0 * k, 15.0 * k * s));
+        let n = lines.len();
+        lines.extend(bonus_lines);
         let height = (10.0 + 56.0 * s + 6.0 + 22.0 * s + if limit.is_some() { 20.0 * s } else { 0.0 } + 18.0 * s * desc.len() as f32 + 4.0 + 19.0 * s * lines.len() as f32 + 6.0) * k;
-        (desc, lines, height)
+        (desc, (lines, n), height)
     };
     let scales = [1.0, 0.9, 0.8, 0.72, 0.65];
     let s = scales.iter().copied().find(|&s| layout(s).2 <= h).unwrap_or(0.65);
-    let (mut desc, lines, _) = layout(s);
+    let (mut desc, (lines, props_n), _) = layout(s);
     let icon = 56.0 * k * s;
     assets.draw_item(item, x + w / 2.0 - icon / 2.0, y + 10.0 * k, icon);
     let mut ly = y + 10.0 * k + icon + 6.0 * k + 18.0 * k * s;
@@ -943,9 +947,13 @@ pub(super) fn item_description(game: &Game, assets: &Assets, item: ItemId, x: f3
         text_centered(line, x + w / 2.0, ly, 15.0 * k * s, BOX_INK);
     }
     ly += 4.0 * k;
-    for line in &lines {
+    for (n, line) in lines.iter().enumerate() {
         ly += 19.0 * k * s;
-        text_centered(line, x + w / 2.0, ly, 16.0 * k * s, MANA);
+        if n < props_n {
+            text_centered(line, x + w / 2.0, ly, 16.0 * k * s, MANA);
+        } else {
+            text_centered(line, x + w / 2.0, ly, 15.0 * k * s, chrome::GOLD);
+        }
     }
 }
 
