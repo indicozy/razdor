@@ -224,6 +224,31 @@ pub fn win_ugs(name: &str) -> Option<Texture2D> {
     art(&format!("Windows/{name}.ugs"), Fx::Plain)
 }
 
+/// `Graphics/Windows/<name>.lit` cut out by the brightness of `<mask>.lit` (the original's
+/// separate alpha pictures, e.g. the battle's slide sprites over `army-alpha`, 0x4afbd8).
+pub fn win_masked(name: &str, mask: &str) -> Option<Texture2D> {
+    let key = format!("masked:{name}:{mask}");
+    CHROME.with(|c| {
+        let mut c = c.borrow_mut();
+        let c = c.as_mut()?;
+        if let Some(t) = c.animations.get(&key) {
+            return t.as_ref().and_then(|v| v.first().cloned());
+        }
+        let load = |n: &str| find_path(&c.dir, &format!("Graphics/Windows/{n}.lit")).and_then(|p| gfx::decode_file(&p)).ok().and_then(|f| f.into_iter().next());
+        let t = match (load(name), load(mask)) {
+            (Some(mut img), Some(m)) if (img.width, img.height) == (m.width, m.height) => {
+                for (p, q) in img.rgba.chunks_exact_mut(4).zip(m.rgba.chunks_exact(4)) {
+                    p[3] = q[0].max(q[1]).max(q[2]);
+                }
+                to_texture(&img).map(|t| vec![t])
+            }
+            _ => None,
+        };
+        c.animations.insert(key, t.clone());
+        t.and_then(|v| v.first().cloned())
+    })
+}
+
 /// The frames of a battle effect (`Graphics/Battle/<file>.ugs`) with its colour and alpha
 /// offsets applied (0x4e1148), for [`premultiplied`] drawing; `None` without the file.
 pub fn battle_effect(e: &razdor::dt::data::BattleEffect) -> Option<Vec<Texture2D>> {

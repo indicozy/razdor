@@ -12,7 +12,6 @@
 //! wounded and blesses the rest.
 
 use std::collections::VecDeque;
-use std::f32::consts::PI;
 
 use macroquad::prelude::*;
 
@@ -34,7 +33,6 @@ use super::world_view;
 use super::Screen;
 
 const AI_DELAY: f32 = 0.45;
-const STRIKE_TIME: f32 = 0.7;
 const MOVE_TIME: f32 = 0.25;
 const ACTIVE: Color = Color::new(0.35, 1.0, 0.35, 1.0);
 const FRIENDLY: Color = Color::new(0.35, 0.55, 1.0, 1.0);
@@ -112,10 +110,11 @@ impl Layout {
 
 /// An action being animated.
 enum FxKind {
-    /// The actor lunges, the target shows the hit's animation and number; then, for a
-    /// counterblow, the target lunges back and the actor shows the same animation, or, for a
-    /// `DeathCurse` death of the killer, the actor shows the sorcery (`echo`, 0x4c43e8).
-    Act { hit: Hit, echo: Option<Echo>, echo_cued: bool },
+    /// The action's sprite slides from the actor's card to the target's (`slide` seconds,
+    /// 0x4afbd8), then the target shows the action's effect (`effect` seconds, 0x4afe7c) with
+    /// its sound; then, for a counterblow, the slide back and the same effect on the actor, or,
+    /// for a `DeathCurse` death of the killer, the sorcery on the actor (`echo`, 0x4c43e8).
+    Act { hit: Hit, echo: Option<Echo>, slide: f32, effect: f32, cued: bool, echo_cued: bool },
     /// The actor slides between two cells.
     Move { from: Vec2, to: Vec2 },
     /// A pass: a short pause (0x4afb54).
@@ -129,15 +128,30 @@ struct Fx {
 }
 
 impl Fx {
-    fn act(battle: &Battle, actor: usize, hit: Hit) -> Fx {
+    /// `actor`'s action `hit`; `px` the distance between the two cards in the original's
+    /// pixels.
+    fn act(battle: &Battle, actor: usize, hit: Hit, px: f32) -> Fx {
         let echo = razdor::av::echo(battle, actor, &hit);
-        Fx { actor, kind: FxKind::Act { hit, echo, echo_cued: false }, t: 0.0 }
+        let speed = anim_speed();
+        let kind = FxKind::Act { hit, echo, slide: slide_secs(px, speed), effect: effect_secs(speed), cued: false, echo_cued: false };
+        Fx { actor, kind, t: 0.0 }
+    }
+
+    /// When the first effect ends and when the echo's starts (after its slide back).
+    fn marks(&self) -> (f32, f32) {
+        match self.kind {
+            FxKind::Act { slide, effect, echo, .. } => {
+                let first = slide + effect;
+                (first, first + if echo == Some(Echo::Counter) { slide } else { 0.0 })
+            }
+            _ => (0.0, 0.0),
+        }
     }
 
     fn duration(&self) -> f32 {
         match self.kind {
-            FxKind::Act { echo: Some(_), .. } => 2.0 * STRIKE_TIME,
-            FxKind::Act { .. } => STRIKE_TIME,
+            FxKind::Act { echo: Some(_), effect, .. } => self.marks().1 + effect,
+            FxKind::Act { .. } => self.marks().0,
             FxKind::Move { .. } => MOVE_TIME,
             FxKind::Pass => razdor::av::BATTLE_PASS_MS as f32 / 1000.0,
         }
@@ -145,7 +159,47 @@ impl Fx {
 
     /// The echo's half of an action is playing.
     fn echoing(&self) -> bool {
-        matches!(self.kind, FxKind::Act { echo: Some(_), .. }) && self.t >= STRIKE_TIME
+        matches!(self.kind, FxKind::Act { echo: Some(_), .. }) && self.t >= self.marks().0
+    }
+}
+
+/// The Community animation speed (`AnimationSpeed`, percent), if the install has it.
+fn anim_speed() -> Option<f32> {
+    chrome::options_value("AnimationSpeed").and_then(|v| v.trim().parse::<f32>().ok()).map(|s| s.clamp(0.0, 99.0))
+}
+
+/// A slide's length over `px` of the original's pixels (0x4afbd8): 1.8 ms a pixel, at most
+/// `(100 − speed) × 5` ms with the Community patch (the vanilla cap is unknown).
+fn slide_secs(px: f32, speed: Option<f32>) -> f32 {
+    let ms = (1.8 * px).round();
+    speed.map_or(ms, |s| ms.min((100.0 - s) * 5.0)) / 1000.0
+}
+
+/// A battle effect's length (0x4afe7c): 350 ms, `(100 − speed) × 3` ms with the Community patch.
+fn effect_secs(speed: Option<f32>) -> f32 {
+    speed.map_or(350.0, |s| (100.0 - s) * 3.0) / 1000.0
+}
+
+/// The distance between the centres of `a`'s and `b`'s cards, in the original's pixels (its
+/// card is 92 wide).
+fn card_distance(l: &Layout, battle: &Battle, a: usize, b: usize) -> f32 {
+    let centre = |id: usize| {
+        let f = &battle.fighters[id];
+        l.portrait(l.cell_pos(f.team, f.slot)).center()
+    };
+    centre(a).distance(centre(b)) * 92.0 / l.card.x
+}
+
+/// The sprite sliding for an action (0x4afbd8): crossed swords for melee, arrows up for the
+/// player's shot and down for the enemy's, a skull for hostile magic, stars for a friendly
+/// spell (`army-1..5`, cut out by `army-alpha`).
+fn slide_sprite(kind: ActionKind, team: Team) -> &'static str {
+    match kind {
+        ActionKind::Melee | ActionKind::LongStrike => "army-1",
+        ActionKind::Shot if team == Team::Player => "army-2",
+        ActionKind::Shot => "army-3",
+        ActionKind::Strike | ActionKind::Curse => "army-5",
+        ActionKind::Heal | ActionKind::Bless => "army-4",
     }
 }
 
@@ -452,13 +506,15 @@ impl BattleView {
             // the curse sign, the blessing's with the blessing sign (4afe7c, effects 2 and 3).
             if let FxKind::Act { hit, echo, .. } = &fx.kind {
                 let ended = |end: f32| before < end && fx.t >= end;
+                let (first, _) = fx.marks();
+                let last = fx.duration();
                 let mut marks = Vec::new();
-                if ended(STRIKE_TIME) {
+                if ended(first) {
                     marks.push((hit.target, hit.kind));
                 }
                 match echo {
-                    Some(Echo::Counter) if ended(2.0 * STRIKE_TIME) => marks.push((fx.actor, hit.kind)),
-                    Some(Echo::Curse) if ended(2.0 * STRIKE_TIME) => marks.push((fx.actor, ActionKind::Strike)),
+                    Some(Echo::Counter) if ended(last) => marks.push((fx.actor, hit.kind)),
+                    Some(Echo::Curse) if ended(last) => marks.push((fx.actor, ActionKind::Strike)),
                     _ => {}
                 }
                 for (id, kind) in marks {
@@ -472,9 +528,16 @@ impl BattleView {
                     }
                 }
             }
-            // The echo's sound as its half begins: the action's own, or the sorcery.
-            let echoing = fx.echoing();
-            if let FxKind::Act { hit, echo: Some(e), echo_cued } = &mut fx.kind {
+            // The action's sound as its effect begins (0x4afe7c), the echo's as its effect
+            // begins: the action's own, or the sorcery.
+            let echoing = fx.t >= fx.marks().1 && fx.echoing();
+            if let FxKind::Act { hit, slide, cued, .. } = &mut fx.kind {
+                if fx.t >= *slide && !*cued {
+                    *cued = true;
+                    cue(action_cue(&self.battle, fx.actor, hit.kind));
+                }
+            }
+            if let FxKind::Act { hit, echo: Some(e), echo_cued, .. } = &mut fx.kind {
                 if echoing && !*echo_cued {
                     *echo_cued = true;
                     cue(match e {
@@ -522,8 +585,8 @@ impl BattleView {
                         self.ai_timer = 0.0;
                         self.fx = match self.ai_move() {
                             Some(Step::Act { actor, hit }) => {
-                                cue(action_cue(&self.battle, actor, hit.kind));
-                                Some(Fx::act(&self.battle, actor, hit))
+                                let px = card_distance(l, &self.battle, actor, hit.target);
+                                Some(Fx::act(&self.battle, actor, hit, px))
                             }
                             Some(Step::Move { actor, from, to }) => {
                                 cue(Cue::CardMove);
@@ -672,8 +735,8 @@ impl BattleView {
             let opts = self.battle.options(active, t);
             if let Some(&kind) = opts.first() {
                 if let Ok(hit) = self.battle.act_with(t, kind) {
-                    cue(action_cue(&self.battle, active, kind));
-                    self.fx = Some(Fx::act(&self.battle, active, hit));
+                    let px = card_distance(l, &self.battle, active, hit.target);
+                    self.fx = Some(Fx::act(&self.battle, active, hit, px));
                     self.note_log();
                 }
             } else if t == active {
@@ -753,14 +816,10 @@ impl BattleView {
             }
             let mut p = l.cell_pos(f.team, f.slot);
             if let Some(fx) = &self.fx {
-                let dir = if f.team == Team::Player { -1.0 } else { 1.0 };
-                let lunge = |t: f32| dir * 14.0 * k * ((t / (STRIKE_TIME * 0.5)).min(1.0) * PI).sin();
-                match &fx.kind {
-                    FxKind::Act { .. } if fx.actor == i && !fx.echoing() => p.y += lunge(fx.t),
-                    // The counterblow: the target lunges back at the actor.
-                    FxKind::Act { hit, echo: Some(Echo::Counter), .. } if hit.target == i && fx.echoing() => p.y += lunge(fx.t - STRIKE_TIME),
-                    FxKind::Move { from, to } if fx.actor == i => p = from.lerp(*to, (fx.t / MOVE_TIME).min(1.0)),
-                    _ => {}
+                if let FxKind::Move { from, to } = &fx.kind {
+                    if fx.actor == i {
+                        p = from.lerp(*to, (fx.t / MOVE_TIME).min(1.0));
+                    }
                 }
             }
             let hovered = hovered_cell == Some((f.team, f.slot));
@@ -926,11 +985,33 @@ impl BattleView {
     }
 
     fn draw_fx(&self, l: &Layout, fx: &Fx) {
-        let FxKind::Act { hit, echo, .. } = &fx.kind else { return };
+        let FxKind::Act { hit, echo, slide, effect, .. } = &fx.kind else { return };
+        let (first, echo_at) = fx.marks();
+        let card = |id: usize| {
+            let f = &self.battle.fighters[id];
+            l.portrait(l.cell_pos(f.team, f.slot)).center()
+        };
+        // The slide (0x4afbd8): the action's sprite from one card's centre to the other's.
+        let sprite = |from: usize, to: usize, s: f32| {
+            let team = self.battle.fighters[from].team;
+            if let Some(t) = chrome::win_masked(slide_sprite(hit.kind, team), "army-alpha") {
+                let size = 56.0 * l.card.x / 92.0;
+                let p = card(from).lerp(card(to), s.clamp(0.0, 1.0));
+                draw_texture_ex(&t, p.x - size / 2.0, p.y - size / 2.0, WHITE, DrawTextureParams { dest_size: Some(vec2(size, size)), ..Default::default() });
+            }
+        };
+        if fx.t < *slide {
+            sprite(fx.actor, hit.target, fx.t / slide);
+            return;
+        }
         if fx.echoing() {
+            if fx.t < echo_at {
+                sprite(hit.target, fx.actor, (fx.t - first) / slide);
+                return;
+            }
             // The echo on the actor: the action's own picture for a counterblow, the sorcery
             // for a curse.
-            let k = (fx.t - STRIKE_TIME) / STRIKE_TIME;
+            let k = (fx.t - echo_at) / effect;
             let a = &self.battle.fighters[fx.actor];
             let q = l.portrait(l.cell_pos(a.team, a.slot));
             let n = match echo {
@@ -944,7 +1025,7 @@ impl BattleView {
             }
             return;
         }
-        let k = fx.t / STRIKE_TIME;
+        let k = (fx.t - slide) / effect;
         let f = &self.battle.fighters[hit.target];
         let sq = l.portrait(l.cell_pos(f.team, f.slot));
         let drawn = draw_effect(self.battle.content(), effect_number(&self.battle, fx.actor, hit.kind), sq, k);
@@ -1264,11 +1345,22 @@ mod tests {
         let target = b.at(Team::Enemy, Slot::new(Row::Front, 1)).unwrap();
         let kind = b.options(actor, target)[0];
         let hit = b.act_with(target, kind).unwrap();
-        let mut fx = Fx::act(&b, actor, hit);
+        let mut fx = Fx::act(&b, actor, hit, 200.0);
         assert!(matches!(fx.kind, FxKind::Act { echo: Some(Echo::Counter), .. }));
-        assert_eq!(fx.duration(), 2.0 * STRIKE_TIME);
+        // Without the Community setting: a 360 ms slide, a 350 ms effect, twice.
+        assert!((fx.duration() - 2.0 * (0.36 + 0.35)).abs() < 1e-5, "{}", fx.duration());
         assert!(!fx.echoing());
-        fx.t = STRIKE_TIME + 0.01;
+        fx.t = 0.36 + 0.35 + 0.01;
         assert!(fx.echoing());
+    }
+
+    #[test]
+    fn slides_and_effects_take_the_originals_time() {
+        assert_eq!(slide_secs(100.0, None), 0.18);
+        assert_eq!(slide_secs(400.0, Some(0.0)), 0.5, "the Community cap at speed 0");
+        assert_eq!(slide_secs(400.0, Some(50.0)), 0.25);
+        assert_eq!(effect_secs(None), 0.35);
+        assert_eq!(effect_secs(Some(0.0)), 0.3);
+        assert_eq!(slide_sprite(ActionKind::Shot, Team::Enemy), "army-3");
     }
 }
