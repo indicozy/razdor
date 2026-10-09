@@ -248,6 +248,11 @@ pub struct Unit {
     pub named: u8,
     /// Joined through a scenario event (events can take such units away again).
     pub from_event: bool,
+    /// Its first `personal` worn slots hold its own items: while it lives they cannot be
+    /// taken off (unit +0x18; 0x4c24f4 refuses a worn slot below it, 0x4c280c shows
+    /// `[Army] ItemI`). A map army's first unit gets the count of the items it wears at load.
+    #[serde(default)]
+    pub personal: u8,
     /// The last time the garrison tab opened while it was in the hero's army (unit+0x1bb):
     /// a garrison unit counts as paid a day after it (economy.md §2). 0: never, as a hire.
     #[serde(default)]
@@ -282,6 +287,7 @@ impl Unit {
             potions: Vec::new(),
             named: 0,
             from_event: false,
+            personal: 0,
             seen: 0,
             spells: [None; SPELL_SLOTS],
             drain: 0,

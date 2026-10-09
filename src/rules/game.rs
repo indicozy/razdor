@@ -2356,6 +2356,8 @@ pub(crate) fn troop_unit_stats(content: &Content, t: &Troop) -> (Unit, super::un
     u.spells = t.spells;
     u.drain = t.drain;
     u.carry = t.carry;
+    u.named = t.named;
+    u.personal = t.personal;
     // Healed full (`Unit::heal_full`), then its wounds.
     let stats = u.stats(content);
     u.hp = stats.max_hp();
@@ -2366,6 +2368,22 @@ pub(crate) fn troop_unit_stats(content: &Content, t: &Troop) -> (Unit, super::un
         u.died_at = t.died_at;
     }
     (u, stats)
+}
+
+/// The whole record of unit `u` as an army's troop (the reverse of [`troop_unit`]): level,
+/// XP, worn items, pay and kind, spells, wounds or death, name and personal items.
+pub(crate) fn troop_of_unit(content: &Content, u: &Unit, now: u64) -> Troop {
+    let mut t = Troop::new(u.def, u.level, u.slot);
+    t.xp = u.xp;
+    t.worn = u.items;
+    t.unpaid = u.unpaid;
+    t.last_paid = u.last_paid;
+    t.kind = u.wage_kind;
+    t.named = u.named;
+    t.personal = u.personal;
+    t.died_at = u.died_at;
+    unit_into_troop(content, &mut t, u, now);
+    t
 }
 
 /// Writes what a world spell or a rebuild did to the unit of troop `t` back into it: its

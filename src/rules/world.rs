@@ -72,6 +72,13 @@ pub struct Troop {
     pub drain: i32,
     #[serde(default)]
     pub carry: crate::rules::units::HpCarry,
+    /// The named character it is (unit +0x14, 1-based); 0 for an ordinary unit.
+    #[serde(default)]
+    pub named: u8,
+    /// Its first `personal` worn slots hold its own items, not to be taken off while it lives
+    /// (unit +0x18, see [`crate::rules::units::Unit::personal`]).
+    #[serde(default)]
+    pub personal: u8,
 }
 
 fn recruit() -> WageKind {
@@ -96,6 +103,8 @@ impl Troop {
             spells: [None; crate::rules::units::SPELL_SLOTS],
             drain: 0,
             carry: crate::rules::units::HpCarry(0.0),
+            named: 0,
+            personal: 0,
         }
     }
 
@@ -697,7 +706,9 @@ pub struct Army {
     pub arrived: bool,
     /// Game minute until which it stands still between patrol legs.
     pub rest_until: f64,
-    /// Named character (1-based, the scenario's list) leading it; 0 none.
+    /// The named character leading it in saves from before each troop kept its own
+    /// ([`Troop::named`]); a load moves it onto the leader.
+    #[serde(default, skip_serializing)]
     pub named: u8,
     /// Army-wide world spells of saves before format 7; a load moves them into the units'
     /// slots (`rules::save`).
@@ -1156,16 +1167,24 @@ impl World {
                 talk: 0,
                 arrived: false,
                 rest_until: 0.0,
-                named: a.named_character,
+                named: 0,
                 old_effects: Vec::new(),
                 ship,
                 ai: AiProfile::from_dt(a),
                 mind: AiMind::default(),
             };
             let mut army = army;
+            if let Some(leader) = army.troops.first_mut().filter(|_| a.leader_unit != 0) {
+                leader.named = a.named_character;
+            }
             // Its items go to the unit each one helps most, else into its pack (0x4a273c).
             for item in artifact_ids(content, a.artifacts.iter().filter(|&&x| x != 0).map(|&x| x as u32)) {
                 super::ai::give_item(content, &mut army, item);
+            }
+            // Then its first unit's worn items become his own (0x4b2504 sets unit 1's +0x18 to
+            // the number of his filled worn slots): Йошка's pitchfork stays on while he lives.
+            if let Some(first) = army.troops.first_mut() {
+                first.personal = first.worn.iter().filter(|w| w.is_some()).count() as u8;
             }
             // Byte 84: every unit holds that spell in its first slot for good (0x4b2504).
             if a.spell != 0 {

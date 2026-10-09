@@ -445,6 +445,11 @@ fn migrate_spells(game: &mut Game) {
     let c = game.content.clone();
     let w = &mut game.world;
     for a in w.armies.iter_mut().chain(w.inactive.iter_mut()) {
+        // An army's character was its own field before each troop kept its name.
+        let named = std::mem::take(&mut a.named);
+        if let Some(leader) = a.troops.first_mut().filter(|t| named != 0 && t.named == 0) {
+            leader.named = named;
+        }
         let old = std::mem::take(&mut a.old_effects);
         let mut units: Vec<_> = a.troops.iter().map(|t| super::game::troop_unit(&c, t)).collect();
         super::magic::migrate_old_spells(&old, &mut units, end);
