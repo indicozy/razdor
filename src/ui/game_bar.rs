@@ -14,7 +14,7 @@ use razdor::rules::game::Game;
 use razdor::trf;
 
 use super::chrome::{self, shadow_centered, shadow_text, tex, three_slice, Fx, CREAM, GOLD};
-use super::widgets::{clicked, fit_size, measure, mouse_in, tooltip};
+use super::widgets::{clicked, fit_size, measure, mouse_in, panel_hint};
 
 /// A bar button.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -216,7 +216,7 @@ fn time_button(b: TimeButton, r: Rect, hover: bool) -> bool {
         }
     }
     if hover {
-        tooltip(&[(b.hint(), CREAM)]);
+        panel_hint(&[(b.hint(), CREAM)]);
     }
     let pressed = hover && clicked();
     if pressed {
@@ -331,7 +331,7 @@ fn oval(b: BarButton, r: Rect, look: Look) -> bool {
         shadow_centered(label, r.x + r.w / 2.0, r.y + r.h / 2.0 + s * 0.36, s, glyph);
     }
     if hover {
-        tooltip(&[(b.hint().to_string(), CREAM)]);
+        panel_hint(&[(b.hint().to_string(), CREAM)]);
     }
     // A panel icon's own sound (interface.md §14); the window it opens is silent.
     let pressed = hover && clicked();
