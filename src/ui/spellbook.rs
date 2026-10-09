@@ -6,7 +6,6 @@
 
 use macroquad::prelude::*;
 
-use razdor::dt::data::MagicSchool;
 use razdor::i18n::{n_, tr};
 use razdor::trf;
 
@@ -54,28 +53,6 @@ pub fn duration_text(s: &SpellDef) -> String {
     match Duration::of(s) {
         Duration::Instant => tr("instant").into(),
         Duration::Minutes(m) => trf!("lasts {time}", time = duration_label(m as f64)),
-    }
-}
-
-/// The lines describing a spell: effect, school and cost for this hero, duration, target.
-pub fn spell_lines(game: &Game, s: &SpellDef) -> Vec<String> {
-    let cost = game.cast_cost(s);
-    let school = s.school.map_or(String::new(), |m| format!("{} ", school_label(m)));
-    let base = if cost.mana != s.cost_mana.max(0) { format!(" {}", trf!("(base {base})", base = s.cost_mana)) } else { String::new() };
-    let target = if magic::targets_enemy(s) { tr("an enemy army") } else { tr("your army") };
-    vec![
-        effect_summary(s),
-        format!("{school}{}{base}, {}", trf!("Mana {mana}", mana = cost.mana), trf!("casting {time}", time = duration_label(cost.minutes as f64))),
-        trf!("{duration}, cast on {target}", duration = duration_text(s), target),
-    ]
-}
-
-/// "Life magic.", "Death magic.", "Elemental magic.".
-pub fn school_label(m: MagicSchool) -> &'static str {
-    match m {
-        MagicSchool::Life => tr("Life magic."),
-        MagicSchool::Elemental => tr("Elemental magic."),
-        MagicSchool::Death => tr("Death magic."),
     }
 }
 
@@ -286,4 +263,48 @@ pub fn frame(
         chrome::shadow_centered(m, r.center().x, r.y + r.h - 8.0 * k, 14.0 * k, ACCENT);
     }
     next.or(bar_pick)
+}
+
+/// A spell's card as the sanctuary shows it (0x49bde4): a box with the spell's picture and
+/// its silver frame on the left (100 px, 6 px in), and to its right, centred and wrapped
+/// into the rest of the box, the name, a blank line, what it does, the mana and reading
+/// time and how long it lasts, the block centred in the box's height.
+pub fn spell_card(game: &Game, s: &SpellDef, r: Rect) {
+    use super::chrome::{self, CREAM};
+    let k = chrome::k();
+    chrome::text_box(r);
+    let side = (r.h - 12.0 * k).min(100.0 * k);
+    let icon = Rect::new(r.x + 6.0 * k, r.y + (r.h - side) / 2.0, side, side);
+    chrome::spell_icon(&s.icons, icon);
+    if let Some(t) = chrome::win_fx("Spell-Frame", chrome::Fx::KeyBlack) {
+        chrome::tex(&t, icon, WHITE);
+    }
+    let left = icon.x + icon.w + 2.0 * k;
+    let room = r.x + r.w - left - 8.0 * k;
+    let tx = left + (r.x + r.w - left) / 2.0;
+    let cost = game.cast_cost(s);
+    let card_hours = game.card_cast_hours(s).max(0) as u64;
+    let mana_line = format!("{} {}, {} {}", own("Mana", n_("Mana:")), cost.mana, own("Reading", n_("Reading:")), hours(card_hours * 60, false));
+    let last = match Duration::of(s) {
+        Duration::Instant => own("MomentaryEffect", n_("Instant effect")),
+        Duration::Minutes(m) => format!("{} {}", own("TimeOfEffect", n_("Lasts:")), hours(m, true)),
+    };
+    let (name_size, size) = (fit_size(&s.name, room, 17.0 * k), 12.0 * k);
+    let gold = Color::new(1.0, 0.72, 0.3, 1.0);
+    let mut lines: Vec<(String, Color)> = wrap(&effect_summary(s), room, size).into_iter().map(|l| (l, chrome::BLUE_TEXT)).collect();
+    lines.extend(wrap(&mana_line, room, size).into_iter().map(|l| (l, gold)));
+    lines.extend(wrap(&last, room, size).into_iter().map(|l| (l, gold)));
+    let line_h = 13.0 * k;
+    // The name, a blank line, then the lines: centred in the box's height.
+    let block = name_size + line_h + lines.len() as f32 * line_h;
+    let mut y = r.y + ((r.h - block) / 2.0).max(4.0 * k) + name_size * 0.8;
+    super::dt_font::with_face(super::dt_font::Face::Title, || chrome::shadow_centered(&s.name, tx, y, name_size, CREAM));
+    y += line_h * 2.0;
+    for (line, color) in lines {
+        if y > r.y + r.h - 2.0 * k {
+            break;
+        }
+        chrome::shadow_centered(&line, tx, y, size, color);
+        y += line_h;
+    }
 }

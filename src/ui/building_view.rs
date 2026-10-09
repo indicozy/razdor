@@ -928,8 +928,8 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
     if button(x, by, 150.0 * k, 40.0 * k, tr("Inventory"), true) {
         next = Some(Screen::Squad { selected: Default::default(), scroll: 0, back: Some(view.clone()) });
     }
-    resource_icon(Resource::Gold, x + 180.0 * k, by + 20.0 * k, 34.0 * k);
-    text(&trf!("Gold {gold}", gold = game.gold), x + 202.0 * k, by + 27.0 * k, 20.0 * k, ACCENT);
+    // The money between "Снаряжение" and the trade button, its label over the amount.
+    gold_group(game, Rect::new(x + 154.0 * k, by - 2.0 * k, lx - x - 158.0 * k, 44.0 * k));
     let label = if view.selling { tr("Sell") } else { tr("Buy") };
     // Sell is always on; Buy only when the price is at most the gold, the purchase's test.
     let can = match (view.selling, view.pick) {
@@ -985,46 +985,108 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
 /// Sanctuary: spells for sale; a spell bought goes into the hero's book.
 fn sanctuary(game: &mut Game, f: &Frame, view: &mut BuildingView, message: &mut Option<String>) {
     let k = chrome::k();
-    let (x, y, w) = (f.cx, f.cy, f.cw);
     let spells: Vec<SpellDef> = game.spells_here().into_iter().cloned().collect();
-    let dw = w * 0.45;
-    let (lx, lw) = (x + dw + 10.0 * k, w - dw - 10.0 * k);
-    let rows: Vec<_> = spells.iter().map(|s| (None, s.name.clone(), s.cost_gold.to_string(), false)).collect();
-    text_centered(tr("Spells"), lx + lw / 2.0, y + 18.0 * k, 18.0 * k, ACCENT);
-    if let Some(k) = price_list(None, &rows, view.pick, &mut view.scroll, lx, y + 26.0 * k, lw, 7) {
-        view.pick = Some(k);
+    // Laid out as the original's (0x4ba854, tab 4; measured on its screen): the list on the
+    // right, a picture column, "Название заклятия" and "Цена" over six rows in one frame; a
+    // spell already in the book in its own colour.
+    let list = at(f, 530.0, 55.0, 296.0, 234.0);
+    if let Some(n) = spell_list(game, &spells, view.pick, list) {
+        view.pick = Some(n);
     }
-    let dh = 150.0 * k;
-    chrome::text_box(Rect::new(x, y, dw, dh));
-    let chosen = view.pick.and_then(|k| spells.get(k));
+    // The description on the left: its title, the spell's card, the message box, the money
+    // and "Купить" (0x4ba078).
+    let title = own_text("Building", "SpellInfo", n_("Spell description"));
+    super::dt_font::with_face(super::dt_font::Face::Title, || chrome::shadow_centered(&title, f.x + 388.0 * k, f.y + 46.0 * k, 15.0 * k, chrome::CREAM));
+    let card = at(f, 255.0, 55.0, 266.0, 103.0);
+    let chosen = view.pick.and_then(|n| spells.get(n));
     match chosen {
-        Some(s) => {
-            chrome::spell_icon(&s.icons, Rect::new(x + 14.0 * k, y + 14.0 * k, 96.0 * k, 96.0 * k));
-            text_centered(&s.name, x + dw / 2.0, y + 30.0 * k, 21.0 * k, BOX_INK);
-            for (i, line) in super::spellbook::spell_lines(game, s).iter().enumerate() {
-                text_centered(line, x + dw / 2.0, y + 60.0 * k + i as f32 * 22.0 * k, 16.0 * k, MANA);
-            }
+        Some(s) => super::spellbook::spell_card(game, s, card),
+        None => {
+            chrome::text_box(card);
+            text_centered(tr("Pick a spell from the list."), card.center().x, card.center().y, 16.0 * k, BOX_INK);
         }
-        None => text_centered(tr("Pick a spell from the list."), x + dw / 2.0, y + dh / 2.0, 18.0 * k, BOX_INK),
     }
-    let by = y + dh + 14.0 * k;
-    if let Some(s) = chosen {
-        if game.knows_spell(s.id) {
-            text_centered(tr("This spell is already in your book!"), x + dw / 2.0, by + 20.0 * k, 18.0 * k, MANA);
-        } else if button_sounding(x + dw - 130.0 * k, by + 50.0 * k, 130.0 * k, 40.0 * k, tr("Buy"), game.gold >= s.cost_gold, Cue::Gold) {
+    let note = at(f, 255.0, 165.0, 266.0, 66.0);
+    let (can, said) = match chosen {
+        Some(s) if game.knows_spell(s.id) => (false, Some((own_text("Building", "AlreadySpell", n_("This spell is already in your book!")), MANA))),
+        Some(s) if game.gold < s.cost_gold => (false, Some((own_text("Building", "NoMoneyForSpell", n_("You do not have enough money for this spell!")), chrome::RED_TEXT))),
+        Some(_) if game.spells.len() >= SPELL_BOOK_SIZE => (false, Some((own_text("Building", "NoPlaceForSpell", n_("There is no room for the spell in your spell book!")), chrome::RED_TEXT))),
+        Some(_) => (true, None),
+        None => (false, None),
+    };
+    if let Some((t, color)) = said {
+        let size = 15.0 * k;
+        let lines = wrap(&t, note.w - 8.0 * k, size);
+        let top = note.y + (note.h - lines.len() as f32 * 19.0 * k) / 2.0 + size * 0.8;
+        for (i, l) in lines.iter().enumerate() {
+            chrome::shadow_centered(l, note.center().x, top + i as f32 * 19.0 * k, size, color);
+        }
+    }
+    gold_group(game, at(f, 255.0, 239.0, 160.0, 50.0));
+    let buy = at(f, 424.0, 247.0, 92.0, 36.0);
+    if button_sounding(buy.x, buy.y, buy.w, buy.h, tr("Buy"), can, Cue::Gold) {
+        if let Some(s) = chosen {
             *message = Some(match game.learn_spell(s.id) {
                 Ok(()) => trf!("{spell} is written into your book.", spell = s.name),
                 Err(e) => service_error(e),
             });
         }
     }
-    resource_icon(Resource::Gold, x + 26.0 * k, by + 70.0 * k, 34.0 * k);
-    text(&trf!("Gold {gold}", gold = game.gold), x + 50.0 * k, by + 77.0 * k, 20.0 * k, ACCENT);
-    text_fit(&trf!("Book {n}/{max}. Cast from the spell book on the map (B).", n = game.spells.len(), max = SPELL_BOOK_SIZE), x, by + 118.0 * k, w, 16.0 * k, DIM);
     if let Some(l) = game.location {
-        let dy = y + 26.0 * k + 26.0 * k + 7.0 * 30.0 * k + 50.0 * k;
-        description_box(&game.world.locations[l].description, x, dy, w, f.y + f.h - dy - 10.0 * k);
+        let dy = f.y + 300.0 * k;
+        description_box(&game.world.locations[l].description, f.cx, dy, f.cw, f.y + f.h - dy - 10.0 * k);
     }
+}
+
+/// The sanctuary's spell list (0x4ba854): each row the spell's small picture, its name and
+/// its price, six rows over the frame's height; a click picks a row.
+fn spell_list(game: &Game, spells: &[SpellDef], pick: Option<usize>, r: Rect) -> Option<usize> {
+    let k = chrome::k();
+    draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, 0.04, 0.02, 0.45));
+    chrome::silver_frame(r, 1.0);
+    // The column titles stand over the frame, on the description's title line.
+    let head = 0.0;
+    let (name_x, price_x) = (r.x + 47.0 * k, r.x + r.w - 53.0 * k);
+    let (name_head, price_head) = (own_text("Building", "SpellName", n_("Spell")), own_text("Building", "ItemCost", n_("Price")));
+    super::dt_font::with_face(super::dt_font::Face::Title, || {
+        chrome::shadow_text(&name_head, name_x + 10.0 * k, r.y - 9.0 * k, 15.0 * k, chrome::CREAM);
+        chrome::shadow_text(&price_head, price_x, r.y - 9.0 * k, 15.0 * k, chrome::CREAM);
+    });
+    let row_h = (r.h - head) / 6.0;
+    let mut hit = None;
+    for (n, s) in spells.iter().enumerate().take(6) {
+        let ry = r.y + head + n as f32 * row_h;
+        let row = Rect::new(r.x + 2.0 * k, ry, r.w - 4.0 * k, row_h - 2.0 * k);
+        if pick == Some(n) {
+            draw_rectangle(row.x, row.y, row.w, row.h, Color::new(0.3, 0.38, 0.3, 1.0));
+        }
+        let side = row_h - 6.0 * k;
+        chrome::spell_icon(&s.icons, Rect::new(r.x + 5.0 * k, ry + 2.0 * k, side, side));
+        let ink = if game.knows_spell(s.id) { MANA } else if pick == Some(n) { WHITE } else { ACCENT };
+        let size = fit_size(&s.name, price_x - name_x - 8.0 * k, 18.0 * k);
+        text(&s.name, name_x, ry + row_h / 2.0 + size * 0.35, size, ink);
+        text(&s.cost_gold.to_string(), price_x, ry + row_h / 2.0 + 6.0 * k, 18.0 * k, if game.gold < s.cost_gold { RED } else { ACCENT });
+        if mouse_in(row.x, row.y, row.w, row.h) && clicked() {
+            hit = Some(n);
+        }
+    }
+    hit
+}
+
+/// The money as the market and the sanctuary show it (0x4bd39c): the gold picture, then
+/// "Деньги" with the amount under it, the group centred in `r`.
+fn gold_group(game: &Game, r: Rect) {
+    let k = chrome::k();
+    let label = own_text("Building", "Gold", n_("Money"));
+    let icon = 34.0 * k;
+    let size = fit_size(&label, r.w - icon - 6.0 * k, 17.0 * k);
+    let amount = game.gold.to_string();
+    let tw = measure(&label, size).width.max(measure(&amount, 16.0 * k).width);
+    let x = r.x + ((r.w - icon - 6.0 * k - tw) / 2.0).max(0.0);
+    resource_icon(Resource::Gold, x + icon / 2.0, r.y + r.h / 2.0, icon);
+    let tx = x + icon + 6.0 * k;
+    chrome::shadow_text(&label, tx, r.y + r.h / 2.0 - 4.0 * k, size, ACCENT);
+    chrome::shadow_text(&amount, tx, r.y + r.h / 2.0 + 15.0 * k, 16.0 * k, ACCENT);
 }
 
 /// A village: its waiting tribute and what may be asked instead.
