@@ -550,11 +550,9 @@ impl EventWorld for Game {
             let found = find_unit(&army_units(a), unit, named, 0);
             if let Some(k) = found {
                 let t = a.troops.remove(k);
-                let leader = if k == 0 { std::mem::take(&mut a.named) } else { 0 };
-                // The whole record: level, XP, wounds, items, name and kind.
+                // The whole record: level, XP, wounds, items, name, personal items and kind.
                 u = troop_unit(&c, &t);
                 u.slot = slot;
-                u.named = leader;
                 u.wage_kind = t.kind;
                 u.from_event = t.kind == WageKind::Event;
                 if a.troops.is_empty() {
@@ -584,9 +582,8 @@ impl EventWorld for Game {
         let now = self.clock.total_minutes() as u64;
         if let Some(a) = to_army.and_then(|a| self.army_mut(a)) {
             let cap = c.formation.capacity();
-            let mut t = Troop::new(u.def, u.level, u.slot);
-            unit_into_troop(&c, &mut t, &u, now);
-            t.kind = u.wage_kind;
+            // The whole record: level, XP, worn items, pay, kind, name and personal items.
+            let mut t = super::game::troop_of_unit(&c, &u, now);
             let full = a.troops.len() >= cap;
             if !lead {
                 match a.troops.last_mut() {
@@ -611,8 +608,6 @@ impl EventWorld for Game {
                     t.slot = slot;
                 }
                 a.troops.insert(0, t);
-                // Razdor keeps an army's character on its leader: the new leader's name.
-                a.named = u.named;
             }
         }
     }
@@ -935,9 +930,9 @@ impl EventWorld for Game {
                 }
             }
             Holder::Army(a) => {
-                if let Some(a) = self.army_mut(a) {
-                    a.named = named;
-                    if let (Some(id), Some(t)) = (class, a.troops.get_mut(unit as usize)) {
+                if let Some(t) = self.army_mut(a).and_then(|a| a.troops.get_mut(unit as usize)) {
+                    t.named = named;
+                    if let Some(id) = class {
                         t.unit = id;
                     }
                 }
@@ -1041,15 +1036,14 @@ impl EventWorld for Game {
     }
 }
 
-/// An AI army's units as the event engine sees them: its named character leads it (its
-/// first unit); a dead unit has no hit points.
+/// An AI army's units as the event engine sees them, each with its own name; a dead unit
+/// has no hit points.
 fn army_units(a: &Army) -> Vec<UnitRecord> {
     a.troops
         .iter()
-        .enumerate()
-        .map(|(k, t)| UnitRecord {
+        .map(|t| UnitRecord {
             unit: t.unit.0,
-            named: if k == 0 { a.named } else { 0 },
+            named: t.named,
             hp: if t.alive() { 1 } else { 0 },
             from_event: t.kind == WageKind::Event,
         })
@@ -1539,7 +1533,7 @@ mod tests {
         assert!(g.pack.is_empty());
         assert!(g.world.armies.is_empty());
         let a = &g.world.inactive[0];
-        assert_eq!((a.id, a.named), (2, 1), "it joined army 2, now waiting");
+        assert_eq!((a.id, a.troops[0].named), (2, 1), "it joined army 2, now waiting");
         assert_eq!(a.troops.iter().map(|t| t.unit).collect::<Vec<_>>(), [UnitId(5), UnitId(4), UnitId(4)], "the named one leads it");
         let faction = a.faction;
         let units = g.faction_units(faction);
@@ -2220,7 +2214,7 @@ mod tests {
         assert_eq!((a.faction, a.attitude), (4, -2), "enemy group: hostile whatever its own attitude");
         let end = g.map_start() + crate::rules::magic::OPCODE_SPELL_END;
         assert!(a.troops.iter().all(|t| t.spells[0] == Some(SpellSlot { spell: 3, until: end })), "every unit of it");
-        assert_eq!((a.named, a.figure), (1, 12));
+        assert_eq!((a.troops[1].named, a.figure), (1, 12), "unit 1 of the army is named, as its class changed");
         assert_eq!(a.post, (14, 10));
         assert!(!a.path.is_empty(), "it sets off");
         assert!(g.has_spells(Holder::Army(2), None, &[3]));

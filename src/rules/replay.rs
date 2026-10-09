@@ -762,3 +762,33 @@ fn rk1_balthazars_waiting_army_stands_arranged() {
     let a = d.g.world.armies.iter().find(|a| a.id == 8).expect("army 8 on the map");
     assert_eq!(rows(&a.troops), expected, "arranged on activation");
 }
+
+/// Обучающий2's peasant Йошка (named character 1, army 7) joins by event 18, leaves for army 7
+/// by event 19 and comes back by event 21. He wears his pitchfork from the map's army
+/// items, his own (unit 1's +0x18 at load), and the whole record travels each way: his
+/// name, the pitchfork, its lock and his XP.
+#[test]
+fn tutorial2_yoshka_keeps_his_name_and_pitchfork_through_the_events() {
+    use crate::rules::content::ItemId;
+    use crate::rules::events::EventWorld;
+    let Some(dt) = install() else { return };
+    let c = content(&dt);
+    let mut d = Driver::new(&dt, &c, "Обучающий2", HeroClass::Knight);
+    let pitchfork = Some(ItemId(108));
+    let waiting = d.g.world.inactive.iter().find(|a| a.id == 7).expect("army 7 waits");
+    let leader = &waiting.troops[0];
+    assert_eq!((leader.named, leader.personal), (1, 1));
+    assert!(leader.worn.contains(&pitchfork), "{:?}", leader.worn);
+    let named = |g: &Game| g.squad.iter().position(|u| u.named == 1);
+    EventWorld::add_unit(&mut d.g, 60, 1, Some(7));
+    let k = named(&d.g).expect("Йошка joined");
+    d.g.squad[k].xp = 17;
+    assert!(d.g.squad[k].items.contains(&pitchfork) && d.g.squad[k].personal == 1);
+    EventWorld::remove_unit(&mut d.g, k, true, Some(7));
+    assert!(named(&d.g).is_none());
+    EventWorld::add_unit(&mut d.g, 60, 1, Some(7));
+    let u = &d.g.squad[named(&d.g).expect("Йошка back")];
+    assert!(u.items.contains(&pitchfork), "his items come back with him: {:?}", u.items);
+    assert_eq!((u.personal, u.xp), (1, 17));
+    assert_eq!(d.g.unit_label(u), "Крестьянин Йошка");
+}
