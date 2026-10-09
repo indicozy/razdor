@@ -74,6 +74,60 @@ was seen on and what to check.
    into an army is decided before he moves, so he no longer slides towards it first. The
    diff test and the replays call `Game::tick`, unchanged.
 
+## 2026-10-05, main: the new game's map list does not scroll
+
+1. **"The player cannot scroll the maps in the menu after «Новая игра»."** Done. Reproduced on
+   Xvfb with four extra maps in a copy of the install and XTest wheel clicks: the wheel moved
+   the list for one frame, then `wheel().signum()` (1.0 for no turn) pulled it back up every
+   frame; a campaign block only partly in view was skipped, hiding it and what followed. The
+   list now keeps its scroll and clips its rows to the box. With the 15 shipped maps the list
+   fits (at any window size), so it showed only with more maps. The original's
+   list (4d2a30) is a text list with a scroll bar; Razdor's grouped list has none.
+
+## 2026-10-05, main: the leftovers of the Discord reports, and the scenario texts' marks
+
+1. **The original's shipyard window.** Done (0x4bbc84, 0x4d3ec0, 0x4d1314, 0x4c60ac): on land
+   a shipyard opens its own small window (picture, `AboutShipyard` with the owner, the price
+   line, «Нанять корабль» and «Отмена», `NoMoneyForShip` in red when gold is short); buying
+   closes it; at sea nothing opens.
+2. **Arranging the army by clicks** (0x4c346c, 0x4c653c, 0x4c6f50, 0x4b0c04). Done: a press on
+   another unit with one selected swaps them, on an empty cell slides the card there, both
+   with `Card-Move`, ending with none selected; the hero is a unit like the others. By the
+   disassembly a press on the selected unit only deselects it and leaves its tree up (the
+   0.3.1 fix brought the pack back at once; the user chose the original's way); a press on an
+   empty cell with nothing selected brings the pack back.
+3. **A unit that cannot be promoted** (level 0 or no next type) shows every tree portrait
+   locked: grey, darkened, with the vignette (0x494340); Razdor's own notes under the tree went.
+4. **"| ^ @ * — these marks in the scenarios"** (the tavern channel). Done: the original reads
+   them with 0x48e438 / 0x48e1cc in the event window, the tutorial offer, the restart and
+   delete-save boxes (`*` white, `|` blue, `@` orange, unmarked pale yellow; `^` centred,
+   else justified behind a six-`_` indent; `#\` or CR LF a break). Only the two tutorials'
+   events and a few ini texts use them. The journal shows them raw in the original too.
+
+## 2026-10-05, main: a player's reports from the Discord thread
+
+From the forum thread «Razdor - открытый движок для "Времена Раздора"» (cheats left out).
+
+1. **"They aren't supposed to be highlighted in red. Plus some strange flags on the map."**
+   Done. The minimap coloured every building by its faction and drew Razdor's own symbols;
+   now it follows Minimap_Refresh 0x49e28c and the icon tables 0x4ed520/0x4ed5d4 (only
+   castles and forts by side; armies as 9×9 shields, red unless a meeting with a friendly
+   army waits, none inside buildings). The flag was Razdor's pennant over buildings; the
+   original draws none (0x4c9b5b).
+2. **"How do I buy a ship?"** Done. The shipyard was ill-disposed and Razdor hid the ship tab
+   at such shipyards; the original's ship window (0x4bbc84) tests neither attitude nor owner.
+   Left: the original's shipyard is its own small window (`AboutShipyard`, Buy, Cancel, the
+   buy closes it, nothing at sea); Razdor keeps its building window with a ships tab.
+3. **"Wrong model"** (Разбойники у дороги, Другой берег army 40). Done. The figure is the
+   original's +0x169d from the map loader 0x4b4824 (style, undead and mage leaders, ships),
+   not byte 5; this army walks as the Rogue. Left: event opcode 17 on the hero changes his
+   figure in the original; Razdor draws him by class.
+4. **"Levelling blocks the inventory."** Done. The tree replacing the pack for a selected unit
+   is the original's (0x498d0c); Razdor lacked the deselect (0x4c346c: pressing the selected
+   unit, the end of a swap or slide). Left: the original swaps two units by pressing one then
+   the other, Razdor by dragging; a final-class unit's portraits are greyed with a lock in
+   the original (0x494340).
+
 ## 2026-10-04, dt-original: spell badges on the unit cards, items dropped on the hero
 
 1. **"In the grid of units I don't see what buffs or debuffs (magic) they have on them."**
