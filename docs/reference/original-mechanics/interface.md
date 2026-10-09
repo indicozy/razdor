@@ -831,6 +831,35 @@ wage total. **code**
   Esc (4c6118, 4cd8d0) only close it: the hero still stands in the shipyard. Its frame only
   keeps the sound and the map music going (no timeline). It opens with an event chord (§14).
   The village window (4d3a38) is a separate window of the same frame. **code**
+- **The village window** (built by 4d3a38, filled by 4bbc84, drawn by its open handler
+  4d0e28): a village (type 2) never opens the building window. The same 634×516 frame,
+  centred, titled with the village's name; `S_Village` (624×425) at (5, 32); a text box at
+  (18, 45), 598 wide, as tall as its text plus 14 above and below, at most 193 (4bbc84):
+  `[Building] AboutVillage` with `#NAME1` = the owner's name (font ae2498, white, centred),
+  an empty line, then `VillageEmpty` (ae24a4, orange-red) when both stocks are 0, else
+  `VillageFullGold` (ae24a0, yellow) when the gold stock (+0x11e) is above 0 and
+  `VillageFullMana` (ae24ac, cyan: Benguiat with red − 120) when the mana stock (+0x160)
+  is, an empty line between the two. Two 160×160 slots (6718a4, 0x4b apart) at x = W·(i+1)/3
+  − 80 (131 and 342) and y = 45 + 193 + 41 = 279, fixed when the window is built: slot 0
+  `Village_Gold.lit`, slot 1 `Village_Mana.lit`; a stock of 0 draws `Village_Gold_Empty` /
+  `Village_Mana_Empty` there instead (4d11ef, 4d1247). Over each slot, 24 px above it and
+  centred on it (measured in ae249c), "`[Building] Gold` + N" / "`Mana` + N", " = " instead
+  of " + " for 0, drawn with the Benguiat_Shadow 1 px down-right, then in ae24a0 (yellow,
+  gold) or ae24a8 (blue, mana). `Ok` (`Btn1`, ae6b54) centred 10 px above the bottom, and the
+  close box, both 4c6000 (take everything, close); its open handler ends with the event
+  chord (4d127d: `Random(3)` → `Global-Event-N`). **code**
+- **The village offers** (4aca80): the offer is event record N+2 shown in the event window
+  (4a8ae8 → 4a9d88): titled with the village's name, a Yes/No question, the text
+  `[Event] VillageBonus1` / `2` (the question is in it), or `VillageBonusN` +
+  `VillageBonusNAsk` for 3–5; its picture (record +0xa7) `Village_Bonus_1` blessing, `_2`
+  priest, `_3` furs, `_4` witch, `_5` innkeeper (671d18, 671d1c, 671d20, 671d28, 671d30).
+  `Village_Bonus_3A/4A/5A` (671d24, 671d2c, 671d34) are loaded by 4dc118 and never read.
+  With the record's portrait byte (+0x52) at 0 the picture is the event's own: 4a9d88 moves
+  the text box right by its width + 14 and makes it at least `max(92, picture height)` tall
+  (the text centred in it); for record N+2 the draw mode (674964) is 0, so 4d179b draws it
+  as it is at (19, 46) of the window with a 1 px frame around it (4d1803). A Yes to 3–5
+  shows the window again (4c2100) with the same picture and `VillageBonusN` +
+  `VillageBonusNResult`. **code**
 
 ### 9.9 After a won battle: the experience cards (4b09e8, 4b0684)
 
@@ -1172,6 +1201,8 @@ parity rule they are candidates to hide or remove, not bugs to copy.
 | 57 | Battle card signs | Matches: potion and blessing from the top left, poison and curse from the top right, 23 px apart; the curse and blessing signs set as a magic or a blessing effect ends on the card and kept to the battle's end (the turn order number, Razdor's, moved to the bottom right). The army and building cards show the promotion (the hero's army and a garrison) and then the potion sign from the top left in the same places (`chrome::card_signs`; the hero's helm, Razdor's, takes the first place); their payment sign is still Razdor's and they show no poison sign yet | `Sign-*` badges by the unit's potion, +0xc9, regeneration < 0, +0xc5; outside battle (493a64) also `Sign-Upgrade` first from the left (the hero's army or a building's garrison, a promotion to take) and `Sign-Payment` first from the right (unpaid), poison on any card | 12 |
 | 58 | Shipyard window | Matches: a shipyard opens the original's small ship window on land and nothing at sea (no main hall, no other tab): its picture, the install's `AboutShipyard` text with the owner's name, `NoMoneyForShip` when the gold is short, the price line, "Нанять корабль" (enabled iff ShipCost ≤ gold) and "Отмена"; Buy closes it (`building_view::ship_window`, `Game::window_at`). The text box's font is Razdor's, so its lines wrap a little differently | The ship window on land, nothing at sea; Buy closes it (4bbc84, 4d3ec0, 4c60ac) | 9.8 |
 | 59 | Text markup | Matches: event windows, the tutorial offer and the restart and delete-save boxes read the marks (`dt::markup`): the lines at CR LF and `#\`, the four fonts' colours, `^` centred, the rest justified behind the six-space indent, blank lines kept; the journal shows the marks as typed, as the original's. The text keeps Razdor's face (the original draws it in Benguiat) | `*` `\|` `@` pick the font, `^` centres, other lines justified with an indent; only in the event window's own text and the restart and delete-save boxes | 11 |
+| 60 | Village window | Matches: a village opens the original's small window (no main hall, no tabs): `S_Village`, the `AboutVillage` box with the `VillageEmpty` / `VillageFullGold` / `VillageFullMana` lines in their fonts' colours, the two 160×160 stock pictures (`_Empty` at 0) with "Деньги + N" / "Магия + N" captions, `Ok` and the close box (`building_view::village_window`). Razdor takes the tribute as the hero enters, so the window shows what was taken | 4d3a38, 4d0e28: the stocks shown as the window opens, paid as it closes (4c6000) | 9.8 |
+| 61 | Village offers | Matches: the offer is a Yes/No question in the event window before any village window, titled with the village's name, the install's `VillageBonusN` texts, its `Village_Bonus_N` picture left of the text (`Picture::Side`); Yes to the furs, witch or innkeeper shows its result window with the same picture; No opens the village window. Other events' own pictures are still drawn over the text | 4aca80, 4a9d88, 4d179b: the picture left of the text box, 1 px frame | 9.8 |
 
 ## Unknowns
 
@@ -1194,4 +1225,5 @@ parity rule they are candidates to hide or remove, not bugs to copy.
   hint kind, were not mapped one by one.
 - **Event-window chord.** The three window open handlers that play the chord (4d128a,
   4d1567, 4d1666) were assigned to the village, shipyard and event windows by their address
-  ranges, not by tracing.
+  ranges; 4d128a is traced: it ends the village window's open handler 4d0e28 (set by
+  4d3a38).

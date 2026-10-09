@@ -45,7 +45,6 @@ Wounded by magic: -{hurt} hits = Раны от магии: жизнь -{hurt}
 (tribute already collected) = (дань уже собрана)
 
 # World map: side panel and notices
-Tribute already collected. = Дань уже собрана.
 The village pays its tribute: {g} gold and {mana} mana. = Деревня платит дань: золото {g}, мана {mana}.
 The village pays with a {item} and {mana} mana. = Деревня платит предметом «{item}» и маной: {mana}.
 {name} reaches level {level}! = {name}: достигнут уровень {level}!
@@ -166,26 +165,21 @@ Pick a spell from the list. = Выберите заклинание из спи�
 This spell is already in your book! = Это заклинание уже есть в вашей книге!
 {spell} is written into your book. = {spell}: вписано в вашу книгу.
 
-# Building window: village tribute
-The headman keeps the tribute for whoever protects the village. = Староста хранит дань для того, кто защищает деревню.
-Gold {gold} (up to {max}) = Золото {gold} (до {max})
-Mana {mana} (up to {max}) = Мана {mana} (до {max})
-The villagers ask you something before paying their tribute. = Прежде чем платить дань, селяне хотят вас о чём-то попросить.
-The village pays no tribute to you. = Деревня не платит вам дани.
-Instead: the innkeeper pays your army = Вместо дани: трактирщик платит вашей армии
-Instead: the priest heals ({spell}) = Вместо дани: исцеление у священника ({spell})
-Instead: a long blessing ({spells}) = Вместо дани: долгое благословение ({spells})
-Instead: furs ({item}) = Вместо дани: меха ({item})
-Instead: the witch's gift of mana = Вместо дани: мана в дар от ведьмы
-The innkeeper pays off your {n} men. = Трактирщик расплачивается с вашими воинами. Воинов: {n}.
-The priest tends to your wounded: {h} hits. = Священник врачует раненых: жизнь {h}.
-The villagers pray for you: {spell}. = Селяне молятся за вас: {spell}.
-You get {item}. = Вы получаете: {item}.
-The witch gives {m} mana. = Ведьма дарует ману: {m}.
-No thanks: take the tribute = Нет, спасибо: взять дань
-The village pays {gold} gold and {mana} mana. = Деревня платит: золото {gold}, мана {mana}.
-The village pays with a {item}. = Деревня платит предметом «{item}».
-The tribute grows every midnight, slower as it nears the village's maximum. = Дань растёт каждую полночь, тем медленнее, чем ближе к пределу деревни.
+# Village window and offers (the install's [Building] and [Event] texts when it has them)
+You enter the village, and the local #NAME1 greets you with reverence. = Вы входите в деревню; здешний #NAME1 почтительно вас приветствует.
+The tribute of this village has already been taken: there is nothing left but to bid the headman farewell. = Дань с этой деревни уже взята: остаётся лишь проститься со старостой.
+As a nobleman you collect the village's tax, promising to hunt the robbers and shield the peasants from heretics and hostile lords. = Как дворянин, вы берёте с деревни подать и обещаете ловить разбойников и оберегать селян от еретиков и чужих феодалов.
+The grateful peasants pray for your magic power to grow. = Селяне в благодарность молятся, чтобы ваша магическая сила росла.
+Magic = Магия
+Will you take this offer instead of the usual tribute? = Принять это предложение вместо обычной дани?
+The local priest asks you not to take the village's tribute. Instead he will cast a good spell on your army, one that lasts very long thanks to some secrets of his craft. = Здешний священник просит не брать с деревни дань. За это он наложит на ваше войско доброе заклинание, которое благодаря тайнам его ремесла продержится очень долго.
+The local priest asks you not to take the village's tribute. He sees that your soldiers need healing, and he will try to cure all he can, as far as his strength goes. = Здешний священник просит не брать с деревни дань. Он видит, что вашим воинам нужно лечение, и постарается исцелить всех, кого успеет, сколько хватит сил.
+Some hunters of the village come up to you. They ask you not to take the village's tribute; instead they will give you furs that sell at the market for much more than the usual tribute. = К вам подходят деревенские охотники и просят не брать с деревни дань. Взамен они дадут меха, которые на рынке стоят куда больше обычной дани.
+The village witch asks you not to take the village's tribute. Instead she will perform a ritual that greatly increases your magic power. = Деревенская ведьма просит не брать с деревни дань. Взамен она проведёт обряд, который сильно умножит вашу магическую силу.
+The village innkeeper comes up to you. He asks you not to take the village's tribute: he sees that many of your soldiers have not been paid for a long time, and he will feed them and give them drink in place of their pay, so that they all fight again. = К вам подходит деревенский трактирщик и просит не брать с деревни дань. Он видит, что многие ваши воины давно без жалованья, и накормит и напоит их вместо платы, чтобы все снова пошли в бой.
+You agree. The hunters hand you a bag of furs. = Вы согласны. Охотники вручают вам мешок мехов.
+You agree. The witch performs her ritual and your magic power grows. = Вы согласны. Ведьма проводит обряд, и ваша магическая сила растёт.
+You agree. Your soldiers are content now and ready to fight! = Вы согласны. Воины довольны и готовы к бою!
 
 # Shipyard window (the install's [Building] texts when it has them)
 You have entered a harbour owned by #NAME1. The harbour master tells you that a ship can be hired here.\n\nThe terms are simple: for a fixed price the ship takes you anywhere on the coast. When you go ashore, it stays and waits for you to come back. = Это пристань, хозяин которой — #NAME1. Здесь сдают корабли внаём.\n\nУсловия просты: за твёрдую плату корабль отвезёт вас к любому месту на побережье, а пока вы на берегу, будет ждать вашего возвращения.

@@ -34,6 +34,10 @@ pub enum Resource {
 pub enum Picture {
     Unit(UnitId),
     Image(Texture2D),
+    /// The original's event picture (the record's +0xa7, 0x4a9d88 / 0x4d1679): at its own
+    /// size left of the text box, framed by a 1 px line; the box moves right by its width
+    /// plus 14 and is at least as tall as it, the text centred in it (the village offers).
+    Side(Texture2D),
 }
 
 /// How the player closed a dialog.
@@ -65,6 +69,9 @@ pub struct Dialog {
     pub event: Option<u16>,
     /// The event's yes/no question: the dialog has Yes and No buttons.
     pub question: bool,
+    /// The question is a village's offer (0x4aca80): its answer goes to the village
+    /// (`building_view::answer_offer`), not to the event engine.
+    pub offer: bool,
     pub picture: Option<Picture>,
     /// Units that joined / left the army.
     pub joined: Vec<UnitId>,
@@ -95,6 +102,7 @@ impl Dialog {
             notice: None,
             event: None,
             question: false,
+            offer: false,
             picture: None,
             joined: Vec::new(),
             left: Vec::new(),
@@ -263,27 +271,40 @@ fn unit_row(assets: &Assets, label: &str, units: &[UnitId], x: f32, y: f32) -> f
 pub fn draw(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Close> {
     let (sw, sh) = (screen_width(), screen_height());
     chrome::under_message();
+    // A picture at the side takes its width and 14 more from the text box.
+    let side = match &d.picture {
+        Some(Picture::Side(t)) => Some((t.width(), t.height())),
+        _ => None,
+    };
+    let side_w = side.map_or(0.0, |(pw, _)| pw + 14.0);
     // A long story text widens the window rather than running off the screen.
     let fit = |w: f32| -> (f32, Vec<String>, Vec<MarkupRow>) {
         match &d.marked {
-            Some(t) => (w, Vec::new(), markup_rows(t, w - 80.0, 19.0)),
-            None => (w, d.text.iter().flat_map(|t| wrap(t, w - 80.0, 19.0)).collect(), Vec::new()),
+            Some(t) => (w, Vec::new(), markup_rows(t, w - 80.0 - side_w, 19.0)),
+            None => (w, d.text.iter().flat_map(|t| wrap(t, w - 80.0 - side_w, 19.0)).collect(), Vec::new()),
         }
     };
     let (mut w, mut lines, mut rows) = fit(620.0f32.min(sw - 20.0));
     if (lines.len() + rows.len()) as f32 * 23.0 > sh * 0.45 {
         (w, lines, rows) = fit(980.0f32.min(sw - 20.0));
     }
-    let text_h = (lines.len() + rows.len()) as f32 * 23.0 + 24.0;
+    let mut text_h = (lines.len() + rows.len()) as f32 * 23.0 + 24.0;
     let res_h = if d.resources.is_empty() { 0.0 } else { 104.0 };
     // An icon row grows the window by its caption and icons (0x4a8e66: 87 for items, 82
     // for spells).
     let items_h = if d.items.is_empty() { 0.0 } else { 87.0 };
     let spells_h = if d.spells.is_empty() { 0.0 } else { 82.0 };
     let notice_h = if d.notice.is_some() { 26.0 } else { 0.0 };
-    let pic_h = if d.picture.is_some() { 140.0 } else { 0.0 };
+    let pic_h = if d.picture.is_some() && side.is_none() { 140.0 } else { 0.0 };
     let units_h = [&d.joined, &d.left].iter().filter(|u| !u.is_empty()).count() as f32 * 60.0;
-    let h = 34.0 + 16.0 + pic_h + text_h + res_h + items_h + spells_h + units_h + notice_h + 64.0;
+    let h_fixed = 34.0 + 16.0 + pic_h + res_h + items_h + spells_h + units_h + notice_h + 64.0;
+    // The box is at least as tall as the side picture and its frame, the text centred in it
+    // (0x4aa88a).
+    let text_top = side.map_or(0.0, |(_, ph)| ((ph + 2.0 - text_h) / 2.0).max(0.0));
+    if let Some((_, ph)) = side {
+        text_h = text_h.max(ph + 2.0);
+    }
+    let h = h_fixed + text_h;
     let (x, y) = ((sw - w) / 2.0, ((sh - h) / 2.0).max(10.0));
     chrome::window(Rect::new(x, y, w, h), &d.title, chrome::Skin::Marble, false);
     let mut cy = y + 44.0;
@@ -299,15 +320,22 @@ pub fn draw(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Close> {
             draw_texture_ex(tex, x + (w - tw) / 2.0, cy, WHITE, DrawTextureParams { dest_size: Some(vec2(tw, th)), ..Default::default() });
             draw_rectangle_lines(x + (w - tw) / 2.0, cy, tw, th, 2.0, MARBLE_EDGE);
         }
+        Some(Picture::Side(tex)) => {
+            let (px, py) = (x + 17.0, cy + 1.0);
+            draw_texture(tex, px, py, WHITE);
+            draw_rectangle_lines(px - 1.0, py - 1.0, tex.width() + 2.0, tex.height() + 2.0, 1.0, WHITE);
+        }
         None => {}
     }
     cy += pic_h;
-    chrome::text_box(Rect::new(x + 16.0, cy, w - 32.0, text_h));
+    let tb = Rect::new(x + 16.0 + side_w, cy, w - 32.0 - side_w, text_h);
+    chrome::text_box(tb);
+    let ty = cy + text_top;
     for (i, line) in lines.iter().enumerate() {
-        chrome::shadow_centered(line, x + w / 2.0, cy + 30.0 + i as f32 * 23.0, 19.0, Color::new(1.0, 0.9, 0.66, 1.0));
+        chrome::shadow_centered(line, tb.x + tb.w / 2.0, ty + 30.0 + i as f32 * 23.0, 19.0, Color::new(1.0, 0.9, 0.66, 1.0));
     }
     for (i, row) in rows.iter().enumerate() {
-        draw_markup_row(row, x + 40.0, cy + 30.0 + i as f32 * 23.0, w - 80.0, 19.0);
+        draw_markup_row(row, tb.x + 24.0, ty + 30.0 + i as f32 * 23.0, tb.w - 48.0, 19.0);
     }
     cy += text_h + 10.0;
     if !d.resources.is_empty() {

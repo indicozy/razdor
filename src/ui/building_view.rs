@@ -11,7 +11,8 @@ use razdor::rules::battle::Team;
 use razdor::trf;
 use razdor::rules::content::{ArtefactType, ItemId, SpellDef};
 use razdor::rules::formation::{Formation, Slot};
-use razdor::rules::game::{Currency, Game, HireError, TradeError, SPELL_BOOK_SIZE};
+use razdor::rules::economy::VillageOffer;
+use razdor::rules::game::{Currency, Game, HireError, TradeError, Tribute, SPELL_BOOK_SIZE};
 use razdor::rules::items::describe;
 use razdor::rules::script::HallEntry;
 use razdor::rules::town::{ServiceError, Tab};
@@ -21,7 +22,7 @@ use razdor::rules::world::LocationKind;
 use super::assets::Assets;
 use super::chrome;
 use super::audio::{cue, cued, Cue};
-use super::dialog::{resource_icon, Dialog, Resource, MANA};
+use super::dialog::{resource_icon, Dialog, Picture, Resource, MANA};
 use super::items_view::{level_gains, unit_stat_lines};
 use super::screens::stat_lines;
 use super::story;
@@ -49,6 +50,8 @@ pub struct BuildingView {
     pub garrison_buy: Option<(usize, Slot, i32)>,
     /// The village window took the tribute: its close plays `Item-Gold` (0x4c604a).
     pub tribute_paid: bool,
+    /// The gold and mana the village paid as the hero came in: what its window shows.
+    pub tribute: (i32, i32),
     /// A card animation of the hire tab under way.
     anim: Option<CardAnim>,
 }
@@ -82,11 +85,11 @@ fn now_ms() -> i64 {
 
 impl BuildingView {
     pub fn new(tab: Tab) -> BuildingView {
-        BuildingView { tab, pick: None, scroll: 0, selling: false, garrison_sel: None, garrison_buy: None, tribute_paid: false, anim: None }
+        BuildingView { tab, pick: None, scroll: 0, selling: false, garrison_sel: None, garrison_buy: None, tribute_paid: false, tribute: (0, 0), anim: None }
     }
 
     fn switch(&mut self, tab: Tab) {
-        *self = BuildingView { tribute_paid: self.tribute_paid, ..BuildingView::new(tab) };
+        *self = BuildingView { tribute_paid: self.tribute_paid, tribute: self.tribute, ..BuildingView::new(tab) };
     }
 
     /// The animation under way and how far it is (0..1), if any.
@@ -1138,93 +1141,215 @@ fn gold_group(game: &Game, r: Rect) {
     chrome::shadow_text(&amount, tx, r.y + r.h / 2.0 + 15.0 * k, 16.0 * k, ACCENT);
 }
 
-/// A village: its waiting tribute and what may be asked instead.
-/// Returns whether the village window closes: a Yes to the blessing or the priest finishes
-/// the offer at once with no window (0x4ab966), its spell played over the hero on the map.
-fn tribute(game: &mut Game, f: &Frame, view: &mut BuildingView, message: &mut Option<String>) -> bool {
-    let mut leave = false;
-    let k = chrome::k();
-    let Some(l) = game.location else { return false };
-    let (x, y, w) = (f.cx, f.cy, f.cw);
-    let v = game.world.locations[l].clone();
-    draw_rectangle(x, y, w, 120.0 * k, Color::new(0.2, 0.12, 0.07, 1.0));
-    text_fit(tr("The headman keeps the tribute for whoever protects the village."), x + 16.0 * k, y + 28.0 * k, w - 32.0 * k, 19.0 * k, INK);
-    resource_icon(Resource::Gold, x + 40.0 * k, y + 76.0 * k, 40.0 * k);
-    text(&trf!("Gold {gold} (up to {max})", gold = v.tribute_gold, max = v.gold_max.max(v.gold_income)), x + 70.0 * k, y + 84.0 * k, 20.0 * k, ACCENT);
-    resource_icon(Resource::Mana, x + 340.0 * k, y + 76.0 * k, 40.0 * k);
-    text(&trf!("Mana {mana} (up to {max})", mana = v.tribute_mana, max = v.mana_max.max(v.mana_income)), x + 370.0 * k, y + 84.0 * k, 20.0 * k, MANA);
-    // The tribute is taken on entering (economy.md §3); only an offer waits for an answer.
-    let mut by = y + 140.0 * k;
-    let status = if game.village_offer().is_some() {
-        tr("The villagers ask you something before paying their tribute.")
-    } else if v.hostile() {
-        tr("The village pays no tribute to you.")
-    } else {
-        tr("Tribute already collected.")
-    };
-    text_fit(status, x, by + 26.0 * k, w, 19.0 * k, DIM);
-    by += 52.0 * k;
-    // The one offer this visit may bring (instead of the tribute: it empties the village).
-    if let Some(offer) = game.village_offer() {
-        use razdor::rules::economy::{OfferResult, VillageOffer, BLESSING_SPELLS, FURS_ITEM, PRIEST_SPELL};
-        let spell_name = |id: u32| game.spell(id).map_or(String::new(), |s| s.name.clone());
-        let label = match offer {
-            VillageOffer::Innkeeper => tr("Instead: the innkeeper pays your army").to_string(),
-            VillageOffer::Priest => trf!("Instead: the priest heals ({spell})", spell = spell_name(PRIEST_SPELL)),
-            VillageOffer::Blessing => {
-                let names: Vec<String> = BLESSING_SPELLS.iter().map(|&s| spell_name(s)).filter(|n| !n.is_empty()).collect();
-                trf!("Instead: a long blessing ({spells})", spells = names.join(" / "))
-            }
-            VillageOffer::Furs => trf!("Instead: furs ({item})", item = game.content.try_item(razdor::rules::content::ItemId(FURS_ITEM)).map_or("", |i| i.name.as_str())),
-            VillageOffer::Witch => tr("Instead: the witch's gift of mana").to_string(),
-        };
-        if button(x, by, (460.0 * k).min(w), 42.0 * k, &label, true) {
-            // The furs, the witch and the innkeeper show their result in the event window,
-            // with its chord (0x4c2100).
-            let window = offer.result_window();
-            let result = game.accept_offer();
-            if window {
-                let k = game.event_chord();
-                cue(Cue::Event(k as u8));
-            }
-            // The blessing's and the priest's spell is cast as an event's (0x4aca80 builds the
-            // offer as an event record): its effect over the hero, its sound by its target.
-            let cast = match result {
-                Some(OfferResult::Blessing(id)) => Some(id),
-                Some(OfferResult::Healed(_)) => Some(PRIEST_SPELL),
-                _ => None,
-            };
-            if let Some(s) = cast.and_then(|id| game.spell(id).cloned()) {
-                cue(if razdor::rules::magic::targets_enemy(&s) { Cue::SpellEvil } else { Cue::SpellGood });
-                super::world_view::spell_effect(&s, razdor::rules::magic::CastTarget::Own);
-                leave = true;
-            }
-            let spell_name = |id: u32| game.spell(id).map_or(String::new(), |s| s.name.clone());
-            *message = result.map(|r| match r {
-                OfferResult::Paid(n) => trf!("The innkeeper pays off your {n} men.", n),
-                OfferResult::Healed(h) => trf!("The priest tends to your wounded: {h} hits.", h = format!("{h:+}")),
-                OfferResult::Blessing(id) => trf!("The villagers pray for you: {spell}.", spell = spell_name(id)),
-                OfferResult::Furs(item) => trf!("You get {item}.", item = game.content.item(item).name),
-                OfferResult::Mana(m) => trf!("The witch gives {m} mana.", m),
-            });
-        }
-        by += 52.0 * k;
-        if button(x, by, (460.0 * k).min(w), 42.0 * k, tr("No thanks: take the tribute"), true) {
-            let (gold, mana) = (v.tribute_gold, v.tribute_mana);
-            let paid = game.decline_offer();
-            view.tribute_paid |= paid.is_some();
-            *message = paid.map(|t| match t {
-                razdor::rules::game::Tribute::Gold(_) => trf!("The village pays {gold} gold and {mana} mana.", gold, mana),
-                razdor::rules::game::Tribute::Item(item) => trf!("The village pays with a {item}.", item = game.content.item(item).name),
-            });
-        }
-        by += 52.0 * k;
+/// The original's Benguiat tints (0x4dbb0c adds a per-channel delta to the white glyphs).
+fn benguiat(rgb: [u8; 3]) -> Color {
+    Color::from_rgba(rgb[0], rgb[1], rgb[2], 255)
+}
+
+/// `Benguiat` with red − 120 (0x4dbb0c: font 0xae24ac), the village's mana line.
+const CYAN_INK: [u8; 3] = [135, 255, 255];
+
+/// The picture of a village stock slot: the full one while the stock is above 0, else the
+/// empty one (0x4d11ef gold, 0x4d1247 mana).
+fn stock_picture(stock: i32, mana: bool) -> &'static str {
+    match (mana, stock > 0) {
+        (false, true) => "Village_Gold",
+        (false, false) => "Village_Gold_Empty",
+        (true, true) => "Village_Mana",
+        (true, false) => "Village_Mana_Empty",
     }
-    by += 4.0 * k;
-    text_fit(tr("The tribute grows every midnight, slower as it nears the village's maximum."), x, by, w, 16.0 * k, DIM);
-    let dy = by + 24.0 * k;
-    description_box(&v.description, x, dy, w, f.y + f.h - dy - 10.0 * k);
-    leave
+}
+
+/// The caption over a stock slot: `[Building] Gold` / `Mana`, then " + N" while the stock is
+/// above 0, else " = N" (0x4d0f7a, 0x4d0fa3).
+fn stock_caption(label: &str, stock: i32) -> String {
+    format!("{label}{}{stock}", if stock > 0 { " + " } else { " = " })
+}
+
+/// The village window (built by 0x4d3a38, drawn by 0x4d0e28, filled by 0x4bbc84), in the
+/// original's pixels: the 634×516 frame centred over the map, the village's name as its
+/// title, `S_Village` at (5, 32); a text box at (18, 45), 598 wide and as tall as its text
+/// plus 14 above and below, at most 193: `AboutVillage` (`#NAME1` = the owner's name,
+/// white, centred), an empty line, then `VillageEmpty` (orange-red) when both stocks are 0,
+/// else `VillageFullGold` (yellow) when there is gold and `VillageFullMana` (cyan) when there
+/// is mana, an empty line between the two. Two 160×160 slots at x = W·(i+1)/3 − 80, 279
+/// down (41 under the box's full 193): `Village_Gold` / `Village_Mana`, or their `_Empty`
+/// pictures for a stock of 0; over each, 24 px up and centred, its caption ("Деньги + N" in
+/// yellow, "Магия + N" in blue) with a 1 px shadow. `Ok` (`Btn1`) centred 10 px from the
+/// bottom and the close box, both 0x4c6000. Razdor takes the tribute as the hero enters
+/// (economy.md §3), so the window shows what was taken ([`BuildingView::tribute`]).
+fn village_window(game: &mut Game, view: &BuildingView, message: &mut Option<String>) -> Option<Screen> {
+    use razdor::dt::markup::Ink;
+    let l = game.location?;
+    let o = chrome::k() * 0.9375;
+    let (w, h) = ((634.0 * o).round(), (516.0 * o).round());
+    let (x, y) = (((screen_width() - w) / 2.0).round(), ((screen_height() - chrome::bar_height() - h) / 2.0).max(2.0).round());
+    let loc = &game.world.locations[l];
+    let (_, closed) = chrome::window(Rect::new(x, y, w, h), &loc.name, chrome::Skin::Marble, true);
+    if let Some(t) = chrome::win("S_Village") {
+        let (pw, ph) = ((t.width() * o).min(w - 10.0 * o), (t.height() * o).min(h - 34.0 * o));
+        chrome::tex_src(&t, Rect::new(0.0, 0.0, pw / o, ph / o), Rect::new(x + 5.0 * o, y + 32.0 * o, pw, ph), WHITE);
+    }
+    let (gold, mana) = view.tribute;
+    let size = (15.0 * o).round();
+    let line_h = (17.0 * o).round();
+    let (bx, by, bw) = (x + 18.0 * o, y + 45.0 * o, 598.0 * o);
+    let lines_of = |t: &str| t.split('\n').flat_map(|p| if p.trim().is_empty() { vec![String::new()] } else { wrap(p, bw - 32.0 * o, size) }).collect::<Vec<_>>();
+    let mut lines: Vec<(String, Color)> = Vec::new();
+    let mut add = |t: &str, c: Color| lines.extend(lines_of(t).into_iter().map(|t| (t, c)));
+    let about = own_text("Building", "AboutVillage", n_("You enter the village, and the local #NAME1 greets you with reverence.")).replace("#NAME1", &loc.owner_name);
+    add(&about, benguiat(Ink::Star.rgb()));
+    add("", WHITE);
+    if gold <= 0 && mana <= 0 {
+        add(&own_text("Building", "VillageEmpty", n_("The tribute of this village has already been taken: there is nothing left but to bid the headman farewell.")), benguiat(Ink::At.rgb()));
+    } else {
+        if gold > 0 {
+            add(&own_text("Building", "VillageFullGold", n_("As a nobleman you collect the village's tax, promising to hunt the robbers and shield the peasants from heretics and hostile lords.")), benguiat(Ink::Plain.rgb()));
+            if mana > 0 {
+                add("", WHITE);
+            }
+        }
+        if mana > 0 {
+            add(&own_text("Building", "VillageFullMana", n_("The grateful peasants pray for your magic power to grow.")), benguiat(CYAN_INK));
+        }
+    }
+    let text_h = lines.len() as f32 * line_h;
+    let bh = (text_h + 28.0 * o).min(193.0 * o);
+    let top = if text_h + 28.0 * o <= 193.0 * o { 14.0 * o } else { (bh - text_h) / 2.0 };
+    chrome::text_box(Rect::new(bx, by, bw, bh));
+    for (i, (t, c)) in lines.iter().enumerate() {
+        let ly = by + top + i as f32 * line_h;
+        if ly >= by && ly + line_h <= by + bh {
+            chrome::shadow_centered(t, bx + bw / 2.0, ly + size, size, *c);
+        }
+    }
+    for (i, (stock, is_mana)) in [(gold, false), (mana, true)].into_iter().enumerate() {
+        let sx = x + (634 * (i as i32 + 1) / 3 - 80) as f32 * o;
+        let sy = y + 279.0 * o;
+        if let Some(t) = chrome::win(stock_picture(stock, is_mana)) {
+            chrome::tex(&t, Rect::new(sx, sy, 160.0 * o, 160.0 * o), WHITE);
+        }
+        let (label, ink) = if is_mana { (own_text("Building", "Mana", n_("Magic")), Ink::Bar) } else { (own_text("Building", "Gold", n_("Money")), Ink::Plain) };
+        chrome::shadow_centered(&stock_caption(&label, stock), sx + 80.0 * o, sy - 24.0 * o + size, size, benguiat(ink.rgb()));
+    }
+    let (btn_w, btn_h) = chrome::win("Btn1Up").map_or((180.0, 40.0), |t| (t.width(), t.height()));
+    let (btn_w, btn_h) = (btn_w * o, btn_h * o);
+    let ok = button(x + (w - btn_w) / 2.0, y + h - 10.0 * o - btn_h, btn_w, btn_h, &own_text("Buttons", "Ok", n_("OK")), true);
+    // The close box and Esc sound as the button does (tools/difftest/AV.md §5).
+    let esc = key(KeyCode::Escape);
+    if closed || esc {
+        cue(Cue::Button);
+    }
+    if !(ok || closed || esc) {
+        return None;
+    }
+    // Closing plays `Item-Gold` too when the tribute was taken (0x4c604a).
+    if view.tribute_paid {
+        cue(Cue::Gold);
+    }
+    *message = None;
+    Some(Screen::WorldMap)
+}
+
+/// The picture of a village offer in the event window (0x4aca80 sets the record's picture,
+/// +0xa7): `Village_Bonus_1` the blessing, `_2` the priest, `_3` the furs, `_4` the witch,
+/// `_5` the innkeeper. The `_3A`/`_4A`/`_5A` pictures are loaded (0x4dc118: 0x671d24,
+/// 0x671d2c, 0x671d34) and never read.
+pub fn offer_picture(o: VillageOffer) -> &'static str {
+    match o {
+        VillageOffer::Blessing => "Village_Bonus_1",
+        VillageOffer::Priest => "Village_Bonus_2",
+        VillageOffer::Furs => "Village_Bonus_3",
+        VillageOffer::Witch => "Village_Bonus_4",
+        VillageOffer::Innkeeper => "Village_Bonus_5",
+    }
+}
+
+/// The offer's question (0x4aca80, `[Event]`): `VillageBonus1` / `2` carry their question;
+/// 3, 4 and 5 are `VillageBonusN` + `VillageBonusNAsk`. With `result`, the text of the window
+/// a Yes opens for 3, 4 and 5: `VillageBonusN` + `VillageBonusNResult`.
+fn offer_text(o: VillageOffer, result: bool) -> String {
+    // The install's text in Russian, else ours behind the original's marks: two blank lines
+    // (`#\`) and the line's font (`@` orange for the question, `*` white, `|` blue).
+    let ini = |key: &str| (razdor::i18n::lang() == razdor::i18n::Lang::Ru).then(|| chrome::ui_text("Event", key)).flatten();
+    let own = |key: &str, mark: &str, ours: &'static str| match ini(key) {
+        Some(t) => t,
+        None if mark.is_empty() => tr(ours).to_string(),
+        None => format!("#\\#\\#\\{mark}{}", tr(ours)),
+    };
+    let ask = n_("Will you take this offer instead of the usual tribute?");
+    let (n, body) = match o {
+        VillageOffer::Blessing => {
+            let ours = n_("The local priest asks you not to take the village's tribute. Instead he will cast a good spell on your army, one that lasts very long thanks to some secrets of his craft.");
+            return ini("VillageBonus1").unwrap_or_else(|| format!("{}#\\#\\#\\@{}", tr(ours), tr(ask)));
+        }
+        VillageOffer::Priest => {
+            let ours = n_("The local priest asks you not to take the village's tribute. He sees that your soldiers need healing, and he will try to cure all he can, as far as his strength goes.");
+            return ini("VillageBonus2").unwrap_or_else(|| format!("{}#\\#\\#\\@{}", tr(ours), tr(ask)));
+        }
+        VillageOffer::Furs => (3, own("VillageBonus3", "", n_("Some hunters of the village come up to you. They ask you not to take the village's tribute; instead they will give you furs that sell at the market for much more than the usual tribute."))),
+        VillageOffer::Witch => (4, own("VillageBonus4", "", n_("The village witch asks you not to take the village's tribute. Instead she will perform a ritual that greatly increases your magic power."))),
+        VillageOffer::Innkeeper => (5, own("VillageBonus5", "", n_("The village innkeeper comes up to you. He asks you not to take the village's tribute: he sees that many of your soldiers have not been paid for a long time, and he will feed them and give them drink in place of their pay, so that they all fight again."))),
+    };
+    let tail = match (n, result) {
+        (_, false) => own(&format!("VillageBonus{n}Ask"), "@", ask),
+        (3, true) => own("VillageBonus3Result", "*", n_("You agree. The hunters hand you a bag of furs.")),
+        (4, true) => own("VillageBonus4Result", "|", n_("You agree. The witch performs her ritual and your magic power grows.")),
+        _ => own("VillageBonus5Result", "*", n_("You agree. Your soldiers are content now and ready to fight!")),
+    };
+    format!("{body}{tail}")
+}
+
+/// The village's offer as the original shows it (0x4aca80 → 0x4a8ae8): the event window
+/// titled with the village's name, a Yes/No question, the offer's picture left of the text.
+pub fn offer_dialog(game: &Game, o: VillageOffer, result: bool) -> Dialog {
+    let name = game.location.map_or(String::new(), |l| game.world.locations[l].name.clone());
+    let mut d = Dialog::new(name);
+    d.chord = true;
+    d.question = !result;
+    d.offer = !result;
+    d.marked = Some(offer_text(o, result));
+    d.picture = chrome::win(offer_picture(o)).map(Picture::Side);
+    d
+}
+
+/// The answer to the village's offer (`Dialog::offer`). Yes (0x4ab1ec, 0x4ab966): the offer
+/// taken, the village emptied; the blessing's and the priest's spell lands over the hero
+/// with no window, the furs, the witch and the innkeeper show their result in the event
+/// window again (0x4c2100: its chord, its OK). No (0x4c2378): the village is entered again
+/// with no offer, its window opens and the tribute is taken. Returns the next screen.
+pub fn answer_offer(game: &mut Game, yes: bool, dialogs: &mut VecDeque<Dialog>) -> Option<Screen> {
+    use razdor::rules::economy::{OfferResult, PRIEST_SPELL};
+    let o = game.village_offer()?;
+    if !yes {
+        let mana = game.location.map_or(0, |l| game.world.locations[l].tribute_mana);
+        let paid = game.decline_offer();
+        let tab = game.location.and_then(|l| game.window_at(l))?;
+        let mut v = BuildingView::new(tab);
+        v.tribute_paid = paid.is_some();
+        v.tribute = match paid {
+            Some(Tribute::Gold(g)) => (g, mana),
+            Some(Tribute::Item(_)) => (0, mana),
+            None => (0, 0),
+        };
+        return Some(Screen::Building(v));
+    }
+    let result = game.accept_offer();
+    if o.result_window() {
+        dialogs.push_back(offer_dialog(game, o, true));
+    }
+    // The blessing's and the priest's spell is cast as an event's: its effect over the hero,
+    // its sound by its target.
+    let cast = match result {
+        Some(OfferResult::Blessing(id)) => Some(id),
+        Some(OfferResult::Healed(_)) => Some(PRIEST_SPELL),
+        _ => None,
+    };
+    if let Some(s) = cast.and_then(|id| game.spell(id).cloned()) {
+        cue(if razdor::rules::magic::targets_enemy(&s) { Cue::SpellEvil } else { Cue::SpellGood });
+        super::world_view::spell_effect(&s, razdor::rules::magic::CastTarget::Own);
+    }
+    None
 }
 
 /// The shipyard's ship window (0x4d3ec0, opened by 0x4bbc84 when the hero is on land), in
@@ -1311,13 +1436,19 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut BuildingView, message:
     if tabs.is_empty() {
         return Some(Screen::WorldMap);
     }
-    // A shipyard opens its own small window, not the building window.
+    // A shipyard and a village open their own small windows, not the building window.
     if tabs == [Tab::Shipyard] {
-        let bar_next = bar.map(|b| match b {
-            Screen::Squad { selected, scroll, .. } => Screen::Squad { selected, scroll, back: Some(view.clone()) },
-            other => other,
-        });
-        return early.or(ship_window(game)).or(bar_next);
+        return early.or(ship_window(game)).or(with_back(bar, view));
+    }
+    if tabs.contains(&Tab::Tribute) {
+        // An offer waiting for its answer is asked in the event window first (0x4aca80).
+        if let Some(o) = game.village_offer() {
+            if !dialogs.iter().any(|d| d.offer) {
+                dialogs.push_back(offer_dialog(game, o, false));
+            }
+            return early.or(Some(Screen::WorldMap));
+        }
+        return early.or(village_window(game, view, message)).or(with_back(bar, view));
     }
     if !tabs.contains(&view.tab) {
         view.switch(tabs[0]);
@@ -1358,12 +1489,7 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut BuildingView, message:
         Tab::Garrison => garrison(game, assets, &f, view, message),
         Tab::Market => next = market(game, assets, &f, view, message),
         Tab::Sanctuary => sanctuary(game, &f, view, message),
-        Tab::Tribute => {
-            if tribute(game, &f, view, message) {
-                return Some(Screen::WorldMap);
-            }
-        }
-        Tab::Shipyard => {}
+        Tab::Tribute | Tab::Shipyard => {}
     }
     if let Some(m) = message {
         let w = measure(m, 20.0).width + 40.0;
@@ -1372,29 +1498,47 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut BuildingView, message:
         text_centered(m, cx, y + 21.0, 20.0, ACCENT);
     }
     if close || exit || key(KeyCode::Escape) {
+        // The building window's close is silent.
         *message = None;
-        // The village window closes with the button sound, with the gold sound too when its
-        // tribute was taken (0x4c604a); the building window's close is silent.
-        let chord = game.location.is_some_and(|l| game.world.locations[l].kind == LocationKind::Village);
-        if chord {
-            cue(Cue::Button);
-            if view.tribute_paid {
-                cue(Cue::Gold);
-            }
-        }
         return Some(Screen::WorldMap);
     }
-    // The bar's army button opens the army screen with the way back here.
-    next.or(match bar {
-        Some(Screen::Squad { selected, scroll, .. }) => Some(Screen::Squad { selected, scroll, back: Some(view.clone()) }),
+    next.or(with_back(bar, view))
+}
+
+/// The bar's army button opens the army screen with the way back here.
+fn with_back(bar: Option<Screen>, view: &BuildingView) -> Option<Screen> {
+    bar.map(|b| match b {
+        Screen::Squad { selected, scroll, .. } => Screen::Squad { selected, scroll, back: Some(view.clone()) },
         other => other,
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{next_pick, recruit_x, screen_line};
+    use super::{next_pick, offer_picture, recruit_x, screen_line, stock_caption, stock_picture};
+    use razdor::rules::economy::VillageOffer;
     use razdor::rules::formation::{Formation, Row, Slot};
+
+    /// 0x4d11ef / 0x4d1247: a stock of 0 shows the `_Empty` picture; 0x4d0f7a: " + " above 0,
+    /// " = " at 0.
+    #[test]
+    fn a_village_stock_of_zero_shows_the_empty_picture_and_an_equals_sign() {
+        assert_eq!(stock_picture(120, false), "Village_Gold");
+        assert_eq!(stock_picture(0, false), "Village_Gold_Empty");
+        assert_eq!(stock_picture(7, true), "Village_Mana");
+        assert_eq!(stock_picture(0, true), "Village_Mana_Empty");
+        assert_eq!(stock_caption("Деньги", 120), "Деньги + 120");
+        assert_eq!(stock_caption("Магия", 0), "Магия = 0");
+    }
+
+    /// 0x4aca80: the offer's kind (1 blessing … 5 innkeeper) picks `Village_Bonus_<kind>`;
+    /// the `A` pictures are never shown.
+    #[test]
+    fn each_village_offer_shows_its_bonus_picture() {
+        use VillageOffer::*;
+        let names = [Blessing, Priest, Furs, Witch, Innkeeper].map(offer_picture);
+        assert_eq!(names, ["Village_Bonus_1", "Village_Bonus_2", "Village_Bonus_3", "Village_Bonus_4", "Village_Bonus_5"]);
+    }
 
     /// Two recruits stand at a third and two thirds of the picture, as on the original's
     /// screen (centres near 427 and 651); six fill it.

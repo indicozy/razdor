@@ -710,12 +710,17 @@ impl App {
             cursor::set(cursor::Shape::Arrow);
             if let Some(close) = dialog::draw(d, &self.assets, self.game.as_ref()) {
                 let closed = self.dialogs.pop_front();
-                let asked = closed.as_ref().is_some_and(|d| d.question);
+                let offer = closed.as_ref().is_some_and(|d| d.offer);
+                let asked = closed.as_ref().is_some_and(|d| d.question && !d.offer);
                 let read = closed.as_ref().is_some_and(|d| d.event.is_some() && !d.question);
                 // Closing a dialog while the triumph plays changes the map track at once
                 // (0x4c20b3).
                 if self.map_music.triumph {
                     self.rotate_music();
+                }
+                // A village's offer: the answer goes to the village.
+                if let (true, Some(game)) = (offer, self.game.as_mut()) {
+                    next = next.or(building_view::answer_offer(game, close == Close::Yes, &mut self.dialogs));
                 }
                 // A scenario question: the answer goes to the event engine.
                 if let (true, Some(game)) = (asked, self.game.as_mut()) {
