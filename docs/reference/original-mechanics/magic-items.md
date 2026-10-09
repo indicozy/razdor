@@ -166,6 +166,34 @@ clearly "the hero's army has a Caster". **code**
   subtracted with **no check and no floor**: if mana dropped meanwhile it goes negative.
 - Event and village casts pay nothing.
 
+### 3.4a How the effect is drawn (0x4e0c60, 0x4b911c, 0x4af2f8, renderer 0x4c8864 / 0x4c9b5b)
+
+- `EffectN=file,R,G,B,length,Y,scale×1000,start` (lengths and start in ms). The loader 0x4e0c60
+  keeps `length` at effect +0xc1 and `start` at +0xc5, and builds a 128×128 quad (0x48c4c0,
+  the whole texture) whatever the frames' size. 0x48c6b0 moves it by (−64, Y − 128), the
+  scale (field 7 / 1000) multiplies it and (16, 11) is added. The renderer adds the target
+  cell's top-left. So the frame is **centred** on the cell's centre and its **bottom row is
+  Y·scale px below that centre**. A larger Y draws lower. **code**
+- Colour: every vertex's diffuse is `R·65536 + G·256 + B` (0x48c5b4; alpha 0, specular 0).
+  The device (D3D7, init 0x481cd0) never sets stage 0's COLOROP, so it keeps D3D's default
+  MODULATE: texel × diffuse. Each layer is drawn with **SRCBLEND = DESTBLEND = ONE** (pure
+  additive; layer 1 0x4c92ec/0x4c93e0, layer 2 0x4c9e63/0x4c9e72, layer 3 0x4ca1a1/0x4ca1b0).
+  It is then put back to SRCALPHA / INVSRCALPHA. The min filter is LINEAR during the draw.
+  So each pixel is `below + texel × (R, G, B) / 255`, saturated. Black adds nothing, and the
+  layer can only brighten the map, never darken it. **code**
+- Frames: 0x4b911c reads 50 frames of 128×128 16-bit pixels per layer (+4-byte header each)
+  into the textures at 0xae28f8 + layer·200. Each pixel goes through the format LUT 0xae6f60,
+  then through 0xae2b50 (RGB444 with each nibble ×17). The art's alpha nibble is 0. **code**
+- Timing: the timer copies the three quads to 0x68ea90 / 0x68eb30 / 0x68ebd0 on its first
+  call and marks the cell (+0x10 = spell + 1). On every tick with t = ms since the cast,
+  layer e is shown iff `start ≤ t ≤ start + length` (flags 0x68eca8..aa), and frame
+  `(t − start)·49 div length` is uploaded (0x482290). Frame 49 shows only at the very end.
+  **code**
+- Order: layer 1 is drawn in the cell pass after the hills, before that cell's mark and route
+  arrow (0x4c935b), under every standing sprite. Layers 2 and 3 are drawn in the sprite pass
+  of the target cell, layer 2 before the cell's armies (0x4c9dca) and layer 3 after them
+  (0x4ca108). So `Effect2` is behind the figure and `Effect3` in front of it. **code**
+
 ### 3.5 Choosing an enemy target (world frame 0x4cc148, hit test 0x4cbf20)
 
 - In target mode, hovering any cell that holds an army (not the hero, not the ship) on a
@@ -474,6 +502,7 @@ Razdor's code read: `src/rules/items.rs`, `src/rules/magic.rs`, `src/rules/units
 | Spells after a campaign change | All slots wiped; D kept (the hero's too) | All slots wiped; D kept | §9 | Matches |
 | Spells after a battle | The player's units the battle left dead lose their slots | The player's dead units lose their slots | §9 | Matches |
 | Community opcode 11 "permanent" spells | End at the map start + 156,588 minutes (0xEEEEEE hundredths, rounded up); slot k takes entry k, a 0 empties it; garrisons too | End at an absolute time ≈ 108.7 game days after the map start | §4.2 | Matches |
+| World spell effect drawing | The layer's frame `(t − start)·49 div length` added to the map, times its R, G, B (`chrome::additive` over glow frames), on a 128·scale square centred on the target, its bottom Y·scale px below the centre; layer 1 under the marks and sprites, 2 just behind the figure, 3 just in front of it (`world_view::draw_spell_layer`) | The same, with SRCBLEND = DESTBLEND = ONE over texel × diffuse; 2 and 3 in the target cell's sprite pass, so sprites of the cells below cover layer 3 | §3.4a | Matches (Razdor draws figures after all scenery, so no tree covers layer 3) |
 | AI item handling | Value = tactical cost gain over the bare unit, threshold 5 (`ai::give_item`, `ai::redistribute`, shopping) | Value = tactical cost gain over the bare unit, threshold 5, as in §8 | §8 | Matches |
 
 ## Unknowns

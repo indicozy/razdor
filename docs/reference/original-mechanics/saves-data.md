@@ -167,8 +167,8 @@ there it stays empty. **code** (0x4e0448)
 - Keys: `Icon1..3` with `ColorC1..3` (the picture), `CostGold`, `CostMana`, `Type` (Life 1,
   Death 3, anything else Elemental 2), `TimeWork`, `TimeCast`, `Target` (Enemy 0, OneEnemy −1,
   anything else 1), `DeltaFixedHits`, `DeltaPercentHits`, `p-LifeLose`, the `d-` and `p-` stat
-  keys, and `Effect1..3` (list: sprite file, R, G, B, start, a sixth value, scale ×1000,
-  duration; an empty sprite name means no effect). Semantics: economy.md §4. **code**
+  keys, and `Effect1..3` (list: sprite file, R, G, B, length in ms, Y offset, scale ×1000,
+  start in ms; an empty sprite name means no effect; how they are drawn: magic-items.md §3.4a). Semantics: economy.md §4. **code**
 
 ## 6. `_Global.ini`
 

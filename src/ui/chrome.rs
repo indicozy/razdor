@@ -1238,6 +1238,46 @@ mod tests {
         assert_eq!(g.pixel(1, 0), [255, 127, 0, 100]);
     }
 
+    /// A world spell layer's pixel in the original: what is below plus texel × tint, per
+    /// channel, saturated (stage 0 MODULATE of texture and diffuse, SRCBLEND = DESTBLEND =
+    /// ONE; 0x4c9e63).
+    fn original_spell_pixel(below: [u8; 3], texel: [u8; 3], tint: [u8; 3]) -> [u8; 3] {
+        std::array::from_fn(|i| (below[i] as u32 + texel[i] as u32 * tint[i] as u32 / 255).min(255) as u8)
+    }
+
+    /// The same pixel drawn by Razdor: the texel made to glow, tinted, under [`additive`]
+    /// (source × its alpha + what is below).
+    fn razdor_spell_pixel(below: [u8; 3], texel: [u8; 3], tint: [u8; 3]) -> [u8; 3] {
+        let mut g = img(&[[texel[0], texel[1], texel[2], 0]]);
+        transform(&mut g, Fx::Glow);
+        let p = g.pixel(0, 0);
+        std::array::from_fn(|i| {
+            let src = p[i] as f32 / 255.0 * tint[i] as f32 / 255.0;
+            (below[i] as f32 + src * p[3] as f32).min(255.0) as u8
+        })
+    }
+
+    #[test]
+    fn a_spell_layer_adds_its_tinted_light_and_never_darkens() {
+        // «Молния»'s flare: purple light over green grass, black adds nothing.
+        let grass = [40, 90, 30];
+        assert_eq!(original_spell_pixel(grass, [0, 0, 0], [120, 0, 100]), grass);
+        assert_eq!(original_spell_pixel(grass, [255, 255, 255], [120, 0, 100]), [160, 90, 130]);
+        assert_eq!(original_spell_pixel([200, 0, 0], [255, 0, 0], [255, 255, 255]), [255, 0, 0]);
+        let levels = [0u8, 17, 68, 119, 170, 221, 255];
+        for &a in &levels {
+            for &b in &levels {
+                for &c in &levels {
+                    for tint in [[120, 0, 100], [0, 135, 155], [255, 255, 255], [10, 10, 10]] {
+                        let (o, r) = (original_spell_pixel(grass, [a, b, c], tint), razdor_spell_pixel(grass, [a, b, c], tint));
+                        assert!(o.iter().zip(r).all(|(&x, y)| x.abs_diff(y) <= 1), "{:?} {tint:?}: {o:?} vs {r:?}", [a, b, c]);
+                        assert!(r.iter().zip(grass).all(|(&x, y)| x >= y), "never darker");
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn a_spell_layers_colour_correction_is_taken_away() {
         // «Исцеление»'s rays: 160,40,100 off white leaves green.

@@ -419,9 +419,11 @@ enum SpellFx {
 }
 
 /// One of a spell's `EffectN`: its animation, when it starts and how long it runs (ms), its
-/// tint, how far up it is drawn and its scale (× 1000).
+/// tint, its frame's bottom below the cell's centre and its scale (× 1000).
 #[derive(Clone, Debug)]
 struct FxLayer {
+    /// Which of `Effect1..3` (1 under every sprite, 2 behind the figure, 3 in front of it).
+    layer: u8,
     art: String,
     start_ms: f64,
     duration_ms: f64,
@@ -430,10 +432,15 @@ struct FxLayer {
     scale: f32,
 }
 
+/// The side of a spell layer's quad in the original's pixels, before its scale: the loader
+/// 0x4e0c60 builds every quad 128×128 (0x48c4c0) whatever the frames' size.
+const FX_QUAD: f32 = 128.0;
+
 impl FxLayer {
-    fn of(e: &razdor::dt::data::SpellEffect) -> FxLayer {
+    fn of(layer: u8, e: &razdor::dt::data::SpellEffect) -> FxLayer {
         let c = |v: i32| v.clamp(0, 255) as f32 / 255.0;
         FxLayer {
+            layer,
             art: format!("Spells/{}.ugs", e.file),
             start_ms: e.start_ms.max(0) as f64,
             duration_ms: e.duration_ms.max(1) as f64,
@@ -441,6 +448,24 @@ impl FxLayer {
             y_offset: e.y_offset as f32,
             scale: e.scale_milli.max(1) as f32 / 1000.0,
         }
+    }
+
+    /// The frame shown `ms` after the cast, if the layer shows then: from its start to its
+    /// end, both included, frame `(ms − start)·49 div length` of the 50 (0x4af2f8).
+    fn frame(&self, ms: f64) -> Option<usize> {
+        let (start, len) = (self.start_ms as i64, self.duration_ms as i64);
+        let t = ms as i64;
+        (t >= start && t <= start + len).then(|| ((t - start) * 49 / len.max(1)).clamp(0, 49) as usize)
+    }
+
+    /// The layer's quad, in the original's pixels from the target cell's centre: the loader
+    /// 0x4e0c60 moves the 128×128 quad by (−64, Y − 128) (0x48c6b0, Y = the 6th field), scales
+    /// it by the 7th field / 1000 and adds (16, 11), and the renderer adds the cell's top-left
+    /// (0x4c9368, 0x4c9dd7, 0x4ca115). So Y puts the frame's bottom row Y·scale px below the
+    /// centre: a larger Y draws lower.
+    fn quad(&self) -> Rect {
+        let side = FX_QUAD * self.scale;
+        Rect::new(-FX_QUAD / 2.0 * self.scale, (self.y_offset - FX_QUAD) * self.scale, side, side)
     }
 }
 
@@ -480,7 +505,12 @@ pub(super) fn look_at(target: CastTarget) {
 /// Spell `s` lands on `target`: its effect over the army, queued for the map. The spell's
 /// own `Effect1..3` when it has them, else a stand-in by its school.
 pub(super) fn spell_effect(s: &razdor::rules::content::SpellDef, target: CastTarget) {
-    let layers: Vec<FxLayer> = s.effects.iter().flatten().filter(|e| !e.file.trim().is_empty()).map(FxLayer::of).collect();
+    let layers: Vec<FxLayer> = (1u8..)
+        .zip(&s.effects)
+        .filter_map(|(n, e)| Some((n, e.as_ref()?)))
+        .filter(|(_, e)| !e.file.trim().is_empty())
+        .map(|(n, e)| FxLayer::of(n, e))
+        .collect();
     if !layers.is_empty() && layers.iter().all(|l| super::chrome::animation(&l.art).is_some()) {
         let army = match target {
             CastTarget::Own => None,
@@ -847,6 +877,39 @@ enum Drawable {
     /// The hero's ship, waiting where he left it.
     Ship,
     Hero,
+    /// Layer 2 or 3 of the spell being played ([`SpellShow`]).
+    Spell(u8),
+}
+
+/// A spell's layers playing over the figure they landed on, for [`draw_world`].
+struct SpellShow<'a> {
+    layers: &'a [FxLayer],
+    /// The target's place in world units (its cell's centre while it stands).
+    at: (f32, f32),
+    /// The target figure's place among the figures (see [`draw_world`]).
+    key: f32,
+    /// Since the cast.
+    ms: f64,
+}
+
+/// Draws `show`'s layer `n` (1..3) as the original does: its frame added to what is below,
+/// each texel times the layer's red/green/blue (the quad's diffuse colour 0x00RRGGBB,
+/// 0x48c5b4; stage 0 keeps D3D's default MODULATE, specular 0), with SRCBLEND = DESTBLEND =
+/// ONE (layer 1 0x4c92ec/0x4c93e0, 2 0x4c9e63, 3 0x4ca1a1). Black adds nothing and a dark
+/// tint only dims the light: the frames never darken the map. The frames are the additive
+/// art made to glow ([`super::chrome::Fx::Glow`]), which [`super::chrome::additive`] adds
+/// back to the same sum.
+fn draw_spell_layer(show: &SpellShow, n: u8, cam: &Camera) {
+    let c = cam.to_screen(show.at);
+    let zoom = cam.scale / PX;
+    for l in show.layers.iter().filter(|l| l.layer == n) {
+        let Some(i) = l.frame(show.ms) else { continue };
+        let Some(frames) = super::chrome::animation(&l.art) else { continue };
+        let Some(f) = frames.get(i.min(frames.len().saturating_sub(1))) else { continue };
+        let q = l.quad();
+        let dest = Rect::new(c.x + q.x * zoom, c.y + q.y * zoom, q.w * zoom, q.h * zoom);
+        super::chrome::additive(|| super::chrome::tex(f, dest, l.tint));
+    }
 }
 
 /// Bottom-centre of a location's footprint, in world units.
@@ -1144,7 +1207,7 @@ fn draw_hero(game: &Game, assets: &Assets, art: Option<&DtArt>, cam: &Camera) {
     }
 }
 
-fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>) {
+fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>) {
     let art = assets.dt.as_ref();
     draw_terrain(game, art, cam);
     let map = &game.world.map;
@@ -1166,6 +1229,11 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
                 items.push((o.tile.1 as f32 * rh, Drawable::Object(*o)));
             }
         }
+    }
+    // A spell's layer 1 lies on the ground over the hills, under the marks and every
+    // standing sprite (0x4c935b: the cell loop before the marks' 0x4c9459).
+    if let Some(s) = spell {
+        draw_spell_layer(s, 1, cam);
     }
     // The marks under the hero and every army (cell byte +0xA, 0x48eeb0: the hero's kind 1,
     // an army's 3) lie on the ground in the same pass, under every tree, building and
@@ -1209,6 +1277,12 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
         figures.push((map.center(ship.tile).1 + 0.02, Drawable::Ship));
     }
     figures.push((game.display_pos().1 + 0.03, Drawable::Hero));
+    // A spell's layer 2 just behind its target's figure, layer 3 just in front (0x4c9b5b
+    // draws them in the cell's pass before its armies, 0x4c9dca, and after, 0x4ca108).
+    if let Some(s) = spell {
+        figures.push((s.key - 0.001, Drawable::Spell(2)));
+        figures.push((s.key + 0.001, Drawable::Spell(3)));
+    }
     items.sort_by(|a, b| a.0.total_cmp(&b.0));
     buildings.sort_by(|a, b| a.0.total_cmp(&b.0));
     figures.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -1226,6 +1300,11 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
                 }
             }
             Drawable::Hero => draw_hero(game, assets, art, cam),
+            Drawable::Spell(n) => {
+                if let Some(s) = spell {
+                    draw_spell_layer(s, *n, cam);
+                }
+            }
         }
     }
 }
@@ -1797,7 +1876,7 @@ pub fn backdrop_lit(game: &Game, assets: &Assets, lit: Option<BarButton>) {
     clear_background(rgb(10, 12, 10));
     let full = map_area();
     let cam = Camera::looking_in(game, 1.0, game.display_pos(), full);
-    draw_world(game, assets, &cam, None);
+    draw_world(game, assets, &cam, None, None);
     cam.draw_fog(game);
     draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.2));
     game_bar::draw(game, |b| if Some(b) == lit { Look::Lit } else { Look::Grey });
@@ -1814,7 +1893,7 @@ pub fn window_backdrop(game: &Game, assets: &Assets, lit: Option<BarButton>) -> 
     clear_background(rgb(10, 12, 10));
     let full = map_area();
     let cam = Camera::looking_in(game, 1.0, game.display_pos(), full);
-    draw_world(game, assets, &cam, None);
+    draw_world(game, assets, &cam, None, None);
     cam.draw_fog(game);
     draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.2));
     let idle = game.foe.is_none();
@@ -2125,7 +2204,21 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     }
 
     let cam = Camera::looking_at(game, view.zoom, view.look.unwrap_or(game.display_pos()));
-    draw_world(game, assets, &cam, view.preview.as_ref().map(|p| p.1.as_slice()));
+    // A spell's own effects, each layer while it runs (0x4af2f8), drawn among the figures.
+    let show = match view.spell_fx.front() {
+        Some(SpellFx::Layers { army, layers, started: Some(t0) }) => {
+            let target = match army {
+                None => Some((game.display_pos(), game.display_pos().1 + 0.03)),
+                Some(uid) => game.world.armies.iter().find(|a| a.uid == *uid).map(|a| {
+                    let p = game.army_display_pos(a);
+                    (p, p.1 + 0.02)
+                }),
+            };
+            target.map(|(at, key)| SpellShow { layers, at, key, ms: (now - t0) * 1000.0 })
+        }
+        _ => None,
+    };
+    draw_world(game, assets, &cam, view.preview.as_ref().map(|p| p.1.as_slice()), show.as_ref());
     cam.draw_fog(game);
     cam.draw_showing(game, view.opening.iter().chain(&view.shows), now);
     if let Some(s) = view.shows.front() {
@@ -2137,20 +2230,6 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
             let c = cam.to_screen(at);
             let t = ((now - t0) / SPELL_FX_SECS) as f32;
             super::chrome::effect(art, c, cam.cell_size().x * 3.0, t, WHITE);
-        }
-    }
-    // A spell's own effects: each layer while it runs, its 50 frames over its length, in its
-    // tint, raised by its offset and at its scale (0x4af2f8).
-    if let Some(SpellFx::Layers { army, layers, started: Some(t0) }) = view.spell_fx.front() {
-        if let Some(at) = army_pos(game, *army) {
-            let c = cam.to_screen(at);
-            let zoom = cam.scale / PX;
-            let ms = (now - t0) * 1000.0;
-            for l in layers.iter().filter(|l| ms >= l.start_ms && ms <= l.start_ms + l.duration_ms) {
-                let Some(w) = super::chrome::animation(&l.art).and_then(|f| f.first().map(|t| t.width())) else { continue };
-                let t = ((ms - l.start_ms) / l.duration_ms) as f32;
-                super::chrome::effect(&l.art, vec2(c.x, c.y - l.y_offset * zoom), w * zoom * l.scale, t, l.tint);
-            }
         }
     }
     // The shown route's travel time, at its end.
@@ -2498,6 +2577,48 @@ mod tests {
         // Slow at both ends, symmetric, never backwards.
         assert!((glide_ease(800) - (1.0 - glide_ease(100))).abs() < 1e-6);
         assert!((1..=900).all(|t| glide_ease(t) >= glide_ease(t - 1)));
+    }
+
+    /// «Молния»'s layers: `Effect1=P-Flare,120,0,100,1000,65,1200,600` and
+    /// `Effect3=S-Lighting,0,135,155,1000,35,1400,0`.
+    fn lightning(n: u8) -> FxLayer {
+        let line = if n == 1 { "P-Flare,120,0,100,1000,65,1200,600" } else { "S-Lighting,0,135,155,1000,35,1400,0" };
+        let parts: Vec<i32> = line.split(',').skip(1).map(|x| x.parse().unwrap()).collect();
+        let e = razdor::dt::data::SpellEffect {
+            file: line.split(',').next().unwrap().into(),
+            rgb: [parts[0], parts[1], parts[2]],
+            duration_ms: parts[3],
+            y_offset: parts[4],
+            scale_milli: parts[5],
+            start_ms: parts[6],
+        };
+        FxLayer::of(n, &e)
+    }
+
+    #[test]
+    fn a_spell_layer_shows_from_its_start_to_its_end_in_49_steps() {
+        let flare = lightning(1);
+        assert_eq!(flare.frame(599.0), None);
+        assert_eq!(flare.frame(600.0), Some(0));
+        // (t − start)·49 div length: frame 49 only at the very end.
+        assert_eq!(flare.frame(620.0), Some(0));
+        assert_eq!(flare.frame(621.0), Some(1));
+        assert_eq!(flare.frame(1599.0), Some(48));
+        assert_eq!(flare.frame(1600.0), Some(49));
+        assert_eq!(flare.frame(1601.0), None);
+        assert_eq!(layers_ms(&[flare, lightning(3)]), 1600.0);
+    }
+
+    #[test]
+    fn a_spell_layers_quad_hangs_from_the_cells_centre_by_its_y() {
+        // 128 px × 1.2 wide, centred; its bottom 65 × 1.2 px below the centre.
+        let q = lightning(1).quad();
+        assert!((q.x + 76.8).abs() < 1e-4 && (q.w - 153.6).abs() < 1e-4 && (q.h - 153.6).abs() < 1e-4);
+        assert!((q.y - (65.0 - 128.0) * 1.2).abs() < 1e-4);
+        assert!((q.y + q.h - 78.0).abs() < 1e-4);
+        // The bolt: 1.4 times, its bottom 49 px below the centre, its top 130 px above.
+        let q = lightning(3).quad();
+        assert!((q.y + q.h - 49.0).abs() < 1e-4 && (q.y + 130.2).abs() < 1e-4);
     }
 
     /// A planning click keeps the view where it was scrolled; the walk brings it back to
