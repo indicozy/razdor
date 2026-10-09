@@ -189,8 +189,8 @@ impl Default for Settings {
     }
 }
 
-/// One volume step of the menu's buttons and +/- keys.
-pub const VOLUME_STEP: f32 = 0.1;
+/// One volume step of the settings' sliders: 1%.
+pub const VOLUME_STEP: f32 = 0.01;
 
 fn step_volume(v: f32, steps: i32) -> f32 {
     ((v / VOLUME_STEP).round() + steps as f32).clamp(0.0, 1.0 / VOLUME_STEP) * VOLUME_STEP
@@ -386,7 +386,8 @@ impl Audio {
             cue(c);
         }
         let cues = take_cues();
-        if self.settings != self.saved {
+        // Written once the slider is let go, not on every frame of a drag.
+        if self.settings != self.saved && !held {
             self.settings = self.settings.clamped();
             self.settings.save();
             self.saved = self.settings;
@@ -539,11 +540,13 @@ mod tests {
     #[test]
     fn volume_steps_and_settings_file() {
         let mut s = Settings::default();
-        s.step_music(5);
+        s.step_music(50);
         assert!((s.music_volume - 1.0).abs() < 1e-6);
-        s.step_music(-3);
-        assert!((s.music_volume - 0.7).abs() < 1e-6);
-        s.step_sfx(-20);
+        s.step_music(-33);
+        assert!((s.music_volume - 0.67).abs() < 1e-6);
+        s.step_music(-1);
+        assert!((s.music_volume - 0.66).abs() < 1e-6);
+        s.step_sfx(-100);
         assert_eq!(s.sfx_volume, 0.0);
         s.music_muted = true;
         s.show_fps = true;
