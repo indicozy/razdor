@@ -501,7 +501,7 @@ dependencies = [
 
 [[package]]
 name = "razdor"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "bzip2",
  "dirs",
