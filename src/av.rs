@@ -61,7 +61,7 @@ impl BattleSound {
 }
 
 /// The class of the effect picture Razdor draws on the target of an action
-/// (`ui::battle_view::effect_art`), named as the original's effect numbers (0x4afe7c: 0 shot,
+/// (`ui::battle_view::effect_number`), named as the original's effect numbers (0x4afe7c: 0 shot,
 /// 1 melee, 2 magic, 3 bless, 4 cure).
 pub fn battle_effect(kind: ActionKind) -> &'static str {
     match kind {

@@ -19,7 +19,7 @@ use macroquad::prelude::*;
 use razdor::i18n::tr;
 use razdor::rules::battle::{ActionKind, Battle, EndReason, Fighter, Hit, Outcome, Preview, Step, Team, XpAward};
 use razdor::av::Echo;
-use razdor::rules::content::{HeroClass, ItemId, MagicSchool, Stat};
+use razdor::rules::content::{HeroClass, ItemId, Stat};
 use razdor::rules::formation::{Row, Slot};
 use razdor::rules::game::{BattleResult, Foe, Game};
 
@@ -218,21 +218,36 @@ fn action_cue(battle: &Battle, actor: usize, kind: ActionKind) -> Cue {
     }
 }
 
-/// The original's animation for an action (`Graphics/Battle`, `Graphics/Spells`), its size
-/// relative to the card and its tint.
-fn effect_art(kind: ActionKind, school: Option<MagicSchool>) -> (&'static str, f32) {
+/// The original's effect number for `actor`'s action `kind` (`[BattleEffects] EffectN`,
+/// 0x4c4477): 0 a shot, 1 melee or a cannon's shot (as its sound, `Battle-Strike`), 2 hostile
+/// magic, 3 a blessing, 4 a cure.
+fn effect_number(battle: &Battle, actor: usize, kind: ActionKind) -> usize {
     match kind {
-        ActionKind::Melee | ActionKind::LongStrike => ("Battle/--KUSKI.ugs", 1.9),
-        ActionKind::Shot => ("Battle/--KUSKIBIG.ugs", 1.7),
-        ActionKind::Strike => match school {
-            Some(MagicSchool::Life) => ("Spells/S-Light-Front.ugs", 1.5),
-            Some(MagicSchool::Death) => ("Spells/S-Fog.ugs", 1.5),
-            _ => ("Spells/S-Fire.ugs", 1.5),
-        },
-        ActionKind::Curse => ("Spells/S-Fontain.ugs", 1.5),
-        ActionKind::Heal => ("Battle/--CURE.ugs", 1.6),
-        ActionKind::Bless => ("Spells/S-Swirl.ugs", 1.4),
+        ActionKind::Shot if action_cue(battle, actor, kind) == Cue::Cannon => 1,
+        ActionKind::Shot => 0,
+        ActionKind::Melee | ActionKind::LongStrike => 1,
+        ActionKind::Strike | ActionKind::Curse => 2,
+        ActionKind::Bless => 3,
+        ActionKind::Heal => 4,
     }
+}
+
+/// Draws battle effect `n` over the card `sq` at `t` (0..1 of its 350 ms): its 25 frames
+/// (`elapsed × 24 / 350`) of 220 × 110 drawn at double height, 220 × 220 original pixels,
+/// centred on the card and moved down by the effect's own `y` (0x4afe7c); blended as the
+/// original's 5-bit alpha masks. False without the picture.
+fn draw_effect(content: &razdor::rules::content::Content, n: usize, sq: Rect, t: f32) -> bool {
+    let Some(e) = content.options.battle_effects.get(n) else { return false };
+    let Some(frames) = chrome::battle_effect(e) else { return false };
+    let i = ((t.clamp(0.0, 1.0) * 24.0) as usize).min(frames.len() - 1);
+    // The original's card is 92 px wide.
+    let px = sq.w / 92.0;
+    let size = 220.0 * px;
+    let (cx, cy) = (sq.x + sq.w / 2.0, sq.y + sq.h / 2.0 + e.y as f32 * px);
+    chrome::premultiplied(|| {
+        draw_texture_ex(&frames[i], cx - size / 2.0, cy - size / 2.0, WHITE, DrawTextureParams { dest_size: Some(vec2(size, size)), ..Default::default() });
+    });
+    true
 }
 
 /// "Battle: the army of hero Stings against Castle Morgen!"
@@ -702,11 +717,11 @@ impl BattleView {
             let k = (fx.t - STRIKE_TIME) / STRIKE_TIME;
             let a = &self.battle.fighters[fx.actor];
             let q = l.portrait(l.cell_pos(a.team, a.slot));
-            let art = match echo {
-                Some(Echo::Curse) => effect_art(ActionKind::Strike, Some(MagicSchool::Death)).0,
-                _ => effect_art(hit.kind, self.battle.fighters[hit.target].stats.magic).0,
+            let n = match echo {
+                Some(Echo::Curse) => 2,
+                _ => effect_number(&self.battle, fx.actor, hit.kind),
             };
-            chrome::effect(art, vec2(q.x + q.w / 2.0, q.y + q.h / 2.0), q.w * 1.7, k, WHITE);
+            draw_effect(self.battle.content(), n, q, k);
             draw_rectangle(q.x, q.y, q.w, q.h, Color::new(1.0, 0.1, 0.1, 0.35 * (1.0 - k)));
             if let Some(c) = hit.counter {
                 shadow_centered(&razdor::trf!("-{c} counter", c), q.x + q.w / 2.0, q.y + q.h * 0.45 - 26.0 * l.k * k, (18.0 * l.k).round(), RED);
@@ -716,10 +731,7 @@ impl BattleView {
         let k = fx.t / STRIKE_TIME;
         let f = &self.battle.fighters[hit.target];
         let sq = l.portrait(l.cell_pos(f.team, f.slot));
-        let school = self.battle.fighters[fx.actor].stats.magic;
-        let (art, size) = effect_art(hit.kind, school);
-        let centre = vec2(sq.x + sq.w / 2.0, sq.y + sq.h / 2.0);
-        let drawn = chrome::effect(art, centre, sq.w * size, k, WHITE);
+        let drawn = draw_effect(self.battle.content(), effect_number(&self.battle, fx.actor, hit.kind), sq, k);
         let (flash, label, color) = match hit.kind {
             ActionKind::Heal => (Color::new(0.2, 1.0, 0.3, 0.4 * (1.0 - k)), format!("+{}", hit.amount), GREEN),
             ActionKind::Bless => (Color::new(0.4, 0.7, 1.0, 0.4 * (1.0 - k)), tr("blessed").into(), BLUE_TEXT),
