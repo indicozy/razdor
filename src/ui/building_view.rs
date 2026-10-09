@@ -345,6 +345,15 @@ fn at(f: &Frame, x: f32, y: f32, w: f32, h: f32) -> Rect {
     Rect::new(f.x + x * k, f.y + y * k, w * k, h * k)
 }
 
+/// The left edge of recruit card `i` of `n` (window pixels): the cards and the `n + 1` gaps
+/// share the picture area evenly, as the original's hire tab (0x4bd3a4: gap = (area − card·n)
+/// div (n + 1)).
+fn recruit_x(i: usize, n: usize) -> f32 {
+    let (area_x, area_w, card) = (250.0, 584.0, 88.0);
+    let gap = ((area_w - card * n as f32) / (n as f32 + 1.0)).trunc();
+    area_x + gap + i as f32 * (card + gap)
+}
+
 /// The barracks' counters, as the original's row under the recruits: money, the army's
 /// wages and the income, each with its picture.
 fn barracks_counters(game: &Game, r: Rect) {
@@ -412,8 +421,9 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
     if recruits.is_empty() {
         chrome::shadow_centered(tr("No recruits here."), back.center().x, back.y + 90.0 * k, 18.0 * k, chrome::CREAM);
     }
+    let shown = recruits.len().min(6);
     for (i, r) in recruits.iter().take(6).enumerate() {
-        let face = at(f, 258.0 + i as f32 * 96.0, 74.0, 88.0, 88.0);
+        let face = at(f, recruit_x(i, shown), 74.0, 88.0, 88.0);
         draw_rectangle(face.x + 3.0 * k, face.y + 3.0 * k, face.w, face.h, Color::new(0.0, 0.0, 0.0, 0.45));
         assets.draw_portrait(r.unit, Team::Player, face);
         draw_rectangle_lines(face.x, face.y, face.w, face.h, 1.0, Color::new(0.85, 0.85, 0.85, 0.9));
@@ -490,7 +500,7 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
         let mut p = cell_at(u.slot);
         if let Some((CardAnimKind::Hired { unit, recruit }, t)) = anim {
             if unit == i {
-                let from = at(f, 258.0 + recruit as f32 * 96.0, 74.0, 88.0, 88.0);
+                let from = at(f, recruit_x(recruit, recruits.len().min(6)), 74.0, 88.0, 88.0);
                 p = vec2(from.x, from.y).lerp(p, t).round();
             }
         }
@@ -1359,8 +1369,17 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut BuildingView, message:
 
 #[cfg(test)]
 mod tests {
-    use super::{next_pick, screen_line};
+    use super::{next_pick, recruit_x, screen_line};
     use razdor::rules::formation::{Formation, Row, Slot};
+
+    /// Two recruits stand at a third and two thirds of the picture, as on the original's
+    /// screen (centres near 427 and 651); six fill it.
+    #[test]
+    fn recruits_spread_over_the_picture_by_their_number() {
+        let centre = |i, n| recruit_x(i, n) + 44.0;
+        assert_eq!((centre(0, 2), centre(1, 2)), (430.0, 654.0));
+        assert!(recruit_x(0, 6) >= 250.0 && recruit_x(5, 6) + 88.0 <= 834.0);
+    }
 
     #[test]
     fn the_garrison_grid_is_mirrored_the_heros_is_not() {
@@ -1381,3 +1400,4 @@ mod tests {
         assert_eq!(next_pick(0, 0), None, "nothing left");
     }
 }
+
