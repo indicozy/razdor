@@ -64,15 +64,6 @@ lifts life-draining curses = снимает проклятия, отнимающ
 no effect = без действия
 instant = мгновенно
 lasts {time} = действует {time}
-(base {base}) = (обычно {base})
-an enemy army = на вражескую армию
-your army = на свою армию
-Mana {mana} = Мана {mana}
-casting {time} = сотворение {time}
-{duration}, cast on {target} = {duration}, применяется {target}
-Life magic. = Магия Жизни.
-Elemental magic. = Магия Стихий.
-Death magic. = Магия Смерти.
 That spell is not in your book. = Этого заклинания нет в вашей книге.
 Not enough mana. = Недостаточно маны.
 That spell does not work on that target. = Это заклинание не действует на эту цель.
@@ -165,18 +156,15 @@ Your pack: what the market pays = Ваш рюкзак: цены рынка
 Goods for sale = Товары на продажу
 Pick an item from the list. = Выберите предмет из списка.
 Inventory = Снаряжение
-Gold {gold} = Золото {gold}
 Sell = Продать
 Buy = Купить
 Sold {name} for {g} gold. = Продано: {name}, за {g} золота.
 Bought {item}. It is in your pack. = Куплено: {item}. Предмет в рюкзаке.
 Back to the goods = К товарам
 Sell shop = Продажа
-Spells = Заклинания
 Pick a spell from the list. = Выберите заклинание из списка.
 This spell is already in your book! = Это заклинание уже есть в вашей книге!
 {spell} is written into your book. = {spell}: вписано в вашу книгу.
-Book {n}/{max}. Cast from the spell book on the map (B). = Книга: {n}/{max}. Заклинания творят из книги на карте (B).
 
 # Building window: village tribute
 The headman keeps the tribute for whoever protects the village. = Староста хранит дань для того, кто защищает деревню.
@@ -232,3 +220,8 @@ you = вы
 
 Money = Деньги
 Price {price} = Цена = {price}
+Spell description = Описание заклятия
+You do not have enough money for this spell! = У Вас недостаточно денег для покупки этого заклятия!
+There is no room for the spell in your spell book! = В Вашей Магической Книге нет места для заклятия!
+Money = Деньги
+Spell = Заклятие

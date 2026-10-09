@@ -6,7 +6,7 @@
 //! Scenes (`<map>` is a map file name of the install without `.DTm`, e.g. `РК3-Столица`):
 //! `title`, `update` (a made-up release on offer), `authors[:<seconds>]`, `options[:advanced]`, `scenarios`, `tutorial`, `load[:manual|auto[:<row>]]`, `editor[:<map>[:<text to find>]]`, `classes:<map>`, `map:<map>[:x,y]`, `minimap:<map>`, `walk:<map>:dx,dy` (the
 //! hero sets off that many cells away), `building:<map>:<n>`
-//! (the hero in the n-th building; `:barracks`, `:garrison`, `:market` open that tab), `army:<map>[:<n>[:<unit id>[:<level>]]]` (squad member n selected, made that unit at that level), `journal:<map>`, `spells:<map>`,
+//! (the hero in the n-th building; `:barracks`, `:garrison`, `:market`, `:sanctuary` open that tab), `army:<map>[:<n>[:<unit id>[:<level>]]]` (squad member n selected, made that unit at that level), `journal:<map>`, `spells:<map>`,
 //! `menu:<map>`, `battle:<map>:<n>` (against the n-th army), `custom` (the custom battle
 //! setup), `custom-battle` (its first round; `custom-battle:watch` watches the AI play it). `RAZDOR_SCENE_DEBUG=1` turns the map's debug overlay (F3) on; `RAZDOR_SCENE_SHOW=x,y,r` shows
 //! a place as a lantern event does; `RAZDOR_SCENE_CONSOLE=help;gold 100` opens the cheat
@@ -274,11 +274,17 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                 Some("barracks") => tab = razdor::rules::town::Tab::Barracks,
                 Some("garrison") => tab = razdor::rules::town::Tab::Garrison,
                 Some("market") => tab = razdor::rules::town::Tab::Market,
+                Some("sanctuary") => tab = razdor::rules::town::Tab::Sanctuary,
                 _ => {}
             }
             game.pos = game.world.map.center(loc.anchor);
             game.location = Some(l);
-            Screen::Building(BuildingView::new(tab))
+            // The map's opening windows are not shown over the building.
+            game.drain_events();
+            let mut view = BuildingView::new(tab);
+            // `…:sanctuary:<row>` (or any tab): that row of its list picked.
+            view.pick = parts.next().and_then(|p| p.parse().ok());
+            Screen::Building(view)
         }
         "army" => {
             // `army:<map>:<n>[:<unit id>[:<level>]]`: squad member n pressed (its promotion
