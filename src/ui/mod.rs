@@ -702,7 +702,7 @@ impl App {
         let held = matches!(self.screen, Screen::WorldMap) && self.map_view.holds_dialogs(&self.dialogs);
         let clock = macroquad::prelude::get_time();
         if let Some(d) = self.dialogs.front().filter(|d| !held && !d.waiting(clock)) {
-            if let Some(close) = dialog::draw(d, &self.assets) {
+            if let Some(close) = dialog::draw(d, &self.assets, self.game.as_ref()) {
                 let closed = self.dialogs.pop_front();
                 let asked = closed.as_ref().is_some_and(|d| d.question);
                 let read = closed.as_ref().is_some_and(|d| d.event.is_some() && !d.question);
