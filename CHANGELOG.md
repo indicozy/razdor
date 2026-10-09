@@ -64,6 +64,9 @@ old id, and their versions give both.
   original, ruins say they are guarded but hide by whom, and towns show none.
 
 ### Changed
+- **Stepping onto a friendly army is a battle when the map has no event for it**, as in the
+  original (seen on a fort garrison that only said "lets you pass"). Razdor had let the hero
+  pass.
 - **A building is guarded only by an army standing in it, as in the original:** stepping onto
   a castle, fort, village or ruins whose own army is away on patrol storms its garrison (or
   takes it); that army no longer comes from across the map to fight you before you move.

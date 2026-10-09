@@ -223,7 +223,7 @@ impl Game {
         };
         let now = self.world.armies.iter().position(|a| a.id == id);
         let fired = after.iter().any(|e| matches!(e, Event::Script(EventOutcome::Fired { .. } | EventOutcome::Question(_))));
-        let fights = |a: &Army| if on_step { a.attitude <= 0 } else { a.hostile() };
+        let fights = |a: &Army| on_step || a.hostile();
         match e {
             // A battle the events started instead comes with `after`.
             Event::Encounter(_) if after.iter().any(|e| matches!(e, Event::Encounter(_))) => {}

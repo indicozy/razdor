@@ -1297,10 +1297,9 @@ impl Game {
                 self.path.clear();
                 self.goal = None;
                 self.talk_to = None;
-                let e = if self.world.armies[i].attitude <= 0 { Event::Encounter(i) } else { Event::Met(i) };
-                if let Event::Encounter(i) = e {
-                    self.foe = Some(Foe::Army(i));
-                }
+                // The original engages any army stepped onto, friendly or not (world.md §4.2).
+                let e = Event::Encounter(i);
+                self.foe = Some(Foe::Army(i));
                 self.engage(e, events);
                 return false;
             }
@@ -3523,9 +3522,8 @@ mod tests {
 
     #[test]
     fn stepping_onto_an_army_engages_it() {
-        // §4.2: the cell he is about to enter holds an army: he stays where he is. Hostile, a
-        // battle; well disposed, a meeting (Razdor's guess for what the original's battle
-        // screen does with a friend met on open ground).
+        // §4.2: the cell he is about to enter holds an army: he stays where he is and it is
+        // engaged, friendly or not: with no event firing, a battle.
         let mut g = with_walker(-2, (5, 2), vec![]);
         // A stationary guard: it does not come for him.
         g.world.armies[0].patrols = true;
@@ -3536,7 +3534,7 @@ mod tests {
         let mut g = with_walker(2, (5, 2), vec![]);
         assert!(g.set_destination((5, 2)));
         let events = walk_until_stopped(&mut g);
-        assert_eq!((events.last(), g.tile(), g.foe), (Some(&Event::Met(0)), (4, 2), None));
+        assert_eq!((events.last(), g.tile(), g.foe), (Some(&Event::Encounter(0)), (4, 2), Some(Foe::Army(0))), "a friend too, as the original");
     }
 
     #[test]
@@ -3547,7 +3545,7 @@ mod tests {
         g.world.armies[0].speed = 10;
         assert!(g.set_destination((8, 2)));
         let events = walk_until_stopped(&mut g);
-        assert!(events.contains(&Event::Met(0)), "met where it went: {events:?}");
+        assert!(events.contains(&Event::Encounter(0)), "engaged where it went: {events:?}");
         let at = g.world.armies[0].tile(&g.world.map);
         assert!(at.0 > 8 && g.tile() == (at.0 - 1, 2), "next to it: {:?} {at:?}", g.tile());
         // Moved by other means (not a step of its own), it is not followed: he walks to the
@@ -3587,14 +3585,15 @@ mod tests {
     #[test]
     fn clicking_a_friendly_army_meets_it_again() {
         // The help: "click it to talk or fight": stepping onto it engages it, whatever its
-        // talk counter.
+        // talk counter: with no event firing, a battle each time, friendly or not.
         let mut g = with_walker(1, (10, 2), vec![]);
         for _ in 0..2 {
             let at = g.world.armies[0].tile(&g.world.map);
             assert!(g.set_destination(at));
             let events = walk_until_stopped(&mut g);
-            assert!(events.contains(&Event::Met(0)), "{events:?}");
-            assert_eq!((g.foe, g.tile()), (None, (9, 2)));
+            assert!(events.contains(&Event::Encounter(0)), "{events:?}");
+            assert_eq!((g.foe, g.tile()), (Some(Foe::Army(0)), (9, 2)));
+            g.foe = None;
             g.pos = g.world.map.center((4, 2));
         }
     }
