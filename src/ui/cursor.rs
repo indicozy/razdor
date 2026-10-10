@@ -247,6 +247,41 @@ fn over_army(attitude: i8, meeting: bool) -> Shape {
     }
 }
 
+/// The guard of a hovered building (0x4ccc8a-0x4ccd46), as the pointer over it: of a
+/// village, castle, fort, ruins or bridge the last army standing in it that is ill-disposed
+/// (any on a bridge); a castle, fort or ruins with a garrison and an attitude of 0 or less
+/// (ruins whatever it is) is guarded by its garrison (the swords); ruins with no garrison
+/// have none.
+fn building_guard(b: &BuildingHover) -> Option<Shape> {
+    let mut guard = None;
+    if matches!(b.kind, 2..=4 | 12..=14) {
+        guard = b.standing.iter().rev().find(|&&(att, _)| att <= 0 || b.kind >= 13).map(|&(att, meeting)| over_army(att, meeting));
+    }
+    if matches!(b.kind, 3 | 4 | 12) && b.garrison && (b.attitude <= 0 || b.kind == 12) {
+        guard = Some(Shape::Swords);
+    }
+    if b.kind == 12 && !b.garrison {
+        guard = None;
+    }
+    guard
+}
+
+/// The ring the hover puts on a newly entered cell (0x48eeb0 from 0x4ccdf8 and 0x4cce51,
+/// size 1), off spell targeting (Razdor has none on the map): with an army or a building
+/// in it colour 3 when the building has a guard (0x4ccd37, 0x4ccd88), else colour 2; on an
+/// empty cell colour 2 when it is a target, nothing when it is not. The hero's own cell
+/// keeps his mark (0x48eee5 refuses colour 2 there, 0x4ccee4 marks him again). The cell's
+/// mark before comes back when the pointer enters another one (0x4ccb1a, 0x4ccb39).
+pub fn hover_ring(h: &MapHover) -> Option<u8> {
+    if h.army == CellArmy::Hero {
+        return None;
+    }
+    if h.army != CellArmy::None || h.building.is_some() {
+        return Some(if h.building.as_ref().and_then(building_guard).is_some() { 3 } else { 2 });
+    }
+    h.valid.then_some(2)
+}
+
 /// The pointer after the map's hover of a newly entered cell, from the one before (`prev`):
 /// the hover of 0x4ccb85-0x4ccdfd, then the still of 0x4cce5b.
 ///
@@ -272,17 +307,7 @@ pub fn map_pointer(prev: Shape, h: &MapHover) -> Shape {
     } else {
         match &h.building {
             Some(b) => {
-                let mut guard = None;
-                if matches!(b.kind, 2..=4 | 12..=14) {
-                    guard = b.standing.iter().rev().find(|&&(att, _)| att <= 0 || b.kind >= 13).map(|&(att, meeting)| over_army(att, meeting));
-                }
-                if matches!(b.kind, 3 | 4 | 12) && b.garrison && (b.attitude <= 0 || b.kind == 12) {
-                    guard = Some(Shape::Swords);
-                }
-                if b.kind == 12 && !b.garrison {
-                    guard = None;
-                }
-                s = match guard {
+                s = match building_guard(b) {
                     Some(g) => g,
                     None if matches!(b.kind, 13 | 14) => Shape::Arrow,
                     None if matches!(s, Shape::House | Shape::Query) => s,
@@ -407,6 +432,28 @@ mod tests {
         // An army on a cell that is no target keeps its swords.
         let shut = MapHover { valid: false, army: CellArmy::Army { attitude: -1, meeting: false }, ..Default::default() };
         assert_eq!(map_pointer(Shape::Arrow, &shut), Shape::Swords);
+    }
+
+    #[test]
+    fn the_hovered_cell_gets_the_originals_ring() {
+        // 0x4ccb85-0x4cce51: colour 2 on a target or an army, 3 on a guarded building.
+        assert_eq!(hover_ring(&cell(true, false)), Some(2));
+        assert_eq!(hover_ring(&cell(false, false)), None, "no target, no ring");
+        assert_eq!(hover_ring(&cell(false, true)), None);
+        let army = MapHover { valid: false, army: CellArmy::Army { attitude: -1, meeting: false }, ..Default::default() };
+        assert_eq!(hover_ring(&army), Some(2), "an army's cell, a target or not");
+        assert_eq!(hover_ring(&over(building(5))), Some(2), "an unguarded building");
+        let guarded = BuildingHover { kind: 3, garrison: true, attitude: 0, ..Default::default() };
+        assert_eq!(hover_ring(&over(guarded)), Some(3));
+        let held = BuildingHover { kind: 2, standing: vec![(-1, false)], ..Default::default() };
+        assert_eq!(hover_ring(&over(held)), Some(3), "an ill-disposed army stands in it");
+        let empty_ruins = BuildingHover { kind: 12, standing: vec![(-1, false)], ..Default::default() };
+        assert_eq!(hover_ring(&over(empty_ruins)), Some(2));
+        let ship = MapHover { valid: true, army: CellArmy::Ship, ..Default::default() };
+        assert_eq!(hover_ring(&ship), Some(2));
+        // The hero's cell keeps his own mark, in a building too.
+        let hero = MapHover { valid: true, army: CellArmy::Hero, building: Some(building(3)), ..Default::default() };
+        assert_eq!(hover_ring(&hero), None);
     }
 
     #[test]

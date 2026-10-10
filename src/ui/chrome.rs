@@ -489,6 +489,37 @@ pub fn additive(draw: impl FnOnce()) {
     with_material(material, draw);
 }
 
+const SILHOUETTE_FRAGMENT: &str = r#"#version 100
+varying lowp vec4 color;
+varying lowp vec2 uv;
+uniform sampler2D Texture;
+void main() {
+    gl_FragColor = vec4(color.rgb, color.a * step(0.7, texture2D(Texture, uv).a));
+}"#;
+
+thread_local! {
+    static SILHOUETTE: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
+}
+
+/// Runs `draw` with every picture drawn as its solid shape in the tint colour (the faint
+/// alpha of a shadow left out), for outlines. Without the material, nothing is drawn.
+pub fn silhouette(draw: impl FnOnce()) {
+    use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation, PipelineParams};
+    let material = SILHOUETTE.with(|m| {
+        m.get_or_init(|| {
+            let blend = BlendState::new(Equation::Add, BlendFactor::Value(BlendValue::SourceAlpha), BlendFactor::OneMinusValue(BlendValue::SourceAlpha));
+            let pipeline_params = PipelineParams { color_blend: Some(blend), ..Default::default() };
+            load_material(ShaderSource::Glsl { vertex: ADD_VERTEX, fragment: SILHOUETTE_FRAGMENT }, MaterialParams { pipeline_params, ..Default::default() })
+                .map_err(|e| razdor::diag!("silhouette material: {e}"))
+                .ok()
+        })
+        .clone()
+    });
+    if let Some(m) = material {
+        with_material(Some(m), draw);
+    }
+}
+
 /// Runs `draw` with multiplying blending: what is below is multiplied by the colour drawn
 /// (darkening and tinting parchment), or with normal blending if the material cannot be made.
 pub fn multiply(draw: impl FnOnce()) {

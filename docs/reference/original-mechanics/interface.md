@@ -294,8 +294,17 @@ instant saves and loads. The end of a glide, of a place shown or of a wait gives
 (0x4b9060, 0x4ae24c), which stays until the pointer enters another cell. While the map's
 right-button tooltip is up the pointer is not drawn (0x474a81 on 0x4ecd88). **code**
 
-The hovered cell also gets a ring marker (normal, hostile, spell target or "no target"
-colours). **code** (48eeb0 calls)
+The hovered cell also gets a ring marker: the hover writes the cell's mark byte (48eeb0,
+size 1) after putting back the mark of the cell it left (0x4ccb1a, 0x4ccb39, saved by
+48ef7c). Off spell targeting a cell with an army or a building gets colour 3 when the
+building has a guard (0x4ccd37, 0x4ccd88), else colour 2 (0x4ccdf8); an empty cell that is
+a target colour 2 (0x4cce51); a cell that is no target nothing. In spell targeting a target
+army gets colour 5, other targets colour 4 (0x4ccc4c, 0x4cce24). The hero's cell refuses
+colour 2 (0x48eee5) and is marked again with colour 1 (0x4ccee4). Over the bottom panel
+nothing is put back, so the last ring stays. The colours (0x4ce30c): 1 `Selection-1`
+0xffff00, 2 `Selection-0` 0x00df00, 3 `Selection-1` 0xff0080, 4 `Selection-2` 0xdf0000,
+5 `Selection-2` 0x00c4ff; the mark lies on the ground in the cell pass (0x4c9459), under
+the building standing there. **code**
 
 ### 7.3 Left button (first frame of the press)
 
@@ -1229,6 +1238,8 @@ parity rule they are candidates to hide or remove, not bugs to copy.
 | 63 | Card shadows | Matches: `Shadow-Unit` through its alpha under every occupied card (army, building, battle, the barracks' hire offers), only its band right of and below the card (`chrome::unit_shadow`). `Shadow-Empty` under empty cells is drawn whole at 55 % (Razdor's), not masked over the card | `Shadow-Unit` / `Shadow-Empty` through their alpha, masks cleared over 94×133 / 94×94 | 9.5 |
 | 64 | Experience cards | Matches: the darkened portrait, the running `exp` strip and `exp-hole` (`chrome::xp_veil`), «Опыт» and "+ N" in light blue Benguiat at y + 31 / y + 47, `Sign-Upgrade` at (+3, +3) for a unit past its first level with a next type; without the art Razdor's "XP +N" box. The army screen has no promotion animation, so no overlay there | 4b0684 during the won hold; 4b05a8 in the promotion animation | 9.9 |
 | 65 | Unit panel state lines | Matches: dead → `Bonus-Ressurrect` with `Hint3`; else unpaid (army window, not a type preview, not in battle) → `Bonus-NoPayment` over an empty row (the original's bug); else `Bonus-2Row`, `Bonus-InCastle` (`unit_sheet::state_lines`). Razdor's red "Dead" / "Unpaid" status lines are gone | The same chain; the no-payment text never set | 9.1 |
+| 66 | Map hover marks | Matches: the hovered cell's ring in the colour of the original's mark, worked out on entering another cell (`cursor::hover_ring`, `world_view::hover_look`), in place of the army's mark on that cell; the ring stays over the bar; Razdor drops it while the hero walks. Extra (Razdor's choice, a player's wish): the building under the pointer is outlined in gold around its picture (`chrome::silhouette`) | The ring only, under the building's picture | 7.2 |
+| 67 | Battle hover outline | Extra (Razdor's choice, a player's wish, as Razdor's first battle grid had): a cell under the mouse that is not framed otherwise (target, actor, a cell to step to) gets a thin silver outline round its portrait (`battle_view`) | Only a target under the mouse is lit | 12 |
 
 ## Unknowns
 

@@ -35,6 +35,8 @@ use super::Screen;
 const ACTIVE: Color = Color::new(0.35, 1.0, 0.35, 1.0);
 const FRIENDLY: Color = Color::new(0.35, 0.55, 1.0, 1.0);
 const HOSTILE: Color = Color::new(1.0, 0.35, 0.35, 1.0);
+/// The outline of a cell under the mouse that is not framed otherwise (Razdor's choice).
+const HOVER_EDGE: Color = Color::new(0.80, 0.80, 0.84, 0.85);
 /// The experience cards' font (ae24a8): Benguiat with red −200, green −75.
 const XP_INK: Color = Color::new(55.0 / 255.0, 180.0 / 255.0, 1.0, 1.0);
 /// The paces of the watched battle.
@@ -903,6 +905,19 @@ impl BattleView {
             };
             let order = queue.iter().position(|&q| q == i);
             self.draw_card(l, assets, i, p, frame, hovered && targets.contains(&i), order, Some(f.team) == acting, now);
+        }
+        // Any other cell under the mouse, a card or an empty cell, gets a thin outline
+        // (Razdor's choice, a player's wish, as Razdor's first battle grid had): the original
+        // frames only a target under the mouse.
+        if let Some((team, slot)) = hovered_cell.filter(|_| ongoing && !input_blocked()) {
+            let framed = match b.at(team, slot).filter(|&i| self.fighter(i).alive()) {
+                Some(i) => targets.contains(&i) || (Some(i) == active && self.fx.is_none()),
+                None => Some(team) == acting && moves.contains(&slot),
+            };
+            if !framed {
+                let sq = l.portrait(l.cell_pos(team, slot));
+                draw_rectangle_lines(sq.x, sq.y, sq.w, sq.h, 1.5 * k, HOVER_EDGE);
+            }
         }
 
         if let Some(fx) = &self.fx {
