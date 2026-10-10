@@ -5,7 +5,7 @@
 //!   scaled over the map with linear filtering; explored cells next to the dark are shaded by
 //!   how much dark lies around them, so the edge is a soft feathered band like the original's.
 //! - Minimap: a toggle window in the top-right corner of the map view (bottom-bar "Map" button
-//!   or M). The whole map scaled down, explored cells in their terrain colour and the rest
+//!   or M); Razdor's: dragged by its frame, it moves to any corner ([`Corner`]). The whole map scaled down, explored cells in their terrain colour and the rest
 //!   black, locations as small icons in the colours the original gives their types, the
 //!   armies and the hero as shields, and a light rectangle for the view. A click on it moves the camera there (as in the video); walking still
 //!   needs a click on the map.
@@ -117,8 +117,8 @@ pub fn draw_fog(fog: &Fog, tl: Vec2, br: Vec2) {
 const WINDOW: f32 = 403.0;
 const BORDER: f32 = 13.0 * 403.0 / 430.0;
 
-/// Screen rectangle of the minimap picture (inside its frame): a square in the top-right
-/// corner of the map view `view`, the whole map in it, one cell per texel (the original's
+/// Screen rectangle of the minimap picture (inside its frame): a square in its corner of
+/// the map view `view`, the whole map in it, one cell per texel (the original's
 /// minimap is square for its square maps).
 pub fn rect(map: &TileMap, view: Rect) -> Rect {
     rect_at(map, view, super::chrome::k())
@@ -141,7 +141,50 @@ pub fn outer(map: &TileMap, view: Rect) -> Rect {
 }
 
 fn outer_at(map: &TileMap, view: Rect, k: f32) -> Rect {
-    outer_sized(view, k, SIZE.with(|s| s.get()), aspect(map))
+    let o = outer_sized(view, k, SIZE.with(|s| s.get()), aspect(map), corner());
+    match MOVE.with(|m| m.get()) {
+        Some(grab) => carried(view, o, Vec2::from(crate::ui::widgets::pointer()) - grab),
+        None => o,
+    }
+}
+
+/// The window `o` carried to the top-left `at`, kept within `view`.
+fn carried(view: Rect, o: Rect, at: Vec2) -> Rect {
+    let x = at.x.min(view.x + view.w - o.w).max(view.x);
+    let y = at.y.min(view.y + view.h - o.h).max(view.y);
+    Rect::new(x, y, o.w, o.h)
+}
+
+/// A corner of the map view the minimap window stands in (Razdor's; the original's is the
+/// top right).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Corner {
+    #[default]
+    TopRight,
+    TopLeft,
+    BottomLeft,
+    BottomRight,
+}
+
+impl Corner {
+    fn left(self) -> bool {
+        matches!(self, Corner::TopLeft | Corner::BottomLeft)
+    }
+
+    fn bottom(self) -> bool {
+        matches!(self, Corner::BottomLeft | Corner::BottomRight)
+    }
+
+    /// The corner of `view` whose quarter holds `p`.
+    fn nearest(view: Rect, p: Vec2) -> Corner {
+        match (p.x < view.x + view.w / 2.0, p.y >= view.y + view.h / 2.0) {
+            (false, false) => Corner::TopRight,
+            (true, false) => Corner::TopLeft,
+            (true, true) => Corner::BottomLeft,
+            (false, true) => Corner::BottomRight,
+        }
+    }
 }
 
 /// The map's width over its height.
@@ -150,10 +193,11 @@ fn aspect(map: &TileMap) -> f32 {
 }
 
 /// The window of size `size` (in pixels of the 960×720 video; `None`: the original's
-/// square), kept in the top-right corner of `view` and within it. A size of Razdor's own
+/// square), kept in the corner `at` of `view` (the original's: the top right, 10 px from
+/// its side and 2 from its top; the others mirror it) and within it. A size of Razdor's own
 /// keeps the map's proportions inside the frame (`aspect`, width over height): it shrinks to
 /// fit them, so the map fills the frame with no empty band.
-fn outer_sized(view: Rect, k: f32, size: Option<(f32, f32)>, aspect: f32) -> Rect {
+fn outer_sized(view: Rect, k: f32, size: Option<(f32, f32)>, aspect: f32, at: Corner) -> Rect {
     let b = 2.0 * BORDER;
     let (mut w, mut h) = size.unwrap_or((WINDOW, WINDOW));
     let fitted = size.is_some();
@@ -176,20 +220,27 @@ fn outer_sized(view: Rect, k: f32, size: Option<(f32, f32)>, aspect: f32) -> Rec
     }
     let w = (w * k).min(view.w - 14.0 * k).max(MIN_SIDE * k);
     let h = (h * k).min(view.h - 4.0 * k).max(MIN_SIDE * k);
-    Rect::new(view.x + view.w - w - 10.0 * k, view.y + 2.0 * k, w, h)
+    let x = if at.left() { view.x + 10.0 * k } else { view.x + view.w - w - 10.0 * k };
+    let y = if at.bottom() { view.y + view.h - h - 2.0 * k } else { view.y + 2.0 * k };
+    Rect::new(x, y, w, h)
 }
 
 /// Smallest side of the window (Razdor's resizing), in pixels of the 960×720 video.
 const MIN_SIDE: f32 = 120.0;
 
-/// A resize under way: which edges (left, bottom), where the pointer and the size started.
+/// A resize under way: which edges (side, end: those facing the view's middle), where the
+/// pointer and the size started.
 type Drag = ((bool, bool), Vec2, (f32, f32));
 
 thread_local! {
-    /// Razdor's own size of the window (dragged by its left and bottom edges), `None` for
-    /// the original's.
+    /// Razdor's own size of the window (dragged by its inner edges), `None` for the
+    /// original's.
     static SIZE: std::cell::Cell<Option<(f32, f32)>> = const { std::cell::Cell::new(None) };
     static DRAG: std::cell::Cell<Option<Drag>> = const { std::cell::Cell::new(None) };
+    /// The corner the window stands in.
+    static CORNER: std::cell::Cell<Corner> = const { std::cell::Cell::new(Corner::TopRight) };
+    /// A move under way: the pointer's offset from the window's top-left.
+    static MOVE: std::cell::Cell<Option<Vec2>> = const { std::cell::Cell::new(None) };
     /// When an edge was last pressed (a second press soon after restores the original size).
     static LAST_PRESS: std::cell::Cell<f64> = const { std::cell::Cell::new(f64::NEG_INFINITY) };
 }
@@ -204,42 +255,61 @@ pub fn set_size(size: Option<(f32, f32)>) {
     SIZE.with(|s| s.set(size.filter(|&(w, h)| w.is_finite() && h.is_finite())));
 }
 
-/// The window is being resized: the map takes no pointer meanwhile.
+/// The window's corner, for the settings.
+pub fn corner() -> Corner {
+    CORNER.with(|c| c.get())
+}
+
+/// Sets the window's corner from the settings.
+pub fn set_corner(at: Corner) {
+    CORNER.with(|c| c.set(at));
+}
+
+/// The window is being resized or moved: the map takes no pointer meanwhile.
 pub fn resizing() -> bool {
-    DRAG.with(|d| d.get().is_some())
+    DRAG.with(|d| d.get().is_some()) || MOVE.with(|m| m.get().is_some())
 }
 
 /// The pointer is the minimap's: over the window or its edges' grip, or resizing it.
 pub fn under_pointer(map: &TileMap, view: Rect) -> bool {
     let o = outer(map, view);
     let band = (BORDER * super::chrome::k()).max(6.0);
-    let grown = Rect::new(o.x - band, o.y, o.w + band, o.h + band);
+    let at = corner();
+    let x = if at.left() { o.x } else { o.x - band };
+    let y = if at.bottom() { o.y - band } else { o.y };
+    let grown = Rect::new(x, y, o.w + band, o.h + band);
     resizing() || grown.contains(Vec2::from(crate::ui::widgets::pointer()))
 }
 
-/// Which edges of `o` the pointer `m` grips: (left, bottom), within `band` of them.
-fn grip(o: Rect, m: Vec2, band: f32) -> (bool, bool) {
-    let inside_y = m.y >= o.y && m.y <= o.y + o.h + band;
-    let inside_x = m.x >= o.x - band && m.x <= o.x + o.w;
-    let left = inside_y && (m.x - o.x).abs() <= band;
-    let bottom = inside_x && (m.y - (o.y + o.h)).abs() <= band;
-    (left, bottom)
+/// Which edges of `o` the pointer `m` grips, within `band` of them: (side, end), the edges
+/// facing the view's middle from the corner `at` (left and bottom in the top right).
+fn grip(o: Rect, m: Vec2, band: f32, at: Corner) -> (bool, bool) {
+    let side_x = if at.left() { o.x + o.w } else { o.x };
+    let end_y = if at.bottom() { o.y } else { o.y + o.h };
+    let (y0, y1) = if at.bottom() { (o.y - band, o.y + o.h) } else { (o.y, o.y + o.h + band) };
+    let (x0, x1) = if at.left() { (o.x, o.x + o.w + band) } else { (o.x - band, o.x + o.w) };
+    let side = m.y >= y0 && m.y <= y1 && (m.x - side_x).abs() <= band;
+    let end = m.x >= x0 && m.x <= x1 && (m.y - end_y).abs() <= band;
+    (side, end)
 }
 
 /// The size a drag of the edges `edges` by `d` (screen pixels) gives, from `from`
-/// (pixels of the video) at scale `k`: the left edge widens to the left, the bottom one
-/// grows down.
-fn dragged(from: (f32, f32), edges: (bool, bool), d: Vec2, k: f32) -> (f32, f32) {
-    let w = if edges.0 { from.0 - d.x / k } else { from.0 };
-    let h = if edges.1 { from.1 + d.y / k } else { from.1 };
+/// (pixels of the video) at scale `k`, the window in the corner `at`: an edge grows away
+/// from its corner (in the top right the left edge widens to the left, the bottom one
+/// grows down).
+fn dragged(from: (f32, f32), edges: (bool, bool), d: Vec2, k: f32, at: Corner) -> (f32, f32) {
+    let dx = if at.left() { d.x } else { -d.x };
+    let dy = if at.bottom() { -d.y } else { d.y };
+    let w = if edges.0 { from.0 + dx / k } else { from.0 };
+    let h = if edges.1 { from.1 + dy / k } else { from.1 };
     (w.max(MIN_SIDE), h.max(MIN_SIDE))
 }
 
 /// [`dragged`] kept to the map's proportions (`aspect`): the edge dragged leads, the other
 /// side follows; dragging the corner, the side that grew more leads.
-fn dragged_in_proportion(from: (f32, f32), edges: (bool, bool), d: Vec2, k: f32, aspect: f32) -> (f32, f32) {
+fn dragged_in_proportion(from: (f32, f32), edges: (bool, bool), d: Vec2, k: f32, aspect: f32, at: Corner) -> (f32, f32) {
     let b = 2.0 * BORDER;
-    let (w, h) = dragged(from, edges, d, k);
+    let (w, h) = dragged(from, edges, d, k, at);
     let by_w = (w, (w - b) / aspect + b);
     let by_h = ((h - b) * aspect + b, h);
     match edges {
@@ -250,19 +320,20 @@ fn dragged_in_proportion(from: (f32, f32), edges: (bool, bool), d: Vec2, k: f32,
     }
 }
 
-/// Resizing by the left and bottom edges and their corner; a double click on an edge
+/// Resizing by the inner edges and their corner; a double click on an edge
 /// restores the original's size. Returns true while the pointer
 /// grips an edge or drags one (the click is the resize's, not the minimap's).
 fn resize(view: Rect, o: Rect, aspect: f32) -> bool {
     use macroquad::miniquad::CursorIcon;
     let k = super::chrome::k();
     let m = Vec2::from(crate::ui::widgets::pointer());
+    let at = corner();
     let edges = match DRAG.with(|d| d.get()) {
         Some((edges, start, from)) => {
             if is_mouse_button_down(MouseButton::Left) {
-                let want = dragged_in_proportion(from, edges, m - start, k, aspect);
+                let want = dragged_in_proportion(from, edges, m - start, k, aspect, at);
                 // Kept within the view: what is shown is what is stored.
-                let shown = outer_sized(view, k, Some(want), aspect);
+                let shown = outer_sized(view, k, Some(want), aspect, at);
                 SIZE.with(|s| s.set(Some((shown.w / k, shown.h / k))));
             } else {
                 DRAG.with(|d| d.set(None));
@@ -270,7 +341,7 @@ fn resize(view: Rect, o: Rect, aspect: f32) -> bool {
             edges
         }
         None => {
-            let edges = if input_blocked() { (false, false) } else { grip(o, m, (BORDER * k).max(6.0)) };
+            let edges = if input_blocked() || MOVE.with(|m| m.get()).is_some() { (false, false) } else { grip(o, m, (BORDER * k).max(6.0), at) };
             if (edges.0 || edges.1) && clicked() {
                 let now = get_time();
                 if now - LAST_PRESS.with(|t| t.replace(now)) < 0.4 {
@@ -287,12 +358,41 @@ fn resize(view: Rect, o: Rect, aspect: f32) -> bool {
     // The resize is Razdor's: the system's resize pointers, not the original's.
     if gripped {
         super::cursor::system(match edges {
+            (true, true) if at.left() == at.bottom() => CursorIcon::NWSEResize,
             (true, true) => CursorIcon::NESWResize,
             (true, false) => CursorIcon::EWResize,
             _ => CursorIcon::NSResize,
         });
     }
     gripped
+}
+
+/// Moving by the frame (Razdor's): pressed on the frame off the edges that resize, the
+/// window follows the pointer within the view and, let go, stands in the corner of the
+/// view's quarter its middle is in. Returns true while the pointer is on that frame or
+/// carries the window (the click is the move's, not the minimap's).
+fn shift(view: Rect, o: Rect, picture: Rect) -> bool {
+    use macroquad::miniquad::CursorIcon;
+    let m = Vec2::from(crate::ui::widgets::pointer());
+    let held = match MOVE.with(|g| g.get()) {
+        Some(_) if is_mouse_button_down(MouseButton::Left) => true,
+        Some(_) => {
+            set_corner(Corner::nearest(view, o.center()));
+            MOVE.with(|g| g.set(None));
+            true
+        }
+        None => {
+            let on_frame = !input_blocked() && o.contains(m) && !picture.contains(m);
+            if on_frame && clicked() {
+                MOVE.with(|g| g.set(Some(m - o.point())));
+            }
+            on_frame
+        }
+    };
+    if held {
+        super::cursor::system(CursorIcon::Move);
+    }
+    held
 }
 
 /// The frame art over `o`: its corners kept, its sides stretched (a nine-slice), so a
@@ -560,7 +660,7 @@ pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_
         draw_frame(&t, o, super::chrome::k());
     }
 
-    let gripped = resize(view, o, aspect(map));
+    let gripped = resize(view, o, aspect(map)) || shift(view, o, r);
     let m = Vec2::from(crate::ui::widgets::pointer());
     (!gripped && clicked() && r.contains(m)).then(|| ((m.x - r.x) / k.x - 0.5, ((m.y - r.y) / k.y - 0.5) * rh))
 }
@@ -620,27 +720,54 @@ mod tests {
     #[test]
     fn the_window_resizes_by_its_left_and_bottom_edges() {
         let o = Rect::new(500.0, 2.0, 400.0, 400.0);
-        assert_eq!(grip(o, vec2(502.0, 200.0), 8.0), (true, false), "the left edge");
-        assert_eq!(grip(o, vec2(700.0, 405.0), 8.0), (false, true), "the bottom edge");
-        assert_eq!(grip(o, vec2(498.0, 404.0), 8.0), (true, true), "the corner");
-        assert_eq!(grip(o, vec2(700.0, 200.0), 8.0), (false, false), "the map inside");
+        let tr = Corner::TopRight;
+        assert_eq!(grip(o, vec2(502.0, 200.0), 8.0, tr), (true, false), "the left edge");
+        assert_eq!(grip(o, vec2(700.0, 405.0), 8.0, tr), (false, true), "the bottom edge");
+        assert_eq!(grip(o, vec2(498.0, 404.0), 8.0, tr), (true, true), "the corner");
+        assert_eq!(grip(o, vec2(700.0, 200.0), 8.0, tr), (false, false), "the map inside");
+        assert_eq!(grip(o, vec2(898.0, 200.0), 8.0, tr), (false, false), "the right edge is the screen's");
         // Dragged left and down at scale 2: wider and taller by half the screen distance.
-        assert_eq!(dragged((400.0, 400.0), (true, true), vec2(-100.0, 60.0), 2.0), (450.0, 430.0));
-        assert_eq!(dragged((400.0, 400.0), (false, true), vec2(-100.0, -1000.0), 1.0), (400.0, MIN_SIDE));
+        assert_eq!(dragged((400.0, 400.0), (true, true), vec2(-100.0, 60.0), 2.0, tr), (450.0, 430.0));
+        assert_eq!(dragged((400.0, 400.0), (false, true), vec2(-100.0, -1000.0), 1.0, tr), (400.0, MIN_SIDE));
         // Kept in the view's top-right corner and within it, the map's proportions kept
         // inside the frame.
         let view = Rect::new(0.0, 0.0, 1000.0, 700.0);
         let b = 2.0 * BORDER;
-        let w = outer_sized(view, 1.0, Some((600.0, 250.0)), 1.0);
+        let w = outer_sized(view, 1.0, Some((600.0, 250.0)), 1.0, tr);
         assert!((w.x + w.w - 990.0).abs() < 1e-3 && w.y == 2.0 && (w.w - w.h).abs() < 1e-3, "a square map: a square frame {w:?}");
-        let wide = outer_sized(view, 1.0, Some((600.0, 600.0)), 2.0);
+        let wide = outer_sized(view, 1.0, Some((600.0, 600.0)), 2.0, tr);
         assert!(((wide.w - b) / (wide.h - b) - 2.0).abs() < 1e-3, "{wide:?}");
-        let big = outer_sized(view, 1.0, Some((5000.0, 5000.0)), 1.5);
+        let big = outer_sized(view, 1.0, Some((5000.0, 5000.0)), 1.5, tr);
         assert!(big.x >= 0.0 && big.y + big.h <= 700.0 && ((big.w - b) / (big.h - b) - 1.5).abs() < 1e-3, "{big:?}");
-        assert_eq!(outer_sized(view, 1.0, None, 2.0).w, WINDOW, "the original's square by default");
+        assert_eq!(outer_sized(view, 1.0, None, 2.0, tr).w, WINDOW, "the original's square by default");
         // Dragging an edge: the other side follows.
-        let (dw, dh) = dragged_in_proportion((400.0, 400.0), (true, false), vec2(-100.0, 0.0), 1.0, 1.0);
+        let (dw, dh) = dragged_in_proportion((400.0, 400.0), (true, false), vec2(-100.0, 0.0), 1.0, 1.0, tr);
         assert!((dw - 500.0).abs() < 1e-3 && (dh - 500.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn the_window_stands_in_any_corner_and_resizes_by_its_inner_edges() {
+        let view = Rect::new(0.0, 0.0, 1000.0, 700.0);
+        let at = |c| outer_sized(view, 1.0, None, 1.0, c);
+        assert_eq!(at(Corner::TopLeft).point(), vec2(10.0, 2.0));
+        assert_eq!(at(Corner::BottomLeft).point(), vec2(10.0, 700.0 - WINDOW - 2.0));
+        assert_eq!(at(Corner::BottomRight).point(), vec2(1000.0 - WINDOW - 10.0, 700.0 - WINDOW - 2.0));
+        // Let go, the window goes to the corner of the quarter its middle is in.
+        assert_eq!(Corner::nearest(view, vec2(200.0, 600.0)), Corner::BottomLeft);
+        assert_eq!(Corner::nearest(view, vec2(800.0, 100.0)), Corner::TopRight);
+        assert_eq!(Corner::nearest(view, vec2(100.0, 100.0)), Corner::TopLeft);
+        assert_eq!(Corner::nearest(view, vec2(900.0, 650.0)), Corner::BottomRight);
+        // Carried, it stays within the view.
+        let o = Rect::new(0.0, 0.0, 400.0, 400.0);
+        assert_eq!(carried(view, o, vec2(-50.0, 500.0)).point(), vec2(0.0, 300.0));
+        // In the bottom left: its right and top edges resize, growing right and up.
+        let o = Rect::new(10.0, 300.0, 400.0, 400.0);
+        let bl = Corner::BottomLeft;
+        assert_eq!(grip(o, vec2(408.0, 500.0), 8.0, bl), (true, false), "the right edge");
+        assert_eq!(grip(o, vec2(200.0, 296.0), 8.0, bl), (false, true), "the top edge");
+        assert_eq!(grip(o, vec2(412.0, 296.0), 8.0, bl), (true, true), "their corner");
+        assert_eq!(grip(o, vec2(12.0, 500.0), 8.0, bl), (false, false), "the left edge is the screen's");
+        assert_eq!(dragged((400.0, 400.0), (true, true), vec2(100.0, -60.0), 1.0, bl), (500.0, 460.0));
     }
 
     #[test]

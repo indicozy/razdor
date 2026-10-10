@@ -2344,7 +2344,12 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     }
 
     // The original has no side panel: the map fills the screen above the bar. Lasting
-    // world spells stand small in the top left corner.
+    // world spells stand small in the top left corner, under the minimap when it was moved
+    // there.
+    let notes_top = match view.minimap.then(|| minimap::outer(&game.world.map, cam.view)) {
+        Some(o) if o.x < 10.0 + 200.0 * super::chrome::k() && o.y < 40.0 => o.y + o.h + 4.0,
+        _ => 0.0,
+    };
     let now = game.clock.total_minutes() as u64;
     let notes: Vec<(String, Color)> = game
         .active_spells()
@@ -2356,7 +2361,7 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
         .map(|l| (l, MANA))
         .collect();
     for (i, (line, color)) in notes.iter().enumerate() {
-        super::chrome::shadow_text(line, 10.0, 22.0 + i as f32 * 18.0, 16.0, *color);
+        super::chrome::shadow_text(line, 10.0, notes_top + 22.0 + i as f32 * 18.0, 16.0, *color);
     }
     // Waiting: the buttons over the message box (interface.md §6), 1 / 4, or a click on the
     // time panel off the buttons (left 1 h, right 4 h). Waits play in real time, a 30-minute

@@ -196,6 +196,7 @@ impl App {
             .collect();
         let audio = Audio::new(assets.dt.as_ref().map(|d| &d.install));
         minimap::set_size(audio.settings.minimap_size);
+        minimap::set_corner(audio.settings.minimap_corner);
         let mut app = App {
             assets,
             demo,
@@ -697,9 +698,11 @@ impl App {
 
     pub fn frame(&mut self) {
         display::follow_settings(&self.audio.settings);
-        // A minimap resized by the player is kept once the drag ends (saved with the settings).
-        if !minimap::resizing() && minimap::size() != self.audio.settings.minimap_size {
+        // A minimap resized or moved by the player is kept once the drag ends (saved with the
+        // settings).
+        if !minimap::resizing() {
             self.audio.settings.minimap_size = minimap::size();
+            self.audio.settings.minimap_corner = minimap::corner();
         }
         chrome::begin_frame();
         cursor::begin_frame();
