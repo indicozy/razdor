@@ -311,6 +311,30 @@ fn pack_view(game: &Game, assets: &Assets, r: Rect, scroll: &mut usize, hover: &
             *scroll = scroll.saturating_sub(1);
         }
     }
+    // The scroll bar *(Razdor's)*: the knob drags with the left button, a click on the track
+    // pages.
+    let bar = Rect::new(r.x + cols as f32 * cell + 4.0 * k, r.y, 12.0 * k, rows_shown as f32 * cell);
+    let th = bar.h * rows_shown as f32 / rows.max(1) as f32;
+    let room = bar.h - th;
+    let knob_at = |scroll: usize| bar.y + room * scroll as f32 / max_scroll.max(1) as f32;
+    let my = pointer().1;
+    match PACK_DRAG.with(|d| d.get()) {
+        Some(grab) if is_mouse_button_down(MouseButton::Left) && room > 0.0 => {
+            *scroll = (((my - grab - bar.y) / room).clamp(0.0, 1.0) * max_scroll as f32).round() as usize;
+        }
+        Some(_) => PACK_DRAG.with(|d| d.set(None)),
+        None if max_scroll > 0 && clicked() && mouse_in(bar.x, bar.y, bar.w, bar.h) => {
+            let ty = knob_at((*scroll).min(max_scroll));
+            if my >= ty && my < ty + th {
+                PACK_DRAG.with(|d| d.set(Some(my - ty)));
+            } else if my < ty {
+                *scroll = scroll.saturating_sub(rows_shown);
+            } else {
+                *scroll += rows_shown;
+            }
+        }
+        None => {}
+    }
     *scroll = (*scroll).min(max_scroll);
     let inv = chrome::win("Inventory");
     let mut hit = None;
@@ -340,14 +364,14 @@ fn pack_view(game: &Game, assets: &Assets, r: Rect, scroll: &mut usize, hover: &
             }
         }
     }
-    // The scroll bar.
-    let bx = r.x + cols as f32 * cell + 4.0 * k;
-    let bh = rows_shown as f32 * cell;
-    draw_rectangle(bx, r.y, 12.0 * k, bh, Color::new(0.05, 0.05, 0.05, 0.8));
-    let th = bh * rows_shown as f32 / rows.max(1) as f32;
-    let ty = r.y + (bh - th) * *scroll as f32 / max_scroll.max(1) as f32;
-    draw_rectangle(bx + 1.0, ty, 12.0 * k - 2.0, th, chrome::SILVER);
+    draw_rectangle(bar.x, bar.y, bar.w, bar.h, Color::new(0.05, 0.05, 0.05, 0.8));
+    draw_rectangle(bar.x + 1.0, knob_at(*scroll), bar.w - 2.0, th, chrome::SILVER);
     hit
+}
+
+thread_local! {
+    /// The pack's scroll knob held by the left button: the grab point below its top.
+    static PACK_DRAG: std::cell::Cell<Option<f32>> = const { std::cell::Cell::new(None) };
 }
 
 /// The army window's selection (0x668a08: `None`, or a squad index, the hero 0) and the unit
