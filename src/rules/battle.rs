@@ -933,7 +933,12 @@ impl Battle {
     /// and, once the fighting has begun, the actions it has left this turn for its
     /// manoeuvres (more with haste or a first-turn bonus, fewer as it acts or when slowed).
     pub fn shown_stats(&self, i: usize) -> Stats {
-        let f = &self.fighters[i];
+        self.shown_stats_of(&self.fighters[i])
+    }
+
+    /// [`Battle::shown_stats`] of `f`, one of this battle's fighters as it is or as it was
+    /// (the screen shows the cards as they were until an action's effect lands).
+    pub fn shown_stats_of(&self, f: &Fighter) -> Stats {
         let mut s = f.stats.clone();
         let b = self.building_defence[f.team.index()];
         s[Stat::DefenceBlow] += b;

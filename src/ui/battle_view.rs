@@ -127,16 +127,24 @@ struct Fx {
     actor: usize,
     kind: FxKind,
     t: f32,
+    /// The fighters as they were before the action (an `Act`'s; empty otherwise): the rules
+    /// are applied first, the cards show the change only as its effect ends.
+    before: Vec<Fighter>,
 }
 
 impl Fx {
     /// `actor`'s action `hit`; `px` the distance between the two cards in the original's
-    /// pixels.
-    fn act(battle: &Battle, actor: usize, hit: Hit, px: f32) -> Fx {
+    /// pixels; `before` the fighters before the action was applied.
+    fn act(battle: &Battle, actor: usize, hit: Hit, px: f32, before: Vec<Fighter>) -> Fx {
         let echo = razdor::av::echo(battle, actor, &hit);
         let speed = anim_speed();
         let kind = FxKind::Act { hit, echo, slide: slide_secs(px, speed), effect: effect_secs(speed), cued: false, echo_cued: false };
-        Fx { actor, kind, t: 0.0 }
+        Fx { actor, kind, t: 0.0, before }
+    }
+
+    /// A move or a pass.
+    fn plain(actor: usize, kind: FxKind) -> Fx {
+        Fx { actor, kind, t: 0.0, before: Vec::new() }
     }
 
     /// When the first effect ends and when the echo's starts (after its slide back).
@@ -162,6 +170,18 @@ impl Fx {
     /// The echo's half of an action is playing.
     fn echoing(&self) -> bool {
         matches!(self.kind, FxKind::Act { echo: Some(_), .. }) && self.t >= self.marks().0
+    }
+
+    /// Fighter `id` as its card shows it now, when that is not as it is: the sides are
+    /// written back as the effect on the target ends (interface.md §12, step 5), so until
+    /// then every card is as before the action, its HP, wounds and death included. Razdor
+    /// keeps the actor's card as it was until the echo's effect on it ends too, so a
+    /// counterblow's damage shows as it lands (the original refreshes the cards at the
+    /// first effect's end).
+    fn shown(&self, id: usize) -> Option<&Fighter> {
+        let FxKind::Act { echo, .. } = &self.kind else { return None };
+        let pending = self.t < self.marks().0 || (echo.is_some() && id == self.actor && self.t < self.duration());
+        if pending { self.before.get(id) } else { None }
     }
 }
 
@@ -602,16 +622,17 @@ impl BattleView {
                     self.ai_timer += dt;
                     if self.ai_timer >= AI_DELAY {
                         self.ai_timer = 0.0;
+                        let before = self.battle.fighters.clone();
                         self.fx = match self.ai_move() {
                             Some(Step::Act { actor, hit }) => {
                                 let px = card_distance(l, &self.battle, actor, hit.target);
-                                Some(Fx::act(&self.battle, actor, hit, px))
+                                Some(Fx::act(&self.battle, actor, hit, px, before))
                             }
                             Some(Step::Move { actor, from, to }) => {
                                 cue(Cue::CardMove);
                                 let team = self.battle.fighters[actor].team;
                                 let kind = FxKind::Move { from: l.cell_pos(team, from), to: l.cell_pos(team, to) };
-                                Some(Fx { actor, kind, t: 0.0 })
+                                Some(Fx::plain(actor, kind))
                             }
                             Some(Step::Wait { .. }) | None => None,
                         };
@@ -769,23 +790,24 @@ impl BattleView {
         if let Some(t) = under {
             let opts = self.battle.options(active, t);
             if let Some(&kind) = opts.first() {
+                let before = self.battle.fighters.clone();
                 if let Ok(hit) = self.battle.act_with(t, kind) {
                     let px = card_distance(l, &self.battle, active, hit.target);
-                    self.fx = Some(Fx::act(&self.battle, active, hit, px));
+                    self.fx = Some(Fx::act(&self.battle, active, hit, px, before));
                     self.note_log();
                 }
             } else if t == active {
                 // A click on its own card passes one action, with its short pause, as in the
                 // original.
                 self.battle.pass();
-                self.fx = Some(Fx { actor: active, kind: FxKind::Pass, t: 0.0 });
+                self.fx = Some(Fx::plain(active, FxKind::Pass));
             }
         } else if let Some((team, to)) = self.cell_under_mouse(l).filter(|&(t, _)| t == self.battle.fighters[active].team) {
             let from = self.battle.fighters[active].slot;
             if self.battle.move_active(to).is_ok() {
                 cue(Cue::CardMove);
                 let kind = FxKind::Move { from: l.cell_pos(team, from), to: l.cell_pos(team, to) };
-                self.fx = Some(Fx { actor: active, kind, t: 0.0 });
+                self.fx = Some(Fx::plain(active, kind));
             }
         }
     }
@@ -818,7 +840,7 @@ impl BattleView {
         // Empty cells, with the lit cells a step can go to.
         for (team, slot) in all_cells(b) {
             let p = l.cell_pos(team, slot);
-            if b.at(team, slot).is_some_and(|i| b.fighters[i].alive()) {
+            if b.at(team, slot).is_some_and(|i| self.fighter(i).alive()) {
                 continue;
             }
             chrome::empty_cell(Rect::new(p.x, p.y, l.card.x, l.card.y), CellIcon::of(b.formation, slot), true);
@@ -844,7 +866,8 @@ impl BattleView {
 
         // Cards: the order of the next units after the active one, as small numbers.
         let queue: Vec<usize> = if b.outcome() == Outcome::Ongoing { b.queue().skip(1).take(3).collect() } else { Vec::new() };
-        for (i, f) in b.fighters.iter().enumerate() {
+        for i in 0..b.fighters.len() {
+            let f = self.fighter(i);
             let in_fx = self.fx.as_ref().is_some_and(|fx| matches!(&fx.kind, FxKind::Act { hit, .. } if hit.target == i) || fx.actor == i);
             if !f.alive() && !in_fx {
                 continue;
@@ -908,7 +931,7 @@ impl BattleView {
             }
         }
         // The left panel: the hovered unit, else the one acting.
-        if let Some(id) = self.fighter_under_mouse(l).filter(|&i| b.fighters[i].alive()).or(active).or_else(|| b.fighters.iter().position(|f| f.is_hero)) {
+        if let Some(id) = self.fighter_under_mouse(l).filter(|&i| self.fighter(i).alive()).or(active).or_else(|| b.fighters.iter().position(|f| f.is_hero)) {
             self.draw_panel(l, assets, id);
         } else {
             chrome::parchment(l.panel, true);
@@ -974,12 +997,18 @@ impl BattleView {
         promotable_after(f.level + self.levels_gained(a), c.unit(f.unit).upgrades.iter().any(|u| u.target.is_some()))
     }
 
+    /// Fighter `id` as the screen shows it: as it was until the action's effect lands on it
+    /// ([`Fx::shown`]).
+    fn fighter(&self, id: usize) -> &Fighter {
+        self.fx.as_ref().and_then(|fx| fx.shown(id)).unwrap_or(&self.battle.fighters[id])
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn draw_card(&self, l: &Layout, assets: &Assets, id: usize, p: Vec2, frame: Option<(Color, bool)>, aimed: bool, order: Option<usize>, friendly: bool, now: u64) {
-        let f = &self.battle.fighters[id];
+        let f = self.fighter(id);
         // Against the start of the battle, so every gain or loss shows (blue or red), with
         // the building's defence in the D values.
-        let s = &self.battle.shown_stats(id);
+        let s = &self.battle.shown_stats_of(f);
         let base = &f.at_start;
         let k = l.k;
         let p = p.round();
@@ -999,7 +1028,7 @@ impl BattleView {
         let (caster, place) = (unit_sheet::caster(self.battle.content(), f.unit), unit_sheet::strip_place(self.battle.formation, f.slot));
         // The hero's and the enemy's first unit's strip is red, a named character's blue
         // (0x49462c, in battle for both sides).
-        let first_enemy = f.team == Team::Enemy && self.battle.fighters.iter().find(|x| x.team == Team::Enemy).is_some_and(|x| std::ptr::eq(x, f));
+        let first_enemy = f.team == Team::Enemy && self.battle.fighters.iter().position(|x| x.team == Team::Enemy) == Some(id);
         let panel = if f.is_hero || first_enemy {
             unit_sheet::StripPanel::Hero
         } else if f.named > 0 {
@@ -1138,7 +1167,7 @@ impl BattleView {
     /// The unit panel on the left, as the original's.
     fn draw_panel(&self, l: &Layout, assets: &Assets, id: usize) {
         let b = &self.battle;
-        let f = &b.fighters[id];
+        let f = self.fighter(id);
         // What it wears, an enemy's too (an army wears its items, `ai::army_units`).
         let items: [Option<ItemId>; 4] = f.items;
         let mut status = Vec::new();
@@ -1163,7 +1192,7 @@ impl BattleView {
             xp: f.xp,
             need: self.need(f),
             hp: f.hp,
-            now: &self.battle.shown_stats(id),
+            now: &self.battle.shown_stats_of(f),
             start: &f.at_start,
             power: f.power,
             wage: if f.is_hero || f.team == Team::Enemy || self.custom { 0 } else { b.content().wage(f.unit) },
@@ -1405,14 +1434,41 @@ mod tests {
         let actor = b.active().unwrap();
         let target = b.at(Team::Enemy, Slot::new(Row::Front, 1)).unwrap();
         let kind = b.options(actor, target)[0];
+        let before = b.fighters.clone();
         let hit = b.act_with(target, kind).unwrap();
-        let mut fx = Fx::act(&b, actor, hit, 200.0);
+        let mut fx = Fx::act(&b, actor, hit, 200.0, before);
         assert!(matches!(fx.kind, FxKind::Act { echo: Some(Echo::Counter), .. }));
         // Without the Community setting: a 360 ms slide, a 350 ms effect, twice.
         assert!((fx.duration() - 2.0 * (0.36 + 0.35)).abs() < 1e-5, "{}", fx.duration());
         assert!(!fx.echoing());
         fx.t = 0.36 + 0.35 + 0.01;
         assert!(fx.echoing());
+    }
+
+    /// The bandit camp: a damaging blow's target keeps its HP on its card until the blow's
+    /// effect on it ends, then shows the damage (interface.md §12, step 5).
+    #[test]
+    fn a_blow_shows_on_the_target_as_its_effect_ends() {
+        let mut view = bandit_camp();
+        let (actor, hit, before) = loop {
+            assert_eq!(view.battle.outcome(), Outcome::Ongoing, "no blow before the end");
+            let before = view.battle.fighters.clone();
+            if let Some(Step::Act { actor, hit }) = view.battle.auto_step() {
+                if hit.amount > 0 && matches!(hit.kind, ActionKind::Melee | ActionKind::Shot | ActionKind::Strike) {
+                    break (actor, hit, before);
+                }
+            }
+        };
+        let target = hit.target;
+        let was = before[target].hp;
+        assert!(view.battle.fighters[target].hp < was);
+        view.fx = Some(Fx::act(&view.battle, actor, hit, 200.0, before));
+        assert_eq!(view.fighter(target).hp, was, "the slide: not hit yet");
+        let first = view.fx.as_ref().unwrap().marks().0;
+        view.fx.as_mut().unwrap().t = first - 0.01;
+        assert_eq!(view.fighter(target).hp, was, "the effect plays");
+        view.fx.as_mut().unwrap().t = first;
+        assert_eq!(view.fighter(target).hp, view.battle.fighters[target].hp, "the effect is over");
     }
 
     #[test]
