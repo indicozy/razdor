@@ -203,16 +203,19 @@ thread_local! {
 /// leaves none held). Alt and F10 are system keys and never become the held key.
 pub fn track_held_key() {
     SWALLOWED.with(|s| s.set(false));
-    let up = !get_keys_released().is_empty();
-    let down = get_keys_pressed().into_iter().find(|k| !matches!(k, KeyCode::LeftAlt | KeyCode::RightAlt | KeyCode::F10));
-    HELD_KEY.with(|h| {
-        if up {
-            h.set(None);
-        }
-        if down.is_some() {
-            h.set(down);
-        }
-    });
+    let (pressed, released) = (get_keys_pressed(), get_keys_released());
+    HELD_KEY.with(|h| h.set(next_held(h.get(), pressed, !released.is_empty(), is_key_down)));
+}
+
+/// The held key after a frame's key events: any key up clears it, and a key that went down
+/// becomes it while it is still down. The original takes its messages in order (0x475748),
+/// so a key pressed and let go within one frame (a quick tap, a slow frame) ends up not held;
+/// Razdor sees that frame's presses and releases only as sets, and a tap kept as held stayed
+/// held for good, cutting each walk at its first step.
+fn next_held(held: Option<KeyCode>, pressed: impl IntoIterator<Item = KeyCode>, any_up: bool, down: impl Fn(KeyCode) -> bool) -> Option<KeyCode> {
+    let held = if any_up { None } else { held };
+    let pressed = pressed.into_iter().find(|&k| !matches!(k, KeyCode::LeftAlt | KeyCode::RightAlt | KeyCode::F10) && down(k));
+    pressed.or(held)
 }
 
 /// The held key as the original sees it ([`track_held_key`]); none while input is blocked.
@@ -923,6 +926,22 @@ pub fn tabs(x: f32, y: f32, w: f32, labels: &[&str], selected: &mut usize) -> f3
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_key_tapped_within_a_frame_is_not_held() {
+        // Enter pressed and let go in the same frame (a dialog closed with a quick tap): no key
+        // stays held to cut every walk after it.
+        assert_eq!(next_held(None, [KeyCode::Enter], true, |_| false), None);
+        assert_eq!(next_held(Some(KeyCode::J), [KeyCode::Enter], true, |_| false), None);
+        // Pressed and still down: held until a key comes up.
+        assert_eq!(next_held(None, [KeyCode::Enter], false, |_| true), Some(KeyCode::Enter));
+        assert_eq!(next_held(Some(KeyCode::Enter), [], false, |_| true), Some(KeyCode::Enter));
+        assert_eq!(next_held(Some(KeyCode::Enter), [], true, |_| false), None);
+        // Another key let go as this one goes down: this one is held.
+        assert_eq!(next_held(Some(KeyCode::A), [KeyCode::B], true, |k| k == KeyCode::B), Some(KeyCode::B));
+        // System keys are never held.
+        assert_eq!(next_held(None, [KeyCode::LeftAlt], false, |_| true), None);
+    }
 
     #[test]
     fn the_question_box_takes_any_key_but_four_as_yes() {
