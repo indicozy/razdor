@@ -439,7 +439,7 @@ pub fn open_advanced() {
 /// Razdor's advanced settings (the settings window's "Advanced…"): rules where Razdor can
 /// differ from the original. Returns true when closed.
 fn advanced_window(audio: &mut super::audio::Settings) -> bool {
-    let (inner, closed) = window(tr("Advanced settings"), 594.0, 470.0);
+    let (inner, closed) = window(tr("Advanced settings"), 594.0, 570.0);
     let k = chrome::k();
     let y = inner.y + 30.0 * k;
     chrome::shadow_text(tr("Stepping onto a friendly army"), inner.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
@@ -455,9 +455,24 @@ fn advanced_window(audio: &mut super::audio::Settings) -> bool {
     for (i, line) in wrap(hint, inner.w - 48.0 * k, 12.0 * k).iter().enumerate() {
         chrome::shadow_text(line, inner.x + 24.0 * k, y + 56.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
     }
+    // Armies only passing by on a bridge (Razdor's): the original meets each one.
+    let y = y + 100.0 * k;
+    chrome::shadow_text(tr("Armies on bridges"), inner.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
+    let pr = Rect::new(br.x, y, br.w, br.h);
+    let label = if audio.pass_on_bridges { tr("Let pass") } else { tr("Stop (original)") };
+    let over_pass = pr.contains(crate::ui::widgets::pointer().into()) && !input_blocked();
+    chrome::marble_button(pr, label, true, over_pass);
+    if over_pass && clicked() {
+        cue(Cue::Button);
+        audio.pass_on_bridges = !audio.pass_on_bridges;
+    }
+    let hint = tr("The original stops the hero at any army on a bridge. Razdor can let him through those only passing by; guards, enemies and the army clicked still meet him.");
+    for (i, line) in wrap(hint, inner.w - 48.0 * k, 12.0 * k).iter().enumerate() {
+        chrome::shadow_text(line, inner.x + 24.0 * k, y + 56.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
+    }
     // Updates from the GitHub releases (`razdor::update`): offered, put in place quietly, or
     // not looked for; "Check now" asks at once and shows the answer.
-    let y = y + 110.0 * k;
+    let y = y + 100.0 * k;
     chrome::shadow_text(tr("Updates"), inner.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
     let ur = Rect::new(br.x, y, br.w, br.h);
     let mode = match audio.updates {

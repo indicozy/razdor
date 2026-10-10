@@ -727,6 +727,7 @@ impl App {
         if let Some(g) = self.game.as_mut() {
             g.improved_ai = main_menu::expert_ai(&self.audio.settings);
             g.friends_let_pass = self.audio.settings.friends_let_pass;
+            g.pass_on_bridges = self.audio.settings.pass_on_bridges;
         }
         battle_view::set_anim_speed(main_menu::anim_speed(&self.audio.settings));
         // The front row's width from the settings: the next new game uses it.
