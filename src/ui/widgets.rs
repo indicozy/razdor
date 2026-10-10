@@ -93,13 +93,25 @@ fn with_font<R>(s: &str, f: impl FnOnce(Option<&Font>, &str) -> R) -> R {
     })
 }
 
+/// The pixel size a TrueType text is drawn at: above 14 px only even sizes, so the glyph
+/// atlases (one entry per letter and size) stay half as big.
+fn ttf_size(size: f32) -> u16 {
+    let n = size.max(1.0) as u16;
+    if n > 14 { n & !1 } else { n }
+}
+
 fn measure_ttf(s: &str, size: f32) -> TextDimensions {
-    with_font(s, |font, s| measure_text(s, font, size as u16, 1.0))
+    with_font(s, |font, s| measure_text(s, font, ttf_size(size), 1.0))
 }
 
 fn text_ttf(s: &str, x: f32, y: f32, size: f32, color: Color) {
     with_font(s, |font, s| {
-        draw_text_ex(s, x, y, TextParams { font, font_size: size as u16, color, ..Default::default() });
+        // Measuring first puts the string's new glyphs into the atlas before any is drawn:
+        // macroquad sends the whole atlas to the GPU again at each draw after a glyph was
+        // added, so drawing straight away sent it once per new letter (freezes once the
+        // atlas had grown, 4096² on a 2× display).
+        measure_text(s, font, ttf_size(size), 1.0);
+        draw_text_ex(s, x, y, TextParams { font, font_size: ttf_size(size), color, ..Default::default() });
     });
 }
 
