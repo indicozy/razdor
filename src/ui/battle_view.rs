@@ -956,16 +956,12 @@ impl BattleView {
         }
         if player_turn {
             // The original's line while the player's unit waits; the hover box says what a
-            // click does. With nothing in reach, what is left to do.
-            let hint = match (targets.is_empty(), moves.is_empty()) {
-                (false, _) => {
-                    let own = (razdor::i18n::lang() == razdor::i18n::Lang::Ru).then(|| chrome::ui_text("Battle", "ExitHint")).flatten();
-                    return (own.unwrap_or_else(|| tr("To leave the battle, press ESC").to_string()), GOLD);
-                }
-                (true, false) => tr("Nothing in reach: step to a lit cell, or press SPACE"),
-                (true, true) => tr("Nothing to do: press SPACE to pass an action"),
-            };
-            return (hint.into(), Color::new(1.0, 0.55, 0.25, 1.0));
+            // click does. With nothing to do at all, how to pass.
+            if targets.is_empty() && moves.is_empty() {
+                return (tr("Nothing to do: press SPACE to pass an action").into(), Color::new(1.0, 0.55, 0.25, 1.0));
+            }
+            let own = (razdor::i18n::lang() == razdor::i18n::Lang::Ru).then(|| chrome::ui_text("Battle", "ExitHint")).flatten();
+            return (own.unwrap_or_else(|| tr("To leave the battle, press ESC").to_string()), GOLD);
         }
         let waiting = if self.watching() {
             tr("The AI plays both sides (W: take over)")

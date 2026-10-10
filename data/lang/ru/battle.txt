@@ -26,7 +26,6 @@ Finish automatically (Q) = Доиграть самим (Q)
 Turn {round}/{limit} = Ход {round}/{limit}
 XP +{xp} = Опыт +{xp}
 The battle is over = Битва окончена
-Nothing in reach: step to a lit cell, or press SPACE = Никого не достать: шагните на светлую клетку или нажмите Пробел
 Nothing to do: press SPACE to pass an action = Делать нечего: нажмите Пробел, чтобы пропустить действие
 The enemy moves... = Ход противника...
 blessed = благословлён
