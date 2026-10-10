@@ -587,6 +587,7 @@ impl App {
         if let Some(g) = self.game.as_mut() {
             g.improved_ai = main_menu::expert_ai(&self.audio.settings);
         }
+        battle_view::set_anim_speed(main_menu::anim_speed(&self.audio.settings));
         // The front row's width from the settings: the next new game uses it.
         self.follow_row_setting();
         if matches!(self.screen, Screen::Editor) {

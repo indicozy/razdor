@@ -674,7 +674,7 @@ the Status column says where it stands now.
 | 22 | Flock sizes | The side blocks of the battle on screen (`PatchGlobals`), refreshed after each of its actions; off-screen battles read them | Living counts of the interactive battle's two sides as of its last completed action (the starting counts on turn 1), so deaths during the current turn start are not seen yet; simulations see the interactive battle's counts | 3 | Matches |
 | 23 | Hunger counter | Global (`PatchGlobals`, 3 at start, never reset); every removal stores the living count of the battle on screen; turn 1 only looks | Global, persists across battles (only matters on coincidences) | 9 | Matches |
 | 24 | Keys | F1 help, F2 language, F5 quick save, F9 quick load (`ui/hotkeys.rs`) | F1/F2 load lists (autosave / private), F3 save window, F4/F5 endless wait on/off | 12 | Interface, left |
-| 25 | AnimationSpeed option | Not present | Slider in the options; caps two animation delays at (100 − S)·5 and ·3 | 12 | Presentation, left |
+| 25 | AnimationSpeed option | Matches: the «Скорость анимаций в битве» slider in the settings (`OptionSld4`), 0–99 %, the install's value until moved; it caps the strike's slide at (100 − S)·5 ms and its effect at (100 − S)·3 ms | Slider in the options; caps two animation delays at (100 − S)·5 and ·3 | 12 | Matches |
 | 26 | Info card Bleed and Evasion lines | Bleeding shown as a battle status | Card lines with the value (with two off-by-one slips) | 12 | Presentation, left |
 | 27 | Tripwires | Not reproduced | Hangs or crashes on certain ini values. Deliberately not reproduced | 12 | Deviation kept |
 

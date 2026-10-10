@@ -29,6 +29,7 @@ The Ranger is a fast and accurate shot who finds his way anywhere. Watching natu
 About the authors = Об авторах игры
 Background music volume = Громкость музыки
 Sound effects volume = Громкость звуков
+Battle animation speed = Скорость анимаций в битве
 OK = Ок
 Sound, graphics and gameplay settings = Настройки звука, графики и игры
 FPS shown = FPS: показ

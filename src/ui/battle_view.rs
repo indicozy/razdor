@@ -147,9 +147,20 @@ impl Fx {
     }
 }
 
-/// The Community animation speed (`AnimationSpeed`, percent), if the install has it.
+thread_local! {
+    static ANIM_SPEED: std::cell::Cell<Option<f32>> = const { std::cell::Cell::new(None) };
+}
+
+/// The battle animation speed from the settings (`main_menu::anim_speed`), for the next
+/// actions.
+pub fn set_anim_speed(speed: Option<f32>) {
+    ANIM_SPEED.with(|c| c.set(speed));
+}
+
+/// The Community animation speed (`AnimationSpeed`, percent): the settings', else the
+/// install's; `None` without either.
 fn anim_speed() -> Option<f32> {
-    chrome::options_value("AnimationSpeed").and_then(|v| v.trim().parse::<f32>().ok()).map(|s| s.clamp(0.0, 99.0))
+    ANIM_SPEED.with(|c| c.get())
 }
 
 /// A slide's length over `px` of the original's pixels (0x4afbd8): 1.8 ms a pixel, at most

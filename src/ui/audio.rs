@@ -164,11 +164,14 @@ pub struct Settings {
     /// `None` until chosen: the install's `OptValue11`. A save keeps the width it was
     /// started with.
     pub wide_row: Option<bool>,
+    /// The Community's battle animation speed (`AnimationSpeed`, percent 0..99); `None`
+    /// until chosen: the install's.
+    pub anim_speed: Option<f32>,
 }
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, expert_ai: None, wide_row: None }
+        Settings { music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, expert_ai: None, wide_row: None, anim_speed: None }
     }
 }
 
@@ -192,7 +195,8 @@ impl Settings {
 
     fn clamped(self) -> Settings {
         let fix = |v: f32| if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.5 };
-        Settings { music_volume: fix(self.music_volume), sfx_volume: fix(self.sfx_volume), ..self }
+        let anim_speed = self.anim_speed.filter(|s| s.is_finite()).map(|s| s.clamp(0.0, 99.0));
+        Settings { music_volume: fix(self.music_volume), sfx_volume: fix(self.sfx_volume), anim_speed, ..self }
     }
 
     fn save(&self) {

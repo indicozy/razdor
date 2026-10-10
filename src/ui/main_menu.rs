@@ -340,6 +340,12 @@ pub fn expert_ai(audio: &super::audio::Settings) -> bool {
     audio.expert_ai.unwrap_or_else(|| chrome::ui_text("Options", "OptValue9").is_some_and(|v| razdor::dt::ini::loose_int(&v) == 1))
 }
 
+/// The battle animation speed (percent): the player's choice, else the install's
+/// `[Options] AnimationSpeed` (the Community's); `None` without either (the vanilla game).
+pub fn anim_speed(audio: &super::audio::Settings) -> Option<f32> {
+    audio.anim_speed.or_else(|| chrome::options_value("AnimationSpeed").and_then(|v| v.trim().parse::<f32>().ok()).map(|s| s.clamp(0.0, 99.0)))
+}
+
 /// The front row's width for new games: the player's choice, else the install's "wide
 /// front row in battle" (`[Options] OptValue11`).
 pub fn wide_row(audio: &super::audio::Settings, install: bool) -> bool {
@@ -357,7 +363,7 @@ pub fn options(audio: &mut super::audio::Settings, install_wide: bool) -> bool {
 /// The settings window alone (over the main menu, or over the map from the bar's gears).
 pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool) -> bool {
     let title = own("Options", "Title", n_("Sound, graphics and gameplay settings"));
-    let (inner, closed) = window(&title, 594.0, 368.0);
+    let (inner, closed) = window(&title, 594.0, 426.0);
     let k = chrome::k();
     let rows = [
         (own("Options", "OptionSld0", n_("Background music volume")), audio.music_volume, true),
@@ -380,6 +386,18 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool) ->
             }
         }
     }
+    // The Community's "Скорость анимаций в битве" (`AnimationSpeed`): it caps a strike's
+    // slide at (100 − S)·5 ms and its effect at (100 − S)·3 ms (0x4afd45, 0x4afe7c).
+    let y = inner.y + 36.0 * k + 2.0 * 58.0 * k;
+    let label = own("Options", "OptionSld4", n_("Battle animation speed"));
+    chrome::shadow_text(&label, inner.x + 24.0 * k, y, 14.0 * k, chrome::CREAM);
+    let speed = anim_speed(audio).unwrap_or(0.0);
+    let pct = format!("{speed:.0}%");
+    chrome::shadow_text(&pct, inner.x + inner.w - 24.0 * k - measure(&pct, 14.0 * k).width, y, 14.0 * k, chrome::GOLD);
+    let track = Rect::new(inner.x + 24.0 * k, y + 10.0 * k, inner.w - 48.0 * k, 18.0 * k);
+    if let Some(v) = slider(track, speed / 99.0) {
+        audio.anim_speed = Some((v * 99.0).round());
+    }
     let lang = format!("{} / {}", Lang::En.label(), Lang::Ru.label());
     let lr = Rect::new(inner.x + 24.0 * k, inner.y + inner.h - 44.0 * k, 140.0 * k, 28.0 * k);
     let over = lr.contains(crate::ui::widgets::pointer().into()) && !input_blocked();
@@ -398,7 +416,7 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool) ->
     }
     // The battle AI, as the original's "Улучшенный интеллект противника в битве": easy or
     // expert, from the install's setting until chosen here.
-    let y = inner.y + 36.0 * k + 2.0 * 58.0 * k;
+    let y = inner.y + 36.0 * k + 3.0 * 58.0 * k;
     let label = own("Options", "Option9", n_("Improved enemy AI in battle"));
     chrome::shadow_text(&label, inner.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
     let expert = expert_ai(audio);
