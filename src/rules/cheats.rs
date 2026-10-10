@@ -36,6 +36,10 @@ pub struct CheatState {
     /// `noclip`: the hero's walk goes through everything ([`Game::plan`]); none in older saves.
     #[serde(default)]
     pub noclip: bool,
+    /// `peace`: enemy armies do not attack or chase the hero (he may still attack them);
+    /// none in older saves.
+    #[serde(default)]
+    pub peace: bool,
 }
 
 impl CheatState {
@@ -64,10 +68,11 @@ pub enum Cheat {
     God,
     Speed(u32),
     Noclip,
+    Peace,
 }
 
 /// The commands for `help`: (name and arguments, what it does).
-pub const COMMANDS: [(&str, &str); 16] = [
+pub const COMMANDS: [(&str, &str); 17] = [
     ("help", n_("this list")),
     ("gold N", n_("gives N gold (a negative N takes it)")),
     ("mana N", n_("gives N mana (a negative N takes it)")),
@@ -84,6 +89,7 @@ pub const COMMANDS: [(&str, &str); 16] = [
     ("god", n_("on / off: your army takes no damage in battle")),
     ("speed N", n_("the hero walks N times faster (1: normal)")),
     ("noclip", n_("on / off: the hero walks through anything to any cell")),
+    ("peace", n_("on / off: enemy armies do not attack or chase the hero")),
 ];
 
 /// Why a line is not a command.
@@ -156,6 +162,7 @@ pub fn parse(line: &str) -> Result<Cheat, ParseError> {
         "god" => none().map(|_| Cheat::God)?,
         "speed" => Cheat::Speed(number(1, MAX_SPEED as i64)? as u32),
         "noclip" => none().map(|_| Cheat::Noclip)?,
+        "peace" => none().map(|_| Cheat::Peace)?,
         _ => return Err(ParseError::Unknown(word.to_string())),
     })
 }
@@ -368,6 +375,10 @@ fn run_on_game(cheat: &Cheat, game: &mut Game) -> Result<Done, String> {
             game.cut_walk();
             Done::line(if game.cheats.noclip { tr("Noclip on: the hero walks through anything.") } else { tr("Noclip off.") }.into())
         }
+        Cheat::Peace => {
+            game.cheats.peace = !game.cheats.peace;
+            Done::line(if game.cheats.peace { tr("Peace on: enemy armies leave the hero alone.") } else { tr("Peace off.") }.into())
+        }
         Cheat::Help | Cheat::Win | Cheat::Lose | Cheat::God => unreachable!("run handles it"),
     })
 }
@@ -409,7 +420,9 @@ mod tests {
         assert_eq!(parse("speed 3"), Ok(Cheat::Speed(3)));
         assert_eq!(parse("NoClip"), Ok(Cheat::Noclip));
         assert_eq!(parse("noclip 1"), Err(ParseError::Usage("noclip")));
-        assert_eq!(COMMANDS.len(), 16);
+        assert_eq!(parse("Peace"), Ok(Cheat::Peace));
+        assert_eq!(parse("peace now"), Err(ParseError::Usage("peace")));
+        assert_eq!(COMMANDS.len(), 17);
         for (u, _) in COMMANDS {
             let name = u.split(' ').next().unwrap();
             assert!(!matches!(parse(name), Err(ParseError::Unknown(_))), "{name} is a command");
@@ -578,14 +591,25 @@ mod tests {
     }
 
     #[test]
+    fn peace_switches_on_and_off() {
+        let mut g = game();
+        assert!(!g.cheats.peace);
+        cheat(&mut g, "peace").unwrap();
+        assert!(g.cheats.peace && g.cheats.used);
+        cheat(&mut g, "PEACE").unwrap();
+        assert!(!g.cheats.peace, "a second peace switches it off");
+    }
+
+    #[test]
     fn the_mark_is_saved() {
         let mut g = game();
         g.set_origin(crate::rules::save::ScenarioRef::Demo);
         cheat(&mut g, "speed 2").unwrap();
         cheat(&mut g, "god").unwrap();
         cheat(&mut g, "noclip").unwrap();
+        cheat(&mut g, "peace").unwrap();
         let back = crate::rules::save::tests::roundtrip(&g, g.content.clone(), None);
-        assert_eq!(back.cheats, CheatState { used: true, god: true, speed: 2, noclip: true });
+        assert_eq!(back.cheats, CheatState { used: true, god: true, speed: 2, noclip: true, peace: true });
         assert!(crate::rules::save::meta_of(&g, crate::rules::save::SaveKind::Manual, "x").unwrap().cheats);
     }
 }

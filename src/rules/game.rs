@@ -1649,9 +1649,12 @@ impl Game {
             let loc = &self.world.locations[l];
             !loc.kind.is_bridge() && !loc.owned()
         });
+        // The console's `peace` (`rules::cheats`): no army attacks him (the AI's own attacks
+        // are dropped as they arrive, `rules::ai`; the demo's gangs here).
+        let peace = self.cheats.peace;
         let gang = |a: &Army| {
             let t = a.tile(map);
-            !ai::managed(a) && !sheltered && a.arrived && (t.0 - here.0).abs() <= 1 && (t.1 - here.1).abs() <= 1 && a.hostile()
+            !ai::managed(a) && !peace && !sheltered && a.arrived && (t.0 - here.0).abs() <= 1 && (t.1 - here.1).abs() <= 1 && a.hostile()
         };
         let i = self.world.armies.iter().rposition(|a| (contact(a, ai::Contact::Attack) || gang(a)) && now >= a.ignore_until)?;
         self.foe = Some(Foe::Army(i));
@@ -1813,10 +1816,12 @@ impl Game {
         let mut armies = std::mem::take(&mut self.world.armies);
         let world = &self.world;
         let map = &world.map;
+        // The console's `peace`: the demo's gangs chase nobody.
+        let peace = self.cheats.peace;
         for a in armies.iter_mut().filter(|a| !ai::managed(a)) {
             a.budget = (a.budget + minutes).min(AI_BUDGET_CAP);
             let here = a.tile(map);
-            let near = a.hostile() && now >= a.ignore_until && map.distance(here, hero_tile) <= CHASE_RADIUS;
+            let near = !peace && a.hostile() && now >= a.ignore_until && map.distance(here, hero_tile) <= CHASE_RADIUS;
             let route = |a: &Army, from: Tile, to: Tile| ai::army_path(world, a, from, to, AI_PATH_NODES);
             if near {
                 if !a.chasing || a.path.last() != Some(&hero_tile) {
@@ -2904,6 +2909,39 @@ mod tests {
     }
 
     #[test]
+    fn peace_keeps_the_gangs_from_chasing_or_attacking() {
+        let mut g = quiet_game(HeroClass::Knight);
+        g.cheats.peace = true;
+        g.set_destination(tile_of_location(&g, "Millbrook"));
+        let camp = g.world.index_of("Bandit camp");
+        let start = (g.tile().0 + 3, g.tile().1 + 2);
+        g.world.spawn_gang(camp, start);
+        for _ in 0..3 {
+            g.tick(0.05);
+        }
+        assert!(!g.world.armies[0].chasing, "no chase");
+        // A gang right next to him after his step attacks nobody either.
+        g.stop();
+        let here = g.tile();
+        let next = g.world.map.grid.neighbours(here).find(|&n| g.world.map.passable(n)).unwrap();
+        let beside = g.world.map.grid.neighbours(next).find(|&n| n != here && g.world.map.passable(n) && g.world.location_at(n).is_none()).unwrap();
+        g.world.armies.clear();
+        g.world.spawn_gang(camp, beside);
+        g.world.armies[0].arrived = true;
+        assert!(g.set_destination(next));
+        let events = walk_until_stopped(&mut g);
+        assert!(!events.iter().any(|e| matches!(e, Event::Encounter(_))), "{events:?}");
+        // Once it stands next to him (it may have stepped on meanwhile).
+        let here = g.tile();
+        let a = &mut g.world.armies[0];
+        a.pos = g.world.map.center((here.0 - 1, here.1));
+        a.arrived = true;
+        assert_eq!(g.ai_contact(), None);
+        g.cheats.peace = false;
+        assert_eq!(g.ai_contact(), Some(Event::Encounter(0)), "without peace it attacks");
+    }
+
+    #[test]
     fn beating_a_gang_removes_it_pays_and_gives_xp() {
         let mut g = quiet_game(HeroClass::Knight);
         let camp = g.world.index_of("Bandit camp");
@@ -3839,6 +3877,47 @@ mod tests {
         assert!(g.set_destination(n));
         let events = walk_until_stopped(&mut g);
         assert!(matches!(events.last(), Some(Event::Encounter(0))), "{events:?}");
+    }
+
+    #[test]
+    fn peace_keeps_hostile_armies_off_the_hero_who_may_still_attack_them() {
+        // The console's `peace` (`rules::cheats`): the army of the test above neither comes
+        // for him nor attacks after his steps; he walks into it himself and the battle opens.
+        let mut s = strip();
+        let mut foe = army(1, 7, 4, -2, &[troop(4, 0, 1)]);
+        foe.patrols = 0;
+        foe.aggression = 100;
+        foe.no_random_targets = 1;
+        foe.gold_income = 500;
+        s.armies = vec![foe];
+        let mut g = start(&s);
+        g.cheats.peace = true;
+        let from = g.world.armies[0].tile(&g.world.map);
+        let events = g.wait(4);
+        assert!(!events.iter().any(|e| matches!(e, Event::Encounter(_))), "{events:?}");
+        let a = g.world.armies[0].tile(&g.world.map);
+        assert!(g.world.map.distance(a, (2, 2)) >= g.world.map.distance(from, (2, 2)), "it did not come for him: {from:?} → {a:?}");
+        // He walks up to it, step by step: it attacks at none of them.
+        for _ in 0..20 {
+            let a = g.world.armies[0].tile(&g.world.map);
+            let here = g.tile();
+            if (a.0 - here.0).abs() <= 1 && (a.1 - here.1).abs() <= 1 {
+                break;
+            }
+            let n = g.world.map.grid.neighbours(here).filter(|&n| g.world.map.passable(n) && n != a).min_by_key(|&n| g.world.map.distance(n, a)).unwrap();
+            assert!(g.set_destination(n));
+            let events = walk_until_stopped(&mut g);
+            assert!(!events.iter().any(|e| matches!(e, Event::Encounter(_))), "no attack on him: {events:?}");
+            assert_eq!(g.foe, None);
+        }
+        let events = g.wait(2);
+        assert!(!events.iter().any(|e| matches!(e, Event::Encounter(_))), "{events:?}");
+        // His own attack: a click on the army.
+        let a = g.world.armies[0].tile(&g.world.map);
+        assert!(g.set_destination(a));
+        let events = walk_until_stopped(&mut g);
+        assert!(matches!(events.last(), Some(Event::Encounter(0))), "{events:?}");
+        assert_eq!(g.foe, Some(Foe::Army(0)));
     }
 
     #[test]

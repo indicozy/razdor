@@ -1978,6 +1978,10 @@ impl Game {
                     v = 1;
                 }
             }
+            // The console's `peace` (`rules::cheats`): the hero is no target of a hostile army.
+            if p == Party::Hero && r < 0 && self.cheats.peace && v > 0 {
+                v = 0;
+            }
             if self.ignored(p) {
                 v = 0;
             }
@@ -2102,7 +2106,9 @@ impl Game {
     pub(crate) fn ai_arrive(&mut self, uid: u32, hero: &HeroCells) -> Option<Contact> {
         // An attack on the hero counts only in the frame his step ends (his step flag
         // 0x75e0c7, 0x4ade3c): not while he waits or stands, nor mid-step.
-        let result = self.ai_arrive_rules(uid, hero).filter(|c| *c != Contact::Attack || hero.boundary);
+        // The console's `peace` (`rules::cheats`) drops every attack on him.
+        let peace = self.cheats.peace;
+        let result = self.ai_arrive_rules(uid, hero).filter(|c| *c != Contact::Attack || (hero.boundary && !peace));
         let i = self.army_by_uid(uid)?;
         if self.world.armies[i].mind.fallen {
             self.world.armies[i].mind.fallen = false;
