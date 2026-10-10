@@ -1667,8 +1667,13 @@ fn hover_tooltip(game: &Game, cam: &Camera) -> Option<Tooltip> {
         return None;
     }
     let near = 22.0 * (cam.scale / PX).max(0.6);
+    let over = |pos: (f32, f32)| (cam.to_screen(pos) - vec2(0.0, 12.0 * cam.scale / PX) - m).length() < near;
+    // Occupant code 1, the hero, is army 0 to the tooltip (0x4cbf20 → 0x4cc274).
+    if over(game.display_pos()) {
+        return Some(hero_tooltip(game));
+    }
     let map = &game.world.map;
-    if let Some(a) = game.world.armies.iter().filter(|a| game.fog.explored(a.tile(map))).find(|a| (cam.to_screen(game.army_display_pos(a)) - vec2(0.0, 12.0 * cam.scale / PX) - m).length() < near) {
+    if let Some(a) = game.world.armies.iter().filter(|a| game.fog.explored(a.tile(map))).find(|a| over(game.army_display_pos(a))) {
         return Some(army_tooltip(game, a));
     }
     let t = cam.tile_under_mouse().filter(|&t| game.fog.explored(t))?;
@@ -1677,6 +1682,22 @@ fn hover_tooltip(game: &Game, cam: &Camera) -> Option<Tooltip> {
         return Some(army_tooltip(game, a));
     }
     Some(location_tooltip(game, &game.world.locations[l]))
+}
+
+/// The original's tooltip of the hero's own army (0x4ca9f0 with army 0): "Отряд героя",
+/// its 2×6 cards, "Предводитель" and the hero's name, in the normal frame.
+fn hero_tooltip(game: &Game) -> Tooltip {
+    let troops = game
+        .squad
+        .iter()
+        .map(|u| {
+            let mut t = Troop::new(u.def, u.level, u.slot);
+            t.hurt = (u.max_hp(&game.content) - u.hp).max(0);
+            t
+        })
+        .collect();
+    let footer = vec![(info("Commander", n_("Leader")), DIM), (game.hero_name(), TIP_NAME)];
+    Tooltip { title: info("HeroArmy", n_("Hero's army")), lines: Vec::new(), troops, team: Team::Player, footer, style: TipStyle::Normal }
 }
 
 /// The army a building's tooltip shows instead of the building's (0x4cc2a5–0x4cc31a): for a

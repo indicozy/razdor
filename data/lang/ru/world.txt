@@ -210,6 +210,7 @@ hours = часов
 Owner = Владелец
 The garrison's defenders: = Состав гарнизона защитников:
 Unknown army = Неизвестная армия
+Hero's army = Отряд героя
 you = вы
 
 Money = Деньги
