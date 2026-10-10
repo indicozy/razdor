@@ -337,7 +337,7 @@ impl App {
         let Some(game) = self.game.as_mut() else { return };
         let (pick, ms) = game.music_rotate(self.map_music.pick);
         self.map_music = MapMusic { pick, due: macroquad::prelude::get_time() + ms as f64 / 1000.0, triumph: false };
-        self.audio.set_map_track(razdor::rules::music::ROTATION[pick]);
+        self.audio.set_map_track(razdor::rules::music::ROTATION[pick], true);
     }
 
     /// Sounds that follow from what changed this frame (a window opened, a battle began, gold
@@ -348,7 +348,7 @@ impl App {
         if let Some(wait) = self.game.as_mut().and_then(|g| g.take_music_wait()) {
             let pick = razdor::rules::music::WORLD_THEME;
             self.map_music = MapMusic { pick, due: clock + wait as f64 / 1000.0, triumph: false };
-            self.audio.set_map_track(razdor::rules::music::ROTATION[pick]);
+            self.audio.set_map_track(razdor::rules::music::ROTATION[pick], false);
         }
         // The change is checked by the map and its windows, not in battle or the menus; the
         // world map alone waits while the triumph plays.
