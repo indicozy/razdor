@@ -3,6 +3,7 @@
 //! editor's overlays: grid, footprints, brush and placement previews, hero starts, lantern
 //! radii and patrol areas. And the minimap.
 
+use crate::ui::input::{is_mouse_button_down};
 use macroquad::prelude::*;
 
 use razdor::dt::dtm::Scenario;

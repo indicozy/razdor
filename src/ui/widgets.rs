@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 
+use crate::ui::input::{get_keys_pressed, get_keys_released, is_key_down, is_key_pressed, is_mouse_button_down, is_mouse_button_pressed, mouse_position, mouse_wheel};
 use macroquad::prelude::*;
 
 pub const INK: Color = Color::new(0.93, 0.90, 0.82, 1.0);
@@ -140,7 +141,8 @@ thread_local! {
     static POINTER: std::cell::Cell<Option<(f32, f32)>> = const { std::cell::Cell::new(None) };
 }
 
-/// The pointer's position: the mouse's, or the snapshot's stand-in.
+/// The pointer's position: the mouse's (or a gamepad's, `ui::input`), or the snapshot's
+/// stand-in.
 pub fn pointer() -> (f32, f32) {
     POINTER.with(|p| p.get()).unwrap_or_else(mouse_position)
 }

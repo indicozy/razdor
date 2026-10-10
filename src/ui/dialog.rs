@@ -2,6 +2,7 @@
 //! of resource icons and an OK button (video notes §5: the noon report, the victory window,
 //! story and quest dialogs). A scenario question has Yes and No instead of OK.
 
+use crate::ui::input::{is_mouse_button_down, is_mouse_button_pressed};
 use macroquad::prelude::*;
 
 use razdor::i18n::tr;

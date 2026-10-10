@@ -121,7 +121,8 @@ thread_local! {
 /// players asked for it: some overlays need a window, and a battle cannot be left for the
 /// settings).
 pub fn hotkey_pressed() -> bool {
-    use macroquad::input::{is_key_down, is_key_pressed, KeyCode};
+    use crate::ui::input::{is_key_down, is_key_pressed};
+    use macroquad::input::KeyCode;
     (is_key_down(KeyCode::LeftAlt) || is_key_down(KeyCode::RightAlt)) && (is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter))
 }
 

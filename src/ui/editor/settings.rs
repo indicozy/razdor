@@ -2,6 +2,7 @@
 //! events, the three hero presets, the faction relations, campaign settings and the named
 //! characters.
 
+use crate::ui::input::{is_key_pressed};
 use macroquad::prelude::*;
 
 use razdor::dt::dtm::{GameDate, Scenario};

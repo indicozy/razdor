@@ -14,6 +14,7 @@
 
 use std::cell::RefCell;
 
+use crate::ui::input::{is_mouse_button_down};
 use macroquad::prelude::*;
 
 use razdor::rules::fog::Fog;

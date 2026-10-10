@@ -13,7 +13,9 @@ pub mod dt_art;
 pub mod dt_font;
 pub mod editor;
 pub mod game_bar;
+pub mod gamepad;
 pub mod hotkeys;
+pub mod input;
 pub mod item_filter;
 pub mod items_view;
 pub mod jukebox;
@@ -36,7 +38,8 @@ pub mod world_view;
 
 use std::collections::VecDeque;
 
-use macroquad::prelude::{is_key_pressed, KeyCode};
+use input::is_key_pressed;
+use macroquad::prelude::KeyCode;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -704,6 +707,7 @@ impl App {
             self.audio.settings.minimap_size = minimap::size();
             self.audio.settings.minimap_corner = minimap::corner();
         }
+        input::begin_frame();
         chrome::begin_frame();
         cursor::begin_frame();
         widgets::track_held_key();

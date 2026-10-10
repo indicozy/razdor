@@ -6,6 +6,7 @@
 //! gold. Razdor's own extras, the map editor, the custom battle and the interface language,
 //! sit small in the bottom corners. Layout numbers are pixels of the 960×720 video, scaled by [`chrome::k`].
 
+use crate::ui::input::{is_mouse_button_down};
 use macroquad::prelude::*;
 
 use razdor::i18n::{self, n_, tr, Lang};
@@ -238,8 +239,10 @@ pub fn frame() -> Option<Pick> {
     chrome::shadow_text(version, screen_width() - 16.0 * k - vw, y - 26.0 * k, 12.0 * k, Color::new(0.95, 0.88, 0.72, 0.6));
     // An update put in place says so (an "Always" update has no window of its own).
     super::update_view::title_line();
-    // Esc quits the game at once, without a question, as in the original (0x4c8059).
-    if key(KeyCode::Escape) {
+    // Esc quits the game at once, without a question, as in the original (0x4c8059); a
+    // gamepad's Start, which is Esc elsewhere, does not (Razdor's: pressed to open a menu,
+    // it would end the game).
+    if key(KeyCode::Escape) && !crate::ui::input::pad_key_pressed(KeyCode::Escape) {
         pick = Some(Pick::Exit);
     }
     pick

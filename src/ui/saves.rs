@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::ui::input::{is_key_pressed, is_mouse_button_down};
 use macroquad::prelude::*;
 
 use razdor::i18n::{n_, tr};

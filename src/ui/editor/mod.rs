@@ -15,6 +15,7 @@ mod settings;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::ui::input::{is_key_down, is_key_pressed, is_mouse_button_down, is_mouse_button_pressed, mouse_wheel};
 use macroquad::prelude::*;
 
 use razdor::dt::dtm::Scenario;

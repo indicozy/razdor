@@ -3,6 +3,7 @@
 //! with a short scroll-back. The commands are `rules::cheats`; `help` lists them. While it is
 //! open every key goes to it: the screen below takes none.
 
+use crate::ui::input::{is_key_pressed, mouse_wheel};
 use macroquad::prelude::*;
 
 use razdor::i18n::tr;

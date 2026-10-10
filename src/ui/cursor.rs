@@ -135,6 +135,12 @@ fn focused() -> bool {
     watch.0
 }
 
+/// The window had the keyboard focus when the last frame's pointer was drawn (a gamepad is
+/// read only then: it would play a game in the background).
+pub fn has_focus() -> bool {
+    FOCUS.with(|f| f.get().0)
+}
+
 /// The window shows the system pointer `icon`, or none.
 fn show_system(icon: Option<CursorIcon>) {
     if SHOWN.with(|s| s.get()) == Some(icon) {
@@ -156,8 +162,20 @@ fn show_system(icon: Option<CursorIcon>) {
 pub fn draw() {
     let focus = focused();
     let want = WANT.with(|w| w.get());
+    // A gamepad's pointer (`ui::input`): the window's pointer cannot be put there, so where
+    // the system's would show Razdor draws a plain arrow of its own.
+    let pad = super::input::pad_pointer().filter(|_| focus);
+    let system = |icon: CursorIcon| match pad {
+        Some(at) => {
+            show_system(None);
+            if want != Shape::Hidden {
+                plain_arrow(at);
+            }
+        }
+        None => show_system(Some(icon)),
+    };
     if let Some(icon) = SYSTEM.with(|s| s.get()).or((!focus).then_some(CursorIcon::Default)) {
-        show_system(Some(icon));
+        system(icon);
         return;
     }
     let Some((what, hot)) = art(want) else {
@@ -172,7 +190,7 @@ pub fn draw() {
         }),
     };
     let Some(tex) = tex else {
-        show_system(Some(CursorIcon::Default));
+        system(CursorIcon::Default);
         return;
     };
     show_system(None);
@@ -186,6 +204,18 @@ pub fn draw() {
     let (x, y) = ((mx + hot.0 * px).round(), (my + hot.1 * px).round());
     let size = vec2(tex.width(), tex.height()) * px;
     draw_texture_ex(&tex, x, y, WHITE, DrawTextureParams { dest_size: Some(size), ..Default::default() });
+}
+
+/// Razdor's stand-in for the system arrow at the gamepad's pointer: white, outlined in black,
+/// its tip at `at`.
+fn plain_arrow(at: (f32, f32)) {
+    let k = super::chrome::k();
+    let tip = vec2(at.0, at.1).round();
+    let (a, b) = (tip + vec2(0.0, 19.0) * k, tip + vec2(13.0, 13.0) * k);
+    draw_triangle(tip, a, b, WHITE);
+    for (p, q) in [(tip, a), (a, b), (b, tip)] {
+        draw_line(p.x, p.y, q.x, q.y, 1.5 * k.max(1.0), BLACK);
+    }
 }
 
 // ------------------------------------------------------------------------------------------

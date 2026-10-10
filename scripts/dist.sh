@@ -5,6 +5,9 @@
 # dist/SHA256SUMS lists their SHA-256: publish it with the files, and check a download with
 # `sha256sum -c SHA256SUMS` (Linux) or `Get-FileHash Razdor.exe` (Windows PowerShell).
 #
+# The Linux build needs the headers of ALSA and udev (libasound2-dev and libudev-dev on
+# Debian / Ubuntu, alsa-lib-devel and systemd-devel on Fedora): sound and gamepads.
+#
 # The Windows build needs the target (`rustup target add x86_64-pc-windows-gnullvm`) and an
 # llvm-mingw toolchain (https://github.com/mstorsjo/llvm-mingw, the ucrt build): set
 # LLVM_MINGW to its folder, or have x86_64-w64-mingw32-clang on the PATH.

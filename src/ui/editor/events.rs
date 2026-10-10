@@ -7,6 +7,7 @@
 //! All logic is in `razdor::editor::events` (tested there); this module draws and returns
 //! the command a change makes.
 
+use crate::ui::input::{is_key_pressed};
 use macroquad::prelude::*;
 
 use razdor::dt::dtm::{Event, GameDate, Scenario};

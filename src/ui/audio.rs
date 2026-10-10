@@ -422,7 +422,7 @@ impl Audio {
 
     /// Plays this frame's cues and keeps the music of `mood` going.
     pub fn frame(&mut self, mood: Mood) {
-        let held = macroquad::input::is_mouse_button_down(macroquad::input::MouseButton::Left);
+        let held = crate::ui::input::is_mouse_button_down(macroquad::input::MouseButton::Left);
         if let Some(c) = ON_RELEASE.with(|r| released_cue(&mut r.borrow_mut(), held)) {
             cue(c);
         }

@@ -6,6 +6,7 @@
 
 use std::collections::VecDeque;
 
+use crate::ui::input::{get_keys_pressed, is_mouse_button_down};
 use macroquad::prelude::*;
 
 use razdor::i18n::{n_, tr};
@@ -290,8 +291,9 @@ const EDGE: f32 = 5.0;
 /// The original's scrolling of the idle map (interface.md §7.6): the held arrow key (only one
 /// at a time: the original keeps only the last key down) and the mouse within 5 px of an
 /// edge of the screen (the bar's lower edge included; a corner both ways) each move the
-/// view by the frame's step. The camera then stays there until something moves it.
-fn scroll(game: &Game, view: &mut MapView, dt_ms: i64) {
+/// view by the frame's step. The camera then stays there until something moves it. A
+/// gamepad's right stick (`pad`, Razdor's) scrolls it too, as far as it is pushed.
+fn scroll(game: &Game, view: &mut MapView, dt_ms: i64, pad: (f32, f32)) {
     if input_blocked() || !view.shows.is_empty() || view.minimap {
         return;
     }
@@ -303,6 +305,7 @@ fn scroll(game: &Game, view: &mut MapView, dt_ms: i64) {
         Some(KeyCode::Down) => dir.y += 1.0,
         _ => {}
     }
+    dir += Vec2::from(pad);
     let (mx, my) = crate::ui::widgets::pointer();
     let (w, h) = (screen_width(), screen_height());
     let edge = EDGE * map_scale();
@@ -2184,6 +2187,8 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     let now_ms = (get_time() * 1000.0) as i64;
     let dt_ms = now_ms - view.last_frame_ms.unwrap_or(now_ms);
     view.last_frame_ms = Some(now_ms);
+    // A gamepad's right stick scrolls the map here (Razdor's), and turns no wheel.
+    let pad_scroll = crate::ui::input::map_scroll();
 
     // Zoom: mouse wheel or +/- (Razdor's, also while he walks or waits), in notches from the
     // settings' zoom; 0 comes back to it. Locked in the settings, the zoom stays theirs.
@@ -2243,7 +2248,7 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
         }
     }
     if idle && dialogs.is_empty() && view.grab.is_none() {
-        scroll(game, view, dt_ms);
+        scroll(game, view, dt_ms, pad_scroll);
     }
     // While he walks the view is locked on him (interface.md §8).
     view.look = camera_look(view.look, game.moving(), !view.shows.is_empty());

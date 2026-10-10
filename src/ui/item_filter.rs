@@ -4,6 +4,7 @@
 //! (`rules::items::filter_match`: any case, Ё as Е), Enter takes the first match and Esc
 //! clears it.
 
+use crate::ui::input::{is_key_down, is_key_pressed};
 use macroquad::prelude::*;
 
 use razdor::i18n::tr;

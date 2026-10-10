@@ -63,8 +63,8 @@ jobs:
           grep -qx "version = \"$version\"" Cargo.toml || { echo "Cargo.toml is not version $version"; exit 1; }
           grep -q "^## $version " CHANGELOG.md || { echo "CHANGELOG.md has no section for $version"; exit 1; }
 
-      - name: Libraries for sound (ALSA)
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Libraries for sound (ALSA) and gamepads (udev)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
 
       - name: Rust (rust-toolchain.toml)
         run: rustup show active-toolchain

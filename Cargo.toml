@@ -9,6 +9,7 @@ license = "MIT"
 bzip2 = "0.6.1"
 dirs = "7.0.0"
 encoding_rs = "0.8.42"
+gilrs = { version = "0.11.2", optional = true }
 libc = "0.2"
 macroquad = "0.4"
 serde = { version = "1.0.229", features = ["derive"] }
@@ -16,10 +17,13 @@ serde_json = { version = "1.0.151", features = ["float_roundtrip"] }
 sha2 = "0.10.9"
 
 [features]
-default = ["audio"]
+default = ["audio", "gamepad"]
 # Sound and music (macroquad's quad-snd; on Linux it links ALSA's libasound).
 # Build with `--no-default-features` for a silent game without it.
 audio = ["macroquad/audio"]
+# Gamepads (gilrs): the sticks and buttons drive the pointer, its clicks and some keys
+# (`ui::gamepad`). On Linux it links libudev. Without it the game is mouse and keyboard only.
+gamepad = ["dep:gilrs"]
 
 [profile.dev.package."*"]
 opt-level = 2

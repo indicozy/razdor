@@ -6,6 +6,7 @@
 //! idle map shows the original's three small buttons on it (interface.md §6): wait 1 hour,
 //! centre the view on the hero, wait 4 hours.
 
+use crate::ui::input::{is_mouse_button_down};
 use macroquad::prelude::*;
 
 use razdor::i18n::tr;

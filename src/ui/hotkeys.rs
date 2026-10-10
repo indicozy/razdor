@@ -6,6 +6,7 @@
 //! editor field) or while a dialog or question is open (there Esc and N mean "No" and any
 //! other key "Yes", as in the original but for Razdor's N).
 
+use crate::ui::input::{is_key_pressed, is_mouse_button_pressed};
 use macroquad::prelude::*;
 
 use razdor::i18n::{n_, tr};
