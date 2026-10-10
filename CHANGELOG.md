@@ -14,6 +14,15 @@
 
 ## 0.4.7 — 2026-10-11
 
+Коммит `95a5722` (тег `v0.4.7`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+```
+2b61f13ec2234ae3f3b105f99d79a22845c3c17adc1eddce7b2b166e63ac2c4e  razdor
+40fe3c4c657cebcaa9386cc4c43be7b67a127e2c00c2e52b21e440847be5a3a7  Razdor.exe
+d4fdc5ffc6b602cab288c6751d6e32cb62584bf2a90214a4fb9bc5b6259d9c87  razdor-macos
+```
+
 ### Добавлено
 
 - Геймпад (Xbox, PlayStation и подобные; Windows, Linux и macOS), по просьбам игроков: левый
