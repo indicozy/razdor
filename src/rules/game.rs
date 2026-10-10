@@ -921,6 +921,10 @@ impl Game {
     /// nothing.
     pub fn can_target(&self, t: Tile) -> bool {
         let w = &self.world;
+        if self.cheats.noclip {
+            // The console's `noclip`: any cell of the map, the dark and the impassable too.
+            return w.map.in_bounds(t) && t != self.tile();
+        }
         if !w.map.in_bounds(t) || !self.fog.explored(t) {
             return false;
         }
@@ -983,6 +987,12 @@ impl Game {
         let map = &w.map;
         if map.mask_index(to).is_none() {
             return Vec::new();
+        }
+        if self.cheats.noclip {
+            // The console's `noclip`: every cell open, the impassable ones at the cost of a
+            // road, so the route goes through anything by the cheapest way.
+            let cost = |t: Tile| self.planner_cost(t).max(1);
+            return map.flood_route(&cost, &|_| 1, &[(to, 0)], from).map(|r| r.0).unwrap_or_default();
         }
         let ship_click = self.parked_ship() == Some(to);
         let cost = |t: Tile| if ship_click && t == to { 1 } else { self.planner_cost(t) };
@@ -1328,6 +1338,9 @@ impl Game {
         let from = self.tile();
         // The walk timer's frame clears the step flag; the step sets it again as it ends.
         self.step_flag = false;
+        if self.cheats.noclip && self.path.len() > 1 {
+            return self.fly_over(from, next, events);
+        }
         match self.step_contact(next) {
             Some(StepContact::Army(i)) => {
                 self.snapped = true;
@@ -1396,6 +1409,27 @@ impl Game {
                 return false;
             }
         }
+        if self.path.is_empty() {
+            self.arrive_at_end(events);
+            return false;
+        }
+        true
+    }
+
+    /// A step of the console's `noclip` onto a cell short of the route's end: nothing there
+    /// is met, entered, captured or landed on, and no army comes at him; the time passes as
+    /// on the cell he leaves (nothing on the impassable). The last step is an ordinary one.
+    fn fly_over(&mut self, from: Tile, next: Tile, events: &mut Vec<Event>) -> bool {
+        let minutes = self.step_time(from, next);
+        self.path.remove(0);
+        let was = self.pos;
+        self.pos = self.world.map.center(next);
+        self.location = None;
+        self.step_base = None;
+        self.look_around();
+        self.facing = Some((next.0 - from.0, next.1 - from.1));
+        self.pass_time_walking(minutes, from, events);
+        self.hero_glide = Some((was, self.world.map.center(next)));
         if self.path.is_empty() {
             self.arrive_at_end(events);
             return false;
@@ -4334,6 +4368,44 @@ mod tests {
         g.fog = Fog::disabled(24, 6);
         assert!(!g.set_destination((20, 2)), "a guard standing in the gap");
         assert!(g.set_destination((10, 2)), "the guard himself can be clicked");
+    }
+
+    #[test]
+    fn noclip_walks_through_the_sea_and_the_guard_and_meets_nobody_on_the_way() {
+        // The console's `noclip` (`rules::cheats`): the sea wall and the guard in its gap
+        // close nothing, the dark is a target, and the walk meets no one before its end.
+        let mut s = strip();
+        for y in [0u32, 1, 3, 4, 5] {
+            tk::set(&mut s, 10, y, crate::dt::dtm::Surface::DeepSea);
+        }
+        let mut guard = army(1, 10, 2, -2, &[troop(4, 0, 1)]);
+        guard.patrols = 1;
+        guard.patrol_radius = 0;
+        s.armies = vec![guard];
+        let mut g = start(&s);
+        assert!(!g.can_target((20, 4)), "in the dark");
+        g.cheats.noclip = true;
+        assert!(g.can_target((20, 4)), "noclip: the dark too");
+        assert!(g.set_destination((20, 4)));
+        assert!(g.path.iter().any(|&t| t.0 == 10), "the route crosses the wall");
+        let events = walk_until_stopped(&mut g);
+        assert!(!events.iter().any(|e| matches!(e, Event::Encounter(_) | Event::Met(_))), "{events:?}");
+        assert_eq!((g.tile(), g.foe), ((20, 4), None));
+        // Onto the sea itself, and back through the guard's own cell to land.
+        assert!(g.set_destination((10, 4)));
+        walk_until_stopped(&mut g);
+        assert_eq!(g.tile(), (10, 4));
+        assert!(g.set_destination((2, 2)));
+        walk_until_stopped(&mut g);
+        assert_eq!((g.tile(), g.foe), ((2, 2), None));
+        // The route's end is an ordinary step: the guard clicked is engaged.
+        assert!(g.set_destination((10, 2)));
+        let events = walk_until_stopped(&mut g);
+        assert_eq!((events.last(), g.foe), (Some(&Event::Encounter(0)), Some(Foe::Army(0))));
+        // Off again, the wall closes the route as before.
+        let mut g = start(&s);
+        g.fog = Fog::disabled(24, 6);
+        assert!(!g.set_destination((20, 2)));
     }
 
     #[test]
