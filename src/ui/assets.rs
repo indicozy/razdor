@@ -118,6 +118,11 @@ impl Assets {
         self.dt.as_ref()?.unit_figure(self.dt_id(kind)?)
     }
 
+    /// Where the body of [`Assets::figure`] stands across the picture (0 left, 1 right).
+    pub fn figure_center(&self, kind: UnitId) -> Option<f32> {
+        self.dt.as_ref()?.unit_figure_center(self.dt_id(kind)?)
+    }
+
     /// The promotion screen's locked portrait (494340) filling `r`: the original's bust
     /// greyed, darkened and vignetted; without it the plain portrait under a dark veil.
     pub fn draw_portrait_locked(&self, kind: UnitId, team: Team, r: Rect) {

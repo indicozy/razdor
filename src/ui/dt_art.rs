@@ -64,6 +64,8 @@ pub struct DtArt {
     textures: RefCell<HashMap<Key, Option<Texture2D>>>,
     /// Map figures (`Graphics/Units/*.ugs`) as 8×8 sheets of 64×64 frames, by file stem.
     figures_sheets: RefCell<HashMap<String, Option<Texture2D>>>,
+    /// [`DtArt::unit_figure_center`] by `GlobalIndex`.
+    figure_centers: RefCell<HashMap<u32, Option<f32>>>,
 }
 
 fn or_log<T: Default>(what: &str, r: Result<T, DtError>) -> T {
@@ -93,6 +95,7 @@ impl DtArt {
             terrain_images: OnceCell::new(),
             textures: RefCell::new(HashMap::new()),
             figures_sheets: RefCell::new(HashMap::new()),
+            figure_centers: RefCell::new(HashMap::new()),
         }
     }
 
@@ -146,6 +149,19 @@ impl DtArt {
             let sheet = self.figures.get_or_init(|| or_log("unit figures", self.install.unit_figures()));
             texture(sheet.get(gfx::portrait_frame(unit_id)?)?)
         })
+    }
+
+    /// Where the body of [`DtArt::unit_figure`] stands across its frame (0 left, 1 right):
+    /// the frames are cropped to the picture, so a long weapon to one side (the cuirassier's
+    /// sword) puts the body off the frame's middle.
+    pub fn unit_figure_center(&self, unit_id: u32) -> Option<f32> {
+        if let Some(c) = self.figure_centers.borrow().get(&unit_id) {
+            return *c;
+        }
+        let sheet = self.figures.get_or_init(|| or_log("unit figures", self.install.unit_figures()));
+        let c = gfx::portrait_frame(unit_id).and_then(|i| sheet.get(i)).and_then(gfx::opaque_center_x);
+        self.figure_centers.borrow_mut().insert(unit_id, c);
+        c
     }
 
     /// Icon (53×53) of an artefact, by `GlobalIndex`.

@@ -463,7 +463,12 @@ pub fn draw(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: bool,
         Some(t) => {
             let h = (t.height() * 0.9375 * k).min(fig_h);
             let w = t.width() * h / t.height();
-            chrome::tex(&t, Rect::new(r.x + (r.w - w) / 2.0, top, w, h), Color::new(1.0, 1.0, 1.0, 0.92));
+            // The body in the panel's middle, not the picture: a long weapon to one side
+            // would push it off. The picture stays inside the panel where it fits.
+            let body = assets.figure_center(s.kind).unwrap_or(0.5);
+            let x = r.x + r.w / 2.0 - body * w;
+            let x = if w <= r.w { x.clamp(r.x, r.x + r.w - w) } else { r.x + (r.w - w) / 2.0 };
+            chrome::tex(&t, Rect::new(x, top, w, h), Color::new(1.0, 1.0, 1.0, 0.92));
         }
         None => silhouette(Rect::new(r.x + r.w * 0.2, r.y + 12.0 * k, r.w * 0.6, fig_h * 0.95)),
     }
