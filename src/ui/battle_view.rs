@@ -893,7 +893,7 @@ impl BattleView {
                     let label = chrome::ui_text("Battle", "Expirience").filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr("Experience").to_string());
                     let size = (14.0 * s).round();
                     // The card is 1 px up and left of the portrait; the text's top at y + 31, y + 47.
-                    super::dt_font::with_face(super::dt_font::Face::Title, || {
+                    super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
                         shadow_centered(&label, sq.x + sq.w / 2.0, sq.y - s + 31.0 * s + size * 0.8, size, XP_INK);
                         shadow_centered(&format!("+ {}", a.xp), sq.x + sq.w / 2.0, sq.y - s + 47.0 * s + size * 0.8, size, XP_INK);
                     });

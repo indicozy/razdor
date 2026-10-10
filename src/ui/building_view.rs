@@ -391,7 +391,7 @@ fn barracks_counters(game: &Game, r: Rect) {
             draw_line(cx, r.y + 3.0 * k, cx, r.y + r.h - 3.0 * k, 1.0, Color::new(0.6, 0.55, 0.45, 0.6));
         }
         resource_icon(*res, cx + 34.0 * k, r.y + r.h / 2.0, 40.0 * k);
-        super::dt_font::with_face(super::dt_font::Face::Title, || {
+        super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
             let size = fit_size(label, step - 66.0 * k, 14.0 * k);
             chrome::shadow_text(&ellipsize(label, step - 66.0 * k, size), cx + 62.0 * k, r.y + 19.0 * k, size, Color::new(0.85, 0.9, 0.45, 1.0));
             chrome::shadow_text(value, cx + 62.0 * k, r.y + 39.0 * k, 16.0 * k, chrome::CREAM);

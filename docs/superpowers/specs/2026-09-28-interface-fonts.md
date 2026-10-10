@@ -18,11 +18,13 @@ stay as the fallback if a font fails to load. Nothing of the original is bundled
 |---|---|---|
 | Text (`SanSerif`) | **PT Sans** (ParaType) | `data/fonts/PT_Sans-Regular.ttf` |
 | Bold (`SanSerif_Bold`) | **PT Sans Bold** | `data/fonts/PT_Sans-Bold.ttf` |
-| Titles and names (`Benguiat`) | **Becker Medium** (Cyrillic, close to Benguiat; free for personal and commercial use; Kurale until 2026-10-10) | `data/fonts/Becker-Medium.ttf` |
+| Titles and headings (`Benguiat`) | **Becker Medium** (Cyrillic, close to Benguiat; free for personal and commercial use) | `data/fonts/Becker-Medium.ttf` |
+| Buttons and names (`Benguiat`) | **Kurale** (Cyrillic, old-style decorative serif) | `data/fonts/Kurale-Regular.ttf` |
 
-Overrides: `RAZDOR_FONT` (text), `RAZDOR_FONT_BOLD`, `RAZDOR_FONT_TITLE` (paths to `.ttf`/`.otf`).
-The OFL lets PT Sans be bundled and redistributed with the software; its licence file
-(`PT_Sans-OFL.txt`) must stay with it, and the font must not be sold on its own. Becker Medium
+Overrides: `RAZDOR_FONT` (text), `RAZDOR_FONT_BOLD`, `RAZDOR_FONT_TITLE`, `RAZDOR_FONT_SUBTITLE` (paths to `.ttf`/`.otf`).
+The OFL lets PT Sans and Kurale be bundled and redistributed with the software; their licence
+files (`PT_Sans-OFL.txt`, `Kurale-OFL.txt`) must stay with them, and the fonts must not be sold
+on their own. Becker Medium
 is free for personal and commercial use (`Becker-LICENSE.txt`).
 
 ## Alternative: the real Benguiat

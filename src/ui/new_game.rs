@@ -255,7 +255,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         let head = Rect::new(r.x, r.y, r.w, head_h - 2.0 * k);
         scenario_icon(e.scenario.header.scenario_picture_index, vec2(head.x + 14.0 * k, head.y + head.h / 2.0), 26.0 * k);
         let name = group_name(scenarios, g);
-        with_face(Face::Title, || {
+        with_face(Face::Subtitle, || {
             let size = fit_size(name, r.w - 40.0 * k, 15.0 * k);
             chrome::shadow_text(&ellipsize(name, r.w - 40.0 * k, size), head.x + 32.0 * k, head.y + head.h * 0.5 + size * 0.36, size, CREAM);
         });
@@ -459,7 +459,7 @@ pub fn class_select(game: &mut Option<Game>, demo: &Arc<Content>, scenario: Opti
         }
         let name = &content.unit(hero.unit()).name;
         let ink = if i == pick { GOLD } else if offered[i] { CREAM } else { Color::new(0.5, 0.48, 0.44, 1.0) };
-        with_face(Face::Title, || chrome::shadow_centered(name, r.center().x, r.y + r.h + 18.0 * k, 16.0 * k, ink));
+        with_face(Face::Subtitle, || chrome::shadow_centered(name, r.center().x, r.y + r.h + 18.0 * k, 16.0 * k, ink));
         if hover && clicked() {
             // Choosing another class plays the menu press (interface.md §14); the class
             // already picked, nothing.

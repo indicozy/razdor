@@ -271,7 +271,7 @@ fn resources(game: &Game, y: f32, h: f32) {
                 icon,
             ),
         }
-        super::dt_font::with_face(super::dt_font::Face::Title, || shadow_text(value, cx + 16.0 * k, base, value_size, *color));
+        super::dt_font::with_face(super::dt_font::Face::Subtitle, || shadow_text(value, cx + 16.0 * k, base, value_size, *color));
     }
 }
 

@@ -529,7 +529,7 @@ pub fn draw(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: bool,
     let name_size = (17.0 * k).round();
     let mut y = name_y;
     let name_ink = if s.named { NAMED_INK } else { CREAM };
-    super::dt_font::with_face(super::dt_font::Face::Title, || shadow_centered(s.name, r.x + r.w / 2.0, y, name_size, name_ink));
+    super::dt_font::with_face(super::dt_font::Face::Subtitle, || shadow_centered(s.name, r.x + r.w / 2.0, y, name_size, name_ink));
     y += 17.0 * k;
     let size = (12.0 * k).round();
     // Level and experience on one line.

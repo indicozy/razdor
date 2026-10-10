@@ -845,7 +845,8 @@ fn title_bar_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bo
     // Ornaments at both ends of a wide title: orange on the battle's red, silver-green on
     // marble (the load window, the army screen).
     // They give way to a title that would not fit between them.
-    let face = if ornate { super::dt_font::Face::Title } else { super::dt_font::Face::Body };
+    // Every window title in the titles' face (the original draws a plain one in its body font).
+    let face = super::dt_font::Face::Title;
     let size = (16.0 * k).round();
     let title_w = super::dt_font::with_face(face, || measure(title, size).width);
     let ornate = ornate && matches!(skin, Skin::Red | Skin::Marble) && r.w > 400.0 && title_w < r.w - 300.0 * k;
@@ -862,7 +863,6 @@ fn title_bar_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bo
     draw_line(r.x, r.y + r.h, r.x + r.w, r.y + r.h, 1.0 * k, SILVER);
     let color = if skin == Skin::Red { GOLD } else { CREAM };
     let room = if ornate { r.w - 300.0 * k } else { r.w - 2.0 * r.h - 8.0 * k };
-    // Titles are in the original's Benguiat, a plain one in its body font.
     super::dt_font::with_face(face, || {
         let mut t = title.to_string();
         while measure(&t, size).width > room && t.chars().count() > 4 {
@@ -995,11 +995,6 @@ pub fn marble_button(r: Rect, label: &str, enabled: bool, hover: bool) {
         draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, if enabled { SILVER } else { SILVER_DARK });
         draw_rectangle_lines(r.x + 2.0, r.y + 2.0, r.w - 4.0, r.h - 4.0, 1.0, Color::new(0.0, 0.0, 0.0, 0.5));
     }
-    let mut size: f32 = (r.h * 0.56).clamp(12.0, (22.0 * k()).max(12.0)).round();
-    while size > 11.0 && measure(label, size).width > r.w - 10.0 {
-        size -= 1.0;
-    }
-    let d = measure(label, size);
     let color = if !enabled {
         Color::new(0.6, 0.6, 0.58, 1.0)
     } else if hover {
@@ -1007,7 +1002,15 @@ pub fn marble_button(r: Rect, label: &str, enabled: bool, hover: bool) {
     } else {
         CREAM
     };
-    shadow_text(label, r.x + (r.w - d.width) / 2.0, r.y + (r.h + d.offset_y) / 2.0 - 1.0, size, color);
+    // Button labels in the buttons' and names' face.
+    super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
+        let mut size: f32 = (r.h * 0.56).clamp(12.0, (22.0 * k()).max(12.0)).round();
+        while size > 11.0 && measure(label, size).width > r.w - 10.0 {
+            size -= 1.0;
+        }
+        let d = measure(label, size);
+        shadow_text(label, r.x + (r.w - d.width) / 2.0, r.y + (r.h + d.offset_y) / 2.0 - 1.0, size, color);
+    });
 }
 
 /// The small pill buttons of the barracks ("Hire" green, "Heal" blue). They pay: the
@@ -1039,9 +1042,11 @@ pub fn pill_button(r: Rect, label: &str, enabled: bool, green: bool) -> bool {
             draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.5, if hover { GOLD } else { SILVER });
         }
     }
-    let size = super::widgets::fit_size(label, r.w - 8.0, (r.h * 0.62).round().clamp(11.0, (18.0 * k()).max(11.0)));
-    let d = measure(label, size);
-    shadow_text(label, r.x + (r.w - d.width) / 2.0, r.y + (r.h + d.offset_y) / 2.0 - 1.0, size, if enabled { WHITE } else { Color::new(0.8, 0.8, 0.8, 1.0) });
+    super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
+        let size = super::widgets::fit_size(label, r.w - 8.0, (r.h * 0.62).round().clamp(11.0, (18.0 * k()).max(11.0)));
+        let d = measure(label, size);
+        shadow_text(label, r.x + (r.w - d.width) / 2.0, r.y + (r.h + d.offset_y) / 2.0 - 1.0, size, if enabled { WHITE } else { Color::new(0.8, 0.8, 0.8, 1.0) });
+    });
     let pressed = hover && super::widgets::clicked();
     if pressed {
         super::audio::cue(super::audio::Cue::Gold);

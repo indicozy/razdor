@@ -153,7 +153,7 @@ pub fn frame(
             let lines: Vec<&str> = none.split('\n').collect();
             let size = 15.0 * k;
             let top = cr.y + cr.h / 2.0 - (lines.len() as f32 - 1.0) * 8.0 * k + size * 0.36;
-            super::dt_font::with_face(super::dt_font::Face::Title, || {
+            super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
                 for (i, l) in lines.iter().enumerate() {
                     let y = top + i as f32 * 16.0 * k;
                     text_centered(l, tx + 1.0 * k, y + 1.0 * k, size, Color::new(0.55, 0.42, 0.2, 0.7));
@@ -168,7 +168,7 @@ pub fn frame(
         }
         let cost = game.cast_cost(s);
         let size = 12.0 * k;
-        super::dt_font::with_face(super::dt_font::Face::Title, || {
+        super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
             let ns = fit_size(&s.name, room, 17.0 * k);
             chrome::shadow_centered(&s.name, tx, cr.y + 26.0 * k, ns, CREAM);
         });
@@ -298,7 +298,7 @@ pub fn spell_card(game: &Game, s: &SpellDef, r: Rect) {
     // The name, a blank line, then the lines: centred in the box's height.
     let block = name_size + line_h + lines.len() as f32 * line_h;
     let mut y = r.y + ((r.h - block) / 2.0).max(4.0 * k) + name_size * 0.8;
-    super::dt_font::with_face(super::dt_font::Face::Title, || chrome::shadow_centered(&s.name, tx, y, name_size, CREAM));
+    super::dt_font::with_face(super::dt_font::Face::Subtitle, || chrome::shadow_centered(&s.name, tx, y, name_size, CREAM));
     y += line_h * 2.0;
     for (line, color) in lines {
         if y > r.y + r.h - 2.0 * k {

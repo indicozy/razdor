@@ -337,7 +337,7 @@ impl Book {
                 draw_pin(Rect::new(r.x + 6.0 * k, r.y + (r.h - sign) / 2.0, sign, sign), true, false);
             }
             let lh = r.h;
-            super::dt_font::with_face(super::dt_font::Face::Title, || {
+            super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
                 let size = fit_size(&row.name, 250.0 * k, 16.0 * k);
                 super::chrome::shadow_centered(&ellipsize(&row.name, 250.0 * k, size), self.p(157.0, 0.0).x, r.y + lh * 0.5 + size * 0.36, size, super::chrome::CREAM);
             });
@@ -363,7 +363,7 @@ impl Book {
             Some(t) => super::chrome::tex(&t, r, if open || hover { WHITE } else { Color::new(0.85, 0.85, 0.85, 1.0) }),
             None => super::chrome::surface(r, super::chrome::Skin::Paper),
         }
-        super::dt_font::with_face(super::dt_font::Face::Title, || {
+        super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
             let size = 15.0 * k;
             super::chrome::shadow_centered(label, r.center().x, r.y + r.h * 0.55, size, if open { super::chrome::CREAM } else { WHITE });
         });

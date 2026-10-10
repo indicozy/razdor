@@ -1600,10 +1600,10 @@ fn draw_tooltip(game: &Game, assets: &Assets, t: &Tooltip) {
     // `formation_grid` spaces its cells 3 px apart.
     let grid_w = f.display_cols() as f32 * (cell + 3.0) - 3.0;
     let grid_h = if t.troops.is_empty() { 0.0 } else { f.display_lines() as f32 * (cell + 3.0) + 8.0 * k };
-    // Names in Benguiat, larger; the rest small.
+    // Names in the names' face, larger; the rest small.
     let big = |c: Color| c == TIP_NAME || c == TIP_NOTE;
     let size = |c: Color| if big(c) { 16.0 * k } else { 12.0 * k };
-    let face = |c: Color| if big(c) { Face::Title } else { Face::Body };
+    let face = |c: Color| if big(c) { Face::Subtitle } else { Face::Body };
     // The style's colours (0x4ca9f0, 0x4cb18c): in the hostile frame names and labels are
     // orange (fonts 0xae24a4, 0xae24c4), in the neutral one grey (0xae24b8, 0xae24d0).
     let shown = |c: Color| match (t.style, c) {

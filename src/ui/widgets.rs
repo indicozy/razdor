@@ -12,17 +12,20 @@ thread_local! {
     /// original's names and descriptions).
     static FONT: RefCell<Option<Font>> = const { RefCell::new(None) };
     /// Sharp stand-ins for the original's bitmap faces: text, bold, titles.
-    static FACE_FONTS: RefCell<[Option<Font>; 3]> = const { RefCell::new([None, None, None]) };
+    static FACE_FONTS: RefCell<[Option<Font>; 4]> = const { RefCell::new([None, None, None, None]) };
 }
 
 /// The fonts that ship with Razdor (`data/fonts`; see
 /// `docs/superpowers/specs/2026-09-28-interface-fonts.md`): PT Sans (SIL Open Font License)
-/// for text and bold, Becker Medium (free for personal and commercial use) for titles and names, in place of the original's small bitmap faces. `RAZDOR_FONT`,
-/// `RAZDOR_FONT_BOLD` and `RAZDOR_FONT_TITLE` name other files (e.g. a bought Benguiat).
-const FACE_FILES: [(&str, &[u8]); 3] = [
+/// for text and bold, Becker Medium (free for personal and commercial use) for titles and
+/// headings, Kurale (SIL Open Font License) for buttons and names, in place of the
+/// original's small bitmap faces. `RAZDOR_FONT`, `RAZDOR_FONT_BOLD`, `RAZDOR_FONT_TITLE` and
+/// `RAZDOR_FONT_SUBTITLE` name other files (e.g. a bought Benguiat).
+const FACE_FILES: [(&str, &[u8]); 4] = [
     ("RAZDOR_FONT", include_bytes!("../../data/fonts/PT_Sans-Regular.ttf")),
     ("RAZDOR_FONT_BOLD", include_bytes!("../../data/fonts/PT_Sans-Bold.ttf")),
     ("RAZDOR_FONT_TITLE", include_bytes!("../../data/fonts/Becker-Medium.ttf")),
+    ("RAZDOR_FONT_SUBTITLE", include_bytes!("../../data/fonts/Kurale-Regular.ttf")),
 ];
 
 pub async fn load_font() {
@@ -42,7 +45,8 @@ pub async fn load_font() {
     FONT.with(|f| *f.borrow_mut() = text);
 }
 
-/// The sharp stand-in for bitmap face `i` (0 text, 1 bold, 2 titles), if installed.
+/// The sharp stand-in for bitmap face `i` (0 text, 1 bold, 2 titles, 3 buttons and names),
+/// if installed.
 pub fn face_font(i: usize) -> Option<Font> {
     FACE_FONTS.with(|f| f.borrow().get(i).cloned().flatten())
 }
@@ -783,10 +787,12 @@ pub fn small_button(x: f32, y: f32, w: f32, h: f32, label: &str, enabled: bool) 
     };
     draw_rectangle(x, y, w, h, bg);
     draw_rectangle_lines(x, y, w, h, 1.0, if enabled { DIM } else { Color::new(0.3, 0.3, 0.3, 1.0) });
-    let size = fit_size(label, w - 6.0, 17.0);
-    let label = &ellipsize(label, w - 6.0, size);
-    let d = measure(label, size);
-    text(label, x + (w - d.width) / 2.0, y + (h + d.offset_y) / 2.0 - 1.0, size, if enabled { INK } else { DIM });
+    super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
+        let size = fit_size(label, w - 6.0, 17.0);
+        let label = &ellipsize(label, w - 6.0, size);
+        let d = measure(label, size);
+        text(label, x + (w - d.width) / 2.0, y + (h + d.offset_y) / 2.0 - 1.0, size, if enabled { INK } else { DIM });
+    });
     hover && clicked()
 }
 
@@ -796,10 +802,12 @@ pub fn toggle_button(x: f32, y: f32, w: f32, h: f32, label: &str, on: bool) -> b
     let bg = if on { Color::new(0.55, 0.42, 0.18, 1.0) } else if hover { Color::new(0.36, 0.28, 0.18, 1.0) } else { Color::new(0.22, 0.18, 0.12, 1.0) };
     draw_rectangle(x, y, w, h, bg);
     draw_rectangle_lines(x, y, w, h, 1.0, if on { ACCENT } else { DIM });
-    let size = fit_size(label, w - 6.0, 17.0);
-    let label = &ellipsize(label, w - 6.0, size);
-    let d = measure(label, size);
-    text(label, x + (w - d.width) / 2.0, y + (h + d.offset_y) / 2.0 - 1.0, size, INK);
+    super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
+        let size = fit_size(label, w - 6.0, 17.0);
+        let label = &ellipsize(label, w - 6.0, size);
+        let d = measure(label, size);
+        text(label, x + (w - d.width) / 2.0, y + (h + d.offset_y) / 2.0 - 1.0, size, INK);
+    });
     let pressed = hover && clicked();
     if pressed {
         claim();

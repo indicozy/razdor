@@ -25,8 +25,10 @@ const TTF_CAP: f32 = 0.72;
 pub enum Face {
     /// `SanSerif.lit`: most texts.
     Body,
-    /// `Benguiat.lit`: window titles and names.
+    /// `Benguiat.lit`: window titles and headings.
     Title,
+    /// `Benguiat.lit` too: buttons and names (Razdor draws them in a softer face than titles).
+    Subtitle,
     /// `SanSerif_Bold.lit`: the bar's time panel.
     Bold,
 }
@@ -35,7 +37,7 @@ impl Face {
     fn file(self) -> &'static str {
         match self {
             Face::Body => "Windows/SanSerif.lit",
-            Face::Title => "Windows/Benguiat.lit",
+            Face::Title | Face::Subtitle => "Windows/Benguiat.lit",
             Face::Bold => "Windows/SanSerif_Bold.lit",
         }
     }
@@ -174,6 +176,7 @@ pub fn current_ttf() -> Option<Font> {
         Face::Body => 0,
         Face::Bold => 1,
         Face::Title => 2,
+        Face::Subtitle => 3,
     };
     super::widgets::face_font(i)
 }
