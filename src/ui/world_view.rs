@@ -1546,18 +1546,7 @@ fn location_tooltip(game: &Game, l: &Location) -> Tooltip {
     if l.kind == LocationKind::Village && l.tribute_gold <= 0 && l.tribute_mana <= 0 {
         lines.push((info("VillageEmptyGold", n_("(tribute already collected)")), TIP_NOTE));
     }
-    // The garrison, whoever holds the building (0x4cb18c): the player's units left there too.
-    // A town shows none; ruins say they are guarded but hide by whom.
-    let mut troops: Vec<Troop> = l.garrison.iter().filter(|t| t.alive()).cloned().collect();
-    for s in l.stationed.iter().filter(|s| s.unit.alive()) {
-        let u = &s.unit;
-        let mut t = Troop::new(u.def, u.level, u.slot);
-        t.hurt = (u.max_hp(&game.content) - u.hp).max(0);
-        troops.push(t);
-    }
-    if l.kind == LocationKind::Town || l.cleared {
-        troops.clear();
-    }
+    let mut troops = garrison_shown(game, l);
     if !troops.is_empty() {
         lines.push((info("Defenders", n_("The garrison's defenders:")), DIM));
         if l.kind == LocationKind::Ruins {
@@ -1567,6 +1556,23 @@ fn location_tooltip(game: &Game, l: &Location) -> Tooltip {
     }
     let team = if l.owned() { Team::Player } else { Team::Enemy };
     Tooltip { title, lines, troops, team, footer: Vec::new(), style: location_tip_style(l) }
+}
+
+/// The garrison of a building's tooltip, whoever holds the building (0x4cb18c): the player's
+/// units left there too. A town shows none. A building taken shows only the units the player
+/// left there: the garrison beaten for it is gone.
+fn garrison_shown(game: &Game, l: &Location) -> Vec<Troop> {
+    if l.kind == LocationKind::Town {
+        return Vec::new();
+    }
+    let mut troops: Vec<Troop> = if l.cleared { Vec::new() } else { l.garrison.iter().filter(|t| t.alive()).cloned().collect() };
+    for s in l.stationed.iter().filter(|s| s.unit.alive()) {
+        let u = &s.unit;
+        let mut t = Troop::new(u.def, u.level, u.slot);
+        t.hurt = (u.max_hp(&game.content) - u.hp).max(0);
+        troops.push(t);
+    }
+    troops
 }
 
 /// The frame of a building's tooltip (0x4cb18c): neutral for bridges; for a castle, fort or
@@ -2638,6 +2644,23 @@ mod tests {
         assert_eq!(location_tip_style(&castle), TipStyle::Hostile);
         castle.owner = razdor::rules::world::Owner::Player;
         assert_eq!(location_tip_style(&castle), TipStyle::Normal);
+    }
+
+    /// A castle taken shows the units the player left in it, not the garrison beaten for it.
+    #[test]
+    fn a_castle_taken_shows_the_units_left_in_it() {
+        let Some(dir) = std::env::var_os(razdor::dt::install::ENV_VAR) else { return };
+        let dt = razdor::dt::install::DtInstall::load(std::path::Path::new(&dir)).unwrap();
+        let m = dt.maps.iter().find(|m| m.name.starts_with("РК1")).unwrap();
+        let content = std::sync::Arc::new(razdor::rules::content::Content::from_dt(&dt));
+        let g = Game::from_scenario(content, &m.load().unwrap(), HeroClass::Knight);
+        let mut castle = g.world.locations.iter().find(|l| l.name == "Замок Бонитур").unwrap().clone();
+        assert!(castle.garrison.iter().any(|t| t.alive()));
+        castle.cleared = true;
+        castle.owner = razdor::rules::world::Owner::Player;
+        let left = g.squad.last().unwrap().clone();
+        castle.stationed.push(razdor::rules::world::Stationed { unit: left.clone() });
+        assert_eq!(garrison_shown(&g, &castle).iter().map(|t| t.unit).collect::<Vec<_>>(), vec![left.def]);
     }
 
     /// A building with an army standing in it shows that army's panel (0x4cc2a5), the last
