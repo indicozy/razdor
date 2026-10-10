@@ -6,7 +6,7 @@ use razdor::rules::battle::Team;
 use razdor::rules::content::{ArtefactType, Content, ItemId, Stat, UnitId};
 use razdor::rules::experience::is_percent_stat;
 use razdor::rules::game::{Game, PACK_SIZE};
-use razdor::rules::items::{bonus_name, EquipError, Given, ItemFrom};
+use razdor::rules::items::{EquipError, Given, ItemFrom};
 use razdor::rules::units::Unit;
 
 use super::assets::Assets;
@@ -71,7 +71,7 @@ pub(super) fn unit_stat_lines(content: &Content, u: &Unit, wage: i32) -> Vec<Str
     if s[Stat::Vampirizm] > 0 {
         extra.push(razdor::trf!("vampirism {v}%", v = s[Stat::Vampirizm]));
     }
-    extra.extend(s.bonuses.iter().map(bonus_name));
+    extra.extend(s.bonuses.iter().map(super::unit_sheet::bonus_title));
     if !extra.is_empty() {
         lines.push(extra.join(", "));
     }

@@ -395,6 +395,12 @@ pub fn bonus_name(b: &Bonus) -> String {
 
 /// Short summary, e.g. "melee weapon, attack +6, initiative -1".
 pub fn describe(content: &Content, item: ItemId) -> String {
+    describe_with(content, item, &bonus_name)
+}
+
+/// [`describe`] with the bonus named by `bonus` (the UI passes the install's names, the
+/// original's `[Army] Bonus<N>`).
+pub fn describe_with(content: &Content, item: ItemId, bonus: &dyn Fn(&Bonus) -> String) -> String {
     let d = content.item(item);
     let mut parts = vec![kind_name(d.kind).to_string()];
     for (&st, &v) in &d.fixed {
@@ -411,17 +417,17 @@ pub fn describe(content: &Content, item: ItemId) -> String {
         parts.push(format!("{} {v:+}%", stat_label(st)));
     }
     if let Some(b) = &d.bonus {
-        parts.push(bonus_name(b));
+        parts.push(bonus(b));
     }
     parts.join(", ")
 }
 
 /// How item `item` matches the inventory filter's `query` ([`crate::search::matches`]):
 /// by its name, and by the words of its summary ([`describe`]: its type, its stats and its
-/// bonus) and description.
-pub fn filter_match(content: &Content, item: ItemId, query: &str) -> Option<crate::search::Match> {
+/// bonus, named by `bonus` as [`describe_with`]) and description.
+pub fn filter_match(content: &Content, item: ItemId, query: &str, bonus: &dyn Fn(&Bonus) -> String) -> Option<crate::search::Match> {
     let d = content.item(item);
-    crate::search::matches(query, &d.name, &[&describe(content, item), &d.description])
+    crate::search::matches(query, &d.name, &[&describe_with(content, item, bonus), &d.description])
 }
 
 /// Where an item dropped on a unit's card was picked up on the army screen.
@@ -572,6 +578,17 @@ mod tests {
     use crate::rules::content::testkit::spell;
     use crate::rules::formation::{Row, Slot};
 
+    /// The UI names the bonus with the install's text; the summary takes its name as given.
+    #[test]
+    fn the_summary_takes_the_bonus_name_given() {
+        let mut ring = item(1, ArtefactType::Ring);
+        ring.bonus = Some(Bonus::Fortify);
+        let c = Content::new(vec![warrior(5, 20, 0)], vec![ring], Vec::new(), Default::default(), crate::rules::formation::Formation::WIDE);
+        assert_eq!(describe(&c, ItemId(1)), "ring, Entrenchment");
+        assert_eq!(describe_with(&c, ItemId(1), &|_| "Install name".to_string()), "ring, Install name");
+        assert!(filter_match(&c, ItemId(1), "install", &|_| "Install name".to_string()).is_some());
+    }
+
     #[test]
     fn the_inventory_filter_reads_names_types_and_bonuses() {
         let mut sword = item(1, ArtefactType::BlowWeapon);
@@ -582,7 +599,7 @@ mod tests {
         amulet.name = "Ёлочный амулет".into();
         amulet.description = "Пахнет хвоей".into();
         let c = Content::new(vec![warrior(5, 20, 0)], vec![sword, amulet], Vec::new(), Default::default(), crate::rules::formation::Formation::WIDE);
-        let names = |q: &str| [1, 2].into_iter().filter(|&i| filter_match(&c, ItemId(i), q).is_some()).collect::<Vec<_>>();
+        let names = |q: &str| [1, 2].into_iter().filter(|&i| filter_match(&c, ItemId(i), q, &bonus_name).is_some()).collect::<Vec<_>>();
         assert_eq!(names(""), [1, 2], "an empty filter keeps all");
         assert_eq!(names("SWORD"), [1]);
         assert_eq!(names("melee"), [1], "by type");
@@ -591,7 +608,7 @@ mod tests {
         assert_eq!(names("елоч"), [2], "Cyrillic, Ё as Е");
         assert_eq!(names("хвоей"), [2], "by description");
         assert_eq!(names("amulet long"), Vec::<u32>::new(), "every word must match");
-        assert_eq!(filter_match(&c, ItemId(1), "melee sw").unwrap().name_range, Some(5..7));
+        assert_eq!(filter_match(&c, ItemId(1), "melee sw", &bonus_name).unwrap().name_range, Some(5..7));
     }
 
     /// A warrior (type 1 unless given) with the given protections, wearing `items`.

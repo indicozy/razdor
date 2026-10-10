@@ -25,7 +25,7 @@ pub struct Reply {
 
 /// The items of `list` that `query` keeps, with their matches, in order.
 pub fn keep(content: &Content, list: impl IntoIterator<Item = (usize, ItemId)>, query: &str) -> Vec<(usize, Match)> {
-    list.into_iter().filter_map(|(i, item)| filter_match(content, item, query).map(|m| (i, m))).collect()
+    list.into_iter().filter_map(|(i, item)| filter_match(content, item, query, &super::unit_sheet::bonus_title).map(|m| (i, m))).collect()
 }
 
 /// The filter line in `r`, for the field `key`. `shortcuts` are the keys of the screen that
