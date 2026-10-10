@@ -13,7 +13,7 @@ use razdor::rules::content::{ArtefactType, ItemId, SpellDef};
 use razdor::rules::formation::{Formation, Slot};
 use razdor::rules::economy::VillageOffer;
 use razdor::rules::game::{Currency, Game, HireError, TradeError, Tribute, SPELL_BOOK_SIZE};
-use razdor::rules::items::describe;
+use razdor::rules::items::describe_with;
 use razdor::rules::script::HallEntry;
 use razdor::rules::town::{ServiceError, Tab};
 use razdor::rules::units::Unit;
@@ -896,7 +896,7 @@ pub(super) fn item_description(game: &Game, assets: &Assets, item: ItemId, x: f3
         ArtefactType::Item => Some(tr("trade goods: cannot be worn")),
         _ => None,
     };
-    let props = describe(c, item);
+    let props = describe_with(c, item, &super::unit_sheet::bonus_title);
     // Everything in the box: the picture, the name, the description and the properties at
     // the largest size that fits its height (the army window's box under the promotion tree
     // is a small one), the description cut short only at the smallest.

@@ -87,6 +87,21 @@ fn trait_line(b: &Bonus) -> (String, String) {
     }
 }
 
+/// The bonus's name as the original's item text writes it (499eb0): its `[Army] Bonus<N>`
+/// text up to " - ", trimmed (the table 4e36cc fills at c35000); ours without an install.
+pub(super) fn bonus_title(b: &Bonus) -> String {
+    bonus_number(b)
+        .and_then(|n| chrome::ui_text("Army", &format!("Bonus{n}")))
+        .map(|t| title_of(&t).to_string())
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| razdor::rules::items::bonus_name(b))
+}
+
+/// The name part of a bonus text: up to the first " - ", trimmed.
+fn title_of(text: &str) -> &str {
+    text.split(" - ").next().unwrap_or(text).trim()
+}
+
 fn hero_trait(h: HeroClass) -> (String, String) {
     let n = HeroClass::ALL.iter().position(|&c| c == h).unwrap_or(0) + 1;
     let english = match h {
@@ -656,6 +671,29 @@ mod tests {
         assert_eq!(state_lines(false, false, false, true), vec![InCastle]);
         assert!(state_lines(false, false, false, false).is_empty());
         assert_eq!(state_trait(NoPayment).1, "", "the original never sets the text");
+    }
+
+    /// A bonus text's name part (499eb0): up to the first " - ", trimmed; the whole text
+    /// when it has none.
+    #[test]
+    fn a_bonus_title_is_the_text_before_its_dash() {
+        assert_eq!(title_of("Name One - what it does - more"), "Name One");
+        assert_eq!(title_of("  Name  "), "Name");
+        assert_eq!(title_of("Name-Two - x"), "Name-Two");
+    }
+
+    /// Every bonus is named from the install's `[Army] Bonus<N>`, as the original's item text
+    /// (skipped without `RAZDOR_DT_DIR`).
+    #[test]
+    fn bonus_titles_come_from_the_install() {
+        let Ok(install) = razdor::dt::install::DtInstall::from_env() else { return };
+        chrome::set_install(install.dir.clone());
+        for b in Bonus::known() {
+            let n = bonus_number(b).unwrap();
+            let Some(text) = chrome::ui_text("Army", &format!("Bonus{n}")) else { continue };
+            assert_eq!(bonus_title(b), title_of(&text), "Bonus{n}");
+            assert!(!bonus_title(b).is_empty(), "Bonus{n}");
+        }
     }
 
     /// The original's places: the front line 0–5, the back line 6–11, as drawn.

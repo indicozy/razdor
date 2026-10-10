@@ -401,6 +401,12 @@ pub fn bonus_name(b: &Bonus) -> String {
 
 /// Short summary, e.g. "melee weapon, attack +6, initiative -1".
 pub fn describe(content: &Content, item: ItemId) -> String {
+    describe_with(content, item, &bonus_name)
+}
+
+/// [`describe`] with the bonus named by `bonus` (the UI passes the install's names, the
+/// original's `[Army] Bonus<N>`).
+pub fn describe_with(content: &Content, item: ItemId, bonus: &dyn Fn(&Bonus) -> String) -> String {
     let d = content.item(item);
     let mut parts = vec![kind_name(d.kind).to_string()];
     for (&st, &v) in &d.fixed {
@@ -417,7 +423,7 @@ pub fn describe(content: &Content, item: ItemId) -> String {
         parts.push(format!("{} {v:+}%", stat_label(st)));
     }
     if let Some(b) = &d.bonus {
-        parts.push(bonus_name(b));
+        parts.push(bonus(b));
     }
     parts.join(", ")
 }
