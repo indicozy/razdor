@@ -1312,8 +1312,9 @@ pub fn offer_picture(o: VillageOffer) -> &'static str {
 /// a Yes opens for 3, 4 and 5: `VillageBonusN` + `VillageBonusNResult`.
 fn offer_text(o: VillageOffer, result: bool) -> String {
     // The install's text in Russian, else ours behind the original's marks: two blank lines
-    // (`#\`) and the line's font (`@` orange for the question, `*` white, `|` blue).
-    let ini = |key: &str| (razdor::i18n::lang() == razdor::i18n::Lang::Ru).then(|| chrome::ui_text("Event", key)).flatten();
+    // (`#\`) and the line's font (`@` orange for the question, `*` white, `|` blue). The
+    // install's text keeps its `#\` too: the window reads it as markup.
+    let ini = |key: &str| (razdor::i18n::lang() == razdor::i18n::Lang::Ru).then(|| chrome::ui_markup("Event", key)).flatten();
     let own = |key: &str, mark: &str, ours: &'static str| match ini(key) {
         Some(t) => t,
         None if mark.is_empty() => tr(ours).to_string(),

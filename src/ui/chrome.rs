@@ -362,6 +362,19 @@ pub fn ui_text(section: &str, key: &str) -> Option<String> {
     })
 }
 
+/// An interface text of the install as written, its marks kept (`#\` line breaks, `*` `|`
+/// `@` `^`): for the windows that read it as markup ([`super::widgets::markup_rows`]).
+pub fn ui_markup(section: &str, key: &str) -> Option<String> {
+    CHROME.with(|c| {
+        let mut c = c.borrow_mut();
+        let c = c.as_mut()?;
+        if c.texts.is_none() {
+            c.texts = Some(read_texts(&c.dir));
+        }
+        c.texts.as_ref()?.as_ref()?.section(section)?.get_nonempty(key).map(str::to_string)
+    })
+}
+
 /// Line `n` (0-based) of the unnamed lines of a section of the install's interface texts,
 /// e.g. `[Army]`'s «Кликните, что бы выделить #NAME1» (line 1).
 pub fn ui_line(section: &str, n: usize) -> Option<String> {
@@ -1462,6 +1475,19 @@ mod tests {
             assert!(!frames.is_empty(), "{n}");
         }
         assert!(ui_text_from(&install.dir, "Army", "Bonus2").is_some_and(|t| !t.is_empty()));
+    }
+
+    /// A village's offer reads the install's text as markup: its `#\` breaks stay marks and
+    /// make lines, none is drawn as a stray character (skipped without `RAZDOR_DT_DIR`).
+    #[test]
+    fn the_village_offer_keeps_its_marks() {
+        let Ok(install) = razdor::dt::install::DtInstall::from_env() else { return };
+        set_install(install.dir.clone());
+        let raw = ui_markup("Event", "VillageBonus1").expect("VillageBonus1");
+        assert!(raw.contains("#\\") && !raw.contains('\n'), "{raw}");
+        let lines = razdor::dt::markup::parse(&raw);
+        assert!(lines.iter().all(|l| !l.text.contains(['\n', '#', '@'])), "{lines:?}");
+        assert_eq!(lines.last().map(|l| l.ink), Some(razdor::dt::markup::Ink::At));
     }
 
     #[test]
