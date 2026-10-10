@@ -388,6 +388,10 @@ that window (world.md §7.2): the offer rolls below come after the event's OK.
 - Otherwise the **village window** opens. Taking, and also closing the window, gives **all the gold
   and all the mana**, with no F factor and no attitude test, and clears "the village of the last
   offer" (0x4c6000).
+- A click on the village he stands in enters it again (0x4cd0aa → 0x4bbc84): the same offer
+  roll and window, so a stock refilled at midnight while he waited there is paid then. Razdor:
+  the same (`Game::reenter_building`; 0.4.4 opened the window alone, "already taken", and left
+  the stock in the village).
 
 **The 5 alternatives** (code, chooser 0x4bba40, offer 0x4aca80, finish 0x4ab966):
 - Rolls in this order; the first that passes is offered. "Last" is one global value for all
