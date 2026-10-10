@@ -459,34 +459,32 @@ pub fn draw(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: bool,
     // The figure, behind the text.
     let fig_h = r.h * if s.battle { 0.66 } else { 0.6 };
     let top = r.y + 10.0 * k;
-    let fig_bottom = match assets.figure(s.kind) {
+    match assets.figure(s.kind) {
         Some(t) => {
             let h = (t.height() * 0.9375 * k).min(fig_h);
             let w = t.width() * h / t.height();
             chrome::tex(&t, Rect::new(r.x + (r.w - w) / 2.0, top, w, h), Color::new(1.0, 1.0, 1.0, 0.92));
-            top + h
         }
-        None => {
-            silhouette(Rect::new(r.x + r.w * 0.2, r.y + 12.0 * k, r.w * 0.6, fig_h * 0.95));
-            top + fig_h * 0.95
-        }
-    };
-    // Below the figure's shoulders the parchment turns dark brown (the video's panel: light
-    // gold down to about a quarter, then (115, 62, 0)); the figure's lower part shows through.
-    // In battle the name and the stats run over the figure's lower part; on the army screen
-    // they stand under the figure.
-    let natural_y = if s.battle { r.y + r.h * 0.375 } else { fig_bottom + 6.0 * k };
-    // The traits always get their room: when the name, the stats and the traits do not fit
-    // under the figure, the text starts higher, over the figure (a caster's long stat list
-    // with a trait, a mod's long trait texts).
+        None => silhouette(Rect::new(r.x + r.w * 0.2, r.y + 12.0 * k, r.w * 0.6, fig_h * 0.95)),
+    }
+    // The text stands on the panel's bottom, as the original's (492f24 stacks the description
+    // and state lines on the bottom edge, the stats over them, the name over those), in battle
+    // and in the army and building windows alike; the figure's lower part shows through the
+    // dark parchment above a long text. The traits always get their room: when everything
+    // does not fit, the description is cut short (a caster's long stat list with a trait, a
+    // mod's long trait texts).
     let traits = traits_of(s);
     let (small, slh, icon) = ((12.0 * k).round(), 13.2 * k, 24.0 * k);
     let trait_w = r.w - 44.0 * k - icon;
     let traits_h: f32 = traits.iter().map(|(_, line)| trait_height(trait_rows(line, trait_w, small).len(), slh, k)).sum();
     let lh = 13.6 * k;
     let text_h = 17.0 * k + lh * (1 + stat_lines(content, s).len() + s.status.len()) as f32 + 6.0 * k + traits_h;
+    // Any unit but the hero shows its class's description (0x492f24: the type's text, the
+    // `Descript` of Rus_Units.ini), in battle and in the army and building windows alike.
+    let desc = if s.hero.is_none() { content.unit(s.kind).description.as_str() } else { "" };
+    let desc_lines = wrap(desc, r.w - 44.0 * k, small);
     let bottom = r.y + r.h - 6.0 * k;
-    let name_y = natural_y.min(bottom - text_h).max(r.y + 0.25 * r.h);
+    let name_y = (bottom - text_h - desc_lines.len() as f32 * slh).max(r.y + 0.25 * r.h);
     // From 50 px above the name the parchment turns dark brown (both screens of the video:
     // light gold, then (115, 62, 0)); the figure shows through.
     let (fade0, fade1) = (name_y - 50.0 * k, name_y - 15.0 * k);
@@ -549,12 +547,9 @@ pub fn draw(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: bool,
     }
     // The description in what the traits leave, then the traits with their icons.
     y += 6.0 * k;
-    // Any unit but the hero shows its class's description (0x492f24: the type's text, the
-    // `Descript` of Rus_Units.ini), in battle and in the army and building windows alike.
-    let desc = if s.hero.is_none() { content.unit(s.kind).description.as_str() } else { "" };
     let desc_bottom = bottom - traits_h;
-    let desc_lines = wrap(desc, r.w - 44.0 * k, small);
-    let fits = ((desc_bottom - y) / slh).floor().max(0.0) as usize;
+    // A hair of slack: the text is laid out to end exactly at the bottom.
+    let fits = ((desc_bottom - y) / slh + 0.01).floor().max(0.0) as usize;
     for (i, line) in desc_lines.iter().take(fits).enumerate() {
         // A description cut short ends in an ellipsis.
         let line = if i + 1 == fits && fits < desc_lines.len() { format!("{}…", line.trim_end()) } else { line.clone() };
