@@ -95,11 +95,13 @@ pub struct MapView {
     pointer_cell: Option<Tile>,
     /// The map was busy last frame (the clock was up).
     was_busy: bool,
+    /// The cell the hover last worked out and its ring ([`cursor::hover_ring`]), if any.
+    hover: Option<(Tile, Option<Color>)>,
 }
 
 impl Default for MapView {
     fn default() -> Self {
-        MapView { zoom: 1.0, minimap: false, look: None, shows: VecDeque::new(), returning: None, opening: None, spell_fx: VecDeque::new(), preview: None, last_frame_ms: None, back_to: None, centring: None, pointer: Shape::Arrow, pointer_cell: None, was_busy: false }
+        MapView { zoom: 1.0, minimap: false, look: None, shows: VecDeque::new(), returning: None, opening: None, spell_fx: VecDeque::new(), preview: None, last_frame_ms: None, back_to: None, centring: None, pointer: Shape::Arrow, pointer_cell: None, was_busy: false, hover: None }
     }
 }
 
@@ -1065,7 +1067,7 @@ fn draw_hero(game: &Game, assets: &Assets, art: Option<&DtArt>, cam: &Camera) {
     }
 }
 
-fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>) {
+fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<(Tile, Option<Color>)>) {
     let art = assets.dt.as_ref();
     draw_terrain(game, art, cam);
     let map = &game.world.map;
@@ -1095,9 +1097,16 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
     }
     // The marks under the hero and every army (cell byte +0xA, 0x48eeb0: the hero's kind 1,
     // an army's 3) lie on the ground in the same pass, under every tree, building and
-    // figure (0x4c9459), so the figures' shadows fall over them.
+    // figure (0x4c9459), so the figures' shadows fall over them. The hover's ring takes the
+    // place of the mark of the cell it is on (one mark byte a cell, 0x48eeb0).
+    let ring = hover.and_then(|(t, c)| Some((t, c?)));
     for a in game.world.armies.iter().filter(|a| fog.explored(a.tile(map)) && !a.sails()) {
-        draw_mark(cam, game.army_display_pos(a), MARK_ARMY);
+        if ring.is_none_or(|(t, _)| a.tile(map) != t) {
+            draw_mark(cam, game.army_display_pos(a), MARK_ARMY);
+        }
+    }
+    if let Some((t, color)) = ring {
+        draw_mark(cam, map.center(t), color);
     }
     if !game.aboard() {
         draw_mark(cam, game.display_pos(), MARK_HERO);
@@ -1605,15 +1614,21 @@ fn update_pointer(game: &Game, view: &mut MapView, cam: &Camera, on_minimap: boo
     if game.moving() {
         view.pointer = Shape::Arrow;
         view.pointer_cell = None;
+        view.hover = None;
         return;
     }
     let Some(t) = cam.tile_under_mouse() else {
+        // Below the map the cell's ring stays (0x4cceeb restores nothing).
         view.pointer = Shape::Arrow;
         return;
     };
     if view.pointer_cell != Some(t) {
         view.pointer_cell = Some(t);
-        view.pointer = cursor::map_pointer(view.pointer, &map_hover(game, t, on_minimap));
+        let h = map_hover(game, t, on_minimap);
+        view.pointer = cursor::map_pointer(view.pointer, &h);
+        // The ring in the colour of the original's mark: 2 the route end's green, 3 the
+        // armies' red.
+        view.hover = Some((t, cursor::hover_ring(&h).map(|c| if c == 3 { MARK_ARMY } else { MARK_ROUTE_END })));
     }
 }
 
@@ -1772,7 +1787,7 @@ pub fn backdrop_lit(game: &Game, assets: &Assets, lit: Option<BarButton>) {
     clear_background(rgb(10, 12, 10));
     let full = map_area();
     let cam = Camera::looking_in(game, 1.0, game.display_pos(), full);
-    draw_world(game, assets, &cam, None, None);
+    draw_world(game, assets, &cam, None, None, None);
     cam.draw_fog(game);
     draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.2));
     game_bar::draw(game, |b| if Some(b) == lit { Look::Lit } else { Look::Grey });
@@ -1789,7 +1804,7 @@ pub fn window_backdrop(game: &Game, assets: &Assets, lit: Option<BarButton>) -> 
     clear_background(rgb(10, 12, 10));
     let full = map_area();
     let cam = Camera::looking_in(game, 1.0, game.display_pos(), full);
-    draw_world(game, assets, &cam, None, None);
+    draw_world(game, assets, &cam, None, None, None);
     cam.draw_fog(game);
     draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.2));
     let idle = game.foe.is_none();
@@ -2080,7 +2095,7 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
         }
         _ => None,
     };
-    draw_world(game, assets, &cam, view.preview.as_ref().map(|p| p.1.as_slice()), show.as_ref());
+    draw_world(game, assets, &cam, view.preview.as_ref().map(|p| p.1.as_slice()), show.as_ref(), view.hover);
     cam.draw_fog(game);
     cam.draw_showing(game, view.opening.iter().chain(&view.shows), now);
     // A spell's effect over the army it landed on.
