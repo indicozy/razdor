@@ -64,7 +64,7 @@ pub fn field(key: &str, query: &mut String, r: Rect, shortcuts: &[KeyCode], foun
             if is_key_pressed(KeyCode::Escape) {
                 query.clear();
                 clear_focus();
-            } else if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter) {
+            } else if enter_pressed() {
                 reply.pick = !query.trim().is_empty();
             } else if clicked() && !mouse_in(r.x, r.y, r.w, r.h) {
                 clear_focus();

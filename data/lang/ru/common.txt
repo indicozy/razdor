@@ -41,6 +41,7 @@ Front row in battle (new games) = Первый ряд в бою (для новы
 6 cells = 6 клеток
 4 cells = 4 клетки
 Screen = Экран
+Screen (Alt+Enter) = Экран (Alt+Enter)
 Windowed = В окне
 Borderless = Окно без рамки
 Full screen = Полный экран

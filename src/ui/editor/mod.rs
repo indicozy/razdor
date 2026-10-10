@@ -393,7 +393,7 @@ impl EditorScreen {
     /// Enter and F3 to the next one, Esc closes it.
     fn find_window(&mut self, r: Rect) {
         let focused = has_focus(FIND_KEY);
-        let enter = is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter);
+        let enter = enter_pressed();
         let f3 = is_key_pressed(KeyCode::F3);
         if focused && is_key_pressed(KeyCode::Escape) {
             clear_focus();
@@ -927,7 +927,7 @@ impl EditorScreen {
                 for (i, line) in wrap(tr("Use \"Save to game folder\" in the toolbar to put it where the game finds it."), r.w - 40.0, 15.0).iter().enumerate() {
                     text(line, x, y + 100.0 + i as f32 * 18.0, 15.0, DIM);
                 }
-                let go = button(r.right() - 270.0, r.bottom() - 54.0, 120.0, 40.0, tr("Save"), true) || (is_key_pressed(KeyCode::Enter) && !popup_open());
+                let go = button(r.right() - 270.0, r.bottom() - 54.0, 120.0, 40.0, tr("Save"), true) || (enter_pressed() && !popup_open());
                 if go {
                     let n = name.clone();
                     self.modal = None;

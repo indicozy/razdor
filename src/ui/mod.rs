@@ -704,6 +704,12 @@ impl App {
         chrome::begin_frame();
         cursor::begin_frame();
         widgets::track_held_key();
+        // Alt+Enter: the next display mode on any screen; the screens do not see its Enter.
+        if display::hotkey_pressed() {
+            self.audio.settings.display = self.audio.settings.display.next();
+            display::notice(self.audio.settings.display);
+            widgets::swallow_input();
+        }
         self.follow_language();
         // A screen opened from outside the frame (a snapshot scene) draws its content.
         self.show_content();
@@ -959,6 +965,7 @@ impl App {
         }
         self.fly_from_building(next.is_some());
         self.console.draw();
+        display::draw_notice();
         // A newer release on offer, or how the update the player chose went.
         if self.update_open && next.is_none() && update_view::frame(matches!(self.screen, Screen::MainMenu | Screen::Options), &mut self.audio.settings.updates) {
             self.quit = true;

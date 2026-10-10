@@ -154,6 +154,7 @@ fight = в бой
 back to the main menu = назад в главное меню
 this list (F1 or Esc closes it) = этот список (F1 или Esc закрывают)
 interface language: English / Russian = язык интерфейса: английский / русский
+screen: windowed, borderless, full screen = экран: в окне, окно без рамки, полный экран
 music off / on = музыка выкл. / вкл.
 "Yes" in a question (Enter: OK) = «Да» в вопросе (Enter: «Готово»)
 "No" in a question = «Нет» в вопросе

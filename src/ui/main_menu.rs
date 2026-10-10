@@ -613,7 +613,7 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool) ->
     }
     // Windowed, borderless or full screen, set at once (`display::follow_settings`).
     let y = y + 58.0 * k;
-    chrome::shadow_text(tr("Screen"), inner.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
+    chrome::shadow_text(tr("Screen (Alt+Enter)"), inner.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
     let dr = Rect::new(ar.x, y, ar.w, ar.h);
     let over_display = dr.contains(crate::ui::widgets::pointer().into()) && !input_blocked();
     chrome::marble_button(dr, audio.display.label(), true, over_display);

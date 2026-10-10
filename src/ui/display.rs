@@ -105,6 +105,52 @@ thread_local! {
 /// Seconds after a change when it is set once more.
 const SETTLE_SECONDS: f64 = 0.5;
 
+// ------------------------------------------------------------------------------------------
+// Alt+Enter
+// ------------------------------------------------------------------------------------------
+
+/// Seconds the new mode's name stays on screen after Alt+Enter; it fades over the last 0.5.
+const NOTICE_SECONDS: f64 = 2.0;
+
+thread_local! {
+    /// The mode Alt+Enter last chose and when.
+    static NOTICE: std::cell::Cell<Option<(DisplayMode, f64)>> = const { std::cell::Cell::new(None) };
+}
+
+/// Alt+Enter went down this frame: the next display mode, on any screen (Razdor's, the
+/// players asked for it: some overlays need a window, and a battle cannot be left for the
+/// settings).
+pub fn hotkey_pressed() -> bool {
+    use macroquad::input::{is_key_down, is_key_pressed, KeyCode};
+    (is_key_down(KeyCode::LeftAlt) || is_key_down(KeyCode::RightAlt)) && (is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter))
+}
+
+/// Shows `mode`'s name for a moment ([`draw_notice`]).
+pub fn notice(mode: DisplayMode) {
+    NOTICE.with(|n| n.set(Some((mode, macroquad::prelude::get_time()))));
+}
+
+/// The name of the mode Alt+Enter chose, at the top of the screen over everything else.
+pub fn draw_notice() {
+    use crate::ui::widgets::{measure, text_centered, ACCENT, PANEL};
+    use macroquad::prelude::*;
+    let Some((mode, at)) = NOTICE.with(|n| n.get()) else { return };
+    let left = NOTICE_SECONDS - (get_time() - at);
+    if left <= 0.0 {
+        NOTICE.with(|n| n.set(None));
+        return;
+    }
+    let a = (left / 0.5).clamp(0.0, 1.0) as f32;
+    let k = crate::ui::chrome::k();
+    let (size, h) = ((18.0 * k).max(14.0), (30.0 * k).max(24.0));
+    let m = format!("{}: {}", razdor::i18n::tr("Screen"), mode.label());
+    let w = measure(&m, size).width + 40.0 * k;
+    let (cx, y) = (screen_width() / 2.0, 16.0 * k);
+    draw_rectangle(cx - w / 2.0, y, w, h, Color { a: PANEL.a * a, ..PANEL });
+    draw_rectangle_lines(cx - w / 2.0, y, w, h, 1.0, Color { a: 0.5 * a, ..crate::ui::chrome::SILVER });
+    text_centered(&m, cx, y + h * 0.5 + size * 0.36, size, Color { a, ..ACCENT });
+}
+
 /// The settings' display mode and interface scale, taken in at the start of every frame.
 pub fn follow_settings(settings: &crate::ui::audio::Settings) {
     if crate::ui::snapshot::size().is_some() {

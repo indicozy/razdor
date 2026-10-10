@@ -155,6 +155,12 @@ pub fn input_swallowed() -> bool {
     SWALLOWED.with(|s| s.get())
 }
 
+/// Enter (or the keypad's) went down this frame and was not taken (Alt+Enter, the display
+/// mode, swallows it).
+pub fn enter_pressed() -> bool {
+    !input_swallowed() && (is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter))
+}
+
 /// A key went down this frame (any key, Alt and F10 aside, as the held key).
 pub fn any_key_pressed() -> bool {
     !input_blocked() && !input_swallowed() && get_keys_pressed().iter().any(|k| !matches!(k, KeyCode::LeftAlt | KeyCode::RightAlt | KeyCode::F10))
@@ -666,7 +672,7 @@ fn typed() -> (Vec<char>, usize, bool) {
     while let Some(c) = get_char_pressed() {
         chars.push(c);
     }
-    let enter = is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter);
+    let enter = enter_pressed();
     (chars, backspace_repeat(), enter)
 }
 

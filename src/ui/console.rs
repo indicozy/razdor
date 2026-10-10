@@ -116,7 +116,7 @@ impl Console {
             self.scroll = self.scroll.saturating_sub(3);
         }
         let mut entered = None;
-        if (is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter)) && !self.line.trim().is_empty() {
+        if enter_pressed() && !self.line.trim().is_empty() {
             let line = std::mem::take(&mut self.line).trim().to_string();
             if self.recall.last() != Some(&line) {
                 self.recall.push(line.clone());

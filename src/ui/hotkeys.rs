@@ -186,9 +186,10 @@ pub fn screen_keys(place: Place) -> Vec<(&'static str, &'static str)> {
 }
 
 /// Keys that work on every screen of a game, and in the dialogs.
-pub const EVERYWHERE: [(&str, &str); 6] = [
+pub const EVERYWHERE: [(&str, &str); 7] = [
     ("F1", n_("this list (F1 or Esc closes it)")),
     ("F2", n_("interface language: English / Russian")),
+    ("Alt+Enter", n_("screen: windowed, borderless, full screen")),
     ("F9", n_("load the quick save")),
     ("N", n_("music off / on")),
     ("Y / Enter", n_("\"Yes\" in a question (Enter: OK)")),
