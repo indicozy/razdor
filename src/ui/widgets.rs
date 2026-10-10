@@ -15,14 +15,14 @@ thread_local! {
     static FACE_FONTS: RefCell<[Option<Font>; 3]> = const { RefCell::new([None, None, None]) };
 }
 
-/// The fonts that ship with Razdor (`data/fonts`, SIL Open Font License; see
-/// `docs/superpowers/specs/2026-09-28-interface-fonts.md`): PT Sans for text and bold, Kurale
-/// for titles and names, in place of the original's small bitmap faces. `RAZDOR_FONT`,
+/// The fonts that ship with Razdor (`data/fonts`; see
+/// `docs/superpowers/specs/2026-09-28-interface-fonts.md`): PT Sans (SIL Open Font License)
+/// for text and bold, Becker Medium (free for personal and commercial use) for titles and names, in place of the original's small bitmap faces. `RAZDOR_FONT`,
 /// `RAZDOR_FONT_BOLD` and `RAZDOR_FONT_TITLE` name other files (e.g. a bought Benguiat).
 const FACE_FILES: [(&str, &[u8]); 3] = [
     ("RAZDOR_FONT", include_bytes!("../../data/fonts/PT_Sans-Regular.ttf")),
     ("RAZDOR_FONT_BOLD", include_bytes!("../../data/fonts/PT_Sans-Bold.ttf")),
-    ("RAZDOR_FONT_TITLE", include_bytes!("../../data/fonts/Kurale-Regular.ttf")),
+    ("RAZDOR_FONT_TITLE", include_bytes!("../../data/fonts/Becker-Medium.ttf")),
 ];
 
 pub async fn load_font() {
