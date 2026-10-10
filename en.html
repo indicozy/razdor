@@ -7,37 +7,36 @@
 <meta name="description" content="Razdor is an open engine for Discord Times. It plays the original scenarios and campaigns from your own copy of the game on today's Windows and Linux.">
 <link rel="alternate" hreflang="ru" href="index.html">
 <link rel="stylesheet" href="style.css">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Ruslan+Display&display=swap">
 <style>
-  /* The new header: the game's main menu over a live fire (canvas#fx, fixed behind the
-     whole page). The windows below keep style.css. */
-  :root { --bw: clamp(168px, min(26vw, 19vh), 250px); --rim: #1f0d40; }
+  /* The header: the game's main menu over a live fire (canvas#fx behind the menu). The
+     windows below keep style.css. */
+  :root { --bw: clamp(210px, min(32vw, 24vh), 320px); --rim: #2a0f4a; --rim-hot: #4a1c06; }
   /* The fire burns behind the menu only, fading out at its foot; it never lies under the
      video (a browser cuts the player's hole into a canvas under it in the wrong place). */
   .hero { position: relative; isolation: isolate; }
   #fx { position: absolute; inset: 0; width: 100%; height: 100%; display: block; z-index: -1;
-    -webkit-mask-image: linear-gradient(#000 78%, transparent); mask-image: linear-gradient(#000 78%, transparent); }
-  .hero { display: grid; justify-items: center; gap: clamp(6px, 1.4vh, 16px);
-    padding: clamp(14px, 3vh, 36px) 1.25rem clamp(18px, 3.5vh, 40px); text-align: center; }
+    -webkit-mask-image: linear-gradient(#000 80%, transparent); mask-image: linear-gradient(#000 80%, transparent); }
+  .hero { display: grid; justify-items: center; gap: clamp(4px, 1vh, 12px);
+    padding: clamp(14px, 3vh, 36px) 1.25rem clamp(22px, 4vh, 48px); text-align: center; }
+  /* The title in silver, as the game's: Becker, a chiselled gradient, a dark rim. */
   #title {
-    margin: 0; font-family: "Ruslan Display", "Kurale", Georgia, serif; font-weight: 400;
-    font-size: clamp(56px, min(12vw, 12vh), 140px); line-height: 1; letter-spacing: .02em;
-    background: linear-gradient(180deg, #fff 0%, #c6c5d0 34%, #f6f6fa 50%, #6e6c7a 68%, #d9d8e2 86%, #8f8d99 100%);
+    margin: 0; font-family: "Becker", "Kurale", Georgia, serif; font-weight: 400;
+    font-size: clamp(64px, min(14vw, 14vh), 160px); line-height: 1.05; letter-spacing: .015em;
+    background: linear-gradient(180deg, #fff 0%, #b9b8c6 30%, #f8f8fc 47%, #5d5b6a 60%, #e4e3ec 80%, #8d8b98 100%);
     -webkit-background-clip: text; background-clip: text; color: transparent;
-    -webkit-text-stroke: 1px rgba(30, 16, 10, .55);
-    filter: drop-shadow(0 3px 2px rgba(0, 0, 0, .85)) drop-shadow(0 0 18px rgba(0, 0, 0, .45));
+    -webkit-text-stroke: 1.5px rgba(24, 12, 8, .7);
+    filter: drop-shadow(0 3px 2px rgba(0, 0, 0, .9)) drop-shadow(0 0 16px rgba(0, 0, 0, .5));
   }
-  .hero .tag { margin: 0; max-width: 40rem; font-family: "Kurale", Georgia, serif; font-size: clamp(16px, 2.3vh, 21px);
+  .hero .tag { margin: 0 0 clamp(4px, 1.2vh, 14px); max-width: 40rem; font-family: "Kurale", Georgia, serif; font-size: clamp(16px, 2.3vh, 21px);
     color: var(--gold); text-shadow: 0 1px 2px #000, 0 0 12px rgba(0, 0, 0, .8); text-wrap: balance; }
-  .hero nav { display: flex; flex-direction: column; align-items: center; margin-top: 4px; }
-  .btn { position: relative; display: block; width: var(--bw); aspect-ratio: 214 / 112;
-    margin-top: calc(var(--bw) * -0.085); color: #f0eaff; text-decoration: none; -webkit-tap-highlight-color: transparent; }
+  .hero nav { display: flex; flex-direction: column; align-items: center; }
+  /* The ovals in the game's proportions: 228×96 each, 2 apart; the last (Exit) 196×131. */
+  .btn { position: relative; display: block; width: var(--bw); aspect-ratio: 228 / 96;
+    margin-top: calc(var(--bw) * 2 / 228); color: #f4eeff; text-decoration: none; -webkit-tap-highlight-color: transparent; }
   .btn:first-child { margin-top: 0; }
-  .btn:hover { color: #fff0d6; }
+  .btn.exit { width: calc(var(--bw) * 196 / 228); aspect-ratio: 196 / 131; }
   .btn svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible;
-    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .95)) drop-shadow(0 2px 5px rgba(0, 0, 0, .6)); }
+    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .95)) drop-shadow(0 3px 6px rgba(0, 0, 0, .55)); }
   .btn .metal { stroke: url(#silver); }
   .btn .leaf { fill: url(#silver); }
   .btn.hot .metal { stroke: url(#gold); }
@@ -46,9 +45,12 @@
   .btn.hot .still { fill: url(#marble-hot); }
   .no-fire .btn .still { display: inline; }
   .btn .label { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
-  .btn .label span { font-family: "Kurale", Georgia, serif; font-size: calc(var(--bw) * .1); white-space: nowrap; letter-spacing: .01em;
-    text-shadow: -1.5px 0 var(--rim), 1.5px 0 var(--rim), 0 -1.5px var(--rim), 0 1.5px var(--rim), 0 2px 6px rgba(0, 0, 0, .7); }
-  .btn.hot .label span { color: #fff0d6; }
+  .btn.exit .label { bottom: calc(100% - 100% * 108 / 131); }
+  .btn .label span { font-family: "Becker", "Kurale", Georgia, serif; font-size: calc(var(--bw) * .092); white-space: nowrap; letter-spacing: .01em;
+    text-shadow: -1.5px 0 var(--rim), 1.5px 0 var(--rim), 0 -1.5px var(--rim), 0 1.5px var(--rim),
+      -1px -1px var(--rim), 1px 1px var(--rim), -1px 1px var(--rim), 1px -1px var(--rim), 0 2px 6px rgba(0, 0, 0, .7); }
+  .btn.hot { color: #fff2d4; --rim: var(--rim-hot); }
+  .btn:active svg, .btn:active .label { transform: translateY(1px) scale(.992); }
   .btn:focus-visible { outline: none; }
   .btn:focus-visible .label span { text-decoration: underline; text-decoration-color: var(--gold); text-underline-offset: .2em; }
   .video { scroll-margin-top: 1.5rem; }
@@ -281,37 +283,68 @@
 
 <script>
 (() => {
-  // The oval frame, in the 214×112 box of the game's button picture. One quarter of the
-  // ornament, mirrored four ways; the last button gets a pointed tip below.
-  const QUARTER = `
-    <path class="metal" fill="none" stroke-width="3" stroke-linecap="round" d="M35 56 C27 55 21 49 22 42 C23 35 32 34 34 40 C35 44 30 46 28 43"/>
-    <path class="leaf" d="M34 56 C24 51 13 52 3 56 C13 58 24 59 34 56Z"/>
-    <path class="metal" fill="none" stroke-width="2.6" stroke-linecap="round" d="M60 29 C49 23 49 12 57 11 C63 10 64 18 59 19"/>
-    <path class="metal" fill="none" stroke-width="2.6" stroke-linecap="round" d="M107 24 C96 24 88 18 91 11 C93 6 100 7 100 12"/>
-    <path class="leaf" d="M107 25 C102 19 100 11 107 3 L107 25Z"/>`;
-  function frame(pointed) {
-    const q = (m) => `<g transform="${m}">${QUARTER}</g>`;
-    return `<svg viewBox="0 0 214 112" aria-hidden="true">
-      ${q("")}${q("matrix(-1 0 0 1 214 0)")}${q("matrix(1 0 0 -1 0 112)")}${q("matrix(-1 0 0 -1 214 112)")}
-      ${pointed ? `<path class="leaf" d="M107 84 C99 93 100 104 107 116 C114 104 115 93 107 84Z"/>` : ""}
-      <ellipse class="still" cx="107" cy="56" rx="68" ry="27.5"/>
-      <ellipse cx="107" cy="56" rx="77" ry="36" fill="none" stroke="rgba(20,12,8,.8)" stroke-width="1.4"/>
-      <ellipse class="metal" cx="107" cy="56" rx="72" ry="31.5" fill="none" stroke-width="9"/>
-      <ellipse cx="107" cy="56" rx="72" ry="31.5" fill="none" stroke="rgba(255,255,255,.75)" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="0.1 7.2"/>
-      <ellipse cx="107" cy="56" rx="67" ry="26.6" fill="none" stroke="rgba(20,12,8,.85)" stroke-width="1.6"/>
+  // The oval frames, after the game's menu buttons: a marble oval in a thick silver rim,
+  // a band of lace scrolls and beads around it and a spike at each end. A plain button is
+  // 228×96; the last (Exit) is 196×131, its lace taller with a spike below. `M` is where the
+  // marble is in each (the fire draws it through the frame's middle).
+  const M = { plain: { w: 228, h: 96, cx: 114, cy: 48, rx: 84, ry: 26 },
+              exit: { w: 196, h: 131, cx: 98, cy: 54, rx: 68, ry: 26 } };
+  const f1 = (v) => v.toFixed(1);
+  function frame(exit) {
+    const g = exit ? M.exit : M.plain;
+    const { cx, cy, rx, ry } = g;
+    const lx = exit ? 24 : 18, ly = exit ? 22 : 16; // the lace band's reach beyond the rim
+    const at = (t, ax, ay) => [cx + ax * Math.cos(t), cy + ay * Math.sin(t)];
+    const out = (t, ax, ay) => { const x = Math.cos(t) / ax, y = Math.sin(t) / ay, l = Math.hypot(x, y); return [x / l, y / l]; };
+    let lace = "";
+    const n = exit ? 30 : 32;
+    for (let k = 0; k < n; k++) {
+      const t = (k + .5) / n * Math.PI * 2;
+      const [bx, by] = at(t, rx + 6, ry + 5);
+      const [nx, ny] = out(t, rx + 6, ry + 5);
+      const s = k % 2 ? 1 : -1, gx = -ny * s, gy = nx * s; // along the band, every other one mirrored
+      const P = (a, b) => `${f1(bx + nx * a + gx * b)} ${f1(by + ny * a + gy * b)}`;
+      const r = Math.min(1, .55 + .45 * Math.abs(Math.cos(t))); // smaller above and below, where the band is thin
+      lace += `<path class="metal" fill="none" stroke-width="2.3" stroke-linecap="round" d="M${P(0, 0)} C${P(7 * r, -3)} ${P(13 * r, 3)} ${P(10 * r, 7)} C${P(7.5 * r, 9.5)} ${P(4.5 * r, 6)} ${P(7 * r, 4.5)}"/>`;
+      lace += `<path class="metal" fill="none" stroke-width="1.8" stroke-linecap="round" d="M${P((lx - 4) * r, 0)} C${P((lx - 9) * r, 3)} ${P((lx - 13) * r, -2)} ${P((lx - 11) * r, -6)} C${P((lx - 9) * r, -8)} ${P((lx - 6.5) * r, -5.5)} ${P((lx - 8) * r, -4)}"/>`;
+      const [ox, oy] = at(t + Math.PI / n, rx + lx, ry + ly);
+      lace += `<circle class="metal" cx="${f1(ox)}" cy="${f1(oy)}" r="${f1(2.4 * r + .7)}" fill="none" stroke-width="1.8"/>`;
+      const [ix, iy] = at(t + Math.PI / n, rx + 8, ry + 7), [jx, jy] = at(t + Math.PI / n, rx + lx - 3, ry + ly - 3);
+      lace += `<path class="metal" stroke-width="2" d="M${f1(ix)} ${f1(iy)} L${f1(jx)} ${f1(jy)}"/>`;
+    }
+    // The spikes at both ends: a lily of three leaves, the middle one long.
+    const lily = (x, d) => `<path class="leaf" d="M${x} ${cy} C${x + d * 8} ${cy - 9} ${x + d * 14} ${cy - 5} ${x + d * 22} ${cy} C${x + d * 14} ${cy + 5} ${x + d * 8} ${cy + 9} ${x} ${cy}Z"/>
+      <path class="leaf" d="M${x + d * 2} ${cy - 2} C${x + d * 6} ${cy - 14} ${x + d * 12} ${cy - 16} ${x + d * 15} ${cy - 13} C${x + d * 10} ${cy - 11} ${x + d * 7} ${cy - 6} ${x + d * 2} ${cy - 2}Z"/>
+      <path class="leaf" d="M${x + d * 2} ${cy + 2} C${x + d * 6} ${cy + 14} ${x + d * 12} ${cy + 16} ${x + d * 15} ${cy + 13} C${x + d * 10} ${cy + 11} ${x + d * 7} ${cy + 6} ${x + d * 2} ${cy + 2}Z"/>`;
+    const ends = lily(cx - rx - 9, -1) + lily(cx + rx + 9, 1);
+    // Crests: a small leaf above and below; Exit's lower one a long spike to the box's foot.
+    const crest = (y, d, len) => `<path class="leaf" d="M${cx} ${y} C${cx - 6} ${y + d * len * .35} ${cx - 3} ${y + d * len * .7} ${cx} ${y + d * len} C${cx + 3} ${y + d * len * .7} ${cx + 6} ${y + d * len * .35} ${cx} ${y}Z"/>`;
+    const crests = crest(cy - ry - 7, -1, ly - 5) + (exit ? crest(cy + ry + 6, 1, g.h - (cy + ry + 6) - 1)
+      + `<path class="metal" fill="none" stroke-width="2.2" stroke-linecap="round" d="M${cx - 30} ${cy + ry + 14} C${cx - 20} ${cy + ry + 30} ${cx - 9} ${cy + ry + 34} ${cx - 3} ${cy + ry + 46}"/>
+         <path class="metal" fill="none" stroke-width="2.2" stroke-linecap="round" d="M${cx + 30} ${cy + ry + 14} C${cx + 20} ${cy + ry + 30} ${cx + 9} ${cy + ry + 34} ${cx + 3} ${cy + ry + 46}"/>`
+      : crest(cy + ry + 7, 1, ly - 5));
+    return `<svg viewBox="0 0 ${g.w} ${g.h}" aria-hidden="true">
+      <ellipse cx="${cx}" cy="${cy}" rx="${rx + lx + 3}" ry="${ry + ly + 3}" fill="none" stroke="rgba(20,10,6,.35)" stroke-width="4"/>
+      ${lace}${ends}${crests}
+      <ellipse class="metal" cx="${cx}" cy="${cy}" rx="${rx + lx}" ry="${ry + ly}" fill="none" stroke-width="2.2"/>
+      <ellipse class="metal" cx="${cx}" cy="${cy}" rx="${rx + 7}" ry="${ry + 6}" fill="none" stroke-width="2.2"/>
+      <ellipse class="still" cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}"/>
+      <ellipse cx="${cx}" cy="${cy}" rx="${rx + 5.5}" ry="${ry + 5.5}" fill="none" stroke="rgba(20,12,8,.8)" stroke-width="1.2"/>
+      <ellipse class="metal" cx="${cx}" cy="${cy}" rx="${rx + 2.6}" ry="${ry + 2.6}" fill="none" stroke-width="5.6"/>
+      <ellipse cx="${cx}" cy="${cy}" rx="${rx + 2.6}" ry="${ry + 2.6}" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="1" transform="translate(0 -1.2)"/>
+      <ellipse cx="${cx}" cy="${cy}" rx="${rx - .2}" ry="${ry - .2}" fill="none" stroke="rgba(20,12,8,.85)" stroke-width="1.4"/>
     </svg>`;
   }
 
-
-
-  // The ovals: a frame each, the last one pointed; the word shrinks to fit the oval.
+  // The ovals: a frame each, the last one Exit's; the word shrinks to fit the oval.
   const buttons = [...document.querySelectorAll(".hero .btn")];
-  buttons.forEach((b, i) => b.insertAdjacentHTML("afterbegin", frame(i === buttons.length - 1)));
+  buttons.forEach((b, i) => { const exit = i === buttons.length - 1; b.classList.toggle("exit", exit); b.insertAdjacentHTML("afterbegin", frame(exit)); });
   function fit() {
     buttons.forEach((b) => {
       const s = b.querySelector(".label span");
+      const g = b.classList.contains("exit") ? M.exit : M.plain;
       s.style.fontSize = "";
-      const room = b.getBoundingClientRect().width * 0.6;
+      const room = b.getBoundingClientRect().width * (g.rx * 2 / g.w) * .86;
       let size = parseFloat(getComputedStyle(s).fontSize);
       while (s.getBoundingClientRect().width > room && size > 9) { size -= 0.5; s.style.fontSize = size + "px"; }
     });
@@ -391,11 +424,11 @@
     // Smoke and fire rising through the whole picture.
     vec2 w = vec2(fbm(n * 2. + vec2(0., T * .05)), fbm(n * 2. + vec2(5.2, 1.3) + vec2(0., T * .04)));
     float f = fbm(n * 2.6 + w * 1.6 + vec2(0., T * .09));
-    float heat = (.55 + .45 * (1. - abs(q.x - .5) * 1.6)) * (.55 + .6 * q.y);
-    float v = f * heat * 1.25;
-    vec3 col = mix(vec3(.07, .03, .012), vec3(.45, .18, .045), smoothstep(.2, .55, v));
-    col = mix(col, vec3(.93, .52, .15), smoothstep(.5, .85, v));
-    col = mix(col, vec3(1., .84, .5), smoothstep(.82, 1.05, v) * .6);
+    float heat = (.7 + .3 * (1. - abs(q.x - .5) * 1.6)) * (.7 + .45 * q.y);
+    float v = f * heat * 1.45;
+    vec3 col = mix(vec3(.16, .06, .015), vec3(.6, .27, .06), smoothstep(.15, .5, v));
+    col = mix(col, vec3(.96, .58, .16), smoothstep(.45, .8, v));
+    col = mix(col, vec3(1., .86, .5), smoothstep(.8, 1.05, v) * .65);
 
     // The stones, darker than the haze, lit by it at the edges.
     float ru = ruins(q);
@@ -417,22 +450,35 @@
       col += vec3(1., .46, .12) * tongue * 1.1 + vec3(1., .85, .5) * tongue * tongue * .55;
     }
 
-    // Fire around the column of buttons, and each button's swirling marble middle.
+    // Fire around each button, licking up through its lace (hotter around the lit one),
+    // and each button's swirling marble middle.
     for (int i = 0; i < 5; i++) {
       vec4 b = B[i];
       vec2 e = (p - b.xy) / b.zw;
       float r = length(e);
-      col += vec3(1., .45, .12) * exp(-r * r * .3) * .16 * (.8 + .2 * sin(T * 3. + float(i) * 1.7));
+      float hot = 1. - step(.1, abs(H - float(i)));
+      // The flames' ring, in the oval's own measure, so the ends burn as much as the sides.
+      vec2 o = (p - b.xy) / (b.zw + vec2(b.w * 1.1));
+      float ro = length(o);
+      float ring = smoothstep(.55, .8, ro) * smoothstep(1.75, 1.05, ro + max(-o.y, 0.) * -.35);
+      vec2 fp = vec2(p.x * .03 * S, p.y * .022 * S + T * 2.3 + float(i) * 7.);
+      float fl = fbm(fp) * .75 + fbm(fp * 2.2 + vec2(3.1, T * 1.2)) * .45;
+      float tongue = smoothstep(.5, .9, fl + .25 - ro * .32 - o.y * .18) * ring * (1. + .55 * hot);
+      col += vec3(1., .4, .08) * tongue * .95 + vec3(1., .8, .45) * tongue * tongue * .45;
+      col += vec3(1., .45, .12) * exp(-r * r * .3) * .08 * (.8 + .2 * sin(T * 3. + float(i) * 1.7));
+    }
+    for (int i = 0; i < 5; i++) {
+      vec4 b = B[i];
+      vec2 e = (p - b.xy) / b.zw;
+      float r = length(e);
+      float hot = 1. - step(.1, abs(H - float(i)));
       if (r < 1.05) {
-        float hot = 1. - step(.1, abs(H - float(i)));
-        float a = atan(e.y, e.x) + r * 2.4 - T * .55;
-        vec2 sw = vec2(cos(a), sin(a)) * r;
-        float m = fbm(sw * 2.3 + fbm(sw * 3. + T * .15 + float(i)) * 1.6 + float(i) * 3.1);
-        vec3 vi = mix(vec3(.17, .09, .5), vec3(.6, .47, 1.), smoothstep(.3, .75, m));
-        vi += vec3(.85, .8, 1.) * smoothstep(.68, .9, m) * .55;
-        vec3 wa = mix(vec3(.45, .15, .1), vec3(1., .66, .38), smoothstep(.3, .75, m));
-        wa += vec3(1., .9, .7) * smoothstep(.68, .9, m) * .55;
-        vec3 mc = mix(vi, wa, hot) * (.62 + .38 * (1. - r * r));
+        vec2 mp = vec2(e.x * b.z, e.y * b.w) / b.w;
+        float m = fbm(mp * 1.6 + vec2(fbm(mp * 2.4 + T * .08 + float(i)), fbm(mp * 2.4 - T * .07)) * 1.4 + float(i) * 3.1);
+        float vein = smoothstep(.04, 0., abs(fbm(mp * 3.1 + float(i) * 1.3 + T * .05) - .5)) * .5;
+        vec3 vi = mix(vec3(.3, .2, .62), vec3(.66, .56, .92), smoothstep(.25, .75, m)) + vec3(.85, .8, 1.) * vein * .5;
+        vec3 wa = mix(vec3(.5, .24, .17), vec3(.92, .62, .45), smoothstep(.25, .75, m)) + vec3(1., .9, .75) * vein * .5;
+        vec3 mc = mix(vi, wa, hot) * (.72 + .28 * (1. - r * r));
         col = mix(col, mc, smoothstep(1.03, .96, r));
       }
     }
@@ -476,10 +522,11 @@
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; gl.viewport(0, 0, w, h); }
     buttons.forEach((b, i) => {
       const r = b.getBoundingClientRect();
-      rects[i * 4] = (r.left - hr.left + r.width / 2) * scale;
-      rects[i * 4 + 1] = (r.top - hr.top + r.height / 2) * scale;
-      rects[i * 4 + 2] = r.width * (67 / 214) * scale;
-      rects[i * 4 + 3] = r.height * (26.6 / 112) * scale;
+      const g = b.classList.contains("exit") ? M.exit : M.plain, k = r.width / g.w;
+      rects[i * 4] = (r.left - hr.left + g.cx * k) * scale;
+      rects[i * 4 + 1] = (r.top - hr.top + g.cy * k) * scale;
+      rects[i * 4 + 2] = g.rx * k * scale;
+      rects[i * 4 + 3] = g.ry * k * scale;
     });
     const range = document.createRange(); range.selectNodeContents(title);
     const tr = range.getBoundingClientRect();

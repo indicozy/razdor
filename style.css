@@ -1,8 +1,9 @@
 /* Razdor's page, drawn after Discord Times' own interface: the main menu over burning
    ruins with its oval buttons, green marble windows in silver frames with a title strip,
    dark text boxes and parchment. Everything is CSS: none of the game's art is used.
-   Fonts: Kurale and PT Sans, the two free fonts Razdor ships (SIL OFL). */
+   Fonts: Becker Medium (titles and the menu), Kurale and PT Sans: the fonts Razdor ships. */
 
+@font-face { font-family: "Becker"; src: url("fonts/Becker-Medium.ttf") format("truetype"); font-display: swap; }
 @font-face { font-family: "Kurale"; src: url("fonts/Kurale-Regular.ttf") format("truetype"); font-display: swap; }
 @font-face { font-family: "PT Sans"; src: url("fonts/PT_Sans-Regular.ttf") format("truetype"); font-display: swap; }
 @font-face { font-family: "PT Sans"; src: url("fonts/PT_Sans-Bold.ttf") format("truetype"); font-weight: 700; font-display: swap; }
@@ -167,7 +168,7 @@ main { padding: 0 1.25rem 2rem; }
   margin: 0;
   padding: 0.5rem 3rem 0.45rem;
   text-align: center;
-  font-family: "Kurale", serif;
+  font-family: "Becker", "Kurale", serif;
   font-weight: 400;
   font-size: 1.3rem;
   color: var(--cream);
@@ -226,7 +227,7 @@ main { padding: 0 1.25rem 2rem; }
 .box + .box { margin-top: 1rem; }
 .box h3 {
   margin: 0 0 0.6rem;
-  font-family: "Kurale", serif;
+  font-family: "Becker", "Kurale", serif;
   font-weight: 400;
   font-size: 1.35rem;
   color: var(--cream);
