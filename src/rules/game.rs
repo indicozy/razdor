@@ -1439,6 +1439,16 @@ impl Game {
         events
     }
 
+    /// A click on the building he stands in enters it again (0x4cd0aa → 0x4bbc84): a
+    /// village rolls its offer and pays what has refilled since, as on arrival.
+    pub fn reenter_building(&mut self) -> Vec<Event> {
+        let mut events = Vec::new();
+        if let Some(l) = self.location {
+            self.enter_building(l, false, &mut events);
+        }
+        events
+    }
+
     /// Entering building `l` (0x4bbc84): its window opens unless it is a bridge or an
     /// obelisk ([`Event::Arrived`]), with a village's offer or tribute. `scan` runs the
     /// events first when he has only now come into it; one that opens its window keeps the

@@ -1032,6 +1032,22 @@ mod tests {
     }
 
     #[test]
+    fn a_click_on_the_village_he_stands_in_pays_what_has_refilled() {
+        // 0x4cd0aa → 0x4bbc84: the click enters it again, so the refilled stock is paid
+        // (Razdor 0.4.4 showed "already taken" and left it in the village).
+        let seed = (0..200).find(|&s| walk_into_village(s, 1).0.village_offer().is_none()).unwrap();
+        let (mut g, _, _) = walk_into_village(seed, 1);
+        (g.world.locations[0].tribute_gold, g.world.locations[0].tribute_mana) = (40, 5);
+        let (gold, mana) = (g.gold, g.mana);
+        let events = g.reenter_building();
+        assert!(events.contains(&Event::Arrived(0)), "{events:?}");
+        if g.village_offer().is_none() {
+            assert!(events.contains(&Event::Tribute { at: 0, paid: Tribute::Gold(40), mana: 5 }), "{events:?}");
+            assert_eq!((g.gold, g.mana), (gold + 40, mana + 5));
+        }
+    }
+
+    #[test]
     fn with_an_offer_the_tribute_waits_for_the_answer() {
         let seed = (0..200).find(|&s| walk_into_village(s, 1).0.village_offer().is_some()).unwrap();
         let (mut g, events, _) = walk_into_village(seed, 1);

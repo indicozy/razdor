@@ -1617,9 +1617,11 @@ fn update_pointer(game: &Game, view: &mut MapView, cam: &Camera, on_minimap: boo
     }
 }
 
-/// A click on the building the party stands in (`t` one of its cells): its window again, or
-/// the battle with a garrison still to beat. Nothing for a burnt camp.
-fn reopen_here(game: &mut Game, t: Tile) -> Option<Screen> {
+/// A click on the building the party stands in (`t` one of its cells): he enters it again
+/// (0x4cd0aa → 0x4bbc84: a village's offer, or its window paying what has refilled), or the
+/// battle with a garrison still to beat. Nothing for a burnt camp. `None` when the click was
+/// not on that building.
+fn reopen_here(game: &mut Game, t: Tile, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) -> Option<Option<Screen>> {
     let l = game.location?;
     if game.world.location_covering(t).or_else(|| game.world.location_at(t)) != Some(l) {
         return None;
@@ -1630,9 +1632,10 @@ fn reopen_here(game: &mut Game, t: Tile) -> Option<Screen> {
     }
     if loc.defended() {
         game.foe = Some(Foe::Garrison(l));
-        return Some(saves::battle(game));
+        return Some(Some(saves::battle(game)));
     }
-    game.window_at(l).map(|first| Screen::Building(BuildingView::new(first)))
+    let events = game.reenter_building();
+    Some(handle_events(game, events, message, dialogs))
 }
 
 
@@ -1987,10 +1990,9 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
             swallow_input();
         }
     } else if clicked() && !on_minimap {
-        if let Some(screen) = hovered.and_then(|t| reopen_here(game, t)) {
+        if let Some(screen) = hovered.and_then(|t| reopen_here(game, t, message, dialogs)) {
             // A click on the building the party stands in opens it again.
-            *message = None;
-            reopened = Some(screen);
+            reopened = screen;
         } else if let Some(target) = hovered.filter(|&t| game.can_target(t)) {
             // Only a target cell counts (explored, open on his map, or his ship): a click
             // anywhere else does nothing, as in the original. The first click shows the
