@@ -5,7 +5,8 @@
 //!   drains, so screens need no audio handle and the rules know nothing of sound.
 //! - Music follows the [`Mood`] the app derives from the current screen ([`super::jukebox`]).
 //!   Effects are loaded once at start; a music track is decoded when it starts and dropped
-//!   when the next one does (a few MB each).
+//!   once it has faded out under the next one (a few MB each). Changes crossfade, as the
+//!   original's do ([`jukebox::Fade`]).
 //! - Silent without an install, with `RAZDOR_NO_AUDIO=1`, when built without the `audio`
 //!   feature, or when no sound device opens. `RAZDOR_AUDIO_LOG=1` prints every sound played.
 //! - Volumes and mutes ([`Settings`]) are kept in `audio.json` in the save folder.
@@ -22,7 +23,7 @@ use razdor::dt::install::DtInstall;
 use razdor::dt::sound::{self, SoundTable};
 
 pub use super::jukebox::Mood;
-use super::jukebox::{self, Change, Jukebox};
+use super::jukebox::{self, Change, Fade, Jukebox};
 
 /// A sound effect asked for by a screen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -310,6 +311,29 @@ fn env_flag(name: &str) -> bool {
     std::env::var(name).is_ok_and(|v| !v.is_empty() && v != "0")
 }
 
+/// A music track playing, with its fade.
+struct Track {
+    track: &'static str,
+    sound: Sound,
+    fade: Fade,
+    /// When it was started (the player's clock) and how long it lasts, for the jukebox.
+    start: f64,
+    secs: f64,
+    /// The volume last applied.
+    volume: f32,
+}
+
+impl Track {
+    /// Applies the fade's level of the music volume `gain`.
+    fn set_volume(&mut self, gain: f32) {
+        let volume = self.fade.level() * gain;
+        if volume != self.volume {
+            set_sound_volume(&self.sound, volume);
+            self.volume = volume;
+        }
+    }
+}
+
 /// The loaded sounds of an install.
 struct Backend {
     dir: PathBuf,
@@ -317,9 +341,15 @@ struct Backend {
     raw_rate: u32,
     /// Effects by `[SFX-Effects]` key.
     sfx: HashMap<String, Sound>,
-    music: Option<Sound>,
-    /// The music volume last applied.
-    gain: f32,
+    /// The jukebox's track (fading in or at full volume).
+    music: Option<Track>,
+    /// Earlier tracks fading out; each stops and is dropped once silent.
+    fading: Vec<Track>,
+    /// The next change's crossfade: the rotation's, once it has picked, else a screen change's.
+    next_fade: f32,
+    /// A track has been started: the program's first one starts without a fade, as the
+    /// original's.
+    played: bool,
     jukebox: Jukebox,
 }
 
@@ -332,10 +362,12 @@ pub struct Audio {
 
 impl Audio {
     /// The map rotation's track from now on (`rules::music`): the world theme at a map start
-    /// or load, then the app's picks. A triumph still playing ends.
-    pub fn set_map_track(&mut self, track: &'static str) {
+    /// or load, then the app's picks (`rotated`: crossfaded over the rotation's longer
+    /// [`jukebox::ROTATION_FADE`]). A triumph still playing ends.
+    pub fn set_map_track(&mut self, track: &'static str, rotated: bool) {
         if let Some(b) = self.backend.as_mut() {
             b.jukebox.set_map_track(track);
+            b.next_fade = if rotated { jukebox::ROTATION_FADE } else { jukebox::SCREEN_FADE };
         }
     }
 
@@ -418,13 +450,8 @@ impl Audio {
         }
         let change = b.jukebox.update(mood, macroquad::time::get_time());
         b.apply(change, &self.settings, self.log);
-        let gain = self.settings.music_gain();
-        if gain != b.gain {
-            if let Some(m) = &b.music {
-                set_sound_volume(m, gain);
-            }
-            b.gain = gain;
-        }
+        // A long frame (a track decoded) moves the fades at most a tenth of a second.
+        b.fade(macroquad::time::get_frame_time().min(0.1), self.settings.music_gain());
     }
 }
 
@@ -445,7 +472,7 @@ impl Backend {
             }
         }
         let jukebox = Jukebox::new(|t| table.background(t).is_some());
-        Ok(Backend { dir: dir.to_path_buf(), table, raw_rate, sfx, music: None, gain: 0.0, jukebox })
+        Ok(Backend { dir: dir.to_path_buf(), table, raw_rate, sfx, music: None, fading: Vec::new(), next_fade: jukebox::SCREEN_FADE, played: false, jukebox })
     }
 
     fn play_effect(&mut self, c: Cue, settings: &Settings, log: bool) {
@@ -467,37 +494,88 @@ impl Backend {
         }
     }
 
+    /// Stops every track at once (the app is quitting).
     fn stop_music(&mut self) {
-        if let Some(m) = self.music.take() {
-            stop_sound(&m);
+        for t in self.music.take().into_iter().chain(self.fading.drain(..)) {
+            stop_sound(&t.sound);
         }
     }
 
+    /// The jukebox's track starts fading out over `secs`.
+    fn fade_out(&mut self, secs: f32) {
+        if let Some(mut t) = self.music.take() {
+            t.fade = t.fade.toward(0.0, secs);
+            self.fading.push(t);
+        }
+    }
+
+    /// Moves the fades on by `dt` seconds at the music volume `gain`; faded-out tracks stop.
+    fn fade(&mut self, dt: f32, gain: f32) {
+        for t in self.music.iter_mut().chain(self.fading.iter_mut()) {
+            t.fade.step(dt);
+            t.set_volume(gain);
+        }
+        self.fading.retain(|t| {
+            if t.fade.silent() {
+                stop_sound(&t.sound);
+            }
+            !t.fade.silent()
+        });
+    }
+
     fn apply(&mut self, change: Option<Change>, settings: &Settings, log: bool) {
-        match change {
-            None => {}
-            Some(Change::Stop) => {
-                self.stop_music();
+        let Some(change) = change else { return };
+        let gain = settings.music_gain();
+        let now = macroquad::time::get_time();
+        // A looping track that came to its end starts again where its fade is.
+        if let (Change::Play(track), Some(t)) = (change, self.music.as_mut()) {
+            if t.track == track {
+                stop_sound(&t.sound);
+                play_sound(&t.sound, PlaySoundParams { looped: false, volume: t.volume });
+                t.start = now;
+                self.jukebox.started(track, now, t.secs);
                 if log {
-                    razdor::diag!("audio: music stops");
+                    razdor::diag!("audio: music {track} again");
+                }
+                return;
+            }
+        }
+        let secs = std::mem::replace(&mut self.next_fade, jukebox::SCREEN_FADE);
+        self.fade_out(secs);
+        match change {
+            Change::Stop => {
+                if log {
+                    razdor::diag!("audio: music fades out over {secs:.1} s");
                 }
             }
-            Some(Change::Play(track)) => {
-                self.stop_music();
+            // A track still fading out comes back from the level it has reached.
+            Change::Play(track) if self.fading.iter().any(|t| t.track == track) => {
+                let k = self.fading.iter().position(|t| t.track == track).unwrap_or_default();
+                let mut t = self.fading.remove(k);
+                t.fade = t.fade.toward(1.0, secs);
+                self.jukebox.started(track, t.start, t.secs);
+                self.music = Some(t);
+                if log {
+                    razdor::diag!("audio: music {track} fades back in over {secs:.1} s");
+                }
+            }
+            Change::Play(track) => {
                 let file = self.table.background(track).unwrap_or_default().to_string();
                 let t0 = std::time::Instant::now();
                 let loaded = sound::read_sound(&self.dir, &file, self.raw_rate)
                     .map_err(|e| e.to_string())
                     .and_then(|pcm| load_now(&pcm.resampled(OUTPUT_RATE).to_wav()).map(|s| (s, pcm.duration())).ok_or_else(|| "cannot be played".into()));
                 match loaded {
-                    Ok((s, secs)) => {
-                        let gain = settings.music_gain();
-                        play_sound(&s, PlaySoundParams { looped: false, volume: gain });
-                        self.gain = gain;
-                        self.music = Some(s);
-                        self.jukebox.started(track, macroquad::time::get_time(), secs);
+                    Ok((sound, len)) => {
+                        let now = macroquad::time::get_time();
+                        let fade = if self.played { Fade::fade_in(secs) } else { Fade::FULL };
+                        let volume = fade.level() * gain;
+                        play_sound(&sound, PlaySoundParams { looped: false, volume });
+                        self.played = true;
+                        self.music = Some(Track { track, sound, fade, start: now, secs: len, volume });
+                        self.jukebox.started(track, now, len);
                         if log {
-                            razdor::diag!("audio: music {track} ({file}, {secs:.1} s, decoded in {} ms) at {gain:.1}", t0.elapsed().as_millis());
+                            razdor::diag!("audio: music {track} ({file}, {len:.1} s, decoded in {} ms) at {gain:.1}, fading in over {secs:.1} s", t0.elapsed().as_millis());
                         }
                     }
                     Err(e) => {

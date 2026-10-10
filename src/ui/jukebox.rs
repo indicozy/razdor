@@ -7,7 +7,11 @@
 //!
 //! The map rotation's picks are draws of the game's generator, so the app makes them
 //! (`rules::music`, `App::rotate_music`) and hands the track over ([`Jukebox::set_map_track`]).
-//! The original's cross-fades are left out.
+//!
+//! A change crossfades as in the original (0x49d774, 0x4819cc): the old track fades out and the
+//! new one in, linearly, over 2 s ([`SCREEN_FADE`]), or 4 s for the rotation's picks
+//! ([`ROTATION_FADE`]); the program's first track starts without one. The levels ([`Fade`]) are
+//! advanced by the frames' lengths and scale the music volume.
 //!
 //! Tracks are named by their `_Sounds.ini` keys (`[Backgrounds]`).
 
@@ -17,6 +21,57 @@ pub const MENU: &str = "BkgMenuMain";
 pub const AUTHORS: &str = "BkgAuthors";
 /// The battle themes, the triumph and the defeat piece (shared with the replay's log).
 pub use razdor::av::{BATTLE, DEFEAT, TRIUMPH};
+
+/// A crossfade's length on a screen change (a battle, its end, the menus), in seconds.
+pub const SCREEN_FADE: f32 = 2.0;
+/// A crossfade's length when the map rotation picks the next track, in seconds.
+pub const ROTATION_FADE: f32 = 4.0;
+
+/// One track's loudness in a crossfade (0x4819cc): its level, a share of the music volume,
+/// goes in a straight line from `from` to `to` over `secs`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Fade {
+    from: f32,
+    to: f32,
+    secs: f32,
+    /// Seconds since it began, at most `secs`.
+    t: f32,
+}
+
+impl Fade {
+    /// The full music volume, no fade.
+    pub const FULL: Fade = Fade { from: 1.0, to: 1.0, secs: 0.0, t: 0.0 };
+
+    /// From silence up to the full music volume over `secs`.
+    pub fn fade_in(secs: f32) -> Fade {
+        Fade { from: 0.0, to: 1.0, secs: secs.max(0.0), t: 0.0 }
+    }
+
+    /// A newer fade toward `to` over `secs`, from the level this one has reached: it replaces
+    /// this one, as the original's does.
+    pub fn toward(self, to: f32, secs: f32) -> Fade {
+        Fade { from: self.level(), to, secs: secs.max(0.0), t: 0.0 }
+    }
+
+    /// The share of the music volume now (0..1).
+    pub fn level(&self) -> f32 {
+        if self.t >= self.secs {
+            self.to
+        } else {
+            self.from + (self.to - self.from) * self.t / self.secs
+        }
+    }
+
+    /// `dt` seconds (a frame) have gone by.
+    pub fn step(&mut self, dt: f32) {
+        self.t = (self.t + dt.max(0.0)).min(self.secs);
+    }
+
+    /// It has faded out: the track can stop.
+    pub fn silent(&self) -> bool {
+        self.t >= self.secs && self.to <= 0.0
+    }
+}
 
 /// What the current screen wants to hear.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -242,6 +297,47 @@ mod tests {
         assert_eq!(step(&mut j, Mood::Menu, 61.0, 5.0), Some(Change::Play(MENU)));
         assert_eq!(step(&mut j, Mood::Won, 62.0, 5.0), Some(Change::Play(TRIUMPH)));
         assert_eq!(step(&mut j, Mood::Won, 70.0, 5.0), None);
+    }
+
+    fn close(a: f32, b: f32) -> bool {
+        (a - b).abs() < 1e-5
+    }
+
+    #[test]
+    fn a_fade_is_linear_over_its_length() {
+        let mut f = Fade::fade_in(SCREEN_FADE);
+        assert_eq!(f.level(), 0.0);
+        f.step(0.5);
+        assert!(close(f.level(), 0.25));
+        f.step(1.0);
+        assert!(close(f.level(), 0.75));
+        f.step(10.0);
+        assert_eq!(f.level(), 1.0);
+        assert!(!f.silent());
+        let mut out = f.toward(0.0, ROTATION_FADE);
+        out.step(1.0);
+        assert!(close(out.level(), 0.75));
+        out.step(-1.0);
+        assert!(close(out.level(), 0.75), "time does not run back");
+        out.step(3.0);
+        assert!(out.silent());
+        assert_eq!(Fade::FULL.level(), 1.0);
+        assert!(!Fade::FULL.silent());
+    }
+
+    /// A track faded halfway out and brought back rises from where it was, over the whole
+    /// length (the newer fade starts from the current volume).
+    #[test]
+    fn a_newer_fade_starts_from_the_current_level() {
+        let mut f = Fade::FULL.toward(0.0, 2.0);
+        f.step(1.0);
+        let mut back = f.toward(1.0, 2.0);
+        assert!(close(back.level(), 0.5));
+        back.step(1.0);
+        assert!(close(back.level(), 0.75));
+        back.step(1.0);
+        assert_eq!(back.level(), 1.0);
+        assert!(Fade::FULL.toward(0.0, 0.0).silent(), "a zero length is at its end at once");
     }
 
     #[test]
