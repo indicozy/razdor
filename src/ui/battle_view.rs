@@ -32,8 +32,6 @@ use super::widgets::*;
 use super::world_view;
 use super::Screen;
 
-const AI_DELAY: f32 = 0.45;
-const MOVE_TIME: f32 = 0.25;
 const ACTIVE: Color = Color::new(0.35, 1.0, 0.35, 1.0);
 const FRIENDLY: Color = Color::new(0.35, 0.55, 1.0, 1.0);
 const HOSTILE: Color = Color::new(1.0, 0.35, 0.35, 1.0);
@@ -117,8 +115,8 @@ enum FxKind {
     /// its sound; then, for a counterblow, the slide back and the same effect on the actor, or,
     /// for a `DeathCurse` death of the killer, the sorcery on the actor (`echo`, 0x4c43e8).
     Act { hit: Hit, echo: Option<Echo>, slide: f32, effect: f32, cued: bool, echo_cued: bool },
-    /// The actor slides between two cells.
-    Move { from: Vec2, to: Vec2 },
+    /// The actor's card slides between two cells (`secs` seconds, 0x4b0284).
+    Move { from: Vec2, to: Vec2, secs: f32 },
     /// A pass: a short pause (0x4afb54).
     Pass,
 }
@@ -147,6 +145,13 @@ impl Fx {
         Fx { actor, kind, t: 0.0, before: Vec::new() }
     }
 
+    /// `actor`'s card sliding from cell `from` to cell `to` of `team`'s side.
+    fn card_move(l: &Layout, actor: usize, team: Team, from: Slot, to: Slot) -> Fx {
+        let (from, to) = (l.cell_pos(team, from), l.cell_pos(team, to));
+        let secs = move_secs(from.distance(to) * 92.0 / l.card.x);
+        Fx::plain(actor, FxKind::Move { from, to, secs })
+    }
+
     /// When the first effect ends and when the echo's starts (after its slide back).
     fn marks(&self) -> (f32, f32) {
         match self.kind {
@@ -162,7 +167,7 @@ impl Fx {
         match self.kind {
             FxKind::Act { echo: Some(_), effect, .. } => self.marks().1 + effect,
             FxKind::Act { .. } => self.marks().0,
-            FxKind::Move { .. } => MOVE_TIME,
+            FxKind::Move { secs, .. } => secs,
             FxKind::Pass => razdor::av::BATTLE_PASS_MS as f32 / 1000.0,
         }
     }
@@ -213,6 +218,12 @@ fn effect_secs(speed: Option<f32>) -> f32 {
     speed.map_or(350.0, |s| (100.0 - s) * 3.0) / 1000.0
 }
 
+/// A card slide's length over `px` of the original's pixels (0x4b0284): 0.7 ms a pixel
+/// (0x4b059c), at most 200 ms.
+fn move_secs(px: f32) -> f32 {
+    (0.7 * px).round().min(200.0) / 1000.0
+}
+
 /// The distance between the centres of `a`'s and `b`'s cards, in the original's pixels (its
 /// card is 92 wide).
 fn card_distance(l: &Layout, battle: &Battle, a: usize, b: usize) -> f32 {
@@ -239,7 +250,6 @@ fn slide_sprite(kind: ActionKind, team: Team) -> &'static str {
 pub struct BattleView {
     battle: Battle,
     fx: Option<Fx>,
-    ai_timer: f32,
     /// XP shares, computed once the battle is over.
     xp: Option<Vec<XpAward>>,
     /// The result box has shown and its music started (once).
@@ -411,7 +421,6 @@ impl BattleView {
         BattleView {
             battle,
             fx: None,
-            ai_timer: 0.0,
             xp: None,
             result_cued: false,
             news: None,
@@ -456,7 +465,6 @@ impl BattleView {
             }
         } else {
             self.watch = true;
-            self.ai_timer = 0.0;
         }
     }
 
@@ -619,24 +627,23 @@ impl BattleView {
                 if self.human(self.battle.fighters[active].team) {
                     self.player_input(l, active);
                 } else {
-                    self.ai_timer += dt;
-                    if self.ai_timer >= AI_DELAY {
-                        self.ai_timer = 0.0;
-                        let before = self.battle.fighters.clone();
-                        self.fx = match self.ai_move() {
-                            Some(Step::Act { actor, hit }) => {
-                                let px = card_distance(l, &self.battle, actor, hit.target);
-                                Some(Fx::act(&self.battle, actor, hit, px, before))
-                            }
-                            Some(Step::Move { actor, from, to }) => {
-                                cue(Cue::CardMove);
-                                let team = self.battle.fighters[actor].team;
-                                let kind = FxKind::Move { from: l.cell_pos(team, from), to: l.cell_pos(team, to) };
-                                Some(Fx::plain(actor, kind))
-                            }
-                            Some(Step::Wait { .. }) | None => None,
-                        };
-                    }
+                    // The computer's unit acts as soon as the last animation ends: Battle_Step
+                    // (0x4c57bc), called as each animation finishes, queues its action at once,
+                    // a pass with the same 100 ms pause as the player's (0x4afb54).
+                    let before = self.battle.fighters.clone();
+                    self.fx = match self.ai_move() {
+                        Some(Step::Act { actor, hit }) => {
+                            let px = card_distance(l, &self.battle, actor, hit.target);
+                            Some(Fx::act(&self.battle, actor, hit, px, before))
+                        }
+                        Some(Step::Move { actor, from, to }) => {
+                            cue(Cue::CardMove);
+                            let team = self.battle.fighters[actor].team;
+                            Some(Fx::card_move(l, actor, team, from, to))
+                        }
+                        Some(Step::Wait { actor }) => Some(Fx::plain(actor, FxKind::Pass)),
+                        None => None,
+                    };
                 }
             }
         }
@@ -806,8 +813,7 @@ impl BattleView {
             let from = self.battle.fighters[active].slot;
             if self.battle.move_active(to).is_ok() {
                 cue(Cue::CardMove);
-                let kind = FxKind::Move { from: l.cell_pos(team, from), to: l.cell_pos(team, to) };
-                self.fx = Some(Fx::plain(active, kind));
+                self.fx = Some(Fx::card_move(l, active, team, from, to));
             }
         }
     }
@@ -874,9 +880,9 @@ impl BattleView {
             }
             let mut p = l.cell_pos(f.team, f.slot);
             if let Some(fx) = &self.fx {
-                if let FxKind::Move { from, to } = &fx.kind {
+                if let FxKind::Move { from, to, secs } = &fx.kind {
                     if fx.actor == i {
-                        p = from.lerp(*to, (fx.t / MOVE_TIME).min(1.0));
+                        p = from.lerp(*to, (fx.t / secs).min(1.0));
                     }
                 }
             }
@@ -1474,6 +1480,8 @@ mod tests {
         assert_eq!(slide_secs(400.0, Some(50.0)), 0.25);
         assert_eq!(effect_secs(None), 0.35);
         assert_eq!(effect_secs(Some(0.0)), 0.3);
+        assert_eq!(move_secs(96.0), 0.067, "a card's slide to the next cell");
+        assert_eq!(move_secs(400.0), 0.2, "capped at 200 ms");
         assert_eq!(slide_sprite(ActionKind::Shot, Team::Enemy), "army-3");
     }
 }
