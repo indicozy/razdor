@@ -2004,7 +2004,10 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
             game.cut_wait();
             swallow_input();
         }
-    } else if clicked() && !on_minimap {
+    } else if clicked() && !on_minimap && !game.holds_events() {
+        // Not while the last step is drawn with its events held: they come at its end, and a
+        // click on the building it entered would enter it again before them (a village's
+        // window "already taken" over its tribute).
         if let Some(screen) = hovered.and_then(|t| reopen_here(game, t, message, dialogs)) {
             // A click on the building the party stands in opens it again.
             reopened = screen;
