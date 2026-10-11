@@ -790,6 +790,37 @@ grey 96 − d·5334/1000: the border loses 96, the middle nothing). The "lock" i
 no picture of the install. Otherwise each portrait is plain under a glow frame. An empty
 option is a plain background. The original writes no text on this view. **code**
 
+**Promotion animation** (4b1a04, a chained frame callback scheduled by the portrait's click
+4c3d38 with `n << 8 | unit`). Input is off (68dc63 = 0) until it ends; `t` is the time since
+its first frame.
+- First frame: the hint box is hidden, the start time kept, and `Unit-Upgrade` plays **at
+  once** (4b1af3). Portrait `n` is drawn as an empty option (494340 for unit 1, the hero,
+  who has no next type) and stays so until the class changes. The length is
+  `D = Round(7 × distance from portrait n to portrait 0) + 500`, at most 8191 ms (4b1b45, the
+  float 7.0 at 4b2040). The portraits are 94 px squares, the options at window (286 + 106·(n −
+  1), 57), the unit's at (392, 200) (4da5e1): **1501 ms** for the middle option, **1746 ms**
+  for a side one.
+- Battle effect 6 (`--UPGRADE`, 50 frames, the 220×110 frame with its rows doubled, 48e058)
+  is drawn every frame over everything, its 220 px square at the portrait less 63 (668c5c,
+  set by 4e1148), the background under it saved in the 220×220 surface ae285c and put back
+  the next frame. For `t < 500` it sits on portrait n, frame `min(15, t·15/500)`; then it
+  travels to portrait 0 by the ease 4b1918 of `(t − 500, D − 500)`, frame `min(49, 16 + (t −
+  500)·33/(D − 500))`.
+- For `t < 400` the empty portrait n gets a green glow added (4768f8 mode 0, colour
+  476374(0, a, a/2)) with `a = (400 − t)·160/400`.
+- `D − 200 < t ≤ D − 100`: the same glow on all four portraits, `a = 2(t − (D − 200))`, up to
+  200 (portrait n still empty).
+- `D − 100 < t ≤ D`: on the first such frame the class changes (4b1dcb, guarded by `L > 0`;
+  see experience.md §4), the four portraits are drawn for the new class (locked: its level
+  is 0) with `a = 2(D − t)`, down to 0.
+- Every frame the unit's army card is drawn darkened under the running `exp` strip, row
+  `((now − start) / 3) mod 512` (4b05a8 from 4b1f05): the experience card's overlay (§9.9)
+  without `exp-hole` and without text.
+- `t ≥ D`: the background is put back, the class changed if not yet, the unit's panel painted
+  (492f24), the portraits drawn, nothing selected (668a08 = 0) with the unit's tree kept up
+  (498d0c), its card redrawn plain (49462c), the hint hidden, the stats rebuilt (497240), and
+  input on again. **code**
+
 **Pack scrolling** (49a718). The pack holds 256 slots; its length is the last used slot + 1.
 The first shown slot is `5 × Round(max(0, length div 5 − 4) × s)`, where s is the scroll bar
 position from 0 to 1 and Round is the FPU's round-half-to-even. So 20–24 items never scroll and
@@ -897,8 +928,9 @@ whose unit has a last gain above 0: the card, its portrait darkened (grey 64 sub
 `(elapsed / 3) mod 512` added (476790 mode 0), `exp-hole` at half (48da5c 512/1024) subtracted
 (mode 1), the `Expirience` label at y + 31 and "+ N" (the last gain) at y + 47, centred, font
 ae24a8 (Benguiat 55, 180, 255), and `Sign-Upgrade` at (+3, +3) when the unit's level is above
-its first (L > 0) and its type has a next one (492dd4). The same overlay runs on the army
-screen's card during the promotion animation (4b05a8 from 4b1f05, inside 4b1a04). When the hold ends, a dead hero is set to 1 HP before the screen closes. **code**
+its first (L > 0) and its type has a next one (492dd4). The army screen's card runs the same
+overlay, without `exp-hole` and text, during the promotion animation (4b05a8 from 4b1f05,
+inside 4b1a04; §9.7). When the hold ends, a dead hero is set to 1 HP before the screen closes. **code**
 
 ## 10. Hints and tooltips
 
@@ -1132,6 +1164,7 @@ it. **code**/**data**
 | Battle effect | 350 ms base, 25 frames | 4afe7c |
 | Battle pass / card slide | 100 ms / 0.7 ms per px, at most 200 ms | 4afb54, 4b0284 |
 | Battle won, hold | 2500 ms, then 250 ms to the report | 4c56a8 |
+| Promotion animation | 7 ms per px from the picked portrait to the unit's + 500 (1501 / 1746 ms), at most 8191; class changes 100 ms before the end | 4b1a04 |
 | Promotion screen ease | piecewise slopes 1, 2, 3, 2, 1 | 4b1918 |
 | Walk and wait pacing | WalkDelay per step or 30-minute tick (world.md) | 4b8c4f |
 
@@ -1235,9 +1268,10 @@ parity rule they are candidates to hide or remove, not bugs to copy.
 | 61 | Village offers | Matches: the offer is a Yes/No question in the event window before any village window, titled with the village's name, the install's `VillageBonusN` texts, its `Village_Bonus_N` picture left of the text (`Picture::Side`); Yes to the furs, witch or innkeeper shows its result window with the same picture; No opens the village window. Other events' own pictures are still drawn over the text | 4aca80, 4a9d88, 4d179b: the picture left of the text box, 1 px frame | 9.8 |
 | 62 | Dead card | Matches: `Army-Death` with 64 off each channel, added over the portrait at HP 0 on the army and building cards (`chrome::death_veil`); in battle a dead unit's cell is empty. Without the art, a dark veil and a red cross | `Army-Death` −64, additive at (+1, +1), outside battle; in battle the slot shows empty | 9.5 |
 | 63 | Card shadows | Matches: `Shadow-Unit` through its alpha under every occupied card (army, building, battle, the barracks' hire offers), only its band right of and below the card (`chrome::unit_shadow`). `Shadow-Empty` under empty cells is drawn whole at 55 % (Razdor's), not masked over the card | `Shadow-Unit` / `Shadow-Empty` through their alpha, masks cleared over 94×133 / 94×94 | 9.5 |
-| 64 | Experience cards | Matches: the darkened portrait, the running `exp` strip and `exp-hole` (`chrome::xp_veil`), «Опыт» and "+ N" in light blue Benguiat at y + 31 / y + 47, `Sign-Upgrade` at (+3, +3) for a unit past its first level with a next type; without the art Razdor's "XP +N" box. The army screen has no promotion animation, so no overlay there | 4b0684 during the won hold; 4b05a8 in the promotion animation | 9.9 |
+| 64 | Experience cards | Matches: the darkened portrait, the running `exp` strip and `exp-hole` (`chrome::xp_veil`), «Опыт» and "+ N" in light blue Benguiat at y + 31 / y + 47, `Sign-Upgrade` at (+3, +3) for a unit past its first level with a next type; without the art Razdor's "XP +N" box. The promoted unit's card has the overlay without `exp-hole` and text while the promotion plays (`chrome::xp_glow`, row 68) | 4b0684 during the won hold; 4b05a8 in the promotion animation | 9.9 |
 | 65 | Unit panel state lines | Matches: dead → `Bonus-Ressurrect` with `Hint3`; else unpaid (army window, not a type preview, not in battle) → `Bonus-NoPayment` over an empty row (the original's bug); else `Bonus-2Row`, `Bonus-InCastle` (`unit_sheet::state_lines`). Razdor's red "Dead" / "Unpaid" status lines are gone | The same chain; the no-payment text never set | 9.1 |
 | 66 | Map hover marks | Matches: the hovered cell's ring in the colour of the original's mark, worked out on entering another cell (`cursor::hover_ring`, `world_view::update_pointer`), in place of the army's mark on that cell; the ring stays over the bar; Razdor drops it while the hero walks | The ring, under the building's picture | 7.2 |
+| 68 | Promotion animation | Matches (`items_view::Promo`): `Unit-Upgrade` on the click, the picked portrait empty with the fading green glow, effect 6 frames 0–15 on it for 500 ms then 16–49 eased down to the unit's portrait, the glow up on all portraits, the class changed 100 ms before the end and the glow down on the new tree, the card under the running `exp` strip, no input meanwhile; at the end nothing selected, the tree up, the panel on the promoted unit until a card is hovered. The time follows the original's portrait distance (1501 / 1746 ms), the path Razdor's own tree places | The same over the original's portraits (4b1a04) | 9.7 |
 
 ## Unknowns
 

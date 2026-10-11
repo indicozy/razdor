@@ -292,7 +292,8 @@ type 83 without a level key (0). **data**
   unit lacks experience, otherwise it invites a choice, and a type without options gets the
   last-class hint. **code**
 - Promotion is free. The unit becomes the chosen type with `L = 0`, XP 0 and last gain 0
-  (4b1df0, again at 4b1f67 guarded by `L > 0`). HP is not touched directly; the stat
+  (4b1df0, again at 4b1f67 guarded by `L > 0`), not on the click but 100 ms before the end
+  of the promotion animation, 1501 or 1746 ms long (interface.md §9.7). HP is not touched directly; the stat
   rebuild that follows (497240) rescales a wounded unit's HP to the new maximum as in §2.
   **code**
 - **Worn items stay worn** and keep working: the promotion code does not touch them, and

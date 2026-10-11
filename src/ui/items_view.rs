@@ -10,7 +10,7 @@ use razdor::rules::items::{EquipError, Given, ItemFrom};
 use razdor::rules::units::Unit;
 
 use super::assets::Assets;
-use super::audio::{cue, cued, Cue};
+use super::audio::{cue, Cue};
 use super::building_view::{service_error, BuildingView};
 use super::screens::attack_line;
 use super::unit_drag::{grid_press, GridPress};
@@ -135,6 +135,98 @@ thread_local! {
     /// repaints it as a fresh unit of that type); it stays when the pointer leaves, as the
     /// original's, until a card is hovered or pressed.
     static PANEL_TYPE: std::cell::Cell<Option<razdor::rules::content::UnitId>> = const { std::cell::Cell::new(None) };
+    /// The promotion playing (0x4b1a04).
+    static PROMO: std::cell::Cell<Option<Promo>> = const { std::cell::Cell::new(None) };
+    /// The unit the left panel was last painted for when nothing is selected: the promoted
+    /// one, as the original's end of a promotion paints it (0x492f24) and then deselects it;
+    /// it stays until a card is hovered or pressed.
+    static PANEL_UNIT: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+/// A promotion playing on the army window (0x4b1a04, scheduled by the portrait's click
+/// 0x4c3d38): squad member `unit`, of class `from`, becomes `to`, the portrait at Razdor's
+/// tree place `pick` (the original's portrait `n`, 1..3, whose distance sets the time).
+/// `done` once the class has changed, 100 ms before the end.
+#[derive(Clone, Copy)]
+struct Promo {
+    unit: usize,
+    from: UnitId,
+    to: UnitId,
+    pick: usize,
+    t0_ms: i64,
+    ms: i64,
+    done: bool,
+}
+
+/// How long a promotion from the original's portrait `n` (1..3) plays (0x4b1b45): 7 ms per
+/// pixel from that portrait to the unit's own, plus 500, at most 8191. The portraits are 94 px
+/// squares, the options at (286 + 106·(n − 1), 57) in the window, the unit's at (392, 200)
+/// (0x4da5e1): 1501 ms for the middle option, 1746 for a side one.
+fn promo_ms(n: usize) -> i64 {
+    let (dx, dy) = ((n as f64 - 2.0) * 106.0, 143.0);
+    ((dx * dx + dy * dy).sqrt() * 7.0).round() as i64 + 500
+}
+
+/// The original's slow-fast-slow ease (0x4b1918): of `t` in `total`, the share
+/// `r = min(1000, 1000·t / total)` through slopes 1, 2, 3, 2, 1 on 0–100–300–700–900–1000
+/// (2200 in all), given back in the units of `total`.
+fn promo_ease(t: i64, total: i64) -> i64 {
+    let r = (t * 1000 / total.max(1)).min(1000);
+    let mut v = if r <= 100 { r } else if r <= 300 { (r - 100) * 2 + 100 } else { 500 };
+    if r > 300 {
+        v += if r < 700 { (r - 300) * 3 } else { 1200 };
+    }
+    if r > 700 {
+        v += if r < 900 { (r - 700) * 2 } else { 400 };
+    }
+    if r > 900 && r <= 1000 {
+        v += r - 900;
+    }
+    v * total / 2200
+}
+
+/// What a promotion shows `t` ms into its `ms` (0x4b1a04).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PromoLook {
+    /// The frame of battle effect 6 (`--UPGRADE`, 50 frames): 0..15 over the first 500 ms on
+    /// the picked portrait, then 16..49 as it travels to the unit's own.
+    frame: usize,
+    /// How far along that way, 0 at the picked portrait, 1 at the unit's.
+    along: f32,
+    /// The green glow (red 0, green `a`, blue `a`/2, added) over the picked portrait,
+    /// fading from 160 over the first 400 ms.
+    pick_glow: u8,
+    /// The same glow over all four portraits, up from 0 to 200 in the 100 ms before the class
+    /// changes and down again in the last 100.
+    all_glow: u8,
+}
+
+fn promo_look(t: i64, ms: i64) -> PromoLook {
+    let travel = (ms - 500).max(1);
+    let (frame, along) = if t < 500 {
+        ((t * 15 / 500).min(15), 0.0)
+    } else if t < ms {
+        ((t - 500) * 33 / travel + 16, promo_ease(t - 500, travel) as f32 / travel as f32)
+    } else {
+        ((t - 500) * 33 / travel + 16, 1.0)
+    };
+    let pick_glow = if t < 400 { (400 - t) * 160 / 400 } else { 0 };
+    let all_glow = if ms - 200 < t && t <= ms - 100 {
+        (t - (ms - 200)) * 2
+    } else if ms - 100 < t && t <= ms {
+        (ms - t) * 2
+    } else {
+        0
+    };
+    PromoLook { frame: frame.clamp(0, 49) as usize, along, pick_glow: pick_glow.clamp(0, 255) as u8, all_glow: all_glow.clamp(0, 255) as u8 }
+}
+
+/// The promotion glow of strength `a` over portrait `r` (4768f8 mode 0 with 476374(0, a, a/2)).
+fn promo_glow(r: Rect, a: u8) {
+    if a > 0 {
+        let a = a as f32 / 255.0;
+        chrome::additive(|| draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, a, a / 2.0, 1.0)));
+    }
 }
 
 /// The army window's timed card actions (0x4b11cc): a potion drunk (`--POTION`, 420 ms) or
@@ -218,7 +310,9 @@ fn give_on_card(game: &mut Game, from: From, to: usize) -> Option<String> {
 /// current class at the bottom, arrows up to its options (portraits; open now, they glow and
 /// promote on a click, free of charge). A unit that cannot be promoted, at its first level
 /// or of a class with no next type, has every portrait locked, its own included (494340).
-fn tree_view(game: &mut Game, assets: &Assets, sel: usize, u: &Unit, r: Rect, message: &mut Option<String>) -> Option<razdor::rules::content::UnitId> {
+/// While a promotion plays ([`Promo`]) the picked portrait is empty until the class changes,
+/// with the glows and the effect travelling down to the unit's own (0x4b1a04).
+fn tree_view(game: &Game, assets: &Assets, sel: usize, u: &Unit, r: Rect, promo: Option<Promo>) -> Option<razdor::rules::content::UnitId> {
     let mut pointed = None;
     let c = game.content.clone();
     let k = chrome::k();
@@ -230,8 +324,16 @@ fn tree_view(game: &mut Game, assets: &Assets, sel: usize, u: &Unit, r: Rect, me
     let s = (r.w * 0.28).min(r.h * 0.36);
     let cur = Rect::new(r.x + (r.w - s) / 2.0, r.y + r.h * 0.95 - s, s, s);
     let slots = [0.17, 0.5, 0.83];
+    let place = |i: usize| Rect::new(r.x + r.w * slots[i] - s / 2.0, r.y + r.h * 0.04, s, s);
+    let look = promo.map(|p| (p, promo_look(now_ms() - p.t0_ms, p.ms)));
     for (i, &(to, level, ok)) in tree.iter().take(3).enumerate() {
-        let o = Rect::new(r.x + r.w * slots[i] - s / 2.0, r.y + r.h * 0.04, s, s);
+        let o = place(i);
+        // The picked portrait is drawn as an empty option (494340 for the hero, who has none)
+        // from the click until the class changes.
+        if let Some((_, l)) = look.filter(|(p, _)| !p.done && p.pick == i) {
+            promo_glow(o, l.pick_glow.max(l.all_glow));
+            continue;
+        }
         if chrome::win("UpgradeTree").is_none() {
             draw_line(cur.x + cur.w / 2.0, cur.y, o.x + o.w / 2.0, o.y + o.h, 3.0, if ok { chrome::GOLD } else { DIM });
         }
@@ -248,13 +350,16 @@ fn tree_view(game: &mut Game, assets: &Assets, sel: usize, u: &Unit, r: Rect, me
         if ok {
             chrome::glow_frame(o, Color::new(0.35, 1.0, 0.35, if over { 1.0 } else { 0.6 }), over);
         }
+        if let Some((_, l)) = look {
+            promo_glow(o, l.all_glow);
+        }
         if over {
             pointed = Some(to);
-            if ok && clicked() {
-                *message = Some(match game.promote(sel, to) {
-                    Ok(()) => cued(Cue::Upgrade, razdor::trf!("{name} is now a {class} (level 1, XP 0).", name = game.squad_label(sel), class = c.unit(to).name)),
-                    Err(_) => tr("Not possible.").into(),
-                });
+            // The click starts the promotion, its sound at once (0x4c3d38 → 0x4b1a04); the
+            // class changes as it ends.
+            if ok && clicked() && promo.is_none() {
+                cue(Cue::Upgrade);
+                PROMO.with(|p| p.set(Some(Promo { unit: sel, from: u.def, to, pick: i, t0_ms: now_ms(), ms: promo_ms(promo_portrait(&c, u.def, to)), done: false })));
             }
         }
     }
@@ -270,7 +375,30 @@ fn tree_view(game: &mut Game, assets: &Assets, sel: usize, u: &Unit, r: Rect, me
     if mouse_in(cur.x, cur.y, cur.w, cur.h) {
         pointed = Some(u.def);
     }
+    if let Some((p, l)) = look {
+        promo_glow(cur, l.all_glow);
+        // Effect 6 over everything, its 220 px square centred on the portrait (63 px out of
+        // the 94 px one, 0x668c5c), eased from the picked portrait to the unit's.
+        let from = place(p.pick.min(2)).center();
+        draw_effect_frame(&c, 6, l.frame, from.lerp(cur.center(), l.along), s / 94.0);
+    }
     pointed
+}
+
+/// The original's portrait (1..3) of the option `to` in class `def`'s upgrade tree: its
+/// `NextUnitN` slot as normalised at load, a lone option in the middle (2).
+fn promo_portrait(c: &Content, def: UnitId, to: UnitId) -> usize {
+    c.unit(def).upgrades.iter().position(|u| u.target == Some(to.0)).map_or(2, |i| i + 1)
+}
+
+/// Frame `i` of battle effect `n` centred on `at`, `px` screen pixels to the original's
+/// (48e058: the 220×110 frame with its rows doubled, a 220 px square).
+fn draw_effect_frame(c: &Content, n: usize, i: usize, at: Vec2, px: f32) {
+    let Some(frames) = c.options.battle_effects.get(n).and_then(chrome::battle_effect) else { return };
+    let size = 220.0 * px;
+    chrome::premultiplied(|| {
+        draw_texture_ex(&frames[i.min(frames.len() - 1)], at.x - size / 2.0, at.y - size / 2.0, WHITE, DrawTextureParams { dest_size: Some(vec2(size, size)), ..Default::default() });
+    });
 }
 
 /// The backpack: 5 columns of the original's inventory squares, scrolling. Returns the
@@ -442,6 +570,29 @@ pub fn squad(
             set_input_blocked(true);
         }
     }
+    // A promotion playing (0x4b1a04) takes no input. Its unit takes the new class once past
+    // 100 ms before the end (0x4b1dcb); at the end the unit's panel is painted (0x492f24),
+    // nothing is selected and its tree stays up (0x498d0c).
+    let mut promo = PROMO.with(|p| p.get()).filter(|p| game.squad.get(p.unit).is_some_and(|u| u.def == if p.done { p.to } else { p.from }));
+    if let Some(p) = promo.as_mut() {
+        let t = now_ms() - p.t0_ms;
+        if !p.done && t > p.ms - 100 {
+            p.done = true;
+            *message = Some(match game.promote(p.unit, p.to) {
+                Ok(()) => razdor::trf!("{name} is now a {class}.", name = game.squad_label(p.unit), class = game.content.unit(p.to).name),
+                Err(_) => tr("Not possible.").into(),
+            });
+        }
+        if t >= p.ms {
+            *selected = ArmySel { selected: None, shown: Some(p.unit) };
+            PANEL_TYPE.with(|t| t.set(None));
+            PANEL_UNIT.with(|u| u.set(Some(p.unit)));
+            promo = None;
+        } else {
+            set_input_blocked(true);
+        }
+    }
+    PROMO.with(|p| p.set(promo));
     let c = game.content.clone();
     let k = chrome::k();
     let (sw, sh) = (screen_width(), screen_height());
@@ -451,8 +602,9 @@ pub fn squad(
     let (_, close) = chrome::window(win, &title, chrome::Skin::Marble, true);
     let at = |x: f32, y: f32, w: f32, h: f32| Rect::new(win.x + x * k, win.y + y * k, w * k, h * k);
     let mut hover = None;
-    // The left panel: the selected unit, else the hero; items go to it (0x4c280c).
-    let sel = selected.selected.unwrap_or(0);
+    // The left panel: the selected unit, else the hero (or the unit just promoted); items go
+    // to it (0x4c280c).
+    let sel = selected.selected.or_else(|| PANEL_UNIT.with(|u| u.get()).filter(|&i| i < game.squad.len())).unwrap_or(0);
     // The right side: the pack, or this unit's promotion tree and Dismiss row (0x498d0c).
     let tree_of = selected.tree();
     let u = game.squad[sel].clone();
@@ -530,7 +682,7 @@ pub fn squad(
     let mut tree_hint = None;
     if let Some(t) = tree_of {
         let tu = game.squad[t].clone();
-        if let Some(to) = tree_view(game, assets, t, &tu, content, message) {
+        if let Some(to) = tree_view(game, assets, t, &tu, content, promo.filter(|p| p.unit == t)) {
             PANEL_TYPE.with(|p| p.set(Some(to)));
             // The hint line (0x4c39d8): `[Army]` line 4 when it lacks the level, 5 to choose,
             // 6 when it has no further class.
@@ -647,6 +799,10 @@ pub fn squad(
         if let Some(fx) = CARD_FX.with(|f| f.get()).filter(|fx| fx.unit == i) {
             super::battle_view::draw_effect(&c, fx.effect, sq, (now_ms() - fx.t0_ms) as f32 / fx.ms as f32);
         }
+        // The promoted unit's card darkened under the running `exp` strip (4b05a8).
+        if let Some(p) = promo.filter(|p| p.unit == i) {
+            chrome::xp_glow(sq, chrome::xp_strip_row(now_ms() - p.t0_ms));
+        }
         if super::unit_drag::dragged() == Some(i) {
             draw_rectangle(p.x, p.y, card.x, card.y, Color::new(0.0, 0.0, 0.0, 0.55));
         }
@@ -680,6 +836,7 @@ pub fn squad(
     // Hovering or pressing a card puts its own unit back on the left panel.
     if card_under.is_some() {
         PANEL_TYPE.with(|p| p.set(None));
+        PANEL_UNIT.with(|u| u.set(None));
     }
     let pointed = if let Some(t) = tree_hint {
         Some(t)
@@ -772,6 +929,7 @@ pub fn squad(
         HELD.with(|c| c.set(None));
         super::unit_drag::cancel();
         SLIDE.with(|c| c.set(None));
+        PANEL_UNIT.with(|u| u.set(None));
         *message = None;
         return Some(match back {
             Some(v) => Screen::Building(v.clone()),
@@ -789,6 +947,7 @@ pub fn squad(
     if next.is_some() {
         HELD.with(|c| c.set(None));
         SLIDE.with(|c| c.set(None));
+        PANEL_UNIT.with(|u| u.set(None));
         super::unit_drag::cancel();
     }
     next
@@ -796,7 +955,7 @@ pub fn squad(
 
 #[cfg(test)]
 mod tests {
-    use super::{ArmySel, GridPress};
+    use super::{promo_ease, promo_look, promo_ms, ArmySel, GridPress};
 
     fn sel(selected: Option<usize>, shown: Option<usize>) -> ArmySel {
         ArmySel { selected, shown }
@@ -845,5 +1004,42 @@ mod tests {
         let mut s = sel(Some(5), Some(5));
         s.clamp(5);
         assert_eq!(s, ArmySel::default());
+    }
+
+    #[test]
+    fn a_promotion_lasts_by_the_portraits_distance() {
+        assert_eq!(promo_ms(2), 1501, "143 px straight down");
+        assert_eq!(promo_ms(1), 1746, "106 across, 143 down");
+        assert_eq!(promo_ms(3), 1746);
+    }
+
+    #[test]
+    fn the_promotion_ease_is_slow_fast_slow() {
+        assert_eq!(promo_ease(0, 2200), 0);
+        assert_eq!(promo_ease(220, 2200), 100, "slope 1 to a tenth");
+        assert_eq!(promo_ease(660, 2200), 500, "slope 2 to 300");
+        assert_eq!(promo_ease(1540, 2200), 1700, "slope 3 to 700");
+        assert_eq!(promo_ease(2200, 2200), 2200);
+        assert_eq!(promo_ease(5000, 2200), 2200, "held at the end");
+    }
+
+    #[test]
+    fn a_promotion_glows_travels_and_flashes_as_the_original() {
+        let ms = 1501;
+        let l = promo_look(0, ms);
+        assert_eq!((l.frame, l.along, l.pick_glow, l.all_glow), (0, 0.0, 160, 0));
+        let l = promo_look(399, ms);
+        assert_eq!((l.frame, l.pick_glow), (11, 0));
+        assert_eq!(promo_look(499, ms).frame, 14);
+        let l = promo_look(500, ms);
+        assert_eq!((l.frame, l.along), (16, 0.0));
+        assert_eq!(promo_look(ms - 1, ms).frame, 48);
+        // The flash: up over the 100 ms before the class changes, down over the last 100.
+        assert_eq!(promo_look(ms - 200, ms).all_glow, 0);
+        assert_eq!(promo_look(ms - 150, ms).all_glow, 100);
+        assert_eq!(promo_look(ms - 100, ms).all_glow, 200);
+        assert_eq!(promo_look(ms - 50, ms).all_glow, 100);
+        let l = promo_look(ms, ms);
+        assert_eq!((l.frame, l.along, l.all_glow), (49, 1.0, 0));
     }
 }

@@ -1213,14 +1213,21 @@ pub fn xp_strip_row(elapsed_ms: i64) -> i32 {
 /// the 92×604 strip loaded with red −250, green and blue −30), `exp-hole` at half
 /// (48da5c, 512/1024) taken off (mode 1). False, and nothing drawn, without the art.
 pub fn xp_veil(sq: Rect, row: i32) -> bool {
-    let (Some(strip), Some(hole)) = (win_scaled("exp", [1024; 3], [-250, -30, -30]), win_scaled("exp-hole", [512; 3], [0; 3])) else {
-        return false;
-    };
+    let Some(hole) = win_scaled("exp-hole", [512; 3], [0; 3]) else { return false };
+    xp_glow(sq, row) && {
+        subtractive(|| tex(&hole, sq, WHITE));
+        true
+    }
+}
+
+/// The promoted unit's card while the promotion plays (4b05a8): [`xp_veil`] without the
+/// `exp-hole`, the darkened portrait and the running `exp` strip only.
+pub fn xp_glow(sq: Rect, row: i32) -> bool {
+    let Some(strip) = win_scaled("exp", [1024; 3], [-250, -30, -30]) else { return false };
     let grey = 64.0 / 255.0;
     subtractive(|| draw_rectangle(sq.x, sq.y, sq.w, sq.h, Color::new(grey, grey, grey, 1.0)));
     let row = row.clamp(0, (strip.height() as i32 - 92).max(0)) as f32;
     additive(|| tex_src(&strip, Rect::new(0.0, row, 92.0, 92.0), sq, WHITE));
-    subtractive(|| tex(&hole, sq, WHITE));
     true
 }
 
