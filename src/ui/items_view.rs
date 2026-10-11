@@ -579,7 +579,7 @@ pub fn squad(
         if !p.done && t > p.ms - 100 {
             p.done = true;
             *message = Some(match game.promote(p.unit, p.to) {
-                Ok(()) => razdor::trf!("{name} is now a {class}.", name = game.squad_label(p.unit), class = game.content.unit(p.to).name),
+                Ok(()) => razdor::trf!("{name} is now a {class} (level 1, XP 0).", name = game.squad_label(p.unit), class = game.content.unit(p.to).name),
                 Err(_) => tr("Not possible.").into(),
             });
         }
