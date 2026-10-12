@@ -665,6 +665,12 @@ pub fn squad(
             held = Some(Held { from: From::Worn(sel, slot), item, at: pointer().into(), moved: false });
         }
     }
+    // The worn slot under the pointer: a carried item let go there goes into that very slot
+    // (the hero window's click on a worn slot, 0x4c24f4).
+    let slot_under = {
+        let (mx, my) = pointer();
+        unit_sheet::slot_rects(sheet_rect).iter().position(|r| r.contains(vec2(mx, my))).filter(|&s| !showing_type && !locked(s))
+    };
     draw_line(win.x + 247.0 * k, win.y + 27.0 * k, win.x + 247.0 * k, win.y + wh - 2.0, 1.5 * k, chrome::SILVER);
 
     // Top middle, as the original switches it: the hero's backpack, or the selected unit's
@@ -907,19 +913,21 @@ pub fn squad(
             // window's: it wears the item.
             let card = if h.moved { card_under } else { None };
             let on_sheet = h.moved && card.is_none() && sheet_rect.contains(vec2(mx, my));
-            match (h.from, h.moved, card) {
-                (From::Pack(i), false, _) => *message = use_pack_item(game, sel, i),
-                (From::Worn(unit, slot), false, _) => *message = game.unequip(unit, slot).err().map(equip_error),
-                (from, true, Some(t)) => *message = give_on_card(game, from, t),
-                (From::Pack(i), true, None) if on_sheet => *message = use_pack_item(game, sel, i),
-                (From::Worn(unit, slot), true, None) if on_sheet && sel != unit => {
-                    let done = game.give(unit, slot, sel);
-                    if done.is_ok() {
-                        cue(Cue::Item(c.item(h.item).kind));
-                    }
-                    *message = done.err().map(equip_error);
+            let worn = |done: Result<(), EquipError>| {
+                if done.is_ok() {
+                    cue(Cue::Item(c.item(h.item).kind));
                 }
-                (From::Worn(unit, slot), true, None) if over_pack => *message = game.unequip(unit, slot).err().map(equip_error),
+                done.err().map(equip_error)
+            };
+            match (h.from, h.moved, card, slot_under.filter(|_| on_sheet)) {
+                (From::Pack(i), false, _, _) => *message = use_pack_item(game, sel, i),
+                (From::Worn(unit, slot), false, _, _) => *message = game.unequip(unit, slot).err().map(equip_error),
+                (from, true, Some(t), _) => *message = give_on_card(game, from, t),
+                (From::Pack(i), true, None, Some(s)) => *message = worn(game.equip_at(sel, i, Some(s))),
+                (From::Worn(unit, slot), true, None, Some(s)) => *message = worn(game.move_worn(unit, slot, sel, s)),
+                (From::Pack(i), true, None, None) if on_sheet => *message = use_pack_item(game, sel, i),
+                (From::Worn(unit, slot), true, None, None) if on_sheet && sel != unit => *message = worn(game.give(unit, slot, sel)),
+                (From::Worn(unit, slot), true, None, _) if over_pack => *message = game.unequip(unit, slot).err().map(equip_error),
                 _ => {}
             }
         }

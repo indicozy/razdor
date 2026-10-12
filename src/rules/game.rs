@@ -2284,6 +2284,29 @@ impl Game {
         items::put_on(&c, &mut self.squad[to], free, item);
         Ok(())
     }
+
+    /// Moves the item in slot `from_slot` of squad member `from` into slot `slot` of squad
+    /// member `to` (the same unit too), as the hero window's pick-up and click on an empty
+    /// worn slot do (0x4c24f4): the item is taken off first, the wear test runs and it goes
+    /// into that very slot. An occupied slot takes nothing; a refusal puts it back.
+    pub fn move_worn(&mut self, from: usize, from_slot: usize, to: usize, slot: usize) -> Result<(), EquipError> {
+        let item = self.squad.get(from).and_then(|u| u.items.get(from_slot).copied().flatten()).ok_or(EquipError::NoSuchItem)?;
+        if (from, from_slot) == (to, slot) {
+            return Ok(());
+        }
+        if self.squad.get(to).and_then(|u| u.items.get(slot)) != Some(&None) {
+            return Err(EquipError::NoFreeSlot);
+        }
+        let c = self.content.clone();
+        let saved = self.squad[from].clone();
+        items::take_off(&c, &mut self.squad[from], from_slot);
+        if let Err(e) = items::slot_for(&c, &self.squad[to], item) {
+            self.squad[from] = saved;
+            return Err(e);
+        }
+        items::put_on(&c, &mut self.squad[to], slot, item);
+        Ok(())
+    }
 }
 
 
@@ -3172,6 +3195,19 @@ mod tests {
         assert_eq!(g.equip_at(0, 0, Some(3)), Err(EquipError::NoFreeSlot), "an occupied slot does not swap");
         assert_eq!(g.equip(0, 0), Ok(()));
         assert_eq!(g.hero().items[0], Some(shield), "the army card's drop: the lowest free slot");
+    }
+
+    #[test]
+    fn a_worn_item_moves_to_an_empty_slot_of_its_own_unit() {
+        // 0x4c24f4: picked up from a worn slot, it can be put on another empty one.
+        let mut g = quiet_game(HeroClass::Knight);
+        let (shield, sword) = (item(&g, "oak_shield"), item(&g, "short_sword"));
+        g.squad[0].items = [Some(shield), None, None, Some(sword)];
+        assert_eq!(g.move_worn(0, 0, 0, 2), Ok(()));
+        assert_eq!(g.hero().items, [None, None, Some(shield), Some(sword)]);
+        assert_eq!(g.move_worn(0, 2, 0, 3), Err(EquipError::NoFreeSlot), "an occupied slot does not swap");
+        assert_eq!(g.hero().items, [None, None, Some(shield), Some(sword)], "a refusal leaves it where it was");
+        assert_eq!(g.move_worn(0, 1, 0, 0), Err(EquipError::NoSuchItem));
     }
 
     #[test]
