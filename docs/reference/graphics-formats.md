@@ -1,7 +1,7 @@
 # Discord Times (Aterdux, 2004) graphics formats
 
 These notes are for interop only: a remake loads art from the user's own install at runtime.
-Reference decoder: `gfx_decode.py` (Python + Pillow + numpy); the Rust port `src/dt/gfx.rs` is bit-identical to it on all 421 files. `python3 gfx_decode.py FILE... OUTDIR`.
+Reference decoder: `gfx_decode.py` (Python + Pillow + numpy); the Rust port `src/dt/gfx.rs` was bit-identical to it on all 421 files, then gained the original's byte planes and chroma smoothing (below). `python3 gfx_decode.py FILE... OUTDIR`.
 All 421 `.lit/.ugs/.spi` files in the Community Update install decode without errors. Each format below
 was checked by eye against the gameplay video.
 
@@ -101,6 +101,12 @@ rank-1 bytes, and so on. Blocks run in raster order over the padded plane.
 - Planes come in order Y, Cb, Cr[, A]. Each has its own 128-byte table header. With 4:2:0, chroma is
   (padW/2)×(padH/2); upsample by duplicating pixels. File size is exactly
   `16 + Σ(128 + plane_bytes)` (checked on every file).
+- Each plane becomes bytes as the original's IDCT leaves them (0x477850: it works at 8×, rounds, drops
+  negatives, then `(v + 4) >> 3`, at most 255).
+- Chroma only: each block edge closes by a quarter of its step, `(a − b) / 4` toward zero, first
+  between block rows, then between block columns (0x477ca4). At 4:2:0 the chroma is then doubled both
+  ways and smoothed `(l + 2c + r) >> 2` along rows, then along columns, the ends kept (0x477de4).
+  `gfx_decode.py` lacks both (nearest-neighbour chroma, no edge smoothing); Razdor follows the original.
 - Colour: JFIF YCbCr→RGB with Cb, Cr centred on 128 (H: textures, portraits and UI match the video).
 - The alpha plane is decoded the same way (clamp 0..255). Some type-8 spell icons have constant alpha 255.
   Those are masked by a separate `Spell-IconMask/Alpha.lit`.

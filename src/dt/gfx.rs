@@ -249,7 +249,7 @@ fn lit_plane(d: &[u8], o: usize, pw: usize, ph: usize, c: &[[f64; 8]; 8]) -> Res
         }
         let (bx, by) = (b % bw, b / bw);
         // Sum of C[k][i]·coef[k][l]·C[l][j] over (k, l) in raster order, as numpy's einsum does,
-        // which keeps the output bit-identical to the reference decoder. Zero coefficients add
+        // which kept the output bit-identical to the Python reference decoder. Zero coefficients add
         // exactly nothing, so they are skipped (most AC coefficients are zero).
         nonzero.clear();
         for (k, row) in coef.iter().enumerate() {
@@ -332,15 +332,84 @@ pub fn decode_lit(d: &[u8]) -> Result<Image, DtError> {
     if o != d.len() {
         return Err(DtError::TrailingBytes { offset: o, count: d.len().saturating_sub(o) });
     }
-    let shift = usize::from(sub);
+    // The original keeps every plane as bytes (0x477850), smooths the chroma's block edges
+    // (0x477ca4) and, at 4:2:0, doubles the chroma and smooths it 1-2-1 (0x477de4).
+    let y = plane_bytes(&y);
+    let mut chroma = [plane_bytes(&cb), plane_bytes(&cr)];
+    for p in &mut chroma {
+        deblock(p, cw, ch);
+        if sub {
+            *p = upsample(p, cw, ch);
+        }
+    }
+    let [cb, cr] = chroma;
     for row in 0..h {
         for col in 0..w {
-            let ci = (row >> shift) * cw + (col >> shift);
-            rgba.extend_from_slice(&ycc(y[row * pw + col], cb[ci], cr[ci]));
-            rgba.push(alpha.as_ref().map_or(255, |a| to_byte(a[row * pw + col])));
+            let i = row * pw + col;
+            rgba.extend_from_slice(&ycc(y[i] as f64, cb[i] as f64, cr[i] as f64));
+            rgba.push(alpha.as_ref().map_or(255, |a| plane_byte(a[i])));
         }
     }
     Ok(Image { width: w as u32, height: h as u32, rgba })
+}
+
+/// A decoded sample as the original stores it (0x477850): its IDCT works at 8×, rounds,
+/// drops negatives, then `(v + 4) >> 3`, 255 at most.
+fn plane_byte(v: f64) -> u8 {
+    let v8 = (v * 8.0).round_ties_even().max(0.0) as i64;
+    ((v8 + 4) >> 3).min(255) as u8
+}
+
+fn plane_bytes(p: &[f64]) -> Vec<u8> {
+    p.iter().map(|&v| plane_byte(v)).collect()
+}
+
+/// The chroma's block edges brought a quarter of their step together (0x477ca4): first the
+/// edges between block rows, then between block columns, each pair moving toward the other
+/// by `(a - b) / 4` rounded toward zero.
+fn deblock(p: &mut [u8], w: usize, h: usize) {
+    let step = |p: &mut [u8], a: usize, b: usize| {
+        let q = (p[a] as i32 - p[b] as i32) / 4;
+        p[a] = (p[a] as i32 - q) as u8;
+        p[b] = (p[b] as i32 + q) as u8;
+    };
+    for edge in (8..h).step_by(8) {
+        for x in 0..w {
+            step(p, (edge - 1) * w + x, edge * w + x);
+        }
+    }
+    for edge in (8..w).step_by(8) {
+        for y in 0..h {
+            step(p, y * w + edge - 1, y * w + edge);
+        }
+    }
+}
+
+/// 4:2:0 chroma at full size (0x477de4): every sample doubled both ways, then each row and
+/// then each column smoothed `(l + 2c + r) >> 2`, the ends kept.
+fn upsample(p: &[u8], w: usize, h: usize) -> Vec<u8> {
+    let (w2, h2) = (w * 2, h * 2);
+    let mut out = vec![0u8; w2 * h2];
+    for y in 0..h2 {
+        for x in 0..w2 {
+            out[y * w2 + x] = p[(y / 2) * w + x / 2];
+        }
+    }
+    let smooth = |out: &mut [u8], at: &dyn Fn(usize) -> usize, n: usize| {
+        let mut prev = out[at(0)] as u32;
+        for k in 1..n.saturating_sub(1) {
+            let cur = out[at(k)] as u32;
+            out[at(k)] = ((cur * 2 + prev + out[at(k + 1)] as u32) >> 2) as u8;
+            prev = cur;
+        }
+    };
+    for y in 0..h2 {
+        smooth(&mut out, &|x| y * w2 + x, w2);
+    }
+    for x in 0..w2 {
+        smooth(&mut out, &|y| y * w2 + x, h2);
+    }
+    out
 }
 
 // ------------------------------------------------------------------------------------------
@@ -800,6 +869,23 @@ mod tests {
     }
 
     #[test]
+    fn lit_chroma_smoothing() {
+        // Bytes as the original's 8× IDCT keeps them: negatives dropped, then round half up.
+        assert_eq!((plane_byte(-3.0), plane_byte(2.5), plane_byte(2.4), plane_byte(300.0)), (0, 3, 2, 255));
+        // A block edge between 100 and 40 closes by a quarter of the step, toward zero.
+        let mut p: Vec<u8> = (0..16 * 8).map(|i| if i % 16 < 8 { 100 } else { 40 }).collect();
+        deblock(&mut p, 16, 8);
+        assert_eq!(&p[6..10], &[100, 85, 55, 40]);
+        let mut p: Vec<u8> = (0..16 * 8).map(|i| if i % 16 < 8 { 40 } else { 101 }).collect();
+        deblock(&mut p, 16, 8);
+        assert_eq!(&p[7..9], &[55, 86]); // (40 − 101) / 4 = −15
+        // 4:2:0: doubled, then 1-2-1 along rows, the ends kept.
+        let up = upsample(&[0, 100, 0, 100], 2, 2);
+        assert_eq!(&up[..4], &[0, 25, 75, 100]);
+        assert_eq!(up.len(), 16);
+    }
+
+    #[test]
     fn lit_dct_420_ac() {
         // 16×16 4:2:0: four Y blocks, one Cb and one Cr block.
         let mut d = lit_header(16, 16, LIT_420);
@@ -922,7 +1008,9 @@ mod tests {
     /// Output of the Python reference decoder (`gfx_decode.py`), computed once; numbers only, no
     /// content. (file, frames, first frame size, weighted sum of the first and the last frame,
     /// per-channel sums of the first frame). Covers every container variant and every LIT flag
-    /// combination (0, 2, 4, 6, 8, 10). The Rust port matched it bit for bit on all 421 files.
+    /// combination (0, 2, 4, 6, 8, 10). The Rust port matched it bit for bit on all 421 files;
+    /// the DCT `.lit` rows were since redone for the original's byte planes and chroma
+    /// smoothing (0x477850, 0x477ca4, 0x477de4), which the Python decoder lacks.
     #[allow(clippy::type_complexity)]
     const REFERENCE: &[(&str, usize, (u32, u32), u64, u64, [u64; 4])] = &[
     ("Graphics/Objects/Icons.ugs", 102, (92, 92), 77383125265, 68009623530, [1454809, 1221535, 1137878, 602531]),
@@ -937,18 +1025,18 @@ mod tests {
     // Grey + alpha (not in the Python decoder, which read it as a scrambled ARGB4444 frame).
     ("Graphics/Windows/Title_RUS.ugs", 1, (896, 128), 2728719528234, 2728719528234, [24779047, 24779047, 24779047, 8587170]),
     ("Graphics/Windows/Way_Arrows.ugs", 8, (32, 22), 124856534, 128991002, [23749, 23749, 23749, 40970]),
-    ("Graphics/Textures/land.lit", 1, (256, 242), 801383493766, 801383493766, [3309536, 5833903, 654297, 15797760]),
-    ("Graphics/Textures/plain.lit", 1, (256, 242), 904841733257, 904841733257, [6542862, 5654681, 920542, 15797760]),
-    ("Graphics/Textures/detail.lit", 1, (256, 256), 1322430523702, 1322430523702, [7896829, 7856417, 7902857, 16711680]),
-    ("Graphics/Windows/Hero0.lit", 1, (160, 160), 460527062800, 460527062800, [4027880, 3182265, 2740830, 6528000]),
-    ("Logo/AE_Logo.lit", 1, (427, 589), 3999390378653, 3999390378653, [26175162, 20457349, 11791369, 64133265]),
+    ("Graphics/Textures/land.lit", 1, (256, 242), 802412639050, 802412639050, [3319887, 5835477, 675137, 15797760]),
+    ("Graphics/Textures/plain.lit", 1, (256, 242), 903798187061, 903798187061, [6519060, 5687273, 879290, 15797760]),
+    ("Graphics/Textures/detail.lit", 1, (256, 256), 1321690410939, 1321690410939, [7877932, 7877932, 7877932, 16711680]),
+    ("Graphics/Windows/Hero0.lit", 1, (160, 160), 459766882056, 459766882056, [4008582, 3200106, 2714682, 6528000]),
+    ("Logo/AE_Logo.lit", 1, (427, 589), 3994941246726, 3994941246726, [26056563, 20565478, 11666899, 64133265]),
     ("Graphics/Windows/Win-black.lit", 1, (480, 480), 2674358021228, 2674358021228, [7772338, 7772338, 7772338, 58752000]),
     ("Graphics/Editor/0.spi", 1, (22, 22), 183559428, 183559428, [20643, 40212, 28851, 99864]),
     ("Graphics/Editor/32.spi", 1, (22, 22), 148548932, 148548932, [17787, 17680, 17787, 99864]),
     ("Graphics/Spells/BigMoon.lit", 1, (100, 100), 74669189400, 74669189400, [391466, 391466, 391466, 2550000]),
     ("Graphics/Windows/Benguiat.lit", 1, (331, 120), 434788999716, 434788999716, [1227908, 1403917, 2317261, 10128600]),
-    ("Graphics/Spells/Fireball.lit", 1, (100, 100), 74178235988, 74178235988, [430888, 427283, 431486, 2550000]),
-    ("Graphics/Windows/DTSplashPBar.lit", 1, (666, 40), 140499437700, 140499437700, [653511, 634929, 655502, 4032154]),
+    ("Graphics/Spells/Fireball.lit", 1, (100, 100), 74142934458, 74142934458, [429181, 429181, 429181, 2550000]),
+    ("Graphics/Windows/DTSplashPBar.lit", 1, (666, 40), 139761721020, 139761721020, [641117, 641117, 641117, 4033196]),
     ];
     const EXPECTED_TOTAL_FRAMES: usize = 3059;
 
