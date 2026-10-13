@@ -632,7 +632,7 @@ mod tests {
         let ids: Vec<u8> = g.world.armies.iter().map(|a| a.id).collect();
         assert_eq!(ids, [1, 2]);
         assert!(g.world.armies[0].hostile() && g.world.armies[0].sails());
-        assert!(!g.world.armies[1].hostile(), "merchants never attack");
+        assert!(g.world.armies[1].hostile(), "a merchant keeps its file's attitude (0x4b2504)");
         // No patrol of their own: they wander the whole sea like any army that does not
         // patrol (ai.md §13).
         assert!(!g.world.armies[0].patrols);
@@ -742,7 +742,7 @@ mod real_maps {
     use super::*;
     use crate::dt::install::DtInstall;
     use crate::rules::content::{Content, HeroClass};
-    use crate::rules::game::Event;
+    use crate::rules::game::{Event, Foe};
 
     #[test]
     fn every_shipyard_has_a_mooring() {
@@ -803,5 +803,35 @@ mod real_maps {
         assert!(g.location == Some(target) || g.foe.is_some(), "{:?} {:?}", g.tile(), g.foe);
         assert!(events.contains(&Event::Arrived(target)));
         assert!(g.ship.is_none_or(|s| !s.aboard), "landed: the ship waits, not boarded");
+    }
+
+    #[test]
+    fn rk4_backroks_merchant_ship_is_an_enemy_and_is_fought_from_the_deck() {
+        // «Корабль Бэкрока» (army 21) is a merchant ill-disposed in its file: the original
+        // keeps that (0x4b2504, 0x4a0868), and a click on it from the hero's ship next to it
+        // engages it (0x4ad94c).
+        let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+        let dt = DtInstall::load(std::path::Path::new(&dir)).unwrap();
+        let s = dt.maps.iter().find(|m| m.name.starts_with("РК4")).unwrap().load().unwrap();
+        let mut g = Game::from_scenario(Arc::new(Content::from_dt(&dt)), &s, HeroClass::Knight);
+        g.fog = crate::rules::fog::Fog::disabled(g.world.map.w, g.world.map.h);
+        let i = g.world.armies.iter().position(|a| a.id == 21).unwrap();
+        assert_eq!(g.world.armies[i].ship, kind::MERCHANT);
+        assert!(g.world.armies[i].hostile() && g.world.armies[i].attitude < 0);
+        let at = g.world.armies[i].tile(&g.world.map);
+        let side = (at.0 + 1, at.1);
+        g.pos = g.world.map.center(side);
+        g.ship = Some(Ship { tile: side, aboard: true });
+        g.location = None;
+        g.move_to_cell(side, side);
+        assert!(g.set_destination(at));
+        let mut events = Vec::new();
+        for _ in 0..1000 {
+            if !g.moving() {
+                break;
+            }
+            events.extend(g.tick(0.05));
+        }
+        assert_eq!((events.last(), g.foe), (Some(&Event::Encounter(i)), Some(Foe::Army(i))));
     }
 }

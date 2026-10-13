@@ -1139,14 +1139,13 @@ impl World {
             let figure = if afloat { Army::ship_figure(a.ship, figure) } else { figure };
             // Exactly the file's cell (0x4b2504): no search for a free or passable one.
             let tile = at;
-            // Merchant ships trade and never attack (guess; one shipped merchant is marked
-            // ill-disposed in its file).
             // The original's relation (0x4a0868): the player's attitude to the army's faction
             // and the army's to the player. An army whose own attitudes were left at 0 (РК1's
-            // mage) is hostile through its faction.
+            // mage) is hostile through its faction. A ship's type picks only its picture: the
+            // loader copies a merchant's attitudes as any army's (0x4b2504), so РК4's «Корабль
+            // Бэкрока», ill-disposed in its file, is an enemy.
             let towards = player_attitude_to(&world.relations, a.faction);
             let attitude = relation(towards, a.relations[0]);
-            let attitude = if ship == super::ships::kind::MERCHANT { attitude.max(0) } else { attitude };
             let home = (a.home_building as usize).checked_sub(1).filter(|&j| j < world.locations.len());
             let army = Army {
                 id: a.id,
