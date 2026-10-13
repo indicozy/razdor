@@ -108,8 +108,8 @@ fn hours(minutes: u64, many: bool) -> String {
 /// The spell book window as the original's (the video, 36:59): 3 × 5 brown cells, each
 /// with the spell's round picture in its silver frame, its name, what it does, its mana and
 /// reading time and how long it lasts; empty cells are dark with the knot and "Нет изученных
-/// заклинаний". A click casts the spell (on an enemy army: pick it in the list that opens);
-/// the spells on the army are listed under the book.
+/// заклинаний". A click casts the spell; an enemy spell's target is then picked on the map
+/// (`world_view::begin_targeting`).
 pub fn frame(
     game: &mut Game,
     assets: &super::assets::Assets,
@@ -198,62 +198,17 @@ pub fn frame(
             }
         }
     }
-    // An enemy spell: the armies within reach, in a list under the book.
+    // A spell on the hero's army is cast at once; an enemy spell closes the book and the map
+    // asks for its target (0x4c2e34 → 0x4c2f39). Without the mana the click does nothing.
     let mut next = None;
-    let picked = book.get(*selected).cloned();
-    let mut target = None;
-    if let Some(s) = cast.as_ref().filter(|s| !magic::targets_enemy(s)) {
-        target = Some((s.clone(), CastTarget::Own));
-    }
-    if let Some(s) = picked.as_ref().filter(|s| magic::targets_enemy(s)) {
-        let armies = game.spell_targets();
-        let lh = (28.0 + 30.0 * armies.len().clamp(1, 4) as f32) * k;
-        let lr = Rect::new(r.center().x - 180.0 * k, r.y + r.h - lh - 10.0 * k, 360.0 * k, lh);
-        chrome::window(lr, &s.name, chrome::Skin::Marble, false);
-        if armies.is_empty() {
-            let line = tr("No army on explored ground to cast on.").to_string();
-            chrome::shadow_centered(&line, lr.center().x, lr.y + 44.0 * k, 13.0 * k, CREAM);
-        }
-        let here = game.tile();
-        let can = game.mana >= game.cast_cost(s).mana && game.foe.is_none();
-        for (i, &a) in armies.iter().take(4).enumerate() {
-            let army = &game.world.armies[a];
-            let name = if army.shown_name().is_empty() { tr("an army").to_string() } else { army.shown_name().to_string() };
-            let d = game.world.map.distance(army.tile(&game.world.map), here);
-            let label = trf!("Cast on {name} ({d} cells)", name, d);
-            let b = Rect::new(lr.x + 10.0 * k, lr.y + 32.0 * k + i as f32 * 30.0 * k, lr.w - 20.0 * k, 26.0 * k);
-            let over = !input_blocked() && b.contains(crate::ui::widgets::pointer().into());
-            chrome::marble_button(b, &label, can, over);
-            if can && over && clicked() {
-                target = Some((s.clone(), CastTarget::Army(army.uid)));
-            }
-        }
-    }
-    if let Some((s, t)) = target {
-        match game.begin_cast(s.id, t) {
-            Ok(outcome) => {
-                cue(Cue::CastSpell);
-                // The camera goes to the army the spell is for: the hero's own before the
-                // reading, an enemy's after it (0x4c2e34, 0x4cc148); then the effect on it.
-                let own = matches!(t, CastTarget::Own);
-                if own {
-                    world_view::look_at(t);
-                }
-                if let Some(CastOutcome::Done { .. }) = outcome {
-                    if !own {
-                        world_view::look_at(t);
-                    }
-                    world_view::spell_effect(&s, t);
-                }
-                razdor::diag::play(&game.clock.label(), &format!("CAST «{}» on {t:?}: {:.0} min", s.name, game.reading().map_or(0.0, |r| r.1)));
-                // The hero reads on the map; the spell lands when the reading is done.
-                *message = Some(match outcome {
-                    Some(o) => landed(&s, t, o),
-                    None => trf!("Reading «{name}»…", name = s.name),
-                });
+    if let Some(s) = cast.filter(|s| game.mana >= game.cast_cost(s).mana) {
+        if magic::targets_enemy(&s) {
+            if game.foe.is_none() {
+                world_view::begin_targeting(s.id);
                 next = Some(Screen::WorldMap);
             }
-            Err(e) => *message = Some(cast_error(e).into()),
+        } else {
+            next = self::cast(game, s.id, CastTarget::Own, message);
         }
     }
     if closed || key(KeyCode::Escape) || key(KeyCode::B) {
@@ -263,6 +218,39 @@ pub fn frame(
         chrome::shadow_centered(m, r.center().x, r.y + r.h - 8.0 * k, 14.0 * k, ACCENT);
     }
     next.or(bar_pick)
+}
+
+/// Casts `spell` on `target`: the hero reads it on the map, and it lands when the reading is
+/// done. The map is next, or nothing when it cannot be cast (the message says why).
+pub(super) fn cast(game: &mut Game, spell: u32, target: CastTarget, message: &mut Option<String>) -> Option<Screen> {
+    let s = game.spell(spell)?.clone();
+    match game.begin_cast(s.id, target) {
+        Ok(outcome) => {
+            cue(Cue::CastSpell);
+            // The camera goes to the army the spell is for: the hero's own before the
+            // reading, an enemy's after it (0x4c2e34, 0x4cc148); then the effect on it.
+            let own = matches!(target, CastTarget::Own);
+            if own {
+                world_view::look_at(target);
+            }
+            if let Some(CastOutcome::Done { .. }) = outcome {
+                if !own {
+                    world_view::look_at(target);
+                }
+                world_view::spell_effect(&s, target);
+            }
+            razdor::diag::play(&game.clock.label(), &format!("CAST «{}» on {target:?}: {:.0} min", s.name, game.reading().map_or(0.0, |r| r.1)));
+            *message = Some(match outcome {
+                Some(o) => landed(&s, target, o),
+                None => trf!("Reading «{name}»…", name = s.name),
+            });
+            Some(Screen::WorldMap)
+        }
+        Err(e) => {
+            *message = Some(cast_error(e).into());
+            None
+        }
+    }
 }
 
 /// A spell's card as the sanctuary shows it (0x49bde4): a box with the spell's picture and

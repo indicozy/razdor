@@ -385,6 +385,49 @@ thread_local! {
     static SPELL_FX: std::cell::RefCell<Vec<SpellFx>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
+thread_local! {
+    /// A world spell picked in the book, waiting for its target on the map: the book's click
+    /// closes it and sets the cast flag (0x4c2e34, [66c0b9] = 1).
+    static TARGETING: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
+}
+
+/// The map asks for the target of enemy spell `spell` (0x4c2f39).
+pub(super) fn begin_targeting(spell: u32) {
+    TARGETING.with(|t| t.set(Some(spell)));
+}
+
+fn targeting() -> Option<u32> {
+    TARGETING.with(|t| t.get())
+}
+
+fn end_targeting() {
+    TARGETING.with(|t| t.set(None));
+}
+
+/// What the targeting hint says (0x47ea80): no target yet, the army aimed at, or a friend
+/// that cannot be cursed.
+fn spell_target_hint(game: &Game, spell: u32, aim: Option<Result<u32, ()>>) {
+    let k = super::chrome::k();
+    let info = |key: &str, ours: &'static str| super::chrome::ui_text("Info", key).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr(ours).to_string());
+    let Some(s) = game.spell(spell) else { return };
+    let mut lines = vec![(s.name.clone(), WHITE)];
+    match aim {
+        None => lines.push((info("SpellTargetHint", n_("Pick a target for the spell!")), super::chrome::GOLD)),
+        Some(Ok(uid)) => {
+            lines.push((info("SpellHint", n_("The spell's target is picked -")), super::chrome::BLUE_TEXT));
+            let name = game.world.armies.iter().find(|a| a.uid == uid).map_or(String::new(), |a| a.shown_name().to_string());
+            lines.push((name, super::chrome::BLUE_TEXT));
+        }
+        Some(Err(())) => {
+            // The original's text breaks its line with `#\`.
+            let refusal = info("SpellFriendHint", n_("Friendly characters cannot be the target of evil spells!"));
+            lines.extend(refusal.split("#\\").map(|l| (l.trim().to_string(), super::chrome::RED_TEXT)));
+        }
+    }
+    lines.push((info("SpellCancelHint", n_("Cancel: right click or ESC")), Color::new(1.0, 0.92, 0.6, 1.0)));
+    hint_box(&lines, 510.0 * k);
+}
+
 /// The camera goes to `target` (a spell's): queued for the map.
 pub(super) fn look_at(target: CastTarget) {
     let army = match target {
@@ -1321,7 +1364,11 @@ fn army_tooltip(game: &Game, a: &Army) -> Tooltip {
         }
     }
     if !spells.is_empty() {
-        footer.push((trf!("Under spells: {spells}", spells = spells.join(", ")), MANA));
+        // Wrapped as the description: an army of several units can list more names than fit.
+        let line = trf!("Under spells: {spells}", spells = spells.join(", "));
+        for l in wrap(&line, 320.0 * super::chrome::k(), 12.0 * super::chrome::k()) {
+            footer.push((l, MANA));
+        }
     }
     let hurt: i32 = a.troops.iter().map(|t| t.hurt).sum();
     if hurt > 0 {
@@ -1925,6 +1972,15 @@ fn plan_click(planned: &mut Option<(Tile, Vec<Tile>, Tile)>, target: Tile, here:
 }
 
 pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) -> Option<Screen> {
+    let next = map_frame(game, assets, view, message, dialogs);
+    // Opening any window ends the spell's targeting (0x4b8d28).
+    if next.is_some() {
+        end_targeting();
+    }
+    next
+}
+
+fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) -> Option<Screen> {
     clear_background(rgb(10, 12, 10));
 
     // The original's world frame acts on the map only while it is idle (interface.md §7.3,
@@ -2003,6 +2059,18 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
         if game.waiting() && (clicked() || any_key_pressed()) {
             game.cut_wait();
             swallow_input();
+        }
+    } else if let Some(spell) = targeting() {
+        // An enemy spell's targeting (0x4cc148): a left click on the army aimed at casts it,
+        // a right click or Esc cancels (0x4cd016); a click anywhere else does nothing.
+        if right_clicked() || key(KeyCode::Escape) {
+            end_targeting();
+            swallow_input();
+        } else if clicked() && !on_minimap {
+            if let Some(Some(Ok(uid))) = hovered.map(|t| game.curse_aim(t)) {
+                end_targeting();
+                super::spellbook::cast(game, spell, CastTarget::Army(uid), message);
+            }
         }
     } else if clicked() && !on_minimap && !game.holds_events() {
         // Not while the last step is drawn with its events held: they come at its end, and a
@@ -2098,7 +2166,20 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
         }
         _ => None,
     };
-    draw_world(game, assets, &cam, view.preview.as_ref().map(|p| p.1.as_slice()), show.as_ref(), view.hover);
+    let mut hover = view.hover;
+    // Targeting rings the cell under the pointer (`Selection-2`, 0x4ccb8f, 0x4cce24): blue
+    // (5, 0x00c4ff) on an army it can curse, red (4, 0xdf0000) on any other target cell.
+    if targeting().is_some() {
+        hover = cam.tile_under_mouse().filter(|_| idle && !on_minimap).map(|t| {
+            let ring = match game.curse_aim(t) {
+                Some(Ok(_)) => Some(rgb(0x00, 0xc4, 0xff)),
+                _ if game.can_target(t) => Some(rgb(0xdf, 0x00, 0x00)),
+                _ => None,
+            };
+            (t, ring)
+        });
+    }
+    draw_world(game, assets, &cam, view.preview.as_ref().map(|p| p.1.as_slice()), show.as_ref(), hover);
     cam.draw_fog(game);
     cam.draw_showing(game, view.opening.iter().chain(&view.shows), now);
     // A spell's effect over the army it landed on.
@@ -2184,6 +2265,15 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     }
     // The pointer (interface.md §7.2); a window or message on top takes the arrow.
     update_pointer(game, view, &cam, on_minimap);
+    // Targeting never shows the swords or the house: the arrow, with the question mark or
+    // the "no entry" over cells that are no target (0x4cce5b).
+    let aiming = targeting().filter(|_| idle && view.pointer != Shape::Clock);
+    if aiming.is_some() {
+        view.pointer = match cam.tile_under_mouse().filter(|_| !on_minimap) {
+            Some(t) => cursor::map_pointer(Shape::Arrow, &MapHover { army: CellArmy::None, building: None, ..map_hover(game, t, on_minimap) }),
+            None => Shape::Arrow,
+        };
+    }
     cursor::set(if input_blocked() { Shape::Arrow } else { view.pointer });
     // The right button held (the left one up) shows the tooltip of the army or building
     // under it; it is never a command (interface.md §7.4). The pointer is not drawn
@@ -2192,6 +2282,10 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     if let Some(t) = hover_tooltip(game, &cam).filter(|_| idle && right_held && !on_minimap) {
         draw_tooltip(game, assets, &t);
         cursor::set(Shape::Hidden);
+    }
+    if let Some(spell) = aiming.filter(|_| !input_blocked()) {
+        let aim = cam.tile_under_mouse().filter(|_| !on_minimap).and_then(|t| game.curse_aim(t));
+        spell_target_hint(game, spell, aim);
     }
     if on_clock && can_wait {
         let hint = |key: &str, ours: &'static str| super::chrome::ui_text("GameMenu", key).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr(ours).to_string());

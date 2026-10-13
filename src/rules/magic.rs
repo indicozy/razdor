@@ -22,6 +22,7 @@ use crate::dt::data::SpellTarget;
 
 use super::clock::MINUTES_PER_HOUR;
 use super::content::{Bonus, Content, HeroClass, SpellDef};
+use super::map::Tile;
 use super::game::{troop_unit, unit_into_troop, Event, Game};
 use super::units::{SpellSlot, Unit};
 pub use super::units::SPELL_SLOTS;
@@ -319,6 +320,17 @@ impl Game {
         let t = a.tile(&self.world.map);
         let talks = a.attitude >= 1 && self.script.as_deref().is_some_and(|e| e.meeting_waiting(self, a.id));
         self.can_target(t) && self.world.location_at(t).is_none() && !talks
+    }
+
+    /// An enemy spell aimed at cell `t` on the map (0x4ccb8f-0x4ccc4c): the army there, on a
+    /// target cell outside any building, if any; `Err` for a friend with a meeting waiting
+    /// (the target -1: the hint refuses it and a click does nothing).
+    pub fn curse_aim(&self, t: Tile) -> Option<Result<u32, ()>> {
+        if !self.can_target(t) || self.world.location_at(t).is_some() {
+            return None;
+        }
+        let i = (0..self.world.armies.len()).find(|&i| self.world.armies[i].tile(&self.world.map) == t)?;
+        Some(if self.can_curse(i) { Ok(self.world.armies[i].uid) } else { Err(()) })
     }
 
     /// The armies the hero can cast an enemy spell on now ([`Game::can_curse`]), nearest

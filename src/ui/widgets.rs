@@ -305,6 +305,36 @@ pub fn panel_hint(lines: &[(String, Color)]) {
     tooltip_at_alpha(lines, 1.0);
 }
 
+/// The hint box that follows the mouse (kind 7, 0x49e9b8): `w` wide, its lines centred, at
+/// the mouse +21, +37, put on the other side of the mouse where it would leave the screen,
+/// at full opacity (0x49ee4b).
+pub fn hint_box(lines: &[(String, Color)], w: f32) {
+    if lines.is_empty() {
+        return;
+    }
+    let k = super::chrome::k();
+    let (size, line_h) = (17.0 * k, 21.0 * k);
+    let w = w.min(screen_width() - 8.0);
+    let h = lines.len() as f32 * line_h + 14.0 * k;
+    let (mx, my) = pointer();
+    let mut x = mx + 21.0 * k;
+    let mut y = my + 37.0 * k;
+    if x + w > screen_width() {
+        x = mx - 21.0 * k - w;
+    }
+    if y + h > screen_height() {
+        y = my - 37.0 * k - h;
+    }
+    let r = Rect::new(x.clamp(4.0, (screen_width() - w - 4.0).max(4.0)), y.clamp(4.0, (screen_height() - h - 4.0).max(4.0)), w, h);
+    super::chrome::surface_alpha(r, super::chrome::Skin::Marble, 1.0);
+    draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, 0.05, 0.03, 0.2));
+    super::chrome::silver_frame(r, 1.5);
+    for (i, (s, c)) in lines.iter().enumerate() {
+        let shown = ellipsize(s, w - 16.0 * k, size);
+        super::chrome::shadow_centered(&shown, r.center().x, r.y + 7.0 * k + (i as f32 + 0.5) * line_h + size * 0.36, size, *c);
+    }
+}
+
 fn tooltip_at_alpha(lines: &[(String, Color)], alpha: f32) {
     if lines.is_empty() {
         return;
