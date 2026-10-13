@@ -643,7 +643,7 @@ pub fn squad(
         now: &stats,
         start: &stats,
         power: stats[Stat::MagicPower],
-        wage: if showing_type { 0 } else { game.wage(sel) },
+        wage: if showing_type { class_wage(&c, u.def) } else { game.wage(sel) },
         items: u.items,
         back_row: u.slot.row == razdor::rules::formation::Row::Back,
         unpaid: !showing_type && u.unpaid,
@@ -961,12 +961,35 @@ pub fn squad(
     next
 }
 
+/// The wage line of a promotion portrait's class card: the original's fresh unit of that type
+/// is painted in a game, so 4924c9 writes its recruit wage (4a163c of the type's Cost), as
+/// for a hire offer; none for a hero class or an Undead type.
+fn class_wage(c: &Content, id: UnitId) -> i32 {
+    let undead = c.unit(id).nature == razdor::dt::data::Nature::Undead;
+    if razdor::rules::content::HeroClass::of_unit(id).is_some() || undead { 0 } else { c.wage(id) }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{promo_ease, promo_look, promo_ms, ArmySel, GridPress};
+    use super::{class_wage, promo_ease, promo_look, promo_ms, ArmySel, Content, GridPress, UnitId};
 
     fn sel(selected: Option<usize>, shown: Option<usize>) -> ArmySel {
         ArmySel { selected, shown }
+    }
+
+    /// A promotion portrait's class card carries the type's recruit wage, as the original's
+    /// fresh unit painted in a game does (0x4c39d8 → 0x492f24 → 0x4924c9 → 0x4a163c); a hero
+    /// class and an Undead type have none.
+    #[test]
+    fn a_tree_class_card_shows_the_type_s_recruit_wage() {
+        let c = Content::builtin();
+        let paid = c.units.iter().map(|u| UnitId(u.id)).find(|&id| razdor::rules::content::HeroClass::of_unit(id).is_none() && c.unit(id).nature != razdor::dt::data::Nature::Undead && c.unit(id).cost > 0).unwrap();
+        assert_eq!(class_wage(&c, paid), c.wage(paid));
+        assert!(class_wage(&c, paid) > 0);
+        assert_eq!(class_wage(&c, razdor::rules::content::HeroClass::Knight.unit()), 0);
+        if let Some(undead) = c.units.iter().map(|u| UnitId(u.id)).find(|&id| c.unit(id).nature == razdor::dt::data::Nature::Undead) {
+            assert_eq!(class_wage(&c, undead), 0);
+        }
     }
 
     #[test]
