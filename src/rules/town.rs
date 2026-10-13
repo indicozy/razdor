@@ -1155,7 +1155,9 @@ mod tests {
         let mut g = (0..200).map(|seed| visit_village(40, 5, seed, &learned)).find(|g| g.village_offer() == Some(VillageOffer::Witch)).unwrap();
         let mana = g.mana;
         let Some(OfferResult::Mana(m)) = g.accept_offer() else { panic!() };
-        assert!((300..=500).contains(&m) && m % 50 == 0 && g.mana == mana + m);
+        assert!((300..=500).contains(&m) && m % 50 == 0 && g.mana == mana, "paid at the result window's OK");
+        g.finish_offer();
+        assert_eq!(g.mana, mana + m);
     }
 
     #[test]
@@ -1184,7 +1186,10 @@ mod tests {
             let result = g.accept_offer();
             assert_eq!(g.rng.state(), state, "the yes draws nothing");
             match result {
-                Some(OfferResult::Mana(m)) => assert_eq!((m, g.mana), (300 + 50 * r, mana + m)),
+                Some(OfferResult::Mana(m)) => {
+                    g.finish_offer();
+                    assert_eq!((m, g.mana), (300 + 50 * r, mana + m));
+                }
                 Some(OfferResult::Blessing(id)) => {
                     assert_eq!(id, 3 + 2 * r as u32);
                     assert!(g.active_spells().is_empty(), "spell {id} is not in the test content");

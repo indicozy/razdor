@@ -904,6 +904,12 @@ impl Game {
         self.collect_tribute()
     }
 
+    /// The offer's result window closed (its OK, 0x4c206c → 0x4ab1ec): the witch's mana is
+    /// paid now (0x4ab53b, floored at 0), and the bar shows it then.
+    pub fn finish_offer(&mut self) {
+        self.mana = (self.mana + std::mem::take(&mut self.offer_mana_due)).max(0);
+    }
+
     /// Accepts the village's offer: it takes effect and empties both of the village's stocks.
     pub fn accept_offer(&mut self) -> Option<OfferResult> {
         let o = self.village_offer()?;
@@ -937,8 +943,9 @@ impl Game {
                 OfferResult::Furs(ItemId(FURS_ITEM))
             }
             VillageOffer::Witch => {
+                // Written into the result window's record (+0x59, 0x4acd76); paid at its OK.
                 let mana = 300 + 50 * self.offer_roll;
-                self.mana += mana;
+                self.offer_mana_due = mana;
                 OfferResult::Mana(mana)
             }
         })

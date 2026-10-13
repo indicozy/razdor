@@ -689,6 +689,12 @@ impl<'a> Runner<'a> {
         // Its OK, Yes or No button (`widgets::button`).
         self.av.sfx("InterfaceButtonDown");
         let closed = self.dialogs.pop_front();
+        // A village offer's result window: its OK pays the witch's mana (0x4ab53b).
+        if closed.as_ref().is_some_and(|d| !d.offer) {
+            if let Some(g) = self.game.as_mut() {
+                g.finish_offer();
+            }
+        }
         if self.triumph {
             let g = self.game.as_mut().expect("a game");
             let (pick, _) = g.music_rotate(self.music_pick);

@@ -363,6 +363,10 @@ pub struct Game {
     /// `3 + 2·r`, the witch's mana `300 + 50·r`.
     #[serde(default)]
     pub(crate) offer_roll: i32,
+    /// The witch's mana, accepted but not yet paid: it comes at the result window's OK
+    /// (0x4c206c → 0x4ab1ec, added at 0x4ab53b), not at the Yes ([`Game::finish_offer`]).
+    #[serde(default)]
+    pub(crate) offer_mana_due: i32,
     /// The village that made the last offer (cleared when its tribute is taken) and what
     /// was offered.
     #[serde(default)]
@@ -550,6 +554,7 @@ impl Game {
             journal: History::default(),
             offer: None,
             offer_roll: 0,
+            offer_mana_due: 0,
             offered_at: None,
             last_offer: None,
             stored_income: 0,
