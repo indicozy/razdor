@@ -434,6 +434,7 @@ pub fn class_select(game: &mut Option<Game>, demo: &Arc<Content>, scenario: Opti
     // started (there is no key for it either).
     let offered = e.scenario.header.offered_classes();
     if !HERO_OPEN.with(|o| o.replace(true)) {
+        fill_name_field();
         match e.scenario.header.first_offered_class() {
             Some(c) => HERO.with(|h| h.set(c)),
             None => return leave_hero_window(Screen::MainMenu),
@@ -481,12 +482,12 @@ pub fn class_select(game: &mut Option<Game>, demo: &Arc<Content>, scenario: Opti
     // The name plate (`nameframe`, 162×22, silver): the name in dark ink on it.
     let field = win.rect(172.0, 212.0, 250.0, 250.0 * 22.0 / 162.0);
     let caret = if (get_time() * 2.0) as i64 % 2 == 0 { "|" } else { "" };
-    let shown = if name.is_empty() { format!("{}{caret}", own("NewHero", "PrivateHeroName", n_("(no name)"))) } else { format!("{name}{caret}") };
+    let shown = format!("{name}{caret}");
     let size = 14.0 * k;
     match chrome::win("nameframe") {
         Some(t) => {
             chrome::tex(&t, field, WHITE);
-            let ink = if name.is_empty() { Color::new(0.25, 0.25, 0.27, 1.0) } else { Color::new(0.05, 0.04, 0.03, 1.0) };
+            let ink = Color::new(0.05, 0.04, 0.03, 1.0);
             with_face(Face::Bold, || {
                 let w = measure(&shown, size).width;
                 let (x, y) = (field.center().x - w / 2.0, field.y + field.h * 0.5 + size * 0.36);
@@ -565,6 +566,15 @@ fn leave_hero_window(next: Screen) -> Option<Screen> {
     Some(next)
 }
 
+/// Fills the name field as the original does on every opening of the window (0x4cff70):
+/// with `[NewHero] PrivateHeroName` as text, not as a hint. Start takes the field as it
+/// stands (0x4c10d9), so a name left untouched is that text («(нет имени)», or the name a
+/// mod writes there).
+fn fill_name_field() {
+    let name = own("NewHero", "PrivateHeroName", n_("(no name)"));
+    screens::HERO_NAME.with(|n| *n.borrow_mut() = name);
+}
+
 /// The class picked after a click on portrait `clicked`: a class the map does not offer
 /// keeps the current pick (the original's hit test skips a disabled portrait, 0x4743c8).
 fn choose_class(offered: [bool; 3], pick: usize, clicked: usize) -> usize {
@@ -580,6 +590,15 @@ mod tests {
         assert_eq!(wheel_scroll(60.0, 0.0), 60.0, "no turn, no move");
         assert_eq!(wheel_scroll(60.0, -1.0), 90.0, "down a notch");
         assert_eq!(wheel_scroll(60.0, 2.5), 30.0, "up a notch, whatever the wheel's step");
+    }
+
+    #[test]
+    fn the_name_field_opens_with_the_install_s_no_name_as_text() {
+        screens::HERO_NAME.with(|n| *n.borrow_mut() = "Иво".to_string());
+        fill_name_field();
+        let name = screens::HERO_NAME.with(|n| n.borrow().clone());
+        assert_eq!(name, own("NewHero", "PrivateHeroName", n_("(no name)")), "the last game's name is gone; the field holds the text itself");
+        assert!(!name.is_empty(), "a name left untouched is that text, not an empty one");
     }
 
     #[test]
