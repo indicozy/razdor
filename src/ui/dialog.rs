@@ -72,6 +72,8 @@ pub struct Dialog {
     /// The question is a village's offer (0x4aca80): its answer goes to the village
     /// (`building_view::answer_offer`), not to the event engine.
     pub offer: bool,
+    /// The village offer's result window: its OK pays the witch's mana (0x4ab53b).
+    pub offer_result: bool,
     pub picture: Option<Picture>,
     /// Units that joined / left the army.
     pub joined: Vec<UnitId>,
@@ -103,6 +105,7 @@ impl Dialog {
             event: None,
             question: false,
             offer: false,
+            offer_result: false,
             picture: None,
             joined: Vec::new(),
             left: Vec::new(),

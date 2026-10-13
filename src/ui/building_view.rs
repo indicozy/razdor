@@ -1308,6 +1308,7 @@ pub fn offer_dialog(game: &Game, o: VillageOffer, result: bool) -> Dialog {
     d.chord = true;
     d.question = !result;
     d.offer = !result;
+    d.offer_result = result;
     d.marked = Some(offer_text(o, result));
     d.picture = chrome::win(offer_picture(o)).map(Picture::Side);
     d

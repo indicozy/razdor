@@ -712,7 +712,7 @@ impl App {
             if let Some(close) = dialog::draw(d, &self.assets, self.game.as_ref()) {
                 let closed = self.dialogs.pop_front();
                 let offer = closed.as_ref().is_some_and(|d| d.offer);
-                let offer_result = closed.as_ref().is_some_and(|d| d.village_event && !d.offer);
+                let offer_result = closed.as_ref().is_some_and(|d| d.offer_result);
                 let asked = closed.as_ref().is_some_and(|d| d.question && !d.offer);
                 let read = closed.as_ref().is_some_and(|d| d.event.is_some() && !d.question);
                 // Closing a dialog while the triumph plays changes the map track at once
