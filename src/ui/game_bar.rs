@@ -259,6 +259,8 @@ fn resources(game: &Game, y: f32, h: f32) {
         let base = y + h * 0.5 + value_size * 0.36;
         shadow_text(label, cx - lw - 16.0 * k, base, label_size, Color::new(0.75, 0.75, 0.75, 1.0));
         let icon = 24.0 * k;
+        // Each picture with its own alpha plane and nothing else, as the original's
+        // (0x4dcd8d loads them, 0x49d3e5 draws them through 0x476a3c).
         match chrome::win(art) {
             Some(t) => {
                 let iw = t.width() * icon / t.height();

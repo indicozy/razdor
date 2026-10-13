@@ -1074,6 +1074,18 @@ mod tests {
     }
 
     #[test]
+    fn real_resource_icons_carry_their_own_alpha() {
+        // The status bar draws the four with nothing but their alpha planes (0x49d3e5), so
+        // each must cut its own shape out: no box around it.
+        let Some(dt) = install() else { return };
+        for n in ["Magic", "Money", "Income", "Payment"] {
+            let img = &dt.graphic(&format!("Graphics/Windows/Res-{n}.lit")).unwrap()[0];
+            let clear = img.rgba.chunks_exact(4).filter(|p| p[3] < 32).count();
+            assert!(clear * 10 >= img.rgba.len() / 4, "Res-{n}: {clear} clear pixels");
+        }
+    }
+
+    #[test]
     fn real_art_lookups() {
         let Some(dt) = install() else { return };
         let portraits = dt.unit_portraits().unwrap();
