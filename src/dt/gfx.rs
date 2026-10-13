@@ -240,9 +240,11 @@ fn lit_plane(d: &[u8], o: usize, pw: usize, ph: usize, c: &[[f64; 8]; 8]) -> Res
     let mut nonzero: Vec<(usize, usize, f64)> = Vec::with_capacity(64);
     for b in 0..nb {
         for pos in 0..64 {
-            let r = rank[pos] as usize;
-            let byte = data[r * nb + b];
-            let v = if r == 0 { byte as f64 } else { byte as i8 as f64 };
+            // Every stored byte is signed, the DC too (0x4778b4: CBW). The encoder keeps DC
+            // bytes under 128, but slot 0 does not always hold the DC: in `Res-Magic` it holds
+            // an AC coefficient, whose negative values read unsigned drew grey stripes.
+            let byte = data[rank[pos] as usize * nb + b];
+            let v = byte as i8 as f64;
             coef[pos / 8][pos % 8] = v * quant[pos] as f64;
         }
         let (bx, by) = (b % bw, b / bw);
@@ -750,10 +752,11 @@ mod tests {
         assert!(matches!(decode_lit(b"XYZ\0...."), Err(DtError::BadMagic { .. })));
     }
 
-    /// A DCT plane whose blocks are flat with the given DC bytes (quant 8 at DC, so value = DC).
+    /// A DCT plane whose blocks are flat with the given DC bytes (quant 16 at DC, so value =
+    /// 2·DC; the bytes are signed, so a DC byte stays under 128).
     fn flat_plane(dcs: &[u8]) -> Vec<u8> {
         let mut v = vec![1u8; 64];
-        v[0] = 8;
+        v[0] = 16;
         v.extend(0..64u8); // identity rank
         v.extend_from_slice(dcs);
         v.extend(std::iter::repeat_n(0, 63 * dcs.len()));
@@ -764,29 +767,48 @@ mod tests {
     fn lit_dct_444_and_alpha() {
         // 10×3 pads to 16×8: two blocks per plane.
         let mut d = lit_header(10, 3, LIT_ALPHA);
-        d.extend(flat_plane(&[100, 200]));
-        d.extend(flat_plane(&[128, 128]));
-        d.extend(flat_plane(&[128, 128]));
-        d.extend(flat_plane(&[255, 7]));
+        d.extend(flat_plane(&[50, 100]));
+        d.extend(flat_plane(&[64, 64]));
+        d.extend(flat_plane(&[64, 64]));
+        d.extend(flat_plane(&[127, 4]));
         let img = decode_lit(&d).unwrap();
         assert_eq!((img.width, img.height), (10, 3));
-        assert_eq!(img.pixel(0, 0), [100, 100, 100, 255]);
-        assert_eq!(img.pixel(9, 2), [200, 200, 200, 7]);
+        assert_eq!(img.pixel(0, 0), [100, 100, 100, 254]);
+        assert_eq!(img.pixel(9, 2), [200, 200, 200, 8]);
         let mut long = d.clone();
         long.push(0);
         assert!(matches!(decode_lit(&long), Err(DtError::TrailingBytes { .. })));
     }
 
     #[test]
+    fn lit_dct_slot_zero_is_signed() {
+        // `Res-Magic`'s luma stores the first horizontal AC (pos 1) in slot 0 and the DC in
+        // slot 1. A negative AC there must ramp up to the right, as the original reads every
+        // byte signed (0x4778b4); read unsigned it made the grey stripes over the hand.
+        let mut d = lit_header(8, 8, 0);
+        let mut y = flat_plane(&[0]);
+        y.swap(64, 65); // rank: pos 0 at slot 1, pos 1 at slot 0
+        y.truncate(128);
+        y.extend([0xEC, 50]); // slot 0: AC −20; slot 1: DC 50 (value 100)
+        y.extend(std::iter::repeat_n(0, 62));
+        d.extend(y);
+        d.extend(flat_plane(&[64]));
+        d.extend(flat_plane(&[64]));
+        let img = decode_lit(&d).unwrap();
+        let (left, right) = (img.pixel(0, 0)[0], img.pixel(7, 0)[0]);
+        assert!(left < right && left > 80 && right < 120, "{left} {right}");
+    }
+
+    #[test]
     fn lit_dct_420_ac() {
         // 16×16 4:2:0: four Y blocks, one Cb and one Cr block.
         let mut d = lit_header(16, 16, LIT_420);
-        let mut y = flat_plane(&[64, 64, 64, 64]);
+        let mut y = flat_plane(&[32, 32, 32, 32]);
         // First horizontal AC coefficient (pos 1, stored at rank 1) of block 0.
         y[128 + 4] = 20;
         d.extend(y);
-        d.extend(flat_plane(&[128]));
-        d.extend(flat_plane(&[228])); // Cr + 100: red tint
+        d.extend(flat_plane(&[64]));
+        d.extend(flat_plane(&[114])); // Cr + 100: red tint
         let img = decode_lit(&d).unwrap();
         let (left, right) = (img.pixel(0, 0), img.pixel(7, 0));
         assert!(left[0] > right[0], "AC ramp {left:?} {right:?}");
@@ -947,6 +969,20 @@ mod tests {
             }
             assert_eq!(got, sums, "{rel} channel sums");
         }
+    }
+
+    #[test]
+    fn real_res_magic_has_no_grey_stripes() {
+        // The status bar's mana hand (0x4dcd8d, drawn by 0x49d3e5): its luma keeps an AC
+        // coefficient in slot 0. Read unsigned, 47 opaque pixels came out light grey in two
+        // vertical stripes; read signed, as the original does, none.
+        let Some(dt) = install() else { return };
+        let img = &dt.graphic("Graphics/Windows/Res-Magic.lit").unwrap()[0];
+        let grey = img.rgba.chunks_exact(4).filter(|p| {
+            let (hi, lo) = (p[0].max(p[1]).max(p[2]), p[0].min(p[1]).min(p[2]));
+            p[3] > 200 && hi - lo < 40 && (p[0] as u32 + p[1] as u32 + p[2] as u32) / 3 > 90
+        });
+        assert_eq!(grey.count(), 0);
     }
 
     #[test]

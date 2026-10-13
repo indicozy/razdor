@@ -93,7 +93,9 @@ Flags work as bit fields (H; the values seen are 0, 2, 4, 6, 8, 10):
 for each natural position, the index where its coefficient is stored; the encoder builds it per image),
 then `64 × nblocks` bytes stored **coefficient-major**: all blocks' rank-0 byte (DC) first, then all
 rank-1 bytes, and so on. Blocks run in raster order over the padded plane.
-- DC byte is **unsigned**; AC bytes are **int8**.
+- Every byte is **int8**, the DC too (the original sign-extends each one, 0x4778b4 `CBW`). The encoder
+  keeps DC bytes under 128, but slot 0 does not always hold the DC: in 14 files (`Res-Magic`,
+  `Selection-1`, the `sign-*` badges, …) it holds an AC coefficient, and reading it unsigned draws stripes.
 - `coef[pos] = byte[rank[pos]][block] * quant[pos]`, then an orthonormal 8×8 IDCT (block mean = DC·q0/8).
   No level shift.
 - Planes come in order Y, Cb, Cr[, A]. Each has its own 128-byte table header. With 4:2:0, chroma is
