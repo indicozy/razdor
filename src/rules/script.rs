@@ -225,7 +225,12 @@ impl Game {
             None => Vec::new(),
         };
         let now = self.world.armies.iter().position(|a| a.id == id);
-        let fired = after.iter().any(|e| matches!(e, Event::Script(EventOutcome::Fired { .. } | EventOutcome::Question(_))));
+        // The scan counts as having fired only when it stops on an event's window (a message
+        // or a question; 0x4abfbc returns 1 then): silent events fire, finish and the scan
+        // goes on, and when it runs out it returns 0 (0x4a7b80 clears the silent-run flag
+        // 0x674966 on each event that does not pass), so the battle opens all the same.
+        // РК4's «- Колдуны мертвы» fires silently on every scan once the warlocks are beaten.
+        let fired = after.iter().any(|e| matches!(e, Event::Script(EventOutcome::Fired { message: true, .. } | EventOutcome::Question(_))));
         let fights = |a: &Army| on_step || a.hostile();
         match e {
             // A battle the events started instead comes with `after`.
@@ -2014,6 +2019,30 @@ mod tests {
         let events = walk(&mut g);
         assert_eq!(events.last(), Some(&Event::Encounter(0)));
         assert_eq!(g.foe, Some(Foe::Army(0)));
+    }
+
+    #[test]
+    fn a_silent_event_firing_as_he_steps_onto_an_army_does_not_stop_the_battle() {
+        // 0x4abfbc returns 1 only when the scan stops on an event's window: a silent event
+        // fires, finishes and the scan goes on to return 0, and the battle opens (0x4ad94c).
+        // РК4 (a player's report): «- Колдуны мертвы», repeating, without a message, fires on
+        // every scan once the warlocks are beaten, and «Корабль Бэкрока» could not be fought.
+        for attitude in [0, -2] {
+            let mut silent = ev(EventKind::Global);
+            (silent.once, silent.message) = (0, String::new());
+            let mut s = world(vec![silent]);
+            let mut guard = army(2, 6, 2, attitude, &[troop(4, 0, 1)]);
+            (guard.patrols, guard.patrol_radius) = (1, 0);
+            s.armies = vec![guard];
+            let mut g = start(&s);
+            read(&mut g);
+            assert!(g.set_destination((6, 2)));
+            let events = walk(&mut g);
+            assert!(fired(&events).contains(&1), "it fires on the steps and at the meeting: {events:?}");
+            assert!(events.contains(&Event::Encounter(0)), "{events:?}");
+            assert_eq!((g.foe, g.tile()), (Some(Foe::Army(0)), (5, 2)));
+            assert_ne!(g.world.armies[0].talk, super::super::game::TALKED);
+        }
     }
 
     #[test]

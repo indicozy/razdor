@@ -345,6 +345,11 @@ Checked for the cell he is about to enter, before he moves (§2.2):
 5. Engagement: the walk stops with the hero on the cell he was leaving, the opponent becomes
    the "met army" for event conditions, and the events are scanned; if none fires, the battle
    screen opens. If an event fired instead, that army's AI memory of the hero is reset.
+   "Fired" is the scan's result (0x4abfbc): it is 1 only when the scan stops on an event's
+   window (a message or a question) or the noon report. Silent events fire and finish inside
+   the scan, which goes on and returns 0 when no further event passes (0x4a7b80 clears the
+   silent-run flag 0x674966), so the battle opens all the same (РК4's «- Колдуны мертвы»,
+   firing on every scan once the warlocks are beaten).
 
 ### 4.3 AI armies reaching the hero (0x4a548c, called after each AI step)
 
