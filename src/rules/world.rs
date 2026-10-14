@@ -2187,3 +2187,41 @@ mod real_maps {
 
 
 
+
+#[cfg(test)]
+mod start_garrisons {
+    use crate::dt::install::DtInstall;
+    use crate::rules::content::{Content, HeroClass};
+    use crate::rules::formation::{Formation, Row};
+    use crate::rules::game::Game;
+    use std::sync::Arc;
+
+    /// Проклятое озеро's Замок Вайтрок is the hero's at the start: its scenario garrison
+    /// (4 militia, 4 archers) becomes his stationed units, and like every garrison it takes
+    /// the load's round trip through a battle side (0x4b2504 → 0x49855c, 0x4988c0; 483b3c):
+    /// the militia in front, the archers behind, side by side in the middle columns, as the
+    /// original's garrison tab shows them. They stood where adding put them (the reserve
+    /// first, 0x495ce0), six in one row.
+    #[test]
+    fn the_hero_s_start_castle_garrison_stands_as_the_original_s() {
+        let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+        let dt = DtInstall::load(std::path::Path::new(&dir)).unwrap();
+        let s = dt.maps.iter().find(|m| m.name.starts_with("Проклятое")).unwrap().load().unwrap();
+        for formation in [Formation::WIDE, Formation::VANILLA] {
+            let mut content = Content::from_dt(&dt);
+            content.formation = formation;
+            let c = Arc::new(content);
+            let g = Game::from_scenario(c.clone(), &s, HeroClass::Knight);
+            let castle = g.world.locations.iter().find(|l| l.name == "Замок Вайтрок").unwrap();
+            assert_eq!(castle.stationed.len(), 8, "{formation:?}");
+            for st in &castle.stationed {
+                let want = if c.unit(st.unit.def).name == "Ополченец" { Row::Front } else { Row::Back };
+                assert_eq!(st.unit.slot.row, want, "{formation:?}: {} at {:?}", c.unit(st.unit.def).name, st.unit.slot);
+            }
+            let mut cols: Vec<u8> = castle.stationed.iter().filter(|s| s.unit.slot.row == Row::Front).map(|s| s.unit.slot.col).collect();
+            cols.sort();
+            cols.dedup();
+            assert_eq!(cols.len(), 4, "{formation:?}: four militia side by side");
+        }
+    }
+}

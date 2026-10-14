@@ -281,7 +281,11 @@ Saves use bzip2 level 1 and 64 KiB blocks; the list caches use one chunk. **code
    stands as the auto-arrange puts it, not where AddUnit put it (reserve first). His building
    defence is still 0 here (he is put on his cell after the loop, 0x497c68). A campaign map
    that carries the army over copies the old army's units and formation back after the load
-   (0x4b5b64).
+   (0x4b5b64). The garrison of a building the hero owns at the start is no exception: it is
+   arranged like the others (Проклятое озеро's Замок Вайтрок shows its four militia in front
+   and four archers behind, in the middle columns). *Razdor:* such a garrison becomes the
+   hero's stationed units when the game is made, and `Game::arrange_at_load` arranges those
+   too.
 10. The AI buffers are cleared and the AI initialised; the hero's gold and mana are set; lit
     lanterns reveal the fog (§10.7).
 

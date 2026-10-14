@@ -746,6 +746,16 @@ impl Game {
         for troops in troops {
             arrange_troops(&content, troops, 0);
         }
+        // The garrisons of the player's own start buildings went to `stationed` when the game
+        // was made ([`Game::with_world`]); in the original they are garrisons like any other
+        // and take the same round trip: a castle's militia in front, its archers behind
+        // (screenshot of Проклятое озеро's Замок Вайтрок; they stood reserve-first before).
+        for l in self.world.locations.iter_mut() {
+            let side: Vec<(usize, &Unit)> = l.stationed.iter().enumerate().filter(|(_, s)| s.unit.alive()).map(|(k, s)| (k, &s.unit)).collect();
+            for (k, s) in arranged(&content, &side, 0) {
+                l.stationed[k].unit.slot = s;
+            }
+        }
     }
 
     /// The hero's name for `#HERONAME`: the one the player chose, else his class's name.
