@@ -35,8 +35,9 @@ pub enum Fx {
     Shade,
     /// Green and blue swapped (0x48dd40 with 1, 3, 2): the blue pill made the green one.
     SwapGreenBlue,
-    /// Red takes green, green takes blue, blue takes red (0x48dd40 with 2, 3, 1): the green
-    /// buttons made the defeat window's red ones (0x4dba90).
+    /// Red takes green, green takes blue, blue takes red (0x48dd40 with 2, 3, 1), then
+    /// (0, 64, 128) taken off inside the 1 px edge (0x4768f8 subtracting over (1,1)–(w−1,h−1)):
+    /// the green buttons made the defeat window's dark red ones with their silver rim (0x4dba90).
     RotateRgb,
 }
 
@@ -144,6 +145,23 @@ pub fn transform(img: &mut Image, fx: Fx) {
             Fx::RotateRgb => {
                 let (r, g, b) = (p[0], p[1], p[2]);
                 p[..3].copy_from_slice(&[g, b, r]);
+            }
+        }
+    }
+    if fx == Fx::RotateRgb {
+        darken_inside_edge(img, [0, 64, 128]);
+    }
+}
+
+/// Takes `rgb` off every pixel but the outermost row and column on each side, down to 0
+/// (0x4768f8 in its subtracting mode, from (1, 1) to (w − 1, h − 1)).
+fn darken_inside_edge(img: &mut Image, rgb: [u8; 3]) {
+    let (w, h) = (img.width as usize, img.height as usize);
+    for y in 1..h.saturating_sub(1) {
+        for x in 1..w.saturating_sub(1) {
+            let p = &mut img.rgba[(y * w + x) * 4..][..3];
+            for (c, d) in p.iter_mut().zip(rgb) {
+                *c = c.saturating_sub(d);
             }
         }
     }
@@ -1356,6 +1374,20 @@ mod tests {
 
     fn img(px: &[[u8; 4]]) -> Image {
         Image { width: px.len() as u32, height: 1, rgba: px.iter().flatten().copied().collect() }
+    }
+
+    /// The defeat window's red button (0x4dba90): channels turned (2, 3, 1), then (0, 64, 128)
+    /// taken off inside the 1 px edge, which keeps its silver. Measured on the original: the
+    /// face (65, 39, 26) after the turn reads (76, 3, 0) on screen.
+    #[test]
+    fn the_defeat_button_is_turned_and_darkened_inside_its_edge() {
+        let mut b = Image { width: 3, height: 3, rgba: [39, 26, 65, 255].repeat(9) };
+        transform(&mut b, Fx::RotateRgb);
+        let at = |x: usize, y: usize| { let o = (y * 3 + x) * 4; [b.rgba[o], b.rgba[o + 1], b.rgba[o + 2]] };
+        assert_eq!(at(1, 1), [26, 1, 0], "inside: turned to (26, 65, 39), less (0, 64, 128)");
+        for (x, y) in [(0, 0), (1, 0), (2, 1), (1, 2), (0, 2)] {
+            assert_eq!(at(x, y), [26, 65, 39], "the edge is only turned");
+        }
     }
 
     #[test]

@@ -261,6 +261,13 @@ runs on its first arrival on a new cell after noon (0x4a5534). In order:
      (nothing is overwritten), but steps 4–6 have already run and used their random rolls.
 - Finally ids outside the item range are cleared. **The list is not sorted**: the Community exe
   jumps over the sort loop (0x4be9a0), so goods stay in the order drawn.
+- **Display order** (data, 2026-10-14: the original under Wine on Проклятое озеро, every market's
+  12 places read from memory at the start and after eleven 12-hour restocks, 78 stocks): the
+  window lists the places in order (0x4bbc84 packs places 1..12 into 0x670e18, which 0x4bca8c
+  lists from the top), so the bands walking down the window show **most expensive first**: 17
+  stocks fell strictly, the other 61 fell but for fixed goods in their own places, a town's
+  potions, or a widened band; none rose. A player's screenshot of the original (another build)
+  showed a market cheapest first, which fits a build that does not jump over the sort.
 
 **Barracks regrowth** (code, 0x4a1998, every midnight, buildings with byte 294 set):
 - Each of the 6 slots with a unit, a max above 0 and count < max gains +1 when

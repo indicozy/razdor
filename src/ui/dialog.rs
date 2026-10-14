@@ -286,101 +286,157 @@ pub fn resource_icon(r: Resource, cx: f32, cy: f32, s: f32) {
 }
 
 /// A row of unit portraits with a caption. Returns its height.
-fn unit_row(assets: &Assets, label: &str, units: &[UnitId], x: f32, y: f32) -> f32 {
+fn unit_row(assets: &Assets, label: &str, units: &[UnitId], x: f32, y: f32, o: f32) -> f32 {
     if units.is_empty() {
         return 0.0;
     }
-    text(label, x + 30.0, y + 30.0, 18.0, INK);
-    let lx = x + 40.0 + measure(label, 18.0).width;
+    text(label, x + 30.0 * o, y + 30.0 * o, 18.0 * o, INK);
+    let lx = x + 40.0 * o + measure(label, 18.0 * o).width;
     for (k, &u) in units.iter().enumerate().take(8) {
-        assets.draw_unit(u, Team::Player, lx + 26.0 + k as f32 * 56.0, y + 26.0, 50.0);
+        assets.draw_unit(u, Team::Player, lx + 26.0 * o + k as f32 * 56.0 * o, y + 26.0 * o, 50.0 * o);
     }
-    60.0
+    60.0 * o
 }
 
-/// Draws `d` centred on the screen; returns how it was closed: OK (or Enter, Escape), or for
-/// a question Yes or No (Esc No, any other key Yes, as the original's box: `answer_key`).
+/// The event window's frame in the original's pixels (0x4a8ae8), before the interface scale:
+/// 634 wide; the text box at (19 + side, 46), `side` being a side picture's width and 14, as
+/// wide as the rest of 634 − 38; the side picture at (20, 47); the box at least 92 tall or
+/// as tall as the picture, the text centred in it with 16 above and below; 119 more than
+/// the box (and Razdor's rows under it) in all, the buttons 45 from the bottom.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct EventFrame {
+    w: f32,
+    h: f32,
+    box_x: f32,
+    box_w: f32,
+    box_h: f32,
+}
+
+const EVENT_W: f32 = 634.0;
+const EVENT_BOX_TOP: f32 = 46.0;
+const EVENT_PAD: f32 = 16.0;
+const EVENT_MIN_BOX: f32 = 92.0;
+/// The box's tallest before the text scrolls (0x4aa88a: 499).
+const EVENT_MAX_BOX: f32 = 499.0;
+/// The window's height besides the box and the rows under it (0x4aa929: + 0x77).
+const EVENT_REST: f32 = 119.0;
+/// Rows of the original's event text (Benguiat), and the defeat report's gap row (0x47e46c
+/// with font ae24bc).
+const EVENT_LINE: f32 = 19.0;
+const EVENT_GAP: f32 = 12.0;
+/// From a row's top to its baseline.
+const EVENT_BASELINE: f32 = 13.0;
+
+fn event_frame(side: Option<(f32, f32)>, text_h: f32, below: f32, max_box: f32) -> EventFrame {
+    let side_w = side.map_or(0.0, |(pw, _)| pw + 14.0);
+    let min_box = side.map_or(EVENT_MIN_BOX, |(_, ph)| ph.max(EVENT_MIN_BOX));
+    let box_h = (text_h + 2.0 * EVENT_PAD).max(min_box).min(max_box.max(min_box));
+    EventFrame { w: EVENT_W, h: box_h + below + EVENT_REST, box_x: 19.0 + side_w, box_w: EVENT_W - 38.0 - side_w, box_h }
+}
+
+/// Where the window stands: centred over the map view above the bottom bar (the original's
+/// 1024×682: 0x4aa9ff), in screen pixels for a window `w` × `h` of them.
+fn event_origin(sw: f32, sh: f32, bar: f32, w: f32, h: f32) -> (f32, f32) {
+    (((sw - w) / 2.0).floor(), ((sh - bar - h) / 2.0).floor().max(2.0))
+}
+
+/// Draws `d` over the map; returns how it was closed: OK (or Enter, Escape), or for a
+/// question Yes or No (Esc or N No, any other key Yes: `answer_key`). Laid out in the
+/// original's pixels ([`event_frame`]) times the interface scale, its text in the original's
+/// Benguiat at its own size ([`super::dt_font::sheet_size`]).
 pub fn draw(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Close> {
     let (sw, sh) = (screen_width(), screen_height());
+    // The original's pixel on screen, snapped as the font sheets snap (×1.875 → ×2), so the
+    // text and its box grow together and the lines break where the original's do.
+    let o = super::dt_font::whole_scale(chrome::k() * 0.9375).min((sw - 12.0) / EVENT_W);
     chrome::under_message();
+    let size = super::dt_font::sheet_size(super::dt_font::Face::Title, o);
+    let line = EVENT_LINE * o;
     // A picture at the side takes its width and 14 more from the text box.
     let side = match &d.picture {
         Some(Picture::Side(t) | Picture::Still(t)) => Some((t.width(), t.height())),
         _ => None,
     };
     let side_w = side.map_or(0.0, |(pw, _)| pw + 14.0);
-    // A long story text widens the window rather than running off the screen.
-    let fit = |w: f32| -> (f32, Vec<String>, Vec<MarkupRow>) {
-        match &d.marked {
-            Some(t) => (w, Vec::new(), markup_rows(t, w - 80.0 - side_w, 19.0)),
-            None => (w, d.text.iter().flat_map(|t| wrap(t, w - 80.0 - side_w, 19.0)).collect(), Vec::new()),
-        }
+    let room = (EVENT_W - 38.0 - side_w - 40.0) * o;
+    let (lines, rows): (Vec<String>, Vec<MarkupRow>) = match &d.marked {
+        Some(t) => (Vec::new(), markup_rows(t, room, size)),
+        None => (d.text.iter().flat_map(|t| wrap(t, room, size)).collect(), Vec::new()),
     };
-    let (mut w, mut lines, mut rows) = fit(620.0f32.min(sw - 20.0));
-    if (lines.len() + rows.len()) as f32 * 23.0 > sh * 0.45 {
-        (w, lines, rows) = fit(980.0f32.min(sw - 20.0));
-    }
-    let mut text_h = (lines.len() + rows.len()) as f32 * 23.0 + 24.0;
-    let res_h = if d.resources.is_empty() { 0.0 } else { 104.0 };
+    // The defeat report's empty row is the gap font's (0x47e46c), shorter than a line.
+    let row_h = |r: &MarkupRow| if d.defeat && r.text.is_empty() { EVENT_GAP * o } else { line };
+    let total = lines.len() + rows.len();
+    let full_h = lines.len() as f32 * line + rows.iter().map(row_h).sum::<f32>();
+    let res_h = if d.resources.is_empty() { 0.0 } else { 104.0 * o };
     // An icon row grows the window by its caption and icons (0x4a8e66: 87 for items, 82
     // for spells).
-    let items_h = if d.items.is_empty() { 0.0 } else { 87.0 };
-    let spells_h = if d.spells.is_empty() { 0.0 } else { 82.0 };
-    let notice_h = if d.notice.is_some() { 26.0 } else { 0.0 };
-    let pic_h = if d.picture.is_some() && side.is_none() { 140.0 } else { 0.0 };
-    let units_h = [&d.joined, &d.left].iter().filter(|u| !u.is_empty()).count() as f32 * 60.0;
-    let h_fixed = 34.0 + 16.0 + pic_h + res_h + items_h + spells_h + units_h + notice_h + 64.0;
-    // The box is at least as tall as the side picture and its frame, the text centred in it
-    // (0x4aa88a).
-    let text_top = side.map_or(0.0, |(_, ph)| ((ph + 2.0 - text_h) / 2.0).max(0.0));
-    if let Some((_, ph)) = side {
-        text_h = text_h.max(ph + 2.0);
-    }
-    let h = h_fixed + text_h;
-    let (x, y) = ((sw - w) / 2.0, ((sh - h) / 2.0).max(10.0));
+    let items_h = if d.items.is_empty() { 0.0 } else { 87.0 * o };
+    let spells_h = if d.spells.is_empty() { 0.0 } else { 82.0 * o };
+    let notice_h = if d.notice.is_some() { 36.0 * o } else { 0.0 };
+    let pic_h = if d.picture.is_some() && side.is_none() { 140.0 * o } else { 0.0 };
+    let units_h = [&d.joined, &d.left].iter().filter(|u| !u.is_empty()).count() as f32 * 60.0 * o;
+    let below = pic_h + res_h + items_h + spells_h + units_h + notice_h;
+    // The box stops at 499 (and short of the screen), the buttons in sight.
+    let screen_box = (sh - chrome::bar_height() - 4.0) / o - below / o - EVENT_REST;
+    let max_box = EVENT_MAX_BOX.min(screen_box);
+    let f = event_frame(side, full_h / o, below / o, max_box);
+    let shown = if full_h / o + 2.0 * EVENT_PAD <= f.box_h { total } else { (((f.box_h - 2.0 * EVENT_PAD) * o / line).floor().max(1.0) as usize).min(total) };
+    let (w, h) = (f.w * o, f.h * o);
+    let (x, y) = event_origin(sw, sh, chrome::bar_height(), w, h);
     // The defeat look is the red marble (the original's window after a lost battle).
     let skin = if d.defeat { chrome::Skin::Red } else { chrome::Skin::Marble };
     chrome::window(Rect::new(x, y, w, h), &d.title, skin, false);
-    let mut cy = y + 44.0;
+    let edge = o.max(1.0);
+    let title_h = (26.0 * chrome::k()).round();
+    chrome::silver_frame(Rect::new(x + 3.0 * o, y + title_h + 3.0 * o, w - 6.0 * o, h - title_h - 64.0 * o), edge);
+    chrome::silver_frame(Rect::new(x + 2.0 * o, y + h - 58.0 * o, w - 4.0 * o, 56.0 * o), edge);
+    let top = y + EVENT_BOX_TOP * o;
+    let mut cy = top;
     match &d.picture {
         Some(Picture::Unit(u)) => {
-            let r = Rect::new(x + w / 2.0 - 64.0, cy, 128.0, 128.0);
+            let r = Rect::new(x + w / 2.0 - 64.0 * o, cy, 128.0 * o, 128.0 * o);
             assets.draw_portrait(*u, Team::Player, r);
-            chrome::silver_frame(r, 1.5);
+            chrome::silver_frame(r, 1.5 * o);
         }
         Some(Picture::Image(tex)) => {
-            let k = (128.0 / tex.height()).min((w - 60.0) / tex.width());
+            let k = (128.0 * o / tex.height()).min((w - 60.0 * o) / tex.width());
             let (tw, th) = (tex.width() * k, tex.height() * k);
             draw_texture_ex(tex, x + (w - tw) / 2.0, cy, WHITE, DrawTextureParams { dest_size: Some(vec2(tw, th)), ..Default::default() });
-            draw_rectangle_lines(x + (w - tw) / 2.0, cy, tw, th, 2.0, MARBLE_EDGE);
+            draw_rectangle_lines(x + (w - tw) / 2.0, cy, tw, th, 2.0 * o, MARBLE_EDGE);
         }
-        Some(Picture::Still(tex)) => draw_texture(tex, x + 17.0, cy + 1.0, WHITE),
+        Some(Picture::Still(tex)) => chrome::tex(tex, Rect::new(x + 20.0 * o, top + o, tex.width() * o, tex.height() * o), WHITE),
         Some(Picture::Side(tex)) => {
-            let (px, py) = (x + 17.0, cy + 1.0);
-            draw_texture(tex, px, py, WHITE);
-            draw_rectangle_lines(px - 1.0, py - 1.0, tex.width() + 2.0, tex.height() + 2.0, 1.0, WHITE);
+            let r = Rect::new(x + 20.0 * o, top + o, tex.width() * o, tex.height() * o);
+            chrome::tex(tex, r, WHITE);
+            draw_rectangle_lines(r.x - 1.0, r.y - 1.0, r.w + 2.0, r.h + 2.0, 1.0, WHITE);
         }
         None => {}
     }
     cy += pic_h;
-    let tb = Rect::new(x + 16.0 + side_w, cy, w - 32.0 - side_w, text_h);
+    let tb = Rect::new(x + f.box_x * o, cy, f.box_w * o, f.box_h * o);
     chrome::text_box(tb);
-    let ty = cy + text_top;
-    for (i, line) in lines.iter().enumerate() {
-        chrome::shadow_centered(line, tb.x + tb.w / 2.0, ty + 30.0 + i as f32 * 23.0, 19.0, Color::new(1.0, 0.9, 0.66, 1.0));
+    // No scrolling on this branch: a text taller than the box shows its first rows.
+    let first = 0;
+    let shown_h = lines.iter().skip(first).take(shown).map(|_| line).sum::<f32>() + rows.iter().skip(first).take(shown).map(row_h).sum::<f32>();
+    let mut ty = tb.y + ((tb.h - shown_h) / 2.0).max(EVENT_PAD * o).floor() + EVENT_BASELINE * o;
+    let text_x = tb.x + 20.0 * o;
+    for l in lines.iter().skip(first).take(shown) {
+        super::dt_font::with_face(super::dt_font::Face::Title, || chrome::shadow_centered(l, tb.x + tb.w / 2.0, ty, size, Color::new(1.0, 0.9, 0.66, 1.0)));
+        ty += line;
     }
-    for (i, row) in rows.iter().enumerate() {
-        draw_markup_row(row, tb.x + 24.0, ty + 30.0 + i as f32 * 23.0, tb.w - 48.0, 19.0);
+    for row in rows.iter().skip(first).take(shown) {
+        draw_markup_row(row, text_x, ty, room, size);
+        ty += row_h(row);
     }
-    cy += text_h + 10.0;
+    cy += tb.h + 10.0 * o;
     if !d.resources.is_empty() {
         let n = d.resources.len() as f32;
-        let step = (w - 60.0) / n;
+        let step = (w - 60.0 * o) / n;
         for (k, (r, label)) in d.resources.iter().enumerate() {
-            let cx = x + 30.0 + step * (k as f32 + 0.5);
+            let cx = x + 30.0 * o + step * (k as f32 + 0.5);
             let c = if *r == Resource::Mana { MANA } else { Color::new(0.7, 0.92, 0.75, 1.0) };
-            chrome::shadow_centered(label, cx, cy + 18.0, 18.0, c);
-            resource_icon(*r, cx, cy + 62.0, 70.0);
+            chrome::shadow_centered(label, cx, cy + 18.0 * o, size, c);
+            resource_icon(*r, cx, cy + 62.0 * o, 70.0 * o);
         }
         cy += res_h;
     }
@@ -390,40 +446,40 @@ pub fn draw(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Close> {
     let spread = |n: usize, i: usize| x + w * (i + 1) as f32 / (n + 1) as f32;
     let caption = |key: &str, ours: &'static str, cy: f32| {
         let t = chrome::ui_text("Event", key).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr(ours).to_string());
-        chrome::shadow_centered(&t, x + w / 2.0, cy + 18.0, 18.0, CAPTION);
+        chrome::shadow_centered(&t, x + w / 2.0, cy + 18.0 * o, size, CAPTION);
     };
     let mut icons: Vec<(bool, u32, Rect)> = Vec::new();
     if !d.spells.is_empty() {
         caption("NewSpell", razdor::i18n::n_("New spells learnt:"), cy);
         let n = d.spells.len().min(4);
         for (i, &s) in d.spells.iter().enumerate().take(4) {
-            let r = Rect::new(spread(n, i) - 25.0, cy + 26.0, 50.0, 50.0);
+            let r = Rect::new(spread(n, i) - 25.0 * o, cy + 26.0 * o, 50.0 * o, 50.0 * o);
             if let Some(def) = game.and_then(|g| g.content.spells.iter().find(|x| x.id == s)) {
                 chrome::spell_icon(&def.icons, r);
-                chrome::silver_frame(r, 1.0);
+                chrome::silver_frame(r, edge);
             }
             icons.push((true, s, r));
         }
         cy += spells_h;
     }
-    cy += unit_row(assets, tr("Left the army:"), &d.left, x, cy);
-    cy += unit_row(assets, tr("Joined the army:"), &d.joined, x, cy);
+    cy += unit_row(assets, tr("Left the army:"), &d.left, x, cy, o);
+    cy += unit_row(assets, tr("Joined the army:"), &d.joined, x, cy, o);
     if !d.items.is_empty() {
         caption("AddItem", razdor::i18n::n_("Items received:"), cy);
         let n = d.items.len().min(8);
         for (i, &item) in d.items.iter().enumerate().take(8) {
-            let r = Rect::new(spread(n, i) - 27.0, cy + 26.0, 55.0, 55.0);
+            let r = Rect::new(spread(n, i) - 27.0 * o, cy + 26.0 * o, 55.0 * o, 55.0 * o);
             assets.draw_item(item, r.x, r.y, r.w);
             icons.push((false, item.0, r));
         }
         cy += items_h;
     }
     if let Some(n) = &d.notice {
-        chrome::shadow_centered(n, x + w / 2.0, cy + 18.0, 18.0, Color::new(0.3, 0.72, 1.0, 1.0));
+        chrome::shadow_centered(n, x + w / 2.0, cy + 18.0 * o, size, Color::new(0.3, 0.72, 1.0, 1.0));
     }
-    let by = y + h - 52.0;
-    // The silver line over the buttons.
-    draw_line(x + 2.0, by - 10.0, x + w - 2.0, by - 10.0, 1.5, chrome::SILVER);
+    // The buttons, 95 × 36, 45 from the window's bottom.
+    let (bw, bh) = (95.0 * o, 36.0 * o);
+    let by = y + h - 45.0 * o;
     // A left or right press on an icon shows its item or spell centred on the press, kept
     // inside the window, until the button is let go (0x4c1fec / 0x4c2048, the frame handler
     // 0x4cd558); the window's buttons wait meanwhile.
@@ -452,8 +508,8 @@ pub fn draw(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Close> {
     }
     if d.question {
         let answer = answer_key();
-        let yes = button(x + w / 2.0 - 140.0, by, 120.0, 38.0, tr("Yes"), true) || answer == Some(true);
-        let no = button(x + w / 2.0 + 20.0, by, 120.0, 38.0, tr("No"), true) || answer == Some(false);
+        let yes = button(x + w / 2.0 - bw - 10.0 * o, by, bw, bh, tr("Yes"), true) || answer == Some(true);
+        let no = button(x + w / 2.0 + 10.0 * o, by, bw, bh, tr("No"), true) || answer == Some(false);
         return if yes {
             Some(Close::Yes)
         } else if no {
@@ -466,7 +522,7 @@ pub fn draw(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Close> {
     // is the red one (0x4aa263).
     let ok_label = chrome::ui_text("Buttons", "Ok").filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| "OK".to_string());
     let ok = if d.defeat {
-        let r = Rect::new(x + w / 2.0 - 60.0, by, 120.0, 38.0);
+        let r = Rect::new(x + (w - bw) / 2.0, by, bw, bh);
         let hover = mouse_in(r.x, r.y, r.w, r.h);
         chrome::defeat_button(r, &ok_label, true, hover);
         let pressed = hover && clicked();
@@ -475,7 +531,7 @@ pub fn draw(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Close> {
         }
         pressed
     } else {
-        button(x + w / 2.0 - 60.0, by, 120.0, 38.0, &ok_label, true)
+        button(x + (w - bw) / 2.0, by, bw, bh, &ok_label, true)
     };
     // Any key but Tab, Alt and the Up and Down arrows, on its release (0x4cd558): Space,
     // Enter and Esc alike. Closed on the release, the key is no longer held when the map
@@ -489,6 +545,21 @@ pub fn draw(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Close> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The defeat report as the original lays it out at 1024×768 (captured under Wine): 634 ×
+    /// 247 at (195, 217), centred over the 1024×682 map view; Stnd-1 (128²) at the side, the
+    /// text box 454 wide from x + 161 and as tall as the picture, two lines, a gap row, two
+    /// lines (4 × 19 + 12 = 88, centred in it).
+    #[test]
+    fn the_event_window_stands_as_the_original_s() {
+        let f = event_frame(Some((128.0, 128.0)), 88.0, 0.0, EVENT_MAX_BOX);
+        assert_eq!(f, EventFrame { w: 634.0, h: 247.0, box_x: 161.0, box_w: 454.0, box_h: 128.0 });
+        assert_eq!(event_origin(1024.0, 768.0, 86.0, f.w, f.h), (195.0, 217.0));
+        assert_eq!(event_frame(None, 19.0, 0.0, EVENT_MAX_BOX).box_h, 92.0);
+        assert_eq!(event_frame(None, 190.0, 0.0, EVENT_MAX_BOX), EventFrame { w: 634.0, h: 341.0, box_x: 19.0, box_w: 596.0, box_h: 222.0 });
+        assert_eq!(event_frame(None, 900.0, 0.0, EVENT_MAX_BOX).box_h, 499.0);
+        assert_eq!(event_frame(None, 900.0, 0.0, 300.0).box_h, 300.0);
+    }
 
     /// The lost battle's report (0x4aa76c): the defeat look, no event behind it (so its OK
     /// ends the game), the defeat text centred in the plain tint, an empty row, the info

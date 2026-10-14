@@ -786,7 +786,14 @@ impl App {
                             self.game = Some(g);
                             next = Some(Screen::WorldMap);
                         }
-                        None => next = Some(Screen::Victory),
+                        // No next map (not a campaign map, or not in the install): the main
+                        // menu once the window is read (0x4aba30 → 0x4bfb34); Razdor's victory
+                        // screen stays for the editor's test play.
+                        None if self.test_play => next = Some(Screen::Victory),
+                        None => {
+                            self.game = None;
+                            next = Some(Screen::MainMenu);
+                        }
                     }
                 }
                 // The map's defeat event: its window was the last thing shown; the game
