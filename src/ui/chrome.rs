@@ -647,8 +647,11 @@ pub fn three_slice(t: &Texture2D, r: Rect, end: f32, color: Color) {
 
 /// Text with the original's dark drop shadow.
 pub fn shadow_text(s: &str, x: f32, y: f32, size: f32, color: Color) {
-    let o = (size / 14.0).clamp(1.0, 2.0);
-    text(s, x + o, y + o, size, Color::new(0.0, 0.0, 0.0, 0.75 * color.a));
+    // From the original's sheets: their shadow sheet, 1 px down and right (4e5c9c, 4dbc26).
+    if !super::dt_font::draw_shadow(s, x, y, size, color.a) {
+        let o = (size / 14.0).clamp(1.0, 2.0);
+        text(s, x + o, y + o, size, Color::new(0.0, 0.0, 0.0, 0.75 * color.a));
+    }
     text(s, x, y, size, color);
 }
 
@@ -865,6 +868,8 @@ fn title_bar_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bo
     let room = if ornate { r.w - 300.0 * k } else { r.w - 2.0 * r.h - 8.0 * k };
     // Titles are in the original's Benguiat, a plain one in its body font.
     super::dt_font::with_face(face, || {
+        // Benguiat is wide: shrink to fit first (at most to 70%); what still does not fit is cut.
+        let size = super::widgets::fit_size(title, room, size);
         let mut t = title.to_string();
         while measure(&t, size).width > room && t.chars().count() > 4 {
             t.pop();
@@ -1020,7 +1025,7 @@ fn marble_button_plain(r: Rect, label: &str, enabled: bool, hover: bool) {
 /// A button's label, centred, smaller if it must be to fit.
 fn button_label(r: Rect, label: &str, enabled: bool, hover: bool) {
     let mut size: f32 = (r.h * 0.56).clamp(12.0, (22.0 * k()).max(12.0)).round();
-    while size > 11.0 && measure(label, size).width > r.w - 10.0 {
+    while size > 7.0 && measure(label, size).width > r.w - 10.0 {
         size -= 1.0;
     }
     let d = measure(label, size);

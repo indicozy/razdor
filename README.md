@@ -261,12 +261,14 @@ name, a save name, an editor field) or while a dialog or question is open (there
 | Battle | Esc | ways out of the battle (quit, main menu, restart) |
 
 ## Fonts
-Razdor draws its text with three free fonts that ship with it (`data/fonts/`, SIL Open Font
-License 1.1, the licences next to the files) and are built into the program: **PT Sans** and
-**PT Sans Bold** (ParaType) for text, **Kurale** for titles and names. They stay sharp at any
-window size, where the original's small bitmap fonts would blur. `RAZDOR_FONT`,
-`RAZDOR_FONT_BOLD` and `RAZDOR_FONT_TITLE` point to other font files, e.g. a bought
-Benguiat Cyrillic (`docs/superpowers/specs/2026-09-28-interface-fonts.md`).
+Razdor draws its text with the original's own bitmap fonts from your install
+(`Graphics/Windows/SanSerif*.lit` for text, `Benguiat*.lit` for titles, buttons, names and the
+event and village texts), with their own shadow sheets, as the original does. The letters are
+scaled by whole numbers without smoothing, so they stay pixel-sharp; a size far from a whole
+number is drawn at its own scale, smoothed. Characters the sheets lack («», —, ×, №) come from
+**PT Sans** (ParaType, SIL Open Font License 1.1, `data/fonts/`, the licence next to the file).
+`RAZDOR_FONT`, `RAZDOR_FONT_BOLD` and `RAZDOR_FONT_TITLE` point to TrueType files to use
+instead, e.g. a bought Benguiat Cyrillic.
 
 ## Language
 Razdor's own interface (buttons, windows, hints, messages, the battle log, the map editor, the

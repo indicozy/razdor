@@ -9,8 +9,15 @@ use crate::rules::game::BattleResult;
 
 /// Days simulated on every map.
 const DAYS: u64 = 30;
-/// Seconds a map may take in a release build.
+/// Seconds a map may take in a release build, times `RAZDOR_PERF_BUDGET_SCALE` (a float,
+/// 1 by default) for slower cores: the E-cores the tests are pinned to need 2 (РК6 takes ~8 s).
 const RELEASE_BUDGET_SECS: f64 = 5.0;
+
+/// [`RELEASE_BUDGET_SECS`] scaled by `RAZDOR_PERF_BUDGET_SCALE`.
+fn release_budget_secs() -> f64 {
+    let scale = std::env::var("RAZDOR_PERF_BUDGET_SCALE").ok().and_then(|s| s.trim().parse::<f64>().ok()).filter(|s| *s > 0.0);
+    RELEASE_BUDGET_SECS * scale.unwrap_or(1.0)
+}
 
 /// Auto-plays the player's pending battle, the AI on both sides.
 fn fight_it_out(g: &mut Game) -> Outcome {
@@ -110,7 +117,7 @@ fn thirty_days_on_every_map() {
         );
         assert!(g.clock.total_minutes() >= end, "{}: the simulation stalled", m.name);
         if !cfg!(debug_assertions) {
-            assert!(secs < RELEASE_BUDGET_SECS, "{}: {secs:.2} s for {DAYS} days", m.name);
+            assert!(secs < release_budget_secs(), "{}: {secs:.2} s for {DAYS} days (set RAZDOR_PERF_BUDGET_SCALE on slow cores)", m.name);
         }
         totals.battles += st.battles;
         totals.captures += st.captures;

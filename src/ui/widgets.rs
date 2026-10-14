@@ -11,40 +11,37 @@ thread_local! {
     /// A TrueType font with Cyrillic, for text the built-in pixel font cannot draw (the
     /// original's names and descriptions).
     static FONT: RefCell<Option<Font>> = const { RefCell::new(None) };
-    /// Sharp stand-ins for the original's bitmap faces: text, bold, titles.
-    static FACE_FONTS: RefCell<[Option<Font>; 3]> = const { RefCell::new([None, None, None]) };
+    /// `RAZDOR_FONT*` files standing in for the original's sheets: text, bold, titles.
+    static OWN_FONTS: RefCell<[Option<Font>; 3]> = const { RefCell::new([None, None, None]) };
 }
 
-/// The fonts that ship with Razdor (`data/fonts`, SIL Open Font License; see
-/// `docs/superpowers/specs/2026-09-28-interface-fonts.md`): PT Sans for text and bold, Kurale
-/// for titles and names, in place of the original's small bitmap faces. `RAZDOR_FONT`,
-/// `RAZDOR_FONT_BOLD` and `RAZDOR_FONT_TITLE` name other files (e.g. a bought Benguiat).
-const FACE_FILES: [(&str, &[u8]); 3] = [
-    ("RAZDOR_FONT", include_bytes!("../../data/fonts/PT_Sans-Regular.ttf")),
-    ("RAZDOR_FONT_BOLD", include_bytes!("../../data/fonts/PT_Sans-Bold.ttf")),
-    ("RAZDOR_FONT_TITLE", include_bytes!("../../data/fonts/Kurale-Regular.ttf")),
-];
+/// The interface draws the install's own bitmap sheets (`ui::dt_font`, as the original:
+/// 4e5c9c, 4dbc26). `RAZDOR_FONT`, `RAZDOR_FONT_BOLD` and `RAZDOR_FONT_TITLE` name TrueType
+/// files to use instead (e.g. a bought Benguiat).
+const OWN_VARS: [&str; 3] = ["RAZDOR_FONT", "RAZDOR_FONT_BOLD", "RAZDOR_FONT_TITLE"];
+
+/// PT Sans (`data/fonts`, SIL Open Font License): the characters the sheets lack (×, —, «…)
+/// and everything when the install has no sheets.
+const FALLBACK_FILE: &[u8] = include_bytes!("../../data/fonts/PT_Sans-Regular.ttf");
 
 pub async fn load_font() {
-    for (i, (var, bundled)) in FACE_FILES.iter().enumerate() {
+    for (i, var) in OWN_VARS.iter().enumerate() {
         let own = match std::env::var(var) {
             Ok(path) => load_ttf_font(&path).await.map_err(|e| razdor::diag!("{var}={path}: {e}")).ok(),
             Err(_) => None,
         };
-        let font = own.or_else(|| load_ttf_font_from_bytes(bundled).map_err(|e| razdor::diag!("bundled font {i}: {e}")).ok());
-        FACE_FONTS.with(|f| f.borrow_mut()[i] = font);
+        OWN_FONTS.with(|f| f.borrow_mut()[i] = own);
     }
-    // The text face doubles as the font for everything else.
-    let text = FACE_FONTS.with(|f| f.borrow()[0].clone());
+    let text = OWN_FONTS.with(|f| f.borrow()[0].clone()).or_else(|| load_ttf_font_from_bytes(FALLBACK_FILE).map_err(|e| razdor::diag!("bundled fallback font: {e}")).ok());
     if text.is_none() {
         razdor::diag!("no TrueType font could be loaded; transliterating");
     }
     FONT.with(|f| *f.borrow_mut() = text);
 }
 
-/// The sharp stand-in for bitmap face `i` (0 text, 1 bold, 2 titles), if installed.
+/// The `RAZDOR_FONT*` file standing in for face `i` (0 text, 1 bold, 2 titles), if one is set.
 pub fn face_font(i: usize) -> Option<Font> {
-    FACE_FONTS.with(|f| f.borrow().get(i).cloned().flatten())
+    OWN_FONTS.with(|f| f.borrow().get(i).cloned().flatten())
 }
 
 /// Whether a TrueType font (with Cyrillic) was found.
@@ -100,7 +97,7 @@ fn ttf_size(size: f32) -> u16 {
     if n > 14 { n & !1 } else { n }
 }
 
-fn measure_ttf(s: &str, size: f32) -> TextDimensions {
+pub fn measure_ttf(s: &str, size: f32) -> TextDimensions {
     with_font(s, |font, s| measure_text(s, font, ttf_size(size), 1.0))
 }
 
@@ -489,6 +486,11 @@ fn glyph_width(c: char, size: f32) -> f32 {
 /// The rows of `text` read as the original's markup (see [`razdor::dt::markup`]) in a box
 /// `room` wide at `size`: each line word-wrapped as TextList.AddText 0x47e46c does.
 pub fn markup_rows(text: &str, room: f32, size: f32) -> Vec<MarkupRow> {
+    // The original draws its marked texts in Benguiat's tints (0x48e438).
+    super::dt_font::with_face(super::dt_font::Face::Title, || markup_rows_in_face(text, room, size))
+}
+
+fn markup_rows_in_face(text: &str, room: f32, size: f32) -> Vec<MarkupRow> {
     razdor::dt::markup::parse(text)
         .into_iter()
         .flat_map(|line| {
@@ -509,6 +511,10 @@ pub fn ink_color(ink: razdor::dt::markup::Ink) -> Color {
 /// (TextDrawJustified 0x478a9c) or, the last row of a justified line, left aligned. No
 /// shadow: these lists get no shadow font (0x48e1cc passes 0). `_` draws as a space.
 pub fn draw_markup_row(row: &MarkupRow, x: f32, y: f32, room: f32, size: f32) {
+    super::dt_font::with_face(super::dt_font::Face::Title, || draw_markup_row_in_face(row, x, y, room, size));
+}
+
+fn draw_markup_row_in_face(row: &MarkupRow, x: f32, y: f32, room: f32, size: f32) {
     use razdor::dt::markup::Align;
     let color = ink_color(row.ink);
     let shown = row.text.replace('_', " ");

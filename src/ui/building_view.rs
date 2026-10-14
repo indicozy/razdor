@@ -1211,44 +1211,47 @@ fn village_window(game: &mut Game, view: &BuildingView, message: &mut Option<Str
     let size = (15.0 * o).round();
     let line_h = (17.0 * o).round();
     let (bx, by, bw) = (x + 18.0 * o, y + 45.0 * o, 598.0 * o);
-    let lines_of = |t: &str| t.split('\n').flat_map(|p| if p.trim().is_empty() { vec![String::new()] } else { wrap(p, bw - 32.0 * o, size) }).collect::<Vec<_>>();
-    let mut lines: Vec<(String, Color)> = Vec::new();
-    let mut add = |t: &str, c: Color| lines.extend(lines_of(t).into_iter().map(|t| (t, c)));
-    let about = own_text("Building", "AboutVillage", n_("You enter the village, and the local #NAME1 greets you with reverence.")).replace("#NAME1", &loc.owner_name);
-    add(&about, benguiat(Ink::Star.rgb()));
-    add("", WHITE);
-    if gold <= 0 && mana <= 0 {
-        add(&own_text("Building", "VillageEmpty", n_("The tribute of this village has already been taken: there is nothing left but to bid the headman farewell.")), benguiat(Ink::At.rgb()));
-    } else {
-        if gold > 0 {
-            add(&own_text("Building", "VillageFullGold", n_("As a nobleman you collect the village's tax, promising to hunt the robbers and shield the peasants from heretics and hostile lords.")), benguiat(Ink::Plain.rgb()));
+    // The original's texts here are Benguiat's tints (0x4dbb0c fonts ae24a0..ae24ac).
+    super::dt_font::with_face(super::dt_font::Face::Title, || {
+        let lines_of = |t: &str| t.split('\n').flat_map(|p| if p.trim().is_empty() { vec![String::new()] } else { wrap(p, bw - 32.0 * o, size) }).collect::<Vec<_>>();
+        let mut lines: Vec<(String, Color)> = Vec::new();
+        let mut add = |t: &str, c: Color| lines.extend(lines_of(t).into_iter().map(|t| (t, c)));
+        let about = own_text("Building", "AboutVillage", n_("You enter the village, and the local #NAME1 greets you with reverence.")).replace("#NAME1", &loc.owner_name);
+        add(&about, benguiat(Ink::Star.rgb()));
+        add("", WHITE);
+        if gold <= 0 && mana <= 0 {
+            add(&own_text("Building", "VillageEmpty", n_("The tribute of this village has already been taken: there is nothing left but to bid the headman farewell.")), benguiat(Ink::At.rgb()));
+        } else {
+            if gold > 0 {
+                add(&own_text("Building", "VillageFullGold", n_("As a nobleman you collect the village's tax, promising to hunt the robbers and shield the peasants from heretics and hostile lords.")), benguiat(Ink::Plain.rgb()));
+                if mana > 0 {
+                    add("", WHITE);
+                }
+            }
             if mana > 0 {
-                add("", WHITE);
+                add(&own_text("Building", "VillageFullMana", n_("The grateful peasants pray for your magic power to grow.")), benguiat(CYAN_INK));
             }
         }
-        if mana > 0 {
-            add(&own_text("Building", "VillageFullMana", n_("The grateful peasants pray for your magic power to grow.")), benguiat(CYAN_INK));
+        let text_h = lines.len() as f32 * line_h;
+        let bh = (text_h + 28.0 * o).min(193.0 * o);
+        let top = if text_h + 28.0 * o <= 193.0 * o { 14.0 * o } else { (bh - text_h) / 2.0 };
+        chrome::text_box(Rect::new(bx, by, bw, bh));
+        for (i, (t, c)) in lines.iter().enumerate() {
+            let ly = by + top + i as f32 * line_h;
+            if ly >= by && ly + line_h <= by + bh {
+                chrome::shadow_centered(t, bx + bw / 2.0, ly + size, size, *c);
+            }
         }
-    }
-    let text_h = lines.len() as f32 * line_h;
-    let bh = (text_h + 28.0 * o).min(193.0 * o);
-    let top = if text_h + 28.0 * o <= 193.0 * o { 14.0 * o } else { (bh - text_h) / 2.0 };
-    chrome::text_box(Rect::new(bx, by, bw, bh));
-    for (i, (t, c)) in lines.iter().enumerate() {
-        let ly = by + top + i as f32 * line_h;
-        if ly >= by && ly + line_h <= by + bh {
-            chrome::shadow_centered(t, bx + bw / 2.0, ly + size, size, *c);
+        for (i, (stock, is_mana)) in [(gold, false), (mana, true)].into_iter().enumerate() {
+            let sx = x + (634 * (i as i32 + 1) / 3 - 80) as f32 * o;
+            let sy = y + 279.0 * o;
+            if let Some(t) = chrome::win(stock_picture(stock, is_mana)) {
+                chrome::tex(&t, Rect::new(sx, sy, 160.0 * o, 160.0 * o), WHITE);
+            }
+            let (label, ink) = if is_mana { (own_text("Building", "Mana", n_("Magic")), Ink::Bar) } else { (own_text("Building", "Gold", n_("Money")), Ink::Plain) };
+            chrome::shadow_centered(&stock_caption(&label, stock), sx + 80.0 * o, sy - 24.0 * o + size, size, benguiat(ink.rgb()));
         }
-    }
-    for (i, (stock, is_mana)) in [(gold, false), (mana, true)].into_iter().enumerate() {
-        let sx = x + (634 * (i as i32 + 1) / 3 - 80) as f32 * o;
-        let sy = y + 279.0 * o;
-        if let Some(t) = chrome::win(stock_picture(stock, is_mana)) {
-            chrome::tex(&t, Rect::new(sx, sy, 160.0 * o, 160.0 * o), WHITE);
-        }
-        let (label, ink) = if is_mana { (own_text("Building", "Mana", n_("Magic")), Ink::Bar) } else { (own_text("Building", "Gold", n_("Money")), Ink::Plain) };
-        chrome::shadow_centered(&stock_caption(&label, stock), sx + 80.0 * o, sy - 24.0 * o + size, size, benguiat(ink.rgb()));
-    }
+    });
     let (btn_w, btn_h) = chrome::win("Btn1Up").map_or((180.0, 40.0), |t| (t.width(), t.height()));
     let (btn_w, btn_h) = (btn_w * o, btn_h * o);
     let ok = button(x + (w - btn_w) / 2.0, y + h - 10.0 * o - btn_h, btn_w, btn_h, &own_text("Buttons", "Ok", n_("OK")), true);

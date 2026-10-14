@@ -39,6 +39,16 @@ impl Face {
             Face::Bold => "Windows/SanSerif_Bold.lit",
         }
     }
+
+    /// The sheet the original draws the face's shadow with, 1 px down and right (the window
+    /// fonts' shadows ae24b0 / ae24d8, loaded by 4e5c9c and 4dbc26).
+    fn shadow_file(self) -> &'static str {
+        match self {
+            Face::Body => "Windows/SanSerif_Shadow.lit",
+            Face::Title => "Windows/Benguiat_Shadow.lit",
+            Face::Bold => "Windows/SanSerif_Bold_Shadow.lit",
+        }
+    }
 }
 
 /// A glyph's cell in the sheet.
@@ -80,10 +90,21 @@ pub fn glyph_boxes(img: &Image) -> Vec<Glyph> {
     boxes
 }
 
+/// The pixel-sharp scale for an exact one (`BitmapFont::scale`): the nearest whole number
+/// when it changes the size by little (at most 15% smaller or 12% bigger), else the exact
+/// scale, drawn smoothed (snapping further down halved text shrunk a little to fit).
+fn whole_scale(raw: f32) -> f32 {
+    let near = raw.round();
+    if near >= 1.0 && near >= raw * 0.85 && near <= raw * 1.12 { near } else { raw }
+}
+
 /// A sheet turned into a font: white glyphs whose alpha is their brightness, the blue boxes
 /// cleared.
 pub struct BitmapFont {
+    /// The sheet drawn without smoothing (whole-number scales) and with it (a fractional
+    /// scale).
     texture: Texture2D,
+    smooth: Texture2D,
     glyphs: HashMap<char, Glyph>,
     /// Rows from a cell's top to the baseline, and the capital height (pixels of the sheet).
     baseline: f32,
@@ -113,14 +134,20 @@ impl BitmapFont {
             let m = if blue { 0 } else { p[0].max(p[1]).max(p[2]) };
             p.copy_from_slice(&[255, 255, 255, m]);
         }
-        let texture = Texture2D::from_rgba8(u16::try_from(img.width).ok()?, u16::try_from(img.height).ok()?, &img.rgba);
-        texture.set_filter(FilterMode::Linear);
-        Some(BitmapFont { texture, glyphs, baseline, cap })
+        let (w, h) = (u16::try_from(img.width).ok()?, u16::try_from(img.height).ok()?);
+        // Pixel-sharp: whole-number scales (`scale`) drawn without smoothing.
+        let texture = Texture2D::from_rgba8(w, h, &img.rgba);
+        texture.set_filter(FilterMode::Nearest);
+        let smooth = Texture2D::from_rgba8(w, h, &img.rgba);
+        smooth.set_filter(FilterMode::Linear);
+        Some(BitmapFont { texture, smooth, glyphs, baseline, cap })
     }
 
-    /// Screen pixels per sheet pixel at font size `size`.
+    /// Screen pixels per sheet pixel at font size `size`: a whole number near what makes the
+    /// capitals as tall as the TrueType font's ([`whole_scale`]), so every sheet pixel becomes
+    /// a square of screen pixels; a scale far from a whole number stays as it is, smoothed.
     fn scale(&self, size: f32) -> f32 {
-        size * TTF_CAP / self.cap
+        whole_scale(size * TTF_CAP / self.cap)
     }
 
     /// Width of `s` at `size`, with `fallback` giving the width of a character not in the sheet.
@@ -137,19 +164,30 @@ impl BitmapFont {
     /// Draws `s` with its baseline at `y`; `fallback` draws a character not in the sheet and
     /// returns its width.
     pub fn draw(&self, s: &str, x: f32, y: f32, size: f32, color: Color, fallback: &dyn Fn(char, f32, f32) -> f32) {
+        self.draw_cells(self, s, vec2(x, y), size, (color, 0.0), fallback);
+    }
+
+    /// Draws `s`'s cells from `sheet` (this font or its shadow sheet, whose boxes stand at the
+    /// same places) from `at` on this font's pen positions, in `color`, `offset` sheet pixels
+    /// down and right. The pen and the cell tops sit on whole screen pixels.
+    fn draw_cells(&self, sheet: &BitmapFont, s: &str, at: Vec2, size: f32, (color, offset): (Color, f32), fallback: &dyn Fn(char, f32, f32) -> f32) {
+        let (x, y) = (at.x, at.y);
         let k = self.scale(size);
-        let mut pen = x;
+        let texture = if k.fract() == 0.0 { &sheet.texture } else { &sheet.smooth };
+        let mut pen = x.round();
+        let top = (y - self.baseline * k).round() + offset * k;
         for c in s.chars() {
-            match self.glyphs.get(&c) {
-                Some(g) => {
+            match (self.glyphs.get(&c), sheet.glyphs.get(&c)) {
+                (Some(g), Some(cell)) => {
                     if c != ' ' {
-                        let src = Rect::new(g.x as f32, g.y as f32, g.w as f32, g.h as f32);
-                        let top = y - self.baseline * k;
-                        draw_texture_ex(&self.texture, pen, top, color, DrawTextureParams { dest_size: Some(vec2(g.w as f32 * k, g.h as f32 * k)), source: Some(src), ..Default::default() });
+                        let src = Rect::new(cell.x as f32, cell.y as f32, cell.w as f32, cell.h as f32);
+                        let dest = vec2(cell.w as f32 * k, cell.h as f32 * k);
+                        draw_texture_ex(texture, pen + offset * k, top, color, DrawTextureParams { dest_size: Some(dest), source: Some(src), ..Default::default() });
                     }
                     pen += g.w as f32 * k;
                 }
-                None => pen += fallback(c, pen, y),
+                (Some(g), None) => pen += g.w as f32 * k,
+                (None, _) => pen += fallback(c, pen, y),
             }
         }
     }
@@ -157,6 +195,7 @@ impl BitmapFont {
 
 thread_local! {
     static FONTS: RefCell<HashMap<Face, Option<BitmapFont>>> = RefCell::new(HashMap::new());
+    static SHADOWS: RefCell<HashMap<Face, Option<BitmapFont>>> = RefCell::new(HashMap::new());
     static FACE: Cell<Face> = const { Cell::new(Face::Body) };
 }
 
@@ -168,7 +207,8 @@ pub fn with_face<R>(face: Face, f: impl FnOnce() -> R) -> R {
     r
 }
 
-/// The TrueType stand-in of the current face (Razdor's bundled fonts win over the bitmap).
+/// The TrueType font of the current face: only a `RAZDOR_FONT*` file; the install's sheets
+/// otherwise.
 pub fn current_ttf() -> Option<Font> {
     let i = match FACE.with(|c| c.get()) {
         Face::Body => 0,
@@ -192,9 +232,53 @@ pub fn with_current<R>(f: impl FnOnce(&BitmapFont) -> R) -> Option<R> {
     })
 }
 
+/// Draws `s`'s shadow as the original does: the face's shadow sheet 1 px (of the sheet)
+/// down and right, darkening what is under it. False when the text is not drawn from a
+/// sheet or the install has no shadow sheet for it.
+pub fn draw_shadow(s: &str, x: f32, y: f32, size: f32, alpha: f32) -> bool {
+    let face = FACE.with(|c| c.get());
+    with_current(|font| {
+        SHADOWS.with(|shadows| {
+            let mut shadows = shadows.borrow_mut();
+            let shadow = shadows.entry(face).or_insert_with(|| super::chrome::image(face.shadow_file()).and_then(BitmapFont::from_sheet));
+            let Some(shadow) = shadow.as_ref() else { return false };
+            font.draw_cells(shadow, s, vec2(x, y), size, (Color::new(0.0, 0.0, 0.0, alpha), 1.0), &|c, _, _| {
+                super::widgets::measure_ttf(c.encode_utf8(&mut [0; 4]), size).width
+            });
+            true
+        })
+    })
+    .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sheets_scale_by_whole_numbers_only_near_them() {
+        assert_eq!(whole_scale(1.0), 1.0);
+        assert_eq!(whole_scale(1.1), 1.0);
+        assert_eq!(whole_scale(1.95), 2.0);
+        assert_eq!(whole_scale(2.8), 3.0);
+        // Far from a whole number: its own scale, never halved.
+        assert_eq!(whole_scale(1.6), 1.6);
+        assert_eq!(whole_scale(1.3), 1.3);
+        // Under 1 (shrunk to fit): its own scale.
+        assert_eq!(whole_scale(0.8), 0.8);
+        for raw in [0.5_f32, 0.9, 1.1, 1.3, 1.5, 1.6, 2.2, 2.45, 3.4] {
+            let k = whole_scale(raw);
+            assert!(k <= raw * 1.12 + 1e-6 && k >= raw * 0.85 - 1e-6, "{raw} -> {k}");
+        }
+    }
+
+    #[test]
+    fn every_face_has_a_shadow_sheet_of_the_original() {
+        for face in [Face::Body, Face::Bold, Face::Title] {
+            assert!(face.shadow_file().ends_with("_Shadow.lit"), "{face:?}");
+            assert!(face.shadow_file().starts_with(face.file().trim_end_matches(".lit")), "{face:?}");
+        }
+    }
 
     /// A sheet of `boxes` blue rectangles of the given inner widths, in one row of height 5
     /// (inside), sharing their borders.
