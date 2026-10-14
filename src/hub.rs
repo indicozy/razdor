@@ -130,6 +130,10 @@ impl Catalog {
             return Err(format!("index.json: format {} is not known", c.format));
         }
         for e in &c.entries {
+            // An id names a mod's folder (`mods/<id>/`): letters, digits, `-` and `_` only.
+            if !safe_id(&e.id) || !e.requires.iter().all(|r| safe_id(r)) {
+                return Err(format!("index.json: bad id {:?}", e.id));
+            }
             for f in &e.files {
                 if !safe_name(&f.name) || !safe_path(&f.path) {
                     return Err(format!("index.json: {}: bad file name {:?}", e.id, f.name));
@@ -142,6 +146,11 @@ impl Catalog {
     pub fn entry(&self, id: &str) -> Option<&Entry> {
         self.entries.iter().find(|e| e.id == id)
     }
+}
+
+/// An entry id: it becomes a folder name, so nothing that could leave the hub folder.
+fn safe_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 /// A file name the hub may write: no folders, no dots in front, nothing odd.
@@ -360,7 +369,7 @@ impl Hub {
                 let _ = std::fs::remove_file(self.local.join(rel));
             }
         }
-        if e.kind == Kind::Mod {
+        if e.kind == Kind::Mod && safe_id(id) {
             let _ = std::fs::remove_dir(self.local.join("mods").join(id));
         }
         self.save_installed(&installed)
@@ -675,5 +684,9 @@ mod tests {
         assert!(Catalog::parse(bad).is_err());
         let bad_name = br#"{"format":1,"entries":[{"id":"x","kind":"map","title":{"ru":"x"},"author":"a","version":"1","files":[{"path":"x","name":"../x.DTm","size":1,"sha256":""}]}]}"#;
         assert!(Catalog::parse(bad_name).is_err());
+        let bad_id = br#"{"format":1,"entries":[{"id":"../../x","kind":"mod","title":{"ru":"x"},"author":"a","version":"1","files":[{"path":"x","name":"mod.json","size":1,"sha256":""}]}]}"#;
+        assert!(Catalog::parse(bad_id).is_err());
+        let bad_need = br#"{"format":1,"entries":[{"id":"x","kind":"map","title":{"ru":"x"},"author":"a","version":"1","requires":["a/b"],"files":[]}]}"#;
+        assert!(Catalog::parse(bad_need).is_err());
     }
 }
