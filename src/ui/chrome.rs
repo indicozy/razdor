@@ -377,6 +377,11 @@ pub fn animation(rel: &str) -> Option<Vec<Texture2D>> {
 
 /// An interface text of the install (`Rus_DiscordTimes.ini`), e.g. `("Army", "Bonus2")`.
 pub fn ui_text(section: &str, key: &str) -> Option<String> {
+    if section == "Options" {
+        if let Some(v) = option_override(key) {
+            return Some(v);
+        }
+    }
     CHROME.with(|c| {
         let mut c = c.borrow_mut();
         let c = c.as_mut()?;
@@ -402,6 +407,35 @@ pub fn ui_line(section: &str, n: usize) -> Option<String> {
 
 /// A raw value of the install's `[Options]` (`Rus_DiscordTimes.ini`), e.g. the minimap colours.
 pub fn options_value(key: &str) -> Option<String> {
+    if let Some(v) = option_override(key) {
+        return Some(v);
+    }
+    install_option(key)
+}
+
+thread_local! {
+    /// `[Options]` values the settings window set (`main_menu::apply_options`): they stand
+    /// in for the install's, as the original's window writes them back into its ini.
+    static OPTION_OVERRIDES: RefCell<Vec<(String, String)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Sets (or with `None` drops) the settings window's value of `[Options] key`.
+pub fn set_option_override(key: &str, value: Option<String>) {
+    OPTION_OVERRIDES.with(|o| {
+        let mut o = o.borrow_mut();
+        o.retain(|(k, _)| k != key);
+        if let Some(v) = value {
+            o.push((key.to_string(), v));
+        }
+    });
+}
+
+fn option_override(key: &str) -> Option<String> {
+    OPTION_OVERRIDES.with(|o| o.borrow().iter().find(|(k, _)| k == key).map(|(_, v)| v.clone()))
+}
+
+/// The install's own `[Options] key`, whatever the settings window chose.
+pub fn install_option(key: &str) -> Option<String> {
     CHROME.with(|c| {
         let mut c = c.borrow_mut();
         let c = c.as_mut()?;

@@ -515,7 +515,7 @@ impl BattleView {
 
         // Quick battle (a Razdor extra the players asked for): the battle under way finished
         // at once.
-        if !over && self.battle.outcome() == Outcome::Ongoing {
+        if !over && !self.exiting && self.battle.outcome() == Outcome::Ongoing {
             let label = tr("Finish automatically (Q)");
             let q = l.quick;
             if button(q.x, q.y, q.w, q.h, label, self.fx.is_none()) {

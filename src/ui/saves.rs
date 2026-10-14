@@ -116,6 +116,13 @@ pub fn autosave(game: &Game, name: &str, in_battle: bool) {
     }
 }
 
+/// Whether autosaves are written, by the install's `[Options] OptValue8` (`None`: no install
+/// texts, or no such key): an install that sets it follows it as the original does (on when it
+/// reads 1, 0x4b7410); without it Razdor autosaves, as it always did before the parity pass.
+pub fn autosaves_on(opt_value8: Option<&str>) -> bool {
+    opt_value8.is_none_or(|v| razdor::dt::ini::loose_int(v) == 1)
+}
+
 /// The install's content for the rest of the session after `game` was loaded: a save's row
 /// width holds for the session (0x4b771c sets the option in memory, not in the ini), so the
 /// next new game, restart or campaign map on the install's maps is played in it too, until
@@ -297,14 +304,15 @@ impl Book {
         (picked, delete)
     }
 
-    /// A torn-parchment tab hanging under the book (`load-button-1/2.lit`: grey, and orange
-    /// for the open one), on a steel line running along the window.
+    /// A torn-parchment tab hanging under the book (`load-button-1/2.lit`), the one not shown
+    /// greyed.
     fn tab(&self, x: f32, label: &str, open: bool) -> bool {
         let k = self.k;
         let r = self.rect(x, 409.0, 133.0, 34.0);
         let hover = !input_blocked() && r.contains(crate::ui::widgets::pointer().into());
         match super::chrome::win(if open { "load-button-2" } else { "load-button-1" }) {
-            Some(t) => super::chrome::tex(&t, r, if open || hover { WHITE } else { Color::new(0.85, 0.85, 0.85, 1.0) }),
+            // The tab not shown is greyed, as the original's (its own art dimmed and cooled).
+            Some(t) => super::chrome::tex(&t, r, if open { WHITE } else if hover { Color::new(0.75, 0.75, 0.78, 1.0) } else { Color::new(0.55, 0.57, 0.62, 1.0) }),
             None => super::chrome::surface(r, super::chrome::Skin::Paper),
         }
         super::dt_font::with_face(super::dt_font::Face::Title, || {
@@ -312,14 +320,6 @@ impl Book {
             super::chrome::shadow_centered(label, r.center().x, r.y + r.h * 0.55, size, if open { super::chrome::CREAM } else { WHITE });
         });
         hover && clicked()
-    }
-
-    /// The steel line the tabs hang on.
-    fn tab_line(&self) {
-        if let Some(t) = super::chrome::win("SteelLine") {
-            let r = self.rect(6.0, 418.0, 582.0, 5.0);
-            super::chrome::three_slice(&t, r, 40.0, WHITE);
-        }
     }
 
     fn button(&self, x: f32, w: f32, label: &str, enabled: bool) -> bool {
@@ -403,7 +403,7 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     if let Some(k) = delete.filter(|_| !asking) {
         view.confirm_delete = Some(k);
     }
-    book.tab_line();
+    // The tabs hang from the page alone: the original draws no line under them.
     for (x, tab, label) in [(17.0, SaveKind::Manual, own("LoadGame", "PrivateSave", n_("Private"))), (172.0, SaveKind::Auto, own("LoadGame", "AutoSave", n_("Autosaves")))] {
         if book.tab(x, &label, view.tab == tab) && view.tab != tab && !asking {
             view.tab = tab;
@@ -459,6 +459,12 @@ fn delete_question(name: String) -> Option<bool> {
     marked_question(&title, &q)
 }
 
+/// The exit window's version line: the original's blue (ae24a8, Benguiat with red − 200,
+/// green − 75).
+const VERSION_INK: Color = Color::new(0.22, 0.7, 1.0, 1.0);
+/// Its warning: the ae24a0 tint.
+const WARNING_INK: Color = Color::new(1.0, 1.0, 0.61, 1.0);
+
 /// What the "Выход из игры" window chose.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExitChoice {
@@ -474,7 +480,7 @@ pub fn exit_window(game: &Game, assets: &Assets, asking: &mut bool) -> (Option<E
     world_view::backdrop_lit(game, assets, Some(super::game_bar::BarButton::Menu));
     let title = own("ExitGame", "Title", n_("Leave the game"));
     let warning = own("ExitGame", "Warning", n_("Attention!\n\nThe game under way will end.\nTo go on with it another time, save it from the map's bar first."));
-    match exit_dialog(&title, &warning, asking) {
+    match exit_dialog(&title, &warning, asking, false, true) {
         (_, true) => (None, Some(Screen::WorldMap)),
         (choice, false) => (choice, None),
     }
@@ -491,7 +497,7 @@ pub fn battle_exit_dialog(asking: &mut bool) -> (Option<ExitChoice>, bool) {
         n_("Attention!\n\nYou cannot go back to the map without finishing the battle!\nTo stop the game under way, leave to the main menu (the game is not saved) or start the scenario again (restart)."),
     );
     if super::chrome::win("S_Battle").is_none() {
-        return exit_dialog(&title, &warning, asking);
+        return exit_dialog(&title, &warning, asking, true, false);
     }
     battle_exit_window(&title, &warning, asking)
 }
@@ -585,16 +591,54 @@ fn battle_exit_window(title: &str, warning: &str, asking: &mut bool) -> (Option<
 
 /// The window of [`exit_window`] and [`battle_exit_dialog`]: the warning and "Выйти из
 /// игры", "Выйти в меню", "Рестарт" (after a question), "Отмена".
-fn exit_dialog(title: &str, warning: &str, asking: &mut bool) -> (Option<ExitChoice>, bool) {
+///
+/// The map's window (`art`) is the original's "Выход из игры" (0x4d5214): the standard
+/// window centred over the 1024×682 view, the castle picture with the game's name
+/// (`S_Exit_RUS`) and the version line (`[SpecialTexts] VerInfo`) over it, the warning in a
+/// framed box under its middle (18 px in from the sides, `(H − 117) / 2 + 65` down,
+/// `(H − 117) / 2 − 20` high, the text centred in it), three buttons from the left and
+/// «Отмена» on the right, 10 px from the window's foot.
+fn exit_dialog(title: &str, warning: &str, asking: &mut bool, _battle: bool, art: bool) -> (Option<ExitChoice>, bool) {
     let k = super::chrome::k();
-    let (w, h) = (560.0 * k, 250.0 * k);
-    let r = Rect::new((screen_width() - w) / 2.0, (screen_height() - super::chrome::bar_height() - h) / 2.0, w, h);
+    let (w, h) = if art { (594.0 * k, 480.0 * k) } else { (560.0 * k, 250.0 * k) };
+    let r = Rect::new((screen_width() - w) / 2.0, ((screen_height() - super::chrome::bar_height() - h) / 2.0).max(0.0), w, h);
     let (inner, closed) = super::chrome::window(r, title, super::chrome::Skin::Marble, true);
-    let size = 13.0 * k;
-    let mut y = inner.y + 22.0 * k;
-    for line in warning.split('\n').flat_map(|l| if l.is_empty() { vec![String::new()] } else { wrap(l, inner.w - 30.0 * k, size) }) {
-        super::chrome::shadow_centered(&line, inner.center().x, y, size, super::chrome::CREAM);
-        y += 16.0 * k;
+    if art {
+        if let Some(t) = super::chrome::win("S_Exit_RUS") {
+            let pw = (inner.w - 4.0 * k).min(585.0 * k);
+            let ph = pw * t.height() / t.width();
+            let pic = Rect::new(inner.center().x - pw / 2.0, inner.y + 2.0 * k, pw, ph.min(inner.h - 4.0 * k));
+            let src = Rect::new(0.0, 0.0, t.width(), t.height() * pic.h / ph);
+            super::chrome::tex_src(&t, src, pic, WHITE);
+        }
+        let ver = super::chrome::ui_text("SpecialTexts", "VerInfo").unwrap_or_default();
+        if !ver.is_empty() {
+            super::dt_font::with_face(super::dt_font::Face::Title, || {
+                super::chrome::shadow_centered(&ver, inner.center().x, inner.y + 95.0 * k, 15.0 * k, VERSION_INK);
+            });
+        }
+        let bh = (480.0 - 110.0) / 2.0;
+        let tb = Rect::new(r.x + 17.0 * k, r.y + (bh + 61.0) * k, r.w - 34.0 * k, (bh - 19.0) * k);
+        super::chrome::text_box(tb);
+        let size = 16.0 * k;
+        let lines: Vec<String> = super::dt_font::with_face(super::dt_font::Face::Title, || {
+            warning.split('\n').flat_map(|l| if l.is_empty() { vec![String::new()] } else { wrap(l, tb.w - 30.0 * k, size) }).collect()
+        });
+        let line_h = 18.0 * k;
+        let mut y = tb.y + ((tb.h - lines.len() as f32 * line_h) / 2.0).max(4.0 * k) + size * 0.8;
+        super::dt_font::with_face(super::dt_font::Face::Title, || {
+            for line in &lines {
+                super::chrome::shadow_centered(line, tb.center().x, y, size, WARNING_INK);
+                y += line_h;
+            }
+        });
+    } else {
+        let size = 13.0 * k;
+        let mut y = inner.y + 22.0 * k;
+        for line in warning.split('\n').flat_map(|l| if l.is_empty() { vec![String::new()] } else { wrap(l, inner.w - 30.0 * k, size) }) {
+            super::chrome::shadow_centered(&line, inner.center().x, y, size, super::chrome::CREAM);
+            y += 16.0 * k;
+        }
     }
     let labels = [
         (own("ExitGame", "Exit", n_("Quit the game")), Some(ExitChoice::Quit)),
@@ -603,14 +647,21 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool) -> (Option<ExitCho
         (own("Buttons", "Cancel", n_("Cancel")), None),
     ];
     let bw = (inner.w - 50.0 * k) / 4.0;
-    let by = inner.y + inner.h - 42.0 * k;
+    let by = if art { r.y + r.h - 10.0 * k - 30.0 * k } else { inner.y + inner.h - 42.0 * k };
+    // The original's buttons: three from the left 8 apart, «Отмена» on the right.
+    let widths = [142.0 * k, 142.0 * k, 114.0 * k, 89.0 * k];
     let mut choice = None;
     let mut cancel = closed;
     // The restart question opens on the next frame, so the click on «Рестарт» cannot also
     // answer it (its «Нет» lies over that button).
     let was_asking = *asking;
     for (i, (label, what)) in labels.iter().enumerate() {
-        let b = Rect::new(inner.x + 10.0 * k + i as f32 * (bw + 10.0 * k), by, bw, 30.0 * k);
+        let b = if art {
+            let x = if i == 3 { r.x + r.w - 10.0 * k - widths[3] } else { r.x + 10.0 * k + widths[..i].iter().map(|w| w + 8.0 * k).sum::<f32>() };
+            Rect::new(x, by, widths[i], 30.0 * k)
+        } else {
+            Rect::new(inner.x + 10.0 * k + i as f32 * (bw + 10.0 * k), by, bw, 30.0 * k)
+        };
         let over = !*asking && b.contains(crate::ui::widgets::pointer().into()) && !input_blocked();
         super::chrome::marble_button(b, label, true, over);
         if over && clicked() {

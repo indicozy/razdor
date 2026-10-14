@@ -25,6 +25,19 @@ fn wide_row_default() -> bool {
     true
 }
 
+fn pace_default() -> f32 {
+    1.0
+}
+
+/// The pace of the world's real time for `WalkSpeed` (0..100): the original's step takes
+/// `WalkDelay = (100 - w) * 250 div 100 + 150` ms (0x4b8c54, integer division), and every
+/// step, wait tick and walk of the world is paced by it; Razdor's [`STEP_SECONDS`] is that
+/// delay at the shipped 100, so the world runs `150 / WalkDelay` as fast.
+pub fn walk_pace(walk_speed: i32) -> f32 {
+    let w = walk_speed.clamp(0, 100);
+    150.0 / ((100 - w) * 250 / 100 + 150) as f32
+}
+
 /// Real seconds each hero step and each wait tick plays over: the original's
 /// `WalkDelay = 150 + (100 − WalkSpeed) × 2.5` ms at the shipped `WalkSpeed=100` (world.md
 /// §2). Game time per real second follows from the step's own minutes.
@@ -443,6 +456,15 @@ pub struct Game {
     /// settings): the player's choice, set by the interface, not part of the save.
     #[serde(skip)]
     pub improved_ai: bool,
+    /// "Automatically pursue the chosen army" (the original's `OptValue7`, world.md §1):
+    /// on, the hero's route follows the army he clicked as it steps; off, he walks to the
+    /// cell where it stood. Set by the interface, not part of the save.
+    #[serde(skip, default = "wide_row_default")]
+    pub pursue: bool,
+    /// The real-time pace of steps and waits from `WalkSpeed` ([`walk_pace`]); 1 at the
+    /// shipped 100. Set by the interface, not part of the save.
+    #[serde(skip, default = "pace_default")]
+    pub walk_pace: f32,
     /// Reports of AI battles to hand to the interface with the slice's events.
     #[serde(skip)]
     pub(crate) ai_events: Vec<Event>,
@@ -585,6 +607,8 @@ impl Game {
             snap_due: false,
             snapped: false,
             improved_ai: false,
+            pursue: true,
+            walk_pace: 1.0,
             ai_events: Vec::new(),
             sims: Default::default(),
         };
@@ -900,6 +924,11 @@ impl Game {
     /// ends and the hero stops where he is. Returns false when he stopped.
     fn follow_army(&mut self) -> bool {
         let Some(uid) = self.talk_to else { return true };
+        // Without the option the route stays on the cell the army stood on (the chase at
+        // 0x4aedd1 reads the option first).
+        if !self.pursue {
+            return true;
+        }
         let map = &self.world.map;
         let Some(a) = self.world.armies.iter().find(|a| a.uid == uid) else {
             self.talk_to = None;
@@ -1246,6 +1275,8 @@ impl Game {
     /// flows while the party walks or waits.
     pub fn tick(&mut self, real_dt: f32) -> Vec<Event> {
         let mut events = Vec::new();
+        // "Скорость перемещения героя": a slower walk stretches every step and wait tick.
+        let real_dt = real_dt * self.walk_pace;
         self.since_step += real_dt;
         if self.foe.is_some() || (!self.moving() && self.wait_ticks == 0) {
             self.step_elapsed = 0.0;
@@ -4256,6 +4287,16 @@ mod tests {
         assert_eq!(a.walk.points.len(), a.walk.minutes.len() + 1);
         g.since_step = 0.5 * STEP_SECONDS;
         assert_eq!(g.army_display_pos(&g.world.armies[0]), at);
+    }
+
+    /// "Скорость перемещения героя": WalkDelay = (100 - w) * 250 div 100 + 150 ms (0x4b8c54),
+    /// Razdor's step being the 150 ms of WalkSpeed 100.
+    #[test]
+    fn the_walking_speed_paces_the_world_as_the_original_s_walk_delay() {
+        assert_eq!(walk_pace(100), 1.0);
+        assert_eq!(walk_pace(0), 150.0 / 400.0);
+        assert_eq!(walk_pace(1), 150.0 / 397.0, "integer division: 99 * 250 / 100 = 247");
+        assert_eq!(walk_pace(140), 1.0, "clamped");
     }
 
     #[test]

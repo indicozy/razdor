@@ -165,7 +165,17 @@ pub struct App {
 
 impl App {
     pub fn new(assets: Assets, demo: Arc<Content>) -> Self {
-        let dt_content = assets.dt.as_ref().map(|d| Arc::new(Content::from_dt(&d.install)));
+        let audio = Audio::new(assets.dt.as_ref().map(|d| &d.install));
+        // "Невозможный уровень сложности игры" from the settings window, read at start as the
+        // original reads `OptValue10` (interface.md §16): F = 100 instead of 120.
+        let impossible = audio.settings.impossible;
+        let dt_content = assets.dt.as_ref().map(|d| {
+            let mut c = Content::from_dt(&d.install);
+            if let Some(on) = impossible {
+                c.options.difficulty_factor = if on { 100 } else { 120 };
+            }
+            Arc::new(c)
+        });
         let scenarios = assets
             .dt
             .iter()
@@ -589,8 +599,12 @@ impl App {
         // The battle AI's level from the settings: the next battle uses it.
         if let Some(g) = self.game.as_mut() {
             g.improved_ai = main_menu::expert_ai(&self.audio.settings);
+            g.pursue = main_menu::pursue(&self.audio.settings);
+            g.walk_pace = main_menu::walk_pace(&self.audio.settings);
         }
         battle_view::set_anim_speed(main_menu::anim_speed(&self.audio.settings));
+        // The settings window's options the interface reads from the install's `[Options]`.
+        main_menu::apply_options(&self.audio.settings);
         // The front row's width from the settings: the next new game uses it.
         self.follow_row_setting();
         if matches!(self.screen, Screen::Editor) {
@@ -608,8 +622,14 @@ impl App {
         let install_wide = self.install_wide_row();
         let mut next = match (&mut self.screen, &mut self.game) {
             (Screen::MainMenu, _) => match main_menu::frame() {
-                Some(main_menu::Pick::NewGame) if new_game::tutorial_map(&self.scenarios).is_some() => Some(Screen::TutorialOffer),
-                Some(main_menu::Pick::NewGame) => Some(Screen::ScenarioSelect),
+                Some(main_menu::Pick::NewGame) if new_game::tutorial_map(&self.scenarios).is_some() => {
+                    new_game::open_list();
+                    Some(Screen::TutorialOffer)
+                }
+                Some(main_menu::Pick::NewGame) => {
+                    new_game::open_list();
+                    Some(Screen::ScenarioSelect)
+                }
                 Some(main_menu::Pick::Load) => Some(Screen::Load(saves::LoadView::new(saves::Back::Title))),
                 Some(main_menu::Pick::Editor) => Some(Screen::Editor),
                 Some(main_menu::Pick::Exit) => {

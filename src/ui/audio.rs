@@ -168,11 +168,26 @@ pub struct Settings {
     /// The Community's battle animation speed (`AnimationSpeed`, percent 0..99); `None`
     /// until chosen: the install's.
     pub anim_speed: Option<f32>,
+    /// The original's settings window (interface.md §16), each `None` until chosen there:
+    /// then the install's `[Options]` value. "Скорость скроллинга карты" (`ScrollSpeed`, 0..100).
+    pub scroll_speed: Option<f32>,
+    /// "Скорость перемещения героя" (`WalkSpeed`, 0..100).
+    pub walk_speed: Option<f32>,
+    /// "Не загружать музыку и звуки" (`OptValue4`; read at start, as the original).
+    pub no_sound: Option<bool>,
+    /// "Отключить всплывающие подсказки" (`OptValue6`).
+    pub hints_off: Option<bool>,
+    /// "Автоматически преследовать выбранную армию" (`OptValue7`).
+    pub pursue: Option<bool>,
+    /// "Автоматически сохранять текущую игру" (`OptValue8`).
+    pub autosave: Option<bool>,
+    /// "Невозможный уровень сложности игры" (`OptValue10`; read at start, as the original).
+    pub impossible: Option<bool>,
 }
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, expert_ai: None, wide_row: None, anim_speed: None }
+        Settings { music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, expert_ai: None, wide_row: None, anim_speed: None, scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None }
     }
 }
 
@@ -197,7 +212,8 @@ impl Settings {
     fn clamped(self) -> Settings {
         let fix = |v: f32| if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.5 };
         let anim_speed = self.anim_speed.filter(|s| s.is_finite()).map(|s| s.clamp(0.0, 99.0));
-        Settings { music_volume: fix(self.music_volume), sfx_volume: fix(self.sfx_volume), anim_speed, ..self }
+        let pct = |v: Option<f32>| v.filter(|s| s.is_finite()).map(|s| s.clamp(0.0, 100.0));
+        Settings { music_volume: fix(self.music_volume), sfx_volume: fix(self.sfx_volume), anim_speed, scroll_speed: pct(self.scroll_speed), walk_speed: pct(self.walk_speed), ..self }
     }
 
     fn save(&self) {
@@ -359,6 +375,9 @@ impl Audio {
             _ if !cfg!(feature = "audio") => "built without the audio feature",
             _ if env_flag("RAZDOR_NO_AUDIO") => "RAZDOR_NO_AUDIO is set",
             None => "no install",
+            // "Не загружать музыку и звуки" (`OptValue4`, interface.md §16): read at start, as
+            // the original's, so a change waits for the next start.
+            Some(dt) if audio.settings.no_sound.unwrap_or_else(|| razdor::dt::install::PlayOptions::read(&dt.dir).no_sound) => "no music and sounds, as the settings say",
             Some(_) if !device_ok() => "no sound device",
             Some(dt) => match (std::time::Instant::now(), Backend::load(&dt.dir)) {
                 (t0, Ok(b)) => {

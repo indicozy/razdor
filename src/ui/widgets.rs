@@ -293,7 +293,12 @@ impl Drop for Clip {
 
 /// A translucent panel of lines next to the mouse: the original's ordinary hint box, which
 /// fades in to 160/255 over 300 ms (49ee4b–49ef0d: `elapsed × 160 / 300`).
+/// Not shown with the hints off (interface.md hint boxes: only pushed and spell-target hints
+/// stay).
 pub fn tooltip(lines: &[(String, Color)]) {
+    if !hints_on() {
+        return;
+    }
     tooltip_at_alpha(lines, hint_fade(lines, 160.0 / 255.0));
 }
 
@@ -332,11 +337,26 @@ fn hint_fade(lines: &[(String, Color)], full: f32) -> f32 {
     hint_alpha(now - start, full)
 }
 
+thread_local! {
+    /// The hint boxes are shown: off with "Отключить всплывающие подсказки" (`OptValue6`).
+    static HINTS: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// Shows or hides the hint boxes (the settings window's "hints off").
+pub fn set_hints(on: bool) {
+    HINTS.with(|h| h.set(on));
+}
+
+/// Whether hint boxes are shown (interface.md §16: on unless `OptValue6` is 1).
+pub fn hints_on() -> bool {
+    HINTS.with(|h| h.get())
+}
+
 /// The hint box that follows the mouse (kind 7, 0x49e9b8): `w` wide, its lines centred, at
 /// the mouse +21, +37, put on the other side of the mouse where it would leave the screen,
 /// at full opacity (0x49ee4b).
 pub fn hint_box(lines: &[(String, Color)], w: f32) {
-    if lines.is_empty() {
+    if lines.is_empty() || !hints_on() {
         return;
     }
     let k = super::chrome::k();
