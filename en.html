@@ -136,14 +136,15 @@
           <li>The world map with its fog of war, towns, castles and villages, armies with goals of their own, ships.</li>
           <li>Items, spells, the quest journal, saves.</li>
           <li>A map editor whose maps the original opens too.</li>
-          <li>Russian and English interface.</li>
+          <li>Russian and English interface; the game's own fonts or a modern one, your choice.</li>
+          <li>Mouse, keyboard or gamepad.</li>
         </ul>
       </div>
       <div class="box">
         <h3>What you bring</h3>
         <ul>
           <li>Your own copy of <i>Discord Times</i> with the Community Update 1.2.</li>
-          <li>Windows 10 or newer, or Linux (x86_64).</li>
+          <li>Windows 10 or newer, Linux (x86_64), or macOS 11 or newer.</li>
           <li>A graphics card with OpenGL 2, which almost any computer has.</li>
         </ul>
       </div>
@@ -158,11 +159,11 @@
     <div class="parchment">
       <ol>
         <li>Install <i>Discord Times</i> and the Community Update 1.2, if you haven't yet.</li>
-        <li>Download Razdor from the <a href="https://github.com/indicozy/razdor/releases/latest">releases page</a>: <strong>Razdor.exe</strong> for Windows or <strong>razdor</strong> for Linux.</li>
+        <li>Download Razdor from the <a href="https://github.com/indicozy/razdor/releases/latest">releases page</a>: <strong>Razdor.exe</strong> for Windows, <strong>razdor</strong> for Linux or <strong>razdor-macos</strong> for macOS.</li>
         <li>Put it into the game folder, next to <strong>DiscordTimes.exe</strong>.</li>
         <li>Start it. Razdor finds the game in its own folder; it keeps its saves and settings apart and leaves the game untouched.</li>
       </ol>
-      <p class="note">If the game is somewhere else, give its folder in a <code>.env</code> file next to the program: <code>RAZDOR_DT_DIR="C:\Games\Discord Times"</code>. If something does not start or plays differently from the original, report it on <a href="https://github.com/indicozy/razdor/issues">GitHub</a> with the <code>razdor.log</code> file from <code>%APPDATA%\razdor\</code> (Windows) or <code>~/.local/share/razdor/</code> (Linux).</p>
+      <p class="note">If the game is somewhere else, give its folder in a <code>.env</code> file next to the program: <code>RAZDOR_DT_DIR="C:\Games\Discord Times"</code>. If something does not start or plays differently from the original, report it on <a href="https://github.com/indicozy/razdor/issues">GitHub</a> with the <code>razdor.log</code> file from <code>%APPDATA%\razdor\</code> (Windows), <code>~/.local/share/razdor/</code> (Linux) or <code>~/Library/Application Support/razdor/</code> (macOS).</p>
     </div>
   </div>
 </section>
@@ -171,6 +172,73 @@
   <h2 id="changes-title">Changelog</h2>
   <a class="close" href="#top" aria-label="Back to the menu">×</a>
   <div class="window-body">
+    <article class="box">
+      <h3>0.4.18 <span class="dash">–</span> 0.4.20 <span class="date">14 October 2026</span></h3>
+      <h4>New</h4>
+      <ul>
+        <li>A «Font» setting: the game's own fonts, sharp as in the original (the default), or the modern PT Serif.</li>
+        <li>Razdor has its own icon: a shield split in two, on the program, the game window and this site.</li>
+      </ul>
+      <h4>Changed</h4>
+      <ul>
+        <li>Defeat as in the original: after a lost battle a red window with a skull opens over the map, and «OK» returns to the main menu.</li>
+        <li>The market's buttons as in the original: «Inventory» shows your items for sale, «Trade shop» the goods; «Name» and «Price» above the list.</li>
+        <li>Goods and items for sale are listed from cheapest to most expensive.</li>
+      </ul>
+      <h4>Fixed</h4>
+      <ul>
+        <li>The original's font no longer shrinks to half size in long lines on unit cards and at the bottom of the screen.</li>
+      </ul>
+    </article>
+    <article class="box">
+      <h3>0.4.16 <span class="dash">–</span> 0.4.17 <span class="date">13 October 2026</span></h3>
+      <h4>New</h4>
+      <ul>
+        <li>In auto-battle the hero's units hold the line: nobody leaves the front row, and a healer or buffer with nobody to help stays put.</li>
+        <li>Hovering a unit in the promotion tree shows its daily wage, as in the original.</li>
+      </ul>
+      <h4>Changed</h4>
+      <ul>
+        <li>The load and save windows open at once, even with hundreds of saves; the army, building and journal windows open without delay too.</li>
+        <li>Fallen units can no longer be left in a garrison.</li>
+        <li>Settings windows on the map no longer slide over the bottom panel.</li>
+      </ul>
+      <h4>Fixed</h4>
+      <ul>
+        <li>If you keep the name in the new hero window, the hero gets the name from the game or the mod instead of «(no name)».</li>
+        <li>The magic icon, the crossed swords on empty battle cells, the selection ring and other pictures are no longer drawn with stripes.</li>
+        <li>On the Eastern Province, armies and ships can be attacked again after the warlocks are beaten.</li>
+      </ul>
+    </article>
+    <article class="box">
+      <h3>0.4.15 <span class="date">13 October 2026</span></h3>
+      <h4>New</h4>
+      <ul>
+        <li>Quests and rumours can be taken at the market and the sanctuary too, not only in the main hall.</li>
+      </ul>
+      <h4>Changed</h4>
+      <ul>
+        <li>The building, army and quest windows, the spell book and the bottom panel are closer to the original: frames, paper, buttons. Thanks to Eizenvald!</li>
+        <li>A spell on another army is aimed right on the map, as in the original.</li>
+      </ul>
+    </article>
+    <article class="box">
+      <h3>0.4.4 <span class="dash">–</span> 0.4.14 <span class="date">10–12 October 2026</span></h3>
+      <h4>New</h4>
+      <ul>
+        <li>Gamepad support (Xbox, PlayStation and similar) on Windows, Linux and macOS.</li>
+        <li>Scrollbars on long lists; a «Clear all» button in the load window.</li>
+        <li>Music changes smoothly, as in the original; a ring under the cursor on the map; a promotion animation.</li>
+        <li>The <code>peace</code> cheat: enemy armies don't attack the hero.</li>
+        <li>Equipped items can be dragged from slot to slot right on the unit.</li>
+      </ul>
+      <h4>Fixed</h4>
+      <ul>
+        <li>Saves of the base game and of mods (such as «Evolution») no longer mix.</li>
+        <li>Slowdowns on large screens, the hero stopping after dialogs, an extra pause before the enemy's turn.</li>
+        <li>Tribute in a village with an army in it, item bonus names, the tooltip of a captured castle.</li>
+      </ul>
+    </article>
     <article class="box">
       <h3>0.4.3 <span class="date">10 October 2026</span></h3>
       <h4>New</h4>
@@ -210,7 +278,7 @@
       </ul>
     </article>
     <article class="box">
-      <h3>0.3.1 – 0.3.23 <span class="date">5–10 October 2026</span></h3>
+      <h3>0.3.1 <span class="dash">–</span> 0.3.23 <span class="date">5–10 October 2026</span></h3>
       <h4>New</h4>
       <ul>
         <li>Updates: Razdor finds a new version on GitHub by itself and offers to install it.</li>
@@ -352,7 +420,7 @@
 </main>
 
 <footer class="foot">
-  <p>Razdor 0.4.3 // for Community Update 1.2 // <a href="https://github.com/indicozy/razdor">source code on GitHub</a></p>
+  <p>Razdor 0.4.20 // for Community Update 1.2 // <a href="https://github.com/indicozy/razdor">source code on GitHub</a></p>
   <p>Made by <a href="https://github.com/indicozy">@indicozy</a>. Not affiliated with Aterdux or the rights holders of <i>Discord Times</i>; no warranty.</p>
 </footer>
 

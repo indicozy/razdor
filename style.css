@@ -245,6 +245,8 @@ main { padding: 0 1.25rem 2rem; }
 .box li { margin: 0 0 0.35rem; }
 .box li::marker { color: var(--silver-dark); }
 .date { font-family: "PT Sans", sans-serif; font-size: 0.95rem; color: var(--silver); }
+/* Becker has no en dash: the one in a version range comes from PT Sans. */
+.dash { font-family: "PT Sans", sans-serif; }
 
 /* How it works: two columns on wide screens (what Razdor does / what you bring). */
 .pair { display: grid; gap: 1rem; margin-top: 1rem; }
