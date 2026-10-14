@@ -334,13 +334,13 @@ fn curl() -> Command {
 
 /// The body of `url`, or why not.
 #[cfg(any(target_os = "android", target_os = "ios"))]
-fn fetch(url: &str, seconds: u32) -> Result<Vec<u8>, String> {
+pub(crate) fn fetch(url: &str, seconds: u32) -> Result<Vec<u8>, String> {
     phone::get(url, seconds)
 }
 
 /// The body of `url`, or why not.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn fetch(url: &str, seconds: u32) -> Result<Vec<u8>, String> {
+pub(crate) fn fetch(url: &str, seconds: u32) -> Result<Vec<u8>, String> {
     let out = curl()
         .args(["--max-time", &seconds.to_string(), url])
         .output()
