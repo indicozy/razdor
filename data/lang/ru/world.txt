@@ -110,7 +110,6 @@ Gold = Золото
 Mana = Мана
 Army wages = Жалованье армии
 Income = Доход
-Lv {level} = Ур. {level}
 
 # Building window: main hall
 Quests and rumours: = Задания и слухи:

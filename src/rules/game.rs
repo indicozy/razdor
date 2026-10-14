@@ -1837,8 +1837,9 @@ impl Game {
 
     /// The defence of the building the hero's army stands in (army +0x378c): one of his own or
     /// of a friend (attitude above 0); 0 elsewhere. It is added to his units' defences in
-    /// battle (battle.md §0, 485908) and to their tactical cost.
-    pub(crate) fn hero_building_defence(&self) -> i32 {
+    /// battle (battle.md §0, 485908) and to their tactical cost, and shown on their cards
+    /// and the unit panel (0x49462c, 492f24).
+    pub fn hero_building_defence(&self) -> i32 {
         let here = self.location.or_else(|| self.world.location_covering(self.tile()));
         here.map(|l| &self.world.locations[l]).filter(|l| l.owned() || l.attitude > 0).map_or(0, |l| l.garrison_defence)
     }

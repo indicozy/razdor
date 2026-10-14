@@ -223,6 +223,12 @@ impl Game {
         }
     }
 
+    /// The defence the building here adds to its garrison's defences (the garrison record's
+    /// +0x378c, its `ExtraDefense`): what the original's garrison cards add (0x49462c).
+    pub fn garrison_defence_here(&self) -> i32 {
+        self.here().filter(|l| l.takes_garrison()).map_or(0, |l| l.garrison_defence)
+    }
+
     /// Opens the garrison tab here (0x4ba854 tab 2): every unit of the hero's army is
     /// stamped with now, and the paid mark of every garrison unit is set, the only place it
     /// is: paid when last paid less than 1441 minutes ago, or when 1440 minutes or more

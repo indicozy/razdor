@@ -807,7 +807,7 @@ impl BattleView {
         } else {
             unit_sheet::StripPanel::Plain
         };
-        unit_sheet::stat_strip(strip, s, base, f.power, caster, place, f.hp, row2, frame.is_some_and(|(c, _)| c == ACTIVE), panel);
+        unit_sheet::stat_strip(strip, s, base, f.power, caster, place, f.hp, row2, 0, frame.is_some_and(|(c, _)| c == ACTIVE), panel);
 
         // The original's signs (493a64): a drunk potion, then the blessing, from the top
         // left; poison (a negative regeneration), then the curse, from the top right; 23 px
@@ -965,7 +965,10 @@ impl BattleView {
             now: &self.battle.shown_stats(id),
             start: &f.at_start,
             power: f.power,
-            wage: if f.is_hero || f.team == Team::Enemy { 0 } else { b.content().wage(f.unit) },
+            // The recruit wage of the type's Cost for either side, none for a hero class, a
+            // named character or the Undead (491a58 → 4a163c; the original showed 49 on an
+            // enemy «Атаманша»).
+            wage: if f.is_hero || f.named > 0 { 0 } else { super::items_view::class_wage(b.content(), f.unit) },
             items,
             back_row: f.slot.row == Row::Back,
             // No payment line in battle (492f24: 4ed424).

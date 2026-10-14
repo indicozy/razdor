@@ -321,12 +321,24 @@ fn tree_view(game: &Game, assets: &Assets, sel: usize, u: &Unit, r: Rect, promo:
     if let Some(t) = chrome::win_fx("UpgradeTree", chrome::Fx::KeyBlack) {
         chrome::tex(&t, r, WHITE);
     }
+    // The pane's frame, as the original's tree box: a light line over a dark one (seen in
+    // the original at 1024×768; the description box beside it has the same).
+    draw_rectangle_lines(r.x - 2.0 * k, r.y - 2.0 * k, r.w + 4.0 * k, r.h + 4.0 * k, 2.0 * k, Color::new(0.0, 0.0, 0.0, 0.7));
+    draw_rectangle_lines(r.x - 1.0 * k, r.y - 1.0 * k, r.w + 2.0 * k, r.h + 2.0 * k, 1.0 * k, Color::new(0.78, 0.8, 0.82, 0.9));
     let s = (r.w * 0.28).min(r.h * 0.36);
     let cur = Rect::new(r.x + (r.w - s) / 2.0, r.y + r.h * 0.95 - s, s, s);
     let slots = [0.17, 0.5, 0.83];
     let place = |i: usize| Rect::new(r.x + r.w * slots[i] - s / 2.0, r.y + r.h * 0.04, s, s);
     let look = promo.map(|p| (p, promo_look(now_ms() - p.t0_ms, p.ms)));
-    for (i, &(to, level, ok)) in tree.iter().take(3).enumerate() {
+    // Each option stands at its own place, `NextUnit1` left, 2 in the middle, 3 right
+    // (494340 reads the type's option of portrait n: +0xa4 + n·8); an empty place shows the
+    // tree's own picture. Two options sit in places 1 and 3 ([`normalise_upgrade_slots`]).
+    let def = c.unit(u.def);
+    let slot_of = |to: razdor::rules::content::UnitId, n: usize| {
+        def.upgrades.iter().find(|x| x.target == Some(to.0)).map_or(n, |x| (x.slot.clamp(1, 3) - 1) as usize)
+    };
+    for (n, &(to, _level, ok)) in tree.iter().take(3).enumerate() {
+        let i = slot_of(to, n);
         let o = place(i);
         // The picked portrait is drawn as an empty option (494340 for the hero, who has none)
         // from the click until the class changes.
@@ -343,9 +355,8 @@ fn tree_view(game: &Game, assets: &Assets, sel: usize, u: &Unit, r: Rect, promo:
         } else {
             assets.draw_portrait(to, Team::Player, o);
         }
+        // No level caption: the original's portraits carry none (494340).
         draw_rectangle_lines(o.x, o.y, o.w, o.h, 1.0, Color::new(0.85, 0.85, 0.85, 0.8));
-        let label = razdor::trf!("Lv {level}", level);
-        chrome::shadow_centered(&label, o.x + o.w / 2.0, o.y + o.h - 4.0 * k, (12.0 * k).round(), if ok { chrome::GOLD } else { chrome::CREAM });
         let over = mouse_in(o.x, o.y, o.w, o.h);
         if ok {
             chrome::glow_frame(o, Color::new(0.35, 1.0, 0.35, if over { 1.0 } else { 0.6 }), over);
@@ -623,7 +634,12 @@ pub fn squad(
     let showing_type = panel_type.is_some();
 
     // The unit's panel; a click on a worn item takes it off.
-    let stats = u.stats(&c);
+    // In a building of his the hero's units show its defence with their own, "15 + 20"
+    // (army +0x378c, as the cards: 0x49462c); a class preview shows none.
+    let bd = if showing_type { 0 } else { game.hero_building_defence() };
+    let mut stats = u.stats(&c);
+    stats[Stat::DefenceBlow] += bd;
+    stats[Stat::DefenceShot] += bd;
     let hero = (sel == 0).then(|| razdor::rules::content::HeroClass::ALL.into_iter().find(|h| h.unit() == u.def)).flatten();
     let mut status = Vec::new();
     if !u.potions.is_empty() {
@@ -647,7 +663,7 @@ pub fn squad(
         items: u.items,
         back_row: u.slot.row == razdor::rules::formation::Row::Back,
         unpaid: !showing_type && u.unpaid,
-        building: 0,
+        building: bd,
         hero,
         status,
         battle: false,
@@ -791,7 +807,7 @@ pub fn squad(
         chrome::wounds(sq, v.hp, v.max_hp(&c));
         draw_rectangle_lines(sq.x, sq.y, sq.w, sq.h, 1.0, Color::new(0.85, 0.85, 0.85, 0.8));
         let vs = v.stats(&c);
-        unit_sheet::stat_strip(Rect::new(p.x, p.y + card.x, card.x, card.y - card.x), &vs, &vs, vs[Stat::MagicPower], unit_sheet::caster(&c, v.def), unit_sheet::strip_place(f, v.slot), v.hp, super::building_view::back_row_def(&c, v.slot), selected.selected == Some(i), unit_sheet::StripPanel::of_squad(i, v.named));
+        unit_sheet::stat_strip(Rect::new(p.x, p.y + card.x, card.x, card.y - card.x), &vs, &vs, vs[Stat::MagicPower], unit_sheet::caster(&c, v.def), unit_sheet::strip_place(f, v.slot), v.hp, super::building_view::back_row_def(&c, v.slot), game.hero_building_defence(), selected.selected == Some(i), unit_sheet::StripPanel::of_squad(i, v.named));
         if !v.alive() {
             chrome::death_veil(sq);
         } else if v.unpaid {
@@ -964,7 +980,7 @@ pub fn squad(
 /// The wage line of a promotion portrait's class card: the original's fresh unit of that type
 /// is painted in a game, so 4924c9 writes its recruit wage (4a163c of the type's Cost), as
 /// for a hire offer; none for a hero class or an Undead type.
-fn class_wage(c: &Content, id: UnitId) -> i32 {
+pub(super) fn class_wage(c: &Content, id: UnitId) -> i32 {
     let undead = c.unit(id).nature == razdor::dt::data::Nature::Undead;
     if razdor::rules::content::HeroClass::of_unit(id).is_some() || undead { 0 } else { c.wage(id) }
 }

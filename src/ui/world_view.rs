@@ -1307,12 +1307,8 @@ fn formation_grid(game: &Game, assets: &Assets, troops: &[Troop], team: Team, x:
                 // Wounds left by world spells.
                 let max = razdor::rules::units::Stats::of_level(&game.content, t.unit, t.level).max_hp();
                 super::chrome::wounds(sq, max - t.hurt, max);
+                // Portrait, wounds and frame only: the original writes no level (0x4ca9f0).
                 draw_rectangle_lines(cx, cy, cell, cell, 1.0, Color::new(0.8, 0.8, 0.8, 0.9));
-                // The troop's level in the corner.
-                let lv = t.level.to_string();
-                let tw = measure(&lv, 14.0).width;
-                draw_rectangle(cx + cell - tw - 4.0, cy + cell - 14.0, tw + 4.0, 14.0, Color::new(0.0, 0.0, 0.0, 0.6));
-                text(&lv, cx + cell - tw - 2.0, cy + cell - 2.0, 14.0, XP_COLOR);
             }
         }
     }

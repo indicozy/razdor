@@ -251,28 +251,36 @@ fn stat_lines(content: &Content, s: &Sheet) -> Vec<Line> {
         let v = if b != 0 && now[st] == start[st] { format!("{n} {} {}", if b > 0 { "+" } else { "-" }, b.abs()) } else { now[st].to_string() };
         (v, cmp_color(now[st], start[st]))
     };
-    if start[Stat::AttackBlow] > 0 || now[Stat::AttackBlow] > 0 {
+    // In a building its defence is written apart, "15 + 12", as the original does; the
+    // back row's `Row2Def` joins the building's on the ranged defence (0x491fa4). A line is
+    // left out when the shown and the current value are both 0, a defence kept while
+    // v + n is above 0 (491a58, 491b84).
+    let defence = |st: Stat| -> Option<(String, Color)> {
+        let extra = s.building + if st == Stat::DefenceShot { row2_extra(content, s) } else { 0 };
+        let own = now[st] - s.building;
+        if extra > 0 && own + extra > 0 {
+            Some((format!("{own} + {extra}"), cmp_color(now[st], start[st])))
+        } else if now[st] != 0 || start[st] != 0 {
+            Some(split(st))
+        } else {
+            None
+        }
+    };
+    // The original's order: melee attack and defence, then ranged attack and defence (491fa4).
+    if start[Stat::AttackBlow] != 0 || now[Stat::AttackBlow] != 0 {
         let (v, c) = split(Stat::AttackBlow);
         lines.push((label("SAttackBlow", n_("Melee attack")), v, c));
     }
-    if start[Stat::AttackShot] > 0 || now[Stat::AttackShot] > 0 {
+    if let Some((v, c)) = defence(Stat::DefenceBlow) {
+        lines.push((label("SDefenceBlow", n_("Melee defence")), v, c));
+    }
+    if start[Stat::AttackShot] != 0 || now[Stat::AttackShot] != 0 {
         let (v, c) = split(Stat::AttackShot);
         lines.push((label("SAttackShot", n_("Ranged attack")), v, c));
     }
-    // In a building its defence is written apart, "15 + 12", as the original does; the
-    // back row's `Row2Def` joins the building's on the ranged defence (0x491fa4).
-    let defence = |st: Stat| -> (String, Color) {
-        let extra = s.building + if st == Stat::DefenceShot { row2_extra(content, s) } else { 0 };
-        if extra > 0 {
-            (format!("{} + {}", now[st] - s.building, extra), cmp_color(now[st], start[st]))
-        } else {
-            split(st)
-        }
-    };
-    let (v, c) = defence(Stat::DefenceBlow);
-    lines.push((label("SDefenceBlow", n_("Melee defence")), v, c));
-    let (v, c) = defence(Stat::DefenceShot);
-    lines.push((label("SDefenceShot", n_("Ranged defence")), v, c));
+    if let Some((v, c)) = defence(Stat::DefenceShot) {
+        lines.push((label("SDefenceShot", n_("Ranged defence")), v, c));
+    }
     if now.is_mage() || start.is_mage() {
         let school = now.magic.unwrap_or(MagicSchool::Elemental);
         let p = s.power;
@@ -295,13 +303,27 @@ fn stat_lines(content: &Content, s: &Sheet) -> Vec<Line> {
             buff_lines(&mut lines, bless_effect(o, school, p), true);
         }
     }
+    // The three protections as one `SProtectAllMagic` line when they are equal and above 0
+    // (491fa4; the label 0x4e4f3c, read at 4e3fd3).
+    let protections = [Stat::ProtectLife, Stat::ProtectElemental, Stat::ProtectDeath];
+    let all = now[Stat::ProtectLife];
+    let merged = all > 0 && protections.iter().all(|&st| now[st] == all);
+    if merged {
+        let c = protections.iter().map(|&st| cmp_color(now[st], start[st])).find(|&c| c != CREAM).unwrap_or(CREAM);
+        lines.push((label("SProtectAllMagic", n_("Immunity to magic")), format!("{all}%"), c));
+    }
+    // Negative regeneration is poison (`SPoison`, 491fa4).
+    let regen = if now[Stat::Regen] < 0 { label("SPoison", n_("Poison")) } else { label("SRegen", n_("Regeneration")) };
     for (label, st) in [
         (label("SProtectLife", n_("Life magic protection")), Stat::ProtectLife),
         (label("SProtectElemental", n_("Elemental magic protection")), Stat::ProtectElemental),
         (label("SProtectDeath", n_("Death magic protection")), Stat::ProtectDeath),
-        (label("SRegen", n_("Regeneration")), Stat::Regen),
+        (regen, Stat::Regen),
         (label("SVampirizm", n_("Vampirism")), Stat::Vampirizm),
     ] {
+        if merged && protections.contains(&st) {
+            continue;
+        }
         if now[st] != 0 || start[st] != 0 {
             lines.push((label, format!("{}%", now[st]), cmp_color(now[st], start[st])));
         }
@@ -389,13 +411,23 @@ impl StripPanel {
     }
 }
 
+/// The card's defence piece (0x49462c): the melee and the ranged defence with the
+/// building defence of the unit's army (army +0x378c) added to both and the back row's
+/// `Row2Def` to the ranged one; none when both come to 0 or less (the original then leaves
+/// "D:" out: a healer's card reads only "Pwr: 15").
+pub fn defence_piece(now: &Stats, row2: i32, building: i32) -> Option<(i32, i32)> {
+    let (blow, shot) = (now[Stat::DefenceBlow] + building, now[Stat::DefenceShot] + row2 + building);
+    (blow > 0 || shot > 0).then_some((blow, shot))
+}
+
 /// The strip under a card's portrait, as the original's: "A: 45  D: 35/40", "Mnvr: 1
 /// Ini: 12", "Hits: 70" (or "Hits: 45/70"). `row2` is added to the ranged defence shown
-/// (the back row's `Row2Def`, 0 elsewhere: 0x49462c). `lit` reddens it (the unit acting, or
-/// the one selected on the army screen). `caster` and `place` choose the attack piece
-/// ([`caster`], [`strip_place`]).
+/// (the back row's `Row2Def`, 0 elsewhere) and `building` (the defence of the building the
+/// unit's army or garrison stands in, army +0x378c) to both ([`defence_piece`]). `lit`
+/// reddens it (the unit acting, or the one selected on the army screen). `caster` and
+/// `place` choose the attack piece ([`caster`], [`strip_place`]).
 #[allow(clippy::too_many_arguments)]
-pub fn stat_strip(strip: Rect, now: &Stats, base: &Stats, power: i32, caster: bool, place: usize, hp: i32, row2: i32, lit: bool, panel: StripPanel) {
+pub fn stat_strip(strip: Rect, now: &Stats, base: &Stats, power: i32, caster: bool, place: usize, hp: i32, row2: i32, building: i32, lit: bool, panel: StripPanel) {
     let k = k();
     chrome::surface(strip, chrome::Skin::Strip);
     // The original recolours the strip itself (0x48da5c): red for the hero, blue for a named
@@ -414,9 +446,11 @@ pub fn stat_strip(strip: Rect, now: &Stats, base: &Stats, power: i32, caster: bo
     let (x0, x1) = (strip.x + 3.0 * k, strip.x + strip.w - 3.0 * k);
     let (att, ac) = attack_piece(now, base, power, caster, place);
     shadow_text(&att, x0, strip.y + lh - 2.0 * k, fs, ac);
-    let d = razdor::trf!("D: {blow}/{shot}", blow = now[Stat::DefenceBlow], shot = now[Stat::DefenceShot] + row2);
-    let dc = strip_color(now[Stat::DefenceBlow] + now[Stat::DefenceShot], base[Stat::DefenceBlow] + base[Stat::DefenceShot]);
-    shadow_right(&d, x1, strip.y + lh - 2.0 * k, fs, dc);
+    if let Some((blow, shot)) = defence_piece(now, row2, building) {
+        let d = razdor::trf!("D: {blow}/{shot}", blow, shot);
+        let dc = strip_color(now[Stat::DefenceBlow] + now[Stat::DefenceShot], base[Stat::DefenceBlow] + base[Stat::DefenceShot]);
+        shadow_right(&d, x1, strip.y + lh - 2.0 * k, fs, dc);
+    }
     let (mn, ini) = (now[Stat::Manevres], now[Stat::Initiative]);
     shadow_text(&razdor::trf!("Mnvr: {mn}", mn), x0, strip.y + 2.0 * lh - 2.0 * k, fs, strip_color(mn, base[Stat::Manevres]));
     shadow_right(&razdor::trf!("Ini: {ini}", ini), x1, strip.y + 2.0 * lh - 2.0 * k, fs, strip_color(ini, base[Stat::Initiative]));
@@ -658,6 +692,81 @@ mod tests {
         assert_eq!(attack_piece(&s, &start, 0, false, 1).1, BLUE_TEXT);
         start[Stat::AttackShot] = 6;
         assert_eq!(attack_piece(&s, &start, 0, false, 1).1, RED_TEXT);
+    }
+
+    /// The card's "D:" (0x49462c): the army's building defence on both numbers, `Row2Def`
+    /// on the ranged one, and no piece at all when both come to 0 or less.
+    #[test]
+    fn the_card_adds_the_building_and_leaves_out_a_zero_defence() {
+        let content = Content::builtin();
+        let mut s = Stats::of_level(&content, UnitId(content.units[0].id), 0);
+        s[Stat::DefenceBlow] = 0;
+        s[Stat::DefenceShot] = 0;
+        assert_eq!(defence_piece(&s, 0, 0), None, "a healer's card reads only Pwr:");
+        assert_eq!(defence_piece(&s, 0, 20), Some((20, 20)), "a militia in its castle: D: 20/20");
+        assert_eq!(defence_piece(&s, 5, 20), Some((20, 25)), "the back row's Row2Def");
+        assert_eq!(defence_piece(&s, 5, 0), Some((0, 5)));
+        s[Stat::DefenceBlow] = 15;
+        s[Stat::DefenceShot] = 10;
+        assert_eq!(defence_piece(&s, 0, 20), Some((35, 30)), "a knight in the castle: D: 35/30");
+    }
+
+    fn sheet_lines(content: &Content, now: &Stats) -> Vec<String> {
+        let kind = UnitId(content.units[0].id);
+        let sheet = Sheet {
+            kind,
+            name: "",
+            named: false,
+            level: 0,
+            xp: 0,
+            need: 0,
+            hp: now.max_hp(),
+            now,
+            start: now,
+            power: 0,
+            wage: 0,
+            items: [None; 4],
+            back_row: false,
+            unpaid: false,
+            building: 0,
+            hero: None,
+            status: Vec::new(),
+            battle: true,
+        };
+        stat_lines(content, &sheet).into_iter().map(|l| l.0).collect()
+    }
+
+    /// The panel's list as the original's (491fa4, 491a58): melee attack and defence before
+    /// the ranged pair, a line of 0 left out, and the three protections as one
+    /// `SProtectAllMagic` line when they are equal and above 0.
+    #[test]
+    fn the_panel_orders_drops_zeros_and_merges_equal_protections() {
+        let content = Content::builtin();
+        let mut s = Stats::of_level(&content, UnitId(content.units[0].id), 0);
+        s.magic = None;
+        s[Stat::MagicPower] = 0;
+        s[Stat::AttackBlow] = 40;
+        s[Stat::DefenceBlow] = 5;
+        s[Stat::AttackShot] = 0;
+        s[Stat::DefenceShot] = 0;
+        for st in [Stat::ProtectLife, Stat::ProtectElemental, Stat::ProtectDeath, Stat::Regen, Stat::Vampirizm] {
+            s[st] = 0;
+        }
+        let lines = sheet_lines(&content, &s);
+        let at = |key: &str, en: &str| lines.iter().position(|l| *l == label(key, en));
+        assert!(at("SAttackBlow", "Melee attack").unwrap() < at("SDefenceBlow", "Melee defence").unwrap());
+        assert_eq!(at("SDefenceShot", "Ranged defence"), None, "a ranged defence of 0 is left out");
+        assert_eq!(at("SAttackShot", "Ranged attack"), None);
+        for st in [Stat::ProtectLife, Stat::ProtectElemental, Stat::ProtectDeath] {
+            s[st] = 15;
+        }
+        let lines = sheet_lines(&content, &s);
+        assert!(lines.contains(&label("SProtectAllMagic", "Immunity to magic")));
+        assert!(!lines.contains(&label("SProtectLife", "Life magic protection")));
+        s[Stat::ProtectDeath] = 20;
+        let lines = sheet_lines(&content, &s);
+        assert!(!lines.contains(&label("SProtectAllMagic", "Immunity to magic")));
+        assert!(lines.contains(&label("SProtectDeath", "Death magic protection")));
     }
 
     /// The original's state lines (492f24): death shuts out the rest, then no payment, else
