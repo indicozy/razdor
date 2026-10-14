@@ -12,14 +12,23 @@
 <link rel="alternate" hreflang="en" href="en.html">
 <link rel="stylesheet" href="style.css">
 <style>
-  /* The header: the game's main menu over a live fire (canvas#fx behind the menu). The
-     windows below keep style.css. */
+  /* The header: the game's main menu over a burning fire, pre-rendered to looping videos
+     (fire/: the old WebGL fire, rendered offline layer by layer). The windows below keep
+     style.css. */
   :root { --bw: clamp(210px, min(32vw, 24vh), 320px); --rim: #2a0f4a; --rim-hot: #4a1c06; }
-  /* The fire burns behind the menu only, fading out at its foot; it never lies under the
-     video (a browser cuts the player's hole into a canvas under it in the wrong place). */
+  /* The fire burns behind the menu only, fading out at its foot. Layers: the smoke and the
+     ruins (cover); the flames behind the title and around each oval, added to it
+     (plus-lighter, rendered on black); each oval's marble over them. */
   .hero { position: relative; isolation: isolate; }
-  #fx { position: absolute; inset: 0; width: 100%; height: 100%; display: block; z-index: -1;
+  .fx { position: absolute; inset: 0; z-index: -1; overflow: hidden; isolation: isolate; pointer-events: none;
     -webkit-mask-image: linear-gradient(#000 80%, transparent); mask-image: linear-gradient(#000 80%, transparent); }
+  .fx video { position: absolute; display: block; }
+  .fx-bg { inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .fx-title, .fx-ring { mix-blend-mode: plus-lighter; }
+  .fx-ring.hot { filter: brightness(1.55); }
+  .fx-marble { -webkit-mask-image: radial-gradient(closest-side, #000 90.3%, transparent 96.9%); mask-image: radial-gradient(closest-side, #000 90.3%, transparent 96.9%); }
+  .fx-marble.warm { opacity: 0; transition: opacity .15s; }
+  .fx-marble.warm.hot { opacity: 1; }
   .hero { display: grid; justify-items: center; gap: clamp(4px, 1vh, 12px);
     padding: clamp(14px, 3vh, 36px) 1.25rem clamp(22px, 4vh, 48px); text-align: center; }
   /* The title in silver, as the game's: Becker, a chiselled gradient, a dark rim. */
@@ -93,7 +102,7 @@
 </svg>
 
 <header class="hero">
-  <canvas id="fx" aria-hidden="true"></canvas>
+  <div class="fx" aria-hidden="true"><video class="fx-bg" autoplay muted loop playsinline preload="auto" poster="fire/bg-land.webp" aria-hidden="true"><source src="fire/bg-port.webm" type="video/webm" media="(max-aspect-ratio: 1/1)"><source src="fire/bg-port.mp4" type="video/mp4" media="(max-aspect-ratio: 1/1)"><source src="fire/bg-land.webm" type="video/webm"><source src="fire/bg-land.mp4" type="video/mp4"></video><video class="fx-title" autoplay muted loop playsinline preload="auto" poster="fire/title.webp" aria-hidden="true"><source src="fire/title.webm" type="video/webm"><source src="fire/title.mp4" type="video/mp4"></video></div>
   <h1 id="title">Razdor</h1>
   <p class="tag">Движок для «Времён раздора»: оригинальные сценарии на современных Windows и Linux</p>
   <nav aria-label="Разделы">
@@ -404,7 +413,33 @@
 
   // The ovals: a frame each, the last one Exit's; the word shrinks to fit the oval.
   const buttons = [...document.querySelectorAll(".hero .btn")];
-  buttons.forEach((b, i) => { const exit = i === buttons.length - 1; b.classList.toggle("exit", exit); b.insertAdjacentHTML("afterbegin", frame(exit)); });
+  // The fire's layers (fire/, rendered offline from the old WebGL shader at a 1920×1080
+  // layout): each oval's ring of flames (added, as the shader added it) under all the
+  // marbles, as the shader drew all rings, then all marbles.
+  const fx = document.querySelector(".hero .fx"), layers = [];
+  // A video the page already has is loaded only once the first copy is in (copies requested
+  // at once each download it again): until then its poster stands.
+  const first = {};
+  const vid = (cls, name) => {
+    const again = name in first;
+    if (!again) first[name] = [];
+    return `<video class="${cls}" data-fire="${name}" ${again ? 'preload="none"' : 'autoplay preload="auto"'} muted loop playsinline poster="fire/${name}.webp" aria-hidden="true"><source src="fire/${name}.webm" type="video/webm"><source src="fire/${name}.mp4" type="video/mp4"></video>`;
+  };
+  buttons.forEach((b, i) => {
+    const exit = i === buttons.length - 1, k = exit ? "exit" : "plain";
+    b.classList.toggle("exit", exit);
+    // The fire around the oval and its marble (pre-rendered, fire/), each oval at its own
+    // point of the loop so they don't burn in step.
+    b.insertAdjacentHTML("afterbegin", frame(exit));
+    fx.insertAdjacentHTML("beforeend", vid("fx-ring", "ring-" + k));
+    layers.push({ b, exit, ring: fx.lastElementChild });
+  });
+  buttons.forEach((b, i) => {
+    const k = layers[i].exit ? "exit" : "plain";
+    fx.insertAdjacentHTML("beforeend", vid("fx-marble", "marble-" + k) + vid("fx-marble warm", "marble-" + k + "-hot"));
+    layers[i].marbles = [fx.lastElementChild.previousElementSibling, fx.lastElementChild];
+    [layers[i].ring, ...layers[i].marbles].forEach((v) => v.addEventListener("loadedmetadata", () => { v.currentTime = (i * 1.37) % (v.duration || 6); }, { once: true }));
+  });
   function fit() {
     buttons.forEach((b) => {
       const s = b.querySelector(".label span");
@@ -419,7 +454,7 @@
   }
 
   let hot = -1;
-  const setHot = (i) => { hot = i; buttons.forEach((b, j) => b.classList.toggle("hot", j === i)); if (still) draw(); };
+  const setHot = (i) => { hot = i; buttons.forEach((b, j) => b.classList.toggle("hot", j === i)); layers.forEach((l, j) => [l.ring, l.marbles[1]].forEach((v) => v.classList.toggle("hot", j === i))); };
   buttons.forEach((b, i) => {
     b.addEventListener("pointerenter", () => setHot(i));
     b.addEventListener("pointerleave", () => { if (hot === i) setHot(-1); });
@@ -427,200 +462,43 @@
     b.addEventListener("blur", () => { if (hot === i) setHot(-1); });
   });
 
-  // ---- the fire --------------------------------------------------------------------
-  const canvas = document.getElementById("fx");
-  const gl = canvas.getContext("webgl", { antialias: false, alpha: false, premultipliedAlpha: false });
-  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const fail = () => { canvas.hidden = true; document.body.classList.add("no-fire"); };
-  addEventListener("resize", fit);
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
-  fit();
-  if (!gl) { fail(); return; }
-
-  const VS = `attribute vec2 a; void main(){ gl_Position = vec4(a, 0., 1.); }`;
-  const FS = `
-  #ifdef GL_FRAGMENT_PRECISION_HIGH
-  precision highp float;
-  #else
-  precision mediump float;
-  #endif
-  uniform vec2 R; uniform float T; uniform vec4 B[5]; uniform float H; uniform vec4 TT; uniform float S;
-
-  float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
-  float noise(vec2 p){
-    vec2 i = floor(p), f = fract(p), u = f * f * (3. - 2. * f);
-    return mix(mix(hash(i), hash(i + vec2(1., 0.)), u.x), mix(hash(i + vec2(0., 1.)), hash(i + vec2(1., 1.)), u.x), u.y);
-  }
-  float fbm(vec2 p){
-    float v = 0., a = .5; mat2 m = mat2(1.6, 1.2, -1.2, 1.6);
-    for (int i = 0; i < 5; i++) { v += a * noise(p); p = m * p; a *= .5; }
-    return v;
-  }
-  // A soft rectangle from x0 to x1, from y0 down to the bottom (y grows downward).
-  float block(vec2 q, float x0, float x1, float y0){
-    return smoothstep(x0 - .003, x0 + .003, q.x) * smoothstep(x1 + .003, x1 - .003, q.x) * smoothstep(y0 - .004, y0 + .004, q.y);
-  }
-  float hole(vec2 q, float x0, float x1, float y0, float y1){
-    return block(q, x0, x1, y0) * (1. - block(q, x0, x1, y1));
-  }
-  float teeth(vec2 q, float x0, float w){ return step(.5, fract((q.x - x0) / w)); }
-  // Ruined towers and a broken wall, after the game's burning ruins.
-  float ruins(vec2 q0){
-    // Weathered, broken edges: shake the sides a little and break the tops.
-    vec2 q = q0 + vec2((noise(q0 * vec2(5., 18.)) - .5) * .006, (noise(vec2(q0.x * 34., 3.)) - .5) * .045);
-    float m = 0.;
-    m = max(m, block(q, .02, .17, .30)); m = max(m, block(q, .02, .17, .265) * teeth(q, .02, .03));
-    m = max(m, block(q, .25, .35, .12)); m = max(m, block(q, .25, .35, .09) * teeth(q, .25, .025));
-    m = max(m, block(q, .17, .25, .52));
-    m = max(m, block(q, .35, .43, .66)); m = max(m, block(q, .60, .69, .70));
-    m = max(m, block(q, .69, .79, .17)); m = max(m, block(q, .69, .79, .14) * teeth(q, .69, .025));
-    m = max(m, block(q, .79, .86, .58));
-    m = max(m, block(q, .86, .98, .38)); m = max(m, block(q, .86, .98, .345) * teeth(q, .86, .03));
-    m = max(m, block(q, 0., 1., .84));
-    float w = hole(q, .07, .10, .42, .50) + hole(q, .28, .31, .24, .31) + hole(q, .28, .31, .44, .50)
-            + hole(q, .72, .75, .30, .37) + hole(q, .90, .93, .50, .57) + hole(q, .73, .76, .55, .62);
-    return m * (1. - clamp(w, 0., 1.) * .8);
-  }
-
-  void main(){
-    vec2 p = vec2(gl_FragCoord.x, R.y - gl_FragCoord.y);
-    vec2 q = p / R;
-    vec2 n = p / min(R.x, R.y);
-
-    // Smoke and fire rising through the whole picture.
-    vec2 w = vec2(fbm(n * 2. + vec2(0., T * .05)), fbm(n * 2. + vec2(5.2, 1.3) + vec2(0., T * .04)));
-    float f = fbm(n * 2.6 + w * 1.6 + vec2(0., T * .09));
-    float heat = (.7 + .3 * (1. - abs(q.x - .5) * 1.6)) * (.7 + .45 * q.y);
-    float v = f * heat * 1.45;
-    vec3 col = mix(vec3(.16, .06, .015), vec3(.6, .27, .06), smoothstep(.15, .5, v));
-    col = mix(col, vec3(.96, .58, .16), smoothstep(.45, .8, v));
-    col = mix(col, vec3(1., .86, .5), smoothstep(.8, 1.05, v) * .65);
-
-    // The stones, darker than the haze, lit by it at the edges.
-    float ru = ruins(q);
-    float stone = fbm(p * .03 * S) * .6 + fbm(p * .11 * S) * .4;
-    vec3 sc = vec3(.24, .13, .055) * (.45 + stone * 1.1) + col * .22;
-    col = mix(col, sc, ru * (.8 - f * .4));
-
-    // Darker toward the corners.
-    vec2 c = q - .5;
-    col *= 1. - .9 * dot(c, c);
-
-    // Flames licking up behind the title's letters.
-    vec2 d = (p - TT.xy) / TT.zw;
-    if (d.x > -.05 && d.x < 1.05 && d.y > -1. && d.y < 1.1) {
-      float hx = smoothstep(0., .14, d.x) * smoothstep(1., .86, d.x);
-      float vy = smoothstep(-.95, .05, d.y) * smoothstep(.72, .3, d.y);
-      float fl = fbm(vec2(p.x * .018 / S, p.y * .016 / S + T * 2.)) * .7 + fbm(vec2(p.x * .05 / S, p.y * .04 / S + T * 3.2)) * .5;
-      float tongue = smoothstep(.42, .8, fl - (.25 - d.y) * .55) * hx * vy;
-      col += vec3(1., .46, .12) * tongue * 1.1 + vec3(1., .85, .5) * tongue * tongue * .55;
-    }
-
-    // Fire around each button, licking up through its lace (hotter around the lit one),
-    // and each button's swirling marble middle.
-    for (int i = 0; i < 5; i++) {
-      vec4 b = B[i];
-      vec2 e = (p - b.xy) / b.zw;
-      float r = length(e);
-      float hot = 1. - step(.1, abs(H - float(i)));
-      // The flames' ring, in the oval's own measure, so the ends burn as much as the sides.
-      vec2 o = (p - b.xy) / (b.zw + vec2(b.w * 1.1));
-      float ro = length(o);
-      float ring = smoothstep(.55, .8, ro) * smoothstep(1.75, 1.05, ro + max(-o.y, 0.) * -.35);
-      vec2 fp = vec2(p.x * .03 * S, p.y * .022 * S + T * 2.3 + float(i) * 7.);
-      float fl = fbm(fp) * .75 + fbm(fp * 2.2 + vec2(3.1, T * 1.2)) * .45;
-      float tongue = smoothstep(.5, .9, fl + .25 - ro * .32 - o.y * .18) * ring * (1. + .55 * hot);
-      col += vec3(1., .4, .08) * tongue * .95 + vec3(1., .8, .45) * tongue * tongue * .45;
-      col += vec3(1., .45, .12) * exp(-r * r * .3) * .08 * (.8 + .2 * sin(T * 3. + float(i) * 1.7));
-    }
-    for (int i = 0; i < 5; i++) {
-      vec4 b = B[i];
-      vec2 e = (p - b.xy) / b.zw;
-      float r = length(e);
-      float hot = 1. - step(.1, abs(H - float(i)));
-      if (r < 1.05) {
-        vec2 mp = vec2(e.x * b.z, e.y * b.w) / b.w;
-        float m = fbm(mp * 1.6 + vec2(fbm(mp * 2.4 + T * .08 + float(i)), fbm(mp * 2.4 - T * .07)) * 1.4 + float(i) * 3.1);
-        float vein = smoothstep(.04, 0., abs(fbm(mp * 3.1 + float(i) * 1.3 + T * .05) - .5)) * .5;
-        vec3 vi = mix(vec3(.3, .2, .62), vec3(.66, .56, .92), smoothstep(.25, .75, m)) + vec3(.85, .8, 1.) * vein * .5;
-        vec3 wa = mix(vec3(.5, .24, .17), vec3(.92, .62, .45), smoothstep(.25, .75, m)) + vec3(1., .9, .75) * vein * .5;
-        vec3 mc = mix(vi, wa, hot) * (.72 + .28 * (1. - r * r));
-        col = mix(col, mc, smoothstep(1.03, .96, r));
+  // ---- the fire: looping videos (fire/); still for reduced motion, idle out of view -----
+  // Where the title and the ovals are (the frames the videos were rendered in, in units of
+  // the box: the title's text box, each oval's button).
+  const at = (v, x, y, w, h) => { v.style.left = x + "px"; v.style.top = y + "px"; v.style.width = w + "px"; v.style.height = h + "px"; };
+  function place() {
+    const hr = fx.getBoundingClientRect();
+    const range = document.createRange(); range.selectNodeContents(document.getElementById("title"));
+    const t = range.getBoundingClientRect();
+    at(fx.querySelector(".fx-title"), t.left - hr.left - .05 * t.width, t.top - hr.top - 1.3444 * t.height, 1.1 * t.width, 2.1 * t.height);
+    layers.forEach((l) => {
+      const r = l.b.getBoundingClientRect(), x = r.left - hr.left, y = r.top - hr.top, w = r.width, h = r.height;
+      if (l.exit) {
+        at(l.ring, x - .4201 * w, y - .763 * h, 1.84 * w, 1.948 * h);
+        l.marbles.forEach((v) => at(v, x + .1319 * w, y + .2007 * h, .736 * w, .4231 * h));
+      } else {
+        at(l.ring, x - .4259 * w, y - 1.1035 * h, 1.852 * w, 2.657 * h);
+        l.marbles.forEach((v) => at(v, x + .1084 * w, y + .2114 * h, .7832 * w, .5773 * h));
       }
-    }
-    gl_FragColor = vec4(col, 1.);
-  }`;
-
-
-  function shader(type, src) {
-    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
-    return s;
-  }
-  let prog;
-  try {
-    prog = gl.createProgram();
-    gl.attachShader(prog, shader(gl.VERTEX_SHADER, VS));
-    gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, FS));
-    gl.linkProgram(prog);
-    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
-  } catch (err) {
-    console.warn("Razdor site: no fire, the shader failed:", err);
-    fail(); return;
-  }
-  gl.useProgram(prog);
-  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-  const loc = gl.getAttribLocation(prog, "a");
-  gl.enableVertexAttribArray(loc);
-  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
-  const U = {};
-  ["R", "T", "B", "H", "TT", "S"].forEach((k) => { U[k] = gl.getUniformLocation(prog, k); });
-
-  // Where the title and the ovals are in the menu (the canvas covers the menu only).
-  const rects = new Float32Array(20);
-  const title = document.getElementById("title");
-  const hero = document.querySelector(".hero");
-  function measure() {
-    const scale = Math.min(window.devicePixelRatio || 1, 1.5);
-    const hr = hero.getBoundingClientRect();
-    const w = Math.round(hr.width * scale), h = Math.round(hr.height * scale);
-    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; gl.viewport(0, 0, w, h); }
-    buttons.forEach((b, i) => {
-      const r = b.getBoundingClientRect();
-      const g = b.classList.contains("exit") ? M.exit : M.plain, k = r.width / g.w;
-      rects[i * 4] = (r.left - hr.left + g.cx * k) * scale;
-      rects[i * 4 + 1] = (r.top - hr.top + g.cy * k) * scale;
-      rects[i * 4 + 2] = g.rx * k * scale;
-      rects[i * 4 + 3] = g.ry * k * scale;
     });
-    const range = document.createRange(); range.selectNodeContents(title);
-    const tr = range.getBoundingClientRect();
-    gl.uniform4f(U.TT, (tr.left - hr.left) * scale, (tr.top - hr.top) * scale, tr.width * scale, tr.height * scale);
-    gl.uniform2f(U.R, w, h);
-    gl.uniform4fv(U.B, rects);
-    gl.uniform1f(U.S, 1 / scale);
   }
-  const t0 = performance.now();
-  function draw() {
-    measure();
-    gl.uniform1f(U.T, still ? 12.0 : (performance.now() - t0) / 1000);
-    gl.uniform1f(U.H, hot);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-  }
-  // Burn only while the menu is in view.
-  let inView = true;
-  if ("IntersectionObserver" in window) new IntersectionObserver((e) => { inView = e[0].isIntersecting; }).observe(hero);
-  function loop() {
-    if (!document.hidden && inView) draw();
-    requestAnimationFrame(loop);
-  }
-  if (still) {
-    draw();
-    addEventListener("resize", draw);
-  } else {
-    requestAnimationFrame(loop);
-  }
+  const relayout = () => { fit(); place(); };
+  addEventListener("resize", relayout);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(relayout);
+  relayout();
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const fires = [...document.querySelectorAll(".fx video")];
+  if (still) { fires.forEach((v) => { v.removeAttribute("autoplay"); v.preload = "none"; v.pause(); }); return; }
+  fires.forEach((v) => {
+    const copies = first[v.dataset.fire];
+    if (!copies) return;
+    if (v.preload === "none") copies.push(v);
+    else v.addEventListener("canplaythrough", () => copies.splice(0).forEach((c) => { c.preload = "auto"; c.autoplay = true; c.load(); }), { once: true });
+  });
+  const hero = document.querySelector(".hero");
+  if ("IntersectionObserver" in window) new IntersectionObserver((e) => {
+    fires.forEach((v) => { if (e[0].isIntersecting) v.play().catch(() => {}); else v.pause(); });
+  }).observe(hero);
 })();
 </script>
 </body>

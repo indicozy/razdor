@@ -3,10 +3,10 @@
    dark text boxes and parchment. Everything is CSS: none of the game's art is used.
    Fonts: Becker Medium (titles and the menu), Kurale and PT Sans: the fonts Razdor ships. */
 
-@font-face { font-family: "Becker"; src: url("fonts/Becker-Medium.ttf") format("truetype"); font-display: swap; }
-@font-face { font-family: "Kurale"; src: url("fonts/Kurale-Regular.ttf") format("truetype"); font-display: swap; }
-@font-face { font-family: "PT Sans"; src: url("fonts/PT_Sans-Regular.ttf") format("truetype"); font-display: swap; }
-@font-face { font-family: "PT Sans"; src: url("fonts/PT_Sans-Bold.ttf") format("truetype"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "Becker"; src: url("fonts/Becker-Medium.woff2") format("woff2"), url("fonts/Becker-Medium.ttf") format("truetype"); font-display: swap; }
+@font-face { font-family: "Kurale"; src: url("fonts/Kurale-Regular.woff2") format("woff2"), url("fonts/Kurale-Regular.ttf") format("truetype"); font-display: swap; }
+@font-face { font-family: "PT Sans"; src: url("fonts/PT_Sans-Regular.woff2") format("woff2"), url("fonts/PT_Sans-Regular.ttf") format("truetype"); font-display: swap; }
+@font-face { font-family: "PT Sans"; src: url("fonts/PT_Sans-Bold.woff2") format("woff2"), url("fonts/PT_Sans-Bold.ttf") format("truetype"); font-weight: 700; font-display: swap; }
 
 :root {
   --ember: #2a1307;
@@ -34,13 +34,21 @@ body {
   font: 1.0625rem/1.6 "PT Sans", system-ui, sans-serif;
   /* The main menu's backdrop: ruins in firelight. Warm smoke over a dark ember ground,
      brighter at the top where the title burns. */
-  background-color: var(--ember);
-  background-image:
+  background: var(--ember) url("fire/tile-smoke.webp") 0 0 / 700px 700px;
+}
+/* The firelight stays in view while the page scrolls, as a fixed layer of its own (the
+   compositor moves it; a fixed body background repainted the whole page on every scroll).
+   The smoke is pre-rendered noise (it was an SVG feTurbulence filter). */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
     radial-gradient(ellipse 70% 38rem at 50% 14rem, rgba(236, 132, 40, 0.55), rgba(236, 132, 40, 0) 70%),
     radial-gradient(ellipse 40% 30rem at 12% 30rem, rgba(150, 60, 14, 0.5), rgba(150, 60, 14, 0) 70%),
-    radial-gradient(ellipse 40% 30rem at 88% 24rem, rgba(170, 72, 18, 0.45), rgba(170, 72, 18, 0) 70%),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='700' height='700'%3E%3Cfilter id='s' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' stitchTiles='stitch' baseFrequency='0.004 0.011' numOctaves='5' seed='11'/%3E%3CfeColorMatrix values='0 0 0 0 0.55  0 0 0 0 0.24  0 0 0 0 0.07  1.4 0 0 0 -0.55'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23s)'/%3E%3C/svg%3E");
-  background-attachment: fixed, fixed, fixed, scroll;
+    radial-gradient(ellipse 40% 30rem at 88% 24rem, rgba(170, 72, 18, 0.45), rgba(170, 72, 18, 0) 70%);
 }
 
 a { color: var(--gold); text-underline-offset: 0.18em; }
@@ -155,7 +163,7 @@ main { padding: 0 1.25rem 2rem; }
   scroll-margin-top: 1.5rem;
   position: relative;
   background:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='520' height='520'%3E%3Cfilter id='v' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' stitchTiles='stitch' baseFrequency='0.011 0.028' numOctaves='4' seed='4'/%3E%3CfeColorMatrix values='0 0 0 0 0.5  0 0 0 0 0.7  0 0 0 0 0.62  0 0 -2.6 1.55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23v)'/%3E%3C/svg%3E"),
+    url("fire/tile-marble.webp"),
     linear-gradient(180deg, #2d5648, var(--marble-dark));
   border: 3px solid var(--silver);
   box-shadow:
