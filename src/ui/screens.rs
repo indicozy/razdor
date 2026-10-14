@@ -261,66 +261,6 @@ fn end_event(game: &Option<Game>) -> Option<String> {
     Some(super::story::event_title(g, id))
 }
 
-/// What the defeat screen asks the app to do besides a new game.
-pub enum EndChoice {
-    /// Load this save (the newest of the same map).
-    Load(std::path::PathBuf),
-    /// Start the same map again, with the same hero.
-    Restart,
-}
-
-thread_local! {
-    /// The newest save of the lost game's map, looked up at most once a second: (when,
-    /// which map, the save).
-    static LATEST: std::cell::RefCell<Option<(f64, ScenarioRef, Option<std::path::PathBuf>)>> = const { std::cell::RefCell::new(None) };
-}
-
-/// The newest save, manual or automatic, of the map `game` was playing.
-fn latest_save(game: &Game) -> Option<std::path::PathBuf> {
-    let origin = game.origin.clone()?;
-    let now = get_time();
-    LATEST.with(|l| {
-        if let Some((at, of, path)) = l.borrow().as_ref() {
-            if *of == origin && now - at < 1.0 {
-                return path.clone();
-            }
-        }
-        let dir = razdor::rules::save::default_dir()?;
-        let newest = [razdor::rules::save::SaveKind::Manual, razdor::rules::save::SaveKind::Auto]
-            .into_iter()
-            .flat_map(|k| razdor::rules::save::list(&dir, k))
-            .filter(|e| e.meta.scenario == origin)
-            .max_by_key(|e| e.meta.saved_at)
-            .map(|e| e.path);
-        *l.borrow_mut() = Some((now, origin, newest.clone()));
-        newest
-    })
-}
-
-/// The defeat screen: a new game, or, for the map just lost, its newest save or a restart.
-pub fn game_over(game: &mut Option<Game>) -> (Option<Screen>, Option<EndChoice>) {
-    let days = days_played(game);
-    let latest = game.as_ref().and_then(latest_save);
-    let can_restart = game.as_ref().is_some_and(|g| g.origin.is_some());
-    let shown = match end_event(game) {
-        Some(title) => end_screen(tr("Defeat"), &trf!("{title}. You lasted {days} days.", title, days), RED, game),
-        None => end_screen(tr("Your hero has fallen"), &trf!("The discord goes on. You lasted {days} days.", days), RED, game),
-    };
-    if shown.is_some() {
-        return (shown, None);
-    }
-    let x = screen_width() / 2.0 - 110.0;
-    if button(x, 445.0, 220.0, 50.0, tr("Load the latest save"), latest.is_some()) {
-        if let Some(path) = latest {
-            return (None, Some(EndChoice::Load(path)));
-        }
-    }
-    if button(x, 510.0, 220.0, 50.0, tr("Restart this map"), can_restart) {
-        return (None, Some(EndChoice::Restart));
-    }
-    (None, None)
-}
-
 /// After a campaign victory whose next map is in the install: what carries over (header
 /// 0x110), with the flags, and that map's entry.
 fn next_campaign_map<'a>(game: &Option<Game>, scenarios: &'a [ScenarioEntry]) -> Option<(NextMap, &'a ScenarioEntry)> {

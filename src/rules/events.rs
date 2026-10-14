@@ -875,6 +875,11 @@ impl EventEngine {
     // State
     // ---------------------------------------------------------------------------------------
 
+    /// Whether `id` is the map's defeat event (header 0xD8).
+    pub fn is_defeat_event(&self, id: EventId) -> bool {
+        id == self.defeat
+    }
+
     pub fn event(&self, id: EventId) -> Option<&Event> {
         (id as usize).checked_sub(1).and_then(|i| self.events.get(i))
     }

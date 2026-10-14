@@ -31,9 +31,6 @@ Back = Назад
 # End of the game
 New game = Новая игра
 Defeat = Поражение
-{title}. You lasted {days} days. = {title}. Продержались дней: {days}.
-Your hero has fallen = Ваш герой пал
-The discord goes on. You lasted {days} days. = Смута продолжается. Продержались дней: {days}.
 Victory! = Победа!
 {title}, after {days} days. = {title}. Прошло дней: {days}.
 The bandits are broken = Разбойники разбиты

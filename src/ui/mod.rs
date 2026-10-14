@@ -83,7 +83,6 @@ pub enum Screen {
     Settings,
     Save(saves::SaveView),
     Load(saves::LoadView),
-    GameOver,
     Victory,
     /// The map editor (`ui::editor`).
     Editor,
@@ -324,8 +323,9 @@ impl App {
             Screen::MainMenu | Screen::Options | Screen::ScenarioSelect | Screen::TutorialOffer | Screen::ClassSelect { .. } | Screen::Editor => Mood::Menu,
             Screen::Load(v) if v.back == saves::Back::Title || self.game.is_none() => Mood::Menu,
             Screen::Battle(_) => Mood::Battle { garrison: matches!(self.game.as_ref().and_then(|g| g.foe.as_ref()), Some(Foe::Garrison(_))) },
-            Screen::GameOver => Mood::Lost,
             Screen::Victory => Mood::Won,
+            // The defeat report plays the defeat theme (4c57ad, 0x4a8ae8's mode 2 → 0x482290).
+            _ if self.dialogs.iter().any(|d| d.defeat) => Mood::Lost,
             _ if self.game.is_some() => Mood::Map,
             _ => Mood::Menu,
         }
@@ -454,7 +454,7 @@ impl App {
             Screen::Menu(_) | Screen::Settings => Place::Menu,
             Screen::Save(_) => Place::Save,
             Screen::Load(_) => Place::Load,
-            Screen::GameOver | Screen::Victory => Place::End,
+            Screen::Victory => Place::End,
             Screen::Editor => Place::Editor,
         }
     }
@@ -551,7 +551,6 @@ impl App {
             Screen::Settings => "settings",
             Screen::Save(_) => "save",
             Screen::Load(_) => "load",
-            Screen::GameOver => "game over",
             Screen::Victory => "victory",
             Screen::Editor => "editor",
         }
@@ -657,17 +656,6 @@ impl App {
             }
             (Screen::Save(view), Some(game)) => saves::save_screen(game, &self.assets, view, &mut self.message),
             (Screen::Load(view), game) => saves::load_screen(game.as_ref(), &self.assets, view, &mut self.pending_load, &self.load_error),
-            (Screen::GameOver, game) => match screens::game_over(game) {
-                (next, Some(screens::EndChoice::Load(path))) => {
-                    self.pending_load = Some(path);
-                    next
-                }
-                (_, Some(screens::EndChoice::Restart)) => {
-                    restart = true;
-                    None
-                }
-                (next, None) => next,
-            },
             (Screen::Victory, game) => screens::victory(game, &self.scenarios, self.dt_content.clone()),
             (Screen::Editor, _) => None,
             (_, None) => Some(Screen::MainMenu),
@@ -715,6 +703,13 @@ impl App {
                 let offer_result = closed.as_ref().is_some_and(|d| d.offer_result);
                 let asked = closed.as_ref().is_some_and(|d| d.question && !d.offer);
                 let read = closed.as_ref().is_some_and(|d| d.event.is_some() && !d.question);
+                // The defeat report's OK ends the game: back to the main menu (0x4c206c with
+                // the defeat mark 0xae6d23 → 0x4bfb34).
+                if closed.as_ref().is_some_and(|d| d.defeat && d.event.is_none()) {
+                    self.dialogs.clear();
+                    self.game = None;
+                    next = Some(Screen::MainMenu);
+                }
                 // Closing a dialog while the triumph plays changes the map track at once
                 // (0x4c20b3).
                 if self.map_music.triumph {
@@ -794,12 +789,19 @@ impl App {
                         None => next = Some(Screen::Victory),
                     }
                 }
-                Some(ScriptEnd::Defeat(_)) if !matches!(self.screen, Screen::GameOver) => next = Some(Screen::GameOver),
+                // The map's defeat event: its window was the last thing shown; the game
+                // returns to the main menu (events.md §11, 0x4bfb34).
+                Some(ScriptEnd::Defeat(_)) => {
+                    self.game = None;
+                    next = Some(Screen::MainMenu);
+                }
                 _ => {}
             }
-            // A world spell that killed the whole army loses the game (0x4900fc → 0x4af658).
-            if next.is_none() && !matches!(self.screen, Screen::GameOver | Screen::Battle(..)) && self.game.as_ref().is_some_and(Game::army_fallen) {
-                next = Some(Screen::GameOver);
+            // A world spell that killed the whole army loses the game: the defeat report,
+            // 250 ms later (0x4906eb → 0x4af658).
+            if next.is_none() && !matches!(self.screen, Screen::Battle(..)) && self.game.as_ref().is_some_and(Game::army_fallen) {
+                let due = macroquad::prelude::get_time() + razdor::av::BATTLE_REPORT_GAP_MS as f64 / 1000.0;
+                self.dialogs.push_back(dialog::Dialog { not_before: Some(due), ..dialog::Dialog::defeat() });
             }
         }
         // The noon report asks for an autosave, named by the date.

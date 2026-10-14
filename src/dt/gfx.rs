@@ -105,10 +105,38 @@ pub fn decode_ugs(d: &[u8]) -> Result<Vec<Image>, DtError> {
     Ok(frames)
 }
 
-/// The single-frame stills of `Graphics/Windows` (`MB2`, `MM_Icons`, `Stnd-1/2`, `Title_RUS`)
-/// are not scrambled: each pixel is one grey byte and one alpha byte. The game tints them
-/// (the menu buttons, the minimap symbols by owner).
-pub const UGS_GREY_STILLS: [&str; 5] = ["mb2.ugs", "mm_icons.ugs", "stnd-1.ugs", "stnd-2.ugs", "title_rus.ugs"];
+/// The single-frame stills of `Graphics/Windows` (`MB2`, `MM_Icons`, `Title_RUS`) are not
+/// scrambled: each pixel is one grey byte and one alpha byte. The game tints them (the menu
+/// buttons, the minimap symbols by owner).
+pub const UGS_GREY_STILLS: [&str; 3] = ["mb2.ugs", "mm_icons.ugs", "title_rus.ugs"];
+
+/// The event window's defeat and victory pictures (`Stnd-1`, `Stnd-2`): `[u16 w][u16 h]`
+/// then one little-endian u16 per pixel, ARGB 4444. The window splits each pixel into its
+/// low 12 bits (the colour, through the 4096-entry table 0xae2b50) and its top 4 (the
+/// alpha, a colour above 0 with alpha 0 drawn at 8 of 31): 0x4d16ef–0x4d1753.
+pub const UGS_ARGB4444_STILLS: [&str; 2] = ["stnd-1.ugs", "stnd-2.ugs"];
+
+/// An ARGB 4444 still (see [`UGS_ARGB4444_STILLS`]).
+pub fn decode_ugs_argb4444(d: &[u8]) -> Result<Image, DtError> {
+    let (Some(w), Some(h)) = (u16_at(d, 0), u16_at(d, 2)) else {
+        return Err(DtError::Truncated { what: "UGS still header", offset: 0 });
+    };
+    let n = w as usize * h as usize;
+    let px = d.get(4..4 + n * 2).ok_or(DtError::Truncated { what: "UGS still pixels", offset: 4 })?;
+    let rgba = px
+        .chunks_exact(2)
+        .flat_map(|p| {
+            let v = u16::from_le_bytes([p[0], p[1]]);
+            let nib = |s: u16| ((v >> s) & 15) as u8 * 17;
+            let (r, g, b, mut a) = (nib(8), nib(4), nib(0), nib(12));
+            if a == 0 && v & 0xfff != 0 {
+                a = (8 * 255 / 31) as u8;
+            }
+            [r, g, b, a]
+        })
+        .collect();
+    Ok(Image { width: w as u32, height: h as u32, rgba })
+}
 
 /// A grey + alpha still (see [`UGS_GREY_STILLS`]): `[u16 w][u16 h]` then `w*h` pairs of
 /// (grey, alpha) bytes; alpha counts from the background's.
@@ -473,6 +501,7 @@ pub fn decode_file(path: &Path) -> Result<Vec<Image>, DtError> {
         "bmp" => Ok(vec![decode_bmp(&d)?]),
         "ugs" if name == "objects.ugs" => Ok(decode_objects_ugs(&d)?.into_iter().map(|s| s.image).collect()),
         "ugs" if UGS_GREY_STILLS.contains(&name.as_str()) => Ok(vec![decode_ugs_grey(&d)?]),
+        "ugs" if UGS_ARGB4444_STILLS.contains(&name.as_str()) => Ok(vec![decode_ugs_argb4444(&d)?]),
         "ugs" => decode_ugs(&d),
         _ => Err(DtError::BadMagic { what: "known graphics file (.ugs/.lit/.spi/.bmp)" }),
     }
@@ -762,6 +791,22 @@ mod tests {
         d.extend(frame(2, 1, &[0, 0], false));
         assert_eq!(&d[4..8], &[2, 0, 1, 0]);
         assert_eq!(decode_ugs(&d).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn stnd_stills_are_argb4444() {
+        // 2×2: transparent, the dark red of Stnd-1's inside (0xF700), its ivory (0xFFFC),
+        // and a colour with alpha 0 (drawn at 8 of 31).
+        let mut d = vec![2, 0, 2, 0];
+        for v in [0x0000u16, 0xF700, 0xFFFC, 0x0F00] {
+            d.extend(v.to_le_bytes());
+        }
+        let img = decode_ugs_argb4444(&d).unwrap();
+        assert_eq!(img.pixel(0, 0), [0, 0, 0, 0]);
+        assert_eq!(img.pixel(1, 0), [119, 0, 0, 255]);
+        assert_eq!(img.pixel(0, 1), [255, 255, 204, 255]);
+        assert_eq!(img.pixel(1, 1), [255, 0, 0, 65]);
+        assert!(decode_ugs_argb4444(&[2, 0, 2, 0, 1]).is_err());
     }
 
     #[test]

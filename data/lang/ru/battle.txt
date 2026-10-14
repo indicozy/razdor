@@ -302,3 +302,5 @@ Unknown = Неизвестно
 month = месяц
 day = день
 hour = час
+Your enemy proved stronger than your army, and you lost this battle. = Враг оказался сильнее, и битва проиграна.
+You let your hero perish, and the game on this scenario cannot go on. = Герой погиб, и этот сценарий продолжить нельзя.

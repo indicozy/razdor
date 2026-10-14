@@ -38,6 +38,9 @@ pub enum Picture {
     /// size left of the text box, framed by a 1 px line; the box moves right by its width
     /// plus 14 and is at least as tall as it, the text centred in it (the village offers).
     Side(Texture2D),
+    /// The defeat or victory still (`Stnd-1`, `Stnd-2`): in the place of [`Picture::Side`],
+    /// drawn with its own alpha and no frame line (0x4d1686 → 0x476a3c).
+    Still(Texture2D),
 }
 
 /// How the player closed a dialog.
@@ -86,6 +89,9 @@ pub struct Dialog {
     /// Not shown before this clock time (seconds, `get_time`): the won battle's report comes
     /// 250 ms after the battle screen closes (the chained step 0x4af658).
     pub not_before: Option<f64>,
+    /// Drawn in the original's defeat look (the event window's mode 2, 0x4a8ae8 / 0x4ed458):
+    /// the red marble; its OK ends the game for the main menu (0x4c206c → 0x4bfb34).
+    pub defeat: bool,
     /// A key that closes it went down while it was shown: its release presses OK (0x4cd558).
     /// A key already held as it opened does nothing (0x47f358).
     pub key_down: std::cell::Cell<bool>,
@@ -112,6 +118,7 @@ impl Dialog {
             chord: false,
             cued: false,
             not_before: None,
+            defeat: false,
             key_down: std::cell::Cell::new(false),
         }
     }
@@ -155,6 +162,28 @@ impl Dialog {
             let names: Vec<&str> = r.deserted.iter().map(|&u| game.content.unit(u).name.as_str()).collect();
             d.text.push(trf!("Left the army unpaid: {names}.", names = names.join(", ")));
         }
+        d
+    }
+
+    /// The report after the army was lost (events.md §11, 0x4c527d / 0x4906eb set the defeat
+    /// mark 0xae6d23, the chained step 0x4af658 opens the battle-report slot): the event window
+    /// in its defeat look, titled `[Event] DefeatTitle`, the `Stnd-1` picture at its side
+    /// (0x674958, loaded at 0x4dc871; 0x4aa1ac), and two centred texts: `[Event] Defeat` in
+    /// the plain tint (font ae24a0), an empty row, `[Event] DefeatInfo` in the orange one
+    /// (ae24a4; 0x4aa76c). The texts are drawn as typed, their marks taken out. OK goes to the
+    /// main menu (0x4c206c with the defeat mark → 0x4bfb34).
+    pub fn defeat() -> Dialog {
+        let ini = |key: &str, ours: &'static str| {
+            super::chrome::ui_text("Event", key).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr(ours).to_string())
+        };
+        let plain = |s: String| s.chars().filter(|c| !matches!(c, '*' | '|' | '@' | '^')).collect::<String>();
+        let mut d = Dialog::new(ini("DefeatTitle", razdor::i18n::n_("Defeat in battle!")));
+        let lost = plain(ini("Defeat", razdor::i18n::n_("Your enemy proved stronger than your army, and you lost this battle.")));
+        let info = plain(ini("DefeatInfo", razdor::i18n::n_("You let your hero perish, and the game on this scenario cannot go on.")));
+        d.marked = Some(format!("^{lost}\r\n\r\n^@{info}"));
+        d.picture = super::chrome::win_ugs("Stnd-1").map(Picture::Still);
+        d.chord = true;
+        d.defeat = true;
         d
     }
 
@@ -276,7 +305,7 @@ pub fn draw(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Close> {
     chrome::under_message();
     // A picture at the side takes its width and 14 more from the text box.
     let side = match &d.picture {
-        Some(Picture::Side(t)) => Some((t.width(), t.height())),
+        Some(Picture::Side(t) | Picture::Still(t)) => Some((t.width(), t.height())),
         _ => None,
     };
     let side_w = side.map_or(0.0, |(pw, _)| pw + 14.0);
@@ -309,7 +338,9 @@ pub fn draw(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Close> {
     }
     let h = h_fixed + text_h;
     let (x, y) = ((sw - w) / 2.0, ((sh - h) / 2.0).max(10.0));
-    chrome::window(Rect::new(x, y, w, h), &d.title, chrome::Skin::Marble, false);
+    // The defeat look is the red marble (the original's window after a lost battle).
+    let skin = if d.defeat { chrome::Skin::Red } else { chrome::Skin::Marble };
+    chrome::window(Rect::new(x, y, w, h), &d.title, skin, false);
     let mut cy = y + 44.0;
     match &d.picture {
         Some(Picture::Unit(u)) => {
@@ -323,6 +354,7 @@ pub fn draw(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Close> {
             draw_texture_ex(tex, x + (w - tw) / 2.0, cy, WHITE, DrawTextureParams { dest_size: Some(vec2(tw, th)), ..Default::default() });
             draw_rectangle_lines(x + (w - tw) / 2.0, cy, tw, th, 2.0, MARBLE_EDGE);
         }
+        Some(Picture::Still(tex)) => draw_texture(tex, x + 17.0, cy + 1.0, WHITE),
         Some(Picture::Side(tex)) => {
             let (px, py) = (x + 17.0, cy + 1.0);
             draw_texture(tex, px, py, WHITE);
@@ -430,7 +462,21 @@ pub fn draw(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Close> {
             None
         };
     }
-    let ok = button(x + w / 2.0 - 60.0, by, 120.0, 38.0, "OK", true);
+    // The label is the language file's `[Buttons] Ok` («Ок»); in the defeat look the button
+    // is the red one (0x4aa263).
+    let ok_label = chrome::ui_text("Buttons", "Ok").filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| "OK".to_string());
+    let ok = if d.defeat {
+        let r = Rect::new(x + w / 2.0 - 60.0, by, 120.0, 38.0);
+        let hover = mouse_in(r.x, r.y, r.w, r.h);
+        chrome::defeat_button(r, &ok_label, true, hover);
+        let pressed = hover && clicked();
+        if pressed {
+            super::audio::cue(super::audio::Cue::Button);
+        }
+        pressed
+    } else {
+        button(x + w / 2.0 - 60.0, by, 120.0, 38.0, &ok_label, true)
+    };
     // Any key but Tab, Alt and the Up and Down arrows, on its release (0x4cd558): Space,
     // Enter and Esc alike. Closed on the release, the key is no longer held when the map
     // takes over, so the hero walks on.
@@ -443,6 +489,21 @@ pub fn draw(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Close> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The lost battle's report (0x4aa76c): the defeat look, no event behind it (so its OK
+    /// ends the game), the defeat text centred in the plain tint, an empty row, the info
+    /// centred in the orange one.
+    #[test]
+    fn the_defeat_report_is_the_event_window_in_its_defeat_look() {
+        use razdor::dt::markup::{parse, Align, Ink};
+        let d = Dialog::defeat();
+        assert!(d.defeat && d.event.is_none() && !d.question && d.chord);
+        let lines = parse(d.marked.as_deref().unwrap());
+        assert_eq!(lines.len(), 3);
+        assert_eq!((lines[0].ink, lines[0].align), (Ink::Plain, Align::Centre));
+        assert!(lines[1].text.trim_matches('_').is_empty());
+        assert_eq!((lines[2].ink, lines[2].align), (Ink::At, Align::Centre));
+    }
 
     /// The won battle's report waits its 250 ms after the screen closes (0x4af658), then shows.
     #[test]

@@ -59,10 +59,17 @@ pub fn event_dialog(game: &Game, id: EventId, asking: bool) -> Dialog {
     // The original fills in `#HERONAME` (0x471f0c) and reads the result as markup (0x48e438:
     // lines at CR LF or `#\`, the marks `*` `|` `@` `^`); the CR is kept for that.
     d.marked = Some(body.replace("#HERONAME", &game.hero_name()));
+    // The defeat look (the event window's mode 2, 0x4a8ae8): a title holding `#DEFEAT`, or
+    // the map's defeat event. It changes the frame and the music, it does not end the game.
+    d.defeat = e.title.contains("#DEFEAT") || game.script().is_some_and(|s| s.is_defeat_event(id));
     let r = &e.results;
     d.picture = match (&e.custom_picture, r.picture) {
         (Some(data), _) if custom_picture(data).is_some() => custom_picture(data).map(Picture::Image),
-        (_, 0 | PICTURE_DEFEAT | PICTURE_VICTORY) => None,
+        // 200 and 201: the defeat and victory pictures, `Stnd-1` and `Stnd-2` (the table
+        // 0x674638 + 4·v, loaded at 0x4dc871 / 0x4dc880; 0x4aa105).
+        (_, PICTURE_DEFEAT) => super::chrome::win_ugs("Stnd-1").map(Picture::Still),
+        (_, PICTURE_VICTORY) => super::chrome::win_ugs("Stnd-2").map(Picture::Still),
+        (_, 0) => None,
         (_, u) => game.content.try_unit(UnitId(u as u32)).map(|_| Picture::Unit(UnitId(u as u32))),
     };
     if asking {

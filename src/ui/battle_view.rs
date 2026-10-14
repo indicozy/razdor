@@ -538,6 +538,9 @@ impl BattleView {
                 let done = *held * 1000.0 >= razdor::av::BATTLE_END_HOLD_MS as f32;
                 return done.then(|| self.close_won(game, message, dialogs));
             }
+            if outcome == Outcome::Defeat {
+                return Some(self.close_lost(game, message, dialogs));
+            }
             return self.result_overlay(&l, game, message, dialogs, outcome);
         }
         if exiting && !just_opened {
@@ -991,7 +994,18 @@ impl BattleView {
         Screen::WorldMap
     }
 
-    /// The result box over the unit panel (a defeat, or a battle nobody won), so the XP
+    /// The lost battle: the screen closes at once, the defeat music starts and the defeat
+    /// report follows on the map 250 ms later (4c575b → the chained step 0x4af658); its OK
+    /// ends the game ([`Dialog::defeat`]).
+    fn close_lost(&self, game: &mut Game, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) -> Screen {
+        game.resolve_battle(&self.battle);
+        let due = macroquad::time::get_time() + razdor::av::BATTLE_REPORT_GAP_MS as f64 / 1000.0;
+        dialogs.push_back(Dialog { not_before: Some(due), ..Dialog::defeat() });
+        *message = None;
+        Screen::WorldMap
+    }
+
+    /// The result box over the unit panel (a battle nobody won), so the XP
     /// badges on the cards stay visible.
     fn result_overlay(&self, l: &Layout, game: &mut Game, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>, outcome: Outcome) -> Option<Screen> {
         let k = l.k;
@@ -1020,7 +1034,10 @@ impl BattleView {
         }
         let result = game.resolve_battle(&self.battle);
         match result {
-            BattleResult::Defeat => Some(Screen::GameOver),
+            BattleResult::Defeat => {
+                dialogs.push_back(Dialog::defeat());
+                Some(Screen::WorldMap)
+            }
             BattleResult::Victory { .. } if game.won() => Some(Screen::Victory),
             victory @ BattleResult::Victory { .. } => {
                 dialogs.extend(Dialog::victory(game, &victory));

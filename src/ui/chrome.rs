@@ -35,12 +35,15 @@ pub enum Fx {
     Shade,
     /// Green and blue swapped (0x48dd40 with 1, 3, 2): the blue pill made the green one.
     SwapGreenBlue,
+    /// Red takes green, green takes blue, blue takes red (0x48dd40 with 2, 3, 1): the green
+    /// buttons made the defeat window's red ones (0x4dba90).
+    RotateRgb,
 }
 
 struct Chrome {
     dir: PathBuf,
     /// By path, then by [`Fx`] (its index).
-    textures: HashMap<String, [Option<Option<Texture2D>>; 6]>,
+    textures: HashMap<String, [Option<Option<Texture2D>>; 7]>,
     animations: HashMap<String, Option<Vec<Texture2D>>>,
     texts: Option<Option<Ini>>,
 }
@@ -138,6 +141,10 @@ pub fn transform(img: &mut Image, fx: Fx) {
                 p[3] = a.min(p[3]);
             }
             Fx::SwapGreenBlue => p.swap(1, 2),
+            Fx::RotateRgb => {
+                let (r, g, b) = (p[0], p[1], p[2]);
+                p[..3].copy_from_slice(&[g, b, r]);
+            }
         }
     }
 }
@@ -974,6 +981,24 @@ pub fn parchment(r: Rect, ornaments: bool) {
 /// A text button on green marble with a silver edge (the original's `Btn*`). True when
 /// clicked this frame.
 pub fn marble_button(r: Rect, label: &str, enabled: bool, hover: bool) {
+    marble_button_plain(r, label, enabled, hover);
+}
+
+/// The event window's buttons in its defeat look: the green ones with their channels turned
+/// (red takes green: 0x4dba90 → 0x48dd40(2, 3, 1); 0x4aa263 swaps them in).
+pub fn defeat_button(r: Rect, label: &str, enabled: bool, hover: bool) {
+    let name = if r.w < 110.0 { "Btn1" } else if r.w < 145.0 { "Btn2" } else { "Btn3" };
+    let state = if hover && enabled { "Down" } else { "Up" };
+    match win_fx(&format!("{name}{state}"), Fx::RotateRgb) {
+        Some(t) if enabled => {
+            three_slice(&t, r, 14.0, WHITE);
+            button_label(r, label, enabled, hover);
+        }
+        _ => marble_button(r, label, enabled, hover),
+    }
+}
+
+fn marble_button_plain(r: Rect, label: &str, enabled: bool, hover: bool) {
     let name = if r.w < 110.0 { "Btn1" } else if r.w < 145.0 { "Btn2" } else { "Btn3" };
     let state = if hover && enabled { "Down" } else { "Up" };
     let fx = if enabled { Fx::Plain } else { Fx::Grey };
@@ -989,6 +1014,11 @@ pub fn marble_button(r: Rect, label: &str, enabled: bool, hover: bool) {
         draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, if enabled { SILVER } else { SILVER_DARK });
         draw_rectangle_lines(r.x + 2.0, r.y + 2.0, r.w - 4.0, r.h - 4.0, 1.0, Color::new(0.0, 0.0, 0.0, 0.5));
     }
+    button_label(r, label, enabled, hover);
+}
+
+/// A button's label, centred, smaller if it must be to fit.
+fn button_label(r: Rect, label: &str, enabled: bool, hover: bool) {
     let mut size: f32 = (r.h * 0.56).clamp(12.0, (22.0 * k()).max(12.0)).round();
     while size > 11.0 && measure(label, size).width > r.w - 10.0 {
         size -= 1.0;
