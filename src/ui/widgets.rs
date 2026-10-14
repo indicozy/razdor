@@ -291,15 +291,45 @@ impl Drop for Clip {
     }
 }
 
-/// A translucent panel of lines next to the mouse.
+/// A translucent panel of lines next to the mouse: the original's ordinary hint box, which
+/// fades in to 160/255 over 300 ms (49ee4b–49ef0d: `elapsed × 160 / 300`).
 pub fn tooltip(lines: &[(String, Color)]) {
-    tooltip_at_alpha(lines, 0.72);
+    tooltip_at_alpha(lines, hint_fade(lines, 160.0 / 255.0));
 }
 
-/// The bottom panel's hint box (49d5ac): a pushed hint, which the original draws at full
-/// opacity (49ee4b), so the bar under it does not show through.
+/// The bottom panel's hint box (49d5ac): a pushed hint (kind 4), which the original fades in
+/// to full opacity over 300 ms (49ee4b: `elapsed × 255 / 300`), so the bar under it does not
+/// show through once it is up.
 pub fn panel_hint(lines: &[(String, Color)]) {
-    tooltip_at_alpha(lines, 1.0);
+    tooltip_at_alpha(lines, hint_fade(lines, 1.0));
+}
+
+thread_local! {
+    /// The hint box shown: its text, when it appeared and when it was last drawn (the same
+    /// text is not restarted while it stays up).
+    static HINT_SHOWN: std::cell::RefCell<(String, f64, f64)> = const { std::cell::RefCell::new((String::new(), 0.0, 0.0)) };
+}
+
+/// The opacity of a hint box `ms` after it appeared, fading in to `full` over 300 ms.
+pub fn hint_alpha(ms: f64, full: f32) -> f32 {
+    ((ms / 300.0).clamp(0.0, 1.0) as f32) * full
+}
+
+/// The opacity of the hint box with these lines now: its fade restarts when its text changes or
+/// when it was not drawn for a moment (it closed in between).
+fn hint_fade(lines: &[(String, Color)], full: f32) -> f32 {
+    let text: String = lines.iter().map(|(s, _)| s.as_str()).collect::<Vec<_>>().join("\n");
+    let now = get_time() * 1000.0;
+    let start = HINT_SHOWN.with(|h| {
+        let mut h = h.borrow_mut();
+        if h.0 != text || now - h.2 > 100.0 {
+            *h = (text, now, now);
+        } else {
+            h.2 = now;
+        }
+        h.1
+    });
+    hint_alpha(now - start, full)
 }
 
 /// The hint box that follows the mouse (kind 7, 0x49e9b8): `w` wide, its lines centred, at
@@ -343,10 +373,13 @@ fn tooltip_at_alpha(lines: &[(String, Color)], alpha: f32) {
     let y = (my + 18.0).min(screen_height() - h - 4.0);
     let r = Rect::new(x, y, w, h);
     super::chrome::surface_alpha(r, super::chrome::Skin::Marble, alpha);
-    draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, 0.05, 0.03, 0.2));
-    super::chrome::silver_frame(r, 1.5);
+    draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, 0.05, 0.03, 0.2 * alpha));
+    let edge = Color { a: super::chrome::SILVER.a * alpha, ..super::chrome::SILVER };
+    draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.5, edge);
+    // The box and its text fade together (the whole box is blended, 49ee4b).
+    let ink = alpha / alpha.max(160.0 / 255.0).max(f32::EPSILON);
     for (i, (s, c)) in lines.iter().enumerate() {
-        super::chrome::shadow_text(s, x + 12.0, y + 24.0 + i as f32 * 21.0, 17.0, *c);
+        super::chrome::shadow_text(s, x + 12.0, y + 24.0 + i as f32 * 21.0, 17.0, Color { a: c.a * ink.min(1.0), ..*c });
     }
 }
 
@@ -387,6 +420,18 @@ pub fn tooltip_panel_styled(r: Rect, style: TipStyle) {
 /// Draws a button and returns true when it was clicked this frame.
 pub fn button(x: f32, y: f32, w: f32, h: f32, label: &str, enabled: bool) -> bool {
     button_sounding(x, y, w, h, label, enabled, super::audio::Cue::Button)
+}
+
+/// [`button`] in the original's red (its buttons with their channels turned, 0x4dba90): the
+/// army window's Dismiss and its confirmation, the defeat report.
+pub fn red_button(x: f32, y: f32, w: f32, h: f32, label: &str, enabled: bool) -> bool {
+    let hover = enabled && mouse_in(x, y, w, h);
+    super::chrome::defeat_button(Rect::new(x, y, w, h), label, enabled, hover);
+    let pressed = hover && clicked();
+    if pressed {
+        super::audio::cue(super::audio::Cue::Button);
+    }
+    pressed
 }
 
 /// [`button`] with its own press sound (the money buttons play `Item-Gold`).
@@ -511,12 +556,17 @@ pub fn ink_color(ink: razdor::dt::markup::Ink) -> Color {
 /// (TextDrawJustified 0x478a9c) or, the last row of a justified line, left aligned. No
 /// shadow: these lists get no shadow font (0x48e1cc passes 0). `_` draws as a space.
 pub fn draw_markup_row(row: &MarkupRow, x: f32, y: f32, room: f32, size: f32) {
-    super::dt_font::with_face(super::dt_font::Face::Title, || draw_markup_row_in_face(row, x, y, room, size));
+    super::dt_font::with_face(super::dt_font::Face::Title, || draw_markup_row_in_face(row, x, y, room, size, ink_color(row.ink)));
 }
 
-fn draw_markup_row_in_face(row: &MarkupRow, x: f32, y: f32, room: f32, size: f32) {
+/// [`draw_markup_row`] in another of the original's fonts (the hero window's diary draws its
+/// entry in SanSerif, 0x49c388).
+pub fn draw_markup_row_face(row: &MarkupRow, x: f32, y: f32, room: f32, size: f32, face: super::dt_font::Face, color: Option<Color>) {
+    super::dt_font::with_face(face, || draw_markup_row_in_face(row, x, y, room, size, color.unwrap_or_else(|| ink_color(row.ink))));
+}
+
+fn draw_markup_row_in_face(row: &MarkupRow, x: f32, y: f32, room: f32, size: f32, color: Color) {
     use razdor::dt::markup::Align;
-    let color = ink_color(row.ink);
     let shown = row.text.replace('_', " ");
     match row.align {
         Align::Centre => {
@@ -963,6 +1013,17 @@ pub fn tabs(x: f32, y: f32, w: f32, labels: &[&str], selected: &mut usize) -> f3
 mod tests {
     use super::*;
 
+    /// The hint box fades in over 300 ms (49ee4b–49ef0d): to 160/255 for an ordinary hint, to
+    /// full for a pushed one, and stays there.
+    #[test]
+    fn a_hint_box_fades_in_over_300_ms() {
+        let ordinary = 160.0 / 255.0;
+        assert_eq!(hint_alpha(0.0, ordinary), 0.0);
+        assert!((hint_alpha(150.0, 1.0) - 0.5).abs() < 1e-6);
+        assert!((hint_alpha(300.0, ordinary) - ordinary).abs() < 1e-6);
+        assert!((hint_alpha(5000.0, ordinary) - ordinary).abs() < 1e-6);
+    }
+
     #[test]
     fn a_key_tapped_within_a_frame_is_not_held() {
         // Enter pressed and let go in the same frame (a dialog closed with a quick tap): no key
@@ -1023,4 +1084,102 @@ mod tests {
         assert_eq!(transliterate("Привет, Мир"), "Privet, Mir");
         assert_eq!(transliterate("ok 12"), "ok 12");
     }
+}
+
+/// [`scrollbar`], drawn even when everything fits: then idle, the knob at the top and the
+/// clicks doing nothing, as the original's lists that always show their bar (the building
+/// window's quests, 0x4bedec).
+/// A vertical scrollbar in the original's art (`VArrowUp` / `VArrowDown`, the `VSTexture`
+/// track, the `VSlider` knob) for a list of `total` rows showing `shown` from `first`. The
+/// arrows move one row, a click on the track a page, and the knob drags. Nothing is drawn
+/// when everything fits. Returns true when `first` changed.
+pub fn scrollbar(r: Rect, first: &mut usize, shown: usize, total: usize) -> bool {
+    use super::chrome;
+    if total <= shown {
+        return false;
+    }
+    let most = total - shown;
+    let before = *first;
+    let w = r.w;
+    let up = Rect::new(r.x, r.y, w, w);
+    let down = Rect::new(r.x, r.y + r.h - w, w, w);
+    let track = Rect::new(r.x, r.y + w, w, r.h - 2.0 * w);
+    match chrome::win("VSTexture") {
+        Some(t) => chrome::tex(&t, track, WHITE),
+        None => draw_rectangle(track.x + w / 3.0, track.y, w / 3.0, track.h, chrome::SILVER_DARK),
+    }
+    let knob_h = chrome::win("VSlider").map_or(w * 1.8, |t| w * t.height() / t.width()).min(track.h / 2.0);
+    let room = track.h - knob_h;
+    let at = |first: usize| track.y + room * first as f32 / most as f32;
+    let (mx, my) = pointer();
+    let free = !input_blocked() && !input_swallowed();
+    let held = is_mouse_button_down(MouseButton::Left);
+    // Dragging the knob: the row whose place is nearest.
+    let drag = SCROLL_DRAG.with(|d| d.get()).filter(|(dr, _)| *dr == r);
+    if let (Some((_, grab)), true) = (drag, held) {
+        let t = ((my - grab - track.y) / room).clamp(0.0, 1.0);
+        *first = (t * most as f32).round() as usize;
+    } else if drag.is_some() {
+        SCROLL_DRAG.with(|d| d.set(None));
+    }
+    let knob = Rect::new(track.x, at((*first).min(most)), w, knob_h);
+    if free && is_mouse_button_pressed(MouseButton::Left) {
+        let p = vec2(mx, my);
+        if knob.contains(p) {
+            SCROLL_DRAG.with(|d| d.set(Some((r, my - knob.y))));
+        } else if up.contains(p) {
+            *first = first.saturating_sub(1);
+        } else if down.contains(p) {
+            *first = (*first + 1).min(most);
+        } else if track.contains(p) {
+            *first = if my < knob.y { first.saturating_sub(shown) } else { (*first + shown).min(most) };
+        }
+    }
+    *first = (*first).min(most);
+    let knob = Rect::new(track.x, at(*first), w, knob_h);
+    for (name, rect, pressed) in [("VArrowUp", up, held && up.contains(vec2(mx, my))), ("VArrowDown", down, held && down.contains(vec2(mx, my)))] {
+        let tint = if pressed { Color::new(0.8, 0.8, 0.8, 1.0) } else { WHITE };
+        match chrome::win(name) {
+            Some(t) => chrome::tex(&t, rect, tint),
+            None => draw_rectangle(rect.x, rect.y, rect.w, rect.h, chrome::SILVER),
+        }
+    }
+    match chrome::win("VSlider") {
+        Some(t) => chrome::tex(&t, knob, WHITE),
+        None => draw_rectangle(knob.x, knob.y, knob.w, knob.h, chrome::SILVER),
+    }
+    *first != before
+}
+
+pub fn scrollbar_always(r: Rect, first: &mut usize, shown: usize, total: usize) -> bool {
+    use super::chrome;
+    if total > shown {
+        return scrollbar(r, first, shown, total);
+    }
+    let w = r.w;
+    let track = Rect::new(r.x, r.y + w, w, r.h - 2.0 * w);
+    match chrome::win("VSTexture") {
+        Some(t) => chrome::tex(&t, track, WHITE),
+        None => draw_rectangle(track.x + w / 3.0, track.y, w / 3.0, track.h, chrome::SILVER_DARK),
+    }
+    for (name, rect) in [("VArrowUp", Rect::new(r.x, r.y, w, w)), ("VArrowDown", Rect::new(r.x, r.y + r.h - w, w, w))] {
+        match chrome::win(name) {
+            Some(t) => chrome::tex(&t, rect, WHITE),
+            None => draw_rectangle(rect.x, rect.y, rect.w, rect.h, chrome::SILVER),
+        }
+    }
+    let knob_h = chrome::win("VSlider").map_or(w * 1.8, |t| w * t.height() / t.width()).min(track.h / 2.0);
+    let knob = Rect::new(track.x, track.y, w, knob_h);
+    match chrome::win("VSlider") {
+        Some(t) => chrome::tex(&t, knob, WHITE),
+        None => draw_rectangle(knob.x, knob.y, knob.w, knob.h, chrome::SILVER),
+    }
+    *first = 0;
+    false
+}
+
+thread_local! {
+    /// The scroll bar whose knob is being dragged (its rect) and the knob's grab point below
+    /// its top.
+    static SCROLL_DRAG: std::cell::Cell<Option<(Rect, f32)>> = const { std::cell::Cell::new(None) };
 }

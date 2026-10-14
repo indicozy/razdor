@@ -23,7 +23,7 @@ pub enum BarButton {
     Settings,
     Save,
     Load,
-    Journal,
+    Hero,
     Squad,
     Spells,
     Map,
@@ -33,7 +33,7 @@ impl BarButton {
     /// From the screen's left edge inwards, as the original's ids 1–4 (4d46e0): exit menu,
     /// options, load, and save next to the message box.
     const LEFT: [BarButton; 4] = [BarButton::Menu, BarButton::Settings, BarButton::Load, BarButton::Save];
-    const RIGHT: [BarButton; 4] = [BarButton::Journal, BarButton::Squad, BarButton::Spells, BarButton::Map];
+    const RIGHT: [BarButton; 4] = [BarButton::Hero, BarButton::Squad, BarButton::Spells, BarButton::Map];
 
     fn icon(self) -> usize {
         match self {
@@ -42,7 +42,7 @@ impl BarButton {
             // Crossed in the original's files: save (id 4) shows `icon_3`, load (id 3) `icon_4`.
             BarButton::Save => 3,
             BarButton::Load => 4,
-            BarButton::Journal => 5,
+            BarButton::Hero => 5,
             BarButton::Squad => 6,
             BarButton::Spells => 7,
             BarButton::Map => 8,
@@ -61,7 +61,7 @@ impl BarButton {
             BarButton::Settings => "cOptions",
             BarButton::Save => "cSave",
             BarButton::Load => "cLoad",
-            BarButton::Journal => "cHero",
+            BarButton::Hero => "cHero",
             BarButton::Squad => "cArmy",
             BarButton::Spells => "cMagic",
             BarButton::Map => "cMap",
@@ -76,7 +76,7 @@ impl BarButton {
             BarButton::Settings => tr("Sound settings"),
             BarButton::Save => tr("Save the game (F5: quick save)"),
             BarButton::Load => tr("Load a saved game (F9: quick load)"),
-            BarButton::Journal => tr("The hero's journal (J)"),
+            BarButton::Hero => tr("The hero's characteristics and inventory"),
             BarButton::Squad => tr("The hero and his army (A)"),
             BarButton::Spells => tr("The spell book (B)"),
             BarButton::Map => tr("Map of the scenario (M)"),
@@ -324,7 +324,7 @@ fn oval(b: BarButton, r: Rect, look: Look) -> bool {
             BarButton::Settings => tr("Opt"),
             BarButton::Save => tr("Save"),
             BarButton::Load => tr("Load"),
-            BarButton::Journal => tr("Quests"),
+            BarButton::Hero => tr("Hero"),
             BarButton::Squad => tr("Army"),
             BarButton::Spells => tr("Book"),
             BarButton::Map => tr("Map"),

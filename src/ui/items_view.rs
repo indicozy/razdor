@@ -746,19 +746,20 @@ pub fn squad(
         let label = if u.alive() { own("Dismiss", n_("Dismiss")) } else { own("Bury", n_("Bury")) };
         let label = label.as_str();
         let b = Rect::new(face.x + face.w + 12.0 * k, row.y + 14.0 * k, row.w - face.w - 24.0 * k, row.h - 28.0 * k);
-        // One confirmation step, as the original's confirm and cancel buttons.
+        // One confirmation step, as the original's confirm and cancel buttons; all three in its
+        // red (0x4dc118 makes them with 0x4dba90: Btn3 for Dismiss, Btn1 for the pair).
         let confirming = CONFIRM.with(|c| c.get()) == Some(sel);
         if !confirming {
-            if button(b.x, b.y, b.w, b.h, label, true) {
+            if red_button(b.x, b.y, b.w, b.h, label, true) {
                 CONFIRM.with(|c| c.set(Some(sel)));
             }
         } else {
             let half = (b.w - 6.0 * k) / 2.0;
-            if button(b.x, b.y, half, b.h, tr("Confirm"), true) {
+            if red_button(b.x, b.y, half, b.h, tr("Confirm"), true) {
                 CONFIRM.with(|c| c.set(None));
                 // It leaves when the effect over its card ends (0x4b11cc kind 2).
                 card_fx(2, sel, true);
-            } else if button(b.x + half + 6.0 * k, b.y, half, b.h, tr("Cancel"), true) {
+            } else if red_button(b.x + half + 6.0 * k, b.y, half, b.h, tr("Cancel"), true) {
                 CONFIRM.with(|c| c.set(None));
             }
         }
@@ -985,12 +986,321 @@ pub(super) fn class_wage(c: &Content, id: UnitId) -> i32 {
     if razdor::rules::content::HeroClass::of_unit(id).is_some() || undead { 0 } else { c.wage(id) }
 }
 
+/// The hero window's state (side window 5, built by 0x4d8638): the pack's scroll, the
+/// diary's picked entry (0x6668bf) and how far its list and its entry are scrolled.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HeroView {
+    pub scroll: usize,
+    pub pick: usize,
+    pub list_scroll: usize,
+    pub text_scroll: usize,
+}
+
+/// The hero window's right side is laid out in the original's pixels (window-relative, x from
+/// 264, y from 28) scaled by this: the right part of Razdor's window (586 px) over the
+/// original's (632 px).
+const HERO_S: f32 = 586.0 / 632.0;
+
+/// The rows of the hero window's diary: the quests under way on this map, oldest first, as
+/// the original's list (0x68e500, a quest added by 0x49c170 as it is received and taken out
+/// by 0x49c2b8 when it is completed).
+fn diary_rows(game: &Game) -> Vec<razdor::rules::journal::Row> {
+    let mut rows = game.journal_rows(razdor::rules::journal::Tab::Active);
+    rows.reverse();
+    rows
+}
+
+/// The diary entry's lines (0x49c388): the quest's title (white, centred), an empty line,
+/// `[Hero] QuestFullDescript` (centred), the description (justified), an empty line,
+/// `[Hero] QuestGetTime` (centred) and the time since the quest was received (centred).
+/// Each with its font (4dbc26 loads them: the title in white Benguiat 0xae2498, the headings
+/// in SanSerif_Bold less 20, 90, 180, an orange, 0xae24f4, the text in SanSerif less 25, 25,
+/// 125, a yellow, 0xae24c0), its colour and size.
+fn diary_entry(row: &razdor::rules::journal::Row, room: f32, title: f32, body: f32) -> Vec<DiaryLine> {
+    use super::dt_font::{with_face, Face};
+    use razdor::dt::markup::{Align, Ink};
+    let own = |key: &str, ours: &'static str| chrome::ui_text("Hero", key).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr(ours).to_string());
+    let rows = |s: &str, ink: Color, align: Align, face: Face, size: f32| -> Vec<DiaryLine> {
+        with_face(face, || {
+            let width = |c: char| measure(c.encode_utf8(&mut [0; 4]), size).width;
+            razdor::dt::markup::wrap(s, room, width).into_iter().map(|r| DiaryLine { row: MarkupRow { text: r.text, ink: Ink::Plain, align, last: r.last }, face, color: ink, size }).collect()
+        })
+    };
+    let (white, orange, yellow) = (Color::from_rgba(255, 255, 255, 255), Color::from_rgba(235, 165, 75, 255), Color::from_rgba(230, 230, 130, 255));
+    let blank = || DiaryLine { row: MarkupRow { text: String::new(), ink: Ink::Plain, align: Align::Centre, last: true }, face: Face::Body, color: yellow, size: body };
+    let mut out = rows(&row.title, white, Align::Centre, Face::Title, title);
+    out.push(blank());
+    out.extend(rows(&own("QuestFullDescript", n_("Description:")), orange, Align::Centre, Face::Bold, body));
+    for line in row.text.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        out.extend(rows(&format!("{}{line}", razdor::dt::markup::INDENT), yellow, Align::Justify, Face::Body, body));
+    }
+    out.push(blank());
+    out.extend(rows(&own("QuestGetTime", n_("Time since the quest was received:")), orange, Align::Centre, Face::Bold, body));
+    let since = row.elapsed.map_or_else(|| tr("unknown").to_string(), |m| razdor::rules::clock::duration_label(m as f64));
+    out.extend(rows(&since, yellow, Align::Centre, Face::Body, body));
+    out
+}
+
+/// A line of the diary entry with its font, colour and size.
+struct DiaryLine {
+    row: MarkupRow,
+    face: super::dt_font::Face,
+    color: Color,
+    size: f32,
+}
+
+/// The resource values of the hero window (4d1814): gold, mana, "+ income", "- wages", each
+/// zero written "0".
+fn hero_resources(gold: i32, mana: i32, income: i32, wages: i32) -> [String; 4] {
+    [
+        gold.to_string(),
+        mana.to_string(),
+        if income == 0 { "0".to_string() } else { format!("+ {income}") },
+        if wages == 0 { "0".to_string() } else { format!("- {wages}") },
+    ]
+}
+
+/// The hero window («Личные характеристики и инвентарь Героя»), the bottom bar's flag (side
+/// window 5; built by 0x4d8638, its fixed parts drawn by 0x4d1814): the hero's panel on the
+/// left as in the army window; the pack's 5×5 squares with its scroll bar; the item
+/// description box (`ItemDescript`); the four resource lines (4d1814: `ResFrame` with its
+/// colours shifted by 0, −15, −22; `res0`–`res3` with their own alpha (0x4dcfd1); the label, line
+/// 0–3 of `[Hero]`, and 20 px right of and below it the value); and the diary: its list
+/// (`QuestList`, the quests under way) over the picked one's entry (`QuestDescript`,
+/// 0x49c388). Razdor's journal (all quests, rumours and messages of the campaign) stays on J.
+pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, message: &mut Option<String>) -> Option<Screen> {
+    use razdor::dt::markup::Ink;
+    use super::dt_font::{sheet_size, with_face, Face};
+    let bar = super::world_view::window_backdrop(game, assets, Some(super::game_bar::BarButton::Hero));
+    let c = game.content.clone();
+    let k = chrome::k();
+    let ru = razdor::i18n::lang() == razdor::i18n::Lang::Ru;
+    let own = |key: &str, ours: &'static str| chrome::ui_text("Hero", key).filter(|_| ru).unwrap_or_else(|| tr(ours).to_string());
+    let (sw, sh) = (screen_width(), screen_height());
+    let (ww, wh) = ((836.0 * k).round(), (600.0 * k).round());
+    let win = Rect::new(((sw - ww) / 2.0).round(), ((sh - chrome::bar_height() - wh) / 2.0).max(2.0).round(), ww, wh);
+    let title = own("Title", n_("The hero's characteristics and inventory"));
+    let (_, close) = chrome::window(win, &title, chrome::Skin::Marble, true);
+    // The original's right side, window-relative.
+    let s = HERO_S * k;
+    let o = |x: f32, y: f32, w: f32, h: f32| Rect::new(win.x + 248.0 * k + (x - 264.0) * s, win.y + 28.0 * k + (y - 28.0) * s, w * s, h * s);
+    let mut hover = None;
+
+    // The hero's panel, as the army window paints him (0x492f24).
+    let u = game.squad[0].clone();
+    let stats = u.stats(&c);
+    let hero = razdor::rules::content::HeroClass::ALL.into_iter().find(|h| h.unit() == u.def);
+    let label = game.squad_label(0);
+    let sheet = unit_sheet::Sheet {
+        kind: u.def,
+        name: &label,
+        named: false,
+        level: u.level,
+        xp: u.xp,
+        need: u.xp_to_next(&c),
+        hp: u.hp,
+        now: &stats,
+        start: &stats,
+        power: stats[Stat::MagicPower],
+        wage: game.wage(0),
+        items: u.items,
+        back_row: u.slot.row == razdor::rules::formation::Row::Back,
+        unpaid: u.unpaid,
+        building: 0,
+        hero,
+        status: if u.potions.is_empty() { Vec::new() } else { vec![(razdor::trf!("Until the next battle: {names}", names = u.potions.iter().map(|&p| c.item(p).name.as_str()).collect::<Vec<_>>().join(", ")), chrome::BLUE_TEXT)] },
+        battle: false,
+    };
+    let sheet_rect = Rect::new(win.x + 2.0 * k, win.y + 27.0 * k, 244.0 * k, 570.0 * k);
+    let locked = |slot: usize| u.alive() && slot < u.personal as usize;
+    let mut held = HELD.with(|h| h.get());
+    if let Some(slot) = unit_sheet::draw(assets, &c, sheet_rect, &sheet, true, &mut hover).filter(|&s| !locked(s)) {
+        if let Some(item) = u.items[slot] {
+            cue(Cue::Item(c.item(item).kind));
+            held = Some(Held { from: From::Worn(0, slot), item, at: pointer().into(), moved: false });
+        }
+    }
+    let slot_under = {
+        let (mx, my) = pointer();
+        unit_sheet::slot_rects(sheet_rect).iter().position(|r| r.contains(vec2(mx, my))).filter(|&s| !locked(s))
+    };
+    draw_line(win.x + 247.0 * k, win.y + 27.0 * k, win.x + 247.0 * k, win.y + win.h - 2.0, 1.5 * k, chrome::SILVER);
+
+    // The pack: 25 squares of 55 px from (274, 37), the scroll bar right of them.
+    let pack = o(274.0, 37.0, 275.0 + 18.0 / HERO_S, 275.0);
+    if let Some(i) = pack_view(game, assets, pack, &mut view.scroll, &mut hover) {
+        cue(Cue::Item(c.item(game.pack[i]).kind));
+        held = Some(Held { from: From::Pack(i), item: game.pack[i], at: pointer().into(), moved: false });
+    }
+    if let Some(h) = held.as_mut() {
+        h.moved |= Vec2::from(pointer()).distance(h.at) > DRAG_START;
+        if h.moved {
+            hover = Some(h.item);
+        }
+    }
+
+    // A box's title over it, as 0x48e750 draws them: centred, in Benguiat.
+    let head = sheet_size(Face::Title, s);
+    let heading = |key: &str, ours: &'static str, r: Rect| {
+        let t = own(key, ours);
+        with_face(Face::Title, || chrome::shadow_centered(&t, r.x + r.w / 2.0, r.y - 7.0 * s, head, ACCENT));
+    };
+
+    // The item description box (310 × 164 at 58): the item under the pointer.
+    let desc = o(576.0, 58.0, 310.0, 164.0);
+    heading("ItemDescript", n_("Item description"), desc);
+    match hover.filter(|_| held.is_none_or(|h| !h.moved)) {
+        Some(item) => super::building_view::item_description(game, assets, item, desc.x, desc.y, desc.w, desc.h),
+        None => chrome::text_box(desc),
+    }
+
+    // The four resource lines, 78 px apart from 325.
+    let values = hero_resources(game.gold, game.mana, game.daily_income(), game.daily_wages());
+    let ours = [n_("Gold reserve"), n_("Mana reserve"), n_("Income from castles"), n_("Army upkeep")];
+    let frame = chrome::win_scaled("ResFrame", [1024; 3], [0, -15, -22]);
+    for (i, value) in values.iter().enumerate() {
+        let y = 325.0 + 78.0 * i as f32;
+        if let Some(t) = &frame {
+            chrome::tex(t, o(271.0, y, t.width(), t.height()), WHITE);
+        }
+        if let Some(t) = chrome::win(&format!("res{i}")) {
+            chrome::tex(&t, o(280.0, y + 4.0, t.width(), t.height()), WHITE);
+        }
+        let name = chrome::ui_line("Hero", i).filter(|_| ru).unwrap_or_else(|| tr(ours[i]).to_string());
+        let at = o(358.0, y + 17.0, 0.0, 0.0);
+        with_face(Face::Title, || {
+            chrome::shadow_text(&name, at.x, at.y + head * 0.8, head, ink_color(Ink::Plain));
+            chrome::shadow_text(value, at.x + 20.0 * s, at.y + 20.0 * s + head * 0.8, head, ink_color(Ink::Star));
+        });
+    }
+
+    // The diary: the list of the quests under way over the picked one's entry.
+    let rows = diary_rows(game);
+    if view.pick >= rows.len() {
+        view.pick = 0;
+    }
+    let list = o(576.0, 252.0, 292.0, 128.0);
+    let list_bar = o(868.0, 252.0, 18.0, 128.0);
+    let list_box = Rect::new(list.x, list.y, list_bar.x + list_bar.w - list.x, list.h);
+    heading("QuestList", n_("Diary contents"), list_box);
+    chrome::text_box(list_box);
+    let row_h = (head * 1.25).round();
+    let fits = ((list.h - 8.0 * s) / row_h).floor().max(1.0) as usize;
+    if mouse_in(list.x, list.y, list.w, list.h) {
+        let w = wheel();
+        if w < 0.0 && view.list_scroll + fits < rows.len() {
+            view.list_scroll += 1;
+        } else if w > 0.0 {
+            view.list_scroll = view.list_scroll.saturating_sub(1);
+        }
+    }
+    scrollbar_always(list_bar, &mut view.list_scroll, fits, rows.len());
+    for (n, row) in rows.iter().enumerate().skip(view.list_scroll).take(fits) {
+        let ry = list.y + 4.0 * s + (n - view.list_scroll) as f32 * row_h;
+        if n == view.pick {
+            // The picked row lit (the list's highlight, 0x262626 added).
+            draw_rectangle(list.x + 2.0 * s, ry, list.w - 4.0 * s, row_h, Color::new(0.15, 0.15, 0.15, 0.6));
+        }
+        let mut title = row.title.clone();
+        while measure(&title, head).width > list.w - 12.0 * s && title.chars().count() > 3 {
+            title.pop();
+        }
+        with_face(Face::Title, || chrome::shadow_centered(&title, list.x + list.w / 2.0, ry + row_h * 0.78, head, ink_color(Ink::Plain)));
+        if mouse_in(list.x, ry, list.w, row_h) && clicked() && view.pick != n {
+            view.pick = n;
+            view.text_scroll = 0;
+        }
+    }
+    let entry = o(576.0, 410.0, 292.0, 220.0);
+    let entry_bar = o(868.0, 410.0, 18.0, 220.0);
+    let entry_box = Rect::new(entry.x, entry.y, entry_bar.x + entry_bar.w - entry.x, entry.h);
+    heading("QuestDescript", n_("Diary entry"), entry_box);
+    chrome::text_box(entry_box);
+    let body = sheet_size(Face::Body, s);
+    let room = entry.w - 16.0 * s;
+    let lines = rows.get(view.pick).map_or_else(Vec::new, |row| diary_entry(row, room, head, body));
+    let line_h = (body * 1.15).round();
+    let shown = ((entry.h - 12.0 * s) / line_h).floor().max(1.0) as usize;
+    if mouse_in(entry.x, entry.y, entry.w, entry.h) {
+        let w = wheel();
+        if w < 0.0 && view.text_scroll + shown < lines.len() {
+            view.text_scroll += 1;
+        } else if w > 0.0 {
+            view.text_scroll = view.text_scroll.saturating_sub(1);
+        }
+    }
+    scrollbar_always(entry_bar, &mut view.text_scroll, shown, lines.len());
+    for (n, line) in lines.iter().skip(view.text_scroll).take(shown).enumerate() {
+        let y = entry.y + 6.0 * s + n as f32 * line_h + body * 0.85;
+        draw_markup_row_face(&line.row, entry.x + 8.0 * s, y, room, line.size, line.face, Some(line.color));
+    }
+
+    // The held item follows the pointer; let go, it goes to a worn slot, the panel or the pack.
+    if let Some(h) = held {
+        let (mx, my) = pointer();
+        if h.moved {
+            let sz = 48.0 * k;
+            assets.draw_item(h.item, mx - sz / 2.0, my - sz / 2.0, sz);
+            super::cursor::set(super::cursor::Shape::Hidden);
+        }
+        if is_mouse_button_down(MouseButton::Left) {
+            HELD.with(|c| c.set(Some(h)));
+        } else {
+            HELD.with(|c| c.set(None));
+            let on_sheet = h.moved && sheet_rect.contains(vec2(mx, my));
+            let over_pack = pack.contains(vec2(mx, my));
+            let worn = |game: &mut Game, done: Result<(), EquipError>| {
+                if done.is_ok() {
+                    cue(Cue::Item(game.content.item(h.item).kind));
+                }
+                done.err().map(equip_error)
+            };
+            let said = match (h.from, h.moved, slot_under.filter(|_| on_sheet)) {
+                (From::Pack(i), false, _) => use_pack_item(game, 0, i),
+                (From::Worn(_, slot), false, _) => game.unequip(0, slot).err().map(equip_error),
+                (From::Pack(i), true, Some(slot)) => {
+                    let done = game.equip_at(0, i, Some(slot));
+                    worn(game, done)
+                }
+                (From::Worn(_, from), true, Some(slot)) => {
+                    let done = game.move_worn(0, from, 0, slot);
+                    worn(game, done)
+                }
+                (From::Pack(i), true, None) if on_sheet => use_pack_item(game, 0, i),
+                (From::Worn(_, slot), true, None) if over_pack => game.unequip(0, slot).err().map(equip_error),
+                _ => None,
+            };
+            if said.is_some() {
+                *message = said;
+            }
+        }
+    }
+    if close || key(KeyCode::Escape) {
+        HELD.with(|c| c.set(None));
+        *message = None;
+        return Some(Screen::WorldMap);
+    }
+    if bar.is_some() {
+        HELD.with(|c| c.set(None));
+        *message = None;
+    }
+    bar
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{class_wage, promo_ease, promo_look, promo_ms, ArmySel, Content, GridPress, UnitId};
+    use super::{class_wage, hero_resources, promo_ease, promo_look, promo_ms, ArmySel, Content, GridPress, UnitId};
 
     fn sel(selected: Option<usize>, shown: Option<usize>) -> ArmySel {
         ArmySel { selected, shown }
+    }
+
+    /// The hero window's resource values as 4d1814 writes them: gold and mana as they are,
+    /// income "+ n", upkeep "- n", a zero "0".
+    #[test]
+    fn the_hero_window_writes_its_resources_as_the_original() {
+        assert_eq!(hero_resources(450, 100, 120, 52), ["450", "100", "+ 120", "- 52"].map(String::from));
+        assert_eq!(hero_resources(0, 0, 0, 0), ["0", "0", "0", "0"].map(String::from));
     }
 
     /// A promotion portrait's class card carries the type's recruit wage, as the original's

@@ -247,7 +247,7 @@ fn spell_layer(name: &str, minus: [i32; 3]) -> Option<Texture2D> {
 
 /// Windows art `name` with its channels scaled and shifted as loaded ([`scale_channels`]),
 /// cached by both.
-fn win_scaled(name: &str, k: [i32; 3], offset: [i32; 3]) -> Option<Texture2D> {
+pub fn win_scaled(name: &str, k: [i32; 3], offset: [i32; 3]) -> Option<Texture2D> {
     let rel = format!("Windows/{name}.lit");
     let key = format!("{rel}#{k:?}{offset:?}");
     CHROME.with(|c| {

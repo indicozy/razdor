@@ -265,6 +265,7 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             Screen::Squad { selected, scroll: 0, back: None }
         }
         "journal" => Screen::Journal(JournalView::default()),
+        "hero" => Screen::Hero(Default::default()),
         "spells" => {
             // A book full of the install's spells, to see their pictures.
             game.spells = game.content.spells.iter().filter_map(|s| u8::try_from(s.id).ok()).take(15).collect();

@@ -167,7 +167,7 @@ fn empty_note(tab: Tab) -> &'static str {
 /// list on the left, the selected entry's date and full text on the right. Wheel or arrows
 /// scroll; Left / Right change the tab; J, Esc or Back close it.
 pub fn journal(game: &Game, assets: &super::assets::Assets, view: &mut JournalView) -> Option<Screen> {
-    let bar_pick = world_view::window_backdrop(game, assets, Some(super::game_bar::BarButton::Journal));
+    let bar_pick = world_view::window_backdrop(game, assets, None);
     let (sw, sh) = (screen_width(), screen_height());
     let bar = super::chrome::bar_height();
     let (w, h) = (1000.0f32.min(sw - 20.0), 640.0f32.min(sh - bar - 8.0));

@@ -132,11 +132,19 @@ pub fn frame(
         let (c, row) = (cell % COLS, cell / COLS);
         let cr = Rect::new(inner.x + gap + c as f32 * (cw + gap), inner.y + gap + row as f32 * ch, cw, ch - gap);
         let spell = book.get(cell);
-        // The cell: brown parchment, dark when empty.
-        chrome::surface(cr, chrome::Skin::Brown);
-        if spell.is_none() {
-            // Olive and darker than a learnt spell's cell, as in the video.
-            chrome::multiply(|| draw_rectangle(cr.x, cr.y, cr.w, cr.h, Color::new(0.62, 0.78, 0.5, 1.0)));
+        // The cell: brown parchment; an empty one is the original's (0x4dc118 makes it,
+        // 0x49bde4 draws it): `Win-paper` from (20, 20) less (180, 140, 113), an olive, inside
+        // a 1 px steel line (0x48d1d4).
+        match (spell, chrome::win_scaled("Win-paper", [1024; 3], [-180, -140, -113])) {
+            (None, Some(paper)) => {
+                chrome::tex_src(&paper, Rect::new(20.0, 20.0, 286.0, 112.0), cr, WHITE);
+                draw_rectangle_lines(cr.x, cr.y, cr.w, cr.h, k.max(1.0), chrome::SILVER);
+            }
+            (None, None) => {
+                chrome::text_box(cr);
+                chrome::multiply(|| draw_rectangle(cr.x, cr.y, cr.w, cr.h, Color::new(0.62, 0.78, 0.5, 1.0)));
+            }
+            (Some(_), _) => chrome::text_box(cr),
         }
         let hover = !input_blocked() && cr.contains(crate::ui::widgets::pointer().into());
         let edge = if spell.is_some() && (*selected == cell || hover) { Color::new(1.0, 0.85, 0.5, 1.0) } else { Color::new(0.55, 0.5, 0.4, 1.0) };
@@ -145,19 +153,29 @@ pub fn frame(
         let tx = icon.x + icon.w + (cr.x + cr.w - icon.x - icon.w) / 2.0;
         let room = cr.x + cr.w - icon.x - icon.w - 8.0 * k;
         let Some(s) = spell else {
-            // The knot stamped in black, and the words pressed into the leather.
-            if let Some(t) = chrome::win_fx("MSign", chrome::Fx::Shade) {
-                chrome::tex(&t, icon, WHITE);
+            // The knot stamped in black: `MSign` less 192 taken off the paper (0x4dc118: 4768f8
+            // then 476790 in mode 1 at (6, 6)).
+            match chrome::win_scaled("MSign", [1024; 3], [-192; 3]) {
+                Some(t) => chrome::subtractive(|| chrome::tex(&t, Rect::new(cr.x + 6.0 * k, cr.y + 6.0 * k, icon.w, icon.h), WHITE)),
+                None => {
+                    if let Some(t) = chrome::win_fx("MSign", chrome::Fx::Shade) {
+                        chrome::tex(&t, icon, WHITE);
+                    }
+                }
             }
             let none = own("NoSpell", n_("No\nspells\nlearnt"));
             let lines: Vec<&str> = none.split('\n').collect();
             let size = 15.0 * k;
             let top = cr.y + cr.h / 2.0 - (lines.len() as f32 - 1.0) * 8.0 * k + size * 0.36;
+            // Pressed into the paper as the original's (0x49bde4): white Benguiat taken off the
+            // paper (the text box's mode 5, which leaves black) 2 px down and right and 1 px up
+            // and left, then its font 0xae24b4 (Benguiat less 125, 140, 170) drawn over them.
             super::dt_font::with_face(super::dt_font::Face::Title, || {
                 for (i, l) in lines.iter().enumerate() {
                     let y = top + i as f32 * 16.0 * k;
-                    text_centered(l, tx + 1.0 * k, y + 1.0 * k, size, Color::new(0.55, 0.42, 0.2, 0.7));
-                    text_centered(l, tx, y, size, Color::new(0.08, 0.05, 0.02, 1.0));
+                    text_centered(l, tx + 2.0 * k, y + 2.0 * k, size, BLACK);
+                    text_centered(l, tx - 1.0 * k, y - 1.0 * k, size, BLACK);
+                    text_centered(l, tx, y, size, Color::from_rgba(130, 115, 85, 255));
                 }
             });
             continue;
