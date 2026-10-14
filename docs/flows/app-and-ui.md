@@ -624,6 +624,17 @@ Input goes through `src/ui/input.rs` (mouse/keys with gamepad emulation from
 The map's F3 debug overlay (Razdor's, `world_view::draw_debug`) also tints every visible cell
 (`world_view::draw_walkable`, `walk_tint`): on foot green for passable (brighter on roads), red
 for impassable; aboard the ship blue for sailable, red otherwise, all faint so the map shows through.
+### Maps and mods (the hub; a Razdor extra, mock)
+
+`main_menu` link → `Screen::Hub(HubView)` (`ui/hub_view.rs`) → `razdor::hub` on a thread:
+`Hub::catalog()` reads `index.json` from `RAZDOR_HUB` (an `https://` address or a folder; unset:
+the mock hub `hub::mock::build` writes under the hub folder), `Hub::install()` installs the
+entry after the mods it needs (`plan_install`), checking each file's size and SHA-256, into
+`RAZDOR_HUB_DIR` (else `razdor/hub` in the data folder): maps to `maps/`, mods to
+`mods/<id>/`, the record in `installed.json`; `Hub::remove()` refuses a mod still needed.
+Leaving the window after a change re-reads the hub's maps into `App::scenarios`
+(`hub_entries`), after the install's, so they show in the new-game list. Mods are only recorded:
+the game does not switch to a mod's data yet. Snapshot scene: `hub[:<tab>[:<id>]]`.
 
 ## Text
 

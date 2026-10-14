@@ -18,6 +18,7 @@ pub mod gamepad;
 pub mod gestures;
 pub mod hall_ink;
 pub mod hotkeys;
+pub mod hub_view;
 pub mod input;
 pub mod item_filter;
 pub mod item_pull;
@@ -124,6 +125,24 @@ pub enum Screen {
     CustomSetup,
     /// A round of a custom battle.
     CustomBattle(Box<BattleView>),
+    /// "Maps and mods", the hub's window over the main menu (`ui::hub_view`).
+    Hub(Box<hub_view::HubView>),
+}
+
+fn load_entry(m: &razdor::dt::install::MapEntry) -> Option<ScenarioEntry> {
+    match m.load() {
+        Ok(scenario) => Some(ScenarioEntry { file: m.name.clone(), path: m.path.clone(), scenario }),
+        Err(e) => {
+            razdor::diag!("{}: {e}", m.name);
+            None
+        }
+    }
+}
+
+/// The maps installed from the hub (`razdor::hub`), after the install's in the new-game list.
+fn hub_entries() -> Vec<ScenarioEntry> {
+    let Some(dir) = razdor::hub::local_dir() else { return Vec::new() };
+    razdor::editor::files::list_dir(&razdor::hub::maps_dir(&dir)).iter().filter_map(load_entry).collect()
 }
 
 /// A scenario of the player's install, loaded for the select screen.
@@ -233,19 +252,15 @@ fn dt_content_of(assets: &Assets, impossible: Option<bool>) -> Option<Arc<Conten
     })
 }
 
-/// The install's maps, each read once (a map that fails to load is logged and left out).
+/// The install's maps, each read once (a map that fails to load is logged and left out), then the
+/// hub's maps.
 fn scenarios_of(assets: &Assets) -> Vec<ScenarioEntry> {
     assets
         .dt
         .iter()
         .flat_map(|d| d.install.maps.iter())
-        .filter_map(|m| match m.load() {
-            Ok(scenario) => Some(ScenarioEntry { file: m.name.clone(), path: m.path.clone(), scenario }),
-            Err(e) => {
-                razdor::diag!("{}: {e}", m.name);
-                None
-            }
-        })
+        .filter_map(load_entry)
+        .chain(hub_entries())
         .collect()
 }
 
@@ -290,6 +305,14 @@ impl App {
         };
         app.follow_row_setting();
         app
+    }
+
+    /// The new-game list after the hub installed or removed maps: the install's maps, then
+    /// the hub's again.
+    fn reload_hub_maps(&mut self) {
+        let dir = razdor::hub::local_dir().map(|d| razdor::hub::maps_dir(&d));
+        self.scenarios.retain(|e| dir.as_ref().is_none_or(|d| !e.path.starts_with(d)));
+        self.scenarios.extend(hub_entries());
     }
 
     /// Opens the map editor (the title screen's button and `--editor`).
@@ -525,7 +548,7 @@ impl App {
     fn mood(&self) -> Mood {
         match &self.screen {
             Screen::Authors(_) => Mood::Credits,
-            Screen::MainMenu | Screen::Options | Screen::ScenarioSelect | Screen::TutorialOffer | Screen::ClassSelect { .. } | Screen::Editor | Screen::CustomSetup => Mood::Menu,
+            Screen::MainMenu | Screen::Options | Screen::ScenarioSelect | Screen::TutorialOffer | Screen::ClassSelect { .. } | Screen::Editor | Screen::CustomSetup | Screen::Hub(_) => Mood::Menu,
             Screen::CustomBattle(_) => Mood::Battle { garrison: false },
             Screen::Load(v) if v.back == saves::Back::Title || self.game.is_none() => Mood::Menu,
             Screen::Battle(_) => Mood::Battle { garrison: matches!(self.game.as_ref().and_then(|g| g.foe.as_ref()), Some(Foe::Garrison(_))) },
@@ -654,7 +677,7 @@ impl App {
     fn place_of(screen: &Screen) -> hotkeys::Place {
         use hotkeys::Place;
         match screen {
-            Screen::MainMenu | Screen::Authors(_) | Screen::Options | Screen::ScenarioSelect | Screen::TutorialOffer => Place::Title,
+            Screen::MainMenu | Screen::Authors(_) | Screen::Options | Screen::ScenarioSelect | Screen::TutorialOffer | Screen::Hub(_) => Place::Title,
             Screen::ClassSelect { .. } => Place::ClassSelect,
             Screen::WorldMap => Place::WorldMap,
             Screen::Building(_) => Place::Building,
@@ -825,6 +848,7 @@ impl App {
             Screen::Editor => "editor",
             Screen::CustomSetup => "custom battle setup",
             Screen::CustomBattle(_) => "custom battle",
+            Screen::Hub(_) => "hub",
         }
     }
 
@@ -1108,6 +1132,7 @@ impl App {
                     self.custom.get_or_insert_with(|| custom_battle::SetupView::new(&custom_content));
                     Some(Screen::CustomSetup)
                 }
+                Some(main_menu::Pick::Hub) => Some(Screen::Hub(Box::default())),
                 Some(main_menu::Pick::Exit) => {
                     self.quit = true;
                     None
@@ -1188,6 +1213,16 @@ impl App {
                     }
                     Some(custom_battle::Pick::Back) => Some(Screen::MainMenu),
                     None => None,
+                }
+            }
+            (Screen::Hub(view), _) => {
+                if hub_view::frame(view) {
+                    if view.changed {
+                        self.reload_hub_maps();
+                    }
+                    Some(Screen::MainMenu)
+                } else {
+                    None
                 }
             }
             (Screen::CustomBattle(view), _) => {

@@ -7,7 +7,7 @@
 //! `title`, `fonts` (sample lines in many scripts), `update` (a made-up release on offer), `authors[:<seconds>]`, `options[:advanced]`, `scenarios[:<map>]`, `import-notice` (the scenario list with «Добавить карту…»'s notice), `tutorial`, `load[:manual|auto[:<row>]]`, `editor[:<map>[:<text to find>]]`, `classes:<map>`, `map:<map>[:x,y]`, `minimap:<map>`, `clash:<map>` (the first two armies fight on the explored map), `walk:<map>:dx,dy` (the
 //! hero sets off that many cells away), `building:<map>:<n>`
 //! (the hero in the n-th building; `:barracks`, `:garrison`, `:market`, `:sanctuary` open that tab; `:store` makes it his with loot and opens its store; `:market-pack` the market's pack list), `army:<map>[:<n>[:<unit id>[:<level>]]]` (squad member n selected, made that unit at that level), `journal:<map>` / `hero:<map>[:<tab>]`, `spells:<map>` (`spells-pages:<map>`: 20 spells, page 2 open),
-//! `menu:<map>`, `defeat:<map>` (the lost battle's report), `event:<map>:<n>` (the map's event n's window; `RAZDOR_SCENE_LOST=<id>,…` adds its lost-items row; `RAZDOR_SCENE_JOINED=<id>,…` and `RAZDOR_SCENE_LEFT=<id>,…` its units rows),`learnt:<map>[:<id>,…]` (the event window with new spells, the hero with no mana), `report:<map>[:<gold>]` (the noon report), `settings:<map>[:advanced|keys]` (`keys`: Razdor's keys window over the advanced settings), `battle:<map>:<n>` (against the n-th army), `custom` (the custom battle
+//! `menu:<map>`, `defeat:<map>` (the lost battle's report), `event:<map>:<n>` (the map's event n's window; `RAZDOR_SCENE_LOST=<id>,…` adds its lost-items row; `RAZDOR_SCENE_JOINED=<id>,…` and `RAZDOR_SCENE_LEFT=<id>,…` its units rows),`learnt:<map>[:<id>,…]` (the event window with new spells, the hero with no mana), `report:<map>[:<gold>]` (the noon report), `settings:<map>[:advanced|keys]` (`keys`: Razdor's keys window over the advanced settings), `battle:<map>:<n>` (against the n-th army), `hub[:<tab>[:<id>]]` ("Maps and mods"), `custom` (the custom battle
 //! setup), `custom-battle` (its first round; `custom-battle:watch` watches the AI play it). `RAZDOR_SCENE_DEBUG=1` turns the map's debug overlay (F3) on; `RAZDOR_SCENE_SHOW=x,y,r` shows
 //! a place as a lantern event does; `RAZDOR_SCENE_CONSOLE=help;gold 100` opens the cheat
 //! console after those commands, `RAZDOR_SCENE_CONSOLE_LINE=go` opens it with that line typed (the
@@ -460,6 +460,14 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                 let path = app.scenarios.iter().find(|e| e.file == map).map(|e| e.path.clone()).ok_or_else(|| format!("no map {map} in the install"))?;
                 ed.open_for_snapshot(path, parts.next());
             }
+            return Ok(());
+        }
+        // `hub[:<tab 0-3>[:<entry id>]]`: "Maps and mods" on that tab with that entry picked.
+        "hub" => {
+            let mut view = super::hub_view::HubView::new();
+            let tab = parts.next().and_then(|t| t.parse().ok()).unwrap_or(0);
+            view.stage(tab, parts.next());
+            app.screen = Screen::Hub(Box::new(view));
             return Ok(());
         }
         "custom" => {

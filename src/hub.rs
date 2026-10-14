@@ -446,6 +446,7 @@ pub mod mock {
         }
 
         /// A mod: a manifest only (a mock mod carries no game data).
+        #[allow(clippy::too_many_arguments)]
         fn a_mod(&mut self, id: &str, title: (&str, &str), author: &str, version: &str, about: (&str, &str), requires: &[&str], added: &str) -> std::io::Result<()> {
             let manifest = serde_json::json!({ "id": id, "name": title.0, "version": version, "mock": true });
             let bytes = serde_json::to_vec_pretty(&manifest).expect("json");

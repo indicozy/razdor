@@ -30,6 +30,8 @@ pub enum Pick {
     Editor,
     /// Razdor's custom battle (`ui::custom_battle`).
     Custom,
+    /// Razdor's "Maps and mods" (`ui::hub_view`).
+    Hub,
 }
 
 /// The five buttons, top to bottom, with the row of `SMText_RUS` holding their word.
@@ -544,12 +546,17 @@ fn corner_links(k: f32) -> Option<Pick> {
         pick = Some(Pick::Editor);
     }
     let x = 16.0 * k + measure(editor, 18.0 * k).width + 28.0 * k;
-    if link(tr("Custom battle"), x, y, false) {
+    let custom = tr("Custom battle");
+    if link(custom, x, y, false) {
         pick = Some(Pick::Custom);
+    }
+    let x = x + measure(custom, 18.0 * k).width + 28.0 * k;
+    if link(tr("Maps and mods"), x, y, false) {
+        pick = Some(Pick::Hub);
     }
     // The players' Discord (the owner's wish): the invite of the site, in the browser; on phones
     // too (`open_link` hands it to the system's browser there).
-    let x = x + measure(tr("Custom battle"), 18.0 * k).width + 28.0 * k;
+    let x = x + measure(tr("Maps and mods"), 18.0 * k).width + 28.0 * k;
     if link("Discord", x, y, false) {
         open_link(DISCORD_INVITE);
     }
@@ -572,7 +579,7 @@ fn corner_links(k: f32) -> Option<Pick> {
 fn chip_links(m: &PortraitMenu, k: f32) -> Option<Pick> {
     let mut pick = None;
     let lang = super::language::current_label();
-    let labels: [&str; 4] = [tr("Map editor"), tr("Custom battle"), "Discord", &lang];
+    let labels: [&str; 5] = [tr("Map editor"), tr("Custom battle"), tr("Maps and mods"), "Discord", &lang];
     let size = 22.0 * k;
     let pad = 18.0 * k;
     let gap = 12.0 * k;
@@ -593,8 +600,9 @@ fn chip_links(m: &PortraitMenu, k: f32) -> Option<Pick> {
         match j {
             0 if pressed => pick = Some(Pick::Editor),
             1 if pressed => pick = Some(Pick::Custom),
-            2 if pressed => open_link(DISCORD_INVITE),
-            3 => (lang_chip, lang_pressed) = (r, pressed),
+            2 if pressed => pick = Some(Pick::Hub),
+            3 if pressed => open_link(DISCORD_INVITE),
+            4 => (lang_chip, lang_pressed) = (r, pressed),
             _ => {}
         }
         x += widths[j] + gap;
