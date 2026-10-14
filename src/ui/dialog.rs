@@ -189,30 +189,15 @@ impl Dialog {
 
     /// The window after a won battle: gold and mana taken, a captured building, the loot.
     pub fn victory(game: &Game, result: &BattleResult) -> Option<Dialog> {
-        let BattleResult::Victory { reward, mana, lost, loot, left_behind, level_ups, captured } = result else {
+        let BattleResult::Victory { reward, mana, loot, left_behind, captured, over, .. } = result else {
             return None;
         };
-        let mut d = Dialog::new(tr("Victory over the enemy!"));
+        let ini = |key: &str, ours: &'static str| {
+            super::chrome::ui_text("Event", key).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr(ours).to_string())
+        };
+        let mut d = Dialog::new(ini("VictoryTitle", razdor::i18n::n_("Victory over the enemy!")));
         d.chord = true;
-        if let Some(l) = captured {
-            let loc = &game.world.locations[*l];
-            d.text.push(trf!("You have taken {place}. It pays you {gold} gold a day from now on.", place = loc.name, gold = loc.gold_income));
-        }
-        if *reward > 0 {
-            d.text.push(tr("In this battle you won gold from the enemy.").into());
-        }
-        if *mana > 0 {
-            d.text.push(tr("Grateful for your mercy, the surrendered troops pray for you.").into());
-        }
-        if *lost > 0 {
-            d.text.push(trf!("{lost} of your units fell. Their bodies can be raised in a town or church.", lost));
-        }
-        for &(i, level) in level_ups {
-            d.text.push(trf!("{name} reaches level {level}.", name = game.squad[i].name(&game.content), level));
-        }
-        if d.text.is_empty() {
-            d.text.push(tr("The enemy is beaten.").into());
-        }
+        d.marked = Some(victory_markup(over, *reward, loot.len(), *mana, &ini));
         d.resources.push((Resource::Gold, trf!("Gold + {reward}", reward)));
         if *mana > 0 {
             d.resources.push((Resource::Mana, trf!("Mana + {mana}", mana)));
@@ -226,6 +211,44 @@ impl Dialog {
         }
         Some(d)
     }
+}
+
+/// The victory report's text as the original builds it (0x4a9d88), each line centred: a
+/// beaten garrison's line (`VictoryBuilding` / `VictoryRuines` with `#NAME2` its owner, the
+/// `NoName` ones without an owner) or `Victory` with `#NAME1` the army's name
+/// (`NoNameArmy` when it has none), in white (font 0xae2498, `*`); then, each after an empty
+/// row (`#\`), `VictoryEmpty` when nothing was won, else `VictoryGold`, `VictoryItems`
+/// (0xae24a0) and `VictoryMana` (0xae24a8, `|`).
+pub fn victory_markup(over: &razdor::rules::game::Beat, gold: i32, items: usize, mana: i32, ini: &dyn Fn(&str, &'static str) -> String) -> String {
+    use razdor::i18n::n_;
+    use razdor::rules::game::Beat;
+    let plain = |s: String| s.chars().filter(|c| !matches!(c, '*' | '|' | '@' | '^')).collect::<String>();
+    let head = match over {
+        Beat::Place { ruins: true, owner } if !owner.trim().is_empty() => ini("VictoryRuines", n_("You have plundered the ruins where #NAME2 ruled.")).replace("#NAME2", owner),
+        Beat::Place { ruins: true, .. } => ini("VictoryNoNameRuines", n_("You have plundered abandoned ruins. Now people can pass these grim walls without fear!")),
+        Beat::Place { owner, .. } if !owner.trim().is_empty() => ini("VictoryBuilding", n_("You have taken the fortress that belonged to #NAME2.")).replace("#NAME2", owner),
+        Beat::Place { .. } => ini("VictoryNoNameBuilding", n_("You have taken a fortress that had no owner. Now you will put it in order!")),
+        Beat::Army(name) => {
+            let name = if name.trim().is_empty() { ini("NoNameArmy", n_("Unknown army")) } else { name.clone() };
+            ini("Victory", n_("The battle is over, and your enemy, #NAME1, is beaten!")).replace("#NAME1", &name)
+        }
+        Beat::Nobody => ini("Victory", n_("The battle is over, and your enemy, #NAME1, is beaten!")).replace("#NAME1", &ini("NoNameArmy", n_("Unknown army"))),
+    };
+    let mut text = format!("^*{}", plain(head));
+    let mut add = |mark: &str, line: String| text.push_str(&format!("\r\n\r\n^{mark}{}", plain(line)));
+    if gold <= 0 && items == 0 && mana <= 0 {
+        add("", ini("VictoryEmpty", n_("This battle brought you nothing but new battle experience.")));
+    }
+    if gold > 0 {
+        add("", ini("VictoryGold", n_("In this battle you won gold from the enemy.")));
+    }
+    if items > 0 {
+        add("", ini("VictoryItems", n_("As trophies you get the items that belonged to your enemy.")));
+    }
+    if mana > 0 {
+        add("|", ini("VictoryMana", n_("Grateful for your mercy, the surrendered troops pray for you.")));
+    }
+    text
 }
 
 /// Small drawn icons for the resources (our own shapes).
@@ -372,7 +395,9 @@ pub fn draw(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Close> {
     // for spells).
     let items_h = if d.items.is_empty() { 0.0 } else { 87.0 * o };
     let spells_h = if d.spells.is_empty() { 0.0 } else { 82.0 * o };
-    let notice_h = if d.notice.is_some() { 36.0 * o } else { 0.0 };
+    // The quest line's row (0x4a8dbf: 16 above the line, 8 under it), measured against the
+    // original's opening event as 30 of Razdor's layout.
+    let notice_h = if d.notice.is_some() { 30.0 * o } else { 0.0 };
     let pic_h = if d.picture.is_some() && side.is_none() { 140.0 * o } else { 0.0 };
     let units_h = [&d.joined, &d.left].iter().filter(|u| !u.is_empty()).count() as f32 * 60.0 * o;
     let below = pic_h + res_h + items_h + spells_h + units_h + notice_h;
@@ -475,7 +500,8 @@ pub fn draw(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Close> {
         cy += items_h;
     }
     if let Some(n) = &d.notice {
-        chrome::shadow_centered(n, x + w / 2.0, cy + 18.0 * o, size, Color::new(0.3, 0.72, 1.0, 1.0));
+        // In the event text's own face and size, the original's cyan (90, 231, 255).
+        super::dt_font::with_face(super::dt_font::Face::Title, || chrome::shadow_centered(n, x + w / 2.0, cy + 18.0 * o, size, Color::new(0.35, 0.9, 1.0, 1.0)));
     }
     // The buttons, 95 × 36, 45 from the window's bottom.
     let (bw, bh) = (95.0 * o, 36.0 * o);
@@ -559,6 +585,22 @@ mod tests {
         assert_eq!(event_frame(None, 190.0, 0.0, EVENT_MAX_BOX), EventFrame { w: 634.0, h: 341.0, box_x: 19.0, box_w: 596.0, box_h: 222.0 });
         assert_eq!(event_frame(None, 900.0, 0.0, EVENT_MAX_BOX).box_h, 499.0);
         assert_eq!(event_frame(None, 900.0, 0.0, 300.0).box_h, 300.0);
+    }
+
+    /// The won battle's report (0x4a9d88): the beaten one's line in white, then each prize's
+    /// line after an empty row, mana in the blue tint; "nothing" only when nothing was won.
+    #[test]
+    fn the_victory_report_is_built_as_the_original_s() {
+        use razdor::rules::game::Beat;
+        let ini = |key: &str, _: &'static str| format!("<{key}{}>", if key == "Victory" { " #NAME1" } else if key.ends_with("Building") || key.ends_with("Ruines") { " #NAME2" } else { "" });
+        let army = victory_markup(&Beat::Army("Мостовые братья".into()), 160, 2, 0, &ini);
+        assert_eq!(army, "^*<Victory Мостовые братья>\r\n\r\n^<VictoryGold>\r\n\r\n^<VictoryItems>");
+        let nameless = victory_markup(&Beat::Army(String::new()), 0, 0, 0, &ini);
+        assert_eq!(nameless, "^*<Victory <NoNameArmy>>\r\n\r\n^<VictoryEmpty>");
+        let ruins = victory_markup(&Beat::Place { ruins: true, owner: "Колдун".into() }, 0, 0, 5, &ini);
+        assert_eq!(ruins, "^*<VictoryRuines Колдун>\r\n\r\n^|<VictoryMana>");
+        let fort = victory_markup(&Beat::Place { ruins: false, owner: " ".into() }, 50, 0, 0, &ini);
+        assert!(fort.starts_with("^*<VictoryNoNameBuilding #NAME2>"), "{fort}");
     }
 
     /// The lost battle's report (0x4aa76c): the defeat look, no event behind it (so its OK

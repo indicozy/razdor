@@ -109,8 +109,8 @@ pub fn show(game: &Game, o: &EventOutcome, message: &mut Option<String>, dialogs
     match *o {
         EventOutcome::Fired { event, message: true } => dialogs.push_back(event_dialog(game, event, false)),
         EventOutcome::Question(id) => dialogs.push_back(event_dialog(game, id, true)),
-        EventOutcome::QuestAdded(id) => notice(tr(QUEST_ADDED), Some(id), message, dialogs),
-        EventOutcome::QuestCompleted(_) => notice(tr(QUEST_COMPLETED), None, message, dialogs),
+        EventOutcome::QuestAdded(id) => notice(&quest_line("AddQuest", QUEST_ADDED), Some(id), message, dialogs),
+        EventOutcome::QuestCompleted(_) => notice(&quest_line("DelQuest", QUEST_COMPLETED), None, message, dialogs),
         EventOutcome::LoopGuard => razdor::diag!("scenario events: loop guard reached"),
         EventOutcome::Fired { .. } | EventOutcome::Declined(_) | EventOutcome::Victory(_) | EventOutcome::Defeat(_) => {}
     }
@@ -118,9 +118,20 @@ pub fn show(game: &Game, o: &EventOutcome, message: &mut Option<String>, dialogs
 
 /// The notice goes on the last event dialog queued (the event that gave or closed the
 /// quest), if it is that one; the message line shows it too.
+/// The event window's quest line: `[Event] AddQuest` («Новая запись добавлена в дневник
+/// героя!») or `DelQuest` from the install, as 0x4a8ae8 sets it (0x4a8de4, 0x4a8e12); Razdor's
+/// own wording in English or without the install's text.
+fn quest_line(key: &str, ours: &'static str) -> String {
+    let t = (razdor::i18n::lang() == razdor::i18n::Lang::Ru).then(|| super::chrome::ui_text("Event", key)).flatten();
+    t.unwrap_or_else(|| tr(ours).to_string())
+}
+
+/// The quest line goes under the event's window, as the original's (0x4a8ae8); the map's
+/// own toast only when no window shows it (the original has no toast).
 fn notice(line: &str, event: Option<EventId>, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) {
     if let Some(d) = dialogs.back_mut().filter(|d| d.event.is_some() && !d.question && (event.is_none() || d.event == event)) {
         d.add_notice(line);
+        return;
     }
     *message = Some(line.to_string());
 }

@@ -114,10 +114,22 @@ pub enum BattleResult {
         left_behind: usize,
         level_ups: Vec<(usize, i32)>,
         captured: Option<usize>,
+        /// Who was beaten, for the report's first line (0x4a9d88).
+        over: Beat,
     },
     /// Nobody won: no XP (the original pays it only for a victory).
     Withdrew { lost: usize },
     Defeat,
+}
+
+/// Who a won battle beat, as the victory report names it (0x4a9d88): an army by its shown
+/// name (empty: `[Event] NoNameArmy`), or a building's garrison with its owner's name
+/// before the capture (empty: the report's "no owner" line), ruins apart (type 0x0c).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Beat {
+    Army(String),
+    Place { ruins: bool, owner: String },
+    Nobody,
 }
 
 /// The noon report (video notes: the daily report comes at 12:00): money and mana after
@@ -2095,6 +2107,7 @@ impl Game {
         match (battle.outcome(), foe) {
             (Outcome::Victory, Some(Foe::Garrison(l))) => {
                 let loc = &mut self.world.locations[l];
+                let over = Beat::Place { ruins: loc.kind == LocationKind::Ruins, owner: loc.owner_name.clone() };
                 loc.cleared = true;
                 // Every item its units wore, in their order, then its pack (0x4c50ec, as for
                 // an army): the ruins' goods its units put on at the load come back so.
@@ -2117,7 +2130,7 @@ impl Game {
                 found.extend((0..rolls).filter_map(|_| self.roll_item(Source::Loot)));
                 let (loot, left_behind) = self.take_items(found);
                 dropped_left += left_behind;
-                BattleResult::Victory { reward, mana, lost, loot, left_behind: dropped_left, level_ups, captured }
+                BattleResult::Victory { reward, mana, lost, loot, left_behind: dropped_left, level_ups, captured, over }
             }
             (Outcome::Victory, Some(Foe::Army(i))) => {
                 let (gold, wages) = self.player_victory_gold(&self.world.armies[i]);
@@ -2128,6 +2141,7 @@ impl Game {
                     l.kind.capturable() && !l.owned() && l.garrison.is_empty()
                 });
                 let army = &mut self.world.armies[i];
+                let over = Beat::Army(army.shown_name().to_string());
                 army.gold -= gold;
                 let (id, mut found) = (army.id, Vec::new());
                 // Every item its units wore, then its pack (economy.md §3).
@@ -2146,10 +2160,10 @@ impl Game {
                 if let Some(h) = home {
                     self.world.give_to_player(h);
                 }
-                BattleResult::Victory { reward, mana, lost, loot, left_behind: dropped_left, level_ups, captured: home }
+                BattleResult::Victory { reward, mana, lost, loot, left_behind: dropped_left, level_ups, captured: home, over }
             }
             (Outcome::Victory, None) => {
-                BattleResult::Victory { reward: 0, mana, lost, loot: Vec::new(), left_behind: dropped_left, level_ups, captured: None }
+                BattleResult::Victory { reward: 0, mana, lost, loot: Vec::new(), left_behind: dropped_left, level_ups, captured: None, over: Beat::Nobody }
             }
             (Outcome::Defeat, _) => BattleResult::Defeat,
             (_, foe) => {

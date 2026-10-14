@@ -219,13 +219,20 @@ fn tab_button(label: &str, tab: Option<Tab>, r: Rect, active: bool) -> bool {
 }
 
 /// The red-brown text box with the building's description.
+/// The building's description in its box, as the original's (the castle's main hall at
+/// 1024×768): a marked-up text in Benguiat's plain tint at the sheet's own size, centred,
+/// with no shadow, rows 19 of the original's pixels apart (the event window's text list).
 fn description_box(desc: &str, x: f32, y: f32, w: f32, h: f32) {
     let k = chrome::k();
     chrome::text_box(Rect::new(x, y, w, h));
-    let lines = wrap(desc, w - 60.0 * k, 19.0 * k);
-    let top = y + (h - lines.len() as f32 * 23.0 * k) / 2.0 + 16.0 * k;
-    for (i, line) in lines.iter().enumerate() {
-        chrome::shadow_centered(line, x + w / 2.0, top + i as f32 * 23.0 * k, 19.0 * k, BOX_INK);
+    let o = super::dt_font::whole_scale(k * 0.9375);
+    let size = super::dt_font::sheet_size(super::dt_font::Face::Title, o);
+    let room = w - 60.0 * k;
+    let rows = markup_rows(&format!("^{desc}"), room, size);
+    let line = 19.0 * o;
+    let top = y + (h - rows.len() as f32 * line) / 2.0 + 14.0 * o;
+    for (i, row) in rows.iter().enumerate() {
+        draw_markup_row(row, x + 30.0 * k, top + i as f32 * line, room, size);
     }
 }
 
@@ -285,7 +292,10 @@ fn main_hall(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingVie
     chrome::silver_frame(Rect::new(x, ly, w, 36.0 * k), 1.0);
     chrome::shadow_text(tr("Quests and rumours:"), x + 14.0 * k, ly + 25.0 * k, 20.0 * k, chrome::GOLD);
     let mut next = None;
-    let label = if matches!(picked, Some(HallEntry::Quest(_))) { tr("Take quest") } else { tr("Hear rumour") };
+    // `[Building] TakeQuest` («Взять задание») whatever is picked, quest or rumour: the
+    // original sets the caption once when it builds the window (0x4d98b0).
+    let label = own_text("Building", "TakeQuest", n_("Take quest"));
+    let label = label.as_str();
     if button(x + w - 250.0 * k, ly + 3.0 * k, 240.0 * k, 30.0 * k, label, picked.is_some()) {
         if let Some(HallEntry::Rumour(id) | HallEntry::Quest(id)) = picked {
             match game.take_hall_entry(id) {
@@ -978,6 +988,11 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
     let (name_head, price_head) = (own_text("Building", "ItemName", n_("Name")), own_text("Building", "ItemCost", n_("Price")));
     chrome::shadow_centered(&name_head, lx + 32.0 * k + (lw - 110.0 * k) / 2.0, y + 18.0 * k, 18.0 * k, ACCENT);
     chrome::shadow_centered(&price_head, lx + lw - 58.0 * k, y + 18.0 * k, 18.0 * k, ACCENT);
+    // The original opens either list with its first row picked and described (0x4bca8c),
+    // the market tab and each switch between the goods and the pack alike.
+    if view.pick.is_none() && !rows.is_empty() {
+        view.pick = Some(0);
+    }
     if let Some(k) = price_list(Some(assets), &rows, view.pick, &mut view.scroll, lx, y + 26.0 * k, lw, 8) {
         view.pick = Some(k);
     }
@@ -995,7 +1010,9 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
     let by = y + dh + 10.0 * k;
     let (invent_on, market_on) = market_switches(view.selling, goods.len());
     let (invent, shop) = (own_text("Building", "Invent", n_("Inventory")), own_text("Building", "Market", n_("Trading shop")));
-    if button(x, by, 150.0 * k, 40.0 * k, &invent, invent_on) {
+    // A list button that is off keeps its normal look in the original (the market with the
+    // goods shown: «Торговая лавка» is not greyed); it only does nothing.
+    if button(x, by, 150.0 * k, 40.0 * k, &invent, true) && invent_on {
         view.selling = true;
         view.pick = None;
         view.scroll = 0;
@@ -1040,7 +1057,7 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
             view.pick = next_pick(k, left);
         }
     }
-    if button(x + w - 190.0 * k, by, 190.0 * k, 40.0 * k, &shop, market_on) {
+    if button(x + w - 190.0 * k, by, 190.0 * k, 40.0 * k, &shop, true) && market_on {
         view.selling = false;
         view.pick = None;
         view.scroll = 0;
@@ -1450,7 +1467,14 @@ fn ship_window(game: &mut Game) -> Option<Screen> {
 
 /// The building window. `Exit` (or Escape) returns to the map.
 pub fn frame(game: &mut Game, assets: &Assets, view: &mut BuildingView, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) -> Option<Screen> {
-    let bar = world_view::window_backdrop(game, assets, None);
+    // The village window is modal, the bar's buttons greyed under it, as the original's
+    // (the audit's capture of «Деревня Замковая»); the building window keeps the bar live.
+    let bar = if game.tabs_here().contains(&Tab::Tribute) {
+        world_view::backdrop(game, assets);
+        None
+    } else {
+        world_view::window_backdrop(game, assets, None)
+    };
     // Events that happened meanwhile (an answer's follow-ups …).
     let pending = game.drain_events();
     let early = world_view::handle_events(game, pending, message, dialogs);

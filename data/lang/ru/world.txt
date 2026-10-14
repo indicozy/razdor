@@ -113,7 +113,6 @@ Income = Доход
 
 # Building window: main hall
 Quests and rumours: = Задания и слухи:
-Hear rumour = Выслушать слух
 Nothing is on offer here. = Здесь ничего не предлагают.
 No quests in the demo. = В демо нет заданий.
 rumour = слух
