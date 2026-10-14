@@ -12,7 +12,8 @@
 //! the scenario's messages every frame, to see the screen under them; `RAZDOR_MOUSE=x,y`
 //! puts the pointer there; `RAZDOR_SCENE_SPELLS=<id>,…` puts those spells on every unit; `RAZDOR_SCENE_POTION=1` gives every unit of the army a
 //! drunk potion. `replay:<step>` with `RAZDOR_REPLAY=<actions.jsonl>`: the diff
-//! test's action list played to that step.
+//! test's action list played to that step. `RAZDOR_SCENE_BATTLE_EXIT=1` opens a battle
+//! scene's leave-battle window.
 //!
 //! Every map scene starts its map as a new game (`Game::from_scenario`): nothing is carried
 //! over from a campaign's map before, so a later map whose opening events check for what it
@@ -94,6 +95,12 @@ pub fn stage(app: &mut App) {
     let Ok(scene) = std::env::var("RAZDOR_SCENE") else { return };
     if let Err(e) = try_stage(app, &scene) {
         razdor::diag!("RAZDOR_SCENE={scene}: {e}");
+    }
+    // `RAZDOR_SCENE_BATTLE_EXIT=1`: a battle scene with its leave-battle window open (Esc).
+    if std::env::var("RAZDOR_SCENE_BATTLE_EXIT").is_ok_and(|v| v == "1") {
+        if let Screen::Battle(v) = &mut app.screen {
+            v.open_exit_window();
+        }
     }
 }
 

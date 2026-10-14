@@ -490,7 +490,97 @@ pub fn battle_exit_dialog(asking: &mut bool) -> (Option<ExitChoice>, bool) {
         "Warning",
         n_("Attention!\n\nYou cannot go back to the map without finishing the battle!\nTo stop the game under way, leave to the main menu (the game is not saved) or start the scenario again (restart)."),
     );
-    exit_dialog(&title, &warning, asking)
+    if super::chrome::win("S_Battle").is_none() {
+        return exit_dialog(&title, &warning, asking);
+    }
+    battle_exit_window(&title, &warning, asking)
+}
+
+/// The original's leave-battle window (4d3620, drawn by 4d0ccc), in its pixels times the
+/// interface scale: 634×516 in red marble centred over the map view above the bar, the
+/// `S_Battle` picture at (5, 32), a text box at (18, 264) 598×179 darkened by 0x30 with its
+/// silver lines and corners, the warning in the plain Benguiat tint (ae24a0) centred in it,
+/// and the red buttons (Btn* turned and darkened, 4dba90) 10 px from the bottom: «Выйти из
+/// игры» (Btn3) at x 10, «Выйти в меню» (Btn3) 8 px after it, «Рестарт» (Btn2) 8 px after
+/// that (4d5214), «Отмена» (Btn1) 10 px from the right (4d3620).
+fn battle_exit_window(title: &str, warning: &str, asking: &mut bool) -> (Option<ExitChoice>, bool) {
+    use super::chrome;
+    const W: f32 = 634.0;
+    const H: f32 = 516.0;
+    let (sw, sh) = (screen_width(), screen_height());
+    let o = super::dt_font::whole_scale(chrome::k() * 0.9375).min((sw - 12.0) / W).min((sh - chrome::bar_height() - 4.0) / H);
+    let (wx, wy) = (((sw - W * o) / 2.0).floor(), ((sh - chrome::bar_height() - H * o) / 2.0).floor().max(2.0));
+    let r = Rect::new(wx, wy, W * o, H * o);
+    let (_, closed) = chrome::window(r, title, chrome::Skin::Red, true);
+    if let Some(t) = chrome::win("S_Battle") {
+        let (pw, ph) = (t.width().min(W - 10.0), t.height().min(H - 32.0 - 5.0));
+        chrome::tex(&t, Rect::new(wx + 5.0 * o, wy + 32.0 * o, pw * o, ph * o), WHITE);
+    }
+    let tb = Rect::new(wx + 18.0 * o, wy + 264.0 * o, 598.0 * o, 179.0 * o);
+    let grey = 0x30 as f32 / 255.0;
+    chrome::subtractive(|| draw_rectangle(tb.x, tb.y, tb.w, tb.h, Color::new(grey, grey, grey, 1.0)));
+    chrome::silver_frame(tb, (chrome::k() * 0.9375).max(1.0));
+    chrome::corners(tb);
+    let size = super::dt_font::sheet_size(super::dt_font::Face::Title, o);
+    let line = 19.0 * o;
+    // Wrapped in the face it is drawn in (the original's Benguiat sheet).
+    let lines: Vec<String> = super::dt_font::with_face(super::dt_font::Face::Title, || {
+        warning.split('\n').flat_map(|l| if l.is_empty() { vec![String::new()] } else { wrap(l, tb.w - 40.0 * o, size) }).collect()
+    });
+    let text_h = lines.len() as f32 * line;
+    let mut y = tb.y + ((tb.h - text_h) / 2.0).max(4.0 * o) + size * 0.8;
+    for l in &lines {
+        super::dt_font::with_face(super::dt_font::Face::Title, || chrome::shadow_centered(l, tb.center().x, y, size, Color::new(1.0, 0.9, 0.66, 1.0)));
+        y += line;
+    }
+    let art = |name: &str| chrome::win(&format!("{name}Up")).map(|t| (t.width(), t.height()));
+    let (b3, b2, b1) = (art("Btn3").unwrap_or((160.0, 36.0)), art("Btn2").unwrap_or((128.0, 36.0)), art("Btn1").unwrap_or((96.0, 36.0)));
+    let by = H - 10.0 - b1.1;
+    let exit_x = 10.0;
+    let menu_x = exit_x + b3.0 + 8.0;
+    let restart_x = menu_x + b3.0 + 8.0;
+    let cancel_x = W - 10.0 - b1.0;
+    let buttons = [
+        (exit_x, b3, "Btn3", own("ExitGame", "Exit", n_("Quit the game")), Some(ExitChoice::Quit)),
+        (menu_x, b3, "Btn3", own("ExitGame", "ExitToMenu", n_("To the menu")), Some(ExitChoice::MainMenu)),
+        (restart_x, b2, "Btn2", own("ExitGame", "Restart", n_("Restart")), Some(ExitChoice::Restart)),
+        (cancel_x, b1, "Btn1", own("Buttons", "Cancel", n_("Cancel")), None),
+    ];
+    let mut choice = None;
+    let mut cancel = closed;
+    let was_asking = *asking;
+    for (x, (bw, bh), art, label, what) in buttons.iter() {
+        let b = Rect::new(wx + x * o, wy + by * o, bw * o, bh * o);
+        let over = !*asking && b.contains(crate::ui::widgets::pointer().into()) && !input_blocked();
+        chrome::defeat_button_art(b, art, label, over);
+        if over && clicked() {
+            match what {
+                Some(ExitChoice::Restart) => *asking = true,
+                Some(c) => choice = Some(*c),
+                None => cancel = true,
+            }
+        }
+    }
+    if was_asking {
+        let t = own("MessageBox", "Restart_Title", n_("Restart the game"));
+        let q = (razdor::i18n::lang() == razdor::i18n::Lang::Ru)
+            .then(|| super::chrome::ui_text("MessageBox", "Restart_Text"))
+            .flatten()
+            .unwrap_or_else(|| format!("^{}", tr(n_("Do you really want to start the scenario under way again from the beginning?"))));
+        match marked_question(&t, &q) {
+            Some(true) => {
+                *asking = false;
+                return (Some(ExitChoice::Restart), false);
+            }
+            Some(false) => *asking = false,
+            None => {}
+        }
+        return (None, false);
+    }
+    if *asking {
+        return (None, false);
+    }
+    (choice, cancel || key(KeyCode::Escape))
 }
 
 /// The window of [`exit_window`] and [`battle_exit_dialog`]: the warning and "Выйти из

@@ -3,9 +3,9 @@
 //! on the left, and on the right the enemy's formation on top, a hint strip, and the
 //! player's formation below, front rows facing each other in the middle. Each card is the
 //! unit's portrait with the original's stat strip ("A: 45 D: 35/40 / Mnvr: 1 Ini: 12 /
-//! Hits: 70"); empty cells show where each kind of unit belongs. The acting card has a green
-//! frame, cells it can step to blue ones and its targets red (hostile, green under the
-//! mouse) or blue (friendly).
+//! Hits: 70"); empty cells show where each kind of unit belongs. Cards and cells are lit as
+//! the original's (`chrome::card_highlight`, 4c57bc): the acting unit green, the cells on its
+//! side it can step to or act on blue, its hostile targets red (orange under the mouse).
 //! Hovering a target previews the action ("Click to curse X" / "Initiative -5 Actions -1");
 //! a click does it. As in the original each cell has one action: a hostile mage curses a
 //! target without a negative modifier and strikes the others, a friendly one heals the
@@ -31,9 +31,9 @@ use super::widgets::*;
 use super::world_view;
 use super::Screen;
 
-const ACTIVE: Color = Color::new(0.35, 1.0, 0.35, 1.0);
-const FRIENDLY: Color = Color::new(0.35, 0.55, 1.0, 1.0);
-const HOSTILE: Color = Color::new(1.0, 0.35, 0.35, 1.0);
+/// `[Battle] ExitHint` in the strip (4c3dcc): the bold sheet in its red tint, font ae24f8
+/// (SanSerif_Bold with green −152 and blue −159, 4dc051), so white ink becomes 255, 103, 96.
+const EXIT_HINT_INK: Color = Color::new(1.0, 103.0 / 255.0, 96.0 / 255.0, 1.0);
 /// The experience cards' font (ae24a8): Benguiat with red −200, green −75.
 const XP_INK: Color = Color::new(55.0 / 255.0, 180.0 / 255.0, 1.0, 1.0);
 
@@ -506,7 +506,11 @@ impl BattleView {
         }
 
         world_view::backdrop(game, assets);
-        self.close_clicked |= self.draw(&l, game, assets);
+        // The leave-battle window stands alone over the map: the original hides the battle
+        // window while it is open (86b of the UI audit; 4d3620 is its own window).
+        if !self.exiting || just_opened {
+            self.close_clicked |= self.draw(&l, game, assets);
+        }
         super::cursor::set(self.pointer());
 
         // Quick battle (a Razdor extra the players asked for): the battle under way finished
@@ -613,6 +617,8 @@ impl BattleView {
             _ => (Vec::new(), Vec::new()),
         };
         let hovered_cell = self.cell_under_mouse(l);
+        // The highlights pulse with the clock (4cd2a2).
+        let pulse_ms = (macroquad::time::get_time() * 1000.0) as u64;
 
         // The window: red marble, the title with both armies, the turn in the corner.
         // Its red close button asks to leave the battle, as Esc does (4daa80).
@@ -632,7 +638,8 @@ impl BattleView {
             let is_move = team == Team::Player && moves.contains(&slot);
             let sq = l.portrait(p);
             if is_move {
-                chrome::glow_frame(sq, FRIENDLY, false);
+                // A cell to step to is lit "can act" as the original's own cells (4c57bc).
+                chrome::card_highlight(sq, chrome::Lit::CanAct, pulse_ms);
             }
             let lit = is_move && team == Team::Player && hovered_cell == Some((team, slot));
             if lit {
@@ -644,12 +651,18 @@ impl BattleView {
         let (hint, color) = self.strip_text(player_turn, &targets, &moves);
         chrome::divider(l.strip);
         let text_r = Rect { w: l.strip.w - 60.0 * k, x: l.strip.x + 30.0 * k, ..l.strip };
-        chrome::hint_text(text_r, &hint, color);
+        if color == EXIT_HINT_INK {
+            super::dt_font::with_face(super::dt_font::Face::Bold, || chrome::hint_text(text_r, &hint, color));
+        } else {
+            chrome::hint_text(text_r, &hint, color);
+        }
         let limit = b.content().options.battle_end_turn;
         let size = (11.0 * k).round();
         shadow_right(&razdor::trf!("Turn {round}/{limit}", round = b.round, limit), l.strip.x + l.strip.w - 6.0 * k, l.strip.y + l.strip.h * 0.5 + size * 0.36, size, GOLD);
 
         // Cards: the order of the next units after the active one, as small numbers.
+        let acting = active.map(|a| b.fighters[a].team);
+        let now = game.clock.total_minutes() as u64;
         let queue: Vec<usize> = if b.outcome() == Outcome::Ongoing { b.queue().skip(1).take(3).collect() } else { Vec::new() };
         for (i, f) in b.fighters.iter().enumerate() {
             let in_fx = self.fx.as_ref().is_some_and(|fx| matches!(&fx.kind, FxKind::Act { hit, .. } if hit.target == i) || fx.actor == i);
@@ -665,24 +678,33 @@ impl BattleView {
                 }
             }
             let hovered = hovered_cell == Some((f.team, f.slot));
-            let frame = if Some(i) == active && self.fx.is_none() {
-                Some((ACTIVE, true))
+            // The original's highlight states (4c57bc): the actor "current" (also while its
+            // action plays); on the player's turn its own side's cells it can act on "can act",
+            // the hostile targets "enemy" and the one under the mouse "aimed" (4c3e58); on the
+            // AI's turn its target "aimed" on the other side, "own target" on its own.
+            let current = self.fx.as_ref().map(|fx| fx.actor).or(active);
+            let fx_target = self.fx.as_ref().and_then(|fx| match &fx.kind {
+                FxKind::Act { hit, .. } => Some(hit.target),
+                _ => None,
+            });
+            let lit = if Some(i) == current {
+                Some(chrome::Lit::Current)
             } else if targets.contains(&i) {
-                // The enemy under the mouse is framed green, as in the original; the other
-                // enemies in reach stay faintly red.
-                let c = match (f.team, hovered) {
-                    (Team::Player, _) => FRIENDLY,
-                    (_, true) => ACTIVE,
-                    (_, false) => HOSTILE,
-                };
-                Some((if hovered { c } else { Color { a: 0.6, ..c } }, hovered))
+                Some(match (Some(f.team) == acting, hovered) {
+                    (true, _) => chrome::Lit::CanAct,
+                    (false, true) => chrome::Lit::Aimed,
+                    (false, false) => chrome::Lit::Enemy,
+                })
+            } else if fx_target == Some(i) {
+                let side = current.map(|c| b.fighters[c].team);
+                Some(if Some(f.team) == side { chrome::Lit::OwnTarget } else { chrome::Lit::Aimed })
             } else {
                 None
             };
             let order = queue.iter().position(|&q| q == i);
-            self.draw_card(l, assets, i, p, frame, hovered && targets.contains(&i), order, game.clock.total_minutes() as u64);
+            let aimed_friend = hovered && targets.contains(&i) && Some(f.team) == acting;
+            self.draw_card(l, assets, i, p, lit, aimed_friend, order, now, pulse_ms);
         }
-
         if let Some(fx) = &self.fx {
             self.draw_fx(l, fx);
         }
@@ -740,18 +762,19 @@ impl BattleView {
         }
         if player_turn {
             // The original's line while the player's unit waits; the hover box says what a
-            // click does. With nothing in reach, what is left to do.
-            let hint = match (targets.is_empty(), moves.is_empty()) {
-                (false, _) => {
-                    let own = (razdor::i18n::lang() == razdor::i18n::Lang::Ru).then(|| chrome::ui_text("Battle", "ExitHint")).flatten();
-                    return (own.unwrap_or_else(|| tr("To leave the battle, press ESC").to_string()), GOLD);
-                }
-                (true, false) => tr("Nothing in reach: step to a lit cell, or press SPACE"),
-                (true, true) => tr("Nothing to do: press SPACE to pass an action"),
-            };
-            return (hint.into(), Color::new(1.0, 0.55, 0.25, 1.0));
+            // click does. With nothing to do at all, how to pass.
+            if targets.is_empty() && moves.is_empty() {
+                return (tr("Nothing to do: press SPACE to pass an action").into(), Color::new(1.0, 0.55, 0.25, 1.0));
+            }
+            let own = (razdor::i18n::lang() == razdor::i18n::Lang::Ru).then(|| chrome::ui_text("Battle", "ExitHint")).flatten();
+            return (own.unwrap_or_else(|| tr("To leave the battle, press ESC").to_string()), EXIT_HINT_INK);
         }
         (tr("The enemy moves...").into(), Color::new(1.0, 0.55, 0.25, 1.0))
+    }
+
+    /// Opens the leave-battle window, as Esc does (the off-screen scene of it).
+    pub fn open_exit_window(&mut self) {
+        self.exiting = true;
     }
 
     /// XP needed for fighter `f`'s next level, as the battle began.
@@ -775,7 +798,7 @@ impl BattleView {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn draw_card(&self, l: &Layout, assets: &Assets, id: usize, p: Vec2, frame: Option<(Color, bool)>, aimed: bool, order: Option<usize>, now: u64) {
+    fn draw_card(&self, l: &Layout, assets: &Assets, id: usize, p: Vec2, lit: Option<chrome::Lit>, aimed_friend: bool, order: Option<usize>, now: u64, pulse_ms: u64) {
         let f = &self.battle.fighters[id];
         // Against the start of the battle, so every gain or loss shows (blue or red), with
         // the building's defence in the D values.
@@ -789,11 +812,16 @@ impl BattleView {
         let sq = l.portrait(p);
         assets.draw_portrait(f.unit, f.team, sq);
         chrome::wounds(sq, f.hp, f.max_hp());
-        if aimed {
-            let tint = if f.team == Team::Player { Color::new(0.3, 0.5, 1.0, 0.22) } else { Color::new(1.0, 0.1, 0.05, 0.25) };
-            draw_rectangle(sq.x, sq.y, sq.w, sq.h, tint);
+        // A friendly target under the mouse (a heal or blessing) gets Razdor's blue tint; the
+        // hostile one is told by its "aimed" highlight, as the original's.
+        if aimed_friend {
+            draw_rectangle(sq.x, sq.y, sq.w, sq.h, Color::new(0.3, 0.5, 1.0, 0.22));
         }
         draw_rectangle_lines(sq.x, sq.y, sq.w, sq.h, 1.0, Color::new(0.85, 0.85, 0.85, 0.8));
+        // The highlight over the portrait, under the signs (493a64).
+        if let Some(lit) = lit {
+            chrome::card_highlight(sq, lit, pulse_ms);
+        }
         let strip = Rect::new(p.x, p.y + w, w, h - w);
         let row2 = if f.slot.row == Row::Back { self.battle.content().options.row2_def } else { 0 };
         let (caster, place) = (unit_sheet::caster(self.battle.content(), f.unit), unit_sheet::strip_place(self.battle.formation, f.slot));
@@ -807,7 +835,7 @@ impl BattleView {
         } else {
             unit_sheet::StripPanel::Plain
         };
-        unit_sheet::stat_strip(strip, s, base, f.power, caster, place, f.hp, row2, 0, frame.is_some_and(|(c, _)| c == ACTIVE), panel);
+        unit_sheet::stat_strip(strip, s, base, f.power, caster, place, f.hp, row2, 0, lit == Some(chrome::Lit::Current), panel);
 
         // The original's signs (493a64): a drunk potion, then the blessing, from the top
         // left; poison (a negative regeneration), then the curse, from the top right; 23 px
@@ -829,9 +857,6 @@ impl BattleView {
         // In battle a dead unit's card shows no badges (493a64: HP 0).
         if f.alive() {
             super::spell_badges::draw(sq, &f.spells, f.drain, now, self.battle.content());
-        }
-        if let Some((c, strong)) = frame {
-            chrome::glow_frame(sq, c, strong);
         }
     }
 

@@ -955,7 +955,7 @@ pub fn hint_text(r: Rect, hint: &str, color: Color) {
 }
 
 /// Corner ornaments of a text box.
-fn corners(r: Rect) {
+pub fn corners(r: Rect) {
     let s = (26.0 * k()).min(r.h / 2.0).min(r.w / 2.0);
     if s <= 0.0 {
         return;
@@ -1018,6 +1018,19 @@ pub fn defeat_button(r: Rect, label: &str, enabled: bool, hover: bool) {
             button_label(r, label, enabled, hover);
         }
         _ => marble_button(r, label, enabled, hover),
+    }
+}
+
+/// [`defeat_button`] with its art named (`Btn1`, `Btn2`, `Btn3`) rather than picked by the
+/// width on screen, for windows laid out in the original's pixels times a scale.
+pub fn defeat_button_art(r: Rect, art: &str, label: &str, hover: bool) {
+    let state = if hover { "Down" } else { "Up" };
+    match win_fx(&format!("{art}{state}"), Fx::RotateRgb) {
+        Some(t) => {
+            three_slice(&t, r, 14.0, WHITE);
+            button_label(r, label, true, hover);
+        }
+        None => marble_button(r, label, true, hover),
     }
 }
 
@@ -1293,6 +1306,76 @@ pub fn cell_icon(icon: CellIcon, sq: Rect) {
     }
 }
 
+/// The states of the original's card highlight (the `add194` / `add1c4` values, 4c57bc):
+/// what a lit card or cell means. The value 0 (none) has no variant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Lit {
+    /// 1: the AI's target on its own side (a heal or blessing): cyan.
+    OwnTarget,
+    /// 2: a cell the acting unit can act on or step to, on its own side: blue.
+    CanAct,
+    /// 3: the hostile target under the mouse (4c3e58, 4c4263), or the AI's target on the
+    /// other side: orange.
+    Aimed,
+    /// 4: a hostile target: red.
+    Enemy,
+    /// 5: the unit that acts: green.
+    Current,
+}
+
+impl Lit {
+    /// The colour taken off the glow's grey rings at brightness `level` (0..15), as the
+    /// original builds its 16 pictures per state at start-up (4dc118, 4de75e…4deb4f: 476374
+    /// then 4768f8 mode 1).
+    pub fn taken_off(self, level: u8) -> [i32; 3] {
+        let l = level.min(15) as i32;
+        match self {
+            Lit::OwnTarget => [255, 255 - 8 * l, 255 - 16 * l],
+            Lit::CanAct => [255, 255, 255 - 16 * l],
+            Lit::Aimed => [255 - 16 * l, 255 - 8 * l, 255],
+            Lit::Enemy => [255 - 16 * l, 255, 255],
+            Lit::Current => [255, 255 - 16 * l, 255],
+        }
+    }
+
+    /// The colour of ring `d` (0 at the portrait's edge, 7 innermost; the middle is black):
+    /// grey 255 − 24d less [`Lit::taken_off`], each channel at least 0.
+    pub fn ring(self, level: u8, d: u8) -> [u8; 3] {
+        let g = if d >= 8 { 0 } else { 255 - 24 * d as i32 };
+        self.taken_off(level).map(|t| (g - t).clamp(0, 255) as u8)
+    }
+}
+
+/// The highlight's brightness at `ms` (4cd704, 4cd28a): `8 + tri((ms / 100) mod 15)`,
+/// `tri(v) = v` up to 7, else `15 − v`, so it pulses 8..15..8 every 1.5 s.
+pub fn lit_level(ms: u64) -> u8 {
+    let v = ((ms / 100) % 15) as u8;
+    8 + if v > 7 { 15 - v } else { v }
+}
+
+/// The original's card highlight over a portrait `sq` (92 px in the original): its picture
+/// of 8 grey rings, 255 − 24 per pixel inwards, less the state's colour, added over the
+/// portrait (493a64: 476790 mode 0 at the portrait's corner, under the card's signs).
+pub fn card_highlight(sq: Rect, lit: Lit, ms: u64) {
+    let s = sq.w / 92.0;
+    let level = lit_level(ms);
+    additive(|| {
+        for d in 0..8u8 {
+            let [r, g, b] = lit.ring(level, d);
+            if r == 0 && g == 0 && b == 0 {
+                continue;
+            }
+            let c = Color::from_rgba(r, g, b, 255);
+            let f = d as f32 * s;
+            let (x, y, w, h) = (sq.x + f, sq.y + f, sq.w - 2.0 * f, sq.h - 2.0 * f);
+            draw_rectangle(x, y, w, s, c);
+            draw_rectangle(x, y + h - s, w, s, c);
+            draw_rectangle(x, y + s, s, h - 2.0 * s, c);
+            draw_rectangle(x + w - s, y + s, s, h - 2.0 * s, c);
+        }
+    });
+}
+
 /// A coloured frame around a card or cell: green for the unit that acts, blue for a cell to
 /// move to or a friendly target, red for a hostile target (green for the one under the mouse).
 pub fn glow_frame(r: Rect, color: Color, strong: bool) {
@@ -1361,6 +1444,28 @@ pub fn effect(rel: &str, c: Vec2, size: f32, t: f32, color: Color) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The card highlight as the original's pictures (4dc118) and pulse (4cd2a2): grey rings
+    /// 255 − 24 per pixel less the state's colour; brightness 8..15..8 every 1.5 s. The
+    /// original's "can act" cell at the top of its pulse read 239, 222, 197, 173… blue on a
+    /// black tent (the UI audit's battle screenshot): 240 − 24d, its black under the art.
+    #[test]
+    fn card_highlight_rings_and_pulse_as_the_original_s() {
+        assert_eq!(Lit::CanAct.ring(15, 0), [0, 0, 240]);
+        assert_eq!(Lit::CanAct.ring(15, 3), [0, 0, 168]);
+        assert_eq!(Lit::CanAct.ring(15, 8), [0, 0, 0], "the middle is black");
+        assert_eq!(Lit::Current.ring(15, 0), [0, 240, 0]);
+        assert_eq!(Lit::Enemy.ring(15, 0), [240, 0, 0]);
+        assert_eq!(Lit::Aimed.ring(15, 0), [240, 120, 0]);
+        assert_eq!(Lit::OwnTarget.ring(15, 0), [0, 120, 240]);
+        assert_eq!(Lit::CanAct.ring(8, 6), [0, 0, 0], "128 − 144 is below 0");
+        assert_eq!(lit_level(0), 8);
+        assert_eq!(lit_level(700), 15);
+        assert_eq!(lit_level(800), 15);
+        assert_eq!(lit_level(1400), 9);
+        assert_eq!(lit_level(1500), 8);
+        assert!((0..30_000).step_by(37).all(|ms| (8..=15).contains(&lit_level(ms))));
+    }
 
     #[test]
     fn wounds_fill_the_share_of_hits_lost() {
