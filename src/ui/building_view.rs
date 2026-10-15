@@ -954,20 +954,31 @@ fn next_pick(k: usize, left: usize) -> Option<usize> {
     (left > 0).then(|| k.min(left - 1))
 }
 
-/// Market: the goods (or, in the sell shop, the pack) with prices, the selected item's
-/// description, and the buy / sell buttons.
-/// Which of the market's list buttons are on, ("Инвентарь", "Торговая лавка"), with the
-/// pack (`selling`) or the goods shown (0x4bca8c): the shown list's own button is off, and
-/// the goods' also while the shop has none (its +0x0d = goods count > 0).
-fn market_switches(selling: bool, goods: usize) -> (bool, bool) {
-    if selling { (false, goods > 0) } else { (true, false) }
+/// One of the market's two list buttons: whether it shows the pack («Инвентарь») or the
+/// goods («Торговая лавка»), and whether it is enabled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ListButton {
+    shows_pack: bool,
+    enabled: bool,
+}
+
+/// The market's list buttons, «Инвентарь» then «Торговая лавка», with the pack (`selling`)
+/// or the goods shown (0x4bca8c sets their enabled bytes +0x0d, 0x670b3d and 0x670cb1): the
+/// shown list's own button is off, and the goods' also while the shop has none (it needs a
+/// goods count above 0). An off button is drawn locked, not in its normal look: Button.Draw (0x479bbc) takes
+/// the disabled picture +0x53 when +0x0d is 0, and for both buttons that is 0x67045b, the
+/// `Btn3Down` art greyed (0x48db5c 100/200/100) and rescaled (0x48da5c ×1300/1024 −26), built
+/// at 0x4d985f and set at 0x4d9a8c / 0x4d9b5f; the caption moves by the pressed offset.
+/// A disabled widget takes no clicks either.
+fn market_list_buttons(selling: bool, goods: usize) -> [ListButton; 2] {
+    [ListButton { shows_pack: true, enabled: !selling }, ListButton { shows_pack: false, enabled: selling && goods > 0 }]
 }
 
 /// Market (0x4bca8c): the goods (mode 1) or the pack (mode 0, "Инвентарь") with prices,
 /// the selected item's description, and the trade button. The goods list stands right of the
 /// description, the pack list left of it (the original moves both panes with the mode).
 /// "Инвентарь" (0x4b9be0) shows the pack and "Торговая лавка" (0x4b9be8) the goods: both
-/// always shown, the current list's one off, "Торговая лавка" also off while the shop is empty.
+/// always shown, the current list's one locked, "Торговая лавка" also while the shop is empty.
 fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, message: &mut Option<String>) -> Option<Screen> {
     let k = chrome::k();
     let (x, y, w) = (f.cx, f.cy, f.cw);
@@ -1008,12 +1019,11 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
         }
     }
     let by = y + dh + 10.0 * k;
-    let (invent_on, market_on) = market_switches(view.selling, goods.len());
+    let [invent_button, shop_button] = market_list_buttons(view.selling, goods.len());
     let (invent, shop) = (own_text("Building", "Invent", n_("Inventory")), own_text("Building", "Market", n_("Trading shop")));
-    // A list button that is off keeps its normal look in the original (the market with the
-    // goods shown: «Торговая лавка» is not greyed); it only does nothing.
-    if button(x, by, 150.0 * k, 40.0 * k, &invent, true) && invent_on {
-        view.selling = true;
+    // The list button of the list shown is locked (greyed), as the original's (0x479bbc).
+    if button(x, by, 150.0 * k, 40.0 * k, &invent, invent_button.enabled) {
+        view.selling = invent_button.shows_pack;
         view.pick = None;
         view.scroll = 0;
     }
@@ -1057,8 +1067,8 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
             view.pick = next_pick(k, left);
         }
     }
-    if button(x + w - 190.0 * k, by, 190.0 * k, 40.0 * k, &shop, true) && market_on {
-        view.selling = false;
+    if button(x + w - 190.0 * k, by, 190.0 * k, 40.0 * k, &shop, shop_button.enabled) {
+        view.selling = shop_button.shows_pack;
         view.pick = None;
         view.scroll = 0;
     }
@@ -1561,7 +1571,7 @@ fn with_back(bar: Option<Screen>, view: &BuildingView) -> Option<Screen> {
 
 #[cfg(test)]
 mod tests {
-    use super::{market_switches, next_pick, offer_picture, recruit_x, screen_line, stock_caption, stock_picture};
+    use super::{market_list_buttons, next_pick, ListButton, offer_picture, recruit_x, screen_line, stock_caption, stock_picture};
     use razdor::rules::economy::VillageOffer;
     use razdor::rules::formation::{Formation, Row, Slot};
 
@@ -1614,14 +1624,16 @@ mod tests {
         assert_eq!(next_pick(0, 0), None, "nothing left");
     }
 
-    /// The original's two list buttons (0x4bca8c): "Инвентарь" shows the pack and is off
-    /// while it is shown; "Торговая лавка" shows the goods and is off while they are shown
-    /// or the shop has none. Neither opens another window.
+    /// The original's two list buttons (0x4bca8c): "Инвентарь" shows the pack and is locked
+    /// while it is shown; "Торговая лавка" shows the goods and is locked while they are shown
+    /// or the shop has none, drawn with the disabled picture (0x479bbc; an owner's report).
+    /// Neither opens another window.
     #[test]
     fn the_market_s_list_buttons_are_the_original_s() {
-        assert_eq!(market_switches(false, 5), (true, false), "goods shown: only Инвентарь");
-        assert_eq!(market_switches(true, 5), (false, true), "pack shown: only Торговая лавка");
-        assert_eq!(market_switches(true, 0), (false, false), "an empty shop: no way to the goods");
+        let b = |shows_pack, enabled| ListButton { shows_pack, enabled };
+        assert_eq!(market_list_buttons(false, 5), [b(true, true), b(false, false)], "goods shown: Торговая лавка locked");
+        assert_eq!(market_list_buttons(true, 5), [b(true, false), b(false, true)], "pack shown: Инвентарь locked");
+        assert_eq!(market_list_buttons(true, 0), [b(true, false), b(false, false)], "an empty shop: both locked");
     }
 }
 

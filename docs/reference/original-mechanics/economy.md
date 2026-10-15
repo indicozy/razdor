@@ -188,6 +188,13 @@ runs on its first arrival on a new cell after noon (0x4a5534). In order:
   - After a sale or purchase the list is rebuilt and the previous row stays selected (the last
     row when the list got shorter). The switch to the buy list is offered only while the shop has
     goods.
+  - The two list buttons, «Инвентарь» (the pack) and «Торговая лавка» (the goods), are always
+    shown; the one of the list shown is disabled (its enabled byte +0x0d cleared in 0x4bca8c),
+    and «Торговая лавка» also while the shop is empty. A disabled button is drawn with its
+    disabled picture (Button.Draw 0x479bbc), which for both is the `Btn3Down` art greyed
+    (weights 100/200/100, 0x48db5c) and rescaled (each channel ×1300/1024 − 26, 0x48da5c),
+    built at 0x4d985f; the caption keeps its colour and moves by the pressed offset (1, 1).
+    So the button of the open list looks locked, and a click on it does nothing.
 - **Spells**: exactly `CostGold`, if CostGold ≤ gold and the spell is not known (0x4ba3b0); the
   book limit is the shop's (magic-items.md).
 - **Barracks hire**: exactly the unit's `Cost` (0x4b0fcf), no relation factor, no Merchant. The
