@@ -80,20 +80,23 @@ fn picked_bar(r: Rect) {
     }
 }
 
-/// The round scenario icon: `SI_Castle`, `SI_Helm`, `SI_Swords`, `SI_Skull`, `SI_Tutorial`
-/// by the map's picture index (header byte 0x120, 1..5), in the silver ring `si-border`.
-fn scenario_icon(picture: u8, c: Vec2, size: f32) {
+/// The scenario icon: `SI_Castle`, `SI_Helm`, `SI_Swords`, `SI_Skull`, `SI_Tutorial` by the
+/// map's picture index (header byte 0x120, 1..5), centred on `c` at its own size. The original
+/// loads each as a picture with its mask (0x4dc118 → 0x48cd90) and puts it into the row's icon
+/// cell as it is (0x4c1968 → 0x48e8f0): no disc and no ring under it (`si-border` belongs to
+/// another window, 0x49ac64).
+fn scenario_icon(picture: u8, c: Vec2, k: f32) {
     const ICONS: [&str; 5] = ["SI_Castle", "SI_Helm", "SI_Swords", "SI_Skull", "SI_Tutorial"];
     let Some(name) = (picture as usize).checked_sub(1).and_then(|i| ICONS.get(i)) else { return };
-    let r = Rect::new(c.x - size / 2.0, c.y - size / 2.0, size, size);
-    draw_circle(c.x, c.y, size * 0.46, Color::new(0.0, 0.0, 0.0, 0.8));
     if let Some(t) = chrome::win(name) {
-        let inner = Rect::new(r.x + size * 0.12, r.y + size * 0.12, size * 0.76, size * 0.76);
-        chrome::tex(&t, inner, WHITE);
+        chrome::tex(&t, icon_rect(t.size(), c, k), WHITE);
     }
-    if let Some(t) = chrome::win_fx("si-border", chrome::Fx::KeyBlack) {
-        chrome::tex(&t, r, WHITE);
-    }
+}
+
+/// Where a scenario icon of `size` pixels goes: its own size at scale `k`, centred on `c`.
+fn icon_rect(size: Vec2, c: Vec2, k: f32) -> Rect {
+    let (w, h) = (size.x * k, size.y * k);
+    Rect::new(c.x - w / 2.0, c.y - h / 2.0, w, h)
 }
 
 /// The map's terrain, one texel per cell (the minimap's colours).
@@ -275,7 +278,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         } else if hover {
             draw_rectangle(head.x, head.y, head.w, head.h, Color::new(0.1, 0.15, 0.45, 0.35));
         }
-        scenario_icon(e.scenario.header.scenario_picture_index, vec2(head.x + 14.0 * k, head.y + head.h / 2.0), 26.0 * k);
+        scenario_icon(e.scenario.header.scenario_picture_index, vec2(head.x + 14.0 * k, head.y + head.h / 2.0), k);
         let name = group_name(scenarios, g);
         with_face(Face::Title, || {
             let size = fit_size(name, r.w - 40.0 * k, 15.0 * k);
@@ -657,6 +660,17 @@ fn choose_class(offered: [bool; 3], pick: usize, clicked: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scenario_icons_keep_their_own_size_without_a_ring() {
+        // 0x4c1968 puts the picture into the cell as it is: a 27×25 icon at k = 2 is 54×50,
+        // centred (Razdor drew it shrunk to 76 % inside a 26 px ring before).
+        let r = icon_rect(vec2(27.0, 25.0), vec2(100.0, 50.0), 2.0);
+        assert_eq!((r.x, r.y, r.w, r.h), (73.0, 25.0, 54.0, 50.0));
+        let src = include_str!("new_game.rs");
+        let body = &src[src.find("fn scenario_icon(").unwrap()..src.find("fn icon_rect(").unwrap()];
+        assert!(!body.contains("win_fx(\"si-border\"") && !body.contains("draw_circle"), "no ring and no disc under the icon");
+    }
 
     #[test]
     fn the_scenario_list_keeps_its_scroll_between_turns_of_the_wheel() {

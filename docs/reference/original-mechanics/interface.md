@@ -160,7 +160,9 @@ comes back with a crossfade. **code**
 followed by their chain) is in the phase-1 notes and dtm-format.md. Each row gets a small
 icon in its fourth column by the map header byte 0x120: 1 castle, 2 helm, 3 swords, 4 skull,
 5 tutorial (pictures `SI_Castle`, `SI_Helm`, `SI_Swords`, `SI_Skull`, `SI_Tutorial`); 0 gives
-no icon. The icons are set on all rows the first time, then again on the old and the new row
+no icon. Each picture is loaded with its mask (4dc118 → 48cd90) and set into the cell as it is,
+at its own size: no disc or ring under it (the `si-border` ring belongs to the spell badges,
+49ac64). The icons are set on all rows the first time, then again on the old and the new row
 whenever the selection changes. **code** (4c1968, pictures loaded at 4dc118) Start
 copies the chosen map's header and enables each hero class whose preset has a start cell
 (start x or start y non-zero; gold, troops or a start building alone do not count). It walks
