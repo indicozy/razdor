@@ -724,8 +724,8 @@ pub fn parse_number(text: &str, min: i64, max: i64) -> Option<i64> {
     text.trim().parse::<i64>().ok().map(|v| v.clamp(min, max))
 }
 
-/// Backspace pressed this frame, or held (repeats after 0.4 s, 25 per second).
-fn backspace_repeat() -> usize {
+/// Backspace pressed this frame, or held: see [`repeats`].
+pub fn backspace_repeat() -> usize {
     if is_key_pressed(KeyCode::Backspace) {
         HELD.with(|h| h.set(Some(get_time())));
         return 1;
@@ -735,12 +735,25 @@ fn backspace_repeat() -> usize {
         return 0;
     }
     let Some(t0) = HELD.with(|h| h.get()) else { return 0 };
-    let t = get_time() - t0 - 0.4;
+    repeats(get_time() - t0, get_frame_time() as f64)
+}
+
+/// A held key's repeats in the frame of `dt` seconds ending `held` seconds after it went
+/// down. The original's edit box (0x47a624) takes one Backspace per WM_KEYDOWN its window
+/// procedure stores as the held key (0x475748, which never looks at the repeat bit), so a
+/// held key repeats at the system's typematic rate: Windows' defaults, a first repeat after
+/// 500 ms and then about 30 a second.
+pub fn repeats(held: f64, dt: f64) -> usize {
+    const DELAY: f64 = 0.5;
+    const RATE: f64 = 30.0;
+    let t = held - DELAY;
     if t < 0.0 {
         return 0;
     }
-    let prev = ((t - get_frame_time() as f64) * 25.0).floor().max(-1.0);
-    ((t * 25.0).floor() - prev).max(0.0) as usize
+    // Repeats due by `t` (the first at 0), a hair over so that frame times summing to a
+    // whole step do not lose it to rounding.
+    let due = |t: f64| (t * RATE + 1e-6).floor().max(-1.0);
+    (due(t) - due(t - dt)).max(0.0) as usize
 }
 
 /// This frame's typing for the focused field.
@@ -1032,6 +1045,20 @@ pub fn tabs(x: f32, y: f32, w: f32, labels: &[&str], selected: &mut usize) -> f3
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_held_key_repeats_after_half_a_second_at_thirty_a_second() {
+        assert_eq!(repeats(0.3, 1.0 / 60.0), 0, "not yet");
+        assert_eq!(repeats(0.5, 1.0 / 60.0), 1, "the first repeat at 500 ms");
+        let total: usize = (1..=60).map(|i| repeats(0.5 + i as f64 / 60.0, 1.0 / 60.0)).sum();
+        assert_eq!(total, 30, "then 30 a second");
+        assert_eq!(repeats(2.0, 0.2), 6, "a slow frame catches up");
+        // No field reads Backspace's press alone (which deletes one character however long
+        // it is held): the hero's name and the save's name repeat as the original's edit box.
+        for (file, src) in [("screens.rs", include_str!("screens.rs")), ("saves.rs", include_str!("saves.rs")), ("new_game.rs", include_str!("new_game.rs"))] {
+            assert!(!src.contains("is_key_pressed(KeyCode::Backspace)"), "{file} reads Backspace without repeat");
+        }
+    }
 
     /// The hint box fades in over 300 ms (49ee4b–49ef0d): to 160/255 for an ordinary hint, to
     /// full for a pushed one, and stays there.

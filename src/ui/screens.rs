@@ -26,15 +26,18 @@ thread_local! {
 }
 
 /// Applies this frame's typing to `name`: printable characters are added (up to
-/// [`NAME_MAX`]), Backspace removes the last one.
+/// [`NAME_MAX`]), Backspace removes the last one, and again while held (the original's edit
+/// box 0x47a624 takes each repeated WM_KEYDOWN, 0x475748).
 pub(super) fn edit_name(name: &mut String) {
     while let Some(c) = get_char_pressed() {
         if !c.is_control() && name.chars().count() < NAME_MAX {
             name.push(c);
         }
     }
-    if !input_blocked() && is_key_pressed(KeyCode::Backspace) {
-        name.pop();
+    if !input_blocked() {
+        for _ in 0..backspace_repeat() {
+            name.pop();
+        }
     }
 }
 

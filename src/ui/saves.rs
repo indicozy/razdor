@@ -341,7 +341,8 @@ pub fn save_screen(game: &Game, assets: &Assets, view: &mut SaveView, message: &
             view.name.push(c);
         }
     }
-    if is_key_pressed(KeyCode::Backspace) {
+    // Held Backspace repeats, as in the original's edit box (0x47a624, 0x475748).
+    for _ in 0..backspace_repeat() {
         view.name.pop();
     }
     let same = view.entries.iter().position(|e| e.meta.name == view.name);
