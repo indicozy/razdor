@@ -246,6 +246,14 @@ struct Signs {
 
 /// The experience card's promotion sign (4b0684): the unit's level after the award is past
 /// its first (Razdor's level 2, the original's L > 0) and its type has a next one (492dd4).
+/// Whether the battle screen shows the end: the battle is decided and no animation (a slide,
+/// an effect, its echo, a pass's pause, a card's slide) still plays. The original handles the
+/// end only in Battle_Step (0x4c57bc → 0x4c50ec), called as the last queued animation ends
+/// (0x4b0135, 0x4afbcc, 0x4b0591).
+fn end_shows(outcome: Outcome, animating: bool) -> bool {
+    outcome != Outcome::Ongoing && !animating
+}
+
 fn promotable_after(level: i32, has_next: bool) -> bool {
     level >= 2 && has_next
 }
@@ -385,6 +393,17 @@ impl BattleView {
         self.quick_played = true;
     }
 
+    /// The screen shows the battle's end (the strip's "The battle is over", the window without
+    /// its close button, the hold and the result): only once the last action's animation has
+    /// played out. The rules apply an action at once (0x48a5c4), so the battle is over while
+    /// its killing blow still plays; the original handles the end in Battle_Step (0x4c57bc →
+    /// 0x4c50ec), which runs only as the queued animations finish: the action effect's end
+    /// (0x4b0135, after writing the sides back and popping the queue), a pass's pause (0x4afbcc)
+    /// or a card's slide (0x4b0591).
+    fn end_shown(&self) -> bool {
+        end_shows(self.battle.outcome(), self.fx.is_some())
+    }
+
     /// Remembers the newest log line for the strip.
     fn note_log(&mut self) {
         if let Some(line) = self.battle.log.last() {
@@ -499,7 +518,7 @@ impl BattleView {
         // player's, 0x4c57bc after each of the enemy's).
         game.battle_write_back(&self.battle);
         let outcome = self.battle.outcome();
-        let over = outcome != Outcome::Ongoing && self.fx.is_none();
+        let over = self.end_shown();
         if over && self.xp.is_none() {
             // What the player's units gain: only a victory pays (experience.md §3).
             self.xp = Some(self.battle.player_xp());
@@ -568,7 +587,13 @@ impl BattleView {
         if self.exiting {
             return super::cursor::Shape::Arrow;
         }
-        let enemy = b.outcome() == Outcome::Ongoing && b.active().is_some_and(|a| b.fighters[a].team != Team::Player);
+        // The pointer changes only as Battle_Step runs (the clock for the computer's turn
+        // 0x4c5fee, the arrow for the player's 0x4c5ab0): while the battle's last action
+        // plays, the clock stays if the computer's unit made it.
+        let enemy = match &self.fx {
+            Some(fx) if b.outcome() != Outcome::Ongoing => b.fighters[fx.actor].team != Team::Player,
+            _ => b.outcome() == Outcome::Ongoing && b.active().is_some_and(|a| b.fighters[a].team != Team::Player),
+        };
         let pausing = self.fx.as_ref().is_some_and(|f| matches!(f.kind, FxKind::Pass));
         super::cursor::battle_pointer(enemy, pausing, self.hold.is_some())
     }
@@ -622,8 +647,7 @@ impl BattleView {
 
         // The window: red marble, the title with both armies, the turn in the corner.
         // Its red close button asks to leave the battle, as Esc does (4daa80).
-        let ongoing = b.outcome() == Outcome::Ongoing;
-        let (_, close) = chrome::window(l.win, &battle_title(game), Skin::Red, ongoing);
+        let (_, close) = chrome::window(l.win, &battle_title(game), Skin::Red, !self.end_shown());
         let close = close && !self.exiting && !input_blocked();
         // The frame between the panel and the formations.
         draw_line(l.panel.x + l.panel.w + 1.0, l.panel.y, l.panel.x + l.panel.w + 1.0, l.panel.y + l.panel.h, 1.5 * k, chrome::SILVER);
@@ -751,8 +775,7 @@ impl BattleView {
 
     /// The strip's text: the last action, or what the player can do.
     fn strip_text(&self, player_turn: bool, targets: &[usize], moves: &[Slot]) -> (String, Color) {
-        let b = &self.battle;
-        if b.outcome() != Outcome::Ongoing {
+        if self.end_shown() {
             return (tr("The battle is over").into(), GOLD);
         }
         if let Some((line, _)) = &self.news {
@@ -1136,6 +1159,47 @@ mod tests {
         assert!(!fx.echoing());
         fx.t = 0.36 + 0.35 + 0.01;
         assert!(fx.echoing());
+    }
+
+    #[test]
+    fn the_end_shows_once_no_animation_plays() {
+        assert!(!end_shows(Outcome::Ongoing, false));
+        assert!(!end_shows(Outcome::Ongoing, true));
+        assert!(!end_shows(Outcome::Victory, true), "the killing blow still plays");
+        assert!(!end_shows(Outcome::Defeat, true));
+        assert!(end_shows(Outcome::Victory, false));
+        assert!(end_shows(Outcome::Defeat, false));
+    }
+
+    /// The bandit camp played to its last blow: while that blow's slide and effect play, the
+    /// strip keeps the blow's line and the window its close button; "The battle is over" and
+    /// the result follow as the animation ends (Battle_Step 0x4c57bc → 0x4c50ec, run at
+    /// 0x4b0135 as the effect ends).
+    #[test]
+    fn the_battle_is_over_only_after_the_last_blow_plays() {
+        let mut g = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        g.foe = Some(Foe::Garrison(g.world.index_of("Bandit camp")));
+        let mut view = BattleView::new(g.start_battle());
+        let (actor, hit) = loop {
+            assert_eq!(view.battle.outcome(), Outcome::Ongoing, "the battle ends on a blow");
+            match view.battle.ai_step() {
+                Some(Step::Act { actor, hit }) if view.battle.outcome() != Outcome::Ongoing => break (actor, hit),
+                Some(_) => {}
+                None => panic!("the battle stopped"),
+            }
+        };
+        assert!(hit.killed, "the last blow kills");
+        view.note_log();
+        view.fx = Some(Fx::act(&view.battle, actor, hit, 200.0));
+        let over = tr("The battle is over");
+        for t in [0.0, 0.2, view.fx.as_ref().unwrap().duration() - 0.01] {
+            view.fx.as_mut().unwrap().t = t;
+            assert!(!view.end_shown(), "at {t} s the blow still plays");
+            assert_ne!(view.strip_text(false, &[], &[]).0, over);
+        }
+        view.fx = None;
+        assert!(view.end_shown());
+        assert_eq!(view.strip_text(false, &[], &[]).0, over);
     }
 
     #[test]
