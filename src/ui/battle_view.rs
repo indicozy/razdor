@@ -953,7 +953,7 @@ impl BattleView {
 
         // The strip between the formations: what to do, or what just happened.
         let (hint, color) = self.strip_text(player_turn, &targets, &moves);
-        chrome::text_box(l.strip);
+        chrome::army_divider(l.strip);
         let text_r = Rect { w: l.strip.w - 60.0 * k, x: l.strip.x + 30.0 * k, ..l.strip };
         if color == EXIT_HINT_INK {
             super::dt_font::with_face(super::dt_font::Face::Bold, || chrome::hint_text(text_r, &hint, color));

@@ -399,7 +399,13 @@ fn hall_offers_in_face(game: &mut Game, f: &Frame, view: &mut BuildingView, mess
     // The bar is always there, idle while the list fits, as the original's (0x4bedec).
     scrollbar_always(Rect::new(list.x + list.w - 14.0 * k, list.y + 2.0 * k, 12.0 * k, list.h - 4.0 * k), &mut view.hall_scroll, rows, entries.len());
     let row_w = list.w - 16.0 * k;
-    let first_y = list.y + 4.0 * k;
+    let visible_entries = entries.len().saturating_sub(view.hall_scroll).min(rows);
+    let content_h = visible_entries as f32 * row_h;
+    let first_y = if entries.len() <= rows {
+        list.y + ((list.h - content_h) / 2.0).max(4.0 * k)
+    } else {
+        list.y + 4.0 * k
+    };
     for (n, entry) in entries.iter().enumerate().skip(view.hall_scroll).take(rows) {
         let y = first_y + (n - view.hall_scroll) as f32 * row_h;
         let id = match *entry { HallEntry::Rumour(id) | HallEntry::Quest(id) => id };
@@ -623,7 +629,7 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
         chrome::shadow_centered(&cost, face.center().x, pill.y + pill.h + 13.0 * k, 12.0 * k, color);
     }
     barracks_counters(game, at(f, 256.0, 242.0, 572.0, 48.0));
-    chrome::text_box(card_panel_divider(f));
+    chrome::army_divider(card_panel_divider(f));
 
     // The army: the army screen's cards, a heal or raise button with its price on the strip.
     let heals = game.heals_here();
@@ -942,7 +948,7 @@ fn garrison(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
         top.or(bottom).and_then(|hit| match hit { Hit::Cell(slot) => super::items_view::row_text(c.formation, slot), _ => None })
     };
     let strip = card_panel_divider(f);
-    chrome::text_box(strip);
+    chrome::army_divider(strip);
     if let Some(hint) = hint {
         chrome::hint_text(strip, &hint, if refusal.is_some() { chrome::RED_TEXT } else { Color::new(0.4, 1.0, 0.8, 1.0) });
     }
@@ -1046,9 +1052,8 @@ fn price_list_in_face(assets: Option<&Assets>, rows: &[(Option<ItemId>, String, 
     let k = chrome::k();
     let row_h = 186.0 * k / visible.max(1) as f32;
     let frame = Rect::new(x, y, w, visible as f32 * row_h);
-    chrome::surface(frame, chrome::Skin::Marble);
+    draw_rectangle(frame.x, frame.y, frame.w, frame.h, Color::new(0.0, 0.0, 0.0, 0.25));
     chrome::surface(Rect::new(x, y, row_h, frame.h), chrome::Skin::Paper);
-    chrome::silver_frame(frame, k.max(1.0));
     let max_scroll = rows.len().saturating_sub(visible);
     let over = mouse_in(x, y, w, visible as f32 * row_h);
     let wheel = if over { wheel() } else { 0.0 };
@@ -1060,16 +1065,18 @@ fn price_list_in_face(assets: Option<&Assets>, rows: &[(Option<ItemId>, String, 
     *scroll = (*scroll).min(max_scroll);
     // The scroll bar (Razdor's): arrows, the track pages, the knob drags.
     scrollbar(Rect::new(x + w - 15.0 * k, y, 12.0 * k, visible as f32 * row_h), scroll, visible, rows.len());
-    let mut hit = None;
-    for (n, (icon, name, price, red)) in rows.iter().enumerate().skip(*scroll).take(visible) {
-        let ry = y + (n - *scroll) as f32 * row_h;
-        let sel = pick == Some(n);
-        if sel {
-            // Keep the icon strip clear; tint the text/price area translucently.
+    for n in *scroll..(*scroll + visible).min(rows.len()) {
+        if pick == Some(n) {
+            let ry = y + (n - *scroll) as f32 * row_h;
             let selection_x = x + row_h;
             let right = x + w - 18.0 * k;
             draw_rectangle(selection_x, ry, (right - selection_x).max(0.0), row_h - 2.0 * k, Color::new(0.3, 0.38, 0.3, 0.42));
         }
+    }
+    chrome::silver_frame(frame, k.max(1.0));
+    let mut hit = None;
+    for (n, (icon, name, price, red)) in rows.iter().enumerate().skip(*scroll).take(visible) {
+        let ry = y + (n - *scroll) as f32 * row_h;
         if let (Some(item), Some(assets)) = (icon, assets) {
             assets.draw_item(*item, x + 2.0 * k, ry + 1.0, row_h - 4.0 * k);
         }

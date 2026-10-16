@@ -2,7 +2,6 @@
 //! of resource icons and an OK button (video notes §5: the noon report, the victory window,
 //! story and quest dialogs). A scenario question has Yes and No instead of OK.
 
-use crate::ui::input::{is_mouse_button_down, is_mouse_button_pressed};
 use macroquad::prelude::*;
 
 use razdor::i18n::tr;
@@ -480,7 +479,11 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     let (x, y) = event_origin(sw, sh, chrome::bar_height(), w, h);
     // The defeat look is the red marble (the original's window after a lost battle).
     let skin = if d.defeat { chrome::Skin::Red } else { chrome::Skin::Marble };
-    chrome::window(Rect::new(x, y, w, h), &d.title, skin, false);
+    if d.defeat {
+        chrome::window_with_title_color(Rect::new(x, y, w, h), &d.title, skin, false, Color::from_rgba(255, 255, 255, 255));
+    } else {
+        chrome::window(Rect::new(x, y, w, h), &d.title, skin, false);
+    }
     let edge = o.max(1.0);
     let title_h = (26.0 * chrome::k()).round();
     chrome::silver_frame(Rect::new(x + 3.0 * o, y + title_h + 3.0 * o, w - 6.0 * o, h - title_h - 64.0 * o), edge);
@@ -624,9 +627,8 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     let ok_label = chrome::ui_text("Buttons", "Ok").filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| "OK".to_string());
     let ok = if d.defeat {
         let r = Rect::new(x + (w - bw) / 2.0, by, bw, bh);
-        let hover = mouse_in(r.x, r.y, r.w, r.h);
-        chrome::defeat_button(r, &ok_label, true, hover);
-        let pressed = hover && clicked();
+        let (_, down, pressed) = button_state(r, true);
+        chrome::defeat_button(r, &ok_label, true, down);
         if pressed {
             super::audio::cue(super::audio::Cue::Button);
         }

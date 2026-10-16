@@ -27,6 +27,8 @@ thread_local! {
     pub(super) static HERO_NAME: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     /// The name field's caret and selection.
     pub(super) static HERO_EDIT: std::cell::Cell<TextEdit> = const { std::cell::Cell::new(TextEdit::at_end()) };
+    /// The fallback scenario screen's last explicitly selected entry (demo is zero).
+    static SCENARIO_PICKED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// The hero's name field: this frame's keys edit the name (printable characters up to
@@ -105,6 +107,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
     let cols = if scenarios.len() > 10 { 2 } else { 1 };
     let col_w = (w - 20.0 * (cols - 1) as f32) / cols as f32;
     let mut hovered = None;
+    let mut picked = SCENARIO_PICKED.with(|p| p.get()).min(scenarios.len());
     let mut entries: Vec<(Option<usize>, String, String)> =
         vec![(None, tr("Built-in demo: the bandit kingdom").into(), tr("Our own small map and units. Clear both bandit camps.").into())];
     entries.extend(scenarios.iter().enumerate().map(|(i, e)| {
@@ -118,13 +121,19 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         let (ex, ey) = (x + c as f32 * (col_w + 20.0), top + r as f32 * (row_h + 6.0));
         let hover = mouse_in(ex, ey, col_w, row_h);
         draw_rectangle(ex, ey, col_w, row_h, PANEL);
-        draw_rectangle_lines(ex, ey, col_w, row_h, 2.0, if hover { ACCENT } else { DIM });
+        let selected = picked == k;
+        draw_rectangle_lines(ex, ey, col_w, row_h, 2.0, if selected { ACCENT } else { DIM });
+        if selected {
+            draw_rectangle(ex + 2.0, ey + 2.0, col_w - 4.0, row_h - 4.0, Color::new(0.8, 0.35, 0.08, 0.25));
+        }
         text_fit(title, ex + 12.0, ey + 22.0, col_w - 24.0, 20.0, if idx.is_none() { ACCENT } else { INK });
         let first = wrap(desc, col_w - 24.0, 16.0).into_iter().next().unwrap_or_default();
         text(&first, ex + 12.0, ey + 42.0, 16.0, DIM);
         if hover {
             hovered = Some((*idx, desc.clone()));
             if clicked() {
+                picked = k;
+                SCENARIO_PICKED.with(|p| p.set(picked));
                 cue(Cue::MenuPress);
                 return Some(Screen::ClassSelect { scenario: *idx });
             }

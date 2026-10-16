@@ -949,7 +949,7 @@ pub fn squad(
         (None, None) if show_tree => (tr("Click a unit to select it; Esc returns").to_string(), Color::new(1.0, 0.55, 0.25, 1.0)),
         (None, None) => (tr("Drag an item onto a unit to give it; Esc returns").to_string(), Color::new(1.0, 0.55, 0.25, 1.0)),
     };
-    chrome::text_box(strip);
+    chrome::army_divider(strip);
     super::dt_font::with_native_metrics(|| {
         let ink = if super::dt_font::native_metrics() && message.is_none() { super::typography::Ink::Green.color() } else { hc };
         chrome::hint_text(strip, &hint, ink);
@@ -1392,7 +1392,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     }
     // A campaign's history runs over several maps: each map's entries under its title.
     let lines = super::story::journal_lines(&rows);
-    chrome::text_box(list_box);
+    chrome::text_box_base(list_box);
     let row_h = (head * 1.25).round();
     let fits = ((list.h - 8.0 * s) / row_h).floor().max(1.0) as usize;
     if mouse_in(list.x, list.y, list.w, list.h) {
@@ -1414,6 +1414,11 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     }
     view.list_scroll = view.list_scroll.min(lines.len().saturating_sub(fits));
     scrollbar_always(list_bar, &mut view.list_scroll, fits, lines.len());
+    if let Some(n) = lines.iter().enumerate().skip(view.list_scroll).take(fits).find_map(|(n, line)| (*line == super::story::Line::Row(view.pick)).then_some(n)) {
+        let ry = list.y + 4.0 * s + (n - view.list_scroll) as f32 * row_h;
+        draw_rectangle(list.x + 2.0 * s, ry, list.w - 4.0 * s, row_h, Color::new(0.15, 0.15, 0.15, 0.6));
+    }
+    chrome::text_box_decoration(list_box);
     if rows.is_empty() {
         with_original_face(Face::Body, || chrome::shadow_centered(super::story::empty_note(view.tab), list.x + list.w / 2.0, list.y + list.h / 2.0, head * 0.9, DIM));
     }
@@ -1428,10 +1433,6 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
             super::story::Line::Row(k) => k,
         };
         let row = &rows[k];
-        if k == view.pick {
-            // The picked row lit (the list's highlight, 0x262626 added).
-            draw_rectangle(list.x + 2.0 * s, ry, list.w - 4.0 * s, row_h, Color::new(0.15, 0.15, 0.15, 0.6));
-        }
         let mut title = row.title.clone();
         while measure(&title, head).width > list.w - 12.0 * s && title.chars().count() > 3 {
             title.pop();
@@ -1446,7 +1447,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     let entry_bar = o(868.0, 410.0, 18.0, 220.0);
     let entry_box = Rect::new(entry.x, entry.y, entry_bar.x + entry_bar.w - entry.x, entry.h);
     heading("QuestDescript", n_("Diary entry"), entry_box);
-    chrome::text_box(entry_box);
+    chrome::text_box_base(entry_box);
     let body = sheet_size(Face::Body, s);
     let room = entry.w - 16.0 * s;
     let lines = rows.get(view.pick).map_or_else(Vec::new, |row| match view.tab {
@@ -1464,6 +1465,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
         }
     }
     scrollbar_always(entry_bar, &mut view.text_scroll, shown, lines.len());
+    chrome::text_box_decoration(entry_box);
     for (n, line) in lines.iter().skip(view.text_scroll).take(shown).enumerate() {
         let y = entry.y + 6.0 * s + n as f32 * line_h + body * 0.85;
         draw_markup_row_face(&line.row, entry.x + 8.0 * s, y, room, line.size, line.face, Some(line.color));

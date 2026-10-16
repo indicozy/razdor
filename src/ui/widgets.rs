@@ -750,6 +750,13 @@ pub fn markup_rows(text: &str, room: f32, size: f32) -> Vec<MarkupRow> {
     super::dt_font::with_original_face(super::dt_font::Face::Subtitle, || markup_rows_in_face(text, room, size))
 }
 
+/// [`markup_rows`] laid out in a chosen font face, with matching metrics in either font mode.
+pub fn markup_rows_face(text: &str, room: f32, size: f32, face: super::dt_font::Face) -> Vec<MarkupRow> {
+    super::dt_font::with_face(face, || {
+        super::dt_font::with_original_face(face, || markup_rows_in_face(text, room, size))
+    })
+}
+
 fn markup_rows_in_face(text: &str, room: f32, size: f32) -> Vec<MarkupRow> {
     razdor::dt::markup::parse(text)
         .into_iter()

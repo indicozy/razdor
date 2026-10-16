@@ -36,6 +36,7 @@ pub enum Fx {
     /// Green/blue swap and black transparency key for the barracks' green hire pill.
     KeyBlackSwapGreenBlue,
     /// Higher-contrast brown ornaments for the shop's dark parchment panels.
+    #[allow(dead_code)] // Kept for legacy art; standard brown panels use subtractive ornament.
     ShadeStrong,
     /// The original trait icons use an opaque violet matte (RGB 129, 0, 127).
     KeyPurple,
@@ -400,6 +401,18 @@ fn visual_texture(key: &'static str, rel: &str, params: [f32; 4], adjust: impl F
     CHROME.with(|state| {
         state.borrow_mut().as_mut()?.visual_textures.insert(key, (params, texture.clone()));
         texture
+    })
+}
+
+/// Original dark parchment palette, independently of light paper and card strips.
+fn brown_paper_texture() -> Option<Texture2D> {
+    visual_texture("reference-brown-paper", "Windows/Win-paper.lit", [144.0,136.0,256.0,565.0], |img| {
+        subtract(img,[144,136,256]);
+        // The reference game renders these panels in RGB565. Retain its grain and levels.
+        for p in img.rgba.chunks_exact_mut(4) {
+            let r=p[0]>>3; let g=p[1]>>2;
+            p[0]=(r<<3)|(r>>2); p[1]=(g<<2)|(g>>4); p[2]=0;
+        }
     })
 }
 
@@ -994,6 +1007,15 @@ pub fn tex_src(t: &Texture2D, src: Rect, dst: Rect, color: Color) {
     draw_texture_ex(t, dst.x, dst.y, color, DrawTextureParams { dest_size: Some(vec2(dst.w, dst.h)), source: Some(src), ..Default::default() });
 }
 
+fn tex_src_flipped_x(t: &Texture2D, src: Rect, dst: Rect, color: Color) {
+    draw_texture_ex(t, dst.x, dst.y, color, DrawTextureParams {
+        dest_size: Some(vec2(dst.w, dst.h)),
+        source: Some(src),
+        flip_x: true,
+        ..Default::default()
+    });
+}
+
 /// Repeats `t` over `r` at `scale` screen pixels per texel, clipping the last row and column.
 pub fn tile(t: &Texture2D, r: Rect, scale: f32, color: Color) {
     let (tw, th) = (t.width() * scale, t.height() * scale);
@@ -1112,11 +1134,9 @@ impl Skin {
         let paper = |brown: bool, c: Color| paper_texture(brown).map(|t| (t, c));
         match self {
             Skin::Marble => win("Win-marble").map(|t| (t, WHITE)),
-            Skin::Red => win("Win-red").map(|t| (t, WHITE)),
+            Skin::Red => win_scaled("Win-red", [1024; 3], [0, -64, -128]).map(|t| (t, WHITE)),
             Skin::Paper => paper(false, WHITE),
-            // The original brown paper is the light Win-paper texture multiplied into
-            // a dark sepia: its blue channel is removed, as in the reference art.
-            Skin::Brown => paper(true, Color::new(0.35, 0.22, 0.0, 1.0)),
+            Skin::Brown => brown_paper_texture().map(|t| (t, WHITE)),
             Skin::Strip => paper(true, Color::new(0.37, 0.265, 0.02, 1.0)),
         }
     }
@@ -1254,7 +1274,8 @@ pub fn paper_panel(r: Rect) {
 /// A skin at opacity `alpha` (the map's tooltips let the ground show through).
 pub fn surface_alpha(r: Rect, skin: Skin, alpha: f32) {
     if let Some((t, c)) = skin.texture() {
-        tile(&t, r, k().min(1.4), Color::new(c.r, c.g, c.b, alpha));
+        let scale = if matches!(skin, Skin::Brown | Skin::Red) { k() } else { k().min(1.4) };
+        tile(&t, r, scale, Color::new(c.r, c.g, c.b, alpha));
         return;
     }
     let base = skin.color();
@@ -1318,7 +1339,7 @@ fn title_bar_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bo
     let title_w = super::dt_font::with_face(face, || measure(title, size).width);
     let ornate = ornate && matches!(skin, Skin::Red | Skin::Marble) && r.w > 400.0 && title_w < r.w - 300.0 * k;
     if let Some(t) = win_fx("Corner-Left", Fx::KeyBlack).filter(|_| ornate) {
-        let tint = if skin == Skin::Red { Color::new(1.0, 0.45, 0.1, 0.9) } else { Color::new(0.55, 0.8, 0.7, 0.8) };
+        let tint = if skin == Skin::Red { Color::new(1.0, 0.30, 0.0, 1.0) } else { Color::new(0.55, 0.8, 0.7, 0.8) };
         let h = r.h * 0.8;
         let w = t.width() * h / t.height();
         tex(&t, Rect::new(r.x + k, r.y + (r.h - h) / 2.0, w, h), tint);
@@ -1371,6 +1392,30 @@ fn window_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bool,
     (Rect::new(r.x + 2.0 * k, r.y + tb + 1.0, r.w - 4.0 * k, r.h - tb - 3.0 * k), closed)
 }
 
+/// Army management's parchment divider uses horizontal black flourishes, without corners.
+pub fn army_divider(r: Rect) {
+    if let Some(t) = win_scaled("Win-paper", [1024; 3], [-146, -128, -256]) {
+        tile(&t, r, k(), WHITE);
+    } else {
+        text_box_base(r);
+    }
+    let inset = k();
+    let ornament_h = (23.0 * k()).min((r.h - 2.0 * inset).max(0.0));
+    for (name, right) in [("Corner-Left", false), ("Corner-Right", true)] {
+        if let Some(t) = win(name) {
+            t.set_filter(FilterMode::Nearest);
+            // Use the inward-facing half of each title ornament at native scale,
+            // rather than squeezing its two motifs into the divider's single one.
+            let w = (62.0 * k()).min((r.w - 2.0 * inset).max(0.0) / 2.0);
+            let x = if right { r.right() - inset - w } else { r.x + inset };
+            let y = r.y + (r.h - ornament_h) / 2.0;
+            let source = Rect::new(if right { 0.0 } else { t.width() / 2.0 }, 0.0, t.width() / 2.0, t.height());
+            subtractive(|| tex_src(&t, source, Rect::new(x, y, w, ornament_h), WHITE));
+        }
+    }
+    silver_frame(r, k().max(1.0));
+}
+
 /// A thin ornamental divider (the strip between the battle's formations, without text).
 pub fn divider(r: Rect) {
     if let Some(t) = win("HintFrame") {
@@ -1414,9 +1459,9 @@ fn corners(r: Rect) {
     }
 }
 
-/// Tile the two sides of a parchment ornament at its native scale. Narrow panels
-/// reveal less of the source instead of squeezing the flourish horizontally.
-fn tile_side_strips(t: &Texture2D, r: Rect, max_frac: f32, tint: Color) {
+/// Tile mirrored parchment ornaments at their native scale. Narrow panels reveal less of
+/// the same source strip on each side instead of squeezing the flourish horizontally.
+fn tile_side_strips(t: &Texture2D, r: Rect, max_frac: f32, flip_left: bool, tint: Color) {
     let scale = k();
     let strip_w = (t.width() * scale).min(r.w * max_frac);
     if strip_w <= 0.0 || r.h <= 0.0 {
@@ -1427,22 +1472,67 @@ fn tile_side_strips(t: &Texture2D, r: Rect, max_frac: f32, tint: Color) {
     while y < r.y + r.h {
         let h = (t.height() * scale).min(r.y + r.h - y);
         let src_h = h / scale;
-        tex_src(t, Rect::new(0.0, 0.0, src_w, src_h), Rect::new(r.x, y, strip_w, h), tint);
-        tex_src(t, Rect::new(t.width() - src_w, 0.0, src_w, src_h), Rect::new(r.x + r.w - strip_w, y, strip_w, h), tint);
+        let src = Rect::new(0.0, 0.0, src_w, src_h);
+        let left = Rect::new(r.x, y, strip_w, h);
+        let right = Rect::new(r.x + r.w - strip_w, y, strip_w, h);
+        if flip_left { tex_src_flipped_x(t, src, left, tint); } else { tex_src(t, src, left, tint); }
+        if flip_left { tex_src(t, src, right, tint); } else { tex_src_flipped_x(t, src, right, tint); }
         y += h;
     }
 }
 
-/// The red-brown parchment box of story and description texts, with silver corners.
-pub fn text_box(r: Rect) {
+/// Fixed native ornament width and repeat height; only the gap changes between panels.
+fn complete_brown_side_strips(t: &Texture2D, r: Rect, tint: Color) {
+    let scale=k();
+    let w=t.width()*scale; let step=t.height()*scale;
+    if r.w<=0.0 || r.h<=0.0 || step<=0.0 {return;}
+    let mut y=r.y;
+    while y<r.bottom() {
+        let h=step.min(r.bottom()-y);
+        let source=Rect::new(0.0,0.0,t.width(),h/scale);
+        tex_src(t,source,Rect::new(r.x,y,w,h),tint);
+        tex_src_flipped_x(t,source,Rect::new(r.right()-w,y,w,h),tint);
+        y+=h;
+    }
+}
+
+pub fn text_box_base(r: Rect) {
     surface(r, Skin::Brown);
-    if let Some(t) = win_fx("Big_Frame_1", Fx::ShadeStrong) {
+}
+
+/// The brown parchment's mirrored side ornament.
+pub fn text_box_sides(r: Rect) {
+    if let Some(t) = win("Big_Frame_1") {
         t.set_filter(FilterMode::Nearest);
         let opacity = super::window_layout::visual().brown_ornament;
-        tile_side_strips(&t, r, 0.14, Color::new(1.0, 1.0, 1.0, opacity));
+        let inset = 2.0 * k();
+        let ornament = Rect::new(r.x + inset, r.y + inset, (r.w - inset * 2.0).max(0.0), (r.h - inset * 2.0).max(0.0));
+        subtractive(|| complete_brown_side_strips(&t, ornament, Color::new(41.0/255.0*opacity,40.0/255.0*opacity,0.0,1.0)));
     }
+}
+
+/// The brown parchment's silver edge and corner art.
+pub fn text_box_frame(r: Rect) {
     silver_frame(r, k().max(1.0));
-    corners(r);
+    for (name, right, bottom) in [
+        ("Corner_Frame-LU",false,false),("Corner_Frame-RU",true,false),
+        ("Corner_Frame-LD",false,true),("Corner_Frame-RD",true,true),
+    ] {
+        if let Some(t)=win(name) {
+            let (w,h)=(t.width()*k(),t.height()*k());
+            tex(&t,Rect::new(if right {r.right()-w}else{r.x},if bottom {r.bottom()-h}else{r.y},w,h),WHITE);
+        }
+    }
+}
+
+pub fn text_box_decoration(r: Rect) {
+    text_box_sides(r);
+    text_box_frame(r);
+}
+
+pub fn text_box(r: Rect) {
+    text_box_base(r);
+    text_box_decoration(r);
 }
 
 /// A translucent dark backing over art, for the village's text panel.
@@ -1470,7 +1560,7 @@ pub fn parchment_fill(r: Rect, ornaments: bool) {
         if let Some(t) = win_fx("Big_Frame_2", Fx::KeyBlack) {
             t.set_filter(FilterMode::Linear);
             let opacity = super::window_layout::visual().white_ornament;
-            tile_side_strips(&t, r, 0.22, Color::new(1.0, 0.78, 0.05, opacity));
+            tile_side_strips(&t, r, 0.22, true, Color::new(1.0, 0.78, 0.05, opacity));
         }
     }
     // The original darkens the parchment towards the edges.

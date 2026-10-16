@@ -27,6 +27,8 @@ thread_local! {
     /// The scenario group picked (index into the list shown), the list's scroll in pixels
     /// at k = 1, and the hero picked.
     static PICKED: Cell<usize> = const { Cell::new(0) };
+    /// The specific chapter selected in a campaign, when one is picked.
+    static PICKED_MAP: Cell<Option<usize>> = const { Cell::new(None) };
     static SCROLL: Cell<f32> = const { Cell::new(0.0) };
     static HERO: Cell<usize> = const { Cell::new(0) };
     /// A map to pick when the list opens (the `scenarios:<map>` snapshot scene).
@@ -204,6 +206,7 @@ fn list_key(file: &str, width: u32, tutorial: &str) -> u32 {
 /// starts on row 0 each time).
 pub fn open_list() {
     PICKED.with(|p| p.set(0));
+    PICKED_MAP.with(|p| p.set(None));
     SCROLL.with(|s| s.set(0.0));
 }
 
@@ -252,13 +255,14 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
     if let Some(name) = PICK.with(|p| p.borrow_mut().take()) {
         if let Some(i) = list.iter().position(|g| std::iter::once(&g.first).chain(&g.chapters).any(|&m| scenarios[m].file.starts_with(&name))) {
             PICKED.with(|p| p.set(i));
+            PICKED_MAP.with(|p| p.set(None));
         }
     }
     let mut picked = PICKED.with(|p| p.get()).min(list.len().saturating_sub(1));
     // The list: per group a round icon and the name, and a campaign's chapters under it in
     // small type; the picked group's block is lit. The wheel and the scrollbar scroll it.
     let rows = win.rect(12.0, 36.0, 270.0, 396.0);
-    chrome::text_box(rows);
+    chrome::text_box_base(rows);
     let (head_h, chapter_h) = (30.0 * k, 18.0 * k);
     let block_h = |g: &Group| head_h + listed_chapters(scenarios, g).len() as f32 * chapter_h + if listed_chapters(scenarios, g).is_empty() { 0.0 } else { 4.0 * k };
     let content_h: f32 = list.iter().map(block_h).sum::<f32>() + 12.0 * k;
@@ -275,11 +279,20 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
     scrollbar_px(Rect::new(rows.x + rows.w - 16.0 * k, rows.y + 4.0 * k, 12.0 * k, rows.h - 8.0 * k), &mut scroll, max_scroll, rows.h / k, 15.0);
     SCROLL.with(|s| s.set(scroll));
     let row_w = rows.w - if barred { 22.0 * k } else { 8.0 * k };
+    chrome::text_box_decoration(rows);
+    let inside = Rect::new(rows.x, rows.y + 2.0 * k, rows.w, rows.h - 4.0 * k);
+    let mut selection_y = rows.y + 6.0 * k - scroll * k;
+    for (row, g) in list.iter().enumerate() {
+        let r = Rect::new(rows.x + 4.0 * k, selection_y, row_w, block_h(g) - 2.0 * k);
+        selection_y += block_h(g);
+        if row == PICKED.with(|p| p.get()).min(list.len().saturating_sub(1)) && r.y < inside.y + inside.h && r.y + r.h > inside.y {
+            picked_bar(r);
+        }
+    }
     let mut next = None;
     let mut y = rows.y + 6.0 * k - scroll * k;
     // The rows are clipped to the box, so a block only partly in view shows its part (a
     // campaign taller than the room left was hidden, with the gap it left).
-    let inside = Rect::new(rows.x, rows.y + 2.0 * k, rows.w, rows.h - 4.0 * k);
     let clip = crate::ui::widgets::Clip::new(inside);
     for (row, g) in list.iter().enumerate() {
         let r = Rect::new(rows.x + 4.0 * k, y, row_w, block_h(g) - 2.0 * k);
@@ -287,16 +300,12 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         if r.y >= inside.y + inside.h || r.y + r.h <= inside.y {
             continue;
         }
-        let (hover, _, pressed) = button_state(r, over_list);
+        let head = Rect::new(r.x, r.y, r.w, head_h - 2.0 * k);
+        let head_pressed = head.contains(crate::ui::widgets::pointer().into()) && clicked() && over_list;
         let e = &scenarios[g.first];
         let chapters = listed_chapters(scenarios, g);
-        let head = Rect::new(r.x, r.y, r.w, head_h - 2.0 * k);
-        // The picked row's bar lies under its name only, not its chapters, as the original's.
-        if row == picked {
-            picked_bar(head);
-        } else if hover {
-            draw_rectangle(head.x, head.y, head.w, head.h, Color::new(0.1, 0.15, 0.45, 0.35));
-        }
+        // The picked campaign and its listed chapters share a selection bar; hover is
+        // deliberately not a selection state.
         scenario_icon(e.scenario.header.scenario_picture_index, vec2(head.x + 14.0 * k, head.y + head.h / 2.0), k);
         let name = group_name(scenarios, g);
         let name_ink = if e.scenario.header.scenario_picture_index == 5 {
@@ -304,7 +313,8 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         } else if !chapters.is_empty() {
             super::typography::Ink::Yellow.color()
         } else {
-            super::typography::Ink::Blue.color()
+            // Single scenarios use the original list's cyan, rather than the blue markup tint.
+            Color::from_rgba(90, 231, 255, 255)
         };
         with_face(Face::Subtitle, || {
             let size = fit_size(name, r.w - 40.0 * k, 15.0 * k);
@@ -315,12 +325,25 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
             let cy = r.y + head_h + n as f32 * chapter_h + chapter_h * 0.5 + small * 0.36;
             chrome::shadow_text(&ellipsize(title(&scenarios[c]), r.w - 60.0 * k, small), r.x + 52.0 * k, cy, small, super::typography::Ink::Orange.color());
         });
-        // A row is picked silently (the original's list makes no sound).
-        if pressed {
-            if row == picked {
+        // A campaign heading or individual chapter is selected only on click.
+        if head_pressed {
+            if row == picked && PICKED_MAP.with(|p| p.get()).is_none() {
                 next = Some(Screen::ClassSelect { scenario: Some(g.first) });
             }
             picked = row;
+            PICKED_MAP.with(|p| p.set(None));
+        } else {
+            for (n, &chapter_index) in chapters.iter().enumerate() {
+                let chapter = Rect::new(r.x + 28.0 * k, r.y + head_h + n as f32 * chapter_h, r.w - 28.0 * k, chapter_h);
+                if over_list && chapter.contains(crate::ui::widgets::pointer().into()) && clicked() {
+                    if PICKED_MAP.with(|p| p.get()) == Some(chapter_index) {
+                        next = Some(Screen::ClassSelect { scenario: Some(chapter_index) });
+                    }
+                    picked = row;
+                    PICKED_MAP.with(|p| p.set(Some(chapter_index)));
+                    break;
+                }
+            }
         }
     }
     drop(clip);
@@ -346,7 +369,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
             chrome::tex(&t, frame, WHITE);
         }
         // Under it the description box (0x4d2a30, 65ae00): the name centred in white, the
-        // description justified in the ae24a0 tint, the block centred in the box's height.
+        // description in SanSerif Bold with Orange for SanSerif, centred in the box's height.
         let bottom = win.rect(0.0, 432.0, 0.0, 0.0).y;
         let desc = Rect::new(frame.x, frame.y + frame.h + 8.0 * k, frame.w, (bottom - frame.y - frame.h - 8.0 * k).max(0.0));
         chrome::text_box(desc);
@@ -355,7 +378,12 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         let title_text = format!("^*{}", group_name(scenarios, g).replace(['^', '*', '|', '@'], ""));
         let mut rows = markup_rows(&title_text, room, 16.0 * k);
         let title_rows = rows.len();
-        rows.extend(markup_rows(&e.scenario.description.replace(['^', '*', '|', '@'], ""), room, size));
+        rows.extend(markup_rows_face(
+            &e.scenario.description.replace(['^', '*', '|', '@'], ""),
+            room,
+            size,
+            Face::Bold,
+        ));
         let line_h = 14.0 * k;
         let block = title_rows as f32 * 20.0 * k + 12.0 * k + (rows.len() - title_rows) as f32 * line_h;
         let mut y = desc.y + ((desc.h - block) / 2.0).max(10.0 * k) + 14.0 * k;
@@ -368,16 +396,20 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
                     y += 12.0 * k;
                 }
             } else {
-                draw_markup_row(row, desc.x + 17.0 * k, y, room, size);
+                let orange = with_face(Face::Bold, || super::typography::Ink::Orange.color());
+                with_face(Face::Bold, || {
+                    draw_markup_row_face(row, desc.x + 17.0 * k, y, room, size, Face::Bold, Some(orange));
+                });
                 y += line_h;
             }
         }
         drop(clip);
     }
     let can = !list.is_empty();
+    let selected_map = PICKED_MAP.with(|p| p.get()).or_else(|| list.get(picked).map(|g| g.first));
     if (win.button(369.0, 116.0, &own("Buttons", "Next", n_("Next")), can) || (can && key(KeyCode::Enter))) && next.is_none() {
         cue(Cue::Button);
-        next = list.get(picked).map(|g| Screen::ClassSelect { scenario: Some(g.first) });
+        next = selected_map.map(|i| Screen::ClassSelect { scenario: Some(i) });
     }
     if win.button(492.0, 95.0, &own("Buttons", "Cancel", n_("Cancel")), true) || closed || key(KeyCode::Escape) {
         return Some(Screen::MainMenu);
