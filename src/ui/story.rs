@@ -130,10 +130,38 @@ fn quest_line(key: &str, ours: &'static str) -> String {
 /// own toast only when no window shows it (the original has no toast).
 fn notice(line: &str, event: Option<EventId>, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) {
     if let Some(d) = dialogs.back_mut().filter(|d| d.event.is_some() && !d.question && (event.is_none() || d.event == event)) {
-        d.add_notice(line);
+        let quest = [quest_line("AddQuest", QUEST_ADDED), quest_line("DelQuest", QUEST_COMPLETED)];
+        d.notice = quest_notice(d.notice.take(), line, &quest);
         return;
     }
     *message = Some(line.to_string());
+}
+
+/// The window's notice after quest line `line` (`quest`: the added and the completed line).
+/// The original keeps one quest line in one label (0x67483f): an event that gives a quest and
+/// closes one shows only the completed line, written after the added one (0x4a8de4, then
+/// 0x4a8e12), whatever order Razdor reports them in. Other notices are kept beside it.
+fn quest_notice(current: Option<String>, line: &str, quest: &[String; 2]) -> Option<String> {
+    match current {
+        Some(n) if n == quest[1] && line == quest[0] => Some(n),
+        Some(n) if quest.contains(&n) => Some(line.to_string()),
+        Some(n) => Some(format!("{n}   {line}")),
+        None => Some(line.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod quest_line_tests {
+    use super::quest_notice;
+
+    #[test]
+    fn one_quest_line_the_completed_one_wins() {
+        let q = ["added".to_string(), "done".to_string()];
+        assert_eq!(quest_notice(None, "added", &q).as_deref(), Some("added"));
+        assert_eq!(quest_notice(Some("added".into()), "done", &q).as_deref(), Some("done"));
+        assert_eq!(quest_notice(Some("done".into()), "added", &q).as_deref(), Some("done"), "whatever the order");
+        assert_eq!(quest_notice(Some("other".into()), "done", &q).as_deref(), Some("other   done"));
+    }
 }
 
 /// The journal screen: its tab, the selected line, and how far the list and the text are

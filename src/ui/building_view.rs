@@ -187,16 +187,43 @@ fn tab_art(tab: Option<Tab>) -> Option<usize> {
     })
 }
 
-/// A parchment tab in the left column (`tab` `None` is the exit). Returns true when clicked.
-fn tab_button(label: &str, tab: Option<Tab>, r: Rect, active: bool) -> bool {
-    let hover = mouse_in(r.x, r.y, r.w, r.h);
-    let state = if active {
+/// A tab's picture, as the original's building window sets them (0x4d9060): `TB-` normal,
+/// `TBo` under the mouse (its enter and leave handlers 0x4bb6c8 / 0x4bb734 swap it in and
+/// out), `TBd` while held down and for the open tab (its pressed picture).
+fn tab_state(active: bool, hover: bool, down: bool) -> &'static str {
+    if active || down {
         "TBd"
     } else if hover {
         "TBo"
     } else {
         "TB-"
-    };
+    }
+}
+
+thread_local! {
+    /// A key went down while the village window was up (its «Ок» is pressed).
+    static VILLAGE_KEY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The village window's «Ок» by key this frame: pressed by a key going down, clicked by its
+/// release (0x4cd81c).
+fn village_ok_key(down: bool, up: bool) -> bool {
+    VILLAGE_KEY.with(|k| {
+        if down {
+            k.set(true);
+        }
+        let click = up && k.get();
+        if click {
+            k.set(false);
+        }
+        click
+    })
+}
+
+/// A parchment tab in the left column (`tab` `None` is the exit). Returns true when clicked.
+fn tab_button(label: &str, tab: Option<Tab>, r: Rect, active: bool) -> bool {
+    let hover = mouse_in(r.x, r.y, r.w, r.h);
+    let state = tab_state(active, hover, hover && is_mouse_button_down(MouseButton::Left));
     let art = tab_art(tab).and_then(|n| chrome::win(&format!("{state}{n}_RUS")));
     if let Some(t) = art {
         chrome::tex(&t, r, WHITE);
@@ -1282,15 +1309,21 @@ fn village_window(game: &mut Game, view: &BuildingView, message: &mut Option<Str
     });
     let (btn_w, btn_h) = chrome::win("Btn1Up").map_or((180.0, 40.0), |t| (t.width(), t.height()));
     let (btn_w, btn_h) = (btn_w * o, btn_h * o);
-    let ok = button(x + (w - btn_w) / 2.0, y + h - 10.0 * o - btn_h, btn_w, btn_h, &own_text("Buttons", "Ok", n_("OK")), true);
+    // Any key but Tab, Alt and the Up and Down arrows presses «Ок» and its release clicks it,
+    // Space and Enter included (the window's key handler 0x4cd81c: 0x479eb8 / 0x47a0dc on
+    // 0x671a24), as in the one-button event window; a release counts only after the key went
+    // down with the window up.
+    let key_ok = village_ok_key(ok_key_pressed(), ok_key_released());
+    let ok = button(x + (w - btn_w) / 2.0, y + h - 10.0 * o - btn_h, btn_w, btn_h, &own_text("Buttons", "Ok", n_("OK")), true) || key_ok;
     // The close box and Esc sound as the button does (tools/difftest/AV.md §5).
     let esc = key(KeyCode::Escape);
-    if closed || esc {
+    if closed || esc || key_ok {
         cue(Cue::Button);
     }
     if !(ok || closed || esc) {
         return None;
     }
+    VILLAGE_KEY.with(|k| k.set(false));
     // Closing plays `Item-Gold` too when the tribute was taken (0x4c604a).
     if view.tribute_paid {
         cue(Cue::Gold);
@@ -1571,6 +1604,23 @@ fn with_back(bar: Option<Screen>, view: &BuildingView) -> Option<Screen> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_tab_lights_under_the_mouse_as_the_original() {
+        // 0x4d9060: TBo under the mouse, TBd held or open, TB- else.
+        assert_eq!(super::tab_state(false, false, false), "TB-");
+        assert_eq!(super::tab_state(false, true, false), "TBo");
+        assert_eq!(super::tab_state(false, true, true), "TBd");
+        assert_eq!(super::tab_state(true, false, false), "TBd");
+    }
+
+    #[test]
+    fn the_village_ok_takes_a_key_pressed_while_it_is_up() {
+        // 0x4cd81c: the key-down presses «Ок», its release clicks it.
+        assert!(!super::village_ok_key(false, true), "a release without a press while open");
+        assert!(!super::village_ok_key(true, false));
+        assert!(super::village_ok_key(false, true));
+        assert!(!super::village_ok_key(false, true), "once");
+    }
     use super::{market_list_buttons, next_pick, ListButton, offer_picture, recruit_x, screen_line, stock_caption, stock_picture};
     use razdor::rules::economy::VillageOffer;
     use razdor::rules::formation::{Formation, Row, Slot};
