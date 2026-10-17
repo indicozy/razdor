@@ -53,10 +53,48 @@ pub enum Event {
     Sending { items: usize, first: String },
     /// An answer was taken: how many of the batch passed, and how long it took.
     Answer { taken: usize, of: usize, seconds: f32 },
-    /// The request or the answer failed as a whole.
-    Failed(String),
-    /// Texts of the batch whose answers were refused: the start of each, and why.
-    Refused(Vec<(String, String)>),
+    /// The request or the answer failed as a whole; `request` is its number in the request log.
+    Failed { why: String, request: usize },
+    /// Texts of the batch whose answers were refused; `request` is the number of the request
+    /// (and its raw answer) in the request log.
+    Refused { request: usize, texts: Vec<Refused> },
+}
+
+/// A text whose answer was refused.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Refused {
+    /// Its key in the request (`"1"`, `"2"`... as [`llm::user_prompt`] numbers the batch).
+    pub key: String,
+    /// The original text, whole.
+    pub src: String,
+    /// Why, in the interface language: what was expected and what came back.
+    pub why: String,
+    /// The refused translation, whole; none when the answer had no text for it.
+    pub answer: Option<String>,
+}
+
+impl Refused {
+    /// Its block in the request log: the reason, the whole original and the whole refused
+    /// translation (the window's log shows only their starts).
+    pub fn log_text(&self) -> String {
+        let indent = |s: &str| s.replace('\n', "\n    ");
+        format!(
+            "[{}] {}\n  original:\n    {}\n  translation:\n    {}",
+            self.key,
+            self.why,
+            indent(&self.src),
+            self.answer.as_deref().map_or("-".to_string(), indent)
+        )
+    }
+}
+
+/// The start of each request in the request log: `===== request N | ...`.
+const REQUEST_HEAD: &str = "===== request ";
+
+/// How many requests the request log holds (the next one gets the number after it).
+fn requests_logged(path: Option<&Path>) -> usize {
+    let Some(bytes) = path.map(request_log).and_then(|p| std::fs::read(p).ok()) else { return 0 };
+    String::from_utf8_lossy(&bytes).lines().filter(|l| l.starts_with(REQUEST_HEAD)).count()
 }
 
 /// The request log of a job: every request and the model's raw answer, next to its progress
@@ -81,6 +119,7 @@ fn log_request(path: Option<&Path>, text: &str) {
 /// a row fail as a whole (a server down, a bad key).
 pub fn run(job: &mut Job, path: Option<&Path>, s: &Settings, stop: &AtomicBool, mut report: impl FnMut(&Job, Event)) -> Result<(), String> {
     let mut failures_in_a_row = 0;
+    let mut request = requests_logged(path);
     loop {
         if stop.load(Ordering::Relaxed) {
             return Ok(());
@@ -100,10 +139,11 @@ pub fn run(job: &mut Job, path: Option<&Path>, s: &Settings, stop: &AtomicBool, 
             job.made_with = Some(job::MadeWith::of(s));
         }
         let asked = llm::chat(s, &rules, &prompt);
+        request += 1;
         log_request(
             path,
             &format!(
-                "===== {} (unix s) | model {} | {} texts\n--- system\n{rules}\n--- user\n{prompt}\n--- answer\n{}\n",
+                "{REQUEST_HEAD}{request} | {} (unix s) | model {} | {} texts\n--- system\n{rules}\n--- user\n{prompt}\n--- answer\n{}\n",
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()),
                 s.model,
                 batch.len(),
@@ -118,22 +158,23 @@ pub fn run(job: &mut Job, path: Option<&Path>, s: &Settings, stop: &AtomicBool, 
                 failures_in_a_row = 0;
                 let taken = job.accept(&batch, &answers);
                 report(job, Event::Answer { taken, of: batch.len(), seconds: t0.elapsed().as_secs_f32() });
-                let refused: Vec<(String, String)> = batch
+                let refused: Vec<Refused> = batch
                     .iter()
-                    .map(|&i| &job.entries[i])
-                    .filter(|e| e.en.is_none())
-                    .map(|e| (e.src.chars().take(50).collect(), e.last_error.clone()))
+                    .enumerate()
+                    .map(|(k, &i)| (k, &job.entries[i]))
+                    .filter(|(_, e)| e.en.is_none())
+                    .map(|(k, e)| Refused { key: (k + 1).to_string(), src: e.src.clone(), why: e.last_error.clone(), answer: e.last_answer.clone() })
                     .collect();
                 if !refused.is_empty() {
-                    log_request(path, &format!("--- refused\n{}\n", refused.iter().map(|(t, w)| format!("{t}: {w}")).collect::<Vec<_>>().join("\n")));
-                    report(job, Event::Refused(refused));
+                    log_request(path, &format!("--- refused (request {request})\n{}\n", refused.iter().map(Refused::log_text).collect::<Vec<_>>().join("\n")));
+                    report(job, Event::Refused { request, texts: refused });
                 }
             }
             Err(why) => {
                 failures_in_a_row += 1;
                 // A batch the model cannot answer as a whole is split by the retries.
                 job.refuse(&batch, &why);
-                report(job, Event::Failed(why.clone()));
+                report(job, Event::Failed { why: why.clone(), request });
                 if failures_in_a_row >= 3 {
                     if let Some(p) = path {
                         let _ = job.save(p);
@@ -192,4 +233,27 @@ impl Target {
 /// The install's maps folder.
 pub fn maps_dir(install: &Path) -> Option<PathBuf> {
     crate::dt::install::find_path(install, crate::dt::install::MAPS_DIR).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_request_log_holds_whole_refused_texts_and_numbers_its_requests() {
+        let r = Refused { key: "3".into(), src: "*Старый Фили\r\nу дороги".into(), why: "markup mark `*`: 1 in the original, 0 in the translation".into(), answer: Some("Old Fili\nby the road".into()) };
+        assert_eq!(
+            r.log_text(),
+            "[3] markup mark `*`: 1 in the original, 0 in the translation\n  original:\n    *Старый Фили\r\n    у дороги\n  translation:\n    Old Fili\n    by the road"
+        );
+        assert!(Refused { answer: None, ..r }.log_text().ends_with("  translation:\n    -"));
+        let dir = std::env::temp_dir().join(format!("razdor-request-log-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let job = dir.join("A.json");
+        assert_eq!(requests_logged(Some(&job)), 0);
+        log_request(Some(&job), &format!("{REQUEST_HEAD}1 | 0 (unix s)\n--- answer\n{{}}\n"));
+        log_request(Some(&job), &format!("{REQUEST_HEAD}2 | 0 (unix s)\n--- answer\n{{}}\n"));
+        assert_eq!(requests_logged(Some(&job)), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

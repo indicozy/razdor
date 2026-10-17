@@ -160,9 +160,17 @@ install they run against (`razdor::dt::install::locate`), replacing older copies
   a character cp1251 lacks as UTF-8, everything else as cp1251). The player's context for the
   model is `Settings::notes` (`--notes`). The player's style replaces the default tone line
   (`llm::rules_styled`) and is repeated at the end of every batch (`llm::user_prompt`).
-  Debugging: `translate::request_log` (`<job>.log` beside the job file) gets every request and
-  raw answer and the refusals; `Event::Refused` puts each refused text and its reason in the
-  window's log; "Show the request" / `--show-prompt` show the instructions; `Job::made_with`
+  Debugging: `translate::request_log` (`<job>.log` beside the job file) gets every request,
+  numbered (`REQUEST_HEAD`, `===== request N`, counted on from the log by `requests_logged`),
+  with its raw answer, then a `--- refused (request N)` block with each refused text's reason,
+  whole original and whole refused translation (`Refused::log_text`). A refusal's reason is a
+  `text::Refusal` with the counts expected and got (`Refusal::message`, in the interface
+  language from `data/lang/ru/translate.txt`), or `job::missing` (the keys the answer did
+  have); the refused answer itself rides in `Entry::last_answer` (not saved).
+  `Event::Refused` gives the window two short lines per text (`refused_lines` in the view: the
+  start of the original and the reason; the start of the refused translation and the request
+  number); `Event::Failed` names its request too. "Show the request" / `--show-prompt` show
+  the instructions; `Job::made_with`
   keeps the model, style and context the texts were made with (`Job::made_otherwise`). Russian as the target (`llm::is_source_language`) is a rewrite in the
   player's style, with its own rules (`llm::rewrite_rules`). A server that refused
   reasoning_effort/response_format once (LM Studio: no json_object) is not sent them again

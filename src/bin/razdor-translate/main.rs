@@ -146,10 +146,11 @@ fn cli(args: &[String]) -> Option<i32> {
     let result = translate::run(&mut job, path.as_deref(), &s, &stop, |job, e| match e {
         translate::Event::Sending { items, first } => println!("[{}/{total}] sending {items}: {first}…", job.done()),
         translate::Event::Answer { taken, of, seconds } => println!("    took {taken}/{of} in {seconds:.1} s"),
-        translate::Event::Failed(why) => println!("    failed: {why}"),
-        translate::Event::Refused(texts) => {
-            for (t, why) in texts {
-                println!("    refused «{t}…»: {why}");
+        translate::Event::Failed { why, request } => println!("    failed: {why} (request {request} in the request log)"),
+        translate::Event::Refused { request, texts } => {
+            for r in texts {
+                let answer = r.answer.as_deref().map_or("-".to_string(), |a| translate::text::excerpt(a, 80));
+                println!("    refused [{}] «{}»: {}\n        translation «{answer}»; request {request} in the request log", r.key, translate::text::excerpt(&r.src, 60), r.why);
             }
         }
     });
