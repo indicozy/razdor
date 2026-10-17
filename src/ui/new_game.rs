@@ -74,14 +74,10 @@ impl Win {
     }
 }
 
-/// The blue bar of the picked row (as the load window's).
+/// The picked item's light: (0, 30, 90) added over its lines (the list's highlight colour
+/// set at 0x4d2e0c, added in the text list's default mode 4, 0x47c848 / 0x47d71c).
 fn picked_bar(r: Rect) {
-    let steps = 8;
-    for s in 0..steps {
-        let t = s as f32 / (steps - 1) as f32;
-        let a = 0.85 - 0.5 * (t - 0.5).abs();
-        draw_rectangle(r.x, r.y + r.h * s as f32 / steps as f32, r.w, r.h / steps as f32 + 0.5, Color::new(0.12, 0.2, 0.62, a));
-    }
+    chrome::additive(|| draw_rectangle(r.x, r.y, r.w, r.h, Color::from_rgba(0, 30, 90, 255)));
 }
 
 /// The scenario icon: `SI_Castle`, `SI_Helm`, `SI_Swords`, `SI_Skull`, `SI_Tutorial` by the
@@ -327,7 +323,12 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         // The name's Benguiat variant (0x4e266e..0x4e27a3, colours from 0x4dbb0c): the tutorial
         // ae249c (green), a campaign ae24a0 (yellow), a single scenario ae24ac (white with
         // 120 taken off red: cyan).
-        let name_ink = if e.scenario.header.scenario_picture_index == 5 {
+        // The picked item's lines take their highlight fonts (0x47d71c): the name the white
+        // Benguiat ae2498, the chapters the plain white SanSerif ae24bc (else ae24c4, orange).
+        let lit = row == picked;
+        let name_ink = if lit {
+            super::typography::Ink::Plain.color()
+        } else if e.scenario.header.scenario_picture_index == 5 {
             super::typography::Ink::Green.color()
         } else if !chapters.is_empty() {
             super::typography::Ink::Yellow.color()
@@ -341,7 +342,8 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         let small = 12.0 * k;
         with_face(Face::Body, || for (n, &c) in chapters.iter().enumerate() {
             let cy = r.y + head_h + n as f32 * chapter_h + chapter_h * 0.5 + small * 0.36;
-            chrome::shadow_text(&ellipsize(title(&scenarios[c]), r.w - 60.0 * k, small), r.x + 52.0 * k, cy, small, super::typography::Ink::Orange.color());
+            let ink = if lit { super::typography::Ink::Plain } else { super::typography::Ink::Orange };
+            chrome::shadow_text(&ellipsize(title(&scenarios[c]), r.w - 60.0 * k, small), r.x + 52.0 * k, cy, small, ink.color());
         });
         // A row is picked silently (the original's list makes no sound).
         if pressed {
@@ -374,8 +376,8 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
             chrome::tex(&t, frame, WHITE);
         }
         // Under it the description box (0x4d2a30, 65ae00): the name centred in white (ae2498,
-        // 0x4c1b4b), the description in the bold SanSerif's orange (ae24f4 in ae2510, 0x4c1bb4),
-        // the block centred in the box's height.
+        // 0x4c1b4b), the description in the bold SanSerif's orange (ae24f4 over ae2510,
+        // 0x4c1bb4), from the box's top.
         let bottom = win.rect(0.0, 432.0, 0.0, 0.0).y;
         let desc = Rect::new(frame.x, frame.y + frame.h + 8.0 * k, frame.w, (bottom - frame.y - frame.h - 8.0 * k).max(0.0));
         chrome::text_box(desc);
@@ -384,15 +386,11 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         let title_text = format!("^*{}", group_name(scenarios, g).replace(['^', '*', '|', '@'], ""));
         let mut rows = markup_rows(&title_text, room, 16.0 * k);
         let title_rows = rows.len();
-        rows.extend(markup_rows_face(
-            &e.scenario.description.replace(['^', '*', '|', '@'], ""),
-            room,
-            size,
-            Face::Bold,
-        ));
+        // The description is added as plain lines (0x4c1bb4 → 0x47ea80): marks stay as typed,
+        // no indent, justified, in ae24f4 over the shadow font ae2510.
+        rows.extend(plain_rows_face(&e.scenario.description, room, size, Face::Bold));
         let line_h = 14.0 * k;
         let steps = desc_steps(title_rows, rows.len(), k);
-        let block: f32 = steps.iter().sum();
         // The box is a text list (0x65ae00): the wheel over it scrolls it a line a frame
         // (0x47ede0), down to its last line; a new map starts it at the top (0x47cc90).
         let max_scroll = desc_max_scroll(&steps, desc.h - 20.0 * k);
@@ -410,27 +408,23 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         }
         let first = first.min(max_scroll);
         DESC_SCROLL.with(|d| d.set((picked, first)));
-        let mut y = if first > 0 {
-            desc.y + 10.0 * k + 14.0 * k
-        } else {
-            desc.y + ((desc.h - block) / 2.0).max(10.0 * k) + 14.0 * k
-        };
+        // A text list lays its lines from its top (0x47e46c).
+        let mut y = desc.y + 10.0 * k + 14.0 * k;
         let clip = crate::ui::widgets::Clip::new(desc);
         for (n, row) in rows.iter().enumerate() {
             if n < first {
                 continue;
             }
             if n < title_rows {
-                draw_markup_row(row, desc.x + 17.0 * k, y, room, 16.0 * k);
+                // The name in ae2498 over its shadow font ae24b0 (0x4c1b33).
+                draw_markup_row_shadowed(row, desc.x + 17.0 * k, y, room, 16.0 * k, Face::Subtitle, super::typography::Ink::Plain.color());
                 y += 20.0 * k;
                 if n + 1 == title_rows {
                     y += 12.0 * k;
                 }
             } else {
                 let orange = with_face(Face::Bold, || super::typography::Ink::Orange.color());
-                with_face(Face::Bold, || {
-                    draw_markup_row_face(row, desc.x + 17.0 * k, y, room, size, Face::Bold, Some(orange));
-                });
+                with_face(Face::Bold, || draw_markup_row_shadowed(row, desc.x + 17.0 * k, y, room, size, Face::Bold, orange));
                 y += line_h;
             }
         }

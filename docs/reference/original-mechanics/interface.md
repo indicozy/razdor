@@ -167,9 +167,14 @@ whenever the selection changes. **code** (4c1968, pictures loaded at 4dc118) Eac
 Benguiat tint (4e266e..4e27a3: a first case in ae249c green (Razdor takes it for the tutorial; its test is **unknown**), a single scenario ae24ac cyan
 (135, 255, 255), a campaign its campaign name in ae24a0 yellow) and, for a campaign, its
 chapters as further lines of the same item (0x47e46c with the new-item flag clear), so the
-selection lights the whole block and a chapter cannot be picked alone. The description box
-(4c1a9c) shows the name in ae2498 (white, centred) and the description in the bold SanSerif's
-orange (ae24f4 in ae2510). **code** Start
+selection lights the whole block and a chapter cannot be picked alone. The list's highlight
+adds (0, 30, 90) over the picked item's lines (set at 4d2e0c, the text list's add mode) and
+draws them in their highlight fonts: the name in ae2498 (white Benguiat), the chapters in
+ae24bc (plain white SanSerif) instead of ae24c4 (orange). The description box (4c1a9c, 293×236)
+is filled from its top: the name through 47ea80 centred in ae2498 over the shadow font ae24b0,
+a blank line, then the description through 47ea80 as plain lines (split at CR LF and `#\`
+only: no marks read, no indent added), justified, in ae24f4 (the bold SanSerif's orange) over
+`SanSerif_Bold_Shadow` (ae2510). **code** Start
 copies the chosen map's header and enables each hero class whose preset has a start cell
 (start x or start y non-zero; gold, troops or a start building alone do not count). It walks
 the classes from the ranger down to the knight and opens the hero window on the last one it

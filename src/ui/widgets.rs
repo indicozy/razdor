@@ -750,10 +750,34 @@ pub fn markup_rows(text: &str, room: f32, size: f32) -> Vec<MarkupRow> {
     super::dt_font::with_original_face(super::dt_font::Face::Subtitle, || markup_rows_in_face(text, room, size))
 }
 
-/// [`markup_rows`] laid out in a chosen font face, with matching metrics in either font mode.
-pub fn markup_rows_face(text: &str, room: f32, size: f32, face: super::dt_font::Face) -> Vec<MarkupRow> {
+/// A plain text's pieces, as 0x47ea80 splits it: at CR LF or at `#\`, nothing else read.
+fn plain_pieces(text: &str) -> Vec<&str> {
+    let mut pieces = Vec::new();
+    let mut rest = text;
+    while let Some(i) = [rest.find("\r\n"), rest.find("#\\")].into_iter().flatten().min() {
+        pieces.push(&rest[..i]);
+        rest = &rest[i + 2..];
+    }
+    pieces.push(rest);
+    pieces
+}
+
+/// A plain text's rows in a chosen font face, as List_AddWrappedText 0x47ea80 adds them: the
+/// text split at CR LF or `#\`, each piece word-wrapped and justified (its last row left),
+/// with no marks read and no indent added (only [`markup_rows`]' reader 0x48e1cc does those).
+pub fn plain_rows_face(text: &str, room: f32, size: f32, face: super::dt_font::Face) -> Vec<MarkupRow> {
+    use razdor::dt::markup::{Align, Ink};
     super::dt_font::with_face(face, || {
-        super::dt_font::with_original_face(face, || markup_rows_in_face(text, room, size))
+        super::dt_font::with_original_face(face, || {
+            plain_pieces(text)
+                .into_iter()
+                .flat_map(|piece| {
+                    razdor::dt::markup::wrap(piece, room, |c| glyph_width(c, size))
+                        .into_iter()
+                        .map(|r| MarkupRow { text: r.text, ink: Ink::Plain, align: Align::Justify, last: r.last })
+                })
+                .collect()
+        })
     })
 }
 
@@ -784,18 +808,28 @@ pub fn draw_markup_row(row: &MarkupRow, x: f32, y: f32, room: f32, size: f32) {
 /// [`draw_markup_row`] in another of the original's fonts (the hero window's diary draws its
 /// entry in SanSerif, 0x49c388).
 pub fn draw_markup_row_face(row: &MarkupRow, x: f32, y: f32, room: f32, size: f32, face: super::dt_font::Face, color: Option<Color>) {
-    super::dt_font::with_original_face(face, || draw_markup_row_in_face(row, x, y, room, size, color.unwrap_or_else(|| ink_color(row.ink))));
+    let color = color.unwrap_or_else(|| ink_color(row.ink));
+    super::dt_font::with_original_face(face, || draw_markup_row_in_face(row, x, y, room, size, &|s, x, y| text(s, x, y, size, color)));
 }
 
-fn draw_markup_row_in_face(row: &MarkupRow, x: f32, y: f32, room: f32, size: f32, color: Color) {
+/// [`draw_markup_row_face`] over the face's shadow font, as a text list line with a shadow
+/// font set (0x47d2bc draws the shadow first, then the text): the original's shadow sheet
+/// where the font is a sheet, else a dark copy 1 px down and right.
+pub fn draw_markup_row_shadowed(row: &MarkupRow, x: f32, y: f32, room: f32, size: f32, face: super::dt_font::Face, color: Color) {
+    super::dt_font::with_original_face(face, || {
+        draw_markup_row_in_face(row, x, y, room, size, &|s, x, y| super::chrome::shadow_text(s, x, y, size, color));
+    });
+}
+
+fn draw_markup_row_in_face(row: &MarkupRow, x: f32, y: f32, room: f32, size: f32, text: &dyn Fn(&str, f32, f32)) {
     use razdor::dt::markup::Align;
     let shown = row.text.replace('_', " ");
     match row.align {
         Align::Centre => {
             let w: f32 = row.text.chars().map(|c| glyph_width(c, size)).sum();
-            text(&shown, x + ((room - w) / 2.0).trunc(), y, size, color);
+            text(&shown, x + ((room - w) / 2.0).trunc(), y);
         }
-        Align::Justify if row.last || !row.text.contains(' ') => text(&shown, x, y, size, color),
+        Align::Justify if row.last || !row.text.contains(' ') => text(&shown, x, y),
         Align::Justify => {
             let xs = razdor::dt::markup::justify(&row.text, room, |c| glyph_width(c, size));
             let chars: Vec<char> = shown.chars().collect();
@@ -808,7 +842,7 @@ fn draw_markup_row_in_face(row: &MarkupRow, x: f32, y: f32, room: f32, size: f32
                 }
                 let j = (i..raw.len()).find(|&j| raw[j] == ' ').unwrap_or(raw.len());
                 let word: String = chars[i..j].iter().collect();
-                text(&word, x + xs[i], y, size, color);
+                text(&word, x + xs[i], y);
                 i = j;
             }
         }
@@ -1620,6 +1654,14 @@ pub fn scrollbar_px(r: Rect, scroll: &mut f32, most: f32, view: f32, step: f32) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The scenario description is added as plain lines (0x47ea80, a player's report): split
+    /// only at CR LF and `#\`, its marks and leading spaces kept as typed, no indent added.
+    #[test]
+    fn a_plain_text_splits_only_at_its_breaks() {
+        assert_eq!(plain_pieces("  Вуальшпиль - *подземелье*.\r\nНаконец#\\^конец"), vec!["  Вуальшпиль - *подземелье*.", "Наконец", "^конец"]);
+        assert_eq!(plain_pieces(""), vec![""]);
+    }
 
     /// The hint box fades in over 300 ms (49ee4b–49ef0d): to 160/255 for an ordinary hint, to
     /// full for a pushed one, and stays there.
