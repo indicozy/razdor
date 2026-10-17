@@ -14,7 +14,10 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   departed row only with units really taken, by the taken unit's type (0x4a9711, 0x4961d0).
   Razdor has no items lost row and shows every unit type the event lists under "departed"
   (`src/ui/story.rs` `event_dialog`). Settling it needs the event engine to report what it
-  actually took (`src/rules/events.rs`) so the window can show it.
+  actually took (`src/rules/events.rs`) so the window can show it. On `dt-original` the units
+  rows are ported (23151b6) but not the 92 × 92 unit bust at the side of the text: that
+  branch still draws an event's unit picture 128 × 128 above the text (main moved it to the
+  side earlier, not ported).
 
 - **UI look from PR #8, not yet checked in the original's code** (2026-10-17, a player's PR,
   merged with fixes). Checked and cited: the brown text box (0x48e4e8), the hint strip under
