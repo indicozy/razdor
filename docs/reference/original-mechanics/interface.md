@@ -163,7 +163,13 @@ icon in its fourth column by the map header byte 0x120: 1 castle, 2 helm, 3 swor
 no icon. Each picture is loaded with its mask (4dc118 → 48cd90) and set into the cell as it is,
 at its own size: no disc or ring under it (the `si-border` ring belongs to the spell badges,
 49ac64). The icons are set on all rows the first time, then again on the old and the new row
-whenever the selection changes. **code** (4c1968, pictures loaded at 4dc118) Start
+whenever the selection changes. **code** (4c1968, pictures loaded at 4dc118) Each list item is a map's name in a
+Benguiat tint (4e266e..4e27a3: a first case in ae249c green (Razdor takes it for the tutorial; its test is **unknown**), a single scenario ae24ac cyan
+(135, 255, 255), a campaign its campaign name in ae24a0 yellow) and, for a campaign, its
+chapters as further lines of the same item (0x47e46c with the new-item flag clear), so the
+selection lights the whole block and a chapter cannot be picked alone. The description box
+(4c1a9c) shows the name in ae2498 (white, centred) and the description in the bold SanSerif's
+orange (ae24f4 in ae2510). **code** Start
 copies the chosen map's header and enables each hero class whose preset has a start cell
 (start x or start y non-zero; gold, troops or a start building alone do not count). It walks
 the classes from the ranger down to the knight and opens the hero window on the last one it
@@ -1007,6 +1013,21 @@ nothing (there is no status-line fallback). **code** (callers 4b933e, 4b9586)
     each space's position rounded half up; the last row of a line is left aligned.
   - The line keeps its break's first character (the CR or the `#`); neither has a glyph, so
     it draws as nothing.
+- **Brown text box** (48e4e8, the story, description and list boxes): Win-paper copied from
+  (1, 1) at the box's size with (148, 138, 156) taken off (0x4768f8 mode 1); when the box is
+  wider than twice Big_Frame_2a and 8 px, Big_Frame_1a is taken off 4 px in from the left and
+  Big_Frame_2a 4 px in from the right, each repeated down from the top by its own height (both
+  56×397, loaded with −223 red and −215 green, 4dbc4f, 4dbc6a); with corners asked for, the four
+  34×34 `Corner_Frame-*` pictures go in the corners at their own size through their masks; a
+  1 px frame around it when asked (48d1d4). **code**
+- **Hint strip** `ae2548` (built once at 4dbcf3, drawn by 4cd330, 4ba854 and the army, garrison
+  and battle windows): 628×25, Win-paper from (0, 200) with (148, 132, 148) taken off; then
+  `Corner-Left` (124×23) taken off at x = −51 and `Corner-Right` at x = 555, both at y = 1, so
+  each end shows the corner's inner 73 columns. The corners are dimmed by (192, 160, 160) only
+  after that, for their other uses. **code**
+- **Red window skin**: `Win-red` is loaded with −20 red, −40 green and −100 blue (4dbc34 →
+  48d02c, `ae2530`); `Win-marble` plain. The loader adds the offsets per channel and clamps
+  (48cd90). **code**
 - **Text lists**: the wheel scrolls one line per wheel step; a click gives the list the
   keyboard, and the Up and Down keys then repeat every 50 ms. Scroll bars move by 0.1 of the
   range per arrow and 0.5 per page. **code** (47ede0, 47eb84, 47b8d4)

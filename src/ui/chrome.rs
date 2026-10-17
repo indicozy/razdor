@@ -35,9 +35,6 @@ pub enum Fx {
     Shade,
     /// Green/blue swap and black transparency key for the barracks' green hire pill.
     KeyBlackSwapGreenBlue,
-    /// Higher-contrast brown ornaments for the shop's dark parchment panels.
-    #[allow(dead_code)] // Kept for legacy art; standard brown panels use subtractive ornament.
-    ShadeStrong,
     /// The original trait icons use an opaque violet matte (RGB 129, 0, 127).
     KeyPurple,
     /// Warm red button palette, preserving the silver outer edge of the original art.
@@ -51,7 +48,7 @@ pub enum Fx {
 struct Chrome {
     dir: PathBuf,
     /// By path, then by [`Fx`] (its index).
-    textures: HashMap<String, [Option<Option<Texture2D>>; 11]>,
+    textures: HashMap<String, [Option<Option<Texture2D>>; 10]>,
     /// By key: the tuning it was made with and the texture (`None`: its file is missing).
     visual_textures: HashMap<&'static str, ([f32; 4], Option<Texture2D>)>,
     /// The pictures of [`visual_texture`] as decoded, by path: the light and the brown paper
@@ -212,11 +209,6 @@ pub fn transform(img: &mut Image, fx: Fx) {
             Fx::RotateRgb => {
                 let (r, g, b) = (p[0], p[1], p[2]);
                 p[..3].copy_from_slice(&[g, b, r]);
-            }
-            Fx::ShadeStrong => {
-                let a = (lum(p) * 5 / 2).min(255) as u8;
-                p[..3].copy_from_slice(&[60, 20, 0]);
-                p[3] = a.min(p[3]);
             }
             Fx::KeyPurple => {
                 // Bonus<N>.lit images have no embedded alpha: their opaque matte is
@@ -404,16 +396,27 @@ fn visual_texture(key: &'static str, rel: &str, params: [f32; 4], adjust: impl F
     })
 }
 
-/// Original dark parchment palette, independently of light paper and card strips.
+/// The brown text box's paper: Win-paper with (148, 138, 156) taken off (0x48e4e8: 0x476b8c
+/// copies the paper, 0x4768f8 mode 1 subtracts the colour), at the 16-bit screen's levels.
 fn brown_paper_texture() -> Option<Texture2D> {
-    visual_texture("reference-brown-paper", "Windows/Win-paper.lit", [144.0,136.0,256.0,565.0], |img| {
-        subtract(img,[144,136,256]);
-        // The reference game renders these panels in RGB565. Retain its grain and levels.
-        for p in img.rgba.chunks_exact_mut(4) {
-            let r=p[0]>>3; let g=p[1]>>2;
-            p[0]=(r<<3)|(r>>2); p[1]=(g<<2)|(g>>4); p[2]=0;
-        }
+    visual_texture("brown-box-paper", "Windows/Win-paper.lit", [148.0, 138.0, 156.0, 565.0], |img| {
+        subtract(img, BROWN_BOX_TAKEN);
+        quantize_565(img);
     })
+}
+
+/// What the brown text box takes off its paper (0x48e4e8, 0x476374(0x94, 0x8a, 0x9c)).
+const BROWN_BOX_TAKEN: [i32; 3] = [148, 138, 156];
+
+/// Rounds each pixel to the original's 16-bit surfaces (5, 6, 5 bits; 0x476374 packs them),
+/// widened back the way the screen shows them.
+pub fn quantize_565(img: &mut Image) {
+    for p in img.rgba.chunks_exact_mut(4) {
+        let (r, g, b) = (p[0] >> 3, p[1] >> 2, p[2] >> 3);
+        p[0] = (r << 3) | (r >> 2);
+        p[1] = (g << 2) | (g >> 4);
+        p[2] = (b << 3) | (b >> 2);
+    }
 }
 
 fn paper_texture(brown: bool) -> Option<Texture2D> {
@@ -1134,7 +1137,8 @@ impl Skin {
         let paper = |brown: bool, c: Color| paper_texture(brown).map(|t| (t, c));
         match self {
             Skin::Marble => win("Win-marble").map(|t| (t, WHITE)),
-            Skin::Red => win_scaled("Win-red", [1024; 3], [0, -64, -128]).map(|t| (t, WHITE)),
+            // Loaded with (−20, −40, −100) added (0x4dbc34 → 0x48d02c), into ae2530.
+            Skin::Red => win_scaled("Win-red", [1024; 3], [-20, -40, -100]).map(|t| (t, WHITE)),
             Skin::Paper => paper(false, WHITE),
             Skin::Brown => brown_paper_texture().map(|t| (t, WHITE)),
             Skin::Strip => paper(true, Color::new(0.37, 0.265, 0.02, 1.0)),
@@ -1392,28 +1396,47 @@ fn window_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bool,
     (Rect::new(r.x + 2.0 * k, r.y + tb + 1.0, r.w - 4.0 * k, r.h - tb - 3.0 * k), closed)
 }
 
-/// Army management's parchment divider uses horizontal black flourishes, without corners.
+/// The original's 628×25 hint strip `ae2548` (built at 0x4dbcf3), under the army, barracks,
+/// garrison and battle hints: Win-paper's rows from y = 200 with (148, 132, 148) taken off,
+/// and the title corners taken off it at x = −51 and x = 555, y = 1, uncut otherwise
+/// ([`divider_ornaments`]). Razdor's strips are wider or taller than 628×25: the paper repeats
+/// across, the corners sit at both ends, centred in the height; the silver edge is Razdor's.
 pub fn army_divider(r: Rect) {
-    if let Some(t) = win_scaled("Win-paper", [1024; 3], [-146, -128, -256]) {
-        tile(&t, r, k(), WHITE);
+    let k = k();
+    if let Some(t) = win_scaled("Win-paper", [1024; 3], [-148, -132, -148]) {
+        let src_h = (r.h / k).min(t.height() - DIVIDER_PAPER_Y);
+        let mut x = r.x;
+        while x < r.right() && src_h > 0.0 {
+            let w = (t.width() * k).min(r.right() - x);
+            tex_src(&t, Rect::new(0.0, DIVIDER_PAPER_Y, w / k, src_h), Rect::new(x, r.y, w, r.h), WHITE);
+            x += w;
+        }
     } else {
         text_box_base(r);
     }
-    let inset = k();
-    let ornament_h = (23.0 * k()).min((r.h - 2.0 * inset).max(0.0));
+    let ornament_h = (23.0 * k).min(r.h);
+    let y = r.y + (r.h - ornament_h) / 2.0;
     for (name, right) in [("Corner-Left", false), ("Corner-Right", true)] {
         if let Some(t) = win(name) {
             t.set_filter(FilterMode::Nearest);
-            // Use the inward-facing half of each title ornament at native scale,
-            // rather than squeezing its two motifs into the divider's single one.
-            let w = (62.0 * k()).min((r.w - 2.0 * inset).max(0.0) / 2.0);
-            let x = if right { r.right() - inset - w } else { r.x + inset };
-            let y = r.y + (r.h - ornament_h) / 2.0;
-            let source = Rect::new(if right { 0.0 } else { t.width() / 2.0 }, 0.0, t.width() / 2.0, t.height());
-            subtractive(|| tex_src(&t, source, Rect::new(x, y, w, ornament_h), WHITE));
+            let (src_x, src_w, dst_x) = divider_ornaments(t.width(), r.w / k, right);
+            let src = Rect::new(src_x, 0.0, src_w, ornament_h / k);
+            subtractive(|| tex_src(&t, src, Rect::new(r.x + dst_x * k, y, src_w * k, ornament_h), WHITE));
         }
     }
-    silver_frame(r, k().max(1.0));
+    silver_frame(r, k.max(1.0));
+}
+
+/// The hint strip's paper starts this far down Win-paper (0x4dbd0b: 0x476b8c from (0, 200)).
+const DIVIDER_PAPER_Y: f32 = 200.0;
+
+/// Where a title corner lands on a hint strip `strip_w` wide, in the art's pixels: the source
+/// column it starts at, the width shown and the x on the strip. Corner-Left is drawn at
+/// x = −51 (0x4dbd58), so only its columns from 51 show; Corner-Right at 555 on the 628 strip
+/// (0x4dbd74), so its first 73 columns show, against the right end.
+fn divider_ornaments(art_w: f32, strip_w: f32, right: bool) -> (f32, f32, f32) {
+    let shown = (art_w - 51.0).clamp(0.0, (strip_w / 2.0).max(0.0));
+    if right { (0.0, shown, strip_w - shown) } else { (art_w - shown, shown, 0.0) }
 }
 
 /// A thin ornamental divider (the strip between the battle's formations, without text).
@@ -1481,55 +1504,60 @@ fn tile_side_strips(t: &Texture2D, r: Rect, max_frac: f32, flip_left: bool, tint
     }
 }
 
-/// Fixed native ornament width and repeat height; only the gap changes between panels.
-fn complete_brown_side_strips(t: &Texture2D, r: Rect, tint: Color) {
-    let scale=k();
-    let w=t.width()*scale; let step=t.height()*scale;
-    if r.w<=0.0 || r.h<=0.0 || step<=0.0 {return;}
-    let mut y=r.y;
-    while y<r.bottom() {
-        let h=step.min(r.bottom()-y);
-        let source=Rect::new(0.0,0.0,t.width(),h/scale);
-        tex_src(t,source,Rect::new(r.x,y,w,h),tint);
-        tex_src_flipped_x(t,source,Rect::new(r.right()-w,y,w,h),tint);
-        y+=h;
-    }
-}
-
-pub fn text_box_base(r: Rect) {
+fn text_box_base(r: Rect) {
     surface(r, Skin::Brown);
 }
 
-/// The brown parchment's mirrored side ornament.
-pub fn text_box_sides(r: Rect) {
-    if let Some(t) = win("Big_Frame_1") {
-        t.set_filter(FilterMode::Nearest);
-        let opacity = super::window_layout::visual().brown_ornament;
-        let inset = 2.0 * k();
-        let ornament = Rect::new(r.x + inset, r.y + inset, (r.w - inset * 2.0).max(0.0), (r.h - inset * 2.0).max(0.0));
-        subtractive(|| complete_brown_side_strips(&t, ornament, Color::new(41.0/255.0*opacity,40.0/255.0*opacity,0.0,1.0)));
+/// The brown text box's side ornaments (0x48e4e8): Big_Frame_1a 4 px in from the left and
+/// Big_Frame_2a 4 px in from the right, both loaded with (−223, −215, 0) added (0x4dbc4f,
+/// 0x4dbc6a), repeated down from the top and taken off the paper (0x476790 mode 1). A box no
+/// wider than both and 8 px has none.
+fn text_box_sides(r: Rect) {
+    let k = k();
+    let left = win_scaled("Big_Frame_1a", [1024; 3], [-223, -215, 0]);
+    let right = win_scaled("Big_Frame_2a", [1024; 3], [-223, -215, 0]);
+    let (Some(left), Some(right)) = (left, right) else { return };
+    if r.w / k <= right.width() * 2.0 + 8.0 {
+        return;
     }
+    subtractive(|| {
+        for (t, x) in [(&left, r.x + 4.0 * k), (&right, r.right() - (right.width() + 4.0) * k)] {
+            t.set_filter(FilterMode::Nearest);
+            let mut y = r.y;
+            while y < r.bottom() {
+                let h = (t.height() * k).min(r.bottom() - y);
+                tex_src(t, Rect::new(0.0, 0.0, t.width(), h / k), Rect::new(x, y, t.width() * k, h), WHITE);
+                y += h;
+            }
+        }
+    });
 }
 
-/// The brown parchment's silver edge and corner art.
-pub fn text_box_frame(r: Rect) {
+/// The brown text box's silver edge and its four 34 px corners, at the art's size (0x48e4e8:
+/// 0x476a3c at (0, 0), (w − 34, 0), (w − 34, h − 34), (0, h − 34)).
+fn text_box_frame(r: Rect) {
     silver_frame(r, k().max(1.0));
     for (name, right, bottom) in [
-        ("Corner_Frame-LU",false,false),("Corner_Frame-RU",true,false),
-        ("Corner_Frame-LD",false,true),("Corner_Frame-RD",true,true),
+        ("Corner_Frame-LU", false, false),
+        ("Corner_Frame-RU", true, false),
+        ("Corner_Frame-LD", false, true),
+        ("Corner_Frame-RD", true, true),
     ] {
-        if let Some(t)=win(name) {
-            let (w,h)=(t.width()*k(),t.height()*k());
-            tex(&t,Rect::new(if right {r.right()-w}else{r.x},if bottom {r.bottom()-h}else{r.y},w,h),WHITE);
+        if let Some(t) = win(name) {
+            let (w, h) = (t.width() * k(), t.height() * k());
+            let x = if right { r.right() - w } else { r.x };
+            let y = if bottom { r.bottom() - h } else { r.y };
+            tex(&t, Rect::new(x, y, w, h), WHITE);
         }
     }
 }
 
-pub fn text_box_decoration(r: Rect) {
+fn text_box_decoration(r: Rect) {
     text_box_sides(r);
     text_box_frame(r);
 }
 
+/// The red-brown parchment box of story and description texts (0x48e4e8).
 pub fn text_box(r: Rect) {
     text_box_base(r);
     text_box_decoration(r);
@@ -2053,6 +2081,30 @@ pub fn effect(rel: &str, c: Vec2, size: f32, t: f32, color: Color) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The hint strip's corners as the original's (0x4dbd58, 0x4dbd74): the 124 px corners at
+    /// x = −51 and 555 on the 628 px strip show their inner 73 columns, flush with each end.
+    #[test]
+    fn the_hint_strip_shows_the_corners_inner_73_columns() {
+        assert_eq!(divider_ornaments(124.0, 628.0, false), (51.0, 73.0, 0.0));
+        assert_eq!(divider_ornaments(124.0, 628.0, true), (0.0, 73.0, 555.0));
+        // A strip narrower than both never overlaps them.
+        assert_eq!(divider_ornaments(124.0, 100.0, true), (0.0, 50.0, 50.0));
+    }
+
+    /// The brown text box's paper (0x48e4e8): (148, 138, 156) taken off Win-paper, at the
+    /// 16-bit surface's 5-6-5 levels.
+    #[test]
+    fn the_brown_box_paper_is_win_paper_less_its_colour_in_16_bit() {
+        let mut p = Image { width: 1, height: 1, rgba: vec![230, 200, 150, 255] };
+        subtract(&mut p, BROWN_BOX_TAKEN);
+        assert_eq!(&p.rgba[..3], &[82, 62, 0]);
+        quantize_565(&mut p);
+        assert_eq!(&p.rgba[..3], &[82, 60, 0]);
+        let mut white = Image { width: 1, height: 1, rgba: vec![255, 255, 255, 255] };
+        quantize_565(&mut white);
+        assert_eq!(&white.rgba[..3], &[255, 255, 255], "white stays white");
+    }
 
     /// The title menu's English words (an owner's report): sized by the engraved words'
     /// capitals, not by the interface's sheet text size, and narrowed only when too wide.

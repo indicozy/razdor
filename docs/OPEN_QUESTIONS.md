@@ -8,6 +8,17 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **UI look from PR #8, not yet checked in the original's code** (2026-10-17, a player's PR,
+  merged with fixes). Checked and cited: the brown text box (0x48e4e8), the hint strip under
+  the army, barracks, garrison and battle (0x4dbcf3), the red skin's load offsets (0x4dbc34)
+  and the scenario list's item, inks and description (0x4e266e, 0x4c1a9c). Still taken from the
+  player's screenshots: the market lists' plain dark backing instead of marble
+  (`price_list_in_face`), the light paper's ornaments mirrored the other way
+  (`parchment_fill`), the defeat window's white title and stronger orange title ornaments,
+  the scenario list lighting no row on hover, and the brown and red skins tiled at the full
+  scale. The silver edge round the hint strip is Razdor's (the original's strip has none
+  baked in; whether its windows frame it is unknown). Not ported to `dt-original` until
+  these are checked.
 - **«Максимум» against people** (2026-10-16, Razdor's strongest battle AI, the owner's
   request; main only). Against the original's AI (`src/rules/battle/max_ai/tests.rs`, 256
   games on the install's armies) Max wins 60% where the original wins 50%, and never ends

@@ -399,13 +399,8 @@ fn hall_offers_in_face(game: &mut Game, f: &Frame, view: &mut BuildingView, mess
     // The bar is always there, idle while the list fits, as the original's (0x4bedec).
     scrollbar_always(Rect::new(list.x + list.w - 14.0 * k, list.y + 2.0 * k, 12.0 * k, list.h - 4.0 * k), &mut view.hall_scroll, rows, entries.len());
     let row_w = list.w - 16.0 * k;
-    let visible_entries = entries.len().saturating_sub(view.hall_scroll).min(rows);
-    let content_h = visible_entries as f32 * row_h;
-    let first_y = if entries.len() <= rows {
-        list.y + ((list.h - content_h) / 2.0).max(4.0 * k)
-    } else {
-        list.y + 4.0 * k
-    };
+    // From the top however few there are: the list widget lays its lines down from 0 (0x47e46c).
+    let first_y = list.y + 4.0 * k;
     for (n, entry) in entries.iter().enumerate().skip(view.hall_scroll).take(rows) {
         let y = first_y + (n - view.hall_scroll) as f32 * row_h;
         let id = match *entry { HallEntry::Rumour(id) | HallEntry::Quest(id) => id };
