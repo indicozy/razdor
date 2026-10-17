@@ -8,6 +8,14 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **Event window: the items lost row and the departed row's units** (2026-10-17, found with
+  a player's report on the units rows). The original shows a row of the items an event took
+  (`[Event] DelItem`, 0x4a9180, only when one of them was really there) and fills the
+  departed row only with units really taken, by the taken unit's type (0x4a9711, 0x4961d0).
+  Razdor has no items lost row and shows every unit type the event lists under "departed"
+  (`src/ui/story.rs` `event_dialog`). Settling it needs the event engine to report what it
+  actually took (`src/rules/events.rs`) so the window can show it.
+
 - **UI look from PR #8, not yet checked in the original's code** (2026-10-17, a player's PR,
   merged with fixes). Checked and cited: the brown text box (0x48e4e8), the hint strip under
   the army, barracks, garrison and battle (0x4dbcf3), the red skin's load offsets (0x4dbc34)
