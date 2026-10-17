@@ -18,7 +18,17 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   rows are ported (23151b6) but not the 92 × 92 unit bust at the side of the text: that
   branch still draws an event's unit picture 128 × 128 above the text (main moved it to the
   side earlier, not ported).
-
+- **A ring round the whole building** (2026-10-17, Ivan's report in Discord: the hero drawn on
+  top of a tent). Razdor now hides a figure inside a building as the Community exe does
+  (0x497abc) and keeps its one-cell ring. The player's snapshot of «the original» shows a
+  dashed yellow ring round a whole cemetery and asks for it, with colours for the hero, an
+  ally and an enemy. In the Community exe every ring is one cell: the branch of 0x48eeb0 that
+  marks a building's anchor with a ring of the footprint's width (0x48ef08–0x48ef54) is dead
+  (the jump at 0x48ef06 and the hook 0xc25ab0 both lead to the own-cell write). It was very
+  likely live in the vanilla game, which the snapshot probably shows; no vanilla exe is at
+  hand to confirm (interface.md §7.2). The ring's colour would be the mark's (yellow for the
+  hero, red-pink for armies whatever their side), not one per side. Bringing the big ring back
+  would be a deviation from the Community exe: the owner's call (main only).
 - **UI look from PR #8, not yet checked in the original's code** (2026-10-17, a player's PR,
   merged with fixes). Checked and cited: the brown text box (0x48e4e8), the hint strip under
   the army, barracks, garrison and battle (0x4dbcf3), the red skin's load offsets (0x4dbc34)

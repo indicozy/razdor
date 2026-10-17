@@ -1335,6 +1335,11 @@ fn draw_mark(cam: &Camera, pos: (f32, f32), texture: &str, color: Color) {
 }
 
 fn draw_army(game: &Game, a: &Army, assets: &Assets, art: Option<&DtArt>, cam: &Camera) {
+    // Inside a building its figure is not drawn, only its ring under the building
+    // (0x497abc, `World::hides_figure`).
+    if game.army_hidden(a) {
+        return;
+    }
     let next = a.path.first().map(|&t| game.world.map.center(t));
     let pos = game.army_display_pos(a);
     // Its walk frames run by game time (engine.md §7), not by the clock on the wall.
@@ -1364,6 +1369,11 @@ fn draw_hero(game: &Game, assets: &Assets, art: Option<&DtArt>, cam: &Camera) {
         Some(HeroClass::Ranger) => 3,
         _ => 1,
     };
+    // Inside a building his figure is not drawn, only his ring under the building
+    // (0x497abc, `World::hides_figure`).
+    if game.hero_hidden() {
+        return;
+    }
     let next = game.display_heading();
     let c = cam.to_screen(game.display_pos());
     if game.aboard() {

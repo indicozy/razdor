@@ -86,7 +86,12 @@ textures from a 4×4 atlas, water frames multiplied in), then decorations
 (`draw_object`), buildings (`draw_building`), armies (`draw_army`, `draw_figure`,
 `draw_ship`), the hero (`draw_hero`), the route (`draw_route`), and the tooltip
 (`draw_tooltip`). Buildings are anchored like the original (right edge on the cell; see
-PLAYTEST_NOTES "Мосты сдвинуты"). The minimap is `src/ui/minimap.rs`.
+PLAYTEST_NOTES "Мосты сдвинуты"). A figure inside a building is not drawn, as the
+original's drawn-occupant byte (0x497abc): `draw_army` and `draw_hero` skip it when
+`Game::army_hidden` / `Game::hero_hidden` say so (`World::hides_figure`: standing in a building
+other than a bridge, or crossing between building cells; gliding in from outside it is seen
+until the step ends). Its one-cell ring (`draw_mark`) stays, under the building picture. The
+minimap is `src/ui/minimap.rs`.
 
 ## Sound and music
 
