@@ -316,6 +316,32 @@ nothing is put back, so the last ring stays. The colours (0x4ce30c): 1 `Selectio
 5 `Selection-2` 0x00c4ff; the mark lies on the ground in the cell pass (0x4c9459), under
 the building standing there. **code**
 
+**Ring sizes.** The mark byte is `size·16 + colour`; the loader (0x4ce30c) builds sizes 1–9 of
+each colour, size n a ring n·32 px wide and n·22 px high whose box is the n × n cells ending
+at the marked cell (its bottom-right). Every caller of 0x48eeb0 passes size 1 (one cell), so
+in the Community exe every ring is one cell. 0x48eeb0 keeps a second branch (0x48ef08–0x48ef54)
+that, for a cell inside a building, would mark the building's anchor cell with size = the
+footprint's width (building +0x121), a ring round the whole building; in the Community exe it
+is dead: the jump at 0x48ef06 sends building cells to the plain write on their own cell, and
+the Community hook at 0x48ef24 (0xc25ab0) sends the other cells there too. The vanilla game
+very likely took that branch (the jump there was the other way round; the hook only adds the
+own-cell write and keeps the size branch), which is the dashed ring round the whole building
+players remember from it; without a vanilla exe this is **unknown** (inferred from the code's
+shape). **code** (Community)
+
+**Figures inside buildings.** A figure (the hero, an army, a ship) is drawn from its cell's
+drawn-occupant byte (cell +9, the cell pass 0x4c8864/0x4c9b5b). 0x497abc writes it as the
+figure's drawn cell moves: it stays empty when the new cell lies in a building other than a
+bridge (types 13 and 14; an obelisk hides too) and the drawn cell it leaves lies in any
+building (a bridge too). The hero's drawn cell moves at the start of each step and is set
+again on the same cell at its end (0x4ae8ed) and at a stop (0x4ae5d8); an army's moves to the
+cell it steps to while the step plays (0x4ad660) and is set again on it when the step ends
+(0x4ade3c); a map load (0x4b4f38) and an event placing an army (0x4969b8) set it with the
+drawn cell already there. So a figure standing in a building is not drawn at all, one gliding
+in from outside is seen until its step ends, one crossing from one building cell to another
+is hidden, and one stepping out is seen at once. Its ring stays, one cell under the building
+picture (see above). The logical byte (cell +8, 0x497c68) follows the same rule. **code**
+
 ### 7.3 Left button (first frame of the press)
 
 Only on a valid target, and only while the map is idle (no walk, wait, glide or event):
@@ -1300,9 +1326,13 @@ parity rule they are candidates to hide or remove, not bugs to copy.
 | 66 | Map hover marks | Matches: the hovered cell's ring in the colour of the original's mark, worked out on entering another cell (`cursor::hover_ring`, `world_view::update_pointer`), in place of the army's mark on that cell; the ring stays over the bar; Razdor drops it while the hero walks | The ring, under the building's picture | 7.2 |
 | 68 | Promotion animation | Matches (`items_view::Promo`): `Unit-Upgrade` on the click, the picked portrait empty with the fading green glow, effect 6 frames 0–15 on it for 500 ms then 16–49 eased down to the unit's portrait, the glow up on all portraits, the class changed 100 ms before the end and the glow down on the new tree, the card under the running `exp` strip, no input meanwhile; at the end nothing selected, the tree up, the panel on the promoted unit until a card is hovered. The time follows the original's portrait distance (1501 / 1746 ms), the path Razdor's own tree places | The same over the original's portraits (4b1a04) | 9.7 |
 | 69 | Name fields (the hero's name, the save's name) | Matches: held Backspace deletes again after 500 ms, then 30 a second (`widgets::repeats`) | One character per WM_KEYDOWN, the system's key repeat included (475748, 47a816) | 5 |
+| 70 | Figures inside buildings | Matches: the hero's and the armies' figures are not drawn while they stand in a building other than a bridge or cross from one building cell to another; gliding in from outside they are seen until the step ends (`World::hides_figure`, `Game::hero_hidden`, `Game::army_hidden`); their one-cell ring stays under the building | 0x497abc empties the drawn-occupant byte; rings are one cell in the Community exe (the vanilla ring round the whole building is a dead branch of 0x48eeb0) | 7.2 |
 
 ## Unknowns
 
+- **Vanilla building ring.** Whether the vanilla game ringed a building holding an army with
+  one ring of the footprint's width (§7.2, the dead branch 0x48ef08–0x48ef54) is inferred, not
+  seen: no vanilla exe is at hand. The Community exe rings one cell.
 - **Vanilla battle animation caps.** The Community animation-speed hooks overwrote the base
   game's compare values for the slide length and the effect length. The effect length of
   350 ms is inferred from the frame formula; the slide cap is not known (500 ms would match
