@@ -17,6 +17,7 @@ pub mod gamepad;
 pub mod hotkeys;
 pub mod input;
 pub mod item_filter;
+pub mod item_text;
 pub mod items_view;
 pub mod jukebox;
 pub mod language;

@@ -82,6 +82,12 @@ rumours and messages over the whole campaign, with dates and a heading per campa
 (`items_view::HeroView`, `story::journal_lines`). Hint boxes
 (`widgets::tooltip`, `panel_hint`) fade in over 300 ms as the original's.
 
+An item's description, wherever it is shown (the market, the hero window's box, the army
+window's pop-up, the event window's item tooltip), is one box, `item_text::draw` in
+`src/ui/item_text.rs`, laid out per window by `item_text::ItemBox`; its usage line, effect text
+and bonus line are the original's (interface.md §9.2), built by `rules::item_text` from the
+install's `[Skills]` labels (`spell_badges::label`).
+
 Building a window (`src/ui/chrome.rs`):
 
 - `chrome::k()` is the interface scale: screen pixels per pixel of the 960×720 reference

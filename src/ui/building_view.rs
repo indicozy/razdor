@@ -9,11 +9,10 @@ use macroquad::prelude::*;
 use razdor::i18n::{n_, tr};
 use razdor::rules::battle::Team;
 use razdor::trf;
-use razdor::rules::content::{ArtefactType, HeroClass, ItemId, SpellDef, Stat};
+use razdor::rules::content::{HeroClass, ItemId, SpellDef, Stat};
 use razdor::rules::formation::{Formation, Slot};
 use razdor::rules::economy::VillageOffer;
 use razdor::rules::game::{Currency, Game, HireError, TradeError, Tribute, SPELL_BOOK_SIZE};
-use razdor::rules::items::describe_with;
 use razdor::rules::script::HallEntry;
 use razdor::rules::town::{ServiceError, Tab};
 use razdor::rules::units::Unit;
@@ -1089,73 +1088,6 @@ fn price_list_in_face(assets: Option<&Assets>, rows: &[(Option<ItemId>, String, 
     hit
 }
 
-pub(super) fn item_description(game: &Game, assets: &Assets, item: ItemId, x: f32, y: f32, w: f32, h: f32) {
-    let k = chrome::k();
-    let c = &game.content;
-    let d = c.item(item);
-    chrome::text_box(Rect::new(x, y, w, h));
-    let limit = match d.kind {
-        ArtefactType::BlowWeapon => Some(tr("warriors only")),
-        ArtefactType::ShotWeapon => Some(tr("shooters only")),
-        ArtefactType::Staff => Some(tr("mages only")),
-        ArtefactType::Item => Some(tr("trade goods: cannot be worn")),
-        _ => None,
-    };
-    let props = describe_with(c, item, &super::unit_sheet::bonus_title);
-    // What the item's special bonus does, under the properties in its own colour: the text the
-    // unit panel shows for it (`[Army] Bonus<N>`), so a buyer knows it before buying (Razdor's;
-    // the original names the bonus only).
-    let bonus = d.bonus.as_ref().map(|b| super::unit_sheet::trait_line(b).1);
-    let layout = |s: f32| {
-        let desc = wrap(&d.description, w - 24.0 * k, 15.0 * k * s);
-        let mut lines = wrap(&props, w - 24.0 * k, 16.0 * k * s);
-        let bonus_lines = bonus.as_deref().map_or(Vec::new(), |b| wrap(b, w - 24.0 * k, 15.0 * k * s));
-        let n = lines.len();
-        lines.extend(bonus_lines);
-        let height = (10.0 + 56.0 * s + 6.0 + 22.0 * s + if limit.is_some() { 20.0 * s } else { 0.0 } + 18.0 * s * desc.len() as f32 + 4.0 + 19.0 * s * lines.len() as f32 + 6.0) * k;
-        (desc, (lines, n), height)
-    };
-    let scales = [1.0, 0.9, 0.8, 0.72, 0.65];
-    let s = if super::typography::fixed_size() { 1.0 } else { scales.iter().copied().find(|&s| layout(s).2 <= h).unwrap_or(0.65) };
-    let (mut desc, (lines, props_n), _) = layout(s);
-    let icon = 56.0 * k * s;
-    assets.draw_item(item, x + w / 2.0 - icon / 2.0, y + 10.0 * k, icon);
-    let desc_lh = super::typography::Role::Body.line_height(18.0 * k * s);
-    let props_lh = super::typography::Role::Body.line_height(19.0 * k * s);
-    let limit_lh = super::typography::Role::Body.line_height(20.0 * k * s);
-    let mut ly = y + 10.0 * k + icon + 6.0 * k + super::typography::Role::Name.size(18.0 * k * s) * 0.72;
-    super::typography::Role::Name.with(|| {
-        let name = ellipsize(&d.name, w - 24.0 * k, 20.0 * k * s);
-        text_centered(&name, x + w / 2.0, ly, 20.0 * k * s, Color::new(0.84, 0.85, 0.87, 1.0));
-    });
-    ly += 4.0 * k * s;
-    if let Some(limit) = limit {
-        ly += limit_lh;
-        text_centered(limit, x + w / 2.0, ly, 16.0 * k * s, Color::new(155.0 / 255.0, 155.0 / 255.0, 155.0 / 255.0, 1.0));
-    }
-    // At the smallest size the description gives way to the properties.
-    let room = ((y + h - 6.0 * k - ly - 4.0 * k - props_lh * lines.len() as f32) / desc_lh).floor().max(0.0) as usize;
-    if desc.len() > room {
-        desc.truncate(room);
-        if let Some(last) = desc.last_mut() {
-            *last = format!("{}…", last.trim_end());
-        }
-    }
-    for line in &desc {
-        ly += desc_lh;
-        text_centered(line, x + w / 2.0, ly, 15.0 * k * s, ACCENT);
-    }
-    ly += 4.0 * k;
-    for (n, line) in lines.iter().enumerate() {
-        ly += props_lh;
-        if n < props_n {
-            text_centered(line, x + w / 2.0, ly, 16.0 * k * s, chrome::ORANGE_TEXT);
-        } else {
-            text_centered(line, x + w / 2.0, ly, 15.0 * k * s, WHITE);
-        }
-    }
-}
-
 /// The market rows' order: indices of `prices`, cheapest first; equal prices keep their
 /// stock or pack order (a stable sort).
 fn cheapest_first<P: Ord>(prices: &[P]) -> Vec<usize> {
@@ -1263,7 +1195,7 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
     let dh = 186.0 * k;
     let card_y = y + 21.0 * k;
     match view.pick.and_then(|k| rows.get(k)).and_then(|r| r.0) {
-        Some(item) => item_description(game, assets, item, dx, card_y, dw, dh),
+        Some(item) => super::item_text::draw(game, assets, item, Rect::new(dx, card_y, dw, dh), super::item_text::ItemBox::Market, k),
         None => {
             chrome::text_box(Rect::new(dx, card_y, dw, dh));
             text_centered(tr("Pick an item from the list."), dx + dw / 2.0, card_y + dh / 2.0, 18.0 * k, BOX_INK);

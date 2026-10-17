@@ -1036,13 +1036,13 @@ pub fn squad(
     // The item under the pointer, in the pack or worn: its description pops up by the pointer
     // (not while one is carried).
     if let Some(item) = hover.filter(|_| held.is_none()) {
-        // Taller for an item with a special bonus, whose text follows its properties.
-        let (pw, ph) = (272.0 * k, if game.content.item(item).bonus.is_some() { 330.0 } else { 240.0 } * k);
+        // The original's item tooltip (0x4cbab0): 272 wide, as tall as its text plus 32.
+        let (pw, ph) = (super::item_text::TOOLTIP_W * k, super::item_text::tooltip_height(game, item, k));
         let (mx, my) = pointer();
         let px = if mx + 21.0 * k + pw > sw { mx - 21.0 * k - pw } else { mx + 21.0 * k };
         let py = (my + 37.0 * k).min(sh - ph - 4.0).max(4.0);
         draw_rectangle(px + 6.0 * k, py + 6.0 * k, pw, ph, Color::new(0.0, 0.0, 0.0, 0.45));
-        super::building_view::item_description(game, assets, item, px, py, pw, ph);
+        super::item_text::draw(game, assets, item, Rect::new(px, py, pw, ph), super::item_text::ItemBox::Tooltip, k);
     }
 
     if close || (!filter.keys_taken && (key(KeyCode::Escape) || key(KeyCode::A))) {
@@ -1317,7 +1317,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     let desc = o(576.0, 58.0, 310.0, 164.0);
     heading("ItemDescript", n_("Item description"), desc);
     match hover.filter(|_| held.is_none_or(|h| !h.moved)) {
-        Some(item) => super::building_view::item_description(game, assets, item, desc.x, desc.y, desc.w, desc.h),
+        Some(item) => super::item_text::draw(game, assets, item, desc, super::item_text::ItemBox::Inventory, s),
         None => chrome::text_box(desc),
     }
 

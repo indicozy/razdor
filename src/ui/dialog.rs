@@ -611,7 +611,8 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         }
     }
     if let (Some((spell, id, at)), Some(game)) = (d.preview.get(), game) {
-        let (pw, ph) = if spell { (286.0, 112.0) } else { (272.0, 230.0) };
+        // The item tooltip is 272 wide and as tall as its text plus 32 (0x4cbab0).
+        let (pw, ph) = if spell { (286.0, 112.0) } else { (super::item_text::TOOLTIP_W * o, super::item_text::tooltip_height(game, ItemId(id), o)) };
         let px = (at.x - pw / 2.0).clamp(x + 10.0, (x + w - 10.0 - pw).max(x + 10.0));
         let py = (at.y - ph / 2.0).clamp(y + 10.0, (y + h - 10.0 - ph).max(y + 10.0));
         draw_rectangle(px + 8.0, py + 8.0, pw, ph, Color::new(0.0, 0.0, 0.0, 0.45));
@@ -620,7 +621,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
                 super::spellbook::spell_card(game, s, Rect::new(px, py, pw, ph));
             }
         } else {
-            super::building_view::item_description(game, assets, ItemId(id), px, py, pw, ph);
+            super::item_text::draw(game, assets, ItemId(id), Rect::new(px, py, pw, ph), super::item_text::ItemBox::Tooltip, o);
         }
         return None;
     }
@@ -715,7 +716,8 @@ fn draw_village_event(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Optio
             assets.draw_item(item, r.x, r.y, r.w);
             if r.contains(pointer().into()) && (is_mouse_button_down(MouseButton::Left) || is_mouse_button_down(MouseButton::Right)) {
                 if let Some(game) = game {
-                    super::building_view::item_description(game, assets, item, x + (w - 272.0 * o) / 2.0, y, 272.0 * o, 230.0 * o);
+                    let (tw, th) = (super::item_text::TOOLTIP_W * o, super::item_text::tooltip_height(game, item, o));
+                    super::item_text::draw(game, assets, item, Rect::new(x + (w - tw) / 2.0, y, tw, th), super::item_text::ItemBox::Tooltip, o);
                     return None;
                 }
             }

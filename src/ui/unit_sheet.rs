@@ -118,9 +118,9 @@ pub(super) fn bonus_title(b: &Bonus) -> String {
         .unwrap_or_else(|| razdor::rules::items::bonus_name(b))
 }
 
-/// The name part of a bonus text: up to the first " - ", trimmed.
+/// The name part of a bonus text: up to the first " - ", spaces trimmed (0x49a5c6).
 fn title_of(text: &str) -> &str {
-    text.split(" - ").next().unwrap_or(text).trim()
+    razdor::rules::item_text::bonus_title(text)
 }
 
 fn hero_trait(h: HeroClass) -> (String, String, Color) {

@@ -130,8 +130,8 @@ pub fn flush() {
 const TIME_TEXT: Color = Color::new(0.96, 0.88, 0.55, 1.0);
 
 /// A label or word of the hint by its key in the install's interface ini (`[Skills]`,
-/// `[Time]`) in Russian, else ours.
-fn label(key: &'static str) -> String {
+/// `[Time]`) in Russian, else ours. The item text (`ui::item_text`) takes its labels here too.
+pub(super) fn label(key: &'static str) -> String {
     let section = if key.starts_with('c') { "Time" } else { "Skills" };
     let own = (lang() == Lang::Ru).then(|| chrome::ui_text(section, key)).flatten();
     own.unwrap_or_else(|| tr(english(key)).to_string())
@@ -160,6 +160,13 @@ fn english(key: &str) -> &'static str {
         "SInitiative" => n_("Initiative"),
         "SManevres" => n_("Actions"),
         "LifeLost" => n_("Drains life"),
+        "SCurrentHit" => n_("Current hits"),
+        "Resurrect" => n_("Raises from the dead"),
+        "GetBonus" => n_("Gives the bonus"),
+        "OnlyForWarriors" => n_("warriors only"),
+        "OnlyForBowmans" => n_("archers only"),
+        "OnlyForMages" => n_("mages only"),
+        "NotForUse" => n_("dark forces only"),
         "RemainedTimeOfEffect" => n_("Time left:"),
         "RemainedTimeOfEffectAll" => n_("Unknown"),
         "cMounth" => n_("month"),
