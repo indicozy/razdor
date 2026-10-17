@@ -19,6 +19,19 @@
   становятся белыми, как в оригинале.
 ## 0.4.32 — 2026-10-17
 
+Коммит `add507f` (тег `v0.4.32`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+78e7a8bb2b0423fd0659e25adde03adeda4c6a29755541f48b8498f527777ce5  razdor
+14214a43da4892ac1efd3f442c0f47c21e62fa3c21ab52d411c1197bc33f6199  Razdor.exe
+a8c52665ce94ba785c539f9007c6b004f0a245a33e40080398438a5dbcfbabf9  razdor-macos
+03143a1d5d8e00d78d74094a8d626b751e7177c3106d27f21f25a2863ace9e7f  razdor-translate
+05052ac2c9c6dbad2cde79ab55d2c4f689aeddcdef79284543c081f4679f5ee5  Razdor-translate.exe
+933503d76def47bde350f0d50191e02990b44feb952683377219dc07e04661f9  razdor-translate-macos
+```
+
 ### Изменено
 
 - Окна стали ближе к оригиналу: тёмный пергамент с его зерном и боковыми узорами, полоса
@@ -33,6 +46,19 @@
   `*`: 1 в оригинале, 0 в переводе»), начало отвергнутого перевода и номер запроса в «Журнале
   запросов», где лежат ответ модели и оба текста целиком.
 ## 0.4.31 — 2026-10-17
+
+Коммит `49fbd57` (тег `v0.4.31`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+aaaaf690e4305cd3843b0e1d0bb72e84bc084f01e367325abf734896ef8c3605  razdor
+b2a2de4e59fcc6f574bdd708c42ce73961c817822ba27673c8ddad54ffd07598  Razdor.exe
+3b1955e4d79e071d6681b9ca507f2caf8aabca0b3677c624b4256bf6d9a26f21  razdor-macos
+0265475110431b20e71d2121139efdd2070d9ff1f1dcfa5661eddd7db7311b77  razdor-translate
+3abdc92a840bfa9f617a6a7cc5d1dc7aff567af7fb37c0c1053f6f958f40e2f4  Razdor-translate.exe
+e74ae4a1e07d6a0e12125e56afedbddab858c932ca2e687e0202823a2010c53f  razdor-translate-macos
+```
 
 ### Добавлено
 
