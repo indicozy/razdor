@@ -388,7 +388,7 @@ fn hall_offers_in_face(game: &mut Game, f: &Frame, view: &mut BuildingView, mess
     let list_y = (quest_border.y + quest_border.h).max(take.y + take.h) + 5.0*k;
     let list = Rect::new(panel.x, list_y, panel.w, (panel.y + panel.h - list_y).max(row_h + 8.0 * k));
     let rows = (((list.h - 8.0 * k) / row_h).floor() as usize).max(1);
-    chrome::parchment_fill(list, true);
+    chrome::quest_list_parchment(list);
     let max_scroll = entries.len().saturating_sub(rows);
     if mouse_in(list.x, list.y, list.w, list.h) {
         let wh = wheel();

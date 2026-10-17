@@ -1601,6 +1601,42 @@ pub fn parchment_fill(r: Rect, ornaments: bool) {
     draw_rectangle(r.x + r.w - e, r.y + e, e, r.h - 2.0 * e, dark);
 }
 
+/// The bands grey 48 is taken off round the hall list's edges, in its pixels (0x4bef1b, 0x4befcd).
+const QUEST_LIST_BANDS: [f32; 2] = [2.0, 4.0];
+
+/// How much each channel loses `d` pixels in from the hall list's edge.
+#[cfg(test)]
+fn quest_list_edge_loss(d: f32) -> u32 {
+    QUEST_LIST_BANDS.iter().filter(|&&b| d < b).count() as u32 * 48
+}
+
+/// The main hall's quest and rumour list (0x4bedec): Win-paper as it is, copied from (1, 1);
+/// the brown box's side ornaments taken off it ([`text_box_sides`]: on light paper they come
+/// out gold, with no dark rim); then grey 48 taken off a 2 px band round the edges and again
+/// off a 4 px band (0x4bef1b..0x4bf00f), so the outer 2 px lose 96 and the next 2 px 48.
+///
+/// Kept from the original: its ornament loop places every copy at the same height (the count
+/// times the art's height, not the copy's index, 0x4beecc), which only matters for a list
+/// taller than the art (397 px); Razdor's is shorter, so one copy from the top shows.
+pub fn quest_list_parchment(r: Rect) {
+    let k = k();
+    match win("Win-paper") {
+        Some(t) => tile(&t, r, k, WHITE),
+        None => surface(r, Skin::Paper),
+    }
+    text_box_sides(r);
+    let grey = Color::from_rgba(48, 48, 48, 255);
+    subtractive(|| {
+        for band in QUEST_LIST_BANDS {
+            let b = (band * k).min(r.w / 2.0).min(r.h / 2.0);
+            draw_rectangle(r.x, r.y, r.w, b, grey);
+            draw_rectangle(r.x, r.bottom() - b, r.w, b, grey);
+            draw_rectangle(r.x, r.y + b, b, r.h - 2.0 * b, grey);
+            draw_rectangle(r.right() - b, r.y + b, b, r.h - 2.0 * b, grey);
+        }
+    });
+}
+
 /// Light parchment, e.g. the unit panel; ornaments darken the corners when the art is there.
 pub fn parchment(r: Rect, ornaments: bool) {
     parchment_fill(r, ornaments);
@@ -2081,6 +2117,17 @@ pub fn effect(rel: &str, c: Vec2, size: f32, t: f32, color: Color) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The hall list's edges as the original's (0x4bef1b..0x4bf00f): grey 48 off a 2 px band
+    /// and again off a 4 px band, so the outer 2 px lose 96, the next 2 px 48, the rest none.
+    #[test]
+    fn the_hall_list_edges_lose_96_then_48() {
+        assert_eq!(quest_list_edge_loss(0.0), 96);
+        assert_eq!(quest_list_edge_loss(1.5), 96);
+        assert_eq!(quest_list_edge_loss(2.0), 48);
+        assert_eq!(quest_list_edge_loss(3.9), 48);
+        assert_eq!(quest_list_edge_loss(4.0), 0);
+    }
 
     /// The hint strip's corners as the original's (0x4dbd58, 0x4dbd74): the 124 px corners at
     /// x = −51 and 555 on the 628 px strip show their inner 73 columns, flush with each end.

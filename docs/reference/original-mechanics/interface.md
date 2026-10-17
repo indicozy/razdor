@@ -872,8 +872,11 @@ wage total. **code**
   back; held down it shows `tbd`, which is also the open tab's picture. **code**
 
 - **Info tab with quests** (4bedec): without quests the description takes the full 272 px
-  height. With quests a framed list is drawn (dark 2 px and 4 px borders, decorative side
-  strips tiled down, a header picture with the `QuestList` title and a drop shadow), its scroll
+  height. With quests a framed list is drawn (Win-paper as it is from (1, 1); Big_Frame_1a
+  and Big_Frame_2a taken off 4 px in from each side as in the brown text box, so on the light
+  paper they show gold; grey 48 taken off a 2 px and again a 4 px band round the edges;
+  the ornament loop puts every copy at the count times the art's height, not at its index,
+  4beecc), a header picture with the `QuestList` title and a drop shadow), its scroll
   bar, and the Take Quest button, shown but disabled. Selecting a row enables it (4ba754). Take
   Quest (4bb798) prepares the selected quest's event and opens its event dialog (4a8ae8,
   4ac3b4). **code**

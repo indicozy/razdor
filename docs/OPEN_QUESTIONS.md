@@ -18,7 +18,8 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   the scenario list lighting no row on hover, and the brown and red skins tiled at the full
   scale. The silver edge round the hint strip is Razdor's (the original's strip has none
   baked in; whether its windows frame it is unknown). The PR (63f7c0b) and its follow-ups
-  (7fa971a, 2221fbf: the scenario list's highlight, fonts and description) are not on
+  (7fa971a, 2221fbf: the scenario list's highlight, fonts and description; the hall list's
+  parchment) are not on
   `dt-original` yet: they sit on the PR's drawing helpers, so they go over together once the
   rest is checked (41c6b89, the description's wheel, is there).
 - **«Максимум» against people** (2026-10-16, Razdor's strongest battle AI, the owner's
