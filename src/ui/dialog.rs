@@ -308,17 +308,20 @@ pub fn resource_icon(r: Resource, cx: f32, cy: f32, s: f32) {
     }
 }
 
-/// A row of unit portraits with a caption. Returns its height.
-fn unit_row(assets: &Assets, label: &str, units: &[UnitId], x: f32, y: f32, o: f32) -> f32 {
-    if units.is_empty() {
-        return 0.0;
-    }
-    text(label, x + 30.0 * o, y + 30.0 * o, 18.0 * o, INK);
-    let lx = x + 40.0 * o + measure(label, 18.0 * o).width;
-    for (k, &u) in units.iter().enumerate().take(8) {
-        assets.draw_unit(u, Team::Player, lx + 26.0 * o + k as f32 * 56.0 * o, y + 26.0 * o, 50.0 * o);
-    }
-    60.0 * o
+/// The units rows (characters joined, characters departed: 0x4a93bc, 0x4a9711): the
+/// original's picture cells of 47 × 47 (set up at 0x4c612c's event window), each showing the
+/// unit type's 46 × 46 icon (type record +0x18, the 92 × 92 bust box-averaged to half by
+/// 0x48efd0 / 0x48d830), with no ring or frame. A row grows the window by its icons, 8, the
+/// 16 of its caption and 8 more (0x4a9650: 0x2f + 8 + 0x10 + 8).
+const UNIT_ICON: f32 = 46.0;
+const UNIT_ROW: f32 = 79.0;
+
+/// The left edges, from the window's left in the original's pixels, of a units row's `n`
+/// cells: centred at W·(i+1)/(n+1) in whole pixels, less 23 (0x4a95a9 and 0x4a9a84: `IMUL`,
+/// `IDIV`, `SUB 0x17`). Each event names at most four units to add or take (+0x61, +0x69).
+fn unit_cells(n: usize) -> Vec<f32> {
+    let n = n.min(4) as i32;
+    (0..n).map(|i| ((EVENT_W as i32 * (i + 1)) / (n + 1) - 23) as f32).collect()
 }
 
 /// The event window's frame in the original's pixels (0x4a8ae8), before the interface scale:
@@ -399,7 +402,7 @@ pub fn draw(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Close> {
     // original's opening event as 30 of Razdor's layout.
     let notice_h = if d.notice.is_some() { 30.0 * o } else { 0.0 };
     let pic_h = if d.picture.is_some() && side.is_none() { 140.0 * o } else { 0.0 };
-    let units_h = [&d.joined, &d.left].iter().filter(|u| !u.is_empty()).count() as f32 * 60.0 * o;
+    let units_h = [&d.joined, &d.left].iter().filter(|u| !u.is_empty()).count() as f32 * UNIT_ROW * o;
     let below = pic_h + res_h + items_h + spells_h + units_h + notice_h;
     // The box stops at 499 (and short of the screen), the buttons in sight.
     let screen_box = (sh - chrome::bar_height() - 4.0) / o - below / o - EVENT_REST;
@@ -487,8 +490,18 @@ pub fn draw(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Close> {
         }
         cy += spells_h;
     }
-    cy += unit_row(assets, tr("Left the army:"), &d.left, x, cy, o);
-    cy += unit_row(assets, tr("Joined the army:"), &d.joined, x, cy, o);
+    // The units rows: the departed above the joined (0x4a8ae8 stacks them from the bottom
+    // up), each its green caption centred (`[Event] DelUnit` / `AddUnit`) over its icons.
+    for (units, key, ours) in [(&d.left, "DelUnit", razdor::i18n::n_("Characters departed:")), (&d.joined, "AddUnit", razdor::i18n::n_("Characters joined:"))] {
+        if units.is_empty() {
+            continue;
+        }
+        caption(key, ours, cy);
+        for (&u, left) in units.iter().zip(unit_cells(units.len())) {
+            assets.draw_portrait(u, Team::Player, Rect::new(x + left * o, cy + 26.0 * o, UNIT_ICON * o, UNIT_ICON * o));
+        }
+        cy += UNIT_ROW * o;
+    }
     if !d.items.is_empty() {
         caption("AddItem", razdor::i18n::n_("Items received:"), cy);
         let n = d.items.len().min(8);
@@ -619,6 +632,18 @@ mod tests {
     }
 
     /// The won battle's report waits its 250 ms after the screen closes (0x4af658), then shows.
+    /// The units rows (0x4a93bc, 0x4a9711): 46 × 46 icons in 47 × 47 cells centred at
+    /// W·(i+1)/(n+1) less 23, in whole pixels; a row is 79 tall.
+    #[test]
+    fn the_units_rows_stand_as_the_original_s() {
+        assert_eq!(unit_cells(1), vec![294.0]);
+        assert_eq!(unit_cells(2), vec![188.0, 399.0]);
+        assert_eq!(unit_cells(3), vec![135.0, 294.0, 452.0]);
+        assert_eq!(unit_cells(4), vec![103.0, 230.0, 357.0, 484.0]);
+        assert_eq!(unit_cells(6).len(), 4);
+        assert_eq!((UNIT_ICON, UNIT_ROW), (46.0, 79.0));
+    }
+
     #[test]
     fn a_dialog_with_a_time_waits_for_it() {
         let gap = razdor::av::BATTLE_REPORT_GAP_MS as f64 / 1000.0;

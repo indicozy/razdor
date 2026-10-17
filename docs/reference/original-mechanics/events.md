@@ -289,6 +289,11 @@ campaign quest only after both. Razdor: the same (`rk2_the_peasant_offers_and_th
   an editor note that is never shown (378 shipped titles have one). **code**
 - **Resource row**: the event's gold and mana. Events with "no meeting" (148) set show no
   resource row (Community 0xc2831f); the values are still applied. **code**
+- **Units rows**: the units joined and the units departed each get a row: the language file's
+  `[Event] AddUnit` / `DelUnit` caption centred in green, under it the units' 46 × 46 icons
+  (the 92 × 92 bust halved) in 47 × 47 cells centred at W·(i+1)/(n+1), with no frame or
+  ring; a row adds 79 px (0x4a93bc, 0x4a9711). The departed row lists only the units really
+  taken. A unit picture at the side (82) is its 92 × 92 bust. **code**
 - Layout: 634 px wide, centred on 1024 × 682 (on the tutorial's own position in the
   tutorial); the height grows with the reward rows, with a scroll bar past a limit. **code**
 
@@ -628,6 +633,8 @@ world, carry-over), `src/rules/journal.rs`, `src/dt/dtm.rs` (record and flag scr
 | Unit taken from an army | The whole record (level, XP, wounds, items, name, wage kind); an emptied army leaves the map | Takes the whole record; an emptied army leaves the map | Matches |
 | Unit removed, by type | From the last unit back; unnamed slot: unnamed unit of the type; named slot: that name, any type; nothing unless a slot finds one; never the hero; given to no army, its worn items go with it | Unnamed slot: unnamed unit of the type; named slot: that name, any type; can hit the hero | Matches, except the hero (unknown whether reachable: Razdor's guard kept) |
 | Removed unit given to an army | Slot without a name: appended, over the last of a full army; slot with a name: the leader, the others down | Appended (overwriting the last of a full army); under a named slot it becomes the leader | Matches |
+| Units rows of the window | The departed above the joined, each its green caption (`[Event] DelUnit` / `AddUnit`) centred over 46 × 46 icons centred at W·(i+1)/(n+1) − 23, 79 per row; a unit picture is 128 × 128 above the text | 0x4a93bc / 0x4a9711: 47 × 47 cells (0x4c612c) with the type's 46 × 46 icon (+0x18), no frame; 0x2f + 8 + 16 + 8 per row; the side picture +0x14 (92 × 92) | Rows match; the unit picture does not |
+| Items lost row, departed row's units | No "items lost" row; the departed row shows the event's listed types | `[Event] DelItem` row of the items taken (0x4a9180); the departed row shows only units actually taken (0x4a9711) | Gap |
 | "No meeting" and spells | Not learned; no resource row | Not learned; no resource row | Matches |
 | Lantern with radius 0 | Not lit | Not lit | Matches |
 | Move army to hero | Army 136 only, not activated, cheapest neighbour | Army 136 only, not activated, cheapest neighbour by terrain cost | Matches |
