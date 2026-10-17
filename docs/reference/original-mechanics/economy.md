@@ -195,6 +195,36 @@ runs on its first arrival on a new cell after noon (0x4a5534). In order:
     (weights 100/200/100, 0x48db5c) and rescaled (each channel ×1300/1024 − 26, 0x48da5c),
     built at 0x4d985f; the caption keeps its colour and moves by the pressed offset (1, 1).
     So the button of the open list looks locked, and a click on it does nothing.
+- **How the market and sanctuary lists are drawn** (code; built at 0x4d9060, filled by
+  0x4bca8c and 0x4ba854 tab 4). Each list is two engine text lists side by side, the names and
+  the prices, with a picture column at their left; both rows of one item share a group, so a
+  pick lights both.
+  - *Market* (0x4d9df3..0x4d9f20): the price list is 70 px wide, standing left of the scroll
+    bar; the name list 283 − 70 − 27 = 186 px left of it; the picture column 27 px left of the
+    names. Both lists fill their background with (24, 24, 24) in mode 5, which **takes that
+    colour off the window's marble** under them (no paper). The picture column (0x4bddf0) is a
+    27 × 197 copy of `Win-paper` from (0, 0) with (24, 24, 24) taken off (0x4768f8 mode 1),
+    with each visible row's item picture keyed on it at 28 px steps. A 1 px frame (0x48d1d4,
+    colours from the frame art) runs round the three. Rows are spaced 1.75 lines (0x4bcd39).
+    The pick adds the text lists' default highlight (64, 64, 64) over the names and prices.
+  - *Sanctuary* (0x4d9fe6..0x4da12f): the price list 70 px wide, 11 px in from the window's
+    right edge and 60 px down; the name list 0x13c − 70 − 42 = 204 px left of it; both 250 px
+    tall, rows spaced 2.667 lines. One panel 42 + 204 + 70 px wide goes under the picture
+    strip and both lists (0x4bb3c3): `Win-paper` from (20, 20) with (148, 132, 148) taken off,
+    a warm brown with the paper's grain kept. Below the last spell the paper is copied on from
+    (20, 20 + the rows' height) with (180, 140, 113) taken off instead (0x4bb592), darker. The
+    frame goes round the panel (0x4bb508). The spell pictures are painted at (4, 4 + 104·n) on
+    a 108 × 628 strip filled with the key colour (95, 59, 0) when the window opens (0x4bc351),
+    the strip is shrunk to 42 × 250 (0x48d830 at 0x4bc42a) and keyed onto the panel's left
+    (0x4bb533): the pictures sit straight on the paper, no strip of their own. The pick adds
+    (24, 32, 24) over the names and prices (+0xb1 set at 0x4da030 and 0x4da0e5; mode 4).
+  - *Text*: the lists' text inset is 8 px (+0xb9); names are left-aligned (align 1) and prices
+    **centred in their 70 px list** (align 2: 0x4bcd03 market, 0x4bb0ca sanctuary); the titles
+    `ItemName`/`SpellName` and `ItemCost` are each centred over their own list (0x48e750). A
+    market row's name and price share one font: ae24a4 (Benguiat 255, 175, 85) when the buy
+    price is above the gold, else ae24a0 (255, 255, 155). A spell's name and price are ae24a8
+    (55, 180, 255) when it is already in the book, else ae24a0, **whatever the gold**.
+  - The original has no way to sort either list.
 - **Spells**: exactly `CostGold`, if CostGold ≤ gold and the spell is not known (0x4ba3b0); the
   book limit is the shop's (magic-items.md).
 - **Barracks hire**: exactly the unit's `Cost` (0x4b0fcf), no relation factor, no Merchant. The
@@ -594,6 +624,7 @@ Razdor's code as read for this pass: `src/rules/economy.rs`, `town.rs`, `world.r
 | Dismiss / Bury | A confirm step; no refund; worn items lost; the pack untouched; only the hero protected; the hero selected after | A confirm step; no refund; **worn items are lost**; the pack is untouched; only the hero is protected | Matches |
 | Hire timing | Immediate | The unit, gold and slot count change when the card slide ends | Yes (no visible difference) |
 | Market display | Prices as charged; the sell list only Cost > 1; unaffordable buy prices red; Buy enabled iff price ≤ gold, no pack test; opens on the goods when there are some; both lists sorted cheapest first (the owner's choice, 35374ff) | Prices as charged; sell list only Cost > 1; unaffordable buy prices red; Buy enabled iff price ≤ gold, no pack test; places listed in order (most expensive first, as drawn) | Order differs by the owner's choice; the rest matches |
+| Market and sanctuary list look | Market: the names and prices on the marble with (24, 24, 24) taken off, the icon column `Win-paper` (0, 0) less (24, 24, 24), the pick +(64, 64, 64) over names and prices, one tint per row (ae24a4 above the gold, else ae24a0). Sanctuary: one `Win-paper` (20, 20) panel less (148, 132, 148), less (180, 140, 113) below the last spell, pictures on the paper, the pick +(24, 32, 24), blue for a known spell else yellow. Prices centred in a 70-px column, titles centred over their lists; the original's widths scaled to Razdor's window (`price_list_in_face`, `spell_list`, `chrome::paper_minus`) | §2 "How the market and sanctuary lists are drawn" | Matches (row height and Razdor's scroll bar inside the market list aside) |
 | Village offers | Every roll drawn until one passes, the last kind's included (it cannot pass); "last" becomes none after an empty visit; innkeeper and priest against army size div 2, the priest counting the living; all options are questions (`Game::visit_village`) | Rolls every step; "last" becomes none after an empty visit; all options are questions | Matches |
 | Village offer window | The event window's Yes/No question before the village window, its `Village_Bonus_N` picture (1 blessing … 5 innkeeper) left of the text; Yes to 3–5 shows the result window, No opens the village window (`building_view::offer_dialog`, `answer_offer`) | 0x4aca80 (picture +0xa7), 0x4c2100, 0x4c2378; interface.md §9.8 | Matches |
 | Village window | The original's small window: `S_Village`, its texts, `Village_Gold`/`Village_Mana` (or `_Empty` at 0) with "+ N" / "= 0" captions, `Ok` (`building_view::village_window`); shows what was taken on entering | 0x4d3a38, 0x4d0e28, 0x4d11ef, 0x4d1247; shows the stocks, pays them on closing | Look matches; the tribute's moment differs (row below) |

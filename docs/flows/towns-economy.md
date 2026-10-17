@@ -89,11 +89,19 @@ the goods or the pack (`BuildingView::selling`): «Инвентарь» and «Т
 original's 0x479bbc), the description pane swaps sides with the list; the filter (Razdor's) takes
 the column titles' line only while it is used (`item_filter::field_with`).
 
+**List look** (economy.md §2, "How the market and sanctuary lists are drawn"). Both lists
+use the original's column widths scaled to the list (`list_columns`): pictures, names left,
+prices centred in their column, each title centred over its column. The market's
+(`price_list_in_face`) takes (24, 24, 24) off the marble under the names and prices; its icon
+column is Win-paper less the same (`chrome::paper_minus`); a pick adds (64, 64, 64). The
+sanctuary's (`spell_list`) is one Win-paper panel less (148, 132, 148), darker below the last
+spell, the pictures straight on it; a pick adds (24, 32, 24).
+
 **Sanctuary UI** (`sanctuary`, `spell_list`, 0x4ba854): the first spell starts selected.
-The list uses brown parchment with a separate light icon column and translucent selection.
-Known spells have blue names and prices; unavailable purchases are orange, affordable ones
-yellow. The compact card wraps the name without shrinking it; after learning, the local
-blue notice replaces the purchase action, with no extra success message outside the window.
+Known spells have blue names and prices, the others yellow whatever the gold (the original
+has no orange here). The compact card wraps the name without shrinking it; after learning,
+the local blue notice replaces the purchase action, with no extra success message outside
+the window.
 
 **Villages** (economy.md §3). Entering a village takes it (no attitude test) and collects the
 waiting gold and mana, unless it makes an offer: then the tribute waits for the answer. A village

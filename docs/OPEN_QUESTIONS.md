@@ -62,8 +62,7 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   merged with fixes). Checked and cited: the brown text box (0x48e4e8), the hint strip under
   the army, barracks, garrison and battle (0x4dbcf3), the red skin's load offsets (0x4dbc34)
   and the scenario list's item, inks and description (0x4e266e, 0x4c1a9c). Still taken from the
-  player's screenshots: the market lists' plain dark backing instead of marble
-  (`price_list_in_face`), the light paper's ornaments mirrored the other way
+  player's screenshots: the light paper's ornaments mirrored the other way
   (`parchment_fill`), the defeat window's white title and stronger orange title ornaments,
   the scenario list lighting no row on hover, and the brown and red skins tiled at the full
   scale. The silver edge round the hint strip is Razdor's (the original's strip has none
@@ -217,6 +216,12 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   button's own size.
 
 ## Settled
+
+- **The market lists' backing from PR #8** (2026-10-17). PR 63f7c0b drew the market's names
+  and prices on a 25% black overlay taken from screenshots. The code (0x4d9e33, 0x4d9ee5:
+  fill (24, 24, 24) in mode 5) takes (24, 24, 24) off the marble instead, and the icon column
+  is Win-paper less the same (0x4bddf0); Razdor now draws them so (economy.md §2, "How the
+  market and sanctuary lists are drawn").
 
 - **dt-original: the hero window and group 4** (2026-10-14). main bdc0c96 (the bar's flag opens
   the original's hero window, map tooltips centred on the mouse, the spell book's empty cells,

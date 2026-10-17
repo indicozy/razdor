@@ -1241,13 +1241,80 @@ fn price_list(assets: Option<&Assets>, rows: &[(Option<ItemId>, String, String, 
     super::typography::Role::Name.with(|| price_list_in_face(assets, rows, marks, pick, scroll, x, y, w, visible))
 }
 
+/// The market list's columns as the original lays them out (0x4d9df3..0x4d9eaa): the icon
+/// column 27 px, the names 283 − 70 − 27 = 186 px, the prices 70 px, then the scroll bar.
+const MARKET_ICON_W: f32 = 27.0;
+const MARKET_NAME_W: f32 = 186.0;
+const MARKET_PRICE_W: f32 = 70.0;
+
+/// A list's text inset (+0xb9 = 8, set at 0x4d9e50, 0x4d9f02, 0x4da04d, 0x4da0ff).
+const LIST_MARGIN: f32 = 8.0;
+
+/// What the market's lists take off the window's marble under them: their fill (24, 24, 24)
+/// drawn in mode 5 (+0xa9 and +0xad, 0x4d9e33 and 0x4d9ee5), subtracted.
+const MARKET_LIST_TAKEN: [i32; 3] = [24, 24, 24];
+
+/// What a picked market row adds: the text list's own highlight (64, 64, 64) in its adding
+/// mode 4 (0x47c848; the market does not change it).
+const MARKET_PICK_ADDED: [i32; 3] = [64, 64, 64];
+
+/// Where a list's columns stand from its left edge, scaled from the original's widths
+/// (`widths`: the icon column, the names, the prices) to the room left of the scroll bar.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ListColumns {
+    /// The icon column's width (the names start there).
+    icon: f32,
+    /// Where a name starts: the list's margin in from the icon column.
+    name_x: f32,
+    /// The middle of the names' list, where its title is centred.
+    names_cx: f32,
+    /// The middle of the prices' list: the prices and their title are centred on it.
+    price_cx: f32,
+}
+
+fn list_columns(w: f32, bar: f32, [icon, names, prices]: [f32; 3]) -> ListColumns {
+    let s = (w - bar).max(0.0) / (icon + names + prices);
+    ListColumns { icon: icon * s, name_x: (icon + LIST_MARGIN) * s, names_cx: (icon + names / 2.0) * s, price_cx: (icon + names + prices / 2.0) * s }
+}
+
+/// The market list's columns (`w` wide, its scroll bar `bar` at the right).
+fn market_columns(w: f32, bar: f32) -> ListColumns {
+    list_columns(w, bar, [MARKET_ICON_W, MARKET_NAME_W, MARKET_PRICE_W])
+}
+
+/// The tints of a market row (0x4bca8c): a buy price above the gold puts the name and the
+/// price in font ae24a4 (Benguiat 255, 175, 85), any other row in ae24a0 (255, 255, 155).
+fn market_ink(red: bool) -> Color {
+    if red { benguiat(ORANGE_INK) } else { benguiat(YELLOW_INK) }
+}
+
+/// `Benguiat` with blue − 100 (font ae24a0), the lists' plain rows.
+const YELLOW_INK: [u8; 3] = [255, 255, 155];
+/// `Benguiat` with green − 80, blue − 170 (font ae24a4), a price above the gold.
+const ORANGE_INK: [u8; 3] = [255, 175, 85];
+/// `Benguiat` with red − 200, green − 75 (font ae24a8), a spell already in the book.
+const BLUE_INK: [u8; 3] = [55, 180, 255];
+
+/// A blend colour (r, g, b) as drawn.
+fn blend_color(c: [i32; 3]) -> Color {
+    let [r, g, b] = c.map(|v| v.clamp(0, 255) as u8);
+    Color::from_rgba(r, g, b, 255)
+}
+
+/// The market's list as the original draws it (0x4bca8c, 0x4bddf0): the icon column is
+/// Win-paper from (0, 0) with (24, 24, 24) taken off (0x4bddf0), the names and prices stand
+/// on the window's marble with (24, 24, 24) taken off, a 1 px frame round both (0x48d1d4 at
+/// 0x4bcfa4); the names left, the prices centred in their column (align 2, 0x4bcd03); the
+/// picked row lighter by (64, 64, 64) over the names and prices, not the icons.
 #[allow(clippy::too_many_arguments)]
 fn price_list_in_face(assets: Option<&Assets>, rows: &[(Option<ItemId>, String, String, bool)], marks: &[Option<std::ops::Range<usize>>], pick: Option<usize>, scroll: &mut usize, x: f32, y: f32, w: f32, visible: usize) -> Option<usize> {
     let k = chrome::k();
     let row_h = 186.0 * k / visible.max(1) as f32;
     let frame = Rect::new(x, y, w, visible as f32 * row_h);
-    draw_rectangle(frame.x, frame.y, frame.w, frame.h, Color::new(0.0, 0.0, 0.0, 0.25));
-    chrome::surface(Rect::new(x, y, row_h, frame.h), chrome::Skin::Paper);
+    let bar = 18.0 * k;
+    let ListColumns { icon: icon_w, name_x, price_cx, .. } = market_columns(w, bar);
+    chrome::subtractive(|| draw_rectangle(x + icon_w, y, w - icon_w, frame.h, blend_color(MARKET_LIST_TAKEN)));
+    chrome::paper_minus(Rect::new(x, y, icon_w, frame.h), (0.0, 0.0), MARKET_LIST_TAKEN);
     let max_scroll = rows.len().saturating_sub(visible);
     let over = mouse_in(x, y, w, visible as f32 * row_h);
     let wheel = if over { wheel() } else { 0.0 };
@@ -1259,29 +1326,26 @@ fn price_list_in_face(assets: Option<&Assets>, rows: &[(Option<ItemId>, String, 
     *scroll = (*scroll).min(max_scroll);
     // The scroll bar (Razdor's): arrows, the track pages, the knob drags.
     scrollbar(Rect::new(x + w - 15.0 * k, y, 12.0 * k, visible as f32 * row_h), scroll, visible, rows.len());
-    for n in *scroll..(*scroll + visible).min(rows.len()) {
-        if pick == Some(n) {
-            let ry = y + (n - *scroll) as f32 * row_h;
-            let selection_x = x + row_h;
-            let right = x + w - 18.0 * k;
-            draw_rectangle(selection_x, ry, (right - selection_x).max(0.0), row_h - 2.0 * k, Color::new(0.3, 0.38, 0.3, 0.42));
-        }
+    if let Some(n) = pick.filter(|&n| n >= *scroll && n < *scroll + visible) {
+        let ry = y + (n - *scroll) as f32 * row_h;
+        let right = x + w - bar;
+        chrome::additive(|| draw_rectangle(x + icon_w, ry, (right - x - icon_w).max(0.0), row_h, blend_color(MARKET_PICK_ADDED)));
     }
     chrome::silver_frame(frame, k.max(1.0));
     let mut hit = None;
     for (n, (icon, name, price, red)) in rows.iter().enumerate().skip(*scroll).take(visible) {
         let ry = y + (n - *scroll) as f32 * row_h;
         if let (Some(item), Some(assets)) = (icon, assets) {
-            assets.draw_item(*item, x + 2.0 * k, ry + 1.0, row_h - 4.0 * k);
+            let side = (row_h - 4.0 * k).min(icon_w - 2.0 * k);
+            assets.draw_item(*item, x + (icon_w - side) / 2.0, ry + 1.0, side);
         }
-        let shown = ellipsize(name, w - 120.0 * k, 17.0 * k);
+        let shown = ellipsize(name, price_cx - name_x - 30.0 * k, 17.0 * k);
         let visible_end = shown.strip_suffix('…').unwrap_or(&shown).len();
         let mark = marks.get(n).cloned().flatten().filter(|r| r.end <= visible_end && shown.is_char_boundary(r.start) && shown.is_char_boundary(r.end));
-        let item_color = if *red { Color::new(1.0, 0.56, 0.16, 1.0) } else { BUILDING_AND_ITEM_NAME };
-        let price_color = if *red { Color::new(1.0, 0.56, 0.16, 1.0) } else { ACCENT };
-        text_marked(&shown, mark, x + 32.0 * k, ry + 20.0 * k, 17.0 * k, item_color, item_color);
-        text(price, x + w - 80.0 * k, ry + 21.0 * k, 18.0 * k, price_color);
-        if mouse_in(x, ry, w - 18.0 * k, row_h) && clicked() {
+        let ink = market_ink(*red);
+        text_marked(&shown, mark, x + name_x, ry + 20.0 * k, 17.0 * k, ink, ink);
+        text_centered(price, x + price_cx, ry + 21.0 * k, 18.0 * k, ink);
+        if mouse_in(x, ry, w - bar, row_h) && clicked() {
             hit = Some(n);
         }
     }
@@ -1364,10 +1428,12 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
     let filter_rect = Rect::new(lx, y, lw, 18.0 * k);
     let reply = item_filter::field_with(FILTER_KEY, &mut view.filter, filter_rect, &[KeyCode::N], before, rows.len(), false);
     if view.filter.is_empty() && !has_focus(FILTER_KEY) {
+        // Each title centred over its own list (0x48e750 for 0x670688 and 0x670760).
         let (name_head, price_head) = (own_text("Building", "ItemName", n_("Name")), own_text("Building", "ItemCost", n_("Price")));
+        let cols = market_columns(lw, 18.0 * k);
         super::typography::Role::Title.with(|| {
-            chrome::shadow_centered(&name_head, lx + 32.0 * k + (lw - 120.0 * k) / 2.0, y + 13.0 * k, 17.0 * k, MARKET_HEADING);
-            chrome::shadow_centered(&price_head, lx + lw - 58.0 * k, y + 13.0 * k, 17.0 * k, MARKET_HEADING);
+            chrome::shadow_centered(&name_head, lx + cols.names_cx, y + 13.0 * k, 17.0 * k, MARKET_HEADING);
+            chrome::shadow_centered(&price_head, lx + cols.price_cx, y + 13.0 * k, 17.0 * k, MARKET_HEADING);
         });
     }
     let kept = item_filter::keep(&c, all, &view.filter);
@@ -1518,44 +1584,79 @@ fn sanctuary(game: &mut Game, f: &Frame, view: &mut BuildingView, message: &mut 
     hall_offers(game, f, view, message, dialogs)
 }
 
-/// The sanctuary's spell list (0x4ba854): each row the spell's small picture, its name and
-/// its price, six rows over the frame's height; a click picks a row.
+/// The sanctuary list's columns as the original lays them out (0x4d9fe6..0x4da0ae): the
+/// spells' picture strip 42 px, the names 316 − 70 − 42 = 204 px, the prices 70 px.
+const SPELL_ICON_W: f32 = 42.0;
+const SPELL_NAME_W: f32 = 204.0;
+const SPELL_PRICE_W: f32 = 70.0;
+
+/// What the sanctuary takes off Win-paper under its list, copied from (20, 20) (0x4bb3c3,
+/// 0x4bb3e0): (148, 132, 148), the same paper as the hint strip's.
+const SPELL_LIST_TAKEN: [i32; 3] = [148, 132, 148];
+/// What it takes off below the last spell, the paper copied on from (20, 20 + the rows'
+/// height) (0x4bb592, 0x4bb5af): (180, 140, 113), darker.
+const SPELL_EMPTY_TAKEN: [i32; 3] = [180, 140, 113];
+/// What a picked spell's row adds over the names and prices: (24, 32, 24), the lists' own
+/// highlight in the adding mode 4 (+0xb1 set at 0x4da030 and 0x4da0e5).
+const SPELL_PICK_ADDED: [i32; 3] = [24, 32, 24];
+
+/// The tint of a spell's name and price (0x4ba854 tab 4, 0x49c100): a spell already in the
+/// book in font ae24a8 (blue), any other in ae24a0 (yellow), whatever its price and the gold.
+fn spell_ink(known: bool) -> Color {
+    if known { benguiat(BLUE_INK) } else { benguiat(YELLOW_INK) }
+}
+
+/// Where a spell's picture stands in its row: the original paints each 100 px picture at
+/// (4, 4 + 104·n) of a 108 × 628 strip keyed on (95, 59, 0), shrinks the strip to 42 × 250
+/// (0x4bc3c1, 0x4bc42a) and blits it keyed at the list's left (0x4bb533). Returns the
+/// picture's left and top offsets and its side, for a column `icon_w` wide and rows `row_h`.
+fn spell_icon_place(icon_w: f32, row_h: f32) -> (f32, f32, f32) {
+    let (sx, sy) = (icon_w / 108.0, row_h / 104.0);
+    (4.0 * sx, 4.0 * sy, (100.0 * sx).min(100.0 * sy))
+}
+
+/// The sanctuary's spell list (0x4ba854, tab 4), as the original builds it: one panel under
+/// the picture strip, the names and the prices, Win-paper from (20, 20) with (148, 132, 148)
+/// taken off; below the last spell the paper with (180, 140, 113) taken off; a 1 px frame
+/// round it (0x48d1d4 at 0x4bb508); the pictures on the left; the names left and the prices
+/// centred in their lists (align 1 and 2, 0x4bb0b0 and 0x4bb0ca), both in one tint; the
+/// picked row lighter by (24, 32, 24) over the names and prices, not the pictures. Six rows
+/// over the frame's height; a click picks a row.
 fn spell_list(game: &Game, spells: &[SpellDef], pick: Option<usize>, r: Rect) -> Option<usize> {
     let k = chrome::k();
-    chrome::surface(r, chrome::Skin::Brown);
+    let cols = list_columns(r.w, 0.0, [SPELL_ICON_W, SPELL_NAME_W, SPELL_PRICE_W]);
     let row_h = r.h / 6.0;
-    chrome::surface(Rect::new(r.x, r.y, row_h, r.h), chrome::Skin::Paper);
+    let rows = spells.len().min(6);
+    let used = rows as f32 * row_h;
+    chrome::paper_minus(Rect::new(r.x, r.y, r.w, used), (20.0, 20.0), SPELL_LIST_TAKEN);
+    chrome::paper_minus(Rect::new(r.x, r.y + used, r.w, r.h - used), (20.0, 20.0 + used / k), SPELL_EMPTY_TAKEN);
     chrome::silver_frame(r, k.max(1.0));
-    // The column titles stand over the frame, on the description's title line.
-    let (name_x, price_x) = (r.x + 47.0 * k, r.x + r.w - 53.0 * k);
+    // The column titles stand over the frame, each centred over its list (0x48e750).
     let (name_head, price_head) = (own_text("Building", "SpellName", n_("Spell")), own_text("Building", "ItemCost", n_("Price")));
     super::dt_font::with_face(super::dt_font::Face::Title, || {
-        chrome::shadow_text(&name_head, name_x + 10.0 * k, r.y - 9.0 * k, 15.0 * k, MARKET_HEADING);
-        chrome::shadow_text(&price_head, price_x, r.y - 9.0 * k, 15.0 * k, MARKET_HEADING);
+        chrome::shadow_centered(&name_head, r.x + cols.names_cx, r.y - 9.0 * k, 15.0 * k, MARKET_HEADING);
+        chrome::shadow_centered(&price_head, r.x + cols.price_cx, r.y - 9.0 * k, 15.0 * k, MARKET_HEADING);
     });
     let mut hit = None;
+    let (icon_dx, icon_dy, side) = spell_icon_place(cols.icon, row_h);
     for (n, s) in spells.iter().enumerate().take(6) {
         let ry = r.y + n as f32 * row_h;
-        let row = Rect::new(r.x + 2.0 * k, ry, r.w - 4.0 * k, row_h - 2.0 * k);
         if pick == Some(n) {
-            draw_rectangle(r.x + row_h, row.y, r.w - row_h, row.h, Color::new(1.0, 1.0, 0.65, 0.20));
+            chrome::additive(|| draw_rectangle(r.x + cols.icon, ry, r.w - cols.icon, row_h, blend_color(SPELL_PICK_ADDED)));
         }
-        let side = row_h - 6.0 * k;
-        chrome::spell_icon(s, Rect::new(r.x + 5.0 * k, ry + 2.0 * k, side, side));
-        let ink = if game.knows_spell(s.id) { Color::from_rgba(55, 180, 255, 255) }
-            else if game.gold < s.cost_gold { Color::from_rgba(255, 175, 85, 255) }
-            else { Color::from_rgba(255, 255, 155, 255) };
+        chrome::spell_icon(s, Rect::new(r.x + icon_dx, ry + icon_dy, side, side));
+        let ink = spell_ink(game.knows_spell(s.id));
         super::typography::Role::Name.with(|| {
             let size = 18.0 * k;
-            text(&ellipsize(&s.name, price_x - name_x - 8.0 * k, size), name_x, ry + row_h / 2.0 + size * 0.35, size, ink);
-            text(&s.cost_gold.to_string(), price_x, ry + row_h / 2.0 + 6.0 * k, size, ink);
+            let baseline = ry + row_h / 2.0 + size * 0.35;
+            let room = cols.price_cx - (SPELL_PRICE_W / 2.0) * (cols.icon / SPELL_ICON_W) - cols.name_x - 4.0 * k;
+            text(&ellipsize(&s.name, room, size), r.x + cols.name_x, baseline, size, ink);
+            text_centered(&s.cost_gold.to_string(), r.x + cols.price_cx, baseline, size, ink);
         });
-        if button_state(row, true).2 {
+        if button_state(Rect::new(r.x, ry, r.w, row_h), true).2 {
             hit = Some(n);
         }
     }
-    let empty_y = r.y + spells.len().min(6) as f32 * row_h;
-    draw_rectangle(r.x + k, empty_y, r.w - 2.0 * k, (r.bottom() - empty_y - k).max(0.0), Color::new(0.0, 0.0, 0.0, 0.45));
     hit
 }
 
@@ -2173,5 +2274,40 @@ mod tests {
         assert_eq!(market_list_buttons(true, 5), [b(true, false), b(false, true)], "pack shown: Инвентарь locked");
         assert_eq!(market_list_buttons(true, 0), [b(true, false), b(false, false)], "an empty shop: both locked");
     }
-}
 
+    /// 0x4d9df3..0x4d9eaa: the market's columns 27 + 186 + 70 px, the prices centred in
+    /// theirs (align 2, 0x4bcd03), each title centred over its list (0x48e750).
+    #[test]
+    fn market_prices_stand_centred_in_their_column() {
+        let c = super::market_columns(283.0 + 18.0, 18.0);
+        assert_eq!(c, super::ListColumns { icon: 27.0, name_x: 35.0, names_cx: 120.0, price_cx: 248.0 });
+        let half = super::market_columns(141.5 + 9.0, 9.0);
+        assert_eq!(half.price_cx, 124.0, "scaled with the list");
+    }
+
+    /// 0x4d9fe6..0x4da0ae: the sanctuary's picture strip 42 px, names 204, prices 70; the
+    /// pictures shrunk from the 108 × 628 strip (0x4bc42a).
+    #[test]
+    fn the_sanctuary_list_is_laid_out_as_the_original() {
+        let c = super::list_columns(316.0, 0.0, [super::SPELL_ICON_W, super::SPELL_NAME_W, super::SPELL_PRICE_W]);
+        assert_eq!(c, super::ListColumns { icon: 42.0, name_x: 50.0, names_cx: 144.0, price_cx: 281.0 });
+        let (dx, dy, side) = super::spell_icon_place(108.0, 104.0);
+        assert_eq!((dx, dy, side), (4.0, 4.0, 100.0));
+    }
+
+    /// The lists' paper and highlights (0x4bddf0, 0x4bb3c3, 0x4bb592, 0x4d9e33, 0x4da030)
+    /// and their tints (0x4bca8c, 0x4ba854): no orange for a spell the gold does not reach.
+    #[test]
+    fn the_lists_take_the_original_s_colours() {
+        assert_eq!(super::MARKET_LIST_TAKEN, [24, 24, 24]);
+        assert_eq!(super::MARKET_PICK_ADDED, [64, 64, 64]);
+        assert_eq!(super::SPELL_LIST_TAKEN, [148, 132, 148]);
+        assert_eq!(super::SPELL_EMPTY_TAKEN, [180, 140, 113]);
+        assert_eq!(super::SPELL_PICK_ADDED, [24, 32, 24]);
+        let rgb = |c: macroquad::prelude::Color| [c.r, c.g, c.b].map(|v| (v * 255.0).round() as u8);
+        assert_eq!(rgb(super::market_ink(true)), [255, 175, 85]);
+        assert_eq!(rgb(super::market_ink(false)), [255, 255, 155]);
+        assert_eq!(rgb(super::spell_ink(false)), [255, 255, 155]);
+        assert_eq!(rgb(super::spell_ink(true)), [55, 180, 255]);
+    }
+}

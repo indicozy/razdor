@@ -1421,6 +1421,35 @@ pub fn army_divider(r: Rect) {
     silver_frame(r, k.max(1.0));
 }
 
+/// Win-paper with `minus` (r, g, b) taken off, its texels from `from` on (the original copies
+/// the paper from that point with 0x476b8c, then takes the colour off with 0x4768f8 in its
+/// subtracting mode), drawn over `r` at the screen's scale; the paper repeats past its edge.
+/// The market's icon column and the sanctuary's spell list are built this way.
+pub fn paper_minus(r: Rect, from: (f32, f32), minus: [i32; 3]) {
+    let k = k();
+    let Some(t) = win_scaled("Win-paper", [1024; 3], minus.map(|m| -m)) else {
+        surface(r, Skin::Brown);
+        return;
+    };
+    let (tw, th) = (t.width(), t.height());
+    if tw < 1.0 || th < 1.0 || r.w <= 0.0 || r.h <= 0.0 {
+        return;
+    }
+    let (mut sy, mut y) = (from.1.rem_euclid(th), r.y);
+    while y < r.bottom() {
+        let h = ((th - sy) * k).min(r.bottom() - y);
+        let (mut sx, mut x) = (from.0.rem_euclid(tw), r.x);
+        while x < r.right() {
+            let w = ((tw - sx) * k).min(r.right() - x);
+            tex_src(&t, Rect::new(sx, sy, w / k, h / k), Rect::new(x, y, w, h), WHITE);
+            x += w;
+            sx = 0.0;
+        }
+        y += h;
+        sy = 0.0;
+    }
+}
+
 /// The hint strip's paper starts this far down Win-paper (0x4dbd0b: 0x476b8c from (0, 200)).
 const DIVIDER_PAPER_Y: f32 = 200.0;
 
