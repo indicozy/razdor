@@ -28,6 +28,8 @@ thread_local! {
     /// at k = 1, and the hero picked.
     static PICKED: Cell<usize> = const { Cell::new(0) };
     static SCROLL: Cell<f32> = const { Cell::new(0.0) };
+    /// The description's first shown line, and the group it was scrolled for.
+    static DESC_SCROLL: Cell<(usize, usize)> = const { Cell::new((usize::MAX, 0)) };
     static HERO: Cell<usize> = const { Cell::new(0) };
     /// A map to pick when the list opens (the `scenarios:<map>` snapshot scene).
     static PICK: RefCell<Option<String>> = const { RefCell::new(None) };
@@ -233,6 +235,29 @@ fn listed_chapters<'a>(scenarios: &[ScenarioEntry], g: &'a Group) -> &'a [usize]
     if e.scenario.campaign_name.trim() == title(e).trim() { &[] } else { &g.chapters }
 }
 
+/// How far each line of the description box moves the next one down: the name's lines 20 px,
+/// the last with 12 px more under it, the description's 14 px.
+fn desc_steps(title_rows: usize, rows: usize, k: f32) -> Vec<f32> {
+    (0..rows)
+        .map(|n| match n {
+            n if n + 1 == title_rows => 32.0 * k,
+            n if n < title_rows => 20.0 * k,
+            _ => 14.0 * k,
+        })
+        .collect()
+}
+
+/// The first line the description can be scrolled to: the lines from it on fit in `room`.
+fn desc_max_scroll(steps: &[f32], room: f32) -> usize {
+    let mut left: f32 = steps.iter().sum();
+    let mut first = 0;
+    while first < steps.len() && left > room {
+        left -= steps[first];
+        first += 1;
+    }
+    first
+}
+
 /// "Сценарий для Новой Игры".
 /// The list's scroll after the wheel turned by `turned` this frame: 30 px a notch. A frame
 /// without a turn leaves it (`signum` of 0.0 is 1.0, which pulled the list back to its top
@@ -366,10 +391,35 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
             Face::Bold,
         ));
         let line_h = 14.0 * k;
-        let block = title_rows as f32 * 20.0 * k + 12.0 * k + (rows.len() - title_rows) as f32 * line_h;
-        let mut y = desc.y + ((desc.h - block) / 2.0).max(10.0 * k) + 14.0 * k;
+        let steps = desc_steps(title_rows, rows.len(), k);
+        let block: f32 = steps.iter().sum();
+        // The box is a text list (0x65ae00): the wheel over it scrolls it a line a frame
+        // (0x47ede0), down to its last line; a new map starts it at the top (0x47cc90).
+        let max_scroll = desc_max_scroll(&steps, desc.h - 20.0 * k);
+        let (for_group, mut first) = DESC_SCROLL.with(|d| d.get());
+        if for_group != picked {
+            first = 0;
+        }
+        if !input_blocked() && desc.contains(crate::ui::widgets::pointer().into()) {
+            let turned = wheel();
+            if turned > 0.0 {
+                first = first.saturating_sub(1);
+            } else if turned < 0.0 {
+                first += 1;
+            }
+        }
+        let first = first.min(max_scroll);
+        DESC_SCROLL.with(|d| d.set((picked, first)));
+        let mut y = if first > 0 {
+            desc.y + 10.0 * k + 14.0 * k
+        } else {
+            desc.y + ((desc.h - block) / 2.0).max(10.0 * k) + 14.0 * k
+        };
         let clip = crate::ui::widgets::Clip::new(desc);
         for (n, row) in rows.iter().enumerate() {
+            if n < first {
+                continue;
+            }
             if n < title_rows {
                 draw_markup_row(row, desc.x + 17.0 * k, y, room, 16.0 * k);
                 y += 20.0 * k;
@@ -687,6 +737,20 @@ fn choose_class(offered: [bool; 3], pick: usize, clicked: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A description longer than its box scrolls (a player's report: "нельзя прокрутить
+    /// описание"): the original's box is a text list the wheel scrolls (0x47ede0) down to the
+    /// first line from which the rest fits.
+    #[test]
+    fn a_long_description_scrolls_until_its_end_is_in_the_box() {
+        // Two name lines (20, then 20 + 12) and ten description lines of 14.
+        let steps = desc_steps(2, 12, 1.0);
+        assert_eq!(&steps[..3], &[20.0, 32.0, 14.0]);
+        assert_eq!(steps.iter().sum::<f32>(), 192.0);
+        assert_eq!(desc_max_scroll(&steps, 200.0), 0, "it fits: no scrolling");
+        assert_eq!(desc_max_scroll(&steps, 140.0), 2, "the name scrolls away first");
+        assert_eq!(desc_max_scroll(&steps, 100.0), 5);
+    }
 
     #[test]
     fn scenario_icons_keep_their_own_size_without_a_ring() {
