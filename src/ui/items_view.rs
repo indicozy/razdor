@@ -732,7 +732,7 @@ pub fn squad(
     });
     let desc = if show_tree { at(570.0, 54.0, 256.0, 172.0) } else { at(570.0, 54.0, 256.0, 242.0) };
     match hover {
-        Some(item) => super::building_view::item_description(game, assets, item, desc.x, desc.y, desc.w, desc.h),
+        Some(item) => super::item_text::draw(game, assets, item, desc, super::item_text::ItemBox::Inventory, k),
         None => chrome::text_box(desc),
     }
     let row = at(570.0, 234.0, 256.0, 62.0);
@@ -1150,7 +1150,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     let desc = o(576.0, 58.0, 310.0, 164.0);
     heading("ItemDescript", n_("Item description"), desc);
     match hover.filter(|_| held.is_none_or(|h| !h.moved)) {
-        Some(item) => super::building_view::item_description(game, assets, item, desc.x, desc.y, desc.w, desc.h),
+        Some(item) => super::item_text::draw(game, assets, item, desc, super::item_text::ItemBox::Inventory, s),
         None => chrome::text_box(desc),
     }
 

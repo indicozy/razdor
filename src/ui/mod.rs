@@ -11,6 +11,7 @@ pub mod dt_font;
 pub mod editor;
 pub mod game_bar;
 pub mod hotkeys;
+pub mod item_text;
 pub mod items_view;
 pub mod jukebox;
 pub mod language;

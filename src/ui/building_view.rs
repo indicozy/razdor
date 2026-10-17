@@ -9,11 +9,10 @@ use macroquad::prelude::*;
 use razdor::i18n::{n_, tr};
 use razdor::rules::battle::Team;
 use razdor::trf;
-use razdor::rules::content::{ArtefactType, ItemId, SpellDef};
+use razdor::rules::content::{ItemId, SpellDef};
 use razdor::rules::formation::{Formation, Slot};
 use razdor::rules::economy::VillageOffer;
 use razdor::rules::game::{Currency, Game, HireError, TradeError, Tribute, SPELL_BOOK_SIZE};
-use razdor::rules::items::describe_with;
 use razdor::rules::script::HallEntry;
 use razdor::rules::town::{ServiceError, Tab};
 use razdor::rules::units::Unit;
@@ -921,60 +920,6 @@ fn price_list(assets: Option<&Assets>, rows: &[(Option<ItemId>, String, String, 
     hit
 }
 
-pub(super) fn item_description(game: &Game, assets: &Assets, item: ItemId, x: f32, y: f32, w: f32, h: f32) {
-    let k = chrome::k();
-    let c = &game.content;
-    let d = c.item(item);
-    chrome::text_box(Rect::new(x, y, w, h));
-    draw_rectangle_lines(x, y, w, h, 2.0 * k, Color::new(0.6, 0.42, 0.25, 1.0));
-    let limit = match d.kind {
-        ArtefactType::BlowWeapon => Some(tr("warriors only")),
-        ArtefactType::ShotWeapon => Some(tr("shooters only")),
-        ArtefactType::Staff => Some(tr("mages only")),
-        ArtefactType::Item => Some(tr("trade goods: cannot be worn")),
-        _ => None,
-    };
-    let props = describe_with(c, item, &super::unit_sheet::bonus_title);
-    // Everything in the box: the picture, the name, the description and the properties at
-    // the largest size that fits its height (the army window's box under the promotion tree
-    // is a small one), the description cut short only at the smallest.
-    let layout = |s: f32| {
-        let desc = wrap(&d.description, w - 24.0 * k, 15.0 * k * s);
-        let lines = wrap(&props, w - 24.0 * k, 16.0 * k * s);
-        let height = (10.0 + 56.0 * s + 6.0 + 22.0 * s + if limit.is_some() { 20.0 * s } else { 0.0 } + 18.0 * s * desc.len() as f32 + 4.0 + 19.0 * s * lines.len() as f32 + 6.0) * k;
-        (desc, lines, height)
-    };
-    let scales = [1.0, 0.9, 0.8, 0.72, 0.65];
-    let s = scales.iter().copied().find(|&s| layout(s).2 <= h).unwrap_or(0.65);
-    let (mut desc, lines, _) = layout(s);
-    let icon = 56.0 * k * s;
-    assets.draw_item(item, x + w / 2.0 - icon / 2.0, y + 10.0 * k, icon);
-    let mut ly = y + 10.0 * k + icon + 6.0 * k + 18.0 * k * s;
-    text_centered(&d.name, x + w / 2.0, ly, 20.0 * k * s, BOX_INK);
-    ly += 4.0 * k * s;
-    if let Some(limit) = limit {
-        ly += 20.0 * k * s;
-        text_centered(limit, x + w / 2.0, ly, 16.0 * k * s, Color::new(1.0, 0.6, 0.4, 1.0));
-    }
-    // At the smallest size the description gives way to the properties.
-    let room = ((y + h - 6.0 * k - ly - 4.0 * k - 19.0 * k * s * lines.len() as f32) / (18.0 * k * s)).floor().max(0.0) as usize;
-    if desc.len() > room {
-        desc.truncate(room);
-        if let Some(last) = desc.last_mut() {
-            *last = format!("{}…", last.trim_end());
-        }
-    }
-    for line in &desc {
-        ly += 18.0 * k * s;
-        text_centered(line, x + w / 2.0, ly, 15.0 * k * s, BOX_INK);
-    }
-    ly += 4.0 * k;
-    for line in &lines {
-        ly += 19.0 * k * s;
-        text_centered(line, x + w / 2.0, ly, 16.0 * k * s, MANA);
-    }
-}
-
 /// The row to select after row `k` left a list that now has `left` rows: the one that
 /// moved up into it, else the one above, else none.
 fn next_pick(k: usize, left: usize) -> Option<usize> {
@@ -1039,7 +984,7 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
     }
     let dh = 26.0 * k + 8.0 * 30.0 * k + 26.0 * k;
     match view.pick.and_then(|k| rows.get(k)).and_then(|r| r.0) {
-        Some(item) => item_description(game, assets, item, dx, y, dw, dh),
+        Some(item) => super::item_text::draw(game, assets, item, Rect::new(dx, y, dw, dh), super::item_text::ItemBox::Market, k),
         None => {
             chrome::text_box(Rect::new(dx, y, dw, dh));
             text_centered(tr("Pick an item from the list."), dx + dw / 2.0, y + dh / 2.0, 18.0 * k, BOX_INK);

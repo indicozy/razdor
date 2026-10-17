@@ -580,17 +580,23 @@ community-patches.md for the bleed and evasion rules themselves)
 
 ### 9.2 Item text (499eb0)
 
-The same builder fills the inventory's description box (4c280c) and the event dialog's item
-tooltip (4cbab0). Parts, top to bottom: **code**
-1. The item name, in the title font.
-2. Only when the item has a description: a usage line in grey, chosen in this order (each
-   choice replaces the one before): `OnlyForWarriors` for a melee weapon or a shield,
+The same builder fills the market's description (4b9c40), the inventory's description box
+(4c280c) and the event dialog's item tooltip (4cbab0); all three pass the same fonts. Every
+part is added to a text list centred and word-wrapped, with no shadow font. Labels are the
+`[Skills]` texts of the interface ini. Parts, top to bottom: **code**
+1. The item name, in the white Benguiat (ae2498).
+2. Only when the item has a description: a usage line in grey (ae24d0), chosen in this order
+   (each choice replaces the one before): `OnlyForWarriors` for a melee weapon or a shield,
    `OnlyForBowmans` for a ranged weapon, `OnlyForMages` for a staff; `OnlyForMages` for any item
    with a `Magic` school; `NotForUse` for a Death school item. Then an empty line and the
-   description.
-3. The effect text, in one colour, word-wrapped as one paragraph: each entry is "label value "
-   and the entries follow each other. A value of 0 adds nothing; a positive value gets "+"
-   unless the entry has its own prefix.
+   description, both in the yellow SanSerif (ae24c0).
+3. The effect text, in the orange SanSerif (ae24c4), word-wrapped as one paragraph and left
+   out when empty: each entry is the label, a space, the prefix, the number, the suffix and a
+   space (499d30), and the entries follow each other with no other separator (no commas, no
+   item type word). A value of 0 adds nothing; a positive value gets "+" unless the entry has
+   its own prefix; the f- prefix "=" stands before the sign ("=50%", "=-5"). Example, «Кровь
+   для Вампира» (f-Vampirizm 50, d-Initiative 10, p-Manevres 50): «Вампиризм =50% Инициатива
+   +10 Количество действий +50%».
    - **f- entries** (fixed values) have the prefix "=": Hits (label `SHit`), melee and ranged
      attack and defence, magic power (`SMagicPower`), the protections (merged into one
      `SProtectAllMagic` entry when all three are equal and not 0, else Life, Elemental, Death,
@@ -607,11 +613,22 @@ tooltip (4cbab0). Parts, top to bottom: **code**
      (one `SPhysicalDefence` entry when the two p-defences are equal **and** both d-defences
      are 0; otherwise a p-defence entry only when its d-value is 0), magic power, the
      protections (merged as above), regeneration, vampirism, initiative, manevres.
-4. The item's bonus name, plain, when it has one (the Community bonus-name table; the part
-   before " - ", trimmed).
+4. When the item has a bonus, a line in the white SanSerif (ae24bc): `GetBonus`, a space and
+   the bonus's name in double quotes («Дает бонус "…"»). The name is the bonus text of
+   `[Army] Bonus<N>` (the table at c35000) cut before its first " - " and trimmed of spaces
+   (a text without " - " would be cut to nothing and then read before its start; no shipped
+   text lacks it).
 
 The box's top margin is set so the text is centred vertically, at least 4 px. Attack values
 are never merged (there is no AB = AS rule for items). **code**
+
+Where the text stands (**code**):
+- Market (4b9c40): the item's 55 px picture centred horizontally, 8 px below the box's top
+  (4b9dcb); the top margin replaced by `63 + (H − text) / 2` (4b9d97), so the text is centred
+  in the part below the picture.
+- Army and hero windows (4c280c): the description box shows only the text (the hovered slot
+  shows the item); the builder's own centring.
+- Event dialog tooltip (4cbab0): see §9.3, 272 px wide, 16 px margin, text plus 32 tall.
 
 Quirks of the defence merging (**code**, read from the conditions; not seen on screen):
 - Equal d-defences that are not 0 with **unequal** p-defences: the p-defences are written
@@ -1265,7 +1282,7 @@ parity rule they are candidates to hide or remove, not bugs to copy.
 | 48 | Info card wage | Shown when the wage is above 0 | Recruit wage of the type's Cost; hidden for hero classes, named characters, wage kind 3 and Undead | 9.1 |
 | 49 | Card stat strip | Labels match: "Pwr:" for a caster (attack kind 0x11) with no melee attack or outside the places 1–4, else "A:" with the larger attack (`unit_sheet::attack_piece`); the attack line blue when any of the three attacks is above, red when any is below; `Row2Def` on r in the back row as the original; colours against the start-of-battle value (none outside battle); D colour by the sum of both defences | "Pwr:" for a caster outside the front or with no melee, else "A:" with the larger attack; colours against the current value; D colour from one defence only | 9.5 |
 | 50 | Formation editing | Matches: presses as the original's, in the army window (`items_view::ArmySel`, `unit_drag::grid_press`; the deselection and the slide's end leave the right side as it was), the hire tab's hero grid and the garrison grids (a refused hero or named unit keeps the selection), `Card-Move` on every swap and slide, the army window's and hire tab's slides timed as 0x4b0c04. Extra: a card can also be dragged onto another cell (a press that swaps starts no drag) | Click to select, click another unit to swap at once, click an empty cell to slide there; acts on the press; the hero may go anywhere | 9.6 |
-| 51 | Item text | Kind name, then f-, d-, p- values and the bonus (named as the original: `[Army] Bonus<N>` before " - ", trimmed), comma-joined | Name, usage line by type and school, description, then "label value" entries with "=" (f-), "+" (d-), "%" (p-), potion heal/revive rules, defence merging with its lost-value quirks, bonus name | 9.2 |
+| 51 | Item text | Matches (`rules::item_text`, `ui::item_text`): name, usage line, empty line, description, the "label value " entries with the original's labels, prefixes, merging and quirks, the `GetBonus "name"` line, fonts and centring; the market's picture above the text. Differs: the market and inventory lists' side margin is Razdor's 16 px; a text too tall for its box is drawn smaller (the original's list cuts it) | Name, usage line by type and school, description, then "label value" entries with "=" (f-), "+" (d-), "%" (p-), potion heal/revive rules, defence merging with its lost-value quirks, the bonus line | 9.2 |
 | 52 | Spell text | Effect summary, school, mana and casting time, duration and target | Name, effect entries (heal/curse label by the sign of DeltaFixedHits, AB = AS and DB = DS merged), `Mana`/`Reading`, duration; red when unaffordable, blue for own-army spells | 9.3 |
 | 53 | Pack scrolling | Wheel by one row over the whole 256-slot pack | Scroll bar over `max(0, length div 5 − 4)` rows of the used part, rounded | 9.7 |
 | 54 | Army window right side | Matches: the pack with nothing or the hero selected, the promotion tree for any other unit, every portrait locked as the original's (grey, dark brown, vignette: `chrome::lock_portrait`) when the unit is at its first level or of a final class, no note under it; the "Lv" labels and the arrows' colours are Razdor's | Pack when nothing or the hero is selected, the promotion tree for any other unit (every portrait greyed, browned and vignetted when it cannot be promoted) | 9.7 |

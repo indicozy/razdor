@@ -9,6 +9,7 @@ pub mod experience;
 pub mod fog;
 pub mod formation;
 pub mod game;
+pub mod item_text;
 pub mod items;
 pub mod journal;
 pub mod magic;
