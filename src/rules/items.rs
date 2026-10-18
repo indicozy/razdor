@@ -453,63 +453,147 @@ pub fn filter_match(content: &Content, item: ItemId, query: &str, bonus: &dyn Fn
     crate::search::matches(query, &d.name, &[&describe_with(content, item, bonus), &d.description])
 }
 
-/// Where an item dropped on a unit's card was picked up on the army screen.
+/// What a press on a pack cell or a worn slot did with the item on the pointer
+/// ([`Game::press_pack`], [`Game::press_worn`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ItemFrom {
-    /// The pack, at this index.
-    Pack(usize),
-    /// Squad member `unit`'s item slot `slot`.
-    Worn { unit: usize, slot: usize },
+pub enum Press {
+    /// Nothing held: the item there is now on the pointer.
+    Picked(ItemId),
+    /// The item held was put there.
+    Put(ItemId),
+    /// The item held was put there and the one that was there is now held.
+    Swapped { put: ItemId, picked: ItemId },
+    /// Nothing changed.
+    Nothing,
 }
 
-/// What a drop on a card did ([`Game::give_item`]).
+/// What a press with an item held on a unit's card did ([`Game::give_held`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Given {
     /// The potion was drunk: the HP gained.
     Drunk(i32),
-    /// The hero's card: the item went (or stayed) in the pack.
+    /// The hero's card: the item went into the pack.
     ToPack,
     /// Worn by the unit, in its lowest free slot.
     Worn,
 }
 
 impl super::game::Game {
-    /// The army window's drop of an item on squad member `to`'s card (0x4c346c → 0x4979c4,
-    /// magic-items.md §5.2): a potion is drunk; on the **hero**'s card any other item goes
-    /// to the pack (the hero equips only through the hero window, here the unit panel's
-    /// slots); on another unit's the wear test runs and the item goes to its lowest free
-    /// slot. A refusal changes nothing (the original leaves the item on the cursor).
-    pub fn give_item(&mut self, from: ItemFrom, to: usize) -> Result<Given, EquipError> {
-        let item = match from {
-            ItemFrom::Pack(i) => self.pack.get(i).copied(),
-            ItemFrom::Worn { unit, slot } => self.squad.get(unit).and_then(|u| u.items.get(slot).copied().flatten()),
+    /// A press on pack cell `i` in the hero or army window (0x4c24f4, magic-items.md §5.2):
+    /// with nothing held, the cell's item is picked up onto the pointer and the cell left
+    /// empty; with an item held, it is put in an empty cell, or swapped with the cell's item,
+    /// which is then held. Any cell takes an item: it stays where it was put (the original's
+    /// 256 cells; Razdor's pack has no last one, a deviation, see `pack.rs`).
+    pub fn press_pack(&mut self, i: usize) -> Press {
+        match (self.held_item, self.pack.get(i)) {
+            (None, Some(item)) => {
+                self.pack.take(i);
+                self.held_item = Some(item);
+                Press::Picked(item)
+            }
+            (Some(h), None) => {
+                self.pack.set(i, Some(h));
+                self.held_item = None;
+                Press::Put(h)
+            }
+            (Some(h), Some(item)) => {
+                self.pack.set(i, Some(h));
+                self.held_item = Some(item);
+                Press::Swapped { put: h, picked: item }
+            }
+            (None, None) => Press::Nothing,
         }
-        .ok_or(EquipError::NoSuchItem)?;
+    }
+
+    /// Whether worn slot `slot` of squad member `unit` holds one of his own items, which the
+    /// original never lets go while he lives (0x4c24f4 picks a worn slot only past the unit's
+    /// count at +0x18, or from the dead).
+    pub fn worn_locked(&self, unit: usize, slot: usize) -> bool {
+        self.squad.get(unit).is_some_and(|u| u.alive() && slot < u.personal as usize)
+    }
+
+    /// A press on worn slot `slot` of squad member `unit` (the unit panel of the hero and army
+    /// windows: the selected unit, else the hero; 0x4c24f4): with nothing held, its item is
+    /// taken off onto the pointer (a dead unit's too; not one of his own while he lives) and
+    /// the unit rebuilt; with an item held, an empty slot takes it when the wear test
+    /// (0x49765c) passes, into that very slot, else the item stays held and the refusal is
+    /// returned. An occupied slot takes nothing in the original; Razdor's swaps the two, the
+    /// held item under the wear test (a player's request, 2026-10-12).
+    pub fn press_worn(&mut self, unit: usize, slot: usize) -> Result<Press, EquipError> {
+        let Some(u) = self.squad.get(unit) else { return Ok(Press::Nothing) };
+        let Some(&there) = u.items.get(slot) else { return Ok(Press::Nothing) };
+        if there.is_some() && self.worn_locked(unit, slot) {
+            return Ok(Press::Nothing);
+        }
+        let c = self.content.clone();
+        match (self.held_item, there) {
+            (None, Some(item)) => {
+                take_off(&c, &mut self.squad[unit], slot);
+                self.held_item = Some(item);
+                Ok(Press::Picked(item))
+            }
+            (Some(h), None) => {
+                slot_for(&c, &self.squad[unit], h)?;
+                put_on(&c, &mut self.squad[unit], slot, h);
+                self.held_item = None;
+                Ok(Press::Put(h))
+            }
+            // Razdor's swap (the original's press does nothing here).
+            (Some(h), Some(item)) => {
+                let saved = self.squad[unit].clone();
+                take_off(&c, &mut self.squad[unit], slot);
+                if let Err(e) = slot_for(&c, &self.squad[unit], h) {
+                    self.squad[unit] = saved;
+                    return Err(e);
+                }
+                put_on(&c, &mut self.squad[unit], slot, h);
+                self.held_item = Some(item);
+                Ok(Press::Swapped { put: h, picked: item })
+            }
+            (None, None) => Ok(Press::Nothing),
+        }
+    }
+
+    /// A press with an item held on squad member `to`'s card in the army window (0x4c346c →
+    /// 0x4979c4, magic-items.md §5.2): a potion is drunk; on the **hero**'s card any other
+    /// item goes into the pack's first empty cell (the hero wears items only through his
+    /// panel's slots); on another unit's the wear test runs and the item goes to its lowest
+    /// free slot. A refusal (a full pack too) leaves the item on the pointer.
+    pub fn give_held(&mut self, to: usize) -> Result<Given, EquipError> {
+        let item = self.held_item.ok_or(EquipError::NoSuchItem)?;
         if to >= self.squad.len() {
             return Err(EquipError::NoSuchItem);
         }
         let c = self.content.clone();
         let kind = c.try_item(item).ok_or(EquipError::NoSuchItem)?.kind;
-        match (from, kind) {
-            (ItemFrom::Pack(i), ArtefactType::Potion) => self.drink(to, i).map(Given::Drunk),
-            (ItemFrom::Pack(_), _) if to == 0 => Ok(Given::ToPack),
-            (ItemFrom::Worn { unit, slot }, _) if to == 0 => self.unequip(unit, slot).map(|()| Given::ToPack),
-            (ItemFrom::Pack(i), _) => self.equip(to, i).map(|()| Given::Worn),
-            (ItemFrom::Worn { unit, slot }, _) => {
-                // Taken off first, as the original's held item is: dropped back on its own
-                // unit it goes to that unit's lowest free slot.
-                let taken = take_off(&c, &mut self.squad[unit], slot).ok_or(EquipError::NoSuchItem)?;
-                match slot_for(&c, &self.squad[to], taken) {
-                    Ok(free) => {
-                        put_on(&c, &mut self.squad[to], free, taken);
-                        Ok(Given::Worn)
-                    }
-                    Err(e) => {
-                        put_on(&c, &mut self.squad[unit], slot, taken);
-                        Err(e)
-                    }
-                }
+        let given = match kind {
+            ArtefactType::Potion => {
+                let now = self.clock.total_minutes() as u64;
+                drink(&c, &mut self.squad[to], item, now).map(Given::Drunk)?
             }
+            _ if to == 0 => {
+                if !self.pack.add(item) {
+                    return Err(EquipError::PackFull);
+                }
+                Given::ToPack
+            }
+            _ => {
+                let free = slot_for(&c, &self.squad[to], item)?;
+                put_on(&c, &mut self.squad[to], free, item);
+                Given::Worn
+            }
+        };
+        self.held_item = None;
+        Ok(given)
+    }
+
+    /// Closing the hero or army window puts the item held into the pack's first empty cell
+    /// (0x4b8d28 → 0x49a85c). False when the pack was full: the item is lost, as the
+    /// original's (it can only happen to an item taken off a unit with all 256 cells taken).
+    pub fn drop_held(&mut self) -> bool {
+        match self.held_item.take() {
+            Some(item) => self.pack.add(item),
+            None => true,
         }
     }
 }
@@ -519,6 +603,7 @@ mod give_tests {
     use super::*;
     use crate::rules::content::HeroClass;
     use crate::rules::game::Game;
+    use crate::rules::pack::Pack;
     use crate::rules::world::demo_unit;
     use std::sync::Arc;
 
@@ -539,57 +624,112 @@ mod give_tests {
     }
 
     #[test]
+    fn a_press_picks_an_item_up_and_the_next_puts_it_in_any_cell() {
+        // 0x4c24f4: the item leaves its cell for the pointer; an empty cell anywhere takes
+        // it and keeps it there; an occupied one swaps.
+        let mut g = game();
+        let (shield, potion) = (item(&g, "oak_shield"), item(&g, "heal_potion"));
+        g.pack = Pack::from(vec![potion, shield]);
+        assert_eq!(g.press_pack(0), Press::Picked(potion));
+        assert_eq!((g.held_item, g.pack.get(0), g.pack.len()), (Some(potion), None, 2));
+        assert_eq!(g.press_pack(17), Press::Put(potion));
+        assert_eq!((g.held_item, g.pack.get(17), g.pack.get(0)), (None, Some(potion), None), "a hole stays where it was");
+        assert_eq!(g.press_pack(1), Press::Picked(shield));
+        assert_eq!(g.press_pack(17), Press::Swapped { put: shield, picked: potion });
+        assert_eq!((g.held_item, g.pack.get(17)), (Some(potion), Some(shield)));
+        assert_eq!(g.press_pack(3), Press::Put(potion));
+        assert_eq!(g.press_pack(4), Press::Nothing, "an empty cell with nothing held");
+        // Gains fill the first empty cell (0x49a85c).
+        assert!(g.pack.add(potion));
+        assert_eq!(g.pack.get(0), Some(potion));
+    }
+
+    #[test]
+    fn a_press_on_a_worn_slot_takes_off_or_puts_on_under_the_wear_test() {
+        let mut g = game();
+        let (shield, potion) = (item(&g, "oak_shield"), item(&g, "heal_potion"));
+        g.pack = Pack::from(vec![shield, potion]);
+        g.press_pack(0);
+        // The clicked slot, not the lowest free one (0x4c24f4).
+        assert_eq!(g.press_worn(0, 2), Ok(Press::Put(shield)));
+        assert_eq!((g.hero().items[2], g.held_item), (Some(shield), None));
+        // A potion is not worn: it stays on the pointer.
+        g.press_pack(1);
+        assert_eq!(g.press_worn(0, 3), Err(EquipError::NotWearable));
+        assert_eq!(g.held_item, Some(potion));
+        g.press_pack(1);
+        // Taken off onto the pointer.
+        assert_eq!(g.press_worn(0, 2), Ok(Press::Picked(shield)));
+        assert_eq!((g.hero().items[2], g.held_item), (None, Some(shield)));
+        // Razdor's swap on an occupied slot: the held one goes on, the worn one is held.
+        let other = item(&g, "oak_shield");
+        g.squad[0].items[3] = Some(other);
+        assert_eq!(g.press_worn(0, 3), Ok(Press::Swapped { put: shield, picked: other }));
+        assert_eq!((g.hero().items[3], g.held_item), (Some(shield), Some(other)));
+    }
+
+    #[test]
     fn on_the_heros_card_an_item_goes_to_the_pack_and_a_potion_is_drunk() {
         let mut g = game();
         let (shield, potion) = (item(&g, "oak_shield"), item(&g, "heal_potion"));
-        // From another unit's slot: into the pack, not onto the hero.
-        g.pack = vec![shield];
-        g.equip(1, 0).unwrap();
-        let at = g.squad[1].items.iter().position(|i| *i == Some(shield)).unwrap();
-        assert_eq!(g.give_item(ItemFrom::Worn { unit: 1, slot: at }, 0), Ok(Given::ToPack));
-        assert_eq!(g.pack, vec![shield]);
-        assert!(!g.squad[1].items.contains(&Some(shield)) && !g.hero().items.contains(&Some(shield)));
-        // From the pack: it stays there.
-        assert_eq!(g.give_item(ItemFrom::Pack(0), 0), Ok(Given::ToPack));
-        assert_eq!(g.pack, vec![shield]);
+        // Taken off another unit, given to the hero: into the pack's first empty cell.
+        g.squad[1].items[0] = Some(shield);
+        g.pack = Pack::from(vec![potion]);
+        g.pack.set(3, Some(potion));
+        assert_eq!(g.press_worn(1, 0), Ok(Press::Picked(shield)));
+        assert_eq!(g.give_held(0), Ok(Given::ToPack));
+        assert_eq!((g.pack.get(1), g.held_item), (Some(shield), None));
         assert!(!g.hero().items.contains(&Some(shield)));
-        // From the hero's own slot: back to the pack.
-        g.equip_at(0, 0, Some(2)).unwrap();
-        assert_eq!(g.give_item(ItemFrom::Worn { unit: 0, slot: 2 }, 0), Ok(Given::ToPack));
-        assert_eq!((g.pack.clone(), g.hero().items[2]), (vec![shield], None));
-        // A full pack refuses: the item stays worn.
-        g.equip_at(1, 0, Some(1)).unwrap();
-        g.pack = vec![potion; crate::rules::game::PACK_SIZE];
-        assert_eq!(g.give_item(ItemFrom::Worn { unit: 1, slot: 1 }, 0), Err(EquipError::PackFull));
-        assert_eq!(g.squad[1].items[1], Some(shield));
+        // The original's full pack refuses and then loses the held item (0x4b8d28 → 0x49a85c);
+        // Razdor's grows (a deviation): past 256 items the item still goes in.
+        g.squad[1].items[0] = Some(shield);
+        g.press_worn(1, 0).unwrap();
+        g.pack = std::iter::repeat_n(potion, crate::rules::game::PACK_SIZE).collect();
+        assert_eq!(g.give_held(0), Ok(Given::ToPack));
+        assert_eq!((g.pack.get(crate::rules::game::PACK_SIZE), g.held_item), (Some(shield), None));
         // A potion is drunk by the hero.
-        g.pack = vec![potion];
+        g.pack = Pack::from(vec![potion]);
         g.squad[0].hp = 10;
-        assert!(matches!(g.give_item(ItemFrom::Pack(0), 0), Ok(Given::Drunk(n)) if n > 0));
-        assert!(g.pack.is_empty() && g.hero().hp > 10);
+        g.press_pack(0);
+        assert!(matches!(g.give_held(0), Ok(Given::Drunk(n)) if n > 0));
+        assert!(g.pack.is_empty() && g.held_item.is_none() && g.hero().hp > 10);
     }
 
     #[test]
     fn on_another_units_card_the_wear_test_runs_and_a_potion_is_drunk() {
         let mut g = game();
         let (shield, sword, potion) = (item(&g, "oak_shield"), item(&g, "short_sword"), item(&g, "heal_potion"));
-        g.pack = vec![shield, potion];
-        assert_eq!(g.give_item(ItemFrom::Pack(0), 1), Ok(Given::Worn));
-        assert_eq!((g.squad[1].items[0], g.pack.clone()), (Some(shield), vec![potion]), "the lowest free slot");
+        g.pack = Pack::from(vec![shield, potion, sword, shield]);
+        g.press_pack(0);
+        assert_eq!(g.give_held(1), Ok(Given::Worn));
+        assert_eq!(g.squad[1].items[0], Some(shield), "the lowest free slot");
         g.squad[1].hp = 5;
-        assert!(matches!(g.give_item(ItemFrom::Pack(0), 1), Ok(Given::Drunk(n)) if n > 0));
-        // From the hero's slot to the unit; a second shield is refused and stays put.
-        g.pack = vec![sword, item(&g, "oak_shield")];
-        g.equip_at(0, 1, Some(3)).unwrap();
-        assert_eq!(g.give_item(ItemFrom::Worn { unit: 0, slot: 3 }, 1), Err(EquipError::SameType));
-        assert_eq!(g.hero().items[3], Some(shield), "a refusal keeps the item where it was");
-        assert_eq!(g.give_item(ItemFrom::Pack(0), 1), Ok(Given::Worn));
+        g.press_pack(1);
+        assert!(matches!(g.give_held(1), Ok(Given::Drunk(n)) if n > 0));
+        // A second shield is refused and stays on the pointer.
+        g.press_pack(3);
+        assert_eq!(g.give_held(1), Err(EquipError::SameType));
+        assert_eq!(g.held_item, Some(shield));
+        // Closing the window puts it back in the first empty cell.
+        assert!(g.drop_held());
+        assert_eq!((g.pack.get(0), g.held_item), (Some(shield), None));
+        g.press_pack(2);
+        assert_eq!(g.give_held(1), Ok(Given::Worn));
         assert!(g.squad[1].items.contains(&Some(sword)));
-        // Dropped back on its own unit: its lowest free slot.
-        let at = g.squad[1].items.iter().position(|i| *i == Some(sword)).unwrap();
-        g.squad[1].items.swap(at, 3);
-        assert_eq!(g.give_item(ItemFrom::Worn { unit: 1, slot: 3 }, 1), Ok(Given::Worn));
-        assert_eq!(g.squad[1].items[1], Some(sword));
+    }
+
+    #[test]
+    fn a_living_units_own_items_stay_on_him() {
+        let mut g = game();
+        let shield = item(&g, "oak_shield");
+        g.squad[1].items[0] = Some(shield);
+        g.squad[1].personal = 1;
+        assert!(g.worn_locked(1, 0) && !g.worn_locked(1, 1));
+        assert_eq!(g.press_worn(1, 0), Ok(Press::Nothing));
+        assert_eq!((g.squad[1].items[0], g.held_item), (Some(shield), None));
+        // The dead give theirs up (0x4c24f4 tests +0x20).
+        g.squad[1].hp = 0;
+        assert_eq!(g.press_worn(1, 0), Ok(Press::Picked(shield)));
     }
 }
 

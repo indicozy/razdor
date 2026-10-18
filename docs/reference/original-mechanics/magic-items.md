@@ -296,21 +296,40 @@ For each chosen unit, in order:
   full the item is lost without a message.**
 - Removing an item by number (events "lose item", 0x49a8a8) takes the first match in the pack,
   else the first match among the worn items of the player's units, in army order.
+- The pack's length (0x68e0e0, set by 0x49a718) is the last used slot + 1; the grid shows
+  slot `top + n` in its button n, so an item sits in the cell it was put in and the player can
+  leave empty cells between items (patterns of gems or potions stay as made). A sale takes the
+  first slot holding that item (0x4b9e18 → 0x49a8a8); a purchase goes to the first empty slot
+  (0x49a85c), lost when the pack is full. The village's furs offer tests the length, not the
+  count (0x4bba40: length < 25).
+- The whole 256-slot array, holes included, is what a campaign carries to the next map
+  (0x4b5b64, with its length).
 - The AI armies have a separate 12-slot pack (army +0x37b0).
 
 ### 5.2 Equipping in the original's screens
 
+- **The held item** (0x6664a4). The 29 item buttons (25 pack cells, 4 worn slots, built by
+  0x4d8638) act on the **press** (handler 0x4c24f4 at +0x2f): a press with nothing held takes
+  the item out of its cell or slot onto the pointer (the pointer's picture becomes the item's,
+  record 0xae1da0, 55 px at (−27, −27)); it is then in neither until a later press puts it
+  somewhere. Releasing the button does nothing. Closing the window (0x4b8d28) puts a held
+  item into the pack's first empty slot (0x49a85c: lost if the pack is full). Opening the
+  hero window selects the hero (0x668a08 = 0, the old selection kept in 0x668a0c), so its
+  worn slots are the hero's.
 - **Hero window** (0x4c24f4): the pack plus the 4 worn slots of the unit selected in the army
-  window (the hero when none). Clicking picks up, puts down or swaps:
+  window (the hero when none). Pressing picks up, puts down or swaps:
   - picking from a worn slot is always allowed (a "locked slots" count at unit +0x18 exists in
     the code but nothing ever sets it above 0); items can also be taken from dead units;
   - putting an item on an **empty** worn slot runs the wear test (§5.3) and puts the item in
     **the clicked slot**;
   - an occupied worn slot does not swap;
-  - pack cells swap freely.
-  Potions cannot be put on a worn slot.
-- **Army window** (0x4c346c): dropping the held item on a unit's card "gives" it
-  (0x4979c4):
+  - a pack cell: an empty one takes the held item (any cell, whatever the cells before it);
+    an occupied one swaps, the cell's item now held.
+  Potions cannot be put on a worn slot; the hero window has no unit cards, so nothing is
+  drunk there.
+- **Army window** (0x4c346c): pressing a unit's card with an item held "gives" it
+  (0x4979c4), and nothing else happens to the selection; on an empty cell the press is a
+  formation press as usual:
   - a potion is drunk (§7);
   - for the **hero**, any other item goes back to the pack (the hero equips only through the
     hero window);
@@ -497,8 +516,10 @@ Razdor's code read: `src/rules/items.rs`, `src/rules/magic.rs`, `src/rules/units
 | Potion magic power | `d-` and `p-MagicPower` add like any stat (for a unit with a school) | Never takes effect (bug: stored only under a school byte nothing sets) | §7.1 | Razdor fixes the original's bug |
 | Potion clearing | After every battle of the player, then a rebuild (HP follows the maximum) | After every battle of the player, for the player's army | §7.2 | Matches |
 | Pack full on gain | Events drop the item silently; battle loot still counts what did not fit (battle.md) | Item silently lost | §5.1 | Matches for events |
-| Drop on a card (army window) | `Game::give_item`: a potion is drunk; on the hero's card any other item, from the pack or from any unit's slot, goes to the pack (a full pack refuses); on another unit's the wear test and its lowest free slot; a refusal keeps the item where it was. The unit panel's drop still equips the selected unit (the hero window's part) | Potion drunk; the hero's card sends any other item to the pack; another unit: wear test, first free slot; a refusal leaves the item on the cursor | §5.2 | Matches |
-| Equip slot choice (hero window) | `Game::equip_at` / `Game::move_worn`: an item let go on a worn slot of the unit panel goes into that slot, from the pack or from a worn slot (the same unit's too); an occupied slot swaps (the pack item's place, or the slot it came from, takes the other item, under its own wear test); the army-card drop takes the first free one | The clicked empty slot; an occupied one takes nothing; the army-card drop uses the first free one | §5.2 | Razdor's choice: the swap (a player's request, 2026-10-12) |
+| Pack cells | 256 cells with holes (`rules::pack::Pack`): an item stays in the cell it was put in, gains fill the first empty cell, a sale takes the first cell with that item, the scroll runs to the row after the last used cell; saved as cells (`null` a hole; older packed saves read as the first cells) | 256 slots with holes, the same rules (0x49a85c, 0x49a8a8, 0x49a718) | §5.1 | Matches (until 0.4.33 Razdor packed the items together) |
+| Picking up | A press takes the item onto the pointer (`Game::held_item`), the next press puts it in a pack cell, a worn slot or on a card (`Game::press_pack`, `Game::press_worn`, `Game::give_held`); closing the window puts it back (`Game::drop_held`, lost with a full pack); the filter's Enter (Razdor's) picks the first match up | The same (0x4c24f4, 0x4c346c, 0x4b8d28) | §5.2 | Matches (until 0.4.33 Razdor wore or drank an item on a click and dragged it otherwise) |
+| Drop on a card (army window) | `Game::give_held`: a potion is drunk; on the hero's card any other item goes to the pack's first empty cell (a full pack refuses); on another unit's the wear test and its lowest free slot; a refusal keeps the item on the pointer | Potion drunk; the hero's card sends any other item to the pack; another unit: wear test, first free slot; a refusal leaves the item on the cursor | §5.2 | Matches |
+| Equip slot choice | `Game::press_worn`: the held item goes into the pressed empty slot; an occupied one swaps (the held item under the wear test, the slot's item then held); the card press takes the first free one | The pressed empty slot; an occupied one takes nothing; the card press uses the first free one | §5.2 | Razdor's choice: the swap (a player's request, 2026-10-12) |
 | Spells after a campaign change | All slots wiped; D kept (the hero's too) | All slots wiped; D kept | §9 | Matches |
 | Spells after a battle | The player's units the battle left dead lose their slots | The player's dead units lose their slots | §9 | Matches |
 | Community opcode 11 "permanent" spells | End at the map start + 156,588 minutes (0xEEEEEE hundredths, rounded up); slot k takes entry k, a 0 empties it; garrisons too | End at an absolute time ≈ 108.7 game days after the map start | §4.2 | Matches |

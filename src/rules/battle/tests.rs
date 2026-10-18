@@ -811,6 +811,38 @@ fn row26_poisons_set_regeneration_and_replace_the_units_own() {
 }
 
 #[test]
+fn deviation_poison_does_not_take_hold_on_the_undead() {
+    // The owner's decision (2026-10-18): the original poisons the Undead too (48b299–48b2bd).
+    let viper = bonus(71, Bonus::Poison, warrior(71, 30, 0));
+    let cobra = bonus(72, Bonus::PoisonS, warrior(72, 30, 0));
+    let witch = bonus(73, Bonus::Poison, mage(73, 30, MagicSchool::Life, MagicDirection::ToEnemy));
+    let sting = bonus(85, Bonus::PoisonArmorIgnore, warrior(85, 30, 0));
+    let ghoul = UnitDef { nature: Nature::Undead, hits: 200, ..warrior(191, 1, 0) };
+    let mut bt = with(
+        vec![viper, cobra, witch, sting, ghoul],
+        &[(71, f(1)), (72, f(2)), (73, b(1)), (85, f(3))],
+        &[(191, f(1)), (191, f(2)), (191, f(3))],
+    );
+    for (actor, target) in [(0, 4), (1, 5), (2, 6), (3, 6)] {
+        turn_of(&mut bt, actor);
+        bt.act(target).unwrap();
+    }
+    assert!([4, 5, 6].iter().all(|&i| bt.fighters[i].hp < 200), "all were hit");
+    assert_eq!([4, 5, 6].map(|i| bt.fighters[i].regen), [0, 0, 0], "no poison on the Undead");
+    let hp = [4, 5, 6].map(|i| bt.fighters[i].hp);
+    let next = bt.round + 1;
+    to_round(&mut bt, next);
+    assert_eq!([4, 5, 6].map(|i| bt.fighters[i].hp), hp, "and no loss at the turn start");
+    // CtrPoison spares an Undead striker too.
+    let toad = bonus(65, Bonus::CtrPoison, UnitDef { hits: 300, ..warrior(65, 1, 0) });
+    let wight = UnitDef { nature: Nature::Undead, ..warrior(192, 30, 0) };
+    let mut bt = with(vec![toad, wight], &[(192, f(2))], &[(65, f(2))]);
+    turn_of(&mut bt, 0);
+    bt.act(1).unwrap();
+    assert_eq!(bt.fighters[0].regen, 0);
+}
+
+#[test]
 fn row26_poison_armor_ignore_pierces_and_keeps_the_worst_poison() {
     let sting = bonus(85, Bonus::PoisonArmorIgnore, warrior(85, 30, 0));
     let viper = bonus(71, Bonus::Poison, warrior(71, 30, 0));
@@ -2750,13 +2782,14 @@ fn community_evasion_is_a_byte_and_floors_at_1() {
 
 #[test]
 fn community_a_strike_tests_its_damage_in_the_on_hit_block() {
-    // Power 1 is no "> 1", but a Life strike doubles on the undead: 2 is.
-    let needle = bonus(98, Bonus::PoisonArmorIgnore, mage(98, 1, MagicSchool::Life, MagicDirection::ToEnemy));
+    // Power 1 is no "> 1", but a Life strike doubles on the undead: 2 is. (Bleed shows it:
+    // on main poison no longer takes hold on the Undead, the owner's decision.)
+    let needle = bonus(98, Bonus::Bleed, mage(98, 1, MagicSchool::Life, MagicDirection::ToEnemy));
     let mut bt = with(vec![needle], &[(98, b(2)), (10, f(5))], &[(16, f(2))]);
     bt.fighters[2].mods.defence = -1;
     bt.refresh(2);
     let hit = bt.act(2).unwrap();
-    assert_eq!((hit.kind, bt.fighters[2].regen), (ActionKind::Strike, -10));
+    assert_eq!((hit.kind, bt.fighters[2].bleed), (ActionKind::Strike, BLEED_PERCENT));
 }
 
 #[test]

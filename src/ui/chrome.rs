@@ -35,20 +35,25 @@ pub enum Fx {
     Shade,
     /// Green/blue swap and black transparency key for the barracks' green hire pill.
     KeyBlackSwapGreenBlue,
-    /// The original trait icons use an opaque violet matte (RGB 129, 0, 127).
-    KeyPurple,
+    /// The colour of the bottom-left pixel is transparent, compared at 16 bits (the ability
+    /// icons, [`gfx::key_bottom_left_565`]).
+    KeyCorner,
     /// Warm red button palette, preserving the silver outer edge of the original art.
     ButtonRed,
     /// Red takes green, green takes blue, blue takes red (0x48dd40 with 2, 3, 1), then
     /// (0, 64, 128) taken off inside the 1 px edge (0x4768f8 subtracting over (1,1)–(w−1,h−1)):
     /// the green buttons made the defeat window's dark red ones with their silver rim (0x4dba90).
     RotateRgb,
+    /// The new-hero window's portraits ([`hero_portrait`]).
+    HeroPicked,
+    HeroOffered,
+    HeroLocked,
 }
 
 struct Chrome {
     dir: PathBuf,
     /// By path, then by [`Fx`] (its index).
-    textures: HashMap<String, [Option<Option<Texture2D>>; 10]>,
+    textures: HashMap<String, [Option<Option<Texture2D>>; 12]>,
     /// By key: the tuning it was made with and the texture (`None`: its file is missing).
     visual_textures: HashMap<&'static str, ([f32; 4], Option<Texture2D>)>,
     /// The pictures of [`visual_texture`] as decoded, by path: the light and the brown paper
@@ -210,33 +215,92 @@ pub fn transform(img: &mut Image, fx: Fx) {
                 let (r, g, b) = (p[0], p[1], p[2]);
                 p[..3].copy_from_slice(&[g, b, r]);
             }
-            Fx::KeyPurple => {
-                // Bonus<N>.lit images have no embedded alpha: their opaque matte is
-                // exactly 129,0,127. A short ramp removes JPEG/DCT color bleed without
-                // eating the red and silver edges of the actual symbols.
-                let distance = (p[0] as i32 - 129).abs()
-                    .max(p[1] as i32)
-                    .max((p[2] as i32 - 127).abs()) as u32;
-                let alpha = distance.saturating_sub(10).saturating_mul(255) / 32;
-                let a = p[3].min(alpha.min(255) as u8) as u32;
-                if a == 0 {
-                    p[..3].fill(0);
-                } else if a < 255 {
-                    // Remove the matte color from antialiased edge pixels, so linear
-                    // texture filtering does not bring a violet fringe back at runtime.
-                    for (channel, matte) in p[..3].iter_mut().zip([129u32, 0, 127]) {
-                        *channel = ((*channel as u32 * 255)
-                            .saturating_sub(matte * (255 - a))
-                            / a)
-                            .min(255) as u8;
-                    }
-                }
-                p[3] = a as u8;
-            }
+            Fx::KeyCorner | Fx::HeroPicked | Fx::HeroOffered | Fx::HeroLocked => {}
         }
     }
-    if fx == Fx::RotateRgb {
-        darken_inside_edge(img, [0, 64, 128]);
+    match fx {
+        Fx::RotateRgb => darken_inside_edge(img, [0, 64, 128]),
+        Fx::KeyCorner => gfx::key_bottom_left_565(img),
+        Fx::HeroPicked => hero_portrait(img, HeroPortrait::Picked),
+        Fx::HeroOffered => hero_portrait(img, HeroPortrait::Offered),
+        Fx::HeroLocked => hero_portrait(img, HeroPortrait::Locked),
+        _ => {}
+    }
+}
+
+/// Which of the new-hero window's three pictures of a class portrait (0x4d7d30).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HeroPortrait {
+    /// The picked class: the picture brightened (×1100/1024).
+    Picked,
+    /// Another class the map offers: the blue copy (`65bcd8`).
+    Offered,
+    /// A class the map leaves out: the dark red one (`65bce4`).
+    Locked,
+}
+
+/// The new-hero window's class portraits as the original builds them once, at 16 bits per
+/// pixel (0x4d7d30, for each of `Hero0`, `hero1`, `hero2`, loaded without their alpha by
+/// 0x48d02c):
+/// 1. the 160 × 160 vignette taken off the picture (0x476790 mode 1): squares inset by i px,
+///    i = 0..32, filled with grey `(32 − i)·2`, so the edge loses 64 and from 32 px in nothing;
+/// 2. two copies made of that (0x476594); the picture itself scaled by 1100/1024 (0x48da5c);
+/// 3. each copy turned grey, `(100 r + 200 g + 100 b) / 400` (0x48db5c), then scaled and
+///    shifted per channel (0x48da5c): the blue one `g·1300/1024 − (256, 80, 48)`, the dark one
+///    `g·1600/1024 − (48, 176, 256)`, each clamped to a byte, so black stays black and the
+///    light parts take the colour;
+/// 4. the vignette taken off each copy once more (0x476790 mode 1).
+///
+/// Every step reads the 16-bit pixel widened back to bytes (0x4763b8) and writes it through
+/// 0x476374's 5-6-5 tables.
+pub fn hero_portrait(img: &mut Image, which: HeroPortrait) {
+    let (w, h) = (img.width as i32, img.height as i32);
+    // 0x4763b8: a 5-bit channel shifted up by 3 gains its top bit once more; a 6-bit one not.
+    let widen = |p: &mut [u8]| {
+        let (r, g, b) = (p[0] >> 3 << 3, p[1] >> 2 << 2, p[2] >> 3 << 3);
+        p[0] = r + (r >> 7);
+        p[1] = g;
+        p[2] = b + (b >> 7);
+    };
+    let vignette = |x: i32, y: i32| {
+        // The squares are the original's 160 px; a picture of another size keeps that border.
+        let d = x.min(y).min(w - 1 - x).min(h - 1 - y).clamp(0, 32);
+        let mut grey = [((32 - d) * 2) as u8; 3];
+        widen(&mut grey);
+        grey
+    };
+    let take_vignette = |p: &mut [u8], x: i32, y: i32| {
+        let v = vignette(x, y);
+        for (c, v) in p[..3].iter_mut().zip(v) {
+            *c = c.saturating_sub(v);
+        }
+        widen(p);
+    };
+    for (n, p) in img.rgba.chunks_exact_mut(4).enumerate() {
+        let (x, y) = (n as i32 % w.max(1), n as i32 / w.max(1));
+        widen(p);
+        take_vignette(p, x, y);
+        let (k, shift) = match which {
+            HeroPortrait::Picked => {
+                for c in &mut p[..3] {
+                    *c = ((*c as i32 * 1100) >> 10).min(255) as u8;
+                }
+                widen(p);
+                p[3] = 255;
+                continue;
+            }
+            HeroPortrait::Offered => (1300, [-256, -80, -48]),
+            HeroPortrait::Locked => (1600, [-48, -176, -256]),
+        };
+        let grey = ((p[0] as i32 * 100 + p[1] as i32 * 200 + p[2] as i32 * 100) / 400).min(255) as u8;
+        p[..3].fill(grey);
+        widen(p);
+        for (c, s) in p[..3].iter_mut().zip(shift) {
+            *c = (((*c as i32 * k) >> 10) + s).clamp(0, 255) as u8;
+        }
+        widen(p);
+        take_vignette(p, x, y);
+        p[3] = 255;
     }
 }
 
@@ -414,15 +478,63 @@ fn brown_paper_texture() -> Option<Texture2D> {
 /// The reference screenshot's accepted brown parchment palette.
 const BROWN_BOX_TAKEN: [i32; 3] = [144, 136, 256];
 
-/// Rounds each pixel to the original's 16-bit surfaces (5, 6, 5 bits; 0x476374 packs them),
-/// widened back the way the screen shows them.
-pub fn quantize_565(img: &mut Image) {
-    for p in img.rgba.chunks_exact_mut(4) {
-        let (r, g, b) = (p[0] >> 3, p[1] >> 2, p[2] >> 3);
-        p[0] = (r << 3) | (r >> 2);
-        p[1] = (g << 2) | (g >> 4);
-        p[2] = (b << 3) | (b >> 2);
+pub use gfx::quantize_565;
+
+/// The original's card strip picture: 94×39 (0x5e×0x27).
+pub const STRIP_SIZE: (u32, u32) = (94, 39);
+
+/// The picture under a card's stat strip, made from Win-paper at start-up as the original's
+/// (0x4dc118, 0x4de0f0–0x4de1f7): a 94×39 piece of the paper (0x476b8c), at the 16-bit
+/// screen's levels, then
+/// - plain (ae2698): the piece at (20, 20) with (148, 132, 148) taken off (0x4768f8 mode 1):
+///   a dark brown;
+/// - the hero's (ae269c): the same, then red ×4222/1024 − 227, green ×768/1024, blue 0
+///   (0x48da5c): a deep red-brown;
+/// - a named character's (ae26a0): the piece at (220, 20), red and blue swapped (0x48dd40 with
+///   3, 2, 1), then red 0, green ×1394/1024 − 196, blue ×2790/1024 − 517 (0x48da5c): a deep
+///   blue.
+pub fn strip_picture(paper: &Image, panel: super::unit_sheet::StripPanel) -> Image {
+    use super::unit_sheet::StripPanel;
+    let (w, h) = STRIP_SIZE;
+    let x0 = if panel == StripPanel::Named { 220 } else { 20 };
+    let mut img = Image { width: w, height: h, rgba: Vec::with_capacity((w * h * 4) as usize) };
+    for y in 0..h {
+        for x in 0..w {
+            // A paper smaller than the original's is read round (never seen in an install).
+            let px = paper.pixel((x0 + x) % paper.width.max(1), (20 + y) % paper.height.max(1));
+            img.rgba.extend_from_slice(&[px[0], px[1], px[2], 255]);
+        }
     }
+    quantize_565(&mut img);
+    match panel {
+        StripPanel::Plain | StripPanel::Hero => {
+            subtract(&mut img, [148, 132, 148]);
+            quantize_565(&mut img);
+            if panel == StripPanel::Hero {
+                scale_channels(&mut img, [4222, 768, 0], [-227, 0, 0]);
+                quantize_565(&mut img);
+            }
+        }
+        StripPanel::Named => {
+            for p in img.rgba.chunks_exact_mut(4) {
+                p.swap(0, 2);
+            }
+            scale_channels(&mut img, [0, 1394, 2790], [0, -196, -517]);
+            quantize_565(&mut img);
+        }
+    }
+    img
+}
+
+/// [`strip_picture`] as a texture (`None` without the install's paper).
+pub fn strip_texture(panel: super::unit_sheet::StripPanel) -> Option<Texture2D> {
+    use super::unit_sheet::StripPanel;
+    let key = match panel {
+        StripPanel::Plain => "card-strip",
+        StripPanel::Hero => "card-strip-hero",
+        StripPanel::Named => "card-strip-named",
+    };
+    visual_texture(key, "Windows/Win-paper.lit", [0.0; 4], |img| *img = strip_picture(img, panel))
 }
 
 fn paper_texture(brown: bool) -> Option<Texture2D> {
@@ -1298,6 +1410,42 @@ pub fn silver_frame(r: Rect, width: f32) {
     draw_rectangle_lines(r.x + width, r.y + width, r.w - 2.0 * width, r.h - 2.0 * width, 1.0, SILVER_DARK);
 }
 
+/// The original's empty worn-item slot (0xae2860 with its alpha 0xae2864, built at start-up
+/// near 0x4dbc26): a 55 px square, black inside at alpha 0x66 (40%, 0x47650c fills the alpha
+/// 1..53 with grey 0x66), with a 1 px ring at full alpha whose colours run clockwise from the
+/// top left along the first row of `SteelLine.lit` (0x48d1d4 with colour −1 reads 0xae2538's
+/// row 0 at a running index: the top left to right, the right side down, the bottom right to
+/// left, the left side up). Drawn in `r`, the 55 px scaled to its width.
+pub fn empty_item_slot(r: Rect) {
+    const SIDE: f32 = 55.0;
+    let px = r.w / SIDE;
+    draw_rectangle(r.x + px, r.y + px, r.w - 2.0 * px, r.h - 2.0 * px, Color::new(0.0, 0.0, 0.0, 0x66 as f32 / 255.0));
+    let Some(t) = win("SteelLine") else {
+        draw_rectangle_lines(r.x, r.y, r.w, r.h, px.max(1.0), SILVER);
+        return;
+    };
+    // Each side takes the next 55 source pixels of the row, drawn along it from its start.
+    let sides = [
+        (vec2(r.x, r.y), vec2(r.x + r.w, r.y)),
+        (vec2(r.x + r.w, r.y), vec2(r.x + r.w, r.y + r.h)),
+        (vec2(r.x + r.w, r.y + r.h), vec2(r.x, r.y + r.h)),
+        (vec2(r.x, r.y + r.h), vec2(r.x, r.y)),
+    ];
+    for (n, (from, to)) in sides.into_iter().enumerate() {
+        let len = from.distance(to);
+        let angle = (to.y - from.y).atan2(to.x - from.x);
+        // The strip lies inside the square: shifted half its thickness inwards.
+        let inward = vec2(-(to - from).y, (to - from).x).normalize() * px / 2.0;
+        let mid = (from + to) / 2.0 + inward;
+        draw_texture_ex(&t, mid.x - len / 2.0, mid.y - px / 2.0, WHITE, DrawTextureParams {
+            dest_size: Some(vec2(len, px)),
+            source: Some(Rect::new(n as f32 * SIDE, 0.0, SIDE, 1.0)),
+            rotation: angle,
+            ..Default::default()
+        });
+    }
+}
+
 /// The window's close box; true when clicked.
 pub fn close_button(x: f32, y: f32, s: f32, red: bool) -> bool {
     let (hover, down, pressed) = super::widgets::button_state(Rect::new(x, y, s, s), true);
@@ -2107,8 +2255,10 @@ pub fn badge(name: &str, cx: f32, cy: f32, size: f32, fallback: Color) {
 
 /// A trait icon (`Bonus<N>.lit`, `Bonus-2Row`, `HeroBonus<N>`), or a small shield.
 pub fn trait_icon(name: &str, x: f32, y: f32, size: f32) {
-    if let Some(t) = win_fx(name, Fx::KeyPurple) {
-        tex(&t, Rect::new(x, y, size, size), WHITE);
+    if let Some(t) = win_fx(name, Fx::KeyCorner) {
+        // The keyed pixels are transparent black: drawn premultiplied, the scaled picture's
+        // edge takes no colour from them.
+        premultiplied(|| tex(&t, Rect::new(x, y, size, size), WHITE));
     } else {
         let c = Color::new(0.25, 0.35, 0.75, 1.0);
         draw_rectangle(x + size * 0.15, y + size * 0.1, size * 0.7, size * 0.45, c);
@@ -2155,6 +2305,33 @@ mod tests {
         assert_eq!(divider_ornaments(124.0, 628.0, true), (0.0, 73.0, 555.0));
         // A strip narrower than both never overlaps them.
         assert_eq!(divider_ornaments(124.0, 100.0, true), (0.0, 50.0, 50.0));
+    }
+
+    /// The new-hero window's portraits (0x4d7d30, a player's report: Razdor's tint was a flat
+    /// wash with lifted darks): grey copies scaled and shifted per channel, so black stays
+    /// black and white takes the copy's colour; the vignette darkens the edge.
+    #[test]
+    fn the_hero_portraits_are_grey_copies_shifted_into_blue_and_dark_red() {
+        let make = |which, rgb: [u8; 3]| {
+            let mut img = Image { width: 160, height: 160, rgba: [rgb[0], rgb[1], rgb[2], 255].repeat(160 * 160) };
+            hero_portrait(&mut img, which);
+            (img.pixel(80, 80), img.pixel(0, 0), img.pixel(24, 80), img.pixel(32, 80))
+        };
+        let (mid, edge, inner, clear) = make(HeroPortrait::Offered, [255, 255, 255]);
+        // 250 grey: (250·1300 >> 10) − (256, 80, 48), at 5-6-5 levels.
+        assert_eq!(mid, [56, 232, 249, 255]);
+        assert_eq!(clear, mid, "from 32 px in the vignette takes nothing");
+        assert!(edge[1] < inner[1] && inner[1] < mid[1], "{edge:?} {inner:?}");
+        let (mid, ..) = make(HeroPortrait::Locked, [255, 255, 255]);
+        assert_eq!(mid, [249, 208, 129, 255], "(·1600 >> 10) − (48, 176, 256)");
+        for which in [HeroPortrait::Offered, HeroPortrait::Locked, HeroPortrait::Picked] {
+            let (mid, ..) = make(which, [0, 0, 0]);
+            assert_eq!(mid, [0, 0, 0, 255], "black stays black ({which:?})");
+        }
+        // The picked one keeps its colours, ×1100/1024.
+        let (mid, edge, ..) = make(HeroPortrait::Picked, [100, 50, 200]);
+        assert_eq!(mid, [96, 48, 209, 255]);
+        assert_eq!(edge, [32, 0, 145, 255], "64 off at the edge first");
     }
 
     /// The accepted reference palette: (144, 136, 256) taken off Win-paper, at the

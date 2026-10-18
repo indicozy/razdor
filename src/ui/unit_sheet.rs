@@ -12,7 +12,7 @@ use razdor::rules::units::Stats;
 
 use super::assets::Assets;
 use super::chrome::{self, k, BLUE_TEXT, CREAM, ORANGE_TEXT, RED_TEXT};
-use super::widgets::{measure, mouse_in, wrap};
+use super::widgets::{measure, mouse_in};
 
 thread_local! {
     static TRAIT_SCROLL: std::cell::RefCell<std::collections::HashMap<String, f32>> = std::cell::RefCell::new(std::collections::HashMap::new());
@@ -22,17 +22,18 @@ thread_local! {
 /// in the native army presentation. Other screens retain their current palette.
 fn army_ink(color: Color) -> Color {
     if !super::dt_font::native_metrics() { return color; }
-    if color == NAMED_INK || color == STRIP_INK { super::typography::Ink::Yellow.color() }
+    if color == NAMED_INK { super::typography::Ink::Yellow.color() }
     else { super::typography::color(color) }
 }
 
+// The panel's text lists all have the shadow font in a game (0x492f24: ae24d8, the bold
+// wage line ae2510; the name ae24b0): drawn 1 px down and right first.
 fn shadow_text(s: &str, x: f32, y: f32, size: f32, color: Color) {
-    super::widgets::text(s, x, y, size, army_ink(color));
+    chrome::shadow_text(s, x, y, size, army_ink(color));
 }
 
 fn shadow_right(s: &str, x: f32, y: f32, size: f32, color: Color) {
-    let width = measure(s, size).width;
-    super::widgets::text(s, x - width, y, size, army_ink(color));
+    chrome::shadow_right(s, x, y, size, army_ink(color));
 }
 
 fn shadow_centered(s: &str, x: f32, y: f32, size: f32, color: Color) {
@@ -131,7 +132,8 @@ fn hero_trait(h: HeroClass) -> (String, String, Color) {
         HeroClass::Archmage => tr("The Archmage casts spells twice as fast for 50% less mana, but his army gets no bonuses."),
         HeroClass::Ranger => tr("The army of this hero travels 20% faster, and the wounded heal 20% of their hits every day."),
     };
-    (format!("HeroBonus{n}"), chrome::ui_text("NewHero", &format!("Bonus{n}")).unwrap_or_else(|| english.to_string()), super::typography::Ink::Yellow.color())
+    // In the yellow SanSerif (0x492f24 → 0x492e70 with ae24c0).
+    (format!("HeroBonus{n}"), chrome::ui_text("NewHero", &format!("Bonus{n}")).unwrap_or_else(|| english.to_string()), StripInk::Yellow.color())
 }
 
 /// The state lines closing the panel's traits (492f24), each with its icon of the table
@@ -178,7 +180,10 @@ fn state_trait(line: StateLine) -> (String, String, Color) {
         StateLine::BackRow => ("Bonus-2Row".into(), own("Hint1").unwrap_or_else(|| tr("In the second row the unit gets a bonus to its ranged defence!").into())),
         StateLine::InCastle => ("Bonus-InCastle".into(), own("Hint2").unwrap_or_else(|| tr("In its own building the unit gets a bonus to all defences!").into())),
     };
-    (art, text, BLUE_TEXT)
+    // The dead and the unpaid in red (ae24c8), the back row and the own building in blue
+    // (ae24cc), as 0x492f24 passes them to 0x492e70.
+    let ink = if matches!(line, StateLine::Resurrect | StateLine::NoPayment) { RED_TEXT } else { BLUE_TEXT };
+    (art, text, ink)
 }
 
 /// The traits the panel lists: the hero's class, the unit's bonuses (its items' too), then
@@ -206,19 +211,53 @@ fn traits_of(s: &Sheet, content: &Content) -> Vec<(String, String, Color)> {
     traits
 }
 
-/// A trait's wrapped rows; an empty text still takes one (0x47e46c adds an empty line).
-fn trait_rows(line: &str, width: f32, size: f32) -> Vec<String> {
-    let rows = wrap(line, width, size);
-    if rows.is_empty() {
-        vec![String::new()]
-    } else {
-        rows
-    }
+/// The six spaces the original's loaders put before a unit's description (0x48efd0, the
+/// string at 0x48f820) and before every trait and hint text (0x4e36cc: 0x4e3d44–0x4e3ead,
+/// the string at 0x4e4e40): the first row of each indents, the icon stands in it.
+const INDENT: &str = "      ";
+
+/// One row of the panel's description list (0x667bdc): its text, ink and the icon drawn
+/// beside it (the first row of a trait).
+#[derive(Clone, Debug, PartialEq)]
+struct ListRow {
+    text: String,
+    ink: Color,
+    icon: Option<String>,
 }
 
-/// The height a trait of `lines` wrapped lines takes in the list (as `draw` lays it out).
-fn trait_height(lines: usize, slh: f32, k: f32) -> f32 {
-    5.0 * k + slh * lines as f32 + if lines == 1 { slh * 0.6 } else { 0.0 }
+/// The description list as 0x492f24 fills it: the unit's description (`desc`, none for a
+/// hero), then each trait (0x492e70): an empty row first when the list already has rows
+/// (0x47e944), then its text, its icon by its first row. Every text but an empty one
+/// starts with [`INDENT`]; each is word-wrapped to `room` as TextList.AddText 0x47e46c does
+/// (`width`: a character's advance), left aligned.
+fn list_rows(desc: Option<&str>, traits: &[(String, String, Color)], room: f32, width: impl Fn(char) -> f32 + Copy) -> Vec<ListRow> {
+    let indented = |t: &str| if t.is_empty() { String::new() } else { format!("{INDENT}{t}") };
+    let wrap = |t: &str| razdor::dt::markup::wrap(&indented(t), room, width).into_iter().map(|r| r.text);
+    let mut rows: Vec<ListRow> = desc.map(|d| wrap(d).map(|text| ListRow { text, ink: CREAM, icon: None }).collect()).unwrap_or_default();
+    for (art, text, ink) in traits {
+        if !rows.is_empty() {
+            rows.push(ListRow { text: String::new(), ink: *ink, icon: None });
+        }
+        for (i, text) in wrap(text).enumerate() {
+            rows.push(ListRow { text, ink: *ink, icon: (i == 0).then(|| art.clone()) });
+        }
+    }
+    rows
+}
+
+/// The panel's fill is 262 of the original's px wide (0x492f24: X0+2..X0+0x108).
+const PANEL_W: f32 = 262.0;
+
+/// The panel's text blocks in the original's px, stacked up from the bottom of its fill
+/// (0x492f24 with the lists placed at 0x4d9060): the description list (x 12 in, 238 wide,
+/// 14 px a row, its bottom at the fill's bottom, `rows`·14 + 12 tall), over it the stat
+/// lists (`stats`+1)·14 + 8 tall (8 px higher for a hero), the level line 13 px over them,
+/// the name list (16 + 18 px) over that. Returns the tops of the description, the stats and
+/// the name, in px above the fill's bottom.
+fn panel_tops(rows: usize, stats: usize, hero: bool) -> (f32, f32, f32) {
+    let desc = rows as f32 * 14.0 + 12.0;
+    let stat = desc + (stats + 1) as f32 * 14.0 + 8.0 + if hero { 8.0 } else { 0.0 };
+    (desc, stat, stat + 16.0 + 18.0)
 }
 
 /// A stat line: label, value, colour.
@@ -382,18 +421,50 @@ fn stat_lines(content: &Content, s: &Sheet) -> Vec<Line> {
     lines
 }
 
-/// The stat strip's text.
-/// A named character's name on his card (the original's ae24a0 font, gold).
+/// A named character's name on the panel (the original's ae24a0 font, yellow Benguiat).
 const NAMED_INK: Color = Color::new(1.0, 0.86, 0.35, 1.0);
-const STRIP_INK: Color = Color::new(0.98, 0.92, 0.72, 1.0);
-const HITS_INK: Color = Color::new(1.0, 0.78, 0.35, 1.0);
 
-/// Blue for a stat above its start value, red below.
-fn strip_color(cur: i32, base: i32) -> Color {
+/// The SanSerif tints a card's strip is written in (fonts loaded at 0x4dbc26: white less the
+/// colour given; 0x49462c picks them). The strip has no shadow font (0x478978 mode 1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StripInk {
+    /// ae24bc, untinted: the attack and the manoeuvres.
+    White,
+    /// ae24c0, less (25, 25, 125): the defence and the initiative.
+    Yellow,
+    /// ae24c4, less (20, 90, 180): the hits of an unhurt unit.
+    Orange,
+    /// ae24c8, less (0, 152, 159): a value below its own, the hits of a wounded unit.
+    Red,
+    /// ae24cc, less (180, 70, 0): a value above its own.
+    Blue,
+}
+
+impl StripInk {
+    pub fn color(self) -> Color {
+        let [r, g, b] = self.rgb();
+        Color::from_rgba(r, g, b, 255)
+    }
+
+    pub fn rgb(self) -> [u8; 3] {
+        match self {
+            StripInk::White => [255, 255, 255],
+            StripInk::Yellow => [230, 230, 130],
+            StripInk::Orange => [235, 165, 75],
+            StripInk::Red => [255, 103, 96],
+            StripInk::Blue => [75, 185, 255],
+        }
+    }
+}
+
+/// The tint of a strip value (0x49462c): blue when above its own value, red when below,
+/// else `normal`. `blue` is false where the original has no blue (the manoeuvres and the
+/// initiative are only ever red or their own tint).
+fn strip_ink(cur: i32, base: i32, normal: StripInk, blue: bool) -> StripInk {
     match cur.cmp(&base) {
-        std::cmp::Ordering::Greater => BLUE_TEXT,
-        std::cmp::Ordering::Less => RED_TEXT,
-        std::cmp::Ordering::Equal => STRIP_INK,
+        std::cmp::Ordering::Greater if blue => StripInk::Blue,
+        std::cmp::Ordering::Less => StripInk::Red,
+        _ => normal,
     }
 }
 
@@ -402,16 +473,16 @@ fn strip_color(cur: i32, base: i32) -> Color {
 /// [`strip_place`]); for anyone else "A:" with the ranged attack when it is above the melee
 /// attack, else the melee attack. Blue when any of the three attacks is above its value in
 /// `base`, else red when any is below.
-fn attack_piece(s: &Stats, base: &Stats, power: i32, caster: bool, place: usize) -> (String, Color) {
+fn attack_piece(s: &Stats, base: &Stats, power: i32, caster: bool, place: usize) -> (String, StripInk) {
     let (ab, sh) = (s[Stat::AttackBlow], s[Stat::AttackShot]);
     let now = [ab, sh, power];
     let was = [base[Stat::AttackBlow], base[Stat::AttackShot], base[Stat::MagicPower]];
     let color = if now.iter().zip(was).any(|(n, w)| *n > w) {
-        BLUE_TEXT
+        StripInk::Blue
     } else if now.iter().zip(was).any(|(n, w)| *n < w) {
-        RED_TEXT
+        StripInk::Red
     } else {
-        STRIP_INK
+        StripInk::White
     };
     let text = if caster && (ab <= 0 || !(1..=4).contains(&place)) {
         razdor::trf!("Pwr: {power}", power)
@@ -466,6 +537,42 @@ pub fn defence_piece(now: &Stats, row2: i32, building: i32) -> Option<(i32, i32)
     (blow > 0 || shot > 0).then_some((blow, shot))
 }
 
+/// The original's card is 94 px wide; its strip (94×39) starts under the 94 px portrait.
+const CARD_W: f32 = 94.0;
+
+/// Where the strip's pieces stand, as the original's (0x494f93–0x49565f), in screen px of a
+/// strip `strip` (scaled from the original's 94 px card): the three lines' cell tops 2, 14
+/// and 26 px under the portrait; the left pieces 2 px in, the right ones ending 1 px before
+/// the card's right edge (x + 94 − 1 − width), the hits centred (x + (94 − width) / 2).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StripLayout {
+    pub tops: [f32; 3],
+    pub left: f32,
+    pub right_end: f32,
+    scale: f32,
+    x: f32,
+    w: f32,
+}
+
+impl StripLayout {
+    pub fn of(strip: Rect) -> StripLayout {
+        let s = strip.w / CARD_W;
+        StripLayout {
+            tops: [2.0, 14.0, 26.0].map(|t| strip.y + t * s),
+            left: strip.x + 2.0 * s,
+            right_end: strip.x + strip.w - s,
+            scale: s,
+            x: strip.x,
+            w: strip.w,
+        }
+    }
+
+    /// The x of a centred piece `width` wide (the original's halving drops the odd pixel).
+    pub fn centred(&self, width: f32) -> f32 {
+        self.x + (((self.w - width) / self.scale) / 2.0).floor() * self.scale
+    }
+}
+
 /// The strip under a card's portrait, as the original's: "A: 45  D: 35/40", "Mnvr: 1
 /// Ini: 12", "Hits: 70" (or "Hits: 45/70"). `row2` is added to the ranged defence shown
 /// (the back row's `Row2Def`, 0 elsewhere) and `building` (the defence of the building the
@@ -474,63 +581,78 @@ pub fn defence_piece(now: &Stats, row2: i32, building: i32) -> Option<(i32, i32)
 /// `place` choose the attack piece ([`caster`], [`strip_place`]).
 #[allow(clippy::too_many_arguments)]
 pub fn stat_strip(strip: Rect, now: &Stats, base: &Stats, power: i32, caster: bool, place: usize, hp: i32, row2: i32, building: i32, lit: bool, panel: StripPanel) {
-    stat_strip_impl(strip, now, base, power, caster, place, hp, row2, building, lit, panel, false);
+    stat_strip_impl(strip, now, base, power, caster, place, hp, row2, building, lit, panel);
 }
 
 /// [`stat_strip`] in battle: `now` already holds the side's building defence
 /// (`Battle::shown_stats`).
 #[allow(clippy::too_many_arguments)]
 pub fn battle_stat_strip(strip: Rect, now: &Stats, base: &Stats, power: i32, caster: bool, place: usize, hp: i32, row2: i32, lit: bool, panel: StripPanel) {
-    stat_strip_impl(strip, now, base, power, caster, place, hp, row2, 0, lit, panel, true);
+    stat_strip_impl(strip, now, base, power, caster, place, hp, row2, 0, lit, panel);
+}
+
+/// The defence piece's tint (0x495460–0x495510): yellow, or, from the ranged defence when the
+/// back row adds to it, else from the melee one, blue above its own value and red below.
+fn defence_ink(now: &Stats, base: &Stats, row2: i32) -> StripInk {
+    let st = if row2 > 0 { Stat::DefenceShot } else { Stat::DefenceBlow };
+    strip_ink(now[st], base[st], StripInk::Yellow, true)
 }
 
 #[allow(clippy::too_many_arguments)]
-fn stat_strip_impl(strip: Rect, now: &Stats, base: &Stats, power: i32, caster: bool, place: usize, hp: i32, row2: i32, building: i32, lit: bool, panel: StripPanel, battle: bool) {
-    let k = k();
-    // The hero's strip uses the same visible parchment grain as the reference hire card;
-    // the darker standard strip texture loses too much detail once tinted red.
-    chrome::surface(strip, if panel == StripPanel::Hero && !battle { chrome::Skin::Paper } else { chrome::Skin::Strip });
-    // The original recolours the strip itself (0x48da5c): red for the hero, blue for a named
-    // character; a tint over it here. The hero's red is a deeper one than the original's
-    // (about 160,50,0 on this paper), which glared (a choice over the original).
-    match panel {
-        StripPanel::Plain => {}
-        StripPanel::Hero if battle => draw_rectangle(strip.x, strip.y, strip.w, strip.h, Color::new(0.5, 0.05, 0.03, 0.55)),
-        StripPanel::Named if battle => draw_rectangle(strip.x, strip.y, strip.w, strip.h, Color::new(0.05, 0.3, 0.95, 0.6)),
-        // Preserve the paper's warm variation under the leader's red highlight, as in the
-        // reference card. The tint changes its color without flattening the texture.
-        StripPanel::Hero => draw_rectangle(strip.x, strip.y, strip.w, strip.h, Color::new(0.48, 0.12, 0.035, 0.36)),
-        StripPanel::Named => draw_rectangle(strip.x, strip.y, strip.w, strip.h, Color::new(0.035, 0.16, 0.42, 0.62)),
+fn stat_strip_impl(strip: Rect, now: &Stats, base: &Stats, power: i32, caster: bool, place: usize, hp: i32, row2: i32, building: i32, lit: bool, panel: StripPanel) {
+    // The strip's own picture, made from the paper at start-up (0x4de0f0,
+    // `chrome::strip_picture`): dark brown, the hero's deep red-brown, a named character's
+    // deep blue, in battle and on the army and building screens alike (0x49462c draws
+    // ae2698, then ae269c or ae26a0 over it).
+    match chrome::strip_texture(panel) {
+        Some(t) => chrome::tex(&t, strip, WHITE),
+        None => chrome::surface(strip, chrome::Skin::Strip),
     }
     if lit {
         draw_rectangle(strip.x, strip.y, strip.w, strip.h, Color::new(0.75, 0.25, 0.0, 0.4));
     }
-    draw_rectangle_lines(strip.x, strip.y, strip.w, strip.h, 1.0, Color::new(0.0, 0.0, 0.0, 0.5));
-    let fs = super::dt_font::native_size(super::dt_font::Face::Body, (strip.h * 0.30).round().max(9.0));
-    let lh = strip.h / 3.0;
-    let (x0, x1) = (strip.x + 3.0 * k, strip.x + strip.w - 3.0 * k);
+    super::typography::Role::Body.with(|| strip_text(strip, now, base, power, caster, place, hp, row2, building));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn strip_text(strip: Rect, now: &Stats, base: &Stats, power: i32, caster: bool, place: usize, hp: i32, row2: i32, building: i32) {
+    let l = StripLayout::of(strip);
+    // SanSerif at the card's own scale, snapped to whole sheet pixels when near.
+    let fs = super::dt_font::sheet_size(super::dt_font::Face::Body, super::dt_font::whole_scale(l.scale));
     let (att, ac) = attack_piece(now, base, power, caster, place);
     let d = defence_piece(now, row2, building).map(|(blow, shot)| razdor::trf!("D: {blow}/{shot}", blow, shot));
     // The two pieces of the first line: the original draws them at the other lines' size,
     // the attack at the left edge and the defence against the right (0x49462c, no shrink).
     // Here they keep that size when they fit with a gap between them, else only as much
-    // smaller as needed, each size measured as drawn (TrueType sizes are rounded, so a
-    // proportional guess overshot: tiny text in a small window, touching pieces in a large one).
-    let fs1 = first_line_size(fs, x1 - x0, |size| {
+    // smaller as needed (another font mode's or a translation's wider text).
+    let fs1 = first_line_size(fs, l.right_end - l.left, |size| {
         let gap = measure(" ", size).width.max(size * 0.3);
         measure(&att, size).width + d.as_ref().map_or(0.0, |d| gap + measure(d, size).width)
     });
-    shadow_text(&att, x0, strip.y + lh - 2.0 * k, fs1, ac);
+    let put = |s: &str, x: f32, line: usize, size: f32, ink: StripInk| {
+        super::widgets::text(s, x, l.tops[line] + cell_baseline(size), size, ink.color());
+    };
+    let right = |s: &str, line: usize, size: f32, ink: StripInk| put(s, l.right_end - measure(s, size).width, line, size, ink);
+    put(&att, l.left, 0, fs1, ac);
     if let Some(d) = d {
-        let dc = strip_color(now[Stat::DefenceBlow] + now[Stat::DefenceShot], base[Stat::DefenceBlow] + base[Stat::DefenceShot]);
-        shadow_right(&d, x1, strip.y + lh - 2.0 * k, fs1, dc);
+        right(&d, 0, fs1, defence_ink(now, base, row2));
     }
     let (mn, ini) = (now[Stat::Manevres], now[Stat::Initiative]);
-    shadow_text(&razdor::trf!("Mnvr: {mn}", mn), x0, strip.y + 2.0 * lh - 2.0 * k, fs, strip_color(mn, base[Stat::Manevres]));
-    shadow_right(&razdor::trf!("Ini: {ini}", ini), x1, strip.y + 2.0 * lh - 2.0 * k, fs, strip_color(ini, base[Stat::Initiative]));
+    put(&razdor::trf!("Mnvr: {mn}", mn), l.left, 1, fs, strip_ink(mn, base[Stat::Manevres], StripInk::White, false));
+    right(&razdor::trf!("Ini: {ini}", ini), 1, fs, strip_ink(ini, base[Stat::Initiative], StripInk::Yellow, false));
     let max = now.max_hp();
-    let hits = if hp < max { razdor::trf!("Hits: {hp}/{max}", hp = hp.max(0), max) } else { razdor::trf!("Hits: {max}", max) };
-    shadow_centered(&hits, strip.x + strip.w / 2.0, strip.y + 3.0 * lh - 2.5 * k, fs, if hp < max { Color::new(1.0, 0.6, 0.4, 1.0) } else { HITS_INK });
+    let (hits, ink) = if hp < max {
+        (razdor::trf!("Hits: {hp}/{max}", hp = hp.max(0), max), StripInk::Red)
+    } else {
+        (razdor::trf!("Hits: {max}", max), StripInk::Orange)
+    };
+    put(&hits, l.centred(measure(&hits, fs).width), 2, fs, ink);
+}
+
+/// Screen px from a text cell's top (where the original places its text) down to the
+/// baseline (where Razdor draws it) at `size` in the current face.
+fn cell_baseline(size: f32) -> f32 {
+    super::dt_font::cell_baseline(size).unwrap_or_else(|| measure("H", size).offset_y)
 }
 
 /// The size a card's first line is drawn at: `fs` when `width(fs)` (the two pieces and the gap
@@ -595,6 +717,7 @@ pub fn draw(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: bool,
 }
 
 fn draw_in_face(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: bool, hover: &mut Option<ItemId>) -> Option<usize> {
+    use super::dt_font::{sheet_size, whole_scale, Face};
     let k = k();
     chrome::unit_parchment(r);
     // The figure, behind the text: at its own size, centred in the original's box
@@ -607,38 +730,45 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: b
         }
         None => silhouette(figure_rect(r, 0.6 * r.w / (FIGURE_SCALE * k), 0.95 * FIGURE_BOX, k)),
     }
-    // The text stands on the panel's bottom, as the original's (492f24 stacks the description
-    // and state lines on the bottom edge, the stats over them, the name over those), in battle
-    // and in the army and building windows alike; the figure's lower part shows through the
-    // dark parchment above a long text. The traits always get their room: when everything
-    // does not fit, the description is cut short (a caster's long stat list with a trait, a
-    // mod's long trait texts).
+    // The original's px on this panel, and SanSerif at that scale (whole sheet pixels when
+    // near).
+    let px = r.w / PANEL_W;
+    let size = sheet_size(Face::Body, whole_scale(px));
+    let bold = sheet_size(Face::Bold, whole_scale(px));
+    let name_size = sheet_size(Face::Subtitle, whole_scale(px));
+    // The description list (0x667bdc): the type's description for any unit but the hero
+    // (0x492f24: the type's `Descript` of Rus_Units.ini), then the traits with their icons.
     let traits = traits_of(s, content);
-    let small = super::dt_font::native_size(super::dt_font::Face::Body, (12.0 * k).round());
-    let slh = super::dt_font::native_line_height(super::dt_font::Face::Body, 13.2 * k);
-    let icon = 24.0 * k;
-    let trait_w = r.w - 44.0 * k - icon - if content.experimental.simultaneous_bonuses { 16.0*k } else { 0.0 };
-    let traits_h: f32 = traits.iter().map(|(_, line, _)| trait_height(trait_rows(line, trait_w, small).len(), slh, k)).sum();
-    let lh = super::dt_font::native_line_height(super::dt_font::Face::Body, 13.6 * k);
-    let name_lh = super::dt_font::native_line_height(super::dt_font::Face::Subtitle, 17.0 * k);
-    let fixed_h = name_lh + lh * (1 + stat_lines(content, s).len() + s.status.len()) as f32 + 6.0 * k;
-    let traits_view_h = if content.experimental.simultaneous_bonuses {
-        traits_h.min(130.0*k).min((r.h*0.70-fixed_h).max(0.0))
-    } else { traits_h };
-    let text_h = fixed_h + traits_view_h;
-    // Any unit but the hero shows its class's description (0x492f24: the type's text, the
-    // `Descript` of Rus_Units.ini), in battle and in the army and building windows alike.
-    let desc = if s.hero.is_none() { content.unit(s.kind).description.as_str() } else { "" };
-    let desc_lines = wrap(desc, r.w - 44.0 * k, small);
-    let bottom = r.y + r.h - 6.0 * k;
-    let name_y = (bottom - text_h - desc_lines.len() as f32 * slh).max(r.y + 0.25 * r.h);
-    // From 50 px above the name the parchment turns dark brown (both screens of the video:
-    // light gold, then (115, 62, 0)); the figure shows through.
-    let (fade0, fade1) = (name_y - 50.0 * k, name_y - 15.0 * k);
-    chrome::unit_panel_fade(Rect::new(r.x, fade0, r.w, fade1 - fade0));
+    let desc = s.hero.is_none().then(|| content.unit(s.kind).description.as_str());
+    let width = |c: char| measure(c.encode_utf8(&mut [0; 4]), size).width;
+    let list_width = (238.0 - if content.experimental.simultaneous_bonuses { 16.0 } else { 0.0 }) * px;
+    let mut rows = list_rows(desc, &traits, list_width, width);
+    let stats = stat_lines(content, s);
+    let stat_rows = stats.len() + s.status.len();
+    // The original stacks it all up from the bottom with no limit. Razdor keeps the name
+    // under the top quarter: a mod's long texts cut the description short (a choice).
+    let desc_rows = desc.map_or(0, |d| list_rows(Some(d), &[], 238.0 * px, width).len());
+    let mut cut = 0;
+    while cut < desc_rows && r.y + r.h - panel_tops(rows.len() - cut, stat_rows, s.hero.is_some()).2 * px < r.y + 0.25 * r.h {
+        cut += 1;
+    }
+    if cut > 0 {
+        rows.drain(desc_rows - cut..desc_rows);
+        if let Some(last) = (desc_rows > cut).then(|| &mut rows[desc_rows - cut - 1]) {
+            last.text = format!("{}…", last.text.trim_end());
+        }
+    }
+    let view_rows = if content.experimental.simultaneous_bonuses { rows.len().min(8) } else { rows.len() };
+    let (desc_top, stat_top, name_top) = panel_tops(view_rows, stat_rows, s.hero.is_some());
+    let bottom = r.y + r.h;
+    let (desc_top, stat_top, name_top) = (bottom - desc_top * px, bottom - stat_top * px, bottom - name_top * px);
+    // From the name's top down the parchment is dark brown, fading in over the 56 px above
+    // (0x492f24: 28 steps of 2 rows); the figure shows through.
+    let fade0 = name_top - 56.0 * px;
+    chrome::unit_panel_fade(Rect::new(r.x, fade0, r.w, name_top - fade0));
     chrome::multiply(|| {
         // Multiplying (230, 178, 115) parchment by this gives the video's (115, 62, 0).
-        draw_rectangle(r.x, fade1, r.w, r.y + r.h - fade1, Color::new(0.5, 0.35, 0.0, 1.0));
+        draw_rectangle(r.x, name_top, r.w, r.y + r.h - name_top, Color::new(0.5, 0.35, 0.0, 1.0));
     });
     // Items worn.
     let mut clicked = None;
@@ -647,12 +777,12 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: b
         if !slots && item.is_none() {
             continue;
         }
-        if slots {
-            draw_rectangle(sr.x, sr.y, sr.w, sr.h, Color::new(0.2, 0.12, 0.05, 0.35));
-            draw_rectangle_lines(sr.x, sr.y, sr.w, sr.h, 1.0, Color::new(0.45, 0.3, 0.15, 0.8));
-        }
-        if let Some(it) = item {
-            assets.draw_item(it, sr.x, sr.y, sr.w);
+        // A worn item is its picture alone on the parchment; an empty slot is the original's
+        // empty-slot picture (0xae2860, built at start-up: a steel ring over a 40% black
+        // square, `chrome::empty_item_slot`), set by 0x492f24 only for an empty slot.
+        match item {
+            Some(it) => assets.draw_item(it, sr.x, sr.y, sr.w),
+            None => chrome::empty_item_slot(*sr),
         }
         if mouse_in(sr.x, sr.y, sr.w, sr.h) {
             if item.is_some() {
@@ -663,85 +793,65 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: b
             }
         }
     }
-    let x0 = r.x + 24.0 * k;
-    let x1 = r.x + r.w - 16.0 * k;
-    let name_size = super::dt_font::native_size(super::dt_font::Face::Subtitle, (17.0 * k).round());
-    let mut y = name_y;
+    // The name in Benguiat over its shadow, centred (the name list 0x667e64, align 2).
     let name_ink = if s.named { NAMED_INK } else { CREAM };
     super::typography::Role::Name.with(|| {
         let name = super::widgets::ellipsize(s.name, r.w - 16.0 * k, name_size);
-        shadow_centered(&name, r.x + r.w / 2.0, y, name_size, name_ink);
+        shadow_centered(&name, r.x + r.w / 2.0, name_top + cell_baseline(name_size), name_size, name_ink);
     });
-    y += name_lh;
-    let size = super::dt_font::native_size(super::dt_font::Face::Body, (12.0 * k).round());
-    // Level and experience on one line.
-    shadow_text(&razdor::trf!("Level {level}", level = s.level), x0, y, size, CREAM);
-    shadow_right(&razdor::trf!("XP {xp} / {need}", xp = s.xp, need = s.need), x1, y, size, CREAM);
-    y += lh;
-    for (label, value, color) in stat_lines(content, s) {
-        let c = if color == CREAM { CREAM } else { color };
-        let room = x1 - x0 - measure(&value, size).width - 6.0 * k;
-        let label_size = super::widgets::fit_size(&label, room, size);
-        let label = super::widgets::ellipsize(&label, room, label_size);
-        shadow_text(&label, x0, y, label_size, c);
-        shadow_right(&value, x1, y, size, c);
-        y += lh;
+    // The level and experience 13 px over the stat lists: from X0+30 and against X0+236
+    // (0x492f24, the label list 0x667cb4 at X0+0x1e, the value list 0xa6 on and 0x28 wide).
+    let (x0, x1) = (r.x + 28.0 * px, r.x + 234.0 * px);
+    let line = |top: f32| top + cell_baseline(size);
+    shadow_text(&razdor::trf!("Level {level}", level = s.level), x0, line(stat_top - 13.0 * px), size, CREAM);
+    shadow_right(&razdor::trf!("XP {xp} / {need}", xp = s.xp, need = s.need), x1, line(stat_top - 13.0 * px), size, CREAM);
+    let mut y = stat_top;
+    for (label, value, color) in stats {
+        // The daily wage's label and value are in the bold orange SanSerif over its shadow
+        // (0x4924c9: ae24f4, shadow ae2510).
+        let wage = color == ORANGE_TEXT;
+        let (face, fs) = if wage { (Face::Bold, bold) } else { (Face::Body, size) };
+        super::dt_font::with_face(face, || {
+            let room = x1 - x0 - measure(&value, fs).width - 6.0 * k;
+            let label_size = super::widgets::fit_size(&label, room, fs);
+            let label = super::widgets::ellipsize(&label, room, label_size);
+            shadow_text(&label, x0, y + cell_baseline(label_size), label_size, color);
+            shadow_right(&value, x1, y + cell_baseline(fs), fs, color);
+        });
+        y += 14.0 * px;
     }
-    for (line, color) in &s.status {
-        let fitted = super::widgets::fit_size(line, x1 - x0, size);
-        let line = super::widgets::ellipsize(line, x1 - x0, fitted);
-        shadow_text(&line, x0, y, fitted, *color);
-        y += lh;
+    for (status, color) in &s.status {
+        let fitted = super::widgets::fit_size(status, x1 - x0, size);
+        let status = super::widgets::ellipsize(status, x1 - x0, fitted);
+        shadow_text(&status, x0, y + cell_baseline(fitted), fitted, *color);
+        y += 14.0 * px;
     }
-    // The description in what the traits leave, then the traits with their icons.
-    y += 6.0 * k;
-    let desc_bottom = bottom - traits_view_h;
-    // A hair of slack: the text is laid out to end exactly at the bottom.
-    let fits = ((desc_bottom - y) / slh + 0.01).floor().max(0.0) as usize;
-    for (i, line) in desc_lines.iter().take(fits).enumerate() {
-        // A description cut short ends in an ellipsis.
-        let line = if i + 1 == fits && fits < desc_lines.len() { format!("{}…", line.trim_end()) } else { line.clone() };
-        shadow_text(&line, x0 - 4.0 * k, y, small, CREAM);
-        y += slh;
-    }
-    let traits_top = if content.experimental.simultaneous_bonuses { (bottom-traits_view_h).max(y-slh) } else { y-slh+3.0*k };
-    let viewport = Rect::new(r.x+8.0*k, traits_top, r.w-16.0*k, (bottom-traits_top).max(0.0));
-    let most = if traits.is_empty() || viewport.h <= 0.0 { 0.0 } else { (traits_h + slh - viewport.h).max(0.0) };
-    let key = format!("{}:{}:{}:{}:{:?}:{:?}",r.x,r.y,s.kind.0,s.name,s.start.bonuses,s.items);
+    // The description list from 12 px in, a row every 14 px; a trait's icon 16 px in and
+    // 11 px over its first row (0x48e8f0), drawn under the text.
+    let list_x = r.x + 12.0 * px;
+    let viewport = Rect::new(r.x + 8.0 * px, desc_top - 11.0 * px, r.w - 16.0 * px, (view_rows as f32 * 14.0 + 19.0) * px);
+    let most = rows.len().saturating_sub(view_rows) as f32 * 14.0 * px;
+    let key = format!("{}:{}:{}:{}:{:?}:{:?}", r.x, r.y, s.kind.0, s.name, s.start.bonuses, s.items);
     let mut scroll = TRAIT_SCROLL.with(|p| p.borrow().get(&key).copied().unwrap_or(0.0));
     if content.experimental.simultaneous_bonuses && most > 0.0 {
-        if viewport.contains(super::widgets::pointer().into()) { scroll -= super::widgets::wheel()*slh*3.0; }
-        scroll = scroll.clamp(0.0,most);
-        super::widgets::scrollbar_px(Rect::new(viewport.right()-12.0*k,viewport.y,12.0*k,viewport.h),&mut scroll,most,viewport.h,slh);
-        TRAIT_SCROLL.with(|p| {
-            let mut p=p.borrow_mut();
-            if p.len()>32 { p.clear(); }
-            p.insert(key,scroll);
-        });
-    } else { scroll=0.0; }
+        if viewport.contains(super::widgets::pointer().into()) { scroll -= super::widgets::wheel() * 42.0 * px; }
+        scroll = scroll.clamp(0.0, most);
+        super::widgets::scrollbar_px(Rect::new(viewport.right()-12.0*px,viewport.y,12.0*px,viewport.h), &mut scroll, most, viewport.h, 14.0*px);
+        TRAIT_SCROLL.with(|p| { let mut p=p.borrow_mut(); if p.len()>32 {p.clear();} p.insert(key,scroll); });
+    } else { scroll = 0.0; }
     let _traits_clip = content.experimental.simultaneous_bonuses.then(|| super::widgets::Clip::new(viewport));
-    if content.experimental.simultaneous_bonuses { y=viewport.y+slh-5.0*k; }
-    y -= scroll;
-    for (art, line, ink) in traits {
-        y += 5.0 * k;
-        if !content.experimental.simultaneous_bonuses && y + slh > bottom + slh * 0.5 {
-            break;
-        }
-        chrome::trait_icon(&art, x0 - 8.0 * k, y - slh + 2.0 * k, icon);
-        let lines = trait_rows(&line, trait_w, small);
-        for (i, l) in lines.iter().enumerate() {
-            if !content.experimental.simultaneous_bonuses && y > bottom {
-                break;
-            }
-            let lx = if i < 2 { x0 + icon - 4.0 * k } else { x0 - 8.0 * k };
-            shadow_text(l, lx, y, small, ink);
-            y += slh;
-        }
-        if lines.len() == 1 {
-            y += slh * 0.6;
+    for (i, row) in rows.iter().enumerate() {
+        let top = desc_top + i as f32 * 14.0 * px - scroll;
+        if let Some(art) = &row.icon {
+            chrome::trait_icon(art, r.x + 16.0 * px, top - 11.0 * px, 25.0 * px);
         }
     }
-    let _ = measure;
+    for (i, row) in rows.iter().enumerate() {
+        let top = desc_top + i as f32 * 14.0 * px - scroll;
+        if !row.text.trim().is_empty() {
+            shadow_text(&row.text, list_x, line(top), size, row.ink);
+        }
+    }
     clicked
 }
 
@@ -842,9 +952,9 @@ mod tests {
         // Colours: any of the three attacks above its start is blue, else any below red.
         let mut start = s.clone();
         start[Stat::AttackShot] = 2;
-        assert_eq!(attack_piece(&s, &start, 0, false, 1).1, BLUE_TEXT);
+        assert_eq!(attack_piece(&s, &start, 0, false, 1).1, StripInk::Blue);
         start[Stat::AttackShot] = 6;
-        assert_eq!(attack_piece(&s, &start, 0, false, 1).1, RED_TEXT);
+        assert_eq!(attack_piece(&s, &start, 0, false, 1).1, StripInk::Red);
     }
 
     /// The card's "D:" (0x49462c): the army's building defence on both numbers, `Row2Def`
@@ -968,5 +1078,101 @@ mod tests {
         assert_eq!(strip_place(short, Slot::new(Row::Front, 0)), 1);
         assert_eq!(strip_place(short, Slot::new(Row::Front, 3)), 4);
         assert_eq!(strip_place(short, Slot::new(Row::Back, 0)), 7);
+    }
+
+    /// The strip's pieces stand where the original's do (0x494f93–0x49565f): cell tops 2, 14
+    /// and 26 px under the portrait, the left pieces 2 px in, the right ones ending at
+    /// x + 94 − 1, the hits centred with the odd pixel dropped; scaled with the card.
+    #[test]
+    fn the_strip_is_laid_out_as_the_originals() {
+        let l = StripLayout::of(Rect::new(10.0, 100.0, 94.0, 39.0));
+        assert_eq!(l.tops, [102.0, 114.0, 126.0]);
+        assert_eq!((l.left, l.right_end), (12.0, 103.0));
+        assert_eq!(l.centred(40.0), 37.0);
+        assert_eq!(l.centred(41.0), 36.0);
+        let big = StripLayout::of(Rect::new(0.0, 0.0, 188.0, 78.0));
+        assert_eq!(big.tops, [4.0, 28.0, 52.0]);
+        assert_eq!((big.left, big.right_end), (4.0, 186.0));
+    }
+
+    /// The strip's tints are the original's SanSerif fonts (white less the colour given at
+    /// 0x4dbc26), and each piece takes its own (0x49462c): the manoeuvres and the initiative
+    /// never blue; the defence judged by the ranged defence when the back row adds to it.
+    #[test]
+    fn the_strip_pieces_take_the_originals_tints() {
+        assert_eq!(StripInk::White.rgb(), [255, 255, 255]);
+        assert_eq!(StripInk::Yellow.rgb(), [255 - 25, 255 - 25, 255 - 125]);
+        assert_eq!(StripInk::Orange.rgb(), [255 - 20, 255 - 90, 255 - 180]);
+        assert_eq!(StripInk::Red.rgb(), [255, 255 - 152, 255 - 159]);
+        assert_eq!(StripInk::Blue.rgb(), [255 - 180, 255 - 70, 255]);
+        assert_eq!(strip_ink(2, 1, StripInk::White, false), StripInk::White);
+        assert_eq!(strip_ink(0, 1, StripInk::White, false), StripInk::Red);
+        assert_eq!(strip_ink(14, 14, StripInk::Yellow, false), StripInk::Yellow);
+        let content = Content::builtin();
+        let base = Stats::of_level(&content, UnitId(content.units[0].id), 0);
+        let mut now = base.clone();
+        assert_eq!(defence_ink(&now, &base, 0), StripInk::Yellow);
+        now[Stat::DefenceShot] += 3;
+        assert_eq!(defence_ink(&now, &base, 0), StripInk::Yellow, "the melee defence decides outside the back row");
+        assert_eq!(defence_ink(&now, &base, 5), StripInk::Blue);
+        now[Stat::DefenceBlow] -= 1;
+        assert_eq!(defence_ink(&now, &base, 0), StripInk::Red);
+    }
+
+    /// The strip pictures as the original makes them from Win-paper (0x4de0f0–0x4de1f7): on
+    /// a paper of (230, 178, 115) a dark brown, the hero's deep red-brown, a named
+    /// character's deep blue, each 94×39, the named one cut from x = 220.
+    #[test]
+    fn the_strip_pictures_are_made_from_the_paper_as_the_originals() {
+        let (w, h) = (320u32, 80u32);
+        let mut rgba = Vec::new();
+        for _y in 0..h {
+            for x in 0..w {
+                // From x = 220, where only the named strip reads, a paper a little less green.
+                rgba.extend_from_slice(&if x < 220 { [230, 178, 115, 255] } else { [230, 170, 115, 255] });
+            }
+        }
+        let paper = razdor::dt::gfx::Image { width: w, height: h, rgba };
+        let px = |panel| {
+            let img = chrome::strip_picture(&paper, panel);
+            assert_eq!((img.width, img.height), (94, 39));
+            let p = img.pixel(50, 20);
+            [p[0], p[1], p[2]]
+        };
+        assert_eq!(px(StripPanel::Plain), [82, 44, 0]);
+        assert_eq!(px(StripPanel::Hero), [107, 32, 0]);
+        // Red and blue swapped, then green and blue scaled: from the paper at x = 220.
+        assert_eq!(px(StripPanel::Named), [0, 32, 115]);
+    }
+
+    /// The description list as 0x492f24 fills it: the loaders' six spaces before the
+    /// description and each trait (0x48f820, 0x4e4e40), an empty row between entries
+    /// (0x492e70 → 0x47e944), the icon by a trait's first row; the no-payment line's text is
+    /// empty and gets no spaces.
+    #[test]
+    fn the_description_list_indents_and_spaces_as_the_originals() {
+        let width = |_c: char| 1.0;
+        let traits = vec![
+            ("Bonus15".to_string(), "Garrison text".to_string(), RED_TEXT),
+            ("Bonus-NoPayment".to_string(), String::new(), BLUE_TEXT),
+        ];
+        let rows = list_rows(Some("Knows every corner"), &traits, 14.0, width);
+        let texts: Vec<&str> = rows.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(texts, ["      Knows", "every corner", "", "      Garrison", "text", "", ""]);
+        assert_eq!(rows[3].icon.as_deref(), Some("Bonus15"));
+        assert_eq!(rows[4].icon, None);
+        assert_eq!(rows[6].icon.as_deref(), Some("Bonus-NoPayment"));
+        // A hero has no description: its first trait opens the list without an empty row.
+        let hero = list_rows(None, &traits[..1], 100.0, width);
+        assert_eq!(hero[0].text, "      Garrison text");
+    }
+
+    /// The blocks stack up from the panel's bottom as the original's (0x492f24, the lists at
+    /// 0x4d9060): the description rows·14 + 12, the stats (n+1)·14 + 8 over it (8 more for a
+    /// hero), the name 34 over those.
+    #[test]
+    fn the_panel_stacks_its_text_as_the_originals() {
+        assert_eq!(panel_tops(4, 8, false), (68.0, 68.0 + 134.0, 68.0 + 134.0 + 34.0));
+        assert_eq!(panel_tops(4, 8, true), (68.0, 68.0 + 142.0, 68.0 + 142.0 + 34.0));
     }
 }

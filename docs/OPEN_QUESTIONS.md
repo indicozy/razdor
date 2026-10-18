@@ -8,6 +8,29 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **The scenario list's "the game's own" maps** (2026-10-18, players' wish, main only).
+  `ui::new_game::ORIGINAL_MAPS` names the 15 maps of the Community Update install by file
+  name; every other map counts as fan-made. Other editions (the vanilla release, an English
+  edition with other file names) are not known, so their maps may show as fan-made, and a mod
+  that edits a shipped map under its name shows as the game's own. Settled by the file lists
+  of the other editions (or by the owner choosing hashes instead). Also: the new list
+  controls (filter / order buttons, the favourite star, the won tick) were not checked on an
+  off-screen snapshot (Razdor may not be started without the owner's word); check them at
+  800x600, 1024x768 and 1280x800 (`RAZDOR_SCENE=scenarios`), with the `routes` cheat's
+  lines on the minimap (`RAZDOR_SCENE=minimap`, then `routes` in the console).
+
+- **Card strips and the unit panel: what is left** (2026-10-18, a player's report; the parity
+  fix 1b2359f). Still Razdor's, not the original's: the selected or acting unit's strip gets an
+  orange wash (the original pulses the card's frame, 49462c, and leaves the strip); the unit
+  panel's darkening is Razdor's gradient, not the original's subtraction of (113, 113, 129)
+  from the name list's top with a 28-step fade over 56 px (492f24); a long description is cut
+  so the name stays below the panel's top quarter (the original stacks without a limit); the
+  strip's first line shrinks when another font mode's pieces would touch. Also: the sheet
+  fonts are drawn with brightness as alpha, while the original keys only pure black, so its
+  dim glyph edges stay as dark outlines (visible on the cards); the strips sampled from the
+  player's screenshot are a few levels darker in red than Razdor's (plain 76 vs 83), probably
+  the Win-paper decode or the screenshot. Not ported to dt-original by this agent.
+
 - **dt-original: the map info windows** (2026-10-18, a player's report). ed53cd1 (opaque
   tooltip box, the dimmed title corners 0x4dbd83/0x4dbe0b, the fonts by style, the
   original's layout, 0x48d3f8, 0x4ca9f0, 0x4cb18c) is on main only: dt-original's tooltip
@@ -155,10 +178,8 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   load and save windows centred over the map (saves.rs `book_top`) and the question's Yes/No at
   0.24 W / 0.76 W (dialog.rs `question_buttons_x`) are parity; port them to dt-original.
 
-- **Menus (group 5 of the UI audit, 2026-10-14), approximations left.** (1) The new-hero
-  window's other portraits: the original builds them from the picture with 0x48db5c(100, 200,
-  100) and 0x48da5c colour shifts plus a 33-step vignette mask (0x4d7d30); Razdor tints with
-  one multiply colour. (2) The exit window: the standard window's size (`ae2520`) is taken as
+- **Menus (group 5 of the UI audit, 2026-10-14), approximations left.** ((1), the new-hero
+  portraits, is settled below.) (2) The exit window: the standard window's size (`ae2520`) is taken as
   634×512 from the screenshots, and the version line's place on `S_Exit_RUS` (which widget of
   6750c0…675690 draws it, and where) is measured, not read. (3) Maps of one size in the new
   game list keep Razdor's file order; the original's is its directory listing's. (4) The load
@@ -221,6 +242,17 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   button's own size.
 
 ## Settled
+
+- **The army window's wide pack and the pack's size** (2026-10-18). The owner's decision: the
+  army window keeps its wide grid (10 columns at 1280×800), and the pack has no 256-cell limit
+  on main: it grows with its items, nothing is lost to a full pack (5024ed0, a deviation;
+  dt-original keeps the original's 256 and its losses). Still Razdor's: the swap on an
+  occupied worn slot and the filter's Enter picking the first match up.
+
+- **The new-hero window's portraits** (2026-10-14, settled 2026-10-18 by a player's report).
+  Razdor tinted them with one multiply colour; now they are built as 0x4d7d30 builds them:
+  the 33-step vignette off, the picked one ×1100/1024, the others grey (0x48db5c) shifted into
+  blue or dark red (0x48da5c) with the vignette off again (`chrome::hero_portrait`).
 
 - **The market lists' backing from PR #8** (2026-10-17). PR 63f7c0b drew the market's names
   and prices on a 25% black overlay taken from screenshots. The code (0x4d9e33, 0x4d9ee5:

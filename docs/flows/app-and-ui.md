@@ -44,7 +44,8 @@ folder when it is an install, the remembered folder (`config_file`), then a sear
 `App::frame` in order:
 
 - per-frame resets: `input::begin_frame`, `chrome::begin_frame`, `cursor::begin_frame`,
-  `widgets::track_held_key`; Alt+Enter display mode (`display::hotkey_pressed`);
+  `widgets::track_held_key` (the original's one held key: any key up clears it, and the
+  system's repeats of the newest key still down hold it again, 0x475820); Alt+Enter display mode (`display::hotkey_pressed`);
 - settings pushed into the game each frame (`g.improved_ai`, `g.friends_let_pass`,
   `g.pass_on_bridges`, `g.pursue`, `g.walk_pace`, animation speed, row width) — the settings
   live in the UI, the rules only read plain fields; `main_menu::apply_options` puts the
@@ -89,6 +90,30 @@ window's pop-up, the event window's item tooltip), is one box, `item_text::draw`
 `src/ui/item_text.rs`, laid out per window by `item_text::ItemBox`; its usage line, effect text
 and bonus line are the original's (interface.md §9.2), built by `rules::item_text` from the
 install's `[Skills]` labels (`spell_badges::label`).
+
+The pack is the original's cells with holes (`pack::Pack`, `Game::pack`): an item stays in
+the cell it was put in, gains fill the first empty cell. On main it has no last cell (the
+original's 256, a deviation): a gain past the last used cell opens a new one. In the hero and army windows items
+move as the original's, by presses only (0x4c24f4): a press takes an item from a pack cell or a
+worn slot of the unit panel onto the pointer (`Game::held_item`, drawn as the pointer by
+`items_view::draw_held`); the next press puts it in a cell (`Game::press_pack`), a worn slot
+(`Game::press_worn`) or, in the army window, on a unit's card (`Game::give_held`: a potion is
+drunk there). `items_view::pack_view` returns the pressed cell, an empty one too. Leaving the
+window by any way puts a held item back in the pack: `Game::drop_held` in `App::frame`'s
+screen change, and `save::restore` for a save made with one held. The filter (Razdor's) lists
+the matching cells packed; an empty row of it puts the held item in the first empty cell, and
+Enter picks the first match up. An empty worn slot on the unit panel is the original's picture
+(`chrome::empty_item_slot`), a worn item its picture alone.
+
+A spell's card, wherever it is shown (the spell book's cells, the sanctuary's description, the
+event window's spell tooltip), has the same text, drawn by `spellbook::card_text` in
+`src/ui/spellbook.rs` (`spellbook::spell_card` adds the box and picture): the name, then the
+effect text of `rules::spell_hint::effect_text` (the same builder as the badge hint's), the
+cost and the duration line, each word-wrapped as one paragraph (interface.md §9.3). On main the
+effect entries are coloured one by one (`spell_hint::effect_entries`, `spell_hint::good_for_holder`,
+drawn by `widgets::wrap_coloured` and `widgets::shadow_coloured`), in the cards and the badge
+hint alike: blue when good for the unit holding the spell, yellow (red in the hint) when bad;
+the original colours the whole effect by the spell's target (a deviation the owner asked for).
 
 The custom battle's setup (`Screen::CustomSetup`, drawn by `custom_battle::frame` in
 `src/ui/custom_battle.rs`, a Razdor extra) keeps its armies in `rules::custom::Setup`. Its left

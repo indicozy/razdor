@@ -106,6 +106,10 @@ Opening the list never reads a save on the UI thread (commits c04fa1b, b2ecf89):
   `the_journal_history_survives_a_save_and_old_saves_load_without_one`) and a round trip
   (`demo_roundtrip_after_walking_and_a_battle`, `rk1_roundtrip_after_walking_and_a_battle`
   with the install).
+- A changed shape can sometimes read the old one without a version bump: the pack
+  (`pack::Pack`) is saved as its cells with `null` for a hole, so an older save's plain list
+  of items reads as the same items in the first cells (`Game::held_item` is
+  `#[serde(default)]` and goes back into the pack on load).
 - Never commit a player's save (it may embed map data): build fixtures in code, or gate a
   test on a file outside the repo existing.
 

@@ -19,7 +19,8 @@
 //! `RAZDOR_SCENE_RULES=1` opens their menu over `scenarios`. `RAZDOR_SCENE_BONUS_ITEMS=1`
 //! equips the hero with available distinct bonus items to exercise the trait scrollbar.
 //! test's action list played to that step. `RAZDOR_SCENE_BATTLE_EXIT=1` opens a battle
-//! scene's leave-battle window.
+//! scene's leave-battle window. `RAZDOR_SCENE_PACK_AT=<cell>:<id>,…` puts items in those pack
+//! cells; `RAZDOR_SCENE_HELD=<id>` puts an item on the pointer (hero and army windows).
 //!
 //! Every map scene starts its map as a new game (`Game::from_scenario`): nothing is carried
 //! over from a campaign's map before, so a later map whose opening events check for what it
@@ -401,7 +402,21 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
     // `RAZDOR_SCENE_ITEMS=<id>,<id>…`: those items in the hero's pack (the army window's
     // pack, its item hover and pick).
     if let Ok(v) = std::env::var("RAZDOR_SCENE_ITEMS") {
-        game.pack.extend(v.split(',').filter_map(|p| p.trim().parse::<u32>().ok()).map(razdor::rules::content::ItemId));
+        for item in v.split(',').filter_map(|p| p.trim().parse::<u32>().ok()).map(razdor::rules::content::ItemId) {
+            game.pack.add(item);
+        }
+    }
+    // `RAZDOR_SCENE_PACK_AT=<cell>:<id>,…`: those items in those pack cells (holes between
+    // them); `RAZDOR_SCENE_HELD=<id>`: that item on the pointer.
+    if let Ok(v) = std::env::var("RAZDOR_SCENE_PACK_AT") {
+        for (cell, id) in v.split(',').filter_map(|p| p.split_once(':')) {
+            if let (Ok(cell), Ok(id)) = (cell.trim().parse::<usize>(), id.trim().parse::<u32>()) {
+                game.pack.set(cell.min(razdor::rules::game::PACK_SIZE - 1), Some(razdor::rules::content::ItemId(id)));
+            }
+        }
+    }
+    if let Some(id) = std::env::var("RAZDOR_SCENE_HELD").ok().and_then(|v| v.trim().parse::<u32>().ok()) {
+        game.held_item = Some(razdor::rules::content::ItemId(id));
     }
     // `RAZDOR_SCENE_DEBUG=1`: the map's debug overlay (F3) on.
     if std::env::var("RAZDOR_SCENE_DEBUG").is_ok_and(|v| !v.is_empty()) {

@@ -14,6 +14,7 @@ use super::formation::Slot;
 use super::items::{self, EquipError};
 use super::journal::History;
 use super::magic::{self, ActiveSpell};
+use super::pack::Pack;
 use super::save::ScenarioRef;
 use super::ships::Ship;
 use super::map::{is_water, step_minutes, Tile, TileMap};
@@ -54,8 +55,8 @@ pub const CHASE_RADIUS: i32 = 6;
 const AI_PATH_NODES: usize = 4000;
 const SPAWN_EVERY_DAYS: u64 = 3;
 const MAX_GANGS_PER_CAMP: usize = 2;
-/// Unworn items the hero's backpack holds: 256 slots, shown as a scrolling grid 5 wide.
-pub const PACK_SIZE: usize = 256;
+/// Unworn items the hero's backpack holds: 256 cells, shown as a scrolling grid 5 wide.
+pub use super::pack::PACK_SIZE;
 /// Spells the book holds (the original's message comes at 15).
 pub const SPELL_BOOK_SIZE: usize = 15;
 /// Items on sale in each demo market after a restock.
@@ -237,8 +238,15 @@ pub struct Game {
     /// Location the party is standing on, if any.
     pub location: Option<usize>,
     pub foe: Option<Foe>,
-    /// Shared bag of unworn items.
-    pub pack: Vec<ItemId>,
+    /// Shared bag of unworn items: 256 cells with holes, each item where it was put
+    /// (`rules::pack`, 0x68dce0).
+    pub pack: Pack,
+    /// The item on the pointer in the hero and army windows (0x6664a4): picked up out of a
+    /// pack cell or a worn slot, it is in neither until put down. Closing the window puts it
+    /// back in the pack (0x4b8d28, [`Game::drop_held`]); a save made with one held keeps it
+    /// and the load puts it back.
+    #[serde(default)]
+    pub held_item: Option<ItemId>,
     /// The hero's spell book (1-based spell indices), cast with [`Game::cast`].
     pub spells: Vec<u8>,
     /// Explored cells (`rules::fog`): off in the demo, on for scenarios.
@@ -572,7 +580,8 @@ impl Game {
             location: world.location_at(tile),
             world,
             foe: None,
-            pack: Vec::new(),
+            pack: Pack::new(),
+            held_item: None,
             spells: Vec::new(),
             fog: Fog::disabled(0, 0),
             goal: None,
@@ -728,7 +737,7 @@ impl Game {
         g.look_around();
         g.gold = start.gold;
         g.mana = start.mana;
-        g.pack = start.items;
+        g.pack = Pack::from(start.items);
         g.spells = start.spells;
         g.archetype = archetype_of(hero);
         g.script = Some(Box::new(EventEngine::new(scenario)));
@@ -2360,8 +2369,7 @@ impl Game {
         let mut kept = Vec::new();
         let mut left_behind = 0;
         for item in found {
-            if self.pack.len() < PACK_SIZE {
-                self.pack.push(item);
+            if self.pack.add(item) {
                 kept.push(item);
             } else {
                 left_behind += 1;
@@ -2380,8 +2388,9 @@ impl Game {
     }
 
     /// Buys the `stock_index`-th good here for [`Game::buy_price`], if that is at most the
-    /// gold (0x4b9e18). It goes to the pack with no test of its room, as in the original,
-    /// and its place in the market is emptied.
+    /// gold (0x4b9e18). It goes to the pack's first empty cell with no test of its room, as
+    /// in the original (0x49a85c: lost when all 256 are taken), and its place in the market
+    /// is emptied.
     pub fn buy(&mut self, stock_index: usize) -> Result<ItemId, TradeError> {
         let item = *self.market_here().ok_or(TradeError::NoMarket)?.get(stock_index).ok_or(TradeError::NoSuchItem)?;
         let price = self.buy_price(item);
@@ -2392,132 +2401,63 @@ impl Game {
             shop.take(stock_index);
         }
         self.gold = (self.gold - price).max(0);
-        self.pack.push(item);
+        self.pack.add(item);
         self.scan_on_close = true;
         Ok(item)
     }
 
-    /// Sells a pack item for [`Game::sell_price`]. Returns the gold gained.
+    /// Sells the item in pack cell `pack_index` for [`Game::sell_price`]. Returns the gold
+    /// gained. The original takes the first cell holding that item (0x4b9e18 → 0x49a8a8).
     pub fn sell(&mut self, pack_index: usize) -> Result<i32, TradeError> {
         self.market_here().ok_or(TradeError::NoMarket)?;
-        let item = *self.pack.get(pack_index).ok_or(TradeError::NoSuchItem)?;
+        let item = self.pack.get(pack_index).ok_or(TradeError::NoSuchItem)?;
         if !self.can_sell(item) {
             return Err(TradeError::NotForSale);
         }
         let price = self.sell_price(item);
-        self.pack.remove(pack_index);
+        self.pack.remove_first(item);
         self.gold += price;
         self.scan_on_close = true;
         Ok(price)
     }
 
-    /// Moves a pack item onto squad member `unit` into its lowest free slot, as a drop on its
-    /// card in the army window does (wear rules in [`items::slot_for`]).
+    /// Moves the item in pack cell `pack_index` onto squad member `unit` into its lowest free
+    /// slot, as picking it up and pressing his card in the army window does (wear rules in
+    /// [`items::slot_for`]); the cell is left empty. The window's own presses are
+    /// [`Game::press_pack`], [`Game::press_worn`] and [`Game::give_held`].
     pub fn equip(&mut self, unit: usize, pack_index: usize) -> Result<(), EquipError> {
-        self.equip_at(unit, pack_index, None)
-    }
-
-    /// Moves a pack item onto squad member `unit`: into item slot `slot` when given, as a
-    /// click on an empty worn slot of the hero window puts it in that very slot (0x4c24f4),
-    /// else into the lowest free one. The wear test runs either way. Razdor's: an occupied
-    /// slot swaps, its item taking the pack item's place, where the original's takes nothing
-    /// (a player's request, 2026-10-12).
-    pub fn equip_at(&mut self, unit: usize, pack_index: usize, slot: Option<usize>) -> Result<(), EquipError> {
-        let item = *self.pack.get(pack_index).ok_or(EquipError::NoSuchItem)?;
+        let item = self.pack.get(pack_index).ok_or(EquipError::NoSuchItem)?;
         let u = self.squad.get(unit).ok_or(EquipError::NoSuchItem)?;
         let c = self.content.clone();
-        let Some(k) = slot else {
-            let free = items::slot_for(&c, u, item)?;
-            items::put_on(&c, &mut self.squad[unit], free, item);
-            self.pack.remove(pack_index);
-            return Ok(());
-        };
-        if k >= u.items.len() {
-            return Err(EquipError::NoFreeSlot);
-        }
-        let saved = u.clone();
-        let other = items::take_off(&c, &mut self.squad[unit], k);
-        if let Err(e) = items::slot_for(&c, &self.squad[unit], item) {
-            self.squad[unit] = saved;
-            return Err(e);
-        }
-        items::put_on(&c, &mut self.squad[unit], k, item);
-        match other {
-            Some(b) => self.pack[pack_index] = b,
-            None => {
-                self.pack.remove(pack_index);
-            }
-        }
+        let free = items::slot_for(&c, u, item)?;
+        items::put_on(&c, &mut self.squad[unit], free, item);
+        self.pack.take(pack_index);
         Ok(())
     }
 
     /// Squad member `unit` drinks the potion at `pack_index` ([`items::drink`]). Returns the
     /// HP gained.
     pub fn drink(&mut self, unit: usize, pack_index: usize) -> Result<i32, EquipError> {
-        let item = *self.pack.get(pack_index).ok_or(EquipError::NoSuchItem)?;
+        let item = self.pack.get(pack_index).ok_or(EquipError::NoSuchItem)?;
         let c = self.content.clone();
         let now = self.clock.total_minutes() as u64;
         let u = self.squad.get_mut(unit).ok_or(EquipError::NoSuchItem)?;
         let healed = items::drink(&c, u, item, now)?;
-        self.pack.remove(pack_index);
+        self.pack.take(pack_index);
         Ok(healed)
     }
 
     /// Moves item slot `slot` of squad member `unit` back into the pack (a dead unit's too);
     /// the unit is rebuilt.
     pub fn unequip(&mut self, unit: usize, slot: usize) -> Result<(), EquipError> {
-        if self.pack.len() >= PACK_SIZE {
+        if self.pack.is_full() {
             return Err(EquipError::PackFull);
         }
         let c = self.content.clone();
         let u = self.squad.get_mut(unit).ok_or(EquipError::NoSuchItem)?;
         let item = items::take_off(&c, u, slot).ok_or(EquipError::NoSuchItem)?;
-        self.pack.push(item);
+        self.pack.add(item);
         Ok(())
-    }
-
-    /// Hands the item in slot `slot` of squad member `from` straight to squad member `to`
-    /// (dragged from one unit onto another on the army screen).
-    pub fn give(&mut self, from: usize, slot: usize, to: usize) -> Result<(), EquipError> {
-        let item = self.squad.get(from).and_then(|u| u.items.get(slot).copied().flatten()).ok_or(EquipError::NoSuchItem)?;
-        let target = self.squad.get(to).ok_or(EquipError::NoSuchItem)?;
-        let free = items::slot_for(&self.content, target, item)?;
-        let c = self.content.clone();
-        items::take_off(&c, &mut self.squad[from], slot);
-        items::put_on(&c, &mut self.squad[to], free, item);
-        Ok(())
-    }
-
-    /// Moves the item in slot `from_slot` of squad member `from` into slot `slot` of squad
-    /// member `to` (the same unit too), as the hero window's pick-up and click on an empty
-    /// worn slot do (0x4c24f4): the item is taken off first, the wear test runs and it goes
-    /// into that very slot. Razdor's: an occupied slot swaps, its item going to `from_slot`
-    /// under its own wear test, where the original's takes nothing (a player's request,
-    /// 2026-10-12). A refusal puts everything back.
-    pub fn move_worn(&mut self, from: usize, from_slot: usize, to: usize, slot: usize) -> Result<(), EquipError> {
-        let item = self.squad.get(from).and_then(|u| u.items.get(from_slot).copied().flatten()).ok_or(EquipError::NoSuchItem)?;
-        if (from, from_slot) == (to, slot) {
-            return Ok(());
-        }
-        if self.squad.get(to).and_then(|u| u.items.get(slot)).is_none() {
-            return Err(EquipError::NoSuchItem);
-        }
-        let c = self.content.clone();
-        let saved = (self.squad[from].clone(), self.squad[to].clone());
-        items::take_off(&c, &mut self.squad[from], from_slot);
-        let other = items::take_off(&c, &mut self.squad[to], slot);
-        let done = items::slot_for(&c, &self.squad[to], item).and_then(|_| {
-            items::put_on(&c, &mut self.squad[to], slot, item);
-            match other {
-                Some(b) => items::slot_for(&c, &self.squad[from], b).map(|_| items::put_on(&c, &mut self.squad[from], from_slot, b)),
-                None => Ok(()),
-            }
-        });
-        if done.is_err() {
-            self.squad[to] = saved.1;
-            self.squad[from] = saved.0;
-        }
-        done
     }
 }
 
@@ -3175,18 +3115,19 @@ mod tests {
         g.experimental.two_potions=true;
         g.content=Arc::new(g.content.with_experimental(g.experimental));
         let potion=item(&g,"heal_potion");
-        g.pack=vec![potion;3];
+        g.pack=vec![potion;3].into();
         g.drink(0,0).unwrap();
-        g.drink(0,0).unwrap();
-        assert_eq!(g.drink(0,0),Err(EquipError::PotionLimit));
-        assert_eq!(g.pack,vec![potion]);
+        g.drink(0,1).unwrap();
+        assert_eq!(g.drink(0,2),Err(EquipError::PotionLimit));
+        assert_eq!(g.pack.get(2),Some(potion));
+        assert_eq!(g.pack.count(),1);
         g.foe=Some(Foe::Garrison(g.world.index_of("Bandit camp")));
         let mut b=g.start_battle();
         b.begin();
         wipe_all_but_hero(&mut b);
         g.resolve_battle(&b);
         assert_eq!(g.hero().potions_drunk,0);
-        assert!(g.drink(0,0).is_ok());
+        assert!(g.drink(0,2).is_ok());
     }
 
     #[test]
@@ -3432,15 +3373,16 @@ mod tests {
         assert_eq!(g.buy(0), Err(TradeError::NotEnoughGold));
         g.gold = price;
         assert_eq!(g.buy(0), Ok(item));
-        assert_eq!((g.gold, g.pack.clone()), (0, vec![item]));
+        assert_eq!((g.gold, g.pack.items()), (0, vec![item]));
         assert_eq!(g.sell(0), Ok(cost / 4), "ItemSaleCost 25% (the demo's F is 100)");
         assert!(g.pack.is_empty());
         assert_eq!(g.sell(0), Err(TradeError::NoSuchItem));
-        // No pack test at a purchase (0x4b9e18).
-        g.pack = vec![item; PACK_SIZE];
+        // No pack test at a purchase (0x4b9e18); the original loses it with all 256 cells taken
+        // (0x49a85c), Razdor's pack grows (a deviation).
+        g.pack = vec![item; PACK_SIZE].into();
         g.gold = 10_000;
         assert!(g.buy(0).is_ok());
-        assert_eq!(g.pack.len(), PACK_SIZE + 1);
+        assert_eq!((g.pack.count(), g.gold < 10_000), (PACK_SIZE + 1, true));
         g.location = Some(g.world.index_of("Millbrook"));
         assert_eq!(g.sell(0), Err(TradeError::NoMarket));
     }
@@ -3449,22 +3391,27 @@ mod tests {
     fn equip_and_unequip_through_the_pack() {
         let mut g = quiet_game(HeroClass::Knight);
         let (sword, axe, shield, bow) = (item(&g, "short_sword"), item(&g, "war_axe"), item(&g, "oak_shield"), item(&g, "hunting_bow"));
-        g.pack = vec![sword, axe, shield, bow];
+        g.pack = vec![sword, axe, shield, bow].into();
         g.equip(0, 0).unwrap();
-        assert_eq!(g.equip(0, 0), Err(EquipError::SecondWeapon), "axe is a second weapon");
-        assert_eq!(g.equip(0, 2), Err(EquipError::WrongClass), "the knight is no archer");
-        g.equip(0, 1).unwrap();
-        assert_eq!(g.pack, vec![axe, bow]);
+        assert_eq!(g.equip(0, 0), Err(EquipError::NoSuchItem), "its cell is left empty (0x4c24f4)");
+        assert_eq!(g.equip(0, 1), Err(EquipError::SecondWeapon), "axe is a second weapon");
+        assert_eq!(g.equip(0, 3), Err(EquipError::WrongClass), "the knight is no archer");
+        g.equip(0, 2).unwrap();
+        assert_eq!((g.pack.items(), g.pack.get(0), g.pack.len()), (vec![axe, bow], None, 4));
         assert_eq!(g.hero().max_hp(&g.content), 75);
         let c = g.content.clone();
         g.squad.iter_mut().for_each(|u| u.heal_full(&c));
         let shield_slot = g.hero().items.iter().position(|i| *i == Some(shield)).unwrap();
         g.unequip(0, shield_slot).unwrap();
         assert_eq!(g.hero().hp, 70, "HP capped to the new max");
-        assert_eq!(g.pack, vec![axe, bow, shield]);
+        assert_eq!(g.pack.items(), vec![shield, axe, bow], "into the first empty cell (0x49a85c)");
         assert_eq!(g.unequip(0, shield_slot), Err(EquipError::NoSuchItem));
-        g.pack = vec![axe; PACK_SIZE];
-        assert_eq!(g.unequip(0, 0), Err(EquipError::PackFull));
+        // Razdor's pack grows past the original's 256 (a deviation): no PackFull.
+        g.pack = vec![shield].into();
+        g.equip(0, 0).unwrap();
+        g.pack = vec![axe; PACK_SIZE].into();
+        assert_eq!(g.unequip(0, shield_slot), Ok(()));
+        assert_eq!((g.pack.count(), g.pack.get(PACK_SIZE)), (PACK_SIZE + 1, Some(shield)));
     }
 
     #[test]
@@ -3474,7 +3421,7 @@ mod tests {
         let c = g.content.clone();
         g.squad[0].heal_full(&c);
         assert_eq!((g.hero().hp, g.hero().max_hp(&c)), (70, 70));
-        g.pack = vec![shield];
+        g.pack = vec![shield].into();
         g.equip(0, 0).unwrap();
         assert_eq!((g.hero().hp, g.hero().max_hp(&c)), (75, 75), "healed with the new maximum, not 70/75");
         // Wounded, the HP follows the maximum (0x4908a8): 75 × 60 / 70 = 64.29.
@@ -3486,77 +3433,13 @@ mod tests {
     }
 
     #[test]
-    fn the_hero_window_puts_an_item_in_the_clicked_slot() {
-        // 0x4c24f4: a click on an empty worn slot puts the item in that very slot (its f-
-        // values and bonus then win over the slots before it); an occupied one takes nothing.
-        let mut g = quiet_game(HeroClass::Knight);
-        let shield = item(&g, "oak_shield");
-        g.squad[0].items = [None; crate::rules::items::SLOTS];
-        g.pack = vec![shield, shield];
-        assert_eq!(g.equip_at(0, 0, Some(2)), Ok(()));
-        assert_eq!(g.hero().items[2], Some(shield));
-        g.squad[0].items[2] = None;
-        g.squad[0].items[1] = Some(shield);
-        g.pack = vec![shield];
-        assert_eq!(g.equip_at(0, 0, Some(0)), Err(EquipError::SameType), "the wear test still runs");
-        g.squad[0].items[1] = None;
-        let sword = item(&g, "short_sword");
-        g.squad[0].items[3] = Some(sword);
-        assert_eq!(g.equip(0, 0), Ok(()));
-        assert_eq!(g.hero().items[0], Some(shield), "the army card's drop: the lowest free slot");
-        // Razdor's: an occupied slot swaps with the pack item.
-        let other = item(&g, "oak_shield");
-        g.squad[0].items[0] = None;
-        g.pack = vec![other];
-        g.squad[0].items[3] = Some(shield);
-        assert_eq!(g.equip_at(0, 0, Some(3)), Ok(()));
-        assert_eq!((g.hero().items[3], g.pack.clone()), (Some(other), vec![shield]));
-    }
-
-    #[test]
-    fn a_worn_item_moves_to_an_empty_slot_of_its_own_unit() {
-        // 0x4c24f4: picked up from a worn slot, it can be put on another empty one.
-        let mut g = quiet_game(HeroClass::Knight);
-        let (shield, sword) = (item(&g, "oak_shield"), item(&g, "short_sword"));
-        g.squad[0].items = [Some(shield), None, None, Some(sword)];
-        assert_eq!(g.move_worn(0, 0, 0, 2), Ok(()));
-        assert_eq!(g.hero().items, [None, None, Some(shield), Some(sword)]);
-        // Razdor's: an occupied slot swaps.
-        assert_eq!(g.move_worn(0, 2, 0, 3), Ok(()));
-        assert_eq!(g.hero().items, [None, None, Some(sword), Some(shield)]);
-        assert_eq!(g.move_worn(0, 1, 0, 0), Err(EquipError::NoSuchItem));
-    }
-
-    #[test]
-    fn a_worn_item_is_handed_to_another_unit() {
-        let mut g = quiet_game(HeroClass::Knight);
-        let (shield, sword) = (item(&g, "oak_shield"), item(&g, "short_sword"));
-        let taken: Vec<_> = g.squad.iter().map(|u| u.slot).collect();
-        let slot = g.content.formation.free_slot(&taken, crate::rules::formation::Row::Front).unwrap();
-        g.squad.push(Unit::new(&g.content, unit(&g, "spearman"), slot));
-        g.pack = vec![shield, sword];
-        g.equip(0, 0).unwrap();
-        g.equip(1, 0).unwrap();
-        let at = g.hero().items.iter().position(|i| *i == Some(shield)).unwrap();
-        g.give(0, at, 1).unwrap();
-        assert!(!g.hero().items.contains(&Some(shield)));
-        assert!(g.squad[1].items.contains(&Some(shield)));
-        let back = g.squad[1].items.iter().position(|i| *i == Some(shield)).unwrap();
-        g.pack = vec![item(&g, "oak_shield")];
-        g.equip(0, 0).unwrap();
-        assert_eq!(g.give(1, back, 0), Err(EquipError::SameType), "the hero has a shield again");
-        assert!(g.squad[1].items.contains(&Some(shield)), "a refused hand-over keeps the item");
-        assert_eq!(g.give(0, 3, 1), Err(EquipError::NoSuchItem));
-    }
-
-    #[test]
     fn gear_and_potions_go_into_battle_and_potions_wear_off() {
         let mut g = quiet_game(HeroClass::Knight);
-        g.pack = vec![item(&g, "might_potion"), item(&g, "chainmail"), item(&g, "heal_potion")];
+        g.pack = vec![item(&g, "might_potion"), item(&g, "chainmail"), item(&g, "heal_potion")].into();
         g.equip(0, 1).unwrap();
         assert_eq!(g.drink(0, 0), Ok(0), "might: no healing, lasts until the battle ends");
         g.squad[0].hp = 30;
-        assert_eq!(g.drink(0, 0), Ok(20));
+        assert_eq!(g.drink(0, 2), Ok(20));
         g.foe = Some(Foe::Garrison(g.world.index_of("Bandit camp")));
         let mut b = g.start_battle();
         b.begin();
@@ -3585,21 +3468,23 @@ mod tests {
         g.resolve_battle(&b);
         assert_eq!(g.squad.len(), 2);
         assert!(!g.squad[1].alive());
-        assert_eq!((g.squad[1].items[0], g.pack.contains(&mail)), (Some(mail), false), "Razdor's: the corpse keeps its gear");
+        assert_eq!((g.squad[1].items[0], g.pack.contains(mail)), (Some(mail), false), "Razdor's: the corpse keeps its gear");
         // 0x4c50ec: the dead lose their spell slots, the living keep theirs.
         assert_eq!((g.squad[0].spells[0], g.squad[1].spells[0]), (held, None));
     }
 
     #[test]
-    fn loot_that_does_not_fit_is_left_behind() {
+    fn deviation_loot_fits_a_pack_of_256() {
+        // The original leaves loot behind with all 256 cells taken; Razdor's pack grows.
         let mut g = quiet_game(HeroClass::Knight);
-        g.pack = vec![item(&g, "heal_potion"); PACK_SIZE];
+        g.pack = vec![item(&g, "heal_potion"); PACK_SIZE].into();
         let lair = g.world.index_of("Bandit lair");
         g.foe = Some(Foe::Garrison(lair));
         let mut b = g.start_battle();
         b.begin();
         wipe_all_but_hero(&mut b);
-        assert!(matches!(g.resolve_battle(&b), BattleResult::Victory { left_behind: 2, .. }));
+        assert!(matches!(g.resolve_battle(&b), BattleResult::Victory { left_behind: 0, .. }));
+        assert_eq!(g.pack.count(), PACK_SIZE + 2);
     }
 
     #[test]

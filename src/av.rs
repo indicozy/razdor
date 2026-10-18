@@ -21,9 +21,14 @@ pub const TRIUMPH: &str = "BkgTriumph";
 pub const DEFEAT: &str = "BkgDefeat";
 
 /// The sound of a battle action (interface.md §12): melee and long strike `Battle-Fight`, a
-/// shot `Battle-Shoot`, or `Battle-Strike` (cannon) when the shooter's ranged attack is at
-/// least `ShotWeaponRange`, heal `Battle-Cure`, bless `Battle-Bless`, curse and magic strike
-/// `Battle-Sorcery`.
+/// shot `Battle-Shoot`, or `Battle-Strike` (cannon) when the shooter's unit type has a base
+/// ranged attack (the units ini's `AttackShot`) of at least `ShotWeaponRange`, heal
+/// `Battle-Cure`, bless `Battle-Bless`, curse and magic strike `Battle-Sorcery`.
+///
+/// The cannon test reads the type table (0xae1b74, +0x39) through the unit record's type, never
+/// the unit's current ranged attack, so levels, items and spells do not turn a crossbowman into
+/// a gunner (0x4c4521..0x4c4544 as the action starts, 0x4c5d96..0x4c5dc0 for the counterblow;
+/// `>=`: the `JL` skips the flag only below the range).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BattleSound {
     Fight,
@@ -39,7 +44,7 @@ impl BattleSound {
     pub fn of(battle: &Battle, actor: usize, kind: ActionKind) -> BattleSound {
         match kind {
             ActionKind::Melee | ActionKind::LongStrike => BattleSound::Fight,
-            ActionKind::Shot if battle.fighters[actor].stats[Stat::AttackShot] >= battle.content().options.shot_weapon_range => BattleSound::Cannon,
+            ActionKind::Shot if battle.content().unit(battle.fighters[actor].unit).attack_shot >= battle.content().options.shot_weapon_range => BattleSound::Cannon,
             ActionKind::Shot => BattleSound::Shoot,
             ActionKind::Heal => BattleSound::Cure,
             ActionKind::Bless => BattleSound::Bless,
@@ -169,5 +174,38 @@ impl AvLog {
     /// The events so far, emptying the log.
     pub fn take(&mut self) -> Vec<AvEvent> {
         std::mem::take(&mut self.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rules::content::testkit::*;
+    use crate::rules::content::UnitId;
+    use crate::rules::formation::{Row, Slot};
+    use crate::rules::units::Unit;
+    use std::sync::Arc;
+
+    /// The cannon sound follows the type's base ranged attack against `ShotWeaponRange` (60),
+    /// with `>=` (0x4c453c, 0x4c5db8), never the unit's current one: a levelled crossbowman
+    /// shooting 65 still sounds a crossbow.
+    #[test]
+    fn cannon_sound_reads_the_types_base_ranged_attack() {
+        let c = Arc::new(content(vec![shooter(23, 40), shooter(24, 60), shooter(25, 59), warrior(10, 30, 5)], vec![]));
+        assert_eq!(c.options.shot_weapon_range, 60);
+        let squad: Vec<Unit> = [23, 24, 25].iter().enumerate().map(|(i, &id)| Unit::new(&c, UnitId(id), Slot::new(Row::Back, i as u8))).collect();
+        let p: Vec<_> = squad.iter().enumerate().collect();
+        let e = [Unit::new(&c, UnitId(10), Slot::new(Row::Front, 0))];
+        let mut b = Battle::new(c.clone(), &p, &e, Team::Player);
+        let at = |b: &Battle, id: u32| b.fighters.iter().position(|f| f.unit == UnitId(id)).unwrap();
+        let xbow = at(&b, 23);
+        b.fighters[xbow].stats[Stat::AttackShot] = 65;
+        assert_eq!(BattleSound::of(&b, xbow, ActionKind::Shot), BattleSound::Shoot, "a crossbowman boosted to 65");
+        let gun = at(&b, 24);
+        assert_eq!(BattleSound::of(&b, gun, ActionKind::Shot), BattleSound::Cannon, "base 60 = ShotWeaponRange");
+        b.fighters[gun].stats[Stat::AttackShot] = 10;
+        assert_eq!(BattleSound::of(&b, gun, ActionKind::Shot), BattleSound::Cannon, "a weakened gunner");
+        assert_eq!(BattleSound::of(&b, at(&b, 25), ActionKind::Shot), BattleSound::Shoot, "base 59");
+        assert_eq!(BattleSound::of(&b, gun, ActionKind::Melee), BattleSound::Fight);
     }
 }

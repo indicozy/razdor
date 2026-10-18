@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use super::ai;
 use super::content::{Bonus, Content, HeroClass, ItemId, Nature, Source, WageKind};
-use super::game::{Currency, Event, Game, Price, Tribute, PACK_SIZE};
+use super::game::{Currency, Event, Game, Price, Tribute};
 use super::magic;
 use super::units::{Stats, Unit};
 use super::world::{Army, Good, Location, LocationKind, Recruit, Shop};
@@ -779,9 +779,9 @@ impl Game {
         if self.offer.is_some_and(|(k, _)| k == l) {
             self.offer = None;
         }
-        if self.world.demo && self.pack.len() < PACK_SIZE && self.rng.range(1, 100) <= super::game::TRIBUTE_ITEM_CHANCE {
+        if self.world.demo && !self.pack.is_full() && self.rng.range(1, 100) <= super::game::TRIBUTE_ITEM_CHANCE {
             if let Some(item) = self.roll_item(Source::Tribute) {
-                self.pack.push(item);
+                self.pack.add(item);
                 return Some(Tribute::Item(item));
             }
         }
@@ -821,7 +821,7 @@ impl Game {
             VillageOffer::Blessing => self.good_spells_on_units() <= n,
             VillageOffer::Furs => {
                 let furs = ItemId(FURS_ITEM);
-                c.try_item(furs).is_some() && self.pack.len() < 25 && self.pack.iter().filter(|&&i| i == furs).count() <= 2
+                c.try_item(furs).is_some() && self.pack.len() < 25 && self.pack.iter().filter(|&i| i == furs).count() <= 2
             }
             VillageOffer::Witch => self.mana < self.gold && self.spells.len() >= 3 && self.good_spells_on_units() == 0,
         }
@@ -913,7 +913,7 @@ impl Game {
                 OfferResult::Blessing(id)
             }
             VillageOffer::Furs => {
-                self.pack.push(ItemId(FURS_ITEM));
+                self.pack.add(ItemId(FURS_ITEM));
                 OfferResult::Furs(ItemId(FURS_ITEM))
             }
             VillageOffer::Witch => {

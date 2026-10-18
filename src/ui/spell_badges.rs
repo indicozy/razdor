@@ -16,7 +16,7 @@ use razdor::rules::spell_hint::{self, BADGE_PITCH, BADGE_SIZE, BADGE_TOP, HINT_W
 use razdor::rules::units::SpellSlot;
 
 use super::chrome;
-use super::widgets::{mouse_in, pointer, wrap};
+use super::widgets::{mouse_in, pointer, shadow_coloured, wrap_coloured};
 
 /// What a hovered badge's hint shows.
 struct Hint {
@@ -85,16 +85,19 @@ pub fn flush() {
     let pad = 8.0 * k;
     let tx = pad * 2.0 + pic;
     let room = w - tx - pad;
-    let own = spell_hint::on_own_army(&h.spell);
-    let mut lines: Vec<(String, Color)> = Vec::new();
-    let effect = spell_hint::effect_text(&h.spell, &label);
-    for l in wrap(effect.trim_end(), room, body) {
-        lines.push((l, if own { chrome::BLUE_TEXT } else { chrome::RED_TEXT }));
-    }
+    // Deviation (the owner's decision, 2026-10-18, a player's request): each effect entry is
+    // blue when good for the unit holding the spell and red when bad
+    // (`spell_hint::good_for_holder`), as the spell cards; the original colours the whole
+    // effect text blue for a spell on the own army and red otherwise (49ece8).
+    let parts: Vec<(String, Color)> = spell_hint::effect_entries(&h.spell, &label)
+        .into_iter()
+        .map(|e| (e.text, if e.good { chrome::BLUE_TEXT } else { chrome::RED_TEXT }))
+        .collect();
+    let mut lines: Vec<Vec<(String, Color)>> = wrap_coloured(&parts, room, body);
     if let Some(l) = spell_hint::life_lost_line(&h.spell, h.drain, &label) {
-        lines.push((l, chrome::RED_TEXT));
+        lines.push(vec![(l, chrome::RED_TEXT)]);
     }
-    lines.push((spell_hint::time_left_line(h.minutes_left, &label), TIME_TEXT));
+    lines.push(vec![(spell_hint::time_left_line(h.minutes_left, &label), TIME_TEXT)]);
     let text_h = title + 6.0 * k + lines.len() as f32 * (body + 3.0 * k);
     let hh = (text_h.max(pic) + 2.0 * pad).round();
     // 21 px right of and 37 px below the pointer, flipped to the other side when it would
@@ -120,8 +123,8 @@ pub fn flush() {
     let mut ty = r.y + (r.h - text_h) / 2.0 + title * 0.85;
     chrome::shadow_text(&h.spell.name, r.x + tx, ty, title, chrome::CREAM);
     ty += 6.0 * k + body;
-    for (l, c) in lines {
-        chrome::shadow_text(&l, r.x + tx, ty, body, c);
+    for l in lines {
+        shadow_coloured(&l, r.x + tx, ty, body, false);
         ty += body + 3.0 * k;
     }
 }

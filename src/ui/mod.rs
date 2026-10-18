@@ -1075,6 +1075,10 @@ impl App {
                 // the original goes to the main menu once the window is read (0x4aba30 →
                 // 0x4bfb34); Razdor's victory screen stays for the editor's test play.
                 Some(ScriptEnd::Victory(_)) if !matches!(self.screen, Screen::Victory) => {
+                    // The scenario list marks the map as won (Razdor's, kept in the settings).
+                    if let Some(razdor::rules::save::ScenarioRef::Map { file, .. }) = self.game.as_ref().and_then(|g| g.origin.as_ref()).filter(|_| !self.test_play) {
+                        language::mark_completed(file);
+                    }
                     let handed = (!self.test_play).then(|| screens::hand_over(&self.game, &self.scenarios, self.dt_content.clone())).flatten();
                     match handed {
                         Some(g) => {
@@ -1155,6 +1159,16 @@ impl App {
                 if !events.is_empty() {
                     let _ = world_view::handle_events(g, events, &mut self.message, &mut self.dialogs);
                 }
+            }
+            // The hero or army window closes (or gives way to the other): an item on the
+            // pointer goes back into the pack's first empty cell (0x4b8d28 → 0x49a85c).
+            let inventory = |s: &Screen| match s {
+                Screen::Squad { .. } => 1,
+                Screen::Hero(_) => 2,
+                _ => 0,
+            };
+            if let (true, Some(g)) = (inventory(&self.screen) != inventory(&next), self.game.as_mut()) {
+                g.drop_held();
             }
             // The army window opens: it recounts the hero's army (0x4d1814).
             if let (Screen::Squad { .. }, false, Some(g)) = (&next, matches!(self.screen, Screen::Squad { .. }), self.game.as_mut()) {

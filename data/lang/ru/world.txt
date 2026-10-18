@@ -55,12 +55,6 @@ A meeting on the road: {who} lets you pass. = Встреча в пути: {who} 
 No way through. = Пути нет.
 
 # Spell book
-heals {h} hits = лечит: жизнь +{h}
-{h} hits = жизнь {h}
-hits {p}% at once = жизнь {p}% сразу
-max hits {p}% = макс. жизнь {p}%
-lifts life-draining curses = снимает проклятия, отнимающие жизнь
-no effect = без действия
 instant = мгновенно
 lasts {time} = действует {time}
 That spell is not in your book. = Этого заклинания нет в вашей книге.

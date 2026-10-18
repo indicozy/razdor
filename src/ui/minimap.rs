@@ -649,6 +649,23 @@ pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_
         let waits = game.script().is_some_and(|e| e.meeting_waiting(game, a.id));
         marks.push((t, if army_is_ally(a.attitude, waits) { ally } else { enemy }));
     }
+    // The `routes` cheat (Razdor's): each enemy army's planned path as a line from where it
+    // stands, and a ring where it heads, under the shields.
+    if game.cheats.routes {
+        let line = Color { a: 0.85, ..enemy };
+        let w = (1.5 * zoom).max(1.0);
+        for route in razdor::rules::cheats::routes(game) {
+            let mut from = to_mini(map.center(route.from));
+            for &t in &route.path {
+                let to = to_mini(map.center(t));
+                draw_line(from.x, from.y, to.x, to.y, w, line);
+                from = to;
+            }
+            let end = to_mini(map.center(route.destination()));
+            draw_circle_lines(end.x, end.y, 3.0 * zoom.max(1.0), w, BLACK);
+            draw_circle_lines(end.x, end.y, 2.5 * zoom.max(1.0), w, line);
+        }
+    }
     for (t, col) in marks {
         let p = to_mini(map.center(t));
         match &icons {

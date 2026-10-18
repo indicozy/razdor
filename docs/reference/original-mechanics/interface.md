@@ -92,6 +92,11 @@ until the next key-down or until a handler clears it. Typed characters are kept 
 Keys sent as system keys (Alt, F10) never reach the held key. Showing a window clears both the
 held and the released key, and if a key was held at that moment its next key-up is swallowed,
 so the key that opened a window does not act in it. **code** (475748, 47f358)
+The key-down branch (475820–475837) never looks at the repeat bit, so the system's typematic
+repeats of the newest key still down store it again: with two arrows down, letting the older go
+clears the held key and the map stops, then the newer one's first repeat (Windows' default,
+500 ms after it went down) holds it again and the map scrolls on; letting the newer go leaves
+nothing held (the system repeats only the newest key). **code** (475820, 475841)
 
 **One action per Esc.** Every screen that reacts to Esc uses one shared latch: when no key is
 held the latch opens; Esc with an open latch acts and closes it. A second Esc therefore needs
@@ -186,6 +191,19 @@ offered it returns to the main menu instead (4c1804). Back or Esc returns to the
 interface ini), and three text boxes. Choosing a class redraws the portraits, shows the class
 texts and plays a 200 ms highlight animation that starts with `MainMenuPress` (4b2044).
 Cancel or Esc returns to the **main menu**, not to the scenario list. **code** (4c0fd4, 4c8584)
+
+**The portraits** (4d7d30, once per window build): each class picture (`Hero0`, `hero1`,
+`hero2`, loaded without alpha) loses a vignette (476790 mode 1: squares inset by i = 0..32 px
+filled with grey (32 − i)·2), is copied twice, and is then scaled ×1100/1024 (48da5c): that is
+the picked class's picture. Each copy is turned grey (48db5c, weights 100/200/100) and scaled
+and shifted per channel (48da5c): `65bcd8` (blue, another offered class) g·1300/1024 −
+(256, 80, 48), `65bce4` (dark red, a class the map leaves out) g·1600/1024 − (48, 176, 256);
+then the vignette comes off once more. All at 16 bits per pixel. 4c1458 draws the three.
+**code**
+
+**The name field** (edit box 65b2b0, 47ae5c): the text and a `|` caret after it, centred, in
+the font ae24a0 (Benguiat, (255, 255, 155)); the caret is always at the end and nothing is
+ever selected. **code**
 
 **A class the map does not offer cannot be picked.** Its portrait is drawn with the second
 greyed copy (`65bce4[i]`) and its enabled byte (portrait widget +0xd, `65bc01 + i·0x4b`) is
@@ -575,6 +593,26 @@ neither the row nor the building line. Bug: ae6c0c is never written, `Hint4` is 
 c35000[0] (4e3dad) instead, so the no-payment line is the icon over an empty row (the text
 list adds an empty line, 47e46c). **code**
 
+**Text layout** (492f24, lists placed at 4d9060). Four text lists stacked up from the bottom of
+the panel's fill (X0+2 .. X0+0x108, 262 px wide). The description list (667bdc) is 262 wide
+with a 12 px margin each side (text 238 px wide from X0+14), 14 px a row, its bottom at the
+fill's bottom and rows·14 + 12 tall; it holds the type's description (not for the hero
+classes), then each trait line (492e70): an empty row first when the list already has rows,
+then the text, left aligned, with the trait's 25×25 icon (black-keyed by its bottom-left
+pixel) 16 px in from the list and 11 px over its first row (48e8f0). The loaders put six
+spaces before the description (48efd0, string 0x48f820) and before every hint, bonus and hero
+class text (4e36cc, string 0x4e4e40), so each paragraph's first row is indented and the icon
+stands in that indent. Fonts: the description in the white SanSerif, the hero class in the
+yellow (ae24c0), a bonus in green (ae24d4), the dead and unpaid lines in red, the back-row
+and own-building lines in blue; all with the shadow font ae24d8 in a game. Over that list the
+stat lists: labels from X0+30 (166 px), values right-aligned in the 40 px after them, so ending
+at X0+236; (lines + 1)·14 + 8 tall (8 px higher for a hero class); the level and "XP / need"
+13 px over their top with the shadow. Over them the name list (Benguiat, centred, its shadow
+ae24b0), 16 + 18 px. The wage line (4924c9) writes both its label and value in the bold
+orange SanSerif (ae24f4) over the bold shadow (ae2510). From the name list's top down the
+panel is darkened (4768f8 subtracting 113, 113, 129), fading in over the 56 px above in 28
+steps of 2 rows. **code**
+
 **Three values per stat.** The list (491fa4) first rebuilds the unit's stats (4908a8). Outside
 an interactive battle it copies the current block into the battle block, so the shown values
 are the current ones (items, potions, spells included); in battle they are the battle values.
@@ -665,7 +703,12 @@ itself are laid out afterwards from the panel's bottom. **code**
 **Item slots and templates** (492f24). The four worn-item slot buttons are set only when the
 card is neither a hire offer in a building's hire tab (68dc88 = 1, army ≠ 0) nor a template
 (the fourth argument). A filled slot shows its item's icon; an empty one shows the empty-slot
-picture ae2860 only outside battle (4ed424 = 0) and outside the building tabs 1 and 2. A
+picture ae2860 only outside battle (4ed424 = 0) and outside the building tabs 1 and 2. The
+filled slot's button has no background of its own: the item's picture with its alpha straight
+on the panel's parchment. ae2860 is built at start-up (4dbc26 onwards): a 55 px picture with a
+1 px ring whose colours are the first row of `SteelLine.lit` read clockwise from the top left
+(48d1d4 with colour −1), black inside, and its alpha ae2864 full on the ring and grey 0x66
+(about 40%) on the inner 53 px. So an empty slot is a darkened square with a thin steel edge. A
 hovered promotion portrait (4c39d8 → 4c3b5f for portrait 0, 4c3bc2 for 1–3) paints the type
 of that portrait (the unit's own, or the next type) as a template: a fresh unit record of the
 type, no item slots at all, the parchment painted over the slots the unit's card had. **code**
@@ -732,20 +775,30 @@ Quirks of the defence merging (**code**, read from the conditions; not seen on s
 
 **Spell card** (49bde4), used in the spell book (15 cards, 4d261c), the spell shop and the
 event dialog's spell tooltip (4cbd58). An empty book slot (no spell) shows an empty frame with
-a caption. Otherwise the background is the normal or the selected one, and outside battle a
-spell whose mana cost (after the Community Caster rule, c27448) is above the hero's mana gets
-the **cannot-afford** background instead. The 50×50 picture sits at (+6, +6); it is drawn
+a caption. Otherwise the background is the normal or the selected one, and, except on the
+sanctuary's tab (tab 4 at 68dc88, so the shop never tints), a spell whose mana cost (after the
+Community Caster rule, c27448) is above the hero's mana gets the **cannot-afford** background
+and the red fonts instead (49be19–49be42). The 50×50 picture sits at (+6, +6); it is drawn
 through a colour filter when the card is selected and affordable. The text starts at x + 108
 and is centred vertically in 112 px. **code**
 
 **Card text** (49ba84): the spell name; then, only if the spell has an effect text: an empty
 line, the effect text, a cost line (`Mana` and the cost, `Reading` and the casting time with
 `Hour`, both through c27448) and a duration line (`MomentaryEffect`, or `TimeOfEffect`, the
-hours and `Hours`). The effect text is blue for a spell on the own army (Target 1); when the
-hero cannot afford it the name, cost, duration and effect text are all in the red tint and the
-effect is not turned blue. Keys are read from the `Magic` section. **code**
+hours and `Hours`). Fonts, as 49bde4 passes them: the name in the white Benguiat ae2498, the
+effect text in the yellow SanSerif ae24c0 (white less 25, 25, 125), turned to the blue ae24cc
+(less 180, 70, 0) for a spell on the own army (Target 1, 49bb36), the cost and duration lines
+in the orange ae24c4; all with the shadow font ae24d8. When the hero cannot afford it the name
+is in the Benguiat ae24a4 and the effect, cost and duration in the red ae24c8, and the effect
+is not turned blue. Without an effect text (49bb0b) the card shows the name alone, no cost or
+duration. Each part is added to the text list as one paragraph, centred and word-wrapped by
+the list (47e46c: a greedy break at the last space that fits the width); there is no line
+break between effect entries, so «Доспехи Веры» («Физическая защита +10 Физическая защита
++20%») shows one entry per line only because two do not fit. Keys are read from the `Magic`
+section. **code**
 
-**Effect text** (49b63c), the same "label value " entries as items:
+**Effect text** (49b63c), the same "label value " entries as items (49b540: label, space,
+"+" for a positive value, the number, the suffix, space; nothing for 0):
 - DeltaFixedHits: label `CureHit` when it is 0 or more, `CurseHit` when negative.
 - DeltaPercentHits, with "%": its label is chosen by the sign of **DeltaFixedHits**, not its
   own (a spell with only a negative percentage is labelled as a heal). **code**
@@ -809,6 +862,22 @@ when any is below; manevres and initiative are red when below. The D line compar
 defence: the melee one, or the ranged one when the row bonus applies; blue above the current
 value, red below the current **or** the level value. Unhurt Hits use an orange tint, wounded
 Hits red. **code**
+
+**Placement and fonts** (494f93–49565f). The card is 94 px wide; the strip's three lines have
+their cell tops 2, 14 and 26 px under the 94 px portrait. Left pieces start 2 px in; right
+pieces end 1 px before the card's right edge (x + 94 − 1 − width); Hits is centred with the
+halving dropping the odd pixel. All in the SanSerif tints, without a shadow font (text draw
+mode 1, black keyed): the attack and "Mnvr" in the untinted white ae24bc, "D" and "Ini" in the
+yellow ae24c0 (white less 25, 25, 125), unhurt Hits in the orange ae24c4, and the red ae24c8 /
+blue ae24cc for values below / above. **code**
+
+**Strip pictures** (made once at 4dc118, 0x4de0f0–0x4de1f7). Each is a 94×39 piece of
+`Win-paper` on the 16-bit surface: the plain one (ae2698) cut at (20, 20) with (148, 132, 148)
+taken off (4768f8 mode 1), a dark brown; the hero's (ae269c) the same, then red ×4222/1024 −
+227, green ×768/1024, blue 0 (48da5c), a deep red-brown; a named character's (ae26a0) cut at
+(220, 20), red and blue swapped (48dd40 with 3, 2, 1), then red 0, green ×1394/1024 − 196,
+blue ×2790/1024 − 517, a deep blue. 49462c blits the plain one, then the hero's or the named
+one over it. **code**
 
 **Shadows and the dead** (49462c, 493a64, art loaded at 4dbc26). Before the card the slot
 draws its shadow at the card's corner through the picture's alpha (476a3c): `Shadow-Unit`
@@ -1215,7 +1284,11 @@ Effects and sounds by action:
 |---|---|---|
 | Melee, long strike | melee effect | `Battle-Fight` |
 | Shot | shot effect | `Battle-Shoot` |
-| Shot by a unit whose range ≥ `ShotWeaponRange` | melee effect | `Battle-Strike` |
+| Shot by a unit whose type's base `AttackShot` (units ini, not the current value with levels, items or spells) ≥ `ShotWeaponRange` | melee effect | `Battle-Strike` |
+
+The cannon test reads the unit type table (+0x39) through the unit record's type and compares
+it with the global `ShotWeaponRange` (`[0x4ed3e8]`, `>=`), once when the action starts and once
+for the counterblow. **code** (4c4521–4c4544, 4c5d96–4c5dc0)
 | Curse or magic strike | magic effect | `Battle-Sorcery` |
 | Heal (target wounded) | heal effect | `Battle-Cure` |
 | Blessing | bless effect | `Battle-Bless` |
@@ -1427,11 +1500,11 @@ parity rule they are candidates to hide or remove, not bugs to copy.
 | 49 | Card stat strip | Labels match: "Pwr:" for a caster (attack kind 0x11) with no melee attack or outside the places 1–4, else "A:" with the larger attack (`unit_sheet::attack_piece`); the attack line blue when any of the three attacks is above, red when any is below; `Row2Def` on r in the back row as the original; colours against the start-of-battle value (none outside battle); D colour by the sum of both defences | "Pwr:" for a caster outside the front or with no melee, else "A:" with the larger attack; colours against the current value; D colour from one defence only | 9.5 |
 | 50 | Formation editing | Matches: presses as the original's, in the army window (`items_view::ArmySel`, `unit_drag::grid_press`; the deselection and the slide's end leave the right side as it was), the hire tab's hero grid and the garrison grids (a refused hero or named unit keeps the selection), `Card-Move` on every swap and slide, the army window's and hire tab's slides timed as 0x4b0c04. Extra: a card can also be dragged onto another cell (a press that swaps starts no drag) | Click to select, click another unit to swap at once, click an empty cell to slide there; acts on the press; the hero may go anywhere | 9.6 |
 | 51 | Item text | Matches (`rules::item_text`, `ui::item_text`): name, usage line, empty line, description, the "label value " entries with the original's labels, prefixes, merging and quirks, the `GetBonus "name"` line, fonts and centring; the market's picture above the text. Differs: the market and inventory lists' side margin is Razdor's 16 px; a text too tall for its box is drawn smaller (the original's list cuts it); the army window shows the box as a pop-up by the pointer (the owner's choice) | Name, usage line by type and school, description, then "label value" entries with "=" (f-), "+" (d-), "%" (p-), potion heal/revive rules, defence merging with its lost-value quirks, the bonus line | 9.2 |
-| 52 | Spell text | Effect summary, school, mana and casting time, duration and target | Name, effect entries (heal/curse label by the sign of DeltaFixedHits, AB = AS and DB = DS merged), `Mana`/`Reading`, duration; red when unaffordable, blue for own-army spells | 9.3 |
-| 53 | Pack scrolling | Wheel by one row over the whole 256-slot pack | Scroll bar over `max(0, length div 5 − 4)` rows of the used part, rounded | 9.7 |
+| 52 | Spell text | Matches: the book, the sanctuary and the event tooltip draw the original's card text (`spellbook::card_text`): the effect entries of 49b63c (`spell_hint::effect_text`, the install's `[Skills]` labels) word-wrapped as one paragraph, cost and duration orange; Razdor's choice (the owner's, 2026-10-18): each effect entry blue when good for the unit holding it and yellow when bad (`spell_hint::good_for_holder`: its value is positive) where the original colours the whole effect by the target; all red when unaffordable outside the sanctuary, the name alone without an effect | Name, effect entries (heal/curse label by the sign of DeltaFixedHits, AB = AS and DB = DS merged), `Mana`/`Reading`, duration; red when unaffordable, blue for own-army spells | 9.3 |
+| 53 | Pack scrolling | Matches: the wheel and the bar run to the row holding the cell after the last used one (`items_view::pack_rows`: in 5 columns `length div 5 − 4` rows), so an item can be put one row past the end; the army window's wide pack (the owner's choice) shows the same cells in rows of its own width | Scroll bar over `max(0, length div 5 − 4)` rows of the used part, rounded | 9.7 |
 | 54 | Army window right side | Matches: the pack with nothing or the hero selected, the promotion tree for any other unit, every portrait locked as the original's (grey, dark brown, vignette: `chrome::lock_portrait`) when the unit is at its first level or of a final class, no note under it; the "Lv" labels and the arrows' colours are Razdor's | Pack when nothing or the hero is selected, the promotion tree for any other unit (every portrait greyed, browned and vignetted when it cannot be promoted) | 9.7 |
 | 55 | Panel icon hover | (see row 42) | A hint box with the icon's name only when hints are on; nothing otherwise | 6, 10 |
-| 56 | Spell badges | Matches: up to four badges along the portrait's bottom on the army, building and battle cards, from the units' slots (running spells with a mana cost, slot order), composed from the install's art (a coloured disc without one), added on hover; the hint with the picture, name, effect text (49b63c), `LifeLost` line and time left with the original's words and quirks (`spell_hint`, `ui::spell_badges`); the box is Razdor's parchment, flipped and clamped to the screen | Four 22 px badges 23 px apart at card + 0x47; 420 px hint box | 9.4 |
+| 56 | Spell badges | Matches: up to four badges along the portrait's bottom on the army, building and battle cards, from the units' slots (running spells with a mana cost, slot order), composed from the install's art (a coloured disc without one), added on hover; the hint with the picture, name, effect text (49b63c), `LifeLost` line and time left with the original's words and quirks (`spell_hint`, `ui::spell_badges`); Razdor's choice (the owner's, 2026-10-18): each effect entry blue when good for the unit and red when bad, where the original colours the whole effect by the target; the box is Razdor's parchment, flipped and clamped to the screen | Four 22 px badges 23 px apart at card + 0x47; 420 px hint box | 9.4 |
 | 57 | Battle card signs | Matches: potion and blessing from the top left, poison and curse from the top right, 23 px apart; the curse and blessing signs set as a magic or a blessing effect ends on the card and kept to the battle's end (the turn order number, Razdor's, moved to the bottom right). The army and building cards show the promotion (the hero's army and a garrison) and then the potion sign from the top left in the same places (`chrome::card_signs`; the hero's helm, Razdor's, takes the first place); their payment sign is still Razdor's and they show no poison sign yet | `Sign-*` badges by the unit's potion, +0xc9, regeneration < 0, +0xc5; outside battle (493a64) also `Sign-Upgrade` first from the left (the hero's army or a building's garrison, a promotion to take) and `Sign-Payment` first from the right (unpaid), poison on any card | 12 |
 | 58 | Shipyard window | Matches: a shipyard opens the original's small ship window on land and nothing at sea (no main hall, no other tab): its picture, the install's `AboutShipyard` text with the owner's name, `NoMoneyForShip` when the gold is short, the price line, "Нанять корабль" (enabled iff ShipCost ≤ gold) and "Отмена"; Buy closes it (`building_view::ship_window`, `Game::window_at`). The text box's font is Razdor's, so its lines wrap a little differently | The ship window on land, nothing at sea; Buy closes it (4bbc84, 4d3ec0, 4c60ac) | 9.8 |
 | 59 | Text markup | Matches: event windows, the tutorial offer and the restart and delete-save boxes read the marks (`dt::markup`): the lines at CR LF and `#\`, the four fonts' colours, `^` centred, the rest justified behind the six-space indent, blank lines kept; the journal shows the marks as typed, as the original's. The text keeps Razdor's face (the original draws it in Benguiat) | `*` `\|` `@` pick the font, `^` centres, other lines justified with an indent; only in the event window's own text and the restart and delete-save boxes | 11 |
@@ -1444,13 +1517,17 @@ parity rule they are candidates to hide or remove, not bugs to copy.
 | 66 | Map hover marks | Matches: the hovered cell's ring in the colour of the original's mark, worked out on entering another cell (`cursor::hover_ring`, `world_view::hover_look`), in place of the army's mark on that cell; the ring stays over the bar; Razdor drops it while the hero walks. Extra (Razdor's choice, a player's wish): the building under the pointer is outlined in gold around its picture (`chrome::silhouette`) | The ring only, under the building's picture | 7.2 |
 | 67 | Battle hover outline | Extra (Razdor's choice, a player's wish, as Razdor's first battle grid had): a cell under the mouse that is not framed otherwise (target, actor, a cell to step to) gets a thin silver outline round its portrait (`battle_view`) | Only a target under the mouse is lit | 12 |
 | 68 | Promotion animation | Matches (`items_view::Promo`): `Unit-Upgrade` on the click, the picked portrait empty with the fading green glow, effect 6 frames 0–15 on it for 500 ms then 16–49 eased down to the unit's portrait, the glow up on all portraits, the class changed 100 ms before the end and the glow down on the new tree, the card under the running `exp` strip, no input meanwhile; at the end nothing selected, the tree up, the panel on the promoted unit until a card is hovered. The time follows the original's portrait distance (1501 / 1746 ms), the path Razdor's own tree places | The same over the original's portraits (4b1a04) | 9.7 |
-| 69 | Name fields (the hero's name, the save's name) | Matches: held Backspace deletes again after 500 ms, then 30 a second (`widgets::repeats`). Extra (Razdor's choice, a player's wish): a normal edit box, the caret placed by the mouse or the arrows, a selection (mouse drag, Shift, Ctrl+A), Delete, Ctrl+C / X / V; the hero window opens with «(нет имени)» selected, so the first key replaces it (`widgets::edit_keys`, `text_edit::TextEdit`) | One character per WM_KEYDOWN, the system's key repeat included (475748, 47a816); the caret always at the end, no selection, no paste; the default name kept with the caret after it (47ae5c) | 5 |
+| 69 | Name fields (the hero's name, the save's name) | Matches: held Backspace deletes again after 500 ms, then 30 a second (`widgets::repeats`). Extra (Razdor's choice, a player's wish): a normal edit box, the caret placed by the mouse or the arrows, a selection (mouse drag, Shift, Ctrl+A), Delete, Ctrl+C / X / V; the hero window opens as the original, with «(нет имени)» and the caret after it, nothing selected (a player's report: the selected name showed a blue band the original never has; `widgets::edit_keys`, `text_edit::TextEdit`) | One character per WM_KEYDOWN, the system's key repeat included (475748, 47a816); the caret always at the end, no selection, no paste; the default name kept with the caret after it (47ae5c) | 5 |
 | 70 | Figures inside buildings | Matches: the hero's and the armies' figures are not drawn while they stand in a building other than a bridge or cross from one building cell to another; gliding in from outside they are seen until the step ends (`World::hides_figure`, `Game::hero_hidden`, `Game::army_hidden`); their one-cell ring stays under the building | 0x497abc empties the drawn-occupant byte; rings are one cell in the Community exe (the vanilla ring round the whole building is a dead branch of 0x48eeb0) | 7.2 |
 | 71 | Pointing at a hire offer | Matches but one quirk (`building_view::barracks`, `hire_panel_on`, `recruit_panel`): the offer's card over the tab column until the hero's grid (nothing selected) or a tab's place brings the tabs back, the green pulsing highlight on its portrait, `[Army]` line 8 (line 10 in red with none left) on the strip, no tooltip; the hero's grid in the hire tab pulses blue under the pointer and green when selected. Not yet: the offer's card shows no building defence or in-building line, where the original keeps the last card's (docs/OPEN_QUESTIONS.md) | 4c6964, 4c72a4, 4cd94c, 4bc98c, 4c612c, 4bb6c8 | 9.5 |
 | 72 | Unit panel figure | Matches (`unit_sheet::figure_rect`): at its own size (at the window's 15/16), its picture centred across the panel and its middle 218 px under the panel's top, in battle, the army, hero and building windows | Unscaled, the picture centred in a 266 × 436 box from the fill's top (492f24 → 476a3c) | 9.1 |
-| 73 | Unit panel item slots on a type preview | Matches: a hovered promotion portrait's type card has no item slots (`items_view::panel_slots`); the slots' own look (Razdor's squares, not ae2860) is Razdor's | A template card (4c39d8, 492f24's fourth argument) sets no slot; empty slots show ae2860 outside battle and the building tabs 1 and 2 | 9.1 |
+| 73 | Unit panel item slots on a type preview | Matches: a hovered promotion portrait's type card has no item slots (`items_view::panel_slots`); an empty slot is the original's ae2860 (a steel ring from `SteelLine`'s first row over 40% black, `chrome::empty_item_slot`), a worn item its picture alone on the parchment | A template card (4c39d8, 492f24's fourth argument) sets no slot; empty slots show ae2860 outside battle and the building tabs 1 and 2 | 9.1 |
 | 74 | Event's own picture (a map's) | Matches: unscrambled ARGB4444, colour from the low 12 bits, alpha (A·17 >> 3)/31, 8/31 for a coloured pixel with A = 0 (`dtm::event_picture_rgba`); read as RGB565 until 2026-10-18 (orange noise on РК6's «Карта окрестностей», a player's report). The editor writes ARGB4444 too | 0x4d1693..0x4d1784 (outside the tutorial; the tutorial blits the words raw, 0x4d179b), colour table 0xae2b50 (0x4e3658), alpha 0x476a3c | 9.8 |
 | 75 | Main hall picture of a building kind without one | Matches: nothing drawn, the window's background shows (`building_view::main_hall`); Razdor drew its own sky, grass and the map sprite until 2026-10-18 (a player's report) | 0x4ba854 case 0 draws pictures only for types 1, 3–7, 10, 12; 0x4bb7c4 repaints the panel from the window surface | 9.8 |
+| 76 | New hero portraits | Matches (`chrome::hero_portrait`): the vignette off, the picked class ×1100/1024, the others grey copies shifted into blue or dark red with the vignette off again, at 16 bits. Razdor tinted them with one multiply colour until 2026-10-18 (a player's report: a flat wash with lifted darks) | 4d7d30, 4c1458 | 5 |
+| 77 | Ability icons' background | Matches (`gfx::key_bottom_left_565`, `chrome::trait_icon`): the colour of the bottom-left pixel transparent at 16 bits, a mod's BMP icon (8 or 24 bits) included. Razdor keyed the shipped violet only until 2026-10-18 (a player's report: a mod's icon on a white square) | 48d02c, 48e8f0, 4764c0, 47669c, 47754c | 9 |
+| 78 | Card stat strip | Matches (`unit_sheet::stat_strip`, `chrome::strip_picture`): the three strip pictures made from the paper, the pieces at the original's places and tints, no shadow; until 2026-10-18 a tinted paper (a deeper hero red, an owner's choice of 2026-10-09) and one pale yellow for every piece (a player's report). The first line still shrinks when another font mode's pieces would touch (Razdor's) | 49462c, 494f93–49565f, pictures 0x4de0f0–0x4de1f7 | 9.5 |
+| 79 | Unit panel text | Matches (`unit_sheet::draw`): lists stacked from the bottom at the original's places, the description 238 px wide with the loaders' six-space indents, shadows, the bold orange wage line. Razdor still cuts a description that would push the name into the panel's top quarter (a mod's long texts), keeps its own darkening gradient and its battle status lines under the stats | 492f24, 4d9060, 48e8f0, 4924c9, 0x48f820, 0x4e4e40 | 9.1 |
 
 ## Unknowns
 
