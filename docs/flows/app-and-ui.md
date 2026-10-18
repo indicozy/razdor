@@ -91,6 +91,19 @@ window's pop-up, the event window's item tooltip), is one box, `item_text::draw`
 and bonus line are the original's (interface.md §9.2), built by `rules::item_text` from the
 install's `[Skills]` labels (`spell_badges::label`).
 
+The pack is the original's 256 cells with holes (`pack::Pack`, `Game::pack`): an item stays in
+the cell it was put in, gains fill the first empty cell. In the hero and army windows items
+move as the original's, by presses only (0x4c24f4): a press takes an item from a pack cell or a
+worn slot of the unit panel onto the pointer (`Game::held_item`, drawn as the pointer by
+`items_view::draw_held`); the next press puts it in a cell (`Game::press_pack`), a worn slot
+(`Game::press_worn`) or, in the army window, on a unit's card (`Game::give_held`: a potion is
+drunk there). `items_view::pack_view` returns the pressed cell, an empty one too. Leaving the
+window by any way puts a held item back in the pack: `Game::drop_held` in `App::frame`'s
+screen change, and `save::restore` for a save made with one held. The filter (Razdor's) lists
+the matching cells packed; an empty row of it puts the held item in the first empty cell, and
+Enter picks the first match up. An empty worn slot on the unit panel is the original's picture
+(`chrome::empty_item_slot`), a worn item its picture alone.
+
 The custom battle's setup (`Screen::CustomSetup`, drawn by `custom_battle::frame` in
 `src/ui/custom_battle.rs`, a Razdor extra) keeps its armies in `rules::custom::Setup`. Its left
 column has two tabs, the unit types (`custom::unit_list`) and the items the picked unit may

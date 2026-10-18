@@ -791,7 +791,7 @@ impl<'a> Runner<'a> {
 
     /// The pack index of row `slot` of the market's sell list (items worth more than 1).
     fn sell_row(g: &Game, slot: usize) -> Option<usize> {
-        (0..g.pack.len()).filter(|&k| g.can_sell(g.pack[k])).nth(slot)
+        g.pack.entries().filter(|&(_, i)| g.can_sell(i)).nth(slot).map(|(k, _)| k)
     }
 
     fn sell(&mut self, slot: usize) {
@@ -956,9 +956,15 @@ impl<'a> Runner<'a> {
         if !self.map_window("equip") {
             return;
         }
-        let kind = self.game.as_ref().and_then(|g| g.pack.get(slot).map(|&i| g.content.item(i).kind));
+        // `slot` counts the pack's items, not its cells (the harness takes the slot-th used
+        // cell, `original.py`'s `equip`).
+        let Some((cell, item)) = self.game.as_ref().and_then(|g| g.pack.entries().nth(slot)) else {
+            self.note(format!("equip {slot} on {unit}: no such pack item"));
+            return;
+        };
+        let kind = self.game.as_ref().map(|g| g.content.item(item).kind);
         self.g().army_window_opened();
-        match self.g().equip(unit, slot) {
+        match self.g().equip(unit, cell) {
             // Its sound as it is taken from the pack, and again as it is worn.
             Ok(()) => {
                 if let Some(kind) = kind {
@@ -997,7 +1003,7 @@ impl<'a> Runner<'a> {
             .map(|(k, s)| json!({"slot": k, "id": s.id, "name": s.name, "mana": g.cast_cost(s).mana, "enemy": crate::rules::magic::targets_enemy(s)}))
             .collect();
         out["book"] = json!(book);
-        let pack: Vec<_> = g.pack.iter().enumerate().map(|(k, &i)| json!({"slot": k, "id": i.0, "name": c.try_item(i).map_or("", |d| d.name.as_str())})).collect();
+        let pack: Vec<_> = g.pack.iter().enumerate().map(|(k, i)| json!({"slot": k, "id": i.0, "name": c.try_item(i).map_or("", |d| d.name.as_str())})).collect();
         out["pack"] = json!(pack);
         if let Some(o) = g.village_offer() {
             out["offer"] = json!(format!("{o:?}"));
@@ -1009,7 +1015,7 @@ impl<'a> Runner<'a> {
                 out["tabs"] = json!(g.tabs_here().iter().map(|t| format!("{t:?}")).collect::<Vec<_>>());
                 if let Some(goods) = g.market_here() {
                     out["goods"] = json!(goods.iter().enumerate().map(|(k, &i)| json!({"slot": k, "id": i.0, "name": c.try_item(i).map_or("", |d| d.name.as_str()), "price": g.buy_price(i)})).collect::<Vec<_>>());
-                    let sell: Vec<_> = (0..g.pack.len()).filter(|&k| g.can_sell(g.pack[k])).enumerate().map(|(row, k)| json!({"slot": row, "id": g.pack[k].0, "price": g.sell_price(g.pack[k])})).collect();
+                    let sell: Vec<_> = g.pack.entries().filter(|&(_, i)| g.can_sell(i)).enumerate().map(|(row, (_, i))| json!({"slot": row, "id": i.0, "price": g.sell_price(i)})).collect();
                     out["sell"] = json!(sell);
                 }
                 if g.heals_here() {

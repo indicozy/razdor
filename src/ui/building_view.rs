@@ -1485,7 +1485,7 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
     super::typography::Role::Title.with(|| chrome::shadow_centered(&heading, dx + dw / 2.0, y + 13.0 * k, 17.0 * k, MARKET_HEADING));
     // The sell list holds only the pack items worth more than 1 (personal items and the
     // cheapest are not bought); a buy price above the gold is red (0x4bca8c).
-    let sellable: Vec<usize> = (0..game.pack.len()).filter(|&k| game.can_sell(game.pack[k])).collect();
+    let sellable: Vec<usize> = game.pack.entries().filter(|&(_, i)| game.can_sell(i)).map(|(k, _)| k).collect();
     let goods = game.market_here().unwrap_or_default();
     // Both lists cheapest first, whatever the item's kind (the owner's choice; the original
     // shows them unsorted, in stock and pack order: 0x4be9a0 jumps over its sort). `order[row]`
@@ -1610,7 +1610,7 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
         // into the bought one's row, or the one above when it was the last; none when the
         // list is empty. A refused trade keeps it where it was.
         if done {
-            let left = if view.selling { game.pack.iter().filter(|&&i| game.can_sell(i)).count() } else { game.market_here().map_or(0, |g| g.len()) };
+            let left = if view.selling { game.pack.iter().filter(|&i| game.can_sell(i)).count() } else { game.market_here().map_or(0, |g| g.len()) };
             view.pick = next_pick(k, left);
         }
     }

@@ -16,7 +16,8 @@
 //! puts the pointer there (`RAZDOR_MOUSE_RIGHT=1` also holds the right button there: the map's tooltips); `RAZDOR_SCENE_SPELLS=<id>,…` puts those spells on every unit; `RAZDOR_SCENE_POTION=1` gives every unit of the army a
 //! drunk potion. `RAZDOR_SCENE_LANGUAGE=1` opens the language list (`title`, `options:advanced`, `settings:<map>:advanced`). `replay:<step>` with `RAZDOR_REPLAY=<actions.jsonl>`: the diff
 //! test's action list played to that step. `RAZDOR_SCENE_BATTLE_EXIT=1` opens a battle
-//! scene's leave-battle window.
+//! scene's leave-battle window. `RAZDOR_SCENE_PACK_AT=<cell>:<id>,…` puts items in those pack
+//! cells; `RAZDOR_SCENE_HELD=<id>` puts an item on the pointer (hero and army windows).
 //!
 //! Every map scene starts its map as a new game (`Game::from_scenario`): nothing is carried
 //! over from a campaign's map before, so a later map whose opening events check for what it
@@ -375,7 +376,21 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
     // `RAZDOR_SCENE_ITEMS=<id>,<id>…`: those items in the hero's pack (the army window's
     // pack, its item hover and pick).
     if let Ok(v) = std::env::var("RAZDOR_SCENE_ITEMS") {
-        game.pack.extend(v.split(',').filter_map(|p| p.trim().parse::<u32>().ok()).map(razdor::rules::content::ItemId));
+        for item in v.split(',').filter_map(|p| p.trim().parse::<u32>().ok()).map(razdor::rules::content::ItemId) {
+            game.pack.add(item);
+        }
+    }
+    // `RAZDOR_SCENE_PACK_AT=<cell>:<id>,…`: those items in those pack cells (holes between
+    // them); `RAZDOR_SCENE_HELD=<id>`: that item on the pointer.
+    if let Ok(v) = std::env::var("RAZDOR_SCENE_PACK_AT") {
+        for (cell, id) in v.split(',').filter_map(|p| p.split_once(':')) {
+            if let (Ok(cell), Ok(id)) = (cell.trim().parse::<usize>(), id.trim().parse::<u32>()) {
+                game.pack.set(cell.min(razdor::rules::game::PACK_SIZE - 1), Some(razdor::rules::content::ItemId(id)));
+            }
+        }
+    }
+    if let Some(id) = std::env::var("RAZDOR_SCENE_HELD").ok().and_then(|v| v.trim().parse::<u32>().ok()) {
+        game.held_item = Some(razdor::rules::content::ItemId(id));
     }
     // `RAZDOR_SCENE_DEBUG=1`: the map's debug overlay (F3) on.
     if std::env::var("RAZDOR_SCENE_DEBUG").is_ok_and(|v| !v.is_empty()) {

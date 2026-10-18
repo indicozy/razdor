@@ -12,7 +12,7 @@ use crate::trf;
 
 use super::battle::{Battle, Outcome, Team};
 use super::content::{Content, ItemId, UnitId};
-use super::game::{Event, Game, PACK_SIZE, SPELL_BOOK_SIZE};
+use super::game::{Event, Game, SPELL_BOOK_SIZE};
 use super::units::Unit;
 
 /// Highest level `level` and `unit` give.
@@ -335,10 +335,10 @@ fn run_on_game(cheat: &Cheat, game: &mut Game) -> Result<Done, String> {
         }
         Cheat::Item(q) => {
             let (item, name, hits) = find_item(&c, q)?;
-            if game.pack.len() >= PACK_SIZE {
+            if game.pack.is_full() {
                 return Err(tr("The pack is full.").into());
             }
-            game.pack.push(item);
+            game.pack.add(item);
             Done::line(trf!("{item} is in the pack.", item = among(&name, hits)))
         }
         Cheat::Spell(q) => {
@@ -540,7 +540,7 @@ mod tests {
         let c = g.content.clone();
         let item = &c.items[0];
         cheat(&mut g, &format!("item {}", item.id)).unwrap();
-        assert_eq!(g.pack.last(), Some(&ItemId(item.id)));
+        assert_eq!(g.pack.items().last(), Some(&ItemId(item.id)));
         let part: String = item.name.chars().skip(1).take(4).collect::<String>().to_uppercase();
         cheat(&mut g, &format!("item {part}")).unwrap();
         assert!(g.pack.len() >= 2);

@@ -835,6 +835,10 @@ pub fn restore(meta: &SaveMeta, mut game: Game, demo: Arc<Content>, install: Opt
     for u in game.squad.iter_mut().filter(|u| u.last_paid == 0) {
         u.last_paid = now;
     }
+    // A save made with an item on the pointer (a quick save in the hero or army window): the
+    // game opens on the map, so the item goes back into the pack as the window's closing
+    // would put it (0x4b8d28 → 0x49a85c).
+    game.drop_held();
     check_content(&game).map_err(SaveError::Mismatch)?;
     Ok(game)
 }
@@ -873,7 +877,7 @@ fn check_content(g: &Game) -> Result<(), String> {
         unit(u.def)?;
         u.items.iter().flatten().chain(&u.potions).try_for_each(|&i| item(i))?;
     }
-    g.pack.iter().try_for_each(|&i| item(i))?;
+    g.pack.iter().try_for_each(item)?;
     let armies = w.armies.iter().chain(w.inactive.iter()).chain(w.respawns.iter().map(|r| &r.army));
     let troops = w.locations.iter().flat_map(|l| l.garrison.iter()).chain(armies.clone().flat_map(|a| a.troops.iter())).chain(w.gang.iter());
     for t in troops {
@@ -1036,6 +1040,24 @@ pub(crate) mod tests {
             g.wait(30);
         }
         assert_eq!(json(&a), json(&b));
+    }
+
+    #[test]
+    fn the_packs_holes_survive_a_save_and_an_item_held_goes_back_into_the_pack() {
+        let c = demo();
+        let mut g = Game::new(c.clone(), HeroClass::Knight);
+        let potion = g.content.item_by_key("heal_potion").unwrap();
+        g.pack = vec![potion, potion, potion].into();
+        g.press_pack(0);
+        g.press_pack(7);
+        g.press_pack(1);
+        assert_eq!(g.held_item, Some(potion));
+        let meta = meta_of(&g, SaveKind::Manual, "test").unwrap();
+        let (m, saved) = decode(&encode(&meta, &g).unwrap()).unwrap();
+        let loaded = restore(&m, saved, c, None).unwrap();
+        // Cell 7 kept; the item held went into the first empty cell (0x4b8d28 → 0x49a85c).
+        assert_eq!(loaded.held_item, None);
+        assert_eq!((0..8).map(|i| loaded.pack.get(i)).collect::<Vec<_>>(), [Some(potion), None, Some(potion), None, None, None, None, Some(potion)]);
     }
 
     #[test]

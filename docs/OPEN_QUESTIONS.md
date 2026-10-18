@@ -8,6 +8,18 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **The army window's wide pack and free placement** (2026-10-18, a player's report on
+  the pack's free cells). The pack now keeps the original's cells with holes (0x68dce0,
+  0x4c24f4), and the hero window shows them 5 to a row as the original. Razdor's army window
+  gives the pack the whole top right (the owner's choice, 2026-10-09), so it shows the same
+  cells in rows of its own width (10 at 1280×800): a row of potions laid out in the hero
+  window wraps differently there. Owner's decision: keep the wide grid, or show 5 columns
+  there too (wider cells or empty space). Also kept as Razdor's: the swap on an occupied worn
+  slot (a player's request, 2026-10-12; the original's press does nothing there), and the
+  filter's Enter picking the first match up. A held item is lost when the window closes with
+  all 256 cells taken, as the original's (0x4b8d28 → 0x49a85c); a purchase into a full pack
+  is lost too (0x4b9e18), where Razdor used to keep it past 256.
+
 - **The scenario list's "the game's own" maps** (2026-10-18, players' wish, main only).
   `ui::new_game::ORIGINAL_MAPS` names the 15 maps of the Community Update install by file
   name; every other map counts as fan-made. Other editions (the vanilla release, an English

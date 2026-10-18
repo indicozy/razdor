@@ -649,7 +649,7 @@ mod tests {
         assert_eq!(g.squad.len(), 3, "the corpse stays in the army");
         let corpse = &g.squad[1];
         assert!(!corpse.alive() && corpse.died_at.is_some());
-        assert!(corpse.items[0] == Some(ItemId(20)) && !g.pack.contains(&ItemId(20)), "Razdor's: the corpse keeps its items");
+        assert!(corpse.items[0] == Some(ItemId(20)) && !g.pack.contains(ItemId(20)), "Razdor's: the corpse keeps its items");
         assert_eq!(g.heal_price(1), None);
         // Resurrection: Round(Cost × 300% × 100 / F) = 50 × 3 / 1.2.
         assert_eq!(g.resurrect_price(1), Some(Price::gold(125)));
@@ -847,7 +847,7 @@ mod tests {
         }).collect();
         assert_eq!(deserted, vec![UnitId(4)]);
         assert_eq!(g.squad.len(), 2);
-        assert!(!g.pack.contains(&ItemId(21)));
+        assert!(!g.pack.contains(ItemId(21)));
     }
 
     #[test]
@@ -1720,7 +1720,7 @@ mod tests {
         s.header.heroes[0] = hero(2, 2, 5000, &[troop(7, 0, 1)]);
         let mut g = inside(&s);
         assert_eq!(g.buy_price(ItemId(24)), 1450 - 1450 * 30 / 100, "Merchant: −30%");
-        g.pack = vec![ItemId(23), ItemId(25)];
+        g.pack = vec![ItemId(23), ItemId(25)].into();
         // Cost × ItemSaleCost × F / 10000 = 300 × 25 × 120 / 10000 = 90; Merchant + 45.
         assert_eq!(g.sell_price(ItemId(23)), 135);
         assert_eq!(g.sell(1), Err(crate::rules::game::TradeError::NotForSale), "worth 1: not sold");
@@ -1808,7 +1808,7 @@ mod tests {
         assert_eq!(g.dismiss(0), Err(ServiceError::Hero));
         let gold = g.gold;
         g.dismiss(1).unwrap();
-        assert_eq!((g.squad.len(), g.pack.clone(), g.gold), (2, vec![], gold));
+        assert_eq!((g.squad.len(), g.pack.items(), g.gold), (2, vec![], gold));
         g.squad[1].hp = 0;
         g.dismiss(1).unwrap();
         assert_eq!(g.squad.len(), 1, "a corpse is buried the same way");
