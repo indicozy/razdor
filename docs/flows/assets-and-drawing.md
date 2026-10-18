@@ -85,6 +85,14 @@ install file ──► src/dt/gfx.rs decode_file ──► gfx::Image (RGBA, not
   `chrome::battle_effect`.
 - Pixel transforms on `gfx::Image` before upload: `chrome::subtract`,
   `chrome::scale_channels`, `chrome::lock_portrait`, `chrome::transform`.
+- Pictures the original makes from another at start-up are made the same way and cached by
+  `chrome::visual_texture`: the brown text box's paper, and the card strips
+  (`chrome::strip_picture`: plain, the hero's red-brown and a named character's blue, all cut
+  from `Win-paper`, 0x4de0f0).
+- The unit cards' strip (`unit_sheet::stat_strip`) and the unit panel's text
+  (`unit_sheet::draw`) are placed in the original's pixels scaled to the card or panel (94 px
+  card, 262 px panel), each text by its cell's top as the original does (`dt_font::cell_baseline`
+  turns that into Razdor's baseline), with the sheet scale snapped by `dt_font::whole_scale`.
 
 ## The world map
 
