@@ -878,6 +878,16 @@ impl App {
                     let _ = world_view::handle_events(g, events, &mut self.message, &mut self.dialogs);
                 }
             }
+            // The hero or army window closes (or gives way to the other): an item on the
+            // pointer goes back into the pack's first empty cell (0x4b8d28 → 0x49a85c).
+            let inventory = |s: &Screen| match s {
+                Screen::Squad { .. } => 1,
+                Screen::Hero(_) => 2,
+                _ => 0,
+            };
+            if let (true, Some(g)) = (inventory(&self.screen) != inventory(&next), self.game.as_mut()) {
+                g.drop_held();
+            }
             // The army window opens: it recounts the hero's army (0x4d1814).
             if let (Screen::Squad { .. }, false, Some(g)) = (&next, matches!(self.screen, Screen::Squad { .. }), self.game.as_mut()) {
                 g.army_window_opened();

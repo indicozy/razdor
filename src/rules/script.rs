@@ -12,7 +12,7 @@
 use super::content::{HeroClass, ItemId, UnitId, WageKind};
 use super::events::{find_unit, ArmyId, EventEngine, EventId, EventOutcome, EventWorld, Holder, Place, UnitRecord};
 use super::units::{SpellSlot, SPELL_SLOTS};
-use super::game::{troop_unit, unit_into_troop, Event, Foe, Game, PACK_SIZE};
+use super::game::{troop_unit, unit_into_troop, Event, Foe, Game};
 use super::town::ServiceError;
 use super::units::Unit;
 use super::world::{Army, EventInfo, Troop};
@@ -466,7 +466,7 @@ impl EventWorld for Game {
     fn player_items(&self) -> (Vec<u8>, Vec<u8>) {
         let id = |i: &ItemId| u8::try_from(i.0).ok();
         let worn = self.squad.iter().flat_map(|u| u.items.iter().flatten()).filter_map(id).collect();
-        (self.pack.iter().filter_map(id).collect(), worn)
+        (self.pack.iter().filter_map(|i| id(&i)).collect(), worn)
     }
 
     fn faction_worn_items(&self, faction: u8) -> Vec<u8> {
@@ -548,9 +548,7 @@ impl EventWorld for Game {
             if weakest < self.squad.len() {
                 let u = self.squad.remove(weakest);
                 for item in u.items.iter().flatten() {
-                    if self.pack.len() < PACK_SIZE {
-                        self.pack.push(*item);
-                    }
+                    self.pack.add(*item);
                 }
             }
         }
@@ -633,16 +631,15 @@ impl EventWorld for Game {
 
     fn give_item(&mut self, artifact: u8) {
         let item = ItemId(artifact as u32);
-        if self.content.try_item(item).is_some() && self.pack.len() < PACK_SIZE {
-            self.pack.push(item);
+        if self.content.try_item(item).is_some() {
+            self.pack.add(item);
         }
     }
 
     /// From the pack, else from whoever wears it.
     fn take_item(&mut self, artifact: u8) {
         let item = ItemId(artifact as u32);
-        if let Some(k) = self.pack.iter().position(|&i| i == item) {
-            self.pack.remove(k);
+        if self.pack.remove_first(item) {
             return;
         }
         let c = self.content.clone();
@@ -811,9 +808,7 @@ impl EventWorld for Game {
                 // Rebuilt: its HP follows its maximum.
                 u.follow_max(&c, before);
                 for item in old {
-                    if self.pack.len() < PACK_SIZE {
-                        self.pack.push(item);
-                    }
+                    self.pack.add(item);
                 }
             }
             Holder::Army(a) => {
@@ -1100,7 +1095,7 @@ pub struct NextMap {
     /// Byte 4: the hero keeps his four worn items; off, his slots are emptied.
     pub hero_items: bool,
     /// Byte 5: the pack, which replaces the next map's.
-    pub inventory: Option<Vec<ItemId>>,
+    pub inventory: Option<crate::rules::pack::Pack>,
     /// Byte 6: the army after the hero, which replaces the next map's (its preset troops are
     /// lost); the dead are dropped there. Every unit's spell slots are emptied.
     pub army: Option<Vec<Unit>>,
@@ -1754,7 +1749,7 @@ mod tests {
         g.world.armies[0].mind.clean.insert(crate::rules::ai::HERO);
         let events = g.answer_question(true);
         assert_eq!(fired(&events), vec![1]);
-        assert_eq!((g.gold, g.pack.clone()), (60, vec![ItemId(9)]));
+        assert_eq!((g.gold, g.pack.items()), (60, vec![ItemId(9)]));
         assert_eq!(g.pending_question(), None);
         // The event took effect: the AI rescores the hero (0x4ab1ec → 0x497240(0, 1)).
         assert!(!g.world.armies[0].mind.clean.contains(&crate::rules::ai::HERO));
@@ -2323,7 +2318,7 @@ mod tests {
             hero: g.squad[0].clone(),
             spells: Some(vec![2, 5]),
             hero_items: true,
-            inventory: Some(vec![ItemId(7)]),
+            inventory: Some(vec![ItemId(7)].into()),
             army: Some(vec![Unit { unpaid: true, last_paid: 0, ..g.squad[1].clone() }, dead]),
             flags: String::new(),
             class: HeroClass::Knight,
@@ -2334,7 +2329,7 @@ mod tests {
         let mut all = world(vec![]);
         all.header.carry_over = [1; 7];
         let mut fresh = start(&all);
-        fresh.pack = vec![ItemId(3)];
+        fresh.pack = vec![ItemId(3)].into();
         let hp = g.squad[0].hp;
         fresh.apply_carry_over(&next);
         assert_eq!((fresh.squad[0].level, fresh.squad[0].xp, fresh.squad[0].hp), (4, 33, hp), "his wounds stay");
@@ -2350,15 +2345,15 @@ mod tests {
         // this map's book, no worn items, this map's pack and preset army behind the old
         // hero, whatever the old map offered.
         let mut again = start(&world(vec![]));
-        again.pack = vec![ItemId(3)];
+        again.pack = vec![ItemId(3)].into();
         let book = again.spells.clone();
         let preset = again.squad.len();
         let gold = again.gold;
         again.apply_carry_over(&next);
         assert_eq!((again.squad[0].level, again.squad[0].xp), (1, 0));
         assert_eq!((again.spells.clone(), again.squad[0].items), (book, [None; 4]));
-        assert_eq!((again.gold, again.pack.clone()), (gold, vec![ItemId(3)]));
-        assert_eq!((again.squad.len(), again.pack.clone()), (preset, vec![ItemId(3)]));
+        assert_eq!((again.gold, again.pack.items()), (gold, vec![ItemId(3)]));
+        assert_eq!((again.squad.len(), again.pack.items()), (preset, vec![ItemId(3)]));
     }
 
     /// РК2's mines: a fort's own event asks for the peasants once the fort is the player's.
@@ -2477,7 +2472,7 @@ mod tests {
         assert_eq!(rk4.header.carry_over, [1, 1, 1, 1, 1, 0, 0]);
         let content = Arc::new(crate::rules::content::Content::from_dt(&dt));
         let mut g = Game::from_scenario(content.clone(), &rk3, HeroClass::Knight);
-        g.pack = vec![ItemId(content.items[0].id)];
+        g.pack = vec![ItemId(content.items[0].id)].into();
         g.squad[0].items[0] = Some(ItemId(content.items[0].id));
         g.gold = 1234;
         // A soldier hired on РК3.

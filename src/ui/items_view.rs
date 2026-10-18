@@ -3,10 +3,10 @@ use macroquad::prelude::*;
 
 use razdor::i18n::{n_, tr};
 use razdor::rules::battle::Team;
-use razdor::rules::content::{ArtefactType, Content, ItemId, Stat, UnitId};
+use razdor::rules::content::{Content, ItemId, Stat, UnitId};
 use razdor::rules::experience::is_percent_stat;
 use razdor::rules::game::{Game, PACK_SIZE};
-use razdor::rules::items::{EquipError, Given, ItemFrom};
+use razdor::rules::items::{EquipError, Given, Press};
 use razdor::rules::units::Unit;
 
 use super::assets::Assets;
@@ -101,30 +101,7 @@ fn equip_error(e: EquipError) -> String {
 /// Backpack grid: 5 columns as in the original, scrolling.
 const PACK_COLS: usize = 5;
 
-/// Where a held item was picked up.
-#[derive(Clone, Copy)]
-enum From {
-    Pack(usize),
-    /// Squad member, item slot.
-    Worn(usize, usize),
-}
-
-/// An item under the pressed mouse button. Let go where it was picked up, it is a click
-/// (wear or drink it on the selected unit, or take it off); moved, it is dragged, as in the
-/// original, onto a unit's card to hand it over.
-#[derive(Clone, Copy)]
-struct Held {
-    from: From,
-    item: ItemId,
-    at: Vec2,
-    moved: bool,
-}
-
-/// Pixels the mouse must move before a press becomes a drag.
-const DRAG_START: f32 = 5.0;
-
 thread_local! {
-    static HELD: std::cell::Cell<Option<Held>> = const { std::cell::Cell::new(None) };
     /// The unit whose Dismiss (or Bury) was pressed: confirm or cancel (0x4c3744).
     static CONFIRM: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
     /// A battle effect playing over a unit's card (0x4b11cc).
@@ -249,47 +226,58 @@ fn card_fx(effect: usize, unit: usize, dismiss: bool) {
     CARD_FX.with(|f| f.set(Some(CardFx { effect, unit, t0_ms: now_ms(), ms, dismiss })));
 }
 
-/// Squad member `unit` wears or drinks the pack item at `i`; the message to show, if any.
-fn use_pack_item(game: &mut Game, unit: usize, i: usize) -> Option<String> {
-    let c = game.content.clone();
-    let item = *game.pack.get(i)?;
-    let kind = c.item(item).kind;
-    let name = game.squad.get(unit)?.name(&c).to_string();
-    if kind == ArtefactType::Potion {
-        let drunk = game.drink(unit, i);
-        if drunk.is_ok() {
-            card_fx(5, unit, false);
-        }
-        Some(match drunk {
-            Ok(healed) if healed > 0 => razdor::trf!("{name} drinks it: +{healed} hits.", name, healed),
-            Ok(_) => razdor::trf!("{name} drinks it. The effect lasts until the next battle ends.", name),
-            Err(e) => equip_error(e),
-        })
-    } else {
-        let done = game.equip(unit, i);
-        if done.is_ok() {
-            cue(Cue::Item(kind));
-        }
-        done.err().map(equip_error)
+/// The item's sound as a press picks it up or puts it down (0x4c24f4 → 0x49a994: on a swap,
+/// the one picked up).
+fn press_sound(game: &Game, press: Press) {
+    let item = match press {
+        Press::Picked(i) | Press::Put(i) | Press::Swapped { picked: i, .. } => i,
+        Press::Nothing => return,
+    };
+    if let Some(def) = game.content.try_item(item) {
+        cue(Cue::Item(def.kind));
     }
 }
 
-/// An item dropped on squad member `to`'s card ([`Game::give_item`]): a potion is drunk,
-/// the hero's card sends anything else to the pack, another unit wears it. The message to
-/// show, if any.
-fn give_on_card(game: &mut Game, from: From, to: usize) -> Option<String> {
+/// A press on pack cell `i`, as the original's (0x4c24f4): the item there is picked up onto
+/// the pointer, or the item held is put there (an empty cell anywhere keeps it) or swapped
+/// with it.
+fn pack_press(game: &mut Game, i: usize) {
+    let press = game.press_pack(i);
+    press_sound(game, press);
+}
+
+/// A press on worn slot `slot` of squad member `unit`'s panel (0x4c24f4): the item is taken
+/// off onto the pointer, or the item held is put on (the wear test's refusal is the message).
+fn worn_press(game: &mut Game, unit: usize, slot: usize) -> Option<String> {
+    match game.press_worn(unit, slot) {
+        Ok(press) => {
+            press_sound(game, press);
+            None
+        }
+        Err(e) => Some(equip_error(e)),
+    }
+}
+
+/// The item on the pointer drawn as the pointer, the original's 55 px picture centred on it
+/// (the record at 0xae1da0, hotspot (−27, −27), takes the item's picture: 0x4c24f4).
+fn draw_held(game: &Game, assets: &Assets) {
+    if let Some(item) = game.held_item {
+        let (mx, my) = pointer();
+        let s = 55.0 * chrome::k();
+        assets.draw_item(item, mx - s / 2.0, my - s / 2.0, s);
+        super::cursor::set(super::cursor::Shape::Hidden);
+    }
+}
+
+/// A press with an item held on squad member `to`'s card ([`Game::give_held`], 0x4c346c →
+/// 0x4979c4): a potion is drunk, the hero's card sends anything else to the pack, another
+/// unit wears it; a refusal keeps it on the pointer. The message to show, if any.
+fn card_press(game: &mut Game, to: usize) -> Option<String> {
     let c = game.content.clone();
-    let source = match from {
-        From::Pack(i) => ItemFrom::Pack(i),
-        From::Worn(unit, slot) => ItemFrom::Worn { unit, slot },
-    };
-    let item = match source {
-        ItemFrom::Pack(i) => game.pack.get(i).copied(),
-        ItemFrom::Worn { unit, slot } => game.squad.get(unit).and_then(|u| u.items[slot]),
-    }?;
+    let item = game.held_item?;
     let kind = c.item(item).kind;
     let name = game.squad.get(to)?.name(&c).to_string();
-    match game.give_item(source, to) {
+    match game.give_held(to) {
         Ok(Given::Drunk(healed)) => {
             card_fx(5, to, false);
             Some(if healed > 0 {
@@ -412,13 +400,21 @@ fn draw_effect_frame(c: &Content, n: usize, i: usize, at: Vec2, px: f32) {
     });
 }
 
-/// The backpack: 5 columns of the original's inventory squares, scrolling. Returns the
-/// pack index pressed.
+/// How many rows the pack scrolls over: the rows down to the one holding the cell after the
+/// last used one (0x49a718: the first shown cell is 5 × Round(max(0, length div 5 − 4) × s),
+/// so with 5 rows shown the top row goes down to length div 5 − 4), in `cols` columns.
+fn pack_rows(len: usize, cols: usize) -> usize {
+    (len / cols.max(1) + 1).min(PACK_SIZE.div_ceil(cols.max(1)))
+}
+
+/// The backpack: 5 columns of the original's inventory squares, the pack's cells in order a
+/// row at a time, scrolling. Returns the cell pressed (an empty one too: an item put there
+/// stays there, 0x4c24f4).
 fn pack_view(game: &Game, assets: &Assets, r: Rect, scroll: &mut usize, hover: &mut Option<ItemId>) -> Option<usize> {
     let k = chrome::k();
     let cell = ((r.w - 18.0 * k) / PACK_COLS as f32).floor();
     let rows_shown = ((r.h / cell).floor() as usize).max(1);
-    let rows = PACK_SIZE.div_ceil(PACK_COLS);
+    let rows = pack_rows(game.pack.len(), PACK_COLS).max(rows_shown);
     let max_scroll = rows.saturating_sub(rows_shown);
     if mouse_in(r.x, r.y, r.w, r.h) {
         let w = wheel();
@@ -445,13 +441,23 @@ fn pack_view(game: &Game, assets: &Assets, r: Rect, scroll: &mut usize, hover: &
                     draw_rectangle_lines(cr.x, cr.y, cr.w, cr.h, 1.0, Color::new(0.5, 0.35, 0.2, 0.8));
                 }
             }
-            let Some(&item) = game.pack.get(i) else { continue };
-            assets.draw_item(item, cr.x + 2.0, cr.y + 2.0, cell - 4.0);
+            if i >= PACK_SIZE {
+                continue;
+            }
+            let cell_at = i;
+            let item = game.pack.get(i);
+            if let Some(item) = item {
+                assets.draw_item(item, cr.x + 2.0, cr.y + 2.0, cell - 4.0);
+            }
             if mouse_in(cr.x, cr.y, cr.w, cr.h) {
-                *hover = Some(item);
-                draw_rectangle_lines(cr.x, cr.y, cr.w, cr.h, 2.0, chrome::GOLD);
+                if item.is_some() || game.held_item.is_some() {
+                    draw_rectangle_lines(cr.x, cr.y, cr.w, cr.h, 2.0, chrome::GOLD);
+                }
+                if item.is_some() {
+                    *hover = item;
+                }
                 if clicked() {
-                    hit = Some(i);
+                    hit = Some(cell_at);
                 }
             }
         }
@@ -619,7 +625,6 @@ pub fn squad(
     // The right side: the pack, or this unit's promotion tree and Dismiss row (0x498d0c).
     let tree_of = selected.tree();
     let u = game.squad[sel].clone();
-    let mut held = HELD.with(|h| h.get());
     // A promotion portrait hovered shows its class on the left panel, as a fresh unit of it
     // (0x4c39d8: level 1, no items, no status or row bonus).
     let panel_type = PANEL_TYPE.with(|p| p.get()).filter(|_| tree_of.is_some());
@@ -633,7 +638,8 @@ pub fn squad(
     };
     let showing_type = panel_type.is_some();
 
-    // The unit's panel; a click on a worn item takes it off.
+    // The unit's panel; a press on a worn slot picks its item up or puts the held one on
+    // (0x4c24f4).
     // In a building of his the hero's units show its defence with their own, "15 + 20"
     // (army +0x378c, as the cards: 0x49462c); a class preview shows none.
     let bd = if showing_type { 0 } else { game.hero_building_defence() };
@@ -674,19 +680,9 @@ pub fn squad(
     let locked = |slot: usize| showing_type || (u.alive() && slot < u.personal as usize);
     let pressed_slot = unit_sheet::draw(assets, &c, sheet_rect, &sheet, true, &mut hover);
     let personal_hover = hover.is_some_and(|h| u.items.iter().enumerate().any(|(s, i)| *i == Some(h) && locked(s)));
-    if let Some(slot) = pressed_slot.filter(|&s| !locked(s)) {
-        if let Some(item) = u.items[slot] {
-            // An item taken up plays its sound, and again where it goes (interface.md §14).
-            cue(Cue::Item(c.item(item).kind));
-            held = Some(Held { from: From::Worn(sel, slot), item, at: pointer().into(), moved: false });
-        }
+    if let Some(slot) = pressed_slot.filter(|_| !showing_type) {
+        *message = worn_press(game, sel, slot);
     }
-    // The worn slot under the pointer: a carried item let go there goes into that very slot
-    // (the hero window's click on a worn slot, 0x4c24f4).
-    let slot_under = {
-        let (mx, my) = pointer();
-        unit_sheet::slot_rects(sheet_rect).iter().position(|r| r.contains(vec2(mx, my))).filter(|&s| !showing_type && !locked(s))
-    };
     draw_line(win.x + 247.0 * k, win.y + 27.0 * k, win.x + 247.0 * k, win.y + wh - 2.0, 1.5 * k, chrome::SILVER);
 
     // Top middle, as the original switches it: the hero's backpack, or the selected unit's
@@ -713,15 +709,9 @@ pub fn squad(
             let who = game.squad_label(t);
             tree_hint = chrome::ui_line("Army", n).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).map(|line| line.replace("#NAME1", &format!("\"{who}\"")));
         }
-    } else if let Some(i) = pack_view(game, assets, content, scroll, &mut hover) {
-        cue(Cue::Item(c.item(game.pack[i]).kind));
-        held = Some(Held { from: From::Pack(i), item: game.pack[i], at: pointer().into(), moved: false });
-    }
-    if let Some(h) = held.as_mut() {
-        h.moved |= Vec2::from(pointer()).distance(h.at) > DRAG_START;
-        if h.moved {
-            hover = Some(h.item);
-        }
+    } else if let Some(cell) = pack_view(game, assets, content, scroll, &mut hover) {
+        *message = None;
+        pack_press(game, cell);
     }
 
     // Top right: the item under the mouse; under it, for a unit other than the hero, its
@@ -877,11 +867,15 @@ pub fn squad(
         (Some(m), _) => (m.clone(), chrome::GOLD),
         (None, Some(p)) => (p, Color::new(1.0, 0.55, 0.25, 1.0)),
         (None, None) if show_tree => (tr("Click a unit to select it; Esc returns").to_string(), Color::new(1.0, 0.55, 0.25, 1.0)),
-        (None, None) => (tr("Drag an item onto a unit to give it; Esc returns").to_string(), Color::new(1.0, 0.55, 0.25, 1.0)),
+        (None, None) => (tr("Click an item to pick it up, then a unit, a slot or a cell to put it; Esc returns").to_string(), Color::new(1.0, 0.55, 0.25, 1.0)),
     };
     chrome::hint_strip(strip, &hint, hc);
     // The press, as the original's (0x4c346c), ignored while a card slides (busy 0x68dc63).
-    if let (Some((on, slot)), None) = (pressed, slide) {
+    if let (Some((Some(to), _)), None, true) = (pressed, slide, game.held_item.is_some()) {
+        // An item held, pressed on a unit's card: it is given to him (0x4c346c → 0x4979c4);
+        // no selection, swap or slide.
+        *message = card_press(game, to);
+    } else if let (Some((on, slot)), None) = (pressed, slide) {
         *message = None;
         match selected.press(on) {
             GridPress::Swap { selected: s, pressed: p } => {
@@ -912,46 +906,11 @@ pub fn squad(
         *selected = ArmySel::default();
     }
 
-    // The held item follows the mouse; let go, it goes to the card or the pack under it.
-    if let Some(h) = held {
-        let (mx, my) = pointer();
-        if h.moved {
-            let s = 48.0 * k;
-            assets.draw_item(h.item, mx - s / 2.0, my - s / 2.0, s);
-            // The item held is the pointer (0x4c24f4: its picture in the pointer's record).
-            super::cursor::set(super::cursor::Shape::Hidden);
-        }
-        if is_mouse_button_down(MouseButton::Left) {
-            HELD.with(|c| c.set(Some(h)));
-        } else {
-            HELD.with(|c| c.set(None));
-            let over_pack = !show_tree && content.contains(vec2(mx, my));
-            // A drop on a card is the army window's (0x4979c4); on the unit panel, the hero
-            // window's: it wears the item.
-            let card = if h.moved { card_under } else { None };
-            let on_sheet = h.moved && card.is_none() && sheet_rect.contains(vec2(mx, my));
-            let worn = |done: Result<(), EquipError>| {
-                if done.is_ok() {
-                    cue(Cue::Item(c.item(h.item).kind));
-                }
-                done.err().map(equip_error)
-            };
-            match (h.from, h.moved, card, slot_under.filter(|_| on_sheet)) {
-                (From::Pack(i), false, _, _) => *message = use_pack_item(game, sel, i),
-                (From::Worn(unit, slot), false, _, _) => *message = game.unequip(unit, slot).err().map(equip_error),
-                (from, true, Some(t), _) => *message = give_on_card(game, from, t),
-                (From::Pack(i), true, None, Some(s)) => *message = worn(game.equip_at(sel, i, Some(s))),
-                (From::Worn(unit, slot), true, None, Some(s)) => *message = worn(game.move_worn(unit, slot, sel, s)),
-                (From::Pack(i), true, None, None) if on_sheet => *message = use_pack_item(game, sel, i),
-                (From::Worn(unit, slot), true, None, None) if on_sheet && sel != unit => *message = worn(game.give(unit, slot, sel)),
-                (From::Worn(unit, slot), true, None, _) if over_pack => *message = game.unequip(unit, slot).err().map(equip_error),
-                _ => {}
-            }
-        }
-    }
+    // The item held is the pointer; closing the window puts it back in the pack (the
+    // screen change in `App::frame`, 0x4b8d28).
+    draw_held(game, assets);
 
     if close || key(KeyCode::Escape) || key(KeyCode::A) {
-        HELD.with(|c| c.set(None));
         super::unit_drag::cancel();
         SLIDE.with(|c| c.set(None));
         PANEL_UNIT.with(|u| u.set(None));
@@ -970,7 +929,6 @@ pub fn squad(
         other => other,
     };
     if next.is_some() {
-        HELD.with(|c| c.set(None));
         SLIDE.with(|c| c.set(None));
         PANEL_UNIT.with(|u| u.set(None));
         super::unit_drag::cancel();
@@ -1112,31 +1070,18 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
         battle: false,
     };
     let sheet_rect = Rect::new(win.x + 2.0 * k, win.y + 27.0 * k, 244.0 * k, 570.0 * k);
-    let locked = |slot: usize| u.alive() && slot < u.personal as usize;
-    let mut held = HELD.with(|h| h.get());
-    if let Some(slot) = unit_sheet::draw(assets, &c, sheet_rect, &sheet, true, &mut hover).filter(|&s| !locked(s)) {
-        if let Some(item) = u.items[slot] {
-            cue(Cue::Item(c.item(item).kind));
-            held = Some(Held { from: From::Worn(0, slot), item, at: pointer().into(), moved: false });
-        }
+    // A press on a worn slot picks its item up or puts the held one on (0x4c24f4; the hero
+    // window shows the hero's slots: 0x4b8d28 selects him as it opens).
+    if let Some(slot) = unit_sheet::draw(assets, &c, sheet_rect, &sheet, true, &mut hover) {
+        *message = worn_press(game, 0, slot);
     }
-    let slot_under = {
-        let (mx, my) = pointer();
-        unit_sheet::slot_rects(sheet_rect).iter().position(|r| r.contains(vec2(mx, my))).filter(|&s| !locked(s))
-    };
     draw_line(win.x + 247.0 * k, win.y + 27.0 * k, win.x + 247.0 * k, win.y + win.h - 2.0, 1.5 * k, chrome::SILVER);
 
     // The pack: 25 squares of 55 px from (274, 37), the scroll bar right of them.
     let pack = o(274.0, 37.0, 275.0 + 18.0 / HERO_S, 275.0);
-    if let Some(i) = pack_view(game, assets, pack, &mut view.scroll, &mut hover) {
-        cue(Cue::Item(c.item(game.pack[i]).kind));
-        held = Some(Held { from: From::Pack(i), item: game.pack[i], at: pointer().into(), moved: false });
-    }
-    if let Some(h) = held.as_mut() {
-        h.moved |= Vec2::from(pointer()).distance(h.at) > DRAG_START;
-        if h.moved {
-            hover = Some(h.item);
-        }
+    if let Some(cell) = pack_view(game, assets, pack, &mut view.scroll, &mut hover) {
+        *message = None;
+        pack_press(game, cell);
     }
 
     // A box's title over it, as 0x48e750 draws them: centred, in Benguiat.
@@ -1149,7 +1094,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     // The item description box (310 × 164 at 58): the item under the pointer.
     let desc = o(576.0, 58.0, 310.0, 164.0);
     heading("ItemDescript", n_("Item description"), desc);
-    match hover.filter(|_| held.is_none_or(|h| !h.moved)) {
+    match hover.filter(|_| game.held_item.is_none()) {
         Some(item) => super::item_text::draw(game, assets, item, desc, super::item_text::ItemBox::Inventory, s),
         None => chrome::text_box(desc),
     }
@@ -1235,53 +1180,14 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
         draw_markup_row_face(&line.row, entry.x + 8.0 * s, y, room, line.size, line.face, Some(line.color));
     }
 
-    // The held item follows the pointer; let go, it goes to a worn slot, the panel or the pack.
-    if let Some(h) = held {
-        let (mx, my) = pointer();
-        if h.moved {
-            let sz = 48.0 * k;
-            assets.draw_item(h.item, mx - sz / 2.0, my - sz / 2.0, sz);
-            super::cursor::set(super::cursor::Shape::Hidden);
-        }
-        if is_mouse_button_down(MouseButton::Left) {
-            HELD.with(|c| c.set(Some(h)));
-        } else {
-            HELD.with(|c| c.set(None));
-            let on_sheet = h.moved && sheet_rect.contains(vec2(mx, my));
-            let over_pack = pack.contains(vec2(mx, my));
-            let worn = |game: &mut Game, done: Result<(), EquipError>| {
-                if done.is_ok() {
-                    cue(Cue::Item(game.content.item(h.item).kind));
-                }
-                done.err().map(equip_error)
-            };
-            let said = match (h.from, h.moved, slot_under.filter(|_| on_sheet)) {
-                (From::Pack(i), false, _) => use_pack_item(game, 0, i),
-                (From::Worn(_, slot), false, _) => game.unequip(0, slot).err().map(equip_error),
-                (From::Pack(i), true, Some(slot)) => {
-                    let done = game.equip_at(0, i, Some(slot));
-                    worn(game, done)
-                }
-                (From::Worn(_, from), true, Some(slot)) => {
-                    let done = game.move_worn(0, from, 0, slot);
-                    worn(game, done)
-                }
-                (From::Pack(i), true, None) if on_sheet => use_pack_item(game, 0, i),
-                (From::Worn(_, slot), true, None) if over_pack => game.unequip(0, slot).err().map(equip_error),
-                _ => None,
-            };
-            if said.is_some() {
-                *message = said;
-            }
-        }
-    }
+    // The item held is the pointer; closing the window puts it back in the pack (the screen
+    // change in `App::frame`, 0x4b8d28).
+    draw_held(game, assets);
     if close || key(KeyCode::Escape) {
-        HELD.with(|c| c.set(None));
         *message = None;
         return Some(Screen::WorldMap);
     }
     if bar.is_some() {
-        HELD.with(|c| c.set(None));
         *message = None;
     }
     bar
