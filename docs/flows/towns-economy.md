@@ -96,6 +96,10 @@ prices centred in their column, each title centred over its column. The market's
 column is Win-paper less the same (`chrome::paper_minus`); a pick adds (64, 64, 64). The
 sanctuary's (`spell_list`) is one Win-paper panel less (148, 132, 148), darker below the last
 spell, the pictures straight on it; a pick adds (24, 32, 24).
+A click on a column title sorts either list (`ListSort` in `BuildingView::sort`, Razdor's
+addition, main only): «Название» A→Я, Я→A, own order; «Цена» dearest first, cheapest first,
+own order; the pick follows its item (`same_pick`). A new window or tab starts unsorted. On
+the market the titles' line still starts the filter when clicked beside the titles.
 
 **Sanctuary UI** (`sanctuary`, `spell_list`, 0x4ba854): the first spell starts selected.
 Known spells have blue names and prices, the others yellow whatever the gold (the original

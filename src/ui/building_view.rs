@@ -87,6 +87,8 @@ pub struct BuildingView {
     pub garrison_buy: Option<(usize, Slot, i32)>,
     /// What the market's filter line holds (`ui::item_filter`).
     pub filter: String,
+    /// How the market's or the sanctuary's list is sorted (Razdor's addition, [`ListSort`]).
+    pub sort: ListSort,
     /// The village window took the tribute: its close plays `Item-Gold` (0x4c604a).
     pub tribute_paid: bool,
     /// The gold and mana the village paid as the hero came in: what its window shows.
@@ -163,7 +165,7 @@ fn now_ms() -> i64 {
 
 impl BuildingView {
     pub fn new(tab: Tab) -> BuildingView {
-        BuildingView { tab, pick: None, scroll: 0, hall_pick: None, hall_scroll: 0, selling: false, garrison_sel: None, garrison_buy: None, filter: String::new(), tribute_paid: false, tribute: (0, 0), anim: None, hire_panel: None }
+        BuildingView { tab, pick: None, scroll: 0, hall_pick: None, hall_scroll: 0, selling: false, garrison_sel: None, garrison_buy: None, filter: String::new(), sort: ListSort::Shown, tribute_paid: false, tribute: (0, 0), anim: None, hire_panel: None }
     }
 
     fn switch(&mut self, tab: Tab) {
@@ -1352,6 +1354,84 @@ fn price_list_in_face(assets: Option<&Assets>, rows: &[(Option<ItemId>, String, 
     hit
 }
 
+/// A list column whose title sorts the list when clicked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Column {
+    Name,
+    Price,
+}
+
+/// How the market's or the sanctuary's list is sorted by clicks on its column titles.
+/// Razdor's addition (the owner's request after a player's report), not the original's: the
+/// original cannot sort these lists. `Shown` is the list's own order, which a new window or
+/// tab starts with.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ListSort {
+    #[default]
+    Shown,
+    /// А to Я.
+    NameUp,
+    /// Я to А.
+    NameDown,
+    /// The dearest first.
+    PriceDown,
+    /// The cheapest first.
+    PriceUp,
+}
+
+impl ListSort {
+    /// The sort after a click on a column's title: «Название» A→Я, then Я→A, then the list's
+    /// own order; «Цена» the dearest first, then the cheapest first, then the own order.
+    fn clicked(self, c: Column) -> ListSort {
+        match (c, self) {
+            (Column::Name, ListSort::NameUp) => ListSort::NameDown,
+            (Column::Name, ListSort::NameDown) => ListSort::Shown,
+            (Column::Name, _) => ListSort::NameUp,
+            (Column::Price, ListSort::PriceDown) => ListSort::PriceUp,
+            (Column::Price, ListSort::PriceUp) => ListSort::Shown,
+            (Column::Price, _) => ListSort::PriceDown,
+        }
+    }
+}
+
+/// A name's key in alphabetical order, case left out; «ё» right after «е».
+fn alphabet_key(s: &str) -> Vec<(char, bool)> {
+    s.chars().flat_map(char::to_lowercase).map(|c| if c == 'ё' { ('е', true) } else { (c, false) }).collect()
+}
+
+/// `base` (the list's own order: indices into `names` and `prices`) sorted by `sort`; rows
+/// with equal keys keep their order in `base`.
+fn sorted_rows<P: Ord>(base: &[usize], names: &[&str], prices: &[P], sort: ListSort) -> Vec<usize> {
+    let mut order = base.to_vec();
+    match sort {
+        ListSort::Shown => {}
+        ListSort::NameUp => order.sort_by_cached_key(|&n| alphabet_key(names[n])),
+        ListSort::NameDown => order.sort_by(|&a, &b| alphabet_key(names[b]).cmp(&alphabet_key(names[a]))),
+        ListSort::PriceDown => order.sort_by(|&a, &b| prices[b].cmp(&prices[a])),
+        ListSort::PriceUp => order.sort_by(|&a, &b| prices[a].cmp(&prices[b])),
+    }
+    order
+}
+
+/// The row that shows what row `pick` of `before` showed, in the order `after`.
+fn same_pick(before: &[usize], after: &[usize], pick: Option<usize>) -> Option<usize> {
+    let item = before.get(pick?)?;
+    after.iter().position(|n| n == item)
+}
+
+/// The column whose title (centred on `name_cx` or `price_cx`, its baseline `y`, in `size`)
+/// was clicked this frame, if any; measured in the font active when called.
+fn title_clicked((name, price): (&str, &str), (name_cx, price_cx): (f32, f32), y: f32, size: f32) -> Option<Column> {
+    if !clicked() {
+        return None;
+    }
+    let k = chrome::k();
+    [(Column::Name, name, name_cx), (Column::Price, price, price_cx)].into_iter().find_map(|(c, s, cx)| {
+        let w = measure(s, size).width + 8.0 * k;
+        mouse_in(cx - w / 2.0, y - size, w, size + 6.0 * k).then_some(c)
+    })
+}
+
 /// The market rows' order: indices of `prices`, cheapest first; equal prices keep their
 /// stock or pack order (a stable sort).
 fn cheapest_first<P: Ord>(prices: &[P]) -> Vec<usize> {
@@ -1413,7 +1493,26 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
     // shows them unsorted, in stock and pack order: 0x4be9a0 jumps over its sort). `order[row]`
     // is the row's index in `sellable` or in the goods, which the trade takes.
     let prices: Vec<_> = if view.selling { sellable.iter().map(|&n| game.sell_price(game.pack[n])).collect() } else { goods.iter().map(|&i| game.buy_price(i)).collect() };
-    let order = cheapest_first(&prices);
+    let names: Vec<&str> = if view.selling { sellable.iter().map(|&n| c.item(game.pack[n]).name.as_str()).collect() } else { goods.iter().map(|&i| c.item(i).name.as_str()).collect() };
+    let own_order = cheapest_first(&prices);
+    // A click on «Название» or «Цена» sorts the list (Razdor's addition, `ListSort`; the
+    // original's titles do nothing). The picked item stays picked.
+    let (name_head, price_head) = (own_text("Building", "ItemName", n_("Name")), own_text("Building", "ItemCost", n_("Price")));
+    let cols = market_columns(lw, 18.0 * k);
+    let titles_shown = view.filter.is_empty() && !has_focus(FILTER_KEY);
+    let title_hit = if titles_shown {
+        super::typography::Role::Title.with(|| title_clicked((&name_head, &price_head), (lx + cols.names_cx, lx + cols.price_cx), y + 13.0 * k, 17.0 * k))
+    } else {
+        None
+    };
+    if let Some(column) = title_hit {
+        let before = sorted_rows(&own_order, &names, &prices, view.sort);
+        view.sort = view.sort.clicked(column);
+        let after = sorted_rows(&own_order, &names, &prices, view.sort);
+        view.pick = same_pick(&before, &after, view.pick);
+        swallow_input();
+    }
+    let order = sorted_rows(&own_order, &names, &prices, view.sort);
     let rows: Vec<(Option<ItemId>, String, String, bool)> = if view.selling {
         order.iter().map(|&n| game.pack[sellable[n]]).map(|i| (Some(i), c.item(i).name.clone(), game.sell_price(i).to_string(), false)).collect()
     } else {
@@ -1421,16 +1520,14 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
     };
     // Over the list the original's column titles, "Название" and "Цена" (0x4bca8c). The
     // filter (Razdor's) takes their line only while it is used: a letter typed over the list,
-    // Ctrl+F or a click on the titles starts it; the list keeps the items that match, their
-    // matched part lit; Enter picks the first.
+    // Ctrl+F or a click on the titles' line beside the titles starts it; the list keeps the
+    // items that match, their matched part lit; Enter picks the first.
     let all: Vec<(usize, ItemId)> = rows.iter().enumerate().filter_map(|(n, r)| r.0.map(|i| (n, i))).collect();
     let before = item_filter::keep(&c, all.iter().copied(), &view.filter).len();
     let filter_rect = Rect::new(lx, y, lw, 18.0 * k);
     let reply = item_filter::field_with(FILTER_KEY, &mut view.filter, filter_rect, &[KeyCode::N], before, rows.len(), false);
     if view.filter.is_empty() && !has_focus(FILTER_KEY) {
         // Each title centred over its own list (0x48e750 for 0x670688 and 0x670760).
-        let (name_head, price_head) = (own_text("Building", "ItemName", n_("Name")), own_text("Building", "ItemCost", n_("Price")));
-        let cols = market_columns(lw, 18.0 * k);
         super::typography::Role::Title.with(|| {
             chrome::shadow_centered(&name_head, lx + cols.names_cx, y + 13.0 * k, 17.0 * k, MARKET_HEADING);
             chrome::shadow_centered(&price_head, lx + cols.price_cx, y + 13.0 * k, 17.0 * k, MARKET_HEADING);
@@ -1531,14 +1628,28 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
 /// Sanctuary: spells for sale; a spell bought goes into the hero's book.
 fn sanctuary(game: &mut Game, f: &Frame, view: &mut BuildingView, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) -> Option<Screen> {
     let k = chrome::k();
-    let spells: Vec<SpellDef> = game.spells_here().into_iter().cloned().collect();
+    let own: Vec<SpellDef> = game.spells_here().into_iter().cloned().collect();
+    // The list in the shop's order, or sorted by a click on a title (Razdor's addition,
+    // `ListSort`).
+    let own_order: Vec<usize> = (0..own.len()).collect();
+    let names: Vec<&str> = own.iter().map(|s| s.name.as_str()).collect();
+    let prices: Vec<i32> = own.iter().map(|s| s.cost_gold).collect();
+    let order = sorted_rows(&own_order, &names, &prices, view.sort);
+    let spells: Vec<SpellDef> = order.iter().map(|&n| own[n].clone()).collect();
     view.pick = view.pick.filter(|&n| n < spells.len()).or_else(|| (!spells.is_empty()).then_some(0));
     // Laid out as the original's (0x4ba854, tab 4; measured on its screen): the list on the
     // right, a picture column, "Название заклятия" and "Цена" over six rows in one frame; a
     // spell already in the book in its own colour.
     let list = at(f, 530.0, 55.0, 296.0, 234.0);
-    if let Some(n) = spell_list(game, &spells, view.pick, list) {
+    let (row, title) = spell_list(game, &spells, view.pick, list);
+    if let Some(n) = row {
         view.pick = Some(n);
+    }
+    if let Some(column) = title {
+        view.sort = view.sort.clicked(column);
+        let after = sorted_rows(&own_order, &names, &prices, view.sort);
+        view.pick = same_pick(&order, &after, view.pick);
+        swallow_input();
     }
     // The description on the left: its title, the spell's card, the message box, the money
     // and "Купить" (0x4ba078).
@@ -1621,8 +1732,9 @@ fn spell_icon_place(icon_w: f32, row_h: f32) -> (f32, f32, f32) {
 /// round it (0x48d1d4 at 0x4bb508); the pictures on the left; the names left and the prices
 /// centred in their lists (align 1 and 2, 0x4bb0b0 and 0x4bb0ca), both in one tint; the
 /// picked row lighter by (24, 32, 24) over the names and prices, not the pictures. Six rows
-/// over the frame's height; a click picks a row.
-fn spell_list(game: &Game, spells: &[SpellDef], pick: Option<usize>, r: Rect) -> Option<usize> {
+/// over the frame's height; a click picks a row, a click on a column's title sorts the list
+/// (Razdor's addition, `ListSort`): the row and the title clicked.
+fn spell_list(game: &Game, spells: &[SpellDef], pick: Option<usize>, r: Rect) -> (Option<usize>, Option<Column>) {
     let k = chrome::k();
     let cols = list_columns(r.w, 0.0, [SPELL_ICON_W, SPELL_NAME_W, SPELL_PRICE_W]);
     let row_h = r.h / 6.0;
@@ -1633,9 +1745,10 @@ fn spell_list(game: &Game, spells: &[SpellDef], pick: Option<usize>, r: Rect) ->
     chrome::silver_frame(r, k.max(1.0));
     // The column titles stand over the frame, each centred over its list (0x48e750).
     let (name_head, price_head) = (own_text("Building", "SpellName", n_("Spell")), own_text("Building", "ItemCost", n_("Price")));
-    super::dt_font::with_face(super::dt_font::Face::Title, || {
+    let title = super::dt_font::with_face(super::dt_font::Face::Title, || {
         chrome::shadow_centered(&name_head, r.x + cols.names_cx, r.y - 9.0 * k, 15.0 * k, MARKET_HEADING);
         chrome::shadow_centered(&price_head, r.x + cols.price_cx, r.y - 9.0 * k, 15.0 * k, MARKET_HEADING);
+        title_clicked((&name_head, &price_head), (r.x + cols.names_cx, r.x + cols.price_cx), r.y - 9.0 * k, 15.0 * k)
     });
     let mut hit = None;
     let (icon_dx, icon_dy, side) = spell_icon_place(cols.icon, row_h);
@@ -1657,7 +1770,7 @@ fn spell_list(game: &Game, spells: &[SpellDef], pick: Option<usize>, r: Rect) ->
             hit = Some(n);
         }
     }
-    hit
+    (hit, title)
 }
 
 /// The money as the market and the sanctuary show it (0x4bd39c): the gold picture, then
@@ -2309,5 +2422,43 @@ mod tests {
         assert_eq!(rgb(super::market_ink(false)), [255, 255, 155]);
         assert_eq!(rgb(super::spell_ink(false)), [255, 255, 155]);
         assert_eq!(rgb(super::spell_ink(true)), [55, 180, 255]);
+    }
+
+    /// Razdor's addition (not the original's): a click on «Название» sorts А→Я, again Я→А,
+    /// again back to the list's own order; on «Цена» the dearest first, then the cheapest,
+    /// then the own order; a new window starts in the own order.
+    #[test]
+    fn titles_cycle_the_list_s_sort() {
+        use super::{Column, ListSort};
+        assert_eq!(super::BuildingView::new(razdor::rules::town::Tab::Market).sort, ListSort::Shown);
+        let name = |s: ListSort| s.clicked(Column::Name);
+        let price = |s: ListSort| s.clicked(Column::Price);
+        assert_eq!(name(ListSort::Shown), ListSort::NameUp);
+        assert_eq!(name(ListSort::NameUp), ListSort::NameDown);
+        assert_eq!(name(ListSort::NameDown), ListSort::Shown);
+        assert_eq!(name(ListSort::PriceUp), ListSort::NameUp);
+        assert_eq!(price(ListSort::Shown), ListSort::PriceDown);
+        assert_eq!(price(ListSort::PriceDown), ListSort::PriceUp);
+        assert_eq!(price(ListSort::PriceUp), ListSort::Shown);
+        assert_eq!(price(ListSort::NameDown), ListSort::PriceDown);
+    }
+
+    #[test]
+    fn rows_sort_by_name_in_the_russian_alphabet_and_by_price() {
+        use super::{sorted_rows, ListSort};
+        let names = ["Ёлка", "яблоко", "Евангелие", "Ангел", "жезл"];
+        let prices = [30, 10, 50, 10, 20];
+        let own = [4, 3, 2, 1, 0];
+        assert_eq!(sorted_rows(&own, &names, &prices, ListSort::Shown), own);
+        assert_eq!(sorted_rows(&own, &names, &prices, ListSort::NameUp), [3, 2, 0, 4, 1], "А, Е, Ё, Ж, Я; case left out");
+        assert_eq!(sorted_rows(&own, &names, &prices, ListSort::NameDown), [1, 4, 0, 2, 3]);
+        assert_eq!(sorted_rows(&own, &names, &prices, ListSort::PriceDown), [2, 0, 4, 3, 1], "equal prices keep the own order");
+        assert_eq!(sorted_rows(&own, &names, &prices, ListSort::PriceUp), [3, 1, 4, 0, 2]);
+    }
+
+    #[test]
+    fn a_sort_keeps_the_picked_item() {
+        assert_eq!(super::same_pick(&[4, 3, 2], &[2, 4, 3], Some(1)), Some(2));
+        assert_eq!(super::same_pick(&[4, 3, 2], &[2, 4, 3], None), None);
     }
 }
