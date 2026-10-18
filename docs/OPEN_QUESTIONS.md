@@ -8,6 +8,18 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **Card strips and the unit panel: what is left** (2026-10-18, a player's report; the parity
+  fix 1b2359f). Still Razdor's, not the original's: the selected or acting unit's strip gets an
+  orange wash (the original pulses the card's frame, 49462c, and leaves the strip); the unit
+  panel's darkening is Razdor's gradient, not the original's subtraction of (113, 113, 129)
+  from the name list's top with a 28-step fade over 56 px (492f24); a long description is cut
+  so the name stays below the panel's top quarter (the original stacks without a limit); the
+  strip's first line shrinks when another font mode's pieces would touch. Also: the sheet
+  fonts are drawn with brightness as alpha, while the original keys only pure black, so its
+  dim glyph edges stay as dark outlines (visible on the cards); the strips sampled from the
+  player's screenshot are a few levels darker in red than Razdor's (plain 76 vs 83), probably
+  the Win-paper decode or the screenshot. Not ported to dt-original by this agent.
+
 - **dt-original: the map info windows** (2026-10-18, a player's report). ed53cd1 (opaque
   tooltip box, the dimmed title corners 0x4dbd83/0x4dbe0b, the fonts by style, the
   original's layout, 0x48d3f8, 0x4ca9f0, 0x4cb18c) is on main only: dt-original's tooltip
