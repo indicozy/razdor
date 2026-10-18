@@ -3674,4 +3674,46 @@ mod real_maps {
         }
         println!("Community extensions in all maps: {extensions}");
     }
+
+    /// Другой берег: event 221 «Сокровища Велитрия» is listed on event point 71, a point
+    /// whose "active" byte is 0, and has no condition at all, though its message follows the
+    /// parchment quest (220, given by the chain of 219 once Velitrius' army is beaten). So
+    /// stepping on the point fires it, gives its gold and items and "completes" quest 220
+    /// that was never received, with the window's «quest completed» line, as in the original:
+    /// the scan takes the point under the hero by its event count alone, never its active
+    /// byte (0x4abfbc), the loader marks every point on its cell (0x4b2504), the line is
+    /// shown whenever byte 124 is set (0x4a8dd2) and the removal finds nothing (0x49c2b8).
+    /// The map's own omission (a player's report).
+    #[test]
+    fn other_shore_velitrius_treasure_fires_without_the_parchment() {
+        let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+        let dt = DtInstall::load(std::path::Path::new(&dir)).expect("install loads");
+        let Some(m) = dt.maps.iter().find(|m| m.name == "Другой берег") else { return };
+        let s = m.load().unwrap();
+        let p = s.points.iter().find(|p| p.id == 71).expect("point 71");
+        assert_eq!(p.active, 0);
+        assert!(p.events().any(|e| e == 221));
+        let e = &s.events[220];
+        assert_eq!(e.conditions, crate::dt::dtm::EventConditions::default(), "no condition");
+        assert_eq!(e.results.completes_quest, 220);
+        let mut g = EventEngine::new(&s);
+        let mut w = MockWorld { now: s.header.start_time as u64, place: Some(Place::Point(71)), ..MockWorld::new() };
+        let mut out = g.tick(&mut w);
+        for _ in 0..200 {
+            if g.times_fired(221) > 0 {
+                break;
+            }
+            if g.pending_question().is_some() {
+                out.extend(g.answer(&mut w, false));
+            } else if g.holds_window() {
+                out.extend(g.window_closed(&mut w));
+            } else {
+                w.now += 30;
+                out.extend(g.tick(&mut w));
+            }
+        }
+        assert_eq!(g.times_fired(220), 0, "the parchment was never received");
+        assert_eq!(g.times_fired(221), 1);
+        assert!(out.contains(&EventOutcome::QuestCompleted(220)));
+    }
 }

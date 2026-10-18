@@ -59,7 +59,10 @@ The scan (0x4abfbc, §2) is started from these places. **code**
 **Order of candidates** (0x4abfbc). The scan is a loop; one pass is: **code**
 1. **Global events** (type 1) in file order; the first that passes is taken.
 2. If none: the **event point** under the hero, its listed events in list order, **whatever
-   their type** (global, local, quest or rumour).
+   their type** (global, local, quest or rumour). The point counts by its event count (byte
+   39) alone: its "active" byte (40, which only lights a lantern at load) is not tested, and
+   the loader marks every point on its cell (0x4b2504). Другой берег's event 221 sits on an
+   inactive point with no condition, so it fires and "completes" a quest never received.
 3. If neither: the **building** the hero stands in, its listed events in list order, but only
    when that building is not the one the hero was already in when his current move began
    (0x4ed434, written at the start of a move 0x4b84f4, at a map click 0x4cc42b and by the
@@ -613,7 +616,7 @@ world, carry-over), `src/rules/journal.rs`, `src/dt/dtm.rs` (record and flag scr
 | Flag action | `+X` appends X with a non-breaking space if not a substring yet; `-X` removes the first occurrence and the next character; counters only with `^`; `-X^` without X changes nothing; actions of ≤ 2 characters ignored | Same (§5), but `-X^` does not check that X exists and lowers an unrelated character (bug) | Matches; Razdor fixes the original's bug (`-X^`) |
 | Engine flags | `Sea` added when the hero goes to sea and removed when he lands, `EnterShipyard` removed when he goes to sea (`Game::sea_changed`) | `Sea` aboard a ship, `EnterShipyard` in the ship logic | `Sea` matches; `EnterShipyard` is only removed at sea: its setting is left out (Razdor does not track the ship's shipyard; no shipped event tests it) |
 | Quests in buildings | Listed in the main hall with the rumours and fired when taken; villages and shipyards fire them on entering | Listed in the main hall and taken by the player, except in villages and shipyards (§2, §10) | Matches |
-| Event points | Every listed event, whatever its type | Every listed event, whatever its type | Matches |
+| Event points | Every listed event, whatever its type, active point or not | Every listed event, whatever its type; the point's active byte is not tested (0x4abfbc) | Matches |
 | Rumour or quest list | The building's quests and rumours that pass the full check (`EventEngine::hall`); taking one opens it without a new check | Quests and rumours of the building that pass the full check | Matches |
 | Places shown by a taken quest | Flown to at its window's OK over the map, then the building window comes back (`App::fly_from_building`) | At the OK, over the world screen, then the building window again (§10, interface.md §9.8; live on РК1) | Matches |
 | Journal | The engine's journal: re-added on every finish, completion removes the last entry, a new engine on the next map; Razdor's history is a separate extra | Re-added on every finish; completion removes the last entry; emptied on the next map | Matches |
