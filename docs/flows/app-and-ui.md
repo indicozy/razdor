@@ -91,8 +91,9 @@ window's pop-up, the event window's item tooltip), is one box, `item_text::draw`
 and bonus line are the original's (interface.md §9.2), built by `rules::item_text` from the
 install's `[Skills]` labels (`spell_badges::label`).
 
-The pack is the original's 256 cells with holes (`pack::Pack`, `Game::pack`): an item stays in
-the cell it was put in, gains fill the first empty cell. In the hero and army windows items
+The pack is the original's cells with holes (`pack::Pack`, `Game::pack`): an item stays in
+the cell it was put in, gains fill the first empty cell. On main it has no last cell (the
+original's 256, a deviation): a gain past the last used cell opens a new one. In the hero and army windows items
 move as the original's, by presses only (0x4c24f4): a press takes an item from a pack cell or a
 worn slot of the unit panel onto the pointer (`Game::held_item`, drawn as the pointer by
 `items_view::draw_held`); the next press puts it in a cell (`Game::press_pack`), a worn slot
