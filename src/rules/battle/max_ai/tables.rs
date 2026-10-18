@@ -128,6 +128,9 @@ impl Battle {
             bench,
             god,
             max_ai: _,
+            // One value for the whole battle, as the battle's tables are; the evaluations
+            // that read it (the forced-win search) keep no table entries.
+            max_stakes: _,
         } = self;
         side.hash(h);
         patch_globals().hash(h);

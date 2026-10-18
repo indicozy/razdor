@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use super::battle::{patch_globals, set_patch_globals, Battle, Outcome, PatchGlobals, Team};
+use super::battle::{patch_globals, set_patch_globals, Battle, MaxStakes, Outcome, PatchGlobals, Team};
 use super::content::{ArtefactType, Content, ItemId, UnitId};
 use super::formation::{Formation, Row, Slot};
 use super::items::{self, EquipError};
@@ -302,9 +302,13 @@ impl Session {
 
     /// The next round's battle (the setup as it stands), begun: the first unit is to act.
     /// The patch's globals are kept aside until [`Session::end_round`].
+    /// A quick fight for «Максимум» ([`MaxStakes::Quick`]).
     pub fn start_round(&mut self, content: &Content, improved_ai: bool) -> Option<Battle> {
         self.setup.fit(content);
         let mut b = self.setup.battle(content, improved_ai)?;
+        // A quick fight, nothing carried over: «Максимум» may trade units for a win it has
+        // proven (Razdor's rule, the owner's decision of 2026-10-19; `MaxStakes`).
+        b.set_max_stakes(MaxStakes::Quick);
         if self.saved.is_none() {
             self.saved = Some(patch_globals());
         }

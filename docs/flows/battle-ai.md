@@ -106,9 +106,11 @@ run the real-maps AI test (`src/rules/ai/real_maps.rs`, needs `RAZDOR_DT_DIR`).
 `hero_auto_battle_keeps_a_front_row_blesser_in_its_cell`,
 `hero_auto_battle_leaves_the_enemy_to_the_original_s_ai`, `real_armies_auto_battle_terminates`,
 `row2_the_battle_ais_never_bless_a_unit_twice_a_turn`,
-`report_death_casters_heal_the_knight_to_the_last_turn_and_only_max_blesses` (install).
+`report_death_casters_heal_the_knight_to_the_last_turn_and_max_too_on_the_map` (install).
 With «Максимум»: `max_plays_both_sides_of_the_watched_and_the_quick_battle` (`src/ui/battle_view.rs`),
-`max_plays_the_hero_s_side_of_the_quick_battle_better` (`src/rules/battle/max_ai/tests.rs`).
+`max_plays_the_hero_s_side_of_the_quick_battle_better` (`src/rules/battle/max_ai/tests.rs`),
+`max_sacrifices_a_unit_for_a_proven_win_only_in_a_quick_fight`,
+`max_sacrifices_nothing_in_a_quick_fight_without_a_proven_win` (`src/rules/battle/tests.rs`).
 
 ## 8. «Максимум» (Razdor extra, main only)
 
@@ -175,7 +177,30 @@ BattleView::ai_move (computer's turn) → max_move → MaxThinker::poll(battle)
   it) Max may see every move lose and play for the worth left, leaving the original's choice:
   a Death caster left a DeathCurse knight unhealed on turn 24 of 25, since the hero could hit
   a healed one for free but not an unhealed one without dying. The original's AI reads no
-  turn counter and always heals there.
+  turn counter and always heals there. Since the stakes rule (next) a battle on the map keeps
+  the original's heal; a quick fight still plays it by the worth left.
+- **Stakes** (`MaxStakes`, Razdor's rule, the owner's decision of 2026-10-19: "if it's just a
+  quick fight and not the campaign, there's no need to avoid sacrificing units for the sake
+  of a quicker finish, if 100% sure"). `Battle::max_stakes` is `Campaign` for every battle
+  (the map's, from `Game::start_battle`, and the tests') and `Quick` only for «Свой бой»
+  (`custom::Session::start_round`); it is read in `max_choice_with` after the normal search,
+  for whichever side Max plays (the enemy, the player's side of Q and W):
+  - `Campaign`: when the deepest iteration scores the choice a loss (at most −2³⁹: every line
+    loses against the best reply), the original's choice is played instead. Wins are already
+    ranked by the worth kept (`max_eval`). A proof of the loss with no rollouts was tried and
+    left out: the report's position needs 8 actions and ~540 000 positions.
+  - `Quick`: when it scores a win (at least 2³⁹), `Search::forced_win` looks for a proof:
+    iterative deepening over every action of both sides from all the root's actions, no
+    rollouts, no tables (only a per-position best move for the ordering), a line scoring only
+    when the battle ends on it, a win less per action it takes (`FORCED_PLY`); up to
+    `FORCED_DEPTH` actions and `FORCED_NODES` positions (4 times a node budget's at most,
+    `FORCED_SHARE`), the clock ignored. The first depth whose best move scores a win proves
+    it whatever the other side does; that move (the fastest win, then the most worth left) is
+    played even if it costs Max's own units. No proof: the normal choice.
+
+  Measured with the harness's custom battles set to `Quick` (by hand): the same wins as before
+  (synthetic 28 of 48, the install's custom battles 23 of 40), worth left 0.41 / 0.50 (0.42 /
+  0.50 before), the median decision 5–6 ms instead of 2–3 ms.
 - **Early exit**: a single action (a pass) is played without a search; the search stops when
   every line ended within the depth (the battle's end proven either way) or only the original's
   choice is left after depth 1 (`MaxReport::settled`).
@@ -240,6 +265,12 @@ BattleView::ai_move (computer's turn) → max_move → MaxThinker::poll(battle)
   | hero's auto-battle vs Max (what the player's own side faced) | 35 (27%) | 0.14 |
   | Max vs Max (Q and W now) | 54 (42%) | 0.27 |
   | Max vs original's AI | 61 (48%) | 0.30 |
+
+  With the stakes rule (2026-10-19; these battles are the map's, `Campaign`) Max keeps the
+  original's choice in lost positions and gambles less: hero's auto-battle vs Max 36 (28%),
+  0.16; Max vs Max 52 (41%), 0.27; Max vs original's AI 59 (46%), 0.29. In
+  `max_beats_the_original_on_real_armies` Max wins 151 of 256 (154 before) against the
+  original's 128, worth left 0.37 (0.38); on the synthetic battles 26 of 48 (28), 0.40 (0.42).
 
   2000 positions per decision gave 55 wins and 0.27 at 2.7 times the time, so the quick
   battle keeps 600 (about 0.8 s a battle on one loaded E-core). Max's search itself is

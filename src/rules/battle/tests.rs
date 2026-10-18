@@ -2800,12 +2800,15 @@ fn community_row21_the_ai_scores_a_manevres_0_target_with_the_wrapping_constant(
 /// The original's AI heals here on every turn: its Death branch scores the code-9 cells of
 /// undead and elemental allies by their wound (0x4891ee–0x489345) before it looks at
 /// blessings (0x489345–0x48951b), and the AI (4864e0 on) never reads the turn counter.
-/// The blessing is Razdor's «максимум» (a deviation, main only): on turn 24 its search
+/// The blessing was Razdor's «максимум» (a deviation, main only): on turn 24 its search
 /// reaches the turn limit, where a hero who stops hitting wins, so every move loses against
-/// the best reply and it keeps the line with the most worth left: a healed knight would be
-/// hit back to 24 HP for free, an unhealed one cannot be hit without the hero dying.
+/// the best reply and it kept the line with the most worth left: a healed knight would be
+/// hit back to 24 HP for free, an unhealed one cannot be hit without the hero dying. Since
+/// the owner's decision of 2026-10-19 (Razdor's rule, `MaxStakes`), a battle on the map
+/// that is lost whatever Max does keeps the original's choice, so Max heals too; only a
+/// quick fight («Свой бой») still weighs the lost lines by the worth left.
 #[test]
-fn report_death_casters_heal_the_knight_to_the_last_turn_and_only_max_blesses() {
+fn report_death_casters_heal_the_knight_to_the_last_turn_and_max_too_on_the_map() {
     let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
     let dt = crate::dt::install::DtInstall::load(std::path::Path::new(&dir)).expect("install loads");
     let mut c = Content::from_dt(&dt);
@@ -2851,12 +2854,69 @@ fn report_death_casters_heal_the_knight_to_the_last_turn_and_only_max_blesses() 
         assert_eq!(bt.plan(false), Some(Plan::Act(3, ActionKind::Heal)), "turn {round}: the original's AI heals");
     }
     // Max keeps the original's heal while the end is out of sight; on turn 24 it sees every
-    // line lose to a hero who stops hitting, and leaves the knight unhealed.
-    let max = |round| at_turn(round).max_choice(MaxBudget::fixed(30, 200_000)).unwrap();
-    let r = max(23);
-    assert_eq!(r.choice, r.original, "{r:?}");
-    let r = max(24);
+    // line lose to a hero who stops hitting, and on the map keeps the original's heal.
+    let max = |round, stakes| {
+        let mut bt = at_turn(round);
+        assert_eq!(bt.max_stakes(), MaxStakes::Campaign, "a battle is the map's unless the custom battle says so");
+        bt.set_max_stakes(stakes);
+        bt.max_choice(MaxBudget::fixed(30, 200_000)).unwrap()
+    };
+    for stakes in [MaxStakes::Campaign, MaxStakes::Quick] {
+        let r = max(23, stakes);
+        assert_eq!(r.choice, r.original, "{stakes:?}: {r:?}");
+    }
+    let r = max(24, MaxStakes::Campaign);
     assert!(r.value < 0 && r.original_value < 0, "every move loses at the turn limit: {r:?}");
+    assert_eq!(r.choice, r.original, "the map's battle keeps the heal: {r:?}");
+    // A quick fight has no proven win here (the hero may just wait), so Max plays by its
+    // normal score, as before the rule: the lost lines by the worth left, no heal.
+    let r = max(24, MaxStakes::Quick);
     assert_ne!(r.choice, r.original, "{r:?}");
 }
 
+/// Max's choice in `bt` with `stakes`, and the battle after it.
+fn max_with_stakes(bt: &Battle, stakes: MaxStakes) -> (MaxReport, Battle) {
+    let mut b = bt.clone();
+    b.set_max_stakes(stakes);
+    let r = b.max_choice(MaxBudget::fixed(6, 20_000)).unwrap();
+    b.play_max_move(r.choice);
+    (r, b)
+}
+
+/// Razdor's rule for «Максимум» (the owner's decision, 2026-10-19; `MaxStakes`): a lone
+/// DeathCurse warrior at 5 HP against Max's hammer (attack 100) and a plain warrior. Killing
+/// it ends the battle and takes the killer with it. In a quick fight the hammer's blow now is
+/// a win proven against every reply, the fastest one, so Max strikes and loses the hammer;
+/// on the map it keeps the hammer (steps aside) and leaves the kill for later.
+#[test]
+fn max_sacrifices_a_unit_for_a_proven_win_only_in_a_quick_fight() {
+    let curse = UnitDef { hits: 5, ..bonus(70, Bonus::DeathCurse, warrior(70, 1, 0)) };
+    let mut bt = with(vec![curse, hammer()], &[(70, f(3))], &[(69, f(3)), (10, f(2))]);
+    turn_of(&mut bt, 1);
+    let (r, after) = max_with_stakes(&bt, MaxStakes::Quick);
+    assert_eq!(r.choice.plan(), Some(Plan::Act(0, ActionKind::Melee)), "{r:?}");
+    assert!(r.settled && r.depth == 1, "a win proven one action ahead: {r:?}");
+    assert_eq!(after.outcome(), Outcome::Defeat, "the enemy (Max) wins at once");
+    assert!(!after.fighters[1].alive(), "and the hammer dies by the curse");
+    let (r, after) = max_with_stakes(&bt, MaxStakes::Campaign);
+    assert_ne!(r.choice.plan(), Some(Plan::Act(0, ActionKind::Melee)), "{r:?}");
+    assert!(after.fighters[1].alive() && after.outcome() == Outcome::Ongoing);
+}
+
+/// The same rule with no proven win: a second player unit (armour 20, 300 HP) keeps the
+/// battle going past the forced-win search's reach, so the quick fight's Max plays as on the
+/// map, and neither throws the hammer away on the cursed warrior (the original's AI would).
+#[test]
+fn max_sacrifices_nothing_in_a_quick_fight_without_a_proven_win() {
+    let curse = UnitDef { hits: 5, ..bonus(70, Bonus::DeathCurse, warrior(70, 1, 0)) };
+    let mut bt = with(vec![curse, hammer(), armour()], &[(70, f(3)), (84, f(4))], &[(69, f(3)), (10, f(2))]);
+    turn_of(&mut bt, 2);
+    let sacrifice = Some(Plan::Act(0, ActionKind::Melee));
+    let (quick, qa) = max_with_stakes(&bt, MaxStakes::Quick);
+    let (map, _) = max_with_stakes(&bt, MaxStakes::Campaign);
+    assert_eq!(quick.original.plan(), sacrifice, "the original's AI kills the cursed warrior");
+    assert!(!quick.settled, "no forced win found: {quick:?}");
+    assert_eq!((quick.choice, quick.value), (map.choice, map.value), "{quick:?} {map:?}");
+    assert_ne!(quick.choice.plan(), sacrifice, "{quick:?}");
+    assert!(qa.fighters[2].alive() && qa.outcome() == Outcome::Ongoing);
+}

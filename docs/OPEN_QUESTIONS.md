@@ -125,10 +125,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   rollouts model. Weighting the deeper plies by the original's own reply (an expectimax with
   the original's move as the likely one) might do better against both; not tried. The cut
   rollouts (`MaxBudget::short_rollouts`) are off for the same lack of gain.
-  The same best-reply assumption at the turn limit (2026-10-18, Eisenwald's report): once the
-  search reaches it, every move may lose to a player who just waits, and Max leaves the
-  original's choice for the most worth left (a Heresiarch did not heal a DeathCurse knight on
-  turn 24 of 25; PLAYTEST_NOTES of that day). The owner's call whether Max should keep that.
 
 - **Battle end on a counterblow** (2026-10-16, the battle-end timing). The original queues a
   counterblow's first effect without the 0x100 flag (4c43e8, 4c57bc), so Battle_Step runs
@@ -257,6 +253,15 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   button's own size.
 
 ## Settled
+
+- **«Максимум» at the turn limit** (2026-10-18, Eisenwald's report: a Heresiarch did not heal
+  a DeathCurse knight on turn 24 of 25, since every line lost to a hero who just waits and Max
+  kept the most worth left). The owner's decision of 2026-10-19 (`MaxStakes`, battle-ai flow
+  §8 "Stakes"; the commit "«Максимум» stakes: …" of that day): on the map, a position the
+  search scores lost on every line keeps the original's choice; in «Свой бой», a win proven
+  by a search with no rollouts is played as fast as possible whatever units it costs. A proof
+  of the loss itself was tried and left out (the report's position needs 8 actions and about
+  540 000 positions).
 
 - **The army window's wide pack and the pack's size** (2026-10-18). The owner's decision: the
   army window keeps its wide grid (10 columns at 1280×800), and the pack has no 256-cell limit

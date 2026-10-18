@@ -28,6 +28,11 @@
 //! with whatever they hold. [`MaxThinker`] (`ponder.rs`) runs the searches on a worker
 //! thread ahead of the need: the next decision as soon as it is known, or the one after the
 //! player's predicted reply.
+//!
+//! What the battle is fought for changes how Max weighs a few positions ([`MaxStakes`],
+//! Razdor's rule, the owner's decision of 2026-10-19): in a campaign Max never gives up the
+//! original's choice for one its search scores lost on every line, and only a quick fight
+//! lets it sacrifice its units for a win it has proven.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -73,6 +78,39 @@ const SHORT_SHARE: i64 = 500;
 const SHORT_MARGIN: i64 = 4;
 /// The cut rollouts' scores are cached apart from the full ones'.
 const SHORT_SALT: StateKey = 0x5348_4f52_5420_524f_4c4c_4f55_5420_2020;
+/// A quick fight's proof of a win ([`Search::forced_win`], [`MaxStakes::Quick`]): at most
+/// this many actions ahead and this many positions, or `FORCED_SHARE` times a node budget's
+/// (no rollouts: about 25 ms at most on a loaded E-core, 3 ms for the quick battle's
+/// decisions), the same on any machine; only searched when the normal search already scores
+/// the battle won.
+const FORCED_DEPTH: u32 = 12;
+const FORCED_NODES: u64 = 20_000;
+const FORCED_SHARE: u64 = 4;
+/// A forced end's score moves this much toward 0 per action it takes, more than any worth
+/// left (and 24 of them less than [`WIN`]): the fastest forced win scores highest.
+const FORCED_PLY: i64 = 1 << 32;
+
+/// What the battle is fought for, as «Максимум» weighs it (Razdor's rule, the owner's
+/// decision of 2026-10-19: "if it's just a quick fight and not the campaign, there's no need
+/// to avoid sacrificing units for the sake of a quicker finish, if 100% sure"). The same for
+/// both sides, so for the enemy and for the player's auto-battle (Q, W) alike.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum MaxStakes {
+    /// A battle on the map (the default): the armies go on after it, so their units matter.
+    /// Max's score already counts every unit kept and its HP, and a win is ranked by the
+    /// worth it keeps; on top of that, when the search scores every line lost against the
+    /// best reply (e.g. the turn limit a few actions ahead), Max does not pick among the
+    /// losses by the worth left against that reply (which may leave a unit unhealed or throw
+    /// it away) but keeps the original's choice (the 2026-10-18 report: a Heresiarch now
+    /// keeps healing its Death Knight to the last turn, as the original's AI does).
+    #[default]
+    Campaign,
+    /// «Свой бой» (`rules::custom`), nothing carried over: when a search with no rollouts
+    /// proves a win within its horizon whatever the other side does, Max plays the fastest
+    /// such win, whatever units it costs. Without that proof it plays as in a campaign
+    /// battle, minus the fallback on a lost position.
+    Quick,
+}
 
 /// How long a decision may search: a time limit (the game's), or none and a node limit
 /// (deterministic, for tests); both stop at `max_depth` actions ahead.
@@ -115,6 +153,14 @@ pub fn max_threads() -> usize {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MaxMove(Option<Plan>);
 
+#[cfg(test)]
+impl MaxMove {
+    /// The action, `None` for the skip of the unit's turn.
+    pub(super) fn plan(self) -> Option<Plan> {
+        self.0
+    }
+}
+
 /// What a decision found.
 #[derive(Clone, Copy, Debug)]
 pub struct MaxReport {
@@ -122,7 +168,8 @@ pub struct MaxReport {
     /// The original AI's choice in the same position.
     pub original: MaxMove,
     /// The deepest completed iteration's scores of the choice and of the original's (0 and
-    /// 0 when not even depth 1 completed: the original's choice is kept).
+    /// 0 when not even depth 1 completed: the original's choice is kept; a quick fight's
+    /// proven win: the proof's scores, `depth` its depth).
     pub value: i64,
     pub original_value: i64,
     /// Actions ahead of the deepest completed iteration.
@@ -147,6 +194,16 @@ impl Battle {
 
     pub fn max_ai(&self) -> bool {
         self.max_ai
+    }
+
+    /// What the battle is fought for, as Max weighs it ([`MaxStakes`]; a campaign battle
+    /// unless the custom battle says otherwise).
+    pub fn set_max_stakes(&mut self, stakes: MaxStakes) {
+        self.max_stakes = stakes;
+    }
+
+    pub fn max_stakes(&self) -> MaxStakes {
+        self.max_stakes
     }
 
     /// Every action the active unit `id` may take: its cells' actions, its steps, a pass.
@@ -299,9 +356,13 @@ impl Battle {
             aborted: false,
             cut: false,
             short: budget.short_rollouts,
+            forced: false,
+            forced_nodes: 0,
+            forced_best: Default::default(),
             scratch: Vec::new(),
             roll: None,
         };
+        let all_moves = moves.clone();
         let mut done = None;
         // A single action (a pass): nothing to weigh.
         let mut settled = moves.len() == 1;
@@ -330,9 +391,27 @@ impl Battle {
             // deeper search finds the same), or the original's choice is the only one left.
             settled = !s.cut || moves.len() == 1;
         }
+        let (mut choice, mut value, mut original_value, mut depth) = done.unwrap_or((original, 0, 0, 0));
+        // Razdor's rule (`MaxStakes`, the owner's decision of 2026-10-19).
+        match self.max_stakes {
+            // A quick fight the search scores won: the fastest win, whatever units it costs,
+            // if a search with no rollouts proves it against every reply (it looks at every
+            // root action, also those the safety rule left out).
+            MaxStakes::Quick if value >= WIN / 2 && all_moves.len() > 1 => {
+                if let Some(won) = s.forced_win(&root, &all_moves) {
+                    (choice, value, original_value, depth) = won;
+                    settled = true;
+                }
+            }
+            // A battle on the map that every line loses against the best reply: the
+            // original's choice, not the line with the most worth left. (A proof of the loss
+            // by a search with no rollouts would cost too much: the 2026-10-18 report's needs
+            // 8 actions and half a million positions.)
+            MaxStakes::Campaign if value <= -WIN / 2 => (choice, value) = (original, original_value),
+            _ => {}
+        }
         set_patch_globals(saved);
         crate::i18n::set_silent(silent);
-        let (choice, value, original_value, depth) = done.unwrap_or((original, 0, 0, 0));
         Some(MaxReport {
             choice,
             original,
@@ -340,7 +419,7 @@ impl Battle {
             original_value,
             depth,
             settled,
-            nodes: s.nodes,
+            nodes: s.nodes + s.forced_nodes,
             rollouts: s.rollouts,
             tt_hits: s.tt_hits,
             rollout_hits: s.rollout_hits,
@@ -396,6 +475,13 @@ struct Search<'a> {
     /// A line was cut by the depth while the battle went on.
     cut: bool,
     short: bool,
+    /// The forced-win search of a quick fight ([`Search::forced_win`]): no rollouts, no tables
+    /// (only the clock's stop from outside); the positions it searched.
+    forced: bool,
+    forced_nodes: u64,
+    /// The proof's best move per position, tried first at the next depth (its scores depend
+    /// on the distance from the root, so only the moves are kept).
+    forced_best: std::collections::HashMap<StateKey, MaxMove>,
     /// The positions under way by distance from the root, and the rollout's: their buffers
     /// are reused (`Battle::clone_from`), the battle searched is never changed.
     scratch: Vec<Option<Battle>>,
@@ -423,6 +509,9 @@ fn class(ply: u32, depth: u32) -> u8 {
 
 impl<'a> Search<'a> {
     fn time_up(&self) -> bool {
+        if self.forced {
+            return self.control.is_some_and(|c| c.stop.load(Ordering::Relaxed));
+        }
         self.deadline.is_some_and(|d| Instant::now() >= d) || self.control.is_some_and(MaxControl::expired)
     }
 
@@ -471,9 +560,46 @@ impl<'a> Search<'a> {
             aborted: false,
             cut: false,
             short: self.short,
+            forced: self.forced,
+            forced_nodes: 0,
+            forced_best: Default::default(),
             scratch: Vec::new(),
             roll: None,
         }
+    }
+
+    /// A quick fight's proof of a win ([`MaxStakes::Quick`]): iterative deepening to
+    /// [`FORCED_DEPTH`] actions and [`FORCED_NODES`] positions in all (less for a small node
+    /// budget, `FORCED_SHARE`), every action of both sides, no rollouts and no tables; a line
+    /// scores only if the battle ends on it (else 0),
+    /// a win the more the sooner it comes, a loss the less ([`FORCED_PLY`]). The first depth
+    /// where the best move scores above 0 proves a win against every reply: that move (the
+    /// fastest win, then the most worth left), its score, the original's and the depth.
+    /// `None` with no proof within the budget. Only the stop of a search on a worker ends it
+    /// early, not the clock (the node limit keeps it to a few milliseconds).
+    fn forced_win(&mut self, b: &Battle, moves: &[MaxMove]) -> Option<(MaxMove, i64, i64, u32)> {
+        let (tables, max_nodes, nodes, deadline) = (self.tables.take(), self.max_nodes, self.nodes, self.deadline.take());
+        (self.forced, self.aborted) = (true, false);
+        self.max_nodes = nodes.saturating_add(FORCED_NODES.min(max_nodes.saturating_mul(FORCED_SHARE)));
+        let mut found = None;
+        for depth in 1..=FORCED_DEPTH {
+            self.cut = false;
+            let Some((best, value, original_value, _)) = self.root(b, moves, depth) else { break };
+            if value > 0 {
+                found = Some((best, value, original_value, depth));
+                break;
+            }
+            // Every line ended within the depth and none is a forced win: none exists.
+            if !self.cut {
+                break;
+            }
+        }
+        // Its positions are counted apart from the normal search's.
+        self.forced_best.clear();
+        self.forced_nodes += self.nodes - nodes;
+        (self.tables, self.max_nodes, self.nodes, self.deadline) = (tables, max_nodes, nodes, deadline);
+        (self.forced, self.aborted, self.cut) = (false, false, false);
+        found
     }
 
     /// [`Search::root`] on `threads` threads, which take the root's moves in turn and share
@@ -578,7 +704,8 @@ impl<'a> Search<'a> {
         let cls = class(ply, depth);
         let d8 = depth.min(u8::MAX as u32) as u8;
         let key = self.tables.map(|_| b.max_key(self.side));
-        let mut first = None;
+        let forced_key = self.forced.then(|| b.max_key(self.side));
+        let mut first = forced_key.and_then(|k| self.forced_best.get(&k).copied());
         if let (Some(t), Some(k)) = (self.tables, key) {
             if let Some(e) = t.tt_get(k) {
                 if let Some(bd) = e.bound(d8, cls) {
@@ -628,6 +755,9 @@ impl<'a> Search<'a> {
         }
         let cut = self.cut;
         self.cut |= outer_cut;
+        if let (Some(k), Some(m)) = (forced_key, best_move) {
+            self.forced_best.insert(k, m);
+        }
         if let (Some(t), Some(k)) = (self.tables, key) {
             let (lower, upper) = if best <= alpha0 {
                 (-INF, best)
@@ -646,6 +776,16 @@ impl<'a> Search<'a> {
     /// so the cache keeps each one's score under the key of its start and of its first few
     /// positions (another rollout passing through one of them ends the same).
     fn leaf(&mut self, b: &Battle, ply: u32) -> i64 {
+        if self.forced {
+            // Only the battle's end counts: the sooner a win the better, a loss the later.
+            return match b.outcome() {
+                Outcome::Ongoing => 0,
+                _ => {
+                    let v = b.max_eval(self.side);
+                    v - v.signum() * ply as i64 * FORCED_PLY
+                }
+            };
+        }
         if b.outcome() != Outcome::Ongoing || ply > ROLLOUT_PLIES {
             return b.max_eval(self.side);
         }
