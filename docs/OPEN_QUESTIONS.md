@@ -8,6 +8,14 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **dt-original: the map info windows** (2026-10-18, a player's report). ed53cd1 (opaque
+  tooltip box, the dimmed title corners 0x4dbd83/0x4dbe0b, the fonts by style, the
+  original's layout, 0x48d3f8, 0x4ca9f0, 0x4cb18c) is on main only: dt-original's tooltip
+  code is older (no `garrison_shown`, its own owner and colour handling) and its red skin
+  lacks the (−20, −40, −100) of 0x4dbc34, so the pick conflicts. Port by hand together
+  with the red skin. Also not done on either branch: the 500 ms fade-in (0x4ca728) and the
+  hostile style's empty-cell icons (ae2774).
+
 - **Event window: the items lost row and the departed row's units** (2026-10-17, found with
   a player's report on the units rows). The original shows a row of the items an event took
   (`[Event] DelItem`, 0x4a9180, only when one of them was really there) and fills the
