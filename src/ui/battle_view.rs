@@ -368,8 +368,8 @@ fn preview_lines(p: Preview, kind: ActionKind, name: &str, hp: i32) -> (String, 
     (head, effect)
 }
 
-/// The sound of `actor`'s action `kind` (`razdor::av::BattleSound`): shooters with a ranged
-/// attack of at least `ShotWeaponRange` fire cannon.
+/// The sound of `actor`'s action `kind` (`razdor::av::BattleSound`): shooters whose unit type
+/// has a base ranged attack of at least `ShotWeaponRange` fire cannon (0x4c453c).
 fn action_cue(battle: &Battle, actor: usize, kind: ActionKind) -> Cue {
     use razdor::av::BattleSound;
     match BattleSound::of(battle, actor, kind) {
