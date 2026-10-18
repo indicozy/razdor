@@ -627,7 +627,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
                 let chapter = Rect::new(r.x + 28.0 * k, r.y + head_h + n as f32 * chapter_h, r.w - 28.0 * k, chapter_h);
                 if over_list && chapter.contains(crate::ui::widgets::pointer().into()) && clicked() {
                     if PICKED_MAP.with(|p| p.get()) == Some(chapter_index) {
-                        next = Some(Screen::ClassSelect { scenario: Some(chapter_index) });
+                        next = Some(Screen::ClassSelect { scenario: Some(g.first) });
                     }
                     picked = row;
                     PICKED_MAP.with(|p| p.set(Some(chapter_index)));
@@ -1231,5 +1231,27 @@ mod tests {
         let campaign = Group { first: 3, chapters: vec![3, 4, 5] };
         assert_eq!(campaign_start(&[campaign], 0), Some(3));
         assert_eq!(campaign_start(&[], 0), None);
+    }
+
+    /// A chapter line is not a list item of its own in the original: the text list keeps the
+    /// item of each line (+0x5f, 0x47e46c), selects and lights by item (0x47d71c), and Start
+    /// copies the sorted map array's entry of the selected item (0x4c1804, [0x65adab]), so
+    /// any line of «Раменское королевство» starts РК1, not the chapter under the pointer (a
+    /// player's report: a game seen starting on РК6). On the install: one item for the
+    /// campaign, РК1 its first map, the other six its chapters only (translated copies left out).
+    #[test]
+    fn a_campaign_on_the_install_is_one_item_started_on_its_first_map() {
+        let Some(dir) = std::env::var_os(razdor::dt::install::ENV_VAR) else { return };
+        let dt = razdor::dt::install::DtInstall::load(std::path::Path::new(&dir)).unwrap();
+        let sc: Vec<ScenarioEntry> =
+            dt.maps.iter().filter(|m| !razdor::translate::job::is_translated_file(&m.name)).map(|m| ScenarioEntry { file: m.name.clone(), path: m.path.clone(), scenario: m.load().unwrap() }).collect();
+        let maps: Vec<(&str, u8, &str)> = sc.iter().map(|e| (e.file.as_str(), e.scenario.header.scenario_kind, e.scenario.next_map.as_str())).collect();
+        let list = groups(&maps);
+        let rk: Vec<&Group> = list.iter().filter(|g| g.chapters.iter().any(|&c| sc[c].file.starts_with("РК6"))).collect();
+        assert_eq!(rk.len(), 1, "one item holds РК6");
+        assert!(sc[rk[0].first].file.starts_with("РК1-"), "its start is {}", sc[rk[0].first].file);
+        let files: Vec<String> = rk[0].chapters.iter().map(|&c| sc[c].file.chars().take(3).collect()).collect();
+        assert_eq!(files, ["РК1", "РК2", "РК3", "РК4", "РК5", "РК6", "РК7"]);
+        assert!(list.iter().all(|g| sc[g.first].scenario.header.scenario_kind != 2), "no later campaign map is an item");
     }
 }

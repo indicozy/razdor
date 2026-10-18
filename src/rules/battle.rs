@@ -649,6 +649,9 @@ pub struct Battle {
     /// Razdor's «Максимум» for the computer's side of the battle on screen
     /// ([`Battle::set_max_ai`], the owner's request); the rules never read it.
     max_ai: bool,
+    /// What the battle is fought for, as «Максимум» weighs it ([`MaxStakes`]; Razdor's rule,
+    /// the owner's decision of 2026-10-19); the rules never read it.
+    max_stakes: MaxStakes,
 }
 
 /// A fighter in its side's strength sum.
@@ -767,6 +770,7 @@ impl Battle {
             bench: Vec::new(),
             god: false,
             max_ai: false,
+            max_stakes: MaxStakes::Campaign,
         };
         b.fit_to_formation();
         b
@@ -3401,7 +3405,7 @@ fn berserk(f: &Fighter) -> i32 {
 
 mod clone;
 mod max_ai;
-pub use max_ai::{MaxBudget, MaxControl, MaxMove, MaxPoll, MaxReport, MaxTables, MaxThinker, MAX_AI_BUDGET, MAX_QUICK_BUDGET};
+pub use max_ai::{MaxBudget, MaxControl, MaxMove, MaxPoll, MaxReport, MaxStakes, MaxTables, MaxThinker, MAX_AI_BUDGET, MAX_QUICK_BUDGET};
 
 #[cfg(test)]
 mod tests;

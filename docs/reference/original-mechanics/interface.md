@@ -172,7 +172,15 @@ whenever the selection changes. **code** (4c1968, pictures loaded at 4dc118) Eac
 Benguiat tint (4e266e..4e27a3: a first case in ae249c green (Razdor takes it for the tutorial; its test is **unknown**), a single scenario ae24ac cyan
 (135, 255, 255), a campaign its campaign name in ae24a0 yellow) and, for a campaign, its
 chapters as further lines of the same item (0x47e46c with the new-item flag clear), so the
-selection lights the whole block and a chapter cannot be picked alone. The list's highlight
+selection lights the whole block and a chapter cannot be picked alone. In detail: the text
+list keeps, per line, the item it belongs to (list +0x5f; 47e46c gives a line the last
+item's number, or that number + 1 with the new-item flag), and its selection (+0x83) is an
+item number, never a line: selecting (47d71c) lights every line whose item is the selected
+one, and Up / Down step by item (47eb84). Only maps that are not later campaign maps (header
+0x10F ≠ 2) get an item, and the later maps sort after all of them (sort key 5000 + width vs.
+width, 4e24c0..4e2649), so item *i* is entry *i* of the sorted map array; Start copies entry
+`[0x65adab]` (the scenario list 65ad28's +0x83) at 4c1804. A click on any chapter line
+therefore picks the campaign and Start begins its first map. **code** The list's highlight
 adds (0, 30, 90) over the picked item's lines (set at 4d2e0c, the text list's add mode) and
 draws them in their highlight fonts: the name in ae2498 (white Benguiat), the chapters in
 ae24bc (plain white SanSerif) instead of ae24c4 (orange). The description box (4c1a9c, 293×236)

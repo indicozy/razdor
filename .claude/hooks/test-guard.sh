@@ -38,10 +38,15 @@ echo y > "$tmp/evil/src/ok.rs"
 rm -f "$tmp"/PWNED-*
 mkdir -p "$tmp/clean/data" "$tmp/clean/saves" "$tmp/clean/docs"
 touch "$tmp/clean/data/x.lit" "$tmp/clean/saves/backrok.rzsave" "$tmp/clean/Rus_Units.ini" "$tmp/clean/docs/_Global.ini"
+# A helper crate outside every repository (a cargo run of it is not the game); cases name it
+# as @TMP@/helper.
+mkdir -p "$tmp/helper/src"
+printf '[package]\nname = "helper"\nversion = "0.1.0"\nedition = "2021"\n' > "$tmp/helper/Cargo.toml"
+echo 'fn main() {}' > "$tmp/helper/src/main.rs"
 pass=0 fail=0
 while IFS='	' read -r expect repo cmd; do
     case "$expect" in ''|'#'*) continue ;; esac
-    json=$(CMD="$cmd" CWD="$tmp/$repo" python3 -I -c 'import json,os;print(json.dumps({"tool_name":"Bash","cwd":os.environ["CWD"],"tool_input":{"command":os.environ["CMD"].replace("\\n","\n")}}))')
+    json=$(CMD="$cmd" CWD="$tmp/$repo" TMPD="$tmp" python3 -I -c 'import json,os;print(json.dumps({"tool_name":"Bash","cwd":os.environ["CWD"],"tool_input":{"command":os.environ["CMD"].replace("\\n","\n").replace("@TMP@",os.environ["TMPD"])}}))')
     printf '%s' "$json" | DISPLAY=:0 python3 -I "$here/guard-bash.py" 2>/dev/null
     code=$?
     got=allow; [ $code -eq 2 ] && got=block

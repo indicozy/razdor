@@ -8,6 +8,17 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **A new game on «Раменское королевство» began on РК6** (2026-10-18, a player's video on
+  0.4.34; `docs/PLAYTEST_NOTES.md`). The list picked the campaign (its block lit, its
+  description shown), the hero window opened, and the map that started was РК6-Северная
+  битва (its opening window «Северная провинция», its date 1204, month 8). The original
+  starts the campaign's first map whatever chapter line is clicked (4c1804, interface.md §5),
+  and so does main's code: the list's group starts on `Group::first` (РК1 on the
+  Community Update files, checked), the hero window starts `scenarios[first]`, and РК1 does
+  not end or hand over at its start. Not reproduced. Settled by the reporter's
+  `razdor-play.log` (its `GAME new game: map «…»` and any `next campaign map` lines) and the
+  list of their `Maps_Rus` folder.
+
 - **The scenario list's "the game's own" maps** (2026-10-18, players' wish, main only).
   `ui::new_game::ORIGINAL_MAPS` names the 15 maps of the Community Update install by file
   name; every other map counts as fan-made. Other editions (the vanilla release, an English
@@ -242,6 +253,15 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   button's own size.
 
 ## Settled
+
+- **«Максимум» at the turn limit** (2026-10-18, Eisenwald's report: a Heresiarch did not heal
+  a DeathCurse knight on turn 24 of 25, since every line lost to a hero who just waits and Max
+  kept the most worth left). The owner's decision of 2026-10-19 (`MaxStakes`, battle-ai flow
+  §8 "Stakes"; the commit "«Максимум» stakes: …" of that day): on the map, a position the
+  search scores lost on every line keeps the original's choice; in «Свой бой», a win proven
+  by a search with no rollouts is played as fast as possible whatever units it costs. A proof
+  of the loss itself was tried and left out (the report's position needs 8 actions and about
+  540 000 positions).
 
 - **The army window's wide pack and the pack's size** (2026-10-18). The owner's decision: the
   army window keeps its wide grid (10 columns at 1280×800), and the pack has no 256-cell limit
