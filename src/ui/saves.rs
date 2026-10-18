@@ -405,7 +405,7 @@ impl Book {
                     let (over, down, pressed) = super::widgets::button_state(p, true);
                     draw_pin(p, row.pinned, down);
                     if over {
-                        tooltip(&[(if row.pinned { tr("Unpin the save (P)") } else { tr("Pin the save (P): it is never overwritten and stays on top") }.to_string(), INK)]);
+                        tooltip(&[(if row.pinned { tr("Unpin the save (P)") } else { tr("Pin the save (P): it is never overwritten, stays on top and is not counted in the save limit") }.to_string(), INK)]);
                     }
                     if pressed {
                         pin = Some(i);

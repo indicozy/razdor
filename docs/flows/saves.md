@@ -16,6 +16,19 @@ All code is in `src/rules/save.rs`; the windows are `src/ui/saves.rs`.
 - `manual/` (player's saves and quick saves, `MANUAL_SAVES_KEPT`, `QUICK_SAVES_KEPT`) and
   `auto/` (autosaves, `AUTOSAVES_KEPT`).
 
+## Limits and pins
+
+- Own saves: at most `MANUAL_SAVES_KEPT` (50) **unpinned** ones, quick saves not counted; a
+  save of a new name past that is `SaveError::Full` (nothing is rotated out), saving over an
+  existing unpinned one always works.
+- Pinned saves (`pinned.txt` per folder, `save::set_pinned`) are not counted anywhere and have
+  no limit (the owner's deviation, 2026-10-17): pinning never fails, a pinned save is never
+  overwritten (`SaveError::Pinned` as a target) nor rotated out, and the list scrolls to all.
+- Quick saves: `QUICK_SAVES_KEPT` (5) unpinned, reused oldest first. Autosaves:
+  `AUTOSAVES_KEPT` (30) unpinned, reused as the original (0x4b7410). Pinned ones of either
+  are left out of the rotation.
+- «Clear all» deletes the tab's unpinned saves only; deleting a save drops its pin.
+
 ## Writing
 
 ```
