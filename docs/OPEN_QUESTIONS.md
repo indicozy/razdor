@@ -23,6 +23,10 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   in-building line whenever the card shown before it (in any window) had them. Razdor shows the
   offer with neither (`building_view::recruit_panel`). Copying it needs the last card's
   building defence kept across windows; what it is when the game starts is unknown.
+  The hire-offer change itself (d20471f: the card over the tabs, the green glow, the strip's
+  hint) is not on `dt-original`: that branch's building window is the older layout, with no
+  unit card panel (`selected_unit_panel`), no `window_layout` and no hint strip under the
+  counters (PR #8's), so the pick does not apply. Port it by hand once those are there.
 
 - **Event window: the items lost row and the departed row's units** (2026-10-17, found with
   a player's report on the units rows). The original shows a row of the items an event took
