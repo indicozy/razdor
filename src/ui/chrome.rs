@@ -1607,7 +1607,7 @@ mod tests {
         let make = |which, rgb: [u8; 3]| {
             let mut img = Image { width: 160, height: 160, rgba: [rgb[0], rgb[1], rgb[2], 255].repeat(160 * 160) };
             hero_portrait(&mut img, which);
-            (img.pixel(80, 80), img.pixel(0, 0), img.pixel(31, 80), img.pixel(32, 80))
+            (img.pixel(80, 80), img.pixel(0, 0), img.pixel(24, 80), img.pixel(32, 80))
         };
         let (mid, edge, inner, clear) = make(HeroPortrait::Offered, [255, 255, 255]);
         // 250 grey: (250·1300 >> 10) − (256, 80, 48), at 5-6-5 levels.
