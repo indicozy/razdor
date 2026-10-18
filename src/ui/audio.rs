@@ -210,11 +210,15 @@ pub struct Settings {
     pub autosave: Option<bool>,
     /// "Невозможный уровень сложности игры" (`OptValue10`; read at start, as the original).
     pub impossible: Option<bool>,
+    /// Advanced: how the army grids outside battle are arranged (`unit_drag::Controls`):
+    /// by dragging only (Razdor's default, the owner's decision; also for a file without the
+    /// key) or the original's presses with dragging on top.
+    pub formation_controls: super::unit_drag::Controls,
 }
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, expert_ai: None, max_ai: false, wide_row: None, display: Default::default(), ui_scale: 0.0, minimap_size: None, minimap_corner: Default::default(), friends_let_pass: false, pass_on_bridges: false, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None }
+        Settings { music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, expert_ai: None, max_ai: false, wide_row: None, display: Default::default(), ui_scale: 0.0, minimap_size: None, minimap_corner: Default::default(), friends_let_pass: false, pass_on_bridges: false, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default() }
     }
 }
 
@@ -668,6 +672,10 @@ mod tests {
         // Missing fields take the defaults; out-of-range volumes are clamped.
         let partial: Settings = serde_json::from_str(r#"{"music_volume": 3.0}"#).unwrap();
         assert_eq!(partial.clamped(), Settings { music_volume: 1.0, ..Settings::default() });
+        // The army's arrangement (Razdor's): dragging only unless the file says otherwise.
+        assert_eq!(partial.formation_controls, crate::ui::unit_drag::Controls::Drag);
+        let original: Settings = serde_json::from_str(r#"{"formation_controls": "original"}"#).unwrap();
+        assert_eq!(original.formation_controls, crate::ui::unit_drag::Controls::Original);
     }
 
     /// «Сила ИИ в бою» and the improved AI's checkbox (`OptValue9`) stay in step: «Максимум»

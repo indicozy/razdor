@@ -655,6 +655,7 @@ pub fn apply_options(audio: &super::audio::Settings) {
     chrome::set_option_override("ScrollSpeed", audio.scroll_speed.map(|v| (v.round() as i32).to_string()));
     chrome::set_option_override("OptValue8", audio.autosave.map(|on| if on { "1" } else { "0" }.to_string()));
     set_hints(!hints_off(audio));
+    super::unit_drag::set_controls(audio.formation_controls);
 }
 
 /// "Настройки звука, графики и геймплея", with what Razdor lets the player change: the
@@ -690,7 +691,9 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     // Razdor's own window, wider than the original's: centred (over the map, above the bar),
     // not hung from the menu's 190, where its foot reached the screen's bottom edge.
     let k = chrome::k();
-    let (ww, wh) = (900.0, 570.0);
+    // 650 high since «Расстановка армии» joined the left column (it still fits the 682 px
+    // view above the bar).
+    let (ww, wh) = (900.0, 650.0);
     let (inner, closed) = if over_map {
         map_window(tr("Advanced settings"), ww, wh)
     } else {
@@ -766,6 +769,23 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     let hint = tr("The zoom the map plays at. The wheel steps away from it and the 0 key comes back to it; locked, the map always shows it.");
     for (i, line) in wrap(hint, col.w - 48.0 * k, 12.0 * k).iter().enumerate() {
         chrome::shadow_text(line, col.x + 24.0 * k, y + 80.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
+    }
+    // The army's arrangement outside battle (Razdor's, the owner's decision after a player's
+    // report): dragging only, or the original's press to pick and press to move (0x4c346c)
+    // with dragging on top (`unit_drag::Controls`).
+    let y = y + 136.0 * k;
+    chrome::shadow_text(tr("Arranging the army"), col.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
+    let ar = Rect::new(br.x, y, br.w, br.h);
+    let label = match audio.formation_controls {
+        super::unit_drag::Controls::Drag => tr("Dragging"),
+        super::unit_drag::Controls::Original => tr("As in the original"),
+    };
+    if row_button(ar, label) {
+        audio.formation_controls = audio.formation_controls.next();
+    }
+    let hint = tr("Dragging: a click on a unit only selects it; units and items are moved by dragging. As in the original: the first click picks a unit, the second moves it; dragging works too.");
+    for (i, line) in wrap(hint, col.w - 48.0 * k, 12.0 * k).iter().enumerate() {
+        chrome::shadow_text(line, col.x + 24.0 * k, y + 56.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
     }
     // The right column: how Razdor shows the game.
     let rx = inner.x + 580.0 * k;

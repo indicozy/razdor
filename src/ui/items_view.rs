@@ -15,7 +15,7 @@ use super::assets::Assets;
 use super::audio::{cue, Cue};
 use super::building_view::{service_error, BuildingView};
 use super::screens::attack_line;
-use super::unit_drag::{grid_press, GridPress};
+use super::unit_drag::{grid_press_in, Controls, GridPress};
 use super::chrome;
 use super::item_filter;
 use super::unit_sheet;
@@ -530,9 +530,11 @@ impl ArmySel {
     /// deselection, which the original jumps past: the deselected unit's promotion tree stays
     /// up (original behaviour) until a later press switches it. A swap leaves nothing
     /// selected and the pack up; a slide keeps the unit selected (and its tree up) until the
-    /// slide ends ([`ArmySel::slide_done`]).
-    fn press(&mut self, pressed: Option<usize>) -> GridPress {
-        let p = grid_press(self.selected, pressed);
+    /// slide ends ([`ArmySel::slide_done`]). With dragging only (`controls`, Razdor's setting,
+    /// the owner's decision) a press only selects: a unit pressed is selected and its side
+    /// shown, an empty cell clears the selection and shows the pack.
+    fn press(&mut self, controls: Controls, pressed: Option<usize>) -> GridPress {
+        let p = grid_press_in(controls, self.selected, pressed);
         match p {
             GridPress::Deselect => self.selected = None,
             GridPress::Select(u) => {
@@ -544,7 +546,11 @@ impl ArmySel {
                 self.shown = None;
             }
             GridPress::Slide(s) => self.shown = Some(s),
-            GridPress::Nothing => self.shown = None,
+            // As the original's nothing selected; with dragging only a unit may be selected.
+            GridPress::Nothing => {
+                self.selected = None;
+                self.shown = None;
+            }
         }
         p
     }
@@ -587,7 +593,8 @@ fn now_ms() -> i64 {
 /// description at the top; the army's 2×6 cards below. Click a card to select it, a pack
 /// item to wear or drink it, a worn item to take it off; drag a pack or worn item onto a
 /// card to give it to that unit, or a worn one onto the pack to take it off. Cards are
-/// pressed as in the original ([`ArmySel::press`]) or dragged (Razdor's). `back` is the
+/// dragged (Razdor's), and pressed as in the original ([`ArmySel::press`]) or, with dragging
+/// only (Razdor's default setting), pressed only to select. `back` is the
 /// building window to return to, if it was opened from one.
 pub fn squad(
     game: &mut Game,
@@ -936,17 +943,20 @@ pub fn squad(
     } else if personal_hover && !showing_type {
         chrome::ui_text("Army", "ItemI").filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).or_else(|| Some(tr("His own item: it cannot be taken off while he lives.").to_string()))
     } else {
-        match (card_under, selected.selected) {
-            (Some(i), Some(s)) if i == s => army_line(0, &game.squad_label(s)),
-            (Some(_), Some(s)) => army_line(2, &game.squad_label(s)),
-            (Some(i), None) => army_line(1, &game.squad_label(i)),
-            (None, _) => empty_under.and_then(|slot| row_text(f, slot)),
+        match card_under {
+            Some(i) => {
+                let (line, named) = pointed_line(super::unit_drag::controls(), i, selected.selected);
+                army_line(line, &game.squad_label(named))
+            }
+            None => empty_under.and_then(|slot| row_text(f, slot)),
         }
     };
     let (hint, hc) = match (message.as_ref(), pointed) {
         (Some(m), _) => (m.clone(), chrome::GOLD),
         (None, Some(p)) => (p, Color::new(1.0, 0.55, 0.25, 1.0)),
         (None, None) if show_tree => (tr("Click a unit to select it; Esc returns").to_string(), Color::new(1.0, 0.55, 0.25, 1.0)),
+        // Razdor's line; with dragging only (Razdor's setting) it says units are dragged too.
+        (None, None) if super::unit_drag::controls() == Controls::Drag => (tr("Drag an item onto a unit to give it, a unit to another cell to move it; Esc returns").to_string(), Color::new(1.0, 0.55, 0.25, 1.0)),
         (None, None) => (tr("Drag an item onto a unit to give it; Esc returns").to_string(), Color::new(1.0, 0.55, 0.25, 1.0)),
     };
     chrome::army_divider(strip);
@@ -955,9 +965,12 @@ pub fn squad(
         chrome::hint_text(strip, &hint, ink);
     });
     // The press, as the original's (0x4c346c), ignored while a card slides (busy 0x68dc63).
+    // With «Расстановка армии: Перетаскивание» (Razdor's default, the owner's decision) it
+    // only selects (no swap or slide; units move by dragging), where the original's second
+    // press moves the unit.
     if let (Some((on, slot)), None) = (pressed, slide) {
         *message = None;
-        match selected.press(on) {
+        match selected.press(super::unit_drag::controls(), on) {
             GridPress::Swap { selected: s, pressed: p } => {
                 // At once, no slide; no drag starts from this press.
                 cue(Cue::CardMove);
@@ -1090,6 +1103,19 @@ pub(super) fn potion_status(c: &Content, u: &Unit) -> Vec<(String, Color)> {
     }
     let names: Vec<&str> = u.potions.iter().map(|&p| c.item(p).name.as_str()).collect();
     vec![(razdor::trf!("Until the next battle: {names}", names = names.join(", ")), chrome::BLUE_TEXT)]
+}
+
+/// The `[Army]` hint line over the card of unit `under` with `selected` selected, and whose
+/// name it quotes: as the original's (0x4c2f54, 0x4c612c) line 0 "click to deselect" over the
+/// selected unit, line 2 "click to move" (naming the selected one) over another, line 1
+/// "click to select" with none selected. With dragging only (Razdor's setting, the owner's
+/// decision) a click only selects, so every card says line 1 with its own name.
+pub(super) fn pointed_line<T: PartialEq + Copy>(controls: super::unit_drag::Controls, under: T, selected: Option<T>) -> (usize, T) {
+    match (controls, selected) {
+        (super::unit_drag::Controls::Drag, _) | (_, None) => (1, under),
+        (_, Some(s)) if s == under => (0, s),
+        (_, Some(s)) => (2, s),
+    }
 }
 
 /// `[Army]` hint line `n` with `name` quoted in #NAME1 (0x4c2f54), in a Russian game only.
@@ -1523,7 +1549,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
 
 #[cfg(test)]
 mod tests {
-    use super::{class_wage, hero_resources, promo_ease, promo_look, promo_ms, ArmySel, Content, GridPress, UnitId};
+    use super::{class_wage, hero_resources, pointed_line, promo_ease, promo_look, promo_ms, ArmySel, Content, Controls, GridPress, UnitId};
 
     fn sel(selected: Option<usize>, shown: Option<usize>) -> ArmySel {
         ArmySel { selected, shown }
@@ -1556,15 +1582,15 @@ mod tests {
     fn a_press_switches_the_right_side_as_the_original() {
         // A unit with nothing selected: selected, its tree up (0x498d0c(unit)).
         let mut s = ArmySel::default();
-        assert_eq!(s.press(Some(3)), GridPress::Select(3));
+        assert_eq!(s.press(Controls::Original, Some(3)), GridPress::Select(3));
         assert_eq!(s, sel(Some(3), Some(3)));
         assert_eq!(s.tree(), Some(3));
         // Pressed again: deselected, but 0x4c346c jumps past 0x498d0c, so its tree stays up.
-        assert_eq!(s.press(Some(3)), GridPress::Deselect);
+        assert_eq!(s.press(Controls::Original, Some(3)), GridPress::Deselect);
         assert_eq!(s, sel(None, Some(3)));
         assert_eq!(s.tree(), Some(3));
         // An empty cell with nothing selected: 0x498d0c(0), the pack.
-        assert_eq!(s.press(None), GridPress::Nothing);
+        assert_eq!(s.press(Controls::Original, None), GridPress::Nothing);
         assert_eq!(s, sel(None, None));
     }
 
@@ -1572,22 +1598,53 @@ mod tests {
     fn the_hero_selected_is_not_nothing_selected() {
         // Selecting the hero shows the pack, as nothing selected (unit < 2)...
         let mut s = ArmySel::default();
-        assert_eq!(s.press(Some(0)), GridPress::Select(0));
+        assert_eq!(s.press(Controls::Original, Some(0)), GridPress::Select(0));
         assert_eq!(s.tree(), None);
         // ...but a press on another unit swaps it with the hero; nothing selected, the pack up.
-        assert_eq!(s.press(Some(4)), GridPress::Swap { selected: 0, pressed: 4 });
+        assert_eq!(s.press(Controls::Original, Some(4)), GridPress::Swap { selected: 0, pressed: 4 });
         assert_eq!(s, sel(None, None));
     }
 
     #[test]
     fn a_slide_keeps_the_unit_selected_until_it_ends() {
         let mut s = ArmySel::default();
-        s.press(Some(2));
-        assert_eq!(s.press(None), GridPress::Slide(2));
+        s.press(Controls::Original, Some(2));
+        assert_eq!(s.press(Controls::Original, None), GridPress::Slide(2));
         assert_eq!(s, sel(Some(2), Some(2)));
         // 0x4b0c04 clears the selection at its end and does not switch the right side.
         s.slide_done();
         assert_eq!(s, sel(None, Some(2)));
+    }
+
+    /// «Расстановка армии: Перетаскивание» (Razdor's default): presses only select; the
+    /// right side follows the pressed unit, an empty cell brings the pack back.
+    #[test]
+    fn with_dragging_only_presses_only_select() {
+        let mut s = ArmySel::default();
+        assert_eq!(s.press(Controls::Drag, Some(3)), GridPress::Select(3));
+        assert_eq!(s, sel(Some(3), Some(3)));
+        // Another unit: selected in its place, no swap.
+        assert_eq!(s.press(Controls::Drag, Some(5)), GridPress::Select(5));
+        assert_eq!(s, sel(Some(5), Some(5)));
+        // The same unit again stays selected.
+        assert_eq!(s.press(Controls::Drag, Some(5)), GridPress::Select(5));
+        assert_eq!(s, sel(Some(5), Some(5)));
+        // An empty cell: no slide; nothing selected, the pack up.
+        assert_eq!(s.press(Controls::Drag, None), GridPress::Nothing);
+        assert_eq!(s, ArmySel::default());
+    }
+
+    #[test]
+    fn the_card_hint_follows_the_arrangement_setting() {
+        // The original's lines (0x4c2f54): 0 over the selected, 2 over another naming the
+        // selected, 1 with none selected.
+        assert_eq!(pointed_line(Controls::Original, 3, Some(3)), (0, 3));
+        assert_eq!(pointed_line(Controls::Original, 4, Some(3)), (2, 3));
+        assert_eq!(pointed_line(Controls::Original, 4, None), (1, 4));
+        // Dragging only: a click only selects, so always "click to select" this one.
+        assert_eq!(pointed_line(Controls::Drag, 3, Some(3)), (1, 3));
+        assert_eq!(pointed_line(Controls::Drag, 4, Some(3)), (1, 4));
+        assert_eq!(pointed_line(Controls::Drag, (true, 1), Some((false, 2))), (1, (true, 1)));
     }
 
     #[test]
