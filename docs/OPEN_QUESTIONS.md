@@ -125,6 +125,10 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   rollouts model. Weighting the deeper plies by the original's own reply (an expectimax with
   the original's move as the likely one) might do better against both; not tried. The cut
   rollouts (`MaxBudget::short_rollouts`) are off for the same lack of gain.
+  The same best-reply assumption at the turn limit (2026-10-18, Eisenwald's report): once the
+  search reaches it, every move may lose to a player who just waits, and Max leaves the
+  original's choice for the most worth left (a Heresiarch did not heal a DeathCurse knight on
+  turn 24 of 25; PLAYTEST_NOTES of that day). The owner's call whether Max should keep that.
 
 - **Battle end on a counterblow** (2026-10-16, the battle-end timing). The original queues a
   counterblow's first effect without the 0x100 flag (4c43e8, 4c57bc), so Battle_Step runs

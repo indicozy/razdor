@@ -105,7 +105,8 @@ run the real-maps AI test (`src/rules/ai/real_maps.rs`, needs `RAZDOR_DT_DIR`).
 `auto_battles_terminate_deterministically_and_never_use_the_reserve`,
 `hero_auto_battle_keeps_a_front_row_blesser_in_its_cell`,
 `hero_auto_battle_leaves_the_enemy_to_the_original_s_ai`, `real_armies_auto_battle_terminates`,
-`row2_the_battle_ais_never_bless_a_unit_twice_a_turn`.
+`row2_the_battle_ais_never_bless_a_unit_twice_a_turn`,
+`report_death_casters_heal_the_knight_to_the_last_turn_and_only_max_blesses` (install).
 With «Максимум»: `max_plays_both_sides_of_the_watched_and_the_quick_battle` (`src/ui/battle_view.rs`),
 `max_plays_the_hero_s_side_of_the_quick_battle_better` (`src/rules/battle/max_ai/tests.rs`).
 
@@ -169,6 +170,12 @@ BattleView::ai_move (computer's turn) → max_move → MaxThinker::poll(battle)
   The clock only decides how deep the search gets; the uncut stop (all lines ended) only stops
   when every deeper depth gives the same answer. So pondering or warm tables can only let a
   decision reach a greater depth within its time, never change what a given depth picks.
+- **The turn limit** (the 2026-10-18 report): a battle that reaches it is the player's win, and
+  Max's opponent model is minimax, so once the search reaches the limit (a few actions before
+  it) Max may see every move lose and play for the worth left, leaving the original's choice:
+  a Death caster left a DeathCurse knight unhealed on turn 24 of 25, since the hero could hit
+  a healed one for free but not an unhealed one without dying. The original's AI reads no
+  turn counter and always heals there.
 - **Early exit**: a single action (a pass) is played without a search; the search stops when
   every line ended within the depth (the battle's end proven either way) or only the original's
   choice is left after depth 1 (`MaxReport::settled`).
