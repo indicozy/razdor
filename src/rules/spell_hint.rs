@@ -88,11 +88,37 @@ pub fn on_own_army(spell: &SpellDef) -> bool {
 /// merge to nothing); the protections merge into `SProtectAllMagic` only when all three are
 /// equal and not 0, else they come as Life, Elemental, Death.
 pub fn effect_text(spell: &SpellDef, label: &dyn Fn(&'static str) -> String) -> String {
-    let mut out = String::new();
+    effect_entries(spell, label).into_iter().map(|e| e.text + " ").collect()
+}
+
+/// One entry of a spell's effect text: "label value" (without the original's trailing
+/// space) and whether it is good for the unit the spell lands on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EffectEntry {
+    pub text: String,
+    pub good: bool,
+}
+
+/// Whether an effect entry of `value` is good for the unit holding the spell (Razdor's
+/// colouring, the owner's decision 2026-10-18; the original colours the whole effect text by
+/// the spell's target instead, 0x49bb36). Every value the effect text can show is one where
+/// more is better for its holder: hits (fixed, percentage and maximum), melee and ranged
+/// attack and defence, magic power, the magic protections, regeneration (negative is
+/// poison), vampirism, initiative and actions. Mana cost and casting time are not effect
+/// entries. So an entry is good exactly when its value is positive, whatever its label says
+/// (the original's «Лечит (+хиты) -15%» quirk is bad) and whoever cast it (a curse on an
+/// enemy is bad for that enemy).
+pub fn good_for_holder(value: i32) -> bool {
+    value > 0
+}
+
+/// The entries of [`effect_text`], in its order.
+pub fn effect_entries(spell: &SpellDef, label: &dyn Fn(&'static str) -> String) -> Vec<EffectEntry> {
+    let mut out = Vec::new();
     let mut entry = |v: i32, key: &'static str, suffix: &str| {
         if v != 0 {
             let plus = if v > 0 { "+" } else { "" };
-            out.push_str(&format!("{} {plus}{v}{suffix} ", label(key)));
+            out.push(EffectEntry { text: format!("{} {plus}{v}{suffix}", label(key)), good: good_for_holder(v) });
         }
     };
     let fixed = spell.delta_fixed_hits.unwrap_or(0);
@@ -233,6 +259,32 @@ mod tests {
         assert!(on_own_army(&s));
         s.target = Some(SpellTarget::Enemy);
         assert!(!on_own_army(&s));
+    }
+
+    /// Deviation (the owner's decision, 2026-10-18): each entry is good or bad for the unit
+    /// holding the spell by its sign, not by the spell's target and not by its label.
+    #[test]
+    fn deviation_entries_are_good_by_their_sign_for_the_holder() {
+        let goods = |s: &SpellDef| effect_entries(s, &key).into_iter().map(|e| (e.text, e.good)).collect::<Vec<_>>();
+        // A spell on the own army with a cost: «жизнь −15% сразу» is bad even on the own side.
+        let mut s = testkit::spell(1, 10);
+        s.delta_fixed_hits = None;
+        s.delta_percent_hits = Some(-15);
+        s.percent.insert(Stat::Vampirizm, 35);
+        assert!(on_own_army(&s));
+        assert_eq!(goods(&s), [("CureHit -15%".to_string(), false), ("SVampirizm +35%".to_string(), true)]);
+        // A curse on the enemy: its lowered values are bad for the enemy holding it, poison too.
+        let mut s = testkit::spell(2, 10);
+        s.target = Some(SpellTarget::Enemy);
+        s.delta_fixed_hits = Some(-20);
+        s.add.insert(Stat::Initiative, -2);
+        s.percent.insert(Stat::Regen, -15);
+        s.percent.insert(Stat::ProtectLife, 10);
+        assert_eq!(
+            goods(&s),
+            [("CurseHit -20".to_string(), false), ("SInitiative -2".to_string(), false), ("SProtectLife +10%".to_string(), true), ("SPoison -15%".to_string(), false)]
+        );
+        assert_eq!(effect_text(&s, &key), "CurseHit -20 SInitiative -2 SProtectLife +10% SPoison -15% ");
     }
 
     /// The spell card of the report (2026-10-18) from the install, with its own labels: equal

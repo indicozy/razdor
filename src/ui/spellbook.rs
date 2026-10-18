@@ -242,9 +242,9 @@ pub fn spell_card(game: &Game, s: &SpellDef, r: Rect, tint_mana: bool) {
 }
 
 /// The card's fonts (0x49bde4 → 0x49ba84; the SanSerif tints of 0x4dbc26, white less a delta).
-/// 0xae24c0, less (25, 25, 125): the effect text of a spell on the enemy.
+/// 0xae24c0, less (25, 25, 125): the effect text of a spell on the enemy; Razdor's bad entries.
 const EFFECT_YELLOW: Color = Color::new(230.0 / 255.0, 230.0 / 255.0, 130.0 / 255.0, 1.0);
-/// 0xae24cc, less (180, 70, 0): the effect text of a spell on the own army (Target 1).
+/// 0xae24cc, less (180, 70, 0): the effect text of a spell on the own army (Target 1); Razdor's good entries.
 const EFFECT_BLUE: Color = Color::new(75.0 / 255.0, 185.0 / 255.0, 1.0, 1.0);
 /// 0xae24c4, less (20, 90, 180): the cost and duration lines.
 const GOLD: Color = Color::new(235.0 / 255.0, 165.0 / 255.0, 75.0 / 255.0, 1.0);
@@ -259,7 +259,7 @@ const UNAFFORDABLE_NAME: Color = Color::new(1.0, 175.0 / 255.0, 85.0 / 255.0, 1.
 /// [`razdor::rules::spell_hint::effect_text`] with the install's `[Skills]` labels), the
 /// cost line (`Mana`, `Reading`, `Hour`) and the duration line (`MomentaryEffect`, or
 /// `TimeOfEffect` with the hours and `Hours`). The effect is yellow, blue for a spell on the
-/// own army; cost and duration orange. With `tint_mana` a spell over the hero's mana has all
+/// own army (Razdor: each entry by its sign, a deviation); cost and duration orange. With `tint_mana` a spell over the hero's mana has all
 /// its lines red, its name in the red Benguiat, and its effect is not turned blue
 /// (0x49be2c, 0x49bb36).
 fn card_text(game: &Game, s: &SpellDef, area: Rect, tint_mana: bool) {
@@ -270,23 +270,23 @@ fn card_text(game: &Game, s: &SpellDef, area: Rect, tint_mana: bool) {
     let tx = area.x + area.w / 2.0;
     let cost = game.cast_cost(s);
     let red = tint_mana && game.mana < cost.mana;
-    let effect = razdor::rules::spell_hint::effect_text(s, &super::spell_badges::label);
+    let effect = razdor::rules::spell_hint::effect_entries(s, &super::spell_badges::label);
     let name_size = Role::Name.size(17.0 * k);
     let names = Role::Name.with(|| wrap(&s.name, room, name_size));
     let name_lh = Role::Name.line_height(18.0 * k);
     let size = Role::Body.size(12.0 * k);
     let line_h = Role::Body.line_height(13.0 * k);
-    let mut lines: Vec<(String, Color)> = Vec::new();
+    let mut lines: Vec<Vec<(String, Color)>> = Vec::new();
     // Without an effect text the card has the name alone (0x49bb0b).
     if !effect.is_empty() {
-        let effect_ink = if red {
-            UNAFFORDABLE
-        } else if razdor::rules::spell_hint::on_own_army(s) {
-            EFFECT_BLUE
-        } else {
-            EFFECT_YELLOW
-        };
-        lines.extend(wrap(effect.trim_end(), room, size).into_iter().map(|l| (l, effect_ink)));
+        // Deviation (the owner's decision, 2026-10-18, a player's request): each entry is blue
+        // when it is good for the unit holding the spell and yellow when bad
+        // (`spell_hint::good_for_holder`). The original turns the whole effect text blue for a
+        // spell on the own army and leaves it yellow on the enemy (0x49bb36). Unaffordable,
+        // all red as the original's.
+        let ink = |good: bool| if red { UNAFFORDABLE } else if good { EFFECT_BLUE } else { EFFECT_YELLOW };
+        let parts: Vec<(String, Color)> = effect.into_iter().map(|e| (e.text, ink(e.good))).collect();
+        lines.extend(wrap_coloured(&parts, room, size));
         // The card shows the cost function of `TimeCast` in hours, not the real wait (0x49bbe0).
         let card_hours = game.card_cast_hours(s).max(0) as u64;
         let mana_line = format!("{} {}, {} {}", own("Mana", n_("Mana:")), cost.mana, own("Reading", n_("Reading:")), hours(card_hours * 60, false));
@@ -295,8 +295,8 @@ fn card_text(game: &Game, s: &SpellDef, area: Rect, tint_mana: bool) {
             Duration::Minutes(m) => format!("{} {}", own("TimeOfEffect", n_("Lasts:")), hours(m, true)),
         };
         let ink = if red { UNAFFORDABLE } else { GOLD };
-        lines.extend(wrap(&mana_line, room, size).into_iter().map(|l| (l, ink)));
-        lines.extend(wrap(&last, room, size).into_iter().map(|l| (l, ink)));
+        lines.extend(wrap(&mana_line, room, size).into_iter().map(|l| vec![(l, ink)]));
+        lines.extend(wrap(&last, room, size).into_iter().map(|l| vec![(l, ink)]));
     }
     let gap = if lines.is_empty() { 0.0 } else { line_h };
     let block = names.len() as f32 * name_lh + gap + lines.len() as f32 * line_h;
@@ -308,11 +308,11 @@ fn card_text(game: &Game, s: &SpellDef, area: Rect, tint_mana: bool) {
         }
     });
     let mut y = top + names.len() as f32 * name_lh + gap + size * 0.72;
-    for (line, color) in lines {
+    for line in lines {
         if y > area.y + area.h - 2.0 * k {
             break;
         }
-        chrome::shadow_centered(&line, tx, y, size, color);
+        shadow_coloured(&line, tx, y, size, true);
         y += line_h;
     }
 }

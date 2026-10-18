@@ -813,6 +813,37 @@ pub fn wrap(s: &str, width: f32, size: f32) -> Vec<String> {
     lines
 }
 
+/// [`wrap`] for words in their own colours: `parts` are pieces of one paragraph (each may hold
+/// several words), the lines keep each word's colour.
+pub fn wrap_coloured(parts: &[(String, Color)], width: f32, size: f32) -> Vec<Vec<(String, Color)>> {
+    let words: Vec<(&str, Color)> = parts.iter().flat_map(|(t, c)| t.split_whitespace().map(move |w| (w, *c))).collect();
+    let text: Vec<&str> = words.iter().map(|w| w.0).collect();
+    let mut lines = Vec::new();
+    let mut next = 0;
+    for line in wrap(&text.join(" "), width, size) {
+        let n = line.split_whitespace().count();
+        lines.push(words[next..next + n].iter().map(|&(w, c)| (w.to_string(), c)).collect());
+        next += n;
+    }
+    lines
+}
+
+/// Draws a line of coloured words from [`wrap_coloured`] with the shadow, its left end at
+/// `x` (or centred on `x` when `centred`), the words a space apart.
+pub fn shadow_coloured(line: &[(String, Color)], x: f32, y: f32, size: f32, centred: bool) {
+    let all: Vec<&str> = line.iter().map(|w| w.0.as_str()).collect();
+    let all = all.join(" ");
+    let left = if centred { x - measure(&all, size).width / 2.0 } else { x };
+    let mut before = String::new();
+    for (w, c) in line {
+        // The word starts where the text before it and the word end, less the word.
+        let at = measure(&format!("{before}{w}"), size).width - measure(w, size).width;
+        super::chrome::shadow_text(w, left + at, y, size, *c);
+        before.push_str(w);
+        before.push(' ');
+    }
+}
+
 /// One row of a marked-up text (0x48e438) laid out in a box.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MarkupRow {

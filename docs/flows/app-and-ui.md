@@ -109,7 +109,11 @@ A spell's card, wherever it is shown (the spell book's cells, the sanctuary's de
 event window's spell tooltip), has the same text, drawn by `spellbook::card_text` in
 `src/ui/spellbook.rs` (`spellbook::spell_card` adds the box and picture): the name, then the
 effect text of `rules::spell_hint::effect_text` (the same builder as the badge hint's), the
-cost and the duration line, each word-wrapped as one paragraph (interface.md §9.3).
+cost and the duration line, each word-wrapped as one paragraph (interface.md §9.3). On main the
+effect entries are coloured one by one (`spell_hint::effect_entries`, `spell_hint::good_for_holder`,
+drawn by `widgets::wrap_coloured` and `widgets::shadow_coloured`), in the cards and the badge
+hint alike: blue when good for the unit holding the spell, yellow (red in the hint) when bad;
+the original colours the whole effect by the spell's target (a deviation the owner asked for).
 
 The custom battle's setup (`Screen::CustomSetup`, drawn by `custom_battle::frame` in
 `src/ui/custom_battle.rs`, a Razdor extra) keeps its armies in `rules::custom::Setup`. Its left
