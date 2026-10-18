@@ -164,6 +164,9 @@ The original finds a unit's and an ability's pictures as follows, and Razdor doe
   (`data::unit_picture_frames`, `DtInstall::unit_picture_frame`). A mod that adds units must
   add their frames at the same positions; frames are `[u16 w][u16 h][u16 w][u16 h]` then
   w·h scrambled ARGB4444 pixels (Persones) and `[u16 w][u16 h]` + 92·92 pixels (Icons).
+  The unit panel draws the engraving unscaled (at the window's 15/16), the whole picture
+  centred in the original's 266 × 436 box under the panel's top (`unit_sheet::figure_rect`,
+  0x492f24); never place it by its pixels or pin it to the top.
 - **Engraving blend.** Drawn with the frame's own alpha at full strength (492f24 → 0x476a3c);
   a frame whose opaque pixels carry a low alpha nibble looks faded in the original too.
 - **Ability icons.** `Windows/Bonus<N>.lit` for N = 1…52, N being the bonus's place among the

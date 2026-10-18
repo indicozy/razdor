@@ -1342,7 +1342,6 @@ impl BattleView {
             building: b.building_defence(f.team),
             hero,
             status,
-            battle: true,
         };
         let mut hover = None;
         unit_sheet::draw(assets, b.content(), l.panel, &sheet, false, &mut hover);

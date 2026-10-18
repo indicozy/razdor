@@ -540,7 +540,6 @@ fn recruit_panel(game: &Game, assets: &Assets, f: &Frame, kind: UnitId) {
         building: 0,
         hero: None,
         status: Vec::new(),
-        battle: false,
     };
     let mut hover = None;
     unit_sheet::draw(assets, c, window_layout::left(Rect::new(f.x, f.y, f.w, f.h)), &sheet, false, &mut hover);
@@ -581,7 +580,6 @@ fn unit_panel(game: &Game, assets: &Assets, f: &Frame, (guard, i): (bool, usize)
         building: bd,
         hero,
         status: super::items_view::potion_status(c, unit),
-        battle: false,
     };
     let mut hover = None;
     unit_sheet::draw(assets, c, window_layout::left(Rect::new(f.x, f.y, f.w, f.h)), &sheet, false, &mut hover);

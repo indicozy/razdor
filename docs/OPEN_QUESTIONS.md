@@ -28,6 +28,15 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   unit card panel (`selected_unit_panel`), no `window_layout` and no hint strip under the
   counters (PR #8's), so the pick does not apply. Port it by hand once those are there.
 
+- **dt-original: the unit panel's figure box and the promotion preview's slots** (2026-10-18,
+  a player's report). Main places the engraving unscaled, centred in the original's
+  266 × 436 box under the panel's top (`unit_sheet::figure_rect`, 0x492f24 → 0x476a3c), and a
+  hovered promotion portrait's type card has no item slots (`items_view::panel_slots`,
+  0x4c39d8). dt-original's panel is still the older layout (the figure pinned 10 px under the
+  top, the text laid out under the figure's bottom, `Sheet::battle`), which main replaced
+  earlier with the text stacked from the panel's bottom (492f24); port that layout first,
+  then these two.
+
 - **Event window: the items lost row and the departed row's units** (2026-10-17, found with
   a player's report on the units rows). The original shows a row of the items an event took
   (`[Event] DelItem`, 0x4a9180, only when one of them was really there) and fills the

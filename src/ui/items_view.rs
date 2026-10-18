@@ -714,19 +714,18 @@ pub fn squad(
         start: &stats,
         power: stats[Stat::MagicPower],
         wage: if showing_type { class_wage(&c, u.def) } else { game.wage(sel) },
-        items: u.items,
+        items: if showing_type { [None; 4] } else { u.items },
         back_row: u.slot.row == razdor::rules::formation::Row::Back,
         unpaid: !showing_type && u.unpaid,
         building: bd,
         hero,
         status,
-        battle: false,
     };
     let sheet_rect = window_layout::left(win);
     // A living unit's first `personal` worn slots are his own: not taken up (0x4c24f4), and
     // hovering one says so (0x4c280c, `[Army] ItemI`).
     let locked = |slot: usize| showing_type || (u.alive() && slot < u.personal as usize);
-    let pressed_slot = super::dt_font::with_native_metrics(|| unit_sheet::draw(assets, &c, sheet_rect, &sheet, true, &mut hover));
+    let pressed_slot = super::dt_font::with_native_metrics(|| unit_sheet::draw(assets, &c, sheet_rect, &sheet, panel_slots(showing_type), &mut hover));
     let personal_hover = hover.is_some_and(|h| u.items.iter().enumerate().any(|(s, i)| *i == Some(h) && locked(s)));
     if let Some(slot) = pressed_slot.filter(|&s| !locked(s)) {
         if let Some(item) = u.items[slot] {
@@ -1097,6 +1096,14 @@ pub(super) fn class_wage(c: &Content, id: UnitId) -> i32 {
     if razdor::rules::content::HeroClass::of_unit(id).is_some() || undead { 0 } else { c.wage(id) }
 }
 
+/// Whether the army window's panel shows the four worn-item slots: only for the unit itself.
+/// A promotion portrait hovered (0x4c39d8) paints its type as a template (492f24 with the
+/// fourth argument set), and a template skips the slot loop altogether, so no slot, empty
+/// or filled, is drawn on the previewed type's card.
+fn panel_slots(showing_type: bool) -> bool {
+    !showing_type
+}
+
 pub(super) fn potion_status(c: &Content, u: &Unit) -> Vec<(String, Color)> {
     if u.potions.is_empty() {
         return Vec::new();
@@ -1302,7 +1309,6 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
         building: 0,
         hero,
         status: potion_status(&c, &u),
-        battle: false,
     };
     let sheet_rect = window_layout::left(win);
     let locked = |slot: usize| u.alive() && slot < u.personal as usize;
@@ -1549,7 +1555,15 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
 
 #[cfg(test)]
 mod tests {
-    use super::{class_wage, hero_resources, pointed_line, promo_ease, promo_look, promo_ms, ArmySel, Content, Controls, GridPress, UnitId};
+    use super::{class_wage, hero_resources, panel_slots, pointed_line, promo_ease, promo_look, promo_ms, ArmySel, Content, Controls, GridPress, UnitId};
+
+    /// The panel's item slots belong to the unit only: a hovered promotion portrait's type
+    /// card has none (492f24 skips them for a template, 0x4c3b5f / 0x4c3bc2 pass it).
+    #[test]
+    fn a_promotion_preview_has_no_item_slots() {
+        assert!(panel_slots(false));
+        assert!(!panel_slots(true));
+    }
 
     fn sel(selected: Option<usize>, shown: Option<usize>) -> ArmySel {
         ArmySel { selected, shown }

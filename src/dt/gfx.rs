@@ -105,22 +105,6 @@ pub fn decode_ugs(d: &[u8]) -> Result<Vec<Image>, DtError> {
     Ok(frames)
 }
 
-/// The middle of a picture's opaque part across its width (0 left, 1 right): the mean column
-/// of its pixels weighted by their alpha. `None` for a fully transparent picture.
-pub fn opaque_center_x(img: &Image) -> Option<f32> {
-    let w = img.width as usize;
-    if w == 0 {
-        return None;
-    }
-    let (mut sum, mut total) = (0.0f64, 0.0f64);
-    for (i, p) in img.rgba.chunks_exact(4).enumerate() {
-        let a = p[3] as f64;
-        sum += (i % w) as f64 * a;
-        total += a;
-    }
-    (total > 0.0).then(|| ((sum / total + 0.5) / w as f64) as f32)
-}
-
 /// The single-frame stills of `Graphics/Windows` (`MB2`, `MM_Icons`, `Title_RUS`) are not
 /// scrambled: each pixel is one grey byte and one alpha byte. The game tints them (the menu
 /// buttons, the minimap symbols by owner).
@@ -762,20 +746,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn opaque_center_follows_the_pixels_not_the_frame() {
-        // Four columns: a solid body in column 0, a faint blade (a quarter as opaque) over 1–3.
-        let px = |a: u8| [0, 0, 0, a];
-        let row: Vec<u8> = [px(255), px(64), px(64), px(64)].concat();
-        let img = Image { width: 4, height: 2, rgba: row.repeat(2) };
-        let c = opaque_center_x(&img).unwrap();
-        assert!((0.25..0.5).contains(&c), "{c}");
-        let clear = Image { width: 2, height: 1, rgba: vec![0; 8] };
-        assert_eq!(opaque_center_x(&clear), None);
-        let even = Image { width: 2, height: 1, rgba: [px(255), px(255)].concat() };
-        assert_eq!(opaque_center_x(&even), Some(0.5));
-    }
-
-    #[test]
     fn atlas_packs_images_without_overlap() {
         let img = |w: u32, h: u32, v: u8| Image { width: w, height: h, rgba: vec![v; (w * h * 4) as usize] };
         let (a, b, c) = (img(3, 2, 10), img(4, 3, 20), img(2, 1, 30));
@@ -1212,6 +1182,11 @@ mod tests {
         assert!(portraits.iter().all(|p| (p.width, p.height) == (92, 92)));
         let figures = dt.unit_figures().unwrap();
         assert_eq!(figures.len(), dt.units.len());
+        // The unit panel centres each figure, unscaled, in a 0x10a × 0x1b4 box (0x492f24):
+        // every shipped figure fits it, so none rises above the panel's top.
+        for (i, f) in figures.iter().enumerate() {
+            assert!(f.width <= 0x10a && f.height <= 0x1b4, "figure {i}: {}x{}", f.width, f.height);
+        }
         let items = dt.item_icons().unwrap();
         assert_eq!(items.len(), 167);
         // One frame per artefact, in GlobalIndex order (as the unit portraits): the helmets
