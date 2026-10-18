@@ -6,7 +6,7 @@ use razdor::i18n::{n_, tr};
 use razdor::rules::battle::Team;
 use razdor::rules::content::{Content, ItemId, Stat, UnitId};
 use razdor::rules::experience::is_percent_stat;
-use razdor::rules::game::{Game, PACK_SIZE};
+use razdor::rules::game::Game;
 use razdor::rules::items::{EquipError, Given, Press};
 use razdor::rules::journal::Tab;
 use razdor::rules::units::Unit;
@@ -433,9 +433,11 @@ fn draw_effect_frame(c: &Content, n: usize, i: usize, at: Vec2, px: f32) {
 
 /// How many rows the pack scrolls over: the rows down to the one holding the cell after the
 /// last used one (0x49a718: the first shown cell is 5 × Round(max(0, length div 5 − 4) × s),
-/// so with 5 rows shown the top row goes down to length div 5 − 4), in `cols` columns.
+/// so with 5 rows shown the top row goes down to length div 5 − 4), in `cols` columns. The
+/// original stops at its 256th cell; Razdor's pack grows (a deviation), so there is always an
+/// empty row after the last used one.
 fn pack_rows(len: usize, cols: usize) -> usize {
-    (len / cols.max(1) + 1).min(PACK_SIZE.div_ceil(cols.max(1)))
+    len / cols.max(1) + 1
 }
 
 /// The backpack: the original's inventory squares, the pack's cells in order a row at a time,
@@ -504,8 +506,7 @@ fn pack_view(game: &Game, assets: &Assets, r: Rect, scroll: &mut usize, hover: &
             }
             let cell_at = match kept {
                 Some(v) => v.get(i).copied(),
-                None if i < PACK_SIZE => Some(i),
-                None => continue,
+                None => Some(i),
             };
             let item = cell_at.and_then(|i| game.pack.get(i));
             if let Some(item) = item {

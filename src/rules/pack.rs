@@ -3,7 +3,9 @@
 //! the cell it was put in; the grid shows the cells in order, five to a row.
 //!
 //! - A gained item (an event, loot, a purchase) goes into the first empty cell (0x49a85c);
-//!   with all 256 taken it is lost without a word.
+//!   with all 256 taken the original loses it without a word. Razdor's pack (the owner's
+//!   decision, 2026-10-18, a deviation) has no last cell: it grows by a cell past the last one
+//!   used, so nothing is ever lost to a full pack.
 //! - Removing an item by its number takes the first cell holding it (0x49a8a8).
 //! - The pack's length is its last used cell + 1 (0x49a718); the scroll runs over it.
 //!
@@ -12,7 +14,8 @@
 
 use super::content::ItemId;
 
-/// Cells of the pack (0x68dce0: 256 entries).
+/// Cells of the original's pack (0x68dce0: 256 entries). Razdor's pack has no such bound
+/// (a deviation, see the module's note); the number stays for the specs and the tests.
 pub const PACK_SIZE: usize = 256;
 
 /// The hero's pack: cells in order, `None` an empty one; never a trailing empty cell.
@@ -60,21 +63,18 @@ impl Pack {
         self.cells.iter().flatten().count()
     }
 
-    /// No empty cell among the 256: [`Pack::add`] would lose the item.
+    /// No empty cell left: never in Razdor's growing pack (a deviation: the original's is
+    /// full at 256 items, 0x49a85c). Kept so the callers read as the original's checks.
     pub fn is_full(&self) -> bool {
-        self.count() >= PACK_SIZE
+        false
     }
 
-    /// Puts `item` in the first empty cell (0x49a85c). False, and the item is lost, when all
-    /// 256 cells are taken (the original's silent loss).
+    /// Puts `item` in the first empty cell (0x49a85c), or in a new cell past the last one
+    /// (Razdor's deviation: the original loses the item with all 256 cells taken). Always true.
     pub fn add(&mut self, item: ItemId) -> bool {
-        match (0..PACK_SIZE).find(|&i| self.get(i).is_none()) {
-            Some(i) => {
-                self.set(i, Some(item));
-                true
-            }
-            None => false,
-        }
+        let i = (0..self.cells.len()).find(|&i| self.get(i).is_none()).unwrap_or(self.cells.len());
+        self.set(i, Some(item));
+        true
     }
 
     /// Takes the item out of cell `i`, leaving it empty (the click that picks it up, 0x4c24f4;
@@ -85,7 +85,7 @@ impl Pack {
         item
     }
 
-    /// Puts `item` (or nothing) in cell `i` (below [`PACK_SIZE`]); returns what was there.
+    /// Puts `item` (or nothing) in cell `i`; returns what was there.
     pub fn set(&mut self, i: usize, item: Option<ItemId>) -> Option<ItemId> {
         if i >= self.cells.len() {
             item?;
@@ -186,9 +186,13 @@ mod tests {
     }
 
     #[test]
-    fn a_full_pack_loses_the_item_and_the_first_match_is_removed() {
+    fn deviation_the_pack_grows_past_256_and_the_first_match_is_removed() {
+        // The original loses an item with all 256 cells taken (0x49a85c); Razdor's pack grows.
         let mut p: Pack = std::iter::repeat_n(ItemId(5), PACK_SIZE).collect();
-        assert!(p.is_full() && !p.add(ItemId(6)), "0x49a85c: lost without a word");
+        assert!(!p.is_full() && p.add(ItemId(6)));
+        assert_eq!((p.get(PACK_SIZE), p.len()), (Some(ItemId(6)), PACK_SIZE + 1));
+        p.set(1000, Some(ItemId(7)));
+        assert_eq!(p.get(1000), Some(ItemId(7)), "any cell takes an item");
         let mut p = Pack::from(vec![ItemId(5), ItemId(6), ItemId(6)]);
         assert!(p.remove_first(ItemId(6)));
         assert_eq!((p.get(1), p.get(2)), (None, Some(ItemId(6))), "0x49a8a8: the first match");

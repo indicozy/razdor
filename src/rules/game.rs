@@ -3291,12 +3291,12 @@ mod tests {
         assert_eq!(g.sell(0), Ok(cost / 4), "ItemSaleCost 25% (the demo's F is 100)");
         assert!(g.pack.is_empty());
         assert_eq!(g.sell(0), Err(TradeError::NoSuchItem));
-        // No pack test at a purchase (0x4b9e18): paid for, and lost with all 256 cells taken
-        // (0x49a85c).
+        // No pack test at a purchase (0x4b9e18); the original loses it with all 256 cells taken
+        // (0x49a85c), Razdor's pack grows (a deviation).
         g.pack = vec![item; PACK_SIZE].into();
         g.gold = 10_000;
         assert!(g.buy(0).is_ok());
-        assert_eq!((g.pack.count(), g.gold < 10_000), (PACK_SIZE, true));
+        assert_eq!((g.pack.count(), g.gold < 10_000), (PACK_SIZE + 1, true));
         g.location = Some(g.world.index_of("Millbrook"));
         assert_eq!(g.sell(0), Err(TradeError::NoMarket));
     }
@@ -3320,8 +3320,12 @@ mod tests {
         assert_eq!(g.hero().hp, 70, "HP capped to the new max");
         assert_eq!(g.pack.items(), vec![shield, axe, bow], "into the first empty cell (0x49a85c)");
         assert_eq!(g.unequip(0, shield_slot), Err(EquipError::NoSuchItem));
+        // Razdor's pack grows past the original's 256 (a deviation): no PackFull.
+        g.pack = vec![shield].into();
+        g.equip(0, 0).unwrap();
         g.pack = vec![axe; PACK_SIZE].into();
-        assert_eq!(g.unequip(0, 0), Err(EquipError::PackFull));
+        assert_eq!(g.unequip(0, shield_slot), Ok(()));
+        assert_eq!((g.pack.count(), g.pack.get(PACK_SIZE)), (PACK_SIZE + 1, Some(shield)));
     }
 
     #[test]
@@ -3384,7 +3388,8 @@ mod tests {
     }
 
     #[test]
-    fn loot_that_does_not_fit_is_left_behind() {
+    fn deviation_loot_fits_a_pack_of_256() {
+        // The original leaves loot behind with all 256 cells taken; Razdor's pack grows.
         let mut g = quiet_game(HeroClass::Knight);
         g.pack = vec![item(&g, "heal_potion"); PACK_SIZE].into();
         let lair = g.world.index_of("Bandit lair");
@@ -3392,7 +3397,8 @@ mod tests {
         let mut b = g.start_battle();
         b.begin();
         wipe_all_but_hero(&mut b);
-        assert!(matches!(g.resolve_battle(&b), BattleResult::Victory { left_behind: 2, .. }));
+        assert!(matches!(g.resolve_battle(&b), BattleResult::Victory { left_behind: 0, .. }));
+        assert_eq!(g.pack.count(), PACK_SIZE + 2);
     }
 
     #[test]

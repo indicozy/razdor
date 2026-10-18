@@ -459,11 +459,9 @@ impl super::game::Game {
     /// A press on pack cell `i` in the hero or army window (0x4c24f4, magic-items.md §5.2):
     /// with nothing held, the cell's item is picked up onto the pointer and the cell left
     /// empty; with an item held, it is put in an empty cell, or swapped with the cell's item,
-    /// which is then held. Any of the 256 cells takes an item: it stays where it was put.
+    /// which is then held. Any cell takes an item: it stays where it was put (the original's
+    /// 256 cells; Razdor's pack has no last one, a deviation, see `pack.rs`).
     pub fn press_pack(&mut self, i: usize) -> Press {
-        if i >= super::pack::PACK_SIZE {
-            return Press::Nothing;
-        }
         match (self.held_item, self.pack.get(i)) {
             (None, Some(item)) => {
                 self.pack.take(i);
@@ -659,15 +657,13 @@ mod give_tests {
         assert_eq!(g.give_held(0), Ok(Given::ToPack));
         assert_eq!((g.pack.get(1), g.held_item), (Some(shield), None));
         assert!(!g.hero().items.contains(&Some(shield)));
-        // A full pack refuses: the item stays on the pointer.
+        // The original's full pack refuses and then loses the held item (0x4b8d28 → 0x49a85c);
+        // Razdor's grows (a deviation): past 256 items the item still goes in.
         g.squad[1].items[0] = Some(shield);
         g.press_worn(1, 0).unwrap();
         g.pack = std::iter::repeat_n(potion, crate::rules::game::PACK_SIZE).collect();
-        assert_eq!(g.give_held(0), Err(EquipError::PackFull));
-        assert_eq!(g.held_item, Some(shield));
-        // Closing the window then loses it, as the original's (0x4b8d28 → 0x49a85c).
-        assert!(!g.drop_held());
-        assert_eq!(g.held_item, None);
+        assert_eq!(g.give_held(0), Ok(Given::ToPack));
+        assert_eq!((g.pack.get(crate::rules::game::PACK_SIZE), g.held_item), (Some(shield), None));
         // A potion is drunk by the hero.
         g.pack = Pack::from(vec![potion]);
         g.squad[0].hp = 10;
