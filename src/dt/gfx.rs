@@ -476,6 +476,11 @@ pub fn decode_bmp(d: &[u8]) -> Result<Image, DtError> {
         return Err(bad("BMP (only uncompressed 8/24/32-bit)", 0));
     }
     let (w, top_down, h) = (w as usize, h < 0, h.unsigned_abs() as usize);
+    // A broken or hostile header (a mod's file) must not reserve gigabytes before the pixel
+    // checks below; the same bound as a LIT's.
+    if w > 1 << 14 || h > 1 << 14 {
+        return Err(bad("BMP size", 18));
+    }
     let mut rgba = Vec::with_capacity(w * h * 4);
     if bpp == 8 {
         // 0x47754c: the palette right after the 40-byte header, whatever bfOffBits says.
@@ -1112,6 +1117,15 @@ mod tests {
         assert_eq!(img.pixel(2, 0), [255, 255, 255, 255]);
         assert_eq!(img.pixel(1, 1), [200, 30, 10, 255]);
         assert_eq!(img.pixel(0, 1), [255, 255, 255, 255]);
+    }
+
+    /// A header claiming a giant picture is refused before any pixel buffer is reserved.
+    #[test]
+    fn a_giant_bmp_header_is_refused_up_front() {
+        let mut b = bmp8([[0, 1, 0], [1, 1, 0]], [[255, 255, 255], [200, 30, 10]]);
+        b[18..22].copy_from_slice(&i32::MAX.to_le_bytes());
+        b[22..26].copy_from_slice(&i32::MIN.wrapping_add(1).to_le_bytes());
+        assert!(decode_bmp(&b).is_err());
     }
 
     /// The ability icons' key (0x48e8f0 → 0x4764c0, 0x47669c): the bottom-left pixel's
