@@ -292,18 +292,16 @@ fn main_hall(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingVie
     let pic_h = 250.0 * k;
     {
         let loc = &game.world.locations[l];
-        draw_rectangle(x, y, w, pic_h, Color::new(0.35, 0.5, 0.65, 1.0));
-        draw_rectangle(x, y + pic_h * 0.62, w, pic_h * 0.38, Color::new(0.35, 0.5, 0.3, 1.0));
-        // The original's picture of this kind of building, else (Razdor's) its map sprite.
+        // The original's picture of this kind of building. A kind without one (the palace,
+        // the smithy, the dungeon entrance) shows the window's own background there: the tab
+        // repaints the right panel from the window's surface (0x4bb7c4) and draws no picture
+        // (0x4ba854 case 0). (Razdor drew its own sky, grass and the map sprite there until a
+        // player's report.) Without the install, Razdor's placeholder names the kind.
         let scene = hall_picture(loc.kind, loc.picture);
         if let Some(t) = scene.and_then(chrome::win) {
             let src_h = (t.width() * pic_h / w).min(t.height());
             chrome::tex_src(&t, Rect::new(0.0, (t.height() - src_h) / 2.0, t.width(), src_h), Rect::new(x, y, w, pic_h), WHITE);
-        } else if let Some(tex) = assets.dt.as_ref().and_then(|a| a.building(loc.picture.0, loc.picture.1)) {
-            let sc = ((pic_h - 20.0 * k) / tex.height()).min((w - 20.0 * k) / tex.width()).min(2.5 * k);
-            let (tw, th) = (tex.width() * sc, tex.height() * sc);
-            draw_texture_ex(&tex, x + (w - tw) / 2.0, y + pic_h - th - 6.0 * k, WHITE, DrawTextureParams { dest_size: Some(vec2(tw, th)), ..Default::default() });
-        } else {
+        } else if assets.dt.is_none() {
             text_centered(loc.kind.label(), x + w / 2.0, y + pic_h / 2.0, 40.0 * k, INK);
         }
         chrome::silver_frame(Rect::new(x, y, w, pic_h), 1.0);
@@ -1678,6 +1676,20 @@ mod tests {
         assert!(!super::village_ok_key(false, true), "once");
     }
     use super::{market_list_buttons, next_pick, ListButton, offer_picture, recruit_x, screen_line, stock_caption, stock_picture};
+
+    /// 0x4ba854 case 0: pictures only for building types 1, 3-7, 10 and 12; the palace, the
+    /// smithy and the dungeon entrance keep the window's background (0x4bb7c4).
+    #[test]
+    fn the_main_hall_has_no_picture_for_the_palace_smithy_and_entrance() {
+        use super::hall_picture;
+        use razdor::rules::world::LocationKind as K;
+        for kind in [K::Palace, K::Smithy, K::Entrance] {
+            assert_eq!(hall_picture(kind, (11, 1)), None, "{kind:?}");
+        }
+        assert_eq!(hall_picture(K::Town, (1, 1)), Some("S_Town"));
+        assert_eq!(hall_picture(K::Altar, (10, 2)), Some("S_Grave"));
+        assert_eq!(hall_picture(K::Ruins, (12, 3)), Some("S_RuinedHouse"));
+    }
     use razdor::rules::economy::VillageOffer;
     use razdor::rules::formation::{Formation, Row, Slot};
 
