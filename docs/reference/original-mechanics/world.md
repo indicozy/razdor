@@ -655,6 +655,7 @@ Razdor's code read for this table: `src/rules/map.rs`, `fog.rs`, `game.rs`, `wor
 | Sight radii | 9/8/10 cells | same | none |
 | Explored edge | the original's half-cell stamps (`fog::stamp`): 241 / 293 / 349 cells for radius 8 / 9 / 10 | half-cell rule; `r + 0.62` fits the sight radii; archmage gets 8 more cells | Matches |
 | Start reveal | instant | grows over ~0.4 s, camera on the hero | cosmetic |
+| Fog elsewhere while a place opens | unchanged: a shown place's overlay holds only the darkness the fog layer lost there (`minimap::reveal_overlay`); until 2026-10-18 the whole old fog was drawn over the fog layer, so every explored edge on the map was darker until the place had opened (a player's report) | one fog image; a reveal only brightens its stamp's half-cells (0x49c8f0, growing 0x4af83c) | Matches (Razdor's place opens as an iris over cells, not a growing half-cell stamp: cosmetic) |
 | Lantern radius unit | cells | cells | none |
 | No re-fogging | yes | yes | none |
 | Clock start | DTm start minute + 1 | start minute + 1 | Matches |

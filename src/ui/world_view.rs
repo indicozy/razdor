@@ -231,9 +231,13 @@ struct Showing {
     /// The event that showed it: shown once its window is closed.
     event: Option<u16>,
     /// The fog as it was before the place was uncovered (soft edges and all), one darkness
-    /// per cell, and the texture it is drawn from: over the map until the reveal, so the
-    /// place pops out of the dark without any hint before.
+    /// per cell, and the texture drawn over the fog layer until the reveal, so the place pops
+    /// out of the dark without any hint before. The texture holds only the darkness the fog
+    /// layer lacks (`minimap::reveal_overlay` against `after`): clear wherever the place's
+    /// cells did not change the fog, so the rest of the map keeps its shade (0x49c8f0).
     before: Vec<u8>,
+    /// The fog layer's darkness once the place was uncovered.
+    after: Vec<u8>,
     mask: Option<Texture2D>,
     /// World distance from the place's centre to its farthest uncovered cell, plus the rim.
     reach: f32,
@@ -250,16 +254,18 @@ impl Showing {
         let map = &game.world.map;
         let at = map.center(shown.at);
         let mut before = Vec::new();
+        let mut after = Vec::new();
         let mask = (!shown.cells.is_empty() && fog.w > 0 && fog.h > 0).then(|| {
             let fresh: std::collections::HashSet<Tile> = shown.cells.iter().copied().collect();
             before = minimap::darkness_of(fog.w, fog.h, |t| fog.explored(t) && !fresh.contains(&t));
-            let rgba: Vec<u8> = before.iter().flat_map(|&a| [0, 0, 0, a]).collect();
+            after = minimap::darkness(fog);
+            let rgba: Vec<u8> = before.iter().zip(&after).flat_map(|(&b, &a)| [0, 0, 0, minimap::reveal_overlay(b, a)]).collect();
             let t = Texture2D::from_rgba8(fog.w as u16, fog.h as u16, &rgba);
             t.set_filter(FilterMode::Linear);
             t
         });
         let reach = shown.cells.iter().map(|&t| (Vec2::from(map.center(t)) - Vec2::from(at)).length()).fold(0.0, f32::max) + SHOW_RIM + 1.0;
-        Showing { at, event: shown.event, before, mask, reach, started: None }
+        Showing { at, event: shown.event, before, after, mask, reach, started: None }
     }
 
     /// Its event's window is closed (a place shown with no window waits for all of them).
@@ -720,7 +726,7 @@ impl Camera {
                         let i = (y * w + x) as usize;
                         let d = (Vec2::from(map.center((x, y))) - centre).length();
                         let keep = ((d - r) / SHOW_RIM + 0.5).clamp(0.0, 1.0);
-                        rgba[i * 4 + 3] = (s.before[i] as f32 * keep) as u8;
+                        rgba[i * 4 + 3] = minimap::reveal_overlay((s.before[i] as f32 * keep) as u8, s.after[i]);
                     }
                 }
                 mask.update(&Image { bytes: rgba, width: w as u16, height: h as u16 });
