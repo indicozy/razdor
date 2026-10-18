@@ -147,8 +147,8 @@ block	clean	rm -rf target/debug
 allow	clean	find . -iname "*.lit" | xargs -n1 basename | grep -i font
 allow	clean	ls | xargs -I{} echo {}
 block	clean	ls | xargs -n1 sh -c "rm -rf x"
-allow	clean	cd /mnt/ai_models/razdor-scratch/manaicon/dumper && CARGO_BUILD_JOBS=4 taskset -c 16-19 cargo run --release
-allow	clean	CARGO_BUILD_JOBS=4 taskset -c 16-19 cargo run --manifest-path /mnt/ai_models/razdor-scratch/manaicon/dumper/Cargo.toml
+allow	clean	cd @TMP@/helper && CARGO_BUILD_JOBS=4 taskset -c 16-19 cargo run --release
+allow	clean	CARGO_BUILD_JOBS=4 taskset -c 16-19 cargo run --manifest-path @TMP@/helper/Cargo.toml
 block	clean	CARGO_BUILD_JOBS=4 taskset -c 16-19 cargo run -p razdor --release
 block	clean	CARGO_BUILD_JOBS=4 taskset -c 16-19 cargo run -p helper
 block	clean	CARGO_BUILD_JOBS=4 taskset -c 16-19 cargo run --manifest-path ./Cargo.toml
