@@ -1182,7 +1182,11 @@ Effects and sounds by action:
 |---|---|---|
 | Melee, long strike | melee effect | `Battle-Fight` |
 | Shot | shot effect | `Battle-Shoot` |
-| Shot by a unit whose range ≥ `ShotWeaponRange` | melee effect | `Battle-Strike` |
+| Shot by a unit whose type's base `AttackShot` (units ini, not the current value with levels, items or spells) ≥ `ShotWeaponRange` | melee effect | `Battle-Strike` |
+
+The cannon test reads the unit type table (+0x39) through the unit record's type and compares
+it with the global `ShotWeaponRange` (`[0x4ed3e8]`, `>=`), once when the action starts and once
+for the counterblow. **code** (4c4521–4c4544, 4c5d96–4c5dc0)
 | Curse or magic strike | magic effect | `Battle-Sorcery` |
 | Heal (target wounded) | heal effect | `Battle-Cure` |
 | Blessing | bless effect | `Battle-Bless` |
