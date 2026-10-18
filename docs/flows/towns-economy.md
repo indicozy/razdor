@@ -67,6 +67,13 @@ elementals are hired and paid in mana. Healing costs a share of the unit's cost 
 factor F (`Game::difficulty`: 100 or 120) and takes no
 game time. Corpses stay in the army and can be raised where `resurrects_here`.
 
+**Hire tab's left panel** (interface.md §9.5, `building_view::hire_panel_on`). Pointing at a
+hire offer paints its unit card (`recruit_panel`, a fresh level-1 unit of the type) over the
+tab column, lights its portrait green and puts `[Army]` line 8 (line 10 with none left) on the
+strip; the card stays until the pointer enters the hero's grid with nothing selected or a
+tab's place. With a unit selected, the hero's grid shows the card of the unit under the pointer.
+Recruits have no tooltip.
+
 **Garrisons** (economy.md §2, ai.md §9.6). Only the player's castles and forts take one
 (`Location::takes_garrison`). The hero and named units are refused. Since f4f3a9f a dead unit is
 refused too (Razdor's rule; the original moves corpses both ways), but a corpse already there can

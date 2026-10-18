@@ -815,6 +815,24 @@ ae26a0)
   the same "`Cost` = N" line (Community: `MCst` and mana for an Elemental) and the `HireArmy`
   button, enabled only when the price is affordable, the hero's army has **fewer than 12 units**
   and the slot still has units. **code** (4957e9, 49571d, hooks c25e18 / c25e38 / c25e61)
+- **Pointing at a hire offer** (mouse-enter 4c6964, leave 4c72a4): the offer's cell gets
+  highlight state 2, which the hire tab's frame (4cd94c) draws every frame with the fifth glow
+  set (set 4, the green "selected" one, whatever the state: 4cda47), pulsing as every
+  highlight; leaving sets it back to 0. The strip's hint line becomes `[Army]` line 8 with
+  #NAME1 = the type's name and #BUTTON1 = the `HireArmy` caption, each put in quotes, in the
+  normal hint colour; for an offer with none left, line 10 in the warning colour (ae24f8). Then
+  the **unit card** of the offer (492f24 with the building's army and the slot: a temporary
+  unit of the type at level 1, the type's recruit wage) is painted over the left column, in
+  place of the tab buttons (it clears 68dc8c, "tabs shown"). Leaving the offer leaves the card.
+  The tabs come back (4bc98c repaints the column and its buttons, sets 68dc8c) when the pointer
+  enters a cell of the hero's grid while nothing is selected (4c612c; with a unit selected that
+  cell shows the card of the unit in it, or of the selected one over an empty cell), the place
+  of a tab button (4bb6c8, even while the card hides it) or an empty barracks slot (492f24 with
+  type 0 in the hire tab). The hire button itself shows no window and asks nothing: it is
+  disabled when the hire is impossible (above), and its release queues the slide that hires.
+  Quirk: the offer's path through 492f24 skips setting the building-defence and in-building
+  flags (68dc67, 68dc68; 492f98 jumps to 493106), so the card keeps those of the card shown
+  before it. **code**
 
 ### 9.6 Editing the formation outside battle (4c346c, 4c653c, 4c6f50)
 
@@ -1409,6 +1427,7 @@ parity rule they are candidates to hide or remove, not bugs to copy.
 | 68 | Promotion animation | Matches (`items_view::Promo`): `Unit-Upgrade` on the click, the picked portrait empty with the fading green glow, effect 6 frames 0–15 on it for 500 ms then 16–49 eased down to the unit's portrait, the glow up on all portraits, the class changed 100 ms before the end and the glow down on the new tree, the card under the running `exp` strip, no input meanwhile; at the end nothing selected, the tree up, the panel on the promoted unit until a card is hovered. The time follows the original's portrait distance (1501 / 1746 ms), the path Razdor's own tree places | The same over the original's portraits (4b1a04) | 9.7 |
 | 69 | Name fields (the hero's name, the save's name) | Matches: held Backspace deletes again after 500 ms, then 30 a second (`widgets::repeats`). Extra (Razdor's choice, a player's wish): a normal edit box, the caret placed by the mouse or the arrows, a selection (mouse drag, Shift, Ctrl+A), Delete, Ctrl+C / X / V; the hero window opens with «(нет имени)» selected, so the first key replaces it (`widgets::edit_keys`, `text_edit::TextEdit`) | One character per WM_KEYDOWN, the system's key repeat included (475748, 47a816); the caret always at the end, no selection, no paste; the default name kept with the caret after it (47ae5c) | 5 |
 | 70 | Figures inside buildings | Matches: the hero's and the armies' figures are not drawn while they stand in a building other than a bridge or cross from one building cell to another; gliding in from outside they are seen until the step ends (`World::hides_figure`, `Game::hero_hidden`, `Game::army_hidden`); their one-cell ring stays under the building | 0x497abc empties the drawn-occupant byte; rings are one cell in the Community exe (the vanilla ring round the whole building is a dead branch of 0x48eeb0) | 7.2 |
+| 71 | Pointing at a hire offer | Matches but one quirk (`building_view::barracks`, `hire_panel_on`, `recruit_panel`): the offer's card over the tab column until the hero's grid (nothing selected) or a tab's place brings the tabs back, the green pulsing highlight on its portrait, `[Army]` line 8 (line 10 in red with none left) on the strip, no tooltip; the hero's grid in the hire tab pulses blue under the pointer and green when selected. Not yet: the offer's card shows no building defence or in-building line, where the original keeps the last card's (docs/OPEN_QUESTIONS.md) | 4c6964, 4c72a4, 4cd94c, 4bc98c, 4c612c, 4bb6c8 | 9.5 |
 
 ## Unknowns
 

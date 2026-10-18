@@ -9,7 +9,7 @@ use macroquad::prelude::*;
 use razdor::i18n::{n_, tr};
 use razdor::rules::battle::Team;
 use razdor::trf;
-use razdor::rules::content::{HeroClass, ItemId, SpellDef, Stat};
+use razdor::rules::content::{HeroClass, ItemId, SpellDef, Stat, UnitId};
 use razdor::rules::formation::{Formation, Slot};
 use razdor::rules::economy::VillageOffer;
 use razdor::rules::game::{Currency, Game, HireError, TradeError, Tribute, SPELL_BOOK_SIZE};
@@ -23,8 +23,7 @@ use super::chrome;
 use super::audio::{cue, cued, Cue};
 use super::dialog::{resource_icon, Dialog, Picture, Resource, MANA};
 use super::item_filter;
-use super::items_view::{level_gains, unit_stat_lines};
-use super::screens::stat_lines;
+use super::items_view::unit_stat_lines;
 use super::story;
 use super::unit_sheet;
 use super::widgets::*;
@@ -94,6 +93,45 @@ pub struct BuildingView {
     pub tribute: (i32, i32),
     /// A card animation of the hire tab under way.
     anim: Option<CardAnim>,
+    /// The unit card the hire tab's left panel shows over the tabs, if any (`HirePanel`).
+    hire_panel: Option<HirePanel>,
+}
+
+/// The card the hire tab paints over its column of tabs (0x492f24), until the pointer brings
+/// the tabs back (0x4bc98c).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HirePanel {
+    /// A hire offer: a fresh unit of the type (0x492f24 with the building's army: level 1).
+    Recruit(UnitId),
+    /// A unit of the hero's army (squad index).
+    Squad(usize),
+}
+
+/// What the pointer entered this frame in the hire tab.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Entered {
+    /// A hire offer's card (0x4c6964, the barracks branch).
+    Recruit(UnitId),
+    /// A cell of the hero's grid, with the unit in it if any (0x4c612c).
+    SquadCell(Option<usize>),
+    /// A tab button's place, the Exit included (0x4bb6c8).
+    Tab,
+}
+
+/// The hire tab's left panel after the pointer enters `entered`, with `selected` the hero's
+/// selected unit (None: the tabs). A hire offer always shows its card (0x4c6964 → 0x492f24
+/// (−building, slot)); a cell of the hero's grid brings the tabs back while nothing is
+/// selected (0x4c612c → 0x4bc98c), else shows the unit under the pointer or, over an empty
+/// cell, the selected one; a tab's place brings the tabs back (0x4bb6c8 → 0x4bc98c). Leaving
+/// a card changes nothing (0x4c72a4, 0x4c68d4): the card stays until something else is
+/// entered.
+fn hire_panel_on(now: Option<HirePanel>, entered: Option<Entered>, selected: Option<usize>) -> Option<HirePanel> {
+    match entered {
+        None => now,
+        Some(Entered::Recruit(kind)) => Some(HirePanel::Recruit(kind)),
+        Some(Entered::SquadCell(on)) => selected.map(|s| HirePanel::Squad(on.unwrap_or(s))),
+        Some(Entered::Tab) => None,
+    }
 }
 
 /// A card animation of the hire tab (0x4b0c04, 0x4b11cc), from its start (whole ms of the
@@ -125,7 +163,7 @@ fn now_ms() -> i64 {
 
 impl BuildingView {
     pub fn new(tab: Tab) -> BuildingView {
-        BuildingView { tab, pick: None, scroll: 0, hall_pick: None, hall_scroll: 0, selling: false, garrison_sel: None, garrison_buy: None, filter: String::new(), tribute_paid: false, tribute: (0, 0), anim: None }
+        BuildingView { tab, pick: None, scroll: 0, hall_pick: None, hall_scroll: 0, selling: false, garrison_sel: None, garrison_buy: None, filter: String::new(), tribute_paid: false, tribute: (0, 0), anim: None, hire_panel: None }
     }
 
     fn switch(&mut self, tab: Tab) {
@@ -456,8 +494,60 @@ fn card_panel_lower(f: &Frame) -> Rect {
     window_layout::lower(Rect::new(f.x, f.y, f.w, f.h))
 }
 
+/// The left panel's unit card: the hire tab's (`HirePanel`), else the selected unit's.
 fn selected_unit_panel(game: &Game, assets: &Assets, f: &Frame, view: &BuildingView) {
-    let Some((guard, i)) = view.garrison_sel else { return };
+    match view.hire_panel.filter(|_| view.tab == Tab::Barracks) {
+        Some(HirePanel::Recruit(kind)) => recruit_panel(game, assets, f, kind),
+        Some(HirePanel::Squad(i)) => unit_panel(game, assets, f, (false, i)),
+        None => {
+            if let Some(sel) = view.garrison_sel {
+                unit_panel(game, assets, f, sel);
+            }
+        }
+    }
+}
+
+/// A hire offer's card (0x492f24 with the building's army): a fresh unit of the type at
+/// level 1, unhurt, with no items, no state lines and the type's recruit wage, as the
+/// promotion tree's class card (`items_view::class_wage`).
+/// Original's quirk, not copied: the offer's path skips setting the building-defence and
+/// in-building flags (0x492f98 → 0x493106 jumps past 0x4930ab / 0x4930ff), so they keep the
+/// last card's values; Razdor shows the offer with neither.
+fn recruit_panel(game: &Game, assets: &Assets, f: &Frame, kind: UnitId) {
+    let c = &game.content;
+    if c.try_unit(kind).is_none() {
+        return;
+    }
+    let mut unit = Unit::new(c, kind, Slot::new(razdor::rules::formation::Row::Front, 0));
+    unit.heal_full(c);
+    let stats = unit.stats(c);
+    let name = c.unit(kind).name.clone();
+    let sheet = unit_sheet::Sheet {
+        kind,
+        name: &name,
+        named: false,
+        level: unit.level,
+        xp: unit.xp,
+        need: unit.xp_to_next(c),
+        hp: unit.hp,
+        now: &stats,
+        start: &stats,
+        power: stats[Stat::MagicPower],
+        wage: super::items_view::class_wage(c, kind),
+        items: unit.items,
+        back_row: false,
+        unpaid: false,
+        building: 0,
+        hero: None,
+        status: Vec::new(),
+        battle: false,
+    };
+    let mut hover = None;
+    unit_sheet::draw(assets, c, window_layout::left(Rect::new(f.x, f.y, f.w, f.h)), &sheet, false, &mut hover);
+}
+
+/// The card of a unit of the hero's army or of the garrison (`guard`), index `i`.
+fn unit_panel(game: &Game, assets: &Assets, f: &Frame, (guard, i): (bool, usize)) {
     let unit = if guard {
         game.garrison_here().get(i).map(|s| &s.unit)
     } else {
@@ -542,6 +632,23 @@ fn own_text(section: &str, key: &str, ours: &'static str) -> String {
     t.unwrap_or_else(|| tr(ours).to_string())
 }
 
+/// The strip's line over a hire offer (0x4c6964): `[Army]` line 8 with the type's name and
+/// the `HireArmy` caption, each in quotes (#NAME1, #BUTTON1); with none left, line 10 in the
+/// warning colour (ae24f8). The flag says warning.
+fn recruit_hint(name: &str, stock_left: bool) -> (String, bool) {
+    let ru = razdor::i18n::lang() == razdor::i18n::Lang::Ru;
+    if !stock_left {
+        let t = chrome::ui_line("Army", 10).filter(|_| ru).unwrap_or_else(|| tr("No units of this type are left for hire!").to_string());
+        return (t, true);
+    }
+    let button = own_text("Army", "HireArmy", n_("Hire"));
+    let t = chrome::ui_line("Army", 8).filter(|_| ru).map_or_else(
+        || trf!("Click the \"{button}\" button to hire \"{name}\" into your army", button, name),
+        |t| t.replace("#BUTTON1", &format!("\"{button}\"")).replace("#NAME1", &format!("\"{name}\"")),
+    );
+    (t, false)
+}
+
 /// The barracks, as the original's (the video, 19:52): the recruits in front of the
 /// building's sepia interior, each portrait with "Нанять" and "Цена = N"; the money, wages
 /// and income; the army's 2×6 cards below, each with "Лечить" / "Воскресить" and its price
@@ -570,6 +677,9 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
     }
     chrome::silver_frame(back, 1.0);
     let mut hover_lines = Vec::new();
+    // What the pointer is over this frame, for the left panel (`hire_panel_on`).
+    let mut entered = None;
+    let mut offer_hint = None;
     if recruits.is_empty() {
         chrome::shadow_centered(tr("No recruits here."), back.center().x, back.y + 90.0 * k, 18.0 * k, chrome::CREAM);
     }
@@ -581,20 +691,17 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
         chrome::unit_shadow(Rect::new(face.x, face.y, face.w, face.w * 128.0 / 88.0));
         assets.draw_portrait(r.unit, Team::Player, face);
         draw_rectangle_lines(face.x, face.y, face.w, face.h, 1.0, Color::new(0.85, 0.85, 0.85, 0.9));
+        let stock_left = r.stock != Some(0);
+        // An offer under the pointer (0x4c6964): its card on the left panel, the green
+        // highlight pulsing on its portrait (state 2 drawn with the fifth glow set: 0x4cd94c
+        // passes set 4 for the building's side of the hire tab, 0x4cda47), and the hint
+        // line on the strip. No tooltip.
         if mouse_in(face.x, face.y, face.w, face.h) {
-            let def = c.unit(r.unit);
-            hover_lines.push((def.name.clone(), ACCENT));
-            hover_lines.push((level_label(1, 0, c.xp_to_next(r.unit, 1)), XP_COLOR));
-            hover_lines.extend(stat_lines(&c, r.unit).into_iter().map(|s| (s, INK)));
-            hover_lines.push((trf!("Per level: {gains}", gains = level_gains(&c, r.unit)), INK));
-            hover_lines.push((trf!("Daily wage {wage}", wage = c.wage_for(r.unit, razdor::rules::content::WageKind::of(def))), Color::new(0.95, 0.6, 0.25, 1.0)));
-            match r.stock {
-                Some(n) => hover_lines.push((trf!("{n} of {max} left", n, max = r.max), INK)),
-                None => hover_lines.push((tr("always").to_string(), INK)),
-            }
+            entered = Some(Entered::Recruit(r.unit));
+            chrome::card_highlight(face, chrome::Lit::Current, now_ms() as u64);
+            offer_hint = Some(recruit_hint(&c.unit(r.unit).name, stock_left));
         }
         let price = game.hire_price(r.unit);
-        let stock_left = r.stock != Some(0);
         let can = hires && stock_left && game.can_afford(price) && game.squad.len() < game.max_squad();
         let pill = Rect::new(face.x + 4.0 * k, face.y + face.h + 2.0 * k, face.w - 8.0 * k, 17.0 * k);
         // The hire pill now has a transparent black matte. Keep its card backing and the
@@ -623,7 +730,11 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
         chrome::shadow_centered(&cost, face.center().x, pill.y + pill.h + 13.0 * k, 12.0 * k, color);
     }
     barracks_counters(game, at(f, 256.0, 242.0, 572.0, 48.0));
-    chrome::army_divider(card_panel_divider(f));
+    let strip = card_panel_divider(f);
+    chrome::army_divider(strip);
+    if let Some((hint, warn)) = offer_hint {
+        chrome::hint_text(strip, &hint, if warn { chrome::RED_TEXT } else { Color::new(0.4, 1.0, 0.8, 1.0) });
+    }
 
     // The army: the army screen's cards, a heal or raise button with its price on the strip.
     let heals = game.heals_here();
@@ -655,8 +766,11 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
         if !taken || landing == Some(slot) {
             let p = cell_at(slot);
             chrome::empty_cell(Rect::new(p.x, p.y, card.x, card.y), chrome::CellIcon::of(form, slot), true);
-            if !taken && mouse_in(p.x, p.y, card.x, card.y) && clicked() {
-                pressed = Some((None, slot));
+            if !taken && mouse_in(p.x, p.y, card.x, card.y) {
+                entered = Some(Entered::SquadCell(None));
+                if clicked() {
+                    pressed = Some((None, slot));
+                }
             }
         }
     }
@@ -716,14 +830,19 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
                 super::battle_view::draw_effect(&c, 4, sq, t);
             }
         }
+        // The hero's grid in the hire tab (0x4cd94c): a selected card (state 5) pulses
+        // green, the one under the pointer (state 2) blue, both with glow set state − 1.
+        let over = mouse_in(sq.x, sq.y, sq.w, sq.h);
         if selected == Some(i) {
-            chrome::glow_frame(sq, Color::new(0.35, 1.0, 0.35, 1.0), true);
+            chrome::card_highlight(sq, chrome::Lit::Current, now_ms() as u64);
+        } else if over {
+            chrome::card_highlight(sq, chrome::Lit::CanAct, now_ms() as u64);
         }
-        if mouse_in(sq.x, sq.y, sq.w, sq.h) {
+        if over {
+            entered = Some(Entered::SquadCell(Some(i)));
             if clicked() {
                 pressed = Some((Some(i), u.slot));
             }
-            chrome::glow_frame(sq, Color::new(0.35, 0.55, 1.0, 0.9), false);
             hover_lines = vec![(game.squad_label(i), ACCENT)];
             hover_lines.extend(unit_stat_lines(&c, &u, game.wage(i)).into_iter().map(|s| (s, INK)));
         }
@@ -760,6 +879,8 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
             }
         }
     }
+    let selected_now = view.garrison_sel.filter(|&(g, i)| !g && i < game.squad.len()).map(|s| s.1);
+    view.hire_panel = hire_panel_on(view.hire_panel, entered, selected_now);
     let cells: Vec<(Slot, Rect)> = form.slots().map(|s| (s, Rect::new(cell_at(s).x, cell_at(s).y, card.x, card.y))).collect();
     if let Some((unit, slot)) = super::unit_drag::update(assets, &cells, card) {
         game.move_unit(unit, slot);
@@ -1842,8 +1963,15 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut BuildingView, message:
     let (tw, th) = ((col.w - 12.0 * k).min(232.0 * k), 88.0 * k);
     let tx = col.x + (col.w - tw) / 2.0;
     let pitch = (th + 6.0 * k).min((col.h - th - 20.0 * k) / tabs.len().max(1) as f32);
+    // A tab's place under the pointer brings the tabs back over the hire tab's card
+    // (0x4bb6c8 → 0x4bc98c), the Exit's too.
+    let exit_r = Rect::new(tx, col.y + col.h - th - 5.0 * k, tw, th);
+    let tab_rects: Vec<Rect> = (0..tabs.len()).map(|i| Rect::new(tx, col.y + 5.0 * k + i as f32 * pitch, tw, th)).chain([exit_r]).collect();
+    if tab_rects.iter().any(|r| mouse_in(r.x, r.y, r.w, r.h)) {
+        view.hire_panel = hire_panel_on(view.hire_panel, Some(Entered::Tab), None);
+    }
     for (i, &t) in tabs.iter().enumerate() {
-        let r = Rect::new(tx, col.y + 5.0 * k + i as f32 * pitch, tw, th);
+        let r = tab_rects[i];
         if tab_button(tab_label(t), Some(t), r, view.tab == t) && view.tab != t && view.garrison_sel.is_none() {
             // The tab is highlighted with the cast sound (interface.md §9.8, §14).
             cue(Cue::CastSpell);
@@ -1858,7 +1986,7 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut BuildingView, message:
             }
         }
     }
-    let exit = tab_button(tr("Exit"), None, Rect::new(tx, col.y + col.h - th - 5.0 * k, tw, th), false) && view.garrison_sel.is_none();
+    let exit = tab_button(tr("Exit"), None, exit_r, false) && view.garrison_sel.is_none();
 
     let mut next = early;
     match view.tab {
@@ -1901,7 +2029,38 @@ fn with_back(bar: Option<Screen>, view: &BuildingView) -> Option<Screen> {
 
 #[cfg(test)]
 mod tests {
-    use super::{tab_state, village_ok_key};
+    use super::{hire_panel_on, tab_state, village_ok_key, Entered, HirePanel};
+    use razdor::rules::content::UnitId;
+
+    #[test]
+    fn a_hire_offer_under_the_pointer_shows_its_card_until_the_tabs_come_back() {
+        // 0x4c6964: entering an offer paints its card over the tabs; 0x4c72a4: leaving it
+        // keeps the card.
+        let archer = UnitId(7);
+        let card = hire_panel_on(None, Some(Entered::Recruit(archer)), None);
+        assert_eq!(card, Some(HirePanel::Recruit(archer)));
+        assert_eq!(hire_panel_on(card, None, None), card, "the card stays after the pointer leaves");
+        // 0x4c612c: the hero's grid with nothing selected brings the tabs back (0x4bc98c),
+        // over a card or an empty cell alike.
+        assert_eq!(hire_panel_on(card, Some(Entered::SquadCell(Some(2))), None), None);
+        assert_eq!(hire_panel_on(card, Some(Entered::SquadCell(None)), None), None);
+        // With a unit selected: the unit under the pointer, else the selected one.
+        assert_eq!(hire_panel_on(card, Some(Entered::SquadCell(Some(2))), Some(4)), Some(HirePanel::Squad(2)));
+        assert_eq!(hire_panel_on(card, Some(Entered::SquadCell(None)), Some(4)), Some(HirePanel::Squad(4)));
+        // 0x4bb6c8: a tab's place brings the tabs back.
+        assert_eq!(hire_panel_on(card, Some(Entered::Tab), Some(4)), None);
+    }
+
+    #[test]
+    fn the_hire_hint_names_the_offer_or_warns_none_are_left() {
+        // 0x4c6964: line 8 with the name and the button in quotes; line 10 in the warning
+        // colour for an offer with none left.
+        let (line, warn) = super::recruit_hint("Archer", true);
+        assert!(!warn);
+        assert!(line.contains("\"Archer\""), "{line}");
+        let (_, warn) = super::recruit_hint("Archer", false);
+        assert!(warn);
+    }
 
     #[test]
     fn the_village_ok_takes_a_key_pressed_while_it_is_up() {

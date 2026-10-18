@@ -16,6 +16,14 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   with the red skin. Also not done on either branch: the 500 ms fade-in (0x4ca728) and the
   hostile style's empty-cell icons (ae2774).
 
+- **A hire offer's card keeps the last card's building defence** (2026-10-17, found with a
+  player's report on the barracks' hire offers). The original paints an offer's card through
+  492f24 on a path that skips setting the building-defence value and the in-building flag
+  (68dc68, 68dc67: 0x492f98 jumps to 0x493106), so the offer shows "v + n" defences and the
+  in-building line whenever the card shown before it (in any window) had them. Razdor shows the
+  offer with neither (`building_view::recruit_panel`). Copying it needs the last card's
+  building defence kept across windows; what it is when the game starts is unknown.
+
 - **Event window: the items lost row and the departed row's units** (2026-10-17, found with
   a player's report on the units rows). The original shows a row of the items an event took
   (`[Event] DelItem`, 0x4a9180, only when one of them was really there) and fills the
