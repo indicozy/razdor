@@ -42,7 +42,8 @@ so an auto-battle always terminates (`AUTO_PLAY_STEPS` caps it).
 5. **Magic** (`ai_magic`) by school: Life (486bb9: heal the biggest wound not below a quarter
    of the power, not an undead's; or strike), Elemental (`ai_elemental`, 487e99: haste and
    the side's mean initiative), Death (488928, `life_strike_score`). It only picks a cell;
-   the cell's own action (heal/bless, strike/curse) is what is cast.
+   the cell's own action (heal/bless, strike/curse) is what is cast. Every plan comes from
+   `all_options`, so on main no AI blesses a unit twice a turn (battle.md §4).
 6. Hero's side only: a healer/blesser with nothing to cast → `own_cell_plan` (keeps its cell).
 7. **Move** (`ai_move`, 489549): back-row pure warrior steps forward (support score); front
    row scores columns by nearby enemies (and may pick an ally's cell to heal/bless); reserve:
@@ -101,7 +102,8 @@ run the real-maps AI test (`src/rules/ai/real_maps.rs`, needs `RAZDOR_DT_DIR`).
 `src/rules/battle/tests.rs`: `row30_ai_leaves_the_reserve_and_never_enters_it`,
 `auto_battles_terminate_deterministically_and_never_use_the_reserve`,
 `hero_auto_battle_keeps_a_front_row_blesser_in_its_cell`,
-`hero_auto_battle_leaves_the_enemy_to_the_original_s_ai`, `real_armies_auto_battle_terminates`.
+`hero_auto_battle_leaves_the_enemy_to_the_original_s_ai`, `real_armies_auto_battle_terminates`,
+`row2_the_battle_ais_never_bless_a_unit_twice_a_turn`.
 
 ## 8. «Максимум» (Razdor extra, main only)
 

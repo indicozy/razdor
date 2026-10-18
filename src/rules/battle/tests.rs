@@ -1832,7 +1832,81 @@ fn row10_a_blessed_reserve_caster_passes_on_its_own_cell() {
     bt.fighters[1].blessed = true;
     bt.fighters[2].blessed = true;
     assert!(bt.options(1, 1).is_empty(), "its own cell is a pass");
-    assert_eq!(bt.options(1, 2), vec![ActionKind::Bless], "the others are blessed again");
+    // Razdor fixes the original's bug (main only): the original blesses the other reserve
+    // units again (4857fb has no test), here they are not targets until they are wounded.
+    assert!(bt.options(1, 2).is_empty(), "no second blessing from the reserve");
+    bt.fighters[2].hp = 30;
+    assert_eq!(bt.options(1, 2), vec![ActionKind::Heal], "a wounded one is still healed");
+}
+
+#[test]
+fn row2_a_death_mage_blesses_a_wounded_living_ally_once_a_turn() {
+    // Razdor fixes the original's bug (the owner's decision, main only): the original offers a
+    // wounded blessed ally (48555b) and, the Death heal being 0 on the living (485b3c), blesses
+    // it again on every action (48a93c), the blessings adding up.
+    let death = acts(44, 3, mage(44, 30, MagicSchool::Death, MagicDirection::ToAlly));
+    let mut bt = with(vec![death], &[(44, b(2)), (10, f(2)), (16, f(3))], &[(18, f(2))]);
+    turn_of(&mut bt, 0);
+    bt.fighters[1].hp = 20;
+    assert_eq!(bt.options(0, 1), vec![ActionKind::Bless], "the first blessing of the turn");
+    let hit = bt.act(1).unwrap();
+    assert_eq!(hit.kind, ActionKind::Bless);
+    let once = bt.fighters[1].mods;
+    assert!(bt.options(0, 1).is_empty(), "blessed and nothing to heal: no action on it");
+    assert!(!bt.targets(0).contains(&1));
+    assert_eq!(bt.act(1).map(|h| h.kind), Err(ActionError::InvalidTarget));
+    assert_eq!(bt.fighters[1].mods, once, "the blessing does not stack");
+    // An Undead ally is healed by Death magic, so a blessed wounded one is still a target.
+    bt.fighters[2].blessed = true;
+    bt.fighters[2].hp = 20;
+    assert_eq!(bt.options(0, 2), vec![ActionKind::Heal]);
+    to_round(&mut bt, 2);
+    assert_eq!(bt.options(0, 1), vec![ActionKind::Bless], "the next turn it can be blessed again");
+}
+
+#[test]
+fn row2_the_battle_ais_never_bless_a_unit_twice_a_turn() {
+    // A Death mage with actions to spare next to a wounded living ally, under each battle AI.
+    let death = acts(44, 3, mage(44, 30, MagicSchool::Death, MagicDirection::ToAlly));
+    // 0 the original's AI between AI armies, 1 normal, 2 improved; 3 the hero's auto-battle;
+    // 4 «Максимум».
+    for who in 0..5u8 {
+        let mut bt = with(vec![death.clone()], &[(44, b(2)), (10, f(2))], &[(18, f(2))]);
+        bt.ai_level = who.min(2);
+        turn_of(&mut bt, 0);
+        bt.fighters[1].hp = 20;
+        assert!(bt.options(0, 1) == vec![ActionKind::Bless]);
+        let mut blessings = 0;
+        for _ in 0..3 {
+            if bt.active() != Some(0) {
+                break;
+            }
+            let step = match who {
+                3 => bt.hero_auto_step(),
+                4 => bt.max_step(MaxBudget::fixed(3, 300)),
+                _ => bt.ai_step().or_else(|| {
+                    bt.skip();
+                    None
+                }),
+            };
+            if let Some(Step::Act { hit, .. }) = step {
+                blessings += i32::from(hit.kind == ActionKind::Bless && hit.target == 1);
+            }
+        }
+        assert!(blessings <= 1, "player {who}: blessed {blessings} times");
+    }
+}
+
+#[test]
+fn row2_a_life_caster_still_heals_a_wounded_blessed_unit() {
+    let healer = acts(42, 3, mage(42, 20, MagicSchool::Life, MagicDirection::ToAlly));
+    let mut bt = with(vec![healer], &[(42, b(2)), (10, f(2))], &[(18, f(2))]);
+    turn_of(&mut bt, 0);
+    assert_eq!(bt.act(1).unwrap().kind, ActionKind::Bless);
+    bt.fighters[1].hp = 20;
+    let hit = bt.act(1).unwrap();
+    assert_eq!((hit.kind, hit.amount, bt.fighters[1].hp), (ActionKind::Heal, 20, 40));
+    assert!(bt.fighters[1].blessed);
 }
 
 #[test]
