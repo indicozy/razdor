@@ -18,7 +18,9 @@ except what the screen value, the `App` fields and a few `thread_local!`s hold.
    `razdor::dt::install::load_dotenv` (`.env` next to the program or in the working
    folder), `single_instance` (a lock file), `razdor::update::init`, the window size
    (`ui::snapshot::size`, `RAZDOR_SIZE`).
-2. `main`: `ui::widgets::load_font` (TrueType faces bundled in `data/fonts/`),
+2. `main`: one black frame (`next_frame` before any loading, so the shown window handles its
+   first messages and presents a picture at once; the loading itself runs inside one frame),
+   `ui::widgets::load_font` (TrueType faces bundled in `data/fonts/`),
    `ui::language::init` (the saved language, `razdor::i18n`), `Content::builtin` (the demo content),
    `Assets::load` (`src/ui/assets.rs`) which finds the install (`DtArt::from_env` →
    `razdor::dt::install::locate`) and, when there is one, calls
@@ -188,6 +190,24 @@ window (`items_view::squad`), the building window's hero grid and the garrison t
 the card hints say "click to select" (`items_view::pointed_line`). «Как в оригинале» keeps the
 original's press to pick, press to move (interface.md §9.6) with dragging on top. Battle is
 not affected.
+
+### The window's display mode
+
+`display::follow_settings` → `display::follow` (first thing in `App::frame`) puts the window in
+the setting's mode through each system's own window (`display::sys`: X11, Win32, AppKit);
+miniquad has no borderless mode. On Windows every step is logged to `razdor.log` ("display:
+…": the window's rectangles, styles, visible / active), the only way to see a player's case.
+
+- Windowed start on Windows: an OpenGL window never resized since it appeared may stay black
+  under the compositor, so `display::NUDGE` grows it 1 px at 0.3 s after the first frame and
+  puts it back at 0.8 s (`nudge_due`, one step per frame, frames presented at the grown size;
+  skipped when the player maximized, minimized or resized it meanwhile).
+- Borderless: a `WS_POPUP` over the monitor, one pixel taller (`popup_rect`), so Windows and
+  the drivers do not take it for an exclusive full-screen application (task switching).
+- Full screen: a `WS_POPUP` exactly over the monitor, topmost only while it is the active
+  window; when another window becomes active (Alt+Tab, Win+Tab) it goes to the bottom, and
+  back to topmost when activated again (`layer`, `sys::Window::keep_layer`, every frame).
+- Alt+Enter cycles the modes on any screen (`hotkey_pressed`, `notice`).
 
 Rule: a parity setting reads the install's value until the player chooses
 (`Option<bool>` = `None` → the install's `[Options]` value such as `OptValue9`, see `main_menu::expert_ai`). A Razdor

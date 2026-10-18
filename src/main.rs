@@ -127,6 +127,13 @@ async fn main() {
         let info = gl.quad_context.info();
         razdor::diag::step(&format!("window open: {:?}, {}", info.backend, info.gl_version_string));
     }
+    // One black frame before the loading: the loading below runs inside a single frame and
+    // handles none of the system's messages, so without it the window just shown would wait
+    // seconds for its first messages and its first picture (on Windows it may be taken as not
+    // responding meanwhile; players' reports of a black window at start).
+    clear_background(BLACK);
+    next_frame().await;
+    razdor::diag::step("first black frame shown");
     ui::widgets::load_font().await;
     razdor::diag::step("fonts loaded");
     ui::language::init();
