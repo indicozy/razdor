@@ -55,7 +55,7 @@ folder when it is an install, the remembered folder (`config_file`), then a sear
 - `match (&mut self.screen, &mut self.game)` calls the screen's function, e.g.
   `world_view::frame`, `building_view::frame`, `items_view::squad`, `BattleView::frame`,
   `items_view::hero_window`, `spellbook::frame`, `saves::load_screen`, `main_menu::options_window`;
-- global hotkeys (`hotkeys::allowed`, F1 help, F5/F9 quick save/load, language);
+- global hotkeys (`hotkeys::allowed`, F1 help, F5/F9 quick save/load, F10 the autosave written last (Razdor's), language);
 - the front dialog: `dialog::draw` returns `Some(Close)` when closed, then the closing is
   routed (village offers → `building_view::answer_offer`, questions →
   `Game::answer_question`, event windows → `Game::event_window_closed`; results go back

@@ -645,6 +645,18 @@ impl App {
         }
     }
 
+    /// F10 (Razdor's, the owner's request): loads the autosave written last, pinned or not.
+    fn load_latest_autosave(&mut self) {
+        let latest = save::games_dir().and_then(|d| latest_save(save::list_files(&d, save::SaveKind::Auto).into_iter().map(|e| (e.written, e.path))));
+        match latest {
+            Some(path) => {
+                self.load(&path);
+                self.message = Some(self.load_error.take().unwrap_or_else(|| tr("Latest autosave loaded.").to_string()));
+            }
+            None => self.message = Some(tr("No autosave yet.").to_string()),
+        }
+    }
+
     /// The frame rate in the top right corner, when the settings ask for it: frames counted
     /// over each half second, so the number stays readable.
     pub fn draw_fps(&self) {
@@ -955,6 +967,9 @@ impl App {
         } else if pressed(hotkeys::Global::QuickLoad) {
             self.quick_load();
             return;
+        } else if pressed(hotkeys::Global::LatestAutosave) {
+            self.load_latest_autosave();
+            return;
         }
         let held = matches!(self.screen, Screen::WorldMap) && self.map_view.holds_dialogs(&self.dialogs);
         let clock = macroquad::prelude::get_time();
@@ -1159,5 +1174,25 @@ impl App {
         }
         self.play_log_frame();
         self.show_content();
+    }
+}
+
+/// The save written last of `(written, path)` pairs (the later name when two share a second),
+/// pinned or not: F10's autosave.
+fn latest_save(saves: impl IntoIterator<Item = (u64, PathBuf)>) -> Option<PathBuf> {
+    saves.into_iter().max().map(|(_, path)| path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// F10 (the owner's request) loads the autosave written last, whatever the list's order
+    /// (pinned saves first) says.
+    #[test]
+    fn f10_takes_the_autosave_written_last() {
+        let saves = vec![(50, PathBuf::from("pinned")), (90, PathBuf::from("b")), (90, PathBuf::from("c")), (70, PathBuf::from("a"))];
+        assert_eq!(latest_save(saves), Some(PathBuf::from("c")));
+        assert_eq!(latest_save(Vec::new()), None);
     }
 }

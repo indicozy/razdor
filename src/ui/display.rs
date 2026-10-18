@@ -223,6 +223,17 @@ fn follow(mode: DisplayMode) {
     });
 }
 
+/// Whether the system pointer is outside the game's window (the window manager's frame or
+/// another window): macroquad keeps the last position it saw, so a pointer that left the
+/// window through an edge would stay "at the edge" and scroll the map (an owner's report).
+/// False when the system cannot tell.
+pub fn pointer_outside() -> bool {
+    if crate::ui::snapshot::size().is_some() {
+        return false;
+    }
+    STATE.with(|s| s.borrow_mut().sys.pointer_inside()) == Some(false)
+}
+
 #[cfg(target_os = "linux")]
 pub use sys::WM_CLASS;
 
@@ -303,6 +314,7 @@ mod sys {
         translate: unsafe extern "C" fn(*mut Display, XWindow, XWindow, c_int, c_int, *mut c_int, *mut c_int, *mut XWindow) -> c_int,
         raise: unsafe extern "C" fn(*mut Display, XWindow) -> c_int,
         sync: unsafe extern "C" fn(*mut Display, c_int) -> c_int,
+        query_pointer: unsafe extern "C" fn(*mut Display, XWindow, *mut XWindow, *mut XWindow, *mut c_int, *mut c_int, *mut c_int, *mut c_int, *mut c_uint) -> c_int,
         /// libXrandr's, when it loads.
         get_monitors: Option<unsafe extern "C" fn(*mut Display, XWindow, c_int, *mut c_int) -> *mut XRRMonitorInfo>,
         free_monitors: Option<unsafe extern "C" fn(*mut XRRMonitorInfo)>,
@@ -341,6 +353,7 @@ mod sys {
                 translate: sym(x, c"XTranslateCoordinates")?,
                 raise: sym(x, c"XRaiseWindow")?,
                 sync: sym(x, c"XSync")?,
+                query_pointer: sym(x, c"XQueryPointer")?,
                 get_monitors: if r.is_null() { None } else { sym(r, c"XRRGetMonitors") },
                 free_monitors: if r.is_null() { None } else { sym(r, c"XRRFreeMonitors") },
             })
@@ -467,7 +480,7 @@ mod sys {
         /// Nothing to do: an X11 window shows its first frames.
         pub fn nudge(&mut self) {}
 
-        pub fn apply(&mut self, from: DisplayMode, to: DisplayMode) -> bool {
+        fn conn(&mut self) -> Option<&Conn> {
             if !self.tried {
                 self.tried = true;
                 // SAFETY: plain Xlib calls on a connection of our own.
@@ -475,6 +488,30 @@ mod sys {
                 if self.conn.is_none() {
                     razdor::diag!("display mode: the game's X11 window was not found");
                 }
+            }
+            self.conn.as_ref()
+        }
+
+        /// Whether the system pointer is over the window's client area; None when unknown.
+        pub fn pointer_inside(&mut self) -> Option<bool> {
+            let c = self.conn()?;
+            // SAFETY: Xlib queries on our own window and connection.
+            unsafe {
+                let mut a: XWindowAttributes = std::mem::zeroed();
+                if (c.x.get_attributes)(c.dpy, c.win, &mut a) == 0 {
+                    return None;
+                }
+                let (mut root, mut child, mut rx, mut ry, mut wx, mut wy, mut mask) = (0, 0, 0, 0, 0, 0, 0);
+                if (c.x.query_pointer)(c.dpy, c.win, &mut root, &mut child, &mut rx, &mut ry, &mut wx, &mut wy, &mut mask) == 0 {
+                    return Some(false);
+                }
+                Some(wx >= 0 && wy >= 0 && wx < a.width && wy < a.height)
+            }
+        }
+
+        pub fn apply(&mut self, from: DisplayMode, to: DisplayMode) -> bool {
+            if self.conn().is_none() {
+                return true;
             }
             let Some(c) = self.conn.as_ref() else { return true };
             // SAFETY: as above; every call names our own window on our own connection.
@@ -540,6 +577,16 @@ mod sys {
         fn GetWindowRect(w: Hwnd, r: *mut Rect) -> i32;
         fn MonitorFromWindow(w: Hwnd, flags: u32) -> *mut c_void;
         fn GetMonitorInfoW(m: *mut c_void, info: *mut MonitorInfo) -> i32;
+        fn GetCursorPos(p: *mut Point) -> i32;
+        fn ScreenToClient(w: Hwnd, p: *mut Point) -> i32;
+        fn GetClientRect(w: Hwnd, r: *mut Rect) -> i32;
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct Point {
+        x: i32,
+        y: i32,
     }
 
     #[link(name = "kernel32")]
@@ -591,6 +638,22 @@ mod sys {
     }
 
     impl Window {
+        /// Whether the system pointer is over the window's client area; None when unknown.
+        pub fn pointer_inside(&mut self) -> Option<bool> {
+            // SAFETY: Win32 queries on our own window.
+            unsafe {
+                if self.hwnd.is_none() {
+                    self.hwnd = find().map(|w| w as usize);
+                }
+                let w = self.hwnd? as Hwnd;
+                let (mut p, mut r) = (Point::default(), Rect::default());
+                if GetCursorPos(&mut p) == 0 || ScreenToClient(w, &mut p) == 0 || GetClientRect(w, &mut r) == 0 {
+                    return None;
+                }
+                Some(p.x >= r.left && p.y >= r.top && p.x < r.right && p.y < r.bottom)
+            }
+        }
+
         /// One pixel wider and back, the frame redrawn: the size change an OpenGL window may
         /// need before the compositor shows it ([`super::nudges_due`]).
         pub fn nudge(&mut self) {
@@ -685,6 +748,11 @@ mod sys {
         /// Nothing to do: a macOS window shows its first frames.
         pub fn nudge(&mut self) {}
 
+        /// Not known here: the pointer is taken as over the window.
+        pub fn pointer_inside(&mut self) -> Option<bool> {
+            None
+        }
+
         pub fn apply(&mut self, from: DisplayMode, to: DisplayMode) -> bool {
             // SAFETY: AppKit messages to our own window on the main thread.
             unsafe {
@@ -739,6 +807,11 @@ mod sys {
 
     impl Window {
         pub fn nudge(&mut self) {}
+
+        /// Not known here: the pointer is taken as over the window.
+        pub fn pointer_inside(&mut self) -> Option<bool> {
+            None
+        }
 
         pub fn apply(&mut self, _from: DisplayMode, to: DisplayMode) -> bool {
             macroquad::miniquad::window::set_fullscreen(to != DisplayMode::Windowed);

@@ -346,7 +346,12 @@ fn scroll(game: &Game, view: &mut MapView, dt_ms: i64, pad: (f32, f32)) {
     let cam = Camera::looking_at(game, view.zoom, view.look.unwrap_or(game.display_pos()));
     let on_minimap = view.minimap && minimap::under_pointer(&game.world.map, cam.view);
     if !on_minimap {
-        dir += edge_dir((mx, my), (w, h), edge);
+        let edge_dir = edge_dir((mx, my), (w, h), edge);
+        // The pointer left the window (Razdor's: macroquad keeps its last place, at the edge it
+        // crossed): asked of the system only while that place is at an edge.
+        if edge_dir != Vec2::ZERO && !super::display::pointer_outside() {
+            dir += edge_dir;
+        }
     }
     if dir == Vec2::ZERO {
         return;

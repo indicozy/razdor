@@ -44,19 +44,22 @@ pub enum Global {
     QuickSave,
     /// F9: load the quick save.
     QuickLoad,
+    /// F10: load the autosave written last (Razdor's, the owner's request).
+    LatestAutosave,
     /// F2: the next language of the list (`language::cycle`).
     Language,
 }
 
 impl Global {
     #[cfg(test)]
-    pub const ALL: [Global; 4] = [Global::Help, Global::QuickSave, Global::QuickLoad, Global::Language];
+    pub const ALL: [Global; 5] = [Global::Help, Global::QuickSave, Global::QuickLoad, Global::LatestAutosave, Global::Language];
 
     pub fn key(self) -> KeyCode {
         match self {
             Global::Help => KeyCode::F1,
             Global::QuickSave => KeyCode::F5,
             Global::QuickLoad => KeyCode::F9,
+            Global::LatestAutosave => KeyCode::F10,
             Global::Language => super::language::KEY,
         }
     }
@@ -103,14 +106,14 @@ pub fn allowed(place: Place, key: Global, g: Guard) -> bool {
         Global::QuickSave => {
             g.game && !g.foe && !g.endless && matches!(place, Place::WorldMap | Place::Building | Place::Army | Place::Hero | Place::Spellbook | Place::Menu)
         }
-        Global::QuickLoad | Global::Language => true,
+        Global::QuickLoad | Global::LatestAutosave | Global::Language => true,
     }
 }
 
 /// The keys of `place` for the F1 overlay: (key, what it does).
 pub fn screen_keys(place: Place) -> Vec<(&'static str, &'static str)> {
     match place {
-        Place::Title => vec![(n_("Click"), n_("the menu's buttons; a scenario twice: go on")), ("F9", n_("load the quick save")), ("Esc", n_("in the main menu: quit the game"))],
+        Place::Title => vec![(n_("Click"), n_("the menu's buttons; a scenario twice: go on")), ("F9", n_("load the quick save")), ("F10", n_("load the latest autosave")), ("Esc", n_("in the main menu: quit the game"))],
         Place::ClassSelect => vec![(n_("Type"), n_("the hero's name")), ("Backspace", n_("delete a letter")), (n_("Mouse, Shift + arrows"), n_("move the cursor, select")), ("Ctrl+A / C / X / V", n_("select all, copy, cut, paste"))],
         Place::WorldMap => vec![
             (n_("Click"), n_("show the route; a second click on the spot: walk there")),
@@ -174,7 +177,7 @@ pub fn screen_keys(place: Place) -> Vec<(&'static str, &'static str)> {
         Place::Menu => vec![("F5", n_("quick save")), ("Esc", n_("back to the game"))],
         Place::Save => vec![(n_("Type"), n_("the save's name")), ("Ctrl+A / C / X / V", n_("select all, copy, cut, paste")), ("Enter", n_("save")), ("Esc", n_("cancel"))],
         Place::Load => vec![(n_("Click"), n_("pick a save")), ("Enter", n_("load it")), ("Esc", n_("cancel"))],
-        Place::End => vec![(n_("Click"), n_("the buttons")), ("F9", n_("load the quick save"))],
+        Place::End => vec![(n_("Click"), n_("the buttons")), ("F9", n_("load the quick save")), ("F10", n_("load the latest autosave"))],
         Place::Editor => vec![],
         Place::Custom => vec![
             (n_("Click a unit type"), n_("add it to the army picked")),
@@ -188,11 +191,12 @@ pub fn screen_keys(place: Place) -> Vec<(&'static str, &'static str)> {
 }
 
 /// Keys that work on every screen of a game, and in the dialogs.
-pub const EVERYWHERE: [(&str, &str); 7] = [
+pub const EVERYWHERE: [(&str, &str); 8] = [
     ("F1", n_("this list (F1 or Esc closes it)")),
     ("F2", n_("the next language of the list")),
     ("Alt+Enter", n_("screen: windowed, borderless, full screen")),
     ("F9", n_("load the quick save")),
+    ("F10", n_("load the latest autosave")),
     ("N", n_("music off / on")),
     ("Y / Enter", n_("\"Yes\" in a question (Enter: OK)")),
     ("N / Esc", n_("\"No\" in a question")),
