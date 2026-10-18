@@ -1003,13 +1003,14 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
         }
     }
     // Razdor's own settings, in a window of their own.
-    let xr = Rect::new(inner.x + 14.0 * k, inner.y + inner.h - 42.0 * k, 120.0 * k, 32.0 * k);
+    let button_y = outer.y + 458.0 * k;
+    let xr = Rect::new(inner.x + 14.0 * k, button_y, 120.0 * k, 32.0 * k);
     if row_button(xr, tr("Advanced…")) {
         ADVANCED.with(|a| a.set(true));
         return false;
     }
     // «Принять» keeps what was changed, «Отмена» (the close box and Esc too) puts it back.
-    let cancel = Rect::new(inner.x + inner.w - 14.0 * k - 89.0 * k, inner.y + inner.h - 42.0 * k, 89.0 * k, 32.0 * k);
+    let cancel = Rect::new(inner.x + inner.w - 14.0 * k - 89.0 * k, button_y, 89.0 * k, 32.0 * k);
     let apply = Rect::new(cancel.x - 8.0 * k - 89.0 * k, cancel.y, 89.0 * k, 32.0 * k);
     let (apply_label, cancel_label) = (own("Buttons", "Apply", n_("Apply")), own("Buttons", "Cancel", n_("Cancel")));
     // Both act when the button is let go over it (PR #5's buttons).

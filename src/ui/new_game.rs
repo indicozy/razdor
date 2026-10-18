@@ -74,7 +74,7 @@ impl Win {
     }
 
     fn button(&self, x: f32, w: f32, label: &str, enabled: bool) -> bool {
-        let r = self.rect(x, 442.0, w, 28.0);
+        let r = self.rect(x, 443.0, w, 28.0);
         let (_, down, pressed) = button_state(r, enabled);
         chrome::marble_button(r, label, enabled, down);
         pressed

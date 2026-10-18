@@ -668,13 +668,13 @@ fn first_line_size(fs: f32, room: f32, width: impl Fn(f32) -> f32) -> f32 {
 /// Rects of the four item slots around the figure: two at the top left, two at the top
 /// right (as in the army screen).
 pub fn slot_rects(r: Rect) -> [Rect; 4] {
-    let s = 44.0 * k();
+    let s = 55.0 * 0.9375 * k();
     let m = 8.0 * k();
     [
         Rect::new(r.x + m, r.y + m, s, s),
-        Rect::new(r.x + m, r.y + m + s + 6.0 * k(), s, s),
+        Rect::new(r.x + m, r.y + m + s, s, s),
         Rect::new(r.x + r.w - m - s, r.y + m, s, s),
-        Rect::new(r.x + r.w - m - s, r.y + m + s + 6.0 * k(), s, s),
+        Rect::new(r.x + r.w - m - s, r.y + m + s, s, s),
     ]
 }
 
@@ -713,13 +713,18 @@ fn silhouette(r: Rect) {
 /// Draws the panel in `r`. `slots` shows the four item slots (empty ones too) and returns
 /// the one clicked; the item under the mouse goes to `hover`.
 pub fn draw(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: bool, hover: &mut Option<ItemId>) -> Option<usize> {
-    super::typography::Role::Body.with(|| draw_in_face(assets, content, r, s, slots, hover))
+    super::typography::Role::Body.with(|| draw_in_face(assets, content, r, r, s, slots, hover))
 }
 
-fn draw_in_face(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: bool, hover: &mut Option<ItemId>) -> Option<usize> {
+/// Extend the parchment behind overlaid battle controls without moving the unit's text.
+pub fn draw_extended(assets: &Assets, content: &Content, r: Rect, background: Rect, s: &Sheet, hover: &mut Option<ItemId>) {
+    super::typography::Role::Body.with(|| draw_in_face(assets, content, r, background, s, false, hover));
+}
+
+fn draw_in_face(assets: &Assets, content: &Content, r: Rect, background: Rect, s: &Sheet, slots: bool, hover: &mut Option<ItemId>) -> Option<usize> {
     use super::dt_font::{sheet_size, whole_scale, Face};
     let k = k();
-    chrome::unit_parchment(r);
+    chrome::unit_parchment(background);
     // The figure, behind the text: at its own size, centred in the original's box
     // (`figure_rect`, 492f24 → 0x476a3c).
     match assets.figure(s.kind) {
@@ -768,7 +773,7 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: b
     chrome::unit_panel_fade(Rect::new(r.x, fade0, r.w, name_top - fade0));
     chrome::multiply(|| {
         // Multiplying (230, 178, 115) parchment by this gives the video's (115, 62, 0).
-        draw_rectangle(r.x, name_top, r.w, r.y + r.h - name_top, Color::new(0.5, 0.35, 0.0, 1.0));
+        draw_rectangle(r.x, name_top, r.w, background.bottom() - name_top, Color::new(0.5, 0.35, 0.0, 1.0));
     });
     // Items worn.
     let mut clicked = None;
@@ -777,12 +782,10 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: b
         if !slots && item.is_none() {
             continue;
         }
-        // A worn item is its picture alone on the parchment; an empty slot is the original's
-        // empty-slot picture (0xae2860, built at start-up: a steel ring over a 40% black
-        // square, `chrome::empty_item_slot`), set by 0x492f24 only for an empty slot.
-        match item {
-            Some(it) => assets.draw_item(it, sr.x, sr.y, sr.w),
-            None => chrome::empty_item_slot(*sr),
+        // Keep the framed, darkened cell visible beneath equipped items as well.
+        chrome::empty_item_slot(*sr);
+        if let Some(it) = item {
+            assets.draw_item(it, sr.x, sr.y, sr.w);
         }
         if mouse_in(sr.x, sr.y, sr.w, sr.h) {
             if item.is_some() {

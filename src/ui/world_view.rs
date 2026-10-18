@@ -1541,10 +1541,8 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
     } else if let Some(path) = preview {
         draw_route(game, path, cam);
     }
-    // Buildings stand in front of the scenery: hills, rocks and trees south of one would
-    // hide it, so they are drawn after every object, sorted among themselves. Bridges lie
-    // flat, under everything standing on them.
-    let mut buildings: Vec<(f32, Drawable)> = Vec::new();
+    // Standing scenery and buildings share row depth: plants south of a building must
+    // cover it, while plants north of it remain behind. Bridges stay on the ground.
     for (i, l) in game.world.locations.iter().enumerate() {
         let (ax, ay) = l.anchor;
         let seen = l.cells().any(|t| fog.explored_near(t, minimap::FEATHER));
@@ -1552,7 +1550,7 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
             if l.kind.is_bridge() {
                 items.push((ay as f32 * rh - 1000.0, Drawable::Building(i)));
             } else {
-                buildings.push((ay as f32 * rh, Drawable::Building(i)));
+                items.push((ay as f32 * rh, Drawable::Building(i)));
             }
         }
     }
@@ -1574,9 +1572,8 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
         figures.push((s.key + 0.001, Drawable::Spell(3)));
     }
     items.sort_by(|a, b| a.0.total_cmp(&b.0));
-    buildings.sort_by(|a, b| a.0.total_cmp(&b.0));
     figures.sort_by(|a, b| a.0.total_cmp(&b.0));
-    for (_, d) in items.iter().chain(&buildings).chain(&figures) {
+    for (_, d) in items.iter().chain(&figures) {
         match d {
             Drawable::Object(o) => draw_object(o, art, cam),
             Drawable::Building(i) => draw_building(&game.world.locations[*i], art, cam, hover.is_some_and(|h| h.building == Some(*i))),

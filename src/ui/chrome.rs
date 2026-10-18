@@ -1410,6 +1410,12 @@ pub fn silver_line(from: Vec2, to: Vec2, width: f32) {
     let len = delta.length();
     if len <= 0.0 { return; }
     let width = width.max(1.0);
+    // Structural borders are a continuous silver band. Texture restarts at corners and
+    // tiled spans otherwise look like seams in this wider line.
+    if width >= 1.5 * k() {
+        draw_line(from.x, from.y, to.x, to.y, width, SILVER);
+        return;
+    }
     let Some(t) = win("SteelLine") else {
         draw_line(from.x, from.y, to.x, to.y, width, SILVER);
         return;
@@ -1608,6 +1614,12 @@ fn window_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bool,
 /// ([`divider_ornaments`]). Razdor's strips are wider or taller than 628×25: the paper repeats
 /// across, the corners sit at both ends, centred in the height; the silver edge is Razdor's.
 pub fn army_divider(r: Rect) {
+    army_divider_fill(r);
+    silver_frame(r, k().max(1.0));
+}
+
+/// Content of a strip whose structural border is supplied by its enclosing window.
+pub fn army_divider_fill(r: Rect) {
     let k = k();
     if let Some(t) = win_scaled("Win-paper", [1024; 3], [-148, -132, -148]) {
         let src_h = (r.h / k).min(t.height() - DIVIDER_PAPER_Y);
@@ -1630,7 +1642,6 @@ pub fn army_divider(r: Rect) {
             subtractive(|| tex_src(&t, src, Rect::new(r.x + dst_x * k, y, src_w * k, ornament_h), WHITE));
         }
     }
-    silver_frame(r, k.max(1.0));
 }
 
 /// Win-paper with `minus` (r, g, b) taken off, its texels from `from` on (the original copies
@@ -1855,7 +1866,14 @@ pub fn quest_list_parchment(r: Rect) {
         Some(t) => tile(&t, r, k, WHITE),
         None => surface(r, Skin::Paper),
     }
-    text_box_sides(r);
+    // The light quest paper uses a golden ornament. Its subtraction removes blue
+    // strongly, unlike the red/green subtraction used on brown description paper.
+    if let Some(t) = win("Big_Frame_1") {
+        t.set_filter(FilterMode::Nearest);
+        let inset = 2.0 * k;
+        let ornament = Rect::new(r.x + inset, r.y + inset, (r.w - 2.0 * inset).max(0.0), (r.h - 2.0 * inset).max(0.0));
+        subtractive(|| complete_brown_side_strips(&t, ornament, Color::from_rgba(32, 40, 192, 255)));
+    }
     let grey = Color::from_rgba(48, 48, 48, 255);
     subtractive(|| {
         for band in QUEST_LIST_BANDS {

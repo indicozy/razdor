@@ -513,7 +513,7 @@ impl Book {
     }
 
     fn button(&self, x: f32, w: f32, label: &str, enabled: bool) -> bool {
-        let r = self.rect(x, 442.0, w, 28.0);
+        let r = self.rect(x, 443.0, w, 28.0);
         let (_, down, pressed) = super::widgets::button_state(r, enabled);
         super::chrome::marble_button(r, label, enabled, down);
         pressed
@@ -850,7 +850,7 @@ fn battle_exit_window(title: &str, warning: &str, asking: &mut bool) -> (Option<
     }
     let art = |name: &str| chrome::win(&format!("{name}Up")).map(|t| (t.width(), t.height()));
     let (b3, b2, b1) = (art("Btn3").unwrap_or((160.0, 36.0)), art("Btn2").unwrap_or((128.0, 36.0)), art("Btn1").unwrap_or((96.0, 36.0)));
-    let by = H - 10.0 - b1.1;
+    let by = 460.0 + (H - 460.0 - b1.1) / 2.0;
     let exit_x = 10.0;
     let menu_x = exit_x + b3.0 + 8.0;
     let restart_x = menu_x + b3.0 + 8.0;
@@ -905,7 +905,9 @@ fn battle_exit_window(title: &str, warning: &str, asking: &mut bool) -> (Option<
 /// «Отмена» on the right, 10 px from the window's foot.
 fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art: bool) -> (Option<ExitChoice>, bool) {
     let k = super::chrome::k();
-    let (w, h) = if art { (594.0 * k, 480.0 * k) } else { (560.0 * k, 250.0 * k) };
+    let footer_h = 56.0 * 0.9375 * k;
+    let picture_h = super::chrome::win("S_Exit_RUS").map(|t| 585.0 * k * t.height() / t.width());
+    let (w, h) = if art { (634.0 * 0.9375 * k, picture_h.map_or(480.0 * k, |ph| ph + 73.0 * k + 1.0) + footer_h - 42.0 * k) } else { (560.0 * k, 250.0 * k) };
     let r = Rect::new((screen_width() - w) / 2.0, ((screen_height() - super::chrome::bar_height() - h) / 2.0).max(0.0), w, h);
     let (inner, closed) = super::chrome::window(r, title, super::chrome::Skin::Marble, true);
     if art {
@@ -915,13 +917,10 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art:
             let pic = Rect::new(inner.center().x - pw / 2.0, inner.y + 2.0 * k, pw, ph.min(inner.h - 4.0 * k));
             let src = Rect::new(0.0, 0.0, t.width(), t.height() * pic.h / ph);
             super::chrome::tex_src(&t, src, pic, WHITE);
+            super::chrome::silver_frame(pic, k);
         }
         // Keep the three large sections distinct, with a fine outline around the artwork
         // occupying the central section.
-        super::chrome::silver_frame(
-            Rect::new(r.x + 3.0 * k, r.y + 29.0 * k, r.w - 6.0 * k, 406.0 * k),
-            k,
-        );
         let ver = super::chrome::ui_text("SpecialTexts", "VerInfo").unwrap_or_default();
         if !ver.is_empty() {
             super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
@@ -960,9 +959,10 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art:
         (own("Buttons", "Cancel", n_("Cancel")), None),
     ];
     let bw = (inner.w - 50.0 * k) / 4.0;
-    let by = if art { r.y + r.h - 10.0 * k - 30.0 * k } else { inner.y + inner.h - 42.0 * k };
+    let button_h = 36.0 * 0.9375 * k;
+    let by = if art { r.bottom() - (footer_h + button_h) / 2.0 } else { inner.y + inner.h - 42.0 * k };
     // The original's buttons: three from the left 8 apart, «Отмена» on the right.
-    let widths = [142.0 * k, 142.0 * k, 114.0 * k, 89.0 * k];
+    let widths = [150.0 * k, 150.0 * k, 120.0 * k, 90.0 * k];
     let mut choice = None;
     let mut cancel = closed;
     // The restart question opens on the next frame, so the click on «Рестарт» cannot also
@@ -970,8 +970,9 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art:
     let was_asking = *asking;
     for (i, (label, what)) in labels.iter().enumerate() {
         let b = if art {
-            let x = if i == 3 { r.x + r.w - 10.0 * k - widths[3] } else { r.x + 10.0 * k + widths[..i].iter().map(|w| w + 8.0 * k).sum::<f32>() };
-            Rect::new(x, by, widths[i], 30.0 * k)
+            let x = if i == 3 { r.right() - 9.375 * k - widths[i] }
+                else { r.x + 9.375 * k + widths[..i].iter().map(|w| w + 7.5 * k).sum::<f32>() };
+            Rect::new(x, by, widths[i], button_h)
         } else {
             Rect::new(inner.x + 10.0 * k + i as f32 * (bw + 10.0 * k), by, bw, 30.0 * k)
         };
@@ -986,7 +987,7 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art:
         }
     }
     if art {
-        super::chrome::three_block_frame(r, 26.0 * k, 438.0 * k, 2.0 * k);
+        super::chrome::three_block_frame(r, 26.0 * k, r.h - footer_h, 2.0 * k);
     }
     if was_asking {
         let (t, q) = if battle {

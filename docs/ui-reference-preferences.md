@@ -16,10 +16,11 @@ Implementation: `chrome::three_block_frame`, drawn after section backgrounds and
 
 ## Frame material and hierarchy (reference set, 2026-10-18)
 
-Use the original `SteelLine` first row for silver outlines: its changing neutral metallic
-tones are visible along every edge. Do not replace it with a flat blue-grey colour or an
-extra dark inner stroke. Structural borders use two native pixels; inset illustrations,
-lists and text panels use one. Shared section edges are drawn once.
+Use the original `SteelLine` first row for thin silver outlines. Structural borders use
+a continuous neutral silver band two native pixels wide, without texture restart seams
+or extra dark strokes. Inset illustrations, lists and text panels use one native pixel,
+with at least one screen pixel of clearance from structural borders. Shared section edges
+are drawn once. Draw the building/army structural grid after tab content, at fixed positions.
 
 Modal windows with a button footer have three sections: title, content, buttons. Content
 can contain independently outlined pictures and parchment panels. Army/building windows
@@ -30,3 +31,7 @@ Scenario artwork uses `MapImageFrame` with an 11-native-pixel inset opening and 
 outlines at the outer edge and picture opening. Keep its decorative border separate from
 the description's parchment ornaments. Background illustrations in exit windows remain
 visible through the darkened warning panel, which has corner decorations only.
+
+In battle, extend the left parchment and its separator to the window's bottom behind the
+autobattle buttons; reserve the original text area above those buttons. The exit artwork's
+thin frame follows its actual bounds, and the window height follows the artwork plus footer.

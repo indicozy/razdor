@@ -282,12 +282,43 @@ fn pack_press(game: &mut Game, cell: Option<usize>) {
 /// A press on worn slot `slot` of squad member `unit`'s panel (0x4c24f4): the item is taken
 /// off onto the pointer, or the item held is put on (the wear test's refusal is the message).
 fn worn_press(game: &mut Game, unit: usize, slot: usize) -> Option<String> {
+    if shift_down() && game.held_item.is_none() {
+        let item = game.squad.get(unit)?.items[slot]?;
+        return match game.unequip(unit, slot) {
+            Ok(()) => { press_sound(game, Press::Picked(item)); None }
+            Err(e) => Some(equip_error(e)),
+        };
+    }
     match game.press_worn(unit, slot) {
         Ok(press) => {
             press_sound(game, press);
             None
         }
         Err(e) => Some(equip_error(e)),
+    }
+}
+
+fn shift_down() -> bool {
+    [KeyCode::LeftShift, KeyCode::RightShift].into_iter().any(super::input::is_key_down)
+}
+
+fn pack_click(game: &mut Game, cell: Option<usize>) -> Option<String> {
+    if shift_down() && game.held_item.is_none() {
+        let cell = cell?;
+        let item = game.pack.get(cell)?;
+        let kind = game.content.item(item).kind;
+        let result = if kind == razdor::rules::content::ArtefactType::Potion {
+            game.drink(0, cell).map(|_| ())
+        } else {
+            game.equip(0, cell)
+        };
+        match result {
+            Ok(()) => { cue(Cue::Item(kind)); None }
+            Err(e) => Some(equip_error(e)),
+        }
+    } else {
+        pack_press(game, cell);
+        None
     }
 }
 
@@ -688,8 +719,8 @@ pub fn squad(
     let win = window_layout::window();
     let title = chrome::ui_text("Army", "Title").filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr("The hero's characteristics and army").to_string());
     let (_, close) = chrome::window(win, &title, chrome::Skin::Marble, true);
-    chrome::silver_frame(window_layout::upper(win), k.max(1.0));
-    chrome::silver_frame(window_layout::lower(win), k.max(1.0));
+    window_layout::panel_frame(window_layout::upper(win));
+    window_layout::panel_frame(window_layout::lower(win));
     let at = |x: f32, y: f32, w: f32, h: f32| window_layout::at(win, x, y, w, h);
     let mut hover = None;
     // The left panel: the selected unit, else the hero (or the unit just promoted); items go
@@ -807,7 +838,7 @@ pub fn squad(
         }
     } else if let Some(cell) = pack_view(game, assets, content, scroll, &mut hover, filtering.then_some(&kept_ids[..])) {
         *message = None;
-        pack_press(game, cell);
+        *message = pack_click(game, cell);
     }
     // Enter (Razdor's filter) picks the first match up onto the pointer.
     if filter.pick && game.held_item.is_none() {
@@ -980,7 +1011,7 @@ pub fn squad(
         (None, None) if super::unit_drag::controls() == Controls::Drag => (tr("Click an item to pick it up, then a unit to give it; drag a unit to another cell to move it; Esc returns").to_string(), Color::new(1.0, 0.55, 0.25, 1.0)),
         (None, None) => (tr("Click an item to pick it up, then a unit, a slot or a cell to put it; Esc returns").to_string(), Color::new(1.0, 0.55, 0.25, 1.0)),
     };
-    chrome::army_divider(strip);
+    chrome::army_divider_fill(strip);
     super::dt_font::with_native_metrics(|| {
         let ink = if super::dt_font::native_metrics() && message.is_none() { super::typography::Ink::Green.color() } else { hc };
         chrome::hint_text(strip, &hint, ink);
@@ -1037,6 +1068,7 @@ pub fn squad(
     }
     // The item held is the pointer; closing the window puts it back in the pack (the
     // screen change in `App::frame`, 0x4b8d28).
+    window_layout::frame(win);
     draw_held(game, assets);
 
     if close || (!filter.keys_taken && (key(KeyCode::Escape) || key(KeyCode::A))) {
@@ -1302,7 +1334,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     let pack = o(274.0, 37.0, 275.0 + 18.0 / HERO_S, 275.0);
     if let Some(cell) = pack_view(game, assets, pack, &mut view.scroll, &mut hover, None) {
         *message = None;
-        pack_press(game, cell);
+        *message = pack_click(game, cell);
     }
 
     // A box's title over it, as 0x48e750 draws them: centred, in Benguiat.
@@ -1417,7 +1449,8 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
         let ry = list.y + 4.0 * s + (n - view.list_scroll) as f32 * row_h;
         draw_rectangle(list.x + 2.0 * s, ry, list.w - 4.0 * s, row_h, Color::new(0.15, 0.15, 0.15, 0.6));
     }
-    chrome::text_box_decoration(list_box);
+    chrome::text_box_sides(list_box);
+    chrome::silver_frame(list_box, chrome::k().max(1.0));
     if rows.is_empty() {
         with_original_face(Face::Body, || chrome::shadow_centered(super::story::empty_note(view.tab), list.x + list.w / 2.0, list.y + list.h / 2.0, head * 0.9, DIM));
     }
@@ -1464,7 +1497,8 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
         }
     }
     scrollbar_always(entry_bar, &mut view.text_scroll, shown, lines.len());
-    chrome::text_box_decoration(entry_box);
+    chrome::text_box_sides(entry_box);
+    chrome::silver_frame(entry_box, chrome::k().max(1.0));
     for (n, line) in lines.iter().skip(view.text_scroll).take(shown).enumerate() {
         let y = entry.y + 6.0 * s + n as f32 * line_h + body * 0.85;
         draw_markup_row_face(&line.row, entry.x + 8.0 * s, y, room, line.size, line.face, Some(line.color));
