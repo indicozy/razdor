@@ -302,7 +302,7 @@ impl Fighter {
         let mut base = unit.stats(content);
         // One bonus per unit: each worn item with a bonus overwrites the unit's, the last one
         // wins (4919f0).
-        if let Some(b) = base.bonuses.last().cloned() {
+        if let Some(b) = base.bonuses.last().cloned().filter(|_| !content.experimental.simultaneous_bonuses) {
             base.bonuses = vec![b];
         }
         Fighter {
@@ -2508,7 +2508,8 @@ impl Battle {
         }
         let t = &mut self.fighters[target];
         if t.has(Bonus::FateGift) && !t.alive() {
-            t.base.bonuses.clear();
+            // Consume this one-use ability, retaining the unit's other abilities.
+            t.base.bonuses.retain(|b| *b != Bonus::FateGift);
             t.actions = t.base[Stat::Manevres];
             for st in [Stat::ProtectLife, Stat::ProtectDeath, Stat::ProtectElemental] {
                 t.base[st] += FATE_PROTECTION;

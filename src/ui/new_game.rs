@@ -12,7 +12,7 @@ use std::sync::Arc;
 use macroquad::prelude::*;
 
 use razdor::i18n::{self, n_, tr, Lang};
-use razdor::rules::content::{Content, HeroClass};
+use razdor::rules::content::{Content, ExperimentalRules, HeroClass};
 use razdor::rules::game::Game;
 
 
@@ -24,6 +24,10 @@ use super::widgets::*;
 use super::{screens, ScenarioEntry, Screen};
 
 thread_local! {
+    static EXPERIMENTAL: Cell<ExperimentalRules> = const { Cell::new(ExperimentalRules {
+        simultaneous_bonuses: false, multiple_rings: false, multiple_amulets: false, no_duplicate_items: true, two_potions: false,
+    }) };
+    static RULES_OPEN: Cell<bool> = const { Cell::new(false) };
     /// The scenario group picked (index into the list shown), the list's scroll in pixels
     /// at k = 1, and the hero picked.
     static PICKED: Cell<usize> = const { Cell::new(0) };
@@ -205,6 +209,8 @@ fn list_key(file: &str, width: u32, tutorial: &str) -> u32 {
 /// The scenario list opens on its first row, scrolled to the top (the original's list
 /// starts on row 0 each time).
 pub fn open_list() {
+    EXPERIMENTAL.with(|p| p.set(ExperimentalRules::for_new_game()));
+    RULES_OPEN.with(|p| p.set(false));
     PICKED.with(|p| p.set(0));
     PICKED_MAP.with(|p| p.set(None));
     SCROLL.with(|s| s.set(0.0));
@@ -245,6 +251,11 @@ fn wheel_scroll(scroll: f32, turned: f32) -> f32 {
 }
 
 pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option<Screen> {
+    if RULES_OPEN.with(Cell::get) {
+        super::main_menu::backdrop();
+        experimental_menu();
+        return None;
+    }
     if !has_install || chrome::win("Win-marble").is_none() {
         return screens::scenario_select(scenarios, has_install);
     }
@@ -406,6 +417,14 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         drop(clip);
     }
     let can = !list.is_empty();
+    if experimental_rules() != ExperimentalRules::default() {
+        let label=win.rect(12.0,442.0,306.0,28.0);
+        chrome::shadow_text(tr("Experimental rules enabled"),label.x,label.y+19.0*k,12.0*k,chrome::ORANGE_TEXT);
+    }
+    if win.button(328.0, 34.0, "...", can) {
+        RULES_OPEN.with(|p| p.set(true));
+        return None;
+    }
     let selected_map = PICKED_MAP.with(|p| p.get()).or_else(|| list.get(picked).map(|g| g.first));
     if (win.button(369.0, 116.0, &own("Buttons", "Next", n_("Next")), can) || (can && key(KeyCode::Enter))) && next.is_none() {
         cue(Cue::Button);
@@ -415,6 +434,45 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         return Some(Screen::MainMenu);
     }
     next
+}
+
+pub(super) fn experimental_rules() -> ExperimentalRules { EXPERIMENTAL.with(Cell::get) }
+
+pub(super) fn open_experimental_menu() { RULES_OPEN.with(|p| p.set(true)); }
+
+pub(super) fn snapshot_experimental(rules: ExperimentalRules) { EXPERIMENTAL.with(|p| p.set(rules)); }
+
+/// Kept modal so clicks and Enter cannot start a scenario behind the options.
+fn experimental_menu() {
+    let k = chrome::k();
+    let r = Rect::new((screen_width() - 550.0*k)/2.0, (screen_height() - 360.0*k)/2.0, 550.0*k, 360.0*k);
+    let (_, close) = chrome::window(r, tr("Experimental scenario rules"), chrome::Skin::Marble, true);
+    let mut rules = experimental_rules();
+    let check = |index: usize, label: &str, value: &mut bool| {
+        let row = Rect::new(r.x+20.0*k, r.y+(54.0+index as f32*38.0)*k, r.w-40.0*k, 28.0*k);
+        let box_r = Rect::new(row.x, row.y+3.0*k, 20.0*k, 20.0*k);
+        chrome::silver_frame(box_r, k.max(1.0));
+        if *value {
+            draw_line(box_r.x+4.0*k,box_r.y+10.0*k,box_r.x+8.0*k,box_r.y+15.0*k,2.0*k,chrome::GOLD);
+            draw_line(box_r.x+8.0*k,box_r.y+15.0*k,box_r.x+17.0*k,box_r.y+5.0*k,2.0*k,chrome::GOLD);
+        }
+        chrome::shadow_text(label,row.x+30.0*k,row.y+20.0*k,16.0*k,chrome::CREAM);
+        if row.contains(pointer().into()) && clicked() { *value = !*value; }
+    };
+    check(0,tr("All special bonuses simultaneously"),&mut rules.simultaneous_bonuses);
+    check(1,tr("Allow multiple rings"),&mut rules.multiple_rings);
+    check(2,tr("Allow multiple amulets"),&mut rules.multiple_amulets);
+    check(3,tr("No duplicate items"),&mut rules.no_duplicate_items);
+    check(4,tr("At most two potions per character"),&mut rules.two_potions);
+    EXPERIMENTAL.with(|p| p.set(rules));
+    let lines = [tr("Four equipment slots. Duplicate abilities do not stack."), tr("Applies to all armies; saved with this playthrough."), tr("The potion limit resets after a battle.")];
+    for (i,line) in lines.iter().enumerate() {
+        chrome::shadow_text(line,r.x+20.0*k,r.y+(264.0+i as f32*19.0)*k,12.0*k,chrome::CREAM);
+    }
+    let b = Rect::new(r.center().x-50.0*k,r.bottom()-44.0*k,100.0*k,28.0*k);
+    let (_, down, pressed) = button_state(b,true);
+    chrome::marble_button(b,tr("OK"),true,down);
+    if close || pressed || key(KeyCode::Escape) || key(KeyCode::Enter) { RULES_OPEN.with(|p| p.set(false)); }
 }
 
 /// The tutorial map to offer before a new game, as an index into `scenarios`: the install's
@@ -492,6 +550,7 @@ pub fn class_select(game: &mut Option<Game>, demo: &Arc<Content>, scenario: Opti
         return screens::class_select(game, demo, scenario, assets);
     }
     let (e, content) = scenario.expect("checked");
+    let content = Arc::new(content.with_experimental(experimental_rules()));
     super::main_menu::backdrop();
     let scale = chrome::k();
     let r = Rect::new((screen_width() - 632.0 * scale) / 2.0, (202.0 * scale).min(screen_height() - 516.0 * scale), 632.0 * scale, 516.0 * scale);

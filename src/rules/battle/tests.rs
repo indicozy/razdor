@@ -903,6 +903,55 @@ fn row29_an_items_bonus_overwrites_the_units() {
 // --- rows 31–50: Community bonuses ------------------------------------------------------------
 
 #[test]
+fn experimental_combined_bonuses_apply_to_both_sides_and_fate_consumes_only_itself() {
+    let native=bonus(37,Bonus::Counterblow,warrior(37,25,0));
+    let enemy=bonus(95,Bonus::FateGift,warrior(95,10,0));
+    let ring=crate::rules::content::ArtefactDef { bonus:Some(Bonus::ArmorIgnore), ..item(900,ArtefactType::Ring) };
+    let c=Arc::new(content(vec![native,enemy],vec![ring]).with_experimental(crate::rules::content::ExperimentalRules {
+        simultaneous_bonuses:true, ..Default::default()
+    }));
+    let mut attacker=Unit::new(&c,UnitId(37),f(2));
+    attacker.items[0]=Some(ItemId(900));
+    let mut enemy=Unit::new(&c,UnitId(95),f(2));
+    enemy.items[0]=Some(ItemId(900));
+    let mut bt=Battle::new(c,&[(0,&attacker)],&[enemy],Team::Player);
+    assert!(bt.fighters[0].base.has(&Bonus::Counterblow));
+    assert!(bt.fighters[0].base.has(&Bonus::ArmorIgnore));
+    assert!(bt.fighters[1].base.has(&Bonus::FateGift));
+    assert!(bt.fighters[1].base.has(&Bonus::ArmorIgnore));
+    bt.fighters[1].hp=0;
+    bt.on_hit(0,1,100,false);
+    assert!(bt.fighters[1].alive());
+    assert!(!bt.fighters[1].base.has(&Bonus::FateGift));
+    assert!(bt.fighters[1].base.has(&Bonus::ArmorIgnore));
+    bt.fighters[0].base.bonuses.push(Bonus::Neutralize);
+    bt.on_hit(0,1,10,false);
+    assert!(bt.fighters[1].base.bonuses.is_empty());
+}
+
+#[test]
+fn experimental_one_hit_applies_piercing_stun_and_bleeding_together() {
+    let attacker=bonus(37,Bonus::ArmorIgnore,warrior(37,25,0));
+    let defender=UnitDef { hits:300, defence_blow:100, ..warrior(95,10,0) };
+    let stun=crate::rules::content::ArtefactDef { bonus:Some(Bonus::Stun), ..item(900,ArtefactType::Ring) };
+    let bleed=crate::rules::content::ArtefactDef { bonus:Some(Bonus::Bleed), ..item(901,ArtefactType::Amulet) };
+    let c=Arc::new(content(vec![attacker,defender],vec![stun,bleed]).with_experimental(crate::rules::content::ExperimentalRules {
+        simultaneous_bonuses:true, ..Default::default()
+    }));
+    let mut u=Unit::new(&c,UnitId(37),f(2));
+    u.items[0]=Some(ItemId(900));
+    u.items[1]=Some(ItemId(901));
+    let enemy=Unit::new(&c,UnitId(95),f(2));
+    let mut bt=Battle::new(c,&[(0,&u)],&[enemy],Team::Player);
+    bt.begin();
+    let initiative=bt.initiative(1);
+    let hit=bt.act(1).unwrap();
+    assert_eq!(hit.amount,25,"the attack pierces the target's 100 defence");
+    assert!(bt.initiative(1)<initiative,"stun also applies");
+    assert!(bt.fighters[1].bleed>0,"bleeding also applies");
+}
+
+#[test]
 fn row31_hunger_heals_on_a_melee_kill_and_at_turn_start_after_a_death() {
     let hungry = bonus(60, Bonus::Hunger, warrior(60, 30, 0));
     let mut bt = with(vec![hungry.clone()], &[(60, f(2))], &[(10, f(2)), (10, f(3))]);

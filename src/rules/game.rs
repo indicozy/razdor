@@ -219,6 +219,9 @@ pub enum Foe {
 /// statics of the world and the event engine, which a load rebuilds from the scenario.
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Game {
+    /// Persisted per playthrough, independently of the new-game menu and installation.
+    #[serde(default)]
+    pub experimental: super::content::ExperimentalRules,
     #[serde(skip)]
     pub content: Arc<Content>,
     /// Squad member 0 is always the hero.
@@ -469,6 +472,9 @@ pub struct Game {
     /// Set by the interface, not part of the save.
     #[serde(skip)]
     pub friends_let_pass: bool,
+    /// Global UI preference: when off, saved battle-disabled marks have no effect.
+    #[serde(skip)]
+    pub allow_unit_benching: bool,
     /// "Automatically pursue the chosen army" (the original's `OptValue7`, world.md §1):
     /// on, the hero's route follows the army he clicked as it steps; off, he walks to the
     /// cell where it stood. Set by the interface, not part of the save.
@@ -555,6 +561,7 @@ impl Game {
         let clock = world.start;
         let wide_row = content.formation == super::formation::Formation::WIDE;
         let mut g = Game {
+            experimental: content.experimental,
             squad,
             gold: 0,
             mana: 0,
@@ -631,6 +638,7 @@ impl Game {
             improved_ai: false,
             max_ai: false,
             friends_let_pass: false,
+            allow_unit_benching: false,
             pursue: true,
             walk_pace: 1.0,
             pass_on_bridges: false,
@@ -752,6 +760,14 @@ impl Game {
 
     pub fn hero(&self) -> &Unit {
         &self.squad[0]
+    }
+
+    /// Does not change HP, wages, roster, formation, or scenario event records.
+    pub fn set_unit_battle_disabled(&mut self, index: usize, disabled: bool) -> bool {
+        if !self.allow_unit_benching || index == 0 { return false; }
+        let Some(unit) = self.squad.get_mut(index).filter(|u| u.alive()) else { return false };
+        unit.battle_disabled = disabled;
+        true
     }
 
     /// Switches the front row's width of a game under way (a Razdor setting, applied at once
@@ -2002,7 +2018,9 @@ impl Game {
         let enemies: Vec<Unit> = enemies;
         // The attacker brings only its paid units, the defender all its living ones (49855c):
         // the player's unpaid units sit out only when he attacks.
-        let player: Vec<_> = self.squad.iter().enumerate().filter(|(i, u)| *i == 0 || (u.alive() && (attacker != Team::Player || !u.unpaid))).collect();
+        let player: Vec<_> = self.squad.iter().enumerate().filter(|(i, u)| *i == 0 || (u.alive()
+            && !(self.allow_unit_benching && u.battle_disabled)
+            && (attacker != Team::Player || !u.unpaid))).collect();
         self.battles += 1;
         let mut b = Battle::new(self.content.clone(), &player, &enemies, attacker);
         // In battle every side names its units as 0x49747c does: the hero by his class and
@@ -2182,6 +2200,7 @@ impl Game {
         for u in &mut self.squad {
             let before = u.max_hp(&c);
             u.potions.clear();
+            u.potions_drunk = 0;
             u.follow_max(&c, before);
         }
         let mut level_ups = Vec::new();
@@ -3073,6 +3092,72 @@ mod tests {
         assert!(g.world.armies.is_empty());
         assert_eq!(g.foe, None);
         assert!(g.hero().xp > 0 || g.hero().level > 1, "XP after the battle");
+    }
+
+    #[test]
+    fn benched_units_keep_wages_records_and_space_but_get_no_battle_xp() {
+        use super::super::events::EventWorld;
+        let mut g=quiet_game(HeroClass::Knight);
+        g.hire(unit(&g,"spearman")).unwrap();
+        let index=g.squad.len()-1;
+        g.squad[index].named=1;
+        let original=g.squad[index].clone();
+        let roster=g.player_units();
+        let wages=g.daily_wages();
+        assert!(!g.set_unit_battle_disabled(index,true),"feature is off by default");
+        g.allow_unit_benching=true;
+        assert!(!g.set_unit_battle_disabled(0,true),"the hero always fights");
+        assert!(g.set_unit_battle_disabled(index,true));
+        assert_eq!(g.player_units(),roster,"quests see exactly the same living army records");
+        assert_eq!(g.daily_wages(),wages);
+        assert_eq!(g.squad[index].slot,original.slot);
+        g.foe=Some(Foe::Garrison(g.world.index_of("Bandit camp")));
+        let mut battle=g.start_battle();
+        assert!(!battle.fighters.iter().any(|f| f.squad_index==Some(index)));
+        battle.begin();
+        wipe_all_but_hero(&mut battle);
+        assert!(!battle.player_xp().iter().any(|a| battle.fighters[a.fighter].squad_index==Some(index)));
+        g.resolve_battle(&battle);
+        assert_eq!(g.squad[index].xp,original.xp);
+        assert_eq!(g.squad[index].hp,original.hp);
+        assert!(g.squad[index].alive());
+        g.allow_unit_benching=false;
+        g.foe=None;
+        assert!(g.start_battle().fighters.iter().any(|f| f.squad_index==Some(index)),"turning off the preference restores participation");
+    }
+
+    #[test]
+    fn benched_units_sit_out_when_the_enemy_attacks_too() {
+        let mut g=quiet_game(HeroClass::Knight);
+        g.hire(unit(&g,"spearman")).unwrap();
+        let index=g.squad.len()-1;
+        g.allow_unit_benching=true;
+        g.set_unit_battle_disabled(index,true);
+        let camp=g.world.index_of("Bandit camp");
+        g.world.spawn_gang(camp,(30,20));
+        g.foe=Some(Foe::Army(0));
+        let battle=g.start_battle();
+        assert!(!battle.fighters.iter().any(|f| f.squad_index==Some(index)));
+    }
+
+    #[test]
+    fn experimental_potion_limit_keeps_inventory_and_resets_after_battle() {
+        let mut g=quiet_game(HeroClass::Knight);
+        g.experimental.two_potions=true;
+        g.content=Arc::new(g.content.with_experimental(g.experimental));
+        let potion=item(&g,"heal_potion");
+        g.pack=vec![potion;3];
+        g.drink(0,0).unwrap();
+        g.drink(0,0).unwrap();
+        assert_eq!(g.drink(0,0),Err(EquipError::PotionLimit));
+        assert_eq!(g.pack,vec![potion]);
+        g.foe=Some(Foe::Garrison(g.world.index_of("Bandit camp")));
+        let mut b=g.start_battle();
+        b.begin();
+        wipe_all_but_hero(&mut b);
+        g.resolve_battle(&b);
+        assert_eq!(g.hero().potions_drunk,0);
+        assert!(g.drink(0,0).is_ok());
     }
 
     #[test]

@@ -50,8 +50,10 @@ use super::world::World;
 /// into it), its *last fired* a minute ahead until the scan goes idle, the ask and once
 /// bytes a Yes rewrites, opcode 18's waiting digit and the tutorial's end mark; older saves
 /// load with their flags joined, no digit waiting and the mark down. 9: the wide front row
-/// the game was started with; older saves load wide, as they were all made.
-pub const FORMAT_VERSION: u32 = 9;
+/// the game was started with; older saves load wide, as they were all made. 10: per-party
+/// experimental rules, also carried between campaign maps; older saves use classic rules.
+/// 11: duplicate-item restriction, potion limit/counters and each unit's noncombatant mark.
+pub const FORMAT_VERSION: u32 = 11;
 /// The oldest format still read.
 pub const OLDEST_VERSION: u32 = 1;
 pub const EXTENSION: &str = "rzsave";
@@ -817,6 +819,7 @@ pub fn restore(meta: &SaveMeta, mut game: Game, demo: Arc<Content>, install: Opt
     } else {
         Arc::new(content.with_formation(if game.wide_row { wide } else { super::formation::Formation::VANILLA }))
     };
+    game.content = Arc::new(game.content.with_experimental(game.experimental));
     game.origin = Some(meta.scenario.clone());
     // The AI is set up again on every load (0x4a1ff0 from the save loader).
     game.ai_init(meta.version >= 4);
@@ -959,6 +962,35 @@ pub(crate) mod tests {
         g.foe = Some(crate::rules::game::Foe::Garrison(g.world.index_of("Bandit lair")));
         let loaded = roundtrip(&g, c, None);
         assert_eq!(loaded.foe, g.foe);
+    }
+
+    #[test]
+    fn experimental_rules_survive_save_load_without_changing_install_defaults() {
+        let install = demo();
+        let rules = super::super::content::ExperimentalRules { simultaneous_bonuses:true, multiple_rings:true, multiple_amulets:true, no_duplicate_items:true, two_potions:true };
+        let mut g = Game::new(Arc::new(install.with_experimental(rules)),HeroClass::Knight);
+        g.squad[0].potions_drunk=2;
+        g.squad[0].battle_disabled=true;
+        let loaded = roundtrip(&g,install.clone(),None);
+        assert_eq!(loaded.experimental,rules);
+        assert_eq!(loaded.content.experimental,rules);
+        assert_eq!(loaded.squad[0].potions_drunk,2);
+        assert!(loaded.squad[0].battle_disabled);
+        assert_eq!(install.experimental,Default::default());
+    }
+
+    #[test]
+    fn experimental_missing_save_rules_default_to_classic() {
+        let g = Game::new(demo(),HeroClass::Knight);
+        let mut old = serde_json::to_value(&g).unwrap();
+        old.as_object_mut().unwrap().remove("experimental");
+        for u in old["squad"].as_array_mut().unwrap() {
+            u.as_object_mut().unwrap().remove("battle_disabled");
+            u.as_object_mut().unwrap().remove("potions_drunk");
+        }
+        let loaded: Game = serde_json::from_value(old).unwrap();
+        assert_eq!(loaded.experimental,Default::default());
+        assert!(loaded.squad.iter().all(|u| !u.battle_disabled && u.potions_drunk==0));
     }
 
     fn walk(g: &mut Game, frames: usize) {

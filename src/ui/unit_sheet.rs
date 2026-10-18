@@ -14,6 +14,10 @@ use super::assets::Assets;
 use super::chrome::{self, k, BLUE_TEXT, CREAM, ORANGE_TEXT, RED_TEXT};
 use super::widgets::{measure, mouse_in, wrap};
 
+thread_local! {
+    static TRAIT_SCROLL: std::cell::RefCell<std::collections::HashMap<String, f32>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
 /// The army's font tints from the original's startup palette (4dbb0c), applied only
 /// in the native army presentation. Other screens retain their current palette.
 fn army_ink(color: Color) -> Color {
@@ -182,9 +186,20 @@ fn state_trait(line: StateLine) -> (String, String, Color) {
 
 /// The traits the panel lists: the hero's class, the unit's bonuses (its items' too), then
 /// its state ([`state_lines`]).
-fn traits_of(s: &Sheet) -> Vec<(String, String, Color)> {
+fn traits_of(s: &Sheet, content: &Content) -> Vec<(String, String, Color)> {
     let mut traits: Vec<(String, String, Color)> = s.start.bonuses.iter().map(|bonus| {
-        let (art, text) = trait_line(bonus);
+        let (art, mut text) = trait_line(bonus);
+        if content.experimental.simultaneous_bonuses {
+            let mut sources = Vec::new();
+            if content.unit(s.kind).bonus.as_ref() == Some(bonus) { sources.push(tr("Own ability").to_string()); }
+            for item in s.items.iter().flatten().filter_map(|&id| content.try_item(id)) {
+                if item.bonus.as_ref() == Some(bonus) { sources.push(item.name.clone()); }
+            }
+            if !sources.is_empty() {
+                text.push('\n');
+                text.push_str(&razdor::trf!("Ability sources: {sources}", sources = sources.join(", ")));
+            }
+        }
         (art, text, super::typography::Ink::Green.color())
     }).collect();
     if let Some(h) = s.hero {
@@ -591,15 +606,19 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: b
     // dark parchment above a long text. The traits always get their room: when everything
     // does not fit, the description is cut short (a caster's long stat list with a trait, a
     // mod's long trait texts).
-    let traits = traits_of(s);
+    let traits = traits_of(s, content);
     let small = super::dt_font::native_size(super::dt_font::Face::Body, (12.0 * k).round());
     let slh = super::dt_font::native_line_height(super::dt_font::Face::Body, 13.2 * k);
     let icon = 24.0 * k;
-    let trait_w = r.w - 44.0 * k - icon;
+    let trait_w = r.w - 44.0 * k - icon - if content.experimental.simultaneous_bonuses { 16.0*k } else { 0.0 };
     let traits_h: f32 = traits.iter().map(|(_, line, _)| trait_height(trait_rows(line, trait_w, small).len(), slh, k)).sum();
     let lh = super::dt_font::native_line_height(super::dt_font::Face::Body, 13.6 * k);
     let name_lh = super::dt_font::native_line_height(super::dt_font::Face::Subtitle, 17.0 * k);
-    let text_h = name_lh + lh * (1 + stat_lines(content, s).len() + s.status.len()) as f32 + 6.0 * k + traits_h;
+    let fixed_h = name_lh + lh * (1 + stat_lines(content, s).len() + s.status.len()) as f32 + 6.0 * k;
+    let traits_view_h = if content.experimental.simultaneous_bonuses {
+        traits_h.min(130.0*k).min((r.h*0.70-fixed_h).max(0.0))
+    } else { traits_h };
+    let text_h = fixed_h + traits_view_h;
     // Any unit but the hero shows its class's description (0x492f24: the type's text, the
     // `Descript` of Rus_Units.ini), in battle and in the army and building windows alike.
     let desc = if s.hero.is_none() { content.unit(s.kind).description.as_str() } else { "" };
@@ -669,7 +688,7 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: b
     }
     // The description in what the traits leave, then the traits with their icons.
     y += 6.0 * k;
-    let desc_bottom = bottom - traits_h;
+    let desc_bottom = bottom - traits_view_h;
     // A hair of slack: the text is laid out to end exactly at the bottom.
     let fits = ((desc_bottom - y) / slh + 0.01).floor().max(0.0) as usize;
     for (i, line) in desc_lines.iter().take(fits).enumerate() {
@@ -678,15 +697,33 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: b
         shadow_text(&line, x0 - 4.0 * k, y, small, CREAM);
         y += slh;
     }
+    let traits_top = if content.experimental.simultaneous_bonuses { (bottom-traits_view_h).max(y-slh) } else { y-slh+3.0*k };
+    let viewport = Rect::new(r.x+8.0*k, traits_top, r.w-16.0*k, (bottom-traits_top).max(0.0));
+    let most = if traits.is_empty() || viewport.h <= 0.0 { 0.0 } else { (traits_h + slh - viewport.h).max(0.0) };
+    let key = format!("{}:{}:{}:{}:{:?}:{:?}",r.x,r.y,s.kind.0,s.name,s.start.bonuses,s.items);
+    let mut scroll = TRAIT_SCROLL.with(|p| p.borrow().get(&key).copied().unwrap_or(0.0));
+    if content.experimental.simultaneous_bonuses && most > 0.0 {
+        if viewport.contains(super::widgets::pointer().into()) { scroll -= super::widgets::wheel()*slh*3.0; }
+        scroll = scroll.clamp(0.0,most);
+        super::widgets::scrollbar_px(Rect::new(viewport.right()-12.0*k,viewport.y,12.0*k,viewport.h),&mut scroll,most,viewport.h,slh);
+        TRAIT_SCROLL.with(|p| {
+            let mut p=p.borrow_mut();
+            if p.len()>32 { p.clear(); }
+            p.insert(key,scroll);
+        });
+    } else { scroll=0.0; }
+    let _traits_clip = content.experimental.simultaneous_bonuses.then(|| super::widgets::Clip::new(viewport));
+    if content.experimental.simultaneous_bonuses { y=viewport.y+slh-5.0*k; }
+    y -= scroll;
     for (art, line, ink) in traits {
         y += 5.0 * k;
-        if y + slh > bottom + slh * 0.5 {
+        if !content.experimental.simultaneous_bonuses && y + slh > bottom + slh * 0.5 {
             break;
         }
         chrome::trait_icon(&art, x0 - 8.0 * k, y - slh + 2.0 * k, icon);
         let lines = trait_rows(&line, trait_w, small);
         for (i, l) in lines.iter().enumerate() {
-            if y > bottom {
+            if !content.experimental.simultaneous_bonuses && y > bottom {
                 break;
             }
             let lx = if i < 2 { x0 + icon - 4.0 * k } else { x0 - 8.0 * k };

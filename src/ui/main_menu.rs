@@ -812,6 +812,9 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
         chrome::shadow_text(line, rx, y - 8.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
     }
     y += lines.len() as f32 * 17.0 * k;
+    if row(tr("Unit battle participation"), if audio.allow_unit_benching { tr("On") } else { tr("Off") }, &mut y) {
+        audio.allow_unit_benching = !audio.allow_unit_benching;
+    }
     // The language list (Razdor's): Russian, English and the translations of the data found
     // in the install; the button opens it.
     chrome::shadow_text(tr("Language"), rx, y + 18.0 * k, 14.0 * k, chrome::CREAM);

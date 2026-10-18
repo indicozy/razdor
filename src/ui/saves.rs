@@ -211,7 +211,7 @@ pub fn autosaves_on(opt_value8: Option<&str>) -> bool {
 /// Razdor is started again.
 pub fn session_content(install: Option<Arc<Content>>, game: &Game) -> Option<Arc<Content>> {
     match install {
-        Some(c) if matches!(game.origin, Some(save::ScenarioRef::Map { .. })) && c.formation != game.content.formation => Some(game.content.clone()),
+        Some(c) if matches!(game.origin, Some(save::ScenarioRef::Map { .. })) && c.formation != game.content.formation => Some(Arc::new(c.with_formation(game.content.formation))),
         other => other,
     }
 }

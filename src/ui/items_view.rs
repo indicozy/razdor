@@ -89,6 +89,8 @@ fn equip_error(e: EquipError) -> String {
     match e {
         EquipError::NoFreeSlot => tr("No free slot.").into(),
         EquipError::SameType => tr("Already wears an item of that type.").into(),
+        EquipError::DuplicateItem => tr("Already wears this item. Duplicate items are disabled.").into(),
+        EquipError::PotionLimit => tr("This character has already drunk two potions. The limit resets after a battle.").into(),
         EquipError::SecondWeapon => tr("Only one weapon or staff at a time.").into(),
         EquipError::WrongClass => tr("This unit cannot use that (warrior, shooter or mage only).").into(),
         EquipError::Unholy => tr("The undead cannot hold holy things.").into(),
@@ -692,7 +694,13 @@ pub fn squad(
     stats[Stat::DefenceBlow] += bd;
     stats[Stat::DefenceShot] += bd;
     let hero = (sel == 0).then(|| razdor::rules::content::HeroClass::ALL.into_iter().find(|h| h.unit() == u.def)).flatten();
-    let status = potion_status(&c, &u);
+    let mut status = potion_status(&c, &u);
+    if !showing_type && game.allow_unit_benching && u.battle_disabled && sel > 0 {
+        status.push((tr("Not fighting").to_string(),chrome::ORANGE_TEXT));
+    }
+    if !showing_type && c.experimental.two_potions {
+        status.push((razdor::trf!("Potions before next battle: {used}/2",used=u.potions_drunk),chrome::BLUE_TEXT));
+    }
     // Dead and unpaid are the original's trait lines (`unit_sheet::state_lines`).
     let label = if showing_type { c.unit(u.def).name.clone() } else { game.squad_label(sel) };
     let sheet = unit_sheet::Sheet {
@@ -813,10 +821,20 @@ pub fn squad(
         chrome::wounds(face, u.hp, u.max_hp(&c));
         let label = if u.alive() { own("Dismiss", n_("Dismiss")) } else { own("Bury", n_("Bury")) };
         let label = label.as_str();
-        let b = Rect::new(face.x + face.w + 12.0 * k, row.y + 14.0 * k, row.w - face.w - 24.0 * k, row.h - 28.0 * k);
+        let bench_control = game.allow_unit_benching && sel > 0 && u.alive();
+        let b = Rect::new(face.x + face.w + 12.0 * k,
+            row.y + if bench_control { 5.0*k } else { 14.0*k },
+            row.w - face.w - 24.0 * k, if bench_control { 24.0*k } else { row.h - 28.0*k });
         // One confirmation step, as the original's confirm and cancel buttons; all three in its
         // red (0x4dc118 makes them with 0x4dba90: Btn3 for Dismiss, Btn1 for the pair).
         let confirming = CONFIRM.with(|c| c.get()) == Some(sel);
+        if bench_control && !confirming {
+            let toggle=Rect::new(b.x,row.y+33.0*k,b.w,24.0*k);
+            let label=if u.battle_disabled { tr("Return to battle") } else { tr("Exclude from battles") };
+            if red_button(toggle.x,toggle.y,toggle.w,toggle.h,label,true) {
+                game.set_unit_battle_disabled(sel,!u.battle_disabled);
+            }
+        }
         if !confirming {
             if red_button(b.x, b.y, b.w, b.h, label, true) {
                 CONFIRM.with(|c| c.set(Some(sel)));
@@ -892,6 +910,10 @@ pub fn squad(
             chrome::death_veil(sq);
         } else if v.unpaid {
             chrome::badge("sign-payment", sq.x + sq.w - 12.0 * k, sq.y + 12.0 * k, 20.0 * k, RED);
+        }
+        if i > 0 && game.allow_unit_benching && v.battle_disabled {
+            draw_rectangle(sq.x,sq.y,sq.w,sq.h,Color::new(0.0,0.0,0.0,0.48));
+            chrome::shadow_centered(tr("Not fighting"),sq.center().x,sq.bottom()-5.0*k,10.0*k,chrome::ORANGE_TEXT);
         }
         // The original's signs from the top left (493a64): the promotion, then a drunk potion
         // (the hero's helm, Razdor's, in the first place).

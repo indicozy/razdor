@@ -152,6 +152,8 @@ fn take_cues() -> Vec<Cue> {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    /// Allows marking army members as noncombatants; off by default.
+    pub allow_unit_benching: bool,
     pub music_volume: f32,
     pub sfx_volume: f32,
     pub music_muted: bool,
@@ -214,7 +216,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, expert_ai: None, max_ai: false, wide_row: None, display: Default::default(), ui_scale: 0.0, minimap_size: None, minimap_corner: Default::default(), friends_let_pass: false, pass_on_bridges: false, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None }
+        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, expert_ai: None, max_ai: false, wide_row: None, display: Default::default(), ui_scale: 0.0, minimap_size: None, minimap_corner: Default::default(), friends_let_pass: false, pass_on_bridges: false, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None }
     }
 }
 
@@ -690,6 +692,15 @@ mod tests {
         assert!(!s.max_ai && s.expert_ai == Some(false));
         let old: Settings = serde_json::from_str(r#"{"expert_ai": true}"#).unwrap();
         assert_eq!(ai_strength(&old), AiStrength::Improved, "an older file: no «Максимум»");
+    }
+
+    #[test]
+    fn benching_preference_defaults_off_and_survives_settings_serialization() {
+        let old: Settings=serde_json::from_str("{}").unwrap();
+        assert!(!old.allow_unit_benching);
+        let enabled=Settings { allow_unit_benching:true,..Settings::default() };
+        let back: Settings=serde_json::from_str(&serde_json::to_string(&enabled).unwrap()).unwrap();
+        assert!(back.allow_unit_benching);
     }
 
     /// The front row's width: the install's `OptValue11` until chosen, then the choice; an

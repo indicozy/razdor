@@ -242,6 +242,12 @@ pub enum PromoteError {
 /// A persistent army member.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Unit {
+    /// Still an ordinary army member; excluded only from the player's battles when enabled.
+    #[serde(default)]
+    pub battle_disabled: bool,
+    /// Successful drinks since the army's last battle, including instant healing.
+    #[serde(default)]
+    pub potions_drunk: u8,
     pub def: UnitId,
     /// 1 as hired.
     pub level: i32,
@@ -295,6 +301,8 @@ impl Unit {
         let hp = content.unit(def).hits.max(1);
         let wage_kind = WageKind::of(content.unit(def));
         Unit {
+            battle_disabled: false,
+            potions_drunk: 0,
             def,
             level: 1,
             xp: 0,
