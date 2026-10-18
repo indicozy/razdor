@@ -512,7 +512,7 @@ impl<'a> Runner<'a> {
             (Source::Install(dt), _) => {
                 let exact = dt.maps.iter().find(|m| m.name == stem);
                 let found = exact.or_else(|| {
-                    let mut it = dt.maps.iter().filter(|m| m.name.starts_with(stem));
+                    let mut it = dt.maps.iter().filter(|m| m.name.starts_with(stem) && !crate::dt::install::is_translated_copy(&m.name));
                     let first = it.next();
                     first.filter(|_| it.next().is_none())
                 });

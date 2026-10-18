@@ -1000,7 +1000,9 @@ mod tests {
 
     fn install() -> Option<DtInstall> {
         let dir = std::env::var_os(super::super::install::ENV_VAR)?;
-        Some(DtInstall::load(Path::new(&dir)).expect("install loads"))
+        let mut dt = DtInstall::load(Path::new(&dir)).expect("install loads");
+        dt.maps.retain(|m| !crate::dt::install::is_translated_copy(&m.name));
+        Some(dt)
     }
 
     fn graphics_files(dir: &Path, out: &mut Vec<PathBuf>) {

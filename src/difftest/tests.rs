@@ -106,7 +106,9 @@ fn input_that_does_not_apply_is_noted() {
 
 fn install() -> Option<DtInstall> {
     let dir = std::env::var_os(crate::dt::install::ENV_VAR)?;
-    Some(DtInstall::load(Path::new(&dir)).expect("install loads"))
+    let mut dt = DtInstall::load(Path::new(&dir)).expect("install loads");
+    dt.maps.retain(|m| !crate::dt::install::is_translated_copy(&m.name));
+    Some(dt)
 }
 
 /// The LCG's step back: the multiplier's inverse mod 2³².

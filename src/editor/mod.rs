@@ -35,7 +35,9 @@ mod real_maps {
 
     fn install() -> Option<DtInstall> {
         let dir = std::env::var_os(crate::dt::install::ENV_VAR)?;
-        Some(DtInstall::load(std::path::Path::new(&dir)).expect("install loads"))
+        let mut dt = DtInstall::load(std::path::Path::new(&dir)).expect("install loads");
+        dt.maps.retain(|m| !crate::dt::install::is_translated_copy(&m.name));
+        Some(dt)
     }
 
     #[test]

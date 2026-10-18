@@ -104,6 +104,15 @@ impl PlayOptions {
     }
 }
 
+/// A copy of a shipped map written into the install by Razdor's map translator (on main):
+/// the source's name, `_`, a lowercase language suffix (`РК1-Начало пути_en.DTm`,
+/// `…_hindi-native.DTm`). The real-data tests look at the shipped maps only.
+pub fn is_translated_copy(file: &str) -> bool {
+    let Some(stem) = Path::new(file).file_stem().map(|s| s.to_string_lossy().into_owned()) else { return false };
+    let Some((name, suffix)) = stem.rsplit_once('_') else { return false };
+    (2..=27).contains(&suffix.len()) && suffix.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') && !name.is_ascii()
+}
+
 /// All `*.DTm` files of the maps folder, sorted by name.
 pub fn list_maps(dir: &Path) -> Result<Vec<MapEntry>, DtError> {
     let maps_dir = find(dir, MAPS_DIR)?;
@@ -406,7 +415,9 @@ mod tests {
 
     fn install() -> Option<DtInstall> {
         let dir = std::env::var_os(ENV_VAR)?;
-        Some(DtInstall::load(Path::new(&dir)).expect("install loads"))
+        let mut dt = DtInstall::load(Path::new(&dir)).expect("install loads");
+        dt.maps.retain(|m| !is_translated_copy(&m.name));
+        Some(dt)
     }
 
     #[test]
