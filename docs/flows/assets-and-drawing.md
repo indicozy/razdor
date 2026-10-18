@@ -102,6 +102,10 @@ other than a bridge, or crossing between building cells; gliding in from outside
 until the step ends). Its one-cell ring (`draw_mark`) stays, under the building picture. The
 minimap is `src/ui/minimap.rs`.
 
+The small trees and bushes (object class 9) sway: `draw_object` draws them through
+`draw_leaning`, the top corners moved by `rng::tree_sway` (a triangle wave of ±2.5 px over
+3.57 s, 0x4c99d0) of the plant's phase, the third draw of its jitter (`rng::plant_jitter`).
+
 Map figures (`draw_figure`) are drawn premultiplied (`chrome::premultiplied`): the sheets hold
 premultiplied colour, as the original's ONE / INVSRCALPHA blend reads them (0x4c9ef6); the
 Ghost's glow is light with alpha 0, invisible under straight alpha. Standing armies animate
