@@ -68,3 +68,20 @@ transferred into a world garrison use that garrison's ordinary troop records.
 
 Snapshot scenes can mark a member using `RAZDOR_SCENE_BENCHED=<squad index>`; enable the
 global preference in an isolated snapshot save directory to display its controls.
+
+## Travel and Shift shortcuts
+
+Player routes avoid all army cells, regardless of allegiance or patrol state. Remaining
+routes are checked before each hero step and after the world advances. A blocking army
+causes a route search to the same destination. If no bypass exists, the planner falls
+back to a terrain-valid route and the hero approaches the blocking army for contact:
+an enemy starts combat and a friendly army is met. Clicking an army directly still
+selects it as the intentional target, including pursuit. These travel changes are always
+active; they are convenience changes rather than original-game behavior.
+
+Holding either Shift key while clicking a garrison/squad card transfers the unit to the
+other formation's first available place. Existing restrictions on heroes, named units,
+dead units and capacity still apply; retrieving an unpaid garrison member pays the normal
+price immediately. Shift-clicking a backpack item equips it on the hero, or drinks it if
+it is a potion. Shift-clicking worn gear returns it to the pack. Failed quick actions
+keep the item and show the existing refusal. All equipment rules and potion limits apply.

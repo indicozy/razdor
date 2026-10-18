@@ -2094,9 +2094,8 @@ mod tests {
 
     #[test]
     fn an_army_with_a_meeting_waiting_next_to_the_hero_closes_his_route() {
-        // World.md §1.3 (0x4cc601): an army a meeting event waits for closes its cell when it
-        // stands next to the hero (any of the 8 neighbours), unless it is the army clicked;
-        // further away, or without the event, it is walked through like any moving army.
+        // Army cells are avoided regardless of meeting events or distance. A deliberate
+        // click still reaches the army so its meeting event can run.
         let mut talk = ev(EventKind::Global);
         talk.conditions.meet_army = 2;
         let routes = |events: Vec<DtEvent>, at: (u16, u16), to: (i32, i32)| {
@@ -2115,9 +2114,9 @@ mod tests {
         let (route, _) = routes(vec![talk.clone()], (3, 3), (4, 4));
         assert!(!route.contains(&(3, 3)), "a diagonal neighbour too: {route:?}");
         let (route, _) = routes(vec![talk], (4, 2), (6, 2));
-        assert!(route.contains(&(4, 2)), "two cells away: {route:?}");
+        assert!(!route.is_empty() && !route.contains(&(4, 2)), "two cells away: {route:?}");
         let (route, _) = routes(vec![], (3, 2), (4, 2));
-        assert_eq!(route, vec![(3, 2), (4, 2)], "no meeting waits for it");
+        assert!(!route.is_empty() && !route.contains(&(3, 2)), "no meeting waits for it: {route:?}");
     }
 
     /// The hero walks from (2, 2) to (8, 4) while army 2 (`attitude`) steps from (5, 2) to

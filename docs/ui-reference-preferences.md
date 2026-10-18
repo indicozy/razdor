@@ -35,3 +35,17 @@ visible through the darkened warning panel, which has corner decorations only.
 In battle, extend the left parchment and its separator to the window's bottom behind the
 autobattle buttons; reserve the original text area above those buttons. The exit artwork's
 thin frame follows its actual bounds, and the window height follows the artwork plus footer.
+
+## Reference details and quick actions (2026-10-19)
+
+The two exit windows share the battle-exit footer dimensions. Keep its first three
+buttons against the left and Cancel against the right, vertically centred in the footer.
+Draw held items after structural frames. Army hint strips contribute artwork only inside
+building/army windows: their enclosing structural grid owns the border exactly once.
+
+Quest and rumour lists on light parchment use the original mirrored side shape in gold
+(subtract RGB 32,40,192), separately from brown-paper decoration. Diary contents and entry
+panels keep their side ornaments and fine silver outlines but omit corner flourishes.
+Equipment cells are 55 original pixels scaled by 15/16, touch vertically in each pair,
+and retain their dark backing and silver outline beneath equipped items. The bottom
+command ribbon uses a one-native-pixel top edge.
