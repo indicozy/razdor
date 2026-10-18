@@ -642,6 +642,30 @@ reads the per-type table one entry off (the next type's value) and is always pla
 shipped data it is never shown. **code** (c2a4be, c2a7d8, c2a7eb, c2a837; see
 community-patches.md for the bleed and evasion rules themselves)
 
+**Panel geometry and the figure** (492f24, with X0, Y0 the panel's origin 6666b1 / 6666b5).
+The panel is filled from (X0 + 2, Y0 + 0x1d) to (X0 + 0x108, Y0 + 0x27e), 262 × 609 px; the
+Win-paper parchment (258 × 605, from its top left) goes 2 px inside it at (X0 + 4, Y0 + 0x1f),
+then the ornament overlay at (X0 + 8, Y0 + 0x23). The unit's figure (the type's picture,
+type +0xc / +0x10) is drawn at its own size with its alpha only (476a3c, clipped to the
+screen), its **picture** centred: x = X0 + (0x10a − w) / 2, y = Y0 + 0x1d + (0x1b4 − h) / 2.
+So the picture's middle stands across the panel's middle and 218 px under the fill's top
+whatever its height, centred in a 266 × 436 box; no figure is scaled or anchored to the top
+or to the text. Every shipped figure fits that box. The darkening under the text and the text
+itself are laid out afterwards from the panel's bottom. **code**
+
+**Item slots and templates** (492f24). The four worn-item slot buttons are set only when the
+card is neither a hire offer in a building's hire tab (68dc88 = 1, army ≠ 0) nor a template
+(the fourth argument). A filled slot shows its item's icon; an empty one shows the empty-slot
+picture ae2860 only outside battle (4ed424 = 0) and outside the building tabs 1 and 2. The
+filled slot's button has no background of its own: the item's picture with its alpha straight
+on the panel's parchment. ae2860 is built at start-up (4dbc26 onwards): a 55 px picture with a
+1 px ring whose colours are the first row of `SteelLine.lit` read clockwise from the top left
+(48d1d4 with colour −1), black inside, and its alpha ae2864 full on the ring and grey 0x66
+(about 40%) on the inner 53 px. So an empty slot is a darkened square with a thin steel edge. A
+hovered promotion portrait (4c39d8 → 4c3b5f for portrait 0, 4c3bc2 for 1–3) paints the type
+of that portrait (the unit's own, or the next type) as a template: a fresh unit record of the
+type, no item slots at all, the parchment painted over the slots the unit's card had. **code**
+
 ### 9.2 Item text (499eb0)
 
 The same builder fills the market's description (4b9c40), the inventory's description box
@@ -1381,6 +1405,7 @@ parity rule they are candidates to hide or remove, not bugs to copy.
 | 68 | Promotion animation | Matches (`items_view::Promo`): `Unit-Upgrade` on the click, the picked portrait empty with the fading green glow, effect 6 frames 0–15 on it for 500 ms then 16–49 eased down to the unit's portrait, the glow up on all portraits, the class changed 100 ms before the end and the glow down on the new tree, the card under the running `exp` strip, no input meanwhile; at the end nothing selected, the tree up, the panel on the promoted unit until a card is hovered. The time follows the original's portrait distance (1501 / 1746 ms), the path Razdor's own tree places | The same over the original's portraits (4b1a04) | 9.7 |
 | 69 | Name fields (the hero's name, the save's name) | Matches: held Backspace deletes again after 500 ms, then 30 a second (`widgets::repeats`) | One character per WM_KEYDOWN, the system's key repeat included (475748, 47a816) | 5 |
 | 70 | Figures inside buildings | Matches: the hero's and the armies' figures are not drawn while they stand in a building other than a bridge or cross from one building cell to another; gliding in from outside they are seen until the step ends (`World::hides_figure`, `Game::hero_hidden`, `Game::army_hidden`); their one-cell ring stays under the building | 0x497abc empties the drawn-occupant byte; rings are one cell in the Community exe (the vanilla ring round the whole building is a dead branch of 0x48eeb0) | 7.2 |
+| 73 | Unit panel item slots | Matches: an empty slot is the original's ae2860 (a steel ring from `SteelLine`'s first row over 40% black, `chrome::empty_item_slot`), a worn item its picture alone on the parchment. Not yet: a hovered promotion portrait's type card still shows the unit's slots | A template card (4c39d8, 492f24's fourth argument) sets no slot; empty slots show ae2860 outside battle and the building tabs 1 and 2 | 9.1 |
 | 74 | Event's own picture (a map's) | Matches: unscrambled ARGB4444, colour from the low 12 bits, alpha (A·17 >> 3)/31, 8/31 for a coloured pixel with A = 0 (`dtm::event_picture_rgba`); read as RGB565 until 2026-10-18 (orange noise on РК6's «Карта окрестностей», a player's report). The editor writes ARGB4444 too | 0x4d1693..0x4d1784 (outside the tutorial; the tutorial blits the words raw, 0x4d179b), colour table 0xae2b50 (0x4e3658), alpha 0x476a3c | 9.8 |
 | 75 | Main hall picture of a building kind without one | Matches: nothing drawn, the window's background shows (`building_view::main_hall`); Razdor drew its own sky, grass and the map sprite until 2026-10-18 (a player's report) | 0x4ba854 case 0 draws pictures only for types 1, 3–7, 10, 12; 0x4bb7c4 repaints the panel from the window surface | 9.8 |
 | 76 | New hero portraits | Matches (`chrome::hero_portrait`): the vignette off, the picked class ×1100/1024, the others grey copies shifted into blue or dark red with the vignette off again, at 16 bits. Razdor tinted them with one multiply colour until 2026-10-18 (a player's report: a flat wash with lifted darks) | 4d7d30, 4c1458 | 5 |

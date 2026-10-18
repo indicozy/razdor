@@ -1031,6 +1031,42 @@ pub fn silver_frame(r: Rect, width: f32) {
     draw_rectangle_lines(r.x + width, r.y + width, r.w - 2.0 * width, r.h - 2.0 * width, 1.0, SILVER_DARK);
 }
 
+/// The original's empty worn-item slot (0xae2860 with its alpha 0xae2864, built at start-up
+/// near 0x4dbc26): a 55 px square, black inside at alpha 0x66 (40%, 0x47650c fills the alpha
+/// 1..53 with grey 0x66), with a 1 px ring at full alpha whose colours run clockwise from the
+/// top left along the first row of `SteelLine.lit` (0x48d1d4 with colour −1 reads 0xae2538's
+/// row 0 at a running index: the top left to right, the right side down, the bottom right to
+/// left, the left side up). Drawn in `r`, the 55 px scaled to its width.
+pub fn empty_item_slot(r: Rect) {
+    const SIDE: f32 = 55.0;
+    let px = r.w / SIDE;
+    draw_rectangle(r.x + px, r.y + px, r.w - 2.0 * px, r.h - 2.0 * px, Color::new(0.0, 0.0, 0.0, 0x66 as f32 / 255.0));
+    let Some(t) = win("SteelLine") else {
+        draw_rectangle_lines(r.x, r.y, r.w, r.h, px.max(1.0), SILVER);
+        return;
+    };
+    // Each side takes the next 55 source pixels of the row, drawn along it from its start.
+    let sides = [
+        (vec2(r.x, r.y), vec2(r.x + r.w, r.y)),
+        (vec2(r.x + r.w, r.y), vec2(r.x + r.w, r.y + r.h)),
+        (vec2(r.x + r.w, r.y + r.h), vec2(r.x, r.y + r.h)),
+        (vec2(r.x, r.y + r.h), vec2(r.x, r.y)),
+    ];
+    for (n, (from, to)) in sides.into_iter().enumerate() {
+        let len = from.distance(to);
+        let angle = (to.y - from.y).atan2(to.x - from.x);
+        // The strip lies inside the square: shifted half its thickness inwards.
+        let inward = vec2(-(to - from).y, (to - from).x).normalize() * px / 2.0;
+        let mid = (from + to) / 2.0 + inward;
+        draw_texture_ex(&t, mid.x - len / 2.0, mid.y - px / 2.0, WHITE, DrawTextureParams {
+            dest_size: Some(vec2(len, px)),
+            source: Some(Rect::new(n as f32 * SIDE, 0.0, SIDE, 1.0)),
+            rotation: angle,
+            ..Default::default()
+        });
+    }
+}
+
 /// The window's close box; true when clicked.
 pub fn close_button(x: f32, y: f32, s: f32, red: bool) -> bool {
     let hover = super::widgets::mouse_in(x, y, s, s);
