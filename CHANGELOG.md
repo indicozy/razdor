@@ -14,6 +14,19 @@
 
 ## 0.4.35 — 2026-10-19
 
+Коммит `4daac76` (тег `v0.4.35`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+41164e837efc7e960909fc61057ee640e3dba995517dd29ead64e8963bcc7254  razdor
+f900556c480be29f5eac5ccc9d6a9345182aa8c8eba5b3860706b731b702e026  Razdor.exe
+451ffed5d64ede9ae92a3426624ac376a9b2bca16f512ba1006d1a8221865440  razdor-macos
+e3408a7f194d8765cc81371b66f657fed9bbccc4cb796d11f80aebd96f91f929  razdor-translate
+73b51c3ccf3bd6abe0818cdb2e521db0899993fa8a698f2ef645186b0fbd6774  Razdor-translate.exe
+c0fe2e4d75313a244e35632ca0aa87c8e41a1e380bb734658962deb686b1327c  razdor-translate-macos
+```
+
 ### Изменено
 
 - «Максимум» в кампании бережёт своих бойцов: если бой всё равно не выиграть (например, под
