@@ -6,7 +6,8 @@
 picks one action for the active unit; it never looks ahead except through `killable`. The
 same AI plays the enemy in the player's battles (unless he chose Razdor's «Максимум», §8),
 both sides of off-screen battles between AI armies (`src/rules/ai.rs`), the pre-simulation in
-`Battle::begin`, and, with two changes, the player's side in Razdor's auto-battle. The world-map AI that decides *whether* to fight is a
+`Battle::begin`, and, with two changes, the player's side in Razdor's auto-battle (with
+«Максимум» chosen, Max plays both sides of the auto-battle instead, §8). The world-map AI that decides *whether* to fight is a
 different thing: `docs/reference/original-mechanics/ai.md` §4 (simulated battles), §10 (AI
 against AI).
 
@@ -74,7 +75,8 @@ this ordering is why a seemingly equal choice differs between columns.
 Commit a375a60. `plan(hero = true)` applies to the player's units only: no `ai_retreat`, and
 a friendly caster with nothing to cast stays put. Everything else is the original's AI, and
 the enemy always plays by it (`hero_auto_battle_leaves_the_enemy_to_the_original_s_ai`). It
-is what Q (quick battle) and W (watch) use in `BattleView`; AI-vs-AI, the pre-simulation, the
+is what Q (quick battle) and W (watch) use in `BattleView` unless «Максимум» is chosen (then
+Max plays both sides there, §8 "Auto-battle"); AI-vs-AI, the pre-simulation, the
 difftests and the cheats use `auto_play_to_end` / `ai_step`.
 
 ## 5. Off-screen battles (world AI)
@@ -104,13 +106,16 @@ run the real-maps AI test (`src/rules/ai/real_maps.rs`, needs `RAZDOR_DT_DIR`).
 `hero_auto_battle_keeps_a_front_row_blesser_in_its_cell`,
 `hero_auto_battle_leaves_the_enemy_to_the_original_s_ai`, `real_armies_auto_battle_terminates`,
 `row2_the_battle_ais_never_bless_a_unit_twice_a_turn`.
+With «Максимум»: `max_plays_both_sides_of_the_watched_and_the_quick_battle` (`src/ui/battle_view.rs`),
+`max_plays_the_hero_s_side_of_the_quick_battle_better` (`src/rules/battle/max_ai/tests.rs`).
 
 ## 8. «Максимум» (Razdor extra, main only)
 
 The owner's request: a third battle AI strength, as strong as possible, for the computer's
 side of the battles the player plays. A deviation: never on `dt-original`, off by default;
 the original's AI above is untouched and still plays everything else (off-screen battles,
-the pre-simulation, the world AI's simulated battles, Q and W, the rollouts below).
+the pre-simulation, the world AI's simulated battles, the rollouts below). With Max chosen,
+the hero's auto-battle (Q, W) is Max's on both sides ("Auto-battle" below).
 
 ```
 BattleView::advance, every frame (Battle::max_ai set, a human plays the other side)  src/ui/battle_view.rs
@@ -208,8 +213,33 @@ BattleView::ai_move (computer's turn) → max_move → MaxThinker::poll(battle)
   iteration counts only when every root move completed. A node limit needs one thread (the
   tests' budgets are serial).
 
-UI: `BattleView` keeps the `MaxThinker` for the computer's side (`max_side`); a battle that is
-over or watched (W) stops its search. The clock pointer already shows while the computer's
+- **Auto-battle** (the 2026-10-18 reports; `BattleView::max_plays`, `Battle::max_play_to_end`):
+  before, Q and W fell back to the hero's auto-battle (the original's AI) on *both* sides
+  even with Max chosen, so the enemy got weaker the moment the player handed his side over
+  (Eisenwald: playing the same moves himself he lost to Max's garrison, watching he won) and
+  his own units were played by the original's AI (the owner: "it loses my units"). Now Max
+  plays every side the computer plays: W uses one `MaxThinker` per side (the acting side's
+  thinks ahead, the other rests); Q runs `Battle::max_play_to_end` at `MAX_QUICK_BUDGET` (a
+  node budget, so the same battle always ends the same way) on a worker thread, the window
+  standing still with the clock pointer until it lands (`BattleView::quick_waits`). Max's
+  model of the other side stays the original's AI (its rollouts), also when Max plays it.
+  Measured by `max_plays_the_hero_s_side_of_the_quick_battle_better` (`RAZDOR_MAX_ALL_SETS`:
+  the install's 128 positions, Max at 600 positions per decision), the player's wins and
+  worth left:
+
+  | player's side vs enemy | wins | worth left |
+  |---|---|---|
+  | hero's auto-battle vs original's AI (Q before, with or without Max) | 44 (34%) | 0.17 |
+  | hero's auto-battle vs Max (what the player's own side faced) | 35 (27%) | 0.14 |
+  | Max vs Max (Q and W now) | 54 (42%) | 0.27 |
+  | Max vs original's AI | 61 (48%) | 0.30 |
+
+  2000 positions per decision gave 55 wins and 0.27 at 2.7 times the time, so the quick
+  battle keeps 600 (about 0.8 s a battle on one loaded E-core). Max's search itself is
+  unchanged: against the original's AI it plays as before (`max_beats_the_original_on_real_armies`).
+
+UI: `BattleView` keeps a `MaxThinker` per side the computer plays (`max_side` names the one
+that thinks ahead now); a battle that is over stops its search. The clock pointer already shows while the computer's
 side acts; the frame never waits. Settings: «Сила ИИ в бою» in «Ещё…» (`main_menu::AiStrength`):
 «как в оригинале», «улучшенный» (the original's `OptValue9`, kept in sync with its checkbox) or
 «максимум (Раздор)» (`Settings::max_ai`, which implies the improved level for the base AI);

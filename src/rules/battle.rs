@@ -3390,7 +3390,7 @@ fn berserk(f: &Fighter) -> i32 {
 
 mod clone;
 mod max_ai;
-pub use max_ai::{MaxBudget, MaxControl, MaxMove, MaxPoll, MaxReport, MaxTables, MaxThinker, MAX_AI_BUDGET};
+pub use max_ai::{MaxBudget, MaxControl, MaxMove, MaxPoll, MaxReport, MaxTables, MaxThinker, MAX_AI_BUDGET, MAX_QUICK_BUDGET};
 
 #[cfg(test)]
 mod tests;

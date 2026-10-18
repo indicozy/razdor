@@ -16,7 +16,7 @@ use std::collections::VecDeque;
 use macroquad::prelude::*;
 
 use razdor::i18n::tr;
-use razdor::rules::battle::{ActionKind, Battle, EndReason, Fighter, Hit, MaxPoll, MaxThinker, Outcome, Preview, Step, Team, XpAward};
+use razdor::rules::battle::{patch_globals, set_patch_globals, ActionKind, Battle, EndReason, Fighter, Hit, MaxPoll, MaxThinker, Outcome, PatchGlobals, Preview, Step, Team, XpAward, MAX_QUICK_BUDGET};
 use razdor::av::Echo;
 use razdor::rules::content::{HeroClass, ItemId, Stat};
 use razdor::rules::custom::{Control, Session};
@@ -291,9 +291,14 @@ pub struct BattleView {
     /// The cards' curse and blessing signs by fighter: set as a magic or a blessing effect
     /// ends on the card, kept to the end of the battle (unit +0xc5 / +0xc9, 4b00c1).
     signs: Vec<Signs>,
-    /// Razdor's «Максимум» (the owner's request) for the computer's side: its searches run on
-    /// a worker thread ahead of the need, so the frame never waits (`MaxThinker`).
-    max: Option<MaxThinker>,
+    /// Razdor's «Максимум» (the owner's request) for each side the computer plays, by
+    /// [`Team::index`]: the enemy's, and while the player watches (W) his own too. Its
+    /// searches run on a worker thread ahead of the need, so the frame never waits
+    /// (`MaxThinker`).
+    max: [Option<MaxThinker>; 2],
+    /// The quick battle (Q) with «Максимум» played out on a worker: the battle at its end
+    /// and the patch's globals then. The window waits for it with the clock pointer.
+    quick: Option<std::sync::mpsc::Receiver<(Battle, PatchGlobals)>>,
     /// The battle's moment the last look ahead was for.
     pondered: Option<(usize, Option<usize>, i32, u32)>,
 }
@@ -452,7 +457,8 @@ impl BattleView {
             watch: false,
             speed: SPEED.with(|s| s.get()),
             custom: false,
-            max: None,
+            max: [None, None],
+            quick: None,
             pondered: None,
         }
     }
@@ -545,43 +551,94 @@ impl BattleView {
     /// Quick battle (Razdor extra): the rest of the battle is played at once by the battle AI
     /// on both sides, the hero's units by the hero's rules (`Battle::hero_auto_play_to_end`);
     /// the result box follows. While watching it skips to the end, with the result the
-    /// watching would have reached.
+    /// watching would have reached. With «Максимум» chosen, Max plays both sides
+    /// (`Battle::max_play_to_end`, the owner's and the players' reports, 2026-10-18): the
+    /// enemy as it plays against the player's own moves, the player's units by the same
+    /// search; that takes a while, so it runs on a worker and the window waits for it.
     fn quick_battle(&mut self) {
         self.fx = None;
         self.news = None;
+        self.rest_max();
+        if self.battle.max_ai() {
+            let (mut b, globals) = (self.battle.clone(), patch_globals());
+            let (tx, rx) = std::sync::mpsc::channel();
+            let spawned = std::thread::Builder::new().name("max-quick".into()).spawn(move || {
+                set_patch_globals(globals);
+                b.max_play_to_end(MAX_QUICK_BUDGET);
+                let _ = tx.send((b, patch_globals()));
+            });
+            if spawned.is_ok() {
+                self.quick = Some(rx);
+                return;
+            }
+        }
         self.battle.hero_auto_play_to_end();
         self.quick_played = true;
     }
 
-    /// One move of the AI for the active unit, whichever side it is on: the quick battle's
-    /// step ([`Battle::hero_auto_step`]), so a watched battle plays exactly as the instant one.
+    /// The quick battle on the worker has ended: its battle replaces the one on screen. True
+    /// while it still runs. A worker that failed leaves the quick battle to the original's AI.
+    fn quick_waits(&mut self) -> bool {
+        let Some(rx) = &self.quick else { return false };
+        match rx.try_recv() {
+            Err(std::sync::mpsc::TryRecvError::Empty) => return true,
+            Ok((b, globals)) => {
+                self.battle = b;
+                set_patch_globals(globals);
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.battle.hero_auto_play_to_end();
+            }
+        }
+        self.quick = None;
+        self.quick_played = true;
+        self.note_log();
+        false
+    }
+
+    /// One move of the AI for the active unit, whichever side it is on: «Максимум»'s when it
+    /// is chosen, else the quick battle's step ([`Battle::hero_auto_step`]), so a watched
+    /// battle plays exactly as the instant one.
     fn ai_move(&mut self) -> Option<Step> {
         let step = if self.max_plays() { self.max_move()? } else { self.battle.hero_auto_step() };
         self.note_log();
         step
     }
 
-    /// Razdor's «Максимум» plays the computer's unit to act: chosen, and a human plays the
-    /// other side (Q and W, the hero's auto-battle, keep the original's AI).
+    /// Razdor's «Максимум» plays the unit to act: chosen, and the computer plays its side
+    /// (the enemy's; while watching, the player's too: before the 2026-10-18 reports W and Q
+    /// left both sides to the original's AI, so the enemy turned easier as soon as the
+    /// player handed his side over).
     fn max_plays(&self) -> bool {
         let b = &self.battle;
-        b.max_ai() && !self.watching() && b.active().is_some_and(|a| !self.human(b.fighters[a].team))
+        b.max_ai() && b.active().is_some_and(|a| !self.human(b.fighters[a].team))
     }
 
-    /// The side «Максимум» plays: the computer's, when a human plays the other.
+    /// The side whose next decision «Максимум» thinks about now: the acting unit's when the
+    /// computer plays it, else (the player acts) the computer's side, after his expected reply.
     fn max_side(&self) -> Option<Team> {
-        let ai = Team::BOTH.into_iter().find(|&t| !self.human(t))?;
-        (self.battle.max_ai() && self.human(ai.other())).then_some(ai)
+        let b = &self.battle;
+        if !b.max_ai() || b.outcome() != Outcome::Ongoing {
+            return None;
+        }
+        let acting = b.fighters[b.active()?].team;
+        [acting, acting.other()].into_iter().find(|&t| !self.human(t))
+    }
+
+    /// Stops every search under way.
+    fn rest_max(&mut self) {
+        for m in self.max.iter_mut().flatten() {
+            m.rest();
+        }
     }
 
     /// «Максимум» looks ahead once per moment of the battle: its next decision starts on the
     /// worker as soon as the action before it is applied (during that action's animation),
-    /// or, while the player is to act, the one after his expected reply.
+    /// or, while the player is to act, the one after his expected reply. The other side's
+    /// thinker rests meanwhile (one search at a time).
     fn max_think_ahead(&mut self) {
-        let Some(side) = self.max_side().filter(|_| self.battle.outcome() == Outcome::Ongoing) else {
-            if let Some(m) = &mut self.max {
-                m.rest();
-            }
+        let Some(side) = self.max_side().filter(|_| self.quick.is_none()) else {
+            self.rest_max();
             return;
         };
         let now = Self::moment(&self.battle);
@@ -589,15 +646,18 @@ impl BattleView {
             return;
         }
         self.pondered = Some(now);
-        self.max.get_or_insert_with(|| MaxThinker::new(side)).think_ahead(&self.battle);
+        if let Some(m) = &mut self.max[side.other().index()] {
+            m.rest();
+        }
+        self.max[side.index()].get_or_insert_with(|| MaxThinker::new(side)).think_ahead(&self.battle);
     }
 
     /// «Максимум»'s move: `None` while its search for this position runs (the clock pointer
     /// shows meanwhile, the animations run on); then the move is played. A search for another
     /// position is dropped; a worker that failed leaves the move to the original's AI.
     fn max_move(&mut self) -> Option<Option<Step>> {
-        let side = self.max_side()?;
-        let t = self.max.get_or_insert_with(|| MaxThinker::new(side));
+        let side = self.battle.fighters[self.battle.active()?].team;
+        let t = self.max[side.index()].get_or_insert_with(|| MaxThinker::new(side));
         Some(match t.poll(&self.battle) {
             MaxPoll::Thinking => return None,
             MaxPoll::Ready(r) => self.battle.play_max_move(r.choice),
@@ -678,6 +738,11 @@ impl BattleView {
         }
 
         self.quick_played = false;
+        if self.quick_waits() {
+            // The quick battle with «Максимум» plays out on its worker: the battle stands
+            // still meanwhile, with the clock pointer and no input.
+            return (false, false);
+        }
         let ongoing = self.battle.outcome() == Outcome::Ongoing;
         // Esc opens the ways out, also while a strike or spell plays. The window opens on the
         // next frame, so the Esc that opened it does not also close it.
@@ -735,7 +800,7 @@ impl BattleView {
     /// it, and the watched one; while watching, its pace, the skip to the end and the way
     /// back to playing.
     fn controls(&mut self, l: &Layout, over: bool) {
-        if over || self.battle.outcome() != Outcome::Ongoing {
+        if over || self.battle.outcome() != Outcome::Ongoing || self.quick.is_some() {
             return;
         }
         let (q, gap) = (l.quick, 4.0 * l.k);
@@ -861,6 +926,9 @@ impl BattleView {
         let b = &self.battle;
         if self.exiting {
             return super::cursor::Shape::Arrow;
+        }
+        if self.quick.is_some() {
+            return super::cursor::battle_pointer(true, false, false);
         }
         // The pointer changes only as Battle_Step runs (the clock for the computer's turn
         // 0x4c5fee, the arrow for the player's 0x4c5ab0): while the battle's last action
@@ -1543,8 +1611,7 @@ mod tests {
     }
 
     /// «Максимум» thinks on a worker thread: asking never holds the frame, the answer is
-    /// played once it comes, and the battle reaches its end. Watching (W) leaves it to the
-    /// original's AI.
+    /// played once it comes, and the battle reaches its end.
     #[test]
     fn max_thinks_on_a_worker_and_the_frame_goes_on() {
         use std::time::{Duration, Instant};
@@ -1570,10 +1637,53 @@ mod tests {
         }
         assert_ne!(view.battle.outcome(), Outcome::Ongoing);
         assert!(answered > 0);
+    }
+
+    /// The 2026-10-18 reports: with «Максимум» chosen, W and Q kept the original's AI on both
+    /// sides, so the enemy played worse as soon as the player handed his side over, and the
+    /// player's units were played by the original's AI. Now Max plays both sides there: the
+    /// watched battle's every unit, and the quick battle on a worker, which ends as
+    /// `Battle::max_play_to_end` does and never holds the frame.
+    #[test]
+    fn max_plays_both_sides_of_the_watched_and_the_quick_battle() {
+        use std::time::{Duration, Instant};
         let mut watched = bandit_camp();
         watched.battle.set_max_ai(true);
         watched.toggle_watch();
-        assert!(!watched.max_plays());
+        assert!(watched.max_plays(), "watching: Max plays the player's units too");
+        let mut played = [0; 2];
+        let t0 = Instant::now();
+        while watched.battle.outcome() == Outcome::Ongoing && t0.elapsed() < Duration::from_secs(120) {
+            let team = watched.battle.fighters[watched.battle.active().unwrap()].team;
+            assert!(watched.max_plays());
+            watched.max_think_ahead();
+            match watched.ai_move() {
+                Some(_) => played[team.index()] += 1,
+                None => std::thread::sleep(Duration::from_millis(2)),
+            }
+        }
+        assert_ne!(watched.battle.outcome(), Outcome::Ongoing);
+        assert!(played[0] > 0 && played[1] > 0, "{played:?}");
+
+        let mut quick = bandit_camp();
+        quick.battle.set_max_ai(true);
+        let mut expected = quick.battle.clone();
+        let globals = patch_globals();
+        expected.max_play_to_end(MAX_QUICK_BUDGET);
+        set_patch_globals(globals);
+        let t = Instant::now();
+        quick.quick_battle();
+        assert!(t.elapsed() < Duration::from_millis(100), "the frame never waits for it");
+        assert!(quick.quick.is_some() && quick.battle.outcome() == Outcome::Ongoing);
+        let t0 = Instant::now();
+        while quick.quick_waits() {
+            assert!(t0.elapsed() < Duration::from_secs(120));
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(quick.quick_played);
+        assert_ne!(quick.battle.outcome(), Outcome::Ongoing);
+        assert_eq!(quick.battle.log, expected.log);
+        assert_eq!(quick.battle.player_results(), expected.player_results());
     }
 
     #[test]

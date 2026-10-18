@@ -222,7 +222,8 @@ fn max_finishes_every_battle() {
     }
 }
 
-/// The off-screen battles and the auto-battles never use Max, even with it chosen.
+/// The off-screen battles and `auto_play_to_end` never use Max, even with it chosen (the
+/// battle window's Q and W ask for it with `max_play_to_end` and its thinkers).
 #[test]
 fn only_the_interface_asks_for_max() {
     let (_, mut b) = synthetic_battles(1).remove(0);
@@ -865,4 +866,79 @@ fn round_robin_of_the_ai_levels() {
             );
         }
     }
+}
+
+/// Who plays a side of the hero's auto-battle (Q) in [`auto_battle`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Auto {
+    /// The hero's auto-battle without «Максимум» (`hero_auto_step`: the original's AI, the
+    /// player's units by the hero's rules).
+    Hero,
+    Max,
+}
+
+/// One quick battle: each side by `who`, Max at `budget` with its own tables per side.
+fn auto_battle(mut b: Battle, who: [Auto; 2], budget: MaxBudget) -> (Battle, Vec<Duration>) {
+    b.begin();
+    let tables = [MaxTables::default(), MaxTables::default()];
+    let mut times = Vec::new();
+    for _ in 0..AUTO_PLAY_STEPS {
+        let Some(id) = b.active() else { break };
+        let team = b.fighters[id].team;
+        if who[team.index()] == Auto::Max {
+            let r = b.max_choice_with(budget, Some(&tables[team.index()]), None).unwrap();
+            times.push(r.elapsed);
+            b.play_max_move(r.choice);
+        } else {
+            b.hero_auto_step();
+        }
+    }
+    (b, times)
+}
+
+/// The quick battle with «Максимум» chosen (the 2026-10-18 reports), at its own budget
+/// (`MAX_QUICK_BUDGET`), on the install's hero battles (with `RAZDOR_MAX_ALL_SETS` all its
+/// sets; else the demo's): the player's side by the hero's auto-battle (as before) or by
+/// Max, the enemy by Max (as when the player plays himself) and, with `RAZDOR_MAX_ALL_SETS`,
+/// by the hero's auto-battle (the original's AI) too. Prints the player's wins and worth
+/// left per pairing; against Max, Max on the player's side must win at least as often as
+/// the hero's auto-battle and keep at least as much.
+#[test]
+fn max_plays_the_hero_s_side_of_the_quick_battle_better() {
+    let all = std::env::var_os("RAZDOR_MAX_ALL_SETS").is_some();
+    let set: Battles = match real_sets() {
+        Some(sets) => sets.into_iter().take(if all { 3 } else { 1 }).flat_map(|(_, s)| s).collect(),
+        None => synthetic_battles(12),
+    };
+    let mut pairs = vec![[Auto::Hero, Auto::Max], [Auto::Max, Auto::Max]];
+    if all {
+        pairs.extend([[Auto::Hero, Auto::Hero], [Auto::Max, Auto::Hero]]);
+    }
+    let mut tally: Vec<(u32, f64, Vec<Duration>)> = vec![Default::default(); pairs.len()];
+    for (_, b) in &set {
+        for (k, who) in pairs.iter().enumerate() {
+            let (end, t) = auto_battle(b.clone(), *who, MAX_QUICK_BUDGET);
+            tally[k].0 += u32::from(end.outcome() == Outcome::Victory);
+            tally[k].1 += worth_left(&end, Team::Player);
+            tally[k].2.extend(t);
+        }
+    }
+    let n = set.len().max(1) as f64;
+    for (who, (wins, left, times)) in pairs.iter().zip(&mut tally) {
+        times.sort();
+        let at = |q: f64| times.get(((times.len() as f64 - 1.0) * q).round() as usize).copied().unwrap_or_default();
+        println!(
+            "player {:?} vs enemy {:?}: {} battles, player wins {wins} ({:.0}%), worth left {:.3}; Max's decisions median {:?}, 95% {:?}, all {:?}",
+            who[0],
+            who[1],
+            set.len(),
+            100.0 * *wins as f64 / n,
+            *left / n,
+            at(0.5),
+            at(0.95),
+            times.iter().sum::<Duration>()
+        );
+    }
+    assert!(tally[1].0 >= tally[0].0, "against Max, Max on the hero's side wins at least as often as the hero's auto-battle");
+    assert!(tally[1].1 >= tally[0].1, "and keeps at least as much");
 }
