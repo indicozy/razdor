@@ -176,6 +176,19 @@ interface ini), and three text boxes. Choosing a class redraws the portraits, sh
 texts and plays a 200 ms highlight animation that starts with `MainMenuPress` (4b2044).
 Cancel or Esc returns to the **main menu**, not to the scenario list. **code** (4c0fd4, 4c8584)
 
+**The portraits** (4d7d30, once per window build): each class picture (`Hero0`, `hero1`,
+`hero2`, loaded without alpha) loses a vignette (476790 mode 1: squares inset by i = 0..32 px
+filled with grey (32 − i)·2), is copied twice, and is then scaled ×1100/1024 (48da5c): that is
+the picked class's picture. Each copy is turned grey (48db5c, weights 100/200/100) and scaled
+and shifted per channel (48da5c): `65bcd8` (blue, another offered class) g·1300/1024 −
+(256, 80, 48), `65bce4` (dark red, a class the map leaves out) g·1600/1024 − (48, 176, 256);
+then the vignette comes off once more. All at 16 bits per pixel. 4c1458 draws the three.
+**code**
+
+**The name field** (edit box 65b2b0, 47ae5c): the text and a `|` caret after it, centred, in
+the font ae24a0 (Benguiat, (255, 255, 155)); the caret is always at the end and nothing is
+ever selected. **code**
+
 **A class the map does not offer cannot be picked.** Its portrait is drawn with the second
 greyed copy (`65bce4[i]`) and its enabled byte (portrait widget +0xd, `65bc01 + i·0x4b`) is
 0; the frame's hit test (4743c8) never reports a widget whose enabled byte is 0, so the
@@ -1329,6 +1342,8 @@ parity rule they are candidates to hide or remove, not bugs to copy.
 | 70 | Figures inside buildings | Matches: the hero's and the armies' figures are not drawn while they stand in a building other than a bridge or cross from one building cell to another; gliding in from outside they are seen until the step ends (`World::hides_figure`, `Game::hero_hidden`, `Game::army_hidden`); their one-cell ring stays under the building | 0x497abc empties the drawn-occupant byte; rings are one cell in the Community exe (the vanilla ring round the whole building is a dead branch of 0x48eeb0) | 7.2 |
 | 74 | Event's own picture (a map's) | Matches: unscrambled ARGB4444, colour from the low 12 bits, alpha (A·17 >> 3)/31, 8/31 for a coloured pixel with A = 0 (`dtm::event_picture_rgba`); read as RGB565 until 2026-10-18 (orange noise on РК6's «Карта окрестностей», a player's report). The editor writes ARGB4444 too | 0x4d1693..0x4d1784 (outside the tutorial; the tutorial blits the words raw, 0x4d179b), colour table 0xae2b50 (0x4e3658), alpha 0x476a3c | 9.8 |
 | 75 | Main hall picture of a building kind without one | Matches: nothing drawn, the window's background shows (`building_view::main_hall`); Razdor drew its own sky, grass and the map sprite until 2026-10-18 (a player's report) | 0x4ba854 case 0 draws pictures only for types 1, 3–7, 10, 12; 0x4bb7c4 repaints the panel from the window surface | 9.8 |
+| 76 | New hero portraits | Matches (`chrome::hero_portrait`): the vignette off, the picked class ×1100/1024, the others grey copies shifted into blue or dark red with the vignette off again, at 16 bits. Razdor tinted them with one multiply colour until 2026-10-18 (a player's report: a flat wash with lifted darks) | 4d7d30, 4c1458 | 5 |
+| 77 | Ability icons' background | Matches (`gfx::key_bottom_left_565`, `chrome::trait_icon`): the colour of the bottom-left pixel transparent at 16 bits, a mod's BMP icon (8 or 24 bits) included. Razdor keyed the shipped violet only until 2026-10-18 (a player's report: a mod's icon on a white square) | 48d02c, 48e8f0, 4764c0, 47669c, 47754c | 9 |
 
 ## Unknowns
 

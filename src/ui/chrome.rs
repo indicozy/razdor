@@ -35,16 +35,23 @@ pub enum Fx {
     Shade,
     /// Green and blue swapped (0x48dd40 with 1, 3, 2): the blue pill made the green one.
     SwapGreenBlue,
+    /// The colour of the bottom-left pixel is transparent, compared at 16 bits (the ability
+    /// icons, [`gfx::key_bottom_left_565`]).
+    KeyCorner,
     /// Red takes green, green takes blue, blue takes red (0x48dd40 with 2, 3, 1), then
     /// (0, 64, 128) taken off inside the 1 px edge (0x4768f8 subtracting over (1,1)–(w−1,h−1)):
     /// the green buttons made the defeat window's dark red ones with their silver rim (0x4dba90).
     RotateRgb,
+    /// The new-hero window's portraits ([`hero_portrait`]).
+    HeroPicked,
+    HeroOffered,
+    HeroLocked,
 }
 
 struct Chrome {
     dir: PathBuf,
     /// By path, then by [`Fx`] (its index).
-    textures: HashMap<String, [Option<Option<Texture2D>>; 7]>,
+    textures: HashMap<String, [Option<Option<Texture2D>>; 11]>,
     animations: HashMap<String, Option<Vec<Texture2D>>>,
     texts: Option<Option<Ini>>,
 }
@@ -146,10 +153,92 @@ pub fn transform(img: &mut Image, fx: Fx) {
                 let (r, g, b) = (p[0], p[1], p[2]);
                 p[..3].copy_from_slice(&[g, b, r]);
             }
+            Fx::KeyCorner | Fx::HeroPicked | Fx::HeroOffered | Fx::HeroLocked => {}
         }
     }
-    if fx == Fx::RotateRgb {
-        darken_inside_edge(img, [0, 64, 128]);
+    match fx {
+        Fx::RotateRgb => darken_inside_edge(img, [0, 64, 128]),
+        Fx::KeyCorner => gfx::key_bottom_left_565(img),
+        Fx::HeroPicked => hero_portrait(img, HeroPortrait::Picked),
+        Fx::HeroOffered => hero_portrait(img, HeroPortrait::Offered),
+        Fx::HeroLocked => hero_portrait(img, HeroPortrait::Locked),
+        _ => {}
+    }
+}
+
+/// Which of the new-hero window's three pictures of a class portrait (0x4d7d30).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HeroPortrait {
+    /// The picked class: the picture brightened (×1100/1024).
+    Picked,
+    /// Another class the map offers: the blue copy (`65bcd8`).
+    Offered,
+    /// A class the map leaves out: the dark red one (`65bce4`).
+    Locked,
+}
+
+/// The new-hero window's class portraits as the original builds them once, at 16 bits per
+/// pixel (0x4d7d30, for each of `Hero0`, `hero1`, `hero2`, loaded without their alpha by
+/// 0x48d02c):
+/// 1. the 160 × 160 vignette taken off the picture (0x476790 mode 1): squares inset by i px,
+///    i = 0..32, filled with grey `(32 − i)·2`, so the edge loses 64 and from 32 px in nothing;
+/// 2. two copies made of that (0x476594); the picture itself scaled by 1100/1024 (0x48da5c);
+/// 3. each copy turned grey, `(100 r + 200 g + 100 b) / 400` (0x48db5c), then scaled and
+///    shifted per channel (0x48da5c): the blue one `g·1300/1024 − (256, 80, 48)`, the dark one
+///    `g·1600/1024 − (48, 176, 256)`, each clamped to a byte, so black stays black and the
+///    light parts take the colour;
+/// 4. the vignette taken off each copy once more (0x476790 mode 1).
+///
+/// Every step reads the 16-bit pixel widened back to bytes (0x4763b8) and writes it through
+/// 0x476374's 5-6-5 tables.
+pub fn hero_portrait(img: &mut Image, which: HeroPortrait) {
+    let (w, h) = (img.width as i32, img.height as i32);
+    // 0x4763b8: a 5-bit channel shifted up by 3 gains its top bit once more; a 6-bit one not.
+    let widen = |p: &mut [u8]| {
+        let (r, g, b) = (p[0] >> 3 << 3, p[1] >> 2 << 2, p[2] >> 3 << 3);
+        p[0] = r + (r >> 7);
+        p[1] = g;
+        p[2] = b + (b >> 7);
+    };
+    let vignette = |x: i32, y: i32| {
+        // The squares are the original's 160 px; a picture of another size keeps that border.
+        let d = x.min(y).min(w - 1 - x).min(h - 1 - y).clamp(0, 32);
+        let mut grey = [((32 - d) * 2) as u8; 3];
+        widen(&mut grey);
+        grey
+    };
+    let take_vignette = |p: &mut [u8], x: i32, y: i32| {
+        let v = vignette(x, y);
+        for (c, v) in p[..3].iter_mut().zip(v) {
+            *c = c.saturating_sub(v);
+        }
+        widen(p);
+    };
+    for (n, p) in img.rgba.chunks_exact_mut(4).enumerate() {
+        let (x, y) = (n as i32 % w.max(1), n as i32 / w.max(1));
+        widen(p);
+        take_vignette(p, x, y);
+        let (k, shift) = match which {
+            HeroPortrait::Picked => {
+                for c in &mut p[..3] {
+                    *c = ((*c as i32 * 1100) >> 10).min(255) as u8;
+                }
+                widen(p);
+                p[3] = 255;
+                continue;
+            }
+            HeroPortrait::Offered => (1300, [-256, -80, -48]),
+            HeroPortrait::Locked => (1600, [-48, -176, -256]),
+        };
+        let grey = ((p[0] as i32 * 100 + p[1] as i32 * 200 + p[2] as i32 * 100) / 400).min(255) as u8;
+        p[..3].fill(grey);
+        widen(p);
+        for (c, s) in p[..3].iter_mut().zip(shift) {
+            *c = (((*c as i32 * k) >> 10) + s).clamp(0, 255) as u8;
+        }
+        widen(p);
+        take_vignette(p, x, y);
+        p[3] = 255;
     }
 }
 
@@ -1450,8 +1539,10 @@ pub fn badge(name: &str, cx: f32, cy: f32, size: f32, fallback: Color) {
 
 /// A trait icon (`Bonus<N>.lit`, `Bonus-2Row`, `HeroBonus<N>`), or a small shield.
 pub fn trait_icon(name: &str, x: f32, y: f32, size: f32) {
-    if let Some(t) = win(name) {
-        tex(&t, Rect::new(x, y, size, size), WHITE);
+    if let Some(t) = win_fx(name, Fx::KeyCorner) {
+        // The keyed pixels are transparent black: drawn premultiplied, the scaled picture's
+        // edge takes no colour from them.
+        premultiplied(|| tex(&t, Rect::new(x, y, size, size), WHITE));
     } else {
         let c = Color::new(0.25, 0.35, 0.75, 1.0);
         draw_rectangle(x + size * 0.15, y + size * 0.1, size * 0.7, size * 0.45, c);
@@ -1508,6 +1599,32 @@ pub fn paper_minus(r: Rect, from: (f32, f32), minus: [i32; 3]) {
 mod tests {
     use super::*;
 
+    /// The new-hero window's portraits (0x4d7d30, a player's report: Razdor's tint was a flat
+    /// wash with lifted darks): grey copies scaled and shifted per channel, so black stays
+    /// black and white takes the copy's colour; the vignette darkens the edge.
+    #[test]
+    fn the_hero_portraits_are_grey_copies_shifted_into_blue_and_dark_red() {
+        let make = |which, rgb: [u8; 3]| {
+            let mut img = Image { width: 160, height: 160, rgba: [rgb[0], rgb[1], rgb[2], 255].repeat(160 * 160) };
+            hero_portrait(&mut img, which);
+            (img.pixel(80, 80), img.pixel(0, 0), img.pixel(31, 80), img.pixel(32, 80))
+        };
+        let (mid, edge, inner, clear) = make(HeroPortrait::Offered, [255, 255, 255]);
+        // 250 grey: (250·1300 >> 10) − (256, 80, 48), at 5-6-5 levels.
+        assert_eq!(mid, [56, 232, 249, 255]);
+        assert_eq!(clear, mid, "from 32 px in the vignette takes nothing");
+        assert!(edge[1] < inner[1] && inner[1] < mid[1], "{edge:?} {inner:?}");
+        let (mid, ..) = make(HeroPortrait::Locked, [255, 255, 255]);
+        assert_eq!(mid, [249, 208, 129, 255], "(·1600 >> 10) − (48, 176, 256)");
+        for which in [HeroPortrait::Offered, HeroPortrait::Locked, HeroPortrait::Picked] {
+            let (mid, ..) = make(which, [0, 0, 0]);
+            assert_eq!(mid, [0, 0, 0, 255], "black stays black ({which:?})");
+        }
+        // The picked one keeps its colours, ×1100/1024.
+        let (mid, edge, ..) = make(HeroPortrait::Picked, [100, 50, 200]);
+        assert_eq!(mid, [96, 48, 209, 255]);
+        assert_eq!(edge, [32, 0, 145, 255], "64 off at the edge first");
+    }
     /// The card highlight as the original's pictures (4dc118) and pulse (4cd2a2): grey rings
     /// 255 − 24 per pixel less the state's colour; brightness 8..15..8 every 1.5 s. The
     /// original's "can act" cell at the top of its pulse read 239, 222, 197, 173… blue on a

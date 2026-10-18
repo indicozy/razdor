@@ -457,7 +457,10 @@ pub fn decode_spi(d: &[u8]) -> Result<Image, DtError> {
     Ok(Image { width: n as u32, height: n as u32, rgba })
 }
 
-/// An uncompressed 24- or 32-bit BMP (water frames, `Win-black.lit`). Alpha is always 255.
+/// An uncompressed BMP (water frames, `Win-black.lit`, a mod's pictures saved as BMP under a
+/// `.lit` name). Alpha is always 255. 24 and 32 bits per pixel, and 8 bits with a palette as
+/// the original's BMP loader reads them (0x47754c: the palette at 0x36, `biClrUsed` colours or
+/// 256 when 0, the pixels right after the palette, rows bottom-up padded to 4 bytes).
 pub fn decode_bmp(d: &[u8]) -> Result<Image, DtError> {
     if !d.starts_with(b"BM") {
         return Err(DtError::BadMagic { what: "BMP image" });
@@ -469,16 +472,38 @@ pub fn decode_bmp(d: &[u8]) -> Result<Image, DtError> {
     let (Some(w), Some(h), Some(bpp), Some(compression)) = (w, h, u16_at(d, 28), u32_at(d, 30)) else {
         return Err(DtError::Truncated { what: "BMP header", offset: 0 });
     };
-    if w <= 0 || h == 0 || !(bpp == 24 || bpp == 32) || compression != 0 {
-        return Err(bad("BMP (only uncompressed 24/32-bit)", 0));
+    if w <= 0 || h == 0 || !(bpp == 8 || bpp == 24 || bpp == 32) || compression != 0 {
+        return Err(bad("BMP (only uncompressed 8/24/32-bit)", 0));
     }
     let (w, top_down, h) = (w as usize, h < 0, h.unsigned_abs() as usize);
+    let mut rgba = Vec::with_capacity(w * h * 4);
+    if bpp == 8 {
+        // 0x47754c: the palette right after the 40-byte header, whatever bfOffBits says.
+        let colours = match u32_at(d, 0x2e).ok_or(DtError::Truncated { what: "BMP header", offset: 0 })? as usize {
+            0 => 256,
+            n => n.min(256),
+        };
+        let palette = d.get(0x36..0x36 + colours * 4).ok_or(DtError::Truncated { what: "BMP palette", offset: 0x36 })?;
+        let pixels = 0x36 + colours * 4;
+        let stride = w.div_ceil(4) * 4;
+        if pixels + stride * h > d.len() {
+            return Err(DtError::Truncated { what: "BMP pixels", offset: pixels });
+        }
+        for row in 0..h {
+            let src = if top_down { row } else { h - 1 - row };
+            for &i in &d[pixels + src * stride..][..w] {
+                // An index past the palette's colours reads as black.
+                let p = palette.get(i as usize * 4..i as usize * 4 + 3).unwrap_or(&[0, 0, 0]);
+                rgba.extend_from_slice(&[p[2], p[1], p[0], 255]);
+            }
+        }
+        return Ok(Image { width: w as u32, height: h as u32, rgba });
+    }
     let bytes = bpp as usize / 8;
     let stride = (w * bytes).div_ceil(4) * 4;
     if data_off + stride * h > d.len() {
         return Err(DtError::Truncated { what: "BMP pixels", offset: data_off });
     }
-    let mut rgba = Vec::with_capacity(w * h * 4);
     for row in 0..h {
         let src = if top_down { row } else { h - 1 - row };
         let line = &d[data_off + src * stride..][..w * bytes];
@@ -487,6 +512,40 @@ pub fn decode_bmp(d: &[u8]) -> Result<Image, DtError> {
         }
     }
     Ok(Image { width: w as u32, height: h as u32, rgba })
+}
+
+/// Rounds each pixel to the original's 16-bit surfaces: 5, 6 and 5 bits (0x476374 packs them
+/// from byte tables), widened back as the screen shows them.
+pub fn quantize_565(img: &mut Image) {
+    for p in img.rgba.chunks_exact_mut(4) {
+        let (r, g, b) = (p[0] >> 3, p[1] >> 2, p[2] >> 3);
+        p[0] = (r << 3) | (r >> 2);
+        p[1] = (g << 2) | (g >> 4);
+        p[2] = (b << 3) | (b >> 2);
+    }
+}
+
+/// A picture the original loads without its alpha and draws with a colour key. The ability
+/// icons (`Bonus<N>`, `Bonus-2Row`, `HeroBonus<N>`) are loaded by 0x48d02c, which frees the
+/// mask 0x48cd90 made, whatever the file (LIT or BMP, 0x47754c); the unit and hero windows put
+/// them into their text list by 0x48e8f0, which takes the 16-bit colour of the picture's
+/// bottom-left pixel (0x4764c0 at (0, h − 1)) and copies only the pixels of another colour
+/// (0x47669c). So any background (the shipped icons' violet, a mod's white BMP) is
+/// transparent, compared at 5-6-5 bits. The picture comes out at those levels, the keyed
+/// pixels transparent black.
+pub fn key_bottom_left_565(img: &mut Image) {
+    quantize_565(img);
+    let (w, h) = (img.width as usize, img.height as usize);
+    if w == 0 || h == 0 {
+        return;
+    }
+    let at = (h - 1) * w * 4;
+    let key = [img.rgba[at], img.rgba[at + 1], img.rgba[at + 2]];
+    for p in img.rgba.chunks_exact_mut(4) {
+        if p[..3] == key {
+            p.copy_from_slice(&[0, 0, 0, 0]);
+        }
+    }
 }
 
 /// Decode any graphics file by extension (`.ugs`, `.lit`, `.spi`, `.bmp`). `Objects.ugs` gives
@@ -975,6 +1034,61 @@ mod tests {
         assert_eq!(decode_lit(&b).unwrap(), img);
     }
 
+    /// A 3×2 8-bit BMP with a 2-colour palette (`biClrUsed` = 2), rows bottom-up padded to 4.
+    fn bmp8(pixels_bottom_up: [[u8; 3]; 2], palette: [[u8; 3]; 2]) -> Vec<u8> {
+        let mut b = b"BM".to_vec();
+        b.extend([0; 8]);
+        b.extend(999u32.to_le_bytes()); // bfOffBits: the original does not read it (0x47754c)
+        b.extend(40u32.to_le_bytes());
+        b.extend(3i32.to_le_bytes());
+        b.extend(2i32.to_le_bytes());
+        b.extend(1u16.to_le_bytes());
+        b.extend(8u16.to_le_bytes());
+        b.extend([0; 16]);
+        b.extend(2u32.to_le_bytes()); // biClrUsed at 0x2e
+        b.extend([0; 4]);
+        for [r, g, bl] in palette {
+            b.extend([bl, g, r, 0]);
+        }
+        for row in pixels_bottom_up {
+            b.extend(row);
+            b.push(0);
+        }
+        b
+    }
+
+    /// A mod's ability icon saved as an 8-bit BMP under a `.lit` name (a player's report):
+    /// the original's BMP loader reads it (0x47754c).
+    #[test]
+    fn an_8_bit_bmp_reads_through_its_palette() {
+        let b = bmp8([[0, 1, 0], [1, 1, 0]], [[255, 255, 255], [200, 30, 10]]);
+        let img = decode_lit(&b).unwrap();
+        assert_eq!((img.width, img.height), (3, 2));
+        assert_eq!(img.pixel(0, 0), [200, 30, 10, 255], "the top row is the last stored");
+        assert_eq!(img.pixel(2, 0), [255, 255, 255, 255]);
+        assert_eq!(img.pixel(1, 1), [200, 30, 10, 255]);
+        assert_eq!(img.pixel(0, 1), [255, 255, 255, 255]);
+    }
+
+    /// The ability icons' key (0x48e8f0 → 0x4764c0, 0x47669c): the bottom-left pixel's
+    /// 16-bit colour is transparent wherever it is, whatever it is (a mod's white, the shipped
+    /// violet); a colour that differs only below 5-6-5 precision is keyed too, one that differs
+    /// in it is not.
+    #[test]
+    fn ability_icons_key_their_bottom_left_colour_at_16_bits() {
+        let mut white = decode_bmp(&bmp8([[0, 1, 0], [1, 1, 0]], [[255, 255, 255], [200, 30, 10]])).unwrap();
+        key_bottom_left_565(&mut white);
+        assert_eq!(white.pixel(0, 1), [0, 0, 0, 0], "the corner itself");
+        assert_eq!(white.pixel(2, 0), [0, 0, 0, 0], "white elsewhere too");
+        assert_eq!(white.pixel(1, 0), [206, 28, 8, 255], "the symbol kept, at 5-6-5 levels");
+        let mut violet = Image { width: 2, height: 2, rgba: vec![129, 0, 127, 255, 133, 3, 120, 255, 128, 0, 127, 255, 137, 0, 127, 255] };
+        key_bottom_left_565(&mut violet);
+        assert_eq!(violet.pixel(0, 1), [0, 0, 0, 0]);
+        assert_eq!(violet.pixel(0, 0), [0, 0, 0, 0], "129 and 128 are one 5-bit red");
+        assert_eq!(violet.pixel(1, 0), [0, 0, 0, 0], "133, 3, 120: the same 5-6-5 colour");
+        assert_eq!(violet.pixel(1, 1)[3], 255, "137 is the next 5-bit red: kept");
+    }
+
     #[test]
     fn water_frame_names_and_clock() {
         assert_eq!(water_frame_file(0), "Graphics/Textures/Water/TEXTURE000.BMP");
@@ -1086,6 +1200,26 @@ mod tests {
     ("Graphics/Windows/DTSplashPBar.lit", 1, (666, 40), 139761721020, 139761721020, [641117, 641117, 641117, 4033196]),
     ];
     const EXPECTED_TOTAL_FRAMES: usize = 3059;
+
+    /// The shipped ability icons on their violet: keyed by their bottom-left pixel as the
+    /// original keys them (0x48e8f0), the background goes and the symbol stays.
+    #[test]
+    fn real_ability_icons_lose_their_background_to_the_corner_key() {
+        let Some(dt) = install() else { return };
+        let names = (1..=52).map(|n| format!("Graphics/Windows/Bonus{n}.lit")).chain((1..=3).map(|n| format!("Graphics/Windows/HeroBonus{n}.lit")));
+        for rel in names.chain(["Graphics/Windows/Bonus-2Row.lit".to_string()]) {
+            let mut img = dt.graphic(&rel).unwrap().swap_remove(0);
+            key_bottom_left_565(&mut img);
+            let n = img.rgba.len() / 4;
+            let clear = img.rgba.chunks_exact(4).filter(|p| p[3] == 0).count();
+            let violet = img.rgba.chunks_exact(4).filter(|p| p[3] != 0 && p[0] > 100 && p[1] < 40 && p[2] > 100).count();
+            assert!(clear * 8 > n, "{rel}: the background goes ({clear} of {n})");
+            assert!(clear * 10 < n * 9, "{rel}: the symbol stays ({clear} of {n})");
+            // A few icons keep some violet: their matte is not one 16-bit colour in the
+            // file (Bonus32, 34, 52), and the original keeps those pixels too.
+            assert!(violet * 5 < n, "{rel}: {violet} violet pixels left");
+        }
+    }
 
     #[test]
     fn real_files_match_reference_decoder() {

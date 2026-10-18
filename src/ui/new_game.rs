@@ -501,23 +501,24 @@ pub fn class_select(game: &mut Option<Game>, demo: &Arc<Content>, scenario: Opti
     }
     let mut pick = HERO.with(|h| h.get()).min(2);
     // The three heroes (0x4d7d30, 0x4c1458): the portraits 160 px square, 37 apart, 43 under
-    // the window's top. The picked one is drawn as it is; another offered class from its blue
-    // copy, a class the map leaves out from its dark one (65bcd8 / 65bce4). Under each the
-    // window's silver chain; under the picked one the name field instead.
+    // the window's top. The picked one is drawn from the brightened picture; another offered
+    // class from its blue copy, a class the map leaves out from its dark red one (65bcd8 /
+    // 65bce4; how they are made: `chrome::hero_portrait`, 0x4d7d30). Under each the window's
+    // silver chain; under the picked one the name field instead.
     let side = 150.0;
     let gap = (594.0 - 3.0 * side) / 4.0;
     for (i, hero) in HeroClass::ALL.into_iter().enumerate() {
         let r = win.rect(gap + i as f32 * (side + gap), 40.0, side, side);
         let hover = offered[i] && !input_blocked() && r.contains(crate::ui::widgets::pointer().into());
-        let tint = if i == pick {
-            WHITE
-        } else if offered[i] {
-            Color::new(0.25, 0.62, 1.0, 1.0)
+        let look = if !offered[i] {
+            chrome::Fx::HeroLocked
+        } else if i == pick {
+            chrome::Fx::HeroPicked
         } else {
-            Color::new(0.38, 0.3, 0.26, 1.0)
+            chrome::Fx::HeroOffered
         };
-        match chrome::win(["Hero0", "hero1", "hero2"][i]) {
-            Some(t) => chrome::tex(&t, r, tint),
+        match chrome::win_fx(["Hero0", "hero1", "hero2"][i], look) {
+            Some(t) => chrome::tex(&t, r, WHITE),
             None => assets.draw_portrait(hero.unit(), razdor::rules::battle::Team::Player, r),
         }
         chrome::silver_frame(r, 1.0);
@@ -695,7 +696,9 @@ fn leave_hero_window(next: Screen) -> Option<Screen> {
 /// Fills the name field as the original does on every opening of the window (0x4cff70):
 /// with `[NewHero] PrivateHeroName` as text, not as a hint. Start takes the field as it
 /// stands (0x4c10d9), so a name left untouched is that text («(нет имени)», or the name a
-/// mod writes there).
+/// mod writes there). As the original, the caret stands at its end and nothing is selected:
+/// its edit box (0x47ae5c) draws the text and the caret in the field's yellow, with no
+/// selection band.
 fn fill_name_field() {
     let name = own("NewHero", "PrivateHeroName", n_("(no name)"));
     screens::HERO_NAME.with(|n| *n.borrow_mut() = name);
