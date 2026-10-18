@@ -193,6 +193,8 @@ pub fn key(k: KeyCode) -> bool {
 thread_local! {
     /// The original's one held key (interface.md §2, 0x475748).
     static HELD_KEY: std::cell::Cell<Option<KeyCode>> = const { std::cell::Cell::new(None) };
+    /// The key the system's typematic repeats and when it went down ([`next_repeat`]).
+    static REPEAT_KEY: std::cell::Cell<Option<(KeyCode, f64)>> = const { std::cell::Cell::new(None) };
 }
 
 /// Once per frame, before the screens: the original keeps no key table, only the last key
@@ -201,7 +203,35 @@ thread_local! {
 pub fn track_held_key() {
     SWALLOWED.with(|s| s.set(false));
     let (pressed, released) = (get_keys_pressed(), get_keys_released());
-    HELD_KEY.with(|h| h.set(next_held(h.get(), pressed, !released.is_empty(), is_key_down)));
+    let (now, dt) = (get_time(), get_frame_time() as f64);
+    let repeat = REPEAT_KEY.with(|r| next_repeat(r.get(), pressed.iter().copied(), &released, now, is_key_down));
+    REPEAT_KEY.with(|r| r.set(repeat));
+    HELD_KEY.with(|h| h.set(repeated_held(next_held(h.get(), pressed, !released.is_empty(), is_key_down), repeat, now, dt)));
+}
+
+/// The key the system repeats after a frame's key events: the last key that went down, while
+/// it stays down (Windows' and X's typematic repeats only the newest key, and a key let go
+/// ends its repeat without passing it to another key still down). Alt and F10 aside, as the
+/// held key. The time is when it went down.
+fn next_repeat(repeat: Option<(KeyCode, f64)>, pressed: impl IntoIterator<Item = KeyCode>, released: &std::collections::HashSet<KeyCode>, now: f64, down: impl Fn(KeyCode) -> bool) -> Option<(KeyCode, f64)> {
+    if let Some(k) = pressed.into_iter().find(|&k| !matches!(k, KeyCode::LeftAlt | KeyCode::RightAlt | KeyCode::F10) && down(k)) {
+        return Some((k, now));
+    }
+    repeat.filter(|&(k, _)| !released.contains(&k) && down(k))
+}
+
+/// The held key once the system's repeats of this frame came in: the original's window
+/// procedure stores every WM_KEYDOWN as the held key without looking at the repeat bit
+/// (0x475820–0x475837), so a repeat makes its key held again after another key's release
+/// cleared it (0x475841: any WM_KEYUP clears the held key). Held Up, Right pressed, Up let
+/// go: the map stops, then scrolls right again from Right's first repeat (500 ms after it
+/// went down, Windows' default). Razdor took only the first press of a key (macroquad's
+/// pressed set leaves the repeats out), so there the map stayed stuck while Right was held.
+fn repeated_held(held: Option<KeyCode>, repeat: Option<(KeyCode, f64)>, now: f64, dt: f64) -> Option<KeyCode> {
+    match repeat {
+        Some((k, t0)) if repeats(now - t0, dt) > 0 => Some(k),
+        _ => held,
+    }
 }
 
 /// The held key after a frame's key events: any key up clears it, and a key that went down
@@ -1085,6 +1115,33 @@ mod tests {
         assert_eq!(next_held(Some(KeyCode::A), [KeyCode::B], true, |k| k == KeyCode::B), Some(KeyCode::B));
         // System keys are never held.
         assert_eq!(next_held(None, [KeyCode::LeftAlt], false, |_| true), None);
+    }
+
+    #[test]
+    fn the_system_repeat_holds_the_newest_key_again() {
+        use std::collections::HashSet;
+        let none = HashSet::new();
+        let dt = 1.0 / 60.0;
+        // Up held, Right pressed at 1.0 s, Up let go at 1.1 s: nothing held (0x475841).
+        let down = |k: KeyCode| k == KeyCode::Right;
+        let rep = next_repeat(Some((KeyCode::Up, 0.0)), [KeyCode::Right], &none, 1.0, |k| k == KeyCode::Right || k == KeyCode::Up);
+        assert_eq!(rep, Some((KeyCode::Right, 1.0)));
+        let up: HashSet<_> = [KeyCode::Up].into();
+        let rep = next_repeat(rep, [], &up, 1.1, down);
+        let held = repeated_held(next_held(Some(KeyCode::Right), [], true, down), rep, 1.1, dt);
+        assert_eq!(held, None, "the original stops the scroll too");
+        // Right's first repeat (500 ms after it went down) holds it again (0x475820).
+        assert_eq!(repeated_held(None, next_repeat(rep, [], &none, 1.3, down), 1.3, dt), None);
+        assert_eq!(repeated_held(None, next_repeat(rep, [], &none, 1.5, down), 1.5, dt), Some(KeyCode::Right));
+        // Right held, A tapped: the repeat is A's and ends with it; Right stays not held.
+        let both = |k: KeyCode| k == KeyCode::Right || k == KeyCode::A;
+        let rep = next_repeat(Some((KeyCode::Right, 0.0)), [KeyCode::A], &none, 2.0, both);
+        let a: HashSet<_> = [KeyCode::A].into();
+        let rep = next_repeat(rep, [], &a, 2.1, down);
+        assert_eq!(rep, None);
+        assert_eq!(repeated_held(None, next_repeat(rep, [], &none, 3.0, down), 3.0, dt), None);
+        // System keys never repeat into the held key.
+        assert_eq!(next_repeat(None, [KeyCode::LeftAlt], &none, 0.0, |_| true), None);
     }
 
     #[test]
