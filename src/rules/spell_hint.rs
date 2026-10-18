@@ -235,6 +235,33 @@ mod tests {
         assert!(!on_own_army(&s));
     }
 
+    /// The spell card of the report (2026-10-18) from the install, with its own labels: equal
+    /// melee and ranged defences read «Физическая защита» once per kind (0x49b63c), as the
+    /// original's screen shows it.
+    #[test]
+    fn real_install_spell_cards() {
+        let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+        let dir = std::path::Path::new(&dir);
+        let dt = crate::dt::install::DtInstall::load(dir).expect("install loads");
+        let path = crate::dt::install::find_path(dir, crate::dt::install::SETTINGS_FILE).expect("interface texts");
+        let ini = crate::dt::ini::Ini::from_cp1251(&std::fs::read(path).expect("read"));
+        let skills = ini.section("Skills").expect("[Skills]");
+        let label = |k: &'static str| skills.get(k).unwrap_or(k).to_string();
+        let spell = |name: &str| dt.spells.iter().find(|s| s.name == name).unwrap_or_else(|| panic!("{name}"));
+        assert_eq!(effect_text(spell("Доспехи Веры"), &label), "Физическая защита +10 Физическая защита +20% ");
+        // Every spell's text is built without a label the install lacks.
+        for s in &dt.spells {
+            let missing = std::cell::Cell::new(None);
+            effect_text(s, &|k| {
+                if skills.get(k).is_none() {
+                    missing.set(Some(k));
+                }
+                k.to_string()
+            });
+            assert_eq!(missing.get(), None, "{}", s.name);
+        }
+    }
+
     #[test]
     fn the_life_lost_line_needs_a_drain_and_the_spells_life_lose() {
         let mut s = testkit::spell(1, 10);

@@ -1137,7 +1137,7 @@ fn sanctuary(game: &mut Game, f: &Frame, view: &mut BuildingView, message: &mut 
     let card = at(f, 255.0, 55.0, 266.0, 103.0);
     let chosen = view.pick.and_then(|n| spells.get(n));
     match chosen {
-        Some(s) => super::spellbook::spell_card(game, s, card),
+        Some(s) => super::spellbook::spell_card(game, s, card, false),
         None => {
             chrome::text_box(card);
             text_centered(tr("Pick a spell from the list."), card.center().x, card.center().y, 16.0 * k, BOX_INK);

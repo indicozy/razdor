@@ -728,20 +728,30 @@ Quirks of the defence merging (**code**, read from the conditions; not seen on s
 
 **Spell card** (49bde4), used in the spell book (15 cards, 4d261c), the spell shop and the
 event dialog's spell tooltip (4cbd58). An empty book slot (no spell) shows an empty frame with
-a caption. Otherwise the background is the normal or the selected one, and outside battle a
-spell whose mana cost (after the Community Caster rule, c27448) is above the hero's mana gets
-the **cannot-afford** background instead. The 50×50 picture sits at (+6, +6); it is drawn
+a caption. Otherwise the background is the normal or the selected one, and, except on the
+sanctuary's tab (tab 4 at 68dc88, so the shop never tints), a spell whose mana cost (after the
+Community Caster rule, c27448) is above the hero's mana gets the **cannot-afford** background
+and the red fonts instead (49be19–49be42). The 50×50 picture sits at (+6, +6); it is drawn
 through a colour filter when the card is selected and affordable. The text starts at x + 108
 and is centred vertically in 112 px. **code**
 
 **Card text** (49ba84): the spell name; then, only if the spell has an effect text: an empty
 line, the effect text, a cost line (`Mana` and the cost, `Reading` and the casting time with
 `Hour`, both through c27448) and a duration line (`MomentaryEffect`, or `TimeOfEffect`, the
-hours and `Hours`). The effect text is blue for a spell on the own army (Target 1); when the
-hero cannot afford it the name, cost, duration and effect text are all in the red tint and the
-effect is not turned blue. Keys are read from the `Magic` section. **code**
+hours and `Hours`). Fonts, as 49bde4 passes them: the name in the white Benguiat ae2498, the
+effect text in the yellow SanSerif ae24c0 (white less 25, 25, 125), turned to the blue ae24cc
+(less 180, 70, 0) for a spell on the own army (Target 1, 49bb36), the cost and duration lines
+in the orange ae24c4; all with the shadow font ae24d8. When the hero cannot afford it the name
+is in the Benguiat ae24a4 and the effect, cost and duration in the red ae24c8, and the effect
+is not turned blue. Without an effect text (49bb0b) the card shows the name alone, no cost or
+duration. Each part is added to the text list as one paragraph, centred and word-wrapped by
+the list (47e46c: a greedy break at the last space that fits the width); there is no line
+break between effect entries, so «Доспехи Веры» («Физическая защита +10 Физическая защита
++20%») shows one entry per line only because two do not fit. Keys are read from the `Magic`
+section. **code**
 
-**Effect text** (49b63c), the same "label value " entries as items:
+**Effect text** (49b63c), the same "label value " entries as items (49b540: label, space,
+"+" for a positive value, the number, the suffix, space; nothing for 0):
 - DeltaFixedHits: label `CureHit` when it is 0 or more, `CurseHit` when negative.
 - DeltaPercentHits, with "%": its label is chosen by the sign of **DeltaFixedHits**, not its
   own (a spell with only a negative percentage is labelled as a heal). **code**
@@ -1391,7 +1401,7 @@ parity rule they are candidates to hide or remove, not bugs to copy.
 | 49 | Card stat strip | Labels match: "Pwr:" for a caster (attack kind 0x11) with no melee attack or outside the places 1–4, else "A:" with the larger attack (`unit_sheet::attack_piece`); the attack line blue when any of the three attacks is above, red when any is below; `Row2Def` on r in the back row as the original; colours against the start-of-battle value (none outside battle); D colour by the sum of both defences | "Pwr:" for a caster outside the front or with no melee, else "A:" with the larger attack; colours against the current value; D colour from one defence only | 9.5 |
 | 50 | Formation editing | Matches: presses as the original's, in the army window (`items_view::ArmySel`, `unit_drag::grid_press`; the deselection and the slide's end leave the right side as it was), the hire tab's hero grid and the garrison grids (a refused hero or named unit keeps the selection), `Card-Move` on every swap and slide, the army window's and hire tab's slides timed as 0x4b0c04. Extra: a card can also be dragged onto another cell (a press that swaps starts no drag) | Click to select, click another unit to swap at once, click an empty cell to slide there; acts on the press; the hero may go anywhere | 9.6 |
 | 51 | Item text | Matches (`rules::item_text`, `ui::item_text`): name, usage line, empty line, description, the "label value " entries with the original's labels, prefixes, merging and quirks, the `GetBonus "name"` line, fonts and centring; the market's picture above the text. Differs: the market and inventory lists' side margin is Razdor's 16 px; a text too tall for its box is drawn smaller (the original's list cuts it) | Name, usage line by type and school, description, then "label value" entries with "=" (f-), "+" (d-), "%" (p-), potion heal/revive rules, defence merging with its lost-value quirks, the bonus line | 9.2 |
-| 52 | Spell text | Effect summary, school, mana and casting time, duration and target | Name, effect entries (heal/curse label by the sign of DeltaFixedHits, AB = AS and DB = DS merged), `Mana`/`Reading`, duration; red when unaffordable, blue for own-army spells | 9.3 |
+| 52 | Spell text | Matches: the book, the sanctuary and the event tooltip draw the original's card text (`spellbook::card_text`): the effect entries of 49b63c (`spell_hint::effect_text`, the install's `[Skills]` labels) word-wrapped as one paragraph, yellow or blue by target, cost and duration orange, all red when unaffordable outside the sanctuary, the name alone without an effect | Name, effect entries (heal/curse label by the sign of DeltaFixedHits, AB = AS and DB = DS merged), `Mana`/`Reading`, duration; red when unaffordable, blue for own-army spells | 9.3 |
 | 53 | Pack scrolling | Matches: the wheel and the bar run to the row holding the cell after the last used one (`items_view::pack_rows`: in 5 columns `length div 5 − 4` rows), so an item can be put one row past the end | Scroll bar over `max(0, length div 5 − 4)` rows of the used part, rounded | 9.7 |
 | 54 | Army window right side | Matches: the pack with nothing or the hero selected, the promotion tree for any other unit, every portrait locked as the original's (grey, dark brown, vignette: `chrome::lock_portrait`) when the unit is at its first level or of a final class, no note under it; the "Lv" labels and the arrows' colours are Razdor's | Pack when nothing or the hero is selected, the promotion tree for any other unit (every portrait greyed, browned and vignetted when it cannot be promoted) | 9.7 |
 | 55 | Panel icon hover | (see row 42) | A hint box with the icon's name only when hints are on; nothing otherwise | 6, 10 |
