@@ -809,7 +809,7 @@ pub fn restore(meta: &SaveMeta, mut game: Game, demo: Arc<Content>, install: Opt
         (None, _) => {}
         (Some(_), None) => return Err(SaveError::Mismatch(tr("events saved for the demo").into())),
     }
-    let (rng, music) = Rng::save_load_with_music(game.world.map.w, &plants, armies);
+    let (rng, idle_offsets, music) = Rng::save_load_draws(game.world.map.w, &plants, armies);
     game.rng = rng;
     game.music_wait = Some(90_000 + music as u32);
     game.event_rng = EventRng::from_clock();
@@ -824,6 +824,8 @@ pub fn restore(meta: &SaveMeta, mut game: Game, demo: Arc<Content>, install: Opt
     game.origin = Some(meta.scenario.clone());
     // The AI is set up again on every load (0x4a1ff0 from the save loader).
     game.ai_init(meta.version >= 4);
+    // The offsets the load drew (after the AI's set-up, which clears the records).
+    game.set_idle_offsets(&idle_offsets);
     // Saves from before the units' spell slots: the army-wide spells go into the slots.
     if meta.version < 7 {
         migrate_spells(&mut game);

@@ -724,7 +724,13 @@ impl Game {
         g.spells = start.spells;
         g.archetype = archetype_of(hero);
         g.script = Some(Box::new(EventEngine::new(scenario)));
+        // The armies' idle offsets of the map load (0x4b4b43), drawn after the plant jitter
+        // from a generator the load then resets to 1 (engine.md §3.2).
+        let (w, h) = (scenario.header.width as i32, scenario.header.height as i32);
+        let plants = super::rng::plant_layer(w, h, scenario.objects.iter().map(|o| (o.x as i32, o.y as i32, o.class, o.sprite)));
+        let idle_offsets = Rng::map_load_idle_offsets(w, &plants, scenario.armies.len());
         g.ai_init(false);
+        g.set_idle_offsets(&idle_offsets);
         // The AI's set-up adds the player's castles' and forts' income to his stored income
         // too (0x4a1ff0). The original seems to add it again on top of a saved value after a
         // load (economy.md, Unknowns); Razdor adds it at the map's start only.

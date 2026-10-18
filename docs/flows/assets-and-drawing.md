@@ -94,6 +94,17 @@ other than a bridge, or crossing between building cells; gliding in from outside
 until the step ends). Its one-cell ring (`draw_mark`) stays, under the building picture. The
 minimap is `src/ui/minimap.rs`.
 
+Map figures (`draw_figure`) are drawn premultiplied (`chrome::premultiplied`): the sheets hold
+premultiplied colour, as the original's ONE / INVSRCALPHA blend reads them (0x4c9ef6); the
+Ghost's glow is light with alpha 0, invisible under straight alpha. Standing armies animate
+while the map is idle (no walk, no wait): `idle_sprite_frame` takes the frame from
+`src/rules/idle.rs` (`idle_frame`: the figure's 20-step table at 250 ms; `ship_idle_frame`;
+`hero_ship_idle_frame` for the hero's galley at rest) by the wall clock since the army's stamp,
+with its offset `AiMind::idle_offset`. The offsets come from the loads
+(`Rng::map_load_idle_offsets`, `Rng::save_load_draws`) and the stop (`Game::armies_snap`, which
+also counts `idle_restarts`); `stamp_idle` stamps each army at the first frame drawn and again when
+its restart count changes, and `MapView::forget_shows` drops the stamps of the last game.
+
 ## Sound and music
 
 - `src/dt/sound.rs`: `SoundTable::from_ini` (`_Sounds.ini`: `[Backgrounds]` music keys,
