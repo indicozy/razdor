@@ -494,7 +494,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     let edge = o.max(1.0);
     let title_h = (26.0 * chrome::k()).round();
     chrome::silver_frame(Rect::new(x + 3.0 * o, y + title_h + 3.0 * o, w - 6.0 * o, h - title_h - 64.0 * o), edge);
-    chrome::silver_frame(Rect::new(x + 2.0 * o, y + h - 58.0 * o, w - 4.0 * o, 56.0 * o), edge);
+    chrome::three_block_frame(Rect::new(x, y, w, h), title_h, h - 58.0 * o, 2.0 * o);
     let top = y + EVENT_BOX_TOP * o;
     let mut cy = top;
     match &d.picture {
@@ -689,7 +689,7 @@ fn draw_village_event(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Optio
     let body = Rect::new(x + 4.0 * o, y + 31.0 * o, w - 8.0 * o, h - 89.0 * o);
     let footer = Rect::new(x + 2.0 * o, y + h - 55.0 * o, w - 4.0 * o, 53.0 * o);
     chrome::silver_frame(body, o.max(1.0));
-    chrome::silver_frame(footer, o.max(1.0));
+    chrome::three_block_frame(Rect::new(x, y, w, h), 26.0 * chrome::k(), h - 55.0 * o, 2.0 * o);
     let top = y + 45.0 * o;
     if let Some(t) = picture {
         let r = Rect::new(x + 18.0 * o, top, pw, ph.min(panel_h));

@@ -1229,8 +1229,8 @@ pub fn shadow_right(s: &str, rx: f32, y: f32, size: f32, color: Color) {
 /// Palette of the placeholder style (and of text drawn over the original's art).
 pub const CREAM: Color = Color::new(0.96, 0.91, 0.76, 1.0);
 pub const GOLD: Color = Color::new(1.0, 0.82, 0.42, 1.0);
-pub const SILVER: Color = Color::new(0.80, 0.80, 0.84, 1.0);
-pub const SILVER_DARK: Color = Color::new(0.30, 0.31, 0.34, 1.0);
+pub const SILVER: Color = Color::new(0.75, 0.74, 0.75, 1.0);
+pub const SILVER_DARK: Color = Color::new(0.30, 0.30, 0.30, 1.0);
 pub const BLUE_TEXT: Color = Color::new(0.45, 0.70, 1.0, 1.0);
 pub const RED_TEXT: Color = Color::new(1.0, 0.33, 0.25, 1.0);
 pub const ORANGE_TEXT: Color = Color::new(1.0, 0.70, 0.25, 1.0);
@@ -1404,10 +1404,40 @@ pub fn surface_alpha(r: Rect, skin: Skin, alpha: f32) {
     tile(&noise_texture(), r, 2.0, Color::new(lift(base.r), lift(base.g), lift(base.b), alpha));
 }
 
-/// The silver edge of windows and panels (outer light line, inner dark line).
+/// Original metallic line, kept inside the panel and sampled at the UI's native scale.
+pub fn silver_line(from: Vec2, to: Vec2, width: f32) {
+    let delta = to - from;
+    let len = delta.length();
+    if len <= 0.0 { return; }
+    let width = width.max(1.0);
+    let Some(t) = win("SteelLine") else {
+        draw_line(from.x, from.y, to.x, to.y, width, SILVER);
+        return;
+    };
+    let scale = k();
+    let direction = delta / len;
+    let angle = delta.y.atan2(delta.x);
+    let mut offset = 0.0;
+    while offset < len {
+        let span = (t.width() * scale).min(len - offset);
+        let mid = from + direction * (offset + span / 2.0);
+        draw_texture_ex(&t, mid.x - span / 2.0, mid.y - width / 2.0, WHITE, DrawTextureParams {
+            dest_size: Some(vec2(span, width)),
+            source: Some(Rect::new(0.0, 0.0, span / scale, 1.0)),
+            rotation: angle,
+            ..Default::default()
+        });
+        offset += span;
+    }
+}
+
+/// Thin picture/panel outline; the artwork supplies the metallic shading itself.
 pub fn silver_frame(r: Rect, width: f32) {
-    draw_rectangle_lines(r.x, r.y, r.w, r.h, width, SILVER);
-    draw_rectangle_lines(r.x + width, r.y + width, r.w - 2.0 * width, r.h - 2.0 * width, 1.0, SILVER_DARK);
+    let w = width.max(1.0);
+    silver_line(vec2(r.x, r.y + w / 2.0), vec2(r.right(), r.y + w / 2.0), w);
+    silver_line(vec2(r.right() - w / 2.0, r.y), vec2(r.right() - w / 2.0, r.bottom()), w);
+    silver_line(vec2(r.right(), r.bottom() - w / 2.0), vec2(r.x, r.bottom() - w / 2.0), w);
+    silver_line(vec2(r.x + w / 2.0, r.bottom()), vec2(r.x + w / 2.0, r.y), w);
 }
 
 /// The original's empty worn-item slot (0xae2860 with its alpha 0xae2864, built at start-up
@@ -1495,7 +1525,7 @@ fn title_bar_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bo
             tex(&t2, Rect::new(right, r.y + (r.h - h) / 2.0, w, h), tint);
         }
     }
-    draw_line(r.x, r.y + r.h, r.x + r.w, r.y + r.h, 1.0 * k, SILVER);
+    silver_line(vec2(r.x, r.bottom()), vec2(r.right(), r.bottom()), 2.0 * k);
     let color = title_color.unwrap_or(if skin == Skin::Red { GOLD } else { CREAM });
     let room = if ornate { r.w - 300.0 * k } else { r.w - 2.0 * r.h - 8.0 * k };
     super::dt_font::with_face(face, || {
@@ -1521,6 +1551,41 @@ pub fn window_with_title_color(r: Rect, title: &str, skin: Skin, closable: bool,
     window_styled(r, title, skin, closable, true, Some(color))
 }
 
+/// The battle exit window uses the artwork's own pixel scale for its title and nested frames.
+pub fn battle_exit_frame(r: Rect, title: &str, px: f32) -> bool {
+    BIGGEST.with(|b| {
+        if b.get().is_none_or(|old| old.w * old.h < r.w * r.h) { b.set(Some(r)); }
+    });
+    if let Some(t) = win_scaled("Win-red", [1024; 3], [-20, -40, -100]) {
+        tile(&t, r, px, WHITE);
+    } else {
+        surface(r, Skin::Red);
+    }
+    for (name, right) in [("Corner-Left", false), ("Corner-Right", true)] {
+        if let Some(t) = win_fx(name, Fx::KeyBlack) {
+            let (w, h) = (t.width() * px, t.height() * px);
+            let x = if right { r.right() - w - px } else { r.x + px };
+            tex(&t, Rect::new(x, r.y + 2.0 * px, w, h), Color::new(1.0, 0.30, 0.0, 1.0));
+        }
+    }
+    let yellow = Color::from_rgba(255, 255, 155, 255);
+    let face = super::dt_font::Face::Subtitle;
+    let size = super::dt_font::sheet_size(face, px);
+    super::dt_font::with_face(face, || shadow_centered(title, r.center().x, r.y + 19.0 * px, size, yellow));
+    close_button(r.right() - 23.0 * px, r.y + 3.0 * px, 20.0 * px, true)
+}
+
+/// Three adjacent rectangular sections share solid borders of exactly the same thickness.
+/// Draw after their backgrounds so pictures cannot cover the separators or side edges.
+pub fn three_block_frame(r: Rect, title_height: f32, footer_top: f32, thickness: f32) {
+    let t = thickness.max(1.0);
+    for y in [r.y, r.y + title_height, r.y + footer_top, r.bottom() - t] {
+        silver_line(vec2(r.x, y + t / 2.0), vec2(r.right(), y + t / 2.0), t);
+    }
+    silver_line(vec2(r.x + t / 2.0, r.y), vec2(r.x + t / 2.0, r.bottom()), t);
+    silver_line(vec2(r.right() - t / 2.0, r.bottom()), vec2(r.right() - t / 2.0, r.y), t);
+}
+
 fn window_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bool, title_color: Option<Color>) -> (Rect, bool) {
     let k = k();
     BIGGEST.with(|b| {
@@ -1532,7 +1597,7 @@ fn window_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bool,
     surface(r, skin);
     let tb = (26.0 * k).round();
     let closed = title_bar_styled(Rect::new(r.x, r.y, r.w, tb), title, skin, closable, ornate, title_color);
-    silver_frame(r, (1.5 * k).max(1.0));
+    silver_frame(r, (2.0 * k).max(1.0));
     // Each caller draws the frames for its own content and footer.
     (Rect::new(r.x + 2.0 * k, r.y + tb + 1.0, r.w - 4.0 * k, r.h - tb - 3.0 * k), closed)
 }

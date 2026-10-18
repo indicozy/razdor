@@ -65,6 +65,7 @@ impl Win {
         let (w, h) = (594.0 * k, 482.0 * k);
         let r = Rect::new((screen_width() - w) / 2.0, (190.0 * k).min(screen_height() - h), w, h);
         let (_, closed) = chrome::window(r, title, chrome::Skin::Marble, true);
+        chrome::three_block_frame(r, 26.0 * k, 432.0 * k, 2.0 * k);
         (Win { r, k }, closed)
     }
 
@@ -450,6 +451,12 @@ fn listed_chapters<'a>(scenarios: &[ScenarioEntry], g: &'a Group) -> &'a [usize]
     if e.scenario.campaign_name.trim() == title(e).trim() { &[] } else { &g.chapters }
 }
 
+/// Next always starts the selected campaign at its first scenario. Selecting a chapter only
+/// changes the highlighted row; it does not change the campaign entry point.
+fn campaign_start(groups: &[Group], picked: usize) -> Option<usize> {
+    groups.get(picked).map(|g| g.first)
+}
+
 /// How far each line of the description box moves the next one down: the name's lines 20 px,
 /// the last with 12 px more under it, the description's 14 px.
 fn desc_steps(title_rows: usize, rows: usize, k: f32) -> Vec<f32> {
@@ -644,7 +651,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         let frame = win.rect(290.0, 36.0, 295.0, 162.0);
         draw_rectangle(frame.x, frame.y, frame.w, frame.h, BLACK);
         // The frame's opening: the map's own picture (it is made for it), else the terrain.
-        let inner = Rect::new(frame.x + 8.0 * k, frame.y + 8.0 * k, frame.w - 16.0 * k, frame.h - 16.0 * k);
+        let inner = Rect::new(frame.x + 11.0 * k, frame.y + 11.0 * k, frame.w - 22.0 * k, frame.h - 22.0 * k);
         let pic = picture(i, e);
         match (&pic, preview(i, e)) {
             (Some(p), _) => chrome::tex(p, inner, WHITE),
@@ -658,6 +665,8 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         if let Some(t) = chrome::win_fx("MapImageFrame", chrome::Fx::KeyBlack) {
             chrome::tex(&t, frame, WHITE);
         }
+        chrome::silver_frame(frame, k);
+        chrome::silver_frame(inner, k);
         // Under it the description box (0x4d2a30, 65ae00): the name centred in white (ae2498,
         // 0x4c1b4b), the description in the bold SanSerif's orange (ae24f4 over ae2510,
         // 0x4c1bb4), from the box's top.
@@ -734,7 +743,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         RULES_OPEN.with(|p| p.set(true));
         return None;
     }
-    let selected_map = PICKED_MAP.with(|p| p.get()).or_else(|| list.get(picked).map(|g| g.first));
+    let selected_map = campaign_start(&list, picked);
     if (win.button(369.0, 116.0, &own("Buttons", "Next", n_("Next")), can) || (can && key(KeyCode::Enter))) && next.is_none() {
         cue(Cue::Button);
         next = selected_map.map(|i| Screen::ClassSelect { scenario: Some(i) });
@@ -1215,5 +1224,12 @@ mod tests {
             ],
             "names match without case or extension; a loop and a missing map end the chain; an unreached later map is left out"
         );
+    }
+
+    #[test]
+    fn next_starts_a_campaign_at_its_first_scenario_even_if_a_chapter_was_selected() {
+        let campaign = Group { first: 3, chapters: vec![3, 4, 5] };
+        assert_eq!(campaign_start(&[campaign], 0), Some(3));
+        assert_eq!(campaign_start(&[], 0), None);
     }
 }

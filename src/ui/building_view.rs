@@ -381,7 +381,7 @@ fn main_hall(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingVie
 fn quest_section_frame(panel: Rect, list: Rect) {
     let bottom = list.y + list.h;
     chrome::silver_frame(Rect::new(panel.x, panel.y, panel.w, bottom - panel.y), chrome::k().max(1.0));
-    draw_line(panel.x + 1.0, list.y, panel.x + panel.w - 1.0, list.y, chrome::k().max(1.0), chrome::SILVER);
+    chrome::silver_line(vec2(panel.x + 1.0, list.y), vec2(panel.right() - 1.0, list.y), chrome::k().max(1.0));
 }
 
 /// The quests and rumours under the main hall's picture; they remain available from every
@@ -1914,8 +1914,7 @@ fn village_window(game: &mut Game, view: &BuildingView, message: &mut Option<Str
         chrome::tex(&t, picture, WHITE);
     }
     chrome::silver_frame(picture, o.max(1.0));
-    let footer = Rect::new(x + 2.0 * o, y + 461.0 * o, w - 4.0 * o, h - 463.0 * o);
-    chrome::silver_frame(footer, o.max(1.0));
+    chrome::three_block_frame(Rect::new(x, y, w, h), (26.0 * chrome::k()).round(), 460.0 * o, 2.0 * o);
     let size = (15.0 * o).round();
     let line_h = (17.0 * o).round();
     // The original's texts here are Benguiat's tints (0x4dbb0c fonts ae24a0..ae24ac).
