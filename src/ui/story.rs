@@ -27,23 +27,13 @@ pub fn event_title(game: &Game, id: EventId) -> String {
     game.event_title(id)
 }
 
-/// An event's own picture: `width`, `height` (u16 each) and 16-bit pixels, taken as RGB565
-/// *(guess, dtm-format.md §9)*.
+/// An event's own picture, decoded as the original draws it (ARGB4444, 0x4d1693;
+/// `dtm::event_picture_rgba`).
 fn custom_picture(data: &[u8]) -> Option<Texture2D> {
-    let w = u16::from_le_bytes([*data.first()?, *data.get(1)?]);
-    let h = u16::from_le_bytes([*data.get(2)?, *data.get(3)?]);
-    let px = data.get(4..4 + 2 * w as usize * h as usize)?;
+    let (w, h, rgba) = razdor::dt::dtm::event_picture_rgba(data)?;
     if w == 0 || h == 0 {
         return None;
     }
-    let rgba: Vec<u8> = px
-        .chunks_exact(2)
-        .flat_map(|p| {
-            let v = u16::from_le_bytes([p[0], p[1]]);
-            let (r, g, b) = ((v >> 11) & 31, (v >> 5) & 63, v & 31);
-            [(r * 255 / 31) as u8, (g * 255 / 63) as u8, (b * 255 / 31) as u8, 255]
-        })
-        .collect();
     let tex = Texture2D::from_rgba8(w, h, &rgba);
     tex.set_filter(FilterMode::Nearest);
     Some(tex)

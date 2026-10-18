@@ -523,8 +523,9 @@ pub fn is_quest(s: &Scenario, id: u16) -> bool {
 /// Side of an event picture (the shipped one is 128 × 128).
 pub const PICTURE_SIDE: u16 = 128;
 
-/// An event picture from RGBA pixels: scaled (nearest) to 128 × 128 and stored as the map
-/// keeps it: u16 width, u16 height, then 16-bit RGB565 pixels, little-endian.
+/// An event picture from RGBA pixels: scaled (nearest) to 128 × 128 and stored as the game
+/// reads it: u16 width, u16 height, then 16-bit ARGB4444 pixels, little-endian, opaque
+/// (0x4d1693; `dtm::event_picture_rgba`).
 pub fn picture_from_rgba(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
     if width == 0 || height == 0 || rgba.len() < (width * height * 4) as usize {
         return None;
@@ -538,7 +539,7 @@ pub fn picture_from_rgba(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>
             let (sx, sy) = (x * width / side, y * height / side);
             let i = ((sy * width + sx) * 4) as usize;
             let (r, g, b) = (rgba[i] as u16, rgba[i + 1] as u16, rgba[i + 2] as u16);
-            let v = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+            let v = 0xF000 | ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
             out.extend(v.to_le_bytes());
         }
     }
@@ -714,14 +715,14 @@ mod tests {
     }
 
     #[test]
-    fn pictures_are_rgb565() {
+    fn pictures_are_argb4444() {
         // 2 × 1: red, blue; scaled to 128 × 128 the left half is red.
         let rgba = [255, 0, 0, 255, 0, 0, 255, 255];
         let p = picture_from_rgba(2, 1, &rgba).unwrap();
         assert_eq!(p.len(), 4 + 128 * 128 * 2);
         assert_eq!(picture_size(&p), Some((128, 128)));
-        assert_eq!(&p[4..6], &0xF800u16.to_le_bytes());
-        assert_eq!(&p[4 + 127 * 2..4 + 128 * 2], &0x001Fu16.to_le_bytes());
+        assert_eq!(&p[4..6], &0xFF00u16.to_le_bytes());
+        assert_eq!(&p[4 + 127 * 2..4 + 128 * 2], &0xF00Fu16.to_le_bytes());
         assert!(picture_from_rgba(0, 1, &[]).is_none());
         assert!(picture_size(&p[..10]).is_none());
     }

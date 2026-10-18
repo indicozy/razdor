@@ -562,4 +562,28 @@ mod tests {
         let pictures: usize = dt.maps.iter().map(|m| m.load().unwrap().events.iter().filter(|e| e.custom_picture.is_some()).count()).sum();
         assert_eq!(pictures, 1);
     }
+
+    /// РК6's «Карта окрестностей» (event 6) has the only event picture of the shipped maps:
+    /// a 128 × 128 map drawn as ARGB4444 (0x4d1693). Read so, it is a mostly opaque green and
+    /// brown map; read as RGB565 it was orange noise (a player's report).
+    #[test]
+    fn rk6_the_neighbourhood_map_decodes_as_argb4444() {
+        let Some(dt) = install() else { return };
+        let Some(m) = dt.maps.iter().find(|m| m.name.starts_with("РК6")) else { return };
+        let s = m.load().unwrap();
+        let (id, e) = s.events.iter().enumerate().find(|(_, e)| e.custom_picture.is_some()).unwrap();
+        assert_eq!(id + 1, 6);
+        assert!(e.title.starts_with("Карта окрестностей"), "{}", e.title);
+        let (w, h, rgba) = crate::dt::dtm::event_picture_rgba(e.custom_picture.as_ref().unwrap()).unwrap();
+        assert_eq!((w, h, rgba.len()), (128, 128, 128 * 128 * 4));
+        let px: Vec<&[u8]> = rgba.chunks_exact(4).collect();
+        let opaque = px.iter().filter(|p| p[3] >= 230).count();
+        assert!(opaque * 10 >= px.len() * 9, "mostly opaque: {opaque}");
+        // A map of land: green above red on average, and neighbours alike (no noise).
+        let mean = |c: usize| px.iter().map(|p| p[c] as f64).sum::<f64>() / px.len() as f64;
+        assert!(mean(1) > mean(0), "green {} red {}", mean(1), mean(0));
+        let jump: f64 = px.windows(2).map(|q| (q[0][1] as f64 - q[1][1] as f64).abs()).sum::<f64>() / px.len() as f64;
+        // ARGB4444 gives 21.9 (a map with roads and marks), RGB565 59.6.
+        assert!(jump < 35.0, "smooth: {jump}");
+    }
 }
