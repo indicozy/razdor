@@ -14,6 +14,19 @@
 
 ## 0.4.34 — 2026-10-18
 
+Коммит `3bff27a` (тег `v0.4.34`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+f1b4f10defb9f38ca724b7637ff6666e390e567df0b82e5b821150f53a90ad2a  razdor
+e4c74496863b97a9181011450caabc7bded38d931e9d3206bf8cb7b23b143b46  Razdor.exe
+d7e9ae0fdb160d30ee78b27a4a9e518387687832aab397992cc7486778f38b75  razdor-macos
+8e5627e2205b92eb369aa3d314b984069238e2825cefcb93d3d5561c8fdfe7f0  razdor-translate
+36fd46f1f6d79abe294f4420fb7665c0ad363cce93d17a26adbfeac02534e735  Razdor-translate.exe
+db0c76934977e845906bde45aee2588a616627f338ccd4548f8427e569bde90b  razdor-translate-macos
+```
+
 ### Добавлено
 
 - Чит `routes` в консоли (~): мини-карта показывает пути вражеских армий и куда они идут;
