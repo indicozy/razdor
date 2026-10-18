@@ -122,6 +122,9 @@ which hold the glyph metrics), small frames, check boxes and "…Alpha" masks. A
 LIT files, used as a mask for the matching colour file (M).
 
 `Windows/Win-black.lit` is actually a plain 24-bit BMP (480×480) with the wrong extension. The decoder handles this.
+The original's picture loader (0x48cd90) picks the format by the first byte (`B`: BMP through 0x47754c, `L`: LIT), so a
+mod may save any `Windows/*.lit` as a BMP. 0x47754c reads 8-bit (palette at 0x36, `biClrUsed` colours or 256, pixels
+right after it) and 24-bit BMPs, bottom-up, without alpha; it ignores `bfOffBits`. (code)
 
 ### What's where
 - `Textures/*.lit`: world-map terrain textures, **256×242** (detail.lit 256×256). They tile seamlessly

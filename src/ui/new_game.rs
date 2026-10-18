@@ -537,21 +537,22 @@ pub fn class_select(game: &mut Option<Game>, demo: &Arc<Content>, scenario: Opti
     }
     let mut pick = HERO.with(|h| h.get()).min(2);
     // The three heroes (0x4d7d30, 0x4c1458): the portraits 160 px square, 37 apart, 43 under
-    // the window's top. The picked one is drawn as it is; another offered class from its blue
-    // copy, a class the map leaves out from its dark one (65bcd8 / 65bce4). Under each the
-    // window's silver chain; under the picked one the name field instead.
+    // the window's top. The picked one is drawn from the brightened picture; another offered
+    // class from its blue copy, a class the map leaves out from its dark red one (65bcd8 /
+    // 65bce4; how they are made: `chrome::hero_portrait`, 0x4d7d30). Under each the window's
+    // silver chain; under the picked one the name field instead.
     for (i, hero) in HeroClass::ALL.into_iter().enumerate() {
         let r = win.rect(38.0 + i as f32 * 197.0, 42.0, 160.0, 160.0);
         let (hover, down, pressed) = button_state(r, offered[i]);
-        let tint = if !offered[i] {
-            Color::new(1.0, 0.24, 0.10, 1.0)
+        let look = if !offered[i] {
+            chrome::Fx::HeroLocked
         } else if i == pick {
-            WHITE
+            chrome::Fx::HeroPicked
         } else {
-            Color::new(0.22, 0.58, 1.0, 1.0)
+            chrome::Fx::HeroOffered
         };
-        match chrome::win(["Hero0", "hero1", "hero2"][i]) {
-            Some(t) => chrome::tex(&t, r, tint),
+        match chrome::win_fx(["Hero0", "hero1", "hero2"][i], look) {
+            Some(t) => chrome::tex(&t, r, WHITE),
             None => assets.draw_portrait(hero.unit(), razdor::rules::battle::Team::Player, r),
         }
         chrome::silver_frame(r, 1.0);
@@ -714,11 +715,12 @@ fn leave_hero_window(next: Screen) -> Option<Screen> {
 /// Fills the name field as the original does on every opening of the window (0x4cff70):
 /// with `[NewHero] PrivateHeroName` as text, not as a hint. Start takes the field as it
 /// stands (0x4c10d9), so a name left untouched is that text («(нет имени)», or the name a
-/// mod writes there). Razdor's choice (a player's wish): that text is selected, so the first
-/// key typed replaces it; the original keeps it with the caret at its end (0x47ae5c).
+/// mod writes there). As the original, the caret stands at its end and nothing is selected:
+/// its edit box (0x47ae5c) draws the text and the caret in the field's yellow, with no
+/// selection band (a player's report; it once opened with the text selected, in blue).
 fn fill_name_field() {
     let name = own("NewHero", "PrivateHeroName", n_("(no name)"));
-    screens::HERO_EDIT.with(|e| e.set(super::text_edit::TextEdit::all(&name)));
+    screens::HERO_EDIT.with(|e| e.set(super::text_edit::TextEdit::at_end()));
     screens::HERO_NAME.with(|n| *n.borrow_mut() = name);
 }
 
@@ -772,10 +774,12 @@ mod tests {
         assert_eq!(name, own("NewHero", "PrivateHeroName", n_("(no name)")), "the last game's name is gone; the field holds the text itself");
         assert!(!name.is_empty(), "a name left untouched is that text, not an empty one");
         let mut ed = screens::HERO_EDIT.with(|e| e.get());
-        assert_eq!(ed.selected(&name), name, "all of it selected (Razdor's choice)");
+        ed.fit(&name);
+        assert!(!ed.has_selection(), "nothing selected, no blue band (0x47ae5c)");
+        assert_eq!(ed.caret, name.chars().count(), "the caret after the text");
         let mut typed = name.clone();
         assert!(ed.type_chars(&mut typed, &['И'], 24));
-        assert_eq!(typed, "И", "the first key replaces the default name");
+        assert_eq!(typed, format!("{name}И"), "a key typed goes after the default name, as the original");
     }
 
     /// The list's order (0x4e21d8): the tutorial first, then by map width; one size keeps

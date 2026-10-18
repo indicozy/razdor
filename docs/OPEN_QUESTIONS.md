@@ -155,10 +155,8 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   load and save windows centred over the map (saves.rs `book_top`) and the question's Yes/No at
   0.24 W / 0.76 W (dialog.rs `question_buttons_x`) are parity; port them to dt-original.
 
-- **Menus (group 5 of the UI audit, 2026-10-14), approximations left.** (1) The new-hero
-  window's other portraits: the original builds them from the picture with 0x48db5c(100, 200,
-  100) and 0x48da5c colour shifts plus a 33-step vignette mask (0x4d7d30); Razdor tints with
-  one multiply colour. (2) The exit window: the standard window's size (`ae2520`) is taken as
+- **Menus (group 5 of the UI audit, 2026-10-14), approximations left.** ((1), the new-hero
+  portraits, is settled below.) (2) The exit window: the standard window's size (`ae2520`) is taken as
   634×512 from the screenshots, and the version line's place on `S_Exit_RUS` (which widget of
   6750c0…675690 draws it, and where) is measured, not read. (3) Maps of one size in the new
   game list keep Razdor's file order; the original's is its directory listing's. (4) The load
@@ -221,6 +219,11 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   button's own size.
 
 ## Settled
+
+- **The new-hero window's portraits** (2026-10-14, settled 2026-10-18 by a player's report).
+  Razdor tinted them with one multiply colour; now they are built as 0x4d7d30 builds them:
+  the 33-step vignette off, the picked one ×1100/1024, the others grey (0x48db5c) shifted into
+  blue or dark red (0x48da5c) with the vignette off again (`chrome::hero_portrait`).
 
 - **The market lists' backing from PR #8** (2026-10-17). PR 63f7c0b drew the market's names
   and prices on a 25% black overlay taken from screenshots. The code (0x4d9e33, 0x4d9ee5:

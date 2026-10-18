@@ -42,7 +42,12 @@ install file ──► src/dt/gfx.rs decode_file ──► gfx::Image (RGBA, not
 - **UGS** (`decode_ugs`): sprite sequences of 16-bit pixels (`ugs_pixel`); `Objects.ugs`
   has its own record layout (`decode_objects_ugs`, `ObjectSprite`, `ObjectSprites`).
 - **SPI** (`decode_spi`, editor icons) and **BMP** (`decode_bmp`, water frames; some
-  `.lit` files are really BMPs).
+  `.lit` files are really BMPs, and a mod may save its pictures so). 8-bit BMPs are read
+  through their palette as the original's loader reads them (0x47754c), 24 and 32 bits as
+  they are.
+- `gfx::quantize_565` rounds a picture to the original's 16-bit surfaces;
+  `gfx::key_bottom_left_565` keys a picture loaded without alpha by its bottom-left pixel's
+  16-bit colour, as the original draws the ability icons (0x48e8f0).
 - Install locations as constants: `UNIT_PORTRAITS`, `UNIT_FIGURES`, `ITEM_ICONS`,
   `MAP_OBJECTS`, `TERRAIN_TEXTURES`, `WATER_FRAMES` / `water_frame_file`.
 
@@ -50,7 +55,8 @@ install file ──► src/dt/gfx.rs decode_file ──► gfx::Image (RGBA, not
 
 - `chrome::art(rel, fx)` decodes a file once and caches the texture per path and per
   `chrome::Fx` (Plain, KeyBlack, Glow, Grey, Shade, SwapGreenBlue, ShadeStrong,
-  KeyPurple). `chrome::win(name)` = `Graphics/Windows/<name>.lit` drawn plainly with its own
+  KeyCorner for the ability icons, HeroPicked / HeroOffered / HeroLocked for the new-hero
+  window's portraits, `chrome::hero_portrait`, 0x4d7d30). `chrome::win(name)` = `Graphics/Windows/<name>.lit` drawn plainly with its own
   alpha. Prefer `Fx::Plain`: a black key was once used to hide the decoder's sign bug and
   ate dark pixels (commit 66d29ff).
 - A map event's own picture is unscrambled ARGB4444 (`dtm::event_picture_rgba`, 0x4d1693;
@@ -185,7 +191,11 @@ The original finds a unit's and an ability's pictures as follows, and Razdor doe
 - **Ability icons.** `Windows/Bonus<N>.lit` for N = 1…52, N being the bonus's place among the
   52 names the unit loader knows (0x48efd0); a missing file is a blank 25×25 picture in the
   original (0x4dca8f–0x4dcb13). New bonus *names* are not possible: an unknown `Bonus=` is no
-  bonus. A mod changes an icon by replacing the `Bonus<N>.lit` of an existing bonus.
+  bonus. A mod changes an icon by replacing the `Bonus<N>.lit` of an existing bonus, as a
+  LIT or as a BMP under that name (0x48cd90 picks the loader by the first byte). The icons
+  are loaded without their alpha (0x48d02c) and drawn with the colour of their bottom-left
+  pixel transparent, compared at 16 bits (0x48e8f0 → 0x4764c0, 0x47669c), so a mod's white
+  background goes as the shipped violet does (`chrome::trait_icon`, `Fx::KeyCorner`).
 
 ## How to add a picture
 
