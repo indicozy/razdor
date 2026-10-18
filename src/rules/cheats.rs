@@ -40,6 +40,10 @@ pub struct CheatState {
     /// none in older saves.
     #[serde(default)]
     pub peace: bool,
+    /// `routes`: the minimap shows where the enemy armies are heading ([`routes`]); none in
+    /// older saves.
+    #[serde(default)]
+    pub routes: bool,
 }
 
 impl CheatState {
@@ -69,10 +73,11 @@ pub enum Cheat {
     Speed(u32),
     Noclip,
     Peace,
+    Routes,
 }
 
 /// The commands for `help`: (name and arguments, what it does).
-pub const COMMANDS: [(&str, &str); 17] = [
+pub const COMMANDS: [(&str, &str); 18] = [
     ("help", n_("this list")),
     ("gold N", n_("gives N gold (a negative N takes it)")),
     ("mana N", n_("gives N mana (a negative N takes it)")),
@@ -90,6 +95,7 @@ pub const COMMANDS: [(&str, &str); 17] = [
     ("speed N", n_("the hero walks N times faster (1: normal)")),
     ("noclip", n_("on / off: the hero walks through anything to any cell")),
     ("peace", n_("on / off: enemy armies do not attack or chase the hero")),
+    ("routes", n_("on / off: the minimap shows the enemy armies' routes and where they head")),
 ];
 
 /// Why a line is not a command.
@@ -163,6 +169,7 @@ pub fn parse(line: &str) -> Result<Cheat, ParseError> {
         "speed" => Cheat::Speed(number(1, MAX_SPEED as i64)? as u32),
         "noclip" => none().map(|_| Cheat::Noclip)?,
         "peace" => none().map(|_| Cheat::Peace)?,
+        "routes" => none().map(|_| Cheat::Routes)?,
         _ => return Err(ParseError::Unknown(word.to_string())),
     })
 }
@@ -379,8 +386,35 @@ fn run_on_game(cheat: &Cheat, game: &mut Game) -> Result<Done, String> {
             game.cheats.peace = !game.cheats.peace;
             Done::line(if game.cheats.peace { tr("Peace on: enemy armies leave the hero alone.") } else { tr("Peace off.") }.into())
         }
+        Cheat::Routes => {
+            game.cheats.routes = !game.cheats.routes;
+            Done::line(if game.cheats.routes { tr("Routes on: the minimap (M) shows where the enemy armies are heading.") } else { tr("Routes off.") }.into())
+        }
         Cheat::Help | Cheat::Win | Cheat::Lose | Cheat::God => unreachable!("run handles it"),
     })
+}
+
+/// An enemy army's route for the `routes` cheat: the cell it stands on, then the cells of
+/// the path its AI planned (`Army::path`, the original's path buffer, `rules::ai`), the last
+/// one being where it heads.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Route {
+    pub from: (i32, i32),
+    pub path: Vec<(i32, i32)>,
+}
+
+impl Route {
+    /// Where the army heads: its path's last cell.
+    pub fn destination(&self) -> (i32, i32) {
+        self.path.last().copied().unwrap_or(self.from)
+    }
+}
+
+/// The routes of the hostile armies that have a path, for the `routes` cheat (fog or not:
+/// it is a cheat).
+pub fn routes(game: &Game) -> Vec<Route> {
+    let map = &game.world.map;
+    game.world.armies.iter().filter(|a| a.hostile() && !a.path.is_empty()).map(|a| Route { from: a.tile(map), path: a.path.clone() }).collect()
 }
 
 #[cfg(test)]
@@ -422,7 +456,9 @@ mod tests {
         assert_eq!(parse("noclip 1"), Err(ParseError::Usage("noclip")));
         assert_eq!(parse("Peace"), Ok(Cheat::Peace));
         assert_eq!(parse("peace now"), Err(ParseError::Usage("peace")));
-        assert_eq!(COMMANDS.len(), 17);
+        assert_eq!(parse("Routes"), Ok(Cheat::Routes));
+        assert_eq!(parse("routes on"), Err(ParseError::Usage("routes")));
+        assert_eq!(COMMANDS.len(), 18);
         for (u, _) in COMMANDS {
             let name = u.split(' ').next().unwrap();
             assert!(!matches!(parse(name), Err(ParseError::Unknown(_))), "{name} is a command");
@@ -601,6 +637,29 @@ mod tests {
     }
 
     #[test]
+    fn routes_switch_on_and_show_the_enemies_planned_paths() {
+        let mut g = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        assert!(g.world.armies.len() >= 2, "the demo has gangs");
+        cheat(&mut g, "routes").unwrap();
+        assert!(g.cheats.routes && g.cheats.used);
+        let map = g.world.map.clone();
+        for a in &mut g.world.armies {
+            a.path.clear();
+        }
+        let from = g.world.armies[0].tile(&map);
+        g.world.armies[0].attitude = -3;
+        g.world.armies[0].path = vec![(from.0 + 1, from.1), (from.0 + 2, from.1 + 1)];
+        g.world.armies[1].attitude = 3;
+        g.world.armies[1].path = vec![(1, 1)];
+        let r = routes(&g);
+        assert_eq!(r, vec![Route { from, path: vec![(from.0 + 1, from.1), (from.0 + 2, from.1 + 1)] }], "a friend's route is not shown");
+        assert_eq!(r[0].destination(), (from.0 + 2, from.1 + 1));
+        cheat(&mut g, "routes").unwrap();
+        assert!(!g.cheats.routes, "a second routes switches it off");
+        assert!(help().iter().any(|l| l.starts_with("routes")), "help lists it");
+    }
+
+    #[test]
     fn the_mark_is_saved() {
         let mut g = game();
         g.set_origin(crate::rules::save::ScenarioRef::Demo);
@@ -608,8 +667,9 @@ mod tests {
         cheat(&mut g, "god").unwrap();
         cheat(&mut g, "noclip").unwrap();
         cheat(&mut g, "peace").unwrap();
+        cheat(&mut g, "routes").unwrap();
         let back = crate::rules::save::tests::roundtrip(&g, g.content.clone(), None);
-        assert_eq!(back.cheats, CheatState { used: true, god: true, speed: 2, noclip: true, peace: true });
+        assert_eq!(back.cheats, CheatState { used: true, god: true, speed: 2, noclip: true, peace: true, routes: true });
         assert!(crate::rules::save::meta_of(&g, crate::rules::save::SaveKind::Manual, "x").unwrap().cheats);
     }
 }
