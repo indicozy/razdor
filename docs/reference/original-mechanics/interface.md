@@ -404,6 +404,42 @@ Tooltip box: centred on the mouse, kept inside the 1024×682 view; styles normal
 portraits with a darkened band of height `46 × (1 − HP/max HP)` px on wounded units; ruins
 never show their defenders. **code** (4ca8ac, 4ca9f0, 4cb18c)
 
+The box (48d3f8, through 4ca8ac) is opaque once faded in. Normal style: `Win-marble` tiled;
+hostile: `Win-red` (already loaded 20, 40, 100 darker) tiled; neutral: the marble, its green
+channel copied into all three (48dd40), then scaled by 1, 0x2aa/1024 and 0x1c7/1024 (48da5c),
+a dull brown. A 2 px SteelLine frame round the box and a 2 px line from (2, 27) to (w − 2, 29)
+under the title; the title corners added (476790 mode 0) at (2, 3) and at the right end. The
+corners are copies of `Corner-Left` / `Corner-Right` made at start-up with a colour taken off
+(4768f8 mode 1): (192, 160, 160) for the normal and neutral pair (ae2554/58, 4dbd83), (128,
+192, 250) for the hostile pair (ae255c/60, 4dbe0b), which leaves them dark orange on the red.
+(The Community patch at c2828e/c282ad swaps the background for `Win-yellow` when its flag
+c2825b is set.) **code**
+
+Layout, in the original's pixels: 348 (0x15c) wide; the title cut to 340 px and centred at
+y = 8 in the yellow Benguiat (ae24a0, white less 0, 0, 100) over its shadow (ae24b0) in every
+style. Text block 332 px wide at x = 8, every entry centred, the description word-wrapped.
+Fonts by style (fonts are white less the colour given, loaded at 4e5c9c and 4dbc26):
+
+| Style | Labels (SanSerif) | Names (Benguiat) |
+|---|---|---|
+| normal | ae24d4, less (100, 0, 100): green | ae249c, less (100, 0, 100): green |
+| hostile | ae24c4, less (20, 90, 180): orange | ae24a4, less (0, 80, 170): orange |
+| neutral | ae24d0, less (100, 100, 100): grey | ae24b8, less (80, 80, 80): grey |
+
+- **Army** (4ca9f0): title, then the 2×6 cells (48 px squares 56 px apart from x = 10,
+  y = 37; portrait at (1, 1)); the text block at y = 149: `Commander` (label) and the leader
+  (name) only when the army has more than one unit (record +0 above 1), then the description
+  in ae24c4 (orange in every style). Height text + 0x9f (text at most 0x161), or 0x97 with
+  no text. The hero (army 0): `HeroArmy`, `Commander` and the hero's name, normal style.
+- **Building** (4cb18c): the text block at y = 37: `Owner` (label) and the owner (name), the
+  description in the label font, `VillageEmptyGold` in ae24a4; for ruins with a garrison an
+  empty line, `Defenders` (label) and `NoNameArmy` (name font), only inside that block (so
+  not when it has nothing else). Height text + 0x2f, or 0x1d with no text. Any other
+  building with a garrison (not a town) adds `Defenders` (label) and the cells under the text:
+  + caption + 0x79 (or caption + 0x9f with no text), the cells 10 px off the bottom, the
+  caption 8 px over them and a 1 px line 5 px over the caption when there is text. Height at
+  most 0x200. **code**
+
 ### 7.5 World spell targeting
 
 After a world spell is chosen in the spell book, the map is in targeting mode. Hovering an
@@ -1306,7 +1342,7 @@ parity rule they are candidates to hide or remove, not bugs to copy.
 | 2 | Click to walk | Matches: first click shows the route, a second click on the same spot walks; a click on a planned cell whose route was dropped (a click out of reach, a wait) plans it again (`world_view::plan_click`): Razdor fixes the original's bug; the route's arrows, its last cell's green ring and the arrows' running light as the original's (`world_view::draw_route`) | The original does the same two-click walk (no double click); a planned cell whose route was dropped stays planned and its clicks do nothing (bug); an arrow on every cell but the last, in a building only on the cell it is left from; the last cell gets a green ring (48eeb0, kind 2) unless an army to meet stands there (0x49e520) | 7.3 |
 | 3 | Stop walking | Matches: left click or any key held; the step under way is finished (`Game::cut_walk`); no other input while he walks or waits | Left click or any key; the hero stops at the end of the current step | 7.3 |
 | 4 | Right button | Matches: held, the tooltip of the army or building under it, the hero's own army included («Отряд героя», its cards, «Предводитель» and the hero's name: occupant code 1 is army 0 to 0x4ca9f0); never a command (the pointer is not frozen: presentation, left out) | Held: tooltip of the army or building under it, pointer frozen; never a command | 7.4 |
-| 5 | Map tooltips | Only while the right button is held (left up), on the idle map; no fade-in (presentation, left out) | Only while the right button is held, 500 ms fade-in | 7.4 |
+| 5 | Map tooltips | Only while the right button is held (left up), on the idle map; no fade-in (presentation, left out). Matches the box (`widgets::tooltip_panel_styled`): opaque, the style's marble or red, the corners dimmed as the original's copies and added; and the layout (`world_view::draw_tooltip`): 348 px, the fonts by style, the yellow title, an army's orange description, the leader only for more than one unit, the ruins' empty line and «Неизвестная армия» in the name font, a garrison's caption and cells at the bottom. Line heights are Razdor's font metrics; empty cells keep the normal icons in the hostile style (ae2774 not drawn) | Only while the right button is held, 500 ms fade-in; layout as §7.4 | 7.4 |
 | 6 | Pointer | Matches: the original's pointers from the install, drawn last over everything at the original's hotspots, the strips at their frame times (`ui/cursor.rs`); the map's hover as §7.2, worked out again only on entering another cell (`cursor::map_pointer`, `world_view::update_pointer`); the clock while the map is busy (a wait, a glide, a place shown, a spell), while the enemy acts, during a pass and the won battle's hold, while the credits roll; hidden under the right-button tooltip and while an item is carried (its picture is the pointer). The system pointer stays for Razdor's own minimap resize and move and map drag, in the editor, out of focus and without the art | Own pointers: arrow, ask, denied, swords, house, clock, with animated frames | 7.2 |
 | 7 | Edge scroll | Matches: 5 px margin (scaled with the screen), `round(dt / F)` and `round(dt × 0.6875 / F)` original px per frame, dt the whole ms since the map's last frame, `ScrollSpeed` from the install | 5 px margin, `dt / F` px per ms with F from ScrollSpeed (62.5 cells/s at 100) | 7.6 |
 | 8 | Arrow keys | Matches: the held arrow scrolls (only the last key down counts) | Held arrow scrolls | 7.6 |

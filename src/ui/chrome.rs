@@ -344,8 +344,14 @@ fn spell_layer(name: &str, minus: [i32; 3]) -> Option<Texture2D> {
 /// Windows art `name` with its channels scaled and shifted as loaded ([`scale_channels`]),
 /// cached by both.
 pub fn win_scaled(name: &str, k: [i32; 3], offset: [i32; 3]) -> Option<Texture2D> {
+    win_adjusted(name, &format!("{k:?}{offset:?}"), |img| scale_channels(img, k, offset))
+}
+
+/// Windows art `name` changed by `adjust` once, as the original changes its copies at
+/// start-up, cached under `tag` (which must name the change).
+pub fn win_adjusted(name: &str, tag: &str, adjust: impl FnOnce(&mut Image)) -> Option<Texture2D> {
     let rel = format!("Windows/{name}.lit");
-    let key = format!("{rel}#{k:?}{offset:?}");
+    let key = format!("{rel}#{tag}");
     CHROME.with(|c| {
         let mut c = c.borrow_mut();
         let c = c.as_mut()?;
@@ -358,7 +364,7 @@ pub fn win_scaled(name: &str, k: [i32; 3], offset: [i32; 3]) -> Option<Texture2D
             .ok()
             .and_then(|mut frames| {
                 let img = frames.get_mut(0)?;
-                scale_channels(img, k, offset);
+                adjust(img);
                 to_texture(img)
             });
         c.textures.entry(key).or_default()[Fx::Plain as usize] = Some(t.clone());
@@ -1275,7 +1281,7 @@ pub fn paper_panel(r: Rect) {
     }
 }
 
-/// A skin at opacity `alpha` (the map's tooltips let the ground show through).
+/// A skin at opacity `alpha` (the fading hint boxes).
 pub fn surface_alpha(r: Rect, skin: Skin, alpha: f32) {
     if let Some((t, c)) = skin.texture() {
         let scale = if matches!(skin, Skin::Brown | Skin::Red) { k() } else { k().min(1.4) };
@@ -1285,18 +1291,6 @@ pub fn surface_alpha(r: Rect, skin: Skin, alpha: f32) {
     let base = skin.color();
     let lift = |v: f32| (v * 1.25).min(1.0);
     tile(&noise_texture(), r, 2.0, Color::new(lift(base.r), lift(base.g), lift(base.b), alpha));
-}
-
-/// The original's neutral frame (style 2 of 0x48d3f8): the green marble with its green
-/// channel in all three (0x48dd40) scaled ×1, ×0.67, ×0.44 (0x48da5c), a dull brown. Razdor
-/// greys the marble by its brightness, near enough to its green.
-pub fn neutral_surface_alpha(r: Rect, alpha: f32) {
-    let (r_, g, b) = (1.0, 0x2aa as f32 / 1024.0, 0x1c7 as f32 / 1024.0);
-    if let Some(t) = win_fx("Win-marble", Fx::Grey) {
-        tile(&t, r, k().min(1.4), Color::new(r_, g, b, alpha));
-        return;
-    }
-    tile(&noise_texture(), r, 2.0, Color::new(0.6 * r_, 0.6 * g, 0.6 * b, alpha));
 }
 
 /// The silver edge of windows and panels (outer light line, inner dark line).

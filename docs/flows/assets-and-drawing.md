@@ -85,7 +85,8 @@ install file ──► src/dt/gfx.rs decode_file ──► gfx::Image (RGBA, not
 textures from a 4×4 atlas, water frames multiplied in), then decorations
 (`draw_object`), buildings (`draw_building`), armies (`draw_army`, `draw_figure`,
 `draw_ship`), the hero (`draw_hero`), the route (`draw_route`), and the tooltip
-(`draw_tooltip`). Buildings are anchored like the original (right edge on the cell; see
+(`draw_tooltip`; its opaque box in the original's three styles is `widgets::tooltip_panel_styled`,
+the layout as interface.md §7.4). Buildings are anchored like the original (right edge on the cell; see
 PLAYTEST_NOTES "Мосты сдвинуты"). A figure inside a building is not drawn, as the
 original's drawn-occupant byte (0x497abc): `draw_army` and `draw_hero` skip it when
 `Game::army_hidden` / `Game::hero_hidden` say so (`World::hides_figure`: standing in a building
