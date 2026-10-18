@@ -760,12 +760,12 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: b
         if !slots && item.is_none() {
             continue;
         }
-        if slots {
-            draw_rectangle(sr.x, sr.y, sr.w, sr.h, Color::new(0.2, 0.12, 0.05, 0.35));
-            draw_rectangle_lines(sr.x, sr.y, sr.w, sr.h, 1.0, Color::new(0.45, 0.3, 0.15, 0.8));
-        }
-        if let Some(it) = item {
-            assets.draw_item(it, sr.x, sr.y, sr.w);
+        // A worn item is its picture alone on the parchment; an empty slot is the original's
+        // empty-slot picture (0xae2860, built at start-up: a steel ring over a 40% black
+        // square, `chrome::empty_item_slot`), set by 0x492f24 only for an empty slot.
+        match item {
+            Some(it) => assets.draw_item(it, sr.x, sr.y, sr.w),
+            None => chrome::empty_item_slot(*sr),
         }
         if mouse_in(sr.x, sr.y, sr.w, sr.h) {
             if item.is_some() {
