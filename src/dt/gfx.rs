@@ -477,11 +477,11 @@ pub fn decode_bmp(d: &[u8]) -> Result<Image, DtError> {
     }
     let (w, top_down, h) = (w as usize, h < 0, h.unsigned_abs() as usize);
     // A broken or hostile header (a mod's file) must not reserve gigabytes before the pixel
-    // checks below; the same bound as a LIT's.
+    // checks below; the same bound as a LIT's. The buffer is reserved only once the file is
+    // known to hold all the pixels.
     if w > 1 << 14 || h > 1 << 14 {
         return Err(bad("BMP size", 18));
     }
-    let mut rgba = Vec::with_capacity(w * h * 4);
     if bpp == 8 {
         // 0x47754c: the palette right after the 40-byte header, whatever bfOffBits says.
         let colours = match u32_at(d, 0x2e).ok_or(DtError::Truncated { what: "BMP header", offset: 0 })? as usize {
@@ -494,6 +494,7 @@ pub fn decode_bmp(d: &[u8]) -> Result<Image, DtError> {
         if pixels + stride * h > d.len() {
             return Err(DtError::Truncated { what: "BMP pixels", offset: pixels });
         }
+        let mut rgba = Vec::with_capacity(w * h * 4);
         for row in 0..h {
             let src = if top_down { row } else { h - 1 - row };
             for &i in &d[pixels + src * stride..][..w] {
@@ -506,9 +507,10 @@ pub fn decode_bmp(d: &[u8]) -> Result<Image, DtError> {
     }
     let bytes = bpp as usize / 8;
     let stride = (w * bytes).div_ceil(4) * 4;
-    if data_off + stride * h > d.len() {
+    if data_off.saturating_add(stride * h) > d.len() {
         return Err(DtError::Truncated { what: "BMP pixels", offset: data_off });
     }
+    let mut rgba = Vec::with_capacity(w * h * 4);
     for row in 0..h {
         let src = if top_down { row } else { h - 1 - row };
         let line = &d[data_off + src * stride..][..w * bytes];
