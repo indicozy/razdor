@@ -23,6 +23,10 @@ last one carries over (`Game::next_map` → `Game::from_campaign` → `apply_car
 dt/install.rs   locate() / DtInstall::load(dir)        the player's install, never shipped
 rules/content.rs Content::from_dt(...)                  units, items, spells, global options
 ui/new_game.rs   scenario list (groups, scenario_groups, listed_chapters) → hero window
+                 arrange()           Razdor's filter and order under the list (Show, Order;
+                                     all / as the original by default), facts_of() per row;
+                                     favourites and maps won kept in settings.json
+                                     (ui/language.rs Settings), ORIGINAL_MAPS for "the game's own"
                  fill_name_field()   the field opens holding [NewHero] PrivateHeroName as text
                  choose_class()      only the classes the map offers
 ui/screens.rs    start_game(demo, Some((entry, content)), class, name)
@@ -36,7 +40,8 @@ ui/screens.rs    start_game(demo, Some((entry, content)), class, name)
 … play (map-step.md, towns-economy.md, battles) …
 scenario end:
   EventOutcome::Victory / Defeat → Game::script_end() → ScriptEnd
-  ui/mod.rs      ScriptEnd::Victory: screens::hand_over() → Game::next_map() → NextMap
+  ui/mod.rs      ScriptEnd::Victory: language::mark_completed(map file) for the list's tick
+                   (not in the editor's test play), then screens::hand_over() → Game::next_map() → NextMap
                    campaign_game() → Game::from_campaign(content, scenario, &prev)
                                        → apply_carry_over(&prev); journal.next_chapter()
                  no next map (not a campaign map, or not in the install) → the main menu,

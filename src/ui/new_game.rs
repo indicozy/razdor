@@ -198,12 +198,222 @@ fn list_key(file: &str, width: u32, tutorial: &str) -> u32 {
     }
 }
 
+/// The maps the game ships with (the Community Update's install, file names without the
+/// extension): the list's "original" filter. Any other map (a mod's, the player's own) is
+/// fan-made. Razdor's list, for the filter only (a players' wish).
+const ORIGINAL_MAPS: [&str; 15] = [
+    "Другой берег",
+    "ДС1-С чего все начиналось",
+    "ДС2-Страшная история",
+    "Обучающий1",
+    "Обучающий2",
+    "Проклятое озеро",
+    "РК1-Начало пути",
+    "РК2-Дикие пустоши",
+    "РК3-Столица",
+    "РК4-Восточная провинция",
+    "РК5-Столица в огне",
+    "РК6-Северная битва",
+    "РК7-Конец",
+    "Тихая пристань",
+    "Устье Трейна",
+];
+
+/// A map the game ships with ([`ORIGINAL_MAPS`]).
+fn is_original_map(file: &str) -> bool {
+    ORIGINAL_MAPS.iter().any(|m| m.to_lowercase() == file.to_lowercase())
+}
+
+/// Which rows the list shows (Razdor's, a players' wish; `All` is the original's list).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Show {
+    All,
+    Campaigns,
+    Singles,
+    Original,
+    FanMade,
+    Completed,
+    NotCompleted,
+    Favourites,
+}
+
+impl Show {
+    const ALL: [Show; 8] = [Show::All, Show::Campaigns, Show::Singles, Show::Original, Show::FanMade, Show::Completed, Show::NotCompleted, Show::Favourites];
+
+    fn of(v: i64) -> Show {
+        usize::try_from(v).ok().and_then(|i| Show::ALL.get(i)).copied().unwrap_or(Show::All)
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Show::All => tr("All scenarios"),
+            Show::Campaigns => tr("Campaigns"),
+            Show::Singles => tr("Single scenarios"),
+            Show::Original => tr("The game's own"),
+            Show::FanMade => tr("Fan-made"),
+            Show::Completed => tr("Completed scenarios"),
+            Show::NotCompleted => tr("Not completed"),
+            Show::Favourites => tr("Favourites"),
+        }
+    }
+
+    fn keeps(self, f: &Facts) -> bool {
+        match self {
+            Show::All => true,
+            Show::Campaigns => f.campaign,
+            Show::Singles => !f.campaign,
+            Show::Original => f.original,
+            Show::FanMade => !f.original,
+            Show::Completed => f.completed,
+            Show::NotCompleted => !f.completed,
+            Show::Favourites => f.favourite,
+        }
+    }
+}
+
+/// The list's order (Razdor's choices besides the original's).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Order {
+    /// The original's: the tutorial first, then by the map's width ([`list_key`]).
+    Original,
+    /// Single scenarios by size, small first, then the campaigns in the original's order
+    /// (a campaign has maps of several sizes: it is not sorted by size).
+    SmallFirst,
+    /// The same, large first.
+    LargeFirst,
+    /// By the name the row shows.
+    Name,
+}
+
+impl Order {
+    const ALL: [Order; 4] = [Order::Original, Order::SmallFirst, Order::LargeFirst, Order::Name];
+
+    fn of(v: i64) -> Order {
+        usize::try_from(v).ok().and_then(|i| Order::ALL.get(i)).copied().unwrap_or(Order::Original)
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Order::Original => tr("As in the game"),
+            Order::SmallFirst => tr("Small maps first"),
+            Order::LargeFirst => tr("Large maps first"),
+            Order::Name => tr("By name"),
+        }
+    }
+}
+
+/// What the filter and the order read of a row.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Facts {
+    campaign: bool,
+    original: bool,
+    completed: bool,
+    favourite: bool,
+    width: u32,
+    name: String,
+}
+
+/// The rows `list` (in the original's order) as `show` and `order` want them, with each
+/// row's facts from `facts`.
+fn arrange(list: Vec<Group>, facts: impl Fn(&Group) -> Facts, show: Show, order: Order) -> Vec<Group> {
+    let mut rows: Vec<(Group, Facts)> = list.into_iter().map(|g| {
+        let f = facts(&g);
+        (g, f)
+    }).filter(|(_, f)| show.keeps(f)).collect();
+    match order {
+        Order::Original => {}
+        Order::SmallFirst => rows.sort_by_key(|(_, f)| (f.campaign, if f.campaign { 0 } else { f.width })),
+        Order::LargeFirst => rows.sort_by_key(|(_, f)| (f.campaign, if f.campaign { 0 } else { u32::MAX - f.width })),
+        Order::Name => rows.sort_by_cached_key(|(_, f)| razdor::search::fold(&f.name)),
+    }
+    rows.into_iter().map(|(g, _)| g).collect()
+}
+
+/// The marks the player keeps on the list (`settings.json`), read when the list opens.
+#[derive(Clone, Debug, Default)]
+struct Marks {
+    completed: Vec<String>,
+    favourites: Vec<String>,
+    show: i64,
+    order: i64,
+}
+
+thread_local! {
+    static MARKS: RefCell<Option<Marks>> = const { RefCell::new(None) };
+}
+
+fn marks() -> Marks {
+    MARKS.with(|m| {
+        m.borrow_mut()
+            .get_or_insert_with(|| {
+                let s = super::language::Settings::load();
+                Marks { completed: s.completed_scenarios, favourites: s.favourite_scenarios, show: s.scenario_show, order: s.scenario_order }
+            })
+            .clone()
+    })
+}
+
+/// Keeps `m` and writes it into the settings.
+fn keep_marks(m: Marks) {
+    let s = super::language::Settings::load();
+    super::language::Settings { favourite_scenarios: m.favourites.clone(), scenario_show: m.show, scenario_order: m.order, ..s }.save();
+    MARKS.with(|c| *c.borrow_mut() = Some(m));
+}
+
+fn listed(names: &[String], file: &str) -> bool {
+    names.iter().any(|n| n.to_lowercase() == file.to_lowercase())
+}
+
+/// A row's facts: a campaign counts as completed once its last map is won.
+fn facts_of(scenarios: &[ScenarioEntry], g: &Group, m: &Marks) -> Facts {
+    let e = &scenarios[g.first];
+    let last = g.chapters.last().map_or(g.first, |&c| c);
+    Facts {
+        campaign: !g.chapters.is_empty(),
+        original: is_original_map(&e.file),
+        completed: listed(&m.completed, &scenarios[last].file),
+        favourite: listed(&m.favourites, &e.file),
+        width: e.scenario.width(),
+        name: group_name(scenarios, g).to_string(),
+    }
+}
+
 /// The scenario list opens on its first row, scrolled to the top (the original's list
-/// starts on row 0 each time).
+/// starts on row 0 each time). The player's marks are read again (a map won since).
 pub fn open_list() {
     PICKED.with(|p| p.set(0));
     SCROLL.with(|s| s.set(0.0));
+    MARKS.with(|m| *m.borrow_mut() = None);
 }
+
+/// A five-pointed star centred on `c` (the favourite mark): filled, or its outline.
+fn star(c: Vec2, r: f32, color: Color, filled: bool) {
+    let p: Vec<Vec2> = (0..10)
+        .map(|i| {
+            let a = std::f32::consts::PI * (i as f32 / 5.0 - 0.5);
+            let rr = if i % 2 == 0 { r } else { r * 0.45 };
+            vec2(c.x + rr * a.cos(), c.y + rr * a.sin())
+        })
+        .collect();
+    for i in 0..10 {
+        let (a, b) = (p[i], p[(i + 1) % 10]);
+        if filled {
+            draw_triangle(c, a, b, color);
+        } else {
+            draw_line(a.x, a.y, b.x, b.y, (r * 0.18).max(1.0), color);
+        }
+    }
+}
+
+/// A tick (the completed mark) in a box of side `s` at `(x, y)`.
+fn tick(x: f32, y: f32, s: f32, color: Color) {
+    let w = (s * 0.18).max(1.5);
+    draw_line(x + s * 0.1, y + s * 0.55, x + s * 0.4, y + s * 0.85, w, color);
+    draw_line(x + s * 0.4, y + s * 0.85, x + s * 0.95, y + s * 0.15, w, color);
+}
+
+const TICK_GREEN: Color = Color::new(0.45, 0.95, 0.35, 1.0);
+const STAR_GOLD: Color = Color::new(1.0, 0.82, 0.25, 1.0);
 
 /// Picks the row of the map whose file name starts with `name` when the list next shows
 /// (the `scenarios:<map>` snapshot scene).
@@ -269,7 +479,9 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
     super::main_menu::backdrop();
     let (win, closed) = Win::open(&own("NewGame", "Title", n_("Scenario for a new game")));
     let k = win.k;
-    let list = scenario_groups(scenarios);
+    let mut m = marks();
+    let (show, order) = (Show::of(m.show), Order::of(m.order));
+    let list = arrange(scenario_groups(scenarios), |g| facts_of(scenarios, g, &m), show, order);
     if let Some(name) = PICK.with(|p| p.borrow_mut().take()) {
         if let Some(i) = list.iter().position(|g| std::iter::once(&g.first).chain(&g.chapters).any(|&m| scenarios[m].file.starts_with(&name))) {
             PICKED.with(|p| p.set(i));
@@ -308,10 +520,33 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         if r.y >= inside.y + inside.h || r.y + r.h <= inside.y {
             continue;
         }
-        let (_, _, pressed) = button_state(r, over_list);
         let e = &scenarios[g.first];
         let chapters = listed_chapters(scenarios, g);
         let head = Rect::new(r.x, r.y, r.w, head_h - 2.0 * k);
+        // Razdor's marks at the head's right end: the favourite star (shown on the row under
+        // the pointer, lit when marked; a click on it marks or unmarks) and the tick of a
+        // scenario won (a campaign: its last map).
+        let star_r = Rect::new(head.x + head.w - 22.0 * k, head.y + head.h / 2.0 - 9.0 * k, 18.0 * k, 18.0 * k);
+        let on_star = over_list && star_r.contains(crate::ui::widgets::pointer().into());
+        let (row_hover, _, pressed) = button_state(r, over_list && !on_star);
+        let (_, _, star_pressed) = button_state(star_r, over_list);
+        let f = facts_of(scenarios, g, &m);
+        if f.favourite || row_hover || on_star {
+            let ink = if f.favourite { STAR_GOLD } else { Color::new(0.85, 0.85, 0.85, if on_star { 0.9 } else { 0.45 }) };
+            star(star_r.center(), 8.0 * k, ink, f.favourite);
+        }
+        if star_pressed {
+            let file = e.file.clone();
+            if f.favourite {
+                m.favourites.retain(|n| n.to_lowercase() != file.to_lowercase());
+            } else {
+                m.favourites.push(file);
+            }
+            keep_marks(m.clone());
+        }
+        if f.completed {
+            tick(head.x + head.w - 42.0 * k, head.y + head.h / 2.0 - 7.0 * k, 14.0 * k, TICK_GREEN);
+        }
         // A campaign's chapters are lines of its own item (0x4e27ad..0x4e286e add them with
         // 0x47e46c's new-item flag clear), so the picked bar lies under the name and the
         // chapters, and a chapter is never picked by itself: Start takes the campaign's map.
@@ -335,15 +570,23 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         } else {
             Color::from_rgba(135, 255, 255, 255)
         };
+        // The name leaves room for the marks it has (none: the original's width).
+        let name_w = r.w - (40.0 + if f.completed { 44.0 } else if f.favourite { 24.0 } else { 0.0 }) * k;
         with_face(Face::Subtitle, || {
-            let size = fit_size(name, r.w - 40.0 * k, 15.0 * k);
-            chrome::shadow_text(&ellipsize(name, r.w - 40.0 * k, size), head.x + 32.0 * k, head.y + head.h * 0.5 + size * 0.36, size, name_ink);
+            let size = fit_size(name, name_w, 15.0 * k);
+            chrome::shadow_text(&ellipsize(name, name_w, size), head.x + 32.0 * k, head.y + head.h * 0.5 + size * 0.36, size, name_ink);
         });
         let small = 12.0 * k;
         with_face(Face::Body, || for (n, &c) in chapters.iter().enumerate() {
             let cy = r.y + head_h + n as f32 * chapter_h + chapter_h * 0.5 + small * 0.36;
             let ink = if lit { super::typography::Ink::Plain } else { super::typography::Ink::Orange };
-            chrome::shadow_text(&ellipsize(title(&scenarios[c]), r.w - 60.0 * k, small), r.x + 52.0 * k, cy, small, ink.color());
+            // Each map of a campaign won has its tick too.
+            let won = listed(&m.completed, &scenarios[c].file);
+            let room = r.w - (if won { 84.0 } else { 60.0 }) * k;
+            chrome::shadow_text(&ellipsize(title(&scenarios[c]), room, small), r.x + 52.0 * k, cy, small, ink.color());
+            if won {
+                tick(head.x + head.w - 40.0 * k, cy - small * 0.36 - 5.0 * k, 10.0 * k, TICK_GREEN);
+            }
         });
         // A row is picked silently (the original's list makes no sound).
         if pressed {
@@ -354,6 +597,13 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         }
     }
     drop(clip);
+    if list.is_empty() {
+        with_face(Face::Body, || {
+            let size = 13.0 * k;
+            let t = tr("No scenario fits this choice.");
+            chrome::shadow_text(&ellipsize(t, rows.w - 24.0 * k, size), rows.x + 12.0 * k, rows.y + 24.0 * k, size, super::typography::Ink::Orange.color());
+        });
+    }
     PICKED.with(|p| p.set(picked));
     // The map and what it is.
     if let Some(g) = list.get(picked) {
@@ -430,6 +680,17 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         }
         drop(clip);
     }
+    // Razdor's filter and order (a players' wish), under the list where the original's window
+    // has nothing: each opens a drop-down list; the choice is kept in the settings.
+    let pick_show = view_choice(&win, 12.0, "razdor:scenario-show", show as i64, &Show::ALL.map(|s| s.label()));
+    let pick_order = view_choice(&win, 190.0, "razdor:scenario-order", order as i64, &Order::ALL.map(|o| o.label()));
+    if pick_show.is_some() || pick_order.is_some() {
+        m.show = pick_show.unwrap_or(m.show);
+        m.order = pick_order.unwrap_or(m.order);
+        keep_marks(m);
+        PICKED.with(|p| p.set(0));
+        SCROLL.with(|s| s.set(0.0));
+    }
     let can = !list.is_empty();
     if (win.button(369.0, 116.0, &own("Buttons", "Next", n_("Next")), can) || (can && key(KeyCode::Enter))) && next.is_none() {
         cue(Cue::Button);
@@ -439,6 +700,25 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         return Some(Screen::MainMenu);
     }
     next
+}
+
+/// A marble button at `x` (window pixels) on the buttons' line showing the choice `current`
+/// of `labels`, with a small arrow; a click opens the drop-down list `key`. The value picked.
+fn view_choice(win: &Win, x: f32, key: &str, current: i64, labels: &[&str]) -> Option<i64> {
+    let picked = take_pick(key);
+    let r = win.rect(x, 442.0, 172.0, 28.0);
+    let (_, down, pressed) = button_state(r, true);
+    let label = labels.get(current as usize).copied().unwrap_or_default();
+    chrome::marble_button(r, label, true, down || list_open(key));
+    let (ax, ay) = (r.x + r.w - 14.0 * win.k, r.y + r.h / 2.0);
+    let s = 4.0 * win.k;
+    draw_triangle(vec2(ax - s, ay - s * 0.6), vec2(ax + s, ay - s * 0.6), vec2(ax, ay + s * 0.8), Color::new(0.85, 0.85, 0.8, 1.0));
+    if pressed {
+        cue(Cue::Button);
+        let options: Vec<(i64, String)> = labels.iter().enumerate().map(|(i, l)| (i as i64, l.to_string())).collect();
+        super::widgets::open_list(key, r, current, &options, win.k);
+    }
+    picked.filter(|&v| v != current)
 }
 
 /// The tutorial map to offer before a new game, as an index into `scenarios`: the install's
@@ -792,6 +1072,33 @@ mod tests {
         assert_eq!(order, ["Обучающий1", "РК1-Начало пути", "Тихая пристань", "Проклятое озеро", "Другой берег"]);
         assert_eq!(list_key("обучающий1", 50, "Обучающий1"), 0, "the name is found whatever its case");
         assert_eq!(list_key("Обучающий1", 50, ""), 50, "no tutorial named: by size");
+    }
+
+    #[test]
+    fn the_list_filters_and_sorts_as_chosen() {
+        // Rows in the original's order: a 50 single, a campaign, a 200 fan map, a 100 single.
+        let g = |first: usize, campaign: bool| Group { first, chapters: if campaign { vec![first, first + 10] } else { Vec::new() } };
+        let facts = |g: &Group| match g.first {
+            0 => Facts { original: true, completed: true, width: 50, name: "Тихая пристань".into(), ..Facts::default() },
+            1 => Facts { campaign: true, original: true, width: 50, name: "Кампания".into(), ..Facts::default() },
+            2 => Facts { favourite: true, width: 200, name: "Ахтунг".into(), ..Facts::default() },
+            _ => Facts { original: true, width: 100, name: "Другой берег".into(), ..Facts::default() },
+        };
+        let list = || vec![g(0, false), g(1, true), g(2, false), g(3, false)];
+        let firsts = |show: Show, order: Order| arrange(list(), facts, show, order).iter().map(|g| g.first).collect::<Vec<_>>();
+        assert_eq!(firsts(Show::All, Order::Original), [0, 1, 2, 3], "the original's list as it is");
+        assert_eq!(firsts(Show::Campaigns, Order::Original), [1]);
+        assert_eq!(firsts(Show::Singles, Order::Original), [0, 2, 3]);
+        assert_eq!(firsts(Show::Original, Order::Original), [0, 1, 3]);
+        assert_eq!(firsts(Show::FanMade, Order::Original), [2]);
+        assert_eq!(firsts(Show::Completed, Order::Original), [0]);
+        assert_eq!(firsts(Show::NotCompleted, Order::Original), [1, 2, 3]);
+        assert_eq!(firsts(Show::Favourites, Order::Original), [2]);
+        assert_eq!(firsts(Show::All, Order::SmallFirst), [0, 3, 2, 1], "campaigns after, unsorted by size");
+        assert_eq!(firsts(Show::All, Order::LargeFirst), [2, 3, 0, 1]);
+        assert_eq!(firsts(Show::All, Order::Name), [2, 3, 1, 0]);
+        assert_eq!((Show::of(99), Order::of(-1)), (Show::All, Order::Original), "a bad setting: the original's view");
+        assert!(is_original_map("обучающий1") && !is_original_map("Изумрудная шахта"));
     }
 
     #[test]

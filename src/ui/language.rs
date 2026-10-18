@@ -1,7 +1,8 @@
 //! The language: the player's choice kept in `settings.json` (next to `audio.json` in the
 //! save folder), the language list (a drop-down) and its F2 key. Russian when nothing is
 //! saved (English when no font with Cyrillic was found). The same file remembers that the
-//! tutorial is done.
+//! tutorial is done, and the scenario list's marks and view (Razdor's): the scenarios won,
+//! the player's favourites, and how the list is filtered and sorted.
 //!
 //! The list (Razdor's own, asked for by the owner): «Русский» (the game as it is), «English»,
 //! then each translation of the game data found in the install (`razdor::dt::english::discover`:
@@ -35,6 +36,14 @@ pub struct Settings {
     /// The tutorial's last event finished (its title test holds `end_tutorial`): the original
     /// writes `[Tutorial] Completed=1` into its language ini (0x4ac9fc); Razdor keeps it here.
     pub tutorial_completed: bool,
+    /// The maps whose victory was reached (file names without the extension), for the
+    /// scenario list's marks (Razdor's, a players' wish; the original keeps no such record).
+    pub completed_scenarios: Vec<String>,
+    /// The maps the player marked as favourites in the scenario list (Razdor's).
+    pub favourite_scenarios: Vec<String>,
+    /// The scenario list's filter and order (`ui::new_game`; 0, 0: all, as the original).
+    pub scenario_show: i64,
+    pub scenario_order: i64,
 }
 
 impl Settings {
@@ -57,6 +66,10 @@ impl Settings {
             .unwrap_or_else(|| serde_json::json!({}));
         json["language"] = serde_json::Value::String(self.language.clone());
         json["tutorial_completed"] = serde_json::Value::Bool(self.tutorial_completed);
+        json["completed_scenarios"] = serde_json::json!(self.completed_scenarios);
+        json["favourite_scenarios"] = serde_json::json!(self.favourite_scenarios);
+        json["scenario_show"] = serde_json::json!(self.scenario_show);
+        json["scenario_order"] = serde_json::json!(self.scenario_order);
         let written = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| {
             std::fs::write(&path, serde_json::to_vec_pretty(&json).unwrap_or_default())
         });
@@ -64,6 +77,24 @@ impl Settings {
             razdor::diag!("{}: {e}", path.display());
         }
     }
+}
+
+/// Notes that the victory of map `file` (its name without the extension) was reached, for the
+/// scenario list's mark; written at once.
+pub fn mark_completed(file: &str) {
+    let mut s = Settings::load();
+    if add_completed(&mut s, file) {
+        s.save();
+    }
+}
+
+/// Adds `file` to the maps won, unless it is there already (any case). True when added.
+fn add_completed(s: &mut Settings, file: &str) -> bool {
+    if file.is_empty() || s.completed_scenarios.iter().any(|f| f.to_lowercase() == file.to_lowercase()) {
+        return false;
+    }
+    s.completed_scenarios.push(file.to_string());
+    true
 }
 
 /// One entry of the language list.
@@ -253,6 +284,18 @@ mod tests {
         let s: Settings = serde_json::from_str(r#"{"language":"en","other":1,"tutorial_offered":true}"#).unwrap();
         assert_eq!(s.language, "en");
         assert!(!s.tutorial_completed, "older files: the tutorial is not done (an offer seen does not count)");
+        assert!(s.completed_scenarios.is_empty() && s.favourite_scenarios.is_empty(), "older files: nothing won, no favourites");
+    }
+
+    #[test]
+    fn a_won_map_is_noted_once() {
+        let mut s = Settings::default();
+        assert!(add_completed(&mut s, "Тихая пристань"));
+        assert!(!add_completed(&mut s, "тихая пристань"), "once");
+        assert!(!add_completed(&mut s, ""));
+        assert_eq!(s.completed_scenarios, ["Тихая пристань"]);
+        let back: Settings = serde_json::from_value(serde_json::to_value(&s).unwrap()).unwrap();
+        assert_eq!(back, s);
     }
 
     #[test]

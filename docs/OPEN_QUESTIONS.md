@@ -8,6 +8,17 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **The scenario list's "the game's own" maps** (2026-10-18, players' wish, main only).
+  `ui::new_game::ORIGINAL_MAPS` names the 15 maps of the Community Update install by file
+  name; every other map counts as fan-made. Other editions (the vanilla release, an English
+  edition with other file names) are not known, so their maps may show as fan-made, and a mod
+  that edits a shipped map under its name shows as the game's own. Settled by the file lists
+  of the other editions (or by the owner choosing hashes instead). Also: the new list
+  controls (filter / order buttons, the favourite star, the won tick) were not checked on an
+  off-screen snapshot (Razdor may not be started without the owner's word); check them at
+  800x600, 1024x768 and 1280x800 (`RAZDOR_SCENE=scenarios`), with the `routes` cheat's
+  lines on the minimap (`RAZDOR_SCENE=minimap`, then `routes` in the console).
+
 - **Card strips and the unit panel: what is left** (2026-10-18, a player's report; the parity
   fix 1b2359f). Still Razdor's, not the original's: the selected or acting unit's strip gets an
   orange wash (the original pulses the card's frame, 49462c, and leaves the strip); the unit
