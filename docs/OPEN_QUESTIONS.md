@@ -8,6 +8,17 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **A new game on «Раменское королевство» began on РК6** (2026-10-18, a player's video on
+  0.4.34; `docs/PLAYTEST_NOTES.md`). The list picked the campaign (its block lit, its
+  description shown), the hero window opened, and the map that started was РК6-Северная
+  битва (its opening window «Северная провинция», its date 1204, month 8). The original
+  starts the campaign's first map whatever chapter line is clicked (4c1804, interface.md §5),
+  and so does main's code: the list's group starts on `Group::first` (РК1 on the
+  Community Update files, checked), the hero window starts `scenarios[first]`, and РК1 does
+  not end or hand over at its start. Not reproduced. Settled by the reporter's
+  `razdor-play.log` (its `GAME new game: map «…»` and any `next campaign map` lines) and the
+  list of their `Maps_Rus` folder.
+
 - **The scenario list's "the game's own" maps** (2026-10-18, players' wish, main only).
   `ui::new_game::ORIGINAL_MAPS` names the 15 maps of the Community Update install by file
   name; every other map counts as fan-made. Other editions (the vanilla release, an English
