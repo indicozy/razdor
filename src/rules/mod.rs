@@ -5,6 +5,7 @@ pub mod cheats;
 pub mod clock;
 pub mod content;
 pub mod custom;
+pub mod custom_code;
 pub mod economy;
 pub mod events;
 pub mod experience;

@@ -90,6 +90,21 @@ window's pop-up, the event window's item tooltip), is one box, `item_text::draw`
 and bonus line are the original's (interface.md §9.2), built by `rules::item_text` from the
 install's `[Skills]` labels (`spell_badges::label`).
 
+The custom battle's setup (`Screen::CustomSetup`, drawn by `custom_battle::frame` in
+`src/ui/custom_battle.rs`, a Razdor extra) keeps its armies in `rules::custom::Setup`. Its left
+column has two tabs, the unit types (`custom::unit_list`) and the items the picked unit may
+put on (`custom::item_list`: by `custom::Category`, sorted by `custom::PriceOrder`, kept by
+the inventory filter's match). Each list has the inventory filter line
+(`item_filter::field_hinted`, started by a click or Ctrl+F only); the screen takes the typed
+characters first (`widgets::typed_chars` while no field has the keyboard) and a letter jumps
+to the next name starting with it (`custom::jump`). «Скопировать код боя» / «Вставить код
+боя» (and Ctrl+C / Ctrl+V while no field has the keyboard) write and read the whole setup as
+one line of text, `RZB1:` + base58 (`rules::custom_code`: `custom_code::encode`,
+`custom_code::decode`, versioned, CRC-checked, with the content's fingerprint to warn about
+another install or mod) through miniquad's clipboard (its window module's clipboard_set and clipboard_get:
+X11, Wayland, Windows and macOS). A code that does not read changes nothing; unknown unit
+types and items are left out and counted in the message.
+
 Building a window (`src/ui/chrome.rs`):
 
 - `chrome::k()` is the interface scale: screen pixels per pixel of the 960×720 reference
