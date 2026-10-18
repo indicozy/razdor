@@ -14,6 +14,7 @@ use razdor::trf;
 use razdor::rules::clock::duration_label;
 use razdor::rules::content::HeroClass;
 use razdor::rules::game::{Event, Foe, Game};
+use razdor::rules::idle;
 use razdor::rules::magic::{CastOutcome, CastTarget};
 use razdor::rules::map::{object_class, Decoration, Grid, Tile, TileMap};
 use razdor::rules::world::{Army, Location, LocationKind, Owner, Troop};
@@ -55,6 +56,63 @@ fn map_area_in(w: f32, h: f32, bar: f32) -> Rect {
     Rect::new(0.0, 0.0, w.max(0.0), (h - bar).max(0.0))
 }
 use super::dialog::MANA;
+
+thread_local! {
+    /// The screen's side of the armies' idle animation ([`razdor::rules::idle`]), by uid.
+    static IDLE: std::cell::RefCell<std::collections::HashMap<u32, IdleSprite>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// An army's idle stamp (the frame clock, ms, when its idle animation last restarted: the
+/// load, 0x4b4b38, or a stop, 0x4ad8a0), the restart it belongs to, and the frame the idle
+/// pass last set (its sprite keeps it while the hero walks or waits).
+#[derive(Clone, Copy)]
+struct IdleSprite {
+    restarts: u32,
+    stamp_ms: i64,
+    frame: u32,
+}
+
+/// The frame clock the idle pass reads (0x4f1c34), in ms.
+fn clock_ms() -> i64 {
+    (get_time() * 1000.0) as i64
+}
+
+/// Stamps every army the first time the screen draws the map (a load stamps them all at
+/// once) and an army again when a stop restarted its animation.
+fn stamp_idle(game: &Game, now: i64) {
+    IDLE.with(|m| {
+        let mut m = m.borrow_mut();
+        for a in &game.world.armies {
+            let restarts = a.mind.idle_restarts;
+            let e = m.entry(a.uid).or_insert(IdleSprite { restarts, stamp_ms: now, frame: 0 });
+            if e.restarts != restarts {
+                *e = IdleSprite { restarts, stamp_ms: now, ..*e };
+            }
+        }
+    });
+}
+
+/// The frame of a standing army (`None`: its walk frame stays). While the map is idle (the
+/// hero neither walks nor waits, 0x68dc62) the world frame's idle pass (0x4c868c) sets the
+/// sprite of every army in no building from its stamp and offset; otherwise the sprite keeps
+/// the frame the pass last set, unless the army walks.
+fn idle_sprite_frame(game: &Game, a: &Army, now: i64) -> Option<u32> {
+    if a.mind.standing.is_some() {
+        return None;
+    }
+    let idle = !game.moving() && !game.waiting();
+    IDLE.with(|m| {
+        let mut m = m.borrow_mut();
+        let e = m.get_mut(&a.uid)?;
+        if idle {
+            let since = now - e.stamp_ms;
+            e.frame = if a.sails() { idle::ship_idle_frame(since, a.mind.idle_offset) } else { idle::idle_frame(a.figure, since, a.mind.idle_offset) };
+            Some(e.frame)
+        } else {
+            game.army_walk_frame(a).is_none().then_some(e.frame)
+        }
+    })
+}
 
 /// World-map view state kept between frames.
 pub struct MapView {
@@ -225,6 +283,7 @@ impl MapView {
 
     /// A game was loaded: the places the old one was about to show are dropped.
     pub fn forget_shows(&mut self) {
+        IDLE.with(|m| m.borrow_mut().clear());
         self.shows.clear();
         self.returning = None;
         self.opening = None;
@@ -1020,13 +1079,18 @@ fn draw_figure(art: Option<&DtArt>, stem: &str, pos: (f32, f32), next: Option<(f
         Stand::Feet => vec2(p.x - size / 2.0, p.y - size * 0.8),
         Stand::Afloat => vec2(p.x - size / 2.0, p.y - size * 0.55),
     };
-    draw_texture_ex(
-        &sheet,
-        dest.x,
-        dest.y,
-        WHITE,
-        DrawTextureParams { dest_size: Some(vec2(size, size)), source: Some(Rect::new(frame * n, row * n, n, n)), ..Default::default() },
-    );
+    // The sheets hold premultiplied colour and the original draws every figure with
+    // SRCBLEND ONE, DESTBLEND INVSRCALPHA (0x4c9ef6, 0x4ca0d9): the Ghost's light where its
+    // alpha is 0 is added to the map, its glow.
+    super::chrome::premultiplied(|| {
+        draw_texture_ex(
+            &sheet,
+            dest.x,
+            dest.y,
+            WHITE,
+            DrawTextureParams { dest_size: Some(vec2(size, size)), source: Some(Rect::new(frame * n, row * n, n, n)), ..Default::default() },
+        )
+    });
     true
 }
 
@@ -1075,8 +1139,9 @@ fn draw_army(game: &Game, a: &Army, assets: &Assets, art: Option<&DtArt>, cam: &
     }
     let next = a.path.first().map(|&t| game.world.map.center(t));
     let pos = game.army_display_pos(a);
-    // Its walk frames run by game time (engine.md §7), not by the clock on the wall.
-    let frame = game.army_walk_frame(a).unwrap_or(0);
+    // Its walk frames run by game time (engine.md §7), not by the clock on the wall; standing,
+    // its idle animation by the wall clock (0x4c868c).
+    let frame = idle_sprite_frame(game, a, clock_ms()).or_else(|| game.army_walk_frame(a)).unwrap_or(0);
     if a.sails() {
         if !draw_figure(art, ship_stem(a.ship), pos, next, frame, cam, Stand::Afloat) {
             let sail = if a.hostile() { Color::new(0.15, 0.12, 0.12, 1.0) } else { Color::new(0.92, 0.9, 0.82, 1.0) };
@@ -1110,7 +1175,9 @@ fn draw_hero(game: &Game, assets: &Assets, art: Option<&DtArt>, cam: &Camera) {
     let next = game.display_heading();
     let c = cam.to_screen(game.display_pos());
     if game.aboard() {
-        if !draw_figure(art, ship_stem(razdor::rules::ships::kind::HERO), game.display_pos(), next, hero_frame(next), cam, Stand::Afloat) {
+        // At rest aboard, his galley rocks through its 8 frames by the frame clock (0x4c868c).
+        let frame = if !game.moving() && !game.waiting() && game.location.is_none() { idle::hero_ship_idle_frame(clock_ms()) } else { hero_frame(next) };
+        if !draw_figure(art, ship_stem(razdor::rules::ships::kind::HERO), game.display_pos(), next, frame, cam, Stand::Afloat) {
             draw_ship(cam, game.display_pos(), HERO_SAIL);
         }
         return;
@@ -1122,6 +1189,7 @@ fn draw_hero(game: &Game, assets: &Assets, art: Option<&DtArt>, cam: &Camera) {
 
 fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<(Tile, Option<Color>)>) {
     let art = assets.dt.as_ref();
+    stamp_idle(game, clock_ms());
     draw_terrain(game, art, cam);
     let map = &game.world.map;
     let ((c0, c1), (r0, r1)) = cam.visible(map);

@@ -1683,11 +1683,32 @@ fn the_stop_draws_an_idle_offset_for_each_patroller_facing_a_step_outside_buildi
     g.snap_due = true;
     g.armies_snap();
     let mut want = Rng::new(before);
-    want.random(3000);
-    want.random(3000);
+    let first = want.random(3000);
+    let fifth = want.random(3000);
     assert_eq!(g.rng.state(), want.state(), "armies 1 and 5 (a roamer with a radius counts too)");
     g.armies_snap();
     assert_eq!(g.rng.state(), want.state(), "once per stop");
+    // The draws are the restarted armies' new offsets (+0x216a); the others keep theirs.
+    let minds: Vec<(i32, u32)> = g.world.armies.iter().map(|a| (a.mind.idle_offset, a.mind.idle_restarts)).collect();
+    assert_eq!((minds[0], minds[4]), ((first, 1), (fifth, 1)));
+    assert!(minds[1..4].iter().all(|&(_, restarts)| restarts == 0));
+}
+
+#[test]
+fn the_map_load_gives_every_army_its_idle_offset_in_file_order() {
+    // 0x4b4b43: after the plant jitter, Random(3000) per army of the file, in file order,
+    // from a generator the load then sets to 1.
+    let mut s = map();
+    s.armies = (1..=3).map(|id| army(id, (10 + 5 * id as u16, 10), 4, ENEMY, 0, &[troop(4, 0, 1)])).collect();
+    let g = start(&s);
+    let plants = crate::rules::rng::plant_layer(s.header.width as i32, s.header.height as i32, s.objects.iter().map(|o| (o.x as i32, o.y as i32, o.class, o.sprite)));
+    let mut r = Rng::default();
+    r.jitter_plants(s.header.width as i32, &plants);
+    let want: Vec<i32> = (0..3).map(|_| r.random(3000)).collect();
+    let mut got: Vec<(u8, i32)> = g.world.armies.iter().map(|a| (a.id, a.mind.idle_offset)).collect();
+    got.sort();
+    assert_eq!(got, vec![(1, want[0]), (2, want[1]), (3, want[2])]);
+    assert!(want.iter().all(|o| (0..3000).contains(o)));
 }
 
 #[test]

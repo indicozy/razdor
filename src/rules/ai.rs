@@ -284,6 +284,15 @@ pub struct AiMind {
     /// with its record, as the original's does; it leaves at the arrival's end.
     #[serde(skip)]
     pub fallen: bool,
+    /// Its idle animation's `Random(3000)` ms offset (+0x216a), drawn at the map load, the
+    /// save load and the stops that restart it ([`Game::armies_snap`]); not saved, as the
+    /// original draws it again at every load. Only the sprite reads it ([`super::idle`]).
+    #[serde(skip)]
+    pub idle_offset: i32,
+    /// How many stops have restarted its idle animation (each sets its stamp, +0x2166, to
+    /// the frame clock): the screen stamps it again when this changes.
+    #[serde(skip)]
+    pub idle_restarts: u32,
     /// Tests walk it along the path they give it: it never plans.
     #[cfg(test)]
     #[serde(skip)]
@@ -1552,7 +1561,8 @@ impl Game {
     /// every army the AI steers, in id order, ends a step under way (Razdor has none: its
     /// steps end as they start) and, when it faces a next step (direction below 8), has a
     /// patrol radius above 0 and stands in no building, restarts its idle animation at a
-    /// `Random(3000)` ms offset. The offset only times the sprite; the draw is what counts.
+    /// `Random(3000)` ms offset (stamp +0x2166, offset +0x216a). The offset only times the
+    /// sprite ([`super::idle`]), but the draw shifts every later roll.
     pub fn armies_snap(&mut self) {
         if !std::mem::take(&mut self.snap_due) {
             return;
@@ -1560,7 +1570,22 @@ impl Game {
         for k in 0..self.world.armies.len() {
             let a = &self.world.armies[k];
             if managed(a) && !a.mind.facing_none && a.patrol_radius > 0 && a.mind.standing.is_none() {
-                let _idle_offset_ms = self.rng.random(super::rng::ARMY_IDLE_DRAW);
+                let offset = self.rng.random(super::rng::ARMY_IDLE_DRAW);
+                let mind = &mut self.world.armies[k].mind;
+                mind.idle_offset = offset;
+                mind.idle_restarts = mind.idle_restarts.wrapping_add(1);
+            }
+        }
+    }
+
+    /// The idle offsets a load draws, one per army of the map file in file order (army id
+    /// `k + 1` takes `offsets[k]`), set on every army record (0x4b4b43, 0x4b8691).
+    pub(crate) fn set_idle_offsets(&mut self, offsets: &[i32]) {
+        let w = &mut self.world;
+        let armies = w.armies.iter_mut().chain(w.inactive.iter_mut()).chain(w.respawns.iter_mut().map(|r| &mut r.army));
+        for a in armies {
+            if let Some(&o) = (a.id as usize).checked_sub(1).and_then(|k| offsets.get(k)) {
+                a.mind.idle_offset = o;
             }
         }
     }

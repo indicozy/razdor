@@ -346,7 +346,8 @@ animate.
 | Tree sway (class 9) | `s = (t div 70 + phase) mod 51`; offset `0.2·(s − 12.5)` for s < 25, else `0.2·(37.5 − s)`; added to the x coordinate of the sprite's first two vertices, so the top edge leans left and right (−2.5 … +2.5 px, period 3.57 s) | 0x4c99d0 | code |
 | Hero walking | frame `((t − step start) div (WalkDelay div 2)) and 3`, plus 3: figure frames 3–6, two frames per step at the default 150 ms; standing = frame 0 | 0x4ae8f7 | code |
 | AI army walking | frame `((game time div 1000) and 3) + 3`: it changes every 10 **game** minutes | 0x4ad779 | code |
-| AI army idle on land | a 20-step table at 250 ms per step, from `t − stamp − offset` | 0x4c868c | code |
+| AI army idle on land | step `(t − stamp − offset) div 250`, held at 0 while negative, `mod 20`, indexes the figure's 20-entry frame table (0x4ed6d0, below); only while the map is idle (flag 0x68dc62: no walk, no wait) and for an army in no building | 0x4c868c, 0x4cc17b | code |
+| AI ship idle; the hero's galley at rest | `(t − stamp + offset) div 200 and 7` (the offset is *added*); the hero aboard and in no building: `t div 200 and 7` | 0x4c868c | code |
 | Ship | 8 frames: AI ships at 100 ms (0x4ad314) or 200 ms with the army's offset (0x4c868c); the hero's ship while moving at `((t − step start) div (WalkDelay div 2)) and 7` (0x4ad4cc) | | code |
 | Selection ring | 8 frames of 100 ms, 5.625° per frame | map 004c612c | code |
 | Route arrows | brightness 150–240 by a triangle wave over `(t/10 + 18k) mod 181` | map 004c612c | code |
@@ -366,6 +367,24 @@ animate.
   non-empty queue runs, and an entry removes itself when finished. So animations in one queue play
   one after another, and different queues play at the same time. code.
 - The AI army offsets (`Random(3000)`, §3.4) only desynchronise the idle animations.
+- **Idle stamps and offsets** (code): the map load stamps every army with the raw time and draws
+  its offset (0x4b4b38, 0x4b4b43), the save load draws them again (0x4b8691), and the hero's stop
+  restamps and redraws the armies it restarts (0x4ad8a0, world.md §2.2.1). The stamp is at army
+  +0x2166, the offset at +0x216a; the facing row is the direction of the next step (+0x74; above
+  7 it is 5, the viewer). Outside the idle map the sprite keeps the frame last set (the walk sets
+  its own frames, 0x4ad314).
+- **Idle frame tables** (0x4ed6d0, 20 sheet frames per figure, in the order of the 13 figure
+  names at 0x4ed238): figures 0–3 (the heroes, the galley) all 0; Rogue and Necromant
+  `0 0 0 0 1 1 1 1 0 0 0 0 1 1 2 2 1 1 0 0`; Peasant `1 1 1 1 1 1 1 2 2 2 1 1 1 1 1 1 1 2 2 2`;
+  Knight `0 0 0 0 1 1 1 1 2 2 2 2 0 0 0 0 1 1 1 1`; Zombie `1 1 1 1 2 2 4 4 1 1 2 2 2 2 4 4 2 2 1 1`;
+  **Ghost `0 0 1 1 2 2 3 4 5 5 6 0 1 1 2 2 3 4 5 5`** (it drifts through frames 0–6); Mage as the
+  Rogue but frames 14–15 are 7. The ships' figures (11, 12) take the ship branch; their rows would
+  run into the pointer table after it.
+- **Figure blending** (code): every figure on the map, the hero's too, is drawn with SRCBLEND ONE
+  and DESTBLEND INVSRCALPHA (0x4c9ef6, 0x4ca0d9), i.e. as premultiplied colour. The sheets are made
+  so: in `Knight.ugs` or `Zombie.ugs` no channel exceeds alpha, while most of `Ghost.ugs`'s pixels
+  have colour above their alpha and about a quarter have alpha 0 with colour: that light is added
+  to the map, the Ghost's glow. Drawn with straight alpha it vanishes.
 
 ## 8. Sound
 
@@ -450,7 +469,7 @@ silent.
 |---|---|---|---|
 | Generator | the LCG `S×214013+2531011`, `random(n)` = 15 bits `mod n`, drawn even for n = 0, one state per game, not saved (`rules/rng.rs`); Razdor's own rolls use `range(lo, hi)` = one `Random(hi − lo + 1)`; the Community event generator (`EventRng`) with its retry slip, seeded from the clock at every load | MSVC-style LCG `S×214013+2531011`, 15-bit output `mod n`, cap 32767; one global state | Matches |
 | Seeding | 1 at every new game and campaign map (`Game::with_world`), not saved (save format 2; format 1 saves load, their generator ignored); a save load runs the load sequence: plant hash of the map's last plant, `Random(3000)` per army of the map file, `Random(90000)` for the world music (`Rng::save_load`) | 0 at start, **1 at every map load** (before the markets), not saved; after a load it comes from the plant hash | Matches (a map without plants starts from 0, not from the last session's state; the plant hash uses f64 sin/cos, see §11) |
-| Draw order | map load: 1, the markets, the music's draw; save load as above; midnight building by building, its market restock then its barracks slots (`economy_midnight`) | fixed order at load (§3.2) and at midnight (restock, then barracks, per building) | Matches; the music rotation draws in real time and the event, village and shipyard windows and the victory box and the noon report (the event window) draw their chord's `Random(3)` as they open (`rules::music`, `Game::event_chord`); the idle patrollers' `Random(3000)` when the hero stops is not drawn |
+| Draw order | map load: 1, the markets, the music's draw; save load as above; midnight building by building, its market restock then its barracks slots (`economy_midnight`) | fixed order at load (§3.2) and at midnight (restock, then barracks, per building) | Matches; the music rotation draws in real time and the event, village and shipyard windows and the victory box and the noon report (the event window) draw their chord's `Random(3)` as they open (`rules::music`, `Game::event_chord`); the idle patrollers' `Random(3000)` when the hero stops is drawn and times their idle animation (`Game::armies_snap`) |
 | Barracks roll | one `Random(D div max)` per slot with a unit, a maximum and room, also when the divisor is 0 or 1 (`economy::regrow`) | always one draw per qualifying slot | Matches |
 | Wander points | 4 points, x then y: `xmin + Random(xmax + 1 − xmin)` in the patrol box (post ± radius, clamped), else `Random(W)`, `Random(H)` over the map; no passability test; the own cell and column 0 dropped; guards draw nothing (`ai::wander_points`) | 4 points uniform over the whole map (non-patrol) or the patrol box, no passability test, own cell dropped | Matches (drawing; Razdor's goal scoring still seeds only patrollers' points and has no obstacle map, ai.md) |
 | AI promotion | `Random(3)` for Militia and Infantry, `Random(3) + 1` rejection loop for others (`ai_promote`) | same | Matches |
@@ -458,7 +477,9 @@ silent.
 | Plant jitter and sway | the draws are made at a save load for the stream (`Rng::jitter_plants`), over the original's `(W + 8) × (H + 2)` cell array with its columns for the hash (`rng::plant_layer`); the map draws the offsets (`rng::plant_offset`), not the sway | per-plant offsets from the trig hash; triangle sway 3.57 s | partly (the sway is left for later) |
 | Frame pacing | macroquad `next_frame`, variable window size, game time from frame time | vsync flip, no fixed tick, all timers on a millisecond clock | equivalent in spirit |
 | Clock pause on focus loss | not modelled | Now freezes while inactive (walks, waits, music, fades stop) | missing |
-| Hero walk frames | 8 frames at 10 per second while moving (`world_view::draw_figure`) | frames 3–6 at half the WalkDelay (75 ms default); AI walk frames by game time; land idle 20 × 250 ms | differs |
+| Hero walk frames | 8 frames at 10 per second while moving (`world_view::draw_figure`) | frames 3–6 at half the WalkDelay (75 ms default) | differs |
+| Armies' idle animation | on the idle map every army in no building takes its figure's 20 × 250 ms table (ships 8 × 200 ms, offset added; the hero's galley at rest by the clock), from a stamp the screen sets at the load and when a stop restarts it, with the offsets of the map load, the save load and the stop (`rules::idle`, `Game::armies_snap`, `world_view::idle_sprite_frame`); the last idle frame is kept while the hero walks or waits | §7: 0x4c868c, 0x4ed6d0, 0x4ad8a0, 0x4b4b43 | Matches (the stamp is the first frame drawn after the load, not the load's own moment; a map without plants draws its offsets from 0) |
+| Figure blending | every map figure with ONE / INVSRCALPHA (`chrome::premultiplied` in `world_view::draw_figure`) | 0x4c9ef6 | Matches |
 | AI walk frames | Frames 3–6, the next every 10 game minutes (`(time_cs div 1000) and 3` + 3) while the army has a step to take, by the game time interpolated inside the stretch, so they stand still with it; its standing frame without a step (`Game::army_walk_frame`) | 0x4ad660 → 0x4ad314 with `[0x68dcb8] div 1000`, from the AI's per-frame advance 0x4ade3c (only while the hero walks or waits) | Matches |
 | Water | frame `(t div 100) mod 32` multiplied twice into the ground of codes 0–2, ⅓ frame per cell, frames uploaded once and picked per draw (`ui::terrain`); its share of Razdor's bilinear blend is animated too, where the original leaves the edge overlays still; still water without the BMPs and in the editor | 32 frames at 100 ms on terrain codes 0–2, MODULATE2X on the cell quads | Matches (blend edges differ) |
 | Cursor animation | the original's pointers drawn last each frame over the hidden system pointer; the 50-frame strips at 30/50/30/25 ms from the clock, hotspots (0,0) for the arrow and its stills, (−21,−21) clock and house, (−24,−24) swords, (−20,−20) question mark (`ui/cursor.rs`); the system pointer without the install's art or out of focus | 50-frame cursors at 25/30/50 ms from raw time, hotspots per cursor | Matches |
