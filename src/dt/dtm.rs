@@ -1245,9 +1245,37 @@ pub struct Event {
     pub message: String,
     /// Parsed from `title`.
     pub flags: Option<FlagScript>,
-    /// Custom picture (size: the i32 at byte 163): u16 width, u16 height, 16-bit pixels
-    /// (L: RGB565).
+    /// Custom picture (size: the i32 at byte 163): u16 width, u16 height, 16-bit ARGB4444
+    /// pixels ([`event_picture_rgba`]).
     pub custom_picture: Option<Vec<u8>>,
+}
+
+/// An event's custom picture as RGBA: `(width, height, pixels)`, `None` when the data is
+/// shorter than its size says.
+///
+/// The original (outside the tutorial) draws it at 0x4d1693..0x4d1784: every pixel is a
+/// plain (unscrambled) ARGB4444 word; its low 12 bits pick the colour from the RGB444 table
+/// (0xae2b50, built at 0x4e3658 as `R·17, G·17, B·17`), its top nibble the alpha the same
+/// way, and 0x476a3c takes the alpha from that word's 5-bit blue: `(A·17 >> 3) / 31`. A
+/// pixel with A = 0 but a colour that is not black gets the alpha word 8 (8 / 31) instead.
+/// (Razdor read the pixels as RGB565, which shows the РК6 map as orange noise.)
+pub fn event_picture_rgba(data: &[u8]) -> Option<(u16, u16, Vec<u8>)> {
+    let w = u16::from_le_bytes([*data.first()?, *data.get(1)?]);
+    let h = u16::from_le_bytes([*data.get(2)?, *data.get(3)?]);
+    let px = data.get(4..4 + 2 * w as usize * h as usize)?;
+    let rgba = px
+        .chunks_exact(2)
+        .flat_map(|p| {
+            let v = u16::from_le_bytes([p[0], p[1]]);
+            let n = |s: u16| ((v >> s) & 15) as u8 * 17;
+            let blue5 = match (v >> 12) as u8 {
+                0 if v & 0xfff != 0 => 8,
+                a => (a * 17) >> 3,
+            };
+            [n(8), n(4), n(0), ((blue5 as u32 * 255 + 15) / 31) as u8]
+        })
+        .collect();
+    Some((w, h, rgba))
 }
 
 impl Event {
@@ -1811,6 +1839,22 @@ impl Scenario {
 
 #[cfg(test)]
 mod tests {
+    /// 0x4d1693..0x4d1784: ARGB4444, colour by the RGB444 table, alpha from the 5-bit blue
+    /// of the alpha nibble's table word, 8 / 31 for a coloured pixel with A = 0.
+    #[test]
+    fn event_pictures_are_argb4444() {
+        let words: [u16; 4] = [0xF361, 0x0000, 0x0F00, 0x8FFF];
+        let mut data = vec![4, 0, 1, 0];
+        data.extend(words.iter().flat_map(|w| w.to_le_bytes()));
+        let (w, h, rgba) = super::event_picture_rgba(&data).unwrap();
+        assert_eq!((w, h), (4, 1));
+        assert_eq!(&rgba[0..4], &[51, 102, 17, 255]);
+        assert_eq!(&rgba[4..8], &[0, 0, 0, 0]);
+        assert_eq!(&rgba[8..12], &[255, 0, 0, 66], "A = 0 with a colour: 8 / 31");
+        assert_eq!(&rgba[12..16], &[255, 255, 255, 140], "A = 8: (136 >> 3) / 31 = 17 / 31");
+        assert!(super::event_picture_rgba(&data[..10]).is_none());
+    }
+
     use super::*;
 
     fn w16(b: &mut [u8], o: usize, v: u16) {

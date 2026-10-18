@@ -415,7 +415,7 @@ condition next to it. The editor holds at most 5000 events.
 |---|---|
 | 23–24, 27–28, 87–88, 91–92 | U (small or rare values) |
 | 151–162 | U. Byte 156 is a 0/1 flag in about 2% of events; the editor's window does not write it. |
-| 163 | size of this event's custom picture, a u32 at 163–166 (the game reads all 32 bits; shipped sizes fit in the low u16). It is stored after the scenario picture: u16 width, u16 height, then width·height 16-bit pixels. The only example is 128×128, 32,772 bytes. The pixel format is probably RGB565 (L). |
+| 163 | size of this event's custom picture, a u32 at 163–166 (the game reads all 32 bits; shipped sizes fit in the low u16). It is stored after the scenario picture: u16 width, u16 height, then width·height 16-bit pixels. The only example is 128×128, 32,772 bytes (РК6, event 6). The pixels are plain (unscrambled) ARGB4444: the game takes the colour from the low 12 bits and the alpha from the top nibble (C: 0x4d1693, see `graphics-formats.md` and `original-mechanics/interface.md`). |
 | 165–170 | U |
 
 **Strings.** Each event has three strings:
@@ -468,7 +468,8 @@ The data is a LIT image, the same format as `Graphics/**/*.lit`:
 In mode 2, the data after the header begins with 8×8 quantisation tables, which suggests a JPEG-like DCT codec. The LIT
 codec itself is out of scope here (U).
 
-**Event pictures.** These follow the scenario picture, in event order (see event offset 163).
+**Event pictures.** These follow the scenario picture, in event order (see event offset 163): u16 width, u16 height,
+then ARGB4444 pixels as the UGS sprites have them, but not scrambled (C: 0x4d1693).
 
 ## 12. How a loader should use this
 

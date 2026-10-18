@@ -53,6 +53,8 @@ install file ──► src/dt/gfx.rs decode_file ──► gfx::Image (RGBA, not
   KeyPurple). `chrome::win(name)` = `Graphics/Windows/<name>.lit` drawn plainly with its own
   alpha. Prefer `Fx::Plain`: a black key was once used to hide the decoder's sign bug and
   ate dark pixels (commit 66d29ff).
+- A map event's own picture is unscrambled ARGB4444 (`dtm::event_picture_rgba`, 0x4d1693;
+  `ui::story` draws it); it was once read as RGB565 and showed as orange noise.
 - `DtArt` (`src/ui/dt_art.rs`) caches by `Key` (portrait, figure, item, terrain, object,
   building) and builds one `Atlas` for every map object and building sprite so the map
   draws in few batches.
