@@ -44,7 +44,8 @@ folder when it is an install, the remembered folder (`config_file`), then a sear
 `App::frame` in order:
 
 - per-frame resets: `input::begin_frame`, `chrome::begin_frame`, `cursor::begin_frame`,
-  `widgets::track_held_key`; Alt+Enter display mode (`display::hotkey_pressed`);
+  `widgets::track_held_key` (the original's one held key: any key up clears it, and the
+  system's repeats of the newest key still down hold it again, 0x475820); Alt+Enter display mode (`display::hotkey_pressed`);
 - settings pushed into the game each frame (`g.improved_ai`, `g.friends_let_pass`,
   `g.pass_on_bridges`, `g.pursue`, `g.walk_pace`, animation speed, row width) — the settings
   live in the UI, the rules only read plain fields; `main_menu::apply_options` puts the

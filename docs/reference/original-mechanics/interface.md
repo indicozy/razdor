@@ -92,6 +92,11 @@ until the next key-down or until a handler clears it. Typed characters are kept 
 Keys sent as system keys (Alt, F10) never reach the held key. Showing a window clears both the
 held and the released key, and if a key was held at that moment its next key-up is swallowed,
 so the key that opened a window does not act in it. **code** (475748, 47f358)
+The key-down branch (475820–475837) never looks at the repeat bit, so the system's typematic
+repeats of the newest key still down store it again: with two arrows down, letting the older go
+clears the held key and the map stops, then the newer one's first repeat (Windows' default,
+500 ms after it went down) holds it again and the map scrolls on; letting the newer go leaves
+nothing held (the system repeats only the newest key). **code** (475820, 475841)
 
 **One action per Esc.** Every screen that reacts to Esc uses one shared latch: when no key is
 held the latch opens; Esc with an open latch acts and closes it. A second Esc therefore needs
