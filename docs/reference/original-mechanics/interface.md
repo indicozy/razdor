@@ -541,6 +541,26 @@ neither the row nor the building line. Bug: ae6c0c is never written, `Hint4` is 
 c35000[0] (4e3dad) instead, so the no-payment line is the icon over an empty row (the text
 list adds an empty line, 47e46c). **code**
 
+**Text layout** (492f24, lists placed at 4d9060). Four text lists stacked up from the bottom of
+the panel's fill (X0+2 .. X0+0x108, 262 px wide). The description list (667bdc) is 262 wide
+with a 12 px margin each side (text 238 px wide from X0+14), 14 px a row, its bottom at the
+fill's bottom and rows·14 + 12 tall; it holds the type's description (not for the hero
+classes), then each trait line (492e70): an empty row first when the list already has rows,
+then the text, left aligned, with the trait's 25×25 icon (black-keyed by its bottom-left
+pixel) 16 px in from the list and 11 px over its first row (48e8f0). The loaders put six
+spaces before the description (48efd0, string 0x48f820) and before every hint, bonus and hero
+class text (4e36cc, string 0x4e4e40), so each paragraph's first row is indented and the icon
+stands in that indent. Fonts: the description in the white SanSerif, the hero class in the
+yellow (ae24c0), a bonus in green (ae24d4), the dead and unpaid lines in red, the back-row
+and own-building lines in blue; all with the shadow font ae24d8 in a game. Over that list the
+stat lists: labels from X0+30 (166 px), values right-aligned in the 40 px after them, so ending
+at X0+236; (lines + 1)·14 + 8 tall (8 px higher for a hero class); the level and "XP / need"
+13 px over their top with the shadow. Over them the name list (Benguiat, centred, its shadow
+ae24b0), 16 + 18 px. The wage line (4924c9) writes both its label and value in the bold
+orange SanSerif (ae24f4) over the bold shadow (ae2510). From the name list's top down the
+panel is darkened (4768f8 subtracting 113, 113, 129), fading in over the 56 px above in 28
+steps of 2 rows. **code**
+
 **Three values per stat.** The list (491fa4) first rebuilds the unit's stats (4908a8). Outside
 an interactive battle it copies the current block into the battle block, so the shown values
 are the current ones (items, potions, spells included); in battle they are the battle values.
@@ -756,6 +776,22 @@ when any is below; manevres and initiative are red when below. The D line compar
 defence: the melee one, or the ranged one when the row bonus applies; blue above the current
 value, red below the current **or** the level value. Unhurt Hits use an orange tint, wounded
 Hits red. **code**
+
+**Placement and fonts** (494f93–49565f). The card is 94 px wide; the strip's three lines have
+their cell tops 2, 14 and 26 px under the 94 px portrait. Left pieces start 2 px in; right
+pieces end 1 px before the card's right edge (x + 94 − 1 − width); Hits is centred with the
+halving dropping the odd pixel. All in the SanSerif tints, without a shadow font (text draw
+mode 1, black keyed): the attack and "Mnvr" in the untinted white ae24bc, "D" and "Ini" in the
+yellow ae24c0 (white less 25, 25, 125), unhurt Hits in the orange ae24c4, and the red ae24c8 /
+blue ae24cc for values below / above. **code**
+
+**Strip pictures** (made once at 4dc118, 0x4de0f0–0x4de1f7). Each is a 94×39 piece of
+`Win-paper` on the 16-bit surface: the plain one (ae2698) cut at (20, 20) with (148, 132, 148)
+taken off (4768f8 mode 1), a dark brown; the hero's (ae269c) the same, then red ×4222/1024 −
+227, green ×768/1024, blue 0 (48da5c), a deep red-brown; a named character's (ae26a0) cut at
+(220, 20), red and blue swapped (48dd40 with 3, 2, 1), then red 0, green ×1394/1024 − 196,
+blue ×2790/1024 − 517, a deep blue. 49462c blits the plain one, then the hero's or the named
+one over it. **code**
 
 **Shadows and the dead** (49462c, 493a64, art loaded at 4dbc26). Before the card the slot
 draws its shadow at the card's corner through the picture's alpha (476a3c): `Shadow-Unit`
@@ -1344,6 +1380,8 @@ parity rule they are candidates to hide or remove, not bugs to copy.
 | 75 | Main hall picture of a building kind without one | Matches: nothing drawn, the window's background shows (`building_view::main_hall`); Razdor drew its own sky, grass and the map sprite until 2026-10-18 (a player's report) | 0x4ba854 case 0 draws pictures only for types 1, 3–7, 10, 12; 0x4bb7c4 repaints the panel from the window surface | 9.8 |
 | 76 | New hero portraits | Matches (`chrome::hero_portrait`): the vignette off, the picked class ×1100/1024, the others grey copies shifted into blue or dark red with the vignette off again, at 16 bits. Razdor tinted them with one multiply colour until 2026-10-18 (a player's report: a flat wash with lifted darks) | 4d7d30, 4c1458 | 5 |
 | 77 | Ability icons' background | Matches (`gfx::key_bottom_left_565`, `chrome::trait_icon`): the colour of the bottom-left pixel transparent at 16 bits, a mod's BMP icon (8 or 24 bits) included. Razdor keyed the shipped violet only until 2026-10-18 (a player's report: a mod's icon on a white square) | 48d02c, 48e8f0, 4764c0, 47669c, 47754c | 9 |
+| 78 | Card stat strip | Matches (`unit_sheet::stat_strip`, `chrome::strip_picture`): the three strip pictures made from the paper, the pieces at the original's places and tints, no shadow; until 2026-10-18 a tinted paper and one pale yellow for every piece (a player's report) | 49462c, 494f93–49565f, pictures 0x4de0f0–0x4de1f7 | 9.5 |
+| 79 | Unit panel text | Matches (`unit_sheet::draw`): lists stacked from the bottom at the original's places, the description 238 px wide with the loaders' six-space indents, shadows, the bold orange wage line. Razdor still cuts a description that would push the name into the panel's top quarter (a mod's long texts), keeps its own darkening gradient and its battle status lines under the stats | 492f24, 4d9060, 48e8f0, 4924c9, 0x48f820, 0x4e4e40 | 9.1 |
 
 ## Unknowns
 

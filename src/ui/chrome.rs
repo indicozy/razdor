@@ -364,6 +364,79 @@ pub fn win(name: &str) -> Option<Texture2D> {
     art(&format!("Windows/{name}.lit"), Fx::Plain)
 }
 
+use gfx::quantize_565;
+
+/// The original's card strip picture: 94×39 (0x5e×0x27).
+pub const STRIP_SIZE: (u32, u32) = (94, 39);
+
+/// The picture under a card's stat strip, made from Win-paper at start-up as the original's
+/// (0x4dc118, 0x4de0f0–0x4de1f7): a 94×39 piece of the paper (0x476b8c), at the 16-bit
+/// screen's levels, then
+/// - plain (ae2698): the piece at (20, 20) with (148, 132, 148) taken off (0x4768f8 mode 1):
+///   a dark brown;
+/// - the hero's (ae269c): the same, then red ×4222/1024 − 227, green ×768/1024, blue 0
+///   (0x48da5c): a deep red-brown;
+/// - a named character's (ae26a0): the piece at (220, 20), red and blue swapped (0x48dd40 with
+///   3, 2, 1), then red 0, green ×1394/1024 − 196, blue ×2790/1024 − 517 (0x48da5c): a deep
+///   blue.
+pub fn strip_picture(paper: &Image, panel: super::unit_sheet::StripPanel) -> Image {
+    use super::unit_sheet::StripPanel;
+    let (w, h) = STRIP_SIZE;
+    let x0 = if panel == StripPanel::Named { 220 } else { 20 };
+    let mut img = Image { width: w, height: h, rgba: Vec::with_capacity((w * h * 4) as usize) };
+    for y in 0..h {
+        for x in 0..w {
+            // A paper smaller than the original's is read round (never seen in an install).
+            let px = paper.pixel((x0 + x) % paper.width.max(1), (20 + y) % paper.height.max(1));
+            img.rgba.extend_from_slice(&[px[0], px[1], px[2], 255]);
+        }
+    }
+    quantize_565(&mut img);
+    match panel {
+        StripPanel::Plain | StripPanel::Hero => {
+            subtract(&mut img, [148, 132, 148]);
+            quantize_565(&mut img);
+            if panel == StripPanel::Hero {
+                scale_channels(&mut img, [4222, 768, 0], [-227, 0, 0]);
+                quantize_565(&mut img);
+            }
+        }
+        StripPanel::Named => {
+            for p in img.rgba.chunks_exact_mut(4) {
+                p.swap(0, 2);
+            }
+            scale_channels(&mut img, [0, 1394, 2790], [0, -196, -517]);
+            quantize_565(&mut img);
+        }
+    }
+    img
+}
+
+/// [`strip_picture`] as a texture (`None` without the install's paper), made once and cached.
+pub fn strip_texture(panel: super::unit_sheet::StripPanel) -> Option<Texture2D> {
+    use super::unit_sheet::StripPanel;
+    let rel = "Windows/Win-paper.lit";
+    let key = match panel {
+        StripPanel::Plain => "#card-strip",
+        StripPanel::Hero => "#card-strip-hero",
+        StripPanel::Named => "#card-strip-named",
+    };
+    CHROME.with(|c| {
+        let mut c = c.borrow_mut();
+        let c = c.as_mut()?;
+        if let Some(t) = c.textures.get(key).and_then(|v| v[Fx::Plain as usize].as_ref()) {
+            return t.clone();
+        }
+        let t = find_path(&c.dir, &format!("Graphics/{rel}"))
+            .and_then(|p| gfx::decode_file(&p))
+            .map_err(|e| razdor::diag!("Discord Times art: {rel}: {e}"))
+            .ok()
+            .and_then(|frames| to_texture(&strip_picture(frames.first()?, panel)));
+        c.textures.entry(key.to_string()).or_default()[Fx::Plain as usize] = Some(t.clone());
+        t
+    })
+}
+
 pub fn win_fx(name: &str, fx: Fx) -> Option<Texture2D> {
     art(&format!("Windows/{name}.lit"), fx)
 }

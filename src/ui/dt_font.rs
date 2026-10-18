@@ -233,6 +233,12 @@ pub fn current_ttf() -> Option<Font> {
     super::widgets::face_font(i)
 }
 
+/// Screen px from a cell's top to the baseline at `size` in the current face's sheet (`None`
+/// when the face is not drawn from a sheet): the original places text by its cell's top.
+pub fn cell_baseline(size: f32) -> Option<f32> {
+    with_current(|font| font.baseline * font.scale(size))
+}
+
 /// Runs `f` with the current face's bitmap font, if the install has it and no TrueType
 /// stand-in loaded for the face.
 pub fn with_current<R>(f: impl FnOnce(&BitmapFont) -> R) -> Option<R> {
