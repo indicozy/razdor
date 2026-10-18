@@ -186,9 +186,27 @@ pub fn plant_hash(x: i32, y: i32, word: u16) -> u32 {
 /// even rows or `4 + Random(16)` on odd ones, then `Random(11)`. The same draws as
 /// [`Rng::jitter_plants`], made again for the picture and kept out of the draw trace.
 pub fn plant_offset(x: i32, y: i32, word: u16) -> (i32, i32) {
+    let (dx, dy, _) = plant_jitter(x, y, word);
+    (dx, dy)
+}
+
+/// [`plant_offset`] and the plant's sway phase, the third draw `Random(1000)` (0x4cfb24).
+pub fn plant_jitter(x: i32, y: i32, word: u16) -> (i32, i32, i32) {
     let mut r = Rng::new(plant_hash(x, y, word));
     let dx = if y % 2 == 0 { 28 - r.untraced(16) } else { 4 + r.untraced(16) };
-    (dx, r.untraced(11))
+    let dy = r.untraced(11);
+    (dx, dy, r.untraced(1000))
+}
+
+/// How far, in map pixels, the top edge of a class-9 plant (the small trees and bushes) leans
+/// at clock `t_ms` (engine.md §7, 0x4c99d0): `s = (t div 70 + phase) mod 51`, then
+/// `0.2·(s − 12.5)` while s < 25, else `0.2·(37.5 − s)`: a triangle wave between −2.5 and
+/// +2.5 px with a period of 51 × 70 ms = 3.57 s. The original adds it to the x of the sprite
+/// quad's first two vertices, its top corners; the bottom stays. Its animation flag
+/// (0x65d4d7) is forced on by the options reader (0x4b8a7c), so the trees always sway.
+pub fn tree_sway(t_ms: i64, phase: i32) -> f32 {
+    let s = (t_ms.div_euclid(70) + phase as i64).rem_euclid(51) as f32;
+    if s < 25.0 { 0.2 * (s - 12.5) } else { 0.2 * (37.5 - s) }
 }
 
 /// The original's cell array is 8 cells wider and 2 rows taller than the map (saves-data
@@ -328,6 +346,26 @@ mod tests {
         let mut r = Rng::new(77);
         assert!(!r.jitter_plants(3, &plant_layer(3, 2, [(0, 0, 12, 1), (1, 1, 5, 0)])));
         assert_eq!(r.state(), 77);
+    }
+
+    /// The trees sway (a player's report): the phase is the jitter's third draw (0x4cfb24) and
+    /// the lean a triangle wave of 51 steps of 70 ms between −2.5 and +2.5 px (0x4c99d0).
+    #[test]
+    fn small_trees_sway_by_their_phase_in_a_triangle_wave() {
+        let tree = 9 << 8 | 3;
+        let mut r = Rng::new(plant_hash(5, 4, tree));
+        let draws = [r.random(16), r.random(11), r.random(1000)];
+        let (dx, dy, phase) = plant_jitter(5, 4, tree);
+        assert_eq!((28 - draws[0], draws[1], draws[2]), (dx, dy, phase), "row 4 is even: 28 − Random(16)");
+        assert_eq!(plant_offset(5, 4, tree), (dx, dy));
+        assert_eq!(tree_sway(0, 0), -2.5);
+        assert!((tree_sway(12 * 70, 0) + 0.1).abs() < 1e-6, "s = 12");
+        assert!((tree_sway(24 * 70 + 69, 0) - 2.3).abs() < 1e-6, "s = 24, the last step up");
+        assert_eq!(tree_sway(25 * 70, 0), 2.5, "s = 25: the top");
+        assert!((tree_sway(50 * 70, 0) + 2.5).abs() < 1e-6, "s = 50");
+        assert_eq!(tree_sway(51 * 70, 0), tree_sway(0, 0), "3.57 s a period");
+        assert_eq!(tree_sway(0, 25), tree_sway(25 * 70, 0), "the phase is in steps");
+        assert_eq!(tree_sway(70 * 1000, 7), tree_sway(0, (1000 + 7) % 51));
     }
 
     #[test]

@@ -935,13 +935,40 @@ fn object_sprite_origin(o: &Decoration, w: f32, h: f32, cam: &Camera) -> Vec2 {
     corner + vec2(dx - w - 0.5, dy - h - 0.5) * (cam.scale / PX)
 }
 
+/// The part `src` of `texture` drawn at `at`, `size` big, its top edge moved `lean` px right.
+fn draw_leaning(texture: &Texture2D, src: Rect, at: Vec2, size: Vec2, lean: f32) {
+    let (tw, th) = (texture.width(), texture.height());
+    let (u0, v0, u1, v1) = (src.x / tw, src.y / th, (src.x + src.w) / tw, (src.y + src.h) / th);
+    let vertex = |x: f32, y: f32, u: f32, v: f32| Vertex::new(x, y, 0.0, u, v, WHITE);
+    let mesh = Mesh {
+        vertices: vec![
+            vertex(at.x + lean, at.y, u0, v0),
+            vertex(at.x + size.x + lean, at.y, u1, v0),
+            vertex(at.x + size.x, at.y + size.y, u1, v1),
+            vertex(at.x, at.y + size.y, u0, v1),
+        ],
+        indices: vec![0, 1, 2, 0, 2, 3],
+        texture: Some(texture.clone()),
+    };
+    draw_mesh(&mesh);
+}
+
 fn draw_object(o: &Decoration, art: Option<&DtArt>, cam: &Camera) {
     let c = cam.cell_centre(o.tile);
     let base = vec2(c.x, c.y + cam.cell_size().y / 2.0);
     let zoom = cam.scale / PX;
     if let Some((atlas, r)) = art.and_then(|a| a.map_atlas()).and_then(|at| Some((at, at.decoration(o.class, o.sprite)?))) {
         let at = object_sprite_origin(o, r.w, r.h, cam);
-        draw_texture_ex(&atlas.texture, at.x, at.y, WHITE, DrawTextureParams { dest_size: Some(vec2(r.w * zoom, r.h * zoom)), source: Some(r), ..Default::default() });
+        let size = vec2(r.w * zoom, r.h * zoom);
+        if o.class == object_class::TREES {
+            // The small trees and bushes sway: the quad's top corners move by the lean of
+            // their phase, the bottom stays (0x4c99d0, engine.md §7).
+            let (_, _, phase) = razdor::rules::rng::plant_jitter(o.tile.0, o.tile.1, u16::from(o.class) << 8 | u16::from(o.sprite));
+            let lean = razdor::rules::rng::tree_sway(clock_ms(), phase) * zoom;
+            draw_leaning(&atlas.texture, r, at, size, lean);
+            return;
+        }
+        draw_texture_ex(&atlas.texture, at.x, at.y, WHITE, DrawTextureParams { dest_size: Some(size), source: Some(r), ..Default::default() });
         return;
     }
     let s = cam.scale;
