@@ -60,6 +60,9 @@ change the selected entry's type or the action button label.
 
 **Tabs by building type** (economy.md §7, `town::tabs`). The first tab is the village's tribute or
 the shipyard's ship window, else the main hall. A shipyard opens nothing while the hero is at sea.
+The main hall's picture is the original's for the kind (`hall_picture`, 0x4ba854); a kind without
+one (palace, smithy, dungeon entrance) leaves the window's own background there (0x4bb7c4), with
+no sky, grass or map sprite.
 An ill-disposed building refuses services (`ServiceError::NotHere`).
 
 **Hiring and healing** (economy.md §2). `hire_price` follows the unit's cost and wage kind;
