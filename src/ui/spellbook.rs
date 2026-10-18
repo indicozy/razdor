@@ -21,34 +21,6 @@ use super::Screen;
 
 const COLS: usize = 3;
 
-/// "heals 30 hits", "defence +5, hits +20%", "-15 hits".
-pub fn effect_summary(s: &SpellDef) -> String {
-    use razdor::rules::items::stat_label;
-    let mut effects = Vec::new();
-    if let Some(h) = s.delta_fixed_hits {
-        effects.push(if h >= 0 { trf!("heals {h} hits", h) } else { trf!("{h} hits", h) });
-    }
-    if let Some(p) = s.delta_percent_hits {
-        effects.push(trf!("hits {p}% at once", p = format!("{p:+}")));
-    }
-    for (&st, &v) in &s.add {
-        effects.push(format!("{} {v:+}", stat_label(st)));
-    }
-    for (&st, &v) in &s.percent {
-        effects.push(format!("{} {v:+}%", stat_label(st)));
-    }
-    match s.life_lose_percent {
-        Some(p) if p < 0 => effects.push(trf!("max hits {p}%", p)),
-        Some(_) => effects.push(tr("lifts life-draining curses").into()),
-        None => {}
-    }
-    if effects.is_empty() {
-        tr("no effect").into()
-    } else {
-        effects.join(", ")
-    }
-}
-
 pub fn duration_text(s: &SpellDef) -> String {
     match Duration::of(s) {
         Duration::Instant => tr("instant").into(),
@@ -116,7 +88,7 @@ pub fn frame(
     selected: &mut usize,
     message: &mut Option<String>,
 ) -> Option<Screen> {
-    use super::chrome::{self, CREAM};
+    use super::chrome;
     let bar_pick = world_view::window_backdrop(game, assets, Some(super::game_bar::BarButton::Spells));
     let k = chrome::k();
     // The army screen's window: 836 × 600 video pixels over the map.
@@ -151,7 +123,6 @@ pub fn frame(
         }
         let icon = Rect::new(cr.x + 4.0 * k, cr.y + 4.0 * k, cr.h - 8.0 * k, cr.h - 8.0 * k);
         let tx = icon.x + icon.w + (cr.x + cr.w - icon.x - icon.w) / 2.0;
-        let room = cr.x + cr.w - icon.x - icon.w - 8.0 * k;
         let Some(s) = spell else {
             // The knot stamped in black: `MSign` less 192 taken off the paper (0x4dc118: 4768f8
             // then 476790 in mode 1 at (6, 6)).
@@ -182,27 +153,10 @@ pub fn frame(
         };
         chrome::spell_icon(s, icon);
         let cost = game.cast_cost(s);
-        let size = 12.0 * k;
-        super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
-            let ns = fit_size(&s.name, room, 17.0 * k);
-            chrome::shadow_centered(&ellipsize(&s.name, room, ns), tx, cr.y + 26.0 * k, ns, CREAM);
-        });
-        let effect = effect_summary(s);
-        // The card shows the cost function of `TimeCast` in hours, not the real wait (0x49bbe0).
-        let card_hours = game.card_cast_hours(s).max(0) as u64;
-        let mana_line = format!("{} {}, {} {}", own("Mana", n_("Mana:")), cost.mana, own("Reading", n_("Reading:")), hours(card_hours * 60, false));
-        let last = match Duration::of(s) {
-            Duration::Instant => own("MomentaryEffect", n_("Instant effect")),
-            Duration::Minutes(m) => format!("{} {}", own("TimeOfEffect", n_("Lasts:")), hours(m, true)),
-        };
-        let mana_color = if game.mana >= cost.mana { Color::new(1.0, 0.72, 0.3, 1.0) } else { chrome::RED_TEXT };
-        let mut y = cr.y + 50.0 * k;
-        for line in wrap(&effect, room, size).iter().take(2) {
-            chrome::shadow_centered(line, tx, y, size, chrome::BLUE_TEXT);
-            y += 13.0 * k;
-        }
-        chrome::shadow_centered(&ellipsize(&mana_line, room, size), tx, y, size, mana_color);
-        chrome::shadow_centered(&ellipsize(&last, room, size), tx, y + 13.0 * k, size, Color::new(1.0, 0.72, 0.3, 1.0));
+        // The book's cells are the original's spell cards (0x4d261c → 0x49bde4): the card
+        // text of 0x49ba84 in the room right of the picture, red when unaffordable.
+        let text = Rect::new(icon.x + icon.w, cr.y, cr.x + cr.w - icon.x - icon.w, cr.h);
+        super::typography::Role::Body.with(|| card_text(game, s, text, true));
         if hover {
             if game.mana < cost.mana {
                 tooltip(&[(own("NoManaForSpell", n_("Not enough mana\nto cast this spell!")).replace('\n', " "), chrome::RED_TEXT)]);
@@ -268,53 +222,94 @@ pub(super) fn cast(game: &mut Game, spell: u32, target: CastTarget, message: &mu
     }
 }
 
-/// A spell's card as the sanctuary shows it (0x49bde4): a box with the spell's picture and
-/// its silver frame on the left (100 px, 6 px in), and to its right, centred and wrapped
-/// into the rest of the box, the name, a blank line, what it does, the mana and reading
-/// time and how long it lasts, the block centred in the box's height.
-pub fn spell_card(game: &Game, s: &SpellDef, r: Rect) {
-    super::typography::Role::Body.with(|| spell_card_in_face(game, s, r));
+
+/// A spell's card as the sanctuary and the event window show it (0x49bde4): a box with the
+/// spell's picture and its silver frame on the left (100 px, 6 px in), and to its right the
+/// card text ([`card_text`]). `tint_mana`: a spell over the hero's mana turns red, as
+/// everywhere but the sanctuary's tab (0x49be2c skips the mana test on tab 4, 0x68dc88).
+pub fn spell_card(game: &Game, s: &SpellDef, r: Rect, tint_mana: bool) {
+    use super::chrome;
+    super::typography::Role::Body.with(|| {
+        let k = chrome::k();
+        chrome::surface(r, chrome::Skin::Brown);
+        chrome::silver_frame(r, k.max(1.0));
+        let side = (r.h - 12.0 * k).min(100.0 * k);
+        let icon = Rect::new(r.x + 6.0 * k, r.y + (r.h - side) / 2.0, side, side);
+        chrome::spell_icon(s, icon);
+        let left = icon.x + icon.w + 2.0 * k;
+        card_text(game, s, Rect::new(left, r.y, r.x + r.w - left, r.h), tint_mana);
+    });
 }
 
-fn spell_card_in_face(game: &Game, s: &SpellDef, r: Rect) {
+/// The card's fonts (0x49bde4 → 0x49ba84; the SanSerif tints of 0x4dbc26, white less a delta).
+/// 0xae24c0, less (25, 25, 125): the effect text of a spell on the enemy.
+const EFFECT_YELLOW: Color = Color::new(230.0 / 255.0, 230.0 / 255.0, 130.0 / 255.0, 1.0);
+/// 0xae24cc, less (180, 70, 0): the effect text of a spell on the own army (Target 1).
+const EFFECT_BLUE: Color = Color::new(75.0 / 255.0, 185.0 / 255.0, 1.0, 1.0);
+/// 0xae24c4, less (20, 90, 180): the cost and duration lines.
+const GOLD: Color = Color::new(235.0 / 255.0, 165.0 / 255.0, 75.0 / 255.0, 1.0);
+/// 0xae24c8, less (0, 152, 159): every line of a spell the hero cannot afford.
+const UNAFFORDABLE: Color = Color::new(1.0, 103.0 / 255.0, 96.0 / 255.0, 1.0);
+/// 0xae24a4, Benguiat less (0, 80, 170): the name of a spell the hero cannot afford.
+const UNAFFORDABLE_NAME: Color = Color::new(1.0, 175.0 / 255.0, 85.0 / 255.0, 1.0);
+
+/// The card text (0x49ba84) in `area`, centred in it both ways and word-wrapped to it as one
+/// paragraph per part (the text list 0x47e46c breaks at the last space that fits): the name;
+/// then, only when the spell has an effect text, an empty line, the effect text (0x49b63c,
+/// [`razdor::rules::spell_hint::effect_text`] with the install's `[Skills]` labels), the
+/// cost line (`Mana`, `Reading`, `Hour`) and the duration line (`MomentaryEffect`, or
+/// `TimeOfEffect` with the hours and `Hours`). The effect is yellow, blue for a spell on the
+/// own army; cost and duration orange. With `tint_mana` a spell over the hero's mana has all
+/// its lines red, its name in the red Benguiat, and its effect is not turned blue
+/// (0x49be2c, 0x49bb36).
+fn card_text(game: &Game, s: &SpellDef, area: Rect, tint_mana: bool) {
     use super::chrome::{self, CREAM};
+    use super::typography::Role;
     let k = chrome::k();
-    chrome::surface(r, chrome::Skin::Brown);
-    chrome::silver_frame(r, k.max(1.0));
-    let side = (r.h - 12.0 * k).min(100.0 * k);
-    let icon = Rect::new(r.x + 6.0 * k, r.y + (r.h - side) / 2.0, side, side);
-    chrome::spell_icon(s, icon);
-    let left = icon.x + icon.w + 2.0 * k;
-    let room = r.x + r.w - left - 8.0 * k;
-    let tx = left + (r.x + r.w - left) / 2.0;
+    let room = area.w - 12.0 * k;
+    let tx = area.x + area.w / 2.0;
     let cost = game.cast_cost(s);
-    let card_hours = game.card_cast_hours(s).max(0) as u64;
-    let mana_line = format!("{} {}, {} {}", own("Mana", n_("Mana:")), cost.mana, own("Reading", n_("Reading:")), hours(card_hours * 60, false));
-    let last = match Duration::of(s) {
-        Duration::Instant => own("MomentaryEffect", n_("Instant effect")),
-        Duration::Minutes(m) => format!("{} {}", own("TimeOfEffect", n_("Lasts:")), hours(m, true)),
-    };
-    let name_size = super::typography::Role::Name.size(17.0 * k);
-    let names = super::typography::Role::Name.with(|| wrap(&s.name, room, name_size));
-    let name_lh = super::typography::Role::Name.line_height(18.0 * k);
-    let size = super::typography::Role::Body.size(12.0 * k);
-    let gold = Color::from_rgba(235, 165, 75, 255);
-    let effect_ink = if magic::targets_enemy(s) { Color::from_rgba(255, 255, 155, 255) } else { Color::from_rgba(75, 185, 255, 255) };
-    let mut lines: Vec<(String, Color)> = wrap(&effect_summary(s), room, size).into_iter().map(|l| (l, effect_ink)).collect();
-    lines.extend(wrap(&mana_line, room, size).into_iter().map(|l| (l, gold)));
-    lines.extend(wrap(&last, room, size).into_iter().map(|l| (l, gold)));
-    let line_h = super::typography::Role::Body.line_height(13.0 * k);
-    // A long name wraps at the same font size, as the two-line title in the reference.
-    let block = names.len() as f32 * name_lh + line_h * 0.5 + lines.len() as f32 * line_h;
-    let top = r.y + ((r.h - block) / 2.0).max(3.0 * k);
-    super::typography::Role::Name.with(|| {
+    let red = tint_mana && game.mana < cost.mana;
+    let effect = razdor::rules::spell_hint::effect_text(s, &super::spell_badges::label);
+    let name_size = Role::Name.size(17.0 * k);
+    let names = Role::Name.with(|| wrap(&s.name, room, name_size));
+    let name_lh = Role::Name.line_height(18.0 * k);
+    let size = Role::Body.size(12.0 * k);
+    let line_h = Role::Body.line_height(13.0 * k);
+    let mut lines: Vec<(String, Color)> = Vec::new();
+    // Without an effect text the card has the name alone (0x49bb0b).
+    if !effect.is_empty() {
+        let effect_ink = if red {
+            UNAFFORDABLE
+        } else if razdor::rules::spell_hint::on_own_army(s) {
+            EFFECT_BLUE
+        } else {
+            EFFECT_YELLOW
+        };
+        lines.extend(wrap(effect.trim_end(), room, size).into_iter().map(|l| (l, effect_ink)));
+        // The card shows the cost function of `TimeCast` in hours, not the real wait (0x49bbe0).
+        let card_hours = game.card_cast_hours(s).max(0) as u64;
+        let mana_line = format!("{} {}, {} {}", own("Mana", n_("Mana:")), cost.mana, own("Reading", n_("Reading:")), hours(card_hours * 60, false));
+        let last = match Duration::of(s) {
+            Duration::Instant => own("MomentaryEffect", n_("Instant effect")),
+            Duration::Minutes(m) => format!("{} {}", own("TimeOfEffect", n_("Lasts:")), hours(m, true)),
+        };
+        let ink = if red { UNAFFORDABLE } else { GOLD };
+        lines.extend(wrap(&mana_line, room, size).into_iter().map(|l| (l, ink)));
+        lines.extend(wrap(&last, room, size).into_iter().map(|l| (l, ink)));
+    }
+    let gap = if lines.is_empty() { 0.0 } else { line_h };
+    let block = names.len() as f32 * name_lh + gap + lines.len() as f32 * line_h;
+    let top = area.y + ((area.h - block) / 2.0).max(3.0 * k);
+    let name_ink = if red { UNAFFORDABLE_NAME } else { CREAM };
+    Role::Name.with(|| {
         for (n, name) in names.iter().enumerate() {
-            chrome::shadow_centered(name, tx, top + n as f32 * name_lh + name_size * 0.72, name_size, CREAM);
+            chrome::shadow_centered(name, tx, top + n as f32 * name_lh + name_size * 0.72, name_size, name_ink);
         }
     });
-    let mut y = top + names.len() as f32 * name_lh + line_h * 0.5 + size * 0.72;
+    let mut y = top + names.len() as f32 * name_lh + gap + size * 0.72;
     for (line, color) in lines {
-        if y > r.y + r.h - 2.0 * k {
+        if y > area.y + area.h - 2.0 * k {
             break;
         }
         chrome::shadow_centered(&line, tx, y, size, color);

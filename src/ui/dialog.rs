@@ -618,7 +618,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         draw_rectangle(px + 8.0, py + 8.0, pw, ph, Color::new(0.0, 0.0, 0.0, 0.45));
         if spell {
             if let Some(s) = game.content.spells.iter().find(|s| s.id == id) {
-                super::spellbook::spell_card(game, s, Rect::new(px, py, pw, ph));
+                super::spellbook::spell_card(game, s, Rect::new(px, py, pw, ph), true);
             }
         } else {
             super::item_text::draw(game, assets, ItemId(id), Rect::new(px, py, pw, ph), super::item_text::ItemBox::Tooltip, o);

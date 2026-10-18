@@ -105,6 +105,12 @@ the matching cells packed; an empty row of it puts the held item in the first em
 Enter picks the first match up. An empty worn slot on the unit panel is the original's picture
 (`chrome::empty_item_slot`), a worn item its picture alone.
 
+A spell's card, wherever it is shown (the spell book's cells, the sanctuary's description, the
+event window's spell tooltip), has the same text, drawn by `spellbook::card_text` in
+`src/ui/spellbook.rs` (`spellbook::spell_card` adds the box and picture): the name, then the
+effect text of `rules::spell_hint::effect_text` (the same builder as the badge hint's), the
+cost and the duration line, each word-wrapped as one paragraph (interface.md §9.3).
+
 The custom battle's setup (`Screen::CustomSetup`, drawn by `custom_battle::frame` in
 `src/ui/custom_battle.rs`, a Razdor extra) keeps its armies in `rules::custom::Setup`. Its left
 column has two tabs, the unit types (`custom::unit_list`) and the items the picked unit may
