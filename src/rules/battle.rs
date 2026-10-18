@@ -1659,27 +1659,34 @@ impl Battle {
             if !(s.is_mage() && s.magic_direction().helps_allies()) {
                 return None;
             }
+            let heals = t.wounded() && self.heal_amount(id, target, f.power) > 0;
+            // Razdor fixes the original's bug (the owner's decision, main only): a unit is
+            // blessed at most once a turn. The original offers a blessed ally while it is
+            // wounded (48555b, flag +0x9d), and every reserve unit to a reserve caster with
+            // no test at all (4857fb → 484b64 writes code 9; only the caster's own cell is
+            // checked, 485854). The action then heals only when the heal power is above 0
+            // (48a8d3, tested at 48a911/48a917), else it blesses again (48a93c), and the
+            // blessings add up. So a Death caster re-blessed a wounded living ally on every
+            // action (its heal is 0 there), and a sorceress in the reserve stacked blessings
+            // on the reserve units. Here an already-blessed unit is a target only for a heal
+            // that does something.
+            let blessed_again = t.blessed && !heals;
             if from.row == Row::Reserve {
                 // A caster in the reserve tends the reserve, and nothing else.
-                if t.slot.row != Row::Reserve {
-                    return None;
-                }
-                // Its own cell is a self-cast only while it is wounded or unblessed, else a
-                // pass (48555b end); the other reserve units have no such test.
-                if target == id && t.blessed && !t.wounded() {
+                if t.slot.row != Row::Reserve || blessed_again {
                     return None;
                 }
             } else {
                 // NoHeal's mark is tested only here: a reserve caster still tends a marked
                 // reserve unit (c2967a).
-                if !t.slot.row.is_active() || (t.blessed && !t.wounded()) || self.crippled(target) {
+                if !t.slot.row.is_active() || blessed_again || self.crippled(target) {
                     return None;
                 }
                 if self.school(id) == Some(MagicSchool::Elemental) && t.base.magic == Some(MagicSchool::Elemental) && !t.wounded() {
                     return None;
                 }
             }
-            Some(if t.wounded() && self.heal_amount(id, target, f.power) > 0 { Heal } else { Bless })
+            Some(if heals { Heal } else { Bless })
         }
     }
 
@@ -2400,6 +2407,12 @@ impl Battle {
             out.amount = heal.min(t.max_hp() - t.hp);
             self.fighters[target].hp += out.amount;
             self.log.push(crate::trf!("{name} heals {tname} +{healed}", name, tname, healed = out.amount));
+        } else if t.blessed {
+            // Razdor fixes the original's bug (the owner's decision, main only): no second
+            // blessing in a turn (see `option_at`). Only a Splash follow-up on a blessed
+            // neighbour (c26fd2 runs the case again on it, 48a93c blesses it again) or a
+            // Splash heal scaled down to 0 gets here; it does nothing.
+            out.kind = ActionKind::Bless;
         } else {
             out.kind = ActionKind::Bless;
             out.buff = self.bless_of(id, target, p);
@@ -3378,7 +3391,7 @@ fn berserk(f: &Fighter) -> i32 {
 
 mod clone;
 mod max_ai;
-pub use max_ai::{MaxBudget, MaxControl, MaxMove, MaxPoll, MaxReport, MaxTables, MaxThinker, MAX_AI_BUDGET};
+pub use max_ai::{MaxBudget, MaxControl, MaxMove, MaxPoll, MaxReport, MaxTables, MaxThinker, MAX_AI_BUDGET, MAX_QUICK_BUDGET};
 
 #[cfg(test)]
 mod tests;

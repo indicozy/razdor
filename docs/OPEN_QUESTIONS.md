@@ -8,14 +8,82 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **dt-original: the map info windows** (2026-10-18, a player's report). ed53cd1 (opaque
+  tooltip box, the dimmed title corners 0x4dbd83/0x4dbe0b, the fonts by style, the
+  original's layout, 0x48d3f8, 0x4ca9f0, 0x4cb18c) is on main only: dt-original's tooltip
+  code is older (no `garrison_shown`, its own owner and colour handling) and its red skin
+  lacks the (−20, −40, −100) of 0x4dbc34, so the pick conflicts. Port by hand together
+  with the red skin. Also not done on either branch: the 500 ms fade-in (0x4ca728) and the
+  hostile style's empty-cell icons (ae2774).
+
+- **A hire offer's card keeps the last card's building defence** (2026-10-17, found with a
+  player's report on the barracks' hire offers). The original paints an offer's card through
+  492f24 on a path that skips setting the building-defence value and the in-building flag
+  (68dc68, 68dc67: 0x492f98 jumps to 0x493106), so the offer shows "v + n" defences and the
+  in-building line whenever the card shown before it (in any window) had them. Razdor shows the
+  offer with neither (`building_view::recruit_panel`). Copying it needs the last card's
+  building defence kept across windows; what it is when the game starts is unknown.
+  The hire-offer change itself (d20471f: the card over the tabs, the green glow, the strip's
+  hint) is not on `dt-original`: that branch's building window is the older layout, with no
+  unit card panel (`selected_unit_panel`), no `window_layout` and no hint strip under the
+  counters (PR #8's), so the pick does not apply. Port it by hand once those are there.
+
+- **dt-original: the unit panel's figure box and the promotion preview's slots** (2026-10-18,
+  a player's report). Main places the engraving unscaled, centred in the original's
+  266 × 436 box under the panel's top (`unit_sheet::figure_rect`, 0x492f24 → 0x476a3c), and a
+  hovered promotion portrait's type card has no item slots (`items_view::panel_slots`,
+  0x4c39d8). dt-original's panel is still the older layout (the figure pinned 10 px under the
+  top, the text laid out under the figure's bottom, `Sheet::battle`), which main replaced
+  earlier with the text stacked from the panel's bottom (492f24); port that layout first,
+  then these two.
+
+- **Event window: the items lost row and the departed row's units** (2026-10-17, found with
+  a player's report on the units rows). The original shows a row of the items an event took
+  (`[Event] DelItem`, 0x4a9180, only when one of them was really there) and fills the
+  departed row only with units really taken, by the taken unit's type (0x4a9711, 0x4961d0).
+  Razdor has no items lost row and shows every unit type the event lists under "departed"
+  (`src/ui/story.rs` `event_dialog`). Settling it needs the event engine to report what it
+  actually took (`src/rules/events.rs`) so the window can show it. On `dt-original` the units
+  rows are ported (23151b6) but not the 92 × 92 unit bust at the side of the text: that
+  branch still draws an event's unit picture 128 × 128 above the text (main moved it to the
+  side earlier, not ported).
+- **A ring round the whole building** (2026-10-17, Ivan's report in Discord: the hero drawn on
+  top of a tent). Razdor now hides a figure inside a building as the Community exe does
+  (0x497abc) and keeps its one-cell ring. The player's snapshot of «the original» shows a
+  dashed yellow ring round a whole cemetery and asks for it, with colours for the hero, an
+  ally and an enemy. In the Community exe every ring is one cell: the branch of 0x48eeb0 that
+  marks a building's anchor with a ring of the footprint's width (0x48ef08–0x48ef54) is dead
+  (the jump at 0x48ef06 and the hook 0xc25ab0 both lead to the own-cell write). It was very
+  likely live in the vanilla game, which the snapshot probably shows; no vanilla exe is at
+  hand to confirm (interface.md §7.2). The ring's colour would be the mark's (yellow for the
+  hero, red-pink for armies whatever their side), not one per side. Bringing the big ring back
+  would be a deviation from the Community exe: the owner's call (main only).
+- **UI look from PR #8, not yet checked in the original's code** (2026-10-17, a player's PR,
+  merged with fixes). Checked and cited: the brown text box (0x48e4e8), the hint strip under
+  the army, barracks, garrison and battle (0x4dbcf3), the red skin's load offsets (0x4dbc34)
+  and the scenario list's item, inks and description (0x4e266e, 0x4c1a9c). Still taken from the
+  player's screenshots: the light paper's ornaments mirrored the other way
+  (`parchment_fill`), the defeat window's white title and stronger orange title ornaments,
+  the scenario list lighting no row on hover, and the brown and red skins tiled at the full
+  scale. The silver edge round the hint strip is Razdor's (the original's strip has none
+  baked in; whether its windows frame it is unknown). The PR (63f7c0b) and its follow-ups
+  (7fa971a, 2221fbf: the scenario list's highlight, fonts and description; the hall list's
+  parchment) are not on
+  `dt-original` yet: they sit on the PR's drawing helpers, so they go over together once the
+  rest is checked (41c6b89, the description's wheel, is there).
 - **«Максимум» against people** (2026-10-16, Razdor's strongest battle AI, the owner's
   request; main only). Against the original's AI (`src/rules/battle/max_ai/tests.rs`, 256
   games on the install's armies) Max wins 60% where the original wins 50%, and never ends
   below the original's score; the deeper minimax adds no wins there over the one-ply rollouts
   (the same tally at 4 plies / 600 nodes and at 150 ms). How much the minimax helps against a
-  human needs players' reports. Q and W keep the original's AI for the enemy (the hero's
-  auto-battle), so a battle finished with Q is easier than one played to the end: the owner
-  may want Max there too. Since the optimisations (tables, thinking ahead, threads; battle-ai
+  human needs players' reports. Settled 2026-10-18 (the owner's and Eisenwald's reports):
+  Q and W had kept the original's AI on both sides, so the enemy got easier once the player
+  handed his side over and his units were played by the original's AI; with Max chosen, Max
+  now plays both sides there (battle-ai flow §8 "Auto-battle": against Max the player's side
+  wins 42% instead of 27%). Still open: Max's search models the other side as the original's
+  AI (its rollouts) also when that side is Max, and its taste for small steps (a 3-action
+  vampire stepping out and back to a cell where a ranger hurts it less, Нлтчк's report) is
+  its evaluation at work, not a rule. Since the optimisations (tables, thinking ahead, threads; battle-ai
   flow §8) the pause per action is ~0.6 ms median and the depth reached about doubled, but
   against the original's AI the wins stay the same and the worth kept dips a little when the
   search goes deeper (the timeline harness, 12 battles: 0.71 left at depth 5.6, 0.67 at 7.5):
@@ -153,6 +221,12 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   button's own size.
 
 ## Settled
+
+- **The market lists' backing from PR #8** (2026-10-17). PR 63f7c0b drew the market's names
+  and prices on a 25% black overlay taken from screenshots. The code (0x4d9e33, 0x4d9ee5:
+  fill (24, 24, 24) in mode 5) takes (24, 24, 24) off the marble instead, and the icon column
+  is Win-paper less the same (0x4bddf0); Razdor now draws them so (economy.md §2, "How the
+  market and sanctuary lists are drawn").
 
 - **dt-original: the hero window and group 4** (2026-10-14). main bdc0c96 (the bar's flag opens
   the original's hero window, map tooltips centred on the mouse, the spell book's empty cells,

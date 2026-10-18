@@ -99,9 +99,9 @@ struct State {
     /// may reach a window it does not manage yet), so the mode is set once more after a while.
     since: f64,
     settled: bool,
-    /// When `follow` first ran (the first frame), and how many start nudges were sent.
+    /// When `follow` first ran (the first frame), and how many start nudge steps were taken.
     started: Option<f64>,
-    nudges: u8,
+    nudges: usize,
     sys: sys::Window,
 }
 
@@ -113,16 +113,69 @@ thread_local! {
 /// Seconds after a change when it is set once more.
 const SETTLE_SECONDS: f64 = 0.5;
 
-/// Seconds after the first frame when a windowed start nudges its window ([`nudges_due`]).
-const NUDGE_AT: [f64; 2] = [0.3, 1.5];
+/// A step of the start nudge ([`nudge_due`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(not(windows), allow(dead_code))]
+pub enum Nudge {
+    /// The window one pixel wider, kept so for some frames.
+    Grow,
+    /// The window back to its size.
+    Restore,
+}
 
-/// How many start nudges are due `elapsed` seconds after the first frame, `sent` already
-/// sent. On Windows an OpenGL window that was never resized after it appeared can stay black
-/// under the desktop compositor (a player's report: black until maximized or Alt+Enter, on
-/// every windowed start); a start in borderless or full screen moves the window, and never
-/// showed it. So a windowed start sends a size change after its first frames too.
-fn nudges_due(elapsed: f64, sent: u8) -> u8 {
-    (NUDGE_AT.iter().filter(|&&t| elapsed >= t).count() as u8).saturating_sub(sent)
+/// The start nudge's steps, in seconds after the first frame. On Windows an OpenGL window that
+/// was never resized after it appeared can stay black under the desktop compositor (players'
+/// reports: black until maximized, stretched or Alt+Enter, on every windowed start); a start
+/// in borderless or full screen moves the window, and never showed it. A size change that is
+/// undone before the next frame (1 px wider and back at once, as 0.4.21..0.4.32 did) was not
+/// enough: the grown size is now kept for half a second, frames presented at it, and only then
+/// put back.
+const NUDGE: [(f64, Nudge); 2] = [(0.3, Nudge::Grow), (0.8, Nudge::Restore)];
+
+/// The start nudge step due `elapsed` seconds after the first frame with `taken` steps taken
+/// already: at most one per frame, so frames are presented between them.
+fn nudge_due(elapsed: f64, taken: usize) -> Option<Nudge> {
+    NUDGE.get(taken).filter(|(at, _)| elapsed >= *at).map(|&(_, step)| step)
+}
+
+/// Where a window stands among the others.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(not(windows), allow(dead_code))]
+pub enum Layer {
+    /// Above every ordinary window.
+    Topmost,
+    /// An ordinary window.
+    Normal,
+    /// Below every other window.
+    Bottom,
+}
+
+/// Where the window stands in `mode` while it has (`focused`) or lacks the keyboard focus.
+/// Full screen is above everything only while it is the active window: kept topmost, it
+/// covered whatever Alt+Tab or Win+Tab switched to (players' reports), so once another window
+/// is active it goes below the others, as a game's exclusive full screen does when it is left.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn layer(mode: DisplayMode, focused: bool) -> Layer {
+    match mode {
+        DisplayMode::Fullscreen if focused => Layer::Topmost,
+        DisplayMode::Fullscreen => Layer::Bottom,
+        _ => Layer::Normal,
+    }
+}
+
+/// The window's rectangle (left, top, right, bottom) over a monitor's `m` in a frame-less
+/// `mode`. Borderless is one pixel taller than the monitor: an OpenGL window covering exactly
+/// the whole monitor is taken by Windows and the graphics drivers as an exclusive full-screen
+/// application, and then Win+Tab and the switch to other windows misbehave (players'
+/// reports); one pixel more (below the screen's edge, never seen) keeps it an ordinary window.
+/// Full screen covers the monitor exactly.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn popup_rect(mode: DisplayMode, m: (i32, i32, i32, i32)) -> (i32, i32, i32, i32) {
+    let (l, t, r, b) = m;
+    match mode {
+        DisplayMode::Borderless => (l, t, r, b + 1),
+        _ => (l, t, r, b),
+    }
 }
 
 // ------------------------------------------------------------------------------------------
@@ -194,11 +247,14 @@ fn follow(mode: DisplayMode) {
     STATE.with(|s| {
         let mut s = s.borrow_mut();
         let started = *s.started.get_or_insert(now);
-        if nudges_due(now - started, s.nudges) > 0 {
+        if let Some(step) = nudge_due(now - started, s.nudges) {
             s.nudges += 1;
             if s.applied == Some(DisplayMode::Windowed) && mode == DisplayMode::Windowed {
-                s.sys.nudge();
+                s.sys.nudge(step);
             }
+        }
+        if s.applied == Some(DisplayMode::Fullscreen) {
+            s.sys.keep_layer(DisplayMode::Fullscreen);
         }
         let from = s.applied.unwrap_or(DisplayMode::Windowed);
         if s.applied == Some(mode) {
@@ -221,6 +277,17 @@ fn follow(mode: DisplayMode) {
             s.since = now;
         }
     });
+}
+
+/// Whether the system pointer is outside the game's window (the window manager's frame or
+/// another window): macroquad keeps the last position it saw, so a pointer that left the
+/// window through an edge would stay "at the edge" and scroll the map (an owner's report).
+/// False when the system cannot tell.
+pub fn pointer_outside() -> bool {
+    if crate::ui::snapshot::size().is_some() {
+        return false;
+    }
+    STATE.with(|s| s.borrow_mut().sys.pointer_inside()) == Some(false)
 }
 
 #[cfg(target_os = "linux")]
@@ -303,6 +370,7 @@ mod sys {
         translate: unsafe extern "C" fn(*mut Display, XWindow, XWindow, c_int, c_int, *mut c_int, *mut c_int, *mut XWindow) -> c_int,
         raise: unsafe extern "C" fn(*mut Display, XWindow) -> c_int,
         sync: unsafe extern "C" fn(*mut Display, c_int) -> c_int,
+        query_pointer: unsafe extern "C" fn(*mut Display, XWindow, *mut XWindow, *mut XWindow, *mut c_int, *mut c_int, *mut c_int, *mut c_int, *mut c_uint) -> c_int,
         /// libXrandr's, when it loads.
         get_monitors: Option<unsafe extern "C" fn(*mut Display, XWindow, c_int, *mut c_int) -> *mut XRRMonitorInfo>,
         free_monitors: Option<unsafe extern "C" fn(*mut XRRMonitorInfo)>,
@@ -341,6 +409,7 @@ mod sys {
                 translate: sym(x, c"XTranslateCoordinates")?,
                 raise: sym(x, c"XRaiseWindow")?,
                 sync: sym(x, c"XSync")?,
+                query_pointer: sym(x, c"XQueryPointer")?,
                 get_monitors: if r.is_null() { None } else { sym(r, c"XRRGetMonitors") },
                 free_monitors: if r.is_null() { None } else { sym(r, c"XRRFreeMonitors") },
             })
@@ -465,9 +534,12 @@ mod sys {
 
     impl Window {
         /// Nothing to do: an X11 window shows its first frames.
-        pub fn nudge(&mut self) {}
+        pub fn nudge(&mut self, _step: super::Nudge) {}
 
-        pub fn apply(&mut self, from: DisplayMode, to: DisplayMode) -> bool {
+        /// Nothing to do: only Windows' full screen changes its place among the windows.
+        pub fn keep_layer(&mut self, _mode: DisplayMode) {}
+
+        fn conn(&mut self) -> Option<&Conn> {
             if !self.tried {
                 self.tried = true;
                 // SAFETY: plain Xlib calls on a connection of our own.
@@ -475,6 +547,30 @@ mod sys {
                 if self.conn.is_none() {
                     razdor::diag!("display mode: the game's X11 window was not found");
                 }
+            }
+            self.conn.as_ref()
+        }
+
+        /// Whether the system pointer is over the window's client area; None when unknown.
+        pub fn pointer_inside(&mut self) -> Option<bool> {
+            let c = self.conn()?;
+            // SAFETY: Xlib queries on our own window and connection.
+            unsafe {
+                let mut a: XWindowAttributes = std::mem::zeroed();
+                if (c.x.get_attributes)(c.dpy, c.win, &mut a) == 0 {
+                    return None;
+                }
+                let (mut root, mut child, mut rx, mut ry, mut wx, mut wy, mut mask) = (0, 0, 0, 0, 0, 0, 0);
+                if (c.x.query_pointer)(c.dpy, c.win, &mut root, &mut child, &mut rx, &mut ry, &mut wx, &mut wy, &mut mask) == 0 {
+                    return Some(false);
+                }
+                Some(wx >= 0 && wy >= 0 && wx < a.width && wy < a.height)
+            }
+        }
+
+        pub fn apply(&mut self, from: DisplayMode, to: DisplayMode) -> bool {
+            if self.conn().is_none() {
+                return true;
             }
             let Some(c) = self.conn.as_ref() else { return true };
             // SAFETY: as above; every call names our own window on our own connection.
@@ -506,20 +602,28 @@ mod sys {
 
 #[cfg(windows)]
 mod sys {
-    //! Windows: borderless and full screen are both a popup over the monitor; full screen
-    //! also stays above the other windows (as a game's exclusive screen does).
-    use super::DisplayMode;
+    //! Windows: borderless and full screen are both a popup over the monitor (borderless one
+    //! pixel taller, [`super::popup_rect`]); full screen also stays above the other windows
+    //! while it is the active one ([`super::layer`]). Every step goes to `razdor.log`, which is
+    //! all there is to see what happened on a player's machine.
+    use super::{DisplayMode, Layer, Nudge};
     use std::ffi::c_void;
 
     type Hwnd = *mut c_void;
 
     #[repr(C)]
-    #[derive(Clone, Copy, Default)]
+    #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
     struct Rect {
         left: i32,
         top: i32,
         right: i32,
         bottom: i32,
+    }
+
+    impl Rect {
+        fn size(self) -> (i32, i32) {
+            (self.right - self.left, self.bottom - self.top)
+        }
     }
 
     #[repr(C)]
@@ -540,6 +644,21 @@ mod sys {
         fn GetWindowRect(w: Hwnd, r: *mut Rect) -> i32;
         fn MonitorFromWindow(w: Hwnd, flags: u32) -> *mut c_void;
         fn GetMonitorInfoW(m: *mut c_void, info: *mut MonitorInfo) -> i32;
+        fn GetCursorPos(p: *mut Point) -> i32;
+        fn ScreenToClient(w: Hwnd, p: *mut Point) -> i32;
+        fn GetClientRect(w: Hwnd, r: *mut Rect) -> i32;
+        fn GetForegroundWindow() -> Hwnd;
+        fn IsWindowVisible(w: Hwnd) -> i32;
+        fn IsIconic(w: Hwnd) -> i32;
+        fn IsZoomed(w: Hwnd) -> i32;
+        fn RedrawWindow(w: Hwnd, update: *const Rect, region: *mut c_void, flags: u32) -> i32;
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct Point {
+        x: i32,
+        y: i32,
     }
 
     #[link(name = "kernel32")]
@@ -548,6 +667,7 @@ mod sys {
     }
 
     const GWL_STYLE: i32 = -16;
+    const GWL_EXSTYLE: i32 = -20;
     const WS_POPUP: isize = 0x8000_0000;
     const WS_VISIBLE: isize = 0x1000_0000;
     const WS_CLIPSIBLINGS: isize = 0x0400_0000;
@@ -557,19 +677,33 @@ mod sys {
     const WS_SIZEBOX: isize = 0x0004_0000;
     const WS_MINIMIZEBOX: isize = 0x0002_0000;
     const WS_MAXIMIZEBOX: isize = 0x0001_0000;
+    /// On the taskbar and in Alt+Tab / Win+Tab; a tool window is in neither.
+    const WS_EX_APPWINDOW: isize = 0x0004_0000;
+    const WS_EX_TOOLWINDOW: isize = 0x0000_0080;
+    const SWP_NOSIZE: u32 = 0x0001;
     const SWP_NOMOVE: u32 = 0x0002;
     const SWP_NOZORDER: u32 = 0x0004;
     const SWP_NOACTIVATE: u32 = 0x0010;
     const SWP_FRAMECHANGED: u32 = 0x0020;
     const SWP_SHOWWINDOW: u32 = 0x0040;
+    const HWND_BOTTOM: Hwnd = 1isize as Hwnd;
     const HWND_TOPMOST: Hwnd = -1isize as Hwnd;
     const HWND_NOTOPMOST: Hwnd = -2isize as Hwnd;
     const MONITOR_DEFAULTTONEAREST: u32 = 2;
+    const RDW_INVALIDATE: u32 = 0x0001;
+    const RDW_UPDATENOW: u32 = 0x0100;
+    const RDW_FRAME: u32 = 0x0400;
 
     #[derive(Default)]
     pub struct Window {
         hwnd: Option<usize>,
+        /// The window was looked for once without success (logged once).
+        missed: bool,
         windowed: Option<Rect>,
+        /// The window's rectangle after the start nudge grew it, until it is put back.
+        grown: Option<Rect>,
+        /// Whether full screen was last placed as the active window; None: not placed yet.
+        focused: Option<bool>,
     }
 
     /// miniquad's window class (`MINIQUADAPP`) in this process.
@@ -590,55 +724,142 @@ mod sys {
         }
     }
 
+    /// The window's state for the log: rectangles, styles, whether it is shown and active.
+    unsafe fn describe(w: Hwnd) -> String {
+        let (mut r, mut c) = (Rect::default(), Rect::default());
+        GetWindowRect(w, &mut r);
+        GetClientRect(w, &mut c);
+        format!(
+            "window {r:?} client {:?} style {:#x} ex {:#x} visible {} minimized {} maximized {} active {}",
+            c.size(),
+            GetWindowLongPtrW(w, GWL_STYLE),
+            GetWindowLongPtrW(w, GWL_EXSTYLE),
+            IsWindowVisible(w) != 0,
+            IsIconic(w) != 0,
+            IsZoomed(w) != 0,
+            GetForegroundWindow() == w
+        )
+    }
+
     impl Window {
-        /// One pixel wider and back, the frame redrawn: the size change an OpenGL window may
-        /// need before the compositor shows it ([`super::nudges_due`]).
-        pub fn nudge(&mut self) {
+        /// The game's window, looked up the first time it is needed.
+        unsafe fn window(&mut self) -> Option<Hwnd> {
+            if self.hwnd.is_none() {
+                self.hwnd = find().map(|w| w as usize);
+                match self.hwnd {
+                    Some(w) => razdor::diag!("display: window found ({w:#x}): {}", describe(w as Hwnd)),
+                    None if !self.missed => {
+                        self.missed = true;
+                        razdor::diag!("display: the game's window (MINIQUADAPP) was not found");
+                    }
+                    None => {}
+                }
+            }
+            self.hwnd.map(|w| w as Hwnd)
+        }
+
+        /// Whether the system pointer is over the window's client area; None when unknown.
+        pub fn pointer_inside(&mut self) -> Option<bool> {
+            // SAFETY: Win32 queries on our own window.
+            unsafe {
+                let w = self.window()?;
+                let (mut p, mut r) = (Point::default(), Rect::default());
+                if GetCursorPos(&mut p) == 0 || ScreenToClient(w, &mut p) == 0 || GetClientRect(w, &mut r) == 0 {
+                    return None;
+                }
+                Some(p.x >= r.left && p.y >= r.top && p.x < r.right && p.y < r.bottom)
+            }
+        }
+
+        /// A step of the start nudge ([`super::NUDGE`]): one pixel wider, the frame redrawn,
+        /// and some frames later back, unless the player has resized, maximized or minimized
+        /// the window meanwhile.
+        pub fn nudge(&mut self, step: Nudge) {
             // SAFETY: Win32 calls on our own window.
             unsafe {
-                if self.hwnd.is_none() {
-                    self.hwnd = find().map(|w| w as usize);
-                }
-                let Some(w) = self.hwnd.map(|w| w as Hwnd) else { return };
+                let Some(w) = self.window() else { return };
+                razdor::diag!("display: start nudge {step:?}: {}", describe(w));
                 let mut r = Rect::default();
-                if GetWindowRect(w, &mut r) == 0 {
+                if GetWindowRect(w, &mut r) == 0 || IsIconic(w) != 0 || IsZoomed(w) != 0 {
                     return;
                 }
-                let (cw, ch) = (r.right - r.left, r.bottom - r.top);
+                let (cw, ch) = r.size();
                 let flags = SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED;
-                SetWindowPos(w, std::ptr::null_mut(), 0, 0, cw + 1, ch, flags);
-                SetWindowPos(w, std::ptr::null_mut(), 0, 0, cw, ch, flags);
+                let ok = match step {
+                    Nudge::Grow => {
+                        let ok = SetWindowPos(w, std::ptr::null_mut(), 0, 0, cw + 1, ch, flags);
+                        let mut g = Rect::default();
+                        GetWindowRect(w, &mut g);
+                        self.grown = Some(g);
+                        ok
+                    }
+                    Nudge::Restore => match self.grown.take() {
+                        Some(g) if g == r => SetWindowPos(w, std::ptr::null_mut(), 0, 0, cw - 1, ch, flags),
+                        _ => {
+                            razdor::diag!("display: start nudge: the window was changed meanwhile, left as it is");
+                            return;
+                        }
+                    },
+                };
+                RedrawWindow(w, std::ptr::null(), std::ptr::null_mut(), RDW_INVALIDATE | RDW_FRAME | RDW_UPDATENOW);
+                razdor::diag!("display: start nudge {step:?} done (SetWindowPos {ok}): {}", describe(w));
+            }
+        }
+
+        /// Full screen: topmost while active, below the others once another window is
+        /// ([`super::layer`]); called every frame, acts when the active window changes.
+        pub fn keep_layer(&mut self, mode: DisplayMode) {
+            // SAFETY: Win32 calls on our own window.
+            unsafe {
+                let Some(w) = self.window() else { return };
+                let focused = GetForegroundWindow() == w;
+                if self.focused == Some(focused) {
+                    return;
+                }
+                self.focused = Some(focused);
+                let layer = super::layer(mode, focused);
+                let after = match layer {
+                    Layer::Topmost => HWND_TOPMOST,
+                    Layer::Normal => HWND_NOTOPMOST,
+                    Layer::Bottom => HWND_BOTTOM,
+                };
+                let ok = SetWindowPos(w, after, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                razdor::diag!("display: {mode:?} {} -> {layer:?} (SetWindowPos {ok})", if focused { "active" } else { "not active" });
             }
         }
 
         pub fn apply(&mut self, from: DisplayMode, to: DisplayMode) -> bool {
             // SAFETY: Win32 calls on our own window.
             unsafe {
-                if self.hwnd.is_none() {
-                    self.hwnd = find().map(|w| w as usize);
-                }
-                let Some(w) = self.hwnd.map(|w| w as Hwnd) else { return true };
+                let Some(w) = self.window() else { return true };
+                self.grown = None;
+                self.focused = None;
                 if from == DisplayMode::Windowed && to != DisplayMode::Windowed {
                     let mut r = Rect::default();
                     if GetWindowRect(w, &mut r) != 0 {
                         self.windowed = Some(r);
                     }
                 }
+                // In Alt+Tab, Win+Tab and on the taskbar in every mode.
+                let ex = (GetWindowLongPtrW(w, GWL_EXSTYLE) & !WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW;
+                SetWindowLongPtrW(w, GWL_EXSTYLE, ex);
                 let flags = SWP_FRAMECHANGED | SWP_SHOWWINDOW;
-                if to == DisplayMode::Windowed {
+                let ok = if to == DisplayMode::Windowed {
                     let style = WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SIZEBOX | WS_VISIBLE;
                     SetWindowLongPtrW(w, GWL_STYLE, style);
                     let r = self.windowed.unwrap_or(Rect { left: 64, top: 64, right: 64 + 1280, bottom: 64 + 800 });
-                    SetWindowPos(w, HWND_NOTOPMOST, r.left, r.top, r.right - r.left, r.bottom - r.top, flags);
+                    SetWindowPos(w, HWND_NOTOPMOST, r.left, r.top, r.right - r.left, r.bottom - r.top, flags)
                 } else {
                     let style = (GetWindowLongPtrW(w, GWL_STYLE) & !(WS_CAPTION | WS_SIZEBOX | WS_MAXIMIZEBOX)) | WS_POPUP | WS_VISIBLE;
                     SetWindowLongPtrW(w, GWL_STYLE, style);
                     let mut info = MonitorInfo { size: std::mem::size_of::<MonitorInfo>() as u32, monitor: Rect::default(), work: Rect::default(), flags: 0 };
                     GetMonitorInfoW(MonitorFromWindow(w, MONITOR_DEFAULTTONEAREST), &mut info);
                     let m = info.monitor;
-                    let after = if to == DisplayMode::Fullscreen { HWND_TOPMOST } else { HWND_NOTOPMOST };
-                    SetWindowPos(w, after, m.left, m.top, m.right - m.left, m.bottom - m.top, flags);
-                }
+                    let (l, t, r, b) = super::popup_rect(to, (m.left, m.top, m.right, m.bottom));
+                    let after = if super::layer(to, true) == Layer::Topmost { HWND_TOPMOST } else { HWND_NOTOPMOST };
+                    SetWindowPos(w, after, l, t, r - l, b - t, flags)
+                };
+                razdor::diag!("display: {from:?} -> {to:?} (SetWindowPos {ok}): {}", describe(w));
             }
             true
         }
@@ -683,7 +904,15 @@ mod sys {
 
     impl Window {
         /// Nothing to do: a macOS window shows its first frames.
-        pub fn nudge(&mut self) {}
+        pub fn nudge(&mut self, _step: super::Nudge) {}
+
+        /// Nothing to do: only Windows' full screen changes its place among the windows.
+        pub fn keep_layer(&mut self, _mode: DisplayMode) {}
+
+        /// Not known here: the pointer is taken as over the window.
+        pub fn pointer_inside(&mut self) -> Option<bool> {
+            None
+        }
 
         pub fn apply(&mut self, from: DisplayMode, to: DisplayMode) -> bool {
             // SAFETY: AppKit messages to our own window on the main thread.
@@ -738,7 +967,15 @@ mod sys {
     pub struct Window;
 
     impl Window {
-        pub fn nudge(&mut self) {}
+        pub fn nudge(&mut self, _step: super::Nudge) {}
+
+        /// Nothing to do: only Windows' full screen changes its place among the windows.
+        pub fn keep_layer(&mut self, _mode: DisplayMode) {}
+
+        /// Not known here: the pointer is taken as over the window.
+        pub fn pointer_inside(&mut self) -> Option<bool> {
+            None
+        }
 
         pub fn apply(&mut self, _from: DisplayMode, to: DisplayMode) -> bool {
             macroquad::miniquad::window::set_fullscreen(to != DisplayMode::Windowed);
@@ -752,13 +989,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_windowed_start_is_nudged_twice_after_its_first_frames() {
-        assert_eq!(nudges_due(0.0, 0), 0, "not on the first frame");
-        assert_eq!(nudges_due(0.31, 0), 1);
-        assert_eq!(nudges_due(0.5, 1), 0, "once per step");
-        assert_eq!(nudges_due(1.6, 1), 1);
-        assert_eq!(nudges_due(100.0, 2), 0, "never again");
-        assert_eq!(nudges_due(100.0, 0), 2, "a long first frame sends both in turn");
+    fn a_windowed_start_grows_its_window_and_puts_it_back_later() {
+        assert_eq!(nudge_due(0.0, 0), None, "not on the first frame");
+        assert_eq!(nudge_due(0.31, 0), Some(Nudge::Grow));
+        assert_eq!(nudge_due(0.5, 1), None, "the grown size is kept for some frames");
+        assert_eq!(nudge_due(0.81, 1), Some(Nudge::Restore));
+        assert_eq!(nudge_due(100.0, 2), None, "never again");
+        assert_eq!(nudge_due(100.0, 0), Some(Nudge::Grow), "a long first frame: one step per frame");
+        assert_eq!(nudge_due(100.0, 1), Some(Nudge::Restore));
+    }
+
+    #[test]
+    fn full_screen_is_topmost_only_while_active() {
+        assert_eq!(layer(DisplayMode::Fullscreen, true), Layer::Topmost);
+        assert_eq!(layer(DisplayMode::Fullscreen, false), Layer::Bottom, "Alt+Tab / Win+Tab show the other window");
+        for focused in [true, false] {
+            assert_eq!(layer(DisplayMode::Borderless, focused), Layer::Normal);
+            assert_eq!(layer(DisplayMode::Windowed, focused), Layer::Normal);
+        }
+    }
+
+    #[test]
+    fn borderless_is_one_pixel_taller_than_its_monitor() {
+        let m = (1920, 0, 3840, 1080);
+        assert_eq!(popup_rect(DisplayMode::Borderless, m), (1920, 0, 3840, 1081));
+        assert_eq!(popup_rect(DisplayMode::Fullscreen, m), m);
     }
 
     #[test]

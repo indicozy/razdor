@@ -158,10 +158,17 @@ CurseMainSpell (CM, 5) and CurseNextSpell (CN, 10), plus a fixed 10. **code**
 **Stacking.** **code**
 - Values are added (+=) to the modifier fields, not replaced.
 - A friendly mage cannot pick an already-blessed unit in the same turn, unless the unit is
-  wounded, and then it heals instead (except a reserve caster, section 3).
+  wounded, and then it heals instead (except a reserve caster, section 3). **Bug:** "heals"
+  only when the heal power is above 0 (48a8d3, tested at 48a911/48a917); otherwise the action
+  blesses again (48a93c) and the blessings add up. So a Death caster re-blesses a wounded living
+  ally on every action (its heal is 0 on the living), a Life caster a wounded Undead or
+  Elemental one (for nothing), and a reserve caster any reserve unit (no test there, 4857fb).
+  Razdor on main fixes this (the owner's decision, row 2 of the table).
 - A hostile mage whose target already has a negative modifier strikes instead of cursing
   (section 3).
-- So in practice there is at most one blessing and one curse per unit per turn. The flags reset
+- So in practice there is at most one curse per unit per turn, and one blessing except in the
+  bug's cases above (and the Community Splash follow-ups, which re-run the case on the
+  neighbours whatever their flags, c26fd2). The flags reset
   every turn.
 
 **EternalGift** (hooks c29e59, c29ea3, c29f2f for curses; c2a019, c2a0ae, c2a0f8 for blessings).
@@ -308,9 +315,12 @@ Undead blesses it for nothing. **code**
   that is wounded or unblessed; then a click on it (or the space key) casts on itself.
 
 **Stacking.**
-- **Blessings:** their values are added to the modifiers, but an ally cannot be blessed twice in
-  one turn because blessed units are no longer legal targets. A wounded, blessed unit can still
-  be healed.
+- **Blessings:** their values are added to the modifiers. A blessed unit in rows 1–2 is no
+  longer a legal target unless wounded; a wounded, blessed unit can still be healed. But when
+  the heal power on it is 0 (a Death caster on a living ally, a Life caster on an Undead or
+  Elemental one) the action is a blessing again (48a93c), and a reserve caster may bless any
+  reserve unit again (4857fb), so in those cases blessings stack without limit (section 1,
+  the bug; fixed on Razdor's main only).
 - **Curses:** in practice one per target per turn. After the first curse the auto-choice
   switches to strikes.
 
@@ -884,14 +894,14 @@ were implemented and tested earlier (`src/rules/battle/tests.rs`, `rowN_…`); t
 | # | Topic | Razdor now | Original (this exe) | § | Status |
 |---|---|---|---|---|---|
 | 1 | Buff/curse duration | Modifiers reset every turn | Until the start of the next turn | 1 | Matches |
-| 2 | Stacking | Additive; blessed allies untargetable unless wounded; curse then strike | Same | 1, 3 | Matches |
+| 2 | Stacking | Additive; curse then strike; **main:** a unit is blessed at most once a turn, a blessed ally (in rows 1–2 or the reserve) is a target only for a heal that does something, a Splash follow-up does not bless a blessed neighbour again (the owner's decision, 2026-10-17); `dt-original` keeps the original's rule | Blessed allies untargetable unless wounded, but a wounded one with a heal of 0 (a Death caster on a living ally, a Life caster on an Undead or Elemental one) is blessed again, as is any reserve unit by a reserve caster, and Splash re-blesses neighbours: blessings stack | 1, 3 | Razdor fixes the original's bug (main only, a deliberate deviation) |
 | 3 | Bless and curse sizes | `bless_effect` / `curse_effect` with the ini divisors, Life curse ⌊2·CM/3⌋ and 10; the attack modifier given to units without an attack too (only the hover hides it); a caster with no school sets only the flag | Same | 1 | Matches |
 | 4 | EternalGift | Base stats, stacks; the Life blessing raises the defences | Base stats, stacks, Life blessing lowers defences (bug) | 1 | Razdor fixes the original's bug |
 | 5 | Magic drain | `max(MP − drain, floor)` if MP > 0, drain and floor per type (none for a type without MagicPower), Undead Death floor +25 on the default floor only, Concentration adds | Same (community-patches.md §10) | 1 | Matches |
 | 6 | Hostile power rounding | `P·(100 − prot) / 100` rounded half to even (the product taken as exact; the FPU precision is unknown, engine.md) | Floating-point product, Delphi round half to even | 0 | Matches |
 | 7 | Strike with power 0 | GodAnger/GodStrike added whenever the caster has MP | GodAnger/GodStrike still added when the caster has MP | 0 | Matches |
 | 8 | Hostile mage action | Curse if no negative modifier, else strike; one action per cell | Same | 3 | Matches |
-| 9 | Friendly mage | Heal if wounded and heal > 0, else bless; reserve casters tend the reserve, NoHeal-marked units too | Same | 3 | Matches |
+| 9 | Friendly mage | Heal if wounded and heal > 0, else bless; reserve casters tend the reserve, NoHeal-marked units too; **main:** never a second blessing in a turn (row 2) | Same, with the second blessings of row 2 | 3 | Matches but for row 2's deviation (main only) |
 | 10 | Own-cell self-cast and the space key | Own card and space: one action, a self-cast if offered (a reserve caster's own cell only while wounded or unblessed), else a pass | Own cell and space are the same thing: **one** action, pass or self-cast | 2, 3 | Matches |
 | 11 | Edge columns | Columns 1 and last are never "clear" (`front_clear`) | Columns 1 and last are never "clear": front-row shooters there hit only c±1, front-row mages there cannot cast | 3 | Matches |
 | 12 | Map priority | Melee, then shot, then magic, later wins | Same | 3 | Matches |

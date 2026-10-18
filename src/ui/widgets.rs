@@ -587,27 +587,82 @@ pub enum TipStyle {
     Neutral,
 }
 
-/// The translucent marble panel of hover tooltips, with a silver edge, in one of the
-/// original's styles.
+/// The map tooltip's box `r` in one of the original's styles (0x48d3f8, called by 0x4ca8ac):
+/// `Win-marble` (normal) or the red `Win-red` (hostile) tiled, or for the neutral style the
+/// marble turned dull brown ([`neutral_tip_pixel`]); its edge; the title strip's line 27 px
+/// down; the title corners at (2, 3) and at the right end, added (0x476790 mode 0). The box
+/// is opaque: the original only fades it in (0x4ca728), the ground never shows through.
 pub fn tooltip_panel_styled(r: Rect, style: TipStyle) {
-    use super::chrome::Skin;
-    // Translucent marble: the ground shows through, as in the original's map tooltips.
-    let shade = match style {
-        TipStyle::Normal => {
-            super::chrome::surface_alpha(r, Skin::Marble, 0.72);
-            Color::new(0.0, 0.05, 0.03, 0.2)
+    use super::chrome::{self, Skin};
+    let k = chrome::k();
+    match style {
+        TipStyle::Normal => chrome::surface(r, Skin::Marble),
+        TipStyle::Hostile => chrome::surface(r, Skin::Red),
+        TipStyle::Neutral => match chrome::win_adjusted("Win-marble", "neutral-tip", neutral_tip_image) {
+            Some(t) => chrome::tile(&t, r, k.min(1.4), WHITE),
+            None => draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.30, 0.20, 0.13, 1.0)),
+        },
+    }
+    // The line under the title: 0x48d1d4 from (2, 27) to (w − 2, 29), 2 px.
+    draw_rectangle(r.x + 2.0 * k, r.y + 27.0 * k, r.w - 4.0 * k, 2.0 * k, chrome::SILVER_DARK);
+    draw_line(r.x + 2.0 * k, r.y + 27.0 * k, r.right() - 2.0 * k, r.y + 27.0 * k, 1.0, chrome::SILVER);
+    for (name, right) in [("Corner-Left", false), ("Corner-Right", true)] {
+        let Some(t) = chrome::win_adjusted(name, style.corner_tag(), |img| tip_corner_image(img, style)) else { continue };
+        let (w, h) = (t.width() * k, t.height() * k);
+        let x = if right { r.right() - 2.0 * k - w } else { r.x + 2.0 * k };
+        chrome::additive(|| chrome::tex(&t, Rect::new(x, r.y + 3.0 * k, w, h), WHITE));
+    }
+    chrome::silver_frame(r, 1.5);
+}
+
+impl TipStyle {
+    fn corner_tag(self) -> &'static str {
+        match self {
+            TipStyle::Normal => "tip-corner-normal",
+            TipStyle::Hostile => "tip-corner-hostile",
+            TipStyle::Neutral => "tip-corner-neutral",
         }
-        TipStyle::Hostile => {
-            super::chrome::surface_alpha(r, Skin::Red, 0.72);
-            Color::new(0.05, 0.0, 0.0, 0.2)
-        }
-        TipStyle::Neutral => {
-            super::chrome::neutral_surface_alpha(r, 0.72);
-            Color::new(0.03, 0.02, 0.0, 0.2)
-        }
-    };
-    draw_rectangle(r.x, r.y, r.w, r.h, shade);
-    super::chrome::silver_frame(r, 1.5);
+    }
+}
+
+/// What the start-up takes off the tooltips' title corners (0x4768f8 mode 1 with
+/// 0x476374(r, g, b)): the normal pair `ae2554/58` loses (192, 160, 160) (0x4dbd83..0x4dbddc),
+/// the hostile pair `ae255c/60`, loaded again from the same files, (128, 192, 250)
+/// (0x4dbe0b..0x4dbe64): left a dark orange, added onto the red.
+pub fn tip_corner_taken(style: TipStyle) -> [i32; 3] {
+    match style {
+        TipStyle::Hostile => [128, 192, 250],
+        TipStyle::Normal | TipStyle::Neutral => [192, 160, 160],
+    }
+}
+
+/// One pixel of a tooltip's title corner: [`tip_corner_taken`] off it, down to black; the
+/// neutral style draws the normal pair, then turns the whole box ([`neutral_tip_pixel`]).
+pub fn tip_corner_pixel(style: TipStyle, p: [u8; 3]) -> [u8; 3] {
+    let minus = tip_corner_taken(style);
+    let q: [u8; 3] = std::array::from_fn(|i| (p[i] as i32 - minus[i]).clamp(0, 255) as u8);
+    if style == TipStyle::Neutral { neutral_tip_pixel(q) } else { q }
+}
+
+/// The neutral style's turn of the box (0x48d3f8 style 2): the green channel into all three
+/// (0x48dd40), then scaled by 1024, 0x2aa and 0x1c7 per 1024 (0x48da5c): a dull brown.
+pub fn neutral_tip_pixel(p: [u8; 3]) -> [u8; 3] {
+    let g = p[1] as i32;
+    [g, g * 0x2aa / 1024, g * 0x1c7 / 1024].map(|c| c.clamp(0, 255) as u8)
+}
+
+fn tip_corner_image(img: &mut razdor::dt::gfx::Image, style: TipStyle) {
+    for p in img.rgba.chunks_exact_mut(4) {
+        let q = tip_corner_pixel(style, [p[0], p[1], p[2]]);
+        p[..3].copy_from_slice(&q);
+    }
+}
+
+fn neutral_tip_image(img: &mut razdor::dt::gfx::Image) {
+    for p in img.rgba.chunks_exact_mut(4) {
+        let q = neutral_tip_pixel([p[0], p[1], p[2]]);
+        p[..3].copy_from_slice(&q);
+    }
 }
 
 /// Draws a button and returns true when it was clicked this frame.
@@ -750,10 +805,34 @@ pub fn markup_rows(text: &str, room: f32, size: f32) -> Vec<MarkupRow> {
     super::dt_font::with_original_face(super::dt_font::Face::Subtitle, || markup_rows_in_face(text, room, size))
 }
 
-/// [`markup_rows`] laid out in a chosen font face, with matching metrics in either font mode.
-pub fn markup_rows_face(text: &str, room: f32, size: f32, face: super::dt_font::Face) -> Vec<MarkupRow> {
+/// A plain text's pieces, as 0x47ea80 splits it: at CR LF or at `#\`, nothing else read.
+fn plain_pieces(text: &str) -> Vec<&str> {
+    let mut pieces = Vec::new();
+    let mut rest = text;
+    while let Some(i) = [rest.find("\r\n"), rest.find("#\\")].into_iter().flatten().min() {
+        pieces.push(&rest[..i]);
+        rest = &rest[i + 2..];
+    }
+    pieces.push(rest);
+    pieces
+}
+
+/// A plain text's rows in a chosen font face, as List_AddWrappedText 0x47ea80 adds them: the
+/// text split at CR LF or `#\`, each piece word-wrapped and justified (its last row left),
+/// with no marks read and no indent added (only [`markup_rows`]' reader 0x48e1cc does those).
+pub fn plain_rows_face(text: &str, room: f32, size: f32, face: super::dt_font::Face) -> Vec<MarkupRow> {
+    use razdor::dt::markup::{Align, Ink};
     super::dt_font::with_face(face, || {
-        super::dt_font::with_original_face(face, || markup_rows_in_face(text, room, size))
+        super::dt_font::with_original_face(face, || {
+            plain_pieces(text)
+                .into_iter()
+                .flat_map(|piece| {
+                    razdor::dt::markup::wrap(piece, room, |c| glyph_width(c, size))
+                        .into_iter()
+                        .map(|r| MarkupRow { text: r.text, ink: Ink::Plain, align: Align::Justify, last: r.last })
+                })
+                .collect()
+        })
     })
 }
 
@@ -784,18 +863,28 @@ pub fn draw_markup_row(row: &MarkupRow, x: f32, y: f32, room: f32, size: f32) {
 /// [`draw_markup_row`] in another of the original's fonts (the hero window's diary draws its
 /// entry in SanSerif, 0x49c388).
 pub fn draw_markup_row_face(row: &MarkupRow, x: f32, y: f32, room: f32, size: f32, face: super::dt_font::Face, color: Option<Color>) {
-    super::dt_font::with_original_face(face, || draw_markup_row_in_face(row, x, y, room, size, color.unwrap_or_else(|| ink_color(row.ink))));
+    let color = color.unwrap_or_else(|| ink_color(row.ink));
+    super::dt_font::with_original_face(face, || draw_markup_row_in_face(row, x, y, room, size, &|s, x, y| text(s, x, y, size, color)));
 }
 
-fn draw_markup_row_in_face(row: &MarkupRow, x: f32, y: f32, room: f32, size: f32, color: Color) {
+/// [`draw_markup_row_face`] over the face's shadow font, as a text list line with a shadow
+/// font set (0x47d2bc draws the shadow first, then the text): the original's shadow sheet
+/// where the font is a sheet, else a dark copy 1 px down and right.
+pub fn draw_markup_row_shadowed(row: &MarkupRow, x: f32, y: f32, room: f32, size: f32, face: super::dt_font::Face, color: Color) {
+    super::dt_font::with_original_face(face, || {
+        draw_markup_row_in_face(row, x, y, room, size, &|s, x, y| super::chrome::shadow_text(s, x, y, size, color));
+    });
+}
+
+fn draw_markup_row_in_face(row: &MarkupRow, x: f32, y: f32, room: f32, size: f32, text: &dyn Fn(&str, f32, f32)) {
     use razdor::dt::markup::Align;
     let shown = row.text.replace('_', " ");
     match row.align {
         Align::Centre => {
             let w: f32 = row.text.chars().map(|c| glyph_width(c, size)).sum();
-            text(&shown, x + ((room - w) / 2.0).trunc(), y, size, color);
+            text(&shown, x + ((room - w) / 2.0).trunc(), y);
         }
-        Align::Justify if row.last || !row.text.contains(' ') => text(&shown, x, y, size, color),
+        Align::Justify if row.last || !row.text.contains(' ') => text(&shown, x, y),
         Align::Justify => {
             let xs = razdor::dt::markup::justify(&row.text, room, |c| glyph_width(c, size));
             let chars: Vec<char> = shown.chars().collect();
@@ -808,7 +897,7 @@ fn draw_markup_row_in_face(row: &MarkupRow, x: f32, y: f32, room: f32, size: f32
                 }
                 let j = (i..raw.len()).find(|&j| raw[j] == ' ').unwrap_or(raw.len());
                 let word: String = chars[i..j].iter().collect();
-                text(&word, x + xs[i], y, size, color);
+                text(&word, x + xs[i], y);
                 i = j;
             }
         }
@@ -1620,6 +1709,26 @@ pub fn scrollbar_px(r: Rect, scroll: &mut f32, most: f32, view: f32, step: f32) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The map tooltip's title corners (0x4dbd83, 0x4dbe0b): the hostile pair loses
+    /// (128, 192, 250), leaving a dark orange, the normal one (192, 160, 160); the neutral box
+    /// takes the green into all three, scaled 1, 0x2aa/1024, 0x1c7/1024 (0x48dd40, 0x48da5c).
+    #[test]
+    fn the_tooltip_corners_are_dimmed_as_the_original_s() {
+        assert_eq!(tip_corner_pixel(TipStyle::Hostile, [255, 255, 255]), [127, 63, 5]);
+        assert_eq!(tip_corner_pixel(TipStyle::Hostile, [100, 100, 100]), [0, 0, 0]);
+        assert_eq!(tip_corner_pixel(TipStyle::Normal, [255, 255, 255]), [63, 95, 95]);
+        assert_eq!(tip_corner_pixel(TipStyle::Neutral, [255, 255, 255]), [95, 63, 42]);
+        assert_eq!(neutral_tip_pixel([10, 200, 30]), [200, 133, 88]);
+    }
+
+    /// The scenario description is added as plain lines (0x47ea80, a player's report): split
+    /// only at CR LF and `#\`, its marks and leading spaces kept as typed, no indent added.
+    #[test]
+    fn a_plain_text_splits_only_at_its_breaks() {
+        assert_eq!(plain_pieces("  Вуальшпиль - *подземелье*.\r\nНаконец#\\^конец"), vec!["  Вуальшпиль - *подземелье*.", "Наконец", "^конец"]);
+        assert_eq!(plain_pieces(""), vec![""]);
+    }
 
     /// The hint box fades in over 300 ms (49ee4b–49ef0d): to 160/255 for an ordinary hint, to
     /// full for a pushed one, and stays there.

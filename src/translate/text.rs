@@ -17,6 +17,9 @@ pub struct Prepared {
     pub tokens: Vec<String>,
 }
 
+use crate::i18n::tr;
+use crate::trf;
+
 /// The markup marks whose counts a translation must keep.
 const MARKS: [char; 4] = ['*', '|', '@', '^'];
 
@@ -46,42 +49,97 @@ pub fn prepare(src: &str) -> Prepared {
     Prepared { text, tokens }
 }
 
+/// Why an answer for one text was refused, with what the source had and what came back, so
+/// the translator's log can say it in the player's words ([`Refusal::message`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Refusal {
+    /// Nothing but blanks.
+    Empty,
+    /// Placeholder `ph` (once in the source) came back `got` times.
+    Placeholder { ph: String, got: usize },
+    /// Cyrillic letters left in an answer in another language.
+    Cyrillic,
+    /// Counts of `<br>` (the markup break `#\`).
+    Breaks { src: usize, got: usize },
+    /// Counts of lines.
+    Lines { src: usize, got: usize },
+    /// Counts of a markup mark.
+    Mark { mark: char, src: usize, got: usize },
+    /// A character Windows-1251 lacks (the game's fonts and files cannot hold it).
+    Character(char),
+}
+
+impl Refusal {
+    /// The reason in the interface language, e.g. "markup mark `*`: 1 in the original, 0 in
+    /// the translation".
+    pub fn message(&self) -> String {
+        match self {
+            Refusal::Empty => tr("the answer is empty").to_string(),
+            Refusal::Placeholder { ph, got } => trf!("placeholder {ph}: 1 in the original, {got} in the translation", ph, got),
+            Refusal::Cyrillic => tr("Cyrillic letters left in the translation").to_string(),
+            Refusal::Breaks { src, got } => trf!("line breaks <br>: {src} in the original, {got} in the translation", src, got),
+            Refusal::Lines { src, got } => trf!("lines: {src} in the original, {got} in the translation", src, got),
+            Refusal::Mark { mark, src, got } => trf!("markup mark `{mark}`: {src} in the original, {got} in the translation", mark, src, got),
+            Refusal::Character(c) => trf!("character «{c}» (U+{code}) the game cannot show", c, code = format!("{:04X}", *c as u32)),
+        }
+    }
+}
+
+impl std::fmt::Display for Refusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message())
+    }
+}
+
+/// The start of `s` for a log line: its words on one line, up to `n` characters, `…` when cut.
+pub fn excerpt(s: &str, n: usize) -> String {
+    let one_line = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if one_line.chars().count() <= n {
+        one_line
+    } else {
+        one_line.chars().take(n).collect::<String>() + "…"
+    }
+}
+
 /// The model's `answer` for `src`, checked and turned back into a map string: placeholders
 /// replaced, `<br>` back to `#\`, line breaks in the source's style, punctuation the game's
 /// fonts may lack made plain ASCII. Errors say what the answer broke.
-pub fn restore(src: &str, prepared: &Prepared, answer: &str, language: &str, any_script: bool) -> Result<String, String> {
+pub fn restore(src: &str, prepared: &Prepared, answer: &str, language: &str, any_script: bool) -> Result<String, Refusal> {
     let answer = plain_punctuation(answer.trim_matches(|c: char| c == ' ' || c == '\t'));
     if answer.trim().is_empty() {
-        return Err("empty".into());
+        return Err(Refusal::Empty);
     }
     let mut out = answer.clone();
     for (i, tok) in prepared.tokens.iter().enumerate() {
         let ph = format!("{{{i}}}");
         match out.matches(&ph).count() {
             1 => out = out.replace(&ph, tok),
-            n => return Err(format!("placeholder {ph} appears {n} times")),
+            got => return Err(Refusal::Placeholder { ph, got }),
         }
     }
     if !is_cyrillic_language(language) && has_cyrillic(&strip_tokens(&out, &prepared.tokens)) {
-        return Err("still has Cyrillic".into());
+        return Err(Refusal::Cyrillic);
     }
     let count = |s: &str, p: &str| s.matches(p).count();
-    if count(&answer, "<br>") != count(&prepared.text, "<br>") {
-        return Err("line breaks (<br>) changed".into());
+    let (src_breaks, got_breaks) = (count(&prepared.text, "<br>"), count(&answer, "<br>"));
+    if got_breaks != src_breaks {
+        return Err(Refusal::Breaks { src: src_breaks, got: got_breaks });
     }
-    let lines = |s: &str| s.trim_end_matches('\n').matches('\n').count();
-    if lines(&answer) != lines(&prepared.text) {
-        return Err("line count changed".into());
+    let lines = |s: &str| s.trim_end_matches('\n').matches('\n').count() + 1;
+    let (src_lines, got_lines) = (lines(&prepared.text), lines(&answer));
+    if got_lines != src_lines {
+        return Err(Refusal::Lines { src: src_lines, got: got_lines });
     }
-    for m in MARKS {
-        if answer.matches(m).count() != prepared.text.matches(m).count() {
-            return Err(format!("markup mark {m} changed"));
+    for mark in MARKS {
+        let (src, got) = (prepared.text.matches(mark).count(), answer.matches(mark).count());
+        if got != src {
+            return Err(Refusal::Mark { mark, src, got });
         }
     }
     // Maps and data files keep their text in Windows-1251 (`crate::dt::text`), as the original's
     // fonts do: a character outside it cannot be stored.
     if let Some(bad) = out.chars().find(|&c| !any_script && !in_cp1251(c) && !prepared.tokens.iter().any(|t| t.contains(c))) {
-        return Err(format!("character {bad:?} the game cannot show"));
+        return Err(Refusal::Character(bad));
     }
     // Trailing line breaks of the source come back as they were.
     let out = out.trim_end_matches('\n').to_string() + &"\n".repeat(prepared.text.len() - prepared.text.trim_end_matches('\n').len());
@@ -156,6 +214,36 @@ mod tests {
         // A Cyrillic `#` word is kept, not counted as untranslated.
         let src = "Страж#рыцарь";
         assert_eq!(restore(src, &prepare(src), "Guard{0}", "English", false).unwrap(), "Guard#рыцарь");
+    }
+
+    #[test]
+    fn refusals_say_what_was_expected_and_what_came() {
+        let src = "Привет, #HERONAME!\r\n*Конец#\\^Да";
+        let p = prepare(src);
+        let refused = |answer: &str| restore(src, &p, answer, "English", false).unwrap_err();
+        assert_eq!(refused("Hello!\n*The end<br>^Yes"), Refusal::Placeholder { ph: "{0}".into(), got: 0 });
+        assert_eq!(refused("Hello, {0} {0}!\n*The end<br>^Yes"), Refusal::Placeholder { ph: "{0}".into(), got: 2 });
+        assert_eq!(refused("Hello, {0}!\n*The end ^Yes"), Refusal::Breaks { src: 1, got: 0 });
+        assert_eq!(refused("Hello, {0}! *The end<br>^Yes"), Refusal::Lines { src: 2, got: 1 });
+        assert_eq!(refused("Hello, {0}!\nThe end<br>^Yes"), Refusal::Mark { mark: '*', src: 1, got: 0 });
+        assert_eq!(refused("Hello, {0}!\n*The end<br>^Yes ^"), Refusal::Mark { mark: '^', src: 1, got: 2 });
+        assert_eq!(refused("Привет, {0}!\n*The end<br>^Yes"), Refusal::Cyrillic);
+        assert_eq!(refused(" \t"), Refusal::Empty);
+        assert_eq!(refused("Hello, {0}!\n*The end<br>^Ja\u{00E4}"), Refusal::Character('\u{00E4}'));
+        // The messages (English while the library runs in English; the Russian is the catalog's).
+        assert_eq!(Refusal::Mark { mark: '*', src: 1, got: 0 }.message(), "markup mark `*`: 1 in the original, 0 in the translation");
+        assert_eq!(Refusal::Lines { src: 2, got: 1 }.to_string(), "lines: 2 in the original, 1 in the translation");
+        assert_eq!(Refusal::Placeholder { ph: "{0}".into(), got: 2 }.message(), "placeholder {0}: 1 in the original, 2 in the translation");
+        assert_eq!(Refusal::Character('\u{00E4}').message(), "character «\u{00E4}» (U+00E4) the game cannot show");
+        let ru = crate::i18n::tr_in(crate::i18n::Lang::Ru, "markup mark `{mark}`: {src} in the original, {got} in the translation");
+        assert_eq!(crate::i18n::fill(ru, &[("mark", &'*'), ("src", &1), ("got", &0)]), "знак разметки `*`: 1 в оригинале, 0 в переводе");
+    }
+
+    #[test]
+    fn excerpts_are_one_short_line() {
+        assert_eq!(excerpt("Old Fili\nbegs  by the road", 100), "Old Fili begs by the road");
+        assert_eq!(excerpt("Old Fili begs by the road", 8), "Old Fili…");
+        assert_eq!(excerpt("Старый Фили", 6), "Старый…");
     }
 
     #[test]

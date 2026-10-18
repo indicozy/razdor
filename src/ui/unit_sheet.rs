@@ -66,9 +66,6 @@ pub struct Sheet<'a> {
     pub hero: Option<HeroClass>,
     /// Status lines under the name (actions left, poison, this turn's modifiers).
     pub status: Vec<(String, Color)>,
-    /// The battle's panel: the name and stats run over the figure's lower part. Otherwise
-    /// (the army screen) they stand under the full figure.
-    pub battle: bool,
 }
 
 /// One-based number of a bonus in the original's list (`Bonus<N>.lit`, `[Army] Bonus<N>`).
@@ -122,9 +119,9 @@ pub(super) fn bonus_title(b: &Bonus) -> String {
         .unwrap_or_else(|| razdor::rules::items::bonus_name(b))
 }
 
-/// The name part of a bonus text: up to the first " - ", trimmed.
+/// The name part of a bonus text: up to the first " - ", spaces trimmed (0x49a5c6).
 fn title_of(text: &str) -> &str {
-    text.split(" - ").next().unwrap_or(text).trim()
+    razdor::rules::item_text::bonus_title(text)
 }
 
 fn hero_trait(h: HeroClass) -> (String, String, Color) {
@@ -559,6 +556,24 @@ pub fn slot_rects(r: Rect) -> [Rect; 4] {
     ]
 }
 
+/// Razdor's army and battle windows are the original's at 15/16: the panel's 262×609 px
+/// fill (0x492f24: X0+2..X0+0x108, Y0+0x1d..Y0+0x27e) is 244×570 here.
+const FIGURE_SCALE: f32 = 0.9375;
+/// The height of the original's figure box under the panel's top, in its pixels (0x1b4).
+const FIGURE_BOX: f32 = 436.0;
+
+/// Where the unit's figure, `w`×`h` in the picture's own pixels, stands on the panel `r`, as
+/// the original's (0x492f24 → 0x476a3c): unscaled, its picture (not its body) centred across
+/// the panel (x = X0 + (0x10a − w) / 2, the middle of the fill X0+2..X0+0x108), and centred
+/// down a 436 px box from the fill's top (y = Y0 + 0x1d + (0x1b4 − h) / 2), so its middle
+/// stands 218 px under the top whatever its height. No size limit: a taller picture would
+/// rise above the box.
+fn figure_rect(r: Rect, w: f32, h: f32, k: f32) -> Rect {
+    let s = FIGURE_SCALE * k;
+    let (w, h) = (w * s, h * s);
+    Rect::new(r.x + (r.w - w) / 2.0, r.y + (FIGURE_BOX * s - h) / 2.0, w, h)
+}
+
 /// A placeholder figure: a dark sepia silhouette.
 fn silhouette(r: Rect) {
     let c = Color::new(0.30, 0.18, 0.08, 0.55);
@@ -582,23 +597,15 @@ pub fn draw(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: bool,
 fn draw_in_face(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: bool, hover: &mut Option<ItemId>) -> Option<usize> {
     let k = k();
     chrome::unit_parchment(r);
-    // The figure, behind the text.
-    let fig_h = r.h * if s.battle { 0.66 } else { 0.6 };
-    let top = r.y + 10.0 * k;
+    // The figure, behind the text: at its own size, centred in the original's box
+    // (`figure_rect`, 492f24 → 0x476a3c).
     match assets.figure(s.kind) {
         Some(t) => {
-            let h = (t.height() * 0.9375 * k).min(fig_h);
-            let w = t.width() * h / t.height();
-            // The body in the panel's middle, not the picture: a long weapon to one side
-            // would push it off. The picture stays inside the panel where it fits.
-            let body = assets.figure_center(s.kind).unwrap_or(0.5);
-            let x = r.x + r.w / 2.0 - body * w;
-            let x = if w <= r.w { x.clamp(r.x, r.x + r.w - w) } else { r.x + (r.w - w) / 2.0 };
             // Drawn with the picture's own alpha only, at full strength (492f24 → 0x476a3c);
             // an extra overall transparency washed every engraving out.
-            chrome::tex(&t, Rect::new(x, top, w, h), WHITE);
+            chrome::tex(&t, figure_rect(r, t.width(), t.height(), k), WHITE);
         }
-        None => silhouette(Rect::new(r.x + r.w * 0.2, r.y + 12.0 * k, r.w * 0.6, fig_h * 0.95)),
+        None => silhouette(figure_rect(r, 0.6 * r.w / (FIGURE_SCALE * k), 0.95 * FIGURE_BOX, k)),
     }
     // The text stands on the panel's bottom, as the original's (492f24 stacks the description
     // and state lines on the bottom edge, the stats over them, the name over those), in battle
@@ -742,6 +749,24 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: b
 mod tests {
     use super::*;
 
+    /// The figure as the original places it (0x492f24 → 0x476a3c): its own size (at the
+    /// window's 15/16), the picture centred across the panel and its middle 218 original px
+    /// under the panel's top, whatever its height; no longer pinned 10 px under the top.
+    #[test]
+    fn the_figure_is_centred_in_the_originals_box() {
+        let r = Rect::new(10.0, 20.0, 244.0, 570.0);
+        let f = figure_rect(r, 160.0, 320.0, 1.0);
+        assert_eq!((f.w, f.h), (150.0, 300.0));
+        assert_eq!(f.x + f.w / 2.0, r.x + r.w / 2.0);
+        assert_eq!(f.y + f.h / 2.0, r.y + 218.0 * 0.9375);
+        assert!(f.y - r.y > 50.0, "the head clears the top: {}", f.y - r.y);
+        // A shorter figure stands lower; the scale follows the window's.
+        let short = figure_rect(r, 100.0, 200.0, 1.0);
+        assert_eq!(short.y + short.h / 2.0, f.y + f.h / 2.0);
+        let big = figure_rect(Rect::new(0.0, 0.0, 488.0, 1140.0), 160.0, 320.0, 2.0);
+        assert_eq!((big.y, big.h), (2.0 * (f.y - r.y), 600.0));
+    }
+
     #[test]
     fn the_first_line_keeps_its_size_when_it_fits_and_shrinks_only_as_needed() {
         // A width growing in rounded steps, as TrueType sizes are drawn.
@@ -775,7 +800,6 @@ mod tests {
             building,
             hero: None,
             status: Vec::new(),
-            battle: true,
         };
         let label = label("SDefenceShot", "Ranged defence");
         stat_lines(content, &sheet).into_iter().find(|l| l.0 == label).map(|l| l.1).unwrap()
@@ -860,7 +884,6 @@ mod tests {
             building: 0,
             hero: None,
             status: Vec::new(),
-            battle: true,
         };
         stat_lines(content, &sheet).into_iter().map(|l| l.0).collect()
     }

@@ -1,7 +1,13 @@
 //! Dragging a unit's card to another cell of the army grid (the army screen, the barracks):
 //! pressed on a card, it follows the mouse once moved; let go over another cell, the unit
 //! goes there, swapping with a unit standing in it (`Game::move_unit`). A press that does
-//! not move stays a click.
+//! not move stays a click. The garrison tab drags between its two grids the same way
+//! ([`press_guard`], [`follow`]).
+//!
+//! Razdor's setting «Расстановка армии» ([`Controls`], the owner's decision after a player's
+//! report, 2026-10-17): with dragging only (the default) a press on a card only selects its
+//! unit and units move by dragging alone; «Как в оригинале» keeps the original's
+//! press-to-pick, press-to-move (interface.md §9.6) with dragging on top.
 
 use std::cell::Cell;
 
@@ -10,6 +16,7 @@ use macroquad::prelude::*;
 use razdor::rules::battle::Team;
 use razdor::rules::content::UnitId;
 use razdor::rules::formation::Slot;
+use serde::{Deserialize, Serialize};
 
 use super::assets::Assets;
 use super::widgets::{input_blocked, pointer};
@@ -17,10 +24,50 @@ use super::widgets::{input_blocked, pointer};
 /// Pixels the mouse must move before a press on a card drags it.
 const START: f32 = 5.0;
 
+/// How the army grids outside battle are arranged (Razdor's setting in «Ещё…»). Battle is
+/// not affected.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Controls {
+    /// Razdor's choice (the default, also for settings files without the key): a press on a
+    /// card only selects its unit (its card and items show); units move and items are given
+    /// by dragging. The original has no dragging and moves units by presses (0x4c346c).
+    #[default]
+    Drag,
+    /// The original's: a press picks a unit, the next press swaps it or moves it (0x4c346c,
+    /// 0x4c653c, 0x4c6f50), and Razdor's dragging works as well.
+    Original,
+}
+
+impl Controls {
+    /// The settings button's next choice.
+    pub fn next(self) -> Controls {
+        match self {
+            Controls::Drag => Controls::Original,
+            Controls::Original => Controls::Drag,
+        }
+    }
+}
+
+thread_local! {
+    static CONTROLS: Cell<Controls> = const { Cell::new(Controls::Drag) };
+}
+
+/// The setting, pushed in each frame (`main_menu::apply_options`).
+pub fn set_controls(c: Controls) {
+    CONTROLS.with(|m| m.set(c));
+}
+
+/// The arrangement chosen in the settings.
+pub fn controls() -> Controls {
+    CONTROLS.with(|m| m.get())
+}
+
 #[derive(Clone, Copy)]
 struct Drag {
-    /// Squad index, and its portrait.
+    /// Squad index (a garrison index when `guard`), and its portrait.
     unit: usize,
+    guard: bool,
     kind: UnitId,
     start: Vec2,
     moved: bool,
@@ -32,17 +79,40 @@ thread_local! {
 
 /// A press on squad member `unit`'s card: it may be dragged from here.
 pub fn press(unit: usize, kind: UnitId) {
-    DRAG.with(|d| d.set(Some(Drag { unit, kind, start: pointer().into(), moved: false })));
+    DRAG.with(|d| d.set(Some(Drag { unit, guard: false, kind, start: pointer().into(), moved: false })));
 }
 
-/// The unit being dragged, once the mouse has moved (its card is drawn dimmed).
+/// A press on garrison unit `unit`'s card (the garrison tab): it may be dragged from here.
+pub fn press_guard(unit: usize, kind: UnitId) {
+    DRAG.with(|d| d.set(Some(Drag { unit, guard: true, kind, start: pointer().into(), moved: false })));
+}
+
+/// The squad member being dragged, once the mouse has moved (its card is drawn dimmed).
 pub fn dragged() -> Option<usize> {
-    DRAG.with(|d| d.get()).filter(|d| d.moved).map(|d| d.unit)
+    dragged_from().filter(|d| !d.0).map(|d| d.1)
+}
+
+/// The card being dragged, once the mouse has moved: (a garrison unit, its index).
+pub fn dragged_from() -> Option<(bool, usize)> {
+    DRAG.with(|d| d.get()).filter(|d| d.moved).map(|d| (d.guard, d.unit))
 }
 
 /// After the grid is drawn: follows the mouse with the portrait (card `size`), and on the
-/// release over one of `cells` other than the unit's own returns (unit, cell).
+/// release over one of `cells` other than the unit's own returns (unit, cell). A garrison
+/// drag ends here without a move.
 pub fn update(assets: &Assets, cells: &[(Slot, Rect)], size: Vec2) -> Option<(usize, Slot)> {
+    let (guard, unit) = follow(assets, size)?;
+    if guard {
+        return None;
+    }
+    let m = Vec2::from(pointer());
+    cells.iter().find(|(_, r)| r.contains(m)).map(|&(slot, _)| (unit, slot))
+}
+
+/// Follows the mouse with the dragged portrait (card `size`); on a release after the mouse
+/// moved returns where the drag started: (a garrison unit, its index). The caller decides
+/// what lies under the pointer.
+pub fn follow(assets: &Assets, size: Vec2) -> Option<(bool, usize)> {
     let mut d = DRAG.with(|d| d.get())?;
     let m = Vec2::from(pointer());
     if !d.moved && m.distance(d.start) > START {
@@ -58,10 +128,7 @@ pub fn update(assets: &Assets, cells: &[(Slot, Rect)], size: Vec2) -> Option<(us
         return None;
     }
     DRAG.with(|c| c.set(None));
-    if !d.moved {
-        return None;
-    }
-    cells.iter().find(|(_, r)| r.contains(m)).map(|&(slot, _)| (d.unit, slot))
+    d.moved.then_some((d.guard, d.unit))
 }
 
 /// Leaving the screen: nothing stays held.
@@ -85,13 +152,14 @@ pub enum GridPress {
     /// An empty cell pressed while a unit is selected: its card slides there (0x4b0c04,
     /// `Card-Move`); the selection is cleared when the slide ends.
     Slide(usize),
-    /// An empty cell with nothing selected.
+    /// An empty cell with nothing selected (with dragging only, any empty cell: the
+    /// selection is cleared).
     Nothing,
 }
 
 /// The press on `pressed` (a squad index, `None` for an empty cell) with `selected`
-/// selected. The hero is a unit like any other here: selected, a press on another unit
-/// swaps the two (no test on the hero or a named character in 0x4c346c).
+/// selected, as the original's. The hero is a unit like any other here: selected, a press
+/// on another unit swaps the two (no test on the hero or a named character in 0x4c346c).
 pub fn grid_press(selected: Option<usize>, pressed: Option<usize>) -> GridPress {
     match (selected, pressed) {
         (Some(s), Some(p)) if s == p => GridPress::Deselect,
@@ -99,6 +167,18 @@ pub fn grid_press(selected: Option<usize>, pressed: Option<usize>) -> GridPress 
         (Some(s), Some(p)) => GridPress::Swap { selected: s, pressed: p },
         (Some(s), None) => GridPress::Slide(s),
         (None, None) => GridPress::Nothing,
+    }
+}
+
+/// The press as the setting `controls` has it. With [`Controls::Drag`] (Razdor's choice, the
+/// owner's decision) a press never moves a unit: a unit pressed is selected (the selected
+/// one stays so) and an empty cell clears the selection, where the original swaps or slides
+/// on the second press (0x4c346c, 0x4c653c) or deselects.
+pub fn grid_press_in(controls: Controls, selected: Option<usize>, pressed: Option<usize>) -> GridPress {
+    match (controls, pressed) {
+        (Controls::Original, _) => grid_press(selected, pressed),
+        (Controls::Drag, Some(p)) => GridPress::Select(p),
+        (Controls::Drag, None) => GridPress::Nothing,
     }
 }
 
@@ -127,6 +207,38 @@ mod tests {
         // An empty cell slides the selected unit there, or does nothing.
         assert_eq!(grid_press(Some(4), None), GridPress::Slide(4));
         assert_eq!(grid_press(None, None), GridPress::Nothing);
+    }
+
+    #[test]
+    fn as_in_the_original_the_second_press_moves() {
+        use Controls::Original;
+        assert_eq!(grid_press_in(Original, Some(3), Some(5)), GridPress::Swap { selected: 3, pressed: 5 });
+        assert_eq!(grid_press_in(Original, Some(4), None), GridPress::Slide(4));
+        assert_eq!(grid_press_in(Original, Some(3), Some(3)), GridPress::Deselect);
+        assert_eq!(grid_press_in(Original, None, Some(3)), GridPress::Select(3));
+        assert_eq!(grid_press_in(Original, None, None), GridPress::Nothing);
+    }
+
+    #[test]
+    fn with_dragging_only_a_press_never_moves_a_unit() {
+        use Controls::Drag;
+        // A unit pressed is selected, whatever was selected before: no swap.
+        assert_eq!(grid_press_in(Drag, None, Some(3)), GridPress::Select(3));
+        assert_eq!(grid_press_in(Drag, Some(3), Some(5)), GridPress::Select(5));
+        assert_eq!(grid_press_in(Drag, Some(0), Some(5)), GridPress::Select(5));
+        // The selected unit pressed again stays selected (no deselection).
+        assert_eq!(grid_press_in(Drag, Some(3), Some(3)), GridPress::Select(3));
+        // An empty cell: no slide, nothing selected.
+        assert_eq!(grid_press_in(Drag, Some(4), None), GridPress::Nothing);
+        assert_eq!(grid_press_in(Drag, None, None), GridPress::Nothing);
+    }
+
+    #[test]
+    fn dragging_is_the_default_also_for_old_settings_files() {
+        assert_eq!(Controls::default(), Controls::Drag);
+        assert_eq!(Controls::Drag.next(), Controls::Original);
+        assert_eq!(Controls::Original.next(), Controls::Drag);
+        assert_eq!(serde_json::to_string(&Controls::Original).unwrap(), "\"original\"");
     }
 
     #[test]

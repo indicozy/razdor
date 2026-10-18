@@ -53,6 +53,8 @@ install file ──► src/dt/gfx.rs decode_file ──► gfx::Image (RGBA, not
   KeyPurple). `chrome::win(name)` = `Graphics/Windows/<name>.lit` drawn plainly with its own
   alpha. Prefer `Fx::Plain`: a black key was once used to hide the decoder's sign bug and
   ate dark pixels (commit 66d29ff).
+- A map event's own picture is unscrambled ARGB4444 (`dtm::event_picture_rgba`, 0x4d1693;
+  `ui::story` draws it); it was once read as RGB565 and showed as orange noise.
 - `DtArt` (`src/ui/dt_art.rs`) caches by `Key` (portrait, figure, item, terrain, object,
   building) and builds one `Atlas` for every map object and building sprite so the map
   draws in few batches.
@@ -85,8 +87,25 @@ install file ──► src/dt/gfx.rs decode_file ──► gfx::Image (RGBA, not
 textures from a 4×4 atlas, water frames multiplied in), then decorations
 (`draw_object`), buildings (`draw_building`), armies (`draw_army`, `draw_figure`,
 `draw_ship`), the hero (`draw_hero`), the route (`draw_route`), and the tooltip
-(`draw_tooltip`). Buildings are anchored like the original (right edge on the cell; see
-PLAYTEST_NOTES "Мосты сдвинуты"). The minimap is `src/ui/minimap.rs`.
+(`draw_tooltip`; its opaque box in the original's three styles is `widgets::tooltip_panel_styled`,
+the layout as interface.md §7.4). Buildings are anchored like the original (right edge on the cell; see
+PLAYTEST_NOTES "Мосты сдвинуты"). A figure inside a building is not drawn, as the
+original's drawn-occupant byte (0x497abc): `draw_army` and `draw_hero` skip it when
+`Game::army_hidden` / `Game::hero_hidden` say so (`World::hides_figure`: standing in a building
+other than a bridge, or crossing between building cells; gliding in from outside it is seen
+until the step ends). Its one-cell ring (`draw_mark`) stays, under the building picture. The
+minimap is `src/ui/minimap.rs`.
+
+Map figures (`draw_figure`) are drawn premultiplied (`chrome::premultiplied`): the sheets hold
+premultiplied colour, as the original's ONE / INVSRCALPHA blend reads them (0x4c9ef6); the
+Ghost's glow is light with alpha 0, invisible under straight alpha. Standing armies animate
+while the map is idle (no walk, no wait): `idle_sprite_frame` takes the frame from
+`src/rules/idle.rs` (`idle_frame`: the figure's 20-step table at 250 ms; `ship_idle_frame`;
+`hero_ship_idle_frame` for the hero's galley at rest) by the wall clock since the army's stamp,
+with its offset `AiMind::idle_offset`. The offsets come from the loads
+(`Rng::map_load_idle_offsets`, `Rng::save_load_draws`) and the stop (`Game::armies_snap`, which
+also counts `idle_restarts`); `stamp_idle` stamps each army at the first frame drawn and again when
+its restart count changes, and `MapView::forget_shows` drops the stamps of the last game.
 
 ## Sound and music
 
@@ -158,6 +177,9 @@ The original finds a unit's and an ability's pictures as follows, and Razdor doe
   (`data::unit_picture_frames`, `DtInstall::unit_picture_frame`). A mod that adds units must
   add their frames at the same positions; frames are `[u16 w][u16 h][u16 w][u16 h]` then
   w·h scrambled ARGB4444 pixels (Persones) and `[u16 w][u16 h]` + 92·92 pixels (Icons).
+  The unit panel draws the engraving unscaled (at the window's 15/16), the whole picture
+  centred in the original's 266 × 436 box under the panel's top (`unit_sheet::figure_rect`,
+  0x492f24); never place it by its pixels or pin it to the top.
 - **Engraving blend.** Drawn with the frame's own alpha at full strength (492f24 → 0x476a3c);
   a frame whose opaque pixels carry a low alpha nibble looks faded in the original too.
 - **Ability icons.** `Windows/Bonus<N>.lit` for N = 1…52, N being the bonus's place among the

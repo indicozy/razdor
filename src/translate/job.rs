@@ -16,6 +16,7 @@ use super::text::{self, has_cyrillic, prepare};
 use crate::dt::container;
 use crate::dt::dtm::{FlagScript, Scenario};
 use crate::dt::DtError;
+use crate::trf;
 
 /// What a map string is, for where it may be cut and which pass translates it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,6 +96,25 @@ pub struct Entry {
     /// Why the last answer was refused.
     #[serde(default)]
     pub last_error: String,
+    /// The last refused answer itself, for the log (not saved).
+    #[serde(skip)]
+    pub last_answer: Option<String>,
+}
+
+/// Why an answer has no text for `key`: the keys it does have, or that it has none (its raw
+/// text is in the request log).
+pub fn missing(key: &str, answers: &HashMap<String, String>) -> String {
+    let mut keys: Vec<&str> = answers.keys().map(String::as_str).collect();
+    if keys.is_empty() {
+        return trf!("no text under key \"{key}\": the answer holds no texts", key);
+    }
+    keys.sort_by_key(|k| (k.parse::<u64>().unwrap_or(u64::MAX), *k));
+    const SHOWN: usize = 12;
+    let mut list = keys.iter().take(SHOWN).copied().collect::<Vec<_>>().join(", ");
+    if keys.len() > SHOWN {
+        list.push_str(", …");
+    }
+    trf!("no text under key \"{key}\"; the answer has keys {keys}", key, keys = list)
 }
 
 /// A map of the job: its file in the maps folder and the English copy's.
@@ -393,16 +413,24 @@ impl Job {
         let mut taken = 0;
         for (k, &i) in batch.iter().enumerate() {
             let e = &mut self.entries[i];
-            let got = answers.get(&(k + 1).to_string()).ok_or_else(|| "missing from the answer".to_string());
-            match got.and_then(|a| text::restore(&e.src, &prepare(&e.src), a, &self.language, self.any_script)) {
+            let key = (k + 1).to_string();
+            let Some(answer) = answers.get(&key) else {
+                e.tries += 1;
+                e.last_error = missing(&key, answers);
+                e.last_answer = None;
+                continue;
+            };
+            match text::restore(&e.src, &prepare(&e.src), answer, &self.language, self.any_script) {
                 Ok(en) => {
                     e.en = Some(en);
                     e.last_error.clear();
+                    e.last_answer = None;
                     taken += 1;
                 }
                 Err(why) => {
                     e.tries += 1;
-                    e.last_error = why;
+                    e.last_error = why.message();
+                    e.last_answer = Some(answer.clone());
                 }
             }
         }
@@ -414,6 +442,7 @@ impl Job {
         for &i in batch {
             self.entries[i].tries += 1;
             self.entries[i].last_error = why.to_string();
+            self.entries[i].last_answer = None;
         }
     }
 
@@ -585,6 +614,25 @@ mod tests {
         assert!(job.failed() >= 1);
         job.retry_failed();
         assert_eq!(job.failed(), 0);
+    }
+
+    #[test]
+    fn a_refusal_says_which_key_was_missing_and_keeps_the_refused_answer() {
+        let mut job = Job::from_texts([("Озеро", true), ("Мельница", true), ("*Конец", true)]);
+        let batch: Vec<usize> = (0..3).collect();
+        let answers: HashMap<String, String> = [("1", "Lake"), ("10", "Mill"), ("3", "The end")].map(|(k, v)| (k.to_string(), v.to_string())).into();
+        assert_eq!(job.accept(&batch, &answers), 1);
+        let e = &job.entries[1];
+        assert_eq!(e.last_error, "no text under key \"2\"; the answer has keys 1, 3, 10");
+        assert_eq!(e.last_answer, None);
+        let e = &job.entries[2];
+        assert_eq!(e.last_error, "markup mark `*`: 1 in the original, 0 in the translation");
+        assert_eq!(e.last_answer.as_deref(), Some("The end"));
+        assert_eq!(job.entries[0].en.as_deref(), Some("Lake"));
+        // An answer with no texts at all.
+        assert_eq!(missing("1", &HashMap::new()), "no text under key \"1\": the answer holds no texts");
+        let many: HashMap<String, String> = (1..=20).map(|k| (k.to_string(), String::new())).collect();
+        assert_eq!(missing("21", &many), "no text under key \"21\"; the answer has keys 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, …");
     }
 
     #[test]

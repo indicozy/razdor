@@ -496,9 +496,10 @@ impl View {
                     Event::Answer { taken, of, seconds } => {
                         vec![(trf!("Taken {taken} of {of} in {s} s", taken, of, s = format!("{seconds:.1}")), if taken == of { GREEN } else { RED })]
                     }
-                    Event::Failed(why) => vec![(trf!("Failed: {why}", why), RED)],
-                    // Why each refused text was refused (the answer itself is in the request log).
-                    Event::Refused(texts) => texts.into_iter().map(|(text, why)| (trf!("Refused «{text}…»: {why}", text, why), RED)).collect(),
+                    Event::Failed { why, request } => vec![(trf!("Failed: {why} (request {n} in the Request log)", why, n = request), RED)],
+                    // Each refused text: why, with what was expected and what came; then the
+                    // start of the refused translation and where the whole answer is.
+                    Event::Refused { request, texts } => texts.into_iter().flat_map(|r| refused_lines(&r, request)).collect(),
                 };
                 let mut sh = shared.lock().unwrap();
                 sh.log.extend(lines);
@@ -557,6 +558,18 @@ impl View {
             text_fit(line, r.x + 8.0, r.y + 20.0 + k as f32 * 19.0, r.w - 16.0, 15.0, *color);
         }
     }
+}
+
+/// A refused text in the log, kept short: the start of the original and why, then the start
+/// of the refused translation and the request whose raw answer and whole texts the request
+/// log holds.
+fn refused_lines(r: &translate::Refused, request: usize) -> [(String, Color); 2] {
+    let (text, why) = (translate::text::excerpt(&r.src, 40), &r.why);
+    let detail = match &r.answer {
+        Some(a) => trf!("translation «{answer}»; request {n} in the Request log", answer = translate::text::excerpt(a, 50), n = request),
+        None => trf!("the raw answer: request {n} in the Request log", n = request),
+    };
+    [(trf!("Refused «{text}»: {why}", text, why), RED), (format!("    {detail}"), DIM)]
 }
 
 /// The list: each campaign once (by its first chapter), then the maps alone; English copies

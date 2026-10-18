@@ -18,7 +18,9 @@ except what the screen value, the `App` fields and a few `thread_local!`s hold.
    `razdor::dt::install::load_dotenv` (`.env` next to the program or in the working
    folder), `single_instance` (a lock file), `razdor::update::init`, the window size
    (`ui::snapshot::size`, `RAZDOR_SIZE`).
-2. `main`: `ui::widgets::load_font` (TrueType faces bundled in `data/fonts/`),
+2. `main`: one black frame (`next_frame` before any loading, so the shown window handles its
+   first messages and presents a picture at once; the loading itself runs inside one frame),
+   `ui::widgets::load_font` (TrueType faces bundled in `data/fonts/`),
    `ui::language::init` (the saved language, `razdor::i18n`), `Content::builtin` (the demo content),
    `Assets::load` (`src/ui/assets.rs`) which finds the install (`DtArt::from_env` →
    `razdor::dt::install::locate`) and, when there is one, calls
@@ -55,7 +57,7 @@ folder when it is an install, the remembered folder (`config_file`), then a sear
 - `match (&mut self.screen, &mut self.game)` calls the screen's function, e.g.
   `world_view::frame`, `building_view::frame`, `items_view::squad`, `BattleView::frame`,
   `items_view::hero_window`, `spellbook::frame`, `saves::load_screen`, `main_menu::options_window`;
-- global hotkeys (`hotkeys::allowed`, F1 help, F5/F9 quick save/load, language);
+- global hotkeys (`hotkeys::allowed`, F1 help, F5/F9 quick save/load, F10 the autosave written last (Razdor's), language);
 - the front dialog: `dialog::draw` returns `Some(Close)` when closed, then the closing is
   routed (village offers → `building_view::answer_offer`, questions →
   `Game::answer_question`, event windows → `Game::event_window_closed`; results go back
@@ -81,6 +83,27 @@ owner): the quests under way (the original's diary), and Razdor's history of com
 rumours and messages over the whole campaign, with dates and a heading per campaign map
 (`items_view::HeroView`, `story::journal_lines`). Hint boxes
 (`widgets::tooltip`, `panel_hint`) fade in over 300 ms as the original's.
+
+An item's description, wherever it is shown (the market, the hero window's box, the army
+window's pop-up, the event window's item tooltip), is one box, `item_text::draw` in
+`src/ui/item_text.rs`, laid out per window by `item_text::ItemBox`; its usage line, effect text
+and bonus line are the original's (interface.md §9.2), built by `rules::item_text` from the
+install's `[Skills]` labels (`spell_badges::label`).
+
+The custom battle's setup (`Screen::CustomSetup`, drawn by `custom_battle::frame` in
+`src/ui/custom_battle.rs`, a Razdor extra) keeps its armies in `rules::custom::Setup`. Its left
+column has two tabs, the unit types (`custom::unit_list`) and the items the picked unit may
+put on (`custom::item_list`: by `custom::Category`, sorted by `custom::PriceOrder`, kept by
+the inventory filter's match). Each list has the inventory filter line
+(`item_filter::field_hinted`, started by a click or Ctrl+F only); the screen takes the typed
+characters first (`widgets::typed_chars` while no field has the keyboard) and a letter jumps
+to the next name starting with it (`custom::jump`). «Скопировать код боя» / «Вставить код
+боя» (and Ctrl+C / Ctrl+V while no field has the keyboard) write and read the whole setup as
+one line of text, `RZB1:` + base58 (`rules::custom_code`: `custom_code::encode`,
+`custom_code::decode`, versioned, CRC-checked, with the content's fingerprint to warn about
+another install or mod) through miniquad's clipboard (its window module's clipboard_set and clipboard_get:
+X11, Wayland, Windows and macOS). A code that does not read changes nothing; unknown unit
+types and items are left out and counted in the message.
 
 Building a window (`src/ui/chrome.rs`):
 
@@ -171,6 +194,35 @@ window opened with) and `advanced_window` («Ещё…»: Razdor's own options, 
 font and language). Two options are read at start only, as the original's: «no music and
 sounds» (`Audio::new`) and «impossible difficulty» (the content's difficulty factor in
 `App::new`).
+
+«Расстановка армии» (`unit_drag::Controls`, saved as `formation_controls`, pushed in by
+`main_menu::apply_options` → `unit_drag::set_controls`) is a Razdor setting that does not
+default to the original (the owner's decision after a player's report, 2026-10-17):
+«Перетаскивание», the default also for older files, makes a press on a card in the army
+window (`items_view::squad`), the building window's hero grid and the garrison tab only select
+(`unit_drag::grid_press_in`, `building_view::garrison_click`); units move by dragging
+(`unit_drag::update`, `unit_drag::follow`, the garrison's `building_view::garrison_act`) and
+the card hints say "click to select" (`items_view::pointed_line`). «Как в оригинале» keeps the
+original's press to pick, press to move (interface.md §9.6) with dragging on top. Battle is
+not affected.
+
+### The window's display mode
+
+`display::follow_settings` → `display::follow` (first thing in `App::frame`) puts the window in
+the setting's mode through each system's own window (`display::sys`: X11, Win32, AppKit);
+miniquad has no borderless mode. On Windows every step is logged to `razdor.log` ("display:
+…": the window's rectangles, styles, visible / active), the only way to see a player's case.
+
+- Windowed start on Windows: an OpenGL window never resized since it appeared may stay black
+  under the compositor, so `display::NUDGE` grows it 1 px at 0.3 s after the first frame and
+  puts it back at 0.8 s (`nudge_due`, one step per frame, frames presented at the grown size;
+  skipped when the player maximized, minimized or resized it meanwhile).
+- Borderless: a `WS_POPUP` over the monitor, one pixel taller (`popup_rect`), so Windows and
+  the drivers do not take it for an exclusive full-screen application (task switching).
+- Full screen: a `WS_POPUP` exactly over the monitor, topmost only while it is the active
+  window; when another window becomes active (Alt+Tab, Win+Tab) it goes to the bottom, and
+  back to topmost when activated again (`layer`, `sys::Window::keep_layer`, every frame).
+- Alt+Enter cycles the modes on any screen (`hotkey_pressed`, `notice`).
 
 Rule: a parity setting reads the install's value until the player chooses
 (`Option<bool>` = `None` → the install's `[Options]` value such as `OptValue9`, see `main_menu::expert_ai`). A Razdor

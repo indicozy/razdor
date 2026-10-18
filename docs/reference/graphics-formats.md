@@ -50,6 +50,11 @@ translucent marble middle; `Title_RUS` = the silver "Времена Раздор
 symbols (houses, towers, castles, churches, skull, anchor) in three sizes; `Stnd-1/2` = standards (skull, towers).
 The animated `Windows/Ask, Clock, House, Swords` are ordinary scrambled frames.
 
+**Map event pictures (code):** a `.DTm` event's own picture (`dtm-format.md` §11) is `[u16 w][u16 h]` and
+ARGB4444 words **without** the scramble. The event window (0x4d1693) splits each word as the UGS loader
+does: colour from the RGB444 table (low 12 bits), alpha from the top nibble, through the table's 5-bit blue
+(`(A·17 >> 3) / 31`); a coloured pixel with A = 0 gets alpha 8/31. Read as RGB565 it is orange noise.
+
 **b) `Objects/Persones.ugs` (H):** 102 records of `[u16 w][u16 h][u16 w][u16 h][pixels]`. Frame sizes vary
 (about 115–162 × 340–420). These are the full-body sepia portraits in the hire/army screen. Frame order
 matches `Icons.ugs`.

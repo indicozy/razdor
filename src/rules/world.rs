@@ -602,6 +602,9 @@ impl Location {
     }
 }
 
+/// One step of a [`Walk`] as drawn: the point left, the point gone to, how far along (0..1).
+pub type WalkStep = ((f32, f32), (f32, f32), f32);
+
 /// The steps an army took while the hero made one step or wait tick (drawing only). The
 /// original plays them within that step's real time (world.md §2, 0x4a39d0): a step it could
 /// follow with another lasts its share `minutes / banked` of the window, the last one fills
@@ -619,6 +622,12 @@ pub struct Walk {
 impl Walk {
     /// Where the army is `k` (0..1) of the way through the window, if it walked.
     pub fn at(&self, k: f32) -> Option<(f32, f32)> {
+        self.step_at(k).map(|(a, b, t)| (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t))
+    }
+
+    /// The step being drawn `k` (0..1) of the way through the window: the point it leaves,
+    /// the point it goes to and how far along it is (0..1; 1 once the last step is done).
+    pub fn step_at(&self, k: f32) -> Option<WalkStep> {
         let n = self.minutes.len();
         if n == 0 || self.points.len() != n + 1 {
             return None;
@@ -630,8 +639,7 @@ impl Walk {
             let end = (start + share).min(1.0);
             if k < end || i + 1 == n {
                 let t = if end > start { ((k - start) / (end - start)).clamp(0.0, 1.0) } else { 1.0 };
-                let (a, b) = (self.points[i], self.points[i + 1]);
-                return Some((a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t));
+                return Some((self.points[i], self.points[i + 1], t));
             }
             start = end;
         }
@@ -1460,6 +1468,21 @@ impl World {
         self.footprints.get(&t).copied()
     }
 
+    /// The figure of the hero or of an army drawn on its way from cell `from` to cell `to`
+    /// (`from == to` while it stands) is not drawn: it is inside a building. The original
+    /// draws a figure from its cell's drawn-occupant byte (cell +9, 0x4c8864/0x4c9b5b), which
+    /// 0x497abc writes as the figure's drawn cell moves to `to`: it stays empty when `to` lies
+    /// in a building other than a bridge (types 13–14; obelisks hide too) and the drawn cell
+    /// it leaves lies in any building, bridges included. A stop puts the figure on its cell
+    /// again (the hero's 0x4ae5d8, an army's step end 0x4ade3c, a map load 0x4b4f38 and an
+    /// army placed by an event 0x4969b8 with its drawn cell already there), so a figure that
+    /// stands in a building is hidden, one gliding in from outside is seen until its step
+    /// ends, one crossing from one building cell to another is hidden, and one stepping out
+    /// is seen at once. Its ring stays (0x48eeb0 marks its own cell, under the building).
+    pub fn hides_figure(&self, from: Tile, to: Tile) -> bool {
+        self.location_at(to).is_some() && self.location_covering(from).is_some()
+    }
+
     /// A demo gang from camp `home` at `at`.
     pub fn spawn_gang(&mut self, home: usize, at: Tile) {
         self.next_uid = self.next_uid.max(FIRST_GANG_UID) + 1;
@@ -1782,6 +1805,47 @@ mod tests {
         for t in BuildingType::ALL {
             assert_eq!(format!("{t:?}").replace("DungeonEntrance", "Entrance"), format!("{:?}", LocationKind::from_building(t)));
         }
+    }
+
+    #[test]
+    fn figures_inside_buildings_but_bridges_are_hidden() {
+        // 0x497abc: the drawn-occupant byte stays empty when the cell drawn to lies in a
+        // building other than a bridge (types 13–14) and the drawn cell left lies in any
+        // building, a bridge too.
+        let mut s = scenario(12, 12);
+        let village = building(BuildingType::Village, 5, 5, (2, 2)); // cells 4..=5 × 4..=5
+        let tent = building(BuildingType::Tavern, 8, 2, (1, 1));
+        let obelisk = building(BuildingType::Obelisk, 2, 9, (1, 1));
+        let bridge = building(BuildingType::StoneBridge, 6, 5, (1, 1));
+        s.buildings = vec![village, tent, obelisk, bridge];
+        let w = World::from_scenario(&s, &content());
+        // Standing (a stop, a load, an army placed by an event): hidden in any building but a bridge.
+        for t in [(4, 4), (5, 5), (8, 2), (2, 9)] {
+            assert!(w.hides_figure(t, t), "standing at {t:?}");
+        }
+        for t in [(6, 5), (3, 3), (0, 0)] {
+            assert!(!w.hides_figure(t, t), "standing at {t:?}");
+        }
+        // Gliding in from outside: seen until the step ends.
+        assert!(!w.hides_figure((3, 4), (4, 4)));
+        assert!(!w.hides_figure((8, 3), (8, 2)));
+        // Crossing from one building cell to the next: hidden, also from a bridge.
+        assert!(w.hides_figure((4, 4), (5, 4)));
+        assert!(w.hides_figure((6, 5), (5, 5)));
+        // Stepping out, or onto a bridge: seen at once.
+        assert!(!w.hides_figure((5, 5), (6, 6)));
+        assert!(!w.hides_figure((5, 5), (6, 5)));
+    }
+
+    #[test]
+    fn a_walk_step_is_found_by_its_share_of_the_window() {
+        let w = Walk { points: vec![(0.0, 0.0), (32.0, 0.0), (64.0, 0.0)], minutes: vec![10.0, 30.0], banked: 40.0 };
+        assert_eq!(w.step_at(0.0), Some(((0.0, 0.0), (32.0, 0.0), 0.0)));
+        assert_eq!(w.step_at(0.125), Some(((0.0, 0.0), (32.0, 0.0), 0.5)));
+        assert_eq!(w.step_at(0.625), Some(((32.0, 0.0), (64.0, 0.0), 0.5)));
+        assert_eq!(w.step_at(1.0), Some(((32.0, 0.0), (64.0, 0.0), 1.0)));
+        assert_eq!(w.at(0.625), Some((48.0, 0.0)));
+        assert_eq!(Walk::default().step_at(0.5), None);
     }
 
     #[test]

@@ -12,6 +12,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::text::prepare;
+use crate::i18n::tr;
+use crate::trf;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -256,22 +258,26 @@ pub fn user_prompt(texts: &[&str], glossary: &[(String, String)], language: &str
 /// The JSON object in a model's answer (code fences and chatter around it ignored): its
 /// string values by key.
 pub fn parse_answer(answer: &str) -> Result<HashMap<String, String>, String> {
-    let start = answer.find('{').ok_or("no JSON object in the answer")?;
-    let end = answer.rfind('}').ok_or("no JSON object in the answer")?;
+    if answer.trim().is_empty() {
+        return Err(tr("the answer is empty").to_string());
+    }
+    let no_json = || tr("no JSON object in the answer").to_string();
+    let start = answer.find('{').ok_or_else(no_json)?;
+    let end = answer.rfind('}').ok_or_else(no_json)?;
     if end < start {
-        return Err("no JSON object in the answer".into());
+        return Err(no_json());
     }
     let body = &answer[start..=end];
     match serde_json::from_str::<Value>(body) {
         Ok(v) => {
-            let obj = v.as_object().ok_or("the answer is not a JSON object")?;
+            let obj = v.as_object().ok_or_else(|| tr("the answer is not a JSON object").to_string())?;
             Ok(obj.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect())
         }
         // A model sometimes breaks one entry (an unquoted value, a stray character): the
         // well-formed `"N": "text"` pairs are kept, and only the rest is asked again.
         Err(e) => {
             let pairs = loose_pairs(body);
-            if pairs.is_empty() { Err(format!("the answer is not valid JSON: {e}")) } else { Ok(pairs) }
+            if pairs.is_empty() { Err(trf!("the answer is not valid JSON: {e}", e)) } else { Ok(pairs) }
         }
     }
 }
@@ -469,6 +475,10 @@ mod tests {
         assert_eq!(got["1"], "Hello, \"friend\"");
         assert_eq!(got["3"], "Yes: {0}");
         assert!(parse_answer("{\"1\": ").is_err());
+        // Each failure says what the answer was.
+        assert_eq!(parse_answer(" \n").unwrap_err(), "the answer is empty");
+        assert_eq!(parse_answer("no json here").unwrap_err(), "no JSON object in the answer");
+        assert!(parse_answer("{oops}").unwrap_err().starts_with("the answer is not valid JSON: "));
     }
 
     #[test]

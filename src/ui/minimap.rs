@@ -98,6 +98,22 @@ pub fn darkness_of(w: i32, h: i32, explored: impl Fn((i32, i32)) -> bool) -> Vec
     out
 }
 
+/// The darkness to draw over the fog layer (whose darkness is `now`) so that the two add up
+/// to `kept`, the darkness a reveal still keeps over a cell (alpha over alpha:
+/// `1 − (1 − a)(1 − now)`). Where the reveal changed nothing (`kept ≤ now`) it is 0: the
+/// original's fog is one image whose merge only brightens the stamp's cells (world.md §3,
+/// 0x49c8f0; the growing event reveal, 0x4af83c), so the rest of the map keeps its shade
+/// while a place is shown. (Razdor drew the whole fog before the reveal over the fog
+/// layer: every explored edge on the map was darkened twice until the place had opened,
+/// and lightened when it had; a player's report.)
+pub fn reveal_overlay(kept: u8, now: u8) -> u8 {
+    if kept <= now || now == 255 {
+        return 0;
+    }
+    let (k, n) = (kept as u32, now as u32);
+    ((k - n) * 255).div_ceil(255 - n).min(255) as u8
+}
+
 /// Draws the fog over the map. `tl` and `br` are the screen positions of world points
 /// `(-0.5, -0.5·row)` and `(w − 0.5, (h − 0.5)·row)`: the outer corners of the edge cells,
 /// so texel centres fall on cell centres.
@@ -689,6 +705,36 @@ mod tests {
         assert!(at(20, 10) >= 128 && at(20, 10) < 255, "dark edge cell mostly dark: {}", at(20, 10));
         assert!(at(17, 10) <= at(19, 10) && at(20, 10) <= at(22, 10), "darker outwards");
         assert!(darkness(&Fog::disabled(3, 3)).iter().all(|&a| a == 0));
+    }
+
+    /// A lantern opening far away leaves the rest of the fog as it is (0x49c8f0 merges only
+    /// the stamp's cells): the overlay of a reveal is clear everywhere its fog did not change,
+    /// and over the fresh cells it brings the fog back to its old darkness.
+    #[test]
+    fn a_reveal_overlay_only_darkens_the_cells_it_opens() {
+        let (w, h) = (60, 30);
+        let mut fog = Fog::new(w, h);
+        fog.reveal(10, 15, 5);
+        let old = fog.clone();
+        let opened = (48, 15);
+        fog.reveal(opened.0, opened.1, 3);
+        let before = darkness_of(w, h, |t| old.explored(t));
+        let now = darkness(&fog);
+        for y in 0..h {
+            for x in 0..w {
+                let i = (y * w + x) as usize;
+                let a = reveal_overlay(before[i], now[i]) as f32 / 255.0;
+                let total = 1.0 - (1.0 - a) * (1.0 - now[i] as f32 / 255.0);
+                if (x - opened.0).abs() > 8 {
+                    assert_eq!(a, 0.0, "cell ({x}, {y}) far from the lantern is left alone");
+                }
+                assert!((total * 255.0 - before[i] as f32).abs() <= 1.5, "cell ({x}, {y}) stacks to its old darkness");
+            }
+        }
+        assert_eq!(reveal_overlay(255, 0), 255);
+        assert_eq!(reveal_overlay(170, 170), 0);
+        assert_eq!(reveal_overlay(100, 200), 0);
+        assert_eq!(reveal_overlay(255, 255), 0);
     }
 
     #[test]

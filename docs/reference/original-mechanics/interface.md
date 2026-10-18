@@ -163,7 +163,18 @@ icon in its fourth column by the map header byte 0x120: 1 castle, 2 helm, 3 swor
 no icon. Each picture is loaded with its mask (4dc118 → 48cd90) and set into the cell as it is,
 at its own size: no disc or ring under it (the `si-border` ring belongs to the spell badges,
 49ac64). The icons are set on all rows the first time, then again on the old and the new row
-whenever the selection changes. **code** (4c1968, pictures loaded at 4dc118) Start
+whenever the selection changes. **code** (4c1968, pictures loaded at 4dc118) Each list item is a map's name in a
+Benguiat tint (4e266e..4e27a3: a first case in ae249c green (Razdor takes it for the tutorial; its test is **unknown**), a single scenario ae24ac cyan
+(135, 255, 255), a campaign its campaign name in ae24a0 yellow) and, for a campaign, its
+chapters as further lines of the same item (0x47e46c with the new-item flag clear), so the
+selection lights the whole block and a chapter cannot be picked alone. The list's highlight
+adds (0, 30, 90) over the picked item's lines (set at 4d2e0c, the text list's add mode) and
+draws them in their highlight fonts: the name in ae2498 (white Benguiat), the chapters in
+ae24bc (plain white SanSerif) instead of ae24c4 (orange). The description box (4c1a9c, 293×236)
+is filled from its top: the name through 47ea80 centred in ae2498 over the shadow font ae24b0,
+a blank line, then the description through 47ea80 as plain lines (split at CR LF and `#\`
+only: no marks read, no indent added), justified, in ae24f4 (the bold SanSerif's orange) over
+`SanSerif_Bold_Shadow` (ae2510). **code** Start
 copies the chosen map's header and enables each hero class whose preset has a start cell
 (start x or start y non-zero; gold, troops or a start building alone do not count). It walks
 the classes from the ranger down to the knight and opens the hero window on the last one it
@@ -316,6 +327,32 @@ nothing is put back, so the last ring stays. The colours (0x4ce30c): 1 `Selectio
 5 `Selection-2` 0x00c4ff; the mark lies on the ground in the cell pass (0x4c9459), under
 the building standing there. **code**
 
+**Ring sizes.** The mark byte is `size·16 + colour`; the loader (0x4ce30c) builds sizes 1–9 of
+each colour, size n a ring n·32 px wide and n·22 px high whose box is the n × n cells ending
+at the marked cell (its bottom-right). Every caller of 0x48eeb0 passes size 1 (one cell), so
+in the Community exe every ring is one cell. 0x48eeb0 keeps a second branch (0x48ef08–0x48ef54)
+that, for a cell inside a building, would mark the building's anchor cell with size = the
+footprint's width (building +0x121), a ring round the whole building; in the Community exe it
+is dead: the jump at 0x48ef06 sends building cells to the plain write on their own cell, and
+the Community hook at 0x48ef24 (0xc25ab0) sends the other cells there too. The vanilla game
+very likely took that branch (the jump there was the other way round; the hook only adds the
+own-cell write and keeps the size branch), which is the dashed ring round the whole building
+players remember from it; without a vanilla exe this is **unknown** (inferred from the code's
+shape). **code** (Community)
+
+**Figures inside buildings.** A figure (the hero, an army, a ship) is drawn from its cell's
+drawn-occupant byte (cell +9, the cell pass 0x4c8864/0x4c9b5b). 0x497abc writes it as the
+figure's drawn cell moves: it stays empty when the new cell lies in a building other than a
+bridge (types 13 and 14; an obelisk hides too) and the drawn cell it leaves lies in any
+building (a bridge too). The hero's drawn cell moves at the start of each step and is set
+again on the same cell at its end (0x4ae8ed) and at a stop (0x4ae5d8); an army's moves to the
+cell it steps to while the step plays (0x4ad660) and is set again on it when the step ends
+(0x4ade3c); a map load (0x4b4f38) and an event placing an army (0x4969b8) set it with the
+drawn cell already there. So a figure standing in a building is not drawn at all, one gliding
+in from outside is seen until its step ends, one crossing from one building cell to another
+is hidden, and one stepping out is seen at once. Its ring stays, one cell under the building
+picture (see above). The logical byte (cell +8, 0x497c68) follows the same rule. **code**
+
 ### 7.3 Left button (first frame of the press)
 
 Only on a valid target, and only while the map is idle (no walk, wait, glide or event):
@@ -366,6 +403,42 @@ Tooltip box: centred on the mouse, kept inside the 1024×682 view; styles normal
 (attitude < 1) and neutral (bridges, empty ruins). The army panel lists up to 2×6 unit
 portraits with a darkened band of height `46 × (1 − HP/max HP)` px on wounded units; ruins
 never show their defenders. **code** (4ca8ac, 4ca9f0, 4cb18c)
+
+The box (48d3f8, through 4ca8ac) is opaque once faded in. Normal style: `Win-marble` tiled;
+hostile: `Win-red` (already loaded 20, 40, 100 darker) tiled; neutral: the marble, its green
+channel copied into all three (48dd40), then scaled by 1, 0x2aa/1024 and 0x1c7/1024 (48da5c),
+a dull brown. A 2 px SteelLine frame round the box and a 2 px line from (2, 27) to (w − 2, 29)
+under the title; the title corners added (476790 mode 0) at (2, 3) and at the right end. The
+corners are copies of `Corner-Left` / `Corner-Right` made at start-up with a colour taken off
+(4768f8 mode 1): (192, 160, 160) for the normal and neutral pair (ae2554/58, 4dbd83), (128,
+192, 250) for the hostile pair (ae255c/60, 4dbe0b), which leaves them dark orange on the red.
+(The Community patch at c2828e/c282ad swaps the background for `Win-yellow` when its flag
+c2825b is set.) **code**
+
+Layout, in the original's pixels: 348 (0x15c) wide; the title cut to 340 px and centred at
+y = 8 in the yellow Benguiat (ae24a0, white less 0, 0, 100) over its shadow (ae24b0) in every
+style. Text block 332 px wide at x = 8, every entry centred, the description word-wrapped.
+Fonts by style (fonts are white less the colour given, loaded at 4e5c9c and 4dbc26):
+
+| Style | Labels (SanSerif) | Names (Benguiat) |
+|---|---|---|
+| normal | ae24d4, less (100, 0, 100): green | ae249c, less (100, 0, 100): green |
+| hostile | ae24c4, less (20, 90, 180): orange | ae24a4, less (0, 80, 170): orange |
+| neutral | ae24d0, less (100, 100, 100): grey | ae24b8, less (80, 80, 80): grey |
+
+- **Army** (4ca9f0): title, then the 2×6 cells (48 px squares 56 px apart from x = 10,
+  y = 37; portrait at (1, 1)); the text block at y = 149: `Commander` (label) and the leader
+  (name) only when the army has more than one unit (record +0 above 1), then the description
+  in ae24c4 (orange in every style). Height text + 0x9f (text at most 0x161), or 0x97 with
+  no text. The hero (army 0): `HeroArmy`, `Commander` and the hero's name, normal style.
+- **Building** (4cb18c): the text block at y = 37: `Owner` (label) and the owner (name), the
+  description in the label font, `VillageEmptyGold` in ae24a4; for ruins with a garrison an
+  empty line, `Defenders` (label) and `NoNameArmy` (name font), only inside that block (so
+  not when it has nothing else). Height text + 0x2f, or 0x1d with no text. Any other
+  building with a garrison (not a town) adds `Defenders` (label) and the cells under the text:
+  + caption + 0x79 (or caption + 0x9f with no text), the cells 10 px off the bottom, the
+  caption 8 px over them and a 1 px line 5 px over the caption when there is text. Height at
+  most 0x200. **code**
 
 ### 7.5 World spell targeting
 
@@ -578,19 +651,44 @@ reads the per-type table one entry off (the next type's value) and is always pla
 shipped data it is never shown. **code** (c2a4be, c2a7d8, c2a7eb, c2a837; see
 community-patches.md for the bleed and evasion rules themselves)
 
+**Panel geometry and the figure** (492f24, with X0, Y0 the panel's origin 6666b1 / 6666b5).
+The panel is filled from (X0 + 2, Y0 + 0x1d) to (X0 + 0x108, Y0 + 0x27e), 262 × 609 px; the
+Win-paper parchment (258 × 605, from its top left) goes 2 px inside it at (X0 + 4, Y0 + 0x1f),
+then the ornament overlay at (X0 + 8, Y0 + 0x23). The unit's figure (the type's picture,
+type +0xc / +0x10) is drawn at its own size with its alpha only (476a3c, clipped to the
+screen), its **picture** centred: x = X0 + (0x10a − w) / 2, y = Y0 + 0x1d + (0x1b4 − h) / 2.
+So the picture's middle stands across the panel's middle and 218 px under the fill's top
+whatever its height, centred in a 266 × 436 box; no figure is scaled or anchored to the top
+or to the text. Every shipped figure fits that box. The darkening under the text and the text
+itself are laid out afterwards from the panel's bottom. **code**
+
+**Item slots and templates** (492f24). The four worn-item slot buttons are set only when the
+card is neither a hire offer in a building's hire tab (68dc88 = 1, army ≠ 0) nor a template
+(the fourth argument). A filled slot shows its item's icon; an empty one shows the empty-slot
+picture ae2860 only outside battle (4ed424 = 0) and outside the building tabs 1 and 2. A
+hovered promotion portrait (4c39d8 → 4c3b5f for portrait 0, 4c3bc2 for 1–3) paints the type
+of that portrait (the unit's own, or the next type) as a template: a fresh unit record of the
+type, no item slots at all, the parchment painted over the slots the unit's card had. **code**
+
 ### 9.2 Item text (499eb0)
 
-The same builder fills the inventory's description box (4c280c) and the event dialog's item
-tooltip (4cbab0). Parts, top to bottom: **code**
-1. The item name, in the title font.
-2. Only when the item has a description: a usage line in grey, chosen in this order (each
-   choice replaces the one before): `OnlyForWarriors` for a melee weapon or a shield,
+The same builder fills the market's description (4b9c40), the inventory's description box
+(4c280c) and the event dialog's item tooltip (4cbab0); all three pass the same fonts. Every
+part is added to a text list centred and word-wrapped, with no shadow font. Labels are the
+`[Skills]` texts of the interface ini. Parts, top to bottom: **code**
+1. The item name, in the white Benguiat (ae2498).
+2. Only when the item has a description: a usage line in grey (ae24d0), chosen in this order
+   (each choice replaces the one before): `OnlyForWarriors` for a melee weapon or a shield,
    `OnlyForBowmans` for a ranged weapon, `OnlyForMages` for a staff; `OnlyForMages` for any item
    with a `Magic` school; `NotForUse` for a Death school item. Then an empty line and the
-   description.
-3. The effect text, in one colour, word-wrapped as one paragraph: each entry is "label value "
-   and the entries follow each other. A value of 0 adds nothing; a positive value gets "+"
-   unless the entry has its own prefix.
+   description, both in the yellow SanSerif (ae24c0).
+3. The effect text, in the orange SanSerif (ae24c4), word-wrapped as one paragraph and left
+   out when empty: each entry is the label, a space, the prefix, the number, the suffix and a
+   space (499d30), and the entries follow each other with no other separator (no commas, no
+   item type word). A value of 0 adds nothing; a positive value gets "+" unless the entry has
+   its own prefix; the f- prefix "=" stands before the sign ("=50%", "=-5"). Example, «Кровь
+   для Вампира» (f-Vampirizm 50, d-Initiative 10, p-Manevres 50): «Вампиризм =50% Инициатива
+   +10 Количество действий +50%».
    - **f- entries** (fixed values) have the prefix "=": Hits (label `SHit`), melee and ranged
      attack and defence, magic power (`SMagicPower`), the protections (merged into one
      `SProtectAllMagic` entry when all three are equal and not 0, else Life, Elemental, Death,
@@ -607,11 +705,22 @@ tooltip (4cbab0). Parts, top to bottom: **code**
      (one `SPhysicalDefence` entry when the two p-defences are equal **and** both d-defences
      are 0; otherwise a p-defence entry only when its d-value is 0), magic power, the
      protections (merged as above), regeneration, vampirism, initiative, manevres.
-4. The item's bonus name, plain, when it has one (the Community bonus-name table; the part
-   before " - ", trimmed).
+4. When the item has a bonus, a line in the white SanSerif (ae24bc): `GetBonus`, a space and
+   the bonus's name in double quotes («Дает бонус "…"»). The name is the bonus text of
+   `[Army] Bonus<N>` (the table at c35000) cut before its first " - " and trimmed of spaces
+   (a text without " - " would be cut to nothing and then read before its start; no shipped
+   text lacks it).
 
 The box's top margin is set so the text is centred vertically, at least 4 px. Attack values
 are never merged (there is no AB = AS rule for items). **code**
+
+Where the text stands (**code**):
+- Market (4b9c40): the item's 55 px picture centred horizontally, 8 px below the box's top
+  (4b9dcb); the top margin replaced by `63 + (H − text) / 2` (4b9d97), so the text is centred
+  in the part below the picture.
+- Army and hero windows (4c280c): the description box shows only the text (the hovered slot
+  shows the item); the builder's own centring.
+- Event dialog tooltip (4cbab0): see §9.3, 272 px wide, 16 px margin, text plus 32 tall.
 
 Quirks of the defence merging (**code**, read from the conditions; not seen on screen):
 - Equal d-defences that are not 0 with **unequal** p-defences: the p-defences are written
@@ -725,6 +834,24 @@ ae26a0)
   the same "`Cost` = N" line (Community: `MCst` and mana for an Elemental) and the `HireArmy`
   button, enabled only when the price is affordable, the hero's army has **fewer than 12 units**
   and the slot still has units. **code** (4957e9, 49571d, hooks c25e18 / c25e38 / c25e61)
+- **Pointing at a hire offer** (mouse-enter 4c6964, leave 4c72a4): the offer's cell gets
+  highlight state 2, which the hire tab's frame (4cd94c) draws every frame with the fifth glow
+  set (set 4, the green "selected" one, whatever the state: 4cda47), pulsing as every
+  highlight; leaving sets it back to 0. The strip's hint line becomes `[Army]` line 8 with
+  #NAME1 = the type's name and #BUTTON1 = the `HireArmy` caption, each put in quotes, in the
+  normal hint colour; for an offer with none left, line 10 in the warning colour (ae24f8). Then
+  the **unit card** of the offer (492f24 with the building's army and the slot: a temporary
+  unit of the type at level 1, the type's recruit wage) is painted over the left column, in
+  place of the tab buttons (it clears 68dc8c, "tabs shown"). Leaving the offer leaves the card.
+  The tabs come back (4bc98c repaints the column and its buttons, sets 68dc8c) when the pointer
+  enters a cell of the hero's grid while nothing is selected (4c612c; with a unit selected that
+  cell shows the card of the unit in it, or of the selected one over an empty cell), the place
+  of a tab button (4bb6c8, even while the card hides it) or an empty barracks slot (492f24 with
+  type 0 in the hire tab). The hire button itself shows no window and asks nothing: it is
+  disabled when the hire is impossible (above), and its release queues the slide that hires.
+  Quirk: the offer's path through 492f24 skips setting the building-defence and in-building
+  flags (68dc67, 68dc68; 492f98 jumps to 493106), so the card keeps those of the card shown
+  before it. **code**
 
 ### 9.6 Editing the formation outside battle (4c346c, 4c653c, 4c6f50)
 
@@ -861,8 +988,11 @@ wage total. **code**
   back; held down it shows `tbd`, which is also the open tab's picture. **code**
 
 - **Info tab with quests** (4bedec): without quests the description takes the full 272 px
-  height. With quests a framed list is drawn (dark 2 px and 4 px borders, decorative side
-  strips tiled down, a header picture with the `QuestList` title and a drop shadow), its scroll
+  height. With quests a framed list is drawn (Win-paper as it is from (1, 1); Big_Frame_1a
+  and Big_Frame_2a taken off 4 px in from each side as in the brown text box, so on the light
+  paper they show gold; grey 48 taken off a 2 px and again a 4 px band round the edges;
+  the ornament loop puts every copy at the count times the art's height, not at its index,
+  4beecc), a header picture with the `QuestList` title and a drop shadow), its scroll
   bar, and the Take Quest button, shown but disabled. Selecting a row enables it (4ba754). Take
   Quest (4bb798) prepares the selected quest's event and opens its event dialog (4a8ae8,
   4ac3b4). **code**
@@ -1007,6 +1137,21 @@ nothing (there is no status-line fallback). **code** (callers 4b933e, 4b9586)
     each space's position rounded half up; the last row of a line is left aligned.
   - The line keeps its break's first character (the CR or the `#`); neither has a glyph, so
     it draws as nothing.
+- **Brown text box** (48e4e8, the story, description and list boxes): Win-paper copied from
+  (1, 1) at the box's size with (148, 138, 156) taken off (0x4768f8 mode 1); when the box is
+  wider than twice Big_Frame_2a and 8 px, Big_Frame_1a is taken off 4 px in from the left and
+  Big_Frame_2a 4 px in from the right, each repeated down from the top by its own height (both
+  56×397, loaded with −223 red and −215 green, 4dbc4f, 4dbc6a); with corners asked for, the four
+  34×34 `Corner_Frame-*` pictures go in the corners at their own size through their masks; a
+  1 px frame around it when asked (48d1d4). **code**
+- **Hint strip** `ae2548` (built once at 4dbcf3, drawn by 4cd330, 4ba854 and the army, garrison
+  and battle windows): 628×25, Win-paper from (0, 200) with (148, 132, 148) taken off; then
+  `Corner-Left` (124×23) taken off at x = −51 and `Corner-Right` at x = 555, both at y = 1, so
+  each end shows the corner's inner 73 columns. The corners are dimmed by (192, 160, 160) only
+  after that, for their other uses. **code**
+- **Red window skin**: `Win-red` is loaded with −20 red, −40 green and −100 blue (4dbc34 →
+  48d02c, `ae2530`); `Win-marble` plain. The loader adds the offsets per channel and clamps
+  (48cd90). **code**
 - **Text lists**: the wheel scrolls one line per wheel step; a click gives the list the
   keyboard, and the Up and Down keys then repeat every 50 ms. Scroll bars move by 0.1 of the
   range per arrow and 0.5 per page. **code** (47ede0, 47eb84, 47b8d4)
@@ -1234,7 +1379,7 @@ parity rule they are candidates to hide or remove, not bugs to copy.
 | 2 | Click to walk | Matches: first click shows the route, a second click on the same spot walks; a click on a planned cell whose route was dropped (a click out of reach, a wait) plans it again (`world_view::plan_click`): Razdor fixes the original's bug; the route's arrows, its last cell's green ring and the arrows' running light as the original's (`world_view::draw_route`) | The original does the same two-click walk (no double click); a planned cell whose route was dropped stays planned and its clicks do nothing (bug); an arrow on every cell but the last, in a building only on the cell it is left from; the last cell gets a green ring (48eeb0, kind 2) unless an army to meet stands there (0x49e520) | 7.3 |
 | 3 | Stop walking | Matches: left click or any key held; the step under way is finished (`Game::cut_walk`); no other input while he walks or waits | Left click or any key; the hero stops at the end of the current step | 7.3 |
 | 4 | Right button | Matches: held, the tooltip of the army or building under it, the hero's own army included («Отряд героя», its cards, «Предводитель» and the hero's name: occupant code 1 is army 0 to 0x4ca9f0); never a command (the pointer is not frozen: presentation, left out) | Held: tooltip of the army or building under it, pointer frozen; never a command | 7.4 |
-| 5 | Map tooltips | Only while the right button is held (left up), on the idle map; no fade-in (presentation, left out) | Only while the right button is held, 500 ms fade-in | 7.4 |
+| 5 | Map tooltips | Only while the right button is held (left up), on the idle map; no fade-in (presentation, left out). Matches the box (`widgets::tooltip_panel_styled`): opaque, the style's marble or red, the corners dimmed as the original's copies and added; and the layout (`world_view::draw_tooltip`): 348 px, the fonts by style, the yellow title, an army's orange description, the leader only for more than one unit, the ruins' empty line and «Неизвестная армия» in the name font, a garrison's caption and cells at the bottom. Line heights are Razdor's font metrics; empty cells keep the normal icons in the hostile style (ae2774 not drawn) | Only while the right button is held, 500 ms fade-in; layout as §7.4 | 7.4 |
 | 6 | Pointer | Matches: the original's pointers from the install, drawn last over everything at the original's hotspots, the strips at their frame times (`ui/cursor.rs`); the map's hover as §7.2, worked out again only on entering another cell (`cursor::map_pointer`, `world_view::update_pointer`); the clock while the map is busy (a wait, a glide, a place shown, a spell), while the enemy acts, during a pass and the won battle's hold, while the credits roll; hidden under the right-button tooltip and while an item is carried (its picture is the pointer). The system pointer stays for Razdor's own minimap resize and move and map drag, in the editor, out of focus and without the art | Own pointers: arrow, ask, denied, swords, house, clock, with animated frames | 7.2 |
 | 7 | Edge scroll | Matches: 5 px margin (scaled with the screen), `round(dt / F)` and `round(dt × 0.6875 / F)` original px per frame, dt the whole ms since the map's last frame, `ScrollSpeed` from the install | 5 px margin, `dt / F` px per ms with F from ScrollSpeed (62.5 cells/s at 100) | 7.6 |
 | 8 | Arrow keys | Matches: the held arrow scrolls (only the last key down counts) | Held arrow scrolls | 7.6 |
@@ -1281,7 +1426,7 @@ parity rule they are candidates to hide or remove, not bugs to copy.
 | 48 | Info card wage | Shown when the wage is above 0 | Recruit wage of the type's Cost; hidden for hero classes, named characters, wage kind 3 and Undead | 9.1 |
 | 49 | Card stat strip | Labels match: "Pwr:" for a caster (attack kind 0x11) with no melee attack or outside the places 1–4, else "A:" with the larger attack (`unit_sheet::attack_piece`); the attack line blue when any of the three attacks is above, red when any is below; `Row2Def` on r in the back row as the original; colours against the start-of-battle value (none outside battle); D colour by the sum of both defences | "Pwr:" for a caster outside the front or with no melee, else "A:" with the larger attack; colours against the current value; D colour from one defence only | 9.5 |
 | 50 | Formation editing | Matches: presses as the original's, in the army window (`items_view::ArmySel`, `unit_drag::grid_press`; the deselection and the slide's end leave the right side as it was), the hire tab's hero grid and the garrison grids (a refused hero or named unit keeps the selection), `Card-Move` on every swap and slide, the army window's and hire tab's slides timed as 0x4b0c04. Extra: a card can also be dragged onto another cell (a press that swaps starts no drag) | Click to select, click another unit to swap at once, click an empty cell to slide there; acts on the press; the hero may go anywhere | 9.6 |
-| 51 | Item text | Kind name, then f-, d-, p- values and the bonus (named as the original: `[Army] Bonus<N>` before " - ", trimmed), comma-joined | Name, usage line by type and school, description, then "label value" entries with "=" (f-), "+" (d-), "%" (p-), potion heal/revive rules, defence merging with its lost-value quirks, bonus name | 9.2 |
+| 51 | Item text | Matches (`rules::item_text`, `ui::item_text`): name, usage line, empty line, description, the "label value " entries with the original's labels, prefixes, merging and quirks, the `GetBonus "name"` line, fonts and centring; the market's picture above the text. Differs: the market and inventory lists' side margin is Razdor's 16 px; a text too tall for its box is drawn smaller (the original's list cuts it); the army window shows the box as a pop-up by the pointer (the owner's choice) | Name, usage line by type and school, description, then "label value" entries with "=" (f-), "+" (d-), "%" (p-), potion heal/revive rules, defence merging with its lost-value quirks, the bonus line | 9.2 |
 | 52 | Spell text | Effect summary, school, mana and casting time, duration and target | Name, effect entries (heal/curse label by the sign of DeltaFixedHits, AB = AS and DB = DS merged), `Mana`/`Reading`, duration; red when unaffordable, blue for own-army spells | 9.3 |
 | 53 | Pack scrolling | Wheel by one row over the whole 256-slot pack | Scroll bar over `max(0, length div 5 − 4)` rows of the used part, rounded | 9.7 |
 | 54 | Army window right side | Matches: the pack with nothing or the hero selected, the promotion tree for any other unit, every portrait locked as the original's (grey, dark brown, vignette: `chrome::lock_portrait`) when the unit is at its first level or of a final class, no note under it; the "Lv" labels and the arrows' colours are Razdor's | Pack when nothing or the hero is selected, the promotion tree for any other unit (every portrait greyed, browned and vignetted when it cannot be promoted) | 9.7 |
@@ -1300,9 +1445,18 @@ parity rule they are candidates to hide or remove, not bugs to copy.
 | 67 | Battle hover outline | Extra (Razdor's choice, a player's wish, as Razdor's first battle grid had): a cell under the mouse that is not framed otherwise (target, actor, a cell to step to) gets a thin silver outline round its portrait (`battle_view`) | Only a target under the mouse is lit | 12 |
 | 68 | Promotion animation | Matches (`items_view::Promo`): `Unit-Upgrade` on the click, the picked portrait empty with the fading green glow, effect 6 frames 0–15 on it for 500 ms then 16–49 eased down to the unit's portrait, the glow up on all portraits, the class changed 100 ms before the end and the glow down on the new tree, the card under the running `exp` strip, no input meanwhile; at the end nothing selected, the tree up, the panel on the promoted unit until a card is hovered. The time follows the original's portrait distance (1501 / 1746 ms), the path Razdor's own tree places | The same over the original's portraits (4b1a04) | 9.7 |
 | 69 | Name fields (the hero's name, the save's name) | Matches: held Backspace deletes again after 500 ms, then 30 a second (`widgets::repeats`). Extra (Razdor's choice, a player's wish): a normal edit box, the caret placed by the mouse or the arrows, a selection (mouse drag, Shift, Ctrl+A), Delete, Ctrl+C / X / V; the hero window opens with «(нет имени)» selected, so the first key replaces it (`widgets::edit_keys`, `text_edit::TextEdit`) | One character per WM_KEYDOWN, the system's key repeat included (475748, 47a816); the caret always at the end, no selection, no paste; the default name kept with the caret after it (47ae5c) | 5 |
+| 70 | Figures inside buildings | Matches: the hero's and the armies' figures are not drawn while they stand in a building other than a bridge or cross from one building cell to another; gliding in from outside they are seen until the step ends (`World::hides_figure`, `Game::hero_hidden`, `Game::army_hidden`); their one-cell ring stays under the building | 0x497abc empties the drawn-occupant byte; rings are one cell in the Community exe (the vanilla ring round the whole building is a dead branch of 0x48eeb0) | 7.2 |
+| 71 | Pointing at a hire offer | Matches but one quirk (`building_view::barracks`, `hire_panel_on`, `recruit_panel`): the offer's card over the tab column until the hero's grid (nothing selected) or a tab's place brings the tabs back, the green pulsing highlight on its portrait, `[Army]` line 8 (line 10 in red with none left) on the strip, no tooltip; the hero's grid in the hire tab pulses blue under the pointer and green when selected. Not yet: the offer's card shows no building defence or in-building line, where the original keeps the last card's (docs/OPEN_QUESTIONS.md) | 4c6964, 4c72a4, 4cd94c, 4bc98c, 4c612c, 4bb6c8 | 9.5 |
+| 72 | Unit panel figure | Matches (`unit_sheet::figure_rect`): at its own size (at the window's 15/16), its picture centred across the panel and its middle 218 px under the panel's top, in battle, the army, hero and building windows | Unscaled, the picture centred in a 266 × 436 box from the fill's top (492f24 → 476a3c) | 9.1 |
+| 73 | Unit panel item slots on a type preview | Matches: a hovered promotion portrait's type card has no item slots (`items_view::panel_slots`); the slots' own look (Razdor's squares, not ae2860) is Razdor's | A template card (4c39d8, 492f24's fourth argument) sets no slot; empty slots show ae2860 outside battle and the building tabs 1 and 2 | 9.1 |
+| 74 | Event's own picture (a map's) | Matches: unscrambled ARGB4444, colour from the low 12 bits, alpha (A·17 >> 3)/31, 8/31 for a coloured pixel with A = 0 (`dtm::event_picture_rgba`); read as RGB565 until 2026-10-18 (orange noise on РК6's «Карта окрестностей», a player's report). The editor writes ARGB4444 too | 0x4d1693..0x4d1784 (outside the tutorial; the tutorial blits the words raw, 0x4d179b), colour table 0xae2b50 (0x4e3658), alpha 0x476a3c | 9.8 |
+| 75 | Main hall picture of a building kind without one | Matches: nothing drawn, the window's background shows (`building_view::main_hall`); Razdor drew its own sky, grass and the map sprite until 2026-10-18 (a player's report) | 0x4ba854 case 0 draws pictures only for types 1, 3–7, 10, 12; 0x4bb7c4 repaints the panel from the window surface | 9.8 |
 
 ## Unknowns
 
+- **Vanilla building ring.** Whether the vanilla game ringed a building holding an army with
+  one ring of the footprint's width (§7.2, the dead branch 0x48ef08–0x48ef54) is inferred, not
+  seen: no vanilla exe is at hand. The Community exe rings one cell.
 - **Vanilla battle animation caps.** The Community animation-speed hooks overwrote the base
   game's compare values for the slide length and the effect length. The effect length of
   350 ms is inferred from the frame formula; the slide cap is not known (500 ms would match

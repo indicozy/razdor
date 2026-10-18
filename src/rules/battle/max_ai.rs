@@ -1,8 +1,10 @@
 //! «Максимум», Razdor's strongest battle AI (the owner's request; a deviation from the
 //! original, main only, never on `dt-original`, off by default). The original's AI
 //! ([`Battle::plan`]) stays as it is and keeps playing everywhere else: both sides of
-//! off-screen battles, the pre-simulation, the world AI's simulated battles, the hero's
-//! auto-battle and the rollouts here.
+//! off-screen battles, the pre-simulation, the world AI's simulated battles and the rollouts
+//! here. With Max chosen, the hero's auto-battle (Q, W) is played by Max on both sides
+//! ([`Battle::max_play_to_end`]; before the 2026-10-18 reports it fell back to the
+//! original's AI).
 //!
 //! A decision is a minimax search with alpha-beta pruning over the battle's real actions:
 //! every legal action of the active unit (each target with its cell's action, each step,
@@ -41,6 +43,13 @@ use tables::{Bound, StateKey};
 
 /// The time one decision may take on screen (the search returns the best found by then).
 pub const MAX_AI_BUDGET: Duration = Duration::from_millis(150);
+/// A decision of the quick battle with «Максимум» (Q, [`Battle::max_play_to_end`]): a node
+/// budget, no clock, so the same battle ends the same way on any machine; played on a worker
+/// while the battle window waits. 4 actions ahead and 600 positions (the harness's budget):
+/// on the install's armies about 0.8 s a battle on one E-core, and 2000 positions won no
+/// more (`max_plays_the_hero_s_side_of_the_quick_battle_better`: 43% against 42%, 2.7 times
+/// as long).
+pub const MAX_QUICK_BUDGET: MaxBudget = MaxBudget::fixed(4, 600);
 /// Iterative deepening stops at this many actions ahead.
 const MAX_DEPTH: u32 = 24;
 /// Leaves more than this many actions ahead are scored without a rollout.
@@ -195,6 +204,30 @@ impl Battle {
     pub fn max_step(&mut self, budget: MaxBudget) -> Option<Step> {
         let report = self.max_choice(budget)?;
         self.play_max_move(report.choice)
+    }
+
+    /// The hero's auto-battle with «Максимум» chosen (Q; the owner's and the players'
+    /// reports, 2026-10-18): the rest of the battle played at once by Max on both sides, each
+    /// side with its own tables, so the enemy plays as it does against the player's own
+    /// moves and the player's units are played by the same search. Deploys as the cards
+    /// stand when still deploying; a position Max cannot search (nobody to act) leaves the
+    /// step to the hero's auto-battle. With a fixed budget ([`MAX_QUICK_BUDGET`]) the same
+    /// position always ends the same way. Returns the outcome.
+    pub fn max_play_to_end(&mut self, budget: MaxBudget) -> Outcome {
+        self.begin();
+        let tables = [MaxTables::default(), MaxTables::default()];
+        for _ in 0..AUTO_PLAY_STEPS {
+            if self.outcome() != Outcome::Ongoing {
+                break;
+            }
+            let Some(id) = self.active() else { break };
+            let side = self.fighters[id].team;
+            match self.max_choice_with(budget, Some(&tables[side.index()]), None) {
+                Some(r) => self.play_max_move(r.choice),
+                None => self.hero_auto_step(),
+            };
+        }
+        self.outcome()
     }
 
     /// `side`'s score of the battle as it stands: a win or loss, then the worth left of each

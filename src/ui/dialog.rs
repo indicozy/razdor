@@ -333,17 +333,22 @@ pub fn resource_icon(r: Resource, cx: f32, cy: f32, s: f32) {
     }
 }
 
-/// A row of unit portraits with a caption. Returns its height.
-fn unit_row(assets: &Assets, label: &str, units: &[UnitId], x: f32, y: f32, o: f32) -> f32 {
-    if units.is_empty() {
-        return 0.0;
-    }
-    text(label, x + 30.0 * o, y + 30.0 * o, 18.0 * o, INK);
-    let lx = x + 40.0 * o + measure(label, 18.0 * o).width;
-    for (k, &u) in units.iter().enumerate().take(8) {
-        assets.draw_unit(u, Team::Player, lx + 26.0 * o + k as f32 * 56.0 * o, y + 26.0 * o, 50.0 * o);
-    }
-    60.0 * o
+/// The units rows (characters joined, characters departed: 0x4a93bc, 0x4a9711): the
+/// original's picture cells of 47 × 47 (set up at 0x4c612c's event window), each showing the
+/// unit type's 46 × 46 icon (type record +0x18, the 92 × 92 bust box-averaged to half by
+/// 0x48efd0 / 0x48d830), with no ring or frame. A row grows the window by its icons, 8, the
+/// 16 of its caption and 8 more (0x4a9650: 0x2f + 8 + 0x10 + 8).
+const UNIT_ICON: f32 = 46.0;
+const UNIT_ROW: f32 = 79.0;
+/// The side picture of a unit: its bust (type record +0x14, 92 × 92: 0x48efd0).
+const UNIT_BUST: f32 = 92.0;
+
+/// The left edges, from the window's left in the original's pixels, of a units row's `n`
+/// cells: centred at W·(i+1)/(n+1) in whole pixels, less 23 (0x4a95a9 and 0x4a9a84: `IMUL`,
+/// `IDIV`, `SUB 0x17`). Each event names at most four units to add or take (+0x61, +0x69).
+fn unit_cells(n: usize) -> Vec<f32> {
+    let n = n.min(4) as i32;
+    (0..n).map(|i| ((EVENT_W as i32 * (i + 1)) / (n + 1) - 23) as f32).collect()
 }
 
 /// The first line shown of a text of `total` lines with `shown` in sight in box `tb`: the
@@ -440,7 +445,8 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     let line = EVENT_LINE * o;
     // A picture at the side takes its width and 14 more from the text box.
     let side = match &d.picture {
-        Some(Picture::Unit(_)) => Some((128.0, 128.0)),
+        // A unit's 92 × 92 bust (type record +0x14, 0x4a8ae8; Icons.ugs, 0x48efd0).
+        Some(Picture::Unit(_)) => Some((UNIT_BUST, UNIT_BUST)),
         Some(Picture::Image(t)) => {
             let scale = (128.0 / t.height()).min(220.0 / t.width());
             Some((t.width() * scale, t.height() * scale))
@@ -468,7 +474,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     // original's opening event as 30 of Razdor's layout.
     let notice_h = if d.notice.is_some() { 30.0 * o } else { 0.0 };
     let pic_h = if d.picture.is_some() && side.is_none() { 140.0 * o } else { 0.0 };
-    let units_h = [&d.joined, &d.left].iter().filter(|u| !u.is_empty()).count() as f32 * 60.0 * o;
+    let units_h = [&d.joined, &d.left].iter().filter(|u| !u.is_empty()).count() as f32 * UNIT_ROW * o;
     let below = pic_h + res_h + items_h + spells_h + units_h + notice_h;
     // The box stops at 499 (and short of the screen): the text scrolls in it, the buttons
     // stay in sight.
@@ -495,7 +501,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         Some(Picture::Unit(u)) => {
             // Left of the text box, as the original's portrait (the box starts at 19 +
             // picture + 14).
-            let r = Rect::new(x + 20.0 * o, top + o, 128.0 * o, 128.0 * o);
+            let r = Rect::new(x + 20.0 * o, top + o, UNIT_BUST * o, UNIT_BUST * o);
             assets.draw_portrait(*u, Team::Player, r);
             chrome::silver_frame(r, 1.5 * o);
         }
@@ -563,8 +569,18 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         }
         cy += spells_h;
     }
-    cy += unit_row(assets, tr("Left the army:"), &d.left, x, cy, o);
-    cy += unit_row(assets, tr("Joined the army:"), &d.joined, x, cy, o);
+    // The units rows: the departed above the joined (0x4a8ae8 stacks them from the bottom
+    // up), each its green caption centred (`[Event] DelUnit` / `AddUnit`) over its icons.
+    for (units, key, ours) in [(&d.left, "DelUnit", razdor::i18n::n_("Characters departed:")), (&d.joined, "AddUnit", razdor::i18n::n_("Characters joined:"))] {
+        if units.is_empty() {
+            continue;
+        }
+        caption(key, ours, cy);
+        for (&u, left) in units.iter().zip(unit_cells(units.len())) {
+            assets.draw_portrait(u, Team::Player, Rect::new(x + left * o, cy + 26.0 * o, UNIT_ICON * o, UNIT_ICON * o));
+        }
+        cy += UNIT_ROW * o;
+    }
     if !d.items.is_empty() {
         caption("AddItem", razdor::i18n::n_("Items received:"), cy);
         let n = d.items.len().min(8);
@@ -595,7 +611,8 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         }
     }
     if let (Some((spell, id, at)), Some(game)) = (d.preview.get(), game) {
-        let (pw, ph) = if spell { (286.0, 112.0) } else { (272.0, 230.0) };
+        // The item tooltip is 272 wide and as tall as its text plus 32 (0x4cbab0).
+        let (pw, ph) = if spell { (286.0, 112.0) } else { (super::item_text::TOOLTIP_W * o, super::item_text::tooltip_height(game, ItemId(id), o)) };
         let px = (at.x - pw / 2.0).clamp(x + 10.0, (x + w - 10.0 - pw).max(x + 10.0));
         let py = (at.y - ph / 2.0).clamp(y + 10.0, (y + h - 10.0 - ph).max(y + 10.0));
         draw_rectangle(px + 8.0, py + 8.0, pw, ph, Color::new(0.0, 0.0, 0.0, 0.45));
@@ -604,7 +621,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
                 super::spellbook::spell_card(game, s, Rect::new(px, py, pw, ph));
             }
         } else {
-            super::building_view::item_description(game, assets, ItemId(id), px, py, pw, ph);
+            super::item_text::draw(game, assets, ItemId(id), Rect::new(px, py, pw, ph), super::item_text::ItemBox::Tooltip, o);
         }
         return None;
     }
@@ -699,7 +716,8 @@ fn draw_village_event(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Optio
             assets.draw_item(item, r.x, r.y, r.w);
             if r.contains(pointer().into()) && (is_mouse_button_down(MouseButton::Left) || is_mouse_button_down(MouseButton::Right)) {
                 if let Some(game) = game {
-                    super::building_view::item_description(game, assets, item, x + (w - 272.0 * o) / 2.0, y, 272.0 * o, 230.0 * o);
+                    let (tw, th) = (super::item_text::TOOLTIP_W * o, super::item_text::tooltip_height(game, item, o));
+                    super::item_text::draw(game, assets, item, Rect::new(x + (w - tw) / 2.0, y, tw, th), super::item_text::ItemBox::Tooltip, o);
                     return None;
                 }
             }
@@ -784,6 +802,21 @@ mod tests {
         // A text taller than 499 scrolls in a box of 499 (0x4aa88a), or less on a short screen.
         assert_eq!(event_frame(None, 900.0, 0.0, EVENT_MAX_BOX).box_h, 499.0);
         assert_eq!(event_frame(None, 900.0, 0.0, 300.0).box_h, 300.0);
+    }
+
+    /// The units rows (0x4a93bc, 0x4a9711): 46 × 46 icons in 47 × 47 cells centred at
+    /// W·(i+1)/(n+1) less 23, in whole pixels; a row is 79 tall. A unit at the side is its
+    /// 92 × 92 bust, the text box after it and 14 more.
+    #[test]
+    fn the_units_rows_stand_as_the_original_s() {
+        assert_eq!(unit_cells(1), vec![294.0]);
+        assert_eq!(unit_cells(2), vec![188.0, 399.0]);
+        assert_eq!(unit_cells(3), vec![135.0, 294.0, 452.0]);
+        assert_eq!(unit_cells(4), vec![103.0, 230.0, 357.0, 484.0]);
+        assert_eq!(unit_cells(6).len(), 4);
+        assert_eq!((UNIT_ICON, UNIT_ROW), (46.0, 79.0));
+        let f = event_frame(Some((UNIT_BUST, UNIT_BUST)), 19.0, UNIT_ROW, EVENT_MAX_BOX);
+        assert_eq!(f, EventFrame { w: 634.0, h: 92.0 + 79.0 + 119.0, box_x: 125.0, box_w: 490.0, box_h: 92.0 });
     }
 
     #[test]

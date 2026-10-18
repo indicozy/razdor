@@ -9,11 +9,10 @@ use macroquad::prelude::*;
 use razdor::i18n::{n_, tr};
 use razdor::rules::battle::Team;
 use razdor::trf;
-use razdor::rules::content::{ArtefactType, HeroClass, ItemId, SpellDef, Stat};
+use razdor::rules::content::{HeroClass, ItemId, SpellDef, Stat, UnitId};
 use razdor::rules::formation::{Formation, Slot};
 use razdor::rules::economy::VillageOffer;
 use razdor::rules::game::{Currency, Game, HireError, TradeError, Tribute, SPELL_BOOK_SIZE};
-use razdor::rules::items::describe_with;
 use razdor::rules::script::HallEntry;
 use razdor::rules::town::{ServiceError, Tab};
 use razdor::rules::units::Unit;
@@ -24,8 +23,7 @@ use super::chrome;
 use super::audio::{cue, cued, Cue};
 use super::dialog::{resource_icon, Dialog, Picture, Resource, MANA};
 use super::item_filter;
-use super::items_view::{level_gains, unit_stat_lines};
-use super::screens::stat_lines;
+use super::items_view::unit_stat_lines;
 use super::story;
 use super::unit_sheet;
 use super::widgets::*;
@@ -89,12 +87,53 @@ pub struct BuildingView {
     pub garrison_buy: Option<(usize, Slot, i32)>,
     /// What the market's filter line holds (`ui::item_filter`).
     pub filter: String,
+    /// How the market's or the sanctuary's list is sorted (Razdor's addition, [`ListSort`]).
+    pub sort: ListSort,
     /// The village window took the tribute: its close plays `Item-Gold` (0x4c604a).
     pub tribute_paid: bool,
     /// The gold and mana the village paid as the hero came in: what its window shows.
     pub tribute: (i32, i32),
     /// A card animation of the hire tab under way.
     anim: Option<CardAnim>,
+    /// The unit card the hire tab's left panel shows over the tabs, if any (`HirePanel`).
+    hire_panel: Option<HirePanel>,
+}
+
+/// The card the hire tab paints over its column of tabs (0x492f24), until the pointer brings
+/// the tabs back (0x4bc98c).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HirePanel {
+    /// A hire offer: a fresh unit of the type (0x492f24 with the building's army: level 1).
+    Recruit(UnitId),
+    /// A unit of the hero's army (squad index).
+    Squad(usize),
+}
+
+/// What the pointer entered this frame in the hire tab.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Entered {
+    /// A hire offer's card (0x4c6964, the barracks branch).
+    Recruit(UnitId),
+    /// A cell of the hero's grid, with the unit in it if any (0x4c612c).
+    SquadCell(Option<usize>),
+    /// A tab button's place, the Exit included (0x4bb6c8).
+    Tab,
+}
+
+/// The hire tab's left panel after the pointer enters `entered`, with `selected` the hero's
+/// selected unit (None: the tabs). A hire offer always shows its card (0x4c6964 → 0x492f24
+/// (−building, slot)); a cell of the hero's grid brings the tabs back while nothing is
+/// selected (0x4c612c → 0x4bc98c), else shows the unit under the pointer or, over an empty
+/// cell, the selected one; a tab's place brings the tabs back (0x4bb6c8 → 0x4bc98c). Leaving
+/// a card changes nothing (0x4c72a4, 0x4c68d4): the card stays until something else is
+/// entered.
+fn hire_panel_on(now: Option<HirePanel>, entered: Option<Entered>, selected: Option<usize>) -> Option<HirePanel> {
+    match entered {
+        None => now,
+        Some(Entered::Recruit(kind)) => Some(HirePanel::Recruit(kind)),
+        Some(Entered::SquadCell(on)) => selected.map(|s| HirePanel::Squad(on.unwrap_or(s))),
+        Some(Entered::Tab) => None,
+    }
 }
 
 /// A card animation of the hire tab (0x4b0c04, 0x4b11cc), from its start (whole ms of the
@@ -126,7 +165,7 @@ fn now_ms() -> i64 {
 
 impl BuildingView {
     pub fn new(tab: Tab) -> BuildingView {
-        BuildingView { tab, pick: None, scroll: 0, hall_pick: None, hall_scroll: 0, selling: false, garrison_sel: None, garrison_buy: None, filter: String::new(), tribute_paid: false, tribute: (0, 0), anim: None }
+        BuildingView { tab, pick: None, scroll: 0, hall_pick: None, hall_scroll: 0, selling: false, garrison_sel: None, garrison_buy: None, filter: String::new(), sort: ListSort::Shown, tribute_paid: false, tribute: (0, 0), anim: None, hire_panel: None }
     }
 
     fn switch(&mut self, tab: Tab) {
@@ -322,17 +361,15 @@ fn main_hall(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingVie
         let upper = window_layout::upper(Rect::new(f.x, f.y, f.w, f.h));
         let (x, y, w) = (upper.x, upper.y, upper.w);
         let loc = &game.world.locations[l];
-        draw_rectangle(x, y, w, pic_h, Color::new(0.35, 0.5, 0.65, 1.0));
-        draw_rectangle(x, y + pic_h * 0.62, w, pic_h * 0.38, Color::new(0.35, 0.5, 0.3, 1.0));
-        // The original's picture of this kind of building, else (Razdor's) its map sprite.
+        // The original's picture of this kind of building. A kind without one (the palace,
+        // the smithy, the dungeon entrance) shows the window's own background there: the tab
+        // repaints the right panel from the window's surface (0x4bb7c4) and draws no picture
+        // (0x4ba854 case 0). (Razdor drew its own sky, grass and the map sprite there until a
+        // player's report.) Without the install, Razdor's placeholder names the kind.
         let scene = hall_picture(loc.kind, loc.picture);
         if let Some(t) = scene.and_then(chrome::win) {
             chrome::tex(&t, Rect::new(x, y, w, pic_h), WHITE);
-        } else if let Some(tex) = assets.dt.as_ref().and_then(|a| a.building(loc.picture.0, loc.picture.1)) {
-            let sc = ((pic_h - 20.0 * k) / tex.height()).min((w - 20.0 * k) / tex.width()).min(2.5 * k);
-            let (tw, th) = (tex.width() * sc, tex.height() * sc);
-            draw_texture_ex(&tex, x + (w - tw) / 2.0, y + pic_h - th - 6.0 * k, WHITE, DrawTextureParams { dest_size: Some(vec2(tw, th)), ..Default::default() });
-        } else {
+        } else if assets.dt.is_none() {
             text_centered(loc.kind.label(), x + w / 2.0, y + pic_h / 2.0, 40.0 * k, INK);
         }
         chrome::silver_frame(Rect::new(x, y, w, pic_h), k.max(1.0));
@@ -388,7 +425,7 @@ fn hall_offers_in_face(game: &mut Game, f: &Frame, view: &mut BuildingView, mess
     let list_y = (quest_border.y + quest_border.h).max(take.y + take.h) + 5.0*k;
     let list = Rect::new(panel.x, list_y, panel.w, (panel.y + panel.h - list_y).max(row_h + 8.0 * k));
     let rows = (((list.h - 8.0 * k) / row_h).floor() as usize).max(1);
-    chrome::parchment_fill(list, true);
+    chrome::quest_list_parchment(list);
     let max_scroll = entries.len().saturating_sub(rows);
     if mouse_in(list.x, list.y, list.w, list.h) {
         let wh = wheel();
@@ -462,8 +499,59 @@ fn card_panel_lower(f: &Frame) -> Rect {
     window_layout::lower(Rect::new(f.x, f.y, f.w, f.h))
 }
 
+/// The left panel's unit card: the hire tab's (`HirePanel`), else the selected unit's.
 fn selected_unit_panel(game: &Game, assets: &Assets, f: &Frame, view: &BuildingView) {
-    let Some((guard, i)) = view.garrison_sel else { return };
+    match view.hire_panel.filter(|_| view.tab == Tab::Barracks) {
+        Some(HirePanel::Recruit(kind)) => recruit_panel(game, assets, f, kind),
+        Some(HirePanel::Squad(i)) => unit_panel(game, assets, f, (false, i)),
+        None => {
+            if let Some(sel) = view.garrison_sel {
+                unit_panel(game, assets, f, sel);
+            }
+        }
+    }
+}
+
+/// A hire offer's card (0x492f24 with the building's army): a fresh unit of the type at
+/// level 1, unhurt, with no items, no state lines and the type's recruit wage, as the
+/// promotion tree's class card (`items_view::class_wage`).
+/// Original's quirk, not copied: the offer's path skips setting the building-defence and
+/// in-building flags (0x492f98 → 0x493106 jumps past 0x4930ab / 0x4930ff), so they keep the
+/// last card's values; Razdor shows the offer with neither.
+fn recruit_panel(game: &Game, assets: &Assets, f: &Frame, kind: UnitId) {
+    let c = &game.content;
+    if c.try_unit(kind).is_none() {
+        return;
+    }
+    let mut unit = Unit::new(c, kind, Slot::new(razdor::rules::formation::Row::Front, 0));
+    unit.heal_full(c);
+    let stats = unit.stats(c);
+    let name = c.unit(kind).name.clone();
+    let sheet = unit_sheet::Sheet {
+        kind,
+        name: &name,
+        named: false,
+        level: unit.level,
+        xp: unit.xp,
+        need: unit.xp_to_next(c),
+        hp: unit.hp,
+        now: &stats,
+        start: &stats,
+        power: stats[Stat::MagicPower],
+        wage: super::items_view::class_wage(c, kind),
+        items: unit.items,
+        back_row: false,
+        unpaid: false,
+        building: 0,
+        hero: None,
+        status: Vec::new(),
+    };
+    let mut hover = None;
+    unit_sheet::draw(assets, c, window_layout::left(Rect::new(f.x, f.y, f.w, f.h)), &sheet, false, &mut hover);
+}
+
+/// The card of a unit of the hero's army or of the garrison (`guard`), index `i`.
+fn unit_panel(game: &Game, assets: &Assets, f: &Frame, (guard, i): (bool, usize)) {
     let unit = if guard {
         game.garrison_here().get(i).map(|s| &s.unit)
     } else {
@@ -497,7 +585,6 @@ fn selected_unit_panel(game: &Game, assets: &Assets, f: &Frame, view: &BuildingV
         building: bd,
         hero,
         status: super::items_view::potion_status(c, unit),
-        battle: false,
     };
     let mut hover = None;
     unit_sheet::draw(assets, c, window_layout::left(Rect::new(f.x, f.y, f.w, f.h)), &sheet, false, &mut hover);
@@ -548,6 +635,23 @@ fn own_text(section: &str, key: &str, ours: &'static str) -> String {
     t.unwrap_or_else(|| tr(ours).to_string())
 }
 
+/// The strip's line over a hire offer (0x4c6964): `[Army]` line 8 with the type's name and
+/// the `HireArmy` caption, each in quotes (#NAME1, #BUTTON1); with none left, line 10 in the
+/// warning colour (ae24f8). The flag says warning.
+fn recruit_hint(name: &str, stock_left: bool) -> (String, bool) {
+    let ru = razdor::i18n::lang() == razdor::i18n::Lang::Ru;
+    if !stock_left {
+        let t = chrome::ui_line("Army", 10).filter(|_| ru).unwrap_or_else(|| tr("No units of this type are left for hire!").to_string());
+        return (t, true);
+    }
+    let button = own_text("Army", "HireArmy", n_("Hire"));
+    let t = chrome::ui_line("Army", 8).filter(|_| ru).map_or_else(
+        || trf!("Click the \"{button}\" button to hire \"{name}\" into your army", button, name),
+        |t| t.replace("#BUTTON1", &format!("\"{button}\"")).replace("#NAME1", &format!("\"{name}\"")),
+    );
+    (t, false)
+}
+
 /// The barracks, as the original's (the video, 19:52): the recruits in front of the
 /// building's sepia interior, each portrait with "Нанять" and "Цена = N"; the money, wages
 /// and income; the army's 2×6 cards below, each with "Лечить" / "Воскресить" and its price
@@ -576,6 +680,9 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
     }
     chrome::silver_frame(back, 1.0);
     let mut hover_lines = Vec::new();
+    // What the pointer is over this frame, for the left panel (`hire_panel_on`).
+    let mut entered = None;
+    let mut offer_hint = None;
     if recruits.is_empty() {
         chrome::shadow_centered(tr("No recruits here."), back.center().x, back.y + 90.0 * k, 18.0 * k, chrome::CREAM);
     }
@@ -587,20 +694,17 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
         chrome::unit_shadow(Rect::new(face.x, face.y, face.w, face.w * 128.0 / 88.0));
         assets.draw_portrait(r.unit, Team::Player, face);
         draw_rectangle_lines(face.x, face.y, face.w, face.h, 1.0, Color::new(0.85, 0.85, 0.85, 0.9));
+        let stock_left = r.stock != Some(0);
+        // An offer under the pointer (0x4c6964): its card on the left panel, the green
+        // highlight pulsing on its portrait (state 2 drawn with the fifth glow set: 0x4cd94c
+        // passes set 4 for the building's side of the hire tab, 0x4cda47), and the hint
+        // line on the strip. No tooltip.
         if mouse_in(face.x, face.y, face.w, face.h) {
-            let def = c.unit(r.unit);
-            hover_lines.push((def.name.clone(), ACCENT));
-            hover_lines.push((level_label(1, 0, c.xp_to_next(r.unit, 1)), XP_COLOR));
-            hover_lines.extend(stat_lines(&c, r.unit).into_iter().map(|s| (s, INK)));
-            hover_lines.push((trf!("Per level: {gains}", gains = level_gains(&c, r.unit)), INK));
-            hover_lines.push((trf!("Daily wage {wage}", wage = c.wage_for(r.unit, razdor::rules::content::WageKind::of(def))), Color::new(0.95, 0.6, 0.25, 1.0)));
-            match r.stock {
-                Some(n) => hover_lines.push((trf!("{n} of {max} left", n, max = r.max), INK)),
-                None => hover_lines.push((tr("always").to_string(), INK)),
-            }
+            entered = Some(Entered::Recruit(r.unit));
+            chrome::card_highlight(face, chrome::Lit::Current, now_ms() as u64);
+            offer_hint = Some(recruit_hint(&c.unit(r.unit).name, stock_left));
         }
         let price = game.hire_price(r.unit);
-        let stock_left = r.stock != Some(0);
         let can = hires && stock_left && game.can_afford(price) && game.squad.len() < game.max_squad();
         let pill = Rect::new(face.x + 4.0 * k, face.y + face.h + 2.0 * k, face.w - 8.0 * k, 17.0 * k);
         // The hire pill now has a transparent black matte. Keep its card backing and the
@@ -629,7 +733,11 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
         chrome::shadow_centered(&cost, face.center().x, pill.y + pill.h + 13.0 * k, 12.0 * k, color);
     }
     barracks_counters(game, at(f, 256.0, 242.0, 572.0, 48.0));
-    chrome::army_divider(card_panel_divider(f));
+    let strip = card_panel_divider(f);
+    chrome::army_divider(strip);
+    if let Some((hint, warn)) = offer_hint {
+        chrome::hint_text(strip, &hint, if warn { chrome::RED_TEXT } else { Color::new(0.4, 1.0, 0.8, 1.0) });
+    }
 
     // The army: the army screen's cards, a heal or raise button with its price on the strip.
     let heals = game.heals_here();
@@ -661,8 +769,11 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
         if !taken || landing == Some(slot) {
             let p = cell_at(slot);
             chrome::empty_cell(Rect::new(p.x, p.y, card.x, card.y), chrome::CellIcon::of(form, slot), true);
-            if !taken && mouse_in(p.x, p.y, card.x, card.y) && clicked() {
-                pressed = Some((None, slot));
+            if !taken && mouse_in(p.x, p.y, card.x, card.y) {
+                entered = Some(Entered::SquadCell(None));
+                if clicked() {
+                    pressed = Some((None, slot));
+                }
             }
         }
     }
@@ -722,25 +833,33 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
                 super::battle_view::draw_effect(&c, 4, sq, t);
             }
         }
+        // The hero's grid in the hire tab (0x4cd94c): a selected card (state 5) pulses
+        // green, the one under the pointer (state 2) blue, both with glow set state − 1.
+        let over = mouse_in(sq.x, sq.y, sq.w, sq.h);
         if selected == Some(i) {
-            chrome::glow_frame(sq, Color::new(0.35, 1.0, 0.35, 1.0), true);
+            chrome::card_highlight(sq, chrome::Lit::Current, now_ms() as u64);
+        } else if over {
+            chrome::card_highlight(sq, chrome::Lit::CanAct, now_ms() as u64);
         }
-        if mouse_in(sq.x, sq.y, sq.w, sq.h) {
+        if over {
+            entered = Some(Entered::SquadCell(Some(i)));
             if clicked() {
                 pressed = Some((Some(i), u.slot));
             }
-            chrome::glow_frame(sq, Color::new(0.35, 0.55, 1.0, 0.9), false);
             hover_lines = vec![(game.squad_label(i), ACCENT)];
             hover_lines.extend(unit_stat_lines(&c, &u, game.wage(i)).into_iter().map(|s| (s, INK)));
         }
     }
     // The press, as the original's hero grid within the hero's army (0x4c653c); none while a
-    // card moves (busy 0x68dc63).
+    // card moves (busy 0x68dc63). With «Расстановка армии: Перетаскивание» (Razdor's default,
+    // the owner's decision) it only selects and units move by dragging; the original's second
+    // press swaps or slides.
     if let (Some((on, slot)), None) = (pressed, anim) {
-        let press = super::unit_drag::grid_press(selected, on);
+        let press = super::unit_drag::grid_press_in(super::unit_drag::controls(), selected, on);
         view.garrison_sel = match press {
             super::unit_drag::GridPress::Select(i) => Some((false, i)),
-            super::unit_drag::GridPress::Nothing => view.garrison_sel,
+            // Dragging only: an empty cell clears this grid's selection.
+            super::unit_drag::GridPress::Nothing => view.garrison_sel.filter(|_| selected.is_none()),
             _ => None,
         };
         match press {
@@ -763,6 +882,8 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
             }
         }
     }
+    let selected_now = view.garrison_sel.filter(|&(g, i)| !g && i < game.squad.len()).map(|s| s.1);
+    view.hire_panel = hire_panel_on(view.hire_panel, entered, selected_now);
     let cells: Vec<(Slot, Rect)> = form.slots().map(|s| (s, Rect::new(cell_at(s).x, cell_at(s).y, card.x, card.y))).collect();
     if let Some((unit, slot)) = super::unit_drag::update(assets, &cells, card) {
         game.move_unit(unit, slot);
@@ -826,10 +947,9 @@ fn screen_line(form: Formation, line: usize, own: bool) -> usize {
 /// The army screen's cards for `units` in the formation, `rel_y` below the content's top;
 /// `own`: the hero's army (else a garrison, mirrored: [`screen_line`]). `selected` is framed.
 /// Returns what the pointer is over.
-fn card_grid(game: &Game, assets: &Assets, f: &Frame, rel_y: f32, units: &[&Unit], own: bool, selected: Option<usize>) -> Option<Hit> {
+/// The scale, card size and pitch of the card grid at `rel_y` (screen px).
+fn card_grid_size(f: &Frame, form: Formation, rel_y: f32) -> (f32, Vec2, Vec2) {
     let k = chrome::k();
-    let c = &game.content;
-    let form = c.formation;
     let lines = form.display_lines() as f32;
     let win = Rect::new(f.x, f.y, f.w, f.h);
     let pane = if rel_y < 300.0 { window_layout::upper(win) } else { window_layout::lower(win) };
@@ -837,7 +957,14 @@ fn card_grid(game: &Game, assets: &Assets, f: &Frame, rel_y: f32, units: &[&Unit
     let cs = 1.0f32.min(2.0 / lines).min(6.0 / cols)
         .min((pane.w - 16.0*k) / ((cols*96.0-8.0)*k))
         .min((pane.h - 16.0*k) / (((lines-1.0)*133.0+128.0)*k));
-    let (card, pitch) = (vec2(88.0 * cs * k, 128.0 * cs * k).round(), vec2(96.0 * cs * k, 133.0 * cs * k));
+    (cs, vec2(88.0 * cs * k, 128.0 * cs * k).round(), vec2(96.0 * cs * k, 133.0 * cs * k))
+}
+
+fn card_grid(game: &Game, assets: &Assets, f: &Frame, rel_y: f32, units: &[&Unit], own: bool, selected: Option<usize>) -> Option<Hit> {
+    let k = chrome::k();
+    let c = &game.content;
+    let form = c.formation;
+    let (cs, card, pitch) = card_grid_size(f, form, rel_y);
     let grid = at(f, CARD_PANEL_X, rel_y, CARD_PANEL_W, 0.0);
     let gx = card_grid_left(f, form, cs, pitch.x);
     let cell_at = |slot: Slot| {
@@ -873,6 +1000,10 @@ fn card_grid(game: &Game, assets: &Assets, f: &Frame, rel_y: f32, units: &[&Unit
         // building's, < 0, outside a battle).
         top_left_signs(c, sq, u, !own || i > 0);
         super::spell_badges::draw(sq, &u.spells, u.drain, game.clock.total_minutes() as u64, c);
+        // A card dragged (Razdor's) is dimmed where it stands.
+        if super::unit_drag::dragged_from() == Some((!own, i)) {
+            draw_rectangle(p.x, p.y, card.x, card.y, Color::new(0.0, 0.0, 0.0, 0.55));
+        }
         if selected == Some(i) {
             chrome::glow_frame(sq, Color::new(1.0, 0.85, 0.3, 0.95), false);
         }
@@ -887,7 +1018,9 @@ fn card_grid(game: &Game, assets: &Assets, f: &Frame, rel_y: f32, units: &[&Unit
 /// Garrison, as the original's (0x4c653c, 0x4c6f50): the troops left here on top, the
 /// hero's army below. One click selects a unit, a second acts: a unit of the other grid
 /// swaps the two, an empty cell of the other grid moves it across (buying back an unpaid
-/// guard asks first), the same grid changes its cell.
+/// guard asks first), the same grid changes its cell. Razdor's: a card dragged onto a card or
+/// a cell does the same; with «Расстановка армии: Перетаскивание» (the default) a click only
+/// selects ([`garrison_click`]).
 fn garrison(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, message: &mut Option<String>) {
     let k = chrome::k();
     let c = game.content.clone();
@@ -918,9 +1051,14 @@ fn garrison(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
     // line 11).
     // Razdor's rule: a fallen unit of the army does not go in either (the original takes it);
     // its line is Razdor's own (no `[Army]` line, hence 0).
+    // With «Расстановка армии: Перетаскивание» (Razdor's default) a selection does nothing
+    // more, so the refusals speak only while a card is dragged; the original's selection
+    // acts on the next press.
+    let controls = super::unit_drag::controls();
+    let acting = super::unit_drag::dragged_from().or(sel.filter(|_| controls == super::unit_drag::Controls::Original));
     let unique = |i: usize| i == 0 || squad.get(i).is_some_and(|u| u.named > 0);
     let fallen = |i: usize| i > 0 && squad.get(i).is_some_and(|u| u.named == 0 && !u.alive());
-    let refusal = match (sel, top, bottom) {
+    let refusal = match (acting, top, bottom) {
         (Some((false, n)), Some(_), _) if unique(n) => Some((9, n_("A unique character cannot be moved into a garrison!"))),
         (Some((true, _)), _, Some(Hit::Unit(i))) if unique(i) => Some((11, n_("You cannot change places with the selected character!"))),
         (Some((false, n)), Some(_), _) if fallen(n) => Some((0, n_("A fallen unit cannot be left in a garrison!"))),
@@ -939,11 +1077,8 @@ fn garrison(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
     let hint = if let Some((line, ours)) = refusal {
         Some(chrome::ui_line("Army", line).filter(|_| line > 0 && razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr(ours).to_string()))
     } else if let Some(pointed) = pointed {
-        match sel {
-            Some(selected) if selected == pointed => super::items_view::army_line(0, &unit_name(selected)),
-            Some(selected) => super::items_view::army_line(2, &unit_name(selected)),
-            None => super::items_view::army_line(1, &unit_name(pointed)),
-        }
+        let (line, named) = super::items_view::pointed_line(controls, pointed, sel);
+        super::items_view::army_line(line, &unit_name(named))
     } else {
         top.or(bottom).and_then(|hit| match hit { Hit::Cell(slot) => super::items_view::row_text(c.formation, slot), _ => None })
     };
@@ -970,74 +1105,138 @@ fn garrison(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
         tooltip(&hover);
         return;
     }
-    if clicked() {
-        let mut done = true;
-        let result: Option<Result<(), ServiceError>> = match (sel, top, bottom) {
-            (Some((true, j)), Some(Hit::Unit(n)), _) if n == j => None,
-            (Some((false, i)), _, Some(Hit::Unit(n))) if n == i => None,
-            (None, Some(Hit::Unit(j)), _) => {
-                view.garrison_sel = Some((true, j));
-                done = false;
-                None
+    // Razdor's drag (both settings): a card let go over a card or a cell does what the
+    // original's second press does with that card selected.
+    let dropped = super::unit_drag::follow(assets, card_grid_size(f, c.formation, CARD_BOTTOM_Y).1);
+    if let Some(from) = dropped {
+        view.garrison_sel = Some(from);
+        garrison_act(game, view, &guards, &squad, Some(from), top, bottom, message);
+    } else if clicked() {
+        match garrison_click(controls, top, bottom) {
+            GarrisonClick::Select(s) => {
+                view.garrison_sel = Some(s);
+                start_garrison_drag(&guards, &squad, s);
             }
-            (None, _, Some(Hit::Unit(i))) => {
-                view.garrison_sel = Some((false, i));
-                done = false;
-                None
-            }
-            // Within one army: a swap or a slide, both with `Card-Move` (0x4c7029, 0x4c65f8;
-            // the slide's own at 0x4b0d19).
-            (Some((true, j)), Some(Hit::Unit(n)), _) => {
-                game.move_guard(j, guards[n].unit.slot);
-                cue(Cue::CardMove);
-                None
-            }
-            (Some((true, j)), Some(Hit::Cell(cell)), _) => {
-                game.move_guard(j, cell);
-                cue(Cue::CardMove);
-                None
-            }
-            (Some((false, i)), _, Some(Hit::Unit(n))) => {
-                game.move_unit(i, squad[n].slot);
-                cue(Cue::CardMove);
-                None
-            }
-            (Some((false, i)), _, Some(Hit::Cell(cell))) => {
-                game.move_unit(i, cell);
-                cue(Cue::CardMove);
-                None
-            }
-            (Some((false, i)), Some(Hit::Unit(j)), _) => Some(game.swap_with_garrison(i, j, false)),
-            (Some((true, j)), _, Some(Hit::Unit(i))) => Some(game.swap_with_garrison(i, j, true)),
-            (Some((false, i)), Some(Hit::Cell(cell)), _) => Some(game.leave_in_garrison(i, Some(cell))),
-            (Some((true, j)), _, Some(Hit::Cell(cell))) => match game.take_from_garrison(j, Some(cell), false) {
-                Err(ServiceError::Unpaid(price)) if price < game.gold => {
-                    view.garrison_buy = Some((j, cell, price));
-                    None
+            GarrisonClick::Clear => view.garrison_sel = None,
+            GarrisonClick::Act => {
+                garrison_act(game, view, &guards, &squad, sel, top, bottom, message);
+                // A unit selected by this press may be dragged from here (Razdor's).
+                if let (None, Some(s)) = (sel, view.garrison_sel) {
+                    start_garrison_drag(&guards, &squad, s);
                 }
-                Err(ServiceError::Unpaid(_)) => Some(Err(ServiceError::CannotAfford)),
-                r => Some(r),
-            },
-            _ => {
-                done = false;
-                None
             }
-        };
-        // The hero and named units are refused without a word and the selection stays, as in
-        // the original (0x4c667e, 0x4c70d6, 0x4c7233 jump past the deselection); a fallen one
-        // (Razdor's rule) the same way, the strip saying why.
-        let refused = matches!(result, Some(Err(ServiceError::Hero | ServiceError::Named | ServiceError::Dead)));
-        if done && !refused {
-            view.garrison_sel = None;
-        }
-        match result {
-            // A move across plays `Card-Move` too (the swap's 0x4c66a0 / 0x4c70fe, the slide's).
-            Some(Ok(())) => cue(Cue::CardMove),
-            Some(Err(e)) if !refused => *message = Some(service_error(e)),
-            _ => {}
+            GarrisonClick::Nothing => {}
         }
     }
     tooltip(&hover);
+}
+
+/// What a press on the garrison tab does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GarrisonClick {
+    /// Dragging only: the unit pressed (a garrison unit, its index) is selected.
+    Select((bool, usize)),
+    /// Dragging only: an empty cell clears the selection.
+    Clear,
+    /// As in the original: the press selects, swaps or moves ([`garrison_act`]).
+    Act,
+    Nothing,
+}
+
+/// The press on the garrison tab over `top` (the garrison's grid) or `bottom` (the hero's).
+/// With «Расстановка армии: Перетаскивание» (Razdor's default, the owner's decision) a press
+/// only selects and units move by dragging; the original's second press swaps or moves
+/// (0x4c653c, 0x4c6f50).
+fn garrison_click(controls: super::unit_drag::Controls, top: Option<Hit>, bottom: Option<Hit>) -> GarrisonClick {
+    if controls == super::unit_drag::Controls::Original {
+        return GarrisonClick::Act;
+    }
+    match (top, bottom) {
+        (Some(Hit::Unit(j)), _) => GarrisonClick::Select((true, j)),
+        (_, Some(Hit::Unit(i))) => GarrisonClick::Select((false, i)),
+        (Some(Hit::Cell(_)), _) | (_, Some(Hit::Cell(_))) => GarrisonClick::Clear,
+        (None, None) => GarrisonClick::Nothing,
+    }
+}
+
+/// Razdor's drag from the garrison tab's card `s` (a garrison unit, its index).
+fn start_garrison_drag(guards: &[razdor::rules::world::Stationed], squad: &[Unit], s: (bool, usize)) {
+    match s {
+        (true, j) => super::unit_drag::press_guard(j, guards[j].unit.def),
+        (false, i) => super::unit_drag::press(i, squad[i].def),
+    }
+}
+
+/// The original's second press on the garrison tab with `sel` selected (0x4c653c, 0x4c6f50):
+/// selects with none selected, else swaps or moves within one army or across. Razdor's drag
+/// ends here as well.
+#[allow(clippy::too_many_arguments)]
+fn garrison_act(game: &mut Game, view: &mut BuildingView, guards: &[razdor::rules::world::Stationed], squad: &[Unit], sel: Option<(bool, usize)>, top: Option<Hit>, bottom: Option<Hit>, message: &mut Option<String>) {
+    let mut done = true;
+    let result: Option<Result<(), ServiceError>> = match (sel, top, bottom) {
+        (Some((true, j)), Some(Hit::Unit(n)), _) if n == j => None,
+        (Some((false, i)), _, Some(Hit::Unit(n))) if n == i => None,
+        (None, Some(Hit::Unit(j)), _) => {
+            view.garrison_sel = Some((true, j));
+            done = false;
+            None
+        }
+        (None, _, Some(Hit::Unit(i))) => {
+            view.garrison_sel = Some((false, i));
+            done = false;
+            None
+        }
+        // Within one army: a swap or a slide, both with `Card-Move` (0x4c7029, 0x4c65f8;
+        // the slide's own at 0x4b0d19).
+        (Some((true, j)), Some(Hit::Unit(n)), _) => {
+            game.move_guard(j, guards[n].unit.slot);
+            cue(Cue::CardMove);
+            None
+        }
+        (Some((true, j)), Some(Hit::Cell(cell)), _) => {
+            game.move_guard(j, cell);
+            cue(Cue::CardMove);
+            None
+        }
+        (Some((false, i)), _, Some(Hit::Unit(n))) => {
+            game.move_unit(i, squad[n].slot);
+            cue(Cue::CardMove);
+            None
+        }
+        (Some((false, i)), _, Some(Hit::Cell(cell))) => {
+            game.move_unit(i, cell);
+            cue(Cue::CardMove);
+            None
+        }
+        (Some((false, i)), Some(Hit::Unit(j)), _) => Some(game.swap_with_garrison(i, j, false)),
+        (Some((true, j)), _, Some(Hit::Unit(i))) => Some(game.swap_with_garrison(i, j, true)),
+        (Some((false, i)), Some(Hit::Cell(cell)), _) => Some(game.leave_in_garrison(i, Some(cell))),
+        (Some((true, j)), _, Some(Hit::Cell(cell))) => match game.take_from_garrison(j, Some(cell), false) {
+            Err(ServiceError::Unpaid(price)) if price < game.gold => {
+                view.garrison_buy = Some((j, cell, price));
+                None
+            }
+            Err(ServiceError::Unpaid(_)) => Some(Err(ServiceError::CannotAfford)),
+            r => Some(r),
+        },
+        _ => {
+            done = false;
+            None
+        }
+    };
+    // The hero and named units are refused without a word and the selection stays, as in
+    // the original (0x4c667e, 0x4c70d6, 0x4c7233 jump past the deselection); a fallen one
+    // (Razdor's rule) the same way, the strip saying why.
+    let refused = matches!(result, Some(Err(ServiceError::Hero | ServiceError::Named | ServiceError::Dead)));
+    if done && !refused {
+        view.garrison_sel = None;
+    }
+    match result {
+        // A move across plays `Card-Move` too (the swap's 0x4c66a0 / 0x4c70fe, the slide's).
+        Some(Ok(())) => cue(Cue::CardMove),
+        Some(Err(e)) if !refused => *message = Some(service_error(e)),
+        _ => {}
+    }
 }
 
 /// A list with a selection and a scroll bar. Rows are (icon item, name, price, the price in
@@ -1047,13 +1246,80 @@ fn price_list(assets: Option<&Assets>, rows: &[(Option<ItemId>, String, String, 
     super::typography::Role::Name.with(|| price_list_in_face(assets, rows, marks, pick, scroll, x, y, w, visible))
 }
 
+/// The market list's columns as the original lays them out (0x4d9df3..0x4d9eaa): the icon
+/// column 27 px, the names 283 − 70 − 27 = 186 px, the prices 70 px, then the scroll bar.
+const MARKET_ICON_W: f32 = 27.0;
+const MARKET_NAME_W: f32 = 186.0;
+const MARKET_PRICE_W: f32 = 70.0;
+
+/// A list's text inset (+0xb9 = 8, set at 0x4d9e50, 0x4d9f02, 0x4da04d, 0x4da0ff).
+const LIST_MARGIN: f32 = 8.0;
+
+/// What the market's lists take off the window's marble under them: their fill (24, 24, 24)
+/// drawn in mode 5 (+0xa9 and +0xad, 0x4d9e33 and 0x4d9ee5), subtracted.
+const MARKET_LIST_TAKEN: [i32; 3] = [24, 24, 24];
+
+/// What a picked market row adds: the text list's own highlight (64, 64, 64) in its adding
+/// mode 4 (0x47c848; the market does not change it).
+const MARKET_PICK_ADDED: [i32; 3] = [64, 64, 64];
+
+/// Where a list's columns stand from its left edge, scaled from the original's widths
+/// (`widths`: the icon column, the names, the prices) to the room left of the scroll bar.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ListColumns {
+    /// The icon column's width (the names start there).
+    icon: f32,
+    /// Where a name starts: the list's margin in from the icon column.
+    name_x: f32,
+    /// The middle of the names' list, where its title is centred.
+    names_cx: f32,
+    /// The middle of the prices' list: the prices and their title are centred on it.
+    price_cx: f32,
+}
+
+fn list_columns(w: f32, bar: f32, [icon, names, prices]: [f32; 3]) -> ListColumns {
+    let s = (w - bar).max(0.0) / (icon + names + prices);
+    ListColumns { icon: icon * s, name_x: (icon + LIST_MARGIN) * s, names_cx: (icon + names / 2.0) * s, price_cx: (icon + names + prices / 2.0) * s }
+}
+
+/// The market list's columns (`w` wide, its scroll bar `bar` at the right).
+fn market_columns(w: f32, bar: f32) -> ListColumns {
+    list_columns(w, bar, [MARKET_ICON_W, MARKET_NAME_W, MARKET_PRICE_W])
+}
+
+/// The tints of a market row (0x4bca8c): a buy price above the gold puts the name and the
+/// price in font ae24a4 (Benguiat 255, 175, 85), any other row in ae24a0 (255, 255, 155).
+fn market_ink(red: bool) -> Color {
+    if red { benguiat(ORANGE_INK) } else { benguiat(YELLOW_INK) }
+}
+
+/// `Benguiat` with blue − 100 (font ae24a0), the lists' plain rows.
+const YELLOW_INK: [u8; 3] = [255, 255, 155];
+/// `Benguiat` with green − 80, blue − 170 (font ae24a4), a price above the gold.
+const ORANGE_INK: [u8; 3] = [255, 175, 85];
+/// `Benguiat` with red − 200, green − 75 (font ae24a8), a spell already in the book.
+const BLUE_INK: [u8; 3] = [55, 180, 255];
+
+/// A blend colour (r, g, b) as drawn.
+fn blend_color(c: [i32; 3]) -> Color {
+    let [r, g, b] = c.map(|v| v.clamp(0, 255) as u8);
+    Color::from_rgba(r, g, b, 255)
+}
+
+/// The market's list as the original draws it (0x4bca8c, 0x4bddf0): the icon column is
+/// Win-paper from (0, 0) with (24, 24, 24) taken off (0x4bddf0), the names and prices stand
+/// on the window's marble with (24, 24, 24) taken off, a 1 px frame round both (0x48d1d4 at
+/// 0x4bcfa4); the names left, the prices centred in their column (align 2, 0x4bcd03); the
+/// picked row lighter by (64, 64, 64) over the names and prices, not the icons.
 #[allow(clippy::too_many_arguments)]
 fn price_list_in_face(assets: Option<&Assets>, rows: &[(Option<ItemId>, String, String, bool)], marks: &[Option<std::ops::Range<usize>>], pick: Option<usize>, scroll: &mut usize, x: f32, y: f32, w: f32, visible: usize) -> Option<usize> {
     let k = chrome::k();
     let row_h = 186.0 * k / visible.max(1) as f32;
     let frame = Rect::new(x, y, w, visible as f32 * row_h);
-    draw_rectangle(frame.x, frame.y, frame.w, frame.h, Color::new(0.0, 0.0, 0.0, 0.25));
-    chrome::surface(Rect::new(x, y, row_h, frame.h), chrome::Skin::Paper);
+    let bar = 18.0 * k;
+    let ListColumns { icon: icon_w, name_x, price_cx, .. } = market_columns(w, bar);
+    chrome::subtractive(|| draw_rectangle(x + icon_w, y, w - icon_w, frame.h, blend_color(MARKET_LIST_TAKEN)));
+    chrome::paper_minus(Rect::new(x, y, icon_w, frame.h), (0.0, 0.0), MARKET_LIST_TAKEN);
     let max_scroll = rows.len().saturating_sub(visible);
     let over = mouse_in(x, y, w, visible as f32 * row_h);
     let wheel = if over { wheel() } else { 0.0 };
@@ -1065,100 +1331,108 @@ fn price_list_in_face(assets: Option<&Assets>, rows: &[(Option<ItemId>, String, 
     *scroll = (*scroll).min(max_scroll);
     // The scroll bar (Razdor's): arrows, the track pages, the knob drags.
     scrollbar(Rect::new(x + w - 15.0 * k, y, 12.0 * k, visible as f32 * row_h), scroll, visible, rows.len());
-    for n in *scroll..(*scroll + visible).min(rows.len()) {
-        if pick == Some(n) {
-            let ry = y + (n - *scroll) as f32 * row_h;
-            let selection_x = x + row_h;
-            let right = x + w - 18.0 * k;
-            draw_rectangle(selection_x, ry, (right - selection_x).max(0.0), row_h - 2.0 * k, Color::new(0.3, 0.38, 0.3, 0.42));
-        }
+    if let Some(n) = pick.filter(|&n| n >= *scroll && n < *scroll + visible) {
+        let ry = y + (n - *scroll) as f32 * row_h;
+        let right = x + w - bar;
+        chrome::additive(|| draw_rectangle(x + icon_w, ry, (right - x - icon_w).max(0.0), row_h, blend_color(MARKET_PICK_ADDED)));
     }
     chrome::silver_frame(frame, k.max(1.0));
     let mut hit = None;
     for (n, (icon, name, price, red)) in rows.iter().enumerate().skip(*scroll).take(visible) {
         let ry = y + (n - *scroll) as f32 * row_h;
         if let (Some(item), Some(assets)) = (icon, assets) {
-            assets.draw_item(*item, x + 2.0 * k, ry + 1.0, row_h - 4.0 * k);
+            let side = (row_h - 4.0 * k).min(icon_w - 2.0 * k);
+            assets.draw_item(*item, x + (icon_w - side) / 2.0, ry + 1.0, side);
         }
-        let shown = ellipsize(name, w - 120.0 * k, 17.0 * k);
+        let shown = ellipsize(name, price_cx - name_x - 30.0 * k, 17.0 * k);
         let visible_end = shown.strip_suffix('…').unwrap_or(&shown).len();
         let mark = marks.get(n).cloned().flatten().filter(|r| r.end <= visible_end && shown.is_char_boundary(r.start) && shown.is_char_boundary(r.end));
-        let item_color = if *red { Color::new(1.0, 0.56, 0.16, 1.0) } else { BUILDING_AND_ITEM_NAME };
-        let price_color = if *red { Color::new(1.0, 0.56, 0.16, 1.0) } else { ACCENT };
-        text_marked(&shown, mark, x + 32.0 * k, ry + 20.0 * k, 17.0 * k, item_color, item_color);
-        text(price, x + w - 80.0 * k, ry + 21.0 * k, 18.0 * k, price_color);
-        if mouse_in(x, ry, w - 18.0 * k, row_h) && clicked() {
+        let ink = market_ink(*red);
+        text_marked(&shown, mark, x + name_x, ry + 20.0 * k, 17.0 * k, ink, ink);
+        text_centered(price, x + price_cx, ry + 21.0 * k, 18.0 * k, ink);
+        if mouse_in(x, ry, w - bar, row_h) && clicked() {
             hit = Some(n);
         }
     }
     hit
 }
 
-pub(super) fn item_description(game: &Game, assets: &Assets, item: ItemId, x: f32, y: f32, w: f32, h: f32) {
+/// A list column whose title sorts the list when clicked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Column {
+    Name,
+    Price,
+}
+
+/// How the market's or the sanctuary's list is sorted by clicks on its column titles.
+/// Razdor's addition (the owner's request after a player's report), not the original's: the
+/// original cannot sort these lists. `Shown` is the list's own order, which a new window or
+/// tab starts with.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ListSort {
+    #[default]
+    Shown,
+    /// А to Я.
+    NameUp,
+    /// Я to А.
+    NameDown,
+    /// The dearest first.
+    PriceDown,
+    /// The cheapest first.
+    PriceUp,
+}
+
+impl ListSort {
+    /// The sort after a click on a column's title: «Название» A→Я, then Я→A, then the list's
+    /// own order; «Цена» the dearest first, then the cheapest first, then the own order.
+    fn clicked(self, c: Column) -> ListSort {
+        match (c, self) {
+            (Column::Name, ListSort::NameUp) => ListSort::NameDown,
+            (Column::Name, ListSort::NameDown) => ListSort::Shown,
+            (Column::Name, _) => ListSort::NameUp,
+            (Column::Price, ListSort::PriceDown) => ListSort::PriceUp,
+            (Column::Price, ListSort::PriceUp) => ListSort::Shown,
+            (Column::Price, _) => ListSort::PriceDown,
+        }
+    }
+}
+
+/// A name's key in alphabetical order, case left out; «ё» right after «е».
+fn alphabet_key(s: &str) -> Vec<(char, bool)> {
+    s.chars().flat_map(char::to_lowercase).map(|c| if c == 'ё' { ('е', true) } else { (c, false) }).collect()
+}
+
+/// `base` (the list's own order: indices into `names` and `prices`) sorted by `sort`; rows
+/// with equal keys keep their order in `base`.
+fn sorted_rows<P: Ord>(base: &[usize], names: &[&str], prices: &[P], sort: ListSort) -> Vec<usize> {
+    let mut order = base.to_vec();
+    match sort {
+        ListSort::Shown => {}
+        ListSort::NameUp => order.sort_by_cached_key(|&n| alphabet_key(names[n])),
+        ListSort::NameDown => order.sort_by(|&a, &b| alphabet_key(names[b]).cmp(&alphabet_key(names[a]))),
+        ListSort::PriceDown => order.sort_by(|&a, &b| prices[b].cmp(&prices[a])),
+        ListSort::PriceUp => order.sort_by(|&a, &b| prices[a].cmp(&prices[b])),
+    }
+    order
+}
+
+/// The row that shows what row `pick` of `before` showed, in the order `after`.
+fn same_pick(before: &[usize], after: &[usize], pick: Option<usize>) -> Option<usize> {
+    let item = before.get(pick?)?;
+    after.iter().position(|n| n == item)
+}
+
+/// The column whose title (centred on `name_cx` or `price_cx`, its baseline `y`, in `size`)
+/// was clicked this frame, if any; measured in the font active when called.
+fn title_clicked((name, price): (&str, &str), (name_cx, price_cx): (f32, f32), y: f32, size: f32) -> Option<Column> {
+    if !clicked() {
+        return None;
+    }
     let k = chrome::k();
-    let c = &game.content;
-    let d = c.item(item);
-    chrome::text_box(Rect::new(x, y, w, h));
-    let limit = match d.kind {
-        ArtefactType::BlowWeapon => Some(tr("warriors only")),
-        ArtefactType::ShotWeapon => Some(tr("shooters only")),
-        ArtefactType::Staff => Some(tr("mages only")),
-        ArtefactType::Item => Some(tr("trade goods: cannot be worn")),
-        _ => None,
-    };
-    let props = describe_with(c, item, &super::unit_sheet::bonus_title);
-    // What the item's special bonus does, under the properties in its own colour: the text the
-    // unit panel shows for it (`[Army] Bonus<N>`), so a buyer knows it before buying (Razdor's;
-    // the original names the bonus only).
-    let bonus = d.bonus.as_ref().map(|b| super::unit_sheet::trait_line(b).1);
-    let layout = |s: f32| {
-        let desc = wrap(&d.description, w - 24.0 * k, 15.0 * k * s);
-        let mut lines = wrap(&props, w - 24.0 * k, 16.0 * k * s);
-        let bonus_lines = bonus.as_deref().map_or(Vec::new(), |b| wrap(b, w - 24.0 * k, 15.0 * k * s));
-        let n = lines.len();
-        lines.extend(bonus_lines);
-        let height = (10.0 + 56.0 * s + 6.0 + 22.0 * s + if limit.is_some() { 20.0 * s } else { 0.0 } + 18.0 * s * desc.len() as f32 + 4.0 + 19.0 * s * lines.len() as f32 + 6.0) * k;
-        (desc, (lines, n), height)
-    };
-    let scales = [1.0, 0.9, 0.8, 0.72, 0.65];
-    let s = if super::typography::fixed_size() { 1.0 } else { scales.iter().copied().find(|&s| layout(s).2 <= h).unwrap_or(0.65) };
-    let (mut desc, (lines, props_n), _) = layout(s);
-    let icon = 56.0 * k * s;
-    assets.draw_item(item, x + w / 2.0 - icon / 2.0, y + 10.0 * k, icon);
-    let desc_lh = super::typography::Role::Body.line_height(18.0 * k * s);
-    let props_lh = super::typography::Role::Body.line_height(19.0 * k * s);
-    let limit_lh = super::typography::Role::Body.line_height(20.0 * k * s);
-    let mut ly = y + 10.0 * k + icon + 6.0 * k + super::typography::Role::Name.size(18.0 * k * s) * 0.72;
-    super::typography::Role::Name.with(|| {
-        let name = ellipsize(&d.name, w - 24.0 * k, 20.0 * k * s);
-        text_centered(&name, x + w / 2.0, ly, 20.0 * k * s, Color::new(0.84, 0.85, 0.87, 1.0));
-    });
-    ly += 4.0 * k * s;
-    if let Some(limit) = limit {
-        ly += limit_lh;
-        text_centered(limit, x + w / 2.0, ly, 16.0 * k * s, Color::new(155.0 / 255.0, 155.0 / 255.0, 155.0 / 255.0, 1.0));
-    }
-    // At the smallest size the description gives way to the properties.
-    let room = ((y + h - 6.0 * k - ly - 4.0 * k - props_lh * lines.len() as f32) / desc_lh).floor().max(0.0) as usize;
-    if desc.len() > room {
-        desc.truncate(room);
-        if let Some(last) = desc.last_mut() {
-            *last = format!("{}…", last.trim_end());
-        }
-    }
-    for line in &desc {
-        ly += desc_lh;
-        text_centered(line, x + w / 2.0, ly, 15.0 * k * s, ACCENT);
-    }
-    ly += 4.0 * k;
-    for (n, line) in lines.iter().enumerate() {
-        ly += props_lh;
-        if n < props_n {
-            text_centered(line, x + w / 2.0, ly, 16.0 * k * s, chrome::ORANGE_TEXT);
-        } else {
-            text_centered(line, x + w / 2.0, ly, 15.0 * k * s, WHITE);
-        }
-    }
+    [(Column::Name, name, name_cx), (Column::Price, price, price_cx)].into_iter().find_map(|(c, s, cx)| {
+        let w = measure(s, size).width + 8.0 * k;
+        mouse_in(cx - w / 2.0, y - size, w, size + 6.0 * k).then_some(c)
+    })
 }
 
 /// The market rows' order: indices of `prices`, cheapest first; equal prices keep their
@@ -1222,7 +1496,26 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
     // shows them unsorted, in stock and pack order: 0x4be9a0 jumps over its sort). `order[row]`
     // is the row's index in `sellable` or in the goods, which the trade takes.
     let prices: Vec<_> = if view.selling { sellable.iter().map(|&n| game.sell_price(game.pack[n])).collect() } else { goods.iter().map(|&i| game.buy_price(i)).collect() };
-    let order = cheapest_first(&prices);
+    let names: Vec<&str> = if view.selling { sellable.iter().map(|&n| c.item(game.pack[n]).name.as_str()).collect() } else { goods.iter().map(|&i| c.item(i).name.as_str()).collect() };
+    let own_order = cheapest_first(&prices);
+    // A click on «Название» or «Цена» sorts the list (Razdor's addition, `ListSort`; the
+    // original's titles do nothing). The picked item stays picked.
+    let (name_head, price_head) = (own_text("Building", "ItemName", n_("Name")), own_text("Building", "ItemCost", n_("Price")));
+    let cols = market_columns(lw, 18.0 * k);
+    let titles_shown = view.filter.is_empty() && !has_focus(FILTER_KEY);
+    let title_hit = if titles_shown {
+        super::typography::Role::Title.with(|| title_clicked((&name_head, &price_head), (lx + cols.names_cx, lx + cols.price_cx), y + 13.0 * k, 17.0 * k))
+    } else {
+        None
+    };
+    if let Some(column) = title_hit {
+        let before = sorted_rows(&own_order, &names, &prices, view.sort);
+        view.sort = view.sort.clicked(column);
+        let after = sorted_rows(&own_order, &names, &prices, view.sort);
+        view.pick = same_pick(&before, &after, view.pick);
+        swallow_input();
+    }
+    let order = sorted_rows(&own_order, &names, &prices, view.sort);
     let rows: Vec<(Option<ItemId>, String, String, bool)> = if view.selling {
         order.iter().map(|&n| game.pack[sellable[n]]).map(|i| (Some(i), c.item(i).name.clone(), game.sell_price(i).to_string(), false)).collect()
     } else {
@@ -1230,17 +1523,17 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
     };
     // Over the list the original's column titles, "Название" and "Цена" (0x4bca8c). The
     // filter (Razdor's) takes their line only while it is used: a letter typed over the list,
-    // Ctrl+F or a click on the titles starts it; the list keeps the items that match, their
-    // matched part lit; Enter picks the first.
+    // Ctrl+F or a click on the titles' line beside the titles starts it; the list keeps the
+    // items that match, their matched part lit; Enter picks the first.
     let all: Vec<(usize, ItemId)> = rows.iter().enumerate().filter_map(|(n, r)| r.0.map(|i| (n, i))).collect();
     let before = item_filter::keep(&c, all.iter().copied(), &view.filter).len();
     let filter_rect = Rect::new(lx, y, lw, 18.0 * k);
     let reply = item_filter::field_with(FILTER_KEY, &mut view.filter, filter_rect, &[KeyCode::N], before, rows.len(), false);
     if view.filter.is_empty() && !has_focus(FILTER_KEY) {
-        let (name_head, price_head) = (own_text("Building", "ItemName", n_("Name")), own_text("Building", "ItemCost", n_("Price")));
+        // Each title centred over its own list (0x48e750 for 0x670688 and 0x670760).
         super::typography::Role::Title.with(|| {
-            chrome::shadow_centered(&name_head, lx + 32.0 * k + (lw - 120.0 * k) / 2.0, y + 13.0 * k, 17.0 * k, MARKET_HEADING);
-            chrome::shadow_centered(&price_head, lx + lw - 58.0 * k, y + 13.0 * k, 17.0 * k, MARKET_HEADING);
+            chrome::shadow_centered(&name_head, lx + cols.names_cx, y + 13.0 * k, 17.0 * k, MARKET_HEADING);
+            chrome::shadow_centered(&price_head, lx + cols.price_cx, y + 13.0 * k, 17.0 * k, MARKET_HEADING);
         });
     }
     let kept = item_filter::keep(&c, all, &view.filter);
@@ -1268,7 +1561,7 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
     let dh = 186.0 * k;
     let card_y = y + 21.0 * k;
     match view.pick.and_then(|k| rows.get(k)).and_then(|r| r.0) {
-        Some(item) => item_description(game, assets, item, dx, card_y, dw, dh),
+        Some(item) => super::item_text::draw(game, assets, item, Rect::new(dx, card_y, dw, dh), super::item_text::ItemBox::Market, k),
         None => {
             chrome::text_box(Rect::new(dx, card_y, dw, dh));
             text_centered(tr("Pick an item from the list."), dx + dw / 2.0, card_y + dh / 2.0, 18.0 * k, BOX_INK);
@@ -1338,14 +1631,28 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
 /// Sanctuary: spells for sale; a spell bought goes into the hero's book.
 fn sanctuary(game: &mut Game, f: &Frame, view: &mut BuildingView, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) -> Option<Screen> {
     let k = chrome::k();
-    let spells: Vec<SpellDef> = game.spells_here().into_iter().cloned().collect();
+    let own: Vec<SpellDef> = game.spells_here().into_iter().cloned().collect();
+    // The list in the shop's order, or sorted by a click on a title (Razdor's addition,
+    // `ListSort`).
+    let own_order: Vec<usize> = (0..own.len()).collect();
+    let names: Vec<&str> = own.iter().map(|s| s.name.as_str()).collect();
+    let prices: Vec<i32> = own.iter().map(|s| s.cost_gold).collect();
+    let order = sorted_rows(&own_order, &names, &prices, view.sort);
+    let spells: Vec<SpellDef> = order.iter().map(|&n| own[n].clone()).collect();
     view.pick = view.pick.filter(|&n| n < spells.len()).or_else(|| (!spells.is_empty()).then_some(0));
     // Laid out as the original's (0x4ba854, tab 4; measured on its screen): the list on the
     // right, a picture column, "Название заклятия" and "Цена" over six rows in one frame; a
     // spell already in the book in its own colour.
     let list = at(f, 530.0, 55.0, 296.0, 234.0);
-    if let Some(n) = spell_list(game, &spells, view.pick, list) {
+    let (row, title) = spell_list(game, &spells, view.pick, list);
+    if let Some(n) = row {
         view.pick = Some(n);
+    }
+    if let Some(column) = title {
+        view.sort = view.sort.clicked(column);
+        let after = sorted_rows(&own_order, &names, &prices, view.sort);
+        view.pick = same_pick(&order, &after, view.pick);
+        swallow_input();
     }
     // The description on the left: its title, the spell's card, the message box, the money
     // and "Купить" (0x4ba078).
@@ -1391,45 +1698,82 @@ fn sanctuary(game: &mut Game, f: &Frame, view: &mut BuildingView, message: &mut 
     hall_offers(game, f, view, message, dialogs)
 }
 
-/// The sanctuary's spell list (0x4ba854): each row the spell's small picture, its name and
-/// its price, six rows over the frame's height; a click picks a row.
-fn spell_list(game: &Game, spells: &[SpellDef], pick: Option<usize>, r: Rect) -> Option<usize> {
+/// The sanctuary list's columns as the original lays them out (0x4d9fe6..0x4da0ae): the
+/// spells' picture strip 42 px, the names 316 − 70 − 42 = 204 px, the prices 70 px.
+const SPELL_ICON_W: f32 = 42.0;
+const SPELL_NAME_W: f32 = 204.0;
+const SPELL_PRICE_W: f32 = 70.0;
+
+/// What the sanctuary takes off Win-paper under its list, copied from (20, 20) (0x4bb3c3,
+/// 0x4bb3e0): (148, 132, 148), the same paper as the hint strip's.
+const SPELL_LIST_TAKEN: [i32; 3] = [148, 132, 148];
+/// What it takes off below the last spell, the paper copied on from (20, 20 + the rows'
+/// height) (0x4bb592, 0x4bb5af): (180, 140, 113), darker.
+const SPELL_EMPTY_TAKEN: [i32; 3] = [180, 140, 113];
+/// What a picked spell's row adds over the names and prices: (24, 32, 24), the lists' own
+/// highlight in the adding mode 4 (+0xb1 set at 0x4da030 and 0x4da0e5).
+const SPELL_PICK_ADDED: [i32; 3] = [24, 32, 24];
+
+/// The tint of a spell's name and price (0x4ba854 tab 4, 0x49c100): a spell already in the
+/// book in font ae24a8 (blue), any other in ae24a0 (yellow), whatever its price and the gold.
+fn spell_ink(known: bool) -> Color {
+    if known { benguiat(BLUE_INK) } else { benguiat(YELLOW_INK) }
+}
+
+/// Where a spell's picture stands in its row: the original paints each 100 px picture at
+/// (4, 4 + 104·n) of a 108 × 628 strip keyed on (95, 59, 0), shrinks the strip to 42 × 250
+/// (0x4bc3c1, 0x4bc42a) and blits it keyed at the list's left (0x4bb533). Returns the
+/// picture's left and top offsets and its side, for a column `icon_w` wide and rows `row_h`.
+fn spell_icon_place(icon_w: f32, row_h: f32) -> (f32, f32, f32) {
+    let (sx, sy) = (icon_w / 108.0, row_h / 104.0);
+    (4.0 * sx, 4.0 * sy, (100.0 * sx).min(100.0 * sy))
+}
+
+/// The sanctuary's spell list (0x4ba854, tab 4), as the original builds it: one panel under
+/// the picture strip, the names and the prices, Win-paper from (20, 20) with (148, 132, 148)
+/// taken off; below the last spell the paper with (180, 140, 113) taken off; a 1 px frame
+/// round it (0x48d1d4 at 0x4bb508); the pictures on the left; the names left and the prices
+/// centred in their lists (align 1 and 2, 0x4bb0b0 and 0x4bb0ca), both in one tint; the
+/// picked row lighter by (24, 32, 24) over the names and prices, not the pictures. Six rows
+/// over the frame's height; a click picks a row, a click on a column's title sorts the list
+/// (Razdor's addition, `ListSort`): the row and the title clicked.
+fn spell_list(game: &Game, spells: &[SpellDef], pick: Option<usize>, r: Rect) -> (Option<usize>, Option<Column>) {
     let k = chrome::k();
-    chrome::surface(r, chrome::Skin::Brown);
+    let cols = list_columns(r.w, 0.0, [SPELL_ICON_W, SPELL_NAME_W, SPELL_PRICE_W]);
     let row_h = r.h / 6.0;
-    chrome::surface(Rect::new(r.x, r.y, row_h, r.h), chrome::Skin::Paper);
+    let rows = spells.len().min(6);
+    let used = rows as f32 * row_h;
+    chrome::paper_minus(Rect::new(r.x, r.y, r.w, used), (20.0, 20.0), SPELL_LIST_TAKEN);
+    chrome::paper_minus(Rect::new(r.x, r.y + used, r.w, r.h - used), (20.0, 20.0 + used / k), SPELL_EMPTY_TAKEN);
     chrome::silver_frame(r, k.max(1.0));
-    // The column titles stand over the frame, on the description's title line.
-    let (name_x, price_x) = (r.x + 47.0 * k, r.x + r.w - 53.0 * k);
+    // The column titles stand over the frame, each centred over its list (0x48e750).
     let (name_head, price_head) = (own_text("Building", "SpellName", n_("Spell")), own_text("Building", "ItemCost", n_("Price")));
-    super::dt_font::with_face(super::dt_font::Face::Title, || {
-        chrome::shadow_text(&name_head, name_x + 10.0 * k, r.y - 9.0 * k, 15.0 * k, MARKET_HEADING);
-        chrome::shadow_text(&price_head, price_x, r.y - 9.0 * k, 15.0 * k, MARKET_HEADING);
+    let title = super::dt_font::with_face(super::dt_font::Face::Title, || {
+        chrome::shadow_centered(&name_head, r.x + cols.names_cx, r.y - 9.0 * k, 15.0 * k, MARKET_HEADING);
+        chrome::shadow_centered(&price_head, r.x + cols.price_cx, r.y - 9.0 * k, 15.0 * k, MARKET_HEADING);
+        title_clicked((&name_head, &price_head), (r.x + cols.names_cx, r.x + cols.price_cx), r.y - 9.0 * k, 15.0 * k)
     });
     let mut hit = None;
+    let (icon_dx, icon_dy, side) = spell_icon_place(cols.icon, row_h);
     for (n, s) in spells.iter().enumerate().take(6) {
         let ry = r.y + n as f32 * row_h;
-        let row = Rect::new(r.x + 2.0 * k, ry, r.w - 4.0 * k, row_h - 2.0 * k);
         if pick == Some(n) {
-            draw_rectangle(r.x + row_h, row.y, r.w - row_h, row.h, Color::new(1.0, 1.0, 0.65, 0.20));
+            chrome::additive(|| draw_rectangle(r.x + cols.icon, ry, r.w - cols.icon, row_h, blend_color(SPELL_PICK_ADDED)));
         }
-        let side = row_h - 6.0 * k;
-        chrome::spell_icon(s, Rect::new(r.x + 5.0 * k, ry + 2.0 * k, side, side));
-        let ink = if game.knows_spell(s.id) { Color::from_rgba(55, 180, 255, 255) }
-            else if game.gold < s.cost_gold { Color::from_rgba(255, 175, 85, 255) }
-            else { Color::from_rgba(255, 255, 155, 255) };
+        chrome::spell_icon(s, Rect::new(r.x + icon_dx, ry + icon_dy, side, side));
+        let ink = spell_ink(game.knows_spell(s.id));
         super::typography::Role::Name.with(|| {
             let size = 18.0 * k;
-            text(&ellipsize(&s.name, price_x - name_x - 8.0 * k, size), name_x, ry + row_h / 2.0 + size * 0.35, size, ink);
-            text(&s.cost_gold.to_string(), price_x, ry + row_h / 2.0 + 6.0 * k, size, ink);
+            let baseline = ry + row_h / 2.0 + size * 0.35;
+            let room = cols.price_cx - (SPELL_PRICE_W / 2.0) * (cols.icon / SPELL_ICON_W) - cols.name_x - 4.0 * k;
+            text(&ellipsize(&s.name, room, size), r.x + cols.name_x, baseline, size, ink);
+            text_centered(&s.cost_gold.to_string(), r.x + cols.price_cx, baseline, size, ink);
         });
-        if button_state(row, true).2 {
+        if button_state(Rect::new(r.x, ry, r.w, row_h), true).2 {
             hit = Some(n);
         }
     }
-    let empty_y = r.y + spells.len().min(6) as f32 * row_h;
-    draw_rectangle(r.x + k, empty_y, r.w - 2.0 * k, (r.bottom() - empty_y - k).max(0.0), Color::new(0.0, 0.0, 0.0, 0.45));
-    hit
+    (hit, title)
 }
 
 /// The money as the market and the sanctuary show it (0x4bd39c): the gold picture, then
@@ -1834,8 +2178,15 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut BuildingView, message:
     let (tw, th) = ((col.w - 12.0 * k).min(232.0 * k), 88.0 * k);
     let tx = col.x + (col.w - tw) / 2.0;
     let pitch = (th + 6.0 * k).min((col.h - th - 20.0 * k) / tabs.len().max(1) as f32);
+    // A tab's place under the pointer brings the tabs back over the hire tab's card
+    // (0x4bb6c8 → 0x4bc98c), the Exit's too.
+    let exit_r = Rect::new(tx, col.y + col.h - th - 5.0 * k, tw, th);
+    let tab_rects: Vec<Rect> = (0..tabs.len()).map(|i| Rect::new(tx, col.y + 5.0 * k + i as f32 * pitch, tw, th)).chain([exit_r]).collect();
+    if tab_rects.iter().any(|r| mouse_in(r.x, r.y, r.w, r.h)) {
+        view.hire_panel = hire_panel_on(view.hire_panel, Some(Entered::Tab), None);
+    }
     for (i, &t) in tabs.iter().enumerate() {
-        let r = Rect::new(tx, col.y + 5.0 * k + i as f32 * pitch, tw, th);
+        let r = tab_rects[i];
         if tab_button(tab_label(t), Some(t), r, view.tab == t) && view.tab != t && view.garrison_sel.is_none() {
             // The tab is highlighted with the cast sound (interface.md §9.8, §14).
             cue(Cue::CastSpell);
@@ -1850,7 +2201,7 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut BuildingView, message:
             }
         }
     }
-    let exit = tab_button(tr("Exit"), None, Rect::new(tx, col.y + col.h - th - 5.0 * k, tw, th), false) && view.garrison_sel.is_none();
+    let exit = tab_button(tr("Exit"), None, exit_r, false) && view.garrison_sel.is_none();
 
     let mut next = early;
     match view.tab {
@@ -1893,7 +2244,38 @@ fn with_back(bar: Option<Screen>, view: &BuildingView) -> Option<Screen> {
 
 #[cfg(test)]
 mod tests {
-    use super::{tab_state, village_ok_key};
+    use super::{hire_panel_on, tab_state, village_ok_key, Entered, HirePanel};
+    use razdor::rules::content::UnitId;
+
+    #[test]
+    fn a_hire_offer_under_the_pointer_shows_its_card_until_the_tabs_come_back() {
+        // 0x4c6964: entering an offer paints its card over the tabs; 0x4c72a4: leaving it
+        // keeps the card.
+        let archer = UnitId(7);
+        let card = hire_panel_on(None, Some(Entered::Recruit(archer)), None);
+        assert_eq!(card, Some(HirePanel::Recruit(archer)));
+        assert_eq!(hire_panel_on(card, None, None), card, "the card stays after the pointer leaves");
+        // 0x4c612c: the hero's grid with nothing selected brings the tabs back (0x4bc98c),
+        // over a card or an empty cell alike.
+        assert_eq!(hire_panel_on(card, Some(Entered::SquadCell(Some(2))), None), None);
+        assert_eq!(hire_panel_on(card, Some(Entered::SquadCell(None)), None), None);
+        // With a unit selected: the unit under the pointer, else the selected one.
+        assert_eq!(hire_panel_on(card, Some(Entered::SquadCell(Some(2))), Some(4)), Some(HirePanel::Squad(2)));
+        assert_eq!(hire_panel_on(card, Some(Entered::SquadCell(None)), Some(4)), Some(HirePanel::Squad(4)));
+        // 0x4bb6c8: a tab's place brings the tabs back.
+        assert_eq!(hire_panel_on(card, Some(Entered::Tab), Some(4)), None);
+    }
+
+    #[test]
+    fn the_hire_hint_names_the_offer_or_warns_none_are_left() {
+        // 0x4c6964: line 8 with the name and the button in quotes; line 10 in the warning
+        // colour for an offer with none left.
+        let (line, warn) = super::recruit_hint("Archer", true);
+        assert!(!warn);
+        assert!(line.contains("\"Archer\""), "{line}");
+        let (_, warn) = super::recruit_hint("Archer", false);
+        assert!(warn);
+    }
 
     #[test]
     fn the_village_ok_takes_a_key_pressed_while_it_is_up() {
@@ -1927,7 +2309,38 @@ mod tests {
         assert_eq!(super::first_pick(0), None);
     }
 
+    /// The garrison tab's press: with dragging only (Razdor's default) it selects the unit
+    /// pressed or clears on an empty cell, never moving one; as in the original it acts
+    /// (0x4c653c, 0x4c6f50).
+    #[test]
+    fn a_garrison_press_follows_the_arrangement_setting() {
+        use super::{garrison_click, GarrisonClick, Hit};
+        use crate::ui::unit_drag::Controls::{Drag, Original};
+        let cell = Hit::Cell(Slot { row: Row::Front, col: 0 });
+        assert_eq!(garrison_click(Drag, Some(Hit::Unit(2)), None), GarrisonClick::Select((true, 2)));
+        assert_eq!(garrison_click(Drag, None, Some(Hit::Unit(0))), GarrisonClick::Select((false, 0)));
+        assert_eq!(garrison_click(Drag, Some(cell), None), GarrisonClick::Clear);
+        assert_eq!(garrison_click(Drag, None, Some(cell)), GarrisonClick::Clear);
+        assert_eq!(garrison_click(Drag, None, None), GarrisonClick::Nothing);
+        assert_eq!(garrison_click(Original, Some(Hit::Unit(2)), None), GarrisonClick::Act);
+        assert_eq!(garrison_click(Original, None, Some(cell)), GarrisonClick::Act);
+    }
+
     use super::{market_list_buttons, next_pick, ListButton, offer_picture, recruit_x, screen_line, stock_caption, stock_picture};
+
+    /// 0x4ba854 case 0: pictures only for building types 1, 3-7, 10 and 12; the palace, the
+    /// smithy and the dungeon entrance keep the window's background (0x4bb7c4).
+    #[test]
+    fn the_main_hall_has_no_picture_for_the_palace_smithy_and_entrance() {
+        use super::hall_picture;
+        use razdor::rules::world::LocationKind as K;
+        for kind in [K::Palace, K::Smithy, K::Entrance] {
+            assert_eq!(hall_picture(kind, (11, 1)), None, "{kind:?}");
+        }
+        assert_eq!(hall_picture(K::Town, (1, 1)), Some("S_Town"));
+        assert_eq!(hall_picture(K::Altar, (10, 2)), Some("S_Grave"));
+        assert_eq!(hall_picture(K::Ruins, (12, 3)), Some("S_RuinedHouse"));
+    }
     use razdor::rules::economy::VillageOffer;
     use razdor::rules::formation::{Formation, Row, Slot};
 
@@ -1991,5 +2404,78 @@ mod tests {
         assert_eq!(market_list_buttons(true, 5), [b(true, false), b(false, true)], "pack shown: Инвентарь locked");
         assert_eq!(market_list_buttons(true, 0), [b(true, false), b(false, false)], "an empty shop: both locked");
     }
-}
 
+    /// 0x4d9df3..0x4d9eaa: the market's columns 27 + 186 + 70 px, the prices centred in
+    /// theirs (align 2, 0x4bcd03), each title centred over its list (0x48e750).
+    #[test]
+    fn market_prices_stand_centred_in_their_column() {
+        let c = super::market_columns(283.0 + 18.0, 18.0);
+        assert_eq!(c, super::ListColumns { icon: 27.0, name_x: 35.0, names_cx: 120.0, price_cx: 248.0 });
+        let half = super::market_columns(141.5 + 9.0, 9.0);
+        assert_eq!(half.price_cx, 124.0, "scaled with the list");
+    }
+
+    /// 0x4d9fe6..0x4da0ae: the sanctuary's picture strip 42 px, names 204, prices 70; the
+    /// pictures shrunk from the 108 × 628 strip (0x4bc42a).
+    #[test]
+    fn the_sanctuary_list_is_laid_out_as_the_original() {
+        let c = super::list_columns(316.0, 0.0, [super::SPELL_ICON_W, super::SPELL_NAME_W, super::SPELL_PRICE_W]);
+        assert_eq!(c, super::ListColumns { icon: 42.0, name_x: 50.0, names_cx: 144.0, price_cx: 281.0 });
+        let (dx, dy, side) = super::spell_icon_place(108.0, 104.0);
+        assert_eq!((dx, dy, side), (4.0, 4.0, 100.0));
+    }
+
+    /// The lists' paper and highlights (0x4bddf0, 0x4bb3c3, 0x4bb592, 0x4d9e33, 0x4da030)
+    /// and their tints (0x4bca8c, 0x4ba854): no orange for a spell the gold does not reach.
+    #[test]
+    fn the_lists_take_the_original_s_colours() {
+        assert_eq!(super::MARKET_LIST_TAKEN, [24, 24, 24]);
+        assert_eq!(super::MARKET_PICK_ADDED, [64, 64, 64]);
+        assert_eq!(super::SPELL_LIST_TAKEN, [148, 132, 148]);
+        assert_eq!(super::SPELL_EMPTY_TAKEN, [180, 140, 113]);
+        assert_eq!(super::SPELL_PICK_ADDED, [24, 32, 24]);
+        let rgb = |c: macroquad::prelude::Color| [c.r, c.g, c.b].map(|v| (v * 255.0).round() as u8);
+        assert_eq!(rgb(super::market_ink(true)), [255, 175, 85]);
+        assert_eq!(rgb(super::market_ink(false)), [255, 255, 155]);
+        assert_eq!(rgb(super::spell_ink(false)), [255, 255, 155]);
+        assert_eq!(rgb(super::spell_ink(true)), [55, 180, 255]);
+    }
+
+    /// Razdor's addition (not the original's): a click on «Название» sorts А→Я, again Я→А,
+    /// again back to the list's own order; on «Цена» the dearest first, then the cheapest,
+    /// then the own order; a new window starts in the own order.
+    #[test]
+    fn titles_cycle_the_list_s_sort() {
+        use super::{Column, ListSort};
+        assert_eq!(super::BuildingView::new(razdor::rules::town::Tab::Market).sort, ListSort::Shown);
+        let name = |s: ListSort| s.clicked(Column::Name);
+        let price = |s: ListSort| s.clicked(Column::Price);
+        assert_eq!(name(ListSort::Shown), ListSort::NameUp);
+        assert_eq!(name(ListSort::NameUp), ListSort::NameDown);
+        assert_eq!(name(ListSort::NameDown), ListSort::Shown);
+        assert_eq!(name(ListSort::PriceUp), ListSort::NameUp);
+        assert_eq!(price(ListSort::Shown), ListSort::PriceDown);
+        assert_eq!(price(ListSort::PriceDown), ListSort::PriceUp);
+        assert_eq!(price(ListSort::PriceUp), ListSort::Shown);
+        assert_eq!(price(ListSort::NameDown), ListSort::PriceDown);
+    }
+
+    #[test]
+    fn rows_sort_by_name_in_the_russian_alphabet_and_by_price() {
+        use super::{sorted_rows, ListSort};
+        let names = ["Ёлка", "яблоко", "Евангелие", "Ангел", "жезл"];
+        let prices = [30, 10, 50, 10, 20];
+        let own = [4, 3, 2, 1, 0];
+        assert_eq!(sorted_rows(&own, &names, &prices, ListSort::Shown), own);
+        assert_eq!(sorted_rows(&own, &names, &prices, ListSort::NameUp), [3, 2, 0, 4, 1], "А, Е, Ё, Ж, Я; case left out");
+        assert_eq!(sorted_rows(&own, &names, &prices, ListSort::NameDown), [1, 4, 0, 2, 3]);
+        assert_eq!(sorted_rows(&own, &names, &prices, ListSort::PriceDown), [2, 0, 4, 3, 1], "equal prices keep the own order");
+        assert_eq!(sorted_rows(&own, &names, &prices, ListSort::PriceUp), [3, 1, 4, 0, 2]);
+    }
+
+    #[test]
+    fn a_sort_keeps_the_picked_item() {
+        assert_eq!(super::same_pick(&[4, 3, 2], &[2, 4, 3], Some(1)), Some(2));
+        assert_eq!(super::same_pick(&[4, 3, 2], &[2, 4, 3], None), None);
+    }
+}

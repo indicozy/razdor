@@ -121,6 +121,10 @@ the parked ship (`parked_ship`). The first step after going to sea takes no time
 
 **Camera** (`src/ui/world_view.rs`: `camera_look`). A click does not move the camera; the walk
 brings it back. Places shown by events (`Game::shown`) are flown to after their window is read.
+While a place waits or opens, its overlay holds only the darkness the fog layer lost there
+(`minimap::reveal_overlay`): the rest of the map keeps its shade, as the original's single fog
+image (0x49c8f0). Drawing the whole old fog over the fog layer once darkened every explored edge
+twice until the place had opened.
 
 ## Traps (from past bugs)
 

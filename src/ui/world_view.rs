@@ -15,6 +15,7 @@ use razdor::trf;
 use razdor::rules::clock::duration_label;
 use razdor::rules::content::HeroClass;
 use razdor::rules::game::{Event, Foe, Game};
+use razdor::rules::idle;
 use razdor::rules::magic::{CastOutcome, CastTarget};
 use razdor::rules::map::{object_class, Decoration, Grid, Tile, TileMap};
 use razdor::rules::world::{Army, Location, LocationKind, Owner, Troop};
@@ -114,6 +115,60 @@ thread_local! {
     /// The map's camera as last drawn (its zoom and where it looked, `None` the hero): the
     /// windows over the map draw it so, not re-centred and re-zoomed under them.
     static LAST_CAM: std::cell::Cell<Option<CamState>> = const { std::cell::Cell::new(None) };
+    /// The screen's side of the armies' idle animation ([`razdor::rules::idle`]), by uid.
+    static IDLE: std::cell::RefCell<std::collections::HashMap<u32, IdleSprite>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// An army's idle stamp (the frame clock, ms, when its idle animation last restarted: the
+/// load, 0x4b4b38, or a stop, 0x4ad8a0), the restart it belongs to, and the frame the idle
+/// pass last set (its sprite keeps it while the hero walks or waits).
+#[derive(Clone, Copy)]
+struct IdleSprite {
+    restarts: u32,
+    stamp_ms: i64,
+    frame: u32,
+}
+
+/// The frame clock the idle pass reads (0x4f1c34), in ms.
+fn clock_ms() -> i64 {
+    (get_time() * 1000.0) as i64
+}
+
+/// Stamps every army the first time the screen draws the map (a load stamps them all at
+/// once) and an army again when a stop restarted its animation.
+fn stamp_idle(game: &Game, now: i64) {
+    IDLE.with(|m| {
+        let mut m = m.borrow_mut();
+        for a in &game.world.armies {
+            let restarts = a.mind.idle_restarts;
+            let e = m.entry(a.uid).or_insert(IdleSprite { restarts, stamp_ms: now, frame: 0 });
+            if e.restarts != restarts {
+                *e = IdleSprite { restarts, stamp_ms: now, ..*e };
+            }
+        }
+    });
+}
+
+/// The frame of a standing army (`None`: its walk frame stays). While the map is idle (the
+/// hero neither walks nor waits, 0x68dc62) the world frame's idle pass (0x4c868c) sets the
+/// sprite of every army in no building from its stamp and offset; otherwise the sprite keeps
+/// the frame the pass last set, unless the army walks.
+fn idle_sprite_frame(game: &Game, a: &Army, now: i64) -> Option<u32> {
+    if a.mind.standing.is_some() {
+        return None;
+    }
+    let idle = !game.moving() && !game.waiting();
+    IDLE.with(|m| {
+        let mut m = m.borrow_mut();
+        let e = m.get_mut(&a.uid)?;
+        if idle {
+            let since = now - e.stamp_ms;
+            e.frame = if a.sails() { idle::ship_idle_frame(since, a.mind.idle_offset) } else { idle::idle_frame(a.figure, since, a.mind.idle_offset) };
+            Some(e.frame)
+        } else {
+            game.army_walk_frame(a).is_none().then_some(e.frame)
+        }
+    })
 }
 
 /// World-map view state kept between frames.
@@ -346,7 +401,12 @@ fn scroll(game: &Game, view: &mut MapView, dt_ms: i64, pad: (f32, f32)) {
     let cam = Camera::looking_at(game, view.zoom, view.look.unwrap_or(game.display_pos()));
     let on_minimap = view.minimap && minimap::under_pointer(&game.world.map, cam.view);
     if !on_minimap {
-        dir += edge_dir((mx, my), (w, h), edge);
+        let edge_dir = edge_dir((mx, my), (w, h), edge);
+        // The pointer left the window (Razdor's: macroquad keeps its last place, at the edge it
+        // crossed): asked of the system only while that place is at an edge.
+        if edge_dir != Vec2::ZERO && !super::display::pointer_outside() {
+            dir += edge_dir;
+        }
     }
     if dir == Vec2::ZERO {
         return;
@@ -374,9 +434,13 @@ struct Showing {
     /// The event that showed it: shown once its window is closed.
     event: Option<u16>,
     /// The fog as it was before the place was uncovered (soft edges and all), one darkness
-    /// per cell, and the texture it is drawn from: over the map until the reveal, so the
-    /// place pops out of the dark without any hint before.
+    /// per cell, and the texture drawn over the fog layer until the reveal, so the place pops
+    /// out of the dark without any hint before. The texture holds only the darkness the fog
+    /// layer lacks (`minimap::reveal_overlay` against `after`): clear wherever the place's
+    /// cells did not change the fog, so the rest of the map keeps its shade (0x49c8f0).
     before: Vec<u8>,
+    /// The fog layer's darkness once the place was uncovered.
+    after: Vec<u8>,
     mask: Option<Texture2D>,
     /// Reused upload buffer and distances for only the texels the reveal can change.
     mask_image: Option<std::cell::RefCell<Image>>,
@@ -398,16 +462,18 @@ impl Showing {
         let map = &game.world.map;
         let at = map.center(shown.at);
         let mut before = Vec::new();
+        let mut after = Vec::new();
         let reach = shown.cells.iter().map(|&t| (Vec2::from(map.center(t)) - Vec2::from(at)).length()).fold(0.0, f32::max) + SHOW_RIM + 1.0;
         let mut mask_image = None;
         let mut reveal_cells = Vec::new();
         let mask = (!shown.cells.is_empty() && fog.w > 0 && fog.h > 0).then(|| {
             let fresh: std::collections::HashSet<Tile> = shown.cells.iter().copied().collect();
             before = minimap::darkness_of(fog.w, fog.h, |t| fog.explored(t) && !fresh.contains(&t));
-            let rgba: Vec<u8> = before.iter().flat_map(|&a| [0, 0, 0, a]).collect();
+            after = minimap::darkness(fog);
+            let rgba: Vec<u8> = before.iter().zip(&after).flat_map(|(&b, &a)| [0, 0, 0, minimap::reveal_overlay(b, a)]).collect();
             let t = Texture2D::from_rgba8(fog.w as u16, fog.h as u16, &rgba);
             t.set_filter(FilterMode::Linear);
-            for (i, &alpha) in before.iter().enumerate() {
+            for (i, &alpha) in rgba.iter().skip(3).step_by(4).enumerate() {
                 if alpha == 0 {
                     continue;
                 }
@@ -420,7 +486,7 @@ impl Showing {
             mask_image = Some(std::cell::RefCell::new(Image { bytes: rgba, width: fog.w as u16, height: fog.h as u16 }));
             t
         });
-        Showing { at, event: shown.event, before, mask, mask_image, reveal_cells, reach, started: None, radius: shown.radius as f32 + 0.5 }
+        Showing { at, event: shown.event, before, after, mask, mask_image, reveal_cells, reach, started: None, radius: shown.radius as f32 + 0.5 }
     }
 
     /// Its event's window is closed (a place shown with no window waits for all of them).
@@ -451,6 +517,7 @@ impl MapView {
 
     /// A game was loaded: the places the old one was about to show are dropped.
     pub fn forget_shows(&mut self) {
+        IDLE.with(|m| m.borrow_mut().clear());
         self.shows.clear();
         self.returning = None;
         self.opening = None;
@@ -914,7 +981,7 @@ impl Camera {
                 let mut image = image.borrow_mut();
                 for &(i, d) in &s.reveal_cells {
                     let keep = ((d - r) / SHOW_RIM + 0.5).clamp(0.0, 1.0);
-                    image.bytes[i * 4 + 3] = (s.before[i] as f32 * keep) as u8;
+                    image.bytes[i * 4 + 3] = minimap::reveal_overlay((s.before[i] as f32 * keep) as u8, s.after[i]);
                 }
                 mask.update(&image);
             }
@@ -1286,13 +1353,18 @@ fn draw_figure(art: Option<&DtArt>, stem: &str, pos: (f32, f32), next: Option<(f
         Stand::Feet => vec2(p.x - size / 2.0, p.y - size * 0.8),
         Stand::Afloat => vec2(p.x - size / 2.0, p.y - size * 0.55),
     };
-    draw_texture_ex(
-        &sheet,
-        dest.x,
-        dest.y,
-        WHITE,
-        DrawTextureParams { dest_size: Some(vec2(size, size)), source: Some(Rect::new(frame * n, row * n, n, n)), ..Default::default() },
-    );
+    // The sheets hold premultiplied colour and the original draws every figure with
+    // SRCBLEND ONE, DESTBLEND INVSRCALPHA (0x4c9ef6, 0x4ca0d9): the Ghost's light where its
+    // alpha is 0 is added to the map, its glow.
+    super::chrome::premultiplied(|| {
+        draw_texture_ex(
+            &sheet,
+            dest.x,
+            dest.y,
+            WHITE,
+            DrawTextureParams { dest_size: Some(vec2(size, size)), source: Some(Rect::new(frame * n, row * n, n, n)), ..Default::default() },
+        )
+    });
     true
 }
 
@@ -1335,10 +1407,16 @@ fn draw_mark(cam: &Camera, pos: (f32, f32), texture: &str, color: Color) {
 }
 
 fn draw_army(game: &Game, a: &Army, assets: &Assets, art: Option<&DtArt>, cam: &Camera) {
+    // Inside a building its figure is not drawn, only its ring under the building
+    // (0x497abc, `World::hides_figure`).
+    if game.army_hidden(a) {
+        return;
+    }
     let next = a.path.first().map(|&t| game.world.map.center(t));
     let pos = game.army_display_pos(a);
-    // Its walk frames run by game time (engine.md §7), not by the clock on the wall.
-    let frame = game.army_walk_frame(a).unwrap_or(0);
+    // Its walk frames run by game time (engine.md §7), not by the clock on the wall; standing,
+    // its idle animation by the wall clock (0x4c868c).
+    let frame = idle_sprite_frame(game, a, clock_ms()).or_else(|| game.army_walk_frame(a)).unwrap_or(0);
     if a.sails() {
         if !draw_figure(art, ship_stem(a.ship), pos, next, frame, cam, Stand::Afloat) {
             let sail = if a.hostile() { Color::new(0.15, 0.12, 0.12, 1.0) } else { Color::new(0.92, 0.9, 0.82, 1.0) };
@@ -1364,10 +1442,17 @@ fn draw_hero(game: &Game, assets: &Assets, art: Option<&DtArt>, cam: &Camera) {
         Some(HeroClass::Ranger) => 3,
         _ => 1,
     };
+    // Inside a building his figure is not drawn, only his ring under the building
+    // (0x497abc, `World::hides_figure`).
+    if game.hero_hidden() {
+        return;
+    }
     let next = game.display_heading();
     let c = cam.to_screen(game.display_pos());
     if game.aboard() {
-        if !draw_figure(art, ship_stem(razdor::rules::ships::kind::HERO), game.display_pos(), next, hero_frame(next), cam, Stand::Afloat) {
+        // At rest aboard, his galley rocks through its 8 frames by the frame clock (0x4c868c).
+        let frame = if !game.moving() && !game.waiting() && game.location.is_none() { idle::hero_ship_idle_frame(clock_ms()) } else { hero_frame(next) };
+        if !draw_figure(art, ship_stem(razdor::rules::ships::kind::HERO), game.display_pos(), next, frame, cam, Stand::Afloat) {
             draw_ship(cam, game.display_pos(), HERO_SAIL);
         }
         return;
@@ -1379,6 +1464,7 @@ fn draw_hero(game: &Game, assets: &Assets, art: Option<&DtArt>, cam: &Camera) {
 
 fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<MapHoverLook>) {
     let art = assets.dt.as_ref();
+    stamp_idle(game, clock_ms());
     draw_terrain(game, art, cam);
     let map = &game.world.map;
     let ((c0, c1), (r0, r1)) = cam.visible(map);
@@ -1553,41 +1639,75 @@ fn route_arrow_light(ms: f64, phase: usize) -> f32 {
     (x + 150) as f32 / 255.0
 }
 
+/// The tooltips' cells (0x4ca9f0, 0x4cb18c): 48 px squares 56 px apart, from 10 px in; a
+/// portrait 46 px at (1, 1) inside, framed by a 1 px line.
+const TIP_CELL: f32 = 48.0;
+const TIP_PITCH: f32 = 56.0;
+
+/// The height of the tooltips' cells, `lines` rows of [`TIP_PITCH`] less the last gap.
+fn tip_grid_h(lines: usize) -> f32 {
+    lines as f32 * TIP_PITCH - (TIP_PITCH - TIP_CELL)
+}
+
 /// A 2×6 (or 3×4) mini formation of portraits, the front row at the bottom as the enemy's
-/// in battle; empty cells show their row's icon.
-fn formation_grid(game: &Game, assets: &Assets, troops: &[Troop], team: Team, x: f32, y: f32, cell: f32) -> f32 {
+/// in battle; empty cells show their row's icon. Returns its height.
+fn formation_grid(game: &Game, assets: &Assets, troops: &[Troop], team: Team, x: f32, y: f32) -> f32 {
+    let k = super::chrome::k();
+    let (cell, pitch) = (TIP_CELL * k, TIP_PITCH * k);
     let f = game.content.formation;
     let lines = f.display_lines();
     for r in 0..lines {
         for col in 0..f.display_cols() {
             let Some(slot) = f.at_display(r, col) else { continue };
-            let (cx, cy) = (x + col as f32 * (cell + 3.0), y + (lines - 1 - r) as f32 * (cell + 3.0));
+            let (cx, cy) = (x + col as f32 * pitch, y + (lines - 1 - r) as f32 * pitch);
             let sq = Rect::new(cx, cy, cell, cell);
-            draw_rectangle(cx, cy, cell, cell, Color::new(0.0, 0.0, 0.0, 0.45));
-            draw_rectangle_lines(cx, cy, cell, cell, 1.0, Color::new(0.6, 0.6, 0.62, 0.8));
             let troop = troops.iter().find(|t| f.display(t.slot) == (r, col));
-            if troop.is_none() {
-                super::chrome::cell_icon(super::chrome::CellIcon::of(f, slot), sq);
+            match troop {
+                None => super::chrome::cell_icon(super::chrome::CellIcon::of(f, slot), sq),
+                Some(t) => {
+                    let face = Rect::new(cx + k, cy + k, cell - 2.0 * k, cell - 2.0 * k);
+                    assets.draw_portrait(t.unit, team, face);
+                    // Wounds left by world spells.
+                    let max = razdor::rules::units::Stats::of_level(&game.content, t.unit, t.level).max_hp();
+                    super::chrome::wounds(face, max - t.hurt, max);
+                }
             }
-            if let Some(t) = troop {
-                assets.draw_portrait(t.unit, team, sq);
-                // Wounds left by world spells.
-                let max = razdor::rules::units::Stats::of_level(&game.content, t.unit, t.level).max_hp();
-                super::chrome::wounds(sq, max - t.hurt, max);
-                // Portrait, wounds and frame only: the original writes no level (0x4ca9f0).
-                draw_rectangle_lines(cx, cy, cell, cell, 1.0, Color::new(0.8, 0.8, 0.8, 0.9));
-            }
+            // Portrait, wounds and frame only: the original writes no level (0x4ca9f0).
+            draw_rectangle_lines(cx, cy, cell, cell, 1.0, super::chrome::SILVER);
         }
     }
-    f.display_lines() as f32 * (cell + 3.0)
+    tip_grid_h(lines) * k
+}
+
+/// What a tooltip line is drawn in (0x4ca9f0, 0x4cb18c): the style's label font (SanSerif),
+/// its name font (Benguiat), the orange SanSerif of an army's description, the orange
+/// Benguiat of "(дань уже собрана)", or Razdor's blue magic lines.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Ink {
+    Label,
+    Name,
+    Orange,
+    Note,
+    Mana,
+}
+
+impl Ink {
+    /// Names and the note are in Benguiat, larger; the rest in SanSerif.
+    fn big(self) -> bool {
+        matches!(self, Ink::Name | Ink::Note)
+    }
 }
 
 struct Tooltip {
     title: String,
-    lines: Vec<(String, Color)>,
+    /// The text block, centred: each entry a line or a paragraph to wrap, "" an empty line.
+    text: Vec<(String, Ink)>,
     troops: Vec<Troop>,
+    /// A building's garrison caption, over its cells at the bottom.
+    garrison: Option<String>,
+    /// An army's: its cells right under the title, the text after them.
+    army: bool,
     team: Team,
-    footer: Vec<(String, Color)>,
     style: TipStyle,
 }
 
@@ -1597,27 +1717,59 @@ fn info(key: &str, ours: &'static str) -> String {
     t.unwrap_or_else(|| tr(ours).to_string())
 }
 
-/// The name colour of the original's tooltips (the leader, the owner).
-const TIP_NAME: Color = Color::new(0.45, 1.0, 0.5, 1.0);
-/// Its orange notes ("(дань уже собрана)"), and the names in the hostile frame.
-const TIP_NOTE: Color = Color::new(1.0, 0.62, 0.25, 1.0);
-/// The labels ("Владелец") in the hostile frame: white less (20, 90, 180) (font 0xae24c4).
-const TIP_LABEL_HOSTILE: Color = Color::new(0.92, 0.65, 0.29, 1.0);
-/// Names and labels in the neutral frame: white less (80, 80, ...) and (100, 100, 100).
-const TIP_NAME_NEUTRAL: Color = Color::new(0.69, 0.69, 0.69, 1.0);
-const TIP_LABEL_NEUTRAL: Color = Color::new(0.61, 0.61, 0.61, 1.0);
+/// A font's tint: white with `minus` (r, g, b) taken off as it is loaded (0x48d0d4 at
+/// 0x4e5c9c and 0x4dbc26).
+const fn tint(minus: [u8; 3]) -> Color {
+    Color::new((255 - minus[0]) as f32 / 255.0, (255 - minus[1]) as f32 / 255.0, (255 - minus[2]) as f32 / 255.0, 1.0)
+}
 
-/// The original's army tooltip: its name, its 2×6 cards, "Предводитель" and the leader's
-/// name, the description; world spells on it and their wounds (Razdor's) under that.
+/// The title, in every style: Benguiat less (0, 0, 100) (font 0xae24a0), over its shadow.
+const TIP_TITLE: Color = tint([0, 0, 100]);
+/// Normal style: names in Benguiat less (100, 0, 100) (0xae249c), labels and a building's
+/// description in SanSerif less (100, 0, 100) (0xae24d4): both green.
+const TIP_GREEN: Color = tint([100, 0, 100]);
+/// SanSerif less (20, 90, 180) (0xae24c4): an army's description in every style, labels and
+/// a building's description in the hostile one.
+const TIP_ORANGE: Color = tint([20, 90, 180]);
+/// Benguiat less (0, 80, 170) (0xae24a4): names in the hostile style, and the village's note.
+const TIP_ORANGE_NAME: Color = tint([0, 80, 170]);
+/// Neutral style: names in Benguiat less (80, 80, 80) (0xae24b8), labels in SanSerif less
+/// (100, 100, 100) (0xae24d0).
+const TIP_GREY_NAME: Color = tint([80, 80, 80]);
+const TIP_GREY_LABEL: Color = tint([100, 100, 100]);
+
+/// The colour of `ink` in `style` (0x4ca9f0, 0x4cb18c pick the fonts by style).
+fn tip_color(style: TipStyle, ink: Ink) -> Color {
+    match (style, ink) {
+        (_, Ink::Orange) => TIP_ORANGE,
+        (_, Ink::Note) => TIP_ORANGE_NAME,
+        (_, Ink::Mana) => MANA,
+        (TipStyle::Normal, _) => TIP_GREEN,
+        (TipStyle::Hostile, Ink::Name) => TIP_ORANGE_NAME,
+        (TipStyle::Hostile, _) => TIP_ORANGE,
+        (TipStyle::Neutral, Ink::Name) => TIP_GREY_NAME,
+        (TipStyle::Neutral, _) => TIP_GREY_LABEL,
+    }
+}
+
+/// An army's tooltip names its leader only when the army has more than one unit (0x4ca9f0:
+/// the record's unit count, +0, above 1).
+fn tip_shows_leader(leader: &str, units: usize) -> bool {
+    !leader.is_empty() && units > 1
+}
+
+/// The original's army tooltip (0x4ca9f0): its name, its 2×6 cards, then "Предводитель" and
+/// the leader's name, the description in orange; world spells on it and their wounds
+/// (Razdor's) under that.
 fn army_tooltip(game: &Game, a: &Army) -> Tooltip {
     let title = if a.shown_name().is_empty() { info("NoNameArmy", n_("Unknown army")) } else { a.shown_name().to_string() };
-    let mut footer = Vec::new();
-    if !a.leader_name.is_empty() {
-        footer.push((info("Commander", n_("Leader")), DIM));
-        footer.push((a.leader_name.clone(), TIP_NAME));
+    let mut text = Vec::new();
+    if tip_shows_leader(&a.leader_name, a.troops.len()) {
+        text.push((info("Commander", n_("Leader")), Ink::Label));
+        text.push((a.leader_name.clone(), Ink::Name));
     }
-    for line in wrap(&a.description, 320.0 * super::chrome::k(), 12.0 * super::chrome::k()) {
-        footer.push((line, INK));
+    if !a.description.trim().is_empty() {
+        text.push((a.description.clone(), Ink::Orange));
     }
     let now = game.clock.total_minutes() as u64;
     let mut spells: Vec<&str> = Vec::new();
@@ -1628,19 +1780,17 @@ fn army_tooltip(game: &Game, a: &Army) -> Tooltip {
     }
     if !spells.is_empty() {
         // Wrapped as the description: an army of several units can list more names than fit.
-        let line = trf!("Under spells: {spells}", spells = spells.join(", "));
-        for l in wrap(&line, 320.0 * super::chrome::k(), 12.0 * super::chrome::k()) {
-            footer.push((l, MANA));
-        }
+        text.push((trf!("Under spells: {spells}", spells = spells.join(", ")), Ink::Mana));
     }
     let hurt: i32 = a.troops.iter().map(|t| t.hurt).sum();
     if hurt > 0 {
-        footer.push((trf!("Wounded by magic: -{hurt} hits", hurt), MANA));
+        text.push((trf!("Wounded by magic: -{hurt} hits", hurt), Ink::Mana));
     }
     // 0x4ca9f0: the hostile frame and colours for an army whose attitude to the player is
     // below 1, neutral ones (0) included.
     let style = if a.attitude < 1 { TipStyle::Hostile } else { TipStyle::Normal };
-    Tooltip { title, lines: Vec::new(), troops: a.troops.clone(), team: if a.hostile() { Team::Enemy } else { Team::Player }, footer, style }
+    let team = if a.hostile() { Team::Enemy } else { Team::Player };
+    Tooltip { title, text, troops: a.troops.clone(), garrison: None, army: true, team, style }
 }
 
 /// The owner line of a building's tooltip. The holder is named only for a castle, fort or
@@ -1654,33 +1804,42 @@ fn tooltip_owner(game: &Game, l: &Location) -> String {
     }
 }
 
-/// The original's building tooltip: its name, "Владелец" and the owner's name, the
-/// description, "(дань уже собрана)" for a village already emptied; a garrison under
-/// "Состав гарнизона защитников:".
+/// The original's building tooltip (0x4cb18c): its name; a text block of "Владелец" and the
+/// owner's name, the description in the label font, "(дань уже собрана)" for a village
+/// already emptied; a garrison's cells at the bottom under "Состав гарнизона защитников:".
+/// Ruins never show their cells: their text block ends with an empty line, that caption and
+/// "Неизвестная армия" in the name font (only when the block has something else in it).
 fn location_tooltip(game: &Game, l: &Location) -> Tooltip {
     let title = if l.name.is_empty() { info("NoNameBuilding", n_("Unknown building")) } else { l.name.clone() };
-    let mut lines = Vec::new();
+    let mut text = Vec::new();
     let owner = tooltip_owner(game, l);
     if !owner.trim().is_empty() {
-        lines.push((info("Owner", n_("Owner")), DIM));
-        lines.push((owner, TIP_NAME));
+        text.push((info("Owner", n_("Owner")), Ink::Label));
+        text.push((owner, Ink::Name));
     }
-    for line in wrap(&l.description, 320.0 * super::chrome::k(), 12.0 * super::chrome::k()) {
-        lines.push((line, INK));
+    if !l.description.trim().is_empty() {
+        text.push((l.description.clone(), Ink::Label));
     }
     if l.kind == LocationKind::Village && l.tribute_gold <= 0 && l.tribute_mana <= 0 {
-        lines.push((info("VillageEmptyGold", n_("(tribute already collected)")), TIP_NOTE));
+        text.push((info("VillageEmptyGold", n_("(tribute already collected)")), Ink::Note));
     }
     let mut troops = garrison_shown(game, l);
+    let mut garrison = None;
     if !troops.is_empty() {
-        lines.push((info("Defenders", n_("The garrison's defenders:")), DIM));
+        let caption = info("Defenders", n_("The garrison's defenders:"));
         if l.kind == LocationKind::Ruins {
-            lines.push((info("NoNameArmy", n_("Unknown army")), INK));
+            if !text.is_empty() {
+                text.push((String::new(), Ink::Label));
+                text.push((caption, Ink::Label));
+                text.push((info("NoNameArmy", n_("Unknown army")), Ink::Name));
+            }
             troops.clear();
+        } else {
+            garrison = Some(caption);
         }
     }
     let team = if l.owned() { Team::Player } else { Team::Enemy };
-    Tooltip { title, lines, troops, team, footer: Vec::new(), style: location_tip_style(l) }
+    Tooltip { title, text, troops, garrison, army: false, team, style: location_tip_style(l) }
 }
 
 /// The garrison of a building's tooltip, whoever holds the building (0x4cb18c): the player's
@@ -1722,74 +1881,98 @@ fn location_tip_style(l: &Location) -> TipStyle {
     }
 }
 
+/// The tooltip's width, its text block's width, its title's room and the text block's top
+/// (0x4ca8ac: 0x15c wide; 0x47cc90 boxes 0x14c wide at x = 8; 0x48df50 cuts the title to
+/// 0x154; a building's block at y = 0x25).
+const TIP_W: f32 = 348.0;
+const TIP_TEXT_W: f32 = 332.0;
+const TIP_TITLE_W: f32 = 340.0;
+const TIP_TOP: f32 = 37.0;
+
+/// A tooltip's height in the original's pixels (0x4ca9f0, 0x4cb18c), from its text block's
+/// height, its cells' height and the garrison caption's (a building with cells):
+/// - an army: its cells from y = 37, its text 8 px under them and 10 px of margin; 2 px of
+///   margin without text; the text at most 0x161 high;
+/// - a building: its text from y = 37 and 10 px of margin, or the title strip alone (0x1d);
+///   with cells, the caption and the cells under the text (+ 0x79 for 2 rows), or under the
+///   title (0x9f for 2 rows);
+/// - at most 0x200.
+fn tip_height(army: bool, text_h: f32, grid_h: f32, caption_h: Option<f32>) -> f32 {
+    let h = if army {
+        let top = TIP_TOP + grid_h + 8.0;
+        if text_h > 0.0 { top + text_h.min(353.0) + 10.0 } else { top + 2.0 }
+    } else {
+        match (text_h > 0.0, caption_h) {
+            (true, None) => TIP_TOP + text_h + 10.0,
+            (false, None) => 29.0,
+            (true, Some(c)) => TIP_TOP + text_h + 10.0 + c + grid_h + 17.0,
+            (false, Some(c)) => c + grid_h + 55.0,
+        }
+    };
+    h.min(512.0)
+}
+
 fn draw_tooltip(game: &Game, assets: &Assets, t: &Tooltip) {
-    use super::chrome::{shadow_centered, CREAM};
+    use super::chrome::shadow_centered;
     use super::dt_font::{with_face, Face};
     let k = super::chrome::k();
-    let cell = (46.0 * k).round();
-    let f = game.content.formation;
-    // `formation_grid` spaces its cells 3 px apart.
-    let grid_w = f.display_cols() as f32 * (cell + 3.0) - 3.0;
-    let grid_h = if t.troops.is_empty() { 0.0 } else { f.display_lines() as f32 * (cell + 3.0) + 8.0 * k };
-    // Names in the names' face, larger; the rest small.
-    let big = |c: Color| c == TIP_NAME || c == TIP_NOTE;
-    let size = |c: Color| if big(c) { 16.0 * k } else { 12.0 * k };
-    let face = |c: Color| if big(c) { Face::Subtitle } else { Face::Body };
-    // The style's colours (0x4ca9f0, 0x4cb18c): in the hostile frame names and labels are
-    // orange (fonts 0xae24a4, 0xae24c4), in the neutral one grey (0xae24b8, 0xae24d0).
-    let shown = |c: Color| match (t.style, c) {
-        (_, c) if c == INK => CREAM,
-        (TipStyle::Hostile, c) if c == TIP_NAME => TIP_NOTE,
-        (TipStyle::Hostile, c) if c == DIM => TIP_LABEL_HOSTILE,
-        (TipStyle::Neutral, c) if c == TIP_NAME => TIP_NAME_NEUTRAL,
-        (TipStyle::Neutral, c) if c == DIM => TIP_LABEL_NEUTRAL,
-        (_, c) => c,
-    };
-    let width = |s: &str, c: Color| with_face(face(c), || measure(s, size(c)).width);
-    let title_size = 16.0 * k;
-    let w = [with_face(Face::Title, || measure(&t.title, title_size).width) + 90.0 * k, grid_w + 24.0 * k, 250.0 * k]
-        .into_iter()
-        .chain(t.lines.iter().chain(&t.footer).map(|(s, c)| width(s, *c) + 24.0 * k))
-        .fold(0.0, f32::max)
-        .min(420.0 * k);
-    let lh = |c: Color| size(c) + 3.0 * k;
-    let lines_h: f32 = t.lines.iter().chain(&t.footer).map(|(_, c)| lh(*c)).sum();
-    let bar = 24.0 * k;
-    let h = bar + 8.0 * k + lines_h + grid_h + 8.0 * k;
+    let face = |ink: Ink| if ink.big() { Face::Subtitle } else { Face::Body };
+    let size = |ink: Ink| if ink.big() { 16.0 * k } else { 12.0 * k };
+    let lh = |ink: Ink| size(ink) + 3.0 * k;
+    // Every entry centred, a paragraph wrapped in the block's width (0x47e944, 0x47e46c).
+    let rows: Vec<(String, Ink)> = t
+        .text
+        .iter()
+        .flat_map(|(s, ink)| {
+            let wrapped = if s.trim().is_empty() { vec![String::new()] } else { with_face(face(*ink), || wrap(s, TIP_TEXT_W * k, size(*ink))) };
+            wrapped.into_iter().map(|r| (r, *ink))
+        })
+        .collect();
+    let text_h: f32 = rows.iter().map(|(_, ink)| lh(*ink)).sum();
+    let lines = game.content.formation.display_lines();
+    let grid_h = tip_grid_h(lines);
+    let cells = t.army || t.garrison.is_some();
+    let caption_h = t.garrison.as_ref().map(|_| lh(Ink::Label) / k);
+    let w = TIP_W * k;
+    let h = tip_height(t.army, text_h / k, if cells { grid_h } else { 0.0 }, caption_h) * k;
     // Centred on the mouse and kept inside the map's view, above the bottom bar (interface.md
     // §7.4; 0x4ca8ac).
     let (mx, my) = crate::ui::widgets::pointer();
     let x = (mx - w / 2.0).min(screen_width() - w).max(0.0);
     let y = (my - h / 2.0).min(screen_height() - bar_h() - h).max(0.0);
     tooltip_panel_styled(Rect::new(x, y, w, h), t.style);
-    // The title strip with the ornaments at its ends.
-    draw_rectangle(x + 2.0, y + 2.0, w - 4.0, bar - 2.0, Color::new(0.0, 0.0, 0.0, 0.25));
-    if let Some(orn) = super::chrome::win_fx("Corner-Left", super::chrome::Fx::KeyBlack) {
-        let oh = bar * 0.8;
-        let ow = orn.width() * oh / orn.height();
-        // The hostile frame has its own pair of end pieces (0xae255c/60), tinted as in
-        // Razdor's red windows; the neutral one keeps the normal pair (0xae2554/58).
-        let tint = if t.style == TipStyle::Hostile { Color::new(1.0, 0.45, 0.1, 0.9) } else { Color::new(0.55, 0.8, 0.7, 0.8) };
-        super::chrome::tex(&orn, Rect::new(x + 4.0 * k, y + (bar - oh) / 2.0, ow, oh), tint);
-        if let Some(r) = super::chrome::win_fx("Corner-Right", super::chrome::Fx::KeyBlack) {
-            super::chrome::tex(&r, Rect::new(x + w - ow - 4.0 * k, y + (bar - oh) / 2.0, ow, oh), tint);
+    // The title in the yellow Benguiat over its shadow, centred in the 27 px strip.
+    let title_size = 16.0 * k;
+    with_face(Face::Title, || {
+        let title = ellipsize(&t.title, TIP_TITLE_W * k, title_size);
+        shadow_centered(&title, x + w / 2.0, y + 13.5 * k + title_size * 0.36, title_size, TIP_TITLE);
+    });
+    let grid_x = x + (w - (game.content.formation.display_cols() as f32 * TIP_PITCH - (TIP_PITCH - TIP_CELL)) * k) / 2.0;
+    let mut ly = y + TIP_TOP * k;
+    if t.army {
+        ly += formation_grid(game, assets, &t.troops, t.team, grid_x, ly) + 8.0 * k;
+    }
+    let bottom = y + h - 2.0 * k;
+    for (s, ink) in &rows {
+        if ly + lh(*ink) > bottom {
+            break;
         }
+        if !s.is_empty() {
+            with_face(face(*ink), || shadow_centered(s, x + w / 2.0, ly + size(*ink), size(*ink), tip_color(t.style, *ink)));
+        }
+        ly += lh(*ink);
     }
-    draw_line(x + 2.0, y + bar, x + w - 2.0, y + bar, 1.0, super::chrome::SILVER);
-    with_face(Face::Title, || shadow_centered(&t.title, x + w / 2.0, y + bar * 0.5 + title_size * 0.36, title_size, CREAM));
-    let mut ly = y + bar + 6.0 * k;
-    let line = |s: &str, c: Color, ly: &mut f32| {
-        with_face(face(c), || shadow_centered(s, x + w / 2.0, *ly + size(c), size(c), shown(c)));
-        *ly += lh(c);
-    };
-    for (s, c) in &t.lines {
-        line(s, *c, &mut ly);
-    }
-    if !t.troops.is_empty() {
-        ly += formation_grid(game, assets, &t.troops, t.team, x + (w - grid_w) / 2.0, ly + 4.0 * k, cell) + 8.0 * k;
-    }
-    for (s, c) in &t.footer {
-        line(s, *c, &mut ly);
+    if let (Some(caption), Some(caption_h)) = (&t.garrison, caption_h) {
+        // The cells 10 px off the bottom, the caption 8 px over them, and a line 5 px over
+        // the caption when there is text above (0x4cb18c).
+        let grid_y = y + h - (10.0 + grid_h) * k;
+        let caption_y = grid_y - (8.0 + caption_h) * k;
+        if !rows.is_empty() {
+            draw_line(x + 2.0 * k, caption_y - 5.0 * k, x + w - 2.0 * k, caption_y - 5.0 * k, 1.0, super::chrome::SILVER);
+        }
+        let ink = Ink::Label;
+        with_face(face(ink), || shadow_centered(caption, x + w / 2.0, caption_y + size(ink), size(ink), tip_color(t.style, ink)));
+        formation_grid(game, assets, &t.troops, t.team, grid_x, grid_y);
     }
 }
 
@@ -1829,8 +2012,8 @@ fn hero_tooltip(game: &Game) -> Tooltip {
             t
         })
         .collect();
-    let footer = vec![(info("Commander", n_("Leader")), DIM), (game.hero_name(), TIP_NAME)];
-    Tooltip { title: info("HeroArmy", n_("Hero's army")), lines: Vec::new(), troops, team: Team::Player, footer, style: TipStyle::Normal }
+    let text = vec![(info("Commander", n_("Leader")), Ink::Label), (game.hero_name(), Ink::Name)];
+    Tooltip { title: info("HeroArmy", n_("Hero's army")), text, troops, garrison: None, army: true, team: Team::Player, style: TipStyle::Normal }
 }
 
 /// The army a building's tooltip shows instead of the building's (0x4cc2a5–0x4cc31a): for a
@@ -2884,6 +3067,62 @@ mod tests {
         assert_eq!(location_tip_style(&castle), TipStyle::Hostile);
         castle.owner = razdor::rules::world::Owner::Player;
         assert_eq!(location_tip_style(&castle), TipStyle::Normal);
+        // Guarded ruins (a player's report: «Врата Вуальшпиля»): the text block ends with an
+        // empty line, the caption in the label font and «Неизвестная армия» in the name font;
+        // no cells (0x4cb18c). A castle's garrison gets its caption over its cells instead.
+        let ruins = g.world.locations.iter().find(|l| l.name == "Развалины").unwrap();
+        let t = location_tooltip(&g, ruins);
+        assert!(t.troops.is_empty() && t.garrison.is_none() && !t.army);
+        let inks: Vec<Ink> = t.text.iter().map(|(_, i)| *i).collect();
+        assert_eq!(inks[inks.len() - 3..], [Ink::Label, Ink::Label, Ink::Name]);
+        assert_eq!(t.text[t.text.len() - 3].0, "");
+        if !ruins.description.trim().is_empty() {
+            assert!(t.text.contains(&(ruins.description.clone(), Ink::Label)), "a building's description in the label font");
+        }
+        let castle = g.world.locations.iter().find(|l| l.name == "Замок Бонитур").unwrap();
+        let t = location_tooltip(&g, castle);
+        assert!(!t.troops.is_empty() && t.garrison.is_some());
+    }
+
+    /// The tooltips' fonts by style (0x4ca9f0, 0x4cb18c; loaded at 0x4e5c9c and 0x4dbc26):
+    /// in the red one, as the player's screenshot of the original shows, labels and the
+    /// description in the orange SanSerif, names in the orange Benguiat; the title yellow in
+    /// all; an army's description orange in all.
+    #[test]
+    fn the_tooltip_fonts_follow_the_style() {
+        let rgb = |c: Color| [c.r, c.g, c.b].map(|v| (v * 255.0).round() as u8);
+        assert_eq!(rgb(TIP_TITLE), [255, 255, 155]);
+        assert_eq!(rgb(tip_color(TipStyle::Hostile, Ink::Label)), [235, 165, 75]);
+        assert_eq!(rgb(tip_color(TipStyle::Hostile, Ink::Name)), [255, 175, 85]);
+        assert_eq!(rgb(tip_color(TipStyle::Normal, Ink::Label)), [155, 255, 155]);
+        assert_eq!(rgb(tip_color(TipStyle::Normal, Ink::Name)), [155, 255, 155]);
+        assert_eq!(rgb(tip_color(TipStyle::Normal, Ink::Orange)), [235, 165, 75]);
+        assert_eq!(rgb(tip_color(TipStyle::Neutral, Ink::Label)), [155, 155, 155]);
+        assert_eq!(rgb(tip_color(TipStyle::Neutral, Ink::Name)), [175, 175, 175]);
+        assert_eq!(rgb(tip_color(TipStyle::Normal, Ink::Note)), [255, 175, 85]);
+    }
+
+    /// An army's leader is named only when it has more than one unit (0x4ca9f0).
+    #[test]
+    fn a_lone_unit_s_tooltip_names_no_leader() {
+        assert!(!tip_shows_leader("Бран", 1));
+        assert!(tip_shows_leader("Бран", 2));
+        assert!(!tip_shows_leader("", 5));
+    }
+
+    /// The tooltips' heights (0x4ca9f0, 0x4cb18c) with the 2×6 cells (104 px high).
+    #[test]
+    fn the_tooltip_heights_are_the_original_s() {
+        let grid = tip_grid_h(2);
+        assert_eq!(grid, 104.0);
+        assert_eq!(tip_height(true, 0.0, grid, None), 151.0, "an army without text: 0x97");
+        assert_eq!(tip_height(true, 30.0, grid, None), 30.0 + 159.0, "with text: + 0x9f");
+        assert_eq!(tip_height(true, 400.0, grid, None), 353.0 + 159.0, "its text at most 0x161");
+        assert_eq!(tip_height(false, 0.0, 0.0, None), 29.0, "the title strip alone: 0x1d");
+        assert_eq!(tip_height(false, 40.0, 0.0, None), 40.0 + 47.0, "+ 0x2f");
+        assert_eq!(tip_height(false, 0.0, grid, Some(15.0)), 15.0 + 159.0, "cells only: caption + 0x9f");
+        assert_eq!(tip_height(false, 40.0, grid, Some(15.0)), 40.0 + 47.0 + 15.0 + 121.0, "+ caption + 0x79");
+        assert_eq!(tip_height(false, 600.0, grid, Some(15.0)), 512.0, "at most 0x200");
     }
 
     /// A castle taken shows the units the player left in it, not the garrison beaten for it.

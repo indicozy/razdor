@@ -110,6 +110,10 @@ impl Rng {
     /// original does. Only the stream is kept here; the map draws the offsets by [`plant_offset`].
     /// Returns whether any plant re-seeded it.
     pub fn jitter_plants(&mut self, w: i32, cells: &[u16]) -> bool {
+        self.jitter(w, cells, true)
+    }
+
+    fn jitter(&mut self, w: i32, cells: &[u16], traced: bool) -> bool {
         let stride = (w + CELL_PAD_X).max(1);
         let mut any = false;
         for (l, &word) in cells.iter().enumerate() {
@@ -120,9 +124,13 @@ impl Rng {
             self.0 = plant_hash(x, y, word);
             // x offset: 4 + Random(16) on odd rows, 28 − Random(16) on even ones; then y
             // offset Random(11), sway phase Random(1000).
-            self.random(16);
-            self.random(11);
-            self.random(1000);
+            for n in [16, 11, 1000] {
+                if traced {
+                    self.random(n);
+                } else {
+                    self.untraced(n);
+                }
+            }
             any = true;
         }
         any
@@ -139,13 +147,28 @@ impl Rng {
     /// [`Rng::save_load`], and the world music's draw: its first change comes that many ms
     /// after 90 s.
     pub fn save_load_with_music(w: i32, plants: &[u16], armies: usize) -> (Rng, i32) {
+        let (r, _, music) = Rng::save_load_draws(w, plants, armies);
+        (r, music)
+    }
+
+    /// [`Rng::save_load_with_music`], and the armies' idle offsets it drew, in file order.
+    pub fn save_load_draws(w: i32, plants: &[u16], armies: usize) -> (Rng, Vec<i32>, i32) {
         let mut r = Rng::default();
         r.jitter_plants(w, plants);
-        for _ in 0..armies {
-            r.random(ARMY_IDLE_DRAW);
-        }
+        let offsets = (0..armies).map(|_| r.random(ARMY_IDLE_DRAW)).collect();
         let music = r.random(WORLD_MUSIC_DRAW);
-        (r, music)
+        (r, offsets, music)
+    }
+
+    /// The armies' idle offsets of a map load (engine.md §3.2, 0x4b4b43): after the plant
+    /// jitter, `Random(3000)` for every army of the map file in file order; the map load
+    /// then sets the state to 1, so these draws only time the sprites. The state before the
+    /// jitter is the program's (0 at its start); a map without plants keeps it, which Razdor
+    /// takes as 0 *(guess for a second map of a session)*.
+    pub fn map_load_idle_offsets(w: i32, plants: &[u16], armies: usize) -> Vec<i32> {
+        let mut r = Rng::default();
+        r.jitter(w, plants, false);
+        (0..armies).map(|_| r.untraced(ARMY_IDLE_DRAW)).collect()
     }
 }
 

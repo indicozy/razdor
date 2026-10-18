@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use super::battle::{patch_globals, set_patch_globals, Battle, Outcome, PatchGlobals, Team};
-use super::content::{Content, ItemId, UnitId};
+use super::content::{ArtefactType, Content, ItemId, UnitId};
 use super::formation::{Formation, Row, Slot};
 use super::items::{self, EquipError};
 use super::units::Unit;
@@ -79,6 +79,99 @@ pub fn unit(content: &Content, pick: &Pick, slot: Slot) -> Unit {
 pub fn wearable(content: &Content, pick: &Pick) -> Vec<ItemId> {
     let u = unit(content, pick, Slot::new(Row::Front, 0));
     content.items.iter().map(|d| ItemId(d.id)).filter(|&i| items::slot_for(content, &u, i).is_ok()).collect()
+}
+
+/// The kinds of items the custom battle's item list shows: all, or one kind (the three
+/// weapon kinds together).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Category {
+    #[default]
+    All,
+    Weapons,
+    Armour,
+    Helms,
+    Shields,
+    Rings,
+    Amulets,
+}
+
+impl Category {
+    pub const EVERY: [Category; 7] = [Category::All, Category::Weapons, Category::Armour, Category::Helms, Category::Shields, Category::Rings, Category::Amulets];
+
+    /// An item of `kind` is shown under this category.
+    pub fn holds(self, kind: ArtefactType) -> bool {
+        use ArtefactType as T;
+        match self {
+            Category::All => !matches!(kind, T::Potion | T::Item),
+            Category::Weapons => matches!(kind, T::BlowWeapon | T::ShotWeapon | T::Staff),
+            Category::Armour => kind == T::Armor,
+            Category::Helms => kind == T::Helm,
+            Category::Shields => kind == T::Shield,
+            Category::Rings => kind == T::Ring,
+            Category::Amulets => kind == T::Amulet,
+        }
+    }
+}
+
+/// The item list's order by price.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PriceOrder {
+    /// The content's order.
+    #[default]
+    Content,
+    Cheapest,
+    Dearest,
+}
+
+impl PriceOrder {
+    pub fn next(self) -> PriceOrder {
+        match self {
+            PriceOrder::Content => PriceOrder::Cheapest,
+            PriceOrder::Cheapest => PriceOrder::Dearest,
+            PriceOrder::Dearest => PriceOrder::Content,
+        }
+    }
+}
+
+/// An item's price as the list shows and sorts it (a personal item's negative mark is 0).
+pub fn price(content: &Content, item: ItemId) -> i32 {
+    content.try_item(item).map_or(0, |d| d.cost.max(0))
+}
+
+/// The custom battle's item list: the items `pick` may put on next (with no unit picked,
+/// every item that can be worn), of `category`, that `query` keeps (the inventory filter's
+/// match: name, type, stats, bonus or description, any case), in `order`, with the matches.
+pub fn item_list(content: &Content, pick: Option<&Pick>, category: Category, order: PriceOrder, query: &str, bonus: &dyn Fn(&super::content::Bonus) -> String) -> Vec<(ItemId, crate::search::Match)> {
+    let base = match pick {
+        Some(p) => wearable(content, p),
+        None => content.items.iter().map(|d| ItemId(d.id)).collect(),
+    };
+    let mut list: Vec<(ItemId, crate::search::Match)> = base
+        .into_iter()
+        .filter(|&i| category.holds(content.item(i).kind))
+        .filter_map(|i| items::filter_match(content, i, query, bonus).map(|m| (i, m)))
+        .collect();
+    match order {
+        PriceOrder::Content => {}
+        PriceOrder::Cheapest => list.sort_by_key(|&(i, _)| price(content, i)),
+        PriceOrder::Dearest => list.sort_by_key(|&(i, _)| std::cmp::Reverse(price(content, i))),
+    }
+    list
+}
+
+/// The unit types `query` keeps by name (any case, Ё as Е), in order, with the matches.
+pub fn unit_list(content: &Content, query: &str) -> Vec<(UnitId, crate::search::Match)> {
+    choices(content).into_iter().filter_map(|u| crate::search::matches(query, &content.unit(u).name, &[]).map(|m| (u, m))).collect()
+}
+
+/// A letter typed over a list: the next row after `from` (from the top when `None`) whose
+/// name starts with `letter` (any case, Ё as Е), going round to the top; `None` when no
+/// name does.
+pub fn jump<'a>(names: impl IntoIterator<Item = &'a str>, letter: char, from: Option<usize>) -> Option<usize> {
+    let letter = crate::search::fold_char(letter);
+    let hits: Vec<usize> = names.into_iter().enumerate().filter(|(_, n)| n.trim_start().chars().next().map(crate::search::fold_char) == Some(letter)).map(|(i, _)| i).collect();
+    let next = from.and_then(|f| hits.iter().find(|&&i| i > f));
+    next.or(hits.first()).copied()
 }
 
 impl Setup {
@@ -320,6 +413,47 @@ mod tests {
         assert_eq!(b.fighters[0].base[crate::rules::content::Stat::AttackBlow], 37, "the item's +7");
         s.take_off(Team::Player, 0, 0);
         assert!(s.army(Team::Player)[0].items.is_empty());
+    }
+
+    #[test]
+    fn the_item_list_filters_by_kind_name_and_sorts_by_price() {
+        let mut items = vec![item(200, ArtefactType::BlowWeapon), item(201, ArtefactType::Amulet), item(202, ArtefactType::Potion), item(203, ArtefactType::Ring), item(204, ArtefactType::ShotWeapon), item(205, ArtefactType::Amulet)];
+        let names = ["Меч", "Амулет силы", "Зелье", "Кольцо", "Лук", "Ёлочный амулет"];
+        let costs = [300, 50, 10, -500, 120, 900];
+        for ((d, n), c) in items.iter_mut().zip(names).zip(costs) {
+            d.name = n.to_string();
+            d.cost = c;
+        }
+        let c = content(vec![warrior(10, 30, 5)], items);
+        let none = |_: &crate::rules::content::Bonus| String::new();
+        let ids = |l: Vec<(ItemId, crate::search::Match)>| l.into_iter().map(|(i, _)| i.0).collect::<Vec<_>>();
+        assert_eq!(ids(item_list(&c, None, Category::All, PriceOrder::Content, "", &none)), vec![200, 201, 203, 204, 205], "no potion");
+        let pick = Pick::new(UnitId(10));
+        assert_eq!(ids(item_list(&c, Some(&pick), Category::All, PriceOrder::Content, "", &none)), vec![200, 201, 203, 205], "a warrior takes no bow");
+        assert_eq!(ids(item_list(&c, None, Category::Weapons, PriceOrder::Content, "", &none)), vec![200, 204]);
+        assert_eq!(ids(item_list(&c, None, Category::Amulets, PriceOrder::Cheapest, "", &none)), vec![201, 205]);
+        assert_eq!(ids(item_list(&c, None, Category::All, PriceOrder::Dearest, "", &none)), vec![205, 200, 204, 201, 203], "a personal item counts as 0");
+        assert_eq!(ids(item_list(&c, None, Category::All, PriceOrder::Content, "АМУЛЕТ", &none)), vec![201, 205], "any case, Ё as Е");
+        assert_eq!(ids(item_list(&c, None, Category::All, PriceOrder::Content, "елочный", &none)), vec![205]);
+        assert_eq!(ids(item_list(&c, None, Category::Rings, PriceOrder::Content, "меч", &none)), Vec::<u32>::new());
+    }
+
+    #[test]
+    fn a_letter_jumps_to_the_next_name_starting_with_it() {
+        let names = ["Арбалет", "булава", "Ёрш", "Броня", "енот", "Блин"];
+        assert_eq!(jump(names, 'б', None), Some(1));
+        assert_eq!(jump(names, 'Б', Some(1)), Some(3));
+        assert_eq!(jump(names, 'б', Some(3)), Some(5));
+        assert_eq!(jump(names, 'б', Some(5)), Some(1), "round to the top");
+        assert_eq!(jump(names, 'е', None), Some(2), "Ё as Е");
+        assert_eq!(jump(names, 'е', Some(2)), Some(4));
+        assert_eq!(jump(names, 'я', None), None);
+        let c = demo();
+        let all = unit_list(&c, "");
+        assert_eq!(all.len(), choices(&c).len());
+        let first = &c.unit(all[0].0).name;
+        let word: String = first.chars().take(3).collect::<String>().to_uppercase();
+        assert!(unit_list(&c, &word).iter().any(|(u, _)| *u == all[0].0), "the unit types filter by name in any case");
     }
 
     #[test]

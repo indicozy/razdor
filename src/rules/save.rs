@@ -61,8 +61,10 @@ pub const EXTENSION: &str = "rzsave";
 pub const DIR_ENV: &str = "RAZDOR_SAVE_DIR";
 /// Autosaves kept: 30, Razdor's (the original keeps 12), reused as the original reuses them.
 pub const AUTOSAVES_KEPT: usize = 30;
-/// The player's own saves (quick saves not counted): Razdor's limit (the original has 12
-/// slots). A save of a new name is refused when they are full; replacing one always works.
+/// The player's own unpinned saves (quick saves not counted): Razdor's limit (the original
+/// has 12 slots). A save of a new name is refused when they are full; replacing one always
+/// works. Pinned saves are not counted and have no limit: a Razdor deviation the owner asked
+/// for (a player's report, 2026-10-17); pinning never fails for lack of room.
 pub const MANUAL_SAVES_KEPT: usize = 50;
 /// Quick saves (F5), reused oldest first: Razdor's (the original has none).
 pub const QUICK_SAVES_KEPT: usize = 5;
@@ -128,7 +130,7 @@ pub enum SaveError {
     MapChanged(String),
     /// The saved game does not fit the map or the install's data any more.
     Mismatch(String),
-    /// [`MANUAL_SAVES_KEPT`] saves already: replace or delete one.
+    /// [`MANUAL_SAVES_KEPT`] unpinned saves already: replace, delete or pin one.
     Full,
     /// The save to replace is pinned.
     Pinned,
@@ -146,7 +148,7 @@ impl std::fmt::Display for SaveError {
             SaveError::MapChanged(m) => f.write_str(&trf!("the map \"{m}\" has changed since the game was saved", m)),
             SaveError::Mismatch(e) => f.write_str(&trf!("the save does not fit the map or the data: {e}", e)),
             SaveError::Pinned => f.write_str(tr("that save is pinned: unpin it first")),
-            SaveError::Full => f.write_str(&trf!("there are {n} saves already: save over one or delete one", n = MANUAL_SAVES_KEPT)),
+            SaveError::Full => f.write_str(&trf!("there are {n} unpinned saves already: save over one, delete one or pin one", n = MANUAL_SAVES_KEPT)),
         }
     }
 }
@@ -559,7 +561,8 @@ fn slug(name: &str) -> String {
 }
 
 /// Writes `game` into save folder `dir` as `name`. A manual save of the same name is
-/// replaced; a new one is refused when there are [`MANUAL_SAVES_KEPT`]; the quick save's
+/// replaced; a new one is refused when there are [`MANUAL_SAVES_KEPT`] unpinned ones (the
+/// pinned ones, however many, are not counted); the quick save's
 /// name goes to [`quick_save`]; an autosave goes where [`write_autosave`] puts one outside a
 /// battle. Returns the file written.
 pub fn write(dir: &Path, kind: SaveKind, name: &str, game: &Game) -> Result<PathBuf, SaveError> {
@@ -572,6 +575,7 @@ pub fn write(dir: &Path, kind: SaveKind, name: &str, game: &Game) -> Result<Path
             if is_pinned(&path) {
                 return Err(SaveError::Pinned);
             }
+            // Pinned saves are not counted (Razdor's deviation, see MANUAL_SAVES_KEPT).
             let own = list(dir, kind).iter().filter(|e| e.meta.name != QUICK_SAVE && !e.pinned).count();
             if !path.exists() && own >= MANUAL_SAVES_KEPT {
                 return Err(SaveError::Full);
@@ -807,7 +811,7 @@ pub fn restore(meta: &SaveMeta, mut game: Game, demo: Arc<Content>, install: Opt
         (None, _) => {}
         (Some(_), None) => return Err(SaveError::Mismatch(tr("events saved for the demo").into())),
     }
-    let (rng, music) = Rng::save_load_with_music(game.world.map.w, &plants, armies);
+    let (rng, idle_offsets, music) = Rng::save_load_draws(game.world.map.w, &plants, armies);
     game.rng = rng;
     game.music_wait = Some(90_000 + music as u32);
     game.event_rng = EventRng::from_clock();
@@ -823,6 +827,8 @@ pub fn restore(meta: &SaveMeta, mut game: Game, demo: Arc<Content>, install: Opt
     game.origin = Some(meta.scenario.clone());
     // The AI is set up again on every load (0x4a1ff0 from the save loader).
     game.ai_init(meta.version >= 4);
+    // The offsets the load drew (after the AI's set-up, which clears the records).
+    game.set_idle_offsets(&idle_offsets);
     // Saves from before the units' spell slots: the army-wide spells go into the slots.
     if meta.version < 7 {
         migrate_spells(&mut game);
@@ -1275,6 +1281,44 @@ pub(crate) mod tests {
         write(&dir, SaveKind::Manual, "save 7", &g).unwrap();
         quick_save(&dir, &g).unwrap();
         assert_eq!(list(&dir, SaveKind::Manual).len(), MANUAL_SAVES_KEPT + 2, "quick saves do not count");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pinned_own_saves_have_no_limit_and_free_their_slots() {
+        // The owner's deviation (a player's report, 2026-10-17): only unpinned own saves
+        // count toward MANUAL_SAVES_KEPT; pinned ones are unlimited and never rotated out.
+        let dir = temp_dir("pins-unlimited");
+        let g = Game::new(demo(), HeroClass::Knight);
+        let mut pinned = Vec::new();
+        for k in 0..MANUAL_SAVES_KEPT + 10 {
+            let path = write(&dir, SaveKind::Manual, &format!("kept {k}"), &g).unwrap();
+            set_pinned(&path, true).unwrap();
+            pinned.push(path);
+        }
+        // Past the limit in pins alone, a full set of unpinned saves still fits.
+        for k in 0..MANUAL_SAVES_KEPT {
+            write(&dir, SaveKind::Manual, &format!("free {k}"), &g).unwrap();
+        }
+        assert!(matches!(write(&dir, SaveKind::Manual, "one more", &g), Err(SaveError::Full)), "unpinned saves keep their limit");
+        // Replacing an unpinned one still works; a quick save is not refused either.
+        write(&dir, SaveKind::Manual, "free 3", &g).unwrap();
+        quick_save(&dir, &g).unwrap();
+        // Pinning one more when the unpinned slots are full works and frees a slot.
+        let free0 = dir.join(MANUAL_DIR).join(format!("{}.{EXTENSION}", slug("free 0")));
+        set_pinned(&free0, true).unwrap();
+        let extra = write(&dir, SaveKind::Manual, "one more", &g).unwrap();
+        // Every save is listed, pinned ones first, and none was overwritten or removed.
+        let all = list(&dir, SaveKind::Manual);
+        assert_eq!(all.len(), 2 * MANUAL_SAVES_KEPT + 10 + 1 + 1);
+        let pins_listed = all.iter().take_while(|e| e.pinned).count();
+        assert_eq!(pins_listed, MANUAL_SAVES_KEPT + 11);
+        assert!(pinned.iter().all(|p| p.exists() && is_pinned(p)));
+        assert!(all.iter().any(|e| e.path == extra && !e.pinned));
+        // Unpinning one past the limit keeps every file; only new names are refused.
+        set_pinned(&pinned[0], false).unwrap();
+        assert!(pinned[0].exists());
+        assert!(matches!(write(&dir, SaveKind::Manual, "and another", &g), Err(SaveError::Full)));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

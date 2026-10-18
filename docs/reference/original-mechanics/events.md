@@ -59,7 +59,10 @@ The scan (0x4abfbc, §2) is started from these places. **code**
 **Order of candidates** (0x4abfbc). The scan is a loop; one pass is: **code**
 1. **Global events** (type 1) in file order; the first that passes is taken.
 2. If none: the **event point** under the hero, its listed events in list order, **whatever
-   their type** (global, local, quest or rumour).
+   their type** (global, local, quest or rumour). The point counts by its event count (byte
+   39) alone: its "active" byte (40, which only lights a lantern at load) is not tested, and
+   the loader marks every point on its cell (0x4b2504). Другой берег's event 221 sits on an
+   inactive point with no condition, so it fires and "completes" a quest never received.
 3. If neither: the **building** the hero stands in, its listed events in list order, but only
    when that building is not the one the hero was already in when his current move began
    (0x4ed434, written at the start of a move 0x4b84f4, at a map click 0x4cc42b and by the
@@ -289,6 +292,11 @@ campaign quest only after both. Razdor: the same (`rk2_the_peasant_offers_and_th
   an editor note that is never shown (378 shipped titles have one). **code**
 - **Resource row**: the event's gold and mana. Events with "no meeting" (148) set show no
   resource row (Community 0xc2831f); the values are still applied. **code**
+- **Units rows**: the units joined and the units departed each get a row: the language file's
+  `[Event] AddUnit` / `DelUnit` caption centred in green, under it the units' 46 × 46 icons
+  (the 92 × 92 bust halved) in 47 × 47 cells centred at W·(i+1)/(n+1), with no frame or
+  ring; a row adds 79 px (0x4a93bc, 0x4a9711). The departed row lists only the units really
+  taken. A unit picture at the side (82) is its 92 × 92 bust. **code**
 - Layout: 634 px wide, centred on 1024 × 682 (on the tutorial's own position in the
   tutorial); the height grows with the reward rows, with a scroll bar past a limit. **code**
 
@@ -608,7 +616,7 @@ world, carry-over), `src/rules/journal.rs`, `src/dt/dtm.rs` (record and flag scr
 | Flag action | `+X` appends X with a non-breaking space if not a substring yet; `-X` removes the first occurrence and the next character; counters only with `^`; `-X^` without X changes nothing; actions of ≤ 2 characters ignored | Same (§5), but `-X^` does not check that X exists and lowers an unrelated character (bug) | Matches; Razdor fixes the original's bug (`-X^`) |
 | Engine flags | `Sea` added when the hero goes to sea and removed when he lands, `EnterShipyard` removed when he goes to sea (`Game::sea_changed`) | `Sea` aboard a ship, `EnterShipyard` in the ship logic | `Sea` matches; `EnterShipyard` is only removed at sea: its setting is left out (Razdor does not track the ship's shipyard; no shipped event tests it) |
 | Quests in buildings | Listed in the main hall with the rumours and fired when taken; villages and shipyards fire them on entering | Listed in the main hall and taken by the player, except in villages and shipyards (§2, §10) | Matches |
-| Event points | Every listed event, whatever its type | Every listed event, whatever its type | Matches |
+| Event points | Every listed event, whatever its type, active point or not | Every listed event, whatever its type; the point's active byte is not tested (0x4abfbc) | Matches |
 | Rumour or quest list | The building's quests and rumours that pass the full check (`EventEngine::hall`); taking one opens it without a new check | Quests and rumours of the building that pass the full check | Matches |
 | Places shown by a taken quest | Flown to at its window's OK over the map, then the building window comes back (`App::fly_from_building`) | At the OK, over the world screen, then the building window again (§10, interface.md §9.8; live on РК1) | Matches |
 | Journal | The engine's journal: re-added on every finish, completion removes the last entry, a new engine on the next map; Razdor's history is a separate extra | Re-added on every finish; completion removes the last entry; emptied on the next map | Matches |
@@ -628,6 +636,8 @@ world, carry-over), `src/rules/journal.rs`, `src/dt/dtm.rs` (record and flag scr
 | Unit taken from an army | The whole record (level, XP, wounds, items, name, wage kind); an emptied army leaves the map | Takes the whole record; an emptied army leaves the map | Matches |
 | Unit removed, by type | From the last unit back; unnamed slot: unnamed unit of the type; named slot: that name, any type; nothing unless a slot finds one; never the hero; given to no army, its worn items go with it | Unnamed slot: unnamed unit of the type; named slot: that name, any type; can hit the hero | Matches, except the hero (unknown whether reachable: Razdor's guard kept) |
 | Removed unit given to an army | Slot without a name: appended, over the last of a full army; slot with a name: the leader, the others down | Appended (overwriting the last of a full army); under a named slot it becomes the leader | Matches |
+| Units rows of the window | The departed above the joined, each its green caption (`[Event] DelUnit` / `AddUnit`) centred over 46 × 46 icons centred at W·(i+1)/(n+1) − 23, 79 per row; a unit at the side is its 92 × 92 bust | 0x4a93bc / 0x4a9711: 47 × 47 cells (0x4c612c) with the type's 46 × 46 icon (+0x18), no frame; 0x2f + 8 + 16 + 8 per row; the side picture +0x14 (92 × 92) | Matches |
+| Items lost row, departed row's units | No "items lost" row; the departed row shows the event's listed types | `[Event] DelItem` row of the items taken (0x4a9180); the departed row shows only units actually taken (0x4a9711) | Gap (OPEN_QUESTIONS) |
 | "No meeting" and spells | Not learned; no resource row | Not learned; no resource row | Matches |
 | Lantern with radius 0 | Not lit | Not lit | Matches |
 | Move army to hero | Army 136 only, not activated, cheapest neighbour | Army 136 only, not activated, cheapest neighbour by terrain cost | Matches |

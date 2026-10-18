@@ -41,6 +41,13 @@ pub fn field(key: &str, query: &mut String, r: Rect, shortcuts: &[KeyCode], foun
 /// false: the screen draws its own content in `r` meanwhile (the market's column titles).
 /// The keys work the same either way.
 pub fn field_with(key: &str, query: &mut String, r: Rect, shortcuts: &[KeyCode], found: usize, of: usize, draw_idle: bool) -> Reply {
+    field_hinted(key, query, r, shortcuts, found, of, draw_idle, tr("Search: type a name (Ctrl+F)"))
+}
+
+/// [`field_with`] showing `hint` while empty (the custom battle's lists, where a typed
+/// letter jumps instead: the caller takes the typed characters first).
+#[allow(clippy::too_many_arguments)]
+pub fn field_hinted(key: &str, query: &mut String, r: Rect, shortcuts: &[KeyCode], found: usize, of: usize, draw_idle: bool, hint: &str) -> Reply {
     let mut reply = Reply::default();
     let ctrl = is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl);
     if !input_blocked() {
@@ -91,7 +98,7 @@ pub fn field_with(key: &str, query: &mut String, r: Rect, shortcuts: &[KeyCode],
     text(&count, r.right() - cw - 6.0 * k, ty, size, if found == 0 { chrome::RED_TEXT } else { DIM });
     let room = r.w - cw - 18.0 * k;
     if query.is_empty() && !active {
-        text_fit(tr("Search: type a name (Ctrl+F)"), r.x + 6.0 * k, ty, room, size, DIM);
+        text_fit(hint, r.x + 6.0 * k, ty, room, size, DIM);
     } else {
         let mut ed = focus_edit(key);
         let look = LineLook { size, color: INK, centred: false, shadow: false };

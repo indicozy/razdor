@@ -60,12 +60,22 @@ change the selected entry's type or the action button label.
 
 **Tabs by building type** (economy.md §7, `town::tabs`). The first tab is the village's tribute or
 the shipyard's ship window, else the main hall. A shipyard opens nothing while the hero is at sea.
+The main hall's picture is the original's for the kind (`hall_picture`, 0x4ba854); a kind without
+one (palace, smithy, dungeon entrance) leaves the window's own background there (0x4bb7c4), with
+no sky, grass or map sprite.
 An ill-disposed building refuses services (`ServiceError::NotHere`).
 
 **Hiring and healing** (economy.md §2). `hire_price` follows the unit's cost and wage kind;
 elementals are hired and paid in mana. Healing costs a share of the unit's cost over the difficulty
 factor F (`Game::difficulty`: 100 or 120) and takes no
 game time. Corpses stay in the army and can be raised where `resurrects_here`.
+
+**Hire tab's left panel** (interface.md §9.5, `building_view::hire_panel_on`). Pointing at a
+hire offer paints its unit card (`recruit_panel`, a fresh level-1 unit of the type) over the
+tab column, lights its portrait green and puts `[Army]` line 8 (line 10 with none left) on the
+strip; the card stays until the pointer enters the hero's grid with nothing selected or a
+tab's place. With a unit selected, the hero's grid shows the card of the unit under the pointer.
+Recruits have no tooltip.
 
 **Garrisons** (economy.md §2, ai.md §9.6). Only the player's castles and forts take one
 (`Location::takes_garrison`). The hero and named units are refused. Since f4f3a9f a dead unit is
@@ -82,11 +92,23 @@ the goods or the pack (`BuildingView::selling`): «Инвентарь» and «Т
 original's 0x479bbc), the description pane swaps sides with the list; the filter (Razdor's) takes
 the column titles' line only while it is used (`item_filter::field_with`).
 
+**List look** (economy.md §2, "How the market and sanctuary lists are drawn"). Both lists
+use the original's column widths scaled to the list (`list_columns`): pictures, names left,
+prices centred in their column, each title centred over its column. The market's
+(`price_list_in_face`) takes (24, 24, 24) off the marble under the names and prices; its icon
+column is Win-paper less the same (`chrome::paper_minus`); a pick adds (64, 64, 64). The
+sanctuary's (`spell_list`) is one Win-paper panel less (148, 132, 148), darker below the last
+spell, the pictures straight on it; a pick adds (24, 32, 24).
+A click on a column title sorts either list (`ListSort` in `BuildingView::sort`, Razdor's
+addition, main only): «Название» A→Я, Я→A, own order; «Цена» dearest first, cheapest first,
+own order; the pick follows its item (`same_pick`). A new window or tab starts unsorted. On
+the market the titles' line still starts the filter when clicked beside the titles.
+
 **Sanctuary UI** (`sanctuary`, `spell_list`, 0x4ba854): the first spell starts selected.
-The list uses brown parchment with a separate light icon column and translucent selection.
-Known spells have blue names and prices; unavailable purchases are orange, affordable ones
-yellow. The compact card wraps the name without shrinking it; after learning, the local
-blue notice replaces the purchase action, with no extra success message outside the window.
+Known spells have blue names and prices, the others yellow whatever the gold (the original
+has no orange here). The compact card wraps the name without shrinking it; after learning,
+the local blue notice replaces the purchase action, with no extra success message outside
+the window.
 
 **Villages** (economy.md §3). Entering a village takes it (no attitude test) and collects the
 waiting gold and mana, unless it makes an offer: then the tribute waits for the answer. A village

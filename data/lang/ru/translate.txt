@@ -57,7 +57,7 @@ Untranslated texts stay in Russian in the written maps. = Непереведён
 Started: model {m}, {n} characters per batch = Начато: модель {m}, по {n} символов за запрос
 Sending {items}: {first}... = Отправлено {items}: {first}...
 Taken {taken} of {of} in {s} s = Принято {taken} из {of} за {s} с
-Failed: {why} = Ошибка: {why}
+Failed: {why} (request {n} in the Request log) = Ошибка: {why} (запрос №{n} в «Журнале запросов»)
 Stopping after this answer... = Остановка после этого ответа...
 Stopped. = Остановлено.
 Stopped: {why} = Остановлено: {why}
@@ -69,7 +69,23 @@ Written: {f} = Записано: {f}
 Not written: {why} = Не записано: {why}
 
 # Debugging
-Refused «{text}…»: {why} = Не принят «{text}…»: {why}
+Refused «{text}»: {why} = Не принят «{text}»: {why}
+translation «{answer}»; request {n} in the Request log = перевод «{answer}»; запрос №{n} в «Журнале запросов»
+the raw answer: request {n} in the Request log = ответ модели целиком: запрос №{n} в «Журнале запросов»
+
+# Why an answer was refused (src/translate/text.rs, job.rs, llm.rs)
+the answer is empty = ответ пустой
+placeholder {ph}: 1 in the original, {got} in the translation = заполнитель {ph}: 1 в оригинале, {got} в переводе
+Cyrillic letters left in the translation = в переводе остались русские буквы
+line breaks <br>: {src} in the original, {got} in the translation = переносы <br>: {src} в оригинале, {got} в переводе
+lines: {src} in the original, {got} in the translation = строк: {src} в оригинале, {got} в переводе
+markup mark `{mark}`: {src} in the original, {got} in the translation = знак разметки `{mark}`: {src} в оригинале, {got} в переводе
+character «{c}» (U+{code}) the game cannot show = знак «{c}» (U+{code}) игра показать не может
+no text under key "{key}": the answer holds no texts = нет текста под ключом «{key}»: в ответе нет ни одного текста
+no text under key "{key}"; the answer has keys {keys} = нет текста под ключом «{key}»; в ответе есть ключи: {keys}
+no JSON object in the answer = в ответе нет объекта JSON
+the answer is not a JSON object = ответ — не объект JSON
+the answer is not valid JSON: {e} = ответ — испорченный JSON: {e}
 Show the request = Показать запрос
 Request log = Журнал запросов
 The model, style or context changed after these texts were translated: they stay as they were until «Translate again». = Модель, стиль или контекст изменились после перевода: готовые тексты останутся прежними до «Перевести заново».

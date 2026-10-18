@@ -732,7 +732,13 @@ impl Game {
         g.spells = start.spells;
         g.archetype = archetype_of(hero);
         g.script = Some(Box::new(EventEngine::new(scenario)));
+        // The armies' idle offsets of the map load (0x4b4b43), drawn after the plant jitter
+        // from a generator the load then resets to 1 (engine.md §3.2).
+        let (w, h) = (scenario.header.width as i32, scenario.header.height as i32);
+        let plants = super::rng::plant_layer(w, h, scenario.objects.iter().map(|o| (o.x as i32, o.y as i32, o.class, o.sprite)));
+        let idle_offsets = Rng::map_load_idle_offsets(w, &plants, scenario.armies.len());
         g.ai_init(false);
+        g.set_idle_offsets(&idle_offsets);
         // The AI's set-up adds the player's castles' and forts' income to his stored income
         // too (0x4a1ff0). The original seems to add it again on top of a saved value after a
         // load (economy.md, Unknowns); Razdor adds it at the map's start only.
@@ -1278,6 +1284,29 @@ impl Game {
             return a.pos;
         }
         a.walk.at(self.since_step / STEP_SECONDS).unwrap_or(a.pos)
+    }
+
+    /// The hero's figure is hidden in a building ([`World::hides_figure`], 0x497abc): while
+    /// his last step plays it is drawn on its way from the cell he left, else he stands.
+    pub fn hero_hidden(&self) -> bool {
+        let to = self.tile();
+        let from = match self.hero_glide {
+            Some((a, b)) if b == self.pos && self.since_step < STEP_SECONDS => self.world.map.tile_at(a),
+            _ => to,
+        };
+        self.world.hides_figure(from, to)
+    }
+
+    /// Army `a`'s figure is hidden in a building ([`World::hides_figure`], 0x497abc): the
+    /// step of its window being drawn ([`Game::army_display_pos`]), else it stands.
+    pub fn army_hidden(&self, a: &Army) -> bool {
+        let map = &self.world.map;
+        let at = a.tile(map);
+        let (from, to) = match a.walk.step_at(self.since_step / STEP_SECONDS) {
+            Some((p, q, t)) if a.walk.points.last() == Some(&a.pos) && t < 1.0 => (map.tile_at(p), map.tile_at(q)),
+            _ => (at, at),
+        };
+        self.world.hides_figure(from, to)
     }
 
     /// The walk frame of army `a`'s figure (engine.md §7: the original's AI walk frames run
@@ -3616,6 +3645,39 @@ mod tests {
         assert!(g.set_destination((9, 2)));
         let events = walk_until_stopped(&mut g);
         assert!(events.contains(&Event::Arrived(0)), "{events:?}");
+    }
+
+    #[test]
+    fn figures_standing_in_a_building_are_hidden() {
+        // 0x497abc: the hero gliding into a building is seen, standing in it he is not; an
+        // army placed in a building at load (0x4b4f38) is not drawn, one outside is.
+        let mut s = strip();
+        let mut v = building(BuildingType::Village, 10, 3, (2, 2)); // cells 9..=10 × 2..=3
+        v.relations = [1, 0, 0, 0];
+        let tent = building(BuildingType::Tavern, 18, 5, (1, 1));
+        s.buildings = vec![v, tent];
+        s.armies = vec![army(1, 18, 5, 1, &[troop(4, 0, 1)]), army(2, 22, 0, 1, &[troop(4, 0, 1)])];
+        let mut g = start(&s);
+        g.fog = crate::rules::fog::Fog::disabled(g.world.map.w, g.world.map.h);
+        let (inside, outside) = (&g.world.armies[0], &g.world.armies[1]);
+        assert!(g.army_hidden(inside) && !g.army_hidden(outside));
+        assert!(!g.hero_hidden());
+        assert!(g.set_destination((9, 2)));
+        walk_until_stopped(&mut g);
+        assert_eq!(g.tile(), (9, 2));
+        g.since_step = 0.0;
+        assert!(!g.hero_hidden(), "his step in from (8, 2) is still playing");
+        g.since_step = STEP_SECONDS;
+        assert!(g.hero_hidden(), "he stands in the village");
+        // On to the next cell of the village: hidden on the way too; out of it: seen.
+        assert!(g.set_destination((10, 2)));
+        walk_until_stopped(&mut g);
+        g.since_step = 0.0;
+        assert!(g.hero_hidden());
+        assert!(g.set_destination((12, 2)));
+        walk_until_stopped(&mut g);
+        g.since_step = 0.0;
+        assert!(!g.hero_hidden());
     }
 
     #[test]

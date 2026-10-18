@@ -7,7 +7,7 @@ const DIVIDER: f32 = 28.7;
 #[derive(Clone, Copy)]
 pub struct Visual {
     pub quest_brightness: f32, pub quest_gamma: f32, pub quest_opacity: f32, pub quest_cutoff: f32,
-    pub brown_brightness: f32, pub brown_gamma: f32, pub brown_ornament: f32,
+    pub brown_brightness: f32, pub brown_gamma: f32,
     pub white_brightness: f32, pub white_gamma: f32, pub white_ornament: f32,
     pub paper_edge_width: f32, pub paper_edge_opacity: f32, pub quest_text_saturation: f32,
     pub bar_ornament_brightness: f32, pub bar_ornament_gamma: f32, pub bar_ornament_opacity: f32,
@@ -16,7 +16,7 @@ pub struct Visual {
 pub fn visual() -> Visual {
     Visual {
         quest_brightness: 1.070, quest_gamma: 1.167, quest_opacity: 1.0, quest_cutoff: 0.0,
-        brown_brightness: 1.057, brown_gamma: 0.805, brown_ornament: 1.0,
+        brown_brightness: 1.057, brown_gamma: 0.805,
         white_brightness: 1.007, white_gamma: 0.914, white_ornament: 0.576,
         paper_edge_width: 3.724, paper_edge_opacity: 0.400, quest_text_saturation: 0.874,
         bar_ornament_brightness: 2.000, bar_ornament_gamma: 0.904,
