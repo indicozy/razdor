@@ -2229,17 +2229,17 @@ impl Battle {
         let raw = self.physical_damage(id, target, kind);
         out.amount = raw.min(self.fighters[target].hp);
         self.wound(target, out.amount);
-        if raw > 1 && self.fighters[id].has(Bonus::Poison) {
+        if raw > 1 && self.fighters[id].has(Bonus::Poison) && self.poisonable(target) {
             self.fighters[target].regen = POISON_REGEN;
         }
         self.berserk_target(target);
         // CtrPoison: each blow on it costs the striker 20 regeneration (stacks).
-        if self.fighters[target].has(Bonus::CtrPoison) {
+        if self.fighters[target].has(Bonus::CtrPoison) && self.poisonable(id) {
             self.fighters[id].regen -= CTR_POISON_STEP;
             self.refresh(id);
         }
         self.suicide(id);
-        if raw > 1 && self.fighters[id].has(Bonus::PoisonS) {
+        if raw > 1 && self.fighters[id].has(Bonus::PoisonS) && self.poisonable(target) {
             self.fighters[target].regen = STRONG_POISON_REGEN;
         }
         self.splash.actor_col = self.fighters[id].slot.col as i32;
@@ -2299,12 +2299,12 @@ impl Battle {
         let raw = self.physical_damage(id, target, ActionKind::Shot);
         out.amount = raw.min(self.fighters[target].hp);
         self.wound(target, out.amount);
-        if raw > 1 && self.fighters[id].has(Bonus::Poison) {
+        if raw > 1 && self.fighters[id].has(Bonus::Poison) && self.poisonable(target) {
             self.fighters[target].regen = POISON_REGEN;
         }
         self.berserk_target(target);
         self.suicide(id);
-        if raw != 1 && self.fighters[id].has(Bonus::PoisonS) {
+        if raw != 1 && self.fighters[id].has(Bonus::PoisonS) && self.poisonable(target) {
             self.fighters[target].regen = STRONG_POISON_REGEN;
         }
         self.splash_record(id, target, SPLASH_SHOT);
@@ -2369,7 +2369,7 @@ impl Battle {
             self.fighters[target].hp -= dry;
             out.amount += dry;
         }
-        let poisoned = self.poison_power(id, target) > MAGE_POISON_POWER;
+        let poisoned = self.poison_power(id, target) > MAGE_POISON_POWER && self.poisonable(target);
         if poisoned && self.fighters[id].has(Bonus::Poison) {
             self.fighters[target].regen = POISON_REGEN;
         }
@@ -2499,9 +2499,10 @@ impl Battle {
         let mark = (self.fighters[target].team.index(), self.record_index(target));
         let finish = crate::trf!("{name} finishes {tname}", name = self.fighters[id].name, tname = self.fighters[target].name);
         let god = self.god;
+        let poisonable = self.poisonable(target);
         let t = &mut self.fighters[target];
         if d > 1 {
-            if a.has(&Bonus::PoisonArmorIgnore) {
+            if a.has(&Bonus::PoisonArmorIgnore) && poisonable {
                 t.regen = t.regen.min(PIERCING_POISON_REGEN);
             }
             if a.has(&Bonus::Bleed) && (!shot || t.alive()) {
@@ -2692,7 +2693,16 @@ impl Battle {
     /// The AI's poison bonus: a vanilla `Poison` attacker (not `PoisonS`) whose hit of more
     /// than 1 would poison a target that is not poisoned yet.
     fn poisons(&self, id: usize, t: usize, dmg: i64) -> bool {
-        self.fighters[id].has(Bonus::Poison) && self.fighters[t].regen >= 0 && dmg > 1
+        self.fighters[id].has(Bonus::Poison) && self.fighters[t].regen >= 0 && dmg > 1 && self.poisonable(t)
+    }
+
+    /// Poison takes hold on unit `t`: not on the Undead. Razdor's deviation (the owner's
+    /// decision, 2026-10-18): the original poisons every target whatever its nature (vanilla
+    /// Poison 48b299–48b2bd and 48b398, PoisonS c2639c, PoisonArmorIgnore c2a27c, CtrPoison
+    /// c25c43, the mages' poison c259da), so its Undead lose 20% a turn like the living. Here
+    /// none of them poisons an Undead unit, and the AI no longer counts a poison on one.
+    fn poisonable(&self, t: usize) -> bool {
+        self.fighters[t].stats.nature != Nature::Undead
     }
 
     /// Hits `u` needs to kill the enemy in the front row of `col` (4863e8): a blow if it has

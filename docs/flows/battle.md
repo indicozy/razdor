@@ -113,6 +113,8 @@ act_with(target, kind) / move_active(to) / pass() / own_cell() / skip()
   for a heal that does something, and `friendly_case` gives no second blessing to a Splash
   neighbour. Every battle AI (the original's, the hero's auto-battle, «Максимум») plans from
   `all_options`, so they follow the same rule. `dt-original` keeps the original's re-blessing.
+- No poison takes hold on an Undead unit (`Battle::poisonable`, a deviation on main: the
+  original poisons them).
 - `on_hit` applies Community side effects (poison, bleed, stun, vampirism …); `kill_check`
   removes the dead (`died`) and runs on-kill bonuses; `collapse` moves rows forward when a
   side's front empties after its unit's last action.
