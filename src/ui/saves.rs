@@ -176,6 +176,22 @@ fn row_of(e: &SaveEntry) -> Row {
     Row { name, scenario: m.title.clone(), time: razdor::trf!("Time: {date}", date = saved_label(m.saved_at)) }
 }
 
+/// The save lists' text colours (0x4b61bc, 0x4b6338): the save's name in ae24a0 (255, 255,
+/// 155), the scenario's name in ae24f0 (230, 230, 130; loaded at 0x4dc01a) and the time in
+/// ae24c4 (235, 165, 75). No highlight font is given (0x47e46c's last argument 0), so the
+/// picked row keeps them, and the lists' highlight mode 4 (0x4d67ac) adds (0, 30, 90) over
+/// its lines, text included (0x47d71c): the yellows come out almost white, the time pale.
+const NAME_INK: [u8; 3] = [255, 255, 155];
+const SCENARIO_INK: [u8; 3] = [230, 230, 130];
+const TIME_INK: [u8; 3] = [235, 165, 75];
+const PICKED_ADDED: [u8; 3] = [0, 30, 90];
+
+/// A save row's text colour `c`, with the picked row's (0, 30, 90) added when `picked`.
+fn row_ink(c: [u8; 3], picked: bool) -> Color {
+    let add = if picked { PICKED_ADDED } else { [0; 3] };
+    Color::from_rgba(c[0].saturating_add(add[0]), c[1].saturating_add(add[1]), c[2].saturating_add(add[2]), 255)
+}
+
 /// "2023 год, 1 месяц, 31 день, 13:01": when a file was saved, in the original's words.
 fn saved_label(secs: u64) -> String {
     let t = real_time(secs);
@@ -290,13 +306,13 @@ impl Book {
             let lh = r.h;
             super::dt_font::with_face(super::dt_font::Face::Title, || {
                 let size = fit_size(&row.name, 250.0 * k, 16.0 * k);
-                super::chrome::shadow_centered(&ellipsize(&row.name, 250.0 * k, size), self.p(157.0, 0.0).x, r.y + lh * 0.5 + size * 0.36, size, super::chrome::CREAM);
+                super::chrome::shadow_centered(&ellipsize(&row.name, 250.0 * k, size), self.p(157.0, 0.0).x, r.y + lh * 0.5 + size * 0.36, size, row_ink(NAME_INK, selected == Some(i)));
             });
             let cx = self.p(437.0, 0.0).x;
             super::dt_font::with_face(super::dt_font::Face::Bold, || {
-                super::chrome::shadow_centered(&ellipsize(&row.scenario, 250.0 * k, 11.0 * k), cx, r.y + lh * 0.42, 11.0 * k, WHITE);
+                super::chrome::shadow_centered(&ellipsize(&row.scenario, 250.0 * k, 11.0 * k), cx, r.y + lh * 0.42, 11.0 * k, row_ink(SCENARIO_INK, selected == Some(i)));
             });
-            super::chrome::shadow_centered(&ellipsize(&row.time, 250.0 * k, 11.0 * k), cx, r.y + lh * 0.9, 11.0 * k, Color::new(0.85, 0.75, 0.45, 1.0));
+            super::chrome::shadow_centered(&ellipsize(&row.time, 250.0 * k, 11.0 * k), cx, r.y + lh * 0.9, 11.0 * k, row_ink(TIME_INK, selected == Some(i)));
             if hover && clicked() && delete.is_none() {
                 picked = Some(i);
             }
@@ -743,6 +759,16 @@ fn question_box(title: &str, text: &str, marked: bool) -> Option<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 0x4b6338, 0x47d71c: the picked save's lines keep their fonts with (0, 30, 90) added.
+    #[test]
+    fn the_picked_save_s_lines_are_their_fonts_with_the_highlight_added() {
+        let rgb = |c: Color| [(c.r * 255.0).round() as u8, (c.g * 255.0).round() as u8, (c.b * 255.0).round() as u8];
+        assert_eq!(rgb(row_ink(NAME_INK, false)), [255, 255, 155]);
+        assert_eq!(rgb(row_ink(NAME_INK, true)), [255, 255, 245], "the name almost white");
+        assert_eq!(rgb(row_ink(SCENARIO_INK, true)), [230, 255, 220]);
+        assert_eq!(rgb(row_ink(TIME_INK, true)), [235, 195, 165], "the time pale, not orange");
+    }
 
     #[test]
     fn a_loaded_map_games_row_width_holds_for_the_session() {
