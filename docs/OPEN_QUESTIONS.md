@@ -41,7 +41,7 @@ Parity fixes made on `main` that this branch does not carry yet, with the `main`
     (0x48e4e8); the hero and army windows' corner pieces (0x4d1814, 0x498c2c).
   - The army, building and battle windows' column line and strip lines (0x4cd330, 0x4bb7c4,
     0x4d1ce8), which need `silver_line`.
-    main's fix 0ccd2ca (the item pop-up and the building hints drawn after these lines) follows
+    main's fix 5e3235d (the item pop-up and the building hints drawn after these lines) follows
     with them. main's 1032 fix (the stat strip's first line keeping its place) does not apply here:
     this branch never shrinks that line.
   - The hall list's gold sides and lines (0x4bedec, 0x47e46c), the worn-item slots at 55 px,
