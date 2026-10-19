@@ -953,10 +953,11 @@ pub fn squad(
             draw_rectangle(sq.x,sq.y,sq.w,sq.h,Color::new(0.0,0.0,0.0,0.48));
             chrome::shadow_centered(tr("Not fighting"),sq.center().x,sq.bottom()-5.0*k,10.0*k,chrome::ORANGE_TEXT);
         }
-        // The original's signs from the top left (493a64): the promotion, then a drunk potion
-        // (the hero's helm, Razdor's, in the first place).
+        // The original's signs from the top left (493a64): the promotion, then a drunk potion.
+        // Razdor's deviation (the owner's decision): no helmet sign on the hero's card, which has
+        // its own coloured field; Razdor drew the helmet here, not the original.
         let upgrade = i > 0 && v.upgrade_tree(&c).iter().any(|&(_, _, ok)| ok);
-        chrome::card_signs(sq, true, &[(i == 0, "SI_Helm", chrome::GOLD), (upgrade, "Sign-Upgrade", GREEN), (!v.potions.is_empty(), "sign-potion", GREEN)]);
+        chrome::card_signs(sq, true, &[(upgrade, "Sign-Upgrade", GREEN), (!v.potions.is_empty(), "sign-potion", GREEN)]);
         super::spell_badges::draw(sq, &v.spells, v.drain, game.clock.total_minutes() as u64, &c);
         if let Some(fx) = CARD_FX.with(|f| f.get()).filter(|fx| fx.unit == i) {
             super::battle_view::draw_effect(&c, fx.effect, sq, (now_ms() - fx.t0_ms) as f32 / fx.ms as f32);
