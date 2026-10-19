@@ -9,6 +9,9 @@ use crate::dt::data::{ArtefactType, MagicSchool, Stat};
 
 use super::content::ArtefactDef;
 
+/// Usage keys that are Razdor's own (the staff's school), not the install's `[Skills]`.
+pub const OWN_USAGE_KEYS: [&str; 3] = ["OnlyForLifeMages", "OnlyForElementalMages", "OnlyForDeathMages"];
+
 /// The `[Skills]` key of the usage line, or none (0x499eb0): only for an item with a
 /// description. Each test replaces the one before: by type, `OnlyForWarriors` for a melee
 /// weapon (type 0) or a shield (4), `OnlyForBowmans` for a ranged weapon (1), `OnlyForMages`
@@ -340,7 +343,8 @@ mod tests {
                 k.to_string()
             };
             effect_text(a, &check);
-            if let Some(k) = usage_key(a) {
+            // Razdor's own staff lines are not in the install's [Skills] (see `usage_key`).
+            if let Some(k) = usage_key(a).filter(|k| !OWN_USAGE_KEYS.contains(k)) {
                 check(k);
             }
             assert_eq!(missing.get(), None, "{}", a.name);
