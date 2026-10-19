@@ -55,7 +55,7 @@ fn won(outcome: Outcome, team: Team) -> bool {
 }
 
 /// `team`'s worth left at the end as a share (0..1) of its worth at the start.
-fn worth_left(b: &Battle, team: Team) -> f64 {
+pub(super) fn worth_left(b: &Battle, team: Team) -> f64 {
     let worth = |alive: bool| -> f64 {
         b.fighters
             .iter()
@@ -184,7 +184,7 @@ fn custom_battles(c: &Content, label: &str, n: usize, most: usize, mut seed: u64
 }
 
 /// Battles of the demo's units.
-fn synthetic_battles(n: usize) -> Vec<(String, Battle)> {
+pub(super) fn synthetic_battles(n: usize) -> Vec<(String, Battle)> {
     custom_battles(&Content::builtin(), "demo", n, 6, 7)
 }
 
@@ -285,12 +285,12 @@ fn max_beats_the_original_on_real_armies_in_game_time() {
 }
 
 /// Named positions to play.
-type Battles = Vec<(String, Battle)>;
+pub(super) type Battles = Vec<(String, Battle)>;
 
 /// The install's battle sets (`RAZDOR_DT_DIR`; `None` without it): each map's first armies
 /// against the hero's army as the game sets up the battle, map armies of near strength
 /// against each other (each on each side), custom battles of the install's unit types.
-fn real_sets() -> Option<Vec<(&'static str, Battles)>> {
+pub(super) fn real_sets() -> Option<Vec<(&'static str, Battles)>> {
     use crate::dt::install::DtInstall;
     use crate::rules::content::HeroClass;
     use crate::rules::game::{Foe, Game};

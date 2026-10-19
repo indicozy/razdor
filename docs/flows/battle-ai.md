@@ -115,6 +115,35 @@ With «Максимум»: `max_plays_both_sides_of_the_watched_and_the_quick_ba
 (install and demo, the `Blunders` tally: the reserve asserted, the idle decisions with a damaging
 strike printed) in `src/rules/battle/max_ai/tests.rs`.
 
+**The benchmark** (`src/rules/battle/max_ai/bench.rs`, 2026-10-20): «Максимум» judged by numbers,
+so a later change (a tempo-aware score, a model of the player) is compared with the last
+release, and a fixed bug cannot come back silently. The battle set is fixed: the demo's 24
+battles, then every second of the install's battles (`real_sets`: each map's hero battles, map
+armies of near strength, custom battles; 88 battles in all with the install). Each battle is
+played to its end three ways, Max on the enemy's side and on the player's (each against the
+original's AI) and the original's AI on both sides (the baseline). Node budget only (4 actions
+ahead, 600 positions), so the numbers are the same on every machine. Per game: winner, turns,
+each side's worth left, Max's reserve steps and idle decisions (a pass, a step or a refused
+plan while a damaging strike was open, of which a kill), and the decisions.
+
+- `max_bench` (ignored; about 10 s with the install, release): prints the summary (Max's and
+  the original's wins, turn-limit endings, worth kept and taken, blunders per 1000 decisions)
+  and each battle whose record differs from the baseline. Run it with `--ignored --nocapture`:
+  `cargo test --release max_bench -- --ignored --nocapture --exact rules::battle::max_ai::bench::max_bench`.
+- `max_bench_does_not_regress` (in every `cargo test`; ~1 s without the install, ~6 s with it,
+  on the demo's 24 battles and every fourth install battle): fails when Max wins fewer games
+  than the baseline did, keeps more than 10‰ less worth on average, or a game has more reserve
+  steps or idle decisions than its baseline record. A battle the baseline lacks fails too.
+- The baseline is `src/rules/battle/max_ai/bench_baseline.json` (numbers only, one battle per
+  line). Update it only for an intended improvement, after reading `max_bench`'s diff:
+  `RAZDOR_MAX_BENCH_WRITE=1` with the same command rewrites the battles it ran (the others
+  stay). Never to make a failing check pass.
+- First baseline (2026-10-20, current main, with the install): Max wins 102 of 176 games (58%)
+  against the original's 88 (50%) of the same games; 6 turn-limit endings (the original's 0);
+  worth kept 380‰ (the original's 313‰), taken 677‰ (687‰); reserve steps 0 (0); idle with a
+  damaging strike 77 of 1926 decisions, 40‰ (the original's 6 of 1661, 3.6‰), of which a kill
+  open 19 (the original's 0): see `docs/OPEN_QUESTIONS.md`.
+
 ## 8. «Максимум» (Razdor extra, main only)
 
 The owner's request: a third battle AI strength, as strong as possible, for the computer's

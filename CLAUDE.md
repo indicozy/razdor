@@ -87,6 +87,7 @@ are in `README.md` (Russian).
 | A player report has its `PLAYTEST_NOTES.md` entry and its backlog entry's status is current | review |
 | A change that alters a flow updates its `docs/flows/` file | review |
 | A UI change: the UI regression check run, its diffs reviewed, the changed references accepted | review |
+| A change to «Максимум»: `max_bench` run, its numbers compared, the baseline updated only for an intended improvement | `max_bench_does_not_regress` + review |
 | Parity commits are cherry-picked to `dt-original` and pushed (or listed in `docs/OPEN_QUESTIONS.md`) | review |
 | Unresolved questions are in `docs/OPEN_QUESTIONS.md`; settled ones moved to its Settled list | review |
 | The task's worktrees, branches, processes and scratch files are cleaned up | review |

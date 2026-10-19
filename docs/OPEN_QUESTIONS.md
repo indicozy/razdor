@@ -8,6 +8,14 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **«Максимум» passes or steps with a kill open** (2026-10-20, from the first `max_bench`
+  baseline: 19 of Max's 1926 decisions, 88 battles three ways). Max's decision was a pass, a
+  step or a refused plan while a strike that kills a unit was open (77 idle decisions with any
+  damaging strike open, the original's AI 6 of 1661, never with a kill). Some may be right
+  (a tempo move, a heal first, a lost battle either way); the owner should read them. Check
+  the search's choice and its rollout scores there before changing the score. Recorded in
+  the baseline's `idle_kill` counts.
+
 - **Unit panel: Community bleed source, evasion, magic tint** (2026-10-19). The stat list
   (interface.md, the "Razdor now → original" row 80) follows the original's colour rule. Still open:
   - The bleed line shows the unit's own bleed in battle. The original reads the battle bleed
