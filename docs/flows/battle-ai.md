@@ -110,7 +110,10 @@ run the real-maps AI test (`src/rules/ai/real_maps.rs`, needs `RAZDOR_DT_DIR`).
 With «Максимум»: `max_plays_both_sides_of_the_watched_and_the_quick_battle` (`src/ui/battle_view.rs`),
 `max_plays_the_hero_s_side_of_the_quick_battle_better` (`src/rules/battle/max_ai/tests.rs`),
 `max_sacrifices_a_unit_for_a_proven_win_only_in_a_quick_fight`,
-`max_sacrifices_nothing_in_a_quick_fight_without_a_proven_win` (`src/rules/battle/tests.rs`).
+`max_sacrifices_nothing_in_a_quick_fight_without_a_proven_win` (`src/rules/battle/tests.rs`),
+`max_never_steps_into_the_reserve` (synthetic, both sides) and `max_blunders_over_the_battles_to_the_end`
+(install and demo, the `Blunders` tally: the reserve asserted, the idle decisions with a damaging
+strike printed) in `src/rules/battle/max_ai/tests.rs`.
 
 ## 8. «Максимум» (Razdor extra, main only)
 
@@ -132,7 +135,13 @@ BattleView::ai_move (computer's turn) → max_move → MaxThinker::poll(battle)
 
 `src/rules/battle/max_ai.rs`:
 - **Moves** (`max_moves`): every cell action of the active unit (`all_options`, the same as
-  the clicks), every step (`moves`, the reserve included), a pass. `max_order` puts the
+  the clicks), every step (`moves`), a pass. No step *into* the reserve, for either side (the
+  2026-10-20 report, #1034): the original's AI never enters it (battle.md §2), and a unit in the
+  reserve cannot be hit, so the worth left scores it well while the manoeuvres it loses to go in
+  and out, and the damage it does not deal, are not seen (the search's leaves count only the
+  worth left). Leaving the reserve stays a step. Before the fix the demo's battles and the
+  install's gave 20 such steps in 1758 decisions (7 in 24 demo battles, the first found). The
+  search's opponent model uses the same list, so it is no more blind there. `max_order` puts the
   original's pick (`plan(false)`, or a skip when the rules refuse it, as `auto_step`) first,
   then hostile actions by damage in tactical worth (a kill counts its worth again), heals,
   blessings and curses, steps, the pass.

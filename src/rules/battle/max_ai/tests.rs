@@ -988,3 +988,84 @@ fn a_long_quick_battle_keeps_to_its_time() {
     let scale = std::env::var("RAZDOR_PERF_BUDGET_SCALE").ok().and_then(|s| s.trim().parse::<f64>().ok()).filter(|s| *s > 0.0).unwrap_or(1.0);
     assert!(t.elapsed() <= Duration::from_secs(8).mul_f64(scale), "{name}: {:?}", t.elapsed());
 }
+
+/// Blunder checks (the 2026-10-20 report, #1034): what Max does at its decisions that a
+/// player would call a blunder.
+#[derive(Default)]
+struct Blunders {
+    decisions: usize,
+    /// (a) A unit outside the reserve stepped into it.
+    reserve: Vec<String>,
+    /// (b) A pass, a step or a refused plan while a hostile action that deals damage was open.
+    idle: usize,
+    /// (b) Of those, one that kills a unit was open.
+    idle_kill: usize,
+}
+
+/// Plays `b` to its end with Max on `max`'s side (the original's AI on the other side), and
+/// tallies each of Max's decisions into `t`.
+fn blunders_in(mut b: Battle, max: Team, budget: MaxBudget, name: &str, t: &mut Blunders) {
+    let budget = harness(budget);
+    b.begin();
+    let tables = MaxTables::default();
+    for _ in 0..AUTO_PLAY_STEPS {
+        let Some(id) = b.active() else { break };
+        if b.fighters[id].team != max {
+            b.auto_step();
+            continue;
+        }
+        let r = b.max_choice_with(budget, with_tables().then_some(&tables), None).unwrap();
+        t.decisions += 1;
+        let from = b.fighters[id].slot;
+        if let Some(Plan::Move(s)) = r.choice.plan() {
+            if s.row == Row::Reserve && from.row != Row::Reserve {
+                t.reserve.push(format!("{name}: {} {from:?} -> {s:?}", b.fighters[id].name));
+            }
+        }
+        let idle = !matches!(r.choice.plan(), Some(Plan::Act(..)));
+        if idle {
+            let damage = |&(tg, k): &(usize, ActionKind)| {
+                k.is_hostile() && matches!(b.preview(id, tg, k), Preview::Damage(d) if d > 0)
+            };
+            let open: Vec<(usize, ActionKind)> = b.all_options(id).into_iter().filter(damage).collect();
+            if !open.is_empty() {
+                t.idle += 1;
+                let kills = open.iter().any(|&(tg, k)| matches!(b.preview(id, tg, k), Preview::Damage(d) if d >= b.fighters[tg].hp));
+                t.idle_kill += usize::from(kills);
+            }
+        }
+        b.play_max_move(r.choice);
+    }
+}
+
+/// Max never steps a unit into the reserve, on either side (the 2026-10-20 report, #1034:
+/// the original's AI never does; the demo's battle 4 is one of the first positions where Max
+/// did).
+#[test]
+fn max_never_steps_into_the_reserve() {
+    let mut t = Blunders::default();
+    for (name, b) in synthetic_battles(24) {
+        blunders_in(b.clone(), Team::Enemy, TEST_BUDGET, &name, &mut t);
+        blunders_in(b, Team::Player, TEST_BUDGET, &name, &mut t);
+    }
+    assert!(t.reserve.is_empty(), "{} steps into the reserve:\n{}", t.reserve.len(), t.reserve.join("\n"));
+}
+
+/// The blunder checks over battles played to their end, Max on the enemy's side: the
+/// install's sets (`RAZDOR_DT_DIR`) and the demo's. Never a step into the reserve; the
+/// idle decisions (b) are counted and printed, not asserted.
+#[test]
+fn max_blunders_over_the_battles_to_the_end() {
+    let mut sets: Vec<(&str, Battles)> = real_sets().unwrap_or_default();
+    sets.push(("demo", synthetic_battles(24)));
+    let mut t = Blunders::default();
+    for (title, set) in sets {
+        let before = (t.decisions, t.idle, t.idle_kill);
+        for (name, b) in set {
+            blunders_in(b, Team::Enemy, TEST_BUDGET, &format!("{title}: {name}"), &mut t);
+        }
+        println!("{title}: {} decisions, idle with a damaging strike {}, of which a kill {}", t.decisions - before.0, t.idle - before.1, t.idle_kill - before.2);
+    }
+    println!("all: {} decisions, reserve steps {}, idle with a damaging strike {}, of which a kill {}", t.decisions, t.reserve.len(), t.idle, t.idle_kill);
+    assert!(t.reserve.is_empty(), "{} steps into the reserve:\n{}", t.reserve.len(), t.reserve.join("\n"));
+}

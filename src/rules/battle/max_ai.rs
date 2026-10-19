@@ -214,9 +214,14 @@ impl Battle {
     }
 
     /// Every action the active unit `id` may take: its cells' actions, its steps, a pass.
+    /// Every choice of the active unit, for either side (the search's own side and the
+    /// opponent's model). No step into the reserve: the original's AI never enters it
+    /// (battle.md §2, `row30_ai_leaves_the_reserve_and_never_enters_it`), and a unit there
+    /// cannot be hit, so the worth left scores it well while its turns are lost (the
+    /// 2026-10-20 report, #1034). Leaving the reserve stays a step like any other.
     fn max_moves(&self, id: usize) -> Vec<Plan> {
         let mut v: Vec<Plan> = self.all_options(id).into_iter().map(|(t, k)| Plan::Act(t, k)).collect();
-        v.extend(self.moves(id).into_iter().map(Plan::Move));
+        v.extend(self.moves(id).into_iter().filter(|s| s.row != Row::Reserve).map(Plan::Move));
         v.push(Plan::Pass);
         v
     }
