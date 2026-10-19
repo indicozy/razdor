@@ -18,6 +18,18 @@ pub fn usage_key(d: &ArtefactDef) -> Option<&'static str> {
     if d.description.is_empty() {
         return None;
     }
+    // Razdor's deviation (the owner's decision, 2026-10-19): a staff with a school names it
+    // (the school its wearer must have, as `slot_for` checks it). The original gives every
+    // staff «mages only», and its death staff «dark forces only», though witches can use it.
+    if d.kind == ArtefactType::Staff {
+        if let Some(school) = d.magic {
+            return Some(match school {
+                MagicSchool::Life => "OnlyForLifeMages",
+                MagicSchool::Elemental => "OnlyForElementalMages",
+                MagicSchool::Death => "OnlyForDeathMages",
+            });
+        }
+    }
     let mut key = match d.kind {
         ArtefactType::BlowWeapon | ArtefactType::Shield => Some("OnlyForWarriors"),
         ArtefactType::ShotWeapon => Some("OnlyForBowmans"),
@@ -279,6 +291,24 @@ mod tests {
         assert_eq!(with(ArtefactType::BlowWeapon, Some(MagicSchool::Life)), Some("OnlyForMages"));
         assert_eq!(with(ArtefactType::Ring, Some(MagicSchool::Death)), Some("NotForUse"));
         assert_eq!(usage_key(&item(1, ArtefactType::BlowWeapon)), None, "no description, no usage line");
+    }
+
+    /// Razdor's deviation (the owner's decision): a staff names its school; the other items keep
+    /// the original's lines (its death staff's «dark forces only» is the original's, not a staff's).
+    #[test]
+    fn a_staff_names_its_school_and_the_other_items_keep_the_original_line() {
+        let with = |kind, magic| {
+            let mut d = item(1, kind);
+            d.description = "text".into();
+            d.magic = magic;
+            usage_key(&d)
+        };
+        assert_eq!(with(ArtefactType::Staff, Some(MagicSchool::Death)), Some("OnlyForDeathMages"));
+        assert_eq!(with(ArtefactType::Staff, Some(MagicSchool::Life)), Some("OnlyForLifeMages"));
+        assert_eq!(with(ArtefactType::Staff, Some(MagicSchool::Elemental)), Some("OnlyForElementalMages"));
+        assert_eq!(with(ArtefactType::Staff, None), Some("OnlyForMages"), "a staff with no school keeps the original's");
+        assert_eq!(with(ArtefactType::BlowWeapon, Some(MagicSchool::Death)), Some("NotForUse"));
+        assert_eq!(with(ArtefactType::Ring, Some(MagicSchool::Life)), Some("OnlyForMages"));
     }
 
     #[test]

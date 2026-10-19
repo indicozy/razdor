@@ -170,6 +170,10 @@ fn english(key: &str) -> &'static str {
         "OnlyForBowmans" => n_("archers only"),
         "OnlyForMages" => n_("mages only"),
         "NotForUse" => n_("dark forces only"),
+        // A staff's school (Razdor's deviation, see `rules::item_text::usage_key`).
+        "OnlyForLifeMages" => n_("life mages only"),
+        "OnlyForElementalMages" => n_("elemental mages only"),
+        "OnlyForDeathMages" => n_("death mages only"),
         "RemainedTimeOfEffect" => n_("Time left:"),
         "RemainedTimeOfEffectAll" => n_("Unknown"),
         "cMounth" => n_("month"),
