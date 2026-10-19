@@ -313,6 +313,23 @@ pub fn row2_extra(content: &Content, s: &Sheet) -> i32 {
     }
 }
 
+/// A stat's shown value and colour as the panel writes it: "base + items" when the items
+/// (`start` − `base`, the worn ones' share) are what the value is made of, the items' share
+/// coloured blue for a gain and red for a loss; else the value alone in the colour of its
+/// change from `start`. The army window passes the same stats as both `now` and `start`, so
+/// it has no change to colour and the items' share decides (Razdor's, from the army panel's
+/// report, #11; the original shows the bonus in colour, 0x492f24).
+pub(super) fn base_and_items(base: i32, now: i32, start: i32) -> (String, Color) {
+    let items = start - base;
+    if items != 0 && now == start {
+        let sign = if items > 0 { "+" } else { "-" };
+        let ink = if items > 0 { BLUE_TEXT } else { RED_TEXT };
+        (format!("{base} {sign} {}", items.abs()), ink)
+    } else {
+        (now.to_string(), cmp_color(now, start))
+    }
+}
+
 /// The stat list of `s`, as the original's panel orders it.
 fn stat_lines(content: &Content, s: &Sheet) -> Vec<Line> {
     let (now, start) = (s.now, s.start);
@@ -321,12 +338,7 @@ fn stat_lines(content: &Content, s: &Sheet) -> Vec<Line> {
     let max = now.max_hp();
     let hits = if s.hp < max { format!("{} / {max}", s.hp.max(0)) } else { max.to_string() };
     lines.push((label("SHit", n_("Hits")), hits, if s.hp < max { RED_TEXT } else { cmp_color(max, start.max_hp()) }));
-    // "base + bonus" for what items and traits add, as the original writes it.
-    let split = |st: Stat| -> (String, Color) {
-        let (n, b) = (naked[st], start[st] - naked[st]);
-        let v = if b != 0 && now[st] == start[st] { format!("{n} {} {}", if b > 0 { "+" } else { "-" }, b.abs()) } else { now[st].to_string() };
-        (v, cmp_color(now[st], start[st]))
-    };
+    let split = |st: Stat| base_and_items(naked[st], now[st], start[st]);
     // In a building its defence is written apart, "15 + 12", as the original does; the
     // back row's `Row2Def` joins the building's on the ranged defence (0x491fa4). A line is
     // left out when the shown and the current value are both 0, a defence kept while
@@ -1198,5 +1210,58 @@ mod tests {
     fn the_panel_stacks_its_text_as_the_originals() {
         assert_eq!(panel_tops(4, 8, false), (68.0, 68.0 + 134.0, 68.0 + 134.0 + 34.0));
         assert_eq!(panel_tops(4, 8, true), (68.0, 68.0 + 142.0, 68.0 + 142.0 + 34.0));
+    }
+
+    /// The army panel's stat is "base + items" in colour (#11): the items' share blue for a
+    /// gain, red for a loss, the value alone when there are no items (the army window passes
+    /// the same stats as now and start, so the items' share is what decides).
+    #[test]
+    fn an_items_share_shows_as_base_plus_its_bonus_in_colour() {
+        assert_eq!(base_and_items(20, 30, 30), ("20 + 10".to_string(), BLUE_TEXT));
+        assert_eq!(base_and_items(20, 15, 15), ("20 - 5".to_string(), RED_TEXT));
+        assert_eq!(base_and_items(20, 20, 20), ("20".to_string(), CREAM));
+        // In battle the value differs from the start: it is written alone, in the colour of
+        // its change (blue raised, red lowered).
+        assert_eq!(base_and_items(20, 25, 20), ("25".to_string(), BLUE_TEXT));
+        assert_eq!(base_and_items(20, 12, 20), ("12".to_string(), RED_TEXT));
+    }
+
+    /// A worn sword's +3 melee attack on the panel: the base, then "+ 3" in blue; unworn, the
+    /// base alone.
+    #[test]
+    fn a_worn_item_raises_the_panel_attack_in_blue_from_its_base() {
+        let content = Content::builtin();
+        let kind = UnitId(content.units[0].id);
+        let sword = content.item_by_key("short_sword").expect("the demo sword");
+        let mut u = razdor::rules::units::Unit::new(&content, kind, Slot::new(razdor::rules::formation::Row::Front, 0));
+        let base = Stats::of_level(&content, kind, u.level)[Stat::AttackBlow];
+        let line = |u: &razdor::rules::units::Unit| {
+            let stats = u.stats(&content);
+            let sheet = Sheet {
+                kind,
+                name: "",
+                named: false,
+                level: u.level,
+                xp: 0,
+                need: 0,
+                hp: u.hp,
+                now: &stats,
+                start: &stats,
+                power: 0,
+                wage: 0,
+                items: u.items,
+                back_row: false,
+                unpaid: false,
+                building: 0,
+                hero: None,
+                status: Vec::new(),
+            };
+            stat_lines(&content, &sheet).into_iter().find(|l| l.0 == label("SAttackBlow", "Melee attack")).expect("melee attack line")
+        };
+        assert_eq!(line(&u).1, base.to_string());
+        u.items[0] = Some(sword);
+        let shown = line(&u);
+        assert_eq!(shown.1, format!("{base} + 3"));
+        assert_eq!(shown.2, BLUE_TEXT);
     }
 }
