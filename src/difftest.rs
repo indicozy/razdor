@@ -1343,7 +1343,7 @@ impl<'a> Runner<'a> {
         let g = self.game.as_ref()?;
         let c = &g.content;
         let (x, y) = g.tile();
-        let units = g.squad.iter().map(|u| HeroUnit { kind: u.def.0 as i32, level: u.level - 1, hp: u.hp.max(0), xp: u.xp, items: u.items.iter().map(|i| i.map_or(0, |i| i.0 as i32)).collect() }).collect();
+        let units = g.squad.iter().map(|u| HeroUnit { kind: u.def.0 as i32, level: u.level - 1, hp: u.hp.max(0), xp: u.xp, items: u.items[..crate::rules::items::slot_count(c)].iter().map(|i| i.map_or(0, |i| i.0 as i32)).collect() }).collect();
         let pack = g.pack.iter().map(|i| i.0 as i32).collect();
         let book = g.spells.iter().map(|&s| i32::from(s)).collect();
         let hero = HeroState { x, y, gold: g.gold, mana: g.mana, units, pack, book };

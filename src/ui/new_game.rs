@@ -792,7 +792,13 @@ fn experimental_menu() {
     check(3,tr("No duplicate items"),&mut rules.no_duplicate_items);
     check(4,tr("At most two potions per character"),&mut rules.two_potions);
     EXPERIMENTAL.with(|p| p.set(rules));
-    let lines = [tr("Four equipment slots. Duplicate abilities do not stack."), tr("Applies to all armies; saved with this playthrough."), tr("The potion limit resets after a battle.")];
+    // Six cells with the multiple rings or amulets rule, else the original's four.
+    let slots = if rules.multiple_rings || rules.multiple_amulets {
+        tr("Six equipment slots. Duplicate abilities do not stack.")
+    } else {
+        tr("Four equipment slots. Duplicate abilities do not stack.")
+    };
+    let lines = [slots, tr("Applies to all armies; saved with this playthrough."), tr("The potion limit resets after a battle.")];
     for (i,line) in lines.iter().enumerate() {
         chrome::shadow_text(line,r.x+20.0*k,r.y+(264.0+i as f32*19.0)*k,12.0*k,chrome::CREAM);
     }

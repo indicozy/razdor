@@ -13,7 +13,8 @@ for an existing game through this menu.
   Stat modifiers from equipment continue using the existing calculation, independently
   of this switch. Negative abilities are retained too.
 - **Multiple rings** and **multiple amulets:** allow those item types to occupy any of
-  the four existing equipment slots. Class, magic school, holy-item, weapon and all other
+  the equipment slots: with either switch a unit has six cells (the four classic ones plus
+  a third pair), otherwise four. Class, magic school, holy-item, weapon and all other
   equipment restrictions remain in force. Each switch is independent of bonus stacking.
 - **No duplicate items:** compare item IDs per character, not item categories. Different
   rings/amulets are permitted when their corresponding switch is on. Repeated copies of
@@ -33,14 +34,20 @@ and noncombatant marks in units. Missing rules in older saves use false values. 
 and advancing to the next campaign map preserve the rules. Older Razdor builds reject
 format 11 rather than silently dropping the experimental rules.
 
+Save format 12 stores each unit's item cells as six (`items::MAX_SLOTS`); a format 11 save's
+four load with two empty cells added (`items::deserialize_cells`). Which cells the rules use
+is `items::slot_count(content)`: every search, equip and count reads only those, so the classic
+rules never see cells 4 and 5.
+
 In battle, all active abilities survive fighter creation. FateGift consumes only itself
 when triggered; Neutralize removes all current abilities. Existing phase order governs
 combinations (for example, a fatal hit can trigger FateGift before Neutralize removes the
 remaining abilities). Abilities still retain their attack-type and other applicability
 conditions; enabling them does not make every ability trigger on every action.
 
-The shared unit panel lists active abilities and their sources in a bounded region.
-An overflowing list scrolls independently using the wheel over the region or its scrollbar.
+The shared unit panel lists the unit's description first, always whole, and under it the active
+abilities in a bounded region of eight rows. Only that region scrolls, using the wheel over it or
+its scrollbar. Abilities carry no source line.
 Name, stats, equipment slots and the panel's outer bounds remain fixed. Hero class traits
 and state lines share the region with unit abilities.
 

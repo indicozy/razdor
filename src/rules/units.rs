@@ -10,7 +10,7 @@ use crate::i18n::tr;
 use super::content::{Bonus, Content, ItemId, MagicDirection, MagicSchool, Nature, SpellDef, Stat, StatMods, UnitId, WageKind};
 use super::experience;
 use super::formation::{Row, Slot};
-use super::items::{self, SLOTS};
+use super::items::{self, MAX_SLOTS};
 
 /// Effective stats of a unit: numbers by [`Stat`] plus magic, nature and bonuses.
 #[derive(Debug, PartialEq, Eq, Hash)]
@@ -267,8 +267,10 @@ pub struct Unit {
     /// Game minute of death; a corpse (HP 0) stays in the army until it is resurrected or
     /// buried (mechanics.md 2.5).
     pub died_at: Option<u64>,
-    /// Worn items.
-    pub items: [Option<ItemId>; SLOTS],
+    /// Worn items: [`MAX_SLOTS`] cells, of which the rules use [`items::slot_count`]. Older
+    /// saves hold four.
+    #[serde(deserialize_with = "items::deserialize_cells")]
+    pub items: [Option<ItemId>; MAX_SLOTS],
     /// Drunk potions whose effect lasts until the end of the next battle.
     pub potions: Vec<ItemId>,
     /// A named character of the scenario (1-based); 0 for an ordinary unit.
@@ -312,7 +314,7 @@ impl Unit {
             last_paid: 0,
             wage_kind,
             died_at: None,
-            items: [None; SLOTS],
+            items: [None; MAX_SLOTS],
             potions: Vec::new(),
             named: 0,
             from_event: false,

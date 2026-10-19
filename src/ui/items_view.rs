@@ -773,7 +773,7 @@ pub fn squad(
         bleed: 0,
         power: stats[Stat::MagicPower],
         wage: if showing_type { class_wage(&c, u.def) } else { game.wage(sel) },
-        items: if showing_type { [None; 4] } else { u.items },
+        items: if showing_type { [None; razdor::rules::items::MAX_SLOTS] } else { u.items },
         back_row: u.slot.row == razdor::rules::formation::Row::Back,
         unpaid: !showing_type && u.unpaid,
         building: bd,

@@ -8,6 +8,7 @@ use razdor::i18n::{n_, tr};
 use razdor::rules::battle::{bless_effect, curse_effect, Buff};
 use razdor::rules::content::{Bonus, Content, HeroClass, ItemId, MagicDirection, MagicSchool, Stat, UnitId};
 use razdor::rules::formation::{Formation, Slot};
+use razdor::rules::items::{slot_count, MAX_SLOTS};
 use razdor::rules::units::Stats;
 
 use super::assets::Assets;
@@ -60,7 +61,7 @@ pub struct Sheet<'a> {
     /// Current magic power (it drains during a battle).
     pub power: i32,
     pub wage: i32,
-    pub items: [Option<ItemId>; 4],
+    pub items: [Option<ItemId>; MAX_SLOTS],
     pub back_row: bool,
     /// Unpaid, in the player's army outside battle (not a type's preview): the no-payment
     /// line (492f24: paid flag +0x1a5 clear, not a template, not in battle).
@@ -191,20 +192,9 @@ fn state_trait(line: StateLine) -> (String, String, Color) {
 
 /// The traits the panel lists: the hero's class, the unit's bonuses (its items' too), then
 /// its state ([`state_lines`]).
-fn traits_of(s: &Sheet, content: &Content) -> Vec<(String, String, Color)> {
+fn traits_of(s: &Sheet) -> Vec<(String, String, Color)> {
     let mut traits: Vec<(String, String, Color)> = s.start.bonuses.iter().map(|bonus| {
-        let (art, mut text) = trait_line(bonus);
-        if content.experimental.simultaneous_bonuses {
-            let mut sources = Vec::new();
-            if content.unit(s.kind).bonus.as_ref() == Some(bonus) { sources.push(tr("Own ability").to_string()); }
-            for item in s.items.iter().flatten().filter_map(|&id| content.try_item(id)) {
-                if item.bonus.as_ref() == Some(bonus) { sources.push(item.name.clone()); }
-            }
-            if !sources.is_empty() {
-                text.push('\n');
-                text.push_str(&razdor::trf!("Ability sources: {sources}", sources = sources.join(", ")));
-            }
-        }
+        let (art, text) = trait_line(bonus);
         (art, text, super::typography::Ink::Green.color())
     }).collect();
     if let Some(h) = s.hero {
@@ -261,6 +251,17 @@ fn panel_tops(rows: usize, stats: usize, hero: bool) -> (f32, f32, f32) {
     let desc = rows as f32 * 14.0 + 12.0;
     let stat = desc + (stats + 1) as f32 * 14.0 + 8.0 + if hero { 8.0 } else { 0.0 };
     (desc, stat, stat + 16.0 + 18.0)
+}
+
+/// Trait rows the panel shows at once under the simultaneous bonuses rule: the abilities
+/// region scrolls, and this many rows fit its place (the description above it never does).
+const ABILITY_ROWS: usize = 8;
+
+/// The rows the list shows: the description's `desc` rows, always all of them, and the trait
+/// rows, all of them, or on the simultaneous bonuses rule at most [`ABILITY_ROWS`] (the rest
+/// scroll inside the region). Returns `(desc, traits)`.
+fn shown_rows(desc: usize, traits: usize, simultaneous: bool) -> (usize, usize) {
+    (desc, if simultaneous { traits.min(ABILITY_ROWS) } else { traits })
 }
 
 /// A stat line: label, value, colour.
@@ -692,23 +693,29 @@ fn first_line_size(fs: f32, room: f32, width: impl Fn(f32) -> f32) -> f32 {
     size.max(7.0)
 }
 
-/// Rects of the four item slots around the figure: two at the top left, two at the top
-/// right (as in the army screen).
-pub fn slot_rects(r: Rect) -> [Rect; 4] {
+/// Rects of the item slots around the figure: two at the top left, two at the top right (as
+/// in the army screen), and with six cells a third pair under them. Only the first
+/// `slot_count` are shown.
+pub fn slot_rects(r: Rect) -> [Rect; MAX_SLOTS] {
     slot_rects_at(r, 0.9375 * k())
 }
 
-/// The four worn-item slots of a panel whose fill is `r`, `px` screen pixels to one of the
+/// The worn-item slots of a panel whose fill is `r`, `px` screen pixels to one of the
 /// original's (0x4d8638 at 4d88ad..4d8994): 55 px buttons 8 px in from the fill's top and
 /// sides, the second of each side right under the first (55 px down), the left pair at
-/// the fill's left, the right pair against its right.
-pub fn slot_rects_at(r: Rect, px: f32) -> [Rect; 4] {
+/// the fill's left, the right pair against its right. The six-cell rule adds the third
+/// pair (cells 4 and 5) under the first two, touching them.
+pub fn slot_rects_at(r: Rect, px: f32) -> [Rect; MAX_SLOTS] {
     let (s, m) = (55.0 * px, 8.0 * px);
+    let (left, right) = (r.x + m, r.x + r.w - m - s);
+    let row = |i: f32| r.y + m + i * s;
     [
-        Rect::new(r.x + m, r.y + m, s, s),
-        Rect::new(r.x + m, r.y + m + s, s, s),
-        Rect::new(r.x + r.w - m - s, r.y + m, s, s),
-        Rect::new(r.x + r.w - m - s, r.y + m + s, s, s),
+        Rect::new(left, row(0.0), s, s),
+        Rect::new(left, row(1.0), s, s),
+        Rect::new(right, row(0.0), s, s),
+        Rect::new(right, row(1.0), s, s),
+        Rect::new(left, row(2.0), s, s),
+        Rect::new(right, row(2.0), s, s),
     ]
 }
 
@@ -777,18 +784,26 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, background: Rect, s
     let name_size = sheet_size(Face::Subtitle, whole_scale(px));
     // The description list (0x667bdc): the type's description for any unit but the hero
     // (0x492f24: the type's `Descript` of Rus_Units.ini), then the traits with their icons.
-    let traits = traits_of(s, content);
+    let simultaneous = content.experimental.simultaneous_bonuses;
+    let traits = traits_of(s);
     let desc = s.hero.is_none().then(|| content.unit(s.kind).description.as_str());
     let width = |c: char| measure(c.encode_utf8(&mut [0; 4]), size).width;
-    let list_width = (238.0 - if content.experimental.simultaneous_bonuses { 16.0 } else { 0.0 }) * px;
+    let list_width = (238.0 - if simultaneous { 16.0 } else { 0.0 }) * px;
     let mut rows = list_rows(desc, &traits, list_width, width);
     let stats = stat_lines(content, s);
     let stat_rows = stats.len() + s.status.len();
+    // The description's rows are the first of the list, as wrapped at the list's width.
+    let mut desc_rows = desc.map_or(0, |d| list_rows(Some(d), &[], list_width, width).len());
+    let trait_rows = rows.len() - desc_rows;
     // The original stacks it all up from the bottom with no limit. Razdor keeps the name
-    // under the top quarter: a mod's long texts cut the description short (a choice).
-    let desc_rows = desc.map_or(0, |d| list_rows(Some(d), &[], 238.0 * px, width).len());
+    // under the top quarter: a mod's long texts cut the description short (a choice). The
+    // count is of what the panel shows, so the ability rows' overflow never cuts it.
+    let fits = |cut: usize| {
+        let (d, t) = shown_rows(desc_rows - cut, trait_rows, simultaneous);
+        r.y + r.h - panel_tops(d + t, stat_rows, s.hero.is_some()).2 * px < r.y + 0.25 * r.h
+    };
     let mut cut = 0;
-    while cut < desc_rows && r.y + r.h - panel_tops(rows.len() - cut, stat_rows, s.hero.is_some()).2 * px < r.y + 0.25 * r.h {
+    while cut < desc_rows && fits(cut) {
         cut += 1;
     }
     if cut > 0 {
@@ -796,8 +811,10 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, background: Rect, s
         if let Some(last) = (desc_rows > cut).then(|| &mut rows[desc_rows - cut - 1]) {
             last.text = format!("{}…", last.text.trim_end());
         }
+        desc_rows -= cut;
     }
-    let view_rows = if content.experimental.simultaneous_bonuses { rows.len().min(8) } else { rows.len() };
+    let (desc_shown, traits_shown) = shown_rows(desc_rows, rows.len() - desc_rows, simultaneous);
+    let view_rows = desc_shown + traits_shown;
     let (desc_top, stat_top, name_top) = panel_tops(view_rows, stat_rows, s.hero.is_some());
     let bottom = r.y + r.h;
     let (desc_top, stat_top, name_top) = (bottom - desc_top * px, bottom - stat_top * px, bottom - name_top * px);
@@ -811,7 +828,7 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, background: Rect, s
     });
     // Items worn.
     let mut clicked = None;
-    for (i, sr) in slot_rects(r).iter().enumerate() {
+    for (i, sr) in slot_rects(r).iter().take(slot_count(content)).enumerate() {
         let item = s.items[i];
         if !slots && item.is_none() {
             continue;
@@ -868,27 +885,38 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, background: Rect, s
     // The description list from 12 px in, a row every 14 px; a trait's icon 16 px in and
     // 11 px over its first row (0x48e8f0), drawn under the text.
     let list_x = r.x + 12.0 * px;
-    let viewport = Rect::new(r.x + 8.0 * px, desc_top - 11.0 * px, r.w - 16.0 * px, (view_rows as f32 * 14.0 + 19.0) * px);
-    let most = rows.len().saturating_sub(view_rows) as f32 * 14.0 * px;
+    // The abilities region sits under the description, which never moves: only the trait rows
+    // scroll inside it (on the simultaneous bonuses rule; else the whole list shows).
+    let region = Rect::new(r.x + 8.0 * px, desc_top + desc_shown as f32 * 14.0 * px - 11.0 * px, r.w - 16.0 * px, (traits_shown as f32 * 14.0 + 19.0) * px);
+    let most = (rows.len() - desc_rows - traits_shown) as f32 * 14.0 * px;
     let key = format!("{}:{}:{}:{}:{:?}:{:?}", r.x, r.y, s.kind.0, s.name, s.start.bonuses, s.items);
     let mut scroll = TRAIT_SCROLL.with(|p| p.borrow().get(&key).copied().unwrap_or(0.0));
-    if content.experimental.simultaneous_bonuses && most > 0.0 {
-        if viewport.contains(super::widgets::pointer().into()) { scroll -= super::widgets::wheel() * 42.0 * px; }
+    if simultaneous && most > 0.0 {
+        if region.contains(super::widgets::pointer().into()) { scroll -= super::widgets::wheel() * 42.0 * px; }
         scroll = scroll.clamp(0.0, most);
-        super::widgets::scrollbar_px(Rect::new(viewport.right()-12.0*px,viewport.y,12.0*px,viewport.h), &mut scroll, most, viewport.h, 14.0*px);
-        TRAIT_SCROLL.with(|p| { let mut p=p.borrow_mut(); if p.len()>32 {p.clear();} p.insert(key,scroll); });
-    } else { scroll = 0.0; }
-    let _traits_clip = content.experimental.simultaneous_bonuses.then(|| super::widgets::Clip::new(viewport));
-    for (i, row) in rows.iter().enumerate() {
-        let top = desc_top + i as f32 * 14.0 * px - scroll;
-        if let Some(art) = &row.icon {
-            chrome::trait_icon(art, r.x + 16.0 * px, top - 11.0 * px, 25.0 * px);
+        super::widgets::scrollbar_px(Rect::new(region.right() - 12.0 * px, region.y, 12.0 * px, region.h), &mut scroll, most, region.h, 14.0 * px);
+        TRAIT_SCROLL.with(|p| { let mut p = p.borrow_mut(); if p.len() > 32 { p.clear(); } p.insert(key, scroll); });
+    } else {
+        scroll = 0.0;
+    }
+    let row_top = |i: usize| {
+        let top = desc_top + i as f32 * 14.0 * px;
+        if i < desc_rows { top } else { top - scroll }
+    };
+    for (i, row) in rows[..desc_rows].iter().enumerate() {
+        if !row.text.trim().is_empty() {
+            shadow_text(&row.text, list_x, line(row_top(i)), size, row.ink);
         }
     }
-    for (i, row) in rows.iter().enumerate() {
-        let top = desc_top + i as f32 * 14.0 * px - scroll;
+    let _traits_clip = simultaneous.then(|| super::widgets::Clip::new(region));
+    for (i, row) in rows.iter().enumerate().skip(desc_rows) {
+        if let Some(art) = &row.icon {
+            chrome::trait_icon(art, r.x + 16.0 * px, row_top(i) - 11.0 * px, 25.0 * px);
+        }
+    }
+    for (i, row) in rows.iter().enumerate().skip(desc_rows) {
         if !row.text.trim().is_empty() {
-            shadow_text(&row.text, list_x, line(top), size, row.ink);
+            shadow_text(&row.text, list_x, line(row_top(i)), size, row.ink);
         }
     }
     clicked
@@ -956,7 +984,7 @@ mod tests {
             bleed: 0,
             power: 0,
             wage: 0,
-            items: [None; 4],
+            items: [None; MAX_SLOTS],
             back_row,
             unpaid: false,
             building,
@@ -1041,7 +1069,7 @@ mod tests {
             bleed: 0,
             power: 0,
             wage: 0,
-            items: [None; 4],
+            items: [None; MAX_SLOTS],
             back_row: false,
             unpaid: false,
             building: 0,
@@ -1245,7 +1273,7 @@ mod tests {
             bleed: 0,
             power: 0,
             wage: 0,
-            items: [None; 4],
+            items: [None; MAX_SLOTS],
             back_row: false,
             unpaid: false,
             building,
@@ -1253,6 +1281,27 @@ mod tests {
             status: Vec::new(),
         }
     }
+
+    /// With many abilities (simultaneous bonuses) the description keeps every row and only the
+    /// ability rows are limited to the region; classic lists show all rows.
+    #[test]
+    fn the_description_is_never_scrolled_out_by_the_abilities() {
+        assert_eq!(shown_rows(5, 40, true), (5, ABILITY_ROWS));
+        assert_eq!(shown_rows(5, 3, true), (5, 3));
+        assert_eq!(shown_rows(5, 40, false), (5, 40));
+        assert_eq!(shown_rows(0, 0, true), (0, 0));
+    }
+
+    /// Six cells: the third pair (cells 4 and 5) sits under the first two, touching them, and
+    /// the classic four are where they were.
+    #[test]
+    fn the_third_pair_of_cells_sits_under_the_first_two() {
+        let s = slot_rects_at(Rect::new(0.0, 0.0, 262.0, 609.0), 1.0);
+        assert_eq!((s[4].x, s[4].y, s[4].w), (8.0, 118.0, 55.0));
+        assert_eq!((s[5].x, s[5].y), (199.0, 118.0));
+        assert_eq!((s[3].x, s[3].y), (199.0, 63.0));
+    }
+
 
     fn line_of(content: &Content, sheet: &Sheet, key: &str, en: &str) -> Line {
         stat_lines(content, sheet).into_iter().find(|l| l.0 == label(key, en)).expect("the stat's line")

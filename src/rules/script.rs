@@ -1264,7 +1264,7 @@ impl Game {
             None => (self.squad[0].level, self.squad[0].xp) = (1, 0),
         }
         if !hero_items {
-            self.squad[0].items = [None; crate::rules::items::SLOTS];
+            self.squad[0].items = [None; crate::rules::items::MAX_SLOTS];
         }
         if let Some(pack) = inventory {
             self.pack = pack.clone();
@@ -2431,7 +2431,7 @@ mod tests {
         let gold = again.gold;
         again.apply_carry_over(&next);
         assert_eq!((again.squad[0].level, again.squad[0].xp), (1, 0));
-        assert_eq!((again.spells.clone(), again.squad[0].items), (book, [None; 4]));
+        assert_eq!((again.spells.clone(), again.squad[0].items), (book, [None; crate::rules::items::MAX_SLOTS]));
         assert_eq!((again.gold, again.pack.items()), (gold, vec![ItemId(3)]));
         assert_eq!((again.squad.len(), again.pack.items()), (preset, vec![ItemId(3)]));
     }

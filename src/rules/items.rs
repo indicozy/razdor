@@ -1,6 +1,6 @@
 //! Items (artefacts): slots, class limits, stat modifiers and potions (mechanics.md 4).
 //!
-//! A unit wears up to 4 items, only one weapon (melee weapon, bow or staff), never two of the
+//! A unit wears up to 4 items (6 with the multiple rings or amulets rule), only one weapon (melee weapon, bow or staff), never two of the
 //! same type under classic rules. Experimental rules can permit repeated rings/amulets.
 //! Melee weapons need a warrior, ranged weapons a shooter, staffs a mage. Potions
 //! and trade goods are not worn: potions are drunk from the army screen, their healing is
@@ -12,8 +12,29 @@ pub use super::content::{ItemId, Source};
 use super::experience::is_percent_stat;
 use super::units::{Stats, Unit};
 
-/// Item slots every unit has.
-pub const SLOTS: usize = 4;
+/// Item cells a unit's array holds: the most any rules allow (six, with the multiple rings or
+/// amulets rule). The classic rules use the first [`CLASSIC_SLOTS`] only ([`slot_count`]).
+pub const MAX_SLOTS: usize = 6;
+/// Item slots of the classic rules, which the original's units have.
+pub const CLASSIC_SLOTS: usize = 4;
+
+/// How many item cells a unit has under the rules: six when the multiple rings or amulets
+/// rule is on, else four as the original.
+pub fn slot_count(content: &Content) -> usize {
+    if content.experimental.multiple_rings || content.experimental.multiple_amulets { MAX_SLOTS } else { CLASSIC_SLOTS }
+}
+
+/// Reads a unit's item cells: a save from before the six-cell rule holds four, which pad with
+/// empty cells; more than [`MAX_SLOTS`] is refused.
+pub fn deserialize_cells<'de, D: serde::Deserializer<'de>>(d: D) -> Result<[Option<ItemId>; MAX_SLOTS], D::Error> {
+    let cells: Vec<Option<ItemId>> = serde::Deserialize::deserialize(d)?;
+    if cells.len() > MAX_SLOTS {
+        return Err(serde::de::Error::invalid_length(cells.len(), &"at most six item cells"));
+    }
+    let mut out = [None; MAX_SLOTS];
+    out[..cells.len()].copy_from_slice(&cells);
+    Ok(out)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EquipError {
@@ -243,7 +264,7 @@ pub fn slot_for(content: &Content, unit: &Unit, item: ItemId) -> Result<usize, E
     if def.magic.is_some_and(|m| lvl.magic != Some(m)) {
         return Err(EquipError::WrongSchool);
     }
-    let worn: Vec<&ArtefactDef> = unit.items.iter().flatten().filter_map(|&i| content.try_item(i)).collect();
+    let worn: Vec<&ArtefactDef> = unit.items[..slot_count(content)].iter().flatten().filter_map(|&i| content.try_item(i)).collect();
     if def.kind.is_weapon() && worn.iter().any(|w| w.kind.is_weapon()) {
         return Err(EquipError::SecondWeapon);
     }
@@ -253,10 +274,10 @@ pub fn slot_for(content: &Content, unit: &Unit, item: ItemId) -> Result<usize, E
         return Err(EquipError::SameType);
     }
     // Razdor's option after the original's refusals, so classic rules still say SameType.
-    if content.experimental.no_duplicate_items && unit.items.contains(&Some(item)) {
+    if content.experimental.no_duplicate_items && unit.items[..slot_count(content)].contains(&Some(item)) {
         return Err(EquipError::DuplicateItem);
     }
-    unit.items.iter().position(Option::is_none).ok_or(EquipError::NoFreeSlot)
+    unit.items[..slot_count(content)].iter().position(Option::is_none).ok_or(EquipError::NoFreeSlot)
 }
 
 /// Healing of a potion (`f-Hits`).
@@ -879,7 +900,7 @@ mod tests {
     }
 
     #[test]
-    fn experimental_accessories_are_independent_and_still_use_four_slots() {
+    fn experimental_accessories_are_independent_and_use_six_slots() {
         let original = content(vec![warrior(5, 20, 0)], vec![item(1, ArtefactType::Ring), item(2, ArtefactType::Amulet), item(3, ArtefactType::Helm)]);
         let u = wearing(&original, 5, &[1, 2, 3]);
         let rings = super::super::content::ExperimentalRules { multiple_rings: true, ..Default::default() };
@@ -891,8 +912,33 @@ mod tests {
         let c = original.with_experimental(amulets);
         assert_eq!(slot_for(&c, &u, ItemId(1)), Err(EquipError::SameType));
         assert_eq!(slot_for(&c, &u, ItemId(2)), Ok(3));
-        let full = wearing(&c, 5, &[2, 2, 2, 2]);
-        assert_eq!(slot_for(&c, &full, ItemId(2)), Err(EquipError::NoFreeSlot));
+        let four = wearing(&c, 5, &[2, 2, 2, 2]);
+        assert_eq!(slot_for(&c, &four, ItemId(2)), Ok(4), "the rule adds cells 4 and 5");
+        let six = wearing(&c, 5, &[2, 2, 2, 2, 2, 2]);
+        assert_eq!(slot_for(&c, &six, ItemId(2)), Err(EquipError::NoFreeSlot));
+    }
+
+    /// Six cells under the multiple rings or amulets rule, four under the classic rules: the
+    /// classic rules never offer cells 4 and 5.
+    #[test]
+    fn the_rings_or_amulets_rule_adds_two_cells_and_classic_rules_keep_four() {
+        let classic = content(
+            vec![warrior(5, 20, 0)],
+            vec![item(1, ArtefactType::Ring), item(2, ArtefactType::Amulet), item(3, ArtefactType::Helm), item(4, ArtefactType::Armor), item(5, ArtefactType::Shield)],
+        );
+        assert_eq!(slot_count(&classic), CLASSIC_SLOTS);
+        let full = wearing(&classic, 5, &[3, 4, 5, 1]);
+        assert_eq!(slot_for(&classic, &full, ItemId(2)), Err(EquipError::NoFreeSlot));
+        use super::super::content::ExperimentalRules;
+        for rules in [
+            ExperimentalRules { multiple_rings: true, ..Default::default() },
+            ExperimentalRules { multiple_amulets: true, ..Default::default() },
+        ] {
+            let c = classic.with_experimental(rules);
+            assert_eq!(slot_count(&c), MAX_SLOTS);
+            assert_eq!(slot_for(&c, &full, ItemId(2)), Ok(4));
+            assert_eq!(slot_for(&c, &wearing(&c, 5, &[3, 4, 5, 1, 1, 1]), ItemId(2)), Err(EquipError::NoFreeSlot));
+        }
     }
 
     #[test]
@@ -980,7 +1026,7 @@ mod tests {
     #[test]
     fn modifiers_apply_fixed_then_flat_then_percent() {
         let (c, mut w, _) = setup();
-        w.items = [Some(ItemId(1)), Some(ItemId(4)), Some(ItemId(5)), None];
+        w.items = [Some(ItemId(1)), Some(ItemId(4)), Some(ItemId(5)), None, None, None];
         let s = w.stats(&c);
         // attack: (20 + 5) × 1.5; defence: fixed 26, +2, then +10%.
         assert_eq!((s[Stat::AttackBlow], s[Stat::DefenceBlow]), (37, 30));
@@ -993,7 +1039,7 @@ mod tests {
         let mut ring2 = item(10, ArtefactType::Amulet);
         ring2.percent = StatMods::from([(Stat::AttackBlow, 50)]);
         let c = content(c.units.clone(), c.items.iter().cloned().chain([ring2]).collect());
-        w.items = [Some(ItemId(5)), Some(ItemId(10)), None, None];
+        w.items = [Some(ItemId(5)), Some(ItemId(10)), None, None, None, None];
         // 20 → +50% = 30 → +50% = 45 (summed it would be 40).
         assert_eq!(w.stats(&c)[Stat::AttackBlow], 45);
     }
@@ -1144,7 +1190,7 @@ mod tests {
     fn full_slots_are_reported() {
         let (c, mut w, _) = setup();
         let c = content(c.units.clone(), c.items.iter().cloned().chain([item(10, ArtefactType::Amulet), item(11, ArtefactType::Helm)]).collect());
-        w.items = [Some(ItemId(1)), Some(ItemId(4)), Some(ItemId(5)), Some(ItemId(10))];
+        w.items = [Some(ItemId(1)), Some(ItemId(4)), Some(ItemId(5)), Some(ItemId(10)), None, None];
         assert_eq!(slot_for(&c, &w, ItemId(11)), Err(EquipError::NoFreeSlot));
     }
 

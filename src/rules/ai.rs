@@ -800,7 +800,7 @@ pub struct SimKey {
 
 /// A side of a [`SimKey`]: (type, level, HP, worn items, spells, drain) of each unit, the
 /// defence and the defence its strengths were counted with.
-type UnitKey = (u32, i32, i32, [Option<ItemId>; items::SLOTS], [Option<crate::rules::units::SpellSlot>; crate::rules::units::SPELL_SLOTS], i32);
+type UnitKey = (u32, i32, i32, [Option<ItemId>; items::MAX_SLOTS], [Option<crate::rules::units::SpellSlot>; crate::rules::units::SPELL_SLOTS], i32);
 type SideKey = (Vec<UnitKey>, i32, i32, bool);
 
 impl SimKey {

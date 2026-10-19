@@ -45,8 +45,8 @@ pub struct Troop {
     #[serde(default)]
     pub xp: i32,
     /// Worn items, as a unit's ([`Unit::items`]).
-    #[serde(default)]
-    pub worn: [Option<ItemId>; crate::rules::items::SLOTS],
+    #[serde(default, deserialize_with = "crate::rules::items::deserialize_cells")]
+    pub worn: [Option<ItemId>; crate::rules::items::MAX_SLOTS],
     /// Game minute of death: a corpse stays in the record (it may be resurrected, and it
     /// comes back with a respawn) until the AI drops it (ai.md §9).
     #[serde(default)]
@@ -94,7 +94,7 @@ impl Troop {
             slot,
             hurt: 0,
             xp: 0,
-            worn: [None; crate::rules::items::SLOTS],
+            worn: [None; crate::rules::items::MAX_SLOTS],
             died_at: None,
             kept_death: None,
             unpaid: false,

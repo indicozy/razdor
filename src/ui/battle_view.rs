@@ -1379,7 +1379,7 @@ impl BattleView {
         let b = &self.battle;
         let f = self.fighter(id);
         // What it wears, an enemy's too (an army wears its items, `ai::army_units`).
-        let items: [Option<ItemId>; 4] = f.items;
+        let items: [Option<ItemId>; razdor::rules::items::MAX_SLOTS] = f.items;
         let mut status = Vec::new();
         if b.active() == Some(id) {
             status.push((razdor::trf!("Acting: {left} of {total} actions left", left = b.actions_left(), total = f.stats[Stat::Manevres].max(b.actions_left())), Color::new(0.5, 1.0, 0.5, 1.0)));

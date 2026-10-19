@@ -53,7 +53,9 @@ use super::world::World;
 /// the game was started with; older saves load wide, as they were all made. 10: per-party
 /// experimental rules, also carried between campaign maps; older saves use classic rules.
 /// 11: duplicate-item restriction, potion limit/counters and each unit's noncombatant mark.
-pub const FORMAT_VERSION: u32 = 11;
+/// 12: six item cells per unit (the multiple rings or amulets rule); older saves hold four,
+/// read with two empty cells.
+pub const FORMAT_VERSION: u32 = 12;
 /// The oldest format still read.
 pub const OLDEST_VERSION: u32 = 1;
 pub const EXTENSION: &str = "rzsave";
@@ -1002,6 +1004,23 @@ pub(crate) mod tests {
         let loaded: Game = serde_json::from_value(old).unwrap();
         assert_eq!(loaded.experimental, Default::default());
         assert!(loaded.squad.iter().all(|u| !u.battle_disabled && u.potions_drunk == 0));
+    }
+
+    /// Format 11 stored four item cells per unit: they load with two empty cells added, and a
+    /// unit with six cells (the multiple rings or amulets rule) roundtrips whole.
+    #[test]
+    fn four_item_cells_from_format_11_load_padded_and_six_cells_roundtrip() {
+        let install = demo();
+        let mut g = Game::new(install.clone(), HeroClass::Knight);
+        let mut old = serde_json::to_value(&g).unwrap();
+        old["squad"][0]["items"] = serde_json::json!([7, null, null, 9]);
+        let loaded: Game = serde_json::from_value(old).unwrap();
+        assert_eq!(loaded.squad[0].items, [Some(ItemId(7)), None, None, Some(ItemId(9)), None, None]);
+
+        g.squad[0].items[4] = Some(ItemId(7));
+        g.squad[0].items[5] = Some(ItemId(9));
+        let back = roundtrip(&g, install, None);
+        assert_eq!(back.squad[0].items, g.squad[0].items);
     }
 
     fn walk(g: &mut Game, frames: usize) {

@@ -250,7 +250,7 @@ pub struct Fighter {
     /// Berserk, Fortify, Flock …). Every turn start sets them to 0.
     pub mods: Buff,
     /// The items the unit wears (an enemy's too), for the panel.
-    pub items: [Option<ItemId>; crate::rules::items::SLOTS],
+    pub items: [Option<ItemId>; crate::rules::items::MAX_SLOTS],
     /// The unit's lasting world spells and its life loss as the battle began, for the cards'
     /// spell badges (the battle cards read the unit records, 493a64).
     pub spells: [Option<crate::rules::units::SpellSlot>; crate::rules::units::SPELL_SLOTS],
