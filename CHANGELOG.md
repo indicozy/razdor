@@ -14,6 +14,19 @@
 
 ## 0.4.38 — 2026-10-20
 
+Коммит `b3b3cd6` (тег `v0.4.38`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+d6539c9869a1a7257589de4b20b4445ff5516b07f25a1ef207912ad51ad2917f  razdor
+84c3dc701047ee90de72c908e3eb239e8f7b04289bc5b64ad351758849c91738  Razdor.exe
+aad10e68096b5789147793dd31ba1b6d9264d1cefef07656d8cf8bcf147118cc  razdor-macos
+d05cef936752a9f8c5aecf7513d72aa1a55747f55bfa115dfce5e3d5873bf2fb  razdor-translate
+b982956557db794b4e751e21cb16ed8236f608b5c7bea85920c6c3978f5a3825  Razdor-translate.exe
+2a5319401e4f5b784e178a89211b340cadcdd0a66a9610dbab2643ccf15df728  razdor-translate-macos
+```
+
 ### Изменено
 
 - Окно сохранения: в строке новой записи теперь стоят реальные дата и время, как у сохранённых игр, а не игровое время.
