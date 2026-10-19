@@ -7,7 +7,7 @@
 //! `title`, `fonts` (sample lines in many scripts), `update` (a made-up release on offer), `authors[:<seconds>]`, `options[:advanced]`, `scenarios[:<map>]`, `tutorial`, `load[:manual|auto[:<row>]]`, `editor[:<map>[:<text to find>]]`, `classes:<map>`, `map:<map>[:x,y]`, `minimap:<map>`, `walk:<map>:dx,dy` (the
 //! hero sets off that many cells away), `building:<map>:<n>`
 //! (the hero in the n-th building; `:barracks`, `:garrison`, `:market`, `:sanctuary` open that tab; `:market-pack` the market's pack list), `army:<map>[:<n>[:<unit id>[:<level>]]]` (squad member n selected, made that unit at that level), `journal:<map>` / `hero:<map>[:<tab>]`, `spells:<map>`,
-//! `menu:<map>`, `defeat:<map>` (the lost battle's report), `settings:<map>[:advanced]`, `battle:<map>:<n>` (against the n-th army), `custom` (the custom battle
+//! `menu:<map>`, `defeat:<map>` (the lost battle's report), `report:<map>[:<gold>]` (the noon report), `settings:<map>[:advanced]`, `battle:<map>:<n>` (against the n-th army), `custom` (the custom battle
 //! setup), `custom-battle` (its first round; `custom-battle:watch` watches the AI play it). `RAZDOR_SCENE_DEBUG=1` turns the map's debug overlay (F3) on; `RAZDOR_SCENE_SHOW=x,y,r` shows
 //! a place as a lantern event does; `RAZDOR_SCENE_CONSOLE=help;gold 100` opens the cheat
 //! console after those commands; `RAZDOR_SCENE_FILTER=text` fills the inventory filter
@@ -543,6 +543,14 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                 over: razdor::rules::game::Beat::Army(name),
             };
             app.dialogs.extend(super::dialog::Dialog::victory(&result));
+            Screen::WorldMap
+        }
+        "report" => {
+            // `report:<map>[:<gold>]`: the noon report over the map (Dialog::day_report), the
+            // gold `gold` (default 19260), mana 2000, income 500 and wages 595.
+            let gold = arg.and_then(|a| a.parse::<i32>().ok()).unwrap_or(19260);
+            let report = razdor::rules::game::DayReport { day: 0, income: 500, wages: 595, mana_wages: 0, unpaid: 0, deserted: Vec::new(), gold, mana_total: 2000 };
+            app.dialogs.push_back(super::dialog::Dialog::day_report(&game, &report));
             Screen::WorldMap
         }
         "defeat" => {
