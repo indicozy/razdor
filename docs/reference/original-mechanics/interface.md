@@ -458,6 +458,10 @@ Fonts by style (fonts are white less the colour given, loaded at 4e5c9c and 4dbc
   in ae24c4 (orange in every style). Height text + 0x9f (text at most 0x161), or 0x97 with
   no text. The hero (army 0): `HeroArmy`, `Commander` and the hero's name, normal style.
 - **Building** (4cb18c): the text block at y = 37: `Owner` (label) and the owner (name), the
+  owner of a castle, fort or ruins by its owner byte (+0x124): 0 the hero's name (68dcd0),
+  0xFF the building's own owner text (68ed08), k the leader name of the map's army record
+  k − 1 (68ed04, 4cb2d3; the table is filled once by the loader 4b771c, so the name shows
+  whether that army is on the map or not); the
   description in the label font, `VillageEmptyGold` in ae24a4; for ruins with a garrison an
   empty line, `Defenders` (label) and `NoNameArmy` (name font), only inside that block (so
   not when it has nothing else). Height text + 0x2f, or 0x1d with no text. Any other

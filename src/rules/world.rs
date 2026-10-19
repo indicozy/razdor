@@ -889,6 +889,12 @@ pub struct World {
     /// Names of the scenario's named characters, by id − 1.
     #[serde(skip)]
     pub named_characters: Vec<String>,
+    /// The leader names of the scenario's army records, in file order (owner byte k is
+    /// record k − 1): a castle's tooltip names its holder from them (0x4cb2d3), a table the
+    /// map loader fills once (0x68ed04, 0x4b771c), there whether the army is on the map,
+    /// inactive or beaten.
+    #[serde(skip)]
+    pub army_leaders: Vec<String>,
     /// Last [`Army::uid`] handed to a spawned demo gang.
     pub next_uid: u32,
     /// Beaten armies waiting to come back: lords recovering in a building, and armies with
@@ -972,6 +978,7 @@ impl World {
             events: Vec::new(),
             points: Vec::new(),
             named_characters: Vec::new(),
+            army_leaders: Vec::new(),
             next_uid: FIRST_GANG_UID,
             respawns: Vec::new(),
             regions: Vec::new(),
@@ -1035,6 +1042,7 @@ impl World {
         // (0x4b2aa1); the named characters' names are kept as they are.
         let text = crate::dt::dtm::collapse_spaces;
         world.named_characters = s.named_characters.iter().map(|n| n.name.clone()).collect();
+        world.army_leaders = s.armies.iter().map(|a| text(&a.leader_name)).collect();
 
         for (i, b) in s.buildings.iter().enumerate() {
             let kind = b.building_type().map_or(LocationKind::Smithy, LocationKind::from_building);
@@ -1428,6 +1436,7 @@ impl World {
         self.events = fresh.events;
         self.points = fresh.points;
         self.named_characters = fresh.named_characters;
+        self.army_leaders = fresh.army_leaders;
         self.footprints = fresh.footprints;
         self.sea = fresh.sea;
         self.regions = fresh.regions;

@@ -1844,11 +1844,14 @@ fn army_tooltip(game: &Game, a: &Army) -> Tooltip {
 
 /// The owner line of a building's tooltip. The holder is named only for a castle, fort or
 /// ruins (0x4cb18c): the hero, an army's leader or the map's owner. Any other building, a
-/// captured village too, always names the map's owner.
+/// captured village too, always names the map's owner. An army's leader comes from the map's
+/// army record (0x4cb2d3), so it is named while the army is off the map or beaten too.
 fn tooltip_owner(game: &Game, l: &Location) -> String {
     match (l.kind, l.owner) {
         (LocationKind::Castle | LocationKind::Fort | LocationKind::Ruins, Owner::Player) => game.hero_name.clone().unwrap_or_else(|| tr("you").to_string()),
-        (LocationKind::Castle | LocationKind::Fort | LocationKind::Ruins, Owner::Army(k)) => game.world.armies.iter().find(|a| a.id == k).map_or_else(String::new, |a| a.leader_name.clone()),
+        (LocationKind::Castle | LocationKind::Fort | LocationKind::Ruins, Owner::Army(k)) => {
+            (k as usize).checked_sub(1).and_then(|i| game.world.army_leaders.get(i)).cloned().unwrap_or_default()
+        }
         _ => l.owner_name.clone(),
     }
 }
@@ -3234,6 +3237,42 @@ mod tests {
         assert!(!map.is_empty());
         assert_eq!(shown, map);
         assert_eq!(owner(&g, "Замок Бонитур").1, "Иво");
+    }
+
+    /// A castle held by an army names that army's leader from the map's army record
+    /// (0x4cb2d3 reads 0x68ed04), also once the army is off the map or beaten.
+    #[test]
+    fn a_castle_names_its_armys_leader_with_the_army_gone() {
+        let Some(dir) = std::env::var_os(razdor::dt::install::ENV_VAR) else { return };
+        let dt = razdor::dt::install::DtInstall::load(std::path::Path::new(&dir)).unwrap();
+        let content = std::sync::Arc::new(razdor::rules::content::Content::from_dt(&dt));
+        let mut checked = 0;
+        for m in dt.maps.iter().filter(|m| m.name.starts_with("РК")) {
+            let scenario = m.load().unwrap();
+            let mut g = Game::from_scenario(content.clone(), &scenario, HeroClass::Knight);
+            let held: Vec<(usize, u8)> = g
+                .world
+                .locations
+                .iter()
+                .enumerate()
+                .filter(|(_, l)| matches!(l.kind, LocationKind::Castle | LocationKind::Fort))
+                .filter_map(|(i, l)| match l.owner {
+                    Owner::Army(k) => Some((i, k)),
+                    _ => None,
+                })
+                .collect();
+            for (i, k) in held {
+                let leader = razdor::dt::dtm::collapse_spaces(&scenario.armies[k as usize - 1].leader_name);
+                if leader.trim().is_empty() {
+                    continue;
+                }
+                g.world.armies.clear();
+                g.world.inactive.clear();
+                assert_eq!(tooltip_owner(&g, &g.world.locations[i]), leader, "{}: {}", m.name, g.world.locations[i].name);
+                checked += 1;
+            }
+        }
+        assert!(checked > 0, "no castle held by an army");
     }
 
     /// The centre button's glide (0x4af96c): 900 ms, the cosine ease in the original's
