@@ -14,6 +14,19 @@
 
 ## 0.4.36 — 2026-10-19
 
+Коммит `bff4893` (тег `v0.4.36`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+b65ecf95625832b145a3e394024667f645777920c51eae252441eb73a251239a  razdor
+13d4c2ecb955f4cf6f4d2511a83a7244dfc94ba2ccd35f2e6935fc9d39595f96  Razdor.exe
+331a11bd99f874edb5dbac159e2ed28bec98d6ac4d70da38894dfed095d1454c  razdor-macos
+73651d27087e8bacf9fc008490949bae13f665d0048edcfa0537525592e6452e  razdor-translate
+3d3ee6abf42cfdf7b3f7e965183db8ff4842575568bca1bcf33e7ea5c1d1c7ae  Razdor-translate.exe
+2969671484a669520f418358f2c8a7d9691d0e7525be253a2a2b4d2e97c2fca0  razdor-translate-macos
+```
+
 ### Добавлено
 
 - Экспериментальные правила сценария: кнопка «…» рядом с «Далее» на экране сценария открывает
