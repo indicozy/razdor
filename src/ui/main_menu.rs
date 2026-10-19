@@ -576,6 +576,22 @@ pub fn set_ai_strength(audio: &mut super::audio::Settings, s: AiStrength) {
     audio.max_ai = s == AiStrength::Max;
 }
 
+/// The settings a game follows that its saves do not keep (the battle AI's strength, the
+/// walk, the options of passing armies): every frame, and at once on a game just restored,
+/// before the battle it may start (a pending foe, a battle's «Рестарт»). Before #19 a
+/// restored battle began with the defaults, the original's AI on its normal level: with
+/// «Максимум» chosen, its «Рестарт» was played by another AI than the battle itself.
+pub fn follow_settings(audio: &super::audio::Settings, g: &mut razdor::rules::game::Game) {
+    g.improved_ai = expert_ai(audio);
+    g.max_ai = ai_strength(audio) == AiStrength::Max;
+    g.pursue = pursue(audio);
+    g.walk_pace = walk_pace(audio);
+    g.friends_let_pass = audio.friends_let_pass;
+    g.avoid_armies = audio.avoid_armies;
+    g.allow_unit_benching = audio.allow_unit_benching;
+    g.pass_on_bridges = audio.pass_on_bridges;
+}
+
 /// The improved AI's checkbox clicked: on gives the improved level, off the original's (and
 /// so ends «Максимум»).
 fn toggle_expert_ai(audio: &mut super::audio::Settings) {

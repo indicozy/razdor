@@ -48,7 +48,10 @@ put(): save::meta_of → save::encode (serde_json + BzEncoder) → write .tmp �
   the noon report (`Game::autosave_due`, named by `save::date_name`). The install's
   `OptValue8` can turn them off (`autosaves_on`).
 - «Рестарт» of a battle keeps the encoded bytes of that moment in
-  `BattleView::restart_state`, not a file.
+  `BattleView::restart_state`, not a file. A save holds no AI level (`Game::improved_ai`,
+  `max_ai` are the settings'): `App::restart_battle` and `App::load` call
+  `main_menu::follow_settings` before the battle starts, so the restarted battle is fought by
+  the same AI (#19; before, it fell back to the original's AI on its normal level).
 
 ## Loading
 

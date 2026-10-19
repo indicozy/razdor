@@ -359,7 +359,7 @@ impl App {
         let restored = save::decode(bytes).and_then(|(_, game)| save::restore(meta, game, self.demo.clone(), install.as_ref()));
         match restored {
             Ok(mut game) => {
-                game.allow_unit_benching = self.audio.settings.allow_unit_benching;
+                main_menu::follow_settings(&self.audio.settings, &mut game);
                 self.dialogs.clear();
                 self.message = None;
                 self.screen = saves::battle(&mut game);
@@ -373,7 +373,7 @@ impl App {
         let install = self.assets.dt.as_ref().zip(self.dt_content.clone()).map(|(d, content)| Install { dir: &d.install.dir, content });
         match save::load(path, self.demo.clone(), install.as_ref()) {
             Ok(mut game) => {
-                game.allow_unit_benching = self.audio.settings.allow_unit_benching;
+                main_menu::follow_settings(&self.audio.settings, &mut game);
                 self.dialogs.clear();
                 self.message = None;
                 self.load_error = None;
@@ -782,14 +782,7 @@ impl App {
         self.sounds();
         // The battle AI's level from the settings: the next battle uses it.
         if let Some(g) = self.game.as_mut() {
-            g.improved_ai = main_menu::expert_ai(&self.audio.settings);
-            g.max_ai = main_menu::ai_strength(&self.audio.settings) == main_menu::AiStrength::Max;
-            g.pursue = main_menu::pursue(&self.audio.settings);
-            g.walk_pace = main_menu::walk_pace(&self.audio.settings);
-            g.friends_let_pass = self.audio.settings.friends_let_pass;
-            g.avoid_armies = self.audio.settings.avoid_armies;
-            g.allow_unit_benching = self.audio.settings.allow_unit_benching;
-            g.pass_on_bridges = self.audio.settings.pass_on_bridges;
+            main_menu::follow_settings(&self.audio.settings, g);
         }
         battle_view::set_anim_speed(main_menu::anim_speed(&self.audio.settings));
         // The settings window's options the interface reads from the install's `[Options]`.

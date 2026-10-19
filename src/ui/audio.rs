@@ -706,6 +706,32 @@ mod tests {
         assert_eq!(ai_strength(&old), AiStrength::Improved, "an older file: no «Максимум»");
     }
 
+    /// #19: a battle restored from a save (a pending foe, the battle's «Рестарт») is fought
+    /// by the AI the settings choose, as the battle itself was; the save keeps no AI level.
+    #[test]
+    fn a_restored_battle_follows_the_ai_strength() {
+        use crate::ui::main_menu::{follow_settings, set_ai_strength, AiStrength};
+        use razdor::rules::content::{Content, HeroClass};
+        use razdor::rules::game::{Foe, Game};
+        use razdor::rules::save::{self, SaveKind};
+        use std::sync::Arc;
+        let demo = Arc::new(Content::builtin());
+        let mut s = Settings::default();
+        set_ai_strength(&mut s, AiStrength::Max);
+        let mut g = Game::new(demo.clone(), HeroClass::Knight);
+        follow_settings(&s, &mut g);
+        g.foe = Some(Foe::Garrison(g.world.index_of("Bandit camp")));
+        assert!(g.start_battle().max_ai(), "the battle as first fought");
+        let meta = save::meta_of(&g, SaveKind::Auto, "battle").unwrap();
+        let bytes = save::encode(&meta, &g).unwrap();
+        let (meta, game) = save::decode(&bytes).unwrap();
+        let mut restored = save::restore(&meta, game, demo, None).unwrap();
+        assert!(!restored.max_ai && !restored.improved_ai, "the save keeps no AI level");
+        follow_settings(&s, &mut restored);
+        assert!(restored.improved_ai && restored.max_ai);
+        assert!(restored.start_battle().max_ai(), "its «Рестарт» is fought by the same AI");
+    }
+
     #[test]
     fn benching_preference_defaults_off_and_survives_settings_serialization() {
         let old: Settings = serde_json::from_str("{}").unwrap();
