@@ -1002,6 +1002,11 @@ impl BattleView {
             status.push((tr("Bleeding").into(), RED_TEXT));
         }
         let hero = f.is_hero.then(|| HeroClass::ALL.into_iter().find(|h| h.unit() == f.unit)).flatten();
+        // The battle values the panel compares with carry the building's defence too, as the
+        // shown stats do (`shown_stats`); `at_start` leaves it out.
+        let mut start = f.at_start.clone();
+        start[Stat::DefenceBlow] += b.building_defence(f.team);
+        start[Stat::DefenceShot] += b.building_defence(f.team);
         let sheet = Sheet {
             kind: f.unit,
             name: &f.name,
@@ -1011,7 +1016,8 @@ impl BattleView {
             need: self.need(f),
             hp: f.hp,
             now: &self.battle.shown_stats(id),
-            start: &f.at_start,
+            start: &start,
+            bleed: f.bleed,
             power: f.power,
             // The recruit wage of the type's Cost for either side, none for a hero class, a
             // named character or the Undead (491a58 → 4a163c; the original showed 49 on an

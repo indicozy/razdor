@@ -25,8 +25,11 @@ pub struct Sheet<'a> {
     pub hp: i32,
     /// Stats now (with blessings and curses).
     pub now: &'a Stats,
-    /// Stats with items, as the battle began.
+    /// The current value each stat is compared with: the stats with items as the battle
+    /// began (outside battle, the same as `now`). A building's defence is in it too.
     pub start: &'a Stats,
+    /// The unit's bleeding in battle (% lost at each action start; 0 outside battle).
+    pub bleed: i32,
     /// Current magic power (it drains during a battle).
     pub power: i32,
     pub wage: i32,
@@ -243,12 +246,16 @@ fn signed(v: i32) -> String {
     }
 }
 
-/// Colour of a value against its start-of-battle value: blue raised, red lowered.
-fn cmp_color(now: i32, start: i32) -> Color {
-    match now.cmp(&start) {
-        std::cmp::Ordering::Greater => BLUE_TEXT,
-        std::cmp::Ordering::Less => RED_TEXT,
-        std::cmp::Ordering::Equal => CREAM,
+/// The colour of a stat line's label and value (0x491a58): plain when the shown value equals
+/// the level value (the type at the unit's level, no items), blue when above it, red when
+/// below it or below the current value (red wins over blue).
+pub(super) fn shown_ink(shown: i32, level: i32, current: i32) -> Color {
+    if shown < level || shown < current {
+        RED_TEXT
+    } else if shown > level {
+        BLUE_TEXT
+    } else {
+        CREAM
     }
 }
 
@@ -279,45 +286,49 @@ pub fn row2_extra(content: &Content, s: &Sheet) -> i32 {
     }
 }
 
-/// The stat list of `s`, as the original's panel orders it.
+/// The stat list of `s`, as the original's panel orders it (0x491fa4). Every value is the
+/// shown one (`now`: the current stats outside battle, with items and spells; the battle
+/// values in battle), coloured against its level value and the current one (`start`).
+/// Blue above the level value, red below it or below the current value (`shown_ink`).
 fn stat_lines(content: &Content, s: &Sheet) -> Vec<Line> {
     let (now, start) = (s.now, s.start);
     let naked = Stats::of_level(content, s.kind, s.level);
     let mut lines: Vec<Line> = Vec::new();
+    // Hits: the current HP, or the max HP when unhurt; a wounded unit's Hits are red, as the
+    // current HP is compared with the max HP.
     let max = now.max_hp();
-    let hits = if s.hp < max { format!("{} / {max}", s.hp.max(0)) } else { max.to_string() };
-    lines.push((label("SHit", n_("Hits")), hits, if s.hp < max { RED_TEXT } else { cmp_color(max, start.max_hp()) }));
-    // "base + bonus" for what items and traits add, as the original writes it.
-    let split = |st: Stat| -> (String, Color) {
-        let (n, b) = (naked[st], start[st] - naked[st]);
-        let v = if b != 0 && now[st] == start[st] { format!("{n} {} {}", if b > 0 { "+" } else { "-" }, b.abs()) } else { now[st].to_string() };
-        (v, cmp_color(now[st], start[st]))
+    let hits = if s.hp < max { s.hp.max(0).to_string() } else { max.to_string() };
+    let hits_ink = if s.hp < max { RED_TEXT } else { shown_ink(max, naked.max_hp(), start.max_hp()) };
+    lines.push((label("SHit", n_("Hits")), hits, hits_ink));
+    // An attack's line: left out when shown and current are both 0 (491a58).
+    let attack = |st: Stat| -> Option<(String, Color)> {
+        (now[st] != 0 || start[st] != 0).then(|| (now[st].to_string(), shown_ink(now[st], naked[st], start[st])))
     };
-    // In a building its defence is written apart, "15 + 12", as the original does; the
-    // back row's `Row2Def` joins the building's on the ranged defence (0x491fa4). A line is
-    // left out when the shown and the current value are both 0, a defence kept while
-    // v + n is above 0 (491a58, 491b84).
+    // A defence never shows below 0. In a building its defence n is written apart, "v + n":
+    // v is the defence without it, and only v is compared with the level and current values.
+    // The back row's `Row2Def` joins n on the ranged defence. The line is kept while v + n is
+    // above 0 (491fa4, 491b84).
     let defence = |st: Stat| -> Option<(String, Color)> {
         let extra = s.building + if st == Stat::DefenceShot { row2_extra(content, s) } else { 0 };
-        let own = now[st] - s.building;
+        let level = naked[st].max(0);
+        let own = (now[st] - s.building).max(0);
         if extra > 0 && own + extra > 0 {
-            Some((format!("{own} + {extra}"), cmp_color(now[st], start[st])))
-        } else if now[st] != 0 || start[st] != 0 {
-            Some(split(st))
+            let current = (start[st] - s.building).max(0);
+            Some((format!("{own} + {extra}"), shown_ink(own, level, current)))
         } else {
-            None
+            let shown = now[st].max(0);
+            let current = start[st].max(0);
+            (shown != 0 || current != 0).then(|| (shown.to_string(), shown_ink(shown, level, current)))
         }
     };
     // The original's order: melee attack and defence, then ranged attack and defence (491fa4).
-    if start[Stat::AttackBlow] != 0 || now[Stat::AttackBlow] != 0 {
-        let (v, c) = split(Stat::AttackBlow);
+    if let Some((v, c)) = attack(Stat::AttackBlow) {
         lines.push((label("SAttackBlow", n_("Melee attack")), v, c));
     }
     if let Some((v, c)) = defence(Stat::DefenceBlow) {
         lines.push((label("SDefenceBlow", n_("Melee defence")), v, c));
     }
-    if start[Stat::AttackShot] != 0 || now[Stat::AttackShot] != 0 {
-        let (v, c) = split(Stat::AttackShot);
+    if let Some((v, c)) = attack(Stat::AttackShot) {
         lines.push((label("SAttackShot", n_("Ranged attack")), v, c));
     }
     if let Some((v, c)) = defence(Stat::DefenceShot) {
@@ -327,7 +338,9 @@ fn stat_lines(content: &Content, s: &Sheet) -> Vec<Line> {
         let school = now.magic.unwrap_or(MagicSchool::Elemental);
         let p = s.power;
         let o = &content.options;
-        let pc = cmp_color(p, start[Stat::MagicPower]);
+        // The magic lines are compared with the level power only.
+        let level_power = naked[Stat::MagicPower];
+        let pc = shown_ink(p, level_power, level_power);
         let dir = now.magic_direction();
         if matches!(dir, MagicDirection::ToEnemy | MagicDirection::ToAll) {
             lines.push((label("StrikeHit", n_("Magic strike (- hits)")), format!("-{p}"), pc));
@@ -351,7 +364,7 @@ fn stat_lines(content: &Content, s: &Sheet) -> Vec<Line> {
     let all = now[Stat::ProtectLife];
     let merged = all > 0 && protections.iter().all(|&st| now[st] == all);
     if merged {
-        let c = protections.iter().map(|&st| cmp_color(now[st], start[st])).find(|&c| c != CREAM).unwrap_or(CREAM);
+        let c = protections.iter().map(|&st| shown_ink(now[st], naked[st], start[st])).find(|&c| c != CREAM).unwrap_or(CREAM);
         lines.push((label("SProtectAllMagic", n_("Immunity to magic")), format!("{all}%"), c));
     }
     // Negative regeneration is poison (`SPoison`, 491fa4).
@@ -361,17 +374,31 @@ fn stat_lines(content: &Content, s: &Sheet) -> Vec<Line> {
         (label("SProtectElemental", n_("Elemental magic protection")), Stat::ProtectElemental),
         (label("SProtectDeath", n_("Death magic protection")), Stat::ProtectDeath),
         (regen, Stat::Regen),
-        (label("SVampirizm", n_("Vampirism")), Stat::Vampirizm),
     ] {
         if merged && protections.contains(&st) {
             continue;
         }
         if now[st] != 0 || start[st] != 0 {
-            lines.push((label, format!("{}%", now[st]), cmp_color(now[st], start[st])));
+            lines.push((label, format!("{}%", now[st]), shown_ink(now[st], naked[st], start[st])));
         }
     }
-    lines.push((label("SInitiative", n_("Initiative")), now[Stat::Initiative].to_string(), cmp_color(now[Stat::Initiative], start[Stat::Initiative])));
-    lines.push((label("SManevres", n_("Actions")), now[Stat::Manevres].to_string(), cmp_color(now[Stat::Manevres], start[Stat::Manevres])));
+    // The Community bleed line comes after regeneration (4924c1) and before vampirism. It has
+    // no level value in the original, so it is plain.
+    if s.bleed != 0 {
+        lines.push((label("SBleed", n_("Bleeding")), format!("{}%", s.bleed), CREAM));
+    }
+    if now[Stat::Vampirizm] != 0 || start[Stat::Vampirizm] != 0 {
+        let st = Stat::Vampirizm;
+        lines.push((label("SVampirizm", n_("Vampirism")), format!("{}%", now[st]), shown_ink(now[st], naked[st], start[st])));
+    }
+    // Initiative never shows below 0.
+    let (ini, ini_now, ini_start) = (Stat::Initiative, now[Stat::Initiative].max(0), start[Stat::Initiative].max(0));
+    if ini_now != 0 || ini_start != 0 {
+        lines.push((label("SInitiative", n_("Initiative")), ini_now.to_string(), shown_ink(ini_now, naked[ini].max(0), ini_start)));
+    }
+    if let Some((v, c)) = attack(Stat::Manevres) {
+        lines.push((label("SManevres", n_("Actions")), v, c));
+    }
     if s.wage > 0 {
         lines.push((label("DailyPayment", n_("Daily wage")), s.wage.to_string(), ORANGE_TEXT));
     }
@@ -776,6 +803,7 @@ mod tests {
             hp: now.max_hp(),
             now: &now,
             start: &now,
+            bleed: 0,
             power: 0,
             wage: 0,
             items: [None; 4],
@@ -861,6 +889,7 @@ mod tests {
             hp: now.max_hp(),
             now,
             start: now,
+            bleed: 0,
             power: 0,
             wage: 0,
             items: [None; 4],
@@ -1050,5 +1079,118 @@ mod tests {
     fn the_panel_stacks_its_text_as_the_originals() {
         assert_eq!(panel_tops(4, 8, false), (68.0, 68.0 + 134.0, 68.0 + 134.0 + 34.0));
         assert_eq!(panel_tops(4, 8, true), (68.0, 68.0 + 142.0, 68.0 + 142.0 + 34.0));
+    }
+
+    /// A sheet of `kind` at `level` for the colour and value tests: `now` is what it shows,
+    /// `start` what it is compared with (the same stats outside battle).
+    fn panel<'a>(kind: UnitId, level: i32, now: &'a Stats, start: &'a Stats, hp: i32, building: i32) -> Sheet<'a> {
+        Sheet {
+            kind,
+            name: "",
+            named: false,
+            level,
+            xp: 0,
+            need: 0,
+            hp,
+            now,
+            start,
+            bleed: 0,
+            power: 0,
+            wage: 0,
+            items: [None; 4],
+            back_row: false,
+            unpaid: false,
+            building,
+            hero: None,
+            status: Vec::new(),
+            battle: false,
+        }
+    }
+
+    fn line_of(content: &Content, sheet: &Sheet, key: &str, en: &str) -> Line {
+        stat_lines(content, sheet).into_iter().find(|l| l.0 == label(key, en)).expect("the stat's line")
+    }
+
+    /// The colour rule (491a58): plain at the level value, blue above it, red below it or
+    /// below the current value, red winning over blue.
+    #[test]
+    fn a_shown_value_is_blue_above_its_level_and_red_below_it_or_its_current() {
+        assert_eq!(shown_ink(20, 20, 20), CREAM);
+        assert_eq!(shown_ink(25, 20, 25), BLUE_TEXT);
+        assert_eq!(shown_ink(15, 20, 15), RED_TEXT);
+        assert_eq!(shown_ink(25, 20, 30), RED_TEXT, "below the current value: red wins over blue");
+        assert_eq!(shown_ink(20, 20, 12), CREAM, "above the current value only: plain at the level");
+    }
+
+    /// A worn sword's +3 melee attack is the shown total (not "base + 3"), in blue for the
+    /// label and the value alike (0x491a58); unworn, the base alone and plain.
+    #[test]
+    fn an_item_raising_attack_shows_the_total_in_blue() {
+        let content = Content::builtin();
+        let kind = UnitId(content.units[0].id);
+        let sword = content.item_by_key("short_sword").expect("the demo sword");
+        let mut u = razdor::rules::units::Unit::new(&content, kind, Slot::new(razdor::rules::formation::Row::Front, 0));
+        let base = Stats::of_level(&content, kind, u.level)[Stat::AttackBlow];
+        let attack = |u: &razdor::rules::units::Unit| {
+            let stats = u.stats(&content);
+            let sheet = panel(kind, u.level, &stats, &stats, u.hp, 0);
+            line_of(&content, &sheet, "SAttackBlow", "Melee attack")
+        };
+        assert_eq!(attack(&u), (label("SAttackBlow", "Melee attack"), base.to_string(), CREAM));
+        u.items[0] = Some(sword);
+        assert_eq!(attack(&u), (label("SAttackBlow", "Melee attack"), (base + 3).to_string(), BLUE_TEXT));
+    }
+
+    /// A wounded unit's Hits are red (its current HP is compared with the max HP); unhurt,
+    /// the max HP alone.
+    #[test]
+    fn a_wounded_unit_shows_its_hits_in_red() {
+        let content = Content::builtin();
+        let kind = UnitId(content.units[0].id);
+        let stats = Stats::of_level(&content, kind, 0);
+        let max = stats.max_hp();
+        let hits = |hp: i32| {
+            let sheet = panel(kind, 0, &stats, &stats, hp, 0);
+            line_of(&content, &sheet, "SHit", "Hits")
+        };
+        assert_eq!(hits(max), (label("SHit", "Hits"), max.to_string(), CREAM));
+        assert_eq!(hits(max - 3), (label("SHit", "Hits"), (max - 3).to_string(), RED_TEXT));
+    }
+
+    /// In battle a cursed attack (now below its battle value) is red, a blessed one blue.
+    #[test]
+    fn a_cursed_stat_in_battle_is_red() {
+        let content = Content::builtin();
+        let kind = UnitId(content.units[0].id);
+        let start = Stats::of_level(&content, kind, 0);
+        let base = start[Stat::AttackBlow];
+        let mut cursed = start.clone();
+        cursed[Stat::AttackBlow] = base - 4;
+        let sheet = panel(kind, 0, &cursed, &start, cursed.max_hp(), 0);
+        assert_eq!(line_of(&content, &sheet, "SAttackBlow", "Melee attack"), (label("SAttackBlow", "Melee attack"), (base - 4).to_string(), RED_TEXT));
+        let mut blessed = start.clone();
+        blessed[Stat::AttackBlow] = base + 4;
+        let sheet = panel(kind, 0, &blessed, &start, blessed.max_hp(), 0);
+        assert_eq!(line_of(&content, &sheet, "SAttackBlow", "Melee attack").2, BLUE_TEXT);
+    }
+
+    /// In a building the defence is written "v + n" (n the building's defence), and only v is
+    /// coloured: plain at the level value, red when v is cursed below its current value.
+    #[test]
+    fn a_building_defence_is_written_v_plus_n_and_coloured_by_v() {
+        let content = Content::builtin();
+        let kind = UnitId(content.units[0].id);
+        let naked = Stats::of_level(&content, kind, 0);
+        let v = naked[Stat::DefenceBlow];
+        let mut now = naked.clone();
+        now[Stat::DefenceBlow] = v + 20;
+        now[Stat::DefenceShot] = naked[Stat::DefenceShot] + 20;
+        // The current values carry the building too (the army window, and the battle view).
+        let sheet = panel(kind, 0, &now, &now, now.max_hp(), 20);
+        assert_eq!(line_of(&content, &sheet, "SDefenceBlow", "Melee defence"), (label("SDefenceBlow", "Melee defence"), format!("{v} + 20"), CREAM));
+        let mut cursed = now.clone();
+        cursed[Stat::DefenceBlow] = v + 20 - 4;
+        let sheet = panel(kind, 0, &cursed, &now, cursed.max_hp(), 20);
+        assert_eq!(line_of(&content, &sheet, "SDefenceBlow", "Melee defence"), (label("SDefenceBlow", "Melee defence"), format!("{} + 20", v - 4), RED_TEXT));
     }
 }
