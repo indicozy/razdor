@@ -163,6 +163,8 @@ fn english(key: &str) -> &'static str {
         "SInitiative" => n_("Initiative"),
         "SManevres" => n_("Actions"),
         "LifeLost" => n_("Drains life"),
+        // Razdor's deviation for p-LifeLose (rules::spell_hint::effect_entries).
+        "LeaderMaxLife" => n_("Leader's max life"),
         "SCurrentHit" => n_("Current hits"),
         "Resurrect" => n_("Raises from the dead"),
         "GetBonus" => n_("Gives the bonus"),

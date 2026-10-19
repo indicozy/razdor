@@ -161,6 +161,15 @@ pub fn effect_entries(spell: &SpellDef, label: &dyn Fn(&'static str) -> String) 
         entry(v(Stat::Initiative), "SInitiative", suffix);
         entry(v(Stat::Manevres), "SManevres", suffix);
     }
+    // Razdor's deviation (the owner's decision, 2026-10-20): the original writes no text for
+    // p-LifeLose (0x49b63c), so its card shows the name alone (0x49bb0b). Razdor shows the
+    // leader's max life change instead: a drain of L percent reads «−L%», a negative one «+L%».
+    // Only here: remove this block to go back to the original's card.
+    if let Some(drain) = spell.life_lose_percent.filter(|&p| p != 0) {
+        let change = -drain;
+        let sign = if change > 0 { "+" } else { "\u{2212}" };
+        out.push(EffectEntry { text: format!("{} {sign}{}%", label("LeaderMaxLife"), change.abs()), good: good_for_holder(change) });
+    }
     out
 }
 
@@ -261,6 +270,25 @@ mod tests {
         assert!(!on_own_army(&s));
     }
 
+    /// Razdor's deviation (the owner's decision, 2026-10-20): a p-LifeLose spell, which the
+    /// original writes no text for (0x49b63c), reads the leader's max life change, so its card
+    /// has an effect text and with it the mana and time lines. Other spells are unchanged.
+    #[test]
+    fn life_lose_reads_the_leaders_max_life() {
+        let ru = |k: &'static str| if k == "LeaderMaxLife" { "Макс. жизнь лидеру".to_string() } else { k.to_string() };
+        let mut s = testkit::spell(4, 10);
+        s.delta_fixed_hits = None;
+        s.life_lose_percent = Some(20);
+        assert_eq!(effect_text(&s, &ru), "Макс. жизнь лидеру \u{2212}20% ");
+        assert_eq!(effect_entries(&s, &ru), [EffectEntry { text: "Макс. жизнь лидеру \u{2212}20%".to_string(), good: false }]);
+        // A negative drain (a healing curse) raises the max life and is good for the holder.
+        s.life_lose_percent = Some(-10);
+        assert_eq!(effect_entries(&s, &ru), [EffectEntry { text: "Макс. жизнь лидеру +10%".to_string(), good: true }]);
+        // No drain: no entry (the original's empty card).
+        s.life_lose_percent = Some(0);
+        assert!(effect_entries(&s, &ru).is_empty());
+    }
+
     /// Deviation (the owner's decision, 2026-10-18): each entry is good or bad for the unit
     /// holding the spell by its sign, not by the spell's target and not by its label.
     #[test]
@@ -301,11 +329,12 @@ mod tests {
         let label = |k: &'static str| skills.get(k).unwrap_or(k).to_string();
         let spell = |name: &str| dt.spells.iter().find(|s| s.name == name).unwrap_or_else(|| panic!("{name}"));
         assert_eq!(effect_text(spell("Доспехи Веры"), &label), "Физическая защита +10 Физическая защита +20% ");
-        // Every spell's text is built without a label the install lacks.
+        // Every spell's text is built without a label the install lacks (Razdor's own
+        // `LeaderMaxLife`, the p-LifeLose deviation, excepted).
         for s in &dt.spells {
             let missing = std::cell::Cell::new(None);
             effect_text(s, &|k| {
-                if skills.get(k).is_none() {
+                if skills.get(k).is_none() && k != "LeaderMaxLife" {
                     missing.set(Some(k));
                 }
                 k.to_string()

@@ -75,3 +75,6 @@ Improved = Улучшенный
 Maximum (Razdor) = Максимум (Раздор)
 Maximum: before each move the enemy of your battles weighs every move and answer ahead and plays each out to the end of the battle. = Максимум: перед каждым ходом враг в ваших битвах перебирает ходы и ответы на несколько действий вперёд и доигрывает каждый вариант до конца битвы.
 Auto = Авто
+
+# Spell cards: Razdor's p-LifeLose entry, a deviation (ui/spell_badges.rs, rules/spell_hint.rs)
+Leader's max life = Макс. жизнь лидеру
