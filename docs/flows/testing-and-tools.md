@@ -70,6 +70,11 @@ xvfb-run -a -s "-screen 0 1280x800x24" target/release/razdor
 
 Use the `offscreen-snapshot` skill for the full recipe.
 
+UI regression check: `tools/ui-regress/` renders the cases of `scenes.txt` off-screen and
+compares them with the goldens in `/mnt/ai_models/razdor-goldens/` (never committed). Snapshots
+run on a fixed clock (`src/ui/clock.rs`) and a fixed event seed, so an unchanged build gives
+0 changes. See `tools/ui-regress/README.md` and the `offscreen-snapshot` skill.
+
 ## Profiling a hitch
 
 1. Build with symbols: `CARGO_PROFILE_RELEASE_DEBUG=true cargo build --release`.

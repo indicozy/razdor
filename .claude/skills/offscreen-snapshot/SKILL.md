@@ -47,6 +47,25 @@ as a new game may end at once by its own defeat event; that is not a bug.
 No scene for what you need (a hover, a tab, a selection)? Add one to `snapshot.rs` rather than
 skipping the visual check.
 
+## UI regression check
+
+For "did this UI change alter any other screen?": `tools/ui-regress/` renders the cases of
+`tools/ui-regress/scenes.txt` (one per scene and size, the main windows at 800x600, 1280x800 and
+1920x1080) and compares each shot with its reference in `/mnt/ai_models/razdor-goldens/`.
+
+- Build the release binary (`CARGO_TARGET_DIR=/mnt/ai_models/razdor-scratch/ui-regress/target`,
+  `--no-default-features`, core pinning as above), then
+  `python3 -I tools/ui-regress/ui_regress.py run --bin <that binary>`. Needs `RAZDOR_DT_DIR`
+  (environment or the repo's `.env`). About 3 minutes for the whole set.
+- Look at `report.md` in the output folder (under `/mnt/ai_models/razdor-scratch/ui-regress/out/`)
+  and at each `<case>.diff.png` (reference | new | changes in magenta). Accept only the changes
+  that were meant: `accept --only <text> <outdir>`, or the whole run with `accept <outdir>`.
+- A new case has no reference: it is listed as `new` and is not a failure until accepted.
+- Never commit the references or the shots: they show the original game's art.
+- Snapshots are deterministic (`src/ui/clock.rs`: the interface clock advances 1/60 s per frame
+  when `RAZDOR_SNAPSHOT` is set; the event generator has a fixed seed). A case that differs
+  between two runs of one build is a determinism bug to fix in the code, not a tolerance to raise.
+
 ## Profiling
 
 - `RAZDOR_PROFILE=1`: frames whose work takes over 40 ms are logged with their screen, and

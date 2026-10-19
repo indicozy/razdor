@@ -15,6 +15,8 @@ are in `README.md` (Russian).
 - Lint: `cargo clippy --release`.
 - Release builds: `scripts/dist.sh` (Linux + Windows), `scripts/dist-macos.sh`.
 - Off-screen screens and profiling: the `offscreen-snapshot` skill.
+- UI regression check (renders the scene list off-screen, compares with the goldens outside the
+  repo): `python3 -I tools/ui-regress/ui_regress.py run`; see `tools/ui-regress/README.md`.
 
 ## Layout
 
@@ -84,6 +86,7 @@ are in `README.md` (Russian).
 | A player-visible change has a line in `changelog/unreleased.md` | review |
 | A player report has its `PLAYTEST_NOTES.md` entry and its backlog entry's status is current | review |
 | A change that alters a flow updates its `docs/flows/` file | review |
+| A UI change: the UI regression check run, its diffs reviewed, the changed references accepted | review |
 | Parity commits are cherry-picked to `dt-original` and pushed (or listed in `docs/OPEN_QUESTIONS.md`) | review |
 | Unresolved questions are in `docs/OPEN_QUESTIONS.md`; settled ones moved to its Settled list | review |
 | The task's worktrees, branches, processes and scratch files are cleaned up | review |

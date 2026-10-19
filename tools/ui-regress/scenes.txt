@@ -1,0 +1,58 @@
+# UI regression cases: name | RAZDOR_SCENE | WxH | extra env (KEY=VAL;KEY=VAL), read by ui_regress.py.
+# The case's shot is compared with <goldens>/<name>@<WxH>.png. Maps are install files (Maps_Rus).
+# Building indices (n) are the map's building list (0 is the town hall or the first building with a window).
+# Title and menus
+title-1280 | title | 1280x800 |
+title-language | title | 1280x800 | RAZDOR_SCENE_LANGUAGE=1
+options-1280 | options | 1280x800 |
+options-advanced-1280 | options:advanced | 1280x800 |
+scenarios-1280 | scenarios:РК1-Начало пути | 1280x800 |
+rules-menu-1280 | scenarios:РК1-Начало пути | 1280x800 | RAZDOR_SCENE_RULES=1
+load-manual-1280 | load | 1280x800 |
+load-auto-1280 | load:auto | 1280x800 |
+authors-1280 | authors:25 | 1280x800 |
+fonts-1280 | fonts | 1280x800 |
+# The world map and its windows
+map-rk1-1280 | map:РК1-Начало пути | 1280x800 |
+map-rk3-1280 | map:РК3-Столица | 1280x800 |
+minimap-rk1-1280 | minimap:РК1-Начало пути | 1280x800 |
+minimap-rk3-1280 | minimap:РК3-Столица | 1280x800 |
+clash-rk3-1280 | clash:РК3-Столица | 1280x800 |
+menu-1280 | menu:РК1-Начало пути | 1280x800 |
+settings-1280 | settings:РК1-Начало пути | 1280x800 |
+settings-advanced-1280 | settings:РК1-Начало пути:advanced | 1280x800 |
+save-1280 | save:РК1-Начало пути | 1280x800 |
+report-1280 | report:РК1-Начало пути | 1280x800 |
+victory-1280 | victory:РК1-Начало пути | 1280x800 |
+defeat-1280 | defeat:РК1-Начало пути | 1280x800 |
+building-barracks-1280 | building:РК1-Начало пути:0:barracks | 1280x800 |
+building-garrison-1280 | building:РК1-Начало пути:0:garrison | 1280x800 |
+building-market-1280 | building:РК3-Столица:0:market | 1280x800 |
+building-market-pack-1280 | building:РК3-Столица:0:market-pack | 1280x800 |
+building-sanctuary-1280 | building:РК3-Столица:0:sanctuary | 1280x800 |
+# Army, hero, spells
+army-1280 | army:РК1-Начало пути | 1280x800 |
+army-unit-1280 | army:РК1-Начало пути:0 | 1280x800 |
+hero-quests-1280 | hero:РК1-Начало пути:0 | 1280x800 |
+hero-done-1280 | hero:РК1-Начало пути:1 | 1280x800 |
+hero-rumours-1280 | hero:РК1-Начало пути:2 | 1280x800 |
+hero-messages-1280 | hero:РК1-Начало пути:3 | 1280x800 |
+spells-1280 | spells:РК1-Начало пути | 1280x800 |
+experimental-army-1280 | army:РК1-Начало пути | 1280x800 | RAZDOR_SCENE_EXPERIMENTAL=bonuses,rings,amulets;RAZDOR_SCENE_BONUS_ITEMS=1
+# Battles and setups
+battle-rk1-1280 | battle:РК1-Начало пути:0 | 1280x800 |
+battle-rk3-1280 | battle:РК3-Столица:0 | 1280x800 |
+battle-exit-1280 | battle:РК1-Начало пути:0 | 1280x800 | RAZDOR_SCENE_BATTLE_EXIT=1
+custom-1280 | custom | 1280x800 |
+custom-battle-1280 | custom-battle | 1280x800 |
+# The main windows at 800x600 and 1920x1080
+army-800 | army:РК1-Начало пути | 800x600 |
+building-barracks-800 | building:РК1-Начало пути:0:barracks | 800x600 |
+battle-rk1-800 | battle:РК1-Начало пути:0 | 800x600 |
+load-manual-800 | load | 800x600 |
+options-800 | options | 800x600 |
+army-1920 | army:РК1-Начало пути | 1920x1080 |
+building-barracks-1920 | building:РК1-Начало пути:0:barracks | 1920x1080 |
+battle-rk1-1920 | battle:РК1-Начало пути:0 | 1920x1080 |
+load-manual-1920 | load | 1920x1080 |
+options-1920 | options | 1920x1080 |
