@@ -867,7 +867,7 @@ fn battle_exit_window(title: &str, warning: &str, asking: &mut bool) -> (Option<
     for (x, (bw, bh), art, label, what) in buttons.iter() {
         let b = Rect::new(wx + x * o, wy + by * o, bw * o, bh * o);
         let over = !*asking && b.contains(crate::ui::widgets::pointer().into()) && !input_blocked();
-        chrome::defeat_button_art(b, art, label, over && is_mouse_button_down(MouseButton::Left));
+        chrome::defeat_button_art(b, art, label, over && super::input::is_mouse_button_down(MouseButton::Left));
         if over && clicked() {
             match what {
                 Some(ExitChoice::Restart) => *asking = true,
