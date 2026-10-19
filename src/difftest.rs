@@ -164,6 +164,7 @@ impl Carry {
             army.push(u);
         }
         crate::rules::script::NextMap {
+            experimental: Default::default(),
             name: map.to_string(),
             branch: None,
             gold: self.gold,

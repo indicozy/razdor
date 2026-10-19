@@ -832,6 +832,9 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
         chrome::shadow_text(line, rx, y - 8.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
     }
     y += lines.len() as f32 * 17.0 * k;
+    if row(tr("Unit battle participation"), if audio.allow_unit_benching { tr("On") } else { tr("Off") }, &mut y) {
+        audio.allow_unit_benching = !audio.allow_unit_benching;
+    }
     // The language list (Razdor's): Russian, English and the translations of the data found
     // in the install; the button opens it.
     chrome::shadow_text(tr("Language"), rx, y + 18.0 * k, 14.0 * k, chrome::CREAM);
@@ -941,6 +944,9 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     let title = own("Options", "Title", n_("Sound, graphics and gameplay settings"));
     let (inner, closed) = if over_map { map_window(&title, 594.0, 500.0) } else { window(&title, 594.0, 500.0) };
     let k = chrome::k();
+    let outer = Rect::new(inner.x - 2.0 * k, inner.y - (26.0 * k).round() - 1.0, 594.0 * k, 500.0 * k);
+    chrome::three_block_frame(outer, (26.0 * k).round(), 448.0 * k, 2.0 * k);
+    chrome::silver_frame(Rect::new(outer.x + 3.0 * k, outer.y + 29.0 * k, outer.w - 6.0 * k, 417.0 * k), k);
     let row = |i: usize| Rect::new(inner.x + 10.0 * k, inner.y + 8.0 * k + i as f32 * 37.5 * k, inner.w - 20.0 * k, 30.0 * k);
     // The volumes, in steps of 1%.
     for (i, music) in [(0, true), (1, false)] {
@@ -997,13 +1003,14 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
         }
     }
     // Razdor's own settings, in a window of their own.
-    let xr = Rect::new(inner.x + 14.0 * k, inner.y + inner.h - 42.0 * k, 120.0 * k, 32.0 * k);
+    let button_y = outer.y + 458.0 * k;
+    let xr = Rect::new(inner.x + 14.0 * k, button_y, 120.0 * k, 32.0 * k);
     if row_button(xr, tr("Advanced…")) {
         ADVANCED.with(|a| a.set(true));
         return false;
     }
     // «Принять» keeps what was changed, «Отмена» (the close box and Esc too) puts it back.
-    let cancel = Rect::new(inner.x + inner.w - 14.0 * k - 89.0 * k, inner.y + inner.h - 42.0 * k, 89.0 * k, 32.0 * k);
+    let cancel = Rect::new(inner.x + inner.w - 14.0 * k - 89.0 * k, button_y, 89.0 * k, 32.0 * k);
     let apply = Rect::new(cancel.x - 8.0 * k - 89.0 * k, cancel.y, 89.0 * k, 32.0 * k);
     let (apply_label, cancel_label) = (own("Buttons", "Apply", n_("Apply")), own("Buttons", "Cancel", n_("Cancel")));
     // Both act when the button is let go over it (PR #5's buttons).

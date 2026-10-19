@@ -106,9 +106,26 @@ impl Source {
     }
 }
 
+/// Rules chosen for one playthrough. Missing fields in older saves mean classic rules.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct ExperimentalRules {
+    pub simultaneous_bonuses: bool,
+    pub multiple_rings: bool,
+    pub multiple_amulets: bool,
+    pub no_duplicate_items: bool,
+    pub two_potions: bool,
+}
+
+impl ExperimentalRules {
+    pub fn for_new_game() -> Self { Self { no_duplicate_items: true, ..Self::default() } }
+}
+
 /// Everything the rules need to know about units, items, spells and options.
 #[derive(Clone, Debug)]
 pub struct Content {
+    /// Runtime copy of the playthrough's rules, shared by every unit and army.
+    pub experimental: ExperimentalRules,
     pub units: Vec<UnitDef>,
     pub items: Vec<ArtefactDef>,
     pub spells: Vec<SpellDef>,
@@ -149,7 +166,12 @@ impl Content {
     ) -> Content {
         let unit_index = units.iter().enumerate().map(|(i, u)| (u.id, i)).collect();
         let item_index = items.iter().enumerate().map(|(i, a)| (a.id, i)).collect();
-        Content { units, items, spells, options, formation, unit_index, item_index, tactical: TacticalCache::default() }
+        Content { experimental: ExperimentalRules::default(), units, items, spells, options, formation, unit_index, item_index, tactical: TacticalCache::default() }
+    }
+
+    /// An isolated copy for a playthrough, never changing the install's shared content.
+    pub fn with_experimental(&self, experimental: ExperimentalRules) -> Content {
+        Content { experimental, tactical: TacticalCache::default(), ..self.clone() }
     }
 
     /// The same content fought in `formation`.

@@ -12,7 +12,7 @@ use std::sync::Arc;
 use macroquad::prelude::*;
 
 use razdor::i18n::{self, n_, tr, Lang};
-use razdor::rules::content::{Content, HeroClass};
+use razdor::rules::content::{Content, ExperimentalRules, HeroClass};
 use razdor::rules::game::Game;
 
 
@@ -24,9 +24,15 @@ use super::widgets::*;
 use super::{screens, ScenarioEntry, Screen};
 
 thread_local! {
+    static EXPERIMENTAL: Cell<ExperimentalRules> = const { Cell::new(ExperimentalRules {
+        simultaneous_bonuses: false, multiple_rings: false, multiple_amulets: false, no_duplicate_items: true, two_potions: false,
+    }) };
+    static RULES_OPEN: Cell<bool> = const { Cell::new(false) };
     /// The scenario group picked (index into the list shown), the list's scroll in pixels
     /// at k = 1, and the hero picked.
     static PICKED: Cell<usize> = const { Cell::new(0) };
+    /// The specific chapter selected in a campaign, when one is picked.
+    static PICKED_MAP: Cell<Option<usize>> = const { Cell::new(None) };
     static SCROLL: Cell<f32> = const { Cell::new(0.0) };
     /// The description's first shown line, and the group it was scrolled for.
     static DESC_SCROLL: Cell<(usize, usize)> = const { Cell::new((usize::MAX, 0)) };
@@ -59,6 +65,7 @@ impl Win {
         let (w, h) = (594.0 * k, 482.0 * k);
         let r = Rect::new((screen_width() - w) / 2.0, (190.0 * k).min(screen_height() - h), w, h);
         let (_, closed) = chrome::window(r, title, chrome::Skin::Marble, true);
+        chrome::three_block_frame(r, 26.0 * k, 432.0 * k, 2.0 * k);
         (Win { r, k }, closed)
     }
 
@@ -67,7 +74,7 @@ impl Win {
     }
 
     fn button(&self, x: f32, w: f32, label: &str, enabled: bool) -> bool {
-        let r = self.rect(x, 442.0, w, 28.0);
+        let r = self.rect(x, 443.0, w, 28.0);
         let (_, down, pressed) = button_state(r, enabled);
         chrome::marble_button(r, label, enabled, down);
         pressed
@@ -381,7 +388,10 @@ fn facts_of(scenarios: &[ScenarioEntry], g: &Group, m: &Marks) -> Facts {
 /// The scenario list opens on its first row, scrolled to the top (the original's list
 /// starts on row 0 each time). The player's marks are read again (a map won since).
 pub fn open_list() {
+    EXPERIMENTAL.with(|p| p.set(ExperimentalRules::for_new_game()));
+    RULES_OPEN.with(|p| p.set(false));
     PICKED.with(|p| p.set(0));
+    PICKED_MAP.with(|p| p.set(None));
     SCROLL.with(|s| s.set(0.0));
     MARKS.with(|m| *m.borrow_mut() = None);
 }
@@ -441,6 +451,12 @@ fn listed_chapters<'a>(scenarios: &[ScenarioEntry], g: &'a Group) -> &'a [usize]
     if e.scenario.campaign_name.trim() == title(e).trim() { &[] } else { &g.chapters }
 }
 
+/// Next always starts the selected campaign at its first scenario. Selecting a chapter only
+/// changes the highlighted row; it does not change the campaign entry point.
+fn campaign_start(groups: &[Group], picked: usize) -> Option<usize> {
+    groups.get(picked).map(|g| g.first)
+}
+
 /// How far each line of the description box moves the next one down: the name's lines 20 px,
 /// the last with 12 px more under it, the description's 14 px.
 fn desc_steps(title_rows: usize, rows: usize, k: f32) -> Vec<f32> {
@@ -473,6 +489,11 @@ fn wheel_scroll(scroll: f32, turned: f32) -> f32 {
 }
 
 pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option<Screen> {
+    if RULES_OPEN.with(Cell::get) {
+        super::main_menu::backdrop();
+        experimental_menu();
+        return None;
+    }
     if !has_install || chrome::win("Win-marble").is_none() {
         return screens::scenario_select(scenarios, has_install);
     }
@@ -485,13 +506,14 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
     if let Some(name) = PICK.with(|p| p.borrow_mut().take()) {
         if let Some(i) = list.iter().position(|g| std::iter::once(&g.first).chain(&g.chapters).any(|&m| scenarios[m].file.starts_with(&name))) {
             PICKED.with(|p| p.set(i));
-                }
+            PICKED_MAP.with(|p| p.set(None));
+        }
     }
     let mut picked = PICKED.with(|p| p.get()).min(list.len().saturating_sub(1));
     // The list: per group a round icon and the name, and a campaign's chapters under it in
     // small type; the picked group's block is lit. The wheel and the scrollbar scroll it.
     let rows = win.rect(12.0, 36.0, 270.0, 396.0);
-    chrome::text_box(rows);
+    chrome::text_box_base(rows);
     let (head_h, chapter_h) = (30.0 * k, 18.0 * k);
     let block_h = |g: &Group| head_h + listed_chapters(scenarios, g).len() as f32 * chapter_h + if listed_chapters(scenarios, g).is_empty() { 0.0 } else { 4.0 * k };
     let content_h: f32 = list.iter().map(block_h).sum::<f32>() + 12.0 * k;
@@ -508,7 +530,16 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
     scrollbar_px(Rect::new(rows.x + rows.w - 16.0 * k, rows.y + 4.0 * k, 12.0 * k, rows.h - 8.0 * k), &mut scroll, max_scroll, rows.h / k, 15.0);
     SCROLL.with(|s| s.set(scroll));
     let row_w = rows.w - if barred { 22.0 * k } else { 8.0 * k };
+    chrome::text_box_decoration(rows);
     let inside = Rect::new(rows.x, rows.y + 2.0 * k, rows.w, rows.h - 4.0 * k);
+    let mut selection_y = rows.y + 6.0 * k - scroll * k;
+    for (row, g) in list.iter().enumerate() {
+        let r = Rect::new(rows.x + 4.0 * k, selection_y, row_w, block_h(g) - 2.0 * k);
+        selection_y += block_h(g);
+        if row == PICKED.with(|p| p.get()).min(list.len().saturating_sub(1)) && r.y < inside.y + inside.h && r.y + r.h > inside.y {
+            picked_bar(r);
+        }
+    }
     let mut next = None;
     let mut y = rows.y + 6.0 * k - scroll * k;
     // The rows are clipped to the box, so a block only partly in view shows its part (a
@@ -528,7 +559,8 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         // scenario won (a campaign: its last map).
         let star_r = Rect::new(head.x + head.w - 22.0 * k, head.y + head.h / 2.0 - 9.0 * k, 18.0 * k, 18.0 * k);
         let on_star = over_list && star_r.contains(crate::ui::widgets::pointer().into());
-        let (row_hover, _, pressed) = button_state(r, over_list && !on_star);
+        let (row_hover, _, _) = button_state(r, over_list && !on_star);
+        let head_pressed = head.contains(pointer().into()) && clicked() && over_list && !on_star;
         let (_, _, star_pressed) = button_state(star_r, over_list);
         let f = facts_of(scenarios, g, &m);
         if f.favourite || row_hover || on_star {
@@ -547,13 +579,6 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         if f.completed {
             tick(head.x + head.w - 42.0 * k, head.y + head.h / 2.0 - 7.0 * k, 14.0 * k, TICK_GREEN);
         }
-        // A campaign's chapters are lines of its own item (0x4e27ad..0x4e286e add them with
-        // 0x47e46c's new-item flag clear), so the picked bar lies under the name and the
-        // chapters, and a chapter is never picked by itself: the list selects and lights by item
-        // (0x47d71c), and Start takes the item's map, the campaign's first (0x4c1804).
-        if row == picked {
-            picked_bar(r);
-        }
         scenario_icon(e.scenario.header.scenario_picture_index, vec2(head.x + 14.0 * k, head.y + head.h / 2.0), k);
         let name = group_name(scenarios, g);
         // The name's Benguiat variant (0x4e266e..0x4e27a3, colours from 0x4dbb0c): the tutorial
@@ -569,7 +594,8 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         } else if !chapters.is_empty() {
             super::typography::Ink::Yellow.color()
         } else {
-            Color::from_rgba(135, 255, 255, 255)
+            // Single scenarios use the original list's cyan, rather than the blue markup tint.
+            Color::from_rgba(90, 231, 255, 255)
         };
         // The name leaves room for the marks it has (none: the original's width).
         let name_w = r.w - (40.0 + if f.completed { 44.0 } else if f.favourite { 24.0 } else { 0.0 }) * k;
@@ -589,12 +615,25 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
                 tick(head.x + head.w - 40.0 * k, cy - small * 0.36 - 5.0 * k, 10.0 * k, TICK_GREEN);
             }
         });
-        // A row is picked silently (the original's list makes no sound).
-        if pressed {
-            if row == picked {
+        // A campaign heading or individual chapter is selected only on click.
+        if head_pressed {
+            if row == picked && PICKED_MAP.with(|p| p.get()).is_none() {
                 next = Some(Screen::ClassSelect { scenario: Some(g.first) });
             }
             picked = row;
+            PICKED_MAP.with(|p| p.set(None));
+        } else {
+            for (n, &chapter_index) in chapters.iter().enumerate() {
+                let chapter = Rect::new(r.x + 28.0 * k, r.y + head_h + n as f32 * chapter_h, r.w - 28.0 * k, chapter_h);
+                if over_list && chapter.contains(crate::ui::widgets::pointer().into()) && clicked() {
+                    if PICKED_MAP.with(|p| p.get()) == Some(chapter_index) {
+                        next = Some(Screen::ClassSelect { scenario: Some(g.first) });
+                    }
+                    picked = row;
+                    PICKED_MAP.with(|p| p.set(Some(chapter_index)));
+                    break;
+                }
+            }
         }
     }
     drop(clip);
@@ -612,7 +651,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         let frame = win.rect(290.0, 36.0, 295.0, 162.0);
         draw_rectangle(frame.x, frame.y, frame.w, frame.h, BLACK);
         // The frame's opening: the map's own picture (it is made for it), else the terrain.
-        let inner = Rect::new(frame.x + 8.0 * k, frame.y + 8.0 * k, frame.w - 16.0 * k, frame.h - 16.0 * k);
+        let inner = Rect::new(frame.x + 11.0 * k, frame.y + 11.0 * k, frame.w - 22.0 * k, frame.h - 22.0 * k);
         let pic = picture(i, e);
         match (&pic, preview(i, e)) {
             (Some(p), _) => chrome::tex(p, inner, WHITE),
@@ -626,6 +665,8 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         if let Some(t) = chrome::win_fx("MapImageFrame", chrome::Fx::KeyBlack) {
             chrome::tex(&t, frame, WHITE);
         }
+        chrome::silver_frame(frame, k);
+        chrome::silver_frame(inner, k);
         // Under it the description box (0x4d2a30, 65ae00): the name centred in white (ae2498,
         // 0x4c1b4b), the description in the bold SanSerif's orange (ae24f4 over ae2510,
         // 0x4c1bb4), from the box's top.
@@ -684,18 +725,28 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
     // Razdor's filter and order (a players' wish), under the list where the original's window
     // has nothing: each opens a drop-down list; the choice is kept in the settings.
     let pick_show = view_choice(&win, 12.0, "razdor:scenario-show", show as i64, &Show::ALL.map(|s| s.label()));
-    let pick_order = view_choice(&win, 190.0, "razdor:scenario-order", order as i64, &Order::ALL.map(|o| o.label()));
+    let pick_order = view_choice(&win, 158.0, "razdor:scenario-order", order as i64, &Order::ALL.map(|o| o.label()));
     if pick_show.is_some() || pick_order.is_some() {
         m.show = pick_show.unwrap_or(m.show);
         m.order = pick_order.unwrap_or(m.order);
         keep_marks(m);
         PICKED.with(|p| p.set(0));
+        PICKED_MAP.with(|p| p.set(None));
         SCROLL.with(|s| s.set(0.0));
     }
     let can = !list.is_empty();
+    if experimental_rules() != ExperimentalRules::default() {
+        let label=win.rect(12.0,470.0,306.0,12.0);
+        chrome::shadow_text(tr("Experimental rules enabled"),label.x,label.y+9.0*k,9.0*k,chrome::ORANGE_TEXT);
+    }
+    if win.button(328.0, 34.0, "...", can) {
+        RULES_OPEN.with(|p| p.set(true));
+        return None;
+    }
+    let selected_map = campaign_start(&list, picked);
     if (win.button(369.0, 116.0, &own("Buttons", "Next", n_("Next")), can) || (can && key(KeyCode::Enter))) && next.is_none() {
         cue(Cue::Button);
-        next = list.get(picked).map(|g| Screen::ClassSelect { scenario: Some(g.first) });
+        next = selected_map.map(|i| Screen::ClassSelect { scenario: Some(i) });
     }
     if win.button(492.0, 95.0, &own("Buttons", "Cancel", n_("Cancel")), true) || closed || key(KeyCode::Escape) {
         return Some(Screen::MainMenu);
@@ -703,11 +754,50 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
     next
 }
 
+pub(super) fn experimental_rules() -> ExperimentalRules { EXPERIMENTAL.with(Cell::get) }
+
+pub(super) fn open_experimental_menu() { RULES_OPEN.with(|p| p.set(true)); }
+
+pub(super) fn snapshot_experimental(rules: ExperimentalRules) { EXPERIMENTAL.with(|p| p.set(rules)); }
+
+/// Kept modal so clicks and Enter cannot start a scenario behind the options.
+fn experimental_menu() {
+    let k = chrome::k();
+    let r = Rect::new((screen_width() - 550.0*k)/2.0, (screen_height() - 360.0*k)/2.0, 550.0*k, 360.0*k);
+    let (_, close) = chrome::window(r, tr("Experimental scenario rules"), chrome::Skin::Marble, true);
+    let mut rules = experimental_rules();
+    let check = |index: usize, label: &str, value: &mut bool| {
+        let row = Rect::new(r.x+20.0*k, r.y+(54.0+index as f32*38.0)*k, r.w-40.0*k, 28.0*k);
+        let box_r = Rect::new(row.x, row.y+3.0*k, 20.0*k, 20.0*k);
+        chrome::silver_frame(box_r, k.max(1.0));
+        if *value {
+            draw_line(box_r.x+4.0*k,box_r.y+10.0*k,box_r.x+8.0*k,box_r.y+15.0*k,2.0*k,chrome::GOLD);
+            draw_line(box_r.x+8.0*k,box_r.y+15.0*k,box_r.x+17.0*k,box_r.y+5.0*k,2.0*k,chrome::GOLD);
+        }
+        chrome::shadow_text(label,row.x+30.0*k,row.y+20.0*k,16.0*k,chrome::CREAM);
+        if row.contains(pointer().into()) && clicked() { *value = !*value; }
+    };
+    check(0,tr("All special bonuses simultaneously"),&mut rules.simultaneous_bonuses);
+    check(1,tr("Allow multiple rings"),&mut rules.multiple_rings);
+    check(2,tr("Allow multiple amulets"),&mut rules.multiple_amulets);
+    check(3,tr("No duplicate items"),&mut rules.no_duplicate_items);
+    check(4,tr("At most two potions per character"),&mut rules.two_potions);
+    EXPERIMENTAL.with(|p| p.set(rules));
+    let lines = [tr("Four equipment slots. Duplicate abilities do not stack."), tr("Applies to all armies; saved with this playthrough."), tr("The potion limit resets after a battle.")];
+    for (i,line) in lines.iter().enumerate() {
+        chrome::shadow_text(line,r.x+20.0*k,r.y+(264.0+i as f32*19.0)*k,12.0*k,chrome::CREAM);
+    }
+    let b = Rect::new(r.center().x-50.0*k,r.bottom()-44.0*k,100.0*k,28.0*k);
+    let (_, down, pressed) = button_state(b,true);
+    chrome::marble_button(b,tr("OK"),true,down);
+    if close || pressed || key(KeyCode::Escape) || key(KeyCode::Enter) { RULES_OPEN.with(|p| p.set(false)); }
+}
+
 /// A marble button at `x` (window pixels) on the buttons' line showing the choice `current`
 /// of `labels`, with a small arrow; a click opens the drop-down list `key`. The value picked.
 fn view_choice(win: &Win, x: f32, key: &str, current: i64, labels: &[&str]) -> Option<i64> {
     let picked = take_pick(key);
-    let r = win.rect(x, 442.0, 172.0, 28.0);
+    let r = win.rect(x, 442.0, 140.0, 28.0);
     let (_, down, pressed) = button_state(r, true);
     let label = labels.get(current as usize).copied().unwrap_or_default();
     chrome::marble_button(r, label, true, down || list_open(key));
@@ -797,6 +887,7 @@ pub fn class_select(game: &mut Option<Game>, demo: &Arc<Content>, scenario: Opti
         return screens::class_select(game, demo, scenario, assets);
     }
     let (e, content) = scenario.expect("checked");
+    let content = Arc::new(content.with_experimental(experimental_rules()));
     super::main_menu::backdrop();
     let scale = chrome::k();
     let r = Rect::new((screen_width() - 632.0 * scale) / 2.0, (202.0 * scale).min(screen_height() - 516.0 * scale), 632.0 * scale, 516.0 * scale);
@@ -1133,6 +1224,13 @@ mod tests {
             ],
             "names match without case or extension; a loop and a missing map end the chain; an unreached later map is left out"
         );
+    }
+
+    #[test]
+    fn next_starts_a_campaign_at_its_first_scenario_even_if_a_chapter_was_selected() {
+        let campaign = Group { first: 3, chapters: vec![3, 4, 5] };
+        assert_eq!(campaign_start(&[campaign], 0), Some(3));
+        assert_eq!(campaign_start(&[], 0), None);
     }
 
     /// A chapter line is not a list item of its own in the original: the text list keeps the

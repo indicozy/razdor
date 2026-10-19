@@ -14,6 +14,10 @@ use super::assets::Assets;
 use super::chrome::{self, k, BLUE_TEXT, CREAM, ORANGE_TEXT, RED_TEXT};
 use super::widgets::{measure, mouse_in};
 
+thread_local! {
+    static TRAIT_SCROLL: std::cell::RefCell<std::collections::HashMap<String, f32>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
 /// The army's font tints from the original's startup palette (4dbb0c), applied only
 /// in the native army presentation. Other screens retain their current palette.
 fn army_ink(color: Color) -> Color {
@@ -184,9 +188,20 @@ fn state_trait(line: StateLine) -> (String, String, Color) {
 
 /// The traits the panel lists: the hero's class, the unit's bonuses (its items' too), then
 /// its state ([`state_lines`]).
-fn traits_of(s: &Sheet) -> Vec<(String, String, Color)> {
+fn traits_of(s: &Sheet, content: &Content) -> Vec<(String, String, Color)> {
     let mut traits: Vec<(String, String, Color)> = s.start.bonuses.iter().map(|bonus| {
-        let (art, text) = trait_line(bonus);
+        let (art, mut text) = trait_line(bonus);
+        if content.experimental.simultaneous_bonuses {
+            let mut sources = Vec::new();
+            if content.unit(s.kind).bonus.as_ref() == Some(bonus) { sources.push(tr("Own ability").to_string()); }
+            for item in s.items.iter().flatten().filter_map(|&id| content.try_item(id)) {
+                if item.bonus.as_ref() == Some(bonus) { sources.push(item.name.clone()); }
+            }
+            if !sources.is_empty() {
+                text.push('\n');
+                text.push_str(&razdor::trf!("Ability sources: {sources}", sources = sources.join(", ")));
+            }
+        }
         (art, text, super::typography::Ink::Green.color())
     }).collect();
     if let Some(h) = s.hero {
@@ -653,13 +668,13 @@ fn first_line_size(fs: f32, room: f32, width: impl Fn(f32) -> f32) -> f32 {
 /// Rects of the four item slots around the figure: two at the top left, two at the top
 /// right (as in the army screen).
 pub fn slot_rects(r: Rect) -> [Rect; 4] {
-    let s = 44.0 * k();
+    let s = 55.0 * 0.9375 * k();
     let m = 8.0 * k();
     [
         Rect::new(r.x + m, r.y + m, s, s),
-        Rect::new(r.x + m, r.y + m + s + 6.0 * k(), s, s),
+        Rect::new(r.x + m, r.y + m + s, s, s),
         Rect::new(r.x + r.w - m - s, r.y + m, s, s),
-        Rect::new(r.x + r.w - m - s, r.y + m + s + 6.0 * k(), s, s),
+        Rect::new(r.x + r.w - m - s, r.y + m + s, s, s),
     ]
 }
 
@@ -698,13 +713,18 @@ fn silhouette(r: Rect) {
 /// Draws the panel in `r`. `slots` shows the four item slots (empty ones too) and returns
 /// the one clicked; the item under the mouse goes to `hover`.
 pub fn draw(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: bool, hover: &mut Option<ItemId>) -> Option<usize> {
-    super::typography::Role::Body.with(|| draw_in_face(assets, content, r, s, slots, hover))
+    super::typography::Role::Body.with(|| draw_in_face(assets, content, r, r, s, slots, hover))
 }
 
-fn draw_in_face(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: bool, hover: &mut Option<ItemId>) -> Option<usize> {
+/// Extend the parchment behind overlaid battle controls without moving the unit's text.
+pub fn draw_extended(assets: &Assets, content: &Content, r: Rect, background: Rect, s: &Sheet, hover: &mut Option<ItemId>) {
+    super::typography::Role::Body.with(|| draw_in_face(assets, content, r, background, s, false, hover));
+}
+
+fn draw_in_face(assets: &Assets, content: &Content, r: Rect, background: Rect, s: &Sheet, slots: bool, hover: &mut Option<ItemId>) -> Option<usize> {
     use super::dt_font::{sheet_size, whole_scale, Face};
     let k = k();
-    chrome::unit_parchment(r);
+    chrome::unit_parchment(background);
     // The figure, behind the text: at its own size, centred in the original's box
     // (`figure_rect`, 492f24 → 0x476a3c).
     match assets.figure(s.kind) {
@@ -723,10 +743,11 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: b
     let name_size = sheet_size(Face::Subtitle, whole_scale(px));
     // The description list (0x667bdc): the type's description for any unit but the hero
     // (0x492f24: the type's `Descript` of Rus_Units.ini), then the traits with their icons.
-    let traits = traits_of(s);
+    let traits = traits_of(s, content);
     let desc = s.hero.is_none().then(|| content.unit(s.kind).description.as_str());
     let width = |c: char| measure(c.encode_utf8(&mut [0; 4]), size).width;
-    let mut rows = list_rows(desc, &traits, 238.0 * px, width);
+    let list_width = (238.0 - if content.experimental.simultaneous_bonuses { 16.0 } else { 0.0 }) * px;
+    let mut rows = list_rows(desc, &traits, list_width, width);
     let stats = stat_lines(content, s);
     let stat_rows = stats.len() + s.status.len();
     // The original stacks it all up from the bottom with no limit. Razdor keeps the name
@@ -742,7 +763,8 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: b
             last.text = format!("{}…", last.text.trim_end());
         }
     }
-    let (desc_top, stat_top, name_top) = panel_tops(rows.len(), stat_rows, s.hero.is_some());
+    let view_rows = if content.experimental.simultaneous_bonuses { rows.len().min(8) } else { rows.len() };
+    let (desc_top, stat_top, name_top) = panel_tops(view_rows, stat_rows, s.hero.is_some());
     let bottom = r.y + r.h;
     let (desc_top, stat_top, name_top) = (bottom - desc_top * px, bottom - stat_top * px, bottom - name_top * px);
     // From the name's top down the parchment is dark brown, fading in over the 56 px above
@@ -751,7 +773,7 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: b
     chrome::unit_panel_fade(Rect::new(r.x, fade0, r.w, name_top - fade0));
     chrome::multiply(|| {
         // Multiplying (230, 178, 115) parchment by this gives the video's (115, 62, 0).
-        draw_rectangle(r.x, name_top, r.w, r.y + r.h - name_top, Color::new(0.5, 0.35, 0.0, 1.0));
+        draw_rectangle(r.x, name_top, r.w, background.bottom() - name_top, Color::new(0.5, 0.35, 0.0, 1.0));
     });
     // Items worn.
     let mut clicked = None;
@@ -760,12 +782,10 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: b
         if !slots && item.is_none() {
             continue;
         }
-        // A worn item is its picture alone on the parchment; an empty slot is the original's
-        // empty-slot picture (0xae2860, built at start-up: a steel ring over a 40% black
-        // square, `chrome::empty_item_slot`), set by 0x492f24 only for an empty slot.
-        match item {
-            Some(it) => assets.draw_item(it, sr.x, sr.y, sr.w),
-            None => chrome::empty_item_slot(*sr),
+        // Keep the framed, darkened cell visible beneath equipped items as well.
+        chrome::empty_item_slot(*sr);
+        if let Some(it) = item {
+            assets.draw_item(it, sr.x, sr.y, sr.w);
         }
         if mouse_in(sr.x, sr.y, sr.w, sr.h) {
             if item.is_some() {
@@ -812,14 +832,25 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: b
     // The description list from 12 px in, a row every 14 px; a trait's icon 16 px in and
     // 11 px over its first row (0x48e8f0), drawn under the text.
     let list_x = r.x + 12.0 * px;
+    let viewport = Rect::new(r.x + 8.0 * px, desc_top - 11.0 * px, r.w - 16.0 * px, (view_rows as f32 * 14.0 + 19.0) * px);
+    let most = rows.len().saturating_sub(view_rows) as f32 * 14.0 * px;
+    let key = format!("{}:{}:{}:{}:{:?}:{:?}", r.x, r.y, s.kind.0, s.name, s.start.bonuses, s.items);
+    let mut scroll = TRAIT_SCROLL.with(|p| p.borrow().get(&key).copied().unwrap_or(0.0));
+    if content.experimental.simultaneous_bonuses && most > 0.0 {
+        if viewport.contains(super::widgets::pointer().into()) { scroll -= super::widgets::wheel() * 42.0 * px; }
+        scroll = scroll.clamp(0.0, most);
+        super::widgets::scrollbar_px(Rect::new(viewport.right()-12.0*px,viewport.y,12.0*px,viewport.h), &mut scroll, most, viewport.h, 14.0*px);
+        TRAIT_SCROLL.with(|p| { let mut p=p.borrow_mut(); if p.len()>32 {p.clear();} p.insert(key,scroll); });
+    } else { scroll = 0.0; }
+    let _traits_clip = content.experimental.simultaneous_bonuses.then(|| super::widgets::Clip::new(viewport));
     for (i, row) in rows.iter().enumerate() {
-        let top = desc_top + i as f32 * 14.0 * px;
+        let top = desc_top + i as f32 * 14.0 * px - scroll;
         if let Some(art) = &row.icon {
             chrome::trait_icon(art, r.x + 16.0 * px, top - 11.0 * px, 25.0 * px);
         }
     }
     for (i, row) in rows.iter().enumerate() {
-        let top = desc_top + i as f32 * 14.0 * px;
+        let top = desc_top + i as f32 * 14.0 * px - scroll;
         if !row.text.trim().is_empty() {
             shadow_text(&row.text, list_x, line(top), size, row.ink);
         }

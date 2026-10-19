@@ -13,7 +13,7 @@ use razdor::rules::clock::duration_label;
 use razdor::rules::game::Game;
 use razdor::trf;
 
-use super::chrome::{self, shadow_centered, shadow_text, tex, three_slice, Fx, CREAM, GOLD};
+use super::chrome::{self, shadow_centered, shadow_text, tex, Fx, CREAM, GOLD};
 use super::widgets::{fit_size, measure, panel_hint};
 
 /// A bar button.
@@ -394,9 +394,7 @@ pub fn draw_with_time(game: &Game, look: impl Fn(BarButton) -> Look, time_button
             draw_rectangle_lines(0.0, y, w, row, 2.0, chrome::SILVER);
         }
     }
-    if let Some(t) = chrome::win("SteelLine") {
-        three_slice(&t, Rect::new(0.0, y - 2.0, w, 4.0 * k), 40.0, WHITE);
-    }
+    chrome::silver_line(vec2(0.0, y), vec2(w, y), k.max(1.0));
     // The lower strip.
     let sy = y + row;
     let sh = bar - row;

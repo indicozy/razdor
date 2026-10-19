@@ -54,6 +54,7 @@ pub enum Close {
 
 #[derive(Clone, Debug)]
 pub struct Dialog {
+    pub resource_report: bool,
     pub title: String,
     pub text: Vec<String>,
     /// The event's own text, read as the original's markup (0x4a9d88 → 0x48e438): drawn
@@ -104,6 +105,7 @@ pub struct Dialog {
 impl Dialog {
     pub fn new(title: impl Into<String>) -> Dialog {
         Dialog {
+            resource_report: false,
             title: title.into(),
             text: Vec::new(),
             marked: None,
@@ -144,6 +146,7 @@ impl Dialog {
     /// The 12:00 report: gold, mana, income and wages (video notes §5).
     pub fn day_report(game: &Game, r: &DayReport) -> Dialog {
         let mut d = Dialog::new(tr("Report on resources, income and expenses"));
+        d.resource_report = true;
         // The original shows it in the event window, which opens with its chord.
         d.chord = true;
         d.text.push(tr("The report shows your gold, the daily income of your castles and the wages paid to your army.").into());
@@ -486,7 +489,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     let (x, y) = event_origin(sw, sh, chrome::bar_height(), w, h);
     // The defeat look is the red marble (the original's window after a lost battle).
     let skin = if d.defeat { chrome::Skin::Red } else { chrome::Skin::Marble };
-    if d.defeat {
+    if d.defeat || d.resource_report {
         chrome::window_with_title_color(Rect::new(x, y, w, h), &d.title, skin, false, Color::from_rgba(255, 255, 255, 255));
     } else {
         chrome::window(Rect::new(x, y, w, h), &d.title, skin, false);
@@ -494,7 +497,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     let edge = o.max(1.0);
     let title_h = (26.0 * chrome::k()).round();
     chrome::silver_frame(Rect::new(x + 3.0 * o, y + title_h + 3.0 * o, w - 6.0 * o, h - title_h - 64.0 * o), edge);
-    chrome::silver_frame(Rect::new(x + 2.0 * o, y + h - 58.0 * o, w - 4.0 * o, 56.0 * o), edge);
+    chrome::three_block_frame(Rect::new(x, y, w, h), title_h, h - 58.0 * o, 2.0 * o);
     let top = y + EVENT_BOX_TOP * o;
     let mut cy = top;
     match &d.picture {
@@ -527,7 +530,8 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     let mut ty = tb.y + ((tb.h - shown_h) / 2.0).max(EVENT_PAD * o).floor() + EVENT_BASELINE * o;
     let text_x = tb.x + 20.0 * o;
     for l in lines.iter().skip(first).take(shown) {
-        super::dt_font::with_original_face(super::dt_font::Face::Subtitle, || chrome::shadow_centered(l, tb.x + tb.w / 2.0, ty, size, Color::new(1.0, 0.9, 0.66, 1.0)));
+        let color = if d.resource_report { Color::from_rgba(255, 255, 128, 255) } else { Color::new(1.0, 0.9, 0.66, 1.0) };
+        super::dt_font::with_original_face(super::dt_font::Face::Subtitle, || chrome::shadow_centered(l, tb.x + tb.w / 2.0, ty, size, color));
         ty += line;
     }
     for row in rows.iter().skip(first).take(shown) {
@@ -541,7 +545,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         for (k, (r, label)) in d.resources.iter().enumerate() {
             let cx = x + 30.0 * o + step * (k as f32 + 0.5);
             // The original's caption face and green, the mana's in its blue (0x4a8ae8).
-            let c = if *r == Resource::Mana { MANA } else { CAPTION };
+            let c = if d.resource_report { Color::from_rgba(128, 255, 128, 255) } else if *r == Resource::Mana { MANA } else { CAPTION };
             super::dt_font::with_original_face(super::dt_font::Face::Subtitle, || chrome::shadow_centered(label, cx, cy + 18.0 * o, size, c));
             resource_icon(*r, cx, cy + 62.0 * o, 70.0 * o);
         }
@@ -597,7 +601,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     }
     // The buttons, 95 × 36, 45 from the window's bottom.
     let (bw, bh) = (95.0 * o, 36.0 * o);
-    let by = y + h - 45.0 * o;
+    let by = y + h - 58.0 * o + (58.0 * o - bh) / 2.0;
     // A left or right press on an icon shows its item or spell centred on the press, kept
     // inside the window, until the button is let go (0x4c1fec / 0x4c2048, the frame handler
     // 0x4cd558); the window's buttons wait meanwhile.
@@ -689,7 +693,7 @@ fn draw_village_event(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Optio
     let body = Rect::new(x + 4.0 * o, y + 31.0 * o, w - 8.0 * o, h - 89.0 * o);
     let footer = Rect::new(x + 2.0 * o, y + h - 55.0 * o, w - 4.0 * o, 53.0 * o);
     chrome::silver_frame(body, o.max(1.0));
-    chrome::silver_frame(footer, o.max(1.0));
+    chrome::three_block_frame(Rect::new(x, y, w, h), 26.0 * chrome::k(), h - 55.0 * o, 2.0 * o);
     let top = y + 45.0 * o;
     if let Some(t) = picture {
         let r = Rect::new(x + 18.0 * o, top, pw, ph.min(panel_h));
@@ -728,8 +732,8 @@ fn draw_village_event(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Optio
         chrome::shadow_centered(label, cx, reward_y + 15.0 * o, size, MANA);
         resource_icon(*resource, cx, reward_y + 56.0 * o, 65.0 * o);
     }
-    let by = footer.y + 9.0 * o;
     let (bw, bh) = (96.0 * o, 35.0 * o);
+    let by = footer.y + (footer.h - bh) / 2.0;
     if d.question {
         let answer = answer_key();
         let yes = button(x + w * 0.24 - bw / 2.0, by, bw, bh, tr("Yes"), true);

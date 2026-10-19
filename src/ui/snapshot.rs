@@ -15,6 +15,9 @@
 //! the scenario's messages every frame, to see the screen under them; `RAZDOR_MOUSE=x,y`
 //! puts the pointer there (`RAZDOR_MOUSE_RIGHT=1` also holds the right button there: the map's tooltips); `RAZDOR_SCENE_SPELLS=<id>,…` puts those spells on every unit; `RAZDOR_SCENE_POTION=1` gives every unit of the army a
 //! drunk potion. `RAZDOR_SCENE_LANGUAGE=1` opens the language list (`title`, `options:advanced`, `settings:<map>:advanced`). `replay:<step>` with `RAZDOR_REPLAY=<actions.jsonl>`: the diff
+//! `RAZDOR_SCENE_EXPERIMENTAL=bonuses,rings,amulets` enables selected playthrough rules;
+//! `RAZDOR_SCENE_RULES=1` opens their menu over `scenarios`. `RAZDOR_SCENE_BONUS_ITEMS=1`
+//! equips the hero with available distinct bonus items to exercise the trait scrollbar.
 //! test's action list played to that step. `RAZDOR_SCENE_BATTLE_EXIT=1` opens a battle
 //! scene's leave-battle window. `RAZDOR_SCENE_PACK_AT=<cell>:<id>,…` puts items in those pack
 //! cells; `RAZDOR_SCENE_HELD=<id>` puts an item on the pointer (hero and army windows).
@@ -218,9 +221,17 @@ pub fn stage(app: &mut App) {
     // tooltips, as the original shows them while it is held).
     super::input::hold_right_for_snapshot(std::env::var("RAZDOR_MOUSE_RIGHT").is_ok_and(|v| v == "1"));
     let Ok(scene) = std::env::var("RAZDOR_SCENE") else { return };
+    // Reproducible menu, save and stacked-trait screenshots without changing defaults.
+    if let Ok(flags) = std::env::var("RAZDOR_SCENE_EXPERIMENTAL") {
+        let has = |key| flags.split(',').any(|f| f.trim() == key);
+        super::new_game::snapshot_experimental(razdor::rules::content::ExperimentalRules {
+            simultaneous_bonuses: has("bonuses"), multiple_rings: has("rings"), multiple_amulets: has("amulets"), no_duplicate_items: has("unique"), two_potions: has("potions"),
+        });
+    }
     if let Err(e) = try_stage(app, &scene) {
         razdor::diag!("RAZDOR_SCENE={scene}: {e}");
     }
+    if std::env::var("RAZDOR_SCENE_RULES").is_ok_and(|v| v == "1") { super::new_game::open_experimental_menu(); }
     // `RAZDOR_SCENE_BATTLE_EXIT=1`: a battle scene with its leave-battle window open (Esc).
     if std::env::var("RAZDOR_SCENE_BATTLE_EXIT").is_ok_and(|v| v == "1") {
         if let Screen::Battle(v) | Screen::CustomBattle(v) = &mut app.screen {
@@ -333,7 +344,22 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
         return Ok(());
     }
     let content = app.dt_content.clone().ok_or("no install content")?;
+    let content = std::sync::Arc::new(content.with_experimental(super::new_game::experimental_rules()));
     let mut game = Game::from_scenario(content, &app.scenarios[index].scenario, HeroClass::Knight);
+    if let Some(index)=std::env::var("RAZDOR_SCENE_BENCHED").ok().and_then(|s| s.parse::<usize>().ok()).filter(|&i| i>0) {
+        if let Some(unit)=game.squad.get_mut(index) { unit.battle_disabled=true; }
+    }
+    if std::env::var("RAZDOR_SCENE_BONUS_ITEMS").is_ok_and(|v| v == "1") {
+        let c=game.content.clone();
+        let mut seen=game.hero().stats(&c).bonuses;
+        for item in &c.items {
+            let Some(bonus)=item.bonus.as_ref().filter(|b| !seen.contains(b)) else { continue };
+            if let Ok(slot)=razdor::rules::items::slot_for(&c,&game.squad[0],razdor::rules::content::ItemId(item.id)) {
+                game.squad[0].items[slot]=Some(razdor::rules::content::ItemId(item.id));
+                seen.push(bonus.clone());
+            }
+        }
+    }
     // `RAZDOR_SCENE_QUIET=1`: the map's opening windows are not shown.
     if std::env::var_os("RAZDOR_SCENE_QUIET").is_some() {
         game.drain_events();

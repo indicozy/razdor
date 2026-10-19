@@ -1,7 +1,8 @@
 //! Items (artefacts): slots, class limits, stat modifiers and potions (mechanics.md 4).
 //!
 //! A unit wears up to 4 items, only one weapon (melee weapon, bow or staff), never two of the
-//! same type. Melee weapons need a warrior, ranged weapons a shooter, staffs a mage. Potions
+//! same type under classic rules. Experimental rules can permit repeated rings/amulets.
+//! Melee weapons need a warrior, ranged weapons a shooter, staffs a mage. Potions
 //! and trade goods are not worn: potions are drunk from the army screen, their healing is
 //! instant and their other modifiers last until the end of the next battle.
 
@@ -19,6 +20,7 @@ pub enum EquipError {
     NoFreeSlot,
     /// Already wears an item of this type.
     SameType,
+    DuplicateItem,
     /// Already holds a weapon or staff.
     SecondWeapon,
     /// A melee weapon or shield on a non-warrior, a bow on a non-shooter (or on artillery),
@@ -35,6 +37,7 @@ pub enum EquipError {
     /// The dead cannot hold items.
     Dead,
     NotAPotion,
+    PotionLimit,
     PackFull,
     NoSuchItem,
 }
@@ -156,8 +159,19 @@ pub fn rebuild_stats(content: &Content, unit: &Unit, spells: &[&SpellDef]) -> St
     if (1..=3).contains(&unit.def.0) && unit.hp == 1 {
         s[Stat::Initiative] = 1;
     }
-    let bonus = worn.iter().filter_map(|d| d.bonus.clone()).next_back().or_else(|| lvl.bonuses.first().cloned());
-    s.bonuses = bonus.into_iter().collect();
+    if content.experimental.simultaneous_bonuses {
+        s.bonuses = lvl.bonuses.clone();
+        for bonus in worn.iter().filter_map(|d| d.bonus.as_ref()) {
+            if !s.bonuses.contains(bonus) { s.bonuses.push(bonus.clone()); }
+        }
+        // Variants of the same effect use the strongest, without multiplying copies.
+        if s.has(&Bonus::PoisonS) { s.bonuses.retain(|b| *b != Bonus::Poison); }
+        if s.has(&Bonus::GodStrike) { s.bonuses.retain(|b| *b != Bonus::GodAnger); }
+        if s.has(&Bonus::OldVampirsGist) { s.bonuses.retain(|b| *b != Bonus::VampirsGist); }
+    } else {
+        let bonus = worn.iter().filter_map(|d| d.bonus.clone()).next_back().or_else(|| lvl.bonuses.first().cloned());
+        s.bonuses = bonus.into_iter().collect();
+    }
     s
 }
 
@@ -201,6 +215,9 @@ pub fn take_off(content: &Content, unit: &mut Unit, slot: usize) -> Option<ItemI
 /// school; one weapon (staffs included); one item of each type.
 pub fn slot_for(content: &Content, unit: &Unit, item: ItemId) -> Result<usize, EquipError> {
     let def = content.try_item(item).ok_or(EquipError::NoSuchItem)?;
+    if content.experimental.no_duplicate_items && unit.items.contains(&Some(item)) {
+        return Err(EquipError::DuplicateItem);
+    }
     if item.0 == CROWN && unit.wage_kind != WageKind::Leader && !CROWN_TYPES.contains(&unit.def.0) {
         return Err(EquipError::NotAllowed);
     }
@@ -233,7 +250,9 @@ pub fn slot_for(content: &Content, unit: &Unit, item: ItemId) -> Result<usize, E
     if def.kind.is_weapon() && worn.iter().any(|w| w.kind.is_weapon()) {
         return Err(EquipError::SecondWeapon);
     }
-    if worn.iter().any(|w| w.kind == def.kind) {
+    let repeated_accessory = (def.kind == ArtefactType::Ring && content.experimental.multiple_rings)
+        || (def.kind == ArtefactType::Amulet && content.experimental.multiple_amulets);
+    if !repeated_accessory && worn.iter().any(|w| w.kind == def.kind) {
         return Err(EquipError::SameType);
     }
     unit.items.iter().position(Option::is_none).ok_or(EquipError::NoFreeSlot)
@@ -266,6 +285,9 @@ pub fn drink(content: &Content, unit: &mut Unit, item: ItemId, now: u64) -> Resu
     if !unit.alive() && !revives(def) {
         return Err(EquipError::Dead);
     }
+    if content.experimental.two_potions && unit.potions_drunk >= 2 {
+        return Err(EquipError::PotionLimit);
+    }
     let max = unit.max_hp(content);
     let before = unit.hp;
     let f = heal_amount(def);
@@ -289,6 +311,7 @@ pub fn drink(content: &Content, unit: &mut Unit, item: ItemId, now: u64) -> Resu
     }
     // The rebuild: a wounded unit's HP follows the maximum; one revived above it is unhurt.
     unit.follow_max(content, max);
+    unit.potions_drunk = unit.potions_drunk.saturating_add(1);
     Ok(unit.hp - before)
 }
 
@@ -838,6 +861,82 @@ mod tests {
         let s = wearing(&c, 5, &[1]).stats(&c);
         assert_eq!(s.bonuses, vec![Bonus::ArmorIgnore], "one bonus byte: the last item's");
         assert_eq!(s.magic, None, "Magic restricts the wearer, it grants no school");
+    }
+
+    #[test]
+    fn experimental_bonuses_keep_native_and_distinct_item_abilities() {
+        let native = UnitDef { bonus: Some(Bonus::Counterblow), ..warrior(5, 20, 0) };
+        let ring = ArtefactDef { bonus: Some(Bonus::ArmorIgnore), ..item(1, ArtefactType::Ring) };
+        let duplicate = ArtefactDef { bonus: Some(Bonus::Counterblow), ..item(2, ArtefactType::Amulet) };
+        let original = content(vec![native],vec![ring,duplicate]);
+        let mut rules = super::super::content::ExperimentalRules::default();
+        rules.simultaneous_bonuses = true;
+        let c = original.with_experimental(rules);
+        let u = wearing(&c,5,&[1,2]);
+        assert_eq!(u.stats(&c).bonuses,vec![Bonus::Counterblow,Bonus::ArmorIgnore]);
+        assert_eq!(u.stats(&original).bonuses,vec![Bonus::Counterblow]);
+        assert!(!original.experimental.simultaneous_bonuses);
+    }
+
+    #[test]
+    fn experimental_accessories_are_independent_and_still_use_four_slots() {
+        let original = content(vec![warrior(5,20,0)],vec![item(1,ArtefactType::Ring),item(2,ArtefactType::Amulet),item(3,ArtefactType::Helm)]);
+        let u = wearing(&original,5,&[1,2,3]);
+        let mut rules = super::super::content::ExperimentalRules::default();
+        rules.multiple_rings = true;
+        let c = original.with_experimental(rules);
+        assert_eq!(slot_for(&c,&u,ItemId(1)),Ok(3));
+        assert_eq!(slot_for(&c,&u,ItemId(2)),Err(EquipError::SameType));
+        assert_eq!(slot_for(&c,&u,ItemId(3)),Err(EquipError::SameType));
+        rules.multiple_rings = false;
+        rules.multiple_amulets = true;
+        let c = original.with_experimental(rules);
+        assert_eq!(slot_for(&c,&u,ItemId(1)),Err(EquipError::SameType));
+        assert_eq!(slot_for(&c,&u,ItemId(2)),Ok(3));
+        let full = wearing(&c,5,&[2,2,2,2]);
+        assert_eq!(slot_for(&c,&full,ItemId(2)),Err(EquipError::NoFreeSlot));
+    }
+
+    #[test]
+    fn experimental_bonus_variants_choose_the_stronger_effect() {
+        let native = UnitDef { bonus: Some(Bonus::Poison), ..warrior(5,20,0) };
+        let strong = ArtefactDef { bonus: Some(Bonus::PoisonS), ..item(1,ArtefactType::Ring) };
+        let c = content(vec![native],vec![strong]).with_experimental(super::super::content::ExperimentalRules {
+            simultaneous_bonuses: true, ..Default::default()
+        });
+        assert_eq!(wearing(&c,5,&[1]).stats(&c).bonuses,vec![Bonus::PoisonS]);
+    }
+
+    #[test]
+    fn experimental_duplicate_items_compare_ids_not_categories() {
+        let c=content(vec![warrior(5,20,0)],vec![item(1,ArtefactType::Ring),item(2,ArtefactType::Ring),item(3,ArtefactType::Amulet)])
+            .with_experimental(super::super::content::ExperimentalRules { multiple_rings:true,multiple_amulets:true,no_duplicate_items:true,..Default::default() });
+        let u=wearing(&c,5,&[1,3]);
+        assert_eq!(slot_for(&c,&u,ItemId(1)),Err(EquipError::DuplicateItem));
+        assert_eq!(slot_for(&c,&u,ItemId(3)),Err(EquipError::DuplicateItem));
+        assert_eq!(slot_for(&c,&u,ItemId(2)),Ok(2));
+        let mut unrestricted=c.clone();
+        unrestricted.experimental.no_duplicate_items=false;
+        assert_eq!(slot_for(&unrestricted,&u,ItemId(1)),Ok(2));
+    }
+
+    #[test]
+    fn experimental_two_potions_count_healing_and_reject_without_mutation() {
+        let mut heal=item(1,ArtefactType::Potion);
+        heal.fixed.insert(Stat::Hits,5);
+        let c=content(vec![warrior(5,20,0)],vec![heal]).with_experimental(super::super::content::ExperimentalRules { two_potions:true,..Default::default() });
+        let mut u=wearing(&c,5,&[]);
+        u.hp=10;
+        drink(&c,&mut u,ItemId(1),0).unwrap();
+        drink(&c,&mut u,ItemId(1),0).unwrap();
+        assert!(u.potions.is_empty(),"instant heals have no lasting potion block");
+        assert_eq!(u.potions_drunk,2);
+        let before=u.clone();
+        assert_eq!(drink(&c,&mut u,ItemId(1),0),Err(EquipError::PotionLimit));
+        assert_eq!(u,before,"a refused potion changes nothing");
+        let mut classic=c.clone();
+        classic.experimental.two_potions=false;
+        assert!(drink(&classic,&mut u,ItemId(1),0).is_ok());
     }
 
     fn gear() -> Vec<ArtefactDef> {

@@ -1125,8 +1125,11 @@ impl BattleView {
         if let Some(id) = self.fighter_under_mouse(l).filter(|&i| self.fighter(i).alive()).or(active).or_else(|| b.fighters.iter().position(|f| f.is_hero)) {
             self.draw_panel(l, assets, id);
         } else {
-            chrome::parchment(l.panel, true);
+            chrome::parchment(Rect::new(l.panel.x, l.panel.y, l.panel.w, l.win.bottom() - 2.0 * l.k - l.panel.y), true);
         }
+        chrome::silver_frame(l.win, 2.0 * l.k);
+        let separator = l.win.x + 247.0 * l.k;
+        chrome::silver_line(vec2(separator, l.win.y + 26.0 * l.k), vec2(separator, l.win.bottom() - 2.0 * l.k), 2.0 * l.k);
         // One hint box at a time: a spell badge's hint replaces the hover box (49e710).
         if player_turn && !super::spell_badges::hovered() {
             self.draw_preview(l, active.expect("player turn"));
@@ -1412,7 +1415,8 @@ impl BattleView {
             status,
         };
         let mut hover = None;
-        unit_sheet::draw(assets, b.content(), l.panel, &sheet, false, &mut hover);
+        let background = Rect::new(l.panel.x, l.panel.y, l.panel.w, l.win.bottom() - 2.0 * l.k - l.panel.y);
+        unit_sheet::draw_extended(assets, b.content(), l.panel, background, &sheet, &mut hover);
     }
 
     /// The won battle's hold is over: the battle is settled and the screen closes; the

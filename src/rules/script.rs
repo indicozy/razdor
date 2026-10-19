@@ -1075,6 +1075,8 @@ const AI_TARGET_NODES: usize = 4000;
 /// in a hand-over saved before that (which read the old map's bytes).
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NextMap {
+    #[serde(default)]
+    pub experimental: super::content::ExperimentalRules,
     /// The map to load: the scenario's next-map name; after an opcode 15 branch its leading
     /// "number-variant" (or the whole name) is the chosen `N-V` *(guess: the guide names maps
     /// "N-V …" and gives the next map as "0-0")*.
@@ -1149,6 +1151,7 @@ impl Game {
         // Every unit of the army loses its lasting spells at the hand-over.
         let unspelled = |u: &Unit| Unit { spells: [None; SPELL_SLOTS], ..u.clone() };
         NextMap {
+            experimental: self.experimental,
             name,
             branch,
             gold: Some(self.gold),
@@ -1174,6 +1177,7 @@ impl Game {
     /// ([`Game::apply_carry_over`]) before its opening events run: they may look for the
     /// carried army (РК2 checks the herald at once) or the last map's flags.
     pub fn from_campaign(content: std::sync::Arc<crate::rules::content::Content>, scenario: &crate::dt::dtm::Scenario, prev: &NextMap) -> Game {
+        let content = std::sync::Arc::new(content.with_experimental(prev.experimental));
         let mut g = Game::unstarted(content, scenario, prev.class);
         g.apply_carry_over(prev);
         g.carried = Some(Box::new(prev.clone()));
@@ -1186,6 +1190,7 @@ impl Game {
     /// On a campaign map that is what the previous map carried over, not the map's own
     /// preset; on a map started as a new game, the preset of the class it started with.
     pub fn restart(&self, content: std::sync::Arc<crate::rules::content::Content>, scenario: &crate::dt::dtm::Scenario) -> Game {
+        let content = std::sync::Arc::new(content.with_experimental(self.experimental));
         let mut g = match &self.carried {
             Some(prev) => Game::from_campaign(content, scenario, prev),
             None => {
@@ -1215,6 +1220,8 @@ impl Game {
     /// old pack and the old army replace this map's (the army paid as of now, its dead
     /// dropped). The flags always carry over.
     pub fn apply_carry_over(&mut self, prev: &NextMap) {
+        self.experimental = prev.experimental;
+        self.content = std::sync::Arc::new(self.content.with_experimental(prev.experimental));
         let c = self.content.clone();
         let now = self.clock.total_minutes() as u64;
         // This (the next) map's header bytes say what is taken (0x4b5b64 reads the map it
@@ -1872,6 +1879,7 @@ mod tests {
         let mut g = start(&world(vec![]));
         g.journal.record(crate::rules::journal::EntryKind::Message, 1, 0, "t", "x");
         let next = NextMap {
+            experimental: Default::default(),
             name: "Road".into(),
             branch: None,
             gold: None,
@@ -1908,6 +1916,47 @@ mod tests {
         let events = g.take_hall_entry(1).unwrap();
         assert_eq!(fired(&events), vec![1]);
         assert_eq!(g.gold, 0);
+    }
+
+    #[test]
+    fn experimental_rules_carry_to_next_map_and_restart() {
+        let scenario = world(vec![]);
+        let mut game = start(&scenario);
+        let rules = super::super::content::ExperimentalRules { simultaneous_bonuses:true, multiple_rings:true, multiple_amulets:false, no_duplicate_items:true, two_potions:true };
+        game.experimental=rules;
+        game.content=std::sync::Arc::new(game.content.with_experimental(rules));
+        let next=game.hand_over("Road".into(),None);
+        assert_eq!(next.experimental,rules);
+        let ordinary=std::sync::Arc::new(game.content.with_experimental(Default::default()));
+        let carried=Game::from_campaign(ordinary.clone(),&scenario,&next);
+        assert_eq!(carried.experimental,rules);
+        assert_eq!(carried.content.experimental,rules);
+        let restarted=carried.restart(ordinary,&scenario);
+        assert_eq!(restarted.experimental,rules);
+        assert_eq!(restarted.content.experimental,rules);
+    }
+
+    #[test]
+    fn benched_living_characters_still_satisfy_quest_presence_and_death_checks() {
+        let mut present=ev(EventKind::Global);
+        present.conditions.units_check=1;
+        (present.conditions.units,present.conditions.units_named,present.conditions.units_owner)=([4,0,0],[1,0,0],[1,0,0]);
+        let mut absent=ev(EventKind::Global);
+        absent.conditions.units_check=1;
+        (absent.conditions.units,absent.conditions.units_named,absent.conditions.units_owner)=([4,0,0],[1,0,0],[6,0,0]);
+        let mut scenario=world(vec![present,absent]);
+        scenario.header.heroes[0]=hero(2,2,100,&[troop(4,0,1)]);
+        scenario.named_characters=vec![crate::dt::dtm::NamedCharacter { unit:4,name:"Herald".into() }];
+        scenario.header.defeat_event=2;
+        let mut g=Game::unstarted(Arc::new(content()),&scenario,HeroClass::Knight);
+        g.squad[1].named=1;
+        g.allow_unit_benching=true;
+        assert!(g.set_unit_battle_disabled(1,true));
+        g.start_script();
+        let fired=fired(&g.drain_events());
+        assert!(fired.contains(&1),"the living benched character is still present");
+        assert!(!fired.contains(&2),"benching is not death or absence");
+        assert_eq!(g.script_end(),None);
     }
 
     #[test]
@@ -2045,9 +2094,8 @@ mod tests {
 
     #[test]
     fn an_army_with_a_meeting_waiting_next_to_the_hero_closes_his_route() {
-        // World.md §1.3 (0x4cc601): an army a meeting event waits for closes its cell when it
-        // stands next to the hero (any of the 8 neighbours), unless it is the army clicked;
-        // further away, or without the event, it is walked through like any moving army.
+        // Army cells are avoided regardless of meeting events or distance. A deliberate
+        // click still reaches the army so its meeting event can run.
         let mut talk = ev(EventKind::Global);
         talk.conditions.meet_army = 2;
         let routes = |events: Vec<DtEvent>, at: (u16, u16), to: (i32, i32)| {
@@ -2066,9 +2114,9 @@ mod tests {
         let (route, _) = routes(vec![talk.clone()], (3, 3), (4, 4));
         assert!(!route.contains(&(3, 3)), "a diagonal neighbour too: {route:?}");
         let (route, _) = routes(vec![talk], (4, 2), (6, 2));
-        assert!(route.contains(&(4, 2)), "two cells away: {route:?}");
+        assert!(!route.is_empty() && !route.contains(&(4, 2)), "two cells away: {route:?}");
         let (route, _) = routes(vec![], (3, 2), (4, 2));
-        assert_eq!(route, vec![(3, 2), (4, 2)], "no meeting waits for it");
+        assert!(!route.is_empty() && !route.contains(&(3, 2)), "no meeting waits for it: {route:?}");
     }
 
     /// The hero walks from (2, 2) to (8, 4) while army 2 (`attitude`) steps from (5, 2) to
@@ -2313,6 +2361,7 @@ mod tests {
         let mut dead = g.squad[1].clone();
         dead.hp = 0;
         let next = NextMap {
+            experimental: Default::default(),
             name: "Road".into(),
             branch: None,
             gold: Some(70),

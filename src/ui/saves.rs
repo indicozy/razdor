@@ -211,7 +211,7 @@ pub fn autosaves_on(opt_value8: Option<&str>) -> bool {
 /// Razdor is started again.
 pub fn session_content(install: Option<Arc<Content>>, game: &Game) -> Option<Arc<Content>> {
     match install {
-        Some(c) if matches!(game.origin, Some(save::ScenarioRef::Map { .. })) && c.formation != game.content.formation => Some(game.content.clone()),
+        Some(c) if matches!(game.origin, Some(save::ScenarioRef::Map { .. })) && c.formation != game.content.formation => Some(Arc::new(c.with_formation(game.content.formation))),
         other => other,
     }
 }
@@ -330,6 +330,7 @@ impl Book {
         let y = book_top(screen_height(), super::chrome::bar_height(), h, k, over_map);
         let win = Rect::new((screen_width() - w) / 2.0, y, w, h);
         let (_, closed) = super::chrome::window(win, title, super::chrome::Skin::Marble, true);
+        super::chrome::three_block_frame(win, 26.0 * k, 432.0 * k, 2.0 * k);
         (Book { win, k }, closed)
     }
 
@@ -506,14 +507,13 @@ impl Book {
     /// The steel line the tabs hang from, running along the window (the original draws it
     /// right of the tabs, under the book).
     fn tab_line(&self) {
-        if let Some(t) = super::chrome::win("SteelLine") {
-            let r = self.rect(6.0, 418.0, 582.0, 5.0);
-            super::chrome::three_slice(&t, r, 40.0, WHITE);
-        }
+        // This is the shared content/footer boundary, behind the hanging tabs.
+        let y = self.win.y + 433.0 * self.k;
+        super::chrome::silver_line(vec2(self.win.x, y), vec2(self.win.right(), y), 2.0 * self.k);
     }
 
     fn button(&self, x: f32, w: f32, label: &str, enabled: bool) -> bool {
-        let r = self.rect(x, 442.0, w, 28.0);
+        let r = self.rect(x, 443.0, w, 28.0);
         let (_, down, pressed) = super::widgets::button_state(r, enabled);
         super::chrome::marble_button(r, label, enabled, down);
         pressed
@@ -793,7 +793,7 @@ pub fn battle_exit_dialog(asking: &mut bool) -> (Option<ExitChoice>, bool) {
     if super::chrome::win("S_Battle").is_none() {
         return exit_dialog(&title, warning, asking, true, false);
     }
-    battle_exit_window(&title, warning, asking)
+    super::dt_font::with_legacy_metrics(|| battle_exit_window(&title, warning, asking))
 }
 
 /// The original's leave-battle window (4d3620, drawn by 4d0ccc), in its pixels times the
@@ -808,33 +808,49 @@ fn battle_exit_window(title: &str, warning: &str, asking: &mut bool) -> (Option<
     const W: f32 = 634.0;
     const H: f32 = 516.0;
     let (sw, sh) = (screen_width(), screen_height());
-    let o = super::dt_font::whole_scale(chrome::k() * 0.9375).min((sw - 12.0) / W).min((sh - chrome::bar_height() - 4.0) / H);
+    let o = (chrome::k() * 0.9375).min((sw - 12.0) / W).min((sh - chrome::bar_height() - 4.0) / H);
     let (wx, wy) = (((sw - W * o) / 2.0).floor(), ((sh - chrome::bar_height() - H * o) / 2.0).floor().max(2.0));
     let r = Rect::new(wx, wy, W * o, H * o);
-    let (_, closed) = chrome::window(r, title, chrome::Skin::Red, true);
+    let closed = chrome::battle_exit_frame(r, title, o);
     if let Some(t) = chrome::win("S_Battle") {
         let (pw, ph) = (t.width().min(W - 10.0), t.height().min(H - 32.0 - 5.0));
         chrome::tex(&t, Rect::new(wx + 5.0 * o, wy + 32.0 * o, pw * o, ph * o), WHITE);
     }
+    // Title, content and footer form three adjoining rectangles with shared solid edges.
+    chrome::three_block_frame(r, 28.0 * o, 460.0 * o, 2.0 * o);
+    // The central battle illustration has its own fine inset outline, as in the reference.
+    chrome::silver_frame(
+        Rect::new(wx + 3.0 * o, wy + 30.0 * o, W * o - 6.0 * o, 428.0 * o),
+        o,
+    );
     let tb = Rect::new(wx + 18.0 * o, wy + 264.0 * o, 598.0 * o, 179.0 * o);
     let grey = 0x30 as f32 / 255.0;
     chrome::subtractive(|| draw_rectangle(tb.x, tb.y, tb.w, tb.h, Color::new(grey, grey, grey, 1.0)));
-    chrome::shaded_text_box(tb, 0.0);
-    let size = super::dt_font::sheet_size(super::dt_font::Face::Subtitle, o);
-    let line = 19.0 * o;
+    chrome::silver_frame(tb, o);
+    for (name, right, bottom) in [("Corner_Frame-LU", false, false), ("Corner_Frame-RU", true, false), ("Corner_Frame-LD", false, true), ("Corner_Frame-RD", true, true)] {
+        if let Some(t) = chrome::win(name) {
+            let (w, h) = (t.width() * o, t.height() * o);
+            chrome::tex(&t, Rect::new(if right { tb.right()-w } else { tb.x }, if bottom { tb.bottom()-h } else { tb.y }, w, h), WHITE);
+        }
+    }
+    let face = super::dt_font::Face::Subtitle;
+    let size = super::dt_font::sheet_size(face, o);
+    // The warning's first sentence occupies one line in the reference window.
+    let size = super::dt_font::with_face(face, || fit_size(warning.split('\n').nth(2).unwrap_or_default(), tb.w - 40.0 * o, size));
+    let line = 18.0 * o;
     // Wrapped in the face it is drawn in (the original's Benguiat sheet).
-    let lines: Vec<String> = super::dt_font::with_original_face(super::dt_font::Face::Subtitle, || {
+    let lines: Vec<String> = super::dt_font::with_face(face, || {
         warning.split('\n').flat_map(|l| if l.is_empty() { vec![String::new()] } else { wrap(l, tb.w - 40.0 * o, size) }).collect()
     });
     let text_h = lines.len() as f32 * line;
     let mut y = tb.y + ((tb.h - text_h) / 2.0).max(4.0 * o) + size * 0.8;
     for l in &lines {
-        super::dt_font::with_original_face(super::dt_font::Face::Subtitle, || chrome::shadow_centered(l, tb.center().x, y, size, Color::new(1.0, 0.9, 0.66, 1.0)));
+        super::dt_font::with_face(face, || chrome::shadow_centered(l, tb.center().x, y, size, Color::from_rgba(255, 255, 155, 255)));
         y += line;
     }
     let art = |name: &str| chrome::win(&format!("{name}Up")).map(|t| (t.width(), t.height()));
     let (b3, b2, b1) = (art("Btn3").unwrap_or((160.0, 36.0)), art("Btn2").unwrap_or((128.0, 36.0)), art("Btn1").unwrap_or((96.0, 36.0)));
-    let by = H - 10.0 - b1.1;
+    let by = 460.0 + (H - 460.0 - b1.1) / 2.0;
     let exit_x = 10.0;
     let menu_x = exit_x + b3.0 + 8.0;
     let restart_x = menu_x + b3.0 + 8.0;
@@ -851,7 +867,7 @@ fn battle_exit_window(title: &str, warning: &str, asking: &mut bool) -> (Option<
     for (x, (bw, bh), art, label, what) in buttons.iter() {
         let b = Rect::new(wx + x * o, wy + by * o, bw * o, bh * o);
         let over = !*asking && b.contains(crate::ui::widgets::pointer().into()) && !input_blocked();
-        chrome::defeat_button_art(b, art, label, over);
+        chrome::defeat_button_art(b, art, label, over && is_mouse_button_down(MouseButton::Left));
         if over && clicked() {
             match what {
                 Some(ExitChoice::Restart) => *asking = true,
@@ -889,7 +905,9 @@ fn battle_exit_window(title: &str, warning: &str, asking: &mut bool) -> (Option<
 /// «Отмена» on the right, 10 px from the window's foot.
 fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art: bool) -> (Option<ExitChoice>, bool) {
     let k = super::chrome::k();
-    let (w, h) = if art { (594.0 * k, 480.0 * k) } else { (560.0 * k, 250.0 * k) };
+    let footer_h = 56.0 * 0.9375 * k;
+    let picture_h = super::chrome::win("S_Exit_RUS").map(|t| 585.0 * k * t.height() / t.width());
+    let (w, h) = if art { (634.0 * 0.9375 * k, picture_h.map_or(480.0 * k, |ph| ph + 73.0 * k + 1.0) + footer_h - 42.0 * k) } else { (560.0 * k, 250.0 * k) };
     let r = Rect::new((screen_width() - w) / 2.0, ((screen_height() - super::chrome::bar_height() - h) / 2.0).max(0.0), w, h);
     let (inner, closed) = super::chrome::window(r, title, super::chrome::Skin::Marble, true);
     if art {
@@ -899,7 +917,10 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art:
             let pic = Rect::new(inner.center().x - pw / 2.0, inner.y + 2.0 * k, pw, ph.min(inner.h - 4.0 * k));
             let src = Rect::new(0.0, 0.0, t.width(), t.height() * pic.h / ph);
             super::chrome::tex_src(&t, src, pic, WHITE);
+            super::chrome::silver_frame(pic, k);
         }
+        // Keep the three large sections distinct, with a fine outline around the artwork
+        // occupying the central section.
         let ver = super::chrome::ui_text("SpecialTexts", "VerInfo").unwrap_or_default();
         if !ver.is_empty() {
             super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
@@ -908,7 +929,9 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art:
         }
         let bh = (480.0 - 110.0) / 2.0;
         let tb = Rect::new(r.x + 17.0 * k, r.y + (bh + 61.0) * k, r.w - 34.0 * k, (bh - 19.0) * k);
-        super::chrome::text_box(tb);
+        let shade = 0x30 as f32 / 255.0;
+        super::chrome::subtractive(|| draw_rectangle(tb.x, tb.y, tb.w, tb.h, Color::new(shade, shade, shade, 1.0)));
+        super::chrome::text_box_frame(tb);
         let size = 16.0 * k;
         let lines: Vec<String> = super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
             warning.split('\n').flat_map(|l| if l.is_empty() { vec![String::new()] } else { wrap(l, tb.w - 30.0 * k, size) }).collect()
@@ -936,9 +959,10 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art:
         (own("Buttons", "Cancel", n_("Cancel")), None),
     ];
     let bw = (inner.w - 50.0 * k) / 4.0;
-    let by = if art { r.y + r.h - 10.0 * k - 30.0 * k } else { inner.y + inner.h - 42.0 * k };
+    let button_h = 36.0 * 0.9375 * k;
+    let by = if art { r.bottom() - (footer_h + button_h) / 2.0 } else { inner.y + inner.h - 42.0 * k };
     // The original's buttons: three from the left 8 apart, «Отмена» on the right.
-    let widths = [142.0 * k, 142.0 * k, 114.0 * k, 89.0 * k];
+    let widths = [150.0 * k, 150.0 * k, 120.0 * k, 90.0 * k];
     let mut choice = None;
     let mut cancel = closed;
     // The restart question opens on the next frame, so the click on «Рестарт» cannot also
@@ -946,8 +970,9 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art:
     let was_asking = *asking;
     for (i, (label, what)) in labels.iter().enumerate() {
         let b = if art {
-            let x = if i == 3 { r.x + r.w - 10.0 * k - widths[3] } else { r.x + 10.0 * k + widths[..i].iter().map(|w| w + 8.0 * k).sum::<f32>() };
-            Rect::new(x, by, widths[i], 30.0 * k)
+            let x = if i == 3 { r.right() - 9.375 * k - widths[i] }
+                else { r.x + 9.375 * k + widths[..i].iter().map(|w| w + 7.5 * k).sum::<f32>() };
+            Rect::new(x, by, widths[i], button_h)
         } else {
             Rect::new(inner.x + 10.0 * k + i as f32 * (bw + 10.0 * k), by, bw, 30.0 * k)
         };
@@ -960,6 +985,9 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art:
                 None => cancel = true,
             }
         }
+    }
+    if art {
+        super::chrome::three_block_frame(r, 26.0 * k, r.h - footer_h, 2.0 * k);
     }
     if was_asking {
         let (t, q) = if battle {

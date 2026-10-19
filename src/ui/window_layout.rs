@@ -40,7 +40,22 @@ pub fn at(win: Rect, x: f32, y: f32, w: f32, h: f32) -> Rect {
     else {(y,h)};
     Rect::new(win.x+x*k,win.y+yy*k,w*k,hh*k)
 }
-pub fn left(win: Rect) -> Rect { let k=chrome::k(); Rect::new(win.x+2.0*k,win.y+27.0*k,244.0*k,570.0*k) }
+pub fn left(win: Rect) -> Rect { let k=chrome::k(); Rect::new(win.x+2.0*k,win.y+27.0*k,244.0*k,571.0*k) }
+/// Shared structural grid, drawn last so tab artwork cannot erase its borders.
+pub fn frame(win: Rect) {
+    let k = chrome::k();
+    chrome::silver_frame(win, 2.0 * k);
+    let x = win.x + 247.0 * k;
+    chrome::silver_line(vec2(x, win.y + 26.0 * k), vec2(x, win.bottom() - 2.0 * k), 2.0 * k);
+    let strip = divider(win);
+    for y in [strip.y + k, strip.bottom() - k] {
+        chrome::silver_line(vec2(x, y), vec2(win.right() - 2.0 * k, y), 2.0 * k);
+    }
+}
+pub fn panel_frame(r: Rect) {
+    let gap = 2.0 * chrome::k();
+    chrome::silver_frame(Rect::new(r.x + gap, r.y + gap, r.w - 2.0 * gap, r.h - 2.0 * gap), chrome::k());
+}
 pub fn upper(win: Rect) -> Rect { let k=chrome::k(); Rect::new(win.x+248.0*k,win.y+28.0*k,586.0*k,upper_height()*k) }
 pub fn divider(win: Rect) -> Rect { let k=chrome::k(); Rect::new(win.x+248.0*k,win.y+(28.0+upper_height())*k,586.0*k,DIVIDER*k) }
 pub fn lower(win: Rect) -> Rect { let k=chrome::k(); Rect::new(win.x+248.0*k,win.y+lower_y()*k,586.0*k,lower_height()*k) }

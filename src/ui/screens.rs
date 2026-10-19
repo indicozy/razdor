@@ -100,6 +100,10 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
     clear_background(Color::from_rgba(24, 22, 20, 255));
     text_centered("RAZDOR", screen_width() / 2.0, 80.0, 64.0, ACCENT);
     text_centered(tr("Choose a scenario"), screen_width() / 2.0, 114.0, 24.0, DIM);
+    if button(60.0, 20.0, 48.0, 32.0, "...", true) {
+        super::new_game::open_experimental_menu();
+        return None;
+    }
     super::language::picker_box(Rect::new(screen_width() - 196.0, 20.0, 176.0, 36.0));
     let (x, w) = (60.0, screen_width() - 120.0);
     let row_h = 52.0;
@@ -169,9 +173,14 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
 
 /// A new game as `hero` named `name`: of the demo on `demo`, or of the install's map.
 pub(super) fn start_game(demo: &Arc<Content>, scenario: Option<(&ScenarioEntry, &Arc<Content>)>, hero: HeroClass, name: &str) -> Game {
+    start_game_with_rules(demo, scenario, hero, name, super::new_game::experimental_rules())
+}
+
+pub(super) fn start_game_with_rules(demo: &Arc<Content>, scenario: Option<(&ScenarioEntry, &Arc<Content>)>, hero: HeroClass, name: &str, rules: razdor::rules::content::ExperimentalRules) -> Game {
     let mut g = match scenario {
         Some((e, c)) => {
-            let mut g = Game::from_scenario(c.clone(), &e.scenario, hero);
+            let content = Arc::new(c.with_experimental(rules));
+            let mut g = Game::from_scenario(content, &e.scenario, hero);
             // Saves name the map file and a hash of its bytes.
             match ScenarioRef::of_map(&e.path, &e.file) {
                 Ok(origin) => g.set_origin(origin),
@@ -179,7 +188,7 @@ pub(super) fn start_game(demo: &Arc<Content>, scenario: Option<(&ScenarioEntry, 
             }
             g
         }
-        None => Game::new(demo.clone(), hero),
+        None => Game::new(Arc::new(demo.with_experimental(rules)), hero),
     };
     g.set_hero_name(name);
     razdor::diag::play(&g.clock.label(), &super::play_game_line(&g, "new game"));
@@ -195,6 +204,7 @@ pub fn class_select(
 ) -> Option<Screen> {
     clear_background(Color::from_rgba(24, 22, 20, 255));
     let content = scenario.as_ref().map_or(demo.clone(), |(_, c)| c.clone());
+    let content = Arc::new(content.with_experimental(super::new_game::experimental_rules()));
     let title = scenario.as_ref().map_or(tr("A time of discord").to_string(), |(e, _)| e.scenario.title.clone());
     text_centered(&title, screen_width() / 2.0, 100.0, 44.0, ACCENT);
     text_centered(tr("Choose who you are."), screen_width() / 2.0, 140.0, 26.0, DIM);
@@ -332,4 +342,25 @@ pub fn victory(game: &mut Option<Game>, scenarios: &[ScenarioEntry], content: Op
         }
     }
     None
+}
+
+#[cfg(test)]
+mod experimental_tests {
+    use super::*;
+
+    #[test]
+    fn experimental_menu_choices_only_affect_the_new_party() {
+        let demo=Arc::new(Content::builtin());
+        let rules=razdor::rules::content::ExperimentalRules { simultaneous_bonuses:true,multiple_rings:true,multiple_amulets:false,no_duplicate_items:true,two_potions:true };
+        super::super::new_game::snapshot_experimental(rules);
+        let game=start_game(&demo,None,HeroClass::Knight,"Test");
+        assert_eq!(game.experimental,rules);
+        assert_eq!(game.content.experimental,rules);
+        super::super::new_game::open_list();
+        assert_eq!(super::super::new_game::experimental_rules(),razdor::rules::content::ExperimentalRules::for_new_game());
+        assert_eq!(game.experimental,rules,"new menu choices cannot change a running party");
+        let restarted=start_game_with_rules(&demo,None,game.start_class(),"Test",game.experimental);
+        assert_eq!(restarted.content.experimental,rules);
+        assert_eq!(demo.experimental,Default::default());
+    }
 }
