@@ -8,6 +8,18 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **Unit panel: Community bleed source, evasion, magic tint** (2026-10-19). The stat list
+  (interface.md, the "Razdor now → original" row 80) follows the original's colour rule. Still open:
+  - The bleed line shows the unit's own bleed in battle. The original reads the battle bleed
+    table: a hero's unit the player-side entry of its slot, any other army the player-side
+    entry of the **next** slot (so an enemy card shows a player unit's bleed); the table is
+    not cleared after a battle, so the map shows the last battle's bleed. Not ported (needs
+    the table kept on the game); Razdor's bleed lives on the battle's fighters, so the map
+    shows none.
+  - The evasion line (`SEvasion`) reads the per-type table one entry off and is always plain;
+    with the shipped data it is never shown. Not ported.
+  - The magic lines use the plain/blue/red tints; the original tints them yellow (blue or red
+    by the battle power against the level power). Razdor's are not yellow yet.
 - **PR #9's window look, the parts not settled** (2026-10-19). Checked in the original's
   code and fixed: the frame lines (48d1d4, 48d3f8, 48d710), the brown box's paper, sides and
   corners (48e4e8), the red skin (4dbc34), the hall list's ornaments and its top (4bedec,
