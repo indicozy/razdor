@@ -41,8 +41,10 @@ update window shows those notes up to their first `## ` heading.
    push `main`.
 8. Tell the owner: the version, the release link, what is in it (plain words), test results.
 9. Discord announcement (if the `discord-reports` MCP server is connected):
-   - Issues shipped: `gh issue list --state closed --label from-discord --search "closed:>=<previous release date>"`
-     (or the `Fixes #N` in this release's commits). `reports_reporters` gives their reporters.
+   - Reports shipped: the reports backlog's `fixed` entries (`discord-reports` skill §3) whose
+     commits are in this release; set each to `shipped X.Y.Z` in its report and in INDEX.
+     `reports_reporters` gives their reporters (the backlog id is the number they're linked
+     under; older reports were linked under GitHub issue numbers).
    - Write a short Russian post in plain player words: «Вышел Раздор X.Y.Z» + the release link,
      the changelog lines, and after each line that came from a report «спасибо <@id>» (each
      reporter once per line). No internals, no issue numbers needed.

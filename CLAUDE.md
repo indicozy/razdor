@@ -54,13 +54,20 @@ are in `README.md` (Russian).
   to `dt-original` and pushed there; deviations never are.
   `dt-feat` is frozen; `dt-editor` (map editor parity) is paused, untouched unless asked.
 - Player reports go to `docs/PLAYTEST_NOTES.md` (Russian), with what the original does.
+- Every Discord report also gets an entry in the local reports backlog (the path is in
+  `CLAUDE.local.md`; never in git: it holds reporters' names and ids and screenshots): who
+  reported, the text, the media, the verdict and the fix status. It replaces GitHub issues for
+  Discord reports (the owner's decision, 2026-10-19); it is the list for backlog checks and the
+  retrospective that every fixed report stays fixed. Layout in the `discord-reports` skill.
 - Keep RE notes in our own words; never paste decompiled code into `docs/reference/`.
 - Parallel agents each work in their own git worktree (Agent `isolation: "worktree"`), never in
   the shared tree; each lands its commits on `main` itself (`git fetch`, `git rebase
   origin/main`, tests, `git push origin HEAD:main`) and the main session pulls.
-- When a task is done, clean up after it: remove its worktrees and their branches (once the
-  commits are on `main`), stop the processes it started (Xvfb, Wine, servers), and delete its
-  scratch files and temporary probes; leave nothing untracked in the repo.
+- When a task is done, clean up after it at once, without asking (also when the owner is
+  away): remove its worktrees and their branches (once the commits are on `main`), stop the
+  processes it started (Xvfb, Wine, servers), and delete its scratch files, target dirs and
+  temporary probes; leave nothing untracked in the repo. Only what the task created; anything
+  else, or anything with uncommitted work, is listed for the owner.
 - Anything left unresolved (a question about the original, a known difference, a parity fix not
   ported to `dt-original`) goes into `docs/OPEN_QUESTIONS.md`.
 
@@ -75,7 +82,7 @@ are in `README.md` (Russian).
 | A feature tied to the original was reverse engineered first; it cites addresses and has a test | review |
 | A deviation was asked for and stays off `dt-original` | review |
 | A player-visible change has a line in `changelog/unreleased.md` | review |
-| A player report has its `PLAYTEST_NOTES.md` entry | review |
+| A player report has its `PLAYTEST_NOTES.md` entry and its backlog entry's status is current | review |
 | A change that alters a flow updates its `docs/flows/` file | review |
 | Parity commits are cherry-picked to `dt-original` and pushed (or listed in `docs/OPEN_QUESTIONS.md`) | review |
 | Unresolved questions are in `docs/OPEN_QUESTIONS.md`; settled ones moved to its Settled list | review |

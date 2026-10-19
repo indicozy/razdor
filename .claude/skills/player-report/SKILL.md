@@ -46,6 +46,8 @@ helper) usually breaks more than the one thing reported. List what else it fixes
 
 ## 3. Record it
 
+- A Discord report: its entry in the local reports backlog (the `discord-reports` skill, §3)
+  gets the verdict, the fix's commit and test, and the new status.
 - `docs/PLAYTEST_NOTES.md`: a numbered item in Russian under the day's section
   (`## <date>, main: отчёты игроков из Discord (<version>)`), newest section first: what the
   player saw, the cause, what the original does (addresses), what changed and the commit.
