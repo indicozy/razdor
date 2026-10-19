@@ -893,7 +893,7 @@ pub fn squad(
             // Razdor's drag: a card pressed and moved while held goes to another cell.
             GridPress::Select(_) | GridPress::Deselect => {
                 if let Some(i) = on {
-                    super::unit_drag::press(i, game.squad[i].def);
+                    super::unit_drag::press(i, game.squad[i].def, (game.squad[i].hp, game.squad[i].max_hp(&c)));
                 }
             }
             GridPress::Nothing => {}

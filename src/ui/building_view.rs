@@ -622,7 +622,7 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
             // Razdor's drag starts from a press that does not swap.
             _ => {
                 if let Some(i) = on {
-                    super::unit_drag::press(i, game.squad[i].def);
+                    super::unit_drag::press(i, game.squad[i].def, (game.squad[i].hp, game.squad[i].max_hp(&c)));
                 }
             }
         }
