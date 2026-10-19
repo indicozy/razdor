@@ -942,3 +942,49 @@ fn max_plays_the_hero_s_side_of_the_quick_battle_better() {
     assert!(tally[1].0 >= tally[0].0, "against Max, Max on the hero's side wins at least as often as the hero's auto-battle");
     assert!(tally[1].1 >= tally[0].1, "and keeps at least as much");
 }
+
+/// #18: the rollouts played ahead on other threads ([`MaxBudget::prefetch`]) change nothing
+/// the search finds: every decision of whole quick battles (Max on both sides, each with its
+/// tables) has the same choice, scores, depth and positions with them or without.
+#[test]
+fn prefetched_rollouts_change_no_decision() {
+    let serial = MaxBudget { prefetch: false, ..MAX_QUICK_BUDGET };
+    for (name, b) in synthetic_battles(6) {
+        let decide = |budget: MaxBudget| {
+            let mut b = b.clone();
+            b.begin();
+            let tables = [MaxTables::default(), MaxTables::default()];
+            let mut seen = Vec::new();
+            for _ in 0..AUTO_PLAY_STEPS {
+                let Some(id) = b.active() else { break };
+                let side = b.fighters[id].team.index();
+                let r = b.max_choice_with(budget, Some(&tables[side]), None).unwrap();
+                seen.push((r.choice, r.value, r.original_value, r.depth, r.nodes, r.settled));
+                b.play_max_move(r.choice);
+            }
+            (seen, b.log.clone(), b.outcome())
+        };
+        assert_eq!(decide(MAX_QUICK_BUDGET), decide(serial), "{name}");
+    }
+}
+
+/// #18: the slowest of 120 quick battles with «Максимум» of the install's units (23 fighters,
+/// 24 rounds: 10.5 s on a quiet E-core before, about 5 s on 3) keeps under 8 s, scaled by
+/// `RAZDOR_PERF_BUDGET_SCALE` on slow cores. It takes the cores it measures, so it runs by
+/// hand (`--ignored`, alone): among the other tests it is neither fair to them nor to itself.
+#[test]
+#[ignore]
+fn a_long_quick_battle_keeps_to_its_time() {
+    use crate::dt::install::DtInstall;
+    if cfg!(debug_assertions) || max_threads() < 3 {
+        return;
+    }
+    let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+    let dt = DtInstall::load(std::path::Path::new(&dir)).unwrap();
+    let c = Arc::new(Content::from_dt(&dt));
+    let (name, mut b) = custom_battles(&c, "custom", 37, 12, 23).remove(36);
+    let t = std::time::Instant::now();
+    b.max_play_to_end(MAX_QUICK_BUDGET);
+    let scale = std::env::var("RAZDOR_PERF_BUDGET_SCALE").ok().and_then(|s| s.trim().parse::<f64>().ok()).filter(|s| *s > 0.0).unwrap_or(1.0);
+    assert!(t.elapsed() <= Duration::from_secs(8).mul_f64(scale), "{name}: {:?}", t.elapsed());
+}

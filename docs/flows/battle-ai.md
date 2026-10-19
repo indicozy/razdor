@@ -276,6 +276,23 @@ BattleView::ai_move (computer's turn) → max_move → MaxThinker::poll(battle)
   battle keeps 600 (about 0.8 s a battle on one loaded E-core). Max's search itself is
   unchanged: against the original's AI it plays as before (`max_beats_the_original_on_real_armies`).
 
+  **Long quick battles** (#18, 2026-10-19: a lone level-13 knight against a 12-unit peasant
+  gang with healers, to the turn limit, the window stood still for 10 s on a 7800X3D). The
+  cost is decisions × 600 positions × rollouts, and a rollout plays the rest of the battle:
+  big armies that fight long are the worst. Probed on 120 custom battles of the install's
+  units (up to 12 a side): 23 fighters for 24 rounds took 10.5 s on a quiet E-core (296
+  decisions, 411 positions, 177 rollouts played and 126 found in the cache per decision),
+  others 5–12 s. `MAX_QUICK_BUDGET` now sets `MaxBudget::prefetch`: at a node whose children
+  are all leaves to roll out, `Prefetch` hands them to `max_threads() − 1` threads, which play
+  and roll out the leaves into the rollout cache while the search, still on one thread,
+  takes the children in turn (and rolls out untaken ones while it waits for a thread). A
+  rollout is a function of its position, so every score, the positions counted and every
+  choice are the same as before (`prefetched_rollouts_change_no_decision`); the search's
+  thread plays about 2 of the 177 rollouts itself when the cores are free. The same battle:
+  about 5 s on 3 E-cores (`a_long_quick_battle_keeps_to_its_time`, 8 s ×
+  `RAZDOR_PERF_BUDGET_SCALE`). The rest of the time is the search's own positions and the
+  leaves of the cut nodes it needs at once.
+
 UI: `BattleView` keeps a `MaxThinker` per side the computer plays (`max_side` names the one
 that thinks ahead now); a battle that is over stops its search. The clock pointer already shows while the computer's
 side acts; the frame never waits. Settings: «Сила ИИ в бою» in «Ещё…» (`main_menu::AiStrength`):

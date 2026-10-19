@@ -53,8 +53,10 @@ pub const MAX_AI_BUDGET: Duration = Duration::from_millis(150);
 /// while the battle window waits. 4 actions ahead and 600 positions (the harness's budget):
 /// on the install's armies about 0.8 s a battle on one E-core, and 2000 positions won no
 /// more (`max_plays_the_hero_s_side_of_the_quick_battle_better`: 43% against 42%, 2.7 times
-/// as long).
-pub const MAX_QUICK_BUDGET: MaxBudget = MaxBudget::fixed(4, 600);
+/// as long). Big armies that fight long took far more (#18: 10 s and more on a player's
+/// 7800X3D, 23 fighters for 24 rounds 19 s on an E-core), nearly all of it in rollouts: they
+/// are played ahead on the other cores ([`MaxBudget::prefetch`]), the same choices.
+pub const MAX_QUICK_BUDGET: MaxBudget = MaxBudget { prefetch: true, ..MaxBudget::fixed(4, 600) };
 /// Iterative deepening stops at this many actions ahead.
 const MAX_DEPTH: u32 = 24;
 /// Leaves more than this many actions ahead are scored without a rollout.
@@ -128,16 +130,21 @@ pub struct MaxBudget {
     /// The root's actions are searched on [`max_threads`] threads (the game's; a node limit
     /// needs one thread to be met exactly).
     pub parallel: bool,
+    /// The rollouts of a node's leaves are played ahead on [`max_threads`] threads while
+    /// the search takes the leaves in turn ([`Prefetch`], #18): the search itself stays on
+    /// one thread and finds every score as before, so a node budget's choices do not change;
+    /// only its time does. Needs the tables (the rollouts land in their cache).
+    pub prefetch: bool,
 }
 
 impl MaxBudget {
     /// The battle on screen: [`MAX_AI_BUDGET`] per decision.
-    pub const GAME: MaxBudget = MaxBudget { time: Some(MAX_AI_BUDGET), max_depth: MAX_DEPTH, max_nodes: u64::MAX, short_rollouts: false, parallel: true };
+    pub const GAME: MaxBudget = MaxBudget { time: Some(MAX_AI_BUDGET), max_depth: MAX_DEPTH, max_nodes: u64::MAX, short_rollouts: false, parallel: true, prefetch: false };
 
     /// No clock: at most `max_depth` actions ahead and `max_nodes` positions, the same
     /// choice on any machine.
     pub const fn fixed(max_depth: u32, max_nodes: u64) -> MaxBudget {
-        MaxBudget { time: None, max_depth, max_nodes, short_rollouts: false, parallel: false }
+        MaxBudget { time: None, max_depth, max_nodes, short_rollouts: false, parallel: false, prefetch: false }
     }
 }
 
@@ -335,6 +342,27 @@ impl Battle {
     /// outside, in place of the budget's time).
     pub fn max_choice_with(&self, budget: MaxBudget, tables: Option<&MaxTables>, control: Option<&MaxControl>) -> Option<MaxReport> {
         let id = self.active()?;
+        let threads = max_threads();
+        let side = self.fighters[id].team;
+        let prefetch = match tables {
+            Some(t) if budget.prefetch && !budget.short_rollouts && threads > 1 => Some(Prefetch::new(side, t)),
+            _ => None,
+        };
+        let Some(p) = prefetch.as_ref() else { return self.max_search(id, budget, tables, control, None) };
+        let globals = patch_globals();
+        std::thread::scope(|scope| {
+            for _ in 1..threads {
+                scope.spawn(move || p.work(globals));
+            }
+            let r = self.max_search(id, budget, tables, control, Some(p));
+            p.quit();
+            r
+        })
+    }
+
+    /// [`Battle::max_choice_with`]'s search, with its rollouts played ahead by `prefetch`'s
+    /// threads if any.
+    fn max_search<'a>(&self, id: usize, budget: MaxBudget, tables: Option<&'a MaxTables>, control: Option<&'a MaxControl>, prefetch: Option<&'a Prefetch<'a>>) -> Option<MaxReport> {
         let t0 = Instant::now();
         let saved = patch_globals();
         let silent = crate::i18n::set_silent(true);
@@ -361,6 +389,8 @@ impl Battle {
             forced_best: Default::default(),
             scratch: Vec::new(),
             roll: None,
+            prefetch,
+            help: (None, None),
         };
         let all_moves = moves.clone();
         let mut done = None;
@@ -486,6 +516,229 @@ struct Search<'a> {
     /// are reused (`Battle::clone_from`), the battle searched is never changed.
     scratch: Vec<Option<Battle>>,
     roll: Option<Battle>,
+    /// The threads playing the rollouts of the leaves ahead ([`MaxBudget::prefetch`]).
+    prefetch: Option<&'a Prefetch<'a>>,
+    /// The buffers the search rolls out other leaves in while it waits ([`Prefetch::claim`]).
+    help: (Option<Battle>, Option<Battle>),
+}
+
+/// The rollouts of one node's leaves played ahead on other threads ([`MaxBudget::prefetch`],
+/// #18). At a node whose children are all leaves to roll out, the search hands the node and
+/// its actions in order to the threads; each takes the next action not yet taken, plays it and
+/// rolls the leaf out by [`rollout`] into the tables' cache. The search goes on through the
+/// children as ever, on its own thread: before each child it takes that child itself if no
+/// thread has, or, while a thread has it, rolls out other children not yet taken and then
+/// waits for it, and finds its rollout in the cache. A rollout is a function of its position
+/// (the cache's premise), so every score is the one the search would have found alone and the
+/// nodes it counts are the same: the choice is the same, only sooner. When a cut ends the
+/// node early, the children not yet taken are dropped.
+struct Prefetch<'t> {
+    side: Team,
+    tables: &'t MaxTables,
+    batch: std::sync::Mutex<Batch>,
+    changed: std::sync::Condvar,
+}
+
+/// A leaf taken to roll out: its node's serial, its index, the action, the node's patch
+/// globals and the node copied into a buffer.
+struct Taken {
+    serial: u64,
+    index: usize,
+    action: MaxMove,
+    globals: PatchGlobals,
+    node: Battle,
+}
+
+/// The node whose leaves are being rolled out.
+#[derive(Default)]
+struct Batch {
+    /// Bumped by each new node, so a thread's late result does not touch the next one.
+    serial: u64,
+    base: Option<Battle>,
+    globals: Option<PatchGlobals>,
+    moves: Vec<MaxMove>,
+    jobs: Vec<Job>,
+    quit: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Job {
+    Waiting,
+    /// A thread rolls it out.
+    Running,
+    /// Rolled out, or taken by the search itself.
+    Done,
+}
+
+impl<'t> Prefetch<'t> {
+    fn new(side: Team, tables: &'t MaxTables) -> Prefetch<'t> {
+        Prefetch { side, tables, batch: Default::default(), changed: Default::default() }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Batch> {
+        self.batch.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The leaves of `moves` played in `b` (the patch's globals as they stand) to roll out.
+    fn submit(&self, b: &Battle, moves: &[MaxMove]) {
+        let mut g = self.lock();
+        g.serial += 1;
+        g.base = Some(copy_into(g.base.take(), b));
+        g.globals = Some(patch_globals());
+        g.moves.clear();
+        g.moves.extend_from_slice(moves);
+        g.jobs.clear();
+        g.jobs.resize(moves.len(), Job::Waiting);
+        drop(g);
+        self.changed.notify_all();
+    }
+
+    /// The search comes to child `i`: taken by itself if no thread has it, else waited for,
+    /// rolling out the children not yet taken meanwhile (in `bufs`; the patch's globals are
+    /// put back after each).
+    fn claim(&self, i: usize, bufs: &mut (Option<Battle>, Option<Battle>)) {
+        let mut g = self.lock();
+        loop {
+            match g.jobs.get(i) {
+                Some(Job::Waiting) => {
+                    g.jobs[i] = Job::Done;
+                    return;
+                }
+                Some(Job::Running) => match Self::take(&mut g, &mut bufs.0) {
+                    Some(t) => {
+                        drop(g);
+                        let globals = patch_globals();
+                        let (serial, index) = (t.serial, t.index);
+                        bufs.0 = Some(self.run(t, &mut bufs.1));
+                        set_patch_globals(globals);
+                        self.done(serial, index);
+                        g = self.lock();
+                    }
+                    None => g = self.changed.wait(g).unwrap_or_else(|e| e.into_inner()),
+                },
+                _ => return,
+            }
+        }
+    }
+
+    /// The first leaf no one has taken, marked as taken by a thread.
+    fn take(g: &mut Batch, buf: &mut Option<Battle>) -> Option<Taken> {
+        let index = g.jobs.iter().position(|&j| j == Job::Waiting)?;
+        g.jobs[index] = Job::Running;
+        let node = copy_into(buf.take(), g.base.as_ref().expect("a node under way"));
+        Some(Taken { serial: g.serial, index, action: g.moves[index], globals: g.globals.expect("a node under way"), node })
+    }
+
+    /// Plays the leaf and rolls it out into the cache (in the buffer `roll`); gives the leaf's
+    /// buffer back. A panic here is left to the search, which meets the same leaf itself.
+    fn run(&self, t: Taken, roll: &mut Option<Battle>) -> Battle {
+        let mut c = t.node;
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            set_patch_globals(t.globals);
+            c.play_max_move(t.action);
+            if c.outcome() == Outcome::Ongoing {
+                let k = c.max_key(self.side);
+                if self.tables.rollout_get(k).is_none() {
+                    rollout(Some(self.tables), self.side, &c, k, roll, &mut || false);
+                }
+            }
+        }));
+        c
+    }
+
+    /// Leaf `index` of node `serial` is in the cache.
+    fn done(&self, serial: u64, index: usize) {
+        let mut g = self.lock();
+        if g.serial == serial {
+            g.jobs[index] = Job::Done;
+        }
+        drop(g);
+        self.changed.notify_all();
+    }
+
+    /// The node is done (or cut): its children not yet taken are dropped.
+    fn finish(&self) {
+        let mut g = self.lock();
+        g.serial += 1;
+        g.jobs.clear();
+    }
+
+    fn quit(&self) {
+        self.lock().quit = true;
+        self.changed.notify_all();
+    }
+
+    /// A thread's loop: the next waiting leaf of the node under way, played and rolled out
+    /// into the cache, until [`Prefetch::quit`]. `globals`: the search's at its start.
+    fn work(&self, globals: PatchGlobals) {
+        set_patch_globals(globals);
+        crate::i18n::set_silent(true);
+        let (mut leaf, mut roll) = (None, None);
+        loop {
+            let t = {
+                let mut g = self.lock();
+                loop {
+                    if g.quit {
+                        return;
+                    }
+                    if let Some(t) = Self::take(&mut g, &mut leaf) {
+                        break t;
+                    }
+                    g = self.changed.wait(g).unwrap_or_else(|e| e.into_inner());
+                }
+            };
+            let (serial, index) = (t.serial, t.index);
+            leaf = Some(self.run(t, &mut roll));
+            self.done(serial, index);
+        }
+    }
+}
+
+/// A leaf's full rollout (no `short_rollouts`): the rest of the battle by the original's AI
+/// on both sides, scored for `side`; with `tables` (and `key`, the start's key there), cached
+/// under the key of its start and of its first positions, and cut short by a position found
+/// there. `None` when `stop` says so (asked every [`CLOCK_EVERY`] steps). `roll` is the buffer
+/// it plays in.
+fn rollout(tables: Option<&MaxTables>, side: Team, b: &Battle, key: StateKey, roll: &mut Option<Battle>, stop: &mut dyn FnMut() -> bool) -> Option<i64> {
+    let mut chain: [StateKey; ROLLOUT_KEYS] = [0; ROLLOUT_KEYS];
+    let mut keyed = 0;
+    if tables.is_some() {
+        chain[0] = key;
+        keyed = 1;
+    }
+    let mut r = copy_into(roll.take(), b);
+    let mut known = None;
+    let mut stopped = false;
+    for i in 0..AUTO_PLAY_STEPS {
+        if r.outcome() != Outcome::Ongoing {
+            break;
+        }
+        if i % CLOCK_EVERY == 0 && stop() {
+            stopped = true;
+            break;
+        }
+        r.auto_step();
+        if let Some(t) = tables.filter(|_| keyed == i + 1 && keyed < ROLLOUT_KEYS) {
+            let k = r.max_key(side);
+            if let Some(v) = t.rollout_get(k) {
+                known = Some(v);
+                break;
+            }
+            chain[keyed] = k;
+            keyed += 1;
+        }
+    }
+    let v = known.unwrap_or_else(|| r.max_eval(side));
+    *roll = Some(r);
+    if stopped {
+        return None;
+    }
+    if let Some(t) = tables {
+        for &k in &chain[..keyed] {
+            t.rollout_add(k, v);
+        }
+    }
+    Some(v)
 }
 
 /// `b` copied into the buffer of an old position, if any.
@@ -530,9 +783,16 @@ impl<'a> Search<'a> {
     fn root(&mut self, b: &Battle, moves: &[MaxMove], depth: u32) -> Option<(MaxMove, i64, i64, Vec<i64>)> {
         let (mut best, mut alpha, mut original_value) = (moves[0], -INF, 0);
         let mut values = Vec::with_capacity(moves.len());
+        let ahead = self.prefetch_leaves(b, moves, depth, 0);
         for (i, &m) in moves.iter().enumerate() {
+            if ahead {
+                self.prefetch.expect("prefetching").claim(i, &mut self.help);
+            }
             let v = self.child(b, m, depth - 1, 1, alpha, INF);
             if self.aborted {
+                if ahead {
+                    self.prefetch.expect("prefetching").finish();
+                }
                 return None;
             }
             values.push(v);
@@ -541,6 +801,9 @@ impl<'a> Search<'a> {
             } else if v > alpha {
                 (best, alpha) = (m, v);
             }
+        }
+        if ahead {
+            self.prefetch.expect("prefetching").finish();
         }
         Some((best, alpha, original_value, values))
     }
@@ -565,7 +828,17 @@ impl<'a> Search<'a> {
             forced_best: Default::default(),
             scratch: Vec::new(),
             roll: None,
+            prefetch: None,
+            help: (None, None),
         }
+    }
+
+    /// At a node whose children (`moves`, in the order searched) are all leaves to roll out,
+    /// their rollouts are handed to the [`Prefetch`] threads; `true` if so.
+    fn prefetch_leaves(&self, b: &Battle, moves: &[MaxMove], depth: u32, ply: u32) -> bool {
+        let Some(p) = self.prefetch.filter(|_| depth == 1 && ply < ROLLOUT_PLIES && !self.forced && !self.short && moves.len() > 1) else { return false };
+        p.submit(b, moves);
+        true
     }
 
     /// A quick fight's proof of a win ([`MaxStakes::Quick`]): iterative deepening to
@@ -735,9 +1008,19 @@ impl<'a> Search<'a> {
             let m = order.remove(i);
             order.insert(0, m);
         }
-        for m in order {
+        let ahead = self.prefetch_leaves(b, &order, depth, ply);
+        let done = |s: &Self| {
+            if ahead {
+                s.prefetch.expect("prefetching").finish();
+            }
+        };
+        for (i, m) in order.into_iter().enumerate() {
+            if ahead {
+                self.prefetch.expect("prefetching").claim(i, &mut self.help);
+            }
             let v = self.child(b, m, depth - 1, ply + 1, alpha, beta);
             if self.aborted {
+                done(self);
                 return 0;
             }
             if (maxing && v > best) || (!maxing && v < best) {
@@ -753,6 +1036,7 @@ impl<'a> Search<'a> {
                 break;
             }
         }
+        done(self);
         let cut = self.cut;
         self.cut |= outer_cut;
         if let (Some(k), Some(m)) = (forced_key, best_move) {
@@ -792,6 +1076,21 @@ impl<'a> Search<'a> {
         // The root's children keep full rollouts: the first iteration's safety rule weighs
         // each action by the original's own play to the end.
         let short = self.short && ply >= 2;
+        if !short {
+            let key = self.tables.map_or(0, |_| b.max_key(self.side));
+            if let Some(v) = self.tables.and_then(|t| t.rollout_get(key)) {
+                self.rollout_hits += 1;
+                return v;
+            }
+            self.rollouts += 1;
+            let mut roll = self.roll.take();
+            let v = rollout(self.tables, self.side, b, key, &mut roll, &mut || self.time_up());
+            self.roll = roll;
+            return v.unwrap_or_else(|| {
+                self.aborted = true;
+                0
+            });
+        }
         let salt = if short { SHORT_SALT } else { 0 };
         let mut chain: [StateKey; ROLLOUT_KEYS] = [0; ROLLOUT_KEYS];
         let mut keyed = 0;
