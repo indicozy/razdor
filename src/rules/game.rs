@@ -3152,17 +3152,17 @@ mod tests {
         assert_eq!(g.squad[index].slot, original.slot);
         g.foe = Some(Foe::Garrison(g.world.index_of("Bandit camp")));
         let mut battle = g.start_battle();
-        assert!(!battle.fighters.iter().any(|f| f.squad_index==Some(index)));
+        assert!(!battle.fighters.iter().any(|f| f.squad_index == Some(index)));
         battle.begin();
         wipe_all_but_hero(&mut battle);
-        assert!(!battle.player_xp().iter().any(|a| battle.fighters[a.fighter].squad_index==Some(index)));
+        assert!(!battle.player_xp().iter().any(|a| battle.fighters[a.fighter].squad_index == Some(index)));
         g.resolve_battle(&battle);
         assert_eq!(g.squad[index].xp, original.xp);
         assert_eq!(g.squad[index].hp, original.hp);
         assert!(g.squad[index].alive());
         g.allow_unit_benching = false;
         g.foe = None;
-        assert!(g.start_battle().fighters.iter().any(|f| f.squad_index==Some(index)), "turning off the preference restores participation");
+        assert!(g.start_battle().fighters.iter().any(|f| f.squad_index == Some(index)), "turning off the preference restores participation");
     }
 
     #[test]
@@ -3176,7 +3176,7 @@ mod tests {
         g.world.spawn_gang(camp, (30, 20));
         g.foe = Some(Foe::Army(0));
         let battle = g.start_battle();
-        assert!(!battle.fighters.iter().any(|f| f.squad_index==Some(index)));
+        assert!(!battle.fighters.iter().any(|f| f.squad_index == Some(index)));
     }
 
     #[test]

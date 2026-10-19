@@ -1000,7 +1000,7 @@ pub(crate) mod tests {
         }
         let loaded: Game = serde_json::from_value(old).unwrap();
         assert_eq!(loaded.experimental, Default::default());
-        assert!(loaded.squad.iter().all(|u| !u.battle_disabled && u.potions_drunk==0));
+        assert!(loaded.squad.iter().all(|u| !u.battle_disabled && u.potions_drunk == 0));
     }
 
     fn walk(g: &mut Game, frames: usize) {
