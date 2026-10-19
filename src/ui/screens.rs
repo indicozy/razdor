@@ -350,17 +350,17 @@ mod experimental_tests {
 
     #[test]
     fn experimental_menu_choices_only_affect_the_new_party() {
-        let demo=Arc::new(Content::builtin());
-        let rules=razdor::rules::content::ExperimentalRules { simultaneous_bonuses:true,multiple_rings:true,multiple_amulets:false,no_duplicate_items:true,two_potions:true };
+        let demo = Arc::new(Content::builtin());
+        let rules = razdor::rules::content::ExperimentalRules { simultaneous_bonuses: true, multiple_rings: true, multiple_amulets: false, no_duplicate_items: true, two_potions: true };
         super::super::new_game::snapshot_experimental(rules);
-        let game=start_game(&demo,None,HeroClass::Knight,"Test");
-        assert_eq!(game.experimental,rules);
-        assert_eq!(game.content.experimental,rules);
+        let game = start_game(&demo, None, HeroClass::Knight, "Test");
+        assert_eq!(game.experimental, rules);
+        assert_eq!(game.content.experimental, rules);
         super::super::new_game::open_list();
-        assert_eq!(super::super::new_game::experimental_rules(),razdor::rules::content::ExperimentalRules::for_new_game());
-        assert_eq!(game.experimental,rules,"new menu choices cannot change a running party");
-        let restarted=start_game_with_rules(&demo,None,game.start_class(),"Test",game.experimental);
-        assert_eq!(restarted.content.experimental,rules);
-        assert_eq!(demo.experimental,Default::default());
+        assert_eq!(super::super::new_game::experimental_rules(), razdor::rules::content::ExperimentalRules::for_new_game());
+        assert_eq!(game.experimental, rules, "new menu choices cannot change a running party");
+        let restarted = start_game_with_rules(&demo, None, game.start_class(), "Test", game.experimental);
+        assert_eq!(restarted.content.experimental, rules);
+        assert_eq!(demo.experimental, Default::default());
     }
 }

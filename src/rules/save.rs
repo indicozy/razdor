@@ -977,21 +977,21 @@ pub(crate) mod tests {
     #[test]
     fn experimental_rules_survive_save_load_without_changing_install_defaults() {
         let install = demo();
-        let rules = super::super::content::ExperimentalRules { simultaneous_bonuses:true, multiple_rings:true, multiple_amulets:true, no_duplicate_items:true, two_potions:true };
-        let mut g = Game::new(Arc::new(install.with_experimental(rules)),HeroClass::Knight);
-        g.squad[0].potions_drunk=2;
-        g.squad[0].battle_disabled=true;
-        let loaded = roundtrip(&g,install.clone(),None);
-        assert_eq!(loaded.experimental,rules);
-        assert_eq!(loaded.content.experimental,rules);
-        assert_eq!(loaded.squad[0].potions_drunk,2);
+        let rules = super::super::content::ExperimentalRules { simultaneous_bonuses: true, multiple_rings: true, multiple_amulets: true, no_duplicate_items: true, two_potions: true };
+        let mut g = Game::new(Arc::new(install.with_experimental(rules)), HeroClass::Knight);
+        g.squad[0].potions_drunk = 2;
+        g.squad[0].battle_disabled = true;
+        let loaded = roundtrip(&g, install.clone(), None);
+        assert_eq!(loaded.experimental, rules);
+        assert_eq!(loaded.content.experimental, rules);
+        assert_eq!(loaded.squad[0].potions_drunk, 2);
         assert!(loaded.squad[0].battle_disabled);
-        assert_eq!(install.experimental,Default::default());
+        assert_eq!(install.experimental, Default::default());
     }
 
     #[test]
     fn experimental_missing_save_rules_default_to_classic() {
-        let g = Game::new(demo(),HeroClass::Knight);
+        let g = Game::new(demo(), HeroClass::Knight);
         let mut old = serde_json::to_value(&g).unwrap();
         old.as_object_mut().unwrap().remove("experimental");
         for u in old["squad"].as_array_mut().unwrap() {
@@ -999,7 +999,7 @@ pub(crate) mod tests {
             u.as_object_mut().unwrap().remove("potions_drunk");
         }
         let loaded: Game = serde_json::from_value(old).unwrap();
-        assert_eq!(loaded.experimental,Default::default());
+        assert_eq!(loaded.experimental, Default::default());
         assert!(loaded.squad.iter().all(|u| !u.battle_disabled && u.potions_drunk==0));
     }
 
