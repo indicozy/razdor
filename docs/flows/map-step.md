@@ -65,6 +65,10 @@ forts with attitude ≤ 0 and ruins not his (unless clicked or stood in), at sea
 clicked land or stands on a bridge, stationary guards, and armies with a meeting waiting next to him
 (except the clicked army). Moving armies and other buildings are crossed. `Game::can_target` decides
 whether a click is a target at all (a hero on foot never targets water).
+Razdor's advanced option `avoid_armies` («Обход армий на пути», off by default) changes this: every
+army's cell closes instead (`plan_avoiding`, `ArmyBlock::Every`), the route is replanned around armies
+as he walks (`Game::reroute_around_armies`), and when armies seal the only passage the route walks up to
+the first one (`ArmyBlock::Passable`). Off, the list above is the original's route unchanged.
 
 **One step** (world.md §2.2, §4.2). The step costs the cell he *leaves* (`hero_step_minutes`). The
 cell ahead is checked before moving (`step_contact`, in this order): an army there is engaged

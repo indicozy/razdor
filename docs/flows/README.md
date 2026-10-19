@@ -20,6 +20,7 @@ Razdor implements them.
 | Reading the install's files, a picture that looks wrong, textures, map drawing, sound and music, fonts | [assets-and-drawing.md](assets-and-drawing.md) |
 | Saving and loading, the load window, adding state that must survive a save | [saves.md](saves.md) |
 | Tests, real-data tests and difftests, offscreen screenshots, profiling a hitch, releases, updates, the editor | [testing-and-tools.md](testing-and-tools.md) |
+| Experimental scenario rules (the `...` button on the scenario screen), noncombatants, the Shift shortcuts, the route option «Обход армий на пути» | [experimental-rules.md](experimental-rules.md) |
 | A player's report | the `player-report` skill, then the flow of the area |
 
 ## Where the truth is

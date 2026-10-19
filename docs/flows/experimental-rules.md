@@ -71,13 +71,16 @@ global preference in an isolated snapshot save directory to display its controls
 
 ## Travel and Shift shortcuts
 
-Player routes avoid all army cells, regardless of allegiance or patrol state. Remaining
-routes are checked before each hero step and after the world advances. A blocking army
-causes a route search to the same destination. If no bypass exists, the planner falls
-back to a terrain-valid route and the hero approaches the blocking army for contact:
-an enemy starts combat and a friendly army is met. Clicking an army directly still
-selects it as the intentional target, including pursuit. These travel changes are always
-active; they are convenience changes rather than original-game behavior.
+Route avoidance is Razdor's advanced setting «Обход армий на пути» (`Settings::avoid_armies`,
+`Game::avoid_armies`), off by default. Off, the route is the original's: stationary guards and
+armies with a meeting waiting next to the hero close their cells, and other armies are walked
+through and met on the step. On, every army's cell closes whatever its allegiance or patrol state;
+the route is checked before each hero step and after the world advances, and a blocking army causes
+a route search to the same destination. If no bypass exists, the planner falls back to a route that
+walks up to the first army on the way: an enemy starts combat, a friendly army is met, and a
+friendly army clicked on purpose is fought unless `friends_let_pass` lets him by. Clicking an army
+directly still selects it as the intentional target, including pursuit. These are convenience
+changes rather than original-game behavior, and they apply only while the option is on.
 
 Holding either Shift key while clicking a garrison/squad card transfers the unit to the
 other formation's first available place. Existing restrictions on heroes, named units,
