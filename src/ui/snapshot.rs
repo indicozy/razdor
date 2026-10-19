@@ -7,7 +7,7 @@
 //! `title`, `authors[:<seconds>]`, `options`, `scenarios`, `tutorial`, `load`, `editor`, `classes:<map>`, `map:<map>[:x,y]`, `minimap:<map>`, `walk:<map>:dx,dy` (the
 //! hero sets off that many cells away), `building:<map>:<n>`
 //! (the hero in the n-th building; `:barracks`, `:garrison`, `:market`, `:sanctuary` open that tab, a further `:<row>` picks that row of its list), `army:<map>[:<n>[:<unit id>[:<level>]]]` (squad member n selected, made that unit at that level), `journal:<map>`, `spells:<map>`,
-//! `menu:<map>`, `defeat:<map>` (the lost battle's report), `battle:<map>:<n>` (against the n-th army). `RAZDOR_SCENE_SHOW=x,y,r` shows
+//! `menu:<map>`, `defeat:<map>` (the lost battle's report), `report:<map>[:<gold>]` (the noon report), `battle:<map>:<n>` (against the n-th army). `RAZDOR_SCENE_SHOW=x,y,r` shows
 //! a place as a lantern event does; `RAZDOR_SCENE_QUIET=1` drops
 //! the scenario's messages every frame, to see the screen under them; `RAZDOR_MOUSE=x,y`
 //! puts the pointer there; `RAZDOR_SCENE_SPELLS=<id>,…` puts those spells on every unit; `RAZDOR_SCENE_POTION=1` gives every unit of the army a
@@ -302,6 +302,14 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                 over: razdor::rules::game::Beat::Army(name),
             };
             app.dialogs.extend(super::dialog::Dialog::victory(&result));
+            Screen::WorldMap
+        }
+        "report" => {
+            // `report:<map>[:<gold>]`: the noon report over the map (Dialog::day_report), the
+            // gold `gold` (default 19260), mana 2000, income 500 and wages 595.
+            let gold = arg.and_then(|a| a.parse::<i32>().ok()).unwrap_or(19260);
+            let report = razdor::rules::game::DayReport { day: 0, income: 500, wages: 595, mana_wages: 0, unpaid: 0, deserted: Vec::new(), gold, mana_total: 2000 };
+            app.dialogs.push_back(super::dialog::Dialog::day_report(&game, &report));
             Screen::WorldMap
         }
         "defeat" => {

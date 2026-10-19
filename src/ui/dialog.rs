@@ -16,8 +16,9 @@ use super::widgets::*;
 
 const MARBLE_EDGE: Color = Color::new(0.38, 0.58, 0.46, 1.0);
 pub const MANA: Color = Color::new(0.55, 0.72, 1.0, 1.0);
-/// The captions of the event window's icon rows (the original's green font ae249c).
-const CAPTION: Color = Color::new(0.45, 0.95, 0.45, 1.0);
+/// The captions of the event window's icon rows and resources: the original's green font
+/// ae249c, Benguiat less (100, 0, 100).
+const CAPTION: Color = Color::new(155.0 / 255.0, 1.0, 155.0 / 255.0, 1.0);
 
 /// A resource icon with its label.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -136,31 +137,37 @@ impl Dialog {
         });
     }
 
-    /// The 12:00 report: gold, mana, income and wages (video notes §5).
+    /// The 12:00 report, the event window's slot after the victory's (0x4a9d1e..0x4a9d74):
+    /// titled `[Event] ResourceTitle` (0x4ab12c), the text `[Event] ResourceReport`
+    /// (0x4ab0d4) in the plain tint (font ae24a0) and, when the gold and the income do not
+    /// cover the wages, an empty row and `[Event] ResourceFail` (0x4ab0ec) in the orange one
+    /// (ae24a4); then the gold, mana, income and wages, the ones that are 0 left out
+    /// ([`report_resources`]).
+    /// Razdor's own lines (the mana paid to elementals, who left) follow in the plain tint.
     pub fn day_report(game: &Game, r: &DayReport) -> Dialog {
-        let mut d = Dialog::new(tr("Report on resources, income and expenses"));
+        use razdor::i18n::n_;
+        let ini = |key: &str, ours: &'static str| {
+            super::chrome::ui_text("Event", key).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr(ours).to_string())
+        };
+        let plain = |s: String| s.chars().filter(|c| !matches!(c, '*' | '|' | '@' | '^')).collect::<String>();
+        let mut d = Dialog::new(ini("ResourceTitle", n_("Report on resources, income and expenses")));
         // The original shows it in the event window, which opens with its chord.
         d.chord = true;
-        d.text.push(tr("The report shows your gold, the daily income of your castles and the wages paid to your army.").into());
-        d.resources = vec![
-            (Resource::Gold, format!("{} = {}", tr("Gold"), r.gold)),
-            (Resource::Mana, format!("{} = {}", tr("Mana"), r.mana_total)),
-            (Resource::Income, trf!("Income + {n}", n = r.income)),
-            (Resource::Wages, trf!("Wages - {n}", n = r.wages)),
-        ];
-        // The original warns when the gold and the income do not cover the wages (0x4a9b75).
+        let mut text = format!("^{}", plain(ini("ResourceReport", n_("The report shows your gold, the daily income of your castles and the wages paid to your army."))));
         if r.gold + r.income < r.wages {
-            d.add_notice(tr("Your gold and income do not cover the wages."));
+            text.push_str(&format!("\r\n\r\n^@{}", plain(ini("ResourceFail", n_("Your gold and income do not cover the wages.")))));
         }
         if r.mana_wages > 0 {
-            d.text.push(trf!("Mana today: - {paid} paid to elementals.", paid = r.mana_wages));
-        }
-        if r.unpaid > 0 {
-            d.add_notice(&trf!("{n} unpaid units refuse to fight until they are paid.", n = r.unpaid));
+            text.push_str(&format!("\r\n^{}", trf!("Mana today: - {paid} paid to elementals.", paid = r.mana_wages)));
         }
         if !r.deserted.is_empty() {
             let names: Vec<&str> = r.deserted.iter().map(|&u| game.content.unit(u).name.as_str()).collect();
-            d.text.push(trf!("Left the army unpaid: {names}.", names = names.join(", ")));
+            text.push_str(&format!("\r\n^{}", trf!("Left the army unpaid: {names}.", names = names.join(", "))));
+        }
+        d.marked = Some(text);
+        d.resources = report_resources(r.gold, r.mana_total, r.income, r.wages);
+        if r.unpaid > 0 {
+            d.add_notice(&trf!("{n} unpaid units refuse to fight until they are paid.", n = r.unpaid));
         }
         d
     }
@@ -207,19 +214,45 @@ impl Dialog {
     }
 }
 
+/// A resource's word in the event window's captions, from the install's `[Event]
+/// Resource0..3` (Деньги, Магия, Доход, Выплата), as the original labels «Деньги + 160»;
+/// Razdor's own word in English or without the install's text.
+pub fn resource_word(r: Resource) -> String {
+    let (key, ours) = match r {
+        Resource::Gold => ("Resource0", razdor::i18n::n_("Gold")),
+        Resource::Mana => ("Resource1", razdor::i18n::n_("Mana")),
+        Resource::Income => ("Resource2", razdor::i18n::n_("Income")),
+        Resource::Wages => ("Resource3", razdor::i18n::n_("Wages")),
+        Resource::Experience => return tr("Experience").to_string(),
+    };
+    super::chrome::ui_text("Event", key).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr(ours).to_string())
+}
+
 /// The victory report's resource row (0x4a9ce1..0x4a9d19): the gold won in the first place,
 /// the mana in the second, the income and wages places empty; the row then shows only the
 /// places that are not 0 (0x4a9db6, 0x4a9deb), and none at all when every place is 0. So a
-/// battle that brought nothing has no «Золото + 0», and a captured building no income.
+/// battle that brought nothing has no «Деньги + 0», and a captured building no income.
 pub fn victory_resources(gold: i32, mana: i32) -> Vec<(Resource, String)> {
     let mut rows = Vec::new();
     if gold != 0 {
-        rows.push((Resource::Gold, trf!("Gold + {reward}", reward = gold)));
+        rows.push((Resource::Gold, format!("{} + {gold}", resource_word(Resource::Gold))));
     }
     if mana != 0 {
-        rows.push((Resource::Mana, trf!("Mana + {mana}", mana = mana)));
+        rows.push((Resource::Mana, format!("{} + {mana}", resource_word(Resource::Mana))));
     }
     rows
+}
+
+/// The noon report's resource row (0x4a9d29..0x4a9d74): the gold, the mana, the income and
+/// the wages negated in its four places; only the places that are not 0 are shown
+/// (0x4a9deb), the gold and the mana with " = " (0x4aaf7c), the income with " + "
+/// (0x4aaf70), the wages with " - " (0x4aaf64) and their value without the sign.
+pub fn report_resources(gold: i32, mana: i32, income: i32, wages: i32) -> Vec<(Resource, String)> {
+    [(Resource::Gold, gold, "="), (Resource::Mana, mana, "="), (Resource::Income, income, "+"), (Resource::Wages, wages, "-")]
+        .into_iter()
+        .filter(|&(_, v, _)| v != 0)
+        .map(|(r, v, sign)| (r, format!("{} {sign} {v}", resource_word(r))))
+        .collect()
 }
 
 /// The victory report's text as the original builds it (0x4a9d88), each line centred: a
@@ -471,8 +504,9 @@ pub fn draw(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Close> {
         let step = (w - 60.0 * o) / n;
         for (k, (r, label)) in d.resources.iter().enumerate() {
             let cx = x + 30.0 * o + step * (k as f32 + 0.5);
-            let c = if *r == Resource::Mana { MANA } else { Color::new(0.7, 0.92, 0.75, 1.0) };
-            chrome::shadow_centered(label, cx, cy + 18.0 * o, size, c);
+            // Every resource label in the caption green ae249c (0x4d6114 sets it on all four
+            // places), the mana's too.
+            chrome::shadow_centered(label, cx, cy + 18.0 * o, size, CAPTION);
             resource_icon(*r, cx, cy + 62.0 * o, 70.0 * o);
         }
         cy += res_h;
@@ -613,11 +647,24 @@ mod tests {
     /// 0x4a9deb: a victory shows only the resources it brought, none when it brought none.
     #[test]
     fn a_victory_shows_only_the_resources_it_brought() {
-        assert!(victory_resources(0, 0).is_empty(), "no «Золото + 0»");
+        assert!(victory_resources(0, 0).is_empty(), "no «Деньги + 0»");
         let kinds = |v: Vec<(Resource, String)>| v.into_iter().map(|(r, _)| r).collect::<Vec<_>>();
         assert_eq!(kinds(victory_resources(160, 0)), vec![Resource::Gold]);
         assert_eq!(kinds(victory_resources(0, 25)), vec![Resource::Mana]);
         assert_eq!(kinds(victory_resources(160, 25)), vec![Resource::Gold, Resource::Mana]);
+    }
+
+    /// 0x4a9d29..0x4a9d74, 0x4a9deb: the noon report's places, signs, and no zero place.
+    #[test]
+    fn the_noon_report_shows_its_signs_and_leaves_out_what_is_zero() {
+        let report = report_resources(19260, 2000, 500, 595);
+        let labels: Vec<&str> = report.iter().map(|(_, l)| l.as_str()).collect();
+        assert_eq!(labels.len(), 4);
+        assert!(labels[0].ends_with(" = 19260") && labels[1].ends_with(" = 2000"), "{labels:?}");
+        assert!(labels[2].ends_with(" + 500") && labels[3].ends_with(" - 595"), "{labels:?}");
+        let kinds: Vec<Resource> = report_resources(100, 0, 0, 40).into_iter().map(|(r, _)| r).collect();
+        assert_eq!(kinds, vec![Resource::Gold, Resource::Wages]);
+        assert!(report_resources(0, 0, 0, 0).is_empty());
     }
 
     /// The won battle's report (0x4a9d88): the beaten one's line in white, then each prize's
