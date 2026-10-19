@@ -14,6 +14,19 @@
 
 ## 0.4.39 — 2026-10-20
 
+Коммит `951e1ed` (тег `v0.4.39`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+c0be4eb96babf79dbed38a60157825a22533056cd3ba6e912f64d13138babdd2  razdor
+e80a31f89b6d2724f57dee43850e7412c39c6ed7bf3021d8045ff844a48b9538  Razdor.exe
+bddf66918b31a04d0e798ebf2faaaa6164b67b9651d70be5096e74aa7f237dfa  razdor-macos
+45766ba6ae7eeffd088d8e9224330652dcf388651047d34301903665224e8c67  razdor-translate
+a7a6b8c49e60d96192ae23a786fbe1da9d558484f71429a68e50a7051b73ef74  Razdor-translate.exe
+966029a25291028c732eef93a4cd2e9087791cfe3724133c2dc88fc44520d19a  razdor-translate-macos
+```
+
 ### Исправлено
 
 - «Максимум» реже пропускает открытый удар: из равноценных ходов выбирает тот, что сильнее бьёт.
