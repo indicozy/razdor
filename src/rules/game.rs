@@ -1343,6 +1343,20 @@ impl Game {
         }
     }
 
+    /// The heading the hero's figure keeps while he stands: the direction of his last step,
+    /// one cell on from where he stands, as a point in the same frame as
+    /// [`Game::display_heading`] (the original keeps 0x75c050 at a stop, 0x4adc92; each step
+    /// writes it, 0x4ae8e0). None before any step: the figure then faces the viewer.
+    pub fn standing_heading(&self) -> Option<(f32, f32)> {
+        let (dx, dy) = self.facing?;
+        let here = self.tile();
+        let map = &self.world.map;
+        let (ax, ay) = map.center(here);
+        let (bx, by) = map.center((here.0 + dx, here.1 + dy));
+        let (px, py) = self.display_pos();
+        Some((px + bx - ax, py + by - ay))
+    }
+
     /// The last step's window is still playing on screen: what it brought (a battle, the
     /// windows of its events) waits for its end, as the original's come at the step's end.
     pub fn step_playing(&self) -> bool {
@@ -3826,6 +3840,22 @@ mod tests {
         assert!(events.contains(&Event::Met(1)) && !events.contains(&Event::Met(0)), "{events:?}");
         // Both greeted him in their arrivals (0x4a548c): both counters fell to −500.
         assert_eq!((g.world.armies[0].talk, g.world.armies[1].talk), (-500, -500));
+    }
+
+    #[test]
+    fn the_standing_heading_is_the_last_steps_direction() {
+        // Before any step the hero has no heading (the figure faces the viewer, as before).
+        // After a walk east he keeps facing east while he stands (0x75c050, 0x4adc92).
+        let mut g = start(&strip());
+        g.world.armies.clear();
+        g.fog = crate::rules::fog::Fog::disabled(g.world.map.w, g.world.map.h);
+        assert_eq!(g.standing_heading(), None);
+        assert!(g.set_destination((4, 2)));
+        walk_until_stopped(&mut g);
+        assert_eq!(g.facing, Some((1, 0)));
+        let (px, py) = g.display_pos();
+        let (hx, hy) = g.standing_heading().expect("a heading after a step");
+        assert!(hx > px, "({hx}, {hy}) from ({px}, {py}): the heading is east of him");
     }
 
     #[test]

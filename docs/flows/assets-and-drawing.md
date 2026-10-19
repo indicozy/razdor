@@ -149,7 +149,9 @@ original's drawn-occupant byte (0x497abc): `draw_army` and `draw_hero` skip it w
 `Game::army_hidden` / `Game::hero_hidden` say so (`World::hides_figure`: standing in a building
 other than a bridge, or crossing between building cells; gliding in from outside it is seen
 until the step ends). Its one-cell ring (`draw_mark`) stays, under the building picture. The
-minimap is `src/ui/minimap.rs`.
+hero's row is the last step's direction while he stands (`Game::standing_heading`, 0x75c050;
+the frame is the standing one), and the galley's the same; before any step it faces the viewer.
+The minimap is `src/ui/minimap.rs`.
 
 The small trees and bushes (object class 9) sway: `draw_object` draws them through
 `draw_leaning`, the top corners moved by `rng::tree_sway` (a triangle wave of ±2.5 px over

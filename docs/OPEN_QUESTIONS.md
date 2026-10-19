@@ -20,6 +20,13 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
     with the shipped data it is never shown. Not ported.
   - The magic lines use the plain/blue/red tints; the original tints them yellow (blue or red
     by the battle power against the level power). Razdor's are not yellow yet.
+- **Hero's facing at a stop: the cases without a step** (2026-10-19). A stop keeps the last
+  step's row (interface.md, "Razdor now → original" row 81); two cases are not settled:
+  - A hero with no step yet (0x75c050 ≥ 8) uses the first table entry in the original;
+    Razdor keeps the viewer's row. Not seen on screen, so unknown.
+  - A loaded game: the original writes the standing frame from 0x75c050 on a load (0x4b8566,
+    0x4b8726); Razdor keeps no facing in a save, so a loaded hero faces the viewer until his
+    next step. Whether the save should keep the direction is not settled.
 - **PR #9's window look, the parts not settled** (2026-10-19). Checked in the original's
   code and fixed: the frame lines (48d1d4, 48d3f8, 48d710), the brown box's paper, sides and
   corners (48e4e8), the red skin (4dbc34), the hall list's ornaments and its top (4bedec,

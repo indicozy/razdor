@@ -1474,17 +1474,20 @@ fn draw_hero(game: &Game, assets: &Assets, art: Option<&DtArt>, cam: &Camera) {
     if game.hero_hidden() {
         return;
     }
-    let next = game.display_heading();
+    // The frames play while he has a step to take; his row is the step's direction, also at a
+    // stop (he keeps facing it, 0x75c050), the viewer's row before any step.
+    let walking = game.display_heading();
+    let heading = walking.or_else(|| game.standing_heading());
     let c = cam.to_screen(game.display_pos());
     if game.aboard() {
         // At rest aboard, his galley rocks through its 8 frames by the frame clock (0x4c868c).
-        let frame = if !game.moving() && !game.waiting() && game.location.is_none() { idle::hero_ship_idle_frame(clock_ms()) } else { hero_frame(next) };
-        if !draw_figure(art, ship_stem(razdor::rules::ships::kind::HERO), game.display_pos(), next, frame, cam, Stand::Afloat) {
+        let frame = if !game.moving() && !game.waiting() && game.location.is_none() { idle::hero_ship_idle_frame(clock_ms()) } else { hero_frame(walking) };
+        if !draw_figure(art, ship_stem(razdor::rules::ships::kind::HERO), game.display_pos(), heading, frame, cam, Stand::Afloat) {
             draw_ship(cam, game.display_pos(), HERO_SAIL);
         }
         return;
     }
-    if !draw_figure(art, figure_stem(model), game.display_pos(), next, hero_frame(next), cam, Stand::Feet) {
+    if !draw_figure(art, figure_stem(model), game.display_pos(), heading, hero_frame(walking), cam, Stand::Feet) {
         assets.draw_unit(game.hero().def, Team::Player, c.x, c.y - 10.0, 30.0);
     }
 }
