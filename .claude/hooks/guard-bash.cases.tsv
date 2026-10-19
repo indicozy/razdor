@@ -31,6 +31,9 @@ block	clean	wine "Discord Times/Razdor.exe"
 allow	clean	ls target/release/razdor
 allow	clean	file dist/Razdor.exe
 allow	clean	perf record -g -- xvfb-run -a target/release/razdor
+block	clean	/mnt/ai_models/razdor-orig-port/target/release/deps/razdor-4fc93704d09bddac the_new_save_row
+block	clean	taskset -c 16-19 target/release/deps/razdor-7c253ba858c15860 --exact some_test
+allow	clean	xvfb-run -a target/release/deps/razdor-7c253ba858c15860 --exact some_test
 block	clean	perf record -F 999 -g target/release/razdor
 allow	clean	git add src/ok.rs
 block	clean	git add data/x.lit

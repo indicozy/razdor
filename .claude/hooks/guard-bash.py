@@ -623,6 +623,12 @@ def launches_game(argv, cwd=None):
         return False
     if base in ("wine", "wine64", "wine-stable"):
         return any(os.path.basename(a).lower() in ("razdor.exe", "razdor") for a in argv[1:])
+    # cargo's hashed copies in target/*/deps: the game's binary and the test binaries share the
+    # name `razdor-<hash>`, so either may be the game (2026-10-20: an agent ran the game from
+    # there as if it were a test binary, on the owner's desktop and save folder). Run tests
+    # through `cargo test`, or such a binary under xvfb-run.
+    if re.fullmatch(r"razdor-[0-9a-f]{16}", base) and "/" in head:
+        return True
     return base in ("razdor", "razdor-macos", "Razdor.exe") and ("/" in head or base == "Razdor.exe")
 
 
