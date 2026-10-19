@@ -51,9 +51,9 @@ pub struct SaveView {
 }
 
 impl SaveView {
-    pub fn new(game: &Game, back: Back) -> SaveView {
-        let name = format!("{} {}", game.world.title.trim(), save::date_name(&game.clock));
-        SaveView { name, entries: save::default_dir().map_or_else(Vec::new, |d| save::list(&d, SaveKind::Manual)), back }
+    /// The name starts blank (0x4c0dd0: a new save has no suggested name).
+    pub fn new(_game: &Game, back: Back) -> SaveView {
+        SaveView { name: String::new(), entries: save::default_dir().map_or_else(Vec::new, |d| save::list(&d, SaveKind::Manual)), back }
     }
 }
 
@@ -168,12 +168,23 @@ struct Row {
     name: String,
     scenario: String,
     time: String,
+    /// The new save's grey placeholder (nothing typed yet), not a name (0x4c0dd0).
+    placeholder: bool,
 }
 
 fn row_of(e: &SaveEntry) -> Row {
     let m = &e.meta;
     let name = if m.name == save::QUICK_SAVE { tr(save::QUICK_SAVE).to_string() } else { m.name.clone() };
-    Row { name, scenario: m.title.clone(), time: razdor::trf!("Time: {date}", date = saved_label(m.saved_at)) }
+    Row { name, scenario: m.title.clone(), time: razdor::trf!("Time: {date}", date = saved_label(m.saved_at)), placeholder: false }
+}
+
+/// The new save's row (0x4c0dd0, 0x49c94c): the scenario's title and the computer's date `now`,
+/// the same text as the saved rows, not the game's clock.
+fn new_save_row(name: &str, caret_on: bool, title: &str, now: u64) -> Row {
+    let typed = format!("{name}{}", if caret_on { "|" } else { " " });
+    let placeholder = name.is_empty();
+    let name = if placeholder { own("Buttons", "NewSave", n_("(save anew)")) } else { typed };
+    Row { name, scenario: title.to_string(), time: razdor::trf!("Time: {date}", date = saved_label(now)), placeholder }
 }
 
 /// The save lists' text colours (0x4b61bc, 0x4b6338): the save's name in ae24a0 (255, 255,
@@ -182,6 +193,8 @@ fn row_of(e: &SaveEntry) -> Row {
 /// picked row keeps them, and the lists' highlight mode 4 (0x4d67ac) adds (0, 30, 90) over
 /// its lines, text included (0x47d71c): the yellows come out almost white, the time pale.
 const NAME_INK: [u8; 3] = [255, 255, 155];
+/// The grey of the new save's placeholder (0x4c0dd0).
+const PLACEHOLDER_INK: [u8; 3] = [150, 150, 150];
 const SCENARIO_INK: [u8; 3] = [230, 230, 130];
 const TIME_INK: [u8; 3] = [235, 165, 75];
 const PICKED_ADDED: [u8; 3] = [0, 30, 90];
@@ -306,7 +319,8 @@ impl Book {
             let lh = r.h;
             super::dt_font::with_face(super::dt_font::Face::Title, || {
                 let size = fit_size(&row.name, 250.0 * k, 16.0 * k);
-                super::chrome::shadow_centered(&ellipsize(&row.name, 250.0 * k, size), self.p(157.0, 0.0).x, r.y + lh * 0.5 + size * 0.36, size, row_ink(NAME_INK, selected == Some(i)));
+                let ink = if row.placeholder { PLACEHOLDER_INK } else { NAME_INK };
+                super::chrome::shadow_centered(&ellipsize(&row.name, 250.0 * k, size), self.p(157.0, 0.0).x, r.y + lh * 0.5 + size * 0.36, size, row_ink(ink, selected == Some(i)));
             });
             let cx = self.p(437.0, 0.0).x;
             super::dt_font::with_face(super::dt_font::Face::Bold, || {
@@ -363,9 +377,8 @@ pub fn save_screen(game: &Game, assets: &Assets, view: &mut SaveView, message: &
     }
     let same = view.entries.iter().position(|e| e.meta.name == view.name);
     // The first row is the name being typed (a new save, or the one it replaces).
-    let caret = if (get_time() * 2.0) as i64 % 2 == 0 { "|" } else { " " };
-    let typed = if view.name.is_empty() { own("Buttons", "NewSave", n_("(save anew)")) } else { format!("{}{caret}", view.name) };
-    let mut rows = vec![Row { name: typed, scenario: game.world.title.clone(), time: razdor::trf!("Time: {date}", date = game.clock.label()) }];
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let mut rows = vec![new_save_row(&view.name, (get_time() * 2.0) as i64 % 2 == 0, &game.world.title, now)];
     rows.extend(view.entries.iter().map(row_of));
     let mut scroll = 0;
     if let (Some(k), _) = book.rows(&rows, Some(same.map_or(0, |i| i + 1)), &mut scroll, false) {
@@ -781,6 +794,17 @@ mod tests {
         game.origin = Some(save::ScenarioRef::Map { file: "m".into(), hash: 0 });
         assert_eq!(session_content(Some(wide.clone()), &game).unwrap().formation, Formation::VANILLA);
         assert!(session_content(None, &game).is_none());
+    }
+
+    /// 0x4c0dd0, 0x49c94c: the new save's row shows the computer's date, in the saved rows' text.
+    #[test]
+    fn the_new_save_row_shows_the_computer_s_date_like_the_saved_rows() {
+        let now = 1_790_000_000;
+        let row = new_save_row("", true, "Map", now);
+        assert!(row.placeholder);
+        assert_eq!(row.time, razdor::trf!("Time: {date}", date = saved_label(now)));
+        assert_eq!(row.scenario, "Map");
+        assert!(!new_save_row("Mine", false, "Map", now).placeholder, "the placeholder goes once typed");
     }
 
     #[test]
