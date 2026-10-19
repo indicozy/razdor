@@ -10,6 +10,7 @@ use crate::ui::input::{get_keys_pressed, is_mouse_button_down};
 use macroquad::prelude::*;
 
 use razdor::i18n::{n_, tr};
+use razdor::rules::ai::{Clash, Combatant};
 use razdor::rules::battle::Team;
 use razdor::trf;
 use razdor::rules::clock::duration_label;
@@ -227,6 +228,9 @@ pub struct MapView {
     /// while the pointer is within a cell of its footprint, and [`OUTLINE_GRACE`] after
     /// that, so moving over its picture does not make it blink.
     outlined: Option<(usize, f64)>,
+    /// The battles between map parties shown on the map (Razdor's): their cell and when each
+    /// began; the mark fades out over [`CLASH_SECS`].
+    clash_marks: VecDeque<(Tile, f64)>,
 }
 
 /// How long a building stays outlined after the pointer leaves it, in seconds.
@@ -245,7 +249,7 @@ struct MapHoverLook {
 
 impl Default for MapView {
     fn default() -> Self {
-        MapView { zoom: 1.0, zoom_steps: 0, minimap: false, debug: false, look: None, shows: VecDeque::new(), show_clock: 0.0, returning: None, opening: None, spell_fx: VecDeque::new(), preview: None, last_frame_ms: None, back_to: None, centring: None, grab: None, toasts: VecDeque::new(), pointer: Shape::Arrow, pointer_cell: None, was_busy: false, hover: None, outlined: None }
+        MapView { zoom: 1.0, zoom_steps: 0, minimap: false, debug: false, look: None, shows: VecDeque::new(), show_clock: 0.0, returning: None, opening: None, spell_fx: VecDeque::new(), preview: None, last_frame_ms: None, back_to: None, centring: None, grab: None, toasts: VecDeque::new(), pointer: Shape::Arrow, pointer_cell: None, was_busy: false, hover: None, outlined: None, clash_marks: VecDeque::new() }
     }
 }
 
@@ -399,7 +403,7 @@ fn scroll(game: &Game, view: &mut MapView, dt_ms: i64, pad: (f32, f32)) {
     // and its map still scrolls, 4cd0af); only the pointer on the minimap itself does, so it
     // can be clicked at the screen's edge.
     let cam = Camera::looking_at(game, view.zoom, view.look.unwrap_or(game.display_pos()));
-    let on_minimap = view.minimap && minimap::under_pointer(&game.world.map, cam.view);
+    let on_minimap = on_minimap_pointer(game, view, cam.view);
     if !on_minimap {
         let edge_dir = edge_dir((mx, my), (w, h), edge);
         // The pointer left the window (Razdor's: macroquad keeps its last place, at the edge it
@@ -2596,7 +2600,7 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     // While he walks the view is locked on him (interface.md §8).
     view.look = camera_look(view.look, game.moving(), !view.shows.is_empty());
     let cam = Camera::looking_at(game, view.zoom, view.look.unwrap_or(game.display_pos()));
-    let on_minimap = view.minimap && minimap::under_pointer(&game.world.map, cam.view);
+    let on_minimap = on_minimap_pointer(game, view, cam.view);
     let clock = game_bar::time_panel();
     let on_clock = !input_blocked() && clock.contains(crate::ui::widgets::pointer().into());
     let hovered = cam.tile_under_mouse().filter(|_| !on_minimap);
@@ -2684,6 +2688,18 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
         events = game.tick_shown(get_frame_time().min(0.1));
     }
     let mut next = handle_events(game, events, message, dialogs).or(reopened);
+    // Battles between map parties (Razdor's): taken every frame, shown where the player sees
+    // the cell and the option is on; the notice replaces the battle's plain line.
+    let battles_shown = game.battle_marks;
+    for clash in game.take_clashes() {
+        if battles_shown && game.fog.explored(clash.tile) {
+            *message = Some(clash_notice(&clash, &info("NoNameArmy", n_("Unknown army"))));
+            view.clash_marks.push_back((clash.tile, get_time()));
+            while view.clash_marks.len() > CLASH_MAX {
+                view.clash_marks.pop_front();
+            }
+        }
+    }
 
     // The place being shown: once its message is read, the camera flies there and the
     // uncovered area fades in; then the next place, if any. After the last one the camera
@@ -2772,6 +2788,7 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     }
     draw_world(game, assets, &cam, view.preview.as_ref().map(|p| p.1.as_slice()), show.as_ref(), hover);
     cam.draw_fog(game);
+    draw_clash_marks(view, &cam, get_time());
     cam.draw_showing(game, view.opening.iter().chain(&view.shows), show_now);
     if let Some(s) = view.shows.front() {
         cam.draw_known_place(s, show_now);
@@ -2796,7 +2813,7 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     // world spells stand small in the top left corner, under the minimap when it was moved
     // there.
     let notes_top = match view.minimap.then(|| minimap::outer(&game.world.map, cam.view)) {
-        Some(o) if o.x < 10.0 + 200.0 * super::chrome::k() && o.y < 40.0 => o.y + o.h + 4.0,
+        Some(o) if o.x < 10.0 + 200.0 * super::chrome::k() && o.y < 40.0 => minimap::below(game, o, screen_height() - bar_h()) + 4.0,
         _ => 0.0,
     };
     let now = game.clock.total_minutes() as u64;
@@ -2862,6 +2879,13 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
         if let Some(at) = minimap::window(game, assets.dt.as_ref(), cam.view, cam.world_rect(), surface_color) {
             view.look = Some(at);
         }
+        // Razdor's army list under the minimap (advanced option): a click on a row goes there.
+        if game.army_list {
+            let o = minimap::outer(&game.world.map, cam.view);
+            if let Some(at) = minimap::army_list(game, o, screen_height() - bar_h(), &info("NoNameArmy", n_("Unknown army"))) {
+                view.look = Some(at);
+            }
+        }
     }
     // The pointer (interface.md §7.2); a window or message on top takes the arrow.
     update_pointer(game, view, &cam, on_minimap);
@@ -2905,6 +2929,51 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     }
     draw_toasts(&mut view.toasts, get_time());
     next
+}
+
+/// The pointer is on the map's minimap window or on its army list (Razdor's, the option
+/// «Список армий у миникарты»), which the map does not take input through.
+fn on_minimap_pointer(game: &Game, view: &MapView, map_view: Rect) -> bool {
+    view.minimap
+        && (minimap::under_pointer(&game.world.map, map_view)
+            || (game.army_list && minimap::list_under_pointer(game, minimap::outer(&game.world.map, map_view), screen_height() - bar_h())))
+}
+
+/// Seconds a battle's mark stays on the map; it fades out over the last second.
+const CLASH_SECS: f64 = 3.0;
+/// Battle marks shown at once; a new one pushes the oldest out.
+const CLASH_MAX: usize = 4;
+
+/// The crossed-swords mark of the battles on the map (Razdor's, «Битвы армий на карте»): the
+/// install's swords strip (the cursor's `Swords.ugs`), drawn over its cell above the map's
+/// objects and armies, fading out over [`CLASH_SECS`].
+fn draw_clash_marks(view: &mut MapView, cam: &Camera, now: f64) {
+    view.clash_marks.retain(|(_, at)| now - at < CLASH_SECS);
+    for (tile, at) in &view.clash_marks {
+        let age = now - at;
+        let a = (CLASH_SECS - age).clamp(0.0, 1.0) as f32;
+        let frame = ((age * 1000.0 / 30.0) as usize) % 50;
+        let Some(tex) = super::chrome::animation("Windows/Swords.ugs").and_then(|f| f.get(frame % f.len().max(1)).cloned()) else {
+            return;
+        };
+        let c = cam.cell_centre(*tile);
+        let s = cam.cell_size().x * 1.5;
+        draw_texture_ex(&tex, c.x - s / 2.0, c.y - s / 2.0, Color { a, ..WHITE }, DrawTextureParams { dest_size: Some(vec2(s, s)), ..Default::default() });
+    }
+}
+
+/// The notice of a battle on the map (Razdor's): the names as the hover cards show them;
+/// `unnamed` for an army with no name.
+fn clash_notice(clash: &Clash, unnamed: &str) -> String {
+    let name = |p: &Combatant| match p {
+        Combatant::Army(n) if n.is_empty() => unnamed.to_string(),
+        Combatant::Army(n) | Combatant::Garrison(n) => n.clone(),
+    };
+    match (&clash.winner, &clash.loser) {
+        (Combatant::Army(_), Combatant::Army(_)) => trf!("The army «{winner}» defeated the army «{loser}».", winner = name(&clash.winner), loser = name(&clash.loser)),
+        (Combatant::Army(_), Combatant::Garrison(_)) => trf!("The army «{winner}» defeated the garrison «{loser}».", winner = name(&clash.winner), loser = name(&clash.loser)),
+        (Combatant::Garrison(_), _) => trf!("The garrison «{winner}» defeated the army «{loser}».", winner = name(&clash.winner), loser = name(&clash.loser)),
+    }
 }
 
 /// Seconds a message stays above the bar; it fades out over its last [`TOAST_FADE`].

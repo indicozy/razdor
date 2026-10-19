@@ -115,6 +115,19 @@ then its arrival rules run (`ai_arrive`). Wander points: `ai_wander`. Respawns: 
 per army at its first arrival after 12:00 (`ai_noon`). Attitude between sides: `relation`,
 `player_attitude_to` (`src/rules/world.rs`); a merchant ship keeps its file attitude (b3e247f).
 
+**Battles between map parties** (Razdor's, not a rule). When the AI resolves a fight between an
+army and an army or a garrison (`ai_battle`, `rules/ai.rs`), with one
+side beaten and the other standing, it also records a `Clash` (winner, loser as `Combatant`, cell,
+game minute) in `Game::clashes`, serde-skipped. The battle itself, its time and the AI's choices
+are the same as before. An empty defender is taken without a fight and records nothing; both sides
+beaten records nothing (no winner to name). `Game::take_clashes` is drained every frame by the map
+(`world_view::map_frame`), which shows the notice and the mark only when the option `battle_marks`
+is on and the cell is explored (the armies' fog test). Headless runs never drain: the list keeps
+the last 64.
+
+**Visible armies** (Razdor's army list). `Game::visible_armies` is the test the minimap's army marks
+use (explored cell, outside a building); the minimap's list (`minimap::army_list`) shows them.
+
 **Fog** (world.md §3, `src/rules/fog.rs`). `sight_radius` by class, cell-count stamps as the
 original's; lanterns (`start_lanterns`, `lantern`); events reveal areas through
 `Game::reveal_area`, which also records `Game::shown` for the camera to fly there.

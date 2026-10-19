@@ -699,6 +699,89 @@ pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_
     (!gripped && clicked() && r.contains(m)).then(|| ((m.x - r.x) / k.x - 0.5, ((m.y - r.y) / k.y - 0.5) * rh))
 }
 
+// ------------------------------------------------------------------------------------
+// The army list under the minimap (Razdor's, «Список армий у миникарты»)
+// ------------------------------------------------------------------------------------
+
+/// A row of the list, in reference pixels (scaled by `chrome::k`).
+const LIST_ROW: f32 = 18.0;
+
+thread_local! {
+    /// The first listed army shown, when the list is longer than fits under the minimap.
+    static LIST_TOP: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The list's rectangle under the minimap window `o`, above the bar's top `bottom`: as many
+/// rows as the armies, or as many as fit (the rest scrolls). `None` for no army or no room.
+fn list_rect(n: usize, o: Rect, bottom: f32, k: f32) -> Option<Rect> {
+    let row = (LIST_ROW * k).round().max(14.0);
+    let top = o.y + o.h + 4.0 * k;
+    let room = bottom - 4.0 * k - top;
+    if n == 0 || room < row {
+        return None;
+    }
+    let h = (n as f32 * row).min((room / row).floor() * row);
+    Some(Rect::new(o.x, top, o.w, h))
+}
+
+/// The bottom of what sits under the minimap `o`: the list's, or the window's own.
+pub fn below(game: &Game, o: Rect, bottom: f32) -> f32 {
+    list_rect(game.visible_armies().len(), o, bottom, super::chrome::k()).map_or(o.y + o.h, |r| r.y + r.h)
+}
+
+/// The pointer is over the army list under the minimap `o`.
+pub fn list_under_pointer(game: &Game, o: Rect, bottom: f32) -> bool {
+    list_rect(game.visible_armies().len(), o, bottom, super::chrome::k()).is_some_and(|r| r.contains(Vec2::from(crate::ui::widgets::pointer())))
+}
+
+/// Draws the army list under the minimap `o` (see [`Game::visible_armies`]): each row the army's
+/// name as its hover card shows it, in its owner's colour (ally or enemy as the minimap
+/// marks it). A click on a row returns the army's cell centre, as the minimap's click does
+/// (the camera goes there). Armies past the list's room scroll with the wheel over it.
+pub fn army_list(game: &Game, o: Rect, bottom: f32, unnamed: &str) -> Option<(f32, f32)> {
+    let idx = game.visible_armies();
+    let r = list_rect(idx.len(), o, bottom, super::chrome::k())?;
+    let k = super::chrome::k();
+    let row = (LIST_ROW * k).round().max(14.0);
+    let shown = ((r.h / row) as usize).max(1);
+    let m = Vec2::from(crate::ui::widgets::pointer());
+    let wheel = if r.contains(m) { crate::ui::input::mouse_wheel().1 } else { 0.0 };
+    let step: isize = if wheel > 0.0 { -1 } else if wheel < 0.0 { 1 } else { 0 };
+    let top = (LIST_TOP.with(|t| t.get()) as isize + step).clamp(0, idx.len().saturating_sub(shown) as isize) as usize;
+    LIST_TOP.with(|t| t.set(top));
+    let (enemy, ally) = (option_color("ColorMarkEnemy", [255, 66, 0]), option_color("ColorMarkAlly", [0, 160, 255]));
+    let size = 12.0 * k;
+    draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, 0.0, 0.0, 0.55));
+    let mut click = None;
+    for (i, &ai) in idx.iter().skip(top).take(shown).enumerate() {
+        let a = &game.world.armies[ai];
+        let y = r.y + i as f32 * row;
+        let rr = Rect::new(r.x, y, r.w, row);
+        let hot = rr.contains(m);
+        if hot {
+            draw_rectangle(rr.x, rr.y, rr.w, rr.h, Color::new(1.0, 1.0, 1.0, 0.14));
+        }
+        let waits = game.script().is_some_and(|e| e.meeting_waiting(game, a.id));
+        let col = if army_is_ally(a.attitude, waits) { ally } else { enemy };
+        draw_circle(rr.x + 7.0 * k, y + row * 0.5, 3.5 * k, BLACK);
+        draw_circle(rr.x + 7.0 * k, y + row * 0.5, 2.5 * k, col);
+        let full = if a.shown_name().is_empty() { unnamed } else { a.shown_name() };
+        let room = rr.w - 20.0 * k;
+        let mut name = full.to_string();
+        if measure(&name, size).width > room {
+            while !name.is_empty() && measure(&format!("{name}…"), size).width > room {
+                name.pop();
+            }
+            name.push('…');
+        }
+        super::chrome::shadow_text(&name, rr.x + 16.0 * k, y + row * 0.5 + size * 0.36, size, col);
+        if hot && clicked() {
+            click = Some(game.world.map.center(a.tile(&game.world.map)));
+        }
+    }
+    click
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -752,6 +835,18 @@ mod tests {
         assert_eq!(reveal_overlay(170, 170), 0);
         assert_eq!(reveal_overlay(100, 200), 0);
         assert_eq!(reveal_overlay(255, 255), 0);
+    }
+
+    #[test]
+    fn the_army_list_takes_the_room_under_the_minimap_and_no_more() {
+        let o = Rect::new(10.0, 10.0, 200.0, 200.0);
+        // Room for two rows only: the list is two rows high, and the bar's top ends it.
+        let row = LIST_ROW;
+        let bottom = o.y + o.h + 4.0 + 2.0 * row + 4.0;
+        let r = list_rect(5, o, bottom, 1.0).unwrap();
+        assert!((r.h - 2.0 * row).abs() < 1e-3 && r.y + r.h <= bottom, "{r:?}");
+        assert!(list_rect(0, o, bottom, 1.0).is_none(), "no army, no list");
+        assert!(list_rect(5, o, o.y + o.h + 4.0, 1.0).is_none(), "no room above the bar");
     }
 
     #[test]

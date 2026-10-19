@@ -2125,3 +2125,47 @@ fn off_screen_battles_keep_the_static_side_records() {
     assert_eq!(cache.get(&cc, &side(0), &side(1)), r);
     assert_eq!(cache.records, after);
 }
+
+#[test]
+fn an_ai_battle_between_armies_records_the_clash_for_the_map() {
+    // The same fight as `an_ai_battle_beats_a_side_whose_end_strength_is_0`: the attacker
+    // (army 1) wins, so it is the clash's winner. The record is what the interface takes for
+    // its notice and mark; the battle itself is unchanged by it.
+    let mut c = content();
+    c.units.push(ck::warrior(20, 0, 0));
+    let c = ck::content(c.units.clone(), c.items.clone());
+    let mut s = map();
+    s.armies = vec![army(1, (30, 10), 4, ENEMY, 0, &[troop(20, 0, 2)]), army(2, (31, 10), 2, ALLY, 0, &[troop(20, 0, 1)])];
+    let mut g = start_with(&s, c);
+    g.world.armies[0].name = "Alpha".to_string();
+    g.world.armies[1].name = "Beta".to_string();
+    let tile = g.world.armies[0].tile(&g.world.map);
+    assert!(g.ai_battle(0, Defender::Army(1)));
+    let clashes = g.take_clashes();
+    assert_eq!(clashes.len(), 1, "{clashes:?}");
+    assert_eq!(clashes[0].winner, Combatant::Army("Alpha".to_string()));
+    assert_eq!(clashes[0].loser, Combatant::Army("Beta".to_string()));
+    assert_eq!(clashes[0].tile, tile);
+    assert_eq!(clashes[0].at, g.clock.total_minutes() as u64);
+    assert!(g.take_clashes().is_empty(), "taken once");
+}
+
+#[test]
+fn an_ai_army_beaten_at_a_garrison_records_the_garrison_as_winner() {
+    // The garrison holds out (as the garrison promotion test): the garrison is the clash's
+    // winner, the attacking army its loser.
+    let mut s = map();
+    s.buildings = vec![building(BuildingType::Castle, 31, 10, (1, 1))];
+    s.armies = vec![army(1, (30, 10), 4, ENEMY, 0, &[troop(4, 0, 1)])];
+    let mut g = start_with(&s, promoting_content());
+    let c = g.content.clone();
+    g.world.locations[0].garrison.clear();
+    g.world.locations[0].stationed = vec![crate::rules::world::Stationed { unit: Unit::new(&c, UnitId(4), slot(0)) }];
+    g.world.armies[0].name = "Gamma".to_string();
+    g.world.armies[0].troops[0].hurt = 45;
+    assert!(!g.ai_battle(0, Defender::Garrison(0)));
+    let clashes = g.take_clashes();
+    assert_eq!(clashes.len(), 1, "{clashes:?}");
+    assert!(matches!(clashes[0].winner, Combatant::Garrison(_)), "{:?}", clashes[0]);
+    assert_eq!(clashes[0].loser, Combatant::Army("Gamma".to_string()));
+}

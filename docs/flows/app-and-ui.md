@@ -218,7 +218,13 @@ row width, and Razdor's own options (`friends_let_pass`, `pass_on_bridges`, `upd
 map zoom). The windows are `main_menu::options` / `main_menu::options_window` (the
 original's: five slider rows, eight checkboxes, «Принять» keeps, «Отмена» restores what the
 window opened with) and `advanced_window` («Ещё…»: Razdor's own options, the screen, scale, the battle AI strength (`main_menu::AiStrength`, kept in sync with the `OptValue9` checkbox),
-font and language). Two options are read at start only, as the original's: «no music and
+font and language). Razdor's map options «Битвы армий на карте» (`battle_marks`, on) and «Список у
+миникарты» (`army_list`, off) are pushed into `Game::battle_marks` / `Game::army_list` by
+`follow_settings`, like the rule options. The battles' mark and notice are drawn in
+`world_view::map_frame` (`draw_clash_marks`, `clash_notice`, from `Game::take_clashes`); the
+army list is `minimap::army_list`, drawn under the minimap window and clicked like its own
+centring (`view.look`); it takes the room above the bar and scrolls with the wheel.
+Two options are read at start only, as the original's: «no music and
 sounds» (`Audio::new`) and «impossible difficulty» (the content's difficulty factor in
 `App::new`).
 

@@ -514,9 +514,20 @@ pub struct Game {
     /// that bridge, is engaged (world.md §4.2). Set by the interface, not part of the save.
     #[serde(skip)]
     pub pass_on_bridges: bool,
+    /// Razdor's interface options «Битвы армий на карте» (`Settings::battle_marks`) and
+    /// «Список армий у миникарты» (`Settings::army_list`): set by the interface, not part of
+    /// the save; no rule reads them.
+    #[serde(skip)]
+    pub battle_marks: bool,
+    #[serde(skip)]
+    pub army_list: bool,
     /// Reports of AI battles to hand to the interface with the slice's events.
     #[serde(skip)]
     pub(crate) ai_events: Vec<Event>,
+    /// Battles between map parties that the AI resolved, for the interface's notice and
+    /// mark ([`Game::take_clashes`]); not saved, no rule reads them.
+    #[serde(skip)]
+    pub(crate) clashes: Vec<ai::Clash>,
     /// The AI's simulated battles already played (`rules::ai`).
     #[serde(skip)]
     pub(crate) sims: std::cell::RefCell<ai::SimCache>,
@@ -668,7 +679,10 @@ impl Game {
             pursue: true,
             walk_pace: 1.0,
             pass_on_bridges: false,
+            battle_marks: true,
+            army_list: false,
             ai_events: Vec::new(),
+            clashes: Vec::new(),
             sims: Default::default(),
             cheats: Default::default(),
         };
@@ -1396,6 +1410,24 @@ impl Game {
         self.world.hides_figure(from, to)
     }
 
+    /// The armies the player sees, as indices into `world.armies` (Razdor's army list under
+    /// the minimap): each on explored ground and outside a building, the test the minimap's
+    /// army marks use (0x49e381 draws them; the fog hides the unexplored ones). The hero is
+    /// not an army here.
+    pub fn visible_armies(&self) -> Vec<usize> {
+        let map = &self.world.map;
+        self.world
+            .armies
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| {
+                let t = a.tile(map);
+                self.fog.explored(t) && self.world.location_at(t).is_none()
+            })
+            .map(|(i, _)| i)
+            .collect()
+    }
+
     /// The walk frame of army `a`'s figure (engine.md §7: the original's AI walk frames run
     /// by game time, 0x4ad660 → 0x4ad314): frames 3–6, the next every 10 game minutes, while
     /// it has a step to take; `None` (its standing frame) without one. Game time only flows
@@ -1827,6 +1859,12 @@ impl Game {
         self.snap_due = true;
         self.armies_snap();
         events
+    }
+
+    /// The battles between map parties resolved since the last call, oldest first: the
+    /// interface's notice and mark for them (Razdor's, Battles on the map).
+    pub fn take_clashes(&mut self) -> Vec<ai::Clash> {
+        std::mem::take(&mut self.clashes)
     }
 
     /// After the hero's step, what the AI armies' arrivals during it did to him (world.md
@@ -3685,6 +3723,21 @@ mod tests {
 
     fn start(s: &Scenario) -> Game {
         Game::from_scenario(Arc::new(tk::content()), s, HeroClass::Knight)
+    }
+
+    #[test]
+    fn the_visible_armies_are_those_on_explored_ground_outside_buildings() {
+        let mut s = scenario(20, 10);
+        s.header.heroes[0] = hero(0, 0, 100, &[troop(4, 0, 1)]);
+        s.armies = vec![army(1, 5, 5, 0, &[troop(4, 0, 1)]), army(2, 15, 5, 0, &[troop(4, 0, 1)])];
+        let mut g = start(&s);
+        g.fog = crate::rules::fog::Fog::new(g.world.map.w, g.world.map.h);
+        assert!(g.visible_armies().is_empty(), "nothing explored, nothing listed");
+        g.fog.reveal(5, 5, 1);
+        let first = g.world.armies.iter().position(|a| a.id == 1).unwrap();
+        assert_eq!(g.visible_armies(), vec![first]);
+        g.fog.reveal(15, 5, 1);
+        assert_eq!(g.visible_armies().len(), 2);
     }
 
     fn wipe_enemies(b: &mut Battle) {

@@ -590,6 +590,8 @@ pub fn follow_settings(audio: &super::audio::Settings, g: &mut razdor::rules::ga
     g.avoid_armies = audio.avoid_armies;
     g.allow_unit_benching = audio.allow_unit_benching;
     g.pass_on_bridges = audio.pass_on_bridges;
+    g.battle_marks = audio.battle_marks;
+    g.army_list = audio.army_list;
 }
 
 /// The improved AI's checkbox clicked: on gives the improved level, off the original's (and
@@ -811,7 +813,7 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     let row = |label: &str, value: &str, y: &mut f32| -> bool {
         chrome::shadow_text(label, rx, *y + 18.0 * k, 14.0 * k, chrome::CREAM);
         let r = Rect::new(rx + rw - bw, *y, bw, 28.0 * k);
-        *y += 52.0 * k;
+        *y += 44.0 * k;
         row_button(r, value)
     };
     // Windowed, borderless or full screen, set at once (`display::follow_settings`).
@@ -854,6 +856,14 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     // Razdor's option: the route closes every army's cell (off: the original's route).
     if row(tr("Route around armies"), if audio.avoid_armies { tr("On") } else { tr("Off") }, &mut y) {
         audio.avoid_armies = !audio.avoid_armies;
+    }
+    // Razdor's options: a battle between armies on the map shows a mark and a notice (on by
+    // default); the armies the player sees are listed under the minimap (off by default).
+    if row(tr("Battles on the map"), if audio.battle_marks { tr("On") } else { tr("Off") }, &mut y) {
+        audio.battle_marks = !audio.battle_marks;
+    }
+    if row(tr("Minimap army list"), if audio.army_list { tr("On") } else { tr("Off") }, &mut y) {
+        audio.army_list = !audio.army_list;
     }
     // The language list (Razdor's): Russian, English and the translations of the data found
     // in the install; the button opens it.

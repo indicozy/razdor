@@ -35,6 +35,9 @@ Bandit gang = Разбойничья шайка
 An army = Армия
 {name} took {place}. = {name} захватывает: {place}.
 {winner} defeated {loser}. = {winner} побеждает: {loser}.
+The army «{winner}» defeated the army «{loser}». = Армия «{winner}» разбила армию «{loser}».
+The army «{winner}» defeated the garrison «{loser}». = Армия «{winner}» разбила гарнизон «{loser}».
+The garrison «{winner}» defeated the army «{loser}». = Гарнизон «{winner}» разбил армию «{loser}».
 {name} fell at the walls of {place}. = {name} терпит поражение при штурме: {place}.
 
 # World map: tooltips

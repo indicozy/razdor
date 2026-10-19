@@ -340,6 +340,27 @@ pub struct AiNews {
     pub at: u64,
 }
 
+/// Who fought in a clash on the map: an army, or a building's garrison (its name as the
+/// hover card shows it).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Combatant {
+    Army(String),
+    Garrison(String),
+}
+
+/// A battle between two map parties (an army against an army or a garrison) that the AI
+/// resolved, one side beaten and the other standing. Razdor's notice for the interface
+/// (Battles on the map): not a rule, never saved; the interface takes them with
+/// [`Game::take_clashes`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Clash {
+    pub winner: Combatant,
+    pub loser: Combatant,
+    pub tile: Tile,
+    /// Game minute.
+    pub at: u64,
+}
+
 /// Counts for the simulation reports and tests.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -3213,6 +3234,20 @@ impl Game {
         // Reports, and the beaten leave the map.
         let a_name = army_name(&self.world.armies[att]);
         let tile = self.world.armies[att].tile(&self.world.map);
+        // A clash for the map's notice: the battle ends with one side beaten (both beaten
+        // is no winner to name).
+        if a_beaten != b_beaten {
+            let attacker = Combatant::Army(self.world.armies[att].shown_name().to_string());
+            let defender = match def {
+                Defender::Army(j) => Combatant::Army(self.world.armies[j].shown_name().to_string()),
+                Defender::Garrison(l) => Combatant::Garrison(building_name(&self.world.locations[l])),
+            };
+            let (winner, loser) = if b_beaten { (attacker, defender) } else { (defender, attacker) };
+            if self.clashes.len() >= Self::CLASHES_KEPT {
+                self.clashes.remove(0);
+            }
+            self.clashes.push(Clash { winner, loser, tile, at: now as u64 });
+        }
         match def {
             Defender::Army(j) => {
                 let b_name = army_name(&self.world.armies[j]);
@@ -3259,6 +3294,9 @@ impl Game {
         }
         won
     }
+
+    /// Clashes kept until the interface takes them (a headless run never takes them).
+    const CLASHES_KEPT: usize = 64;
 
     /// Adds a battle report to the log; the player hears of it (an event) when it happened
     /// within his sight, or concerned his own building.

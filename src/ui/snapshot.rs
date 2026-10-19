@@ -4,7 +4,7 @@
 //! e.g. `xvfb-run -s "-screen 0 1024x768x24" razdor` with `RAZDOR_SIZE=1024x768`.
 //!
 //! Scenes (`<map>` is a map file name of the install without `.DTm`, e.g. `РК3-Столица`):
-//! `title`, `fonts` (sample lines in many scripts), `update` (a made-up release on offer), `authors[:<seconds>]`, `options[:advanced]`, `scenarios[:<map>]`, `tutorial`, `load[:manual|auto[:<row>]]`, `editor[:<map>[:<text to find>]]`, `classes:<map>`, `map:<map>[:x,y]`, `minimap:<map>`, `walk:<map>:dx,dy` (the
+//! `title`, `fonts` (sample lines in many scripts), `update` (a made-up release on offer), `authors[:<seconds>]`, `options[:advanced]`, `scenarios[:<map>]`, `tutorial`, `load[:manual|auto[:<row>]]`, `editor[:<map>[:<text to find>]]`, `classes:<map>`, `map:<map>[:x,y]`, `minimap:<map>`, `clash:<map>` (the first two armies fight on the explored map), `walk:<map>:dx,dy` (the
 //! hero sets off that many cells away), `building:<map>:<n>`
 //! (the hero in the n-th building; `:barracks`, `:garrison`, `:market`, `:sanctuary` open that tab; `:market-pack` the market's pack list), `army:<map>[:<n>[:<unit id>[:<level>]]]` (squad member n selected, made that unit at that level), `journal:<map>` / `hero:<map>[:<tab>]`, `spells:<map>`,
 //! `menu:<map>`, `defeat:<map>` (the lost battle's report), `report:<map>[:<gold>]` (the noon report), `settings:<map>[:advanced]`, `battle:<map>:<n>` (against the n-th army), `custom` (the custom battle
@@ -433,6 +433,19 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                 }
             }
             app.map_view.minimap = true;
+            Screen::WorldMap
+        }
+        "clash" => {
+            // The whole map explored and the first two armies fight (the AI's battle): the map
+            // shows the crossed-swords mark and the notice of Battles on the map.
+            for y in 0..game.world.map.h {
+                for x in 0..game.world.map.w {
+                    game.fog.mark((x, y));
+                }
+            }
+            if game.world.armies.len() >= 2 {
+                game.ai_battle(0, razdor::rules::ai::Defender::Army(1));
+            }
             Screen::WorldMap
         }
         "map" => {
