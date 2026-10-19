@@ -499,6 +499,33 @@ pub fn tooltip(lines: &[(String, Color)]) {
     tooltip_at_alpha(lines, hint_fade(lines, 160.0 / 255.0));
 }
 
+/// A queued hint box: its lines and its fade.
+type Queued = (Vec<(String, Color)>, f32);
+
+thread_local! {
+    /// Hint boxes queued by [`tooltip_later`] with their fade, drawn by [`draw_later`].
+    static LATER: RefCell<Vec<Queued>> = const { RefCell::new(Vec::new()) };
+}
+
+/// A hint box for a window whose frame lines are drawn after its content (the army and
+/// building windows): queued now, drawn by [`draw_later`] once the frame is up, so no steel
+/// line crosses the box (the original draws its pop-ups over the frame).
+pub fn tooltip_later(lines: &[(String, Color)]) {
+    if !hints_on() {
+        return;
+    }
+    let alpha = hint_fade(lines, 160.0 / 255.0);
+    LATER.with(|q| q.borrow_mut().push((lines.to_vec(), alpha)));
+}
+
+/// Draws the hint boxes queued by [`tooltip_later`], in the order they were asked for.
+pub fn draw_later() {
+    let queued = LATER.with(|q| std::mem::take(&mut *q.borrow_mut()));
+    for (lines, alpha) in queued {
+        tooltip_at_alpha(&lines, alpha);
+    }
+}
+
 /// The bottom panel's hint box (49d5ac): a pushed hint (kind 4), which the original fades in
 /// to full opacity over 300 ms (49ee4b: `elapsed × 255 / 300`), so the bar under it does not
 /// show through once it is up.

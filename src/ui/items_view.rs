@@ -1057,8 +1057,11 @@ pub fn squad(
         *selected = ArmySel::default();
     }
 
+    window_layout::frame(win);
+
     // The item under the pointer, in the pack or worn: its description pops up by the pointer
-    // (not while one is held: 0x4c280c shows the item text with nothing held).
+    // (not while one is held: 0x4c280c shows the item text with nothing held). Drawn after the
+    // frame lines, so the window's steel lines do not cross it.
     if let Some(item) = hover.filter(|_| game.held_item.is_none()) {
         // The original's item tooltip (0x4cbab0): 272 wide, as tall as its text plus 32.
         let (pw, ph) = (super::item_text::TOOLTIP_W * k, super::item_text::tooltip_height(game, item, k));
@@ -1070,7 +1073,6 @@ pub fn squad(
     }
     // The item held is the pointer; closing the window puts it back in the pack (the
     // screen change in `App::frame`, 0x4b8d28).
-    window_layout::frame(win);
     draw_held(game, assets);
 
     if close || (!filter.keys_taken && (key(KeyCode::Escape) || key(KeyCode::A))) {

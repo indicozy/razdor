@@ -900,7 +900,7 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
             Err(e) => *message = Some(service_error(e)),
         }
     }
-    tooltip(&hover_lines);
+    tooltip_later(&hover_lines);
     next
 }
 
@@ -1096,7 +1096,7 @@ fn garrison(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
         } else if button(r.x + r.w - 95.0 * k, r.y + 6.0 * k, 85.0 * k, 32.0 * k, tr("No"), true) {
             view.garrison_buy = None;
         }
-        tooltip(&hover);
+        tooltip_later(&hover);
         return;
     }
     // Razdor's drag (both settings): a card let go over a card or a cell does what the
@@ -1120,7 +1120,7 @@ fn garrison(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
                     Err(e) => Some(service_error(e)),
                 };
             }
-            tooltip(&hover);
+            tooltip_later(&hover);
             return;
         }
         match garrison_click(controls, top, bottom) {
@@ -1139,7 +1139,7 @@ fn garrison(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
             GarrisonClick::Nothing => {}
         }
     }
-    tooltip(&hover);
+    tooltip_later(&hover);
 }
 
 /// What a press on the garrison tab does.
@@ -2225,6 +2225,8 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut BuildingView, message:
     window_layout::panel_frame(window_layout::upper(Rect::new(f.x, f.y, f.w, f.h)));
     selected_unit_panel(game, assets, &f, view);
     window_layout::frame(Rect::new(f.x, f.y, f.w, f.h));
+    // The hint boxes the tabs asked for, over the frame lines (queued by `tooltip_later`).
+    draw_later();
     if let Some(m) = message {
         let w = measure(m, 20.0).width + 40.0;
         let (cx, y) = (f.cx + f.cw / 2.0, f.y + f.h + 6.0);
