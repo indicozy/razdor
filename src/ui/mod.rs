@@ -787,6 +787,7 @@ impl App {
             g.pursue = main_menu::pursue(&self.audio.settings);
             g.walk_pace = main_menu::walk_pace(&self.audio.settings);
             g.friends_let_pass = self.audio.settings.friends_let_pass;
+            g.avoid_armies = self.audio.settings.avoid_armies;
             g.allow_unit_benching = self.audio.settings.allow_unit_benching;
             g.pass_on_bridges = self.audio.settings.pass_on_bridges;
         }

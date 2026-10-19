@@ -185,6 +185,10 @@ pub struct Settings {
     /// Advanced: on a bridge the hero walks through the armies only passing by
     /// (`Game::pass_on_bridges`); off, the original's meeting with each.
     pub pass_on_bridges: bool,
+    /// Advanced: the route closes every army's cell and the hero replans round them
+    /// (`Game::avoid_armies`); off, the original's route, which walks through the armies it
+    /// does not stop for.
+    pub avoid_armies: bool,
     /// Advanced: new releases are offered (`Ask`), put in place without a word (`Always`), or
     /// not looked for (`Off`); `razdor::update`.
     pub updates: razdor::update::Mode,
@@ -220,7 +224,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, expert_ai: None, max_ai: false, wide_row: None, display: Default::default(), ui_scale: 0.0, minimap_size: None, minimap_corner: Default::default(), friends_let_pass: false, pass_on_bridges: false, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default() }
+        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, expert_ai: None, max_ai: false, wide_row: None, display: Default::default(), ui_scale: 0.0, minimap_size: None, minimap_corner: Default::default(), friends_let_pass: false, pass_on_bridges: false, avoid_armies: false, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default() }
     }
 }
 
@@ -704,11 +708,21 @@ mod tests {
 
     #[test]
     fn benching_preference_defaults_off_and_survives_settings_serialization() {
-        let old: Settings=serde_json::from_str("{}").unwrap();
+        let old: Settings = serde_json::from_str("{}").unwrap();
         assert!(!old.allow_unit_benching);
-        let enabled=Settings { allow_unit_benching:true,..Settings::default() };
-        let back: Settings=serde_json::from_str(&serde_json::to_string(&enabled).unwrap()).unwrap();
+        let enabled = Settings { allow_unit_benching: true, ..Settings::default() };
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&enabled).unwrap()).unwrap();
         assert!(back.allow_unit_benching);
+    }
+
+    #[test]
+    fn avoid_armies_defaults_off_and_survives_settings_serialization() {
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert!(!old.avoid_armies, "an older file: the original's route");
+        assert!(!Settings::default().avoid_armies);
+        let enabled = Settings { avoid_armies: true, ..Settings::default() };
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&enabled).unwrap()).unwrap();
+        assert!(back.avoid_armies);
     }
 
     /// The front row's width: the install's `OptValue11` until chosen, then the choice; an

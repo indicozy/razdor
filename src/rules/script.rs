@@ -1922,41 +1922,41 @@ mod tests {
     fn experimental_rules_carry_to_next_map_and_restart() {
         let scenario = world(vec![]);
         let mut game = start(&scenario);
-        let rules = super::super::content::ExperimentalRules { simultaneous_bonuses:true, multiple_rings:true, multiple_amulets:false, no_duplicate_items:true, two_potions:true };
-        game.experimental=rules;
-        game.content=std::sync::Arc::new(game.content.with_experimental(rules));
-        let next=game.hand_over("Road".into(),None);
-        assert_eq!(next.experimental,rules);
-        let ordinary=std::sync::Arc::new(game.content.with_experimental(Default::default()));
-        let carried=Game::from_campaign(ordinary.clone(),&scenario,&next);
-        assert_eq!(carried.experimental,rules);
-        assert_eq!(carried.content.experimental,rules);
-        let restarted=carried.restart(ordinary,&scenario);
-        assert_eq!(restarted.experimental,rules);
-        assert_eq!(restarted.content.experimental,rules);
+        let rules = super::super::content::ExperimentalRules { simultaneous_bonuses: true, multiple_rings: true, multiple_amulets: false, no_duplicate_items: true, two_potions: true };
+        game.experimental = rules;
+        game.content = std::sync::Arc::new(game.content.with_experimental(rules));
+        let next = game.hand_over("Road".into(), None);
+        assert_eq!(next.experimental, rules);
+        let ordinary = std::sync::Arc::new(game.content.with_experimental(Default::default()));
+        let carried = Game::from_campaign(ordinary.clone(), &scenario, &next);
+        assert_eq!(carried.experimental, rules);
+        assert_eq!(carried.content.experimental, rules);
+        let restarted = carried.restart(ordinary, &scenario);
+        assert_eq!(restarted.experimental, rules);
+        assert_eq!(restarted.content.experimental, rules);
     }
 
     #[test]
     fn benched_living_characters_still_satisfy_quest_presence_and_death_checks() {
-        let mut present=ev(EventKind::Global);
-        present.conditions.units_check=1;
-        (present.conditions.units,present.conditions.units_named,present.conditions.units_owner)=([4,0,0],[1,0,0],[1,0,0]);
-        let mut absent=ev(EventKind::Global);
-        absent.conditions.units_check=1;
-        (absent.conditions.units,absent.conditions.units_named,absent.conditions.units_owner)=([4,0,0],[1,0,0],[6,0,0]);
-        let mut scenario=world(vec![present,absent]);
-        scenario.header.heroes[0]=hero(2,2,100,&[troop(4,0,1)]);
-        scenario.named_characters=vec![crate::dt::dtm::NamedCharacter { unit:4,name:"Herald".into() }];
-        scenario.header.defeat_event=2;
-        let mut g=Game::unstarted(Arc::new(content()),&scenario,HeroClass::Knight);
-        g.squad[1].named=1;
-        g.allow_unit_benching=true;
-        assert!(g.set_unit_battle_disabled(1,true));
+        let mut present = ev(EventKind::Global);
+        present.conditions.units_check = 1;
+        (present.conditions.units, present.conditions.units_named, present.conditions.units_owner) = ([4, 0, 0], [1, 0, 0], [1, 0, 0]);
+        let mut absent = ev(EventKind::Global);
+        absent.conditions.units_check = 1;
+        (absent.conditions.units, absent.conditions.units_named, absent.conditions.units_owner) = ([4, 0, 0], [1, 0, 0], [6, 0, 0]);
+        let mut scenario = world(vec![present, absent]);
+        scenario.header.heroes[0] = hero(2, 2, 100, &[troop(4, 0, 1)]);
+        scenario.named_characters = vec![crate::dt::dtm::NamedCharacter { unit: 4, name:"Herald".into() }];
+        scenario.header.defeat_event = 2;
+        let mut g = Game::unstarted(Arc::new(content()), &scenario, HeroClass::Knight);
+        g.squad[1].named = 1;
+        g.allow_unit_benching = true;
+        assert!(g.set_unit_battle_disabled(1, true));
         g.start_script();
-        let fired=fired(&g.drain_events());
-        assert!(fired.contains(&1),"the living benched character is still present");
-        assert!(!fired.contains(&2),"benching is not death or absence");
-        assert_eq!(g.script_end(),None);
+        let fired = fired(&g.drain_events());
+        assert!(fired.contains(&1), "the living benched character is still present");
+        assert!(!fired.contains(&2), "benching is not death or absence");
+        assert_eq!(g.script_end(), None);
     }
 
     #[test]
@@ -2094,6 +2094,33 @@ mod tests {
 
     #[test]
     fn an_army_with_a_meeting_waiting_next_to_the_hero_closes_his_route() {
+        // World.md §1.3 (0x4cc601): an army a meeting event waits for closes its cell when it
+        // stands next to the hero (any of the 8 neighbours), unless it is the army clicked;
+        // further away, or without the event, it is walked through like any moving army.
+        let mut talk = ev(EventKind::Global);
+        talk.conditions.meet_army = 2;
+        let routes = |events: Vec<DtEvent>, at: (u16, u16), to: (i32, i32)| {
+            let mut s = world(events);
+            let mut friend = army(2, at.0, at.1, 1, &[troop(4, 0, 1)]);
+            (friend.patrols, friend.patrol_radius) = (1, 5);
+            s.armies = vec![friend];
+            let mut g = start(&s);
+            read(&mut g);
+            g.fog = crate::rules::fog::Fog::disabled(16, 12);
+            (g.route_to(to), g.route_to(g.world.armies[0].tile(&g.world.map)))
+        };
+        let (route, clicked) = routes(vec![talk.clone()], (3, 2), (4, 2));
+        assert!(!route.is_empty() && !route.contains(&(3, 2)), "{route:?}");
+        assert_eq!(clicked, vec![(3, 2)], "the army clicked stays open");
+        let (route, _) = routes(vec![talk.clone()], (3, 3), (4, 4));
+        assert!(!route.contains(&(3, 3)), "a diagonal neighbour too: {route:?}");
+        let (route, _) = routes(vec![talk], (4, 2), (6, 2));
+        assert!(route.contains(&(4, 2)), "two cells away: {route:?}");
+        let (route, _) = routes(vec![], (3, 2), (4, 2));
+        assert_eq!(route, vec![(3, 2), (4, 2)], "no meeting waits for it");
+    }
+    #[test]
+    fn an_army_with_a_meeting_waiting_next_to_the_hero_closes_his_route_with_avoid_armies() {
         // Army cells are avoided regardless of meeting events or distance. A deliberate
         // click still reaches the army so its meeting event can run.
         let mut talk = ev(EventKind::Global);
@@ -2106,6 +2133,7 @@ mod tests {
             let mut g = start(&s);
             read(&mut g);
             g.fog = crate::rules::fog::Fog::disabled(16, 12);
+            g.avoid_armies = true;
             (g.route_to(to), g.route_to(g.world.armies[0].tile(&g.world.map)))
         };
         let (route, clicked) = routes(vec![talk.clone()], (3, 2), (4, 2));

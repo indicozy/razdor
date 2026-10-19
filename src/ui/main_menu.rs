@@ -835,6 +835,10 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     if row(tr("Unit battle participation"), if audio.allow_unit_benching { tr("On") } else { tr("Off") }, &mut y) {
         audio.allow_unit_benching = !audio.allow_unit_benching;
     }
+    // Razdor's option: the route closes every army's cell (off: the original's route).
+    if row(tr("Route around armies"), if audio.avoid_armies { tr("On") } else { tr("Off") }, &mut y) {
+        audio.avoid_armies = !audio.avoid_armies;
+    }
     // The language list (Razdor's): Russian, English and the translations of the data found
     // in the install; the button opens it.
     chrome::shadow_text(tr("Language"), rx, y + 18.0 * k, 14.0 * k, chrome::CREAM);

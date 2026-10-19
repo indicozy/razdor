@@ -33,6 +33,7 @@ Four equipment slots. Duplicate abilities do not stack. = Четыре слот�
 Applies to all armies; saved with this playthrough. = Для всех армий. Правила сохраняются вместе с этой партией.
 Ability sources: {sources} = Источники способности: {sources}
 Own ability = Собственная способность
+Route around armies = Обход армий на пути
 All scenarios = Все сценарии
 Campaigns = Кампании
 Single scenarios = Одиночные сценарии
