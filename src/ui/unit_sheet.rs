@@ -595,6 +595,13 @@ impl StripLayout {
         }
     }
 
+    /// The baseline of a line's text (0x494f93–0x49565f): the line's cell top plus the body
+    /// face's baseline offset `body_base` (see [`cell_baseline`]). Whatever size the text is
+    /// drawn at, a line keeps its place: a shrunk first line does not rise over the portrait.
+    pub fn baseline(&self, line: usize, body_base: f32) -> f32 {
+        self.tops[line] + body_base
+    }
+
     /// The x of a centred piece `width` wide (the original's halving drops the odd pixel).
     pub fn centred(&self, width: f32) -> f32 {
         self.x + (((self.w - width) / self.scale) / 2.0).floor() * self.scale
@@ -657,8 +664,11 @@ fn strip_text(strip: Rect, now: &Stats, base: &Stats, power: i32, caster: bool, 
         let gap = measure(" ", size).width.max(size * 0.3);
         measure(&att, size).width + d.as_ref().map_or(0.0, |d| gap + measure(d, size).width)
     });
+    // The lines' places come from the body size, not the size a first line shrinks to, so a
+    // long first line does not move up.
+    let body_base = cell_baseline(fs);
     let put = |s: &str, x: f32, line: usize, size: f32, ink: StripInk| {
-        super::widgets::text(s, x, l.tops[line] + cell_baseline(size), size, ink.color());
+        super::widgets::text(s, x, l.baseline(line, body_base), size, ink.color());
     };
     let right = |s: &str, line: usize, size: f32, ink: StripInk| put(s, l.right_end - measure(s, size).width, line, size, ink);
     put(&att, l.left, 0, fs1, ac);
@@ -1169,6 +1179,14 @@ mod tests {
         let l = StripLayout::of(Rect::new(10.0, 100.0, 94.0, 39.0));
         assert_eq!(l.tops, [102.0, 114.0, 126.0]);
         assert_eq!((l.left, l.right_end), (12.0, 103.0));
+        // A caster's card and a warrior's are the same frame: the same places, whatever the
+        // strip's text (0x494f93: the first line keeps its cell under a long "Pwr: 28 D: 0/10").
+        let caster = StripLayout::of(Rect::new(0.0, 94.0, 94.0, 40.0));
+        let warrior = StripLayout::of(Rect::new(0.0, 94.0, 94.0, 40.0));
+        assert_eq!(caster.tops, [96.0, 108.0, 120.0]);
+        assert_eq!(caster.tops, warrior.tops);
+        assert_eq!(caster.baseline(0, 5.0), 101.0, "the first line's place ignores its size");
+        assert_eq!(caster.baseline(2, 5.0), 125.0);
         assert_eq!(l.centred(40.0), 37.0);
         assert_eq!(l.centred(41.0), 36.0);
         let big = StripLayout::of(Rect::new(0.0, 0.0, 188.0, 78.0));
