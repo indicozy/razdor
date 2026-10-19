@@ -1432,7 +1432,7 @@ impl BattleView {
         }
         // The report is the chained step 250 ms after the screen closes (0x4af658).
         let due = macroquad::time::get_time() + razdor::av::BATTLE_REPORT_GAP_MS as f64 / 1000.0;
-        dialogs.extend(Dialog::victory(game, &result).map(|d| Dialog { not_before: Some(due), ..d }));
+        dialogs.extend(Dialog::victory(&result).map(|d| Dialog { not_before: Some(due), ..d }));
         *message = None;
         Screen::WorldMap
     }
@@ -1483,7 +1483,7 @@ impl BattleView {
             }
             BattleResult::Victory { .. } if game.won() => Some(Screen::Victory),
             victory @ BattleResult::Victory { .. } => {
-                dialogs.extend(Dialog::victory(game, &victory));
+                dialogs.extend(Dialog::victory(&victory));
                 *message = None;
                 Some(Screen::WorldMap)
             }

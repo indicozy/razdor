@@ -195,9 +195,9 @@ impl Dialog {
         d
     }
 
-    /// The window after a won battle: gold and mana taken, a captured building, the loot.
-    pub fn victory(game: &Game, result: &BattleResult) -> Option<Dialog> {
-        let BattleResult::Victory { reward, mana, loot, left_behind, captured, over, .. } = result else {
+    /// The window after a won battle: gold and mana taken, the loot.
+    pub fn victory(result: &BattleResult) -> Option<Dialog> {
+        let BattleResult::Victory { reward, mana, loot, left_behind, over, .. } = result else {
             return None;
         };
         let ini = |key: &str, ours: &'static str| {
@@ -206,13 +206,7 @@ impl Dialog {
         let mut d = Dialog::new(ini("VictoryTitle", razdor::i18n::n_("Victory over the enemy!")));
         d.chord = true;
         d.marked = Some(victory_markup(over, *reward, loot.len(), *mana, &ini));
-        d.resources.push((Resource::Gold, format!("{} + {reward}", resource_word(Resource::Gold))));
-        if *mana > 0 {
-            d.resources.push((Resource::Mana, format!("{} + {mana}", resource_word(Resource::Mana))));
-        }
-        if captured.is_some() {
-            d.resources.push((Resource::Income, format!("{} + {}", resource_word(Resource::Income), game.daily_income())));
-        }
+        d.resources = victory_resources(*reward, *mana);
         d.items = loot.clone();
         if *left_behind > 0 {
             d.notice = Some(trf!("{left_behind} items were left behind: the pack is full.", left_behind));
@@ -239,6 +233,18 @@ pub fn resource_word(r: Resource) -> String {
         Resource::Experience => return tr("Experience").to_string(),
     };
     super::chrome::ui_text("Event", key).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr(ours).to_string())
+}
+
+/// The victory report's resource row (0x4a9ce1..0x4a9d19): the gold won in the first place,
+/// the mana in the second, the income and wages places empty; the row then shows only the
+/// places that are not 0 (0x4a9db6, 0x4a9deb), and none at all when every place is 0. So a
+/// battle that brought nothing has no «Деньги + 0», and a captured building no income.
+pub fn victory_resources(gold: i32, mana: i32) -> Vec<(Resource, String)> {
+    [(Resource::Gold, gold), (Resource::Mana, mana)]
+        .into_iter()
+        .filter(|&(_, v)| v != 0)
+        .map(|(r, v)| (r, format!("{} + {v}", resource_word(r))))
+        .collect()
 }
 
 /// The victory report's text as the original builds it (0x4a9d88), each line centred: a
@@ -755,6 +761,16 @@ mod tests {
         assert!(((yes + 47.5) - 347.0).abs() < 4.0, "{yes}");
         assert!(((no + 47.5) - 677.0).abs() < 4.0, "{no}");
         assert_eq!(resource_word(Resource::Experience), tr("Experience"));
+    }
+
+    /// 0x4a9deb: a victory shows only the resources it brought, none when it brought none.
+    #[test]
+    fn a_victory_shows_only_the_resources_it_brought() {
+        assert!(victory_resources(0, 0).is_empty(), "no «Деньги + 0»");
+        let kinds = |v: Vec<(Resource, String)>| v.into_iter().map(|(r, _)| r).collect::<Vec<_>>();
+        assert_eq!(kinds(victory_resources(160, 0)), vec![Resource::Gold]);
+        assert_eq!(kinds(victory_resources(0, 25)), vec![Resource::Mana]);
+        assert_eq!(kinds(victory_resources(160, 25)), vec![Resource::Gold, Resource::Mana]);
     }
 
     /// The won battle's report (0x4a9d88): the beaten one's line in white, then each prize's

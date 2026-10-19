@@ -542,7 +542,7 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                 captured: None,
                 over: razdor::rules::game::Beat::Army(name),
             };
-            app.dialogs.extend(super::dialog::Dialog::victory(&game, &result));
+            app.dialogs.extend(super::dialog::Dialog::victory(&result));
             Screen::WorldMap
         }
         "defeat" => {
