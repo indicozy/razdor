@@ -94,12 +94,53 @@ install file ──► src/dt/gfx.rs decode_file ──► gfx::Image (RGBA, not
   card, 262 px panel), each text by its cell's top as the original does (`dt_font::cell_baseline`
   turns that into Razdor's baseline), with the sheet scale snapped by `dt_font::whole_scale`.
 
+## Window frames and lines
+
+Every outline the original draws round a window or panel is one routine (0x48d1d4) with the
+colour −1: the colours are `SteelLine.lit`'s texels read one by one, the picture taken flat
+(a run past the row's end goes on with the next row), by an index that runs on round the
+frame: top left to right, right side down, bottom right to left, left side up. A 2 px line's
+second pixel lies inside the first in the same colour, and each side overwrites the corners
+the side before it drew. Razdor draws this in `chrome::steel_frame` (the original's pixels
+at a given scale) and `chrome::silver_frame` / `chrome::silver_line` (a width in screen
+pixels: two original pixels or more is the 2 px line, else 1 px). `chrome::opx()` is one
+original pixel on screen (0.9375 × `k`). Without the install the lines are plain silver.
+
+- Every window (0x48d3f8, `chrome::window`): a 2 px frame round it and a 2 px line from
+  (2, 27) to (w − 2, 29) under the title (`chrome::window_frames`).
+- Windows made with inner frames (0x48d710 with its flag; the 634×516 window ae2520 of the
+  scenario list, load/save, exit, village and others, the 634×556 Community window c2953a of
+  the options, the leave-battle window, and the event window, 0x4aaa4b / 0x4aaa79): a 2 px
+  line from (2, h − 56) to (w − 2, h − 54) over the buttons and a 1 px frame from (4, 31) to
+  (w − 4, h − 58) round the content (`chrome::window_inner_frames`).
+- The army, building, battle and hero windows (896×640, made without inner frames): a 2 px
+  line right of the left panel from under the title line to the frame (x 264) and 2 px lines
+  over and under the hint strip across the right side (y 319 and 346, 4cd330, 4bb7c4,
+  4d1ce8); `window_layout::frame` draws them after the tab's content, at Razdor's 836×600
+  layout's column and strip.
+- The brown text box (0x48e4e8): Win-paper less (148, 138, 156) at 16-bit levels,
+  Big_Frame_1a / 2a (loaded −223, −215, 0) taken off 4 px in from the sides, the four 34 px
+  corners when asked, a 1 px frame. The hero window's boxes ask for no corners (0x4d1814 →
+  0x48e750: item description, quest list and quest text; `chrome::text_box_no_corners`); the
+  army window's item description does (0x498c2c). The hall's quest list on light paper takes
+  the same side ornaments off, which show gold there (0x4bedec).
+- The scenario list's map (0x4c1c09..0x4c1c63): `MapImageFrame` (295×162) copied as it is,
+  the map's 267×134 picture 14 px in over its opening, no line round either; Razdor draws
+  both at its window's scale.
+- Worn-item slots (0x4d8638): 55 px, 8 px in from the panel fill's top and sides, each side's
+  pair touching; an empty slot is ae2860 (`chrome::empty_item_slot`: the 1 px steel ring over
+  40% black), a worn item its picture alone (0x492f24).
+- Standard buttons show their pressed picture while held, not on hover (479eb8).
+
 ## The world map
 
 `src/ui/world_view.rs`: `draw_world` draws only the visible cells — `draw_terrain`
 (`TerrainLayer::draw` in `src/ui/terrain.rs`: one shader quad mixing the four nearest cell
 textures from a 4×4 atlas, water frames multiplied in), then decorations
-(`draw_object`), buildings (`draw_building`), armies (`draw_army`, `draw_figure`,
+(`draw_object`) and buildings (`draw_building`) in one pass over the cells as the original's
+(0x4c8864, 0x4c9b5b: row by row, left to right; in a cell its massif object, its plant, then
+the building whose footprint covers it if not drawn yet, so a building comes at its top row's
+left cell and every later object covers it), armies (`draw_army`, `draw_figure`,
 `draw_ship`), the hero (`draw_hero`), the route (`draw_route`), and the tooltip
 (`draw_tooltip`; its opaque box in the original's three styles is `widgets::tooltip_panel_styled`,
 the layout as interface.md §7.4). Buildings are anchored like the original (right edge on the cell; see

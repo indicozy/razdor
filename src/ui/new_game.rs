@@ -65,7 +65,8 @@ impl Win {
         let (w, h) = (594.0 * k, 482.0 * k);
         let r = Rect::new((screen_width() - w) / 2.0, (190.0 * k).min(screen_height() - h), w, h);
         let (_, closed) = chrome::window(r, title, chrome::Skin::Marble, true);
-        chrome::three_block_frame(r, 26.0 * k, 432.0 * k, 2.0 * k);
+        // The 634×516 window with its inner frames (ae2520, read by 4d2a30; 0x48d710).
+        chrome::window_inner_frames(r, chrome::opx());
         (Win { r, k }, closed)
     }
 
@@ -104,6 +105,13 @@ fn scenario_icon(picture: u8, c: Vec2, k: f32) {
 fn icon_rect(size: Vec2, c: Vec2, k: f32) -> Rect {
     let (w, h) = (size.x * k, size.y * k);
     Rect::new(c.x - w / 2.0, c.y - h / 2.0, w, h)
+}
+
+/// The map frame and the picture in it, from the frame's top left `at`, `px` screen pixels
+/// to one of the original's: `MapImageFrame` at its 295×162 and the map's 267×134 picture
+/// 14 px in (0x4c1c24 puts the frame, 0x4c1c63 the picture at +0xe, +0xe).
+fn map_frame_rects(at: Vec2, px: f32) -> (Rect, Rect) {
+    (Rect::new(at.x, at.y, 295.0 * px, 162.0 * px), Rect::new(at.x + 14.0 * px, at.y + 14.0 * px, 267.0 * px, 134.0 * px))
 }
 
 /// The map's terrain, one texel per cell (the minimap's colours).
@@ -648,10 +656,16 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
     // The map and what it is.
     if let Some(g) = list.get(picked) {
         let (i, e) = (g.first, &scenarios[g.first]);
-        let frame = win.rect(290.0, 36.0, 295.0, 162.0);
-        draw_rectangle(frame.x, frame.y, frame.w, frame.h, BLACK);
-        // The frame's opening: the map's own picture (it is made for it), else the terrain.
-        let inner = Rect::new(frame.x + 11.0 * k, frame.y + 11.0 * k, frame.w - 22.0 * k, frame.h - 22.0 * k);
+        // (Razdor's scenario window draws the frame at the interface scale, 295 × 162 of its
+        // own pixels, the picture at the same scale so the two stay in register.)
+        let (frame, inner) = map_frame_rects(win.rect(290.0, 36.0, 0.0, 0.0).point(), k);
+        // The original copies MapImageFrame (295×162) as it is, then the map's own 267×134
+        // picture at its size 14 px in, over the frame's opening (0x4c1c09..0x4c1c63); no
+        // line is drawn round either. Without a picture Razdor shows the terrain there.
+        match chrome::win("MapImageFrame") {
+            Some(t) => chrome::tex(&t, frame, WHITE),
+            None => draw_rectangle(frame.x, frame.y, frame.w, frame.h, BLACK),
+        }
         let pic = picture(i, e);
         match (&pic, preview(i, e)) {
             (Some(p), _) => chrome::tex(p, inner, WHITE),
@@ -662,11 +676,6 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
             }
             (None, None) => {}
         }
-        if let Some(t) = chrome::win_fx("MapImageFrame", chrome::Fx::KeyBlack) {
-            chrome::tex(&t, frame, WHITE);
-        }
-        chrome::silver_frame(frame, k);
-        chrome::silver_frame(inner, k);
         // Under it the description box (0x4d2a30, 65ae00): the name centred in white (ae2498,
         // 0x4c1b4b), the description in the bold SanSerif's orange (ae24f4 over ae2510,
         // 0x4c1bb4), from the box's top.
@@ -1105,6 +1114,19 @@ fn choose_class(offered: [bool; 3], pick: usize, clicked: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The map frame and its picture at one scale (0x4c1c09..0x4c1c63; issue #17): the 267×134
+    /// picture 14 px in fills the 295×162 frame's opening with the same 14 px all round.
+    #[test]
+    fn the_map_picture_sits_14_px_inside_its_frame() {
+        for px in [1.0, 1.0667, 1.5] {
+            let (frame, inner) = map_frame_rects(vec2(10.0, 20.0), px);
+            assert_eq!((frame.w, frame.h), (295.0 * px, 162.0 * px));
+            assert_eq!((inner.x - frame.x, inner.y - frame.y), (14.0 * px, 14.0 * px));
+            assert!((frame.right() - inner.right() - 14.0 * px).abs() < 1e-3);
+            assert!((frame.bottom() - inner.bottom() - 14.0 * px).abs() < 1e-3);
+        }
+    }
 
     /// A description longer than its box scrolls (a player's report: "нельзя прокрутить
     /// описание"): the original's box is a text list the wheel scrolls (0x47ede0) down to the

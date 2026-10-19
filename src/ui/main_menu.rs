@@ -945,8 +945,8 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     let (inner, closed) = if over_map { map_window(&title, 594.0, 500.0) } else { window(&title, 594.0, 500.0) };
     let k = chrome::k();
     let outer = Rect::new(inner.x - 2.0 * k, inner.y - (26.0 * k).round() - 1.0, 594.0 * k, 500.0 * k);
-    chrome::three_block_frame(outer, (26.0 * k).round(), 448.0 * k, 2.0 * k);
-    chrome::silver_frame(Rect::new(outer.x + 3.0 * k, outer.y + 29.0 * k, outer.w - 6.0 * k, 417.0 * k), k);
+    // A window with 0x48d710's inner frames (the options window is c2953a, 634×556, 4d2f48).
+    chrome::window_inner_frames(outer, chrome::opx());
     let row = |i: usize| Rect::new(inner.x + 10.0 * k, inner.y + 8.0 * k + i as f32 * 37.5 * k, inner.w - 20.0 * k, 30.0 * k);
     // The volumes, in steps of 1%.
     for (i, music) in [(0, true), (1, false)] {

@@ -434,13 +434,8 @@ fn hall_offers_in_face(game: &mut Game, f: &Frame, view: &mut BuildingView, mess
     // The bar is always there, idle while the list fits, as the original's (0x4bedec).
     scrollbar_always(Rect::new(list.x + list.w - 14.0 * k, list.y + 2.0 * k, 12.0 * k, list.h - 4.0 * k), &mut view.hall_scroll, rows, entries.len());
     let row_w = list.w - 16.0 * k;
-    let visible_entries = entries.len().saturating_sub(view.hall_scroll).min(rows);
-    let content_h = visible_entries as f32 * row_h;
-    let first_y = if entries.len() <= rows {
-        list.y + ((list.h - content_h) / 2.0).max(4.0 * k)
-    } else {
-        list.y + 4.0 * k
-    };
+    // From the top however few there are: the list widget lays its lines down from 0 (0x47e46c).
+    let first_y = list.y + 4.0 * k;
     for (n, entry) in entries.iter().enumerate().skip(view.hall_scroll).take(rows) {
         let y = first_y + (n - view.hall_scroll) as f32 * row_h;
         let id = match *entry { HallEntry::Rumour(id) | HallEntry::Quest(id) => id };
@@ -1927,8 +1922,8 @@ fn village_window(game: &mut Game, view: &BuildingView, message: &mut Option<Str
     if let Some(t) = chrome::win("S_Village") {
         chrome::tex(&t, picture, WHITE);
     }
-    chrome::silver_frame(picture, o.max(1.0));
-    chrome::three_block_frame(Rect::new(x, y, w, h), (26.0 * chrome::k()).round(), 460.0 * o, 2.0 * o);
+    // The village window (4d3a38) is ae2520, 634×516 with 0x48d710's inner frames.
+    chrome::window_inner_frames(Rect::new(x, y, w, h), o);
     let size = (15.0 * o).round();
     let line_h = (17.0 * o).round();
     // The original's texts here are Benguiat's tints (0x4dbb0c fonts ae24a0..ae24ac).

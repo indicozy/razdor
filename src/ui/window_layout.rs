@@ -41,15 +41,22 @@ pub fn at(win: Rect, x: f32, y: f32, w: f32, h: f32) -> Rect {
     Rect::new(win.x+x*k,win.y+yy*k,w*k,hh*k)
 }
 pub fn left(win: Rect) -> Rect { let k=chrome::k(); Rect::new(win.x+2.0*k,win.y+27.0*k,244.0*k,571.0*k) }
-/// Shared structural grid, drawn last so tab artwork cannot erase its borders.
+/// The army and building windows' lines, drawn last so tab artwork cannot cover them: the
+/// window's frame and title line (the 896×640 window made by 0x48d710 without inner frames,
+/// 4dc126), the 2 px line between the left column and the right side from under the title
+/// line (y 29) to the frame, and the 2 px lines over and under the hint strip across the
+/// right side (4cd330, 4bb7c4: (264, 29)–(266, 638), (266, 319)–(894, 321),
+/// (266, 346)–(894, 348) of the 896×640 window; Razdor's 836×600 layout puts them at its own
+/// column and strip).
 pub fn frame(win: Rect) {
     let k = chrome::k();
-    chrome::silver_frame(win, 2.0 * k);
+    let px = chrome::opx();
+    chrome::window_frames(win, px);
     let x = win.x + 247.0 * k;
-    chrome::silver_line(vec2(x, win.y + 26.0 * k), vec2(x, win.bottom() - 2.0 * k), 2.0 * k);
+    chrome::silver_line(vec2(x, win.y + 29.0 * px), vec2(x, win.bottom() - 2.0 * px), 2.0 * px);
     let strip = divider(win);
-    for y in [strip.y + k, strip.bottom() - k] {
-        chrome::silver_line(vec2(x, y), vec2(win.right() - 2.0 * k, y), 2.0 * k);
+    for y in [strip.y + px, strip.bottom() - px] {
+        chrome::silver_line(vec2(x + px, y), vec2(win.right() - 2.0 * px, y), 2.0 * px);
     }
 }
 pub fn panel_frame(r: Rect) {

@@ -495,9 +495,8 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         chrome::window(Rect::new(x, y, w, h), &d.title, skin, false);
     }
     let edge = o.max(1.0);
-    let title_h = (26.0 * chrome::k()).round();
-    chrome::silver_frame(Rect::new(x + 3.0 * o, y + title_h + 3.0 * o, w - 6.0 * o, h - title_h - 64.0 * o), edge);
-    chrome::three_block_frame(Rect::new(x, y, w, h), title_h, h - 58.0 * o, 2.0 * o);
+    // The event window's inner frames (0x4aaa4b, 0x4aaa79), as 0x48d710's.
+    chrome::window_inner_frames(Rect::new(x, y, w, h), o);
     let top = y + EVENT_BOX_TOP * o;
     let mut cy = top;
     match &d.picture {
@@ -690,10 +689,9 @@ fn draw_village_event(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Optio
     let x = ((screen_width() - w) / 2.0).round();
     let y = ((screen_height() - chrome::bar_height() - h) / 2.0).max(2.0).round();
     chrome::window(Rect::new(x, y, w, h), &d.title, chrome::Skin::Marble, false);
-    let body = Rect::new(x + 4.0 * o, y + 31.0 * o, w - 8.0 * o, h - 89.0 * o);
     let footer = Rect::new(x + 2.0 * o, y + h - 55.0 * o, w - 4.0 * o, 53.0 * o);
-    chrome::silver_frame(body, o.max(1.0));
-    chrome::three_block_frame(Rect::new(x, y, w, h), 26.0 * chrome::k(), h - 55.0 * o, 2.0 * o);
+    // The village window is ae2520's kind, with 0x48d710's inner frames.
+    chrome::window_inner_frames(Rect::new(x, y, w, h), o);
     let top = y + 45.0 * o;
     if let Some(t) = picture {
         let r = Rect::new(x + 18.0 * o, top, pw, ph.min(panel_h));

@@ -1349,7 +1349,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     heading("ItemDescript", n_("Item description"), desc);
     match hover.filter(|_| game.held_item.is_none()) {
         Some(item) => super::item_text::draw(game, assets, item, desc, super::item_text::ItemBox::Inventory, s),
-        None => chrome::text_box(desc),
+        None => chrome::text_box_no_corners(desc),
     }
 
     // The four resource lines, 78 px apart from 325.

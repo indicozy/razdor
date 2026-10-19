@@ -668,8 +668,15 @@ fn first_line_size(fs: f32, room: f32, width: impl Fn(f32) -> f32) -> f32 {
 /// Rects of the four item slots around the figure: two at the top left, two at the top
 /// right (as in the army screen).
 pub fn slot_rects(r: Rect) -> [Rect; 4] {
-    let s = 55.0 * 0.9375 * k();
-    let m = 8.0 * k();
+    slot_rects_at(r, 0.9375 * k())
+}
+
+/// The four worn-item slots of a panel whose fill is `r`, `px` screen pixels to one of the
+/// original's (0x4d8638 at 4d88ad..4d8994): 55 px buttons 8 px in from the fill's top and
+/// sides, the second of each side right under the first (55 px down), the left pair at
+/// the fill's left, the right pair against its right.
+pub fn slot_rects_at(r: Rect, px: f32) -> [Rect; 4] {
+    let (s, m) = (55.0 * px, 8.0 * px);
     [
         Rect::new(r.x + m, r.y + m, s, s),
         Rect::new(r.x + m, r.y + m + s, s, s),
@@ -782,10 +789,12 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, background: Rect, s
         if !slots && item.is_none() {
             continue;
         }
-        // Keep the framed, darkened cell visible beneath equipped items as well.
-        chrome::empty_item_slot(*sr);
-        if let Some(it) = item {
-            assets.draw_item(it, sr.x, sr.y, sr.w);
+        // A worn item is its picture alone on the parchment; an empty slot is the original's
+        // empty-slot picture (0xae2860, built at start-up: a steel ring over a 40% black
+        // square, `chrome::empty_item_slot`), set by 0x492f24 only for an empty slot.
+        match item {
+            Some(it) => assets.draw_item(it, sr.x, sr.y, sr.w),
+            None => chrome::empty_item_slot(*sr),
         }
         if mouse_in(sr.x, sr.y, sr.w, sr.h) {
             if item.is_some() {
@@ -861,6 +870,18 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, background: Rect, s
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The worn-item slots as 0x4d8638 places them on the original's 262 px fill: 55 px,
+    /// 8 px in from the top and sides, each pair touching (55 px apart down).
+    #[test]
+    fn the_item_slots_sit_as_the_originals() {
+        let r = Rect::new(0.0, 0.0, 262.0, 609.0);
+        let s = slot_rects_at(r, 1.0);
+        assert_eq!((s[0].x, s[0].y, s[0].w, s[0].h), (8.0, 8.0, 55.0, 55.0));
+        assert_eq!((s[1].x, s[1].y), (8.0, 63.0));
+        assert_eq!((s[2].x, s[2].y), (262.0 - 8.0 - 55.0, 8.0));
+        assert_eq!((s[3].x, s[3].y), (199.0, 63.0));
+    }
 
     /// The figure as the original places it (0x492f24 → 0x476a3c): its own size (at the
     /// window's 15/16), the picture centred across the panel and its middle 218 original px

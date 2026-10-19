@@ -30,7 +30,7 @@ use super::widgets::{draw_markup_row_face, measure, MarkupRow};
 pub enum ItemBox {
     /// The market's description (0x4b9c40): the picture over the text.
     Market,
-    /// The army and hero windows' description box (0x4c280c).
+    /// The hero window's description box (0x4c280c), framed without corners (0x4d18c5).
     Inventory,
     /// The event window's tooltip (0x4cbab0), also Razdor's pop-up in the army window.
     Tooltip,
@@ -121,7 +121,11 @@ pub fn tooltip_height(game: &Game, item: ItemId, s: f32) -> f32 {
 /// original pixel. A text taller than its room is drawn smaller until it fits (Razdor's: the
 /// original's list cuts it).
 pub fn draw(game: &Game, assets: &Assets, item: ItemId, r: Rect, kind: ItemBox, s: f32) {
-    chrome::text_box(r);
+    if kind == ItemBox::Inventory {
+        chrome::text_box_no_corners(r);
+    } else {
+        chrome::text_box(r);
+    }
     let side = if kind == ItemBox::Tooltip { TOOLTIP_MARGIN } else { SIDE };
     let above = if kind == ItemBox::Market { PICTURE_TOP + PICTURE } else { 0.0 };
     let room_h = |s: f32| r.h - above * s - if kind == ItemBox::Tooltip { 2.0 * TOOLTIP_MARGIN * s } else { 0.0 };

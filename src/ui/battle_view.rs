@@ -1127,9 +1127,12 @@ impl BattleView {
         } else {
             chrome::parchment(Rect::new(l.panel.x, l.panel.y, l.panel.w, l.win.bottom() - 2.0 * l.k - l.panel.y), true);
         }
-        chrome::silver_frame(l.win, 2.0 * l.k);
+        // The battle window's frame and title line (4daab3: 0x48d710, 896×640) and the
+        // 2 px line right of the panel from under the title line (4cd330: x 264, y 29).
+        let px = chrome::opx();
+        chrome::window_frames(l.win, px);
         let separator = l.win.x + 247.0 * l.k;
-        chrome::silver_line(vec2(separator, l.win.y + 26.0 * l.k), vec2(separator, l.win.bottom() - 2.0 * l.k), 2.0 * l.k);
+        chrome::silver_line(vec2(separator, l.win.y + 29.0 * px), vec2(separator, l.win.bottom() - 2.0 * px), 2.0 * px);
         // One hint box at a time: a spell badge's hint replaces the hover box (49e710).
         if player_turn && !super::spell_badges::hovered() {
             self.draw_preview(l, active.expect("player turn"));

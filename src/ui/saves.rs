@@ -330,7 +330,8 @@ impl Book {
         let y = book_top(screen_height(), super::chrome::bar_height(), h, k, over_map);
         let win = Rect::new((screen_width() - w) / 2.0, y, w, h);
         let (_, closed) = super::chrome::window(win, title, super::chrome::Skin::Marble, true);
-        super::chrome::three_block_frame(win, 26.0 * k, 432.0 * k, 2.0 * k);
+        // The 634×516 window with its inner frames (ae2520, 0x48d710 from 4dc10e).
+        super::chrome::window_inner_frames(win, super::chrome::opx());
         (Book { win, k }, closed)
     }
 
@@ -507,9 +508,11 @@ impl Book {
     /// The steel line the tabs hang from, running along the window (the original draws it
     /// right of the tabs, under the book).
     fn tab_line(&self) {
-        // This is the shared content/footer boundary, behind the hanging tabs.
-        let y = self.win.y + 433.0 * self.k;
-        super::chrome::silver_line(vec2(self.win.x, y), vec2(self.win.right(), y), 2.0 * self.k);
+        // The window's line over the buttons (0x48d710: (2, h − 56) to (w − 2, h − 54)),
+        // drawn again over the hanging tabs.
+        let px = super::chrome::opx();
+        let w = self.win;
+        super::chrome::steel_frame(Rect::new(w.x + 2.0 * px, w.bottom() - 56.0 * px, w.w - 4.0 * px, 2.0 * px), px, 2);
     }
 
     fn button(&self, x: f32, w: f32, label: &str, enabled: bool) -> bool {
@@ -816,13 +819,10 @@ fn battle_exit_window(title: &str, warning: &str, asking: &mut bool) -> (Option<
         let (pw, ph) = (t.width().min(W - 10.0), t.height().min(H - 32.0 - 5.0));
         chrome::tex(&t, Rect::new(wx + 5.0 * o, wy + 32.0 * o, pw * o, ph * o), WHITE);
     }
-    // Title, content and footer form three adjoining rectangles with shared solid edges.
-    chrome::three_block_frame(r, 28.0 * o, 460.0 * o, 2.0 * o);
-    // The central battle illustration has its own fine inset outline, as in the reference.
-    chrome::silver_frame(
-        Rect::new(wx + 3.0 * o, wy + 30.0 * o, W * o - 6.0 * o, 428.0 * o),
-        o,
-    );
+    // The window is made by 0x48d710 with its inner frames (4d3664): the 2 px frame and
+    // title line (0x48d3f8), the line over the buttons and the 1 px frame round the picture.
+    chrome::window_frames(r, o);
+    chrome::window_inner_frames(r, o);
     let tb = Rect::new(wx + 18.0 * o, wy + 264.0 * o, 598.0 * o, 179.0 * o);
     let grey = 0x30 as f32 / 255.0;
     chrome::subtractive(|| draw_rectangle(tb.x, tb.y, tb.w, tb.h, Color::new(grey, grey, grey, 1.0)));
@@ -905,9 +905,10 @@ fn battle_exit_window(title: &str, warning: &str, asking: &mut bool) -> (Option<
 /// «Отмена» on the right, 10 px from the window's foot.
 fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art: bool) -> (Option<ExitChoice>, bool) {
     let k = super::chrome::k();
-    let footer_h = 56.0 * 0.9375 * k;
-    let picture_h = super::chrome::win("S_Exit_RUS").map(|t| 585.0 * k * t.height() / t.width());
-    let (w, h) = if art { (634.0 * 0.9375 * k, picture_h.map_or(480.0 * k, |ph| ph + 73.0 * k + 1.0) + footer_h - 42.0 * k) } else { (560.0 * k, 250.0 * k) };
+    // The map's window is ae2520, 634×516 in the original's pixels (4d524b).
+    let px = super::chrome::opx();
+    let footer_h = 56.0 * px;
+    let (w, h) = if art { (634.0 * px, 516.0 * px) } else { (560.0 * k, 250.0 * k) };
     let r = Rect::new((screen_width() - w) / 2.0, ((screen_height() - super::chrome::bar_height() - h) / 2.0).max(0.0), w, h);
     let (inner, closed) = super::chrome::window(r, title, super::chrome::Skin::Marble, true);
     if art {
@@ -917,18 +918,17 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art:
             let pic = Rect::new(inner.center().x - pw / 2.0, inner.y + 2.0 * k, pw, ph.min(inner.h - 4.0 * k));
             let src = Rect::new(0.0, 0.0, t.width(), t.height() * pic.h / ph);
             super::chrome::tex_src(&t, src, pic, WHITE);
-            super::chrome::silver_frame(pic, k);
         }
-        // Keep the three large sections distinct, with a fine outline around the artwork
-        // occupying the central section.
         let ver = super::chrome::ui_text("SpecialTexts", "VerInfo").unwrap_or_default();
         if !ver.is_empty() {
             super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
                 super::chrome::shadow_centered(&ver, inner.center().x, inner.y + 95.0 * k, 15.0 * k, VERSION_INK);
             });
         }
-        let bh = (480.0 - 110.0) / 2.0;
-        let tb = Rect::new(r.x + 17.0 * k, r.y + (bh + 61.0) * k, r.w - 34.0 * k, (bh - 19.0) * k);
+        // The warning's list (665470, 4d5214): 18 px in from the sides, (H − 117) / 2 + 65
+        // down, (H − 117) / 2 − 20 high, its back RGB(0x30, 0x30, 0x30) taken off.
+        let bh = ((516.0 - 117.0) / 2.0f32).floor();
+        let tb = Rect::new(r.x + 18.0 * px, r.y + (bh + 65.0) * px, r.w - 36.0 * px, (bh - 20.0) * px);
         let shade = 0x30 as f32 / 255.0;
         super::chrome::subtractive(|| draw_rectangle(tb.x, tb.y, tb.w, tb.h, Color::new(shade, shade, shade, 1.0)));
         super::chrome::text_box_frame(tb);
@@ -987,7 +987,7 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art:
         }
     }
     if art {
-        super::chrome::three_block_frame(r, 26.0 * k, r.h - footer_h, 2.0 * k);
+        super::chrome::window_inner_frames(r, px);
     }
     if was_asking {
         let (t, q) = if battle {

@@ -1226,6 +1226,24 @@ nothing (there is no status-line fallback). **code** (callers 4b933e, 4b9586)
   `Corner-Left` (124×23) taken off at x = −51 and `Corner-Right` at x = 555, both at y = 1, so
   each end shows the corner's inner 73 columns. The corners are dimmed by (192, 160, 160) only
   after that, for their other uses. **code**
+- **Frame lines** (48d1d4, colour −1): every window and panel outline takes its colours from
+  `SteelLine.lit` (896×8), one texel per pixel by a running index read across the picture as
+  one long row: along the top left to right, down the right side, along the bottom right to
+  left, up the left side; a 2 px line's second pixel is inside (y + 1, x − 2, y − 2, x + 1) in
+  the same colour, each side overwriting the corner pixels of the one before. Every window
+  (48d3f8) gets a 2 px frame and a 2 px line (2, 27)–(w − 2, 29); one made with inner frames
+  (48d710's flag: ae2520 634×516, Community c2953a 634×556, 4d64c8's 400×236, the leave-battle
+  window; the event window draws the same at 4aaa4b, 4aaa79) also a 2 px line (2, h − 56)–
+  (w − 2, h − 54) and a 1 px frame (4, 31)–(w − 4, h − 58). The 896×640 army, building and
+  battle windows add 2 px lines at x 264 (y 29…638) and y 319 and 346 (x 266…894) (4cd330,
+  4bb7c4, 4d1ce8). **code**
+- **Scenario list map** (4c1c09..4c1c63): with a picture, `MapImageFrame` (295×162) is copied
+  at (description x − 1, window y + 45) and the map's picture at its size 14 px further in; no
+  line round either. Without one the description box takes the room and gets a 1 px frame.
+  **code**
+- **Hero window boxes** (4d1814 → 48e750 at 4d18c5, 4d190d, 4d1924): the item description,
+  quest list and quest text boxes are framed brown boxes without the corner pieces; the army
+  window's item description has them (498ceb). **code**
 - **Red window skin**: `Win-red` is loaded with −20 red, −40 green and −100 blue (4dbc34 →
   48d02c, `ae2530`); `Win-marble` plain. The loader adds the offsets per channel and clamps
   (48cd90). **code**

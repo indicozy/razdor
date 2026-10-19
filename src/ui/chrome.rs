@@ -466,17 +466,17 @@ fn visual_texture(key: &'static str, rel: &str, params: [f32; 4], adjust: impl F
     })
 }
 
-/// Original dark parchment palette, independently of light paper and card strips.
+/// The brown text box's paper: Win-paper with (148, 138, 156) taken off (0x48e4e8: 0x476b8c
+/// copies the paper, 0x4768f8 mode 1 subtracts the colour), at the 16-bit screen's levels.
 fn brown_paper_texture() -> Option<Texture2D> {
-    visual_texture("reference-brown-paper", "Windows/Win-paper.lit", [144.0,136.0,256.0,565.0], |img| {
+    visual_texture("brown-box-paper", "Windows/Win-paper.lit", [148.0, 138.0, 156.0, 565.0], |img| {
         subtract(img, BROWN_BOX_TAKEN);
-        // The reference game renders these panels in RGB565. Retain its grain and levels.
         quantize_565(img);
     })
 }
 
-/// The reference screenshot's accepted brown parchment palette.
-const BROWN_BOX_TAKEN: [i32; 3] = [144, 136, 256];
+/// What the brown text box takes off its paper (0x48e4e8, 0x476374(0x94, 0x8a, 0x9c)).
+const BROWN_BOX_TAKEN: [i32; 3] = [148, 138, 156];
 
 pub use gfx::quantize_565;
 
@@ -1229,8 +1229,8 @@ pub fn shadow_right(s: &str, rx: f32, y: f32, size: f32, color: Color) {
 /// Palette of the placeholder style (and of text drawn over the original's art).
 pub const CREAM: Color = Color::new(0.96, 0.91, 0.76, 1.0);
 pub const GOLD: Color = Color::new(1.0, 0.82, 0.42, 1.0);
-pub const SILVER: Color = Color::new(0.75, 0.74, 0.75, 1.0);
-pub const SILVER_DARK: Color = Color::new(0.30, 0.30, 0.30, 1.0);
+pub const SILVER: Color = Color::new(0.80, 0.80, 0.84, 1.0);
+pub const SILVER_DARK: Color = Color::new(0.30, 0.31, 0.34, 1.0);
 pub const BLUE_TEXT: Color = Color::new(0.45, 0.70, 1.0, 1.0);
 pub const RED_TEXT: Color = Color::new(1.0, 0.33, 0.25, 1.0);
 pub const ORANGE_TEXT: Color = Color::new(1.0, 0.70, 0.25, 1.0);
@@ -1255,7 +1255,8 @@ impl Skin {
         let paper = |brown: bool, c: Color| paper_texture(brown).map(|t| (t, c));
         match self {
             Skin::Marble => win("Win-marble").map(|t| (t, WHITE)),
-            Skin::Red => win_scaled("Win-red", [1024; 3], [0, -64, -128]).map(|t| (t, WHITE)),
+            // Loaded with (−20, −40, −100) added (0x4dbc34 → 0x48d02c), into ae2530.
+            Skin::Red => win_scaled("Win-red", [1024; 3], [-20, -40, -100]).map(|t| (t, WHITE)),
             Skin::Paper => paper(false, WHITE),
             Skin::Brown => brown_paper_texture().map(|t| (t, WHITE)),
             Skin::Strip => paper(true, Color::new(0.37, 0.265, 0.02, 1.0)),
@@ -1404,46 +1405,145 @@ pub fn surface_alpha(r: Rect, skin: Skin, alpha: f32) {
     tile(&noise_texture(), r, 2.0, Color::new(lift(base.r), lift(base.g), lift(base.b), alpha));
 }
 
-/// Original metallic line, kept inside the panel and sampled at the UI's native scale.
-pub fn silver_line(from: Vec2, to: Vec2, width: f32) {
-    let delta = to - from;
-    let len = delta.length();
-    if len <= 0.0 { return; }
-    let width = width.max(1.0);
-    // Structural borders are a continuous silver band. Texture restarts at corners and
-    // tiled spans otherwise look like seams in this wider line.
-    if width >= 1.5 * k() {
-        draw_line(from.x, from.y, to.x, to.y, width, SILVER);
+/// Screen pixels per pixel of the original's 1024×768 screen (`k` is per pixel of the 960×720
+/// reference: the original's pixel is 0.9375 of it).
+pub fn opx() -> f32 {
+    0.9375 * k()
+}
+
+/// `SteelLine.lit` (0xae2538, loaded by 0x4dbb0c): the row texture and its transpose, for the
+/// frame lines' runs along and down.
+fn steel_textures() -> Option<(Texture2D, Texture2D)> {
+    let row = win("SteelLine")?;
+    let col = win_adjusted("SteelLine", "transposed", |img| {
+        let (w, h) = (img.width as usize, img.height as usize);
+        let mut out = vec![0u8; w * h * 4];
+        for y in 0..h {
+            for x in 0..w {
+                let (from, to) = ((y * w + x) * 4, (x * h + y) * 4);
+                out[to..to + 4].copy_from_slice(&img.rgba[from..from + 4]);
+            }
+        }
+        *img = Image { width: h as u32, height: w as u32, rgba: out };
+    })?;
+    row.set_filter(FilterMode::Nearest);
+    col.set_filter(FilterMode::Nearest);
+    Some((row, col))
+}
+
+/// Splits a run of `n` texels from the flat index `start` of a `w`×`h` picture read as one
+/// long row (0x4764c0 reads it flat, so a run that passes a row's end goes on with the next
+/// row) into `(index, offset in the run, length)` pieces that stay within one row. Past the
+/// picture's end the original reads on into unrelated memory; Razdor starts the picture
+/// again.
+pub fn steel_pieces(start: usize, n: usize, w: usize, h: usize) -> Vec<(usize, usize, usize)> {
+    let total = (w * h).max(1);
+    let mut pieces = Vec::new();
+    let mut done = 0;
+    while done < n && w > 0 {
+        let i = (start + done) % total;
+        let len = (w - i % w).min(n - done);
+        pieces.push((i, done, len));
+        done += len;
+    }
+    pieces
+}
+
+/// The original's frame line (0x48d1d4 with colour −1, every window and panel outline): the
+/// outline of `r`, `thick` (1 or 2) pixels wide, each pixel `px` screen pixels along the
+/// line and `line` across it, its colours `SteelLine.lit`'s texels taken one by one by an
+/// index that runs on round the frame: the top left to right, the right side down, the
+/// bottom right to left, the left side up. A 2 px line's second pixel lies inside (y + 1,
+/// x − 2, y − 2, x + 1) in the same colour; each side overwrites the corners the one before
+/// it drew. Without the install a plain silver outline.
+fn steel_outline(r: Rect, px: f32, thick: u8, line: f32) {
+    let t = f32::from(thick.clamp(1, 2));
+    let Some((row, col)) = steel_textures() else {
+        draw_rectangle_lines(r.x, r.y, r.w, r.h, t * line, SILVER);
+        return;
+    };
+    let (tw, th) = (row.width() as usize, row.height() as usize);
+    let w = (r.w / px).round().max(0.0) as usize;
+    let h = (r.h / px).round().max(0.0) as usize;
+    if w == 0 || h == 0 {
         return;
     }
-    let Some(t) = win("SteelLine") else {
+    let band = t * line;
+    let along = |start: usize, n: usize, x: f32, y: f32, reversed: bool| {
+        for (i, off, len) in steel_pieces(start, n, tw, th) {
+            let at = if reversed { n - off - len } else { off };
+            draw_texture_ex(&row, x + at as f32 * px, y, WHITE, DrawTextureParams {
+                dest_size: Some(vec2(len as f32 * px, band)),
+                source: Some(Rect::new((i % tw) as f32, (i / tw) as f32, len as f32, 1.0)),
+                flip_x: reversed,
+                ..Default::default()
+            });
+        }
+    };
+    let down = |start: usize, n: usize, x: f32, y: f32, reversed: bool| {
+        for (i, off, len) in steel_pieces(start, n, tw, th) {
+            let at = if reversed { n - off - len } else { off };
+            draw_texture_ex(&col, x, y + at as f32 * px, WHITE, DrawTextureParams {
+                dest_size: Some(vec2(band, len as f32 * px)),
+                source: Some(Rect::new((i / tw) as f32, (i % tw) as f32, 1.0, len as f32)),
+                flip_y: reversed,
+                ..Default::default()
+            });
+        }
+    };
+    let (right, bottom) = (r.x + w as f32 * px - band, r.y + h as f32 * px - band);
+    along(0, w, r.x, r.y, false);
+    down(w, h, right, r.y, false);
+    along(w + h, w, r.x, bottom, true);
+    down(2 * w + h, h, r.x, r.y, true);
+}
+
+/// 0x48d1d4's outline of `r` in the original's pixels of `px` screen pixels.
+pub fn steel_frame(r: Rect, px: f32, thick: u8) {
+    steel_outline(r, px, thick, px);
+}
+
+/// A straight line of the original's: a rectangle `width` high (or wide) round the line,
+/// drawn as a 2 px frame when the width is two of the original's pixels, else 1 px
+/// (0x48d1d4's lines are such thin frames: the title line is (2, 27)–(w − 2, 29) at 2 px).
+pub fn silver_line(from: Vec2, to: Vec2, width: f32) {
+    let width = width.max(1.0);
+    let thick = if width >= 1.5 * opx() { 2 } else { 1 };
+    let band = if from.y == to.y {
+        Rect::new(from.x.min(to.x), from.y - width / 2.0, (to.x - from.x).abs(), width)
+    } else if from.x == to.x {
+        Rect::new(from.x - width / 2.0, from.y.min(to.y), width, (to.y - from.y).abs())
+    } else {
         draw_line(from.x, from.y, to.x, to.y, width, SILVER);
         return;
     };
-    let scale = k();
-    let direction = delta / len;
-    let angle = delta.y.atan2(delta.x);
-    let mut offset = 0.0;
-    while offset < len {
-        let span = (t.width() * scale).min(len - offset);
-        let mid = from + direction * (offset + span / 2.0);
-        draw_texture_ex(&t, mid.x - span / 2.0, mid.y - width / 2.0, WHITE, DrawTextureParams {
-            dest_size: Some(vec2(span, width)),
-            source: Some(Rect::new(0.0, 0.0, span / scale, 1.0)),
-            rotation: angle,
-            ..Default::default()
-        });
-        offset += span;
-    }
+    steel_outline(band, opx(), thick, width / f32::from(thick));
 }
 
-/// Thin picture/panel outline; the artwork supplies the metallic shading itself.
+/// A frame of the original's line round `r`: 2 px when `width` is two of the original's
+/// pixels or more, else 1 px (0x48d1d4).
 pub fn silver_frame(r: Rect, width: f32) {
-    let w = width.max(1.0);
-    silver_line(vec2(r.x, r.y + w / 2.0), vec2(r.right(), r.y + w / 2.0), w);
-    silver_line(vec2(r.right() - w / 2.0, r.y), vec2(r.right() - w / 2.0, r.bottom()), w);
-    silver_line(vec2(r.right(), r.bottom() - w / 2.0), vec2(r.x, r.bottom() - w / 2.0), w);
-    silver_line(vec2(r.x + w / 2.0, r.bottom()), vec2(r.x + w / 2.0, r.y), w);
+    let width = width.max(1.0);
+    let thick = if width >= 1.5 * opx() { 2 } else { 1 };
+    steel_outline(r, opx(), thick, width / f32::from(thick));
+}
+
+/// The frames 0x48d710 adds inside a window made with them (the 634×516 windows, the
+/// village's, the leave-battle window's; the event window draws the same, 0x4aaa4b and
+/// 0x4aaa79): a 2 px line from (2, h − 56) to (w − 2, h − 54) over the buttons and a 1 px
+/// frame from (4, 31) to (w − 4, h − 58) round the content. `px`: screen pixels per pixel
+/// of the window as the original builds it.
+pub fn window_inner_frames(r: Rect, px: f32) {
+    let (w, h) = (r.w / px, r.h / px);
+    steel_frame(Rect::new(r.x + 2.0 * px, r.y + (h - 56.0) * px, (w - 4.0) * px, 2.0 * px), px, 2);
+    steel_frame(Rect::new(r.x + 4.0 * px, r.y + 31.0 * px, (w - 8.0) * px, (h - 89.0) * px), px, 1);
+}
+
+/// The frames 0x48d3f8 draws on every window: a 2 px frame round it and a 2 px line from
+/// (2, 27) to (w − 2, 29) under the title. `px` as in [`window_inner_frames`].
+pub fn window_frames(r: Rect, px: f32) {
+    steel_frame(r, px, 2);
+    steel_frame(Rect::new(r.x + 2.0 * px, r.y + 27.0 * px, r.w - 4.0 * px, 2.0 * px), px, 2);
 }
 
 /// The original's empty worn-item slot (0xae2860 with its alpha 0xae2864, built at start-up
@@ -1456,30 +1556,7 @@ pub fn empty_item_slot(r: Rect) {
     const SIDE: f32 = 55.0;
     let px = r.w / SIDE;
     draw_rectangle(r.x + px, r.y + px, r.w - 2.0 * px, r.h - 2.0 * px, Color::new(0.0, 0.0, 0.0, 0x66 as f32 / 255.0));
-    let Some(t) = win("SteelLine") else {
-        draw_rectangle_lines(r.x, r.y, r.w, r.h, px.max(1.0), SILVER);
-        return;
-    };
-    // Each side takes the next 55 source pixels of the row, drawn along it from its start.
-    let sides = [
-        (vec2(r.x, r.y), vec2(r.x + r.w, r.y)),
-        (vec2(r.x + r.w, r.y), vec2(r.x + r.w, r.y + r.h)),
-        (vec2(r.x + r.w, r.y + r.h), vec2(r.x, r.y + r.h)),
-        (vec2(r.x, r.y + r.h), vec2(r.x, r.y)),
-    ];
-    for (n, (from, to)) in sides.into_iter().enumerate() {
-        let len = from.distance(to);
-        let angle = (to.y - from.y).atan2(to.x - from.x);
-        // The strip lies inside the square: shifted half its thickness inwards.
-        let inward = vec2(-(to - from).y, (to - from).x).normalize() * px / 2.0;
-        let mid = (from + to) / 2.0 + inward;
-        draw_texture_ex(&t, mid.x - len / 2.0, mid.y - px / 2.0, WHITE, DrawTextureParams {
-            dest_size: Some(vec2(len, px)),
-            source: Some(Rect::new(n as f32 * SIDE, 0.0, SIDE, 1.0)),
-            rotation: angle,
-            ..Default::default()
-        });
-    }
+    steel_frame(r, px, 1);
 }
 
 /// The window's close box; true when clicked.
@@ -1531,7 +1608,6 @@ fn title_bar_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bo
             tex(&t2, Rect::new(right, r.y + (r.h - h) / 2.0, w, h), tint);
         }
     }
-    silver_line(vec2(r.x, r.bottom()), vec2(r.right(), r.bottom()), 2.0 * k);
     let color = title_color.unwrap_or(if skin == Skin::Red { GOLD } else { CREAM });
     let room = if ornate { r.w - 300.0 * k } else { r.w - 2.0 * r.h - 8.0 * k };
     super::dt_font::with_face(face, || {
@@ -1581,17 +1657,6 @@ pub fn battle_exit_frame(r: Rect, title: &str, px: f32) -> bool {
     close_button(r.right() - 23.0 * px, r.y + 3.0 * px, 20.0 * px, true)
 }
 
-/// Three adjacent rectangular sections share solid borders of exactly the same thickness.
-/// Draw after their backgrounds so pictures cannot cover the separators or side edges.
-pub fn three_block_frame(r: Rect, title_height: f32, footer_top: f32, thickness: f32) {
-    let t = thickness.max(1.0);
-    for y in [r.y, r.y + title_height, r.y + footer_top, r.bottom() - t] {
-        silver_line(vec2(r.x, y + t / 2.0), vec2(r.right(), y + t / 2.0), t);
-    }
-    silver_line(vec2(r.x + t / 2.0, r.y), vec2(r.x + t / 2.0, r.bottom()), t);
-    silver_line(vec2(r.right() - t / 2.0, r.bottom()), vec2(r.right() - t / 2.0, r.y), t);
-}
-
 fn window_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bool, title_color: Option<Color>) -> (Rect, bool) {
     let k = k();
     BIGGEST.with(|b| {
@@ -1603,7 +1668,8 @@ fn window_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bool,
     surface(r, skin);
     let tb = (26.0 * k).round();
     let closed = title_bar_styled(Rect::new(r.x, r.y, r.w, tb), title, skin, closable, ornate, title_color);
-    silver_frame(r, (2.0 * k).max(1.0));
+    // The frame round the window and the line under its title (0x48d3f8).
+    window_frames(r, opx());
     // Each caller draws the frames for its own content and footer.
     (Rect::new(r.x + 2.0 * k, r.y + tb + 1.0, r.w - 4.0 * k, r.h - tb - 3.0 * k), closed)
 }
@@ -1750,46 +1816,50 @@ fn tile_side_strips(t: &Texture2D, r: Rect, max_frac: f32, flip_left: bool, tint
     }
 }
 
-/// Fixed native ornament width and repeat height; only the gap changes between panels.
-fn complete_brown_side_strips(t: &Texture2D, r: Rect, tint: Color) {
-    let scale=k();
-    let w=t.width()*scale; let step=t.height()*scale;
-    if r.w<=0.0 || r.h<=0.0 || step<=0.0 {return;}
-    let mut y=r.y;
-    while y<r.bottom() {
-        let h=step.min(r.bottom()-y);
-        let source=Rect::new(0.0,0.0,t.width(),h/scale);
-        tex_src(t,source,Rect::new(r.x,y,w,h),tint);
-        tex_src_flipped_x(t,source,Rect::new(r.right()-w,y,w,h),tint);
-        y+=h;
-    }
-}
-
 pub fn text_box_base(r: Rect) {
     surface(r, Skin::Brown);
 }
 
-/// The brown parchment's mirrored side ornament.
+/// The brown text box's side ornaments (0x48e4e8): Big_Frame_1a 4 px in from the left and
+/// Big_Frame_2a 4 px in from the right, both loaded with (−223, −215, 0) added (0x4dbc4f,
+/// 0x4dbc6a), repeated down from the top and taken off the paper (0x476790 mode 1). A box no
+/// wider than both and 8 px has none.
 pub fn text_box_sides(r: Rect) {
-    if let Some(t) = win("Big_Frame_1") {
-        t.set_filter(FilterMode::Nearest);
-        let opacity = 1.0;
-        let inset = 2.0 * k();
-        let ornament = Rect::new(r.x + inset, r.y + inset, (r.w - inset * 2.0).max(0.0), (r.h - inset * 2.0).max(0.0));
-        subtractive(|| complete_brown_side_strips(&t, ornament, Color::new(41.0/255.0*opacity,40.0/255.0*opacity,0.0,1.0)));
+    let k = k();
+    let left = win_scaled("Big_Frame_1a", [1024; 3], [-223, -215, 0]);
+    let right = win_scaled("Big_Frame_2a", [1024; 3], [-223, -215, 0]);
+    let (Some(left), Some(right)) = (left, right) else { return };
+    if r.w / k <= right.width() * 2.0 + 8.0 {
+        return;
     }
+    subtractive(|| {
+        for (t, x) in [(&left, r.x + 4.0 * k), (&right, r.right() - (right.width() + 4.0) * k)] {
+            t.set_filter(FilterMode::Nearest);
+            let mut y = r.y;
+            while y < r.bottom() {
+                let h = (t.height() * k).min(r.bottom() - y);
+                tex_src(t, Rect::new(0.0, 0.0, t.width(), h / k), Rect::new(x, y, t.width() * k, h), WHITE);
+                y += h;
+            }
+        }
+    });
 }
 
-/// The brown parchment's silver edge and corner art.
+/// The brown text box's silver edge and its four 34 px corners, at the art's size (0x48e4e8:
+/// 0x476a3c at (0, 0), (w − 34, 0), (w − 34, h − 34), (0, h − 34)).
 pub fn text_box_frame(r: Rect) {
     silver_frame(r, k().max(1.0));
     for (name, right, bottom) in [
-        ("Corner_Frame-LU",false,false),("Corner_Frame-RU",true,false),
-        ("Corner_Frame-LD",false,true),("Corner_Frame-RD",true,true),
+        ("Corner_Frame-LU", false, false),
+        ("Corner_Frame-RU", true, false),
+        ("Corner_Frame-LD", false, true),
+        ("Corner_Frame-RD", true, true),
     ] {
-        if let Some(t)=win(name) {
-            let (w,h)=(t.width()*k(),t.height()*k());
-            tex(&t,Rect::new(if right {r.right()-w}else{r.x},if bottom {r.bottom()-h}else{r.y},w,h),WHITE);
+        if let Some(t) = win(name) {
+            let (w, h) = (t.width() * k(), t.height() * k());
+            let x = if right { r.right() - w } else { r.x };
+            let y = if bottom { r.bottom() - h } else { r.y };
+            tex(&t, Rect::new(x, y, w, h), WHITE);
         }
     }
 }
@@ -1797,6 +1867,14 @@ pub fn text_box_frame(r: Rect) {
 pub fn text_box_decoration(r: Rect) {
     text_box_sides(r);
     text_box_frame(r);
+}
+
+/// The brown text box without its corner pieces (0x48e4e8 asked for its frame but not its
+/// corners: the hero window's boxes, 0x4d1814 → 0x48e750 at 4d18c5, 4d190d, 4d1924).
+pub fn text_box_no_corners(r: Rect) {
+    text_box_base(r);
+    text_box_sides(r);
+    silver_frame(r, k().max(1.0));
 }
 
 /// The red-brown parchment box of story and description texts (0x48e4e8).
@@ -1866,14 +1944,7 @@ pub fn quest_list_parchment(r: Rect) {
         Some(t) => tile(&t, r, k, WHITE),
         None => surface(r, Skin::Paper),
     }
-    // The light quest paper uses a golden ornament. Its subtraction removes blue
-    // strongly, unlike the red/green subtraction used on brown description paper.
-    if let Some(t) = win("Big_Frame_1") {
-        t.set_filter(FilterMode::Nearest);
-        let inset = 2.0 * k;
-        let ornament = Rect::new(r.x + inset, r.y + inset, (r.w - 2.0 * inset).max(0.0), (r.h - 2.0 * inset).max(0.0));
-        subtractive(|| complete_brown_side_strips(&t, ornament, Color::from_rgba(32, 40, 192, 255)));
-    }
+    text_box_sides(r);
     let grey = Color::from_rgba(48, 48, 48, 255);
     subtractive(|| {
         for band in QUEST_LIST_BANDS {
@@ -2417,15 +2488,15 @@ mod tests {
         assert_eq!(edge, [32, 0, 145, 255], "64 off at the edge first");
     }
 
-    /// The accepted reference palette: (144, 136, 256) taken off Win-paper, at the
+    /// The brown text box's paper (0x48e4e8): (148, 138, 156) taken off Win-paper, at the
     /// 16-bit surface's 5-6-5 levels.
     #[test]
     fn the_brown_box_paper_is_win_paper_less_its_colour_in_16_bit() {
         let mut p = Image { width: 1, height: 1, rgba: vec![230, 200, 150, 255] };
         subtract(&mut p, BROWN_BOX_TAKEN);
-        assert_eq!(&p.rgba[..3], &[86, 64, 0]);
+        assert_eq!(&p.rgba[..3], &[82, 62, 0]);
         quantize_565(&mut p);
-        assert_eq!(&p.rgba[..3], &[82, 65, 0]);
+        assert_eq!(&p.rgba[..3], &[82, 60, 0]);
         let mut white = Image { width: 1, height: 1, rgba: vec![255, 255, 255, 255] };
         quantize_565(&mut white);
         assert_eq!(&white.rgba[..3], &[255, 255, 255], "white stays white");

@@ -8,6 +8,29 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **PR #9's window look, the parts not settled** (2026-10-19). Checked in the original's
+  code and fixed: the frame lines (48d1d4, 48d3f8, 48d710), the brown box's paper, sides and
+  corners (48e4e8), the red skin (4dbc34), the hall list's ornaments and its top (4bedec,
+  47e46c), the worn-item slots (4d8638, 492f24), the scenario map frame (4c1c09), the hero
+  window's boxes (4d1814), the map's draw order (4c8864, 4c9b5b). Still open:
+  - The bottom bar's art is `WinLong.lit` in the original (4dbc26 → ae2524, the panel
+    4d46e0); Razdor draws `Win2a` (which the original never loads) with a steel line over
+    its top. Compare the two pictures and the panel's composition (a strip copied from y 62,
+    a picture at (372, 2)) before changing it.
+  - Figures on the map: the original draws the armies and the hero in the same cell pass as
+    the scenery and buildings (the cell's drawn occupant, after its building, 4c9b5b), so a
+    tree south of an army covers it; Razdor draws every figure after all the scenery.
+  - The building tabs' own 1 px frames (4ba854 at 4bb460, 4bb493, 4bb508; 4bca8c; 4bd3a4)
+    are not compared with `window_layout::panel_frame`'s 2 px inset.
+  - The scenario window's map frame is drawn at Razdor's interface scale (295 × 162 of `k`),
+    not the original's pixel (0.9375 `k`), to keep the window's layout; the picture now
+    follows the same scale.
+  - Title-bar end pieces: the original's are copies of `Corner-Left` / `Corner-Right` with
+    (192, 160, 160) or, on the red skin, (128, 192, 250) taken off (4dbd83, 4dbe0b); Razdor
+    tints them (`title_bar_styled`, `battle_exit_frame`).
+  - Razdor's marble buttons show their pressed picture on hover; the original's show it only
+    while held (479eb8). PR #9 changed only the leave-battle window's buttons.
+
 - **A new game on «Раменское королевство» began on РК6** (2026-10-18, a player's video on
   0.4.34; `docs/PLAYTEST_NOTES.md`). The list picked the campaign (its block lit, its
   description shown), the hero window opened, and the map that started was РК6-Северная
