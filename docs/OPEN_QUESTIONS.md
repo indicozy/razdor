@@ -31,6 +31,19 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   - Razdor's marble buttons show their pressed picture on hover; the original's show it only
     while held (479eb8). PR #9 changed only the leave-battle window's buttons.
 
+- **A picture for the main hall of a mine** (#24, 2026-10-19, a player's wish; the owner
+  agreed to a deviation, main only). The original draws no picture in the main hall of the
+  palace, the smithy, the dungeon entrance or a modded "mine" (0x4ba854 case 0, 0x4bb7c4:
+  the window's background), and so does Razdor (`building_view::hall_picture`). The install
+  has no mine illustration: the hall pictures are `S_Town`, `S_Castle`, `S_Tavern`,
+  `S_Market`, `S_Church`, `S_Village`, `S_Shipyard`, `S_Ruin`, `S_RuinedHouse`, `S_Grave`
+  (plus `S_Battle`, `BI_*`). Options for the owner: (a) the building's map sprite, enlarged,
+  on the window's marble (no sky or grass; the old sky-and-grass placeholder was laughed at
+  and removed in be49e6f); (b) a picture the player drops in Razdor's data folder (e.g.
+  `pictures/hall-<kind>.png`), loaded at runtime and never shipped, which lets the reporter
+  use the art they offered to find; (c) leave it as the original. Settled by the owner's
+  pick.
+
 - **A new game on «Раменское королевство» began on РК6** (2026-10-18, a player's video on
   0.4.34; `docs/PLAYTEST_NOTES.md`). The list picked the campaign (its block lit, its
   description shown), the hero window opened, and the map that started was РК6-Северная
