@@ -869,8 +869,7 @@ mod tests {
         let ring = ArtefactDef { bonus: Some(Bonus::ArmorIgnore), ..item(1, ArtefactType::Ring) };
         let duplicate = ArtefactDef { bonus: Some(Bonus::Counterblow), ..item(2, ArtefactType::Amulet) };
         let original = content(vec![native],vec![ring,duplicate]);
-        let mut rules = super::super::content::ExperimentalRules::default();
-        rules.simultaneous_bonuses = true;
+        let rules = super::super::content::ExperimentalRules { simultaneous_bonuses: true, ..Default::default() };
         let c = original.with_experimental(rules);
         let u = wearing(&c,5,&[1,2]);
         assert_eq!(u.stats(&c).bonuses,vec![Bonus::Counterblow,Bonus::ArmorIgnore]);
@@ -882,15 +881,13 @@ mod tests {
     fn experimental_accessories_are_independent_and_still_use_four_slots() {
         let original = content(vec![warrior(5,20,0)],vec![item(1,ArtefactType::Ring),item(2,ArtefactType::Amulet),item(3,ArtefactType::Helm)]);
         let u = wearing(&original,5,&[1,2,3]);
-        let mut rules = super::super::content::ExperimentalRules::default();
-        rules.multiple_rings = true;
-        let c = original.with_experimental(rules);
+        let rings = super::super::content::ExperimentalRules { multiple_rings: true, ..Default::default() };
+        let c = original.with_experimental(rings);
         assert_eq!(slot_for(&c,&u,ItemId(1)),Ok(3));
         assert_eq!(slot_for(&c,&u,ItemId(2)),Err(EquipError::SameType));
         assert_eq!(slot_for(&c,&u,ItemId(3)),Err(EquipError::SameType));
-        rules.multiple_rings = false;
-        rules.multiple_amulets = true;
-        let c = original.with_experimental(rules);
+        let amulets = super::super::content::ExperimentalRules { multiple_amulets: true, ..Default::default() };
+        let c = original.with_experimental(amulets);
         assert_eq!(slot_for(&c,&u,ItemId(1)),Err(EquipError::SameType));
         assert_eq!(slot_for(&c,&u,ItemId(2)),Ok(3));
         let full = wearing(&c,5,&[2,2,2,2]);
