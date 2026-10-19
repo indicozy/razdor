@@ -61,9 +61,10 @@ pub struct SaveView {
 }
 
 impl SaveView {
-    pub fn new(game: &Game, back: Back) -> SaveView {
-        let name = format!("{} {}", game.world.title.trim(), save::date_name(&game.clock));
-        SaveView { name, edit: Default::default(), entries: listed(SaveKind::Manual), asked: None, settled: false, scroll: 0, error: None, back }
+    /// The name starts empty (0x4c0dd0: a new save has no suggested name); the game is not
+    /// needed for that any more, the row shows the scenario's title while the window is open.
+    pub fn new(_game: &Game, back: Back) -> SaveView {
+        SaveView { name: String::new(), edit: Default::default(), entries: listed(SaveKind::Manual), asked: None, settled: false, scroll: 0, error: None, back }
     }
 }
 
@@ -259,16 +260,27 @@ struct Row {
     waiting: bool,
     /// The name's selected bytes, lit (the name being typed).
     mark: Option<std::ops::Range<usize>>,
+    /// The new save's grey placeholder (nothing typed yet), not a name.
+    placeholder: bool,
+    /// The caret's character in `name` while a name is typed: a name too long for its
+    /// column keeps the caret's side in sight.
+    caret: Option<usize>,
+}
+
+/// The time text of a row (saved rows and the new save's row alike): the computer's date and
+/// time of `secs`, in the original's words (0x49c94c).
+fn time_line(secs: u64) -> String {
+    razdor::trf!("Time: {date}", date = saved_label(secs))
 }
 
 fn row_of(e: &ListedSave) -> Row {
     let Some(m) = &e.meta else {
-        return Row { name: "…".to_string(), scenario: String::new(), time: razdor::trf!("Time: {date}", date = saved_label(e.written)), pinned: e.pinned, waiting: true, mark: None };
+        return Row { name: "…".to_string(), scenario: String::new(), time: time_line(e.written), pinned: e.pinned, waiting: true, mark: None, placeholder: false, caret: None };
     };
     let name = if m.name == save::QUICK_SAVE { tr(save::QUICK_SAVE).to_string() } else { m.name.clone() };
     // A game in which the cheat console worked says so after its scenario.
     let scenario = if m.cheats { razdor::trf!("{title} (cheats)", title = m.title) } else { m.title.clone() };
-    Row { name, scenario, time: razdor::trf!("Time: {date}", date = saved_label(m.saved_at)), pinned: e.pinned, waiting: false, mark: None }
+    Row { name, scenario, time: time_line(m.saved_at), pinned: e.pinned, waiting: false, mark: None, placeholder: false, caret: None }
 }
 
 /// The save lists' fonts (0x4b61bc, 0x4b6338): the save's name in ae24a0 (Benguiat less
@@ -455,10 +467,13 @@ impl Book {
             // The name is centred on its column, never wider than the room right of the load
             // sign (its right edge at 43): 2 × (157 − 47).
             let lit = |c: [u8; 3]| dim(row_ink(c, selected == Some(i)));
-            let name_color = lit(NAME_INK);
+            let name_color = lit(if row.placeholder { PLACEHOLDER_INK } else { NAME_INK });
             super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
                 let size = fit_size(&row.name, NAME_ROOM * k, 16.0 * k);
-                let shown = ellipsize(&row.name, NAME_ROOM * k, size);
+                let shown = match row.caret {
+                    Some(at) => caret_window(&row.name, at, NAME_ROOM * k, |t| measure(t, size).width),
+                    None => ellipsize(&row.name, NAME_ROOM * k, size),
+                };
                 let (cx, y) = (self.p(157.0, 0.0).x, r.y + lh * 0.5 + size * 0.36);
                 // The selection of the name being typed, lit (when it is shown whole).
                 if let Some(m) = row.mark.clone().filter(|m| shown == row.name && m.end <= shown.len()) {
@@ -553,9 +568,51 @@ fn typed_name(name: &str, edit: super::text_edit::TextEdit, caret_on: bool) -> (
     (format!("{}{}{}", &name[..at], if caret_on { '|' } else { ' ' }, &name[at..]), None)
 }
 
+/// The new save's row (the first row of the window): the name being typed, or the grey
+/// placeholder while nothing is typed (0x4c0dd0: an empty slot shows "new save" in grey, a
+/// new save starts with a blank name). Its time is the computer's date `now`, the same text
+/// as the saved rows (0x49c94c), not the game's clock.
+fn new_save_row(name: &str, edit: super::text_edit::TextEdit, caret_on: bool, title: &str, now: u64) -> Row {
+    let time = time_line(now);
+    if name.is_empty() {
+        return Row { name: own("Buttons", "NewSave", n_("(save anew)")), scenario: title.to_string(), time, pinned: false, waiting: false, mark: None, placeholder: true, caret: None };
+    }
+    let (typed, mark) = typed_name(name, edit, caret_on);
+    let mut edit = edit;
+    edit.fit(name);
+    Row { name: typed, scenario: title.to_string(), time, pinned: false, waiting: false, mark, placeholder: false, caret: Some(edit.caret) }
+}
+
+/// The part of `name` (`caret`: the caret's character, drawn as its own glyph) that fits
+/// `room` wide, `width` measuring a text: the start moves on until the caret's glyph is in
+/// sight (`text_edit::first_shown`), the characters past what fits are left out.
+fn caret_window(name: &str, caret: usize, room: f32, width: impl Fn(&str) -> f32) -> String {
+    let chars: Vec<char> = name.chars().collect();
+    let xs = super::text_edit::caret_xs(name, |c| width(&c.to_string()));
+    let first = super::text_edit::first_shown(&xs, caret + 1, room);
+    let mut last = first;
+    while last < chars.len() && xs[last + 1] - xs[first] <= room {
+        last += 1;
+    }
+    chars[first..last].iter().collect()
+}
+
+/// A save may be written under a name with some text in it, into a folder that exists.
+fn can_save(name: &str, folder: bool) -> bool {
+    !name.trim().is_empty() && folder
+}
+
+/// The computer's clock in seconds since 1970 (the save window's new-save date).
+fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
+}
+
 /// The widest a save's name is drawn in its column, in the book's pixels: centred at 157,
 /// it stays right of the selected row's load sign (21..43) with 4 px to spare.
 const NAME_ROOM: f32 = 220.0;
+
+/// The grey of the new save's placeholder name (0x4c0dd0).
+const PLACEHOLDER_INK: [u8; 3] = [150, 150, 150];
 
 /// The save window ("Сохранение активной игры"): the book of manual saves under "(save
 /// anew)"; a click on a save takes its name to replace it, typing edits the name.
@@ -571,9 +628,8 @@ pub fn save_screen(game: &Game, assets: &Assets, view: &mut SaveView, message: &
     fill_metas(&mut view.entries, &mut view.asked, &mut view.settled, view.scroll.saturating_sub(1), None);
     let same = view.entries.iter().position(|e| e.meta.as_ref().is_some_and(|m| m.name == view.name));
     // The first row is the name being typed (a new save, or the one it replaces).
-    let (typed, mark) = typed_name(&view.name, view.edit, (get_time() * 2.0) as i64 % 2 == 0);
-    let typed = if view.name.is_empty() { own("Buttons", "NewSave", n_("(save anew)")) } else { typed };
-    let mut rows = vec![Row { name: typed, scenario: game.world.title.clone(), time: razdor::trf!("Time: {date}", date = game.clock.label()), pinned: false, waiting: false, mark }];
+    let typed = new_save_row(&view.name, view.edit, (get_time() * 2.0) as i64 % 2 == 0, &game.world.title, now_secs());
+    let mut rows = vec![typed];
     rows.extend(view.entries.iter().map(row_of));
     if let (Some(k), _, _) = book.rows(&rows, Some(same.map_or(0, |i| i + 1)), &mut view.scroll, false) {
         // A save whose meta is not read yet gives no name to take.
@@ -590,7 +646,7 @@ pub fn save_screen(game: &Game, assets: &Assets, view: &mut SaveView, message: &
         let p = book.p(22.0, 435.0);
         text(&ellipsize(w, 330.0 * book.k, 13.0 * book.k), p.x, p.y, 13.0 * book.k, RED);
     }
-    let ok = !view.name.trim().is_empty() && dir.is_some();
+    let ok = can_save(&view.name, dir.is_some());
     if book.button(369.0, 116.0, &own("SaveGame", "Save", n_("Save")), ok) || (ok && key(KeyCode::Enter)) {
         let dir = dir.expect("checked");
         match save::write(&dir, SaveKind::Manual, view.name.trim(), game) {
@@ -1151,6 +1207,51 @@ mod tests {
         assert!(autosaves_on(Some("1")));
         assert!(!autosaves_on(Some("0")));
         assert!(!autosaves_on(Some("")));
+    }
+
+    /// 0x4c0dd0, 0x49c94c: the new save's row shows the computer's date, in the saved rows' text.
+    #[test]
+    fn the_new_save_row_shows_the_computer_s_date_like_the_saved_rows() {
+        let now = 1_790_000_000;
+        let row = new_save_row("", Default::default(), true, "Map", now);
+        assert_eq!(row.time, time_line(now));
+        assert_eq!(row.time, razdor::trf!("Time: {date}", date = saved_label(now)));
+        assert_eq!(row.scenario, "Map");
+        let typed = new_save_row("Mine", Default::default(), false, "Map", now);
+        assert_eq!(typed.time, row.time, "the date does not change while typing");
+    }
+
+    /// 0x4c0dd0: a new save starts blank with the grey placeholder, which goes once typed.
+    #[test]
+    fn the_placeholder_shows_only_while_the_name_is_empty() {
+        let blank = new_save_row("", Default::default(), true, "Map", 0);
+        assert!(blank.placeholder && blank.caret.is_none() && blank.mark.is_none());
+        assert!(!blank.name.is_empty());
+        let typed = new_save_row("A", super::super::text_edit::TextEdit { caret: 1, anchor: 1 }, true, "Map", 0);
+        assert!(!typed.placeholder);
+        assert_eq!(typed.name, "A|", "the caret blinks on at the end");
+        assert_eq!(typed.caret, Some(1));
+    }
+
+    /// 0x4c0b68: Save with an empty name (or only spaces) writes nothing.
+    #[test]
+    fn an_empty_name_refuses_to_save() {
+        assert!(!can_save("", true));
+        assert!(!can_save("   ", true));
+        assert!(!can_save("Mine", false), "no save folder");
+        assert!(can_save(" Mine ", true));
+    }
+
+    /// A long name keeps the caret's side in sight, the far end cut.
+    #[test]
+    fn a_long_typed_name_keeps_the_caret_side_in_sight() {
+        // Ten pixels a character.
+        let w = |t: &str| t.chars().count() as f32 * 10.0;
+        let name = "Магическое подземелье Магическое подземелье|";
+        let end = caret_window(name, name.chars().count() - 1, 120.0, w);
+        assert_eq!(end, " подземелье|", "the caret's end in sight, twelve characters");
+        let start = caret_window(name, 0, 120.0, w);
+        assert_eq!(start, "Магическое п", "the start in sight, the far end left out");
     }
 
     #[test]
