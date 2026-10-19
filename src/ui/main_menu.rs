@@ -123,7 +123,7 @@ fn logo() {
         let flame_w = base_w * LOGO_FLAME_WIDTH;
         let flame_h = base_h * LOGO_FLAME_HEIGHT;
         let flame_y = base_y + base_h - flame_h + LOGO_FLAME_Y * k;
-        let t = get_time();
+        let t = crate::ui::clock::now();
         // The two words, each half of the sheet, over each half of the logo.
         for half in 0..2 {
             let dst_x = x + half as f32 * base_w - (flame_w - base_w) / 2.0 + LOGO_FLAME_X * k;
@@ -177,7 +177,7 @@ fn oval(i: usize, label: &str, hot: Option<usize>) -> bool {
             &fl,
             // The previous per-button offset jumped almost four frames at a time;
             // keep a small ordered phase step down the menu instead.
-            get_time() * 0.8 + i as f64 * 0.10,
+            crate::ui::clock::now() * 0.8 + i as f64 * 0.10,
             6.0,
             16,
             flame_frame,
@@ -210,7 +210,7 @@ fn oval(i: usize, label: &str, hot: Option<usize>) -> bool {
         let tint = if hover { Color::new(1.0, 0.8, 0.7, 0.5) } else { Color::new(0.8, 0.65, 1.0, 0.5) };
         draw_flame_frames(
             &fl,
-            get_time() + i as f64 * 0.37,
+            crate::ui::clock::now() + i as f64 * 0.37,
             12.0,
             16,
             flame_frame,
@@ -481,7 +481,7 @@ pub fn authors(started: f64) -> bool {
         if key(KeyCode::PageUp) {
             nudge -= inner.h / px * 0.8;
         }
-        let timed = (get_time() - started) as f32 * 35.0;
+        let timed = (crate::ui::clock::now() - started) as f32 * 35.0;
         // The clock while the credits roll on their own (Credits_OnOpen 0x4cfc6c calls
         // 0x48ecf0); the arrow once their time is up (0x4c84e7), whatever the hand scroll.
         if timed < most {

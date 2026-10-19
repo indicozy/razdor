@@ -637,7 +637,7 @@ struct Slide {
 }
 
 fn now_ms() -> i64 {
-    (get_time() * 1000.0) as i64
+    (crate::ui::clock::now() * 1000.0) as i64
 }
 
 /// The hero and army screen, as the original's (refs 11 and 12): the selected unit's panel

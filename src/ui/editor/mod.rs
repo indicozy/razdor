@@ -660,7 +660,7 @@ impl EditorScreen {
             let s = &self.doc.scenario;
             let (w, h) = (s.width(), s.height());
             if let Some(cam) = self.cam.as_mut() {
-                let step = 600.0 * get_frame_time();
+                let step = 600.0 * crate::ui::clock::frame_dt();
                 let mut d = Vec2::ZERO;
                 if is_key_down(KeyCode::Left) {
                     d.x += step;

@@ -275,7 +275,7 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
         "authors" => {
             // `authors:<seconds>`: that far into the credits' scroll (25 by default).
             let into = parts.next().and_then(|t| t.parse::<f64>().ok()).unwrap_or(25.0);
-            app.screen = Screen::Authors(macroquad::prelude::get_time() - into);
+            app.screen = Screen::Authors(crate::ui::clock::now() - into);
             return Ok(());
         }
         "options" => {
@@ -346,6 +346,8 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
     let content = app.dt_content.clone().ok_or("no install content")?;
     let content = std::sync::Arc::new(content.with_experimental(super::new_game::experimental_rules()));
     let mut game = Game::from_scenario(content, &app.scenarios[index].scenario, HeroClass::Knight);
+    // The event generator's fixed seed (its clock seed would differ on every run).
+    game.seed_events(0x5EED);
     if let Some(index)=std::env::var("RAZDOR_SCENE_BENCHED").ok().and_then(|s| s.parse::<usize>().ok()).filter(|&i| i>0) {
         if let Some(unit)=game.squad.get_mut(index) { unit.battle_disabled=true; }
     }

@@ -201,7 +201,7 @@ pub fn hotkey_pressed() -> bool {
 
 /// Shows `mode`'s name for a moment ([`draw_notice`]).
 pub fn notice(mode: DisplayMode) {
-    NOTICE.with(|n| n.set(Some((mode, macroquad::prelude::get_time()))));
+    NOTICE.with(|n| n.set(Some((mode, crate::ui::clock::now()))));
 }
 
 /// The name of the mode Alt+Enter chose, at the top of the screen over everything else.
@@ -209,7 +209,7 @@ pub fn draw_notice() {
     use crate::ui::widgets::{measure, text_centered, ACCENT, PANEL};
     use macroquad::prelude::*;
     let Some((mode, at)) = NOTICE.with(|n| n.get()) else { return };
-    let left = NOTICE_SECONDS - (get_time() - at);
+    let left = NOTICE_SECONDS - (crate::ui::clock::now() - at);
     if left <= 0.0 {
         NOTICE.with(|n| n.set(None));
         return;
@@ -243,7 +243,7 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
 /// Puts the window in `mode` when it is not yet (called every frame; cheap when nothing
 /// changes). The first call leaves a windowed start alone.
 fn follow(mode: DisplayMode) {
-    let now = macroquad::prelude::get_time();
+    let now = crate::ui::clock::now();
     STATE.with(|s| {
         let mut s = s.borrow_mut();
         let started = *s.started.get_or_insert(now);

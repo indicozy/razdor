@@ -13,7 +13,7 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 
 use macroquad::input as mq;
-use macroquad::prelude::{get_frame_time, screen_height, screen_width, KeyCode, MouseButton};
+use macroquad::prelude::{screen_height, screen_width, KeyCode, MouseButton};
 
 use super::gamepad::{self, Edge, Frame, Mapper};
 
@@ -51,7 +51,7 @@ pub fn begin_frame() {
         let from = if s.active { s.at } else { mouse };
         let map_scrolls = std::mem::take(&mut s.map_claimed.0);
         s.map_claimed.1 = map_scrolls;
-        s.frame = s.mapper.step(&pad, get_frame_time(), from, screen, map_scrolls);
+        s.frame = s.mapper.step(&pad, crate::ui::clock::frame_dt(), from, screen, map_scrolls);
         if let Some(at) = s.frame.pointer {
             s.active = true;
             s.at = at;

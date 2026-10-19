@@ -362,7 +362,7 @@ thread_local! {
 pub fn track_held_key() {
     SWALLOWED.with(|s| s.set(false));
     let (pressed, released) = (get_keys_pressed(), get_keys_released());
-    let (now, dt) = (get_time(), get_frame_time() as f64);
+    let (now, dt) = (crate::ui::clock::now(), crate::ui::clock::frame_dt() as f64);
     let repeat = REPEAT_KEY.with(|r| next_repeat(r.get(), pressed.iter().copied(), &released, now, is_key_down));
     REPEAT_KEY.with(|r| r.set(repeat));
     HELD_KEY.with(|h| h.set(repeated_held(next_held(h.get(), pressed, !released.is_empty(), is_key_down), repeat, now, dt)));
@@ -548,7 +548,7 @@ pub fn hint_alpha(ms: f64, full: f32) -> f32 {
 /// when it was not drawn for a moment (it closed in between).
 fn hint_fade(lines: &[(String, Color)], full: f32) -> f32 {
     let text: String = lines.iter().map(|(s, _)| s.as_str()).collect::<Vec<_>>().join("\n");
-    let now = get_time() * 1000.0;
+    let now = crate::ui::clock::now() * 1000.0;
     let start = HINT_SHOWN.with(|h| {
         let mut h = h.borrow_mut();
         if h.0 != text || now - h.2 > 100.0 {
@@ -1134,7 +1134,7 @@ pub fn key_repeat(k: KeyCode) -> usize {
         HELD.with(|h| {
             let mut h = h.borrow_mut();
             h.retain(|e| e.0 != k);
-            h.push((k, get_time()));
+            h.push((k, crate::ui::clock::now()));
         });
         return 1;
     }
@@ -1146,7 +1146,7 @@ pub fn key_repeat(k: KeyCode) -> usize {
         }
         h.iter().find(|e| e.0 == k).map(|e| e.1)
     });
-    t0.map_or(0, |t0| repeats(get_time() - t0, get_frame_time() as f64))
+    t0.map_or(0, |t0| repeats(crate::ui::clock::now() - t0, crate::ui::clock::frame_dt() as f64))
 }
 
 /// A held key's repeats in the frame of `dt` seconds ending `held` seconds after it went
@@ -1282,7 +1282,7 @@ pub const SELECTION: Color = Color::new(0.20, 0.32, 0.62, 0.85);
 
 /// The caret's blink: on half of each second.
 fn caret_on() -> bool {
-    (get_time() * 2.0) as i64 % 2 == 0
+    (crate::ui::clock::now() * 2.0) as i64 % 2 == 0
 }
 
 /// Caret and selection by the mouse for the field `id` drawn in `hit`: a press in it puts

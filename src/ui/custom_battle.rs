@@ -232,7 +232,7 @@ pub fn frame(view: &mut SetupView, content: &Content, assets: &Assets, audio: &m
         let code = custom_code::encode(&view.session.setup, content, ai_code(strength));
         clipboard_set(&code);
         let msg = trf!("Battle code copied ({n} characters): paste it in a chat. Ctrl+V here loads one.", n = code.chars().count());
-        view.note = Some((msg, false, get_time()));
+        view.note = Some((msg, false, crate::ui::clock::now()));
     }
     let paste = button(lx + 230.0 * k, cy, 200.0 * k, bh, tr("Paste the battle code"), true) || (keys_free && shortcut_held() && is_key_pressed(KeyCode::V));
     if paste {
@@ -241,10 +241,10 @@ pub fn frame(view: &mut SetupView, content: &Content, assets: &Assets, audio: &m
         if !err {
             cue(Cue::Button);
         }
-        view.note = Some((msg, err, get_time()));
+        view.note = Some((msg, err, crate::ui::clock::now()));
     }
     if let Some((msg, err, at)) = &view.note {
-        if get_time() - at < NOTE_SECONDS {
+        if crate::ui::clock::now() - at < NOTE_SECONDS {
             let x = lx + 440.0 * k;
             let room = inner.x + inner.w - 10.0 * k - x;
             let lines = wrap(msg, room, (12.0 * k).round());

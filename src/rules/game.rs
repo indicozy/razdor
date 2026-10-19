@@ -726,6 +726,12 @@ impl Game {
         self.origin = Some(origin);
     }
 
+    /// Seeds the event generator with `state` instead of the clock: the UI's snapshots draw
+    /// the same event numbers on every run (tools/ui-regress). Game rules are unchanged.
+    pub fn seed_events(&mut self, state: u32) {
+        self.event_rng = EventRng::new(state);
+    }
+
     /// A new game on an original scenario, with the hero preset of `hero`.
     pub fn from_scenario(content: Arc<Content>, scenario: &Scenario, hero: HeroClass) -> Self {
         let mut g = Game::unstarted(content, scenario, hero);

@@ -489,10 +489,10 @@ impl Audio {
                 b.play_effect(c, &self.settings, self.log);
             }
         }
-        let change = b.jukebox.update(mood, macroquad::time::get_time());
+        let change = b.jukebox.update(mood, crate::ui::clock::now());
         b.apply(change, &self.settings, self.log);
         // A long frame (a track decoded) moves the fades at most a tenth of a second.
-        b.fade(macroquad::time::get_frame_time().min(0.1), self.settings.music_gain());
+        b.fade(crate::ui::clock::frame_dt().min(0.1), self.settings.music_gain());
     }
 }
 
@@ -567,7 +567,7 @@ impl Backend {
     fn apply(&mut self, change: Option<Change>, settings: &Settings, log: bool) {
         let Some(change) = change else { return };
         let gain = settings.music_gain();
-        let now = macroquad::time::get_time();
+        let now = crate::ui::clock::now();
         // A looping track that came to its end starts again where its fade is.
         if let (Change::Play(track), Some(t)) = (change, self.music.as_mut()) {
             if t.track == track {
@@ -608,7 +608,7 @@ impl Backend {
                     .and_then(|pcm| load_now(&pcm.resampled(OUTPUT_RATE).to_wav()).map(|s| (s, pcm.duration())).ok_or_else(|| "cannot be played".into()));
                 match loaded {
                     Ok((sound, len)) => {
-                        let now = macroquad::time::get_time();
+                        let now = crate::ui::clock::now();
                         let fade = if self.played { Fade::fade_in(secs) } else { Fade::FULL };
                         let volume = fade.level() * gain;
                         play_sound(&sound, PlaySoundParams { looped: false, volume });

@@ -4,6 +4,7 @@ pub mod audio;
 pub mod battle_view;
 pub mod building_view;
 pub mod chrome;
+pub mod clock;
 pub mod console;
 pub mod cursor;
 pub mod custom_battle;
@@ -451,7 +452,7 @@ impl App {
     fn rotate_music(&mut self) {
         let Some(game) = self.game.as_mut() else { return };
         let (pick, ms) = game.music_rotate(self.map_music.pick);
-        self.map_music = MapMusic { pick, due: macroquad::prelude::get_time() + ms as f64 / 1000.0, triumph: false };
+        self.map_music = MapMusic { pick, due: crate::ui::clock::now() + ms as f64 / 1000.0, triumph: false };
         self.audio.set_map_track(razdor::rules::music::ROTATION[pick], true);
     }
 
@@ -459,7 +460,7 @@ impl App {
     /// came in, a dialog appeared), then the audio frame.
     fn sounds(&mut self) {
         // A map start or a load starts the world theme; its first change was drawn then.
-        let clock = macroquad::prelude::get_time();
+        let clock = crate::ui::clock::now();
         if let Some(wait) = self.game.as_mut().and_then(|g| g.take_music_wait()) {
             let pick = razdor::rules::music::WORLD_THEME;
             self.map_music = MapMusic { pick, due: clock + wait as f64 / 1000.0, triumph: false };
@@ -666,7 +667,7 @@ impl App {
             /// (frames so far, when counting began, the last rate shown)
             static COUNT: std::cell::Cell<(u32, f64, u32)> = const { std::cell::Cell::new((0, 0.0, 0)) };
         }
-        let now = macroquad::prelude::get_time();
+        let now = crate::ui::clock::now();
         let (mut n, mut since, mut shown) = COUNT.with(|c| c.get());
         n += 1;
         if now - since >= 0.5 {
@@ -847,7 +848,7 @@ impl App {
                     None
                 }
                 Some(main_menu::Pick::Options) => Some(Screen::Options),
-                Some(main_menu::Pick::Authors) => Some(Screen::Authors(macroquad::prelude::get_time())),
+                Some(main_menu::Pick::Authors) => Some(Screen::Authors(crate::ui::clock::now())),
                 None => None,
             },
             (Screen::Authors(started), _) => main_menu::authors(*started).then_some(Screen::MainMenu),
@@ -969,7 +970,7 @@ impl App {
             return;
         }
         let held = matches!(self.screen, Screen::WorldMap) && self.map_view.holds_dialogs(&self.dialogs);
-        let clock = macroquad::prelude::get_time();
+        let clock = crate::ui::clock::now();
         if let Some(d) = self.dialogs.front().filter(|d| !held && !d.waiting(clock)) {
             // A message window takes the arrow (EventDialog_OpenModal 0x4ac427).
             cursor::set(cursor::Shape::Arrow);
@@ -1100,7 +1101,7 @@ impl App {
             // A world spell that killed the whole army loses the game: the defeat report,
             // 250 ms later (0x4906eb → 0x4af658).
             if next.is_none() && !matches!(self.screen, Screen::Battle(..)) && self.game.as_ref().is_some_and(Game::army_fallen) {
-                let due = macroquad::prelude::get_time() + razdor::av::BATTLE_REPORT_GAP_MS as f64 / 1000.0;
+                let due = crate::ui::clock::now() + razdor::av::BATTLE_REPORT_GAP_MS as f64 / 1000.0;
                 self.dialogs.push_back(dialog::Dialog { not_before: Some(due), ..dialog::Dialog::defeat() });
             }
         }

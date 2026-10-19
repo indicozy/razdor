@@ -170,6 +170,8 @@ async fn main() {
         }
         let work = started.elapsed();
         frames += 1;
+        // The snapshot clock moves one frame on (live runs: no-op).
+        ui::clock::tick();
         if let Some((path, n)) = &snapshot {
             if frames >= *n {
                 get_screen_data().export_png(path);

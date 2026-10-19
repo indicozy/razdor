@@ -132,7 +132,7 @@ struct IdleSprite {
 
 /// The frame clock the idle pass reads (0x4f1c34), in ms.
 fn clock_ms() -> i64 {
-    (get_time() * 1000.0) as i64
+    (crate::ui::clock::now() * 1000.0) as i64
 }
 
 /// Stamps every army the first time the screen draws the map (a load stamps them all at
@@ -1059,7 +1059,7 @@ fn draw_terrain(game: &Game, art: Option<&DtArt>, cam: &Camera) {
         if tl.x < br.x && tl.y < br.y {
             let (a, b) = (cam.to_screen(tl.into()), cam.to_screen(br.into()));
             let view = vec4(tl.x, tl.y / rh, br.x, br.y / rh);
-            layer.draw(map.surface_codes(), (map.w as u32, map.h as u32), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(PX, PX * rh), Some((get_time() * 1000.0) as i64));
+            layer.draw(map.surface_codes(), (map.w as u32, map.h as u32), Rect::new(a.x, a.y, b.x - a.x, b.y - a.y), view, vec2(PX, PX * rh), Some((crate::ui::clock::now() * 1000.0) as i64));
         }
         return;
     }
@@ -1365,7 +1365,7 @@ enum Stand {
 /// The hero's walk frame: 8 frames at 10 a second while he has a step to take, else 0.
 fn hero_frame(next: Option<(f32, f32)>) -> u32 {
     if next.is_some() {
-        (get_time() * 10.0) as u32 % 8
+        (crate::ui::clock::now() * 10.0) as u32 % 8
     } else {
         0
     }
@@ -1430,7 +1430,7 @@ fn draw_mark(cam: &Camera, pos: (f32, f32), texture: &str, color: Color) {
     let zoom = cam.scale / PX;
     // Sized as the original's screen shows it (about 30 × 20 at 1:1).
     let (w, h) = (32.0 * zoom, 22.0 * zoom);
-    let angle = (get_time() * 10.0).floor() as f32 * (std::f32::consts::PI / 32.0);
+    let angle = (crate::ui::clock::now() * 10.0).floor() as f32 * (std::f32::consts::PI / 32.0);
     match super::chrome::win_fx(texture, super::chrome::Fx::Glow) {
         Some(t) => super::chrome::ground_ring(&t, Rect::new(p.x - w / 2.0, p.y - h / 2.0, w, h), color, angle),
         None => draw_ellipse_lines(p.x, p.y, 15.0 * zoom, 10.0 * zoom, 0.0, 1.0, color),
@@ -1646,7 +1646,7 @@ fn draw_route(game: &Game, path: &[Tile], cam: &Camera) {
     }
     let arrows = super::chrome::animation("Windows/Way_Arrows.ugs").filter(|a| a.len() == 8);
     let zoom = cam.scale / PX;
-    let ms = get_time() * 1000.0;
+    let ms = crate::ui::clock::now() * 1000.0;
     let mut from = game.tile();
     for (i, &t) in path.iter().enumerate() {
         let (dx, dy) = ((t.0 - from.0).signum(), (t.1 - from.1).signum());
@@ -2530,10 +2530,10 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     // The glide back to the hero takes no input either (0x4af96c).
     let idle = !game.moving() && !game.waiting() && game.reading().is_none() && view.centring.is_none();
     // The whole milliseconds since the map's last frame (the original's timeGetTime).
-    let now_ms = (get_time() * 1000.0) as i64;
+    let now_ms = (crate::ui::clock::now() * 1000.0) as i64;
     let dt_ms = now_ms - view.last_frame_ms.unwrap_or(now_ms);
     view.last_frame_ms = Some(now_ms);
-    view.show_clock += get_frame_time().clamp(0.0, 1.0 / 30.0) as f64;
+    view.show_clock += crate::ui::clock::frame_dt().clamp(0.0, 1.0 / 30.0) as f64;
     // A gamepad's right stick scrolls the map here (Razdor's), and turns no wheel.
     let pad_scroll = crate::ui::input::map_scroll();
 
@@ -2579,13 +2579,13 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     // he walks (Razdor's key works then too) the view is on him already.
     if view.centring.is_none() && view.look.is_some() && key(KeyCode::Tab) {
         if idle {
-            view.centring = Some((get_time(), view.look.unwrap_or(game.display_pos())));
+            view.centring = Some((crate::ui::clock::now(), view.look.unwrap_or(game.display_pos())));
         } else {
             view.look = None;
         }
     }
     if let Some((t0, from)) = view.centring {
-        let ms = ((get_time() - t0) * 1000.0) as i64;
+        let ms = ((crate::ui::clock::now() - t0) * 1000.0) as i64;
         let to = game.display_pos();
         let e = glide_ease(ms);
         view.look = Some((from.0 + (to.0 - from.0) * e, from.1 + (to.1 - from.1) * e));
@@ -2685,7 +2685,7 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     // Time stands still while a window is open.
     let mut events = game.drain_events();
     if !input_blocked() && events.is_empty() {
-        events = game.tick_shown(get_frame_time().min(0.1));
+        events = game.tick_shown(crate::ui::clock::frame_dt().min(0.1));
     }
     let mut next = handle_events(game, events, message, dialogs).or(reopened);
     // Battles between map parties (Razdor's): taken every frame, shown where the player sees
@@ -2694,7 +2694,7 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     for clash in game.take_clashes() {
         if battles_shown && game.fog.explored(clash.tile) {
             *message = Some(clash_notice(&clash, &info("NoNameArmy", n_("Unknown army"))));
-            view.clash_marks.push_back((clash.tile, get_time()));
+            view.clash_marks.push_back((clash.tile, crate::ui::clock::now()));
             while view.clash_marks.len() > CLASH_MAX {
                 view.clash_marks.pop_front();
             }
@@ -2704,7 +2704,7 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     // The place being shown: once its message is read, the camera flies there and the
     // uncovered area fades in; then the next place, if any. After the last one the camera
     // flies back to the hero.
-    let now = get_time();
+    let now = crate::ui::clock::now();
     let show_now = view.show_clock;
     for shown in std::mem::take(&mut game.shown) {
         view.shows.push_back(Showing::new(game, &shown));
@@ -2762,7 +2762,7 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     let pointed = !input_blocked() && view.pointer != Shape::Clock && view.hover.is_some_and(|h| cam.tile_under_mouse() == Some(h.cell));
     let pointed_at = view.hover.and_then(|h| h.building.filter(|_| pointed));
     let taking = !input_blocked() && view.pointer != Shape::Clock;
-    let now_s = get_time();
+    let now_s = crate::ui::clock::now();
     let mouse_cell = cam.tile_under_mouse();
     let near = |b: usize| mouse_cell.is_some_and(|(x, y)| game.world.locations[b].cells().any(|(cx, cy)| (cx - x).abs() <= 1 && (cy - y).abs() <= 1));
     view.outlined = match (pointed_at, view.outlined) {
@@ -2788,7 +2788,7 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     }
     draw_world(game, assets, &cam, view.preview.as_ref().map(|p| p.1.as_slice()), show.as_ref(), hover);
     cam.draw_fog(game);
-    draw_clash_marks(view, &cam, get_time());
+    draw_clash_marks(view, &cam, crate::ui::clock::now());
     cam.draw_showing(game, view.opening.iter().chain(&view.shows), show_now);
     if let Some(s) = view.shows.front() {
         cam.draw_known_place(s, show_now);
@@ -2869,7 +2869,7 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     match timed {
         Some(TimeButton::Wait1) => game.begin_wait(1),
         Some(TimeButton::Wait4) => game.begin_wait(4),
-        Some(TimeButton::ShowHero) => view.centring = Some((get_time(), view.look.unwrap_or(game.display_pos()))),
+        Some(TimeButton::ShowHero) => view.centring = Some((crate::ui::clock::now(), view.look.unwrap_or(game.display_pos()))),
         None => {}
     }
     if toggle_map {
@@ -2922,12 +2922,12 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     // screen's to show.
     if let Some(m) = message.take_if(|_| next.is_none()) {
         razdor::diag::play(&game.clock.label(), &format!("MESSAGE {m}"));
-        view.toasts.push_back((m, get_time()));
+        view.toasts.push_back((m, crate::ui::clock::now()));
         while view.toasts.len() > TOAST_MAX {
             view.toasts.pop_front();
         }
     }
-    draw_toasts(&mut view.toasts, get_time());
+    draw_toasts(&mut view.toasts, crate::ui::clock::now());
     next
 }
 

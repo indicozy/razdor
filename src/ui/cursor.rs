@@ -185,7 +185,7 @@ pub fn draw() {
     let tex = match what {
         Art::Still(name) => super::chrome::win(name),
         Art::Strip(name, t) => super::chrome::animation(&format!("Windows/{name}")).and_then(|f| {
-            let ms = (get_time() * 1000.0) as u64;
+            let ms = (crate::ui::clock::now() * 1000.0) as u64;
             f.get(strip_frame(ms, t) % f.len().max(1)).cloned()
         }),
     };

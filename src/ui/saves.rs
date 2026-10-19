@@ -604,8 +604,15 @@ fn can_save(name: &str, folder: bool) -> bool {
 
 /// The computer's clock in seconds since 1970 (the save window's new-save date).
 fn now_secs() -> u64 {
+    // A snapshot shows a fixed date, so its pictures do not change from day to day.
+    if crate::ui::clock::is_snapshot() {
+        return SNAPSHOT_SECS;
+    }
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
+
+/// The date a snapshot shows for the computer's time (2025-06-15 12:00 UTC).
+const SNAPSHOT_SECS: u64 = 1_749_988_800;
 
 /// The widest a save's name is drawn in its column, in the book's pixels: centred at 157,
 /// it stays right of the selected row's load sign (21..43) with 4 px to spare.
@@ -628,7 +635,7 @@ pub fn save_screen(game: &Game, assets: &Assets, view: &mut SaveView, message: &
     fill_metas(&mut view.entries, &mut view.asked, &mut view.settled, view.scroll.saturating_sub(1), None);
     let same = view.entries.iter().position(|e| e.meta.as_ref().is_some_and(|m| m.name == view.name));
     // The first row is the name being typed (a new save, or the one it replaces).
-    let typed = new_save_row(&view.name, view.edit, (get_time() * 2.0) as i64 % 2 == 0, &game.world.title, now_secs());
+    let typed = new_save_row(&view.name, view.edit, (crate::ui::clock::now() * 2.0) as i64 % 2 == 0, &game.world.title, now_secs());
     let mut rows = vec![typed];
     rows.extend(view.entries.iter().map(row_of));
     if let (Some(k), _, _) = book.rows(&rows, Some(same.map_or(0, |i| i + 1)), &mut view.scroll, false) {

@@ -360,7 +360,7 @@ fn resize(view: Rect, o: Rect, aspect: f32) -> bool {
         None => {
             let edges = if input_blocked() || MOVE.with(|m| m.get()).is_some() { (false, false) } else { grip(o, m, (BORDER * k).max(6.0), at) };
             if (edges.0 || edges.1) && clicked() {
-                let now = get_time();
+                let now = crate::ui::clock::now();
                 if now - LAST_PRESS.with(|t| t.replace(now)) < 0.4 {
                     // A double click on an edge: the original's square again.
                     SIZE.with(|s| s.set(None));

@@ -678,7 +678,7 @@ impl BattleView {
     /// animations run, the keys and the AI act. Returns whether the battle is over (its last
     /// animation played) and whether the ways out opened this frame.
     fn advance(&mut self, l: &Layout) -> (bool, bool) {
-        let dt = get_frame_time() * self.pace();
+        let dt = crate::ui::clock::frame_dt() * self.pace();
         if let Some(fx) = &mut self.fx {
             let before = fx.t;
             fx.t += dt;
@@ -866,7 +866,7 @@ impl BattleView {
                 // the clock meanwhile (0x4b0a17).
                 super::cursor::set(super::cursor::battle_pointer(false, false, true));
                 let held = self.hold.get_or_insert(0.0);
-                *held += get_frame_time();
+                *held += crate::ui::clock::frame_dt();
                 let done = *held * 1000.0 >= razdor::av::BATTLE_END_HOLD_MS as f32;
                 return done.then(|| self.close_won(game, message, dialogs));
             }
@@ -990,7 +990,7 @@ impl BattleView {
         };
         let hovered_cell = self.cell_under_mouse(l);
         // The highlights pulse with the clock (4cd2a2).
-        let pulse_ms = (macroquad::time::get_time() * 1000.0) as u64;
+        let pulse_ms = (crate::ui::clock::now() * 1000.0) as u64;
 
         // The window: red marble, the title with both armies, the turn in the corner.
         // Its red close button asks to leave the battle, as Esc does (4daa80).
@@ -1437,7 +1437,7 @@ impl BattleView {
             return Screen::Victory;
         }
         // The report is the chained step 250 ms after the screen closes (0x4af658).
-        let due = macroquad::time::get_time() + razdor::av::BATTLE_REPORT_GAP_MS as f64 / 1000.0;
+        let due = crate::ui::clock::now() + razdor::av::BATTLE_REPORT_GAP_MS as f64 / 1000.0;
         dialogs.extend(Dialog::victory(&result).map(|d| Dialog { not_before: Some(due), ..d }));
         *message = None;
         Screen::WorldMap
@@ -1448,7 +1448,7 @@ impl BattleView {
     /// ends the game ([`Dialog::defeat`]).
     fn close_lost(&self, game: &mut Game, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) -> Screen {
         game.resolve_battle(&self.battle);
-        let due = macroquad::time::get_time() + razdor::av::BATTLE_REPORT_GAP_MS as f64 / 1000.0;
+        let due = crate::ui::clock::now() + razdor::av::BATTLE_REPORT_GAP_MS as f64 / 1000.0;
         dialogs.push_back(Dialog { not_before: Some(due), ..Dialog::defeat() });
         *message = None;
         Screen::WorldMap

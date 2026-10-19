@@ -309,7 +309,7 @@ mod xinput {
             (unsafe { get(slot, &mut st) } == 0).then_some(st)
         };
         let (slot, asked) = SLOT.with(|s| s.get());
-        let now = macroquad::time::get_time();
+        let now = crate::ui::clock::now();
         let found = match slot.and_then(|n| read(n).map(|st| (n, st))) {
             Some(hit) => Some(hit),
             None if now - asked >= 1.0 => {

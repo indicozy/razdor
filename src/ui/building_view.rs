@@ -160,7 +160,7 @@ const HIRE_SLIDE_MS: i64 = 200;
 const CURE_MS: i64 = 350;
 
 fn now_ms() -> i64 {
-    (get_time() * 1000.0) as i64
+    (crate::ui::clock::now() * 1000.0) as i64
 }
 
 impl BuildingView {
