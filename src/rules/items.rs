@@ -215,9 +215,6 @@ pub fn take_off(content: &Content, unit: &mut Unit, slot: usize) -> Option<ItemI
 /// school; one weapon (staffs included); one item of each type.
 pub fn slot_for(content: &Content, unit: &Unit, item: ItemId) -> Result<usize, EquipError> {
     let def = content.try_item(item).ok_or(EquipError::NoSuchItem)?;
-    if content.experimental.no_duplicate_items && unit.items.contains(&Some(item)) {
-        return Err(EquipError::DuplicateItem);
-    }
     if item.0 == CROWN && unit.wage_kind != WageKind::Leader && !CROWN_TYPES.contains(&unit.def.0) {
         return Err(EquipError::NotAllowed);
     }
@@ -254,6 +251,10 @@ pub fn slot_for(content: &Content, unit: &Unit, item: ItemId) -> Result<usize, E
         || (def.kind == ArtefactType::Amulet && content.experimental.multiple_amulets);
     if !repeated_accessory && worn.iter().any(|w| w.kind == def.kind) {
         return Err(EquipError::SameType);
+    }
+    // Razdor's option after the original's refusals, so classic rules still say SameType.
+    if content.experimental.no_duplicate_items && unit.items.contains(&Some(item)) {
+        return Err(EquipError::DuplicateItem);
     }
     unit.items.iter().position(Option::is_none).ok_or(EquipError::NoFreeSlot)
 }
@@ -868,72 +869,81 @@ mod tests {
         let native = UnitDef { bonus: Some(Bonus::Counterblow), ..warrior(5, 20, 0) };
         let ring = ArtefactDef { bonus: Some(Bonus::ArmorIgnore), ..item(1, ArtefactType::Ring) };
         let duplicate = ArtefactDef { bonus: Some(Bonus::Counterblow), ..item(2, ArtefactType::Amulet) };
-        let original = content(vec![native],vec![ring,duplicate]);
+        let original = content(vec![native], vec![ring, duplicate]);
         let rules = super::super::content::ExperimentalRules { simultaneous_bonuses: true, ..Default::default() };
         let c = original.with_experimental(rules);
-        let u = wearing(&c,5,&[1,2]);
-        assert_eq!(u.stats(&c).bonuses,vec![Bonus::Counterblow,Bonus::ArmorIgnore]);
-        assert_eq!(u.stats(&original).bonuses,vec![Bonus::Counterblow]);
+        let u = wearing(&c, 5, &[1, 2]);
+        assert_eq!(u.stats(&c).bonuses, vec![Bonus::Counterblow, Bonus::ArmorIgnore]);
+        assert_eq!(u.stats(&original).bonuses, vec![Bonus::Counterblow]);
         assert!(!original.experimental.simultaneous_bonuses);
     }
 
     #[test]
     fn experimental_accessories_are_independent_and_still_use_four_slots() {
-        let original = content(vec![warrior(5,20,0)],vec![item(1,ArtefactType::Ring),item(2,ArtefactType::Amulet),item(3,ArtefactType::Helm)]);
-        let u = wearing(&original,5,&[1,2,3]);
+        let original = content(vec![warrior(5, 20, 0)], vec![item(1, ArtefactType::Ring), item(2, ArtefactType::Amulet), item(3, ArtefactType::Helm)]);
+        let u = wearing(&original, 5, &[1, 2, 3]);
         let rings = super::super::content::ExperimentalRules { multiple_rings: true, ..Default::default() };
         let c = original.with_experimental(rings);
-        assert_eq!(slot_for(&c,&u,ItemId(1)),Ok(3));
-        assert_eq!(slot_for(&c,&u,ItemId(2)),Err(EquipError::SameType));
-        assert_eq!(slot_for(&c,&u,ItemId(3)),Err(EquipError::SameType));
+        assert_eq!(slot_for(&c, &u, ItemId(1)), Ok(3));
+        assert_eq!(slot_for(&c, &u, ItemId(2)), Err(EquipError::SameType));
+        assert_eq!(slot_for(&c, &u, ItemId(3)), Err(EquipError::SameType));
         let amulets = super::super::content::ExperimentalRules { multiple_amulets: true, ..Default::default() };
         let c = original.with_experimental(amulets);
-        assert_eq!(slot_for(&c,&u,ItemId(1)),Err(EquipError::SameType));
-        assert_eq!(slot_for(&c,&u,ItemId(2)),Ok(3));
-        let full = wearing(&c,5,&[2,2,2,2]);
-        assert_eq!(slot_for(&c,&full,ItemId(2)),Err(EquipError::NoFreeSlot));
+        assert_eq!(slot_for(&c, &u, ItemId(1)), Err(EquipError::SameType));
+        assert_eq!(slot_for(&c, &u, ItemId(2)), Ok(3));
+        let full = wearing(&c, 5, &[2, 2, 2, 2]);
+        assert_eq!(slot_for(&c, &full, ItemId(2)), Err(EquipError::NoFreeSlot));
     }
 
     #[test]
     fn experimental_bonus_variants_choose_the_stronger_effect() {
-        let native = UnitDef { bonus: Some(Bonus::Poison), ..warrior(5,20,0) };
-        let strong = ArtefactDef { bonus: Some(Bonus::PoisonS), ..item(1,ArtefactType::Ring) };
-        let c = content(vec![native],vec![strong]).with_experimental(super::super::content::ExperimentalRules {
+        let native = UnitDef { bonus: Some(Bonus::Poison), ..warrior(5, 20, 0) };
+        let strong = ArtefactDef { bonus: Some(Bonus::PoisonS), ..item(1, ArtefactType::Ring) };
+        let c = content(vec![native], vec![strong]).with_experimental(super::super::content::ExperimentalRules {
             simultaneous_bonuses: true, ..Default::default()
         });
-        assert_eq!(wearing(&c,5,&[1]).stats(&c).bonuses,vec![Bonus::PoisonS]);
+        assert_eq!(wearing(&c, 5, &[1]).stats(&c).bonuses, vec![Bonus::PoisonS]);
     }
 
     #[test]
     fn experimental_duplicate_items_compare_ids_not_categories() {
-        let c=content(vec![warrior(5,20,0)],vec![item(1,ArtefactType::Ring),item(2,ArtefactType::Ring),item(3,ArtefactType::Amulet)])
-            .with_experimental(super::super::content::ExperimentalRules { multiple_rings:true,multiple_amulets:true,no_duplicate_items:true,..Default::default() });
-        let u=wearing(&c,5,&[1,3]);
-        assert_eq!(slot_for(&c,&u,ItemId(1)),Err(EquipError::DuplicateItem));
-        assert_eq!(slot_for(&c,&u,ItemId(3)),Err(EquipError::DuplicateItem));
-        assert_eq!(slot_for(&c,&u,ItemId(2)),Ok(2));
-        let mut unrestricted=c.clone();
-        unrestricted.experimental.no_duplicate_items=false;
-        assert_eq!(slot_for(&unrestricted,&u,ItemId(1)),Ok(2));
+        let c = content(vec![warrior(5, 20, 0)], vec![item(1, ArtefactType::Ring), item(2, ArtefactType::Ring), item(3, ArtefactType::Amulet)])
+            .with_experimental(super::super::content::ExperimentalRules { multiple_rings: true, multiple_amulets: true, no_duplicate_items: true, ..Default::default() });
+        let u = wearing(&c, 5, &[1, 3]);
+        assert_eq!(slot_for(&c, &u, ItemId(1)), Err(EquipError::DuplicateItem));
+        assert_eq!(slot_for(&c, &u, ItemId(3)), Err(EquipError::DuplicateItem));
+        assert_eq!(slot_for(&c, &u, ItemId(2)), Ok(2));
+        let mut unrestricted = c.clone();
+        unrestricted.experimental.no_duplicate_items = false;
+        assert_eq!(slot_for(&unrestricted, &u, ItemId(1)), Ok(2));
+    }
+
+    #[test]
+    fn duplicate_item_check_comes_after_the_originals_same_type_refusal() {
+        // The original refuses a second item of a type with SameType; the new-game option's
+        // duplicate check must not replace that message.
+        let c = content(vec![warrior(5, 20, 0)], vec![item(1, ArtefactType::Ring)]).with_experimental(super::super::content::ExperimentalRules::for_new_game());
+        let u = wearing(&c, 5, &[1]);
+        assert_eq!(slot_for(&c, &u, ItemId(1)), Err(EquipError::SameType));
     }
 
     #[test]
     fn experimental_two_potions_count_healing_and_reject_without_mutation() {
-        let mut heal=item(1,ArtefactType::Potion);
-        heal.fixed.insert(Stat::Hits,5);
-        let c=content(vec![warrior(5,20,0)],vec![heal]).with_experimental(super::super::content::ExperimentalRules { two_potions:true,..Default::default() });
-        let mut u=wearing(&c,5,&[]);
-        u.hp=10;
-        drink(&c,&mut u,ItemId(1),0).unwrap();
-        drink(&c,&mut u,ItemId(1),0).unwrap();
-        assert!(u.potions.is_empty(),"instant heals have no lasting potion block");
-        assert_eq!(u.potions_drunk,2);
-        let before=u.clone();
-        assert_eq!(drink(&c,&mut u,ItemId(1),0),Err(EquipError::PotionLimit));
-        assert_eq!(u,before,"a refused potion changes nothing");
-        let mut classic=c.clone();
-        classic.experimental.two_potions=false;
-        assert!(drink(&classic,&mut u,ItemId(1),0).is_ok());
+        let mut heal = item(1, ArtefactType::Potion);
+        heal.fixed.insert(Stat::Hits, 5);
+        let c = content(vec![warrior(5, 20, 0)], vec![heal]).with_experimental(super::super::content::ExperimentalRules { two_potions: true, ..Default::default() });
+        let mut u = wearing(&c, 5, &[]);
+        u.hp = 10;
+        drink(&c, &mut u, ItemId(1), 0).unwrap();
+        drink(&c, &mut u, ItemId(1), 0).unwrap();
+        assert!(u.potions.is_empty(), "instant heals have no lasting potion block");
+        assert_eq!(u.potions_drunk, 2);
+        let before = u.clone();
+        assert_eq!(drink(&c, &mut u, ItemId(1), 0), Err(EquipError::PotionLimit));
+        assert_eq!(u, before, "a refused potion changes nothing");
+        let mut classic = c.clone();
+        classic.experimental.two_potions = false;
+        assert!(drink(&classic, &mut u, ItemId(1), 0).is_ok());
     }
 
     fn gear() -> Vec<ArtefactDef> {
