@@ -143,6 +143,10 @@ plan while a damaging strike was open, of which a kill), and the decisions.
   worth kept 380‰ (the original's 313‰), taken 677‰ (687‰); reserve steps 0 (0); idle with a
   damaging strike 77 of 1926 decisions, 40‰ (the original's 6 of 1661, 3.6‰), of which a kill
   open 19 (the original's 0): see `docs/OPEN_QUESTIONS.md`.
+- With the tie-break (2026-10-20; the baseline rewritten): Max wins 103 of 176 games (58.5%),
+  turn limit 6, worth kept 380‰, taken 679‰; 1861 decisions: idle with a damaging strike 54
+  (29.0‰), of which a kill 17 (9.1‰). Same battle set; the bench's wall time 6.6 s → 6.7–6.9 s
+  (within its noise, about +4%).
 
 ## 8. «Максимум» (Razdor extra, main only)
 
@@ -188,6 +192,26 @@ BattleView::ai_move (computer's turn) → max_move → MaxThinker::poll(battle)
   at least the original's stay in the search. Against the original's AI every decision then
   keeps at least the score the previous one expected, so Max never ends a battle below what the
   original would have (the harness asserts it).
+- **Tie-break toward damage** (`Battle::tie_pick`, 2026-10-20, the owner's "tempo in the score"
+  experiment): the score has no tempo, so a pass, a step or a move that deals nothing this turn
+  tied with the strike that does. At the root, the moves whose exact scores are within
+  `TIE_PERMILLE` (100‰) of a unit's worth of the best, and not below the original's, are tied;
+  the one that takes the most worth at once (`worth_taken`: the damage in worth, a kill counting
+  the target's worth again, as `max_order`) is played, the original's order on a tie. The window
+  of the root's moves sits a slack below the best, so the scores in the tie come out exact
+  (serial and threaded alike). The leaves keep their score. Measured on the benchmark (§7):
+  10‰ (1% of a unit) left Max idle more (83 decisions, 22 with a kill), 100‰ gave Max 103 of
+  176 wins, the idle decisions 77 → 54 and the kill ones 19 → 17, worth kept 380‰ (unchanged), the
+  decision count 1926 → 1861; 300‰ also passed (50 idle, 16 with a kill) but kept 378‰ and took
+  692‰ (677‰).
+- **Left out, measured** (the same benchmark; numbers in the commit): (b) a per-ply discount of
+  the worth part (a gain sooner, a loss later scores higher; 10 or 100 per ply)
+  changed 2 battles and made the kill-idle count 21 (19); with the tie-break it helped less
+  than the tie-break alone. (c) turn-limit pressure on the cut leaves (the computer's own worth
+  shaded toward the loss within 4 or 10 turns of the limit, when it is not ahead in worth)
+  changed nothing, at the bench's 4-action budget and at 12: no leaf ever sits past
+  `ROLLOUT_PLIES` there, so the branch never decided a move. Not measured at the game's clock
+  budget (`OPEN_QUESTIONS.md`).
 - The Community patch's globals (thread-local) are saved and put back around every simulated
   action; the worker thread starts from a copy of the screen's. The battle's own state is
   never touched (`max_choice` takes `&self`).

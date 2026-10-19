@@ -21,7 +21,9 @@
 //! deepest completed iteration decides. The original's own pick is searched first at every
 //! node (the move ordering for the pruning, then the per-target damage) and at the root it
 //! keeps the choice unless another action scores strictly higher, so Max never picks what
-//! its own evaluation rates below the original's choice, and ties stay predictable.
+//! its own evaluation rates below the original's choice, and ties stay predictable. Within a
+//! tenth of a unit's worth of the best (and not below the original's), the root plays the move
+//! that takes the most worth at once ([`Battle::tie_pick`]; the tempo experiment, the flow doc).
 //!
 //! The battle's [`MaxTables`] (a transposition table and a rollout cache, `tables.rs`) only
 //! save work: the choice of a search to a given depth is the same with them or without, and
@@ -66,6 +68,11 @@ const WIN: i64 = 1 << 40;
 const INF: i64 = i64::MAX / 4;
 /// A unit's worth is its tactical value × this × its share of HP left.
 const WORTH_SCALE: i64 = 1000;
+/// The root's tie-break toward damage ([`Battle::tie_pick`]): the moves within this many
+/// permille of the smallest unit's worth of the best score are tied, and the one that deals
+/// the most worth at once is played. 100‰ (a tenth of a unit's worth; 10‰ and 30% of a unit's
+/// worth were measured too, the first left Max idle more, the last gave up more worth).
+const TIE_PERMILLE: i64 = 100;
 /// Rollout steps between two looks at the clock.
 const CLOCK_EVERY: usize = 8;
 /// A rollout's start and its first positions, this many in all, go in the cache.
@@ -322,6 +329,50 @@ impl Battle {
         let (w, l) = (own.max(other) as f64, own.min(other) as f64);
         let left = (w * w - l * l / 4.0).max(0.0).sqrt() as i64;
         Some(if own > other { WIN + left } else { -WIN - left })
+    }
+
+    /// The root's tie-break slack: [`TIE_PERMILLE`] of the smallest unit's worth (a unit's worth
+    /// is its tactical value × [`WORTH_SCALE`] at full HP; a tactical value below 1 counts as 1).
+    fn tie_epsilon(&self) -> i64 {
+        let smallest = self.fighters.iter().map(|f| f.tactical.max(1) as i64).min().unwrap_or(1);
+        smallest * WORTH_SCALE * TIE_PERMILLE / 1000
+    }
+
+    /// The worth `m` (an action of the active unit `id`) takes at once: the damage it deals in
+    /// worth (the target's tactical value × its share of HP per point), a kill counting the
+    /// target's whole worth again, as `max_order` counts it. A heal or any other move takes
+    /// nothing.
+    fn worth_taken(&self, id: usize, m: MaxMove) -> i64 {
+        let Some(Plan::Act(t, k)) = m.0 else { return 0 };
+        let tf = &self.fighters[t];
+        let worth = (tf.tactical.max(1) as i64) * WORTH_SCALE / tf.max_hp().max(1) as i64;
+        match self.preview(id, t, k) {
+            Preview::Damage(d) => d.max(0) as i64 * worth + if d >= tf.hp { tf.tactical.max(1) as i64 * WORTH_SCALE } else { 0 },
+            _ => 0,
+        }
+    }
+
+    /// The root's tie-break toward damage (the owner's tempo experiment, `docs/flows/battle-ai.md`
+    /// §8): among the root's moves (`moves`, the original's first) with exact scores `values`
+    /// (the best is `best_v`), those within `eps` of the best and not below the original's
+    /// (`values[0]`) are tied, and the one that takes the most worth at once
+    /// ([`Battle::worth_taken`]) is played, the earliest (the original's order) on a tie. A move
+    /// with a score at or above that floor is exact (the search's windows sit below it), so the
+    /// pick is the same whatever the threads' timing.
+    fn tie_pick(&self, moves: &[MaxMove], values: &[i64], best_v: i64, eps: i64) -> usize {
+        let Some(id) = self.active() else { return 0 };
+        let floor = (best_v - eps).max(values[0]);
+        let mut pick: Option<(usize, i64)> = None;
+        for (i, &m) in moves.iter().enumerate() {
+            if values[i] < floor {
+                continue;
+            }
+            let taken = self.worth_taken(id, m);
+            if pick.is_none_or(|(_, t)| taken > t) {
+                pick = Some((i, taken));
+            }
+        }
+        pick.map_or(0, |(i, _)| i)
     }
 
     /// `team`'s worth left: each standing unit's tactical value × its share of HP left, plus
@@ -786,13 +837,20 @@ impl<'a> Search<'a> {
     /// if the budget ran out. The root's order is the caller's alone, never the table's, so
     /// which of equal moves wins does not depend on what the tables hold.
     fn root(&mut self, b: &Battle, moves: &[MaxMove], depth: u32) -> Option<(MaxMove, i64, i64, Vec<i64>)> {
-        let (mut best, mut alpha, mut original_value) = (moves[0], -INF, 0);
+        let (mut best, mut best_v, mut original_value) = (moves[0], -INF, 0);
+        let slack = self.tie_slack(b);
         let mut values = Vec::with_capacity(moves.len());
         let ahead = self.prefetch_leaves(b, moves, depth, 0);
         for (i, &m) in moves.iter().enumerate() {
             if ahead {
                 self.prefetch.expect("prefetching").claim(i, &mut self.help);
             }
+            let alpha = match slack {
+                _ if i == 0 => -INF,
+                None => best_v,
+                // Below the best by the tie's slack: a score within it comes out exact.
+                Some(eps) => best_v - eps - 1,
+            };
             let v = self.child(b, m, depth - 1, 1, alpha, INF);
             if self.aborted {
                 if ahead {
@@ -802,15 +860,25 @@ impl<'a> Search<'a> {
             }
             values.push(v);
             if i == 0 {
-                (best, alpha, original_value) = (m, v, v);
-            } else if v > alpha {
-                (best, alpha) = (m, v);
+                (best, best_v, original_value) = (m, v, v);
+            } else if v > best_v {
+                (best, best_v) = (m, v);
             }
         }
         if ahead {
             self.prefetch.expect("prefetching").finish();
         }
-        Some((best, alpha, original_value, values))
+        if let Some(eps) = slack {
+            let k = b.tie_pick(moves, &values, best_v, eps);
+            (best, best_v) = (moves[k], values[k]);
+        }
+        Some((best, best_v, original_value, values))
+    }
+
+    /// The root's tie-break slack ([`Battle::tie_pick`]), `None` in the forced-win search, which
+    /// only asks whether a win is proven.
+    fn tie_slack(&self, b: &Battle) -> Option<i64> {
+        (!self.forced).then(|| b.tie_epsilon())
     }
 
     /// A search like this one for another thread, its counters at 0.
@@ -894,6 +962,7 @@ impl<'a> Search<'a> {
         let next = AtomicUsize::new(0);
         let best = Mutex::new((-INF, usize::MAX));
         let values = Mutex::new(vec![None; moves.len()]);
+        let slack = self.tie_slack(b);
         let forks: Vec<Search> = std::thread::scope(|scope| {
             let workers: Vec<_> = (0..threads)
                 .map(|_| {
@@ -907,10 +976,11 @@ impl<'a> Search<'a> {
                             if i >= moves.len() {
                                 break;
                             }
-                            let alpha = match *best.lock().unwrap_or_else(|e| e.into_inner()) {
+                            let alpha = match (*best.lock().unwrap_or_else(|e| e.into_inner()), slack) {
                                 _ if i == 0 => -INF,
-                                (v, at) if at < i => v,
-                                (v, _) => v - 1,
+                                ((v, _), Some(eps)) => v - eps - 1,
+                                ((v, at), None) if at < i => v,
+                                ((v, _), None) => v - 1,
                             };
                             let v = s.child(&b, moves[i], depth - 1, 1, alpha, INF);
                             if s.aborted {
@@ -942,7 +1012,13 @@ impl<'a> Search<'a> {
         let values: Option<Vec<i64>> = values.into_inner().unwrap_or_else(|e| e.into_inner()).into_iter().collect();
         let (v, at) = best.into_inner().unwrap_or_else(|e| e.into_inner());
         match values {
-            Some(values) if all && !self.aborted && at < moves.len() => Some((moves[at], v, values[0], values)),
+            Some(values) if all && !self.aborted && at < moves.len() => match slack {
+                Some(eps) => {
+                    let k = b.tie_pick(moves, &values, v, eps);
+                    Some((moves[k], values[k], values[0], values))
+                }
+                None => Some((moves[at], v, values[0], values)),
+            },
             _ => {
                 self.aborted = true;
                 None

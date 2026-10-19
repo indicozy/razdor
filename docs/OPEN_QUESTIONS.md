@@ -14,7 +14,16 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   damaging strike open, the original's AI 6 of 1661, never with a kill). Some may be right
   (a tempo move, a heal first, a lost battle either way); the owner should read them. Check
   the search's choice and its rollout scores there before changing the score. Recorded in
-  the baseline's `idle_kill` counts.
+  the baseline's `idle_kill` counts. The root's tie-break toward damage (battle-ai §8) took it
+  from 19 of 1926 to 17 of 1861; still open.
+
+- **«Максимум» turn-limit pressure and tempo at the game's clock** (2026-10-20, the tempo
+  experiment, battle-ai §8). The benchmark's fixed budgets (4 or 12 actions, 600 positions)
+  never reach a leaf past `ROLLOUT_PLIES`, so the turn-limit shading of cut leaves changed no
+  move there, and the per-ply discount of the worth part changed 2 battles and did not help.
+  Neither was measured at the game's clock, where the search goes deeper (mean depth 6–7 with
+  threads). Measure there first (`max_beats_the_original_on_real_armies_in_game_time`, by hand)
+  before reviving either; the baseline's 6 turn-limit endings are what they should move.
 
 - **Unit panel: Community bleed source, evasion, magic tint** (2026-10-19). The stat list
   (interface.md, the "Razdor now → original" row 80) follows the original's colour rule. Still open:
