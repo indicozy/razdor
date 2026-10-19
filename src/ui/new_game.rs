@@ -82,6 +82,13 @@ fn picked_bar(r: Rect) {
     }
 }
 
+/// The map frame and the picture in it, from the frame's top left `at`, `px` screen pixels
+/// to one of the original's: `MapImageFrame` at its 295×162 and the map's 267×134 picture
+/// 14 px in (0x4c1c24 puts the frame, 0x4c1c63 the picture at +0xe, +0xe).
+fn map_frame_rects(at: Vec2, px: f32) -> (Rect, Rect) {
+    (Rect::new(at.x, at.y, 295.0 * px, 162.0 * px), Rect::new(at.x + 14.0 * px, at.y + 14.0 * px, 267.0 * px, 134.0 * px))
+}
+
 /// The scenario icon: `SI_Castle`, `SI_Helm`, `SI_Swords`, `SI_Skull`, `SI_Tutorial` by the
 /// map's picture index (header byte 0x120, 1..5), centred on `c` at its own size. The original
 /// loads each as a picture with its mask (0x4dc118 → 0x48cd90) and puts it into the row's icon
@@ -327,10 +334,16 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
     // The map and what it is.
     if let Some(g) = list.get(picked) {
         let (i, e) = (g.first, &scenarios[g.first]);
-        let frame = win.rect(290.0, 36.0, 295.0, 162.0);
-        draw_rectangle(frame.x, frame.y, frame.w, frame.h, BLACK);
-        // The frame's opening: the map's own picture (it is made for it), else the terrain.
-        let inner = Rect::new(frame.x + 8.0 * k, frame.y + 8.0 * k, frame.w - 16.0 * k, frame.h - 16.0 * k);
+        // (Razdor's scenario window draws the frame at the interface scale, 295 × 162 of its
+        // own pixels, the picture at the same scale so the two stay in register.)
+        let (frame, inner) = map_frame_rects(win.rect(290.0, 36.0, 0.0, 0.0).point(), k);
+        // The original copies MapImageFrame (295×162) as it is, then the map's own 267×134
+        // picture at its size 14 px in, over the frame's opening (0x4c1c09..0x4c1c63); no
+        // line is drawn round either. Without a picture Razdor shows the terrain there.
+        match chrome::win("MapImageFrame") {
+            Some(t) => chrome::tex(&t, frame, WHITE),
+            None => draw_rectangle(frame.x, frame.y, frame.w, frame.h, BLACK),
+        }
         let pic = picture(i, e);
         match (&pic, preview(i, e)) {
             (Some(p), _) => chrome::tex(p, inner, WHITE),
@@ -340,9 +353,6 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
                 chrome::tex(&t, Rect::new(inner.center().x - side / 2.0, inner.y + (inner.h - side) / 2.0, side, side), WHITE);
             }
             (None, None) => {}
-        }
-        if let Some(t) = chrome::win_fx("MapImageFrame", chrome::Fx::KeyBlack) {
-            chrome::tex(&t, frame, WHITE);
         }
         // Under it the description box (0x4d2a30, 65ae00): the name centred in white, the
         // description justified in the ae24a0 tint, the block centred in the box's height.
@@ -726,6 +736,19 @@ mod tests {
         assert_eq!(desc_max_scroll(&steps, 200.0), 0, "it fits: no scrolling");
         assert_eq!(desc_max_scroll(&steps, 140.0), 2, "the name scrolls away first");
         assert_eq!(desc_max_scroll(&steps, 100.0), 5);
+    }
+
+    /// The map frame and its picture at one scale (0x4c1c09..0x4c1c63; issue #17): the 267×134
+    /// picture 14 px in fills the 295×162 frame's opening with the same 14 px all round.
+    #[test]
+    fn the_map_picture_sits_14_px_inside_its_frame() {
+        for px in [1.0, 1.0667, 1.5] {
+            let (frame, inner) = map_frame_rects(vec2(10.0, 20.0), px);
+            assert_eq!((frame.w, frame.h), (295.0 * px, 162.0 * px));
+            assert_eq!((inner.x - frame.x, inner.y - frame.y), (14.0 * px, 14.0 * px));
+            assert!((frame.right() - inner.right() - 14.0 * px).abs() < 1e-3);
+            assert!((frame.bottom() - inner.bottom() - 14.0 * px).abs() < 1e-3);
+        }
     }
 
     #[test]

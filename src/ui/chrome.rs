@@ -928,7 +928,7 @@ impl Skin {
         let paper = |c: Color| win("Win-paper").map(|t| (t, c));
         match self {
             Skin::Marble => win("Win-marble").map(|t| (t, WHITE)),
-            Skin::Red => win("Win-red").map(|t| (t, WHITE)),
+            Skin::Red => win_scaled("Win-red", [1024; 3], [-20, -40, -100]).map(|t| (t, WHITE)),
             Skin::Paper => paper(WHITE),
             Skin::Brown => paper(Color::new(0.33, 0.21, 0.02, 1.0)),
             Skin::Strip => paper(Color::new(0.37, 0.265, 0.02, 1.0)),
@@ -1025,10 +1025,137 @@ pub fn neutral_surface_alpha(r: Rect, alpha: f32) {
     tile(&noise_texture(), r, 2.0, Color::new(0.6 * r_, 0.6 * g, 0.6 * b, alpha));
 }
 
-/// The silver edge of windows and panels (outer light line, inner dark line).
+/// Screen pixels per pixel of the original's 1024×768 screen (`k` is per pixel of the 960×720
+/// reference: the original's pixel is 0.9375 of it).
+pub fn opx() -> f32 {
+    0.9375 * k()
+}
+
+/// `SteelLine.lit` transposed (0xae2538's column for the runs down), cached with the windows art.
+fn steel_column() -> Option<Texture2D> {
+    let key = "Windows/SteelLine.lit#transposed".to_string();
+    CHROME.with(|c| {
+        let mut c = c.borrow_mut();
+        let c = c.as_mut()?;
+        if let Some(t) = c.textures.get(&key).and_then(|v| v[Fx::Plain as usize].as_ref()) {
+            return t.clone();
+        }
+        let t = find_path(&c.dir, "Graphics/Windows/SteelLine.lit")
+            .and_then(|p| gfx::decode_file(&p))
+            .map_err(|e| razdor::diag!("Discord Times art: Windows/SteelLine.lit: {e}"))
+            .ok()
+            .and_then(|mut frames| {
+                let img = frames.get_mut(0)?;
+                let (w, h) = (img.width as usize, img.height as usize);
+                let mut out = vec![0u8; w * h * 4];
+                for y in 0..h {
+                    for x in 0..w {
+                        let (from, to) = ((y * w + x) * 4, (x * h + y) * 4);
+                        out[to..to + 4].copy_from_slice(&img.rgba[from..from + 4]);
+                    }
+                }
+                *img = Image { width: h as u32, height: w as u32, rgba: out };
+                to_texture(img)
+            });
+        c.textures.entry(key).or_default()[Fx::Plain as usize] = Some(t.clone());
+        t
+    })
+}
+
+/// `SteelLine.lit` (0xae2538, loaded by 0x4dbb0c): the row texture and its transpose, for the
+/// frame lines' runs along and down.
+fn steel_textures() -> Option<(Texture2D, Texture2D)> {
+    let row = win("SteelLine")?;
+    let col = steel_column()?;
+    row.set_filter(FilterMode::Nearest);
+    col.set_filter(FilterMode::Nearest);
+    Some((row, col))
+}
+
+/// Splits a run of `n` texels from the flat index `start` of a `w`×`h` picture read as one
+/// long row (0x4764c0 reads it flat, so a run that passes a row's end goes on with the next
+/// row) into `(index, offset in the run, length)` pieces that stay within one row. Past the
+/// picture's end the original reads on into unrelated memory; Razdor starts the picture
+/// again.
+pub fn steel_pieces(start: usize, n: usize, w: usize, h: usize) -> Vec<(usize, usize, usize)> {
+    let total = (w * h).max(1);
+    let mut pieces = Vec::new();
+    let mut done = 0;
+    while done < n && w > 0 {
+        let i = (start + done) % total;
+        let len = (w - i % w).min(n - done);
+        pieces.push((i, done, len));
+        done += len;
+    }
+    pieces
+}
+
+/// The original's frame line (0x48d1d4 with colour −1, every window and panel outline): the
+/// outline of `r`, `thick` (1 or 2) pixels wide, each pixel `px` screen pixels along the
+/// line and `line` across it, its colours `SteelLine.lit`'s texels taken one by one by an
+/// index that runs on round the frame: the top left to right, the right side down, the
+/// bottom right to left, the left side up. A 2 px line's second pixel lies inside (y + 1,
+/// x − 2, y − 2, x + 1) in the same colour; each side overwrites the corners the one before
+/// it drew. Without the install a plain silver outline.
+fn steel_outline(r: Rect, px: f32, thick: u8, line: f32) {
+    let t = f32::from(thick.clamp(1, 2));
+    let Some((row, col)) = steel_textures() else {
+        draw_rectangle_lines(r.x, r.y, r.w, r.h, t * line, SILVER);
+        return;
+    };
+    let (tw, th) = (row.width() as usize, row.height() as usize);
+    let w = (r.w / px).round().max(0.0) as usize;
+    let h = (r.h / px).round().max(0.0) as usize;
+    if w == 0 || h == 0 {
+        return;
+    }
+    let band = t * line;
+    let along = |start: usize, n: usize, x: f32, y: f32, reversed: bool| {
+        for (i, off, len) in steel_pieces(start, n, tw, th) {
+            let at = if reversed { n - off - len } else { off };
+            draw_texture_ex(&row, x + at as f32 * px, y, WHITE, DrawTextureParams {
+                dest_size: Some(vec2(len as f32 * px, band)),
+                source: Some(Rect::new((i % tw) as f32, (i / tw) as f32, len as f32, 1.0)),
+                flip_x: reversed,
+                ..Default::default()
+            });
+        }
+    };
+    let down = |start: usize, n: usize, x: f32, y: f32, reversed: bool| {
+        for (i, off, len) in steel_pieces(start, n, tw, th) {
+            let at = if reversed { n - off - len } else { off };
+            draw_texture_ex(&col, x, y + at as f32 * px, WHITE, DrawTextureParams {
+                dest_size: Some(vec2(band, len as f32 * px)),
+                source: Some(Rect::new((i / tw) as f32, (i % tw) as f32, 1.0, len as f32)),
+                flip_y: reversed,
+                ..Default::default()
+            });
+        }
+    };
+    let (right, bottom) = (r.x + w as f32 * px - band, r.y + h as f32 * px - band);
+    along(0, w, r.x, r.y, false);
+    down(w, h, right, r.y, false);
+    along(w + h, w, r.x, bottom, true);
+    down(2 * w + h, h, r.x, r.y, true);
+}
+
+/// 0x48d1d4's outline of `r` in the original's pixels of `px` screen pixels.
+pub fn steel_frame(r: Rect, px: f32, thick: u8) {
+    steel_outline(r, px, thick, px);
+}
+
+
+/// A frame of the original's line round `r`: 2 px when `width` is two of the original's
+/// pixels or more, else 1 px (0x48d1d4).
 pub fn silver_frame(r: Rect, width: f32) {
-    draw_rectangle_lines(r.x, r.y, r.w, r.h, width, SILVER);
-    draw_rectangle_lines(r.x + width, r.y + width, r.w - 2.0 * width, r.h - 2.0 * width, 1.0, SILVER_DARK);
+    let width = width.max(1.0);
+    let thick = if width >= 1.5 * opx() { 2 } else { 1 };
+    steel_outline(r, opx(), thick, width / f32::from(thick));
+}
+/// (2, 27) to (w − 2, 29) under the title. `px` as in the window frames of 0x48d710.
+pub fn window_frames(r: Rect, px: f32) {
+    steel_frame(r, px, 2);
+    steel_frame(Rect::new(r.x + 2.0 * px, r.y + 27.0 * px, r.w - 4.0 * px, 2.0 * px), px, 2);
 }
 
 /// The original's empty worn-item slot (0xae2860 with its alpha 0xae2864, built at start-up
@@ -1155,7 +1282,7 @@ fn window_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bool)
     surface(r, skin);
     let tb = (26.0 * k).round();
     let closed = title_bar_styled(Rect::new(r.x, r.y, r.w, tb), title, skin, closable, ornate);
-    silver_frame(r, (1.5 * k).max(1.0));
+    window_frames(r, opx());
     (Rect::new(r.x + 2.0 * k, r.y + tb + 1.0, r.w - 4.0 * k, r.h - tb - 3.0 * k), closed)
 }
 
