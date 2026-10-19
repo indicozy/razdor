@@ -870,7 +870,7 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
             // Razdor's drag starts from a press that does not swap.
             _ => {
                 if let Some(i) = on {
-                    super::unit_drag::press(i, game.squad[i].def);
+                    super::unit_drag::press(i, game.squad[i].def, (game.squad[i].hp, game.squad[i].max_hp(&c)));
                 }
             }
         }
@@ -1124,14 +1124,14 @@ fn garrison(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
         match garrison_click(controls, top, bottom) {
             GarrisonClick::Select(s) => {
                 view.garrison_sel = Some(s);
-                start_garrison_drag(&guards, &squad, s);
+                start_garrison_drag(&guards, &squad, s, &c);
             }
             GarrisonClick::Clear => view.garrison_sel = None,
             GarrisonClick::Act => {
                 garrison_act(game, view, &guards, &squad, sel, top, bottom, message);
                 // A unit selected by this press may be dragged from here (Razdor's).
                 if let (None, Some(s)) = (sel, view.garrison_sel) {
-                    start_garrison_drag(&guards, &squad, s);
+                    start_garrison_drag(&guards, &squad, s, &c);
                 }
             }
             GarrisonClick::Nothing => {}
@@ -1169,10 +1169,10 @@ fn garrison_click(controls: super::unit_drag::Controls, top: Option<Hit>, bottom
 }
 
 /// Razdor's drag from the garrison tab's card `s` (a garrison unit, its index).
-fn start_garrison_drag(guards: &[razdor::rules::world::Stationed], squad: &[Unit], s: (bool, usize)) {
+fn start_garrison_drag(guards: &[razdor::rules::world::Stationed], squad: &[Unit], s: (bool, usize), c: &razdor::rules::content::Content) {
     match s {
-        (true, j) => super::unit_drag::press_guard(j, guards[j].unit.def),
-        (false, i) => super::unit_drag::press(i, squad[i].def),
+        (true, j) => super::unit_drag::press_guard(j, guards[j].unit.def, (guards[j].unit.hp, guards[j].unit.max_hp(c))),
+        (false, i) => super::unit_drag::press(i, squad[i].def, (squad[i].hp, squad[i].max_hp(c))),
     }
 }
 

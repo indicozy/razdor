@@ -19,6 +19,7 @@ use razdor::rules::formation::Slot;
 use serde::{Deserialize, Serialize};
 
 use super::assets::Assets;
+use super::chrome;
 use super::widgets::{input_blocked, pointer};
 
 /// Pixels the mouse must move before a press on a card drags it.
@@ -69,6 +70,9 @@ struct Drag {
     unit: usize,
     guard: bool,
     kind: UnitId,
+    /// Its hits and maximum: the dragged portrait shows its wounds as its card does.
+    hp: i32,
+    max: i32,
     start: Vec2,
     moved: bool,
 }
@@ -77,14 +81,15 @@ thread_local! {
     static DRAG: Cell<Option<Drag>> = const { Cell::new(None) };
 }
 
-/// A press on squad member `unit`'s card: it may be dragged from here.
-pub fn press(unit: usize, kind: UnitId) {
-    DRAG.with(|d| d.set(Some(Drag { unit, guard: false, kind, start: pointer().into(), moved: false })));
+/// A press on squad member `unit`'s card (its type `kind`, its hits `hp` of `max`): it may be
+/// dragged from here.
+pub fn press(unit: usize, kind: UnitId, (hp, max): (i32, i32)) {
+    DRAG.with(|d| d.set(Some(Drag { unit, guard: false, kind, hp, max, start: pointer().into(), moved: false })));
 }
 
 /// A press on garrison unit `unit`'s card (the garrison tab): it may be dragged from here.
-pub fn press_guard(unit: usize, kind: UnitId) {
-    DRAG.with(|d| d.set(Some(Drag { unit, guard: true, kind, start: pointer().into(), moved: false })));
+pub fn press_guard(unit: usize, kind: UnitId, (hp, max): (i32, i32)) {
+    DRAG.with(|d| d.set(Some(Drag { unit, guard: true, kind, hp, max, start: pointer().into(), moved: false })));
 }
 
 /// The squad member being dragged, once the mouse has moved (its card is drawn dimmed).
@@ -122,6 +127,8 @@ pub fn follow(assets: &Assets, size: Vec2) -> Option<(bool, usize)> {
         if d.moved {
             let r = Rect::new(m.x - size.x / 2.0, m.y - size.x / 2.0, size.x, size.x);
             assets.draw_portrait(d.kind, Team::Player, r);
+            // A wounded unit keeps its wounds on the portrait, as in its cell (chrome::wounds).
+            chrome::wounds(r, d.hp, d.max);
             draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, super::chrome::GOLD);
         }
         DRAG.with(|c| c.set(Some(d)));
