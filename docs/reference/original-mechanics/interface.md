@@ -411,6 +411,11 @@ Tooltip box: centred on the mouse, kept inside the 1024×682 view; styles normal
 portraits with a darkened band of height `46 × (1 − HP/max HP)` px on wounded units; ruins
 never show their defenders. **code** (4ca8ac, 4ca9f0, 4cb18c)
 
+The holder a castle, fort or ruins names in its tooltip (4cb18c) is read from the map's army
+record for its owner byte k: the leader name of record k − 1 (68ed04, 4cb2d3). That table is
+filled once by the loader (4b771c) and nothing clears it, so the name shows whether that army
+is on the map, inactive or beaten. **code** (4cb2d3, 68ed04, 4b771c)
+
 ### 7.5 World spell targeting
 
 After a world spell is chosen in the spell book, the map is in targeting mode. Hovering an
