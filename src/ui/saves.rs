@@ -271,6 +271,23 @@ fn row_of(e: &ListedSave) -> Row {
     Row { name, scenario, time: razdor::trf!("Time: {date}", date = saved_label(m.saved_at)), pinned: e.pinned, waiting: false, mark: None }
 }
 
+/// The save lists' fonts (0x4b61bc, 0x4b6338): the save's name in ae24a0 (Benguiat less
+/// 0, 0, 100), the scenario's name in ae24f0 (less 25, 25, 125, loaded at 0x4dc01a), the
+/// time in ae24c4 (SanSerif less 20, 90, 180). No highlight font is given (0x47e46c's last
+/// argument 0), so the picked row keeps them, and the lists' highlight mode 4 (0x4d67ac)
+/// adds (0, 30, 90) over its lines, text included (0x47d71c): the yellows come out almost
+/// white, the orange pale.
+const NAME_INK: [u8; 3] = [255, 255, 155];
+const SCENARIO_INK: [u8; 3] = [230, 230, 130];
+const TIME_INK: [u8; 3] = [235, 165, 75];
+const PICKED_ADDED: [u8; 3] = [0, 30, 90];
+
+/// A save row's text colour `c`, with the picked row's (0, 30, 90) added when `picked`.
+fn row_ink(c: [u8; 3], picked: bool) -> Color {
+    let add = if picked { PICKED_ADDED } else { [0; 3] };
+    Color::from_rgba(c[0].saturating_add(add[0]), c[1].saturating_add(add[1]), c[2].saturating_add(add[2]), 255)
+}
+
 /// Razdor's pin of a save: a round head with a needle, gold when pinned, grey when not.
 fn draw_pin(r: Rect, on: bool, hover: bool) {
     let gold = Color::new(0.95, 0.78, 0.3, 1.0);
@@ -437,7 +454,8 @@ impl Book {
             let dim = |c: Color| if row.waiting { Color { a: c.a * 0.55, ..c } } else { c };
             // The name is centred on its column, never wider than the room right of the load
             // sign (its right edge at 43): 2 × (157 − 47).
-            let name_color = dim(ACCENT);
+            let lit = |c: [u8; 3]| dim(row_ink(c, selected == Some(i)));
+            let name_color = lit(NAME_INK);
             super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
                 let size = fit_size(&row.name, NAME_ROOM * k, 16.0 * k);
                 let shown = ellipsize(&row.name, NAME_ROOM * k, size);
@@ -452,10 +470,10 @@ impl Book {
             });
             let cx = self.p(437.0, 0.0).x;
             super::dt_font::with_face(super::dt_font::Face::Bold, || {
-                super::chrome::shadow_centered(&ellipsize(&row.scenario, 250.0 * k, 11.0 * k), cx, r.y + lh * 0.42, 11.0 * k, dim(ACCENT));
+                super::chrome::shadow_centered(&ellipsize(&row.scenario, 250.0 * k, 11.0 * k), cx, r.y + lh * 0.42, 11.0 * k, lit(SCENARIO_INK));
             });
             super::dt_font::with_face(super::dt_font::Face::Body, || {
-                super::chrome::shadow_centered(&ellipsize(&row.time, 250.0 * k, 11.0 * k), cx, r.y + lh * 0.9, 11.0 * k, dim(Color::new(1.0, 0.58, 0.20, 1.0)));
+                super::chrome::shadow_centered(&ellipsize(&row.time, 250.0 * k, 11.0 * k), cx, r.y + lh * 0.9, 11.0 * k, lit(TIME_INK));
             });
             // Keep the play mark above long save names and the selected row highlight.
             if selected == Some(i) {
@@ -1070,6 +1088,16 @@ fn question_box(title: &str, text: &str, marked: bool) -> Option<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 0x4b6338, 0x47d71c: the picked save's lines keep their fonts with (0, 30, 90) added.
+    #[test]
+    fn the_picked_save_s_lines_are_their_fonts_with_the_highlight_added() {
+        let rgb = |c: Color| [(c.r * 255.0).round() as u8, (c.g * 255.0).round() as u8, (c.b * 255.0).round() as u8];
+        assert_eq!(rgb(row_ink(NAME_INK, false)), [255, 255, 155]);
+        assert_eq!(rgb(row_ink(NAME_INK, true)), [255, 255, 245], "the name almost white");
+        assert_eq!(rgb(row_ink(SCENARIO_INK, true)), [230, 255, 220]);
+        assert_eq!(rgb(row_ink(TIME_INK, true)), [235, 195, 165], "the time pale, not orange");
+    }
 
     #[test]
     fn over_the_map_the_book_stands_centred_over_the_view() {
