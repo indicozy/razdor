@@ -963,15 +963,17 @@ varying lowp vec4 color;
 varying lowp vec2 uv;
 uniform sampler2D Texture;
 void main() {
-    gl_FragColor = vec4(color.rgb, color.a * step(0.7, texture2D(Texture, uv).a));
+    gl_FragColor = vec4(color.rgb, color.a * step(0.77, texture2D(Texture, uv).a));
 }"#;
 
 thread_local! {
     static SILHOUETTE: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
 }
 
-/// Runs `draw` with every picture drawn as its solid shape in the tint colour (the faint
-/// alpha of a shadow left out), for outlines. Without the material, nothing is drawn.
+/// Runs `draw` with every picture drawn as its solid shape in the tint colour, for outlines:
+/// only alpha above 0.77, so a building's shadow (up to
+/// [`razdor::dt::gfx::BUILDING_SHADOW_ALPHA`], 0.733) is left out and its edges (from 0.8)
+/// kept. Without the material, nothing is drawn.
 pub fn silhouette(draw: impl FnOnce()) {
     use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation, PipelineParams};
     let material = SILHOUETTE.with(|m| {
@@ -2439,6 +2441,15 @@ pub fn effect(rel: &str, c: Vec2, size: f32, t: f32, color: Color) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The outline's cut sits above a building's shadow plane and below its edges (12/15).
+    #[test]
+    fn the_silhouette_leaves_building_shadows_out() {
+        let cut = 0.77;
+        assert!(SILHOUETTE_FRAGMENT.contains("step(0.77,"));
+        assert!(cut * 255.0 > razdor::dt::gfx::BUILDING_SHADOW_ALPHA as f32);
+        assert!(cut * 255.0 < 204.0);
+    }
 
     /// The hall list's edges as the original's (0x4bef1b..0x4bf00f): grey 48 off a 2 px band
     /// and again off a 4 px band, so the outer 2 px lose 96, the next 2 px 48, the rest none.

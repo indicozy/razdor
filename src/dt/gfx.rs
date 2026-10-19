@@ -236,6 +236,12 @@ pub const LIT_420: u32 = 2;
 /// LIT flag: a fourth (alpha) plane.
 pub const LIT_ALPHA: u32 = 8;
 
+/// The most opaque alpha of the shadows drawn into the map's building pictures
+/// (`Objects.ugs`, alpha in steps of 17): a building's shadow is one flat plane of 9/15, 10/15
+/// or 11/15 (153, 170 or 187), its body 255 with edges from 12/15. Outlines take only what is
+/// more opaque than this.
+pub const BUILDING_SHADOW_ALPHA: u8 = 187;
+
 /// The orthonormal 8-point DCT basis, `C[k][n]`.
 fn dct_basis() -> [[f64; 8]; 8] {
     let mut c = [[0.0; 8]; 8];
@@ -1310,6 +1316,27 @@ mod tests {
             p[3] > 200 && hi - lo < 40 && (p[0] as u32 + p[1] as u32 + p[2] as u32) / 3 > 90
         });
         assert_eq!(grey.count(), 0);
+    }
+
+    #[test]
+    fn real_building_shadows_are_no_more_opaque_than_the_shadow_alpha() {
+        // A building's shadow is its largest half-clear plane: the most common alpha between
+        // clear and solid, wherever there are enough such pixels to be one.
+        let Some(dt) = install() else { return };
+        let objects = dt.map_objects().unwrap();
+        let mut checked = 0;
+        for s in objects.sprites.iter().filter(|s| s.section == ObjectSprite::BUILDINGS) {
+            let mut counts = [0usize; 256];
+            for p in s.image.rgba.chunks_exact(4).filter(|p| (100..=250).contains(&p[3])) {
+                counts[p[3] as usize] += 1;
+            }
+            let (alpha, n) = counts.iter().enumerate().max_by_key(|&(_, n)| *n).unwrap();
+            if *n >= 100 {
+                assert!(alpha <= BUILDING_SHADOW_ALPHA as usize, "building {} {}: shadow alpha {alpha}", s.cat, s.idx);
+                checked += 1;
+            }
+        }
+        assert!(checked > 40, "{checked} shadows");
     }
 
     #[test]
