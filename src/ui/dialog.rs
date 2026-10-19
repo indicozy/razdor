@@ -22,14 +22,25 @@ pub const MANA: Color = Color::new(0.55, 0.72, 1.0, 1.0);
 const CAPTION: Color = Color::new(155.0 / 255.0, 1.0, 155.0 / 255.0, 1.0);
 
 /// The noon report's resource labels. Deviation (the owner's decision, 2026-10-19, a
-/// player's request): the gold in yellow and the wages in red, brighter than the
-/// original's tints; the original draws all four in the green ae249c ([`CAPTION`]).
+/// player's request): the gold in yellow, the magic in blue, the income in green and the wages
+/// in red, all four of about the same brightness; the original draws all four in the green
+/// ae249c ([`CAPTION`]).
 fn report_label_ink(r: Resource) -> Color {
     match r {
-        Resource::Gold => Color::from_rgba(255, 240, 80, 255),
-        Resource::Wages => Color::from_rgba(255, 90, 75, 255),
+        Resource::Gold => Color::from_rgba(250, 222, 90, 255),
+        Resource::Mana => Color::from_rgba(150, 215, 255, 255),
+        Resource::Wages => Color::from_rgba(255, 170, 150, 255),
         _ => CAPTION,
     }
+}
+
+/// Where the noon report's `n` resource labels stand in the box from `x` over `w`, at `cy`
+/// and scale `o`: each label's centre x, and the one baseline all of them share (whole pixels;
+/// no label may sit lower than the one before it).
+fn report_label_places(n: usize, x: f32, w: f32, o: f32, cy: f32) -> (Vec<f32>, f32) {
+    let step = (w - 60.0 * o) / n as f32;
+    let centres = (0..n).map(|k| x + 30.0 * o + step * (k as f32 + 0.5)).collect();
+    (centres, (cy + 18.0 * o).round())
 }
 
 /// A resource icon with its label.
@@ -574,14 +585,12 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     }
     cy += tb.h + 10.0 * o;
     if !d.resources.is_empty() {
-        let n = d.resources.len() as f32;
-        let step = (w - 60.0 * o) / n;
-        for (k, (r, label)) in d.resources.iter().enumerate() {
-            let cx = x + 30.0 * o + step * (k as f32 + 0.5);
+        let (centres, baseline) = report_label_places(d.resources.len(), x, w, o, cy);
+        for ((r, label), &cx) in d.resources.iter().zip(&centres) {
             // The original's caption face, every label in its green font ae249c (0x4d6114 sets
             // it on all four places), the mana's too.
             let c = if d.resource_report { report_label_ink(*r) } else { CAPTION };
-            super::dt_font::with_original_face(super::dt_font::Face::Subtitle, || chrome::shadow_centered(label, cx, cy + 18.0 * o, size, c));
+            super::dt_font::with_original_face(super::dt_font::Face::Subtitle, || chrome::shadow_centered(label, cx, baseline, size, c));
             resource_icon(*r, cx, cy + 62.0 * o, 70.0 * o);
         }
         cy += res_h;
@@ -889,5 +898,31 @@ mod tests {
         assert!(d.waiting(10.2));
         assert!(!d.waiting(10.25));
         assert!(!Dialog::new("now").waiting(0.0));
+    }
+
+    /// The noon report's four labels share one baseline and sit in order across the box (they
+    /// drifted a pixel lower each, one after another).
+    #[test]
+    fn the_report_s_resource_labels_share_one_baseline() {
+        for (o, cy) in [(1.0, 300.0), (1.5, 412.3), (0.75, 97.6)] {
+            let (centres, baseline) = report_label_places(4, 40.0, 500.0, o, cy);
+            assert_eq!(centres.len(), 4);
+            assert_eq!(baseline, (cy + 18.0 * o).round());
+            assert!(centres.windows(2).all(|p| p[0] < p[1]), "{centres:?}");
+        }
+    }
+
+    /// Deviation (the owner's decision): the four report labels are of about one brightness,
+    /// and the magic is blue, the wages still red, the gold yellow.
+    #[test]
+    fn the_report_s_label_inks_are_of_one_brightness() {
+        let luma = |c: Color| 0.299 * c.r * 255.0 + 0.587 * c.g * 255.0 + 0.114 * c.b * 255.0;
+        let inks = [Resource::Gold, Resource::Mana, Resource::Income, Resource::Wages].map(report_label_ink);
+        let (lo, hi) = inks.iter().fold((f32::MAX, f32::MIN), |(lo, hi), &c| (lo.min(luma(c)), hi.max(luma(c))));
+        assert!(hi - lo <= 24.0, "{lo} .. {hi}");
+        let blue = report_label_ink(Resource::Mana);
+        assert!(blue.b > blue.r && blue.b > blue.g, "{blue:?}");
+        let red = report_label_ink(Resource::Wages);
+        assert!(red.r > red.g && red.r > red.b, "{red:?}");
     }
 }
