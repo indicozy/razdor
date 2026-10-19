@@ -286,6 +286,24 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             Screen::Spellbook { selected: 0 }
         }
         "menu" => Screen::Menu(false),
+        "victory" => {
+            // `victory:<map>[:<gold>]`: the report after a won battle over the map
+            // (Dialog::victory), the map's first army beaten, `gold` won (default 160).
+            let gold = arg.and_then(|a| a.parse::<i32>().ok()).unwrap_or(160);
+            let name = game.world.armies.first().map(|a| a.name.clone()).unwrap_or_default();
+            let result = razdor::rules::game::BattleResult::Victory {
+                reward: gold,
+                mana: 0,
+                lost: 0,
+                loot: Vec::new(),
+                left_behind: 0,
+                level_ups: Vec::new(),
+                captured: None,
+                over: razdor::rules::game::Beat::Army(name),
+            };
+            app.dialogs.extend(super::dialog::Dialog::victory(&result));
+            Screen::WorldMap
+        }
         "defeat" => {
             // `defeat:<map>`: the report after a lost battle over the map (Dialog::defeat).
             app.dialogs.push_back(super::dialog::Dialog::defeat());

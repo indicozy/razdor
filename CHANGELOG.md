@@ -690,6 +690,9 @@ old id, and their versions give both.
 - The AI armies' battles among themselves, and the ones they imagine to choose their way,
   pick their targets as the original's do, including its slip of reading leftovers of an
   earlier battle: the same two armies can fight out differently as the game goes on.
+- Окно победы показывает только то, что бой принёс: без «Деньги + 0», когда золота нет, и без
+  дохода захваченного замка, как в оригинале.
+
 ## 0.3.11 — 2026-10-07
 
 ### Fixed
