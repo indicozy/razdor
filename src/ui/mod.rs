@@ -889,7 +889,7 @@ impl App {
                 main_menu::options_window(&mut self.audio.settings, install_wide, true).then_some(Screen::WorldMap)
             }
             (Screen::Save(view), Some(game)) => saves::save_screen(game, &self.assets, view, &mut self.message),
-            (Screen::Load(view), game) => saves::load_screen(game.as_ref(), &self.assets, view, &mut self.pending_load, &self.load_error),
+            (Screen::Load(view), game) => saves::load_screen(game.as_ref(), &self.assets, view, &mut self.pending_load, &mut self.load_error),
             (Screen::Victory, game) => screens::victory(game, &self.scenarios, self.dt_content.clone()),
             (Screen::Editor, _) => None,
             (Screen::CustomSetup, _) => {

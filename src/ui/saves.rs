@@ -615,13 +615,15 @@ pub fn save_screen(game: &Game, assets: &Assets, view: &mut SaveView, message: &
 /// "Авто-сохр." tabs; a row's delete sign opens a confirmation. "Clear all" deletes the tab's
 /// saves but the pinned ones after a question. Loading itself is
 /// the app's (`pending` receives the file).
-pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pending: &mut Option<PathBuf>, error: &Option<String>) -> Option<Screen> {
+pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pending: &mut Option<PathBuf>, error: &mut Option<String>) -> Option<Screen> {
     match game {
         Some(g) if view.back != Back::Title => world_view::backdrop(g, assets),
         _ => super::main_menu::backdrop(),
     }
     let asking_delete = view.confirm_delete.is_some();
-    let asking = view.confirm_clear || asking_delete;
+    // A failed load is told in its own message box, which takes the window until its OK.
+    let failed = error.is_some();
+    let asking = view.confirm_clear || asking_delete || failed;
     let previously_blocked = input_blocked();
     if asking { set_input_blocked(true); }
     let (book, closed) = Book::at(&own("LoadGame", "Title", n_("Load a saved game")), game.is_some() && view.back != Back::Title);
@@ -683,10 +685,6 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
         view.confirm_clear = true;
         return None;
     }
-    if let Some(e) = error {
-        let p = book.p(165.0, 462.0);
-        text(&ellipsize(e, 195.0 * book.k, 12.0 * book.k), p.x, p.y, 12.0 * book.k, Color::new(1.0, 0.45, 0.4, 1.0));
-    }
     let chosen = view.entries.get(view.selected);
     if (book.button(369.0, 116.0, &own("LoadGame", "Load", n_("Load")), chosen.is_some()) || key(KeyCode::Enter)) && !asking && chosen.is_some() {
         *pending = chosen.map(|e| e.path.clone());
@@ -696,6 +694,10 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     }
     set_input_blocked(previously_blocked);
     if asking { super::chrome::grey_out(book.win); }
+    if let Some(message) = error.as_deref() {
+        if load_failed_box(message) { *error = None; }
+        return None;
+    }
     if asking_delete {
         let (path, name) = view.confirm_delete.as_ref().expect("delete confirmation");
         match delete_save_question(&book, name) {
@@ -715,7 +717,7 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     }
     // "Clear all"'s question. It opens on the next frame, so the click that asked it cannot
     // also answer it.
-    if asking {
+    if view.confirm_clear {
         let tab = if view.tab == SaveKind::Manual { own("LoadGame", "PrivateSave", n_("Private")) } else { own("LoadGame", "AutoSave", n_("Autosaves")) };
         let q = format!("^{}", razdor::trf!("Delete every save of the \"{tab}\" tab? The pinned ones stay.", tab));
         match marked_question(&own("MessageBox", "DeleteSave_Title", n_("Delete the save")), &q) {
@@ -744,6 +746,28 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
 const VERSION_INK: Color = Color::new(0.22, 0.7, 1.0, 1.0);
 /// Its warning: the ae24a0 tint.
 const WARNING_INK: Color = Color::new(1.0, 1.0, 0.61, 1.0);
+/// Razdor's message box for a failed load: the message wrapped over as many lines as it takes,
+/// and one OK (or Enter, Escape). True once it is answered.
+fn load_failed_box(message: &str) -> bool {
+    let k = super::chrome::k();
+    let title = own("LoadGame", "Title", n_("Load a saved game"));
+    let size = 13.0 * k;
+    let step = 17.0 * k;
+    let lines = wrap(message, 330.0 * k, size);
+    let h = (60.0 * k + lines.len() as f32 * step).max(150.0 * k);
+    let w = 380.0 * k;
+    let r = Rect::new((screen_width() - w) / 2.0, (screen_height() - h) / 2.0, w, h);
+    let (inner, _) = super::chrome::window(r, &title, super::chrome::Skin::Marble, false);
+    for (i, line) in lines.iter().enumerate() {
+        super::chrome::shadow_centered(line, inner.center().x, inner.y + 24.0 * k + i as f32 * step, size, super::chrome::CREAM);
+    }
+    let ok = Rect::new(inner.center().x - 45.0 * k, inner.y + inner.h - 38.0 * k, 90.0 * k, 28.0 * k);
+    let ok_label = own("Buttons", "Ok", n_("OK"));
+    let (_, down, pressed) = super::widgets::button_state(ok, true);
+    super::chrome::marble_button(ok, &ok_label, true, down);
+    pressed || answer_key().is_some()
+}
+
 /// The original's delete confirmation: a parchment panel and two green buttons.
 fn delete_save_question(book: &Book, name: &str) -> Option<bool> {
     let k = book.k;

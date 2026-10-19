@@ -144,7 +144,8 @@ impl std::fmt::Display for SaveError {
             SaveError::Version(v) => f.write_str(&trf!("the save is from another version (format {v}, this one reads {current})", v, current = FORMAT_VERSION)),
             SaveError::NoScenario => f.write_str(tr("this game's scenario is unknown, it cannot be saved")),
             SaveError::NoInstall => f.write_str(tr("this save needs your Discord Times install: set RAZDOR_DT_DIR")),
-            SaveError::MapMissing(m) => f.write_str(&trf!("the map \"{m}\" is not in your install any more", m)),
+            // The scenario's map file (its name without the extension) is gone from Maps_Rus.
+            SaveError::MapMissing(m) => f.write_str(&trf!("the scenario's map file \"{m}.DTm\" is missing from the game folder (Maps_Rus)", m)),
             SaveError::MapChanged(m) => f.write_str(&trf!("the map \"{m}\" has changed since the game was saved", m)),
             SaveError::Mismatch(e) => f.write_str(&trf!("the save does not fit the map or the data: {e}", e)),
             SaveError::Pinned => f.write_str(tr("that save is pinned: unpin it first")),
@@ -1517,6 +1518,14 @@ pub(crate) mod tests {
         std::fs::rename(&path, maps.join("Other.DTm")).unwrap();
         assert!(matches!(restore(&again().0, again().1, demo(), Some(&install)), Err(SaveError::MapMissing(_))));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A save whose map is gone: the message names the map file and the folder it is missing from.
+    #[test]
+    fn a_missing_map_error_names_the_file_and_the_game_folder() {
+        let text = SaveError::MapMissing("Kiev".to_string()).to_string();
+        assert!(text.contains("\"Kiev.DTm\""), "{text}");
+        assert!(text.contains("missing from the game folder (Maps_Rus)"), "{text}");
     }
 
     fn rk1() -> Option<(crate::dt::install::DtInstall, crate::dt::install::MapEntry)> {
