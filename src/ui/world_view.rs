@@ -1220,16 +1220,36 @@ fn draw_hero(game: &Game, assets: &Assets, art: Option<&DtArt>, cam: &Camera) {
     }
 }
 
+/// A massif object's layer in a cell's turn of the pass (+0, classes 1–8), a plant's (+2,
+/// classes 9–12), the building's (+0xC) last (0x4c8864, 0x4c9b5b).
+const LAYER_BUILDING: i64 = 2;
+
+fn object_layer(class: u8) -> i64 {
+    i64::from(class >= object_class::TREES)
+}
+
+/// Where a cell's drawing comes in the map's one pass over the cells: row by row, left to
+/// right, then by layer within the cell (0x4c8864).
+fn cell_pass_key((x, y): Tile, layer: i64) -> i64 {
+    ((i64::from(y) + 64) * 65536 + (i64::from(x) + 64)) * 4 + layer
+}
+
+/// The first cell of a building's footprint in the pass's order: the top row's left cell
+/// ([`razdor::rules::world::Location::cells`]: `size` cells up and left of the anchor, one
+/// row more when wider than tall).
+fn first_footprint_cell(l: &razdor::rules::world::Location) -> Tile {
+    l.cells().min_by_key(|&(x, y)| (y, x)).unwrap_or(l.anchor)
+}
+
 fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<(Tile, Option<Color>)>) {
     let art = assets.dt.as_ref();
     stamp_idle(game, clock_ms());
     draw_terrain(game, art, cam);
     let map = &game.world.map;
     let ((c0, c1), (r0, r1)) = cam.visible(map);
-    let rh = cam.grid.row_height();
     // Sprites stand on their cell and reach up to ~8 cells above it.
     let (below, side) = (10, 8);
-    let mut items: Vec<(f32, Drawable)> = Vec::new();
+    let mut items: Vec<(i64, Drawable)> = Vec::new();
     let fog = &game.fog;
     // The original (0x4c8864) draws the hills of classes 1-3 in a pass of their own before
     // anything else, so they lie under every tree, mountain, building and army, the ones
@@ -1240,7 +1260,7 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
             if (object_class::HILLS..=object_class::ROCKY_HILLS).contains(&o.class) {
                 draw_object(o, art, cam);
             } else {
-                items.push((o.tile.1 as f32 * rh, Drawable::Object(*o)));
+                items.push((cell_pass_key(o.tile, object_layer(o.class)), Drawable::Object(*o)));
             }
         }
     }
@@ -1272,18 +1292,21 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
     } else if let Some(path) = preview {
         draw_route(game, path, cam);
     }
-    // Buildings stand in front of the scenery: hills, rocks and trees south of one would
-    // hide it, so they are drawn after every object, sorted among themselves. Bridges lie
-    // flat, under everything standing on them.
-    let mut buildings: Vec<(f32, Drawable)> = Vec::new();
+    // The standing scenery and the buildings share one pass over the cells, row by row and
+    // left to right (0x4c8864's cell loop): each cell draws its massif object (+0), then its
+    // plant (+2), then the building whose footprint covers it (+0xC) if that building is not
+    // drawn yet this frame (0x4c9b5b, its once-a-frame flag at record −0x43). So a building
+    // is drawn at the first cell of its footprint in that order, its top row's left cell, and
+    // every object after it in the scan (south of that row, or east in the same row) covers
+    // it. Bridges lie flat, under everything (Razdor's).
     for (i, l) in game.world.locations.iter().enumerate() {
         let (ax, ay) = l.anchor;
         let seen = l.cells().any(|t| fog.explored_near(t, minimap::FEATHER));
         if seen && ay >= r0 - 1 && ay < r1 + below && ax >= c0 - side && ax - l.size.0 < c1 + side {
             if l.kind.is_bridge() {
-                items.push((ay as f32 * rh - 1000.0, Drawable::Building(i)));
+                items.push((i64::MIN / 2 + cell_pass_key(l.anchor, 0), Drawable::Building(i)));
             } else {
-                buildings.push((ay as f32 * rh, Drawable::Building(i)));
+                items.push((cell_pass_key(first_footprint_cell(l), LAYER_BUILDING), Drawable::Building(i)));
             }
         }
     }
@@ -1304,10 +1327,9 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
         figures.push((s.key - 0.001, Drawable::Spell(2)));
         figures.push((s.key + 0.001, Drawable::Spell(3)));
     }
-    items.sort_by(|a, b| a.0.total_cmp(&b.0));
-    buildings.sort_by(|a, b| a.0.total_cmp(&b.0));
+    items.sort_by_key(|a| a.0);
     figures.sort_by(|a, b| a.0.total_cmp(&b.0));
-    for (_, d) in items.iter().chain(&buildings).chain(&figures) {
+    for d in items.iter().map(|(_, d)| d).chain(figures.iter().map(|(_, d)| d)) {
         match d {
             Drawable::Object(o) => draw_object(o, art, cam),
             Drawable::Building(i) => draw_building(&game.world.locations[*i], art, cam),
@@ -2416,6 +2438,18 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 0x4c8864, 0x4c9b5b: one pass over the cells, row by row and left to right; a cell's
+    /// massif object, then its plant, then the building whose first footprint cell it is.
+    #[test]
+    fn a_building_comes_at_its_first_cell_in_the_map_pass() {
+        let building = cell_pass_key((5, 5), LAYER_BUILDING);
+        assert!(cell_pass_key((5, 5), object_layer(object_class::TREES - 1)) < building, "its massif object first");
+        assert!(cell_pass_key((5, 5), object_layer(object_class::TREES)) < building, "then its plant");
+        assert!(building < cell_pass_key((6, 5), 0), "the next cell east is drawn after it");
+        assert!(building < cell_pass_key((4, 6), 0), "the row below is drawn after it");
+        assert!(cell_pass_key((9, 4), 1) < building, "the row above is drawn before it");
+    }
 
     #[test]
     fn the_route_s_last_cell_has_no_arrow() {
