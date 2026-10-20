@@ -253,6 +253,7 @@ impl Game {
     /// only by a landing, [`Game::landing`]); moving inside a shipyard with a ship just
     /// bought puts him at sea there.
     pub(crate) fn move_to_cell(&mut self, old: Tile, new: Tile) {
+        self.bridge_stood_on = None;
         let w = &self.world;
         let (ob, nb) = (w.location_covering(old), w.location_covering(new));
         let building = |b: Option<usize>| b.filter(|&l| !w.locations[l].kind.is_bridge());

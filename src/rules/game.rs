@@ -232,6 +232,10 @@ pub struct Game {
     pub world: World,
     /// Location the party is standing on, if any.
     pub location: Option<usize>,
+    /// The bridge his walk ended on: a bridge is never entered (no window, `location` stays
+    /// none), but its local events run for him as the building he is on (world.md §7.2).
+    #[serde(default)]
+    pub bridge_stood_on: Option<usize>,
     pub foe: Option<Foe>,
     /// Shared bag of unworn items: 256 cells with holes, each item where it was put
     /// (`rules::pack`, 0x68dce0).
@@ -555,6 +559,7 @@ impl Game {
             pos: world.map.center(tile),
             path: Vec::new(),
             location: world.location_at(tile),
+            bridge_stood_on: None,
             world,
             foe: None,
             pack: Pack::new(),
@@ -1533,7 +1538,15 @@ impl Game {
         let here = self.tile();
         let before = self.location;
         self.move_to_cell(here, here);
-        let Some(l) = self.location else { return };
+        let Some(l) = self.location else {
+            // A walk that ends on a bridge enters it for its events, never for a window
+            // (world.md §7.2: "a bridge counts as the building the hero is on for events").
+            if let Some(b) = self.world.location_covering(here).filter(|&b| self.world.locations[b].kind.is_bridge()) {
+                self.bridge_stood_on = Some(b);
+                events.extend(self.run_script());
+            }
+            return;
+        };
         if self.world.locations[l].kind == LocationKind::Obelisk {
             return;
         }
