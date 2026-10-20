@@ -273,6 +273,18 @@ fn label(key: &str, english: &str) -> String {
     own.unwrap_or_else(|| tr(english).to_string())
 }
 
+/// The vampirism line's label. A negative value (an item's −10%) takes HP from the attacker:
+/// Razdor's deviation (the owner's decision, 2026-10-20), its own «Кровопотеря» (blood loss);
+/// the original keeps «Вампиризм» for it. The Community bleed line («Кровотечение») is a
+/// separate stat and keeps its own label.
+fn vampirism_label(shown: i32) -> String {
+    if shown < 0 {
+        tr(n_("Blood loss")).to_string()
+    } else {
+        label("SVampirizm", n_("Vampirism"))
+    }
+}
+
 fn signed(v: i32) -> String {
     if v > 0 {
         format!("+{v}")
@@ -433,7 +445,7 @@ fn stat_lines(content: &Content, s: &Sheet) -> Vec<Line> {
     }
     if now[Stat::Vampirizm] != 0 || start[Stat::Vampirizm] != 0 {
         let st = Stat::Vampirizm;
-        lines.push((label("SVampirizm", n_("Vampirism")), format!("{}%", now[st]), shown_ink(now[st], naked[st], start[st])));
+        lines.push((vampirism_label(now[st]), format!("{}%", now[st].abs()), shown_ink(now[st], naked[st], start[st])));
     }
     // Initiative never shows below 0.
     let (ini, ini_now, ini_start) = (Stat::Initiative, now[Stat::Initiative].max(0), start[Stat::Initiative].max(0));
@@ -935,6 +947,16 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, background: Rect, s
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Razdor's deviation: a negative vampirism reads «Кровопотеря», a positive one keeps the
+    /// original's «Вампиризм» (the install's own text, or the English without it).
+    #[test]
+    fn a_negative_vampirism_is_blood_loss() {
+        assert_eq!(vampirism_label(-10), tr("Blood loss"));
+        assert_ne!(vampirism_label(-10), vampirism_label(10));
+        assert_eq!(vampirism_label(10), label("SVampirizm", n_("Vampirism")));
+        assert_eq!(vampirism_label(0), vampirism_label(10), "0 keeps the vampirism line");
+    }
 
     /// The worn-item slots as 0x4d8638 places them on the original's 262 px fill: 55 px,
     /// 8 px in from the top and sides, each pair touching (55 px apart down).
