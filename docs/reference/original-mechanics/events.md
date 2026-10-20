@@ -382,7 +382,9 @@ In this order: **code**
     every cell costs 100 000 or more). It is not activated by this.
 15. **Battle** (147) is queued.
 16. **New hero class** (137): the hero's unit type becomes that unit (the byte is a 1-based
-    unit id).
+    unit id). Only the type is written, as in opcode 7: his HP is not touched, so an unhurt
+    hero stays unhurt at the new maximum and a wounded one keeps its HP number (§opcode 7).
+    His map figure is not changed (only opcode 17 changes it).
 17. **Delay** (126) is queued.
 18. The **chained event** (138) is noted.
 19. **Relative event** (77): its start := now + 60 × delay hours (79). The start is overwritten,
@@ -622,6 +624,7 @@ world, carry-over), `src/rules/journal.rs`, `src/dt/dtm.rs` (record and flag scr
 | Journal | The engine's journal: re-added on every finish, completion removes the last entry, a new engine on the next map; Razdor's history is a separate extra | Re-added on every finish; completion removes the last entry; emptied on the next map | Matches |
 | Journal detail | Active quests: question then message, `#HERONAME` not filled, markers raw, and the time since the event last fired (`Game::quest_row`) | Title, a label, question then message as one justified block (no `#HERONAME` fill, markers raw), a label and the time since the event last fired, long calendar (§10) | Matches in content; the justified layout and the long calendar's wording are presentation, left |
 | Dismissed unit on a full army | Lowest level value (`experience::level_value`: level stats, no items, raw multiplier) of units 2–12, first on a tie; its worn items to the pack | Lowest mode-0 tactical cost of slots 2–12, first on a tie (§7.1) | Matches |
+| Hero HP after a new class (effect 16) | Same rule as opcode 7 (`retype_unit`): an unhurt hero stays unhurt at the new maximum, a wounded one keeps its HP number; the map figure is kept | Only the type is written (effect 16 and opcode 7 alike); HP and the figure are kept | Matches |
 | Resource line after an event | The bar reads the live values every frame; the army is marked for rescoring after each event | Army recomputed and the resource line redrawn on every non-final finish (§8) | Matches in effect |
 | Gold result | Clamped at 0 | Clamped at 0 (§7.2 step 5) | Matches |
 | Numeric conditions | All five only with byte 18, skipped when byte 17 ≠ 0 with a positive squad value; the opcode-19 cell test replaces gold, mana, squads and strength under its own test | All five only with byte 18, and skipped when byte 17 ≠ 0 with a positive squad value (Community) | Matches |
