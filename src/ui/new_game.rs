@@ -25,7 +25,7 @@ use super::{screens, ScenarioEntry, Screen};
 
 thread_local! {
     static EXPERIMENTAL: Cell<ExperimentalRules> = const { Cell::new(ExperimentalRules {
-        simultaneous_bonuses: false, multiple_rings: false, multiple_amulets: false, no_duplicate_items: true, two_potions: false,
+        simultaneous_bonuses: false, multiple_rings: false, multiple_amulets: false, allow_duplicate_items: false, two_potions: false,
     }) };
     static RULES_OPEN: Cell<bool> = const { Cell::new(false) };
     /// The scenario group picked (index into the list shown), the list's scroll in pixels
@@ -772,7 +772,7 @@ pub(super) fn snapshot_experimental(rules: ExperimentalRules) { EXPERIMENTAL.wit
 /// Kept modal so clicks and Enter cannot start a scenario behind the options.
 fn experimental_menu() {
     let k = chrome::k();
-    let r = Rect::new((screen_width() - 550.0*k)/2.0, (screen_height() - 360.0*k)/2.0, 550.0*k, 360.0*k);
+    let r = Rect::new((screen_width() - 550.0*k)/2.0, (screen_height() - 380.0*k)/2.0, 550.0*k, 380.0*k);
     let (_, close) = chrome::window(r, tr("Experimental scenario rules"), chrome::Skin::Marble, true);
     let mut rules = experimental_rules();
     let check = |index: usize, label: &str, value: &mut bool| {
@@ -789,7 +789,7 @@ fn experimental_menu() {
     check(0,tr("All special bonuses simultaneously"),&mut rules.simultaneous_bonuses);
     check(1,tr("Allow multiple rings"),&mut rules.multiple_rings);
     check(2,tr("Allow multiple amulets"),&mut rules.multiple_amulets);
-    check(3,tr("No duplicate items"),&mut rules.no_duplicate_items);
+    check(3,tr("Allow duplicate items"),&mut rules.allow_duplicate_items);
     check(4,tr("At most two potions per character"),&mut rules.two_potions);
     EXPERIMENTAL.with(|p| p.set(rules));
     // Six cells with the multiple rings or amulets rule, else the original's four.
@@ -798,7 +798,7 @@ fn experimental_menu() {
     } else {
         tr("Four equipment slots. Duplicate abilities do not stack.")
     };
-    let lines = [slots, tr("Applies to all armies; saved with this playthrough."), tr("The potion limit resets after a battle.")];
+    let lines = [slots, tr("One weapon per unit always."), tr("Applies to all armies; saved with this playthrough."), tr("The potion limit resets after a battle.")];
     for (i,line) in lines.iter().enumerate() {
         chrome::shadow_text(line,r.x+20.0*k,r.y+(264.0+i as f32*19.0)*k,12.0*k,chrome::CREAM);
     }

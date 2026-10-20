@@ -1922,7 +1922,7 @@ mod tests {
     fn experimental_rules_carry_to_next_map_and_restart() {
         let scenario = world(vec![]);
         let mut game = start(&scenario);
-        let rules = super::super::content::ExperimentalRules { simultaneous_bonuses: true, multiple_rings: true, multiple_amulets: false, no_duplicate_items: true, two_potions: true };
+        let rules = super::super::content::ExperimentalRules { simultaneous_bonuses: true, multiple_rings: true, multiple_amulets: false, allow_duplicate_items: false, two_potions: true };
         game.experimental = rules;
         game.content = std::sync::Arc::new(game.content.with_experimental(rules));
         let next = game.hand_over("Road".into(), None);

@@ -274,7 +274,7 @@ pub fn slot_for(content: &Content, unit: &Unit, item: ItemId) -> Result<usize, E
         return Err(EquipError::SameType);
     }
     // Razdor's option after the original's refusals, so classic rules still say SameType.
-    if content.experimental.no_duplicate_items && unit.items[..slot_count(content)].contains(&Some(item)) {
+    if !content.experimental.allow_duplicate_items && unit.items[..slot_count(content)].contains(&Some(item)) {
         return Err(EquipError::DuplicateItem);
     }
     unit.items[..slot_count(content)].iter().position(Option::is_none).ok_or(EquipError::NoFreeSlot)
@@ -903,12 +903,12 @@ mod tests {
     fn experimental_accessories_are_independent_and_use_six_slots() {
         let original = content(vec![warrior(5, 20, 0)], vec![item(1, ArtefactType::Ring), item(2, ArtefactType::Amulet), item(3, ArtefactType::Helm)]);
         let u = wearing(&original, 5, &[1, 2, 3]);
-        let rings = super::super::content::ExperimentalRules { multiple_rings: true, ..Default::default() };
+        let rings = super::super::content::ExperimentalRules { multiple_rings: true, allow_duplicate_items: true, ..Default::default() };
         let c = original.with_experimental(rings);
         assert_eq!(slot_for(&c, &u, ItemId(1)), Ok(3));
         assert_eq!(slot_for(&c, &u, ItemId(2)), Err(EquipError::SameType));
         assert_eq!(slot_for(&c, &u, ItemId(3)), Err(EquipError::SameType));
-        let amulets = super::super::content::ExperimentalRules { multiple_amulets: true, ..Default::default() };
+        let amulets = super::super::content::ExperimentalRules { multiple_amulets: true, allow_duplicate_items: true, ..Default::default() };
         let c = original.with_experimental(amulets);
         assert_eq!(slot_for(&c, &u, ItemId(1)), Err(EquipError::SameType));
         assert_eq!(slot_for(&c, &u, ItemId(2)), Ok(3));
@@ -954,13 +954,13 @@ mod tests {
     #[test]
     fn experimental_duplicate_items_compare_ids_not_categories() {
         let c = content(vec![warrior(5, 20, 0)], vec![item(1, ArtefactType::Ring), item(2, ArtefactType::Ring), item(3, ArtefactType::Amulet)])
-            .with_experimental(super::super::content::ExperimentalRules { multiple_rings: true, multiple_amulets: true, no_duplicate_items: true, ..Default::default() });
+            .with_experimental(super::super::content::ExperimentalRules { multiple_rings: true, multiple_amulets: true, ..Default::default() });
         let u = wearing(&c, 5, &[1, 3]);
         assert_eq!(slot_for(&c, &u, ItemId(1)), Err(EquipError::DuplicateItem));
         assert_eq!(slot_for(&c, &u, ItemId(3)), Err(EquipError::DuplicateItem));
         assert_eq!(slot_for(&c, &u, ItemId(2)), Ok(2));
         let mut unrestricted = c.clone();
-        unrestricted.experimental.no_duplicate_items = false;
+        unrestricted.experimental.allow_duplicate_items = true;
         assert_eq!(slot_for(&unrestricted, &u, ItemId(1)), Ok(2));
     }
 

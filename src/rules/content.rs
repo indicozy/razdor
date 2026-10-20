@@ -107,18 +107,67 @@ impl Source {
 }
 
 /// Rules chosen for one playthrough. Missing fields in older saves mean classic rules.
+///
+/// `allow_duplicate_items` is the switch's meaning (default off: a unit cannot wear the same
+/// item twice). Saves also carry the inverse as `no_duplicate_items` for older builds, which
+/// read it as the restriction; a save with only that key maps to the inverse.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
+#[serde(from = "RulesWire", into = "RulesWire")]
 pub struct ExperimentalRules {
     pub simultaneous_bonuses: bool,
     pub multiple_rings: bool,
     pub multiple_amulets: bool,
-    pub no_duplicate_items: bool,
+    pub allow_duplicate_items: bool,
     pub two_potions: bool,
 }
 
 impl ExperimentalRules {
-    pub fn for_new_game() -> Self { Self { no_duplicate_items: true, ..Self::default() } }
+    pub fn for_new_game() -> Self { Self::default() }
+}
+
+/// The save's form of [`ExperimentalRules`].
+#[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+struct RulesWire {
+    simultaneous_bonuses: bool,
+    multiple_rings: bool,
+    multiple_amulets: bool,
+    two_potions: bool,
+    allow_duplicate_items: Option<bool>,
+    /// The inverse of `allow_duplicate_items`, written for older builds and read only from
+    /// saves that predate `allow_duplicate_items`.
+    no_duplicate_items: Option<bool>,
+}
+
+impl From<RulesWire> for ExperimentalRules {
+    fn from(w: RulesWire) -> Self {
+        // Missing in a save from before the switch means classic rules: duplicates allowed.
+        let allow_duplicate_items = match (w.allow_duplicate_items, w.no_duplicate_items) {
+            (Some(allow), _) => allow,
+            (None, Some(no_duplicate)) => !no_duplicate,
+            (None, None) => true,
+        };
+        Self {
+            simultaneous_bonuses: w.simultaneous_bonuses,
+            multiple_rings: w.multiple_rings,
+            multiple_amulets: w.multiple_amulets,
+            allow_duplicate_items,
+            two_potions: w.two_potions,
+        }
+    }
+}
+
+impl From<ExperimentalRules> for RulesWire {
+    fn from(r: ExperimentalRules) -> Self {
+        Self {
+            simultaneous_bonuses: r.simultaneous_bonuses,
+            multiple_rings: r.multiple_rings,
+            multiple_amulets: r.multiple_amulets,
+            two_potions: r.two_potions,
+            allow_duplicate_items: Some(r.allow_duplicate_items),
+            no_duplicate_items: Some(!r.allow_duplicate_items),
+        }
+    }
 }
 
 /// Everything the rules need to know about units, items, spells and options.
@@ -638,5 +687,37 @@ mod tests {
         // The footage: unit 28 fresh at 0/580, unit 14 at level 2 needs 560, hero 2 at
         // level 5 needs 590.
         assert_eq!((c.xp_to_next(UnitId(28), 1), c.xp_to_next(UnitId(14), 2), c.xp_to_next(UnitId(2), 5)), (580, 560, 590));
+    }
+}
+
+#[cfg(test)]
+mod experimental_rules_save_tests {
+    use super::ExperimentalRules;
+
+    /// A save from before the switch (`no_duplicate_items`, the restriction on when true)
+    /// maps to the inverse: true is the restriction, false allows duplicates.
+    #[test]
+    fn an_old_save_maps_no_duplicate_items_to_the_inverse() {
+        let on: ExperimentalRules = serde_json::from_str(r#"{"no_duplicate_items": true}"#).unwrap();
+        assert!(!on.allow_duplicate_items);
+        let off: ExperimentalRules = serde_json::from_str(r#"{"no_duplicate_items": false}"#).unwrap();
+        assert!(off.allow_duplicate_items);
+        // A save with neither field had the restriction off (classic rules).
+        let missing: ExperimentalRules = serde_json::from_str("{}").unwrap();
+        assert!(missing.allow_duplicate_items);
+    }
+
+    /// The rules default to the classic restriction (a unit cannot wear one item twice), and
+    /// a new save writes both the switch and the inverse for older builds.
+    #[test]
+    fn the_default_restricts_duplicates_and_the_save_carries_both_forms() {
+        assert!(!ExperimentalRules::default().allow_duplicate_items);
+        assert_eq!(ExperimentalRules::for_new_game(), ExperimentalRules::default());
+        let allowed = ExperimentalRules { allow_duplicate_items: true, ..Default::default() };
+        let json = serde_json::to_value(allowed).unwrap();
+        assert_eq!(json["allow_duplicate_items"], true);
+        assert_eq!(json["no_duplicate_items"], false);
+        let back: ExperimentalRules = serde_json::from_value(json).unwrap();
+        assert_eq!(back, allowed);
     }
 }

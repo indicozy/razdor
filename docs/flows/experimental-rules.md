@@ -1,7 +1,8 @@
 # Experimental scenario rules
 
 The `...` button beside Next on the scenario screen opens five independent switches.
-Only the duplicate-item restriction is on by default for new games. Choices reset when
+Only the duplicate-item restriction is on by default for new games (the switch
+«Разрешить надевать одинаковые предметы» is off). Choices reset when
 starting a new playthrough from the main menu.
 Returning from hero selection preserves the selection. The switches cannot be changed
 for an existing game through this menu.
@@ -16,9 +17,11 @@ for an existing game through this menu.
   the equipment slots: with either switch a unit has six cells (the four classic ones plus
   a third pair), otherwise four. Class, magic school, holy-item, weapon and all other
   equipment restrictions remain in force. Each switch is independent of bonus stacking.
-- **No duplicate items:** compare item IDs per character, not item categories. Different
-  rings/amulets are permitted when their corresponding switch is on. Repeated copies of
-  one item are refused. Existing old saves retain their previous rules.
+- **Allow duplicate items** (default off): with it off, compare item IDs per character, not
+  item categories. Different rings/amulets are permitted when their corresponding switch is on.
+  Repeated copies of one item are refused. Turning it on lifts only that refusal. A weapon is
+  still one per unit: the hint line «Оружие у бойца всегда одно.» says so in the menu.
+  Old saves keep their previous rules: `RulesWire` maps `no_duplicate_items` to the inverse.
 - **At most two potions per character:** two successful drinks between army battles,
   including instant healing and revival potions. Failed attempts consume neither an item
   nor a count. The counter survives saving, loading and campaign carry-over, and resets
@@ -28,6 +31,9 @@ Rules apply to all armies, including opponents, garrisons and subsequently recru
 They live in an isolated per-playthrough Content copy so menu choices never mutate an
 installation's shared definitions. `Game.experimental` is the persisted source of truth;
 loading rebuilds the runtime Content copy from this field before setting up the AI.
+
+A save writes `allow_duplicate_items` and the inverse `no_duplicate_items` for older builds, which
+read the restriction from that key; format 12 is unchanged by the switch.
 
 Save format 11 stores the rules in Game and the campaign hand-over record, potion counters
 and noncombatant marks in units. Missing rules in older saves use false values. Manual saves, autosaves, restarting the same scenario
