@@ -330,6 +330,12 @@ pub struct Game {
     /// The hero's speed as a Community event set it (0xc279e6); `None`: his class's.
     #[serde(default)]
     pub(crate) speed_set: Option<u32>,
+    /// The hero's map figure (army 0's figure byte, 0x75bfdd + 0x3827·0; [`Army::figure`]):
+    /// the start class's model, written at the game start (0x4b43db from 0x68dccc); only
+    /// Community opcode 17 on the player changes it (0xc28650). `None`: the start class's model
+    /// (saves before this field). Opcode 7 never writes it.
+    #[serde(default)]
+    pub(crate) hero_figure: Option<u8>,
     /// The minutes of the hero's next orthogonal step as the original works them out when he
     /// comes onto his cell (0x497c68: the cell's cost × his speed, ×1.5 at the step if it is
     /// diagonal), on the map his at-sea flag chose *before* that arrival updated it: coming
@@ -583,6 +589,7 @@ impl Game {
             ship_bought: false,
             noon_due: None,
             speed_set: None,
+            hero_figure: None,
             step_base: None,
             step_from: None,
             step_flag: false,
@@ -652,6 +659,7 @@ impl Game {
         g.gold = gold;
         g.spells = g.content.start_spells(hero);
         g.archetype = archetype_of(hero);
+        g.hero_figure = Some(hero_figure_of(hero));
         g.origin = Some(ScenarioRef::Demo);
         g
     }
@@ -704,6 +712,7 @@ impl Game {
         g.pack = Pack::from(start.items);
         g.spells = start.spells;
         g.archetype = archetype_of(hero);
+        g.hero_figure = Some(hero_figure_of(hero));
         g.script = Some(Box::new(EventEngine::new(scenario)));
         // The armies' idle offsets of the map load (0x4b4b43), drawn after the plant jitter
         // from a generator the load then resets to 1 (engine.md §3.2).
@@ -813,6 +822,11 @@ impl Game {
 
     pub fn hero_class(&self) -> Option<HeroClass> {
         HeroClass::of_unit(self.hero().def)
+    }
+
+    /// The hero's map figure (see [`Game::hero_figure`]): the one set, else his start class's.
+    pub fn hero_figure(&self) -> u8 {
+        self.hero_figure.unwrap_or_else(|| hero_figure_of(self.start_class()))
     }
 
     /// Army cap: the formation's size.
@@ -2419,6 +2433,16 @@ impl Game {
             }
         }
         events
+    }
+}
+
+/// The map figure of a hero class: the model the game gives his army record at the start
+/// (0x4b43db from 0x68dccc): 1 knight, 2 archmage, 3 ranger.
+pub(crate) fn hero_figure_of(hero: HeroClass) -> u8 {
+    match hero {
+        HeroClass::Knight => 1,
+        HeroClass::Archmage => 2,
+        HeroClass::Ranger => 3,
     }
 }
 

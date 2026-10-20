@@ -177,6 +177,7 @@ impl Carry {
             flags: self.flags.iter().map(|f| format!("{f}\u{a0}")).collect(),
             class,
             hero_name: None,
+            figure: None,
             journal: Default::default(),
         }
     }

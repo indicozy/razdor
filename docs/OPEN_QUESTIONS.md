@@ -29,6 +29,12 @@ move to a Settled list.
 
 Parity fixes made on `main` that this branch does not carry yet, with the `main` commit.
 
+- **5ebf623 "Formation: pressing the selected unit deselects it in the building window"
+  (0x4c6f50, 0x4c653c): not ported.** The fix changes only Razdor's «Перетаскивание»
+  arrangement (`unit_drag::Controls::Drag`), which this branch does not have; the original's
+  press (`Controls::Original`, the path here) already deselects the selected unit in the army
+  window and in both building grids.
+
 - **1d5afe5 "Window frames, parchment and slots from the original's code; the scenario map
   frame (Fixes #17)": partly ported.** Ported: the steel frame lines (`chrome::steel_frame`,
   `silver_frame` drawn from `SteelLine.lit`), the 2 px window frame and title line
