@@ -1577,6 +1577,13 @@ pub(crate) mod tests {
             g.set_destination(t);
             walk(&mut g, 300);
             g.drain_events();
+            // A save is never taken with a dialog open: the walk's messages are read first.
+            for _ in 0..20 {
+                if !g.script().unwrap().holds_window() {
+                    break;
+                }
+                g.event_window_closed();
+            }
         }
         if !g.world.armies.is_empty() {
             g.foe = Some(Foe::Army(0));

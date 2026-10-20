@@ -26,6 +26,16 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   it, but this was not traced). Settle it by reading 0x4b5b64 for the army record 0 copy. Also
   unknown: whether the original's restart (0x4b5ef8) keeps a figure changed by opcode 17.
 
+- **Bridge passed without stopping** (2026-10-20, from #1041). The spec says a walk that ends on a
+  bridge enters it for its events (`world.md` §7.2, `events.md` §2 step 3), and it says a single
+  bridge cell passed over does not enter a building. Razdor now runs the events of a bridge only
+  when the walk ends on it. What the original does for a bridge the hero walks across without
+  stopping is not in the specs. Settled by a live trace of the scan on a walk over a bridge
+  (Wine or the replays).
+- **Save with unit 121 does not restore** (2026-10-20, #1041). The fort's garrison at (74, 59) on
+  «Устье Трейна» has unit type 121 in the save; the install has 102 unit types, so `restore` panics
+  in `ai_init` (`Content::unit`). Settled by checking the player's install (its unit count) and
+  where 121 comes from in the save; then the loader should not panic.
 
 - **«Максимум» passes or steps with a kill open** (2026-10-20, from the first `max_bench`
   baseline: 19 of Max's 1926 decisions, 88 battles three ways). Max's decision was a pass, a

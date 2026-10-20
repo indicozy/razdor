@@ -508,6 +508,9 @@ impl EventWorld for Game {
                 return Some(Place::Building(id));
             }
         }
+        if let Some(b) = self.bridge_stood_on {
+            return Some(Place::Building(self.world.locations[b].id));
+        }
         let t = self.tile();
         self.world.points.iter().find(|p| p.tile == t).map(|p| Place::Point(p.id))
     }
@@ -1061,6 +1064,7 @@ impl EventWorld for Game {
         self.path.clear();
         self.goal = None;
         self.location = None;
+        self.bridge_stood_on = None;
         // His next step is priced on his new cell (0x497c68, from the Community's 0xc27862).
         let cost = if self.aboard() { self.world.mixed_cost(t) } else { self.world.map.cost(t).unwrap_or(0) };
         self.step_base = Some(u32::from(cost) * self.hero_speed());
@@ -2800,6 +2804,50 @@ mod real_maps {
             }
             next.extend(g.drain_events());
             queue = next;
+        }
+    }
+
+    /// Устье Трейна: event 66 ("- Проверка на меч", +DelSword) is on the wooden bridge at
+    /// (32, 51) and is the only setter of the flag that event 78 needs to take the sword after
+    /// the fight with Сэлдом. A walk that ends on a bridge enters it for its local events
+    /// (world.md §7.2: "a bridge counts as the building the hero is on for events"), with the
+    /// sword in the pack or worn.
+    #[test]
+    fn a_walk_ending_on_a_bridge_runs_its_events() {
+        let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+        let dt = DtInstall::load(std::path::Path::new(&dir)).expect("install loads");
+        let c = Arc::new(Content::from_dt(&dt));
+        let s = dt.maps.iter().find(|m| m.name == "Устье Трейна").unwrap().load().unwrap();
+        for worn in [false, true] {
+            let mut g = Game::from_scenario(c.clone(), &s, HeroClass::Knight);
+            let _ = g.drain_events();
+            if worn {
+                let cells = crate::rules::items::slot_count(&c);
+                *g.squad[0].items.iter_mut().take(cells).find(|i| i.is_none()).unwrap() = Some(ItemId(2));
+            } else {
+                EventWorld::give_item(&mut g, 2);
+            }
+            // The bridge is not on the hero's land route: he is put beside it.
+            g.teleport_player(30, 49);
+            let _ = g.drain_events();
+            assert!(g.set_destination((32, 51)), "a route onto the bridge");
+            for _ in 0..400_000 {
+                if !g.moving() {
+                    break;
+                }
+                let _ = g.tick(0.05);
+            }
+            assert_eq!(g.tile(), (32, 51));
+            assert!(g.location.is_none(), "a bridge is never entered");
+            // A message window that opened on the way holds the scan until its OK; the scan
+            // then goes on with the bridge under him (events.md §2).
+            for _ in 0..20 {
+                if !g.script().unwrap().holds_window() {
+                    break;
+                }
+                let _ = g.event_window_closed();
+            }
+            assert!(g.script().unwrap().flag("DelSword"), "event 66 ran on the bridge (worn: {worn})");
         }
     }
 
