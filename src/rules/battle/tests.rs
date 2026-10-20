@@ -375,6 +375,45 @@ fn row9_vampirism_on_physical_hits_and_death_strikes_only() {
     assert_eq!(bt.fighters[1].hp, 24);
 }
 
+/// 48b3d4–48b42a: vampirism is signed. A negative value takes HP from the melee attacker, with
+/// no sign test; only the max caps the result (48b460), and an attacker at 0 or less is not
+/// removed by its own strike unless a Counterblow answer does it (48b566), since 48b580 tests
+/// only the target.
+#[test]
+fn negative_vampirism_takes_hp_from_the_attacker() {
+    let drinker = |id: u32| UnitDef { vampirism: -10, hits: 50, ..warrior(id, 50, 0) };
+    // (a) −10% of a 50-damage blow is −5: the attacker loses 5 HP.
+    let mut bt = with(vec![drinker(60)], &[(60, f(2))], &[(18, f(2))]);
+    bt.fighters[0].hp = 30;
+    let hit = bt.act(1).unwrap();
+    assert_eq!((hit.amount, bt.fighters[0].hp), (50, 25));
+    // (b) An Undead target: nothing, the attacker keeps its HP.
+    let undead = UnitDef { nature: Nature::Undead, hits: 200, ..warrior(61, 10, 0) };
+    let mut bt = with(vec![drinker(60), undead], &[(60, f(2))], &[(61, f(2))]);
+    bt.fighters[0].hp = 30;
+    bt.act(1).unwrap();
+    assert_eq!(bt.fighters[0].hp, 30, "no drain from undead");
+    // (c) Drained to −2 with no counter blow: its HP is kept at −2 and this strike does not
+    // remove it (not listed any more, but the record stays at its value).
+    let mut bt = with(vec![drinker(60)], &[(60, f(2))], &[(18, f(2))]);
+    bt.fighters[0].hp = 3;
+    let hit = bt.act(1).unwrap();
+    assert_eq!((hit.amount, hit.killed, bt.fighters[0].hp), (50, false, -2));
+    assert!(!bt.fighters[0].alive(), "at 0 or less it cannot act or be hit");
+    assert_eq!(bt.fighters[1].hp, 150, "the target lost the blow");
+    // (d) The same drain, but the target strikes back: the counter finds the attacker at 0 or
+    // less and removes it (48b566), with no damage left to take.
+    let answer = bonus(62, Bonus::Counterblow, UnitDef { hits: 200, ..warrior(62, 10, 0) });
+    let mut bt = with(vec![drinker(60), answer], &[(60, f(2))], &[(62, f(2))]);
+    bt.fighters[0].hp = 3;
+    let hit = bt.act(1).unwrap();
+    assert_eq!((hit.counter, bt.fighters[0].hp, bt.fighters[0].alive()), (Some(0), -2, false));
+    // (e) The battle's fighter keeps the negative value; the panel shows it as it is.
+    let bt = with(vec![drinker(60)], &[(60, f(2))], &[(18, f(2))]);
+    assert_eq!(bt.fighters[0].stats[Stat::Vampirizm], -10);
+    assert_eq!(bt.shown_stats(0)[Stat::Vampirizm], -10);
+}
+
 #[test]
 fn row10_life_curse_uses_the_integer_two_thirds_divisor() {
     let life = mage(57, 36, MagicSchool::Life, MagicDirection::ToAll);

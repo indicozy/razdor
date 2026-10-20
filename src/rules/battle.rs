@@ -1414,8 +1414,12 @@ impl Battle {
         // Before the first turn start the current initiative is not set yet: the base shows.
         let current = if started { f.cur_initiative } else { s[Stat::Initiative] };
         s[Stat::Initiative] = current.wrapping_add(f.mods.initiative);
+        // Vampirism may be negative (an item's −10%, 48b3d4 takes HP from the attacker):
+        // the clamp must not floor it, as it does not floor regeneration.
+        let vamp = s[Stat::Vampirizm];
         s.clamp();
         s[Stat::Regen] = f.regen;
+        s[Stat::Vampirizm] = vamp;
         f.stats = s;
     }
 
@@ -2193,9 +2197,14 @@ impl Battle {
         self.stun(id, target);
         self.on_hit(id, target, raw, false);
         // Vampirism on the uncapped damage, not from undead or elementals; after a melee or
-        // long strike only: the shot path never reaches it (48b3ce).
+        // long strike only: the shot path never reaches it (48b3ce). Any non-zero value
+        // counts: the original multiplies and divides signed (IMUL/IDIV 48b3d4–48b42a, so
+        // the quotient truncates toward zero), with no sign test, so a negative value takes
+        // HP from the attacker. Only the max is capped (48b460); there is no lower bound, and
+        // an attacker drained to 0 or less is not removed here (48b580 tests only the target;
+        // the Counterblow path removes it, 48b566). Its HP stays as it is.
         let vamp = self.fighters[id].stats[Stat::Vampirizm];
-        if vamp > 0 && !matches!(self.fighters[target].stats.nature, Nature::Undead | Nature::Elemental) {
+        if vamp != 0 && !matches!(self.fighters[target].stats.nature, Nature::Undead | Nature::Elemental) {
             let f = &mut self.fighters[id];
             f.hp = f.hp.wrapping_add(raw.wrapping_mul(vamp) / 100).min(f.max_hp());
         }
