@@ -86,7 +86,9 @@ wage to take back.
 
 **Markets** (economy.md §2, §5). Stock is redrawn at every midnight, building by building, before
 the barracks' draws (random order matters for the difftests). Buy/sell prices go through
-`relation_price` and `merchant_price`. The market tab (`building_view::market`, 0x4bca8c) shows
+`relation_price` and `merchant_price`. The Merchant test is `Game::has_merchant`: a unit of the
+army with the bonus, or (Razdor's deviation, the owner's wish) a Merchant item in the hero's pack.
+The market tab (`building_view::market`, 0x4bca8c) shows
 the goods or the pack (`BuildingView::selling`): «Инвентарь» and «Торговая лавка» switch them
 (`market_list_buttons`; the button of the list shown is disabled and drawn greyed, as the
 original's 0x479bbc), the description pane swaps sides with the list; the filter (Razdor's) takes

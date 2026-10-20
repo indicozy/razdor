@@ -97,7 +97,7 @@ pub fn relation_price(base: i32, attitude: i8, own: bool) -> i32 {
     shift_round(p, s as u32) as i32
 }
 
-/// A `Merchant` in the army takes `price × 30 / 100` off a purchase.
+/// A `Merchant` (in the army or the pack) takes `price × 30 / 100` off a purchase.
 pub fn merchant_price(price: i32) -> i32 {
     price - price * 30 / 100
 }
@@ -462,6 +462,14 @@ impl Game {
         self.squad.iter().any(|u| u.stats(&self.content).has(b))
     }
 
+    /// The `Merchant` discount applies: a unit of the army has the bonus ([`squad_has_any`],
+    /// the original's rule), or an item with the bonus lies in the hero's pack. The pack part
+    /// is Razdor's deviation, the owner's wish (2026-10-20); the original counts only the army.
+    pub(crate) fn has_merchant(&self) -> bool {
+        self.squad_has_any(&Bonus::Merchant)
+            || self.pack.iter().any(|i| self.content.try_item(i).is_some_and(|d| d.bonus == Some(Bonus::Merchant)))
+    }
+
     /// The Ranger hero heals every wounded unit of his army `pct`% (truncated): 15 at noon,
     /// 20 more when the noon report is shown.
     pub(crate) fn ranger_heal(&mut self, pct: i32) {
@@ -519,14 +527,14 @@ impl Game {
     // ---------------------------------------------------------------------------------------
 
     /// Price to buy `item` here: its cost times the building's relation factor
-    /// ([`relation_price`]); a `Merchant` in the army takes 30% off.
+    /// ([`relation_price`]); a `Merchant` (army or pack, [`has_merchant`]) takes 30% off.
     pub fn buy_price(&self, item: ItemId) -> i32 {
         let (attitude, own) = self.location.map_or((3, true), |l| {
             let l = &self.world.locations[l];
             (l.attitude, l.owned())
         });
         let p = relation_price(self.content.item(item).cost, attitude, own);
-        if self.squad_has_any(&Bonus::Merchant) {
+        if self.has_merchant() {
             merchant_price(p)
         } else {
             p
@@ -538,7 +546,7 @@ impl Game {
     pub fn sell_price(&self, item: ItemId) -> i32 {
         let cost = self.content.item(item).cost.max(0) as i64;
         let p = (cost * self.content.options.item_sale_cost as i64 * self.difficulty() as i64 / 10_000) as i32;
-        if self.squad_has_any(&Bonus::Merchant) {
+        if self.has_merchant() {
             p + p / 2
         } else {
             p

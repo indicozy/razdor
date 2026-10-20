@@ -1757,6 +1757,27 @@ mod tests {
         assert_eq!(g.sell_price(ItemId(23)), 90, "the relation does not count");
     }
 
+    /// Razdor's deviation (the owner's wish, 2026-10-20): a Merchant item in the hero's pack
+    /// gives the Merchant prices too, with no unit wearing it. The original counts only the army.
+    #[test]
+    fn a_merchant_item_in_the_pack_gives_the_merchant_prices() {
+        use crate::rules::content::Bonus;
+        let mut c = content();
+        c.items.push(crate::rules::content::ArtefactDef { cost: 300, bonus: Some(Bonus::Merchant), ..ck::item(26, ArtefactType::Ring) });
+        let c = Arc::new(Content::new(c.units.clone(), c.items.clone(), c.spells.clone(), Default::default(), crate::rules::formation::Formation::WIDE));
+        let mut g = Game::from_scenario(c, &shop_town(-2), HeroClass::Knight);
+        g.location = Some(0);
+        assert!(!g.has_merchant(), "no Merchant anywhere");
+        assert_eq!(g.buy_price(ItemId(24)), 1450);
+        assert_eq!(g.sell_price(ItemId(26)), 90);
+        g.pack = vec![ItemId(26)].into();
+        assert!(g.has_merchant(), "the pack's Merchant");
+        assert_eq!(g.buy_price(ItemId(24)), 1450 - 1450 * 30 / 100, "−30% with the item in the pack");
+        assert_eq!(g.sell_price(ItemId(26)), 135, "+50% with the item in the pack");
+        g.pack = vec![ItemId(23)].into();
+        assert_eq!(g.buy_price(ItemId(24)), 1450, "an item without the bonus: the plain price");
+    }
+
     #[test]
     fn ill_disposed_buildings_trade_hire_and_pay_tribute() {
         // No attitude test anywhere (economy.md §7, §3).
@@ -1977,7 +1998,7 @@ mod real_maps {
             let loc = &g.world.locations[l];
             for &item in &stock {
                 let want = crate::rules::economy::relation_price(c.item(item).cost, loc.attitude, loc.owned());
-                let want = if g.squad.iter().any(|u| u.alive() && u.stats(&c).has(&crate::rules::content::Bonus::Merchant)) { crate::rules::economy::merchant_price(want) } else { want };
+                let want = if g.has_merchant() { crate::rules::economy::merchant_price(want) } else { want };
                 assert_eq!(g.buy_price(item), want);
             }
         }
