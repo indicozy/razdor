@@ -152,9 +152,12 @@ twice until the place had opened.
   `an_attack_is_shown_after_the_step_that_brought_it_has_played`).
 - *No clicks while a step's events are held.* A village entered twice gave "already taken"
   (5d10303).
-- *Bridges.* A building on a bridge is never entered (no window, `location` stays none); a walk
-  that ends on a bridge runs its local events for him (`Game::bridge_stood_on`, `place()`); armies
-  on bridges block unless the Razdor option is on (`pass_on_bridges`).
+- *Bridges.* A building on a bridge is never entered (no window, `location` stays none). A bridge
+  is the building he is on for events on every step of a walk, not only the last: `hero_step` sets
+  `Game::bridge_stood_on` (`stand_on_bridge`) before the step's time and scan (0x497c68, 0x4abfbc;
+  world.md §7.2), so a walk across a bridge runs its local events on that step and goes on unless
+  one opens a window. Not the building his move began on (0x4ed434, `click_buildings.1`). Armies on
+  bridges block unless the Razdor option is on (`pass_on_bridges`).
 - *Time and windows.* Never advance time while a dialog is open; the UI only ticks when
   `input_blocked()` is false and `drain_events()` is empty.
 - *Questions asked again.* A declined repeating offer comes back on the next visit, not in the same
