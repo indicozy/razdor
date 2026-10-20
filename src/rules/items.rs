@@ -12,16 +12,16 @@ pub use super::content::{ItemId, Source};
 use super::experience::is_percent_stat;
 use super::units::{Stats, Unit};
 
-/// Item cells a unit's array holds: the most any rules allow (six, with the multiple rings or
-/// amulets rule). The classic rules use the first [`CLASSIC_SLOTS`] only ([`slot_count`]).
+/// Item cells a unit's array holds: the most any rules allow (six, with the six-cell switch).
+/// The classic rules use the first [`CLASSIC_SLOTS`] only ([`slot_count`]).
 pub const MAX_SLOTS: usize = 6;
 /// Item slots of the classic rules, which the original's units have.
 pub const CLASSIC_SLOTS: usize = 4;
 
-/// How many item cells a unit has under the rules: six when the multiple rings or amulets
-/// rule is on, else four as the original.
+/// How many item cells a unit has under the rules: six when the six-cell switch is on, else
+/// four as the original. The rings and amulets switches do not change the count.
 pub fn slot_count(content: &Content) -> usize {
-    if content.experimental.multiple_rings || content.experimental.multiple_amulets { MAX_SLOTS } else { CLASSIC_SLOTS }
+    if content.experimental.six_cells { MAX_SLOTS } else { CLASSIC_SLOTS }
 }
 
 /// Reads a unit's item cells: a save from before the six-cell rule holds four, which pad with
@@ -900,7 +900,7 @@ mod tests {
     }
 
     #[test]
-    fn experimental_accessories_are_independent_and_use_six_slots() {
+    fn experimental_accessories_are_independent_and_six_cells_add_two() {
         let original = content(vec![warrior(5, 20, 0)], vec![item(1, ArtefactType::Ring), item(2, ArtefactType::Amulet), item(3, ArtefactType::Helm)]);
         let u = wearing(&original, 5, &[1, 2, 3]);
         let rings = super::super::content::ExperimentalRules { multiple_rings: true, allow_duplicate_items: true, ..Default::default() };
@@ -908,7 +908,7 @@ mod tests {
         assert_eq!(slot_for(&c, &u, ItemId(1)), Ok(3));
         assert_eq!(slot_for(&c, &u, ItemId(2)), Err(EquipError::SameType));
         assert_eq!(slot_for(&c, &u, ItemId(3)), Err(EquipError::SameType));
-        let amulets = super::super::content::ExperimentalRules { multiple_amulets: true, allow_duplicate_items: true, ..Default::default() };
+        let amulets = super::super::content::ExperimentalRules { multiple_amulets: true, allow_duplicate_items: true, six_cells: true, ..Default::default() };
         let c = original.with_experimental(amulets);
         assert_eq!(slot_for(&c, &u, ItemId(1)), Err(EquipError::SameType));
         assert_eq!(slot_for(&c, &u, ItemId(2)), Ok(3));
@@ -918,10 +918,10 @@ mod tests {
         assert_eq!(slot_for(&c, &six, ItemId(2)), Err(EquipError::NoFreeSlot));
     }
 
-    /// Six cells under the multiple rings or amulets rule, four under the classic rules: the
-    /// classic rules never offer cells 4 and 5.
+    /// Six cells under the six-cell switch, four under the classic rules: the classic rules
+    /// never offer cells 4 and 5. The rings and amulets switches keep four cells.
     #[test]
-    fn the_rings_or_amulets_rule_adds_two_cells_and_classic_rules_keep_four() {
+    fn the_six_cell_switch_adds_two_cells_and_classic_rules_keep_four() {
         let classic = content(
             vec![warrior(5, 20, 0)],
             vec![item(1, ArtefactType::Ring), item(2, ArtefactType::Amulet), item(3, ArtefactType::Helm), item(4, ArtefactType::Armor), item(5, ArtefactType::Shield)],
@@ -930,14 +930,28 @@ mod tests {
         let full = wearing(&classic, 5, &[3, 4, 5, 1]);
         assert_eq!(slot_for(&classic, &full, ItemId(2)), Err(EquipError::NoFreeSlot));
         use super::super::content::ExperimentalRules;
-        for rules in [
-            ExperimentalRules { multiple_rings: true, ..Default::default() },
-            ExperimentalRules { multiple_amulets: true, ..Default::default() },
+        let six = classic.with_experimental(ExperimentalRules { six_cells: true, ..Default::default() });
+        assert_eq!(slot_count(&six), MAX_SLOTS);
+        assert_eq!(slot_for(&six, &full, ItemId(2)), Ok(4));
+        assert_eq!(slot_for(&six, &wearing(&six, 5, &[3, 4, 5, 1, 1, 1]), ItemId(2)), Err(EquipError::NoFreeSlot));
+    }
+
+    /// Every combination of the switches: only `six_cells` sets the count.
+    #[test]
+    fn slot_count_follows_only_the_six_cell_switch() {
+        let base = content(vec![warrior(5, 20, 0)], vec![]);
+        for (rings, amulets, six, want) in [
+            (false, false, false, CLASSIC_SLOTS),
+            (true, false, false, CLASSIC_SLOTS),
+            (false, true, false, CLASSIC_SLOTS),
+            (true, true, false, CLASSIC_SLOTS),
+            (false, false, true, MAX_SLOTS),
+            (true, false, true, MAX_SLOTS),
+            (false, true, true, MAX_SLOTS),
+            (true, true, true, MAX_SLOTS),
         ] {
-            let c = classic.with_experimental(rules);
-            assert_eq!(slot_count(&c), MAX_SLOTS);
-            assert_eq!(slot_for(&c, &full, ItemId(2)), Ok(4));
-            assert_eq!(slot_for(&c, &wearing(&c, 5, &[3, 4, 5, 1, 1, 1]), ItemId(2)), Err(EquipError::NoFreeSlot));
+            let c = base.with_experimental(super::super::content::ExperimentalRules { multiple_rings: rings, multiple_amulets: amulets, six_cells: six, ..Default::default() });
+            assert_eq!(slot_count(&c), want, "rings {rings}, amulets {amulets}, six cells {six}");
         }
     }
 
@@ -954,7 +968,7 @@ mod tests {
     #[test]
     fn experimental_duplicate_items_compare_ids_not_categories() {
         let c = content(vec![warrior(5, 20, 0)], vec![item(1, ArtefactType::Ring), item(2, ArtefactType::Ring), item(3, ArtefactType::Amulet)])
-            .with_experimental(super::super::content::ExperimentalRules { multiple_rings: true, multiple_amulets: true, ..Default::default() });
+            .with_experimental(super::super::content::ExperimentalRules { multiple_rings: true, multiple_amulets: true, six_cells: true, ..Default::default() });
         let u = wearing(&c, 5, &[1, 3]);
         assert_eq!(slot_for(&c, &u, ItemId(1)), Err(EquipError::DuplicateItem));
         assert_eq!(slot_for(&c, &u, ItemId(3)), Err(EquipError::DuplicateItem));

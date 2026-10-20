@@ -1,6 +1,6 @@
 # Experimental scenario rules
 
-The `...` button beside Next on the scenario screen opens five independent switches.
+The `...` button beside Next on the scenario screen opens six independent switches.
 Only the duplicate-item restriction is on by default for new games (the switch
 «Разрешить надевать одинаковые предметы» is off). Choices reset when
 starting a new playthrough from the main menu.
@@ -13,15 +13,21 @@ for an existing game through this menu.
   VampirsGist. Other distinct abilities use their existing battle phases and order.
   Stat modifiers from equipment continue using the existing calculation, independently
   of this switch. Negative abilities are retained too.
+- **Six equipment cells** («Шесть ячеек снаряжения», default off): a unit has six item cells
+  (the four classic ones plus a third pair), otherwise four. The count is `items::slot_count`
+  and follows only this switch. It is fixed for a playthrough; the menu edits a new game's
+  rules only, so no unit can wear items in cells 5–6 while the switch is off.
 - **Multiple rings** and **multiple amulets:** allow those item types to occupy any of
-  the equipment slots: with either switch a unit has six cells (the four classic ones plus
-  a third pair), otherwise four. Class, magic school, holy-item, weapon and all other
-  equipment restrictions remain in force. Each switch is independent of bonus stacking.
+  the equipment cells the unit has (four, or six with the six-cell switch). Class, magic
+  school, holy-item, weapon and all other equipment restrictions remain in force. Each switch
+  is independent of bonus stacking. Neither changes the cell count.
 - **Allow duplicate items** (default off): with it off, compare item IDs per character, not
   item categories. Different rings/amulets are permitted when their corresponding switch is on.
   Repeated copies of one item are refused. Turning it on lifts only that refusal. A weapon is
   still one per unit: the hint line «Оружие у бойца всегда одно.» says so in the menu.
   Old saves keep their previous rules: `RulesWire` maps `no_duplicate_items` to the inverse.
+A save without `six_cells` (before the switch) gets `six_cells = multiple_rings || multiple_amulets`,
+so a playthrough that already had six cells keeps them and no worn item is lost.
 - **At most two potions per character:** two successful drinks between army battles,
   including instant healing and revival potions. Failed attempts consume neither an item
   nor a count. The counter survives saving, loading and campaign carry-over, and resets
@@ -33,7 +39,7 @@ installation's shared definitions. `Game.experimental` is the persisted source o
 loading rebuilds the runtime Content copy from this field before setting up the AI.
 
 A save writes `allow_duplicate_items` and the inverse `no_duplicate_items` for older builds, which
-read the restriction from that key; format 12 is unchanged by the switch.
+read the restriction from that key; it also writes `six_cells`. Format 12 is unchanged by the switches.
 
 Save format 11 stores the rules in Game and the campaign hand-over record, potion counters
 and noncombatant marks in units. Missing rules in older saves use false values. Manual saves, autosaves, restarting the same scenario

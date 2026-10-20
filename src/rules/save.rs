@@ -980,7 +980,7 @@ pub(crate) mod tests {
     #[test]
     fn experimental_rules_survive_save_load_without_changing_install_defaults() {
         let install = demo();
-        let rules = super::super::content::ExperimentalRules { simultaneous_bonuses: true, multiple_rings: true, multiple_amulets: true, allow_duplicate_items: false, two_potions: true };
+        let rules = super::super::content::ExperimentalRules { simultaneous_bonuses: true, multiple_rings: true, multiple_amulets: true, allow_duplicate_items: false, two_potions: true, six_cells: true };
         let mut g = Game::new(Arc::new(install.with_experimental(rules)), HeroClass::Knight);
         g.squad[0].potions_drunk = 2;
         g.squad[0].battle_disabled = true;

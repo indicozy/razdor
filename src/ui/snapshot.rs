@@ -225,7 +225,7 @@ pub fn stage(app: &mut App) {
     if let Ok(flags) = std::env::var("RAZDOR_SCENE_EXPERIMENTAL") {
         let has = |key| flags.split(',').any(|f| f.trim() == key);
         super::new_game::snapshot_experimental(razdor::rules::content::ExperimentalRules {
-            simultaneous_bonuses: has("bonuses"), multiple_rings: has("rings"), multiple_amulets: has("amulets"), allow_duplicate_items: !has("unique"), two_potions: has("potions"),
+            simultaneous_bonuses: has("bonuses"), multiple_rings: has("rings"), multiple_amulets: has("amulets"), allow_duplicate_items: !has("unique"), two_potions: has("potions"), six_cells: has("cells"),
         });
     }
     if let Err(e) = try_stage(app, &scene) {

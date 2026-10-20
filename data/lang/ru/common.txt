@@ -19,6 +19,7 @@ All special bonuses simultaneously = Все особые бонусы однов
 Allow multiple rings = Разрешить несколько колец
 Allow multiple amulets = Разрешить несколько амулетов
 Allow duplicate items = Разрешить надевать одинаковые предметы
+Six equipment cells = Шесть ячеек снаряжения
 One weapon per unit always. = Оружие у бойца всегда одно.
 At most two potions per character = Не более двух зелий на персонажа
 The potion limit resets after a battle. = Лимит зелий сбрасывается после боя.

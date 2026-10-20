@@ -25,7 +25,7 @@ use super::{screens, ScenarioEntry, Screen};
 
 thread_local! {
     static EXPERIMENTAL: Cell<ExperimentalRules> = const { Cell::new(ExperimentalRules {
-        simultaneous_bonuses: false, multiple_rings: false, multiple_amulets: false, allow_duplicate_items: false, two_potions: false,
+        simultaneous_bonuses: false, multiple_rings: false, multiple_amulets: false, allow_duplicate_items: false, two_potions: false, six_cells: false,
     }) };
     static RULES_OPEN: Cell<bool> = const { Cell::new(false) };
     /// The scenario group picked (index into the list shown), the list's scroll in pixels
@@ -769,10 +769,19 @@ pub(super) fn open_experimental_menu() { RULES_OPEN.with(|p| p.set(true)); }
 
 pub(super) fn snapshot_experimental(rules: ExperimentalRules) { EXPERIMENTAL.with(|p| p.set(rules)); }
 
+/// The menu's equipment-slot hint for the six-cell switch, in the current language.
+fn slots_hint(six_cells: bool) -> &'static str {
+    if six_cells {
+        tr("Six equipment slots. Duplicate abilities do not stack.")
+    } else {
+        tr("Four equipment slots. Duplicate abilities do not stack.")
+    }
+}
+
 /// Kept modal so clicks and Enter cannot start a scenario behind the options.
 fn experimental_menu() {
     let k = chrome::k();
-    let r = Rect::new((screen_width() - 550.0*k)/2.0, (screen_height() - 380.0*k)/2.0, 550.0*k, 380.0*k);
+    let r = Rect::new((screen_width() - 550.0*k)/2.0, (screen_height() - 410.0*k)/2.0, 550.0*k, 410.0*k);
     let (_, close) = chrome::window(r, tr("Experimental scenario rules"), chrome::Skin::Marble, true);
     let mut rules = experimental_rules();
     let check = |index: usize, label: &str, value: &mut bool| {
@@ -791,16 +800,11 @@ fn experimental_menu() {
     check(2,tr("Allow multiple amulets"),&mut rules.multiple_amulets);
     check(3,tr("Allow duplicate items"),&mut rules.allow_duplicate_items);
     check(4,tr("At most two potions per character"),&mut rules.two_potions);
+    check(5,tr("Six equipment cells"),&mut rules.six_cells);
     EXPERIMENTAL.with(|p| p.set(rules));
-    // Six cells with the multiple rings or amulets rule, else the original's four.
-    let slots = if rules.multiple_rings || rules.multiple_amulets {
-        tr("Six equipment slots. Duplicate abilities do not stack.")
-    } else {
-        tr("Four equipment slots. Duplicate abilities do not stack.")
-    };
-    let lines = [slots, tr("One weapon per unit always."), tr("Applies to all armies; saved with this playthrough."), tr("The potion limit resets after a battle.")];
+    let lines = [slots_hint(rules.six_cells), tr("One weapon per unit always."), tr("Applies to all armies; saved with this playthrough."), tr("The potion limit resets after a battle.")];
     for (i,line) in lines.iter().enumerate() {
-        chrome::shadow_text(line,r.x+20.0*k,r.y+(264.0+i as f32*19.0)*k,12.0*k,chrome::CREAM);
+        chrome::shadow_text(line,r.x+20.0*k,r.y+(284.0+i as f32*19.0)*k,12.0*k,chrome::CREAM);
     }
     let b = Rect::new(r.center().x-50.0*k,r.bottom()-44.0*k,100.0*k,28.0*k);
     let (_, down, pressed) = button_state(b,true);
@@ -1120,6 +1124,16 @@ fn choose_class(offered: [bool; 3], pick: usize, clicked: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The equipment hint follows the six-cell switch alone, in both languages.
+    #[test]
+    fn the_slot_hint_follows_only_the_six_cell_switch() {
+        assert_eq!(slots_hint(false), tr("Four equipment slots. Duplicate abilities do not stack."));
+        assert_eq!(slots_hint(true), tr("Six equipment slots. Duplicate abilities do not stack."));
+        assert_ne!(slots_hint(false), slots_hint(true));
+        assert!(i18n::tr_in(Lang::Ru, "Four equipment slots. Duplicate abilities do not stack.").starts_with("Четыре слота экипировки."));
+        assert!(i18n::tr_in(Lang::Ru, "Six equipment slots. Duplicate abilities do not stack.").starts_with("Шесть слотов экипировки."));
+    }
 
     /// The map frame and its picture at one scale (0x4c1c09..0x4c1c63; issue #17): the 267×134
     /// picture 14 px in fills the 295×162 frame's opening with the same 14 px all round.

@@ -119,6 +119,9 @@ pub struct ExperimentalRules {
     pub multiple_amulets: bool,
     pub allow_duplicate_items: bool,
     pub two_potions: bool,
+    /// Six item cells per unit instead of the classic four (the «Шесть ячеек снаряжения»
+    /// switch). Fixed for a playthrough; see [`ExperimentalRules::from`] for old saves.
+    pub six_cells: bool,
 }
 
 impl ExperimentalRules {
@@ -134,6 +137,9 @@ struct RulesWire {
     multiple_amulets: bool,
     two_potions: bool,
     allow_duplicate_items: Option<bool>,
+    /// Missing in saves from before the switch: those with the rings or amulets rule had six
+    /// cells, so the rule's old meaning is kept (see the `From` impl).
+    six_cells: Option<bool>,
     /// The inverse of `allow_duplicate_items`, written for older builds and read only from
     /// saves that predate `allow_duplicate_items`.
     no_duplicate_items: Option<bool>,
@@ -147,12 +153,16 @@ impl From<RulesWire> for ExperimentalRules {
             (None, Some(no_duplicate)) => !no_duplicate,
             (None, None) => true,
         };
+        // Before the switch, six cells came with the multiple rings or amulets rule; a save
+        // without the key keeps the six cells it had, so no worn item is lost.
+        let six_cells = w.six_cells.unwrap_or(w.multiple_rings || w.multiple_amulets);
         Self {
             simultaneous_bonuses: w.simultaneous_bonuses,
             multiple_rings: w.multiple_rings,
             multiple_amulets: w.multiple_amulets,
             allow_duplicate_items,
             two_potions: w.two_potions,
+            six_cells,
         }
     }
 }
@@ -164,6 +174,7 @@ impl From<ExperimentalRules> for RulesWire {
             multiple_rings: r.multiple_rings,
             multiple_amulets: r.multiple_amulets,
             two_potions: r.two_potions,
+            six_cells: Some(r.six_cells),
             allow_duplicate_items: Some(r.allow_duplicate_items),
             no_duplicate_items: Some(!r.allow_duplicate_items),
         }
@@ -719,5 +730,33 @@ mod experimental_rules_save_tests {
         assert_eq!(json["no_duplicate_items"], false);
         let back: ExperimentalRules = serde_json::from_value(json).unwrap();
         assert_eq!(back, allowed);
+    }
+
+    /// A save from before the six-cell switch keeps the six cells it had: the rings or amulets
+    /// rule used to bring them, so such a save maps to six cells; without either rule, four.
+    #[test]
+    fn an_old_save_without_the_key_maps_six_cells_from_the_rings_or_amulets_rules() {
+        let rings: ExperimentalRules = serde_json::from_str(r#"{"multiple_rings": true}"#).unwrap();
+        assert!(rings.six_cells && rings.multiple_rings);
+        let amulets: ExperimentalRules = serde_json::from_str(r#"{"multiple_amulets": true, "two_potions": true}"#).unwrap();
+        assert!(amulets.six_cells);
+        let both_off: ExperimentalRules = serde_json::from_str(r#"{"multiple_rings": false, "multiple_amulets": false}"#).unwrap();
+        assert!(!both_off.six_cells);
+        let missing: ExperimentalRules = serde_json::from_str("{}").unwrap();
+        assert!(!missing.six_cells);
+    }
+
+    /// A save written with the switch carries it explicitly, whatever the ring and amulet
+    /// switches say, so the mapping above never applies to it.
+    #[test]
+    fn a_new_save_writes_the_six_cell_switch_explicitly() {
+        let four = ExperimentalRules { multiple_rings: true, ..Default::default() };
+        let json = serde_json::to_value(four).unwrap();
+        assert_eq!(json["six_cells"], false);
+        assert_eq!(serde_json::from_value::<ExperimentalRules>(json).unwrap(), four);
+        let six = ExperimentalRules { six_cells: true, ..Default::default() };
+        let json = serde_json::to_value(six).unwrap();
+        assert_eq!(json["six_cells"], true);
+        assert_eq!(serde_json::from_value::<ExperimentalRules>(json).unwrap(), six);
     }
 }
