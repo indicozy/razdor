@@ -8,6 +8,14 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **0.4.41 frame drops on a slow CPU** (report #1048, 2026-10-20). A phone emulator falls to 0.9 FPS
+  in 0.4.41 where 0.4.39 drops to about 60. Instruction counts (`perf stat`, v0.4.39 against main)
+  show no increase in the measured paths: the «Максимум» bench on the same battles, the quick
+  battle, the off-screen map, battle, building and army scenes, and a battle under «Максимум»
+  waiting for the player. Not settled: the screen and the save of the player (asked). Settled by a
+  report with the screen, or a measurement on a slow CPU (the Max worker threads against the
+  drawing thread).
+
 - **Negative vampirism: the attacker drained to 0 or less** (2026-10-20, #1046). The original keeps
   its record in the side's list (no removal test after its own strike, 48b580). Razdor drops such
   a unit from its lists and counts without the removal routine (`died`), so its row does not
