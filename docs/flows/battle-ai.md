@@ -154,6 +154,10 @@ plan while a damaging strike was open, of which a kill), and the decisions.
   original's AI: 6 retreats (3.6‰) and 0 others. The retreats are the #1037 report (a full-HP
   front-row unit stepping back next to its healer, then forward; the second video's pass is
   among the others). Two fixes were measured and not kept (§8 "Left out, measured").
+- With the retreat rule (2026-10-20, candidate B of §8; the baseline rewritten): Max wins 102
+  of 176 games (the baseline 103), worth kept 374‰ (380), taken 677‰ (679); retreats 5 (18),
+  all five the original's own retreats (§8); idle with a damaging strike 26 (54), of which a
+  kill 14 (17); 1809 decisions (1861). Same battle set, 88 battles.
 
 ## 8. «Максимум» (Razdor extra, main only)
 
@@ -185,6 +189,20 @@ BattleView::ai_move (computer's turn) → max_move → MaxThinker::poll(battle)
   original's pick (`plan(false)`, or a skip when the rules refuse it, as `auto_step`) first,
   then hostile actions by damage in tactical worth (a kill counts its worth again), heals,
   blessings and curses, steps, the pass.
+- **Retreat rule** (2026-10-20, the #1037 report; `max_moves(id, own)`, `root_pick`,
+  `root_alpha`): while the searching side's unit has a damaging strike open (a hostile
+  action with damage, the bench's "idle with a damaging strike"), a step from the front row
+  to the back row is not among its moves; the opponent's model keeps every step. At the root
+  a step or a pass is chosen only if it beats the best damaging strike by a unit's worth
+  (`unit_worth`, the smallest unit's tactical value × 1000‰); the original's pick is always
+  allowed, and the tie-break and the Safety floor apply to the allowed moves as before. With a
+  strike open the root's windows are per kind (`root_alpha`), so the strikes' and the steps'
+  scores that matter are exact and the choice is the same with threads
+  (`threads_never_change_the_choice_at_a_fixed_depth`). The original's own retreat (its
+  pick: a wounded shooter or mage, which its AI does step back) stays the first move, since
+  the Safety tests (`max_beats_the_original_on_*`) need the original's choice as the floor:
+  the bench's 5 retreats are those. The forced-win proof of a quick fight searches every
+  action, as before.
 - **Search**: alpha-beta minimax over clones of the battle (`Battle` is `Clone`, no
   randomness); a node maximises when a unit of the searching side acts, minimises otherwise,
   in the battle's own turn order (several actions of a unit in a row are several plies).
@@ -216,11 +234,12 @@ BattleView::ai_move (computer's turn) → max_move → MaxThinker::poll(battle)
   Max's own moves only, the opponent model unchanged): the retreats went 18 → 0, but Max's
   idle decisions with a strike open rose 54 → 110 (kill ones 17 → 67) and its wins 103 → 102.
   (e) A plus, at the root, a step or a pass that does not beat the best damaging strike by a
-  unit's worth (candidate B; the root's window widened to a unit's worth so the strike's score
-  is exact there): retreats 0, idle 54 → 39 (kill 14), worth kept 380 → 374‰, decisions
-  1861 → 1792, but wins 103 → 102 (one battle, a Max enemy that now loses). Not kept: the
-  keep rule asks for at least the baseline's wins. The owner decides whether a win is worth
-  the retreats (`docs/OPEN_QUESTIONS.md`). (b) a per-ply discount of
+  unit's worth (candidate B): retreats 0, idle 54 → 39 (kill 14), worth kept 380 → 374‰,
+  decisions 1861 → 1792, but wins 103 → 102 (one battle, a Max enemy that now loses). Kept
+  (the owner's decision, 2026-10-20: one game of 176 for the retreats) as the Retreat rule
+  above, with one change from the measured form: the original's own retreat is not dropped
+  (the Safety tests fail when it is: Max then ends below the original's score in a battle).
+  Measured with that change: retreats 5, idle 26 (kill 14), decisions 1809, wins 102. (b) a per-ply discount of
   the worth part (a gain sooner, a loss later scores higher; 10 or 100 per ply)
   changed 2 battles and made the kill-idle count 21 (19); with the tie-break it helped less
   than the tie-break alone. (c) turn-limit pressure on the cut leaves (the computer's own worth

@@ -91,7 +91,7 @@ impl MaxThinker {
                 found = Some(patch_globals());
                 break;
             }
-            let legal = r.max_moves(id);
+            let legal = r.max_moves(id, false);
             let guess = self.tables.tt_get(r.max_key(self.side)).and_then(|e| e.best).filter(|m| m.0.is_none_or(|p| legal.contains(&p)));
             let m = guess.unwrap_or_else(|| r.original_move(&legal));
             r.play_max_move(m);

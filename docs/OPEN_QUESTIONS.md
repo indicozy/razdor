@@ -8,18 +8,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
-- **«Максимум» steps back out of the front row with a strike open** (#1037, 2026-10-20; the
-  bench's retreat count: 18 of Max's 1861 decisions, the original's 6 of 1661). A full-HP
-  front-row unit stepped to the back row next to its healer instead of striking; the player
-  confirmed it was «Максимум». Two fixes were measured with `max_bench` and not kept (battle-ai
-  flow §8): A (no such step for Max's own units while a strike is open) takes the retreats to
-  0 but doubles Max's idle decisions with a strike open (54 → 110) and loses a win (103 → 102);
-  B (A, plus a root rule that takes the strike unless the step beats it by a unit's worth)
-  takes idle to 39 and also loses that win (102). The win is one battle of the install's
-  (a Max enemy against the original's AI, now lost). Owner's call: accept one lost game of
-  176 for no retreats, or find the move that keeps it. Check the original too: the bench's
-  original plays 6 such retreats (wounded units?), not yet confirmed in Ghidra.
-
 - **The hero's figure on a campaign's next map** (2026-10-20, with the fix for the hero's figure
   after opcode 7). Razdor carries the figure with the hero's record (`NextMap::figure`, a guess:
   the original's hand-over copies the hero's whole record, 0x4b5b64, and the figure byte is in
@@ -44,7 +32,7 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   (a tempo move, a heal first, a lost battle either way); the owner should read them. Check
   the search's choice and its rollout scores there before changing the score. Recorded in
   the baseline's `idle_kill` counts. The root's tie-break toward damage (battle-ai §8) took it
-  from 19 of 1926 to 17 of 1861; still open.
+  from 19 of 1926 to 17 of 1861, the retreat rule to 14 of 1809; still open.
 
 - **«Максимум» turn-limit pressure and tempo at the game's clock** (2026-10-20, the tempo
   experiment, battle-ai §8). The benchmark's fixed budgets (4 or 12 actions, 600 positions)
@@ -354,6 +342,15 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   button's own size.
 
 ## Settled
+
+- **«Максимум» steps back out of the front row with a strike open** (#1037, 2026-10-20; the
+  bench's retreat count: 18 of Max's 1861 decisions, the original's 6 of 1661). A full-HP
+  front-row unit stepped to the back row next to its healer instead of striking. The owner
+  kept candidate B (battle-ai flow §8 "Retreat rule"): one game of 176 (103 → 102 wins) for
+  fewer retreats (18 → 5). The 5 left are the original's own retreats (wounded shooters or
+  mages), which Max keeps as the Safety floor (the original's pick is the floor of the
+  search's choice; without it the Safety tests fail). Whether the original's retreats are
+  right is not confirmed in Ghidra.
 
 - **«Максимум» at the turn limit** (2026-10-18, Eisenwald's report: a Heresiarch did not heal
   a DeathCurse knight on turn 24 of 25, since every line lost to a hero who just waits and Max

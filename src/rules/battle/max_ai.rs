@@ -226,11 +226,35 @@ impl Battle {
     /// (battle.md §2, `row30_ai_leaves_the_reserve_and_never_enters_it`), and a unit there
     /// cannot be hit, so the worth left scores it well while its turns are lost (the
     /// 2026-10-20 report, #1034). Leaving the reserve stays a step like any other.
-    fn max_moves(&self, id: usize) -> Vec<Plan> {
+    ///
+    /// For `own` (the searching side's unit), while a damaging strike is open, a step from the
+    /// front row to the back row is dropped too (a retreat, the 2026-10-20 report #1037: the
+    /// leaves score a full-HP unit out of reach well, and the strike it gives up is not seen).
+    /// The opponent's model keeps every step.
+    fn max_moves(&self, id: usize, own: bool) -> Vec<Plan> {
         let mut v: Vec<Plan> = self.all_options(id).into_iter().map(|(t, k)| Plan::Act(t, k)).collect();
-        v.extend(self.moves(id).into_iter().filter(|s| s.row != Row::Reserve).map(Plan::Move));
+        let retreat_barred = own && self.damaging_open(id);
+        let from_front = self.fighters[id].slot.row == Row::Front;
+        v.extend(
+            self.moves(id)
+                .into_iter()
+                .filter(|s| s.row != Row::Reserve)
+                .filter(|s| !(retreat_barred && from_front && s.row == Row::Back))
+                .map(Plan::Move),
+        );
         v.push(Plan::Pass);
         v
+    }
+
+    /// A damaging strike is open to the active unit `id`: a hostile action that deals damage
+    /// (the benchmark's "idle with a damaging strike", `bench.rs`).
+    fn damaging_open(&self, id: usize) -> bool {
+        self.all_options(id).into_iter().any(|(t, k)| self.damaging(id, MaxMove(Some(Plan::Act(t, k)))))
+    }
+
+    /// Whether `m`, an action of `id`, is a hostile action that deals damage.
+    fn damaging(&self, id: usize, m: MaxMove) -> bool {
+        matches!(m.0, Some(Plan::Act(t, k)) if k.is_hostile() && matches!(self.preview(id, t, k), Preview::Damage(d) if d > 0))
     }
 
     /// The original AI's decision as the auto-battle carries it out: its plan, or a skip
@@ -242,9 +266,11 @@ impl Battle {
     /// The order to search `id`'s actions in: the original's first, then the most damage
     /// (in tactical worth, a kill counting its whole worth again), heals, the rest of the
     /// cells' actions, steps, a pass.
-    fn max_order(&self, id: usize) -> Vec<MaxMove> {
-        let legal = self.max_moves(id);
-        let original = self.original_move(&legal);
+    fn max_order(&self, id: usize, own: bool) -> Vec<MaxMove> {
+        let legal = self.max_moves(id, own);
+        // The original's own pick, even where the retreat rule of `max_moves` drops it: it stays
+        // the first move and the floor of the root's choice (Safety: the `max_beats_the_original_on_*` tests).
+        let original = if own { self.original_move(&self.max_moves(id, false)) } else { self.original_move(&legal) };
         let key = |p: &Plan| -> i64 {
             match *p {
                 Plan::Act(t, k) => {
@@ -334,8 +360,50 @@ impl Battle {
     /// The root's tie-break slack: [`TIE_PERMILLE`] of the smallest unit's worth (a unit's worth
     /// is its tactical value × [`WORTH_SCALE`] at full HP; a tactical value below 1 counts as 1).
     fn tie_epsilon(&self) -> i64 {
+        self.unit_worth() * TIE_PERMILLE / 1000
+    }
+
+    /// One unit's worth: the smallest unit's tactical value × [`WORTH_SCALE`].
+    fn unit_worth(&self) -> i64 {
         let smallest = self.fighters.iter().map(|f| f.tactical.max(1) as i64).min().unwrap_or(1);
-        smallest * WORTH_SCALE * TIE_PERMILLE / 1000
+        smallest * WORTH_SCALE
+    }
+
+    /// Whether the root's move `m` (of the active unit) is a damaging strike.
+    fn damaging_root(&self, m: MaxMove) -> bool {
+        self.active().is_some_and(|id| self.damaging(id, m))
+    }
+
+    /// The alpha of the root's move `m` (not the original's) with a strike open: a damaging
+    /// strike is searched above the best strike so far less the tie's slack, a step above the
+    /// bar that strike sets (the best strike plus a unit's worth) and above the best so far less
+    /// the slack. A score at or below it cannot change [`Battle::root_pick`]'s choice, and one
+    /// above it is exact.
+    fn root_alpha(&self, m: MaxMove, best: i64, strike: i64, eps: i64) -> i64 {
+        if self.damaging_root(m) {
+            strike - eps - 1
+        } else {
+            (strike + self.unit_worth()).max(best - eps) - 1
+        }
+    }
+
+    /// The root's choice among `moves` (the original's first) with exact scores `values`:
+    /// the tie-break toward damage ([`Battle::tie_pick`]) over the moves the rule below
+    /// allows. With `strike_open` (a damaging strike is among `moves`), a step or a pass is
+    /// allowed only when it beats the best damaging strike's score by more than one unit's
+    /// worth (the 2026-10-20 report #1037, candidate B). Returns the index and its exact score.
+    fn root_pick(&self, moves: &[MaxMove], values: &[i64], eps: i64, strike_open: bool) -> (usize, i64) {
+        let Some(id) = self.active() else { return (0, values[0]) };
+        let allowed: Vec<i64> = if strike_open {
+            let best_strike = moves.iter().zip(values).filter(|(m, _)| self.damaging(id, **m)).map(|(_, &v)| v).max().unwrap_or(-INF);
+            let bar = best_strike + self.unit_worth();
+            moves.iter().zip(values).enumerate().map(|(i, (&m, &v))| if i == 0 || self.damaging(id, m) || v > bar { v } else { -INF }).collect()
+        } else {
+            values.to_vec()
+        };
+        let best = allowed.iter().copied().max().unwrap_or(values[0]);
+        let k = self.tie_pick(moves, &allowed, best, eps);
+        (k, values[k])
     }
 
     /// The worth `m` (an action of the active unit `id`) takes at once: the damage it deals in
@@ -425,7 +493,7 @@ impl Battle {
         let mut root = self.clone();
         root.log.clear();
         root.stale_reads.borrow_mut().clear();
-        let mut moves = root.max_order(id);
+        let mut moves = root.max_order(id, true);
         let original = moves[0];
         let mut s = Search {
             side: root.fighters[id].team,
@@ -447,8 +515,9 @@ impl Battle {
             roll: None,
             prefetch,
             help: (None, None),
+            open_strike: root.damaging_open(id),
         };
-        let all_moves = moves.clone();
+        let all_moves = root.max_order(id, false);
         let mut done = None;
         // A single action (a pass): nothing to weigh.
         let mut settled = moves.len() == 1;
@@ -576,6 +645,8 @@ struct Search<'a> {
     prefetch: Option<&'a Prefetch<'a>>,
     /// The buffers the search rolls out other leaves in while it waits ([`Prefetch::claim`]).
     help: (Option<Battle>, Option<Battle>),
+    /// The root's unit has a damaging strike open ([`Battle::root_pick`]).
+    open_strike: bool,
 }
 
 /// The rollouts of one node's leaves played ahead on other threads ([`MaxBudget::prefetch`],
@@ -839,6 +910,8 @@ impl<'a> Search<'a> {
     fn root(&mut self, b: &Battle, moves: &[MaxMove], depth: u32) -> Option<(MaxMove, i64, i64, Vec<i64>)> {
         let (mut best, mut best_v, mut original_value) = (moves[0], -INF, 0);
         let slack = self.tie_slack(b);
+        let strike = self.strike_open();
+        let mut strike_v = -INF;
         let mut values = Vec::with_capacity(moves.len());
         let ahead = self.prefetch_leaves(b, moves, depth, 0);
         for (i, &m) in moves.iter().enumerate() {
@@ -847,6 +920,8 @@ impl<'a> Search<'a> {
             }
             let alpha = match slack {
                 _ if i == 0 => -INF,
+                // With a strike open, the strikes and the steps have their own bounds (`root_alpha`).
+                Some(eps) if strike => b.root_alpha(m, best_v, strike_v, eps),
                 None => best_v,
                 // Below the best by the tie's slack: a score within it comes out exact.
                 Some(eps) => best_v - eps - 1,
@@ -859,6 +934,9 @@ impl<'a> Search<'a> {
                 return None;
             }
             values.push(v);
+            if strike && b.damaging_root(m) {
+                strike_v = strike_v.max(v);
+            }
             if i == 0 {
                 (best, best_v, original_value) = (m, v, v);
             } else if v > best_v {
@@ -869,8 +947,8 @@ impl<'a> Search<'a> {
             self.prefetch.expect("prefetching").finish();
         }
         if let Some(eps) = slack {
-            let k = b.tie_pick(moves, &values, best_v, eps);
-            (best, best_v) = (moves[k], values[k]);
+            let (k, v) = b.root_pick(moves, &values, eps, strike);
+            (best, best_v) = (moves[k], v);
         }
         Some((best, best_v, original_value, values))
     }
@@ -879,6 +957,12 @@ impl<'a> Search<'a> {
     /// only asks whether a win is proven.
     fn tie_slack(&self, b: &Battle) -> Option<i64> {
         (!self.forced).then(|| b.tie_epsilon())
+    }
+
+    /// The root's strike rule ([`Battle::root_pick`]) applies: a normal search whose root unit
+    /// has a damaging strike open.
+    fn strike_open(&self) -> bool {
+        self.open_strike && !self.forced
     }
 
     /// A search like this one for another thread, its counters at 0.
@@ -903,6 +987,7 @@ impl<'a> Search<'a> {
             roll: None,
             prefetch: None,
             help: (None, None),
+            open_strike: self.open_strike,
         }
     }
 
@@ -960,9 +1045,10 @@ impl<'a> Search<'a> {
         use std::sync::atomic::AtomicUsize;
         use std::sync::Mutex;
         let next = AtomicUsize::new(0);
-        let best = Mutex::new((-INF, usize::MAX));
+        let best = Mutex::new((-INF, usize::MAX, -INF));
         let values = Mutex::new(vec![None; moves.len()]);
         let slack = self.tie_slack(b);
+        let strike = self.strike_open();
         let forks: Vec<Search> = std::thread::scope(|scope| {
             let workers: Vec<_> = (0..threads)
                 .map(|_| {
@@ -976,23 +1062,27 @@ impl<'a> Search<'a> {
                             if i >= moves.len() {
                                 break;
                             }
-                            let alpha = match (*best.lock().unwrap_or_else(|e| e.into_inner()), slack) {
+                            let g = *best.lock().unwrap_or_else(|e| e.into_inner());
+                            let alpha = match (g, slack) {
                                 _ if i == 0 => -INF,
-                                ((v, _), Some(eps)) => v - eps - 1,
-                                ((v, at), None) if at < i => v,
-                                ((v, _), None) => v - 1,
+                                ((_, _, strike_v), Some(eps)) if strike => b.root_alpha(moves[i], g.0, strike_v, eps),
+                                ((v, _, _), Some(eps)) => v - eps - 1,
+                                ((v, at, _), None) if at < i => v,
+                                ((v, _, _), None) => v - 1,
                             };
                             let v = s.child(&b, moves[i], depth - 1, 1, alpha, INF);
                             if s.aborted {
                                 break;
                             }
                             values.lock().unwrap_or_else(|e| e.into_inner())[i] = Some(v);
-                            if i == 0 || v > alpha {
-                                let mut g = best.lock().unwrap_or_else(|e| e.into_inner());
-                                if v > g.0 || (v == g.0 && i < g.1) {
-                                    *g = (v, i);
-                                }
+                            let mut g = best.lock().unwrap_or_else(|e| e.into_inner());
+                            if (i == 0 || v > alpha) && (v > g.0 || (v == g.0 && i < g.1)) {
+                                (g.0, g.1) = (v, i);
                             }
+                            if strike && b.damaging_root(moves[i]) {
+                                g.2 = g.2.max(v);
+                            }
+                            drop(g);
                         }
                         s
                     })
@@ -1010,12 +1100,12 @@ impl<'a> Search<'a> {
             self.cut |= f.cut;
         }
         let values: Option<Vec<i64>> = values.into_inner().unwrap_or_else(|e| e.into_inner()).into_iter().collect();
-        let (v, at) = best.into_inner().unwrap_or_else(|e| e.into_inner());
+        let (v, at, _) = best.into_inner().unwrap_or_else(|e| e.into_inner());
         match values {
             Some(values) if all && !self.aborted && at < moves.len() => match slack {
                 Some(eps) => {
-                    let k = b.tie_pick(moves, &values, v, eps);
-                    Some((moves[k], values[k], values[0], values))
+                    let (k, v) = b.root_pick(moves, &values, eps, strike);
+                    Some((moves[k], v, values[0], values))
                 }
                 None => Some((moves[at], v, values[0], values)),
             },
@@ -1084,7 +1174,8 @@ impl<'a> Search<'a> {
         let maxing = b.fighters[id].team == self.side;
         let mut best = if maxing { -INF } else { INF };
         let mut best_move = None;
-        let mut order = b.max_order(id);
+        let own = b.fighters[id].team == self.side && !self.forced;
+        let mut order = b.max_order(id, own);
         if let Some(i) = first.and_then(|f| order.iter().position(|&m| m == f)) {
             let m = order.remove(i);
             order.insert(0, m);
