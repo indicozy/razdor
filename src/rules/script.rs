@@ -765,16 +765,17 @@ impl EventWorld for Game {
     }
 
     /// The hero becomes unit type `unit`, keeping level, XP and items; the class bonuses
-    /// (tied to the three hero types) are lost.
+    /// (tied to the three hero types) are lost. His HP follows the same rule as opcode 7
+    /// (`retype_unit`): the original's event 16 (events.md, "New hero class") writes only the
+    /// unit's type, so an unhurt hero stays unhurt at the new maximum (an unhurt unit's HP is
+    /// −1, magic-items.md §4.1) and a wounded one keeps its HP number. His map figure is not
+    /// touched: it is set once at the start (`hero_figure`, c0134a0).
     fn set_hero_class(&mut self, unit: u8) {
         let id = UnitId(unit as u32);
         if self.content.try_unit(id).is_none() {
             return;
         }
-        let c = self.content.clone();
-        let h = &mut self.squad[0];
-        h.def = id;
-        h.hp = h.hp.min(h.max_hp(&c)).max(1);
+        self.retype_unit(Holder::Player, 0, id);
     }
 
     /// A battle with the army (brought onto the map if waiting); the UI opens it.
@@ -1719,6 +1720,38 @@ mod tests {
         assert_eq!(g.step_time((2, 2), (3, 2)), 25.0);
         g.set_army_speed(Holder::Player, -3);
         assert_eq!((g.hero_speed(), g.step_time((2, 2), (3, 2))), (8, 40.0));
+    }
+
+    #[test]
+    fn new_hero_class_follows_the_opcode_7_hp_rule() {
+        // Event 16 (events.md, "New hero class") writes only the hero's unit type, like opcode
+        // 7: an unhurt Knight 80/80 becomes a 120-maximum unit at 120/120, and a wounded 50/80
+        // keeps 50 of 120. The map figure stays the start class's (c0134a0).
+        use crate::rules::content::Content;
+        use crate::rules::events::EventWorld as _;
+        let base = content();
+        let with_big_unit = || {
+            let mut units = base.units.clone();
+            // The Knight (unit 1) at 80, the new class (unit 5) at 120.
+            units.iter_mut().find(|u| u.id == 1).unwrap().hits = 80;
+            units.iter_mut().find(|u| u.id == 5).unwrap().hits = 120;
+            Arc::new(Content::new(units, base.items.clone(), vec![], base.options.clone(), base.formation))
+        };
+        let mut g = Game::from_scenario(with_big_unit(), &world(vec![]), HeroClass::Knight);
+        let c = g.content.clone();
+        assert_eq!((g.squad[0].hp, g.squad[0].max_hp(&c)), (80, 80), "the Knight starts unhurt");
+        let figure = g.hero_figure();
+        g.set_hero_class(5);
+        assert_eq!(g.squad[0].def, UnitId(5));
+        assert_eq!(g.squad[0].max_hp(&c), 120);
+        assert_eq!(g.squad[0].hp, 120, "unhurt before, unhurt after: 120/120");
+        assert_eq!(g.hero_figure(), figure, "the figure is untouched");
+
+        let mut g = Game::from_scenario(with_big_unit(), &world(vec![]), HeroClass::Knight);
+        g.squad[0].hp = 50;
+        g.set_hero_class(5);
+        assert_eq!(g.squad[0].max_hp(&c), 120);
+        assert_eq!(g.squad[0].hp, 50, "a wounded hero keeps his HP number: 50/120");
     }
 
     #[test]
