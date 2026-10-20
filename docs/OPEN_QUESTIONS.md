@@ -8,6 +8,18 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **«Максимум» steps back out of the front row with a strike open** (#1037, 2026-10-20; the
+  bench's retreat count: 18 of Max's 1861 decisions, the original's 6 of 1661). A full-HP
+  front-row unit stepped to the back row next to its healer instead of striking; the player
+  confirmed it was «Максимум». Two fixes were measured with `max_bench` and not kept (battle-ai
+  flow §8): A (no such step for Max's own units while a strike is open) takes the retreats to
+  0 but doubles Max's idle decisions with a strike open (54 → 110) and loses a win (103 → 102);
+  B (A, plus a root rule that takes the strike unless the step beats it by a unit's worth)
+  takes idle to 39 and also loses that win (102). The win is one battle of the install's
+  (a Max enemy against the original's AI, now lost). Owner's call: accept one lost game of
+  176 for no retreats, or find the move that keeps it. Check the original too: the bench's
+  original plays 6 such retreats (wounded units?), not yet confirmed in Ghidra.
+
 - **«Максимум» passes or steps with a kill open** (2026-10-20, from the first `max_bench`
   baseline: 19 of Max's 1926 decisions, 88 battles three ways). Max's decision was a pass, a
   step or a refused plan while a strike that kills a unit was open (77 idle decisions with any

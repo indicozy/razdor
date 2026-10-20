@@ -37,6 +37,7 @@ fn baseline_path() -> PathBuf {
 
 /// One battle played to its end, and the tally of its decisions.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(default)]
 struct Game {
     /// `player`, `enemy`, or `none` (still ongoing at the step cap).
     winner: String,
@@ -55,6 +56,10 @@ struct Game {
     idle: u32,
     /// Of those, a strike that kills a unit was open.
     idle_kill: u32,
+    /// Of those, a step from the front row to the back row (a retreat).
+    retreat: u32,
+    /// Of those, any other step, a pass or a refused plan.
+    step_pass: u32,
 }
 
 impl Game {
@@ -140,6 +145,12 @@ fn tally(g: &mut Game, b: &Battle, id: usize, from_reserve: bool, plan: Option<P
         g.idle += 1;
         let kill = open.iter().any(|&(tg, k)| matches!(b.preview(id, tg, k), Preview::Damage(d) if d >= b.fighters[tg].hp));
         g.idle_kill += u32::from(kill);
+        let retreat = b.fighters[id].slot.row == Row::Front && matches!(plan, Some(Plan::Move(s)) if s.row == Row::Back);
+        if retreat {
+            g.retreat += 1;
+        } else {
+            g.step_pass += 1;
+        }
     }
 }
 
@@ -186,6 +197,8 @@ struct Side {
     reserve: u32,
     idle: u32,
     idle_kill: u32,
+    retreat: u32,
+    step_pass: u32,
 }
 
 impl Side {
@@ -202,6 +215,8 @@ impl Side {
         self.reserve += g.reserve;
         self.idle += g.idle;
         self.idle_kill += g.idle_kill;
+        self.retreat += g.retreat;
+        self.step_pass += g.step_pass;
     }
 
     fn print(&self, title: &str) {
@@ -209,7 +224,8 @@ impl Side {
         let per_k = |x: u32| 1000.0 * x as f64 / self.decisions.max(1) as f64;
         println!(
             "{title}: wins {} of {} games ({:.1}%), turn limit {}; worth kept {:.0}‰, taken {:.0}‰; {} decisions: \
-             reserve steps {} ({:.2}‰), idle with a damaging strike {} ({:.1}‰), of which a kill {} ({:.2}‰)",
+             reserve steps {} ({:.2}‰), idle with a damaging strike {} ({:.1}‰), of which a kill {} ({:.2}‰) \
+             (a retreat {} ({:.2}‰), another step or pass {})",
             self.wins,
             self.games,
             100.0 * self.wins as f64 / n,
@@ -222,7 +238,10 @@ impl Side {
             self.idle,
             per_k(self.idle),
             self.idle_kill,
-            per_k(self.idle_kill)
+            per_k(self.idle_kill),
+            self.retreat,
+            per_k(self.retreat),
+            self.step_pass
         );
     }
 }
@@ -345,7 +364,7 @@ fn max_bench_does_not_regress() {
             old_wins += i64::from(then.won(team));
             kept += now.kept(team);
             old_kept += then.kept(team);
-            for (what, n, t) in [("reserve steps", now.reserve, then.reserve), ("idle with a damaging strike", now.idle, then.idle), ("idle with a kill open", now.idle_kill, then.idle_kill)] {
+            for (what, n, t) in [("reserve steps", now.reserve, then.reserve), ("idle with a damaging strike", now.idle, then.idle), ("idle with a kill open", now.idle_kill, then.idle_kill), ("retreat with a damaging strike", now.retreat, then.retreat)] {
                 if n > t {
                     problems.push(format!("{} as {team:?}: {what} {t} -> {n}", e.id));
                 }

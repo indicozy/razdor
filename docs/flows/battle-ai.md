@@ -133,7 +133,8 @@ plan while a damaging strike was open, of which a kill), and the decisions.
 - `max_bench_does_not_regress` (in every `cargo test`; ~1 s without the install, ~6 s with it,
   on the demo's 24 battles and every fourth install battle): fails when Max wins fewer games
   than the baseline did, keeps more than 10‰ less worth on average, or a game has more reserve
-  steps or idle decisions than its baseline record. A battle the baseline lacks fails too.
+  steps, retreats (a front-row step to the back row while a damaging strike was open) or idle
+  decisions than its baseline record. A battle the baseline lacks fails too.
 - The baseline is `src/rules/battle/max_ai/bench_baseline.json` (numbers only, one battle per
   line). Update it only for an intended improvement, after reading `max_bench`'s diff:
   `RAZDOR_MAX_BENCH_WRITE=1` with the same command rewrites the battles it ran (the others
@@ -147,6 +148,12 @@ plan while a damaging strike was open, of which a kill), and the decisions.
   turn limit 6, worth kept 380‰, taken 679‰; 1861 decisions: idle with a damaging strike 54
   (29.0‰), of which a kill 17 (9.1‰). Same battle set; the bench's wall time 6.6 s → 6.7–6.9 s
   (within its noise, about +4%).
+- With the blunder categories (2026-10-20; the baseline rewritten, the AI unchanged): the idle
+  decisions split into a retreat (a front-row step to the back row) and another step, a pass or
+  a refused plan. Max: 18 retreats (9.7‰) and 36 others (19.3‰) of 1861 decisions; the
+  original's AI: 6 retreats (3.6‰) and 0 others. The retreats are the #1037 report (a full-HP
+  front-row unit stepping back next to its healer, then forward; the second video's pass is
+  among the others). Two fixes were measured and not kept (§8 "Left out, measured").
 
 ## 8. «Максимум» (Razdor extra, main only)
 
@@ -204,7 +211,16 @@ BattleView::ai_move (computer's turn) → max_move → MaxThinker::poll(battle)
   176 wins, the idle decisions 77 → 54 and the kill ones 19 → 17, worth kept 380‰ (unchanged), the
   decision count 1926 → 1861; 300‰ also passed (50 idle, 16 with a kill) but kept 378‰ and took
   692‰ (677‰).
-- **Left out, measured** (the same benchmark; numbers in the commit): (b) a per-ply discount of
+- **Left out, measured** (the same benchmark; numbers in the commit): (d) no front-row step to
+  the back row for a unit with a damaging strike open (candidate A: the step is dropped from
+  Max's own moves only, the opponent model unchanged): the retreats went 18 → 0, but Max's
+  idle decisions with a strike open rose 54 → 110 (kill ones 17 → 67) and its wins 103 → 102.
+  (e) A plus, at the root, a step or a pass that does not beat the best damaging strike by a
+  unit's worth (candidate B; the root's window widened to a unit's worth so the strike's score
+  is exact there): retreats 0, idle 54 → 39 (kill 14), worth kept 380 → 374‰, decisions
+  1861 → 1792, but wins 103 → 102 (one battle, a Max enemy that now loses). Not kept: the
+  keep rule asks for at least the baseline's wins. The owner decides whether a win is worth
+  the retreats (`docs/OPEN_QUESTIONS.md`). (b) a per-ply discount of
   the worth part (a gain sooner, a loss later scores higher; 10 or 100 per ply)
   changed 2 battles and made the kill-idle count 21 (19); with the tie-break it helped less
   than the tie-break alone. (c) turn-limit pressure on the cut leaves (the computer's own worth
