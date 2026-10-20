@@ -204,7 +204,8 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   handed his side over and his units were played by the original's AI; with Max chosen, Max
   now plays both sides there (battle-ai flow §8 "Auto-battle": against Max the player's side
   wins 42% instead of 27%). Still open: Max's search models the other side as the original's
-  AI (its rollouts) also when that side is Max, and its taste for small steps (a 3-action
+  AI (its rollouts) also when that side is Max (a focus-fire player model was measured and not
+  kept, battle-ai flow §8), and its taste for small steps (a 3-action
   vampire stepping out and back to a cell where a ranger hurts it less, Нлтчк's report) is
   its evaluation at work, not a rule. Since the optimisations (tables, thinking ahead, threads; battle-ai
   flow §8) the pause per action is ~0.6 ms median and the depth reached about doubled, but

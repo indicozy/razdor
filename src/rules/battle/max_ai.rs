@@ -87,6 +87,8 @@ const SHORT_SHARE: i64 = 500;
 const SHORT_MARGIN: i64 = 4;
 /// The cut rollouts' scores are cached apart from the full ones'.
 const SHORT_SALT: StateKey = 0x5348_4f52_5420_524f_4c4c_4f55_5420_2020;
+/// Tells the table entries of the player model's searches from the original's ([`MaxBudget::key_salt`]).
+const MODEL_SALT: StateKey = 0x4d4f_4445_4c20_4f50_504f_4e45_4e54_2020;
 /// A quick fight's proof of a win ([`Search::forced_win`], [`MaxStakes::Quick`]): at most
 /// this many actions ahead and this many positions, or `FORCED_SHARE` times a node budget's
 /// (no rollouts: about 25 ms at most on a loaded E-core, 3 ms for the quick battle's
@@ -142,16 +144,25 @@ pub struct MaxBudget {
     /// one thread and finds every score as before, so a node budget's choices do not change;
     /// only its time does. Needs the tables (the rollouts land in their cache).
     pub prefetch: bool,
+    /// The player model (the opponent's side in the rollouts plays the focus-fire policy,
+    /// [`Battle::greedy_move`], instead of the original's AI; the minimax plies are unchanged).
+    /// Its table entries are kept apart ([`MaxBudget::key_salt`]).
+    pub player_model: bool,
 }
 
 impl MaxBudget {
+    /// The salt of this budget's table keys: 0 without the player model.
+    fn key_salt(&self) -> StateKey {
+        if self.player_model { MODEL_SALT } else { 0 }
+    }
+
     /// The battle on screen: [`MAX_AI_BUDGET`] per decision.
-    pub const GAME: MaxBudget = MaxBudget { time: Some(MAX_AI_BUDGET), max_depth: MAX_DEPTH, max_nodes: u64::MAX, short_rollouts: false, parallel: true, prefetch: false };
+    pub const GAME: MaxBudget = MaxBudget { time: Some(MAX_AI_BUDGET), max_depth: MAX_DEPTH, max_nodes: u64::MAX, short_rollouts: false, parallel: true, prefetch: false, player_model: false };
 
     /// No clock: at most `max_depth` actions ahead and `max_nodes` positions, the same
     /// choice on any machine.
     pub const fn fixed(max_depth: u32, max_nodes: u64) -> MaxBudget {
-        MaxBudget { time: None, max_depth, max_nodes, short_rollouts: false, parallel: false, prefetch: false }
+        MaxBudget { time: None, max_depth, max_nodes, short_rollouts: false, parallel: false, prefetch: false, player_model: false }
     }
 }
 
@@ -289,6 +300,40 @@ impl Battle {
         let mut rest: Vec<Plan> = legal.iter().copied().filter(|&p| MaxMove(Some(p)) != original).collect();
         rest.sort_by_key(|p| std::cmp::Reverse(key(p)));
         std::iter::once(original).chain(rest.into_iter().map(|p| MaxMove(Some(p)))).collect()
+    }
+
+    /// The player model's move for the active unit `id` (the opponent's side in the rollouts
+    /// with [`MaxBudget::player_model`]): the damaging action that takes the most worth now
+    /// ([`Battle::worth_taken`], a kill counting the target's worth again). Ties go to the
+    /// earliest in `max_order` (the original's pick first). With no damaging action, the
+    /// original's pick. Deterministic.
+    fn greedy_move(&self, id: usize) -> MaxMove {
+        let order = self.max_order(id, false);
+        let mut best: Option<(i64, MaxMove)> = None;
+        for &m in &order {
+            if self.damaging(id, m) {
+                let taken = self.worth_taken(id, m);
+                if best.is_none_or(|(b, _)| taken > b) {
+                    best = Some((taken, m));
+                }
+            }
+        }
+        best.map_or(order[0], |(_, m)| m)
+    }
+
+    /// One step of a rollout: the original's AI (`auto_step`) for every unit, except that with
+    /// `model` the units not on `side` play [`Battle::greedy_move`].
+    fn rollout_step(&mut self, side: Team, model: bool) {
+        if model {
+            if let Some(id) = self.active() {
+                if self.fighters[id].team != side {
+                    let m = self.greedy_move(id);
+                    self.play_max_move(m);
+                    return;
+                }
+            }
+        }
+        self.auto_step();
     }
 
     /// Carries out a decision for the active unit; a refused action ends its turn, as the
@@ -469,7 +514,7 @@ impl Battle {
         let threads = max_threads();
         let side = self.fighters[id].team;
         let prefetch = match tables {
-            Some(t) if budget.prefetch && !budget.short_rollouts && threads > 1 => Some(Prefetch::new(side, t)),
+            Some(t) if budget.prefetch && !budget.short_rollouts && threads > 1 => Some(Prefetch::new(side, t, budget)),
             _ => None,
         };
         let Some(p) = prefetch.as_ref() else { return self.max_search(id, budget, tables, control, None) };
@@ -516,6 +561,8 @@ impl Battle {
             prefetch,
             help: (None, None),
             open_strike: root.damaging_open(id),
+            salt: budget.key_salt(),
+            model: budget.player_model,
         };
         let all_moves = root.max_order(id, false);
         let mut done = None;
@@ -647,6 +694,9 @@ struct Search<'a> {
     help: (Option<Battle>, Option<Battle>),
     /// The root's unit has a damaging strike open ([`Battle::root_pick`]).
     open_strike: bool,
+    /// The table key salt and the player model of the budget ([`MaxBudget`]).
+    salt: StateKey,
+    model: bool,
 }
 
 /// The rollouts of one node's leaves played ahead on other threads ([`MaxBudget::prefetch`],
@@ -662,6 +712,8 @@ struct Search<'a> {
 struct Prefetch<'t> {
     side: Team,
     tables: &'t MaxTables,
+    salt: StateKey,
+    model: bool,
     batch: std::sync::Mutex<Batch>,
     changed: std::sync::Condvar,
 }
@@ -698,8 +750,8 @@ enum Job {
 }
 
 impl<'t> Prefetch<'t> {
-    fn new(side: Team, tables: &'t MaxTables) -> Prefetch<'t> {
-        Prefetch { side, tables, batch: Default::default(), changed: Default::default() }
+    fn new(side: Team, tables: &'t MaxTables, budget: MaxBudget) -> Prefetch<'t> {
+        Prefetch { side, tables, salt: budget.key_salt(), model: budget.player_model, batch: Default::default(), changed: Default::default() }
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Batch> {
@@ -764,9 +816,9 @@ impl<'t> Prefetch<'t> {
             set_patch_globals(t.globals);
             c.play_max_move(t.action);
             if c.outcome() == Outcome::Ongoing {
-                let k = c.max_key(self.side);
+                let k = c.max_key(self.side) ^ self.salt;
                 if self.tables.rollout_get(k).is_none() {
-                    rollout(Some(self.tables), self.side, &c, k, roll, &mut || false);
+                    rollout(Some(self.tables), self.side, &c, k, roll, (self.salt, self.model), &mut || false);
                 }
             }
         }));
@@ -826,7 +878,9 @@ impl<'t> Prefetch<'t> {
 /// under the key of its start and of its first positions, and cut short by a position found
 /// there. `None` when `stop` says so (asked every [`CLOCK_EVERY`] steps). `roll` is the buffer
 /// it plays in.
-fn rollout(tables: Option<&MaxTables>, side: Team, b: &Battle, key: StateKey, roll: &mut Option<Battle>, stop: &mut dyn FnMut() -> bool) -> Option<i64> {
+fn rollout(tables: Option<&MaxTables>, side: Team, b: &Battle, key: StateKey, roll: &mut Option<Battle>, model: (StateKey, bool), stop: &mut dyn FnMut() -> bool) -> Option<i64> {
+    // `model`: the table key salt and the player model's switch (`MaxBudget::player_model`).
+    let (salt, model) = model;
     let mut chain: [StateKey; ROLLOUT_KEYS] = [0; ROLLOUT_KEYS];
     let mut keyed = 0;
     if tables.is_some() {
@@ -844,9 +898,9 @@ fn rollout(tables: Option<&MaxTables>, side: Team, b: &Battle, key: StateKey, ro
             stopped = true;
             break;
         }
-        r.auto_step();
+        r.rollout_step(side, model);
         if let Some(t) = tables.filter(|_| keyed == i + 1 && keyed < ROLLOUT_KEYS) {
-            let k = r.max_key(side);
+            let k = r.max_key(side) ^ salt;
             if let Some(v) = t.rollout_get(k) {
                 known = Some(v);
                 break;
@@ -988,6 +1042,8 @@ impl<'a> Search<'a> {
             prefetch: None,
             help: (None, None),
             open_strike: self.open_strike,
+            salt: self.salt,
+            model: self.model,
         }
     }
 
@@ -1147,7 +1203,7 @@ impl<'a> Search<'a> {
         }
         let cls = class(ply, depth);
         let d8 = depth.min(u8::MAX as u32) as u8;
-        let key = self.tables.map(|_| b.max_key(self.side));
+        let key = self.tables.map(|_| b.max_key(self.side) ^ self.salt);
         let forced_key = self.forced.then(|| b.max_key(self.side));
         let mut first = forced_key.and_then(|k| self.forced_best.get(&k).copied());
         if let (Some(t), Some(k)) = (self.tables, key) {
@@ -1249,14 +1305,14 @@ impl<'a> Search<'a> {
         // each action by the original's own play to the end.
         let short = self.short && ply >= 2;
         if !short {
-            let key = self.tables.map_or(0, |_| b.max_key(self.side));
+            let key = self.tables.map_or(0, |_| b.max_key(self.side) ^ self.salt);
             if let Some(v) = self.tables.and_then(|t| t.rollout_get(key)) {
                 self.rollout_hits += 1;
                 return v;
             }
             self.rollouts += 1;
             let mut roll = self.roll.take();
-            let v = rollout(self.tables, self.side, b, key, &mut roll, &mut || self.time_up());
+            let v = rollout(self.tables, self.side, b, key, &mut roll, (self.salt, self.model), &mut || self.time_up());
             self.roll = roll;
             return v.unwrap_or_else(|| {
                 self.aborted = true;
@@ -1267,7 +1323,7 @@ impl<'a> Search<'a> {
         let mut chain: [StateKey; ROLLOUT_KEYS] = [0; ROLLOUT_KEYS];
         let mut keyed = 0;
         if let Some(t) = self.tables {
-            let k = b.max_key(self.side) ^ salt;
+            let k = b.max_key(self.side) ^ salt ^ self.salt;
             if let Some(v) = t.rollout_get(k) {
                 self.rollout_hits += 1;
                 return v;
@@ -1302,7 +1358,7 @@ impl<'a> Search<'a> {
                 self.aborted = true;
                 return None;
             }
-            r.auto_step();
+            r.rollout_step(self.side, self.model);
             if short && r.round >= r0 + SHORT_ROUNDS && r.outcome() == Outcome::Ongoing {
                 if let Some(v) = r.max_static(self.side) {
                     known = Some(v);
@@ -1310,7 +1366,7 @@ impl<'a> Search<'a> {
                 }
             }
             if let Some(t) = self.tables.filter(|_| *keyed == i + 1 && *keyed < ROLLOUT_KEYS) {
-                let k = r.max_key(self.side) ^ salt;
+                let k = r.max_key(self.side) ^ salt ^ self.salt;
                 if let Some(v) = t.rollout_get(k) {
                     known = Some(v);
                     break;

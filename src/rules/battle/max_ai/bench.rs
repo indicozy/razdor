@@ -20,8 +20,17 @@ use serde_json::Value;
 use super::tests::{real_sets, synthetic_battles, worth_left, Battles};
 use super::*;
 
-/// The budget of every game: 4 actions ahead and 600 positions, no clock (the tests' budget).
-const BENCH_BUDGET: MaxBudget = MaxBudget::fixed(4, 600);
+/// The budget of every game: 4 actions ahead and 600 positions, no clock (the tests' budget),
+/// with the player model as the game's (`MaxBudget::GAME`), or as `RAZDOR_MAX_PLAYER_MODEL`
+/// says (`0` or `1`).
+fn bench_budget() -> MaxBudget {
+    let player_model = match std::env::var("RAZDOR_MAX_PLAYER_MODEL").as_deref() {
+        Ok("0") => false,
+        Ok("1") => true,
+        _ => MaxBudget::GAME.player_model,
+    };
+    MaxBudget { player_model, ..MaxBudget::fixed(4, 600) }
+}
 /// The demo's battles in the set (all of them in the fast check too).
 const DEMO_BATTLES: usize = 24;
 /// The benchmark plays every this-many install battles, the fast check every [`FAST_EVERY`]-th
@@ -39,6 +48,9 @@ fn baseline_path() -> PathBuf {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(default)]
 struct Game {
+    /// Search nodes Max spent on the game's decisions (not in the baseline).
+    #[serde(skip)]
+    nodes: u64,
     /// `player`, `enemy`, or `none` (still ongoing at the step cap).
     winner: String,
     /// The battle ended at the turn limit, a win for the player.
@@ -72,8 +84,18 @@ impl Game {
     }
 }
 
-/// One battle of the set: the original on both sides, and Max on each side in turn.
+/// Who plays the side Max does not: the original's AI, or the focus-fire player model
+/// (`Battle::greedy_move`), the human-like proxy.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Opponent {
+    Original,
+    Greedy,
+}
+
+/// One battle of the set: the original on both sides, and Max on each side in turn, against
+/// the original's AI and against the focus-fire player.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(default)]
 struct Entry {
     id: String,
     original: Game,
@@ -81,11 +103,19 @@ struct Entry {
     max_enemy: Game,
     /// Max on the player's side.
     max_player: Game,
+    /// Max on the enemy's side, the player played by the focus-fire policy.
+    greedy_enemy: Game,
+    /// Max on the player's side, the enemy played by the focus-fire policy.
+    greedy_player: Game,
 }
 
 impl Entry {
     fn max(&self, team: Team) -> &Game {
         if team == Team::Player { &self.max_player } else { &self.max_enemy }
+    }
+
+    fn greedy(&self, team: Team) -> &Game {
+        if team == Team::Player { &self.greedy_player } else { &self.greedy_enemy }
     }
 }
 
@@ -97,8 +127,9 @@ struct Baseline {
 
 /// Plays `b` to its end. `max` (if any) plays by «Максимум» on that side; the original's AI
 /// plays the rest, and all of it when `max` is `None` (then both sides' decisions are tallied).
-fn play(mut b: Battle, max: Option<Team>) -> Game {
+fn play(mut b: Battle, max: Option<Team>, opponent: Opponent) -> Game {
     b.begin();
+    let budget = bench_budget();
     let tables = MaxTables::default();
     let mut g = Game::default();
     for _ in 0..AUTO_PLAY_STEPS {
@@ -106,14 +137,21 @@ fn play(mut b: Battle, max: Option<Team>) -> Game {
         let team = b.fighters[id].team;
         let from_reserve = b.fighters[id].slot.row == Row::Reserve;
         if Some(team) == max {
-            let Some(r) = b.max_choice_with(BENCH_BUDGET, Some(&tables), None) else { break };
+            let Some(r) = b.max_choice_with(budget, Some(&tables), None) else { break };
+            g.nodes += r.nodes;
             tally(&mut g, &b, id, from_reserve, r.choice.plan());
             b.play_max_move(r.choice);
         } else {
             if max.is_none() {
                 tally(&mut g, &b, id, from_reserve, b.plan(false));
             }
-            b.auto_step();
+            match opponent {
+                Opponent::Original => b.auto_step(),
+                Opponent::Greedy => {
+                    let m = b.greedy_move(id);
+                    b.play_max_move(m)
+                }
+            };
         }
     }
     g.winner = match b.outcome() {
@@ -172,14 +210,16 @@ fn battles(demo: usize, every: usize) -> Battles {
     set
 }
 
-/// Plays every battle of `set` the three ways.
+/// Plays every battle of `set` the five ways.
 fn run(set: Battles) -> Vec<Entry> {
     set.into_iter()
         .map(|(id, b)| Entry {
             id,
-            original: play(b.clone(), None),
-            max_enemy: play(b.clone(), Some(Team::Enemy)),
-            max_player: play(b, Some(Team::Player)),
+            original: play(b.clone(), None, Opponent::Original),
+            max_enemy: play(b.clone(), Some(Team::Enemy), Opponent::Original),
+            max_player: play(b.clone(), Some(Team::Player), Opponent::Original),
+            greedy_enemy: play(b.clone(), Some(Team::Enemy), Opponent::Greedy),
+            greedy_player: play(b, Some(Team::Player), Opponent::Greedy),
         })
         .collect()
 }
@@ -199,6 +239,7 @@ struct Side {
     idle_kill: u32,
     retreat: u32,
     step_pass: u32,
+    nodes: u64,
 }
 
 impl Side {
@@ -211,6 +252,7 @@ impl Side {
     }
 
     fn counts(&mut self, g: &Game) {
+        self.nodes += g.nodes;
         self.decisions += g.decisions;
         self.reserve += g.reserve;
         self.idle += g.idle;
@@ -247,18 +289,20 @@ impl Side {
 }
 
 /// Max's totals and the original's over the same games (the original's decisions and blunders
-/// counted for both sides, once per battle).
-fn summarize(entries: &[Entry]) -> (Side, Side) {
-    let (mut max, mut base) = (Side::default(), Side::default());
+/// counted for both sides, once per battle), and Max's against the focus-fire player.
+fn summarize(entries: &[Entry]) -> (Side, Side, Side) {
+    let (mut max, mut base, mut greedy) = (Side::default(), Side::default(), Side::default());
     for e in entries {
         for team in Team::BOTH {
             max.game(e.max(team), team);
             max.counts(e.max(team));
+            greedy.game(e.greedy(team), team);
+            greedy.counts(e.greedy(team));
             base.game(&e.original, team);
         }
         base.counts(&e.original);
     }
-    (max, base)
+    (max, base, greedy)
 }
 
 /// The fields of a battle's record that differ from the baseline, as `path old -> new`.
@@ -305,16 +349,21 @@ fn write_baseline(battles: &[Entry]) {
 
 /// The full benchmark: prints the summary and the per-battle diff against the baseline. With
 /// `RAZDOR_MAX_BENCH_WRITE=1` it writes the baseline: the battles it ran replace the baseline's
-/// records of the same ids, and the others stay. Slow (about every battle three times):
+/// records of the same ids, and the others stay. Slow (about every battle five times):
 /// run by hand with `--ignored`.
 #[test]
 #[ignore]
 fn max_bench() {
+    let started = std::time::Instant::now();
     let entries = run(battles(DEMO_BATTLES, BENCH_EVERY));
-    let (max, base) = summarize(&entries);
-    println!("Max against the original's AI, {} battles:", entries.len());
+    let wall = started.elapsed().as_secs_f64();
+    let (max, base, greedy) = summarize(&entries);
+    println!("Max against the original's AI, {} battles (player model: {}):", entries.len(), bench_budget().player_model);
     max.print("  Max");
     base.print("  original vs original");
+    println!("Max against the focus-fire player (the same battles):");
+    greedy.print("  Max");
+    println!("  search nodes: {} against the original's AI, {} against the focus-fire player; wall time {wall:.1} s", max.nodes, greedy.nodes);
     let old = load_baseline().unwrap_or_default();
     let mut changed = 0;
     for e in &entries {
@@ -337,12 +386,44 @@ fn max_bench() {
     }
 }
 
+/// Compares Max's games with the baseline's (`get` picks Max's record of a battle, `label` names
+/// it): fails when Max wins fewer of the games than the baseline did, keeps less worth on
+/// average (more than [`KEPT_TOLERANCE`] permille), or any game has more reserve steps or
+/// blunders than the baseline's record.
+fn check(entries: &[Entry], baseline: &Baseline, get: fn(&Entry, Team) -> &Game, label: &str, problems: &mut Vec<String>) {
+    let (mut wins, mut old_wins, mut kept, mut old_kept, mut games) = (0i64, 0i64, 0i64, 0i64, 0i64);
+    for e in entries {
+        let Some(o) = baseline.battles.iter().find(|o| o.id == e.id) else {
+            problems.push(format!("{}: not in the baseline", e.id));
+            continue;
+        };
+        for team in Team::BOTH {
+            let (now, then) = (get(e, team), get(o, team));
+            games += 1;
+            wins += i64::from(now.won(team));
+            old_wins += i64::from(then.won(team));
+            kept += now.kept(team);
+            old_kept += then.kept(team);
+            for (what, n, t) in [("reserve steps", now.reserve, then.reserve), ("idle with a damaging strike", now.idle, then.idle), ("idle with a kill open", now.idle_kill, then.idle_kill), ("retreat with a damaging strike", now.retreat, then.retreat)] {
+                if n > t {
+                    problems.push(format!("{} as {team:?}{label}: {what} {t} -> {n}", e.id));
+                }
+            }
+        }
+    }
+    if wins < old_wins {
+        problems.push(format!("Max{label} wins {wins} of {games} games, the baseline {old_wins}"));
+    }
+    if kept < old_kept - KEPT_TOLERANCE * games {
+        problems.push(format!("Max{label} keeps {:.1}‰ of its worth on average, the baseline {:.1}‰", kept as f64 / games.max(1) as f64, old_kept as f64 / games.max(1) as f64));
+    }
+}
+
 /// The fast check of «Максимум» against the committed baseline (every change to it runs
 /// this): on the demo's battles, and on every [`FAST_EVERY`]-th install battle with
-/// `RAZDOR_DT_DIR`. Fails when Max wins fewer of the games than the baseline did, keeps less
-/// worth on average (more than [`KEPT_TOLERANCE`] permille), or any of its games has more
-/// reserve steps or blunders than the baseline's. A battle the baseline lacks fails too: an
-/// intended change rewrites the baseline with `max_bench` (`RAZDOR_MAX_BENCH_WRITE=1`).
+/// `RAZDOR_DT_DIR`, against the original's AI and against the focus-fire player. Fails when
+/// Max's games get worse than the baseline's (see [`check`]). A battle the baseline lacks fails
+/// too: an intended change rewrites the baseline with `max_bench` (`RAZDOR_MAX_BENCH_WRITE=1`).
 #[test]
 fn max_bench_does_not_regress() {
     if cfg!(debug_assertions) {
@@ -351,31 +432,7 @@ fn max_bench_does_not_regress() {
     let baseline = load_baseline().expect("the baseline src/rules/battle/max_ai/bench_baseline.json is missing");
     let entries = run(battles(DEMO_BATTLES, FAST_EVERY));
     let mut problems = Vec::new();
-    let (mut wins, mut old_wins, mut kept, mut old_kept, mut games) = (0i64, 0i64, 0i64, 0i64, 0i64);
-    for e in &entries {
-        let Some(o) = baseline.battles.iter().find(|o| o.id == e.id) else {
-            problems.push(format!("{}: not in the baseline", e.id));
-            continue;
-        };
-        for team in Team::BOTH {
-            let (now, then) = (e.max(team), o.max(team));
-            games += 1;
-            wins += i64::from(now.won(team));
-            old_wins += i64::from(then.won(team));
-            kept += now.kept(team);
-            old_kept += then.kept(team);
-            for (what, n, t) in [("reserve steps", now.reserve, then.reserve), ("idle with a damaging strike", now.idle, then.idle), ("idle with a kill open", now.idle_kill, then.idle_kill), ("retreat with a damaging strike", now.retreat, then.retreat)] {
-                if n > t {
-                    problems.push(format!("{} as {team:?}: {what} {t} -> {n}", e.id));
-                }
-            }
-        }
-    }
-    if wins < old_wins {
-        problems.push(format!("Max wins {wins} of {games} games, the baseline {old_wins}"));
-    }
-    if kept < old_kept - KEPT_TOLERANCE * games {
-        problems.push(format!("Max keeps {:.1}‰ of its worth on average, the baseline {:.1}‰", kept as f64 / games.max(1) as f64, old_kept as f64 / games.max(1) as f64));
-    }
+    check(&entries, &baseline, Entry::max, "", &mut problems);
+    check(&entries, &baseline, Entry::greedy, " vs the focus-fire player", &mut problems);
     assert!(problems.is_empty(), "«Максимум» regressed against the baseline (judge it with `max_bench`):\n{}", problems.join("\n"));
 }

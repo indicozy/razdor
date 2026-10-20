@@ -120,8 +120,9 @@ so a later change (a tempo-aware score, a model of the player) is compared with 
 release, and a fixed bug cannot come back silently. The battle set is fixed: the demo's 24
 battles, then every second of the install's battles (`real_sets`: each map's hero battles, map
 armies of near strength, custom battles; 88 battles in all with the install). Each battle is
-played to its end three ways, Max on the enemy's side and on the player's (each against the
-original's AI) and the original's AI on both sides (the baseline). Node budget only (4 actions
+played to its end five ways, Max on the enemy's side and on the player's (each against the
+original's AI, and against the focus-fire player of §8) and the original's AI on both sides (the
+baseline). Node budget only (4 actions
 ahead, 600 positions), so the numbers are the same on every machine. Per game: winner, turns,
 each side's worth left, Max's reserve steps and idle decisions (a pass, a step or a refused
 plan while a damaging strike was open, of which a kill), and the decisions.
@@ -154,6 +155,12 @@ plan while a damaging strike was open, of which a kill), and the decisions.
   original's AI: 6 retreats (3.6‰) and 0 others. The retreats are the #1037 report (a full-HP
   front-row unit stepping back next to its healer, then forward; the second video's pass is
   among the others). Two fixes were measured and not kept (§8 "Left out, measured").
+- With the focus-fire opponent (2026-10-20, §8 "Left out, measured" (f); the model off, the
+  baseline rewritten with both opponents): against the original's AI Max wins 102 of 176 games,
+  worth kept 374‰, taken 677‰, 1809 decisions, retreats 5, idle with a damaging strike 26 (kill
+  14). Against the focus-fire player, the same battles: wins 103, kept 370‰, taken 685‰, idle 35
+  (kill 18), retreats 6, 1809 decisions. Search nodes 306k and 330k; the bench's wall time 16–18 s
+  on the loaded E-cores (not comparable with the earlier figures).
 - With the retreat rule (2026-10-20, candidate B of §8; the baseline rewritten): Max wins 102
   of 176 games (the baseline 103), worth kept 374‰ (380), taken 677‰ (679); retreats 5 (18),
   all five the original's own retreats (§8); idle with a damaging strike 26 (54), of which a
@@ -389,7 +396,19 @@ BattleView::ai_move (computer's turn) → max_move → MaxThinker::poll(battle)
   about 5 s on 3 E-cores (`a_long_quick_battle_keeps_to_its_time`, 8 s ×
   `RAZDOR_PERF_BUDGET_SCALE`). The rest of the time is the search's own positions and the
   leaves of the cut nodes it needs at once.
-
+- **The player model** (2026-10-20, step 2 of the #1037 work; not kept, the switch stays off).
+  The side Max faces plays the focus-fire policy (`Battle::greedy_move`: the damaging action that
+  takes the most worth now, a kill counting the target's worth again, ties to the original's
+  pick, the original's pick with no damaging action) in Max's rollouts (`rollout_step`,
+  `MaxBudget::player_model`, the table keys salted by `MODEL_SALT`). The minimax plies and Max's
+  own rollouts are the original's. Measured on the bench (`RAZDOR_MAX_PLAYER_MODEL=1`, the
+  baseline's numbers in brackets): against the original's AI wins 101 (102), worth kept 372‰
+  (374), idle 25 (26), kill 10 (14); against the focus-fire player wins 103 (103), kept 374‰
+  (370), taken 685‰ (685), idle 24 (35), kill 10 (18), decisions 1826 (1809); search nodes +7%
+  and +0%, the bench's wall time 23 s (16 s, +43%, under load). The keep rule (wins against the
+  focus-fire player up, against the original's not lower, worth kept not more than 10‰ lower,
+  time not more than +15%) fails on the wins against both opponents and on the time: the model
+  stays off, and the focus-fire opponent stays in the bench as the measurement.
 UI: `BattleView` keeps a `MaxThinker` per side the computer plays (`max_side` names the one
 that thinks ahead now); a battle that is over stops its search. The clock pointer already shows while the computer's
 side acts; the frame never waits. Settings: «Сила ИИ в бою» in «Ещё…» (`main_menu::AiStrength`):
