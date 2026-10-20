@@ -34,7 +34,7 @@ thread_local! {
 /// Once per frame: the check at the first frame (the window is open by then, and the check
 /// runs on its own thread), and "Always" puts a release found in place.
 pub fn tick(mode: Mode) {
-    if !STARTED.with(|s| s.replace(true)) && mode != Mode::Off && update::enabled() {
+    if !STARTED.with(|s| s.replace(true)) && mode != Mode::Off && update::enabled() && !super::clock::is_snapshot() {
         update::check();
     }
     if let (Mode::Always, Status::Found(r)) = (mode, update::status()) {
@@ -44,6 +44,10 @@ pub fn tick(mode: Mode) {
 
 /// "Check now": a check whose release is offered whatever the mode.
 pub fn check_by_hand() {
+    // A snapshot never asks GitHub: its screens show the same state on every run.
+    if super::clock::is_snapshot() {
+        return;
+    }
     BY_HAND.with(|b| b.set(true));
     LATER.with(|l| l.set(false));
     update::check();
@@ -77,12 +81,25 @@ pub fn stage_offer() {
     }));
 }
 
+/// The version a screen shows for this program: its own, or in a snapshot a fixed placeholder,
+/// so a version bump changes no picture of the regression check (tools/ui-regress).
+pub fn shown_version(version: &str, snapshot: bool) -> String {
+    if snapshot {
+        SNAPSHOT_VERSION.into()
+    } else {
+        version.into()
+    }
+}
+
+/// The placeholder a snapshot shows for the program's version.
+pub const SNAPSHOT_VERSION: &str = "0.0.0";
+
 /// The state for the advanced settings, next to "Check now".
 pub fn status_label() -> String {
     match update::status() {
         Status::Idle => String::new(),
         Status::Checking => tr("Checking…").into(),
-        Status::UpToDate => trf!("Up to date ({v})", v = update::current()),
+        Status::UpToDate => trf!("Up to date ({v})", v = shown_version(&update::current().to_string(), super::clock::is_snapshot())),
         Status::CheckFailed(_) => tr("Could not check").into(),
         Status::Found(r) => trf!("Razdor {v} is out", v = r.version),
         Status::Downloading(r) => trf!("Downloading {v}…", v = r.version),
@@ -186,7 +203,7 @@ pub fn frame(on_title: bool, mode: &mut Mode) -> bool {
     let (title, lines) = match &status {
         Status::Found(r) => (
             tr("A new version of Razdor"),
-            trf!("Razdor {new} is out (you have {old}). Update now? It downloads while you play and starts the next time you open the game. What changed:", new = r.version, old = update::current()),
+            trf!("Razdor {new} is out (you have {old}). Update now? It downloads while you play and starts the next time you open the game. What changed:", new = r.version, old = shown_version(&update::current().to_string(), super::clock::is_snapshot())),
         ),
         Status::Installed(r) => (tr("Update installed"), trf!("Razdor {v} is installed. It starts the next time you open the game.", v = r.version)),
         Status::InstallFailed(r, why) => (tr("Update failed"), trf!("Razdor {v} could not be installed: {why}", v = r.version, why)),
@@ -240,4 +257,16 @@ pub fn frame(on_title: bool, mode: &mut Mode) -> bool {
     // The screen below takes none of this frame's input.
     swallow_input();
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_snapshot_shows_the_placeholder_version_and_a_live_run_its_own() {
+        assert_eq!(shown_version("0.4.40", true), "0.0.0");
+        assert_eq!(shown_version("0.4.40", false), "0.4.40");
+        assert_eq!(shown_version("9.9.9", true), SNAPSHOT_VERSION);
+    }
 }

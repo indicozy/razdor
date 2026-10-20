@@ -73,7 +73,8 @@ Use the `offscreen-snapshot` skill for the full recipe.
 UI regression check: `tools/ui-regress/` renders the cases of `scenes.txt` off-screen and
 compares them with the goldens in `/mnt/ai_models/razdor-goldens/` (never committed). Snapshots
 run on a fixed clock (`src/ui/clock.rs`) and a fixed event seed, so an unchanged build gives
-0 changes. See `tools/ui-regress/README.md` and the `offscreen-snapshot` skill.
+0 changes. A snapshot never starts the update check and shows the program's version as the
+placeholder `0.0.0` (`update_view::shown_version`), so a version bump changes no picture. See `tools/ui-regress/README.md` and the `offscreen-snapshot` skill.
 
 ## Profiling a hitch
 

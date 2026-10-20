@@ -63,7 +63,9 @@ A snapshot must give the same pixels on every run. In a snapshot (`RAZDOR_SNAPSH
 
 - the interface's clock (`src/ui/clock.rs`) starts at 0 and moves 1/60 s per frame, so the
   cursor blink, the sways, the fades and the timed windows depend only on the frame count;
-- the event generator is seeded with a fixed value (`Game::seed_events`), not from the clock.
+- the event generator is seeded with a fixed value (`Game::seed_events`), not from the clock;
+- the update check never starts (no network), and the program's version shows as `0.0.0`
+  (`update_view::shown_version`), so a version bump changes no picture.
 
 Game rules are unchanged. A case that still differs between two runs of the same build is a
 determinism bug: fix it in the code that draws it (route the time or the random draw through
