@@ -17,7 +17,7 @@ use razdor::rules::clock::duration_label;
 use razdor::rules::game::{Event, Foe, Game};
 use razdor::rules::idle;
 use razdor::rules::magic::{CastOutcome, CastTarget};
-use razdor::rules::map::{object_class, Decoration, Grid, Tile, TileMap};
+use razdor::rules::map::{object_class, Decoration, Grid, Tile, TileMap, ROAD};
 use razdor::rules::world::{Army, Location, LocationKind, Owner, Troop};
 
 use super::assets::Assets;
@@ -3033,11 +3033,48 @@ fn debug_events(game: &Game, place: razdor::rules::events::Place) -> Vec<String>
         .collect()
 }
 
+/// The tint of a cell in Razdor's debug overlay (F3) for the hero's way of moving: `cost` is
+/// the foot cost (the land map) when on foot, or the ship cost (the water map) when aboard.
+/// On foot passable is green, brighter on a road; aboard sailable is blue; blocked is red.
+fn walk_tint(cost: Option<u16>, aboard: bool, road: bool) -> Color {
+    match (cost, aboard) {
+        (None, _) => Color::new(0.9, 0.1, 0.1, 0.35),
+        (Some(_), true) => Color::new(0.2, 0.5, 1.0, 0.22),
+        (Some(_), false) if road => Color::new(0.1, 0.9, 0.2, 0.3),
+        (Some(_), false) => Color::new(0.1, 0.9, 0.2, 0.18),
+    }
+}
+
+/// Razdor's debug overlay (F3): tints every visible cell by whether the hero can step onto it
+/// (on foot: green, brighter on roads; aboard: blue if the ship can sail it; red if blocked),
+/// with the cost on big cells. Drawn first so the labels stay on top.
+fn draw_walkable(game: &Game, cam: &Camera) {
+    let map = &game.world.map;
+    let aboard = game.aboard();
+    let cell = cam.cell_size();
+    let ((c0, c1), (r0, r1)) = cam.visible(map);
+    for y in r0..r1 {
+        for x in c0..c1 {
+            let t = (x, y);
+            let cost = if aboard { map.water_cost(t) } else { map.cost(t) };
+            let road = !aboard && cost == Some(ROAD);
+            let c = cam.cell_centre(t);
+            draw_rectangle(c.x - cell.x / 2.0, c.y - cell.y / 2.0, cell.x, cell.y, walk_tint(cost, aboard, road));
+            if let Some(v) = cost.filter(|_| cell.x >= 28.0) {
+                let s = v.to_string();
+                let w = measure(&s, 10.0).width;
+                text(&s, c.x - w / 2.0, c.y + 4.0, 10.0, WHITE);
+            }
+        }
+    }
+}
+
 /// Razdor's debug overlay (F3): every event point and lantern with its id, radius and
 /// events, the buildings' events, and a panel with the hero's and the pointer's cells and the
 /// events of the place under the pointer. Drawn through the fog.
 fn draw_debug(game: &Game, cam: &Camera) {
     use razdor::rules::events::Place;
+    draw_walkable(game, cam);
     let size = 13.0;
     let label_rect = |lines: &[String], at: Vec2| {
         let w = lines.iter().map(|l| measure(l, size).width).fold(0.0, f32::max) + 8.0;
@@ -3121,6 +3158,20 @@ fn draw_debug(game: &Game, cam: &Camera) {
 #[cfg(test)]
 mod tests {
     use razdor::rules::content::HeroClass;
+
+    #[test]
+    fn the_debug_overlay_tints_by_how_the_hero_moves() {
+        use super::walk_tint;
+        let red = Color::new(0.9, 0.1, 0.1, 0.35);
+        let green = Color::new(0.1, 0.9, 0.2, 0.18);
+        let road = Color::new(0.1, 0.9, 0.2, 0.3);
+        let blue = Color::new(0.2, 0.5, 1.0, 0.22);
+        assert_eq!(walk_tint(None, false, false), red, "blocked on foot");
+        assert_eq!(walk_tint(None, true, false), red, "blocked by ship");
+        assert_eq!(walk_tint(Some(2), false, false), green, "passable on foot");
+        assert_eq!(walk_tint(Some(3), false, true), road, "a road is brighter");
+        assert_eq!(walk_tint(Some(2), true, false), blue, "sailable aboard");
+    }
 
     #[test]
     fn the_edges_scroll_the_map() {
