@@ -20,6 +20,7 @@ pub mod magic;
 pub mod map;
 pub mod music;
 pub mod pack;
+pub mod pack_order;
 pub mod rng;
 pub mod save;
 #[cfg(test)]

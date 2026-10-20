@@ -12,6 +12,7 @@ use razdor::trf;
 use razdor::rules::content::{HeroClass, ItemId, SpellDef, Stat, UnitId};
 use razdor::rules::formation::{Formation, Slot};
 use razdor::rules::economy::VillageOffer;
+use razdor::rules::pack_order::{alphabet_key, ItemGroup};
 use razdor::rules::game::{Currency, Game, HireError, TradeError, Tribute, SPELL_BOOK_SIZE};
 use razdor::rules::script::HallEntry;
 use razdor::rules::town::{ServiceError, Tab};
@@ -89,6 +90,8 @@ pub struct BuildingView {
     pub filter: String,
     /// How the market's or the sanctuary's list is sorted (Razdor's addition, [`ListSort`]).
     pub sort: ListSort,
+    /// The market's group of items shown (Razdor's addition, a view only: `rules::pack_order`).
+    pub group: ItemGroup,
     /// The village window took the tribute: its close plays `Item-Gold` (0x4c604a).
     pub tribute_paid: bool,
     /// The gold and mana the village paid as the hero came in: what its window shows.
@@ -165,7 +168,7 @@ fn now_ms() -> i64 {
 
 impl BuildingView {
     pub fn new(tab: Tab) -> BuildingView {
-        BuildingView { tab, pick: None, scroll: 0, hall_pick: None, hall_scroll: 0, selling: false, garrison_sel: None, garrison_buy: None, filter: String::new(), sort: ListSort::Shown, tribute_paid: false, tribute: (0, 0), anim: None, hire_panel: None }
+        BuildingView { tab, pick: None, scroll: 0, hall_pick: None, hall_scroll: 0, selling: false, garrison_sel: None, garrison_buy: None, filter: String::new(), sort: ListSort::Shown, group: ItemGroup::All, tribute_paid: false, tribute: (0, 0), anim: None, hire_panel: None }
     }
 
     fn switch(&mut self, tab: Tab) {
@@ -1274,6 +1277,9 @@ const MARKET_ICON_W: f32 = 27.0;
 const MARKET_NAME_W: f32 = 186.0;
 const MARKET_PRICE_W: f32 = 70.0;
 
+/// A market row's height in design units: the original's seven rows fill 186 px.
+const MARKET_ROW_H: f32 = 186.0 / 7.0;
+
 /// A list's text inset (+0xb9 = 8, set at 0x4d9e50, 0x4d9f02, 0x4da04d, 0x4da0ff).
 const LIST_MARGIN: f32 = 8.0;
 
@@ -1336,7 +1342,8 @@ fn blend_color(c: [i32; 3]) -> Color {
 #[allow(clippy::too_many_arguments)]
 fn price_list_in_face(assets: Option<&Assets>, rows: &[(Option<ItemId>, String, String, bool)], marks: &[Option<std::ops::Range<usize>>], pick: Option<usize>, scroll: &mut usize, x: f32, y: f32, w: f32, visible: usize) -> Option<usize> {
     let k = chrome::k();
-    let row_h = 186.0 * k / visible.max(1) as f32;
+    // The rows keep the original's height (186 px for seven); the list shows `visible` of them.
+    let row_h = MARKET_ROW_H * k;
     let frame = Rect::new(x, y, w, visible as f32 * row_h);
     let bar = 18.0 * k;
     let ListColumns { icon: icon_w, name_x, price_cx, .. } = market_columns(w, bar);
@@ -1420,11 +1427,6 @@ impl ListSort {
             (Column::Price, _) => ListSort::PriceDown,
         }
     }
-}
-
-/// A name's key in alphabetical order, case left out; «ё» right after «е».
-fn alphabet_key(s: &str) -> Vec<(char, bool)> {
-    s.chars().flat_map(char::to_lowercase).map(|c| if c == 'ё' { ('е', true) } else { (c, false) }).collect()
 }
 
 /// `base` (the list's own order: indices into `names` and `prices`) sorted by `sort`; rows
@@ -1550,10 +1552,21 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
     // filter (Razdor's) takes their line only while it is used: a letter typed over the list,
     // Ctrl+F or a click on the titles' line beside the titles starts it; the list keeps the
     // items that match, their matched part lit; Enter picks the first.
-    let all: Vec<(usize, ItemId)> = rows.iter().enumerate().filter_map(|(n, r)| r.0.map(|i| (n, i))).collect();
+    // The group (Razdor's, view only) keeps its items before the text filter does; a row it
+    // hides keeps its index in `rows`, so the pick and the trade still mean the same row.
+    let all: Vec<(usize, ItemId)> = rows.iter().enumerate().filter_map(|(n, r)| r.0.map(|i| (n, i))).filter(|&(_, i)| view.group.holds(c.item(i).kind)).collect();
     let before = item_filter::keep(&c, all.iter().copied(), &view.filter).len();
     let filter_rect = Rect::new(lx, y, lw, 18.0 * k);
-    let reply = item_filter::field_with(FILTER_KEY, &mut view.filter, filter_rect, &[KeyCode::N], before, rows.len(), false);
+    let reply = item_filter::field_with(FILTER_KEY, &mut view.filter, filter_rect, &[KeyCode::N], before, all.len(), false);
+    // The group button under the titles: a click shows the next group, a right click the one before.
+    let group_rect = Rect::new(lx, y + 21.0 * k, lw, 18.0 * k);
+    if button(group_rect.x, group_rect.y, group_rect.w, group_rect.h, &trf!("Group: {group}", group = item_filter::group_label(view.group)), true) {
+        view.group = view.group.next();
+        view.scroll = 0;
+    } else if right_clicked() && mouse_in(group_rect.x, group_rect.y, group_rect.w, group_rect.h) {
+        view.group = view.group.prev();
+        view.scroll = 0;
+    }
     if view.filter.is_empty() && !has_focus(FILTER_KEY) {
         // Each title centred over its own list (0x48e750 for 0x670688 and 0x670760).
         super::typography::Role::Title.with(|| {
@@ -1566,18 +1579,18 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
     let marks: Vec<Option<std::ops::Range<usize>>> = kept.iter().map(|(_, m)| m.name_range.clone()).collect();
     // The original opens either list with its first row picked and described (0x4bca8c),
     // the market tab and each switch between the goods and the pack alike.
-    if view.pick.is_none() && view.filter.trim().is_empty() {
+    if view.pick.is_none() && view.filter.trim().is_empty() && view.group == ItemGroup::All {
         view.pick = first_pick(rows.len());
     }
     let at_pick = view.pick.and_then(|p| kept.iter().position(|(n, _)| *n == p));
-    if let Some(k) = price_list(Some(assets), &shown, &marks, at_pick, &mut view.scroll, lx, y + 21.0 * k, lw, 7) {
+    if let Some(k) = price_list(Some(assets), &shown, &marks, at_pick, &mut view.scroll, lx, y + 41.0 * k, lw, 6) {
         view.pick = Some(kept[k].0);
     }
     if reply.pick {
         view.pick = kept.first().map(|(n, _)| *n);
     }
-    // A row the filter hides is not the one picked.
-    if !view.filter.trim().is_empty() && view.pick.is_some_and(|p| !kept.iter().any(|(n, _)| *n == p)) {
+    // A row the group or the filter hides is not the one picked.
+    if view.pick.is_some_and(|p| !kept.iter().any(|(n, _)| *n == p)) {
         view.pick = None;
     }
     if view.pick.is_some_and(|k| k >= rows.len()) {

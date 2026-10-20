@@ -107,6 +107,19 @@ the matching cells packed; an empty row of it puts the held item in the first em
 Enter picks the first match up. An empty worn slot on the unit panel is the original's picture
 (`chrome::empty_item_slot`), a worn item its picture alone.
 
+The backpack's view (Razdor's, view only: the pack keeps its order) is a group row and an order
+button above it, in the army window (`items_view::squad`, with the inventory filter's line over
+them). Eight group buttons (all, weapons, armour, helms, shields, rings, amulets, other:
+`rules::pack_order::ItemGroup`, each kind in exactly one; labels `item_filter::group_label`)
+on two rows, and the order button on the second (`PackSort`: as found, name A–Z or Z–A, price
+dearest or cheapest first, `item_filter::sort_label`). The pack's cells are then listed through
+`pack_order::pack_view_order` as the filter lists them, so the filter counts within the group
+and Enter takes the first shown. Changing the group or the order starts the pack at its top;
+both are kept for the session (`GROUP`, `SORT` in `items_view`). The market's list has one group
+button under its titles (`building_view::market`, a right click goes back a group): it hides the
+other groups' rows before the filter, and a hidden pick is not the pick. The market's list shows
+six rows now (the seventh row's room under the group button).
+
 A spell's card, wherever it is shown (the spell book's cells, the sanctuary's description, the
 event window's spell tooltip), has the same text, drawn by `spellbook::card_text` in
 `src/ui/spellbook.rs` (`spellbook::spell_card` adds the box and picture): the name, then the

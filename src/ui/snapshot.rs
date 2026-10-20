@@ -131,6 +131,35 @@ pub fn open_language_list() -> bool {
     true
 }
 
+/// `RAZDOR_SCENE_PACK_VIEW=<group>,<order>`: the item group (`all`, `weapons`, `armour`,
+/// `helms`, `shields`, `rings`, `amulets`, `other`) and order (`shown`, `name-up`, `name-down`,
+/// `price-down`, `price-up`) the backpack and the market show; an unknown word leaves it out.
+fn pack_view_from_env() -> Option<(razdor::rules::pack_order::ItemGroup, razdor::rules::pack_order::PackSort)> {
+    use razdor::rules::pack_order::{ItemGroup, PackSort};
+    let v = std::env::var("RAZDOR_SCENE_PACK_VIEW").ok()?;
+    let (group, sort) = v.split_once(',').unwrap_or((v.as_str(), "shown"));
+    let group = match group {
+        "all" => ItemGroup::All,
+        "weapons" => ItemGroup::Weapons,
+        "armour" => ItemGroup::Armour,
+        "helms" => ItemGroup::Helms,
+        "shields" => ItemGroup::Shields,
+        "rings" => ItemGroup::Rings,
+        "amulets" => ItemGroup::Amulets,
+        "other" => ItemGroup::Other,
+        _ => return None,
+    };
+    let sort = match sort {
+        "shown" => PackSort::Shown,
+        "name-up" => PackSort::NameUp,
+        "name-down" => PackSort::NameDown,
+        "price-down" => PackSort::PriceDown,
+        "price-up" => PackSort::PriceUp,
+        _ => return None,
+    };
+    Some((group, sort))
+}
+
 /// `RAZDOR_MOUSE=x,y`: the pointer stands there (tooltips, hover looks).
 fn pointer() -> Option<(f32, f32)> {
     let s = std::env::var("RAZDOR_MOUSE").ok()?;
@@ -243,6 +272,14 @@ pub fn stage(app: &mut App) {
         super::items_view::set_pack_filter(&q);
         if let Screen::Building(v) = &mut app.screen {
             v.filter = q;
+        }
+    }
+    // `RAZDOR_SCENE_PACK_VIEW=weapons,price-up`: the backpack's group and order (army screen)
+    // and the market's group, as the player chose them (`rules::pack_order`).
+    if let Some((group, sort)) = pack_view_from_env() {
+        super::items_view::set_pack_view(group, sort);
+        if let Screen::Building(v) = &mut app.screen {
+            v.group = group;
         }
     }
     // `RAZDOR_SCENE_CONSOLE=help;gold 100`: the cheat console open, after those commands.

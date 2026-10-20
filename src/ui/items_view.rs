@@ -9,6 +9,7 @@ use razdor::rules::experience::is_percent_stat;
 use razdor::rules::game::Game;
 use razdor::rules::items::{EquipError, Given, Press};
 use razdor::rules::journal::Tab;
+use razdor::rules::pack_order::{self, ItemGroup, PackSort};
 use razdor::rules::units::Unit;
 
 use super::assets::Assets;
@@ -116,6 +117,10 @@ thread_local! {
     static SLIDE: std::cell::Cell<Option<Slide>> = const { std::cell::Cell::new(None) };
     /// What the backpack's filter line holds (`ui::item_filter`).
     static FILTER: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    /// The backpack's shown group and order (Razdor's, `rules::pack_order`: a view only, the
+    /// pack keeps its order; kept for the session).
+    static GROUP: std::cell::Cell<ItemGroup> = const { std::cell::Cell::new(ItemGroup::All) };
+    static SORT: std::cell::Cell<PackSort> = const { std::cell::Cell::new(PackSort::Shown) };
     /// The class a promotion portrait under the pointer put on the left panel (0x4c39d8
     /// repaints it as a fresh unit of that type) while the pointer is on it (Razdor's: the
     /// original's keeps it after, until a card is hovered or pressed, 0x4c3cf4).
@@ -220,6 +225,12 @@ const FILTER_KEY: &str = "army:pack-filter";
 /// Puts `query` into the backpack's filter (debug snapshots).
 pub(super) fn set_pack_filter(query: &str) {
     FILTER.with(|f| query.clone_into(&mut f.borrow_mut()));
+}
+
+/// Puts the backpack's group and order (debug snapshots).
+pub(super) fn set_pack_view(group: ItemGroup, sort: PackSort) {
+    GROUP.with(|g| g.set(group));
+    SORT.with(|s| s.set(sort));
 }
 
 /// The backpack's filter as the army screen is left by any way (its own buttons clear it;
@@ -804,7 +815,34 @@ pub fn squad(
     }
     // Razdor gives the backpack the whole top right (the user's choice, 2026-10-09: no item
     // description box; an item's description pops up by the pointer, as a spell badge's).
-    let content = if show_tree { at(258.0, 54.0, 300.0, 242.0) } else { at(258.0, 54.0, 568.0, 242.0) };
+    // Under the two rows of group and order buttons (below) the pack starts at y 100.
+    let content = if show_tree { at(258.0, 54.0, 300.0, 242.0) } else { at(258.0, 100.0, 568.0, 196.0) };
+    let (mut group, mut sort) = (GROUP.with(|g| g.get()), SORT.with(|s| s.get()));
+    if !show_tree {
+        // The group and order rows (Razdor's, view only): five groups on the first row, the
+        // other three and the order button on the second, so every label is whole. A click on
+        // a group shows that group, a click on the order button goes on to the next order; either
+        // starts the pack at its top.
+        let mut picked = group;
+        for (i, g) in ItemGroup::EVERY.into_iter().enumerate() {
+            let (row, col) = if i < 5 { (0, i) } else { (1, i - 5) };
+            let r = at(258.0 + 114.0 * col as f32, 54.0 + 23.0 * row as f32, 111.0, 20.0);
+            if toggle_button(r.x, r.y, r.w, r.h, item_filter::group_label(g), group == g) {
+                picked = g;
+            }
+        }
+        let r = at(600.0, 77.0, 226.0, 20.0);
+        let mut sorted = sort;
+        if toggle_button(r.x, r.y, r.w, r.h, item_filter::sort_label(sort), sort != PackSort::Shown) {
+            sorted = sort.next();
+        }
+        if picked != group || sorted != sort {
+            (group, sort) = (picked, sorted);
+            GROUP.with(|g| g.set(group));
+            SORT.with(|s| s.set(sort));
+            *scroll = 0;
+        }
+    }
     // The backpack's filter line above it: typing a letter starts it.
     let mut query = FILTER.with(|f| f.borrow().clone());
     let mut filter = item_filter::Reply::default();
@@ -814,12 +852,17 @@ pub fn squad(
             clear_focus();
         }
     } else {
-        let all: Vec<(usize, ItemId)> = game.pack.entries().collect();
-        let before = item_filter::keep(&c, all.iter().copied(), &query).len();
-        filter = item_filter::field(FILTER_KEY, &mut query, at(258.0, 31.0, 300.0, 20.0), &[KeyCode::A, KeyCode::N], before, game.pack.count());
-        kept = item_filter::keep(&c, all, &query);
+        // The pack's cells in the group and order shown (the pack itself keeps its order); the
+        // filter counts within them.
+        let ordered = pack_order::pack_view_order(&c, game.pack.entries(), group, sort);
+        let of = ordered.len();
+        let before = item_filter::keep(&c, ordered.iter().copied(), &query).len();
+        filter = item_filter::field(FILTER_KEY, &mut query, at(258.0, 31.0, 300.0, 20.0), &[KeyCode::A, KeyCode::N], before, of);
+        kept = item_filter::keep(&c, ordered, &query);
         FILTER.with(|f| query.clone_into(&mut f.borrow_mut()));
     }
+    // A group or an order other than the pack's own shows the pack through `kept` too.
+    let arranged = !show_tree && (group != ItemGroup::All || sort != PackSort::Shown);
     let filtering = !query.trim().is_empty();
     let kept_ids: Vec<usize> = kept.iter().map(|(i, _)| *i).collect();
     let mut tree_hint = None;
@@ -837,7 +880,7 @@ pub fn squad(
             let who = game.squad_label(t);
             tree_hint = chrome::ui_line("Army", n).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).map(|line| line.replace("#NAME1", &format!("\"{who}\"")));
         }
-    } else if let Some(cell) = pack_view(game, assets, content, scroll, &mut hover, filtering.then_some(&kept_ids[..])) {
+    } else if let Some(cell) = pack_view(game, assets, content, scroll, &mut hover, (filtering || arranged).then_some(&kept_ids[..])) {
         *message = None;
         *message = pack_click(game, cell);
     }

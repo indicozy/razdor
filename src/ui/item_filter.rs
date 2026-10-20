@@ -10,6 +10,7 @@ use macroquad::prelude::*;
 use razdor::i18n::tr;
 use razdor::rules::content::{Content, ItemId};
 use razdor::rules::items::filter_match;
+use razdor::rules::pack_order::{ItemGroup, PackSort};
 use razdor::search::Match;
 
 use super::chrome;
@@ -22,6 +23,31 @@ pub struct Reply {
     pub pick: bool,
     /// The filter used this frame's Esc (or holds the keyboard): the screen must not close.
     pub keys_taken: bool,
+}
+
+/// The label of a group button (the backpack's row and the market's group button).
+pub fn group_label(group: ItemGroup) -> &'static str {
+    match group {
+        ItemGroup::All => tr("All"),
+        ItemGroup::Weapons => tr("Weapons"),
+        ItemGroup::Armour => tr("Armour"),
+        ItemGroup::Helms => tr("Helms"),
+        ItemGroup::Shields => tr("Shields"),
+        ItemGroup::Rings => tr("Rings"),
+        ItemGroup::Amulets => tr("Amulets"),
+        ItemGroup::Other => tr("Other"),
+    }
+}
+
+/// The label of the backpack's order button, showing the current order.
+pub fn sort_label(sort: PackSort) -> &'static str {
+    match sort {
+        PackSort::Shown => tr("Order: as found"),
+        PackSort::NameUp => tr("Name A–Z"),
+        PackSort::NameDown => tr("Name Z–A"),
+        PackSort::PriceDown => tr("Price ↓"),
+        PackSort::PriceUp => tr("Price ↑"),
+    }
 }
 
 /// The items of `list` that `query` keeps, with their matches, in order.
