@@ -1011,13 +1011,18 @@ impl EventWorld for Game {
         self.spells.retain(|&s| s != spell);
     }
 
-    /// The hero's figure is not a model of the scenario: a recorded no-op for him.
+    /// Community opcode 17 (0xc28650): the army's figure on the map (army +0x169d, c28662, not
+    /// the editor's byte 5). On the player it is the hero's figure, which his unit type does
+    /// not change (opcode 7 never writes it).
     fn set_army_model(&mut self, holder: Holder, model: u8) {
-        if let Holder::Army(a) = holder {
-            if let Some(a) = self.army_mut(a) {
-                // Army +0x169d, the figure itself (c28662), not the editor's byte 5.
-                a.figure = model;
+        match holder {
+            Holder::Army(a) => {
+                if let Some(a) = self.army_mut(a) {
+                    a.figure = model;
+                }
             }
+            Holder::Player => self.hero_figure = Some(model),
+            Holder::Building(_) => {}
         }
     }
 
@@ -1131,6 +1136,9 @@ pub struct NextMap {
     /// The hero's class (his preset on the next map) and name.
     pub class: HeroClass,
     pub hero_name: Option<String>,
+    /// The hero's map figure ([`Game::hero_figure`]); `None`: his start class's.
+    #[serde(default)]
+    pub figure: Option<u8>,
     /// The journal's history (`rules::journal`, a Razdor extra), always carried: the next map
     /// is its next chapter. The quest journal itself is not (0x4b2204).
     pub journal: crate::rules::journal::History,
@@ -1192,6 +1200,7 @@ impl Game {
                 _ => HeroClass::Knight,
             },
             hero_name: self.hero_name.clone(),
+            figure: self.hero_figure,
             journal: self.journal.clone(),
         }
     }
@@ -1262,6 +1271,9 @@ impl Game {
         if prev.hero_name.is_some() {
             self.hero_name = prev.hero_name.clone();
         }
+        // The hero's figure goes with his record *(guess: the original copies the whole record,
+        // figure byte included)*.
+        self.hero_figure = prev.figure;
         self.journal = prev.journal.clone();
         self.journal.next_chapter();
         let title = self.world.title.clone();
@@ -1699,6 +1711,26 @@ mod tests {
     }
 
     #[test]
+    fn the_hero_keeps_his_figure_when_his_unit_becomes_another() {
+        // The hero's figure is his army record's (0x75bfdd + 0x3827·0), written at the start
+        // from his class (0x4b43db); opcode 7 never writes it (0xc27877–c28043), opcode 17 on
+        // the player does (0xc28650).
+        use crate::rules::events::EventWorld as _;
+        let mut g = start(&world(vec![]));
+        assert_eq!(g.hero_figure(), 1, "a knight's figure");
+        g.replace_unit(Holder::Player, 0, 3);
+        assert_eq!(g.hero_class(), Some(HeroClass::Ranger), "his unit is another now");
+        assert_eq!(g.hero_figure(), 1, "the figure stays the start class's");
+        g.set_army_model(Holder::Player, 3);
+        assert_eq!(g.hero_figure(), 3);
+        // The figure carries over to the next map with his record.
+        let next = g.hand_over("next".into(), None);
+        let mut fresh = start(&world(vec![]));
+        fresh.apply_carry_over(&next);
+        assert_eq!(fresh.hero_figure(), 3);
+    }
+
+    #[test]
     fn opcode_7_keeps_the_hp_number_and_an_unhurt_unit_stays_unhurt() {
         // Community opcode 7 writes only the unit's type (unit +0 = +0x59, c27877–c28043): the
         // HP is not touched, so an unhurt unit stays unhurt at the new maximum (-1 in the
@@ -1968,6 +2000,7 @@ mod tests {
             flags: String::new(),
             class: HeroClass::Knight,
             hero_name: None,
+            figure: None,
             journal: g.journal.clone(),
         };
         let mut fresh = start(&world(vec![]));
@@ -2478,6 +2511,7 @@ mod tests {
             flags: String::new(),
             class: HeroClass::Knight,
             hero_name: None,
+            figure: None,
             journal: crate::rules::journal::History::default(),
         };
         // The next map's header takes it all.

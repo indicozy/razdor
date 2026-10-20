@@ -14,7 +14,6 @@ use razdor::rules::ai::{Clash, Combatant};
 use razdor::rules::battle::Team;
 use razdor::trf;
 use razdor::rules::clock::duration_label;
-use razdor::rules::content::HeroClass;
 use razdor::rules::game::{Event, Foe, Game};
 use razdor::rules::idle;
 use razdor::rules::magic::{CastOutcome, CastTarget};
@@ -1468,11 +1467,9 @@ fn draw_army(game: &Game, a: &Army, assets: &Assets, art: Option<&DtArt>, cam: &
 }
 
 fn draw_hero(game: &Game, assets: &Assets, art: Option<&DtArt>, cam: &Camera) {
-    let model = match game.hero_class() {
-        Some(HeroClass::Archmage) => 2,
-        Some(HeroClass::Ranger) => 3,
-        _ => 1,
-    };
+    // His figure is his army record's, not his current unit type's: an event that makes him
+    // another unit leaves it (0x4ad4cc, 0x4ad5ac).
+    let model = game.hero_figure();
     // Inside a building his figure is not drawn, only his ring under the building
     // (0x497abc, `World::hides_figure`).
     if game.hero_hidden() {
@@ -3105,6 +3102,7 @@ fn draw_debug(game: &Game, cam: &Camera) {
 
 #[cfg(test)]
 mod tests {
+    use razdor::rules::content::HeroClass;
 
     #[test]
     fn the_edges_scroll_the_map() {

@@ -20,6 +20,13 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   176 for no retreats, or find the move that keeps it. Check the original too: the bench's
   original plays 6 such retreats (wounded units?), not yet confirmed in Ghidra.
 
+- **The hero's figure on a campaign's next map** (2026-10-20, with the fix for the hero's figure
+  after opcode 7). Razdor carries the figure with the hero's record (`NextMap::figure`, a guess:
+  the original's hand-over copies the hero's whole record, 0x4b5b64, and the figure byte is in
+  it, but this was not traced). Settle it by reading 0x4b5b64 for the army record 0 copy. Also
+  unknown: whether the original's restart (0x4b5ef8) keeps a figure changed by opcode 17.
+
+
 - **«Максимум» passes or steps with a kill open** (2026-10-20, from the first `max_bench`
   baseline: 19 of Max's 1926 decisions, 88 battles three ways). Max's decision was a pass, a
   step or a refused plan while a strike that kills a unit was open (77 idle decisions with any
