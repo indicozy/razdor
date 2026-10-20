@@ -8,6 +8,16 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **Negative vampirism: the attacker drained to 0 or less** (2026-10-20, #1046). The original keeps
+  its record in the side's list (no removal test after its own strike, 48b580). Razdor drops such
+  a unit from its lists and counts without the removal routine (`died`), so its row does not
+  collapse and the screen's counts are not refreshed by this strike. What the original does with
+  the record later (turn-start regeneration, 4846c1, or the battle's end) is not traced. Settled by
+  a trace of a drained attacker in Wine or a replay.
+- **Death-school vampirism on magic and a negative value** (2026-10-20, #1046). The spec's §3 text
+  for the magic strike (48ad61) does not say whether the original has a sign test there. Razdor
+  keeps `vampirism > 0` on that path (a negative value does nothing). Settled by reading 48ad61.
+
 - **The original's no-income wage formula is not identified** (2026-10-20, from #1044). The
   Community patch's Rear Service takes ×78/256 (−70%) of the wage bill when the player's stored
   income is 0 (0xc250e4 → 0xc25001 skipped). The patch author says that branch compensates another
