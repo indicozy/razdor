@@ -5,6 +5,14 @@ move to a Settled list.
 
 ## Open
 
+- **The original's no-income wage formula is not identified** (2026-10-20, from #1044). The
+  Community patch's Rear Service takes ×78/256 (−70%) of the wage bill when the player's stored
+  income is 0 (0xc250e4 → 0xc25001 skipped). The patch author says that branch compensates another
+  no-income formula of the original, so the intended effect is −30% in both cases. Razdor (on `main`
+  and `dt-original` alike, the owner's decision) always cuts ×178/256 and does not model that formula;
+  the original's ×78 branch is not reproduced. Settled by finding the original's no-income path for
+  wages and modelling it.
+
 - **Unit panel: Community bleed source, evasion, magic tint** (2026-10-19). The stat list
   (interface.md, the "Razdor now → original" row 80) follows the original's colour rule. Still open:
   - The bleed line shows the unit's own bleed in battle. The original reads the battle bleed
