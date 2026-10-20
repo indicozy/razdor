@@ -21,7 +21,9 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   bar only when the rows overflow (`scrollbar`); with a fitting list the pick's highlight now runs
   to the frame's inner edge. Settled by reading the original's list widget (the bar's show
   condition in the 0x4d9060 builder's callees, 0x47e1fc / 0x47b8d4) or an original screenshot of a
-  short market with a pick.
+  short market with a pick. The highlight change (4f2d0e8) is main only, not on `dt-original`, until
+  this is settled. The pick scene (`building:<map>:<n>:market:<row>`) renders black in the
+  ui-regress harness, so the change has no screenshot check yet.
 - **Opcode 12's type write in the original** (2026-10-20, #1039). events.md's table says opcode 12
   writes the named byte (+0x14) only, yet Razdor also sets the unit's type from the named
   character's class and now applies opcode 7's HP rule to it. The original's write for that type
