@@ -1355,7 +1355,10 @@ fn price_list_in_face(assets: Option<&Assets>, rows: &[(Option<ItemId>, String, 
     scrollbar(Rect::new(x + w - 15.0 * k, y, 12.0 * k, visible as f32 * row_h), scroll, visible, rows.len());
     if let Some(n) = pick.filter(|&n| n >= *scroll && n < *scroll + visible) {
         let ry = y + (n - *scroll) as f32 * row_h;
-        let right = x + w - bar;
+        // With no scroll bar (the rows fit) the highlight runs to the frame's inner edge: the
+        // bar's room is then blank marble, and the pick covers the whole row (1049; the
+        // original's bar is not settled, see docs/OPEN_QUESTIONS.md).
+        let right = if rows.len() > visible { x + w - bar } else { x + w - k.max(1.0) };
         chrome::additive(|| draw_rectangle(x + icon_w, ry, (right - x - icon_w).max(0.0), row_h, blend_color(MARKET_PICK_ADDED)));
     }
     chrome::silver_frame(frame, k.max(1.0));
