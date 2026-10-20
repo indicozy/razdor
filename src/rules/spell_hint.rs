@@ -163,10 +163,11 @@ pub fn effect_entries(spell: &SpellDef, label: &dyn Fn(&'static str) -> String) 
     }
     // Razdor's deviation (the owner's decision, 2026-10-20): the original writes no text for
     // p-LifeLose (0x49b63c), so its card shows the name alone (0x49bb0b). Razdor shows the
-    // leader's max life change instead: a drain of L percent reads «−L%», a negative one «+L%».
+    // leader's max life change instead. p-LifeLose is that change in percent as the rules read
+    // it (magic-items.md §4.1): a negative value is a curse's loss, read «−N%», a positive one
+    // a cure's gain, read «+N%».
     // Only here: remove this block to go back to the original's card.
-    if let Some(drain) = spell.life_lose_percent.filter(|&p| p != 0) {
-        let change = -drain;
+    if let Some(change) = spell.life_lose_percent.filter(|&p| p != 0) {
         let sign = if change > 0 { "+" } else { "\u{2212}" };
         out.push(EffectEntry { text: format!("{} {sign}{}%", label("LeaderMaxLife"), change.abs()), good: good_for_holder(change) });
     }
@@ -278,11 +279,12 @@ mod tests {
         let ru = |k: &'static str| if k == "LeaderMaxLife" { "Макс. жизнь лидеру".to_string() } else { k.to_string() };
         let mut s = testkit::spell(4, 10);
         s.delta_fixed_hits = None;
-        s.life_lose_percent = Some(20);
+        // The install's curse «Поглощение силами зла» has p-LifeLose -20: a loss, read −20%.
+        s.life_lose_percent = Some(-20);
         assert_eq!(effect_text(&s, &ru), "Макс. жизнь лидеру \u{2212}20% ");
         assert_eq!(effect_entries(&s, &ru), [EffectEntry { text: "Макс. жизнь лидеру \u{2212}20%".to_string(), good: false }]);
-        // A negative drain (a healing curse) raises the max life and is good for the holder.
-        s.life_lose_percent = Some(-10);
+        // A positive p-LifeLose (a cure) raises the max life and is good for the holder.
+        s.life_lose_percent = Some(10);
         assert_eq!(effect_entries(&s, &ru), [EffectEntry { text: "Макс. жизнь лидеру +10%".to_string(), good: true }]);
         // No drain: no entry (the original's empty card).
         s.life_lose_percent = Some(0);
