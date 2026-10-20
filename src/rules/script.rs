@@ -830,28 +830,10 @@ impl EventWorld for Game {
     /// type's maximum, and a wounded one keeps its HP number ([`hp_after_type_change`]).
     fn replace_unit(&mut self, holder: Holder, unit: u8, with: u8) {
         let id = UnitId(with as u32);
-        let c = self.content.clone();
-        if c.try_unit(id).is_none() {
+        if self.content.try_unit(id).is_none() {
             return;
         }
-        if holder == Holder::Player {
-            if let Some(u) = self.squad.get_mut(unit as usize) {
-                let old_max = u.max_hp(&c);
-                u.def = id;
-                if u.alive() {
-                    u.hp = hp_after_type_change(u.hp, old_max, u.max_hp(&c));
-                }
-            }
-        } else if let Some(t) = self.troops_of(holder).and_then(|t| t.get_mut(unit as usize)) {
-            // A troop records the HP it lacks (`hurt`), so its HP is its maximum minus that.
-            let old_max = troop_max_hp(&c, t);
-            let hp = old_max - t.hurt;
-            t.unit = id;
-            if t.alive() {
-                let new_max = troop_max_hp(&c, t);
-                t.hurt = new_max - hp_after_type_change(hp, old_max, new_max);
-            }
-        }
+        self.retype_unit(holder, unit, id);
     }
 
     /// The army walks at the new speed; the Community patch writes the hero's speed too
@@ -947,30 +929,30 @@ impl EventWorld for Game {
         }
     }
 
+    /// Opcode 12: the unit takes the named character `named` (its flag) and, when the class is
+    /// set, that character's type. The original writes the named byte (+0x14, events.md
+    /// opcode 12); the type change is the opcode-7 write, so its HP follows the same rule
+    /// (`retype_unit`, 0xc27877–c28043). *(guess: the original's type write for opcode 12 is
+    /// not yet traced to its own address; see docs/OPEN_QUESTIONS.md.)*
     fn set_named_unit(&mut self, holder: Holder, unit: u8, named: u8, class: u8) {
         let class = Some(UnitId(class as u32)).filter(|&id| class != 0 && self.content.try_unit(id).is_some());
         match holder {
             Holder::Player => {
                 if let Some(u) = self.squad.get_mut(unit as usize) {
                     u.named = named;
-                    if let Some(id) = class {
-                        u.def = id;
-                    }
                 }
             }
             Holder::Army(a) => {
                 if let Some(t) = self.army_mut(a).and_then(|a| a.troops.get_mut(unit as usize)) {
                     t.named = named;
-                    if let Some(id) = class {
-                        t.unit = id;
-                    }
                 }
             }
-            Holder::Building(_) => {
-                if let (Some(id), Some(t)) = (class, self.troops_of(holder).and_then(|t| t.get_mut(unit as usize))) {
-                    t.unit = id;
-                }
-            }
+            Holder::Building(_) => {}
+        }
+        // The class change keeps the HP as opcode 7 does (see `retype_unit`); a garrison
+        // troop of a building takes the type too.
+        if let Some(id) = class {
+            self.retype_unit(holder, unit, id);
         }
     }
 
@@ -1314,6 +1296,31 @@ impl Game {
     }
 
     /// The troops of an AI army (on the map or waiting) or of a building's garrison.
+    /// The unit's type becomes `id` and its HP follows [`hp_after_type_change`] (opcode 7's
+    /// rule). Shared by opcode 7 and opcode 12 (the named character's type): both write only
+    /// the unit's type, never its HP (events.md, opcodes 7 and 12).
+    fn retype_unit(&mut self, holder: Holder, unit: u8, id: UnitId) {
+        let c = self.content.clone();
+        if holder == Holder::Player {
+            if let Some(u) = self.squad.get_mut(unit as usize) {
+                let old_max = u.max_hp(&c);
+                u.def = id;
+                if u.alive() {
+                    u.hp = hp_after_type_change(u.hp, old_max, u.max_hp(&c));
+                }
+            }
+        } else if let Some(t) = self.troops_of(holder).and_then(|t| t.get_mut(unit as usize)) {
+            // A troop records the HP it lacks (`hurt`), so its HP is its maximum minus that.
+            let old_max = troop_max_hp(&c, t);
+            let hp = old_max - t.hurt;
+            t.unit = id;
+            if t.alive() {
+                let new_max = troop_max_hp(&c, t);
+                t.hurt = new_max - hp_after_type_change(hp, old_max, new_max);
+            }
+        }
+    }
+
     fn troops_of(&mut self, holder: Holder) -> Option<&mut Vec<Troop>> {
         match holder {
             Holder::Army(a) => self.army_mut(a).map(|a| &mut a.troops),
@@ -1740,6 +1747,64 @@ mod tests {
         g.replace_unit(Holder::Player, 0, 2);
         let new = g.squad[0].max_hp(&c);
         assert_eq!(g.squad[0].hp, 50.min(new), "the wounded keep their number, never above the maximum");
+    }
+
+    #[test]
+    fn opcode_12_class_change_keeps_the_hp_rule_of_opcode_7() {
+        // Opcode 12 writes the named character's type (its class) with the same HP rule as
+        // opcode 7 (`retype_unit`): an unhurt unit stays unhurt at the new maximum, a wounded
+        // one keeps its HP number. The hero, an army troop and a garrison troop alike.
+        use crate::rules::content::Content;
+        use crate::rules::events::EventWorld as _;
+        use crate::rules::world::testkit::troop;
+        let base = content();
+        // Unit 5 is the class's type, given a larger maximum than the hero's (unit 1).
+        let mut units = base.units.clone();
+        units.iter_mut().find(|u| u.id == 5).unwrap().hits = 120;
+        let c = Content::new(units, base.items.clone(), vec![], base.options.clone(), base.formation);
+        let mut g = Game::from_scenario(Arc::new(c), &world(vec![]), HeroClass::Knight);
+        let c = g.content.clone();
+        let old = g.squad[0].max_hp(&c);
+        g.squad[0].hp = old;
+        g.set_named_unit(Holder::Player, 0, 1, 5);
+        assert_eq!(g.squad[0].def, UnitId(5), "the class is the hero's type now");
+        assert_ne!(old, g.squad[0].max_hp(&c), "the new type has another maximum");
+        assert_eq!(g.squad[0].hp, g.squad[0].max_hp(&c), "unhurt before, unhurt after");
+        g.squad[0].def = UnitId(1);
+        let wounded = (g.squad[0].max_hp(&c) / 2).max(1);
+        g.squad[0].hp = wounded;
+        g.set_named_unit(Holder::Player, 0, 1, 5);
+        assert_eq!(g.squad[0].hp, wounded.min(g.squad[0].max_hp(&c)), "the wounded keep their number");
+
+        // An army troop: unhurt stays unhurt, a wounded one keeps its HP number.
+        let mut s = world(vec![]);
+        s.armies = vec![army(3, 10, 8, -2, &[troop(4, 0, 2)])];
+        s.buildings = vec![building(BuildingType::Town, 2, 2, (1, 1))];
+        let mut g = start(&s);
+        let c = g.content.clone();
+        let a = g.world.armies.iter().position(|a| a.id == 3).unwrap();
+        g.world.armies[a].troops[0].hurt = 0;
+        g.set_named_unit(Holder::Army(3), 0, 1, 3);
+        assert_eq!(g.world.armies[a].troops[0].unit, UnitId(3));
+        assert_eq!(g.world.armies[a].troops[0].hurt, 0, "unhurt stays unhurt");
+        g.world.armies[a].troops[0].hurt = 10;
+        let t = &g.world.armies[a].troops[0];
+        let hp = crate::rules::ai::troop_max_hp(&c, t) - t.hurt;
+        g.set_named_unit(Holder::Army(3), 0, 1, 2);
+        let t = &g.world.armies[a].troops[0];
+        let max = crate::rules::ai::troop_max_hp(&c, t);
+        assert_eq!(max - t.hurt, hp.min(max).max(1), "the HP number is kept, never above the maximum");
+
+        // A garrison troop of a building takes the same rule.
+        let garrison_troop = g.world.armies[a].troops[0];
+        let bid = g.world.locations[0].id;
+        let loc = &mut g.world.locations[0];
+        loc.garrison = vec![garrison_troop];
+        loc.garrison[0].hurt = 0;
+        g.set_named_unit(Holder::Building(bid), 0, 1, 3);
+        let loc = g.world.locations.iter().find(|l| l.id == bid).unwrap();
+        assert_eq!(loc.garrison[0].unit, UnitId(3));
+        assert_eq!(loc.garrison[0].hurt, 0, "unhurt garrison troop stays unhurt");
     }
 
     #[test]
