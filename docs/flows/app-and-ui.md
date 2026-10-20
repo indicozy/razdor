@@ -143,6 +143,9 @@ Building a window (`src/ui/chrome.rs`):
   0.9375 (as large as the original's pictures in the windows), not cut down to the fit;
   Auto is the fit. The settings' «Масштаб карты» (`map_zoom`) multiplies it, the wheel and
   +/- step from that (×1.1 a notch) and 0 comes back; locked, the zoom stays `map_zoom`.
+  Razdor's: the wheel and +/- zoom out past the settings' range (`ZOOM_RANGE`, 0.4) down to
+  the whole map fitting the view (`world_view::zoom_floor`); a map that fits already at 0.4
+  keeps 0.4 as its floor. The floor is passed as `lo` to `zoom_at` and `step_zoom`.
 - `chrome::window(r, title, skin, closable)` draws background, frame and title bar and
   returns `(inner, closed)`. Skins: `chrome::Skin`.
 - Placement: windows over the map are centred over the view above the bar (as the

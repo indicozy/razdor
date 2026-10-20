@@ -87,21 +87,33 @@ fn home_zoom() -> f32 {
     f32::from_bits(HOME_ZOOM.load(std::sync::atomic::Ordering::Relaxed))
 }
 
-/// The zoom `steps` wheel notches from `home` (×1.1 each), within [`ZOOM_RANGE`]; locked,
-/// always `home`.
-fn zoom_at(home: f32, steps: i32, locked: bool) -> f32 {
+/// The lowest wheel zoom (Razdor's, for fun): far enough out that the whole map fits the
+/// view, and never above ZOOM_RANGE.0. `map_w` and `map_h_px` are the map's size in screen
+/// pixels at zoom 1; a zero or non-finite size, or an empty view, gives ZOOM_RANGE.0.
+fn zoom_floor(map_w: f32, map_h_px: f32, view: Rect) -> f32 {
+    let sized = map_w > 0.0 && map_h_px > 0.0 && map_w.is_finite() && map_h_px.is_finite();
+    let viewed = view.w > 0.0 && view.h > 0.0 && view.w.is_finite() && view.h.is_finite();
+    if !sized || !viewed {
+        return ZOOM_RANGE.0;
+    }
+    (view.w / map_w).min(view.h / map_h_px).min(ZOOM_RANGE.0).max(0.01)
+}
+
+/// The zoom `steps` wheel notches from `home` (×1.1 each), within `lo` (the wheel's lowest,
+/// see [`zoom_floor`]) and ZOOM_RANGE.1; locked, always `home`.
+fn zoom_at(home: f32, steps: i32, locked: bool, lo: f32) -> f32 {
     if locked {
         home
     } else {
-        (home * 1.1f32.powi(steps)).clamp(ZOOM_RANGE.0, ZOOM_RANGE.1)
+        (home * 1.1f32.powi(steps)).clamp(lo, ZOOM_RANGE.1)
     }
 }
 
-/// `steps` moved by `by`, kept where it still changes the zoom.
-fn step_zoom(home: f32, steps: i32, by: i32) -> i32 {
+/// `steps` moved by `by`, kept where it still changes the zoom within `lo` and ZOOM_RANGE.1.
+fn step_zoom(home: f32, steps: i32, by: i32, lo: f32) -> i32 {
     let next = steps + by;
     let z = home * 1.1f32.powi(next);
-    if (z < ZOOM_RANGE.0 && by < 0) || (z > ZOOM_RANGE.1 && by > 0) {
+    if (z < lo && by < 0) || (z > ZOOM_RANGE.1 && by > 0) {
         steps
     } else {
         next
@@ -2537,22 +2549,28 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     // Zoom: mouse wheel or +/- (Razdor's, also while he walks or waits), in notches from the
     // settings' zoom; 0 comes back to it. Locked in the settings, the zoom stays theirs.
     let (home, locked) = (home_zoom(), ZOOM_LOCKED.load(std::sync::atomic::Ordering::Relaxed));
+    // The wheel zooms out to the whole map in the view (Razdor's), past the settings' range.
+    let lo = {
+        let map = &game.world.map;
+        let ms = map_scale();
+        zoom_floor(map.w as f32 * PX * ms, map.h as f32 * map.grid.row_height() * PX * ms, map_area())
+    };
     if !locked {
         let wheel = wheel();
         if wheel != 0.0 {
-            view.zoom_steps = step_zoom(home, view.zoom_steps, if wheel > 0.0 { 1 } else { -1 });
+            view.zoom_steps = step_zoom(home, view.zoom_steps, if wheel > 0.0 { 1 } else { -1 }, lo);
         }
         if key(KeyCode::Equal) || key(KeyCode::KpAdd) {
-            view.zoom_steps = step_zoom(home, step_zoom(home, view.zoom_steps, 1), 1);
+            view.zoom_steps = step_zoom(home, step_zoom(home, view.zoom_steps, 1, lo), 1, lo);
         }
         if key(KeyCode::Minus) || key(KeyCode::KpSubtract) {
-            view.zoom_steps = step_zoom(home, step_zoom(home, view.zoom_steps, -1), -1);
+            view.zoom_steps = step_zoom(home, step_zoom(home, view.zoom_steps, -1, lo), -1, lo);
         }
         if key(KeyCode::Key0) || key(KeyCode::Kp0) {
             view.zoom_steps = 0;
         }
     }
-    view.zoom = zoom_at(home, view.zoom_steps, locked);
+    view.zoom = zoom_at(home, view.zoom_steps, locked, lo);
 
     // M toggles the minimap; F3 Razdor's debug overlay.
     if key(KeyCode::M) {
@@ -3129,16 +3147,55 @@ mod tests {
 
     #[test]
     fn the_zoom_steps_from_the_settings_zoom_and_locks() {
-        assert_eq!(zoom_at(1.2, 0, false), 1.2, "0 is the settings' zoom");
-        assert!((zoom_at(1.0, 2, false) - 1.21).abs() < 1e-5);
-        assert_eq!(zoom_at(1.2, 5, true), 1.2, "locked");
+        let lo = ZOOM_RANGE.0;
+        assert_eq!(zoom_at(1.2, 0, false, lo), 1.2, "0 is the settings' zoom");
+        assert!((zoom_at(1.0, 2, false, lo) - 1.21).abs() < 1e-5);
+        assert_eq!(zoom_at(1.2, 5, true, lo), 1.2, "locked");
         // The steps stop where the zoom stops changing.
         let mut s = 0;
         for _ in 0..40 {
-            s = step_zoom(1.0, s, -1);
+            s = step_zoom(1.0, s, -1, lo);
         }
-        assert!(zoom_at(1.0, s, false) >= ZOOM_RANGE.0 && step_zoom(1.0, s, 1) == s + 1);
-        assert_eq!(zoom_at(1.0, s, false), (1.1f32.powi(s)).max(ZOOM_RANGE.0));
+        assert!(zoom_at(1.0, s, false, lo) >= lo && step_zoom(1.0, s, 1, lo) == s + 1);
+        assert_eq!(zoom_at(1.0, s, false, lo), (1.1f32.powi(s)).max(lo));
+    }
+
+    #[test]
+    fn the_wheel_zooms_out_past_the_settings_range_to_a_lower_floor() {
+        // Razdor's: with a lower floor, stepping out goes below 0.4 and stops at the floor.
+        let lo = 0.1;
+        let mut s = 0;
+        for _ in 0..60 {
+            s = step_zoom(1.0, s, -1, lo);
+        }
+        let z = zoom_at(1.0, s, false, lo);
+        assert!(z < ZOOM_RANGE.0, "past the settings' 0.4: {z}");
+        assert!(z >= lo - 1e-6, "stops at the floor: {z}");
+        assert!(step_zoom(1.0, s, -1, lo) == s, "no step below the floor");
+        // The same steps with the settings' floor stop at 0.4.
+        let mut t = 0;
+        for _ in 0..60 {
+            t = step_zoom(1.0, t, -1, ZOOM_RANGE.0);
+        }
+        assert!(zoom_at(1.0, t, false, ZOOM_RANGE.0) >= ZOOM_RANGE.0);
+    }
+
+    #[test]
+    fn the_zoom_floor_fits_the_whole_map_in_the_view() {
+        let view = Rect::new(0.0, 0.0, 800.0, 600.0);
+        // A big map (4000×3000 px at zoom 1): its floor is below 0.4, and at that zoom it fits.
+        let (w, h) = (4000.0, 3000.0);
+        let lo = zoom_floor(w, h, view);
+        assert!(lo < ZOOM_RANGE.0, "floor {lo}");
+        assert!(w * lo <= view.w + 1e-3 && h * lo <= view.h + 1e-3, "the map fits at the floor");
+        // A small map never goes above the settings' floor.
+        assert_eq!(zoom_floor(200.0, 150.0, view), ZOOM_RANGE.0);
+        // An empty view, or a zero or non-finite map: the settings' floor.
+        assert_eq!(zoom_floor(w, h, Rect::new(0.0, 0.0, 0.0, 600.0)), ZOOM_RANGE.0);
+        assert_eq!(zoom_floor(w, h, Rect::new(0.0, 0.0, 800.0, 0.0)), ZOOM_RANGE.0);
+        assert_eq!(zoom_floor(0.0, h, view), ZOOM_RANGE.0);
+        assert_eq!(zoom_floor(f32::NAN, h, view), ZOOM_RANGE.0);
+        assert_eq!(zoom_floor(w, f32::INFINITY, view), ZOOM_RANGE.0);
     }
 
     #[test]
