@@ -564,49 +564,12 @@ pub fn key_bottom_left_565(img: &mut Image) {
 /// Decode any graphics file by extension (`.ugs`, `.lit`, `.spi`, `.bmp`). `Objects.ugs` gives
 /// its sprites in slot order.
 pub fn decode_file(path: &Path) -> Result<Vec<Image>, DtError> {
-    {
-        let mut ahead = AHEAD.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(frames) = ahead.decoded.remove(path) {
-            return Ok(frames);
-        }
-        // Wanted before [`prefetch`] came to it: it is decoded here, and not again there.
-        ahead.wanted.insert(path.to_path_buf());
-    }
-    crate::diag::timed(|| path.display().to_string(), || decode_file_untimed(path))
+    super::preload::decode_shared(path).map(|frames| frames.to_vec())
 }
 
-/// Pictures decoded ahead of their use ([`prefetch`]), by path, until [`decode_file`] takes
-/// them; and the files [`decode_file`] decoded itself.
-#[derive(Default)]
-struct Ahead {
-    decoded: std::collections::HashMap<PathBuf, Vec<Image>>,
-    wanted: std::collections::HashSet<PathBuf>,
-}
-
-static AHEAD: std::sync::LazyLock<std::sync::Mutex<Ahead>> = std::sync::LazyLock::new(Default::default);
-
-/// Decodes the files `rel` (`/`-separated, under install `dir`) on a thread of its own, for
-/// [`decode_file`] to find them decoded *(Razdor's)*: a window opened for the first time
-/// decoded its pictures there and then, and opened late (a player's report).
-pub fn prefetch(dir: PathBuf, rels: Vec<String>) {
-    let _ = std::thread::Builder::new().name("art ahead".into()).spawn(move || {
-        for rel in rels {
-            let Ok(path) = find_path(&dir, &rel) else { continue };
-            let wanted = |path: &Path| AHEAD.lock().unwrap_or_else(|e| e.into_inner()).wanted.contains(path);
-            if wanted(&path) {
-                continue;
-            }
-            if let Ok(frames) = decode_file_untimed(&path) {
-                let mut ahead = AHEAD.lock().unwrap_or_else(|e| e.into_inner());
-                if !ahead.wanted.contains(&path) {
-                    ahead.decoded.insert(path, frames);
-                }
-            }
-        }
-    });
-}
-
-fn decode_file_untimed(path: &Path) -> Result<Vec<Image>, DtError> {
+/// Decodes the file at `path` without any cache: the decode store's miss path
+/// ([`super::preload`]).
+pub(crate) fn decode_uncached(path: &Path) -> Result<Vec<Image>, DtError> {
     let d = std::fs::read(path).map_err(|source| DtError::Io { path: path.to_path_buf(), source })?;
     let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
     let name = path.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
@@ -799,12 +762,15 @@ impl DtInstall {
     /// The world-map texture for a terrain code (0..16).
     pub fn terrain_texture(&self, code: u8) -> Result<Image, DtError> {
         let name = TERRAIN_TEXTURES.get(code as usize).ok_or(bad("terrain code", code as usize))?;
-        crate::diag::timed(|| name.to_string(), || decode_lit(&self.read(&format!("{TEXTURES_DIR}/{name}"))?))
+        let frames = decode_file(&self.file(&format!("{TEXTURES_DIR}/{name}"))?)?;
+        frames.into_iter().next().ok_or(bad("terrain texture", code as usize))
     }
 
     /// The 32 animated water frames ([`water_frame_file`]); an error if any is missing.
     pub fn water_frames(&self) -> Result<Vec<Image>, DtError> {
-        (0..WATER_FRAMES).map(|i| decode_bmp(&self.read(&water_frame_file(i))?)).collect()
+        (0..WATER_FRAMES)
+            .map(|i| decode_file(&self.file(&water_frame_file(i))?)?.into_iter().next().ok_or(bad("water frame", i)))
+            .collect()
     }
 
     /// Any graphics file of the install by relative path, see [`decode_file`].

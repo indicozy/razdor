@@ -12,6 +12,8 @@ pub mod gfx;
 pub mod ini;
 pub mod install;
 pub mod markup;
+pub mod picture_cache;
+pub mod preload;
 pub mod sound;
 pub mod text;
 

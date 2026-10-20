@@ -166,6 +166,8 @@ pub struct App {
     map_music: MapMusic,
     /// The screen of the last frame, to hear windows open and battles begin.
     last_screen: Option<std::mem::Discriminant<Screen>>,
+    /// The map's pictures are queued for the decode store (once, at the first game).
+    map_art_queued: bool,
     /// The play log's last screen and message, to write each change once.
     play_last: (&'static str, Option<String>),
     /// The map editor, kept while a test play runs.
@@ -232,6 +234,7 @@ impl App {
             audio,
             map_music: MapMusic::default(),
             last_screen: None,
+            map_art_queued: false,
             play_last: ("", None),
             editor: None,
             test_play: false,
@@ -763,6 +766,15 @@ impl App {
         }
         input::begin_frame();
         chrome::begin_frame();
+        // The first game queues the map's pictures for the background decoders (once: the set
+        // is the install's), and each frame uploads the textures of those decoded so far.
+        if !self.map_art_queued && self.game.is_some() {
+            self.map_art_queued = true;
+            if let Some(d) = self.assets.dt.as_ref() {
+                d.preload_map();
+            }
+        }
+        chrome::warm(4.0);
         cursor::begin_frame();
         widgets::track_held_key();
         // Alt+Enter: the next display mode on any screen; the screens do not see its Enter.

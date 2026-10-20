@@ -16,6 +16,7 @@ use macroquad::prelude::*;
 
 use razdor::dt::gfx::{self, Image};
 use razdor::dt::ini::Ini;
+use razdor::dt::preload;
 use razdor::dt::install::{find_path, SETTINGS_FILE};
 
 use super::widgets::{measure, text};
@@ -75,18 +76,119 @@ thread_local! {
 
 /// Use the art of the install in `dir` from now on.
 pub fn set_install(dir: PathBuf) {
-    gfx::prefetch(dir.clone(), WINDOWS_AHEAD.iter().map(|n| format!("Graphics/{n}")).collect());
+    let ahead: Vec<(PathBuf, &'static str)> =
+        WINDOWS_AHEAD.iter().filter_map(|n| Some((find_path(&dir, &format!("Graphics/{n}")).ok()?, *n))).collect();
+    // The decode store decodes them in order, in the background; the lit ones are uploaded
+    // a few per frame ([`warm`]) so that their first use finds the texture made.
+    preload::preload(ahead.iter().map(|(p, _)| p.clone()).collect());
+    WARM.with(|w| *w.borrow_mut() = ahead.into_iter().filter(|(_, n)| n.ends_with(".lit")).map(|(p, n)| (p, n.to_string())).collect());
     CHROME.with(|c| {
         *c.borrow_mut() = Some(Chrome { dir, textures: HashMap::new(), visual_textures: HashMap::new(), visual_images: HashMap::new(), animations: HashMap::new(), texts: None, english_texts: None, english_fallback: None })
     });
 }
 
 /// The pictures the windows decode when they first open, the slow ones (over 2 ms each with
-/// `RAZDOR_PROFILE`), decoded ahead at the start ([`gfx::prefetch`]): the paper (army,
-/// building, journal), the army window's frames and its portrait and icon sheets, the load
-/// window's book, the building window's tabs.
+/// `RAZDOR_PROFILE`), decoded ahead at the start ([`preload::preload`]): the menus and the title
+/// (Castle, the flames, the exit window), the window frames and buttons, the fonts and cursors,
+/// the battle's art, the paper (army, building, journal), the army window's frames and its
+/// portrait and icon sheets, the load window's book, the building window's tabs.
 const WINDOWS_AHEAD: &[&str] = &[
     "Windows/Win-paper.lit",
+    "Windows/Win-marble.lit",
+    "Windows/Win-red.lit",
+    "Windows/Win2a.lit",
+    "Windows/Castle.lit",
+    "Windows/TitleFlame_RUS.lit",
+    "Windows/MenuFlame.lit",
+    "Windows/S_Exit_RUS.lit",
+    "Windows/Title_RUS.ugs",
+    "Windows/SMText_RUS.lit",
+    "Windows/Cursor-Normal.lit",
+    "Windows/Cursor-Denied.lit",
+    "Windows/Selection-0.lit",
+    "Windows/Selection-1.lit",
+    "Windows/SanSerif.lit",
+    "Windows/SanSerif_Shadow.lit",
+    "Windows/SanSerif_Bold.lit",
+    "Windows/SanSerif_Bold_Shadow.lit",
+    "Windows/Benguiat.lit",
+    "Windows/Benguiat_Shadow.lit",
+    "Windows/SteelLine.lit",
+    "Windows/Corner-Left.lit",
+    "Windows/Corner-Right.lit",
+    "Windows/DownCorner.lit",
+    "Windows/Corner_Frame-LU.lit",
+    "Windows/Corner_Frame-RU.lit",
+    "Windows/Corner_Frame-LD.lit",
+    "Windows/Corner_Frame-RD.lit",
+    "Windows/Big_Frame_1a.lit",
+    "Windows/Big_Frame_2a.lit",
+    "Windows/VSTexture.lit",
+    "Windows/VSlider.lit",
+    "Windows/VArrowUp.lit",
+    "Windows/VArrowDown.lit",
+    "Windows/LSign-Delete.lit",
+    "Windows/LSign-Load.lit",
+    "Windows/CloseButtonGreen-Up.lit",
+    "Windows/CloseButtonRed-Up.lit",
+    "Windows/load-button-1.lit",
+    "Windows/load-button-2.lit",
+    "Windows/Btn1Up.lit",
+    "Windows/Btn1Down.lit",
+    "Windows/Btn2Up.lit",
+    "Windows/Btn2Down.lit",
+    "Windows/Btn3Up.lit",
+    "Windows/Btn3Down.lit",
+    "Windows/MLBtn1Up.lit",
+    "Windows/MLBtn2Up.lit",
+    "Windows/MLBtn2Down.lit",
+    "Windows/MRBtn1Up.lit",
+    "Windows/MRBtn2Up.lit",
+    "Windows/GP-ButtonLeft.lit",
+    "Windows/GP-Button-Alpha.lit",
+    "Windows/GP-ButtonCenter.lit",
+    "Windows/GP-ButtonCenter-Alpha.lit",
+    "Windows/GP-ButtonRight.lit",
+    "Windows/button-icon-1.lit",
+    "Windows/button-icon-2.lit",
+    "Windows/button-icon-3.lit",
+    "Windows/button-icon-4.lit",
+    "Windows/button-icon-5.lit",
+    "Windows/button-icon-6.lit",
+    "Windows/button-icon-7.lit",
+    "Windows/button-icon-8.lit",
+    "Windows/Res-Magic.lit",
+    "Windows/Res-Money.lit",
+    "Windows/Res-Income.lit",
+    "Windows/Res-Payment.lit",
+    "Windows/res0.lit",
+    "Windows/res1.lit",
+    "Windows/Shadow-Empty.lit",
+    "Windows/Shadow-Unit.lit",
+    "Windows/wb1.lit",
+    "Windows/wb2.lit",
+    "Windows/wb3.lit",
+    "Windows/Swords.ugs",
+    "Windows/Way_Arrows.ugs",
+    "Windows/Clock.ugs",
+    "Windows/mb2.ugs",
+    "Windows/Bonus4.lit",
+    "Windows/Bonus5.lit",
+    "Windows/Bonus7.lit",
+    "Windows/Bonus12.lit",
+    "Windows/Bonus-2Row.lit",
+    "Windows/Bonus-InCastle.lit",
+    "Windows/HeroBonus1.lit",
+    "Windows/sign-curse.lit",
+    "Windows/army-1.lit",
+    "Windows/army-3.lit",
+    "Windows/army-5.lit",
+    "Windows/army-alpha.lit",
+    "Windows/exp.lit",
+    "Windows/exp-hole.lit",
+    "Battle/--PAR.ugs",
+    "Battle/--KUSKI.ugs",
+    "Battle/--KUSKIBIG.ugs",
     "Objects/Persones.ugs",
     "Windows/UnitFrame.lit",
     "Windows/Inventory.lit",
@@ -108,6 +210,39 @@ const WINDOWS_AHEAD: &[&str] = &[
     "Windows/TBd5_RUS.lit",
     "Windows/TBd6_RUS.lit",
 ];
+
+// Lit pictures of [`WINDOWS_AHEAD`] whose textures [`warm`] makes ahead: the path and the name
+// as [`art`] takes it.
+thread_local! {
+    static WARM: RefCell<std::collections::VecDeque<(PathBuf, String)>> = RefCell::new(Default::default());
+}
+
+/// Uploads the textures of pictures the decode store has ready, a few per frame, within
+/// `budget_ms`, so that the first use of each finds it made (see
+/// [`preload::upload_within_budget`]). Pictures not decoded yet are kept for later frames.
+pub fn warm(budget_ms: f64) {
+    // Snapshot runs make their textures on demand, as before, so their frames stay the same.
+    if std::env::var_os("RAZDOR_SNAPSHOT").is_some() {
+        return;
+    }
+    let start = std::time::Instant::now();
+    WARM.with(|w| {
+        let mut queue = std::mem::take(&mut *w.borrow_mut());
+        if queue.is_empty() {
+            return;
+        }
+        preload::upload_within_budget(
+            &mut queue,
+            |(path, _)| preload::is_ready(path),
+            |(_, rel)| {
+                let _ = art(rel, Fx::Plain);
+            },
+            || start.elapsed().as_secs_f64() * 1000.0,
+            budget_ms,
+        );
+        *w.borrow_mut() = queue;
+    });
+}
 
 // ------------------------------------------------------------------------------------------
 // Pixel transforms (pure)
@@ -329,10 +464,10 @@ fn to_texture(img: &Image) -> Option<Texture2D> {
 pub fn image(rel: &str) -> Option<Image> {
     let dir = CHROME.with(|c| c.borrow().as_ref().map(|c| c.dir.clone()))?;
     find_path(&dir, &format!("Graphics/{rel}"))
-        .and_then(|p| gfx::decode_file(&p))
+        .and_then(|p| preload::decode_shared(&p))
         .map_err(|e| razdor::diag!("Discord Times art: {rel}: {e}"))
         .ok()
-        .and_then(|mut frames| (!frames.is_empty()).then(|| frames.swap_remove(0)))
+        .and_then(|frames| frames.first().cloned())
 }
 
 /// Picture `rel` under `Graphics/` (e.g. `"Windows/Win-red.lit"`), first frame, with `fx`.
@@ -345,13 +480,13 @@ pub fn art(rel: &str, fx: Fx) -> Option<Texture2D> {
             return t.clone();
         }
         let t = find_path(&c.dir, &format!("Graphics/{rel}"))
-            .and_then(|p| gfx::decode_file(&p))
+            .and_then(|p| preload::decode_shared(&p))
             .map_err(|e| razdor::diag!("Discord Times art: {rel}: {e}"))
             .ok()
-            .and_then(|mut frames| {
-                let img = frames.get_mut(0)?;
-                transform(img, fx);
-                to_texture(img)
+            .and_then(|frames| {
+                let mut img = frames.first()?.clone();
+                transform(&mut img, fx);
+                to_texture(&img)
             });
         c.textures.entry(rel.to_string()).or_default()[fx as usize] = Some(t.clone());
         t
@@ -391,14 +526,14 @@ fn spell_layer(name: &str, minus: [i32; 3]) -> Option<Texture2D> {
             return t.clone();
         }
         let t = find_path(&c.dir, &format!("Graphics/{rel}"))
-            .and_then(|p| gfx::decode_file(&p))
+            .and_then(|p| preload::decode_shared(&p))
             .map_err(|e| razdor::diag!("Discord Times art: {rel}: {e}"))
             .ok()
-            .and_then(|mut frames| {
-                let img = frames.get_mut(0)?;
-                subtract(img, minus);
-                transform(img, Fx::Glow);
-                to_texture(img)
+            .and_then(|frames| {
+                let mut img = frames.first()?.clone();
+                subtract(&mut img, minus);
+                transform(&mut img, Fx::Glow);
+                to_texture(&img)
             });
         c.textures.entry(key).or_default()[Fx::Glow as usize] = Some(t.clone());
         t
@@ -423,13 +558,13 @@ pub fn win_adjusted(name: &str, tag: &str, adjust: impl FnOnce(&mut Image)) -> O
             return t.clone();
         }
         let t = find_path(&c.dir, &format!("Graphics/{rel}"))
-            .and_then(|p| gfx::decode_file(&p))
+            .and_then(|p| preload::decode_shared(&p))
             .map_err(|e| razdor::diag!("Discord Times art: {rel}: {e}"))
             .ok()
-            .and_then(|mut frames| {
-                let img = frames.get_mut(0)?;
-                adjust(img);
-                to_texture(img)
+            .and_then(|frames| {
+                let mut img = frames.first()?.clone();
+                adjust(&mut img);
+                to_texture(&img)
             });
         c.textures.entry(key).or_default()[Fx::Plain as usize] = Some(t.clone());
         t

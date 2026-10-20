@@ -64,12 +64,37 @@ install file ──► src/dt/gfx.rs decode_file ──► gfx::Image (RGBA, not
 - `DtArt` (`src/ui/dt_art.rs`) caches by `Key` (portrait, figure, item, terrain, object,
   building) and builds one `Atlas` for every map object and building sprite so the map
   draws in few batches.
-- Decoding ahead (commit c04fa1b): `chrome::set_install` calls `gfx::prefetch` with
-  `WINDOWS_AHEAD` (the paper, portraits and icon sheets, the load window's book, building
-  tabs) on a thread named "art ahead". `gfx::decode_file` takes a picture decoded ahead
-  from the `Ahead` map; if the game asks first it decodes itself and marks it `wanted`
-  so the thread skips it. Slow decodes are logged ("slow load") with `RAZDOR_PROFILE=1`.
-  Add a file to `WINDOWS_AHEAD` when profiling shows a window's first open decoding it.
+- **The decode store** (`src/dt/preload.rs`, `decode_shared`): every install picture is
+  decoded once and shared by `Arc` by every caller (`gfx::decode_file` is the owned form).
+  Two background workers ("art ahead") decode the queued paths in order (`preload::preload`).
+  A caller that asks for a picture a worker is decoding waits for it; one still queued is
+  taken off the queue and decoded there. Slow main-thread waits and decodes are logged
+  ("slow load") with `RAZDOR_PROFILE=1`. Snapshot runs (`RAZDOR_SNAPSHOT`) queue nothing and
+  decode on demand, so their frames do not depend on timing.
+- **What is queued:** `chrome::set_install` queues `WINDOWS_AHEAD` (the menus and the title,
+  the window frames and buttons, fonts, cursors, the battle's art and sheets, the paper,
+  portrait and icon sheets, the load window's book, building tabs). The first game queues
+  `DtArt::preload_map` once: the terrain textures, the water frames and every
+  `Graphics/Units/*.ugs` figure sheet (the install's set, not one map's). Add a file to
+  `WINDOWS_AHEAD` when profiling shows a window's first open decoding it.
+- **Textures are made on the main thread** (macroquad/OpenGL): `chrome::warm(4.0)` runs each
+  frame and uploads the lit pictures of `WINDOWS_AHEAD` (`WARM`) that the store has ready,
+  through `chrome::art(rel, Fx::Plain)`, within 4 ms (`preload::upload_within_budget`; one
+  upload per frame at least). Other `Fx` variants and the map's textures are made at first
+  use, from the decoded picture (no decode then). Snapshot runs make no early textures.
+- **The persistent picture cache** (`src/dt/picture_cache.rs`): a decoded picture's frames
+  (raw RGBA with their sizes) are kept in `<data>/razdor/cache/pictures` (next to the saves;
+  `%APPDATA%\razdor` on Windows, `~/.local/share/razdor` on Linux), one `.rzpc` file per
+  install file. The key is a hash of the file's path, size and modification time, the cache
+  format and Razdor's version: a changed file or a new release misses. A miss is decoded and
+  written by a background thread (temp file, then rename). A truncated, corrupt or stale entry
+  is ignored and rewritten. The folder is capped (1 GiB: past it nothing new is written);
+  clearing it resets everything. Off in snapshot runs and with `RAZDOR_NO_PICTURE_CACHE=1`.
+  Only data derived from the player's own install is in it: never write it into the install
+  folder or the repo.
+- **Why a picture can be decoded twice (fixed):** the chrome cache is per path and per `Fx`,
+  and decoding was per call, so a file used with two `Fx` (SteelLine) was decoded twice.
+  The decode store is keyed by path alone, so each file is decoded once.
 - Textures are created on the main thread only (macroquad/OpenGL); threads may only make
   `gfx::Image`s.
 

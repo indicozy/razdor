@@ -9,7 +9,8 @@ use std::collections::HashMap;
 
 use macroquad::prelude::*;
 
-use razdor::dt::gfx::{self, Image, ObjectSprite, ObjectSprites};
+use razdor::dt::gfx::{self, water_frame_file, Image, ObjectSprite, ObjectSprites, TERRAIN_TEXTURES, TEXTURES_DIR, WATER_FRAMES};
+use std::path::PathBuf;
 use razdor::dt::install::DtInstall;
 use razdor::dt::DtError;
 
@@ -165,6 +166,22 @@ impl DtArt {
 
     /// The blended terrain renderer over all terrain textures (`None` if none loads or the
     /// shader fails).
+    /// Queues what a map draws for the decode store ([`razdor::dt::preload`]): the terrain
+    /// textures, the water frames and every unit's figure sheet of the install. The set is the
+    /// install's, not one map's, so it is queued once; the frames come after the windows' art.
+    pub fn preload_map(&self) {
+        let mut paths: Vec<PathBuf> = TERRAIN_TEXTURES.iter().filter_map(|name| self.install.file(&format!("{TEXTURES_DIR}/{name}")).ok()).collect();
+        paths.extend((0..WATER_FRAMES).filter_map(|i| self.install.file(&water_frame_file(i)).ok()));
+        if let Ok(units) = self.install.file("Graphics/Units") {
+            if let Ok(entries) = std::fs::read_dir(units) {
+                let mut figures: Vec<PathBuf> = entries.filter_map(|e| Some(e.ok()?.path())).filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("ugs"))).collect();
+                figures.sort();
+                paths.extend(figures);
+            }
+        }
+        razdor::dt::preload::preload(paths);
+    }
+
     pub fn terrain_layer(&self) -> Option<&TerrainLayer> {
         self.terrain_layer
             .get_or_init(|| {
