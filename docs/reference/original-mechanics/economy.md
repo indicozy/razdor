@@ -91,6 +91,10 @@ runs on its first arrival on a new cell after noon (0x4a5534). In order:
    code at 0xc2502b), the deduction is `bill × 178 div 256` if the *player's* stored income is not 0,
    and `bill × 78 div 256` if it is 0. The flag and the income test read the player even while an AI
    army is paid, so the player's Rear Service also cuts AI wages (reproduce as written).
+   The 78 branch is a patch bug as the patch author describes it: the intended effect is −30% in
+   both cases, and the ×78/256 at zero income compensates another, unidentified no-income wage
+   formula of the original (OPEN_QUESTIONS.md). Razdor always uses ×178/256 (the patch author's
+   rule, the owner's decision 2026-10-20) and does not reproduce the 78 branch.
 8. Community: the global mana bill is taken from **the player's mana**, for every army's noon
    (0xc25eef). If the player's mana is then **0 or below**, it is set to 0 and a "mana short" flag is
    raised. This test runs even when the mana bill is 0, so with the shipped data the flag goes up
@@ -599,7 +603,7 @@ Razdor's code as read for this pass: `src/rules/economy.rs`, `town.rs`, `world.r
 | Wage kinds | Hero and AI leaders free, event units free, the rest recruits; AI hires kind 2 in foreign buildings | Same for the player; AI kind 2 in foreign buildings | Yes |
 | Wage formulas | Brackets and divisors as the original | §1 | Yes |
 | Corpses' wages | Not billed; may be picked for a refund (`Game::bills`, `pay_noon`) | Not billed; may still be picked for a refund | Matches |
-| Rear Service | On the whole bill at noon, truncated once, testing the paying army's stored income; not in the displayed bill; an AI army's own quartermaster cuts its wages (`rear_service`) | On the whole bill, truncated once; not in the displayed bill; tests the stored income; the *player's* flag and income also cut AI wages (bug) | Razdor fixes the original's bug (AI wages) |
+| Rear Service | On the whole bill at noon, truncated once, always ×178/256 (−30%, the patch author's rule; the code's ×78 branch at zero income is a patch bug, not reproduced); not in the displayed bill; an AI army's own quartermaster cuts its wages (`rear_service`) | On the whole bill, truncated once; ×178/256, or ×78/256 when the player's stored income is 0; not in the displayed bill; tests the stored income; the *player's* flag and income also cut AI wages (bug) | Razdor fixes the original's bug (AI wages) and always cuts ×178/256 (the patch author's rule, a deviation from the 78 branch) |
 | Short gold | Refunds full wages, cheapest first (earliest of equals), corpses included, never Elementals | Refunds full wages, cheapest first, corpses included, never Elementals | Matches |
 | Mana short | The player's mana pays every army's elemental bill; 0 or below raises the saved flag; an enough-gold noon then marks the Elementals unpaid, everyone else paid, and clears it; a short noon clears it too (`Game::mana_short`) | Mana 0 **or below** at any army's noon raises the flag; it sticks across noons; while up, enough-gold noons leave every unit's paid mark as it was (Elementals unpaid) and never clear it (bug: the clearing code is unreachable); the player's mana pays every army's elemental bill | Razdor fixes the original's bug |
 | Desertion | Short noons, `last paid + MaxTimeNotUpkeep < now` | Same | Yes |

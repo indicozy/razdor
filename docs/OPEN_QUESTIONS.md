@@ -8,6 +8,15 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **The original's no-income wage formula is not identified** (2026-10-20, from #1044). The
+  Community patch's Rear Service takes ×78/256 (−70%) of the wage bill when the player's stored
+  income is 0 (0xc250e4 → 0xc25001 skipped). The patch author says that branch compensates another
+  no-income formula of the original, which takes 70% off, so that the intended effect is −30% in
+  both cases. Razdor always cuts ×178/256 (−30%) and does not model that formula; a difftest on a
+  noon with zero income and Rear Service differs by design (`rear_service`, `economy.md` §1
+  step 7). Settled by finding the original's no-income path for wages (the code that reads the
+  stored income near 0x4b5xxx/0xc250e4) and modelling it.
+
 - **The hero's figure on a campaign's next map** (2026-10-20, with the fix for the hero's figure
   after opcode 7). Razdor carries the figure with the hero's record (`NextMap::figure`, a guess:
   the original's hand-over copies the hero's whole record, 0x4b5b64, and the figure byte is in

@@ -102,15 +102,17 @@ pub fn merchant_price(price: i32) -> i32 {
     price - price * 30 / 100
 }
 
-/// Rear Service (`AddPayment`, Community): the whole gold bill ×178/256, or ×78/256 when the
-/// player's stored income is exactly 0 (a quirk of the Community exe, kept as it is).
-pub const REAR_SERVICE: (i32, i32) = (178, 78);
+/// Rear Service (`AddPayment`): the whole gold bill ×178/256 (−30%).
+pub const REAR_SERVICE: i32 = 178;
 
-/// The gold bill as Rear Service cuts it (0xc250e4): the whole bill times 178 (or 78 when
-/// the player's stored income is 0) div 256, truncated once.
-pub fn rear_service(bill: i32, stored_income: i32) -> i32 {
-    let k = if stored_income != 0 { REAR_SERVICE.0 } else { REAR_SERVICE.1 };
-    bill * k / 256
+/// The gold bill as Rear Service cuts it: the whole bill times 178 div 256, truncated once.
+/// Rear Service is always ×178/256 (−30%): the Community patch author's intended rule (the
+/// owner's decision, 2026-10-20). The original's code takes ×78/256 (−70%) when the player's
+/// stored income is 0 (0xc250e4 → 0xc25001 skipped); the patch author says that compensates
+/// another, unidentified no-income wage formula of the original, which Razdor does not model
+/// (OPEN_QUESTIONS.md), so Razdor does not reproduce the 78 branch.
+pub fn rear_service(bill: i32) -> i32 {
+    bill * REAR_SERVICE / 256
 }
 
 /// Daily heals: a Medic in any army at midnight, the Ranger hero at noon and again when the
@@ -365,8 +367,7 @@ impl Game {
         self.gold += income;
         self.stored_income = stored;
         let (bill, mana_bill) = self.bills();
-        // Rear Service tests the stored income just rewritten.
-        self.gold -= if self.squad_has_any(&Bonus::AddPayment) { rear_service(bill, self.stored_income) } else { bill };
+        self.gold -= if self.squad_has_any(&Bonus::AddPayment) { rear_service(bill) } else { bill };
         self.pay_mana_bill(mana_bill);
         let c = self.content.clone();
         let elemental = |u: &Unit| c.paid_in_mana(u.def);
@@ -1072,8 +1073,8 @@ mod tests {
         assert_eq!(grow_mana(200, 255, 255), 255);
         assert_eq!(grow_mana(5, 5, 20), 9, "5 × √0.75 = 4.33");
         assert_eq!(grow_mana(3, 5, 0), 3, "no maximum: no growth");
-        assert_eq!(rear_service(59, 10), 41);
-        assert_eq!(rear_service(59, 0), 17);
+        assert_eq!(rear_service(59), 41);
+        assert_eq!(rear_service(0), 0);
     }
 
     #[test]

@@ -119,7 +119,8 @@ the village he stands in enters it again (`Game::reenter_building`).
 
 **Noon** (economy.md §1, `pay_noon`). Castles and forts pay their grown gold stock ×F/100, villages
 linked to his buildings pay theirs; towns are counted in the shown income but pay nothing. Then the
-gold bill (cut by Rear Service, `rear_service`) and the mana bill go out. Short of gold: the
+gold bill (cut by Rear Service, always ×178/256 whatever the income, `rear_service`; the
+original's ×78/256 at zero income is not reproduced, OPEN_QUESTIONS.md) and the mana bill go out. Short of gold: the
 cheapest units get their wage back and go unpaid, unpaid units sit out battles and leave after
 `MaxTimeNotUpkeep`. The report (`DayReport`) shows the amounts before payment; with no report the
 payment runs at once. The autosave is written as the report opens.
@@ -136,6 +137,8 @@ army.
   are still held entered it twice (5d10303).
 - *Mana timing.* Resources that the original pays at an OK must not be paid at Yes (witch, event
   results): see events.md §7.2.
+- *Rear Service at zero income.* Razdor cuts ×178/256 always (the patch author's rule); the original
+  cuts ×78/256 at zero income, which Razdor does not reproduce. Do not add the 78 branch back.
 - *Wage shown vs paid.* The hire tab and the noon report show the bill without Rear Service; the
   payment applies it. The class card in the promotion tree shows the type's recruit wage
   (555fc8b).

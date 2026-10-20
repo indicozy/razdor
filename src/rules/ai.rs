@@ -3489,7 +3489,7 @@ impl Game {
         let c = self.content.clone();
         let mut bill = self.army_totals(i).wages;
         if super::economy::army_has(&c, &self.world.armies[i], &Bonus::AddPayment) {
-            bill = rear_service(bill, self.world.armies[i].mind.income);
+            bill = rear_service(bill);
         }
         // The mana bill is one global in the original, rebuilt by every army's totals; this
         // army's own (dormant: no shipped unit is an Elemental).

@@ -878,15 +878,17 @@ mod tests {
         g.squad[4].hp = 0; // the militia is a corpse: not billed
         g.gold = 10;
         assert_eq!(g.daily_wages(), 47);
-        // No income: 47 × 78 div 256 = 14 is deducted, 10 − 14 = −4. The corpse's full 6 comes
-        // back first, which is enough.
+        // Rear Service is always × 178 div 256 (the patch author's intended rule, 2026-10-20): 47 × 178 div
+        // 256 = 32 is deducted, 10 − 32 = −22. The corpse's 6 comes back first (−16), then the
+        // archer's 22 (+6): enough.
         g.pass_time(3.0 * 60.0, &mut Vec::new());
         assert_eq!(g.gold, 0);
-        assert_eq!(g.squad.iter().map(|u| u.unpaid).collect::<Vec<_>>(), [false, false, false, false, true]);
-        assert_eq!(g.mana, 80, "the golem is paid in mana");
-        // 0 − 14: the corpse (6), then the archer (22): the golem is never refunded.
-        g.pass_time(24.0 * 60.0, &mut Vec::new());
         assert_eq!(g.squad.iter().map(|u| u.unpaid).collect::<Vec<_>>(), [false, false, false, true, true]);
+        assert_eq!(g.mana, 80, "the golem is paid in mana");
+        // 0 − 32: the corpse (6), the archer (22), then the quartermaster (25): the golem is never
+        // refunded.
+        g.pass_time(24.0 * 60.0, &mut Vec::new());
+        assert_eq!(g.squad.iter().map(|u| u.unpaid).collect::<Vec<_>>(), [false, false, true, true, true]);
     }
 
     #[test]
@@ -948,14 +950,15 @@ mod tests {
         // The fort's nominal income is stored: 59 × 178 div 256 = 41 (per unit it would be 40).
         g.pass_time(3.0 * 60.0, &mut Vec::new());
         assert_eq!((g.gold, g.stored_income), (959, 10));
-        // Without it the stored income is 0: 59 × 78 div 256 = 17.
+        // Without it the stored income is 0. Rear Service stays × 178 div 256 = 41 (the patch
+        // author's intended −30%; the original's × 78 branch at zero income is not reproduced).
         g.world.locations[0].owner = crate::rules::world::Owner::Neutral;
         g.pass_time(24.0 * 60.0, &mut Vec::new());
-        assert_eq!((g.gold, g.stored_income), (942, 0));
+        assert_eq!((g.gold, g.stored_income), (918, 0));
         // A dead quartermaster still counts.
         g.squad[1].hp = 0;
         g.pass_time(24.0 * 60.0, &mut Vec::new());
-        assert_eq!(g.gold, 942 - 34 * 78 / 256);
+        assert_eq!(g.gold, 918 - 34 * 178 / 256);
     }
 
     #[test]

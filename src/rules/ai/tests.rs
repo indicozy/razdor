@@ -1149,12 +1149,12 @@ fn an_armys_rear_service_is_its_own() {
     g.world.armies[0].gold = 1000;
     g.ai_noon(0, now);
     assert_eq!(g.world.armies[0].gold, 1000 - bill);
-    // Its own quartermaster cuts them (no income: × 78 div 256).
+    // Its own quartermaster cuts them (× 178 div 256, whatever the army's income).
     g.world.armies[0].troops[1].unit = UnitId(8);
     let bill = g.army_totals(0).wages;
     g.world.armies[0].gold = 1000;
     g.ai_noon(0, now + MINUTES_PER_DAY as f64);
-    assert_eq!(g.world.armies[0].gold, 1000 - rear_service(bill, 0));
+    assert_eq!(g.world.armies[0].gold, 1000 - rear_service(bill));
 }
 
 #[test]
