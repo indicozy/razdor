@@ -139,8 +139,10 @@ army.
   results): see events.md §7.2.
 - *Rear Service at zero income.* Razdor cuts ×178/256 always (the patch author's rule); the original
   cuts ×78/256 at zero income, which Razdor does not reproduce. Do not add the 78 branch back.
-- *Wage shown vs paid.* The hire tab and the noon report show the bill without Rear Service; the
-  payment applies it. The class card in the promotion tree shows the type's recruit wage
+- *Wage shown vs paid.* Razdor's deviation (the owner's decision, 2026-10-20): the bottom bar, the
+  hire tab, the hero window and the noon report show the bill after Rear Service, the figure
+  `Game::daily_wages` returns; the payment takes that same figure. The original shows the bill
+  without it. The class card in the promotion tree shows the type's recruit wage
   (555fc8b).
 - *Random order.* Every draw (market, barracks, offers) happens in the original's order; adding a
   draw anywhere shifts every later roll and breaks the difftests.

@@ -155,7 +155,7 @@ pub struct DayReport {
     /// The nominal income of the player's towns, castles and forts ×F/100 (not what the
     /// noon pays: economy.md §9).
     pub income: i32,
-    /// The gold wage bill without Rear Service, and the mana paid to elementals.
+    /// The gold wage bill after Rear Service (the one paid, shown), and the mana paid to elementals.
     pub wages: i32,
     pub mana_wages: i32,
     /// Units that could not be paid: they sit out battles until paid.
@@ -2047,11 +2047,13 @@ impl Game {
     /// a nominal income the noon report opens and the payment ([`Game::pay_noon`]) runs when
     /// it is closed, after which a Ranger heals another 20%; else the payment runs at once
     /// and no report is shown. The report shows the gold and mana before the payment, the
-    /// nominal income and the bill without Rear Service.
+    /// nominal income and the bill after Rear Service (the one paid). Razdor's deviation (the
+    /// owner's decision, 2026-10-20): the original shows the bill without Rear Service.
     fn new_day(&mut self, day: u64) -> Option<DayReport> {
         self.ranger_heal(super::economy::RANGER_PERCENT);
         let (income, wages) = (self.daily_income(), self.daily_wages());
-        let shown = wages != 0 || income != 0;
+        // The report opens on the uncut bill (a Rear Service cut to 0 does not hide it).
+        let shown = self.bills().0 != 0 || income != 0;
         let (gold, mana_total) = (self.gold, self.mana);
         let pay = self.pay_noon();
         if shown {

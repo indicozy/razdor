@@ -289,7 +289,8 @@ impl Game {
 
     /// Wage of unit `u` for a day, in its currency: kind 1 by the cost brackets, kind 2
     /// `Cost / CostMercenaryDiv`, kinds 0 and 3 nothing. A kind-1 elemental is paid in mana
-    /// (Community). This is the full wage: Rear Service cuts only the whole bill at noon.
+    /// (Community). This is the full wage: Rear Service cuts only the whole bill (see
+    /// [`Game::daily_wages`]).
     pub fn unit_wage(&self, u: &Unit) -> Price {
         let w = self.content.wage_for(u.def, u.wage_kind);
         if u.wage_kind == WageKind::Recruit && self.content.paid_in_mana(u.def) {
@@ -307,7 +308,7 @@ impl Game {
 
     /// The army's gold and mana bills (0x4a16d4): the wages of its living units; a corpse
     /// goes to the resurrection bill instead. Garrisons are never paid.
-    fn bills(&self) -> (i32, i32) {
+    pub(crate) fn bills(&self) -> (i32, i32) {
         let (mut gold, mut mana) = (0, 0);
         for u in self.squad.iter().filter(|u| u.alive()) {
             let p = self.unit_wage(u);
@@ -319,9 +320,13 @@ impl Game {
         (gold, mana)
     }
 
-    /// The gold wage bill, as the hire tab and the noon report show it (no Rear Service).
+    /// The gold wage bill as the bottom bar, the hire tab, the hero window and the noon report
+    /// show it, and as the noon payment takes it: the gold bill after Rear Service. Razdor's
+    /// deviation (the owner's decision, 2026-10-20): the original shows the bill without Rear
+    /// Service; the payment and every display read this one function, so they cannot drift.
     pub fn daily_wages(&self) -> i32 {
-        self.bills().0
+        let bill = self.bills().0;
+        if self.squad_has_any(&Bonus::AddPayment) { rear_service(bill) } else { bill }
     }
 
     /// Mana wages due at the next noon (elementals).
@@ -366,8 +371,8 @@ impl Game {
         }
         self.gold += income;
         self.stored_income = stored;
-        let (bill, mana_bill) = self.bills();
-        self.gold -= if self.squad_has_any(&Bonus::AddPayment) { rear_service(bill) } else { bill };
+        let (_, mana_bill) = self.bills();
+        self.gold -= self.daily_wages();
         self.pay_mana_bill(mana_bill);
         let c = self.content.clone();
         let elemental = |u: &Unit| c.paid_in_mana(u.def);
@@ -809,7 +814,8 @@ impl Game {
         match o {
             VillageOffer::Innkeeper => {
                 let unpaid = self.squad.iter().filter(|u| u.unpaid).count();
-                unpaid >= n / 2 && self.gold - self.daily_wages() + self.stored_income < 0
+                // The uncut bill, as before the display change (kept: not the payment's figure).
+                unpaid >= n / 2 && self.gold - self.bills().0 + self.stored_income < 0
             }
             VillageOffer::Priest => {
                 // The original's second test counts the *living* units (HP above 0), not the

@@ -877,7 +877,8 @@ mod tests {
         g.mana = 100;
         g.squad[4].hp = 0; // the militia is a corpse: not billed
         g.gold = 10;
-        assert_eq!(g.daily_wages(), 47);
+        // The shown bill is the one Rear Service cuts: 47 × 178 div 256.
+        assert_eq!(g.daily_wages(), 47 * 178 / 256);
         // Rear Service is always × 178 div 256 (the patch author's intended rule, 2026-10-20): 47 × 178 div
         // 256 = 32 is deducted, 10 − 32 = −22. The corpse's 6 comes back first (−16), then the
         // archer's 22 (+6): enough.
@@ -945,8 +946,8 @@ mod tests {
         let mut g = start(&s);
         g.first_noon_today();
         g.mana = 1000;
-        // The shown wages are the full bill.
-        assert_eq!((g.wage(1), g.daily_wages()), (25, 59));
+        // The shown wages are the bill after Rear Service (Razdor's deviation): 59 × 178 div 256.
+        assert_eq!((g.wage(1), g.daily_wages()), (25, 41));
         // The fort's nominal income is stored: 59 × 178 div 256 = 41 (per unit it would be 40).
         g.pass_time(3.0 * 60.0, &mut Vec::new());
         assert_eq!((g.gold, g.stored_income), (959, 10));
@@ -959,6 +960,30 @@ mod tests {
         g.squad[1].hp = 0;
         g.pass_time(24.0 * 60.0, &mut Vec::new());
         assert_eq!(g.gold, 918 - 34 * 178 / 256);
+    }
+
+    /// Razdor's deviation (the owner's decision, 2026-10-20): the wage bill the screens and the
+    /// noon report show is the bill after Rear Service, the one the payment takes. A bill of 130
+    /// (two Quartermasters 50, two archers 44, six militia 36) shows 130 × 178 div 256 = 90;
+    /// without the bonus (four archers, seven militia) it shows 130.
+    #[test]
+    fn the_shown_bill_is_the_one_rear_service_cuts() {
+        let mut s = map();
+        s.header.heroes[0] = hero(2, 2, 1000, &[troop(10, 0, 2), troop(5, 0, 2), troop(4, 0, 6)]);
+        let mut g = start(&s);
+        g.first_noon_today();
+        assert_eq!(g.daily_wages(), 90, "130 × 178 div 256");
+        let mut events = Vec::new();
+        g.pass_time(3.0 * 60.0, &mut events);
+        let Event::NewDay(r) = &events[0] else { panic!("{events:?}") };
+        assert_eq!(r.wages, 90, "the report shows the cut bill too");
+        assert_eq!(g.gold, 1000 - 90, "and the payment takes it");
+
+        let mut s = map();
+        s.header.heroes[0] = hero(2, 2, 1000, &[troop(5, 0, 4), troop(4, 0, 7)]);
+        let mut g = start(&s);
+        g.first_noon_today();
+        assert_eq!(g.daily_wages(), 130, "no Rear Service: the whole bill");
     }
 
     #[test]
