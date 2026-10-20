@@ -15,6 +15,7 @@ use super::units::{SpellSlot, SPELL_SLOTS};
 use super::game::{troop_unit, unit_into_troop, Event, Foe, Game};
 use super::town::ServiceError;
 use super::units::Unit;
+use super::ai::troop_max_hp;
 use super::world::{Army, EventInfo, Troop};
 use crate::dt::dtm::EventKind;
 
@@ -821,22 +822,32 @@ impl EventWorld for Game {
     }
 
     /// The unit keeps its level (and, in the player's army, its XP, items and HP fraction).
+    /// Community opcode 7 writes only the unit's type (`unit +0 = +0x59`, fragments
+    /// c27877–c28043): its HP is not touched, so an unhurt unit stays unhurt at the new
+    /// type's maximum, and a wounded one keeps its HP number ([`hp_after_type_change`]).
     fn replace_unit(&mut self, holder: Holder, unit: u8, with: u8) {
         let id = UnitId(with as u32);
-        if self.content.try_unit(id).is_none() {
+        let c = self.content.clone();
+        if c.try_unit(id).is_none() {
             return;
         }
         if holder == Holder::Player {
-            let c = self.content.clone();
             if let Some(u) = self.squad.get_mut(unit as usize) {
-                let (hp, max) = (u.hp, u.max_hp(&c).max(1));
+                let old_max = u.max_hp(&c);
                 u.def = id;
                 if u.alive() {
-                    u.hp = (hp * u.max_hp(&c) / max).max(1);
+                    u.hp = hp_after_type_change(u.hp, old_max, u.max_hp(&c));
                 }
             }
         } else if let Some(t) = self.troops_of(holder).and_then(|t| t.get_mut(unit as usize)) {
+            // A troop records the HP it lacks (`hurt`), so its HP is its maximum minus that.
+            let old_max = troop_max_hp(&c, t);
+            let hp = old_max - t.hurt;
             t.unit = id;
+            if t.alive() {
+                let new_max = troop_max_hp(&c, t);
+                t.hurt = new_max - hp_after_type_change(hp, old_max, new_max);
+            }
         }
     }
 
@@ -1067,6 +1078,18 @@ fn army_units(a: &Army) -> Vec<UnitRecord> {
 
 /// Search limit of the path to an AI army's scripted target.
 const AI_TARGET_NODES: usize = 4000;
+
+/// The HP a unit has after its type changes to one of maximum `new_max` (opcode 7 keeps the HP
+/// number, 0xc27877–c28043). Unhurt (`hp` at its `old_max`) stays unhurt at the new maximum;
+/// a wounded unit keeps its HP number, which at or above the new maximum counts as unhurt
+/// (never above it). At least 1 HP.
+fn hp_after_type_change(hp: i32, old_max: i32, new_max: i32) -> i32 {
+    if hp >= old_max {
+        new_max
+    } else {
+        hp.min(new_max).max(1)
+    }
+}
 
 /// What the next map of a campaign starts with ([`Game::next_map`]): the hand-over of the
 /// original (0x4b5b64). It holds all the old map could hand over; the **next** map's header
@@ -1663,6 +1686,58 @@ mod tests {
         assert_eq!(g.step_time((2, 2), (3, 2)), 25.0);
         g.set_army_speed(Holder::Player, -3);
         assert_eq!((g.hero_speed(), g.step_time((2, 2), (3, 2))), (8, 40.0));
+    }
+
+    #[test]
+    fn opcode_7_keeps_the_hp_number_and_an_unhurt_unit_stays_unhurt() {
+        // Community opcode 7 writes only the unit's type (unit +0 = +0x59, c27877–c28043): the
+        // HP is not touched, so an unhurt unit stays unhurt at the new maximum (-1 in the
+        // original, mechanics magic-items §4.1) and a wounded one keeps its HP number.
+        use crate::rules::events::EventWorld as _;
+        let mut g = start(&world(vec![]));
+        let c = g.content.clone();
+        let old = g.squad[0].max_hp(&c);
+        g.squad[0].hp = old;
+        g.replace_unit(Holder::Player, 0, 3);
+        assert_eq!(g.squad[0].hp, g.squad[0].max_hp(&c), "unhurt before, unhurt after");
+        g.squad[0].hp = 50;
+        g.replace_unit(Holder::Player, 0, 2);
+        let new = g.squad[0].max_hp(&c);
+        assert_eq!(g.squad[0].hp, 50.min(new), "the wounded keep their number, never above the maximum");
+    }
+
+    #[test]
+    fn the_hp_after_a_type_change_is_the_number_kept_or_unhurt() {
+        // An 80/80 Knight becomes a 120 maximum: full. A wounded 50/80 keeps 50 of 120.
+        assert_eq!(hp_after_type_change(80, 80, 120), 120);
+        assert_eq!(hp_after_type_change(50, 80, 120), 50);
+        // At or above the new maximum a wounded unit counts as unhurt; never above it.
+        assert_eq!(hp_after_type_change(70, 80, 60), 60);
+        assert_eq!(hp_after_type_change(90, 80, 60), 60, "above its old maximum: unhurt");
+        assert_eq!(hp_after_type_change(50, 80, 30), 30);
+        assert_eq!(hp_after_type_change(1, 80, 0), 1, "at least 1 HP");
+    }
+
+    #[test]
+    fn a_troops_wounds_follow_the_type_change_as_the_hero_s() {
+        // A troop records the HP it lacks (`hurt`): unhurt stays unhurt, a wounded one keeps
+        // its HP number.
+        use crate::rules::events::EventWorld as _;
+        let mut s = world(vec![]);
+        s.armies = vec![army(3, 10, 8, -2, &[troop(4, 0, 2)])];
+        let mut g = start(&s);
+        let c = g.content.clone();
+        let a = g.world.armies.iter().position(|a| a.id == 3).unwrap();
+        g.world.armies[a].troops[0].hurt = 0;
+        g.replace_unit(Holder::Army(3), 0, 3);
+        assert_eq!(g.world.armies[a].troops[0].hurt, 0, "unhurt stays unhurt");
+        g.world.armies[a].troops[0].hurt = 10;
+        let t = &g.world.armies[a].troops[0];
+        let hp = crate::rules::ai::troop_max_hp(&c, t) - t.hurt;
+        g.replace_unit(Holder::Army(3), 0, 4);
+        let t = &g.world.armies[a].troops[0];
+        let max = crate::rules::ai::troop_max_hp(&c, t);
+        assert_eq!(max - t.hurt, hp.min(max).max(1), "the HP number is kept, never above the maximum");
     }
 
     #[test]
