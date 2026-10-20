@@ -178,12 +178,14 @@ pub fn grid_press(selected: Option<usize>, pressed: Option<usize>) -> GridPress 
 }
 
 /// The press as the setting `controls` has it. With [`Controls::Drag`] (Razdor's choice, the
-/// owner's decision) a press never moves a unit: a unit pressed is selected (the selected
-/// one stays so) and an empty cell clears the selection, where the original swaps or slides
-/// on the second press (0x4c346c, 0x4c653c) or deselects.
+/// owner's decision) a press never moves a unit: a unit pressed is selected, the selected one
+/// is deselected again (the original's deselection, 0x4c346c, 0x4c653c, 0x4c6f50: the
+/// building window has no other way back to the town's menu with a full formation), and an
+/// empty cell clears the selection, where the original swaps or slides on the second press.
 pub fn grid_press_in(controls: Controls, selected: Option<usize>, pressed: Option<usize>) -> GridPress {
     match (controls, pressed) {
         (Controls::Original, _) => grid_press(selected, pressed),
+        (Controls::Drag, Some(p)) if selected == Some(p) => GridPress::Deselect,
         (Controls::Drag, Some(p)) => GridPress::Select(p),
         (Controls::Drag, None) => GridPress::Nothing,
     }
@@ -233,8 +235,9 @@ mod tests {
         assert_eq!(grid_press_in(Drag, None, Some(3)), GridPress::Select(3));
         assert_eq!(grid_press_in(Drag, Some(3), Some(5)), GridPress::Select(5));
         assert_eq!(grid_press_in(Drag, Some(0), Some(5)), GridPress::Select(5));
-        // The selected unit pressed again stays selected (no deselection).
-        assert_eq!(grid_press_in(Drag, Some(3), Some(3)), GridPress::Select(3));
+        // The selected unit pressed again is deselected (0x4c346c, 0x4c6f50), the hero included.
+        assert_eq!(grid_press_in(Drag, Some(3), Some(3)), GridPress::Deselect);
+        assert_eq!(grid_press_in(Drag, Some(0), Some(0)), GridPress::Deselect);
         // An empty cell: no slide, nothing selected.
         assert_eq!(grid_press_in(Drag, Some(4), None), GridPress::Nothing);
         assert_eq!(grid_press_in(Drag, None, None), GridPress::Nothing);

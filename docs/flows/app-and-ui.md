@@ -232,8 +232,9 @@ sounds» (`Audio::new`) and «impossible difficulty» (the content's difficulty 
 `main_menu::apply_options` → `unit_drag::set_controls`) is a Razdor setting that does not
 default to the original (the owner's decision after a player's report, 2026-10-17):
 «Перетаскивание», the default also for older files, makes a press on a card in the army
-window (`items_view::squad`), the building window's hero grid and the garrison tab only select
-(`unit_drag::grid_press_in`, `building_view::garrison_click`); units move by dragging
+window (`items_view::squad`), the building window's hero grid and the garrison tab only select,
+or deselect the selected unit pressed again, as the original does (`unit_drag::grid_press_in`,
+`building_view::garrison_click`); units move by dragging
 (`unit_drag::update`, `unit_drag::follow`, the garrison's `building_view::garrison_act`) and
 the card hints say "click to select" (`items_view::pointed_line`). «Как в оригинале» keeps the
 original's press to pick, press to move (interface.md §9.6) with dragging on top. Battle is

@@ -1123,9 +1123,13 @@ fn garrison(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
             tooltip_later(&hover);
             return;
         }
-        match garrison_click(controls, top, bottom) {
+        match garrison_click(controls, sel, top, bottom) {
             GarrisonClick::Select(s) => {
                 view.garrison_sel = Some(s);
+                start_garrison_drag(&guards, &squad, s, &c);
+            }
+            GarrisonClick::Deselect(s) => {
+                view.garrison_sel = None;
                 start_garrison_drag(&guards, &squad, s, &c);
             }
             GarrisonClick::Clear => view.garrison_sel = None,
@@ -1147,6 +1151,8 @@ fn garrison(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
 enum GarrisonClick {
     /// Dragging only: the unit pressed (a garrison unit, its index) is selected.
     Select((bool, usize)),
+    /// Dragging only: the selected unit pressed again is deselected (0x4c6f50).
+    Deselect((bool, usize)),
     /// Dragging only: an empty cell clears the selection.
     Clear,
     /// As in the original: the press selects, swaps or moves ([`garrison_act`]).
@@ -1154,19 +1160,24 @@ enum GarrisonClick {
     Nothing,
 }
 
-/// The press on the garrison tab over `top` (the garrison's grid) or `bottom` (the hero's).
-/// With «Расстановка армии: Перетаскивание» (Razdor's default, the owner's decision) a press
-/// only selects and units move by dragging; the original's second press swaps or moves
-/// (0x4c653c, 0x4c6f50).
-fn garrison_click(controls: super::unit_drag::Controls, top: Option<Hit>, bottom: Option<Hit>) -> GarrisonClick {
+/// The press on the garrison tab over `top` (the garrison's grid) or `bottom` (the hero's),
+/// with `sel` selected. With «Расстановка армии: Перетаскивание» (Razdor's default, the owner's
+/// decision) a press only selects, or deselects the selected unit, and units move by dragging;
+/// the original's second press swaps or moves (0x4c653c, 0x4c6f50).
+fn garrison_click(controls: super::unit_drag::Controls, sel: Option<(bool, usize)>, top: Option<Hit>, bottom: Option<Hit>) -> GarrisonClick {
     if controls == super::unit_drag::Controls::Original {
         return GarrisonClick::Act;
     }
-    match (top, bottom) {
-        (Some(Hit::Unit(j)), _) => GarrisonClick::Select((true, j)),
-        (_, Some(Hit::Unit(i))) => GarrisonClick::Select((false, i)),
-        (Some(Hit::Cell(_)), _) | (_, Some(Hit::Cell(_))) => GarrisonClick::Clear,
-        (None, None) => GarrisonClick::Nothing,
+    let unit = match (top, bottom) {
+        (Some(Hit::Unit(j)), _) => Some((true, j)),
+        (_, Some(Hit::Unit(i))) => Some((false, i)),
+        _ => None,
+    };
+    match (unit, top, bottom) {
+        (Some(s), _, _) if sel == Some(s) => GarrisonClick::Deselect(s),
+        (Some(s), _, _) => GarrisonClick::Select(s),
+        (None, Some(Hit::Cell(_)), _) | (None, _, Some(Hit::Cell(_))) => GarrisonClick::Clear,
+        (None, _, _) => GarrisonClick::Nothing,
     }
 }
 
@@ -2330,13 +2341,25 @@ mod tests {
         use super::{garrison_click, GarrisonClick, Hit};
         use crate::ui::unit_drag::Controls::{Drag, Original};
         let cell = Hit::Cell(Slot { row: Row::Front, col: 0 });
-        assert_eq!(garrison_click(Drag, Some(Hit::Unit(2)), None), GarrisonClick::Select((true, 2)));
-        assert_eq!(garrison_click(Drag, None, Some(Hit::Unit(0))), GarrisonClick::Select((false, 0)));
-        assert_eq!(garrison_click(Drag, Some(cell), None), GarrisonClick::Clear);
-        assert_eq!(garrison_click(Drag, None, Some(cell)), GarrisonClick::Clear);
-        assert_eq!(garrison_click(Drag, None, None), GarrisonClick::Nothing);
-        assert_eq!(garrison_click(Original, Some(Hit::Unit(2)), None), GarrisonClick::Act);
-        assert_eq!(garrison_click(Original, None, Some(cell)), GarrisonClick::Act);
+        assert_eq!(garrison_click(Drag, None, Some(Hit::Unit(2)), None), GarrisonClick::Select((true, 2)));
+        assert_eq!(garrison_click(Drag, None, None, Some(Hit::Unit(0))), GarrisonClick::Select((false, 0)));
+        assert_eq!(garrison_click(Drag, None, Some(cell), None), GarrisonClick::Clear);
+        assert_eq!(garrison_click(Drag, None, None, Some(cell)), GarrisonClick::Clear);
+        assert_eq!(garrison_click(Drag, None, None, None), GarrisonClick::Nothing);
+        assert_eq!(garrison_click(Original, None, Some(Hit::Unit(2)), None), GarrisonClick::Act);
+        assert_eq!(garrison_click(Original, None, None, Some(cell)), GarrisonClick::Act);
+    }
+
+    /// The selected unit pressed again is deselected in both grids (0x4c6f50, 0x4c653c), the
+    /// hero's included; another unit pressed while one is selected is selected instead.
+    #[test]
+    fn a_selected_unit_pressed_again_is_deselected() {
+        use super::{garrison_click, GarrisonClick, Hit};
+        use crate::ui::unit_drag::Controls::Drag;
+        assert_eq!(garrison_click(Drag, Some((true, 2)), Some(Hit::Unit(2)), None), GarrisonClick::Deselect((true, 2)));
+        assert_eq!(garrison_click(Drag, Some((false, 0)), None, Some(Hit::Unit(0))), GarrisonClick::Deselect((false, 0)));
+        assert_eq!(garrison_click(Drag, Some((true, 2)), Some(Hit::Unit(3)), None), GarrisonClick::Select((true, 3)));
+        assert_eq!(garrison_click(Drag, Some((false, 4)), None, Some(Hit::Unit(0))), GarrisonClick::Select((false, 0)));
     }
 
     use super::{market_list_buttons, next_pick, ListButton, offer_picture, recruit_x, screen_line, stock_caption, stock_picture};
