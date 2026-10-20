@@ -2766,6 +2766,62 @@ mod real_maps {
         }
     }
 
+    /// Reads every message window that holds the scan (OK), as the player does.
+    fn close_windows(g: &mut Game) {
+        for _ in 0..20 {
+            if !g.script().unwrap().holds_window() {
+                break;
+            }
+            let _ = g.event_window_closed();
+        }
+        let _ = g.drain_events();
+    }
+
+    /// Устье Трейна, the walk across the bridge (events.md §2 step 3, world.md §2 steps 3–4):
+    /// the bridge's cells (31, 50) → (32, 51) → (33, 52) are the building he is on for events
+    /// on every step, so event 66 ("- Проверка на меч", +DelSword, silent) runs on the step onto
+    /// (32, 51), and the walk goes on. (The fight that event 78 needs, with army 19, is not
+    /// scripted here: the army is inactive until the church's events of the town chain.)
+    #[test]
+    fn a_walk_across_a_bridge_runs_its_events_without_stopping_the_walk() {
+        let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+        let dt = DtInstall::load(std::path::Path::new(&dir)).expect("install loads");
+        let c = Arc::new(Content::from_dt(&dt));
+        let s = dt.maps.iter().find(|m| m.name == "Устье Трейна").unwrap().load().unwrap();
+        for worn in [false, true] {
+            let mut g = Game::from_scenario(c.clone(), &s, HeroClass::Knight);
+            let _ = g.drain_events();
+            if worn {
+                let cells = crate::rules::items::SLOTS;
+                *g.squad[0].items.iter_mut().take(cells).find(|i| i.is_none()).unwrap() = Some(ItemId(2));
+            } else {
+                EventWorld::give_item(&mut g, 2);
+            }
+            g.teleport_player(30, 49);
+            close_windows(&mut g);
+            assert!(g.plan((33, 52)).contains(&(32, 51)), "the route crosses the bridge");
+            assert!(g.set_destination((33, 52)));
+            let mut events = Vec::new();
+            for _ in 0..400_000 {
+                if !g.moving() {
+                    break;
+                }
+                events.extend(g.tick(0.05));
+            }
+            assert_eq!(g.tile(), (33, 52), "the walk goes on past the bridge's cell (32, 51)");
+            assert!(!events.iter().any(Event::needs_reading), "event 66 is silent: no window stops the walk");
+            assert!(g.script().unwrap().flag("DelSword"), "event 66 ran on the step onto the bridge (worn: {worn})");
+            assert_eq!(g.script().unwrap().times_fired(66), 1);
+            assert!(g.location.is_none(), "a bridge is never entered");
+
+            // The sword is still his: nothing takes it on the way (event 78 needs the fight with
+            // Сэлдом, army 19, which is inactive until the church's events bring him on the map).
+            let (pack, worn_items) = EventWorld::player_items(&g);
+            assert!(pack.contains(&2) || worn_items.contains(&2), "the sword is still his");
+            assert_eq!(g.script().unwrap().times_fired(78), 0);
+        }
+    }
+
     #[test]
     fn rk1_opening_and_first_buildings_for_every_class() {
         let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };

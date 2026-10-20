@@ -232,8 +232,9 @@ pub struct Game {
     pub world: World,
     /// Location the party is standing on, if any.
     pub location: Option<usize>,
-    /// The bridge his walk ended on: a bridge is never entered (no window, `location` stays
-    /// none), but its local events run for him as the building he is on (world.md §7.2).
+    /// The bridge he stands on, for events: a bridge is never entered (no window, `location`
+    /// stays none), but its local events run for him as the building he is on (world.md §7.2).
+    /// Set on every step ([`Game::stand_on_bridge`]).
     #[serde(default)]
     pub bridge_stood_on: Option<usize>,
     pub foe: Option<Foe>,
@@ -1483,6 +1484,7 @@ impl Game {
         self.look_around();
         // His facing stays the step's direction until the next one (0x4ae8e0).
         self.facing = Some((next.0 - from.0, next.1 - from.1));
+        self.stand_on_bridge(next);
         self.pass_time_walking(minutes, from, events);
         // His step plays over the window its time opened (an event that moved him meanwhile
         // drops it: drawn where he is).
@@ -1522,9 +1524,25 @@ impl Game {
         self.talk_to = None;
         let here = self.tile();
         self.move_to_cell(here, here);
+        self.stand_on_bridge(here);
         if let Some(l) = self.location.filter(|&l| self.click_buildings.0 == Some(l)) {
             self.waiting_entry = Some(l);
         }
+    }
+
+    /// The bridge he stands on counts as the building he is on for events, never as entered
+    /// (world.md §7.2: "a bridge counts as the building the hero is on for events but never as
+    /// entered"; no window opens). It is set on every step, before the step's time and event
+    /// scan (0x497c68 sets the cell, then 0x4abfbc scans), so a walk across a bridge runs its
+    /// local events on that step, and a walk that ends on it has run them already. Not for the
+    /// building he was in when his move began (0x4ed434, written at the move's start by 0x4b84f4
+    /// and at a map click by 0x4cc42b): [`Game::click_buildings`] `.1`. A walk over the bridge's
+    /// other cells keeps the same place, so [`EventEngine::tick`] does not visit it again.
+    pub(crate) fn stand_on_bridge(&mut self, cell: Tile) {
+        self.bridge_stood_on = self
+            .world
+            .location_covering(cell)
+            .filter(|&b| self.world.locations[b].kind.is_bridge() && Some(b) != self.click_buildings.1);
     }
 
     /// The end of a walk (0x4ae5d8): he stops on his cell, which counts as arriving on it
@@ -1538,15 +1556,8 @@ impl Game {
         let here = self.tile();
         let before = self.location;
         self.move_to_cell(here, here);
-        let Some(l) = self.location else {
-            // A walk that ends on a bridge enters it for its events, never for a window
-            // (world.md §7.2: "a bridge counts as the building the hero is on for events").
-            if let Some(b) = self.world.location_covering(here).filter(|&b| self.world.locations[b].kind.is_bridge()) {
-                self.bridge_stood_on = Some(b);
-                events.extend(self.run_script());
-            }
-            return;
-        };
+        self.stand_on_bridge(here);
+        let Some(l) = self.location else { return };
         if self.world.locations[l].kind == LocationKind::Obelisk {
             return;
         }
@@ -3767,6 +3778,39 @@ mod tests {
         assert!(g.set_destination((5, 2)));
         let events = walk_until_stopped(&mut g);
         assert_eq!((events.last(), g.tile(), g.foe), (Some(&Event::Encounter(0)), (4, 2), Some(Foe::Army(0))), "a friend too, as the original");
+    }
+
+    #[test]
+    fn a_bridge_is_the_building_he_is_on_for_events_on_every_step_but_not_the_one_his_move_began_on() {
+        // A one-cell bridge at (5, 2) on the strip (world.md §7.2). A walk onto it sets
+        // `bridge_stood_on` on that step, before the step's scan (0x497c68, 0x4abfbc), and
+        // clears it on the way off; a walk that starts on it does not (0x4ed434).
+        use super::super::events::EventWorld;
+        let walk = |from: (i32, i32), goal: (i32, i32)| {
+            let mut s = strip();
+            s.buildings = vec![building(BuildingType::StoneBridge, 5, 2, (1, 1))];
+            let mut g = start(&s);
+            EventWorld::teleport_player(&mut g, from.0, from.1);
+            let _ = g.drain_events();
+            assert!(g.set_destination(goal), "a route to {goal:?}");
+            let mut seen = Vec::new();
+            for _ in 0..10_000 {
+                if !g.moving() {
+                    break;
+                }
+                let _ = g.tick(0.05);
+                seen.push((g.tile(), g.bridge_stood_on));
+            }
+            (g, seen)
+        };
+        let (g, seen) = walk((3, 2), (8, 2));
+        assert_eq!(g.tile(), (8, 2));
+        assert!(seen.iter().any(|&(t, b)| t == (5, 2) && b == Some(0)), "on the bridge: its events are his");
+        assert!(seen.iter().all(|&(t, b)| b.is_none() || t == (5, 2)), "only while on the bridge: {seen:?}");
+        assert_eq!(g.bridge_stood_on, None, "off it again");
+        assert!(g.location.is_none(), "a bridge is never entered");
+        let (_, seen) = walk((5, 2), (8, 2));
+        assert!(seen.iter().all(|&(_, b)| b.is_none()), "the building his move began on is not checked again: {seen:?}");
     }
 
     #[test]
