@@ -1609,9 +1609,10 @@ mod tests {
         // Another unit: selected in its place, no swap.
         assert_eq!(s.press(Controls::Drag, Some(5)), GridPress::Select(5));
         assert_eq!(s, sel(Some(5), Some(5)));
-        // The same unit again stays selected.
+        // The same unit again deselects it, as the original's press on the selected unit
+        // (4c346c, §9.6; a player's report).
+        assert_eq!(s.press(Controls::Drag, Some(5)), GridPress::Deselect);
         assert_eq!(s.press(Controls::Drag, Some(5)), GridPress::Select(5));
-        assert_eq!(s, sel(Some(5), Some(5)));
         // An empty cell: no slide; nothing selected, the pack up.
         assert_eq!(s.press(Controls::Drag, None), GridPress::Nothing);
         assert_eq!(s, ArmySel::default());
