@@ -5,6 +5,10 @@ move to a Settled list.
 
 ## Open
 
+- **Palace's barracks picture** (2026-10-21, found while fixing the altar's barracks). The hire
+  tab of the palace shows `BI_Town` in Razdor (`barracks_interior`); the original's table at
+  0x4bd3f4 has no entry for type 0 (the palace), so it shows no picture and the brown
+  background. Left as is pending the owner; settled by the owner's decision.
 - **Negative vampirism: the attacker drained to 0 or less** (2026-10-20, #1046). The original keeps
   its record in the side's list (no removal test after its own strike, 48b580). Razdor drops such
   a unit from its lists and counts without the removal routine (`died`), so its row does not
