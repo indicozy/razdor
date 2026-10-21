@@ -443,8 +443,10 @@ fn hall_offers_in_face(game: &mut Game, f: &Frame, view: &mut BuildingView, mess
     // The bar is always there, idle while the list fits, as the original's (0x4bedec).
     scrollbar_always(Rect::new(list.x + list.w - 14.0 * k, list.y + 2.0 * k, 12.0 * k, list.h - 4.0 * k), &mut view.hall_scroll, rows, entries.len());
     let row_w = list.w - 16.0 * k;
-    // From the top however few there are: the list widget lays its lines down from 0 (0x47e46c).
-    let first_y = list.y + 4.0 * k;
+    // The original lays the lines from the top of the list (0x47e46c). Razdor's deviation, the
+    // owner's wish: when they all fit, the block is centred; when they scroll, it stays at the top.
+    let fits = entries.len() <= rows;
+    let first_y = hall_first_row_y(list.y + 4.0 * k, list.h - 8.0 * k, row_h, entries.len().min(rows), fits);
     for (n, entry) in entries.iter().enumerate().skip(view.hall_scroll).take(rows) {
         let y = first_y + (n - view.hall_scroll) as f32 * row_h;
         let id = match *entry { HallEntry::Rumour(id) | HallEntry::Quest(id) => id };
@@ -475,6 +477,14 @@ fn hall_offers_in_face(game: &mut Game, f: &Frame, view: &mut BuildingView, mess
     }
     quest_section_frame(panel, list);
     next
+}
+
+/// Where the hall list's first row is drawn, in the list's inner height (`inner_top` to
+/// `inner_top + inner_h`). The original lays the rows from the top (0x47e46c); Razdor centres
+/// the `shown` rows when all the entries fit (`fits`), the owner's wish, and keeps them at the
+/// top when the list scrolls.
+fn hall_first_row_y(inner_top: f32, inner_h: f32, row_h: f32, shown: usize, fits: bool) -> f32 {
+    if fits { inner_top + ((inner_h - shown as f32 * row_h) / 2.0).max(0.0) } else { inner_top }
 }
 
 /// Barracks: recruits for hire along the top, the counters, the army with heal and
@@ -2300,7 +2310,7 @@ fn with_back(bar: Option<Screen>, view: &BuildingView) -> Option<Screen> {
 
 #[cfg(test)]
 mod tests {
-    use super::{hall_entry_ink, hire_panel_on, tab_state, village_ok_key, Entered, HirePanel};
+    use super::{hall_entry_ink, hall_first_row_y, hire_panel_on, tab_state, village_ok_key, Entered, HirePanel};
     use razdor::rules::content::UnitId;
     use razdor::rules::script::HallEntry;
 
@@ -2308,6 +2318,17 @@ mod tests {
     fn hall_entries_take_their_font_colour_off_the_parchment() {
         assert_eq!(hall_entry_ink(HallEntry::Quest(7)), [255, 255, 155], "a quest: the yellow font (0xae24a0)");
         assert_eq!(hall_entry_ink(HallEntry::Rumour(7)), [155, 255, 155], "a rumour: the green font (0xae249c)");
+    }
+
+    #[test]
+    fn hall_rows_are_centred_when_they_fit() {
+        assert_eq!(hall_first_row_y(100.0, 150.0, 20.0, 3, true), 145.0, "3 rows of 20 centred in 150");
+        assert_eq!(hall_first_row_y(100.0, 60.0, 20.0, 3, true), 100.0, "exactly full: from the top");
+    }
+
+    #[test]
+    fn hall_rows_stay_at_the_top_when_they_scroll() {
+        assert_eq!(hall_first_row_y(100.0, 150.0, 20.0, 7, false), 100.0);
     }
 
     #[test]
