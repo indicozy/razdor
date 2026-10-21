@@ -96,6 +96,13 @@ pub fn show(game: &Game, o: &EventOutcome, message: &mut Option<String>, dialogs
     match *o {
         EventOutcome::Fired { event, message: true } => dialogs.push_back(event_dialog(game, event, false)),
         EventOutcome::Question(id) => dialogs.push_back(event_dialog(game, id, true)),
+        // The row goes on the event's own window, just queued (0x4a8fe5 builds it with the
+        // window); a silent event has no window to show it in.
+        EventOutcome::ItemsLost { event, ref items } => {
+            if let Some(d) = dialogs.back_mut().filter(|d| d.event == Some(event)) {
+                d.lost = items.iter().map(|&a| ItemId(a as u32)).collect();
+            }
+        }
         EventOutcome::QuestAdded(id) => notice(&quest_line("AddQuest", QUEST_ADDED), Some(id), message, dialogs),
         EventOutcome::QuestCompleted(_) => notice(&quest_line("DelQuest", QUEST_COMPLETED), None, message, dialogs),
         EventOutcome::LoopGuard => razdor::diag!("scenario events: loop guard reached"),

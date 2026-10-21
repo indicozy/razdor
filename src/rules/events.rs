@@ -322,6 +322,10 @@ pub fn event_field(e: &Event, off: u16) -> Option<i64> {
 pub enum EventOutcome {
     /// The event fired. `message`: it has a message to show (otherwise it fired silently).
     Fired { event: EventId, message: bool },
+    /// The artifacts the event's window took from the player: only the ones really held
+    /// (0x4a8fe5, the `[Event] DelItem` row). Sent right after the event's `Fired`, and only
+    /// when at least one was taken.
+    ItemsLost { event: EventId, items: Vec<u8> },
     /// The event asks its yes/no question; call [`EventEngine::answer`]. Nothing else runs
     /// until then.
     Question(EventId),
@@ -386,7 +390,9 @@ pub trait EventWorld {
     /// removal's slot names a character, so the unit becomes that army's leader.
     fn remove_unit(&mut self, index: usize, lead: bool, to_army: Option<ArmyId>);
     fn give_item(&mut self, artifact: u8);
-    fn take_item(&mut self, artifact: u8);
+    /// Takes the artifact from the pack, else from a unit wearing it; false when the player
+    /// holds none of it (0x49a8a8 with the take flag).
+    fn take_item(&mut self, artifact: u8) -> bool;
     fn learn_spell(&mut self, spell: u8);
     /// Cast a spell on the player's army.
     fn apply_spell(&mut self, spell: u8);
@@ -1378,11 +1384,18 @@ impl EventEngine {
                 w.give_item(a);
             }
         }
-        // Artifacts lost: only when at least one of them is held (0x4a8fe5).
+        // Artifacts lost: only when at least one of them is held (0x4a8fe5); each slot takes
+        // one held copy, and the row lists exactly those (0x4a9180 region, `[Event] DelItem`).
         let (pack, worn) = w.player_items();
         if nonzero(&r.artifacts_remove).any(|a| pack.contains(&a) || worn.contains(&a)) {
+            let mut lost = Vec::new();
             for a in nonzero(&r.artifacts_remove) {
-                w.take_item(a);
+                if w.take_item(a) {
+                    lost.push(a);
+                }
+            }
+            if !lost.is_empty() {
+                out.push(EventOutcome::ItemsLost { event: id, items: lost });
             }
         }
         let from = (r.units_from_army != 0).then_some(r.units_from_army);
@@ -2088,11 +2101,11 @@ pub(crate) mod mock {
             self.pack.push(artifact);
             self.log.push(Fx::GiveItem(artifact));
         }
-        fn take_item(&mut self, artifact: u8) {
-            if let Some(k) = self.pack.iter().position(|&a| a == artifact) {
-                self.pack.remove(k);
-            }
+        fn take_item(&mut self, artifact: u8) -> bool {
+            let Some(k) = self.pack.iter().position(|&a| a == artifact) else { return false };
+            self.pack.remove(k);
             self.log.push(Fx::TakeItem(artifact));
+            true
         }
         fn learn_spell(&mut self, spell: u8) {
             self.log.push(Fx::Learn(spell));
@@ -3238,13 +3251,35 @@ mod tests {
         w.pack.push(6);
         w.units.extend([unit(40, 0), unit(40, 2), unit(40, 0), unit(41, 0)]);
         tick_at(&mut g, &mut w, 10);
-        assert_eq!(w.log, vec![Fx::TakeItem(5), Fx::TakeItem(6), Fx::RemoveUnit(3, None)]);
+        assert_eq!(w.log, vec![Fx::TakeItem(6), Fx::RemoveUnit(3, None)], "5 is not held: nothing taken");
         // The hero is never removed by a type match *(guess)*.
         let mut w = MockWorld::new();
         let mut e = global();
         e.results.units_remove = [1, 0, 0, 0];
         tick_at(&mut engine(vec![e]), &mut w, 0);
         assert!(w.log.is_empty());
+    }
+
+    /// The lost row lists exactly the artifacts taken (0x4a8fe5): a slot whose item the player
+    /// does not hold takes nothing, and a second slot for an item he holds once takes nothing.
+    #[test]
+    fn the_lost_row_lists_only_what_was_taken() {
+        let mut e = with_message(many(global()));
+        e.results.artifacts_remove = [5, 6, 6, 0];
+        let mut g = engine(vec![e]);
+        let mut w = MockWorld::new();
+        w.pack.extend([6, 9]);
+        let out = g.tick(&mut w);
+        assert!(out.contains(&EventOutcome::ItemsLost { event: 1, items: vec![6] }), "{out:?}");
+        assert_eq!(w.log, vec![Fx::TakeItem(6)]);
+        assert_eq!(w.pack, vec![9]);
+        // Nothing held: no row at all.
+        let mut e = with_message(many(global()));
+        e.results.artifacts_remove = [5, 0, 0, 0];
+        let mut g = engine(vec![e]);
+        let mut w = MockWorld::new();
+        let out = g.tick(&mut w);
+        assert!(!out.iter().any(|o| matches!(o, EventOutcome::ItemsLost { .. })), "{out:?}");
     }
 
     #[test]
@@ -3715,5 +3750,41 @@ mod real_maps {
         assert_eq!(g.times_fired(220), 0, "the parchment was never received");
         assert_eq!(g.times_fired(221), 1);
         assert!(out.contains(&EventOutcome::QuestCompleted(220)));
+    }
+
+    /// Другой берег: after the cursed knight's fight, event 54 («В ущелье») takes the sword
+    /// «Поющих черепов» (artefact 3) from the hero and shows the lightning window; the row
+    /// lists the sword, since he holds it (0x4a8fe5, `[Event] DelItem`).
+    #[test]
+    fn other_shore_the_lightning_takes_the_sword_and_lists_it() {
+        let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+        let dt = DtInstall::load(std::path::Path::new(&dir)).expect("install loads");
+        let Some(m) = dt.maps.iter().find(|m| m.name == "Другой берег") else { return };
+        let s = m.load().unwrap();
+        assert_eq!(s.events[53].results.artifacts_remove, [3, 0, 0, 0]);
+        // The event sits on a point: the hero stands on it.
+        let place = s.points.iter().find(|p| p.events().any(|e| e == 54)).map(|p| Place::Point(p.id)).expect("event 54 on a point");
+        let mut g = EventEngine::new(&s);
+        // Event 53 asks after the player beat army 22 (the cursed knight); he says No, and 54 follows.
+        let mut w = MockWorld { now: s.header.start_time as u64, place: Some(place), pack: vec![3], ..MockWorld::new() };
+        w.defeated.insert(22);
+        let mut out = g.tick(&mut w);
+        for _ in 0..200 {
+            if g.times_fired(54) > 0 {
+                break;
+            }
+            if g.pending_question().is_some() {
+                out.extend(g.answer(&mut w, false));
+            } else if g.holds_window() {
+                out.extend(g.window_closed(&mut w));
+            } else {
+                w.now += 30;
+                out.extend(g.tick(&mut w));
+            }
+        }
+        assert_eq!(g.times_fired(54), 1, "why not: {:?} / 53 {:?} / {:?}", g.why_not(54, &w), g.happened(53), out);
+        assert!(out.contains(&EventOutcome::Fired { event: 54, message: true }), "{out:?}");
+        assert!(out.contains(&EventOutcome::ItemsLost { event: 54, items: vec![3] }), "{out:?}");
+        assert!(!w.pack.contains(&3), "the sword is gone");
     }
 }

@@ -297,6 +297,13 @@ campaign quest only after both. Razdor: the same (`rk2_the_peasant_offers_and_th
   (the 92 × 92 bust halved) in 47 × 47 cells centred at W·(i+1)/(n+1), with no frame or
   ring; a row adds 79 px (0x4a93bc, 0x4a9711). The departed row lists only the units really
   taken. A unit picture at the side (82) is its 92 × 92 bust. **code**
+- **Items lost row**: the artifacts the event took (117–120) get a row: the language file's
+  `[Event] DelItem` caption (Russian «Потеряны предметы:») in green, above the items received
+  row and below the joined units. Only the artifacts really taken are listed: a slot whose item
+  the player does not hold takes nothing and shows nothing; no row when none was taken
+  (0x4a919c–0x4a9358, each take 0x49a8a8 with the take flag). Each icon is 55 × 55 at
+  W·(i+1)/(n+1) − 27, a row adds 87 px (the gained row's steps; caption and cells 0x4d5884,
+  0x4a8fe5). **code**
 - Layout: 634 px wide, centred on 1024 × 682 (on the tutorial's own position in the
   tutorial); the height grows with the reward rows, with a scroll bar past a limit. **code**
 
@@ -640,7 +647,8 @@ world, carry-over), `src/rules/journal.rs`, `src/dt/dtm.rs` (record and flag scr
 | Unit removed, by type | From the last unit back; unnamed slot: unnamed unit of the type; named slot: that name, any type; nothing unless a slot finds one; never the hero; given to no army, its worn items go with it | Unnamed slot: unnamed unit of the type; named slot: that name, any type; can hit the hero | Matches, except the hero (unknown whether reachable: Razdor's guard kept) |
 | Removed unit given to an army | Slot without a name: appended, over the last of a full army; slot with a name: the leader, the others down | Appended (overwriting the last of a full army); under a named slot it becomes the leader | Matches |
 | Units rows of the window | The departed above the joined, each its green caption (`[Event] DelUnit` / `AddUnit`) centred over 46 × 46 icons centred at W·(i+1)/(n+1) − 23, 79 per row; a unit at the side is its 92 × 92 bust | 0x4a93bc / 0x4a9711: 47 × 47 cells (0x4c612c) with the type's 46 × 46 icon (+0x18), no frame; 0x2f + 8 + 16 + 8 per row; the side picture +0x14 (92 × 92) | Matches |
-| Items lost row, departed row's units | No "items lost" row; the departed row shows the event's listed types | `[Event] DelItem` row of the items taken (0x4a9180); the departed row shows only units actually taken (0x4a9711) | Gap (OPEN_QUESTIONS) |
+| Items lost row | `[Event] DelItem` row of the artifacts really taken (`EventOutcome::ItemsLost`), 55 × 55 icons above the items received row; no row when none was taken | `[Event] DelItem` row of the artifacts really taken (0x4a919c–0x4a9358, 0x4d5884), 55 × 55 cells at W·(i+1)/(n+1) − 27, 87 px per row | Matches |
+| Departed row's units | The departed row shows the event's listed types | The departed row shows only units actually taken (0x4a9711) | Gap (OPEN_QUESTIONS) |
 | "No meeting" and spells | Not learned; no resource row | Not learned; no resource row | Matches |
 | Lantern with radius 0 | Not lit | Not lit | Matches |
 | Move army to hero | Army 136 only, not activated, cheapest neighbour | Army 136 only, not activated, cheapest neighbour by terrain cost | Matches |

@@ -46,7 +46,7 @@ impl Event {
     pub fn needs_reading(&self) -> bool {
         match self {
             Event::Script(EventOutcome::Fired { message, .. }) => *message,
-            Event::Script(EventOutcome::Declined(_) | EventOutcome::LoopGuard) => false,
+            Event::Script(EventOutcome::Declined(_) | EventOutcome::LoopGuard | EventOutcome::ItemsLost { .. }) => false,
             Event::Script(_) => true,
             // An event's spell stops the walk on its cell (0x4ab1ec clears the route).
             Event::EventSpell { .. } => true,
@@ -641,19 +641,20 @@ impl EventWorld for Game {
         }
     }
 
-    /// From the pack, else from whoever wears it.
-    fn take_item(&mut self, artifact: u8) {
+    /// From the pack, else from whoever wears it; false when nobody holds it.
+    fn take_item(&mut self, artifact: u8) -> bool {
         let item = ItemId(artifact as u32);
         if self.pack.remove_first(item) {
-            return;
+            return true;
         }
         let c = self.content.clone();
         for u in &mut self.squad {
             if let Some(slot) = u.items.iter().position(|s| *s == Some(item)) {
                 crate::rules::items::take_off(&c, u, slot);
-                return;
+                return true;
             }
         }
+        false
     }
 
     /// Appends the spell to the book unless it is there (0x49c144). There is no limit: the

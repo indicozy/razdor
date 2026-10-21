@@ -106,6 +106,9 @@ pub struct Dialog {
     /// Units that joined / left the army.
     pub joined: Vec<UnitId>,
     pub left: Vec<UnitId>,
+    /// Artifacts the event took from the player, as the window's lost row shows them (only
+    /// the ones really held: `EventOutcome::ItemsLost`, 0x4a8fe5).
+    pub lost: Vec<ItemId>,
     /// It is shown in the original's event window, which opens with a chord (a draw of the
     /// game's generator, 0x4d15d0): the events' dialogs, the victory box and the noon report.
     pub chord: bool,
@@ -144,6 +147,7 @@ impl Dialog {
             picture: None,
             joined: Vec::new(),
             left: Vec::new(),
+            lost: Vec::new(),
             chord: false,
             cued: false,
             not_before: None,
@@ -519,13 +523,15 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     // An icon row grows the window by its caption and icons (0x4a8e66: 87 for items, 82
     // for spells).
     let items_h = if d.items.is_empty() { 0.0 } else { 87.0 * o };
+    // The lost row is laid out as the gained one (0x4a8fe5: the same 0x37 / 0x18 / 8 steps).
+    let lost_h = if d.lost.is_empty() { 0.0 } else { 87.0 * o };
     let spells_h = if d.spells.is_empty() { 0.0 } else { 82.0 * o };
     // The quest line's row (0x4a8dbf: 16 above the line, 8 under it), measured against the
     // original's opening event as 30 of Razdor's layout.
     let notice_h = if d.notice.is_some() { 30.0 * o } else { 0.0 };
     let pic_h = if d.picture.is_some() && side.is_none() { 140.0 * o } else { 0.0 };
     let units_h = [&d.joined, &d.left].iter().filter(|u| !u.is_empty()).count() as f32 * UNIT_ROW * o;
-    let below = pic_h + res_h + items_h + spells_h + units_h + notice_h;
+    let below = pic_h + res_h + items_h + lost_h + spells_h + units_h + notice_h;
     // The box stops at 499 (and short of the screen): the text scrolls in it, the buttons
     // stay in sight.
     let screen_box = (sh - chrome::bar_height() - 4.0) / o - below / o - EVENT_REST;
@@ -628,6 +634,20 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
             assets.draw_portrait(u, Team::Player, Rect::new(x + left * o, cy + 26.0 * o, UNIT_ICON * o, UNIT_ICON * o));
         }
         cy += UNIT_ROW * o;
+    }
+    // The lost row sits above the gained one (the original stacks its rows from the bottom
+    // up: 0x4a8fe5 builds the gained row first, then the lost one, the units above them).
+    if !d.lost.is_empty() {
+        caption("DelItem", razdor::i18n::n_("Items lost:"), cy);
+        // Up to four slots name an artifact (117–120), each 55 × 55 at W·(i+1)/(n+1) − 27
+        // (0x4a8fe5, 0x4d5884's 0x37 picture cells).
+        let n = d.lost.len().min(4);
+        for (i, &item) in d.lost.iter().enumerate().take(4) {
+            let r = Rect::new(spread(n, i) - 27.0 * o, cy + 26.0 * o, 55.0 * o, 55.0 * o);
+            assets.draw_item(item, r.x, r.y, r.w);
+            icons.push((false, item.0, r));
+        }
+        cy += lost_h;
     }
     if !d.items.is_empty() {
         caption("AddItem", razdor::i18n::n_("Items received:"), cy);

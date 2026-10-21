@@ -179,6 +179,7 @@ Grateful for your mercy, the surrendered troops pray for you. = Благодар
 Magic + {magic} = Магия + {magic}
 {left_behind} items were left behind: the pack is full. = Брошено предметов: {left_behind}, рюкзак полон.
 Items received: = Получены предметы:
+Items lost: = Потеряны предметы:
 New spells learnt: = Выучены новые заклинания:
 Characters joined: = Присоединившиеся персонажи:
 Characters departed: = Ушедшие персонажи:

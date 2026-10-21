@@ -228,16 +228,16 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   earlier with the text stacked from the panel's bottom (492f24); port that layout first,
   then these two.
 
-- **Event window: the items lost row and the departed row's units** (2026-10-17, found with
-  a player's report on the units rows). The original shows a row of the items an event took
-  (`[Event] DelItem`, 0x4a9180, only when one of them was really there) and fills the
-  departed row only with units really taken, by the taken unit's type (0x4a9711, 0x4961d0).
-  Razdor has no items lost row and shows every unit type the event lists under "departed"
-  (`src/ui/story.rs` `event_dialog`). Settling it needs the event engine to report what it
-  actually took (`src/rules/events.rs`) so the window can show it. On `dt-original` the units
-  rows are ported (23151b6) but not the 92 × 92 unit bust at the side of the text: that
-  branch still draws an event's unit picture 128 × 128 above the text (main moved it to the
-  side earlier, not ported).
+- **Event window: the departed row's units** (2026-10-17, found with a player's report on the
+  units rows). The original fills the departed row only with units really taken, by the taken
+  unit's type (0x4a9711, 0x4961d0). Razdor shows every unit type the event lists under
+  "departed" (`src/ui/story.rs` `event_dialog`). Settling it needs the event engine to report
+  the units it actually removed, as it now reports the items (`EventOutcome::ItemsLost`,
+  `src/rules/events.rs`). The items lost row itself is settled (see Settled). On `dt-original`
+  the units rows are ported (23151b6) but not the 92 × 92 unit bust at the side of the text:
+  that branch still draws an event's unit picture 128 × 128 above the text (main moved it to
+  the side earlier, not ported). The items lost row is not on `dt-original` yet (to port: the
+  commit that adds it; see the Settled entry).
 - **A ring round the whole building** (2026-10-17, Ivan's report in Discord: the hero drawn on
   top of a tent). Razdor now hides a figure inside a building as the Community exe does
   (0x497abc) and keeps its one-cell ring. The player's snapshot of «the original» shows a
@@ -415,6 +415,14 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 - **The army window's pack scroll bar on dt-original** (2026-10-21). Ported by hand: dt-original
   76ec42fb (dcad48a8). The pack uses `scrollbar_always` there too; the widget's address is still open
   above.
+
+- **Event window: the items lost row** (2026-10-21, a player's report: the sword «Поющих
+  черепов» vanished after the fight in «Другом береге» with no notice). The original's window
+  shows a row under the caption `[Event] DelItem` («Потеряны предметы:») with the artifacts the
+  event really took, 55 × 55, above the items received row (0x4a919c–0x4a9358, 0x4d5884). Razdor
+  lists the same artifacts now: the rules report what was taken (`EventOutcome::ItemsLost`), so a
+  slot for an item the player does not hold shows nothing. Test: `the_lost_row_lists_only_what_was_taken`
+  and `other_shore_the_lightning_takes_the_sword_and_lists_it` (event 54 takes the sword).
 
 - **«Максимум» steps back out of the front row with a strike open** (#1037, 2026-10-20; the
   bench's retreat count: 18 of Max's 1861 decisions, the original's 6 of 1661). A full-HP
