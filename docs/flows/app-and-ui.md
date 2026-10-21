@@ -114,7 +114,8 @@ even gaps (`item_filter::row_cells`), drawn on the green marble of the original'
 their shape). The first eight are the group buttons (`item_filter::group_row`, in
 `item_filter::ROW`: helms, armour, weapons, shields, rings, amulets, potions, other;
 `rules::pack_order::ItemGroup`, each kind in exactly one). Each shows its group's picture
-(`item_filter::representative`) fitted inside, its name as a hint (`group_label`). A click on a
+(`item_filter::representative`: the lowest id of the group, but a shield prefers an item named
+«щит», so the shields button shows a shield, not the bracers) fitted inside, its name as a hint (`group_label`). A click on a
 group shows only it and holds its button down (accent edge); a click on the lit one shows all
 again (there is no "all" button). The ninth is the search (`item_filter::search_button`): idle it
 reads «Поиск»; a click, Ctrl+F or a typed letter makes it the field, the text shows on its face

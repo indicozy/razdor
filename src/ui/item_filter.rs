@@ -47,12 +47,31 @@ pub fn group_label(group: ItemGroup) -> &'static str {
 
 /// The item whose picture stands for a group: the lowest id of the kinds it holds, a blow
 /// weapon first for Weapons. `None` when the content has no such item.
+///
+/// A Razdor extra (the players' request): a group whose lowest item does not look like the
+/// group prefers the lowest item whose name holds a word of [`picture_word`]. The Shields
+/// button would otherwise show the bracers («Кожаные наручи», the game's shield kind).
 pub fn representative(content: &Content, group: ItemGroup) -> Option<ItemId> {
     let first = |pred: &dyn Fn(ArtefactType) -> bool| content.items.iter().filter(|d| pred(d.kind)).min_by_key(|d| d.id).map(|d| ItemId(d.id));
+    if let Some(word) = picture_word(group) {
+        let named = content.items.iter().filter(|d| group.holds(d.kind) && d.name.to_lowercase().contains(word)).min_by_key(|d| d.id);
+        if let Some(d) = named {
+            return Some(ItemId(d.id));
+        }
+    }
     if group == ItemGroup::Weapons {
         first(&|k| k == ArtefactType::BlowWeapon).or_else(|| first(&|k| group.holds(k)))
     } else {
         first(&|k| group.holds(k))
+    }
+}
+
+/// The word (lower case) an item's name must hold for the group's picture to prefer it (see
+/// [`representative`]). Shields: «щит», the shield's own name in the game's data.
+fn picture_word(group: ItemGroup) -> Option<&'static str> {
+    match group {
+        ItemGroup::Shields => Some("щит"),
+        _ => None,
     }
 }
 
@@ -277,4 +296,74 @@ fn handle_keys(key: &str, query: &mut String, r: Rect, shortcuts: &[KeyCode]) ->
         }
     }
     reply
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use razdor::dt::data::ArtefactDef;
+    use razdor::rules::content::Content;
+    use std::collections::BTreeMap;
+
+    fn item(id: u32, name: &str, kind: ArtefactType) -> ArtefactDef {
+        ArtefactDef {
+            id,
+            name: name.to_string(),
+            description: String::new(),
+            icon: String::new(),
+            cost: 100,
+            kind,
+            bonus: None,
+            magic: None,
+            add: Default::default(),
+            percent: Default::default(),
+            fixed: Default::default(),
+            extra: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn shields_prefer_a_shield_over_the_bracers_of_lower_id() {
+        let c = Content::new(
+            Vec::new(),
+            vec![
+                item(42, "Кожаные наручи", ArtefactType::Shield),
+                item(50, "Щит Викинга", ArtefactType::Shield),
+                item(51, "Круглый щит", ArtefactType::Shield),
+                item(60, "Наручи ЩИТа", ArtefactType::Ring),
+                item(7, "Меч", ArtefactType::BlowWeapon),
+            ],
+            Vec::new(),
+            Default::default(),
+            razdor::rules::formation::Formation::WIDE,
+        );
+        // The lowest shield whose name holds «щит» (any case), not the lower id of the bracers.
+        assert_eq!(representative(&c, ItemGroup::Shields), Some(ItemId(50)));
+    }
+
+    #[test]
+    fn shields_without_a_named_one_keep_the_lowest_id() {
+        let c = Content::new(
+            Vec::new(),
+            vec![item(42, "Наручи Кожаные", ArtefactType::Shield), item(43, "Наручи Железные", ArtefactType::Shield)],
+            Vec::new(),
+            Default::default(),
+            razdor::rules::formation::Formation::WIDE,
+        );
+        assert_eq!(representative(&c, ItemGroup::Shields), Some(ItemId(42)));
+    }
+
+    #[test]
+    fn other_groups_keep_their_lowest_id_and_weapons_their_blow_weapon() {
+        let c = Content::new(
+            Vec::new(),
+            vec![item(5, "Лук", ArtefactType::ShotWeapon), item(9, "Щит в названии", ArtefactType::Helm), item(8, "Посох", ArtefactType::Staff), item(12, "Меч", ArtefactType::BlowWeapon)],
+            Vec::new(),
+            Default::default(),
+            razdor::rules::formation::Formation::WIDE,
+        );
+        assert_eq!(representative(&c, ItemGroup::Helms), Some(ItemId(9)));
+        assert_eq!(representative(&c, ItemGroup::Weapons), Some(ItemId(12)));
+        assert_eq!(representative(&c, ItemGroup::Rings), None);
+    }
 }
