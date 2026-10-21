@@ -330,6 +330,13 @@ These are summarised here; the full tables are in `docs/notes/map/004741b4-0047e
   for a 6-bit channel, saturating at 255. Unpacking copies the top bit of a 5-bit value into the
   freed low bit.
 - Additive and subtractive blits saturate per channel. Pixel value 0 is transparent in them.
+- **Code** (0x474de4 builds the tables, 0x476790 with its flag blits): the subtractive blit takes
+  a source pixel off a screen pixel through two lookup tables for the screen's masks. The low
+  table is indexed by the two pixels' low bytes, the high table by their high bytes, and the
+  high read goes at the byte offset the low entry's high byte gives. Red and blue saturate at 0.
+  Green's low three bits borrow 0x300 when they go negative, which moves the high read two bytes
+  on, to the word that takes one more off green's high bits and clamps (its low byte 0x1F clears
+  the green's low bits). Built for the 5-6-5 screen.
 - Alpha masks have 5 bits and are premultiplied: `out = dst × (31 − a)/31 + src`, saturating.
 - Greyed pictures use `(299 R + 587 G + 114 B) / 1243`, a darkened luminance (0x48dc60).
 

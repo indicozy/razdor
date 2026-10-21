@@ -59,6 +59,8 @@ move to a Settled list.
 
 Parity fixes made on `main` that this branch does not carry yet, with the `main` commit.
 
+- **56dd8324 "Main hall list: quests and rumours inked with the original's 16-bit subtract": not ported.** The main list (`hall_ink.rs`) is drawn as one CPU panel on the original's paper with its ornaments, bands and the 16 px sheet text. This branch's list is a GPU parchment with darkened edges, names fitted by `text_fit` (19 px), and a note column; a CPU panel would change its paper, size and rows, which are the owner's to decide. Its spec lines (engine.md, the 0x474de4 tables) are ported. The names keep the GPU subtract from 2c8ecd4.
+
 - **5ebf623 "Formation: pressing the selected unit deselects it in the building window"
   (0x4c6f50, 0x4c653c): not ported.** The fix changes only Razdor's «Перетаскивание»
   arrangement (`unit_drag::Controls::Drag`), which this branch does not have; the original's
