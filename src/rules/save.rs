@@ -3,8 +3,10 @@
 //! A save holds the game's state only. What comes from the scenario (the map, the texts of
 //! buildings, armies and events, the event scripts) and the content (units, items, spells)
 //! is left out and rebuilt on load: the save names its scenario ([`ScenarioRef`]: the demo,
-//! or a map file of the install with an FNV-1a hash of its bytes), and loading reads that map
-//! again from `RAZDOR_DT_DIR`. A missing or changed map is refused ([`SaveError`]).
+//! or a map file of the install with an FNV-1a hash of its bytes). Loading reads that map
+//! from `RAZDOR_DT_DIR`, or, when the install lacks it, from the map's bytes the save carries
+//! ([`SaveFile::map`], the original's self-contained save, saves-data §12.2). Only a map
+//! whose bytes match the hash is used; otherwise the load is refused ([`SaveError`]).
 //!
 //! Saves are the player's data. They live in the platform data folder
 //! (`$XDG_DATA_HOME/razdor/saves`, `~/.local/share/razdor/saves`, `%APPDATA%\razdor\saves`,
@@ -83,9 +85,11 @@ pub enum ScenarioRef {
 }
 
 impl ScenarioRef {
-    /// The reference of map file `path` (named `file` without the extension).
-    pub fn of_map(path: &Path, file: &str) -> std::io::Result<ScenarioRef> {
-        Ok(ScenarioRef::Map { file: file.to_string(), hash: fnv1a(&std::fs::read(path)?) })
+    /// The reference of map file `path` (named `file` without the extension), with the
+    /// file's bytes: the game keeps them so its saves carry the map ([`super::game::Game::set_map`]).
+    pub fn of_map(path: &Path, file: &str) -> std::io::Result<(ScenarioRef, Arc<[u8]>)> {
+        let bytes: Arc<[u8]> = std::fs::read(path)?.into();
+        Ok((ScenarioRef::Map { file: file.to_string(), hash: fnv1a(&bytes) }, bytes))
     }
 }
 
@@ -283,16 +287,22 @@ pub fn meta_of(game: &Game, kind: SaveKind, name: &str) -> Result<SaveMeta, Save
     })
 }
 
+/// A save file's JSON: the meta, the game, and the map's bytes (base64) for a map save, as
+/// the original's save carries its map (saves-data §12.2). Older saves have no `map`.
 #[derive(Serialize)]
 struct SaveOut<'a> {
     meta: &'a SaveMeta,
     game: &'a Game,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    map: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct SaveIn {
     meta: SaveMeta,
     game: Game,
+    #[serde(default)]
+    map: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -300,12 +310,68 @@ struct MetaIn {
     meta: SaveMeta,
 }
 
-/// The save file's bytes: bzip2-compressed JSON of the meta and the game.
+/// The save file's bytes: bzip2-compressed JSON of the meta, the game and, for a map save
+/// whose map bytes the game holds and that hash to the scenario's, the map's bytes
+/// (base64): the save loads without the map file in the install (saves-data §12.2).
 pub fn encode(meta: &SaveMeta, game: &Game) -> Result<Vec<u8>, SaveError> {
-    let json = serde_json::to_vec(&SaveOut { meta, game }).map_err(|e| SaveError::Corrupt(e.to_string()))?;
+    let map = embedded_map(game).map(base64_encode);
+    let json = serde_json::to_vec(&SaveOut { meta, game, map }).map_err(|e| SaveError::Corrupt(e.to_string()))?;
+    pack(&json)
+}
+
+/// The map bytes a save of `game` carries: those of its map, if they hash to the stored hash.
+fn embedded_map(game: &Game) -> Option<&[u8]> {
+    match (&game.origin, &game.map_bytes) {
+        (Some(ScenarioRef::Map { hash, .. }), Some(bytes)) if fnv1a(bytes) == *hash => Some(bytes),
+        _ => None,
+    }
+}
+
+fn pack(json: &[u8]) -> Result<Vec<u8>, SaveError> {
     let mut enc = bzip2::write::BzEncoder::new(Vec::new(), bzip2::Compression::default());
-    enc.write_all(&json)?;
+    enc.write_all(json)?;
     Ok(enc.finish()?)
+}
+
+const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/// Standard base64 with padding (RFC 4648), for the map bytes in the save's JSON.
+fn base64_encode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = chunk.iter().enumerate().fold(0u32, |n, (i, &b)| n | (b as u32) << (16 - 8 * i));
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(BASE64[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+/// The bytes of [`base64_encode`]'s text; `None` when it is not base64.
+fn base64_decode(text: &str) -> Option<Vec<u8>> {
+    let text = text.as_bytes();
+    if !text.len().is_multiple_of(4) {
+        return None;
+    }
+    let mut out = Vec::with_capacity(text.len() / 4 * 3);
+    for (k, quad) in text.chunks(4).enumerate() {
+        let last = k + 1 == text.len() / 4;
+        let pad = quad.iter().rev().take_while(|&&c| c == b'=').count();
+        if pad > 2 || (pad > 0 && !last) {
+            return None;
+        }
+        let mut n = 0u32;
+        for &c in &quad[..4 - pad] {
+            n = n << 6 | BASE64.iter().position(|&b| b == c)? as u32;
+        }
+        n <<= 6 * pad as u32;
+        out.extend_from_slice(&n.to_be_bytes()[1..4 - pad]);
+    }
+    Some(out)
 }
 
 fn unpack(bytes: &[u8]) -> Result<Vec<u8>, SaveError> {
@@ -322,12 +388,18 @@ fn check_version(meta: &SaveMeta) -> Result<(), SaveError> {
 }
 
 /// Reads a save's bytes: its meta and the game state, not yet restored (see [`restore`]).
+/// The game holds the map's bytes the save carries ([`Game::map_bytes`]), if any.
 pub fn decode(bytes: &[u8]) -> Result<(SaveMeta, Game), SaveError> {
     let json = unpack(bytes)?;
     let meta: MetaIn = serde_json::from_slice(&json).map_err(|e| SaveError::Corrupt(e.to_string()))?;
     check_version(&meta.meta)?;
     let s: SaveIn = serde_json::from_slice(&json).map_err(|e| SaveError::Corrupt(e.to_string()))?;
-    Ok((s.meta, s.game))
+    let mut game = s.game;
+    if let Some(text) = s.map {
+        let map = base64_decode(&text).ok_or_else(|| SaveError::Corrupt("the save's map is not base64".into()))?;
+        game.map_bytes = Some(map.into());
+    }
+    Ok((s.meta, game))
 }
 
 /// Only the meta of a save file (for the load screen).
@@ -776,10 +848,11 @@ pub fn load(path: &Path, demo: Arc<Content>, install: Option<&Install>) -> Resul
 }
 
 /// Rebuilds what the save left out: the content, and the world's and the event engine's
-/// statics from the scenario (the demo, or the map file of the install, which must be the
-/// very file the game was saved with).
+/// statics from the scenario (the demo, or the map: the install's file when it is the one
+/// the game was saved with, else the map's bytes the save carries, see [`map_bytes`]).
 pub fn restore(meta: &SaveMeta, mut game: Game, demo: Arc<Content>, install: Option<&Install>) -> Result<Game, SaveError> {
     check_version(meta)?;
+    let embedded = game.map_bytes.take();
     // What the load sequence draws from (`rng::Rng::save_load`): the plant layer and the
     // number of armies of the map file.
     let (content, fresh, engine, plants, armies) = match &meta.scenario {
@@ -792,13 +865,9 @@ pub fn restore(meta: &SaveMeta, mut game: Game, demo: Arc<Content>, install: Opt
         }
         ScenarioRef::Map { file, hash } => {
             let install = install.ok_or(SaveError::NoInstall)?;
-            let maps = crate::dt::install::list_maps(install.dir).map_err(|_| SaveError::NoInstall)?;
-            let entry = maps.iter().find(|m| &m.name == file).ok_or_else(|| SaveError::MapMissing(file.clone()))?;
-            let bytes = std::fs::read(&entry.path)?;
-            if fnv1a(&bytes) != *hash {
-                return Err(SaveError::MapChanged(file.clone()));
-            }
+            let bytes = map_bytes(install.dir, file, *hash, embedded.as_deref())?;
             let scenario = Scenario::from_file_bytes(&bytes).map_err(|e| SaveError::Mismatch(e.to_string()))?;
+            game.map_bytes = Some(bytes.into());
             let world = World::from_scenario(&scenario, &install.content);
             let (w, h) = (scenario.header.width as i32, scenario.header.height as i32);
             let plants = rng::plant_layer(w, h, scenario.objects.iter().map(|o| (o.x as i32, o.y as i32, o.class, o.sprite)));
@@ -847,6 +916,24 @@ pub fn restore(meta: &SaveMeta, mut game: Game, demo: Arc<Content>, install: Opt
     game.drop_held();
     check_content(&game).map_err(SaveError::Mismatch)?;
     Ok(game)
+}
+
+/// The bytes of map `file`, which a save names with `hash`: the install's copy when it has
+/// the hash, else the copy the save carries when that has it (the original's self-contained
+/// save, saves-data §12.2). Otherwise the install's copy is refused as changed, or the map is
+/// missing (a save without the bytes, as before).
+fn map_bytes(dir: &Path, file: &str, hash: u64, embedded: Option<&[u8]>) -> Result<Vec<u8>, SaveError> {
+    let maps = crate::dt::install::list_maps(dir).unwrap_or_default();
+    let entry = maps.iter().find(|m| m.name == file);
+    let in_install = match entry.map(|e| std::fs::read(&e.path)).transpose()? {
+        Some(bytes) if fnv1a(&bytes) == hash => return Ok(bytes),
+        other => other.is_some(),
+    };
+    match embedded.filter(|b| fnv1a(b) == hash) {
+        Some(bytes) => Ok(bytes.to_vec()),
+        None if in_install => Err(SaveError::MapChanged(file.to_string())),
+        None => Err(SaveError::MapMissing(file.to_string())),
+    }
 }
 
 /// Moves the army-wide spells of a save before format 7 into the units' slots (a spell that
@@ -1506,11 +1593,9 @@ pub(crate) mod tests {
         assert!(loaded.old_effects.is_empty());
     }
 
-    #[test]
-    fn map_saves_need_the_same_map_file() {
+    /// A fake install's maps folder with one hand-built map (`Test.DTm`), and a game walked on it.
+    fn map_game(dir: &Path) -> (Game, PathBuf, Arc<Content>) {
         use crate::rules::world::testkit as tk;
-        // A fake install: a maps folder with one hand-built map.
-        let dir = temp_dir("maps");
         let maps = dir.join(crate::dt::install::MAPS_DIR);
         std::fs::create_dir_all(&maps).unwrap();
         let mut s = tk::scenario(24, 6);
@@ -1520,23 +1605,115 @@ pub(crate) mod tests {
         let content = Arc::new(tk::content());
         let scenario = Scenario::load(&path).unwrap();
         let mut g = Game::from_scenario(content.clone(), &scenario, HeroClass::Knight);
-        g.set_origin(ScenarioRef::of_map(&path, "Test").unwrap());
+        let (origin, bytes) = ScenarioRef::of_map(&path, "Test").unwrap();
+        g.set_map(origin, bytes);
         g.set_destination((10, 3));
         walk(&mut g, 200);
+        (g, path, content)
+    }
+
+    /// The save's bytes with its `map` field changed by `f` (a tampered save, rebuilt).
+    fn with_map_bytes(bytes: &[u8], f: impl FnOnce(&mut Vec<u8>)) -> Vec<u8> {
+        let mut v: serde_json::Value = serde_json::from_slice(&unpack(bytes).unwrap()).unwrap();
+        let mut map = base64_decode(v["map"].as_str().expect("a map save carries its map")).unwrap();
+        f(&mut map);
+        v["map"] = base64_encode(&map).into();
+        pack(&serde_json::to_vec(&v).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_map_save_loads_from_its_own_map_bytes_when_the_install_lacks_the_map() {
+        let dir = temp_dir("maps");
+        let (g, path, content) = map_game(&dir);
+        let original = std::fs::read(&path).unwrap();
         let install = Install { dir: &dir, content: content.clone() };
         roundtrip(&g, demo(), Some(&install));
 
+        // The install's copy changed: the save still loads with the map it was saved with.
+        std::fs::write(&path, original.iter().map(|b| b ^ 1).collect::<Vec<u8>>()).unwrap();
+        roundtrip(&g, demo(), Some(&install));
+        // The install has no copy at all (another player's install): the save carries it.
+        std::fs::remove_file(&path).unwrap();
+        let empty = temp_dir("no-maps");
+        let bare = Install { dir: &empty, content: content.clone() };
+        let loaded = roundtrip(&g, demo(), Some(&bare));
+        assert_eq!(loaded.map_bytes.as_deref(), Some(original.as_slice()), "the map the save carries");
+        // Loaded, the game keeps its map: a restart and the next save need no install copy.
+        let scenario = Scenario::from_file_bytes(&original).unwrap();
+        assert!(g.restart(content.clone(), &scenario).map_bytes.is_some());
+        let meta = meta_of(&loaded, SaveKind::Manual, "again").unwrap();
+        let (_, reloaded) = decode(&encode(&meta, &loaded).unwrap()).unwrap();
+        assert!(reloaded.map_bytes.is_some(), "the loaded game's save carries the map");
+
+        // Without the install at all, a map save still needs the install's content.
         let meta = meta_of(&g, SaveKind::Manual, "x").unwrap();
         let bytes = encode(&meta, &g).unwrap();
         let again = || decode(&bytes).unwrap();
         assert!(matches!(restore(&again().0, again().1, demo(), None), Err(SaveError::NoInstall)));
-        // Changed: one more gold in the preset.
-        s.header.heroes[0].gold += 1;
-        std::fs::write(&path, s.to_payload()).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&empty);
+    }
+
+    #[test]
+    fn a_tampered_map_in_a_save_is_refused_and_the_install_copy_is_used_instead() {
+        let dir = temp_dir("maps-tampered");
+        let (g, path, content) = map_game(&dir);
+        let original = std::fs::read(&path).unwrap();
+        let meta = meta_of(&g, SaveKind::Manual, "x").unwrap();
+        let bytes = encode(&meta, &g).unwrap();
+        let tampered = with_map_bytes(&bytes, |m| {
+            let middle = m.len() / 2;
+            m[middle] ^= 1;
+        });
+        let again = || decode(&tampered).unwrap();
+        let bare_dir = temp_dir("maps-tampered-bare");
+        let bare = Install { dir: &bare_dir, content: content.clone() };
+        // Nothing to load it from: the install lacks the map, and the save's copy is not the map's.
+        assert!(matches!(restore(&again().0, again().1, demo(), Some(&bare)), Err(SaveError::MapMissing(m)) if m == "Test"));
+        // The install's own copy has the hash, so that one loads, as before.
+        let install = Install { dir: &dir, content: content.clone() };
+        assert!(restore(&again().0, again().1, demo(), Some(&install)).is_ok());
+        // A tampered save whose install copy is changed too is refused as changed.
+        std::fs::write(&path, original.iter().map(|b| b ^ 1).collect::<Vec<u8>>()).unwrap();
         assert!(matches!(restore(&again().0, again().1, demo(), Some(&install)), Err(SaveError::MapChanged(m)) if m == "Test"));
-        std::fs::rename(&path, maps.join("Other.DTm")).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&bare_dir);
+    }
+
+    #[test]
+    fn a_save_without_map_bytes_still_needs_the_same_map_file() {
+        let dir = temp_dir("maps-old");
+        let (mut g, path, content) = map_game(&dir);
+        let original = std::fs::read(&path).unwrap();
+        let install = Install { dir: &dir, content: content.clone() };
+        // A save as Razdor wrote them before the map was carried: no bytes in it.
+        let carried = g.map_bytes.take();
+        let meta = meta_of(&g, SaveKind::Manual, "x").unwrap();
+        let bytes = encode(&meta, &g).unwrap();
+        g.map_bytes = carried;
+        assert!(!String::from_utf8_lossy(&unpack(&bytes).unwrap()).contains("\"map\":"), "no map in an old save");
+        let again = || decode(&bytes).unwrap();
+        assert!(matches!(restore(&again().0, again().1, demo(), None), Err(SaveError::NoInstall)));
+        roundtrip(&g, demo(), Some(&install));
+        // Changed: every byte of the install's copy differs.
+        std::fs::write(&path, original.iter().map(|b| b ^ 1).collect::<Vec<u8>>()).unwrap();
+        assert!(matches!(restore(&again().0, again().1, demo(), Some(&install)), Err(SaveError::MapChanged(m)) if m == "Test"));
+        std::fs::rename(&path, dir.join(crate::dt::install::MAPS_DIR).join("Other.DTm")).unwrap();
         assert!(matches!(restore(&again().0, again().1, demo(), Some(&install)), Err(SaveError::MapMissing(_))));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn base64_is_standard_and_refuses_what_is_not_base64() {
+        for (raw, text) in [("", ""), ("f", "Zg=="), ("fo", "Zm8="), ("foo", "Zm9v"), ("foob", "Zm9vYg=="), ("fooba", "Zm9vYmE="), ("foobar", "Zm9vYmFy")] {
+            assert_eq!(base64_encode(raw.as_bytes()), text);
+            assert_eq!(base64_decode(text).as_deref(), Some(raw.as_bytes()));
+        }
+        let all: Vec<u8> = (0..=255).collect();
+        assert_eq!(base64_decode(&base64_encode(&all)), Some(all));
+        for bad in ["Zg=", "Z===", "Zg==Zm9v", "Zm9*", "Zm9v=", "Zg=\u{e9}"] {
+            assert_eq!(base64_decode(bad), None, "{bad}");
+        }
     }
 
     /// A save whose map is gone: the message names the map file and the folder it is missing from.
@@ -1560,10 +1737,15 @@ pub(crate) mod tests {
         let content = Arc::new(Content::from_dt(&dt));
         let scenario = entry.load().unwrap();
         let mut g = Game::from_scenario(content.clone(), &scenario, HeroClass::Knight);
-        g.set_origin(ScenarioRef::of_map(&entry.path, &entry.name).unwrap());
+        let (origin, bytes) = ScenarioRef::of_map(&entry.path, &entry.name).unwrap();
+        g.set_map(origin, bytes);
         g.drain_events();
         let install = Install { dir: &dt.dir, content: content.clone() };
         roundtrip(&g, demo(), Some(&install));
+        // The save carries its map: it loads with an install that lacks this map file.
+        let without_maps = temp_dir("rk1-no-maps");
+        roundtrip(&g, demo(), Some(&Install { dir: &without_maps, content: content.clone() }));
+        let _ = std::fs::remove_dir_all(&without_maps);
         // Walk towards the nearest building, then fight the nearest army.
         let here = g.tile();
         let target = g

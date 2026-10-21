@@ -1219,6 +1219,7 @@ impl Game {
             }
         };
         g.origin.clone_from(&self.origin);
+        g.map_bytes.clone_from(&self.map_bytes);
         g
     }
 

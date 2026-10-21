@@ -325,6 +325,11 @@ pub struct Game {
     /// The scenario the game plays (`rules::save`): the demo, or a map file of the install
     /// with a hash of its bytes. The UI sets it for maps ([`Game::set_origin`]).
     pub origin: Option<ScenarioRef>,
+    /// The bytes of the map file `origin` names, as the game was started or loaded. A save
+    /// carries them ([`super::save::encode`]), so it loads without the install's copy, as the
+    /// original's saves do (saves-data §12.2). Not saved as state: it is the map's own file.
+    #[serde(skip)]
+    pub map_bytes: Option<Arc<[u8]>>,
     /// An autosave is due (the noon report came): its name. The UI writes it and clears it.
     #[serde(skip)]
     pub autosave_due: Option<String>,
@@ -644,6 +649,7 @@ impl Game {
             old_effects: Vec::new(),
             map_start: Some(clock.total_minutes() as u64),
             origin: None,
+            map_bytes: None,
             autosave_due: None,
             carried: None,
             wide_row,
@@ -738,6 +744,13 @@ impl Game {
     /// Records which map file the game plays, for saves.
     pub fn set_origin(&mut self, origin: ScenarioRef) {
         self.origin = Some(origin);
+    }
+
+    /// Records the map file the game plays with its bytes ([`ScenarioRef::of_map`]), so the
+    /// save carries them.
+    pub fn set_map(&mut self, origin: ScenarioRef, bytes: Arc<[u8]>) {
+        self.origin = Some(origin);
+        self.map_bytes = Some(bytes);
     }
 
     /// Seeds the event generator with `state` instead of the clock: the UI's snapshots draw

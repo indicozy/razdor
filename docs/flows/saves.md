@@ -2,8 +2,10 @@
 
 **Read this first.** A save (`.rzsave`) is bzip2-compressed JSON of `{meta, game}`: the
 whole `Game` through serde, minus everything that comes from the scenario or the content
-(map, texts, event scripts, unit/item/spell definitions). Loading reads the map again from
-the install (it must be the same bytes: an FNV-1a hash is stored) and rebuilds the statics.
+(map, texts, event scripts, unit/item/spell definitions). A map save also carries its map's
+bytes (the `map` field, base64; saves-data §12.2: the original's save is self-contained). Loading
+takes the map from the install when its bytes hash to the stored FNV-1a hash, else from the
+save's own bytes when those do, and rebuilds the statics. A save with neither is refused.
 All code is in `src/rules/save.rs`; the windows are `src/ui/saves.rs`.
 
 ## Where saves live
@@ -43,6 +45,10 @@ put(): save::meta_of → save::encode (serde_json + BzEncoder) → write .tmp �
        → remember_meta (the meta cache knows the new file at once)
 ```
 
+- The map's bytes: `Game::map_bytes` (not serialised; `Game::set_map` keeps them with the origin
+  when a map game starts or a campaign map starts, `Game::restart` copies them). `encode` writes
+  them as the `map` field only when they hash to the origin's hash. The field is optional: an
+  older save has none, and an older Razdor reads a new save by ignoring it (no format bump).
 - Autosaves: one before every battle (`saves::battle` saves the moment *before* the
   fight with the foe taken off, so loading it puts the hero next to the enemy) and one at
   the noon report (`Game::autosave_due`, named by `save::date_name`). The install's
@@ -60,14 +66,19 @@ ui: saves::load_screen sets App::pending_load → App::load (after the frame)
       │
       ▼
 save::load(path, demo, install) → save::decode (unpack, check_version, serde)
-      → save::restore: re-read the map, check the hash, World::from_scenario,
+      → save::restore: the map (`save::map_bytes`: the install's copy when its hash matches, else the
+        save's own bytes when they match, else `MapChanged` / `MapMissing`; the bytes go back
+        into `Game::map_bytes`), World::from_scenario,
         World::restore_statics, EventEngine::restore_statics, a fresh generator
         (Rng::save_load_with_music, as the original reseeds on load), AI set up again
         (Game::ai_init), format migrations (e.g. migrate_spells for version < 7)
 ```
 
 Errors are `save::SaveError` (version, map missing or changed, mismatch, full, pinned) and
-show in the load window.
+show in the load window. A save of a map the install lacks loads from its own bytes, so a
+player can load a save sent from another install. Moving on to the next campaign map still
+needs that map in the install (the hand-over reads it from there, as the original does), and
+the install is still needed for the content (`NoInstall` without it).
 
 ## The load window's list (progressive)
 
@@ -113,7 +124,7 @@ Opening the list never reads a save on the UI thread (commits c04fa1b, b2ecf89):
   (`pack::Pack`) is saved as its cells with `null` for a hole, so an older save's plain list
   of items reads as the same items in the first cells (`Game::held_item` is
   `#[serde(default)]` and goes back into the pack on load).
-- Never commit a player's save (it may embed map data): build fixtures in code, or gate a
+- Never commit a player's save (it may embed map data; a map save carries the map's bytes): build fixtures in code, or gate a
   test on a file outside the repo existing.
 
 ## Traps
