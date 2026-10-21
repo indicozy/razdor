@@ -13,6 +13,19 @@
 ## Не выпущено
 ## 0.4.47 — 2026-10-21
 
+Коммит `acf0544` (тег `v0.4.47`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+9f215b6250db9c5ef4498bbdfb30e5c50bf54ddfdb32b98d742086ddf3b4f644  razdor
+bdbbedbc0ba06fed2b93f890cf2c6c5d4991672c01817523c66940ea7a336305  Razdor.exe
+ae8a7750739295fe1a04430800f20b59693a970928536214973ef4c03c013bf9  razdor-macos
+3d64b9470118ed03b0706bb15305a2c4f6a41c1a0a0708bf35689904e497bed3  razdor-translate
+9f212e32e334b8ffd05b1e17090c809e49c16d17c2c76d3d2a3dd58086ef77ab  Razdor-translate.exe
+f5fc4d921386676f0a7a41584c99955ea46591ab16b48f9be42aff6095357c69  razdor-translate-macos
+```
+
 ### Изменено
 
 - Список заданий и слухов в главном зале стоит посередине пергамента, а не прижат к верху (если всё помещается).
