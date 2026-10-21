@@ -5,6 +5,12 @@ move to a Settled list.
 
 ## Open
 
+- **Event window: the departed row's units** (2026-10-21, found with a player's report on the
+  units rows). The original fills the departed row only with units really taken, by the taken
+  unit's type (0x4a9711, 0x4961d0). Razdor shows every unit type the event lists under "departed"
+  (`src/ui/story.rs` `event_dialog`). Settling it needs the event engine to report the units it
+  actually removed, as it reports the items (`EventOutcome::ItemsLost`, `src/rules/events.rs`).
+  The items lost row itself is on `dt-original` (ported from main).
 - **Scroll bar widget of the army window's pack** (2026-10-21, a player's report). Razdor draws the
   pack's bar with the hall list's widget (`scrollbar_always`: ▲ ▼ arrows, dark track, knob) as the
   original's screenshots show it; the original's widget address and its art are not traced yet (the
