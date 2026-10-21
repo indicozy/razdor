@@ -686,7 +686,7 @@ dependencies = [
 
 [[package]]
 name = "razdor"
-version = "0.4.48"
+version = "0.4.49"
 dependencies = [
  "ab_glyph_rasterizer",
  "bzip2",
