@@ -287,7 +287,8 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
         "spells" => {
             // A book full of the install's spells, to see their pictures.
             game.spells = game.content.spells.iter().filter_map(|s| u8::try_from(s.id).ok()).take(15).collect();
-            game.mana = 500;
+            // `RAZDOR_SCENE_MANA=<n>` sets the hero's mana (default 500: every card affordable).
+            game.mana = std::env::var("RAZDOR_SCENE_MANA").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(500);
             Screen::Spellbook { selected: 0 }
         }
         "menu" => Screen::Menu(false),

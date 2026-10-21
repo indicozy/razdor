@@ -19,7 +19,57 @@ use super::widgets::*;
 use super::world_view;
 use super::Screen;
 
-const COLS: usize = 3;
+const ROWS: usize = 5;
+
+/// The picture under the pointer is brightened by 1400/1024 (4c2cf4, FUN_0048da5c).
+const LIT: Color = Color::new(1400.0 / 1024.0, 1400.0 / 1024.0, 1400.0 / 1024.0, 1.0);
+
+/// A card's background (0x49bde4): the paper less a colour, by the card's state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CardFill {
+    /// Affordable, not under the pointer (0x4dc118 colour 0x94,0x84,0x94: 265c).
+    Normal,
+    /// Affordable and under the pointer: the book's hover look (0x4c2cf4 draws the card a second
+    /// time with `selected` = 1, background 0x80,0x70,0x80: 2660). The picture is brightened by
+    /// 1400/1024 there too (`spell_badges::draw_picture_lit`).
+    Hovered,
+    /// Over the hero's mana (0x49bde4 switches to 2664 whatever the pointer does): the paper less
+    /// 0xd0,0xd0,0xfa, then scaled by 2700/1024 (0x4dc118, FUN_0048da5c), so it reads dark red.
+    Unaffordable,
+}
+
+/// The book cell `n` sits in: (column, row), the columns filled top to bottom (0x4dad08).
+pub fn book_cell(n: usize) -> (usize, usize) {
+    (n / ROWS, n % ROWS)
+}
+
+/// The background a card has: [`CardFill::Unaffordable`] when `affordable` is false (the
+/// sanctuary never asks, so it passes `true`), else [`CardFill::Hovered`] under the pointer.
+pub fn card_fill(affordable: bool, hovered: bool) -> CardFill {
+    if !affordable {
+        CardFill::Unaffordable
+    } else if hovered {
+        CardFill::Hovered
+    } else {
+        CardFill::Normal
+    }
+}
+
+/// Paints the card background `fill` into `r`: `Win-paper` (the empty cell's base, 0x4dc118)
+/// less the colour of the state, scaled as the original's 2664 is. Without the art, the brown
+/// surface.
+fn card_paper(r: Rect, fill: CardFill) {
+    let paper = match fill {
+        CardFill::Normal => super::chrome::win_scaled("Win-paper", [1024; 3], [-148, -132, -148]),
+        CardFill::Hovered => super::chrome::win_scaled("Win-paper", [1024; 3], [-128, -112, -128]),
+        CardFill::Unaffordable => super::chrome::win_scaled("Win-paper", [2700; 3], [-548, -548, -659]),
+    };
+    match paper {
+        Some(t) => super::chrome::tex_src(&t, Rect::new(20.0, 20.0, 286.0, 112.0), r, WHITE),
+        None => super::chrome::surface(r, super::chrome::Skin::Brown),
+    }
+}
+
 
 pub fn duration_text(s: &SpellDef) -> String {
     match Duration::of(s) {
@@ -101,12 +151,15 @@ pub fn frame(
     let (cw, ch) = ((inner.w - 4.0 * gap) / 3.0, (inner.h - 6.0 * gap) / 5.0 + gap);
     let mut cast = None;
     for cell in 0..CASTABLE {
-        let (c, row) = (cell % COLS, cell / COLS);
+        // The 15 cells fill each column top to bottom, then the next column (0x4dad08).
+        let (c, row) = book_cell(cell);
         let cr = Rect::new(inner.x + gap + c as f32 * (cw + gap), inner.y + gap + row as f32 * ch, cw, ch - gap);
         let spell = book.get(cell);
-        // The cell: brown parchment; an empty one is the original's (0x4dc118 makes it,
-        // 0x49bde4 draws it): `Win-paper` from (20, 20) less (180, 140, 113), an olive, inside
-        // a 1 px steel line (0x48d1d4).
+        let hover = !input_blocked() && cr.contains(crate::ui::widgets::pointer().into());
+        // The cell: an empty one is the original's (0x4dc118 makes it, 0x49bde4 draws it):
+        // `Win-paper` from (20, 20) less (180, 140, 113), an olive, inside a 1 px steel line
+        // (0x48d1d4). A spell's card has no frame: its background tells the state (§9.3), and
+        // the hover look is the card's own colour, not a frame (0x4c2cf4).
         match (spell, chrome::win_scaled("Win-paper", [1024; 3], [-180, -140, -113])) {
             (None, Some(paper)) => {
                 chrome::tex_src(&paper, Rect::new(20.0, 20.0, 286.0, 112.0), cr, WHITE);
@@ -116,11 +169,11 @@ pub fn frame(
                 chrome::text_box(cr);
                 chrome::multiply(|| draw_rectangle(cr.x, cr.y, cr.w, cr.h, Color::new(0.62, 0.78, 0.5, 1.0)));
             }
-            (Some(_), _) => chrome::text_box(cr),
+            (Some(s), _) => {
+                let affordable = game.mana >= game.cast_cost(s).mana;
+                card_paper(cr, card_fill(affordable, hover));
+            }
         }
-        let hover = !input_blocked() && cr.contains(crate::ui::widgets::pointer().into());
-        let edge = if spell.is_some() && (*selected == cell || hover) { Color::new(1.0, 0.85, 0.5, 1.0) } else { Color::new(0.55, 0.5, 0.4, 1.0) };
-        draw_rectangle_lines(cr.x, cr.y, cr.w, cr.h, 1.0, edge);
         let icon = Rect::new(cr.x + 4.0 * k, cr.y + 4.0 * k, cr.h - 8.0 * k, cr.h - 8.0 * k);
         let tx = icon.x + icon.w + (cr.x + cr.w - icon.x - icon.w) / 2.0;
         let Some(s) = spell else {
@@ -151,11 +204,14 @@ pub fn frame(
             });
             continue;
         };
-        chrome::spell_icon(&s.icons, icon);
-        if let Some(t) = chrome::win_fx("Spell-Frame", chrome::Fx::KeyBlack) {
-            chrome::tex(&t, icon, WHITE);
-        }
         let cost = game.cast_cost(s);
+        // The card under the pointer shows its picture brightened, when the hero can afford it
+        // (4c2cf4 draws it through FUN_0048da5c with `selected` = 1; 49bde4 keeps it plain otherwise).
+        let tint = if hover && game.mana >= cost.mana { LIT } else { WHITE };
+        chrome::spell_icon_tinted(&s.icons, icon, tint);
+        if let Some(t) = chrome::win_fx("Spell-Frame", chrome::Fx::KeyBlack) {
+            chrome::tex(&t, icon, tint);
+        }
         // The book's cells are the original's spell cards (0x4d261c → 0x49bde4): the card
         // text of 0x49ba84 in the room right of the picture, red when unaffordable.
         let text = Rect::new(icon.x + icon.w, cr.y, cr.x + cr.w - icon.x - icon.w, cr.h);
@@ -233,7 +289,10 @@ pub(super) fn cast(game: &mut Game, spell: u32, target: CastTarget, message: &mu
 pub fn spell_card(game: &Game, s: &SpellDef, r: Rect, tint_mana: bool) {
     use super::chrome;
     let k = chrome::k();
-    chrome::text_box(r);
+    // The card's background (0x49bde4): red-brown over the hero's mana (49be19-49be42), the
+    // normal paper otherwise; the sanctuary's tab never tints (`tint_mana` false).
+    let red = tint_mana && game.mana < game.cast_cost(s).mana;
+    card_paper(r, card_fill(!red, false));
     let side = (r.h - 12.0 * k).min(100.0 * k);
     let icon = Rect::new(r.x + 6.0 * k, r.y + (r.h - side) / 2.0, side, side);
     chrome::spell_icon(&s.icons, icon);
@@ -316,5 +375,34 @@ fn card_text(game: &Game, s: &SpellDef, area: Rect, tint_mana: bool) {
         }
         chrome::shadow_centered(&line, tx, y, size, color);
         y += line_h;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_book_fills_each_column_before_the_next() {
+        // 0x4dad08: column = n / 5, row = n % 5, so cell 1 is under cell 0, not beside it.
+        assert_eq!(book_cell(0), (0, 0));
+        assert_eq!(book_cell(1), (0, 1));
+        assert_eq!(book_cell(4), (0, 4));
+        assert_eq!(book_cell(5), (1, 0));
+        assert_eq!(book_cell(14), (2, 4));
+        let mut seen: Vec<(usize, usize)> = (0..CASTABLE).map(book_cell).collect();
+        seen.sort();
+        seen.dedup();
+        assert_eq!(seen.len(), CASTABLE, "every cell is its own place");
+    }
+
+    #[test]
+    fn the_background_follows_the_mana_then_the_pointer() {
+        // 49be19-49be42: a card the hero cannot afford is the cannot-afford one whatever the
+        // pointer does; the hover look is the selected background (4c2cf4, 0x4dc118).
+        assert_eq!(card_fill(true, false), CardFill::Normal);
+        assert_eq!(card_fill(true, true), CardFill::Hovered);
+        assert_eq!(card_fill(false, false), CardFill::Unaffordable);
+        assert_eq!(card_fill(false, true), CardFill::Unaffordable);
     }
 }

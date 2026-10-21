@@ -301,11 +301,17 @@ pub fn art(rel: &str, fx: Fx) -> Option<Texture2D> {
 /// (-RGB)": 160,40,100 leaves «Исцеление»'s rays green), the backgrounds (`_` names) first,
 /// all glowing (black adds nothing). Draws nothing without an install.
 pub fn spell_icon(icons: &[razdor::dt::data::SpellIcon], r: Rect) {
+    spell_icon_tinted(icons, r, WHITE);
+}
+
+/// [`spell_icon`] with every layer drawn in `tint` (the book's hovered card: each colour
+/// brightened by 1400/1024, 4c2cf4 through FUN_0048da5c; the alpha is kept).
+pub fn spell_icon_tinted(icons: &[razdor::dt::data::SpellIcon], r: Rect, tint: Color) {
     let mut layers: Vec<(&str, Option<[i32; 3]>)> = icons.iter().filter_map(|i| Some((i.image.as_deref()?, i.tint))).collect();
     layers.sort_by_key(|(name, _)| !name.starts_with('_'));
-    for (name, tint) in layers {
-        let Some(t) = spell_layer(name, tint.unwrap_or([0; 3])) else { continue };
-        draw_texture_ex(&t, r.x, r.y, WHITE, DrawTextureParams { dest_size: Some(vec2(r.w, r.h)), ..Default::default() });
+    for (name, colour_correction) in layers {
+        let Some(t) = spell_layer(name, colour_correction.unwrap_or([0; 3])) else { continue };
+        draw_texture_ex(&t, r.x, r.y, tint, DrawTextureParams { dest_size: Some(vec2(r.w, r.h)), ..Default::default() });
     }
 }
 
