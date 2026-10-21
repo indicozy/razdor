@@ -2,10 +2,12 @@
 //! the original's (video notes §2): a title bar, a column of tabs on the left, the tab's
 //! content on the right, and the building's description at the bottom.
 
+use std::cell::RefCell;
 use std::collections::VecDeque;
 
 use macroquad::prelude::*;
 
+use razdor::dt::gfx::Image;
 use razdor::i18n::{n_, tr};
 use razdor::rules::battle::Team;
 use razdor::trf;
@@ -21,6 +23,8 @@ use razdor::rules::world::LocationKind;
 
 use super::assets::Assets;
 use super::chrome;
+use super::dt_font;
+use super::hall_ink;
 use super::audio::{cue, cued, Cue};
 use super::dialog::{resource_icon, Dialog, Picture, Resource, MANA};
 use super::item_filter;
@@ -40,14 +44,14 @@ const MARKET_HEADING: Color = Color::new(156.0 / 255.0, 1.0, 156.0 / 255.0, 1.0)
 const BUILDING_AND_ITEM_NAME: Color = Color::new(211.0 / 255.0, 228.0 / 255.0, 161.0 / 255.0, 1.0);
 const QUEST_HEADING: Color = Color::new(189.0 / 255.0, 190.0 / 255.0, 90.0 / 255.0, 1.0);
 
-/// The ink of a hall entry's name: the colour of the font it is drawn in (0x4beaac), a quest in
-/// the yellow font (0xae24a0), a rumour in the green one (0xae249c). The list widget draws its
-/// text subtractively (0x4d9060 sets the mode, 0x478a9c mode 5, 0x476790 flag 1), so on the
-/// parchment a quest comes out near black and a rumour crimson.
-fn hall_entry_ink(entry: HallEntry) -> [u8; 3] {
+/// The font of a hall entry's name (0x4beaac): a quest in the yellow Benguiat (0xae24a0, the
+/// sheet less (0, 0, 100)), a rumour in the green one (0xae249c, less (100, 0, 100)). The list
+/// widget draws its text subtractively (0x4d9060 sets the mode, 0x478a9c mode 5, 0x476790 flag
+/// 1), so on the parchment a quest's ink comes out near black and a rumour's crimson.
+fn hall_entry_font(entry: HallEntry) -> [u8; 3] {
     match entry {
-        HallEntry::Quest(_) => [255, 255, 155],
-        HallEntry::Rumour(_) => [155, 255, 155],
+        HallEntry::Quest(_) => [0, 0, 100],
+        HallEntry::Rumour(_) => [100, 0, 100],
     }
 }
 
@@ -432,7 +436,6 @@ fn hall_offers_in_face(game: &mut Game, f: &Frame, view: &mut BuildingView, mess
     let list_y = (quest_border.y + quest_border.h).max(take.y + take.h) + 5.0*k;
     let list = Rect::new(panel.x, list_y, panel.w, (panel.y + panel.h - list_y).max(row_h + 8.0 * k));
     let rows = (((list.h - 8.0 * k) / row_h).floor() as usize).max(1);
-    chrome::quest_list_parchment(list);
     let max_scroll = entries.len().saturating_sub(rows);
     if mouse_in(list.x, list.y, list.w, list.h) {
         let wh = wheel();
@@ -440,25 +443,44 @@ fn hall_offers_in_face(game: &mut Game, f: &Frame, view: &mut BuildingView, mess
         if wh > 0.0 { view.hall_scroll = view.hall_scroll.saturating_sub(1); }
     }
     view.hall_scroll = view.hall_scroll.min(max_scroll);
-    // The bar is always there, idle while the list fits, as the original's (0x4bedec).
-    scrollbar_always(Rect::new(list.x + list.w - 14.0 * k, list.y + 2.0 * k, 12.0 * k, list.h - 4.0 * k), &mut view.hall_scroll, rows, entries.len());
     let row_w = list.w - 16.0 * k;
     // The original lays the lines from the top of the list (0x47e46c). Razdor's deviation, the
     // owner's wish: when they all fit, the block is centred; when they scroll, it stays at the top.
     let fits = entries.len() <= rows;
     let first_y = hall_first_row_y(list.y + 4.0 * k, list.h - 8.0 * k, row_h, entries.len().min(rows), fits);
-    for (n, entry) in entries.iter().enumerate().skip(view.hall_scroll).take(rows) {
-        let y = first_y + (n - view.hall_scroll) as f32 * row_h;
-        let id = match *entry { HallEntry::Rumour(id) | HallEntry::Quest(id) => id };
-        if view.hall_pick == Some(n) {
+    let visible: Vec<(usize, HallEntry, String)> = entries
+        .iter()
+        .enumerate()
+        .skip(view.hall_scroll)
+        .take(rows)
+        .map(|(n, entry)| {
+            let id = match *entry { HallEntry::Rumour(id) | HallEntry::Quest(id) => id };
+            (n, *entry, story::event_title(game, id))
+        })
+        .collect();
+    // The list's paper, its ornaments, bands, the picked row and the names are drawn as the
+    // original's table subtract draws them (`hall_ink`); without the install's sheet or paper,
+    // the GPU path below draws the list.
+    let list_panel = hall_list_panel(list, k, first_y, row_w, view.hall_scroll, view.hall_pick, &visible);
+    match &list_panel {
+        Some((tex, _)) => chrome::tex(tex, Rect::new(list.x, list.y, tex.width() * k, tex.height() * k), WHITE),
+        None => chrome::quest_list_parchment(list),
+    }
+    // The bar is always there, idle while the list fits, as the original's (0x4bedec).
+    scrollbar_always(Rect::new(list.x + list.w - 14.0 * k, list.y + 2.0 * k, 12.0 * k, list.h - 4.0 * k), &mut view.hall_scroll, rows, entries.len());
+    for (i, (n, entry, name)) in visible.iter().enumerate() {
+        let y = first_y + (*n - view.hall_scroll) as f32 * row_h;
+        let on_panel = list_panel.as_ref().is_some_and(|(_, names_on_panel)| names_on_panel[i]);
+        if list_panel.is_none() && view.hall_pick == Some(*n) {
             quest_selection_row(Rect::new(list.x, y, row_w, row_h));
         }
-        let name = story::event_title(game, id);
-        let size = 16.0 * k;
-        let shown = ellipsize(&name, row_w - 20.0 * k, size);
-        let [r, g, b] = hall_entry_ink(*entry);
-        chrome::subtractive_text(|| text_centered(&shown, list.x + row_w / 2.0, y + row_h / 2.0 + size * 0.36, size, Color::from_rgba(r, g, b, 255)));
-        if mouse_in(list.x, y, row_w, row_h) && clicked() { view.hall_pick = Some(n); }
+        if !on_panel {
+            let size = 16.0 * k;
+            let shown = ellipsize(name, row_w - 20.0 * k, size);
+            let [r, g, b] = hall_entry_font(*entry).map(|o| 255 - o);
+            chrome::subtractive_text(|| text_centered(&shown, list.x + row_w / 2.0, y + row_h / 2.0 + size * 0.36, size, Color::from_rgba(r, g, b, 255)));
+        }
+        if mouse_in(list.x, y, row_w, row_h) && clicked() { view.hall_pick = Some(*n); }
     }
 
     let mut next = None;
@@ -485,6 +507,74 @@ fn hall_offers_in_face(game: &mut Game, f: &Frame, view: &mut BuildingView, mess
 /// top when the list scrolls.
 fn hall_first_row_y(inner_top: f32, inner_h: f32, row_h: f32, shown: usize, fits: bool) -> f32 {
     if fits { inner_top + ((inner_h - shown as f32 * row_h) / 2.0).max(0.0) } else { inner_top }
+}
+
+/// What the hall list's CPU panel shows: its size, scale and pick, and each visible row's name,
+/// font and place. The texture is kept while these stay the same.
+#[derive(PartialEq)]
+struct HallListKey {
+    w: u32,
+    h: u32,
+    scale: u32,
+    picked: Option<usize>,
+    rows: Vec<(String, [u8; 3], u32, bool)>,
+}
+
+thread_local! {
+    static HALL_LIST: RefCell<Option<(HallListKey, Texture2D)>> = const { RefCell::new(None) };
+}
+
+/// The hall list's CPU panel (`hall_ink`) at the interface scale `k`: the paper, ornaments,
+/// grey bands, the picked row's highlight, and each visible row's name where the sheet covers
+/// its characters and it fits the row unshortened (the other names stay on the GPU path). Returns
+/// the texture and, per visible row, whether its name is on it. `None` without the install's
+/// Benguiat sheet or Win-paper: the GPU path draws the list then.
+fn hall_list_panel(list: Rect, k: f32, first_y: f32, row_w: f32, scroll: usize, picked: Option<usize>, visible: &[(usize, HallEntry, String)]) -> Option<(Texture2D, Vec<bool>)> {
+    let (w, h) = ((list.w / k).ceil() as u32, (list.h / k).ceil() as u32);
+    let row_w1 = row_w / k;
+    let on_panel: Vec<bool> = dt_font::with_sheet(|sheet| {
+        visible.iter().map(|(_, _, name)| sheet.covers(name) && hall_ink::text_width(sheet, name) <= row_w1 - 20.0).collect()
+    })?;
+    let row_top = |n: usize| (first_y - list.y) / k + (n - scroll) as f32 * hall_ink::ROW_H;
+    let key = HallListKey {
+        w,
+        h,
+        scale: k.to_bits(),
+        picked,
+        rows: visible.iter().zip(&on_panel).map(|((n, entry, name), fit)| (name.clone(), hall_entry_font(*entry), row_top(*n).to_bits(), *fit)).collect(),
+    };
+    let cached = HALL_LIST.with(|c| c.borrow().as_ref().filter(|(old, _)| *old == key).map(|(_, t)| t.clone()));
+    if let Some(tex) = cached {
+        return Some((tex, on_panel));
+    }
+    let paper = chrome::image("Windows/Win-paper.lit")?;
+    let sides = hall_sides(w);
+    let rows: Vec<hall_ink::Row> = visible
+        .iter()
+        .zip(&on_panel)
+        .map(|((n, entry, name), fit)| hall_ink::Row {
+            top: row_top(*n),
+            picked: picked == Some(*n),
+            text: fit.then_some((name.as_str(), hall_entry_font(*entry))),
+        })
+        .collect();
+    let panel = hall_ink::Panel { w, h, paper: &paper, sides: sides.as_ref().map(|s| [&s[0], &s[1]]), row_w: row_w1, rows };
+    let img = dt_font::with_sheet(|sheet| hall_ink::draw(&panel, sheet))?;
+    let tex = Texture2D::from_rgba8(u16::try_from(w).ok()?, u16::try_from(h).ok()?, &img.rgba);
+    tex.set_filter(FilterMode::Nearest);
+    HALL_LIST.with(|c| *c.borrow_mut() = Some((key, tex.clone())));
+    Some((tex, on_panel))
+}
+
+/// The hall list's side ornaments as the original loads them (0x48e4e8: the frames with
+/// (−223, −215, 0) added), when a panel `w` px wide has room for them.
+fn hall_sides(w: u32) -> Option<[Image; 2]> {
+    let mut left = chrome::image("Windows/Big_Frame_1a.lit")?;
+    let mut right = chrome::image("Windows/Big_Frame_2a.lit")?;
+    for img in [&mut left, &mut right] {
+        chrome::scale_channels(img, [1024; 3], [-223, -215, 0]);
+    }
+    (w > right.width * 2 + 8).then_some([left, right])
 }
 
 /// Barracks: recruits for hire along the top, the counters, the army with heal and
@@ -2310,14 +2400,14 @@ fn with_back(bar: Option<Screen>, view: &BuildingView) -> Option<Screen> {
 
 #[cfg(test)]
 mod tests {
-    use super::{hall_entry_ink, hall_first_row_y, hire_panel_on, tab_state, village_ok_key, Entered, HirePanel};
+    use super::{hall_entry_font, hall_first_row_y, hire_panel_on, tab_state, village_ok_key, Entered, HirePanel};
     use razdor::rules::content::UnitId;
     use razdor::rules::script::HallEntry;
 
     #[test]
     fn hall_entries_take_their_font_colour_off_the_parchment() {
-        assert_eq!(hall_entry_ink(HallEntry::Quest(7)), [255, 255, 155], "a quest: the yellow font (0xae24a0)");
-        assert_eq!(hall_entry_ink(HallEntry::Rumour(7)), [155, 255, 155], "a rumour: the green font (0xae249c)");
+        assert_eq!(hall_entry_font(HallEntry::Quest(7)), [0, 0, 100], "a quest: the yellow font (0xae24a0), sheet less (0, 0, 100)");
+        assert_eq!(hall_entry_font(HallEntry::Rumour(7)), [100, 0, 100], "a rumour: the green font (0xae249c), sheet less (100, 0, 100)");
     }
 
     #[test]

@@ -17,6 +17,13 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   their references are not accepted yet (the owner decides).
   Port pending: dcad48a8 (the bar, `items_view.rs`) is not yet cherry-picked to `dt-original`; the
   cherry-pick conflicts there (the branch's `items_view.rs` has diverged), so it needs a hand port.
+- **16-bit screen format for the subtract tables** (2026-10-21). The table build (0x474de4)
+  and the hall list's CPU panel (`subtract16.rs`, `hall_ink.rs`) assume the 5-6-5 screen (masks
+  red 0xF800, green 0x07E0, blue 0x001F, as 0x475ad0 sets them for the 16-bit mode). A 5-5-5 screen
+  would build other tables, and the panel would differ there. Font colours and paper are packed to
+  5-6-5 by truncation (`pack565`, as `gfx::quantize_565`); the original's own rounding of its
+  font pixels is not checked. Verified against the original's screenshot of the quest and rumour
+  cores (black and (57–76, 0, 0)).
 
 - **Palace's barracks picture** (2026-10-21, found while fixing the altar's barracks). The hire
   tab of the palace shows `BI_Town` in Razdor (`barracks_interior`); the original's table at

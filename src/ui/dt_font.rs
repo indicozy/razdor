@@ -155,6 +155,10 @@ pub struct BitmapFont {
     /// Rows from a cell's top to the baseline, and the capital height (pixels of the sheet).
     baseline: f32,
     cap: f32,
+    /// The sheet's glyph level per pixel (its brightest channel; blue boxes 0), for the texts
+    /// the CPU draws (`hall_ink`).
+    grey: Vec<u8>,
+    width: u32,
 }
 
 /// Rows `(top, bottom)` of a glyph's cell that hold ink (brightness over a half).
@@ -175,18 +179,42 @@ impl BitmapFont {
         let glyphs: HashMap<char, Glyph> = chars.into_iter().zip(boxes).collect();
         let (top, bottom) = ink_rows(&img, glyphs[&'H'])?;
         let (baseline, cap) = ((bottom + 1) as f32, (bottom + 1 - top) as f32);
+        let mut grey = Vec::with_capacity(img.rgba.len() / 4);
         for p in img.rgba.chunks_exact_mut(4) {
             let blue = p[2] > 150 && p[0] < 100 && p[1] < 100;
             let m = if blue { 0 } else { p[0].max(p[1]).max(p[2]) };
+            grey.push(m);
             p.copy_from_slice(&[255, 255, 255, m]);
         }
+        let width = img.width;
         let (w, h) = (u16::try_from(img.width).ok()?, u16::try_from(img.height).ok()?);
         // Pixel-sharp: whole-number scales (`scale`) drawn without smoothing.
         let texture = Texture2D::from_rgba8(w, h, &img.rgba);
         texture.set_filter(FilterMode::Nearest);
         let smooth = Texture2D::from_rgba8(w, h, &img.rgba);
         smooth.set_filter(FilterMode::Linear);
-        Some(BitmapFont { texture, smooth, glyphs, baseline, cap })
+        Some(BitmapFont { texture, smooth, glyphs, baseline, cap, grey, width })
+    }
+
+    /// The cell of `c` in the sheet, with its pen advance (the cell's width) at sheet scale.
+    pub fn cell(&self, c: char) -> Option<Glyph> {
+        self.glyphs.get(&c).copied()
+    }
+
+    /// The glyph level of the sheet pixel (x, y): 0 for an empty pixel (transparent in the
+    /// original's text draw).
+    pub fn grey_at(&self, x: u32, y: u32) -> u8 {
+        self.grey.get((y * self.width + x) as usize).copied().unwrap_or(0)
+    }
+
+    /// Rows from a cell's top to the baseline, in sheet pixels.
+    pub fn baseline(&self) -> f32 {
+        self.baseline
+    }
+
+    /// Whether every character of `s` has a cell in the sheet.
+    pub fn covers(&self, s: &str) -> bool {
+        s.chars().all(|c| self.glyphs.contains_key(&c))
     }
 
     /// Screen pixels per sheet pixel at font size `size`: a whole number near what makes the
@@ -275,6 +303,15 @@ impl BitmapFont {
             }
         }
     }
+}
+
+/// Runs `f` with the current face's sheet, when the original's sheets are drawn (the Razdor
+/// font mode uses TrueType and has none).
+pub fn with_sheet<R>(f: impl FnOnce(&BitmapFont) -> R) -> Option<R> {
+    if mode() != FontMode::Original {
+        return None;
+    }
+    with_current(f)
 }
 
 thread_local! {
