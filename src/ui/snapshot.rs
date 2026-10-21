@@ -7,13 +7,13 @@
 //! `title`, `fonts` (sample lines in many scripts), `update` (a made-up release on offer), `authors[:<seconds>]`, `options[:advanced]`, `scenarios[:<map>]`, `tutorial`, `load[:manual|auto[:<row>]]`, `editor[:<map>[:<text to find>]]`, `classes:<map>`, `map:<map>[:x,y]`, `minimap:<map>`, `clash:<map>` (the first two armies fight on the explored map), `walk:<map>:dx,dy` (the
 //! hero sets off that many cells away), `building:<map>:<n>`
 //! (the hero in the n-th building; `:barracks`, `:garrison`, `:market`, `:sanctuary` open that tab; `:market-pack` the market's pack list), `army:<map>[:<n>[:<unit id>[:<level>]]]` (squad member n selected, made that unit at that level), `journal:<map>` / `hero:<map>[:<tab>]`, `spells:<map>`,
-//! `menu:<map>`, `defeat:<map>` (the lost battle's report), `event:<map>:<n>` (the map's event n's window; `RAZDOR_SCENE_LOST=<id>,…` adds its lost-items row),`report:<map>[:<gold>]` (the noon report), `settings:<map>[:advanced]`, `battle:<map>:<n>` (against the n-th army), `custom` (the custom battle
+//! `menu:<map>`, `defeat:<map>` (the lost battle's report), `event:<map>:<n>` (the map's event n's window; `RAZDOR_SCENE_LOST=<id>,…` adds its lost-items row),`learnt:<map>[:<id>,…]` (the event window with new spells, the hero with no mana), `report:<map>[:<gold>]` (the noon report), `settings:<map>[:advanced]`, `battle:<map>:<n>` (against the n-th army), `custom` (the custom battle
 //! setup), `custom-battle` (its first round; `custom-battle:watch` watches the AI play it). `RAZDOR_SCENE_DEBUG=1` turns the map's debug overlay (F3) on; `RAZDOR_SCENE_SHOW=x,y,r` shows
 //! a place as a lantern event does; `RAZDOR_SCENE_CONSOLE=help;gold 100` opens the cheat
 //! console after those commands; `RAZDOR_SCENE_FILTER=text` fills the inventory filter
 //! (army screen, market); `RAZDOR_SCENE_QUIET=1` drops
 //! the scenario's messages every frame, to see the screen under them; `RAZDOR_MOUSE=x,y`
-//! puts the pointer there (`RAZDOR_MOUSE_RIGHT=1` also holds the right button there: the map's tooltips); `RAZDOR_SCENE_SPELLS=<id>,…` puts those spells on every unit; `RAZDOR_SCENE_POTION=1` gives every unit of the army a
+//! puts the pointer there (`RAZDOR_MOUSE_RIGHT=1` also holds the right button there: the map's tooltips); `RAZDOR_SCENE_SPELLS=<id>,…` puts those spells on every unit; `RAZDOR_SCENE_TARGET=<id>` starts the targeting of that enemy spell on the map; `RAZDOR_SCENE_MANA=<n>` sets the hero's mana in the `spells` scene; `RAZDOR_SCENE_PREVIEW=1` shows the first spell's card at the pointer in the `learnt` scene; `RAZDOR_SCENE_POTION=1` gives every unit of the army a
 //! drunk potion. `RAZDOR_SCENE_LANGUAGE=1` opens the language list (`title`, `options:advanced`, `settings:<map>:advanced`). `replay:<step>` with `RAZDOR_REPLAY=<actions.jsonl>`: the diff
 //! `RAZDOR_SCENE_EXPERIMENTAL=bonuses,rings,amulets` enables selected playthrough rules;
 //! `RAZDOR_SCENE_RULES=1` opens their menu over `scenarios`. `RAZDOR_SCENE_BONUS_ITEMS=1`
@@ -630,6 +630,27 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             if let Ok(v) = std::env::var("RAZDOR_SCENE_LOST") {
                 d.lost = v.split(',').filter_map(|p| p.trim().parse::<u32>().ok()).map(razdor::rules::content::ItemId).collect();
             }
+            app.dialogs.push_back(d);
+            Screen::WorldMap
+        }
+        "learnt" => {
+            // `learnt:<map>[:<id>,…]`: the event window «Выучены новые заклинания» with those
+            // spells (default: the first two of the install), the hero with no mana, over the map.
+            // The spell icons' preview is the card at the pointer (RAZDOR_MOUSE).
+            let ids: Vec<u32> = match arg {
+                Some(a) => a.split(',').filter_map(|v| v.trim().parse().ok()).collect(),
+                None => game.content.spells.iter().take(2).map(|s| s.id).collect(),
+            };
+            game.mana = 0;
+            let mut d = super::dialog::Dialog::new("Hermit's gift");
+            // `RAZDOR_SCENE_PREVIEW=1`: the card of the first spell is up at RAZDOR_MOUSE, as after
+            // a press on its icon (the press's edge is never seen in a snapshot).
+            if let (Some((x, y)), Some(&first)) = (pointer(), ids.first()) {
+                if std::env::var("RAZDOR_SCENE_PREVIEW").is_ok_and(|v| v == "1") {
+                    d.preview.set(Some((true, first, macroquad::math::Vec2::new(x, y))));
+                }
+            }
+            d.spells = ids;
             app.dialogs.push_back(d);
             Screen::WorldMap
         }
