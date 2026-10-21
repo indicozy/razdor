@@ -1004,12 +1004,27 @@ exactly 25 items already allow one row of scrolling (an empty last row). **code*
 - Holding an item over a unit card (4c2f54): a refusal shows `Item<n>` (for a potion, code −5,
   the potion note `Item5` in the normal colour, the card not marked); acceptance shows line 3
   of the section naming the unit. **code**
-- The card under the pointer is lit while the item is held (4c280c, 4c2f54, card state in the
-  table at `add194`, drawn with the pulse of §9.1, 4cd704): state 4 (red, the enemy highlight)
-  for a refusal, state 2 (blue, the acting cell's highlight) for an acceptance. The refusal line
-  is the warning line, drawn on hover too (4c280c). The accepted frame sampled from the
-  original's screenshots is blue (94, 101, 255), not green. **code** (the states; the colours
-  are read from the frame, not from the table)
+- The card under the pointer is lit while the item is held (4c280c, 4c2f54, 4c57bc). The
+  table at `add194` (the army side; `add1c4` the other) holds a state per cell, drawn by 49462c
+  with the pulse of §9.1 (4cd704) through 493a64: the state minus 1 selects a block of 17
+  pictures at `add040` (0x44 apart), the pulse level the picture. The blocks are built at
+  4de6a0–4de8f1: block 1 (state 2) is the blue formula (255, 255, 255 − 16 × level), state 1
+  the cyan one, state 5 the green one, state 4 the red one. A refusal sets state 4 (red, the
+  enemy highlight) at 4c2f54 and 4c280c; an acceptance sets state 2 (blue, the acting cell's
+  highlight) on the hovered card, unless it is state 5. **code**
+- Green is the current unit: 4c2f54 sets state 5 on the selected unit (`DAT_0068dc78`
+  negative), and 4c57bc on the acting unit (`DAT_00668cf0`); an acceptance keeps a 5. So the
+  green frame in the original's screenshot (`discord/1562416472360222760/01-image.png`, the
+  mage card with the blue stat strip; the red-framed card is the one under the pointer, with
+  the held crown drawn on it) is most likely the selected unit, state 5, not the accepted
+  card. The accepted frame is blue by the code. **code** for the table and the builder; the
+  identity of the green card in the screenshot is an inference (**unknown** until a screenshot
+  of an acceptance with no selected unit is measured)
+- The refusal line is in the warning ink ae24f8 (the bold SanSerif with green less 152 and
+  blue less 159, 4dc051: white becomes 255, 103, 96), set by 4c2f54 and 4c280c, drawn on
+  hover too; the screenshot's line is that red. An acceptance's line 3 is in ae24cc (4c2f54,
+  before the Line1/2/3 switch); its base face is not measured yet (open, see
+  docs/OPEN_QUESTIONS.md). **code**
 
 **Hero window resource lines** (4d1814): four rows 78 px apart from y + 342, each with a frame,
 an icon, the label (lines 0–3 of the `[Hero]` section) and, 20 px right of and below it, the

@@ -933,6 +933,9 @@ pub const SILVER: Color = Color::new(0.80, 0.80, 0.84, 1.0);
 pub const SILVER_DARK: Color = Color::new(0.30, 0.31, 0.34, 1.0);
 pub const BLUE_TEXT: Color = Color::new(0.45, 0.70, 1.0, 1.0);
 pub const RED_TEXT: Color = Color::new(1.0, 0.33, 0.25, 1.0);
+/// The warning line's ink (ae24f8, 4c280c / 4c2f54 / 4c3dcc): the bold SanSerif with its green
+/// less 152 and blue less 159 (4dc051), so white ink becomes (255, 103, 96).
+pub const WARNING_INK: Color = Color::new(1.0, 103.0 / 255.0, 96.0 / 255.0, 1.0);
 pub const ORANGE_TEXT: Color = Color::new(1.0, 0.70, 0.25, 1.0);
 
 /// A window's or panel's background.

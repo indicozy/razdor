@@ -823,11 +823,9 @@ pub fn squad(
         if over {
             card_under = Some(i);
         }
-        // An item held over a card lights it (0x4c280c, 0x4c2f54, 0x4c57bc): red where the unit
-        // refuses it, blue where it takes it (the original's accepted frame is blue).
+        // An item held over a card lights it (0x4c280c, 0x4c2f54, 0x4c57bc).
         if over && game.held_item.is_some() {
-            let lit = if game.held_refusal(i).is_some() { chrome::Lit::Enemy } else { chrome::Lit::CanAct };
-            chrome::card_highlight(sq, lit, now_ms() as u64);
+            chrome::card_highlight(sq, held_card_lit(game.held_refusal(i).is_some()), now_ms() as u64);
         } else if selected.selected == Some(i) {
             chrome::glow_frame(sq, Color::new(0.35, 1.0, 0.35, 1.0), true);
         } else if over {
@@ -872,8 +870,10 @@ pub fn squad(
     // Holding an item over a card with a refusal shows the refusal (0x4c280c, `Item<n>`) in
     // the warning colour, before any press; a press's message stays until the next press.
     let hover_refusal = card_under.filter(|_| game.held_item.is_some()).and_then(|i| game.held_refusal(i)).map(equip_error);
+    // The refusal's line is the warning ink (ae24f8), a press's refusal too while the item is held.
+    let warn = game.held_item.is_some() && (message.is_some() || hover_refusal.is_some());
     let (hint, hc) = match (message.as_ref().or(hover_refusal.as_ref()), pointed) {
-        (Some(m), _) => (m.clone(), chrome::GOLD),
+        (Some(m), _) => (m.clone(), held_hint_ink(warn)),
         (None, Some(p)) => (p, Color::new(1.0, 0.55, 0.25, 1.0)),
         (None, None) if show_tree => (tr("Click a unit to select it; Esc returns").to_string(), Color::new(1.0, 0.55, 0.25, 1.0)),
         (None, None) => (tr("Click an item to pick it up, then a unit, a slot or a cell to put it; Esc returns").to_string(), Color::new(1.0, 0.55, 0.25, 1.0)),
@@ -963,6 +963,20 @@ pub(super) fn card_line(held: bool, under: usize, selected: Option<usize>) -> (u
         (false, Some(s)) => (2, s),
         (false, None) => (1, under),
     }
+}
+
+/// The state a card takes while an item is held over it (4c2f54 sets state 4 for a refusal,
+/// else state 2; 4c57bc draws them): red (4) where the unit refuses, blue (2) where it takes it.
+/// The state table at 0xadd194 is read in `chrome::Lit`; the original's green card is the
+/// current unit (state 5), not the acceptance.
+pub(super) fn held_card_lit(refused: bool) -> chrome::Lit {
+    if refused { chrome::Lit::Enemy } else { chrome::Lit::CanAct }
+}
+
+/// The hint line's ink while an item is held (4c2f54): the warning ink for a refusal, the
+/// normal line colour otherwise.
+pub(super) fn held_hint_ink(warn: bool) -> Color {
+    if warn { chrome::WARNING_INK } else { chrome::GOLD }
 }
 
 /// The hero window's state (side window 5, built by 0x4d8638): the pack's scroll, the
@@ -1217,7 +1231,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
 
 #[cfg(test)]
 mod tests {
-    use super::{card_line, class_wage, hero_resources, promo_ease, promo_look, promo_ms, ArmySel, Content, GridPress, UnitId};
+use super::{card_line, held_card_lit, held_hint_ink, class_wage, hero_resources, promo_ease, promo_look, promo_ms, ArmySel, Content, GridPress, UnitId};
 
     #[test]
     fn an_item_held_over_a_card_is_offered_on_line_3() {
@@ -1228,6 +1242,31 @@ mod tests {
         assert_eq!(card_line(false, 4, Some(3)), (2, 3));
         assert_eq!(card_line(false, 3, Some(3)), (0, 3));
         assert_eq!(card_line(false, 4, None), (1, 4));
+    }
+
+    #[test]
+    fn a_held_item_lights_the_card_red_for_a_refusal_and_blue_for_an_acceptance() {
+        // 4c2f54 writes state 4 (red, the enemy highlight) for a refusal and state 2 (blue) for
+        // an acceptance; 4c57bc draws them with the colours of the table built at 4de82e (the
+        // state-2 block at 0xadd084 is the blue formula: 255, 255, 255 − 16 × level). Green is
+        // state 5, the current unit, which an acceptance keeps (4c2f54: "if not 5, set 2").
+        use super::super::chrome::Lit;
+        assert_eq!(held_card_lit(true), Lit::Enemy);
+        assert_eq!(held_card_lit(false), Lit::CanAct);
+        assert_eq!(Lit::Enemy.ring(15, 0), [240, 0, 0], "red frame");
+        assert_eq!(Lit::CanAct.ring(15, 0), [0, 0, 240], "blue frame");
+    }
+
+    #[test]
+    fn a_refusal_line_is_in_the_warning_ink_and_an_offer_in_the_normal_one() {
+        // 4c280c / 4c2f54 set the warning font ae24f8 (4dc051: white becomes 255, 103, 96);
+        // an acceptance's line 3 keeps the normal line colour.
+        assert_eq!(held_hint_ink(true), super::super::chrome::WARNING_INK);
+        let red = super::super::chrome::WARNING_INK;
+        assert_eq!((red.r * 255.0).round() as u8, 255);
+        assert_eq!((red.g * 255.0).round() as u8, 103);
+        assert_eq!((red.b * 255.0).round() as u8, 96);
+        assert_eq!(held_hint_ink(false), super::super::chrome::GOLD);
     }
 
     fn sel(selected: Option<usize>, shown: Option<usize>) -> ArmySel {

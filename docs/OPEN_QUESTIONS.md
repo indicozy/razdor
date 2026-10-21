@@ -5,6 +5,15 @@ move to a Settled list.
 
 ## Open
 
+- **Held item: the green card and the acceptance line's face (report 1053, 2026-10-22).** The
+  code gives a refused card state 4 (red) and an accepted one state 2 (blue, the block at
+  0xadd084); the green frame in the original's screenshot is most likely the selected unit
+  (state 5). Open: the colour of an accepting card with no selected unit, and the face of the
+  acceptance line (ae24cc, its base not measured). Settles it: a screenshot of the original with
+  an item held over an accepting unit and no unit selected, and the ae24cc base from the
+  SanSerif colour table at 4dc051.
+
+
 - **Event window: the departed row's units** (2026-10-21, found with a player's report on the
   units rows). The original fills the departed row only with units really taken, by the taken
   unit's type (0x4a9711, 0x4961d0). Razdor shows every unit type the event lists under "departed"
