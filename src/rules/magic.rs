@@ -328,14 +328,16 @@ impl Game {
         let a = &self.world.armies[i];
         let t = a.tile(&self.world.map);
         let talks = a.attitude >= 1 && self.script.as_deref().is_some_and(|e| e.meeting_waiting(self, a.id));
-        self.can_target(t) && self.world.location_at(t).is_none() && !talks
+        // The hero's own cell is never a target: the hit test skips his army (magic-items.md §3.5).
+        t != self.tile() && self.can_target(t) && self.world.location_at(t).is_none() && !talks
     }
 
     /// An enemy spell aimed at cell `t` on the map (0x4ccb8f-0x4ccc4c): the army there, on a
     /// target cell outside any building, if any; `Err` for a friend with a meeting waiting
-    /// (the target -1: the hint refuses it and a click does nothing).
+    /// (the target -1: the hint refuses it and a click does nothing). The hero's own cell is
+    /// no target: the original's hit test skips the hero's army (magic-items.md §3.5).
     pub fn curse_aim(&self, t: Tile) -> Option<Result<u32, ()>> {
-        if !self.can_target(t) || self.world.location_at(t).is_some() {
+        if t == self.tile() || !self.can_target(t) || self.world.location_at(t).is_some() {
             return None;
         }
         let i = (0..self.world.armies.len()).find(|&i| self.world.armies[i].tile(&self.world.map) == t)?;
@@ -940,6 +942,21 @@ mod tests {
         assert_eq!(g.spell_targets(), vec![0]);
         g.mana = 1000;
         assert!(g.cast(3, CastTarget::Army(friend)).is_ok());
+    }
+
+    #[test]
+    fn the_heros_own_army_is_no_target() {
+        // magic-items.md §3.5: the hit test skips the hero's army (and ship): hovering his cell
+        // aims at nothing, so no ring and no army name (video of the original, 637).
+        let mut g = game(HeroClass::Knight);
+        let here = g.tile();
+        let uid = with_enemy(&mut g, (5, 2), &[troop(4, 0, 1)]);
+        g.world.armies[0].ignore_until = f64::MAX;
+        g.world.armies[0].pos = g.world.map.center(here);
+        g.world.armies[0].post = here;
+        assert_eq!(g.curse_aim(here), None, "the hero's cell is no target");
+        assert!(!g.spell_targets().iter().any(|&i| g.world.armies[i].uid == uid));
+        assert_eq!(g.begin_cast(3, CastTarget::Army(uid)), Err(CastError::NotATarget));
     }
 
     #[test]
