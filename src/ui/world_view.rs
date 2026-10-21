@@ -2306,7 +2306,8 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
         hover = cam.tile_under_mouse().filter(|_| idle && !on_minimap).map(|t| {
             let ring = match game.curse_aim(t) {
                 Some(Ok(_)) => Some(rgb(0x00, 0xc4, 0xff)),
-                _ if game.can_target(t) => Some(rgb(0xdf, 0x00, 0x00)),
+                // The hero's own cell is no target (the original's hit test skips his army): no ring.
+                _ if game.can_target(t) && t != game.tile() => Some(rgb(0xdf, 0x00, 0x00)),
                 _ => None,
             };
             (t, ring)
