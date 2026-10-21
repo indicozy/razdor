@@ -8,13 +8,18 @@ use crate::ui::input::{is_key_down, is_key_pressed};
 use macroquad::prelude::*;
 
 use razdor::i18n::tr;
-use razdor::rules::content::{Content, ItemId};
+use razdor::rules::content::{ArtefactType, Content, ItemId};
 use razdor::rules::items::filter_match;
 use razdor::rules::pack_order::{ItemGroup, PackSort};
 use razdor::search::Match;
 
+use super::assets::Assets;
 use super::chrome;
 use super::widgets::*;
+
+/// The group buttons in their row, left to right (the owner's approved order; `All` has none:
+/// a lit button is shown again by a click on it).
+pub const ROW: [ItemGroup; 8] = [ItemGroup::Helms, ItemGroup::Armour, ItemGroup::Weapons, ItemGroup::Shields, ItemGroup::Rings, ItemGroup::Amulets, ItemGroup::Potions, ItemGroup::Other];
 
 /// What the filter's keys did this frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -25,7 +30,7 @@ pub struct Reply {
     pub keys_taken: bool,
 }
 
-/// The label of a group button (the backpack's row and the market's group button).
+/// The name of a group (the hint shown over its button).
 pub fn group_label(group: ItemGroup) -> &'static str {
     match group {
         ItemGroup::All => tr("All"),
@@ -35,16 +40,70 @@ pub fn group_label(group: ItemGroup) -> &'static str {
         ItemGroup::Shields => tr("Shields"),
         ItemGroup::Rings => tr("Rings"),
         ItemGroup::Amulets => tr("Amulets"),
+        ItemGroup::Potions => tr("Potions"),
         ItemGroup::Other => tr("Other"),
     }
 }
 
-/// The label of the backpack's order button, showing the current order.
-pub fn sort_label(sort: PackSort) -> &'static str {
+/// The item whose picture stands for a group: the lowest id of the kinds it holds, a blow
+/// weapon first for Weapons. `None` when the content has no such item.
+pub fn representative(content: &Content, group: ItemGroup) -> Option<ItemId> {
+    let first = |pred: &dyn Fn(ArtefactType) -> bool| content.items.iter().filter(|d| pred(d.kind)).min_by_key(|d| d.id).map(|d| ItemId(d.id));
+    if group == ItemGroup::Weapons {
+        first(&|k| k == ArtefactType::BlowWeapon).or_else(|| first(&|k| group.holds(k)))
+    } else {
+        first(&|k| group.holds(k))
+    }
+}
+
+/// The row of group buttons in `r` (Razdor's, the owner's approved design): one square-ish
+/// button per group of [`ROW`], evenly spaced, each showing a picture of its group's
+/// [`representative`] fitted inside it, its name as a hint while hovered. A click on a group
+/// shows only that group and lights its button; a click on the lit button shows everything
+/// again. Returns the group shown.
+pub fn group_row(content: &Content, assets: &Assets, r: Rect, group: ItemGroup) -> ItemGroup {
+    let k = chrome::k();
+    let gap = 3.0 * k;
+    let w = (r.w - gap * (ROW.len() - 1) as f32) / ROW.len() as f32;
+    let mut shown = group;
+    for (i, g) in ROW.into_iter().enumerate() {
+        let b = Rect::new(r.x + i as f32 * (w + gap), r.y, w, r.h);
+        let on = group == g;
+        let (hover, down, pressed) = button_state(b, true);
+        let bg = if on {
+            Color::new(0.55, 0.42, 0.18, 1.0)
+        } else if down {
+            Color::new(0.36, 0.28, 0.18, 1.0)
+        } else if hover {
+            Color::new(0.28, 0.22, 0.14, 1.0)
+        } else {
+            Color::new(0.22, 0.18, 0.12, 1.0)
+        };
+        draw_rectangle(b.x, b.y, b.w, b.h, bg);
+        draw_rectangle_lines(b.x, b.y, b.w, b.h, 1.0, if on { ACCENT } else { DIM });
+        // The picture fitted inside the button with a small padding, square.
+        let pad = 3.0 * k;
+        let side = (b.w.min(b.h) - 2.0 * pad).max(0.0);
+        if let Some(item) = representative(content, g) {
+            assets.draw_item(item, b.x + (b.w - side) / 2.0, b.y + (b.h - side) / 2.0, side);
+        }
+        if pressed {
+            claim();
+            shown = if on { ItemGroup::All } else { g };
+        }
+        if hover {
+            tooltip_later(&[(group_label(g).to_string(), INK)]);
+        }
+    }
+    shown
+}
+
+/// The label of the backpack's order button (short: it shares the row with the groups).
+pub fn sort_short_label(sort: PackSort) -> &'static str {
     match sort {
-        PackSort::Shown => tr("Order: as found"),
-        PackSort::NameUp => tr("Name A–Z"),
-        PackSort::NameDown => tr("Name Z–A"),
+        PackSort::Shown => tr("As found"),
+        PackSort::NameUp => tr("A–Z"),
+        PackSort::NameDown => tr("Z–A"),
         PackSort::PriceDown => tr("Price ↓"),
         PackSort::PriceUp => tr("Price ↑"),
     }

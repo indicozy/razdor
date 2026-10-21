@@ -132,7 +132,7 @@ pub fn open_language_list() -> bool {
 }
 
 /// `RAZDOR_SCENE_PACK_VIEW=<group>,<order>`: the item group (`all`, `weapons`, `armour`,
-/// `helms`, `shields`, `rings`, `amulets`, `other`) and order (`shown`, `name-up`, `name-down`,
+/// `helms`, `shields`, `rings`, `amulets`, `potions`, `other`) and order (`shown`, `name-up`, `name-down`,
 /// `price-down`, `price-up`) the backpack and the market show; an unknown word leaves it out.
 fn pack_view_from_env() -> Option<(razdor::rules::pack_order::ItemGroup, razdor::rules::pack_order::PackSort)> {
     use razdor::rules::pack_order::{ItemGroup, PackSort};
@@ -146,6 +146,7 @@ fn pack_view_from_env() -> Option<(razdor::rules::pack_order::ItemGroup, razdor:
         "shields" => ItemGroup::Shields,
         "rings" => ItemGroup::Rings,
         "amulets" => ItemGroup::Amulets,
+        "potions" => ItemGroup::Potions,
         "other" => ItemGroup::Other,
         _ => return None,
     };

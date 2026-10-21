@@ -1568,13 +1568,12 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
     let before = item_filter::keep(&c, all.iter().copied(), &view.filter).len();
     let filter_rect = Rect::new(lx, y, lw, 18.0 * k);
     let reply = item_filter::field_with(FILTER_KEY, &mut view.filter, filter_rect, &[KeyCode::N], before, all.len(), false);
-    // The group button under the titles: a click shows the next group, a right click the one before.
+    // The row of group buttons under the titles (the same row as the backpack's): a click shows
+    // that group, a click on the lit one shows all.
     let group_rect = Rect::new(lx, y + 21.0 * k, lw, 18.0 * k);
-    if button(group_rect.x, group_rect.y, group_rect.w, group_rect.h, &trf!("Group: {group}", group = item_filter::group_label(view.group)), true) {
-        view.group = view.group.next();
-        view.scroll = 0;
-    } else if right_clicked() && mouse_in(group_rect.x, group_rect.y, group_rect.w, group_rect.h) {
-        view.group = view.group.prev();
+    let shown = item_filter::group_row(&c, assets, group_rect, view.group);
+    if shown != view.group {
+        view.group = shown;
         view.scroll = 0;
     }
     if view.filter.is_empty() && !has_focus(FILTER_KEY) {

@@ -8,7 +8,7 @@ use super::content::{ArtefactType, Content, ItemId};
 use super::custom::{self, Category};
 
 /// The groups an item list is shown by: everything, one of the six classes of
-/// [`custom::Category`], or the rest (potions and trade goods).
+/// [`custom::Category`], the potions, or the rest (trade goods).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ItemGroup {
     #[default]
@@ -19,12 +19,13 @@ pub enum ItemGroup {
     Shields,
     Rings,
     Amulets,
-    /// Every kind none of the six named groups holds (potions and trade goods).
+    Potions,
+    /// Every kind none of the other groups holds (trade goods).
     Other,
 }
 
 impl ItemGroup {
-    pub const EVERY: [ItemGroup; 8] = [
+    pub const EVERY: [ItemGroup; 9] = [
         ItemGroup::All,
         ItemGroup::Weapons,
         ItemGroup::Armour,
@@ -32,13 +33,14 @@ impl ItemGroup {
         ItemGroup::Shields,
         ItemGroup::Rings,
         ItemGroup::Amulets,
+        ItemGroup::Potions,
         ItemGroup::Other,
     ];
 
-    /// The six named groups, each a [`Category`] (`Other` is what none of them holds).
+    /// The six named groups, each a [`Category`] (`Potions` and `Other` have none).
     fn named(self) -> Option<Category> {
         match self {
-            ItemGroup::All | ItemGroup::Other => None,
+            ItemGroup::All | ItemGroup::Potions | ItemGroup::Other => None,
             ItemGroup::Weapons => Some(Category::Weapons),
             ItemGroup::Armour => Some(Category::Armour),
             ItemGroup::Helms => Some(Category::Helms),
@@ -52,7 +54,9 @@ impl ItemGroup {
     pub fn holds(self, kind: ArtefactType) -> bool {
         match self {
             ItemGroup::All => true,
-            ItemGroup::Other => ItemGroup::EVERY.into_iter().all(|g| g == ItemGroup::All || g == ItemGroup::Other || !g.holds(kind)),
+            ItemGroup::Potions => kind == ArtefactType::Potion,
+            // Whatever no other group holds: the trade goods.
+            ItemGroup::Other => ItemGroup::EVERY.into_iter().all(|g| matches!(g, ItemGroup::All | ItemGroup::Other) || !g.holds(kind)),
             named => named.named().is_some_and(|c| c.holds(kind)),
         }
     }
@@ -146,9 +150,11 @@ mod tests {
     }
 
     #[test]
-    fn other_holds_potions_and_trade_goods_only() {
+    fn potions_and_trade_goods_have_their_own_groups() {
         let other: Vec<ArtefactType> = ArtefactType::ALL.into_iter().filter(|&k| ItemGroup::Other.holds(k)).collect();
-        assert_eq!(other, vec![ArtefactType::Potion, ArtefactType::Item]);
+        assert_eq!(other, vec![ArtefactType::Item]);
+        let potions: Vec<ArtefactType> = ArtefactType::ALL.into_iter().filter(|&k| ItemGroup::Potions.holds(k)).collect();
+        assert_eq!(potions, vec![ArtefactType::Potion]);
         assert!(ItemGroup::Weapons.holds(ArtefactType::Staff));
         assert!(!ItemGroup::Weapons.holds(ArtefactType::Armor));
     }

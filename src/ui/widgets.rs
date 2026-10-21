@@ -1065,7 +1065,7 @@ pub fn fields_end_frame() {
     }
 }
 
-fn claim() {
+pub(super) fn claim() {
     CLAIMED.with(|c| c.set(true));
 }
 

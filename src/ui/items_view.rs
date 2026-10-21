@@ -815,25 +815,17 @@ pub fn squad(
     }
     // Razdor gives the backpack the whole top right (the user's choice, 2026-10-09: no item
     // description box; an item's description pops up by the pointer, as a spell badge's).
-    // Under the two rows of group and order buttons (below) the pack starts at y 100.
-    let content = if show_tree { at(258.0, 54.0, 300.0, 242.0) } else { at(258.0, 100.0, 568.0, 196.0) };
+    // Under the row of group, search and order (below) the pack starts at y 66.
+    let content = if show_tree { at(258.0, 54.0, 300.0, 242.0) } else { at(258.0, 66.0, 568.0, 230.0) };
     let (mut group, mut sort) = (GROUP.with(|g| g.get()), SORT.with(|s| s.get()));
     if !show_tree {
-        // The group and order rows (Razdor's, view only): five groups on the first row, the
-        // other three and the order button on the second, so every label is whole. A click on
-        // a group shows that group, a click on the order button goes on to the next order; either
-        // starts the pack at its top.
-        let mut picked = group;
-        for (i, g) in ItemGroup::EVERY.into_iter().enumerate() {
-            let (row, col) = if i < 5 { (0, i) } else { (1, i - 5) };
-            let r = at(258.0 + 114.0 * col as f32, 54.0 + 23.0 * row as f32, 111.0, 20.0);
-            if toggle_button(r.x, r.y, r.w, r.h, item_filter::group_label(g), group == g) {
-                picked = g;
-            }
-        }
-        let r = at(600.0, 77.0, 226.0, 20.0);
+        // The row (Razdor's, view only): the group buttons (a picture each, a click shows that
+        // group, a click on the lit one shows all), then the search field, then the order button
+        // (a click goes on to the next order). A change starts the pack at its top.
+        let picked = item_filter::group_row(&c, assets, at(258.0, 31.0, 309.0, 30.0), group);
+        let r = at(734.0, 31.0, 92.0, 30.0);
         let mut sorted = sort;
-        if toggle_button(r.x, r.y, r.w, r.h, item_filter::sort_label(sort), sort != PackSort::Shown) {
+        if toggle_button(r.x, r.y, r.w, r.h, item_filter::sort_short_label(sort), sort != PackSort::Shown) {
             sorted = sort.next();
         }
         if picked != group || sorted != sort {
@@ -857,7 +849,7 @@ pub fn squad(
         let ordered = pack_order::pack_view_order(&c, game.pack.entries(), group, sort);
         let of = ordered.len();
         let before = item_filter::keep(&c, ordered.iter().copied(), &query).len();
-        filter = item_filter::field(FILTER_KEY, &mut query, at(258.0, 31.0, 300.0, 20.0), &[KeyCode::A, KeyCode::N], before, of);
+        filter = item_filter::field(FILTER_KEY, &mut query, at(573.0, 31.0, 155.0, 30.0), &[KeyCode::A, KeyCode::N], before, of);
         kept = item_filter::keep(&c, ordered, &query);
         FILTER.with(|f| query.clone_into(&mut f.borrow_mut()));
     }
@@ -1114,6 +1106,8 @@ pub fn squad(
         draw_rectangle(px + 6.0 * k, py + 6.0 * k, pw, ph, Color::new(0.0, 0.0, 0.0, 0.45));
         super::item_text::draw(game, assets, item, Rect::new(px, py, pw, ph), super::item_text::ItemBox::Tooltip, k);
     }
+    // The group button's name, queued by the row (drawn after the frame, as the item's text).
+    draw_later();
     // The item held is the pointer; closing the window puts it back in the pack (the
     // screen change in `App::frame`, 0x4b8d28).
     draw_held(game, assets);
