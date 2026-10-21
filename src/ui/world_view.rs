@@ -489,7 +489,8 @@ fn spell_target_hint(game: &Game, spell: u32, aim: Option<Result<u32, ()>>) {
         }
     }
     lines.push((info("SpellCancelHint", n_("Cancel: right click or ESC")), Color::new(1.0, 0.92, 0.6, 1.0)));
-    hint_box(&lines, 510.0 * k);
+    // Shown whatever option 6 says: the game always shows the spell-target hints (interface.md §10).
+    hint_box_always(&lines, 510.0 * k);
 }
 
 /// The camera goes to `target` (a spell's): queued for the map.
