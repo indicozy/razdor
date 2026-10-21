@@ -396,11 +396,18 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 - **Hint box placement** (2026-10-14). Hint boxes now fade in as the original's (300 ms), but
   `widgets::tooltip` still sits at the mouse +18 px; the original's are at +21, +37, flipped and
   clamped inside the owner window (interface.md hint boxes, 49e710).
-- **Learnt spell cells** (2026-10-14). The empty spell-book cell is now the original's
-  (`Win-paper` less 180, 140, 113); a learnt one is `Win-paper` less 148, 132, 148, the picked
-  one less 128, 112, 128 and one without the mana less 208, 208, 250 then greyed (0x4dc118).
-  Razdor still draws learnt cells as its brown text box: compare with a screenshot of the
-  original's book with spells.
+- **Spell preview: the first frames** (2026-10-21, a player's video). Frames 623 and 624 show
+  the event's spell card smaller (about 284 × 110 px at 1920) than the steady card (625, 626:
+  402 × 157); 623's card is brown with only the name and one effect line, where the steady
+  card of the same spell is dark red. Not explained: a grow-in or a fade of the original's
+  tooltip, or the card under the press's edge. Razdor shows the steady card at once. Needs the
+  original's tooltip timing (4cbd58 under Wine, the player's video frame times).
+- **dt-original: spell book port pending** (2026-10-21). The book's column order (4dad08),
+  hover look and hover picture (4c2cf4, 1400/1024), card backgrounds (4dc118, 49bde4), the
+  event card's size (4cbd58), the hero's cell as no target (magic-items.md §3.5) and the spell-
+  target hint shown whatever option 6 says (interface.md §10) are main's. Cherry-pick them to
+  dt-original once it is free (the four "Spell book:" commits of 2026-10-21 on main).
+
 - **Army window strip text size** (2026-10-14, UI audit). The text in the army window's middle
   strip is Razdor's (the original's strip is an ornament; its hints are hint boxes): the audit
   found it large. A Razdor choice to settle with the owner, not a parity fix.
@@ -423,6 +430,15 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   lists the same artifacts now: the rules report what was taken (`EventOutcome::ItemsLost`), so a
   slot for an item the player does not hold shows nothing. Test: `the_lost_row_lists_only_what_was_taken`
   and `other_shore_the_lightning_takes_the_sword_and_lists_it` (event 54 takes the sword).
+
+- **Spell book hover picture and the event preview** (2026-10-21, a player's report). The
+  hovered affordable card's picture is brightened by 1400/1024 (4c2cf4 → FUN_0048da5c,
+  `spell_badges::draw_picture_lit`). The event window's spell card is the book's cell size, 286 ×
+  112 at the window's scale: the player's frames 625-626 are 402 × 157 px at 1920 with the
+  mana, reading and duration lines, on dark red for a hero with no mana. Razdor drew it
+  unscaled, 286 × 112 px, so those lines were cut (the same card text: 49ba84). Now the card is
+  scaled with the window (`dialog.rs`, the spell preview). Settled by the screenshots of both
+  builds (`dialog` preview before and after, 2026-10-21).
 
 - **«Максимум» steps back out of the front row with a strike open** (#1037, 2026-10-20; the
   bench's retreat count: 18 of Max's 1861 decisions, the original's 6 of 1661). A full-HP

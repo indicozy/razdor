@@ -130,6 +130,11 @@ group or the order starts the pack at its top; both are kept for the session (`G
 filter line, `item_filter::field_with`): it hides the other groups' rows before the filter, and a
 hidden pick is not the pick.
 
+The book (`spellbook::frame`) lays its 15 cells out column by column (`ROWS` = 5, 4dad08). A
+card's background is the paper less the state's colour (`spellbook::card_fill`, `card_paper`):
+normal, hovered (the hover is the colour, no frame), or dark red over the hero's mana. A card
+has no frame of its own. The event window's spell tooltip is the same card at the book's cell
+size, scaled with the window (`dialog.rs`, the spell preview), so its cost and duration lines show.
 A spell's card, wherever it is shown (the spell book's cells, the sanctuary's description, the
 event window's spell tooltip), has the same text, drawn by `spellbook::card_text` in
 `src/ui/spellbook.rs` (`spellbook::spell_card` adds the box and picture): the name, then the

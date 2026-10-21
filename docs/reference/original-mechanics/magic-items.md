@@ -197,7 +197,8 @@ clearly "the hero's army has a Caster". **code**
 ### 3.5 Choosing an enemy target (world frame 0x4cc148, hit test 0x4cbf20)
 
 - In target mode, hovering any cell that holds an army (not the hero, not the ship) on a
-  **valid cell** makes it the target and shows its name. A valid cell is on the map area (not
+  **valid cell** makes it the target and shows its name. The hero's own cell is no target:
+  no ring and no name, only the "Pick a target" hint (video of the original, 637). A valid cell is on the map area (not
   over the minimap, above the bottom bar), **explored**, and passable for the hero's current
   movement map.
 - **There is no distance limit and no line-of-sight test.** The army's code is stored in its
@@ -473,6 +474,9 @@ Razdor's code read: `src/rules/items.rs`, `src/rules/magic.rs`, `src/rules/units
 | Topic | Razdor now | Original | Section | Status |
 |---|---|---|---|---|
 | Spell slots | 4 slots on every unit and troop (`Unit::spells`); a unit with no slot for the spell is skipped, instant part included (`magic::spell_on_unit`) | 4 slots on every unit; full slots skip that unit entirely, instant part included | §4.1 | Matches |
+| Spell book order | Razdor's spell book fills each row of 3 (`spellbook::frame`), the original fills each column of 5 top to bottom (4dad08) | Column-major (`ROWS` = 5) | §2 | Razdor now matches |
+| Hover in the book | Frame on the hovered card, and on unaffordable cards too | Hover redraws the card in its own colour, no frame (4c2cf4); the cannot-afford card is dark red (49bde4) | §3.5 | Razdor now matches (the hover picture brightened 1400/1024) |
+| Hero's cell in target mode | Red ring on the hero's cell | No ring; the hero's army is no target | §3.5 | Razdor now matches |
 | Enemy target range | Any army on an explored cell a click can target, outside buildings, at any distance; friends too unless they have a meeting event waiting and attitude ≥ 1 (`Game::can_curse`, `EventEngine::meeting_waiting`) | Any army on an explored, passable cell, no distance, visible or not; friendly armies may be cursed unless they are "talking" friends | §3.5 | Matches |
 | Target moves during the cast | Lost only if it leaves the map (removed from it, destroyed or deactivated) | Lost only if it leaves the map or is destroyed | §3.2 | Matches |
 | Mana short at the end | The cost, worked out again when the spell lands, is subtracted with no check; mana may go negative | Mana is subtracted anyway and can go negative | §3.4 | Matches |
