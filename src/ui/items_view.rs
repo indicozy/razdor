@@ -823,7 +823,12 @@ pub fn squad(
         if over {
             card_under = Some(i);
         }
-        if selected.selected == Some(i) {
+        // An item held over a card lights it (0x4c280c, 0x4c2f54, 0x4c57bc): red where the unit
+        // refuses it, blue where it takes it (the original's accepted frame is blue).
+        if over && game.held_item.is_some() {
+            let lit = if game.held_refusal(i).is_some() { chrome::Lit::Enemy } else { chrome::Lit::CanAct };
+            chrome::card_highlight(sq, lit, now_ms() as u64);
+        } else if selected.selected == Some(i) {
             chrome::glow_frame(sq, Color::new(0.35, 1.0, 0.35, 1.0), true);
         } else if over {
             chrome::glow_frame(sq, Color::new(0.35, 0.55, 1.0, 0.9), false);
@@ -856,14 +861,18 @@ pub fn squad(
     } else if personal_hover && !showing_type {
         chrome::ui_text("Army", "ItemI").filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).or_else(|| Some(tr("His own item: it cannot be taken off while he lives.").to_string()))
     } else {
-        match (card_under, selected.selected) {
-            (Some(i), Some(s)) if i == s => army_line(0, s),
-            (Some(_), Some(s)) => army_line(2, s),
-            (Some(i), None) => army_line(1, i),
-            (None, _) => empty_under.and_then(row_text),
+        match card_under {
+            Some(i) => {
+                let (line, who) = card_line(game.held_item.is_some(), i, selected.selected);
+                army_line(line, who)
+            }
+            None => empty_under.and_then(row_text),
         }
     };
-    let (hint, hc) = match (message.as_ref(), pointed) {
+    // Holding an item over a card with a refusal shows the refusal (0x4c280c, `Item<n>`) in
+    // the warning colour, before any press; a press's message stays until the next press.
+    let hover_refusal = card_under.filter(|_| game.held_item.is_some()).and_then(|i| game.held_refusal(i)).map(equip_error);
+    let (hint, hc) = match (message.as_ref().or(hover_refusal.as_ref()), pointed) {
         (Some(m), _) => (m.clone(), chrome::GOLD),
         (None, Some(p)) => (p, Color::new(1.0, 0.55, 0.25, 1.0)),
         (None, None) if show_tree => (tr("Click a unit to select it; Esc returns").to_string(), Color::new(1.0, 0.55, 0.25, 1.0)),
@@ -942,6 +951,18 @@ pub fn squad(
 pub(super) fn class_wage(c: &Content, id: UnitId) -> i32 {
     let undead = c.unit(id).nature == razdor::dt::data::Nature::Undead;
     if razdor::rules::content::HeroClass::of_unit(id).is_some() || undead { 0 } else { c.wage(id) }
+}
+
+/// The card's hint line: while an item is held, line 3 offers it to the unit under the pointer
+/// (0x4c2f54, the acceptance); with nothing held, line 0 over the selected unit, line 2 over
+/// another while one is selected, line 1 over a unit with none selected (0x4c2f54, 0x4c612c).
+pub(super) fn card_line(held: bool, under: usize, selected: Option<usize>) -> (usize, usize) {
+    match (held, selected) {
+        (true, _) => (3, under),
+        (false, Some(s)) if s == under => (0, s),
+        (false, Some(s)) => (2, s),
+        (false, None) => (1, under),
+    }
 }
 
 /// The hero window's state (side window 5, built by 0x4d8638): the pack's scroll, the
@@ -1196,7 +1217,18 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
 
 #[cfg(test)]
 mod tests {
-    use super::{class_wage, hero_resources, promo_ease, promo_look, promo_ms, ArmySel, Content, GridPress, UnitId};
+    use super::{card_line, class_wage, hero_resources, promo_ease, promo_look, promo_ms, ArmySel, Content, GridPress, UnitId};
+
+    #[test]
+    fn an_item_held_over_a_card_is_offered_on_line_3() {
+        // 0x4c2f54: with an item held the card's line is line 3 (the offer, naming the unit);
+        // with nothing held it is the select / move line.
+        assert_eq!(card_line(true, 4, None), (3, 4));
+        assert_eq!(card_line(true, 3, Some(3)), (3, 3));
+        assert_eq!(card_line(false, 4, Some(3)), (2, 3));
+        assert_eq!(card_line(false, 3, Some(3)), (0, 3));
+        assert_eq!(card_line(false, 4, None), (1, 4));
+    }
 
     fn sel(selected: Option<usize>, shown: Option<usize>) -> ArmySel {
         ArmySel { selected, shown }

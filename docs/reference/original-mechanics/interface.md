@@ -1004,6 +1004,12 @@ exactly 25 items already allow one row of scrolling (an empty last row). **code*
 - Holding an item over a unit card (4c2f54): a refusal shows `Item<n>` (for a potion, code −5,
   the potion note `Item5` in the normal colour, the card not marked); acceptance shows line 3
   of the section naming the unit. **code**
+- The card under the pointer is lit while the item is held (4c280c, 4c2f54, card state in the
+  table at `add194`, drawn with the pulse of §9.1, 4cd704): state 4 (red, the enemy highlight)
+  for a refusal, state 2 (blue, the acting cell's highlight) for an acceptance. The refusal line
+  is the warning line, drawn on hover too (4c280c). The accepted frame sampled from the
+  original's screenshots is blue (94, 101, 255), not green. **code** (the states; the colours
+  are read from the frame, not from the table)
 
 **Hero window resource lines** (4d1814): four rows 78 px apart from y + 342, each with a frame,
 an icon, the label (lines 0–3 of the `[Hero]` section) and, 20 px right of and below it, the
