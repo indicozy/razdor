@@ -8,6 +8,21 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **Sea pirates flee the hero; a village catch (report 1082, 2026-10-22).** Players see the
+  pirates sail off when the hero comes near and cannot catch them at a coastal village, while the
+  original's pirates sail into the village and can be caught there. The spec has no fleeing rule
+  (ai.md §7.4 repulsion cones and §13 ships are the only mechanisms); the decompile of 0x4a548c
+  does not settle whether a ship inside a village footprint counts as "in a building" (§8). Settles
+  it: the same map and position in the original under Wine, watched step by step, and the
+  building test in 0x4a548c for a ship's cell.
+- **Battle opens with no visible approach (report 1070, 2026-10-22).** The contact and the start
+  of the battle match world.md §4.3 (0x4a548c, attacks only on the hero's step). Open: whether
+  the original shows the approaching army (camera, fog) in the same case. Settles it: the original
+  run with the army starting outside the view.
+- **Install path with spaces on Windows (report 1081, 2026-10-22).** The current code and tests
+  handle spaces (src/dt/install.rs). Not reproduced. Settles it: the reporter's `razdor.log`
+  (`install:` and `.env:` lines) and the folder listing.
+
 - **dt-original: hall list ink not ported** (2026-10-21, with 56dd8324; dt-original dbbb2b00 ports
   its spec lines only). The 16-bit subtract of the hall list's names (`subtract16.rs`, `hall_ink.rs`) is
   main's only. dt-original's list is a GPU parchment with darkened edges, names fitted by `text_fit`
