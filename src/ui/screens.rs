@@ -148,9 +148,9 @@ pub(super) fn start_game(demo: &Arc<Content>, scenario: Option<(&ScenarioEntry, 
     let mut g = match scenario {
         Some((e, c)) => {
             let mut g = Game::from_scenario(c.clone(), &e.scenario, hero);
-            // Saves name the map file and a hash of its bytes.
+            // Saves name the map file, a hash of its bytes, and carry the bytes.
             match ScenarioRef::of_map(&e.path, &e.file) {
-                Ok(origin) => g.set_origin(origin),
+                Ok((origin, bytes)) => g.set_map(origin, bytes),
                 Err(err) => razdor::diag!("{}: {err}; this game cannot be saved", e.file),
             }
             g
@@ -278,7 +278,7 @@ fn next_campaign_map<'a>(game: &Option<Game>, scenarios: &'a [ScenarioEntry]) ->
 fn campaign_game(content: Arc<Content>, prev: &NextMap, e: &ScenarioEntry) -> Game {
     let mut g = Game::from_campaign(content, &e.scenario, prev);
     match ScenarioRef::of_map(&e.path, &e.file) {
-        Ok(origin) => g.set_origin(origin),
+        Ok((origin, bytes)) => g.set_map(origin, bytes),
         Err(err) => razdor::diag!("{}: {err}; this game cannot be saved", e.file),
     }
     razdor::diag::play(&g.clock.label(), &super::play_game_line(&g, "next campaign map"));

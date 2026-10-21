@@ -300,14 +300,26 @@ impl App {
         let Some(old) = self.game.as_ref() else { return };
         let game = match &old.origin {
             Some(save::ScenarioRef::Map { file, .. }) => {
-                let (Some(e), Some(c)) = (self.scenarios.iter().find(|e| &e.file == file), self.dt_content.clone()) else {
+                // The install's map, else the map the save carries (saves-data §12.2): a save
+                // from another player's install loads and restarts without the map file.
+                let installed = self.scenarios.iter().find(|e| &e.file == file);
+                let carried;
+                let scenario = match (installed, old.map_bytes.as_deref().map(Scenario::from_file_bytes)) {
+                    (Some(e), _) => Some(&e.scenario),
+                    (None, Some(Ok(s))) => {
+                        carried = s;
+                        Some(&carried)
+                    }
+                    _ => None,
+                };
+                let (Some(scenario), Some(c)) = (scenario, self.dt_content.clone()) else {
                     self.message = Some(tr("The map of this game is not in the install.").into());
                     self.screen = Screen::WorldMap;
                     return;
                 };
                 // The original's restart snapshot: a campaign map starts again with what
                 // the map before carried over (0x4b5ff8).
-                let g = old.restart(c, &e.scenario);
+                let g = old.restart(c, scenario);
                 razdor::diag::play(&g.clock.label(), &play_game_line(&g, "restart"));
                 g
             }
