@@ -815,17 +815,19 @@ pub fn squad(
     }
     // Razdor gives the backpack the whole top right (the user's choice, 2026-10-09: no item
     // description box; an item's description pops up by the pointer, as a spell badge's).
-    // Under the row of group, search and order (below) the pack starts at y 66.
+    // Under the row of group and search buttons (below) the pack starts at y 66.
     let content = if show_tree { at(258.0, 54.0, 300.0, 242.0) } else { at(258.0, 66.0, 568.0, 230.0) };
     let (mut group, mut sort) = (GROUP.with(|g| g.get()), SORT.with(|s| s.get()));
+    // The row over the pack: nine equal buttons across the backpack, the last one the search.
+    let row = item_filter::row_cells::<9>(at(258.0, 31.0, 568.0, 30.0));
     if !show_tree {
-        // The row (Razdor's, view only): the group buttons (a picture each, a click shows that
-        // group, a click on the lit one shows all), then the search field, then the order button
-        // (a click goes on to the next order). A change starts the pack at its top.
-        let picked = item_filter::group_row(&c, assets, at(258.0, 31.0, 309.0, 30.0), group);
-        let r = at(734.0, 31.0, 92.0, 30.0);
+        // The row (Razdor's, view only, the owner's approved mockup): eight group buttons (a
+        // picture each, a click shows that group, a click on the lit one shows all), then the
+        // search button, which is the filter (below). A right click on it goes on to the next
+        // order. A change starts the pack at its top.
+        let picked = item_filter::group_row(&c, assets, &row[..8], group);
         let mut sorted = sort;
-        if toggle_button(r.x, r.y, r.w, r.h, item_filter::sort_short_label(sort), sort != PackSort::Shown) {
+        if right_clicked() && mouse_in(row[8].x, row[8].y, row[8].w, row[8].h) {
             sorted = sort.next();
         }
         if picked != group || sorted != sort {
@@ -849,7 +851,7 @@ pub fn squad(
         let ordered = pack_order::pack_view_order(&c, game.pack.entries(), group, sort);
         let of = ordered.len();
         let before = item_filter::keep(&c, ordered.iter().copied(), &query).len();
-        filter = item_filter::field(FILTER_KEY, &mut query, at(573.0, 31.0, 155.0, 30.0), &[KeyCode::A, KeyCode::N], before, of);
+        filter = item_filter::search_button(FILTER_KEY, &mut query, row[8], &[KeyCode::A, KeyCode::N], before, of, sort);
         kept = item_filter::keep(&c, ordered, &query);
         FILTER.with(|f| query.clone_into(&mut f.borrow_mut()));
     }

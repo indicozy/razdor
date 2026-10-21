@@ -1585,10 +1585,10 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
     let before = item_filter::keep(&c, all.iter().copied(), &view.filter).len();
     let filter_rect = Rect::new(lx, y, lw, 18.0 * k);
     let reply = item_filter::field_with(FILTER_KEY, &mut view.filter, filter_rect, &[KeyCode::N], before, all.len(), false);
-    // The row of group buttons under the titles (the same row as the backpack's): a click shows
-    // that group, a click on the lit one shows all.
-    let group_rect = Rect::new(lx, y + 21.0 * k, lw, 18.0 * k);
-    let shown = item_filter::group_row(&c, assets, group_rect, view.group);
+    // The row of group buttons under the titles (the same buttons as the backpack's, fitted to
+    // this row): a click shows that group, a click on the lit one shows all.
+    let group_rect = Rect::new(lx, y + 21.0 * k, lw, 24.0 * k);
+    let shown = item_filter::group_row(&c, assets, &item_filter::row_cells::<8>(group_rect), view.group);
     if shown != view.group {
         view.group = shown;
         view.scroll = 0;
@@ -1609,7 +1609,7 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
         view.pick = first_pick(rows.len());
     }
     let at_pick = view.pick.and_then(|p| kept.iter().position(|(n, _)| *n == p));
-    if let Some(k) = price_list(Some(assets), &shown, &marks, at_pick, &mut view.scroll, lx, y + 41.0 * k, lw, 6) {
+    if let Some(k) = price_list(Some(assets), &shown, &marks, at_pick, &mut view.scroll, lx, y + 47.0 * k, lw, 6) {
         view.pick = Some(kept[k].0);
     }
     if reply.pick {

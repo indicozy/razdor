@@ -345,6 +345,13 @@ Nothing is called "{query}". = Ничего не называется «{query}�
 # The inventory filter
 Search: type a name (Ctrl+F) = Поиск: наберите название (Ctrl+F)
 {found} of {of} = {found} из {of}
+Search = Поиск
+Right click: order = ПКМ — порядок
+Order: {order} = Порядок: {order}
+By name A–Z = По имени А–Я
+By name Z–A = По имени Я–А
+A–Z = А–Я
+Z–A = Я–А
 Type, Ctrl+F = Набор, Ctrl+F
 market: filter the list (Enter picks the first, Esc clears) = рынок: отбор списка (Enter — первый, Esc — сброс)
 filter the backpack (Enter: the first to the unit, Esc clears) = отбор рюкзака (Enter — первый воину, Esc — сброс)

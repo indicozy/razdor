@@ -2186,7 +2186,7 @@ fn marble_button_tinted(r: Rect, label: &str, enabled: bool, hover: bool, quest_
 }
 
 /// A button's label, centred, smaller if it must be to fit.
-fn button_label(r: Rect, label: &str, enabled: bool, _hover: bool, _quest_red: bool) {
+pub fn button_label(r: Rect, label: &str, enabled: bool, _hover: bool, _quest_red: bool) {
     let color = if !enabled {
         Color::new(0.6, 0.6, 0.58, 1.0)
     } else {

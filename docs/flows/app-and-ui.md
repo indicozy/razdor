@@ -108,18 +108,26 @@ Enter picks the first match up. An empty worn slot on the unit panel is the orig
 (`chrome::empty_item_slot`), a worn item its picture alone.
 
 The backpack's view (Razdor's, view only: the pack keeps its order) is one row at the top of the
-army window's backpack (`items_view::squad`, y 31): eight picture buttons, one per group
-(`item_filter::group_row`, in `item_filter::ROW`: helms, armour, weapons, shields, rings,
-amulets, potions, other; `rules::pack_order::ItemGroup`, each kind in exactly one; a picture is
-`item_filter::representative`, a hint shows the name, labels `group_label`), then the search
-field (`item_filter::field`), then the order button (`PackSort`: as found, A–Z, Z–A, price
-dearest or cheapest first, short labels `item_filter::sort_short_label`). A click on a group
-shows only it and lights its button; a click on the lit one shows all again (there is no "all"
-button). The pack's cells are then listed through `pack_order::pack_view_order` as the filter
+army window's backpack (`items_view::squad`, y 31, x 258 to 826): nine equal buttons with small
+even gaps (`item_filter::row_cells`), drawn on the green marble of the original's buttons
+(`item_filter::row_face`: `Btn1`/`Btn2`/`Btn3` Up, Down while lit, three-sliced so the ends keep
+their shape). The first eight are the group buttons (`item_filter::group_row`, in
+`item_filter::ROW`: helms, armour, weapons, shields, rings, amulets, potions, other;
+`rules::pack_order::ItemGroup`, each kind in exactly one). Each shows its group's picture
+(`item_filter::representative`) fitted inside, its name as a hint (`group_label`). A click on a
+group shows only it and holds its button down (accent edge); a click on the lit one shows all
+again (there is no "all" button). The ninth is the search (`item_filter::search_button`): idle it
+reads «Поиск»; a click, Ctrl+F or a typed letter makes it the field, the text shows on its face
+and it stays lit while a query is held; Esc clears it. Its hover hint gives the found and of
+count, the order and «ПКМ — порядок». A right click on it goes on to the next order
+(`PackSort::next`); a changed order is named small at its bottom (`sort_short_label`), in the
+body face. The pack's cells are then listed through `pack_order::pack_view_order` as the filter
 lists them, so the filter counts within the group and Enter takes the first shown. Changing the
 group or the order starts the pack at its top; both are kept for the session (`GROUP`, `SORT` in
-`items_view`). The market's list has the same row under its titles (`building_view::market`):
-it hides the other groups' rows before the filter, and a hidden pick is not the pick.
+`items_view`). The market's list has the same eight group buttons under its titles
+(`building_view::market`, a row of 24 px, the list below it; no search: the market keeps its own
+filter line, `item_filter::field_with`): it hides the other groups' rows before the filter, and a
+hidden pick is not the pick.
 
 A spell's card, wherever it is shown (the spell book's cells, the sanctuary's description, the
 event window's spell tooltip), has the same text, drawn by `spellbook::card_text` in
