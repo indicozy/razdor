@@ -2907,6 +2907,54 @@ mod real_maps {
         }
     }
 
+    /// РК3 → РК4 (the capital to the eastern province, report 1075): РК4's header bytes 0x110
+    /// are [1, 1, 1, 1, 1, 0, 0] (events.md §12), so the gold, the mana, the book and the worn
+    /// items carry, but the old pack and the old army are replaced by РК4's own (its preset
+    /// army, its preset pack). Kept by 68a0988a; the old hero's own record always comes.
+    #[test]
+    fn the_eastern_province_drops_the_old_army_and_pack_and_keeps_the_worn_items() {
+        let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+        let dt = DtInstall::load(std::path::Path::new(&dir)).expect("install loads");
+        let c = Arc::new(Content::from_dt(&dt));
+        let load = |name: &str| dt.maps.iter().find(|m| m.name == name).unwrap().load().unwrap();
+        let (rk3, rk4) = (load("РК3-Столица"), load("РК4-Восточная провинция"));
+        assert_eq!(rk4.header.carry_over, [1, 1, 1, 1, 1, 0, 0]);
+        let mut old = Game::from_scenario(c.clone(), &rk3, HeroClass::Knight);
+        let _ = old.drain_events();
+        for _ in 0..3 {
+            let u = old.squad[0].clone();
+            old.squad.push(u);
+        }
+        old.pack = vec![ItemId(3), ItemId(5)].into();
+        old.squad[0].items[0] = Some(ItemId(7));
+        old.gold = 500;
+        let army: Vec<Unit> = old.squad.iter().skip(1).cloned().collect();
+        let prev = NextMap {
+            experimental: Default::default(),
+            name: "РК4-Восточная провинция.DTm".into(),
+            branch: None,
+            gold: Some(old.gold),
+            mana: Some(old.mana),
+            fame: true,
+            hero: old.squad[0].clone(),
+            spells: Some(old.spells.clone()),
+            hero_items: true,
+            inventory: Some(old.pack.clone()),
+            army: Some(army),
+            flags: String::new(),
+            class: HeroClass::Knight,
+            hero_name: None,
+            figure: None,
+            journal: crate::rules::journal::History::default(),
+        };
+        let preset = Game::from_scenario(c.clone(), &rk4, HeroClass::Knight);
+        let g = Game::from_campaign(c.clone(), &rk4, &prev);
+        assert_eq!(g.squad.len(), preset.squad.len(), "the old army is replaced by РК4's preset army");
+        assert_eq!(g.pack.entries().count(), preset.pack.entries().count(), "the old pack is replaced by РК4's pack");
+        assert_eq!(g.squad[0].items[0], Some(ItemId(7)), "byte 4: the worn items stay");
+        assert_eq!(g.gold, old.gold, "byte 0: the gold is set to the old amount");
+    }
+
     /// Устье Трейна: event 66 ("- Проверка на меч", +DelSword) is on the wooden bridge at
     /// (32, 51) and is the only setter of the flag that event 78 needs to take the sword after
     /// the fight with Сэлдом. A walk that ends on a bridge enters it for its local events
