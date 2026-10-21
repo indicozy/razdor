@@ -1124,8 +1124,8 @@ struct SpellShow<'a> {
     layers: &'a [FxLayer],
     /// The target's place in world units (its cell's centre while it stands).
     at: (f32, f32),
-    /// The target figure's place among the figures (see [`draw_world`]).
-    key: f32,
+    /// The cell of the target figure: its layers are drawn in that cell's pass (see [`draw_world`]).
+    cell: Tile,
     /// Since the cast.
     ms: f64,
 }
@@ -1507,17 +1507,24 @@ fn draw_hero(game: &Game, assets: &Assets, art: Option<&DtArt>, cam: &Camera) {
 }
 
 /// A massif object's layer in a cell's turn of the pass (+0, classes 1–8), a plant's (+2,
-/// classes 9–12), the building's (+0xC) last (0x4c8864, 0x4c9b5b).
+/// classes 9–12), the building's (+0xC) last (0x4c8864, 0x4c9b5b). Then a spell's layer 2,
+/// the cell's figures (armies, the ship, the hero: the drawn-occupant byte, 0x4c9dca), and a
+/// spell's layer 3 after them (0x4ca108).
 const LAYER_BUILDING: i64 = 2;
+const LAYER_SPELL_BELOW: i64 = 3;
+const LAYER_FIGURE: i64 = 4;
+const LAYER_SPELL_ABOVE: i64 = 5;
 
 fn object_layer(class: u8) -> i64 {
     i64::from(class >= object_class::TREES)
 }
 
 /// Where a cell's drawing comes in the map's one pass over the cells: row by row, left to
-/// right, then by layer within the cell (0x4c8864).
+/// right, then by layer within the cell (0x4c8864). A figure is drawn in its cell's turn, so
+/// a building or a tree in a later cell covers it (its tall picture reaches up into the
+/// cells north of it), while a figure in a later cell stands in front.
 fn cell_pass_key((x, y): Tile, layer: i64) -> i64 {
-    ((i64::from(y) + 64) * 65536 + (i64::from(x) + 64)) * 4 + layer
+    ((i64::from(y) + 64) * 65536 + (i64::from(x) + 64)) * 8 + layer
 }
 
 /// The first cell of a building's footprint in the pass's order: the top row's left cell
@@ -1596,26 +1603,27 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
             }
         }
     }
-    // Figures (armies, the waiting ship, the hero) always stand in front of the scenery: they
-    // are sorted among themselves and drawn after every object and building.
-    let mut figures: Vec<(f32, Drawable)> = Vec::new();
+    // The figures (armies, the waiting ship, the hero) are drawn in their cell's turn of the
+    // pass, after the cell's scenery and buildings (0x4c9b5b, 0x4c9dca). The original keys a
+    // figure by its drawn cell (cell +9), so a figure north of a building is covered by it
+    // (the castle's walls hide a hero behind them, a player's report).
     // Armies in the dark keep moving but are not shown.
     for (i, a) in game.world.armies.iter().enumerate().filter(|(_, a)| fog.explored(a.tile(map))) {
-        figures.push((game.army_display_pos(a).1 + 0.02, Drawable::Army(i)));
+        items.push((cell_pass_key(a.tile(map), LAYER_FIGURE), Drawable::Army(i)));
     }
     if let Some(ship) = game.ship.filter(|s| !s.aboard && fog.explored(s.tile)) {
-        figures.push((map.center(ship.tile).1 + 0.02, Drawable::Ship));
+        items.push((cell_pass_key(ship.tile, LAYER_FIGURE), Drawable::Ship));
     }
-    figures.push((game.display_pos().1 + 0.03, Drawable::Hero));
+    items.push((cell_pass_key(game.tile(), LAYER_FIGURE), Drawable::Hero));
     // A spell's layer 2 just behind its target's figure, layer 3 just in front (0x4c9b5b
     // draws them in the cell's pass before its armies, 0x4c9dca, and after, 0x4ca108).
     if let Some(s) = spell {
-        figures.push((s.key - 0.001, Drawable::Spell(2)));
-        figures.push((s.key + 0.001, Drawable::Spell(3)));
+        items.push((cell_pass_key(s.cell, LAYER_SPELL_BELOW), Drawable::Spell(2)));
+        items.push((cell_pass_key(s.cell, LAYER_SPELL_ABOVE), Drawable::Spell(3)));
     }
+    // Stable: figures sharing a cell keep the order they were pushed in.
     items.sort_by_key(|a| a.0);
-    figures.sort_by(|a, b| a.0.total_cmp(&b.0));
-    for d in items.iter().map(|(_, d)| d).chain(figures.iter().map(|(_, d)| d)) {
+    for d in items.iter().map(|(_, d)| d) {
         match d {
             Drawable::Object(o) => draw_object(o, art, cam),
             Drawable::Building(i) => draw_building(&game.world.locations[*i], art, cam, hover.is_some_and(|h| h.building == Some(*i))),
@@ -2763,13 +2771,10 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     let show = match view.spell_fx.front() {
         Some(SpellFx::Layers { army, layers, started: Some(t0) }) => {
             let target = match army {
-                None => Some((game.display_pos(), game.display_pos().1 + 0.03)),
-                Some(uid) => game.world.armies.iter().find(|a| a.uid == *uid).map(|a| {
-                    let p = game.army_display_pos(a);
-                    (p, p.1 + 0.02)
-                }),
+                None => Some((game.display_pos(), game.tile())),
+                Some(uid) => game.world.armies.iter().find(|a| a.uid == *uid).map(|a| (game.army_display_pos(a), a.tile(&game.world.map))),
             };
-            target.map(|(at, key)| SpellShow { layers, at, key, ms: (now - t0) * 1000.0 })
+            target.map(|(at, cell)| SpellShow { layers, at, cell, ms: (now - t0) * 1000.0 })
         }
         _ => None,
     };
@@ -3155,6 +3160,21 @@ fn draw_debug(game: &Game, cam: &Camera) {
 #[cfg(test)]
 mod tests {
     use razdor::rules::content::HeroClass;
+
+    /// A figure is drawn in its cell's turn of the map's pass (0x4c9b5b, 0x4c9dca, drawn-occupant
+    /// byte cell +9): a building whose top-left footprint cell is (5, 10) covers a figure one row
+    /// north of it (the castle's walls hide a hero behind them), and a figure one row south
+    /// stands in front of it. Within one cell the scenery and the building come first.
+    #[test]
+    fn a_figure_is_drawn_in_its_cells_turn_of_the_pass() {
+        use super::{cell_pass_key, LAYER_BUILDING, LAYER_FIGURE, LAYER_SPELL_ABOVE};
+        let castle = cell_pass_key((5, 10), LAYER_BUILDING);
+        assert!(cell_pass_key((5, 9), LAYER_FIGURE) < castle, "behind the walls: covered");
+        assert!(cell_pass_key((5, 11), LAYER_FIGURE) > castle, "in front of the walls: seen");
+        assert!(cell_pass_key((5, 10), LAYER_FIGURE) > castle, "its own cell: after the building");
+        assert!(cell_pass_key((5, 9), LAYER_BUILDING) < cell_pass_key((5, 9), LAYER_FIGURE));
+        assert!(cell_pass_key((5, 9), LAYER_FIGURE) < cell_pass_key((5, 9), LAYER_SPELL_ABOVE));
+    }
 
     #[test]
     fn the_debug_overlay_tints_by_how_the_hero_moves() {

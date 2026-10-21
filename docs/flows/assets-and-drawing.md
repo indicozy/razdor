@@ -165,8 +165,9 @@ textures from a 4×4 atlas, water frames multiplied in), then decorations
 (`draw_object`) and buildings (`draw_building`) in one pass over the cells as the original's
 (0x4c8864, 0x4c9b5b: row by row, left to right; in a cell its massif object, its plant, then
 the building whose footprint covers it if not drawn yet, so a building comes at its top row's
-left cell and every later object covers it), armies (`draw_army`, `draw_figure`,
-`draw_ship`), the hero (`draw_hero`), the route (`draw_route`), and the tooltip
+left cell and every later object covers it; then the cell's figures: armies (`draw_army`,
+`draw_figure`, `draw_ship`) and the hero (`draw_hero`), keyed by their cell, so a figure north
+of a building is covered by it, as the castle's walls cover a hero behind them), the route (`draw_route`), and the tooltip
 (`draw_tooltip`; its opaque box in the original's three styles is `widgets::tooltip_panel_styled`,
 the layout as interface.md §7.4). Buildings are anchored like the original (right edge on the cell; see
 PLAYTEST_NOTES "Мосты сдвинуты"). A figure inside a building is not drawn, as the

@@ -22,6 +22,12 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 - **Install path with spaces on Windows (report 1081, 2026-10-22).** The current code and tests
   handle spaces (src/dt/install.rs). Not reproduced. Settles it: the reporter's `razdor.log`
   (`install:` and `.env:` lines) and the folder listing.
+- **Quick battle pays the same XP as a fought one** (2026-10-22, report 1187). The award is the
+  original's share (experience.md §3): the AI spends every action on an attack, so its units
+  reach the 4t cap that a manual player with passes and moves rarely reaches (a lucky quick
+  battle: 360 per unit; manual wins: 200–280). Razdor's quick battle (Razdor extra) and the
+  fought battle use one award path, so this is not a bug. Question for the owner: should the
+  quick battle pay a lower rate (a Razdor deviation, main only), or stay as it is?
 
 - **dt-original: hall list ink not ported** (2026-10-21, with 56dd8324; dt-original dbbb2b00 ports
   its spec lines only). The 16-bit subtract of the hall list's names (`subtract16.rs`, `hall_ink.rs`) is
