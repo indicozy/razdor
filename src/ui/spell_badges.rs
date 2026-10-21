@@ -30,6 +30,8 @@ thread_local! {
     static PENDING: RefCell<Option<Hint>> = const { RefCell::new(None) };
     /// Composed pictures by spell id: (22 px badge, 100 px picture), `None` without art.
     static PICTURES: RefCell<HashMap<u32, Option<(Texture2D, Texture2D)>>> = RefCell::new(HashMap::new());
+    /// The hovered picture of each spell: the same picture scaled by 1400/1024 (see [`draw_picture_lit`]).
+    static PICTURES_LIT: RefCell<HashMap<u32, Option<Texture2D>>> = RefCell::new(HashMap::new());
 }
 
 /// The badges of a unit whose portrait is `sq` (the original's 92 px square, scaled): its
@@ -201,6 +203,36 @@ pub fn draw_picture(spell: &SpellDef, r: Rect) -> bool {
     let Some((_, picture)) = pictures(spell) else { return false };
     chrome::tex(&picture, r, WHITE);
     true
+}
+
+/// The picture of a card under the pointer (4c2cf4 → 49bde4): the spell's picture copied and
+/// brightened by 1400/1024 (FUN_0048da5c: each colour ×1400 >> 10, clamped to 255), then masked
+/// by the icon alpha (FUN_00476a3c). Alpha is kept. Returns false without the art.
+pub fn draw_picture_lit(spell: &SpellDef, r: Rect) -> bool {
+    let cached = PICTURES_LIT.with(|m| m.borrow().get(&spell.id).cloned());
+    let lit = match cached {
+        Some(t) => t,
+        None => {
+            let made = compose_from_install(spell).and_then(|(_, mut picture)| {
+                brighten(&mut picture, 1400);
+                texture(&picture)
+            });
+            PICTURES_LIT.with(|m| m.borrow_mut().insert(spell.id, made.clone()));
+            made
+        }
+    };
+    let Some(t) = lit else { return false };
+    chrome::tex(&t, r, WHITE);
+    true
+}
+
+/// Scales each colour of `img` by `k`/1024, clamped (FUN_0048da5c with no offsets); alpha is kept.
+fn brighten(img: &mut Image, k: u32) {
+    for px in img.rgba.chunks_exact_mut(4) {
+        for c in &mut px[..3] {
+            *c = ((u32::from(*c) * k) >> 10).min(255) as u8;
+        }
+    }
 }
 
 fn texture(img: &Image) -> Option<Texture2D> {
