@@ -56,16 +56,21 @@ Layout (`<backlog>` is the path in `CLAUDE.local.md`):
     replies included.
   - **Media**: the files in `<id>/media/`, one line each on what it shows.
   - **Kind** and **Verdict**: what Razdor does, what the original does (addresses), the cause.
-  - **Status** history, one dated line per change: `new`, `needs-info` (what was asked),
-    `fixing`, `fixed` (commit, test name), `shipped X.Y.Z`, `as-original`, `deviation`
-    (approved / declined by the owner), `wontfix`, `duplicate of <id>`, `regressed` (→ the new
-    report's id).
+  - **Status** history, one dated line per change, the flow of `CLAUDE.md`: open `new` →
+    `triaged` → `needs-info` (what was asked) / `in-progress` → `fixed` (commit, test name) →
+    `released X.Y.Z` → `verified`; closed `as-original`, `declined` (the owner's no; an
+    approved deviation goes on as `triaged`), `duplicate of <id>`, `cannot-reproduce`,
+    `wontfix`; `reopened` / `regressed → <new id>`. INDEX's status column holds the current one.
+    (Entries before 2026-10-22 said `fixing` for `in-progress` and `shipped` for `released`.)
   - **Test**: the regression test that guards the fix (name and file), or why there is none.
 
 Rules:
 
+- Every issue gets an entry, whatever its source (Discord, a GitHub issue, the owner in chat,
+  a playtest note); for one with no Discord message, **Messages** quotes its source instead
+  and there is no `reports_link_issue`.
 - Search the backlog first (`grep -ri` the INDEX and the reports). A repeat of an open report
-  adds its messages to that report. A repeat of a `fixed`/`shipped` one is a **regression**: a
+  adds its messages to that report. A repeat of a `fixed`/`released`/`verified` one is a **regression**: a
   new report with status `new`, and the old one gets `regressed → <new id>`. Say so to the owner.
 - Every new report (and every repeat added to one): `reports_link_issue(<id>, message_ids)`, so
   the reporters can be pinged when it ships.
@@ -75,8 +80,8 @@ Rules:
 
 ## 3a. Retrospective ("backlog", "retro")
 
-List from INDEX: everything not `shipped`/`as-original`/`wontfix`/`duplicate` (open work,
-oldest first), then `regressed` ones. For every `fixed`/`shipped` report check that its test
+List from INDEX: everything open (not `released`/`verified` or closed: `as-original`, `declined`, `duplicate`, `cannot-reproduce`, `wontfix`) (open work,
+oldest first), then `regressed` ones. For every `fixed`/`released`/`verified` report check that its test
 still exists (`grep -rn <test name> src/`) and passes (`cargo test --release <test name>`); a
 report whose test is gone or failing is flagged. Give the owner the counts by status and the
 flagged list.

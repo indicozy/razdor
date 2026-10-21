@@ -56,11 +56,19 @@ are in `README.md` (Russian).
   to `dt-original` and pushed there; deviations never are.
   `dt-feat` is frozen; `dt-editor` (map editor parity) is paused, untouched unless asked.
 - Player reports go to `docs/PLAYTEST_NOTES.md` (Russian), with what the original does.
-- Every Discord report also gets an entry in the local reports backlog (the path is in
-  `CLAUDE.local.md`; never in git: it holds reporters' names and ids and screenshots): who
-  reported, the text, the media, the verdict and the fix status. It replaces GitHub issues for
-  Discord reports (the owner's decision, 2026-10-19); it is the list for backlog checks and the
-  retrospective that every fixed report stays fixed. Layout in the `discord-reports` skill.
+- Every issue goes into the local reports backlog (the path is in `CLAUDE.local.md`; never in
+  git: it holds reporters' names and ids and screenshots), whatever its source: a Discord
+  message, a GitHub issue, the owner in chat, a playtest note (the owner's decision,
+  2026-10-22; Discord-only since 2026-10-19). Each entry: who reported, the text, the media,
+  the verdict and its status. It replaces GitHub issues for Discord reports; it is the list for
+  backlog checks and the retrospective that every fixed report stays fixed.
+- Backlog statuses follow the usual development flow, one dated line per change in the report
+  and the current one in INDEX: open `new` → `triaged` (kind and verdict set) → `needs-info`
+  (what was asked) or `in-progress` → `fixed` (on `main`: commit, test) → `released X.Y.Z` →
+  `verified` (the reporter confirmed, or the retrospective's test passed after a release);
+  closed `as-original`, `declined` (the owner's no), `duplicate of <id>`, `cannot-reproduce`,
+  `wontfix`; a fixed one that breaks again is `reopened` (or `regressed → <new id>`). Move the
+  status the moment the work moves. Layout in the `discord-reports` skill.
 - Keep RE notes in our own words; never paste decompiled code into `docs/reference/`.
 - Parallel agents each work in their own git worktree (Agent `isolation: "worktree"`), never in
   the shared tree; each lands its commits on `main` itself (`git fetch`, `git rebase

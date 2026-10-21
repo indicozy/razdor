@@ -42,7 +42,7 @@ update window shows those notes up to their first `## ` heading.
 8. Tell the owner: the version, the release link, what is in it (plain words), test results.
 9. Discord announcement (if the `discord-reports` MCP server is connected):
    - Reports shipped: the reports backlog's `fixed` entries (`discord-reports` skill §3) whose
-     commits are in this release; set each to `shipped X.Y.Z` in its report and in INDEX.
+     commits are in this release; set each to `released X.Y.Z` in its report and in INDEX.
      `reports_reporters` gives their reporters (the backlog id is the number they're linked
      under; older reports were linked under GitHub issue numbers).
    - Write a short Russian post in plain player words: «Вышел Раздор X.Y.Z» + the release link,
