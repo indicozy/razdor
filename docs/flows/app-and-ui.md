@@ -100,7 +100,10 @@ move as the original's, by presses only (0x4c24f4): a press takes an item from a
 worn slot of the unit panel onto the pointer (`Game::held_item`, drawn as the pointer by
 `items_view::draw_held`); the next press puts it in a cell (`Game::press_pack`), a worn slot
 (`Game::press_worn`) or, in the army window, on a unit's card (`Game::give_held`: a potion is
-drunk there). `items_view::pack_view` returns the pressed cell, an empty one too. Leaving the
+drunk there). `items_view::pack_view` returns the pressed cell, an empty one too. While an item is held, the
+unit card under the pointer is lit as the original's (interface.md §9.7): blue where the unit
+takes it, red where it refuses (`Game::held_refusal`, the same test as `Game::give_held`, without
+giving), and the refusal's line shows at once, before any press. Leaving the
 window by any way puts a held item back in the pack: `Game::drop_held` in `App::frame`'s
 screen change, and `save::restore` for a save made with one held. The filter (Razdor's) lists
 the matching cells packed; an empty row of it puts the held item in the first empty cell, and

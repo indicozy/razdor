@@ -609,6 +609,26 @@ impl super::game::Game {
         Ok(given)
     }
 
+    /// The refusal [`Self::give_held`] would return for squad member `to`, without giving
+    /// anything: the army window lights the card red for it and shows the line (0x4c280c,
+    /// 0x4c2f54), and blue when it is None (accepted). Nothing held is no refusal.
+    pub fn held_refusal(&self, to: usize) -> Option<EquipError> {
+        let item = self.held_item?;
+        if to >= self.squad.len() {
+            return Some(EquipError::NoSuchItem);
+        }
+        let c = &self.content;
+        let Some(def) = c.try_item(item) else { return Some(EquipError::NoSuchItem) };
+        match def.kind {
+            ArtefactType::Potion => {
+                let now = self.clock.total_minutes() as u64;
+                drink(c, &mut self.squad[to].clone(), item, now).err()
+            }
+            _ if to == 0 => (!self.pack.clone().add(item)).then_some(EquipError::PackFull),
+            _ => slot_for(c, &self.squad[to], item).err(),
+        }
+    }
+
     /// Closing the hero or army window puts the item held into the pack's first empty cell
     /// (0x4b8d28 → 0x49a85c). False when the pack was full: the item is lost, as the
     /// original's (it can only happen to an item taken off a unit with all 256 cells taken).
@@ -643,6 +663,31 @@ mod give_tests {
 
     fn item(g: &Game, key: &str) -> ItemId {
         g.content.item_by_key(key).unwrap()
+    }
+
+    #[test]
+    fn the_card_refusal_is_the_one_give_held_would_return() {
+        // 0x4c280c / 0x4c2f54: the card lights red for the refusal the press would get, blue
+        // for an acceptance, and the line names it. Checked on a copy, nothing is given.
+        let mut g = game();
+        let (shield, potion) = (item(&g, "oak_shield"), item(&g, "heal_potion"));
+        assert_eq!(g.held_refusal(0), None, "nothing held: no refusal");
+        g.pack = Pack::from(vec![shield, potion]);
+        g.press_pack(0);
+        for to in 0..g.squad.len() {
+            let mut copy = game();
+            copy.pack = g.pack.clone();
+            copy.squad = g.squad.clone();
+            copy.held_item = g.held_item;
+            let expect = copy.give_held(to).err();
+            assert_eq!(g.held_refusal(to), expect, "unit {to}");
+        }
+        // A dead unit refuses a potion (the Dead refusal), and the press would say so too.
+        g.squad[1].hp = 0;
+        g.held_item = Some(potion);
+        assert_eq!(g.held_refusal(1), Some(EquipError::Dead));
+        assert_eq!(g.held_refusal(0), None);
+        assert_eq!(g.held_item, Some(potion), "the check takes nothing");
     }
 
     #[test]

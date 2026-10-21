@@ -984,7 +984,12 @@ pub fn squad(
         if over {
             card_under = Some(i);
         }
-        if selected.selected == Some(i) {
+        // An item held over a card lights it (0x4c280c, 0x4c2f54, 0x4c57bc): red where the unit
+        // refuses it, blue where it takes it (the original's accepted frame is blue).
+        if over && game.held_item.is_some() {
+            let lit = if game.held_refusal(i).is_some() { chrome::Lit::Enemy } else { chrome::Lit::CanAct };
+            chrome::card_highlight(sq, lit, now_ms() as u64);
+        } else if selected.selected == Some(i) {
             chrome::glow_frame(sq, Color::new(0.35, 1.0, 0.35, 1.0), true);
         } else if over {
             chrome::glow_frame(sq, Color::new(0.35, 0.55, 1.0, 0.9), false);
@@ -1010,13 +1015,16 @@ pub fn squad(
     } else {
         match card_under {
             Some(i) => {
-                let (line, named) = pointed_line(super::unit_drag::controls(), i, selected.selected);
+                let (line, named) = card_line(game.held_item.is_some(), super::unit_drag::controls(), i, selected.selected);
                 army_line(line, &game.squad_label(named))
             }
             None => empty_under.and_then(|slot| row_text(f, slot)),
         }
     };
-    let (hint, hc) = match (message.as_ref(), pointed) {
+    // Holding an item over a card with a refusal shows the refusal (0x4c280c, `Item<n>`) in
+    // the warning colour, before any press; a press's message stays until the next press.
+    let hover_refusal = card_under.filter(|_| game.held_item.is_some()).and_then(|i| game.held_refusal(i)).map(equip_error);
+    let (hint, hc) = match (message.as_ref().or(hover_refusal.as_ref()), pointed) {
         (Some(m), _) => (m.clone(), chrome::GOLD),
         (None, Some(p)) => (p, Color::new(1.0, 0.55, 0.25, 1.0)),
         (None, None) if show_tree => (tr("Click a unit to select it; Esc returns").to_string(), Color::new(1.0, 0.55, 0.25, 1.0)),
@@ -1026,7 +1034,7 @@ pub fn squad(
     };
     chrome::army_divider_fill(strip);
     super::dt_font::with_native_metrics(|| {
-        let ink = if super::dt_font::native_metrics() && message.is_none() { super::typography::Ink::Green.color() } else { hc };
+        let ink = if super::dt_font::native_metrics() && message.is_none() && hover_refusal.is_none() { super::typography::Ink::Green.color() } else { hc };
         chrome::hint_text(strip, &hint, ink);
     });
     // The press, as the original's (0x4c346c), ignored while a card slides (busy 0x68dc63).
@@ -1152,6 +1160,12 @@ pub(super) fn pointed_line<T: PartialEq + Copy>(controls: super::unit_drag::Cont
         (_, Some(s)) if s == under => (0, s),
         (_, Some(s)) => (2, s),
     }
+}
+
+/// The card's hint line while an item is held: line 3 offers the item to the unit under the
+/// pointer (0x4c2f54, the acceptance); with nothing held it is [`pointed_line`].
+pub(super) fn card_line<T: PartialEq + Copy>(held: bool, controls: super::unit_drag::Controls, under: T, selected: Option<T>) -> (usize, T) {
+    if held { (3, under) } else { pointed_line(controls, under, selected) }
 }
 
 /// `[Army]` hint line `n` with `name` quoted in #NAME1 (0x4c2f54), in a Russian game only.
@@ -1537,7 +1551,17 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
 
 #[cfg(test)]
 mod tests {
-    use super::{class_wage, hero_resources, panel_slots, pointed_line, promo_ease, promo_look, promo_ms, ArmySel, Content, Controls, GridPress, UnitId};
+    use super::{card_line, class_wage, hero_resources, panel_slots, pointed_line, promo_ease, promo_look, promo_ms, ArmySel, Content, Controls, GridPress, UnitId};
+
+    #[test]
+    fn an_item_held_over_a_card_is_offered_on_line_3() {
+        // 0x4c2f54: with an item held the card's line is line 3 (the offer, naming the unit);
+        // with nothing held it is the select / move line.
+        assert_eq!(card_line(true, Controls::Original, 4, None), (3, 4));
+        assert_eq!(card_line(true, Controls::Original, 3, Some(3)), (3, 3));
+        assert_eq!(card_line(true, Controls::Drag, 4, Some(3)), (3, 4));
+        assert_eq!(card_line(false, Controls::Original, 4, Some(3)), pointed_line(Controls::Original, 4, Some(3)));
+    }
 
     /// The panel's item slots belong to the unit only: a hovered promotion portrait's type
     /// card has none (492f24 skips them for a template, 0x4c3b5f / 0x4c3bc2 pass it).
