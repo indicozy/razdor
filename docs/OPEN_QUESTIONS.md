@@ -8,6 +8,12 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **dt-original: hall list ink not ported** (2026-10-21, with 56dd8324). The 16-bit subtract of
+  the hall list's names (`subtract16.rs`, `hall_ink.rs`) is main's only. dt-original keeps the GPU
+  subtractive text in its own hall list (`hall_entry_ink`), which has a note column and `text_fit`
+  layout that the CPU panel does not draw yet. Port the panel to that layout, then cherry-pick
+  56dd8324 (its tables and tests) to dt-original.
+
 - **Scroll bar widget of the army window's pack** (2026-10-21, a player's report). Razdor draws the
   pack's bar with the hall list's widget (`scrollbar_always`: ▲ ▼ arrows, dark track, knob) as the
   original's screenshots show it; the original's widget address and its art are not traced yet (the
