@@ -15,6 +15,8 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   and citing its address in `items_view::pack_view`. The hero window's pack uses the same helper.
   The UI regression check shows the four hero-window cases (`hero-*-1280`) changed by the same bar;
   their references are not accepted yet (the owner decides).
+  Port pending: dcad48a8 (the bar, `items_view.rs`) is not yet cherry-picked to `dt-original`; the
+  cherry-pick conflicts there (the branch's `items_view.rs` has diverged), so it needs a hand port.
 
 - **Palace's barracks picture** (2026-10-21, found while fixing the altar's barracks). The hire
   tab of the palace shows `BI_Town` in Razdor (`barracks_interior`); the original's table at
