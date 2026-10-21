@@ -416,6 +416,11 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             u.hp = (u.max_hp(&content) * (pct - 15 * i as i32).clamp(0, 100) / 100).max(1);
         }
     }
+    // `RAZDOR_SCENE_TARGET=<spell id>`: the map is in the targeting of that enemy spell, as after
+    // a click in the book (`world_view::begin_targeting`), to see the aim's ring and hint.
+    if let Some(id) = std::env::var("RAZDOR_SCENE_TARGET").ok().and_then(|v| v.trim().parse::<u32>().ok()) {
+        super::world_view::begin_targeting(id);
+    }
     // `RAZDOR_SCENE_SPELLS=<id>,<id>…`: those spells running on every unit of the hero's army
     // and of the map's armies (the n-th for 10 h + n days), to see the cards' spell badges.
     if let Ok(v) = std::env::var("RAZDOR_SCENE_SPELLS") {

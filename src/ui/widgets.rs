@@ -578,9 +578,10 @@ pub fn hints_on() -> bool {
 
 /// The hint box that follows the mouse (kind 7, 0x49e9b8): `w` wide, its lines centred, at
 /// the mouse +21, +37, put on the other side of the mouse where it would leave the screen,
-/// at full opacity (0x49ee4b).
-pub fn hint_box(lines: &[(String, Color)], w: f32) {
-    if lines.is_empty() || !hints_on() {
+/// at full opacity (0x49ee4b). Shown whatever option 6 says: the spell-target hints always
+/// show (interface.md §10, 49e710 kind 7).
+pub fn hint_box_always(lines: &[(String, Color)], w: f32) {
+    if lines.is_empty() {
         return;
     }
     let k = super::chrome::k();
