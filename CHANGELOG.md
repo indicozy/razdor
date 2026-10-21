@@ -13,6 +13,19 @@
 ## Не выпущено
 ## 0.4.46 — 2026-10-21
 
+Коммит `cd97e0a` (тег `v0.4.46`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+b922dbd4c4f8d02bb36fde20e9f32b272991089eb8415626120d796bb0dc1512  razdor
+5e7b1c360e0ac4ac04a6b502bcb75157069e1f96a308667423060ad3ed0df865  Razdor.exe
+11df63ec355aba26ff7699246d56fc750ef7720e398f7714be7f33c9c425281f  razdor-macos
+9bf3b36610843232790bce764801af3f0cdb43aa57c7a366cf7d24b56b7fae77  razdor-translate
+e8a3df3367387fa2d12d141a42515b348ace96e5330c0f93681763ed91295aca  Razdor-translate.exe
+d272d1c345c6c9b86ce8b3dc16fdcc0c695aac02b62c42526e9b18a19fc4c3e0  razdor-translate-macos
+```
+
 ### Изменено
 
 - Отладочный слой F3 стал бледнее, без чисел на клетках.
