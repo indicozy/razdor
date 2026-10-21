@@ -8,6 +8,11 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **Palace's barracks picture** (2026-10-21, found while fixing the altar's barracks). The hire
+  tab of the palace shows `BI_Town` in Razdor (`barracks_interior`); the original's table at
+  0x4bd3f4 has no entry for type 0 (the palace), so it shows no picture and the brown
+  background. Left as is pending the owner; settled by the owner's decision.
+
 - **0.4.41 frame drops on a slow CPU** (report #1048, 2026-10-20). A phone emulator falls to 0.9 FPS
   in 0.4.41 where 0.4.39 drops to about 60. Instruction counts (`perf stat`, v0.4.39 against main)
   show no increase in the measured paths: the «Максимум» bench on the same battles, the quick

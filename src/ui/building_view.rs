@@ -650,6 +650,22 @@ fn recruit_hint(name: &str, stock_left: bool) -> (String, bool) {
     (t, false)
 }
 
+/// The picture behind the barracks' recruits (0x4bd3a4): the building's type byte (record
+/// −0x160) indexes the switch at 0x4bd3ed, whose table at 0x4bd3f4 maps types 0..12. Town (1)
+/// → BI_Town (0x66d74c); castle (3) and fort (4) → BI_Castle (0x66d754); church (7) →
+/// BI_Church (0x66d750); altar (10) and ruins (12) → BI_Ruin (0x66d758). Every other type,
+/// the palace (0) included, has no picture and keeps the window's brown background.
+/// Razdor still shows BI_Town for the palace; see docs/OPEN_QUESTIONS.md.
+fn barracks_interior(kind: LocationKind) -> Option<&'static str> {
+    match kind {
+        LocationKind::Town | LocationKind::Palace => Some("BI_Town"),
+        LocationKind::Castle | LocationKind::Fort => Some("BI_Castle"),
+        LocationKind::Church => Some("BI_Church"),
+        LocationKind::Altar | LocationKind::Ruins => Some("BI_Ruin"),
+        _ => None,
+    }
+}
+
 /// The barracks, as the original's (the video, 19:52): the recruits in front of the
 /// building's sepia interior, each portrait with "Нанять" and "Цена = N"; the money, wages
 /// and income; the army's 2×6 cards below, each with "Лечить" / "Воскресить" and its price
@@ -662,13 +678,7 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
     let hires = game.world.locations[l].hires(&c);
     // The interior behind the recruits and the counters.
     let back = window_layout::upper(Rect::new(f.x, f.y, f.w, f.h));
-    let interior = match game.world.locations[l].kind {
-        LocationKind::Town | LocationKind::Palace => Some("BI_Town"),
-        LocationKind::Castle | LocationKind::Fort => Some("BI_Castle"),
-        LocationKind::Church => Some("BI_Church"),
-        LocationKind::Ruins => Some("BI_Ruin"),
-        _ => None,
-    };
+    let interior = barracks_interior(game.world.locations[l].kind);
     match interior.and_then(chrome::win) {
         Some(t) => {
             let src_h = t.width() * back.h / back.w;
@@ -2379,6 +2389,23 @@ mod tests {
     }
 
     use super::{market_list_buttons, next_pick, ListButton, offer_picture, recruit_x, screen_line, stock_caption, stock_picture};
+
+    /// 0x4bd3a4 / 0x4bd3ed / 0x4bd3f4: the barracks' interior picture by building type. The
+    /// palace is not in the original's table (Razdor keeps BI_Town for it, see OPEN_QUESTIONS).
+    #[test]
+    fn the_altar_s_barracks_shows_the_ruin_interior_as_the_original() {
+        use super::barracks_interior;
+        use razdor::rules::world::LocationKind as K;
+        assert_eq!(barracks_interior(K::Town), Some("BI_Town"));
+        assert_eq!(barracks_interior(K::Castle), Some("BI_Castle"));
+        assert_eq!(barracks_interior(K::Fort), Some("BI_Castle"));
+        assert_eq!(barracks_interior(K::Church), Some("BI_Church"));
+        assert_eq!(barracks_interior(K::Altar), Some("BI_Ruin"));
+        assert_eq!(barracks_interior(K::Ruins), Some("BI_Ruin"));
+        for kind in [K::Village, K::Tavern, K::Market, K::Smithy, K::Shipyard, K::Entrance] {
+            assert_eq!(barracks_interior(kind), None, "{kind:?}");
+        }
+    }
 
     /// 0x4ba854 case 0: pictures only for building types 1, 3-7, 10 and 12; the palace, the
     /// smithy and the dungeon entrance keep the window's background (0x4bb7c4).

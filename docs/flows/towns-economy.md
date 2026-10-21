@@ -65,6 +65,10 @@ one (palace, smithy, dungeon entrance) leaves the window's own background there 
 no sky, grass or map sprite.
 An ill-disposed building refuses services (`ServiceError::NotHere`).
 
+The hire tab's picture behind the recruits follows the original's table (`barracks_interior`,
+0x4bd3a4 / 0x4bd3f4): town → BI_Town, castle and fort → BI_Castle, church → BI_Church, altar and
+ruins → BI_Ruin; other kinds keep the brown background, the palace aside (see OPEN_QUESTIONS).
+
 **Hiring and healing** (economy.md §2). `hire_price` follows the unit's cost and wage kind;
 elementals are hired and paid in mana. Healing costs a share of the unit's cost over the difficulty
 factor F (`Game::difficulty`: 100 or 120) and takes no
