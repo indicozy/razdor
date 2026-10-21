@@ -8,11 +8,12 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
-- **dt-original: hall list ink not ported** (2026-10-21, with 56dd8324). The 16-bit subtract of
-  the hall list's names (`subtract16.rs`, `hall_ink.rs`) is main's only. dt-original keeps the GPU
-  subtractive text in its own hall list (`hall_entry_ink`), which has a note column and `text_fit`
-  layout that the CPU panel does not draw yet. Port the panel to that layout, then cherry-pick
-  56dd8324 (its tables and tests) to dt-original.
+- **dt-original: hall list ink not ported** (2026-10-21, with 56dd8324; dt-original dbbb2b00 ports
+  its spec lines only). The 16-bit subtract of the hall list's names (`subtract16.rs`, `hall_ink.rs`) is
+  main's only. dt-original's list is a GPU parchment with darkened edges, names fitted by `text_fit`
+  at 19 px, and a note column; the CPU panel draws main's paper, ornaments, bands and 16 px sheet
+  text, so porting it would change dt-original's paper, size and rows, which is the owner's call.
+  Until then dt-original keeps the GPU subtract (`hall_entry_ink`).
 
 - **Scroll bar widget of the army window's pack** (2026-10-21, a player's report). Razdor draws the
   pack's bar with the hall list's widget (`scrollbar_always`: ▲ ▼ arrows, dark track, knob) as the
@@ -21,8 +22,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   and citing its address in `items_view::pack_view`. The hero window's pack uses the same helper.
   The UI regression check shows the four hero-window cases (`hero-*-1280`) changed by the same bar;
   their references are not accepted yet (the owner decides).
-  Port pending: dcad48a8 (the bar, `items_view.rs`) is not yet cherry-picked to `dt-original`; the
-  cherry-pick conflicts there (the branch's `items_view.rs` has diverged), so it needs a hand port.
 - **16-bit screen format for the subtract tables** (2026-10-21). The table build (0x474de4)
   and the hall list's CPU panel (`subtract16.rs`, `hall_ink.rs`) assume the 5-6-5 screen (masks
   red 0xF800, green 0x07E0, blue 0x001F, as 0x475ad0 sets them for the 16-bit mode). A 5-5-5 screen
@@ -412,6 +411,10 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   button's own size.
 
 ## Settled
+
+- **The army window's pack scroll bar on dt-original** (2026-10-21). Ported by hand: dt-original
+  76ec42fb (dcad48a8). The pack uses `scrollbar_always` there too; the widget's address is still open
+  above.
 
 - **«Максимум» steps back out of the front row with a strike open** (#1037, 2026-10-20; the
   bench's retreat count: 18 of Max's 1861 decisions, the original's 6 of 1661). A full-HP
