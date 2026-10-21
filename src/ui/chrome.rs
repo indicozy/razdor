@@ -1141,15 +1141,25 @@ pub fn multiply(draw: impl FnOnce()) {
 /// original's blend mode 1 (476790, 4768f8), the window's alpha kept. Without the material,
 /// normal blending.
 pub fn subtractive(draw: impl FnOnce()) {
+    subtract_with(&SUBTRACT, ADD_FRAGMENT, draw);
+}
+
+/// Subtractive blending for text: like [`subtractive`], but the fragment is premultiplied by the
+/// glyph's coverage, so only the glyph's ink is taken off the parchment, not its whole box.
+pub fn subtractive_text(draw: impl FnOnce()) {
+    subtract_with(&SUBTRACT_TEXT, SUBTRACT_TEXT_FRAGMENT, draw);
+}
+
+fn subtract_with(cell: &'static std::thread::LocalKey<std::cell::OnceCell<Option<Material>>>, fragment: &'static str, draw: impl FnOnce()) {
     use macroquad::miniquad::{BlendFactor, BlendState, Equation, PipelineParams};
-    let material = SUBTRACT.with(|m| {
+    let material = cell.with(|m| {
         m.get_or_init(|| {
             let pipeline_params = PipelineParams {
                 color_blend: Some(BlendState::new(Equation::ReverseSubtract, BlendFactor::One, BlendFactor::One)),
                 alpha_blend: Some(BlendState::new(Equation::Add, BlendFactor::Zero, BlendFactor::One)),
                 ..Default::default()
             };
-            load_material(ShaderSource::Glsl { vertex: ADD_VERTEX, fragment: ADD_FRAGMENT }, MaterialParams { pipeline_params, ..Default::default() })
+            load_material(ShaderSource::Glsl { vertex: ADD_VERTEX, fragment }, MaterialParams { pipeline_params, ..Default::default() })
                 .map_err(|e| razdor::diag!("subtractive material: {e}"))
                 .ok()
         })
@@ -1160,7 +1170,18 @@ pub fn subtractive(draw: impl FnOnce()) {
 
 thread_local! {
     static SUBTRACT: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
+    static SUBTRACT_TEXT: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
 }
+
+const SUBTRACT_TEXT_FRAGMENT: &str = r#"#version 100
+precision lowp float;
+varying lowp vec4 color;
+varying lowp vec2 uv;
+uniform sampler2D Texture;
+void main() {
+    vec4 t = texture2D(Texture, uv);
+    gl_FragColor = vec4(color.rgb * t.rgb * t.a, t.a);
+}"#;
 
 fn with_material(material: Option<Material>, draw: impl FnOnce()) {
     match material {

@@ -40,9 +40,15 @@ const MARKET_HEADING: Color = Color::new(156.0 / 255.0, 1.0, 156.0 / 255.0, 1.0)
 const BUILDING_AND_ITEM_NAME: Color = Color::new(211.0 / 255.0, 228.0 / 255.0, 161.0 / 255.0, 1.0);
 const QUEST_HEADING: Color = Color::new(189.0 / 255.0, 190.0 / 255.0, 90.0 / 255.0, 1.0);
 
-fn quest_text_color() -> Color {
-    let saturation = window_layout::visual().quest_text_saturation;
-    Color::new((97.0 / 255.0 * saturation).clamp(0.0, 1.0), 0.0, 0.0, 1.0)
+/// The ink of a hall entry's name: the colour of the font it is drawn in (0x4beaac), a quest in
+/// the yellow font (0xae24a0), a rumour in the green one (0xae249c). The list widget draws its
+/// text subtractively (0x4d9060 sets the mode, 0x478a9c mode 5, 0x476790 flag 1), so on the
+/// parchment a quest comes out near black and a rumour crimson.
+fn hall_entry_ink(entry: HallEntry) -> [u8; 3] {
+    match entry {
+        HallEntry::Quest(_) => [255, 255, 155],
+        HallEntry::Rumour(_) => [155, 255, 155],
+    }
 }
 
 fn quest_selection_row(r: Rect) {
@@ -448,7 +454,8 @@ fn hall_offers_in_face(game: &mut Game, f: &Frame, view: &mut BuildingView, mess
         let name = story::event_title(game, id);
         let size = 16.0 * k;
         let shown = ellipsize(&name, row_w - 20.0 * k, size);
-        text_centered(&shown, list.x + row_w / 2.0, y + row_h / 2.0 + size * 0.36, size, quest_text_color());
+        let [r, g, b] = hall_entry_ink(*entry);
+        chrome::subtractive_text(|| text_centered(&shown, list.x + row_w / 2.0, y + row_h / 2.0 + size * 0.36, size, Color::from_rgba(r, g, b, 255)));
         if mouse_in(list.x, y, row_w, row_h) && clicked() { view.hall_pick = Some(n); }
     }
 
@@ -2293,8 +2300,15 @@ fn with_back(bar: Option<Screen>, view: &BuildingView) -> Option<Screen> {
 
 #[cfg(test)]
 mod tests {
-    use super::{hire_panel_on, tab_state, village_ok_key, Entered, HirePanel};
+    use super::{hall_entry_ink, hire_panel_on, tab_state, village_ok_key, Entered, HirePanel};
     use razdor::rules::content::UnitId;
+    use razdor::rules::script::HallEntry;
+
+    #[test]
+    fn hall_entries_take_their_font_colour_off_the_parchment() {
+        assert_eq!(hall_entry_ink(HallEntry::Quest(7)), [255, 255, 155], "a quest: the yellow font (0xae24a0)");
+        assert_eq!(hall_entry_ink(HallEntry::Rumour(7)), [155, 255, 155], "a rumour: the green font (0xae249c)");
+    }
 
     #[test]
     fn a_hire_offer_under_the_pointer_shows_its_card_until_the_tabs_come_back() {

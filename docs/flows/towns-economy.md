@@ -60,6 +60,9 @@ change the selected entry's type or the action button label.
 
 **Tabs by building type** (economy.md §7, `town::tabs`). The first tab is the village's tribute or
 the shipyard's ship window, else the main hall. A shipyard opens nothing while the hero is at sea.
+The hall list's names are drawn subtractively in their font's colour, by entry type (a quest
+yellow, a rumour green: 0x4beaac, 0x478a9c mode 5, 0x476790; `hall_entry_ink`), so quests read
+near black and rumours crimson on the parchment.
 The main hall's picture is the original's for the kind (`hall_picture`, 0x4ba854); a kind without
 one (palace, smithy, dungeon entrance) leaves the window's own background there (0x4bb7c4), with
 no sky, grass or map sprite.
