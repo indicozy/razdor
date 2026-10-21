@@ -13,6 +13,19 @@
 ## Не выпущено
 ## 0.4.50 — 2026-10-22
 
+Коммит `5c216231` (тег `v0.4.50`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+9dae6c8afea752caff1b05bdf4f8796cbc65b18f3c3ee2a4763fcf76b05604b9  razdor
+dee7f17d40a815bb08b8b8a88e46a8f0f64571f296068587ed75c431ab3851c5  Razdor.exe
+01b4610257b9550746c50751949b3fbbe7369610ea583eb858e8e4b7c6184c68  razdor-macos
+9273e5150c2569967be3f54d85c3ff2d9ef309bd0ebd901fb18837268199686c  razdor-translate
+534f8576d540c40f385bee2ca43014e0f3ff274342eeec9dd4a1c5335e47dc92  Razdor-translate.exe
+b062689b8ee61d2247b760d4e95c82f90d394f6bd04ae7cfc1bafb0ce1987b3e  razdor-translate-macos
+```
+
 ### Исправлено
 
 - Окно события показывает потерянные предметы (например, меч после боя с Эзраелем в «Другом береге»), как в оригинале.
