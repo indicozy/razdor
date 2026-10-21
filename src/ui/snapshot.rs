@@ -20,7 +20,8 @@
 //! equips the hero with available distinct bonus items to exercise the trait scrollbar.
 //! test's action list played to that step. `RAZDOR_SCENE_BATTLE_EXIT=1` opens a battle
 //! scene's leave-battle window. `RAZDOR_SCENE_PACK_AT=<cell>:<id>,…` puts items in those pack
-//! cells; `RAZDOR_SCENE_HELD=<id>` puts an item on the pointer (hero and army windows).
+//! cells; `RAZDOR_SCENE_HELD=<id>` puts an item on the pointer (hero and army windows);
+//! `RAZDOR_SCENE_WEAR=<id>,…` wears those items on the squad member of `army:<map>:<n>:<unit>`.
 //!
 //! Every map scene starts its map as a new game (`Game::from_scenario`): nothing is carried
 //! over from a campaign's map before, so a later map whose opening events check for what it
@@ -568,6 +569,15 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                     let mut u = razdor::rules::units::Unit::new(&game.content, def, slot);
                     u.level = parts.next().and_then(|v| v.parse().ok()).unwrap_or(2);
                     game.squad[i] = u;
+                }
+                // `RAZDOR_SCENE_WEAR=<id>,<id>…`: those items worn by the squad member n.
+                if let Ok(v) = std::env::var("RAZDOR_SCENE_WEAR") {
+                    let c = game.content.clone();
+                    for id in v.split(',').filter_map(|p| p.trim().parse::<u32>().ok()).map(razdor::rules::content::ItemId) {
+                        if let Ok(slot) = razdor::rules::items::slot_for(&c, &game.squad[i], id) {
+                            game.squad[i].items[slot] = Some(id);
+                        }
+                    }
                 }
                 selected = super::items_view::ArmySel { selected: Some(i), shown: Some(i) };
             }

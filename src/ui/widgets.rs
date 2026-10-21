@@ -244,7 +244,13 @@ fn text_ttf(s: &str, x: f32, y: f32, size: f32, color: Color) {
 /// Size of `s`: in the original's font of the current face when the install has it
 /// (`ui::dt_font`), else in the TrueType font.
 pub fn measure(s: &str, size: f32) -> TextDimensions {
-    let size = super::dt_font::native_size(super::dt_font::face(), size);
+    measure_exact(s, super::dt_font::native_size(super::dt_font::face(), size))
+}
+
+/// [`measure`] at `size` as it is: no native sizing, so a caller that shrinks a text to fit
+/// measures and draws (`text_exact`) at the same size. Equal to `measure` outside native
+/// metrics.
+pub fn measure_exact(s: &str, size: f32) -> TextDimensions {
     let bitmap = super::dt_font::with_current(|f| {
         let width = f.width(s, size, &|run| measure_ttf(run, size).width);
         let cap = f.cap_height(size);
@@ -754,7 +760,11 @@ pub fn button_sounding(x: f32, y: f32, w: f32, h: f32, label: &str, enabled: boo
 
 /// Draws `s` with its baseline at `y` (see [`measure`] for the font).
 pub fn text(s: &str, x: f32, y: f32, size: f32, color: Color) {
-    let size = super::dt_font::native_size(super::dt_font::face(), size);
+    text_exact(s, x, y, super::dt_font::native_size(super::dt_font::face(), size), color);
+}
+
+/// [`text`] at `size` as it is (see [`measure_exact`]).
+pub fn text_exact(s: &str, x: f32, y: f32, size: f32, color: Color) {
     let color = super::typography::color(color);
     let drawn = super::dt_font::with_current(|f| {
         f.draw(s, x, y, size, color, &|run, px, py| {

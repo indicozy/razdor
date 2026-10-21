@@ -13,7 +13,7 @@ use razdor::rules::units::Stats;
 
 use super::assets::Assets;
 use super::chrome::{self, k, BLUE_TEXT, CREAM, ORANGE_TEXT, RED_TEXT};
-use super::widgets::{measure, mouse_in};
+use super::widgets::{measure, measure_exact, mouse_in};
 
 thread_local! {
     static TRAIT_SCROLL: std::cell::RefCell<std::collections::HashMap<String, f32>> = std::cell::RefCell::new(std::collections::HashMap::new());
@@ -672,9 +672,14 @@ fn strip_text(strip: Rect, now: &Stats, base: &Stats, power: i32, caster: bool, 
     // the attack at the left edge and the defence against the right (0x49462c, no shrink).
     // Here they keep that size when they fit with a gap between them, else only as much
     // smaller as needed (another font mode's or a translation's wider text).
-    let fs1 = first_line_size(fs, l.right_end - l.left, |size| {
-        let gap = measure(" ", size).width.max(size * 0.3);
-        measure(&att, size).width + d.as_ref().map_or(0.0, |d| gap + measure(d, size).width)
+    // The first line is fitted and drawn at one size: the native metrics fix the drawn size
+    // (a requested one is not kept there), so the fit uses `measure_exact` and the draw
+    // `text_exact` at the size the fit settled on. Measuring at one size and drawing at
+    // another let "Pwr: 55" run into "D: 36/39" (a player's report).
+    let fs_drawn = super::dt_font::native_size(super::dt_font::face(), fs);
+    let fs1 = first_line_size(fs_drawn, l.right_end - l.left, |size| {
+        let gap = measure_exact(" ", size).width.max(size * 0.3);
+        measure_exact(&att, size).width + d.as_ref().map_or(0.0, |d| gap + measure_exact(d, size).width)
     });
     // The lines' places come from the body size, not the size a first line shrinks to, so a
     // long first line does not move up.
@@ -682,14 +687,15 @@ fn strip_text(strip: Rect, now: &Stats, base: &Stats, power: i32, caster: bool, 
     let put = |s: &str, x: f32, line: usize, size: f32, ink: StripInk| {
         super::widgets::text(s, x, l.baseline(line, body_base), size, ink.color());
     };
-    let right = |s: &str, line: usize, size: f32, ink: StripInk| put(s, l.right_end - measure(s, size).width, line, size, ink);
-    put(&att, l.left, 0, fs1, ac);
+    super::widgets::text_exact(&att, l.left, l.baseline(0, body_base), fs1, ac.color());
     if let Some(d) = d {
-        right(&d, 0, fs1, defence_ink(now, base, row2));
+        let x = l.right_end - measure_exact(&d, fs1).width;
+        super::widgets::text_exact(&d, x, l.baseline(0, body_base), fs1, defence_ink(now, base, row2).color());
     }
     let (mn, ini) = (now[Stat::Manevres], now[Stat::Initiative]);
     put(&razdor::trf!("Mnvr: {mn}", mn), l.left, 1, fs, strip_ink(mn, base[Stat::Manevres], StripInk::White, false));
-    right(&razdor::trf!("Ini: {ini}", ini), 1, fs, strip_ink(ini, base[Stat::Initiative], StripInk::Yellow, false));
+    let ini_text = razdor::trf!("Ini: {ini}", ini);
+    put(&ini_text, l.right_end - measure(&ini_text, fs).width, 1, fs, strip_ink(ini, base[Stat::Initiative], StripInk::Yellow, false));
     let max = now.max_hp();
     let (hits, ink) = if hp < max {
         (razdor::trf!("Hits: {hp}/{max}", hp = hp.max(0), max), StripInk::Red)
@@ -996,6 +1002,24 @@ mod tests {
         let s = first_line_size(16.0, 80.0, width);
         assert!(width(s) <= 80.0 && s >= 13.0, "only as small as needed: {s}");
         assert_eq!(first_line_size(16.0, 10.0, width), 7.0);
+    }
+
+    /// The first line fits its strip at every interface scale, the case a player's 2880x1620
+    /// screen shows ("Pwr: 55" run into "D: 36/39"): the text is 20% too wide at the body
+    /// size, and the shrink brings it inside the room at scales 1 to 3 (the room is the card's
+    /// width less its margins, 91 px at 1x, so it grows with the scale).
+    #[test]
+    fn the_first_line_fits_its_room_at_large_scales() {
+        for k in [1.0_f32, 1.25, 1.5, 2.0, 2.5, 3.0] {
+            let l = StripLayout::of(Rect::new(0.0, 0.0, CARD_W * k, 39.0 * k));
+            let room = l.right_end - l.left;
+            assert!((room - 91.0 * k).abs() < 1e-3, "room {room} at {k}x");
+            let fs = 11.0 * k;
+            let width = |size: f32| size * 1.2 * room / fs;
+            let s = first_line_size(fs, room, width);
+            assert!(s < fs && s >= 7.0, "the first line shrinks at {k}x: {s}");
+            assert!(width(s) <= room + 1e-3 || s == 7.0, "fits at {k}x: {} > {room}", width(s));
+        }
     }
 
     fn ranged_defence(content: &Content, back_row: bool, building: i32) -> String {
