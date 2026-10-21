@@ -33,6 +33,17 @@ const PARCHMENT_INK: Color = Color::new(0.45, 0.28, 0.14, 1.0);
 const BOX_INK: Color = Color::new(1.0, 0.86, 0.58, 1.0);
 const SILVER: Color = Color::new(0.78, 0.78, 0.82, 1.0);
 const TAB_RED: Color = Color::new(0.75, 0.18, 0.12, 1.0);
+/// The ink of a hall entry's name: the colour of the font it is drawn in (0x4beaac), a quest in
+/// the yellow font (0xae24a0), a rumour in the green one (0xae249c). The list widget draws its
+/// text subtractively (0x4d9060 sets the mode, 0x478a9c mode 5, 0x476790 flag 1), so on the
+/// parchment a quest comes out near black and a rumour crimson.
+fn hall_entry_ink(entry: HallEntry) -> [u8; 3] {
+    match entry {
+        HallEntry::Quest(_) => [255, 255, 155],
+        HallEntry::Rumour(_) => [155, 255, 155],
+    }
+}
+
 
 /// State of the building window between frames.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -352,15 +363,17 @@ fn main_hall(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingVie
     view.scroll = view.scroll.min(max_scroll);
     for (n, entry) in entries.iter().enumerate().skip(view.scroll).take(rows) {
         let ry = list_y + 6.0 * k + (n - view.scroll) as f32 * row_h;
-        let (id, note, color) = match *entry {
-            HallEntry::Rumour(id) => (id, tr("rumour"), Color::new(0.55, 0.1, 0.1, 1.0)),
-            HallEntry::Quest(id) => (id, tr("quest"), Color::new(0.1, 0.3, 0.55, 1.0)),
+        let (id, note) = match *entry {
+            HallEntry::Rumour(id) => (id, tr("rumour")),
+            HallEntry::Quest(id) => (id, tr("quest")),
         };
         if view.pick == Some(n) {
             draw_rectangle(x + 4.0 * k, ry, w - 8.0 * k, row_h - 2.0 * k, Color::new(0.72, 0.6, 0.4, 1.0));
         }
         let title: String = story::event_title(game, id).chars().take(60).collect();
-        text_fit(&title, x + 16.0 * k, ry + 18.0 * k, w - 48.0 * k - measure(note, 16.0 * k).width, 19.0 * k, color);
+        // The name in its font's colour, subtractive (0x4beaac, 0x478a9c mode 5, 0x476790).
+        let [r, g, b] = hall_entry_ink(*entry);
+        chrome::subtractive_text(|| text_fit(&title, x + 16.0 * k, ry + 18.0 * k, w - 48.0 * k - measure(note, 16.0 * k).width, 19.0 * k, Color::from_rgba(r, g, b, 255)));
         text(note, x + w - 16.0 * k - measure(note, 16.0 * k).width, ry + 17.0 * k, 16.0 * k, PARCHMENT_INK);
         if mouse_in(x, ry, w, row_h) && clicked() {
             view.pick = Some(n);
@@ -1668,6 +1681,15 @@ fn with_back(bar: Option<Screen>, view: &BuildingView) -> Option<Screen> {
 
 #[cfg(test)]
 mod tests {
+    use super::hall_entry_ink;
+    use razdor::rules::script::HallEntry;
+
+    #[test]
+    fn hall_entries_take_their_font_colour_off_the_parchment() {
+        assert_eq!(hall_entry_ink(HallEntry::Quest(7)), [255, 255, 155], "a quest: the yellow font (0xae24a0)");
+        assert_eq!(hall_entry_ink(HallEntry::Rumour(7)), [155, 255, 155], "a rumour: the green font (0xae249c)");
+    }
+
     #[test]
     fn a_tab_lights_under_the_mouse_as_the_original() {
         // 0x4d9060: TBo under the mouse, TBd held or open, TB- else.
