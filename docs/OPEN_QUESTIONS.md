@@ -5,6 +5,14 @@ move to a Settled list.
 
 ## Open
 
+- **Scroll bar widget of the army window's pack** (2026-10-21, a player's report). Razdor draws the
+  pack's bar with the hall list's widget (`scrollbar_always`: ▲ ▼ arrows, dark track, knob) as the
+  original's screenshots show it; the original's widget address and its art are not traced yet (the
+  spec's 9.7 gives only the pack's scroll formula, 49a718). Settle it by tracing the bar in Ghidra
+  and citing its address in `items_view::pack_view`. The hero window's pack uses the same helper.
+  The UI regression check shows the four hero-window cases (`hero-*-1280`) changed by the same bar;
+  their references are not accepted yet (the owner decides).
+
 - **Palace's barracks picture** (2026-10-21, found while fixing the altar's barracks). The hire
   tab of the palace shows `BI_Town` in Razdor (`barracks_interior`); the original's table at
   0x4bd3f4 has no entry for type 0 (the palace), so it shows no picture and the brown

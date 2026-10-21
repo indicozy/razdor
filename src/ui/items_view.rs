@@ -424,6 +424,12 @@ fn pack_view(game: &Game, assets: &Assets, r: Rect, scroll: &mut usize, hover: &
             *scroll = scroll.saturating_sub(1);
         }
     }
+    // The scroll bar: the original's (with its ▲ and ▼ arrows and dark track), as the army
+    // window shows it right of the pack (the original's screenshots; the widget's address is
+    // not yet traced, see docs/OPEN_QUESTIONS.md). Its rows are the pack's rows (49a718); the
+    // arrows move one row, a track click a page, and the knob drags.
+    let bar = Rect::new(r.x + PACK_COLS as f32 * cell + 4.0 * k, r.y, 12.0 * k, rows_shown as f32 * cell);
+    scrollbar_always(bar, scroll, rows_shown, rows);
     *scroll = (*scroll).min(max_scroll);
     let inv = chrome::win("Inventory");
     let mut hit = None;
@@ -462,13 +468,6 @@ fn pack_view(game: &Game, assets: &Assets, r: Rect, scroll: &mut usize, hover: &
             }
         }
     }
-    // The scroll bar.
-    let bx = r.x + PACK_COLS as f32 * cell + 4.0 * k;
-    let bh = rows_shown as f32 * cell;
-    draw_rectangle(bx, r.y, 12.0 * k, bh, Color::new(0.05, 0.05, 0.05, 0.8));
-    let th = bh * rows_shown as f32 / rows.max(1) as f32;
-    let ty = r.y + (bh - th) * *scroll as f32 / max_scroll.max(1) as f32;
-    draw_rectangle(bx + 1.0, ty, 12.0 * k - 2.0, th, chrome::SILVER);
     hit
 }
 
