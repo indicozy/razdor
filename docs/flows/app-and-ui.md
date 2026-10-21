@@ -192,8 +192,7 @@ Input goes through `src/ui/input.rs` (mouse/keys with gamepad emulation from
 
 The map's F3 debug overlay (Razdor's, `world_view::draw_debug`) also tints every visible cell
 (`world_view::draw_walkable`, `walk_tint`): on foot green for passable (brighter on roads), red
-for impassable; aboard the ship blue for sailable, red otherwise; the cost is written on cells
-at least 28 px wide.
+for impassable; aboard the ship blue for sailable, red otherwise, all faint so the map shows through.
 
 ## Text
 

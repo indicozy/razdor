@@ -3038,16 +3038,16 @@ fn debug_events(game: &Game, place: razdor::rules::events::Place) -> Vec<String>
 /// On foot passable is green, brighter on a road; aboard sailable is blue; blocked is red.
 fn walk_tint(cost: Option<u16>, aboard: bool, road: bool) -> Color {
     match (cost, aboard) {
-        (None, _) => Color::new(0.9, 0.1, 0.1, 0.35),
-        (Some(_), true) => Color::new(0.2, 0.5, 1.0, 0.22),
-        (Some(_), false) if road => Color::new(0.1, 0.9, 0.2, 0.3),
-        (Some(_), false) => Color::new(0.1, 0.9, 0.2, 0.18),
+        (None, _) => Color::new(0.9, 0.1, 0.1, 0.14),
+        (Some(_), true) => Color::new(0.2, 0.5, 1.0, 0.09),
+        (Some(_), false) if road => Color::new(0.1, 0.9, 0.2, 0.12),
+        (Some(_), false) => Color::new(0.1, 0.9, 0.2, 0.06),
     }
 }
 
 /// Razdor's debug overlay (F3): tints every visible cell by whether the hero can step onto it
-/// (on foot: green, brighter on roads; aboard: blue if the ship can sail it; red if blocked),
-/// with the cost on big cells. Drawn first so the labels stay on top.
+/// (on foot: green, brighter on roads; aboard: blue if the ship can sail it; red if blocked).
+/// Drawn first, under the labels.
 fn draw_walkable(game: &Game, cam: &Camera) {
     let map = &game.world.map;
     let aboard = game.aboard();
@@ -3060,11 +3060,6 @@ fn draw_walkable(game: &Game, cam: &Camera) {
             let road = !aboard && cost == Some(ROAD);
             let c = cam.cell_centre(t);
             draw_rectangle(c.x - cell.x / 2.0, c.y - cell.y / 2.0, cell.x, cell.y, walk_tint(cost, aboard, road));
-            if let Some(v) = cost.filter(|_| cell.x >= 28.0) {
-                let s = v.to_string();
-                let w = measure(&s, 10.0).width;
-                text(&s, c.x - w / 2.0, c.y + 4.0, 10.0, WHITE);
-            }
         }
     }
 }
@@ -3162,10 +3157,10 @@ mod tests {
     #[test]
     fn the_debug_overlay_tints_by_how_the_hero_moves() {
         use super::walk_tint;
-        let red = Color::new(0.9, 0.1, 0.1, 0.35);
-        let green = Color::new(0.1, 0.9, 0.2, 0.18);
-        let road = Color::new(0.1, 0.9, 0.2, 0.3);
-        let blue = Color::new(0.2, 0.5, 1.0, 0.22);
+        let red = Color::new(0.9, 0.1, 0.1, 0.14);
+        let green = Color::new(0.1, 0.9, 0.2, 0.06);
+        let road = Color::new(0.1, 0.9, 0.2, 0.12);
+        let blue = Color::new(0.2, 0.5, 1.0, 0.09);
         assert_eq!(walk_tint(None, false, false), red, "blocked on foot");
         assert_eq!(walk_tint(None, true, false), red, "blocked by ship");
         assert_eq!(walk_tint(Some(2), false, false), green, "passable on foot");
