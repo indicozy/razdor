@@ -8,6 +8,14 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **Held item: the green card and the acceptance line's face (report 1053, 2026-10-22).** The
+  code gives a refused card state 4 (red) and an accepted one state 2 (blue, the block at
+  0xadd084); the green frame in the original's screenshot is most likely the selected unit
+  (state 5). Open: the colour of an accepting card with no selected unit, and the face of the
+  acceptance line (ae24cc, its base not measured). Settles it: a screenshot of the original with
+  an item held over an accepting unit and no unit selected, and the ae24cc base from the
+  SanSerif colour table at 4dc051.
+
 - **Sea pirates flee the hero; a village catch (report 1082, 2026-10-22).** Players see the
   pirates sail off when the hero comes near and cannot catch them at a coastal village, while the
   original's pirates sail into the village and can be caught there. The spec has no fleeing rule
