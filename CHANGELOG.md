@@ -14,6 +14,20 @@
 
 ## 0.9.1 — 2026-10-23
 
+Коммит `8ad89f54` (тег `v0.9.1`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+e507d9503a8427c4039021c6694d30dd548b1d275f57d4adb4af465d79a49244  razdor
+c68dc8c66fb9617165b9a6508ae323080d2badf8f906353004831df4a57084c4  Razdor.exe
+716dfb7078012f6783b15159177267463c8e0b8aa85b8bf82e8b8261216979da  razdor-macos
+4bb7c06f6ce10db717d3ac164353aa234e6cbfcea790fe284dd8104d5797bb07  razdor-translate
+5904ba3a7cc6810195e9823d33dfd0562eba293f8ba91bbe392335d0925c7c2a  Razdor-translate.exe
+cd78e1119b208368a61f3c11af6721b4044ea2f3c863d9f33a8a03cb5cc5b3b0  razdor-translate-macos
+b3a3cebbb8ac70799668f454772a9aa93b630bcdff88de7986ddfd9dacf205df  razdor.apk
+```
+
 ### Добавлено
 
 - Клавиши можно переназначить: Настройки → «Ещё…» → «Клавиши…». Подсказки и список клавиш (F1) показывают выбранные.
