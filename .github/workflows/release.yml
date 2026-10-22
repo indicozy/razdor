@@ -1,7 +1,8 @@
 # The release pipeline: pushing a tag vX.Y.Z builds razdor (Linux) and Razdor.exe (Windows)
 # with scripts/dist.sh, razdor-macos (macOS, universal) with scripts/dist-macos.sh on a Mac,
-# razdor.apk (Android, experimental) with scripts/dist-android.sh on the android job (signed
-# with the release keystore from the ANDROID_* secrets), and the map translator beside each
+# razdor.apk (Android, experimental) with scripts/dist-android.sh on the android job (unsigned),
+# then signed in the android-sign job, which runs no repository code and gets the release
+# keystore only on tags; the map translator beside each
 # (razdor-translate, Razdor-translate.exe, razdor-translate-macos),
 # and publishes them as the GitHub release vX.Y.Z, with that version's changelog file
 # (changelog/X.Y.Z.md) and the programs' SHA-256 as its notes. The game's update window
@@ -57,11 +58,9 @@ jobs:
 
   android:
     # Experimental: the Android APK (arm64-v8a, armeabi-v7a, x86_64), built with cargo-quad-apk
-    # (pinned by its commit) on the runner's Android SDK, with the NDK pinned here. The build
-    # step has no secrets in its environment: it makes an unsigned aligned APK. The sign step
-    # alone gets the keystore secrets, in its own step env (never in GITHUB_ENV, which would
-    # reach every later step and the build scripts), and writes dist/razdor.apk. A manual run
-    # without the secrets signs with a throwaway debug key; a tag run without them fails.
+    # (pinned by its commit) on the runner's Android SDK, with the NDK pinned here. This job has
+    # no secrets at all: it makes an unsigned aligned APK, dist/razdor-unsigned.apk, and uploads
+    # it. The android-sign job signs it, without this repository.
     runs-on: ubuntu-22.04
     env:
       NDK_VERSION: "29.0.14206865"
@@ -89,39 +88,64 @@ jobs:
           RAZDOR_ANDROID_UNSIGNED: "1"
         run: sh scripts/dist-android.sh
 
+      - uses: actions/upload-artifact@v7
+        with:
+          name: razdor-android-unsigned
+          path: dist/razdor-unsigned.apk
+          if-no-files-found: error
+
+  android-sign:
+    # Signs the APK in a job of its own: no checkout, no cargo, no repository scripts, so the
+    # release keystore never sits beside code from the repository or a third party. The keystore
+    # secrets reach only the sign step's env, and only on a tag run; a manual run never reads
+    # them and signs with a throwaway key made for that run.
+    needs: android
+    runs-on: ubuntu-22.04
+    # This job needs no token: it only moves artifacts and runs apksigner.
+    permissions: {}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: razdor-android-unsigned
+          path: dist
+
       - name: Sign razdor.apk
-        # The only step with the keystore secrets, and only in its own env: the keystore is
-        # decoded to $RUNNER_TEMP for this step and removed on exit; the passwords reach
-        # apksigner through env: (not on its command line).
         env:
-          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEYSTORE_BASE64: ${{ github.ref_type == 'tag' && secrets.ANDROID_KEYSTORE_BASE64 || '' }}
+          KEYSTORE_PASSWORD: ${{ github.ref_type == 'tag' && secrets.ANDROID_KEYSTORE_PASSWORD || '' }}
+          KEY_ALIAS: ${{ github.ref_type == 'tag' && secrets.ANDROID_KEY_ALIAS || '' }}
         run: |
           set -eu
           apksigner=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)
-          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ]; then
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ]; then
+              echo "::error::The ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD and ANDROID_KEY_ALIAS secrets are needed for a release"
+              exit 1
+            fi
+            # The keystore is decoded for this step only and removed on exit; the password
+            # reaches apksigner through env: (not on its command line).
             keystore="$RUNNER_TEMP/razdor-release.keystore"
             trap 'rm -f "$keystore"' EXIT
             printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$keystore"
             "$apksigner" sign --ks "$keystore" --ks-key-alias "$KEY_ALIAS" \
                 --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEYSTORE_PASSWORD \
                 --out dist/razdor.apk dist/razdor-unsigned.apk
-          elif [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            echo "::error::The ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD and ANDROID_KEY_ALIAS secrets are needed for a release"
-            exit 1
           else
-            echo "::warning::No Android release keystore secrets: razdor.apk of this run is signed with a throwaway debug key"
-            keystore="$RUNNER_TEMP/debug.keystore"
+            # A manual run: the release secrets are not in this step's env at all (see above).
+            echo "::warning::A run by hand: razdor.apk of this run is signed with a throwaway key, not the release key"
+            THROWAWAY_PASSWORD=$(openssl rand -hex 16)
+            export THROWAWAY_PASSWORD
+            keystore="$RUNNER_TEMP/throwaway.keystore"
             trap 'rm -f "$keystore"' EXIT
-            keytool -genkeypair -keystore "$keystore" -storepass android -keypass android \
-                -alias androiddebugkey -dname "CN=Android Debug,O=Android,C=US" \
-                -keyalg RSA -keysize 2048 -validity 10000
-            "$apksigner" sign --ks "$keystore" --ks-key-alias androiddebugkey \
-                --ks-pass pass:android --key-pass pass:android \
+            keytool -genkeypair -keystore "$keystore" -storetype PKCS12 \
+                -storepass:env THROWAWAY_PASSWORD -keypass:env THROWAWAY_PASSWORD \
+                -alias throwaway -dname "CN=Razdor run by hand,O=Razdor,C=US" \
+                -keyalg RSA -keysize 2048 -validity 10
+            "$apksigner" sign --ks "$keystore" --ks-key-alias throwaway \
+                --ks-pass env:THROWAWAY_PASSWORD --key-pass env:THROWAWAY_PASSWORD \
                 --out dist/razdor.apk dist/razdor-unsigned.apk
           fi
-          "$apksigner" verify --print-certs dist/razdor.apk
+          "$apksigner" verify --print-certs dist/razdor.apk | head -3
           sha256sum dist/razdor.apk
 
       - uses: actions/upload-artifact@v7
@@ -131,7 +155,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: [macos, android]
+    needs: [macos, android-sign]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v5

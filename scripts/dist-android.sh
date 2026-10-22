@@ -18,8 +18,9 @@
 #
 # Signing, three modes:
 #   - RAZDOR_ANDROID_UNSIGNED=1 (the release workflow's build step): no signature at all;
-#     the aligned APK goes to dist/razdor-unsigned.apk. The release workflow signs it in its
-#     own step, with the secrets in that step's env only (.github/workflows/release.yml).
+#     the aligned APK goes to dist/razdor-unsigned.apk. The release workflow's android-sign
+#     job signs it, without the repository, with the release keystore on tags only
+#     (.github/workflows/release.yml).
 #   - RAZDOR_ANDROID_KEYSTORE set (a keystore file), with RAZDOR_ANDROID_KEY_ALIAS and
 #     RAZDOR_ANDROID_KEYSTORE_PASSWORD (the keystore's and the key's password, the same): the
 #     APK is signed with it. The password is read from the environment only: never put it in
