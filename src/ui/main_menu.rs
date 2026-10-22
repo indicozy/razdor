@@ -380,8 +380,15 @@ thread_local! {
     static CREDITS_NUDGE: std::cell::Cell<(f64, f32)> = const { std::cell::Cell::new((f64::NAN, 0.0)) };
 }
 
-/// Razdor's own lines over the original's credits: their height in the picture's pixels.
-const OWN_CREDITS_H: f32 = 96.0;
+/// The players who helped Razdor with bug reports and contributions, by their Discord names
+/// (the owner's wish, 2026-10-22), most reports first.
+const THANKS: [&str; 13] = ["Нлтчк", "Ꙇѵαη Ꚍɣkhøηςhʋk", "Eisenwald", "! TuttiFrutti", "Теневой Лорд", "9ibatnk", "turgrin", "nik0N", "Koaxz", "WHS13", "OBANAI77", "Hristos", "bykBa"];
+/// The thanks' heading below the two own lines, and the first name below it (picture pixels).
+const THANKS_HEAD_DY: f32 = 70.0;
+const THANKS_DY: f32 = THANKS_HEAD_DY + 26.0;
+/// Razdor's own lines over the original's credits: their height in the picture's pixels: the
+/// top margin's 24, the two lines, the thanks with a line each (22 apart), 24 below.
+const OWN_CREDITS_H: f32 = THANKS_DY + THANKS.len() as f32 * 22.0 + 24.0;
 
 fn credits() -> Option<Credits> {
     CREDITS.with(|c| {
@@ -506,9 +513,15 @@ pub fn authors(started: f64) -> bool {
         picture(0.0, c.first_row, 0.0);
         // Razdor's modder, in the credits' colours: the role in gold, the name in white.
         let y = inner.y + (c.first_row + 24.0 - scrolled) * px;
-        for (line, dy, size, color) in [(tr("RAZDOR modder"), 0.0, 20.0, chrome::GOLD), ("indicozy", 26.0, 22.0, WHITE)] {
+        let centred = |line: &str, dy: f32, size: f32, color: Color| {
             let lw = measure(line, size * px).width;
             chrome::shadow_text(line, inner.center().x - lw / 2.0, y + dy * px, size * px, color);
+        };
+        centred(tr("RAZDOR modder"), 0.0, 20.0, chrome::GOLD);
+        centred("indicozy", 26.0, 22.0, WHITE);
+        centred(tr("Thanks to the players"), THANKS_HEAD_DY, 20.0, chrome::GOLD);
+        for (i, name) in THANKS.iter().enumerate() {
+            centred(name, THANKS_DY + i as f32 * 22.0, 18.0, WHITE);
         }
         picture(c.first_row, c.letters.height(), c.first_row + OWN_CREDITS_H);
     }

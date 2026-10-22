@@ -417,6 +417,7 @@ Later = Позже
 Restart now = Перезапустить
 Open the release page = Открыть страницу выпуска
 RAZDOR modder = Моддер «Раздора»
+Thanks to the players = Спасибо игрокам
 A unique character cannot be moved into a garrison! = Уникальный персонаж не может быть перемещен в гарнизон!
 You cannot change places with the selected character! = Нельзя обменяться местом с выбранным персонажем!
 A fallen unit cannot be left in a garrison! = Павшего воина нельзя оставить в гарнизоне!
