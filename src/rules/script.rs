@@ -588,8 +588,10 @@ impl EventWorld for Game {
         }
     }
 
-    /// The unit leaves the army (0x496310), its record and worn items with it: with no
-    /// army to go to, its items are lost, as the original's removal only deletes the record.
+    /// The unit leaves the army. The original's removal (0x496310) only deletes the unit's
+    /// record, so its worn items are lost with it, or travel with its record to `to_army`.
+    /// Razdor deviates here (the owner's choice): the worn items other than its personal ones
+    /// go to the pack first; the personal items leave with it, as in the original.
     /// Sent to `to_army`, it goes with its whole record: appended, over the last one of a full
     /// army; when the slot names a character (`lead`), it becomes the army's leader instead,
     /// the others moving down (the last of a full army is lost). The original decides by the
@@ -599,7 +601,14 @@ impl EventWorld for Game {
         if index == 0 || index >= self.squad.len() {
             return;
         }
-        let u = self.squad.remove(index);
+        let mut u = self.squad.remove(index);
+        // Razdor's deviation: the worn items that are not personal go to the pack before the
+        // unit leaves; the original's removal (0x496310) takes them along.
+        for i in u.personal as usize..u.items.len() {
+            if let Some(item) = u.items[i].take() {
+                self.pack.add(item);
+            }
+        }
         let c = self.content.clone();
         let now = self.clock.total_minutes() as u64;
         if let Some(a) = to_army.and_then(|a| self.army_mut(a)) {
@@ -1613,18 +1622,23 @@ mod tests {
         assert!(units.iter().any(|u| u[0].named == 1), "the character is with the faction's army: {units:?}");
     }
 
-    /// The original's removal (0x496310) only deletes the record: a unit removed with no
-    /// army to go to takes its worn items with it. Given to an army, it leads that army when
-    /// the slot names a character, even an unnamed unit (type 255 under a named slot).
+    /// The original's removal (0x496310) only deletes the record, so a unit removed with no
+    /// army to go to takes its worn items with it. Razdor deviates (the owner's choice): its
+    /// worn items other than its personal ones go to the pack first, and the personal ones
+    /// travel with it to `to_army`. Given to an army, it leads that army when the slot names
+    /// a character, even an unnamed unit (type 255 under a named slot).
     #[test]
-    fn a_removed_unit_keeps_its_items_and_leads_by_the_slot_name() {
+    fn a_removed_unit_leaves_its_worn_items_in_the_pack_and_leads_by_the_slot_name() {
         let mut s = world(vec![]);
         s.armies = vec![army(2, 12, 10, 1, &[troop(4, 0, 1)])];
         let mut g = start(&s);
         read(&mut g);
         g.squad[1].items[0] = Some(ItemId(7));
+        g.squad[1].items[1] = Some(ItemId(8));
+        g.squad[1].personal = 0;
         EventWorld::remove_unit(&mut g, 1, false, None);
-        assert!(g.pack.is_empty(), "the items went with the unit");
+        assert!(g.pack.contains(ItemId(7)) && g.pack.contains(ItemId(8)), "the worn items went to the pack (Razdor's deviation)");
+        assert_eq!(g.pack.count(), 2);
         let c = g.content.clone();
         let taken: Vec<_> = g.squad.iter().map(|u| u.slot).collect();
         let mut u = Unit::new(&c, UnitId(5), c.formation.new_unit_slot(&taken).unwrap());
@@ -1634,6 +1648,19 @@ mod tests {
         EventWorld::remove_unit(&mut g, last, true, Some(2));
         let a = g.world.armies.iter().find(|a| a.id == 2).unwrap();
         assert_eq!(a.troops.iter().map(|t| t.unit).collect::<Vec<_>>(), [UnitId(5), UnitId(4)], "it leads");
+
+        // A personal item leaves with its unit, to army 2: the troop keeps it, the pack does not get it.
+        let c = g.content.clone();
+        let taken: Vec<_> = g.squad.iter().map(|u| u.slot).collect();
+        let mut p = Unit::new(&c, UnitId(5), c.formation.new_unit_slot(&taken).unwrap());
+        p.personal = 1;
+        p.items[0] = Some(ItemId(9));
+        g.squad.push(p);
+        let last = g.squad.len() - 1;
+        EventWorld::remove_unit(&mut g, last, false, Some(2));
+        assert!(!g.pack.contains(ItemId(9)), "a personal item does not go to the pack");
+        let a = g.world.armies.iter().find(|a| a.id == 2).unwrap();
+        assert!(a.troops.iter().any(|t| t.unit == UnitId(5) && t.worn.contains(&Some(ItemId(9)))), "the personal item travels with its record");
     }
 
     /// A full army (0x4a8fe5): the unit with the lowest level value after the hero is
