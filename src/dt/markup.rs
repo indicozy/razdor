@@ -63,7 +63,9 @@ pub struct Line {
 ///
 /// - lines end at CR LF or at `#\`; an empty text gives no line, a text ending in a break
 ///   gives an empty last line (it shows as a blank row);
-/// - in each line every `*`, `|`, `@` and `^` is removed, wherever it stands; the font is that
+/// - in each line every `*`, `|`, `@`, `^` and `#` is removed, wherever it stands (a `#` left
+///   by the map, as after `#HERONAME`, has no glyph in the original's fonts and draws as
+///   nothing: 0x4ecdd4, 0x47866c, TextDraw 0x478978 skips it); the font is that
 ///   of the last kind found in the order `*`, `|`, `@` (so `@` beats `|` beats `*`), else
 ///   [`Ink::Plain`]; a `^` anywhere centres the line, else the line is justified behind
 ///   [`INDENT`].
@@ -102,7 +104,10 @@ fn line(raw: &str) -> Line {
             ink = kind;
         }
     }
-    let text: String = raw.chars().filter(|c| !matches!(c, '*' | '|' | '@' | '^')).collect();
+    // `#` has no glyph in the original's fonts (order string 0x4ecdd4, BuildFontFromSheet
+    // 0x47866c), and TextDraw 0x478978 skips a character with no glyph, so a `#` the map leaves
+    // (e.g. after `#HERONAME`) is invisible and takes no width.
+    let text: String = raw.chars().filter(|c| !matches!(c, '*' | '|' | '@' | '^' | '#')).collect();
     if raw.contains('^') {
         Line { text, ink, align: Align::Centre }
     } else {
@@ -218,6 +223,13 @@ mod tests {
         // A bare LF or CR is no break.
         assert_eq!(parse("a\nb").len(), 1);
         assert_eq!(parse("a\rb").len(), 1);
+    }
+
+    #[test]
+    fn a_lone_hash_has_no_glyph_and_is_dropped_but_a_hash_break_still_splits() {
+        // A map's `#HERONAME#` leaves a `#`; the original draws nothing for it (0x478978).
+        assert_eq!(parse("вы, Тихон#. Рад"), vec![l("______вы, Тихон. Рад", Ink::Plain, Align::Justify)]);
+        assert_eq!(parse("a#\\b"), vec![l("______a", Ink::Plain, Align::Justify), l("______b", Ink::Plain, Align::Justify)]);
     }
 
     #[test]
