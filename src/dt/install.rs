@@ -273,15 +273,13 @@ pub fn missing(dir: &Path) -> Vec<String> {
 pub fn config_file() -> Option<PathBuf> {
     let dir = std::env::var_os("RAZDOR_CONFIG_DIR")
         .map(PathBuf::from)
-        .or_else(|| dirs::config_dir().map(|d| d.join("razdor")))?;
+        .or_else(crate::platform::config_dir)?;
     Some(dir.join("install"))
 }
 
-/// Folders searched for an install when none is set or remembered: `~/Games`, `~/Downloads`
-/// and the home folder.
+/// Folders searched for an install when none is set or remembered ([`crate::platform::install_roots`]).
 pub fn search_roots() -> Vec<PathBuf> {
-    let Some(home) = dirs::home_dir() else { return Vec::new() };
-    vec![home.join("Games"), home.join("Downloads"), home]
+    crate::platform::install_roots()
 }
 
 /// The folder holding the running program, when it is an install: Razdor put into the game

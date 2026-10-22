@@ -340,9 +340,10 @@ pub fn frame() -> Option<Pick> {
     if link(tr("Custom battle"), x, y, false) {
         pick = Some(Pick::Custom);
     }
-    // The players' Discord (the owner's wish): the invite of the site, in the browser.
+    // The players' Discord (the owner's wish): the invite of the site, in the browser. Not on
+    // Android: there is no browser opener (`razdor::update::open_in_browser` runs xdg-open).
     let x = x + measure(tr("Custom battle"), 18.0 * k).width + 28.0 * k;
-    if link("Discord", x, y, false) {
+    if !cfg!(target_os = "android") && link("Discord", x, y, false) {
         razdor::update::open_in_browser(DISCORD_INVITE);
     }
     // The language list (Razdor's): the current language; a click opens the list over it.
@@ -860,31 +861,38 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     }
     // Updates from the GitHub releases (`razdor::update`): offered, put in place quietly, or
     // not looked for; "Check now" asks at once and shows the answer.
-    let y = y + 100.0 * k;
-    chrome::shadow_text(tr("Updates"), col.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
-    let ur = Rect::new(br.x, y, br.w, br.h);
-    let mode = match audio.updates {
-        razdor::update::Mode::Ask => tr("Ask"),
-        razdor::update::Mode::Always => tr("Always"),
-        razdor::update::Mode::Off => tr("Off"),
+    // Android has no self-update (`razdor::update::asset_name`): the row is not drawn there and
+    // the zoom row takes its place.
+    let y = if cfg!(target_os = "android") {
+        y
+    } else {
+        let y = y + 100.0 * k;
+        chrome::shadow_text(tr("Updates"), col.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
+        let ur = Rect::new(br.x, y, br.w, br.h);
+        let mode = match audio.updates {
+            razdor::update::Mode::Ask => tr("Ask"),
+            razdor::update::Mode::Always => tr("Always"),
+            razdor::update::Mode::Off => tr("Off"),
+        };
+        if row_button(ur, mode) {
+            audio.updates = audio.updates.next();
+        }
+        let cr = Rect::new(ur.x, y + 40.0 * k, ur.w, ur.h);
+        if row_button(cr, tr("Check now")) {
+            super::update_view::check_by_hand();
+        }
+        let state = super::update_view::status_label();
+        let sw = measure(&state, 13.0 * k).width;
+        chrome::shadow_text(&state, cr.x - 16.0 * k - sw, cr.y + 19.0 * k, 13.0 * k, chrome::GOLD);
+        let hint = tr("Ask: a newer release is offered in a window. Always: it is downloaded and starts the next time. The check never holds up the game.");
+        for (i, line) in wrap(hint, col.w - 48.0 * k, 12.0 * k).iter().enumerate() {
+            chrome::shadow_text(line, col.x + 24.0 * k, y + 92.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
+        }
+        y + 40.0 * k
     };
-    if row_button(ur, mode) {
-        audio.updates = audio.updates.next();
-    }
-    let cr = Rect::new(ur.x, y + 40.0 * k, ur.w, ur.h);
-    if row_button(cr, tr("Check now")) {
-        super::update_view::check_by_hand();
-    }
-    let state = super::update_view::status_label();
-    let sw = measure(&state, 13.0 * k).width;
-    chrome::shadow_text(&state, cr.x - 16.0 * k - sw, cr.y + 19.0 * k, 13.0 * k, chrome::GOLD);
-    let hint = tr("Ask: a newer release is offered in a window. Always: it is downloaded and starts the next time. The check never holds up the game.");
-    for (i, line) in wrap(hint, col.w - 48.0 * k, 12.0 * k).iter().enumerate() {
-        chrome::shadow_text(line, col.x + 24.0 * k, y + 92.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
-    }
     // The map's own zoom (Razdor's): the wheel steps from it, 0 comes back to it; locked, the
     // wheel and +/- leave it alone.
-    let y = y + 140.0 * k;
+    let y = y + 100.0 * k;
     chrome::shadow_text(tr("Map zoom"), col.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
     let zr = Rect::new(br.x, y, br.w, br.h);
     let lock_label = if audio.zoom_locked { tr("Locked") } else { tr("Wheel and +/-") };

@@ -23,7 +23,7 @@ pub fn user_maps_dir() -> Option<PathBuf> {
     if let Some(d) = std::env::var_os(MAPS_DIR_ENV).filter(|d| !d.is_empty()) {
         return Some(PathBuf::from(d));
     }
-    dirs::data_dir().map(|d| d.join("razdor").join("maps"))
+    crate::platform::app_dir().map(|d| d.join("maps"))
 }
 
 /// The `.DTm` files of a folder, sorted by name (empty if the folder does not exist).

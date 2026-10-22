@@ -472,7 +472,7 @@ impl Job {
 
     /// Where jobs are kept: `razdor/translate` in the platform data folder.
     pub fn dir() -> Option<PathBuf> {
-        dirs::data_dir().map(|d| d.join("razdor").join("translate"))
+        crate::platform::app_dir().map(|d| d.join("translate"))
     }
 
     /// The job file for the maps starting with `first`, translated into `language` (English

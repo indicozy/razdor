@@ -116,7 +116,7 @@ pub fn cache_dir() -> Option<PathBuf> {
     if std::env::var_os("RAZDOR_SNAPSHOT").is_some() || std::env::var_os("RAZDOR_NO_PICTURE_CACHE").is_some() {
         return None;
     }
-    dirs::data_dir().map(|d| d.join("razdor").join("cache").join("pictures"))
+    crate::platform::app_dir().map(|d| d.join("cache").join("pictures"))
 }
 
 /// The frames stored under `key` in `dir`, if the entry is whole and current.

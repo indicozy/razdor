@@ -43,7 +43,7 @@ pub fn log_path() -> Option<PathBuf> {
     PATH.get_or_init(|| {
         std::env::var_os("RAZDOR_LOG")
             .map(PathBuf::from)
-            .or_else(|| dirs::data_dir().map(|d| d.join("razdor").join("razdor.log")))
+            .or_else(|| crate::platform::app_dir().map(|d| d.join("razdor.log")))
     })
     .clone()
 }

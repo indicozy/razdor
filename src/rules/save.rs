@@ -202,7 +202,7 @@ pub fn default_dir() -> Option<PathBuf> {
     if let Some(d) = std::env::var_os(DIR_ENV).filter(|d| !d.is_empty()) {
         return Some(PathBuf::from(d));
     }
-    dirs::data_dir().map(|d| d.join("razdor").join("saves"))
+    crate::platform::app_dir().map(|d| d.join("saves"))
 }
 
 /// The install the games are played on ([`set_install`]), whose saves [`games_dir`] keeps.
