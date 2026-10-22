@@ -57,9 +57,11 @@ jobs:
 
   android:
     # Experimental: the Android APK (arm64-v8a, armeabi-v7a, x86_64), built with cargo-quad-apk
-    # (pinned by its commit) on the runner's Android SDK, with the NDK pinned here. Signed with
-    # the release keystore from the secrets; a manual run without them is signed with the debug
-    # key, a tag run without them fails (no debug-signed release).
+    # (pinned by its commit) on the runner's Android SDK, with the NDK pinned here. The build
+    # step has no secrets in its environment: it makes an unsigned aligned APK. The sign step
+    # alone gets the keystore secrets, in its own step env (never in GITHUB_ENV, which would
+    # reach every later step and the build scripts), and writes dist/razdor.apk. A manual run
+    # without the secrets signs with a throwaway debug key; a tag run without them fails.
     runs-on: ubuntu-22.04
     env:
       NDK_VERSION: "29.0.14206865"
@@ -82,26 +84,45 @@ jobs:
       - name: cargo-quad-apk (pinned)
         run: cargo install --git https://github.com/not-fl3/cargo-quad-apk --rev "$CARGO_QUAD_APK_REV" --locked
 
-      - name: Release keystore from the secrets
+      - name: Build razdor-unsigned.apk (no secrets here)
+        env:
+          RAZDOR_ANDROID_UNSIGNED: "1"
+        run: sh scripts/dist-android.sh
+
+      - name: Sign razdor.apk
+        # The only step with the keystore secrets, and only in its own env: the keystore is
+        # decoded to $RUNNER_TEMP for this step and removed on exit; the passwords reach
+        # apksigner through env: (not on its command line).
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
+          set -eu
+          apksigner=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)
           if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/razdor-release.keystore"
-            echo "RAZDOR_ANDROID_KEYSTORE=$RUNNER_TEMP/razdor-release.keystore" >> "$GITHUB_ENV"
-            echo "RAZDOR_ANDROID_KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
-            echo "RAZDOR_ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+            keystore="$RUNNER_TEMP/razdor-release.keystore"
+            trap 'rm -f "$keystore"' EXIT
+            printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$keystore"
+            "$apksigner" sign --ks "$keystore" --ks-key-alias "$KEY_ALIAS" \
+                --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEYSTORE_PASSWORD \
+                --out dist/razdor.apk dist/razdor-unsigned.apk
           elif [ "$GITHUB_REF_TYPE" = "tag" ]; then
             echo "::error::The ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD and ANDROID_KEY_ALIAS secrets are needed for a release"
             exit 1
           else
-            echo "::warning::No Android release keystore secrets: razdor.apk of this run is signed with the debug key"
+            echo "::warning::No Android release keystore secrets: razdor.apk of this run is signed with a throwaway debug key"
+            keystore="$RUNNER_TEMP/debug.keystore"
+            trap 'rm -f "$keystore"' EXIT
+            keytool -genkeypair -keystore "$keystore" -storepass android -keypass android \
+                -alias androiddebugkey -dname "CN=Android Debug,O=Android,C=US" \
+                -keyalg RSA -keysize 2048 -validity 10000
+            "$apksigner" sign --ks "$keystore" --ks-key-alias androiddebugkey \
+                --ks-pass pass:android --key-pass pass:android \
+                --out dist/razdor.apk dist/razdor-unsigned.apk
           fi
-
-      - name: Build razdor.apk
-        run: sh scripts/dist-android.sh
+          "$apksigner" verify --print-certs dist/razdor.apk
+          sha256sum dist/razdor.apk
 
       - uses: actions/upload-artifact@v7
         with:

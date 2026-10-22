@@ -16,11 +16,16 @@
 #   - the Rust targets of the pinned toolchain:
 #       rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
 #
-# Signing: set RAZDOR_ANDROID_KEYSTORE to a keystore file, RAZDOR_ANDROID_KEY_ALIAS to its key's
-# alias and RAZDOR_ANDROID_KEYSTORE_PASSWORD to the password (the keystore's and the key's, the
-# same). The password is read from the environment only: never put it in the repo or on the
-# command line. Without RAZDOR_ANDROID_KEYSTORE the APK is signed with the debug key that
-# cargo-quad-apk makes in ~/.android: installable, but not the release signature.
+# Signing, three modes:
+#   - RAZDOR_ANDROID_UNSIGNED=1 (the release workflow's build step): no signature at all;
+#     the aligned APK goes to dist/razdor-unsigned.apk. The release workflow signs it in its
+#     own step, with the secrets in that step's env only (.github/workflows/release.yml).
+#   - RAZDOR_ANDROID_KEYSTORE set (a keystore file), with RAZDOR_ANDROID_KEY_ALIAS and
+#     RAZDOR_ANDROID_KEYSTORE_PASSWORD (the keystore's and the key's password, the same): the
+#     APK is signed with it. The password is read from the environment only: never put it in
+#     the repo or on the command line.
+#   - otherwise the APK is signed with the debug key that cargo-quad-apk makes in ~/.android:
+#     installable, but not the release signature (the script says so).
 #
 # The APK is built in $CARGO_TARGET_DIR (or target/) under android-artifacts/release/apk/.
 set -eu
@@ -58,7 +63,14 @@ REMAP="$REMAP --remap-path-prefix=$PWD=razdor"
 BUILD="--release --no-default-features --features audio --bin razdor"
 APK="${CARGO_TARGET_DIR:-target}/android-artifacts/release/apk/razdor.apk"
 
-if [ -n "${RAZDOR_ANDROID_KEYSTORE:-}" ]; then
+if [ "${RAZDOR_ANDROID_UNSIGNED:-}" = 1 ]; then
+    # Aligned by cargo-quad-apk, not signed: the caller signs it (no secret is read here).
+    RUSTFLAGS="$REMAP" cargo quad-apk build $BUILD --nosign
+    cp "$APK" dist/razdor-unsigned.apk
+    ls -l dist/razdor-unsigned.apk
+    sha256sum dist/razdor-unsigned.apk
+    exit 0
+elif [ -n "${RAZDOR_ANDROID_KEYSTORE:-}" ]; then
     if [ -z "${RAZDOR_ANDROID_KEY_ALIAS:-}" ] || [ -z "${RAZDOR_ANDROID_KEYSTORE_PASSWORD:-}" ]; then
         echo "RAZDOR_ANDROID_KEYSTORE needs RAZDOR_ANDROID_KEY_ALIAS and RAZDOR_ANDROID_KEYSTORE_PASSWORD too" >&2
         exit 1
