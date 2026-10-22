@@ -67,19 +67,22 @@ impl BarButton {
             BarButton::Map => "cMap",
         };
         let own = (razdor::i18n::lang() == razdor::i18n::Lang::Ru).then(|| chrome::ui_text("GameMenu", key)).flatten();
-        own.unwrap_or_else(|| self.our_hint().to_string())
+        own.unwrap_or_else(|| self.our_hint())
     }
 
-    fn our_hint(self) -> &'static str {
+    /// Razdor's hint; the keys named are the current bindings (`keymap`).
+    fn our_hint(self) -> String {
+        use super::keymap::{display, key, Action};
+        let k = |a: Action| display(key(a));
         match self {
-            BarButton::Menu => tr("Main menu (Esc)"),
-            BarButton::Settings => tr("Sound settings"),
-            BarButton::Save => tr("Save the game (F5: quick save)"),
-            BarButton::Load => tr("Load a saved game (F9: quick load)"),
-            BarButton::Hero => tr("The hero's characteristics and inventory"),
-            BarButton::Squad => tr("The hero and his army (A)"),
-            BarButton::Spells => tr("The spell book (B)"),
-            BarButton::Map => tr("Map of the scenario (M)"),
+            BarButton::Menu => tr("Main menu (Esc)").to_string(),
+            BarButton::Settings => tr("Sound settings").to_string(),
+            BarButton::Save => trf!("Save the game ({key}: quick save)", key = k(Action::QuickSave)),
+            BarButton::Load => trf!("Load a saved game ({key}: quick load)", key = k(Action::QuickLoad)),
+            BarButton::Hero => tr("The hero's characteristics and inventory").to_string(),
+            BarButton::Squad => trf!("The hero and his army ({key})", key = k(Action::HeroArmy)),
+            BarButton::Spells => trf!("The spell book ({key})", key = k(Action::SpellBook)),
+            BarButton::Map => trf!("Map of the scenario ({key})", key = k(Action::Minimap)),
         }
     }
 }

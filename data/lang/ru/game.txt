@@ -209,12 +209,12 @@ Date unknown = Дата неизвестна
 # The bar under the map
 Main menu (Esc) = Главное меню (Esc)
 Sound settings = Настройки звука
-Save the game (F5: quick save) = Сохранить игру (F5 — быстрое сохранение)
-Load a saved game (F9: quick load) = Загрузить игру (F9 — быстрая загрузка)
+Save the game ({key}: quick save) = Сохранить игру ({key} — быстрое сохранение)
+Load a saved game ({key}: quick load) = Загрузить игру ({key} — быстрая загрузка)
 The hero's characteristics and inventory = Личные характеристики и инвентарь героя
-The hero and his army (A) = Герой и его армия (A)
-The spell book (B) = Книга заклинаний (B)
-Map of the scenario (M) = Карта сценария (M)
+The hero and his army ({key}) = Герой и его армия ({key})
+The spell book ({key}) = Книга заклинаний ({key})
+Map of the scenario ({key}) = Карта сценария ({key})
 Wait 1 hour, the hero stays where he is (1) = Подождать 1 час, герой стоит на месте (1)
 Wait 4 hours, the hero stays where he is (4) = Подождать 4 часа, герой стоит на месте (4)
 Move the view to the hero (Tab) = Перевести взгляд на героя (Tab)
