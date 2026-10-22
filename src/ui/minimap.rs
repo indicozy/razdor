@@ -7,7 +7,8 @@
 //! - Minimap: a toggle window in the top-right corner of the map view (bottom-bar "Map" button
 //!   or M). The whole map scaled down, explored cells in their terrain colour and the rest
 //!   black, locations as small icons in the colours the original gives their types, the
-//!   armies and the hero as shields, and a light rectangle for the view. A click on it moves the camera there (as in the video); walking still
+//!   armies and the hero as shields, and a light rectangle for the view. While the left
+//!   button is held on it, the view follows the pointer, as the original's; walking still
 //!   needs a click on the map.
 //!
 //! Both textures are rebuilt only when the explored set changes.
@@ -21,7 +22,6 @@ use razdor::rules::game::Game;
 use razdor::rules::map::TileMap;
 use razdor::rules::world::LocationKind;
 
-use super::widgets::*;
 
 /// Explored cells within this many cells of the dark are shaded (the feathered edge).
 pub const FEATHER: i32 = 2;
@@ -407,12 +407,26 @@ pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_
     }
 
     let m = Vec2::from(crate::ui::widgets::pointer());
-    (clicked() && r.contains(m)).then(|| ((m.x - r.x) / k.x - 0.5, ((m.y - r.y) / k.y - 0.5) * rh))
+    let held = !crate::ui::widgets::input_blocked() && !crate::ui::widgets::input_swallowed() && macroquad::prelude::is_mouse_button_down(macroquad::prelude::MouseButton::Left);
+    follows(held, r.contains(m)).then(|| ((m.x - r.x) / k.x - 0.5, ((m.y - r.y) / k.y - 0.5) * rh))
+}
+
+/// The view follows the pointer while the left button is held on the minimap (the original
+/// centres the camera on the point under the mouse every frame, 4ccf5a-4cd00f).
+fn follows(held: bool, inside: bool) -> bool {
+    held && inside
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_view_follows_while_the_button_is_held_on_the_picture() {
+        assert!(follows(true, true), "held over the picture follows");
+        assert!(!follows(true, false), "held outside does not");
+        assert!(!follows(false, true), "not held does not");
+    }
     use razdor::rules::map::Grid;
 
     #[test]
