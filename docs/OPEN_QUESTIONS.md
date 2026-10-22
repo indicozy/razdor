@@ -8,6 +8,16 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **AI ships move about twice as fast as the original's (report 1082, 2026-10-23).** A diff
+  test on РК1 (knight, the opening read, 48 one-hour waits, `tools/difftest`) has the sea
+  pirates (army 9) sail 4 cells in the first hour in the original and 7 in Razdor, 6 against 12
+  in the second; over two days the original's ship makes 4–6 cells an hour with whole hours
+  standing still, Razdor's 7–12. The SHIP costs match (world.md §1: coastal 1, shallows 2), so
+  the difference is in how an AI ship's steps are timed (ai.md §2, §13). Settles it: RE of the
+  AI step clock for ship armies (0x4a1ff0 loader, the step cost and delay in the per-frame
+  driver), then the same diff test equal. Players catch the pirates in the village in the
+  original because they sail slowly and wait.
+
 - **Held item: the green card and the acceptance line's face (report 1053, 2026-10-22).** The
   code gives a refused card state 4 (red) and an accepted one state 2 (blue, the block at
   0xadd084); the green frame in the original's screenshot is most likely the selected unit
