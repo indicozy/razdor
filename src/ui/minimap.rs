@@ -7,7 +7,8 @@
 //! - Minimap: a toggle window in the top-right corner of the map view (bottom-bar "Map" button
 //!   or M); Razdor's: dragged by its frame, it moves to any corner ([`Corner`]). The whole map scaled down, explored cells in their terrain colour and the rest
 //!   black, locations as small icons in the colours the original gives their types, the
-//!   armies and the hero as shields, and a light rectangle for the view. A click on it moves the camera there (as in the video); walking still
+//!   armies and the hero as shields, and a light rectangle for the view. While the left
+//!   button is held on it, the view follows the pointer, as the original's; walking still
 //!   needs a click on the map.
 //!
 //! Both textures are rebuilt only when the explored set changes.
@@ -335,6 +336,13 @@ fn dragged_in_proportion(from: (f32, f32), edges: (bool, bool), d: Vec2, k: f32,
         _ if by_w.0 * by_w.1 >= by_h.0 * by_h.1 => by_w,
         _ => by_h,
     }
+}
+
+/// The view follows the pointer while the left button is held on the picture (the original
+/// centres the camera on the point under the mouse every frame, 4ccf5a-4cd00f). A press that
+/// grips a resize edge or the frame is not the picture's (`gripped`).
+fn follows(held: bool, gripped: bool, inside: bool) -> bool {
+    held && !gripped && inside
 }
 
 /// Resizing by the inner edges and their corner; a double click on an edge
@@ -696,7 +704,8 @@ pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_
 
     let gripped = resize(view, o, aspect(map)) || shift(view, o, r);
     let m = Vec2::from(crate::ui::widgets::pointer());
-    (!gripped && clicked() && r.contains(m)).then(|| ((m.x - r.x) / k.x - 0.5, ((m.y - r.y) / k.y - 0.5) * rh))
+    let held = !crate::ui::widgets::input_blocked() && !crate::ui::widgets::input_swallowed() && is_mouse_button_down(MouseButton::Left);
+    follows(held, gripped, r.contains(m)).then(|| ((m.x - r.x) / k.x - 0.5, ((m.y - r.y) / k.y - 0.5) * rh))
 }
 
 // ------------------------------------------------------------------------------------
@@ -786,6 +795,14 @@ pub fn army_list(game: &Game, o: Rect, bottom: f32, unnamed: &str) -> Option<(f3
 mod tests {
     use super::*;
     use razdor::rules::map::Grid;
+
+    #[test]
+    fn the_view_follows_while_the_button_is_held_on_the_picture() {
+        assert!(follows(true, false, true), "held over the picture follows");
+        assert!(!follows(true, true, true), "a press that grips the frame or an edge does not");
+        assert!(!follows(true, false, false), "held outside does not");
+        assert!(!follows(false, false, true), "not held does not");
+    }
 
     #[test]
     fn darkness_is_black_in_the_dark_and_feathered_at_the_edge() {
