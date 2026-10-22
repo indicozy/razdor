@@ -381,8 +381,9 @@ thread_local! {
 }
 
 /// The players who helped Razdor with bug reports and contributions, by their Discord names
-/// (the owner's wish, 2026-10-22), most reports first.
-const THANKS: [&str; 13] = ["Нлтчк", "Ꙇѵαη Ꚍɣkhøηςhʋk", "Eisenwald", "! TuttiFrutti", "Теневой Лорд", "9ibatnk", "turgrin", "nik0N", "Koaxz", "WHS13", "OBANAI77", "Hristos", "bykBa"];
+/// (the owner's wish, 2026-10-22), most reports first; a display name in letters the fonts lack
+/// (Cyrillic Extended-B, Greek, IPA) is given as the Discord tag instead.
+const THANKS: [&str; 13] = ["Нлтчк", "ivantykhonchuk", "Eisenwald", "! TuttiFrutti", "Теневой Лорд", "9ibatnk", "turgrin", "nik0N", "Koaxz", "WHS13", "OBANAI77", "Hristos", "bykBa"];
 /// The thanks' heading below the two own lines, and the first name below it (picture pixels).
 const THANKS_HEAD_DY: f32 = 70.0;
 const THANKS_DY: f32 = THANKS_HEAD_DY + 26.0;
