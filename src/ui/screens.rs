@@ -3,6 +3,7 @@ use macroquad::prelude::*;
 use std::sync::Arc;
 
 use razdor::dt::data::MagicSchool;
+#[cfg(not(target_os = "android"))]
 use razdor::dt::install::Problem;
 use razdor::i18n::tr;
 use razdor::rules::battle::Team;
@@ -155,20 +156,44 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
             text(line, x, y + i as f32 * 22.0, 18.0, INK);
         }
     } else if !has_install {
-        let hint = tr("Discord Times not found: put Razdor into the game folder, next to DiscordTimes.exe.");
-        text_centered(hint, screen_width() / 2.0, y + 20.0, 20.0, DIM);
-        let why = match razdor::dt::install::problem() {
-            Some(Problem::NotInstall { dir, missing }) => {
-                Some(trf!("This folder has no {missing}: {dir}", missing = missing.join(", "), dir = dir.display()))
+        #[cfg(target_os = "android")]
+        {
+            android_not_found(x, y, w);
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let hint = tr("Discord Times not found: put Razdor into the game folder, next to DiscordTimes.exe.");
+            text_centered(hint, screen_width() / 2.0, y + 20.0, 20.0, DIM);
+            let why = match razdor::dt::install::problem() {
+                Some(Problem::NotInstall { dir, missing }) => {
+                    Some(trf!("This folder has no {missing}: {dir}", missing = missing.join(", "), dir = dir.display()))
+                }
+                Some(Problem::Load(e)) => Some(e),
+                None => None,
+            };
+            if let Some(why) = why {
+                text_fit(&why, x, y + 48.0, w, 16.0, DIM);
             }
-            Some(Problem::Load(e)) => Some(e),
-            None => None,
-        };
-        if let Some(why) = why {
-            text_fit(&why, x, y + 48.0, w, 16.0, DIM);
         }
     }
     None
+}
+
+/// Android: the install is not there. Tells the player what to do, and offers the two buttons:
+/// give Razdor the storage access (the settings page; a dialog on Android 8 to 10), and look
+/// again. The permission and the look are in `ui::android`; the look runs on the title screen.
+#[cfg(target_os = "android")]
+fn android_not_found(x: f32, y: f32, w: f32) {
+    use super::android::{ask_recheck, request_storage};
+    text_fit(tr("Discord Times not found."), x, y, w, 20.0, INK);
+    text_fit(tr("1. Give Razdor access to all files: the «Grant access» button, or Settings > Apps > Razdor > Permissions."), x, y + 26.0, w, 16.0, DIM);
+    text_fit(tr("2. Put the game folder in internal storage, in a folder named DiscordTimes (or in Download)."), x, y + 46.0, w, 16.0, DIM);
+    if button(x, y + 68.0, 200.0, 34.0, tr("Grant access"), true) {
+        request_storage();
+    }
+    if button(x + 216.0, y + 68.0, 200.0, 34.0, tr("Check again"), true) {
+        ask_recheck();
+    }
 }
 
 /// A new game as `hero` named `name`: of the demo on `demo`, or of the install's map.

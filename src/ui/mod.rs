@@ -41,6 +41,8 @@ pub mod typography;
 pub mod unit_drag;
 pub mod unit_sheet;
 pub mod update_view;
+#[cfg(target_os = "android")]
+pub mod android;
 pub mod widgets;
 pub mod window_layout;
 pub mod world_view;
@@ -194,32 +196,41 @@ pub struct App {
     update_open: bool,
 }
 
+/// The install's content for the new-game windows (`None` without an install).
+fn dt_content_of(assets: &Assets, impossible: Option<bool>) -> Option<Arc<Content>> {
+    assets.dt.as_ref().map(|d| {
+        // In another language, the names made by razdor-translate when the install has them.
+        let mut c = Content::from_dt_in(&d.install, language::data_prefix().as_deref());
+        // "Невозможный уровень сложности игры" from the settings window, read at start as the
+        // original reads `OptValue10` (interface.md §16): F = 100 instead of 120.
+        if let Some(on) = impossible {
+            c.options.difficulty_factor = if on { 100 } else { 120 };
+        }
+        Arc::new(c)
+    })
+}
+
+/// The install's maps, each read once (a map that fails to load is logged and left out).
+fn scenarios_of(assets: &Assets) -> Vec<ScenarioEntry> {
+    assets
+        .dt
+        .iter()
+        .flat_map(|d| d.install.maps.iter())
+        .filter_map(|m| match m.load() {
+            Ok(scenario) => Some(ScenarioEntry { file: m.name.clone(), path: m.path.clone(), scenario }),
+            Err(e) => {
+                razdor::diag!("{}: {e}", m.name);
+                None
+            }
+        })
+        .collect()
+}
+
 impl App {
     pub fn new(assets: Assets, demo: Arc<Content>) -> Self {
         let audio = Audio::new(assets.dt.as_ref().map(|d| &d.install));
-        // "Невозможный уровень сложности игры" from the settings window, read at start as the
-        // original reads `OptValue10` (interface.md §16): F = 100 instead of 120.
-        let impossible = audio.settings.impossible;
-        let dt_content = assets.dt.as_ref().map(|d| {
-            // In another language, the names made by razdor-translate when the install has them.
-            let mut c = Content::from_dt_in(&d.install, language::data_prefix().as_deref());
-            if let Some(on) = impossible {
-                c.options.difficulty_factor = if on { 100 } else { 120 };
-            }
-            Arc::new(c)
-        });
-        let scenarios = assets
-            .dt
-            .iter()
-            .flat_map(|d| d.install.maps.iter())
-            .filter_map(|m| match m.load() {
-                Ok(scenario) => Some(ScenarioEntry { file: m.name.clone(), path: m.path.clone(), scenario }),
-                Err(e) => {
-                    razdor::diag!("{}: {e}", m.name);
-                    None
-                }
-            })
-            .collect();
+        let dt_content = dt_content_of(&assets, audio.settings.impossible);
+        let scenarios = scenarios_of(&assets);
         minimap::set_size(audio.settings.minimap_size);
         minimap::set_corner(audio.settings.minimap_corner);
         keymap::load(&audio.settings.keys);
@@ -764,7 +775,30 @@ impl App {
         }
     }
 
+    /// Android: the install was not there at start. On the title screen, loads it when the
+    /// player asks ("Check again") or when the poll finds it in place (the storage permission
+    /// is granted and an install folder is listed).
+    #[cfg(target_os = "android")]
+    fn android_install_poll(&mut self) {
+        if self.dt_content.is_some() || !matches!(self.screen, Screen::ScenarioSelect) {
+            return;
+        }
+        let asked = android::take_recheck();
+        if !asked && !(android::poll_due(macroquad::time::get_time()) && android::storage_granted() && android::install_listed()) {
+            return;
+        }
+        if let Some(dt) = dt_art::DtArt::from_env() {
+            self.assets.adopt_install(dt);
+            // The settings as they are now (nothing changed them on the title screen).
+            self.audio = Audio::new(self.assets.dt.as_ref().map(|d| &d.install));
+            self.dt_content = dt_content_of(&self.assets, self.audio.settings.impossible);
+            self.scenarios = scenarios_of(&self.assets);
+        }
+    }
+
     pub fn frame(&mut self) {
+        #[cfg(target_os = "android")]
+        self.android_install_poll();
         if matches!(self.screen, Screen::Editor) {
             self.frame_content();
         } else {

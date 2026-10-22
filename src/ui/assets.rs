@@ -28,6 +28,15 @@ pub struct Assets {
 }
 
 /// Discord Times unit (`GlobalIndex`) whose portrait stands in for a demo unit, by its `Key=`.
+/// What the install changes for the rest of the interface: its folder for the window art, the
+/// translations, the saves' folder and the saves' summaries.
+fn announce_install(d: &DtArt) {
+    super::chrome::set_install(d.install.dir.clone());
+    super::language::set_install(&d.install.dir);
+    razdor::rules::save::set_install(&d.install.dir);
+    razdor::rules::save::warm_meta_cache();
+}
+
 fn dt_stand_in(key: &str) -> Option<u32> {
     Some(match key {
         "knight" => 1,
@@ -191,12 +200,16 @@ impl Assets {
         }
         let dt = DtArt::from_env();
         if let Some(d) = &dt {
-            super::chrome::set_install(d.install.dir.clone());
-            super::language::set_install(&d.install.dir);
-            razdor::rules::save::set_install(&d.install.dir);
-            razdor::rules::save::warm_meta_cache();
+            announce_install(d);
         }
         Assets { demo: content.clone(), content, sprites, item_sprites, dt }
+    }
+
+    /// Android: the install found after the start (see `App::android_install_poll`).
+    #[cfg(target_os = "android")]
+    pub fn adopt_install(&mut self, dt: DtArt) {
+        announce_install(&dt);
+        self.dt = Some(dt);
     }
 
     /// Draw pictures for `content` from now on (a new game on other content).

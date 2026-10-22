@@ -9,6 +9,12 @@ Load a game = Загрузить игру
 Map editor = Редактор карт
 This folder has no {missing}: {dir} = В этой папке нет {missing}: {dir}
 Discord Times not found: put Razdor into the game folder, next to DiscordTimes.exe. = «Времена раздора» не найдены: положите Razdor в папку игры, рядом с DiscordTimes.exe.
+# Android (the not-found screen; see ui/screens.rs)
+Discord Times not found. = «Времена раздора» не найдены.
+1. Give Razdor access to all files: the «Grant access» button, or Settings > Apps > Razdor > Permissions. = 1. Дайте Раздору доступ ко всем файлам: кнопка «Выдать доступ» или Настройки > Приложения > Раздор > Разрешения.
+2. Put the game folder in internal storage, in a folder named DiscordTimes (or in Download). = 2. Положите папку игры во внутреннюю память, в папку DiscordTimes (или в Download).
+Grant access = Выдать доступ
+Check again = Проверить снова
 A time of discord = Смутное время
 Choose who you are. = Кем вы будете?
 A later campaign map: the original carries gold and army over from the previous one. = Одна из поздних карт кампании: в оригинале золото и армия переходят сюда с прошлой карты.
