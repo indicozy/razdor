@@ -29,6 +29,7 @@ use super::audio::{cue, cued, Cue};
 use super::dialog::{resource_icon, Dialog, Picture, Resource, MANA};
 use super::item_filter;
 use super::items_view::unit_stat_lines;
+use super::keymap::{self, Action};
 use super::story;
 use super::unit_sheet;
 use super::widgets::*;
@@ -1673,7 +1674,7 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
     let all: Vec<(usize, ItemId)> = rows.iter().enumerate().filter_map(|(n, r)| r.0.map(|i| (n, i))).filter(|&(_, i)| view.group.holds(c.item(i).kind)).collect();
     let before = item_filter::keep(&c, all.iter().copied(), &view.filter).len();
     let filter_rect = Rect::new(lx, y, lw, 18.0 * k);
-    let reply = item_filter::field_with(FILTER_KEY, &mut view.filter, filter_rect, &[KeyCode::N], before, all.len(), false);
+    let reply = item_filter::field_with(FILTER_KEY, &mut view.filter, filter_rect, &[keymap::key(Action::Music)], before, all.len(), false);
     // The row of group buttons under the titles (the same buttons as the backpack's, fitted to
     // this row): a click shows that group, a click on the lit one shows all.
     let group_rect = Rect::new(lx, y + 21.0 * k, lw, 24.0 * k);

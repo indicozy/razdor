@@ -22,6 +22,7 @@ pub mod item_filter;
 pub mod item_text;
 pub mod items_view;
 pub mod jukebox;
+pub mod keymap;
 pub mod language;
 pub mod main_menu;
 pub mod minimap;
@@ -47,7 +48,7 @@ pub mod world_view;
 use std::collections::VecDeque;
 
 use input::is_key_pressed;
-use macroquad::prelude::KeyCode;
+use keymap::Action;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -221,6 +222,7 @@ impl App {
             .collect();
         minimap::set_size(audio.settings.minimap_size);
         minimap::set_corner(audio.settings.minimap_corner);
+        keymap::load(&audio.settings.keys);
         let mut app = App {
             assets,
             demo,
@@ -328,7 +330,7 @@ impl App {
     fn editor_frame(&mut self) {
         if hotkeys::allowed(hotkeys::Place::Editor, hotkeys::Global::Language, self.guard())
             && !widgets::popup_open()
-            && is_key_pressed(language::KEY)
+            && is_key_pressed(keymap::key(Action::Language))
         {
             language::cycle();
         }
@@ -532,7 +534,7 @@ impl App {
         // N: music on/off (not while typing or answering a question: there any key answers).
         // A key that cuts a wait on the map does nothing else (`world_view::frame`).
         let cuts_wait = matches!(self.screen, Screen::WorldMap) && self.dialogs.is_empty() && self.game.as_ref().is_some_and(|g| g.waiting());
-        if !self.help && !cuts_wait && hotkeys::shortcuts_allowed(self.guard()) && is_key_pressed(KeyCode::N) {
+        if !self.help && !cuts_wait && hotkeys::shortcuts_allowed(self.guard()) && is_key_pressed(keymap::key(Action::Music)) {
             self.audio.settings.music_muted = !self.audio.settings.music_muted;
         }
         let mood = self.mood();
@@ -778,6 +780,8 @@ impl App {
             self.audio.settings.minimap_size = minimap::size();
             self.audio.settings.minimap_corner = minimap::corner();
         }
+        // The key bindings the player changed (saved with the settings, as the minimap's).
+        self.audio.settings.keys = keymap::overrides();
         input::begin_frame();
         chrome::begin_frame();
         // The first game queues the map's pictures for the background decoders (once: the set

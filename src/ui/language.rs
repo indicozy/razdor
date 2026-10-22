@@ -21,9 +21,6 @@ use serde::{Deserialize, Serialize};
 
 use super::widgets::*;
 
-/// The key that steps through the language list on every screen.
-pub const KEY: KeyCode = KeyCode::F2;
-
 /// The drop-down list's key ([`super::widgets::open_list`]).
 const LIST: &str = "razdor:language";
 

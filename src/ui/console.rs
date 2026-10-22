@@ -9,6 +9,7 @@ use macroquad::prelude::*;
 use razdor::i18n::tr;
 
 use super::chrome;
+use super::keymap::{self, Action};
 use super::widgets::*;
 
 /// Lines the scroll-back keeps, and how many show at once.
@@ -61,7 +62,7 @@ impl Console {
     /// on the frame the console closes, so its Esc does not reach the game) and the command
     /// entered, if any.
     pub fn input(&mut self, allowed: bool) -> (bool, Option<String>) {
-        let key = is_key_pressed(KeyCode::GraveAccent);
+        let key = is_key_pressed(keymap::key(Action::Console));
         if !self.open {
             if !allowed {
                 return (false, None);

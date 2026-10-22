@@ -458,3 +458,12 @@ wear it or take it off = надеть или снять
 Drag an item = Перетащить предмет
 onto a slot of the hero = в ячейку героя
 Description: = Описание:
+
+# Rebindable keys (ui/keymap.rs): the actions' names in the keys window and the F1 list
+wait 1 hour = ждать 1 час
+wait 4 hours = ждать 4 часа
+wait without end = ждать без конца
+stop waiting without end = прекратить ожидание без конца
+cheat console = консоль читов
+quick load = быстрая загрузка
+this list of keys = этот список клавиш

@@ -18,6 +18,7 @@ use razdor::rules::game::Game;
 use razdor::rules::magic::{self, CastError, CastOutcome, CastTarget, Duration, BOOK_PAGE};
 
 use super::audio::{cue, Cue};
+use super::keymap::{self, Action};
 use super::widgets::*;
 use super::world_view;
 use super::Screen;
@@ -311,7 +312,7 @@ pub fn frame(
             next = self::cast(game, s.id, CastTarget::Own, message);
         }
     }
-    if closed || key(KeyCode::Escape) || key(KeyCode::B) {
+    if closed || key(KeyCode::Escape) || key(keymap::key(Action::SpellBook)) {
         next = next.or(Some(Screen::WorldMap));
     }
     if let Some(m) = message.as_ref().filter(|_| next.is_none()) {

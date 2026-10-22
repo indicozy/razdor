@@ -27,6 +27,7 @@ use super::cursor::{self, BuildingHover, CellArmy, MapHover, Shape};
 use super::dialog::Dialog;
 use super::dt_art::DtArt;
 use super::game_bar::{self, BarButton, Look, TimeButton};
+use super::keymap::{self, Action};
 use super::minimap;
 use super::saves::{self, Back, LoadView, SaveView};
 use super::story;
@@ -353,10 +354,8 @@ fn razdor_stop(game: &mut Game) {
 /// that only change the view, the sound or the help (zoom, the minimap, Tab, the music, F1,
 /// F2) and the quick save leave him walking, as they did before the parity pass.
 fn cuts_walk(k: KeyCode) -> bool {
-    !matches!(
-        k,
-        KeyCode::Equal | KeyCode::Minus | KeyCode::KpAdd | KeyCode::KpSubtract | KeyCode::M | KeyCode::Tab | KeyCode::N | KeyCode::F1 | KeyCode::F2 | KeyCode::F5
-    )
+    const KEPT: [Action; 6] = [Action::Minimap, Action::CentreHero, Action::Music, Action::Help, Action::Language, Action::QuickSave];
+    !(matches!(k, KeyCode::Equal | KeyCode::Minus | KeyCode::KpAdd | KeyCode::KpSubtract) || KEPT.into_iter().any(|a| keymap::key(a) == k))
 }
 
 /// The original's scroll speed setting (`[Options] ScrollSpeed` of the interface ini,
@@ -2435,16 +2434,16 @@ fn bottom_bar(game: &mut Game, message: &mut Option<String>, minimap_open: bool,
     };
     let (mut pressed, timed) = game_bar::draw_with_time(game, look, time_buttons);
     // J opens Razdor's journal (its own window; the bar's flag is the original's hero window).
-    let journal = pressed.is_none() && key(KeyCode::J);
+    let journal = pressed.is_none() && key(keymap::key(Action::Journal));
     // The bar's keys (Razdor's) act as its buttons, also while the hero walks or waits: the
     // key held has cut his walk (`frame`), as the original's any key does.
     if pressed.is_none() && !journal {
         // Esc closes the minimap first (Razdor's); the menu only when nothing else is open.
         pressed = if key(KeyCode::Escape) {
             Some(esc_on_map(minimap_open))
-        } else if idle && key(KeyCode::B) {
+        } else if idle && key(keymap::key(Action::SpellBook)) {
             Some(BarButton::Spells)
-        } else if key(KeyCode::A) {
+        } else if key(keymap::key(Action::HeroArmy)) {
             Some(BarButton::Squad)
         } else {
             None
@@ -2581,11 +2580,11 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     }
     view.zoom = zoom_at(home, view.zoom_steps, locked, lo);
 
-    // M toggles the minimap; F3 Razdor's debug overlay.
-    if key(KeyCode::M) {
+    // M toggles the minimap; F3 Razdor's debug overlay (both as the player has bound them).
+    if key(keymap::key(Action::Minimap)) {
         view.minimap = !view.minimap;
     }
-    if key(KeyCode::F3) {
+    if key(keymap::key(Action::Debug)) {
         view.debug = !view.debug;
     }
     // Places the scenario has just shown wait in line (dark until their turn). Tab or a
@@ -2594,14 +2593,14 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     for shown in std::mem::take(&mut game.shown) {
         view.shows.push_back(Showing::new(game, &shown));
     }
-    if (!view.shows.is_empty() || view.returning.is_some()) && !input_blocked() && ((idle && clicked()) || key(KeyCode::Tab)) {
+    if (!view.shows.is_empty() || view.returning.is_some()) && !input_blocked() && ((idle && clicked()) || key(keymap::key(Action::CentreHero))) {
         view.shows.clear();
         view.returning = None;
         view.look = None;
     }
     // Tab: the centre button's glide (Razdor's key), when the view is off the hero; while
     // he walks (Razdor's key works then too) the view is on him already.
-    if view.centring.is_none() && view.look.is_some() && key(KeyCode::Tab) {
+    if view.centring.is_none() && view.look.is_some() && key(keymap::key(Action::CentreHero)) {
         if idle {
             view.centring = Some((crate::ui::clock::now(), view.look.unwrap_or(game.display_pos())));
         } else {
@@ -2638,7 +2637,7 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
             view.preview = None;
         }
         // F5 held ends the Community endless wait (0xc27802).
-        if game.endless_waiting() && held_key() == Some(KeyCode::F5) {
+        if game.endless_waiting() && held_key() == Some(keymap::key(Action::EndEndlessWait)) {
             game.end_endless_wait();
         }
         // A left click anywhere or a key press during a wait ends it after the half hour
@@ -2859,17 +2858,17 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     // The three buttons show on the idle map only: no walk, wait, flight or glide.
     let time_buttons = can_wait && view.shows.is_empty() && view.returning.is_none() && view.spell_fx.is_empty();
     // The original's wait buttons play the button sound (interface.md §14).
-    if can_wait && key(KeyCode::Key1) {
+    if can_wait && key(keymap::key(Action::Wait1)) {
         cue(Cue::Button);
         game.begin_wait(1);
     }
-    if can_wait && key(KeyCode::Key4) {
+    if can_wait && key(keymap::key(Action::Wait4)) {
         cue(Cue::Button);
         game.begin_wait(4);
     }
     // Community F4 (the held key, 0xc277d2): a wait without end; F5 ends it (`frame`'s
     // walking branch).
-    if can_wait && held_key() == Some(KeyCode::F4) {
+    if can_wait && held_key() == Some(keymap::key(Action::EndlessWait)) {
         game.begin_endless_wait();
     }
     // A wait drops the route drawn; the planned cell stays (0x4ae280).
@@ -3603,8 +3602,12 @@ mod tests {
         assert_eq!(esc_on_map(false), BarButton::Menu);
         // Zoom, minimap, Tab, music, help, language and the quick save leave a walk alone;
         // other keys cut it as in the original.
-        for k in [KeyCode::Equal, KeyCode::Minus, KeyCode::KpAdd, KeyCode::KpSubtract, KeyCode::M, KeyCode::Tab, KeyCode::N, KeyCode::F1, KeyCode::F2, KeyCode::F5] {
+        for k in [KeyCode::Equal, KeyCode::Minus, KeyCode::KpAdd, KeyCode::KpSubtract] {
             assert!(!cuts_walk(k), "{k:?}");
+        }
+        // The keys the player has bound to them, as their defaults.
+        for a in [Action::Minimap, Action::CentreHero, Action::Music, Action::Help, Action::Language, Action::QuickSave] {
+            assert!(!cuts_walk(keymap::key(a)), "{a:?}");
         }
         for k in [KeyCode::Space, KeyCode::J, KeyCode::A, KeyCode::B, KeyCode::Escape, KeyCode::Left, KeyCode::Key1] {
             assert!(cuts_walk(k), "{k:?}");

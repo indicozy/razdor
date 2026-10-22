@@ -18,6 +18,7 @@ use super::screens::attack_line;
 use super::unit_drag::{grid_press_in, Controls, GridPress};
 use super::chrome;
 use super::item_filter;
+use super::keymap::{self, Action};
 use super::unit_sheet;
 use super::widgets::*;
 use super::window_layout;
@@ -825,7 +826,7 @@ pub fn squad(
         let ordered = pack_order::pack_view_order(&c, game.pack.entries(), group, sort);
         let of = ordered.len();
         let before = item_filter::keep(&c, ordered.iter().copied(), &query).len();
-        filter = item_filter::search_button(FILTER_KEY, &mut query, row[8], &[KeyCode::A, KeyCode::N], before, of, sort);
+        filter = item_filter::search_button(FILTER_KEY, &mut query, row[8], &[keymap::key(Action::HeroArmy), keymap::key(Action::Music)], before, of, sort);
         kept = item_filter::keep(&c, ordered, &query);
         FILTER.with(|f| query.clone_into(&mut f.borrow_mut()));
     }
@@ -1096,7 +1097,7 @@ pub fn squad(
     // screen change in `App::frame`, 0x4b8d28).
     draw_held(game, assets);
 
-    if close || (!filter.keys_taken && (key(KeyCode::Escape) || key(KeyCode::A))) {
+    if close || (!filter.keys_taken && (key(KeyCode::Escape) || key(keymap::key(Action::HeroArmy)))) {
         FILTER.with(|f| f.borrow_mut().clear());
         super::unit_drag::cancel();
         SLIDE.with(|c| c.set(None));
@@ -1553,7 +1554,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     // The item held is the pointer; closing the window puts it back in the pack (the screen
     // change in `App::frame`, 0x4b8d28).
     draw_held(game, assets);
-    if close || key(KeyCode::Escape) || key(KeyCode::J) {
+    if close || key(KeyCode::Escape) || key(keymap::key(Action::Journal)) {
         *message = None;
         return Some(Screen::WorldMap);
     }

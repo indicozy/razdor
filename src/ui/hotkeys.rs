@@ -12,6 +12,7 @@ use macroquad::prelude::*;
 use razdor::i18n::{n_, tr};
 
 use super::chrome::{self, Skin};
+use super::keymap::{self, Action};
 use super::widgets::*;
 
 /// Where the keys are pressed: the app's screens, by what their keys do.
@@ -54,13 +55,14 @@ impl Global {
     #[cfg(test)]
     pub const ALL: [Global; 5] = [Global::Help, Global::QuickSave, Global::QuickLoad, Global::LatestAutosave, Global::Language];
 
+    /// The key the player has bound to it (`keymap`).
     pub fn key(self) -> KeyCode {
         match self {
-            Global::Help => KeyCode::F1,
-            Global::QuickSave => KeyCode::F5,
-            Global::QuickLoad => KeyCode::F9,
-            Global::LatestAutosave => KeyCode::F10,
-            Global::Language => super::language::KEY,
+            Global::Help => keymap::key(Action::Help),
+            Global::QuickSave => keymap::key(Action::QuickSave),
+            Global::QuickLoad => keymap::key(Action::QuickLoad),
+            Global::LatestAutosave => keymap::key(Action::LatestAutosave),
+            Global::Language => keymap::key(Action::Language),
         }
     }
 }
@@ -252,7 +254,7 @@ pub fn help_overlay(place: Place) -> bool {
     }
     section(tr("Everywhere"), &EVERYWHERE, &mut ly);
     text_centered(tr("F1, Esc or a click closes this list"), x + w / 2.0, y + h - 14.0, 15.0, DIM);
-    is_key_pressed(KeyCode::F1) || is_key_pressed(KeyCode::Escape) || is_mouse_button_pressed(MouseButton::Left)
+    is_key_pressed(keymap::key(Action::Help)) || is_key_pressed(KeyCode::Escape) || is_mouse_button_pressed(MouseButton::Left)
 }
 
 #[cfg(test)]

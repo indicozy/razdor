@@ -791,7 +791,7 @@ thread_local! {
     static ADVANCED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// The settings as the window found them: «Отмена» puts them back (the original's
     /// Cancel drops what was changed, its Apply keeps it).
-    static OPENED_WITH: std::cell::Cell<Option<super::audio::Settings>> = const { std::cell::Cell::new(None) };
+    static OPENED_WITH: std::cell::RefCell<Option<super::audio::Settings>> = const { std::cell::RefCell::new(None) };
 }
 
 /// Opens the advanced settings over the settings window (a snapshot scene).
@@ -1066,12 +1066,12 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
         if advanced_window(audio, over_map) {
             ADVANCED.with(|a| a.set(false));
             // What the advanced window set is kept, whatever the settings window ends with.
-            OPENED_WITH.with(|o| o.set(Some(*audio)));
+            OPENED_WITH.with(|o| *o.borrow_mut() = Some(audio.clone()));
         }
         return false;
     }
-    if OPENED_WITH.with(|o| o.get()).is_none() {
-        OPENED_WITH.with(|o| o.set(Some(*audio)));
+    if OPENED_WITH.with(|o| o.borrow().is_none()) {
+        OPENED_WITH.with(|o| *o.borrow_mut() = Some(audio.clone()));
     }
     let title = own("Options", "Title", n_("Sound, graphics and gameplay settings"));
     let (inner, closed) = if over_map { map_window(&title, 594.0, 500.0) } else { window(&title, 594.0, 500.0) };
@@ -1149,7 +1149,7 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     let apply_pressed = settings_button(apply, &apply_label);
     let cancel_pressed = settings_button(cancel, &cancel_label);
     if apply_pressed || key(KeyCode::Enter) {
-        OPENED_WITH.with(|o| o.set(None));
+        OPENED_WITH.with(|o| *o.borrow_mut() = None);
         return true;
     }
     if cancel_pressed || closed || key(KeyCode::Escape) {
