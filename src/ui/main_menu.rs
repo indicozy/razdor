@@ -262,6 +262,9 @@ fn word(i: usize, label: &str, c: Vec2, hover: bool) {
     }
 }
 
+/// The Razdor players' Discord server, as the site links it.
+const DISCORD_INVITE: &str = "https://discord.gg/cdTtYz5dH";
+
 /// A small text link (the Razdor extras). Returns true when clicked.
 fn link(label: &str, x: f32, y: f32, right: bool) -> bool {
     let size = 18.0 * chrome::k();
@@ -335,6 +338,11 @@ pub fn frame() -> Option<Pick> {
     let x = 16.0 * k + measure(editor, 18.0 * k).width + 28.0 * k;
     if link(tr("Custom battle"), x, y, false) {
         pick = Some(Pick::Custom);
+    }
+    // The players' Discord (the owner's wish): the invite of the site, in the browser.
+    let x = x + measure(tr("Custom battle"), 18.0 * k).width + 28.0 * k;
+    if link("Discord", x, y, false) {
+        razdor::update::open_in_browser(DISCORD_INVITE);
     }
     // The language list (Razdor's): the current language; a click opens the list over it.
     let lang = super::language::current_label();
