@@ -42,3 +42,37 @@ debug = false
 name = "razdor-translate"
 path = "src/bin/razdor-translate/main.rs"
 test = false
+
+# Android (experimental): the APK of `scripts/dist-android.sh`, built by cargo-quad-apk
+# (https://github.com/not-fl3/cargo-quad-apk, pinned in the release workflow). The build uses
+# `--no-default-features --features audio` (no gamepads: gilrs is Linux and desktop only).
+# Storage: Razdor reads the install from the shared storage, so the app asks for the all-files
+# access (MANAGE_EXTERNAL_STORAGE); Android 8 to 10 get the runtime storage permissions.
+[package.metadata.android]
+package_name = "io.github.indicozy.razdor"
+label = "Раздор"
+android_version = 34
+target_sdk_version = 34
+min_sdk_version = 26
+build_targets = ["aarch64-linux-android", "armv7-linux-androideabi", "x86_64-linux-android"]
+fullscreen = true
+
+[package.metadata.android.application_attributes]
+# Android 10 (API 29): the old storage layout, for the install folder and the saves.
+"android:requestLegacyExternalStorage" = "true"
+
+[package.metadata.android.activity_attributes]
+"android:screenOrientation" = "sensorLandscape"
+# Targeting Android 12 (API 31) and later requires it where the activity has an intent filter.
+"android:exported" = "true"
+
+[[package.metadata.android.permission]]
+name = "android.permission.MANAGE_EXTERNAL_STORAGE"
+
+[[package.metadata.android.permission]]
+name = "android.permission.READ_EXTERNAL_STORAGE"
+max_sdk_version = 32
+
+[[package.metadata.android.permission]]
+name = "android.permission.WRITE_EXTERNAL_STORAGE"
+max_sdk_version = 29
