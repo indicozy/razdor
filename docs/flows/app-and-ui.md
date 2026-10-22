@@ -39,6 +39,26 @@ Install lookup order (`src/dt/install.rs` `locate_with`): `RAZDOR_DT_DIR`, the p
 folder when it is an install, the remembered folder (`config_file`), then a search under
 `search_roots`. Without an install Razdor runs the built-in demo.
 
+## Android (experimental)
+
+The APK is built by `scripts/dist-android.sh` (cargo-quad-apk, pinned in its header; NDK 29;
+see `[package.metadata.android]` in `Cargo.toml`). Per-platform paths live in one place:
+`src/platform.rs` (`app_dir` for saves, log, picture cache, editor maps, translation jobs;
+`config_dir` for the remembered install; `install_roots` for the search). On Android they are
+`/storage/emulated/0/Razdor` (survives an uninstall) and the search starts with `DiscordTimes`
+in internal storage; desktop keeps the platform's data and config folders.
+
+Reading that storage needs the all-files access. `src/ui/android.rs` calls the activity's
+methods through miniquad's JNI (`attach_jni_env`, `ACTIVITY`): the all-files settings page
+(Android 11+) or the runtime permissions (8 to 10), and `storage_granted`. The title screen's
+not-found block (`screens::android_not_found`) has «Выдать доступ» and «Проверить снова»; while it
+is shown, `App::android_install_poll` (every 5 s once the permission is granted, and on the
+button) loads a newly found install with `Assets::adopt_install` and the `ui/mod.rs` helpers
+`dt_content_of` / `scenarios_of`, without a restart. Android has no self-update (`update::asset_name` is None) and
+no Discord link (it needs a browser opener): both are hidden there. Touch: miniquad simulates
+the left mouse button from a touch (`simulate_mouse_with_touch`), so a tap is a left click;
+there is no long-press right click. Gamepads are off (`--no-default-features --features audio`).
+
 ## The frame
 
 `App::frame` in order:

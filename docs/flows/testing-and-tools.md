@@ -102,6 +102,12 @@ Other diagnostics: `razdor.log` in the data folder (`razdor::diag`, `RAZDOR_LOG=
   remapped so the SHA-256 is reproducible) and `razdor-macos` with
   `scripts/dist-macos.sh`, and publishes «Раздор X.Y.Z» with the version's changelog
   section and the SHA-256s. Run by hand it only builds artifacts.
+- The Android job (`android`, Ubuntu): `scripts/dist-android.sh` builds `razdor.apk` with
+  cargo-quad-apk (pinned rev in the workflow and the script's header; master, since the
+  crates.io 0.1.4 needs javac 1.7 and dx) on NDK 29 (pinned), signed with the release keystore
+  from the `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` secrets
+  (debug key on a manual run without them; a tag run without them fails). Locally: the same
+  script with `ANDROID_HOME` and the NDK; `RAZDOR_ANDROID_KEYSTORE*` for the release signature.
 - The procedure (version bump, changelog files, tag, follow-up commit with the SHA-256)
   is the `release` skill.
 - `src/update.rs`: the game checks GitHub releases on a background thread
