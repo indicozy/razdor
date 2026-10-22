@@ -6,13 +6,14 @@
 //! gold. Razdor's own extras, the map editor, the custom battle and the interface language,
 //! sit small in the bottom corners. Layout numbers are pixels of the 960×720 video, scaled by [`chrome::k`].
 
-use crate::ui::input::{is_mouse_button_down};
+use crate::ui::input::{get_keys_pressed, is_mouse_button_down};
 use macroquad::prelude::*;
 
 use razdor::i18n::{self, n_, tr, Lang};
 
 use super::audio::{cue, Cue};
 use super::chrome::{self, Fx};
+use super::keymap;
 use super::widgets::*;
 
 /// What the player picked.
@@ -794,9 +795,20 @@ thread_local! {
     static OPENED_WITH: std::cell::RefCell<Option<super::audio::Settings>> = const { std::cell::RefCell::new(None) };
 }
 
+thread_local! {
+    /// The keys window («Клавиши») is open over the advanced settings.
+    static KEYS_OPEN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// Opens the advanced settings over the settings window (a snapshot scene).
 pub fn open_advanced() {
     ADVANCED.with(|a| a.set(true));
+}
+
+/// Opens the keys window over the advanced settings (a snapshot scene).
+pub fn open_keys() {
+    open_advanced();
+    KEYS_OPEN.with(|o| o.set(true));
 }
 
 /// A button of Razdor's own rows (`label` on the marble), true when clicked.
@@ -967,6 +979,10 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     if row(tr("Minimap army list"), if audio.army_list { tr("On") } else { tr("Off") }, &mut y) {
         audio.army_list = !audio.army_list;
     }
+    // The keys window (Razdor's, the owner's request): every action's key, rebound by a click.
+    if row(tr("Keyboard shortcuts"), tr("Keys…"), &mut y) {
+        KEYS_OPEN.with(|o| o.set(true));
+    }
     // The language list (Razdor's): Russian, English and the translations of the data found
     // in the install; the button opens it.
     chrome::shadow_text(tr("Language"), rx, y + 18.0 * k, 14.0 * k, chrome::CREAM);
@@ -1061,8 +1077,66 @@ fn option_check(x: f32, y: f32, label: &str, on: bool, ink: Color) -> bool {
 /// above the bar, not over it): the original's "Настройки звука, графики и геймплея"
 /// (0x4d01c9, interface.md §16): five slider rows, eight checkboxes, «Принять» and
 /// «Отмена»; Razdor's own settings behind «Ещё…».
+/// «Клавиши» (Razdor's keys window): every action with its key, in two columns. A click on
+/// a key waits for the new one (`keymap::listen`); Esc or a click elsewhere cancels, and a
+/// key another action has goes to that action (`keymap::set`). «По умолчанию» puts every key
+/// back; «Ок» (or Esc, when not waiting) closes it. Returns true when closed.
+fn keys_window(audio: &mut super::audio::Settings) -> bool {
+    let k = chrome::k();
+    let (w, h) = (760.0 * k, 420.0 * k);
+    let r = Rect::new((screen_width() - w) / 2.0, ((screen_height() - h) / 2.0).max(0.0), w, h);
+    let (inner, closed) = chrome::window(r, tr("Keys"), chrome::Skin::Marble, true);
+    let waiting = keymap::listening();
+    let was_waiting = waiting.is_some();
+    let col_w = (inner.w - 60.0 * k) / 2.0;
+    let mut started = false;
+    for (i, a) in keymap::ALL.into_iter().enumerate() {
+        let x = inner.x + 20.0 * k + (i / 9) as f32 * (col_w + 20.0 * k);
+        let y = inner.y + 16.0 * k + (i % 9) as f32 * 32.0 * k;
+        text_fit(tr(a.label()), x, y + 18.0 * k, col_w - 170.0 * k, 14.0 * k, chrome::CREAM);
+        let br = Rect::new(x + col_w - 150.0 * k, y, 150.0 * k, 28.0 * k);
+        let shown = if waiting == Some(a) { tr("press a key…").to_string() } else { keymap::display(keymap::key(a)) };
+        if row_button(br, &shown) && waiting != Some(a) {
+            keymap::listen(Some(a));
+            started = true;
+        }
+    }
+    if let Some(a) = waiting {
+        // The key pressed is the new binding: no shortcut fires on it (`hotkeys`, `mod`).
+        if !started {
+            if key(KeyCode::Escape) || clicked() {
+                keymap::listen(None);
+            } else if let Some(pressed) = get_keys_pressed().into_iter().find(|&k| keymap::bindable(k)) {
+                keymap::set(a, pressed);
+                keymap::listen(None);
+                audio.keys = keymap::overrides();
+            }
+            swallow_input();
+        }
+    }
+    let hint = tr("Click a key, then press the new one. Esc cancels; a key another action has goes to that action.");
+    text_fit(hint, inner.x + 20.0 * k, inner.y + 318.0 * k, inner.w - 40.0 * k, 12.0 * k, WHITE);
+    let defaults = Rect::new(inner.x + 20.0 * k, inner.y + inner.h - 44.0 * k, 150.0 * k, 30.0 * k);
+    let ok = Rect::new(inner.x + inner.w - 120.0 * k, inner.y + inner.h - 44.0 * k, 96.0 * k, 30.0 * k);
+    if settings_button(defaults, tr("Defaults")) {
+        keymap::reset();
+        keymap::listen(None);
+        audio.keys = keymap::overrides();
+    }
+    let ok_label = own("Buttons", "Ok", n_("OK"));
+    let ok_pressed = settings_button(ok, &ok_label);
+    closed || ok_pressed || (!was_waiting && key(KeyCode::Escape))
+}
+
 pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, over_map: bool) -> bool {
     if ADVANCED.with(|a| a.get()) {
+        // The keys window stands over the advanced one, which takes no input meanwhile.
+        if KEYS_OPEN.with(|o| o.get()) {
+            if keys_window(audio) {
+                KEYS_OPEN.with(|o| o.set(false));
+            }
+            return false;
+        }
         if advanced_window(audio, over_map) {
             ADVANCED.with(|a| a.set(false));
             // What the advanced window set is kept, whatever the settings window ends with.

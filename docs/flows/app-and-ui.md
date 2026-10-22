@@ -307,6 +307,19 @@ Rule: a parity setting reads the install's value until the player chooses
 extra defaults to the original's behaviour and its label says which choice is the
 original's ("Battle (original)").
 
+## Keys
+
+The shortcuts' keys live in `src/ui/keymap.rs`: an `Action` per rebindable key (the map's
+time, the windows' keys, F1, F2, the saves, N), each with today's key as its default.
+`keymap::key(action)` is the only read; a screen checks it where it checked the literal key
+before, with its own guards. `keymap::set` swaps with a key another action has (the endless
+wait and the quick save may share F5). The overrides are saved as (action, key) names in
+`Settings::keys` (`audio.json`): `keymap::load` at start, `keymap::overrides` each frame. The
+window «Клавиши» (`main_menu::keys_window`) opens from the advanced settings: a click on a key
+waits for the new one (`keymap::listen`); while it waits no shortcut fires. The F1 list fills
+its `{Action}` tokens with the keys (`hotkeys::fill_keys`). Fixed keys (dialogs, arrows, +/-,
+0, Space, the editor's) stay literal.
+
 ## How to add a window
 
 1. Add a `Screen` variant (or a field on an existing view) in `src/ui/mod.rs`.

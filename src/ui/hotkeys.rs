@@ -115,7 +115,7 @@ pub fn allowed(place: Place, key: Global, g: Guard) -> bool {
 /// The keys of `place` for the F1 overlay: (key, what it does).
 pub fn screen_keys(place: Place) -> Vec<(&'static str, &'static str)> {
     match place {
-        Place::Title => vec![(n_("Click"), n_("the menu's buttons; a scenario twice: go on")), ("F9", n_("load the quick save")), ("F10", n_("load the latest autosave")), ("Esc", n_("in the main menu: quit the game"))],
+        Place::Title => vec![(n_("Click"), n_("the menu's buttons; a scenario twice: go on")), ("{QuickLoad}", n_("load the quick save")), ("{LatestAutosave}", n_("load the latest autosave")), ("Esc", n_("in the main menu: quit the game"))],
         Place::ClassSelect => vec![(n_("Type"), n_("the hero's name")), ("Backspace", n_("delete a letter")), (n_("Mouse, Shift + arrows"), n_("move the cursor, select")), ("Ctrl+A / C / X / V", n_("select all, copy, cut, paste"))],
         Place::WorldMap => vec![
             (n_("Click"), n_("show the route; a second click on the spot: walk there")),
@@ -126,32 +126,32 @@ pub fn screen_keys(place: Place) -> Vec<(&'static str, &'static str)> {
             (n_("Arrow keys, screen edges"), n_("scroll the map")),
             (n_("Wheel, + / -"), n_("zoom")),
             ("0", n_("back to the map's zoom from the settings")),
-            ("1 / 4", n_("wait 1 or 4 hours")),
-            ("F4 / F5", n_("wait without end / stop waiting")),
+            ("{Wait1} / {Wait4}", n_("wait 1 or 4 hours")),
+            ("{EndlessWait} / {EndEndlessWait}", n_("wait without end / stop waiting")),
             (n_("Time panel"), n_("hover its centre: buttons to wait 1 hour, see the hero, wait 4 hours")),
             (n_("Click / any key while waiting"), n_("stop after the half hour under way")),
             (n_("Click where you stand"), n_("the building again, or its garrison's battle")),
-            ("M", n_("minimap")),
-            ("F3", n_("debug: event points, lanterns, events of places")),
-            ("Tab", n_("centre the camera on the hero")),
-            ("J", n_("journal")),
-            ("B", n_("spell book")),
-            ("A", n_("hero and army")),
-            ("F5 / F9", n_("quick save / quick load")),
+            ("{Minimap}", n_("minimap")),
+            ("{Debug}", n_("debug: event points, lanterns, events of places")),
+            ("{CentreHero}", n_("centre the camera on the hero")),
+            ("{Journal}", n_("journal")),
+            ("{SpellBook}", n_("spell book")),
+            ("{HeroArmy}", n_("hero and army")),
+            ("{QuickSave} / {QuickLoad}", n_("quick save / quick load")),
             ("Esc", n_("close the minimap, else the game menu")),
-            ("~", n_("cheat console (help lists its commands)")),
+            ("{Console}", n_("cheat console (help lists its commands)")),
         ],
         Place::Building => vec![
             (n_("Click"), n_("tabs and buttons")),
             (n_("Type, Ctrl+F"), n_("market: filter the list (Enter picks the first, Esc clears)")),
-            ("F5", n_("quick save")),
+            ("{QuickSave}", n_("quick save")),
             ("Esc", n_("back to the map")),
         ],
         Place::Army => vec![
             (n_("Click"), n_("a unit, an item")),
             (n_("Type, Ctrl+F"), n_("filter the backpack (Enter: the first to the unit, Esc clears)")),
-            ("F5", n_("quick save")),
-            ("A / Esc", n_("close")),
+            ("{QuickSave}", n_("quick save")),
+            ("{HeroArmy} / Esc", n_("close")),
         ],
         Place::Battle => vec![
             (n_("Click a framed card"), n_("attack or cast")),
@@ -165,21 +165,21 @@ pub fn screen_keys(place: Place) -> Vec<(&'static str, &'static str)> {
             (n_("Q while watching"), n_("skip to the end (the same result)")),
             ("Esc", n_("ways out of the battle")),
             ("Enter", n_("OK on the result")),
-            ("~", n_("cheat console (help lists its commands)")),
+            ("{Console}", n_("cheat console (help lists its commands)")),
         ],
         Place::Hero => vec![
             (n_("Click an item"), n_("wear it or take it off")),
             (n_("Drag an item"), n_("onto a slot of the hero")),
             (n_("Left / Right"), n_("change the diary's tab")),
             (n_("Up / Down, click"), n_("pick an entry")),
-            ("F5", n_("quick save")),
-            ("J / Esc", n_("close")),
+            ("{QuickSave}", n_("quick save")),
+            ("{Journal} / Esc", n_("close")),
         ],
-        Place::Spellbook => vec![(n_("Click"), n_("pick a spell")), ("Enter", n_("cast on your army")), ("F5", n_("quick save")), ("B / Esc", n_("close"))],
-        Place::Menu => vec![("F5", n_("quick save")), ("Esc", n_("back to the game"))],
+        Place::Spellbook => vec![(n_("Click"), n_("pick a spell")), ("Enter", n_("cast on your army")), ("{QuickSave}", n_("quick save")), ("{SpellBook} / Esc", n_("close"))],
+        Place::Menu => vec![("{QuickSave}", n_("quick save")), ("Esc", n_("back to the game"))],
         Place::Save => vec![(n_("Type"), n_("the save's name")), ("Ctrl+A / C / X / V", n_("select all, copy, cut, paste")), ("Enter", n_("save")), ("Esc", n_("cancel"))],
         Place::Load => vec![(n_("Click"), n_("pick a save")), ("Enter", n_("load it")), ("Esc", n_("cancel"))],
-        Place::End => vec![(n_("Click"), n_("the buttons")), ("F9", n_("load the quick save")), ("F10", n_("load the latest autosave"))],
+        Place::End => vec![(n_("Click"), n_("the buttons")), ("{QuickLoad}", n_("load the quick save")), ("{LatestAutosave}", n_("load the latest autosave"))],
         Place::Editor => vec![],
         Place::Custom => vec![
             (n_("Click a unit type"), n_("add it to the army picked")),
@@ -194,15 +194,28 @@ pub fn screen_keys(place: Place) -> Vec<(&'static str, &'static str)> {
 
 /// Keys that work on every screen of a game, and in the dialogs.
 pub const EVERYWHERE: [(&str, &str); 8] = [
-    ("F1", n_("this list (F1 or Esc closes it)")),
-    ("F2", n_("the next language of the list")),
+    ("{Help}", n_("this list (F1 or Esc closes it)")),
+    ("{Language}", n_("the next language of the list")),
     ("Alt+Enter", n_("screen: windowed, borderless, full screen")),
-    ("F9", n_("load the quick save")),
-    ("F10", n_("load the latest autosave")),
-    ("N", n_("music off / on")),
+    ("{QuickLoad}", n_("load the quick save")),
+    ("{LatestAutosave}", n_("load the latest autosave")),
+    ("{Music}", n_("music off / on")),
     ("Y / Enter", n_("\"Yes\" in a question (Enter: OK)")),
     ("N / Esc", n_("\"No\" in a question")),
 ];
+
+/// The key column of a row with the keys the player has bound: `{Action}` (the action's
+/// name, as in `keymap::Action`) is replaced by its key (`keymap::display`).
+pub fn fill_keys(column: &str) -> String {
+    let mut text = column.to_string();
+    for a in keymap::ALL {
+        let token = format!("{{{a:?}}}");
+        if text.contains(&token) {
+            text = text.replace(&token, &keymap::display(keymap::key(a)));
+        }
+    }
+    text
+}
 
 /// A screen's title in the overlay.
 fn place_name(place: Place) -> &'static str {
@@ -243,7 +256,7 @@ pub fn help_overlay(place: Place) -> bool {
             if *ly > y + h - 34.0 {
                 break;
             }
-            text_fit(tr(k), kx + 10.0, *ly, dx - kx - 16.0, 17.0, INK);
+            text_fit(tr(&fill_keys(k)), kx + 10.0, *ly, dx - kx - 16.0, 17.0, INK);
             text_fit(tr(what), dx, *ly, x + w - dx - 16.0, 17.0, DIM);
             *ly += 24.0;
         }
@@ -322,12 +335,26 @@ mod tests {
         for place in ALL_PLACES.into_iter().filter(|p| *p != Place::Editor) {
             assert!(!screen_keys(place).is_empty(), "{place:?}");
         }
-        let map: Vec<&str> = screen_keys(Place::WorldMap).iter().map(|(k, _)| *k).collect();
-        for k in ["M", "Tab", "J", "B", "A", "1 / 4", "F5 / F9", "Esc"] {
-            assert!(map.contains(&k), "the map lists {k}");
+        let map: Vec<String> = screen_keys(Place::WorldMap).iter().map(|(k, _)| fill_keys(k)).collect();
+        for k in ["M", "Tab", "J", "B", "A", "1 / 4", "F4 / F5", "F5 / F9", "F3", "Esc", "~"] {
+            assert!(map.iter().any(|m| m == k), "the map lists {k}");
         }
-        assert!(screen_keys(Place::Battle).iter().any(|(k, _)| *k == "Q"));
-        assert!(screen_keys(Place::Battle).iter().any(|(k, _)| *k == "W"), "the watched quick battle");
-        assert!(map.contains(&"~") && screen_keys(Place::Battle).iter().any(|(k, _)| *k == "~"), "the cheat console");
+        let battle: Vec<String> = screen_keys(Place::Battle).iter().map(|(k, _)| fill_keys(k)).collect();
+        assert!(battle.iter().any(|k| k == "Q"));
+        assert!(battle.iter().any(|k| k == "W"), "the watched quick battle");
+        assert!(battle.iter().any(|k| k == "~"), "the cheat console");
+    }
+
+    #[test]
+    fn the_list_shows_the_keys_the_player_bound() {
+        use super::super::keymap::{self, Action};
+        keymap::reset();
+        keymap::set(Action::Journal, macroquad::prelude::KeyCode::Comma);
+        keymap::set(Action::QuickSave, macroquad::prelude::KeyCode::F6);
+        let map: Vec<String> = screen_keys(Place::WorldMap).iter().map(|(k, _)| fill_keys(k)).collect();
+        assert!(map.iter().any(|k| k == "Comma"), "the journal's new key");
+        assert!(map.iter().any(|k| k == "F6 / F9"), "the quick save's new key: {map:?}");
+        assert!(!map.iter().any(|k| k.contains('{')), "every token filled");
+        keymap::reset();
     }
 }

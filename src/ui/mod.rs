@@ -534,7 +534,7 @@ impl App {
         // N: music on/off (not while typing or answering a question: there any key answers).
         // A key that cuts a wait on the map does nothing else (`world_view::frame`).
         let cuts_wait = matches!(self.screen, Screen::WorldMap) && self.dialogs.is_empty() && self.game.as_ref().is_some_and(|g| g.waiting());
-        if !self.help && !cuts_wait && hotkeys::shortcuts_allowed(self.guard()) && is_key_pressed(keymap::key(Action::Music)) {
+        if !self.help && !cuts_wait && keymap::listening().is_none() && hotkeys::shortcuts_allowed(self.guard()) && is_key_pressed(keymap::key(Action::Music)) {
             self.audio.settings.music_muted = !self.audio.settings.music_muted;
         }
         let mood = self.mood();
@@ -981,7 +981,8 @@ impl App {
             next = self.custom_round();
         }
         // F1: the key list; F5 / F9: quick save and load (when the screen did not move on).
-        let pressed = |k: hotkeys::Global| next.is_none() && !widgets::input_swallowed() && !widgets::popup_open() && hotkeys::allowed(place, k, guard) && is_key_pressed(k.key());
+        // Nothing fires while the keys window waits for a new key (`keymap::listen`).
+        let pressed = |k: hotkeys::Global| next.is_none() && !widgets::input_swallowed() && !widgets::popup_open() && keymap::listening().is_none() && hotkeys::allowed(place, k, guard) && is_key_pressed(k.key());
         if self.help {
             if hotkeys::help_overlay(place) {
                 self.help = false;

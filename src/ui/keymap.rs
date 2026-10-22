@@ -212,6 +212,22 @@ thread_local! {
     static BINDINGS: RefCell<HashMap<Action, KeyCode>> = RefCell::new(defaults());
 }
 
+thread_local! {
+    /// The action the keys window waits for a key for, if any: while it waits, no shortcut
+    /// fires (the pressed key is the new binding).
+    static LISTENING: std::cell::Cell<Option<Action>> = const { std::cell::Cell::new(None) };
+}
+
+/// The action whose new key is awaited, if any.
+pub fn listening() -> Option<Action> {
+    LISTENING.with(|l| l.get())
+}
+
+/// Starts (`Some`) or ends (`None`) waiting for the new key of an action.
+pub fn listen(a: Option<Action>) {
+    LISTENING.with(|l| l.set(a));
+}
+
 fn defaults() -> HashMap<Action, KeyCode> {
     ALL.into_iter().map(|a| (a, a.default_key())).collect()
 }
