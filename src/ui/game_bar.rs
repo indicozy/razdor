@@ -456,20 +456,6 @@ pub fn draw_with_time(game: &Game, look: impl Fn(BarButton) -> Look, time_button
     (pressed, timed)
 }
 
-/// The time buttons' place on the bar as drawn now: the bar's top, the screen's middle and
-/// the scale (see [`on_bar`]).
-pub fn time_layout() -> (f32, f32, f32) {
-    let row = (60.0 * chrome::k()).round();
-    (screen_height() - chrome::bar_height(), screen_width() / 2.0, row / PANEL_ROW)
-}
-
-/// The time panel in the middle of the bar (it takes the wait clicks on the map).
-pub fn time_panel() -> Rect {
-    let row = (60.0 * chrome::k()).round();
-    let ew = 370.0 * row / 64.0;
-    Rect::new(ew, screen_height() - chrome::bar_height(), screen_width() - 2.0 * ew, row)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

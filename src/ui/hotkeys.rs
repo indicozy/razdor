@@ -118,7 +118,7 @@ pub fn screen_keys(place: Place) -> Vec<(&'static str, &'static str)> {
             (n_("Wheel, + / -"), n_("zoom")),
             ("1 / 4", n_("wait 1 or 4 hours")),
             ("F4 / F5", n_("wait without end / stop waiting")),
-            (n_("Time panel"), n_("hover: buttons to wait 1 hour, see the hero, wait 4 hours; elsewhere left click 1 hour, right click 4 hours")),
+            (n_("Time panel"), n_("hover its centre: buttons to wait 1 hour, see the hero, wait 4 hours")),
             (n_("Click / any key while waiting"), n_("stop after the half hour under way")),
             (n_("Click where you stand"), n_("the building again, or its garrison's battle")),
             ("M", n_("minimap")),
