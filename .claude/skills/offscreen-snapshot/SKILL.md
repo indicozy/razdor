@@ -37,7 +37,7 @@ xvfb-run -a -s "-screen 0 1280x800x24" <target>/release/razdor
 Listed at the top of `src/ui/snapshot.rs` (the source of truth). Common ones: `title`,
 `load[:manual|auto[:<row>]]`, `options[:advanced]`, `map:<map>[:x,y]`,
 `building:<map>:<n>[:barracks|garrison|market|sanctuary]`, `army:<map>[:<n>…]`,
-`journal:<map>`, `spells:<map>`, `menu:<map>`, `settings:<map>[:advanced]`,
+`journal:<map>`, `spells:<map>`, `spells-pages:<map>`, `menu:<map>`, `settings:<map>[:advanced]`,
 `battle:<map>:<n>`, `custom-battle[:watch]`, `replay:<step>` with `RAZDOR_REPLAY`.
 `<map>` is the install's map file name without `.DTm`. Helpers: `RAZDOR_MOUSE=x,y`,
 `RAZDOR_SCENE_QUIET=1`, `RAZDOR_SCENE_SHOW`, `RAZDOR_SCENE_CONSOLE`, `RAZDOR_SCENE_FILTER`,

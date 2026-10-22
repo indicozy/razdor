@@ -326,7 +326,6 @@ The army is healed; {raised} raised from the dead. = Армия вылечена
 The hero is at level {n}. = Герой теперь {n} уровня.
 {item} is in the pack. = {item} — в рюкзаке.
 {spell} is in the book already. = {spell} уже есть в книге.
-The spell book is full. = Книга заклинаний полна.
 {spell} is written into the book. = {spell} вписано в книгу.
 No room in the army. = В армии нет места.
 {unit} (level {level}) joins the army. = {unit} ({level} уровня) вступает в армию.

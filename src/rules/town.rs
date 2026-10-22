@@ -9,7 +9,7 @@
 use super::clock::MINUTES_PER_DAY;
 use super::content::{Content, SpellDef};
 use super::formation::Slot;
-use super::game::{Event, Game, Price, SPELL_BOOK_SIZE};
+use super::game::{Event, Game, Price};
 use super::units::Stats;
 use super::world::{EventId, Location, LocationKind, Stationed};
 
@@ -52,7 +52,6 @@ pub enum ServiceError {
     /// An unpaid garrison unit costs this much gold to take back.
     Unpaid(i32),
     AlreadyKnown,
-    BookFull,
     NoSuchUnit,
 }
 
@@ -391,22 +390,19 @@ impl Game {
     }
 
     /// Learns spell `id` in the sanctuary here for its `CostGold`; it goes into the hero's
-    /// book (which holds [`SPELL_BOOK_SIZE`] spells), to be cast on the map (`rules::magic`).
+    /// book, to be cast on the map (`rules::magic`).
     pub fn learn_spell(&mut self, id: u32) -> Result<(), ServiceError> {
         let spell = self.spells_here().into_iter().find(|s| s.id == id).ok_or(ServiceError::NotHere)?;
         // Exactly `CostGold`, a negative one too (it then pays the hero).
         let price = Price::gold(spell.cost_gold);
-        // The shop's tests in its order (0x4ba078): known, then gold, then a full book of 15.
-        // Razdor fixes the original's bug: it refused only a book of exactly 15, so a book
-        // an event pushed past 15 bought on.
+        // The shop's tests in its order (0x4ba078): known, then gold. Razdor's choice (the
+        // owner's, 2026-10-22): no room test, the book pages past 15; the original refuses
+        // a full book of 15 here.
         if self.knows_spell(id) {
             return Err(ServiceError::AlreadyKnown);
         }
         if !self.can_afford(price) {
             return Err(ServiceError::CannotAfford);
-        }
-        if self.spells.len() >= SPELL_BOOK_SIZE {
-            return Err(ServiceError::BookFull);
         }
         self.spend(price);
         self.spells.push(id as u8);
@@ -1828,15 +1824,12 @@ mod tests {
         assert_eq!(g.learn_spell(1), Err(ServiceError::AlreadyKnown));
         g.gold = 499;
         assert_eq!(g.learn_spell(2), Err(ServiceError::CannotAfford));
-        g.gold = 500;
-        g.spells = (3..18).collect();
-        assert_eq!(g.learn_spell(2), Err(ServiceError::BookFull), "15 cells in the book");
-        g.gold = 499;
-        assert_eq!(g.learn_spell(2), Err(ServiceError::CannotAfford), "the gold is tested before the room");
-        // A book an event filled past 15 is full too (the original's bug sold into it).
+        // Razdor's choice (the owner's, 2026-10-22): a book of 16 still buys; the original
+        // refuses at 15 (0x4ba078).
         g.gold = 500;
         g.spells = (3..19).collect();
-        assert_eq!(g.learn_spell(2), Err(ServiceError::BookFull));
+        g.learn_spell(2).unwrap();
+        assert_eq!(g.spells.len(), 17);
         g.gold = 0;
         g.spells = vec![1];
         assert_eq!(g.learn_spell(7), Err(ServiceError::NotHere));

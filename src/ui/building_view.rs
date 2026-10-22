@@ -15,7 +15,7 @@ use razdor::rules::content::{HeroClass, ItemId, SpellDef, Stat, UnitId};
 use razdor::rules::formation::{Formation, Slot};
 use razdor::rules::economy::VillageOffer;
 use razdor::rules::pack_order::{alphabet_key, ItemGroup};
-use razdor::rules::game::{Currency, Game, HireError, TradeError, Tribute, SPELL_BOOK_SIZE};
+use razdor::rules::game::{Currency, Game, HireError, TradeError, Tribute};
 use razdor::rules::script::HallEntry;
 use razdor::rules::town::{ServiceError, Tab};
 use razdor::rules::units::Unit;
@@ -232,7 +232,6 @@ pub fn service_error(e: ServiceError) -> String {
         ServiceError::GarrisonFull => tr("The garrison is full.").into(),
         ServiceError::Hero => tr("The hero stays with his army.").into(),
         ServiceError::AlreadyKnown => tr("Already in your book.").into(),
-        ServiceError::BookFull => tr("No room in the book.").into(),
         ServiceError::Named => tr("A named hero stays with the army.").into(),
         ServiceError::Dead => tr("A fallen unit cannot be left in a garrison!").into(),
         ServiceError::Unpaid(price) => trf!("Unpaid: {price} gold to take back.", price),
@@ -1825,7 +1824,6 @@ fn sanctuary(game: &mut Game, f: &Frame, view: &mut BuildingView, message: &mut 
     let (can, said) = match chosen {
         Some(s) if game.knows_spell(s.id) => (false, Some((own_text("Building", "AlreadySpell", n_("This spell is already in your book!")), Color::from_rgba(55, 180, 255, 255)))),
         Some(s) if game.gold < s.cost_gold => (false, Some((own_text("Building", "NoMoneyForSpell", n_("You do not have enough money for this spell!")), chrome::RED_TEXT))),
-        Some(_) if game.spells.len() >= SPELL_BOOK_SIZE => (false, Some((own_text("Building", "NoPlaceForSpell", n_("There is no room for the spell in your spell book!")), chrome::RED_TEXT))),
         Some(_) => (true, None),
         None => (false, None),
     };

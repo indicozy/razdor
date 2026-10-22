@@ -6,7 +6,7 @@
 //! Scenes (`<map>` is a map file name of the install without `.DTm`, e.g. `РК3-Столица`):
 //! `title`, `fonts` (sample lines in many scripts), `update` (a made-up release on offer), `authors[:<seconds>]`, `options[:advanced]`, `scenarios[:<map>]`, `tutorial`, `load[:manual|auto[:<row>]]`, `editor[:<map>[:<text to find>]]`, `classes:<map>`, `map:<map>[:x,y]`, `minimap:<map>`, `clash:<map>` (the first two armies fight on the explored map), `walk:<map>:dx,dy` (the
 //! hero sets off that many cells away), `building:<map>:<n>`
-//! (the hero in the n-th building; `:barracks`, `:garrison`, `:market`, `:sanctuary` open that tab; `:market-pack` the market's pack list), `army:<map>[:<n>[:<unit id>[:<level>]]]` (squad member n selected, made that unit at that level), `journal:<map>` / `hero:<map>[:<tab>]`, `spells:<map>`,
+//! (the hero in the n-th building; `:barracks`, `:garrison`, `:market`, `:sanctuary` open that tab; `:market-pack` the market's pack list), `army:<map>[:<n>[:<unit id>[:<level>]]]` (squad member n selected, made that unit at that level), `journal:<map>` / `hero:<map>[:<tab>]`, `spells:<map>` (`spells-pages:<map>`: 20 spells, page 2 open),
 //! `menu:<map>`, `defeat:<map>` (the lost battle's report), `event:<map>:<n>` (the map's event n's window; `RAZDOR_SCENE_LOST=<id>,…` adds its lost-items row),`learnt:<map>[:<id>,…]` (the event window with new spells, the hero with no mana), `report:<map>[:<gold>]` (the noon report), `settings:<map>[:advanced]`, `battle:<map>:<n>` (against the n-th army), `custom` (the custom battle
 //! setup), `custom-battle` (its first round; `custom-battle:watch` watches the AI play it). `RAZDOR_SCENE_DEBUG=1` turns the map's debug overlay (F3) on; `RAZDOR_SCENE_SHOW=x,y,r` shows
 //! a place as a lantern event does; `RAZDOR_SCENE_CONSOLE=help;gold 100` opens the cheat
@@ -219,7 +219,7 @@ pub fn open_later(app: &mut App, frame: u64) -> bool {
     let next = match parts.next().unwrap_or_default() {
         "load" => Some(Screen::Load(LoadView::new(if app.game.is_some() { Back::Map } else { Back::Title }))),
         "army" => Some(Screen::Squad { selected: Default::default(), scroll: 0, back: None }),
-        "spells" => Some(Screen::Spellbook { selected: 0 }),
+        "spells" => Some(Screen::Spellbook { selected: 0, page: 0, filter: Default::default() }),
         "journal" => Some(Screen::Hero(Default::default())),
         "hero" => Some(Screen::Hero(Default::default())),
         "menu" => Some(Screen::Menu(false)),
@@ -588,12 +588,14 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             let tab = arg.and_then(|t| t.parse::<usize>().ok()).and_then(|i| razdor::rules::journal::Tab::ALL.get(i).copied());
             Screen::Hero(super::items_view::HeroView { tab: tab.unwrap_or(razdor::rules::journal::Tab::Active), ..Default::default() })
         }
-        "spells" => {
-            // A book full of the install's spells, to see their pictures.
-            game.spells = game.content.spells.iter().filter_map(|s| u8::try_from(s.id).ok()).take(15).collect();
+        "spells" | "spells-pages" => {
+            // A book full of the install's spells, to see their pictures. `spells-pages`: 20 of
+            // them, with the second page open (Razdor's paged book, the owner's 2026-10-22).
+            let (count, page) = if kind == "spells-pages" { (20, 1) } else { (15, 0) };
+            game.spells = game.content.spells.iter().filter_map(|s| u8::try_from(s.id).ok()).take(count).collect();
             // `RAZDOR_SCENE_MANA=<n>` sets the hero's mana (default 500: every card affordable).
             game.mana = std::env::var("RAZDOR_SCENE_MANA").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(500);
-            Screen::Spellbook { selected: 0 }
+            Screen::Spellbook { selected: 0, page, filter: Default::default() }
         }
         "menu" => Screen::Menu(false),
         "save" => {

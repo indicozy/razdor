@@ -12,7 +12,7 @@ use crate::trf;
 
 use super::battle::{Battle, Outcome, Team};
 use super::content::{Content, ItemId, UnitId};
-use super::game::{Event, Game, SPELL_BOOK_SIZE};
+use super::game::{Event, Game};
 use super::units::Unit;
 
 /// Highest level `level` and `unit` give.
@@ -346,9 +346,6 @@ fn run_on_game(cheat: &Cheat, game: &mut Game) -> Result<Done, String> {
             let Ok(byte) = u8::try_from(id) else { return Err(trf!("Nothing has id {id}.", id)) };
             if game.knows_spell(id) {
                 return Err(trf!("{spell} is in the book already.", spell = name));
-            }
-            if game.spells.len() >= SPELL_BOOK_SIZE {
-                return Err(tr("The spell book is full.").into());
             }
             game.spells.push(byte);
             Done::line(trf!("{spell} is written into the book.", spell = among(&name, hits)))

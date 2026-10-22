@@ -91,8 +91,8 @@ pub enum Screen {
     /// The journal: its tab, selected line and scrolling.
     /// The hero window (the bar's flag, the original's side window 5).
     Hero(items_view::HeroView),
-    /// The spell book, with the selected cell.
-    Spellbook { selected: usize },
+    /// The spell book, with the selected cell, its page and its filter.
+    Spellbook { selected: usize, page: usize, filter: spellbook::BookFilter },
     /// "Выход из игры" over the map (the bar's X, Esc); `true` while the restart question
     /// is open.
     Menu(bool),
@@ -896,8 +896,8 @@ impl App {
             }
             (Screen::Battle(view), Some(game)) => view.frame(game, &self.assets, &mut self.message, &mut self.dialogs),
             (Screen::Hero(view), Some(game)) => items_view::hero_window(game, &self.assets, view, &mut self.message),
-            (Screen::Spellbook { selected }, Some(game)) => {
-                spellbook::frame(game, &self.assets, selected, &mut self.message)
+            (Screen::Spellbook { selected, page, filter }, Some(game)) => {
+                spellbook::frame(game, &self.assets, selected, page, filter, &mut self.message)
             }
             (Screen::Menu(asking), Some(game)) => match saves::exit_window(game, &self.assets, asking) {
                 (Some(saves::ExitChoice::Quit), _) => {

@@ -133,8 +133,14 @@ group or the order starts the pack at its top; both are kept for the session (`G
 filter line, `item_filter::field_with`): it hides the other groups' rows before the filter, and a
 hidden pick is not the pick.
 
-The book (`spellbook::frame`) lays its 15 cells out column by column (`ROWS` = 5, 4dad08). A
-card's background is the paper less the state's colour (`spellbook::card_fill`, `card_paper`):
+The book (`spellbook::frame`) lays its 15 cells out column by column (`ROWS` = 5, 4dad08). Razdor's
+choice (the owner's, 2026-10-22): the book pages all its spells 15 at a time (the original shows only the
+first 15, 0x4d261c). A second page turns by the wheel (up is the previous page), PageUp/PageDown or
+Left/Right, and the two arrow buttons with "N / M" in the bottom row under the grid; with one page those
+are not drawn. A filter button ("Все", "Волшебство", "Проклятия": all, the spells on the own army, the
+enemy spells; `spellbook::BookFilter`, cycled by its click) lists a part of the book, and the pages count
+that list; a new filter starts on page 1. `Screen::Spellbook` keeps the page, the filter and `selected`
+(the book index). The bottom row is always drawn. A card's background is the paper less the state's colour (`spellbook::card_fill`, `card_paper`):
 normal, hovered (the hover is the colour, no frame), or dark red over the hero's mana. A card
 has no frame of its own. The event window's spell tooltip is the same card at the book's cell
 size, scaled with the window (`dialog.rs`, the spell preview), so its cost and duration lines show.

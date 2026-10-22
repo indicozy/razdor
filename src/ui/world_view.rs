@@ -2417,7 +2417,7 @@ pub fn window_backdrop(game: &Game, assets: &Assets, lit: Option<BarButton>) -> 
         BarButton::Load => Screen::Load(LoadView::new(Back::Map)),
         BarButton::Hero => Screen::Hero(Default::default()),
         BarButton::Squad => Screen::Squad { selected: Default::default(), scroll: 0, back: None },
-        BarButton::Spells => Screen::Spellbook { selected: 0 },
+        BarButton::Spells => Screen::Spellbook { selected: 0, page: 0, filter: Default::default() },
         BarButton::Map => Screen::WorldMap,
     })
 }
@@ -2462,7 +2462,7 @@ fn bottom_bar(game: &mut Game, message: &mut Option<String>, minimap_open: bool,
         }
         Some(BarButton::Spells) => {
             *message = None;
-            Some(Screen::Spellbook { selected: 0 })
+            Some(Screen::Spellbook { selected: 0, page: 0, filter: Default::default() })
         }
         Some(BarButton::Map) => None,
         // J: the hero window, whose diary holds the quests and Razdor's history.

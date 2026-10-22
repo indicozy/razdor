@@ -31,8 +31,9 @@ pub use super::units::SPELL_SLOTS;
 pub const CASTER_BONUS: &str = "Caster";
 /// Game time passes in half-hour steps while casting.
 pub const CAST_STEP_MINUTES: u64 = 30;
-/// The magic window shows (and casts) only the first 15 spells of the book (3 × 5 cells).
-pub const CASTABLE: usize = 15;
+/// Cells on one page of the spell book (3 × 5). The original's whole book is this one page
+/// (0x4dad08); Razdor's choice (the owner's, 2026-10-22) pages past it, see `Game::book`.
+pub const BOOK_PAGE: usize = 15;
 /// The end Community opcode 11 gives its "permanent" spells: 15,658,734 hundredths of a minute
 /// after the map start (0xEEEEEE), about 108.7 game days, in whole minutes rounded up.
 pub const OPCODE_SPELL_END: u64 = 156_588;
@@ -294,10 +295,11 @@ impl Game {
         self.content.spell(id)
     }
 
-    /// The spells of the hero's book the magic window shows (its first 15 entries), in book
-    /// order.
+    /// Every spell of the hero's book, in book order. Razdor's choice (the owner's, 2026-10-22):
+    /// the book shows all of them, paged 15 at a time; the original shows only the first 15
+    /// (0x4d261c, 0x4dad08).
     pub fn book(&self) -> Vec<&SpellDef> {
-        self.spells.iter().take(CASTABLE).filter_map(|&id| self.spell(id as u32)).collect()
+        self.spells.iter().filter_map(|&id| self.spell(id as u32)).collect()
     }
 
     /// The `Caster` discount: a unit of the hero's army, dead or alive, whose type's bonus or
@@ -493,13 +495,14 @@ impl Game {
         }
     }
 
-    /// A cast may start (0x4c2e34): the spell is among the first 15 of the book, the target
+    /// A cast may start (0x4c2e34): the spell is in the book (Razdor's choice, the owner's
+    /// 2026-10-22: any page, the original casts only the first 15, 0x4d261c), the target
     /// suits it and can be pointed at, the mana covers its cost, no battle is pending.
     fn check_cast(&self, spell: u32, target: CastTarget) -> Result<(), CastError> {
         if self.foe.is_some() {
             return Err(CastError::Busy);
         }
-        if !self.spells.iter().take(CASTABLE).any(|&s| s as u32 == spell) {
+        if !self.spells.iter().any(|&s| s as u32 == spell) {
             return Err(CastError::NotInBook);
         }
         let def = self.spell(spell).ok_or(CastError::NoSuchSpell)?;
@@ -736,12 +739,13 @@ mod tests {
     }
 
     #[test]
-    fn only_the_first_15_spells_of_the_book_can_be_cast() {
+    fn a_spell_past_the_15th_can_be_cast() {
+        // Razdor's choice (the owner's, 2026-10-22): the 16th spell is on page 2 and castable.
         let mut g = game(HeroClass::Knight);
         g.spells = (20..35).chain([1]).collect();
         assert_eq!(g.spells.len(), 16);
-        assert_eq!(g.cast(1, CastTarget::Own), Err(CastError::NotInBook), "the 16th is known but never shown");
-        assert!(g.book().iter().all(|s| s.id != 1));
+        assert!(g.book().iter().any(|s| s.id == 1), "the 16th is in the book");
+        assert_ne!(g.cast(1, CastTarget::Own), Err(CastError::NotInBook));
     }
 
     #[test]

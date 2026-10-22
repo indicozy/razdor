@@ -1,7 +1,10 @@
 //! The spell book on the world map (key B): the hero's learned spells in the original's
 //! 3 × 5 cells, what each costs this hero (mana and casting time), how long it lasts and what
 //! it does; cast on the own army or on an enemy army within reach; the spells on the army
-//! now, with the time they have left.
+//! now, with the time they have left. Razdor's choice (the owner's, 2026-10-22): the book
+//! pages its spells 15 at a time (the original shows only the first 15); the pages turn by
+//! the wheel, PageUp/PageDown, Left/Right and the two arrow buttons. A filter button cycles
+//! the book through all its spells, the spells on the own army and the enemy spells.
 
 
 use macroquad::prelude::*;
@@ -12,12 +15,56 @@ use razdor::trf;
 use razdor::rules::clock::duration_label;
 use razdor::rules::content::SpellDef;
 use razdor::rules::game::Game;
-use razdor::rules::magic::{self, CastError, CastOutcome, CastTarget, Duration, CASTABLE};
+use razdor::rules::magic::{self, CastError, CastOutcome, CastTarget, Duration, BOOK_PAGE};
 
 use super::audio::{cue, Cue};
 use super::widgets::*;
 use super::world_view;
 use super::Screen;
+
+/// Which spells the book lists (Razdor's choice, the owner's 2026-10-22; the original lists all
+/// the hero's spells, 0x4d261c). One button cycles it: All → Own → Enemy → All.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BookFilter {
+    #[default]
+    All,
+    /// The spells cast on the hero's own army («Волшебство»).
+    Own,
+    /// The spells cast on an enemy army («Проклятия»).
+    Enemy,
+}
+
+impl BookFilter {
+    /// The filter the button turns to.
+    pub fn next(self) -> Self {
+        match self {
+            Self::All => Self::Own,
+            Self::Own => Self::Enemy,
+            Self::Enemy => Self::All,
+        }
+    }
+
+    /// The button's label, from the catalog.
+    fn label(self) -> &'static str {
+        match self {
+            Self::All => tr("All spells"),
+            Self::Own => tr("Spells on your army"),
+            Self::Enemy => tr("Enemy spells"),
+        }
+    }
+}
+
+/// The book indices the filter lists, in book order. `enemy[i]` says whether book spell `i`
+/// is cast on an enemy army (`magic::targets_enemy`).
+pub fn shown(enemy: &[bool], filter: BookFilter) -> Vec<usize> {
+    (0..enemy.len())
+        .filter(|&i| match filter {
+            BookFilter::All => true,
+            BookFilter::Own => !enemy[i],
+            BookFilter::Enemy => enemy[i],
+        })
+        .collect()
+}
 
 /// The book's 3 columns of 5 cells (0x4dad08: cell `n` is column `n / 5`, row `n % 5`).
 const ROWS: usize = 5;
@@ -39,6 +86,16 @@ pub enum CardFill {
 /// The book cell `n` sits in: (column, row), the columns filled top to bottom (0x4dad08).
 pub fn book_cell(n: usize) -> (usize, usize) {
     (n / ROWS, n % ROWS)
+}
+
+/// Pages a book of `spells` takes, 15 spells each; an empty book still shows one page.
+pub fn page_count(spells: usize) -> usize {
+    spells.div_ceil(BOOK_PAGE).max(1)
+}
+
+/// The page `delta` pages from `page`, kept within the `pages` there are.
+pub fn page_turn(page: usize, pages: usize, delta: isize) -> usize {
+    (page as isize + delta).clamp(0, pages.max(1) as isize - 1) as usize
 }
 
 /// The background a card has: [`CardFill::Unaffordable`] when `affordable` is false (the
@@ -128,11 +185,14 @@ fn hours(minutes: u64, many: bool) -> String {
 /// with the spell's round picture in its silver frame, its name, what it does, its mana and
 /// reading time and how long it lasts; empty cells are dark with the knot and "Нет изученных
 /// заклинаний". A click casts the spell; an enemy spell's target is then picked on the map
-/// (`world_view::begin_targeting`).
+/// (`world_view::begin_targeting`). `selected` is the clicked spell's book index; `page` the
+/// page shown (15 spells each, Razdor's choice); `filter` the spells listed (see [`BookFilter`]).
 pub fn frame(
     game: &mut Game,
     assets: &super::assets::Assets,
     selected: &mut usize,
+    page: &mut usize,
+    filter: &mut BookFilter,
     message: &mut Option<String>,
 ) -> Option<Screen> {
     use super::chrome;
@@ -143,14 +203,27 @@ pub fn frame(
     let title = own("Title", n_("The hero's spell book"));
     let (inner, closed) = chrome::window(r, &title, chrome::Skin::Marble, true);
     let book: Vec<SpellDef> = game.book().into_iter().cloned().collect();
+    let enemy: Vec<bool> = book.iter().map(magic::targets_enemy).collect();
     let gap = 8.0 * k;
-    let (cw, ch) = ((inner.w - 4.0 * gap) / 3.0, (inner.h - 6.0 * gap) / 5.0 + gap);
+    // The bottom row (the filter button, and with more than one page the arrows and "N / M")
+    // always leaves its 41 px under the grid, above the message line.
+    let grid = Rect::new(inner.x, inner.y, inner.w, inner.h - 41.0 * k);
+    let (cw, ch) = ((grid.w - 4.0 * gap) / 3.0, (grid.h - 6.0 * gap) / 5.0 + gap);
+    // The filter's list: its book indices, paged; a new filter starts on its first page.
+    let listed = shown(&enemy, *filter);
+    let pages = page_count(listed.len());
+    if bottom_row(r, inner, gap, k, pages, page, filter) {
+        *page = 0;
+    }
+    *page = (*page).min(pages - 1);
+    let first = *page * BOOK_PAGE;
     let mut cast = None;
-    for cell in 0..CASTABLE {
+    for cell in 0..BOOK_PAGE {
         // The 15 cells fill each column top to bottom, then the next column (0x4dad08).
         let (c, row) = book_cell(cell);
-        let cr = Rect::new(inner.x + gap + c as f32 * (cw + gap), inner.y + gap + row as f32 * ch, cw, ch - gap);
-        let spell = book.get(cell);
+        let cr = Rect::new(grid.x + gap + c as f32 * (cw + gap), grid.y + gap + row as f32 * ch, cw, ch - gap);
+        let book_index = listed.get(first + cell).copied();
+        let spell = book_index.map(|i| &book[i]);
         let hover = !input_blocked() && cr.contains(crate::ui::widgets::pointer().into());
         // The cell: an empty one is the original's (0x4dc118 makes it, 0x49bde4 draws it):
         // `Win-paper` from (20, 20) less (180, 140, 113), an olive, inside a 1 px steel line
@@ -216,7 +289,7 @@ pub fn frame(
                 tooltip(&[(own("NoManaForSpell", n_("Not enough mana\nto cast this spell!")).replace('\n', " "), chrome::RED_TEXT)]);
             }
             if clicked() {
-                *selected = cell;
+                *selected = book_index.unwrap_or(0);
                 cast = Some(s.clone());
             }
         }
@@ -241,6 +314,54 @@ pub fn frame(
         chrome::shadow_centered(m, r.center().x, r.y + r.h - 8.0 * k, 14.0 * k, ACCENT);
     }
     next.or(bar_pick)
+}
+
+/// The bottom row under the grid: the filter button at its left end (Razdor's choice, the
+/// owner's 2026-10-22), and with `pages` > 1 the two arrows at the right and "N / M" between
+/// them. The arrows, the wheel over the window, PageUp/PageDown and Left/Right turn `page` (the
+/// wheel up is the previous page); the filter button cycles `filter`. Returns true when the
+/// filter changed, so the caller starts its first page.
+fn bottom_row(r: Rect, inner: Rect, gap: f32, k: f32, pages: usize, page: &mut usize, filter: &mut BookFilter) -> bool {
+    use super::chrome;
+    let row_h = 18.0 * k;
+    let row_y = r.y + r.h - 44.0 * k;
+    let fw = 150.0 * k;
+    let mut changed = false;
+    if button(inner.x + gap, row_y, fw, row_h, filter.label(), true) {
+        *filter = filter.next();
+        changed = true;
+    }
+    if pages <= 1 {
+        return changed;
+    }
+    let aw = 26.0 * k;
+    let next = Rect::new(inner.right() - gap - aw, row_y, aw, row_h);
+    let prev = Rect::new(next.x - 6.0 * k - aw, row_y, aw, row_h);
+    let mut delta: isize = 0;
+    if button(prev.x, prev.y, prev.w, prev.h, "<", *page > 0) {
+        delta -= 1;
+    }
+    if button(next.x, next.y, next.w, next.h, ">", *page + 1 < pages) {
+        delta += 1;
+    }
+    if mouse_in(r.x, r.y, r.w, r.h) {
+        let w = wheel();
+        if w > 0.0 {
+            delta -= 1;
+        } else if w < 0.0 {
+            delta += 1;
+        }
+    }
+    if key(KeyCode::PageUp) || key(KeyCode::Left) {
+        delta -= 1;
+    }
+    if key(KeyCode::PageDown) || key(KeyCode::Right) {
+        delta += 1;
+    }
+    *page = page_turn(*page, pages, delta);
+    let label = format!("{} / {}", *page + 1, pages);
+    chrome::shadow_centered(&label, inner.x + inner.w / 2.0, row_y + row_h * 0.72, 13.0 * k, chrome::CREAM);
+    changed
 }
 
 /// Casts `spell` on `target`: the hero reads it on the map, and it lands when the reading is
@@ -385,10 +506,44 @@ mod tests {
         assert_eq!(book_cell(4), (0, 4));
         assert_eq!(book_cell(5), (1, 0));
         assert_eq!(book_cell(14), (2, 4));
-        let mut seen: Vec<(usize, usize)> = (0..CASTABLE).map(book_cell).collect();
+        let mut seen: Vec<(usize, usize)> = (0..BOOK_PAGE).map(book_cell).collect();
         seen.sort();
         seen.dedup();
-        assert_eq!(seen.len(), CASTABLE, "every cell is its own place");
+        assert_eq!(seen.len(), BOOK_PAGE, "every cell is its own place");
+    }
+
+    #[test]
+    fn the_filter_lists_the_own_or_enemy_spells_in_book_order() {
+        // `enemy[i]`: book spell i is cast on an enemy army.
+        let enemy = [false, true, false, true, true];
+        assert_eq!(shown(&enemy, BookFilter::All), [0, 1, 2, 3, 4]);
+        assert_eq!(shown(&enemy, BookFilter::Own), [0, 2]);
+        assert_eq!(shown(&enemy, BookFilter::Enemy), [1, 3, 4]);
+        assert!(shown(&[], BookFilter::Own).is_empty(), "an empty book shows no spells");
+    }
+
+    #[test]
+    fn the_filter_button_cycles_all_own_enemy() {
+        assert_eq!(BookFilter::default(), BookFilter::All);
+        assert_eq!(BookFilter::All.next(), BookFilter::Own);
+        assert_eq!(BookFilter::Own.next(), BookFilter::Enemy);
+        assert_eq!(BookFilter::Enemy.next(), BookFilter::All);
+    }
+
+    #[test]
+    fn the_book_pages_15_spells_each() {
+        // Razdor's choice (the owner's, 2026-10-22): an empty book still has its one page.
+        assert_eq!(page_count(0), 1);
+        assert_eq!(page_count(15), 1);
+        assert_eq!(page_count(16), 2);
+        assert_eq!(page_count(30), 2);
+        assert_eq!(page_count(31), 3);
+        // Turning clamps at the first and the last page.
+        assert_eq!(page_turn(0, 1, 1), 0, "one page never turns");
+        assert_eq!(page_turn(0, 3, -1), 0);
+        assert_eq!(page_turn(0, 3, 1), 1);
+        assert_eq!(page_turn(1, 3, 5), 2);
+        assert_eq!(page_turn(2, 3, -2), 0);
     }
 
     #[test]

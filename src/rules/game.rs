@@ -57,8 +57,6 @@ const SPAWN_EVERY_DAYS: u64 = 3;
 const MAX_GANGS_PER_CAMP: usize = 2;
 /// Unworn items the hero's backpack holds: 256 cells, shown as a scrolling grid 5 wide.
 pub use super::pack::PACK_SIZE;
-/// Spells the book holds (the original's message comes at 15).
-pub const SPELL_BOOK_SIZE: usize = 15;
 /// Items on sale in each demo market after a restock.
 pub const MARKET_STOCK: usize = 6;
 /// Percent chance that a beaten demo gang drops an item.

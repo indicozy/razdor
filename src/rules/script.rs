@@ -657,8 +657,9 @@ impl EventWorld for Game {
         false
     }
 
-    /// Appends the spell to the book unless it is there (0x49c144). There is no limit: the
-    /// spells past the 15th are known but the magic window never shows them.
+    /// Appends the spell to the book unless it is there (0x49c144). There is no limit, and
+    /// Razdor's choice (the owner's, 2026-10-22) casts and pages the spells past the 15th
+    /// too; the original's magic window never shows them.
     fn learn_spell(&mut self, spell: u8) {
         if spell != 0 && !self.spells.contains(&spell) {
             self.spells.push(spell);
@@ -1571,7 +1572,7 @@ mod tests {
 
     #[test]
     fn an_event_teaches_spells_past_the_15th() {
-        // 0x49c144 has no limit; the 16th is known but not castable (`rules::magic`).
+        // 0x49c144 has no limit; the 16th is known and castable in Razdor (`rules::magic`).
         use crate::rules::events::EventWorld;
         let mut g = start(&world(vec![]));
         g.spells = (20..35).collect();
