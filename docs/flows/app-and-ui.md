@@ -141,8 +141,8 @@ are not drawn. A filter button ("Все", "Волшебство", "Прокля�
 enemy spells; `spellbook::BookFilter`, cycled by its click) lists a part of the book, and the pages count
 that list; a new filter starts on page 1. `Screen::Spellbook` keeps the page, the filter and `selected`
 (the book index). The bottom row is always drawn. A card's background is the paper less the state's colour (`spellbook::card_fill`, `card_paper`):
-normal, hovered (the hover is the colour, no frame), or dark red over the hero's mana. A card
-has no frame of its own. The event window's spell tooltip is the same card at the book's cell
+normal, hovered (the hover is the colour, no frame), or dark red over the hero's mana. Every card has
+the 1 px steel line the original draws into all its card backgrounds (0x4dc118, 0x48d1d4). The event window's spell tooltip is the same card at the book's cell
 size, scaled with the window (`dialog.rs`, the spell preview), so its cost and duration lines show.
 A spell's card, wherever it is shown (the spell book's cells, the sanctuary's description, the
 event window's spell tooltip), has the same text, drawn by `spellbook::card_text` in

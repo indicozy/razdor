@@ -112,7 +112,8 @@ pub fn card_fill(affordable: bool, hovered: bool) -> CardFill {
 
 /// Paints the card background `fill` into `r`: `Win-paper` (the empty cell's base, 0x4dc118)
 /// less the colour of the state, scaled as the original's 2664 is. Without the art, the brown
-/// surface.
+/// surface; with the 1 px steel line round it that 0x4dc118 draws into every card background
+/// (0x48d1d4).
 fn card_paper(r: Rect, fill: CardFill) {
     let paper = match fill {
         CardFill::Normal => super::chrome::win_scaled("Win-paper", [1024; 3], [-148, -132, -148]),
@@ -123,6 +124,8 @@ fn card_paper(r: Rect, fill: CardFill) {
         Some(t) => super::chrome::tex_src(&t, Rect::new(20.0, 20.0, 286.0, 112.0), r, WHITE),
         None => super::chrome::surface(r, super::chrome::Skin::Brown),
     }
+    let k = super::chrome::k();
+    draw_rectangle_lines(r.x, r.y, r.w, r.h, k.max(1.0), super::chrome::SILVER);
 }
 
 pub fn duration_text(s: &SpellDef) -> String {
@@ -227,8 +230,9 @@ pub fn frame(
         let hover = !input_blocked() && cr.contains(crate::ui::widgets::pointer().into());
         // The cell: an empty one is the original's (0x4dc118 makes it, 0x49bde4 draws it):
         // `Win-paper` from (20, 20) less (180, 140, 113), an olive, inside a 1 px steel line
-        // (0x48d1d4). A spell's card has no frame: its background tells the state (§9.3), and
-        // the hover look is the card's own colour, not a frame (0x4c2cf4).
+        // (0x48d1d4). Every card has the same 1 px line as the empty one ([`card_paper`]); its
+        // background tells the state (§9.3), and the hover adds no frame of its own, only its
+        // colour (0x4c2cf4).
         match (spell, chrome::win_scaled("Win-paper", [1024; 3], [-180, -140, -113])) {
             (None, Some(paper)) => {
                 chrome::tex_src(&paper, Rect::new(20.0, 20.0, 286.0, 112.0), cr, WHITE);

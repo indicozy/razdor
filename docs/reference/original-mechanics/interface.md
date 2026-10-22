@@ -797,7 +797,7 @@ bottom, then the next column; a row-by-row fill is wrong. **code**
 
 **Hover look** (4c2cf4). The card under the pointer is drawn again on top of the others, with
 `selected` = 1: the selected background (below) and, when affordable, the picture through a
-colour filter (scaled 1400/1024, FUN_0048da5c). There is **no frame**; the colour is the look.
+colour filter (scaled 1400/1024, FUN_0048da5c). The hover adds **no frame**; the colour is the look (every card background already has the 1 px steel line, below).
 A click (4c2e34) casts only when the mana covers the cost, and a hovered unaffordable card
 shows the "not enough mana" hint (4c2cf4, when hints are on). **code**
 
@@ -806,7 +806,8 @@ event dialog's spell tooltip (4cbd58, drawn at the pointer with `selected` = 0).
 the book's cell size (286 × 112) at the window's scale: the player's video shows it 402 × 157 px
 at 1920 with the mana, reading and duration lines (frames 625-626). An empty book
 slot (no spell) shows an empty frame with a caption. A card's background is the paper
-(`Win-paper`, the empty cell's base) less a colour, by its state (**code**, 4dc118):
+(`Win-paper`, the empty cell's base) less a colour, by its state, each with a 1 px steel line
+round it (48d1d4) (**code**, 4dc118):
 - normal: less (148, 132, 148) (265c);
 - selected (hover): less (128, 112, 128) (2660);
 - **cannot-afford** (a spell whose mana cost, after the Community Caster rule, c27448, is above
@@ -1603,7 +1604,7 @@ parity rule they are candidates to hide or remove, not bugs to copy.
 | 79 | Unit panel text | Matches (`unit_sheet::draw`): lists stacked from the bottom at the original's places, the description 238 px wide with the loaders' six-space indents, shadows, the bold orange wage line. Razdor still cuts a description that would push the name into the panel's top quarter (a mod's long texts), keeps its own darkening gradient and its battle status lines under the stats | 492f24, 4d9060, 48e8f0, 4924c9, 0x48f820, 0x4e4e40 | 9.1 |
 | 80 | Unit panel stat values | Matches but the magic lines (not yellow) and the Community evasion line (see OPEN_QUESTIONS) (`unit_sheet::stat_lines`, `shown_ink`): one shown number per line (the current stats with items and spells outside battle, the battle values in battle), label and value in one colour: plain at the level value, blue above it, red below it or below the current value; a building's defence as "v + n"; the Community bleed line in battle. The hits show the current HP when wounded. The bleed line shows the unit's own bleed | Level value (type at the unit's level, no items), shown and current compared (491a58, 491fa4, 4908a8); the magic lines are yellow-tinted in the original | 9.1 |
 | 81 | Hero's facing at a stop | Matches (`world_view::draw_hero`, `Game::standing_heading`): after a step the figure keeps that step's row while he stands, the standing frame 0; the galley at rest too; before any step the viewer's row (the first table entry is open, OPEN_QUESTIONS) | Each step writes the direction (0x4ae8e0), a stop keeps it in the standing frame (0x4adc92, 0x4ae67d, 0x4ad4cc, 0x4c8840) | — |
-| 82 | Spell book order and hover | Matches: the 15 cells fill each column top to bottom, then the next (`spellbook::frame`, `ROWS`); the hovered card is drawn again in the selected background with no frame (`spellbook::card_fill`, `card_paper`) | Column-major fill (4dad08); hover is the card's own colour, no frame (4c2cf4) | 9.3 |
+| 82 | Spell book order and hover | Matches: the 15 cells fill each column top to bottom, then the next (`spellbook::frame`, `ROWS`); the hovered card is drawn again in the selected background with no extra frame; every card has the 1 px steel line (`spellbook::card_paper`, 4dc118) (`spellbook::card_fill`, `card_paper`) | Column-major fill (4dad08); hover is the card's own colour, no frame (4c2cf4) | 9.3 |
 | 83 | Spell card background | Matches: the paper less the state's colour (normal, hover, cannot-afford dark red, `spellbook::card_paper`), the event tooltip too (`spell_card`); the sanctuary's tab never tints. The hovered affordable picture is brightened 1400/1024 (FUN_0048da5c, `spell_badges::draw_picture_lit`); the event tooltip is the book's cell size at the window's scale (`dialog.rs`) | Paper less 148/132/148, 128/112/128, or 208/208/250 scaled 2700/1024 (4dc118, 49bde4) | 9.3 |
 | 84 | Targeting ring and hint | Matches: no ring and no army on the hero's own cell (`curse_aim`, `world_view`); the hint shows "Pick a target". The spell-target hint is drawn whatever option 6 says (`widgets::hint_box_always`, §10: the game always shows it); before, option 6 hid it | Hero's army ignored; plain hint (video 637); spell-target hints always shown (§10) | 7.5 |
 
