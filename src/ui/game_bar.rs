@@ -154,15 +154,6 @@ pub fn time_button_rect(b: TimeButton, top: f32, mid: f32, s: f32) -> Rect {
     on_bar(b.original_rect(), top, mid, s)
 }
 
-/// The button under `p` when the buttons show: only while the map is idle (`shown`) and
-/// the pointer is on the message box, as the original's hover area (0x4b930c, 0x4b93a8).
-pub fn time_button_at(p: Vec2, shown: bool, top: f32, mid: f32, s: f32) -> Option<TimeButton> {
-    if !shown || !message_box(top, mid, s).contains(p) {
-        return None;
-    }
-    TimeButton::ALL.into_iter().find(|&b| time_button_rect(b, top, mid, s).contains(p))
-}
-
 thread_local! {
     /// The time buttons' art with its alpha mask applied, by name.
     static TIME_ART: std::cell::RefCell<std::collections::HashMap<&'static str, Option<Texture2D>>> = std::cell::RefCell::new(Default::default());
@@ -486,14 +477,7 @@ pub fn draw_with_time(game: &Game, look: impl Fn(BarButton) -> Look, time_button
     (pressed, timed)
 }
 
-/// The time buttons' place on the bar as drawn now: the bar's top, the screen's middle and
-/// the scale (see [`on_bar`]).
-pub fn time_layout() -> (f32, f32, f32) {
-    let row = (60.0 * chrome::k()).round();
-    (screen_height() - chrome::bar_height(), screen_width() / 2.0, row / PANEL_ROW)
-}
-
-/// The time panel in the middle of the bar (it takes the wait clicks on the map).
+/// The time panel in the middle of the bar (clicks on it do not reach the map).
 pub fn time_panel() -> Rect {
     let row = (60.0 * chrome::k()).round();
     let ew = 370.0 * row / 64.0;
@@ -510,6 +494,16 @@ mod tests {
         // icon_3 and load icon_4.
         assert_eq!(BarButton::LEFT, [BarButton::Menu, BarButton::Settings, BarButton::Load, BarButton::Save]);
         assert_eq!((BarButton::Save.icon(), BarButton::Load.icon()), (3, 4));
+    }
+
+    /// The button under `p` when the buttons show: only while the map is idle (`shown`) and
+    /// the pointer is on the message box, as the original's hover area (0x4b930c, 0x4b93a8).
+    /// The drawing takes the same area ([`message_box`]).
+    fn time_button_at(p: Vec2, shown: bool, top: f32, mid: f32, s: f32) -> Option<TimeButton> {
+        if !shown || !message_box(top, mid, s).contains(p) {
+            return None;
+        }
+        TimeButton::ALL.into_iter().find(|&b| time_button_rect(b, top, mid, s).contains(p))
     }
 
     /// The original's own layout: its bar at y = 682, the middle at 512, scale 1.

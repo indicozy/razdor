@@ -2851,21 +2851,19 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     for (i, (line, color)) in notes.iter().enumerate() {
         super::chrome::shadow_text(line, 10.0, notes_top + 22.0 + i as f32 * 18.0, 16.0, *color);
     }
-    // Waiting: the buttons over the message box (interface.md §6), 1 / 4, or a click on the
-    // time panel off the buttons (left 1 h, right 4 h). Waits play in real time, a 30-minute
-    // tick every 150 ms (`Game::tick`).
+    // Waiting: the three buttons over the message box (shown while the pointer is on it, the
+    // panel's centre; interface.md §6) and keys 1 / 4. A click elsewhere on the panel does
+    // nothing, as the original's (0x4b930c, 0x4b93a8; interface.md §6, §7). Waits play in real
+    // time, a 30-minute tick every 150 ms (`Game::tick`).
     let can_wait = idle && game.foe.is_none();
     // The three buttons show on the idle map only: no walk, wait, flight or glide.
     let time_buttons = can_wait && view.shows.is_empty() && view.returning.is_none() && view.spell_fx.is_empty();
-    let (bar_top, bar_mid, bar_scale) = game_bar::time_layout();
-    let on_button = game_bar::time_button_at(Vec2::from(pointer()), time_buttons, bar_top, bar_mid, bar_scale).is_some();
-    let on_clock = on_clock && !on_button;
     // The original's wait buttons play the button sound (interface.md §14).
-    if can_wait && (key(KeyCode::Key1) || (on_clock && clicked())) {
+    if can_wait && key(KeyCode::Key1) {
         cue(Cue::Button);
         game.begin_wait(1);
     }
-    if can_wait && (key(KeyCode::Key4) || (on_clock && right_clicked())) {
+    if can_wait && key(KeyCode::Key4) {
         cue(Cue::Button);
         game.begin_wait(4);
     }
@@ -2933,12 +2931,6 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     if let Some(spell) = aiming.filter(|_| !input_blocked()) {
         let aim = cam.tile_under_mouse().filter(|_| !on_minimap).and_then(|t| game.curse_aim(t));
         spell_target_hint(game, spell, aim);
-    }
-    if on_clock && can_wait {
-        let hint = |key: &str, ours: &'static str| super::chrome::ui_text("GameMenu", key).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr(ours).to_string());
-        let left = hint("cp_Wait1Hour", n_("Wait 1 hour (the hero stands still)"));
-        let right = hint("cp_Wait4Hour", n_("Wait 4 hours (the hero stands still)"));
-        tooltip(&[(trf!("Left click: {left}", left), INK), (trf!("Right click: {right}", right), INK)]);
     }
     // A message for the screen this frame opens (a building's window, a battle) is that
     // screen's to show.
