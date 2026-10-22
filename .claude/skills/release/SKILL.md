@@ -40,7 +40,7 @@ update window shows those notes up to their first `## ` heading.
    Regenerate `CHANGELOG.md`, commit `Changelog: X.Y.Z's commit and the SHA-256 of its release`,
    push `main`.
 8. Tell the owner: the version, the release link, what is in it (plain words), test results.
-9. Discord announcement (if the `discord-reports` MCP server is connected):
+9. Discord announcement, every release (if the `discord-reports` MCP server is connected):
    - Reports shipped: the reports backlog's `fixed` entries (`discord-reports` skill §3) whose
      commits are in this release; set each to `released X.Y.Z` in its report and in INDEX.
      `reports_reporters` gives their reporters (the backlog id is the number they're linked
@@ -48,7 +48,8 @@ update window shows those notes up to their first `## ` heading.
    - Write a short Russian post in plain player words: «Вышел Раздор X.Y.Z» + the release link,
      the changelog lines, and after each line that came from a report «спасибо <@id>» (each
      reporter once per line). No internals, no issue numbers needed.
-   - `reports_post` without `confirm` → show the preview (text and who gets pinged) to the owner;
-     post with `confirm=true` only after they approve. Posting needs `DISCORD_ALLOW_POST=1`.
+   - Post it right away, as part of the release, once the release is published: `reports_post`
+     with `confirm=true`, no preview or approval needed (the owner's decision, 2026-10-22).
+     Posting needs `DISCORD_ALLOW_POST=1`. Give the owner the post's link in the report back.
 
 Release notes are public at once: no personal data, nothing from the game.
