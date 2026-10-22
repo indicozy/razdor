@@ -371,13 +371,11 @@ pub fn frame() -> Option<Pick> {
 }
 
 /// The credits picture of the install: its dark outline (`Credits_Alpha` as the alpha of
-/// black), its letters (`Credits_Color`, drawn additively), and the row of its first letters
-/// (it starts with a blank stretch).
+/// black) and its letters (`Credits_Color`, drawn additively).
 #[derive(Clone)]
 struct Credits {
     shadow: Texture2D,
     letters: Texture2D,
-    first_row: f32,
 }
 
 thread_local! {
@@ -392,12 +390,110 @@ thread_local! {
 /// (the owner's wish, 2026-10-22), most reports first; a display name in letters the fonts lack
 /// (Cyrillic Extended-B, Greek, IPA) is given as the Discord tag instead.
 const THANKS: [&str; 13] = ["Нлтчк", "ivantykhonchuk", "Eisenwald", "! TuttiFrutti", "Теневой Лорд", "9ibatnk", "turgrin", "nik0N", "Koaxz", "WHS13", "OBANAI77", "Hristos", "bykBa"];
-/// The thanks' heading below the two own lines, and the first name below it (picture pixels).
-const THANKS_HEAD_DY: f32 = 70.0;
-const THANKS_DY: f32 = THANKS_HEAD_DY + 26.0;
-/// Razdor's own lines over the original's credits: their height in the picture's pixels: the
-/// top margin's 24, the two lines, the thanks with a line each (22 apart), 24 below.
-const OWN_CREDITS_H: f32 = THANKS_DY + THANKS.len() as f32 * 22.0 + 24.0;
+/// The names column beside the credits window (the owner's choice, 2026-10-23): its margin
+/// from the screen's edges and from the window, in px at the UI scale (k).
+const COLUMN_MARGIN: f32 = 16.0;
+/// The narrowest side the column takes (px at k); narrower, the other side, else under the window.
+const SIDE_MIN_W: f32 = 120.0;
+/// Line spacing of the column, times the line's type size.
+const COLUMN_LEAD: f32 = 1.3;
+/// The smallest scale the column is drawn at before it takes another column under the window.
+const COLUMN_MIN_SCALE: f32 = 0.6;
+
+/// One line of the names column: its text, type size (px at k), colour, and the gap above it.
+struct CreditLine {
+    text: String,
+    size: f32,
+    color: Color,
+    gap: f32,
+}
+
+impl CreditLine {
+    /// Its row's height at scale `s` (k included in `s`): the line and the gap above.
+    fn row(&self, s: f32) -> f32 {
+        (self.size * COLUMN_LEAD + self.gap) * s
+    }
+
+    fn width(&self, s: f32) -> f32 {
+        measure(&self.text, self.size * s).width
+    }
+}
+
+/// Razdor's modder, the rest of the credits' names: the role in gold, the name in white.
+fn thanks_lines() -> Vec<CreditLine> {
+    let line = |text: &str, size: f32, color: Color, gap: f32| CreditLine { text: text.to_string(), size, color, gap };
+    let mut lines = vec![
+        line(tr("RAZDOR modder"), 20.0, chrome::GOLD, 0.0),
+        line("indicozy", 22.0, WHITE, 0.0),
+        line(tr("Thanks to the players"), 20.0, chrome::GOLD, 14.0),
+    ];
+    lines.extend(THANKS.iter().map(|name| line(name, 18.0, WHITE, 0.0)));
+    lines
+}
+
+/// The lines in `n` columns, in order, each line on its own row.
+fn columns(lines: &[CreditLine], n: usize) -> Vec<&[CreditLine]> {
+    lines.chunks(lines.len().div_ceil(n.max(1))).collect()
+}
+
+/// The columns' height and width at scale `s`, with the gaps between them.
+fn columns_size(lines: &[CreditLine], n: usize, k: f32) -> (f32, f32) {
+    let cols = columns(lines, n);
+    let height = cols.iter().map(|c| c.iter().map(|l| l.row(k)).sum::<f32>()).fold(0.0, f32::max);
+    let widths: f32 = cols.iter().map(|c| c.iter().map(|l| l.width(k)).fold(0.0, f32::max)).sum();
+    (height, widths + COLUMN_MARGIN * k * (cols.len() as f32 - 1.0))
+}
+
+/// The scale (up to 1) at which `n` columns of `lines` fit `area`.
+fn columns_fit(lines: &[CreditLine], n: usize, area: Rect, k: f32) -> f32 {
+    let (height, width) = columns_size(lines, n, k);
+    (area.h / height).min(area.w / width).min(1.0)
+}
+
+/// Draws the lines in `n` columns centred in `area`, at the largest scale that fits it.
+fn draw_columns(lines: &[CreditLine], n: usize, area: Rect, k: f32) {
+    let s = columns_fit(lines, n, area, k).max(0.3) * k;
+    let (height, width) = columns_size(lines, n, s);
+    let mut x = area.center().x - width / 2.0;
+    let top = (area.center().y - height / 2.0).max(area.y);
+    for col in columns(lines, n) {
+        let cw = col.iter().map(|l| l.width(s)).fold(0.0, f32::max);
+        let mut y = top;
+        for l in col {
+            let size = l.size * s;
+            let lw = measure(&l.text, size).width;
+            chrome::shadow_text(&l.text, x + (cw - lw) / 2.0, y + l.gap * s, size, l.color);
+            y += l.row(s);
+        }
+        x += cw + COLUMN_MARGIN * s;
+    }
+}
+
+/// The names beside the credits window, outside it and never in the roll: on the right of the
+/// window, else on its left, else under it (one line per name, smaller, in as many columns as
+/// it takes). Always drawn.
+fn thanks_column(page: Rect) {
+    let k = chrome::k();
+    let m = COLUMN_MARGIN * k;
+    let lines = thanks_lines();
+    let (sw, sh) = (screen_width(), screen_height());
+    let right = sw - (page.x + page.w) - 2.0 * m;
+    let left = page.x - 2.0 * m;
+    let min_w = SIDE_MIN_W * k;
+    // Centred on the window's middle, as far as the screen's margins allow.
+    let cy = page.center().y;
+    let half = (cy - m).min(sh - m - cy).max(0.0);
+    let side = |x: f32, w: f32| draw_columns(&lines, 1, Rect::new(x, cy - half, w, 2.0 * half), k);
+    if right >= min_w {
+        side(page.x + page.w + m, right);
+    } else if left >= min_w {
+        side(m, left);
+    } else {
+        let strip = Rect::new(m, page.y + page.h + m, sw - 2.0 * m, sh - page.y - page.h - 2.0 * m);
+        let n = (1..=lines.len()).find(|&n| columns_fit(&lines, n, strip, k) >= COLUMN_MIN_SCALE).unwrap_or(lines.len());
+        draw_columns(&lines, n, strip, k);
+    }
+}
 
 fn credits() -> Option<Credits> {
     CREDITS.with(|c| {
@@ -415,11 +511,7 @@ fn credits() -> Option<Credits> {
                 t.set_filter(FilterMode::Linear);
                 t
             };
-            let width = color.width as usize;
-            let first_row = color.rgba.chunks_exact(width * 4).position(|row| row.chunks_exact(4).any(|p| p[0].max(p[1]).max(p[2]) > 60)).unwrap_or(0);
-            // A margin above, for the faint edges of the first letters.
-            let first_row = first_row.saturating_sub(16);
-            Some(Credits { shadow: make(&shadow), letters: make(&color.rgba), first_row: first_row as f32 })
+            Some(Credits { shadow: make(&shadow), letters: make(&color.rgba) })
         })
         .clone()
     })
@@ -471,12 +563,12 @@ pub fn authors(started: f64) -> bool {
     if let Some(c) = credits() {
         // As the original (0x4c82c4): the picture's top at the page's top to begin with (its
         // own blank start lets the first lines rise from below), 35 of its pixels a second,
-        // and it stays on its last view once the end is in sight. Razdor's own lines come
-        // first, before the original's; the wheel and the arrow keys scroll by hand, and the
-        // scroll goes on from there.
+        // and it stays on its last view once the end is in sight. The roll is the original's
+        // alone; Razdor's names stand beside the window (`thanks_column`), the wheel and the
+        // arrow keys scroll by hand, and the scroll goes on from there.
         let px = k * 0.9375;
         let w = c.letters.width() * px;
-        let total = c.letters.height() + OWN_CREDITS_H;
+        let total = c.letters.height();
         let most = (total - inner.h / px).max(0.0);
         let (opened, mut nudge) = CREDITS_NUDGE.with(|n| n.get());
         if opened != started {
@@ -519,21 +611,9 @@ pub fn authors(started: f64) -> bool {
                 chrome::additive(|| chrome::tex_src(&c.letters, src, dst, WHITE));
             }
         };
-        picture(0.0, c.first_row, 0.0);
-        // Razdor's modder, in the credits' colours: the role in gold, the name in white.
-        let y = inner.y + (c.first_row + 24.0 - scrolled) * px;
-        let centred = |line: &str, dy: f32, size: f32, color: Color| {
-            let lw = measure(line, size * px).width;
-            chrome::shadow_text(line, inner.center().x - lw / 2.0, y + dy * px, size * px, color);
-        };
-        centred(tr("RAZDOR modder"), 0.0, 20.0, chrome::GOLD);
-        centred("indicozy", 26.0, 22.0, WHITE);
-        centred(tr("Thanks to the players"), THANKS_HEAD_DY, 20.0, chrome::GOLD);
-        for (i, name) in THANKS.iter().enumerate() {
-            centred(name, THANKS_DY + i as f32 * 22.0, 18.0, WHITE);
-        }
-        picture(c.first_row, c.letters.height(), c.first_row + OWN_CREDITS_H);
+        picture(0.0, c.letters.height(), 0.0);
     }
+    thanks_column(page);
     chrome::silver_frame(inner, 1.0);
     closed || key(KeyCode::Escape) || key(KeyCode::Enter) || (over_ok && clicked()) || (clicked() && inner.contains(crate::ui::widgets::pointer().into()))
 }
