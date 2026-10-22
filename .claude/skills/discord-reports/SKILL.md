@@ -48,7 +48,9 @@ Deciding parity needs the original: `parity-check` skill (specs, Ghidra) — nev
 Layout (`<backlog>` is the path in `CLAUDE.local.md`):
 
 - `<backlog>/INDEX.md`: one table row per report, newest first:
-  `| id | date | reporters | title | kind | status | fixed in | commit | test |`.
+  `| id | date | reporters | title | kind | status | priority | fixed in | commit | test |`.
+  Priority is `low` for reports the owner set aside (all open ones as of 2026-10-22), `—`
+  otherwise; the report says why under **Priority**.
 - `<backlog>/<id>/report.md`, one per report, `<id>` the next free number from 1001 up (it
   doubles as the `reports_link_issue` number, clear of GitHub's issue numbers):
   - **Reporters**: Discord name and id of each.
@@ -81,7 +83,7 @@ Rules:
 ## 3a. Retrospective ("backlog", "retro")
 
 List from INDEX: everything open (not `released`/`verified` or closed: `as-original`, `declined`, `duplicate`, `cannot-reproduce`, `wontfix`) (open work,
-oldest first), then `regressed` ones. For every `fixed`/`released`/`verified` report check that its test
+oldest first, `low` priority last), then `regressed` ones. For every `fixed`/`released`/`verified` report check that its test
 still exists (`grep -rn <test name> src/`) and passes (`cargo test --release <test name>`); a
 report whose test is gone or failing is flagged. Give the owner the counts by status and the
 flagged list.
