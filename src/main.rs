@@ -181,6 +181,7 @@ async fn main() {
         if is_quit_requested() || app.quit || quit_after.is_some_and(|n| frames >= n) {
             exit_now(&mut app);
         }
+        ui::widgets::sync_keyboard();
         next_frame().await;
         if frames == 1 {
             razdor::diag::step("first frame shown");

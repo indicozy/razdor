@@ -1090,6 +1090,39 @@ pub fn clear_focus() {
     FOCUS.with(|f| *f.borrow_mut() = None);
 }
 
+thread_local! {
+    /// A text field drew itself active this frame ([`want_keyboard`]).
+    static KEYBOARD_WANTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The on-screen keyboard as last asked for ([`sync_keyboard`]).
+    static KEYBOARD_SHOWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// A text field is active this frame: the on-screen keyboard should show ([`sync_keyboard`]).
+fn want_keyboard() {
+    KEYBOARD_WANTED.with(|k| k.set(true));
+}
+
+/// Shows or hides the on-screen keyboard (Android; the desktop has none).
+#[cfg(target_os = "android")]
+fn set_keyboard(show: bool) {
+    macroquad::miniquad::window::show_keyboard(show);
+}
+
+#[cfg(not(target_os = "android"))]
+fn set_keyboard(_show: bool) {}
+
+/// Once a frame, at its end: the on-screen keyboard follows the text fields. It shows while a
+/// field is active and hides when none is. A tap in an active field shows it again, since the
+/// player may have dismissed it with Back.
+pub fn sync_keyboard() {
+    let wanted = KEYBOARD_WANTED.with(|k| k.replace(false));
+    let shown = KEYBOARD_SHOWN.with(|k| k.get());
+    if wanted != shown || (wanted && is_mouse_button_pressed(MouseButton::Left)) {
+        KEYBOARD_SHOWN.with(|k| k.set(wanted));
+        set_keyboard(wanted);
+    }
+}
+
 /// The field of `key` ([`field_id`]) has the keyboard.
 pub fn has_focus(key: &str) -> bool {
     focused(field_id(key))
@@ -1317,6 +1350,9 @@ fn edit_mouse(id: u64, ed: &mut TextEdit, s: &str, hit: Rect, at: impl Fn(f32, f
 /// `r` places the caret and a drag selects ([`edit_mouse`]).
 #[allow(clippy::too_many_arguments)]
 pub fn edit_line(id: u64, s: &str, ed: &mut TextEdit, active: bool, mouse: bool, r: Rect, y: f32, look: LineLook) {
+    if active {
+        want_keyboard();
+    }
     ed.fit(s);
     let size = look.size;
     let xs = text_edit::caret_xs(s, |c| measure(c.encode_utf8(&mut [0; 4]), size).width);
@@ -1353,6 +1389,9 @@ pub fn edit_line(id: u64, s: &str, ed: &mut TextEdit, active: bool, mouse: bool,
 /// mouse placing the caret and selecting ([`edit_mouse`]).
 #[allow(clippy::too_many_arguments)]
 pub fn edit_rows(id: u64, s: &str, ed: &mut TextEdit, active: bool, r: Rect, size: f32, pitch: f32, color: Color) {
+    if active {
+        want_keyboard();
+    }
     ed.fit(s);
     let advance = |c: char| measure(c.encode_utf8(&mut [0; 4]), size).width;
     let rows = text_edit::wrap_rows(s, r.w, advance);
