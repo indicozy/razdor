@@ -1,0 +1,2 @@
+# cargo-quad-apk: the Java inject into miniquad's MainActivity (the volume keys; see the file).
+main_activity_inject = "android/MainActivityInject.java"
