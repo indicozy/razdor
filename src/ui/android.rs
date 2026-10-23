@@ -212,3 +212,127 @@ pub fn ask_once() {
     }
 }
 
+/// The margin the rounded corners and the bars keep at least, in dp: the corners of a phone's
+/// screen are not reported by every system, so the interface keeps this much from each edge.
+const CORNER_DP: f32 = 24.0;
+
+/// `Resources.getDisplayMetrics().density` (2.0 when it cannot be read).
+unsafe fn density(env: *mut sys::JNIEnv) -> f32 {
+    let get = method(env, activity_class(env).obj, "getResources", "()Landroid/content/res/Resources;", false);
+    if get.is_null() || cleared(env) {
+        return 2.0;
+    }
+    let res = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, ACTIVITY, get));
+    if res.obj.is_null() || cleared(env) {
+        return 2.0;
+    }
+    let res_cls = Local::new(env, ((**env).GetObjectClass.unwrap())(env, res.obj));
+    let metrics_m = method(env, res_cls.obj, "getDisplayMetrics", "()Landroid/util/DisplayMetrics;", false);
+    if metrics_m.is_null() || cleared(env) {
+        return 2.0;
+    }
+    let metrics = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, res.obj, metrics_m));
+    if metrics.obj.is_null() || cleared(env) {
+        return 2.0;
+    }
+    let metrics_cls = Local::new(env, ((**env).GetObjectClass.unwrap())(env, metrics.obj));
+    let name = CString::new("density").unwrap();
+    let sig = CString::new("F").unwrap();
+    let field = ((**env).GetFieldID.unwrap())(env, metrics_cls.obj, name.as_ptr(), sig.as_ptr());
+    if field.is_null() || cleared(env) {
+        return 2.0;
+    }
+    let value = ((**env).GetFloatField.unwrap())(env, metrics.obj, field);
+    if cleared(env) || value <= 0.0 { 2.0 } else { value }
+}
+
+/// The system bars and the display cutout of the activity's window, in screen pixels (left,
+/// top, right, bottom): `getRootWindowInsets()` on the decor view, then `getInsets` with the
+/// system bars and the cutout on API 30 and later, the system window insets before that. None
+/// while the window has no insets yet (before its first layout).
+unsafe fn system_insets(env: *mut sys::JNIEnv) -> Option<[i32; 4]> {
+    let get_window = method(env, activity_class(env).obj, "getWindow", "()Landroid/view/Window;", false);
+    if get_window.is_null() || cleared(env) {
+        return None;
+    }
+    let window = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, ACTIVITY, get_window));
+    if window.obj.is_null() || cleared(env) {
+        return None;
+    }
+    let window_cls = Local::new(env, ((**env).GetObjectClass.unwrap())(env, window.obj));
+    let get_decor = method(env, window_cls.obj, "getDecorView", "()Landroid/view/View;", false);
+    if get_decor.is_null() || cleared(env) {
+        return None;
+    }
+    let decor = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, window.obj, get_decor));
+    if decor.obj.is_null() || cleared(env) {
+        return None;
+    }
+    let decor_cls = Local::new(env, ((**env).GetObjectClass.unwrap())(env, decor.obj));
+    let root = method(env, decor_cls.obj, "getRootWindowInsets", "()Landroid/view/WindowInsets;", false);
+    if root.is_null() || cleared(env) {
+        return None;
+    }
+    let insets = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, decor.obj, root));
+    if insets.obj.is_null() || cleared(env) {
+        return None;
+    }
+    let insets_cls = Local::new(env, ((**env).GetObjectClass.unwrap())(env, insets.obj));
+    if sdk_int(env) >= 30 {
+        let type_cls = class(env, "android/view/WindowInsets$Type");
+        let bars_m = method(env, type_cls.obj, "systemBars", "()I", true);
+        let cutout_m = method(env, type_cls.obj, "displayCutout", "()I", true);
+        if bars_m.is_null() || cutout_m.is_null() || cleared(env) {
+            return None;
+        }
+        let bars = ((**env).CallStaticIntMethod.unwrap())(env, type_cls.obj, bars_m);
+        let cutout = ((**env).CallStaticIntMethod.unwrap())(env, type_cls.obj, cutout_m);
+        let get_insets = method(env, insets_cls.obj, "getInsets", "(I)Landroid/graphics/Insets;", false);
+        if get_insets.is_null() || cleared(env) {
+            return None;
+        }
+        let rect = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, insets.obj, get_insets, bars | cutout));
+        if rect.obj.is_null() || cleared(env) {
+            return None;
+        }
+        let rect_cls = Local::new(env, ((**env).GetObjectClass.unwrap())(env, rect.obj));
+        let field = |name: &str| -> i32 {
+            let name = CString::new(name).unwrap();
+            let sig = CString::new("I").unwrap();
+            let id = ((**env).GetFieldID.unwrap())(env, rect_cls.obj, name.as_ptr(), sig.as_ptr());
+            if id.is_null() || cleared(env) {
+                return 0;
+            }
+            ((**env).GetIntField.unwrap())(env, rect.obj, id)
+        };
+        Some([field("left"), field("top"), field("right"), field("bottom")])
+    } else {
+        let int_of = |name: &str| -> i32 {
+            let m = method(env, insets_cls.obj, name, "()I", false);
+            if m.is_null() || cleared(env) {
+                return 0;
+            }
+            let v = ((**env).CallIntMethod.unwrap())(env, insets.obj, m);
+            if cleared(env) { 0 } else { v }
+        };
+        Some([
+            int_of("getSystemWindowInsetLeft"),
+            int_of("getSystemWindowInsetTop"),
+            int_of("getSystemWindowInsetRight"),
+            int_of("getSystemWindowInsetBottom"),
+        ])
+    }
+}
+
+/// The phone's safe margins in screen pixels (left, top, right, bottom): the system's insets,
+/// never less than [`CORNER_DP`] from each edge. None when the window has no insets yet.
+pub fn read_safe_insets() -> Option<(f32, f32, f32, f32)> {
+    // SAFETY: the activity exists once the window is open (the UI runs after it).
+    unsafe {
+        let env = attach_jni_env();
+        let [l, t, r, b] = system_insets(env)?;
+        let corner = (CORNER_DP * density(env)).round();
+        Some(razdor::platform::safe_margins((l as f32, t as f32, r as f32, b as f32), corner))
+    }
+}
+

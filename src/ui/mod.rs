@@ -717,9 +717,9 @@ impl App {
         let label = format!("FPS {shown}");
         let size = (14.0 * k).round();
         let w = widgets::measure(&label, size).width;
-        // Phones (Android, iOS): the rounded corner covers the top right, so the label moves inward.
-        let (inset_x, inset_y) = if razdor::platform::MOBILE { (48.0 * k, 16.0 * k) } else { (0.0, 0.0) };
-        chrome::shadow_text(&label, macroquad::prelude::screen_width() - w - 8.0 * k - inset_x, 8.0 * k + inset_y + size, size, chrome::GOLD);
+        // Inside the safe area (zeros on desktop): the rounded corner and the cutout stay clear.
+        let (_, top, right, _) = razdor::platform::safe_insets();
+        chrome::shadow_text(&label, macroquad::prelude::screen_width() - right - w - 8.0 * k, top + 8.0 * k + size, size, chrome::GOLD);
     }
 
     /// The play log (`diag::play`): the screen when it changes and every new message line.
@@ -815,6 +815,8 @@ impl App {
     }
 
     pub fn frame(&mut self) {
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        mobile::refresh_safe_insets();
         #[cfg(any(target_os = "android", target_os = "ios"))]
         self.mobile_install_poll();
         if matches!(self.screen, Screen::Editor) {

@@ -97,7 +97,30 @@ injects `android/MainActivityInject.java`: the volume keys change the media volu
 API 30+ its `RESIZING_LAYOUT_ON_APPLY_WINDOW_INSETS` section pads by the system bars only, so the
 keyboard floats over the full-size game instead of squashing it. On mobile, `widgets::draw_keyboard_strip`
 draws the line being typed in a dark strip across the top (the keyboard may cover the field); iOS
-needs the strip too, since UIKit does not resize the view. The FPS counter sits further in from the rounded corner.
+needs the strip too, since UIKit does not resize the view.
+
+Safe area (a player's report, 0.9.3: text under the rounded corners and the cutout). `platform::safe_insets()`
+returns the margins (left, top, right, bottom) in screen pixels, zeros on desktop; `platform::set_safe_insets`
+stores them. On Android `ui::android::read_safe_insets` reads the decor view's `getRootWindowInsets()`:
+`getInsets(systemBars | displayCutout)` on API 30 and later, the system window insets before that, and each
+side is at least 24 dp (`platform::safe_margins`: the rounded corners are not reported by every system).
+On iOS `platform::ios_safe_margins` gives 44 points at the top and bottom in portrait, at the sides in
+landscape. `mobile::refresh_safe_insets` (once a frame in `App::frame`) reads them when the screen turns and
+every 30 frames, since the insets settle after a turn; a turn the system has not laid out is read again on
+the next frame. The keyboard strip (`widgets::draw_keyboard_strip`), the active spells line on the map
+(`world_view`, the notes under the minimap) and the FPS counter (`App::draw_fps`) all sit inside it.
+
+Portrait (a phone taller than 4:3): the width sets the interface scale, so the 960×720 canvas is shorter
+than the screen. `chrome::centred_top` centres it vertically, only on screens narrower than 4:3 (a 4:3 or
+wider screen, the desktop's and the landscape phone's, gets 0 and is never moved). The title screens are
+placed from `chrome::canvas_top()`: the logo and the menu (`main_menu`), the scenario list and the new game
+and custom battle windows. The map and building windows are already centred over the view above the bottom
+bar (`window_layout::window`, `main_menu::map_window`, the saves and dialogs), so they are not moved again.
+The title background is covered, not stretched, on a portrait screen whose aspect is more than 20% off the
+picture's (`chrome::cover_source`: the picture's centred crop); every other screen stretches it as before.
+The market and the sanctuary scenes of the UI regression check use town 8 of РК3-Столица (the start's
+castle has neither tab); the snapshot clears the start's due places, which otherwise make the building
+window step aside for the map (`world_view::building_flight`).
 
 Touchpad mode (`src/ui/touchpad.rs`; off by default, on only at `Settings::touchpad == Some(true)`
 on mobile, set by the options window's last checkbox there, which makes the window 28 px taller

@@ -1162,19 +1162,22 @@ pub fn draw_keyboard_strip() {
     });
     let k = super::chrome::k();
     let size = 17.0 * k;
-    let (w, h, pad) = (screen_width(), (size * 2.0).round(), 8.0 * k);
-    draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.8));
+    // The strip sits inside the safe area: away from the rounded corners, the cutout and the bars.
+    let (left, top, right, _) = razdor::platform::safe_insets();
+    let (x0, y0) = (left, top);
+    let (w, h, pad) = (screen_width() - left - right, (size * 2.0).round(), 8.0 * k);
+    draw_rectangle(x0, y0, w, h, Color::new(0.0, 0.0, 0.0, 0.8));
     let advance = |c: char| measure(c.encode_utf8(&mut [0; 4]), size).width;
     let xs = text_edit::caret_xs(&line, advance);
     let room = w - 2.0 * pad;
     let first = text_edit::first_shown(&xs, caret, room);
     let n = xs.len() - 1;
     let last = (first..=n).rev().find(|&i| xs[i] - xs[first] <= room).unwrap_or(first);
-    let x_of = |i: usize| pad + xs[i] - xs[first];
+    let x_of = |i: usize| x0 + pad + xs[i] - xs[first];
     // The baseline that centres the text in the strip (as [`edit_line`] places a caret).
-    let y = h / 2.0 + size * 0.325;
+    let y = y0 + h / 2.0 + size * 0.325;
     let part: String = line.chars().skip(first).take(last - first).collect();
-    text(&part, pad, y, size, INK);
+    text(&part, x0 + pad, y, size, INK);
     if caret_on() && (first..=last).contains(&caret) {
         let cx = x_of(caret).round();
         draw_line(cx, y - size * 0.8, cx, y + size * 0.15, (size / 12.0).max(1.0), INK);

@@ -17,6 +17,37 @@ local! {
     static RECHECK: Cell<bool> = const { Cell::new(false) };
     /// The next time the not-found screen polls for the install (macroquad's clock).
     static NEXT_POLL: Cell<f64> = const { Cell::new(0.0) };
+    /// The screen size the safe area was last read for, and the frames since the last read.
+    static INSETS_SEEN: Cell<(f32, f32, u32)> = const { Cell::new((0.0, 0.0, 0)) };
+}
+
+/// Frames between two reads of the safe area: the system's insets settle a little after a turn,
+/// so they are read again now and then (a few JNI calls, twice a second at 60 fps).
+const INSETS_EVERY: u32 = 30;
+
+/// Reads the phone's safe area into `platform::safe_insets` when the screen turns, and every
+/// [`INSETS_EVERY`] frames. A turn the system has not laid out yet is read again on the next
+/// frame. Called on Android and iOS only (desktop keeps its margins at zero).
+pub fn refresh_safe_insets() {
+    use macroquad::window::{screen_height, screen_width};
+    let (w, h) = (screen_width(), screen_height());
+    let (seen_w, seen_h, frames) = INSETS_SEEN.with(|c| c.get());
+    let turned = (w, h) != (seen_w, seen_h);
+    if !turned && frames < INSETS_EVERY {
+        INSETS_SEEN.with(|c| c.set((seen_w, seen_h, frames + 1)));
+        return;
+    }
+    #[cfg(target_os = "android")]
+    let read = super::android::read_safe_insets();
+    #[cfg(target_os = "ios")]
+    let read = Some(razdor::platform::ios_safe_margins(h >= w, macroquad::window::screen_dpi_scale()));
+    if let Some(insets) = read {
+        razdor::platform::set_safe_insets(insets);
+        INSETS_SEEN.with(|c| c.set((w, h, 0)));
+    } else {
+        // Not laid out yet: the old size is kept, so a turn is read again on the next frame.
+        INSETS_SEEN.with(|c| c.set((seen_w, seen_h, 0)));
+    }
 }
 
 /// Whether Razdor may read the install's folder: Android's storage access; iOS has no

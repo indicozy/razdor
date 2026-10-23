@@ -2848,8 +2848,10 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
         })
         .map(|l| (l, MANA))
         .collect();
+    // Inside the safe area (zeros on desktop): the corner's and the cutout's margins.
+    let (inset_left, inset_top, _, _) = razdor::platform::safe_insets();
     for (i, (line, color)) in notes.iter().enumerate() {
-        super::chrome::shadow_text(line, 10.0, notes_top + 22.0 + i as f32 * 18.0, 16.0, *color);
+        super::chrome::shadow_text(line, 10.0 + inset_left, inset_top + notes_top + 22.0 + i as f32 * 18.0, 16.0, *color);
     }
     // Waiting: the three buttons over the message box (shown while the pointer is on it, the
     // panel's centre; interface.md §6) and keys 1 / 4. A click elsewhere on the panel does
