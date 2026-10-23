@@ -14,6 +14,21 @@
 
 ## 0.9.4 — 2026-10-23
 
+Коммит `afd7d61d` (тег `v0.9.4`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+679b16d789910e006b5e5cd970d7a960697a7007a4a12d3c28ce2760781d64d5  razdor
+d144ec12e9d000e27384ebc82307037b173fd0c4c83a2427daddc0a1dfd6f598  Razdor.exe
+23feed9af6923abd19c4effd597c7030f9a2c3c293bafb5ec0ffb8917d82ed65  razdor-macos
+88fc061060e7b006fc7586721207bb796ccab9807880100206990c1fa3f90e03  razdor-translate
+9517e046bb6ebb35bf7b6599e27f925e3f993bb6847daaf1e26a97bb25ef09c0  Razdor-translate.exe
+096b89c791eec9810f3ca1c0a4f194dcad57ac244f4d46513b4c7da20ba6796e  razdor-translate-macos
+a6069b20e5c7a096a74bfbe796c76b6f85ebb53d4df024e815859d4e6e7ce505  razdor.apk
+8fb80d5d00e7494e3d865a893f99446f233b22f49d3d2fcfe5a94f7c8ef9144a  razdor.ipa
+```
+
 ### Добавлено
 
 - Android: настройка ориентации экрана: авто, альбомная или книжная.
