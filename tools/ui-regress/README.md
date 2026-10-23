@@ -37,6 +37,12 @@ The output folder holds:
 
 The exit code is 1 when a case changed or crashed.
 
+## Phone layouts
+
+The `phone-` cases render the main screens at an 18:9 phone's size in portrait and landscape.
+Run only them with `--only phone-`. The desktop build renders them (the scale fits the width
+and height), so phone-only drawing (the safe area, the keyboard strip) is not in these shots.
+
 ## Review and accept
 
 Open the diffs of the changed cases and check each change is the one you meant. Then:

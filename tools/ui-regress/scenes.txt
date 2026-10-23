@@ -56,3 +56,33 @@ building-barracks-1920 | building:РК1-Начало пути:0:barracks | 1920x
 battle-rk1-1920 | battle:РК1-Начало пути:0 | 1920x1080 |
 load-manual-1920 | load | 1920x1080 |
 options-1920 | options | 1920x1080 |
+
+# Phones (18:9): portrait 1080x2160 and landscape 2160x1080
+phone-title-portrait | title | 1080x2160 |
+phone-title-landscape | title | 2160x1080 |
+phone-options-portrait | options | 1080x2160 |
+phone-options-landscape | options | 2160x1080 |
+phone-scenarios-portrait | scenarios:РК1-Начало пути | 1080x2160 |
+phone-scenarios-landscape | scenarios:РК1-Начало пути | 2160x1080 |
+phone-map-portrait | map:РК1-Начало пути | 1080x2160 |
+phone-map-landscape | map:РК1-Начало пути | 2160x1080 |
+phone-minimap-portrait | minimap:РК1-Начало пути | 1080x2160 |
+phone-minimap-landscape | minimap:РК1-Начало пути | 2160x1080 |
+phone-settings-portrait | settings:РК1-Начало пути | 1080x2160 |
+phone-settings-landscape | settings:РК1-Начало пути | 2160x1080 |
+phone-save-portrait | save:РК1-Начало пути | 1080x2160 |
+phone-save-landscape | save:РК1-Начало пути | 2160x1080 |
+phone-victory-portrait | victory:РК1-Начало пути | 1080x2160 |
+phone-victory-landscape | victory:РК1-Начало пути | 2160x1080 |
+phone-barracks-portrait | building:РК1-Начало пути:0:barracks | 1080x2160 |
+phone-barracks-landscape | building:РК1-Начало пути:0:barracks | 2160x1080 |
+phone-market-portrait | building:РК3-Столица:0:market | 1080x2160 |
+phone-market-landscape | building:РК3-Столица:0:market | 2160x1080 |
+phone-army-portrait | army:РК1-Начало пути | 1080x2160 |
+phone-army-landscape | army:РК1-Начало пути | 2160x1080 |
+phone-hero-portrait | hero:РК1-Начало пути:0 | 1080x2160 |
+phone-hero-landscape | hero:РК1-Начало пути:0 | 2160x1080 |
+phone-spells-portrait | spells:РК1-Начало пути | 1080x2160 |
+phone-spells-landscape | spells:РК1-Начало пути | 2160x1080 |
+phone-battle-portrait | battle:РК1-Начало пути:0 | 1080x2160 |
+phone-battle-landscape | battle:РК1-Начало пути:0 | 2160x1080 |
