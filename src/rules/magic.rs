@@ -411,9 +411,9 @@ impl Game {
     }
 
     /// Casts `spell` of the book on `target`: lets [`CastCost::minutes`] of game time pass
-    /// (armies move, events run, the noon waits; an event that fires ends the wait at once;
-    /// an enemy reaching the hero loses the spell), then the spell lands
-    /// ([`Game::end_reading`]'s rules).
+    /// (armies move, events run, the noon waits; an event that opens a window ends the wait at
+    /// once, 0x4ae4e9–0x4ae4f0, while a silent one does not; an enemy reaching the hero loses
+    /// the spell), then the spell lands ([`Game::end_reading`]'s rules).
     pub fn cast(&mut self, spell: u32, target: CastTarget) -> Result<Cast, CastError> {
         self.check_cast(spell, target)?;
         let cost = self.cast_cost(self.spell(spell).ok_or(CastError::NoSuchSpell)?);
@@ -426,6 +426,7 @@ impl Game {
             left -= slice;
             let from = events.len();
             self.pass_time(slice, &mut events);
+            // The casting step's wait ends on an event's window only (0x4ae4e9–0x4ae4f0).
             if self.foe.is_some() || events[from..].iter().any(super::game::fires) {
                 break;
             }
@@ -441,7 +442,8 @@ impl Game {
 
     /// Starts reading `spell` on the map, as the UI casts: the reading plays in real time,
     /// half an hour of game time per wait tick like a rest ([`Game::tick`]), and the spell
-    /// lands at its end, or as soon as an event fires, as an [`Event::SpellCast`]; an enemy
+    /// lands at its end, or as soon as an event opens a window (0x4ae4e9), as an
+    /// [`Event::SpellCast`]; an enemy
     /// catching the hero meanwhile loses it, and anything that stops the hero (a walk, a
     /// rest, Space) drops it with no mana spent. A spell with no reading time lands at once
     /// (`Some`).

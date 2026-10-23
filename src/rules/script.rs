@@ -231,7 +231,7 @@ impl Game {
         // goes on, and when it runs out it returns 0 (0x4a7b80 clears the silent-run flag
         // 0x674966 on each event that does not pass), so the battle opens all the same.
         // РК4's «- Колдуны мертвы» fires silently on every scan once the warlocks are beaten.
-        let fired = after.iter().any(|e| matches!(e, Event::Script(EventOutcome::Fired { message: true, .. } | EventOutcome::Question(_))));
+        let fired = after.iter().any(super::game::fires);
         let pass = self.friends_let_pass;
         let fights = |a: &Army| if on_step { a.attitude <= 0 || !pass } else { a.hostile() };
         match e {
@@ -1577,6 +1577,64 @@ mod tests {
         assert_eq!(fired(&cast.events), vec![1]);
         assert_eq!(cast.outcome, CastOutcome::Done { hits: 10, killed: 0, destroyed: false });
         assert_eq!((g.clock.total_minutes() - t0, g.mana, g.squad[1].hp), (60.0, 90, 15));
+    }
+
+    #[test]
+    fn a_silent_event_during_a_cast_leaves_the_reading_to_its_end() {
+        // 0x4abfbc, 0x4a7b80: a silent event (no message, no window) fires and finishes inside
+        // the scan, which goes on and returns 0; only a window ends the casting wait
+        // (0x4ae4e9–0x4ae4f0). So the 4 h spell lands after all of them, not after 1 h.
+        use crate::rules::content::{testkit as ck, Content, SpellDef};
+        use crate::rules::magic::{CastOutcome, CastTarget};
+        let mut e = ev(EventKind::Global);
+        e.start_time = 624_354_300 + 60;
+        e.message = String::new();
+        let s = world(vec![e]);
+        let base = content();
+        let heal = SpellDef { time_cast: Some(4), cost_mana: 10, delta_fixed_hits: Some(10), ..ck::spell(1, 0) };
+        let c = Content::new(base.units.clone(), base.items.clone(), vec![heal], base.options.clone(), base.formation);
+        let mut g = Game::from_scenario(Arc::new(c), &s, HeroClass::Knight);
+        read(&mut g);
+        (g.mana, g.spells) = (100, vec![1]);
+        g.squad[1].hp = 5;
+        let t0 = g.clock.total_minutes();
+        let cast = g.cast(1, CastTarget::Own).unwrap();
+        assert_eq!(fired(&cast.events), vec![1]);
+        assert_eq!(cast.outcome, CastOutcome::Done { hits: 10, killed: 0, destroyed: false });
+        assert_eq!((g.clock.total_minutes() - t0, g.mana, g.squad[1].hp), (240.0, 90, 15));
+    }
+
+    #[test]
+    fn a_silent_event_during_a_real_time_cast_leaves_the_reading_to_its_end() {
+        // The same through the UI's path (`begin_cast` then `tick`, as the wait ticks play):
+        // the silent event fires on a tick and the reading goes on to its 4 h end (0x4ae4e9).
+        use crate::rules::content::{testkit as ck, Content, SpellDef};
+        use crate::rules::magic::{CastOutcome, CastTarget};
+        let mut e = ev(EventKind::Global);
+        e.start_time = 624_354_300 + 60;
+        e.message = String::new();
+        let s = world(vec![e]);
+        let base = content();
+        let heal = SpellDef { time_cast: Some(4), cost_mana: 10, delta_fixed_hits: Some(10), ..ck::spell(1, 0) };
+        let c = Content::new(base.units.clone(), base.items.clone(), vec![heal], base.options.clone(), base.formation);
+        let mut g = Game::from_scenario(Arc::new(c), &s, HeroClass::Knight);
+        read(&mut g);
+        (g.mana, g.spells) = (100, vec![1]);
+        g.squad[1].hp = 5;
+        let t0 = g.clock.total_minutes();
+        assert_eq!(g.begin_cast(1, CastTarget::Own), Ok(None));
+        let mut events = Vec::new();
+        for _ in 0..10_000 {
+            events.extend(g.tick(0.05));
+            if g.reading().is_none() {
+                break;
+            }
+        }
+        assert!(g.reading().is_none(), "the reading ends");
+        assert_eq!(fired(&events), vec![1], "the silent event fired during the reading");
+        let done = CastOutcome::Done { hits: 10, killed: 0, destroyed: false };
+        assert!(events.contains(&Event::SpellCast { spell: 1, target: CastTarget::Own, outcome: done }), "{events:?}");
+        assert_eq!((g.clock.total_minutes() - t0, g.mana, g.squad[1].hp), (240.0, 90, 15));
     }
 
     #[test]
