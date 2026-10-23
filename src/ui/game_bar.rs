@@ -370,30 +370,22 @@ pub fn draw_with_time(game: &Game, look: impl Fn(BarButton) -> Look, time_button
     let bar = chrome::bar_height();
     let y = h - bar;
     let row = (60.0 * k).round();
-    // The top row: the original's ribbon (`Win2a`), its ends kept, the wooden middle stretched
-    // when the screen is no wider than the ribbon's natural width. Wider, the ribbon keeps its
-    // natural width, centred, with black either side (Razdor's layout, the owner's request,
-    // 2026-10-23; the original's panel is 1024 wide and has no wide-screen case).
-    let (x0, span) = ribbon_span(w, natural_width(row));
-    if x0 > 0.0 {
-        draw_rectangle(0.0, y, x0, row, BLACK);
-        draw_rectangle(x0 + span, y, w - x0 - span, row, BLACK);
-    }
+    // The top row: the original's ribbon (`Win2a`), its ends kept, the wooden middle stretched.
     match chrome::win("Win2a") {
         Some(t) => {
             let s = row / t.height();
             let end = 370.0;
             let ew = end * s;
-            chrome::tex_src(&t, Rect::new(0.0, 0.0, end, t.height()), Rect::new(x0, y, ew, row), WHITE);
-            chrome::tex_src(&t, Rect::new(t.width() - end, 0.0, end, t.height()), Rect::new(x0 + span - ew, y, ew, row), WHITE);
-            chrome::tex_src(&t, Rect::new(end, 0.0, t.width() - 2.0 * end, t.height()), Rect::new(x0 + ew, y, span - 2.0 * ew, row), WHITE);
+            chrome::tex_src(&t, Rect::new(0.0, 0.0, end, t.height()), Rect::new(0.0, y, ew, row), WHITE);
+            chrome::tex_src(&t, Rect::new(t.width() - end, 0.0, end, t.height()), Rect::new(w - ew, y, ew, row), WHITE);
+            chrome::tex_src(&t, Rect::new(end, 0.0, t.width() - 2.0 * end, t.height()), Rect::new(ew, y, w - 2.0 * ew, row), WHITE);
         }
         None => {
-            chrome::surface(Rect::new(x0, y, span, row), chrome::Skin::Marble);
+            chrome::surface(Rect::new(0.0, y, w, row), chrome::Skin::Marble);
             let ew = 370.0 * row / 64.0;
-            draw_rectangle(x0 + ew, y + 3.0, span - 2.0 * ew, row - 6.0, Color::new(0.42, 0.22, 0.10, 1.0));
-            draw_rectangle_lines(x0 + ew, y + 3.0, span - 2.0 * ew, row - 6.0, 2.0, chrome::SILVER);
-            draw_rectangle_lines(x0, y, span, row, 2.0, chrome::SILVER);
+            draw_rectangle(ew, y + 3.0, w - 2.0 * ew, row - 6.0, Color::new(0.42, 0.22, 0.10, 1.0));
+            draw_rectangle_lines(ew, y + 3.0, w - 2.0 * ew, row - 6.0, 2.0, chrome::SILVER);
+            draw_rectangle_lines(0.0, y, w, row, 2.0, chrome::SILVER);
         }
     }
     chrome::silver_line(vec2(0.0, y), vec2(w, y), k.max(1.0));
@@ -412,7 +404,7 @@ pub fn draw_with_time(game: &Game, look: impl Fn(BarButton) -> Look, time_button
     }
     resources(game, sy, sh);
 
-    // The time panel: the ribbon's middle (the same span as the top row).
+    // The time panel.
     let ew = 370.0 * row / 64.0;
     let cx = w / 2.0;
     let size = super::typography::Role::Bold.size((13.0 * k).round());
@@ -427,7 +419,7 @@ pub fn draw_with_time(game: &Game, look: impl Fn(BarButton) -> Look, time_button
         lines.push((tr("waiting…").to_string(), GOLD));
     }
     // Russian dates run longer: the lines shrink to the ribbon's middle.
-    let room = (span - 2.0 * ew - 16.0 * k).max(100.0);
+    let room = (w - 2.0 * ew - 16.0 * k).max(100.0);
     let size = super::typography::Role::Bold.with(|| lines.iter().map(|(l, _)| fit_size(l, room, size)).fold(size, f32::min));
     let lh = super::typography::Role::Bold.line_height(size * 1.25);
     let top = y + row / 2.0 - lh * (lines.len() as f32 - 1.0) / 2.0 + size * 0.36;
@@ -459,7 +451,7 @@ pub fn draw_with_time(game: &Game, look: impl Fn(BarButton) -> Look, time_button
     let mut hovered_hint = None;
     let bh = |b: BarButton| if b.small() { 44.0 } else { 54.0 } * row / 64.0;
     let bw = |b: BarButton| if b.small() { 80.0 } else { 98.0 } * row / 64.0;
-    let mut x = x0 + 8.0 * k;
+    let mut x = 8.0 * k;
     for b in BarButton::LEFT {
         let r = Rect::new(x, y + (row - bh(b)) / 2.0, bw(b), bh(b));
         let (clicked, hint) = oval(b, r, look(b));
@@ -471,7 +463,7 @@ pub fn draw_with_time(game: &Game, look: impl Fn(BarButton) -> Look, time_button
         // ovals overlap and pushed them away from the ornamental backing's inner edge.
         x += bw(b);
     }
-    let mut x = x0 + span - 8.0 * k;
+    let mut x = w - 8.0 * k;
     for b in BarButton::RIGHT.iter().rev().copied() {
         x -= bw(b);
         let r = Rect::new(x, y + (row - bh(b)) / 2.0, bw(b), bh(b));
@@ -488,34 +480,11 @@ pub fn draw_with_time(game: &Game, look: impl Fn(BarButton) -> Look, time_button
     (pressed, timed)
 }
 
-/// The time panel in the middle of the bar (clicks on it do not reach the map). It is the
-/// ribbon's middle, the same span as the top row (see [`ribbon_span`]).
+/// The time panel in the middle of the bar (clicks on it do not reach the map).
 pub fn time_panel() -> Rect {
     let row = (60.0 * chrome::k()).round();
     let ew = 370.0 * row / 64.0;
-    let (x0, span) = ribbon_span(screen_width(), natural_width(row));
-    Rect::new(x0 + ew, screen_height() - chrome::bar_height(), span - 2.0 * ew, row)
-}
-
-/// The ribbon's natural width for a top row of `row` px: the texture's own width at its
-/// scale (the original's 1024-wide panel), or the same 1024 by the fallback's 64-px row.
-fn natural_width(row: f32) -> f32 {
-    match chrome::win("Win2a") {
-        Some(t) => t.width() * row / t.height(),
-        None => 1024.0 * row / 64.0,
-    }
-}
-
-/// Where the top row's ribbon sits on a screen `w` wide, as `(x0, span)`. Wider than the
-/// natural width, it is centred at its natural width (Razdor's layout, the owner's request,
-/// 2026-10-23: the original's panel has no wide-screen case). No wider, the ribbon takes the
-/// whole screen and stretches as before: `(0, w)`.
-pub fn ribbon_span(w: f32, natural: f32) -> (f32, f32) {
-    if w <= natural {
-        (0.0, w)
-    } else {
-        ((w - natural) / 2.0, natural)
-    }
+    Rect::new(ew, screen_height() - chrome::bar_height(), screen_width() - 2.0 * ew, row)
 }
 
 #[cfg(test)]
@@ -569,18 +538,6 @@ mod tests {
             assert_eq!(at(r.x + r.w / 2.0, r.y + r.h / 2.0, false), None);
             assert_eq!(at(r.x + r.w / 2.0, r.y + r.h / 2.0, true), Some(b));
         }
-    }
-
-    #[test]
-    fn the_ribbon_span_is_the_screen_when_no_wider_than_the_ribbon() {
-        assert_eq!(ribbon_span(1024.0, 1024.0), (0.0, 1024.0));
-        assert_eq!(ribbon_span(800.0, 1024.0), (0.0, 800.0));
-    }
-
-    #[test]
-    fn the_ribbon_span_is_centred_when_wider() {
-        assert_eq!(ribbon_span(1920.0, 1024.0), (448.0, 1024.0));
-        assert_eq!(ribbon_span(2560.0, 1024.0), (768.0, 1024.0));
     }
 
     #[test]
