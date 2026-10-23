@@ -1238,17 +1238,32 @@ pub fn under_message() {
     }
 }
 
-/// Turns what is drawn so far in `r` grey and a little darker. Without the shader, a dark
-/// veil.
+/// Whether the grey-out takes its colours from the screen copy (`_ScreenTexture`). Phones
+/// cannot: macroquad fills that copy with `glCopyTexImage2D` from the default framebuffer,
+/// which miniquad makes without alpha on Android (EGL_ALPHA_SIZE 0); OpenGL ES rejects an
+/// RGBA copy from a framebuffer with no alpha (GL_INVALID_OPERATION), so the copy stays
+/// empty and the shader paints black where the window was. Desktop GL allows the copy.
+/// Phones take the dark veil instead. The alpha bits are not asked for: an alpha surface can
+/// make the app see-through on Android.
+pub fn grey_by_screen_texture() -> bool {
+    !razdor::platform::MOBILE
+}
+
+/// Turns what is drawn so far in `r` grey and a little darker. Without the shader (or on a
+/// phone, see [`grey_by_screen_texture`]), a dark veil.
 pub fn grey_out(r: Rect) {
-    let material = GREY.with(|m| {
-        m.get_or_init(|| {
-            load_material(ShaderSource::Glsl { vertex: GREY_VERTEX, fragment: GREY_FRAGMENT }, MaterialParams::default())
-                .map_err(|e| razdor::diag!("grey material: {e}"))
-                .ok()
+    let material = if grey_by_screen_texture() {
+        GREY.with(|m| {
+            m.get_or_init(|| {
+                load_material(ShaderSource::Glsl { vertex: GREY_VERTEX, fragment: GREY_FRAGMENT }, MaterialParams::default())
+                    .map_err(|e| razdor::diag!("grey material: {e}"))
+                    .ok()
+            })
+            .clone()
         })
-        .clone()
-    });
+    } else {
+        None
+    };
     match material {
         Some(m) => {
             gl_use_material(&m);
@@ -2601,6 +2616,13 @@ pub fn effect(rel: &str, c: Vec2, size: f32, t: f32, color: Color) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The grey-out reads the screen copy on desktop only: phones draw the veil (see
+    /// [`grey_by_screen_texture`]).
+    #[test]
+    fn the_grey_out_reads_the_screen_copy_on_desktop_only() {
+        assert_eq!(grey_by_screen_texture(), !cfg!(any(target_os = "android", target_os = "ios")));
+    }
 
     /// The outline's cut sits above a building's shadow plane and below its edges (12/15).
     #[test]
