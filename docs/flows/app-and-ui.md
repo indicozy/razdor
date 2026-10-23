@@ -58,14 +58,31 @@ opens the access page by itself once per run (`android::ask_once`) and has «В�
 is shown, `App::android_install_poll` (every 5 s once the permission is granted, and on the
 button) loads a newly found install with `Assets::adopt_install` and the `ui/mod.rs` helpers
 `dt_content_of` / `scenarios_of`, without a restart. Android has no self-update (`update::asset_name` is None) and
-no Discord link (it needs a browser opener): both are hidden there. Touch: miniquad simulates
-the left mouse button from a touch (`simulate_mouse_with_touch`), so a tap is a left click;
-there is no long-press right click. Gamepads are off (`--no-default-features --features audio`).
+no Discord link (it needs a browser opener): both are hidden there. Touch: without the touchpad
+mode miniquad simulates the left mouse button from a touch (`simulate_mouse_with_touch`), so a
+tap is a left click where the finger is; there is no long-press right click. Gamepads are off
+(`--no-default-features --features audio`).
 The on-screen keyboard follows the text fields: `edit_line` / `edit_rows` drawn active ask for it,
 and `widgets::sync_keyboard` (once a frame, before `next_frame`) shows or hides it with miniquad's
 `show_keyboard`. miniquad's `MainActivity` swallows every key, so `quad.toml` at the repo root
 injects `android/MainActivityInject.java`: the volume keys change the media volume there. The FPS
 counter sits further in from the rounded corner.
+
+Touchpad mode (`src/ui/touchpad.rs`; on by default on mobile, `Settings::touchpad`, the options
+window's last checkbox there, which makes the window 28 px taller on mobile): the screen is a
+laptop trackpad. `TouchMapper::step` is pure and turns the frame's touches (`TouchPoint`, from
+`macroquad::input::touches()`) into a `gamepad::Frame`: one finger slides the pointer (1.6 px per
+px, the distances scaled to the screen's height); a tap (down and up within 0.25 s, under 12 px
+of slide) clicks where the pointer is, pressed on the lift and released the next frame; a second
+tap within 0.3 s and 40 px of the first is held with the left button while its finger slides
+(a double click when it does not); two fingers tapped are a right click, two still for longer
+than 0.3 s hold the right button until one lifts; two sliding together scroll the map (the stick,
+`map_scroll`) or turn the wheel (a step per 40 px, the content follows the fingers). A third
+finger ends the gestures and lets a held button go. `input::begin_frame` runs it while the mode
+is on, with miniquad's simulated mouse off (`simulate_mouse_with_touch`, set only when it
+changes), and merges its frame with the pad's (`merge`): its pointer starts at the screen's
+centre and stays the pointer. `ui::cursor::draw` draws the pointer as a plain arrow, counting
+the touchpad as focus, as a phone has no system pointer. The mapper's tests cover each gesture.
 
 ## The frame
 

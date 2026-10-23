@@ -377,6 +377,7 @@ Map scroll speed = Скорость скроллинга карты
 Hero's walking speed = Скорость перемещения героя
 Do not load music and sounds (needs a restart) = Не загружать музыку и звуки (требует рестарта игры)
 Show FPS = Показывать FPS
+Touchpad mode (the screen moves a cursor) = Режим тачпада (экран двигает курсор)
 Turn off hints = Отключить всплывающие подсказки
 Automatically pursue the chosen army = Автоматически преследовать выбранную армию
 Automatically save the current game = Автоматически сохранять текущую игру

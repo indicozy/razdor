@@ -778,6 +778,7 @@ pub fn apply_options(audio: &super::audio::Settings) {
     chrome::set_option_override("OptValue8", audio.autosave.map(|on| if on { "1" } else { "0" }.to_string()));
     set_hints(!hints_off(audio));
     super::unit_drag::set_controls(audio.formation_controls);
+    super::touchpad::set_setting(audio.touchpad);
 }
 
 /// "Настройки звука, графики и геймплея", with what Razdor lets the player change: the
@@ -1156,9 +1157,12 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
         OPENED_WITH.with(|o| *o.borrow_mut() = Some(audio.clone()));
     }
     let title = own("Options", "Title", n_("Sound, graphics and gameplay settings"));
-    let (inner, closed) = if over_map { map_window(&title, 594.0, 500.0) } else { window(&title, 594.0, 500.0) };
+    // On a phone the touchpad mode's row (`ui::touchpad`) takes 28 more px under the checkboxes.
+    let touch_row = super::touchpad::MOBILE;
+    let h = if touch_row { 528.0 } else { 500.0 };
+    let (inner, closed) = if over_map { map_window(&title, 594.0, h) } else { window(&title, 594.0, h) };
     let k = chrome::k();
-    let outer = Rect::new(inner.x - 2.0 * k, inner.y - (26.0 * k).round() - 1.0, 594.0 * k, 500.0 * k);
+    let outer = Rect::new(inner.x - 2.0 * k, inner.y - (26.0 * k).round() - 1.0, 594.0 * k, h * k);
     // A window with 0x48d710's inner frames (the options window is c2953a, 634×556, 4d2f48).
     chrome::window_inner_frames(outer, chrome::opx());
     let row = |i: usize| Rect::new(inner.x + 10.0 * k, inner.y + 8.0 * k + i as f32 * 37.5 * k, inner.w - 20.0 * k, 30.0 * k);
@@ -1216,8 +1220,15 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
             }
         }
     }
+    // Razdor's touchpad mode (phones and tablets only), on unless the player turned it off.
+    if touch_row {
+        let on = audio.touchpad.unwrap_or(true);
+        if option_check(cx, cy(8), &own("Options", "RazdorTouchpad", n_("Touchpad mode (the screen moves a cursor)")), on, CHECK_INK) {
+            audio.touchpad = Some(!on);
+        }
+    }
     // Razdor's own settings, in a window of their own.
-    let button_y = outer.y + 458.0 * k;
+    let button_y = outer.y + (h - 42.0) * k;
     let xr = Rect::new(inner.x + 14.0 * k, button_y, 120.0 * k, 32.0 * k);
     if row_button(xr, tr("Advanced…")) {
         ADVANCED.with(|a| a.set(true));

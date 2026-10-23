@@ -8,6 +8,10 @@
 //! pointer is in use the system pointer is hidden and Razdor draws one there (`ui::cursor`),
 //! as the window's pointer cannot be moved. With no pad connected all of it is the mouse
 //! and keyboard unchanged.
+//!
+//! On a phone in the touchpad mode (`ui::touchpad`) the touches are the touchpad's: its pointer
+//! is the pointer from the start, and its clicks, wheel and scroll merge with the pad's. There
+//! miniquad's simulated mouse is off, so a touch is never a click of its own.
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -16,6 +20,7 @@ use macroquad::input as mq;
 use macroquad::prelude::{screen_height, screen_width, KeyCode, MouseButton};
 
 use super::gamepad::{self, Edge, Frame, Mapper};
+use super::touchpad::{self, Phase, TouchMapper, TouchPoint};
 
 #[derive(Default)]
 struct State {
@@ -28,6 +33,10 @@ struct State {
     mouse: Option<(f32, f32)>,
     /// The map screen asked for the right stick this frame and the last ([`map_scroll`]).
     map_claimed: (bool, bool),
+    touch: TouchMapper,
+    /// The touchpad mode was on at the last frame; the simulated mouse's state last set.
+    touch_on: bool,
+    sim: Option<bool>,
 }
 
 thread_local! {
@@ -42,16 +51,33 @@ pub fn begin_frame() {
     let screen = (screen_width(), screen_height());
     // Out of focus the pad lets everything go: it is read even then, by its own device.
     let pad = pad.filter(|_| super::cursor::has_focus()).unwrap_or_default();
+    let touchpad_on = touchpad::enabled();
+    let touches = if touchpad_on { touch_points() } else { Vec::new() };
     STATE.with(|s| {
         let s = &mut *s.borrow_mut();
+        // Phones: miniquad's simulated mouse (a touch as the left button) only without the touchpad.
+        if touchpad::MOBILE && s.sim != Some(!touchpad_on) {
+            mq::simulate_mouse_with_touch(!touchpad_on);
+            s.sim = Some(!touchpad_on);
+        }
         if s.mouse.is_some_and(|m| m != mouse) || mouse_used {
             s.active = false;
         }
         s.mouse = Some(mouse);
+        // The touchpad's pointer starts in the middle of the screen and stays the pointer.
+        if touchpad_on && !s.touch_on {
+            s.active = true;
+            s.at = (screen.0 / 2.0, screen.1 / 2.0);
+        } else if !touchpad_on && s.touch_on {
+            s.active = false;
+        }
+        s.touch_on = touchpad_on;
         let from = if s.active { s.at } else { mouse };
         let map_scrolls = std::mem::take(&mut s.map_claimed.0);
         s.map_claimed.1 = map_scrolls;
-        s.frame = s.mapper.step(&pad, crate::ui::clock::frame_dt(), from, screen, map_scrolls);
+        let dt = crate::ui::clock::frame_dt();
+        let pad_frame = s.mapper.step(&pad, dt, from, screen, map_scrolls);
+        s.frame = if touchpad_on { merge(s.touch.step(&touches, dt, from, screen, map_scrolls), pad_frame) } else { pad_frame };
         if let Some(at) = s.frame.pointer {
             s.active = true;
             s.at = at;
@@ -61,6 +87,42 @@ pub fn begin_frame() {
             s.at = (s.at.0.clamp(0.0, (screen.0 - 1.0).max(0.0)), s.at.1.clamp(0.0, (screen.1 - 1.0).max(0.0)));
         }
     });
+}
+
+/// This frame's touches, as the touchpad reads them.
+fn touch_points() -> Vec<TouchPoint> {
+    mq::touches()
+        .into_iter()
+        .map(|t| TouchPoint {
+            id: t.id,
+            x: t.position.x,
+            y: t.position.y,
+            phase: match t.phase {
+                mq::TouchPhase::Started => Phase::Started,
+                mq::TouchPhase::Stationary => Phase::Stationary,
+                mq::TouchPhase::Moved => Phase::Moved,
+                mq::TouchPhase::Ended => Phase::Ended,
+                mq::TouchPhase::Cancelled => Phase::Cancelled,
+            },
+        })
+        .collect()
+}
+
+/// The touchpad's frame and the pad's, as one: the pointer is the touchpad's when it moved,
+/// a button is held when either holds it, the wheel turns with both, and the map's scroll is
+/// the touchpad's while its fingers push.
+fn merge(touch: Frame, pad: Frame) -> Frame {
+    let either = |a: Edge, b: Edge| Edge { pressed: a.pressed || b.pressed, down: a.down || b.down, released: a.released || b.released };
+    let mut keys = pad.keys;
+    keys.extend(touch.keys);
+    Frame {
+        pointer: touch.pointer.or(pad.pointer),
+        left: either(touch.left, pad.left),
+        right: either(touch.right, pad.right),
+        wheel: touch.wheel + pad.wheel,
+        keys,
+        scroll: if touch.scroll != (0.0, 0.0) { touch.scroll } else { pad.scroll },
+    }
 }
 
 /// Where the pad's pointer is, while it is the pointer.
