@@ -6,6 +6,7 @@
 //! gold. Razdor's own extras, the map editor, the custom battle and the interface language,
 //! sit small in the bottom corners. Layout numbers are pixels of the 960×720 video, scaled by [`chrome::k`].
 
+use razdor::local;
 use crate::ui::input::{get_keys_pressed, is_mouse_button_down};
 use macroquad::prelude::*;
 
@@ -148,7 +149,7 @@ fn logo() {
     }
 }
 
-thread_local! {
+local! {
     /// The main menu item under the pointer at the last frame.
     static HOVERED: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
 }
@@ -319,8 +320,16 @@ fn hot_button(pointer: Vec2, n: usize) -> Option<usize> {
     (0..n).find(|&i| oval_rect(i).contains(pointer))
 }
 
-/// Draws the menu; returns what was picked.
-pub fn frame() -> Option<Pick> {
+/// The screen x of the leftmost button (its oval's left edge): the phones' not-found block sits
+/// to the left of it.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn left_edge() -> f32 {
+    (0..BUTTONS.len()).map(|i| oval_rect(i).x).fold(f32::MAX, f32::min)
+}
+
+/// Draws the menu; returns what was picked. `no_install`: the install was not found, so the
+/// phones' not-found block is drawn beside the buttons.
+pub fn frame(no_install: bool) -> Option<Pick> {
     backdrop();
     let mut pick = None;
     let hot = if input_blocked() { None } else { hot_button(crate::ui::widgets::pointer().into(), BUTTONS.len()) };
@@ -329,6 +338,7 @@ pub fn frame() -> Option<Pick> {
             pick = Some(*p);
         }
     }
+    super::screens::menu_not_found(no_install);
     let k = chrome::k();
     // Razdor's links, over the original's version and copyright lines.
     let y = screen_height() - 22.0 * k;
@@ -381,7 +391,7 @@ struct Credits {
     letters: Texture2D,
 }
 
-thread_local! {
+local! {
     /// The credits, made once.
     static CREDITS: std::cell::OnceCell<Option<Credits>> = const { std::cell::OnceCell::new() };
     /// The credits window the player scrolled (when it opened, how far from the timed scroll
@@ -790,7 +800,7 @@ pub fn options(audio: &mut super::audio::Settings, install_wide: bool) -> bool {
     options_window(audio, install_wide, false)
 }
 
-thread_local! {
+local! {
     /// The advanced settings window is open over the settings.
     static ADVANCED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// The settings as the window found them: «Отмена» puts them back (the original's
@@ -798,7 +808,7 @@ thread_local! {
     static OPENED_WITH: std::cell::RefCell<Option<super::audio::Settings>> = const { std::cell::RefCell::new(None) };
 }
 
-thread_local! {
+local! {
     /// The keys window («Клавиши») is open over the advanced settings.
     static KEYS_OPEN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }

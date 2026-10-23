@@ -1,3 +1,4 @@
+use razdor::local;
 use std::cell::RefCell;
 
 use crate::ui::input::{get_keys_pressed, get_keys_released, is_key_down, is_key_pressed, is_mouse_button_down, is_mouse_button_pressed, is_mouse_button_released, mouse_position, mouse_wheel};
@@ -10,7 +11,7 @@ pub const DIM: Color = Color::new(0.65, 0.62, 0.55, 1.0);
 pub const ACCENT: Color = Color::new(0.95, 0.78, 0.30, 1.0);
 pub const PANEL: Color = Color::new(0.12, 0.11, 0.10, 0.92);
 
-thread_local! {
+local! {
     /// A TrueType font with Cyrillic, for text the built-in pixel font cannot draw (the
     /// original's names and descriptions).
     static FONT: RefCell<Option<Font>> = const { RefCell::new(None) };
@@ -259,12 +260,12 @@ pub fn measure_exact(s: &str, size: f32) -> TextDimensions {
     bitmap.unwrap_or_else(|| measure_ttf(s, size))
 }
 
-thread_local! {
+local! {
     /// A modal dialog is open: the screen below draws but takes no input.
     static BLOCKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-thread_local! {
+local! {
     /// Debug snapshots: where the pointer is said to be (`RAZDOR_MOUSE=x,y`, `ui::snapshot`).
     static POINTER: std::cell::Cell<Option<(f32, f32)>> = const { std::cell::Cell::new(None) };
 }
@@ -280,13 +281,13 @@ pub fn set_pointer(at: Option<(f32, f32)>) {
     POINTER.with(|p| p.set(at));
 }
 
-thread_local! {
+local! {
     /// This frame's click and key presses were taken (a wait cut by them): nothing else
     /// acts on them.
     static SWALLOWED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-thread_local! {
+local! {
     /// The dialog button where the left-button press began. Its action runs only when that
     /// same button receives the release while still under the pointer.
     static BUTTON_CAPTURE: std::cell::Cell<Option<[u32; 4]>> = const { std::cell::Cell::new(None) };
@@ -355,7 +356,7 @@ pub fn key(k: KeyCode) -> bool {
     !input_blocked() && !input_swallowed() && is_key_pressed(k)
 }
 
-thread_local! {
+local! {
     /// The original's one held key (interface.md §2, 0x475748).
     static HELD_KEY: std::cell::Cell<Option<KeyCode>> = const { std::cell::Cell::new(None) };
     /// The key the system's typematic repeats and when it went down ([`next_repeat`]).
@@ -508,7 +509,7 @@ pub fn tooltip(lines: &[(String, Color)]) {
 /// A queued hint box: its lines and its fade.
 type Queued = (Vec<(String, Color)>, f32);
 
-thread_local! {
+local! {
     /// Hint boxes queued by [`tooltip_later`] with their fade, drawn by [`draw_later`].
     static LATER: RefCell<Vec<Queued>> = const { RefCell::new(Vec::new()) };
 }
@@ -539,7 +540,7 @@ pub fn panel_hint(lines: &[(String, Color)]) {
     tooltip_at_alpha(lines, hint_fade(lines, 1.0));
 }
 
-thread_local! {
+local! {
     /// The hint box shown: its text, when it appeared and when it was last drawn (the same
     /// text is not restarted while it stays up).
     static HINT_SHOWN: std::cell::RefCell<(String, f64, f64)> = const { std::cell::RefCell::new((String::new(), 0.0, 0.0)) };
@@ -567,7 +568,7 @@ fn hint_fade(lines: &[(String, Color)], full: f32) -> f32 {
     hint_alpha(now - start, full)
 }
 
-thread_local! {
+local! {
     /// The hint boxes are shown: off with "Отключить всплывающие подсказки" (`OptValue6`).
     static HINTS: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
 }
@@ -1040,7 +1041,7 @@ struct Popup {
     scale: f32,
 }
 
-thread_local! {
+local! {
     static FOCUS: RefCell<Option<Focus>> = const { RefCell::new(None) };
     static POPUP: RefCell<Option<Popup>> = const { RefCell::new(None) };
     /// A choice made in the popup: (drop-down id, value), taken by that drop-down.
@@ -1090,7 +1091,7 @@ pub fn clear_focus() {
     FOCUS.with(|f| *f.borrow_mut() = None);
 }
 
-thread_local! {
+local! {
     /// A text field drew itself active this frame ([`want_keyboard`]).
     static KEYBOARD_WANTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// The on-screen keyboard as last asked for ([`sync_keyboard`]).
@@ -1769,7 +1770,7 @@ pub fn tabs(x: f32, y: f32, w: f32, labels: &[&str], selected: &mut usize) -> f3
     30.0
 }
 
-thread_local! {
+local! {
     /// A scrollbar's knob held by the mouse: the bar's rectangle (to know which bar) and the
     /// knob's grab point below its top.
     static SCROLL_DRAG: std::cell::Cell<Option<(Rect, f32)>> = const { std::cell::Cell::new(None) };

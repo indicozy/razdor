@@ -11,6 +11,7 @@
 //! `RAZDOR_LOG=<file>` puts the log elsewhere. `RAZDOR_CRASH_TEST=panic` or `=crash` fails on
 //! purpose right after the start is logged, to see the report on a player's machine.
 
+use crate::local;
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
@@ -27,7 +28,7 @@ static LOG: Mutex<Log> = Mutex::new(Log { file: None, stderr_is_file: false });
 static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
 static PATH: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
 
-thread_local! {
+local! {
     /// Panics expected and caught by the caller ([`quiet`]): logged, never shown.
     static QUIET: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
 }
@@ -124,6 +125,23 @@ pub fn init() {
         Ok("crash") => unsafe { std::ptr::null_mut::<u8>().write_volatile(1) },
         _ => {}
     }
+}
+
+/// Opens the log when [`init`] could not (on Android the data folder is not writable before the
+/// all-files access is granted): the file is made now, the output goes there and the summary is
+/// written again, so the crashes of this run are logged. Does nothing when the log is open.
+pub fn reopen_log() {
+    let Some(path) = log_path() else { return };
+    {
+        let mut log = LOG.lock().unwrap_or_else(|e| e.into_inner());
+        if log.file.is_some() {
+            return;
+        }
+        let Ok(file) = File::create(&path) else { return };
+        log.stderr_is_file = redirect_output(&file);
+        log.file = Some(file);
+    }
+    summary(Some(&path));
 }
 
 /// The author's credit, from Cargo.toml's `authors`. The start of the log prints it, so it

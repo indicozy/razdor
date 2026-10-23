@@ -1,4 +1,5 @@
 //! The hero and army screen: gear, backpack, promotion.
+use razdor::local;
 use macroquad::prelude::*;
 
 use razdor::i18n::{n_, tr};
@@ -108,7 +109,7 @@ fn equip_error(e: EquipError) -> String {
 /// Backpack grid: 5 columns as in the original, scrolling.
 const PACK_COLS: usize = 5;
 
-thread_local! {
+local! {
     /// The unit whose Dismiss (or Bury) was pressed: confirm or cancel (0x4c3744).
     static CONFIRM: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
     /// A battle effect playing over a unit's card (0x4b11cc).

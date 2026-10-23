@@ -3,6 +3,7 @@
 //! settings (`Settings::keys`) and read through [`key`]. Keys inside the dialogs, the arrows,
 //! the zoom keys, Space and the editor's keys stay fixed.
 
+use razdor::local;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -207,12 +208,12 @@ pub fn display(k: KeyCode) -> String {
     }
 }
 
-thread_local! {
+local! {
     /// The current bindings: the defaults, with the player's overrides.
     static BINDINGS: RefCell<HashMap<Action, KeyCode>> = RefCell::new(defaults());
 }
 
-thread_local! {
+local! {
     /// The action the keys window waits for a key for, if any: while it waits, no shortcut
     /// fires (the pressed key is the new binding).
     static LISTENING: std::cell::Cell<Option<Action>> = const { std::cell::Cell::new(None) };

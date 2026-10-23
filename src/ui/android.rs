@@ -9,6 +9,7 @@
 //! its own settings page. Android 8 to 10: the runtime permissions `READ_EXTERNAL_STORAGE` and
 //! `WRITE_EXTERNAL_STORAGE`, asked with a dialog.
 
+use razdor::local;
 use std::cell::Cell;
 use std::ffi::{CStr, CString};
 
@@ -23,7 +24,7 @@ const ALL_FILES: &str = "android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION
 const ALL_FILES_LIST: &str = "android.settings.MANAGE_ALL_FILES_ACCESS_PERMISSION";
 const STORAGE_PERMISSIONS: [&str; 2] = ["android.permission.READ_EXTERNAL_STORAGE", "android.permission.WRITE_EXTERNAL_STORAGE"];
 
-thread_local! {
+local! {
     /// The not-found screen has looked at the storage access once in this run ([`ask_once`]).
     static ASKED: Cell<bool> = const { Cell::new(false) };
 }

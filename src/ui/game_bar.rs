@@ -6,6 +6,7 @@
 //! idle map shows the original's three small buttons on it (interface.md §6): wait 1 hour,
 //! centre the view on the hero, wait 4 hours.
 
+use razdor::local;
 use macroquad::prelude::*;
 
 use razdor::i18n::tr;
@@ -157,7 +158,7 @@ pub fn time_button_rect(b: TimeButton, top: f32, mid: f32, s: f32) -> Rect {
     on_bar(b.original_rect(), top, mid, s)
 }
 
-thread_local! {
+local! {
     /// The time buttons' art with its alpha mask applied, by name.
     static TIME_ART: std::cell::RefCell<std::collections::HashMap<&'static str, Option<Texture2D>>> = std::cell::RefCell::new(Default::default());
 }
@@ -273,7 +274,7 @@ fn resources(game: &Game, y: f32, h: f32) {
 }
 
 fn lower_strip_gradient(bottom_tone: f32) -> Texture2D {
-    thread_local! {
+    local! {
         static TEXTURE: std::cell::RefCell<Option<(u8, Texture2D)>> = const { std::cell::RefCell::new(None) };
     }
     let bottom = (bottom_tone.clamp(0.0, 1.0) * 255.0).round() as u8;

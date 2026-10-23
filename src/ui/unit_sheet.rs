@@ -2,6 +2,7 @@
 //! parchment, worn items in the top corners, its name, the long stat list and its traits
 //! with their icons (video notes §3, refs 09 and 11).
 
+use razdor::local;
 use macroquad::prelude::*;
 
 use razdor::i18n::{n_, tr};
@@ -15,7 +16,7 @@ use super::assets::Assets;
 use super::chrome::{self, k, BLUE_TEXT, CREAM, ORANGE_TEXT, RED_TEXT};
 use super::widgets::{measure, measure_exact, mouse_in};
 
-thread_local! {
+local! {
     static TRAIT_SCROLL: std::cell::RefCell<std::collections::HashMap<String, f32>> = std::cell::RefCell::new(std::collections::HashMap::new());
 }
 

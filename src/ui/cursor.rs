@@ -10,6 +10,7 @@
 //! at (−21,−21) (0x4db3a8, 0x4db3da), 48 px swords at (−24,−24) (0x4db412), 40 px question
 //! mark at (−20,−20) (0x4db44a). Without the install's art the system pointer stays.
 
+use razdor::local;
 use std::cell::Cell;
 
 use macroquad::miniquad::{self, CursorIcon};
@@ -77,7 +78,7 @@ fn strip_frame(ms: u64, frame_ms: u64) -> usize {
     ((ms / frame_ms.max(1)) % 50) as usize
 }
 
-thread_local! {
+local! {
     /// The shape the screens asked for this frame.
     static WANT: Cell<Shape> = const { Cell::new(Shape::Arrow) };
     /// A system pointer asked for this frame (Razdor's own drags, the editor).

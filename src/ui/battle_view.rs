@@ -11,6 +11,7 @@
 //! target without a negative modifier and strikes the others, a friendly one heals the
 //! wounded and blesses the rest.
 
+use razdor::local;
 use std::collections::VecDeque;
 
 use macroquad::prelude::*;
@@ -42,7 +43,7 @@ const XP_INK: Color = Color::new(55.0 / 255.0, 180.0 / 255.0, 1.0, 1.0);
 /// The paces of the watched battle.
 const SPEEDS: [u8; 3] = [1, 2, 4];
 
-thread_local! {
+local! {
     /// The pace last chosen for watching: the next battle watches at it too.
     static SPEED: std::cell::Cell<u8> = const { std::cell::Cell::new(1) };
 }
@@ -192,7 +193,7 @@ impl Fx {
     }
 }
 
-thread_local! {
+local! {
     static ANIM_SPEED: std::cell::Cell<Option<f32>> = const { std::cell::Cell::new(None) };
 }
 

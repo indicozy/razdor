@@ -51,6 +51,7 @@ pub mod widgets;
 pub mod window_layout;
 pub mod world_view;
 
+use razdor::local;
 use std::collections::VecDeque;
 
 use input::is_key_pressed;
@@ -697,7 +698,7 @@ impl App {
     /// The frame rate in the top right corner, when the settings ask for it: frames counted
     /// over each half second, so the number stays readable.
     pub fn draw_fps(&self) {
-        thread_local! {
+        local! {
             /// (frames so far, when counting began, the last rate shown)
             static COUNT: std::cell::Cell<(u32, f64, u32)> = const { std::cell::Cell::new((0, 0.0, 0)) };
         }
@@ -783,14 +784,25 @@ impl App {
 
     /// Android and iOS: the install was not there at start. On the title screen, loads it when
     /// the player asks ("Check again") or when the poll finds it in place (the storage is
-    /// granted and an install folder is listed; iOS always has the storage).
+    /// granted and an install folder is listed; iOS always has the storage). The first frame
+    /// without an install asks for the storage access once (Android), so the player lands on
+    /// the access page at once; the poll also reopens the log once the storage is granted.
     #[cfg(any(target_os = "android", target_os = "ios"))]
     fn mobile_install_poll(&mut self) {
-        if self.dt_content.is_some() || !matches!(self.screen, Screen::ScenarioSelect) {
+        if self.dt_content.is_some() {
+            return;
+        }
+        mobile::ask_access_once();
+        if !matches!(self.screen, Screen::MainMenu | Screen::ScenarioSelect) {
             return;
         }
         let asked = mobile::take_recheck();
-        if !(asked || (mobile::poll_due(macroquad::time::get_time()) && mobile::storage_granted() && mobile::install_listed())) {
+        let due = mobile::poll_due(macroquad::time::get_time());
+        let granted = due && mobile::storage_granted();
+        if granted {
+            razdor::diag::reopen_log();
+        }
+        if !(asked || (granted && mobile::install_listed())) {
             return;
         }
         if let Some(dt) = dt_art::DtArt::from_env() {
@@ -898,7 +910,7 @@ impl App {
         let custom_content = self.custom_content();
         let install_wide = self.install_wide_row();
         let mut next = match (&mut self.screen, &mut self.game) {
-            (Screen::MainMenu, _) => match main_menu::frame() {
+            (Screen::MainMenu, _) => match main_menu::frame(self.dt_content.is_none()) {
                 Some(main_menu::Pick::NewGame) if new_game::tutorial_map(&self.scenarios).is_some() => {
                     new_game::open_list();
                     Some(Screen::TutorialOffer)

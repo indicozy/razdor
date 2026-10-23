@@ -2,6 +2,7 @@
 //! decides how it goes on, the transposition table of searched positions and the cache of
 //! rollouts, kept for the whole battle and shared by the threads that search it.
 
+use crate::local;
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hash, Hasher};
 use std::sync::Mutex;
@@ -69,7 +70,7 @@ pub(super) fn murmur3_128(data: &[u8]) -> u128 {
     ((h2 as u128) << 64) | h1 as u128
 }
 
-thread_local! {
+local! {
     static KEY_BYTES: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 

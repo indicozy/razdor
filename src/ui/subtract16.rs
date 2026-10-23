@@ -21,6 +21,7 @@
 //! The byte-level layout is kept as the original has it (table words stored little-endian,
 //! read at any byte offset), so the entries are the original's, not a per-channel rule.
 
+use razdor::local;
 use std::cell::OnceCell;
 
 /// A 5-6-5 pixel from 8-bit channels, truncated as `gfx::quantize_565` rounds them.
@@ -73,7 +74,7 @@ fn build() -> Tables {
     Tables { low, high }
 }
 
-thread_local! {
+local! {
     static TABLES: OnceCell<Tables> = const { OnceCell::new() };
 }
 

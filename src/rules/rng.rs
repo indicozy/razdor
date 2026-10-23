@@ -15,6 +15,7 @@ pub struct Rng(u32);
 pub mod trace {
     use std::cell::RefCell;
     use std::panic::Location;
+    use crate::local;
 
     /// One `Random(n)`: the state before it and the source line that drew.
     #[derive(Clone, Debug)]
@@ -24,7 +25,7 @@ pub mod trace {
         pub site: &'static Location<'static>,
     }
 
-    thread_local! {
+    local! {
         static DRAWS: RefCell<Option<Vec<Draw>>> = const { RefCell::new(None) };
     }
 

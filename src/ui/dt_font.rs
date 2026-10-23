@@ -5,6 +5,7 @@
 //! TrueType font's would be at the same size, so the layouts keep working; a character the
 //! sheet lacks (×, —, «…) is drawn with the TrueType font.
 
+use razdor::local;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
@@ -314,7 +315,7 @@ pub fn with_sheet<R>(f: impl FnOnce(&BitmapFont) -> R) -> Option<R> {
     with_current(f)
 }
 
-thread_local! {
+local! {
     static FONTS: RefCell<HashMap<Face, Option<BitmapFont>>> = RefCell::new(HashMap::new());
     static SHADOWS: RefCell<HashMap<Face, Option<BitmapFont>>> = RefCell::new(HashMap::new());
     static FACE: Cell<Face> = const { Cell::new(Face::Body) };

@@ -2,6 +2,7 @@
 //! the original's (video notes §2): a title bar, a column of tabs on the left, the tab's
 //! content on the right, and the building's description at the bottom.
 
+use razdor::local;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 
@@ -76,7 +77,7 @@ fn take_quest_button(r: Rect, picked: Option<HallEntry>) -> bool {
 /// The market's filter field.
 const FILTER_KEY: &str = "market:filter";
 
-thread_local! {
+local! {
     /// The market's filter took this frame's keys (its Esc does not close the window).
     static FILTER_KEYS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
@@ -520,7 +521,7 @@ struct HallListKey {
     rows: Vec<(String, [u8; 3], u32, bool)>,
 }
 
-thread_local! {
+local! {
     static HALL_LIST: RefCell<Option<(HallListKey, Texture2D)>> = const { RefCell::new(None) };
 }
 
@@ -2033,7 +2034,7 @@ fn village_texts(game: &Game, view: &BuildingView, l: usize, (x, y, o): (f32, f3
     }
 }
 
-thread_local! {
+local! {
     /// A key went down while the village window was up (its «Ок» is pressed).
     static VILLAGE_KEY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }

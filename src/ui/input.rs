@@ -15,6 +15,7 @@
 //! and scroll merge with the pad's, and miniquad's simulated mouse is off, so a touch is never a
 //! click of its own.
 
+use razdor::local;
 use std::cell::RefCell;
 use std::collections::HashSet;
 
@@ -44,7 +45,7 @@ struct State {
     sim_off: bool,
 }
 
-thread_local! {
+local! {
     static STATE: RefCell<State> = RefCell::new(State::default());
 }
 
@@ -195,7 +196,7 @@ pub fn is_mouse_button_down(b: MouseButton) -> bool {
     mq::is_mouse_button_down(b) || button(b).down || (b == MouseButton::Right && SNAPSHOT_RIGHT.with(|r| r.get()))
 }
 
-thread_local! {
+local! {
     /// Debug snapshots: the right button is held (`RAZDOR_MOUSE_RIGHT=1`, `ui::snapshot`).
     static SNAPSHOT_RIGHT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }

@@ -9,6 +9,7 @@
 //! has only units that surrender, or after the first action of turn `BattleEndTurn`, which the
 //! player wins if any of his units stand. There is no retreat.
 
+use crate::local;
 use std::sync::Arc;
 
 use crate::i18n::tr;
@@ -513,7 +514,7 @@ impl PatchGlobals {
     const START: PatchGlobals = PatchGlobals { hunger_counter: 3, hunger_seen: 3, screen_living: 0, side_blocks: [0; 2] };
 }
 
-thread_local! {
+local! {
     static PATCH: std::cell::Cell<PatchGlobals> = const { std::cell::Cell::new(PatchGlobals::START) };
 }
 

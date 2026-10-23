@@ -8,6 +8,7 @@
 //! Layout numbers of the screens that follow the original closely (battle, bottom bar) are
 //! in pixels of the 960×720 gameplay video (`docs/reference/video-notes.md`), scaled by [`k`].
 
+use razdor::local;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -70,7 +71,7 @@ struct Chrome {
     english_fallback: Option<Option<Ini>>,
 }
 
-thread_local! {
+local! {
     static CHROME: RefCell<Option<Chrome>> = const { RefCell::new(None) };
 }
 
@@ -213,7 +214,7 @@ const WINDOWS_AHEAD: &[&str] = &[
 
 // Lit pictures of [`WINDOWS_AHEAD`] whose textures [`warm`] makes ahead: the path and the name
 // as [`art`] takes it.
-thread_local! {
+local! {
     static WARM: RefCell<std::collections::VecDeque<(PathBuf, String)>> = RefCell::new(Default::default());
 }
 
@@ -903,7 +904,7 @@ pub fn options_value(key: &str) -> Option<String> {
     install_option(key)
 }
 
-thread_local! {
+local! {
     /// `[Options]` values the settings window set (`main_menu::apply_options`): they stand
     /// in for the install's, as the original's window writes them back into its ini.
     static OPTION_OVERRIDES: RefCell<Vec<(String, String)>> = const { RefCell::new(Vec::new()) };
@@ -1007,7 +1008,7 @@ void main() {
     gl_FragColor = color * texture2D(Texture, source_uv);
 }"#;
 
-thread_local! {
+local! {
     static ADDITIVE: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
     static MULTIPLY: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
     static PREMULTIPLIED: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
@@ -1101,7 +1102,7 @@ void main() {
     gl_FragColor = vec4(color.rgb, color.a * step(0.77, texture2D(Texture, uv).a));
 }"#;
 
-thread_local! {
+local! {
     static SILHOUETTE: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
 }
 
@@ -1150,7 +1151,7 @@ pub fn subtractive_text(draw: impl FnOnce()) {
     subtract_with(&SUBTRACT_TEXT, SUBTRACT_TEXT_FRAGMENT, draw);
 }
 
-fn subtract_with(cell: &'static std::thread::LocalKey<std::cell::OnceCell<Option<Material>>>, fragment: &'static str, draw: impl FnOnce()) {
+fn subtract_with(cell: &'static razdor::local::Local<std::cell::OnceCell<Option<Material>>>, fragment: &'static str, draw: impl FnOnce()) {
     use macroquad::miniquad::{BlendFactor, BlendState, Equation, PipelineParams};
     let material = cell.with(|m| {
         m.get_or_init(|| {
@@ -1168,7 +1169,7 @@ fn subtract_with(cell: &'static std::thread::LocalKey<std::cell::OnceCell<Option
     with_material(material, draw);
 }
 
-thread_local! {
+local! {
     static SUBTRACT: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
     static SUBTRACT_TEXT: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
 }
@@ -1216,7 +1217,7 @@ void main() {
     gl_FragColor = vec4(vec3(l) * 0.85, 1.0);
 }"#;
 
-thread_local! {
+local! {
     static GREY: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
     /// The largest window drawn this frame (what a message greys out).
     static BIGGEST: std::cell::Cell<Option<Rect>> = const { std::cell::Cell::new(None) };
@@ -1467,7 +1468,7 @@ pub fn marble_noise(n: usize) -> Vec<u8> {
     out.iter().map(|v| (150.0 + 105.0 * (v / total).clamp(0.0, 1.0)) as u8).collect()
 }
 
-thread_local! {
+local! {
     static NOISE: RefCell<Option<Texture2D>> = const { RefCell::new(None) };
     static UNIT_PANEL_FADE: RefCell<Option<Texture2D>> = const { RefCell::new(None) };
 }

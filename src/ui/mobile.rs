@@ -6,12 +6,13 @@
 //! The storage is the only difference: Android needs the all-files access (see
 //! `ui::android::storage_granted`), iOS has no permission at all (the app's Documents folder).
 
+use razdor::local;
 use std::cell::Cell;
 
 /// How often the not-found screen looks for the install while the storage is granted.
 const POLL_SECONDS: f64 = 5.0;
 
-thread_local! {
+local! {
     /// The player asked to look again ("Check again" on the not-found screen).
     static RECHECK: Cell<bool> = const { Cell::new(false) };
     /// The next time the not-found screen polls for the install (macroquad's clock).
@@ -29,6 +30,13 @@ pub fn storage_granted() -> bool {
     {
         true
     }
+}
+
+/// The first frame without an install asks for the storage access, once in the run (Android:
+/// the all-files settings page, `ui::android::ask_once`). iOS has no permission to ask for.
+pub fn ask_access_once() {
+    #[cfg(target_os = "android")]
+    super::android::ask_once();
 }
 
 /// The player pressed "Check again" on the not-found screen.

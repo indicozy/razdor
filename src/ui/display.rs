@@ -6,6 +6,7 @@
 //! second connection to the X server, Windows through the window's styles, macOS through the
 //! `NSWindow`. Wayland is not used (miniquad runs on X11 alone by default).
 
+use razdor::local;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use serde::{Deserialize, Serialize};
@@ -105,7 +106,7 @@ struct State {
     sys: sys::Window,
 }
 
-thread_local! {
+local! {
     static STATE: std::cell::RefCell<State> =
         std::cell::RefCell::new(State { applied: None, target: None, since: 0.0, settled: true, started: None, nudges: 0, sys: sys::Window::default() });
 }
@@ -185,7 +186,7 @@ fn popup_rect(mode: DisplayMode, m: (i32, i32, i32, i32)) -> (i32, i32, i32, i32
 /// Seconds the new mode's name stays on screen after Alt+Enter; it fades over the last 0.5.
 const NOTICE_SECONDS: f64 = 2.0;
 
-thread_local! {
+local! {
     /// The mode Alt+Enter last chose and when.
     static NOTICE: std::cell::Cell<Option<(DisplayMode, f64)>> = const { std::cell::Cell::new(None) };
 }

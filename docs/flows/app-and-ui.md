@@ -67,12 +67,19 @@ methods through miniquad's JNI (`attach_jni_env`, `ACTIVITY`): the all-files set
 (Android 11+: the app's own page, else the general all-files list, else the app's details) or
 the runtime permissions (8 to 10), and `storage_granted`. The title screen's not-found block
 (`screens::android_not_found`, scaled to the screen, its buttons at least 12% of its height)
-opens the access page by itself once per run (`android::ask_once`) and has «Выдать доступ» and
-«Проверить снова»; while it
-is shown, `App::mobile_install_poll` (`ui::mobile`; every 5 s once the permission is granted, and on the
-button) loads a newly found install with `Assets::adopt_install` and the `ui/mod.rs` helpers
+has «Выдать доступ» and «Проверить снова». The first frame of a run without an install opens the
+access page by itself, once (`mobile::ask_access_once` → `android::ask_once`). The main menu shows the
+same block while no install is found (`screens::menu_not_found`, drawn by `main_menu::frame(no_install)`
+in the column left of the buttons, stacked, over a dark panel, at the interface scale; the column is the
+left half of the screen, in either orientation). While it
+is shown, `App::mobile_install_poll` (`ui::mobile`; on the main menu and the scenario list; every 5 s
+once the permission is granted, and on the button) loads a newly found install with `Assets::adopt_install` and the `ui/mod.rs` helpers
 `dt_content_of` / `scenarios_of`, without a restart. Android has no self-update (`update::asset_name` is None) and
-no Discord link (it needs a browser opener): both are hidden there. Touch (phones and tablets,
+no Discord link (it needs a browser opener): both are hidden there. The log cannot be opened before
+the access (the folder is not writable), so the poll calls `diag::reopen_log` once it is granted.
+Thread locals: `local!` (`src/local.rs`), never std's `thread_local!`: std takes one TLS key per static
+on Android, where a process has about 128, and the army window aborted with «out of TLS keys»; one
+test fails if `thread_local!` comes back in `src/`. Touch (phones and tablets,
 `touchpad::MOBILE`): two modes, with miniquad's simulated mouse off (`simulate_mouse_with_touch(false)`,
 once). The default is the gestures (`src/ui/gestures.rs`, `GestureMapper`): the finger is the
 pointer, a tap clicks where it lifts, a double tap clicks at the first tap's place, a dragged

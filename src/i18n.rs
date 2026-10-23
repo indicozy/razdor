@@ -12,6 +12,7 @@
 //! What the player's install brings (unit, item and spell names, map texts) is already
 //! Russian and never passes through here.
 
+use crate::local;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::OnceLock;
@@ -158,7 +159,7 @@ pub const fn n_(en: &'static str) -> &'static str {
     en
 }
 
-thread_local! {
+local! {
     static SILENT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 

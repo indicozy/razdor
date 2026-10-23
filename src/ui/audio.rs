@@ -11,6 +11,7 @@
 //!   feature, or when no sound device opens. `RAZDOR_AUDIO_LOG=1` prints every sound played.
 //! - Volumes and mutes ([`Settings`]) are kept in `audio.json` in the save folder.
 
+use razdor::local;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -100,7 +101,7 @@ impl Cue {
     }
 }
 
-thread_local! {
+local! {
     static CUES: RefCell<Vec<Cue>> = const { RefCell::new(Vec::new()) };
 }
 
@@ -115,7 +116,7 @@ pub fn cued<T>(c: Cue, value: T) -> T {
     value
 }
 
-thread_local! {
+local! {
     static ON_RELEASE: RefCell<Option<Cue>> = const { RefCell::new(None) };
 }
 

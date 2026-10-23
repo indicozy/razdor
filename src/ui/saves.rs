@@ -3,6 +3,7 @@
 //! hero and the in-game date), the Esc menu, and the autosaves before every battle and at the
 //! 12:00 report. Files live in the player's data folder ([`save::games_dir`]).
 
+use razdor::local;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -84,7 +85,7 @@ pub struct LoadView {
     pub back: Back,
 }
 
-thread_local! {
+local! {
     /// The tab the load window was last left on: it opens there again, the autosaves the
     /// first time (players mostly load an autosave; the original always opens on its own
     /// saves — a choice of the user's, 2026-10-09).

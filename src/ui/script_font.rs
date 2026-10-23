@@ -10,6 +10,7 @@
 //! index into cached textures, laid on the same baseline at the same pixel size as the
 //! main font, with the same `dpi_scale` handling as macroquad's own text.
 
+use razdor::local;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::ops::{Range, RangeInclusive};
@@ -366,7 +367,7 @@ impl Chain {
     }
 }
 
-thread_local! {
+local! {
     static CHAIN: RefCell<Option<Chain>> = const { RefCell::new(None) };
 }
 

@@ -4,6 +4,7 @@
 //! dialog. A check that fails or finds nothing shows nothing, unless the player asked for it
 //! ("Check now" in the advanced settings, which shows [`status_label`]).
 
+use razdor::local;
 use std::cell::Cell;
 
 use macroquad::prelude::*;
@@ -16,7 +17,7 @@ use super::audio::{cue, Cue};
 use super::chrome;
 use super::widgets::*;
 
-thread_local! {
+local! {
     /// The check at start was started.
     static STARTED: Cell<bool> = const { Cell::new(false) };
     /// The player asked for the check ("Check now"): its release is offered in any mode.

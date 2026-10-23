@@ -6,6 +6,8 @@
 //! what the pad holds into that mouse, purely; `ui::input` merges it with the real mouse and
 //! keyboard. The pads are read with gilrs (feature `gamepad`); without it [`poll`] finds none.
 
+#[cfg(feature = "gamepad")]
+use razdor::local;
 use macroquad::prelude::KeyCode;
 
 /// A gamepad button, by its place on an Xbox pad (A below, B right, X left, Y above; on a
@@ -198,7 +200,7 @@ pub fn poll() -> Option<PadState> {
         gilrs: Option<Gilrs>,
         active: Option<GamepadId>,
     }
-    thread_local! {
+    local! {
         static PADS: RefCell<Option<Pads>> = const { RefCell::new(None) };
     }
     PADS.with(|p| {
@@ -275,7 +277,7 @@ mod xinput {
     }
 
     fn get_state() -> Option<GetState> {
-        thread_local! {
+        local! {
             static GET: Cell<Option<Option<GetState>>> = const { Cell::new(None) };
         }
         GET.with(|g| {
@@ -298,7 +300,7 @@ mod xinput {
     }
 
     pub(super) fn poll() -> Option<PadState> {
-        thread_local! {
+        local! {
             /// The slot last found connected, and when the empty slots were last asked.
             static SLOT: Cell<(Option<u32>, f64)> = const { Cell::new((None, f64::NEG_INFINITY)) };
         }

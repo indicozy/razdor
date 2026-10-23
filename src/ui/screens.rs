@@ -1,3 +1,4 @@
+use razdor::local;
 use macroquad::prelude::*;
 
 use std::sync::Arc;
@@ -23,7 +24,7 @@ use super::{ScenarioEntry, Screen};
 /// Longest hero name the class screen takes.
 const NAME_MAX: usize = 24;
 
-thread_local! {
+local! {
     /// The hero's name typed on the class screen (kept between frames and games).
     pub(super) static HERO_NAME: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     /// The name field's caret and selection.
@@ -186,13 +187,12 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
 /// Android: the install is not there. Tells the player what to do, and offers the two buttons:
 /// give Razdor the storage access (the settings page; a dialog on Android 8 to 10), and look
 /// again. The permission is in `ui::android`, the look in `ui::mobile`; the look runs on the
-/// title screen. The first time it is shown in a run, it opens the access page itself
-/// ([`ask_once`]). The block is scaled to the screen ([`PhoneBlock`]).
+/// title screen. The access page is opened at the first frame of the run without an install
+/// (`App::mobile_install_poll`). The block is scaled to the screen ([`PhoneBlock`]).
 #[cfg(target_os = "android")]
 fn android_not_found(x: f32, w: f32) {
-    use super::android::{ask_once, request_storage};
+    use super::android::request_storage;
     use super::mobile::ask_recheck;
-    ask_once();
     let b = PhoneBlock::new(w, 2);
     text_fit(tr("Discord Times not found."), x, b.y, w, 20.0 * b.k, INK);
     text_fit(tr("1. Give Razdor access to all files: the «Grant access» button, or Settings > Apps > Special app access > All files access > Razdor."), x, b.y + 26.0 * b.k, w, 16.0 * b.k, DIM);
@@ -219,6 +219,72 @@ fn ios_not_found(x: f32, w: f32) {
         ask_recheck();
     }
 }
+
+/// Android and iOS, on the main menu while no install is found: the not-found block in the
+/// column left of the menu's buttons (the left half of the screen, in landscape and portrait),
+/// over a dark panel, with the same texts and buttons as the scenario list's block. Its buttons
+/// stack. The scale is the interface's (`chrome::k`, which fits the width and the height), so
+/// the column is not scaled by the height alone.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn menu_not_found(no_install: bool) {
+    if !no_install {
+        return;
+    }
+    let sh = screen_height();
+    let k = super::chrome::k();
+    let x = 16.0 * k;
+    let w = (super::main_menu::left_edge() - 2.0 * x).max(120.0 * k);
+    let btn_h = (sh * 0.12).max(34.0 * k);
+    let btn_w = (240.0 * k).min(w);
+    let gap = 12.0 * k;
+    let bottom = sh - 60.0 * k;
+    #[cfg(target_os = "android")]
+    let (steps, buttons) = (
+        [
+            tr("1. Give Razdor access to all files: the «Grant access» button, or Settings > Apps > Special app access > All files access > Razdor."),
+            tr("2. Put the game folder in internal storage, in a folder named DiscordTimes (or in Download)."),
+        ],
+        2,
+    );
+    #[cfg(target_os = "ios")]
+    let (steps, buttons) = (
+        [
+            tr("1. Copy the game folder to the Files app: On My iPhone (or iPad) > Razdor, in a folder named DiscordTimes."),
+            tr("2. From a computer: Finder (or iTunes) > the device > Files > Razdor."),
+        ],
+        1,
+    );
+    let (title_size, step_size, lead) = (20.0 * k, 16.0 * k, 22.0 * k);
+    let step_lines: Vec<String> = steps.iter().flat_map(|s| wrap(s, w, step_size)).collect();
+    let text_h = title_size + 10.0 * k + step_lines.len() as f32 * lead;
+    let buttons_top = bottom - buttons as f32 * btn_h - (buttons - 1) as f32 * gap;
+    let text_top = buttons_top - 18.0 * k - text_h;
+    draw_rectangle(x - 10.0 * k, text_top - 10.0 * k, w + 20.0 * k, bottom - text_top + 20.0 * k, Color::new(0.0, 0.0, 0.0, 0.6));
+    let title_base = text_top + title_size;
+    text(tr("Discord Times not found."), x, title_base, title_size, INK);
+    for (i, line) in step_lines.iter().enumerate() {
+        text(line, x, title_base + 10.0 * k + (i + 1) as f32 * lead, step_size, DIM);
+    }
+    #[cfg(target_os = "android")]
+    {
+        if button(x, buttons_top, btn_w, btn_h, tr("Grant access"), true) {
+            super::android::request_storage();
+        }
+        if button(x, buttons_top + btn_h + gap, btn_w, btn_h, tr("Check again"), true) {
+            super::mobile::ask_recheck();
+        }
+    }
+    #[cfg(target_os = "ios")]
+    {
+        if button(x, buttons_top, btn_w, btn_h, tr("Check again"), true) {
+            super::mobile::ask_recheck();
+        }
+    }
+}
+
+/// Other platforms: the install is searched for in the game's folder; no menu block.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub fn menu_not_found(_no_install: bool) {}
 
 /// The layout of a phone's not-found block, scaled to the screen: the scale `k` (at least 1),
 /// the buttons' height (a twelfth of the screen at least) and width (`buttons` of them across

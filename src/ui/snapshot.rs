@@ -28,6 +28,7 @@
 //! should have brought ends at once by its own defeat event (РК2 does without the herald,
 //! so `battle:РК2-…:0` shows the defeat screen). The game is not at fault there.
 
+use razdor::local;
 use razdor::rules::content::HeroClass;
 use razdor::rules::game::{Foe, Game};
 use razdor::rules::town::first_tab;
@@ -37,7 +38,7 @@ use super::building_view::BuildingView;
 use super::saves::{Back, LoadView};
 use super::{App, Screen};
 
-thread_local! {
+local! {
     /// The `fonts` scene is on.
     static FONTS_SCENE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
@@ -117,7 +118,7 @@ pub fn quiet() -> bool {
     std::env::var("RAZDOR_SCENE_QUIET").is_ok_and(|v| !v.is_empty())
 }
 
-thread_local! {
+local! {
     /// `RAZDOR_SCENE_LANGUAGE` has opened the language list.
     static LANGUAGE_OPENED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }

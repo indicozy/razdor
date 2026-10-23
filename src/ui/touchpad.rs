@@ -9,6 +9,7 @@
 //! and merges its [`Frame`] with the mouse's and the pad's. Distances are pixels of a 1080 px
 //! high screen, scaled to the screen's height, so a gesture feels the same on any phone.
 
+use razdor::local;
 use std::cell::Cell;
 
 use super::gamepad::Frame;
@@ -16,7 +17,7 @@ use super::gamepad::Frame;
 /// Phones and tablets (`platform::MOBILE`): where the touch modes run and the setting shows.
 pub use razdor::platform::MOBILE;
 
-thread_local! {
+local! {
     /// The setting (`Settings::touchpad`), pushed in by `main_menu::apply_options`.
     static SETTING: Cell<Option<bool>> = const { Cell::new(None) };
 }

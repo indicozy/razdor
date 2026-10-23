@@ -6,6 +6,7 @@
 //! No footage shows these two windows: their layout is ours, built from the original's art
 //! (L). Without an install the plain screens of `ui::screens` stand in.
 
+use razdor::local;
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 
@@ -23,7 +24,7 @@ use super::dt_font::{with_face, Face};
 use super::widgets::*;
 use super::{screens, ScenarioEntry, Screen};
 
-thread_local! {
+local! {
     static EXPERIMENTAL: Cell<ExperimentalRules> = const { Cell::new(ExperimentalRules {
         simultaneous_bonuses: false, multiple_rings: false, multiple_amulets: false, allow_duplicate_items: false, two_potions: false, six_cells: false,
     }) };
@@ -353,7 +354,7 @@ struct Marks {
     order: i64,
 }
 
-thread_local! {
+local! {
     static MARKS: RefCell<Option<Marks>> = const { RefCell::new(None) };
 }
 

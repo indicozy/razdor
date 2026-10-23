@@ -4,6 +4,7 @@
 //! mana; hovering one shows a 420 px box with the spell's picture, name, effect, the unit's
 //! life loss and the time left. The rules of what shows are in [`razdor::rules::spell_hint`].
 
+use razdor::local;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -25,7 +26,7 @@ struct Hint {
     drain: i32,
 }
 
-thread_local! {
+local! {
     /// The hint of the badge under the pointer this frame, drawn on top by [`flush`].
     static PENDING: RefCell<Option<Hint>> = const { RefCell::new(None) };
     /// Composed pictures by spell id: (22 px badge, 100 px picture), `None` without art.

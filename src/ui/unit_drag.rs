@@ -9,6 +9,7 @@
 //! unit and units move by dragging alone; «Как в оригинале» keeps the original's
 //! press-to-pick, press-to-move (interface.md §9.6) with dragging on top.
 
+use razdor::local;
 use std::cell::Cell;
 
 use crate::ui::input::{is_mouse_button_down};
@@ -50,7 +51,7 @@ impl Controls {
     }
 }
 
-thread_local! {
+local! {
     static CONTROLS: Cell<Controls> = const { Cell::new(Controls::Drag) };
 }
 
@@ -77,7 +78,7 @@ struct Drag {
     moved: bool,
 }
 
-thread_local! {
+local! {
     static DRAG: Cell<Option<Drag>> = const { Cell::new(None) };
 }
 

@@ -4,6 +4,7 @@
 //! map figures are drawn (decoded at runtime by [`DtArt`]); otherwise coloured cells and
 //! simple shapes. Only the visible cells are drawn, so 200×200 maps stay fast.
 
+use razdor::local;
 use std::collections::VecDeque;
 
 use crate::ui::input::{get_keys_pressed, is_mouse_button_down};
@@ -124,7 +125,7 @@ fn step_zoom(home: f32, steps: i32, by: i32, lo: f32) -> i32 {
 /// A camera's zoom and where it looked (`None`: the hero).
 type CamState = (f32, Option<(f32, f32)>);
 
-thread_local! {
+local! {
     /// The map's camera as last drawn (its zoom and where it looked, `None` the hero): the
     /// windows over the map draw it so, not re-centred and re-zoomed under them.
     static LAST_CAM: std::cell::Cell<Option<CamState>> = const { std::cell::Cell::new(None) };
@@ -687,12 +688,12 @@ fn glide_ease(ms: i64) -> f32 {
 }
 const SPELL_FX_SECS: f64 = 0.8;
 
-thread_local! {
+local! {
     /// What the spell book and the events asked the map to show, taken by its next frame.
     static SPELL_FX: std::cell::RefCell<Vec<SpellFx>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
-thread_local! {
+local! {
     /// A world spell picked in the book, waiting for its target on the map: the book's click
     /// closes it and sets the cast flag (0x4c2e34, [66c0b9] = 1).
     static TARGETING: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };

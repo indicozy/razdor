@@ -14,6 +14,7 @@
 //! units on foot (its LAND map) and by ship (its SHIP map), from the surface and the map
 //! objects on it ([`TileMap::from_codes`]).
 
+use crate::local;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
@@ -273,7 +274,7 @@ struct FloodScratch {
     used: Vec<u32>,
 }
 
-thread_local! {
+local! {
     static SCRATCH: std::cell::RefCell<FloodScratch> = std::cell::RefCell::new(FloodScratch::default());
 }
 

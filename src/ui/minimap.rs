@@ -13,6 +13,7 @@
 //!
 //! Both textures are rebuilt only when the explored set changes.
 
+use razdor::local;
 use std::cell::RefCell;
 
 use crate::ui::input::{is_mouse_button_down};
@@ -33,13 +34,13 @@ struct Cached {
     tex: Texture2D,
 }
 
-thread_local! {
+local! {
     static FOG_TEX: RefCell<Option<Cached>> = const { RefCell::new(None) };
     static MINI_TEX: RefCell<Option<Cached>> = const { RefCell::new(None) };
 }
 
 /// A texture from `cache`, rebuilt by `make` (w, h, rgba) when `key` changes.
-fn cached(cache: &'static std::thread::LocalKey<RefCell<Option<Cached>>>, key: u64, filter: FilterMode, make: impl FnOnce() -> (u16, u16, Vec<u8>)) -> Texture2D {
+fn cached(cache: &'static razdor::local::Local<RefCell<Option<Cached>>>, key: u64, filter: FilterMode, make: impl FnOnce() -> (u16, u16, Vec<u8>)) -> Texture2D {
     cache.with(|c| {
         let mut c = c.borrow_mut();
         if c.as_ref().is_none_or(|c| c.key != key) {
@@ -250,7 +251,7 @@ const MIN_SIDE: f32 = 120.0;
 /// pointer and the size started.
 type Drag = ((bool, bool), Vec2, (f32, f32));
 
-thread_local! {
+local! {
     /// Razdor's own size of the window (dragged by its inner edges), `None` for the
     /// original's.
     static SIZE: std::cell::Cell<Option<(f32, f32)>> = const { std::cell::Cell::new(None) };
@@ -715,7 +716,7 @@ pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_
 /// A row of the list, in reference pixels (scaled by `chrome::k`).
 const LIST_ROW: f32 = 18.0;
 
-thread_local! {
+local! {
     /// The first listed army shown, when the list is longer than fits under the minimap.
     static LIST_TOP: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }

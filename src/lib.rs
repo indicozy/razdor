@@ -1,5 +1,6 @@
 pub mod av;
 pub mod diag;
+pub mod local;
 pub mod difftest;
 pub mod i18n;
 pub mod platform;
