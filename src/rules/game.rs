@@ -1398,8 +1398,9 @@ impl Game {
                 if self.endless_wait.is_none() && events[from..].iter().any(|e| matches!(e, Event::NewDay(_))) {
                     go = false;
                 }
-                // The reading is done, an event fired (the original pops the wait off its
-                // queue, 0x4ae4f2, and the spell lands at once), or an event set a battle
+                // The reading is done, an event opened its window (the original's scan returns
+                // 1 and the wait's test stops it, 0x4ae4e9–0x4ae4f0, 0x4ae4f2: the spell lands
+                // at once; a silent event does not), or an event set a battle
                 // over his book.
                 if self.wait_ticks == 0 || self.foe.is_some() || events[from..].iter().any(fires) {
                     self.end_reading(&mut events);
@@ -2581,9 +2582,15 @@ pub(crate) fn unit_into_troop(content: &Content, t: &mut Troop, u: &Unit, now: u
     }
 }
 
-/// An event of the scenario fired (or asks its question) in this event.
+/// An event that opens a window: a message or a question. That is when the original's event
+/// scan returns 1 (0x4abfbc). A silent event (no message) fires and finishes inside the scan,
+/// which goes on (0x4a7b80), so it neither ends a spell's reading (0x4ae4e9–0x4ae4f0) nor holds
+/// back the noon.
 pub(crate) fn fires(e: &Event) -> bool {
-    matches!(e, Event::Script(super::events::EventOutcome::Fired { .. } | super::events::EventOutcome::Question(_)))
+    matches!(
+        e,
+        Event::Script(super::events::EventOutcome::Fired { message: true, .. } | super::events::EventOutcome::Question(_))
+    )
 }
 
 #[cfg(test)]
