@@ -1294,6 +1294,45 @@ pub fn bar_height() -> f32 {
     (80.0 * k()).round()
 }
 
+/// Top of a `canvas_h`-tall canvas centred vertically on a `screen_w`×`screen_h` screen. Only
+/// screens narrower than 4:3 get it: there the width sets the scale and leaves height free (a
+/// phone in portrait). A 4:3 or wider screen, the desktop's, gets 0 and is never moved.
+pub fn centred_top(screen_w: f32, screen_h: f32, canvas_h: f32) -> f32 {
+    if screen_w * 3.0 >= screen_h * 4.0 || screen_h <= canvas_h {
+        0.0
+    } else {
+        ((screen_h - canvas_h) / 2.0).round()
+    }
+}
+
+/// Top of the title screens' 720-line canvas ([`centred_top`]); the menus, their logo and their
+/// windows are placed from it.
+pub fn canvas_top() -> f32 {
+    centred_top(screen_width(), screen_height(), 720.0 * k())
+}
+
+/// The part of a `pic` picture (width, height) that covers a `screen` (width, height) at the
+/// picture's own aspect: the centred crop, in picture pixels. None where the picture keeps
+/// being stretched over the screen: a landscape or square screen (unchanged from before), and a
+/// portrait one whose aspect is within 20% of the picture's.
+pub fn cover_source(pic: (f32, f32), screen: (f32, f32)) -> Option<Rect> {
+    let ((pw, ph), (sw, sh)) = (pic, screen);
+    if pw <= 0.0 || ph <= 0.0 || sw <= 0.0 || sh <= sw {
+        return None;
+    }
+    let (pic_aspect, screen_aspect) = (pw / ph, sw / sh);
+    if (0.8..=1.2).contains(&(screen_aspect / pic_aspect)) {
+        return None;
+    }
+    if screen_aspect < pic_aspect {
+        let cut = ph * screen_aspect;
+        Some(Rect::new(((pw - cut) / 2.0).round(), 0.0, cut.round(), ph))
+    } else {
+        let cut = pw / screen_aspect;
+        Some(Rect::new(0.0, ((ph - cut) / 2.0).round(), pw, cut.round()))
+    }
+}
+
 pub fn tex(t: &Texture2D, r: Rect, color: Color) {
     draw_texture_ex(t, r.x, r.y, color, DrawTextureParams { dest_size: Some(vec2(r.w, r.h)), ..Default::default() });
 }
@@ -2944,5 +2983,42 @@ mod tests {
         transform(&mut s, Fx::Shade);
         assert_eq!(s.pixel(0, 0)[3], 255);
         assert_eq!(s.pixel(1, 0)[3], 0);
+    }
+
+    #[test]
+    fn canvas_centred_only_on_screens_narrower_than_4_3() {
+        // A phone in portrait: 1080 wide, the 720-line canvas at 1.125 is 810 tall in 2160.
+        assert_eq!(centred_top(1080.0, 2160.0, 810.0), 675.0);
+        // Odd remainders round to whole pixels.
+        assert_eq!(centred_top(1000.0, 1801.0, 800.0), 501.0);
+        // 4:3 and wider never move, whatever the canvas.
+        assert_eq!(centred_top(1024.0, 768.0, 500.0), 0.0);
+        assert_eq!(centred_top(2160.0, 1080.0, 500.0), 0.0);
+        assert_eq!(centred_top(1920.0, 1080.0, 600.0), 0.0);
+        // A canvas as tall as the screen, or taller, has no room to move.
+        assert_eq!(centred_top(900.0, 1000.0, 1000.0), 0.0);
+        assert_eq!(centred_top(900.0, 1000.0, 1200.0), 0.0);
+    }
+
+    #[test]
+    fn cover_crops_the_picture_only_where_its_aspect_is_far_off() {
+        // A 4:3 picture on a phone in portrait (9:18): the centre strip of its width.
+        let r = cover_source((1024.0, 768.0), (1080.0, 2160.0)).expect("far off");
+        assert_eq!((r.x, r.y, r.h), ((1024.0f32 - 768.0 * 0.5) / 2.0, 0.0, 768.0));
+        assert_eq!(r.w, (768.0 * 0.5f32).round());
+        // A narrow portrait screen (0.4) on a 0.6 picture: the centre strip of its width.
+        let r = cover_source((600.0, 1000.0), (400.0, 1000.0)).expect("narrower screen");
+        assert_eq!((r.x, r.y, r.w, r.h), (100.0, 0.0, 400.0, 1000.0));
+        // A wide picture (2:1) on a portrait screen: the centre strip of its width.
+        let r = cover_source((1000.0, 500.0), (500.0, 1000.0)).expect("wide picture");
+        assert_eq!((r.x, r.y, r.w, r.h), (375.0, 0.0, 250.0, 500.0));
+        // Within 20% of the picture's aspect: stretched as before.
+        assert_eq!(cover_source((1024.0, 768.0), (1000.0, 800.0)), None);
+        assert_eq!(cover_source((640.0, 800.0), (700.0, 1000.0)), None);
+        assert_eq!(cover_source((1024.0, 768.0), (900.0, 1000.0)).map(|r| r.w), Some((768.0 * 0.9f32).round()));
+        // Landscape and square screens: stretched as before (the desktop and the phone's landscape).
+        assert_eq!(cover_source((1024.0, 768.0), (1920.0, 1080.0)), None);
+        assert_eq!(cover_source((1024.0, 768.0), (2160.0, 1080.0)), None);
+        assert_eq!(cover_source((1024.0, 768.0), (800.0, 800.0)), None);
     }
 }

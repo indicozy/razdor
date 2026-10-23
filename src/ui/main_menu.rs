@@ -56,13 +56,22 @@ const LOGO_FLAME_GLOW: f32 = 0.85;
 
 fn video(p: Vec2) -> Vec2 {
     let k = chrome::k();
-    vec2(screen_width() / 2.0 + p.x * k, p.y * k)
+    vec2(screen_width() / 2.0 + p.x * k, chrome::canvas_top() + p.y * k)
 }
 
 /// The burning ruins over the whole screen, a little warmer where the fire glows.
 fn background() {
     match chrome::win("Castle") {
-        Some(t) => chrome::tex(&t, Rect::new(0.0, 0.0, screen_width(), screen_height()), WHITE),
+        Some(t) => {
+            // A phone in portrait covers the screen with the picture's centre (keeping its
+            // aspect), not stretched; other screens stretch it as before.
+            let (sw, sh) = (screen_width(), screen_height());
+            let screen = Rect::new(0.0, 0.0, sw, sh);
+            match chrome::cover_source((t.width(), t.height()), (sw, sh)) {
+                Some(src) => chrome::tex_src(&t, src, screen, WHITE),
+                None => chrome::tex(&t, screen, WHITE),
+            }
+        }
         None => clear_background(Color::from_rgba(60, 30, 12, 255)),
     }
 }
@@ -110,7 +119,7 @@ fn logo() {
     let h = w * 128.0 / 896.0;
     // The letters sit left in the picture: the video shows them centred.
     let x = screen_width() / 2.0 - w / 2.0 + 25.0 * k;
-    let y = 50.0 * k;
+    let y = chrome::canvas_top() + 50.0 * k;
     if let Some(fl) = chrome::win_fx("TitleFlame_RUS", Fx::Glow) {
         let fh = fl.height() / 9.0;
         let fw = fl.width() / 2.0;
@@ -541,7 +550,7 @@ fn own(section: &str, key: &str, ours: &'static str) -> String {
 fn window(title: &str, w: f32, h: f32) -> (Rect, bool) {
     let k = chrome::k();
     let (w, h) = (w * k, h * k);
-    let r = Rect::new((screen_width() - w) / 2.0, (190.0 * k).min(screen_height() - h), w, h);
+    let r = Rect::new((screen_width() - w) / 2.0, (chrome::canvas_top() + 190.0 * k).min(screen_height() - h), w, h);
     chrome::window(r, title, chrome::Skin::Marble, true)
 }
 

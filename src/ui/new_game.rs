@@ -64,7 +64,7 @@ impl Win {
     fn open(title: &str) -> (Win, bool) {
         let k = chrome::k();
         let (w, h) = (594.0 * k, 482.0 * k);
-        let r = Rect::new((screen_width() - w) / 2.0, (190.0 * k).min(screen_height() - h), w, h);
+        let r = Rect::new((screen_width() - w) / 2.0, (super::chrome::canvas_top() + 190.0 * k).min(screen_height() - h), w, h);
         let (_, closed) = chrome::window(r, title, chrome::Skin::Marble, true);
         // The 634×516 window with its inner frames (ae2520, read by 4d2a30; 0x48d710).
         chrome::window_inner_frames(r, chrome::opx());
@@ -910,7 +910,7 @@ pub fn class_select(game: &mut Option<Game>, demo: &Arc<Content>, scenario: Opti
     let content = Arc::new(content.with_experimental(experimental_rules()));
     super::main_menu::backdrop();
     let scale = chrome::k();
-    let r = Rect::new((screen_width() - 632.0 * scale) / 2.0, (202.0 * scale).min(screen_height() - 516.0 * scale), 632.0 * scale, 516.0 * scale);
+    let r = Rect::new((screen_width() - 632.0 * scale) / 2.0, (super::chrome::canvas_top() + 202.0 * scale).min(screen_height() - 516.0 * scale), 632.0 * scale, 516.0 * scale);
     let title = own("NewHero", "Title", n_("The hero's starting characteristics"));
     let (_, closed) = chrome::window(r, &title, chrome::Skin::Marble, true);
     let win = Win { r, k: scale };

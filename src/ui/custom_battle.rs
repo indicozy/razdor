@@ -183,7 +183,7 @@ pub fn frame(view: &mut SetupView, content: &Content, assets: &Assets, audio: &m
     view.session.setup.fit(content);
     let k = chrome::k();
     let (w, h) = (900.0 * k, 600.0 * k);
-    let r = Rect::new((screen_width() - w) / 2.0, (130.0 * k).min(screen_height() - h).max(0.0), w, h);
+    let r = Rect::new((screen_width() - w) / 2.0, (super::chrome::canvas_top() + 130.0 * k).min(screen_height() - h).max(0.0), w, h);
     let (inner, closed) = chrome::window(r, tr("Custom battle"), chrome::Skin::Marble, true);
     let size = (14.0 * k).round();
     let row_h = 26.0 * k;
