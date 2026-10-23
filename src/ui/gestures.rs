@@ -92,6 +92,9 @@ pub struct GestureMapper {
     /// The left button is held by a drag, the right one by a long press, until the finger lifts.
     left_held: bool,
     right_held: bool,
+    /// Where the pointer was when the long press began: it stays there while the right button
+    /// is held (the finger may slide off to uncover the view; the finger covers the army).
+    press_at: (f32, f32),
     /// A click made by the last frame's lift: let go this frame.
     release_left: bool,
     release_right: bool,
@@ -150,8 +153,10 @@ impl GestureMapper {
                         self.right_held = true;
                         f.right.pressed = true;
                         f.right.down = true;
+                        self.press_at = g.at(screen);
                     }
-                    f.pointer = Some(g.at(screen));
+                    // A long press keeps the pointer where it began (the info window stays put).
+                    f.pointer = Some(if self.right_held { self.press_at } else { g.at(screen) });
                 }
             }
             n if n >= 2 => {
@@ -238,14 +243,15 @@ impl GestureMapper {
     }
 
     /// A finger lifted (`g` is it, already out of `fingers`, at its last place). A single
-    /// finger's tap clicks where it lifts; whatever it held lets go. Two fingers lifting click
-    /// nothing, and nothing stays held once all are up.
+    /// finger's tap clicks where it lifts; whatever it held lets go, a long press's right button
+    /// at the place the press began. Two fingers lifting click nothing, and nothing stays held
+    /// once all are up.
     fn lift(&mut self, g: Finger, f: &mut Frame, screen: (f32, f32)) {
         if !self.fingers.is_empty() || self.multi {
             return;
         }
         let at = g.at(screen);
-        f.pointer = Some(at);
+        f.pointer = Some(if self.right_held { self.press_at } else { at });
         if std::mem::take(&mut self.left_held) {
             f.left.released = true;
         }
@@ -325,6 +331,48 @@ mod tests {
         assert_eq!(lift.right, Edge { pressed: false, down: false, released: true });
         assert_eq!((lift.left, lift.pointer), (Edge::default(), Some((50.0, 60.0))));
         assert_eq!(step(&mut m, &[], false), Frame::default());
+    }
+
+    #[test]
+    fn a_long_press_keeps_the_pointer_where_it_began_while_the_finger_moves() {
+        let mut m = GestureMapper::default();
+        step(&mut m, &[touch(1, 50.0, 60.0, Phase::Started)], false);
+        for _ in 0..40 {
+            if step(&mut m, &[touch(1, 50.0, 60.0, Phase::Stationary)], false).right.pressed {
+                break;
+            }
+        }
+        // The finger slides down off the cell and on: the right button stays down, the pointer
+        // stays at the press, and no drag starts.
+        let slide = step(&mut m, &[touch(1, 50.0, 300.0, Phase::Moved)], false);
+        assert_eq!((slide.pointer, slide.right), (Some((50.0, 60.0)), Edge { pressed: false, down: true, released: false }));
+        assert_eq!(slide.left, Edge::default());
+        let far = step(&mut m, &[touch(1, 200.0, 500.0, Phase::Moved)], false);
+        assert_eq!((far.pointer, far.right.down, far.left), (Some((50.0, 60.0)), true, Edge::default()));
+        // The lift releases the right button where the press began, and clicks nothing.
+        let lift = step(&mut m, &[touch(1, 200.0, 500.0, Phase::Ended)], false);
+        assert_eq!(lift.right, Edge { pressed: false, down: false, released: true });
+        assert_eq!((lift.pointer, lift.left), (Some((50.0, 60.0)), Edge::default()));
+        assert_eq!(step(&mut m, &[], false), Frame::default());
+    }
+
+    #[test]
+    fn a_long_press_after_a_small_drift_keeps_the_point_it_began_at() {
+        let mut m = GestureMapper::default();
+        step(&mut m, &[touch(1, 100.0, 100.0, Phase::Started)], false);
+        // Still inside the slop: the press is taken where the finger is now, 5 px away.
+        step(&mut m, &[touch(1, 105.0, 100.0, Phase::Stationary)], false);
+        let mut pressed = None;
+        for _ in 0..40 {
+            let f = step(&mut m, &[touch(1, 105.0, 100.0, Phase::Stationary)], false);
+            if f.right.pressed {
+                pressed = Some(f.pointer);
+                break;
+            }
+        }
+        assert_eq!(pressed, Some(Some((105.0, 100.0))));
+        let slide = step(&mut m, &[touch(1, 105.0, 400.0, Phase::Moved)], false);
+        assert_eq!(slide.pointer, Some((105.0, 100.0)));
     }
 
     #[test]

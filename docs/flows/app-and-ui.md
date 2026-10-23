@@ -84,8 +84,11 @@ test fails if `thread_local!` comes back in `src/`. Touch (phones and tablets,
 once). The default is the gestures (`src/ui/gestures.rs`, `GestureMapper`): the finger is the
 pointer, a tap clicks where it lifts, a double tap clicks at the first tap's place, a dragged
 finger holds the left button, a long press holds the right one, two fingers pinch the wheel
-(the map's zoom) or slide (the map's scroll, or the list's wheel). The touchpad mode is an
-option (`Settings::touchpad`, off by default; below). Gamepads are off
+(the map's zoom) or slide (the map's scroll, or the list's wheel). A long press keeps the pointer
+where the press began while the right button is held (`GestureMapper::press_at`): the finger may
+slide to uncover the view, and the info window (army, building) stays put; the lift releases the
+button there too. The touchpad mode is an option (`Settings::touchpad`, off by default; below).
+Gamepads are off
 (`--no-default-features --features audio`).
 The screen turns with the device (Android `screenOrientation = fullUser` in `Cargo.toml`,
 following the rotation lock; iOS portrait and landscape in `scripts/dist-ios.sh`'s Info.plist); a
