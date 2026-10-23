@@ -73,6 +73,20 @@ pub fn fitted_scale(fit: f32) -> f32 {
     if chosen > 0.0 { chosen.min(fit) } else { fit }
 }
 
+/// Runs `f` with the interface scale kept to the fit `fit`: inside, `chrome::k()` and the
+/// bitmap fonts' native sizes (`dt_font::native_size`, which follow the interface scale) are
+/// the fitted scale, so the bottom bar's text matches its fitted layout above the fit.
+pub fn with_fitted<R>(fit: f32, f: impl FnOnce() -> R) -> R {
+    let chosen = chosen_scale();
+    if chosen <= fit {
+        return f();
+    }
+    set_scale(fit);
+    let r = f();
+    set_scale(chosen);
+    r
+}
+
 /// The scale chosen in the settings as it is (`0.0`: auto), not yet kept to the window's fit.
 pub fn chosen_scale() -> f32 {
     f32::from_bits(SCALE.load(Ordering::Relaxed))
@@ -1053,6 +1067,10 @@ mod tests {
         assert_eq!(scale(1.5), 2.0, "the chosen scale, past the fit");
         assert_eq!(fitted_scale(1.5), 1.5, "the bar's scale stays at the fit");
         assert_eq!(fitted_scale(3.0), 2.0, "below the fit it is the choice");
+        // The bar draws inside `with_fitted`: there the scale is the fit, then the choice again.
+        assert_eq!(with_fitted(1.5, chosen_scale), 1.5);
+        assert_eq!(chosen_scale(), 2.0);
+        assert_eq!(with_fitted(3.0, chosen_scale), 2.0, "below the fit nothing changes");
         set_scale(0.0);
         assert_eq!(scale(1.5), 1.5, "Auto is the fit");
         assert_eq!(fitted_scale(1.5), 1.5);

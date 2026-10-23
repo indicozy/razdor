@@ -366,8 +366,9 @@ pub fn draw(game: &Game, look: impl Fn(BarButton) -> Look) -> Option<BarButton> 
 /// three time buttons over it instead of its text. Returns the bar button and the time
 /// button pressed.
 pub fn draw_with_time(game: &Game, look: impl Fn(BarButton) -> Look, time_buttons: bool) -> (Option<BarButton>, Option<TimeButton>) {
-    // The bar stays at the screen's bottom whatever the windows' pan is (`ui::pan`).
-    super::pan::unpanned(|| draw_bar(game, &look, time_buttons))
+    // The bar stays at the screen's bottom whatever the windows' pan is (`ui::pan`), and at
+    // the fitted scale, its text included (`display::with_fitted`).
+    super::pan::unpanned(|| super::display::with_fitted(super::chrome::fit_k(), || draw_bar(game, &look, time_buttons)))
 }
 
 fn draw_bar(game: &Game, look: &impl Fn(BarButton) -> Look, time_buttons: bool) -> (Option<BarButton>, Option<TimeButton>) {
