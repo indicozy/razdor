@@ -18,8 +18,8 @@
 # then iOS shows a generic icon.
 #
 # The bundle's Info.plist is written here (the keys are Razdor's: the Files app sharing, the
-# landscape orientations, the empty launch screen that makes iOS run it at the full screen size,
-# see the comments below). The version comes from Cargo.toml.
+# orientations (any way up but an iPhone upside down), the empty launch screen that makes iOS
+# run it at the full screen size, see the comments below). The version comes from Cargo.toml.
 set -eu
 cd "$(dirname "$0")/.."
 ROOT=$PWD
@@ -102,11 +102,14 @@ cat > "$APP/Info.plist" <<EOF
     <dict/>
     <key>UISupportedInterfaceOrientations</key>
     <array>
+        <string>UIInterfaceOrientationPortrait</string>
         <string>UIInterfaceOrientationLandscapeLeft</string>
         <string>UIInterfaceOrientationLandscapeRight</string>
     </array>
     <key>UISupportedInterfaceOrientations~ipad</key>
     <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationPortraitUpsideDown</string>
         <string>UIInterfaceOrientationLandscapeLeft</string>
         <string>UIInterfaceOrientationLandscapeRight</string>
     </array>

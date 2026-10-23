@@ -62,7 +62,9 @@ fullscreen = true
 "android:requestLegacyExternalStorage" = "true"
 
 [package.metadata.android.activity_attributes]
-"android:screenOrientation" = "sensorLandscape"
+# Any way up the phone is held (the owner's request, 2026-10-23), following the system's
+# rotation lock; the activity takes the rotation as a resize (configChanges), no restart.
+"android:screenOrientation" = "fullUser"
 # Targeting Android 12 (API 31) and later requires it where the activity has an intent filter.
 "android:exported" = "true"
 

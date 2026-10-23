@@ -80,6 +80,9 @@ finger holds the left button, a long press holds the right one, two fingers pinc
 (the map's zoom) or slide (the map's scroll, or the list's wheel). The touchpad mode is an
 option (`Settings::touchpad`, off by default; below). Gamepads are off
 (`--no-default-features --features audio`).
+The screen turns with the device (Android `screenOrientation = fullUser` in `Cargo.toml`,
+following the rotation lock; iOS portrait and landscape in `scripts/dist-ios.sh`'s Info.plist); a
+turn is a resize, and the interface scale fits the new width and height (`chrome::fit_k`).
 The on-screen keyboard follows the text fields: `edit_line` / `edit_rows` drawn active ask for it,
 and `widgets::sync_keyboard` (once a frame, before `next_frame`) shows or hides it with miniquad's
 `show_keyboard`. miniquad's `MainActivity` swallows every key, so `quad.toml` at the repo root
