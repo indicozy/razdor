@@ -13,10 +13,6 @@
 #   - the Rust target of the pinned toolchain (rust-toolchain.toml lists it too):
 #       rustup target add aarch64-apple-ios
 #
-# Not yet: an app icon. The bundle has no AppIcon, although the master picture is there
-# (data/icon/razdor.png, 1024 px): an iOS icon set (AppIcon, no alpha) would come from it. Until
-# then iOS shows a generic icon.
-#
 # The bundle's Info.plist is written here (the keys are Razdor's: the Files app sharing, the
 # orientations (any way up but an iPhone upside down), the empty launch screen that makes iOS
 # run it at the full screen size, see the comments below). The version comes from Cargo.toml.
@@ -44,6 +40,14 @@ rm -rf "$STAGE"
 APP="$STAGE/Payload/Razdor.app"
 mkdir -p "$APP"
 cp target/aarch64-apple-ios/release/razdor "$APP/razdor"
+
+# The app icons, resized from the master picture (data/icon/razdor.png, 1024 px) to the sizes
+# iOS asks for. The Info.plist below names them without the @2x/@3x suffix and the .png.
+ICON=data/icon/razdor.png
+sips -z 120 120 "$ICON" --out "$APP/AppIcon60x60@2x.png" >/dev/null
+sips -z 180 180 "$ICON" --out "$APP/AppIcon60x60@3x.png" >/dev/null
+sips -z 152 152 "$ICON" --out "$APP/AppIcon76x76@2x.png" >/dev/null
+sips -z 167 167 "$ICON" --out "$APP/AppIcon83.5x83.5@2x.png" >/dev/null
 
 cat > "$APP/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -113,6 +117,28 @@ cat > "$APP/Info.plist" <<EOF
         <string>UIInterfaceOrientationLandscapeLeft</string>
         <string>UIInterfaceOrientationLandscapeRight</string>
     </array>
+    <key>CFBundleIcons</key>
+    <dict>
+        <key>CFBundlePrimaryIcon</key>
+        <dict>
+            <key>CFBundleIconFiles</key>
+            <array>
+                <string>AppIcon60x60</string>
+            </array>
+        </dict>
+    </dict>
+    <key>CFBundleIcons~ipad</key>
+    <dict>
+        <key>CFBundlePrimaryIcon</key>
+        <dict>
+            <key>CFBundleIconFiles</key>
+            <array>
+                <string>AppIcon60x60</string>
+                <string>AppIcon76x76</string>
+                <string>AppIcon83.5x83.5</string>
+            </array>
+        </dict>
+    </dict>
 </dict>
 </plist>
 EOF

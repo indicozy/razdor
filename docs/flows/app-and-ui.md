@@ -44,7 +44,9 @@ folder when it is an install, the remembered folder (`config_file`), then a sear
 iOS mirrors Android, with no permission. `scripts/dist-ios.sh` (on a Mac; the `ios` job of
 `.github/workflows/release.yml`) builds `dist/razdor.ipa`: an `aarch64-apple-ios` binary in a
 `Payload/Razdor.app` bundle whose Info.plist is written by the script, ad-hoc signed only so the
-binary loads; the player's AltStore or Sideloadly re-signs it. Paths: `platform::app_dir` and
+binary loads; the player's AltStore or Sideloadly re-signs it. The app icons (AppIcon60x60, 76x76,
+83.5x83.5 in the bundle, listed in `CFBundleIcons` of the Info.plist) are resized from
+`data/icon/razdor.png` with `sips` by the same script. Paths: `platform::app_dir` and
 `config_dir` are `Documents/Razdor` (the app's sandbox `$HOME/Documents`), and `install_roots` are
 `Documents/DiscordTimes` then `Documents`. `UIFileSharingEnabled` makes that folder show in the Files
 app as «На iPhone → Раздор», so the player copies the game there; no permission is asked, and
@@ -56,7 +58,9 @@ stay in `ui::android`. The on-screen keyboard is on for both (`widgets::set_keyb
 self-update, no Discord link. `ui/script_font.rs` skips the fontconfig lookup on iOS, as on Android.
 
 The APK is built by `scripts/dist-android.sh` (cargo-quad-apk, pinned in its header; NDK 29;
-see `[package.metadata.android]` in `Cargo.toml`). Per-platform paths live in one place:
+see `[package.metadata.android]` in `Cargo.toml`). The launcher icon is `android/res/mipmap-*/ic_launcher.png`
+(Razdor's own icon, `data/icon/razdor.png` resized to 48–192 px; `res` and `icon` in `Cargo.toml`).
+Per-platform paths live in one place:
 `src/platform.rs` (`app_dir` for saves, log, picture cache, editor maps, translation jobs;
 `config_dir` for the remembered install; `install_roots` for the search). On Android they are
 `/storage/emulated/0/Razdor` (survives an uninstall) and the search starts with `DiscordTimes`
