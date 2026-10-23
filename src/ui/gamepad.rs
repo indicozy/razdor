@@ -253,6 +253,8 @@ mod xinput {
     use std::cell::Cell;
     use std::ffi::c_void;
 
+    use razdor::local;
+
     use super::{Button, PadState};
 
     #[repr(C)]
