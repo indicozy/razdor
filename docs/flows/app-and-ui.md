@@ -50,14 +50,22 @@ in internal storage; desktop keeps the platform's data and config folders.
 
 Reading that storage needs the all-files access. `src/ui/android.rs` calls the activity's
 methods through miniquad's JNI (`attach_jni_env`, `ACTIVITY`): the all-files settings page
-(Android 11+) or the runtime permissions (8 to 10), and `storage_granted`. The title screen's
-not-found block (`screens::android_not_found`) has «Выдать доступ» and «Проверить снова»; while it
+(Android 11+: the app's own page, else the general all-files list, else the app's details) or
+the runtime permissions (8 to 10), and `storage_granted`. The title screen's not-found block
+(`screens::android_not_found`, scaled to the screen, its buttons at least 12% of its height)
+opens the access page by itself once per run (`android::ask_once`) and has «Выдать доступ» and
+«Проверить снова»; while it
 is shown, `App::android_install_poll` (every 5 s once the permission is granted, and on the
 button) loads a newly found install with `Assets::adopt_install` and the `ui/mod.rs` helpers
 `dt_content_of` / `scenarios_of`, without a restart. Android has no self-update (`update::asset_name` is None) and
 no Discord link (it needs a browser opener): both are hidden there. Touch: miniquad simulates
 the left mouse button from a touch (`simulate_mouse_with_touch`), so a tap is a left click;
 there is no long-press right click. Gamepads are off (`--no-default-features --features audio`).
+The on-screen keyboard follows the text fields: `edit_line` / `edit_rows` drawn active ask for it,
+and `widgets::sync_keyboard` (once a frame, before `next_frame`) shows or hides it with miniquad's
+`show_keyboard`. miniquad's `MainActivity` swallows every key, so `quad.toml` at the repo root
+injects `android/MainActivityInject.java`: the volume keys change the media volume there. The FPS
+counter sits further in from the rounded corner.
 
 ## The frame
 
