@@ -1095,11 +1095,15 @@ thread_local! {
     static KEYBOARD_WANTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// The on-screen keyboard as last asked for ([`sync_keyboard`]).
     static KEYBOARD_SHOWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The text of the active field this frame and its caret (a char index): the strip shows it.
+    static KEYBOARD_TEXT: RefCell<(String, usize)> = const { RefCell::new((String::new(), 0)) };
 }
 
-/// A text field is active this frame: the on-screen keyboard should show ([`sync_keyboard`]).
-fn want_keyboard() {
+/// A text field is active this frame: the on-screen keyboard should show ([`sync_keyboard`]),
+/// and the strip ([`draw_keyboard_strip`]) shows its text `s` with the caret at char `caret`.
+fn want_keyboard(s: &str, caret: usize) {
     KEYBOARD_WANTED.with(|k| k.set(true));
+    KEYBOARD_TEXT.with(|t| *t.borrow_mut() = (s.to_string(), caret));
 }
 
 /// Shows or hides the on-screen keyboard (Android and iOS; the desktop has none).
@@ -1120,6 +1124,47 @@ pub fn sync_keyboard() {
     if wanted != shown || (wanted && is_mouse_button_pressed(MouseButton::Left)) {
         KEYBOARD_SHOWN.with(|k| k.set(wanted));
         set_keyboard(wanted);
+    }
+}
+
+/// The line of `s` that holds char `caret`, and the caret's char index in that line.
+fn caret_line(s: &str, caret: usize) -> (String, usize) {
+    let chars: Vec<char> = s.chars().collect();
+    let caret = caret.min(chars.len());
+    let start = chars[..caret].iter().rposition(|&c| c == '\n').map_or(0, |i| i + 1);
+    let end = chars[caret..].iter().position(|&c| c == '\n').map_or(chars.len(), |i| caret + i);
+    (chars[start..end].iter().collect(), caret - start)
+}
+
+/// Mobile only: while a field wants the keyboard, the line it types is drawn in a dark strip
+/// across the top of the screen, over the frame. The keyboard covers the field on a small
+/// screen; the strip keeps the typed text in sight. Called before [`sync_keyboard`].
+pub fn draw_keyboard_strip() {
+    if !razdor::platform::MOBILE || !KEYBOARD_WANTED.with(|k| k.get()) {
+        return;
+    }
+    let (line, caret) = KEYBOARD_TEXT.with(|t| {
+        let t = t.borrow();
+        caret_line(&t.0, t.1)
+    });
+    let k = super::chrome::k();
+    let size = 17.0 * k;
+    let (w, h, pad) = (screen_width(), (size * 2.0).round(), 8.0 * k);
+    draw_rectangle(0.0, 0.0, w, h, Color::new(0.0, 0.0, 0.0, 0.8));
+    let advance = |c: char| measure(c.encode_utf8(&mut [0; 4]), size).width;
+    let xs = text_edit::caret_xs(&line, advance);
+    let room = w - 2.0 * pad;
+    let first = text_edit::first_shown(&xs, caret, room);
+    let n = xs.len() - 1;
+    let last = (first..=n).rev().find(|&i| xs[i] - xs[first] <= room).unwrap_or(first);
+    let x_of = |i: usize| pad + xs[i] - xs[first];
+    // The baseline that centres the text in the strip (as [`edit_line`] places a caret).
+    let y = h / 2.0 + size * 0.325;
+    let part: String = line.chars().skip(first).take(last - first).collect();
+    text(&part, pad, y, size, INK);
+    if caret_on() && (first..=last).contains(&caret) {
+        let cx = x_of(caret).round();
+        draw_line(cx, y - size * 0.8, cx, y + size * 0.15, (size / 12.0).max(1.0), INK);
     }
 }
 
@@ -1351,7 +1396,7 @@ fn edit_mouse(id: u64, ed: &mut TextEdit, s: &str, hit: Rect, at: impl Fn(f32, f
 #[allow(clippy::too_many_arguments)]
 pub fn edit_line(id: u64, s: &str, ed: &mut TextEdit, active: bool, mouse: bool, r: Rect, y: f32, look: LineLook) {
     if active {
-        want_keyboard();
+        want_keyboard(s, ed.caret);
     }
     ed.fit(s);
     let size = look.size;
@@ -1390,7 +1435,7 @@ pub fn edit_line(id: u64, s: &str, ed: &mut TextEdit, active: bool, mouse: bool,
 #[allow(clippy::too_many_arguments)]
 pub fn edit_rows(id: u64, s: &str, ed: &mut TextEdit, active: bool, r: Rect, size: f32, pitch: f32, color: Color) {
     if active {
-        want_keyboard();
+        want_keyboard(s, ed.caret);
     }
     ed.fit(s);
     let advance = |c: char| measure(c.encode_utf8(&mut [0; 4]), size).width;
@@ -1981,5 +2026,21 @@ mod tests {
     fn transliterates_russian() {
         assert_eq!(transliterate("Привет, Мир"), "Privet, Mir");
         assert_eq!(transliterate("ok 12"), "ok 12");
+    }
+
+    #[test]
+    fn the_strip_shows_the_line_of_the_caret() {
+        assert_eq!(caret_line("ab\ncd", 4), ("cd".to_string(), 1));
+        assert_eq!(caret_line("ab\ncd", 2), ("ab".to_string(), 2), "a caret at a break ends its line");
+        assert_eq!(caret_line("", 0), (String::new(), 0));
+        assert_eq!(caret_line("Имя", 9), ("Имя".to_string(), 3), "a caret past the end is the end");
+    }
+
+    #[test]
+    fn an_active_field_wants_the_keyboard_with_its_text() {
+        KEYBOARD_WANTED.with(|k| k.set(false));
+        want_keyboard("Вася", 2);
+        assert!(KEYBOARD_WANTED.with(|k| k.get()));
+        assert_eq!(KEYBOARD_TEXT.with(|t| t.borrow().clone()), ("Вася".to_string(), 2));
     }
 }

@@ -86,8 +86,11 @@ turn is a resize, and the interface scale fits the new width and height (`chrome
 The on-screen keyboard follows the text fields: `edit_line` / `edit_rows` drawn active ask for it,
 and `widgets::sync_keyboard` (once a frame, before `next_frame`) shows or hides it with miniquad's
 `show_keyboard`. miniquad's `MainActivity` swallows every key, so `quad.toml` at the repo root
-injects `android/MainActivityInject.java`: the volume keys change the media volume there. The FPS
-counter sits further in from the rounded corner.
+injects `android/MainActivityInject.java`: the volume keys change the media volume there, and on
+API 30+ its `RESIZING_LAYOUT_ON_APPLY_WINDOW_INSETS` section pads by the system bars only, so the
+keyboard floats over the full-size game instead of squashing it. On mobile, `widgets::draw_keyboard_strip`
+draws the line being typed in a dark strip across the top (the keyboard may cover the field); iOS
+needs the strip too, since UIKit does not resize the view. The FPS counter sits further in from the rounded corner.
 
 Touchpad mode (`src/ui/touchpad.rs`; off by default, on only at `Settings::touchpad == Some(true)`
 on mobile, set by the options window's last checkbox there, which makes the window 28 px taller

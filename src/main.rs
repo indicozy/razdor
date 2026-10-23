@@ -163,6 +163,8 @@ async fn main() {
         app.frame();
         app.draw_fps();
         ui::snapshot::draw_overlay();
+        // On mobile, the text being typed, over the frame (the keyboard covers its field).
+        ui::widgets::draw_keyboard_strip();
         // The original draws its pointer last, over everything (0x474a81).
         ui::cursor::draw();
         if quiet {
