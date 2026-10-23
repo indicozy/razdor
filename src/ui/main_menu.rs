@@ -59,9 +59,10 @@ fn video(p: Vec2) -> Vec2 {
     vec2(screen_width() / 2.0 + p.x * k, chrome::canvas_top() + p.y * k)
 }
 
-/// The burning ruins over the whole screen, a little warmer where the fire glows.
+/// The burning ruins over the whole screen, a little warmer where the fire glows. Not panned:
+/// the screen behind a panned title stays covered (`ui::pan`).
 fn background() {
-    match chrome::win("Castle") {
+    super::pan::unpanned(|| match chrome::win("Castle") {
         Some(t) => {
             // A phone in portrait covers the screen with the picture's centre (keeping its
             // aspect), not stretched; other screens stretch it as before.
@@ -73,7 +74,7 @@ fn background() {
             }
         }
         None => clear_background(Color::from_rgba(60, 30, 12, 255)),
-    }
+    });
 }
 
 /// The current and next frame, and the blend between them, for a looping animation.
@@ -973,10 +974,11 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     if row(tr("Screen (Alt+Enter)"), audio.display.label(), &mut y) {
         audio.display = audio.display.next();
     }
-    // The interface scale, as Minecraft's: Auto (the largest that fits) or a fixed one below it.
+    // The interface scale: Auto (the largest that fits) or a fixed one, past the fit too (the
+    // windows pan then, `ui::pan`).
     let fit = chrome::fit_k();
     if row(tr("Interface scale"), &super::display::scale_label(audio.ui_scale, fit), &mut y) {
-        audio.ui_scale = super::display::next_scale(audio.ui_scale, fit);
+        audio.ui_scale = super::display::next_scale(audio.ui_scale);
     }
     // The interface's fonts (Razdor's choice): the original's sheets from the install, or PT
     // Serif; at once.

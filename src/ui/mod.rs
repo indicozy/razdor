@@ -28,6 +28,7 @@ pub mod language;
 pub mod main_menu;
 pub mod minimap;
 pub mod new_game;
+pub mod pan;
 pub mod saves;
 pub mod screens;
 pub mod script_font;
@@ -713,7 +714,7 @@ impl App {
         if !self.audio.settings.show_fps {
             return;
         }
-        let k = chrome::k();
+        let k = chrome::bar_k();
         let label = format!("FPS {shown}");
         let size = (14.0 * k).round();
         let w = widgets::measure(&label, size).width;
@@ -839,6 +840,14 @@ impl App {
         }
         // The key bindings the player changed (saved with the settings, as the minimap's).
         self.audio.settings.keys = keymap::overrides();
+        // The pan first: the pointer below is read on the canvas (`ui::pan`). The editor and the
+        // map alone are not panned; a dialog over the map is. The finger's pan is last frame's.
+        let pannable = match &self.screen {
+            Screen::Editor => false,
+            Screen::WorldMap => !self.dialogs.is_empty(),
+            _ => true,
+        };
+        pan::begin_frame(pannable, std::mem::discriminant(&self.screen), self.dialogs.len());
         input::begin_frame();
         chrome::begin_frame();
         // The first game queues the map's pictures for the background decoders (once: the set
@@ -946,9 +955,10 @@ impl App {
                 let pick = scenario.and_then(|i| Some((self.scenarios.get(i)?, self.dt_content.clone()?)));
                 new_game::class_select(game, &self.demo, pick, &self.assets)
             }
-            (Screen::WorldMap, Some(game)) => {
+            // The map itself stays where it is; a dialog over it is panned (`ui::pan`).
+            (Screen::WorldMap, Some(game)) => pan::unpanned(|| {
                 world_view::frame(game, &self.assets, &mut self.map_view, &mut self.message, &mut self.dialogs)
-            }
+            }),
             (Screen::Building(view), Some(game)) => {
                 building_view::frame(game, &self.assets, view, &mut self.message, &mut self.dialogs)
             }

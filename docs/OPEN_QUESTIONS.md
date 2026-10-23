@@ -8,6 +8,11 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **A window larger than the screen hides the bottom bar (interface scale above 2×, Razdor's own
+  choice, not the original's).** `world_view::window_backdrop` draws the bar under the window and
+  the window's panned background covers it. Settles it: redraw the bar over the window (not its
+  buttons, which the window's own press handling already took), or clip the window above the bar.
+
 - **AI ships move about twice as fast as the original's (report 1082, 2026-10-23).** A diff
   test on РК1 (knight, the opening read, 48 one-hour waits, `tools/difftest`) has the sea
   pirates (army 9) sail 4 cells in the first hour in the original and 7 in Razdor, 6 against 12

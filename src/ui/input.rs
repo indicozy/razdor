@@ -201,8 +201,16 @@ fn keys_where(pick: impl Fn(&Edge) -> bool) -> Vec<KeyCode> {
     with_frame(|f| f.keys.iter().filter(|(_, e)| pick(e)).map(|(k, _)| *k).collect())
 }
 
-/// The pointer: the pad's while it is in use, else the mouse's.
+/// The pointer: the pad's while it is in use, else the mouse's; on the canvas, so the pan
+/// (`ui::pan`) is taken off it.
 pub fn mouse_position() -> (f32, f32) {
+    let (x, y) = screen_pointer();
+    let (ox, oy) = super::pan::shift();
+    (x - ox, y - oy)
+}
+
+/// The pointer on the screen: the pad's while it is in use, else the mouse's (not panned).
+pub fn screen_pointer() -> (f32, f32) {
     pad_pointer().unwrap_or_else(mq::mouse_position)
 }
 

@@ -161,6 +161,8 @@ async fn main() {
             opened = 6;
         }
         app.frame();
+        // The FPS counter, the keyboard strip and the pointer stay where the screen is.
+        ui::pan::end_frame();
         app.draw_fps();
         ui::snapshot::draw_overlay();
         // On mobile, the text being typed, over the frame (the keyboard covers its field).

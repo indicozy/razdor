@@ -230,7 +230,7 @@ pub enum Look {
 
 /// The four resources along the bar's lower strip.
 fn resources(game: &Game, y: f32, h: f32) {
-    let k = chrome::k();
+    let k = chrome::bar_k();
     let w = screen_width();
     let mut wages = format!("- {}", game.daily_wages());
     if game.daily_mana_wages() > 0 {
@@ -366,7 +366,12 @@ pub fn draw(game: &Game, look: impl Fn(BarButton) -> Look) -> Option<BarButton> 
 /// three time buttons over it instead of its text. Returns the bar button and the time
 /// button pressed.
 pub fn draw_with_time(game: &Game, look: impl Fn(BarButton) -> Look, time_buttons: bool) -> (Option<BarButton>, Option<TimeButton>) {
-    let k = chrome::k();
+    // The bar stays at the screen's bottom whatever the windows' pan is (`ui::pan`).
+    super::pan::unpanned(|| draw_bar(game, &look, time_buttons))
+}
+
+fn draw_bar(game: &Game, look: &impl Fn(BarButton) -> Look, time_buttons: bool) -> (Option<BarButton>, Option<TimeButton>) {
+    let k = chrome::bar_k();
     let (w, h) = (screen_width(), screen_height());
     let bar = chrome::bar_height();
     let y = h - bar;
@@ -483,7 +488,7 @@ pub fn draw_with_time(game: &Game, look: impl Fn(BarButton) -> Look, time_button
 
 /// The time panel in the middle of the bar (clicks on it do not reach the map).
 pub fn time_panel() -> Rect {
-    let row = (60.0 * chrome::k()).round();
+    let row = (60.0 * chrome::bar_k()).round();
     let ew = 370.0 * row / 64.0;
     Rect::new(ew, screen_height() - chrome::bar_height(), screen_width() - 2.0 * ew, row)
 }

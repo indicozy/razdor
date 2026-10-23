@@ -48,8 +48,9 @@ impl DisplayMode {
 // ------------------------------------------------------------------------------------------
 
 /// The interface scales the player can pick, in screen pixels per pixel of the 960×720
-/// reference (`chrome::k`); `0` is "Auto", the largest that fits the window.
-pub const SCALES: [f32; 9] = [0.0, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0];
+/// reference (`chrome::k`); `0` is "Auto", the largest that fits the window. Past the fit a
+/// scale is larger than the screen, and the windows pan (`ui::pan`).
+pub const SCALES: [f32; 10] = [0.0, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 3.5, 4.0];
 
 /// The chosen scale as `f32` bits (`0.0`: auto), read by `chrome::k` every call.
 static SCALE: AtomicU32 = AtomicU32::new(0);
@@ -58,9 +59,16 @@ pub fn set_scale(scale: f32) {
     SCALE.store(scale.to_bits(), Ordering::Relaxed);
 }
 
-/// The interface scale for a window whose own fit is `fit`: the chosen one, as in Minecraft
-/// never larger than what fits.
+/// The interface scale for a window whose own fit is `fit`: the chosen one, even larger than
+/// the fit (the windows then pan, `ui::pan`); Auto is the fit.
 pub fn scale(fit: f32) -> f32 {
+    let chosen = chosen_scale();
+    if chosen > 0.0 { chosen } else { fit }
+}
+
+/// The chosen scale kept to the window's fit: the bottom bar, the FPS counter and the keyboard
+/// strip stay as large as the fit allows, whatever the player chose.
+pub fn fitted_scale(fit: f32) -> f32 {
     let chosen = chosen_scale();
     if chosen > 0.0 { chosen.min(fit) } else { fit }
 }
@@ -70,20 +78,22 @@ pub fn chosen_scale() -> f32 {
     f32::from_bits(SCALE.load(Ordering::Relaxed))
 }
 
-/// The scale after `chosen` in the settings' cycle, skipping those the window cannot fit
-/// (they would look the same as Auto).
-pub fn next_scale(chosen: f32, fit: f32) -> f32 {
+/// The scale after `chosen` in the settings' cycle (Auto after the largest).
+pub fn next_scale(chosen: f32) -> f32 {
     let at = SCALES.iter().position(|&s| s == chosen).unwrap_or(0);
-    (1..=SCALES.len()).map(|i| SCALES[(at + i) % SCALES.len()]).find(|&s| s == 0.0 || s < fit - 0.01).unwrap_or(0.0)
+    SCALES[(at + 1) % SCALES.len()]
 }
 
-/// The settings' label of a scale, against the window's own fit.
+/// The settings' label of a scale, against the window's own fit: Auto shows the fit, and a
+/// scale above the fit says it is larger than the screen.
 pub fn scale_label(chosen: f32, fit: f32) -> String {
     use razdor::i18n::tr;
-    if chosen > 0.0 && chosen < fit - 0.01 {
-        format!("{chosen}×")
-    } else {
+    if chosen <= 0.0 {
         format!("{} ({:.1}×)", tr("Auto"), fit)
+    } else if chosen > fit + 0.01 {
+        format!("{chosen}× ({})", tr("larger than the screen"))
+    } else {
+        format!("{chosen}×")
     }
 }
 
@@ -1026,14 +1036,25 @@ mod tests {
     }
 
     #[test]
-    fn scale_never_exceeds_the_fit_and_skips_what_does_not_fit() {
-        assert_eq!(next_scale(0.0, 1.5), 1.0);
-        assert_eq!(next_scale(1.0, 1.5), 1.25, "a full HD screen's step between 1× and its fit");
-        assert_eq!(next_scale(1.25, 1.5), 0.0, "1.5 is the fit itself: Auto");
+    fn scale_steps_run_to_4_past_the_fit() {
+        assert_eq!(next_scale(0.0), 1.0);
+        assert_eq!(next_scale(1.0), 1.25);
+        assert_eq!(next_scale(3.5), 4.0, "the steps go on past a 1.5 fit");
+        assert_eq!(next_scale(4.0), 0.0, "after the largest, Auto");
+        assert_eq!(scale_label(0.0, 1.5), "Auto (1.5×)");
         assert_eq!(scale_label(1.25, 1.5), "1.25×");
-        assert_eq!(next_scale(0.0, 3.2), 1.0);
-        assert_eq!(next_scale(3.0, 3.2), 0.0);
-        assert_eq!(next_scale(2.0, 1.5), 0.0, "a scale that no longer fits moves on to Auto");
+        assert_eq!(scale_label(2.0, 1.5), "2× (larger than the screen)");
         assert_eq!(scale_label(2.0, 3.0), "2×");
+    }
+
+    #[test]
+    fn the_choice_goes_past_the_fit_and_the_bar_keeps_it() {
+        set_scale(2.0);
+        assert_eq!(scale(1.5), 2.0, "the chosen scale, past the fit");
+        assert_eq!(fitted_scale(1.5), 1.5, "the bar's scale stays at the fit");
+        assert_eq!(fitted_scale(3.0), 2.0, "below the fit it is the choice");
+        set_scale(0.0);
+        assert_eq!(scale(1.5), 1.5, "Auto is the fit");
+        assert_eq!(fitted_scale(1.5), 1.5);
     }
 }

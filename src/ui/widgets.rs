@@ -1166,7 +1166,7 @@ pub fn draw_keyboard_strip() {
         let t = t.borrow();
         caret_line(&t.0, t.1)
     });
-    let k = super::chrome::k();
+    let k = super::chrome::bar_k();
     let size = 17.0 * k;
     // The strip sits inside the safe area: away from the rounded corners, the cutout and the bars.
     let (left, top, right, _) = razdor::platform::safe_insets();

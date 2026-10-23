@@ -1279,7 +1279,8 @@ pub fn grey_out(r: Rect) {
 // ------------------------------------------------------------------------------------------
 
 /// Screen pixels per pixel of the 960×720 reference video (the original ran at 1024×768):
-/// the settings' interface scale, never more than [`fit_k`].
+/// the settings' interface scale, which may be larger than the screen ([`fit_k`]; the windows
+/// pan then, `ui::pan`).
 pub fn k() -> f32 {
     super::display::scale(fit_k())
 }
@@ -1289,9 +1290,15 @@ pub fn fit_k() -> f32 {
     ((screen_width() / 1024.0).min(screen_height() / 768.0) / 0.9375).max(0.5)
 }
 
+/// The scale of the bottom bar, the FPS counter and the keyboard strip: the chosen one kept to
+/// the fit, so they stay fully visible whatever the windows' scale is.
+pub fn bar_k() -> f32 {
+    super::display::fitted_scale(fit_k())
+}
+
 /// Height of the bottom game bar.
 pub fn bar_height() -> f32 {
-    (80.0 * k()).round()
+    (80.0 * bar_k()).round()
 }
 
 /// Top of a `canvas_h`-tall canvas centred vertically on a `screen_w`×`screen_h` screen. Only
@@ -1882,6 +1889,8 @@ fn window_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bool,
     });
     draw_rectangle(r.x + 6.0 * k, r.y + 6.0 * k, r.w, r.h, Color::new(0.0, 0.0, 0.0, 0.35));
     surface(r, skin);
+    // A one-finger slide over the window pans it when the canvas overflows (`ui::pan`).
+    super::pan::window_area(r);
     let tb = (26.0 * k).round();
     let closed = title_bar_styled(Rect::new(r.x, r.y, r.w, tb), title, skin, closable, ornate, title_color);
     // The frame round the window and the line under its title (0x48d3f8).

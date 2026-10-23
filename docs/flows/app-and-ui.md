@@ -290,8 +290,26 @@ Building a window (`src/ui/chrome.rs`):
 
 - `chrome::k()` is the interface scale: screen pixels per pixel of the 960×720 reference
   video. Every size and offset is written in reference pixels times `k`. `chrome::fit_k` is
-  the largest that fits; `chrome::bar_height` the bottom bar. A chosen scale is cut down to
-  the fit (`display::scale`); `display::chosen_scale` is the setting as it is.
+  the largest that fits; `chrome::bar_height` the bottom bar. The chosen scale goes past the
+  fit (`display::scale`, up to ×4; Auto is the fit); `display::chosen_scale` is the setting as
+  it is. The bottom bar, the FPS counter and the keyboard strip use `chrome::bar_k`, the chosen
+  scale cut to the fit (`display::fitted_scale`), so they stay as large as the fit allows.
+- The pan (`src/ui/pan.rs`, Razdor's, the owner's request): when the canvas (960k × 720k) is
+  larger than the screen, the offset is a translation of macroquad's camera that shifts
+  everything drawn in the frame. `pan::begin_frame` runs before `input::begin_frame`
+  (`App::frame_content`) and clamps the offset with `pan::offset_range` (the canvas edges meet
+  the screen's, no further). Its input: a middle-button drag (desktop), or the finger's pan of
+  the frame (`input::map_pan`, from last frame's gesture: a swipe over a window's registered
+  area, `pan::window_area`, called by `chrome::window_styled`). It resets when the screen or a
+  dialog changes (the window opened is centred). `input::mouse_position` takes the offset off,
+  so the hit tests follow the drawing. `pan::unpanned` keeps the bottom bar
+  (`game_bar::draw_with_time`), the map under a window (`world_view::window_backdrop`,
+  `backdrop_lit`), the title's background (`main_menu::background`) and the map alone where
+  they are; `pan::end_frame` (`main.rs`) puts the FPS counter, keyboard strip and pointer back
+  on the screen. Not panned: the editor, the map with no dialog open.
+- Known gap: a window larger than the screen covers the bottom bar drawn under it
+  (`world_view::window_backdrop` draws the bar, then the window), so at a large scale the bar
+  is hidden behind an enlarged window; the bar is not redrawn over the window.
 - The world map's scale at zoom 1 (`world_view::map_scale`, Razdor's choice) follows the
   interface scale setting, not the window: its 32 px cells are drawn at the chosen scale ×
   0.9375 (as large as the original's pictures in the windows), not cut down to the fit;

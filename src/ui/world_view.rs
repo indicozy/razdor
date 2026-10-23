@@ -2391,12 +2391,15 @@ fn backdrop_camera(game: &Game, full: Rect) -> Camera {
 /// The map under a building window or a dialog: drawn over the whole screen, not
 /// interactive, with the bar's buttons greyed (`lit`: the open screen's button).
 pub fn backdrop_lit(game: &Game, assets: &Assets, lit: Option<BarButton>) {
-    clear_background(rgb(10, 12, 10));
-    let full = map_area();
-    let cam = backdrop_camera(game, full);
-    draw_world(game, assets, &cam, None, None, None);
-    cam.draw_fog(game);
-    draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.2));
+    // The map stays where it is when the window over it is panned (`ui::pan`).
+    super::pan::unpanned(|| {
+        clear_background(rgb(10, 12, 10));
+        let full = map_area();
+        let cam = backdrop_camera(game, full);
+        draw_world(game, assets, &cam, None, None, None);
+        cam.draw_fog(game);
+        draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.2));
+    });
     game_bar::draw(game, |b| if Some(b) == lit { Look::Lit } else { Look::Grey });
 }
 
@@ -2408,12 +2411,15 @@ pub fn backdrop(game: &Game, assets: &Assets) {
 /// as in the original: its buttons are blue, the window's own one green; one pressed gives
 /// the screen it opens (the lit one, or the map button, closes the window).
 pub fn window_backdrop(game: &Game, assets: &Assets, lit: Option<BarButton>) -> Option<Screen> {
-    clear_background(rgb(10, 12, 10));
-    let full = map_area();
-    let cam = backdrop_camera(game, full);
-    draw_world(game, assets, &cam, None, None, None);
-    cam.draw_fog(game);
-    draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.2));
+    // The map stays where it is when the window over it is panned (`ui::pan`).
+    super::pan::unpanned(|| {
+        clear_background(rgb(10, 12, 10));
+        let full = map_area();
+        let cam = backdrop_camera(game, full);
+        draw_world(game, assets, &cam, None, None, None);
+        cam.draw_fog(game);
+        draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.2));
+    });
     let idle = game.foe.is_none();
     let modal = input_blocked();
     let pressed = game_bar::draw(game, |b| match b {
