@@ -212,6 +212,43 @@ pub fn ask_once() {
     }
 }
 
+/// `ActivityInfo`'s screen orientations: the system's full user rotation (the manifest's
+/// `fullUser`, Auto), the sensor's landscape and the sensor's portrait.
+const ORIENTATION_AUTO: i32 = 13;
+const ORIENTATION_LANDSCAPE: i32 = 6;
+const ORIENTATION_PORTRAIT: i32 = 7;
+
+local! {
+    /// The orientation last asked of the system (an `ORIENTATION_*`), none before the first call.
+    static ORIENTATION: Cell<Option<i32>> = const { Cell::new(None) };
+}
+
+/// Puts the setting's orientation on the activity when it has changed: at start, and each time
+/// the settings' row changes it (`setRequestedOrientation`; the system turns the screen then).
+/// Called from the UI's frame, which runs on the activity's own thread as the other calls here.
+pub fn follow_orientation(setting: Option<super::audio::Orientation>) {
+    use super::audio::Orientation;
+    let want = match setting {
+        None => ORIENTATION_AUTO,
+        Some(Orientation::Landscape) => ORIENTATION_LANDSCAPE,
+        Some(Orientation::Portrait) => ORIENTATION_PORTRAIT,
+    };
+    if ORIENTATION.with(|o| o.get()) == Some(want) {
+        return;
+    }
+    ORIENTATION.with(|o| o.set(Some(want)));
+    // SAFETY: as in `storage_granted`; the activity exists once the frames run.
+    unsafe {
+        let env = attach_jni_env();
+        let set = method(env, activity_class(env).obj, "setRequestedOrientation", "(I)V", false);
+        if set.is_null() || cleared(env) {
+            return;
+        }
+        ((**env).CallVoidMethod.unwrap())(env, ACTIVITY, set, want);
+        cleared(env);
+    }
+}
+
 /// The margin the rounded corners and the bars keep at least, in dp: the corners of a phone's
 /// screen are not reported by every system, so the interface keeps this much from each edge.
 const CORNER_DP: f32 = 24.0;

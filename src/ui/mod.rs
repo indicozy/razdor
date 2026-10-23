@@ -819,6 +819,9 @@ impl App {
         mobile::refresh_safe_insets();
         #[cfg(any(target_os = "android", target_os = "ios"))]
         self.mobile_install_poll();
+        // The screen's orientation from the settings (Android; applied at start and on each change).
+        #[cfg(target_os = "android")]
+        android::follow_orientation(self.audio.settings.orientation);
         if matches!(self.screen, Screen::Editor) {
             self.frame_content();
         } else {

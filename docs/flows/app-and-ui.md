@@ -87,12 +87,18 @@ finger holds the left button, a long press holds the right one, two fingers pinc
 (the map's zoom) or slide (the map's scroll, or the list's wheel). A long press keeps the pointer
 where the press began while the right button is held (`GestureMapper::press_at`): the finger may
 slide to uncover the view, and the info window (army, building) stays put; the lift releases the
-button there too. The touchpad mode is an option (`Settings::touchpad`, off by default; below).
-Gamepads are off
+button there too. The touchpad mode is an option (`Settings::touchpad`, off by default; below). Gamepads are off
 (`--no-default-features --features audio`).
 The screen turns with the device (Android `screenOrientation = fullUser` in `Cargo.toml`,
 following the rotation lock; iOS portrait and landscape in `scripts/dist-ios.sh`'s Info.plist); a
 turn is a resize, and the interface scale fits the new width and height (`chrome::fit_k`).
+The orientation setting (Android only; the options window's «Ориентация экрана» row, the last one
+on Android, `Settings::orientation: Option<audio::Orientation>`, `None` = Auto): Auto keeps the
+manifest's `fullUser`, Landscape and Portrait lock the activity. `ui::android::follow_orientation`
+runs from `Ui::frame` and calls `Activity.setRequestedOrientation(int)` over JNI with
+`ActivityInfo`'s 13 (full user), 6 (sensor landscape) and 7 (sensor portrait) when the value
+changes, so it applies at start and on each change. iOS has no row (its rotation lock stays the
+system's).
 The on-screen keyboard follows the text fields: `edit_line` / `edit_rows` drawn active ask for it,
 and `widgets::sync_keyboard` (once a frame, before `next_frame`) shows or hides it with miniquad's
 `show_keyboard`. miniquad's `MainActivity` swallows every key, so `quad.toml` at the repo root

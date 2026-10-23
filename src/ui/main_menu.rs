@@ -833,6 +833,15 @@ pub fn open_keys() {
     KEYS_OPEN.with(|o| o.set(true));
 }
 
+/// The orientation row's value: Auto (None), Landscape or Portrait.
+fn orientation_label(orientation: Option<super::audio::Orientation>) -> &'static str {
+    match orientation {
+        None => tr("Auto"),
+        Some(super::audio::Orientation::Landscape) => tr("Landscape"),
+        Some(super::audio::Orientation::Portrait) => tr("Portrait"),
+    }
+}
+
 /// A button of Razdor's own rows (`label` on the marble), true when clicked.
 fn row_button(r: Rect, label: &str) -> bool {
     settings_button(r, label)
@@ -1179,7 +1188,9 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     let title = own("Options", "Title", n_("Sound, graphics and gameplay settings"));
     // On a phone the touchpad mode's row (`ui::touchpad`) takes 28 more px under the checkboxes.
     let touch_row = super::touchpad::MOBILE;
-    let h = if touch_row { 528.0 } else { 500.0 };
+    // The orientation row is Android's: iOS keeps the system's rotation lock for now, so it has no row there.
+    let orientation_row = cfg!(target_os = "android");
+    let h = if orientation_row { 556.0 } else if touch_row { 528.0 } else { 500.0 };
     let (inner, closed) = if over_map { map_window(&title, 594.0, h) } else { window(&title, 594.0, h) };
     let k = chrome::k();
     let outer = Rect::new(inner.x - 2.0 * k, inner.y - (26.0 * k).round() - 1.0, 594.0 * k, h * k);
@@ -1245,6 +1256,20 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
         let on = audio.touchpad.unwrap_or(false);
         if option_check(cx, cy(8), &own("Options", "RazdorTouchpad", n_("Touchpad mode (the screen moves a cursor)")), on, CHECK_INK) {
             audio.touchpad = Some(!on);
+        }
+    }
+    // Razdor's screen orientation (Android only): Auto (the system's, the device's turn), then
+    // landscape or portrait, cycled by the button. `ui::android::follow_orientation` applies it.
+    if orientation_row {
+        let y = cy(9) - 4.0 * k;
+        chrome::shadow_text(tr("Screen orientation"), cx, y + 18.0 * k, 14.0 * k, chrome::CREAM);
+        let r = Rect::new(inner.x + inner.w - 14.0 * k - 170.0 * k, y, 170.0 * k, 28.0 * k);
+        if row_button(r, orientation_label(audio.orientation)) {
+            audio.orientation = match audio.orientation {
+                None => Some(super::audio::Orientation::Landscape),
+                Some(super::audio::Orientation::Landscape) => Some(super::audio::Orientation::Portrait),
+                Some(super::audio::Orientation::Portrait) => None,
+            };
         }
     }
     // Razdor's own settings, in a window of their own.

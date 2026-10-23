@@ -163,6 +163,9 @@ pub struct Settings {
     /// Phones and tablets, Razdor's: the touchpad mode (`ui::touchpad`), on only at `Some(true)`;
     /// off, the touch is the gestures (`ui::gestures`).
     pub touchpad: Option<bool>,
+    /// Phones, Razdor's: the screen's orientation (`ui::android::follow_orientation`); `None`
+    /// (the default) is Auto, the system's rotation. Android only (`main_menu::options_window`).
+    pub orientation: Option<Orientation>,
     /// The enemy's battle AI: `Some(true)` expert (the original's "improved enemy AI in
     /// battle"), `Some(false)` easy; `None` until chosen: the install's `OptValue9`.
     pub expert_ai: Option<bool>,
@@ -236,9 +239,18 @@ pub struct Settings {
     pub keys: Vec<(String, String)>,
 }
 
+/// The screen's orientation the player chose on a phone: Auto turns with the device, the others
+/// stay in landscape or in portrait.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Orientation {
+    Landscape,
+    Portrait,
+}
+
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, expert_ai: None, max_ai: false, wide_row: None, display: Default::default(), ui_scale: 0.0, minimap_size: None, minimap_corner: Default::default(), friends_let_pass: false, pass_on_bridges: false, avoid_armies: false, battle_marks: true, army_list: false, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new() }
+        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, wide_row: None, display: Default::default(), ui_scale: 0.0, minimap_size: None, minimap_corner: Default::default(), friends_let_pass: false, pass_on_bridges: false, avoid_armies: false, battle_marks: true, army_list: false, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new() }
     }
 }
 
