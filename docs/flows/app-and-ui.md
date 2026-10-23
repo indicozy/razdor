@@ -39,7 +39,21 @@ Install lookup order (`src/dt/install.rs` `locate_with`): `RAZDOR_DT_DIR`, the p
 folder when it is an install, the remembered folder (`config_file`), then a search under
 `search_roots`. Without an install Razdor runs the built-in demo.
 
-## Android (experimental)
+## Android and iOS (experimental)
+
+iOS mirrors Android, with no permission. `scripts/dist-ios.sh` (on a Mac; the `ios` job of
+`.github/workflows/release.yml`) builds `dist/razdor.ipa`: an `aarch64-apple-ios` binary in a
+`Payload/Razdor.app` bundle whose Info.plist is written by the script, ad-hoc signed only so the
+binary loads; the player's AltStore or Sideloadly re-signs it. Paths: `platform::app_dir` and
+`config_dir` are `Documents/Razdor` (the app's sandbox `$HOME/Documents`), and `install_roots` are
+`Documents/DiscordTimes` then `Documents`. `UIFileSharingEnabled` makes that folder show in the Files
+app as «На iPhone → Раздор», so the player copies the game there; no permission is asked, and
+`platform::MOBILE` (Android or iOS) is the one flag the UI reads for «a phone». The not-found block
+(`screens::ios_not_found`: the copy instructions and «Check again», the Android block's layout) and
+the poll (`App::mobile_install_poll`, `ui::mobile`: the `RECHECK` / `NEXT_POLL` helpers, the 5-s
+look for the install, `storage_granted` = always true on iOS) are shared with Android; the JNI parts
+stay in `ui::android`. The on-screen keyboard is on for both (`widgets::set_keyboard`). No
+self-update, no Discord link. `ui/script_font.rs` skips the fontconfig lookup on iOS, as on Android.
 
 The APK is built by `scripts/dist-android.sh` (cargo-quad-apk, pinned in its header; NDK 29;
 see `[package.metadata.android]` in `Cargo.toml`). Per-platform paths live in one place:
@@ -55,7 +69,7 @@ the runtime permissions (8 to 10), and `storage_granted`. The title screen's not
 (`screens::android_not_found`, scaled to the screen, its buttons at least 12% of its height)
 opens the access page by itself once per run (`android::ask_once`) and has «Выдать доступ» and
 «Проверить снова»; while it
-is shown, `App::android_install_poll` (every 5 s once the permission is granted, and on the
+is shown, `App::mobile_install_poll` (`ui::mobile`; every 5 s once the permission is granted, and on the
 button) loads a newly found install with `Assets::adopt_install` and the `ui/mod.rs` helpers
 `dt_content_of` / `scenarios_of`, without a restart. Android has no self-update (`update::asset_name` is None) and
 no Discord link (it needs a browser opener): both are hidden there. Touch: without the touchpad
