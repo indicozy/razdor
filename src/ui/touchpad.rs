@@ -12,8 +12,9 @@ use std::cell::Cell;
 
 use super::gamepad::Frame;
 
-/// Phones and tablets: where the touchpad mode is the default and its setting shows.
-pub const MOBILE: bool = cfg!(any(target_os = "android", target_os = "ios"));
+/// Phones and tablets (`platform::MOBILE`): where the touchpad mode is the default and its
+/// setting shows.
+pub use razdor::platform::MOBILE;
 
 thread_local! {
     /// The setting (`Settings::touchpad`), pushed in by `main_menu::apply_options`.
