@@ -532,8 +532,12 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             let pack = scene.ends_with(":market-pack");
             game.pos = game.world.map.center(loc.anchor);
             game.location = Some(l);
-            // The map's opening windows are not shown over the building.
+            // The map's opening windows are not shown over the building. Their places are
+            // cleared too: a place still due (the start's flight to the capital) makes the
+            // building window step aside for the map (`world_view::building_flight`), which
+            // left the scene a black map with no window.
             game.drain_events();
+            game.shown.clear();
             let mut view = BuildingView::new(tab);
             view.selling |= pack;
             // `…:sanctuary:<row>` (or any tab): that row of its list picked; the main hall's

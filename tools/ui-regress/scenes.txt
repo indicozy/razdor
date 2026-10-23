@@ -1,6 +1,7 @@
 # UI regression cases: name | RAZDOR_SCENE | WxH | extra env (KEY=VAL;KEY=VAL), read by ui_regress.py.
 # The case's shot is compared with <goldens>/<name>@<WxH>.png. Maps are install files (Maps_Rus).
 # Building indices (n) are the map's building list (0 is the town hall or the first building with a window).
+# РК3-Столица's 0 is a castle with no market or sanctuary: its market and sanctuary cases use town 8.
 # Title and menus
 title-1280 | title | 1280x800 |
 title-language | title | 1280x800 | RAZDOR_SCENE_LANGUAGE=1
@@ -27,9 +28,9 @@ victory-1280 | victory:РК1-Начало пути | 1280x800 |
 defeat-1280 | defeat:РК1-Начало пути | 1280x800 |
 building-barracks-1280 | building:РК1-Начало пути:0:barracks | 1280x800 |
 building-garrison-1280 | building:РК1-Начало пути:0:garrison | 1280x800 |
-building-market-1280 | building:РК3-Столица:0:market | 1280x800 |
-building-market-pack-1280 | building:РК3-Столица:0:market-pack | 1280x800 |
-building-sanctuary-1280 | building:РК3-Столица:0:sanctuary | 1280x800 |
+building-market-1280 | building:РК3-Столица:8:market | 1280x800 |
+building-market-pack-1280 | building:РК3-Столица:8:market-pack | 1280x800 |
+building-sanctuary-1280 | building:РК3-Столица:8:sanctuary | 1280x800 |
 # Army, hero, spells
 army-1280 | army:РК1-Начало пути | 1280x800 |
 army-unit-1280 | army:РК1-Начало пути:0 | 1280x800 |
@@ -76,8 +77,8 @@ phone-victory-portrait | victory:РК1-Начало пути | 1080x2160 |
 phone-victory-landscape | victory:РК1-Начало пути | 2160x1080 |
 phone-barracks-portrait | building:РК1-Начало пути:0:barracks | 1080x2160 |
 phone-barracks-landscape | building:РК1-Начало пути:0:barracks | 2160x1080 |
-phone-market-portrait | building:РК3-Столица:0:market | 1080x2160 |
-phone-market-landscape | building:РК3-Столица:0:market | 2160x1080 |
+phone-market-portrait | building:РК3-Столица:8:market | 1080x2160 |
+phone-market-landscape | building:РК3-Столица:8:market | 2160x1080 |
 phone-army-portrait | army:РК1-Начало пути | 1080x2160 |
 phone-army-landscape | army:РК1-Начало пути | 2160x1080 |
 phone-hero-portrait | hero:РК1-Начало пути:0 | 1080x2160 |
