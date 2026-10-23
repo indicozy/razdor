@@ -154,7 +154,13 @@ impl GestureMapper {
                     f.pointer = Some(g.at(screen));
                 }
             }
-            n if n >= 2 => self.pinch_or_slide(&mut f, dt, screen, map_scrolls),
+            n if n >= 2 => {
+                // The pointer stays on the first finger while two are down (Razdor's, a player's
+                // report): the wheel of a list takes its turn where the fingers are, not where
+                // the pointer was left before the second finger came down.
+                f.pointer = Some(self.fingers[0].at(screen));
+                self.pinch_or_slide(&mut f, dt, screen, map_scrolls);
+            }
             _ => {}
         }
         // A held button stays down for every frame it is held.
@@ -442,6 +448,23 @@ mod tests {
     }
 
     #[test]
+    fn two_fingers_sliding_keep_the_pointer_on_the_first_finger() {
+        let mut m = GestureMapper::default();
+        step(&mut m, &[touch(1, 300.0, 500.0, Phase::Started)], false);
+        // The second finger lands: the pointer stays where the first one is, not left behind.
+        let down = step(&mut m, &[touch(1, 300.0, 500.0, Phase::Stationary), touch(2, 400.0, 500.0, Phase::Started)], false);
+        assert_eq!(down.pointer, Some((300.0, 500.0)));
+        let mut wheel = 0.0;
+        for i in 0..3 {
+            let y = 500.0 - 40.0 * (i + 1) as f32;
+            let f = step(&mut m, &[touch(1, 300.0, y, Phase::Moved), touch(2, 400.0, y, Phase::Moved)], false);
+            assert_eq!(f.pointer, Some((300.0, y)));
+            wheel += f.wheel;
+        }
+        assert_eq!(wheel, -3.0);
+    }
+
+    #[test]
     fn one_finger_held_and_the_other_sliding_scrolls_the_map() {
         let mut m = GestureMapper::default();
         step(&mut m, &[touch(1, 300.0, 500.0, Phase::Started)], true);
@@ -461,7 +484,8 @@ mod tests {
         let mut m = GestureMapper::default();
         step(&mut m, &[touch(1, 100.0, 100.0, Phase::Started), touch(2, 300.0, 100.0, Phase::Started)], false);
         let third = step(&mut m, &[touch(1, 100.0, 100.0, Phase::Stationary), touch(2, 300.0, 100.0, Phase::Stationary), touch(3, 500.0, 100.0, Phase::Started)], false);
-        assert_eq!(third, Frame::default());
+        // Nothing but the pointer, which stays on the first finger.
+        assert_eq!(Frame { pointer: None, ..third }, Frame::default());
         let slide = step(&mut m, &[touch(1, 100.0, 100.0, Phase::Stationary), touch(2, 300.0, 100.0, Phase::Stationary), touch(3, 500.0, 300.0, Phase::Moved)], false);
         assert_eq!((slide.wheel, slide.scroll, slide.left, slide.right), (0.0, (0.0, 0.0), Edge::default(), Edge::default()));
         for id in 1..=3 {
