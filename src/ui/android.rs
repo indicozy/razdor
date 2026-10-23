@@ -18,6 +18,8 @@ const ALL_FILES_API: i32 = 30;
 /// The package's own page in the settings (the fallback where the all-files page is missing).
 const APP_SETTINGS: &str = "android.settings.APPLICATION_DETAILS_SETTINGS";
 const ALL_FILES: &str = "android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION";
+/// The general list of the apps with all-files access (some vendors lack the package's own page).
+const ALL_FILES_LIST: &str = "android.settings.MANAGE_ALL_FILES_ACCESS_PERMISSION";
 const STORAGE_PERMISSIONS: [&str; 2] = ["android.permission.READ_EXTERNAL_STORAGE", "android.permission.WRITE_EXTERNAL_STORAGE"];
 /// How often the not-found screen looks for the install while the permission is granted.
 const POLL_SECONDS: f64 = 5.0;
@@ -27,6 +29,8 @@ thread_local! {
     static RECHECK: Cell<bool> = const { Cell::new(false) };
     /// The next time the not-found screen polls for the install (macroquad's clock).
     static NEXT_POLL: Cell<f64> = const { Cell::new(0.0) };
+    /// The not-found screen has looked at the storage access once in this run ([`ask_once`]).
+    static ASKED: Cell<bool> = const { Cell::new(false) };
 }
 
 /// A local JNI reference, freed when dropped.
@@ -179,7 +183,8 @@ pub fn request_storage() {
     unsafe {
         let env = attach_jni_env();
         if sdk_int(env) >= ALL_FILES_API {
-            if !start_settings(env, ALL_FILES, true) {
+            // The package's own page, then the general list, then the app's page.
+            if !start_settings(env, ALL_FILES, true) && !start_settings(env, ALL_FILES_LIST, false) {
                 start_settings(env, APP_SETTINGS, true);
             }
         } else {
@@ -196,6 +201,18 @@ pub fn request_storage() {
             ((**env).CallVoidMethod.unwrap())(env, ACTIVITY, ask, perms.obj, 1i32);
             cleared(env);
         }
+    }
+}
+
+/// Asks for the storage the first time the not-found screen is shown in this run, when it is
+/// not granted yet, so the player lands on the access page without finding the button. Later
+/// calls do nothing.
+pub fn ask_once() {
+    if ASKED.with(|a| a.replace(true)) {
+        return;
+    }
+    if !storage_granted() {
+        request_storage();
     }
 }
 

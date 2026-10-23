@@ -158,7 +158,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
     } else if !has_install {
         #[cfg(target_os = "android")]
         {
-            android_not_found(x, y, w);
+            android_not_found(x, w);
         }
         #[cfg(not(target_os = "android"))]
         {
@@ -182,16 +182,27 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
 /// Android: the install is not there. Tells the player what to do, and offers the two buttons:
 /// give Razdor the storage access (the settings page; a dialog on Android 8 to 10), and look
 /// again. The permission and the look are in `ui::android`; the look runs on the title screen.
+/// The first time it is shown in a run, it opens the access page itself ([`ask_once`]). The
+/// block is scaled to the screen, its buttons a twelfth of the height at least, and it sits
+/// at the bottom of the screen.
 #[cfg(target_os = "android")]
-fn android_not_found(x: f32, y: f32, w: f32) {
-    use super::android::{ask_recheck, request_storage};
-    text_fit(tr("Discord Times not found."), x, y, w, 20.0, INK);
-    text_fit(tr("1. Give Razdor access to all files: the «Grant access» button, or Settings > Apps > Razdor > Permissions."), x, y + 26.0, w, 16.0, DIM);
-    text_fit(tr("2. Put the game folder in internal storage, in a folder named DiscordTimes (or in Download)."), x, y + 46.0, w, 16.0, DIM);
-    if button(x, y + 68.0, 200.0, 34.0, tr("Grant access"), true) {
+fn android_not_found(x: f32, w: f32) {
+    use super::android::{ask_once, ask_recheck, request_storage};
+    ask_once();
+    let sh = screen_height();
+    let k = (sh / 600.0).max(1.0);
+    let btn_h = (sh * 0.12).max(34.0 * k);
+    let btn_w = (200.0 * k).min((w - 16.0 * k) / 2.0);
+    let gap = 16.0 * k;
+    let buttons = sh - 20.0 * k - btn_h;
+    let y = buttons - 66.0 * k;
+    text_fit(tr("Discord Times not found."), x, y, w, 20.0 * k, INK);
+    text_fit(tr("1. Give Razdor access to all files: the «Grant access» button, or Settings > Apps > Special app access > All files access > Razdor."), x, y + 26.0 * k, w, 16.0 * k, DIM);
+    text_fit(tr("2. Put the game folder in internal storage, in a folder named DiscordTimes (or in Download)."), x, y + 46.0 * k, w, 16.0 * k, DIM);
+    if button(x, buttons, btn_w, btn_h, tr("Grant access"), true) {
         request_storage();
     }
-    if button(x + 216.0, y + 68.0, 200.0, 34.0, tr("Check again"), true) {
+    if button(x + btn_w + gap, buttons, btn_w, btn_h, tr("Check again"), true) {
         ask_recheck();
     }
 }
