@@ -1102,13 +1102,13 @@ fn want_keyboard() {
     KEYBOARD_WANTED.with(|k| k.set(true));
 }
 
-/// Shows or hides the on-screen keyboard (Android; the desktop has none).
-#[cfg(target_os = "android")]
+/// Shows or hides the on-screen keyboard (Android and iOS; the desktop has none).
+#[cfg(any(target_os = "android", target_os = "ios"))]
 fn set_keyboard(show: bool) {
     macroquad::miniquad::window::show_keyboard(show);
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn set_keyboard(_show: bool) {}
 
 /// Once a frame, at its end: the on-screen keyboard follows the text fields. It shows while a

@@ -1,6 +1,7 @@
 //! Android: the storage permission, and the settings page where the player grants it, through
 //! the JNI of miniquad's activity (miniquad exposes the activity and the JNI environment, not
-//! these calls). Only what Razdor needs. Every call that the Java side may refuse clears its
+//! these calls). The not-found screen's look for the install is platform-neutral (`ui::mobile`).
+//! Only what Razdor needs. Every call that the Java side may refuse clears its
 //! pending exception, so a refused call never ends the process; the local references it makes
 //! are freed as they go (a long session polls this every few seconds).
 //!
@@ -21,14 +22,8 @@ const ALL_FILES: &str = "android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION
 /// The general list of the apps with all-files access (some vendors lack the package's own page).
 const ALL_FILES_LIST: &str = "android.settings.MANAGE_ALL_FILES_ACCESS_PERMISSION";
 const STORAGE_PERMISSIONS: [&str; 2] = ["android.permission.READ_EXTERNAL_STORAGE", "android.permission.WRITE_EXTERNAL_STORAGE"];
-/// How often the not-found screen looks for the install while the permission is granted.
-const POLL_SECONDS: f64 = 5.0;
 
 thread_local! {
-    /// The player asked to look again ("Check again" on the not-found screen).
-    static RECHECK: Cell<bool> = const { Cell::new(false) };
-    /// The next time the not-found screen polls for the install (macroquad's clock).
-    static NEXT_POLL: Cell<f64> = const { Cell::new(0.0) };
     /// The not-found screen has looked at the storage access once in this run ([`ask_once`]).
     static ASKED: Cell<bool> = const { Cell::new(false) };
 }
@@ -216,33 +211,3 @@ pub fn ask_once() {
     }
 }
 
-/// The player pressed "Check again" on the not-found screen.
-pub fn ask_recheck() {
-    RECHECK.with(|r| r.set(true));
-}
-
-/// True once after "Check again" was pressed.
-pub fn take_recheck() -> bool {
-    RECHECK.with(|r| r.replace(false))
-}
-
-/// True at most every [`POLL_SECONDS`]: the not-found screen's own look for the install.
-pub fn poll_due(now: f64) -> bool {
-    NEXT_POLL.with(|next| {
-        if now >= next.get() {
-            next.set(now + POLL_SECONDS);
-            true
-        } else {
-            false
-        }
-    })
-}
-
-/// A cheap look for an install (its folder, or a folder of the search roots' children): no
-/// deep search, so it can run every few seconds. Finds what the full search finds there.
-pub fn install_listed() -> bool {
-    razdor::platform::install_roots().iter().any(|root| {
-        razdor::dt::install::is_install(root)
-            || std::fs::read_dir(root).into_iter().flatten().flatten().any(|e| razdor::dt::install::is_install(&e.path()))
-    })
-}

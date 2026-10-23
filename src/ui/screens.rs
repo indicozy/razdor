@@ -3,7 +3,7 @@ use macroquad::prelude::*;
 use std::sync::Arc;
 
 use razdor::dt::data::MagicSchool;
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use razdor::dt::install::Problem;
 use razdor::i18n::tr;
 use razdor::rules::battle::Team;
@@ -160,7 +160,11 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         {
             android_not_found(x, w);
         }
-        #[cfg(not(target_os = "android"))]
+        #[cfg(target_os = "ios")]
+        {
+            ios_not_found(x, w);
+        }
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
             let hint = tr("Discord Times not found: put Razdor into the game folder, next to DiscordTimes.exe.");
             text_centered(hint, screen_width() / 2.0, y + 20.0, 20.0, DIM);
@@ -181,29 +185,63 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
 
 /// Android: the install is not there. Tells the player what to do, and offers the two buttons:
 /// give Razdor the storage access (the settings page; a dialog on Android 8 to 10), and look
-/// again. The permission and the look are in `ui::android`; the look runs on the title screen.
-/// The first time it is shown in a run, it opens the access page itself ([`ask_once`]). The
-/// block is scaled to the screen, its buttons a twelfth of the height at least, and it sits
-/// at the bottom of the screen.
+/// again. The permission is in `ui::android`, the look in `ui::mobile`; the look runs on the
+/// title screen. The first time it is shown in a run, it opens the access page itself
+/// ([`ask_once`]). The block is scaled to the screen ([`PhoneBlock`]).
 #[cfg(target_os = "android")]
 fn android_not_found(x: f32, w: f32) {
-    use super::android::{ask_once, ask_recheck, request_storage};
+    use super::android::{ask_once, request_storage};
+    use super::mobile::ask_recheck;
     ask_once();
-    let sh = screen_height();
-    let k = (sh / 600.0).max(1.0);
-    let btn_h = (sh * 0.12).max(34.0 * k);
-    let btn_w = (200.0 * k).min((w - 16.0 * k) / 2.0);
-    let gap = 16.0 * k;
-    let buttons = sh - 20.0 * k - btn_h;
-    let y = buttons - 66.0 * k;
-    text_fit(tr("Discord Times not found."), x, y, w, 20.0 * k, INK);
-    text_fit(tr("1. Give Razdor access to all files: the «Grant access» button, or Settings > Apps > Special app access > All files access > Razdor."), x, y + 26.0 * k, w, 16.0 * k, DIM);
-    text_fit(tr("2. Put the game folder in internal storage, in a folder named DiscordTimes (or in Download)."), x, y + 46.0 * k, w, 16.0 * k, DIM);
-    if button(x, buttons, btn_w, btn_h, tr("Grant access"), true) {
+    let b = PhoneBlock::new(w, 2);
+    text_fit(tr("Discord Times not found."), x, b.y, w, 20.0 * b.k, INK);
+    text_fit(tr("1. Give Razdor access to all files: the «Grant access» button, or Settings > Apps > Special app access > All files access > Razdor."), x, b.y + 26.0 * b.k, w, 16.0 * b.k, DIM);
+    text_fit(tr("2. Put the game folder in internal storage, in a folder named DiscordTimes (or in Download)."), x, b.y + 46.0 * b.k, w, 16.0 * b.k, DIM);
+    if button(x, b.buttons_y, b.btn_w, b.btn_h, tr("Grant access"), true) {
         request_storage();
     }
-    if button(x + btn_w + gap, buttons, btn_w, btn_h, tr("Check again"), true) {
+    if button(x + b.btn_w + 16.0 * b.k, b.buttons_y, b.btn_w, b.btn_h, tr("Check again"), true) {
         ask_recheck();
+    }
+}
+
+/// iOS: the install is not there. Tells the player how to copy the game folder into the app's
+/// Files folder (no permission to grant), and offers «Check again», the look that runs on the
+/// title screen (`ui::mobile`). Scaled and placed as [`android_not_found`].
+#[cfg(target_os = "ios")]
+fn ios_not_found(x: f32, w: f32) {
+    use super::mobile::ask_recheck;
+    let b = PhoneBlock::new(w, 1);
+    text_fit(tr("Discord Times not found."), x, b.y, w, 20.0 * b.k, INK);
+    text_fit(tr("1. Copy the game folder to the Files app: On My iPhone (or iPad) > Razdor, in a folder named DiscordTimes."), x, b.y + 26.0 * b.k, w, 16.0 * b.k, DIM);
+    text_fit(tr("2. From a computer: Finder (or iTunes) > the device > Files > Razdor."), x, b.y + 46.0 * b.k, w, 16.0 * b.k, DIM);
+    if button(x, b.buttons_y, b.btn_w, b.btn_h, tr("Check again"), true) {
+        ask_recheck();
+    }
+}
+
+/// The layout of a phone's not-found block, scaled to the screen: the scale `k` (at least 1),
+/// the buttons' height (a twelfth of the screen at least) and width (`buttons` of them across
+/// the block, 16 scaled pixels apart), the buttons' top `buttons_y`, and the block's first text
+/// line `y` (66 scaled pixels above the buttons).
+#[cfg(any(target_os = "android", target_os = "ios"))]
+struct PhoneBlock {
+    k: f32,
+    btn_h: f32,
+    btn_w: f32,
+    buttons_y: f32,
+    y: f32,
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+impl PhoneBlock {
+    fn new(w: f32, buttons: u32) -> PhoneBlock {
+        let sh = screen_height();
+        let k = (sh / 600.0).max(1.0);
+        let btn_h = (sh * 0.12).max(34.0 * k);
+        let btn_w = (200.0 * k).min((w - 16.0 * k * (buttons - 1) as f32) / buttons as f32);
+        let buttons_y = sh - 20.0 * k - btn_h;
+        PhoneBlock { k, btn_h, btn_w, buttons_y, y: buttons_y - 66.0 * k }
     }
 }
 

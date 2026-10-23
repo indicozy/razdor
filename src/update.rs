@@ -135,6 +135,7 @@ pub fn pretend(s: Status) {
 /// The program's file name in the releases on this platform; `None` where none is built.
 /// Android is `None` too: its APK is installed by hand from the release page, so there is no
 /// update check, no download and no restart there (`enabled` is false, the menu hides the row).
+/// iOS is `None` as well: its IPA is re-signed and installed by AltStore or Sideloadly.
 pub fn asset_name() -> Option<&'static str> {
     if cfg!(target_os = "macos") {
         Some("razdor-macos")

@@ -341,9 +341,10 @@ pub fn frame() -> Option<Pick> {
         pick = Some(Pick::Custom);
     }
     // The players' Discord (the owner's wish): the invite of the site, in the browser. Not on
-    // Android: there is no browser opener (`razdor::update::open_in_browser` runs xdg-open).
+    // Android and iOS: there is no browser opener there (`razdor::update::open_in_browser` runs
+    // xdg-open).
     let x = x + measure(tr("Custom battle"), 18.0 * k).width + 28.0 * k;
-    if !cfg!(target_os = "android") && link("Discord", x, y, false) {
+    if !razdor::platform::MOBILE && link("Discord", x, y, false) {
         razdor::update::open_in_browser(DISCORD_INVITE);
     }
     // The language list (Razdor's): the current language; a click opens the list over it.
@@ -862,9 +863,9 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     }
     // Updates from the GitHub releases (`razdor::update`): offered, put in place quietly, or
     // not looked for; "Check now" asks at once and shows the answer.
-    // Android has no self-update (`razdor::update::asset_name`): the row is not drawn there and
-    // the zoom row takes its place.
-    let y = if cfg!(target_os = "android") {
+    // Android and iOS have no self-update (`razdor::update::asset_name`): the row is not drawn
+    // there and the zoom row takes its place.
+    let y = if razdor::platform::MOBILE {
         y
     } else {
         let y = y + 100.0 * k;

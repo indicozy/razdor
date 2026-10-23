@@ -44,6 +44,8 @@ pub mod unit_sheet;
 pub mod update_view;
 #[cfg(target_os = "android")]
 pub mod android;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub mod mobile;
 pub mod widgets;
 pub mod window_layout;
 pub mod world_view;
@@ -713,8 +715,8 @@ impl App {
         let label = format!("FPS {shown}");
         let size = (14.0 * k).round();
         let w = widgets::measure(&label, size).width;
-        // Android: the phone's rounded corner covers the top right, so the label moves inward.
-        let (inset_x, inset_y) = if cfg!(target_os = "android") { (48.0 * k, 16.0 * k) } else { (0.0, 0.0) };
+        // Phones (Android, iOS): the rounded corner covers the top right, so the label moves inward.
+        let (inset_x, inset_y) = if razdor::platform::MOBILE { (48.0 * k, 16.0 * k) } else { (0.0, 0.0) };
         chrome::shadow_text(&label, macroquad::prelude::screen_width() - w - 8.0 * k - inset_x, 8.0 * k + inset_y + size, size, chrome::GOLD);
     }
 
@@ -778,16 +780,16 @@ impl App {
         }
     }
 
-    /// Android: the install was not there at start. On the title screen, loads it when the
-    /// player asks ("Check again") or when the poll finds it in place (the storage permission
-    /// is granted and an install folder is listed).
-    #[cfg(target_os = "android")]
-    fn android_install_poll(&mut self) {
+    /// Android and iOS: the install was not there at start. On the title screen, loads it when
+    /// the player asks ("Check again") or when the poll finds it in place (the storage is
+    /// granted and an install folder is listed; iOS always has the storage).
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    fn mobile_install_poll(&mut self) {
         if self.dt_content.is_some() || !matches!(self.screen, Screen::ScenarioSelect) {
             return;
         }
-        let asked = android::take_recheck();
-        if !asked && !(android::poll_due(macroquad::time::get_time()) && android::storage_granted() && android::install_listed()) {
+        let asked = mobile::take_recheck();
+        if !(asked || (mobile::poll_due(macroquad::time::get_time()) && mobile::storage_granted() && mobile::install_listed())) {
             return;
         }
         if let Some(dt) = dt_art::DtArt::from_env() {
@@ -800,8 +802,8 @@ impl App {
     }
 
     pub fn frame(&mut self) {
-        #[cfg(target_os = "android")]
-        self.android_install_poll();
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        self.mobile_install_poll();
         if matches!(self.screen, Screen::Editor) {
             self.frame_content();
         } else {

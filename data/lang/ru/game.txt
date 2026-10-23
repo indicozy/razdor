@@ -15,6 +15,9 @@ Discord Times not found. = «Времена раздора» не найдены
 2. Put the game folder in internal storage, in a folder named DiscordTimes (or in Download). = 2. Положите папку игры во внутреннюю память, в папку DiscordTimes (или в Download).
 Grant access = Выдать доступ
 Check again = Проверить снова
+# iOS (the not-found screen; see ui/screens.rs)
+1. Copy the game folder to the Files app: On My iPhone (or iPad) > Razdor, in a folder named DiscordTimes. = 1. Скопируйте папку игры в «Файлы»: На iPhone (или iPad) > Раздор, в папку DiscordTimes.
+2. From a computer: Finder (or iTunes) > the device > Files > Razdor. = 2. С компьютера: Finder (или iTunes) > устройство > Файлы > Раздор.
 A time of discord = Смутное время
 Choose who you are. = Кем вы будете?
 A later campaign map: the original carries gold and army over from the previous one. = Одна из поздних карт кампании: в оригинале золото и армия переходят сюда с прошлой карты.

@@ -440,10 +440,10 @@ pub fn chain_names() -> Vec<String> {
 /// System font files that may have `c`, best first: fontconfig's sorted matches on Linux
 /// (then the usual places), the fonts folder's script fonts on Windows and macOS.
 fn system_candidates(c: char) -> Vec<(PathBuf, u32)> {
-    #[cfg_attr(target_os = "android", allow(unused_mut))]
+    #[cfg_attr(any(target_os = "android", target_os = "ios"), allow(unused_mut))]
     let mut found = Vec::new();
-    // Android has no fontconfig and no such font files: none found, the bundled fonts only.
-    #[cfg(all(unix, not(any(target_os = "macos", target_os = "android"))))]
+    // Android and iOS have no fontconfig and no such font files: none found, the bundled fonts only.
+    #[cfg(all(unix, not(any(target_os = "macos", target_os = "android", target_os = "ios"))))]
     {
         let pattern = format!(":charset={:x}", c as u32);
         if let Ok(out) = std::process::Command::new("fc-match").args(["-s", "--format=%{file}\t%{index}\n", &pattern]).output() {

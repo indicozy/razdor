@@ -205,8 +205,8 @@ impl Assets {
         Assets { demo: content.clone(), content, sprites, item_sprites, dt }
     }
 
-    /// Android: the install found after the start (see `App::android_install_poll`).
-    #[cfg(target_os = "android")]
+    /// Android and iOS: the install found after the start (see `App::mobile_install_poll`).
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     pub fn adopt_install(&mut self, dt: DtArt) {
         announce_install(&dt);
         self.dt = Some(dt);
