@@ -160,6 +160,11 @@ fn show_system(icon: Option<CursorIcon>) {
 /// without the install's picture, the system pointer shows instead; outside the window
 /// nothing is drawn.
 pub fn draw() {
+    // The gestures (`ui::gestures`) have no pointer of their own: the finger is the pointer.
+    if super::gestures::enabled() {
+        show_system(None);
+        return;
+    }
     // The touchpad's pointer is drawn with no system pointer and no focus check: a phone has
     // neither a system pointer nor a focus that the window reports to it.
     let focus = focused() || super::touchpad::enabled();

@@ -15,6 +15,7 @@ pub mod dt_font;
 pub mod editor;
 pub mod game_bar;
 pub mod gamepad;
+pub mod gestures;
 pub mod hall_ink;
 pub mod hotkeys;
 pub mod input;

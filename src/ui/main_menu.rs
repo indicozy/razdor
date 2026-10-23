@@ -1221,9 +1221,9 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
             }
         }
     }
-    // Razdor's touchpad mode (phones and tablets only), on unless the player turned it off.
+    // Razdor's touchpad mode (phones and tablets only), off unless the player turned it on.
     if touch_row {
-        let on = audio.touchpad.unwrap_or(true);
+        let on = audio.touchpad.unwrap_or(false);
         if option_check(cx, cy(8), &own("Options", "RazdorTouchpad", n_("Touchpad mode (the screen moves a cursor)")), on, CHECK_INK) {
             audio.touchpad = Some(!on);
         }

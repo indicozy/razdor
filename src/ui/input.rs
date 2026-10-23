@@ -9,9 +9,11 @@
 //! as the window's pointer cannot be moved. With no pad connected all of it is the mouse
 //! and keyboard unchanged.
 //!
-//! On a phone in the touchpad mode (`ui::touchpad`) the touches are the touchpad's: its pointer
-//! is the pointer from the start, and its clicks, wheel and scroll merge with the pad's. There
-//! miniquad's simulated mouse is off, so a touch is never a click of its own.
+//! On a phone the touches are the touch modes': the gestures (`ui::gestures`, the default), where
+//! the finger is the pointer, or the touchpad mode (`ui::touchpad`, an option), where the touches
+//! are a trackpad's and its pointer is the pointer from the start. Either way the clicks, wheel
+//! and scroll merge with the pad's, and miniquad's simulated mouse is off, so a touch is never a
+//! click of its own.
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -20,6 +22,7 @@ use macroquad::input as mq;
 use macroquad::prelude::{screen_height, screen_width, KeyCode, MouseButton};
 
 use super::gamepad::{self, Edge, Frame, Mapper};
+use super::gestures::{self, GestureMapper};
 use super::touchpad::{self, Phase, TouchMapper, TouchPoint};
 
 #[derive(Default)]
@@ -34,9 +37,11 @@ struct State {
     /// The map screen asked for the right stick this frame and the last ([`map_scroll`]).
     map_claimed: (bool, bool),
     touch: TouchMapper,
-    /// The touchpad mode was on at the last frame; the simulated mouse's state last set.
+    gestures: GestureMapper,
+    /// The touchpad mode was on at the last frame.
     touch_on: bool,
-    sim: Option<bool>,
+    /// miniquad's simulated mouse has been turned off (phones, once).
+    sim_off: bool,
 }
 
 thread_local! {
@@ -52,13 +57,14 @@ pub fn begin_frame() {
     // Out of focus the pad lets everything go: it is read even then, by its own device.
     let pad = pad.filter(|_| super::cursor::has_focus()).unwrap_or_default();
     let touchpad_on = touchpad::enabled();
-    let touches = if touchpad_on { touch_points() } else { Vec::new() };
+    let gestures_on = gestures::enabled();
+    let touches = if touchpad_on || gestures_on { touch_points() } else { Vec::new() };
     STATE.with(|s| {
         let s = &mut *s.borrow_mut();
-        // Phones: miniquad's simulated mouse (a touch as the left button) only without the touchpad.
-        if touchpad::MOBILE && s.sim != Some(!touchpad_on) {
-            mq::simulate_mouse_with_touch(!touchpad_on);
-            s.sim = Some(!touchpad_on);
+        // Phones: miniquad's simulated mouse (a touch as the left button) is off in both touch modes.
+        if touchpad::MOBILE && !s.sim_off {
+            mq::simulate_mouse_with_touch(false);
+            s.sim_off = true;
         }
         if s.mouse.is_some_and(|m| m != mouse) || mouse_used {
             s.active = false;
@@ -77,7 +83,13 @@ pub fn begin_frame() {
         s.map_claimed.1 = map_scrolls;
         let dt = crate::ui::clock::frame_dt();
         let pad_frame = s.mapper.step(&pad, dt, from, screen, map_scrolls);
-        s.frame = if touchpad_on { merge(s.touch.step(&touches, dt, from, screen, map_scrolls), pad_frame) } else { pad_frame };
+        s.frame = if touchpad_on {
+            merge(s.touch.step(&touches, dt, from, screen, map_scrolls), pad_frame)
+        } else if gestures_on {
+            merge(s.gestures.step(&touches, dt, screen, map_scrolls), pad_frame)
+        } else {
+            pad_frame
+        };
         if let Some(at) = s.frame.pointer {
             s.active = true;
             s.at = at;
@@ -108,9 +120,9 @@ fn touch_points() -> Vec<TouchPoint> {
         .collect()
 }
 
-/// The touchpad's frame and the pad's, as one: the pointer is the touchpad's when it moved,
-/// a button is held when either holds it, the wheel turns with both, and the map's scroll is
-/// the touchpad's while its fingers push.
+/// The touch's frame and the pad's, as one: the pointer is the touch's when it moved, a button
+/// is held when either holds it, the wheel turns with both, and the map's scroll is the touch's
+/// while its fingers push.
 fn merge(touch: Frame, pad: Frame) -> Frame {
     let either = |a: Edge, b: Edge| Edge { pressed: a.pressed || b.pressed, down: a.down || b.down, released: a.released || b.released };
     let mut keys = pad.keys;

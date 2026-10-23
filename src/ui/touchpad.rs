@@ -1,5 +1,6 @@
-//! Touchpad mode (a Razdor extra; the original has no touch input). On a phone or tablet the
-//! screen is a laptop trackpad: one finger sliding moves a cursor that Razdor draws
+//! Touchpad mode (a Razdor extra; the original has no touch input), an option: off by default,
+//! the standard gestures are the touch there (`ui::gestures`). On a phone or tablet with it on
+//! the screen is a laptop trackpad: one finger sliding moves a cursor that Razdor draws
 //! (`ui::cursor`); a tap is a left click where the cursor is; a second tap that is held and
 //! slid drags with the left button (units, scroll bars, windows); two fingers tapped are a
 //! right click, two held still hold the right button (the map's tooltips); two sliding
@@ -12,8 +13,7 @@ use std::cell::Cell;
 
 use super::gamepad::Frame;
 
-/// Phones and tablets (`platform::MOBILE`): where the touchpad mode is the default and its
-/// setting shows.
+/// Phones and tablets (`platform::MOBILE`): where the touch modes run and the setting shows.
 pub use razdor::platform::MOBILE;
 
 thread_local! {
@@ -21,14 +21,14 @@ thread_local! {
     static SETTING: Cell<Option<bool>> = const { Cell::new(None) };
 }
 
-/// The setting as the player chose it (`None`: not chosen yet, which is on).
+/// The setting as the player chose it (`None`: not chosen yet, which is off).
 pub fn set_setting(on: Option<bool>) {
     SETTING.with(|s| s.set(on));
 }
 
-/// The touchpad mode is on: on mobile, unless the setting turns it off.
+/// The touchpad mode is on: on mobile, when the player turned it on (off by default).
 pub fn enabled() -> bool {
-    MOBILE && SETTING.with(|s| s.get()).unwrap_or(true)
+    MOBILE && SETTING.with(|s| s.get()) == Some(true)
 }
 
 /// A touch's phase, as macroquad reports it: down, then still or moved, then up once.
@@ -524,10 +524,13 @@ mod tests {
     }
 
     #[test]
-    fn the_touchpad_is_on_only_on_mobile_unless_the_setting_says_otherwise() {
-        assert_eq!(enabled(), MOBILE);
+    fn the_touchpad_is_off_unless_the_player_turns_it_on_on_mobile() {
+        set_setting(None);
+        assert!(!enabled());
         set_setting(Some(false));
         assert!(!enabled());
+        set_setting(Some(true));
+        assert_eq!(enabled(), MOBILE);
         set_setting(None);
     }
 }

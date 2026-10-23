@@ -159,7 +159,8 @@ pub struct Settings {
     pub music_muted: bool,
     pub sfx_muted: bool,
     pub show_fps: bool,
-    /// Phones and tablets, Razdor's: the touchpad mode (`ui::touchpad`), on unless `Some(false)`.
+    /// Phones and tablets, Razdor's: the touchpad mode (`ui::touchpad`), on only at `Some(true)`;
+    /// off, the touch is the gestures (`ui::gestures`).
     pub touchpad: Option<bool>,
     /// The enemy's battle AI: `Some(true)` expert (the original's "improved enemy AI in
     /// battle"), `Some(false)` easy; `None` until chosen: the install's `OptValue9`.
