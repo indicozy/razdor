@@ -14,6 +14,21 @@
 
 ## 0.9.2 — 2026-10-23
 
+Коммит `b1e651f3` (тег `v0.9.2`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+8635770147e350044f3e940d02d4b55356fb506ee39f28b09081ac18dc12a86d  razdor
+55eabd18472dea2eaab3886a43fe8cadfd905037e70704cd429a0fdcba4b1e4b  Razdor.exe
+72e8dbed6bd2340c3467ac9e616a44d6f0cc477a9e51387ec03ec21cafa24776  razdor-macos
+328bc5bcbf3a538beab99a6f958aa5f66aaa10358d6e7e4c285661a57a3c85fe  razdor-translate
+a5d71f306b4f270fed3939f412f1b8bb22c56fa9149413c6444adf4249a4a2d3  Razdor-translate.exe
+00ff940d52ee1cded21d87989de586050df6d4bfe0a0ecc9e064b09c85d4acd2  razdor-translate-macos
+4e0bc526e6d27b2b08662f9439392aeaad771b437af47b0951d8c8f21688e41d  razdor.apk
+3e6fae5ddc962dca84d4aa67073e53a86fc7ef0da7fff3ca0fe1c7f5786e6a91  razdor.ipa
+```
+
 ### Добавлено
 
 - Раздор для iPhone и iPad (пробная версия): файл razdor.ipa в выпуске. Он не подписан: установите его через AltStore или Sideloadly со своим Apple ID, папку игры скопируйте в «Файлы» → На iPhone → Раздор → DiscordTimes (см. README, «iOS»).
