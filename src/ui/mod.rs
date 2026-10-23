@@ -712,7 +712,9 @@ impl App {
         let label = format!("FPS {shown}");
         let size = (14.0 * k).round();
         let w = widgets::measure(&label, size).width;
-        chrome::shadow_text(&label, macroquad::prelude::screen_width() - w - 8.0 * k, 8.0 * k + size, size, chrome::GOLD);
+        // Android: the phone's rounded corner covers the top right, so the label moves inward.
+        let (inset_x, inset_y) = if cfg!(target_os = "android") { (48.0 * k, 16.0 * k) } else { (0.0, 0.0) };
+        chrome::shadow_text(&label, macroquad::prelude::screen_width() - w - 8.0 * k - inset_x, 8.0 * k + inset_y + size, size, chrome::GOLD);
     }
 
     /// The play log (`diag::play`): the screen when it changes and every new message line.
