@@ -2,5 +2,5 @@
 # gives the same programs (scripts/dist.sh, scripts/dist-macos.sh, .github/workflows/release.yml).
 [toolchain]
 channel = "1.90.0"
-targets = ["x86_64-pc-windows-gnullvm", "aarch64-apple-darwin", "x86_64-apple-darwin"]
+targets = ["x86_64-pc-windows-gnullvm", "aarch64-apple-darwin", "x86_64-apple-darwin", "aarch64-apple-ios"]
 profile = "minimal"

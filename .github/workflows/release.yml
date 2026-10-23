@@ -2,8 +2,9 @@
 # with scripts/dist.sh, razdor-macos (macOS, universal) with scripts/dist-macos.sh on a Mac,
 # razdor.apk (Android, experimental) with scripts/dist-android.sh on the android job (unsigned),
 # then signed in the android-sign job, which runs no repository code and gets the release
-# keystore only on tags; the map translator beside each
-# (razdor-translate, Razdor-translate.exe, razdor-translate-macos),
+# keystore only on tags; razdor.ipa (iOS, experimental, unsigned: the player signs it with AltStore
+# or Sideloadly) with scripts/dist-ios.sh on the ios job, a Mac with no secrets; the map translator
+# beside each (razdor-translate, Razdor-translate.exe, razdor-translate-macos),
 # and publishes them as the GitHub release vX.Y.Z, with that version's changelog file
 # (changelog/X.Y.Z.md) and the programs' SHA-256 as its notes. The game's update window
 # (src/update.rs) shows the notes up to their first `## ` heading: keep the pipeline's own
@@ -54,6 +55,28 @@ jobs:
           path: |
             dist/razdor-macos
             dist/razdor-translate-macos
+          if-no-files-found: error
+
+  ios:
+    # Experimental: the iOS app, dist/razdor.ipa, built on a Mac (the iOS SDK comes with Xcode).
+    # It is not signed by a developer and needs no secrets: the player's AltStore or Sideloadly
+    # signs it with their own Apple ID when they install it.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Rust (rust-toolchain.toml) and the iOS target
+        run: |
+          rustup show active-toolchain
+          rustup target add --toolchain 1.90.0 aarch64-apple-ios
+
+      - name: Build razdor.ipa
+        run: sh scripts/dist-ios.sh
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: razdor-ios
+          path: dist/razdor.ipa
           if-no-files-found: error
 
   android:
@@ -155,7 +178,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: [macos, android-sign]
+    needs: [macos, android-sign, ios]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v5
@@ -197,10 +220,15 @@ jobs:
           name: razdor-android
           path: dist
 
+      - uses: actions/download-artifact@v8
+        with:
+          name: razdor-ios
+          path: dist
+
       - name: SHA-256 of all of them
         run: |
           chmod +x dist/razdor-macos dist/razdor-translate-macos
-          (cd dist && sha256sum razdor Razdor.exe razdor-macos razdor-translate Razdor-translate.exe razdor-translate-macos razdor.apk > SHA256SUMS)
+          (cd dist && sha256sum razdor Razdor.exe razdor-macos razdor-translate Razdor-translate.exe razdor-translate-macos razdor.apk razdor.ipa > SHA256SUMS)
           cat dist/SHA256SUMS
 
       - name: The programs of a run by hand
@@ -216,6 +244,7 @@ jobs:
             dist/Razdor-translate.exe
             dist/razdor-translate-macos
             dist/razdor.apk
+            dist/razdor.ipa
             dist/SHA256SUMS
 
       - name: Release notes from changelog/X.Y.Z.md
@@ -229,6 +258,7 @@ jobs:
             echo "- **Razdor.exe**: Windows (x86_64). **razdor**: Linux (x86_64). **razdor-macos**: macOS 11+ (Apple Silicon и Intel). **SHA256SUMS**: их контрольные суммы."
             echo "- Положите программу рядом с \`DiscordTimes.exe\` в папке игры и запустите её. Дальше Раздор обновляется сам (Настройки → «Ещё…» → «Обновления»)."
             echo "- **razdor.apk**: Android 8+ (ARM). Установите, дайте «Доступ ко всем файлам», положите папку игры в \`DiscordTimes\` во внутренней памяти; экспериментально, управление только касанием (касание = левый щелчок). Обновления в приложении нет: новый APK ставится поверх."
+            echo "- **razdor.ipa**: iPhone и iPad (iOS 14+), экспериментально. Файл не подписан: установите его через AltStore или Sideloadly со своим Apple ID (бесплатная подпись действует 7 дней, AltStore продлевает её сам). Папку игры скопируйте в «Файлы» → На iPhone → Раздор → DiscordTimes; см. README, «iOS»."
             echo "- **Razdor-translate.exe**, **razdor-translate**, **razdor-translate-macos**: переводчик карт и данных игры на английский языковой моделью (см. README, «Переводчик карт»); кладётся туда же. Сам он не обновляется."
             echo "- macOS: программа не подписана разработчиком; после загрузки выполните \`xattr -d com.apple.quarantine razdor-macos\` (или правый щелчок → «Открыть») перед первым запуском."
             echo
@@ -249,4 +279,4 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" --title "Раздор ${GITHUB_REF_NAME#v}" --notes-file notes.md \
             dist/Razdor.exe dist/razdor dist/razdor-macos \
-            dist/Razdor-translate.exe dist/razdor-translate dist/razdor-translate-macos dist/razdor.apk dist/SHA256SUMS
+            dist/Razdor-translate.exe dist/razdor-translate dist/razdor-translate-macos dist/razdor.apk dist/razdor.ipa dist/SHA256SUMS
