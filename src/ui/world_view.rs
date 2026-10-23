@@ -2401,6 +2401,8 @@ pub fn backdrop_lit(game: &Game, assets: &Assets, lit: Option<BarButton>) {
         draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.2));
     });
     game_bar::draw(game, |b| if Some(b) == lit { Look::Lit } else { Look::Grey });
+    // The window or dialog drawn next stays above the bar (`ui::pan`).
+    super::pan::cover_bar();
 }
 
 pub fn backdrop(game: &Game, assets: &Assets) {
@@ -2427,7 +2429,10 @@ pub fn window_backdrop(game: &Game, assets: &Assets, lit: Option<BarButton>) -> 
         _ if Some(b) == lit => Look::Lit,
         BarButton::Save | BarButton::Spells if !idle => Look::Grey,
         _ => Look::Normal,
-    })?;
+    });
+    // The window drawn next stays above the bar, which keeps its own presses (`ui::pan`).
+    super::pan::cover_bar();
+    let pressed = pressed?;
     Some(match pressed {
         b if Some(b) == lit => Screen::WorldMap,
         BarButton::Menu => Screen::Menu(false),

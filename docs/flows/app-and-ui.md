@@ -307,9 +307,12 @@ Building a window (`src/ui/chrome.rs`):
   `backdrop_lit`), the title's background (`main_menu::background`) and the map alone where
   they are; `pan::end_frame` (`main.rs`) puts the FPS counter, keyboard strip and pointer back
   on the screen. Not panned: the editor, the map with no dialog open.
-- Known gap: a window larger than the screen covers the bottom bar drawn under it
-  (`world_view::window_backdrop` draws the bar, then the window), so at a large scale the bar
-  is hidden behind an enlarged window; the bar is not redrawn over the window.
+- The bar over a window (`pan::cover_bar`, called after the bar is drawn in `world_view::backdrop_lit`
+  and `window_backdrop`): when the canvas overflows, the frame's drawing is cut off above the bar
+  (a scissor, also in `widgets::Clip`) and the window's controls take no hover or press over it
+  (`widgets::mouse_in`); a press on the bar is swallowed for the rest of the frame. The pan's
+  clamp stops the canvas's bottom at the bar's top (`pan::Pan::settle`). `RAZDOR_SCENE_PAN=dx,dy`
+  (`ui::snapshot`) holds the offset for a snapshot.
 - The world map's scale at zoom 1 (`world_view::map_scale`, Razdor's choice) follows the
   interface scale setting, not the window: its 32 px cells are drawn at the chosen scale ×
   0.9375 (as large as the original's pictures in the windows), not cut down to the fit;

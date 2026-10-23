@@ -22,6 +22,7 @@
 //! scene's leave-battle window. `RAZDOR_SCENE_PACK_AT=<cell>:<id>,…` puts items in those pack
 //! cells; `RAZDOR_SCENE_HELD=<id>` puts an item on the pointer (hero and army windows);
 //! `RAZDOR_SCENE_WEAR=<id>,…` wears those items on the squad member of `army:<map>:<n>:<unit>`.
+//! `RAZDOR_SCENE_PAN=dx,dy` holds the interface's pan at that offset (windows larger than the screen).
 //!
 //! Every map scene starts its map as a new game (`Game::from_scenario`): nothing is carried
 //! over from a campaign's map before, so a later map whose opening events check for what it
@@ -170,6 +171,14 @@ fn pointer() -> Option<(f32, f32)> {
     Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
 }
 
+/// `RAZDOR_SCENE_PAN=dx,dy`: the interface's pan holds that offset (a window panned over the
+/// screen at an interface scale above the fit, `ui::pan`).
+fn pan_offset() -> Option<(f32, f32)> {
+    let s = std::env::var("RAZDOR_SCENE_PAN").ok()?;
+    let (x, y) = s.split_once(',')?;
+    Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
+}
+
 /// `replay:<step>`: the action list `RAZDOR_REPLAY` (the diff test's, `razdor --replay`)
 /// played up to and including action `<step>` (all of it without a step), and its screen:
 /// the map, the building window or the battle. Dialogs still waiting are not shown.
@@ -249,6 +258,7 @@ pub fn open_later(app: &mut App, frame: u64) -> bool {
 /// Sets up the scene of `RAZDOR_SCENE`, if any; a scene that cannot be set up is reported.
 pub fn stage(app: &mut App) {
     super::widgets::set_pointer(pointer());
+    super::pan::force_for_snapshot(pan_offset());
     // `RAZDOR_MOUSE_RIGHT=1`: the right button held where `RAZDOR_MOUSE` stands (the map's
     // tooltips, as the original shows them while it is held).
     super::input::hold_right_for_snapshot(std::env::var("RAZDOR_MOUSE_RIGHT").is_ok_and(|v| v == "1"));

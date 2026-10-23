@@ -325,7 +325,8 @@ pub fn input_blocked() -> bool {
 
 pub fn mouse_in(x: f32, y: f32, w: f32, h: f32) -> bool {
     let (mx, my) = pointer();
-    !input_blocked() && mx >= x && mx < x + w && my >= y && my < y + h
+    // A window's controls take no pointer over the bottom bar (`pan::cover_bar`).
+    !input_blocked() && !super::pan::covered((mx, my)) && mx >= x && mx < x + w && my >= y && my < y + h
 }
 
 pub fn clicked() -> bool {
@@ -488,6 +489,9 @@ pub struct Clip;
 
 impl Clip {
     pub fn new(r: Rect) -> Clip {
+        // The canvas rect on the screen with the pan, cut above the bottom bar while a window
+        // covers it (`pan::cover_bar`).
+        let r = super::pan::clipped(super::pan::on_screen(r));
         let dpi = screen_dpi_scale();
         let gl = unsafe { get_internal_gl() }.quad_gl;
         gl.scissor(Some(((r.x * dpi) as i32, (r.y * dpi) as i32, (r.w * dpi).ceil() as i32, (r.h * dpi).ceil() as i32)));
@@ -497,7 +501,7 @@ impl Clip {
 
 impl Drop for Clip {
     fn drop(&mut self) {
-        unsafe { get_internal_gl() }.quad_gl.scissor(None);
+        super::pan::restore_scissor();
     }
 }
 
