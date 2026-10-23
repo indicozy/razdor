@@ -83,6 +83,9 @@ pub struct Frame {
     pub keys: Vec<(KeyCode, Edge)>,
     /// The right stick, when the map scrolls with it (x right, y down, -1..1).
     pub scroll: (f32, f32),
+    /// A one-finger swipe over the map this frame: the finger's slide in screen pixels
+    /// (`ui::gestures`, `SwipeKind::Pan`); the map moves with it.
+    pub pan: (f32, f32),
 }
 
 /// The keys of the buttons: Start is Esc (menus, back), X Enter (OK, Yes), Y Space (the

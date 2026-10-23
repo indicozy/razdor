@@ -477,6 +477,12 @@ pub fn wheel() -> f32 {
     }
 }
 
+/// A list or text box `r` of rows `row_px` screen pixels high: a one-finger swipe over it turns
+/// the wheel a step per row (`ui::gestures`), as the wheel does here. Call where it is drawn.
+pub fn swipe_rows(r: Rect, row_px: f32) {
+    crate::ui::input::swipe_area(r, crate::ui::gestures::SwipeKind::ScrollRows { row_px });
+}
+
 /// Drawing clipped to a rectangle (screen coordinates) while the guard lives.
 pub struct Clip;
 

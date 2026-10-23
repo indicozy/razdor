@@ -20,10 +20,10 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 
 use macroquad::input as mq;
-use macroquad::prelude::{screen_height, screen_width, KeyCode, MouseButton};
+use macroquad::prelude::{screen_height, screen_width, KeyCode, MouseButton, Rect};
 
 use super::gamepad::{self, Edge, Frame, Mapper};
-use super::gestures::{self, GestureMapper};
+use super::gestures::{self, GestureMapper, SwipeArea, SwipeKind};
 use super::touchpad::{self, Phase, TouchMapper, TouchPoint};
 
 #[derive(Default)]
@@ -39,6 +39,10 @@ struct State {
     map_claimed: (bool, bool),
     touch: TouchMapper,
     gestures: GestureMapper,
+    /// The swipe areas registered this frame (`swipe_area`), and last frame's, which this
+    /// frame's gestures use.
+    swipe_now: Vec<SwipeArea>,
+    swipe_prev: Vec<SwipeArea>,
     /// The touchpad mode was on at the last frame.
     touch_on: bool,
     /// miniquad's simulated mouse has been turned off (phones, once).
@@ -83,11 +87,14 @@ pub fn begin_frame() {
         let map_scrolls = std::mem::take(&mut s.map_claimed.0);
         s.map_claimed.1 = map_scrolls;
         let dt = crate::ui::clock::frame_dt();
+        // The swipe areas of the frame before: this frame's are registered while it is drawn.
+        std::mem::swap(&mut s.swipe_prev, &mut s.swipe_now);
+        s.swipe_now.clear();
         let pad_frame = s.mapper.step(&pad, dt, from, screen, map_scrolls);
         s.frame = if touchpad_on {
             merge(s.touch.step(&touches, dt, from, screen, map_scrolls), pad_frame)
         } else if gestures_on {
-            merge(s.gestures.step(&touches, dt, screen, map_scrolls), pad_frame)
+            merge(s.gestures.step(&touches, dt, screen, map_scrolls, &s.swipe_prev), pad_frame)
         } else {
             pad_frame
         };
@@ -135,7 +142,24 @@ fn merge(touch: Frame, pad: Frame) -> Frame {
         wheel: touch.wheel + pad.wheel,
         keys,
         scroll: if touch.scroll != (0.0, 0.0) { touch.scroll } else { pad.scroll },
+        pan: (touch.pan.0 + pad.pan.0, touch.pan.1 + pad.pan.1),
     }
+}
+
+/// Registers a rectangle a one-finger swipe acts on (gestures only; a no-op elsewhere): the
+/// map's `SwipeKind::Pan`, a list's or text box's `ScrollRows` (see `widgets::swipe_rows`),
+/// `SwipeKind::Off` for a control a drag must stay a drag on. Called while the screen is
+/// drawn: the next frame's gestures use it, the last one registered over a point acting.
+pub fn swipe_area(rect: Rect, kind: SwipeKind) {
+    if !gestures::enabled() {
+        return;
+    }
+    STATE.with(|s| s.borrow_mut().swipe_now.push((rect, kind)));
+}
+
+/// The map's pan this frame: the finger's slide over the map, in screen pixels.
+pub fn map_pan() -> (f32, f32) {
+    with_frame(|f| f.pan)
 }
 
 /// Where the pad's pointer is, while it is the pointer.

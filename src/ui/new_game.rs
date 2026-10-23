@@ -528,6 +528,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
     let content_h: f32 = list.iter().map(block_h).sum::<f32>() + 12.0 * k;
     let max_scroll = (content_h - rows.h).max(0.0) / k;
     let mut scroll = SCROLL.with(|s| s.get());
+    swipe_rows(rows, 30.0 * k);
     let over_list = !input_blocked() && rows.contains(crate::ui::widgets::pointer().into());
     if over_list {
         scroll = wheel_scroll(scroll, wheel());

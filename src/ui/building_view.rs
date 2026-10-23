@@ -438,6 +438,7 @@ fn hall_offers_in_face(game: &mut Game, f: &Frame, view: &mut BuildingView, mess
     let list = Rect::new(panel.x, list_y, panel.w, (panel.y + panel.h - list_y).max(row_h + 8.0 * k));
     let rows = (((list.h - 8.0 * k) / row_h).floor() as usize).max(1);
     let max_scroll = entries.len().saturating_sub(rows);
+    swipe_rows(list, row_h);
     if mouse_in(list.x, list.y, list.w, list.h) {
         let wh = wheel();
         if wh < 0.0 { view.hall_scroll = (view.hall_scroll + 1).min(max_scroll); }
@@ -1468,6 +1469,7 @@ fn price_list_in_face(assets: Option<&Assets>, rows: &[(Option<ItemId>, String, 
     chrome::subtractive(|| draw_rectangle(x + icon_w, y, w - icon_w, frame.h, blend_color(MARKET_LIST_TAKEN)));
     chrome::paper_minus(Rect::new(x, y, icon_w, frame.h), (0.0, 0.0), MARKET_LIST_TAKEN);
     let max_scroll = rows.len().saturating_sub(visible);
+    swipe_rows(Rect::new(x, y, w, visible as f32 * row_h), row_h);
     let over = mouse_in(x, y, w, visible as f32 * row_h);
     let wheel = if over { wheel() } else { 0.0 };
     if wheel < 0.0 {

@@ -339,6 +339,7 @@ fn jump_to(state: &mut ListState, names: &[&str], letters: &[char], rows: usize)
 fn scroll_list(state: &mut ListState, list: Rect, rows: usize, total: usize) -> f32 {
     let k = chrome::k();
     let max_scroll = total.saturating_sub(rows);
+    swipe_rows(list, list.h / rows.max(1) as f32);
     if mouse_in(list.x, list.y, list.w, list.h) {
         let wh = wheel();
         if wh < 0.0 {

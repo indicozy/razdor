@@ -24,6 +24,7 @@ use razdor::rules::world::{Army, Location, LocationKind, Owner, Troop};
 use super::assets::Assets;
 use super::audio::{cue, Cue};
 use super::building_view::BuildingView;
+use super::gestures::SwipeKind;
 use super::cursor::{self, BuildingHover, CellArmy, MapHover, Shape};
 use super::dialog::Dialog;
 use super::dt_art::DtArt;
@@ -387,6 +388,18 @@ fn edge_dir(at: (f32, f32), size: (f32, f32), edge: f32) -> Vec2 {
     let x = if mx < edge { -1.0 } else if mx > w - edge { 1.0 } else { 0.0 };
     let y = if my < edge { -1.0 } else if my > h - edge { 1.0 } else { 0.0 };
     vec2(x, y)
+}
+
+/// A one-finger swipe over the idle map moves the view with the finger (gestures, Razdor's):
+/// `slide` is the finger's move in screen pixels, the map following it 1:1 (finger right, the
+/// map right: the view goes left), clamped to the map as the scroll is.
+fn pan(game: &Game, view: &mut MapView, slide: (f32, f32)) {
+    if slide == (0.0, 0.0) || input_blocked() || !view.shows.is_empty() {
+        return;
+    }
+    let scale = PX * view.zoom * map_scale();
+    let at = Vec2::from(view.look.unwrap_or(game.display_pos())) - vec2(slide.0, slide.1) / scale;
+    view.look = Some(Camera::looking_at(game, view.zoom, at.into()).centre());
 }
 
 /// The original's scrolling of the idle map (interface.md §7.6): the held arrow key (only one
@@ -2620,11 +2633,20 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     }
     if idle && dialogs.is_empty() && view.grab.is_none() && !view.flying() && view.spell_fx.is_empty() {
         scroll(game, view, dt_ms, pad_scroll);
+        pan(game, view, crate::ui::input::map_pan());
     }
     // While he walks the view is locked on him (interface.md §8).
     view.look = camera_look(view.look, game.moving(), !view.shows.is_empty());
     let cam = Camera::looking_at(game, view.zoom, view.look.unwrap_or(game.display_pos()));
     let on_minimap = on_minimap_pointer(game, view, cam.view);
+    // A one-finger swipe over the map pans it (gestures, a phone): the map view, with the open
+    // minimap as a blocker (its drag stays a drag), and only with no dialog open on the map.
+    if dialogs.is_empty() && !input_blocked() {
+        crate::ui::input::swipe_area(map_area(), SwipeKind::Pan);
+        if view.minimap {
+            crate::ui::input::swipe_area(minimap::outer(&game.world.map, cam.view), SwipeKind::Off);
+        }
+    }
     let clock = game_bar::time_panel();
     let on_clock = !input_blocked() && clock.contains(crate::ui::widgets::pointer().into());
     let hovered = cam.tile_under_mouse().filter(|_| !on_minimap);

@@ -598,6 +598,7 @@ pub fn authors(started: f64) -> bool {
         }
         let over = inner.contains(crate::ui::widgets::pointer().into());
         let step = 48.0;
+        swipe_rows(inner, step);
         nudge -= if over { wheel() * step } else { 0.0 };
         if key(KeyCode::Down) {
             nudge += step;

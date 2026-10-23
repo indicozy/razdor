@@ -87,7 +87,15 @@ finger holds the left button, a long press holds the right one, two fingers pinc
 (the map's zoom) or slide (the map's scroll, or the list's wheel). A long press keeps the pointer
 where the press began while the right button is held (`GestureMapper::press_at`): the finger may
 slide to uncover the view, and the info window (army, building) stays put; the lift releases the
-button there too. The touchpad mode is an option (`Settings::touchpad`, off by default; below). Gamepads are off
+button there too. Swipe areas: each frame the screens register the rectangles a one-finger swipe acts on
+(`input::swipe_area(rect, SwipeKind)`, gestures only; `widgets::swipe_rows` for a list or text box with
+its row height). The map registers `Pan` over the map view (not while a dialog is open; the open minimap
+is `Off`, a blocker that keeps its drag a drag). The registrations of a frame are the next frame's
+(`input::begin_frame` swaps them), the last one registered over the touch acts. A finger that moves past
+the slop within 0.25 s of touching down, on a `Pan` or `ScrollRows` area, is a swipe: no click, the map's
+`Frame::pan` (the finger's slide, applied 1:1 by `world_view::pan` on the idle map), or the list's wheel
+steps (one per row, finger up = content up). A finger held still longer first, or outside any area, is
+the held drag as above; taps, double taps and the long press are unchanged. The touchpad mode is an option (`Settings::touchpad`, off by default; below). Gamepads are off
 (`--no-default-features --features audio`).
 The screen turns with the device (Android `screenOrientation = fullUser` in `Cargo.toml`,
 following the rotation lock; iOS portrait and landscape in `scripts/dist-ios.sh`'s Info.plist); a

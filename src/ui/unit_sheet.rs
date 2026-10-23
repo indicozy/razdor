@@ -921,6 +921,7 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, background: Rect, s
     let key = format!("{}:{}:{}:{}:{:?}:{:?}", r.x, r.y, s.kind.0, s.name, s.start.bonuses, s.items);
     let mut scroll = TRAIT_SCROLL.with(|p| p.borrow().get(&key).copied().unwrap_or(0.0));
     if simultaneous && most > 0.0 {
+        super::widgets::swipe_rows(region, 42.0 * px);
         if region.contains(super::widgets::pointer().into()) { scroll -= super::widgets::wheel() * 42.0 * px; }
         scroll = scroll.clamp(0.0, most);
         super::widgets::scrollbar_px(Rect::new(region.right() - 12.0 * px, region.y, 12.0 * px, region.h), &mut scroll, most, region.h, 14.0 * px);

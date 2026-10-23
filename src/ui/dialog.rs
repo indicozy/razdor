@@ -411,6 +411,9 @@ fn unit_cells(n: usize) -> Vec<f32> {
 fn scrolled(d: &Dialog, total: usize, shown: usize, tb: Rect) -> usize {
     let last = total.saturating_sub(shown);
     let mut first = d.scroll.get().min(last);
+    if last > 0 {
+        swipe_rows(tb, tb.h / shown.max(1) as f32);
+    }
     if last > 0 && !input_blocked() {
         let wh = if tb.contains(pointer().into()) { wheel() } else { 0.0 };
         let page = shown.saturating_sub(1).max(1);

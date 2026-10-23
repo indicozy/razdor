@@ -3,10 +3,16 @@
 //! double tap clicks at the first tap's place (the second tap does not shift the hero's route);
 //! a finger dragged holds the left button; a long press holds the right one (army and building
 //! information, tooltips); two fingers pinch the wheel (the map's zoom) or slide together (the
-//! map's scroll, or the wheel of a list). [`GestureMapper`] turns the frame's touches into that
-//! mouse, purely; `ui::input` feeds it macroquad's touches and merges its [`Frame`] with the
-//! pad's. The touchpad mode (`ui::touchpad`) is the option instead. Distances are pixels of a
-//! 1080 px high screen, scaled to the screen's height, so a gesture feels the same on any phone.
+//! map's scroll, or the wheel of a list). A one-finger swipe that starts on a registered area
+//! (`ui::input::swipe_area`: the map pans, a list or text box scrolls) is no click at all: it
+//! moves the map or turns the list's wheel; only a finger held still before it moves drags as
+//! above. [`GestureMapper`] turns the frame's touches into that mouse, purely; `ui::input` feeds
+//! it macroquad's touches and merges its [`Frame`] with the pad's. The touchpad mode
+//! (`ui::touchpad`) is the option instead. Distances are pixels of a 1080 px high screen, scaled
+//! to the screen's height, so a gesture feels the same on any phone (a swipe's row height is
+//! given in screen pixels).
+
+use macroquad::prelude::Rect;
 
 use super::gamepad::Frame;
 use super::touchpad::{self, Phase, TouchPoint};
@@ -29,6 +35,30 @@ const DOUBLE_SLOP: f32 = 24.0;
 const PINCH_STEP: f32 = 60.0;
 /// Two fingers sliding turn the wheel a step per this many pixels.
 const WHEEL_STEP: f32 = 40.0;
+/// A one-finger slide past the slop within this many seconds of the touch is a swipe over its
+/// area (shorter than [`LONG_TIME`]); a finger held still longer first is a held drag as before.
+const SWIPE_TIME: f32 = 0.25;
+
+/// What a one-finger swipe does over a registered rectangle (`ui::input::swipe_area`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SwipeKind {
+    /// The map: the finger's slide pans it (`Frame::pan`), 1:1 with the finger.
+    Pan,
+    /// A list or text box whose rows are `row_px` screen pixels high: the slide turns the
+    /// wheel a step per row, finger up = content up (natural scrolling).
+    ScrollRows { row_px: f32 },
+    /// Not a swipe (the minimap, drawn over the map): a drag there stays the drag it is.
+    Off,
+}
+
+/// A registered rectangle and its swipe. Later ones are drawn on top: the last over a point
+/// is the one that acts.
+pub type SwipeArea = (Rect, SwipeKind);
+
+/// The swipe of the last area registered over `at`, if any.
+fn swipe_at(areas: &[SwipeArea], at: (f32, f32)) -> Option<SwipeKind> {
+    areas.iter().rev().find(|(r, _)| at.0 >= r.x && at.0 < r.x + r.w && at.1 >= r.y && at.1 < r.y + r.h).map(|(_, k)| *k)
+}
 
 /// Pixels of a 1080 px high screen, scaled to this one.
 fn px(screen: (f32, f32), v: f32) -> f32 {
@@ -54,11 +84,16 @@ struct Finger {
     moved: bool,
     /// Its slide this frame.
     delta: (f32, f32),
+    /// The swipe of the area it touched down on (`Off` and no area: none).
+    area: Option<SwipeKind>,
+    /// Its first move past the slop has been judged (`decided`): a swipe over `area` or not.
+    decided: bool,
+    swiping: bool,
 }
 
 impl Finger {
     fn new(id: u64, pos: (f32, f32), anchor: (f32, f32), now: f32) -> Self {
-        Finger { id, last: pos, down: pos, anchor, since: now, moved: false, delta: (0.0, 0.0) }
+        Finger { id, last: pos, down: pos, anchor, since: now, moved: false, delta: (0.0, 0.0), area: None, decided: false, swiping: false }
     }
 
     /// Where the pointer is for this finger, kept on the screen.
@@ -103,13 +138,16 @@ pub struct GestureMapper {
     /// The pinch's distance change not yet a whole wheel step, and the same for the slide.
     pinch: f32,
     wheel: f32,
+    /// The swipe's rows not yet a whole wheel step.
+    rows: f32,
 }
 
 impl GestureMapper {
     /// The frame for this frame's `touches` after `dt` seconds on a `screen` (w, h) window.
     /// `map_scrolls`: two fingers sliding scroll the map (as the stick does), else they turn the
-    /// wheel as in a list. A pinch always turns the wheel.
-    pub fn step(&mut self, touches: &[TouchPoint], dt: f32, screen: (f32, f32), map_scrolls: bool) -> Frame {
+    /// wheel as in a list. A pinch always turns the wheel. `areas`: the rectangles a one-finger
+    /// swipe acts on, as registered in the last frame.
+    pub fn step(&mut self, touches: &[TouchPoint], dt: f32, screen: (f32, f32), map_scrolls: bool, areas: &[SwipeArea]) -> Frame {
         let dt = dt.clamp(0.0, 0.1);
         self.now += dt;
         let mut f = Frame::default();
@@ -134,14 +172,37 @@ impl GestureMapper {
                 }
                 (Some(i), false) => self.fingers[i].slide(pos, screen),
                 (None, true) => {}
-                (None, false) => self.down(t.id, pos, &mut f, screen),
+                (None, false) => self.down(t.id, pos, &mut f, screen, areas),
             }
         }
 
         match self.fingers.len() {
             1 if !self.multi => {
-                let g = self.fingers[0];
-                if g.moved && !self.left_held && !self.right_held {
+                let mut g = self.fingers[0];
+                let mut movement = g.delta;
+                if g.moved && !g.decided {
+                    // The first move past the slop judges it: a swipe over its area if it came
+                    // before the hold time, else the held drag or long press as before.
+                    g.decided = true;
+                    g.swiping = self.now - g.since < SWIPE_TIME && matches!(g.area, Some(SwipeKind::Pan | SwipeKind::ScrollRows { .. }));
+                    // The slide from the touch counts too: the map follows the finger from its place.
+                    movement = (g.last.0 - g.down.0, g.last.1 - g.down.1);
+                }
+                self.fingers[0] = g;
+                if g.swiping {
+                    // No click: the pointer stays where the swipe began, over the area it acts on.
+                    f.pointer = Some(g.anchor);
+                    match g.area {
+                        Some(SwipeKind::Pan) => f.pan = (f.pan.0 + movement.0, f.pan.1 + movement.1),
+                        Some(SwipeKind::ScrollRows { row_px }) => {
+                            self.rows += movement.1;
+                            let steps = (self.rows / row_px).trunc();
+                            self.rows -= steps * row_px;
+                            f.wheel += steps;
+                        }
+                        _ => {}
+                    }
+                } else if g.moved && !self.left_held && !self.right_held {
                     // A drag: the left button goes down where the finger touched (the first tap's
                     // place for a double tap); the pointer follows the finger from the next frame.
                     self.left_held = true;
@@ -216,18 +277,21 @@ impl GestureMapper {
     /// A finger came down at `pos`. The first one starts a session; a tap near the last one's
     /// click is a double tap and lands at that click. A second one makes two fingers, which
     /// lets a held button go; the rest are ignored.
-    fn down(&mut self, id: u64, pos: (f32, f32), f: &mut Frame, screen: (f32, f32)) {
+    fn down(&mut self, id: u64, pos: (f32, f32), f: &mut Frame, screen: (f32, f32), areas: &[SwipeArea]) {
         let now = self.now;
         if self.fingers.is_empty() {
             self.multi = false;
             self.pair = None;
             self.pinch = 0.0;
             self.wheel = 0.0;
+            self.rows = 0.0;
             let anchor = match self.last_tap.take() {
                 Some((clicked, at)) if now - clicked <= DOUBLE_TIME && dist(at, pos) <= px(screen, DOUBLE_SLOP) => at,
                 _ => pos,
             };
-            self.fingers.push(Finger::new(id, pos, anchor, now));
+            let mut g = Finger::new(id, pos, anchor, now);
+            g.area = swipe_at(areas, pos);
+            self.fingers.push(g);
             return;
         }
         if self.fingers.len() == 1 {
@@ -247,7 +311,7 @@ impl GestureMapper {
     /// at the place the press began. Two fingers lifting click nothing, and nothing stays held
     /// once all are up.
     fn lift(&mut self, g: Finger, f: &mut Frame, screen: (f32, f32)) {
-        if !self.fingers.is_empty() || self.multi {
+        if !self.fingers.is_empty() || self.multi || g.swiping {
             return;
         }
         let at = g.at(screen);
@@ -281,7 +345,20 @@ mod tests {
     }
 
     fn step(m: &mut GestureMapper, touches: &[TouchPoint], map_scrolls: bool) -> Frame {
-        m.step(touches, DT, SCREEN, map_scrolls)
+        m.step(touches, DT, SCREEN, map_scrolls, &[])
+    }
+
+    /// A frame with `areas` registered over the touches.
+    fn step_in(m: &mut GestureMapper, touches: &[TouchPoint], areas: &[SwipeArea]) -> Frame {
+        m.step(touches, DT, SCREEN, false, areas)
+    }
+
+    const PAN: SwipeKind = SwipeKind::Pan;
+    const ROWS: SwipeKind = SwipeKind::ScrollRows { row_px: 40.0 };
+
+    /// The whole screen, as one area of kind `kind`.
+    fn all(kind: SwipeKind) -> Vec<SwipeArea> {
+        vec![(Rect::new(0.0, 0.0, 720.0, 1080.0), kind)]
     }
 
     #[test]
@@ -550,5 +627,135 @@ mod tests {
         let lift = step(&mut m, &[touch(1, 100.0, 520.0, Phase::Cancelled)], false);
         assert_eq!(lift.left, Edge { pressed: false, down: false, released: true });
         assert_eq!(step(&mut m, &[], false), Frame::default());
+    }
+
+    #[test]
+    fn a_swipe_over_the_map_pans_by_the_finger_and_clicks_nothing() {
+        let mut m = GestureMapper::default();
+        let areas = all(PAN);
+        let down = step_in(&mut m, &[touch(1, 300.0, 500.0, Phase::Started)], &areas);
+        assert_eq!(down.pointer, Some((300.0, 500.0)));
+        // Past the slop in the first frame: the whole slide from the touch counts, no press.
+        let first = step_in(&mut m, &[touch(1, 300.0, 530.0, Phase::Moved)], &areas);
+        assert_eq!(first.pan, (0.0, 30.0));
+        assert_eq!((first.left, first.right), (Edge::default(), Edge::default()));
+        assert_eq!(first.pointer, Some((300.0, 500.0)));
+        let slide = step_in(&mut m, &[touch(1, 290.0, 540.0, Phase::Moved)], &areas);
+        assert_eq!(slide.pan, (-10.0, 10.0));
+        assert_eq!(slide.left, Edge::default());
+        let lift = step_in(&mut m, &[touch(1, 290.0, 540.0, Phase::Ended)], &areas);
+        assert_eq!((lift.left, lift.right, lift.pan), (Edge::default(), Edge::default(), (0.0, 0.0)));
+        assert_eq!(step_in(&mut m, &[], &areas), Frame::default());
+    }
+
+    #[test]
+    fn a_swipe_over_a_list_turns_the_wheel_a_row_a_step_finger_up_is_down_the_list() {
+        let mut m = GestureMapper::default();
+        let areas = all(ROWS);
+        step_in(&mut m, &[touch(1, 300.0, 500.0, Phase::Started)], &areas);
+        let mut wheel = 0.0;
+        for i in 1..=4 {
+            // Up 20 px a frame: two rows in all, the list's content moves up (the wheel down).
+            let f = step_in(&mut m, &[touch(1, 300.0, 500.0 - 20.0 * i as f32, Phase::Moved)], &areas);
+            assert_eq!((f.left, f.right, f.pan), (Edge::default(), Edge::default(), (0.0, 0.0)));
+            wheel += f.wheel;
+        }
+        assert_eq!(wheel, -2.0);
+        // Down 40 px: one row back.
+        let f = step_in(&mut m, &[touch(1, 300.0, 460.0, Phase::Moved)], &areas);
+        assert_eq!(f.wheel, 1.0);
+        assert_eq!(f.left, Edge::default());
+    }
+
+    #[test]
+    fn a_finger_held_still_before_it_drags_inside_an_area_is_the_old_left_drag() {
+        let mut m = GestureMapper::default();
+        let areas = all(PAN);
+        step_in(&mut m, &[touch(1, 100.0, 500.0, Phase::Started)], &areas);
+        // Held past the swipe time (0.25 s = 15 frames) and short of the long press: then a drag.
+        for _ in 0..16 {
+            step_in(&mut m, &[touch(1, 100.0, 500.0, Phase::Stationary)], &areas);
+        }
+        let start = step_in(&mut m, &[touch(1, 100.0, 520.0, Phase::Moved)], &areas);
+        assert_eq!(start.left, Edge { pressed: true, down: true, released: false });
+        assert_eq!((start.pan, start.pointer), ((0.0, 0.0), Some((100.0, 500.0))));
+        let lift = step_in(&mut m, &[touch(1, 100.0, 600.0, Phase::Ended)], &areas);
+        assert_eq!(lift.left, Edge { pressed: false, down: false, released: true });
+    }
+
+    #[test]
+    fn a_drag_outside_every_area_is_the_old_left_drag() {
+        let mut m = GestureMapper::default();
+        let areas = vec![(Rect::new(0.0, 0.0, 100.0, 100.0), PAN)];
+        step_in(&mut m, &[touch(1, 300.0, 500.0, Phase::Started)], &areas);
+        let start = step_in(&mut m, &[touch(1, 300.0, 520.0, Phase::Moved)], &areas);
+        assert_eq!((start.left.pressed, start.pan), (true, (0.0, 0.0)));
+    }
+
+    #[test]
+    fn an_off_area_keeps_the_drag_a_drag() {
+        let mut m = GestureMapper::default();
+        let areas = vec![(Rect::new(0.0, 0.0, 720.0, 1080.0), PAN), (Rect::new(0.0, 400.0, 200.0, 200.0), SwipeKind::Off)];
+        step_in(&mut m, &[touch(1, 100.0, 500.0, Phase::Started)], &areas);
+        let start = step_in(&mut m, &[touch(1, 100.0, 520.0, Phase::Moved)], &areas);
+        assert_eq!((start.left.pressed, start.pan), (true, (0.0, 0.0)));
+    }
+
+    #[test]
+    fn the_last_area_registered_over_a_touch_acts() {
+        let mut m = GestureMapper::default();
+        // A list drawn over the map: its rows, not the map, take the slide.
+        let areas = vec![(Rect::new(0.0, 0.0, 720.0, 1080.0), PAN), (Rect::new(0.0, 300.0, 720.0, 300.0), ROWS)];
+        step_in(&mut m, &[touch(1, 100.0, 400.0, Phase::Started)], &areas);
+        let f = step_in(&mut m, &[touch(1, 100.0, 380.0, Phase::Moved)], &areas);
+        assert_eq!((f.pan, f.wheel), ((0.0, 0.0), 0.0));
+        let g = step_in(&mut m, &[touch(1, 100.0, 360.0, Phase::Moved)], &areas);
+        assert_eq!((g.pan, g.wheel), ((0.0, 0.0), -1.0));
+    }
+
+    #[test]
+    fn a_tap_inside_an_area_is_still_a_tap() {
+        let mut m = GestureMapper::default();
+        let areas = all(PAN);
+        step_in(&mut m, &[touch(1, 50.0, 60.0, Phase::Started)], &areas);
+        let lift = step_in(&mut m, &[touch(1, 50.0, 60.0, Phase::Ended)], &areas);
+        assert_eq!(lift.left, Edge { pressed: true, down: true, released: false });
+        assert_eq!(lift.pointer, Some((50.0, 60.0)));
+        assert_eq!(step_in(&mut m, &[], &areas).left, Edge { pressed: false, down: false, released: true });
+    }
+
+    #[test]
+    fn a_double_tap_inside_an_area_is_still_a_double_tap() {
+        let mut m = GestureMapper::default();
+        let areas = all(ROWS);
+        step_in(&mut m, &[touch(1, 50.0, 60.0, Phase::Started)], &areas);
+        step_in(&mut m, &[touch(1, 50.0, 60.0, Phase::Ended)], &areas);
+        step_in(&mut m, &[], &areas);
+        let down = step_in(&mut m, &[touch(2, 55.0, 62.0, Phase::Started)], &areas);
+        assert_eq!(down.pointer, Some((50.0, 60.0)));
+        let lift = step_in(&mut m, &[touch(2, 55.0, 62.0, Phase::Ended)], &areas);
+        assert_eq!((lift.left.pressed, lift.pointer), (true, Some((50.0, 60.0))));
+    }
+
+    #[test]
+    fn a_long_press_inside_an_area_is_still_the_right_button() {
+        let mut m = GestureMapper::default();
+        let areas = all(PAN);
+        step_in(&mut m, &[touch(1, 50.0, 60.0, Phase::Started)], &areas);
+        let mut pressed = false;
+        for _ in 0..40 {
+            let f = step_in(&mut m, &[touch(1, 50.0, 60.0, Phase::Stationary)], &areas);
+            if f.right.pressed {
+                assert_eq!((f.right.down, f.left), (true, Edge::default()));
+                pressed = true;
+                break;
+            }
+        }
+        assert!(pressed);
+        // The slide off then keeps the right button; no pan.
+        let slide = step_in(&mut m, &[touch(1, 50.0, 400.0, Phase::Moved)], &areas);
+        assert_eq!((slide.pan, slide.pointer, slide.right.down, slide.left), ((0.0, 0.0), Some((50.0, 60.0)), true, Edge::default()));
+        let lift = step_in(&mut m, &[touch(1, 50.0, 400.0, Phase::Ended)], &areas);
+        assert_eq!(lift.right, Edge { pressed: false, down: false, released: true });
     }
 }

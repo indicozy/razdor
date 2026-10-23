@@ -167,6 +167,7 @@ fn notes(r: Rect, notes: &[Note]) {
     let total: f32 = rows.iter().map(|(_, _, _, s, gap)| gap + s.max(line)).sum::<f32>() + 2.0 * pad;
     let most = (total - r.h).max(0.0);
     let mut scroll = SCROLL.with(|s| s.get());
+    swipe_rows(r, 3.0 * line);
     if r.contains(pointer().into()) {
         scroll -= wheel() * 3.0 * line;
     }

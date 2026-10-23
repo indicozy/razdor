@@ -402,6 +402,7 @@ impl Book {
         let k = self.k;
         // The rows and the scrollbar right of them.
         let list = self.rect(17.0, 60.0, 574.0, 350.0);
+        swipe_rows(list, 29.0 * k);
         if list.contains(crate::ui::widgets::pointer().into()) && !input_blocked() {
             let wh = wheel();
             if wh < 0.0 && *scroll + Book::ROWS < rows.len() {

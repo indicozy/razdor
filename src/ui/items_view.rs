@@ -500,6 +500,7 @@ fn pack_view(game: &Game, assets: &Assets, r: Rect, scroll: &mut usize, hover: &
     let cols = ((room / cell).floor() as usize).max(PACK_COLS);
     let rows = kept.map_or_else(|| pack_rows(game.pack.len(), cols), |v| v.len().max(1).div_ceil(cols)).max(rows_shown);
     let max_scroll = rows.saturating_sub(rows_shown);
+    swipe_rows(r, cell);
     if mouse_in(r.x, r.y, r.w, r.h) {
         let w = wheel();
         if w < 0.0 {
@@ -1474,6 +1475,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     chrome::text_box_base(list_box);
     let row_h = (head * 1.25).round();
     let fits = ((list.h - 8.0 * s) / row_h).floor().max(1.0) as usize;
+    swipe_rows(list, row_h);
     if mouse_in(list.x, list.y, list.w, list.h) {
         let w = wheel();
         if w < 0.0 && view.list_scroll + fits < lines.len() {
@@ -1536,6 +1538,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     });
     let line_h = (body * 1.15).round();
     let shown = ((entry.h - 12.0 * s) / line_h).floor().max(1.0) as usize;
+    swipe_rows(entry, line_h);
     if mouse_in(entry.x, entry.y, entry.w, entry.h) {
         let w = wheel();
         if w < 0.0 && view.text_scroll + shown < lines.len() {
