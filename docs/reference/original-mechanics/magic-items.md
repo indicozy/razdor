@@ -118,8 +118,11 @@ spells.
 - The world keeps running: AI armies move, and the event scan runs after every step.
 - The noon pay and report are held back while a cast is in progress (0x4abfbc tests the cast
   flag 0x66c0b9).
-- **An event that fires during the wait ends the wait early**, and the spell then lands at once
-  (the wait is simply popped from the queue, 0x4ae4f2–0x4ae50f).
+- **An event that opens its window during the wait ends the wait early**, and the spell then
+  lands at once (the wait is simply popped from the queue, 0x4ae4f2–0x4ae50f). The test is the
+  scan's result (0x4ae4e9–0x4ae4f0), which is 1 only when the scan stops on a message or a
+  question (world.md §4.2): a silent event (no message) fires and finishes inside the scan and
+  the reading goes on to its end. **code**
 - If that event casts a spell (§3.6), its cast sets the target code (0x68eca4) to 1, "an event's
   cast", and the hero's spell reads that code when it lands (§3.4): it hits **the player's own
   army** whatever its `Target`, no mana is paid, and an own-army spell gets the event's
@@ -480,7 +483,7 @@ Razdor's code read: `src/rules/items.rs`, `src/rules/magic.rs`, `src/rules/units
 | Enemy target range | Any army on an explored cell a click can target, outside buildings, at any distance; friends too unless they have a meeting event waiting and attitude ≥ 1 (`Game::can_curse`, `EventEngine::meeting_waiting`) | Any army on an explored, passable cell, no distance, visible or not; friendly armies may be cursed unless they are "talking" friends | §3.5 | Matches |
 | Target moves during the cast | Lost only if it leaves the map (removed from it, destroyed or deactivated) | Lost only if it leaves the map or is destroyed | §3.2 | Matches |
 | Mana short at the end | The cost, worked out again when the spell lands, is subtracted with no check; mana may go negative | Mana is subtracted anyway and can go negative | §3.4 | Matches |
-| Event during the cast | An event that fires in a casting step ends the wait; the spell lands at once | The wait ends early and the spell lands at once | §3.2 | Matches |
+| Event during the cast | An event that opens its window (message or question) in a casting step ends the wait and the spell lands at once; a silent event does not | The same (0x4ae4e9, 0x4abfbc) | §3.2 | Matches (since 2026-10-23: silent events ended it too) |
 | Event spell during the cast | The hero's spell lands on his own army as an event's cast (free; an own-army spell gets the 10× / 5× time), then the event's spell (`Game::end_reading`) | The event's cast leaves the target code at 1, and the hero's spell lands on that code: his own army, unpaid, with the event's duration; the event's spell lands after it | §3.2, §3.4 | Matches |
 | Noon during the cast | Held back while a spell is read (`Game::cast` reads too) | Held back until the cast ends | §3.2 | Matches |
 | Caster discount | Any unit of the hero's army, dead or alive, with Caster as its type's or its current (item) bonus; `floor(4x/5)` as the unsigned multiply | A global flag from the last army recomputed (often an AI army); dead units count | §3.3 | Differs: the global flag's call points are not mirrored |
