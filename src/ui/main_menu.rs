@@ -411,7 +411,7 @@ local! {
 /// The players who helped Razdor with bug reports and contributions, by their Discord names
 /// (the owner's wish, 2026-10-22), most reports first; a display name in letters the fonts lack
 /// (Cyrillic Extended-B, Greek, IPA) is given as the Discord tag instead.
-const THANKS: [&str; 13] = ["Нлтчк", "ivantykhonchuk", "Eisenwald", "! TuttiFrutti", "Теневой Лорд", "9ibatnk", "turgrin", "nik0N", "Koaxz", "WHS13", "OBANAI77", "Hristos", "bykBa"];
+const THANKS: [&str; 14] = ["Нлтчк", "ivantykhonchuk", "Eisenwald", "Теневой Лорд", "! TuttiFrutti", "9ibatnk", "OBANAI77", "turgrin", "nik0N", "Koaxz", "Ulmo", "Hristos", "bykBa", "WHS13"];
 /// The names column beside the credits window (the owner's choice, 2026-10-23): its margin
 /// from the screen's edges and from the window, in px at the UI scale (k).
 const COLUMN_MARGIN: f32 = 16.0;
