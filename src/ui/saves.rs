@@ -615,6 +615,15 @@ fn now_secs() -> u64 {
 /// The date a snapshot shows for the computer's time (2025-06-15 12:00 UTC).
 const SNAPSHOT_SECS: u64 = 1_749_988_800;
 
+/// The name is typed in whenever the window is open and not blocked (its row draws the caret
+/// at all times), so it asks for the on-screen keyboard as the other text fields do
+/// (`widgets::edit_line`); the row is drawn by `new_save_row`, not by `edit_line`.
+fn ask_keyboard(name: &str, edit: super::text_edit::TextEdit, blocked: bool) {
+    if !blocked {
+        want_keyboard(name, edit.caret);
+    }
+}
+
 /// The widest a save's name is drawn in its column, in the book's pixels: centred at 157,
 /// it stays right of the selected row's load sign (21..43) with 4 px to spare.
 const NAME_ROOM: f32 = 220.0;
@@ -633,6 +642,7 @@ pub fn save_screen(game: &Game, assets: &Assets, view: &mut SaveView, message: &
     if !input_blocked() {
         edit_keys(&mut view.name, &mut view.edit, &typed_chars(), EditRules::line(60));
     }
+    ask_keyboard(&view.name, view.edit, input_blocked());
     fill_metas(&mut view.entries, &mut view.asked, &mut view.settled, view.scroll.saturating_sub(1), None);
     let same = view.entries.iter().position(|e| e.meta.as_ref().is_some_and(|m| m.name == view.name));
     // The first row is the name being typed (a new save, or the one it replaces).
@@ -1266,5 +1276,18 @@ mod tests {
     fn real_time_labels() {
         assert_eq!(real_time(0), "1970-01-01 00:00");
         assert_eq!(real_time(1_790_000_000), "2026-09-21 14:13");
+    }
+
+    #[test]
+    fn the_save_name_asks_for_the_keyboard_unless_input_is_blocked() {
+        use crate::ui::widgets::{keyboard_request, reset_keyboard_request};
+        reset_keyboard_request();
+        ask_keyboard("Сейв", Default::default(), true);
+        assert_eq!(keyboard_request(), None, "a blocked window asks for nothing");
+        // The caret of the typed name goes to the strip, as with the other fields.
+        reset_keyboard_request();
+        let edit = crate::ui::text_edit::TextEdit::all("Сейв");
+        ask_keyboard("Сейв", edit, false);
+        assert_eq!(keyboard_request(), Some(("Сейв".to_string(), edit.caret)));
     }
 }

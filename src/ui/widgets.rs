@@ -1102,9 +1102,21 @@ local! {
 
 /// A text field is active this frame: the on-screen keyboard should show ([`sync_keyboard`]),
 /// and the strip ([`draw_keyboard_strip`]) shows its text `s` with the caret at char `caret`.
-fn want_keyboard(s: &str, caret: usize) {
+pub fn want_keyboard(s: &str, caret: usize) {
     KEYBOARD_WANTED.with(|k| k.set(true));
     KEYBOARD_TEXT.with(|t| *t.borrow_mut() = (s.to_string(), caret));
+}
+
+/// The keyboard request of this frame so far, its text and caret, if a field asked for it.
+#[cfg(test)]
+pub fn keyboard_request() -> Option<(String, usize)> {
+    KEYBOARD_WANTED.with(|k| k.get()).then(|| KEYBOARD_TEXT.with(|t| t.borrow().clone()))
+}
+
+/// Clears the keyboard request, so a test starts from no request whatever ran before it.
+#[cfg(test)]
+pub fn reset_keyboard_request() {
+    KEYBOARD_WANTED.with(|k| k.set(false));
 }
 
 /// Shows or hides the on-screen keyboard (Android and iOS; the desktop has none).
@@ -1707,6 +1719,8 @@ pub fn draw_popup() {
         let r = pop.rect;
         // Typing filters; Backspace deletes from the filter.
         edit_keys(&mut pop.filter, &mut pop.edit, &typed_chars(), EditRules::line(40));
+        // The filter is typed in while the list is open: it asks for the keyboard as a field does.
+        want_keyboard(&pop.filter, pop.edit.caret);
         let needle = pop.filter.to_lowercase();
         let shown: Vec<&(i64, String)> = pop.options.iter().filter(|o| needle.is_empty() || o.1.to_lowercase().contains(&needle) || o.0.to_string() == needle).collect();
         let max_scroll = shown.len().saturating_sub(POPUP_ROWS);
