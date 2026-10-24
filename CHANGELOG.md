@@ -14,6 +14,21 @@
 
 ## 1.0.1 — 2026-10-24
 
+Коммит `10e43849` (тег `v1.0.1`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+bdf009d5ca487f3aafd65d1b6a0fbda6a3608951bcd88b9280279f9de8067c76  razdor
+07792ef99a0c733b8622761664a224db8dafbaf7ac29f3c1674946c94f5c589f  Razdor.exe
+ee96f2fe7b8375ec6dd5a6bb4b53e5bb998d4aa10993e2daec1482dae9524487  razdor-macos
+da96b1e1c26c2b664a7b0491a92c281766b34be2a978d72f0c761d4df4c6c01e  razdor-translate
+4f075c0f2df2baa83703d0d19cc3d41115c05340744743e056568cea3657596a  Razdor-translate.exe
+9bc34b1866908d1700df4a6e6cc3bc0ef61ee74fc104f12a7e59d1aca84d776b  razdor-translate-macos
+150673de85e3a2905286220d80f8679b7e06fc48b6b18f1f3bb24f68400f70c3  razdor.apk
+f801c76ecf98004a317a417d053e12b3a59499b8f2b4be73f03c8e3182c7a176  razdor.ipa
+```
+
 ### Добавлено
 
 - Без установленной игры главное меню объясняет, что нужна своя копия «Времён раздора», и ведёт к инструкции по установке (с картинками на сайте) и в Discord, где её берут.
