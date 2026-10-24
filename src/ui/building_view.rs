@@ -416,8 +416,9 @@ fn hall_offers_in_face(game: &mut Game, f: &Frame, view: &mut BuildingView, mess
     if entries.is_empty() {
         chrome::divider(strip);
         if let Some(l) = game.location {
-            let desc = &game.world.locations[l].description;
-            description_box(desc, panel.x, panel.y, panel.w, panel.h);
+            // The original fills #HERONAME in building/army descriptions at map load (0x4b2930, 0x4b2a46).
+            let desc = game.fill_text(&game.world.locations[l].description);
+            description_box(&desc, panel.x, panel.y, panel.w, panel.h);
         }
         return None;
     }

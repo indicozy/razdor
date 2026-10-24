@@ -1856,7 +1856,8 @@ fn army_tooltip(game: &Game, a: &Army) -> Tooltip {
         text.push((a.leader_name.clone(), Ink::Name));
     }
     if !a.description.trim().is_empty() {
-        text.push((a.description.clone(), Ink::Orange));
+        // The original fills #HERONAME in building/army descriptions at map load (0x4b2930, 0x4b2a46).
+        text.push((game.fill_text(&a.description), Ink::Orange));
     }
     let now = game.clock.total_minutes() as u64;
     let mut spells: Vec<&str> = Vec::new();
@@ -1908,7 +1909,8 @@ fn location_tooltip(game: &Game, l: &Location) -> Tooltip {
         text.push((owner, Ink::Name));
     }
     if !l.description.trim().is_empty() {
-        text.push((l.description.clone(), Ink::Label));
+        // The original fills #HERONAME in building/army descriptions at map load (0x4b2930, 0x4b2a46).
+        text.push((game.fill_text(&l.description), Ink::Label));
     }
     if l.kind == LocationKind::Village && l.tribute_gold <= 0 && l.tribute_mana <= 0 {
         text.push((info("VillageEmptyGold", n_("(tribute already collected)")), Ink::Note));
@@ -3403,6 +3405,25 @@ mod tests {
     }
 
     /// An army's leader is named only when it has more than one unit (0x4ca9f0).
+    /// The original fills `#HERONAME` in a building's and an army's description at map load
+    /// (0x4b2930, 0x4b2a46): the tooltips show the hero's name, never the escape.
+    #[test]
+    fn tooltips_fill_the_hero_name_as_the_original_does() {
+        use std::sync::Arc;
+        use razdor::rules::content::Content;
+        let mut g = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        g.set_hero_name("Ivo");
+        g.world.locations[0].description = "Принадлежит #HERONAME.".into();
+        let t = location_tooltip(&g, &g.world.locations[0]);
+        assert!(t.text.iter().any(|(s, _)| s == "Принадлежит Ivo."), "the building's description");
+        assert!(!t.text.iter().any(|(s, _)| s.contains("#HERONAME")));
+        let a = g.world.armies.len() - 1;
+        g.world.armies[a].description = "Армия #HERONAME.".into();
+        let t = army_tooltip(&g, &g.world.armies[a]);
+        assert!(t.text.iter().any(|(s, _)| s == "Армия Ivo."), "the army's description");
+        assert!(!t.text.iter().any(|(s, _)| s.contains("#HERONAME")));
+    }
+
     #[test]
     fn a_lone_unit_s_tooltip_names_no_leader() {
         assert!(!tip_shows_leader("Бран", 1));
