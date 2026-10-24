@@ -852,6 +852,13 @@ mode 1, black keyed): the attack and "Mnvr" in the untinted white ae24bc, "D" an
 yellow ae24c0 (white less 25, 25, 125), unhurt Hits in the orange ae24c4, and the red ae24c8 /
 blue ae24cc for values below / above. **code**
 
+**Which values.** In battle the strip shows the block 0x4986e4 fills: attacks, defences and
+initiative clamped at 0, and an attack at 0 when its base is 0. Out of battle (the army screens)
+it shows the unit's recomputed stats (0x4908a8, via 0x491fa4), which are not floored at 0 for the
+defences: spell and item deltas can take a defence below 0 and the strip prints it negative, e.g.
+«D: -5/5» under «Ветхость Доспехов» on a unit with melee defence 0 and ranged 10 (as-original).
+**code**
+
 **Strip pictures** (made once at 4dc118, 0x4de0f0–0x4de1f7). Each is a 94×39 piece of
 `Win-paper` on the 16-bit surface: the plain one (ae2698) cut at (20, 20) with (148, 132, 148)
 taken off (4768f8 mode 1), a dark brown; the hero's (ae269c) the same, then red ×4222/1024 −
