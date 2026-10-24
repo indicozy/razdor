@@ -36,9 +36,16 @@ update window shows those notes up to their first `## ` heading.
 
    SHA-256 выпущенных программ (собраны конвейером выпуска):
    ```
-   then the three `<sha256>  <name>` lines in a code block (razdor, Razdor.exe, razdor-macos).
-   Regenerate `CHANGELOG.md`, commit `Changelog: X.Y.Z's commit and the SHA-256 of its release`,
-   push `main`.
+   then the `<sha256>  <name>` lines of every program in the release's `SHA256SUMS`, in a code
+   block. Regenerate `CHANGELOG.md`, commit `Changelog: X.Y.Z's commit and the SHA-256 of its
+   release`, push `main`.
+7a. Website, every release: the site is the `gh-pages` branch (GitHub Pages,
+   https://indicozy.github.io/razdor/; `index.html` Russian, `en.html` English, no build step).
+   In a worktree of `origin/gh-pages` add the release to the «Изменения» / "Changes" window
+   (the page's own article format, player words, newest first; group small releases as the page
+   does), set the footer's version, and update anything the release changed on the page (the
+   platforms, the requirements, the install steps, the video when the owner gives a new one).
+   Commit `Site: X.Y.Z …`, push as a fast-forward to `gh-pages` (never force), remove the worktree.
 8. Tell the owner: the version, the release link, what is in it (plain words), test results.
 9. Discord announcement, every release (if the `discord-reports` MCP server is connected):
    - Reports shipped: the reports backlog's `fixed` entries (`discord-reports` skill §3) whose
