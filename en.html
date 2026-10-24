@@ -104,7 +104,7 @@
 <header class="hero">
   <div class="fx" aria-hidden="true"><video class="fx-bg" autoplay muted loop playsinline preload="auto" poster="fire/bg-land.webp" aria-hidden="true"><source src="fire/bg-port.webm" type="video/webm" media="(max-aspect-ratio: 1/1)"><source src="fire/bg-port.mp4" type="video/mp4" media="(max-aspect-ratio: 1/1)"><source src="fire/bg-land.webm" type="video/webm"><source src="fire/bg-land.mp4" type="video/mp4"></video><video class="fx-title" autoplay muted loop playsinline preload="auto" poster="fire/title.webp" aria-hidden="true"><source src="fire/title.webm" type="video/webm"><source src="fire/title.mp4" type="video/mp4"></video></div>
   <h1 id="title">Razdor</h1>
-  <p class="tag">An engine for <i>Discord Times</i>: the original scenarios on today's Windows and Linux</p>
+  <p class="tag">The same RPG, on any device: <i>Discord Times</i> on Windows, Linux, macOS, Android and iOS</p>
   <nav aria-label="Sections">
     <a class="btn" href="#video"><span class="label"><span>Watch the video</span></span></a>
     <a class="btn" href="#how"><span class="label"><span>How it works</span></span></a>
@@ -117,7 +117,7 @@
 <main>
 
 <div class="video" id="video">
-  <iframe src="https://www.youtube-nocookie.com/embed/p7g0yvwtEeM" title="Razdor: the video" loading="lazy" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+  <iframe src="https://www.youtube-nocookie.com/embed/rM6SsLLTwCM" title="Razdor: the video" loading="lazy" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
 </div>
 
 <section class="window" id="how" aria-labelledby="how-title">
@@ -138,6 +138,10 @@
           <li>A map editor whose maps the original opens too.</li>
           <li>Russian and English interface; the game's own fonts or a modern one, your choice.</li>
           <li>Mouse, keyboard or gamepad.</li>
+          <li>Any resolution and window shape; interface scale up to ×4.</li>
+          <li>Phones and tablets (Android, iOS): touch gestures or a touchpad mode, portrait too.</li>
+          <li>Own battle by a shareable code, and the «Максимум» battle AI.</li>
+          <li>Automatic updates on PC.</li>
         </ul>
       </div>
       <div class="box">
@@ -146,6 +150,7 @@
           <li>Your own copy of <i>Discord Times</i> with the Community Update 1.2.</li>
           <li>Windows 10 or newer, Linux (x86_64), or macOS 11 or newer.</li>
           <li>A graphics card with OpenGL 2, which almost any computer has.</li>
+          <li>Android 8 or newer, or an iPhone or iPad with iOS 14 or newer (the iOS version is installed with AltStore or Sideloadly).</li>
         </ul>
       </div>
     </div>
@@ -164,6 +169,7 @@
         <li>Start it. Razdor finds the game in its own folder; it keeps its saves and settings apart and leaves the game untouched.</li>
       </ol>
       <p class="note">If the game is somewhere else, give its folder in a <code>.env</code> file next to the program: <code>RAZDOR_DT_DIR="C:\Games\Discord Times"</code>. If something does not start or plays differently from the original, report it on <a href="https://github.com/indicozy/razdor/issues">GitHub</a> with the <code>razdor.log</code> file from <code>%APPDATA%\razdor\</code> (Windows), <code>~/.local/share/razdor/</code> (Linux) or <code>~/Library/Application Support/razdor/</code> (macOS).</p>
+      <p class="note"><strong>Phone or tablet (trial versions).</strong> Android: download <strong>razdor.apk</strong> from the <a href="https://github.com/indicozy/razdor/releases/latest">releases page</a>, put the game folder into <code>DiscordTimes</code> in internal storage, and allow «All files access». iOS: install <strong>razdor.ipa</strong> with AltStore or Sideloadly, then copy the game folder to Files → On My iPhone → Razdor → DiscordTimes. Details are in the <a href="https://github.com/indicozy/razdor#readme">README</a>.</p>
     </div>
   </div>
 </section>
@@ -172,6 +178,137 @@
   <h2 id="changes-title">Changelog</h2>
   <a class="close" href="#top" aria-label="Back to the menu">×</a>
   <div class="window-body">
+    <article class="box">
+      <h3>1.0.0 <span class="date">24 October 2026</span></h3>
+      <p>Razdor 1.0 is the first stable release: the original's scenarios and campaigns play by its rules on Windows, Linux and macOS. Updates will come less often from now on and will mostly be fixes. The Android and iOS versions are still trial versions; their support will grow in the next releases.</p>
+      <h4>New</h4>
+      <ul>
+        <li>The interface scale goes up to ×4, even larger than the screen: a big window scrolls — drag it by an empty spot in the window or with the middle mouse button; the bottom bar stays in place.</li>
+        <li>Android and iOS: the app now has the Razdor icon.</li>
+      </ul>
+      <h4>Changed</h4>
+      <ul>
+        <li>Android and iOS: the map follows your finger, and lists and text windows scroll with a swipe; to drag an item or a unit, hold your finger on it and move.</li>
+        <li>The Credits list of players who helped has been updated: those whose reports led to fixes are listed by their count.</li>
+      </ul>
+    </article>
+    <article class="box">
+      <h3>0.9.0 <span class="dash">–</span> 0.9.4 <span class="date">22–23 October 2026</span></h3>
+      <h4>New</h4>
+      <ul>
+        <li>Keys can be rebound: «Ещё…» → «Клавиши…» (More → Keys); hints and the key list (F1) show the keys you chose.</li>
+        <li>A link to our Discord in the main menu.</li>
+        <li>Razdor for Android and for iPhone and iPad — trial versions; the installation steps are above.</li>
+        <li>Android and iOS: ordinary gestures — a tap is a click, a long press is a right click, a pinch zooms, two fingers scroll the map and lists; a touchpad mode is in the settings.</li>
+        <li>Android and iOS: the screen turns with the phone, and you can play in portrait; on Android, the orientation is set to auto, landscape or portrait.</li>
+        <li>Credits: a list of players who helped with bug reports.</li>
+      </ul>
+      <h4>Changed</h4>
+      <ul>
+        <li>A click on the bottom bar's date no longer skips time: wait with the buttons that appear when you hover over its middle, or with keys 1 and 4.</li>
+        <li>Android and iOS: the on-screen keyboard lies over the game and no longer squeezes the picture; the text you type shows at the top.</li>
+        <li>Android and iOS: in portrait, menus and windows sit in the centre, and the title picture is not stretched.</li>
+      </ul>
+      <h4>Fixed</h4>
+      <ul>
+        <li>Android: the game no longer crashes when windows open or at random; the volume buttons change the game's volume; the on-screen keyboard appears when you type a hero or save name; Razdor asks for «All files access» itself.</li>
+        <li>A spell no longer fires early if an event without a message happens while it is being read: «Вихрь скорости» (Whirlwind of Speed) takes its full 8 hours.</li>
+        <li>Minimap: while the left button is held on the minimap, the view follows the mouse.</li>
+        <li>Event texts no longer show a stray «#» after the hero's name; a nickname in Credits is written in plain letters.</li>
+        <li>Spell cards in the book and in event windows have the thin silver frame again, as in the original.</li>
+        <li>No black box under message windows (for example, the rumours in the tavern).</li>
+      </ul>
+    </article>
+    <article class="box">
+      <h3>0.4.41 <span class="dash">–</span> 0.4.53 <span class="date">20–22 October 2026</span></h3>
+      <h4>New</h4>
+      <ul>
+        <li>The spell book has no 15-spell limit: extra spells go on the next pages; filter buttons All, Magic (on your army) and Curses (on the enemy).</li>
+        <li>The hero's and the army's packs can be shown by kind (weapons, armour, rings…) and sorted by name or price; a row of picture buttons above the pack and in the market.</li>
+        <li>A save now holds its map: it loads even when the map is not in the game folder, as in the original.</li>
+        <li>The map can be zoomed out with the mouse wheel or the «-» key until it fits on the screen.</li>
+      </ul>
+      <h4>Changed</h4>
+      <ul>
+        <li>«Тыловая служба» (Quartermaster service) always cuts the pay by 30%; the pay line shows the amount after the discount, the amount that is taken.</li>
+        <li>The merchant's discount in the market works even when the item with that skill just lies in the pack.</li>
+        <li>When an event takes a quest character from a party, the artifacts he wears go into the inventory by themselves.</li>
+        <li>The spell book fills in columns from top to bottom; a hovered spell is highlighted, and its card turns red when there is not enough mana.</li>
+        <li>Quests in the main hall are dark blue, rumours are crimson; the list sits in the middle of the parchment.</li>
+      </ul>
+      <h4>Fixed</h4>
+      <ul>
+        <li>Negative vampirism works in battle as in the original and is called «Кровопотеря» (bloodloss).</li>
+        <li>Bridge events fire when the hero crosses a bridge.</li>
+        <li>The hero's figure no longer changes when an event changes his class; a healthy hero stays fully healthy at the new maximum.</li>
+        <li>«Максимум» no longer leads a unit to the rear and dances in place less when it could strike.</li>
+        <li>The event window shows the items that were lost, as in the original.</li>
+        <li>The first load of pictures no longer freezes weaker computers: unpacked pictures are kept in Razdor's data folder.</li>
+        <li>A hero or army behind a castle or building wall is hidden by the wall, as in the original.</li>
+        <li>The numbers on unit cards no longer overlap at large scale.</li>
+      </ul>
+    </article>
+    <article class="box">
+      <h3>0.4.33 <span class="dash">–</span> 0.4.40 <span class="date">18–20 October 2026</span></h3>
+      <h4>New</h4>
+      <ul>
+        <li>Own battle: items are picked from a list, filtered by kind and sorted by price; «Скопировать код боя» and «Вставить код боя» (Copy and Paste battle code) send the whole battle as one line to a friend.</li>
+        <li>F10 loads the last autosave; the market and shrine lists sort by a click on the heading.</li>
+        <li>The scenario list can be filtered (campaigns, single scenarios, played, unplayed, favourites) and sorted by map size or name; a star adds a scenario to the favourites.</li>
+        <li>Army battles on the map: crossed swords and a line about the winner in the messages; a list of armies by the minimap. They are switched on in the extra settings.</li>
+        <li>Experimental scenario rules (the «…» button next to «Далее»): several rings, several amulets, no identical items, at most two potions per character.</li>
+        <li>A living army unit can sit out battles («Не участвует в боях»), and a route can go around armies («Обход армий на пути»). Both are in the extra settings.</li>
+      </ul>
+      <h4>Changed</h4>
+      <ul>
+        <li>Soldiers in the army, building and garrison windows are arranged by dragging; a click only selects. The old clicks can be brought back: «Ещё…» → «Расстановка армии».</li>
+        <li>Items in the hero and army windows are taken and put down with clicks, as in the original; a stray click no longer drinks a potion.</li>
+        <li>The pack has no limit: more slots appear with the items, and nothing is lost.</li>
+        <li>Spell effects are coloured by meaning: helpful for the target in blue, harmful in yellow; the undead no longer take poison.</li>
+        <li>«Максимум» in a campaign keeps its units alive; in your own battle it may sacrifice a unit only when it is sure of the win.</li>
+        <li>In battle a unit gets at most one blessing per turn.</li>
+        <li>The save window shows the real date and time; a new game's name is no longer filled in.</li>
+      </ul>
+      <h4>Fixed</h4>
+      <ul>
+        <li>With the «Максимум» AI, auto-battle (Q and W) also plays «Максимум» for both sides.</li>
+        <li>Unit cards, the unit description and spell texts look as in the original: labels, colours, bars and font.</li>
+        <li>Item descriptions and market lists look as in the original.</li>
+        <li>Building and army windows opened with the right mouse button look as in the original: opaque, with the game's patterns and colours.</li>
+        <li>Armies on the map move slightly while the hero stands still; a hero and armies inside a building are hidden, as in the original.</li>
+        <li>When an event opens a place on the map, the fog on the rest of the map no longer clears.</li>
+        <li>A map moved with the arrow keys no longer gets stuck.</li>
+        <li>Windows: Alt+Tab and Win+Tab in full screen show the chosen window.</li>
+      </ul>
+    </article>
+    <article class="box">
+      <h3>0.4.23 <span class="dash">–</span> 0.4.32 <span class="date">14–17 October 2026</span></h3>
+      <h4>New</h4>
+      <ul>
+        <li>A map translator, a separate program <code>razdor-translate</code>: it makes English copies of maps and whole campaigns with a language model (your own, for example Ollama, or a cloud one with a key). It translates the game's data too — units, items, spells and texts — and can translate into any language.</li>
+        <li>The EN / RU switch is replaced by a list of languages: Russian, English and each translation of the game's data found in its folder. F2 goes to the next one.</li>
+        <li>Text in any language shows in both font modes: Greek, Vietnamese and Hindi with their letters joined properly, Chinese and Japanese in the system font.</li>
+        <li>A new battle AI, «Максимум (Раздор)» («Ещё…» → «Сила ИИ в бою»): the enemy looks several actions ahead and wins about 60 % of battles against the normal AI. Off by default.</li>
+      </ul>
+      <h4>Changed</h4>
+      <ul>
+        <li>Fonts and colours of labels in all windows are brought to the original; long names and button labels are cut with an ellipsis instead of shrinking.</li>
+        <li>The shrine is as in the original: the spell list on parchment, a column of icons, colours for the spells you have learned.</li>
+        <li>Buttons fire when you release the mouse over them; if you move away, the press is cancelled.</li>
+        <li>The hero's diary is one: in the hero window, with tabs for quests, completed quests, rumours and messages. J opens it too.</li>
+        <li>Windows are closer to the original: dark parchment, a hint strip, the red defeat window and the scenario list with coloured titles.</li>
+        <li>The starting zoom of the map follows the interface scale set in «Ещё…».</li>
+      </ul>
+      <h4>Fixed</h4>
+      <ul>
+        <li>A held Backspace erases letters in a row, as in the original; in every text field you can place the cursor with the mouse or arrows, select, and use Delete and Ctrl+C / Ctrl+X / Ctrl+V.</li>
+        <li>The map scrolls again when the mouse is at the edge of the screen.</li>
+        <li>«The battle is over» appears only when the last blow has landed, as in the original.</li>
+        <li>The village window closes on Space and Enter, as in the original.</li>
+        <li>Modern font: ä, ö, ü and ß no longer turn into Russian letters, and «», — no longer disappear.</li>
+        <li>Scenario icons in the new game list look as in the original, without the black circle and ring.</li>
+      </ul>
+    </article>
     <article class="box">
       <h3>0.4.21 <span class="dash">–</span> 0.4.22 <span class="date">14 October 2026</span></h3>
       <h4>Changed</h4>
@@ -438,7 +575,7 @@
 </main>
 
 <footer class="foot">
-  <p>Razdor 0.4.22 // for Community Update 1.2 // <a href="https://github.com/indicozy/razdor">source code on GitHub</a></p>
+  <p>Razdor 1.0.0 // for Community Update 1.2 // <a href="https://github.com/indicozy/razdor">source code on GitHub</a></p>
   <p>Made by <a href="https://github.com/indicozy">@indicozy</a>. Not affiliated with Aterdux or the rights holders of <i>Discord Times</i>; no warranty.</p>
 </footer>
 
