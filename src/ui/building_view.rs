@@ -380,7 +380,8 @@ fn main_hall(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingVie
         }
     }
     let dy = list_y + list_h + 10.0 * k;
-    let desc = game.world.locations[l].description.clone();
+    // The original fills #HERONAME in building/army descriptions at map load (0x4b2930, 0x4b2a46).
+    let desc = game.fill_text(&game.world.locations[l].description);
     description_box(&desc, x, dy, w, f.y + f.h - dy - 10.0 * k);
     next
 }
@@ -1137,7 +1138,8 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
     }
     if let Some(l) = game.location {
         let dy = by + 52.0 * k;
-        description_box(&game.world.locations[l].description, x, dy, w, f.y + f.h - dy - 10.0 * k);
+        // The original fills #HERONAME in building/army descriptions at map load (0x4b2930, 0x4b2a46).
+        description_box(&game.fill_text(&game.world.locations[l].description), x, dy, w, f.y + f.h - dy - 10.0 * k);
     }
     None
 }
@@ -1194,7 +1196,8 @@ fn sanctuary(game: &mut Game, f: &Frame, view: &mut BuildingView, message: &mut 
     }
     if let Some(l) = game.location {
         let dy = f.y + 300.0 * k;
-        description_box(&game.world.locations[l].description, f.cx, dy, f.cw, f.y + f.h - dy - 10.0 * k);
+        // The original fills #HERONAME in building/army descriptions at map load (0x4b2930, 0x4b2a46).
+        description_box(&game.fill_text(&game.world.locations[l].description), f.cx, dy, f.cw, f.y + f.h - dy - 10.0 * k);
     }
 }
 

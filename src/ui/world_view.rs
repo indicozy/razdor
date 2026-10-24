@@ -1491,7 +1491,8 @@ fn army_tooltip(game: &Game, a: &Army) -> Tooltip {
         footer.push((info("Commander", n_("Leader")), DIM));
         footer.push((a.leader_name.clone(), TIP_NAME));
     }
-    for line in wrap(&a.description, 320.0 * super::chrome::k(), 12.0 * super::chrome::k()) {
+    // The original fills #HERONAME in building/army descriptions at map load (0x4b2930, 0x4b2a46).
+    for line in wrap(&game.fill_text(&a.description), 320.0 * super::chrome::k(), 12.0 * super::chrome::k()) {
         footer.push((line, INK));
     }
     let now = game.clock.total_minutes() as u64;
@@ -1543,7 +1544,8 @@ fn location_tooltip(game: &Game, l: &Location) -> Tooltip {
         lines.push((info("Owner", n_("Owner")), DIM));
         lines.push((owner, TIP_NAME));
     }
-    for line in wrap(&l.description, 320.0 * super::chrome::k(), 12.0 * super::chrome::k()) {
+    // The original fills #HERONAME in building/army descriptions at map load (0x4b2930, 0x4b2a46).
+    for line in wrap(&game.fill_text(&l.description), 320.0 * super::chrome::k(), 12.0 * super::chrome::k()) {
         lines.push((line, INK));
     }
     if l.kind == LocationKind::Village && l.tribute_gold <= 0 && l.tribute_mana <= 0 {
@@ -2440,6 +2442,23 @@ mod tests {
     /// byte cell +9): a building whose top-left footprint cell is (5, 10) covers a figure one row
     /// north of it (the castle's walls hide a hero behind them), and a figure one row south
     /// stands in front of it. Within one cell the scenery and the building come first.
+    /// The original fills `#HERONAME` in a building's and an army's description at map load
+    /// (0x4b2930, 0x4b2a46): the tooltips show the hero's name, never the escape.
+    #[test]
+    fn tooltips_fill_the_hero_name_as_the_original_does() {
+        use razdor::rules::content::Content;
+        use std::sync::Arc;
+        // The tooltip builders wrap their texts with the window's font, so this checks the text
+        // they take: the description as it is filled for display.
+        let mut g = super::Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        g.set_hero_name("Ivo");
+        g.world.locations[0].description = "Принадлежит #HERONAME.".into();
+        assert_eq!(g.fill_text(&g.world.locations[0].description), "Принадлежит Ivo.", "the building's description");
+        let a = g.world.armies.len() - 1;
+        g.world.armies[a].description = "Армия #HERONAME.".into();
+        assert_eq!(g.fill_text(&g.world.armies[a].description), "Армия Ivo.", "the army's description");
+    }
+
     #[test]
     fn a_figure_is_drawn_in_its_cells_turn_of_the_pass() {
         use super::{cell_pass_key, LAYER_BUILDING, LAYER_FIGURE, LAYER_SPELL_ABOVE};
