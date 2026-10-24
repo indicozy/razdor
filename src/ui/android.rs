@@ -148,6 +148,47 @@ unsafe fn start_settings(env: *mut sys::JNIEnv, action: &str, with_package: bool
     !cleared(env)
 }
 
+/// Opens `url` in the browser (or the app that handles it): an `ACTION_VIEW` intent over
+/// `Uri.parse(url)`, started from the activity. A link no app takes is logged, not raised.
+pub fn open_url(url: &str) {
+    // SAFETY: the activity exists once the window is open (the menu runs after it); every
+    // reference made below is a local one, freed by `Local` when it goes out of scope.
+    unsafe {
+        let env = attach_jni_env();
+        if !view_url(env, url) {
+            razdor::diag!("could not open {url}");
+        }
+    }
+}
+
+/// The intent of [`open_url`]: `new Intent("android.intent.action.VIEW", Uri.parse(url))`, then
+/// `startActivity`. False when a call failed (the Java exception is cleared).
+unsafe fn view_url(env: *mut sys::JNIEnv, url: &str) -> bool {
+    let uri_cls = class(env, "android/net/Uri");
+    let parse = method(env, uri_cls.obj, "parse", "(Ljava/lang/String;)Landroid/net/Uri;", true);
+    if parse.is_null() || cleared(env) {
+        return false;
+    }
+    let text = string(env, url);
+    let uri = Local::new(env, ((**env).CallStaticObjectMethod.unwrap())(env, uri_cls.obj, parse, text.obj));
+    if uri.obj.is_null() || cleared(env) {
+        return false;
+    }
+    let intent_cls = class(env, "android/content/Intent");
+    let action = string(env, "android.intent.action.VIEW");
+    let ctor = method(env, intent_cls.obj, "<init>", "(Ljava/lang/String;Landroid/net/Uri;)V", false);
+    if ctor.is_null() || cleared(env) {
+        return false;
+    }
+    let intent = Local::new(env, ((**env).NewObject.unwrap())(env, intent_cls.obj, ctor, action.obj, uri.obj));
+    if intent.obj.is_null() || cleared(env) {
+        return false;
+    }
+    let start = method(env, activity_class(env).obj, "startActivity", "(Landroid/content/Intent;)V", false);
+    ((**env).CallVoidMethod.unwrap())(env, ACTIVITY, start, intent.obj);
+    !cleared(env)
+}
+
 /// Whether Razdor may read the shared storage (the install and the saves live there).
 pub fn storage_granted() -> bool {
     // SAFETY: the activity exists once the window is open (the screens run after it).

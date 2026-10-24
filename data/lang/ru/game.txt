@@ -11,6 +11,10 @@ This folder has no {missing}: {dir} = В этой папке нет {missing}: {
 Discord Times not found: put Razdor into the game folder, next to DiscordTimes.exe. = «Времена раздора» не найдены: положите Razdor в папку игры, рядом с DiscordTimes.exe.
 # Android (the not-found screen; see ui/screens.rs)
 Discord Times not found. = «Времена раздора» не найдены.
+Razdor plays your own copy of Discord Times: version 1.8 with Community Update 1.2. = Раздор играет на вашей копии «Времён раздора»: версия 1.8 с Community Update 1.2.
+Put Razdor into the game folder, next to DiscordTimes.exe. = Положите Раздор в папку игры, рядом с DiscordTimes.exe.
+How to install = Как установить
+Where to get the game = Где взять игру
 1. Give Razdor access to all files: the «Grant access» button, or Settings > Apps > Special app access > All files access > Razdor. = 1. Дайте Раздору доступ ко всем файлам: кнопка «Выдать доступ» или Настройки > Приложения > Специальный доступ > Доступ ко всем файлам > Раздор.
 2. Put the game folder in internal storage, in a folder named DiscordTimes (or in Download). = 2. Положите папку игры во внутреннюю память, в папку DiscordTimes (или в Download).
 Grant access = Выдать доступ

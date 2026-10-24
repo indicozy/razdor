@@ -169,14 +169,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         {
             let hint = tr("Discord Times not found: put Razdor into the game folder, next to DiscordTimes.exe.");
             text_centered(hint, screen_width() / 2.0, y + 20.0, 20.0, DIM);
-            let why = match razdor::dt::install::problem() {
-                Some(Problem::NotInstall { dir, missing }) => {
-                    Some(trf!("This folder has no {missing}: {dir}", missing = missing.join(", "), dir = dir.display()))
-                }
-                Some(Problem::Load(e)) => Some(e),
-                None => None,
-            };
-            if let Some(why) = why {
+            if let Some(why) = install_problem() {
                 text_fit(&why, x, y + 48.0, w, 16.0, DIM);
             }
         }
@@ -220,12 +213,14 @@ fn ios_not_found(x: f32, w: f32) {
     }
 }
 
-/// Android and iOS, on the main menu while no install is found: the not-found block in the
+/// On the main menu while no install is found, on every platform: the not-found block in the
 /// column left of the menu's buttons (the left half of the screen, in landscape and portrait),
-/// over a dark panel, with the same texts and buttons as the scenario list's block. Its buttons
-/// stack. The scale is the interface's (`chrome::k`, which fits the width and the height), so
-/// the column is not scaled by the height alone.
-#[cfg(any(target_os = "android", target_os = "ios"))]
+/// over a dark panel. It says that Razdor plays the player's own copy of the game, gives the
+/// steps to put it in place, and offers «How to install» (the install guide on the website) and
+/// «Where to get the game» (the Discord). The phones also have their access button or «Check
+/// again» (their steps' texts). The buttons stack; the two links share a row when the stack does
+/// not fit the screen's height. The scale is the interface's (`chrome::k`, which fits the width
+/// and the height), so the column is not scaled by the height alone.
 pub fn menu_not_found(no_install: bool) {
     if !no_install {
         return;
@@ -234,57 +229,134 @@ pub fn menu_not_found(no_install: bool) {
     let k = super::chrome::k();
     let x = 16.0 * k;
     let w = (super::main_menu::left_edge() - 2.0 * x).max(120.0 * k);
-    let btn_h = (sh * 0.12).max(34.0 * k);
+    let btn_h = button_height(sh, k);
     let btn_w = (240.0 * k).min(w);
     let gap = 12.0 * k;
     let bottom = sh - 60.0 * k;
-    #[cfg(target_os = "android")]
-    let (steps, buttons) = (
-        [
-            tr("1. Give Razdor access to all files: the «Grant access» button, or Settings > Apps > Special app access > All files access > Razdor."),
-            tr("2. Put the game folder in internal storage, in a folder named DiscordTimes (or in Download)."),
-        ],
-        2,
-    );
-    #[cfg(target_os = "ios")]
-    let (steps, buttons) = (
-        [
-            tr("1. Copy the game folder to the Files app: On My iPhone (or iPad) > Razdor, in a folder named DiscordTimes."),
-            tr("2. From a computer: Finder (or iTunes) > the device > Files > Razdor."),
-        ],
-        1,
-    );
-    let (title_size, step_size, lead) = (20.0 * k, 16.0 * k, 22.0 * k);
-    let step_lines: Vec<String> = steps.iter().flat_map(|s| wrap(s, w, step_size)).collect();
-    let text_h = title_size + 10.0 * k + step_lines.len() as f32 * lead;
-    let buttons_top = bottom - buttons as f32 * btn_h - (buttons - 1) as f32 * gap;
+    let (title_size, body_size, lead) = (20.0 * k, 16.0 * k, 22.0 * k);
+    let mut body = vec![tr("Razdor plays your own copy of Discord Times: version 1.8 with Community Update 1.2.").to_string()];
+    body.extend(not_found_steps());
+    body.extend(install_problem());
+    let body_lines: Vec<String> = body.iter().flat_map(|s| wrap(s, w, body_size)).flat_map(|l| break_wide(&l, w, body_size)).collect();
+    let text_h = title_size + 10.0 * k + body_lines.len() as f32 * lead;
+    // The rows of buttons, from the top: the platform's own, then the two links.
+    let (how, there) = ((tr("How to install"), open_guide as fn()), (tr("Where to get the game"), open_discord as fn()));
+    let mut rows = not_found_rows();
+    let stack_height = |n: usize| n as f32 * btn_h + (n as f32 - 1.0) * gap;
+    let stacked = stack_height(rows.len() + 2);
+    if bottom - stacked - 18.0 * k - text_h - 10.0 * k >= 16.0 * k {
+        rows.push(vec![how]);
+        rows.push(vec![there]);
+    } else {
+        rows.push(vec![how, there]);
+    }
+    let buttons_top = bottom - stack_height(rows.len());
     let text_top = buttons_top - 18.0 * k - text_h;
     draw_rectangle(x - 10.0 * k, text_top - 10.0 * k, w + 20.0 * k, bottom - text_top + 20.0 * k, Color::new(0.0, 0.0, 0.0, 0.6));
     let title_base = text_top + title_size;
     text(tr("Discord Times not found."), x, title_base, title_size, INK);
-    for (i, line) in step_lines.iter().enumerate() {
-        text(line, x, title_base + 10.0 * k + (i + 1) as f32 * lead, step_size, DIM);
+    for (i, line) in body_lines.iter().enumerate() {
+        text(line, x, title_base + 10.0 * k + (i + 1) as f32 * lead, body_size, DIM);
     }
-    #[cfg(target_os = "android")]
-    {
-        if button(x, buttons_top, btn_w, btn_h, tr("Grant access"), true) {
-            super::android::request_storage();
-        }
-        if button(x, buttons_top + btn_h + gap, btn_w, btn_h, tr("Check again"), true) {
-            super::mobile::ask_recheck();
-        }
-    }
-    #[cfg(target_os = "ios")]
-    {
-        if button(x, buttons_top, btn_w, btn_h, tr("Check again"), true) {
-            super::mobile::ask_recheck();
+    for (i, row) in rows.iter().enumerate() {
+        let y = buttons_top + i as f32 * (btn_h + gap);
+        let n = row.len() as f32;
+        let bw = btn_w.min((w - gap * (n - 1.0)) / n);
+        for (j, (label, action)) in row.iter().enumerate() {
+            if button(x + j as f32 * (bw + gap), y, bw, btn_h, label, true) {
+                action();
+            }
         }
     }
 }
 
-/// Other platforms: the install is searched for in the game's folder; no menu block.
+/// A line of the not-found block that is still wider than the column (a folder's path has no
+/// spaces to wrap at) is cut by characters, each piece as wide as the column allows.
+fn break_wide(line: &str, w: f32, size: f32) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = line;
+    while measure(rest, size).width > w {
+        let mut end = 0;
+        for (i, c) in rest.char_indices() {
+            let next = i + c.len_utf8();
+            if end > 0 && measure(&rest[..next], size).width > w {
+                break;
+            }
+            end = next;
+        }
+        out.push(rest[..end].to_string());
+        rest = &rest[end..];
+    }
+    out.push(rest.to_string());
+    out
+}
+
+/// A button of the not-found block: its label and what it does.
+type NotFoundButton = (&'static str, fn());
+
+/// A button's height on the menu's not-found block: a finger's size on the phones, a desktop
+/// button's on the desktop.
+fn button_height(sh: f32, k: f32) -> f32 {
+    if cfg!(any(target_os = "android", target_os = "ios")) { (sh * 0.12).max(34.0 * k) } else { 40.0 * k }
+}
+
+/// The steps that put the game in place, as the menu's not-found block gives them.
+fn not_found_steps() -> Vec<String> {
+    #[cfg(target_os = "android")]
+    let steps = vec![
+        tr("1. Give Razdor access to all files: the «Grant access» button, or Settings > Apps > Special app access > All files access > Razdor.").to_string(),
+        tr("2. Put the game folder in internal storage, in a folder named DiscordTimes (or in Download).").to_string(),
+    ];
+    #[cfg(target_os = "ios")]
+    let steps = vec![
+        tr("1. Copy the game folder to the Files app: On My iPhone (or iPad) > Razdor, in a folder named DiscordTimes.").to_string(),
+        tr("2. From a computer: Finder (or iTunes) > the device > Files > Razdor.").to_string(),
+    ];
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    let steps = vec![tr("Put Razdor into the game folder, next to DiscordTimes.exe.").to_string()];
+    steps
+}
+
+/// The platform's own buttons of the menu's not-found block (above the two links).
+fn not_found_rows() -> Vec<Vec<NotFoundButton>> {
+    #[cfg(target_os = "android")]
+    let rows = vec![
+        vec![(tr("Grant access"), super::android::request_storage as fn())],
+        vec![(tr("Check again"), super::mobile::ask_recheck as fn())],
+    ];
+    #[cfg(target_os = "ios")]
+    let rows = vec![vec![(tr("Check again"), super::mobile::ask_recheck as fn())]];
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    let rows = Vec::new();
+    rows
+}
+
+/// Why the install was not found, for the player: the folder that was looked at, what is missing
+/// there, or the load error. The desktop only (the phones say what to copy, not why).
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub fn menu_not_found(_no_install: bool) {}
+fn install_problem() -> Option<String> {
+    match razdor::dt::install::problem() {
+        Some(Problem::NotInstall { dir, missing }) => Some(trf!("This folder has no {missing}: {dir}", missing = missing.join(", "), dir = dir.display())),
+        Some(Problem::Load(e)) => Some(e),
+        None => None,
+    }
+}
+
+/// The phones: no line about the problem.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn install_problem() -> Option<String> {
+    None
+}
+
+/// «How to install»: the install guide of the interface language, in the browser.
+fn open_guide() {
+    super::main_menu::open_link(super::main_menu::install_guide());
+}
+
+/// «Where to get the game»: the Razdor players' Discord, in the browser.
+fn open_discord() {
+    super::main_menu::open_link(super::main_menu::DISCORD_INVITE);
+}
 
 /// The layout of a phone's not-found block, scaled to the screen: the scale `k` (at least 1),
 /// the buttons' height (a twelfth of the screen at least) and width (`buttons` of them across

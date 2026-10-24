@@ -5,6 +5,12 @@
 # Title and menus
 title-1280 | title | 1280x800 |
 title-language | title | 1280x800 | RAZDOR_SCENE_LANGUAGE=1
+# The main menu without an install (no game folder: the not-found block beside the buttons). The
+# install search (its remembered folder and the home folders) is pointed at nowhere.
+title-noinstall-1280 | title | 1280x800 | RAZDOR_DT_DIR=/nonexistent-razdor-dt;RAZDOR_CONFIG_DIR=/nonexistent-razdor-config;HOME=/nonexistent-razdor-home
+title-noinstall-1280x720 | title | 1280x720 | RAZDOR_DT_DIR=/nonexistent-razdor-dt;RAZDOR_CONFIG_DIR=/nonexistent-razdor-config;HOME=/nonexistent-razdor-home
+title-noinstall-1920 | title | 1920x1080 | RAZDOR_DT_DIR=/nonexistent-razdor-dt;RAZDOR_CONFIG_DIR=/nonexistent-razdor-config;HOME=/nonexistent-razdor-home
+title-noinstall-portrait | title | 1080x2400 | RAZDOR_DT_DIR=/nonexistent-razdor-dt;RAZDOR_CONFIG_DIR=/nonexistent-razdor-config;HOME=/nonexistent-razdor-home
 options-1280 | options | 1280x800 |
 options-advanced-1280 | options:advanced | 1280x800 |
 scenarios-1280 | scenarios:РК1-Начало пути | 1280x800 |

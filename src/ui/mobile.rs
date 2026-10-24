@@ -100,3 +100,24 @@ pub fn install_listed() -> bool {
             || std::fs::read_dir(root).into_iter().flatten().flatten().any(|e| razdor::dt::install::is_install(&e.path()))
     })
 }
+
+/// iOS: opens `url` in the browser through `UIApplication`'s `openURL:options:completionHandler:`
+/// (no completion handler, no options). A link that does not parse is logged, not sent.
+#[cfg(target_os = "ios")]
+pub fn open_url(url: &str) {
+    use macroquad::miniquad::native::apple::frameworks::{class, msg_send, nil, sel, sel_impl, ObjcId};
+    let Ok(text) = std::ffi::CString::new(url) else { return };
+    // SAFETY: the Foundation and UIKit classes are the app's own; every object is autoreleased
+    // by its class factory, and the strings and the URL live through the call.
+    unsafe {
+        let ns_string: ObjcId = msg_send![class!(NSString), stringWithUTF8String: text.as_ptr()];
+        let ns_url: ObjcId = msg_send![class!(NSURL), URLWithString: ns_string];
+        if ns_url == nil {
+            razdor::diag!("could not open {url}");
+            return;
+        }
+        let options: ObjcId = msg_send![class!(NSDictionary), dictionary];
+        let app: ObjcId = msg_send![class!(UIApplication), sharedApplication];
+        let () = msg_send![app, openURL: ns_url options: options completionHandler: nil];
+    }
+}

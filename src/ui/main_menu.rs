@@ -274,8 +274,28 @@ fn word(i: usize, label: &str, c: Vec2, hover: bool) {
     }
 }
 
-/// The Razdor players' Discord server, as the site links it.
-const DISCORD_INVITE: &str = "https://discord.gg/cdTtYz5dH";
+/// The Razdor players' Discord server, as the site links it (where the community shares the game).
+pub(super) const DISCORD_INVITE: &str = "https://discord.gg/cdTtYz5dH";
+/// The illustrated install guide on the website (the pages of the gh-pages branch of the repo),
+/// in Russian and in English: the not-found block's «How to install» picks by the interface language.
+const INSTALL_GUIDE_RU: &str = "https://indicozy.github.io/razdor/install.html";
+const INSTALL_GUIDE_EN: &str = "https://indicozy.github.io/razdor/install-en.html";
+
+/// The install guide's page in the current interface language.
+pub fn install_guide() -> &'static str {
+    if razdor::i18n::lang() == razdor::i18n::Lang::Ru { INSTALL_GUIDE_RU } else { INSTALL_GUIDE_EN }
+}
+
+/// Opens `url` in the player's browser: `xdg-open`, `explorer` or `open` on desktop, an intent
+/// on Android (`ui::android::open_url`), the app's `openURL` on iOS (`ui::mobile::open_url`).
+pub fn open_link(url: &str) {
+    #[cfg(target_os = "android")]
+    super::android::open_url(url);
+    #[cfg(target_os = "ios")]
+    super::mobile::open_url(url);
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    razdor::update::open_in_browser(url);
+}
 
 /// A small text link (the Razdor extras). Returns true when clicked.
 fn link(label: &str, x: f32, y: f32, right: bool) -> bool {
@@ -331,8 +351,7 @@ fn hot_button(pointer: Vec2, n: usize) -> Option<usize> {
 }
 
 /// The screen x of the leftmost button (its oval's left edge): the phones' not-found block sits
-/// to the left of it.
-#[cfg(any(target_os = "android", target_os = "ios"))]
+/// to the left of it (on the desktop too, where the not-found block sits in the same column).
 pub fn left_edge() -> f32 {
     (0..BUTTONS.len()).map(|i| oval_rect(i).x).fold(f32::MAX, f32::min)
 }
@@ -360,12 +379,11 @@ pub fn frame(no_install: bool) -> Option<Pick> {
     if link(tr("Custom battle"), x, y, false) {
         pick = Some(Pick::Custom);
     }
-    // The players' Discord (the owner's wish): the invite of the site, in the browser. Not on
-    // Android and iOS: there is no browser opener there (`razdor::update::open_in_browser` runs
-    // xdg-open).
+    // The players' Discord (the owner's wish): the invite of the site, in the browser; on phones
+    // too (`open_link` hands it to the system's browser there).
     let x = x + measure(tr("Custom battle"), 18.0 * k).width + 28.0 * k;
-    if !razdor::platform::MOBILE && link("Discord", x, y, false) {
-        razdor::update::open_in_browser(DISCORD_INVITE);
+    if link("Discord", x, y, false) {
+        open_link(DISCORD_INVITE);
     }
     // The language list (Razdor's): the current language; a click opens the list over it.
     let lang = super::language::current_label();

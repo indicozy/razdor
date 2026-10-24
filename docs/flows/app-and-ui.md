@@ -55,7 +55,7 @@ app as «На iPhone → Раздор», so the player copies the game there; no
 the poll (`App::mobile_install_poll`, `ui::mobile`: the `RECHECK` / `NEXT_POLL` helpers, the 5-s
 look for the install, `storage_granted` = always true on iOS) are shared with Android; the JNI parts
 stay in `ui::android`. The on-screen keyboard is on for both (`widgets::set_keyboard`). No
-self-update, no Discord link. `ui/script_font.rs` skips the fontconfig lookup on iOS, as on Android.
+self-update; the Discord link opens through `ui::mobile::open_url` (see the main menu above). `ui/script_font.rs` skips the fontconfig lookup on iOS, as on Android.
 
 The APK is built by `scripts/dist-android.sh` (cargo-quad-apk, pinned in its header; NDK 29;
 see `[package.metadata.android]` in `Cargo.toml`). The launcher icon is `android/res/mipmap-*/ic_launcher.png`
@@ -75,11 +75,18 @@ has «Выдать доступ» and «Проверить снова». The fir
 access page by itself, once (`mobile::ask_access_once` → `android::ask_once`). The main menu shows the
 same block while no install is found (`screens::menu_not_found`, drawn by `main_menu::frame(no_install)`
 in the column left of the buttons, stacked, over a dark panel, at the interface scale; the column is the
-left half of the screen, in either orientation). While it
+left half of the screen, in either orientation). The block is the same on the desktop (a Razdor extra, not
+the original's): it says that Razdor plays the player's own copy of the game (1.8 with Community Update
+1.2), gives the steps, and offers «Как установить» (`main_menu::install_guide`: the website's install guide,
+`install.html` or `install-en.html` by the interface language) and «Где взять игру» (`main_menu::DISCORD_INVITE`).
+Both links, and the bottom «Discord» link, go through `main_menu::open_link`: `xdg-open` / `explorer` / `open`
+on desktop, `ui::android::open_url` (an `ACTION_VIEW` intent) on Android, `ui::mobile::open_url`
+(`UIApplication openURL:`) on iOS. The two link buttons share a row when the stack does not fit the height.
+While it
 is shown, `App::mobile_install_poll` (`ui::mobile`; on the main menu and the scenario list; every 5 s
 once the permission is granted, and on the button) loads a newly found install with `Assets::adopt_install` and the `ui/mod.rs` helpers
-`dt_content_of` / `scenarios_of`, without a restart. Android has no self-update (`update::asset_name` is None) and
-no Discord link (it needs a browser opener): both are hidden there. The log cannot be opened before
+`dt_content_of` / `scenarios_of`, without a restart. Android has no self-update (`update::asset_name` is None); its
+Discord link opens through `open_url` like the desktop's (see the main menu above). The log cannot be opened before
 the access (the folder is not writable), so the poll calls `diag::reopen_log` once it is granted.
 Thread locals: `local!` (`src/local.rs`), never std's `thread_local!`: std takes one TLS key per static
 on Android, where a process has about 128, and the army window aborted with «out of TLS keys»; one
