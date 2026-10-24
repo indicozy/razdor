@@ -23,6 +23,10 @@
 //! cells; `RAZDOR_SCENE_HELD=<id>` puts an item on the pointer (hero and army windows);
 //! `RAZDOR_SCENE_WEAR=<id>,…` wears those items on the squad member of `army:<map>:<n>:<unit>`.
 //! `RAZDOR_SCENE_PAN=dx,dy` holds the interface's pan at that offset (windows larger than the screen).
+//! `RAZDOR_TEXT_SIZE=<1|1.25|1.5>` sets the text size and `RAZDOR_LARGE_WINDOWS=1` turns the large
+//! pop-up message windows on (the original's size and off otherwise; the saved settings are ignored).
+//! `RAZDOR_DP=<f32>` is a phone's density (screen px per dp): the phone layout of the pop-ups and
+//! the event window (their size in dp, the window's width following the screen), on the desktop.
 //!
 //! Every map scene starts its map as a new game (`Game::from_scenario`): nothing is carried
 //! over from a campaign's map before, so a later map whose opening events check for what it

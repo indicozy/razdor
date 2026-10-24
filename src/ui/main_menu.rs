@@ -1211,7 +1211,10 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     let touch_row = super::touchpad::MOBILE;
     // The orientation row is Android's: iOS keeps the system's rotation lock for now, so it has no row there.
     let orientation_row = cfg!(target_os = "android");
-    let h = if orientation_row { 556.0 } else if touch_row { 528.0 } else { 500.0 };
+    // Razdor's two rows at the end (the text size and the large windows, the owner's request:
+    // phones' text too small) take 76 px more: the frame line under the checkboxes sits 82 px above
+    // the bottom edge, the buttons 68 above.
+    let h = (if orientation_row { 556.0 } else if touch_row { 528.0 } else { 500.0 }) + 76.0;
     let (inner, closed) = if over_map { map_window(&title, 594.0, h) } else { window(&title, 594.0, h) };
     let k = chrome::k();
     let outer = Rect::new(inner.x - 2.0 * k, inner.y - (26.0 * k).round() - 1.0, 594.0 * k, h * k);
@@ -1292,6 +1295,23 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
                 Some(super::audio::Orientation::Portrait) => None,
             };
         }
+    }
+    // Razdor's text size and large pop-up message windows (the owner's request: phones' text
+    // too small), one row each under the others: «Размер текста» cycles, «Крупные окна
+    // сообщений» toggles. The step is 30 px, the button 170 px wide at the right, as the
+    // orientation row's.
+    let last_y = if orientation_row { cy(9) - 4.0 * k } else if touch_row { cy(8) } else { cy(7) };
+    let text_y = last_y + 30.0 * k;
+    chrome::shadow_text(tr("Text size"), cx, text_y + 18.0 * k, 14.0 * k, chrome::CREAM);
+    let r = Rect::new(inner.x + inner.w - 14.0 * k - 170.0 * k, text_y, 170.0 * k, 28.0 * k);
+    if row_button(r, super::display::text_size_label(audio.text_size)) {
+        audio.text_size = super::display::next_text_size(audio.text_size);
+    }
+    let large_y = text_y + 30.0 * k;
+    chrome::shadow_text(tr("Large message windows"), cx, large_y + 18.0 * k, 14.0 * k, chrome::CREAM);
+    let r = Rect::new(inner.x + inner.w - 14.0 * k - 170.0 * k, large_y, 170.0 * k, 28.0 * k);
+    if row_button(r, if audio.large_windows { tr("On") } else { tr("Off") }) {
+        audio.large_windows = !audio.large_windows;
     }
     // Razdor's own settings, in a window of their own.
     let button_y = outer.y + (h - 42.0) * k;

@@ -334,11 +334,16 @@ fn description_box_in_face(desc: &str, x: f32, y: f32, w: f32, h: f32) {
     let k = chrome::k();
     chrome::text_box(Rect::new(x, y, w, h));
     let o = super::dt_font::whole_scale(k * 0.9375);
-    let size = super::dt_font::sheet_size(super::dt_font::Face::Subtitle, o);
     let room = w - 60.0 * k;
-    let rows = markup_rows(&format!("^{desc}"), room, size);
-    let line = 19.0 * o;
-    let top = y + (h - rows.len() as f32 * line) / 2.0 + 14.0 * o;
+    // Razdor's text size (the owner's request: phones' text too small): the description at
+    // its text scale while its rows fit the box above the original's 28 px margin, else at
+    // the original's size.
+    let rows_at = |t: f32| markup_rows(&format!("^{desc}"), room, super::dt_font::sheet_size(super::dt_font::Face::Subtitle, t));
+    let t = super::display::text_o_fitting(o, |t| rows_at(t).len() as f32 * 19.0 * t <= h - 28.0 * o);
+    let size = super::dt_font::sheet_size(super::dt_font::Face::Subtitle, t);
+    let rows = rows_at(t);
+    let line = 19.0 * t;
+    let top = y + (h - rows.len() as f32 * line) / 2.0 + 14.0 * t;
     for (i, row) in rows.iter().enumerate() {
         draw_markup_row(row, x + 30.0 * k, top + i as f32 * line, room, size);
     }
@@ -1989,13 +1994,13 @@ fn stock_caption(label: &str, stock: i32) -> String {
 /// yellow, "Магия + N" in blue) with a 1 px shadow. `Ok` (`Btn1`) centred 10 px from the
 /// bottom and the close box, both 0x4c6000. Razdor takes the tribute as the hero enters
 /// (economy.md §3), so the window shows what was taken ([`BuildingView::tribute`]).
-/// The village window's texts: the box and the two stock captions ([`village_window`]).
-fn village_texts(game: &Game, view: &BuildingView, l: usize, (x, y, o): (f32, f32, f32), size: f32, line_h: f32) {
+/// The village window's text lines at the scale `o`, wrapped at the text size `size`: the
+/// village's greeting and the tribute on offer ([`village_texts`]).
+fn village_lines(game: &Game, view: &BuildingView, l: usize, o: f32, size: f32) -> Vec<(String, Color)> {
     use razdor::dt::markup::Ink;
     let loc = &game.world.locations[l];
     let (gold, mana) = view.tribute;
-
-    let (bx, by, bw) = (x + 18.0 * o, y + 45.0 * o, 598.0 * o);
+    let bw = 598.0 * o;
     let lines_of = |t: &str| t.split('\n').flat_map(|p| if p.trim().is_empty() { vec![String::new()] } else { wrap(p, bw - 32.0 * o, size) }).collect::<Vec<_>>();
     let mut lines: Vec<(String, Color)> = Vec::new();
     let mut add = |t: &str, c: Color| lines.extend(lines_of(t).into_iter().map(|t| (t, c)));
@@ -2015,14 +2020,31 @@ fn village_texts(game: &Game, view: &BuildingView, l: usize, (x, y, o): (f32, f3
             add(&own_text("Building", "VillageFullMana", n_("The grateful peasants pray for your magic power to grow.")), benguiat(CYAN_INK));
         }
     }
-    let text_h = lines.len() as f32 * line_h;
+    lines
+}
+
+/// The village window's texts: the box and the two stock captions ([`village_window`]).
+fn village_texts(game: &Game, view: &BuildingView, l: usize, (x, y, o): (f32, f32, f32), size: f32, line_h: f32) {
+    use razdor::dt::markup::Ink;
+    let (gold, mana) = view.tribute;
+    let (bx, by, bw) = (x + 18.0 * o, y + 45.0 * o, 598.0 * o);
+    // Razdor's text size (the owner's request: phones' text too small): the greeting and the
+    // offer at their text scale while they fit the box (193 at most, 14 above and below, as the
+    // original's), else at the original's size. The stock captions stay at `size`.
+    let r = super::display::text_o_fitting(o, |t| {
+        let r = t / o;
+        village_lines(game, view, l, o, size * r).len() as f32 * line_h * r + 28.0 * o <= 193.0 * o
+    }) / o;
+    let (tsize, tline) = (size * r, line_h * r);
+    let lines = village_lines(game, view, l, o, tsize);
+    let text_h = lines.len() as f32 * tline;
     let bh = (text_h + 28.0 * o).min(193.0 * o);
     let top = if text_h + 28.0 * o <= 193.0 * o { 14.0 * o } else { (bh - text_h) / 2.0 };
     chrome::shaded_text_box(Rect::new(bx, by, bw, bh), 0.30);
     for (i, (t, c)) in lines.iter().enumerate() {
-        let ly = by + top + i as f32 * line_h;
-        if ly >= by && ly + line_h <= by + bh {
-            chrome::shadow_centered(t, bx + bw / 2.0, ly + size, size, *c);
+        let ly = by + top + i as f32 * tline;
+        if ly >= by && ly + tline <= by + bh {
+            chrome::shadow_centered(t, bx + bw / 2.0, ly + tsize, tsize, *c);
         }
     }
     for (i, (stock, is_mana)) in [(gold, false), (mana, true)].into_iter().enumerate() {
@@ -2058,7 +2080,9 @@ fn village_ok_key(down: bool, up: bool) -> bool {
 
 fn village_window(game: &mut Game, view: &BuildingView, message: &mut Option<String>) -> Option<Screen> {
     let l = game.location?;
-    let o = chrome::k() * 0.9375;
+    // Razdor's large windows (the owner's request: phones' text too small): the largest scale
+    // that fits the screen, up to twice the interface scale's (`display::popup_o`).
+    let o = super::display::popup_o(chrome::k() * 0.9375, 634.0, 516.0);
     let (w, h) = ((634.0 * o).round(), (516.0 * o).round());
     let (x, y) = (((screen_width() - w) / 2.0).round(), ((screen_height() - chrome::bar_height() - h) / 2.0).max(2.0).round());
     let loc = &game.world.locations[l];
@@ -2225,8 +2249,9 @@ pub fn answer_offer(game: &mut Game, yes: bool, dialogs: &mut VecDeque<Dialog>) 
 /// Esc (0x4c6118, 0x4cd8d0) close it, the hero still standing in the shipyard.
 fn ship_window(game: &mut Game) -> Option<Screen> {
     let l = game.location?;
-    // Screen pixels per pixel of the original's 1024×768.
-    let o = chrome::k() * 0.9375;
+    // Screen pixels per pixel of the original's 1024×768; Razdor's large windows take the
+    // largest scale that fits the screen, up to twice the interface scale's (`display::popup_o`).
+    let o = super::display::popup_o(chrome::k() * 0.9375, 634.0, 516.0);
     let (w, h) = ((634.0 * o).round(), (516.0 * o).round());
     let (x, y) = (((screen_width() - w) / 2.0).round(), ((screen_height() - chrome::bar_height() - h) / 2.0).max(2.0).round());
     let loc = &game.world.locations[l];
@@ -2243,23 +2268,36 @@ fn ship_window(game: &mut Game) -> Option<Screen> {
     let size = (15.0 * o).round();
     let line_h = (17.0 * o).round();
     let (bx, by, bw) = (x + 18.0 * o, y + 45.0 * o, 598.0 * o);
-    let lines_of = |t: &str| t.split('\n').flat_map(|p| if p.trim().is_empty() { vec![String::new()] } else { wrap(p, bw - 32.0 * o, size) }).collect::<Vec<_>>();
-    let mut lines: Vec<(String, Color)> = lines_of(&about).into_iter().map(|t| (t, BOX_INK)).collect();
-    if !affordable {
-        lines.push((String::new(), BOX_INK));
-        let short = own_text("Building", "NoMoneyForShip", n_("You have no money to hire a ship right now!"));
-        lines.extend(lines_of(&short).into_iter().map(|t| (t, chrome::RED_TEXT)));
-    }
-    let text_h = lines.len() as f32 * line_h;
+    let no_money = own_text("Building", "NoMoneyForShip", n_("You have no money to hire a ship right now!"));
+    // The text as wrapped at `s`, as the box takes it.
+    let text_at = |s: f32| {
+        let lines_of = |t: &str| t.split('\n').flat_map(|p| if p.trim().is_empty() { vec![String::new()] } else { wrap(p, bw - 32.0 * o, s) }).collect::<Vec<_>>();
+        let mut lines: Vec<(String, Color)> = lines_of(&about).into_iter().map(|t| (t, BOX_INK)).collect();
+        if !affordable {
+            lines.push((String::new(), BOX_INK));
+            lines.extend(lines_of(&no_money).into_iter().map(|t| (t, chrome::RED_TEXT)));
+        }
+        lines
+    };
+    // Razdor's text size (the owner's request: phones' text too small): the text at its text
+    // scale while it fits the box (193 at most, as the original's), else at the original's size.
+    // The price stays at `size`.
+    let r = super::display::text_o_fitting(o, |t| {
+        let r = t / o;
+        text_at(size * r).len() as f32 * line_h * r + 28.0 * o <= 193.0 * o
+    }) / o;
+    let (tsize, tline) = (size * r, line_h * r);
+    let lines = text_at(tsize);
+    let text_h = lines.len() as f32 * tline;
     // As tall as the text with 14 above and below, at most 193; a longer text is centred in
     // it and cut at both ends (0x4bbc84).
     let bh = (text_h + 28.0 * o).min(193.0 * o);
     let top = if text_h + 28.0 * o <= 193.0 * o { 14.0 * o } else { (bh - text_h) / 2.0 };
     chrome::text_box(Rect::new(bx, by, bw, bh));
     for (i, (t, c)) in lines.iter().enumerate() {
-        let ly = by + top + i as f32 * line_h;
-        if ly >= by && ly + line_h <= by + bh {
-            chrome::shadow_centered(t, bx + bw / 2.0, ly + size, size, *c);
+        let ly = by + top + i as f32 * tline;
+        if ly >= by && ly + tline <= by + bh {
+            chrome::shadow_centered(t, bx + bw / 2.0, ly + tsize, tsize, *c);
         }
     }
     let cost = format!("{} = {price}", own_text("Building", "CostShip", n_("Price of hiring a ship")));

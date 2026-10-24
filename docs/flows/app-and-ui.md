@@ -308,6 +308,22 @@ Building a window (`src/ui/chrome.rs`):
   (`display::scale_reset_pressed`, `ui/mod.rs`) sets it back to Auto on any screen, with a notice
   (`display::notice_scale`), and swallows the key so the world map's 0 does not fire. The bottom bar, the FPS counter and the keyboard strip use `chrome::bar_k`, the chosen
   scale cut to the fit (`display::fitted_scale`), so they stay as large as the fit allows.
+- Text size and large windows (Razdor's, the owner's request: phones' text too small).
+  «Размер текста» (`Settings::text_size`, `display::TEXT_SIZES`: ×1, ×1.25, ×1.5; on phones
+  ×1.25 by default) scales the long wrapped texts only (messages, building descriptions,
+  village and shipyard texts, the diary entry, item descriptions, map tips) through
+  `display::text_o`. A box that cannot scroll takes the largest size that fits, stepping down
+  from the chosen one (`display::text_o_fitting`: 1.5, 1.25, then the original's); a scrolling
+  box (the event window, the diary) takes the chosen size as it is. «Крупные окна сообщений»
+  (`Settings::large_windows`, on by default on phones) scales the 634-px pop-ups (event window,
+  village event, village and shipyard windows) with `display::popup_o`: the largest scale that
+  fits the screen above the bar, from their smallest size. On a phone (`display::dp_px`: one
+  original px per dp, read from the system's density, 1 on iOS) that is one px per dp, and the
+  cap of twice the interface scale is off; on the desktop the cap stays. The event window on a
+  phone is widened to the screen (`dialog::event_width`, 480 to 860 px of the original).
+  `display::dp_px` is `RAZDOR_DP` in snapshots. `Settings::layout_version` (`LAYOUT_VERSION`):
+  a file saved before 1.0.2 is reset once on load (interface scale back to Auto, text size and
+  large windows to the platform defaults), then saved again.
 - The pan (`src/ui/pan.rs`, Razdor's, the owner's request; inert since 1.0.1, as the canvas never
   exceeds the screen): when the canvas (960k × 720k) is
   larger than the screen, the offset is a translation of macroquad's camera that shifts

@@ -7,7 +7,7 @@
 //! `NSWindow`. Wayland is not used (miniquad runs on X11 alone by default).
 
 use razdor::local;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -116,6 +116,143 @@ pub fn scale_label(chosen: f32, fit: f32) -> String {
     } else {
         format!("{chosen}×")
     }
+}
+
+// ------------------------------------------------------------------------------------------
+// Text size and large message windows
+// ------------------------------------------------------------------------------------------
+// Razdor's (the owner's request after players' reports: phones' text too small).
+
+/// The text sizes the player can pick («Размер текста»), times the long texts' original size.
+pub const TEXT_SIZES: [f32; 3] = [1.0, 1.25, 1.5];
+
+/// The chosen text size as `f32` bits (`1.0`: the original's size).
+static TEXT_SIZE: AtomicU32 = AtomicU32::new(0x3f80_0000);
+
+/// Whether the 634-px pop-up message windows take the largest scale that fits the screen.
+static LARGE_WINDOWS: AtomicBool = AtomicBool::new(false);
+
+pub fn set_text_size(s: f32) {
+    TEXT_SIZE.store(s.to_bits(), Ordering::Relaxed);
+}
+
+/// The chosen text size, read by every long text's layout each frame.
+pub fn text_size() -> f32 {
+    f32::from_bits(TEXT_SIZE.load(Ordering::Relaxed))
+}
+
+pub fn set_large_windows(on: bool) {
+    LARGE_WINDOWS.store(on, Ordering::Relaxed);
+}
+
+pub fn large_windows() -> bool {
+    LARGE_WINDOWS.load(Ordering::Relaxed)
+}
+
+/// The text size on a fresh install: larger on phones, where the text looks small.
+pub fn default_text_size() -> f32 {
+    if razdor::platform::MOBILE { 1.25 } else { 1.0 }
+}
+
+/// Large message windows on a fresh install: on phones only.
+pub fn default_large_windows() -> bool {
+    razdor::platform::MOBILE
+}
+
+/// The text size after `s` in the settings' cycle over [`TEXT_SIZES`]; a value that is not one
+/// of them counts as the first one, so its next is the second.
+pub fn next_text_size(s: f32) -> f32 {
+    let at = TEXT_SIZES.iter().position(|&t| (t - s).abs() < 1e-3).unwrap_or(0);
+    TEXT_SIZES[(at + 1) % TEXT_SIZES.len()]
+}
+
+/// The settings' label of a text size.
+pub fn text_size_label(s: f32) -> &'static str {
+    use razdor::i18n::tr;
+    if (s - 1.5).abs() < 1e-3 {
+        tr("Largest")
+    } else if (s - 1.25).abs() < 1e-3 {
+        tr("Large")
+    } else {
+        tr("Normal")
+    }
+}
+
+/// `o` (screen px per original px of a layout) times the text size, snapped as the font sheets
+/// snap. At the original's size it is `o` itself.
+pub fn text_o(o: f32) -> f32 {
+    let t = text_size();
+    if t == 1.0 { o } else { crate::ui::dt_font::whole_scale(o * t) }
+}
+
+/// The scale of a pop-up window whose smallest size is `min_w`×`min_h` original px. Off, it is
+/// `base` (the interface scale's). On, it is the largest scale that fits `sw`×`sh` above a
+/// `bar`-tall bottom bar (12 px of side margin in all, 4 px above the bar), never below `base`,
+/// and wanted: on a phone `dp` (one original px per dp, Razdor's: the text is as large as the
+/// phone's own text); on the desktop up to twice `base`.
+pub fn popup_scale(base: f32, large: bool, dp: Option<f32>, (min_w, min_h): (f32, f32), (sw, sh): (f32, f32), bar: f32) -> f32 {
+    if !large {
+        return base;
+    }
+    let fit = ((sw - 12.0) / min_w).min((sh - bar - 4.0) / min_h);
+    let want = dp.unwrap_or(base * 2.0);
+    base.max(want.min(fit))
+}
+
+/// Screen px per dp on a phone (Razdor's; `None` on the desktop). Read once from the system's
+/// density on Android (`ui::android::read_density`), 1 on iOS (its screen is in points), and
+/// set by `RAZDOR_DP` in snapshots, the way a phone's layout is tested on the desktop.
+static DP: AtomicU32 = AtomicU32::new(0);
+/// Whether [`DP`] has been read from the system yet.
+static DP_READ: AtomicBool = AtomicBool::new(false);
+
+pub fn set_dp_px(dp: Option<f32>) {
+    DP.store(dp.filter(|d| d.is_finite() && *d > 0.0).map_or(0, f32::to_bits), Ordering::Relaxed);
+}
+
+pub fn dp_px() -> Option<f32> {
+    let dp = f32::from_bits(DP.load(Ordering::Relaxed));
+    (dp > 0.0).then_some(dp)
+}
+
+/// Reads the system's dp once, on the first frame of the app (phones only).
+fn read_dp_once() {
+    if !DP_READ.swap(true, Ordering::Relaxed) {
+        #[cfg(target_os = "android")]
+        set_dp_px(Some(super::android::read_density() / macroquad::window::screen_dpi_scale()));
+        #[cfg(target_os = "ios")]
+        set_dp_px(Some(1.0));
+    }
+}
+
+/// [`popup_scale`] for this screen and the current setting.
+pub fn popup_o(base: f32, min_w: f32, min_h: f32) -> f32 {
+    popup_scale(
+        base,
+        large_windows(),
+        dp_px(),
+        (min_w, min_h),
+        (macroquad::window::screen_width(), macroquad::window::screen_height()),
+        crate::ui::chrome::bar_height(),
+    )
+}
+
+/// A text's scale in a box that does not scroll: the chosen text size, stepped down (1.5, then
+/// 1.25, then the original's size) until `fits` takes the text at that scale (Razdor's: a
+/// phone's large text must not overflow a box that cannot scroll).
+pub fn text_o_fitting(o: f32, fits: impl Fn(f32) -> bool) -> f32 {
+    text_o_fitting_at(text_size(), o, fits)
+}
+
+/// [`text_o_fitting`] for the text size `chosen`, pure (no global state).
+pub fn text_o_fitting_at(chosen: f32, o: f32, fits: impl Fn(f32) -> bool) -> f32 {
+    for &s in TEXT_SIZES.iter().rev().filter(|&&s| s <= chosen + 1e-3) {
+        let t = if s == 1.0 { o } else { crate::ui::dt_font::whole_scale(o * s) };
+        if fits(t) {
+            return t;
+        }
+    }
+    o
 }
 
 // ------------------------------------------------------------------------------------------
@@ -273,17 +410,28 @@ pub fn draw_notice() {
     text_centered(&m, cx, y + h * 0.5 + size * 0.36, size, Color { a, ..ACCENT });
 }
 
-/// The settings' display mode and interface scale, taken in at the start of every frame.
+/// The settings' display mode, interface scale, text size and large windows, taken in at the
+/// start of every frame.
 pub fn follow_settings(settings: &crate::ui::audio::Settings) {
     crate::ui::dt_font::set_mode(settings.font);
     if crate::ui::snapshot::size().is_some() {
         // Offscreen snapshots keep their fixed size and the automatic scale, or the one in
-        // `RAZDOR_UI_SCALE` (checking a screen at several interface scales).
+        // `RAZDOR_UI_SCALE` (checking a screen at several interface scales). The text size
+        // (`RAZDOR_TEXT_SIZE`, one of `TEXT_SIZES`) and the large windows (`RAZDOR_LARGE_WINDOWS=1`)
+        // come from their variables too: the original's size and off otherwise.
         let scale = std::env::var("RAZDOR_UI_SCALE").ok().and_then(|s| s.trim().parse::<f32>().ok());
         set_scale(scale.filter(|s| s.is_finite() && *s > 0.0).unwrap_or(0.0));
+        let text = std::env::var("RAZDOR_TEXT_SIZE").ok().and_then(|s| s.trim().parse::<f32>().ok());
+        set_text_size(text.and_then(|t| TEXT_SIZES.iter().copied().find(|&v| (v - t).abs() < 1e-3)).unwrap_or(1.0));
+        set_large_windows(std::env::var("RAZDOR_LARGE_WINDOWS").is_ok_and(|v| v.trim() == "1"));
+        // `RAZDOR_DP=<f32>`: a phone's density (screen px per dp), the phone layout on the desktop.
+        set_dp_px(std::env::var("RAZDOR_DP").ok().and_then(|s| s.trim().parse::<f32>().ok()));
         return;
     }
+    read_dp_once();
     set_scale(settings.ui_scale);
+    set_text_size(settings.text_size);
+    set_large_windows(settings.large_windows);
     crate::ui::world_view::set_zoom_prefs(settings.map_zoom, settings.zoom_locked);
     follow(settings.display);
 }
@@ -1104,5 +1252,77 @@ mod tests {
         set_scale(0.0);
         assert_eq!(scale(1.5), 1.5, "Auto is the fit");
         assert_eq!(fitted_scale(1.5), 1.5);
+    }
+
+    #[test]
+    fn desktop_large_message_windows_fill_the_screen_up_to_twice_the_base() {
+        // The base is the interface scale's: the original's size (960×720) fitted to the screen.
+        let screens: [(f32, f32); 10] = [
+            (2400.0, 1080.0),
+            (2160.0, 1080.0),
+            (1600.0, 720.0),
+            (1280.0, 720.0),
+            (960.0, 540.0),
+            (854.0, 480.0),
+            (800.0, 480.0),
+            (1080.0, 2400.0),
+            (720.0, 1600.0),
+            (480.0, 854.0),
+        ];
+        for (sw, sh) in screens {
+            let fit_k = (sw / 960.0).min(sh / 720.0);
+            let base = fit_k * 0.9375;
+            let bar = (80.0 * fit_k).round();
+            for (w, h) in [(634.0, 241.0), (634.0, 516.0)] {
+                let o = popup_scale(base, true, None, (w, h), (sw, sh), bar);
+                assert!(o >= base, "{sw}×{sh} {w}×{h}: {o} below the base {base}");
+                assert!(o <= 2.0 * base + 1e-4, "{sw}×{sh} {w}×{h}: {o} above twice the base");
+                if o > base {
+                    assert!(w * o <= sw - 12.0 + 0.01, "{sw}×{sh} {w}×{h}: wider than the screen");
+                    assert!(h * o <= sh - bar - 4.0 + 0.01, "{sw}×{sh} {w}×{h}: taller than the screen above the bar");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_phone_pop_up_is_one_dp_per_original_pixel_when_it_fits() {
+        // Portrait 1080×2400 at 2.625 px per dp: the width is the limit (1068 / 480 = 2.2 px).
+        let (sw, sh, bar) = (1080.0, 2400.0, 90.0);
+        let base = 1.125 * 0.9375;
+        let fit = ((sw - 12.0) / 480.0_f32).min((sh - bar - 4.0) / 211.0);
+        let o = popup_scale(base, true, Some(2.625), (480.0, 211.0), (sw, sh), bar);
+        assert!((o - fit).abs() < 1e-4, "{o} is not the fit {fit}");
+        // A roomy screen: exactly the dp, no cap at twice the base.
+        let o = popup_scale(1.0, true, Some(2.625), (480.0, 211.0), (2400.0, 1080.0), 120.0);
+        assert!((o - 2.625).abs() < 1e-4, "{o} is not the dp");
+        // Below the base it stays at the base.
+        assert_eq!(popup_scale(base, true, Some(2.625), (480.0, 211.0), (400.0, 300.0), bar), base);
+    }
+
+    #[test]
+    fn large_message_windows_off_keep_the_interface_scale() {
+        assert_eq!(popup_scale(1.5, false, None, (634.0, 516.0), (2400.0, 1080.0), 80.0), 1.5);
+        assert_eq!(popup_scale(1.5, false, Some(2.625), (634.0, 516.0), (1080.0, 2400.0), 80.0), 1.5);
+    }
+
+    #[test]
+    fn a_large_text_steps_down_until_its_box_takes_it() {
+        // Fits at 1.25 only: 1.5 steps down to it.
+        assert_eq!(text_o_fitting_at(1.5, 2.0, |t| t <= 2.5 + 1e-3), 2.5);
+        // Fits nowhere: the original's size.
+        assert_eq!(text_o_fitting_at(1.5, 2.0, |_| false), 2.0);
+        // Fits at the largest: taken.
+        assert_eq!(text_o_fitting_at(1.5, 2.0, |_| true), 3.0);
+        // The chosen size is the largest tried: at 1.0 only the original's.
+        assert_eq!(text_o_fitting_at(1.0, 2.0, |_| true), 2.0, "the chosen size is the original's");
+    }
+
+    #[test]
+    fn text_sizes_cycle_and_an_unknown_one_goes_to_a_valid_size() {
+        assert_eq!(next_text_size(1.0), 1.25);
+        assert_eq!(next_text_size(1.25), 1.5);
+        assert_eq!(next_text_size(1.5), 1.0);
+        assert!(TEXT_SIZES.contains(&next_text_size(0.7)));
     }
 }

@@ -1530,11 +1530,14 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     let entry_box = Rect::new(entry.x, entry.y, entry_bar.x + entry_bar.w - entry.x, entry.h);
     heading("QuestDescript", n_("Diary entry"), entry_box);
     chrome::text_box_base(entry_box);
-    let body = sheet_size(Face::Body, s);
+    // Razdor's text size (the owner's request: phones' text too small): the entry's text
+    // larger, its titles with it; its box scrolls, so it takes any size.
+    let ts = super::display::text_o(s);
+    let body = sheet_size(Face::Body, ts);
     let room = entry.w - 16.0 * s;
     let lines = rows.get(view.pick).map_or_else(Vec::new, |row| match view.tab {
-        Tab::Active => diary_entry(row, room, head, body),
-        tab => history_entry(row, tab, room, head, body),
+        Tab::Active => diary_entry(row, room, head * ts / s, body),
+        tab => history_entry(row, tab, room, head * ts / s, body),
     });
     let line_h = (body * 1.15).round();
     let shown = ((entry.h - 12.0 * s) / line_h).floor().max(1.0) as usize;

@@ -181,6 +181,17 @@ pub struct Settings {
     pub display: super::display::DisplayMode,
     /// The interface scale (`display::SCALES`); `0` is Auto, the largest that fits.
     pub ui_scale: f32,
+    /// The long texts' size (`display::TEXT_SIZES`): messages, descriptions, the diary, the
+    /// tips and the items' texts. Razdor's; on phones 1.25 by default.
+    pub text_size: f32,
+    /// The 634-px pop-up message windows take the largest scale that fits the screen
+    /// (`display::popup_o`). Razdor's; on phones by default.
+    pub large_windows: bool,
+    /// The layout defaults' version (`LAYOUT_VERSION`): a file without it, saved before the
+    /// defaults were reset, reads 0 and is reset once by `migrated`. Field-level so a missing
+    /// key reads 0, not the current version.
+    #[serde(default)]
+    pub layout_version: u32,
     /// The minimap window's size dragged by the player, in pixels of the 960×720 video;
     /// `None`: the original's square.
     pub minimap_size: Option<(f32, f32)>,
@@ -239,6 +250,11 @@ pub struct Settings {
     pub keys: Vec<(String, String)>,
 }
 
+/// The version of the layout defaults (text size, large windows, interface scale). Bumped when
+/// those defaults change and must reach the players who saved older settings. v1 (1.0.2):
+/// interface scale back to Auto, text size and large windows to their platform defaults.
+pub const LAYOUT_VERSION: u32 = 1;
+
 /// The screen's orientation the player chose on a phone: Auto turns with the device, the others
 /// stay in landscape or in portrait.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -250,7 +266,7 @@ pub enum Orientation {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, wide_row: None, display: Default::default(), ui_scale: 0.0, minimap_size: None, minimap_corner: Default::default(), friends_let_pass: false, pass_on_bridges: false, avoid_armies: false, battle_marks: true, army_list: false, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new() }
+        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), friends_let_pass: false, pass_on_bridges: false, avoid_armies: false, battle_marks: true, army_list: false, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new() }
     }
 }
 
@@ -266,20 +282,51 @@ impl Settings {
         razdor::rules::save::default_dir().map(|d| d.join("audio.json"))
     }
 
-    /// The saved settings, or the defaults.
+    /// The saved settings, or the defaults. A file saved before the layout defaults were reset
+    /// is migrated once, and saved again so that it stays.
     pub fn load() -> Settings {
         let read = Settings::path().and_then(|p| std::fs::read(p).ok());
-        read.and_then(|b| serde_json::from_slice::<Settings>(&b).ok()).unwrap_or_default().clamped()
+        let (settings, migrated) = read
+            .and_then(|b| serde_json::from_slice::<Settings>(&b).ok())
+            .unwrap_or_default()
+            .clamped()
+            .migrated();
+        if migrated {
+            settings.save();
+        }
+        settings
+    }
+
+    /// Resets the layout defaults of a file older than `LAYOUT_VERSION` (Razdor's, the owner's
+    /// request: after the phones' text came out too small): the interface scale back to Auto,
+    /// the text size and the large windows to their platform defaults. Returns whether it did.
+    fn migrated(self) -> (Settings, bool) {
+        if self.layout_version >= LAYOUT_VERSION {
+            return (self, false);
+        }
+        let settings = Settings {
+            ui_scale: 0.0,
+            text_size: super::display::default_text_size(),
+            large_windows: super::display::default_large_windows(),
+            layout_version: LAYOUT_VERSION,
+            ..self
+        };
+        (settings, true)
     }
 
     fn clamped(self) -> Settings {
         let fix = |v: f32| if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.5 };
         let ui_scale = if super::display::SCALES.contains(&self.ui_scale) { self.ui_scale } else { 0.0 };
+        let text_size = if super::display::TEXT_SIZES.contains(&self.text_size) {
+            self.text_size
+        } else {
+            super::display::default_text_size()
+        };
         let (lo, hi) = super::world_view::ZOOM_RANGE;
         let map_zoom = if self.map_zoom.is_finite() { self.map_zoom.clamp(lo, hi) } else { 1.0 };
         let anim_speed = self.anim_speed.filter(|s| s.is_finite()).map(|s| s.clamp(0.0, 99.0));
         let pct = |v: Option<f32>| v.filter(|s| s.is_finite()).map(|s| s.clamp(0.0, 100.0));
-        Settings { music_volume: fix(self.music_volume), sfx_volume: fix(self.sfx_volume), ui_scale, map_zoom, anim_speed, scroll_speed: pct(self.scroll_speed), walk_speed: pct(self.walk_speed), ..self }
+        Settings { music_volume: fix(self.music_volume), sfx_volume: fix(self.sfx_volume), ui_scale, text_size, map_zoom, anim_speed, scroll_speed: pct(self.scroll_speed), walk_speed: pct(self.walk_speed), ..self }
     }
 
     fn save(&self) {
@@ -652,6 +699,41 @@ impl Backend {
 mod tests {
     use super::*;
 
+    /// A saved file's settings after `clamped` and `migrated`, as `load` reads them.
+    fn read_back(json: &str) -> (Settings, bool) {
+        serde_json::from_str::<Settings>(json).unwrap().clamped().migrated()
+    }
+
+    #[test]
+    fn a_file_saved_before_the_layout_defaults_is_reset_once() {
+        let (s, migrated) = read_back(r#"{"ui_scale": 2.0, "text_size": 1.0, "large_windows": false}"#);
+        assert!(migrated);
+        assert_eq!(s.ui_scale, 0.0, "the interface scale goes back to Auto");
+        assert_eq!(s.text_size, super::super::display::default_text_size());
+        assert_eq!(s.large_windows, super::super::display::default_large_windows());
+        assert_eq!(s.layout_version, LAYOUT_VERSION);
+    }
+
+    #[test]
+    fn a_current_file_keeps_its_layout_settings() {
+        let (s, migrated) = read_back(r#"{"ui_scale": 1.5, "text_size": 1.5, "large_windows": true, "layout_version": 1}"#);
+        assert!(!migrated);
+        assert_eq!((s.ui_scale, s.text_size, s.large_windows), (1.5, 1.5, true));
+    }
+
+    #[test]
+    fn an_empty_file_is_migrated_to_the_current_version() {
+        let (s, migrated) = read_back("{}");
+        assert!(migrated, "a file without the version is older");
+        assert_eq!(s.layout_version, 1);
+    }
+
+    #[test]
+    fn a_bad_text_size_goes_to_the_default() {
+        let (s, _) = read_back(r#"{"text_size": 0.3, "layout_version": 1}"#);
+        assert_eq!(s.text_size, super::super::display::default_text_size());
+    }
+
     #[test]
     fn cue_keys_match_the_ini() {
         assert_eq!(Cue::Item(ArtefactType::BlowWeapon).key(), "Item-BlowWeapon");
@@ -703,7 +785,8 @@ mod tests {
         assert_eq!(back, s);
         // Missing fields take the defaults; out-of-range volumes are clamped.
         let partial: Settings = serde_json::from_str(r#"{"music_volume": 3.0}"#).unwrap();
-        assert_eq!(partial.clone().clamped(), Settings { music_volume: 1.0, ..Settings::default() });
+        // (A file without `layout_version` reads 0: `load` migrates it, `clamped` does not.)
+        assert_eq!(partial.clone().clamped(), Settings { music_volume: 1.0, layout_version: 0, ..Settings::default() });
         // The army's arrangement (Razdor's): dragging only unless the file says otherwise.
         assert_eq!(partial.formation_controls, crate::ui::unit_drag::Controls::Drag);
         let original: Settings = serde_json::from_str(r#"{"formation_controls": "original"}"#).unwrap();

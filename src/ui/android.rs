@@ -402,6 +402,12 @@ unsafe fn system_insets(env: *mut sys::JNIEnv) -> Option<[i32; 4]> {
     }
 }
 
+/// The system's density (screen px per dp, Razdor's phone layout reads it once: `display`).
+pub fn read_density() -> f32 {
+    // SAFETY: the activity exists once the window is open (the UI runs after it).
+    unsafe { density(attach_jni_env()) }
+}
+
 /// The phone's safe margins in screen pixels (left, top, right, bottom): the system's insets,
 /// never less than [`CORNER_DP`] from each edge. None when the window has no insets yet.
 pub fn read_safe_insets() -> Option<(f32, f32, f32, f32)> {

@@ -30,6 +30,8 @@ xvfb-run -a -s "-screen 0 1280x800x24" <target>/release/razdor
 - `RAZDOR_SNAPSHOT_FRAMES` (default 20): frames before the shot.
 - `RAZDOR_UI_SCALE=<n>` (e.g. `1.25`): that interface scale instead of Auto (snapshots
   ignore the saved settings' scale).
+- `RAZDOR_TEXT_SIZE=<1|1.25|1.5>`, `RAZDOR_LARGE_WINDOWS=1`, `RAZDOR_DP=<px per dp>` (a phone's
+  density, e.g. `2.625`): the text size, the large pop-up windows and the phone layout.
 - Check UI changes at 800x600, 1024x768 and 1280x800 at least.
 
 ## Scenes

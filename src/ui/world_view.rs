@@ -1988,7 +1988,12 @@ const TIP_TOP: f32 = 37.0;
 ///   title (0x9f for 2 rows);
 /// - at most 0x200.
 fn tip_height(army: bool, text_h: f32, grid_h: f32, caption_h: Option<f32>) -> f32 {
-    let h = if army {
+    tip_height_raw(army, text_h, grid_h, caption_h).min(512.0)
+}
+
+/// [`tip_height`] before its cap of 0x200.
+fn tip_height_raw(army: bool, text_h: f32, grid_h: f32, caption_h: Option<f32>) -> f32 {
+    if army {
         let top = TIP_TOP + grid_h + 8.0;
         if text_h > 0.0 { top + text_h.min(353.0) + 10.0 } else { top + 2.0 }
     } else {
@@ -1998,8 +2003,17 @@ fn tip_height(army: bool, text_h: f32, grid_h: f32, caption_h: Option<f32>) -> f
             (true, Some(c)) => TIP_TOP + text_h + 10.0 + c + grid_h + 17.0,
             (false, Some(c)) => c + grid_h + 55.0,
         }
-    };
-    h.min(512.0)
+    }
+}
+
+/// A tooltip row's font size at the text scale `s`: the big Benguiat's 16, else 12.
+fn tip_size(ink: Ink, s: f32) -> f32 {
+    if ink.big() { 16.0 * s } else { 12.0 * s }
+}
+
+/// A tooltip row's advance at the text scale `s`: its font size and 3 more.
+fn tip_lh(ink: Ink, s: f32) -> f32 {
+    tip_size(ink, s) + 3.0 * s
 }
 
 fn draw_tooltip(game: &Game, assets: &Assets, t: &Tooltip) {
@@ -2007,24 +2021,36 @@ fn draw_tooltip(game: &Game, assets: &Assets, t: &Tooltip) {
     use super::dt_font::{with_face, Face};
     let k = super::chrome::k();
     let face = |ink: Ink| if ink.big() { Face::Subtitle } else { Face::Body };
-    let size = |ink: Ink| if ink.big() { 16.0 * k } else { 12.0 * k };
-    let lh = |ink: Ink| size(ink) + 3.0 * k;
-    // Every entry centred, a paragraph wrapped in the block's width (0x47e944, 0x47e46c).
-    let rows: Vec<(String, Ink)> = t
-        .text
-        .iter()
-        .flat_map(|(s, ink)| {
-            let wrapped = if s.trim().is_empty() { vec![String::new()] } else { with_face(face(*ink), || wrap(s, TIP_TEXT_W * k, size(*ink))) };
-            wrapped.into_iter().map(|r| (r, *ink))
-        })
-        .collect();
-    let text_h: f32 = rows.iter().map(|(_, ink)| lh(*ink)).sum();
+    // Every entry centred, a paragraph wrapped in the block's width (0x47e944, 0x47e46c), its
+    // text at the text scale `tk`.
+    let rows_at = |tk: f32| -> Vec<(String, Ink)> {
+        t.text
+            .iter()
+            .flat_map(|(s, ink)| {
+                let wrapped = if s.trim().is_empty() { vec![String::new()] } else { with_face(face(*ink), || wrap(s, TIP_TEXT_W * k, tip_size(*ink, tk))) };
+                wrapped.into_iter().map(|r| (r, *ink))
+            })
+            .collect()
+    };
+    let text_h_of = |rows: &[(String, Ink)], tk: f32| -> f32 { rows.iter().map(|(_, ink)| tip_lh(*ink, tk)).sum() };
     let lines = game.content.formation.display_lines();
     let grid_h = tip_grid_h(lines);
     let cells = t.army || t.garrison.is_some();
-    let caption_h = t.garrison.as_ref().map(|_| lh(Ink::Label) / k);
+    let grid = if cells { grid_h } else { 0.0 };
+    // The garrison's caption stays at the interface scale, as the cells do.
+    let caption_h = t.garrison.as_ref().map(|_| tip_lh(Ink::Label, k) / k);
+    // Razdor's text size (the owner's request: phones' text too small): the text at its text
+    // scale while the tip stays within its caps (an army's text 353 high, the tip 512), else at
+    // the interface scale.
+    let fits = |tk: f32| {
+        let text_h = text_h_of(&rows_at(tk), tk) / k;
+        (!t.army || text_h <= 353.0) && tip_height_raw(t.army, text_h, grid, caption_h) <= 512.0
+    };
+    let tk = super::display::text_o_fitting(k, fits);
+    let rows = rows_at(tk);
+    let text_h = text_h_of(&rows, tk);
     let w = TIP_W * k;
-    let h = tip_height(t.army, text_h / k, if cells { grid_h } else { 0.0 }, caption_h) * k;
+    let h = tip_height(t.army, text_h / k, grid, caption_h) * k;
     // Centred on the mouse and kept inside the map's view, above the bottom bar (interface.md
     // §7.4; 0x4ca8ac).
     let (mx, my) = crate::ui::widgets::pointer();
@@ -2044,13 +2070,13 @@ fn draw_tooltip(game: &Game, assets: &Assets, t: &Tooltip) {
     }
     let bottom = y + h - 2.0 * k;
     for (s, ink) in &rows {
-        if ly + lh(*ink) > bottom {
+        if ly + tip_lh(*ink, tk) > bottom {
             break;
         }
         if !s.is_empty() {
-            with_face(face(*ink), || shadow_centered(s, x + w / 2.0, ly + size(*ink), size(*ink), tip_color(t.style, *ink)));
+            with_face(face(*ink), || shadow_centered(s, x + w / 2.0, ly + tip_size(*ink, tk), tip_size(*ink, tk), tip_color(t.style, *ink)));
         }
-        ly += lh(*ink);
+        ly += tip_lh(*ink, tk);
     }
     if let (Some(caption), Some(caption_h)) = (&t.garrison, caption_h) {
         // The cells 10 px off the bottom, the caption 8 px over them, and a line 5 px over
@@ -2061,7 +2087,7 @@ fn draw_tooltip(game: &Game, assets: &Assets, t: &Tooltip) {
             draw_line(x + 2.0 * k, caption_y - 5.0 * k, x + w - 2.0 * k, caption_y - 5.0 * k, 1.0, super::chrome::SILVER);
         }
         let ink = Ink::Label;
-        with_face(face(ink), || shadow_centered(caption, x + w / 2.0, caption_y + size(ink), size(ink), tip_color(t.style, ink)));
+        with_face(face(ink), || shadow_centered(caption, x + w / 2.0, caption_y + tip_size(ink, k), tip_size(ink, k), tip_color(t.style, ink)));
         formation_grid(game, assets, &t.troops, t.team, grid_x, grid_y);
     }
 }

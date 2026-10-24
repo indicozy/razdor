@@ -452,6 +452,11 @@ struct EventFrame {
 }
 
 const EVENT_W: f32 = 634.0;
+/// On a phone the window's width range (Razdor's): narrower than the original's so that a
+/// portrait phone shows its text larger (8 item icons of 55 still fit), and no wider than
+/// this on tablets and landscape phones, where the lines would run on too long.
+const EVENT_MIN_W: f32 = 480.0;
+const EVENT_MAX_W: f32 = 860.0;
 const EVENT_BOX_TOP: f32 = 46.0;
 const EVENT_PAD: f32 = 16.0;
 const EVENT_MIN_BOX: f32 = 92.0;
@@ -466,11 +471,11 @@ const EVENT_GAP: f32 = 12.0;
 /// From a row's top to its baseline.
 const EVENT_BASELINE: f32 = 13.0;
 
-fn event_frame(side: Option<(f32, f32)>, text_h: f32, below: f32, max_box: f32) -> EventFrame {
+fn event_frame(side: Option<(f32, f32)>, text_h: f32, below: f32, max_box: f32, w: f32) -> EventFrame {
     let side_w = side.map_or(0.0, |(pw, _)| pw + 14.0);
     let min_box = side.map_or(EVENT_MIN_BOX, |(_, ph)| ph.max(EVENT_MIN_BOX));
     let box_h = (text_h + 2.0 * EVENT_PAD).max(min_box).min(max_box.max(min_box));
-    EventFrame { w: EVENT_W, h: box_h + below + EVENT_REST, box_x: 19.0 + side_w, box_w: EVENT_W - 38.0 - side_w, box_h }
+    EventFrame { w, h: box_h + below + EVENT_REST, box_x: 19.0 + side_w, box_w: w - 38.0 - side_w, box_h }
 }
 
 /// Where the window stands: centred over the map view above the bottom bar (the original's
@@ -479,27 +484,49 @@ fn event_origin(sw: f32, sh: f32, bar: f32, w: f32, h: f32) -> (f32, f32) {
     (((sw - w) / 2.0).floor(), ((sh - bar - h) / 2.0).floor().max(2.0))
 }
 
-/// Draws `d` over the map; returns how it was closed: OK (or Enter, Escape), or for a
-/// question Yes or No (Esc or N No, any other key Yes: `answer_key`). Laid out in the
-/// original's pixels ([`event_frame`]) times the interface scale, its text in the original's
-/// Benguiat at its own size ([`super::dt_font::sheet_size`]).
-pub fn draw(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Close> {
-    super::dt_font::with_legacy_metrics(|| {
-        super::dt_font::with_original_face(super::typography::Role::Name.face(), || draw_content(d, assets, game))
-    })
+/// The event window measured at the scale `o` (screen px per original px): its text at the
+/// text scale `t` ([`super::display::text_o`], Razdor's), everything else in `o`.
+struct EventLayout {
+    o: f32,
+    t: f32,
+    size: f32,
+    line: f32,
+    side: Option<(f32, f32)>,
+    room: f32,
+    lines: Vec<String>,
+    rows: Vec<MarkupRow>,
+    total: usize,
+    pic_h: f32,
+    res_h: f32,
+    items_h: f32,
+    lost_h: f32,
+    spells_h: f32,
+    below: f32,
+    f: EventFrame,
+    shown: usize,
 }
 
-fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Close> {
-    if d.village_event {
-        return draw_village_event(d, assets, game);
-    }
-    let (sw, sh) = (screen_width(), screen_height());
-    // The original's pixel on screen, snapped as the font sheets snap (×1.875 → ×2), so the
-    // text and its box grow together and the lines break where the original's do.
-    let o = super::dt_font::whole_scale(chrome::k() * 0.9375).min((sw - 12.0) / EVENT_W);
-    chrome::under_message();
-    let size = super::dt_font::sheet_size(super::dt_font::Face::Subtitle, o);
-    let line = EVENT_LINE * o;
+/// A text row's height: the defeat report's empty row is the gap font's (0x47e46c), shorter
+/// than a line.
+fn event_row_h(defeat: bool, line: f32, t: f32, r: &MarkupRow) -> f32 {
+    if defeat && r.text.is_empty() { EVENT_GAP * t } else { line }
+}
+
+/// The event window's width in the original's pixels at the scale `o` on a `sw`-wide screen:
+/// 634 on the desktop; on a phone (Razdor's, the owner's request: a portrait phone's window
+/// was 60% of the width) the screen's width less 12 px, kept between [`EVENT_MIN_W`] and
+/// [`EVENT_MAX_W`].
+fn event_width(o: f32, sw: f32, phone: bool) -> f32 {
+    if phone { ((sw - 12.0) / o).clamp(EVENT_MIN_W, EVENT_MAX_W) } else { EVENT_W }
+}
+
+/// Measures the event window `d` at the scale `o`: the text wrapped at the text scale, the
+/// rows and the frame around them.
+fn event_layout(d: &Dialog, o: f32, w: f32) -> EventLayout {
+    let sh = screen_height();
+    let t = super::display::text_o(o);
+    let size = super::dt_font::sheet_size(super::dt_font::Face::Subtitle, t);
+    let line = EVENT_LINE * t;
     // A picture at the side takes its width and 14 more from the text box.
     let side = match &d.picture {
         // A unit's 92 × 92 bust (type record +0x14, 0x4a8ae8; Icons.ugs, 0x48efd0).
@@ -513,15 +540,13 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         _ => None,
     };
     let side_w = side.map_or(0.0, |(pw, _)| pw + 14.0);
-    let room = (EVENT_W - 38.0 - side_w - 40.0) * o;
+    let room = (w - 38.0 - side_w - 40.0) * o;
     let (lines, rows): (Vec<String>, Vec<MarkupRow>) = match &d.marked {
         Some(t) => (Vec::new(), markup_rows(t, room, size)),
         None => (d.text.iter().flat_map(|t| wrap(t, room, size)).collect(), Vec::new()),
     };
-    // The defeat report's empty row is the gap font's (0x47e46c), shorter than a line.
-    let row_h = |r: &MarkupRow| if d.defeat && r.text.is_empty() { EVENT_GAP * o } else { line };
     let total = lines.len() + rows.len();
-    let full_h = lines.len() as f32 * line + rows.iter().map(row_h).sum::<f32>();
+    let full_h = lines.len() as f32 * line + rows.iter().map(|r| event_row_h(d.defeat, line, t, r)).sum::<f32>();
     let res_h = if d.resources.is_empty() { 0.0 } else { 104.0 * o };
     // An icon row grows the window by its caption and icons (0x4a8e66: 87 for items, 82
     // for spells).
@@ -539,8 +564,53 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     // stay in sight.
     let screen_box = (sh - chrome::bar_height() - 4.0) / o - below / o - EVENT_REST;
     let max_box = EVENT_MAX_BOX.min(screen_box);
-    let f = event_frame(side, full_h / o, below / o, max_box);
+    let f = event_frame(side, full_h / o, below / o, max_box, w);
     let shown = if full_h / o + 2.0 * EVENT_PAD <= f.box_h { total } else { (((f.box_h - 2.0 * EVENT_PAD) * o / line).floor().max(1.0) as usize).min(total) };
+    EventLayout { o, t, size, line, side, room, lines, rows, total, pic_h, res_h, items_h, lost_h, spells_h, below, f, shown }
+}
+
+/// Draws `d` over the map; returns how it was closed: OK (or Enter, Escape), or for a
+/// question Yes or No (Esc or N No, any other key Yes: `answer_key`). Laid out in the
+/// original's pixels ([`event_frame`]) times the interface scale, its text in the original's
+/// Benguiat at its own size ([`super::dt_font::sheet_size`]). Razdor's two settings: the text
+/// size (`display::text_o`) scales the text only. The large windows (`display::popup_o`) scale
+/// the whole window while it fits the screen: on the desktop up to twice the interface scale,
+/// 634 px wide; on a phone one original px per dp, and the width follows the screen between 480
+/// and 860 px (`event_width`). Off, the window is the original's, at the interface scale.
+pub fn draw(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Close> {
+    super::dt_font::with_legacy_metrics(|| {
+        super::dt_font::with_original_face(super::typography::Role::Name.face(), || draw_content(d, assets, game))
+    })
+}
+
+fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Close> {
+    if d.village_event {
+        return draw_village_event(d, assets, game);
+    }
+    let (sw, sh) = (screen_width(), screen_height());
+    // The original's pixel on screen, snapped as the font sheets snap (×1.875 → ×2), so the
+    // text and its box grow together and the lines break where the original's do. Razdor's
+    // large windows (the owner's request: phones' text too small): on, the window takes the
+    // largest scale that fits its smallest size on the screen (on a phone one px per dp), and
+    // is measured again. On a phone the window's width follows the screen (`event_width`).
+    let defeat = d.defeat;
+    let base = chrome::k() * 0.9375;
+    // The phone layout needs the large windows on: off, a phone takes the original's path.
+    let phone = super::display::large_windows() && super::display::dp_px().is_some();
+    let min_w = if phone { EVENT_MIN_W } else { EVENT_W };
+    let o0 = super::dt_font::whole_scale(base).min((sw - 12.0) / min_w);
+    let first = event_layout(d, o0, EVENT_W);
+    let mut o = o0;
+    if super::display::large_windows() {
+        // The smallest window: the box at its minimum, the rows under it as they are.
+        let min_h = event_frame(first.side, 0.0, first.below / o0, EVENT_MAX_BOX, min_w).h;
+        o = super::dt_font::whole_scale(super::display::popup_o(base, min_w, min_h)).min((sw - 12.0) / min_w);
+    }
+    let width = event_width(o, sw, phone);
+    let lay = if o == o0 && width == EVENT_W { first } else { event_layout(d, o, width) };
+    chrome::under_message();
+    let EventLayout { o, t, size, line, side, room, lines, rows, total, pic_h, res_h, items_h, lost_h, spells_h, f, shown, .. } = lay;
+    let row_h = |r: &MarkupRow| event_row_h(defeat, line, t, r);
     let (w, h) = (f.w * o, f.h * o);
     let (x, y) = event_origin(sw, sh, chrome::bar_height(), w, h);
     // The defeat look is the red marble (the original's window after a lost battle).
@@ -582,7 +652,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     chrome::text_box(tb);
     let first = scrolled(d, total, shown, tb);
     let shown_h = lines.iter().skip(first).take(shown).map(|_| line).sum::<f32>() + rows.iter().skip(first).take(shown).map(row_h).sum::<f32>();
-    let mut ty = tb.y + ((tb.h - shown_h) / 2.0).max(EVENT_PAD * o).floor() + EVENT_BASELINE * o;
+    let mut ty = tb.y + ((tb.h - shown_h) / 2.0).max(EVENT_PAD * o).floor() + EVENT_BASELINE * t;
     let text_x = tb.x + 20.0 * o;
     for l in lines.iter().skip(first).take(shown) {
         super::dt_font::with_original_face(super::dt_font::Face::Subtitle, || chrome::shadow_centered(l, tb.x + tb.w / 2.0, ty, size, Color::new(1.0, 0.9, 0.66, 1.0)));
@@ -740,16 +810,23 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
 /// The illustration stays beside the text, with rewards below and a framed footer.
 fn draw_village_event(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Close> {
     chrome::under_message();
-    let o = (chrome::k() * 0.9375).min((screen_width() - 12.0) / 634.0);
-    let w = 634.0 * o;
-    let size = 17.0 * o;
-    let line_h = 18.0 * o;
     let picture = match &d.picture { Some(Picture::Side(t)) => Some(t), _ => None };
+    // The window's height in the original's pixels, for Razdor's large windows (the owner's
+    // request: phones' text too small): the footer and the frame (114), the rewards (110), the
+    // illustration's height (210 without one).
+    let rewards = !d.items.is_empty() || !d.resources.is_empty();
+    let need = 114.0 + if rewards { 110.0 } else { 0.0 } + picture.map_or(210.0, |t| t.height());
+    let base = chrome::k() * 0.9375;
+    let o = super::display::popup_o(base, 634.0, need).min((screen_width() - 12.0) / 634.0);
+    let w = 634.0 * o;
+    // The text takes Razdor's text size (`display::text_o`); the window stays in `o`.
+    let t = super::display::text_o(o);
+    let size = 17.0 * t;
+    let line_h = 18.0 * t;
     let pw = picture.map_or(106.0, |t| t.width()) * o;
     let ph = picture.map_or(210.0, |t| t.height()) * o;
     let text_w = w - pw - 50.0 * o;
     let rows = markup_rows(d.marked.as_deref().unwrap_or(""), text_w - 40.0 * o, size);
-    let rewards = !d.items.is_empty() || !d.resources.is_empty();
     let reward_h = if rewards { 110.0 * o } else { 0.0 };
     let fixed = 114.0 * o + reward_h;
     let available = (screen_height() - chrome::bar_height() - fixed - 8.0).max(60.0 * o);
@@ -888,15 +965,56 @@ mod tests {
     /// lines (4 × 19 + 12 = 88, centred in it).
     #[test]
     fn the_event_window_stands_as_the_original_s() {
-        let f = event_frame(Some((128.0, 128.0)), 88.0, 0.0, EVENT_MAX_BOX);
+        let f = event_frame(Some((128.0, 128.0)), 88.0, 0.0, EVENT_MAX_BOX, EVENT_W);
         assert_eq!(f, EventFrame { w: 634.0, h: 247.0, box_x: 161.0, box_w: 454.0, box_h: 128.0 });
         assert_eq!(event_origin(1024.0, 768.0, 86.0, f.w, f.h), (195.0, 217.0));
         // No picture: the box at least 92, else the text and 16 above and below.
-        assert_eq!(event_frame(None, 19.0, 0.0, EVENT_MAX_BOX).box_h, 92.0);
-        assert_eq!(event_frame(None, 190.0, 0.0, EVENT_MAX_BOX), EventFrame { w: 634.0, h: 341.0, box_x: 19.0, box_w: 596.0, box_h: 222.0 });
+        assert_eq!(event_frame(None, 19.0, 0.0, EVENT_MAX_BOX, EVENT_W).box_h, 92.0);
+        assert_eq!(event_frame(None, 190.0, 0.0, EVENT_MAX_BOX, EVENT_W), EventFrame { w: 634.0, h: 341.0, box_x: 19.0, box_w: 596.0, box_h: 222.0 });
         // A text taller than 499 scrolls in a box of 499 (0x4aa88a), or less on a short screen.
-        assert_eq!(event_frame(None, 900.0, 0.0, EVENT_MAX_BOX).box_h, 499.0);
-        assert_eq!(event_frame(None, 900.0, 0.0, 300.0).box_h, 300.0);
+        assert_eq!(event_frame(None, 900.0, 0.0, EVENT_MAX_BOX, EVENT_W).box_h, 499.0);
+        assert_eq!(event_frame(None, 900.0, 0.0, 300.0, EVENT_W).box_h, 300.0);
+    }
+
+    /// Razdor's phone table (the owner's request): how large the event text is on phones, in dp
+    /// (one original px is one dp there), against the original's own size. Each device in both
+    /// orientations; the window fits the screen, and its line is no smaller than before.
+    #[test]
+    fn a_phone_s_event_text_is_as_large_as_its_dp_allows() {
+        use crate::ui::dt_font::whole_scale;
+        // (device, screen width and height in landscape, px per dp)
+        let devices: [(&str, f32, f32, f32); 10] = [
+            ("iPhone 15", 852.0, 393.0, 1.0),
+            ("iPhone SE", 667.0, 375.0, 1.0),
+            ("iPhone 15 Pro Max", 932.0, 430.0, 1.0),
+            ("6.5in 720p", 1600.0, 720.0, 1.75),
+            ("6.5in 720p, 2.0", 1600.0, 720.0, 2.0),
+            ("5.5in 720p", 1280.0, 720.0, 2.0),
+            ("small budget", 854.0, 480.0, 1.5),
+            ("6.4in 1080p", 2400.0, 1080.0, 2.625),
+            ("2160x1080", 2160.0, 1080.0, 2.75),
+            ("tablet 10in", 1920.0, 1200.0, 1.5),
+        ];
+        let text = 1.25;
+        let min_h = EVENT_REST + EVENT_MIN_BOX;
+        for (name, long, short, dp) in devices {
+            for (orientation, (sw, sh)) in [("landscape", (long, short)), ("portrait", (short, long))] {
+                let fit_k = (sw / 960.0).min(sh / 720.0).max(0.5);
+                let base = fit_k * 0.9375;
+                let bar = (80.0 * fit_k).round();
+                let old_o = whole_scale(base).min((sw - 12.0) / EVENT_W);
+                let raw = crate::ui::display::popup_scale(base, true, Some(dp), (EVENT_MIN_W, min_h), (sw, sh), bar);
+                let o = whole_scale(raw).min((sw - 12.0) / EVENT_MIN_W);
+                let width = event_width(o, sw, true);
+                let t = whole_scale(o * text);
+                let (old_dp, new_dp) = (EVENT_LINE * old_o / dp, EVENT_LINE * t / dp);
+                eprintln!("{name:<18} {orientation:<9} {sw:>5}x{sh:<5} dp {dp:<5} scale {o:.2} width {width:>5.0} line {old_dp:>5.1} dp -> {new_dp:>5.1} dp");
+                assert!(o >= base - 1e-4, "{name} {orientation}: the scale is below the base");
+                assert!(width * o <= sw - 12.0 + 0.01, "{name} {orientation}: the window is wider than the screen");
+                assert!(min_h * o <= sh - bar - 4.0 + 0.01, "{name} {orientation}: the window is taller than the screen");
+                assert!(new_dp >= old_dp - 1e-3, "{name} {orientation}: the text got smaller");
+            }
+        }
     }
 
     /// The units rows (0x4a93bc, 0x4a9711): 46 × 46 icons in 47 × 47 cells centred at
@@ -910,7 +1028,7 @@ mod tests {
         assert_eq!(unit_cells(4), vec![103.0, 230.0, 357.0, 484.0]);
         assert_eq!(unit_cells(6).len(), 4);
         assert_eq!((UNIT_ICON, UNIT_ROW), (46.0, 79.0));
-        let f = event_frame(Some((UNIT_BUST, UNIT_BUST)), 19.0, UNIT_ROW, EVENT_MAX_BOX);
+        let f = event_frame(Some((UNIT_BUST, UNIT_BUST)), 19.0, UNIT_ROW, EVENT_MAX_BOX, EVENT_W);
         assert_eq!(f, EventFrame { w: 634.0, h: 92.0 + 79.0 + 119.0, box_x: 125.0, box_w: 490.0, box_h: 92.0 });
     }
 

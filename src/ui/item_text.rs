@@ -68,10 +68,12 @@ struct Line {
     color: Color,
 }
 
-/// The item's lines at `s` screen pixels per original pixel, wrapped to `room`.
+/// The item's lines at `s` screen pixels per original pixel, wrapped to `room`. Their text
+/// takes Razdor's text size (`display::text_o`; the owner's request: phones' text too small).
 fn lines(game: &Game, item: ItemId, room: f32, s: f32) -> Vec<Line> {
     let d = game.content.item(item);
-    let (title, body) = (sheet_size(Face::Subtitle, s), sheet_size(Face::Body, s));
+    let t = super::display::text_o(s);
+    let (title, body) = (sheet_size(Face::Subtitle, t), sheet_size(Face::Body, t));
     let mut out = Vec::new();
     let mut add = |text: &str, face: Face, size: f32, color: Color| {
         with_original_face(face, || {
