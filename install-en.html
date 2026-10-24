@@ -1,0 +1,591 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How to install Razdor</title>
+<link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="description" content="How to install Razdor: your own copy of Discord Times with Community Update 1.2, the program next to DiscordTimes.exe, trial versions for Android and iPhone. With pictures.">
+<link rel="alternate" hreflang="ru" href="install.html">
+<link rel="stylesheet" href="style.css">
+<style>
+  /* The install guide: the site's windows and parchment (style.css), with the platform
+     jumps, numbered steps and the illustrations below. Everything is drawn here as SVG. */
+  .ihead { text-align: center; padding: 2.6rem 1.25rem 0; }
+  .ihead img { width: 6.5rem; height: 6.5rem; border-radius: 1.4rem; box-shadow: 0 0 0 3px var(--silver), 0 0 0 5px #111, 0 1rem 2rem rgba(0, 0, 0, .6); }
+  .ihead h1 { margin: 1.6rem 0 .6rem; font-family: "Becker", "Kurale", serif; font-weight: 400; font-size: clamp(2.3rem, 8vw, 3.8rem); line-height: 1.1; color: var(--cream); text-shadow: 0 3px 0 #1a0d05, 0 0 18px rgba(255, 150, 60, .35); }
+  .ihead p { max-width: 38rem; margin: 0 auto; color: var(--cream); text-shadow: 0 1px 2px #000; }
+  .jump { list-style: none; margin: 1.8rem auto 3rem; padding: 0 1.25rem; display: flex; flex-wrap: wrap; justify-content: center; gap: .6rem; max-width: 52rem; }
+  .jump a { display: inline-block; padding: .3rem .95rem .36rem; border: 2px solid var(--silver); border-radius: 999px; background: var(--oval); color: #fff7e2; text-decoration: none; font-family: "Kurale", serif; font-size: 1.05rem; text-shadow: 0 1px 2px #10072e; box-shadow: 0 0 0 2px #4e575c, 0 4px 10px rgba(0, 0, 0, .5); }
+  .jump a:hover, .jump a:focus-visible { color: #fff; box-shadow: 0 0 0 2px #4e575c, 0 0 18px 3px rgba(255, 160, 60, .7); }
+  .window h2 { scroll-margin-top: 1rem; }
+  .window .window-body > .box + .box, .window .window-body > .pair + .box, .window .window-body > .box + .parchment, .window .window-body > .parchment + .box { margin-top: 1.2rem; }
+  .window .window-body > .parchment + .parchment { margin-top: 1.2rem; }
+
+  .parchment h3 { margin: 0 0 .9rem; font-family: "Becker", "Kurale", serif; font-weight: 400; font-size: 1.35rem; color: #4a2a0b; }
+  .parchment h3 + .steps, .parchment h3 + p { margin-top: 0; }
+  .parchment .sub { margin: 2.2rem 0 1rem; padding-top: 1.4rem; border-top: 2px solid rgba(90, 48, 10, .35); }
+  .parchment .sub:first-of-type { margin-top: 0; padding-top: 0; border-top: 0; }
+  .parchment p { margin: 0 0 .9rem; max-width: 40rem; }
+  .parchment .note { margin: 1.2rem 0 0; font-size: .95rem; color: #4a2f14; }
+  .parchment .code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .92em; font-weight: 700; color: #5a300a; }
+
+  /* Numbered steps: a marble badge, the text, and the picture beside it on wide screens. */
+  .steps { list-style: none; margin: 0 0 1rem; padding: 0; display: grid; gap: 1.6rem; }
+  .steps li { display: grid; grid-template-columns: 2.4rem minmax(0, 1fr); gap: .8rem; align-items: start; }
+  .badge { display: grid; place-items: center; width: 2.4rem; height: 2.4rem; border-radius: 50%; padding-top: 2px; font-family: "Becker", "Kurale", serif; font-size: 1.25rem; line-height: 1; color: var(--gold); text-shadow: 0 1px 2px #000;
+    background: radial-gradient(ellipse 60% 55% at 50% 38%, rgba(190, 170, 255, .45), rgba(190, 170, 255, 0) 70%), var(--marble);
+    border: 2px solid #e7ebee; box-shadow: 0 0 0 2px #3a4246, 0 2px 5px rgba(0, 0, 0, .4); }
+  .step-body { min-width: 0; display: grid; gap: 1rem; align-items: start; }
+  .step-body > p { margin: 0; }
+  .step-body ul { margin: 0; padding-left: 1.2rem; }
+  .step-body li { display: list-item; gap: 0; }
+  @media (min-width: 46rem) {
+    .step-body.side-wide { grid-template-columns: minmax(0, 1fr) minmax(0, 21rem); align-items: start; column-gap: 1.6rem; }
+    .step-body.side-phone { grid-template-columns: minmax(0, 1fr) minmax(0, 13rem); align-items: start; column-gap: 1.6rem; }
+  }
+
+  /* The pictures: a light frame for the folders and windows, the phones bare. */
+  .fig { margin: 0; text-align: center; }
+  .frame { background: #f8f0d8; border: 2px solid #5a300a; border-radius: 8px; padding: .7rem .6rem .5rem; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .5); }
+  .fig svg { display: block; width: 100%; height: auto; margin: 0 auto; }
+  .fig figcaption { margin-top: .45rem; font-size: .92rem; line-height: 1.4; color: #4a2f14; }
+  .fig.phone svg { max-width: 13.5rem; filter: drop-shadow(0 6px 8px rgba(40, 20, 5, .45)); }
+  .fig.wide svg { max-width: 22rem; }
+  .fig svg.term { max-width: 26rem; }
+  .fig text { font-family: "PT Sans", sans-serif; font-size: 15px; fill: #2c1b0b; }
+  .fig .s { font-size: 12.5px; fill: #5a3a1a; }
+  .fig .hl { font-weight: 700; fill: #f0c96a; }
+  .fig .ln { fill: none; stroke: #5a300a; stroke-width: 2; stroke-linecap: round; }
+  .fig .hlbox { fill: #24473b; stroke: #f0c96a; stroke-width: 2; }
+  .fig .pt { font-size: 17px; font-weight: 700; }
+  .fig .pr { font-size: 14px; }
+  .fig .pm { font-size: 12px; fill: #6a5a40; }
+  .fig .pb { font-size: 15px; font-weight: 700; fill: #fff7e2; }
+  .fig .logo { font-family: "Becker", "Kurale", serif; font-size: 38px; fill: #3b220f; }
+  .fig .cmd { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 14px; fill: #f1e6c9; }
+  .fig .big { font-family: "Becker", "Kurale", serif; font-size: 20px; fill: #fff2d4; }
+
+  /* The jump-back line and the footer's links. */
+  .back { margin: 2.4rem 0 0; text-align: center; font-size: 1rem; }
+  .back a { color: var(--gold); }
+
+  @media (max-width: 30rem) {
+    .jump a { font-size: .98rem; }
+    .parchment { padding-inline: 1rem; }
+    .steps { gap: 1.3rem; }
+    .steps li { grid-template-columns: 2.1rem minmax(0, 1fr); gap: .6rem; }
+    .badge { width: 2.1rem; height: 2.1rem; font-size: 1.1rem; }
+  }
+</style>
+</head>
+<body id="top">
+
+<p class="lang"><b>EN</b> / <a href="install.html" lang="ru">RU</a></p>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <!-- Shared pictograms for the drawings below: a folder, a file, the game's program, a download. -->
+    <symbol id="fold" viewBox="0 0 34 26">
+      <path d="M1 4 Q1 1 4 1 H12 L15 4 H30 Q33 4 33 7 V23 Q33 25 31 25 H3 Q1 25 1 23 Z" fill="#d9a04e" stroke="#5a300a" stroke-width="1.5"/>
+    </symbol>
+    <symbol id="file" viewBox="0 0 26 32">
+      <path d="M1 1 H17 L25 9 V31 H1 Z" fill="#f8f2e0" stroke="#5a300a" stroke-width="1.5" stroke-linejoin="round"/>
+      <path d="M17 1 V9 H25" fill="none" stroke="#5a300a" stroke-width="1.5"/>
+      <path d="M6 16 H20 M6 21 H20 M6 26 H15" stroke="#b9a77f" stroke-width="1.6" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="exe" viewBox="0 0 26 32">
+      <path d="M1 1 H17 L25 9 V31 H1 Z" fill="#c7ccd0" stroke="#5a300a" stroke-width="1.5" stroke-linejoin="round"/>
+      <path d="M17 1 V9 H25" fill="none" stroke="#5a300a" stroke-width="1.5"/>
+      <rect x="5" y="15" width="16" height="11" fill="#24473b"/>
+    </symbol>
+    <symbol id="dl" viewBox="0 0 120 90">
+      <path d="M40 4 H72 L86 18 V52 H40 Z" fill="#f8f2e0" stroke="#5a300a" stroke-width="2.2" stroke-linejoin="round"/>
+      <path d="M72 4 V18 H86" fill="none" stroke="#5a300a" stroke-width="2.2"/>
+      <path d="M48 28 H76 M48 36 H76 M48 44 H70" stroke="#b9a77f" stroke-width="2.5" stroke-linecap="round"/>
+      <path d="M60 58 V72 M52 64 L60 72 L68 64" fill="none" stroke="#b8591c" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M18 66 V82 H102 V66" fill="none" stroke="#5a300a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <!-- A phone without its screen content: the body and the screen (12..208 × 12..408). -->
+    <symbol id="ph" viewBox="0 0 220 420">
+      <rect x="2" y="2" width="216" height="416" rx="30" fill="#142b24" stroke="#c7ccd0" stroke-width="3"/>
+      <rect x="12" y="12" width="196" height="396" rx="20" fill="#f6eedb"/>
+      <rect x="92" y="18" width="36" height="7" rx="3.5" fill="#142b24"/>
+    </symbol>
+  </defs>
+</svg>
+
+<header class="ihead">
+  <img src="icon-192.png" width="192" height="192" alt="" decoding="async">
+  <h1>How to install Razdor</h1>
+  <p>Razdor is a program that runs <i>Discord Times</i>, but it does not contain the game itself. You need your own copy of the game: Razdor reads its maps, data and graphics while it runs and changes nothing in it.</p>
+</header>
+
+<ul class="jump">
+  <li><a href="#need">What you need</a></li>
+  <li><a href="#windows">Windows</a></li>
+  <li><a href="#linux">Linux</a></li>
+  <li><a href="#macos">macOS</a></li>
+  <li><a href="#android">Android</a></li>
+  <li><a href="#iphone">iPhone and iPad</a></li>
+  <li><a href="#update">Updates</a></li>
+  <li><a href="#trouble">Won't start</a></li>
+</ul>
+
+<main>
+
+<section class="window" id="need" aria-labelledby="need-title">
+  <h2 id="need-title">What you need</h2>
+  <div class="window-body">
+    <div class="box">
+      <ul>
+        <li><strong>Your own copy of <i>Discord Times</i></strong>, version 1.8.1, with Community Update 1.2.</li>
+        <li><strong>Razdor</strong>, the program from a release on GitHub. Each system has its own file.</li>
+        <li>System: Windows, Linux or macOS 11 and later; Android 8 or later (ARM processors); iPhone or iPad with iOS 14 or later.</li>
+      </ul>
+    </div>
+    <div class="pair">
+      <div class="box">
+        <h3>Where to get the game</h3>
+        <p>Discord of the <i>Discord Times</i> players (not Razdor's): <a href="https://discord.gg/cdTtYz5dH">discord.gg/cdTtYz5dH</a></p>
+      </div>
+      <div class="box">
+        <h3>Where to get Razdor</h3>
+        <p>Releases page: <a href="https://github.com/indicozy/razdor/releases">github.com/indicozy/razdor/releases</a>. Take the newest release: <span class="code">Razdor.exe</span>, <span class="code">razdor</span>, <span class="code">razdor-macos</span>, <span class="code">razdor.apk</span>, <span class="code">razdor.ipa</span>.</p>
+      </div>
+    </div>
+    <div class="box">
+      <p>Razdor is made for Community Update 1.2. The <strong>Evolution</strong> mod (tested with version 9.0 on Community Update) works too: put Razdor into the game folder with the mod installed. Mods that change <span class="code">DiscordTimes.exe</span> itself are not supported.</p>
+    </div>
+  </div>
+</section>
+
+<section class="window" id="computer" aria-labelledby="computer-title">
+  <h2 id="computer-title">On a computer</h2>
+  <div class="window-body">
+    <div class="parchment">
+      <p>The program has to be in the game folder, next to <span class="code">DiscordTimes.exe</span>. Then Razdor finds the game by itself and plays exactly this copy.</p>
+
+      <div class="sub" id="windows">
+        <h3>Windows</h3>
+        <ol class="steps">
+          <li><span class="badge">1</span>
+            <div class="step-body side-wide">
+              <p>Download <strong>Razdor.exe</strong> from the newest release.</p>
+              <figure class="fig wide"><div class="frame"><svg viewBox="0 0 120 90" role="img" aria-label="Download icon for a file">
+                <use href="#dl" x="0" y="0" width="120" height="90"/></svg></div>
+                <figcaption>The <span class="code">Razdor.exe</span> file on the releases page</figcaption></figure>
+            </div>
+          </li>
+          <li><span class="badge">2</span>
+            <div class="step-body side-wide">
+              <p>Put <strong>Razdor.exe</strong> into the game folder, next to <strong>DiscordTimes.exe</strong>. The rest is already there: the <span class="code">Maps_Rus</span> folder and the <span class="code">Rus_Units.ini</span> file.</p>
+              <figure class="fig wide"><div class="frame"><svg viewBox="0 0 300 205" role="img" aria-label="Game folder: Razdor.exe lies next to DiscordTimes.exe">
+                <use href="#fold" x="8" y="8" width="44" height="34"/>
+                <text x="62" y="27">Discord Times</text>
+                <text class="s" x="62" y="42">game folder</text>
+                <path class="ln" d="M30 42 V188 M30 73 H54 M30 114 H54 M30 148 H54 M30 188 H50"/>
+                <use href="#fold" x="54" y="60" width="34" height="26"/>
+                <text x="98" y="78">Maps_Rus</text>
+                <use href="#file" x="56" y="98" width="26" height="32"/>
+                <text x="98" y="119">Rus_Units.ini</text>
+                <use href="#exe" x="56" y="132" width="26" height="32"/>
+                <text x="98" y="153">DiscordTimes.exe</text>
+                <rect class="hlbox" x="46" y="167" width="248" height="36" rx="8"/>
+                <image href="icon-192.png" x="52" y="169" width="32" height="32"/>
+                <text class="hl" x="92" y="190">Razdor.exe</text>
+              </svg></div>
+                <figcaption>The game folder: <span class="code">Razdor.exe</span> lies next to <span class="code">DiscordTimes.exe</span></figcaption></figure>
+            </div>
+          </li>
+          <li><span class="badge">3</span>
+            <div class="step-body side-wide">
+              <p>Double-click <strong>Razdor.exe</strong> to start it.</p>
+              <figure class="fig wide"><div class="frame"><svg viewBox="0 0 300 170" role="img" aria-label="Program window with the Razdor icon and a pointer on it">
+                <rect x="4" y="4" width="292" height="162" rx="8" fill="#f6eedb" stroke="#5a300a" stroke-width="2"/>
+                <path d="M4 12 a8 8 0 0 1 8-8 H288 a8 8 0 0 1 8 8 V30 H4 Z" fill="#24473b"/>
+                <text class="hl" x="18" y="24" style="font-size:12.5px">Razdor</text>
+                <image href="icon-192.png" x="104" y="46" width="80" height="80"/>
+                <text x="150" y="150" text-anchor="middle">Razdor</text>
+                <path d="M200 98 L200 124 L207 117 L213 130 L219 127 L213 115 L222 115 Z" fill="#111" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/>
+              </svg></div>
+                <figcaption>Double-click <span class="code">Razdor.exe</span></figcaption></figure>
+            </div>
+          </li>
+        </ol>
+        <p class="note">If the game is somewhere else, give its folder in a <span class="code">.env</span> file next to the program: <span class="code">RAZDOR_DT_DIR="path to the game folder"</span>.</p>
+      </div>
+
+      <div class="sub" id="linux">
+        <h3>Linux</h3>
+        <ol class="steps">
+          <li><span class="badge">1</span>
+            <div class="step-body side-wide">
+              <p>Download <strong>razdor</strong> from the newest release.</p>
+              <figure class="fig wide"><div class="frame"><svg viewBox="0 0 120 90" role="img" aria-label="Download icon for a file">
+                <use href="#dl" x="0" y="0" width="120" height="90"/></svg></div>
+                <figcaption>The <span class="code">razdor</span> file on the releases page</figcaption></figure>
+            </div>
+          </li>
+          <li><span class="badge">2</span>
+            <div class="step-body side-wide">
+              <p>Put <strong>razdor</strong> into the game folder, next to <strong>DiscordTimes.exe</strong>.</p>
+              <figure class="fig wide"><div class="frame"><svg viewBox="0 0 300 205" role="img" aria-label="Game folder: razdor lies next to DiscordTimes.exe">
+                <use href="#fold" x="8" y="8" width="44" height="34"/>
+                <text x="62" y="27">Discord Times</text>
+                <text class="s" x="62" y="42">game folder</text>
+                <path class="ln" d="M30 42 V188 M30 73 H54 M30 114 H54 M30 148 H54 M30 188 H50"/>
+                <use href="#fold" x="54" y="60" width="34" height="26"/>
+                <text x="98" y="78">Maps_Rus</text>
+                <use href="#file" x="56" y="98" width="26" height="32"/>
+                <text x="98" y="119">Rus_Units.ini</text>
+                <use href="#exe" x="56" y="132" width="26" height="32"/>
+                <text x="98" y="153">DiscordTimes.exe</text>
+                <rect class="hlbox" x="46" y="167" width="248" height="36" rx="8"/>
+                <image href="icon-192.png" x="52" y="169" width="32" height="32"/>
+                <text class="hl" x="92" y="190">razdor</text>
+              </svg></div>
+                <figcaption>The game folder: <span class="code">razdor</span> lies next to <span class="code">DiscordTimes.exe</span></figcaption></figure>
+            </div>
+          </li>
+          <li><span class="badge">3</span>
+            <div class="step-body side-wide">
+              <p>Start <strong>razdor</strong> from a terminal opened in the game folder.</p>
+              <figure class="fig wide"><div class="frame"><svg class="term" viewBox="0 0 420 110" role="img" aria-label="Terminal: the start command ./razdor">
+                <rect x="2" y="2" width="416" height="106" rx="8" fill="#1d150e" stroke="#c7ccd0" stroke-width="2"/>
+                <rect x="2" y="2" width="416" height="24" rx="8" fill="#3a2a1c"/>
+                <text class="cmd" x="16" y="62">$ ./razdor</text>
+              </svg></div>
+                <figcaption>The start command in a terminal</figcaption></figure>
+            </div>
+          </li>
+        </ol>
+        <p class="note">Sound goes through ALSA (the <span class="code">libasound.so.2</span> library is on any desktop; PipeWire and PulseAudio provide the <span class="code">default</span> device). The menu icon is described in the <a href="https://github.com/indicozy/razdor#readme">README</a>.</p>
+      </div>
+
+      <div class="sub" id="macos">
+        <h3>macOS</h3>
+        <ol class="steps">
+          <li><span class="badge">1</span>
+            <div class="step-body side-wide">
+              <p>Download <strong>razdor-macos</strong> from the newest release.</p>
+              <figure class="fig wide"><div class="frame"><svg viewBox="0 0 120 90" role="img" aria-label="Download icon for a file">
+                <use href="#dl" x="0" y="0" width="120" height="90"/></svg></div>
+                <figcaption>The <span class="code">razdor-macos</span> file on the releases page</figcaption></figure>
+            </div>
+          </li>
+          <li><span class="badge">2</span>
+            <div class="step-body side-wide">
+              <p>On a Mac the game stands inside a Wine or CrossOver bottle. Put <strong>razdor-macos</strong> into the game folder, next to <strong>DiscordTimes.exe</strong>.</p>
+              <figure class="fig wide"><div class="frame"><svg viewBox="0 0 300 245" role="img" aria-label="Inside a Wine or CrossOver bottle: the game folder with DiscordTimes.exe and razdor-macos">
+                <rect x="2" y="2" width="296" height="241" rx="10" fill="none" stroke="#5a300a" stroke-width="1.6" stroke-dasharray="6 5"/>
+                <text class="s" x="14" y="19">Wine or CrossOver bottle</text>
+                <g transform="translate(0 26)">
+                  <use href="#fold" x="8" y="8" width="44" height="34"/>
+                  <text x="62" y="27">Discord Times</text>
+                  <text class="s" x="62" y="42">game folder</text>
+                  <path class="ln" d="M30 42 V188 M30 73 H54 M30 114 H54 M30 148 H54 M30 188 H50"/>
+                  <use href="#fold" x="54" y="60" width="34" height="26"/>
+                  <text x="98" y="78">Maps_Rus</text>
+                  <use href="#file" x="56" y="98" width="26" height="32"/>
+                  <text x="98" y="119">Rus_Units.ini</text>
+                  <use href="#exe" x="56" y="132" width="26" height="32"/>
+                  <text x="98" y="153">DiscordTimes.exe</text>
+                  <rect class="hlbox" x="46" y="167" width="248" height="36" rx="8"/>
+                  <image href="icon-192.png" x="52" y="169" width="32" height="32"/>
+                  <text class="hl" x="92" y="190">razdor-macos</text>
+                </g>
+              </svg></div>
+                <figcaption>The program next to <span class="code">DiscordTimes.exe</span>, inside the bottle</figcaption></figure>
+            </div>
+          </li>
+          <li><span class="badge">3</span>
+            <div class="step-body side-wide">
+              <p>Before the first start, remove the macOS block. In Terminal, in the folder with the program, run the command. Or right-click the file and choose Open in Finder.</p>
+              <figure class="fig wide"><div class="frame"><svg class="term" viewBox="0 0 420 110" role="img" aria-label="Terminal: the command that removes the block">
+                <rect x="2" y="2" width="416" height="106" rx="8" fill="#1d150e" stroke="#c7ccd0" stroke-width="2"/>
+                <rect x="2" y="2" width="416" height="24" rx="8" fill="#3a2a1c"/>
+                <text class="cmd" x="14" y="62">$ xattr -d com.apple.quarantine razdor-macos</text>
+              </svg></div>
+                <figcaption>The command in Terminal</figcaption></figure>
+            </div>
+          </li>
+          <li><span class="badge">4</span>
+            <div class="step-body side-wide">
+              <p>Start <strong>razdor-macos</strong> with a double-click. The program opens in a Terminal window.</p>
+              <figure class="fig wide"><div class="frame"><svg viewBox="0 0 300 150" role="img" aria-label="Double-click on razdor-macos">
+                <use href="#file" x="122" y="18" width="52" height="64"/>
+                <text x="150" y="112" text-anchor="middle">razdor-macos</text>
+                <path d="M182 60 L182 92 L190 84 L197 100 L204 97 L197 81 L208 81 Z" fill="#111" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/>
+                <text class="s" x="150" y="138" text-anchor="middle">double-click</text>
+              </svg></div>
+                <figcaption>Double-click the program</figcaption></figure>
+            </div>
+          </li>
+        </ol>
+        <p class="note">The program is not signed by its developer, so macOS blocks it after the download: that is step 3.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="window" id="android" aria-labelledby="android-title">
+  <h2 id="android-title">Android (trial version)</h2>
+  <div class="window-body">
+    <div class="parchment">
+      <p>Touch controls: the gestures are described in the <a href="https://github.com/indicozy/razdor#readme">README</a>. There is no update inside the program: a new APK installs over the old one. Saves are kept in the <span class="code">Razdor</span> folder in internal storage and are not lost when the app is reinstalled.</p>
+      <ol class="steps">
+        <li><span class="badge">1</span>
+          <div class="step-body side-phone">
+            <div>
+              <p>Install <strong>razdor.apk</strong>. Android 8 or later is needed. Allow installs from this source in the Android settings.</p>
+            </div>
+            <figure class="fig phone"><svg viewBox="0 0 220 420" role="img" aria-label="Downloads: the razdor.apk file and the Install button">
+              <use href="#ph" x="0" y="0" width="220" height="420"/>
+              <text class="pt" x="26" y="58">Downloads</text>
+              <rect x="22" y="80" width="176" height="64" rx="10" fill="#fff" stroke="#8a7a5a" stroke-width="1.5"/>
+              <use href="#file" x="34" y="95" width="26" height="32"/>
+              <text class="pr" x="72" y="110">razdor.apk</text>
+              <text class="pm" x="72" y="130">Razdor</text>
+              <rect x="22" y="200" width="176" height="46" rx="23" fill="#24473b" stroke="#c7ccd0" stroke-width="2"/>
+              <text class="pb" x="110" y="228" text-anchor="middle">Install</text>
+            </svg>
+              <figcaption>The <span class="code">razdor.apk</span> file</figcaption></figure>
+          </div>
+        </li>
+        <li><span class="badge">2</span>
+          <div class="step-body side-phone">
+            <div>
+              <p>Put the <i>Discord Times</i> game folder into internal storage, in a folder named <strong>DiscordTimes</strong> (<span class="code">Internal storage/DiscordTimes</span>) or in <strong>Download</strong>. It must contain the <span class="code">Maps_Rus</span> folder and the <span class="code">Rus_Units.ini</span> file, as the folder with <span class="code">DiscordTimes.exe</span> on a computer does.</p>
+            </div>
+            <figure class="fig phone"><svg viewBox="0 0 220 420" role="img" aria-label="File manager: internal storage, the DiscordTimes folder with Maps_Rus and Rus_Units.ini">
+              <use href="#ph" x="0" y="0" width="220" height="420"/>
+              <text class="pm" x="26" y="50">Internal storage ›</text>
+              <text class="pt" x="26" y="72">DiscordTimes</text>
+              <rect x="18" y="88" width="184" height="40" rx="8" fill="#fbf7ec" stroke="#c9b98f"/>
+              <use href="#fold" x="28" y="96" width="30" height="23"/>
+              <text class="pr" x="68" y="113">Maps_Rus</text>
+              <rect x="18" y="136" width="184" height="40" rx="8" fill="#fbf7ec" stroke="#c9b98f"/>
+              <use href="#file" x="32" y="140" width="22" height="28"/>
+              <text class="pr" x="68" y="161">Rus_Units.ini</text>
+              <rect x="18" y="200" width="184" height="36" rx="8" fill="#f5dc8e" stroke="#c08d34" stroke-width="2"/>
+              <text class="pm" x="26" y="222">inside: Maps_Rus and Rus_Units.ini</text>
+            </svg>
+              <figcaption>The <span class="code">DiscordTimes</span> folder in internal storage</figcaption></figure>
+          </div>
+        </li>
+        <li><span class="badge">3</span>
+          <div class="step-body side-phone">
+            <div>
+              <p>Give Razdor <strong>All files access</strong>. If the game is not visible, the title screen shows a <strong>Grant access</strong> button, which opens the right settings page. By hand: Settings → Apps → Special app access → All files access → Razdor. On Android 8–10 the button asks for the usual file permission.</p>
+            </div>
+            <figure class="fig phone"><svg viewBox="0 0 220 420" role="img" aria-label="Settings: Special app access, All files access, the switch for Razdor">
+              <use href="#ph" x="0" y="0" width="220" height="420"/>
+              <text class="pm" x="26" y="50">‹ Apps</text>
+              <text class="pt" x="26" y="72">Special app access</text>
+              <rect x="18" y="88" width="184" height="46" rx="10" fill="#f5dc8e" stroke="#c08d34" stroke-width="2.5"/>
+              <text class="pr" x="30" y="115">All files access</text>
+              <text class="pr" x="186" y="115" text-anchor="end">›</text>
+              <rect x="18" y="146" width="184" height="46" rx="10" fill="#fbf7ec" stroke="#c9b98f"/>
+              <text class="pr" x="30" y="173">Razdor</text>
+              <rect x="150" y="160" width="40" height="20" rx="10" fill="#24473b"/>
+              <circle cx="180" cy="170" r="8" fill="#fff"/>
+            </svg>
+              <figcaption>Settings → Apps → Special app access → All files access → Razdor</figcaption></figure>
+          </div>
+        </li>
+        <li><span class="badge">4</span>
+          <div class="step-body side-phone">
+            <div>
+              <p>Go back to Razdor and tap <strong>Check again</strong>. The game is found without a restart. The title screen also checks the folder by itself every few seconds.</p>
+            </div>
+            <figure class="fig phone"><svg viewBox="0 0 220 420" role="img" aria-label="Razdor title screen with the Check again button">
+              <use href="#ph" x="0" y="0" width="220" height="420"/>
+              <text class="logo" x="110" y="150" text-anchor="middle">Razdor</text>
+              <rect x="26" y="222" width="168" height="48" rx="24" fill="none" stroke="#f0c96a" stroke-width="2"/>
+              <rect x="32" y="228" width="156" height="36" rx="18" fill="#4b3a9e" stroke="#c7ccd0" stroke-width="2"/>
+              <text class="pb" x="110" y="251" text-anchor="middle">Check again</text>
+            </svg>
+              <figcaption>The <strong>Check again</strong> button on the title screen</figcaption></figure>
+          </div>
+        </li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section class="window" id="iphone" aria-labelledby="iphone-title">
+  <h2 id="iphone-title">iPhone and iPad (trial version)</h2>
+  <div class="window-body">
+    <div class="parchment">
+      <p>Touch controls, as on Android. There is no update inside the program: a new IPA installs over the old one. The file is not signed, so it is installed with <strong>AltStore</strong> or <strong>Sideloadly</strong> using your own Apple ID; you do not need to sign anything yourself.</p>
+      <ol class="steps">
+        <li><span class="badge">1</span>
+          <div class="step-body side-wide">
+            <p>Download <strong>razdor.ipa</strong> from the newest release. iOS 14 or later is needed.</p>
+            <figure class="fig wide"><div class="frame"><svg viewBox="0 0 120 90" role="img" aria-label="Download icon for a file">
+              <use href="#dl" x="0" y="0" width="120" height="90"/></svg></div>
+              <figcaption>The <span class="code">razdor.ipa</span> file on the releases page</figcaption></figure>
+          </div>
+        </li>
+        <li><span class="badge">2</span>
+          <div class="step-body side-wide">
+            <div>
+              <p>Install the IPA in one of two ways:</p>
+              <ul>
+                <li><strong>AltStore</strong> (<a href="https://altstore.io">altstore.io</a>): on the computer, start AltServer, then install AltStore on the phone through AltServer. In AltStore, on the My Apps tab, tap “+” and choose the IPA.</li>
+                <li><strong>Sideloadly</strong> (<a href="https://sideloadly.io">sideloadly.io</a>): connect the phone to the computer, drag the IPA into the window and enter your Apple ID.</li>
+              </ul>
+            </div>
+            <figure class="fig wide"><div class="frame"><svg viewBox="0 0 240 180" role="img" aria-label="A computer with AltServer or Sideloadly installs the IPA on an iPhone">
+              <rect x="6" y="20" width="140" height="96" rx="8" fill="#142b24" stroke="#c7ccd0" stroke-width="2.5"/>
+              <rect x="14" y="28" width="124" height="80" rx="3" fill="#f6eedb"/>
+              <use href="#file" x="50" y="40" width="36" height="44"/>
+              <text class="pm" x="76" y="104" text-anchor="middle">razdor.ipa</text>
+              <rect x="60" y="116" width="40" height="8" fill="#5f686d"/>
+              <rect x="44" y="124" width="72" height="6" rx="3" fill="#5f686d"/>
+              <path d="M156 68 H176" stroke="#b8591c" stroke-width="3" stroke-linecap="round"/>
+              <path d="M170 61 L180 68 L170 75 Z" fill="#b8591c"/>
+              <rect x="186" y="30" width="48" height="98" rx="10" fill="#142b24" stroke="#c7ccd0" stroke-width="2.5"/>
+              <rect x="192" y="38" width="36" height="82" rx="5" fill="#f6eedb"/>
+              <image href="icon-192.png" x="196" y="60" width="28" height="28"/>
+              <text class="s" x="76" y="164" text-anchor="middle">computer</text>
+              <text class="s" x="210" y="164" text-anchor="middle">iPhone</text>
+            </svg></div>
+              <figcaption>AltStore or Sideloadly installs the IPA from the computer</figcaption></figure>
+          </div>
+        </li>
+        <li><span class="badge">3</span>
+          <div class="step-body side-phone">
+            <div>
+              <p>On iOS 16 and later, turn on <strong>Developer Mode</strong>: Settings → Privacy &amp; Security → Developer Mode. Then trust the developer profile: Settings → General → VPN &amp; Device Management.</p>
+            </div>
+            <figure class="fig phone"><svg viewBox="0 0 220 420" role="img" aria-label="Settings: the Developer Mode switch is on">
+              <use href="#ph" x="0" y="0" width="220" height="420"/>
+              <text class="pm" x="26" y="50">‹ Settings</text>
+              <text class="pt" x="26" y="72">Privacy &amp; Security</text>
+              <rect x="18" y="108" width="184" height="46" rx="10" fill="#f5dc8e" stroke="#c08d34" stroke-width="2.5"/>
+              <text class="pr" x="30" y="136">Developer Mode</text>
+              <rect x="150" y="122" width="40" height="20" rx="10" fill="#24473b"/>
+              <circle cx="180" cy="132" r="8" fill="#fff"/>
+            </svg>
+              <figcaption>Settings → Privacy &amp; Security → Developer Mode</figcaption></figure>
+          </div>
+        </li>
+        <li><span class="badge">4</span>
+          <div class="step-body side-wide">
+            <p>A free Apple ID signs the program for <strong>7 days</strong>; after that it has to be signed again. AltStore does this itself if AltServer runs on the computer on the same Wi‑Fi network. Otherwise install the IPA again with Sideloadly. Saves stay.</p>
+            <figure class="fig wide"><div class="frame"><svg viewBox="0 0 240 120" role="img" aria-label="Calendar: 7 days until the signature has to be renewed">
+              <rect x="2" y="2" width="236" height="116" rx="10" fill="#fbf6e8" stroke="#5a300a" stroke-width="2"/>
+              <path d="M2 12 a10 10 0 0 1 10-10 H228 a10 10 0 0 1 10 10 V40 H2 Z" fill="#24473b"/>
+              <text class="big" x="120" y="34" text-anchor="middle">7 days</text>
+              <rect x="18" y="52" width="24" height="24" rx="4" fill="#f0e0b0" stroke="#5a300a"/><text x="30" y="69" text-anchor="middle" class="s">1</text>
+              <rect x="49" y="52" width="24" height="24" rx="4" fill="#f0e0b0" stroke="#5a300a"/><text x="61" y="69" text-anchor="middle" class="s">2</text>
+              <rect x="80" y="52" width="24" height="24" rx="4" fill="#f0e0b0" stroke="#5a300a"/><text x="92" y="69" text-anchor="middle" class="s">3</text>
+              <rect x="111" y="52" width="24" height="24" rx="4" fill="#f0e0b0" stroke="#5a300a"/><text x="123" y="69" text-anchor="middle" class="s">4</text>
+              <rect x="142" y="52" width="24" height="24" rx="4" fill="#f0e0b0" stroke="#5a300a"/><text x="154" y="69" text-anchor="middle" class="s">5</text>
+              <rect x="173" y="52" width="24" height="24" rx="4" fill="#f0e0b0" stroke="#5a300a"/><text x="185" y="69" text-anchor="middle" class="s">6</text>
+              <rect x="204" y="52" width="24" height="24" rx="4" fill="#f0e0b0" stroke="#5a300a"/><text x="216" y="69" text-anchor="middle" class="s">7</text>
+              <text x="120" y="102" text-anchor="middle" class="s">then sign it again</text>
+            </svg></div>
+              <figcaption>The signature lasts 7 days</figcaption></figure>
+          </div>
+        </li>
+        <li><span class="badge">5</span>
+          <div class="step-body side-wide">
+            <p>Copy the <i>Discord Times</i> game folder (with the <span class="code">Maps_Rus</span> folder and the <span class="code">Rus_Units.ini</span> file) to <strong>Files → On My iPhone → Razdor → DiscordTimes</strong>. From a computer, do the same with Finder (or iTunes): the device → Files → Razdor.</p>
+            <figure class="fig wide"><div class="frame"><svg viewBox="0 0 300 200" role="img" aria-label="The Files app: On My iPhone, the Razdor folder, DiscordTimes">
+              <rect x="2" y="2" width="296" height="196" rx="10" fill="#f6eedb" stroke="#5a300a" stroke-width="2"/>
+              <path d="M2 12 a10 10 0 0 1 10-10 H288 a10 10 0 0 1 10 10 V40 H2 Z" fill="#d8cdb0"/>
+              <text class="pm" x="14" y="30">Files › On My iPhone › Razdor</text>
+              <rect x="12" y="52" width="276" height="44" rx="8" fill="#f5dc8e" stroke="#c08d34" stroke-width="2.5"/>
+              <use href="#fold" x="24" y="61" width="34" height="26"/>
+              <text x="70" y="79">DiscordTimes</text>
+              <rect x="12" y="104" width="276" height="44" rx="8" fill="#fbf7ec" stroke="#c9b98f"/>
+              <use href="#fold" x="24" y="113" width="34" height="26"/>
+              <text x="70" y="131">Razdor</text>
+              <text class="s" x="14" y="180">Razdor's folder: saves and log</text>
+            </svg></div>
+              <figcaption>The <span class="code">DiscordTimes</span> folder in the Files app</figcaption></figure>
+            <figure class="fig wide"><div class="frame"><svg viewBox="0 0 300 190" role="img" aria-label="Finder on the computer: the iPhone device, the Files tab, the Razdor app">
+              <rect x="2" y="2" width="296" height="186" rx="8" fill="#f6eedb" stroke="#5a300a" stroke-width="2"/>
+              <path d="M2 10 a8 8 0 0 1 8-8 H290 a8 8 0 0 1 8 8 V26 H2 Z" fill="#d8cdb0"/>
+              <rect x="2" y="26" width="92" height="162" fill="#e9dfc5"/>
+              <rect x="8" y="44" width="80" height="22" rx="5" fill="#f0c96a"/>
+              <text x="16" y="60" class="pr">iPhone</text>
+              <text class="pm" x="106" y="46">General</text>
+              <rect x="176" y="34" width="66" height="22" rx="5" fill="#24473b"/>
+              <text x="209" y="49" text-anchor="middle" class="pb" style="font-size:12.5px">Files</text>
+              <rect x="106" y="66" width="184" height="26" rx="6" fill="#fbf7ec" stroke="#c9b98f"/>
+              <use href="#fold" x="112" y="70" width="20" height="16"/>
+              <text x="140" y="84" class="pr">Razdor</text>
+              <rect x="106" y="100" width="184" height="36" rx="6" fill="#f5dc8e" stroke="#c08d34" stroke-width="2"/>
+              <use href="#fold" x="116" y="106" width="20" height="16"/>
+              <text x="144" y="123" class="pr">DiscordTimes</text>
+              <text class="s" x="106" y="160">the game folder goes here</text>
+            </svg></div>
+              <figcaption>From a computer: the device → Files → Razdor</figcaption></figure>
+          </div>
+        </li>
+        <li><span class="badge">6</span>
+          <div class="step-body side-phone">
+            <div>
+              <p>Open Razdor and tap <strong>Check again</strong>. The title screen also checks the folder by itself every few seconds.</p>
+            </div>
+            <figure class="fig phone"><svg viewBox="0 0 220 420" role="img" aria-label="Razdor title screen with the Check again button">
+              <use href="#ph" x="0" y="0" width="220" height="420"/>
+              <text class="logo" x="110" y="150" text-anchor="middle">Razdor</text>
+              <rect x="26" y="222" width="168" height="48" rx="24" fill="none" stroke="#f0c96a" stroke-width="2"/>
+              <rect x="32" y="228" width="156" height="36" rx="18" fill="#4b3a9e" stroke="#c7ccd0" stroke-width="2"/>
+              <text class="pb" x="110" y="251" text-anchor="middle">Check again</text>
+            </svg>
+              <figcaption>The <strong>Check again</strong> button</figcaption></figure>
+          </div>
+        </li>
+      </ol>
+      <p class="note">Saves, the log and the image cache are in Files → On My iPhone → Razdor → <span class="code">Razdor</span> (the <span class="code">saves</span> folder inside). No permissions are needed for this.</p>
+    </div>
+  </div>
+</section>
+
+<section class="window" id="update" aria-labelledby="update-title">
+  <h2 id="update-title">Updates</h2>
+  <div class="window-body">
+    <div class="box">
+      <ul>
+        <li><strong>On a computer</strong> Razdor checks for a newer release when it starts. When one exists, at a quiet moment (the title screen, the settings, or the map with no other windows; never in a battle) it offers the update. “Update” downloads it, checks it against the release's <span class="code">SHA256SUMS</span> and puts it in place of the program; the new version runs from the next start.</li>
+        <li>Settings → “More…” → “Updates”: “Ask” (the default), “Always” (no window) or “Off”. The “Check” button looks for a new version at once. The system <span class="code">curl</span> is needed (it is on Windows 10 and later, macOS and almost any Linux).</li>
+        <li><strong>On Android and iPhone</strong> there is no update inside the program: a new APK or IPA installs over the old one.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="window" id="trouble" aria-labelledby="trouble-title">
+  <h2 id="trouble-title">If it does not start</h2>
+  <div class="window-body">
+    <div class="box">
+      <ul>
+        <li><strong>Razdor cannot find the game.</strong> The screen says “Discord Times not found.” Check that the program lies next to <span class="code">DiscordTimes.exe</span> (computer), and on the phone that the game folder is in place: Android — <span class="code">Internal storage/DiscordTimes</span> or <span class="code">Download</span>; iPhone — Files → On My iPhone → Razdor → DiscordTimes. The folder must contain <span class="code">Maps_Rus</span> and <span class="code">Rus_Units.ini</span>. While the game is missing, Razdor runs its own demo kingdom: its own units and map, without the original's scenarios.</li>
+        <li><strong>Android: the game is not visible.</strong> Give All files access (step 3), then tap Check again. Without this access the game cannot be read, and the title screen stays with the demo map.</li>
+        <li><strong>Windows: “WGL_ARB_pixel_format is required” or no OpenGL driver.</strong> Razdor needs OpenGL 2. This happens in a remote desktop (RDP) session and in virtual machines without a driver. Put a software OpenGL from Mesa (<span class="code">opengl32.dll</span>, and in new releases also <span class="code">libgallium_wgl.dll</span> from the <span class="code">x64</span> folder of <a href="https://github.com/pal1000/mesa-dist-win/releases">mesa-dist-win</a>) next to <span class="code">Razdor.exe</span>; or connect without RDP; or install a graphics driver. Razdor shows this advice itself instead of a bare error.</li>
+        <li><strong>It does not start, or plays differently from the original.</strong> Razdor writes a <span class="code">razdor.log</span> file: on Windows in <span class="code">%APPDATA%\razdor\</span>, on Linux in <span class="code">~/.local/share/razdor/</span>, on macOS in <span class="code">~/Library/Application Support/razdor/</span>. The previous run is in <span class="code">razdor.previous.log</span>. The last line shows the step where the program stopped.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<p class="back"><a href="index.html">← Back to the main page</a> · <a href="install.html" lang="ru">Русская версия</a></p>
+
+<footer class="foot">
+  <p>Razdor 1.0.0 // for Community Update 1.2 // <a href="https://github.com/indicozy/razdor">source code on GitHub</a></p>
+  <p>Made by <a href="https://github.com/indicozy">@indicozy</a>. Not affiliated with Aterdux or the rights holders of <i>Discord Times</i>; no warranty.</p>
+</footer>
+
+</body>
+</html>
