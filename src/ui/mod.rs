@@ -867,6 +867,13 @@ impl App {
             display::notice(self.audio.settings.display);
             widgets::swallow_input();
         }
+        // Ctrl+0: the interface scale back to Auto on any screen (a player who scaled the
+        // settings off the screen in 1.0.0 had no way back).
+        if display::scale_reset_pressed() {
+            self.audio.settings.ui_scale = 0.0;
+            display::notice_scale();
+            widgets::swallow_input();
+        }
         self.follow_language();
         // A screen opened from outside the frame (a snapshot scene) draws its content.
         self.show_content();

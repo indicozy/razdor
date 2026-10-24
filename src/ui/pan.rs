@@ -9,6 +9,10 @@
 //! the bottom bar, the FPS counter and the keyboard strip (`unpanned`, and `end_frame` for what
 //! the frame draws last), the map under a window (`window_backdrop`) and the title background.
 //! Input: a middle-button drag pans (desktop); on phones a one-finger drag does (`gestures`).
+//!
+//! Inert since 1.0.1: the interface scale is kept to the screen's fit (`display::scale`), so the
+//! canvas never exceeds the screen and nothing pans. The pan stays for a later, safer return of
+//! larger scales.
 
 use std::cell::{Cell, RefCell};
 use std::mem::Discriminant;

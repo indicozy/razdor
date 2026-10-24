@@ -301,11 +301,15 @@ Building a window (`src/ui/chrome.rs`):
 
 - `chrome::k()` is the interface scale: screen pixels per pixel of the 960×720 reference
   video. Every size and offset is written in reference pixels times `k`. `chrome::fit_k` is
-  the largest that fits; `chrome::bar_height` the bottom bar. The chosen scale goes past the
-  fit (`display::scale`, up to ×4; Auto is the fit); `display::chosen_scale` is the setting as
-  it is. The bottom bar, the FPS counter and the keyboard strip use `chrome::bar_k`, the chosen
+  the largest that fits; `chrome::bar_height` the bottom bar. The chosen scale is kept to the
+  fit (`display::scale`, since 1.0.1; Auto is the fit): a scale above the fit, saved by 1.0.0, is
+  kept to the fit too, so the settings always fit the screen (players got stuck with them
+  off-screen in 1.0.0). `display::chosen_scale` is the setting as it is. Ctrl+0
+  (`display::scale_reset_pressed`, `ui/mod.rs`) sets it back to Auto on any screen, with a notice
+  (`display::notice_scale`), and swallows the key so the world map's 0 does not fire. The bottom bar, the FPS counter and the keyboard strip use `chrome::bar_k`, the chosen
   scale cut to the fit (`display::fitted_scale`), so they stay as large as the fit allows.
-- The pan (`src/ui/pan.rs`, Razdor's, the owner's request): when the canvas (960k × 720k) is
+- The pan (`src/ui/pan.rs`, Razdor's, the owner's request; inert since 1.0.1, as the canvas never
+  exceeds the screen): when the canvas (960k × 720k) is
   larger than the screen, the offset is a translation of macroquad's camera that shifts
   everything drawn in the frame. `pan::begin_frame` runs before `input::begin_frame`
   (`App::frame_content`) and clamps the offset with `pan::offset_range` (the canvas edges meet

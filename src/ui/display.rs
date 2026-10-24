@@ -48,8 +48,9 @@ impl DisplayMode {
 // ------------------------------------------------------------------------------------------
 
 /// The interface scales the player can pick, in screen pixels per pixel of the 960×720
-/// reference (`chrome::k`); `0` is "Auto", the largest that fits the window. Past the fit a
-/// scale is larger than the screen, and the windows pan (`ui::pan`).
+/// reference (`chrome::k`); `0` is "Auto", the largest that fits the window. A scale above the
+/// fit is kept to the fit (players got stuck with the settings off-screen in 1.0.0), so the
+/// settings always fit the screen.
 pub const SCALES: [f32; 10] = [0.0, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 3.5, 4.0];
 
 /// The chosen scale as `f32` bits (`0.0`: auto), read by `chrome::k` every call.
@@ -59,11 +60,11 @@ pub fn set_scale(scale: f32) {
     SCALE.store(scale.to_bits(), Ordering::Relaxed);
 }
 
-/// The interface scale for a window whose own fit is `fit`: the chosen one, even larger than
-/// the fit (the windows then pan, `ui::pan`); Auto is the fit.
+/// The interface scale for a window whose own fit is `fit`: the chosen one kept to the fit
+/// (a scale above the fit is kept to the fit, so the windows always fit the screen); Auto is
+/// the fit.
 pub fn scale(fit: f32) -> f32 {
-    let chosen = chosen_scale();
-    if chosen > 0.0 { chosen } else { fit }
+    fitted_scale(fit)
 }
 
 /// The chosen scale kept to the window's fit: the bottom bar, the FPS counter and the keyboard
@@ -92,20 +93,26 @@ pub fn chosen_scale() -> f32 {
     f32::from_bits(SCALE.load(Ordering::Relaxed))
 }
 
-/// The scale after `chosen` in the settings' cycle (Auto after the largest).
-pub fn next_scale(chosen: f32) -> f32 {
-    let at = SCALES.iter().position(|&s| s == chosen).unwrap_or(0);
-    SCALES[(at + 1) % SCALES.len()]
+/// The scale after `chosen` in the settings' cycle against the window's fit: Auto, then each
+/// scale of [`SCALES`] that fits, then Auto again. A `chosen` above the fit (saved by 1.0.0)
+/// goes to Auto.
+pub fn next_scale(chosen: f32, fit: f32) -> f32 {
+    if chosen > fit + 0.01 {
+        return 0.0;
+    }
+    let cycle: Vec<f32> = SCALES.iter().copied().filter(|&s| s <= 0.0 || s <= fit + 0.01).collect();
+    let at = cycle.iter().position(|&s| s == chosen).unwrap_or(0);
+    cycle[(at + 1) % cycle.len()]
 }
 
 /// The settings' label of a scale, against the window's own fit: Auto shows the fit, and a
-/// scale above the fit says it is larger than the screen.
+/// scale above the fit shows the fit it is kept to.
 pub fn scale_label(chosen: f32, fit: f32) -> String {
     use razdor::i18n::tr;
     if chosen <= 0.0 {
         format!("{} ({:.1}×)", tr("Auto"), fit)
     } else if chosen > fit + 0.01 {
-        format!("{chosen}× ({})", tr("larger than the screen"))
+        format!("{:.1}×", fit)
     } else {
         format!("{chosen}×")
     }
@@ -211,8 +218,16 @@ fn popup_rect(mode: DisplayMode, m: (i32, i32, i32, i32)) -> (i32, i32, i32, i32
 const NOTICE_SECONDS: f64 = 2.0;
 
 local! {
-    /// The mode Alt+Enter last chose and when.
-    static NOTICE: std::cell::Cell<Option<(DisplayMode, f64)>> = const { std::cell::Cell::new(None) };
+    /// The notice Alt+Enter or Ctrl+0 last set (its text) and when.
+    static NOTICE: std::cell::RefCell<Option<(String, f64)>> = std::cell::RefCell::new(None);
+}
+
+/// Ctrl+0 went down this frame: the interface scale back to Auto, on any screen (a player who
+/// scaled the settings off the screen in 1.0.0 had no way back).
+pub fn scale_reset_pressed() -> bool {
+    use crate::ui::input::{is_key_down, is_key_pressed};
+    use macroquad::input::KeyCode;
+    (is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl)) && (is_key_pressed(KeyCode::Key0) || is_key_pressed(KeyCode::Kp0))
 }
 
 /// Alt+Enter went down this frame: the next display mode, on any screen (Razdor's, the
@@ -224,25 +239,33 @@ pub fn hotkey_pressed() -> bool {
     (is_key_down(KeyCode::LeftAlt) || is_key_down(KeyCode::RightAlt)) && (is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter))
 }
 
-/// Shows `mode`'s name for a moment ([`draw_notice`]).
+/// Shows the display mode's name for a moment ([`draw_notice`]).
 pub fn notice(mode: DisplayMode) {
-    NOTICE.with(|n| n.set(Some((mode, crate::ui::clock::now()))));
+    set_notice(format!("{}: {}", razdor::i18n::tr("Screen"), mode.label()));
 }
 
-/// The name of the mode Alt+Enter chose, at the top of the screen over everything else.
+/// Shows "Interface scale: Auto" for a moment ([`draw_notice`]), after Ctrl+0.
+pub fn notice_scale() {
+    set_notice(format!("{}: {}", razdor::i18n::tr("Interface scale"), razdor::i18n::tr("Auto")));
+}
+
+fn set_notice(text: String) {
+    NOTICE.with(|n| *n.borrow_mut() = Some((text, crate::ui::clock::now())));
+}
+
+/// The notice at the top of the screen over everything else.
 pub fn draw_notice() {
     use crate::ui::widgets::{measure, text_centered, ACCENT, PANEL};
     use macroquad::prelude::*;
-    let Some((mode, at)) = NOTICE.with(|n| n.get()) else { return };
+    let Some((m, at)) = NOTICE.with(|n| n.borrow().clone()) else { return };
     let left = NOTICE_SECONDS - (crate::ui::clock::now() - at);
     if left <= 0.0 {
-        NOTICE.with(|n| n.set(None));
+        NOTICE.with(|n| *n.borrow_mut() = None);
         return;
     }
     let a = (left / 0.5).clamp(0.0, 1.0) as f32;
     let k = crate::ui::chrome::k();
     let (size, h) = ((18.0 * k).max(14.0), (30.0 * k).max(24.0));
-    let m = format!("{}: {}", razdor::i18n::tr("Screen"), mode.label());
     let w = measure(&m, size).width + 40.0 * k;
     let (cx, y) = (screen_width() / 2.0, 16.0 * k);
     draw_rectangle(cx - w / 2.0, y, w, h, Color { a: PANEL.a * a, ..PANEL });
@@ -1050,23 +1073,30 @@ mod tests {
     }
 
     #[test]
-    fn scale_steps_run_to_4_past_the_fit() {
-        assert_eq!(next_scale(0.0), 1.0);
-        assert_eq!(next_scale(1.0), 1.25);
-        assert_eq!(next_scale(3.5), 4.0, "the steps go on past a 1.5 fit");
-        assert_eq!(next_scale(4.0), 0.0, "after the largest, Auto");
+    fn scale_steps_stay_within_the_fit() {
+        // Fit 1.6: the cycle is Auto, 1.0, 1.25, 1.5, then Auto again.
+        assert_eq!(next_scale(0.0, 1.6), 1.0);
+        assert_eq!(next_scale(1.0, 1.6), 1.25);
+        assert_eq!(next_scale(1.25, 1.6), 1.5);
+        assert_eq!(next_scale(1.5, 1.6), 0.0, "after the last that fits, Auto");
+        // A scale saved above the fit (by 1.0.0) goes to Auto.
+        assert_eq!(next_scale(4.0, 1.5), 0.0);
         assert_eq!(scale_label(0.0, 1.5), "Auto (1.5×)");
         assert_eq!(scale_label(1.25, 1.5), "1.25×");
-        assert_eq!(scale_label(2.0, 1.5), "2× (larger than the screen)");
+        assert_eq!(scale_label(4.0, 1.5), "1.5×", "a scale above the fit shows the fit");
         assert_eq!(scale_label(2.0, 3.0), "2×");
     }
 
     #[test]
-    fn the_choice_goes_past_the_fit_and_the_bar_keeps_it() {
+    fn the_choice_is_kept_to_the_fit_and_the_bar_keeps_it() {
+        set_scale(4.0);
+        assert_eq!(scale(1.5), 1.5, "a choice above the fit is kept to the fit");
+        assert_eq!(fitted_scale(1.5), 1.5);
         set_scale(2.0);
-        assert_eq!(scale(1.5), 2.0, "the chosen scale, past the fit");
+        assert_eq!(scale(1.5), 1.5);
         assert_eq!(fitted_scale(1.5), 1.5, "the bar's scale stays at the fit");
         assert_eq!(fitted_scale(3.0), 2.0, "below the fit it is the choice");
+        assert_eq!(scale(3.0), 2.0, "below the fit it is the choice");
         // The bar draws inside `with_fitted`: there the scale is the fit, then the choice again.
         assert_eq!(with_fitted(1.5, chosen_scale), 1.5);
         assert_eq!(chosen_scale(), 2.0);

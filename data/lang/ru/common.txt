@@ -69,7 +69,6 @@ Windowed = В окне
 Borderless = Окно без рамки
 Full screen = Полный экран
 Interface scale = Масштаб интерфейса
-larger than the screen = больше экрана
 Font = Шрифт
 As in the original = Как в оригинале
 Modern = Современный

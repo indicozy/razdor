@@ -992,11 +992,11 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     if row(tr("Screen (Alt+Enter)"), audio.display.label(), &mut y) {
         audio.display = audio.display.next();
     }
-    // The interface scale: Auto (the largest that fits) or a fixed one, past the fit too (the
-    // windows pan then, `ui::pan`).
+    // The interface scale: Auto (the largest that fits) or a fixed one, kept to the fit (a
+    // scale above it is kept to the fit: players got stuck with the settings off-screen in 1.0.0).
     let fit = chrome::fit_k();
     if row(tr("Interface scale"), &super::display::scale_label(audio.ui_scale, fit), &mut y) {
-        audio.ui_scale = super::display::next_scale(audio.ui_scale);
+        audio.ui_scale = super::display::next_scale(audio.ui_scale, fit);
     }
     // The interface's fonts (Razdor's choice): the original's sheets from the install, or PT
     // Serif; at once.

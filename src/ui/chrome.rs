@@ -1279,8 +1279,8 @@ pub fn grey_out(r: Rect) {
 // ------------------------------------------------------------------------------------------
 
 /// Screen pixels per pixel of the 960×720 reference video (the original ran at 1024×768):
-/// the settings' interface scale, which may be larger than the screen ([`fit_k`]; the windows
-/// pan then, `ui::pan`).
+/// the settings' interface scale, kept to the screen's fit ([`fit_k`]): a scale above the fit
+/// is kept to the fit (players got stuck with the settings off-screen in 1.0.0).
 pub fn k() -> f32 {
     super::display::scale(fit_k())
 }

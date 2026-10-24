@@ -93,23 +93,3 @@ phone-spells-portrait | spells:РК1-Начало пути | 1080x2160 |
 phone-spells-landscape | spells:РК1-Начало пути | 2160x1080 |
 phone-battle-portrait | battle:РК1-Начало пути:0 | 1080x2160 |
 phone-battle-landscape | battle:РК1-Начало пути:0 | 2160x1080 |
-
-# The interface scale above the fit (x2, x4): the windows pan, the bottom bar keeps its fit.
-x2-title-1280 | title | 1280x800 | RAZDOR_UI_SCALE=2
-x2-army-1280 | army:РК1-Начало пути | 1280x800 | RAZDOR_UI_SCALE=2
-x2-barracks-1280 | building:РК1-Начало пути:0:barracks | 1280x800 | RAZDOR_UI_SCALE=2
-x2-market-1280 | building:РК3-Столица:8:market | 1280x800 | RAZDOR_UI_SCALE=2
-x2-settings-map-1280 | settings:РК1-Начало пути | 1280x800 | RAZDOR_UI_SCALE=2
-x2-battle-1280 | battle:РК1-Начало пути:0 | 1280x800 | RAZDOR_UI_SCALE=2
-x2-phone-army-portrait | army:РК1-Начало пути | 1080x2160 | RAZDOR_UI_SCALE=2
-x2-phone-barracks-portrait | building:РК1-Начало пути:0:barracks | 1080x2160 | RAZDOR_UI_SCALE=2
-x2-phone-settings-map-portrait | settings:РК1-Начало пути | 1080x2160 | RAZDOR_UI_SCALE=2
-x4-title-1280 | title | 1280x800 | RAZDOR_UI_SCALE=4
-x4-army-1280 | army:РК1-Начало пути | 1280x800 | RAZDOR_UI_SCALE=4
-x4-barracks-1280 | building:РК1-Начало пути:0:barracks | 1280x800 | RAZDOR_UI_SCALE=4
-x4-market-1280 | building:РК3-Столица:8:market | 1280x800 | RAZDOR_UI_SCALE=4
-x4-settings-map-1280 | settings:РК1-Начало пути | 1280x800 | RAZDOR_UI_SCALE=4
-x4-battle-1280 | battle:РК1-Начало пути:0 | 1280x800 | RAZDOR_UI_SCALE=4
-x4-phone-army-portrait | army:РК1-Начало пути | 1080x2160 | RAZDOR_UI_SCALE=4
-x4-phone-barracks-portrait | building:РК1-Начало пути:0:barracks | 1080x2160 | RAZDOR_UI_SCALE=4
-x4-phone-settings-map-portrait | settings:РК1-Начало пути | 1080x2160 | RAZDOR_UI_SCALE=4
