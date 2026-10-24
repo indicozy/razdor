@@ -267,6 +267,23 @@ pub fn missing(dir: &Path) -> Vec<String> {
     missing
 }
 
+/// The install's check ([`is_install`]) on the relative paths of an archive's listing, `/`
+/// separated, with the archive's top folder already dropped: the maps folder holds something
+/// and the unit list is there. Case-insensitive (the game comes from Windows).
+pub fn listing_is_install<S: AsRef<str>>(paths: &[S]) -> bool {
+    let maps = paths.iter().any(|p| p.as_ref().split_once('/').is_some_and(|(dir, rest)| dir.eq_ignore_ascii_case(MAPS_DIR) && !rest.is_empty()));
+    maps && paths.iter().any(|p| p.as_ref().eq_ignore_ascii_case(UNITS_FILE))
+}
+
+/// Whether a relative path of an archive is one of the install's: inside the maps folder, or one
+/// of the data files the loader reads (`Rus_*.ini`, `_Global.ini`). Case-insensitive. An archive
+/// without the whole install but with some of these is a patch for it.
+pub fn is_install_path(rel: &str) -> bool {
+    let first = rel.split('/').next().unwrap_or_default();
+    first.eq_ignore_ascii_case(MAPS_DIR)
+        || [UNITS_FILE, ARTEFACTS_FILE, SPELLS_FILE, GLOBAL_FILE, SETTINGS_FILE].iter().any(|f| rel.eq_ignore_ascii_case(f))
+}
+
 /// Where Razdor remembers the install folder: `$RAZDOR_CONFIG_DIR`, else the platform's
 /// config folder (`$XDG_CONFIG_HOME` or `~/.config` on Linux, `%APPDATA%` on Windows) +
 /// `razdor`; the file `install` holds the path.

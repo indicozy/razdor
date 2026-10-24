@@ -88,6 +88,19 @@ once the permission is granted, and on the button) loads a newly found install w
 `dt_content_of` / `scenarios_of`, without a restart. Android has no self-update (`update::asset_name` is None); its
 Discord link opens through `open_url` like the desktop's (see the main menu above). The log cannot be opened before
 the access (the folder is not writable), so the poll calls `diag::reopen_log` once it is granted.
+Game archives on the not-found block (`dt::unpack`, `ui::mobile`, every platform): `look_for_archives`
+scans `platform::archive_dirs()` (the phones: the install folders, Download, the storage root; the desktop:
+the program's folder except on macOS, Downloads, the install folders) at once after «Check again» or the
+unpacking's end, else every 5 s. `unpack::find_archives` lists each `.7z` / `.zip` there without extracting:
+a game when the listing passes `install::listing_is_install` after dropping one top folder, a patch when it
+holds some of `install::is_install_path`'s files, else ignored. `not_found_rows` offers «Распаковать архив
+игры» while a game is found and nothing runs; `start_unpack` writes the archives on a thread into
+`platform::unpack_dir()` (Android `DiscordTimes` in the storage, iOS `Documents/DiscordTimes`, macOS
+`DiscordTimes` in `app_dir`, elsewhere next to the program), the game first, the patches over it. While it
+runs, `mobile_install_poll` does not load the install; its end (`unpack_tick`) asks for it (`ask_recheck`),
+and the same poll loads it (the desktop has no 5-s poll: that reload is its only one). Snapshot fakes:
+`RAZDOR_SCENE_ARCHIVES`, `RAZDOR_SCENE_UNPACK`.
+
 Thread locals: `local!` (`src/local.rs`), never std's `thread_local!`: std takes one TLS key per static
 on Android, where a process has about 128, and the army window aborted with «out of TLS keys»; one
 test fails if `thread_local!` comes back in `src/`. Touch (phones and tablets,

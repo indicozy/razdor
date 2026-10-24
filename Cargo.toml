@@ -17,6 +17,13 @@ rustybuzz = "0.20"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["float_roundtrip"] }
 sha2 = "0.10.9"
+# Unpacking the game archive on the phones (`dt::unpack`): pure Rust, no deflate C code.
+sevenz-rust2 = { version = "0.20.2", default-features = false, features = ["ppmd"] }
+zip = { version = "9.1.0", default-features = false, features = ["deflate-flate2"] }
+
+[dev-dependencies]
+# The tests of `dt::unpack` write a 7z archive; the game itself only reads them.
+sevenz-rust2 = { version = "0.20.2", default-features = false, features = ["compress"] }
 
 [features]
 default = ["audio", "gamepad"]

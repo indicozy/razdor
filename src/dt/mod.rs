@@ -16,6 +16,7 @@ pub mod picture_cache;
 pub mod preload;
 pub mod sound;
 pub mod text;
+pub mod unpack;
 
 use std::fmt;
 use std::path::PathBuf;

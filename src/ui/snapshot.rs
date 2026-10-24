@@ -277,6 +277,11 @@ pub fn stage(app: &mut App) {
     if let Err(e) = try_stage(app, &scene) {
         razdor::diag!("RAZDOR_SCENE={scene}: {e}");
     }
+    // `RAZDOR_SCENE_ARCHIVES=a.7z,b.zip`: the not-found block with those game archives found;
+    // `RAZDOR_SCENE_UNPACK=<pct>` with it: the unpacking at that percentage (`ui::mobile`).
+    if let Ok(names) = std::env::var("RAZDOR_SCENE_ARCHIVES") {
+        super::mobile::snapshot_archives(&names, std::env::var("RAZDOR_SCENE_UNPACK").ok().and_then(|p| p.parse().ok()));
+    }
     if std::env::var("RAZDOR_SCENE_RULES").is_ok_and(|v| v == "1") { super::new_game::open_experimental_menu(); }
     // `RAZDOR_SCENE_BATTLE_EXIT=1`: a battle scene with its leave-battle window open (Esc).
     if std::env::var("RAZDOR_SCENE_BATTLE_EXIT").is_ok_and(|v| v == "1") {

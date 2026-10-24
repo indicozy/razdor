@@ -19,6 +19,14 @@ Where to get the game = Где взять игру
 2. Put the game folder in internal storage, in a folder named DiscordTimes (or in Download). = 2. Положите папку игры во внутреннюю память, в папку DiscordTimes (или в Download).
 Grant access = Выдать доступ
 Check again = Проверить снова
+Unpack the game archive = Распаковать архив игры
+Found: {names} = Найдено: {names}
+Unpacking… {pct}% = Распаковка… {pct}%
+Could not unpack: {error} = Не удалось распаковать: {error}
+Could not unpack: no room or no access to the folder {dir} = Не удалось распаковать: нет места или нет доступа к папке {dir}
+Or download the game archive from the Discord (the «Where to get the game» button) into Download and press «Unpack the game archive». = Или скачайте архив игры из Discord (кнопка «Где взять игру») в папку Download и нажмите «Распаковать архив игры».
+Or save the game archive from the Discord into the Files app: On iPhone > Razdor, and press «Unpack the game archive». = Или сохраните архив игры из Discord в приложение Файлы: На iPhone > Razdor, и нажмите «Распаковать архив игры».
+Or download the game archive from the Discord (the «Where to get the game» button) into Downloads and press «Unpack the game archive». = Или скачайте архив игры из Discord (кнопка «Где взять игру») в папку «Загрузки» и нажмите «Распаковать архив игры».
 # iOS (the not-found screen; see ui/screens.rs)
 1. Copy the game folder to the Files app: On My iPhone (or iPad) > Razdor, in a folder named DiscordTimes. = 1. Скопируйте папку игры в «Файлы»: На iPhone (или iPad) > Раздор, в папку DiscordTimes.
 2. From a computer: Finder (or iTunes) > the device > Files > Razdor. = 2. С компьютера: Finder (или iTunes) > устройство > Файлы > Раздор.

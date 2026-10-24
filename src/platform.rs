@@ -116,9 +116,73 @@ pub fn install_roots() -> Vec<PathBuf> {
     }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
-        let Some(home) = dirs::home_dir() else { return Vec::new() };
-        vec![home.join("Games"), home.join("Downloads"), home]
+        let mut roots: Vec<PathBuf> = dirs::home_dir().map(|home| vec![home.join("Games"), home.join("Downloads"), home]).unwrap_or_default();
+        roots.extend(unpack_dir());
+        roots
     }
+}
+
+/// The folder an unpacked game goes into (`dt::unpack`), and the last install folder the search
+/// checks: Android `DiscordTimes` in the shared storage, iOS `Documents/DiscordTimes`, macOS
+/// `DiscordTimes` in [`app_dir`] (the app bundle is not written to), elsewhere `DiscordTimes`
+/// next to the program.
+pub fn unpack_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "android")]
+    {
+        Some(PathBuf::from("/storage/emulated/0/DiscordTimes"))
+    }
+    #[cfg(target_os = "ios")]
+    {
+        ios_documents().map(|docs| docs.join("DiscordTimes"))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        app_dir().map(|dir| dir.join("DiscordTimes"))
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_os = "macos")))]
+    {
+        std::env::current_exe().ok()?.parent().map(|dir| dir.join("DiscordTimes"))
+    }
+}
+
+/// The folders scanned for a game archive (`dt::unpack::find_archives`), without repeats. The
+/// phones: their install folders ([`install_roots`]). The desktop: the program's own folder
+/// (not on macOS, where it is inside the bundle), the Downloads folder, then the install folders.
+pub fn archive_dirs() -> Vec<PathBuf> {
+    let mut dirs = desktop_archive_dirs();
+    dirs.extend(install_roots());
+    let mut out: Vec<PathBuf> = Vec::new();
+    for dir in dirs {
+        if !out.contains(&dir) {
+            out.push(dir);
+        }
+    }
+    out
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn desktop_archive_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    #[cfg(not(target_os = "macos"))]
+    dirs.extend(std::env::current_exe().ok().and_then(|exe| exe.parent().map(PathBuf::from)));
+    dirs.extend(downloads_dir());
+    dirs
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn desktop_archive_dirs() -> Vec<PathBuf> {
+    Vec::new()
+}
+
+/// The Downloads folder: `XDG_DOWNLOAD_DIR` on Linux when set, else the platform's
+/// ([`dirs::download_dir`]), else `Downloads` in the home folder.
+pub fn downloads_dir() -> Option<PathBuf> {
+    if cfg!(target_os = "linux") {
+        if let Some(dir) = std::env::var_os("XDG_DOWNLOAD_DIR").filter(|d| !d.is_empty()) {
+            return Some(PathBuf::from(dir));
+        }
+    }
+    dirs::download_dir().or_else(|| dirs::home_dir().map(|home| home.join("Downloads")))
 }
 
 #[cfg(test)]

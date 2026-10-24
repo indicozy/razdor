@@ -17,6 +17,7 @@ use razdor::rules::units::Stats;
 
 use super::assets::Assets;
 use super::audio::{cue, Cue};
+use super::mobile;
 use super::text_edit::TextEdit;
 use super::widgets::*;
 use super::{ScenarioEntry, Screen};
@@ -236,6 +237,7 @@ pub fn menu_not_found(no_install: bool) {
     let (title_size, body_size, lead) = (20.0 * k, 16.0 * k, 22.0 * k);
     let mut body = vec![tr("Razdor plays your own copy of Discord Times: version 1.8 with Community Update 1.2.").to_string()];
     body.extend(not_found_steps());
+    body.extend(unpack_lines());
     body.extend(install_problem());
     let body_lines: Vec<String> = body.iter().flat_map(|s| wrap(s, w, body_size)).flat_map(|l| break_wide(&l, w, body_size)).collect();
     let text_h = title_size + 10.0 * k + body_lines.len() as f32 * lead;
@@ -306,28 +308,52 @@ fn not_found_steps() -> Vec<String> {
     let steps = vec![
         tr("1. Give Razdor access to all files: the «Grant access» button, or Settings > Apps > Special app access > All files access > Razdor.").to_string(),
         tr("2. Put the game folder in internal storage, in a folder named DiscordTimes (or in Download).").to_string(),
+        tr("Or download the game archive from the Discord (the «Where to get the game» button) into Download and press «Unpack the game archive».").to_string(),
     ];
     #[cfg(target_os = "ios")]
     let steps = vec![
         tr("1. Copy the game folder to the Files app: On My iPhone (or iPad) > Razdor, in a folder named DiscordTimes.").to_string(),
         tr("2. From a computer: Finder (or iTunes) > the device > Files > Razdor.").to_string(),
+        tr("Or save the game archive from the Discord into the Files app: On iPhone > Razdor, and press «Unpack the game archive».").to_string(),
     ];
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    let steps = vec![tr("Put Razdor into the game folder, next to DiscordTimes.exe.").to_string()];
+    let steps = vec![
+        tr("Put Razdor into the game folder, next to DiscordTimes.exe.").to_string(),
+        tr("Or download the game archive from the Discord (the «Where to get the game» button) into Downloads and press «Unpack the game archive».").to_string(),
+    ];
     steps
 }
 
-/// The platform's own buttons of the menu's not-found block (above the two links).
+/// The game archives found, and the unpacking's progress or error, as the block's lines.
+fn unpack_lines() -> Vec<String> {
+    let names = mobile::game_archive_names();
+    if names.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = vec![trf!("Found: {names}", names = names.join(", "))];
+    if let Some(pct) = mobile::unpack_progress() {
+        lines.push(trf!("Unpacking… {pct}%", pct = pct));
+    } else if let Some(error) = mobile::unpack_error() {
+        lines.push(match error {
+            razdor::dt::unpack::UnpackError::NoRoomOrAccess(dir) => trf!("Could not unpack: no room or no access to the folder {dir}", dir = dir.display()),
+            other => trf!("Could not unpack: {error}", error = other),
+        });
+    }
+    lines
+}
+
+/// The buttons of the menu's not-found block above the two links: the platform's own (the phones'
+/// access button), «Unpack the game archive» when a game archive was found, and the phones'
+/// «Check again».
 fn not_found_rows() -> Vec<Vec<NotFoundButton>> {
+    let mut rows = Vec::new();
     #[cfg(target_os = "android")]
-    let rows = vec![
-        vec![(tr("Grant access"), super::android::request_storage as fn())],
-        vec![(tr("Check again"), super::mobile::ask_recheck as fn())],
-    ];
-    #[cfg(target_os = "ios")]
-    let rows = vec![vec![(tr("Check again"), super::mobile::ask_recheck as fn())]];
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    let rows = Vec::new();
+    rows.push(vec![(tr("Grant access"), super::android::request_storage as fn())]);
+    if mobile::unpack_offered() {
+        rows.push(vec![(tr("Unpack the game archive"), mobile::start_unpack as fn())]);
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    rows.push(vec![(tr("Check again"), super::mobile::ask_recheck as fn())]);
     rows
 }
 

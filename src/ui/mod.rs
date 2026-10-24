@@ -46,7 +46,6 @@ pub mod unit_sheet;
 pub mod update_view;
 #[cfg(target_os = "android")]
 pub mod android;
-#[cfg(any(target_os = "android", target_os = "ios"))]
 pub mod mobile;
 pub mod widgets;
 pub mod window_layout;
@@ -783,12 +782,12 @@ impl App {
         }
     }
 
-    /// Android and iOS: the install was not there at start. On the title screen, loads it when
-    /// the player asks ("Check again") or when the poll finds it in place (the storage is
-    /// granted and an install folder is listed; iOS always has the storage). The first frame
-    /// without an install asks for the storage access once (Android), so the player lands on
-    /// the access page at once; the poll also reopens the log once the storage is granted.
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    /// The install was not there at start. On the menus, loads it when the player asks ("Check
+    /// again", or the unpacking's end on the desktop) or, on the phones, when the poll finds it in
+    /// place (the storage is granted and an install folder is listed; iOS always has the storage).
+    /// The first frame without an install asks for the storage access once (Android), so the
+    /// player lands on the access page at once; the poll also reopens the log once the storage is
+    /// granted. Game archives found in the folders are looked for here too (`ui::mobile`).
     fn mobile_install_poll(&mut self) {
         if self.dt_content.is_some() {
             return;
@@ -797,8 +796,15 @@ impl App {
         if !matches!(self.screen, Screen::MainMenu | Screen::ScenarioSelect) {
             return;
         }
+        let now = macroquad::time::get_time();
+        mobile::unpack_tick();
+        // The files are being written: the install is loaded when they are all there.
+        if mobile::unpacking() {
+            return;
+        }
         let asked = mobile::take_recheck();
-        let due = mobile::poll_due(macroquad::time::get_time());
+        mobile::look_for_archives(now, asked);
+        let due = mobile::poll_due(now);
         let granted = due && mobile::storage_granted();
         if granted {
             razdor::diag::reopen_log();
@@ -818,7 +824,6 @@ impl App {
     pub fn frame(&mut self) {
         #[cfg(any(target_os = "android", target_os = "ios"))]
         mobile::refresh_safe_insets();
-        #[cfg(any(target_os = "android", target_os = "ios"))]
         self.mobile_install_poll();
         // The screen's orientation from the settings (Android; applied at start and on each change).
         #[cfg(target_os = "android")]
