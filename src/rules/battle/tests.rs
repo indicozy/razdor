@@ -1841,6 +1841,30 @@ fn the_cards_show_the_actions_left_this_turn() {
     assert_eq!(bt.shown_stats(0)[Stat::Manevres], 3, "a haste shows as more");
 }
 
+/// In battle the card's values are clamped at 0 (0x4986e4, which `Battle::refresh` does);
+/// out of battle they are not (0x4908a8), and the card then shows a negative defence.
+#[test]
+fn the_cards_show_no_negative_defence_attack_or_initiative() {
+    // A curse that takes melee defence below 0 shows 0, the ranged defence keeps its value.
+    let archer = UnitDef { defence_shot: 5, ..shooter(30, 20) };
+    let swordsman = UnitDef { attack_shot: 0, ..warrior(31, 30, 0) };
+    let c = content_with(vec![archer, swordsman], Formation::WIDE);
+    let mut bt = prepared(&c, &[(30, b(0)), (31, f(0))], &[(18, f(0))], Team::Player);
+    bt.begin();
+    assert_eq!(bt.shown_stats(0)[Stat::DefenceBlow], 0);
+    bt.fighters[0].mods = Buff { defence: -3, ..Buff::default() };
+    bt.refresh(0);
+    let s = bt.shown_stats(0);
+    assert_eq!((s[Stat::DefenceBlow], s[Stat::DefenceShot]), (0, 2), "melee clamped, ranged 5 - 3");
+    bt.fighters[1].mods = Buff { attack: -40, ..Buff::default() };
+    bt.refresh(1);
+    let s = bt.shown_stats(1);
+    assert_eq!((s[Stat::AttackBlow], s[Stat::AttackShot]), (0, 0), "a negative attack is 0; base ranged 0 stays 0");
+    bt.fighters[1].mods = Buff { initiative: -100, ..Buff::default() };
+    bt.refresh(1);
+    assert_eq!(bt.shown_stats(1)[Stat::Initiative], 0, "initiative below 0 shows 0");
+}
+
 #[test]
 fn a_piercing_blow_on_the_invulnerable_is_one_hit() {
     let piercer = bonus(40, Bonus::ArmorIgnore, UnitDef { initiative: 30, ..warrior(40, 60, 0) });
