@@ -11,6 +11,7 @@
 //% IMPORTS
 
 import android.app.PendingIntent;
+import android.view.DisplayCutout;
 import android.content.BroadcastReceiver;
 import android.content.IntentFilter;
 import android.content.pm.PackageInstaller;
@@ -119,6 +120,52 @@ public String razdorInstallOutcome() {
 // The folder the app keeps its own files in (cleared by Android, never shared).
 public String razdorCacheDir() {
     return getCacheDir().getAbsolutePath();
+}
+
+// The phone's safe area in physical px (src/ui/display.rs reads it): "left,top,right,bottom,bl,br",
+// the display cutout's insets and the radii of the two bottom rounded corners. A corner the
+// system does not report (before API 31) is -1; "" while the window has no insets yet. The
+// system bars are left out: the game is in full screen, where they are hidden.
+public String razdorSafeArea() {
+    WindowInsets insets = getWindow().getDecorView().getRootWindowInsets();
+    if (insets == null) {
+        return "";
+    }
+    int left = 0;
+    int top = 0;
+    int right = 0;
+    int bottom = 0;
+    if (Build.VERSION.SDK_INT >= 28) {
+        DisplayCutout cutout = insets.getDisplayCutout();
+        if (cutout != null) {
+            left = cutout.getSafeInsetLeft();
+            top = cutout.getSafeInsetTop();
+            right = cutout.getSafeInsetRight();
+            bottom = cutout.getSafeInsetBottom();
+        }
+    }
+    int bottomLeft = -1;
+    int bottomRight = -1;
+    if (Build.VERSION.SDK_INT >= 31) {
+        // RoundedCorner.POSITION_BOTTOM_RIGHT is 2 and POSITION_BOTTOM_LEFT is 3 (API 31).
+        bottomLeft = razdorCornerRadius(insets, 3);
+        bottomRight = razdorCornerRadius(insets, 2);
+    }
+    return left + "," + top + "," + right + "," + bottom + "," + bottomLeft + "," + bottomRight;
+}
+
+// The radius of the rounded corner at `position`, 0 when the screen has none there, -1 when it
+// cannot be read. Reflection: RoundedCorner is API 31, and this runs only from there.
+private int razdorCornerRadius(WindowInsets insets, int position) {
+    try {
+        Object corner = insets.getClass().getMethod("getRoundedCorner", int.class).invoke(insets, position);
+        if (corner == null) {
+            return 0;
+        }
+        return (Integer) corner.getClass().getMethod("getRadius").invoke(corner);
+    } catch (Exception e) {
+        return -1;
+    }
 }
 
 // Downloads `url` into the file `path`, giving up after `seconds` without an answer.

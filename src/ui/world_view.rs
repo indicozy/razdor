@@ -318,7 +318,7 @@ fn grab_map(game: &Game, view: &mut MapView, cam: &Camera, off_map: bool) -> boo
     use macroquad::miniquad::CursorIcon;
     let m = Vec2::from(pointer());
     let Some(mut grab) = view.grab else {
-        if right_clicked() && !off_map && cam.view.contains(m) && view.shows.is_empty() && !game.moving() {
+        if right_clicked() && !off_map && cam.over_map(m) && view.shows.is_empty() && !game.moving() {
             view.grab = Some(Grab { start: m, from: view.look.unwrap_or(game.display_pos()).into(), moved: false });
         }
         return false;
@@ -882,7 +882,11 @@ pub(super) fn faction_color(faction: u8) -> Color {
 struct Camera {
     /// World pixel (at this zoom) at the top-left of the map view.
     origin: Vec2,
+    /// The view above the bottom bar: the scroll range and the minimap's window are kept to it.
     view: Rect,
+    /// What is drawn: the view and the strip under it, beside the bar (Razdor's choice: the map
+    /// shows where the bar does not cover it, down to the screen's edge).
+    draw: Rect,
     /// Screen pixels per world unit.
     scale: f32,
     grid: Grid,
@@ -908,7 +912,8 @@ impl Camera {
         let mut origin = centre - vec2(view.w, view.h) / 2.0;
         origin.x = origin.x.clamp(0.0, (world.x - view.w).max(0.0));
         origin.y = origin.y.clamp(0.0, (world.y - view.h).max(0.0));
-        Camera { origin: origin - pad, view, scale, grid: map.grid }
+        let draw = Rect::new(view.x, view.y, view.w, view.h + bar_h());
+        Camera { origin: origin - pad, view, draw, scale, grid: map.grid }
     }
 
     /// The world point at the middle of the view (where the camera really looks, the map's
@@ -937,6 +942,18 @@ impl Camera {
         Rect::new(o.x, o.y, self.view.w / self.scale, self.view.h / self.scale)
     }
 
+    /// The part of the world drawn, in world units (the view and the strip beside the bar).
+    fn drawn_world_rect(&self) -> Rect {
+        let o = self.origin / self.scale;
+        Rect::new(o.x, o.y, self.draw.w / self.scale, self.draw.h / self.scale)
+    }
+
+    /// Whether a map click or hover at `m` lands on the map: on what is drawn and not on the
+    /// bar, whose buttons and time panel take their own clicks.
+    fn over_map(&self, m: Vec2) -> bool {
+        self.draw.contains(m) && !game_bar::bar_rect().contains(m)
+    }
+
     /// Screen corners of the fog grid over the whole map.
     fn fog_corners(&self, game: &Game) -> (Vec2, Vec2) {
         let map = &game.world.map;
@@ -950,7 +967,7 @@ impl Camera {
     fn draw_fog(&self, game: &Game) {
         let (tl, br) = self.fog_corners(game);
         minimap::draw_fog(&game.fog, &game.unshown_cells(), tl, br);
-        let v = self.view;
+        let v = self.draw;
         let (l, r) = (tl.x.clamp(v.x, v.x + v.w), br.x.clamp(v.x, v.x + v.w));
         let (t, b) = (tl.y.clamp(v.y, v.y + v.h), br.y.clamp(v.y, v.y + v.h));
         for (x, y, w, h) in [(v.x, v.y, l - v.x, v.h), (r, v.y, v.x + v.w - r, v.h), (l, v.y, r - l, t - v.y), (l, b, r - l, v.y + v.h - b)] {
@@ -1020,10 +1037,10 @@ impl Camera {
 
     fn tile_under_mouse(&self) -> Option<Tile> {
         let m = Vec2::from(crate::ui::widgets::pointer());
-        if !self.view.contains(m) {
+        if !self.over_map(m) {
             return None;
         }
-        let w = (m - vec2(self.view.x, self.view.y) + self.origin) / self.scale;
+        let w = (m - vec2(self.draw.x, self.draw.y) + self.origin) / self.scale;
         Some(self.grid.tile_at((w.x, w.y)))
     }
 
@@ -1033,8 +1050,8 @@ impl Camera {
         let rh = self.grid.row_height();
         let c0 = (top_left.x - 1.0).floor() as i32;
         let r0 = (top_left.y / rh - 1.0).floor() as i32;
-        let c1 = c0 + (self.view.w / self.scale) as i32 + 3;
-        let r1 = r0 + (self.view.h / (self.scale * rh)) as i32 + 3;
+        let c1 = c0 + (self.draw.w / self.scale) as i32 + 3;
+        let r1 = r0 + (self.draw.h / (self.scale * rh)) as i32 + 3;
         ((c0.max(0), c1.min(map.w)), (r0.max(0), r1.min(map.h)))
     }
 }
@@ -1079,7 +1096,7 @@ fn draw_terrain(game: &Game, art: Option<&DtArt>, cam: &Camera) {
         // The map area in view, in world units (cells span ±½ around their centres).
         let rh = cam.grid.row_height();
         let (map_tl, map_br) = (vec2(-0.5, -0.5 * rh), vec2(map.w as f32 - 0.5, (map.h as f32 - 0.5) * rh));
-        let w = cam.world_rect();
+        let w = cam.drawn_world_rect();
         let (tl, br) = (map_tl.max(w.point()), map_br.min(w.point() + w.size()));
         if tl.x < br.x && tl.y < br.y {
             let (a, b) = (cam.to_screen(tl.into()), cam.to_screen(br.into()));
@@ -2168,7 +2185,7 @@ fn draw_tooltip_at(game: &Game, assets: &Assets, t: &Tooltip) {
 /// What the mouse is over: an army, else a building.
 fn hover_tooltip(game: &Game, cam: &Camera) -> Option<Tooltip> {
     let m = Vec2::from(crate::ui::widgets::pointer());
-    if !cam.view.contains(m) {
+    if !cam.over_map(m) {
         return None;
     }
     let near = 22.0 * (cam.scale / PX).max(0.6);
@@ -2758,6 +2775,13 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     // minimap as a blocker (its drag stays a drag), and only with no dialog open on the map.
     if dialogs.is_empty() && !input_blocked() {
         crate::ui::input::swipe_area(map_area(), SwipeKind::Pan);
+        // Beside the bar the map is drawn down to the screen's edge: a swipe there pans it too.
+        let bar = game_bar::bar_rect();
+        for side in [Rect::new(0.0, bar.y, bar.x, bar.h), Rect::new(bar.x + bar.w, bar.y, screen_width() - bar.x - bar.w, bar.h)] {
+            if side.w > 0.0 {
+                crate::ui::input::swipe_area(side, SwipeKind::Pan);
+            }
+        }
         if view.minimap {
             crate::ui::input::swipe_area(minimap::outer(&game.world.map, cam.view), SwipeKind::Off);
         }
@@ -2829,7 +2853,7 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     // Razdor's stop: Space, or a right click on the map (the right button dragged moves the
     // map instead); either also drops the route shown.
     let right_click = if game.moving() {
-        right_clicked() && !on_minimap && !on_clock && cam.view.contains(Vec2::from(pointer()))
+        right_clicked() && !on_minimap && !on_clock && cam.over_map(Vec2::from(pointer()))
     } else {
         grab_map(game, view, &cam, on_minimap || on_clock || view.centring.is_some())
     };

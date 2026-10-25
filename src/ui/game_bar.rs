@@ -15,6 +15,7 @@ use razdor::rules::game::Game;
 use razdor::trf;
 
 use super::chrome::{self, shadow_centered, shadow_text, tex, Fx, CREAM, GOLD};
+use super::display::{safe_area, SafeArea};
 use super::widgets::{fit_size, measure, panel_hint};
 
 /// A bar button.
@@ -228,10 +229,11 @@ pub enum Look {
     Glow,
 }
 
-/// The four resources along the bar's lower strip.
-fn resources(game: &Game, y: f32, h: f32) {
+/// The four resources along the bar's lower strip, inside the bar's width `bar` (not the
+/// screen's: the bar keeps its own width on a wide screen). An item moves inward when its text
+/// would sit under a rounded bottom corner (`safe`).
+fn resources(game: &Game, y: f32, h: f32, bar: Rect, safe: SafeArea, screen: Vec2) {
     let k = chrome::bar_k();
-    let w = screen_width();
     let mut wages = format!("- {}", game.daily_wages());
     if game.daily_mana_wages() > 0 {
         wages += &format!(" / {}", game.daily_mana_wages());
@@ -245,9 +247,20 @@ fn resources(game: &Game, y: f32, h: f32) {
     let value_size = super::typography::Role::Name.size((19.0 * k).round());
     let label_size = super::typography::Role::Body.size((19.0 * k).round());
     for (i, (label, art, value, color)) in items.iter().enumerate() {
-        let cx = w * (0.125 + 0.25 * i as f32);
+        let mut cx = bar.x + bar.w * (0.125 + 0.25 * i as f32);
         let lw = super::dt_font::with_face(super::dt_font::Face::Body, || measure(label, label_size).width);
+        let vw = super::dt_font::with_face(super::dt_font::Face::Subtitle, || measure(value, value_size).width);
         let base = y + h * 0.5 + value_size * 0.36;
+        let label_x = cx - lw - 16.0 * k;
+        let value_end = cx + 16.0 * k + vw;
+        let (bl, br) = (safe.corner_bl, safe.corner_br);
+        if i < 2 {
+            let s = smallest_shift(bar.w, |s| on_screen(vec2(label_x + s, base), screen, bl, br)).unwrap_or(0.0);
+            cx += s;
+        } else {
+            let s = smallest_shift(bar.w, |s| on_screen(vec2(value_end - s, base), screen, bl, br)).unwrap_or(0.0);
+            cx -= s;
+        }
         let label_x = cx - lw - 16.0 * k;
         let icon = 24.0 * k;
         // Each picture with its own alpha plane and nothing else, as the original's
@@ -374,45 +387,45 @@ pub fn draw_with_time(game: &Game, look: impl Fn(BarButton) -> Look, time_button
 fn draw_bar(game: &Game, look: &impl Fn(BarButton) -> Look, time_buttons: bool) -> (Option<BarButton>, Option<TimeButton>) {
     let k = chrome::bar_k();
     let (w, h) = (screen_width(), screen_height());
-    let bar = chrome::bar_height();
-    let y = h - bar;
     let row = (60.0 * k).round();
+    let lay = current_layout();
+    let bar = lay.bar;
+    let y = bar.y;
     // The top row: the original's ribbon (`Win2a`), its ends kept, the wooden middle stretched.
     match chrome::win("Win2a") {
         Some(t) => {
             let s = row / t.height();
             let end = 370.0;
             let ew = end * s;
-            chrome::tex_src(&t, Rect::new(0.0, 0.0, end, t.height()), Rect::new(0.0, y, ew, row), WHITE);
-            chrome::tex_src(&t, Rect::new(t.width() - end, 0.0, end, t.height()), Rect::new(w - ew, y, ew, row), WHITE);
-            chrome::tex_src(&t, Rect::new(end, 0.0, t.width() - 2.0 * end, t.height()), Rect::new(ew, y, w - 2.0 * ew, row), WHITE);
+            chrome::tex_src(&t, Rect::new(0.0, 0.0, end, t.height()), Rect::new(bar.x, y, ew, row), WHITE);
+            chrome::tex_src(&t, Rect::new(t.width() - end, 0.0, end, t.height()), Rect::new(bar.x + bar.w - ew, y, ew, row), WHITE);
+            chrome::tex_src(&t, Rect::new(end, 0.0, t.width() - 2.0 * end, t.height()), Rect::new(bar.x + ew, y, bar.w - 2.0 * ew, row), WHITE);
         }
         None => {
-            chrome::surface(Rect::new(0.0, y, w, row), chrome::Skin::Marble);
+            chrome::surface(Rect::new(bar.x, y, bar.w, row), chrome::Skin::Marble);
             let ew = 370.0 * row / 64.0;
-            draw_rectangle(ew, y + 3.0, w - 2.0 * ew, row - 6.0, Color::new(0.42, 0.22, 0.10, 1.0));
-            draw_rectangle_lines(ew, y + 3.0, w - 2.0 * ew, row - 6.0, 2.0, chrome::SILVER);
-            draw_rectangle_lines(0.0, y, w, row, 2.0, chrome::SILVER);
+            draw_rectangle(bar.x + ew, y + 3.0, bar.w - 2.0 * ew, row - 6.0, Color::new(0.42, 0.22, 0.10, 1.0));
+            draw_rectangle_lines(bar.x + ew, y + 3.0, bar.w - 2.0 * ew, row - 6.0, 2.0, chrome::SILVER);
+            draw_rectangle_lines(bar.x, y, bar.w, row, 2.0, chrome::SILVER);
         }
     }
-    chrome::silver_line(vec2(0.0, y), vec2(w, y), k.max(1.0));
-    // The lower strip.
+    chrome::silver_line(vec2(bar.x, y), vec2(bar.x + bar.w, y), k.max(1.0));
+    // The lower strip, the bar's own width.
     let sy = y + row;
-    let sh = bar - row;
+    let sh = bar.h - row;
     let visual = super::window_layout::visual();
-    chrome::tex(&lower_strip_gradient(visual.bar_gradient_bottom), Rect::new(0.0, sy, w, sh), WHITE);
+    chrome::tex(&lower_strip_gradient(visual.bar_gradient_bottom), Rect::new(bar.x, sy, bar.w, sh), WHITE);
     if let Some(t) = chrome::bottom_bar_ornament() {
         let ow = t.width() * sh / t.height();
-        let mut x = w * 0.25 - ow / 2.0;
-        while x < w {
+        let mut x = bar.x + bar.w * 0.25 - ow / 2.0;
+        while x < bar.x + bar.w {
             tex(&t, Rect::new(x, sy, ow, sh), Color::new(1.0, 1.0, 1.0, visual.bar_ornament_opacity));
-            x += w * 0.25;
+            x += bar.w * 0.25;
         }
     }
-    resources(game, sy, sh);
+    resources(game, sy, sh, bar, safe_area(), vec2(w, h));
 
     // The time panel.
-    let ew = 370.0 * row / 64.0;
     let cx = w / 2.0;
     let size = super::typography::Role::Bold.size((13.0 * k).round());
     // "Время:", the date, and while walking "До конца пути: 4 час" (the video's bar).
@@ -425,8 +438,8 @@ fn draw_bar(game: &Game, look: &impl Fn(BarButton) -> Look, time_buttons: bool) 
     } else if game.waiting() {
         lines.push((tr("waiting…").to_string(), GOLD));
     }
-    // Russian dates run longer: the lines shrink to the ribbon's middle.
-    let room = (w - 2.0 * ew - 16.0 * k).max(100.0);
+    // Russian dates run longer: the lines shrink to the time panel's width.
+    let room = (lay.time.w - 16.0 * k).max(60.0 * k);
     let size = super::typography::Role::Bold.with(|| lines.iter().map(|(l, _)| fit_size(l, room, size)).fold(size, f32::min));
     let lh = super::typography::Role::Bold.line_height(size * 1.25);
     let top = y + row / 2.0 - lh * (lines.len() as f32 - 1.0) / 2.0 + size * 0.36;
@@ -448,38 +461,27 @@ fn draw_bar(game: &Game, look: &impl Fn(BarButton) -> Look, time_buttons: bool) 
     } else {
         super::dt_font::with_face(super::dt_font::Face::Bold, || {
             for (i, (l, c)) in lines.iter().enumerate() {
-                shadow_centered(&super::widgets::ellipsize(l, room, size), cx, top + i as f32 * lh, size, *c);
+                shadow_centered(&super::widgets::ellipsize(l, room, size), lay.time.x + lay.time.w / 2.0, top + i as f32 * lh, size, *c);
             }
         });
     }
 
-    // The buttons.
+    // The buttons, at their laid-out rects.
     let mut pressed = None;
     let mut hovered_hint = None;
-    let bh = |b: BarButton| if b.small() { 44.0 } else { 54.0 } * row / 64.0;
-    let bw = |b: BarButton| if b.small() { 80.0 } else { 98.0 } * row / 64.0;
-    let mut x = 8.0 * k;
-    for b in BarButton::LEFT {
-        let r = Rect::new(x, y + (row - bh(b)) / 2.0, bw(b), bh(b));
-        let (clicked, hint) = oval(b, r, look(b));
+    for (i, b) in BarButton::LEFT.iter().copied().enumerate() {
+        let (clicked, hint) = oval(b, lay.left[i], look(b));
         if clicked {
             pressed = Some(b);
         }
         hovered_hint = hint.or(hovered_hint);
-        // The original's silver side edges meet exactly; subtracting 4 px made adjacent
-        // ovals overlap and pushed them away from the ornamental backing's inner edge.
-        x += bw(b);
     }
-    let mut x = w - 8.0 * k;
-    for b in BarButton::RIGHT.iter().rev().copied() {
-        x -= bw(b);
-        let r = Rect::new(x, y + (row - bh(b)) / 2.0, bw(b), bh(b));
-        let (clicked, hint) = oval(b, r, look(b));
+    for (i, b) in BarButton::RIGHT.iter().copied().enumerate().rev() {
+        let (clicked, hint) = oval(b, lay.right[i], look(b));
         if clicked {
             pressed = Some(b);
         }
         hovered_hint = hint.or(hovered_hint);
-        // Keep the right-hand group edge-to-edge as well.
     }
     // Both are hover hints: none after a phone's finger lifted (`input::touch_hover`).
     if let Some(hint) = timed_hint.or(hovered_hint).filter(|_| super::input::touch_hover()) {
@@ -488,11 +490,137 @@ fn draw_bar(game: &Game, look: &impl Fn(BarButton) -> Look, time_buttons: bool) 
     (pressed, timed)
 }
 
+/// Whether the point `p` is on the screen (`size`) with rounded bottom corners of radii `bl`
+/// and `br` (the phone's, `display::SafeArea`): outside the corner's arc is off the screen.
+pub fn on_screen(p: Vec2, size: Vec2, bl: f32, br: f32) -> bool {
+    if p.x < 0.0 || p.y < 0.0 || p.x > size.x || p.y > size.y {
+        return false;
+    }
+    if bl > 0.0 && p.x < bl && p.y > size.y - bl {
+        return (p - vec2(bl, size.y - bl)).length() <= bl;
+    }
+    if br > 0.0 && p.x > size.x - br && p.y > size.y - br {
+        return (p - vec2(size.x - br, size.y - br)).length() <= br;
+    }
+    true
+}
+
+/// Whether the disc of radius `rad` at `c` lies on the screen: its centre and 64 points of its
+/// rim are on it ([`on_screen`]).
+pub fn disc_on_screen(c: Vec2, rad: f32, size: Vec2, bl: f32, br: f32) -> bool {
+    on_screen(c, size, bl, br)
+        && (0..64).all(|i| {
+            let a = i as f32 / 64.0 * std::f32::consts::TAU;
+            on_screen(c + rad * vec2(a.cos(), a.sin()), size, bl, br)
+        })
+}
+
+/// The least shift in `[0, max]` for which `ok` holds, found by bisection to half a pixel; `ok`
+/// must turn true as the shift grows. None when even `max` is not enough.
+pub fn smallest_shift(max: f32, ok: impl Fn(f32) -> bool) -> Option<f32> {
+    if ok(0.0) {
+        return Some(0.0);
+    }
+    if !ok(max) {
+        return None;
+    }
+    let (mut lo, mut hi) = (0.0f32, max);
+    while hi - lo > 0.5 {
+        let mid = (lo + hi) / 2.0;
+        if ok(mid) {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    Some(hi)
+}
+
+/// Razdor's bar is the video's 960 reference px wide at the bar's scale, centred; on a wider
+/// screen the map shows beside it (Razdor's choice, not the original's 800 px bar).
+const BAR_W: f32 = 960.0;
+
+/// The bar's place on the screen: its natural width, centred, at the screen's bottom.
+pub fn bar_rect() -> Rect {
+    let (w, h) = (screen_width(), screen_height());
+    let bar = chrome::bar_height();
+    let bw = (BAR_W * chrome::bar_k()).round().min(w);
+    Rect::new(((w - bw) / 2.0).round(), h - bar, bw, bar)
+}
+
+/// A bar button's size at the bar's row height `row` (the original's art sizes).
+fn button_size(b: BarButton, row: f32) -> (f32, f32) {
+    let (h, w) = if b.small() { (44.0, 80.0) } else { (54.0, 98.0) };
+    (w * row / 64.0, h * row / 64.0)
+}
+
+/// The bar's pieces on the screen: every button's rect (the one place the drawing, the hit
+/// tests, the hints and the sounds take them from), the time panel between the groups.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Layout {
+    pub bar: Rect,
+    /// The left group in [`BarButton::LEFT`] order, the right one in [`BarButton::RIGHT`] order.
+    pub left: [Rect; 4],
+    pub right: [Rect; 4],
+    pub time: Rect,
+}
+
+/// The bar's layout on a `screen` (px) at the bar's scale `k` with the row height `row`, for the
+/// phone's safe area `safe`. Each group moves inward by the least shift that keeps every
+/// button's disc (70 % of its radius, [`disc_on_screen`]) off the rounded bottom corners and
+/// inside the cutout's insets; with no corners and no insets nothing moves.
+pub fn layout(bar: Rect, screen: Vec2, k: f32, row: f32, safe: SafeArea) -> Layout {
+    let (bl, br) = (safe.corner_bl, safe.corner_br);
+    let left_at = |s: f32| {
+        let mut x = bar.x + 8.0 * k + s;
+        let mut out = [Rect::default(); 4];
+        for (i, b) in BarButton::LEFT.iter().enumerate() {
+            let (w, h) = button_size(*b, row);
+            out[i] = Rect::new(x, bar.y + (row - h) / 2.0, w, h);
+            x += w;
+        }
+        out
+    };
+    let right_at = |s: f32| {
+        let mut x = bar.x + bar.w - 8.0 * k - s;
+        let mut out = [Rect::default(); 4];
+        for (i, b) in BarButton::RIGHT.iter().enumerate().rev() {
+            let (w, h) = button_size(*b, row);
+            x -= w;
+            out[i] = Rect::new(x, bar.y + (row - h) / 2.0, w, h);
+        }
+        out
+    };
+    let fits = |r: &Rect| {
+        let rad = 0.7 * r.w.min(r.h) / 2.0;
+        disc_on_screen(vec2(r.x + r.w / 2.0, r.y + r.h / 2.0), rad, screen, bl, br)
+    };
+    let left_ok = |s: f32| left_at(s).iter().all(|r| r.x >= safe.left && fits(r));
+    let right_ok = |s: f32| right_at(s).iter().all(|r| r.x + r.w <= screen.x - safe.right && fits(r));
+    // A group moves at most half the bar: past that the far buttons would leave the bar (and
+    // the ok test would stop being monotone there). The corners only need the first few pixels.
+    let max = bar.w / 2.0;
+    let ls = smallest_shift(max, left_ok).unwrap_or(0.0);
+    let rs = smallest_shift(max, right_ok).unwrap_or(0.0);
+    let left = left_at(ls);
+    let right = right_at(rs);
+    let ew = 370.0 * row / 64.0;
+    let x0 = (bar.x + ew).max(left[3].x + left[3].w);
+    let x1 = (bar.x + bar.w - ew).min(right[0].x);
+    Layout { bar, left, right, time: Rect::new(x0, bar.y, (x1 - x0).max(0.0), row) }
+}
+
+/// The layout the bar is drawn and hit with now (the screen's size, the safe area).
+pub fn current_layout() -> Layout {
+    let bar = bar_rect();
+    let row = (60.0 * chrome::bar_k()).round();
+    let screen = vec2(screen_width(), screen_height());
+    layout(bar, screen, chrome::bar_k(), row, safe_area())
+}
+
 /// The time panel in the middle of the bar (clicks on it do not reach the map).
 pub fn time_panel() -> Rect {
-    let row = (60.0 * chrome::bar_k()).round();
-    let ew = 370.0 * row / 64.0;
-    Rect::new(ew, screen_height() - chrome::bar_height(), screen_width() - 2.0 * ew, row)
+    current_layout().time
 }
 
 #[cfg(test)]
@@ -554,5 +682,84 @@ mod tests {
         let r = time_button_rect(TimeButton::ShowHero, 900.0, 800.0, 1.5);
         assert_eq!(r, Rect::new(800.0 - 51.0 * 1.5, 900.0 + 5.0 * 1.5, 153.0, 81.0));
         assert_eq!(time_button_at(vec2(800.0, 940.0), true, 900.0, 800.0, 1.5), Some(TimeButton::ShowHero));
+    }
+
+    fn bar_on(screen: Vec2, k: f32, x: f32, w: f32) -> Rect {
+        let h = (80.0 * k).round();
+        Rect::new(x, screen.y - h, w, h)
+    }
+
+    /// Whether the button's disc (70 % of its radius) lies on the screen with those corners.
+    fn disc_clear(r: &Rect, screen: Vec2, safe: SafeArea) -> bool {
+        disc_on_screen(vec2(r.x + r.w / 2.0, r.y + r.h / 2.0), 0.7 * r.w.min(r.h) / 2.0, screen, safe.corner_bl, safe.corner_br)
+    }
+
+    #[test]
+    fn no_insets_no_shift() {
+        // A 2376x1080 phone (2.625 px per dp): the bar is 960 px at the scale 1.5, centred.
+        let screen = vec2(2376.0, 1080.0);
+        let (k, row) = (1.5, 90.0);
+        let bar = bar_on(screen, k, 468.0, 1440.0);
+        let lay = layout(bar, screen, k, row, SafeArea::default());
+        assert_eq!(lay.left[0].x, bar.x + 8.0 * k);
+        assert_eq!(lay.right[3].x + lay.right[3].w, bar.x + bar.w - 8.0 * k);
+        // The time panel stands between the ribbon's ends (the original's placement).
+        let ew = 370.0 * row / 64.0;
+        assert_eq!(lay.time, Rect::new(bar.x + ew, bar.y, bar.w - 2.0 * ew, row));
+    }
+
+    #[test]
+    fn a_corner_moves_the_end_buttons_inwards_only_as_far_as_the_disc_needs() {
+        // A portrait phone: the bar spans the screen, its bottom corners are `corner` px.
+        let screen = vec2(1080.0, 2376.0);
+        let (k, row) = (1.125, 68.0);
+        let bar = bar_on(screen, k, 0.0, 1080.0);
+        let at = |corner: f32| {
+            let safe = SafeArea { corner_bl: corner, corner_br: corner, ..Default::default() };
+            (layout(bar, screen, k, row, safe), safe)
+        };
+        // 120 px: the Menu button's disc (70 % of its radius) is already inside the arc, so
+        // nothing moves (computed: its far point is 110 px from the arc's centre).
+        let (lay, _) = at(120.0);
+        assert_eq!(lay.left[0].x, bar.x + 8.0 * k);
+        // 200 px: the end buttons move in, and every disc is clear afterwards.
+        let (lay, safe) = at(200.0);
+        assert!(lay.left[0].x > bar.x + 8.0 * k, "the Menu button moves in");
+        assert!(lay.right[3].x + lay.right[3].w < bar.x + bar.w - 8.0 * k, "the Map button moves in");
+        for r in lay.left.iter().chain(lay.right.iter()) {
+            assert!(disc_clear(r, screen, safe), "{r:?} is clear of the corners");
+        }
+        // The shift is the least one (to half a pixel): 2 px nearer the middle would be cut.
+        let less = Rect { x: lay.left[0].x - 2.0, ..lay.left[0] };
+        assert!(!disc_clear(&less, screen, safe));
+    }
+
+    #[test]
+    fn a_left_cutout_keeps_the_left_group_after_it() {
+        let screen = vec2(2376.0, 1080.0);
+        let bar = bar_on(screen, 1.5, 0.0, 1440.0);
+        let safe = SafeArea { left: 90.0, ..Default::default() };
+        let lay = layout(bar, screen, 1.5, 90.0, safe);
+        // The bisection stops within half a pixel above the cutout's edge.
+        assert!((90.0..=90.5).contains(&lay.left[0].x), "{}", lay.left[0].x);
+    }
+
+    #[test]
+    fn the_smallest_shift_is_found_by_bisection() {
+        let got = smallest_shift(100.0, |s| s >= 30.0).unwrap();
+        assert!((30.0..=30.5).contains(&got), "got {got}");
+        assert_eq!(smallest_shift(100.0, |_| true), Some(0.0));
+        assert_eq!(smallest_shift(100.0, |_| false), None);
+    }
+
+    #[test]
+    fn corners_cut_the_arc_and_only_the_arc() {
+        let size = vec2(1000.0, 1000.0);
+        // Inside the arc: on screen; in the cut-off corner: not.
+        assert!(on_screen(vec2(120.0, 880.0), size, 120.0, 0.0));
+        assert!(!on_screen(vec2(5.0, 995.0), size, 120.0, 0.0));
+        // The bottom-right corner does not depend on the left one.
+        assert!(on_screen(vec2(5.0, 995.0), size, 0.0, 0.0));
+        assert!(!on_screen(vec2(995.0, 995.0), size, 0.0, 120.0));
     }
 }

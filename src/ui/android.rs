@@ -400,6 +400,32 @@ unsafe fn system_insets(env: *mut sys::JNIEnv) -> Option<[i32; 4]> {
     }
 }
 
+/// The phone's safe area from the activity's `razdorSafeArea` (physical px: left, top, right,
+/// bottom, then the two bottom corners' radii, -1 where the system does not report them; see
+/// `display::safe_area_from_system`). None while the window has no insets yet.
+pub fn read_safe_area() -> Option<[f32; 6]> {
+    // SAFETY: as in `read_safe_insets`; every reference made below is local and freed by `Local`.
+    unsafe {
+        let env = attach_jni_env();
+        let get = method(env, activity_class(env).obj, "razdorSafeArea", "()Ljava/lang/String;", false);
+        if get.is_null() || cleared(env) {
+            return None;
+        }
+        let text = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, ACTIVITY, get));
+        if text.obj.is_null() || cleared(env) {
+            return None;
+        }
+        let chars = ((**env).GetStringUTFChars.unwrap())(env, text.obj, std::ptr::null_mut());
+        if chars.is_null() {
+            return None;
+        }
+        let read = CStr::from_ptr(chars).to_string_lossy().into_owned();
+        ((**env).ReleaseStringUTFChars.unwrap())(env, text.obj, chars);
+        let values: Vec<f32> = read.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+        <[f32; 6]>::try_from(values).ok()
+    }
+}
+
 /// The system's density (screen px per dp, Razdor's phone layout reads it once: `display`).
 pub fn read_density() -> f32 {
     // SAFETY: the activity exists once the window is open (the UI runs after it).
