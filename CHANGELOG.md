@@ -14,6 +14,21 @@
 
 ## 1.0.5 — 2026-10-26
 
+Коммит `7b24d33e` (тег `v1.0.5`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+522f5af9be71066302ba64d2a1917fb2b05409ca148e328c6adbd04f05c9053c  razdor
+a5534ed1826681302be7d14c6a760502a742fae81bf45401709f73e3baf2f84f  Razdor.exe
+6f908cd91b02de29a3f1cc8b8318d6de8786f53fb4326eefefbd606f816af262  razdor-macos
+ddb55439a61e411d28d5afe06ae6bf779ddcea8364ee252d31d7fdb736a872f1  razdor-translate
+375ecdc046dbba22e07ffd280086e382bf3ecd409682920fc5926532d8299164  Razdor-translate.exe
+a86bd4086cd2c5ae180161845d5aba8ea0591a33c24eb2be9352f4c46a41887f  razdor-translate-macos
+086d7f1a42846b9b25b970ae5c600c085823d05a7e56f2ceff6df12b032ad3a6  razdor.apk
+f8ace18ab558b2d64832108af1775cd851c2a586c041c0ee38704608075e0811  razdor.ipa
+```
+
 ### Добавлено
 - Телефон в вертикальном положении: кнопки главного меню в 1,6 раза крупнее, ссылки внизу (редактор карт, свой бой, Discord, язык) — крупными кнопками.
 - Эксперимент: кнопка «Клавиши» есть и в окне выхода из битвы на телефоне — список кнопок открывается прямо в бою.
