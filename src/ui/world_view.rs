@@ -3404,7 +3404,6 @@ mod tests {
         assert_eq!(rgb(tip_color(TipStyle::Normal, Ink::Note)), [255, 175, 85]);
     }
 
-    /// An army's leader is named only when it has more than one unit (0x4ca9f0).
     /// The original fills `#HERONAME` in a building's and an army's description at map load
     /// (0x4b2930, 0x4b2a46): the tooltips show the hero's name, never the escape.
     #[test]
@@ -3424,6 +3423,7 @@ mod tests {
         assert!(!t.text.iter().any(|(s, _)| s.contains("#HERONAME")));
     }
 
+    /// An army's leader is named only when it has more than one unit (0x4ca9f0).
     #[test]
     fn a_lone_unit_s_tooltip_names_no_leader() {
         assert!(!tip_shows_leader("Бран", 1));
