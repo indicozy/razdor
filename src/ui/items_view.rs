@@ -704,6 +704,7 @@ pub fn squad(
     let win = window_layout::window();
     let title = chrome::ui_text("Army", "Title").filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr("The hero's characteristics and army").to_string());
     let (_, close) = chrome::window(win, &title, chrome::Skin::Marble, true);
+    let close = close_button(win) || close;
     window_layout::panel_frame(window_layout::upper(win));
     window_layout::panel_frame(window_layout::lower(win));
     let at = |x: f32, y: f32, w: f32, h: f32| window_layout::at(win, x, y, w, h);
@@ -765,11 +766,10 @@ pub fn squad(
         hero,
         status,
     };
-    let sheet_rect = window_layout::left(win);
     // A living unit's first `personal` worn slots are his own: not taken up (0x4c24f4), and
     // hovering one says so (0x4c280c, `[Army] ItemI`).
     let locked = |slot: usize| showing_type || (u.alive() && slot < u.personal as usize);
-    let pressed_slot = super::dt_font::with_native_metrics(|| unit_sheet::draw(assets, &c, sheet_rect, &sheet, panel_slots(showing_type), &mut hover));
+    let pressed_slot = super::dt_font::with_native_metrics(|| draw_sheet(assets, &c, win, &sheet, panel_slots(showing_type), &mut hover));
     let personal_hover = hover.is_some_and(|h| u.items.iter().enumerate().any(|(s, i)| *i == Some(h) && locked(s)));
     if let Some(slot) = pressed_slot.filter(|_| !showing_type) {
         *message = worn_press(game, sel, slot);
@@ -1139,6 +1139,26 @@ pub(super) fn class_wage(c: &Content, id: UnitId) -> i32 {
 /// A promotion portrait hovered (0x4c39d8) paints its type as a template (492f24 with the
 /// fourth argument set), and a template skips the slot loop altogether, so no slot, empty
 /// or filled, is drawn on the previewed type's card.
+/// The stacked army and hero windows' «Закрыть» under the formation, in thumb reach: the same
+/// close as the title's cross (`true` when pressed). Landscape has none.
+fn close_button(win: Rect) -> bool {
+    if !window_layout::portrait() {
+        return false;
+    }
+    let r = window_layout::army_close(win);
+    super::widgets::button(r.x, r.y, r.w, r.h, tr("Close"), true)
+}
+
+/// The unit's panel of the army and hero windows: the landscape column on the left, or stacked
+/// (a phone held upright) the band under the title, its picture left and its stats right.
+fn draw_sheet(assets: &Assets, c: &razdor::rules::content::Content, win: Rect, sheet: &unit_sheet::Sheet, slots: bool, hover: &mut Option<razdor::rules::content::ItemId>) -> Option<usize> {
+    if window_layout::portrait() {
+        unit_sheet::draw_band(assets, c, window_layout::army_band(win), sheet, slots, hover)
+    } else {
+        unit_sheet::draw(assets, c, window_layout::left(win), sheet, slots, hover)
+    }
+}
+
 fn panel_slots(showing_type: bool) -> bool {
     !showing_type
 }
@@ -1374,6 +1394,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     let win = window_layout::window();
     let title = own("Title", n_("The hero's characteristics and inventory"));
     let (_, close) = chrome::window(win, &title, chrome::Skin::Marble, true);
+    let close = close_button(win) || close;
     // The original's right side, window-relative.
     let s = HERO_S * k;
     // Its origin is the right side's (248, 28) as the window places it (below the left column when stacked).
@@ -1406,10 +1427,9 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
         hero,
         status: potion_status(&c, &u),
     };
-    let sheet_rect = window_layout::left(win);
     // A press on a worn slot picks its item up or puts the held one on (0x4c24f4; the hero
     // window shows the hero's slots: 0x4b8d28 selects him as it opens).
-    if let Some(slot) = unit_sheet::draw(assets, &c, sheet_rect, &sheet, true, &mut hover) {
+    if let Some(slot) = draw_sheet(assets, &c, win, &sheet, true, &mut hover) {
         *message = worn_press(game, 0, slot);
     }
     // Stacked (a phone held upright) the seam is drawn across the window (`window_layout::seam`).

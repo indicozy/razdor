@@ -158,11 +158,16 @@ placed from `chrome::canvas_top()`: the logo and the menu (`main_menu`), the sce
 and custom battle windows. The map and building windows are already centred over the view above the bottom
 bar (`window_layout::window`, `main_menu::map_window`, the saves and dialogs), so they are not moved again.
 Stacked windows (experiment, main only): a phone held upright (`window_layout::portrait`: `dp_px` set and the
-screen taller than wide) stacks the building, army and hero windows. The left column is centred on top, the
-right side moves below it (`window_layout::place`, one shift used by `at`, `point` and the panel helpers), and
-the seam is a 2 px line across (`window_layout::frame`, `window_layout::seam`). These windows are drawn inside
+screen taller than wide) stacks the building, army and hero windows, each with its own layout
+(`window_layout::Stack`, passed to `window_layout::scaled`). Building: the two panes on top at full width, the
+lower pane fills down to a row of the building's tabs (`window_layout::building_tabs`) with Выход centred under
+it (`building_exit`); the quest header row sits at the lower pane's bottom, above the tabs. Army and hero: the
+unit's band under the title (`window_layout::army_band`, `unit_sheet::draw_band`: picture left, stats right),
+the right side (pack, formation) under it, and a «Закрыть» button under the formation (`army_close`). The
+right side moves by the layout's shift (`window_layout::place`, used by `at`, `point` and the panel helpers),
+and the army seam is a 2 px line under the band (`window_layout::frame`, `window_layout::seam`). These windows are drawn inside
 `window_layout::scaled` (`display::with_window_scale`), so `chrome::k()` is the stacked window's own scale
-(`portrait_k`: the largest that fits the width and the height above the bar); the map and bar under them are
+(`portrait_k_for`: the largest that fits the width and the height above the bar); the map and bar under them are
 drawn at the interface scale (`world_view::window_backdrop`). Landscape and desktop are unchanged; the
 spellbook keeps its landscape window (`window_layout::landscape_window`).
 The title background is covered, not stretched, on a portrait screen whose aspect is more than 20% off the

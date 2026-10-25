@@ -14,6 +14,7 @@ use razdor::rules::units::Stats;
 
 use super::assets::Assets;
 use super::chrome::{self, k, BLUE_TEXT, CREAM, ORANGE_TEXT, RED_TEXT};
+use super::window_layout;
 use super::widgets::{measure, measure_exact, mouse_in};
 
 local! {
@@ -751,6 +752,8 @@ pub fn slot_rects_at(r: Rect, px: f32) -> [Rect; MAX_SLOTS] {
 /// Razdor's army and battle windows are the original's at 15/16: the panel's 262×609 px
 /// fill (0x492f24: X0+2..X0+0x108, Y0+0x1d..Y0+0x27e) is 244×570 here.
 const FIGURE_SCALE: f32 = 0.9375;
+/// The column's height in design px (its 571 under the title, the stacked band's scale).
+const COLUMN_H: f32 = 571.0;
 /// The height of the original's figure box under the panel's top, in its pixels (0x1b4).
 const FIGURE_BOX: f32 = 436.0;
 
@@ -778,6 +781,147 @@ fn silhouette(r: Rect) {
     draw_triangle(a, cc, d, c);
     draw_triangle(a, vec2(cx - h * 0.2, top + h * 0.5), vec2(cx - h * 0.1, top + h * 0.3), c);
     draw_triangle(b, vec2(cx + h * 0.2, top + h * 0.5), vec2(cx + h * 0.1, top + h * 0.3), c);
+}
+
+/// The worn-item slots (`rects`, one per slot of the unit's content): an item is its picture alone
+/// on the parchment, an empty slot the original's empty-slot picture (0xae2860, built at start-up: a
+/// steel ring over a 40% black square, `chrome::empty_item_slot`), set by 0x492f24 only for an empty
+/// slot. Returns the slot pressed; the item under the mouse goes to `hover`.
+fn worn_slots(assets: &Assets, content: &Content, rects: [Rect; MAX_SLOTS], s: &Sheet, slots: bool, hover: &mut Option<ItemId>) -> Option<usize> {
+    let mut clicked = None;
+    for (i, sr) in rects.iter().take(slot_count(content)).enumerate() {
+        let item = s.items[i];
+        if !slots && item.is_none() {
+            continue;
+        }
+        match item {
+            Some(it) => assets.draw_item(it, sr.x, sr.y, sr.w),
+            None => chrome::empty_item_slot(*sr),
+        }
+        if mouse_in(sr.x, sr.y, sr.w, sr.h) {
+            if item.is_some() {
+                *hover = item;
+            }
+            if super::widgets::clicked() {
+                clicked = Some(i);
+            }
+        }
+    }
+    clicked
+}
+
+/// The level and experience line at `level_y`, then the stat lines and the status lines, a row
+/// every 14 px from `stat_y` down (the column and the band share it). Returns the y under the last
+/// row.
+#[allow(clippy::too_many_arguments)]
+fn stat_block(s: &Sheet, stats: Vec<Line>, x0: f32, x1: f32, level_y: f32, stat_y: f32, size: f32, bold: f32, px: f32) -> f32 {
+    use super::dt_font::Face;
+    let k = k();
+    let line = |top: f32| top + cell_baseline(size);
+    shadow_text(&razdor::trf!("Level {level}", level = s.level), x0, line(level_y), size, CREAM);
+    shadow_right(&razdor::trf!("XP {xp} / {need}", xp = s.xp, need = s.need), x1, line(level_y), size, CREAM);
+    let mut y = stat_y;
+    for (label, value, color) in stats {
+        // The daily wage's label and value are in the bold orange SanSerif over its shadow
+        // (0x4924c9: ae24f4, shadow ae2510).
+        let wage = color == ORANGE_TEXT;
+        let (face, fs) = if wage { (Face::Bold, bold) } else { (Face::Body, size) };
+        super::dt_font::with_face(face, || {
+            let room = x1 - x0 - measure(&value, fs).width - 6.0 * k;
+            let label_size = super::widgets::fit_size(&label, room, fs);
+            let label = super::widgets::ellipsize(&label, room, label_size);
+            shadow_text(&label, x0, y + cell_baseline(label_size), label_size, color);
+            shadow_right(&value, x1, y + cell_baseline(fs), fs, color);
+        });
+        y += 14.0 * px;
+    }
+    for (status, color) in &s.status {
+        let fitted = super::widgets::fit_size(status, x1 - x0, size);
+        let status = super::widgets::ellipsize(status, x1 - x0, fitted);
+        shadow_text(&status, x0, y + cell_baseline(fitted), fitted, *color);
+        y += 14.0 * px;
+    }
+    y
+}
+
+/// The band (the army and hero windows stacked) and a pane's card (the hire tab's unit over the
+/// upper pane): the unit's picture on the band's left half with its worn items, and on its right
+/// half the name, the level, the stats and the traits, top down. The picture is the column's
+/// figure fitted to the band's height, the text at the band's scale (1.2 times the column's on
+/// the army band).
+pub fn draw_band(assets: &Assets, content: &Content, band: Rect, s: &Sheet, slots: bool, hover: &mut Option<ItemId>) -> Option<usize> {
+    super::typography::Role::Body.with(|| draw_band_in_face(assets, content, band, s, slots, hover))
+}
+
+fn draw_band_in_face(assets: &Assets, content: &Content, band: Rect, s: &Sheet, slots: bool, hover: &mut Option<ItemId>) -> Option<usize> {
+    use super::dt_font::{sheet_size, whole_scale, Face};
+    let k = k();
+    chrome::unit_parchment(band);
+    let (pic, txt) = window_layout::band_halves(band);
+    // Screen px per design px of the figure and of the worn-item slots.
+    let fig = FIGURE_SCALE * band.h / COLUMN_H;
+    match assets.figure(s.kind) {
+        Some(t) => chrome::tex(&t, figure_rect(pic, t.width(), t.height(), fig / FIGURE_SCALE), WHITE),
+        None => silhouette(figure_rect(pic, 0.6 * pic.w / fig, 0.95 * FIGURE_BOX, fig / FIGURE_SCALE)),
+    }
+    let clicked = worn_slots(assets, content, slot_rects_at(pic, fig), s, slots, hover);
+    // The original's px on the text half (the column's px is its width over the same 262).
+    let px = txt.w / PANEL_W;
+    let size = sheet_size(Face::Body, whole_scale(px));
+    let bold = sheet_size(Face::Bold, whole_scale(px));
+    let name_size = sheet_size(Face::Subtitle, whole_scale(px));
+    // The text half is the column's dark brown text ground (multiplied parchment).
+    chrome::multiply(|| draw_rectangle(txt.x, txt.y, txt.w, txt.h, Color::new(0.5, 0.35, 0.0, 1.0)));
+    let name_ink = if s.named { NAMED_INK } else { CREAM };
+    let name_top = txt.y + 12.0 * px;
+    super::typography::Role::Name.with(|| {
+        let name = super::widgets::ellipsize(s.name, txt.w - 16.0 * k, name_size);
+        shadow_centered(&name, txt.x + txt.w / 2.0, name_top + cell_baseline(name_size), name_size, name_ink);
+    });
+    let (x0, x1) = (txt.x + 28.0 * px, txt.x + 234.0 * px);
+    let level_y = name_top + 21.0 * px;
+    let end = stat_block(s, stat_lines(content, s), x0, x1, level_y, level_y + 13.0 * px, size, bold, px);
+    // The description, then the traits, a row every 14 px under the stats. The description goes
+    // when the whole list does not fit the band's text half; the rest is cut at its bottom with "…".
+    let traits = traits_of(s);
+    let desc = s.hero.is_none().then(|| content.unit(s.kind).description.as_str());
+    let width = |c: char| measure(c.encode_utf8(&mut [0; 4]), size).width;
+    let room = 238.0 * px;
+    let desc_rows = list_rows(desc, &[], room, width);
+    let trait_rows = list_rows(None, &traits, room, width);
+    let (row_h, list_top) = (14.0 * px, end + 8.0 * px);
+    let avail = ((txt.bottom() - list_top) / row_h).floor().max(0.0) as usize;
+    let both = !desc_rows.is_empty() && !trait_rows.is_empty();
+    let all = desc_rows.len() + usize::from(both) + trait_rows.len();
+    let mut rows: Vec<ListRow> = if all <= avail {
+        let mut rows = desc_rows;
+        if both {
+            rows.push(ListRow { text: String::new(), ink: CREAM, icon: None });
+        }
+        rows.extend(trait_rows);
+        rows
+    } else {
+        trait_rows
+    };
+    if rows.len() > avail {
+        rows.truncate(avail);
+        if let Some(last) = rows.last_mut() {
+            last.text = format!("{}…", last.text.trim_end());
+        }
+    }
+    let _clip = super::widgets::Clip::new(txt);
+    let line = |top: f32| top + cell_baseline(size);
+    for (i, row) in rows.iter().enumerate() {
+        if let Some(art) = &row.icon {
+            chrome::trait_icon(art, txt.x + 16.0 * px, list_top + i as f32 * row_h - 11.0 * px, 25.0 * px);
+        }
+    }
+    for (i, row) in rows.iter().enumerate() {
+        if !row.text.trim().is_empty() {
+            shadow_text(&row.text, txt.x + 12.0 * px, line(list_top + i as f32 * row_h), size, row.ink);
+        }
+    }
+    clicked
 }
 
 /// Draws the panel in `r`. `slots` shows the four item slots (empty ones too) and returns
@@ -856,28 +1000,7 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, background: Rect, s
         draw_rectangle(r.x, name_top, r.w, background.bottom() - name_top, Color::new(0.5, 0.35, 0.0, 1.0));
     });
     // Items worn.
-    let mut clicked = None;
-    for (i, sr) in slot_rects(r).iter().take(slot_count(content)).enumerate() {
-        let item = s.items[i];
-        if !slots && item.is_none() {
-            continue;
-        }
-        // A worn item is its picture alone on the parchment; an empty slot is the original's
-        // empty-slot picture (0xae2860, built at start-up: a steel ring over a 40% black
-        // square, `chrome::empty_item_slot`), set by 0x492f24 only for an empty slot.
-        match item {
-            Some(it) => assets.draw_item(it, sr.x, sr.y, sr.w),
-            None => chrome::empty_item_slot(*sr),
-        }
-        if mouse_in(sr.x, sr.y, sr.w, sr.h) {
-            if item.is_some() {
-                *hover = item;
-            }
-            if super::widgets::clicked() {
-                clicked = Some(i);
-            }
-        }
-    }
+    let clicked = worn_slots(assets, content, slot_rects(r), s, slots, hover);
     // The name in Benguiat over its shadow, centred (the name list 0x667e64, align 2).
     let name_ink = if s.named { NAMED_INK } else { CREAM };
     super::typography::Role::Name.with(|| {
@@ -888,29 +1011,7 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, background: Rect, s
     // (0x492f24, the label list 0x667cb4 at X0+0x1e, the value list 0xa6 on and 0x28 wide).
     let (x0, x1) = (r.x + 28.0 * px, r.x + 234.0 * px);
     let line = |top: f32| top + cell_baseline(size);
-    shadow_text(&razdor::trf!("Level {level}", level = s.level), x0, line(stat_top - 13.0 * px), size, CREAM);
-    shadow_right(&razdor::trf!("XP {xp} / {need}", xp = s.xp, need = s.need), x1, line(stat_top - 13.0 * px), size, CREAM);
-    let mut y = stat_top;
-    for (label, value, color) in stats {
-        // The daily wage's label and value are in the bold orange SanSerif over its shadow
-        // (0x4924c9: ae24f4, shadow ae2510).
-        let wage = color == ORANGE_TEXT;
-        let (face, fs) = if wage { (Face::Bold, bold) } else { (Face::Body, size) };
-        super::dt_font::with_face(face, || {
-            let room = x1 - x0 - measure(&value, fs).width - 6.0 * k;
-            let label_size = super::widgets::fit_size(&label, room, fs);
-            let label = super::widgets::ellipsize(&label, room, label_size);
-            shadow_text(&label, x0, y + cell_baseline(label_size), label_size, color);
-            shadow_right(&value, x1, y + cell_baseline(fs), fs, color);
-        });
-        y += 14.0 * px;
-    }
-    for (status, color) in &s.status {
-        let fitted = super::widgets::fit_size(status, x1 - x0, size);
-        let status = super::widgets::ellipsize(status, x1 - x0, fitted);
-        shadow_text(&status, x0, y + cell_baseline(fitted), fitted, *color);
-        y += 14.0 * px;
-    }
+    stat_block(s, stats, x0, x1, stat_top - 13.0 * px, stat_top, size, bold, px);
     // The description list from 12 px in, a row every 14 px; a trait's icon 16 px in and
     // 11 px over its first row (0x48e8f0), drawn under the text.
     let list_x = r.x + 12.0 * px;

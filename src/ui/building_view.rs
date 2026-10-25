@@ -430,7 +430,18 @@ fn hall_offers_in_face(game: &mut Game, f: &Frame, view: &mut BuildingView, mess
 
     view.hall_pick = view.hall_pick.filter(|&n| n < entries.len());
     chrome::divider(strip);
-    let (quest_border, take) = window_layout::quest_rects(panel);
+    // Stacked, the header row («Предлагаемые задания и слухи», «Взять задание») sits at the
+    // pane's bottom, right above the tabs (thumb reach); the list fills the pane above it.
+    let stacked = window_layout::portrait();
+    let natural = window_layout::quest_panel(panel);
+    let head_panel = if stacked {
+        // Its header row (the first fifth of the natural panel) ends at the pane's bottom.
+        let header_h = window_layout::quest_rects(natural).0.h;
+        Rect::new(panel.x, panel.bottom() - header_h, panel.w, natural.h)
+    } else {
+        natural
+    };
+    let (quest_border, take) = window_layout::quest_rects(head_panel);
     let title = tr("Quests and rumours:");
     if let Some(t) = chrome::quest_border_texture() {
         chrome::tex(&t, quest_border, WHITE);
@@ -445,8 +456,12 @@ fn hall_offers_in_face(game: &mut Game, f: &Frame, view: &mut BuildingView, mess
     // The list fills the rest of the lower panel, its entries from the top, a picked one lit
     // across the whole row (0x4bedec); the building's description is not shown under it.
     let row_h = 20.0 * k;
-    let list_y = (quest_border.y + quest_border.h).max(take.y + take.h) + 5.0*k;
-    let list = Rect::new(panel.x, list_y, panel.w, (panel.y + panel.h - list_y).max(row_h + 8.0 * k));
+    let list = if stacked {
+        Rect::new(panel.x, panel.y, panel.w, (head_panel.y - 5.0 * k - panel.y).max(row_h + 8.0 * k))
+    } else {
+        let list_y = (quest_border.y + quest_border.h).max(take.y + take.h) + 5.0*k;
+        Rect::new(panel.x, list_y, panel.w, (panel.y + panel.h - list_y).max(row_h + 8.0 * k))
+    };
     let rows = (((list.h - 8.0 * k) / row_h).floor() as usize).max(1);
     let max_scroll = entries.len().saturating_sub(rows);
     swipe_rows(list, row_h);
@@ -510,7 +525,14 @@ fn hall_offers_in_face(game: &mut Game, f: &Frame, view: &mut BuildingView, mess
             }
         }
     }
-    quest_section_frame(panel, list);
+    if stacked {
+        // The header is under the list: one frame around both, a matching line above the header.
+        chrome::silver_frame(panel, k.max(1.0));
+        let y = list.y + list.h;
+        chrome::silver_line(vec2(panel.x + 1.0, y), vec2(panel.right() - 1.0, y), k.max(1.0));
+    } else {
+        quest_section_frame(panel, list);
+    }
     next
 }
 
@@ -664,7 +686,18 @@ fn recruit_panel(game: &Game, assets: &Assets, f: &Frame, kind: UnitId) {
         status: Vec::new(),
     };
     let mut hover = None;
-    unit_sheet::draw(assets, c, window_layout::left(Rect::new(f.x, f.y, f.w, f.h)), &sheet, false, &mut hover);
+    draw_card(assets, c, f, &sheet, &mut hover);
+}
+
+/// A unit's card over the tabs' place: the landscape tabs column, or stacked the upper pane (the
+/// picture and text in its 586 × 271; the tabs and Exit stay tappable under it).
+fn draw_card(assets: &Assets, c: &razdor::rules::content::Content, f: &Frame, sheet: &unit_sheet::Sheet, hover: &mut Option<razdor::rules::content::ItemId>) {
+    let win = Rect::new(f.x, f.y, f.w, f.h);
+    if window_layout::portrait() {
+        unit_sheet::draw_band(assets, c, window_layout::upper(win), sheet, false, hover);
+    } else {
+        unit_sheet::draw(assets, c, window_layout::left(win), sheet, false, hover);
+    }
 }
 
 /// The card of a unit of the hero's army or of the garrison (`guard`), index `i`.
@@ -705,7 +738,7 @@ fn unit_panel(game: &Game, assets: &Assets, f: &Frame, (guard, i): (bool, usize)
         status: super::items_view::potion_status(c, unit),
     };
     let mut hover = None;
-    unit_sheet::draw(assets, c, window_layout::left(Rect::new(f.x, f.y, f.w, f.h)), &sheet, false, &mut hover);
+    draw_card(assets, c, f, &sheet, &mut hover);
 }
 
 /// The left edge of recruit card `i` of `n` (window pixels): the cards and the `n + 1` gaps
@@ -2316,17 +2349,29 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut BuildingView, message:
     let (_, close) = chrome::window_with_title_color(Rect::new(f.x, f.y, f.w, f.h), &title(game), chrome::Skin::Marble, true, BUILDING_AND_ITEM_NAME);
     window_layout::panel_frame(card_panel_lower(&f));
 
-    // Tabs, on light parchment.
-    let col = window_layout::left(Rect::new(f.x, f.y, f.w, f.h));
-    chrome::paper_panel(col);
-    chrome::silver_frame(col, k.max(1.0));
-    let (tw, th) = ((col.w - 12.0 * k).min(232.0 * k), 88.0 * k);
-    let tx = col.x + (col.w - tw) / 2.0;
-    let pitch = (th + 6.0 * k).min((col.h - th - 20.0 * k) / tabs.len().max(1) as f32);
-    // A tab's place under the pointer brings the tabs back over the hire tab's card
-    // (0x4bb6c8 → 0x4bc98c), the Exit's too.
-    let exit_r = Rect::new(tx, col.y + col.h - th - 5.0 * k, tw, th);
-    let tab_rects: Vec<Rect> = (0..tabs.len()).map(|i| Rect::new(tx, col.y + 5.0 * k + i as f32 * pitch, tw, th)).chain([exit_r]).collect();
+    // The tabs, then Exit last. Landscape: a column of tabs on light parchment. Stacked: a row
+    // across the window's bottom, Exit centred under it.
+    let win = Rect::new(f.x, f.y, f.w, f.h);
+    let tab_rects: Vec<Rect> = if window_layout::portrait() {
+        let exit = window_layout::building_exit(win);
+        let top = window_layout::building_tabs(win, tabs.len()).first().map_or(exit.y, |r| r.y);
+        // The same light parchment the landscape column has behind its tabs.
+        let row = Rect::new(win.x + 2.0 * k, top - 4.0 * k, win.w - 4.0 * k, exit.bottom() + 4.0 * k - top);
+        chrome::paper_panel(row);
+        window_layout::building_tabs(win, tabs.len()).into_iter().chain([exit]).collect()
+    } else {
+        let col = window_layout::left(win);
+        chrome::paper_panel(col);
+        chrome::silver_frame(col, k.max(1.0));
+        let (tw, th) = ((col.w - 12.0 * k).min(232.0 * k), 88.0 * k);
+        let tx = col.x + (col.w - tw) / 2.0;
+        let pitch = (th + 6.0 * k).min((col.h - th - 20.0 * k) / tabs.len().max(1) as f32);
+        // A tab's place under the pointer brings the tabs back over the hire tab's card
+        // (0x4bb6c8 → 0x4bc98c), the Exit's too.
+        let exit_r = Rect::new(tx, col.y + col.h - th - 5.0 * k, tw, th);
+        (0..tabs.len()).map(|i| Rect::new(tx, col.y + 5.0 * k + i as f32 * pitch, tw, th)).chain([exit_r]).collect()
+    };
+    let exit_r = tab_rects[tabs.len()];
     if tab_rects.iter().any(|r| mouse_in(r.x, r.y, r.w, r.h)) {
         view.hire_panel = hire_panel_on(view.hire_panel, Some(Entered::Tab), None);
     }
