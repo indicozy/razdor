@@ -2,9 +2,10 @@
 """MCP server for Razdor's player reports on Discord.
 
 Speaks MCP (JSON-RPC 2.0, one message per line) on stdin/stdout, standard library only.
-It reads one channel or thread with a bot token. Every Discord call is a GET except one:
-`reports_post`, which writes a message to that same channel only when DISCORD_ALLOW_POST=1
-and the call passes confirm=true (without it, it returns a preview). Its mentions are limited
+It reads one channel or thread with a bot token. Every Discord call is a GET except the writes
+of `reports_post`: a POST for its message (with up to 10 attached images) and a PUT per reaction
+(up to 5). They go to that same channel only when DISCORD_ALLOW_POST=1 and the call passes
+confirm=true (without it, it returns a preview). Its mentions are limited
 to users recorded as reporters; @everyone, @here and roles never ping. Locally it writes
 downloaded attachments and a state file: the cursor and which Discord users reported which
 GitHub issue (kept off GitHub, so issues carry no Discord ids).
@@ -20,11 +21,15 @@ Settings come from the environment or from the repo's `.env` (KEY=VALUE, quotes 
 
 Attachments are untrusted files from strangers: each message gets its own folder, names are
 reduced to safe characters, and nothing downloaded is ever opened or run by this server.
+
+Offline checks (multipart body, file and reaction limits, the 204 path) run with
+`python3 -I tools/discord-mcp/server.py --selftest`; they never call Discord.
 """
 
 import json
 import os
 import re
+import secrets
 import sys
 import time
 import urllib.error
@@ -35,6 +40,13 @@ from pathlib import Path
 API = "https://discord.com/api/v10"
 SERVER = {"name": "razdor-discord-reports", "version": "0.1.0"}
 MAX_ATTACHMENT = 100 * 1024 * 1024  # bytes; larger files are listed, not fetched
+MAX_UPLOAD = 10 * 1024 * 1024  # bytes per image reports_post attaches
+MAX_UPLOAD_TOTAL = 25 * 1024 * 1024  # bytes for all images of one message
+MAX_FILES = 10
+MAX_REACTIONS = 5
+REACTION_PAUSE = 0.3  # seconds between reaction calls (rate limits)
+IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+               ".webp": "image/webp", ".gif": "image/gif"}
 REPO = Path(__file__).resolve().parents[2]
 
 
@@ -74,7 +86,8 @@ def channel_id():
     raise Fail("DISCORD_REPORTS_CHANNEL is not set (an id or a discord.com/channels/... link)")
 
 
-def get(path, params=None, body=None):
+def request(method, path, data=None, ctype=None, params=None):
+    """One Discord call: retries 429 (honouring retry_after), returns the JSON body or None for an empty reply (204)."""
     token = ENV.get("DISCORD_BOT_TOKEN")
     if not token:
         raise Fail("DISCORD_BOT_TOKEN is not set")
@@ -83,15 +96,14 @@ def get(path, params=None, body=None):
         "Authorization": "Bot " + token,
         "User-Agent": "DiscordBot (https://github.com/indicozy/razdor, 0.1) razdor-reports",
     }
-    data = None
-    if body is not None:
-        data = json.dumps(body).encode()
-        headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(url, data=data, headers=headers, method="POST" if body is not None else "GET")
+    if ctype:
+        headers["Content-Type"] = ctype
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
     for _ in range(3):
         try:
             with urllib.request.urlopen(req, timeout=30) as r:
-                return json.load(r)
+                raw = r.read()
+                return json.loads(raw) if raw else None
         except urllib.error.HTTPError as e:
             if e.code == 429:
                 try:
@@ -102,10 +114,23 @@ def get(path, params=None, body=None):
                 continue
             hint = {401: "bad token", 403: "the bot can't see this channel (permissions, or the "
                     "Message Content intent is off)", 404: "no such channel or message"}.get(e.code, "")
-            raise Fail(f"Discord answered {e.code} for {path} {hint}".strip())
+            try:
+                detail = json.load(e).get("message", "")
+            except Exception:
+                detail = ""
+            msg = f"Discord answered {e.code} for {method} {path}"
+            msg += f" ({hint})" if hint else ""
+            msg += f": {detail}" if detail else ""
+            raise Fail(msg)
         except urllib.error.URLError as e:
             raise Fail(f"network error: {e.reason}")
     raise Fail("Discord kept rate-limiting; try again later")
+
+
+def get(path, params=None, body=None):
+    if body is None:
+        return request("GET", path, params=params)
+    return request("POST", path, data=json.dumps(body).encode(), ctype="application/json", params=params)
 
 
 _guild = {}
@@ -291,18 +316,92 @@ def chunks(text, size=1900):
     return parts
 
 
-def post(text, reply_to=None, confirm=False):
+def check_files(paths):
+    """Validate the local images for reports_post; returns their Paths (nothing is read yet)."""
+    if paths is None:
+        return []
+    if not isinstance(paths, list):
+        raise Fail("files must be an array of local file paths")
+    if len(paths) > MAX_FILES:
+        raise Fail(f"at most {MAX_FILES} files per message")
+    out, total = [], 0
+    for raw in paths:
+        if not isinstance(raw, str) or not raw.strip():
+            raise Fail("each file must be a non-empty path")
+        path = Path(raw.strip()).expanduser()
+        if path.suffix.lower() not in IMAGE_TYPES:
+            raise Fail(f"{path.name}: only .png, .jpg, .jpeg, .webp or .gif can be attached")
+        if not path.is_file():
+            raise Fail(f"{path.name}: no such file")
+        size = path.stat().st_size
+        if size > MAX_UPLOAD:
+            raise Fail(f"{path.name}: {size} bytes; the limit is 10 MB per file")
+        total += size
+        out.append(path)
+    if total > MAX_UPLOAD_TOTAL:
+        raise Fail("the files add up to more than 25 MB")
+    return out
+
+
+def check_reactions(emojis):
+    if emojis is None:
+        return []
+    if not isinstance(emojis, list):
+        raise Fail("reactions must be an array of emoji strings")
+    if len(emojis) > MAX_REACTIONS:
+        raise Fail(f"at most {MAX_REACTIONS} reactions per message")
+    out = []
+    for e in emojis:
+        if not isinstance(e, str) or not e.strip():
+            raise Fail("each reaction must be a non-empty emoji string")
+        out.append(e.strip())
+    return out
+
+
+def multipart(payload, files):
+    """multipart/form-data body: payload_json plus files[i] parts. files = [(name, bytes, content_type)]."""
+    boundary = "razdor" + secrets.token_hex(16)
+    out = [f'--{boundary}\r\nContent-Disposition: form-data; name="payload_json"\r\n'
+           "Content-Type: application/json\r\n\r\n".encode(),
+           json.dumps(payload, ensure_ascii=False).encode("utf-8"), b"\r\n"]
+    for i, (name, data, ctype) in enumerate(files):
+        safe = re.sub(r"[\x00-\x1f]", "_", name).replace("\\", "\\\\").replace('"', '\\"')
+        out.append(f'--{boundary}\r\nContent-Disposition: form-data; name="files[{i}]"; filename="{safe}"\r\n'
+                   f"Content-Type: {ctype}\r\n\r\n".encode("utf-8"))
+        out += [data, b"\r\n"]
+    out.append(f"--{boundary}--\r\n".encode())
+    return b"".join(out), f"multipart/form-data; boundary={boundary}"
+
+
+def send_with_files(cid, body, paths):
+    """Post one message carrying the images (their bytes are read here, after all checks)."""
+    blobs = []
+    for p in paths:
+        data = p.read_bytes()
+        if len(data) > MAX_UPLOAD:
+            raise Fail(f"{p.name}: changed while sending; it is over 10 MB now")
+        blobs.append((p.name, data, IMAGE_TYPES[p.suffix.lower()]))
+    payload = {**body, "attachments": [{"id": i, "filename": p.name} for i, p in enumerate(paths)]}
+    data, ctype = multipart(payload, blobs)
+    return request("POST", f"/channels/{cid}/messages", data=data, ctype=ctype)
+
+
+def post(text, reply_to=None, confirm=False, files=None, reactions=None):
     cid = channel_id()
     text = (text or "").strip()
     if not text:
         raise Fail("empty message")
+    paths = check_files(files)
+    emojis = check_reactions(reactions)
     known = {u for ids in read_state().get("reporters", {}).values() for u in ids}
     mentioned = re.findall(r"<@!?(\d+)>", text)
     pinged = sorted({u for u in mentioned if u in known})
     unknown = sorted({u for u in mentioned if u not in known})
     parts = chunks(text)
     preview = {"channel": cid, "parts": parts, "pings": pinged,
-               "not_pinged": unknown, "reply_to": reply_to}
+               "not_pinged": unknown, "reply_to": reply_to,
+               "files": [{"name": p.name, "size": p.stat().st_size} for p in paths],
+               "reactions": emojis}
     if not confirm:
         preview["note"] = "Preview only. Show it to the owner; call again with confirm=true after they approve."
         return preview
@@ -315,9 +414,23 @@ def post(text, reply_to=None, confirm=False):
         body = {"content": part, "allowed_mentions": {"parse": [], "users": pinged[:100]}}
         if i == 0 and reply_to:
             body["message_reference"] = {"message_id": str(reply_to), "fail_if_not_exists": False}
-        m = get(f"/channels/{cid}/messages", body=body)
+        if paths and i == len(parts) - 1:  # the images go on the last part's message
+            m = send_with_files(cid, body, paths)
+        else:
+            m = get(f"/channels/{cid}/messages", body=body)
         sent.append({"id": m["id"], "link": f"https://discord.com/channels/{guild_of(cid)}/{cid}/{m['id']}"})
-    return {"sent": sent, "pings": pinged}
+    added = []
+    last = sent[-1]
+    for n, emoji in enumerate(emojis):  # reactions go on the last message
+        if n:
+            time.sleep(REACTION_PAUSE)
+        try:
+            request("PUT", f"/channels/{cid}/messages/{last['id']}/reactions/{urllib.parse.quote(emoji, safe='')}/@me",
+                    data=b"")
+        except Fail as e:
+            raise Fail(f"{e}; the message is posted at {last['link']}, reactions added: {added or 'none'}")
+        added.append(emoji)
+    return {"sent": sent, "pings": pinged, "files": [p.name for p in paths], "reactions": added}
 
 
 def status():
@@ -360,11 +473,16 @@ TOOLS = [
     ("reports_reporters", "The Discord users recorded for these issues, with their <@id> mention text.",
      {"issues": {"type": "array", "items": {"type": "integer"}}},
      lambda a: reporters_of(a["issues"])),
-    ("reports_post", "Post a message to the reports channel (split at 2000 chars). Without confirm=true it only returns "
-     "a preview: show that to the owner first. Pings only recorded reporters; never @everyone/@here/roles. "
-     "Needs DISCORD_ALLOW_POST=1.",
-     {"text": {"type": "string"}, "reply_to": ID, "confirm": {"type": "boolean"}},
-     lambda a: post(a["text"], a.get("reply_to"), bool(a.get("confirm")))),
+    ("reports_post", "Post a message to the reports channel (split at 2000 chars). `files` attaches up to 10 local images "
+     "(.png/.jpg/.jpeg/.webp/.gif, 10 MB each, 25 MB in all) to the last part; `reactions` adds up to 5 emoji to that "
+     "message. Without confirm=true it only returns a preview: show that to the owner first. Pings only recorded "
+     "reporters; never @everyone/@here/roles. Needs DISCORD_ALLOW_POST=1.",
+     {"text": {"type": "string"}, "reply_to": ID, "confirm": {"type": "boolean"},
+      "files": {"type": "array", "items": {"type": "string"},
+                "description": "Local image paths (at most 10)."},
+      "reactions": {"type": "array", "items": {"type": "string"},
+                    "description": "Unicode emoji, e.g. [\"👍\", \"👎\"] (at most 5)."}},
+     lambda a: post(a["text"], a.get("reply_to"), bool(a.get("confirm")), a.get("files"), a.get("reactions"))),
     ("reports_mark_read", "Move the local cursor forward to this message once it is handled. Local only: nothing is written to Discord.",
      {"message_id": ID}, lambda a: mark_read(a["message_id"])),
 ]
@@ -404,7 +522,110 @@ def handle(req):
     raise LookupError(method)
 
 
+def selftest():
+    """Offline checks: no Discord call (urlopen is replaced by a stub for the request path)."""
+    import tempfile
+    import urllib.request as ur
+    from urllib.parse import quote
+
+    def ok(cond, what):
+        if not cond:
+            raise AssertionError(what)
+        print("ok -", what)
+
+    def refused(fn, what):
+        try:
+            fn()
+        except Fail as e:
+            print("ok -", what, f"({e})")
+            return
+        raise AssertionError(what + ": not refused")
+
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24 + b"fake-picture-data"
+    body, ctype = multipart({"content": "hi", "attachments": [{"id": 0, "filename": "a.png"}]},
+                            [("a.png", png, "image/png")])
+    boundary = ctype.split("boundary=")[1]
+    delim = b"--" + boundary.encode()
+    ok(ctype == f"multipart/form-data; boundary={boundary}", "content type carries the boundary")
+    ok(body.startswith(delim + b"\r\n") and body.endswith(delim + b"--\r\n"), "body opens and closes with the boundary")
+    parts = body.split(delim)
+    ok(len(parts) == 4 and parts[0] == b"" and parts[3] == b"--\r\n", "one payload part and one file part")
+    head1, _, rest1 = parts[1].partition(b"\r\n\r\n")
+    ok(b'name="payload_json"' in head1 and b"Content-Type: application/json" in head1, "payload_json part headers")
+    ok(json.loads(rest1.rstrip(b"\r\n"))["content"] == "hi", "payload_json carries the content")
+    head2, _, rest2 = parts[2].partition(b"\r\n\r\n")
+    ok(b'name="files[0]"; filename="a.png"' in head2 and b"Content-Type: image/png" in head2, "file part headers")
+    ok(rest2 == png + b"\r\n", "file bytes arrive intact")
+    ok(quote("👍", safe="") == "%F0%9F%91%8D", "emoji is percent-encoded for the reaction path")
+
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        good = d / "shot.PNG"
+        good.write_bytes(png)
+        txt = d / "note.txt"
+        txt.write_text("x")
+        ok([p.name for p in check_files([str(good)])] == ["shot.PNG"], "upper-case .PNG accepted")
+        refused(lambda: check_files([str(txt)]), "bad extension refused")
+        refused(lambda: check_files([str(good)] * 11), "eleven files refused")
+        refused(lambda: check_files([str(d / "missing.png")]), "missing file refused")
+        big = d / "big.png"
+        big.write_bytes(b"")
+        os.truncate(big, MAX_UPLOAD + 1)
+        refused(lambda: check_files([str(big)]), "file over 10 MB refused")
+        three = []
+        for i in range(3):
+            f = d / f"s{i}.gif"
+            f.write_bytes(b"GIF89a")
+            os.truncate(f, 9 * 1024 * 1024)
+            three.append(str(f))
+        refused(lambda: check_files(three), "27 MB in total refused")
+        refused(lambda: check_reactions(["👍"] * 6), "six reactions refused")
+        refused(lambda: check_reactions([""]), "empty reaction refused")
+        ok(check_reactions(["👍", "👎"]) == ["👍", "👎"], "two reactions accepted")
+
+    # The request path with a stubbed urlopen: a 204 with no body returns None, and the PUT and multipart POST
+    # carry the right method and headers.
+    class Reply:
+        def __init__(self, raw):
+            self.raw = raw
+
+        def read(self):
+            return self.raw
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    seen = []
+
+    def fake_urlopen(req, timeout=None):
+        seen.append(req)
+        return Reply(b"")
+
+    real_urlopen, had = ur.urlopen, "DISCORD_BOT_TOKEN" in ENV
+    old_token = ENV.get("DISCORD_BOT_TOKEN")
+    ur.urlopen = fake_urlopen
+    ENV["DISCORD_BOT_TOKEN"] = "selftest-token"
+    try:
+        out = request("PUT", "/channels/1/messages/2/reactions/x/@me", data=b"")
+        ok(out is None and seen[-1].get_method() == "PUT", "204 with no body returns None")
+        request("POST", "/channels/1/messages", data=body, ctype=ctype)
+        ok(seen[-1].get_method() == "POST" and seen[-1].get_header("Content-type") == ctype,
+           "multipart POST sends the boundary content type")
+    finally:
+        ur.urlopen = real_urlopen
+        if had:
+            ENV["DISCORD_BOT_TOKEN"] = old_token
+        else:
+            ENV.pop("DISCORD_BOT_TOKEN", None)
+    print("selftest passed")
+
+
 def main():
+    if "--selftest" in sys.argv:
+        return selftest()
     for line in sys.stdin:
         line = line.strip()
         if not line:
