@@ -83,9 +83,11 @@ install file ──► src/dt/gfx.rs decode_file ──► gfx::Image (RGBA, not
   upload per frame at least). Other `Fx` variants and the map's textures are made at first
   use, from the decoded picture (no decode then). Snapshot runs make no early textures.
 - **The persistent picture cache** (`src/dt/picture_cache.rs`): a decoded picture's frames
-  (raw RGBA with their sizes) are kept in `<data>/razdor/cache/pictures` (next to the saves;
-  `%APPDATA%\razdor` on Windows, `~/.local/share/razdor` on Linux), one `.rzpc` file per
-  install file. The key is a hash of the file's path, size and modification time, the cache
+  (raw RGBA with their sizes) are kept in `platform::cache_dir()` + `pictures`: desktop
+  `<data>/razdor/cache/pictures` (`%APPDATA%\razdor` on Windows, `~/.local/share/razdor` on Linux);
+  Android the app's private cache (`Context.getCacheDir()`, not the shared storage, so the Files
+  app's Recent tab does not list them); iOS `Library/Caches/Razdor`. One `.rzpc` file per
+  install file. `platform::tidy_app_dir` removes the old `<app_dir>/cache/pictures` at start. The key is a hash of the file's path, size and modification time, the cache
   format and Razdor's version: a changed file or a new release misses. A miss is decoded and
   written by a background thread (temp file, then rename). A truncated, corrupt or stale entry
   is ignored and rewritten. The folder is capped (1 GiB: past it nothing new is written);

@@ -61,7 +61,7 @@ The APK is built by `scripts/dist-android.sh` (cargo-quad-apk, pinned in its hea
 see `[package.metadata.android]` in `Cargo.toml`). The launcher icon is `android/res/mipmap-*/ic_launcher.png`
 (Razdor's own icon, `data/icon/razdor.png` resized to 48–192 px; `res` and `icon` in `Cargo.toml`).
 Per-platform paths live in one place:
-`src/platform.rs` (`app_dir` for saves, log, picture cache, editor maps, translation jobs;
+`src/platform.rs` (`app_dir` for saves, log, editor maps, translation jobs; `cache_dir` for the picture cache;
 `config_dir` for the remembered install; `install_roots` for the search). On Android they are
 `/storage/emulated/0/Razdor` (survives an uninstall) and the search starts with `DiscordTimes`
 in internal storage; desktop keeps the platform's data and config folders.

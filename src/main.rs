@@ -122,6 +122,11 @@ async fn main() {
     // Closing the window sets a flag instead of leaving the loop, so the exit goes through
     // `exit_now`.
     prevent_quit();
+    // The picture cache's folder on Android (the app's private cache, not the shared storage).
+    #[cfg(target_os = "android")]
+    razdor::platform::set_private_cache_dir(ui::android::private_cache_dir());
+    // The phones' folders are tidied off the main thread (the old picture cache goes, `.nomedia`).
+    std::thread::spawn(razdor::platform::tidy_app_dir);
     {
         let gl = unsafe { get_internal_gl() };
         let info = gl.quad_context.info();

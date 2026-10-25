@@ -1,5 +1,6 @@
 //! The persistent cache of decoded pictures: the RGBA of each install file's frames, kept in the
-//! player's data folder (`<data>/razdor/cache/pictures`, next to the saves), so a picture is
+//! app's cache folder (`platform::cache_dir`, `pictures` in it; outside the shared storage on the
+//! phones), so a picture is
 //! decoded once per install file and not on every launch. Everything in it is derived from the
 //! player's own install; nothing is written to the install folder or the repo.
 //!
@@ -110,13 +111,14 @@ pub fn decode(key: u64, bytes: &[u8]) -> Option<Vec<Image>> {
     (at == body.len()).then_some(frames)
 }
 
-/// The folder of the cache: `razdor/cache/pictures` in the platform's data folder, or `None`
-/// where the cache is off (snapshot runs, `RAZDOR_NO_PICTURE_CACHE`) or there is no such folder.
+/// The folder of the cache: `pictures` in `platform::cache_dir` (desktop: `razdor/cache/pictures`
+/// in the platform's data folder), or `None` where the cache is off (snapshot runs,
+/// `RAZDOR_NO_PICTURE_CACHE`) or there is no such folder.
 pub fn cache_dir() -> Option<PathBuf> {
     if std::env::var_os("RAZDOR_SNAPSHOT").is_some() || std::env::var_os("RAZDOR_NO_PICTURE_CACHE").is_some() {
         return None;
     }
-    crate::platform::app_dir().map(|d| d.join("cache").join("pictures"))
+    crate::platform::cache_dir().map(|d| d.join("pictures"))
 }
 
 /// The frames stored under `key` in `dir`, if the entry is whole and current.

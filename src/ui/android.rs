@@ -189,6 +189,40 @@ unsafe fn view_url(env: *mut sys::JNIEnv, url: &str) -> bool {
     !cleared(env)
 }
 
+/// The app's private cache folder: `Context.getCacheDir()` (the picture cache lives there, out
+/// of the shared storage the Files app indexes). `None` when the call fails. Called from any
+/// thread (the JNI attaches it); `platform::cache_dir` keeps the answer.
+pub fn private_cache_dir() -> Option<std::path::PathBuf> {
+    // SAFETY: as in `storage_granted`; every reference made below is local and freed by `Local`.
+    unsafe {
+        let env = attach_jni_env();
+        let get_dir = method(env, activity_class(env).obj, "getCacheDir", "()Ljava/io/File;", false);
+        if get_dir.is_null() || cleared(env) {
+            return None;
+        }
+        let dir = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, ACTIVITY, get_dir));
+        if dir.obj.is_null() || cleared(env) {
+            return None;
+        }
+        let file_cls = class(env, "java/io/File");
+        let get_path = method(env, file_cls.obj, "getAbsolutePath", "()Ljava/lang/String;", false);
+        if get_path.is_null() || cleared(env) {
+            return None;
+        }
+        let text = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, dir.obj, get_path));
+        if text.obj.is_null() || cleared(env) {
+            return None;
+        }
+        let chars = ((**env).GetStringUTFChars.unwrap())(env, text.obj, std::ptr::null_mut());
+        if chars.is_null() {
+            return None;
+        }
+        let path = CStr::from_ptr(chars).to_string_lossy().into_owned();
+        ((**env).ReleaseStringUTFChars.unwrap())(env, text.obj, chars);
+        Some(std::path::PathBuf::from(path))
+    }
+}
+
 /// Whether Razdor may read the shared storage (the install and the saves live there).
 pub fn storage_granted() -> bool {
     // SAFETY: the activity exists once the window is open (the screens run after it).
