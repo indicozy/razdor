@@ -259,8 +259,8 @@ public String razdorInstall(String path) {
 }
 
 // «Добавить карту…» (src/ui/map_import.rs): the system's document picker (Storage Access
-// Framework) opens, and its answer comes back in onActivityResult, which is overridden here
-// (Activity's own; no AndroidX). The picked file is copied into the app's cache, because the
+// Framework) opens, and its answer comes back in miniquad's onActivityResult, which hands it to
+// razdorOnActivityResult (no AndroidX). The picked file is copied into the app's cache, because the
 // game reads a file, not a content URI. razdorPickOutcome is the game's poll: "" while the
 // picker is open or the copy runs, "cancel", "error: <why>", or "ok\n<name>\n<path>".
 private static final int RAZDOR_PICK_REQUEST = 7301;
@@ -292,10 +292,10 @@ public String razdorPickOutcome() {
     return razdorPickResult;
 }
 
-@Override
-protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+// Called from miniquad's own onActivityResult (the MAIN_ACTIVITY_ON_ACTIVITY_RESULT section at
+// the end of this file): MainActivity already defines that method, so it can't be overridden here.
+private void razdorOnActivityResult(int requestCode, int resultCode, Intent data) {
     if (requestCode != RAZDOR_PICK_REQUEST) {
-        super.onActivityResult(requestCode, resultCode, data);
         return;
     }
     if (resultCode != RESULT_OK || data == null || data.getData() == null) {
@@ -433,5 +433,11 @@ if (Build.VERSION.SDK_INT >= 30) {
 //% MAIN_ACTIVITY_ON_CREATE
 
 setVolumeControlStream(AudioManager.STREAM_MUSIC);
+
+//% END
+
+//% MAIN_ACTIVITY_ON_ACTIVITY_RESULT
+
+razdorOnActivityResult(requestCode, resultCode, data);
 
 //% END
