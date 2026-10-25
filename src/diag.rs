@@ -14,7 +14,7 @@
 use crate::local;
 use std::fs::File;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Instant;
 
@@ -110,9 +110,8 @@ pub fn init() {
     PLAY_ON.store(true, std::sync::atomic::Ordering::Relaxed);
     let path = log_path();
     let file = path.as_ref().and_then(|p| {
-        let _ = p.parent().map(std::fs::create_dir_all);
         let _ = std::fs::rename(p, p.with_file_name("razdor.previous.log"));
-        File::create(p).ok()
+        create_log_file(p).ok()
     });
     let stderr_is_file = file.as_ref().is_some_and(redirect_output);
     *LOG.lock().unwrap_or_else(|e| e.into_inner()) = Log { file, stderr_is_file };
@@ -137,11 +136,20 @@ pub fn reopen_log() {
         if log.file.is_some() {
             return;
         }
-        let Ok(file) = File::create(&path) else { return };
+        let Ok(file) = create_log_file(&path) else { return };
         log.stderr_is_file = redirect_output(&file);
         log.file = Some(file);
     }
     summary(Some(&path));
+}
+
+/// Creates (truncates) the log file, making its folder first when it is missing: on Android the
+/// data folder is made only once the install is loaded, after [`init`] has run.
+fn create_log_file(path: &Path) -> std::io::Result<File> {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    File::create(path)
 }
 
 /// The author's credit, from Cargo.toml's `authors`. The start of the log prints it, so it
@@ -268,7 +276,19 @@ fn redirect_output(file: &File) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::known_cause;
+    use super::{create_log_file, known_cause};
+
+    #[test]
+    fn the_log_is_made_in_a_folder_that_does_not_exist_yet() {
+        let root = std::env::temp_dir().join(format!("razdor-log-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let path = root.join("a").join("b").join("razdor.log");
+        let file = create_log_file(&path);
+        let made = file.is_ok() && path.is_file();
+        drop(file);
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(made, "the log file and its folders should be created");
+    }
 
     #[test]
     fn a_missing_opengl_driver_is_explained() {

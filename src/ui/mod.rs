@@ -823,6 +823,8 @@ impl App {
         }
         if let Some(dt) = dt_art::DtArt::from_env() {
             self.assets.adopt_install(dt);
+            // Android: the data folder (and so the log) is made once the install is loaded.
+            razdor::diag::reopen_log();
             // The settings as they are now (nothing changed them on the title screen).
             self.audio = Audio::new(self.assets.dt.as_ref().map(|d| &d.install));
             self.dt_content = dt_content_of(&self.assets, self.audio.settings.impossible);
