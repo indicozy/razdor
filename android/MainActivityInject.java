@@ -40,6 +40,9 @@ private boolean razdorInstallReceiverRegistered = false;
 // The random token of the install under way: a status broadcast counts only with this token
 // (any app can send our action, but cannot read the PendingIntent that carries the token).
 private String razdorInstallToken = null;
+// How the installer ended the last session ("installed", "cancelled", "failed: <why>"), or ""
+// while it has not ended. Set by the receiver, taken once by razdorInstallOutcome.
+private volatile String razdorInstallOutcome = "";
 
 // The installer's report: a confirmation screen to show, or why the install did not happen.
 // The explicit intent (our package, our token) is the only way in; the confirmation is started
@@ -63,8 +66,14 @@ private final BroadcastReceiver razdorInstallReceiver = new BroadcastReceiver() 
                         | Intent.FLAG_ACTIVITY_NEW_TASK);
                 context.startActivity(confirm);
             }
-        } else if (status != PackageInstaller.STATUS_SUCCESS) {
+        } else if (status == PackageInstaller.STATUS_SUCCESS) {
+            razdorInstallOutcome = "installed";
+        } else {
+            // The player cancelled on the installer's screen, or the install failed: Razdor's
+            // window reads this (razdorInstallOutcome) and offers the update again or says why.
             String message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE);
+            razdorInstallOutcome = status == PackageInstaller.STATUS_FAILURE_ABORTED
+                    ? "cancelled" : "failed: " + message;
             Toast.makeText(context, "Razdor: " + message, Toast.LENGTH_LONG).show();
         }
     }
@@ -96,6 +105,13 @@ private String razdorNewToken() {
         hex.append(String.format("%02x", b));
     }
     return hex.toString();
+}
+
+// The installer's report on the last session, taken: "" while it has not ended.
+public String razdorInstallOutcome() {
+    String outcome = razdorInstallOutcome;
+    razdorInstallOutcome = "";
+    return outcome;
 }
 
 // The folder the app keeps its own files in (cleared by Android, never shared).

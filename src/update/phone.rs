@@ -83,6 +83,25 @@ mod android {
         }
     }
 
+    /// How the installer ended the last session (`razdorInstallOutcome`): "installed",
+    /// "cancelled", "failed: <why>", or "" while it has not ended (or the call is missing).
+    pub fn installer_outcome() -> String {
+        // SAFETY: as in `cache_dir`.
+        unsafe {
+            let env = attach_jni_env();
+            let sig = "()Ljava/lang/String;";
+            let mid = method(env, activity_class(env).obj, "razdorInstallOutcome", sig, false);
+            if mid.is_null() || cleared(env) {
+                return String::new();
+            }
+            let reply = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, ACTIVITY, mid));
+            if cleared(env) {
+                return String::new();
+            }
+            to_text(env, reply.obj).unwrap_or_default()
+        }
+    }
+
     /// The Java reply of a call that returns "" when it worked, else the reason.
     ///
     /// # Safety
@@ -105,7 +124,7 @@ mod android {
 }
 
 #[cfg(target_os = "android")]
-pub use android::{cache_dir, download, get, install};
+pub use android::{cache_dir, download, get, install, installer_outcome};
 
 #[cfg(target_os = "ios")]
 pub fn get(url: &str, _seconds: u32) -> Result<Vec<u8>, String> {

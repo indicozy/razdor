@@ -142,6 +142,62 @@ pub fn pretend(s: Status) {
     set(s);
 }
 
+/// How the system installer ended a session that Razdor handed it (Android).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Outcome {
+    Installed,
+    /// The player cancelled on the installer's screen.
+    Cancelled,
+    Failed(String),
+}
+
+impl Outcome {
+    /// The Java side's report (`razdorInstallOutcome`): "" while the session has not ended.
+    pub fn parse(text: &str) -> Option<Outcome> {
+        match text {
+            "" => None,
+            "installed" => Some(Outcome::Installed),
+            "cancelled" => Some(Outcome::Cancelled),
+            other => Some(Outcome::Failed(other.strip_prefix("failed: ").unwrap_or(other).to_string())),
+        }
+    }
+}
+
+/// The status after the installer's report. A cancelled session goes back to the offer, so
+/// the player can press «Обновить» again (on a phone "Always" is "Ask", so the offer does not
+/// come straight back); a failed one shows its reason; anything else stays as it is.
+pub fn after_installer(status: Status, outcome: Outcome) -> Status {
+    match (status, outcome) {
+        (Status::Handed(r), Outcome::Cancelled) => Status::Found(r),
+        (Status::Handed(r), Outcome::Failed(why)) => Status::InstallFailed(r, why),
+        (Status::Handed(r), Outcome::Installed) => Status::Installed(r),
+        (other, _) => other,
+    }
+}
+
+/// Once per frame: while the system installer has an update of Razdor's, takes its report
+/// (Android; nothing else hands an install to a system).
+pub fn poll_installer() {
+    if !matches!(status(), Status::Handed(_)) {
+        return;
+    }
+    if let Some(outcome) = installer_report() {
+        let next = after_installer(status(), outcome.clone());
+        crate::diag!("update: the installer ended: {outcome:?}");
+        set(next);
+    }
+}
+
+#[cfg(target_os = "android")]
+fn installer_report() -> Option<Outcome> {
+    Outcome::parse(&phone::installer_outcome())
+}
+
+#[cfg(not(target_os = "android"))]
+fn installer_report() -> Option<Outcome> {
+    None
+}
+
 /// The program's file name in the releases for this system; `None` where none is built (the
 /// Linux and Windows builds are x86_64 only). Android's APK is one file for every ABI, iOS's
 /// IPA is installed by AltStore or Sideloadly (`opens_page`).
@@ -628,6 +684,40 @@ mod tests {
         assert_eq!(asset_for("android", "x86_64"), Some("razdor.apk"));
         assert_eq!(asset_for("ios", "aarch64"), Some("razdor.ipa"));
         assert_eq!(asset_for("freebsd", "x86_64"), None);
+    }
+
+    fn release_for_test() -> Release {
+        Release {
+            version: Version(1, 0, 2),
+            page: String::new(),
+            program_url: String::new(),
+            sums_url: String::new(),
+            notes: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_cancelled_installer_session_goes_back_to_the_offer() {
+        let r = release_for_test();
+        // Cancelled on the installer's screen: the offer is on again, «Обновить» works again.
+        assert_eq!(after_installer(Status::Handed(r.clone()), Outcome::Cancelled), Status::Found(r.clone()));
+        // A failed session shows its reason.
+        assert_eq!(
+            after_installer(Status::Handed(r.clone()), Outcome::Failed("no space".into())),
+            Status::InstallFailed(r.clone(), "no space".into())
+        );
+        assert_eq!(after_installer(Status::Handed(r.clone()), Outcome::Installed), Status::Installed(r.clone()));
+        // Only a handed install has a session to end: any other status stays as it is.
+        assert_eq!(after_installer(Status::Idle, Outcome::Cancelled), Status::Idle);
+        assert_eq!(after_installer(Status::Found(r.clone()), Outcome::Cancelled), Status::Found(r));
+    }
+
+    #[test]
+    fn the_java_report_reads_as_an_outcome() {
+        assert_eq!(Outcome::parse(""), None);
+        assert_eq!(Outcome::parse("installed"), Some(Outcome::Installed));
+        assert_eq!(Outcome::parse("cancelled"), Some(Outcome::Cancelled));
+        assert_eq!(Outcome::parse("failed: no space"), Some(Outcome::Failed("no space".into())));
     }
 
     #[test]

@@ -33,11 +33,13 @@ local! {
 }
 
 /// Once per frame: the check at the first frame (the window is open by then, and the check
-/// runs on its own thread), and "Always" puts a release found in place.
+/// runs on its own thread), "Always" puts a release found in place, and the system installer's
+/// report on a handed-over update is taken (a cancel brings the offer back).
 pub fn tick(mode: Mode) {
     if !STARTED.with(|s| s.replace(true)) && mode != Mode::Off && update::enabled() && !super::clock::is_snapshot() {
         update::check();
     }
+    update::poll_installer();
     if let (Mode::Always, Status::Found(r)) = (update::effective(mode), update::status()) {
         update::install(r);
     }
