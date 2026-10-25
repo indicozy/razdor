@@ -4,9 +4,9 @@
 //! not move stays a click. The garrison tab drags between its two grids the same way
 //! ([`press_guard`], [`follow`]).
 //!
-//! Both ways work at once, for everyone: the original's press-to-pick, press-to-move
-//! (interface.md §9.6, [`grid_press`]) and this dragging (the owner's decision after a
-//! player's report, 2026-10-25, which removed the setting «Расстановка армии»).
+//! Razdor's setting «Расстановка армии» ([`Controls`], the owner's decision after players'
+//! reports): clicks only (the original's press-to-pick, press-to-move, interface.md §9.6),
+//! dragging only (a press only selects), or both (the default).
 
 use razdor::local;
 use std::cell::Cell;
@@ -16,6 +16,7 @@ use macroquad::prelude::*;
 use razdor::rules::battle::Team;
 use razdor::rules::content::UnitId;
 use razdor::rules::formation::Slot;
+use serde::{Deserialize, Serialize};
 
 use super::assets::Assets;
 use super::chrome;
@@ -23,6 +24,54 @@ use super::widgets::{input_blocked, pointer};
 
 /// Pixels the mouse must move before a press on a card drags it.
 const START: f32 = 5.0;
+
+/// How the army grids outside battle are arranged (Razdor's setting in «Ещё…»). Battle is
+/// not affected.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Controls {
+    /// «Щелчками», the original's: the first click picks a unit or an item, the second places
+    /// it (0x4c346c, 0x4c653c, 0x4c6f50). Nothing is dragged, so nothing sticks to the pointer.
+    Clicks,
+    /// «Перетаскиванием»: a click only selects (its sheet shows); units and items move by
+    /// dragging. Nothing is picked up by a click, so nothing sticks to the pointer.
+    Drag,
+    /// «Оба», the default (also for settings files without the key, and for the old
+    /// «как в оригинале» choice, which had both): the clicks and the dragging at once.
+    #[default]
+    #[serde(alias = "original")]
+    Both,
+}
+
+impl Controls {
+    /// The settings button's next choice: clicks, dragging, both.
+    pub fn next(self) -> Controls {
+        match self {
+            Controls::Clicks => Controls::Drag,
+            Controls::Drag => Controls::Both,
+            Controls::Both => Controls::Clicks,
+        }
+    }
+
+    /// Whether a press on a card may start a drag (`Drag` and `Both`).
+    pub fn drags(self) -> bool {
+        self != Controls::Clicks
+    }
+}
+
+local! {
+    static CONTROLS: Cell<Controls> = const { Cell::new(Controls::Both) };
+}
+
+/// The setting, pushed in each frame (`main_menu::apply_options`).
+pub fn set_controls(c: Controls) {
+    CONTROLS.with(|m| m.set(c));
+}
+
+/// The arrangement chosen in the settings.
+pub fn controls() -> Controls {
+    CONTROLS.with(|m| m.get())
+}
 
 #[derive(Clone, Copy)]
 struct Drag {
@@ -44,11 +93,17 @@ local! {
 /// A press on squad member `unit`'s card (its type `kind`, its hits `hp` of `max`): it may be
 /// dragged from here.
 pub fn press(unit: usize, kind: UnitId, (hp, max): (i32, i32)) {
+    if !controls().drags() {
+        return cancel();
+    }
     DRAG.with(|d| d.set(Some(Drag { unit, guard: false, kind, hp, max, start: pointer().into(), moved: false })));
 }
 
 /// A press on garrison unit `unit`'s card (the garrison tab): it may be dragged from here.
 pub fn press_guard(unit: usize, kind: UnitId, (hp, max): (i32, i32)) {
+    if !controls().drags() {
+        return cancel();
+    }
     DRAG.with(|d| d.set(Some(Drag { unit, guard: true, kind, hp, max, start: pointer().into(), moved: false })));
 }
 
@@ -106,7 +161,7 @@ pub fn cancel() {
 /// What a press on a grid of one army does, as the original's army window (0x4c346c) and
 /// the building window's hero grid within the hero's army (0x4c653c). The original acts on
 /// the press and knows no dragging; Razdor's drag starts from the same press unless it
-/// swaps. The garrison tab's presses act the same way (0x4c6f50).
+/// swaps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GridPress {
     /// The selected unit was pressed: nothing is selected now.
@@ -119,7 +174,8 @@ pub enum GridPress {
     /// An empty cell pressed while a unit is selected: its card slides there (0x4b0c04,
     /// `Card-Move`); the selection is cleared when the slide ends.
     Slide(usize),
-    /// An empty cell with nothing selected: nothing happens.
+    /// An empty cell with nothing selected (with dragging only, any empty cell: the
+    /// selection is cleared).
     Nothing,
 }
 
@@ -133,6 +189,20 @@ pub fn grid_press(selected: Option<usize>, pressed: Option<usize>) -> GridPress 
         (Some(s), Some(p)) => GridPress::Swap { selected: s, pressed: p },
         (Some(s), None) => GridPress::Slide(s),
         (None, None) => GridPress::Nothing,
+    }
+}
+
+/// The press as the setting `controls` has it. With [`Controls::Drag`] a press never moves a
+/// unit: a unit pressed is selected, the selected one is deselected again (the original's
+/// deselection, 0x4c346c, 0x4c653c, 0x4c6f50: the building window has no other way back to
+/// the town's menu with a full formation), and an empty cell clears the selection, where the
+/// original swaps or slides on the second press. Clicks and both act as the original.
+pub fn grid_press_in(controls: Controls, selected: Option<usize>, pressed: Option<usize>) -> GridPress {
+    match (controls, pressed) {
+        (Controls::Clicks | Controls::Both, _) => grid_press(selected, pressed),
+        (Controls::Drag, Some(p)) if selected == Some(p) => GridPress::Deselect,
+        (Controls::Drag, Some(p)) => GridPress::Select(p),
+        (Controls::Drag, None) => GridPress::Nothing,
     }
 }
 
@@ -163,14 +233,71 @@ mod tests {
         assert_eq!(grid_press(None, None), GridPress::Nothing);
     }
 
-    /// A click on a unit, then a click on another cell, moves it (the original's second press,
-    /// 0x4c346c): an empty cell slides the unit there, another unit's cell swaps the two.
     #[test]
-    fn a_click_on_a_unit_then_a_click_on_a_cell_moves_it() {
-        assert_eq!(grid_press(None, Some(4)), GridPress::Select(4));
-        assert_eq!(grid_press(Some(4), None), GridPress::Slide(4));
-        assert_eq!(grid_press(None, Some(4)), GridPress::Select(4));
-        assert_eq!(grid_press(Some(4), Some(1)), GridPress::Swap { selected: 4, pressed: 1 });
+    fn as_in_the_original_the_second_press_moves() {
+        use Controls::{Both, Clicks};
+        assert_eq!(grid_press_in(Both, Some(3), Some(5)), GridPress::Swap { selected: 3, pressed: 5 });
+        assert_eq!(grid_press_in(Both, Some(4), None), GridPress::Slide(4));
+        assert_eq!(grid_press_in(Both, Some(3), Some(3)), GridPress::Deselect);
+        assert_eq!(grid_press_in(Both, None, Some(3)), GridPress::Select(3));
+        assert_eq!(grid_press_in(Both, None, None), GridPress::Nothing);
+        // The clicks choice acts the same on a press; only the dragging is missing.
+        assert_eq!(grid_press_in(Clicks, Some(3), Some(5)), GridPress::Swap { selected: 3, pressed: 5 });
+        assert_eq!(grid_press_in(Clicks, Some(4), None), GridPress::Slide(4));
+    }
+
+    #[test]
+    fn with_dragging_only_a_press_never_moves_a_unit() {
+        use Controls::Drag;
+        // A unit pressed is selected, whatever was selected before: no swap.
+        assert_eq!(grid_press_in(Drag, None, Some(3)), GridPress::Select(3));
+        assert_eq!(grid_press_in(Drag, Some(3), Some(5)), GridPress::Select(5));
+        assert_eq!(grid_press_in(Drag, Some(0), Some(5)), GridPress::Select(5));
+        // The selected unit pressed again is deselected (0x4c346c, 0x4c6f50), the hero included.
+        assert_eq!(grid_press_in(Drag, Some(3), Some(3)), GridPress::Deselect);
+        assert_eq!(grid_press_in(Drag, Some(0), Some(0)), GridPress::Deselect);
+        // An empty cell: no slide, nothing selected.
+        assert_eq!(grid_press_in(Drag, Some(4), None), GridPress::Nothing);
+        assert_eq!(grid_press_in(Drag, None, None), GridPress::Nothing);
+    }
+
+    #[test]
+    fn both_is_the_default_and_the_choices_cycle() {
+        assert_eq!(Controls::default(), Controls::Both);
+        assert_eq!(Controls::Clicks.next(), Controls::Drag);
+        assert_eq!(Controls::Drag.next(), Controls::Both);
+        assert_eq!(Controls::Both.next(), Controls::Clicks);
+        assert!(!Controls::Clicks.drags());
+        assert!(Controls::Drag.drags());
+        assert!(Controls::Both.drags());
+    }
+
+    /// The settings file keeps the three choices under their own names; the old values
+    /// («drag», and «original», which had both) load as their matching choice.
+    #[test]
+    fn the_settings_values_round_trip_and_the_old_ones_load() {
+        for (c, name) in [(Controls::Clicks, "clicks"), (Controls::Drag, "drag"), (Controls::Both, "both")] {
+            assert_eq!(serde_json::to_string(&c).unwrap(), format!("\"{name}\""));
+            assert_eq!(serde_json::from_str::<Controls>(&format!("\"{name}\"")).unwrap(), c);
+        }
+        assert_eq!(serde_json::from_str::<Controls>("\"original\"").unwrap(), Controls::Both);
+    }
+
+    /// With clicks only (`Clicks`) a press on a card never arms a drag, so nothing can stick
+    /// to the pointer; with dragging (`Drag`, `Both`) it does.
+    #[test]
+    fn clicks_only_arms_no_drag() {
+        // The pointer is pinned: no window in a test.
+        super::super::widgets::set_pointer(Some((0.0, 0.0)));
+        set_controls(Controls::Clicks);
+        press(2, UnitId(0), (10, 10));
+        assert!(DRAG.with(|d| d.get()).is_none());
+        press_guard(1, UnitId(0), (10, 10));
+        assert!(DRAG.with(|d| d.get()).is_none());
+        set_controls(Controls::Both);
+        press(2, UnitId(0), (10, 10));
+        assert!(DRAG.with(|d| d.get()).is_some());
+        set_controls(Controls::default());
     }
 
     #[test]

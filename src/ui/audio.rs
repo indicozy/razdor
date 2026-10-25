@@ -241,6 +241,10 @@ pub struct Settings {
     pub autosave: Option<bool>,
     /// "Невозможный уровень сложности игры" (`OptValue10`; read at start, as the original).
     pub impossible: Option<bool>,
+    /// Advanced «Расстановка армии»: how the army grids outside battle are arranged
+    /// (`unit_drag::Controls`): clicks, dragging, or both (the default; also for a file
+    /// without the key).
+    pub formation_controls: super::unit_drag::Controls,
     /// Razdor's, the owner's request: the keys the player rebound (`keymap::overrides`, the
     /// action's name and the key's), the rest on their defaults.
     pub keys: Vec<(String, String)>,
@@ -262,7 +266,7 @@ pub enum Orientation {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), friends_let_pass: false, pass_on_bridges: false, avoid_armies: false, battle_marks: true, army_list: false, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, keys: Vec::new() }
+        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), friends_let_pass: false, pass_on_bridges: false, avoid_armies: false, battle_marks: true, army_list: false, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new() }
     }
 }
 
@@ -783,18 +787,27 @@ mod tests {
         let partial: Settings = serde_json::from_str(r#"{"music_volume": 3.0}"#).unwrap();
         // (A file without `layout_version` reads 0: `load` migrates it, `clamped` does not.)
         assert_eq!(partial.clone().clamped(), Settings { music_volume: 1.0, layout_version: 0, ..Settings::default() });
+        // The army's arrangement: both (the default) unless the file says otherwise.
+        use crate::ui::unit_drag::Controls::Both;
+        assert_eq!(partial.formation_controls, Both);
     }
 
-    /// The removed «Расстановка армии» (`formation_controls`) is ignored: a settings file that
-    /// still has it loads with the other settings as they were, and the key is not written back.
+    /// «Расстановка армии»: a file's own values load as their choice, the key round-trips, and
+    /// the value from before the three choices («original», presses with dragging on top) loads
+    /// as «Оба», its matching choice.
     #[test]
-    fn a_settings_file_with_the_removed_arrangement_setting_still_loads() {
-        let old = r#"{"music_volume": 0.5, "formation_controls": "original", "layout_version": 1}"#;
-        let s: Settings = serde_json::from_str(old).expect("an old file must still parse");
-        assert_eq!(s.music_volume, 0.5);
-        assert_eq!(s.layout_version, 1);
-        let back = serde_json::to_string(&s).unwrap();
-        assert!(!back.contains("formation_controls"), "the removed key is not written back");
+    fn the_army_arrangement_setting_round_trips_and_old_values_load() {
+        use crate::ui::unit_drag::Controls::{Both, Clicks, Drag};
+        for (value, want) in [("clicks", Clicks), ("drag", Drag), ("both", Both), ("original", Both)] {
+            let file = format!(r#"{{"formation_controls": "{value}", "music_volume": 0.5}}"#);
+            let s: Settings = serde_json::from_str(&file).expect("a settings file must parse");
+            assert_eq!(s.formation_controls, want, "{value}");
+            assert_eq!(s.music_volume, 0.5);
+        }
+        let s = Settings { formation_controls: Clicks, ..Settings::default() };
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&s).unwrap()).unwrap();
+        assert_eq!(back.formation_controls, Clicks);
+        assert!(serde_json::to_string(&s).unwrap().contains(r#""formation_controls":"clicks""#));
     }
 
     /// «Сила ИИ в бою» and the improved AI's checkbox (`OptValue9`) stay in step: «Максимум»
