@@ -573,7 +573,8 @@ fn event_layout(d: &Dialog, o: f32, t: f32, w: f32) -> EventLayout {
     let room = (w - 38.0 - side_w - 40.0) * o;
     let (lines, rows): (Vec<String>, Vec<MarkupRow>) = match &d.marked {
         Some(t) => (Vec::new(), markup_rows(t, room, size)),
-        None => (d.text.iter().flat_map(|t| wrap(t, room, size)).collect(), Vec::new()),
+        // Laid out three times a frame with a large window (`draw_content`): the wraps are kept.
+        None => (d.text.iter().flat_map(|t| wrap_cached(t, room, size)).collect(), Vec::new()),
     };
     let total = lines.len() + rows.len();
     let full_h = lines.len() as f32 * line + rows.iter().map(|r| event_row_h(d.defeat, line, t, r)).sum::<f32>();

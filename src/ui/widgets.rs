@@ -863,6 +863,63 @@ pub fn wrap(s: &str, width: f32, size: f32) -> Vec<String> {
     lines
 }
 
+/// The font state [`measure`] reads: the face, the font mode, native metrics and, with them,
+/// the interface scale (`native_size`).
+#[derive(Clone, Copy, PartialEq)]
+struct MeasureState {
+    face: super::dt_font::Face,
+    mode: super::dt_font::FontMode,
+    native: bool,
+    k: u32,
+}
+
+/// One [`wrap_cached`] result, with the font state its widths were measured in.
+struct WrapEntry {
+    text: String,
+    width: u32,
+    size: u32,
+    state: MeasureState,
+    lines: Vec<String>,
+}
+
+/// The most [`wrap_cached`] results kept: the message windows on the screen (a few at most).
+const WRAP_CACHE_MAX: usize = 16;
+
+local! {
+    /// The last [`wrap_cached`] results, oldest first.
+    static WRAPS: RefCell<Vec<WrapEntry>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The cache's answer for `s` at `width` and `size` in `state`: the kept lines when the same
+/// text, width, size and font state were wrapped before, else what `compute` gives (kept,
+/// the oldest result dropped when the cache is full).
+fn cached_wrap(cache: &mut Vec<WrapEntry>, state: MeasureState, s: &str, width: f32, size: f32, compute: impl FnOnce() -> Vec<String>) -> Vec<String> {
+    let (width_key, size_key) = (width.to_bits(), size.to_bits());
+    if let Some(e) = cache.iter().find(|e| e.width == width_key && e.size == size_key && e.state == state && e.text == s) {
+        return e.lines.clone();
+    }
+    let lines = compute();
+    if cache.len() >= WRAP_CACHE_MAX {
+        cache.remove(0);
+    }
+    cache.push(WrapEntry { text: s.to_string(), width: width_key, size: size_key, state, lines: lines.clone() });
+    lines
+}
+
+/// [`wrap`], kept per text, width, size and the font state its widths come from ([`MeasureState`]).
+/// A window lays out its text every frame with the same answer: this skips the re-measuring of
+/// every word, and the result is what [`wrap`] gives for the same arguments.
+pub fn wrap_cached(s: &str, width: f32, size: f32) -> Vec<String> {
+    let native = super::dt_font::native_metrics();
+    let state = MeasureState {
+        face: super::dt_font::face(),
+        mode: super::dt_font::mode(),
+        native,
+        k: if native { super::chrome::k().to_bits() } else { 0 },
+    };
+    WRAPS.with(|cache| cached_wrap(&mut cache.borrow_mut(), state, s, width, size, || wrap(s, width, size)))
+}
+
 /// [`wrap`] for words in their own colours: `parts` are pieces of one paragraph (each may hold
 /// several words), the lines keep each word's colour.
 pub fn wrap_coloured(parts: &[(String, Color)], width: f32, size: f32) -> Vec<Vec<(String, Color)>> {
@@ -2071,5 +2128,49 @@ mod tests {
         want_keyboard("Вася", 2);
         assert!(KEYBOARD_WANTED.with(|k| k.get()));
         assert_eq!(KEYBOARD_TEXT.with(|t| t.borrow().clone()), ("Вася".to_string(), 2));
+    }
+
+    /// The cache measures a text again only when its text, width, size or font state changes;
+    /// otherwise the kept lines come back. `measured` counts the measurements.
+    #[test]
+    fn the_wrap_cache_measures_again_only_on_a_change() {
+        use super::super::dt_font::{Face, FontMode};
+        let state = MeasureState { face: Face::Body, mode: FontMode::Original, native: false, k: 0 };
+        let mut cache = Vec::new();
+        let measured = std::cell::Cell::new(0);
+        let get = |cache: &mut Vec<WrapEntry>, state: MeasureState, s: &str, w: f32, z: f32| {
+            cached_wrap(cache, state, s, w, z, || {
+                measured.set(measured.get() + 1);
+                vec![format!("{s}|{w}|{z}")]
+            })
+        };
+        assert_eq!(get(&mut cache, state, "a", 300.0, 14.0), ["a|300|14"]);
+        assert_eq!(get(&mut cache, state, "a", 300.0, 14.0), ["a|300|14"]);
+        assert_eq!(measured.get(), 1, "the same text, width and size come back kept");
+        assert_eq!(get(&mut cache, state, "a", 120.0, 14.0), ["a|120|14"], "a new width");
+        assert_eq!(get(&mut cache, state, "a", 120.0, 20.0), ["a|120|20"], "a new size");
+        assert_eq!(get(&mut cache, state, "b", 120.0, 20.0), ["b|120|20"], "a new text");
+        assert_eq!(measured.get(), 4);
+        let modern = MeasureState { mode: FontMode::Modern, ..state };
+        assert_eq!(get(&mut cache, modern, "b", 120.0, 20.0), ["b|120|20"], "a new font mode");
+        let native = MeasureState { native: true, k: 7, ..state };
+        get(&mut cache, native, "b", 120.0, 20.0);
+        get(&mut cache, MeasureState { k: 8, ..native }, "b", 120.0, 20.0);
+        assert_eq!(measured.get(), 7, "a new face-scale or native state is measured too");
+        assert_eq!(get(&mut cache, state, "b", 120.0, 20.0), ["b|120|20"]);
+        assert_eq!(measured.get(), 7, "the original state's entry is still kept");
+    }
+
+    /// Past [`WRAP_CACHE_MAX`] results the oldest goes, and the cache still answers.
+    #[test]
+    fn the_wrap_cache_drops_its_oldest_result_when_full() {
+        use super::super::dt_font::{Face, FontMode};
+        let state = MeasureState { face: Face::Body, mode: FontMode::Original, native: false, k: 0 };
+        let mut cache = Vec::new();
+        for i in 0..=WRAP_CACHE_MAX {
+            cached_wrap(&mut cache, state, &format!("t{i}"), 100.0, 14.0, || vec![format!("t{i}")]);
+        }
+        assert_eq!(cache.len(), WRAP_CACHE_MAX);
+        assert_eq!(cache[0].text, "t1", "t0 was dropped");
     }
 }
