@@ -866,7 +866,8 @@ fn band_text_fits(s: &Sheet, content: &Content, txt: Rect, base: f32, px: f32) -
     let size = sheet_size(Face::Body, whole_scale(px));
     let stats = stat_lines(content, s);
     let fits_width = super::dt_font::with_face(Face::Body, || {
-        stats.iter().all(|(label, value, _)| measure(label, size).width + measure(value, size).width + 6.0 * k <= 206.0 * base)
+        stats.iter().all(|(label, value, _)| measure(label, size).width + measure(value, size).width + 6.0 * k <= 206.0 * base * 0.85)
+            && measure(s.name, sheet_size(Face::Subtitle, whole_scale(px))).width <= txt.w - 16.0 * k
     });
     let width = |c: char| measure(c.encode_utf8(&mut [0; 4]), size).width;
     let trait_rows = list_rows(None, &traits_of(s), 238.0 * base, width).len();
@@ -884,7 +885,9 @@ fn band_text_fits(s: &Sheet, content: &Content, txt: Rect, base: f32, px: f32) -
 /// figure fitted to the band's height, the text at the band's scale (1.2 times the column's on
 /// the army band).
 pub fn draw_band(assets: &Assets, content: &Content, band: Rect, s: &Sheet, slots: bool, hover: &mut Option<ItemId>) -> Option<usize> {
-    super::typography::Role::Body.with(|| draw_band_in_face(assets, content, band, s, slots, hover))
+    // The band's text grows with its half (`band_text_scale`): the original's sheet fonts take the
+    // asked size only outside the frame's native metrics (as the phone's diary text, 1307).
+    super::dt_font::legacy_metrics_if(true, || super::typography::Role::Body.with(|| draw_band_in_face(assets, content, band, s, slots, hover)))
 }
 
 fn draw_band_in_face(assets: &Assets, content: &Content, band: Rect, s: &Sheet, slots: bool, hover: &mut Option<ItemId>) -> Option<usize> {

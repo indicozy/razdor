@@ -228,8 +228,10 @@ fn army_band_in(win: Rect, k: f32) -> Rect {
 
 /// The band's two halves: the picture (left) and the text (right).
 pub fn band_halves(band: Rect) -> (Rect, Rect) {
-    let w = band.w / 2.0;
-    (Rect::new(band.x, band.y, w, band.h), Rect::new(band.x + w, band.y, w, band.h))
+    // The picture takes 40 % and the text 60 %: the text half wider than the landscape column, so
+    // its text grows with it (the stat lines already fill the column's width at its size).
+    let w = (band.w * 0.4).round();
+    (Rect::new(band.x, band.y, w, band.h), Rect::new(band.x + w, band.y, band.w - w, band.h))
 }
 
 /// The building window's tab row (stacked): `n` tabs of equal width side by side across the
@@ -413,8 +415,8 @@ mod tests {
         assert_eq!((band.x, band.y, band.w), (12.0, 48.0, 586.0));
         assert!((band.h - BAND_H).abs() < 0.01);
         let (pic, txt) = band_halves(band);
-        assert_eq!((pic.w, txt.w), (293.0, 293.0));
-        assert_eq!((pic.x, txt.x), (12.0, 305.0));
+        assert_eq!((pic.w, txt.w), (234.0, 352.0));
+        assert_eq!((pic.x, txt.x), (12.0, 246.0));
         let right = within(Stack::Army, || point_in(w, 1.0, 248.0, 28.0, true));
         assert_eq!(right.y, 20.0 + 28.0 + BAND_H, "the right side starts under the band");
         let bottom = within(Stack::Army, || point_in(w, 1.0, 248.0, 599.4, true));

@@ -306,11 +306,19 @@ fn tab_state(active: bool, hover: bool, down: bool) -> &'static str {
 fn tab_button(label: &str, tab: Option<Tab>, r: Rect, active: bool) -> bool {
     let (hover, down, pressed) = button_state(r, true);
     let state = tab_state(active, hover, down);
-    // The original's tab art has its label baked in: stretched into a stacked row's narrower
-    // button it cuts the label, so stacked tabs draw their own label, fitted to the button.
-    let art = if window_layout::portrait() { None } else { tab_art(tab).and_then(|n| chrome::win(&format!("{state}{n}_RUS"))) };
+    let art = tab_art(tab).and_then(|n| chrome::win(&format!("{state}{n}_RUS")));
     if let Some(t) = art {
-        chrome::tex(&t, r, WHITE);
+        // The original's tab art has its label baked in. Stacked (a phone held upright) the row's
+        // buttons have another shape than the column's, so the art keeps its own proportions,
+        // centred in the button, instead of being stretched (which cut the label).
+        let dest = if window_layout::portrait() {
+            let s = (r.w / t.width()).min(r.h / t.height());
+            let (w, h) = (t.width() * s, t.height() * s);
+            Rect::new(r.x + (r.w - w) / 2.0, r.y + (r.h - h) / 2.0, w, h)
+        } else {
+            r
+        };
+        chrome::tex(&t, dest, WHITE);
     } else {
         if active {
             draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.45, 0.4, 0.38, 0.35));
