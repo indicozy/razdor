@@ -1465,7 +1465,10 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     // A campaign's history runs over several maps: each map's entries under its title.
     let lines = super::story::journal_lines(&rows);
     chrome::text_box_base(list_box);
-    let row_h = (head * 1.25).round();
+    // The quest list's titles take the phone's text scale too (`display::text_for`); the boxes'
+    // own headings stay at the window's.
+    let list_t = sheet_size(Face::Title, super::display::text_for(s, crate::ui::dialog::TEXT_REF));
+    let row_h = (list_t * 1.25).round();
     let fits = ((list.h - 8.0 * s) / row_h).floor().max(1.0) as usize;
     swipe_rows(list, row_h);
     if mouse_in(list.x, list.y, list.w, list.h) {
@@ -1500,18 +1503,19 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
         let ry = list.y + 4.0 * s + (n - view.list_scroll) as f32 * row_h;
         let k = match *line {
             super::story::Line::Heading(chapter) => {
-                let head_text = ellipsize(&game.journal.chapter_heading(chapter), list.w - 12.0 * s, head);
-                with_original_face(Face::Bold, || chrome::shadow_centered(&head_text, list.x + list.w / 2.0, ry + row_h * 0.78, head, Color::from_rgba(235, 165, 75, 255)));
+                let head_text = ellipsize(&game.journal.chapter_heading(chapter), list.w - 12.0 * s, list_t);
+                with_original_face(Face::Bold, || chrome::shadow_centered(&head_text, list.x + list.w / 2.0, ry + row_h * 0.78, list_t, Color::from_rgba(235, 165, 75, 255)));
                 continue;
             }
             super::story::Line::Row(k) => k,
         };
         let row = &rows[k];
         let mut title = row.title.clone();
-        while measure(&title, head).width > list.w - 12.0 * s && title.chars().count() > 3 {
+        // Measured in the face it is drawn in (Benguiat's title), so a long title is cut to fit.
+        while with_original_face(Face::Title, || measure(&title, list_t).width) > list.w - 12.0 * s && title.chars().count() > 3 {
             title.pop();
         }
-        with_original_face(Face::Title, || chrome::shadow_centered(&title, list.x + list.w / 2.0, ry + row_h * 0.78, head, ink_color(Ink::Plain)));
+        with_original_face(Face::Title, || chrome::shadow_centered(&title, list.x + list.w / 2.0, ry + row_h * 0.78, list_t, ink_color(Ink::Plain)));
         if mouse_in(list.x, ry, list.w, row_h) && clicked() && view.pick != k {
             view.pick = k;
             view.text_scroll = 0;
@@ -1524,7 +1528,9 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     chrome::text_box_base(entry_box);
     // Razdor's text size (the owner's request: phones' text too small): the entry's text
     // larger, its titles with it; its box scrolls, so it takes any size.
-    let ts = super::display::text_o(s);
+    // On a phone the text base is one px per dp (`display::text_for`, the 1.0.2 large-window
+    // scale), so the diary reads as large as the messages do; the desktop is unchanged.
+    let ts = super::display::text_for(s, crate::ui::dialog::TEXT_REF);
     let body = sheet_size(Face::Body, ts);
     let room = entry.w - 16.0 * s;
     let lines = rows.get(view.pick).map_or_else(Vec::new, |row| match view.tab {

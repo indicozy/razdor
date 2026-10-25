@@ -179,12 +179,6 @@ pub fn text_size_label(s: f32) -> &'static str {
     }
 }
 
-/// `o` (screen px per original px of a layout) times the text size, snapped as the font sheets
-/// snap. At the original's size it is `o` itself.
-pub fn text_o(o: f32) -> f32 {
-    text_o_at(text_size(), o)
-}
-
 /// [`text_o`] for the text size `t`, pure (no global state).
 pub fn text_o_at(t: f32, o: f32) -> f32 {
     if t == 1.0 { o } else { crate::ui::dt_font::whole_scale(o * t) }
@@ -213,7 +207,13 @@ pub fn text_base(base: f32, reference: (f32, f32)) -> f32 {
 /// The text's scale for the window of scale `base` and the message `reference`: the text base
 /// times the text size (`text_o_at`). At the original's size on the desktop it is `base`.
 pub fn text_for(base: f32, reference: (f32, f32)) -> f32 {
-    text_o_at(text_size(), text_base(base, reference))
+    text_for_at(text_size(), dp_px(), base, reference, (macroquad::window::screen_width(), macroquad::window::screen_height()), crate::ui::chrome::bar_height())
+}
+
+/// [`text_for`] for the text size `t`, the phone's density `dp` and the screen, pure (no global
+/// state): the text base times the size (`phone_text_base`, `text_o_at`).
+pub fn text_for_at(t: f32, dp: Option<f32>, base: f32, reference: (f32, f32), screen: (f32, f32), bar: f32) -> f32 {
+    text_o_at(t, phone_text_base(dp, base, reference, screen, bar))
 }
 
 /// Whether the text is the original's own (the desktop at the original's size): then the texts
@@ -1399,6 +1399,21 @@ mod tests {
         let tooltip = phone_text_base(Some(2.625), k, reference, (sw, sh), bar);
         assert_eq!(message, tooltip, "one text scale on the phone");
         assert_eq!(phone_text_base(None, k, reference, (sw, sh), bar), k, "off the phone the window's own scale");
+    }
+
+    #[test]
+    fn a_phone_s_box_text_follows_the_text_size() {
+        // The hero window's diary, quest list and item description read `text_for`: on a phone the
+        // phone's base times «Размер текста», so the text grows with the setting; the desktop keeps
+        // the window's own scale.
+        let (sw, sh, bar) = (2400.0, 1080.0, 120.0);
+        let reference = crate::ui::dialog::TEXT_REF;
+        let k = 1.5;
+        let at = |t: f32| text_for_at(t, Some(2.625), k, reference, (sw, sh), bar);
+        assert!(at(1.0) >= 2.6, "the phone's base: one px per dp");
+        assert!(at(1.25) > at(1.0), "the large size is larger");
+        assert!(at(1.5) > at(1.25), "the largest size is larger still");
+        assert_eq!(text_for_at(1.25, None, k, reference, (sw, sh), bar), text_o_at(1.25, k), "the desktop keeps its scale");
     }
 
     #[test]

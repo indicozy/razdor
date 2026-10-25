@@ -609,6 +609,17 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
         }
         // `hero:<map>[:<tab>]`: the diary on tab 0..3 (quests, completed, rumours, messages).
         "journal" | "hero" => {
+            // `RAZDOR_SCENE_QUEST=1`: one completed quest, with a long text, for the diary's box
+            // (the «Выполнено» tab, `journal:<map>:1`; the quests under way come from the script).
+            if std::env::var_os("RAZDOR_SCENE_QUEST").is_some() {
+                game.journal.record(
+                    razdor::rules::journal::EntryKind::Completed,
+                    1,
+                    0,
+                    "Защитить деревню Солёную от разбойников",
+                    "Староста Тилион просит защитить деревню от разбойничьего отряда, который каждую ночь нападает на рыбаков. Разбойники укрылись в старом форте на севере; до их прихода осталось немного времени.",
+                );
+            }
             let tab = arg.and_then(|t| t.parse::<usize>().ok()).and_then(|i| razdor::rules::journal::Tab::ALL.get(i).copied());
             Screen::Hero(super::items_view::HeroView { tab: tab.unwrap_or(razdor::rules::journal::Tab::Active), ..Default::default() })
         }
