@@ -306,7 +306,9 @@ fn tab_state(active: bool, hover: bool, down: bool) -> &'static str {
 fn tab_button(label: &str, tab: Option<Tab>, r: Rect, active: bool) -> bool {
     let (hover, down, pressed) = button_state(r, true);
     let state = tab_state(active, hover, down);
-    let art = tab_art(tab).and_then(|n| chrome::win(&format!("{state}{n}_RUS")));
+    // The original's tab art has its label baked in: stretched into a stacked row's narrower
+    // button it cuts the label, so stacked tabs draw their own label, fitted to the button.
+    let art = if window_layout::portrait() { None } else { tab_art(tab).and_then(|n| chrome::win(&format!("{state}{n}_RUS"))) };
     if let Some(t) = art {
         chrome::tex(&t, r, WHITE);
     } else {

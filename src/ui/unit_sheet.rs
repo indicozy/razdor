@@ -811,10 +811,10 @@ fn worn_slots(assets: &Assets, content: &Content, rects: [Rect; MAX_SLOTS], s: &
 }
 
 /// The level and experience line at `level_y`, then the stat lines and the status lines, a row
-/// every 14 px from `stat_y` down (the column and the band share it). Returns the y under the last
-/// row.
+/// `pitch` apart from `stat_y` down (the column's 14 px, the band's spread rows); the column and the
+/// band share it.
 #[allow(clippy::too_many_arguments)]
-fn stat_block(s: &Sheet, stats: Vec<Line>, x0: f32, x1: f32, level_y: f32, stat_y: f32, size: f32, bold: f32, px: f32) -> f32 {
+fn stat_block(s: &Sheet, stats: Vec<Line>, x0: f32, x1: f32, level_y: f32, stat_y: f32, size: f32, bold: f32, pitch: f32, share_line: bool) {
     use super::dt_font::Face;
     let k = k();
     let line = |top: f32| top + cell_baseline(size);
@@ -831,17 +831,51 @@ fn stat_block(s: &Sheet, stats: Vec<Line>, x0: f32, x1: f32, level_y: f32, stat_
             let label_size = super::widgets::fit_size(&label, room, fs);
             let label = super::widgets::ellipsize(&label, room, label_size);
             shadow_text(&label, x0, y + cell_baseline(label_size), label_size, color);
-            shadow_right(&value, x1, y + cell_baseline(fs), fs, color);
+            // The band's label may shrink to fit beside its value: the value then shares its line.
+            let value_line = if share_line { cell_baseline(label_size) } else { cell_baseline(fs) };
+            shadow_right(&value, x1, y + value_line, fs, color);
         });
-        y += 14.0 * px;
+        y += pitch;
     }
     for (status, color) in &s.status {
         let fitted = super::widgets::fit_size(status, x1 - x0, size);
         let status = super::widgets::ellipsize(status, x1 - x0, fitted);
         shadow_text(&status, x0, y + cell_baseline(fitted), fitted, *color);
-        y += 14.0 * px;
+        y += pitch;
     }
-    y
+}
+
+/// The band's text scale on the column's text px `base`: the largest of 1.00 … 2.00 (steps of 0.05)
+/// at which the band's text fits its half (`band_text_fits`). Never below the column's size.
+fn band_text_scale(s: &Sheet, content: &Content, txt: Rect, base: f32) -> f32 {
+    let mut best = 1.0;
+    for step in 0..=20 {
+        let m = 1.0 + step as f32 * 0.05;
+        if band_text_fits(s, content, txt, base, base * m) {
+            best = m;
+        }
+    }
+    best
+}
+
+/// Whether the stat lines (label and value side by side) fit the half's width, and the stats with
+/// at least the traits' first rows fit its height, at the text px `px`.
+fn band_text_fits(s: &Sheet, content: &Content, txt: Rect, base: f32, px: f32) -> bool {
+    use super::dt_font::{sheet_size, whole_scale, Face};
+    let k = k();
+    let size = sheet_size(Face::Body, whole_scale(px));
+    let stats = stat_lines(content, s);
+    let fits_width = super::dt_font::with_face(Face::Body, || {
+        stats.iter().all(|(label, value, _)| measure(label, size).width + measure(value, size).width + 6.0 * k <= 206.0 * base)
+    });
+    let width = |c: char| measure(c.encode_utf8(&mut [0; 4]), size).width;
+    let trait_rows = list_rows(None, &traits_of(s), 238.0 * base, width).len();
+    let row_h = 14.0 * px;
+    // The name's block (34 px) under its top and the level line (13 px) above the first stat row.
+    let stat_y = txt.y + 46.0 * px;
+    let natural_end = stat_y + (stats.len() + s.status.len()) as f32 * row_h;
+    let fits_height = natural_end + (trait_rows as f32 + 1.0) * row_h <= txt.bottom();
+    fits_width && fits_height
 }
 
 /// The band (the army and hero windows stacked) and a pane's card (the hire tab's unit over the
@@ -865,8 +899,10 @@ fn draw_band_in_face(assets: &Assets, content: &Content, band: Rect, s: &Sheet, 
         None => silhouette(figure_rect(pic, 0.6 * pic.w / fig, 0.95 * FIGURE_BOX, fig / FIGURE_SCALE)),
     }
     let clicked = worn_slots(assets, content, slot_rects_at(pic, fig), s, slots, hover);
-    // The original's px on the text half (the column's px is its width over the same 262).
-    let px = txt.w / PANEL_W;
+    // The original's px on the text half (the column's px is its width over the same 262), scaled
+    // up to fill the half (`band_text_scale`; never below the column's size).
+    let base = txt.w / PANEL_W;
+    let px = base * band_text_scale(s, content, txt, base);
     let size = sheet_size(Face::Body, whole_scale(px));
     let bold = sheet_size(Face::Bold, whole_scale(px));
     let name_size = sheet_size(Face::Subtitle, whole_scale(px));
@@ -878,19 +914,23 @@ fn draw_band_in_face(assets: &Assets, content: &Content, band: Rect, s: &Sheet, 
         let name = super::widgets::ellipsize(s.name, txt.w - 16.0 * k, name_size);
         shadow_centered(&name, txt.x + txt.w / 2.0, name_top + cell_baseline(name_size), name_size, name_ink);
     });
-    let (x0, x1) = (txt.x + 28.0 * px, txt.x + 234.0 * px);
+    // The columns keep the column's width (`base`); only the text grows with `px`.
+    let (x0, x1) = (txt.x + 28.0 * base, txt.x + 234.0 * base);
     let level_y = name_top + 21.0 * px;
-    let end = stat_block(s, stat_lines(content, s), x0, x1, level_y, level_y + 13.0 * px, size, bold, px);
-    // The description, then the traits, a row every 14 px under the stats. The description goes
-    // when the whole list does not fit the band's text half; the rest is cut at its bottom with "…".
+    let stat_y = level_y + 13.0 * px;
+    let stats = stat_lines(content, s);
+    let row_h = 14.0 * px;
+    // The description, then the traits, at the half's bottom. The description goes when the whole
+    // list does not fit the band's text half; what still does not fit is cut at its end with "…".
     let traits = traits_of(s);
     let desc = s.hero.is_none().then(|| content.unit(s.kind).description.as_str());
     let width = |c: char| measure(c.encode_utf8(&mut [0; 4]), size).width;
-    let room = 238.0 * px;
+    let room = 238.0 * base;
     let desc_rows = list_rows(desc, &[], room, width);
     let trait_rows = list_rows(None, &traits, room, width);
-    let (row_h, list_top) = (14.0 * px, end + 8.0 * px);
-    let avail = ((txt.bottom() - list_top) / row_h).floor().max(0.0) as usize;
+    let rows_n = stats.len() + s.status.len();
+    let natural_end = stat_y + rows_n as f32 * row_h;
+    let avail = ((txt.bottom() - 16.0 * px - natural_end) / row_h).floor().max(0.0) as usize;
     let both = !desc_rows.is_empty() && !trait_rows.is_empty();
     let all = desc_rows.len() + usize::from(both) + trait_rows.len();
     let mut rows: Vec<ListRow> = if all <= avail {
@@ -909,16 +949,20 @@ fn draw_band_in_face(assets: &Assets, content: &Content, band: Rect, s: &Sheet, 
             last.text = format!("{}…", last.text.trim_end());
         }
     }
+    // The list sits at the half's bottom; the stat lines spread evenly from the level line down to it.
+    let list_top = txt.bottom() - 8.0 * px - rows.len() as f32 * row_h;
+    let pitch = if rows_n > 1 { ((list_top - 8.0 * px - stat_y) / rows_n as f32).max(row_h) } else { row_h };
+    stat_block(s, stats, x0, x1, level_y, stat_y, size, bold, pitch, true);
     let _clip = super::widgets::Clip::new(txt);
     let line = |top: f32| top + cell_baseline(size);
     for (i, row) in rows.iter().enumerate() {
         if let Some(art) = &row.icon {
-            chrome::trait_icon(art, txt.x + 16.0 * px, list_top + i as f32 * row_h - 11.0 * px, 25.0 * px);
+            chrome::trait_icon(art, txt.x + 16.0 * base, list_top + i as f32 * row_h - 11.0 * px, 25.0 * base);
         }
     }
     for (i, row) in rows.iter().enumerate() {
         if !row.text.trim().is_empty() {
-            shadow_text(&row.text, txt.x + 12.0 * px, line(list_top + i as f32 * row_h), size, row.ink);
+            shadow_text(&row.text, txt.x + 12.0 * base, line(list_top + i as f32 * row_h), size, row.ink);
         }
     }
     clicked
@@ -1011,7 +1055,7 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, background: Rect, s
     // (0x492f24, the label list 0x667cb4 at X0+0x1e, the value list 0xa6 on and 0x28 wide).
     let (x0, x1) = (r.x + 28.0 * px, r.x + 234.0 * px);
     let line = |top: f32| top + cell_baseline(size);
-    stat_block(s, stats, x0, x1, stat_top - 13.0 * px, stat_top, size, bold, px);
+    stat_block(s, stats, x0, x1, stat_top - 13.0 * px, stat_top, size, bold, 14.0 * px, false);
     // The description list from 12 px in, a row every 14 px; a trait's icon 16 px in and
     // 11 px over its first row (0x48e8f0), drawn under the text.
     let list_x = r.x + 12.0 * px;
