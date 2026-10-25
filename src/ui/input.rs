@@ -45,6 +45,10 @@ struct State {
     swipe_prev: Vec<SwipeArea>,
     /// The touchpad mode was on at the last frame.
     touch_on: bool,
+    /// A finger lifted and none has come down since (`hover_after`), and a finger is down now:
+    /// the pointer is where the finger lifted, so no hover shows a hint (`touch_hover`).
+    lifted: bool,
+    down_now: bool,
     /// miniquad's simulated mouse has been turned off (phones, once).
     sim_off: bool,
     /// Virtual key taps (`tap_key`): queued in one frame, pressed in the next.
@@ -122,6 +126,13 @@ pub fn begin_frame() {
             s.active = false;
         }
         s.touch_on = touchpad_on;
+        if touchpad_on || gestures_on {
+            s.lifted = hover_after(s.lifted, &touches);
+            s.down_now = touches.iter().any(|t| !matches!(t.phase, Phase::Ended | Phase::Cancelled));
+        } else {
+            s.lifted = false;
+            s.down_now = false;
+        }
         let from = if s.active { s.at } else { mouse };
         let map_scrolls = std::mem::take(&mut s.map_claimed.0);
         s.map_claimed.1 = map_scrolls;
@@ -183,6 +194,35 @@ fn merge(touch: Frame, pad: Frame) -> Frame {
         scroll: if touch.scroll != (0.0, 0.0) { touch.scroll } else { pad.scroll },
         pan: (touch.pan.0 + pad.pan.0, touch.pan.1 + pad.pan.1),
     }
+}
+
+/// Whether a hover may show a hint (`widgets::tooltip`, `widgets::tooltip_later`, the bar's
+/// hover hint). On a phone a finger's lift leaves the pointer where it lifted, so no hint shows
+/// until a finger is down again; a long press is a finger down, so its info still shows. Always
+/// true with no touch mode on.
+pub fn touch_hover() -> bool {
+    STATE.with(|s| {
+        let s = s.borrow();
+        hover_shown(s.lifted, s.down_now)
+    })
+}
+
+/// The lift latch after this frame's `touches`: a finger coming down clears it, a lift sets it,
+/// and a frame with neither keeps it. A touch that came down and up within one frame arrives
+/// only as its lift, so it counts as one.
+fn hover_after(lifted: bool, touches: &[TouchPoint]) -> bool {
+    if touches.iter().any(|t| t.phase == Phase::Started) {
+        false
+    } else if touches.iter().any(|t| matches!(t.phase, Phase::Ended | Phase::Cancelled)) {
+        true
+    } else {
+        lifted
+    }
+}
+
+/// A hover shows a hint unless a finger has lifted and none is down now.
+fn hover_shown(lifted: bool, down: bool) -> bool {
+    !lifted || down
 }
 
 /// Registers a rectangle a one-finger swipe acts on (gestures only; a no-op elsewhere): the
@@ -311,6 +351,29 @@ pub fn pad_key_pressed(k: KeyCode) -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// After a lift no hover shows a hint until a finger comes down; a finger held still (a long
+    /// press) keeps them, and a tap that starts and ends in one frame counts as a lift.
+    #[test]
+    fn a_lift_hides_the_hover_hints_until_a_finger_comes_down() {
+        use super::{hover_after, hover_shown};
+        use crate::ui::touchpad::{Phase, TouchPoint};
+        let t = |phase| TouchPoint { id: 1, x: 0.0, y: 0.0, phase };
+        let mut lifted = false;
+        lifted = hover_after(lifted, &[t(Phase::Started)]);
+        assert!(hover_shown(lifted, true));
+        lifted = hover_after(lifted, &[t(Phase::Stationary)]);
+        assert!(hover_shown(lifted, true));
+        lifted = hover_after(lifted, &[t(Phase::Ended)]);
+        assert!(!hover_shown(lifted, false));
+        lifted = hover_after(lifted, &[]);
+        assert!(!hover_shown(lifted, false));
+        lifted = hover_after(lifted, &[t(Phase::Started)]);
+        assert!(hover_shown(lifted, true));
+        let quick = hover_after(false, &[t(Phase::Ended)]);
+        assert!(!hover_shown(quick, false));
+        assert!(hover_shown(false, false));
+    }
+
     /// Every file of the interface reads the mouse and keys through this module: one calling
     /// macroquad's functions of the same names (through its prelude) would not see the pad.
     #[test]
