@@ -1492,6 +1492,8 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     // The quest list's titles take the phone's text scale too (`display::text_for`); the boxes'
     // own headings stay at the window's.
     let list_t = sheet_size(Face::Title, super::display::text_for(s, crate::ui::dialog::TEXT_REF));
+    // On a phone the list is drawn at its own size, as the entry below.
+    let phone = super::display::dp_px().is_some();
     let row_h = (list_t * 1.25).round();
     let fits = ((list.h - 8.0 * s) / row_h).floor().max(1.0) as usize;
     swipe_rows(list, row_h);
@@ -1527,8 +1529,8 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
         let ry = list.y + 4.0 * s + (n - view.list_scroll) as f32 * row_h;
         let k = match *line {
             super::story::Line::Heading(chapter) => {
-                let head_text = ellipsize(&game.journal.chapter_heading(chapter), list.w - 12.0 * s, list_t);
-                with_original_face(Face::Bold, || chrome::shadow_centered(&head_text, list.x + list.w / 2.0, ry + row_h * 0.78, list_t, Color::from_rgba(235, 165, 75, 255)));
+                let head_text = super::dt_font::legacy_metrics_if(phone, || ellipsize(&game.journal.chapter_heading(chapter), list.w - 12.0 * s, list_t));
+                super::dt_font::legacy_metrics_if(phone, || with_original_face(Face::Bold, || chrome::shadow_centered(&head_text, list.x + list.w / 2.0, ry + row_h * 0.78, list_t, Color::from_rgba(235, 165, 75, 255))));
                 continue;
             }
             super::story::Line::Row(k) => k,
@@ -1536,10 +1538,10 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
         let row = &rows[k];
         let mut title = row.title.clone();
         // Measured in the face it is drawn in (Benguiat's title), so a long title is cut to fit.
-        while with_original_face(Face::Title, || measure(&title, list_t).width) > list.w - 12.0 * s && title.chars().count() > 3 {
+        while super::dt_font::legacy_metrics_if(phone, || with_original_face(Face::Title, || measure(&title, list_t).width)) > list.w - 12.0 * s && title.chars().count() > 3 {
             title.pop();
         }
-        with_original_face(Face::Title, || chrome::shadow_centered(&title, list.x + list.w / 2.0, ry + row_h * 0.78, list_t, ink_color(Ink::Plain)));
+        super::dt_font::legacy_metrics_if(phone, || with_original_face(Face::Title, || chrome::shadow_centered(&title, list.x + list.w / 2.0, ry + row_h * 0.78, list_t, ink_color(Ink::Plain))));
         if mouse_in(list.x, ry, list.w, row_h) && clicked() && view.pick != k {
             view.pick = k;
             view.text_scroll = 0;
@@ -1556,7 +1558,6 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     // scale), so the diary reads as large as the messages do; the desktop is unchanged.
     // Under native metrics (the whole frame) the sheet fonts ignore the size passed, so the
     // phone's diary (its wrap and its drawing) runs with the legacy metrics, which take it.
-    let phone = super::display::dp_px().is_some();
     let ts = super::display::text_for(s, crate::ui::dialog::TEXT_REF);
     let body = diary_body_size(phone, ts);
     let room = entry.w - 16.0 * s;
