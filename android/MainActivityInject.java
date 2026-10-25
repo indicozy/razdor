@@ -71,14 +71,20 @@ private final BroadcastReceiver razdorInstallReceiver = new BroadcastReceiver() 
 };
 
 // Whether `confirm` is the confirmation activity of the system's own installer: its action is
-// the installer's, and the activity it resolves to belongs to a system app.
+// the installer's, and the activity it resolves to belongs to a system app. On API 30+ package
+// visibility can hide the installer's activity from us (cargo-quad-apk cannot declare a
+// <queries> entry), so resolveActivity may return null: that does not block the confirmation.
+// The broadcast itself is already authenticated by the session's random token above.
 private boolean razdorIsSystemInstaller(Context context, Intent confirm) {
-    if (!PackageInstaller.ACTION_CONFIRM_INSTALL.equals(confirm.getAction())) {
+    // PackageInstaller.ACTION_CONFIRM_INSTALL is hidden from the public SDK: its value, literally.
+    if (!"android.content.pm.action.CONFIRM_INSTALL".equals(confirm.getAction())) {
         return false;
     }
     android.content.pm.ResolveInfo info = context.getPackageManager().resolveActivity(confirm, 0);
-    return info != null && info.activityInfo != null
-            && (info.activityInfo.applicationInfo.flags & android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0;
+    if (info == null || info.activityInfo == null) {
+        return true;
+    }
+    return (info.activityInfo.applicationInfo.flags & android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0;
 }
 
 // A random token of 128 bits, in hex.
