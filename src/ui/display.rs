@@ -33,6 +33,28 @@ impl DisplayMode {
         }
     }
 
+    /// The mode the device shows: a phone has no borderless window, so a saved Borderless is
+    /// Full screen there.
+    pub fn for_device(self, phone: bool) -> DisplayMode {
+        if phone && self == DisplayMode::Borderless {
+            DisplayMode::Fullscreen
+        } else {
+            self
+        }
+    }
+
+    /// The «Экран» row's next mode: on a phone only Windowed and Full screen (Borderless is
+    /// skipped), else [`DisplayMode::next`].
+    pub fn next_on(self, phone: bool) -> DisplayMode {
+        if !phone {
+            return self.next();
+        }
+        match self.for_device(true) {
+            DisplayMode::Windowed => DisplayMode::Fullscreen,
+            _ => DisplayMode::Windowed,
+        }
+    }
+
     pub fn label(self) -> &'static str {
         use razdor::i18n::tr;
         match self {
@@ -478,7 +500,7 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
     set_text_size(settings.text_size);
     set_large_windows(settings.large_windows);
     crate::ui::world_view::set_zoom_prefs(settings.map_zoom, settings.zoom_locked);
-    follow(settings.display);
+    follow(settings.display.for_device(dp_px().is_some()));
 }
 
 /// Puts the window in `mode` when it is not yet (called every frame; cheap when nothing
@@ -1219,6 +1241,11 @@ mod sys {
         }
 
         pub fn apply(&mut self, _from: DisplayMode, to: DisplayMode) -> bool {
+            // Android: full screen hides the system bars (the activity's immersive mode);
+            // miniquad's full screen only lets them stay (API 30+ sets the decor flag alone).
+            #[cfg(target_os = "android")]
+            crate::ui::android::set_immersive(to != DisplayMode::Windowed);
+            #[cfg(not(target_os = "android"))]
             macroquad::miniquad::window::set_fullscreen(to != DisplayMode::Windowed);
             true
         }
@@ -1263,6 +1290,20 @@ mod tests {
         let json = serde_json::to_string(&DisplayMode::Fullscreen).unwrap();
         assert_eq!(json, "\"fullscreen\"");
         assert_eq!(serde_json::from_str::<DisplayMode>("\"borderless\"").unwrap(), DisplayMode::Borderless);
+    }
+
+    #[test]
+    fn a_phone_s_screen_row_skips_borderless() {
+        // The desktop cycles through all three.
+        assert_eq!(DisplayMode::Windowed.next_on(false), DisplayMode::Borderless);
+        assert_eq!(DisplayMode::Borderless.next_on(false), DisplayMode::Fullscreen);
+        // A phone: Windowed and Full screen only, and a saved Borderless is Full screen.
+        assert_eq!(DisplayMode::Windowed.next_on(true), DisplayMode::Fullscreen);
+        assert_eq!(DisplayMode::Fullscreen.next_on(true), DisplayMode::Windowed);
+        assert_eq!(DisplayMode::Borderless.next_on(true), DisplayMode::Windowed);
+        assert_eq!(DisplayMode::Borderless.for_device(true), DisplayMode::Fullscreen);
+        assert_eq!(DisplayMode::Borderless.for_device(false), DisplayMode::Borderless);
+        assert_eq!(DisplayMode::Windowed.for_device(true), DisplayMode::Windowed);
     }
 
     #[test]

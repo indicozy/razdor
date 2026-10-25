@@ -66,7 +66,7 @@ android_version = 34
 target_sdk_version = 34
 min_sdk_version = 26
 build_targets = ["aarch64-linux-android", "armv7-linux-androideabi", "x86_64-linux-android"]
-fullscreen = true
+fullscreen = false
 # The launcher icon: the mipmap PNGs of Razdor's own icon (data/icon/razdor.png, resized).
 icon = "@mipmap/ic_launcher"
 res = "android/res"

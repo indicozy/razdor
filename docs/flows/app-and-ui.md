@@ -495,6 +495,11 @@ miniquad has no borderless mode. On Windows every step is logged to `razdor.log`
   window; when another window becomes active (Alt+Tab, Win+Tab) it goes to the bottom, and
   back to topmost when activated again (`layer`, `sys::Window::keep_layer`, every frame).
 - Alt+Enter cycles the modes on any screen (`hotkey_pressed`, `notice`).
+- Android (`sys::Window::apply`, the fallback module): full screen calls `android::set_immersive`
+  (`razdorSetImmersive` in `android/MainActivityInject.java`), which hides the status and
+  navigation bars (a swipe from the edge shows them for a moment); windowed shows them again.
+  The activity re-applies it when the window regains the focus. On a phone the «Экран» row
+  cycles only Windowed and Full screen (`DisplayMode::next_on`); a saved Borderless is Full screen.
 
 Rule: a parity setting reads the install's value until the player chooses
 (`Option<bool>` = `None` → the install's `[Options]` value such as `OptValue9`, see `main_menu::expert_ai`). A Razdor

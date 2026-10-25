@@ -270,6 +270,24 @@ pub fn follow_orientation(setting: Option<super::audio::Orientation>) {
     }
 }
 
+/// Hides the system bars (`on`: full screen) or shows them (`razdorSetImmersive`, which the
+/// activity applies on its UI thread and again when the window regains the focus). Called from
+/// the display's frame, like the orientation.
+pub fn set_immersive(on: bool) {
+    // SAFETY: as in `follow_orientation`; the activity exists once the frames run.
+    unsafe {
+        let env = attach_jni_env();
+        let set = method(env, activity_class(env).obj, "razdorSetImmersive", "(Z)V", false);
+        if set.is_null() || cleared(env) {
+            razdor::diag!("razdorSetImmersive is missing");
+            return;
+        }
+        // A jboolean is passed as an int through the variadic call (Rust does not take bool there).
+        ((**env).CallVoidMethod.unwrap())(env, ACTIVITY, set, on as i32);
+        cleared(env);
+    }
+}
+
 /// The margin the rounded corners and the bars keep at least, in dp: the corners of a phone's
 /// screen are not reported by every system, so the interface keeps this much from each edge.
 const CORNER_DP: f32 = 24.0;

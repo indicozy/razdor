@@ -970,9 +970,12 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
         *y += 44.0 * k;
         row_button(r, value)
     };
-    // Windowed, borderless or full screen, set at once (`display::follow_settings`).
-    if row(tr("Screen (Alt+Enter)"), audio.display.label(), &mut y) {
-        audio.display = audio.display.next();
+    // Windowed, borderless or full screen, set at once (`display::follow_settings`). A phone
+    // has two: windowed (the bars shown) and full screen (the bars hidden).
+    let phone = super::display::dp_px().is_some();
+    let screen_label = if phone { tr("Screen") } else { tr("Screen (Alt+Enter)") };
+    if row(screen_label, audio.display.for_device(phone).label(), &mut y) {
+        audio.display = audio.display.next_on(phone);
     }
     // The interface scale: Auto (the largest that fits) or a fixed one, kept to the fit (a
     // scale above it is kept to the fit: players got stuck with the settings off-screen in 1.0.0).
