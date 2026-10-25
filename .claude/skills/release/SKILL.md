@@ -11,6 +11,12 @@ the tests, builds `razdor` (Linux), `Razdor.exe` (Windows) and `razdor-macos`, a
 release «Раздор X.Y.Z» with the changelog section and the SHA-256 as its notes. The game's
 update window shows those notes up to their first `## ` heading.
 
+The programs' file names are read by the game's update check (`update::asset_name`): `razdor`,
+`Razdor.exe`, `razdor-macos`, `razdor.apk` (Android: downloaded, checked and handed to the system
+installer) and `razdor.ipa` (iOS: its release page is opened). Keep the names, and keep
+`SHA256SUMS` listing every one of them; a release without an Android or iOS file gets no offer on
+that system.
+
 ## Steps
 
 1. All work for the release is committed; `git status` is clean (other agents' files: ask).

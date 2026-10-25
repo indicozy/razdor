@@ -2,17 +2,24 @@
 //! of this program.
 //!
 //! Everything runs on a background thread and only changes [`status`]; the game never waits
-//! on it. The requests go through the system's `curl` (Windows 10 and later, macOS and
-//! almost every Linux have it): without one the check fails quietly. A download counts only
+//! on it. On desktop the requests go through the system's `curl` (Windows 10 and later, macOS
+//! and almost every Linux have it): without one the check fails quietly. A download counts only
 //! when its SHA-256 matches the release's `SHA256SUMS`.
 //!
 //! The new program replaces this one by a rename: on Unix over the running file (which keeps
 //! running from its old inode), on Windows after moving the running `Razdor.exe` aside to
 //! `Razdor.exe.old`, deleted at the next start. It runs from the next start on.
 //!
+//! Phones (`update::phone`): Android downloads its `razdor.apk`, checks it the same way and
+//! hands it to the system installer, which the player confirms (`Status::Handed`). iOS
+//! installs nothing: its window opens the release's page (`opens_page`).
+//!
 //! A program under a `target` folder (a `cargo` build) checks nothing, unless
 //! `RAZDOR_UPDATE_AS=<X.Y.Z>` is set: it then counts as that version, to try the whole flow
 //! against the real releases.
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+mod phone;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -109,6 +116,9 @@ pub enum Status {
     Downloading(Release),
     /// The release is in place of this program and runs from the next start.
     Installed(Release),
+    /// Android: the verified APK is with the system installer, which asks the player to
+    /// confirm it on the screen (the install itself is the system's, not Razdor's).
+    Handed(Release),
     InstallFailed(Release, String),
 }
 
@@ -132,19 +142,42 @@ pub fn pretend(s: Status) {
     set(s);
 }
 
-/// The program's file name in the releases on this platform; `None` where none is built.
-/// Android is `None` too: its APK is installed by hand from the release page, so there is no
-/// update check, no download and no restart there (`enabled` is false, the menu hides the row).
-/// iOS is `None` as well: its IPA is re-signed and installed by AltStore or Sideloadly.
+/// The program's file name in the releases for this system; `None` where none is built (the
+/// Linux and Windows builds are x86_64 only). Android's APK is one file for every ABI, iOS's
+/// IPA is installed by AltStore or Sideloadly (`opens_page`).
 pub fn asset_name() -> Option<&'static str> {
-    if cfg!(target_os = "macos") {
-        Some("razdor-macos")
-    } else if cfg!(all(windows, target_arch = "x86_64")) {
-        Some("Razdor.exe")
-    } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-        Some("razdor")
+    asset_for(std::env::consts::OS, std::env::consts::ARCH)
+}
+
+/// [`asset_name`] for a system (`std::env::consts::OS` and `ARCH`).
+fn asset_for(os: &str, arch: &str) -> Option<&'static str> {
+    match (os, arch) {
+        ("macos", _) => Some("razdor-macos"),
+        ("windows", "x86_64") => Some("Razdor.exe"),
+        ("linux", "x86_64") => Some("razdor"),
+        ("android", _) => Some("razdor.apk"),
+        ("ios", _) => Some("razdor.ipa"),
+        _ => None,
+    }
+}
+
+/// iOS: an update opens the release's page in the browser (`ui::main_menu::open_link`), where
+/// the player downloads the IPA for AltStore or Sideloadly. Razdor installs nothing there.
+pub fn opens_page() -> bool {
+    cfg!(target_os = "ios")
+}
+
+/// The mode that applies on this system: on a phone "Always" reads as "Ask", because the
+/// system's installer always needs the player's tap (and iOS installs nothing at all).
+pub fn effective(mode: Mode) -> Mode {
+    effective_on(mode, crate::platform::MOBILE)
+}
+
+fn effective_on(mode: Mode, phone: bool) -> Mode {
+    if phone && mode == Mode::Always {
+        Mode::Ask
     } else {
-        None
+        mode
     }
 }
 
@@ -158,8 +191,11 @@ pub fn current() -> Version {
 }
 
 /// At start: notes the program's file and clears what an update left behind (the old
-/// Windows program, a download cut short).
+/// Windows program, a download cut short). A phone's program is not a file Razdor replaces.
 pub fn init() {
+    if crate::platform::MOBILE {
+        return;
+    }
     let program = PROGRAM.get_or_init(|| std::env::current_exe().ok()).clone();
     let (Some(program), Some(name)) = (program, asset_name()) else { return };
     for leftover in [old_path(&program), part_path(&program, name)] {
@@ -182,7 +218,7 @@ pub fn enabled() -> bool {
     if asset_name().is_none() {
         return false;
     }
-    if std::env::var_os("RAZDOR_UPDATE_AS").is_some() {
+    if std::env::var_os("RAZDOR_UPDATE_AS").is_some() || crate::platform::MOBILE {
         return true;
     }
     program().is_some_and(|p| !p.components().any(|c| c.as_os_str() == "target"))
@@ -199,6 +235,7 @@ fn part_path(program: &Path, asset: &str) -> PathBuf {
 }
 
 /// `curl` with its window hidden on Windows (Razdor has no console there).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn curl() -> Command {
     let mut c = Command::new("curl");
     c.args(["-fsSL", "--proto", "=https", "-A", concat!("razdor/", env!("CARGO_PKG_VERSION"))]);
@@ -212,6 +249,13 @@ fn curl() -> Command {
 }
 
 /// The body of `url`, or why not.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn fetch(url: &str, seconds: u32) -> Result<Vec<u8>, String> {
+    phone::get(url, seconds)
+}
+
+/// The body of `url`, or why not.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn fetch(url: &str, seconds: u32) -> Result<Vec<u8>, String> {
     let out = curl()
         .args(["--max-time", &seconds.to_string(), url])
@@ -302,7 +346,7 @@ pub fn parse_releases(json: &[u8], current: Version, asset: &str) -> Result<Opti
 /// Asks GitHub for the latest release on a background thread (nothing when a check or a
 /// download is under way, or an update is already in place).
 pub fn check() {
-    let busy = matches!(status(), Status::Checking | Status::Downloading(_) | Status::Installed(_));
+    let busy = matches!(status(), Status::Checking | Status::Downloading(_) | Status::Installed(_) | Status::Handed(_));
     let Some(asset) = asset_name().filter(|_| !busy) else { return };
     set(Status::Checking);
     let spawned = std::thread::Builder::new().name("update check".into()).spawn(move || {
@@ -362,12 +406,29 @@ pub fn swap(new: &Path, program: &Path) -> std::io::Result<()> {
     }
 }
 
-/// Downloads `r`, checks it and puts it in place of this program.
-fn install_now(r: &Release) -> Result<(), String> {
+/// The SHA-256 that `sums` (the release's `SHA256SUMS`) gives for `asset`.
+pub fn expected_sum(sums: &[u8], asset: &str) -> Result<String, String> {
+    sum_for(&String::from_utf8_lossy(sums), asset).ok_or_else(|| format!("SHA256SUMS has no {asset}"))
+}
+
+/// Checks that `bytes` hash to `want` (see [`expected_sum`]).
+pub fn check_sum(bytes: &[u8], want: &str) -> Result<(), String> {
+    let got = sha256_hex(bytes);
+    if got == want {
+        Ok(())
+    } else {
+        Err(format!("SHA-256 {got} is not the release's {want}"))
+    }
+}
+
+/// Downloads `r`, checks it and puts it in place of this program. True when the file went to
+/// the system's installer instead (Android): the player confirms it there.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn install_now(r: &Release) -> Result<bool, String> {
     let asset = asset_name().ok_or("no release for this system")?;
     let program = program().ok_or("the program's file is unknown")?;
     let sums = fetch(&r.sums_url, 60)?;
-    let want = sum_for(&String::from_utf8_lossy(&sums), asset).ok_or_else(|| format!("SHA256SUMS has no {asset}"))?;
+    let want = expected_sum(&sums, asset)?;
     let part = part_path(&program, asset);
     let out = curl()
         .args(["--max-time", "900", "-o"])
@@ -378,31 +439,55 @@ fn install_now(r: &Release) -> Result<(), String> {
     let checked = if !out.status.success() {
         Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
     } else {
-        let bytes = std::fs::read(&part).map_err(|e| format!("{}: {e}", part.display()))?;
-        let got = sha256_hex(&bytes);
-        if got == want {
-            swap(&part, &program).map_err(|e| format!("{}: {e}", program.display()))
-        } else {
-            Err(format!("SHA-256 {got} is not the release's {want}"))
-        }
+        std::fs::read(&part)
+            .map_err(|e| format!("{}: {e}", part.display()))
+            .and_then(|bytes| check_sum(&bytes, &want))
+            .and_then(|()| swap(&part, &program).map_err(|e| format!("{}: {e}", program.display())))
     };
     if checked.is_err() {
         let _ = std::fs::remove_file(&part);
     }
-    checked
+    checked.map(|()| false)
 }
 
-/// Downloads release `r` and puts it in place, on a background thread.
+/// Android: downloads the APK, checks it against `SHA256SUMS` and hands it to the system
+/// installer (which copies it before it returns; the file is removed then). True: handed over.
+#[cfg(target_os = "android")]
+fn install_now(r: &Release) -> Result<bool, String> {
+    let asset = asset_name().ok_or("no release for this system")?;
+    let sums = fetch(&r.sums_url, 60)?;
+    let want = expected_sum(&sums, asset)?;
+    let part = phone::cache_dir()?.join(format!("{asset}.update"));
+    let placed = phone::download(&r.program_url, &part, 900)
+        .and_then(|()| std::fs::read(&part).map_err(|e| format!("{}: {e}", part.display())))
+        .and_then(|bytes| check_sum(&bytes, &want))
+        .and_then(|()| phone::install(&part));
+    let _ = std::fs::remove_file(&part);
+    placed.map(|()| true)
+}
+
+/// iOS installs nothing (its window opens the release's page): nothing to do here.
+#[cfg(target_os = "ios")]
+fn install_now(_: &Release) -> Result<bool, String> {
+    Err("iOS installs by AltStore or Sideloadly, from the release's page".into())
+}
+
+/// Downloads release `r` and puts it in place, on a background thread. Not on iOS (which opens
+/// the page instead, see [`opens_page`]).
 pub fn install(r: Release) {
-    if matches!(status(), Status::Downloading(_) | Status::Installed(_)) {
+    if opens_page() || matches!(status(), Status::Downloading(_) | Status::Installed(_) | Status::Handed(_)) {
         return;
     }
     set(Status::Downloading(r.clone()));
     let spawned = std::thread::Builder::new().name("update download".into()).spawn(move || {
         set(match install_now(&r) {
-            Ok(()) => {
+            Ok(false) => {
                 crate::diag!("update: {} is in place; it runs from the next start", r.version);
                 Status::Installed(r)
+            }
+            Ok(true) => {
+                crate::diag!("update: {} is with the system installer", r.version);
+                Status::Handed(r)
             }
             Err(e) => {
                 crate::diag!("update: {} not installed: {e}", r.version);
@@ -530,6 +615,61 @@ mod tests {
     #[test]
     fn sha256_of_known_text() {
         assert_eq!(sha256_hex(b"abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    }
+
+    #[test]
+    fn each_system_gets_its_own_release_file() {
+        assert_eq!(asset_for("windows", "x86_64"), Some("Razdor.exe"));
+        assert_eq!(asset_for("windows", "aarch64"), None);
+        assert_eq!(asset_for("linux", "x86_64"), Some("razdor"));
+        assert_eq!(asset_for("linux", "aarch64"), None);
+        assert_eq!(asset_for("macos", "aarch64"), Some("razdor-macos"));
+        assert_eq!(asset_for("android", "aarch64"), Some("razdor.apk"));
+        assert_eq!(asset_for("android", "x86_64"), Some("razdor.apk"));
+        assert_eq!(asset_for("ios", "aarch64"), Some("razdor.ipa"));
+        assert_eq!(asset_for("freebsd", "x86_64"), None);
+    }
+
+    #[test]
+    fn a_phone_release_gives_its_file_and_its_page() {
+        let reply = r#"[{"tag_name":"v1.1.0","html_url":"https://x/v1.1.0","draft":false,"prerelease":false,
+            "body":"\n### Added\n- Phones.\n\n## SHA-256\nsums",
+            "assets":[{"name":"razdor.apk","browser_download_url":"https://x/razdor.apk"},
+                      {"name":"razdor.ipa","browser_download_url":"https://x/razdor.ipa"},
+                      {"name":"SHA256SUMS","browser_download_url":"https://x/SHA256SUMS"}]}]"#;
+        let apk = parse_releases(reply.as_bytes(), Version(1, 0, 2), "razdor.apk").unwrap().unwrap();
+        assert_eq!(apk.program_url, "https://x/razdor.apk");
+        assert_eq!(apk.page, "https://x/v1.1.0");
+        let ipa = parse_releases(reply.as_bytes(), Version(1, 0, 2), "razdor.ipa").unwrap().unwrap();
+        assert_eq!(ipa.program_url, "https://x/razdor.ipa");
+        assert_eq!(apk.notes, vec![Note::Release(Version(1, 1, 0)), Note::Section("Added".into()), Note::Item("Phones.".into())]);
+        // A release without the phone's file is no update for that phone.
+        assert!(parse_releases(reply.as_bytes(), Version(1, 0, 2), "razdor-macos").is_err());
+    }
+
+    #[test]
+    fn always_reads_as_ask_on_a_phone_only() {
+        assert_eq!(effective_on(Mode::Always, true), Mode::Ask);
+        assert_eq!(effective_on(Mode::Always, false), Mode::Always);
+        assert_eq!(effective_on(Mode::Ask, true), Mode::Ask);
+        assert_eq!(effective_on(Mode::Off, true), Mode::Off);
+        assert_eq!(effective_on(Mode::Off, false), Mode::Off);
+    }
+
+    #[test]
+    fn the_phone_and_the_desktop_check_the_same_sums() {
+        let sums = b"0e4b2c  razdor.apk\nbeef  razdor.ipa\n";
+        let want = expected_sum(sums, "razdor.apk").unwrap();
+        assert_eq!(want, "0e4b2c");
+        assert!(expected_sum(sums, "razdor-macos").is_err());
+        assert!(check_sum(b"abc", &sha256_hex(b"abc")).is_ok());
+        let wrong = check_sum(b"abc", "0000").unwrap_err();
+        assert!(wrong.starts_with("SHA-256 ba7816"), "{wrong}");
+        // Through the release's own SHA256SUMS line.
+        let line = format!("{}  razdor.apk\n", sha256_hex(b"apk bytes"));
+        let want = expected_sum(line.as_bytes(), "razdor.apk").unwrap();
+        assert!(check_sum(b"apk bytes", &want).is_ok());
+        assert!(check_sum(b"apk bytes!", &want).is_err());
     }
 
     #[test]

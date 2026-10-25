@@ -14,6 +14,7 @@ use std::cell::Cell;
 use std::ffi::{CStr, CString};
 
 use macroquad::miniquad::native::android::{attach_jni_env, ndk_sys as sys, ACTIVITY};
+use razdor::jni::{activity_class, cleared, class, method, string, Local};
 
 /// The first release whose all-files access is its own permission page.
 const ALL_FILES_API: i32 = 30;
@@ -27,61 +28,6 @@ const STORAGE_PERMISSIONS: [&str; 2] = ["android.permission.READ_EXTERNAL_STORAG
 local! {
     /// The not-found screen has looked at the storage access once in this run ([`ask_once`]).
     static ASKED: Cell<bool> = const { Cell::new(false) };
-}
-
-/// A local JNI reference, freed when dropped.
-struct Local {
-    env: *mut sys::JNIEnv,
-    obj: sys::jobject,
-}
-
-impl Local {
-    fn new(env: *mut sys::JNIEnv, obj: sys::jobject) -> Local {
-        Local { env, obj }
-    }
-}
-
-impl Drop for Local {
-    fn drop(&mut self) {
-        if !self.obj.is_null() {
-            // SAFETY: `obj` is a local reference of `env`'s thread, freed once.
-            unsafe { ((**self.env).DeleteLocalRef.unwrap())(self.env, self.obj) };
-        }
-    }
-}
-
-/// Clears a Java exception raised by the last call; true when there was one.
-unsafe fn cleared(env: *mut sys::JNIEnv) -> bool {
-    let pending = ((**env).ExceptionCheck.unwrap())(env) != 0;
-    if pending {
-        ((**env).ExceptionClear.unwrap())(env);
-    }
-    pending
-}
-
-unsafe fn class(env: *mut sys::JNIEnv, name: &str) -> Local {
-    let name = CString::new(name).unwrap();
-    Local::new(env, ((**env).FindClass.unwrap())(env, name.as_ptr()))
-}
-
-unsafe fn string(env: *mut sys::JNIEnv, text: &str) -> Local {
-    let text = CString::new(text).unwrap();
-    Local::new(env, ((**env).NewStringUTF.unwrap())(env, text.as_ptr()))
-}
-
-unsafe fn method(env: *mut sys::JNIEnv, cls: sys::jclass, name: &str, sig: &str, is_static: bool) -> sys::jmethodID {
-    let name = CString::new(name).unwrap();
-    let sig = CString::new(sig).unwrap();
-    if is_static {
-        ((**env).GetStaticMethodID.unwrap())(env, cls, name.as_ptr(), sig.as_ptr())
-    } else {
-        ((**env).GetMethodID.unwrap())(env, cls, name.as_ptr(), sig.as_ptr())
-    }
-}
-
-/// The activity's class (its methods are looked up on it).
-unsafe fn activity_class(env: *mut sys::JNIEnv) -> Local {
-    Local::new(env, ((**env).GetObjectClass.unwrap())(env, ACTIVITY))
 }
 
 /// `Build.VERSION.SDK_INT` (0 when it cannot be read).

@@ -115,6 +115,18 @@ Other diagnostics: `razdor.log` in the data folder (`razdor::diag`, `RAZDOR_LOG=
   only if its SHA-256 matches `SHA256SUMS`, and replaces itself by rename. A `cargo`
   build checks nothing unless `RAZDOR_UPDATE_AS=<X.Y.Z>`. The update window shows the
   release notes up to their first `## ` heading.
+- Phones (`update::asset_name`: `razdor.apk` on Android, `razdor.ipa` on iOS; the names the
+  release workflow publishes, keep them): no `curl`, so `src/update/phone.rs` makes the
+  requests. Android downloads the APK with `HttpURLConnection` in `razdorDownload`
+  (`android/MainActivityInject.java`), checks it the same way, and `razdorInstall` copies it into a
+  `PackageInstaller` session whose commit the system confirms on screen (the window says so:
+  `Status::Handed`). No FileProvider: cargo-quad-apk cannot declare a provider, and the
+  session takes the bytes. The permissions REQUEST_INSTALL_PACKAGES and INTERNET are in `Cargo.toml`.
+  Mode Always reads as Ask there (`update::effective`). iOS installs nothing: its window
+  opens the release page (`ui::main_menu::open_link`) and the check uses `NSData`.
+  The JNI helpers are in `src/jni.rs`, shared by `update::phone` and `ui::android`.
+  These paths are checked by `cargo check --target aarch64-linux-android` and
+  `aarch64-apple-ios` only; the install itself was not run on a device.
 
 ## The map editor (briefly)
 

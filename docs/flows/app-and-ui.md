@@ -54,8 +54,9 @@ app as «На iPhone → Раздор», so the player copies the game there; no
 (`screens::ios_not_found`: the copy instructions and «Check again», the Android block's layout) and
 the poll (`App::mobile_install_poll`, `ui::mobile`: the `RECHECK` / `NEXT_POLL` helpers, the 5-s
 look for the install, `storage_granted` = always true on iOS) are shared with Android; the JNI parts
-stay in `ui::android`. The on-screen keyboard is on for both (`widgets::set_keyboard`). No
-self-update; the Discord link opens through `ui::mobile::open_url` (see the main menu above). `ui/script_font.rs` skips the fontconfig lookup on iOS, as on Android.
+stay in `ui::android` (the shared helpers in `src/jni.rs`). The on-screen keyboard is on for both (`widgets::set_keyboard`). The
+update window (`ui/update_view.rs`) offers a release on the phones too: Android installs it through the system
+installer, iOS opens the release page; the Discord link opens through `ui::mobile::open_url` (see the main menu above). `ui/script_font.rs` skips the fontconfig lookup on iOS, as on Android.
 
 The APK is built by `scripts/dist-android.sh` (cargo-quad-apk, pinned in its header; NDK 29;
 see `[package.metadata.android]` in `Cargo.toml`). The launcher icon is `android/res/mipmap-*/ic_launcher.png`
@@ -85,8 +86,7 @@ on desktop, `ui::android::open_url` (an `ACTION_VIEW` intent) on Android, `ui::m
 While it
 is shown, `App::mobile_install_poll` (`ui::mobile`; on the main menu and the scenario list; every 5 s
 once the permission is granted, and on the button) loads a newly found install with `Assets::adopt_install` and the `ui/mod.rs` helpers
-`dt_content_of` / `scenarios_of`, without a restart. Android has no self-update (`update::asset_name` is None); its
-Discord link opens through `open_url` like the desktop's (see the main menu above). The log cannot be opened before
+`dt_content_of` / `scenarios_of`, without a restart. Its Discord link opens through `open_url` like the desktop's (see the main menu above). The log cannot be opened before
 the access (the folder is not writable), so the poll calls `diag::reopen_log` once it is granted.
 Game archives on the not-found block (`dt::unpack`, `ui::mobile`, every platform): `look_for_archives`
 scans `platform::archive_dirs()` (the phones: the install folders, Download, the storage root; the desktop:

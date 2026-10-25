@@ -38,7 +38,7 @@ pub fn tick(mode: Mode) {
     if !STARTED.with(|s| s.replace(true)) && mode != Mode::Off && update::enabled() && !super::clock::is_snapshot() {
         update::check();
     }
-    if let (Mode::Always, Status::Found(r)) = (mode, update::status()) {
+    if let (Mode::Always, Status::Found(r)) = (update::effective(mode), update::status()) {
         update::install(r);
     }
 }
@@ -56,9 +56,10 @@ pub fn check_by_hand() {
 
 /// The update window wants to be on screen, at a calm moment.
 pub fn wanted(mode: Mode, calm: bool) -> bool {
+    let mode = update::effective(mode);
     calm && match update::status() {
         Status::Found(_) => mode != Mode::Always && (mode == Mode::Ask || BY_HAND.with(|b| b.get())) && !LATER.with(|l| l.get()),
-        Status::Installed(_) | Status::InstallFailed(..) => ASKED.with(|a| a.get()) && !TOLD.with(|t| t.get()),
+        Status::Installed(_) | Status::Handed(_) | Status::InstallFailed(..) => ASKED.with(|a| a.get()) && !TOLD.with(|t| t.get()),
         _ => false,
     }
 }
@@ -105,7 +106,20 @@ pub fn status_label() -> String {
         Status::Found(r) => trf!("Razdor {v} is out", v = r.version),
         Status::Downloading(r) => trf!("Downloading {v}…", v = r.version),
         Status::Installed(r) => trf!("{v} starts next time", v = r.version),
+        Status::Handed(r) => trf!("Razdor {v} waits for its install", v = r.version),
         Status::InstallFailed(..) => tr("Could not update").into(),
+    }
+}
+
+/// The offer's text: what the release is and what the player does about it, per system.
+fn offer_text(r: &Release) -> String {
+    let old = shown_version(&update::current().to_string(), super::clock::is_snapshot());
+    if update::opens_page() {
+        trf!("Razdor {new} is out (you have {old}). Its page has the file: install it with AltStore or Sideloadly. What changed:", new = r.version, old = old)
+    } else if razdor::platform::MOBILE {
+        trf!("Razdor {new} is out (you have {old}). Update now? It downloads and is checked here, then Android asks you to confirm the install. What changed:", new = r.version, old = old)
+    } else {
+        trf!("Razdor {new} is out (you have {old}). Update now? It downloads while you play and starts the next time you open the game. What changed:", new = r.version, old = old)
     }
 }
 
@@ -203,11 +217,12 @@ pub fn frame(on_title: bool, mode: &mut Mode) -> bool {
     let r = Rect::new((screen_width() - w) / 2.0, (screen_height() - h) / 2.0, w, h);
     draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.35));
     let (title, lines) = match &status {
-        Status::Found(r) => (
-            tr("A new version of Razdor"),
-            trf!("Razdor {new} is out (you have {old}). Update now? It downloads while you play and starts the next time you open the game. What changed:", new = r.version, old = shown_version(&update::current().to_string(), super::clock::is_snapshot())),
-        ),
+        Status::Found(r) => (tr("A new version of Razdor"), offer_text(r)),
         Status::Installed(r) => (tr("Update installed"), trf!("Razdor {v} is installed. It starts the next time you open the game.", v = r.version)),
+        Status::Handed(r) => (
+            tr("Confirm the update"),
+            trf!("Razdor {v} waits for you to confirm its install on the screen. If Android first asks to allow installs from Razdor, allow them: the update is offered again at the next start.", v = r.version),
+        ),
         Status::InstallFailed(r, why) => (tr("Update failed"), trf!("Razdor {v} could not be installed: {why}", v = r.version, why)),
         _ => return false,
     };
@@ -223,18 +238,40 @@ pub fn frame(on_title: bool, mode: &mut Mode) -> bool {
     }
     let close = closed || key(KeyCode::Escape);
     match status {
+        Status::Found(rel) if update::opens_page() => {
+            // iOS installs nothing: the release's page opens in the browser, where the IPA is.
+            match buttons(inner, &[tr("Open the release page"), tr("Later")]) {
+                Some(0) => {
+                    super::main_menu::open_link(&rel.page);
+                    LATER.with(|l| l.set(true));
+                }
+                Some(_) => LATER.with(|l| l.set(true)),
+                None if close => LATER.with(|l| l.set(true)),
+                None => {}
+            }
+        }
         Status::Found(rel) => {
-            let picked = buttons(inner, &[tr("Update"), tr("Always update"), tr("Later")]);
-            if picked == Some(0) || picked == Some(1) || (picked.is_none() && key(KeyCode::Enter)) {
-                // "Always update": from now on without this window.
-                if picked == Some(1) {
+            // Desktop: "Always update" too (from now on without this window). A phone has no
+            // "Always" (the system's installer asks), so its buttons are "Update" and "Later".
+            let desktop = !razdor::platform::MOBILE;
+            let labels: Vec<&str> = if desktop { vec![tr("Update"), tr("Always update"), tr("Later")] } else { vec![tr("Update"), tr("Later")] };
+            let later = labels.len() - 1;
+            let picked = buttons(inner, &labels);
+            let always = desktop && picked == Some(1);
+            if picked == Some(0) || always || (picked.is_none() && key(KeyCode::Enter)) {
+                if always {
                     *mode = Mode::Always;
                 }
                 ASKED.with(|a| a.set(true));
                 TOLD.with(|t| t.set(false));
                 update::install(rel);
-            } else if picked == Some(2) || close {
+            } else if picked == Some(later) || close {
                 LATER.with(|l| l.set(true));
+            }
+        }
+        Status::Handed(_) => {
+            if buttons(inner, &[tr("OK")]).is_some() || close || key(KeyCode::Enter) {
+                TOLD.with(|t| t.set(true));
             }
         }
         Status::Installed(_) => {
@@ -249,7 +286,7 @@ pub fn frame(on_title: bool, mode: &mut Mode) -> bool {
             }
         }
         Status::InstallFailed(rel, _) => match buttons(inner, &[tr("Open the release page"), tr("OK")]) {
-            Some(0) => update::open_in_browser(&rel.page),
+            Some(0) => super::main_menu::open_link(&rel.page),
             Some(_) => TOLD.with(|t| t.set(true)),
             None if close || key(KeyCode::Enter) => TOLD.with(|t| t.set(true)),
             None => {}

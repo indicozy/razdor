@@ -909,8 +909,9 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     }
     // Updates from the GitHub releases (`razdor::update`): offered, put in place quietly, or
     // not looked for; "Check now" asks at once and shows the answer.
-    // Android and iOS have no self-update (`razdor::update::asset_name`): the row is not drawn
-    // there and the zoom row takes its place.
+    // Phones have their own update window (Android installs through the system, iOS opens the
+    // release's page; `razdor::update::opens_page`): the row is not drawn there and the zoom
+    // row takes its place.
     let y = if razdor::platform::MOBILE {
         y
     } else {

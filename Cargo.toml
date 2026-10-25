@@ -55,6 +55,10 @@ test = false
 # `--no-default-features --features audio` (no gamepads: gilrs is Linux and desktop only).
 # Storage: Razdor reads the install from the shared storage, so the app asks for the all-files
 # access (MANAGE_EXTERNAL_STORAGE); Android 8 to 10 get the runtime storage permissions.
+# Updates (`update::phone`): INTERNET for the check and the APK's download; REQUEST_INSTALL_PACKAGES
+# for handing the downloaded APK to the system installer (the player confirms it there). No
+# FileProvider: cargo-quad-apk cannot declare a <provider>, and the installer session takes the
+# file's bytes, so no content URI is shared.
 [package.metadata.android]
 package_name = "io.github.indicozy.razdor"
 label = "Раздор"
@@ -77,6 +81,12 @@ res = "android/res"
 "android:screenOrientation" = "fullUser"
 # Targeting Android 12 (API 31) and later requires it where the activity has an intent filter.
 "android:exported" = "true"
+
+[[package.metadata.android.permission]]
+name = "android.permission.INTERNET"
+
+[[package.metadata.android.permission]]
+name = "android.permission.REQUEST_INSTALL_PACKAGES"
 
 [[package.metadata.android.permission]]
 name = "android.permission.MANAGE_EXTERNAL_STORAGE"

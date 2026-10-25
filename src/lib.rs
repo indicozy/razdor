@@ -3,6 +3,8 @@ pub mod diag;
 pub mod local;
 pub mod difftest;
 pub mod i18n;
+#[cfg(target_os = "android")]
+pub mod jni;
 pub mod platform;
 pub mod rules;
 pub mod search;
