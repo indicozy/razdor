@@ -143,12 +143,15 @@ fn read_archive_within(bytes: &[u8], budget: u64, max_maps: usize) -> Result<Vec
         // One byte more than what is left, so an entry that goes over the budget shows it.
         let left = budget.saturating_sub(total).min(MAX_PICKED_MAP_BYTES);
         let mut data = Vec::new();
-        if entry.by_ref().take(left + 1).read_to_end(&mut data).is_err() {
-            continue;
-        }
+        let read = entry.by_ref().take(left + 1).read_to_end(&mut data);
+        // The bytes unpacked count against the budget even when the entry then fails (a broken
+        // entry must not let an archive unpack past it).
         total += data.len() as u64;
         if total > budget {
             return Err(ImportError::BadArchive(format!("the maps inside are more than {} MiB", budget >> 20)));
+        }
+        if read.is_err() {
+            continue;
         }
         if data.len() as u64 > MAX_PICKED_MAP_BYTES {
             continue;
