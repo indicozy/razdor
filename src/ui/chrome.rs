@@ -1774,14 +1774,21 @@ pub fn strip_height(k: f32, factor: f32) -> f32 {
     (26.0 * k * factor).round()
 }
 
-/// The title strip of the windows now, in px (the interface scale's and the text's).
-pub fn title_strip() -> f32 {
-    strip_height(k(), super::display::title_factor(k()))
+/// The title factor of a fixed-layout window (the hero, army, building and settings windows, the
+/// save and the spell book): the original's title whatever «Размер текста» is, since their
+/// layouts are fixed. Only the windows that can grow take the text's title (`growing_title`).
+pub const FIXED_TITLE: f32 = 1.0;
+
+/// The title factor of the windows that can grow with the text (the event and message windows):
+/// the text's scale over the interface scale (`display::title_factor`).
+pub fn growing_title() -> f32 {
+    super::display::title_factor(k())
 }
 
-/// How much taller the title strip is than the original's 26 px, in px (0 at the original's size).
+/// How much taller the growing windows' title strip is than the original's 26 px, in px (0 at
+/// the original's size).
 pub fn title_grow() -> f32 {
-    title_strip() - (26.0 * k()).round()
+    strip_height(k(), growing_title()) - (26.0 * k()).round()
 }
 
 /// The frames 0x48d3f8 draws on every window: a 2 px frame round it and a 2 px line from
@@ -1835,7 +1842,7 @@ pub fn close_button(x: f32, y: f32, s: f32, red: bool) -> bool {
 /// Title bar of a window: the window's own skin, the title centred; `ornate` puts the
 /// corner ornaments on a wide one, including town and building windows.
 /// Returns true when its close box (if any) was clicked.
-fn title_bar_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bool, title_color: Option<Color>) -> bool {
+fn title_bar_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bool, title_color: Option<Color>, factor: f32) -> bool {
     let k = k();
     surface(r, skin);
     draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, 0.0, 0.0, 0.15));
@@ -1846,7 +1853,7 @@ fn title_bar_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bo
     let face = super::typography::Role::Title.face();
     // Razdor's text size scales the titles too (the owner's request: phones' titles are small);
     // at the original's size this is the title's own.
-    let size = super::typography::Role::Title.size((16.0 * k).round()) * super::display::title_factor(k);
+    let size = super::typography::Role::Title.size((16.0 * k).round()) * factor;
     let title_w = super::dt_font::with_face(face, || measure(title, size).width);
     let ornate = ornate && matches!(skin, Skin::Red | Skin::Marble) && r.w > 400.0 && title_w < r.w - 300.0 * k;
     if let Some(t) = win_fx("Corner-Left", Fx::KeyBlack).filter(|_| ornate) {
@@ -1870,7 +1877,8 @@ fn title_bar_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bo
         let t = super::widgets::ellipsize(title, room, size);
         shadow_centered(&t, r.x + r.w / 2.0, r.y + r.h * 0.5 + size * 0.36, size, color);
     });
-    if super::display::native_text() { block() } else { super::dt_font::with_legacy_metrics(block) }
+    // The original's size (factor 1) is drawn as it always was; a grown title takes its size.
+    if factor == FIXED_TITLE { block() } else { super::dt_font::with_legacy_metrics(block) }
     if closable {
         let s = r.h - 6.0 * k;
         return close_button(r.x + r.w - s - 4.0 * k, r.y + 3.0 * k, s, skin == Skin::Red);
@@ -1881,11 +1889,22 @@ fn title_bar_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bo
 /// A modal window: background, silver frame, title bar. Returns the area below the title
 /// bar and whether the close box was clicked.
 pub fn window(r: Rect, title: &str, skin: Skin, closable: bool) -> (Rect, bool) {
-    window_styled(r, title, skin, closable, true, None)
+    window_styled(r, title, skin, closable, true, None, FIXED_TITLE)
 }
 
 pub fn window_with_title_color(r: Rect, title: &str, skin: Skin, closable: bool, color: Color) -> (Rect, bool) {
-    window_styled(r, title, skin, closable, true, Some(color))
+    window_styled(r, title, skin, closable, true, Some(color), FIXED_TITLE)
+}
+
+/// [`window`] for a window that can grow with the text (an event or message window): its title
+/// takes «Размер текста» (`growing_title`), and its strip grows (`title_grow`).
+pub fn window_grown(r: Rect, title: &str, skin: Skin, closable: bool) -> (Rect, bool) {
+    window_styled(r, title, skin, closable, true, None, growing_title())
+}
+
+/// [`window_with_title_color`] for a window that can grow with the text (see [`window_grown`]).
+pub fn window_with_title_color_grown(r: Rect, title: &str, skin: Skin, closable: bool, color: Color) -> (Rect, bool) {
+    window_styled(r, title, skin, closable, true, Some(color), growing_title())
 }
 
 /// The battle exit window uses the artwork's own pixel scale for its title and nested frames.
@@ -1912,7 +1931,7 @@ pub fn battle_exit_frame(r: Rect, title: &str, px: f32) -> bool {
     close_button(r.right() - 23.0 * px, r.y + 3.0 * px, 20.0 * px, true)
 }
 
-fn window_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bool, title_color: Option<Color>) -> (Rect, bool) {
+fn window_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bool, title_color: Option<Color>, factor: f32) -> (Rect, bool) {
     let k = k();
     BIGGEST.with(|b| {
         if b.get().is_none_or(|o| o.w * o.h < r.w * r.h) {
@@ -1925,8 +1944,10 @@ fn window_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bool,
     super::pan::window_area(r);
     // The title strip grows with the text size, so a large title keeps its room (at the
     // original's size it is 26 px).
-    let tb = title_strip();
-    let closed = title_bar_styled(Rect::new(r.x, r.y, r.w, tb), title, skin, closable, ornate, title_color);
+    // The title strip is 26 px at the original's size, taller by the title's factor (a growing
+    // window only; `FIXED_TITLE` keeps 26 px).
+    let tb = strip_height(k, factor);
+    let closed = title_bar_styled(Rect::new(r.x, r.y, r.w, tb), title, skin, closable, ornate, title_color, factor);
     // The frame round the window and the line under its title (0x48d3f8).
     window_frames_grown(r, opx(), tb - (26.0 * k).round());
     // Each caller draws the frames for its own content and footer.
@@ -2698,6 +2719,19 @@ pub fn effect(rel: &str, c: Vec2, size: f32, t: f32, color: Color) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A fixed-layout window (the hero, army, building and settings windows, the save and the
+    /// spell book) keeps the original's title whatever «Размер текста» is: its factor is
+    /// `FIXED_TITLE`, its strip stays 26 px at every interface scale and text size.
+    #[test]
+    fn a_fixed_window_s_title_ignores_the_text_size() {
+        assert_eq!(FIXED_TITLE, 1.0);
+        for kk in [0.75_f32, 1.0, 1.5, 2.25] {
+            assert_eq!(strip_height(kk, FIXED_TITLE), (26.0 * kk).round(), "k {kk}: the fixed strip is the original's");
+        }
+        // The growing windows take the text's factor instead (a phone's 1.25 is above 1).
+        assert!(strip_height(1.5, 2.0) > strip_height(1.5, FIXED_TITLE));
+    }
 
     /// The grey-out reads the screen copy on desktop only: phones draw the veil (see
     /// [`grey_by_screen_texture`]).

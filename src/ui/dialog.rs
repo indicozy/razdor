@@ -659,9 +659,9 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     // The defeat look is the red marble (the original's window after a lost battle).
     let skin = if d.defeat { chrome::Skin::Red } else { chrome::Skin::Marble };
     if d.defeat || d.resource_report {
-        chrome::window_with_title_color(Rect::new(x, y, w, h), &d.title, skin, false, Color::from_rgba(255, 255, 255, 255));
+        chrome::window_with_title_color_grown(Rect::new(x, y, w, h), &d.title, skin, false, Color::from_rgba(255, 255, 255, 255));
     } else {
-        chrome::window(Rect::new(x, y, w, h), &d.title, skin, false);
+        chrome::window_grown(Rect::new(x, y, w, h), &d.title, skin, false);
     }
     let edge = o.max(1.0);
     // The event window's inner frames (0x4aaa4b, 0x4aaa79), as 0x48d710's.
@@ -881,7 +881,7 @@ fn draw_village_event(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Optio
     let h = fixed + panel_h + grow;
     let x = ((screen_width() - w) / 2.0).round();
     let y = ((screen_height() - chrome::bar_height() - h) / 2.0).max(2.0).round();
-    chrome::window(Rect::new(x, y, w, h), &d.title, chrome::Skin::Marble, false);
+    chrome::window_grown(Rect::new(x, y, w, h), &d.title, chrome::Skin::Marble, false);
     let footer = Rect::new(x + 2.0 * o, y + h - 55.0 * o, w - 4.0 * o, 53.0 * o);
     // The village window is ae2520's kind, with 0x48d710's inner frames (moved down with the
     // taller title strip).
