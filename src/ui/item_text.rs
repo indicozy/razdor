@@ -72,6 +72,11 @@ struct Line {
 /// takes Razdor's text size on the phone's text base (`display::text_for`; the owner's request:
 /// phones' text too small), as the messages do.
 fn lines(game: &Game, item: ItemId, room: f32, s: f32) -> Vec<Line> {
+    // A phone's text takes its own size: measured with the legacy metrics (see `draw`).
+    super::dt_font::legacy_metrics_if(super::display::dp_px().is_some(), || lines_at(game, item, room, s))
+}
+
+fn lines_at(game: &Game, item: ItemId, room: f32, s: f32) -> Vec<Line> {
     let d = game.content.item(item);
     let t = super::display::text_for(s, crate::ui::dialog::TEXT_REF);
     let (title, body) = (sheet_size(Face::Subtitle, t), sheet_size(Face::Body, t));
@@ -152,9 +157,13 @@ pub fn draw(game: &Game, assets: &Assets, item: ItemId, r: Rect, kind: ItemBox, 
         ItemBox::Tooltip => TOOLTIP_MARGIN * scale,
     };
     let room = r.w - 2.0 * side * scale;
-    let mut y = r.y + top;
-    for l in &text {
-        draw_markup_row_face(&l.row, r.x + side * scale, y + l.size * 0.85, room, l.size, l.face, Some(l.color));
-        y += advance(l);
-    }
+    // On a phone the lines are drawn with the legacy metrics too: under native metrics the
+    // sheet fonts would ignore the size they were measured at (see `lines`).
+    super::dt_font::legacy_metrics_if(super::display::dp_px().is_some(), || {
+        let mut y = r.y + top;
+        for l in &text {
+            draw_markup_row_face(&l.row, r.x + side * scale, y + l.size * 0.85, room, l.size, l.face, Some(l.color));
+            y += advance(l);
+        }
+    });
 }

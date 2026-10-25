@@ -1544,12 +1544,17 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     // larger, its titles with it; its box scrolls, so it takes any size.
     // On a phone the text base is one px per dp (`display::text_for`, the 1.0.2 large-window
     // scale), so the diary reads as large as the messages do; the desktop is unchanged.
+    // Under native metrics (the whole frame) the sheet fonts ignore the size passed, so the
+    // phone's diary (its wrap and its drawing) runs with the legacy metrics, which take it.
+    let phone = super::display::dp_px().is_some();
     let ts = super::display::text_for(s, crate::ui::dialog::TEXT_REF);
-    let body = diary_body_size(super::display::dp_px().is_some(), ts);
+    let body = diary_body_size(phone, ts);
     let room = entry.w - 16.0 * s;
-    let lines = rows.get(view.pick).map_or_else(Vec::new, |row| match view.tab {
-        Tab::Active => diary_entry(row, room, head * ts / s, body),
-        tab => history_entry(row, tab, room, head * ts / s, body),
+    let lines = super::dt_font::legacy_metrics_if(phone, || {
+        rows.get(view.pick).map_or_else(Vec::new, |row| match view.tab {
+            Tab::Active => diary_entry(row, room, head * ts / s, body),
+            tab => history_entry(row, tab, room, head * ts / s, body),
+        })
     });
     let line_h = (body * 1.15).round();
     let shown = ((entry.h - 12.0 * s) / line_h).floor().max(1.0) as usize;
@@ -1565,10 +1570,12 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     scrollbar_always(entry_bar, &mut view.text_scroll, shown, lines.len());
     chrome::text_box_sides(entry_box);
     chrome::silver_frame(entry_box, chrome::k().max(1.0));
-    for (n, line) in lines.iter().skip(view.text_scroll).take(shown).enumerate() {
-        let y = entry.y + 6.0 * s + n as f32 * line_h + body * 0.85;
-        draw_markup_row_face(&line.row, entry.x + 8.0 * s, y, room, line.size, line.face, Some(line.color));
-    }
+    super::dt_font::legacy_metrics_if(phone, || {
+        for (n, line) in lines.iter().skip(view.text_scroll).take(shown).enumerate() {
+            let y = entry.y + 6.0 * s + n as f32 * line_h + body * 0.85;
+            draw_markup_row_face(&line.row, entry.x + 8.0 * s, y, room, line.size, line.face, Some(line.color));
+        }
+    });
 
     // The item held is the pointer; closing the window puts it back in the pack (the screen
     // change in `App::frame`, 0x4b8d28).

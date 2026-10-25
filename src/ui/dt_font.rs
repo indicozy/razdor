@@ -344,6 +344,17 @@ pub fn native_metrics() -> bool {
     NATIVE_METRICS.with(Cell::get) && mode() == FontMode::Original
 }
 
+/// Runs `f` with the legacy metrics when `on` (a box whose text takes Razdor's own sizes,
+/// e.g. the phone's text size), else as it is.
+pub fn legacy_metrics_if<R>(on: bool, f: impl FnOnce() -> R) -> R {
+    if on { with_legacy_metrics(f) } else { f() }
+}
+
+#[cfg(test)]
+fn native_flag() -> bool {
+    NATIVE_METRICS.with(Cell::get)
+}
+
 pub fn native_size(face: Face, fallback: f32) -> f32 {
     if !NATIVE_METRICS.with(Cell::get) || mode() != FontMode::Original {
         return fallback;
@@ -450,6 +461,17 @@ pub fn draw_shadow(s: &str, x: f32, y: f32, size: f32, alpha: f32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_metrics_if_turns_native_sizing_off_only_when_asked() {
+        with_native_metrics(|| {
+            assert!(native_flag());
+            assert!(!legacy_metrics_if(true, native_flag));
+            assert!(legacy_metrics_if(false, native_flag));
+            // The flag is restored after the closure.
+            assert!(native_flag());
+        });
+    }
 
     #[test]
     fn the_font_mode_defaults_to_the_original_s_and_toggles() {
