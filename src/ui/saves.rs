@@ -1129,8 +1129,8 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art:
     let fit = if phone_menu { ((r.w - 18.75 * k - gap * (n as f32 - 1.0)) / widths.iter().sum::<f32>()).min(1.0) } else { 1.0 };
     // The plain window's row: 10 px from the sides and between the buttons (four on the
     // desktop; a phone's five share the same row, 4 px apart).
-    let gap = if phone_menu { 4.0 * k } else { 10.0 * k };
-    let bw = (inner.w - 20.0 * k - gap * (n as f32 - 1.0)) / n as f32;
+    let plain_gap = if phone_menu { 4.0 * k } else { 10.0 * k };
+    let bw = (inner.w - 20.0 * k - plain_gap * (n as f32 - 1.0)) / n as f32;
     let button_h = 36.0 * 0.9375 * k;
     let by = if art { r.bottom() - (footer_h + button_h) / 2.0 } else { inner.y + inner.h - 42.0 * k };
     // The original's buttons: three from the left 8 apart, «Отмена» on the right.
@@ -1145,7 +1145,7 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art:
                 else { r.x + 9.375 * k + widths[..i].iter().map(|w| w * fit + gap).sum::<f32>() };
             Rect::new(x, by, widths[i] * fit, button_h)
         } else {
-            Rect::new(inner.x + 10.0 * k + i as f32 * (bw + gap), by, bw, 30.0 * k)
+            Rect::new(inner.x + 10.0 * k + i as f32 * (bw + plain_gap), by, bw, 30.0 * k)
         };
         let (_, down, pressed) = super::widgets::button_state(b, !*asking);
         super::chrome::marble_button(b, label, true, down);
