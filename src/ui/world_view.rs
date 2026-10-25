@@ -1396,19 +1396,29 @@ fn hero_frame(next: Option<(f32, f32)>) -> u32 {
     }
 }
 
-fn draw_figure(art: Option<&DtArt>, stem: &str, pos: (f32, f32), next: Option<(f32, f32)>, frame: u32, cam: &Camera, stand: Stand) -> bool {
-    let Some(sheet) = art.and_then(|a| a.figure_sheet(stem)) else { return false };
-    let n = sheet.width() / 8.0;
+/// The screen square a figure's sprite is drawn in, from its feet at world `pos`. None if the
+/// install has no such sprite.
+fn figure_rect(art: Option<&DtArt>, stem: &str, pos: (f32, f32), cam: &Camera, stand: Stand) -> Option<Rect> {
+    let sheet = art.and_then(|a| a.figure_sheet(stem))?;
+    let size = sheet.width() / 8.0 * cam.scale / PX;
     let p = cam.to_screen(pos);
-    let heading = next.map_or(Vec2::ZERO, |n| cam.to_screen(n) - p);
-    let row = facing_row(heading);
-    let frame = frame.min(7) as f32;
-    let size = n * cam.scale / PX;
     let dest = match stand {
         // The figure's own alpha holds its shadow (the .ugs frames); nothing is added under it.
         Stand::Feet => vec2(p.x - size / 2.0, p.y - size * 0.8),
         Stand::Afloat => vec2(p.x - size / 2.0, p.y - size * 0.55),
     };
+    Some(Rect::new(dest.x, dest.y, size, size))
+}
+
+fn draw_figure(art: Option<&DtArt>, stem: &str, pos: (f32, f32), next: Option<(f32, f32)>, frame: u32, cam: &Camera, stand: Stand) -> bool {
+    let Some(sheet) = art.and_then(|a| a.figure_sheet(stem)) else { return false };
+    let Some(rect) = figure_rect(art, stem, pos, cam, stand) else { return false };
+    let n = sheet.width() / 8.0;
+    let p = cam.to_screen(pos);
+    let heading = next.map_or(Vec2::ZERO, |n| cam.to_screen(n) - p);
+    let row = facing_row(heading);
+    let frame = frame.min(7) as f32;
+    let (dest, size) = (vec2(rect.x, rect.y), rect.w);
     // The sheets hold premultiplied colour and the original draws every figure with
     // SRCBLEND ONE, DESTBLEND INVSRCALPHA (0x4c9ef6, 0x4ca0d9): the Ghost's light where its
     // alpha is 0 is added to the map, its glow.
@@ -1422,6 +1432,45 @@ fn draw_figure(art: Option<&DtArt>, stem: &str, pos: (f32, f32), next: Option<(f
         )
     });
     true
+}
+
+/// The figure under a screen point, of `(cell, sprite rect, feet)` entries: the one whose body
+/// contains the point, its transparent margins left out (the middle 60% across, the top 15%
+/// ignored), and among several the one whose feet are nearest. The body is drawn above its
+/// feet, so a point can lie in the cell above a figure's cell.
+fn figure_under(pointer: Vec2, figures: &[(Tile, Rect, Vec2)]) -> Option<Tile> {
+    figures
+        .iter()
+        .filter(|(_, r, _)| Rect::new(r.x + r.w * 0.2, r.y + r.h * 0.15, r.w * 0.6, r.h * 0.85).contains(pointer))
+        .min_by(|a, b| a.2.distance_squared(pointer).total_cmp(&b.2.distance_squared(pointer)))
+        .map(|(t, _, _)| *t)
+}
+
+/// The cell a tap on `t` aims at. On a phone there is no hover, so a finger on an army's
+/// figure lands on the cell above its feet. When no army stands on `t`, the army whose figure
+/// is under the finger (among the cells the hero can target) is the target. Razdor's choice for
+/// phones (a player's report): the original picks an army by its cell (interface.md §7.2,
+/// world.md §1.3, 0x4cc583), and on PC the hover pointer shows the army under the mouse.
+fn figure_aim(game: &Game, art: Option<&DtArt>, cam: &Camera, t: Tile, pointer: Vec2) -> Tile {
+    let map = &game.world.map;
+    if crate::ui::display::dp_px().is_none() || game.world.armies.iter().any(|a| a.tile(map) == t) {
+        return t;
+    }
+    let figures: Vec<(Tile, Rect, Vec2)> = game
+        .world
+        .armies
+        .iter()
+        .filter(|a| game.fog.explored(a.tile(map)) && !game.army_hidden(a) && game.can_target(a.tile(map)))
+        .filter_map(|a| {
+            let pos = game.army_display_pos(a);
+            let feet = cam.to_screen(pos);
+            let (stem, stand) = if a.sails() { (ship_stem(a.ship), Stand::Afloat) } else { (*FIGURES.get(a.figure as usize)?, Stand::Feet) };
+            // Without the install's sprite: a cell wide and 1.6 cells tall above the feet.
+            let rect = figure_rect(art, stem, pos, cam, stand).unwrap_or_else(|| Rect::new(feet.x - cam.scale / 2.0, feet.y - 1.6 * cam.scale, cam.scale, 1.6 * cam.scale));
+            Some((a.tile(map), rect, feet))
+        })
+        .collect();
+    figure_under(pointer, &figures).unwrap_or(t)
 }
 
 /// A ship on the water without the install's sprites (a placeholder shape: hull, mast and a
@@ -2756,7 +2805,7 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
         if let Some(screen) = hovered.and_then(|t| reopen_here(game, t, message, dialogs)) {
             // A click on the building the party stands in opens it again.
             reopened = screen;
-        } else if let Some(target) = hovered.filter(|&t| game.can_target(t)) {
+        } else if let Some(target) = hovered.map(|t| figure_aim(game, assets.dt.as_ref(), &cam, t, Vec2::from(pointer()))).filter(|&t| game.can_target(t)) {
             // Only a target cell counts (explored, open on his map, or his ship): a click
             // anywhere else does nothing, as in the original. The first click shows the
             // route; a second one on the same spot sets off (0x4cc99f).
@@ -3256,6 +3305,38 @@ mod tests {
         assert!(cell_pass_key((5, 10), LAYER_FIGURE) > castle, "its own cell: after the building");
         assert!(cell_pass_key((5, 9), LAYER_BUILDING) < cell_pass_key((5, 9), LAYER_FIGURE));
         assert!(cell_pass_key((5, 9), LAYER_FIGURE) < cell_pass_key((5, 9), LAYER_SPELL_ABOVE));
+    }
+
+    /// A figure whose feet are at `feet` and whose sprite square is 40 px (feet 0.8 up it).
+    fn figure_at(cell: (i32, i32), feet: (f32, f32)) -> ((i32, i32), macroquad::prelude::Rect, macroquad::prelude::Vec2) {
+        use macroquad::prelude::{vec2, Rect};
+        (cell, Rect::new(feet.0 - 20.0, feet.1 - 32.0, 40.0, 40.0), vec2(feet.0, feet.1))
+    }
+
+    #[test]
+    fn a_tap_on_a_figures_body_finds_it_though_the_cell_above_its_feet() {
+        use macroquad::prelude::vec2;
+        // Feet at (100, 100); the finger at (100, 85) is on the body, in the cell above.
+        let figures = [figure_at((5, 5), (100.0, 100.0))];
+        assert_eq!(super::figure_under(vec2(100.0, 85.0), &figures), Some((5, 5)));
+    }
+
+    #[test]
+    fn a_tap_where_two_figures_overlap_picks_the_nearest_feet() {
+        use macroquad::prelude::vec2;
+        let figures = [figure_at((5, 5), (100.0, 100.0)), figure_at((5, 4), (100.0, 90.0))];
+        assert_eq!(super::figure_under(vec2(100.0, 96.0), &figures), Some((5, 5)), "4 px from the first's feet, 6 from the second's");
+        assert_eq!(super::figure_under(vec2(100.0, 91.0), &figures), Some((5, 4)), "1 px from the second's feet");
+    }
+
+    #[test]
+    fn a_tap_outside_every_figure_or_in_its_transparent_margin_finds_none() {
+        use macroquad::prelude::vec2;
+        let figures = [figure_at((5, 5), (100.0, 100.0))];
+        assert_eq!(super::figure_under(vec2(10.0, 10.0), &figures), None, "far from the figure");
+        assert_eq!(super::figure_under(vec2(100.0, 70.0), &figures), None, "the top 15% of the sprite is transparent");
+        assert_eq!(super::figure_under(vec2(82.0, 90.0), &figures), None, "the side margin is transparent");
+        assert_eq!(super::figure_under(vec2(100.0, 90.0), &[]), None, "no figures");
     }
 
     #[test]
