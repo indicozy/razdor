@@ -662,6 +662,10 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             // short or a long one), title `RAZDOR_SCENE_TITLE`, over the map.
             let mut d = super::dialog::Dialog::new(std::env::var("RAZDOR_SCENE_TITLE").unwrap_or_else(|_| "Сообщение".into()));
             d.text = vec![std::env::var("RAZDOR_SCENE_TEXT").unwrap_or_default()];
+            // `RAZDOR_SCENE_UNIT=<id>`: the unit's portrait at the side, as an event's picture.
+            if let Some(u) = std::env::var("RAZDOR_SCENE_UNIT").ok().and_then(|v| v.trim().parse::<u32>().ok()) {
+                d.picture = Some(super::dialog::Picture::Unit(razdor::rules::content::UnitId(u)));
+            }
             app.dialogs.push_back(d);
             Screen::WorldMap
         }

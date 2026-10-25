@@ -8,14 +8,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
-- **A phone's window title strip with the large windows off (report 1299, 2026-10-25).** The
-  title strip grows with the text (`chrome::title_bar_styled`, `chrome::window_styled`), but the
-  event window's inner frame lines (`chrome::window_inner_frames`, drawn at the window's own
-  scale) still sit where the 1.0.2 strip put them, so with «Крупные окна сообщений» off the
-  title's text crosses them. Snapshot: `/mnt/ai_models/razdor-scratch/text-1299/v2_defeat_off.png`.
-  Fix: move the inner frame lines down by the strip's growth (as `chrome::window_frames_grown`
-  does for the outer frame).
-
 - **AI ships move about twice as fast as the original's (report 1082, 2026-10-23).** A diff
   test on РК1 (knight, the opening read, 48 one-hour waits, `tools/difftest`) has the sea
   pirates (army 9) sail 4 cells in the first hour in the original and 7 in Razdor, 6 against 12
@@ -465,6 +457,12 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   button's own size.
 
 ## Settled
+
+- **A phone's window title strip with the large windows off** (report 1299, 2026-10-25). Settled
+  in the follow-up commit: the event windows (normal and village, with or without a portrait)
+  move their inner frame and content down by the strip's growth (`chrome::window_inner_frames_grown`,
+  `chrome::title_grow`) and grow by the same amount; test `a_phone_s_event_content_is_below_its_title_strip`.
+  Snapshot: `/mnt/ai_models/razdor-scratch/text-1299/v3_defeat_off.png`.
 
 - **The army window's pack scroll bar on dt-original** (2026-10-21). Ported by hand: dt-original
   76ec42fb (dcad48a8). The pack uses `scrollbar_always` there too; the widget's address is still open

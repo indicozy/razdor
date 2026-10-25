@@ -1757,9 +1757,31 @@ pub fn silver_frame(r: Rect, width: f32) {
 /// frame from (4, 31) to (w − 4, h − 58) round the content. `px`: screen pixels per pixel
 /// of the window as the original builds it.
 pub fn window_inner_frames(r: Rect, px: f32) {
+    window_inner_frames_grown(r, px, 0.0);
+}
+
+/// [`window_inner_frames`] for a window whose title strip is taller by `grow` px: the top of
+/// the inner frame moves down with it, the bottom stays where it is (`r` includes the growth).
+pub fn window_inner_frames_grown(r: Rect, px: f32, grow: f32) {
     let (w, h) = (r.w / px, r.h / px);
     steel_frame(Rect::new(r.x + 2.0 * px, r.y + (h - 56.0) * px, (w - 4.0) * px, 2.0 * px), px, 2);
-    steel_frame(Rect::new(r.x + 4.0 * px, r.y + 31.0 * px, (w - 8.0) * px, (h - 89.0) * px), px, 1);
+    steel_frame(Rect::new(r.x + 4.0 * px, r.y + (31.0 * px + grow), (w - 8.0) * px, (h - 89.0) * px - grow), px, 1);
+}
+
+/// A title strip's height in px at the interface scale `k` and the title factor `factor`
+/// (26 px at the original's size; `display::title_factor`).
+pub fn strip_height(k: f32, factor: f32) -> f32 {
+    (26.0 * k * factor).round()
+}
+
+/// The title strip of the windows now, in px (the interface scale's and the text's).
+pub fn title_strip() -> f32 {
+    strip_height(k(), super::display::title_factor(k()))
+}
+
+/// How much taller the title strip is than the original's 26 px, in px (0 at the original's size).
+pub fn title_grow() -> f32 {
+    title_strip() - (26.0 * k()).round()
 }
 
 /// The frames 0x48d3f8 draws on every window: a 2 px frame round it and a 2 px line from
@@ -1903,7 +1925,7 @@ fn window_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bool,
     super::pan::window_area(r);
     // The title strip grows with the text size, so a large title keeps its room (at the
     // original's size it is 26 px).
-    let tb = (26.0 * k * super::display::title_factor(k)).round();
+    let tb = title_strip();
     let closed = title_bar_styled(Rect::new(r.x, r.y, r.w, tb), title, skin, closable, ornate, title_color);
     // The frame round the window and the line under its title (0x48d3f8).
     window_frames_grown(r, opx(), tb - (26.0 * k).round());

@@ -345,7 +345,9 @@ Building a window (`src/ui/chrome.rs`):
   The width of a large event window is what its text needs (`dialog::text_fit_width`: the
   widest row plus the frame, at least 260 px of text, at most `dialog::event_width`: the
   screen less 12 px, 860 on a phone, 634 on the desktop), so a one-line message is narrow. With
-  the large windows off the event window is the original's 634 px. `display::dp_px` is
+  the large windows off the event window is the original's 634 px. A taller title strip
+  (`chrome::title_grow`, the text's growth over the original's 26 px) is added to the event
+  windows' height (normal and village), and their inner frame and content move down by it. `display::dp_px` is
   `RAZDOR_DP` in snapshots; `RAZDOR_SCENE_TEXT` and `RAZDOR_SCENE_TITLE` give the `message`
   scene its text. `Settings::layout_version` (`LAYOUT_VERSION`): a file saved before 1.0.2 is
   reset once on load (interface scale back to Auto, text size and large windows to the

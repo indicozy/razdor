@@ -592,7 +592,8 @@ fn event_layout(d: &Dialog, o: f32, t: f32, w: f32) -> EventLayout {
     let below = pic_h + res_h + items_h + lost_h + spells_h + units_h + notice_h;
     // The box stops at 499 (and short of the screen): the text scrolls in it, the buttons
     // stay in sight.
-    let screen_box = (sh - chrome::bar_height() - 4.0) / o - below / o - EVENT_REST;
+    // The title strip's growth (`chrome::title_grow`) is part of the window's height too.
+    let screen_box = (sh - chrome::bar_height() - 4.0) / o - below / o - EVENT_REST - chrome::title_grow() / o;
     let max_box = EVENT_MAX_BOX.min(screen_box);
     let f = event_frame(side, full_h / o, below / o, max_box, w);
     let shown = if full_h / o + 2.0 * EVENT_PAD <= f.box_h { total } else { (((f.box_h - 2.0 * EVENT_PAD) * o / line).floor().max(1.0) as usize).min(total) };
@@ -636,7 +637,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         let min_w = if phone { EVENT_MIN_W } else { EVENT_W };
         // The smallest window: the box at its minimum, the rows under it as they are.
         let first = event_layout(d, plain, t, EVENT_W);
-        let min_h = event_frame(first.side, 0.0, first.below / plain, EVENT_MAX_BOX, min_w).h;
+        let min_h = event_frame(first.side, 0.0, first.below / plain, EVENT_MAX_BOX, min_w).h + chrome::title_grow() / plain;
         o = super::dt_font::whole_scale(super::display::popup_o(base, min_w, min_h)).min((sw - 12.0) / min_w).max(plain);
     }
     let lay = if large {
@@ -651,7 +652,9 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     chrome::under_message();
     let EventLayout { o, t, size, line, side, room, lines, rows, total, pic_h, res_h, items_h, lost_h, spells_h, f, shown, .. } = lay;
     let row_h = |r: &MarkupRow| event_row_h(defeat, line, t, r);
-    let (w, h) = (f.w * o, f.h * o);
+    // The title strip's growth: the window is taller by it, and its frame and content move down.
+    let grow = chrome::title_grow();
+    let (w, h) = (f.w * o, f.h * o + grow);
     let (x, y) = event_origin(sw, sh, chrome::bar_height(), w, h);
     // The defeat look is the red marble (the original's window after a lost battle).
     let skin = if d.defeat { chrome::Skin::Red } else { chrome::Skin::Marble };
@@ -662,8 +665,8 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     }
     let edge = o.max(1.0);
     // The event window's inner frames (0x4aaa4b, 0x4aaa79), as 0x48d710's.
-    chrome::window_inner_frames(Rect::new(x, y, w, h), o);
-    let top = y + EVENT_BOX_TOP * o;
+    chrome::window_inner_frames_grown(Rect::new(x, y, w, h), o, grow);
+    let top = y + EVENT_BOX_TOP * o + grow;
     let mut cy = top;
     match &d.picture {
         Some(Picture::Unit(u)) => {
@@ -870,17 +873,20 @@ fn draw_village_event(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Optio
     let rows = markup_rows(d.marked.as_deref().unwrap_or(""), text_w - 40.0 * o, size);
     let reward_h = if rewards { 110.0 * o } else { 0.0 };
     let fixed = 114.0 * o + reward_h;
-    let available = (screen_height() - chrome::bar_height() - fixed - 8.0).max(60.0 * o);
+    // The title strip's growth is part of the window's height (`chrome::title_grow`).
+    let grow = chrome::title_grow();
+    let available = (screen_height() - chrome::bar_height() - fixed - grow - 8.0).max(60.0 * o);
     let panel_h = ph.max(rows.len() as f32 * line_h + 36.0 * o).min(available);
     let shown = ((panel_h - 36.0 * o) / line_h).floor().max(1.0) as usize;
-    let h = fixed + panel_h;
+    let h = fixed + panel_h + grow;
     let x = ((screen_width() - w) / 2.0).round();
     let y = ((screen_height() - chrome::bar_height() - h) / 2.0).max(2.0).round();
     chrome::window(Rect::new(x, y, w, h), &d.title, chrome::Skin::Marble, false);
     let footer = Rect::new(x + 2.0 * o, y + h - 55.0 * o, w - 4.0 * o, 53.0 * o);
-    // The village window is ae2520's kind, with 0x48d710's inner frames.
-    chrome::window_inner_frames(Rect::new(x, y, w, h), o);
-    let top = y + 45.0 * o;
+    // The village window is ae2520's kind, with 0x48d710's inner frames (moved down with the
+    // taller title strip).
+    chrome::window_inner_frames_grown(Rect::new(x, y, w, h), o, grow);
+    let top = y + 45.0 * o + grow;
     if let Some(t) = picture {
         let r = Rect::new(x + 18.0 * o, top, pw, ph.min(panel_h));
         chrome::tex(t, r, WHITE);
@@ -1075,6 +1081,24 @@ mod tests {
         let widest = 600.0;
         let w = text_fit_width(widest, o, 0.0, 860.0);
         assert!((w - EVENT_SIDES - widest / o).abs() <= 1.0 + 1e-4, "{w}");
+    }
+
+    /// The title strip grows with the phone's text, and the event window's inner frame and
+    /// content move down with it (a player's report: the strip crossed the frame with the large
+    /// windows off): the inner frame's top stays below the strip's bottom, large windows on or off.
+    #[test]
+    fn a_phone_s_event_content_is_below_its_title_strip() {
+        let (sw, sh, bar) = (2400.0, 1080.0, 120.0);
+        for k in [1.5_f32, 1.125] {
+            let factor = crate::ui::display::text_o_at(1.25, crate::ui::display::phone_text_base(Some(2.625), k, TEXT_REF, (sw, sh), bar)) / k;
+            let strip = chrome::strip_height(k, factor);
+            let grow = strip - (26.0 * k).round();
+            assert!(grow > 0.0, "k {k}: the strip grows at a phone's text size");
+            for o in [k * 0.9375, 2.625] {
+                let inner_top = 31.0 * o + grow;
+                assert!(inner_top >= strip, "k {k}, o {o}: the inner frame at {inner_top} is under the strip's {strip}");
+            }
+        }
     }
 
     /// The units rows (0x4a93bc, 0x4a9711): 46 × 46 icons in 47 × 47 cells centred at
