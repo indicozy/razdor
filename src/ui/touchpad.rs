@@ -149,7 +149,19 @@ impl TouchMapper {
                     g.last = pos;
                     slide = (slide.0 + d.0, slide.1 + d.1);
                 }
-                (None, Phase::Ended | Phase::Cancelled) => {}
+                // A finger that came down and up within one frame arrives only as `Ended` (macroquad
+                // keeps one entry per touch with its latest phase): a tap, as if seen going down
+                // first. A cancelled one is no tap.
+                (None, Phase::Ended) => {
+                    let g = Finger { id: t.id, last: pos, down: pos, since: self.now, travel: 0.0 };
+                    self.down(g, &mut f, scale);
+                    if let Some(i) = self.fingers.iter().position(|g| g.id == t.id) {
+                        let mut g = self.fingers.remove(i);
+                        g.travel += dist(g.last, pos);
+                        self.lift(g, &mut f, scale);
+                    }
+                }
+                (None, Phase::Cancelled) => {}
                 (None, _) => {
                     let g = Finger { id: t.id, last: pos, down: pos, since: self.now, travel: 0.0 };
                     self.down(g, &mut f, scale);
@@ -352,6 +364,27 @@ mod tests {
         // Down the screen: 500 px of slide is 800 px of pointer, clamped to the bottom.
         let f = step(&mut m, &[touch(1, 370.0, 1000.0, Phase::Moved)], (700.0, 1070.0), false);
         assert_eq!(f.pointer, Some((700.0, 1079.0)));
+    }
+
+    #[test]
+    fn a_tap_seen_only_as_ended_in_one_frame_is_the_same_tap() {
+        let at = (200.0, 300.0);
+        let mut slow = TouchMapper::default();
+        step(&mut slow, &[touch(1, 50.0, 50.0, Phase::Started)], at, false);
+        step(&mut slow, &[touch(1, 50.0, 50.0, Phase::Stationary)], at, false);
+        let lift = step(&mut slow, &[touch(1, 50.0, 50.0, Phase::Ended)], at, false);
+        let after = step(&mut slow, &[], at, false);
+        let mut quick = TouchMapper::default();
+        assert_eq!(step(&mut quick, &[touch(1, 50.0, 50.0, Phase::Ended)], at, false), lift);
+        assert_eq!(step(&mut quick, &[], at, false), after);
+        assert_eq!(step(&mut quick, &[], at, false), Frame::default());
+    }
+
+    #[test]
+    fn a_finger_cancelled_in_one_frame_is_no_tap() {
+        let mut m = TouchMapper::default();
+        assert_eq!(step(&mut m, &[touch(1, 50.0, 50.0, Phase::Cancelled)], (200.0, 300.0), false), Frame::default());
+        assert_eq!(step(&mut m, &[], (200.0, 300.0), false), Frame::default());
     }
 
     #[test]
