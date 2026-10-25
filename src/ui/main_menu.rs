@@ -47,6 +47,13 @@ fn button_centre(i: usize) -> Vec2 {
 /// Size of an oval button (video pixels): `mb2.ugs` drawn 1:1 at 1024×768.
 const OVAL: Vec2 = Vec2::new(214.0, 112.0);
 
+/// A phone held upright (`upright_dp`): the buttons are this many times the landscape size,
+/// in one column under the logo, and the links are chips at the bottom (the owner's choice,
+/// 2026-10-26, mockup "A: ×1.6").
+const PORTRAIT_SCALE: f32 = 1.6;
+/// The smallest touch target of a phone's link, in dp.
+const TOUCH_DP: f32 = 48.0;
+
 // Final title-flame placement from the temporary development tuner.
 const LOGO_FLAME_X: f32 = -16.0;
 const LOGO_FLAME_Y: f32 = 12.0;
@@ -167,10 +174,11 @@ local! {
 /// An oval button: the violet swirl, the frame (gold under the mouse) and its word. Returns
 /// true when clicked.
 fn oval(i: usize, label: &str, hot: Option<usize>) -> bool {
-    let k = chrome::k();
-    let c = video(button_centre(i));
-    let size = OVAL * k;
+    let upright = upright_dp().is_some();
+    let k = chrome::k() * if upright { PORTRAIT_SCALE } else { 1.0 };
     let r = oval_rect(i);
+    let c = if upright { r.center() } else { video(button_centre(i)) };
+    let size = OVAL * k;
     let (hover, _down, pressed) = super::widgets::button_state(r, hot == Some(i));
     // The bell as the pointer comes onto an item (interface.md §4, 0x4b9b3c); leaving clears
     // the light.
@@ -230,7 +238,7 @@ fn oval(i: usize, label: &str, hot: Option<usize>) -> bool {
             tint,
         );
     }
-    word(i, label, c, hover);
+    word(i, label, c, hover, k);
     if pressed {
         cue(Cue::MenuPress);
         return true;
@@ -251,8 +259,7 @@ const WORD_EDGE: Color = Color::new(0.12, 0.05, 0.25, 0.8);
 
 /// The button's word: its row of `SMText_RUS` in Russian, else the text, as large and with
 /// the same rim.
-fn word(i: usize, label: &str, c: Vec2, hover: bool) {
-    let k = chrome::k();
+fn word(i: usize, label: &str, c: Vec2, hover: bool, k: f32) {
     let color = if hover { Color::new(1.0, 0.93, 0.80, 1.0) } else { Color::new(0.93, 0.90, 1.0, 1.0) };
     let sheet = (i18n::lang() == Lang::Ru).then(|| chrome::win_fx("SMText_RUS", Fx::Glow)).flatten();
     match sheet {
@@ -324,7 +331,7 @@ pub fn backdrop() {
 fn foot_lines() {
     let k = chrome::k();
     let size = 11.0 * k;
-    let y = screen_height() - 4.0 * k;
+    let y = upright_menu().map_or(screen_height() - 4.0 * k, |m| m.foot_y);
     let ink = Color::new(0.92, 0.92, 0.92, 1.0);
     if let Some(v) = chrome::ui_text("SpecialTexts", "VerInfo") {
         chrome::shadow_text(&v, 5.0 * k, y, size, ink);
@@ -334,12 +341,105 @@ fn foot_lines() {
     }
 }
 
+/// The dp of a phone held upright (its stacked menu), else None.
+fn upright_dp() -> Option<f32> {
+    super::display::dp_px().filter(|_| super::window_layout::portrait())
+}
+
+/// The five buttons in the landscape layout: the original's column (video geometry, 1:1 at
+/// `k`, centred on a `sw` × `sh` screen; neighbouring ovals overlap by 20 px).
+fn landscape_buttons(sw: f32, sh: f32, k: f32) -> [Rect; 5] {
+    let top = chrome::centred_top(sw, sh, 720.0 * k);
+    std::array::from_fn(|i| {
+        let c = vec2(sw / 2.0, top + button_centre(i).y * k);
+        let size = OVAL * k;
+        Rect::new(c.x - size.x / 2.0, c.y - size.y / 2.0, size.x, size.y)
+    })
+}
+
+/// The menu held upright: the buttons are a column of [`PORTRAIT_SCALE`] × the landscape size
+/// starting under the logo, and the links are a row of chips at the bottom.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PortraitMenu {
+    buttons: [Rect; 5],
+    /// The chips' row: its top and height (a touch target of at least [`TOUCH_DP`]).
+    chip_top: f32,
+    chip_h: f32,
+    /// The baseline of the foot lines (the version and copyright), just above the chips.
+    foot_y: f32,
+    /// The top of the logo: the space above it is free for the not-found block.
+    logo_top: f32,
+}
+
+impl PortraitMenu {
+    /// The baseline of the version line (above the foot lines).
+    fn version_y(&self, k: f32) -> f32 {
+        self.foot_y - 24.0 * k
+    }
+
+    /// The baseline of an installed update's notice (above the version line).
+    fn notice_y(&self, k: f32) -> f32 {
+        self.foot_y - 48.0 * k
+    }
+
+    /// The bottom of the not-found block: above the logo, where the screen is empty (the column
+    /// under the logo would cover a block below it).
+    fn block_bottom(&self, k: f32) -> f32 {
+        self.logo_top - 16.0 * k
+    }
+}
+
+/// The portrait menu on a `sw` × `sh` screen at interface scale `k`, a phone of `dp` screen px
+/// per dp.
+fn portrait_menu(sw: f32, sh: f32, k: f32, dp: f32) -> PortraitMenu {
+    let top = chrome::centred_top(sw, sh, 720.0 * k);
+    // The logo (`logo`): 50 px under the canvas top, 840 px wide, 128/896 of that high.
+    let logo_top = top + 50.0 * k;
+    let logo_bottom = logo_top + 840.0 * 128.0 / 896.0 * k;
+    let size = OVAL * (PORTRAIT_SCALE * k);
+    let chip_h = (TOUCH_DP * dp).max(24.0 * k);
+    let chip_top = sh - 16.0 * k - chip_h;
+    let foot_y = chip_top - 12.0 * k;
+    // The column starts 24 px under the logo and ends above the lines, its gaps shared out
+    // between the five buttons (at least 6 px, at most 20 px).
+    let first = logo_bottom + 24.0 * k;
+    let column_end = foot_y - 70.0 * k;
+    let gap = ((column_end - first - 5.0 * size.y) / 4.0).clamp(6.0 * k, 20.0 * k);
+    let x = sw / 2.0 - size.x / 2.0;
+    let buttons = std::array::from_fn(|i| Rect::new(x, first + i as f32 * (size.y + gap), size.x, size.y));
+    PortraitMenu { buttons, chip_top, chip_h, foot_y, logo_top }
+}
+
+/// The current menu's portrait geometry, when the phone is held upright.
+fn upright_menu() -> Option<PortraitMenu> {
+    let dp = upright_dp()?;
+    Some(portrait_menu(screen_width(), screen_height(), chrome::k(), dp))
+}
+
 /// The screen rectangle of oval button `i`.
 fn oval_rect(i: usize) -> Rect {
-    let k = chrome::k();
-    let c = video(button_centre(i));
-    let size = OVAL * k;
-    Rect::new(c.x - size.x / 2.0, c.y - size.y / 2.0, size.x, size.y)
+    match upright_menu() {
+        Some(m) => m.buttons[i],
+        None => landscape_buttons(screen_width(), screen_height(), chrome::k())[i],
+    }
+}
+
+/// The left, width and bottom of the phones' not-found block (`screens::menu_not_found`): beside
+/// the buttons' column when the menu is landscape, under the column (full width, above the
+/// lines) when held upright.
+pub fn not_found_box(k: f32) -> (f32, f32, f32) {
+    match upright_menu() {
+        Some(m) => (16.0 * k, screen_width() - 32.0 * k, m.block_bottom(k)),
+        None => (16.0 * k, (left_edge() - 32.0 * k).max(120.0 * k), screen_height() - 60.0 * k),
+    }
+}
+
+/// The baseline of the title screen's update notice (`update_view::title_line`).
+pub fn notice_y(k: f32) -> f32 {
+    match upright_menu() {
+        Some(m) => m.notice_y(k),
+        None => screen_height() - 44.0 * k,
+    }
 }
 
 /// The one button under the pointer: neighbouring ovals overlap by 20 px, and the original's
@@ -369,7 +469,41 @@ pub fn frame(no_install: bool) -> Option<Pick> {
     }
     super::screens::menu_not_found(no_install);
     let k = chrome::k();
-    // Razdor's links, over the original's version and copyright lines.
+    // The version line sits above the links: the landscape corner's, or the chips' row when
+    // held upright.
+    let version_y = match upright_menu() {
+        Some(m) => {
+            if let Some(p) = chip_links(&m, k) {
+                pick = Some(p);
+            }
+            m.version_y(k)
+        }
+        None => {
+            if let Some(p) = corner_links(k) {
+                pick = Some(p);
+            }
+            screen_height() - 22.0 * k - 26.0 * k
+        }
+    };
+    // This program's version, small in the corner above the links.
+    let version = format!("v{}", super::update_view::shown_version(env!("CARGO_PKG_VERSION"), super::clock::is_snapshot()));
+    let vw = measure(&version, 12.0 * k).width;
+    chrome::shadow_text(&version, screen_width() - 16.0 * k - vw, version_y, 12.0 * k, Color::new(0.95, 0.88, 0.72, 0.6));
+    // An update put in place says so (an "Always" update has no window of its own).
+    super::update_view::title_line();
+    // Esc quits the game at once, without a question, as in the original (0x4c8059); a
+    // gamepad's Start, which is Esc elsewhere, does not (Razdor's: pressed to open a menu,
+    // it would end the game).
+    if key(KeyCode::Escape) && !crate::ui::input::pad_key_pressed(KeyCode::Escape) {
+        pick = Some(Pick::Exit);
+    }
+    pick
+}
+
+/// The links in the landscape corners, over the original's version and copyright lines: the map
+/// editor, the custom battle, the Discord and the language. Returns what was picked.
+fn corner_links(k: f32) -> Option<Pick> {
+    let mut pick = None;
     let y = screen_height() - 22.0 * k;
     let editor = tr("Map editor");
     if link(editor, 16.0 * k, y, false) {
@@ -396,19 +530,58 @@ pub fn frame(no_install: bool) -> Option<Pick> {
     if super::widgets::mouse_in(anchor.x, anchor.y, anchor.w, anchor.h) {
         super::widgets::tooltip(&[(super::language::hint().to_string(), super::widgets::INK)]);
     }
-    // This program's version, small in the corner above the language switch.
-    let version = format!("v{}", super::update_view::shown_version(env!("CARGO_PKG_VERSION"), super::clock::is_snapshot()));
-    let vw = measure(&version, 12.0 * k).width;
-    chrome::shadow_text(&version, screen_width() - 16.0 * k - vw, y - 26.0 * k, 12.0 * k, Color::new(0.95, 0.88, 0.72, 0.6));
-    // An update put in place says so (an "Always" update has no window of its own).
-    super::update_view::title_line();
-    // Esc quits the game at once, without a question, as in the original (0x4c8059); a
-    // gamepad's Start, which is Esc elsewhere, does not (Razdor's: pressed to open a menu,
-    // it would end the game).
-    if key(KeyCode::Escape) && !crate::ui::input::pad_key_pressed(KeyCode::Escape) {
-        pick = Some(Pick::Exit);
+    pick
+}
+
+/// The links held upright: a row of chips at the bottom, each a dark rounded plate and a touch
+/// target of at least [`TOUCH_DP`]. The language chip opens the list above the row.
+fn chip_links(m: &PortraitMenu, k: f32) -> Option<Pick> {
+    let mut pick = None;
+    let lang = super::language::current_label();
+    let labels: [&str; 4] = [tr("Map editor"), tr("Custom battle"), "Discord", &lang];
+    let size = 22.0 * k;
+    let pad = 18.0 * k;
+    let gap = 12.0 * k;
+    let widths: Vec<f32> = labels.iter().map(|l| measure(l, size).width + 2.0 * pad).collect();
+    let total = widths.iter().sum::<f32>() + gap * (labels.len() - 1) as f32;
+    let mut x = (screen_width() - total) / 2.0;
+    let (mut lang_chip, mut lang_pressed) = (Rect::new(0.0, 0.0, 0.0, 0.0), false);
+    for (j, label) in labels.iter().enumerate() {
+        let r = Rect::new(x, m.chip_top, widths[j], m.chip_h);
+        let (hover, down, pressed) = super::widgets::button_state(r, true);
+        plate(r, 14.0 * k, Color::new(0.08, 0.05, 0.03, 1.0));
+        let color = if down || hover { chrome::GOLD } else { Color::new(0.95, 0.88, 0.72, 1.0) };
+        let tw = measure(label, size).width;
+        chrome::shadow_text(label, r.x + (r.w - tw) / 2.0, r.y + r.h / 2.0 + size * 0.35, size, color);
+        if pressed {
+            cue(Cue::Button);
+        }
+        match j {
+            0 if pressed => pick = Some(Pick::Editor),
+            1 if pressed => pick = Some(Pick::Custom),
+            2 if pressed => open_link(DISCORD_INVITE),
+            3 => (lang_chip, lang_pressed) = (r, pressed),
+            _ => {}
+        }
+        x += widths[j] + gap;
+    }
+    if lang_pressed || super::snapshot::open_language_list() {
+        super::language::open_list(lang_chip, k);
+    }
+    if super::widgets::mouse_in(lang_chip.x, lang_chip.y, lang_chip.w, lang_chip.h) {
+        super::widgets::tooltip(&[(super::language::hint().to_string(), super::widgets::INK)]);
     }
     pick
+}
+
+/// A rounded rectangle of radius `rad` (at most half its sides).
+fn plate(r: Rect, rad: f32, c: Color) {
+    let rad = rad.min(r.w / 2.0).min(r.h / 2.0);
+    draw_rectangle(r.x + rad, r.y, r.w - 2.0 * rad, r.h, c);
+    draw_rectangle(r.x, r.y + rad, r.w, r.h - 2.0 * rad, c);
+    for (x, y) in [(r.x + rad, r.y + rad), (r.x + r.w - rad, r.y + rad), (r.x + rad, r.y + r.h - rad), (r.x + r.w - rad, r.y + r.h - rad)] {
+        draw_circle(x, y, rad, c);
+    }
 }
 
 /// The credits picture of the install: its dark outline (`Credits_Alpha` as the alpha of
@@ -1323,4 +1496,74 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
         return true;
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A phone of 1080×2376 px at 2.625 px per dp, its interface scale the fit (1.125).
+    const PHONE: (f32, f32, f32, f32) = (1080.0, 2376.0, 1.125, 2.625);
+
+    fn close(a: f32, b: f32) -> bool {
+        (a - b).abs() < 1e-3
+    }
+
+    #[test]
+    fn upright_buttons_are_a_column_of_touch_sized_ovals_above_the_chips() {
+        let (sw, sh, k, dp) = PHONE;
+        let m = portrait_menu(sw, sh, k, dp);
+        for r in &m.buttons {
+            assert!(close(r.h, OVAL.y * PORTRAIT_SCALE * k), "{r:?}");
+            assert!(close(r.w, OVAL.x * PORTRAIT_SCALE * k), "{r:?}");
+            assert!(r.h >= TOUCH_DP * dp, "{r:?} is under 48 dp");
+            assert!(r.x >= 0.0 && r.x + r.w <= sw, "{r:?} leaves the screen");
+        }
+        for pair in m.buttons.windows(2) {
+            assert!(pair[0].y + pair[0].h <= pair[1].y, "{pair:?} overlap");
+        }
+        // Under the logo (its bottom 170 px under the canvas top), above the version and notice lines.
+        let top = chrome::centred_top(sw, sh, 720.0 * k);
+        assert!(m.buttons[0].y >= top + 170.0 * k, "{:?} is under the logo", m.buttons[0]);
+        let last = m.buttons[4];
+        assert!(last.y + last.h <= m.notice_y(k) - 16.0 * k, "{last:?} runs into the lines");
+        // The not-found block sits above the logo, clear of the column.
+        assert!(m.block_bottom(k) < m.logo_top && m.block_bottom(k) > top, "block over the logo");
+    }
+
+    #[test]
+    fn upright_chips_are_touch_sized_and_on_the_bottom_of_the_screen() {
+        let (sw, sh, k, dp) = PHONE;
+        let m = portrait_menu(sw, sh, k, dp);
+        assert!(m.chip_h >= TOUCH_DP * dp, "chips are {} px tall", m.chip_h);
+        assert!(m.chip_top + m.chip_h <= sh, "chips leave the screen");
+        assert!(m.foot_y <= m.chip_top, "the lines run into the chips");
+        assert!(m.version_y(k) < m.foot_y && m.notice_y(k) < m.version_y(k));
+    }
+
+    #[test]
+    fn upright_geometry_fits_a_small_phone_too() {
+        // 720×1600 at 2 px per dp: the fit is 0.75.
+        let m = portrait_menu(720.0, 1600.0, 0.75, 2.0);
+        for pair in m.buttons.windows(2) {
+            assert!(pair[0].y + pair[0].h <= pair[1].y);
+        }
+        assert!(m.buttons[4].y + m.buttons[4].h <= m.notice_y(0.75));
+        assert!(m.chip_h >= TOUCH_DP * 2.0);
+    }
+
+    #[test]
+    fn landscape_buttons_keep_the_original_column() {
+        // 2376×1080 at the fit (1.5): the original's column, 1:1 video geometry, centred.
+        let (sw, sh, k) = (2376.0, 1080.0, 1.5);
+        let rects = landscape_buttons(sw, sh, k);
+        let first = rects[0];
+        assert!(close(first.w, 214.0 * k) && close(first.h, 112.0 * k));
+        assert!(close(first.x, sw / 2.0 - 107.0 * k));
+        assert!(close(first.y, 232.0 * k - 56.0 * k), "{first:?}");
+        for pair in rects.windows(2) {
+            assert!(close(pair[1].y - pair[0].y, 92.0 * k), "pitch of the column");
+            assert!(close(pair[0].y + pair[0].h - pair[1].y, 20.0 * k), "the 20 px overlap");
+        }
+    }
 }

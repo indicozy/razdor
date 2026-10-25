@@ -131,7 +131,7 @@ pub fn title_line() {
     if let Status::Installed(r) = update::status() {
         let k = chrome::k();
         let line = trf!("Razdor {v} is installed and starts next time", v = r.version);
-        text_centered(&line, screen_width() / 2.0, screen_height() - 44.0 * k, 16.0 * k, chrome::GOLD);
+        text_centered(&line, screen_width() / 2.0, super::main_menu::notice_y(k), 16.0 * k, chrome::GOLD);
     }
 }
 

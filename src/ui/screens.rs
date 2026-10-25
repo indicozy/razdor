@@ -228,12 +228,10 @@ pub fn menu_not_found(no_install: bool) {
     }
     let sh = screen_height();
     let k = super::chrome::k();
-    let x = 16.0 * k;
-    let w = (super::main_menu::left_edge() - 2.0 * x).max(120.0 * k);
+    let (x, w, bottom) = super::main_menu::not_found_box(k);
     let btn_h = button_height(sh, k);
     let btn_w = (240.0 * k).min(w);
     let gap = 12.0 * k;
-    let bottom = sh - 60.0 * k;
     let (title_size, body_size, lead) = (20.0 * k, 16.0 * k, 22.0 * k);
     let mut body = vec![tr("Razdor plays your own copy of Discord Times: version 1.8 with Community Update 1.2.").to_string()];
     body.extend(not_found_steps());

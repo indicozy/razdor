@@ -167,6 +167,11 @@ drawn at the interface scale (`world_view::window_backdrop`). Landscape and desk
 spellbook keeps its landscape window (`window_layout::landscape_window`).
 The title background is covered, not stretched, on a portrait screen whose aspect is more than 20% off the
 picture's (`chrome::cover_source`: the picture's centred crop); every other screen stretches it as before.
+The title menu held upright (`main_menu::portrait_menu`, pure, with unit tests): the five buttons are 1.6× the
+landscape size in one column under the logo; the links (map editor, custom battle, Discord, language) are chips
+in one row at the bottom, touch targets of 48 dp; the version and copyright lines and an installed update's
+notice sit just above the chips; the not-found block (no install) sits above the logo. Landscape and desktop keep
+the original column and the corner links (`main_menu::landscape_buttons`, `corner_links`).
 The market and the sanctuary scenes of the UI regression check use town 8 of РК3-Столица (the start's
 castle has neither tab); the snapshot clears the start's due places, which otherwise make the building
 window step aside for the map (`world_view::building_flight`).
