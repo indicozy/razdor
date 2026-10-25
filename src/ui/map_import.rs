@@ -151,12 +151,17 @@ pub fn tick(install: Option<&DtInstall>, content: Option<&Content>) -> Option<Ve
         }
         Poll::Got(picked) => picked,
     };
-    let bytes = std::fs::read(&picked.path);
+    // The size is checked before the file is read (`read_limited`): a huge pick is refused.
+    let read = map_import::read_limited(&picked.path, map_import::picked_limit(&picked.name));
     if picked.cached {
         let _ = std::fs::remove_file(&picked.path);
     }
-    let bytes = match bytes {
-        Ok(bytes) => bytes,
+    let bytes = match read {
+        Ok(Some(bytes)) => bytes,
+        Ok(None) => {
+            notice(tr("Add a map…"), vec![import_error(&ImportError::TooBig(picked.name.clone()))]);
+            return None;
+        }
         Err(e) => {
             notice(tr("Add a map…"), vec![trf!("Cannot read «{name}»: {e}.", name = picked.name, e = e)]);
             return None;
@@ -227,6 +232,7 @@ fn import_error(e: &ImportError) -> String {
         ImportError::NotAMap(name) => trf!("«{name}» is not a Discord Times map.", name = name.clone()),
         ImportError::BadArchive(why) => trf!("The archive cannot be read: {why}.", why = why.clone()),
         ImportError::NoMaps => tr("The archive holds no Discord Times maps (.DTm).").to_string(),
+        ImportError::TooBig(name) => trf!("«{name}» is too big to be a Discord Times map.", name = name.clone()),
     }
 }
 

@@ -560,7 +560,12 @@ fn campaign_game(content: Arc<Content>, prev: &NextMap, e: &ScenarioEntry) -> Ga
 /// names no next map or the install lacks it (then the victory screen).
 pub fn hand_over(game: &Option<Game>, scenarios: &[ScenarioEntry], content: Option<Arc<Content>>) -> Option<Game> {
     let (prev, e) = next_campaign_map(game, scenarios)?;
-    Some(campaign_game(content?, &prev, e))
+    let content = content?;
+    // A next map that needs a mod's units or items is not started (the victory screen shows instead).
+    if !razdor::rules::map_refs::unknown(&e.scenario, &content).is_empty() {
+        return None;
+    }
+    Some(campaign_game(content, &prev, e))
 }
 
 /// The victory screen. After a campaign map whose next map is in the install, "Next map"
@@ -576,7 +581,10 @@ pub fn victory(game: &mut Option<Game>, scenarios: &[ScenarioEntry], content: Op
         return shown;
     }
     if let (Some((prev, e)), Some(c)) = (next, content) {
-        if button(screen_width() / 2.0 - 160.0, 450.0, 320.0, 50.0, &trf!("Next map: {title}", title = e.scenario.title), true) {
+        // The button only when the next map can start: a map that needs a mod's units or items is
+        // not offered (`hand_over` refuses it the same way).
+        let startable = razdor::rules::map_refs::unknown(&e.scenario, &c).is_empty();
+        if startable && button(screen_width() / 2.0 - 160.0, 450.0, 320.0, 50.0, &trf!("Next map: {title}", title = e.scenario.title), true) {
             cue(Cue::MenuPress);
             *game = Some(campaign_game(c, &prev, e));
             return Some(Screen::WorldMap);

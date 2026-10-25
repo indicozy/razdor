@@ -11,10 +11,38 @@ use super::install::{find_path, MAPS_DIR, MAP_EXTENSION};
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 
-/// The largest map read out of an archive: a map is a few hundred KB, so the rest is not one.
-const MAX_MAP_BYTES: u64 = 16 << 20;
+/// The largest map: a picked `.DTm`, or one entry of an archive. A map is a few hundred KB.
+pub const MAX_PICKED_MAP_BYTES: u64 = 16 << 20;
+/// The largest picked archive.
+pub const MAX_PICKED_ARCHIVE_BYTES: u64 = 64 << 20;
+/// The decompressed bytes of the maps an archive may give in all (a zip bomb is refused).
+const MAX_ARCHIVE_BYTES: u64 = 64 << 20;
+/// The most maps one archive may give.
+pub const MAX_MAPS: usize = 256;
 /// An archive with more entries than this is refused (its list alone would be large).
 const MAX_ENTRIES: usize = 4096;
+
+/// The size limit of a picked file: an archive's, or a map's.
+pub fn picked_limit(name: &str) -> u64 {
+    if extension_is(name, "zip") {
+        MAX_PICKED_ARCHIVE_BYTES
+    } else {
+        MAX_PICKED_MAP_BYTES
+    }
+}
+
+/// Reads the file at `path` if it is at most `limit` bytes; `Ok(None)` when it is bigger (its
+/// size, or what it holds as it is read: the size the system reports is not trusted alone).
+pub fn read_limited(path: &Path, limit: u64) -> Result<Option<Vec<u8>>, String> {
+    use std::io::Read as _;
+    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    if file.metadata().map(|m| m.len()).unwrap_or(0) > limit {
+        return Ok(None);
+    }
+    let mut data = Vec::new();
+    file.take(limit + 1).read_to_end(&mut data).map_err(|e| e.to_string())?;
+    Ok((data.len() as u64 <= limit).then_some(data))
+}
 
 /// A map read from a picked file: its bytes as they are (copied on import) and what they parse to.
 #[derive(Clone, Debug)]
@@ -36,18 +64,40 @@ pub enum ImportError {
     BadArchive(String),
     /// A `.zip` with no map in it.
     NoMaps,
+    /// A picked file bigger than its limit (its file name).
+    TooBig(String),
 }
 
-/// The base name of a map inside `name` (a file name or an archive entry's path): `Name.DTm`,
-/// the extension in the game's own spelling. `None` unless the name ends in `.dtm` (any case)
-/// and has a base name of its own.
+/// Windows' reserved device names: no file may take one, with or without an extension.
+const RESERVED: [&str; 22] = [
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// The base name of a map inside `name` (a file name, or an archive entry's path, whose folders
+/// are dropped): `Name.DTm`, the extension in the game's own spelling. `None` unless the base
+/// name ends in `.dtm` (any case) and is a plain, safe file name: one path component, no drive
+/// or device spelling (`C:`, `CON`), no characters Windows refuses, no control characters, and
+/// no trailing dot or space.
 pub fn map_file_name(name: &str) -> Option<String> {
-    let base = name.rsplit(['/', '\\']).next().unwrap_or_default().trim();
-    let (stem, ext) = base.rsplit_once('.')?;
-    if !ext.eq_ignore_ascii_case(MAP_EXTENSION) || stem.trim().is_empty() || stem.contains('\0') || stem.starts_with('.') {
+    let base = name.rsplit(['/', '\\']).next().unwrap_or_default().trim_start();
+    if base.chars().any(|c| c.is_control() || matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*')) || base.ends_with(['.', ' ']) {
         return None;
     }
-    Some(format!("{}.{MAP_EXTENSION}", stem.trim()))
+    let (stem, ext) = base.rsplit_once('.')?;
+    if !ext.eq_ignore_ascii_case(MAP_EXTENSION) {
+        return None;
+    }
+    let stem = stem.trim();
+    let device = stem.split('.').next().unwrap_or_default().to_ascii_uppercase();
+    if stem.is_empty() || stem.starts_with('.') || RESERVED.contains(&device.as_str()) {
+        return None;
+    }
+    let file_name = format!("{stem}.{MAP_EXTENSION}");
+    let mut parts = Path::new(&file_name).components();
+    match (parts.next(), parts.next()) {
+        (Some(std::path::Component::Normal(_)), None) => Some(file_name),
+        _ => None,
+    }
 }
 
 fn extension_is(name: &str, ext: &str) -> bool {
@@ -70,24 +120,45 @@ pub fn read_picked(name: &str, bytes: &[u8]) -> Result<Vec<Map>, ImportError> {
 /// Every `.DTm` in the archive that parses as a map. An entry that is not one is skipped, and a
 /// name seen before in the archive is skipped (the first one stays).
 fn read_archive(bytes: &[u8]) -> Result<Vec<Map>, ImportError> {
+    read_archive_within(bytes, MAX_ARCHIVE_BYTES, MAX_MAPS)
+}
+
+/// [`read_archive`] with its budget: the decompressed bytes of the `.DTm` entries read may total
+/// `budget` at most, and the archive gives at most `max_maps` maps. Only the entries named
+/// `.DTm` are decompressed, each through a `take()` so that a size the entry lies about cannot
+/// get past the budget.
+fn read_archive_within(bytes: &[u8], budget: u64, max_maps: usize) -> Result<Vec<Map>, ImportError> {
     let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| ImportError::BadArchive(e.to_string()))?;
     if zip.len() > MAX_ENTRIES {
         return Err(ImportError::BadArchive(format!("{} files", zip.len())));
     }
     let mut maps: Vec<Map> = Vec::new();
+    let mut total: u64 = 0;
     for index in 0..zip.len() {
         let Ok(mut entry) = zip.by_index(index) else { continue };
-        if entry.is_dir() || entry.size() > MAX_MAP_BYTES {
+        if entry.is_dir() {
             continue;
         }
         let Some(file_name) = entry.name().ok().and_then(|n| map_file_name(&n)) else { continue };
+        // One byte more than what is left, so an entry that goes over the budget shows it.
+        let left = budget.saturating_sub(total).min(MAX_PICKED_MAP_BYTES);
         let mut data = Vec::new();
-        if entry.by_ref().take(MAX_MAP_BYTES + 1).read_to_end(&mut data).is_err() || data.len() as u64 > MAX_MAP_BYTES {
+        if entry.by_ref().take(left + 1).read_to_end(&mut data).is_err() {
+            continue;
+        }
+        total += data.len() as u64;
+        if total > budget {
+            return Err(ImportError::BadArchive(format!("the maps inside are more than {} MiB", budget >> 20)));
+        }
+        if data.len() as u64 > MAX_PICKED_MAP_BYTES {
             continue;
         }
         let Ok(scenario) = Scenario::from_file_bytes(&data) else { continue };
         if maps.iter().any(|m| m.file_name.eq_ignore_ascii_case(&file_name)) {
             continue;
+        }
+        if maps.len() >= max_maps {
+            return Err(ImportError::BadArchive(format!("more than {max_maps} maps")));
         }
         maps.push(Map { file_name, bytes: data, scenario });
     }
@@ -126,6 +197,10 @@ pub fn write_maps(folder: &Path, maps: &[Map], replace: bool) -> Result<Vec<Stri
             continue;
         }
         let target = folder.join(existing.unwrap_or_else(|| map.file_name.clone()));
+        // Only a file directly in the maps folder: a name that would go elsewhere is refused.
+        if target.parent() != Some(folder) {
+            return Err(format!("{}: not a file of the maps folder", map.file_name));
+        }
         let temp = folder.join(format!(".import-{}-{n}.tmp", std::process::id()));
         let copied = std::fs::write(&temp, &map.bytes).and_then(|()| std::fs::rename(&temp, &target));
         if let Err(e) = copied {
@@ -269,6 +344,55 @@ mod tests {
         assert_eq!(write_maps(&s.0, &maps, true).unwrap(), ["Name.dtm"]);
         let names: Vec<String> = existing_names(&s.0);
         assert_eq!(names, ["Name.dtm"], "one file, not two spellings of it");
+    }
+
+    #[test]
+    fn names_that_could_leave_the_folder_or_break_windows_are_refused_or_reduced() {
+        // Refused: a drive, a colon, a device name, a trailing dot or space, a control character.
+        for name in ["C:evil.DTm", "x:y.DTm", "CON.DTm", "nul.DTm", "com1.x.DTm", "x.DTm.", "x.DTm ", "bad\u{1}.DTm", "a<b.DTm", ".DTm", "dir/"] {
+            assert_eq!(map_file_name(name), None, "{name:?} must be refused");
+        }
+        // Reduced to their base name, which is a plain name: no folder survives.
+        assert_eq!(map_file_name("..\\x.DTm").as_deref(), Some("x.DTm"));
+        assert_eq!(map_file_name("a/../../x.DTm").as_deref(), Some("x.DTm"));
+        assert_eq!(map_file_name("C:\\dir\\ok.dtm").as_deref(), Some("ok.DTm"));
+        // Normal names still come through.
+        assert_eq!(map_file_name("Name With Spaces.dtm").as_deref(), Some("Name With Spaces.DTm"));
+        assert_eq!(map_file_name("Console.DTm").as_deref(), Some("Console.DTm"), "a name that only starts like a device is fine");
+    }
+
+    #[test]
+    fn an_archive_whose_maps_total_over_the_budget_is_refused() {
+        let zip = zip_of(&[("a.DTm", &map_bytes("a")), ("b.DTm", &map_bytes("b"))]);
+        assert!(matches!(read_archive_within(&zip, 10, MAX_MAPS), Err(ImportError::BadArchive(_))));
+        assert_eq!(read_archive_within(&zip, 1 << 20, MAX_MAPS).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn an_archive_with_more_maps_than_the_cap_is_refused() {
+        let zip = zip_of(&[("a.DTm", &map_bytes("a")), ("b.DTm", &map_bytes("b")), ("c.DTm", &map_bytes("c"))]);
+        assert!(matches!(read_archive_within(&zip, 1 << 20, 2), Err(ImportError::BadArchive(_))));
+        assert_eq!(read_archive_within(&zip, 1 << 20, 3).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn a_picked_file_over_its_limit_is_not_read() {
+        let s = Scratch::new("limit");
+        let path = s.0.join("picked.DTm");
+        std::fs::write(&path, [7u8; 10]).unwrap();
+        assert_eq!(read_limited(&path, 5).unwrap(), None);
+        assert_eq!(read_limited(&path, 10).unwrap().map(|b| b.len()), Some(10));
+        assert_eq!(picked_limit("pack.zip"), MAX_PICKED_ARCHIVE_BYTES);
+        assert_eq!(picked_limit("map.DTm"), MAX_PICKED_MAP_BYTES);
+    }
+
+    #[test]
+    fn a_map_is_written_only_directly_in_the_folder() {
+        let s = Scratch::new("outside");
+        let folder = s.0.join("Maps_Rus");
+        let outside = Map { file_name: "../escaped.DTm".into(), bytes: map_bytes("x"), scenario: Scenario::default() };
+        assert!(write_maps(&folder, &[outside], true).is_err());
+        assert!(!s.0.join("escaped.DTm").exists());
     }
 
     /// The install's own maps read back through an archive: the zip path on real files

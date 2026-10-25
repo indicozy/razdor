@@ -533,3 +533,4 @@ The map «{title}» uses units or items that are not in your game ({ids}). It ne
 units {units}; items {items} = воины {units}; предметы {items}
 units {units} = воины {units}
 items {items} = предметы {items}
+«{name}» is too big to be a Discord Times map. = «{name}» слишком большой для карты Discord Times.
