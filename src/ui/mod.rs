@@ -1053,7 +1053,11 @@ impl App {
             match v.exit.take() {
                 Some(saves::ExitChoice::Quit) => self.quit = true,
                 Some(saves::ExitChoice::MainMenu) => next = Some(Screen::MainMenu),
-                Some(saves::ExitChoice::Keys) => {}
+                // «Клавиши» (phones): the battle stays, the key list opens over it (Place::Battle).
+                Some(saves::ExitChoice::Keys) => {
+                    self.help = true;
+                    self.help_fresh = true;
+                }
                 // «Рестарт» in a battle: this battle again from the moment it began (Razdor's;
                 // the scenario's restart when that moment was not kept).
                 Some(saves::ExitChoice::Restart) => match v.restart_state.take() {
