@@ -340,28 +340,53 @@ local! {
 /// on the screen under it (`input::tap_key`). Returns true when the list closes: F1 or Esc, a
 /// press outside the buttons, or a tap on one. `fresh`: the press that opened it (a menu's
 /// button) does not close it.
+/// A tile's words at `size`, wrapped to `width` in at most `max_lines`: the largest size, down to
+/// 60 % of `size`, at which they fit; else one line at the smallest size (drawn shrunk to fit).
+fn fit_words(words: &str, width: f32, size: f32, max_lines: usize) -> (f32, Vec<String>) {
+    let mut s = size;
+    loop {
+        let lines = wrap(words, width, s);
+        if lines.len() <= max_lines {
+            return (s, lines);
+        }
+        if s <= size * 0.6 {
+            return (s, vec![words.to_string()]);
+        }
+        s -= size * 0.05;
+    }
+}
+
 pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
     let (sw, sh) = (screen_width(), screen_height());
     draw_rectangle(0.0, 0.0, sw, sh, Color::new(0.0, 0.0, 0.0, 0.45));
-    // The phone's text base (one original px per dp, as the message windows): the buttons read
-    // on a phone; on the desktop it is the interface scale.
+    // The layout's base: on a phone the phone's text base (one original px per dp, as the message
+    // windows); on the desktop the interface scale.
     let k = super::display::text_base(chrome::k(), super::dialog::TEXT_REF);
+    // The text's scale: on a phone the phone's text (with «Размер текста»), drawn under the legacy
+    // metrics so the sizes are not shrunk to the sheet fonts' own; on the desktop `k`, as before.
+    let phone = super::display::dp_px().is_some();
+    let t = if phone { super::display::text_for(chrome::k(), super::dialog::TEXT_REF) } else { k };
     let tiles = tiles(place);
     let info = info_rows(place);
     let cols = if sw < sh || sw < 760.0 { 2 } else { 3 };
-    let (pad, gap, line) = (14.0 * k, 8.0 * k, 24.0 * k);
+    let (pad, gap) = (14.0 * k, 8.0 * k);
     let w = if cols == 2 { sw - 16.0 } else { (880.0 * k).min(sw - 40.0) };
     let tile_w = (w - 2.0 * pad - 14.0 * k - gap * (cols as f32 - 1.0)) / cols as f32;
-    let tile_h = (60.0 * k).max(40.0);
+    let size = 18.0 * t;
+    // A tile's words wrap to its width: at most two lines on the desktop, three on a phone; a
+    // longer text shrinks (to 60 %) until it fits those lines.
+    let max_lines = if phone { 3 } else { 2 };
+    let fitted: Vec<(f32, Vec<String>)> = super::dt_font::legacy_metrics_if(phone, || tiles.iter().map(|tl| fit_words(tr(tl.what), tile_w - 16.0 * t, size, max_lines)).collect());
+    let text_rows = fitted.iter().map(|(_, l)| l.len().clamp(1, max_lines)).max().unwrap_or(1) as f32;
+    let tile_h = if phone { (text_rows * 21.0 * t + 33.0 * t).max(60.0 * k) } else { (60.0 * k).max(40.0) };
     let grid_h = tiles.len().div_ceil(cols) as f32 * (tile_h + gap);
-    let info_h = if info.is_empty() { 0.0 } else { 30.0 * k + info.len() as f32 * line + 6.0 * k };
+    let line = 24.0 * t;
+    let info_h = if info.is_empty() { 0.0 } else { 30.0 * t + info.len() as f32 * line + 6.0 * k };
     let content = 4.0 * k + grid_h + 6.0 * k + info_h;
-    let h = (content + 124.0 * k).min(sh - 16.0);
+    let h = (content + 52.0 * t + 72.0 * k).min(sh - 16.0);
     let (x, y) = ((sw - w) / 2.0, (sh - h) / 2.0);
     let (inner, _) = chrome::window(Rect::new(x, y, w, h), tr("Keys"), Skin::Marble, false);
-    text(place_name(place), inner.x + pad, inner.y + 22.0 * k, 19.0 * k, ACCENT);
-    text_fit(tr("Tap a button to run its action"), inner.x + pad, inner.y + 44.0 * k, inner.w - 2.0 * pad, 15.0 * k, DIM);
-    let body = Rect::new(inner.x, inner.y + 52.0 * k, inner.w, inner.bottom() - 40.0 * k - (inner.y + 52.0 * k));
+    let body = Rect::new(inner.x, inner.y + 52.0 * t, inner.w, inner.bottom() - 40.0 * k - (inner.y + 52.0 * t));
     let most = (content - body.h).max(0.0);
     let mut scroll = SCROLL.with(|s| s.get()).clamp(0.0, most);
     let (mx, my) = input::screen_pointer();
@@ -373,58 +398,64 @@ pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
     let bar = Rect::new(body.right() - 12.0 * k, body.y, 10.0 * k, body.h);
     let mut on_control = over(bar);
     let mut press = None;
-    {
-        let _clip = super::widgets::Clip::new(body);
-        for (i, t) in tiles.iter().enumerate() {
-            let (col, row) = (i % cols, i / cols);
-            let ty = body.y + 4.0 * k + row as f32 * (tile_h + gap) - scroll;
-            let r = Rect::new(inner.x + pad + col as f32 * (tile_w + gap), ty, tile_w, tile_h);
-            let enabled = tile_enabled(place, t, guard);
-            let visible = ty >= body.y - 0.5 && ty + tile_h <= body.bottom() + 0.5;
-            let (_, down, pressed) = if visible { super::widgets::button_state(r, enabled) } else { (false, false, false) };
-            on_control |= visible && over(r);
-            chrome::marble_button(r, "", enabled, down);
-            let ink = if enabled { chrome::CREAM } else { DIM };
-            let size = 18.0 * k;
-            let lines = super::widgets::wrap(tr(t.what), r.w - 16.0 * k, size);
-            let one_line = lines.len() <= 1;
-            let lines: Vec<String> = if lines.len() > 2 { vec![tr(t.what).to_string()] } else { lines };
-            let top = r.y + (r.h - 17.0 * k - lines.len() as f32 * 21.0 * k) / 2.0 + size * 0.8;
-            for (n, l) in lines.iter().enumerate() {
-                if one_line {
-                    text_fit(l, r.x + 8.0 * k, top + n as f32 * 21.0 * k, r.w - 16.0 * k, size, ink);
-                } else {
-                    text(l, r.x + 8.0 * k, top + n as f32 * 21.0 * k, size, ink);
+    super::dt_font::legacy_metrics_if(phone, || {
+        text(place_name(place), inner.x + pad, inner.y + 22.0 * t, 19.0 * t, ACCENT);
+        text_fit(tr("Tap a button to run its action"), inner.x + pad, inner.y + 44.0 * t, inner.w - 2.0 * pad, 15.0 * t, DIM);
+        {
+            let _clip = super::widgets::Clip::new(body);
+            for (i, tl) in tiles.iter().enumerate() {
+                let (col, row) = (i % cols, i / cols);
+                let ty = body.y + 4.0 * k + row as f32 * (tile_h + gap) - scroll;
+                if ty + tile_h <= body.y || ty >= body.bottom() {
+                    continue;
                 }
-            }
-            text_fit(&t.shown, r.x + 8.0 * k, r.bottom() - 8.0 * k, r.w - 16.0 * k, 15.0 * k, ACCENT);
-            if pressed {
-                super::audio::cue(super::audio::Cue::Button);
-                press = Some(t.key);
+                let r = Rect::new(inner.x + pad + col as f32 * (tile_w + gap), ty, tile_w, tile_h);
+                let enabled = tile_enabled(place, tl, guard);
+                let visible = ty >= body.y - 0.5 && ty + tile_h <= body.bottom() + 0.5;
+                let (_, down, pressed) = if visible { super::widgets::button_state(r, enabled) } else { (false, false, false) };
+                on_control |= visible && over(r);
+                chrome::marble_button(r, "", enabled, down);
+                let ink = if enabled { chrome::CREAM } else { DIM };
+                let (size, lines) = &fitted[i];
+                let step = size * 21.0 / 18.0;
+                let top = r.y + (r.h - 17.0 * t - lines.len() as f32 * step) / 2.0 + size * 0.8;
+                for (n, l) in lines.iter().enumerate() {
+                    // One line shrinks to the tile's width; several lines are set as they wrap.
+                    if lines.len() == 1 {
+                        text_fit(l, r.x + 8.0 * k, top + n as f32 * step, r.w - 16.0 * k, *size, ink);
+                    } else {
+                        text(l, r.x + 8.0 * k, top + n as f32 * step, *size, ink);
+                    }
+                }
+                text_fit(&tl.shown, r.x + 8.0 * k, r.bottom() - 8.0 * t, r.w - 16.0 * k, if phone { 17.0 * t } else { 15.0 * t }, ACCENT);
+                if pressed {
+                    super::audio::cue(super::audio::Cue::Button);
+                    press = Some(tl.key);
+                }
             }
         }
         let mut ly = body.y + 4.0 * k + grid_h + 6.0 * k - scroll;
         if !info.is_empty() {
-            text(tr("Other keys and mouse"), inner.x + pad, ly + 20.0 * k, 17.0 * k, ACCENT);
-            ly += 30.0 * k;
+            text(tr("Other keys and mouse"), inner.x + pad, ly + 20.0 * t, 17.0 * t, ACCENT);
+            ly += 30.0 * t;
             let dx = inner.x + inner.w * 0.42;
             for (key, what) in &info {
                 if ly > body.bottom() {
                     break;
                 }
                 if ly >= body.y - line {
-                    text_fit(tr(&fill_keys(key)), inner.x + pad + 8.0 * k, ly + 16.0 * k, dx - inner.x - pad - 16.0 * k, 16.0 * k, INK);
-                    text_fit(tr(what), dx, ly + 16.0 * k, inner.right() - dx - pad, 16.0 * k, DIM);
+                    text_fit(tr(&fill_keys(key)), inner.x + pad + 8.0 * k, ly + 16.0 * t, dx - inner.x - pad - 16.0 * k, 16.0 * t, INK);
+                    text_fit(tr(what), dx, ly + 16.0 * t, inner.right() - dx - pad, 16.0 * t, DIM);
                 }
                 ly += line;
             }
         }
-    }
+        text_centered(tr("F1, Esc or a click closes this list"), inner.center().x, inner.bottom() - 12.0 * k, 15.0 * t, DIM);
+    });
     if most > 0.0 {
         super::widgets::scrollbar_px(bar, &mut scroll, most, body.h, 40.0 * k);
     }
     SCROLL.with(|s| s.set(scroll));
-    text_centered(tr("F1, Esc or a click closes this list"), inner.center().x, inner.bottom() - 12.0 * k, 15.0 * k, DIM);
     let closes = !fresh && is_mouse_button_pressed(MouseButton::Left) && !on_control;
     let done = is_key_pressed(keymap::key(Action::Help)) || is_key_pressed(KeyCode::Escape) || closes || press.is_some();
     if let Some(key) = press {

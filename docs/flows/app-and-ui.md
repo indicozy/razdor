@@ -538,9 +538,11 @@ the key is queued and on the next frame `input::is_key_pressed` and `get_keys_pr
 once, so the screen under the list runs its action as if the key were pressed (the queue is
 `input::TapQueue`, consumed in `begin_frame`). A tile the rules forbid now is drawn disabled
 (`hotkeys::tile_enabled`, `allowed`). Phones have no F1: the game menu's «Клавиши» button
-(`saves::ExitChoice::Keys`, drawn by `exit_dialog` for the menu only; the five buttons take 4 px
-between them) opens the list over the map; `App::help_fresh` keeps the press that opened it from
-closing it. The list's text follows the phone's text base (`display::text_base`). Snapshot:
+(`saves::ExitChoice::Keys`, drawn by `exit_dialog` on a phone only, `display::dp_px()`; the desktop
+menu is the original's four buttons; the phone's five take 4 px between them) opens the list over
+the map; `App::help_fresh` keeps the press that opened it from closing it. On a phone the list's
+text is the phone's text (`display::text_for`, drawn under `dt_font::legacy_metrics_if`) and its
+tiles wrap to three lines; the desktop keeps the interface scale. Snapshot:
 `RAZDOR_SCENE_OPEN=<frame>:keys`.
 
 ## How to add a window

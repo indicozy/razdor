@@ -1076,20 +1076,22 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art:
         (own("ExitGame", "ExitToMenu", n_("To the menu")), Some(ExitChoice::MainMenu)),
         (own("ExitGame", "Restart", n_("Restart")), Some(ExitChoice::Restart)),
     ];
-    // Razdor's «Клавиши» in the game menu (the key list over the map; phones have no F1).
-    let mut widths = vec![150.0 * k, 150.0 * k, 110.0 * k];
-    // The menu's five buttons take a little less between them (5 px, not 7.5) and «Клавиши»
-    // and «Отмена» are narrower, so the row keeps the original's labels whole.
-    let gap = if art { 4.0 * k } else { 7.5 * k };
-    if art {
+    // Razdor's «Клавиши» in the game menu: on phones only (the key list over the map; phones
+    // have no F1). The desktop menu is the original's five-less row, as before.
+    let phone_menu = art && super::display::dp_px().is_some();
+    let mut widths = vec![150.0 * k, 150.0 * k, if phone_menu { 110.0 * k } else { 120.0 * k }];
+    // The phone menu's five buttons take a little less between them (4 px, not 7.5) and
+    // «Клавиши» and «Отмена» are narrower, so the row keeps the labels whole.
+    let gap = if phone_menu { 4.0 * k } else { 7.5 * k };
+    if phone_menu {
         labels.push((tr(n_("Keys")).to_string(), Some(ExitChoice::Keys)));
         widths.push(104.0 * k);
     }
     labels.push((own("Buttons", "Cancel", n_("Cancel")), None));
-    widths.push(if art { 84.0 * k } else { 90.0 * k });
+    widths.push(if phone_menu { 84.0 * k } else { 90.0 * k });
     let n = labels.len();
-    // The menu's row fits the window: the buttons shrink together when they would not.
-    let fit = if art { ((r.w - 18.75 * k - gap * (n as f32 - 1.0)) / widths.iter().sum::<f32>()).min(1.0) } else { 1.0 };
+    // The phone's row fits the window: the buttons shrink together when they would not.
+    let fit = if phone_menu { ((r.w - 18.75 * k - gap * (n as f32 - 1.0)) / widths.iter().sum::<f32>()).min(1.0) } else { 1.0 };
     let bw = (inner.w - 50.0 * k) / 4.0;
     let button_h = 36.0 * 0.9375 * k;
     let by = if art { r.bottom() - (footer_h + button_h) / 2.0 } else { inner.y + inner.h - 42.0 * k };
