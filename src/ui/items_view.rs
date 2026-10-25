@@ -1338,6 +1338,17 @@ fn diary_title_size(phone: bool, list_t: f32, head: f32, ts: f32, s: f32) -> f32
     }
 }
 
+/// A quest row's text size on a phone: the largest size in the 0.9-step sequence from `full` whose
+/// width (`width_at`) fits `room`, never below `floor` (the original's title size). A text that
+/// fits at `full` keeps it; one that never fits gets `floor`, and the caller cuts it there.
+fn fit_row_size(full: f32, floor: f32, width_at: impl Fn(f32) -> f32, room: f32) -> f32 {
+    let mut size = full;
+    while width_at(size) > room && size > floor {
+        size = (size * 0.9).max(floor);
+    }
+    size
+}
+
 /// The hero window («Личные характеристики и инвентарь Героя»), the bottom bar's flag (side
 /// window 5; built by 0x4d8638, its fixed parts drawn by 0x4d1814): the hero's panel on the
 /// left as in the army window; the pack's 5×5 squares with its scroll bar; the item
@@ -1494,6 +1505,8 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     let list_t = sheet_size(Face::Title, super::display::text_for(s, crate::ui::dialog::TEXT_REF));
     // On a phone the list is drawn at its own size, as the entry below.
     let phone = super::display::dp_px().is_some();
+    // A phone's row shrinks to fit the box down to the window's title size before it is cut.
+    let row_floor = sheet_size(Face::Title, s).min(list_t);
     let row_h = (list_t * 1.25).round();
     let fits = ((list.h - 8.0 * s) / row_h).floor().max(1.0) as usize;
     swipe_rows(list, row_h);
@@ -1529,19 +1542,25 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
         let ry = list.y + 4.0 * s + (n - view.list_scroll) as f32 * row_h;
         let k = match *line {
             super::story::Line::Heading(chapter) => {
-                let head_text = super::dt_font::legacy_metrics_if(phone, || ellipsize(&game.journal.chapter_heading(chapter), list.w - 12.0 * s, list_t));
-                super::dt_font::legacy_metrics_if(phone, || with_original_face(Face::Bold, || chrome::shadow_centered(&head_text, list.x + list.w / 2.0, ry + row_h * 0.78, list_t, Color::from_rgba(235, 165, 75, 255))));
+                let heading = game.journal.chapter_heading(chapter);
+                let room = list.w - 12.0 * s;
+                let size = if phone { super::dt_font::legacy_metrics_if(true, || fit_row_size(list_t, row_floor, |z| with_original_face(Face::Bold, || measure(&heading, z).width), room)) } else { list_t };
+                let head_text = super::dt_font::legacy_metrics_if(phone, || ellipsize(&heading, room, size));
+                super::dt_font::legacy_metrics_if(phone, || with_original_face(Face::Bold, || chrome::shadow_centered(&head_text, list.x + list.w / 2.0, ry + row_h * 0.78, size, Color::from_rgba(235, 165, 75, 255))));
                 continue;
             }
             super::story::Line::Row(k) => k,
         };
         let row = &rows[k];
         let mut title = row.title.clone();
-        // Measured in the face it is drawn in (Benguiat's title), so a long title is cut to fit.
-        while super::dt_font::legacy_metrics_if(phone, || with_original_face(Face::Title, || measure(&title, list_t).width)) > list.w - 12.0 * s && title.chars().count() > 3 {
+        // Measured in the face it is drawn in (Benguiat's title): on a phone the row first shrinks
+        // to fit, and only then is a title that still does not fit cut.
+        let room = list.w - 12.0 * s;
+        let size = if phone { super::dt_font::legacy_metrics_if(true, || fit_row_size(list_t, row_floor, |z| with_original_face(Face::Title, || measure(&title, z).width), room)) } else { list_t };
+        while super::dt_font::legacy_metrics_if(phone, || with_original_face(Face::Title, || measure(&title, size).width)) > room && title.chars().count() > 3 {
             title.pop();
         }
-        super::dt_font::legacy_metrics_if(phone, || with_original_face(Face::Title, || chrome::shadow_centered(&title, list.x + list.w / 2.0, ry + row_h * 0.78, list_t, ink_color(Ink::Plain))));
+        super::dt_font::legacy_metrics_if(phone, || with_original_face(Face::Title, || chrome::shadow_centered(&title, list.x + list.w / 2.0, ry + row_h * 0.78, size, ink_color(Ink::Plain))));
         if mouse_in(list.x, ry, list.w, row_h) && clicked() && view.pick != k {
             view.pick = k;
             view.text_scroll = 0;
@@ -1615,6 +1634,23 @@ mod tests {
         let t = 3.0;
         assert_eq!(diary_body_size(true, t), sheet_size(Face::Subtitle, t));
         assert_eq!(diary_body_size(false, t), sheet_size(Face::Body, t));
+    }
+
+    #[test]
+    fn a_long_quest_title_shrinks_before_it_is_cut() {
+        // Razdor's phone choice: a quest row shrinks to fit its box (0.9 steps) down to the
+        // window's title size; only a title that never fits is cut, at that floor.
+        use super::fit_row_size;
+        let width = |z: f32| z * 10.0;
+        // Fits at full: full.
+        assert_eq!(fit_row_size(20.0, 10.0, width, 300.0), 20.0);
+        // Needs shrinking: a smaller size that fits.
+        let shrunk = fit_row_size(20.0, 10.0, width, 150.0);
+        assert!(shrunk < 20.0 && width(shrunk) <= 150.0, "{shrunk}");
+        // Never below the floor: even the floor is too wide, so the floor.
+        assert_eq!(fit_row_size(20.0, 15.0, width, 100.0), 15.0);
+        // A full size already below the floor is not grown.
+        assert_eq!(fit_row_size(12.0, 15.0, width, 100.0), 12.0);
     }
 
     #[test]
