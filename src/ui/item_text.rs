@@ -68,17 +68,18 @@ struct Line {
     color: Color,
 }
 
-/// The item's lines at `s` screen pixels per original pixel, wrapped to `room`. Their text
-/// takes Razdor's text size on the phone's text base (`display::text_for`; the owner's request:
-/// phones' text too small), as the messages do.
-fn lines(game: &Game, item: ItemId, room: f32, s: f32) -> Vec<Line> {
+/// The item's lines at `s` screen pixels per original pixel, wrapped to `room`, their text
+/// times `fit` (1 unless `draw` shrinks a long text). Their text takes Razdor's text size on
+/// the phone's text base (`display::text_for`; the owner's request: phones' text too small),
+/// as the messages do.
+fn lines(game: &Game, item: ItemId, room: f32, s: f32, fit: f32) -> Vec<Line> {
     // A phone's text takes its own size: measured with the legacy metrics (see `draw`).
-    super::dt_font::legacy_metrics_if(super::display::dp_px().is_some(), || lines_at(game, item, room, s))
+    super::dt_font::legacy_metrics_if(super::display::dp_px().is_some(), || lines_at(game, item, room, s, fit))
 }
 
-fn lines_at(game: &Game, item: ItemId, room: f32, s: f32) -> Vec<Line> {
+fn lines_at(game: &Game, item: ItemId, room: f32, s: f32, fit: f32) -> Vec<Line> {
     let d = game.content.item(item);
-    let t = super::display::text_for(s, crate::ui::dialog::TEXT_REF);
+    let t = super::display::text_for(s, crate::ui::dialog::TEXT_REF) * fit;
     let (title, body) = (sheet_size(Face::Subtitle, t), sheet_size(Face::Body, t));
     let mut out = Vec::new();
     let mut add = |text: &str, face: Face, size: f32, color: Color| {
@@ -122,7 +123,29 @@ fn height(lines: &[Line]) -> f32 {
 /// The tooltip's height for `item` at `s` screen pixels per original pixel: its text plus
 /// twice the margin (0x4cbb15).
 pub fn tooltip_height(game: &Game, item: ItemId, s: f32) -> f32 {
-    height(&lines(game, item, (TOOLTIP_W - 2.0 * TOOLTIP_MARGIN) * s, s)) + 2.0 * TOOLTIP_MARGIN * s
+    height(&lines(game, item, (TOOLTIP_W - 2.0 * TOOLTIP_MARGIN) * s, s, 1.0)) + 2.0 * TOOLTIP_MARGIN * s
+}
+
+/// The next `(scale, fit)` of a text that is taller than its room. On the desktop the text's
+/// size follows the window's scale, so the scale shrinks. On a phone the text's size is the
+/// phone's own (`display::text_for` ignores the window's scale), so the scale stays and the
+/// fit shrinks the text itself (Razdor's: the original cuts the list).
+fn fit_step(phone: bool, scale: f32, fit: f32) -> (f32, f32) {
+    if phone {
+        (scale, fit * 0.9)
+    } else {
+        (scale * 0.9, fit)
+    }
+}
+
+/// Whether [`fit_step`] may shrink again: the scale (desktop) or the text's size (phone,
+/// `t` the phone's base times `fit`) stays above 0.6 of the window's scale `s`.
+fn can_shrink(phone: bool, s: f32, scale: f32, t: f32, fit: f32) -> bool {
+    if phone {
+        t * fit > s * 0.6
+    } else {
+        scale > s * 0.6
+    }
 }
 
 /// Draws `item`'s description box in `r`, laid out as `kind`, at `s` screen pixels per
@@ -137,11 +160,13 @@ pub fn draw(game: &Game, assets: &Assets, item: ItemId, r: Rect, kind: ItemBox, 
     let side = if kind == ItemBox::Tooltip { TOOLTIP_MARGIN } else { SIDE };
     let above = if kind == ItemBox::Market { PICTURE_TOP + PICTURE } else { 0.0 };
     let room_h = |s: f32| r.h - above * s - if kind == ItemBox::Tooltip { 2.0 * TOOLTIP_MARGIN * s } else { 0.0 };
-    let mut scale = s;
-    let mut text = lines(game, item, r.w - 2.0 * side * scale, scale);
-    while height(&text) > room_h(scale) && scale > s * 0.6 {
-        scale *= 0.9;
-        text = lines(game, item, r.w - 2.0 * side * scale, scale);
+    let phone = super::display::dp_px().is_some();
+    let t = super::display::text_for(s, crate::ui::dialog::TEXT_REF);
+    let (mut scale, mut fit) = (s, 1.0);
+    let mut text = lines(game, item, r.w - 2.0 * side * scale, scale, fit);
+    while height(&text) > room_h(scale) && can_shrink(phone, s, scale, t, fit) {
+        (scale, fit) = fit_step(phone, scale, fit);
+        text = lines(game, item, r.w - 2.0 * side * scale, scale, fit);
     }
     let h = height(&text);
     let top = match kind {
@@ -166,4 +191,33 @@ pub fn draw(game: &Game, assets: &Assets, item: ItemId, r: Rect, kind: ItemBox, 
             y += advance(l);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_phone_s_long_description_shrinks_its_text_to_fit() {
+        let s = 1.0;
+        // A phone keeps the window's scale and shrinks the fit; the desktop does the reverse.
+        assert_eq!(fit_step(true, s, 1.0), (s, 0.9));
+        let (scale, fit) = fit_step(false, s, 1.0);
+        assert!((scale - 0.9).abs() < 1e-6 && fit == 1.0);
+
+        // The 0.6 floor holds on both: the phone's text (base 10 times the fit) stops at 0.6.
+        assert!(can_shrink(true, s, s, 10.0, 0.08));
+        assert!(!can_shrink(true, s, s, 10.0, 0.05));
+        assert!(can_shrink(false, s, 0.7, 10.0, 1.0));
+        assert!(!can_shrink(false, s, 0.5, 10.0, 1.0));
+
+        // Stepping a phone's text down stops at the floor, with the window's scale unchanged.
+        let (t, mut fit, mut n) = (10.0, 1.0, 0);
+        while can_shrink(true, s, s, t, fit) {
+            fit = fit_step(true, s, fit).1;
+            n += 1;
+        }
+        assert!(n > 0 && t * fit <= s * 0.6 && fit < 1.0);
+        assert_eq!(fit_step(true, s, fit).0, s);
+    }
 }
