@@ -1328,6 +1328,16 @@ fn diary_body_size(phone: bool, ts: f32) -> f32 {
     }
 }
 
+/// The diary entry's title size: on a phone it is as large as the quest list's titles (`list_t`),
+/// the desktop keeps the entry's own heading size (`head * ts / s`).
+fn diary_title_size(phone: bool, list_t: f32, head: f32, ts: f32, s: f32) -> f32 {
+    if phone {
+        list_t
+    } else {
+        head * ts / s
+    }
+}
+
 /// The hero window («Личные характеристики и инвентарь Героя»), the bottom bar's flag (side
 /// window 5; built by 0x4d8638, its fixed parts drawn by 0x4d1814): the hero's panel on the
 /// left as in the army window; the pack's 5×5 squares with its scroll bar; the item
@@ -1550,10 +1560,12 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     let ts = super::display::text_for(s, crate::ui::dialog::TEXT_REF);
     let body = diary_body_size(phone, ts);
     let room = entry.w - 16.0 * s;
+    // On a phone the entry's title is as large as the quest list's titles (`list_t`).
+    let entry_title = diary_title_size(phone, list_t, head, ts, s);
     let lines = super::dt_font::legacy_metrics_if(phone, || {
         rows.get(view.pick).map_or_else(Vec::new, |row| match view.tab {
-            Tab::Active => diary_entry(row, room, head * ts / s, body),
-            tab => history_entry(row, tab, room, head * ts / s, body),
+            Tab::Active => diary_entry(row, room, entry_title, body),
+            tab => history_entry(row, tab, room, entry_title, body),
         })
     });
     let line_h = (body * 1.15).round();
@@ -1592,7 +1604,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
 
 #[cfg(test)]
 mod tests {
-    use super::{card_line, diary_body_size, held_card_lit, held_hint_ink, class_wage, hero_resources, panel_slots, pointed_line, promo_ease, promo_look, promo_ms, ArmySel, Content, GridPress, UnitId};
+    use super::{card_line, diary_body_size, diary_title_size, held_card_lit, held_hint_ink, class_wage, hero_resources, panel_slots, pointed_line, promo_ease, promo_look, promo_ms, ArmySel, Content, GridPress, UnitId};
 
     #[test]
     fn a_phone_s_diary_body_is_as_tall_as_the_message_text() {
@@ -1602,6 +1614,14 @@ mod tests {
         let t = 3.0;
         assert_eq!(diary_body_size(true, t), sheet_size(Face::Subtitle, t));
         assert_eq!(diary_body_size(false, t), sheet_size(Face::Body, t));
+    }
+
+    #[test]
+    fn a_phone_s_diary_title_is_as_large_as_the_list_s_titles() {
+        // Razdor's phone choice: the entry's title takes the quest list's title size on a phone;
+        // the desktop keeps the entry's own heading size (head * ts / s).
+        assert_eq!(diary_title_size(true, 20.0, 30.0, 3.0, 2.0), 20.0);
+        assert_eq!(diary_title_size(false, 20.0, 30.0, 3.0, 2.0), 30.0 * 3.0 / 2.0);
     }
 
     #[test]
