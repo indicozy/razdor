@@ -971,14 +971,14 @@ impl App {
             (Screen::WorldMap, Some(game)) => pan::unpanned(|| {
                 world_view::frame(game, &self.assets, &mut self.map_view, &mut self.message, &mut self.dialogs)
             }),
-            (Screen::Building(view), Some(game)) => {
+            (Screen::Building(view), Some(game)) => window_layout::scaled(|| {
                 building_view::frame(game, &self.assets, view, &mut self.message, &mut self.dialogs)
-            }
-            (Screen::Squad { selected, scroll, back }, Some(game)) => {
+            }),
+            (Screen::Squad { selected, scroll, back }, Some(game)) => window_layout::scaled(|| {
                 items_view::squad(game, &self.assets, selected, scroll, back, &mut self.message)
-            }
+            }),
             (Screen::Battle(view), Some(game)) => view.frame(game, &self.assets, &mut self.message, &mut self.dialogs),
-            (Screen::Hero(view), Some(game)) => items_view::hero_window(game, &self.assets, view, &mut self.message),
+            (Screen::Hero(view), Some(game)) => window_layout::scaled(|| items_view::hero_window(game, &self.assets, view, &mut self.message)),
             (Screen::Spellbook { selected, page, filter }, Some(game)) => {
                 spellbook::frame(game, &self.assets, selected, page, filter, &mut self.message)
             }

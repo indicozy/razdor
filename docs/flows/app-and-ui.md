@@ -157,6 +157,14 @@ wider screen, the desktop's and the landscape phone's, gets 0 and is never moved
 placed from `chrome::canvas_top()`: the logo and the menu (`main_menu`), the scenario list and the new game
 and custom battle windows. The map and building windows are already centred over the view above the bottom
 bar (`window_layout::window`, `main_menu::map_window`, the saves and dialogs), so they are not moved again.
+Stacked windows (experiment, main only): a phone held upright (`window_layout::portrait`: `dp_px` set and the
+screen taller than wide) stacks the building, army and hero windows. The left column is centred on top, the
+right side moves below it (`window_layout::place`, one shift used by `at`, `point` and the panel helpers), and
+the seam is a 2 px line across (`window_layout::frame`, `window_layout::seam`). These windows are drawn inside
+`window_layout::scaled` (`display::with_window_scale`), so `chrome::k()` is the stacked window's own scale
+(`portrait_k`: the largest that fits the width and the height above the bar); the map and bar under them are
+drawn at the interface scale (`world_view::window_backdrop`). Landscape and desktop are unchanged; the
+spellbook keeps its landscape window (`window_layout::landscape_window`).
 The title background is covered, not stretched, on a portrait screen whose aspect is more than 20% off the
 picture's (`chrome::cover_source`: the picture's centred crop); every other screen stretches it as before.
 The market and the sanctuary scenes of the UI regression check use town 8 of РК3-Столица (the start's

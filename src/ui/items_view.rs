@@ -774,7 +774,12 @@ pub fn squad(
     if let Some(slot) = pressed_slot.filter(|_| !showing_type) {
         *message = worn_press(game, sel, slot);
     }
-    draw_line(win.x + 247.0 * k, win.y + 27.0 * k, win.x + 247.0 * k, win.y + win.h - 2.0, 1.5 * k, chrome::SILVER);
+    // Stacked (a phone held upright) the seam is drawn across the window (`window_layout::seam`).
+    if window_layout::portrait() {
+        window_layout::seam(win);
+    } else {
+        draw_line(win.x + 247.0 * k, win.y + 27.0 * k, win.x + 247.0 * k, win.y + win.h - 2.0, 1.5 * k, chrome::SILVER);
+    }
 
     // Top middle, as the original switches it: the hero's backpack, or the selected unit's
     // upgrade tree under its title.
@@ -783,8 +788,9 @@ pub fn squad(
     let own = |key: &str, ours: &'static str| chrome::ui_text("Army", key).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr(ours).to_string());
     if show_tree {
         let title = own("UpgradeTree", n_("Upgrade tree"));
+        let tree = window_layout::point(win, 408.0, 40.0);
         super::dt_font::with_face(super::dt_font::Face::Title, || {
-            chrome::shadow_centered(&title, win.x + 408.0 * k, win.y + 40.0 * k + head * 0.36, 15.0 * k, chrome::CREAM);
+            chrome::shadow_centered(&title, tree.x, tree.y + head * 0.36, 15.0 * k, chrome::CREAM);
         });
     }
     // Razdor gives the backpack the whole top right (the user's choice, 2026-10-09: no item
@@ -1370,7 +1376,9 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     let (_, close) = chrome::window(win, &title, chrome::Skin::Marble, true);
     // The original's right side, window-relative.
     let s = HERO_S * k;
-    let o = |x: f32, y: f32, w: f32, h: f32| Rect::new(win.x + 248.0 * k + (x - 264.0) * s, win.y + 28.0 * k + (y - 28.0) * s, w * s, h * s);
+    // Its origin is the right side's (248, 28) as the window places it (below the left column when stacked).
+    let origin = window_layout::point(win, 248.0, 28.0);
+    let o = |x: f32, y: f32, w: f32, h: f32| Rect::new(origin.x + (x - 264.0) * s, origin.y + (y - 28.0) * s, w * s, h * s);
     let mut hover = None;
 
     // The hero's panel, as the army window paints him (0x492f24).
@@ -1404,7 +1412,12 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     if let Some(slot) = unit_sheet::draw(assets, &c, sheet_rect, &sheet, true, &mut hover) {
         *message = worn_press(game, 0, slot);
     }
-    draw_line(win.x + 247.0 * k, win.y + 27.0 * k, win.x + 247.0 * k, win.y + win.h - 2.0, 1.5 * k, chrome::SILVER);
+    // Stacked (a phone held upright) the seam is drawn across the window (`window_layout::seam`).
+    if window_layout::portrait() {
+        window_layout::seam(win);
+    } else {
+        draw_line(win.x + 247.0 * k, win.y + 27.0 * k, win.x + 247.0 * k, win.y + win.h - 2.0, 1.5 * k, chrome::SILVER);
+    }
 
     // The pack: 25 squares of 55 px from (274, 37), the scroll bar right of them.
     let pack = o(274.0, 37.0, 275.0 + 18.0 / HERO_S, 275.0);

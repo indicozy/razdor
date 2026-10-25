@@ -263,6 +263,11 @@ struct Frame {
 
 /// The window, as the original's building window (836×600 in the reference video): the tab
 /// column on the left, the content pane on the right.
+/// A design point of the window (see `window_layout::point`).
+fn point(f: &Frame, x: f32, y: f32) -> Vec2 {
+    window_layout::point(Rect::new(f.x, f.y, f.w, f.h), x, y)
+}
+
 fn window() -> Frame {
     let Rect { x, y, w, h } = window_layout::window();
     let win = Rect::new(x, y, w, h);
@@ -1676,9 +1681,9 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
             text_centered(tr("Pick an item from the list."), dx + dw / 2.0, card_y + dh / 2.0, 18.0 * k, BOX_INK);
         }
     }
-    let by = f.y + 249.0 * k;
+    let by = point(f, 248.0, 249.0).y;
     for (offset, width) in [(0.0, 166.0), (166.0, 134.0), (300.0, 108.0), (408.0, 164.0)] {
-        chrome::silver_frame(Rect::new(x + offset * k, f.y + 241.0 * k, width * k, 50.0 * k), k.max(1.0));
+        chrome::silver_frame(Rect::new(x + offset * k, point(f, 248.0, 241.0).y, width * k, 50.0 * k), k.max(1.0));
     }
     let [invent_button, shop_button] = market_list_buttons(view.selling, goods.len());
     let (invent, shop) = (own_text("Building", "Invent", n_("Inventory")), own_text("Building", "Market", n_("Trading shop")));
@@ -1766,7 +1771,7 @@ fn sanctuary(game: &mut Game, f: &Frame, view: &mut BuildingView, message: &mut 
     // The description on the left: its title, the spell's card, the message box, the money
     // and "Купить" (0x4ba078).
     let title = own_text("Building", "SpellInfo", n_("Spell description"));
-    super::dt_font::with_face(super::dt_font::Face::Title, || chrome::shadow_centered(&title, f.x + 388.0 * k, f.y + 46.0 * k, 15.0 * k, MARKET_HEADING));
+    super::dt_font::with_face(super::dt_font::Face::Title, || chrome::shadow_centered(&title, point(f, 388.0, 46.0).x, point(f, 388.0, 46.0).y, 15.0 * k, MARKET_HEADING));
     let card = at(f, 255.0, 55.0, 266.0, 103.0);
     let chosen = view.pick.and_then(|n| spells.get(n));
     match chosen {

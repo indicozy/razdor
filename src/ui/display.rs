@@ -110,6 +110,26 @@ pub fn with_fitted<R>(fit: f32, f: impl FnOnce() -> R) -> R {
     r
 }
 
+/// The window's own scale (a phone held upright: `window_layout::scaled`), `0.0` when none is set.
+static WINDOW_K: AtomicU32 = AtomicU32::new(0);
+
+/// Runs `f` with `chrome::k()` (and so the window's pixels and its fonts' native sizes) at
+/// `k` instead of the interface scale; `None` runs it at the interface scale. Only the window's
+/// own drawing takes it: the bottom bar and the map under it are drawn outside.
+pub fn with_window_scale<R>(k: Option<f32>, f: impl FnOnce() -> R) -> R {
+    let next = k.filter(|k| *k > 0.0).map_or(0, f32::to_bits);
+    let prev = WINDOW_K.swap(next, Ordering::Relaxed);
+    let r = f();
+    WINDOW_K.store(prev, Ordering::Relaxed);
+    r
+}
+
+/// The scale [`with_window_scale`] set, if any.
+pub fn window_scale() -> Option<f32> {
+    let k = f32::from_bits(WINDOW_K.load(Ordering::Relaxed));
+    (k > 0.0).then_some(k)
+}
+
 /// The scale chosen in the settings as it is (`0.0`: auto), not yet kept to the window's fit.
 pub fn chosen_scale() -> f32 {
     f32::from_bits(SCALE.load(Ordering::Relaxed))

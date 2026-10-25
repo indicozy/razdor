@@ -2463,6 +2463,11 @@ pub fn backdrop(game: &Game, assets: &Assets) {
 /// as in the original: its buttons are blue, the window's own one green; one pressed gives
 /// the screen it opens (the lit one, or the map button, closes the window).
 pub fn window_backdrop(game: &Game, assets: &Assets, lit: Option<BarButton>) -> Option<Screen> {
+    // The map and the bar are drawn at the interface scale, whatever window is over them.
+    super::display::with_window_scale(None, || window_backdrop_at_scale(game, assets, lit))
+}
+
+fn window_backdrop_at_scale(game: &Game, assets: &Assets, lit: Option<BarButton>) -> Option<Screen> {
     // The map stays where it is when the window over it is panned (`ui::pan`).
     super::pan::unpanned(|| {
         clear_background(rgb(10, 12, 10));

@@ -1282,7 +1282,7 @@ pub fn grey_out(r: Rect) {
 /// the settings' interface scale, kept to the screen's fit ([`fit_k`]): a scale above the fit
 /// is kept to the fit (players got stuck with the settings off-screen in 1.0.0).
 pub fn k() -> f32 {
-    super::display::scale(fit_k())
+    super::display::window_scale().unwrap_or_else(|| super::display::scale(fit_k()))
 }
 
 /// The largest interface scale the window fits (the settings' "Auto").
