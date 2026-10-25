@@ -169,6 +169,38 @@ pub fn private_cache_dir() -> Option<std::path::PathBuf> {
     }
 }
 
+/// A call of the activity that takes no argument and returns text (`razdor::jni::to_text`), or
+/// `None` when the call is missing or refused.
+///
+/// # Safety
+/// Called from the game's thread; every reference made here is local and freed by `Local`.
+unsafe fn text_call(name: &str) -> Option<String> {
+    let env = attach_jni_env();
+    let mid = method(env, activity_class(env).obj, name, "()Ljava/lang/String;", false);
+    if mid.is_null() || cleared(env) {
+        return None;
+    }
+    let reply = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, ACTIVITY, mid));
+    if cleared(env) {
+        return None;
+    }
+    razdor::jni::to_text(env, reply.obj)
+}
+
+/// Opens the system's document picker (`razdorPickFile`, the Java side). False when the call
+/// fails; the answer comes through [`pick_outcome`].
+pub fn start_pick() -> bool {
+    // SAFETY: as in `text_call`.
+    unsafe { text_call("razdorPickFile") }.is_some_and(|reply| reply.is_empty())
+}
+
+/// The picker's answer (`razdorPickOutcome`): "" while it is open, "cancel", "error: <why>", or
+/// "ok\n<display name>\n<path of a copy in the app's cache>" (the caller deletes the copy).
+pub fn pick_outcome() -> String {
+    // SAFETY: as in `text_call`.
+    unsafe { text_call("razdorPickOutcome") }.unwrap_or_default()
+}
+
 /// Whether Razdor may read the shared storage (the install and the saves live there).
 pub fn storage_granted() -> bool {
     // SAFETY: the activity exists once the window is open (the screens run after it).

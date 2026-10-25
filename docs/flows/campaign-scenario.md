@@ -113,6 +113,18 @@ dropped); flags always carry over. Named characters travel with the army (`set_n
 `name_chapter`), newest first; Razdor keeps the history across maps (an addition; the original's
 journal is per map).
 
+## Adding a map («Добавить карту…»)
+
+The new-game window's button (`ui/new_game.rs`, `add_map_button`, under the list) opens the
+platform's picker (`ui/map_import.rs`: `rfd` on desktop, on a thread or on the main thread on
+macOS; Android's document picker through `android/MainActivityInject.java`, polled by
+`ui/android.rs`; no button on iOS). `dt/map_import.rs` reads a `.DTm`, or every `.DTm` inside a
+`.zip` (any depth, base names only), and copies them into the install's `Maps_Rus` (atomically;
+a taken name asks «Заменить?»). The import then reads the install's maps and the list again
+(`App::maps_written`) and picks the first map. A map that names unit types or items the install
+lacks is warned about at the import and refused at the start (`rules/map_refs.rs`, a notice),
+because `Content::unit` would panic on it.
+
 ## Traps (from past bugs)
 
 - *Carry-over order.* Carry-over must be applied before the next map's opening events run;

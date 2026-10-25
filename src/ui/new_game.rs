@@ -21,6 +21,7 @@ use super::assets::Assets;
 use super::audio::{cue, Cue};
 use super::chrome;
 use super::dt_font::{with_face, Face};
+use super::map_import;
 use super::widgets::*;
 use super::{screens, ScenarioEntry, Screen};
 
@@ -521,7 +522,8 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
     let mut picked = PICKED.with(|p| p.get()).min(list.len().saturating_sub(1));
     // The list: per group a round icon and the name, and a campaign's chapters under it in
     // small type; the picked group's block is lit. The wheel and the scrollbar scroll it.
-    let rows = win.rect(12.0, 36.0, 270.0, 396.0);
+    // The list ends at 360 (its room is 324 units): «Добавить карту…» and its hint are under it.
+    let rows = win.rect(12.0, 36.0, 270.0, 324.0);
     chrome::text_box_base(rows);
     let (head_h, chapter_h) = (30.0 * k, 18.0 * k);
     let block_h = |g: &Group| head_h + listed_chapters(scenarios, g).len() as f32 * chapter_h + if listed_chapters(scenarios, g).is_empty() { 0.0 } else { 4.0 * k };
@@ -733,6 +735,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         }
         drop(clip);
     }
+    add_map_button(&win, has_install);
     // Razdor's filter and order (a players' wish), under the list where the original's window
     // has nothing: each opens a drop-down list; the choice is kept in the settings.
     let pick_show = view_choice(&win, 12.0, "razdor:scenario-show", show as i64, &Show::ALL.map(|s| s.label()));
@@ -816,6 +819,30 @@ fn experimental_menu() {
 
 /// A marble button at `x` (window pixels) on the buttons' line showing the choice `current`
 /// of `labels`, with a small arrow; a click opens the drop-down list `key`. The value picked.
+/// Razdor's «Добавить карту…» under the scenario list, with the hint of what it takes: the
+/// platform's picker copies the map (or the archive's maps) into the install (`ui::map_import`).
+/// The list ends above it (`add_map_button`'s room: the list is 324 units high).
+fn add_map_button(win: &Win, has_install: bool) {
+    if !map_import::available() {
+        return;
+    }
+    let k = win.k;
+    let enabled = has_install && map_import::can_start();
+    let r = win.rect(12.0, 366.0, 270.0, 26.0);
+    let (_, down, pressed) = button_state(r, enabled);
+    chrome::marble_button(r, tr("Add a map…"), enabled, down);
+    if pressed {
+        cue(Cue::Button);
+        map_import::request();
+    }
+    let size = 10.0 * k;
+    let hint = tr("A .DTm file or a .zip archive: an archive may hold a campaign or several maps.");
+    for (i, line) in wrap(hint, 270.0 * k, size).iter().take(2).enumerate() {
+        let at = win.rect(12.0, 398.0 + i as f32 * 13.0, 270.0, 13.0);
+        chrome::shadow_text(line, at.x + 4.0 * k, at.y + size, size, chrome::CREAM);
+    }
+}
+
 fn view_choice(win: &Win, x: f32, key: &str, current: i64, labels: &[&str]) -> Option<i64> {
     let picked = take_pick(key);
     let r = win.rect(x, 442.0, 140.0, 28.0);
@@ -904,6 +931,12 @@ pub fn tutorial_offer(scenarios: &[ScenarioEntry]) -> Option<Screen> {
 
 /// "Стартовые характеристики Героя".
 pub fn class_select(game: &mut Option<Game>, demo: &Arc<Content>, scenario: Option<(&ScenarioEntry, Arc<Content>)>, assets: &Assets) -> Option<Screen> {
+    // A map that needs a mod's units or items is not started (its notice says why).
+    if let Some((e, content)) = &scenario {
+        if map_import::refused(e, content) {
+            return Some(Screen::ScenarioSelect);
+        }
+    }
     if scenario.is_none() || chrome::win("Win-marble").is_none() {
         return screens::class_select(game, demo, scenario, assets);
     }

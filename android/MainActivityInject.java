@@ -11,6 +11,10 @@
 //% IMPORTS
 
 import android.app.PendingIntent;
+import android.content.Intent;
+import android.database.Cursor;
+import android.net.Uri;
+import android.provider.OpenableColumns;
 import android.view.DisplayCutout;
 import android.content.BroadcastReceiver;
 import android.content.IntentFilter;
@@ -252,6 +256,93 @@ public String razdorInstall(String path) {
             session.close();
         }
     }
+}
+
+// «Добавить карту…» (src/ui/map_import.rs): the system's document picker (Storage Access
+// Framework) opens, and its answer comes back in onActivityResult, which is overridden here
+// (Activity's own; no AndroidX). The picked file is copied into the app's cache, because the
+// game reads a file, not a content URI. razdorPickOutcome is the game's poll: "" while the
+// picker is open or the copy runs, "cancel", "error: <why>", or "ok\n<name>\n<path>".
+private static final int RAZDOR_PICK_REQUEST = 7301;
+// "" until the picker answers; then as razdorPickOutcome describes.
+private volatile String razdorPickResult = "";
+
+// Opens the picker on the UI thread. "" once it is requested; a failure to open it is the poll's
+// answer ("error: ..."), so the game learns of it from razdorPickOutcome.
+public String razdorPickFile() {
+    razdorPickResult = "";
+    runOnUiThread(new Runnable() {
+        @Override
+        public void run() {
+            try {
+                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType("*/*");
+                startActivityForResult(intent, RAZDOR_PICK_REQUEST);
+            } catch (Exception e) {
+                razdorPickResult = "error: " + e;
+            }
+        }
+    });
+    return "";
+}
+
+// The game's poll (see above). Taken as it is: the answer is kept until it is read.
+public String razdorPickOutcome() {
+    return razdorPickResult;
+}
+
+@Override
+protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+    if (requestCode != RAZDOR_PICK_REQUEST) {
+        super.onActivityResult(requestCode, resultCode, data);
+        return;
+    }
+    if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+        razdorPickResult = "cancel";
+        return;
+    }
+    final Uri uri = data.getData();
+    // A thread: the copy of a big file must not stall the activity.
+    new Thread(new Runnable() {
+        @Override
+        public void run() {
+            razdorPickResult = razdorCopyPicked(uri);
+        }
+    }).start();
+}
+
+// Copies the picked document into the app's cache folder; returns the answer for the poll.
+private String razdorCopyPicked(Uri uri) {
+    String name = "picked";
+    try (Cursor cursor = getContentResolver().query(uri, new String[] {OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+        if (cursor != null && cursor.moveToFirst()) {
+            String display = cursor.getString(0);
+            if (display != null && !display.isEmpty()) {
+                name = display.replace('\n', ' ').replace('\r', ' ');
+            }
+        }
+    } catch (Exception e) {
+        // No display name: the file keeps the name "picked" (its extension decides what it is).
+    }
+    File dir = new File(getCacheDir(), "razdor-import");
+    dir.mkdirs();
+    File copy = new File(dir, "picked-" + System.currentTimeMillis());
+    try (InputStream in = getContentResolver().openInputStream(uri); OutputStream out = new FileOutputStream(copy)) {
+        if (in == null) {
+            copy.delete();
+            return "error: the file has no data";
+        }
+        byte[] buffer = new byte[65536];
+        int n;
+        while ((n = in.read(buffer)) > 0) {
+            out.write(buffer, 0, n);
+        }
+    } catch (Exception e) {
+        copy.delete();
+        return "error: " + e;
+    }
+    return "ok\n" + name + "\n" + copy.getAbsolutePath();
 }
 
 // Full screen (the settings' «Экран» row, src/ui/display.rs): the system bars are hidden, and a

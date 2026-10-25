@@ -26,6 +26,7 @@ pub mod jukebox;
 pub mod keymap;
 pub mod language;
 pub mod main_menu;
+pub mod map_import;
 pub mod minimap;
 pub mod new_game;
 pub mod pan;
@@ -343,6 +344,21 @@ impl App {
                     g.content = Arc::new(g.content.retitled(&d.install, data));
                 }
             }
+        }
+    }
+
+    /// The maps folder changed (`written`: the names copied in): the install's list and the
+    /// scenario list are read again, and the first map copied in is picked.
+    fn maps_written(&mut self, written: &[String]) {
+        if let Some(d) = self.assets.dt.as_mut() {
+            match razdor::dt::install::list_maps(&d.install.dir) {
+                Ok(maps) => d.install.maps = maps,
+                Err(e) => razdor::diag!("maps: {e}"),
+            }
+        }
+        self.scenarios = scenarios_of(&self.assets);
+        if let Some(first) = written.first() {
+            new_game::pick_map(first.rsplit_once('.').map_or(first.as_str(), |(stem, _)| stem));
         }
     }
 
@@ -941,7 +957,11 @@ impl App {
         // A dialog or the key list on top: the screen below is drawn but takes no input.
         let guard = self.guard();
         // The flights of an event read in a building window take no input either.
-        widgets::set_input_blocked(!self.dialogs.is_empty() || self.help || held || self.map_view.back_to.is_some() || self.update_open || widgets::popup_open());
+        // «Добавить карту…»: a picked map is copied into the install's maps folder, and the list is read again.
+        if let Some(written) = map_import::tick(self.assets.dt.as_ref().map(|d| &d.install), self.dt_content.as_deref()) {
+            self.maps_written(&written);
+        }
+        widgets::set_input_blocked(!self.dialogs.is_empty() || self.help || held || self.map_view.back_to.is_some() || self.update_open || map_import::open() || widgets::popup_open());
         let mut restart = false;
         let mut custom_round = false;
         let custom_content = self.custom_content();
@@ -1182,6 +1202,10 @@ impl App {
         // A newer release on offer, or how the update the player chose went.
         if self.update_open && next.is_none() && update_view::frame(matches!(self.screen, Screen::MainMenu | Screen::Options), &mut self.audio.settings.updates) {
             self.quit = true;
+        }
+        // The map import's question or notice, over the screen.
+        if let Some(written) = map_import::modal() {
+            self.maps_written(&written);
         }
         // A fight decided on the map or in a building begins once the messages of that moment
         // are read (the original shows a meeting's words over the map, then the battle), and

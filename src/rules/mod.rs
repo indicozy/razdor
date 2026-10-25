@@ -18,6 +18,7 @@ pub mod items;
 pub mod journal;
 pub mod magic;
 pub mod map;
+pub mod map_refs;
 pub mod music;
 pub mod pack;
 pub mod pack_order;

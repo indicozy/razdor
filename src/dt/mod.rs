@@ -11,6 +11,7 @@ pub mod english;
 pub mod gfx;
 pub mod ini;
 pub mod install;
+pub mod map_import;
 pub mod markup;
 pub mod picture_cache;
 pub mod preload;

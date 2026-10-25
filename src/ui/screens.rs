@@ -438,6 +438,11 @@ pub fn class_select(
     scenario: Option<(&ScenarioEntry, Arc<Content>)>,
     assets: &Assets,
 ) -> Option<Screen> {
+    if let Some((e, content)) = &scenario {
+        if super::map_import::refused(e, content) {
+            return Some(Screen::ScenarioSelect);
+        }
+    }
     clear_background(Color::from_rgba(24, 22, 20, 255));
     let content = scenario.as_ref().map_or(demo.clone(), |(_, c)| c.clone());
     let content = Arc::new(content.with_experimental(super::new_game::experimental_rules()));
