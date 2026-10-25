@@ -528,6 +528,21 @@ waits for the new one (`keymap::listen`); while it waits no shortcut fires. The 
 its `{Action}` tokens with the keys (`hotkeys::fill_keys`). Fixed keys (dialogs, arrows, +/-,
 0, Space, the editor's) stay literal.
 
+**The F1 list as buttons (an experiment, main only).** `hotkeys::tiles(place)` makes a tile of
+each key of the list's rows: an `{Action}` (its bound key), or a literal key (Esc, Enter, Backspace,
+a digit, a letter when the row is that letter alone); F1 and the endless wait make none. A row's
+words split at " / " when it has as many parts as the key label, else the row's words serve each
+tile. Mouse and typing rows (`hotkeys::info_rows`) stay text lines under the grid, and EVERYWHERE's
+question keys (Y, Enter, N, Esc) are no tile. A tap closes the list and calls `input::tap_key(key)`:
+the key is queued and on the next frame `input::is_key_pressed` and `get_keys_pressed` report it
+once, so the screen under the list runs its action as if the key were pressed (the queue is
+`input::TapQueue`, consumed in `begin_frame`). A tile the rules forbid now is drawn disabled
+(`hotkeys::tile_enabled`, `allowed`). Phones have no F1: the game menu's «Клавиши» button
+(`saves::ExitChoice::Keys`, drawn by `exit_dialog` for the menu only; the five buttons take 4 px
+between them) opens the list over the map; `App::help_fresh` keeps the press that opened it from
+closing it. The list's text follows the phone's text base (`display::text_base`). Snapshot:
+`RAZDOR_SCENE_OPEN=<frame>:keys`.
+
 ## How to add a window
 
 1. Add a `Screen` variant (or a field on an existing view) in `src/ui/mod.rs`.

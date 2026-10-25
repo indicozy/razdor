@@ -6,8 +6,9 @@
 //! editor field) or while a dialog or question is open (there Esc and N mean "No" and any
 //! other key "Yes", as in the original but for Razdor's N).
 
-use crate::ui::input::{is_key_pressed, is_mouse_button_pressed};
+use crate::ui::input::{self, is_key_pressed, is_mouse_button_pressed, tap_key};
 use macroquad::prelude::*;
+use razdor::local;
 
 use razdor::i18n::{n_, tr};
 
@@ -237,37 +238,202 @@ fn place_name(place: Place) -> &'static str {
     }
 }
 
-/// Draws the F1 overlay over the screen; true when it closes (F1, Esc or a click).
-pub fn help_overlay(place: Place) -> bool {
+/// A row of the F1 list as a button: a tap runs the key it stands for (`input::tap_key`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Tile {
+    /// What it does, in the row's words (English; translated where drawn).
+    pub what: &'static str,
+    /// The key a tap presses.
+    pub key: KeyCode,
+    /// The key as the player sees it (the bound key of an action, or the literal's name).
+    pub shown: String,
+    /// The action it is bound to; `None` for a literal key such as Esc.
+    pub action: Option<Action>,
+}
+
+/// The rows of `place` as (label, words, whether the screen's own): its rows, then EVERYWHERE's.
+fn all_rows(place: Place) -> Vec<(&'static str, &'static str, bool)> {
+    screen_keys(place).into_iter().map(|(l, w)| (l, w, true)).chain(EVERYWHERE.into_iter().map(|(l, w)| (l, w, false))).collect()
+}
+
+/// One `/`-separated part of a row's key label as a key: an `{Action}` (its bound key), a
+/// literal key name, or a single letter when the label has only that part. None for words
+/// (Click, Type, …) and for F1, which is the overlay itself.
+fn part_key(part: &str, alone: bool) -> Option<(KeyCode, Option<Action>, String)> {
+    if let Some(name) = part.strip_prefix('{').and_then(|p| p.strip_suffix('}')) {
+        let a = keymap::ALL.into_iter().find(|a| format!("{a:?}") == name)?;
+        // F1 is the overlay itself; the endless wait is held while its key is down (a tap would
+        // start it with no release); its stop shares the quick save's F5, which is the tile.
+        let held = a == Action::EndlessWait || (a == Action::EndEndlessWait && keymap::key(a) == keymap::key(Action::QuickSave));
+        if a == Action::Help || held {
+            return None;
+        }
+        return Some((keymap::key(a), Some(a), keymap::display(keymap::key(a))));
+    }
+    let key = match part {
+        "Esc" => KeyCode::Escape,
+        "Enter" => KeyCode::Enter,
+        "Backspace" => KeyCode::Backspace,
+        _ if part.len() == 1 && part.chars().all(|c| c.is_ascii_alphabetic()) && !alone => return None,
+        _ => keymap::key_from_name(part)?,
+    };
+    Some((key, None, part.to_string()))
+}
+
+/// The tiles of one row: one per key part, its words split at " / " when the row has as many.
+/// The literal keys of EVERYWHERE (the question's Y, Enter, N, Esc) make none: they answer a
+/// question, and on the map they do nothing.
+fn row_tiles(label: &'static str, what: &'static str, own: bool) -> Vec<Tile> {
+    let parts: Vec<&'static str> = label.split(" / ").collect();
+    let words: Vec<&'static str> = what.split(" / ").collect();
+    let split = words.len() == parts.len();
+    parts
+        .iter()
+        .enumerate()
+        .filter_map(|(i, part)| {
+            let (key, action, shown) = part_key(part, parts.len() == 1)?;
+            if action.is_none() && !own {
+                return None;
+            }
+            Some(Tile { what: if split { words[i] } else { what }, key, shown, action })
+        })
+        .collect()
+}
+
+/// The F1 list of `place` as buttons: each key once, the screen's own first, then EVERYWHERE's.
+pub fn tiles(place: Place) -> Vec<Tile> {
+    let mut out: Vec<Tile> = Vec::new();
+    for (label, what, own) in all_rows(place) {
+        for t in row_tiles(label, what, own) {
+            if !out.iter().any(|o| o.key == t.key) {
+                out.push(t);
+            }
+        }
+    }
+    out
+}
+
+/// The rows of `place` that make no tile (the mouse, typing, the arrows): text lines.
+pub fn info_rows(place: Place) -> Vec<(&'static str, &'static str)> {
+    all_rows(place).into_iter().filter(|(label, what, own)| row_tiles(label, what, *own).is_empty()).map(|(l, w, _)| (l, w)).collect()
+}
+
+/// Whether a tile can be tapped now: the key's rules (`allowed`) for the shortcuts, else always.
+pub fn tile_enabled(place: Place, tile: &Tile, g: Guard) -> bool {
+    match tile.action {
+        Some(Action::QuickSave) => allowed(place, Global::QuickSave, g),
+        Some(Action::QuickLoad) => allowed(place, Global::QuickLoad, g),
+        Some(Action::LatestAutosave) => allowed(place, Global::LatestAutosave, g),
+        Some(Action::Language) => allowed(place, Global::Language, g),
+        Some(Action::Music) => shortcuts_allowed(g),
+        _ => true,
+    }
+}
+
+local! {
+    /// How far the overlay's body is scrolled (pixels), kept while the list is open.
+    static SCROLL: std::cell::Cell<f32> = const { std::cell::Cell::new(0.0) };
+}
+
+/// Draws the F1 overlay over the screen: the keys as a grid of buttons (`tiles`) and the rows
+/// that make none below it (`info_rows`). A tap on a button closes the list and runs its key
+/// on the screen under it (`input::tap_key`). Returns true when the list closes: F1 or Esc, a
+/// press outside the buttons, or a tap on one. `fresh`: the press that opened it (a menu's
+/// button) does not close it.
+pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
     let (sw, sh) = (screen_width(), screen_height());
     draw_rectangle(0.0, 0.0, sw, sh, Color::new(0.0, 0.0, 0.0, 0.45));
-    let own = screen_keys(place);
-    let lines = own.len() + EVERYWHERE.len() + 3;
-    let (w, h) = (640.0f32.min(sw - 20.0), (90.0 + lines as f32 * 24.0).min(sh - 20.0));
+    // The phone's text base (one original px per dp, as the message windows): the buttons read
+    // on a phone; on the desktop it is the interface scale.
+    let k = super::display::text_base(chrome::k(), super::dialog::TEXT_REF);
+    let tiles = tiles(place);
+    let info = info_rows(place);
+    let cols = if sw < sh || sw < 760.0 { 2 } else { 3 };
+    let (pad, gap, line) = (14.0 * k, 8.0 * k, 24.0 * k);
+    let w = if cols == 2 { sw - 16.0 } else { (880.0 * k).min(sw - 40.0) };
+    let tile_w = (w - 2.0 * pad - 14.0 * k - gap * (cols as f32 - 1.0)) / cols as f32;
+    let tile_h = (60.0 * k).max(40.0);
+    let grid_h = tiles.len().div_ceil(cols) as f32 * (tile_h + gap);
+    let info_h = if info.is_empty() { 0.0 } else { 30.0 * k + info.len() as f32 * line + 6.0 * k };
+    let content = 4.0 * k + grid_h + 6.0 * k + info_h;
+    let h = (content + 124.0 * k).min(sh - 16.0);
     let (x, y) = ((sw - w) / 2.0, (sh - h) / 2.0);
-    chrome::window(Rect::new(x, y, w, h), tr("Keys"), Skin::Marble, false);
-    let kx = x + 24.0;
-    let dx = x + w * 0.42;
-    let mut ly = y + 58.0;
-    let section = |title: &str, rows: &[(&str, &str)], ly: &mut f32| {
-        text(title, kx, *ly, 19.0, ACCENT);
-        *ly += 26.0;
-        for (k, what) in rows {
-            if *ly > y + h - 34.0 {
-                break;
-            }
-            text_fit(tr(&fill_keys(k)), kx + 10.0, *ly, dx - kx - 16.0, 17.0, INK);
-            text_fit(tr(what), dx, *ly, x + w - dx - 16.0, 17.0, DIM);
-            *ly += 24.0;
-        }
-        *ly += 6.0;
-    };
-    if !own.is_empty() {
-        section(place_name(place), &own, &mut ly);
+    let (inner, _) = chrome::window(Rect::new(x, y, w, h), tr("Keys"), Skin::Marble, false);
+    text(place_name(place), inner.x + pad, inner.y + 22.0 * k, 19.0 * k, ACCENT);
+    text_fit(tr("Tap a button to run its action"), inner.x + pad, inner.y + 44.0 * k, inner.w - 2.0 * pad, 15.0 * k, DIM);
+    let body = Rect::new(inner.x, inner.y + 52.0 * k, inner.w, inner.bottom() - 40.0 * k - (inner.y + 52.0 * k));
+    let most = (content - body.h).max(0.0);
+    let mut scroll = SCROLL.with(|s| s.get()).clamp(0.0, most);
+    let (mx, my) = input::screen_pointer();
+    let over = |r: Rect| mx >= r.x && mx < r.right() && my >= r.y && my < r.bottom();
+    if over(body) {
+        scroll = (scroll - input::mouse_wheel().1 * 40.0 * k).clamp(0.0, most);
     }
-    section(tr("Everywhere"), &EVERYWHERE, &mut ly);
-    text_centered(tr("F1, Esc or a click closes this list"), x + w / 2.0, y + h - 14.0, 15.0, DIM);
-    is_key_pressed(keymap::key(Action::Help)) || is_key_pressed(KeyCode::Escape) || is_mouse_button_pressed(MouseButton::Left)
+    super::widgets::swipe_rows(body, 40.0 * k);
+    let bar = Rect::new(body.right() - 12.0 * k, body.y, 10.0 * k, body.h);
+    let mut on_control = over(bar);
+    let mut press = None;
+    {
+        let _clip = super::widgets::Clip::new(body);
+        for (i, t) in tiles.iter().enumerate() {
+            let (col, row) = (i % cols, i / cols);
+            let ty = body.y + 4.0 * k + row as f32 * (tile_h + gap) - scroll;
+            let r = Rect::new(inner.x + pad + col as f32 * (tile_w + gap), ty, tile_w, tile_h);
+            let enabled = tile_enabled(place, t, guard);
+            let visible = ty >= body.y - 0.5 && ty + tile_h <= body.bottom() + 0.5;
+            let (_, down, pressed) = if visible { super::widgets::button_state(r, enabled) } else { (false, false, false) };
+            on_control |= visible && over(r);
+            chrome::marble_button(r, "", enabled, down);
+            let ink = if enabled { chrome::CREAM } else { DIM };
+            let size = 18.0 * k;
+            let lines = super::widgets::wrap(tr(t.what), r.w - 16.0 * k, size);
+            let one_line = lines.len() <= 1;
+            let lines: Vec<String> = if lines.len() > 2 { vec![tr(t.what).to_string()] } else { lines };
+            let top = r.y + (r.h - 17.0 * k - lines.len() as f32 * 21.0 * k) / 2.0 + size * 0.8;
+            for (n, l) in lines.iter().enumerate() {
+                if one_line {
+                    text_fit(l, r.x + 8.0 * k, top + n as f32 * 21.0 * k, r.w - 16.0 * k, size, ink);
+                } else {
+                    text(l, r.x + 8.0 * k, top + n as f32 * 21.0 * k, size, ink);
+                }
+            }
+            text_fit(&t.shown, r.x + 8.0 * k, r.bottom() - 8.0 * k, r.w - 16.0 * k, 15.0 * k, ACCENT);
+            if pressed {
+                super::audio::cue(super::audio::Cue::Button);
+                press = Some(t.key);
+            }
+        }
+        let mut ly = body.y + 4.0 * k + grid_h + 6.0 * k - scroll;
+        if !info.is_empty() {
+            text(tr("Other keys and mouse"), inner.x + pad, ly + 20.0 * k, 17.0 * k, ACCENT);
+            ly += 30.0 * k;
+            let dx = inner.x + inner.w * 0.42;
+            for (key, what) in &info {
+                if ly > body.bottom() {
+                    break;
+                }
+                if ly >= body.y - line {
+                    text_fit(tr(&fill_keys(key)), inner.x + pad + 8.0 * k, ly + 16.0 * k, dx - inner.x - pad - 16.0 * k, 16.0 * k, INK);
+                    text_fit(tr(what), dx, ly + 16.0 * k, inner.right() - dx - pad, 16.0 * k, DIM);
+                }
+                ly += line;
+            }
+        }
+    }
+    if most > 0.0 {
+        super::widgets::scrollbar_px(bar, &mut scroll, most, body.h, 40.0 * k);
+    }
+    SCROLL.with(|s| s.set(scroll));
+    text_centered(tr("F1, Esc or a click closes this list"), inner.center().x, inner.bottom() - 12.0 * k, 15.0 * k, DIM);
+    let closes = !fresh && is_mouse_button_pressed(MouseButton::Left) && !on_control;
+    let done = is_key_pressed(keymap::key(Action::Help)) || is_key_pressed(KeyCode::Escape) || closes || press.is_some();
+    if let Some(key) = press {
+        tap_key(key);
+    }
+    if done {
+        SCROLL.with(|s| s.set(0.0));
+    }
+    done
 }
 
 #[cfg(test)]
@@ -328,6 +494,31 @@ mod tests {
         assert!(!allowed(Place::Editor, Global::Help, in_game()));
         assert!(allowed(Place::Editor, Global::Language, in_game()), "F2 works in the editor too");
         assert!(!allowed(Place::Editor, Global::Language, Guard { typing: true, ..in_game() }));
+    }
+
+    #[test]
+    fn the_key_list_turns_action_keys_into_tiles() {
+        keymap::reset();
+        let map = tiles(Place::WorldMap);
+        let action = |a: Action| map.iter().any(|t| t.action == Some(a));
+        assert!(action(Action::QuickSave) && action(Action::QuickLoad), "the map's quick save and load are tiles");
+        assert!(action(Action::Minimap) && action(Action::Journal) && action(Action::Wait1));
+        let quick_save = map.iter().find(|t| t.action == Some(Action::QuickSave)).unwrap();
+        assert_eq!((quick_save.what, quick_save.shown.as_str()), ("quick save", "F5"));
+        assert!(map.iter().any(|t| t.key == KeyCode::Escape), "Esc is a literal tile");
+        assert!(!map.iter().any(|t| t.action == Some(Action::Help)), "F1 is the overlay itself");
+        assert!(map.iter().all(|t| t.what != "Click"), "a click is no tile");
+        let info = info_rows(Place::WorldMap);
+        assert!(info.iter().any(|(k, _)| *k == "Click"), "a click is a text line");
+        assert!(info.iter().any(|(k, _)| *k == "Wheel, + / -"), "the wheel is a text line");
+        for (i, a) in map.iter().enumerate() {
+            assert!(map[i + 1..].iter().all(|b| b.key != a.key), "each key once: {:?}", a.key);
+        }
+        let battle = tiles(Place::Battle);
+        assert!(battle.iter().any(|t| t.key == KeyCode::Q && t.action.is_none()), "a single letter alone is a tile");
+        assert!(tiles(Place::ClassSelect).iter().all(|t| t.key != KeyCode::C), "Ctrl+A / C / X / V is no tile");
+        assert!(info_rows(Place::ClassSelect).iter().any(|(k, _)| *k == "Ctrl+A / C / X / V"), "and a text line");
+        keymap::reset();
     }
 
     #[test]

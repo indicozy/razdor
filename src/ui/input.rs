@@ -47,6 +47,44 @@ struct State {
     touch_on: bool,
     /// miniquad's simulated mouse has been turned off (phones, once).
     sim_off: bool,
+    /// Virtual key taps (`tap_key`): queued in one frame, pressed in the next.
+    taps: TapQueue,
+}
+
+/// Virtual key presses for the screens: a key tapped in one frame is pressed in the next, once
+/// (the F1 list's tiles run their keys this way, `ui::hotkeys`).
+#[derive(Default, Debug)]
+pub struct TapQueue {
+    queued: Vec<KeyCode>,
+    now: Vec<KeyCode>,
+}
+
+impl TapQueue {
+    /// Queues `k` for the next frame.
+    pub fn push(&mut self, k: KeyCode) {
+        self.queued.push(k);
+    }
+
+    /// The start of a frame: what was queued before is pressed now.
+    pub fn advance(&mut self) {
+        self.now = std::mem::take(&mut self.queued);
+    }
+
+    /// Whether `k` is tapped this frame.
+    pub fn pressed(&self, k: KeyCode) -> bool {
+        self.now.contains(&k)
+    }
+
+    /// Every key tapped this frame.
+    pub fn keys(&self) -> &[KeyCode] {
+        &self.now
+    }
+}
+
+/// Presses `k` on the next frame, as if the player had pressed it once: the screen under the
+/// F1 list runs its action (quick save, the minimap, …) without a keyboard.
+pub fn tap_key(k: KeyCode) {
+    STATE.with(|s| s.borrow_mut().taps.push(k));
 }
 
 local! {
@@ -66,6 +104,7 @@ pub fn begin_frame() {
     let touches = if touchpad_on || gestures_on { touch_points() } else { Vec::new() };
     STATE.with(|s| {
         let s = &mut *s.borrow_mut();
+        s.taps.advance();
         // Phones: miniquad's simulated mouse (a touch as the left button) is off in both touch modes.
         if touchpad::MOBILE && !s.sim_off {
             mq::simulate_mouse_with_touch(false);
@@ -241,7 +280,7 @@ pub fn is_mouse_button_released(b: MouseButton) -> bool {
 }
 
 pub fn is_key_pressed(k: KeyCode) -> bool {
-    mq::is_key_pressed(k) || key_edge(k).pressed
+    mq::is_key_pressed(k) || key_edge(k).pressed || with_taps(|t| t.pressed(k))
 }
 
 pub fn is_key_down(k: KeyCode) -> bool {
@@ -251,7 +290,12 @@ pub fn is_key_down(k: KeyCode) -> bool {
 pub fn get_keys_pressed() -> HashSet<KeyCode> {
     let mut keys = mq::get_keys_pressed();
     keys.extend(keys_where(|e| e.pressed));
+    keys.extend(with_taps(|t| t.keys().to_vec()));
     keys
+}
+
+fn with_taps<R>(f: impl FnOnce(&TapQueue) -> R) -> R {
+    STATE.with(|s| f(&s.borrow().taps))
 }
 
 pub fn get_keys_released() -> HashSet<KeyCode> {
@@ -329,5 +373,35 @@ mod tests {
             }
         }
         assert!(wrong.is_empty(), "read macroquad's input directly instead of ui::input's:\n{}", wrong.join("\n"));
+    }
+}
+
+#[cfg(test)]
+mod tap_tests {
+    use super::*;
+
+    /// A tap is pressed on the frame after it is queued, once, and only that key.
+    #[test]
+    fn a_tap_is_pressed_once_on_the_next_frame() {
+        let mut q = TapQueue::default();
+        q.push(KeyCode::F5);
+        assert!(!q.pressed(KeyCode::F5), "not in the frame it is queued");
+        q.advance();
+        assert!(q.pressed(KeyCode::F5));
+        assert!(!q.pressed(KeyCode::F9));
+        assert_eq!(q.keys(), &[KeyCode::F5]);
+        q.advance();
+        assert!(!q.pressed(KeyCode::F5), "gone the frame after");
+        assert!(q.keys().is_empty());
+    }
+
+    /// Taps queued in one frame all come out together in the next.
+    #[test]
+    fn taps_queued_together_are_pressed_together() {
+        let mut q = TapQueue::default();
+        q.push(KeyCode::M);
+        q.push(KeyCode::J);
+        q.advance();
+        assert!(q.pressed(KeyCode::M) && q.pressed(KeyCode::J));
     }
 }

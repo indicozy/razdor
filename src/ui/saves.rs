@@ -887,6 +887,8 @@ pub enum ExitChoice {
     Quit,
     MainMenu,
     Restart,
+    /// Razdor's «Клавиши» (the game menu only): the key list over the map.
+    Keys,
 }
 
 /// The bar's X button (and Esc on the map): "Выход из игры", the original's warning that the
@@ -1069,17 +1071,29 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art:
             y += 16.0 * k;
         }
     }
-    let labels = [
+    let mut labels = vec![
         (own("ExitGame", "Exit", n_("Quit the game")), Some(ExitChoice::Quit)),
         (own("ExitGame", "ExitToMenu", n_("To the menu")), Some(ExitChoice::MainMenu)),
         (own("ExitGame", "Restart", n_("Restart")), Some(ExitChoice::Restart)),
-        (own("Buttons", "Cancel", n_("Cancel")), None),
     ];
+    // Razdor's «Клавиши» in the game menu (the key list over the map; phones have no F1).
+    let mut widths = vec![150.0 * k, 150.0 * k, 110.0 * k];
+    // The menu's five buttons take a little less between them (5 px, not 7.5) and «Клавиши»
+    // and «Отмена» are narrower, so the row keeps the original's labels whole.
+    let gap = if art { 4.0 * k } else { 7.5 * k };
+    if art {
+        labels.push((tr(n_("Keys")).to_string(), Some(ExitChoice::Keys)));
+        widths.push(104.0 * k);
+    }
+    labels.push((own("Buttons", "Cancel", n_("Cancel")), None));
+    widths.push(if art { 84.0 * k } else { 90.0 * k });
+    let n = labels.len();
+    // The menu's row fits the window: the buttons shrink together when they would not.
+    let fit = if art { ((r.w - 18.75 * k - gap * (n as f32 - 1.0)) / widths.iter().sum::<f32>()).min(1.0) } else { 1.0 };
     let bw = (inner.w - 50.0 * k) / 4.0;
     let button_h = 36.0 * 0.9375 * k;
     let by = if art { r.bottom() - (footer_h + button_h) / 2.0 } else { inner.y + inner.h - 42.0 * k };
     // The original's buttons: three from the left 8 apart, «Отмена» on the right.
-    let widths = [150.0 * k, 150.0 * k, 120.0 * k, 90.0 * k];
     let mut choice = None;
     let mut cancel = closed;
     // The restart question opens on the next frame, so the click on «Рестарт» cannot also
@@ -1087,9 +1101,9 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art:
     let was_asking = *asking;
     for (i, (label, what)) in labels.iter().enumerate() {
         let b = if art {
-            let x = if i == 3 { r.right() - 9.375 * k - widths[i] }
-                else { r.x + 9.375 * k + widths[..i].iter().map(|w| w + 7.5 * k).sum::<f32>() };
-            Rect::new(x, by, widths[i], button_h)
+            let x = if i == n - 1 { r.right() - 9.375 * k - widths[i] * fit }
+                else { r.x + 9.375 * k + widths[..i].iter().map(|w| w * fit + gap).sum::<f32>() };
+            Rect::new(x, by, widths[i] * fit, button_h)
         } else {
             Rect::new(inner.x + 10.0 * k + i as f32 * (bw + 10.0 * k), by, bw, 30.0 * k)
         };

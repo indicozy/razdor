@@ -92,7 +92,8 @@ Game menu = Меню игры
 
 # Keys (F1)
 Keys = Клавиши
-Everywhere = Везде
+Tap a button to run its action = Нажмите кнопку, чтобы выполнить её действие
+Other keys and mouse = Остальные клавиши и мышь
 F1, Esc or a click closes this list = F1, Esc или щелчок закрывают этот список
 Title screen = Титульный экран
 Hero choice = Выбор героя

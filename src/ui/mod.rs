@@ -186,6 +186,9 @@ pub struct App {
     test_play: bool,
     /// The F1 key list is open over the screen.
     help: bool,
+    /// The key list was opened this frame by a button (`ExitChoice::Keys`): the press that
+    /// opened it does not close it.
+    help_fresh: bool,
     /// The custom battles of this run: their setup and score, kept from round to round.
     custom: Option<custom_battle::SetupView>,
     /// The cheat console (`~` on the map and in battle).
@@ -259,6 +262,7 @@ impl App {
             editor: None,
             test_play: false,
             help: false,
+            help_fresh: false,
             custom: None,
             console: console::Console::default(),
             console_held: false,
@@ -592,8 +596,13 @@ impl App {
 
     /// The current screen, by what its keys do.
     fn place(&self) -> hotkeys::Place {
+        Self::place_of(&self.screen)
+    }
+
+    /// The place of a screen, by what its keys do.
+    fn place_of(screen: &Screen) -> hotkeys::Place {
         use hotkeys::Place;
-        match &self.screen {
+        match screen {
             Screen::MainMenu | Screen::Authors(_) | Screen::Options | Screen::ScenarioSelect | Screen::TutorialOffer => Place::Title,
             Screen::ClassSelect { .. } => Place::ClassSelect,
             Screen::WorldMap => Place::WorldMap,
@@ -992,6 +1001,12 @@ impl App {
                     restart = true;
                     None
                 }
+                // «Клавиши»: the key list over the map (Razdor's; phones have no F1).
+                (Some(saves::ExitChoice::Keys), _) => {
+                    self.help = true;
+                    self.help_fresh = true;
+                    Some(Screen::WorldMap)
+                }
                 (None, next) => next,
             },
             (Screen::Settings, Some(game)) => {
@@ -1036,6 +1051,7 @@ impl App {
             match v.exit.take() {
                 Some(saves::ExitChoice::Quit) => self.quit = true,
                 Some(saves::ExitChoice::MainMenu) => next = Some(Screen::MainMenu),
+                Some(saves::ExitChoice::Keys) => {}
                 // «Рестарт» in a battle: this battle again from the moment it began (Razdor's;
                 // the scenario's restart when that moment was not kept).
                 Some(saves::ExitChoice::Restart) => match v.restart_state.take() {
@@ -1063,7 +1079,9 @@ impl App {
         // Nothing fires while the keys window waits for a new key (`keymap::listen`).
         let pressed = |k: hotkeys::Global| next.is_none() && !widgets::input_swallowed() && !widgets::popup_open() && keymap::listening().is_none() && hotkeys::allowed(place, k, guard) && is_key_pressed(k.key());
         if self.help {
-            if hotkeys::help_overlay(place) {
+            // Over the screen the list was opened from (a button's list opens over the map).
+            let here = next.as_ref().map_or(place, Self::place_of);
+            if hotkeys::help_overlay(here, guard, std::mem::take(&mut self.help_fresh)) {
                 self.help = false;
             }
         } else if pressed(hotkeys::Global::Help) {
