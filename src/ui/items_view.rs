@@ -1314,6 +1314,20 @@ fn hero_resources(gold: i32, mana: i32, income: i32, wages: i32) -> [String; 4] 
     ]
 }
 
+/// The diary entry's line size (`QuestDescript`, its body text). The original draws the body in
+/// its small SanSerif (`Face::Body`) and the desktop keeps that. A Razdor choice for phones (the
+/// players' request: the phone's diary text is too small): there the body is as tall as the
+/// message windows' Benguiat text (`Face::Subtitle`, `dialog::event_layout`), so it grows with
+/// «Размер текста» like they do.
+fn diary_body_size(phone: bool, ts: f32) -> f32 {
+    use super::dt_font::{sheet_size, Face};
+    if phone {
+        sheet_size(Face::Subtitle, ts)
+    } else {
+        sheet_size(Face::Body, ts)
+    }
+}
+
 /// The hero window («Личные характеристики и инвентарь Героя»), the bottom bar's flag (side
 /// window 5; built by 0x4d8638, its fixed parts drawn by 0x4d1814): the hero's panel on the
 /// left as in the army window; the pack's 5×5 squares with its scroll bar; the item
@@ -1531,7 +1545,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     // On a phone the text base is one px per dp (`display::text_for`, the 1.0.2 large-window
     // scale), so the diary reads as large as the messages do; the desktop is unchanged.
     let ts = super::display::text_for(s, crate::ui::dialog::TEXT_REF);
-    let body = sheet_size(Face::Body, ts);
+    let body = diary_body_size(super::display::dp_px().is_some(), ts);
     let room = entry.w - 16.0 * s;
     let lines = rows.get(view.pick).map_or_else(Vec::new, |row| match view.tab {
         Tab::Active => diary_entry(row, room, head * ts / s, body),
@@ -1571,7 +1585,17 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
 
 #[cfg(test)]
 mod tests {
-    use super::{card_line, held_card_lit, held_hint_ink, class_wage, hero_resources, panel_slots, pointed_line, promo_ease, promo_look, promo_ms, ArmySel, Content, GridPress, UnitId};
+    use super::{card_line, diary_body_size, held_card_lit, held_hint_ink, class_wage, hero_resources, panel_slots, pointed_line, promo_ease, promo_look, promo_ms, ArmySel, Content, GridPress, UnitId};
+
+    #[test]
+    fn a_phone_s_diary_body_is_as_tall_as_the_message_text() {
+        // Razdor's phone choice: the diary body takes the message windows' Subtitle size on a
+        // phone; the desktop keeps the original's SanSerif (Face::Body) size.
+        use super::super::dt_font::{sheet_size, Face};
+        let t = 3.0;
+        assert_eq!(diary_body_size(true, t), sheet_size(Face::Subtitle, t));
+        assert_eq!(diary_body_size(false, t), sheet_size(Face::Body, t));
+    }
 
     #[test]
     fn an_item_held_over_a_card_is_offered_on_line_3() {
