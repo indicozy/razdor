@@ -464,6 +464,11 @@ const EVENT_MIN_BOX: f32 = 92.0;
 const EVENT_MAX_BOX: f32 = 499.0;
 /// The window's height besides the box and the rows under it (0x4aa929: + 0x77).
 const EVENT_REST: f32 = 119.0;
+
+/// The message the phone's text base is read for (`display::text_base`): the smallest large
+/// window, its box at its minimum and no picture. Tooltips and titles read it too, so that a
+/// phone's text is one scale everywhere.
+pub const TEXT_REF: (f32, f32) = (EVENT_MIN_W, EVENT_MIN_BOX + EVENT_REST);
 /// Rows of the original's event text (Benguiat), and the defeat report's gap row (0x47e46c
 /// with font ae24bc).
 const EVENT_LINE: f32 = 19.0;
@@ -622,7 +627,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     let defeat = d.defeat;
     let base = chrome::k() * 0.9375;
     let plain = super::dt_font::whole_scale(base).min((sw - 12.0) / EVENT_W);
-    let t = super::display::text_o(plain);
+    let t = super::display::text_for(plain, TEXT_REF);
     let large = super::display::large_windows();
     // The phone layout needs the large windows on: off, a phone takes the original's path.
     let phone = large && super::display::dp_px().is_some();
@@ -856,7 +861,7 @@ fn draw_village_event(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Optio
     let w = 634.0 * o;
     // The text takes Razdor's text size (`display::text_o`) at the window's scale with the large
     // windows off, so it is the same with them on; the large windows grow the window only.
-    let t = super::display::text_o(base.min((screen_width() - 12.0) / 634.0));
+    let t = super::display::text_for(base.min((screen_width() - 12.0) / 634.0), TEXT_REF);
     let size = 17.0 * t;
     let line_h = 18.0 * t;
     let pw = picture.map_or(106.0, |t| t.width()) * o;

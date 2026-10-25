@@ -2018,18 +2018,41 @@ fn tip_lh(ink: Ink, s: f32) -> f32 {
     tip_size(ink, s) + 3.0 * s
 }
 
+/// The tooltip's box width in px at the text scale `u`: the original's `TIP_W` at `u`, no wider
+/// than the screen less 8 px (Razdor's: a phone's text base makes the box grow with its text).
+fn tip_box_w(u: f32) -> f32 {
+    (TIP_W * u).min(screen_width() - 8.0)
+}
+
 fn draw_tooltip(game: &Game, assets: &Assets, t: &Tooltip) {
+    // The glyphs take the sizes asked for (`glyph`), not the interface scale's native ones,
+    // unless the text is the original's own (`display::native_text`).
+    if super::display::native_text() {
+        draw_tooltip_at(game, assets, t);
+    } else {
+        super::dt_font::with_legacy_metrics(|| draw_tooltip_at(game, assets, t));
+    }
+}
+
+fn draw_tooltip_at(game: &Game, assets: &Assets, t: &Tooltip) {
     use super::chrome::shadow_centered;
     use super::dt_font::{with_face, Face};
     let k = super::chrome::k();
     let face = |ink: Ink| if ink.big() { Face::Subtitle } else { Face::Body };
-    // Every entry centred, a paragraph wrapped in the block's width (0x47e944, 0x47e46c), its
-    // text at the text scale `tk`.
+    // A glyph's size at the text scale `u` in its face: the sheet's size there (the native one
+    // at the interface scale).
+    let glyph = |f: Face, u: f32| super::dt_font::sheet_size(f, u);
+    // Razdor's text size and phone base (the owner's request): the text, the title and the
+    // garrison's caption share one text scale `tk` (the phone's text base times the text size,
+    // else the interface scale), and the box is `TIP_W` original px at `tk`. The formation's
+    // cells keep the interface scale. Every entry centred, a paragraph wrapped in the box's text
+    // width (0x47e944, 0x47e46c).
     let rows_at = |tk: f32| -> Vec<(String, Ink)> {
+        let text_w = tip_box_w(tk) * TIP_TEXT_W / TIP_W;
         t.text
             .iter()
             .flat_map(|(s, ink)| {
-                let wrapped = if s.trim().is_empty() { vec![String::new()] } else { with_face(face(*ink), || wrap(s, TIP_TEXT_W * k, tip_size(*ink, tk))) };
+                let wrapped = if s.trim().is_empty() { vec![String::new()] } else { with_face(face(*ink), || wrap(s, text_w, glyph(face(*ink), tk))) };
                 wrapped.into_iter().map(|r| (r, *ink))
             })
             .collect()
@@ -2039,58 +2062,56 @@ fn draw_tooltip(game: &Game, assets: &Assets, t: &Tooltip) {
     let grid_h = tip_grid_h(lines);
     let cells = t.army || t.garrison.is_some();
     let grid = if cells { grid_h } else { 0.0 };
-    // The garrison's caption stays at the interface scale, as the cells do.
-    let caption_h = t.garrison.as_ref().map(|_| tip_lh(Ink::Label, k) / k);
-    // Razdor's text size (the owner's request: phones' text too small): the text at its text
-    // scale while the tip stays within its caps (an army's text 353 high, the tip 512), else at
+    // The layout's heights in units of `u` px: the caption and the text at `u`, the cells at
     // the interface scale.
-    let fits = |tk: f32| {
-        let text_h = text_h_of(&rows_at(tk), tk) / k;
-        (!t.army || text_h <= 353.0) && tip_height_raw(t.army, text_h, grid, caption_h) <= 512.0
+    let caption = |u: f32| t.garrison.as_ref().map(|_| tip_lh(Ink::Label, u) / u);
+    let fits = |u: f32| {
+        let text_h = text_h_of(&rows_at(u), u) / u;
+        let raw = tip_height_raw(t.army, text_h, grid * k / u, caption(u));
+        (!t.army || text_h <= 353.0) && raw <= 512.0 && raw * u <= screen_height() - bar_h()
     };
-    let tk = super::display::text_o_fitting(k, fits);
+    let tk = super::display::text_o_fitting(super::display::text_base(k, super::dialog::TEXT_REF), fits);
     let rows = rows_at(tk);
-    let text_h = text_h_of(&rows, tk);
-    let w = TIP_W * k;
-    let h = tip_height(t.army, text_h / k, grid, caption_h) * k;
+    let text_h = text_h_of(&rows, tk) / tk;
+    let w = tip_box_w(tk);
+    let h = tip_height(t.army, text_h, grid * k / tk, caption(tk)) * tk;
     // Centred on the mouse and kept inside the map's view, above the bottom bar (interface.md
     // §7.4; 0x4ca8ac).
     let (mx, my) = crate::ui::widgets::pointer();
     let x = (mx - w / 2.0).min(screen_width() - w).max(0.0);
     let y = (my - h / 2.0).min(screen_height() - bar_h() - h).max(0.0);
-    tooltip_panel_styled(Rect::new(x, y, w, h), t.style);
-    // The title in the yellow Benguiat over its shadow, centred in the 27 px strip.
-    // The title takes the text scale as the big rows do (16 × `tk`), so it grows with the text.
-    let title_size = 16.0 * tk;
+    tooltip_panel_styled(Rect::new(x, y, w, h), t.style, tk);
+    // The title in the yellow Benguiat over its shadow, centred in the strip (27 px at `tk`).
+    let title_size = glyph(Face::Title, tk);
     with_face(Face::Title, || {
-        let title = ellipsize(&t.title, TIP_TITLE_W * k, title_size);
-        shadow_centered(&title, x + w / 2.0, y + 13.5 * k + title_size * 0.36, title_size, TIP_TITLE);
+        let title = ellipsize(&t.title, w * TIP_TITLE_W / TIP_W, title_size);
+        shadow_centered(&title, x + w / 2.0, y + 13.5 * tk + title_size * 0.36, title_size, TIP_TITLE);
     });
     let grid_x = x + (w - (game.content.formation.display_cols() as f32 * TIP_PITCH - (TIP_PITCH - TIP_CELL)) * k) / 2.0;
-    let mut ly = y + TIP_TOP * k;
+    let mut ly = y + TIP_TOP * tk;
     if t.army {
         ly += formation_grid(game, assets, &t.troops, t.team, grid_x, ly) + 8.0 * k;
     }
-    let bottom = y + h - 2.0 * k;
+    let bottom = y + h - 2.0 * tk;
     for (s, ink) in &rows {
         if ly + tip_lh(*ink, tk) > bottom {
             break;
         }
         if !s.is_empty() {
-            with_face(face(*ink), || shadow_centered(s, x + w / 2.0, ly + tip_size(*ink, tk), tip_size(*ink, tk), tip_color(t.style, *ink)));
+            with_face(face(*ink), || shadow_centered(s, x + w / 2.0, ly + tip_size(*ink, tk), glyph(face(*ink), tk), tip_color(t.style, *ink)));
         }
         ly += tip_lh(*ink, tk);
     }
-    if let (Some(caption), Some(caption_h)) = (&t.garrison, caption_h) {
+    if let Some(caption_text) = &t.garrison {
         // The cells 10 px off the bottom, the caption 8 px over them, and a line 5 px over
         // the caption when there is text above (0x4cb18c).
         let grid_y = y + h - (10.0 + grid_h) * k;
-        let caption_y = grid_y - (8.0 + caption_h) * k;
+        let caption_y = grid_y - 8.0 * k - tip_lh(Ink::Label, tk);
         if !rows.is_empty() {
-            draw_line(x + 2.0 * k, caption_y - 5.0 * k, x + w - 2.0 * k, caption_y - 5.0 * k, 1.0, super::chrome::SILVER);
+            draw_line(x + 2.0 * tk, caption_y - 5.0 * k, x + w - 2.0 * tk, caption_y - 5.0 * k, 1.0, super::chrome::SILVER);
         }
         let ink = Ink::Label;
-        with_face(face(ink), || shadow_centered(caption, x + w / 2.0, caption_y + tip_size(ink, k), tip_size(ink, k), tip_color(t.style, ink)));
+        with_face(face(ink), || shadow_centered(caption_text, x + w / 2.0, caption_y + tip_size(ink, tk), glyph(face(ink), tk), tip_color(t.style, ink)));
         formation_grid(game, assets, &t.troops, t.team, grid_x, grid_y);
     }
 }

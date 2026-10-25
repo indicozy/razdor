@@ -8,14 +8,13 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
-- **Phones' default text is smaller than before (reports 1299, 1301, 1302, 2026-10-25).** The
-  text size and the large windows are now independent (the text is the interface scale ×
-  «Размер текста»; the large windows only grow the window). The phone default is «очень
-  крупный» (×1.5), which measures ~2.1 screen px per original px on a 2400×1080 phone, against
-  ~3.0 before (the old large text ×1.25 scaled by the window's dp). Options for the owner: a
-  bigger phone base for the text (one px per dp on phones, which changes the non-scrolling boxes'
-  fitting with the large windows off), or larger multipliers for the phones only. Snapshots:
-  `/mnt/ai_models/razdor-scratch/text-1299/`.
+- **A phone's window title strip with the large windows off (report 1299, 2026-10-25).** The
+  title strip grows with the text (`chrome::title_bar_styled`, `chrome::window_styled`), but the
+  event window's inner frame lines (`chrome::window_inner_frames`, drawn at the window's own
+  scale) still sit where the 1.0.2 strip put them, so with «Крупные окна сообщений» off the
+  title's text crosses them. Snapshot: `/mnt/ai_models/razdor-scratch/text-1299/v2_defeat_off.png`.
+  Fix: move the inner frame lines down by the strip's growth (as `chrome::window_frames_grown`
+  does for the outer frame).
 
 - **AI ships move about twice as fast as the original's (report 1082, 2026-10-23).** A diff
   test on РК1 (knight, the opening read, 48 one-hour waits, `tools/difftest`) has the sea

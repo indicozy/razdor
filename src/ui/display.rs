@@ -149,11 +149,10 @@ pub fn large_windows() -> bool {
     LARGE_WINDOWS.load(Ordering::Relaxed)
 }
 
-/// The text size on a fresh install: the largest on phones, where the text looks small (the
-/// phones' text at this size is still smaller than the old large windows' text was; see
-/// `docs/PLAYTEST_NOTES.md`).
+/// The text size on a fresh install: «крупный» on phones, where the phone's text base (one px per
+/// dp) times it is the 1.0.2 default's text; the original's size on the desktop.
 pub fn default_text_size() -> f32 {
-    if razdor::platform::MOBILE { 1.5 } else { 1.0 }
+    if razdor::platform::MOBILE { 1.25 } else { 1.0 }
 }
 
 /// Large message windows on a fresh install: on phones only.
@@ -189,6 +188,46 @@ pub fn text_o(o: f32) -> f32 {
 /// [`text_o`] for the text size `t`, pure (no global state).
 pub fn text_o_at(t: f32, o: f32) -> f32 {
     if t == 1.0 { o } else { crate::ui::dt_font::whole_scale(o * t) }
+}
+
+/// The phone's text base (the owner's request after players' reports): one original px per dp,
+/// which is the 1.0.2 large-window scale, always, whether «Крупные окна сообщений» is on or
+/// not. The text size multiplies it. `base` is the window's own scale off the phone (`dp`
+/// `None`: it is returned as it is). `reference` is the message whose smallest size the scale
+/// is read for (`dialog::TEXT_REF`), `screen` and `bar` as in [`popup_scale`].
+pub fn phone_text_base(dp: Option<f32>, base: f32, reference: (f32, f32), screen: (f32, f32), bar: f32) -> f32 {
+    match dp {
+        None => base,
+        Some(_) => {
+            let raw = popup_scale(base, true, dp, reference, screen, bar);
+            crate::ui::dt_font::whole_scale(raw).min((screen.0 - 12.0) / reference.0).max(base)
+        }
+    }
+}
+
+/// [`phone_text_base`] for this screen and the phone's density.
+pub fn text_base(base: f32, reference: (f32, f32)) -> f32 {
+    phone_text_base(dp_px(), base, reference, (macroquad::window::screen_width(), macroquad::window::screen_height()), crate::ui::chrome::bar_height())
+}
+
+/// The text's scale for the window of scale `base` and the message `reference`: the text base
+/// times the text size (`text_o_at`). At the original's size on the desktop it is `base`.
+pub fn text_for(base: f32, reference: (f32, f32)) -> f32 {
+    text_o_at(text_size(), text_base(base, reference))
+}
+
+/// Whether the text is the original's own (the desktop at the original's size): then the texts
+/// keep the interface scale's native metrics, as before the text size. Off, they take the sizes
+/// asked for (`dt_font::with_legacy_metrics`).
+pub fn native_text() -> bool {
+    dp_px().is_none() && text_size() == 1.0
+}
+
+/// The window titles' size relative to the interface scale `k`: the text's scale over `k`, so
+/// the titles grow with «Размер текста» and on a phone with its base, as the messages' text
+/// does. 1 at the original's size on the desktop.
+pub fn title_factor(k: f32) -> f32 {
+    text_for(k, crate::ui::dialog::TEXT_REF) / k
 }
 
 /// The scale of a pop-up window whose smallest size is `min_w`×`min_h` original px. Off, it is
@@ -1336,6 +1375,30 @@ mod tests {
             assert!(text_o_at(t, base) <= text_o_at(TEXT_SIZES[2], base) + 1e-4);
         }
         assert_eq!(text_o_at(1.0, base), base, "the original's size is the base");
+    }
+
+    #[test]
+    fn a_phone_s_default_text_is_the_1_0_2_default() {
+        // 2400×1080 at 2.625 px per dp: 1.0.2's large window was the dp scale, its text ×1.25.
+        let (sw, sh, bar) = (2400.0, 1080.0, 120.0);
+        let base = 1.5 * 0.9375;
+        let (min_w, min_h) = crate::ui::dialog::TEXT_REF;
+        let old_o = crate::ui::dt_font::whole_scale(popup_scale(base, true, Some(2.625), (min_w, min_h), (sw, sh), bar)).min((sw - 12.0) / min_w);
+        let old_text = text_o_at(1.25, old_o);
+        let new_text = text_o_at(1.25, phone_text_base(Some(2.625), base, (min_w, min_h), (sw, sh), bar));
+        assert!((new_text - old_text).abs() <= old_text * 0.01, "{new_text} is not the 1.0.2 default {old_text}");
+        assert!((new_text - 3.0).abs() < 0.01, "about 3 px per original px: {new_text}");
+    }
+
+    #[test]
+    fn a_phone_tooltip_reads_the_message_s_text_base() {
+        let (sw, sh, bar) = (2400.0, 1080.0, 120.0);
+        let reference = crate::ui::dialog::TEXT_REF;
+        let k = 1.5;
+        let message = phone_text_base(Some(2.625), k * 0.9375, reference, (sw, sh), bar);
+        let tooltip = phone_text_base(Some(2.625), k, reference, (sw, sh), bar);
+        assert_eq!(message, tooltip, "one text scale on the phone");
+        assert_eq!(phone_text_base(None, k, reference, (sw, sh), bar), k, "off the phone the window's own scale");
     }
 
     #[test]

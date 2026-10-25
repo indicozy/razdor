@@ -668,7 +668,7 @@ pub enum TipStyle {
 /// marble turned dull brown ([`neutral_tip_pixel`]); its edge; the title strip's line 27 px
 /// down; the title corners at (2, 3) and at the right end, added (0x476790 mode 0). The box
 /// is opaque: the original only fades it in (0x4ca728), the ground never shows through.
-pub fn tooltip_panel_styled(r: Rect, style: TipStyle) {
+pub fn tooltip_panel_styled(r: Rect, style: TipStyle, u: f32) {
     use super::chrome::{self, Skin};
     let k = chrome::k();
     match style {
@@ -679,14 +679,15 @@ pub fn tooltip_panel_styled(r: Rect, style: TipStyle) {
             None => draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.30, 0.20, 0.13, 1.0)),
         },
     }
-    // The line under the title: 0x48d1d4 from (2, 27) to (w − 2, 29), 2 px.
-    draw_rectangle(r.x + 2.0 * k, r.y + 27.0 * k, r.w - 4.0 * k, 2.0 * k, chrome::SILVER_DARK);
-    draw_line(r.x + 2.0 * k, r.y + 27.0 * k, r.right() - 2.0 * k, r.y + 27.0 * k, 1.0, chrome::SILVER);
+    // The line under the title: 0x48d1d4 from (2, 27) to (w − 2, 29), 2 px. `u` is the
+    // tooltip's own scale (its title strip grows with the text, Razdor's).
+    draw_rectangle(r.x + 2.0 * u, r.y + 27.0 * u, r.w - 4.0 * u, 2.0 * u, chrome::SILVER_DARK);
+    draw_line(r.x + 2.0 * u, r.y + 27.0 * u, r.right() - 2.0 * u, r.y + 27.0 * u, 1.0, chrome::SILVER);
     for (name, right) in [("Corner-Left", false), ("Corner-Right", true)] {
         let Some(t) = chrome::win_adjusted(name, style.corner_tag(), |img| tip_corner_image(img, style)) else { continue };
-        let (w, h) = (t.width() * k, t.height() * k);
-        let x = if right { r.right() - 2.0 * k - w } else { r.x + 2.0 * k };
-        chrome::additive(|| chrome::tex(&t, Rect::new(x, r.y + 3.0 * k, w, h), WHITE));
+        let (w, h) = (t.width() * u, t.height() * u);
+        let x = if right { r.right() - 2.0 * u - w } else { r.x + 2.0 * u };
+        chrome::additive(|| chrome::tex(&t, Rect::new(x, r.y + 3.0 * u, w, h), WHITE));
     }
     chrome::silver_frame(r, 1.5);
 }

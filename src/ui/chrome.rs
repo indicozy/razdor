@@ -1824,7 +1824,7 @@ fn title_bar_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bo
     let face = super::typography::Role::Title.face();
     // Razdor's text size scales the titles too (the owner's request: phones' titles are small);
     // at the original's size this is the title's own.
-    let size = super::display::text_o(super::typography::Role::Title.size((16.0 * k).round()));
+    let size = super::typography::Role::Title.size((16.0 * k).round()) * super::display::title_factor(k);
     let title_w = super::dt_font::with_face(face, || measure(title, size).width);
     let ornate = ornate && matches!(skin, Skin::Red | Skin::Marble) && r.w > 400.0 && title_w < r.w - 300.0 * k;
     if let Some(t) = win_fx("Corner-Left", Fx::KeyBlack).filter(|_| ornate) {
@@ -1841,12 +1841,14 @@ fn title_bar_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bo
     }
     let color = title_color.unwrap_or(if skin == Skin::Red { GOLD } else { CREAM });
     let room = if ornate { r.w - 300.0 * k } else { r.w - 2.0 * r.h - 8.0 * k };
-    super::dt_font::with_face(face, || {
+    // The title's size is the one asked for (Razdor's text size), not the interface scale's native.
+    let block = || super::dt_font::with_face(face, || {
         // A wide face shrinks to fit first (at most to 70%); what still does not fit is cut.
         let size = super::widgets::fit_size(title, room, size);
         let t = super::widgets::ellipsize(title, room, size);
         shadow_centered(&t, r.x + r.w / 2.0, r.y + r.h * 0.5 + size * 0.36, size, color);
     });
+    if super::display::native_text() { block() } else { super::dt_font::with_legacy_metrics(block) }
     if closable {
         let s = r.h - 6.0 * k;
         return close_button(r.x + r.w - s - 4.0 * k, r.y + 3.0 * k, s, skin == Skin::Red);
@@ -1901,7 +1903,7 @@ fn window_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bool,
     super::pan::window_area(r);
     // The title strip grows with the text size, so a large title keeps its room (at the
     // original's size it is 26 px).
-    let tb = (26.0 * k * super::display::text_size()).round();
+    let tb = (26.0 * k * super::display::title_factor(k)).round();
     let closed = title_bar_styled(Rect::new(r.x, r.y, r.w, tb), title, skin, closable, ornate, title_color);
     // The frame round the window and the line under its title (0x48d3f8).
     window_frames_grown(r, opx(), tb - (26.0 * k).round());

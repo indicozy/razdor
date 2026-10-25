@@ -323,12 +323,17 @@ Building a window (`src/ui/chrome.rs`):
   scale cut to the fit (`display::fitted_scale`), so they stay as large as the fit allows.
 - Text size and large windows (Razdor's, the owner's request: phones' text too small). The
   two settings are independent (players' reports, 1.0.3). «Размер текста» (`Settings::text_size`,
-  `display::TEXT_SIZES`: ×1, ×1.25, ×1.5; on phones ×1.5 by default) alone sets the glyph size
+  `display::TEXT_SIZES`: ×1, ×1.25, ×1.5; on phones ×1.25 by default) multiplies the text base and
+  alone sets the glyph size
   of the long wrapped texts (messages, building descriptions, village and shipyard texts, the
   diary entry, item descriptions, map tips), of the window titles (`chrome::title_bar_styled`,
   the strip grows with the size: `chrome::window_styled`) and of the tooltips' text and title
-  (`world_view::draw_tooltip`). The text's base is the window's scale with the large windows
-  off (`display::text_o_at`, `text_o`), so it is the same with them on. A box that cannot
+  (`world_view::draw_tooltip`, its glyphs read by `dt_font::sheet_size` under
+  `with_legacy_metrics`, as the native metrics ignore the size asked for). The text base is
+  the window's scale on the desktop; on a phone it is one original px per dp
+  (`display::phone_text_base`, the 1.0.2 large-window scale, read for the message
+  `dialog::TEXT_REF`), always, with the large windows on or off, so tooltips, titles and
+  messages share one scale there (`display::text_base`, `display::text_for`). A box that cannot
   scroll takes the largest size that fits, stepping down from the chosen one
   (`display::text_o_fitting`: 1.5, 1.25, then the original's); a scrolling box (the event
   window, the diary) takes the chosen size as it is. «Крупные окна сообщений»
