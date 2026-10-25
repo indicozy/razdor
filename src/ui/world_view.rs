@@ -949,7 +949,7 @@ impl Camera {
     /// staggered rows).
     fn draw_fog(&self, game: &Game) {
         let (tl, br) = self.fog_corners(game);
-        minimap::draw_fog(&game.fog, tl, br);
+        minimap::draw_fog(&game.fog, &game.unshown_cells(), tl, br);
         let v = self.view;
         let (l, r) = (tl.x.clamp(v.x, v.x + v.w), br.x.clamp(v.x, v.x + v.w));
         let (t, b) = (tl.y.clamp(v.y, v.y + v.h), br.y.clamp(v.y, v.y + v.h));

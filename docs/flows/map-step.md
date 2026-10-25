@@ -142,6 +142,10 @@ While a place waits or opens, its overlay holds only the darkness the fog layer 
 (`minimap::reveal_overlay`): the rest of the map keeps its shade, as the original's single fog
 image (0x49c8f0). Drawing the whole old fog over the fog layer once darkened every explored edge
 twice until the place had opened.
+Until its `Showing` exists (the camera has not been there yet), the cells an event uncovered
+stay dark wherever the map is drawn, also under a building window or an event's dialog: the fog
+is open in the rules at once, so the fog layer draws them as before (`Game::unshown_cells`,
+`minimap::darkness_held`).
 
 ## Traps (from past bugs)
 

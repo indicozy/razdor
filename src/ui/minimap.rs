@@ -100,6 +100,28 @@ pub fn darkness_of(w: i32, h: i32, explored: impl Fn((i32, i32)) -> bool) -> Vec
     out
 }
 
+/// [`darkness`] with the cells `held` kept as they were before they were uncovered: their
+/// place is not shown yet, so they stay dark until its reveal plays (the original shows a
+/// place only when the camera arrives there, 0x4af83c). `held` is empty when nothing waits.
+pub fn darkness_held(fog: &Fog, held: &[(i32, i32)]) -> Vec<u8> {
+    if held.is_empty() {
+        return darkness(fog);
+    }
+    let held: std::collections::HashSet<(i32, i32)> = held.iter().copied().collect();
+    darkness_of(fog.w, fog.h, |t| fog.explored(t) && !held.contains(&t))
+}
+
+/// The part of a cache key that a fog's held cells add (0 for none, so it changes nothing).
+fn held_key(held: &[(i32, i32)]) -> u64 {
+    if held.is_empty() {
+        return 0;
+    }
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    held.hash(&mut h);
+    h.finish()
+}
+
 /// The darkness to draw over the fog layer (whose darkness is `now`) so that the two add up
 /// to `kept`, the darkness a reveal still keeps over a cell (alpha over alpha:
 /// `1 − (1 − a)(1 − now)`). Where the reveal changed nothing (`kept ≤ now`) it is 0: the
@@ -119,12 +141,12 @@ pub fn reveal_overlay(kept: u8, now: u8) -> u8 {
 /// Draws the fog over the map. `tl` and `br` are the screen positions of world points
 /// `(-0.5, -0.5·row)` and `(w − 0.5, (h − 0.5)·row)`: the outer corners of the edge cells,
 /// so texel centres fall on cell centres.
-pub fn draw_fog(fog: &Fog, tl: Vec2, br: Vec2) {
+pub fn draw_fog(fog: &Fog, held: &[(i32, i32)], tl: Vec2, br: Vec2) {
     if !fog.enabled || fog.w <= 0 || fog.h <= 0 {
         return;
     }
-    let tex = cached(&FOG_TEX, fog.fingerprint(), FilterMode::Linear, || {
-        let rgba = darkness(fog).into_iter().flat_map(|a| [0, 0, 0, a]).collect();
+    let tex = cached(&FOG_TEX, fog.fingerprint() ^ held_key(held), FilterMode::Linear, || {
+        let rgba = darkness_held(fog, held).into_iter().flat_map(|a| [0, 0, 0, a]).collect();
         (fog.w as u16, fog.h as u16, rgba)
     });
     draw_texture_ex(&tex, tl.x, tl.y, WHITE, DrawTextureParams { dest_size: Some(br - tl), ..Default::default() });
@@ -565,7 +587,8 @@ pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_
     if frame_art.is_none() {
         draw_rectangle_lines(o.x + 1.0, o.y + 1.0, o.w - 2.0, o.h - 2.0, 2.0, Color::new(0.62, 0.64, 0.62, 1.0));
     }
-    let tex = cached(&MINI_TEX, fog.fingerprint() ^ (map.w as u64) << 20 ^ map.h as u64 ^ art.is_some() as u64, FilterMode::Linear, || {
+    let held = game.unshown_cells();
+    let tex = cached(&MINI_TEX, fog.fingerprint() ^ held_key(&held) ^ (map.w as u64) << 20 ^ map.h as u64 ^ art.is_some() as u64, FilterMode::Linear, || {
         // The ground: the terrain texture's own colours; the map objects on it in their
         // sprites' colours; building footprints (bridges, roads through towns) light.
         let (w, h) = (map.w as usize, map.h as usize);
@@ -603,7 +626,7 @@ pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_
             }
         }
         // The dark with the map's soft edge.
-        let dark = darkness(fog);
+        let dark = darkness_held(fog, &held);
         let mut rgba = Vec::with_capacity(w * h * 4);
         for (i, c) in rgb.iter().enumerate() {
             let lit = 255 - dark.get(i).copied().unwrap_or(255) as u32;
@@ -853,6 +876,28 @@ mod tests {
         assert_eq!(reveal_overlay(170, 170), 0);
         assert_eq!(reveal_overlay(100, 200), 0);
         assert_eq!(reveal_overlay(255, 255), 0);
+    }
+
+    /// A reveal queued while a building window is open (or its event's dialog is): the fog is
+    /// open at once, but the place is shown only when the camera arrives, so its cells stay
+    /// as dark as they were until then, and the rest of the map is not touched.
+    #[test]
+    fn a_queued_reveal_keeps_its_cells_dark_until_it_plays() {
+        let (w, h) = (60, 30);
+        let mut fog = Fog::new(w, h);
+        fog.reveal(10, 15, 5);
+        let old = fog.clone();
+        fog.reveal(48, 15, 3);
+        let fresh: Vec<(i32, i32)> = (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).filter(|&t| fog.explored(t) && !old.explored(t)).collect();
+        assert!(!fresh.is_empty());
+        // Held: the cells look as they did before the reveal, everywhere.
+        assert_eq!(darkness_held(&fog, &fresh), darkness(&old));
+        // Nothing held: the fog as it is.
+        assert_eq!(darkness_held(&fog, &[]), darkness(&fog));
+        // Without the hold the new cells are lit at once; held, the lantern's centre is black.
+        let centre = (48 + 15 * w) as usize;
+        assert_eq!(darkness(&fog)[centre], 0);
+        assert_eq!(darkness_held(&fog, &fresh)[centre], 255);
     }
 
     #[test]

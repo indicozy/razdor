@@ -1509,6 +1509,14 @@ impl Game {
         !self.held.is_empty() || !self.held_shown.is_empty()
     }
 
+    /// The cells an event has uncovered whose place is not shown yet (waiting in
+    /// [`Game::shown`] or held by [`Game::tick_shown`]). The fog is already open there, but the
+    /// original shows the place only when the camera arrives, so the map keeps them dark until
+    /// then, in any window (`ui::minimap::darkness_held`).
+    pub fn unshown_cells(&self) -> Vec<Tile> {
+        self.shown.iter().chain(self.held_shown.iter().map(|(_, s)| s)).flat_map(|s| s.cells.iter().copied()).collect()
+    }
+
     /// Advance the world by `real_dt` seconds (world.md §2): each hero step and each wait
     /// tick plays over [`STEP_SECONDS`]; the game time a step takes is its own cost. Time only
     /// flows while the party walks or waits.
