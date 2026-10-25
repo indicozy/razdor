@@ -212,8 +212,9 @@ public String razdorInstall(String path) {
 // the focus (Android drops the immersive state after a dialog, e.g. the package installer).
 private volatile boolean razdorImmersive = false;
 
-// Hides the system bars (`on`) or shows them again. Called from the game's thread; the window
-// is changed on the UI thread.
+// Full screen (`on`) hides the status and navigation bars. Windowed keeps the status bar hidden
+// (as the fullscreen theme did before 1.0.4) and shows the navigation bar. Called from the game's
+// thread; the window is changed on the UI thread.
 public void razdorSetImmersive(final boolean on) {
     razdorImmersive = on;
     runOnUiThread(new Runnable() {
@@ -234,7 +235,8 @@ private void razdorApplyImmersive(boolean on) {
                 controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
                 controller.hide(WindowInsets.Type.systemBars());
             } else {
-                controller.show(WindowInsets.Type.systemBars());
+                controller.show(WindowInsets.Type.navigationBars());
+                controller.hide(WindowInsets.Type.statusBars());
             }
         }
     } else if (on) {
@@ -242,7 +244,7 @@ private void razdorApplyImmersive(boolean on) {
                 | View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                 | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
     } else {
-        decor.setSystemUiVisibility(0);
+        decor.setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN);
     }
     if (Build.VERSION.SDK_INT >= 28) {
         // Draw into the notch's area too in full screen, so the game fills the screen.

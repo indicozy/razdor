@@ -66,7 +66,9 @@ android_version = 34
 target_sdk_version = 34
 min_sdk_version = 26
 build_targets = ["aarch64-linux-android", "armv7-linux-androideabi", "x86_64-linux-android"]
-fullscreen = false
+# The status bar is hidden in every mode, as in 1.0.3; «Полный экран» (src/ui/android.rs) also
+# hides the navigation bar.
+fullscreen = true
 # The launcher icon: the mipmap PNGs of Razdor's own icon (data/icon/razdor.png, resized).
 icon = "@mipmap/ic_launcher"
 res = "android/res"
