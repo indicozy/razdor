@@ -149,9 +149,11 @@ pub fn large_windows() -> bool {
     LARGE_WINDOWS.load(Ordering::Relaxed)
 }
 
-/// The text size on a fresh install: larger on phones, where the text looks small.
+/// The text size on a fresh install: the largest on phones, where the text looks small (the
+/// phones' text at this size is still smaller than the old large windows' text was; see
+/// `docs/PLAYTEST_NOTES.md`).
 pub fn default_text_size() -> f32 {
-    if razdor::platform::MOBILE { 1.25 } else { 1.0 }
+    if razdor::platform::MOBILE { 1.5 } else { 1.0 }
 }
 
 /// Large message windows on a fresh install: on phones only.
@@ -181,7 +183,11 @@ pub fn text_size_label(s: f32) -> &'static str {
 /// `o` (screen px per original px of a layout) times the text size, snapped as the font sheets
 /// snap. At the original's size it is `o` itself.
 pub fn text_o(o: f32) -> f32 {
-    let t = text_size();
+    text_o_at(text_size(), o)
+}
+
+/// [`text_o`] for the text size `t`, pure (no global state).
+pub fn text_o_at(t: f32, o: f32) -> f32 {
     if t == 1.0 { o } else { crate::ui::dt_font::whole_scale(o * t) }
 }
 
@@ -1316,6 +1322,20 @@ mod tests {
         assert_eq!(text_o_fitting_at(1.5, 2.0, |_| true), 3.0);
         // The chosen size is the largest tried: at 1.0 only the original's.
         assert_eq!(text_o_fitting_at(1.0, 2.0, |_| true), 2.0, "the chosen size is the original's");
+    }
+
+    #[test]
+    fn text_size_does_not_follow_large_windows() {
+        // The text is measured at the window's scale with the large windows off (`base`); the
+        // large window grows past it, and the text stays where it was at each size.
+        let base = 1.406;
+        let grown = popup_scale(base, true, Some(2.625), (480.0, 211.0), (2400.0, 1080.0), 90.0);
+        assert!(grown > base, "the large window is larger");
+        for t in TEXT_SIZES {
+            assert_eq!(text_o_at(t, base), text_o_at(t, base), "the text base does not change");
+            assert!(text_o_at(t, base) <= text_o_at(TEXT_SIZES[2], base) + 1e-4);
+        }
+        assert_eq!(text_o_at(1.0, base), base, "the original's size is the base");
     }
 
     #[test]

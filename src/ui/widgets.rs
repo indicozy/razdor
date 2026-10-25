@@ -904,7 +904,7 @@ pub struct MarkupRow {
 }
 
 /// A character's advance at `size`: `_` has the space's glyph (0x47866c).
-fn glyph_width(c: char, size: f32) -> f32 {
+pub fn glyph_width(c: char, size: f32) -> f32 {
     let c = if c == '_' { ' ' } else { c };
     measure(c.encode_utf8(&mut [0; 4]), size).width
 }

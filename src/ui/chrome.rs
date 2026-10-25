@@ -1765,8 +1765,14 @@ pub fn window_inner_frames(r: Rect, px: f32) {
 /// The frames 0x48d3f8 draws on every window: a 2 px frame round it and a 2 px line from
 /// (2, 27) to (w − 2, 29) under the title. `px` as in [`window_inner_frames`].
 pub fn window_frames(r: Rect, px: f32) {
+    window_frames_grown(r, px, 0.0);
+}
+
+/// [`window_frames`] with the title strip taller by `grow` px (Razdor's text size grows the
+/// strip, see `window_styled`): the line under the title moves down with it.
+fn window_frames_grown(r: Rect, px: f32, grow: f32) {
     steel_frame(r, px, 2);
-    steel_frame(Rect::new(r.x + 2.0 * px, r.y + 27.0 * px, r.w - 4.0 * px, 2.0 * px), px, 2);
+    steel_frame(Rect::new(r.x + 2.0 * px, r.y + 27.0 * px + grow, r.w - 4.0 * px, 2.0 * px), px, 2);
 }
 
 /// The original's empty worn-item slot (0xae2860 with its alpha 0xae2864, built at start-up
@@ -1816,7 +1822,9 @@ fn title_bar_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bo
     // They give way to a title that would not fit between them.
     // Every window title in the titles' face (the original draws a plain one in its body font).
     let face = super::typography::Role::Title.face();
-    let size = super::typography::Role::Title.size((16.0 * k).round());
+    // Razdor's text size scales the titles too (the owner's request: phones' titles are small);
+    // at the original's size this is the title's own.
+    let size = super::display::text_o(super::typography::Role::Title.size((16.0 * k).round()));
     let title_w = super::dt_font::with_face(face, || measure(title, size).width);
     let ornate = ornate && matches!(skin, Skin::Red | Skin::Marble) && r.w > 400.0 && title_w < r.w - 300.0 * k;
     if let Some(t) = win_fx("Corner-Left", Fx::KeyBlack).filter(|_| ornate) {
@@ -1891,10 +1899,12 @@ fn window_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bool,
     surface(r, skin);
     // A one-finger slide over the window pans it when the canvas overflows (`ui::pan`).
     super::pan::window_area(r);
-    let tb = (26.0 * k).round();
+    // The title strip grows with the text size, so a large title keeps its room (at the
+    // original's size it is 26 px).
+    let tb = (26.0 * k * super::display::text_size()).round();
     let closed = title_bar_styled(Rect::new(r.x, r.y, r.w, tb), title, skin, closable, ornate, title_color);
     // The frame round the window and the line under its title (0x48d3f8).
-    window_frames(r, opx());
+    window_frames_grown(r, opx(), tb - (26.0 * k).round());
     // Each caller draws the frames for its own content and footer.
     (Rect::new(r.x + 2.0 * k, r.y + tb + 1.0, r.w - 4.0 * k, r.h - tb - 3.0 * k), closed)
 }

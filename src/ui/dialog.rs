@@ -512,19 +512,44 @@ fn event_row_h(defeat: bool, line: f32, t: f32, r: &MarkupRow) -> f32 {
     if defeat && r.text.is_empty() { EVENT_GAP * t } else { line }
 }
 
-/// The event window's width in the original's pixels at the scale `o` on a `sw`-wide screen:
-/// 634 on the desktop; on a phone (Razdor's, the owner's request: a portrait phone's window
-/// was 60% of the width) the screen's width less 12 px, kept between [`EVENT_MIN_W`] and
-/// [`EVENT_MAX_W`].
+/// The event window's widest width in the original's pixels at the scale `o` on a `sw`-wide
+/// screen: 634 on the desktop; on a phone (Razdor's, the owner's request: a portrait phone's
+/// window was 60% of the width) the screen's width less 12 px, up to [`EVENT_MAX_W`]. A large
+/// window is no wider than this; the text may need less ([`text_fit_width`]).
 fn event_width(o: f32, sw: f32, phone: bool) -> f32 {
-    if phone { ((sw - 12.0) / o).clamp(EVENT_MIN_W, EVENT_MAX_W) } else { EVENT_W }
+    let cap = if phone { EVENT_MAX_W } else { EVENT_W };
+    cap.min((sw - 12.0) / o)
 }
 
-/// Measures the event window `d` at the scale `o`: the text wrapped at the text scale, the
-/// rows and the frame around them.
-fn event_layout(d: &Dialog, o: f32, w: f32) -> EventLayout {
+/// The frame's sides beside the text, in the original's pixels: the box's 19 + 19 and the
+/// text's 40 (`room` in [`event_layout`]).
+const EVENT_SIDES: f32 = 78.0;
+
+/// The narrowest a large window gets for its text, in the original's pixels (a short line).
+const EVENT_TEXT_MIN_W: f32 = 260.0;
+
+/// The width of a large window that takes what its text needs (Razdor's, the owner's request
+/// after a player's report: a one-line message filled the screen's width). `widest` is the
+/// widest text row in screen px at the scale `o`; the window is that plus the frame and the
+/// picture beside it, at least [`EVENT_TEXT_MIN_W`] of text, at most `max_w`.
+fn text_fit_width(widest: f32, o: f32, side_w: f32, max_w: f32) -> f32 {
+    // One original px over the greedy wrap's exact fit, so the lines break as they did.
+    let want = widest / o + EVENT_SIDES + side_w + 1.0;
+    want.max(EVENT_TEXT_MIN_W + EVENT_SIDES + side_w).min(max_w)
+}
+
+/// The widest of a laid-out text's rows, in screen px.
+fn widest_text(lay: &EventLayout) -> f32 {
+    let lines = lay.lines.iter().map(|l| measure(l, lay.size).width);
+    let rows = lay.rows.iter().map(|r| r.text.chars().map(|c| glyph_width(c, lay.size)).sum::<f32>());
+    lines.chain(rows).fold(0.0, f32::max)
+}
+
+/// Measures the event window `d` at the scale `o` and the text scale `t` (`display::text_o_at`,
+/// its size on its own): the text wrapped at the text scale, the rows and the frame around
+/// them, in the window `w` original px wide.
+fn event_layout(d: &Dialog, o: f32, t: f32, w: f32) -> EventLayout {
     let sh = screen_height();
-    let t = super::display::text_o(o);
     let size = super::dt_font::sheet_size(super::dt_font::Face::Subtitle, t);
     let line = EVENT_LINE * t;
     // A picture at the side takes its width and 14 more from the text box.
@@ -590,24 +615,34 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     let (sw, sh) = (screen_width(), screen_height());
     // The original's pixel on screen, snapped as the font sheets snap (×1.875 → ×2), so the
     // text and its box grow together and the lines break where the original's do. Razdor's
-    // large windows (the owner's request: phones' text too small): on, the window takes the
-    // largest scale that fits its smallest size on the screen (on a phone one px per dp), and
-    // is measured again. On a phone the window's width follows the screen (`event_width`).
+    // two settings (the owner's request): the text takes the text size alone, at the scale of
+    // the window with the large windows off, so it is the same with them on. The large windows
+    // only grow the window: on, its scale is the largest that fits its smallest size on the
+    // screen (on a phone one px per dp), and its width is what its text needs.
     let defeat = d.defeat;
     let base = chrome::k() * 0.9375;
+    let plain = super::dt_font::whole_scale(base).min((sw - 12.0) / EVENT_W);
+    let t = super::display::text_o(plain);
+    let large = super::display::large_windows();
     // The phone layout needs the large windows on: off, a phone takes the original's path.
-    let phone = super::display::large_windows() && super::display::dp_px().is_some();
-    let min_w = if phone { EVENT_MIN_W } else { EVENT_W };
-    let o0 = super::dt_font::whole_scale(base).min((sw - 12.0) / min_w);
-    let first = event_layout(d, o0, EVENT_W);
-    let mut o = o0;
-    if super::display::large_windows() {
+    let phone = large && super::display::dp_px().is_some();
+    let mut o = plain;
+    if large {
+        let min_w = if phone { EVENT_MIN_W } else { EVENT_W };
         // The smallest window: the box at its minimum, the rows under it as they are.
-        let min_h = event_frame(first.side, 0.0, first.below / o0, EVENT_MAX_BOX, min_w).h;
-        o = super::dt_font::whole_scale(super::display::popup_o(base, min_w, min_h)).min((sw - 12.0) / min_w);
+        let first = event_layout(d, plain, t, EVENT_W);
+        let min_h = event_frame(first.side, 0.0, first.below / plain, EVENT_MAX_BOX, min_w).h;
+        o = super::dt_font::whole_scale(super::display::popup_o(base, min_w, min_h)).min((sw - 12.0) / min_w).max(plain);
     }
-    let width = event_width(o, sw, phone);
-    let lay = if o == o0 && width == EVENT_W { first } else { event_layout(d, o, width) };
+    let lay = if large {
+        let max_w = event_width(o, sw, phone);
+        let probe = event_layout(d, o, t, max_w);
+        let side_w = probe.side.map_or(0.0, |(pw, _)| pw + 14.0);
+        let width = text_fit_width(widest_text(&probe), o, side_w, max_w);
+        event_layout(d, o, t, width)
+    } else {
+        event_layout(d, o, t, EVENT_W)
+    };
     chrome::under_message();
     let EventLayout { o, t, size, line, side, room, lines, rows, total, pic_h, res_h, items_h, lost_h, spells_h, f, shown, .. } = lay;
     let row_h = |r: &MarkupRow| event_row_h(defeat, line, t, r);
@@ -819,8 +854,9 @@ fn draw_village_event(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Optio
     let base = chrome::k() * 0.9375;
     let o = super::display::popup_o(base, 634.0, need).min((screen_width() - 12.0) / 634.0);
     let w = 634.0 * o;
-    // The text takes Razdor's text size (`display::text_o`); the window stays in `o`.
-    let t = super::display::text_o(o);
+    // The text takes Razdor's text size (`display::text_o`) at the window's scale with the large
+    // windows off, so it is the same with them on; the large windows grow the window only.
+    let t = super::display::text_o(base.min((screen_width() - 12.0) / 634.0));
     let size = 17.0 * t;
     let line_h = 18.0 * t;
     let pw = picture.map_or(106.0, |t| t.width()) * o;
@@ -1006,15 +1042,34 @@ mod tests {
                 let raw = crate::ui::display::popup_scale(base, true, Some(dp), (EVENT_MIN_W, min_h), (sw, sh), bar);
                 let o = whole_scale(raw).min((sw - 12.0) / EVENT_MIN_W);
                 let width = event_width(o, sw, true);
-                let t = whole_scale(o * text);
-                let (old_dp, new_dp) = (EVENT_LINE * old_o / dp, EVENT_LINE * t / dp);
-                eprintln!("{name:<18} {orientation:<9} {sw:>5}x{sh:<5} dp {dp:<5} scale {o:.2} width {width:>5.0} line {old_dp:>5.1} dp -> {new_dp:>5.1} dp");
+                // The text is the window's scale with the large windows off, whatever the window's.
+                let t = crate::ui::display::text_o_at(text, old_o);
+                let line_dp = EVENT_LINE * t / dp;
+                eprintln!("{name:<18} {orientation:<9} {sw:>5}x{sh:<5} dp {dp:<5} scale {o:.2} width {width:>5.0} line {line_dp:>5.1} dp");
                 assert!(o >= base - 1e-4, "{name} {orientation}: the scale is below the base");
                 assert!(width * o <= sw - 12.0 + 0.01, "{name} {orientation}: the window is wider than the screen");
                 assert!(min_h * o <= sh - bar - 4.0 + 0.01, "{name} {orientation}: the window is taller than the screen");
-                assert!(new_dp >= old_dp - 1e-3, "{name} {orientation}: the text got smaller");
+                assert!(o >= old_o - 1e-4, "{name} {orientation}: the large window is smaller than the normal one");
             }
         }
+    }
+
+    /// A large window takes what its text needs (a player's report: a one-line message filled
+    /// the phone's width): narrower than the screen for a short text, the cap for a long one.
+    #[test]
+    fn a_large_window_is_as_wide_as_its_text_needs() {
+        let o = 2.0;
+        // A one-line text 300 px wide at 2 px per original px: the frame's 78 and one px more.
+        let one_line = text_fit_width(300.0, o, 0.0, 860.0);
+        assert_eq!(one_line, EVENT_TEXT_MIN_W + EVENT_SIDES, "a short text takes the least width");
+        assert!(one_line * o < 1080.0 - 12.0, "a one-line window is narrower than the screen");
+        // A text as wide as the screen takes the cap; the picture's side is added.
+        assert_eq!(text_fit_width(5000.0, o, 0.0, 860.0), 860.0);
+        assert_eq!(text_fit_width(300.0, o, 142.0, 860.0), EVENT_TEXT_MIN_W + EVENT_SIDES + 142.0);
+        // Wide enough for the widest line: that line wraps as it did, with no room lost.
+        let widest = 600.0;
+        let w = text_fit_width(widest, o, 0.0, 860.0);
+        assert!((w - EVENT_SIDES - widest / o).abs() <= 1.0 + 1e-4, "{w}");
     }
 
     /// The units rows (0x4a93bc, 0x4a9711): 46 × 46 icons in 47 × 47 cells centred at

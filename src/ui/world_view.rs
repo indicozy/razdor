@@ -2060,7 +2060,8 @@ fn draw_tooltip(game: &Game, assets: &Assets, t: &Tooltip) {
     let y = (my - h / 2.0).min(screen_height() - bar_h() - h).max(0.0);
     tooltip_panel_styled(Rect::new(x, y, w, h), t.style);
     // The title in the yellow Benguiat over its shadow, centred in the 27 px strip.
-    let title_size = 16.0 * k;
+    // The title takes the text scale as the big rows do (16 × `tk`), so it grows with the text.
+    let title_size = 16.0 * tk;
     with_face(Face::Title, || {
         let title = ellipsize(&t.title, TIP_TITLE_W * k, title_size);
         shadow_centered(&title, x + w / 2.0, y + 13.5 * k + title_size * 0.36, title_size, TIP_TITLE);

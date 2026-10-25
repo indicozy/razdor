@@ -657,6 +657,14 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             app.dialogs.push_back(super::dialog::Dialog::defeat());
             Screen::WorldMap
         }
+        "message" => {
+            // `message:<map>`: a plain message window with the text of `RAZDOR_SCENE_TEXT` (a
+            // short or a long one), title `RAZDOR_SCENE_TITLE`, over the map.
+            let mut d = super::dialog::Dialog::new(std::env::var("RAZDOR_SCENE_TITLE").unwrap_or_else(|_| "Сообщение".into()));
+            d.text = vec![std::env::var("RAZDOR_SCENE_TEXT").unwrap_or_default()];
+            app.dialogs.push_back(d);
+            Screen::WorldMap
+        }
         "event" => {
             // `event:<map>:<n>`: the map's event n as its window opens (story::event_dialog),
             // with the lost row of the items in `RAZDOR_SCENE_LOST=<id>,…` (what the engine
