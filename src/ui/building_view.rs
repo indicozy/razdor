@@ -973,15 +973,13 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
             hover_lines.extend(unit_stat_lines(&c, &u, game.wage(i)).into_iter().map(|s| (s, INK)));
         }
     }
-    // The press, as the original's hero grid within the hero's army (0x4c653c); none while a
-    // card moves (busy 0x68dc63). With «Расстановка армии: Перетаскивание» (Razdor's default,
-    // the owner's decision) it only selects and units move by dragging; the original's second
-    // press swaps or slides.
+    // The press, as the original's hero grid within the hero's army (0x4c653c): a click selects,
+    // the second click swaps or slides; none while a card moves (busy 0x68dc63). A card dragged
+    // from here is Razdor's drag, from the same press.
     if let (Some((on, slot)), None) = (pressed, anim) {
-        let press = super::unit_drag::grid_press_in(super::unit_drag::controls(), selected, on);
+        let press = super::unit_drag::grid_press(selected, on);
         view.garrison_sel = match press {
             super::unit_drag::GridPress::Select(i) => Some((false, i)),
-            // Dragging only: an empty cell clears this grid's selection.
             super::unit_drag::GridPress::Nothing => view.garrison_sel.filter(|_| selected.is_none()),
             _ => None,
         };
@@ -1142,8 +1140,7 @@ fn card_grid(game: &Game, assets: &Assets, f: &Frame, rel_y: f32, units: &[&Unit
 /// hero's army below. One click selects a unit, a second acts: a unit of the other grid
 /// swaps the two, an empty cell of the other grid moves it across (buying back an unpaid
 /// guard asks first), the same grid changes its cell. Razdor's: a card dragged onto a card or
-/// a cell does the same; with «Расстановка армии: Перетаскивание» (the default) a click only
-/// selects ([`garrison_click`]).
+/// a cell does the same.
 fn garrison(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, message: &mut Option<String>) {
     let k = chrome::k();
     let c = game.content.clone();
@@ -1173,11 +1170,9 @@ fn garrison(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
     // line 11).
     // Razdor's rule: a fallen unit of the army does not go in either (the original takes it);
     // its line is Razdor's own (no `[Army]` line, hence 0).
-    // With «Расстановка армии: Перетаскивание» (Razdor's default) a selection does nothing
-    // more, so the refusals speak only while a card is dragged; the original's selection
-    // acts on the next press.
-    let controls = super::unit_drag::controls();
-    let acting = super::unit_drag::dragged_from().or(sel.filter(|_| controls == super::unit_drag::Controls::Original));
+    // The refusals speak for the card being dragged, or for the selected one the next press
+    // would act on (0x4c612c).
+    let acting = super::unit_drag::dragged_from().or(sel);
     let unique = |i: usize| i == 0 || squad.get(i).is_some_and(|u| u.named > 0);
     let fallen = |i: usize| i > 0 && squad.get(i).is_some_and(|u| u.named == 0 && !u.alive());
     let refusal = match (acting, top, bottom) {
@@ -1199,7 +1194,7 @@ fn garrison(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
     let hint = if let Some((line, ours)) = refusal {
         Some(chrome::ui_line("Army", line).filter(|_| line > 0 && razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr(ours).to_string()))
     } else if let Some(pointed) = pointed {
-        let (line, named) = super::items_view::pointed_line(controls, pointed, sel);
+        let (line, named) = super::items_view::pointed_line(pointed, sel);
         super::items_view::army_line(line, &unit_name(named))
     } else {
         top.or(bottom).and_then(|hit| match hit { Hit::Cell(slot) => super::items_view::row_text(c.formation, slot), _ => None })
@@ -1227,8 +1222,8 @@ fn garrison(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
         tooltip_later(&hover);
         return;
     }
-    // Razdor's drag (both settings): a card let go over a card or a cell does what the
-    // original's second press does with that card selected.
+    // Razdor's drag: a card let go over a card or a cell does what the original's second press
+    // does with that card selected.
     let dropped = super::unit_drag::follow(assets, card_grid_size(f, c.formation, CARD_BOTTOM_Y).1);
     if let Some(from) = dropped {
         view.garrison_sel = Some(from);
@@ -1251,62 +1246,13 @@ fn garrison(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
             tooltip_later(&hover);
             return;
         }
-        match garrison_click(controls, sel, top, bottom) {
-            GarrisonClick::Select(s) => {
-                view.garrison_sel = Some(s);
-                start_garrison_drag(&guards, &squad, s, &c);
-            }
-            GarrisonClick::Deselect(s) => {
-                view.garrison_sel = None;
-                start_garrison_drag(&guards, &squad, s, &c);
-            }
-            GarrisonClick::Clear => view.garrison_sel = None,
-            GarrisonClick::Act => {
-                garrison_act(game, view, &guards, &squad, sel, top, bottom, message);
-                // A unit selected by this press may be dragged from here (Razdor's).
-                if let (None, Some(s)) = (sel, view.garrison_sel) {
-                    start_garrison_drag(&guards, &squad, s, &c);
-                }
-            }
-            GarrisonClick::Nothing => {}
+        garrison_act(game, view, &guards, &squad, sel, top, bottom, message);
+        // A unit selected by this press may be dragged from here (Razdor's).
+        if let (None, Some(s)) = (sel, view.garrison_sel) {
+            start_garrison_drag(&guards, &squad, s, &c);
         }
     }
     tooltip_later(&hover);
-}
-
-/// What a press on the garrison tab does.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum GarrisonClick {
-    /// Dragging only: the unit pressed (a garrison unit, its index) is selected.
-    Select((bool, usize)),
-    /// Dragging only: the selected unit pressed again is deselected (0x4c6f50).
-    Deselect((bool, usize)),
-    /// Dragging only: an empty cell clears the selection.
-    Clear,
-    /// As in the original: the press selects, swaps or moves ([`garrison_act`]).
-    Act,
-    Nothing,
-}
-
-/// The press on the garrison tab over `top` (the garrison's grid) or `bottom` (the hero's),
-/// with `sel` selected. With «Расстановка армии: Перетаскивание» (Razdor's default, the owner's
-/// decision) a press only selects, or deselects the selected unit, and units move by dragging;
-/// the original's second press swaps or moves (0x4c653c, 0x4c6f50).
-fn garrison_click(controls: super::unit_drag::Controls, sel: Option<(bool, usize)>, top: Option<Hit>, bottom: Option<Hit>) -> GarrisonClick {
-    if controls == super::unit_drag::Controls::Original {
-        return GarrisonClick::Act;
-    }
-    let unit = match (top, bottom) {
-        (Some(Hit::Unit(j)), _) => Some((true, j)),
-        (_, Some(Hit::Unit(i))) => Some((false, i)),
-        _ => None,
-    };
-    match (unit, top, bottom) {
-        (Some(s), _, _) if sel == Some(s) => GarrisonClick::Deselect(s),
-        (Some(s), _, _) => GarrisonClick::Select(s),
-        (None, Some(Hit::Cell(_)), _) | (None, _, Some(Hit::Cell(_))) => GarrisonClick::Clear,
-        (None, _, _) => GarrisonClick::Nothing,
-    }
 }
 
 /// Razdor's drag from the garrison tab's card `s` (a garrison unit, its index).
@@ -2522,35 +2468,6 @@ mod tests {
     fn a_market_list_opens_on_its_first_row() {
         assert_eq!(super::first_pick(7), Some(0));
         assert_eq!(super::first_pick(0), None);
-    }
-
-    /// The garrison tab's press: with dragging only (Razdor's default) it selects the unit
-    /// pressed or clears on an empty cell, never moving one; as in the original it acts
-    /// (0x4c653c, 0x4c6f50).
-    #[test]
-    fn a_garrison_press_follows_the_arrangement_setting() {
-        use super::{garrison_click, GarrisonClick, Hit};
-        use crate::ui::unit_drag::Controls::{Drag, Original};
-        let cell = Hit::Cell(Slot { row: Row::Front, col: 0 });
-        assert_eq!(garrison_click(Drag, None, Some(Hit::Unit(2)), None), GarrisonClick::Select((true, 2)));
-        assert_eq!(garrison_click(Drag, None, None, Some(Hit::Unit(0))), GarrisonClick::Select((false, 0)));
-        assert_eq!(garrison_click(Drag, None, Some(cell), None), GarrisonClick::Clear);
-        assert_eq!(garrison_click(Drag, None, None, Some(cell)), GarrisonClick::Clear);
-        assert_eq!(garrison_click(Drag, None, None, None), GarrisonClick::Nothing);
-        assert_eq!(garrison_click(Original, None, Some(Hit::Unit(2)), None), GarrisonClick::Act);
-        assert_eq!(garrison_click(Original, None, None, Some(cell)), GarrisonClick::Act);
-    }
-
-    /// The selected unit pressed again is deselected in both grids (0x4c6f50, 0x4c653c), the
-    /// hero's included; another unit pressed while one is selected is selected instead.
-    #[test]
-    fn a_selected_unit_pressed_again_is_deselected() {
-        use super::{garrison_click, GarrisonClick, Hit};
-        use crate::ui::unit_drag::Controls::Drag;
-        assert_eq!(garrison_click(Drag, Some((true, 2)), Some(Hit::Unit(2)), None), GarrisonClick::Deselect((true, 2)));
-        assert_eq!(garrison_click(Drag, Some((false, 0)), None, Some(Hit::Unit(0))), GarrisonClick::Deselect((false, 0)));
-        assert_eq!(garrison_click(Drag, Some((true, 2)), Some(Hit::Unit(3)), None), GarrisonClick::Select((true, 3)));
-        assert_eq!(garrison_click(Drag, Some((false, 4)), None, Some(Hit::Unit(0))), GarrisonClick::Select((false, 0)));
     }
 
     use super::{market_list_buttons, next_pick, ListButton, offer_picture, recruit_x, screen_line, stock_caption, stock_picture};

@@ -241,10 +241,6 @@ pub struct Settings {
     pub autosave: Option<bool>,
     /// "Невозможный уровень сложности игры" (`OptValue10`; read at start, as the original).
     pub impossible: Option<bool>,
-    /// Advanced: how the army grids outside battle are arranged (`unit_drag::Controls`):
-    /// by dragging only (Razdor's default, the owner's decision; also for a file without the
-    /// key) or the original's presses with dragging on top.
-    pub formation_controls: super::unit_drag::Controls,
     /// Razdor's, the owner's request: the keys the player rebound (`keymap::overrides`, the
     /// action's name and the key's), the rest on their defaults.
     pub keys: Vec<(String, String)>,
@@ -266,7 +262,7 @@ pub enum Orientation {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), friends_let_pass: false, pass_on_bridges: false, avoid_armies: false, battle_marks: true, army_list: false, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new() }
+        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), friends_let_pass: false, pass_on_bridges: false, avoid_armies: false, battle_marks: true, army_list: false, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, keys: Vec::new() }
     }
 }
 
@@ -787,10 +783,18 @@ mod tests {
         let partial: Settings = serde_json::from_str(r#"{"music_volume": 3.0}"#).unwrap();
         // (A file without `layout_version` reads 0: `load` migrates it, `clamped` does not.)
         assert_eq!(partial.clone().clamped(), Settings { music_volume: 1.0, layout_version: 0, ..Settings::default() });
-        // The army's arrangement (Razdor's): dragging only unless the file says otherwise.
-        assert_eq!(partial.formation_controls, crate::ui::unit_drag::Controls::Drag);
-        let original: Settings = serde_json::from_str(r#"{"formation_controls": "original"}"#).unwrap();
-        assert_eq!(original.formation_controls, crate::ui::unit_drag::Controls::Original);
+    }
+
+    /// The removed «Расстановка армии» (`formation_controls`) is ignored: a settings file that
+    /// still has it loads with the other settings as they were, and the key is not written back.
+    #[test]
+    fn a_settings_file_with_the_removed_arrangement_setting_still_loads() {
+        let old = r#"{"music_volume": 0.5, "formation_controls": "original", "layout_version": 1}"#;
+        let s: Settings = serde_json::from_str(old).expect("an old file must still parse");
+        assert_eq!(s.music_volume, 0.5);
+        assert_eq!(s.layout_version, 1);
+        let back = serde_json::to_string(&s).unwrap();
+        assert!(!back.contains("formation_controls"), "the removed key is not written back");
     }
 
     /// «Сила ИИ в бою» and the improved AI's checkbox (`OptValue9`) stay in step: «Максимум»

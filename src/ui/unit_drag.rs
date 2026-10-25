@@ -4,10 +4,9 @@
 //! not move stays a click. The garrison tab drags between its two grids the same way
 //! ([`press_guard`], [`follow`]).
 //!
-//! Razdor's setting «Расстановка армии» ([`Controls`], the owner's decision after a player's
-//! report, 2026-10-17): with dragging only (the default) a press on a card only selects its
-//! unit and units move by dragging alone; «Как в оригинале» keeps the original's
-//! press-to-pick, press-to-move (interface.md §9.6) with dragging on top.
+//! Both ways work at once, for everyone: the original's press-to-pick, press-to-move
+//! (interface.md §9.6, [`grid_press`]) and this dragging (the owner's decision after a
+//! player's report, 2026-10-25, which removed the setting «Расстановка армии»).
 
 use razdor::local;
 use std::cell::Cell;
@@ -17,7 +16,6 @@ use macroquad::prelude::*;
 use razdor::rules::battle::Team;
 use razdor::rules::content::UnitId;
 use razdor::rules::formation::Slot;
-use serde::{Deserialize, Serialize};
 
 use super::assets::Assets;
 use super::chrome;
@@ -25,45 +23,6 @@ use super::widgets::{input_blocked, pointer};
 
 /// Pixels the mouse must move before a press on a card drags it.
 const START: f32 = 5.0;
-
-/// How the army grids outside battle are arranged (Razdor's setting in «Ещё…»). Battle is
-/// not affected.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Controls {
-    /// Razdor's choice (the default, also for settings files without the key): a press on a
-    /// card only selects its unit (its card and items show); units move and items are given
-    /// by dragging. The original has no dragging and moves units by presses (0x4c346c).
-    #[default]
-    Drag,
-    /// The original's: a press picks a unit, the next press swaps it or moves it (0x4c346c,
-    /// 0x4c653c, 0x4c6f50), and Razdor's dragging works as well.
-    Original,
-}
-
-impl Controls {
-    /// The settings button's next choice.
-    pub fn next(self) -> Controls {
-        match self {
-            Controls::Drag => Controls::Original,
-            Controls::Original => Controls::Drag,
-        }
-    }
-}
-
-local! {
-    static CONTROLS: Cell<Controls> = const { Cell::new(Controls::Drag) };
-}
-
-/// The setting, pushed in each frame (`main_menu::apply_options`).
-pub fn set_controls(c: Controls) {
-    CONTROLS.with(|m| m.set(c));
-}
-
-/// The arrangement chosen in the settings.
-pub fn controls() -> Controls {
-    CONTROLS.with(|m| m.get())
-}
 
 #[derive(Clone, Copy)]
 struct Drag {
@@ -147,7 +106,7 @@ pub fn cancel() {
 /// What a press on a grid of one army does, as the original's army window (0x4c346c) and
 /// the building window's hero grid within the hero's army (0x4c653c). The original acts on
 /// the press and knows no dragging; Razdor's drag starts from the same press unless it
-/// swaps.
+/// swaps. The garrison tab's presses act the same way (0x4c6f50).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GridPress {
     /// The selected unit was pressed: nothing is selected now.
@@ -160,8 +119,7 @@ pub enum GridPress {
     /// An empty cell pressed while a unit is selected: its card slides there (0x4b0c04,
     /// `Card-Move`); the selection is cleared when the slide ends.
     Slide(usize),
-    /// An empty cell with nothing selected (with dragging only, any empty cell: the
-    /// selection is cleared).
+    /// An empty cell with nothing selected: nothing happens.
     Nothing,
 }
 
@@ -175,20 +133,6 @@ pub fn grid_press(selected: Option<usize>, pressed: Option<usize>) -> GridPress 
         (Some(s), Some(p)) => GridPress::Swap { selected: s, pressed: p },
         (Some(s), None) => GridPress::Slide(s),
         (None, None) => GridPress::Nothing,
-    }
-}
-
-/// The press as the setting `controls` has it. With [`Controls::Drag`] (Razdor's choice, the
-/// owner's decision) a press never moves a unit: a unit pressed is selected, the selected one
-/// is deselected again (the original's deselection, 0x4c346c, 0x4c653c, 0x4c6f50: the
-/// building window has no other way back to the town's menu with a full formation), and an
-/// empty cell clears the selection, where the original swaps or slides on the second press.
-pub fn grid_press_in(controls: Controls, selected: Option<usize>, pressed: Option<usize>) -> GridPress {
-    match (controls, pressed) {
-        (Controls::Original, _) => grid_press(selected, pressed),
-        (Controls::Drag, Some(p)) if selected == Some(p) => GridPress::Deselect,
-        (Controls::Drag, Some(p)) => GridPress::Select(p),
-        (Controls::Drag, None) => GridPress::Nothing,
     }
 }
 
@@ -219,37 +163,14 @@ mod tests {
         assert_eq!(grid_press(None, None), GridPress::Nothing);
     }
 
+    /// A click on a unit, then a click on another cell, moves it (the original's second press,
+    /// 0x4c346c): an empty cell slides the unit there, another unit's cell swaps the two.
     #[test]
-    fn as_in_the_original_the_second_press_moves() {
-        use Controls::Original;
-        assert_eq!(grid_press_in(Original, Some(3), Some(5)), GridPress::Swap { selected: 3, pressed: 5 });
-        assert_eq!(grid_press_in(Original, Some(4), None), GridPress::Slide(4));
-        assert_eq!(grid_press_in(Original, Some(3), Some(3)), GridPress::Deselect);
-        assert_eq!(grid_press_in(Original, None, Some(3)), GridPress::Select(3));
-        assert_eq!(grid_press_in(Original, None, None), GridPress::Nothing);
-    }
-
-    #[test]
-    fn with_dragging_only_a_press_never_moves_a_unit() {
-        use Controls::Drag;
-        // A unit pressed is selected, whatever was selected before: no swap.
-        assert_eq!(grid_press_in(Drag, None, Some(3)), GridPress::Select(3));
-        assert_eq!(grid_press_in(Drag, Some(3), Some(5)), GridPress::Select(5));
-        assert_eq!(grid_press_in(Drag, Some(0), Some(5)), GridPress::Select(5));
-        // The selected unit pressed again is deselected (0x4c346c, 0x4c6f50), the hero included.
-        assert_eq!(grid_press_in(Drag, Some(3), Some(3)), GridPress::Deselect);
-        assert_eq!(grid_press_in(Drag, Some(0), Some(0)), GridPress::Deselect);
-        // An empty cell: no slide, nothing selected.
-        assert_eq!(grid_press_in(Drag, Some(4), None), GridPress::Nothing);
-        assert_eq!(grid_press_in(Drag, None, None), GridPress::Nothing);
-    }
-
-    #[test]
-    fn dragging_is_the_default_also_for_old_settings_files() {
-        assert_eq!(Controls::default(), Controls::Drag);
-        assert_eq!(Controls::Drag.next(), Controls::Original);
-        assert_eq!(Controls::Original.next(), Controls::Drag);
-        assert_eq!(serde_json::to_string(&Controls::Original).unwrap(), "\"original\"");
+    fn a_click_on_a_unit_then_a_click_on_a_cell_moves_it() {
+        assert_eq!(grid_press(None, Some(4)), GridPress::Select(4));
+        assert_eq!(grid_press(Some(4), None), GridPress::Slide(4));
+        assert_eq!(grid_press(None, Some(4)), GridPress::Select(4));
+        assert_eq!(grid_press(Some(4), Some(1)), GridPress::Swap { selected: 4, pressed: 1 });
     }
 
     #[test]

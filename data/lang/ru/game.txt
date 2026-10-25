@@ -459,10 +459,6 @@ Wheel and +/- = Колесо и +/−
 The zoom the map plays at. The wheel steps away from it and the 0 key comes back to it; locked, the map always shows it. = Масштаб, в котором идёт игра. Колесо мыши отходит от него, клавиша 0 возвращает к нему; зафиксированный, он не меняется.
 back to the map's zoom from the settings = вернуть масштаб карты из настроек
 
-# Advanced settings: arranging the army outside battle
-Arranging the army = Расстановка армии
-Dragging = Перетаскивание
-Dragging: a click on a unit only selects it; units and items are moved by dragging. As in the original: the first click picks a unit, the second moves it; dragging works too. = Перетаскивание: щелчок по воину только выбирает его, а воинов и предметы перемещают перетаскиванием. Как в оригинале: первый щелчок выбирает воина, второй перемещает его; перетаскивание тоже работает.
 Click an item to pick it up, then a unit to give it; drag a unit to another cell to move it; Esc returns = Щёлкните предмет, чтобы взять его, затем воина, чтобы отдать; воина перетащите в другую клетку, чтобы переместить; Esc — назад
 The battle is over, and your enemy, #NAME1, is beaten! = Завершилась битва, и Ваш противник - #NAME1 - побежден!
 This battle brought you nothing but new battle experience. = Эта битва не принесла Вам ничего, кроме нового опыта ведения боя.

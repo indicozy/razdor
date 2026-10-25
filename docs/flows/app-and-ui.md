@@ -454,16 +454,13 @@ Two options are read at start only, as the original's: «no music and
 sounds» (`Audio::new`) and «impossible difficulty» (the content's difficulty factor in
 `App::new`).
 
-«Расстановка армии» (`unit_drag::Controls`, saved as `formation_controls`, pushed in by
-`main_menu::apply_options` → `unit_drag::set_controls`) is a Razdor setting that does not
-default to the original (the owner's decision after a player's report, 2026-10-17):
-«Перетаскивание», the default also for older files, makes a press on a card in the army
-window (`items_view::squad`), the building window's hero grid and the garrison tab only select,
-or deselect the selected unit pressed again, as the original does (`unit_drag::grid_press_in`,
-`building_view::garrison_click`); units move by dragging
-(`unit_drag::update`, `unit_drag::follow`, the garrison's `building_view::garrison_act`) and
-the card hints say "click to select" (`items_view::pointed_line`). «Как в оригинале» keeps the
-original's press to pick, press to move (interface.md §9.6) with dragging on top. Battle is
+Army cards (the army window, the building window's hero grid and the garrison tab) and items
+move in two ways at once, for everyone: a click on a unit selects it and a second click on a cell
+moves it there (or swaps it with the unit in that cell), as the original does (`unit_drag::grid_press`,
+`items_view::ArmySel::press`, `building_view::garrison_act`); or a press on a card dragged to
+another cell (`unit_drag::update`, `unit_drag::follow`). The card hints follow the original's lines
+(`items_view::pointed_line`). The setting «Расстановка армии» was removed (the owner's decision after
+a player's report, 2026-10-25); an old settings file's formation_controls key is ignored. Battle is
 not affected.
 
 ### The window's display mode
