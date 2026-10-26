@@ -202,6 +202,10 @@ wider screen, the desktop's and the landscape phone's, gets 0 and is never moved
 placed from `chrome::canvas_top()`: the logo and the menu (`main_menu`), the scenario list and the new game
 and custom battle windows. The map and building windows are already centred over the view above the bottom
 bar (`window_layout::window`, `main_menu::map_window`, the saves and dialogs), so they are not moved again.
+The battle window held upright (`battle_view::Layout::upright`, pure, with unit tests): the window's scale comes from
+`window_layout::game_scale` (the width less 8 px, above the bar); the unit's band (`unit_sheet::draw_band`) on top at
+design y 76, then the quick buttons, the enemy's grid, the strip, the player's grid; the close box is 44 dp at the top right
+(`close_button`). The map, the bar and the exit window are drawn at the interface scale (`display::with_window_scale(None, …)`).
 Stacked windows (experiment, main only): a phone held upright (`window_layout::portrait`: `dp_px` set and the
 screen taller than wide) stacks the building, army and hero windows, each with its own layout
 (`window_layout::Stack`, passed to `window_layout::scaled`). Building: the two panes on top at full width, each at the

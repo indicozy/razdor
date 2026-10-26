@@ -52,7 +52,7 @@ fn building_ph() -> f32 { lower_y() + lower_height() + LOWER_GAP + 2.0 * TAB_H +
 /// two thirds of the landscape scale. 420 is the owner's experiment: at 272 the text and the
 /// picture were too small on a phone held upright. The window stays width-limited at 1080x2376
 /// with the map above and below it (`stacked_army_window_is_width_limited_on_a_phone`).
-const BAND_H: f32 = 420.0;
+pub const BAND_H: f32 = 420.0;
 /// The army and hero windows' height: the title, the band, then the right side (672 px).
 const ARMY_PH: f32 = BAND_H + 672.0;
 /// The army and hero windows' «Закрыть» button under the formation (stacked): 64 design px

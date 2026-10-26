@@ -21,7 +21,7 @@ use razdor::rules::battle::{patch_globals, set_patch_globals, ActionKind, Battle
 use razdor::av::Echo;
 use razdor::rules::content::{HeroClass, ItemId, Stat};
 use razdor::rules::custom::{Control, Session};
-use razdor::rules::formation::{Row, Slot};
+use razdor::rules::formation::{Formation, Row, Slot};
 use razdor::rules::game::{BattleResult, Foe, Game};
 
 use super::assets::Assets;
@@ -30,6 +30,7 @@ use super::chrome::{self, shadow_centered, shadow_right, CellIcon, Skin, BLUE_TE
 use super::dialog::Dialog;
 use super::unit_sheet::{self, Sheet};
 use super::widgets::*;
+use super::window_layout;
 use super::world_view;
 use super::Screen;
 
@@ -63,6 +64,7 @@ pub enum CustomEnd {
 struct Layout {
     k: f32,
     win: Rect,
+    /// The unit's card: the landscape column at the left, or the band on top when stacked.
     panel: Rect,
     /// Under the panel: the quick battle buttons.
     quick: Rect,
@@ -70,28 +72,107 @@ struct Layout {
     card: Vec2,
     pitch: Vec2,
     grid_x: f32,
-    formation: razdor::rules::formation::Formation,
+    formation: Formation,
+    /// Stacked only (a phone held upright): the window's own close box, finger-sized, at the top right.
+    close: Option<Rect>,
+}
+
+/// The stacked battle window's design width: 590 px, as the other stacked windows.
+const STACK_W: f32 = 590.0;
+/// The stacked rows, design px from the window's top: the close row over the band (the close box
+/// lives there), the unit band (`window_layout::BAND_H`), the quick buttons under it (3 px gap,
+/// 30 px tall), the enemy's grid, the strip and the player's grid, the landscape's gaps (9 and 10 px).
+const STACK_BAND_Y: f32 = 76.0;
+const STACK_QUICK_GAP: f32 = 3.0;
+const STACK_QUICK_H: f32 = 30.0;
+const STACK_GRID_GAP: f32 = 9.0;
+const STRIP_H: f32 = 20.0;
+const STRIP_GAP: f32 = 10.0;
+const STACK_BOTTOM: f32 = 8.0;
+/// The stacked close box's side in dp: the 44 dp touch target.
+const CLOSE_DP: f32 = 44.0;
+
+/// The card's scale on the formation's lines and columns (the landscape's rule, kept as it is).
+fn card_scale(f: Formation) -> f32 {
+    1.0f32.min(2.0 / f.display_lines() as f32).min(6.0 / f.display_cols() as f32)
+}
+
+/// One army's grid in design px: its card and the lines behind the front one.
+fn grid_height(f: Formation) -> f32 {
+    let c = card_scale(f);
+    128.0 * c + (f.display_lines() as f32 - 1.0) * 133.0 * c
+}
+
+/// The stacked window's strip top and its height, in design px (see [`STACK_BAND_Y`]).
+fn stacked_rows(f: Formation) -> (f32, f32) {
+    let g = grid_height(f);
+    let enemy_top = STACK_BAND_Y + window_layout::BAND_H + STACK_QUICK_GAP + STACK_QUICK_H + STACK_GRID_GAP;
+    let strip_y = enemy_top + g + STACK_GRID_GAP;
+    (strip_y, strip_y + STRIP_H + STRIP_GAP + g + STACK_BOTTOM)
+}
+
+/// The stacked window's size for `f` in design px: what `window_layout::game_rect` fits.
+fn stacked_video(f: Formation) -> (f32, f32) {
+    (STACK_W, stacked_rows(f).1)
 }
 
 impl Layout {
     fn new(battle: &Battle) -> Layout {
-        let k = chrome::k();
-        let (sw, sh) = (screen_width(), screen_height());
+        let (f, k) = (battle.formation, chrome::k());
+        match (window_layout::game_rect(stacked_video(f)), super::display::dp_px()) {
+            (Some(win), Some(dp)) => Layout::upright(k, win, f, dp),
+            _ => Layout::landscape(k, (screen_width(), screen_height()), chrome::bar_height(), f),
+        }
+    }
+
+    /// The landscape window: 836×600 at `k`, centred over the view above the `bar` px bottom bar,
+    /// the unit's column at the left and the formations on the right.
+    fn landscape(k: f32, screen: (f32, f32), bar: f32, f: Formation) -> Layout {
+        let (sw, sh) = screen;
         let (ww, wh) = ((836.0 * k).round(), (600.0 * k).round());
         let x = ((sw - ww) / 2.0).round();
-        let y = ((sh - chrome::bar_height() - wh) / 2.0).max(2.0).round();
+        let y = ((sh - bar - wh) / 2.0).max(2.0).round();
         let win = Rect::new(x, y, ww, wh);
         let panel = Rect::new(x + 2.0 * k, y + 27.0 * k, 244.0 * k, 534.0 * k);
         let quick = Rect::new(panel.x + 10.0 * k, panel.y + panel.h + 3.0 * k, panel.w - 20.0 * k, 30.0 * k);
         let (rx, rw) = (x + 248.0 * k, 586.0 * k);
         let strip = Rect::new(rx, y + 302.0 * k, rw, 20.0 * k);
-        let f = battle.formation;
-        let lines = f.display_lines() as f32;
-        let c = 1.0f32.min(2.0 / lines).min(6.0 / f.display_cols() as f32);
+        let c = card_scale(f);
         let card = vec2(88.0 * c * k, 128.0 * c * k).round();
         let pitch = vec2(96.0 * c * k, 133.0 * c * k);
         let grid_w = f.display_cols() as f32 * pitch.x - 8.0 * c * k;
-        Layout { k, win, panel, quick, strip, card, pitch, grid_x: (rx + (rw - grid_w) / 2.0).round(), formation: f }
+        Layout { k, win, panel, quick, strip, card, pitch, grid_x: (rx + (rw - grid_w) / 2.0).round(), formation: f, close: None }
+    }
+
+    /// The stacked window (a phone held upright) at `k`, `win` as `window_layout::game_rect` fits
+    /// it: the unit's band on top, the quick buttons under it, the enemy's grid, the strip, and the
+    /// player's grid. The close box is `dp`-sized over the band's top right, in the close row.
+    fn upright(k: f32, win: Rect, f: Formation, dp: f32) -> Layout {
+        let c = card_scale(f);
+        let (strip_y, _) = stacked_rows(f);
+        let band = Rect::new(win.x + 2.0 * k, win.y + STACK_BAND_Y * k, 586.0 * k, window_layout::BAND_H * k);
+        let quick = Rect::new(band.x + 10.0 * k, band.bottom() + STACK_QUICK_GAP * k, band.w - 20.0 * k, STACK_QUICK_H * k);
+        let strip = Rect::new(win.x + 2.0 * k, win.y + strip_y * k, 586.0 * k, STRIP_H * k);
+        let card = vec2(88.0 * c * k, 128.0 * c * k).round();
+        let pitch = vec2(96.0 * c * k, 133.0 * c * k);
+        let grid_w = f.display_cols() as f32 * pitch.x - 8.0 * c * k;
+        let side = (CLOSE_DP * dp).round();
+        let close = Rect::new(win.right() - side - 4.0 * k, win.y + 3.0 * k, side, side);
+        Layout { k, win, panel: band, quick, strip, card, pitch, grid_x: (strip.x + (strip.w - grid_w) / 2.0).round(), formation: f, close: Some(close) }
+    }
+
+    /// Whether the window is stacked (a phone held upright).
+    fn is_stacked(&self) -> bool {
+        self.close.is_some()
+    }
+
+    /// The ground under the unit's card: the landscape column down to the window's bottom, or the band.
+    fn column(&self) -> Rect {
+        if self.is_stacked() {
+            self.panel
+        } else {
+            Rect::new(self.panel.x, self.panel.y, self.panel.w, self.win.bottom() - 2.0 * self.k - self.panel.y)
+        }
     }
 
     /// Top-left of a cell. Display line 0 is the front row: the enemy's is just above the
@@ -843,6 +924,8 @@ impl BattleView {
     }
 
     pub fn frame(&mut self, game: &mut Game, assets: &Assets, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) -> Option<Screen> {
+        // A phone held upright stacks the window at its own scale (`window_layout::game_scale`).
+        let _window = window_layout::game_scale(stacked_video(self.battle.formation));
         let l = Layout::new(&self.battle);
         // Input the app holds back (the cheat console) stays held for the exit window too.
         let outer = input_blocked();
@@ -850,7 +933,7 @@ impl BattleView {
         // Every action is written back into the armies as it is taken (0x4c4f8c after the
         // player's, 0x4c57bc after each of the enemy's).
         game.battle_write_back(&self.battle);
-        world_view::backdrop(game, assets);
+        super::display::with_window_scale(None, || world_view::backdrop(game, assets));
         // The leave-battle window stands alone over the map: the original hides the battle
         // window while it is open (86b of the UI audit; 4d3620 is its own window).
         if !self.exiting || just_opened {
@@ -878,7 +961,7 @@ impl BattleView {
         }
         if self.exiting && !just_opened {
             set_input_blocked(outer);
-            match super::saves::battle_exit_dialog(&mut self.exit_asking) {
+            match super::display::with_window_scale(None, || super::saves::battle_exit_dialog(&mut self.exit_asking)) {
                 (Some(choice), _) => {
                     self.exiting = false;
                     self.exit = Some(choice);
@@ -893,11 +976,12 @@ impl BattleView {
     /// A frame of a custom battle, over the main menu's ruins: the round is counted in
     /// `session` when its result shows. Esc asks before leaving for the setup.
     pub fn frame_custom(&mut self, assets: &Assets, session: &mut Session) -> Option<CustomEnd> {
+        let _window = window_layout::game_scale(stacked_video(self.battle.formation));
         let l = Layout::new(&self.battle);
         // Input the app holds back (the cheat console) stays held for the exit window too.
         let outer = input_blocked();
         let (over, just_opened) = self.advance(&l);
-        super::main_menu::backdrop();
+        super::display::with_window_scale(None, super::main_menu::backdrop);
         self.close_clicked |= self.draw(&l, tr("Custom battle"), 0, assets);
         self.controls(&l, over);
         super::cursor::set(self.pointer());
@@ -909,7 +993,7 @@ impl BattleView {
         }
         if self.exiting && !just_opened {
             set_input_blocked(outer);
-            match super::saves::question(tr("Leave the battle"), tr("The battle is not over. Leave it for the setup of the armies?")) {
+            match super::display::with_window_scale(None, || super::saves::question(tr("Leave the battle"), tr("The battle is not over. Leave it for the setup of the armies?"))) {
                 Some(true) => {
                     self.exiting = false;
                     return Some(CustomEnd::Setup);
@@ -996,10 +1080,16 @@ impl BattleView {
         // The window: red marble, the title with both armies, the turn in the corner.
         // Its red close button asks to leave the battle, as Esc does (4daa80).
         let ongoing = b.outcome() == Outcome::Ongoing;
-        let (_, close) = chrome::window(l.win, title, Skin::Red, !self.end_shown());
-        let close = close && !self.exiting && !input_blocked();
-        // The frame between the panel and the formations.
-        draw_line(l.panel.x + l.panel.w + 1.0, l.panel.y, l.panel.x + l.panel.w + 1.0, l.panel.y + l.panel.h, 1.5 * k, chrome::SILVER);
+        // Stacked, the close is the finger-sized box over the band, drawn after the title bar; the
+        // title bar's own close box is the landscape window's.
+        let closable = !self.end_shown();
+        let (_, title_close) = chrome::window(l.win, title, Skin::Red, closable && !l.is_stacked());
+        let box_close = l.close.filter(|_| closable).is_some_and(|c| chrome::close_button(c.x, c.y, c.w, true));
+        let close = (title_close || box_close) && !self.exiting && !input_blocked();
+        // The frame between the panel and the formations (stacked, the band's seam is drawn last).
+        if !l.is_stacked() {
+            draw_line(l.panel.x + l.panel.w + 1.0, l.panel.y, l.panel.x + l.panel.w + 1.0, l.panel.y + l.panel.h, 1.5 * k, chrome::SILVER);
+        }
 
         // Empty cells, with the lit cells a step can go to.
         for (team, slot) in all_cells(b) {
@@ -1126,14 +1216,20 @@ impl BattleView {
         if let Some(id) = self.fighter_under_mouse(l).filter(|&i| self.fighter(i).alive()).or(active).or_else(|| b.fighters.iter().position(|f| f.is_hero)) {
             self.draw_panel(l, assets, id);
         } else {
-            chrome::parchment(Rect::new(l.panel.x, l.panel.y, l.panel.w, l.win.bottom() - 2.0 * l.k - l.panel.y), true);
+            chrome::parchment(l.column(), true);
         }
         // The battle window's frame and title line (4daab3: 0x48d710, 896×640) and the
         // 2 px line right of the panel from under the title line (4cd330: x 264, y 29).
         let px = chrome::opx();
         chrome::window_frames(l.win, px);
-        let separator = l.win.x + 247.0 * l.k;
-        chrome::silver_line(vec2(separator, l.win.y + 29.0 * px), vec2(separator, l.win.bottom() - 2.0 * px), 2.0 * px);
+        if l.is_stacked() {
+            // The band's seam, across the window under the band.
+            let y = l.panel.bottom();
+            chrome::silver_line(vec2(l.win.x + 2.0 * l.k, y), vec2(l.win.right() - 2.0 * px, y), 2.0 * px);
+        } else {
+            let separator = l.win.x + 247.0 * l.k;
+            chrome::silver_line(vec2(separator, l.win.y + 29.0 * px), vec2(separator, l.win.bottom() - 2.0 * px), 2.0 * px);
+        }
         // One hint box at a time: a spell badge's hint replaces the hover box (49e710).
         if player_turn && !super::spell_badges::hovered() {
             self.draw_preview(l, active.expect("player turn"));
@@ -1425,8 +1521,12 @@ impl BattleView {
             status,
         };
         let mut hover = None;
-        let background = Rect::new(l.panel.x, l.panel.y, l.panel.w, l.win.bottom() - 2.0 * l.k - l.panel.y);
-        unit_sheet::draw_extended(assets, b.content(), l.panel, background, &sheet, &mut hover);
+        if l.is_stacked() {
+            // Stacked: the unit's band, its picture and its text, as the army windows' (no items to pick).
+            unit_sheet::draw_band(assets, b.content(), l.panel, &sheet, false, &mut hover);
+        } else {
+            unit_sheet::draw_extended(assets, b.content(), l.panel, l.column(), &sheet, &mut hover);
+        }
     }
 
     /// The won battle's hold is over: the battle is settled and the screen closes; the
@@ -1553,6 +1653,83 @@ mod tests {
     use razdor::rules::game::{Foe, Game};
 
     use super::*;
+
+    /// The stacked window of a 1080×2400 phone at 2.75 px per dp, a 60 px top inset and a 90 px bar.
+    fn upright(f: Formation) -> Layout {
+        let (k, win) = window_layout::portrait_game((1080.0, 2400.0), Some(2.75), 60.0, 90.0, 1.125, stacked_video(f)).expect("held upright");
+        Layout::upright(k, win, f, 2.75)
+    }
+
+    /// Every cell of both armies on `l`'s formation, with its team and rectangle.
+    fn cell_rects(l: &Layout) -> Vec<(Team, Rect)> {
+        let mut out = Vec::new();
+        for team in [Team::Enemy, Team::Player] {
+            for row in [Row::Front, Row::Back, Row::Reserve] {
+                for col in 0..l.formation.cols {
+                    let slot = Slot::new(row, col);
+                    if l.formation.contains(slot) {
+                        let p = l.cell_pos(team, slot);
+                        out.push((team, Rect::new(p.x, p.y, l.card.x, l.card.y)));
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    fn overlaps(a: Rect, b: Rect) -> bool {
+        a.x < b.right() && b.x < a.right() && a.y < b.bottom() && b.y < a.bottom()
+    }
+
+    #[test]
+    fn the_landscape_battle_layout_is_as_before() {
+        // 1280×800 at the interface scale 1, an 80 px bar: the window centred above the bar.
+        let l = Layout::landscape(1.0, (1280.0, 800.0), 80.0, Formation::default());
+        assert!(!l.is_stacked());
+        assert_eq!(l.win, Rect::new(222.0, 60.0, 836.0, 600.0));
+        assert_eq!(l.panel, Rect::new(224.0, 87.0, 244.0, 534.0));
+        assert_eq!(l.quick, Rect::new(234.0, 624.0, 224.0, 30.0));
+        assert_eq!(l.strip, Rect::new(470.0, 362.0, 586.0, 20.0));
+        assert_eq!(l.card, vec2(88.0, 128.0));
+        assert_eq!(l.pitch, vec2(96.0, 133.0));
+        assert_eq!(l.grid_x, 479.0);
+        assert_eq!(l.column(), Rect::new(224.0, 87.0, 244.0, 600.0 - 2.0 - 27.0));
+    }
+
+    #[test]
+    fn the_stacked_battle_window_spans_the_phone_with_the_band_the_armies_and_the_strip_in_order() {
+        let l = upright(Formation::default());
+        let (win, band, quick, strip) = (l.win, l.panel, l.quick, l.strip);
+        let close = l.close.expect("stacked");
+        assert!(l.is_stacked());
+        // Spans the width less the 8 px margins, centred, below the inset and above the bar.
+        assert!((win.w - 1064.0).abs() <= 1.0, "{win:?}");
+        assert!((win.x + win.w / 2.0 - 540.0).abs() <= 1.0, "{win:?}");
+        assert!(win.y >= 60.0 && win.bottom() <= 2400.0 - 90.0, "{win:?}");
+        // The band, the quick buttons, the enemy's grid, the strip, the player's grid: top to bottom.
+        let cells = cell_rects(&l);
+        let span = |team: Team| {
+            let rs: Vec<Rect> = cells.iter().filter(|(t, _)| *t == team).map(|(_, r)| *r).collect();
+            let top = rs.iter().map(|r| r.y).fold(f32::MAX, f32::min);
+            let bottom = rs.iter().map(|r| r.bottom()).fold(f32::MIN, f32::max);
+            (top, bottom)
+        };
+        let (enemy_top, enemy_bottom) = span(Team::Enemy);
+        let (player_top, player_bottom) = span(Team::Player);
+        assert!(band.bottom() <= quick.y && quick.bottom() <= enemy_top, "band, quick, enemy");
+        assert!(enemy_bottom <= strip.y && strip.bottom() <= player_top, "enemy, strip, player");
+        assert!(player_bottom <= win.bottom(), "the player's grid inside the window");
+        // Cards do not overlap, and every cell is inside the window.
+        for (i, (_, a)) in cells.iter().enumerate() {
+            assert!(a.x >= win.x && a.right() <= win.right() && a.y >= win.y && a.bottom() <= win.bottom(), "{a:?} outside");
+            for (_, b) in &cells[i + 1..] {
+                assert!(!overlaps(*a, *b), "{a:?} overlaps {b:?}");
+            }
+        }
+        // The close box is a 44 dp target at the top right, above the band and inside the window.
+        assert!(close.w >= 44.0 * 2.75 && close.h >= 44.0 * 2.75, "{close:?}");
+        assert!(close.x >= win.x && close.right() <= win.right() && close.y >= win.y && close.bottom() <= band.y, "{close:?}");
+    }
 
     #[test]
     fn the_xp_card_signs_a_promotion_past_the_first_level_with_a_next_type() {
