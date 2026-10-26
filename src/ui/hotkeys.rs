@@ -394,7 +394,9 @@ pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
     let (top, bottom) = if super::window_layout::portrait() && has_bar(place) { (super::display::safe_area().top, sh - chrome::bar_height()) } else { (0.0, sh) };
     let h = (content + 52.0 * t + 72.0 * k).min(bottom - top - 16.0);
     let (x, y) = ((sw - w) / 2.0, top + (bottom - top - h) / 2.0);
-    let (inner, _) = chrome::window(Rect::new(x, y, w, h), tr("Keys"), Skin::Marble, false);
+    // A phone's list has a close cross (its click area is finger-sized, `chrome::touch_hit`); it closes
+    // by Esc and a tap outside, as the desktop's.
+    let (inner, box_closed) = chrome::window(Rect::new(x, y, w, h), tr("Keys"), Skin::Marble, phone);
     let body = Rect::new(inner.x, inner.y + 52.0 * t, inner.w, inner.bottom() - 40.0 * k - (inner.y + 52.0 * t));
     let most = (content - body.h).max(0.0);
     let mut scroll = SCROLL.with(|s| s.get()).clamp(0.0, most);
@@ -466,7 +468,7 @@ pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
     }
     SCROLL.with(|s| s.set(scroll));
     let closes = !fresh && is_mouse_button_pressed(MouseButton::Left) && !on_control;
-    let done = is_key_pressed(keymap::key(Action::Help)) || esc_pressed() || closes || press.is_some();
+    let done = is_key_pressed(keymap::key(Action::Help)) || esc_pressed() || closes || box_closed || press.is_some();
     if let Some(key) = press {
         tap_key(key);
     }

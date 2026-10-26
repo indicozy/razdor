@@ -20,6 +20,7 @@ use razdor::rules::magic::{self, CastError, CastOutcome, CastTarget, Duration, B
 use super::audio::{cue, Cue};
 use super::keymap::{self, Action};
 use super::widgets::*;
+use super::window_layout;
 use super::world_view;
 use super::Screen;
 
@@ -66,6 +67,9 @@ pub fn shown(enemy: &[bool], filter: BookFilter) -> Vec<usize> {
         })
         .collect()
 }
+
+/// The book's window in video px (836 × 600, the landscape window's size at the interface scale).
+pub const BOOK_VIDEO: (f32, f32) = (window_layout::WIDTH, window_layout::HEIGHT);
 
 /// The book's 3 columns of 5 cells (0x4dad08: cell `n` is column `n / 5`, row `n % 5`).
 const ROWS: usize = 5;
@@ -201,9 +205,12 @@ pub fn frame(
 ) -> Option<Screen> {
     use super::chrome;
     let bar_pick = world_view::window_backdrop(game, assets, Some(super::game_bar::BarButton::Spells));
+    // The book's window: 836 × 600 video pixels over the map. On a phone held upright it spans the
+    // width between the top inset and the bar, at its own scale (`window_layout::game_rect`): the
+    // book is one spread of 3 × 5 cells, so it is scaled to the width, not stacked. Landscape: as before.
+    let _scale = super::window_layout::game_scale(BOOK_VIDEO);
     let k = chrome::k();
-    // The army screen's window: 836 × 600 video pixels over the map.
-    let r = super::window_layout::landscape_window();
+    let r = super::window_layout::game_rect(BOOK_VIDEO).unwrap_or_else(super::window_layout::landscape_window);
     let title = own("Title", n_("The hero's spell book"));
     let (inner, closed) = chrome::window(r, &title, chrome::Skin::Marble, true);
     let book: Vec<SpellDef> = game.book().into_iter().cloned().collect();
@@ -559,5 +566,26 @@ mod tests {
         assert_eq!(card_fill(true, true), CardFill::Hovered);
         assert_eq!(card_fill(false, false), CardFill::Unaffordable);
         assert_eq!(card_fill(false, true), CardFill::Unaffordable);
+    }
+
+    /// On a phone held upright the book is the width's scale: it fits the screen between the top
+    /// inset and the bar, and clears the bar.
+    #[test]
+    fn a_phone_spellbook_in_portrait_fits_the_screen_above_the_bar() {
+        let dp = 2.75;
+        let (sw, sh, top, bar, base) = (1080.0, 2400.0, 60.0, 150.0, 1.0);
+        let (k, r) = super::window_layout::portrait_game((sw, sh), Some(dp), top, bar, base, BOOK_VIDEO).expect("held upright");
+        assert!(r.x >= 0.0 && r.x + r.w <= sw, "across the screen: {r:?}");
+        assert!(r.y >= top, "under the inset: {r:?}");
+        assert!(r.y + r.h <= sh - bar, "clears the bar: {r:?}");
+        assert!((r.w - BOOK_VIDEO.0 * k).abs() <= 1.0, "one spread, scaled to the width: {r:?}");
+        assert!(k >= base, "never below the interface scale");
+    }
+
+    /// The desktop's book keeps its size: the landscape rectangle and the book's video size.
+    #[test]
+    fn the_desktop_spellbook_is_the_landscape_window_unchanged() {
+        assert_eq!(BOOK_VIDEO, (window_layout::WIDTH, window_layout::HEIGHT));
+        assert_eq!(BOOK_VIDEO, (836.0, 600.0));
     }
 }

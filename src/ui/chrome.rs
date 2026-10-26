@@ -1819,7 +1819,11 @@ pub fn empty_item_slot(r: Rect) {
 
 /// The window's close box; true when clicked.
 pub fn close_button(x: f32, y: f32, s: f32, red: bool) -> bool {
-    let (hover, down, pressed) = super::widgets::button_state(Rect::new(x, y, s, s), true);
+    // The cross is drawn as it always was; a phone's click area is finger-sized (`touch_hit`). The
+    // title strip ends 3 px under the cross (`title_bar_styled`: the cross at 3 px, the strip's height less 6).
+    let k = k();
+    let hit = touch_hit(Rect::new(x, y, s, s), y + s + 3.0 * k, super::display::dp_px(), (screen_width(), screen_height()));
+    let (hover, down, pressed) = super::widgets::button_state(hit, true);
     let name = match (red, down) {
         (true, false) => "CloseButtonRed-Up",
         (true, true) => "CloseButtonRed-Down2",
@@ -1837,6 +1841,22 @@ pub fn close_button(x: f32, y: f32, s: f32, red: bool) -> bool {
         draw_line(x + s - p, y + p, x + p, y + s - p, 2.0, c);
     }
     pressed
+}
+
+/// The touch target of a phone's close cross, in dp (Android's and iOS's minimum).
+pub const CLOSE_DP: f32 = 44.0;
+
+/// The click area of a close cross drawn at `cross`, whose strip ends at `strip_bottom` (px). On a
+/// phone (`dp`, screen px per dp) it is a square of 44 dp centred on the cross, so it reaches up and
+/// outside the window, but its bottom is never below the strip's, so it never takes a click from the
+/// window's content below. Clamped to the screen (`screen` px). The desktop's is the cross itself.
+pub fn touch_hit(cross: Rect, strip_bottom: f32, dp: Option<f32>, screen: (f32, f32)) -> Rect {
+    let Some(dp) = dp.filter(|d| *d > 0.0) else { return cross };
+    let side = (CLOSE_DP * dp).round();
+    let x = (cross.center().x - side / 2.0).clamp(0.0, (screen.0 - side).max(0.0));
+    // The square's bottom is the strip's; at the screen's top it is cut to the strip's height.
+    let h = side.min(strip_bottom.max(0.0));
+    Rect::new(x, strip_bottom - h, side, h)
 }
 
 /// Title bar of a window: the window's own skin, the title centred; `ornate` puts the
@@ -2719,6 +2739,29 @@ pub fn effect(rel: &str, c: Vec2, size: f32, t: f32, color: Color) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A phone's close click area is 44 dp at dp 2.75, its bottom never below the strip's, it holds
+    /// the drawn cross, and it reaches up and right of it; the desktop's is the cross itself.
+    #[test]
+    fn a_phones_close_click_area_is_44_dp_and_never_below_the_strip() {
+        let screen = (1080.0, 2400.0);
+        let cross = Rect::new(1000.0, 70.0, 56.0, 56.0);
+        let strip_bottom = 130.0;
+        let hit = touch_hit(cross, strip_bottom, Some(2.75), screen);
+        assert_eq!((hit.w, hit.h), ((44.0f32 * 2.75).round(), (44.0f32 * 2.75).round()), "44 dp square: {hit:?}");
+        assert!(hit.bottom() <= strip_bottom + 1e-3, "never below the strip: {hit:?}");
+        assert!(hit.x <= cross.x && cross.right() <= hit.right() + 1e-3, "holds the cross across: {hit:?}");
+        assert!(hit.contains(cross.center()), "contains the cross: {hit:?}");
+        assert!(hit.y < cross.y, "reaches up, outside the window: {hit:?}");
+        // At the screen's right edge the square stays on the screen.
+        let edge = touch_hit(Rect::new(1020.0, 70.0, 56.0, 56.0), strip_bottom, Some(2.75), screen);
+        assert!(edge.right() <= screen.0 + 1e-3, "clamped to the screen: {edge:?}");
+        // At the top of the screen the square is cut to the strip's height, never taller.
+        let top = touch_hit(Rect::new(1000.0, 4.0, 56.0, 56.0), 60.0, Some(2.75), screen);
+        assert!(top.y >= 0.0 && top.bottom() <= 60.0 + 1e-3, "cut at the top: {top:?}");
+        // The desktop keeps the cross as its click area.
+        assert_eq!(touch_hit(cross, strip_bottom, None, (1920.0, 1080.0)), cross);
+    }
 
     /// A fixed-layout window (the hero, army, building and settings windows, the save and the
     /// spell book) keeps the original's title whatever «Размер текста» is: its factor is

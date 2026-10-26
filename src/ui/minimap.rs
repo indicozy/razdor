@@ -182,11 +182,41 @@ pub fn outer(map: &TileMap, view: Rect) -> Rect {
 }
 
 fn outer_at(map: &TileMap, view: Rect, k: f32) -> Rect {
+    let view = in_safe_area(view);
     let o = outer_sized(view, k, SIZE.with(|s| s.get()), aspect(map), corner());
     match MOVE.with(|m| m.get()) {
         Some(grab) => carried(view, o, Vec2::from(crate::ui::widgets::pointer()) - grab),
         None => o,
     }
+}
+
+/// The map view the window may stand in: on a phone held upright, inside the safe area (the
+/// top inset: the status bar and the cutout; the sides too). Elsewhere the view as it is.
+fn in_safe_area(view: Rect) -> Rect {
+    if !super::window_layout::portrait() {
+        return view;
+    }
+    inset_view(view, super::display::safe_area())
+}
+
+/// `view` inset by the safe area `a` (the top and the sides; the bottom is the bar's).
+fn inset_view(view: Rect, a: super::display::SafeArea) -> Rect {
+    Rect::new(view.x + a.left, view.y + a.top, (view.w - a.left - a.right).max(0.0), (view.h - a.top).max(0.0))
+}
+
+/// The phone's close cross (a finger-sized click area, `chrome::touch_hit`) in the window's top
+/// right corner (on the side the window stands on), inside its frame. None on the desktop.
+fn close_box(o: Rect, at: Corner) -> Option<Rect> {
+    close_box_with(o, at, super::chrome::k(), super::display::dp_px().is_some())
+}
+
+/// [`close_box`] at the interface scale `k`, on a phone (`phone`) only.
+fn close_box_with(o: Rect, at: Corner, k: f32, phone: bool) -> Option<Rect> {
+    if !phone {
+        return None;
+    }
+    let s = 22.0 * k;
+    Some(Rect::new(if at.left() { o.x + 4.0 * k } else { o.right() - s - 4.0 * k }, o.y + 4.0 * k, s, s))
 }
 
 /// The window `o` carried to the top-left `at`, kept within `view`.
@@ -419,7 +449,7 @@ fn resize(view: Rect, o: Rect, aspect: f32) -> bool {
 /// window follows the pointer within the view and, let go, stands in the corner of the
 /// view's quarter its middle is in. Returns true while the pointer is on that frame or
 /// carries the window (the click is the move's, not the minimap's).
-fn shift(view: Rect, o: Rect, picture: Rect) -> bool {
+fn shift(view: Rect, o: Rect, picture: Rect, close: Option<Rect>) -> bool {
     use macroquad::miniquad::CursorIcon;
     let m = Vec2::from(crate::ui::widgets::pointer());
     let held = match MOVE.with(|g| g.get()) {
@@ -430,7 +460,7 @@ fn shift(view: Rect, o: Rect, picture: Rect) -> bool {
             true
         }
         None => {
-            let on_frame = !input_blocked() && o.contains(m) && !picture.contains(m);
+            let on_frame = !input_blocked() && o.contains(m) && !picture.contains(m) && !close.is_some_and(|c| c.contains(m));
             if on_frame && clicked() {
                 MOVE.with(|g| g.set(Some(m - o.point())));
             }
@@ -574,8 +604,9 @@ fn army_is_ally(attitude: i8, meeting_waiting: bool) -> bool {
 }
 
 /// Draws the minimap window. `view_world` is the part of the world the map view shows (world
-/// units). Returns the world position clicked, if any.
-pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_world: Rect, surface_color: fn(u8) -> Color) -> Option<(f32, f32)> {
+/// units). Returns the look point (where the map's view goes, while the picture is held) and
+/// whether its close box (a phone's) was clicked.
+pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_world: Rect, surface_color: fn(u8) -> Color) -> (Option<(f32, f32)>, bool) {
     let map = &game.world.map;
     let fog = &game.fog;
     let r = rect(map, view);
@@ -726,10 +757,13 @@ pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_
         draw_frame(&t, o, super::chrome::k());
     }
 
-    let gripped = resize(view, o, aspect(map)) || shift(view, o, r);
+    let close_at = close_box(o, corner());
+    let closed = close_at.is_some_and(|c| super::chrome::close_button(c.x, c.y, c.w, false));
+    let gripped = resize(view, o, aspect(map)) || shift(view, o, r, close_at);
     let m = Vec2::from(crate::ui::widgets::pointer());
     let held = !crate::ui::widgets::input_blocked() && !crate::ui::widgets::input_swallowed() && is_mouse_button_down(MouseButton::Left);
-    follows(held, gripped, r.contains(m)).then(|| ((m.x - r.x) / k.x - 0.5, ((m.y - r.y) / k.y - 0.5) * rh))
+    let look = follows(held, gripped, r.contains(m)).then(|| ((m.x - r.x) / k.x - 0.5, ((m.y - r.y) / k.y - 0.5) * rh));
+    (look, closed)
 }
 
 // ------------------------------------------------------------------------------------
@@ -1047,5 +1081,34 @@ mod tests {
         }
         let m = ARMY_MARK;
         assert!(m.x >= 0.0 && m.x + m.w <= 12.0 && m.y >= 60.0 && m.y + m.h <= 72.0, "inside the first shield");
+    }
+
+    /// A phone's minimap window carries its close cross in the top corner on the side it stands
+    /// on, inside the frame, in every corner and scale; the desktop has none.
+    #[test]
+    fn a_phone_minimap_keeps_its_close_cross_in_the_frame_in_every_corner() {
+        let view = Rect::new(0.0, 0.0, 1080.0, 1700.0);
+        for k in [1.0_f32, 2.75] {
+            for at in [Corner::TopLeft, Corner::TopRight, Corner::BottomLeft, Corner::BottomRight] {
+                let o = outer_sized(view, k, None, 1.0, at);
+                assert!(o.x >= view.x && o.x + o.w <= view.x + view.w, "{at:?} across: {o:?}");
+                let c = close_box_with(o, at, k, true).expect("a phone has a cross");
+                assert!(c.x >= o.x && c.x + c.w <= o.x + o.w && c.y >= o.y && c.y + c.h <= o.y + o.h, "{at:?} inside the frame: {c:?} in {o:?}");
+                assert_eq!(c.x <= o.x + o.w / 2.0, at.left(), "{at:?} on the window's side");
+            }
+        }
+        assert_eq!(close_box_with(outer_sized(view, 1.0, None, 1.0, Corner::TopRight), Corner::TopRight, 1.0, false), None, "the desktop has none");
+    }
+
+    /// The safe area (the top inset, the sides) bounds a phone's minimap view, not the desktop's.
+    #[test]
+    fn a_phone_minimap_stands_inside_the_safe_area_and_the_desktop_view_is_unchanged() {
+        let view = Rect::new(0.0, 0.0, 1080.0, 2100.0);
+        let a = super::super::display::SafeArea { left: 12.0, top: 80.0, right: 12.0, ..Default::default() };
+        let v = inset_view(view, a);
+        assert_eq!((v.x, v.y, v.w, v.h), (12.0, 80.0, 1056.0, 2020.0));
+        let o = outer_sized(v, 2.75, None, 1.0, Corner::TopRight);
+        assert!(o.y >= 80.0 && o.x >= 12.0 && o.x + o.w <= 1068.0, "inside the inset: {o:?}");
+        assert_eq!(inset_view(view, super::super::display::SafeArea::default()), view, "no inset: the view as it is");
     }
 }

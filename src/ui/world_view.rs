@@ -3059,11 +3059,16 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
         view.minimap = !view.minimap;
     }
     if view.minimap {
-        if let Some(at) = minimap::window(game, assets.dt.as_ref(), cam.view, cam.world_rect(), surface_color) {
+        let (look, closed) = minimap::window(game, assets.dt.as_ref(), cam.view, cam.world_rect(), surface_color);
+        if let Some(at) = look {
             view.look = Some(at);
         }
+        // A phone's close box shuts the minimap (as M and Esc do on the desktop).
+        if closed {
+            view.minimap = false;
+        }
         // Razdor's army list under the minimap (advanced option): a click on a row goes there.
-        if game.army_list {
+        if game.army_list && view.minimap {
             let o = minimap::outer(&game.world.map, cam.view);
             if let Some(at) = minimap::army_list(game, o, screen_height() - bar_h(), &info("NoNameArmy", n_("Unknown army"))) {
                 view.look = Some(at);

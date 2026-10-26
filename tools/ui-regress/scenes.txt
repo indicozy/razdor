@@ -97,6 +97,13 @@ phone-spells-landscape | spells:РК1-Начало пути | 2160x1080 |
 phone-battle-portrait | battle:РК1-Начало пути:0 | 1080x2160 |
 phone-battle-landscape | battle:РК1-Начало пути:0 | 2160x1080 |
 phone-battle-upright | battle:РК1-Начало пути:0 | 1080x2400 | RAZDOR_DP=2.75
+phone-spellbook-upright | spells:РК1-Начало пути | 1080x2400 | RAZDOR_DP=2.75
+phone-minimap-upright | minimap:РК1-Начало пути | 1080x2400 | RAZDOR_DP=2.75
+phone-keys-upright | settings:РК1-Начало пути:keys | 1080x2400 | RAZDOR_DP=2.75
+phone-help-upright | map:РК1-Начало пути | 1080x2400 | RAZDOR_DP=2.75;RAZDOR_SCENE_OPEN=3:keys
+phone-keys-dp-landscape | settings:РК1-Начало пути:keys | 2160x1080 | RAZDOR_DP=2.75
+phone-spellbook-dp-landscape | spells:РК1-Начало пути | 2160x1080 | RAZDOR_DP=2.75
+phone-army-dp-portrait | army:РК1-Начало пути | 1080x2400 | RAZDOR_DP=2.75
 phone-keyboard-hero-portrait | classes:РК1-Начало пути | 1080x2376 | RAZDOR_DP=2.75;RAZDOR_KEYBOARD=900
 phone-keyboard-hero-none-portrait | classes:РК1-Начало пути | 1080x2376 | RAZDOR_DP=2.75
 phone-keyboard-save-portrait | save:РК1-Начало пути | 1080x2376 | RAZDOR_DP=2.75;RAZDOR_KEYBOARD=900

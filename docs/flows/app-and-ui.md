@@ -264,7 +264,15 @@ area's sides and the bar), so the window and its text and buttons grow together 
 interface scale on a 2400×1080 phone). `window_layout::exit_rect` centres them between the safe area's sides
 and between its top and the bar. Their «Рестарт» question (`saves::question_box`) is drawn at that scale
 too, centred between the safe area's sides. On the desktop all of it is as before (no insets, no phone scale).
-Not covered: the building, army and hero windows (the stacked layout), and the spellbook (landscape window).
+The spellbook in portrait is the same fit (`spellbook::frame`, `window_layout::game_rect`): 836 × 600 scaled to the
+width between the top inset and the bar, its bottom row inside that rectangle. The minimap (`minimap::window`) in
+portrait stands inside the safe area (`in_safe_area`, `inset_view`); its phone close cross sits in the frame's top
+corner (`close_box`). The F1 keys list (`hotkeys::help_overlay`) takes the cross on a phone and closes by it.
+Close crosses on a phone: the cross is drawn as it always was, inside its title strip; its click area is 44 dp
+(`chrome::touch_hit`, used by `chrome::close_button`): a square centred on the cross, its bottom at the strip's bottom,
+so it reaches up and out of the window but never takes a click from the content under the strip; clamped to the screen.
+Desktop: the cross is its own click area. No layout (window rectangles, title strips) changes on a phone.
+Not covered: the building, army and hero windows (the stacked layout).
 The market and the sanctuary scenes of the UI regression check use town 8 of РК3-Столица (the start's
 castle has neither tab); the snapshot clears the start's due places, which otherwise make the building
 window step aside for the map (`world_view::building_flight`).
