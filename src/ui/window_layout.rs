@@ -45,10 +45,12 @@ pub enum Stack {
 /// The building window's height: the panes at the landscape height, then the tab row and Exit
 /// under them (746 design px; the 1080×2376 phone's window at the width's scale).
 fn building_ph() -> f32 { lower_y() + lower_height() + LOWER_GAP + 2.0 * TAB_H + 2.0 * EDGE }
-/// The unit band of the army and hero windows: the landscape column's height, so its picture
-/// half (234 px) has the landscape column's proportions (244 × 571); the band fills the 586 px width.
-const BAND_H: f32 = 571.0;
-/// The army and hero windows' height: the title, the band, then the right side (571 px).
+/// The unit band of the army and hero windows (272 design px): the band fills the 586 px width;
+/// its text half (352 px) holds the stats and the hero's bonus paragraph at the text size the band
+/// starts from (never below the landscape column's), and its picture half (234 px) takes the
+/// unit's figure scaled to the band's height (`unit_sheet`: its proportions kept, never cropped).
+const BAND_H: f32 = 272.0;
+/// The army and hero windows' height: the title, the band, then the right side (672 px).
 const ARMY_PH: f32 = BAND_H + 672.0;
 /// The army and hero windows' «Закрыть» button under the formation (stacked): 64 design px
 /// tall, 2 px under the right side's bottom (599.4 + the band).
@@ -157,8 +159,14 @@ fn lower_in(win: Rect, k: f32, portrait: bool) -> Rect { rect_in(win, k, 248.0, 
 /// height above the bottom bar, never below the interface scale. Called outside the window's
 /// own scale ([`scaled`]).
 fn portrait_k_for(st: Stack) -> f32 {
-    let fit = (screen_width() / PW).min((screen_height() - chrome::bar_height() - 4.0) / height_of(st));
-    fit.max(chrome::k())
+    stacked_scale(screen_width(), screen_height(), chrome::bar_height(), height_of(st), chrome::k())
+}
+
+/// The stacked scale for a `screen_w`×`screen_h` screen with a `bar`-px bottom bar: the width's
+/// scale (`screen_w / PW`) or the height's (above the bar), whichever is smaller, never below `min_k`.
+fn stacked_scale(screen_w: f32, screen_h: f32, bar: f32, height: f32, min_k: f32) -> f32 {
+    let fit = (screen_w / PW).min((screen_h - bar - 4.0) / height);
+    fit.max(min_k)
 }
 
 /// Runs `f` (a building, army or hero window's whole frame) at the stacked window's own scale
@@ -394,7 +402,7 @@ mod tests {
         let w = Rect::new(10.0, 20.0, 590.0, ARMY_PH);
         let band = army_band_in(w, 1.0);
         assert_eq!((band.x, band.y, band.w), (12.0, 48.0, 586.0));
-        assert_eq!(band.h, 571.0, "the landscape column's height");
+        assert_eq!(band.h, BAND_H, "the band's height");
         let (pic, txt) = band_halves(band);
         assert_eq!((pic.w, txt.w), (234.0, 352.0));
         assert_eq!((pic.x, txt.x), (12.0, 246.0));
@@ -406,6 +414,21 @@ mod tests {
         let close = army_close_in(w, 1.0);
         assert!(close.y >= w.y + BAND_H + 600.0, "the close button is under the formation");
         assert!(close.bottom() - w.y <= ARMY_PH, "and inside the window: {}", close.bottom() - w.y);
+    }
+
+    #[test]
+    fn stacked_army_window_is_width_limited_on_a_phone() {
+        // 1080x2376 at 2.75 dp: the window spans the width (scale 1080 / 590), with the map
+        // above and below it; the bottom bar takes its own height at the bottom.
+        let (sw, sh, bar) = (1080.0, 2376.0, 90.0);
+        let k = stacked_scale(sw, sh, bar, ARMY_PH, 1.0);
+        assert!((k - sw / PW).abs() < 1e-4, "width-limited: {k}");
+        let h = (ARMY_PH * k).round();
+        assert!(h <= sh - bar - 4.0 - 2.0 * 100.0, "the map shows above and below: {h}");
+        assert!(h <= sh - bar - 4.0);
+        // A screen too short for the window falls back to the height's scale.
+        let k_short = stacked_scale(sw, 1600.0, bar, ARMY_PH, 1.0);
+        assert!(k_short < sw / PW, "height-limited on a short screen: {k_short}");
     }
 
     #[test]

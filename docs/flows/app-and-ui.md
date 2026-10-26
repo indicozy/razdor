@@ -166,8 +166,11 @@ screen taller than wide) stacks the building, army and hero windows, each with i
 landscape pane's height (`window_layout::lower_height`), then a row of the building's tabs
 (`window_layout::building_tabs`) with Выход centred under it (`building_exit`), the window 746 design px
 tall; the quest header row sits at the lower pane's bottom, above the tabs. Army and hero: the
-unit's band under the title at the landscape column's height, 571 design px (`window_layout::army_band`,
-`unit_sheet::draw_band`: picture left, stats right; its text fits the shorter band),
+unit's band under the title, 272 design px (`window_layout::army_band`, `unit_sheet::draw_band`: picture
+left, stats right; the band is the least height where the stats and the hero's bonus paragraph fit at the
+band's text size, which is never below the landscape column's; the picture is scaled to the band's height,
+its proportions kept, so it is about half the landscape size; the window is 944 design px tall, width-limited
+on a 1080x2376 phone),
 the right side (pack, formation) under it, and a «Закрыть» button under the formation (`army_close`). The
 right side moves by the layout's shift (`window_layout::place`, used by `at`, `point` and the panel helpers),
 and the army seam is a 2 px line under the band (`window_layout::frame`, `window_layout::seam`). These windows are drawn inside
