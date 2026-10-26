@@ -83,10 +83,14 @@ holds which cells exist per side.
 - The turn limit (`BattleEndTurn`) ends the battle after its first action
   (`EndReason::TurnLimit`); the player wins if any of his units stand.
 
-Magic drain (`Battle::drain`, `Battle::drain_of`): from turn 2 the power drops by `ManaDrain`
-(or the school's `DecSpell…`) down to `MinMagicPower` (or `MinSpell…`, +25 for undead Death),
-never below 0; `Concentration` adds instead. A mod with `MinSpell…` 0 drains casters to 0;
-that is the original's behaviour, not a bug.
+Magic drain (`Battle::drain`, dispatching on `GlobalOptions::drain_rule`): `Community` runs
+`Battle::drain_community` (`Battle::drain_of`): from turn 2 the power drops by `ManaDrain` (or the
+school's `DecSpell…`) down to `MinMagicPower` (or `MinSpell…`, +25 for undead Death), never below
+0; `Concentration` adds instead. A mod with `MinSpell…` 0 drains casters to 0; that is the
+original's behaviour, not a bug. `Old` runs `Battle::drain_old`, the exe's own block (0x484466):
+fixed floors 15 / 15 / 25 by school and nature. The rule is set at load by `install::drain_rule`
+from the install's `DiscordTimes.exe` (E9 at 0x484466 = Community), or without an exe from
+`MinSpellLife` in `_Global.ini`.
 
 ## 4. One action
 

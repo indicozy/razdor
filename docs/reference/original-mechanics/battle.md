@@ -193,8 +193,23 @@ CurseMainSpell (CM, 5) and CurseNextSpell (CN, 10), plus a fixed 10. **code**
     casters get +25** on the floor.
 - The floor also **raises** a weaker caster. A Life mage with MP 10 has 15 on turn 2.
 - **Concentration** *adds* the drain instead of subtracting it, with no cap.
-- The replaced vanilla code had the same idea: Life floor 15; Elemental floor 15 (0 for Undead or
-  Rogue casters that went negative); Undead Death casters 25.
+- **The original's own block** (0x484466–0x484683) is what an exe *without* the Community patch
+  runs (seen in the Evolution Mod's exe; its `_Global.ini` has no `MinSpell…` keys). The Community
+  exe has a `JMP` (E9) at 0x484466 to c2851a; the original's block starts with an IMUL
+  (`69 45 F8 51 08 00 00`). Per unit with MP > 0, from turn 2, by school:
+  - **Life:** MP −= DecSpellLife (+= with Concentration); then MP = max(MP, 15).
+  - **Elemental:** MP −= DecSpellelemental (+= with Concentration); then if MP < 0 and the nature
+    is Undead or Rogue, MP = 0; otherwise MP = max(MP, 15).
+  - **Death:** MP −= DecSpellDeath (+= with Concentration); an Undead caster gets MP = max(MP, 25),
+    other casters no floor.
+  - No school: no change.
+  - Finally (0x484683), every unit with MP < 0 gets MP = 0.
+  - The floors are fixed (15, 15, 25). This block reads neither `MinSpell…` nor the per-type
+    `MinMagicPower` / `ManaDrain`; the amounts still come from `DecSpell…`.
+- **Which rule an install uses** (read at load, `install::drain_rule`): the install's
+  `DiscordTimes.exe`, when there is one: the byte at the file offset of 0x484466 (through the PE
+  section table) is E9 → Community, anything else → the original's block. Without an exe: Community
+  when `_Global.ini` has a `MinSpellLife` key, else the original's block.
 
 ## 2. Reserve row, movement and collapse
 
@@ -903,7 +918,7 @@ were implemented and tested earlier (`src/rules/battle/tests.rs`, `rowN_…`); t
 | 2 | Stacking | Additive; curse then strike; **main:** a unit is blessed at most once a turn, a blessed ally (in rows 1–2 or the reserve) is a target only for a heal that does something, a Splash follow-up does not bless a blessed neighbour again (the owner's decision, 2026-10-17); `dt-original` keeps the original's rule | Blessed allies untargetable unless wounded, but a wounded one with a heal of 0 (a Death caster on a living ally, a Life caster on an Undead or Elemental one) is blessed again, as is any reserve unit by a reserve caster, and Splash re-blesses neighbours: blessings stack | 1, 3 | Razdor fixes the original's bug (main only, a deliberate deviation) |
 | 3 | Bless and curse sizes | `bless_effect` / `curse_effect` with the ini divisors, Life curse ⌊2·CM/3⌋ and 10; the attack modifier given to units without an attack too (only the hover hides it); a caster with no school sets only the flag | Same | 1 | Matches |
 | 4 | EternalGift | Base stats, stacks; the Life blessing raises the defences | Base stats, stacks, Life blessing lowers defences (bug) | 1 | Razdor fixes the original's bug |
-| 5 | Magic drain | `max(MP − drain, floor)` if MP > 0, drain and floor per type (none for a type without MagicPower), Undead Death floor +25 on the default floor only, Concentration adds | Same (community-patches.md §10) | 1 | Matches |
+| 5 | Magic drain | `max(MP − drain, floor)` if MP > 0, drain and floor per type (none for a type without MagicPower), Undead Death floor +25 on the default floor only, Concentration adds; an install whose exe lacks the patch (`DrainRule::Old`, from the exe at 0x484466, or `MinSpellLife` without an exe) runs the original's block: fixed floors 15 / 15 / 25 by school and nature | Same (community-patches.md §10); without the Community patch: the block at 0x484466–0x484683 (the rules above) | 1 | Matches |
 | 6 | Hostile power rounding | `P·(100 − prot) / 100` rounded half to even (the product taken as exact; the FPU precision is unknown, engine.md) | Floating-point product, Delphi round half to even | 0 | Matches |
 | 7 | Strike with power 0 | GodAnger/GodStrike added whenever the caster has MP | GodAnger/GodStrike still added when the caster has MP | 0 | Matches |
 | 8 | Hostile mage action | Curse if no negative modifier, else strike; one action per cell | Same | 3 | Matches |

@@ -8,6 +8,10 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **The Evolution Mod's exe differs from Community 1.2 in 74 places in CODE; only the drain is
+  supported; survey in progress (backlog 1305).** The mod's `DiscordTimes.exe` lacks the Community
+  drain patch; Razdor runs the original's own drain block for such an install (battle.md, "Magic
+  power drain"; `install::drain_rule`).
 - **iOS: the windows do not move above the on-screen keyboard** (2026-10-26, Razdor extra, not
   parity). `display::keyboard_inset` is 0 on iOS, so the hero and save windows stay under the
   keyboard there. Settles it: a reading of the keyboard's frame on iOS (UIKit's keyboard

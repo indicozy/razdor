@@ -8,8 +8,8 @@
 use std::collections::{BTreeMap, HashMap};
 
 pub use crate::dt::data::{
-    ArtefactDef, ArtefactType, Bonus, GlobalOptions, MagicDirection, MagicSchool, Nature, SpellDef, Stat, StatMods,
-    UnitDef, Upgrade,
+    ArtefactDef, ArtefactType, Bonus, DrainRule, GlobalOptions, MagicDirection, MagicSchool, Nature, SpellDef, Stat,
+    StatMods, UnitDef, Upgrade,
 };
 use crate::dt::data::{parse_artefacts, parse_spells, parse_units};
 use crate::dt::ini::Ini;

@@ -2,7 +2,7 @@
 //!
 //! Only reads. Nothing is copied or written anywhere.
 
-use super::data::{self, ArtefactDef, GlobalOptions, SpellDef, UnitDef};
+use super::data::{self, ArtefactDef, DrainRule, GlobalOptions, SpellDef, UnitDef};
 use super::dtm::Scenario;
 use super::ini::Ini;
 use super::DtError;
@@ -14,6 +14,7 @@ pub const UNITS_FILE: &str = "Rus_Units.ini";
 pub const ARTEFACTS_FILE: &str = "Rus_Artefacts.ini";
 pub const SPELLS_FILE: &str = "Rus_Spells.ini";
 pub const GLOBAL_FILE: &str = "_Global.ini";
+pub const EXE_FILE: &str = "DiscordTimes.exe";
 /// The interface texts and the player's settings (`[Options]`).
 pub const SETTINGS_FILE: &str = "Rus_DiscordTimes.ini";
 pub const MAPS_DIR: &str = "Maps_Rus";
@@ -147,7 +148,9 @@ impl DtInstall {
             }
             loaded.value
         }
-        let mut options = logged(GLOBAL_FILE, GlobalOptions::from_ini(&read_ini(dir, GLOBAL_FILE)?));
+        let global = read_ini(dir, GLOBAL_FILE)?;
+        let mut options = logged(GLOBAL_FILE, GlobalOptions::from_ini(&global));
+        options.drain_rule = drain_rule(dir, &global);
         let settings = PlayOptions::read(dir);
         if settings.impossible {
             options.difficulty_factor = 100;
@@ -433,6 +436,71 @@ pub fn parse_dotenv(text: &str) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Virtual address of the drain block the exe runs (0x484466): the Community 1.2 patch
+/// jumps from here to its own drain (c2851a), and the original's block starts with an IMUL.
+const DRAIN_VA: u64 = 0x0048_4466;
+/// The first byte of a JMP rel32, the Community patch's jump at [`DRAIN_VA`].
+const JMP_REL32: u8 = 0xE9;
+
+/// The file offset of virtual address `va` in a PE image, through its section table; `None`
+/// when `exe` is not a PE file or `va` is not backed by file bytes.
+pub fn pe_file_offset(exe: &[u8], va: u64) -> Option<usize> {
+    let u16_at = |o: usize| Some(u16::from_le_bytes(exe.get(o..o + 2)?.try_into().ok()?));
+    let u32_at = |o: usize| Some(u32::from_le_bytes(exe.get(o..o + 4)?.try_into().ok()?));
+    if exe.get(0..2)? != b"MZ" {
+        return None;
+    }
+    let pe = u32_at(0x3C)? as usize;
+    if exe.get(pe..pe + 4)? != b"PE\0\0" {
+        return None;
+    }
+    let coff = pe + 4;
+    let sections = u16_at(coff + 2)? as usize;
+    let opt_size = u16_at(coff + 16)? as usize;
+    let opt = coff + 20;
+    let image_base = match u16_at(opt)? {
+        0x10B => u64::from(u32_at(opt + 28)?),
+        0x20B => u64::from_le_bytes(exe.get(opt + 24..opt + 32)?.try_into().ok()?),
+        _ => return None,
+    };
+    let rva = va.checked_sub(image_base)?;
+    let table = opt + opt_size;
+    for n in 0..sections {
+        let s = table + n * 40;
+        let virtual_size = u64::from(u32_at(s + 8)?);
+        let virtual_address = u64::from(u32_at(s + 12)?);
+        let raw_size = u64::from(u32_at(s + 16)?);
+        let raw_pointer = u64::from(u32_at(s + 20)?);
+        let Some(within) = rva.checked_sub(virtual_address) else { continue };
+        if within < virtual_size && within < raw_size {
+            return Some((raw_pointer + within) as usize);
+        }
+    }
+    None
+}
+
+/// Which drain the exe runs, from its bytes: `E9` (the Community patch's jump) at the drain
+/// block means Community, anything else the original's block. `None` when the bytes are not
+/// a PE file with that address in it.
+pub fn drain_rule_of_exe(exe: &[u8]) -> Option<DrainRule> {
+    let at = pe_file_offset(exe, DRAIN_VA)?;
+    let first = *exe.get(at)?;
+    Some(if first == JMP_REL32 { DrainRule::Community } else { DrainRule::Old })
+}
+
+/// The drain rule of the install in `dir`: from its `DiscordTimes.exe` when there is one
+/// (the exe's own code), else from `_Global.ini`: Community when it has `MinSpellLife`, the
+/// original's rule otherwise.
+pub fn drain_rule(dir: &Path, global: &Ini) -> DrainRule {
+    if let Ok(path) = find(dir, EXE_FILE) {
+        if let Some(rule) = std::fs::read(&path).ok().as_deref().and_then(drain_rule_of_exe) {
+            return rule;
+        }
+    }
+    let has_floor = global.section("GlobalOptions").is_some_and(|s| s.get("MinSpellLife").is_some());
+    if has_floor { DrainRule::Community } else { DrainRule::Old }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -563,7 +631,7 @@ mod tests {
         let d = GlobalOptions::default();
         // The player's settings turn on "impossible difficulty" (OptValue10=1): F = 100.
         assert_eq!(o.difficulty_factor, 100);
-        let same = GlobalOptions { ai_targets: d.ai_targets.clone(), army_generation: vec![], extra: d.extra.clone(), difficulty_factor: d.difficulty_factor, ..o.clone() };
+        let same = GlobalOptions { ai_targets: d.ai_targets.clone(), army_generation: vec![], extra: d.extra.clone(), difficulty_factor: d.difficulty_factor, drain_rule: d.drain_rule, ..o.clone() };
         assert_eq!(same, d);
         assert_eq!(o.extra.keys().collect::<Vec<_>>(), ["MixHealingTarget"]);
         assert_eq!(o.ai_targets.min_attack_army, Some([1, 1, 100, 50, 50]));
@@ -695,5 +763,65 @@ mod tests {
         let jump: f64 = px.windows(2).map(|q| (q[0][1] as f64 - q[1][1] as f64).abs()).sum::<f64>() / px.len() as f64;
         // ARGB4444 gives 21.9 (a map with roads and marks), RGB565 59.6.
         assert!(jump < 35.0, "smooth: {jump}");
+    }
+
+    /// A tiny PE32 file: one section at VA 0x84000 (so the drain block at 0x484466 is at file
+    /// offset 0x866), with `byte` there. `raw` is the section's raw size.
+    fn synthetic_exe(byte: u8, raw: u32) -> Vec<u8> {
+        let mut e = vec![0u8; 0x1400];
+        e[0..2].copy_from_slice(b"MZ");
+        e[0x3C..0x40].copy_from_slice(&0x40u32.to_le_bytes());
+        e[0x40..0x44].copy_from_slice(b"PE\0\0");
+        e[0x46..0x48].copy_from_slice(&1u16.to_le_bytes()); // NumberOfSections
+        e[0x54..0x56].copy_from_slice(&0xE0u16.to_le_bytes()); // SizeOfOptionalHeader
+        e[0x58..0x5A].copy_from_slice(&0x10Bu16.to_le_bytes()); // PE32
+        e[0x74..0x78].copy_from_slice(&0x0040_0000u32.to_le_bytes()); // ImageBase
+        let s = 0x58 + 0xE0;
+        e[s + 8..s + 12].copy_from_slice(&0x1000u32.to_le_bytes()); // VirtualSize
+        e[s + 12..s + 16].copy_from_slice(&0x84000u32.to_le_bytes()); // VirtualAddress
+        e[s + 16..s + 20].copy_from_slice(&raw.to_le_bytes()); // SizeOfRawData
+        e[s + 20..s + 24].copy_from_slice(&0x400u32.to_le_bytes()); // PointerToRawData
+        e[0x866] = byte;
+        e
+    }
+
+    #[test]
+    fn the_drain_block_is_found_through_the_section_table() {
+        use super::super::data::DrainRule::{Community, Old};
+        assert_eq!(pe_file_offset(&synthetic_exe(0, 0x1000), DRAIN_VA), Some(0x866));
+        assert_eq!(drain_rule_of_exe(&synthetic_exe(JMP_REL32, 0x1000)), Some(Community));
+        assert_eq!(drain_rule_of_exe(&synthetic_exe(0x69, 0x1000)), Some(Old), "the original's IMUL");
+        assert_eq!(drain_rule_of_exe(&synthetic_exe(0x90, 0x1000)), Some(Old), "anything but E9");
+        assert_eq!(drain_rule_of_exe(&synthetic_exe(JMP_REL32, 0x100)), None, "past the raw data");
+        assert_eq!(drain_rule_of_exe(b"MZ not a pe"), None);
+        let mut other = synthetic_exe(JMP_REL32, 0x1000);
+        other[0x74..0x78].copy_from_slice(&0x0010_0000u32.to_le_bytes());
+        assert_eq!(drain_rule_of_exe(&other), None, "the address below the image base");
+    }
+
+    #[test]
+    fn the_drain_rule_falls_back_to_the_floor_key_without_an_exe() {
+        use super::super::data::DrainRule::{Community, Old};
+        let dir = std::env::temp_dir().join(format!("razdor-drain-rule-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let with_floor = Ini::parse("[GlobalOptions]\nMinSpellLife=15\n");
+        let without = Ini::parse("[GlobalOptions]\nDecSpellLife=2\n");
+        assert_eq!(drain_rule(&dir, &with_floor), Community);
+        assert_eq!(drain_rule(&dir, &without), Old);
+        // An exe decides when it is there, whatever the ini says.
+        std::fs::write(dir.join(EXE_FILE), synthetic_exe(0x69, 0x1000)).unwrap();
+        assert_eq!(drain_rule(&dir, &with_floor), Old);
+        std::fs::write(dir.join(EXE_FILE), synthetic_exe(JMP_REL32, 0x1000)).unwrap();
+        assert_eq!(drain_rule(&dir, &without), Community);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_real_community_exe_runs_the_community_drain() {
+        let Some(dir) = super::locate() else { return };
+        let Ok(exe) = std::fs::read(dir.join(EXE_FILE)) else { return };
+        // The Community 1.2 exe jumps from the block; an exe without the patch does not.
+        assert_eq!(drain_rule_of_exe(&exe), Some(super::DrainRule::Community));
     }
 }

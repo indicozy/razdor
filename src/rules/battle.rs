@@ -13,7 +13,7 @@ use crate::local;
 use std::sync::Arc;
 
 use crate::i18n::tr;
-use super::content::{Bonus, Content, HeroClass, ItemId, MagicSchool, Nature, Stat, UnitId};
+use super::content::{Bonus, Content, DrainRule, HeroClass, ItemId, MagicSchool, Nature, Stat, UnitId};
 use super::experience::{self, Role, SideUnit};
 use super::formation::{Formation, Row, Slot};
 use super::units::{Stats, Unit};
@@ -57,6 +57,11 @@ pub(crate) const RECORDS: usize = 12;
 /// The drain loader's floor for a type with magic power but no school: the unused slot of the
 /// floor table holds these bytes (c28480).
 const SCHOOLLESS_FLOOR: i32 = 16_777_215;
+/// The floors of the original's drain block (0x484466–0x484683): Life 15, Elemental 15, Undead
+/// Death 25. They are fixed in the exe, not read from `_Global.ini`.
+const OLD_LIFE_FLOOR: i32 = 15;
+const OLD_ELEMENTAL_FLOOR: i32 = 15;
+const OLD_UNDEAD_DEATH_FLOOR: i32 = 25;
 /// Community c25b63: the battle AI's factor for a melee target with 0 Manevres, 1.5 × the
 /// number the four bytes at c25bc1 make (1 164 546 049).
 const MANEVRES_0_FACTOR: f64 = 1_164_546_049.0 * 1.5;
@@ -1267,10 +1272,51 @@ impl Battle {
         }
     }
 
-    /// Magic power drain from turn 2 (Community c2851a): `max(MP − drain, floor)`, at least
-    /// 0, for units with power; the floor also raises weak casters. Concentration adds the
-    /// drain instead.
+    /// Magic power drain from turn 2, by the install's rule (see [`DrainRule`]).
     fn drain(&mut self, i: usize) {
+        match self.opt().drain_rule {
+            DrainRule::Community => self.drain_community(i),
+            DrainRule::Old => self.drain_old(i),
+        }
+    }
+
+    /// The original's own drain block (0x484466–0x484683), run by an exe without the Community
+    /// patch. A unit with power loses its school's `DecSpell…` (Concentration adds it), then
+    /// the school's fixed floor applies: Life and Elemental 15 (Elemental goes to 0 for an
+    /// Undead or Rogue that dipped below 0), Death 25 for Undead and no floor otherwise. Then
+    /// every unit's power below 0 becomes 0 (0x484683). No school: no change.
+    fn drain_old(&mut self, i: usize) {
+        let def = self.content.unit(self.fighters[i].unit);
+        let (school, nature) = (def.magic, def.nature);
+        let o = &self.content.options;
+        let f = &mut self.fighters[i];
+        if f.power > 0 {
+            if let Some(school) = school {
+                let dec = o.dec_spell(school);
+                f.power = if f.has(Bonus::Concentration) { f.power.wrapping_add(dec) } else { f.power.wrapping_sub(dec) };
+                match school {
+                    MagicSchool::Life => f.power = f.power.max(OLD_LIFE_FLOOR),
+                    MagicSchool::Elemental => {
+                        if f.power < 0 && matches!(nature, Nature::Undead | Nature::Rogue) {
+                            f.power = 0;
+                        } else if f.power < OLD_ELEMENTAL_FLOOR {
+                            f.power = OLD_ELEMENTAL_FLOOR;
+                        }
+                    }
+                    MagicSchool::Death => {
+                        if nature == Nature::Undead && f.power < OLD_UNDEAD_DEATH_FLOOR {
+                            f.power = OLD_UNDEAD_DEATH_FLOOR;
+                        }
+                    }
+                }
+            }
+        }
+        f.power = f.power.max(0);
+    }
+
+    /// The Community drain (c2851a): `max(MP − drain, floor)`, at least 0, for units with
+    /// power; the floor also raises weak casters. Concentration adds the drain instead.
+    fn drain_community(&mut self, i: usize) {
         if self.fighters[i].power <= 0 {
             return;
         }
