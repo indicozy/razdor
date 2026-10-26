@@ -18,6 +18,11 @@ original. GitHub issues are only for what the owner files or asks for.
 
 ## 1. Read
 
+The owner's tags come first: a message from the owner (`indicozy`) that mentions the bot is a
+request to Claude. Act on it as on a request in chat, and reply to that message with
+`reports_post` (`reply_to` it, `confirm=true` at once: these replies need no approval, the
+owner's decision, 2026-10-26). Other people's mentions of the bot are ordinary messages.
+
 1. `reports_status`. If the token or channel is missing, or Discord answers 401/403, tell the
    owner what to set and stop.
 2. `reports_fetch_new` (default 50). Nothing new → say so and stop.

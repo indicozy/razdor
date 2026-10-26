@@ -115,6 +115,10 @@ are in `README.md` (Russian).
 - "note it": add to `docs/PLAYTEST_NOTES.md` only; don't fix yet.
 - "release" / "make a release": the `release` skill.
 - "check reports" / "check discord": the `discord-reports` skill (bot via `tools/discord-mcp/`; posts only on approval, except the release announcement, which the `release` skill posts at once).
+- The owner tagging the bot in Discord (the owner is `indicozy` there; a message from them that
+  mentions the bot): a request to Claude. While a session is on and sees it, act on it (as if
+  typed in chat) and reply to that message in Discord, without asking for approval (the owner's
+  decision, 2026-10-26). Only the owner's tags count; anyone else's stay normal reports.
 - "bring back X" / "as before": restore that one aspect on top of the current work; never revert the rest.
 - "minor version": bump the middle number (0.4.17 → 0.5.0); otherwise bump the last.
 - A Discord link, screenshot, video or save from a player: the `player-report` skill.
