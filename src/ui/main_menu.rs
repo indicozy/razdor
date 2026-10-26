@@ -783,12 +783,16 @@ fn window(title: &str, w: f32, h: f32) -> (Rect, bool) {
 }
 
 /// A window over the map, centred over the view above the bottom bar, as the original's map
-/// windows are (over its 1024×682 view), its foot never on the bar.
+/// windows are (over its 1024×682 view), its foot never on the bar. On a phone held upright it
+/// is centred between the top inset and the bar at its own scale (`window_layout::game_rect`,
+/// the caller's `window_layout::window_scale` guard).
 fn map_window(title: &str, w: f32, h: f32) -> (Rect, bool) {
     let k = chrome::k();
-    let (w, h) = (w * k, h * k);
-    let view = screen_height() - chrome::bar_height();
-    let r = Rect::new((screen_width() - w) / 2.0, ((view - h) / 2.0).max(0.0), w, h);
+    let r = window_layout::game_rect((w, h)).unwrap_or_else(|| {
+        let (w, h) = (w * k, h * k);
+        let view = screen_height() - chrome::bar_height();
+        Rect::new((screen_width() - w) / 2.0, ((view - h) / 2.0).max(0.0), w, h)
+    });
     chrome::window(r, title, chrome::Skin::Marble, true)
 }
 
@@ -1099,8 +1103,9 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     // 650 high since «Расстановка армии» joined the left column (it still fits the 682 px
     // view above the bar).
     let (ww, wh) = (900.0, 650.0);
-    // Its own scale on a title screen (its own window, not the settings window's).
-    let _scale = (!over_map).then(|| window_layout::title_scale((ww, wh)));
+    // Its own scale on a title screen or in game on a phone held upright (its own window, not the
+    // settings window's).
+    let _scale = window_layout::window_scale(over_map, (ww, wh));
     // Razdor's own window, wider than the original's: centred (over the map, above the bar),
     // not hung from the menu's 190, where its foot reached the screen's bottom edge.
     let k = chrome::k();
@@ -1394,10 +1399,10 @@ fn option_check(x: f32, y: f32, label: &str, on: bool, ink: Color) -> bool {
 /// key another action has goes to that action (`keymap::set`). «По умолчанию» puts every key
 /// back; «Ок» (or Esc, when not waiting) closes it. Returns true when closed.
 fn keys_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
-    let _scale = (!over_map).then(|| window_layout::title_scale((760.0, 420.0)));
+    let _scale = window_layout::window_scale(over_map, (760.0, 420.0));
     let k = chrome::k();
     let (w, h) = (760.0 * k, 420.0 * k);
-    let r = (!over_map).then(|| window_layout::title_rect((760.0, 420.0))).flatten().unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, ((screen_height() - h) / 2.0).max(0.0), w, h));
+    let r = window_layout::window_rect(over_map, (760.0, 420.0)).unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, ((screen_height() - h) / 2.0).max(0.0), w, h));
     let (inner, closed) = chrome::window(r, tr("Keys"), chrome::Skin::Marble, true);
     let waiting = keymap::listening();
     let was_waiting = waiting.is_some();
@@ -1465,6 +1470,8 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     // The rows below depend on the phone's own: see `options_h`.
     let touch_row = super::touchpad::MOBILE;
     let orientation_row = cfg!(target_os = "android");
+    // In game on a phone held upright, the window at its own scale (`map_window`); the title's is set by `options`.
+    let _scale = over_map.then(|| window_layout::game_scale((594.0, h)));
     let (inner, closed) = if over_map { map_window(&title, 594.0, h) } else { window(&title, 594.0, h) };
     let k = chrome::k();
     let outer = Rect::new(inner.x - 2.0 * k, inner.y - (26.0 * k).round() - 1.0, 594.0 * k, h * k);

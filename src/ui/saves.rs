@@ -361,9 +361,10 @@ impl Book {
         // map windows (its in-game load and save at y 104 of 768).
         let y = book_top(screen_height(), super::chrome::bar_height(), h, k, over_map);
         // On a phone held upright the title's load window spans the width between the top inset
-        // and the footer (`window_layout::title_rect`); the old placement, at the video's y 190,
-        // is above the logo there.
-        let win = (!over_map).then(|| super::window_layout::title_rect((Book::W, Book::H))).flatten().unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, y, w, h));
+        // and the footer (`window_layout::title_rect`), and the window over the map the width
+        // between the inset and the bar (`window_layout::game_rect`); the old placements (the
+        // video's y 190 on the title, the view's centre over the map) are the fallback.
+        let win = super::window_layout::window_rect(over_map, (Book::W, Book::H)).unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, y, w, h));
         // Above the on-screen keyboard while its name field is typed in (`window_layout::keyboard_lifted`).
         let win = super::window_layout::keyboard_lifted(win, Book { win, k }.row_rect(0));
         let (_, closed) = super::chrome::window(win, title, super::chrome::Skin::Marble, true);
@@ -644,6 +645,8 @@ const PLACEHOLDER_INK: [u8; 3] = [150, 150, 150];
 /// anew)"; a click on a save takes its name to replace it, typing edits the name.
 pub fn save_screen(game: &Game, assets: &Assets, view: &mut SaveView, message: &mut Option<String>) -> Option<Screen> {
     world_view::backdrop(game, assets);
+    // The save window at its own scale on a phone held upright (`window_layout::game_scale`).
+    let _scale = super::window_layout::game_scale((Book::W, Book::H));
     let (book, closed) = Book::at(&own("SaveGame", "Title", n_("Save the game")), true);
     book.page(&own("SaveGame", "GameName", n_("Name of the saved game")), &own("SaveGame", "ScenarioName", n_("Name of the scenario")));
     // Held Backspace repeats, as in the original's edit box (0x47a624, 0x475748); the caret,
@@ -720,8 +723,9 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     let previously_blocked = input_blocked();
     if asking { set_input_blocked(true); }
     let over_map = game.is_some() && view.back != Back::Title;
-    // The title's load window at its own scale on a phone held upright (`window_layout::title_scale`).
-    let _scale = (!over_map).then(|| super::window_layout::title_scale((Book::W, Book::H)));
+    // The load window at its own scale on a phone held upright: the title's (`window_layout::title_scale`)
+    // or the one over the map (`window_layout::game_scale`).
+    let _scale = super::window_layout::window_scale(over_map, (Book::W, Book::H));
     let (book, closed) = Book::at(&own("LoadGame", "Title", n_("Load a saved game")), over_map);
     book.page(&own("LoadGame", "GameName", n_("Name of the saved game")), &own("LoadGame", "ScenarioName", n_("Name of the scenario")));
     fill_metas(&mut view.entries, &mut view.asked, &mut view.settled, view.scroll, Some(&mut view.selected));
@@ -917,6 +921,8 @@ pub enum ExitChoice {
 /// "Отмена". `asking` is true while the restart question is open.
 pub fn exit_window(game: &Game, assets: &Assets, asking: &mut bool) -> (Option<ExitChoice>, Option<Screen>) {
     world_view::backdrop_lit(game, assets, Some(super::game_bar::BarButton::Menu));
+    // The game menu's window at its own scale on a phone held upright (`exit_dialog`).
+    let _scale = super::window_layout::game_scale(EXIT_ART);
     let title = own("ExitGame", "Title", n_("Leave the game"));
     let warning = own("ExitGame", "Warning", n_("Attention!\n\nThe game under way will end.\nTo go on with it another time, save it from the map's bar first."));
     match exit_dialog(&title, &warning, asking, false, true) {
@@ -1077,13 +1083,18 @@ fn battle_exit_row(phone: bool, art: (f32, f32, f32)) -> Vec<(f32, f32)> {
 /// framed box under its middle (18 px in from the sides, `(H − 117) / 2 + 65` down,
 /// `(H − 117) / 2 − 20` high, the text centred in it), three buttons from the left and
 /// «Отмена» on the right, 10 px from the window's foot.
+/// The game menu's art window in video px: 634×516 of the original's pixels, which are
+/// `chrome::opx` (0.9375 of the interface scale) on the screen.
+const EXIT_ART: (f32, f32) = (634.0 * 0.9375, 516.0 * 0.9375);
+
 fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art: bool) -> (Option<ExitChoice>, bool) {
     let k = super::chrome::k();
     // The map's window is ae2520, 634×516 in the original's pixels (4d524b).
     let px = super::chrome::opx();
     let footer_h = 56.0 * px;
     let (w, h) = if art { (634.0 * px, 516.0 * px) } else { (560.0 * k, 250.0 * k) };
-    let r = Rect::new((screen_width() - w) / 2.0, ((screen_height() - super::chrome::bar_height() - h) / 2.0).max(0.0), w, h);
+    // The art window on a phone held upright: between the top inset and the bar (`game_rect`).
+    let r = art.then(|| super::window_layout::game_rect(EXIT_ART)).flatten().unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, ((screen_height() - super::chrome::bar_height() - h) / 2.0).max(0.0), w, h));
     let (inner, closed) = super::chrome::window(r, title, super::chrome::Skin::Marble, true);
     if art {
         if let Some(t) = super::chrome::win("S_Exit_RUS") {
@@ -1402,5 +1413,28 @@ mod tests {
         reset_keyboard_request();
         ask_keyboard("", Default::default(), false, false);
         assert_eq!(keyboard_request(), None);
+    }
+
+    /// The save window over the map on a phone held upright (1080×2376 at 2.75 px per dp, the
+    /// interface scale 1.125, the bar 90 px): its buttons take their clicks at the window's
+    /// scale, inside it, and with the on-screen keyboard up the save button is still above it.
+    #[test]
+    fn the_in_game_save_window_on_a_phone_clicks_at_its_own_scale() {
+        let (sw, sh, top) = (1080.0, 2376.0, 66.0);
+        let bar = (80.0f32 * 1.125).round();
+        let (k, win) = crate::ui::window_layout::portrait_game((sw, sh), Some(2.75), top, bar, 1.125, (Book::W, Book::H)).expect("held upright");
+        let book = Book { win, k };
+        // «Сохранить» (369, 116) and «Отмена» (492, 95), 28 design px high, as `Book::button` draws them.
+        let save = book.rect(369.0, 443.0, 116.0, 28.0);
+        let cancel = book.rect(492.0, 443.0, 95.0, 28.0);
+        assert!((save.h - 28.0 * k).abs() < 1e-3, "the button is drawn at the window's scale");
+        assert!(win.contains(save.center()) && win.contains(cancel.center()), "both buttons are in the window");
+        assert!(save.contains(save.center()) && !cancel.contains(save.center()), "a click on «Сохранить» hits it alone");
+        // With the keyboard up (900 px), the window moves so that its name field and the save button are above it.
+        let keyboard = 900.0;
+        let dy = crate::ui::window_layout::keyboard_lift(win, book.row_rect(0), sh, keyboard, top);
+        let lifted = Rect::new(win.x, win.y + dy, win.w, win.h);
+        assert!(lifted.y >= top - 0.5 && lifted.bottom() <= sh - keyboard + 0.5, "the window is above the keyboard: {lifted:?}");
+        assert!(save.y + dy + save.h <= sh - keyboard + 0.5, "the save button is above the keyboard");
     }
 }

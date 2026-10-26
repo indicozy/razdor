@@ -241,7 +241,20 @@ placement takes `window_layout::title_rect` where it is portrait, else its old p
 `book_top`, at video y 190, is above the logo on a phone: that is why it moved). The credits column
 (`thanks_column`) goes under the window down to `window_layout::title_bottom` (the footer), since the window
 leaves no side. Landscape and desktop: `title_scale` keeps the scale it has and `title_rect` is `None`, so nothing
-changes. The save window and the in-game windows over the map are not title windows and are not touched.
+changes. The in-game windows over the map get the same treatment on a phone held upright, with their own
+rectangle: `window_layout::portrait_game` (pure, with unit tests) fits the window between the top safe inset
+and the top of the bottom bar (`chrome::bar_height`, at the interface scale, 8 px above it), not the footer;
+`window_layout::game_scale` / `game_rect` (and `window_scale` / `window_rect`, which pick the title or the
+game variant by `in_game`) are the guard and the placement. They cover the settings window (its guard is set
+in `options_window` over the map), «Ещё…» (`advanced_window`), the keys window (`keys_window`), the save window
+(`save_screen`, the name field's keyboard lift applies to the scaled rect), the load window (`load_screen`), the
+game menu's art window (`saves::exit_window`, `exit_dialog`, at the art's 634×516 px scaled by `opx`), and
+`map_window`, which centres them over the map. The map and the bar under them are drawn at the interface scale
+(`world_view::window_backdrop`, `backdrop_lit`). The help overlay (F1, «Клавиши» in game, `hotkeys::help_overlay`)
+already spans the phone's width; on a phone with a bar it stands between the top inset and the bar (`has_bar`).
+Landscape and desktop are byte-identical (`window_layout::portrait_game` is None, the old placements stay).
+Not covered: the building, army and hero windows (the stacked layout), the spellbook (landscape window), and the
+battle's exit window (`saves::battle_exit_dialog`, not a title-flow window).
 The market and the sanctuary scenes of the UI regression check use town 8 of РК3-Столица (the start's
 castle has neither tab); the snapshot clears the start's due places, which otherwise make the building
 window step aside for the map (`world_view::building_flight`).

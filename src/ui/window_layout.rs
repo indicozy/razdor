@@ -202,13 +202,34 @@ pub fn portrait_title(screen: (f32, f32), dp: Option<f32>, top: f32, base_k: f32
         return None;
     }
     let bottom = super::main_menu::portrait_foot_top(sw, sh, base_k, dp, top) - TITLE_FOOT_GAP * base_k;
+    Some(fit_between(sw, top, bottom, base_k, video))
+}
+
+/// The gap between a window over the map and the top of the bottom bar, at the interface scale.
+const GAME_BAR_GAP: f32 = 8.0;
+
+/// The scale and the rectangle of a window over the map (a settings, save, load or game menu
+/// window, opened in game) on a phone held upright: as [`portrait_title`], but between the top
+/// safe inset `top` and the top of the bottom bar, `bar` px tall at the interface scale (the bar
+/// is not scaled with the window). `None` where the phone is not held upright.
+pub fn portrait_game(screen: (f32, f32), dp: Option<f32>, top: f32, bar: f32, base_k: f32, video: (f32, f32)) -> Option<(f32, Rect)> {
+    let ((sw, sh), _) = (screen, dp.filter(|d| *d > 0.0)?);
+    if sh <= sw {
+        return None;
+    }
+    Some(fit_between(sw, top, sh - bar - GAME_BAR_GAP * base_k, base_k, video))
+}
+
+/// The largest scale (never below `base_k`) at which a `video` window spans `sw` less the margins
+/// and fits between `top` and `bottom`, with its rectangle centred there (both px).
+fn fit_between(sw: f32, top: f32, bottom: f32, base_k: f32, video: (f32, f32)) -> (f32, Rect) {
     let (vw, vh) = video;
     let fit_w = (sw - 2.0 * TITLE_MARGIN) / vw;
     let fit_h = (bottom - top - 2.0 * TITLE_MARGIN) / vh;
     let k = fit_w.min(fit_h).max(base_k);
     let (w, h) = ((vw * k).round(), (vh * k).round());
     let y = (top + ((bottom - top) - h) / 2.0).max(top).round();
-    Some((k, Rect::new(((sw - w) / 2.0).round(), y, w, h)))
+    (k, Rect::new(((sw - w) / 2.0).round(), y, w, h))
 }
 
 /// The interface scale (`chrome::k` outside any window's scale).
@@ -232,6 +253,34 @@ pub fn title_scale(video: (f32, f32)) -> super::display::WindowScale {
 /// upright; `None` elsewhere, where the window keeps its own placement.
 pub fn title_rect(video: (f32, f32)) -> Option<Rect> {
     portrait_title_now(video).map(|(_, r)| r)
+}
+
+/// [`portrait_game`] for the phone on screen now (`None` where it is not held upright).
+fn portrait_game_now(video: (f32, f32)) -> Option<(f32, Rect)> {
+    portrait_game((screen_width(), screen_height()), super::display::dp_px(), super::display::safe_area().top, chrome::bar_height(), interface_k(), video)
+}
+
+/// The window scale of a window over the map of `video` size, as a guard (see [`title_scale`]):
+/// on a phone held upright it is the largest that fits between the top inset and the bar.
+pub fn game_scale(video: (f32, f32)) -> super::display::WindowScale {
+    let k = portrait_game_now(video).map(|(k, _)| k);
+    super::display::enter_window_scale(k.or_else(super::display::window_scale))
+}
+
+/// The rectangle of a window over the map of `video` size (see [`game_scale`]); `None` elsewhere.
+pub fn game_rect(video: (f32, f32)) -> Option<Rect> {
+    portrait_game_now(video).map(|(_, r)| r)
+}
+
+/// [`title_scale`] for a window opened from the title screens, or [`game_scale`] for one over
+/// the map (`in_game`): the same guard either way, so a window's frame reads one place.
+pub fn window_scale(in_game: bool, video: (f32, f32)) -> super::display::WindowScale {
+    if in_game { game_scale(video) } else { title_scale(video) }
+}
+
+/// [`title_rect`] or [`game_rect`] by where the window is opened.
+pub fn window_rect(in_game: bool, video: (f32, f32)) -> Option<Rect> {
+    if in_game { game_rect(video) } else { title_rect(video) }
 }
 
 /// The bottom edge the title screens' windows may reach: the footer's top on a phone held
@@ -628,5 +677,52 @@ mod title_tests {
         assert_eq!(portrait_title((2376.0, 1080.0), Some(2.75), 0.0, BASE, (594.0, 482.0)), None);
         assert_eq!(portrait_title((1920.0, 1080.0), None, 0.0, BASE, (594.0, 482.0)), None);
         assert_eq!(portrait_title((1080.0, 2376.0), None, 0.0, BASE, (594.0, 482.0)), None);
+    }
+
+    /// The bottom bar's height at the interface scale (`chrome::bar_height`: 80 design px).
+    fn bar_of() -> f32 { (80.0 * BASE).round() }
+
+    /// The in-game windows' bottom: the bar's top less the gap (`GAME_BAR_GAP`).
+    fn bar_top(sh: f32) -> f32 { sh - bar_of() - GAME_BAR_GAP * BASE }
+
+    #[test]
+    fn an_in_game_window_spans_the_phone_held_upright_between_the_inset_and_the_bar() {
+        // The game's windows: the settings, its «Ещё…» and keys, the save and load windows, the game menu (its art 634×516 at 0.9375).
+        let videos = VIDEOS.into_iter().chain([(634.0 * 0.9375, 516.0 * 0.9375)]);
+        for (sw, sh) in [(1080.0, 2376.0), (1080.0, 1920.0)] {
+            let (dp, top) = (2.75, 66.0);
+            let bottom = bar_top(sh);
+            for video in videos.clone() {
+                let (k, r) = portrait_game((sw, sh), Some(dp), top, bar_of(), BASE, video).expect("held upright");
+                assert!(r.w >= 0.95 * sw, "{video:?} on {sw}x{sh}: width {} of {sw}", r.w);
+                assert!(r.x >= 0.0 && r.x + r.w <= sw, "{video:?} off the sides: {r:?}");
+                assert!(r.y >= top && r.y + r.h <= bottom + 0.5, "{video:?} off the inset or the bar: {r:?} bottom {bottom}");
+                assert!(k >= BASE, "never below the interface scale");
+                assert!((r.w - video.0 * k).abs() <= 1.0, "the window keeps its proportions");
+            }
+        }
+    }
+
+    #[test]
+    fn an_in_game_window_is_centred_between_the_inset_and_the_bar() {
+        let (sw, sh, dp, top) = (1080.0, 2376.0, 2.75, 66.0);
+        let (_, r) = portrait_game((sw, sh), Some(dp), top, bar_of(), BASE, (594.0, 482.0)).expect("held upright");
+        let space = (top + bar_top(sh)) / 2.0;
+        assert!((r.center().y - space).abs() <= 1.0, "centre {} against {space}", r.center().y);
+    }
+
+    #[test]
+    fn the_in_game_settings_window_on_the_phone_is_width_limited() {
+        // 594 × 606 (the settings window's height at the phone's rows): the width sets the scale.
+        let (k, r) = portrait_game((1080.0, 2376.0), Some(2.75), 66.0, bar_of(), BASE, (594.0, 606.0)).expect("held upright");
+        assert!((k - 1064.0 / 594.0).abs() < 0.01, "k {k}");
+        assert_eq!(r.w.round(), 1064.0);
+    }
+
+    #[test]
+    fn a_landscape_phone_and_the_desktop_keep_their_in_game_windows() {
+        assert_eq!(portrait_game((2376.0, 1080.0), Some(2.75), 0.0, bar_of(), BASE, (594.0, 482.0)), None);
+        assert_eq!(portrait_game((1920.0, 1080.0), None, 0.0, bar_of(), BASE, (594.0, 482.0)), None);
+        assert_eq!(portrait_game((1080.0, 2376.0), None, 0.0, bar_of(), BASE, (594.0, 482.0)), None);
     }
 }

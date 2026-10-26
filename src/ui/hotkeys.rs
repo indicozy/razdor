@@ -356,6 +356,12 @@ fn fit_words(words: &str, width: f32, size: f32, max_lines: usize) -> (f32, Vec<
     }
 }
 
+/// The screens drawn over the game's bottom bar (the map and the windows over it, the menu and
+/// the save and load windows in game): the help overlay keeps above the bar on those.
+fn has_bar(place: Place) -> bool {
+    matches!(place, Place::WorldMap | Place::Building | Place::Army | Place::Hero | Place::Spellbook | Place::Menu | Place::Save | Place::Load)
+}
+
 pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
     let (sw, sh) = (screen_width(), screen_height());
     draw_rectangle(0.0, 0.0, sw, sh, Color::new(0.0, 0.0, 0.0, 0.45));
@@ -383,8 +389,11 @@ pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
     let line = 24.0 * t;
     let info_h = if info.is_empty() { 0.0 } else { 30.0 * t + info.len() as f32 * line + 6.0 * k };
     let content = 4.0 * k + grid_h + 6.0 * k + info_h;
-    let h = (content + 52.0 * t + 72.0 * k).min(sh - 16.0);
-    let (x, y) = ((sw - w) / 2.0, (sh - h) / 2.0);
+    // On a phone held upright, over a screen with the bottom bar, the overlay stands between the
+    // top safe inset and the bar, as the game's windows do; elsewhere over the whole screen.
+    let (top, bottom) = if super::window_layout::portrait() && has_bar(place) { (super::display::safe_area().top, sh - chrome::bar_height()) } else { (0.0, sh) };
+    let h = (content + 52.0 * t + 72.0 * k).min(bottom - top - 16.0);
+    let (x, y) = ((sw - w) / 2.0, top + (bottom - top - h) / 2.0);
     let (inner, _) = chrome::window(Rect::new(x, y, w, h), tr("Keys"), Skin::Marble, false);
     let body = Rect::new(inner.x, inner.y + 52.0 * t, inner.w, inner.bottom() - 40.0 * k - (inner.y + 52.0 * t));
     let most = (content - body.h).max(0.0);
