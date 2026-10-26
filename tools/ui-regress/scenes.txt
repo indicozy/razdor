@@ -34,6 +34,7 @@ victory-1280 | victory:РК1-Начало пути | 1280x800 |
 defeat-1280 | defeat:РК1-Начало пути | 1280x800 |
 building-barracks-1280 | building:РК1-Начало пути:0:barracks | 1280x800 |
 building-garrison-1280 | building:РК1-Начало пути:0:garrison | 1280x800 |
+building-store-1280 | building:РК1-Начало пути:0:store | 1280x800 |
 building-market-1280 | building:РК3-Столица:8:market | 1280x800 |
 building-market-pack-1280 | building:РК3-Столица:8:market-pack | 1280x800 |
 building-sanctuary-1280 | building:РК3-Столица:8:sanctuary | 1280x800 |
@@ -83,6 +84,8 @@ phone-victory-portrait | victory:РК1-Начало пути | 1080x2160 |
 phone-victory-landscape | victory:РК1-Начало пути | 2160x1080 |
 phone-barracks-portrait | building:РК1-Начало пути:0:barracks | 1080x2160 |
 phone-barracks-landscape | building:РК1-Начало пути:0:barracks | 2160x1080 |
+phone-store-portrait | building:РК1-Начало пути:0:store | 1080x2160 |
+phone-store-landscape | building:РК1-Начало пути:0:store | 2160x1080 |
 phone-market-portrait | building:РК3-Столица:8:market | 1080x2160 |
 phone-market-landscape | building:РК3-Столица:8:market | 2160x1080 |
 phone-army-portrait | army:РК1-Начало пути | 1080x2160 |

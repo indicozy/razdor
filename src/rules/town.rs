@@ -7,7 +7,7 @@
 //! (see `economy::relation_price`).
 
 use super::clock::MINUTES_PER_DAY;
-use super::content::{Content, SpellDef};
+use super::content::{Content, ItemId, SpellDef};
 use super::formation::Slot;
 use super::game::{Event, Game, Price};
 use super::units::Stats;
@@ -22,6 +22,9 @@ pub enum Tab {
     Barracks,
     /// Leave or take troops (the player's castles and forts).
     Garrison,
+    /// Razdor's deviation (the owner's request, not parity): the loot his own building's
+    /// garrison could not wear, taken into the pack; shown only while it is not empty.
+    Store,
     /// Buy and sell items.
     Market,
     /// Learn spells.
@@ -53,6 +56,10 @@ pub enum ServiceError {
     Unpaid(i32),
     AlreadyKnown,
     NoSuchUnit,
+    /// The hero's pack has no room (never in Razdor's growing pack; see `pack.rs`).
+    PackFull,
+    /// No store item at that place.
+    NoSuchItem,
 }
 
 /// The tabs location `l` shows the player, in the original's order (economy.md §7,
@@ -82,6 +89,11 @@ pub fn tabs(l: &Location, c: &Content) -> Vec<Tab> {
     }
     if l.takes_garrison() {
         tabs.push(Tab::Garrison);
+    }
+    // Razdor's deviation (the owner's request): the store of his own building, shown only
+    // while it holds loot. The original never lets the owner take items out of his building.
+    if l.owned() && !l.treasure.is_empty() {
+        tabs.push(Tab::Store);
     }
     if l.shop.is_some() {
         tabs.push(Tab::Market);
@@ -283,6 +295,34 @@ impl Game {
         Ok(())
     }
 
+    /// The store here (Razdor's deviation, the owner's request): the loot of his own building
+    /// its garrison could not wear, `Location::treasure`, while the store tab is offered; else
+    /// nothing.
+    pub fn store_here(&self) -> &[ItemId] {
+        match self.here() {
+            Some(l) if self.offers(Tab::Store) => &l.treasure,
+            _ => &[],
+        }
+    }
+
+    /// Takes store item `index` of the building here into the hero's pack (Razdor's deviation,
+    /// the owner's request). The original never lets the owner take items out of his own
+    /// building: only a hero who beats its garrison loots the record (0x4c50ec). Taking only:
+    /// nothing goes in. Refused unless the building is his and the hero stands in it.
+    pub fn take_from_store(&mut self, index: usize) -> Result<ItemId, ServiceError> {
+        if !self.offers(Tab::Store) {
+            return Err(ServiceError::NotHere);
+        }
+        let l = self.location.ok_or(ServiceError::NotHere)?;
+        let item = *self.world.locations[l].treasure.get(index).ok_or(ServiceError::NoSuchItem)?;
+        if self.pack.is_full() {
+            return Err(ServiceError::PackFull);
+        }
+        self.world.locations[l].treasure.remove(index);
+        self.pack.add(item);
+        Ok(item)
+    }
+
     /// What taking garrison unit `j` into an empty cell of the army costs: nothing when it
     /// is paid, else one day's kind-1 wage of its type (0x4acff4).
     pub fn garrison_price(&self, j: usize) -> Option<i32> {
@@ -437,6 +477,7 @@ mod tests {
     use crate::rules::content::{ArtefactType, Bonus, Content, HeroClass, ItemId, MagicDirection, MagicSchool, Nature, UnitDef, UnitId};
     use crate::rules::game::{BattleResult, Currency, DayReport, Foe, Game};
     use crate::rules::world::testkit::{army, building, hero, scenario, troop};
+    use crate::rules::world::Owner;
 
     /// Units: 1–3 heroes; 4 militia (cost 50); 5 archer (cost 90); 6 priest (cost 60,
     /// Surrender 20); 7 merchant (cost 100, Merchant); 8 golem (cost 80, Elemental); 9 bandit
@@ -1402,6 +1443,39 @@ mod tests {
         castle.owner_army = 0; // the owner byte makes it the player's
         s.buildings = vec![castle];
         inside(&s)
+    }
+
+    #[test]
+    fn the_store_of_his_own_building_gives_its_loot_to_the_pack_and_shows_only_with_loot() {
+        // Razdor's deviation (the owner's request): the loot in his own building is taken to the
+        // pack. The original never lets the owner take items out of his building (0x4c50ec only).
+        let mut g = in_own_castle();
+        assert!(!g.tabs_here().contains(&Tab::Store), "no loot, no store tab");
+        assert_eq!(g.take_from_store(0), Err(ServiceError::NotHere));
+        g.world.locations[0].treasure = vec![ItemId(7), ItemId(9)];
+        assert!(g.tabs_here().contains(&Tab::Store));
+        assert_eq!(g.store_here(), [ItemId(7), ItemId(9)]);
+        let before = g.pack.count();
+        assert_eq!(g.take_from_store(5), Err(ServiceError::NoSuchItem));
+        assert_eq!(g.take_from_store(1), Ok(ItemId(9)));
+        assert_eq!(g.world.locations[0].treasure, [ItemId(7)]);
+        assert_eq!(g.pack.count(), before + 1);
+        assert!((0..g.pack.len()).any(|i| g.pack.get(i) == Some(ItemId(9))), "the item is in the pack");
+        g.take_from_store(0).unwrap();
+        assert!(g.world.locations[0].treasure.is_empty());
+        assert!(!g.tabs_here().contains(&Tab::Store), "emptied, the tab goes");
+    }
+
+    #[test]
+    fn the_store_is_only_his_own_building_s() {
+        // Another owner's building with loot: no store, nothing taken out of it.
+        let mut g = in_own_castle();
+        g.world.locations[0].owner = Owner::Neutral;
+        g.world.locations[0].treasure = vec![ItemId(7)];
+        assert!(!g.tabs_here().contains(&Tab::Store));
+        assert!(g.store_here().is_empty());
+        assert_eq!(g.take_from_store(0), Err(ServiceError::NotHere));
+        assert_eq!(g.world.locations[0].treasure, [ItemId(7)]);
     }
 
     #[test]

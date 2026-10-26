@@ -208,6 +208,7 @@ pub fn tab_label(t: Tab) -> &'static str {
         Tab::MainHall => tr("Main hall"),
         Tab::Barracks => tr("Barracks"),
         Tab::Garrison => tr("Garrison"),
+        Tab::Store => tr("Store"),
         Tab::Market => tr("Market"),
         Tab::Sanctuary => tr("Sanctuary"),
         Tab::Tribute => tr("Tribute"),
@@ -238,6 +239,8 @@ pub fn service_error(e: ServiceError) -> String {
         ServiceError::Dead => tr("A fallen unit cannot be left in a garrison!").into(),
         ServiceError::Unpaid(price) => trf!("Unpaid: {price} gold to take back.", price),
         ServiceError::NoSuchUnit => tr("Nobody there.").into(),
+        ServiceError::PackFull => tr("The pack is full.").into(),
+        ServiceError::NoSuchItem => tr("No such item.").into(),
     }
 }
 
@@ -285,7 +288,7 @@ fn tab_art(tab: Option<Tab>) -> Option<usize> {
         Some(Tab::Market) => 4,
         Some(Tab::Sanctuary) => 5,
         None => 6,
-        Some(Tab::Tribute | Tab::Shipyard) => return None,
+        Some(Tab::Tribute | Tab::Shipyard | Tab::Store) => return None,
     })
 }
 
@@ -1319,6 +1322,46 @@ fn garrison(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
         }
     }
     tooltip_later(&hover);
+}
+
+/// The store tab (Razdor's deviation, the owner's request): the loot of his own building that
+/// its garrison could not wear, as squares of the pack's kind. A press takes the item into the
+/// hero's pack (`Game::take_from_store`); nothing goes in. The tab is offered only while the
+/// store holds something (`town::tabs`).
+fn store(game: &mut Game, assets: &Assets, f: &Frame, message: &mut Option<String>) {
+    let k = chrome::k();
+    let c = game.content.clone();
+    let items: Vec<ItemId> = game.store_here().to_vec();
+    let origin = at(f, CARD_PANEL_X + 24.0, 60.0, 0.0, 0.0);
+    let (cell, gap) = (56.0 * k, 6.0 * k);
+    const COLS: usize = 6;
+    let mut hover = None;
+    for (i, &item) in items.iter().enumerate() {
+        let (col, row) = ((i % COLS) as f32, (i / COLS) as f32);
+        let cr = Rect::new(origin.x + col * (cell + gap), origin.y + row * (cell + gap), cell, cell);
+        chrome::surface(cr, chrome::Skin::Paper);
+        draw_rectangle_lines(cr.x, cr.y, cr.w, cr.h, 1.0, Color::new(0.5, 0.35, 0.2, 0.8));
+        assets.draw_item(item, cr.x + 2.0 * k, cr.y + 2.0 * k, cell - 4.0 * k);
+        if mouse_in(cr.x, cr.y, cr.w, cr.h) {
+            draw_rectangle_lines(cr.x, cr.y, cr.w, cr.h, 2.0, chrome::GOLD);
+            hover = Some(item);
+            if clicked() {
+                *message = match game.take_from_store(i) {
+                    Ok(taken) => {
+                        cue(Cue::Item(c.item(taken).kind));
+                        None
+                    }
+                    Err(e) => Some(service_error(e)),
+                };
+            }
+        }
+    }
+    let strip = card_panel_divider(f);
+    chrome::army_divider_fill(strip);
+    chrome::hint_text(strip, tr("Click an item to take it into your pack."), Color::new(0.4, 1.0, 0.8, 1.0));
+    if let Some(item) = hover {
+        tooltip_later(&[(c.item(item).name.clone(), ACCENT)]);
+    }
 }
 
 /// What a press on the garrison tab does.
@@ -2461,6 +2504,7 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut BuildingView, message:
         Tab::MainHall => next = next.or(main_hall(game, &f, view, message, dialogs)),
         Tab::Barracks => next = next.or(barracks(game, assets, &f, view, message, dialogs)),
         Tab::Garrison => garrison(game, assets, &f, view, message),
+        Tab::Store => store(game, assets, &f, message),
         Tab::Market => next = next.or_else(|| market(game, assets, &f, view, message, dialogs)),
         Tab::Sanctuary => next = next.or_else(|| sanctuary(game, &f, view, message, dialogs)),
         Tab::Tribute | Tab::Shipyard => {}
