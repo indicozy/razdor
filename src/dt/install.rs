@@ -2,7 +2,7 @@
 //!
 //! Only reads. Nothing is copied or written anywhere.
 
-use super::data::{self, ArtefactDef, DrainRule, GlobalOptions, SpellDef, UnitDef};
+use super::data::{self, ArtefactDef, Build, DrainRule, GlobalOptions, SpellDef, UnitDef};
 use super::dtm::Scenario;
 use super::ini::Ini;
 use super::DtError;
@@ -150,17 +150,21 @@ impl DtInstall {
         }
         let global = read_ini(dir, GLOBAL_FILE)?;
         let mut options = logged(GLOBAL_FILE, GlobalOptions::from_ini(&global));
-        options.drain_rule = drain_rule(dir, &global);
         let settings = PlayOptions::read(dir);
         if settings.impossible {
             options.difficulty_factor = 100;
         }
+        options.build = build(dir, &global);
+        options.drain_rule = options.build.drain_rule();
         let units_ini = read_ini(dir, UNITS_FILE)?;
+        let mut units = logged(UNITS_FILE, data::parse_units(&units_ini));
+        let mut artefacts = logged(ARTEFACTS_FILE, data::parse_artefacts(&read_ini(dir, ARTEFACTS_FILE)?));
+        data::apply_build(&mut units, &mut artefacts, options.build);
         Ok(DtInstall {
             dir: dir.to_path_buf(),
-            units: logged(UNITS_FILE, data::parse_units(&units_ini)),
+            units,
             unit_pictures: data::unit_picture_frames(&units_ini),
-            artefacts: logged(ARTEFACTS_FILE, data::parse_artefacts(&read_ini(dir, ARTEFACTS_FILE)?)),
+            artefacts,
             spells: logged(SPELLS_FILE, data::parse_spells(&read_ini(dir, SPELLS_FILE)?)),
             options,
             settings,
@@ -486,6 +490,15 @@ pub fn drain_rule_of_exe(exe: &[u8]) -> Option<DrainRule> {
     let at = pe_file_offset(exe, DRAIN_VA)?;
     let first = *exe.get(at)?;
     Some(if first == JMP_REL32 { DrainRule::Community } else { DrainRule::Old })
+}
+
+/// The battle rules of the install in `dir` (see [`Build`]): the build its exe is, by the drain
+/// block (see [`drain_rule`]).
+pub fn build(dir: &Path, global: &Ini) -> Build {
+    match drain_rule(dir, global) {
+        DrainRule::Community => Build::Community12,
+        DrainRule::Old => Build::OlderCommunity,
+    }
 }
 
 /// The drain rule of the install in `dir`: from its `DiscordTimes.exe` when there is one
@@ -818,6 +831,26 @@ mod tests {
     }
 
     #[test]
+    fn the_build_follows_the_drain_block() {
+        use super::super::data::Build::{Community12, OlderCommunity};
+        let dir = std::env::temp_dir().join(format!("razdor-build-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let with_floor = Ini::parse("[GlobalOptions]\nMinSpellLife=15\n");
+        let without = Ini::parse("[GlobalOptions]\nDecSpellLife=2\n");
+        assert_eq!(build(&dir, &with_floor), Community12);
+        assert_eq!(build(&dir, &without), OlderCommunity);
+        // The exe decides: the original's IMUL at the drain block is the older build.
+        std::fs::write(dir.join(EXE_FILE), synthetic_exe(0x69, 0x1000)).unwrap();
+        assert_eq!(build(&dir, &with_floor), OlderCommunity);
+        std::fs::write(dir.join(EXE_FILE), synthetic_exe(JMP_REL32, 0x1000)).unwrap();
+        assert_eq!(build(&dir, &without), Community12);
+        assert_eq!(OlderCommunity.drain_rule(), DrainRule::Old);
+        assert_eq!(Community12.drain_rule(), DrainRule::Community);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn the_real_community_exe_runs_the_community_drain() {
         let Some(dir) = super::locate() else { return };
         let Ok(exe) = std::fs::read(dir.join(EXE_FILE)) else { return };
@@ -838,6 +871,17 @@ pub(crate) mod evolution_mod {
         let mut dt = DtInstall::load(Path::new(&dir)).expect("mod install loads");
         dt.maps.retain(|m| !crate::translate::job::is_translated_file(&m.name));
         Some(dt)
+    }
+
+    #[test]
+    fn evo_install_runs_the_older_build() {
+        let Some(dt) = evo_install() else { return };
+        assert_eq!(dt.options.build, Build::OlderCommunity);
+        assert_eq!(dt.options.drain_rule, DrainRule::Old);
+        // The older token table has none of these; its per-type fields are not read.
+        let lacking = [data::Bonus::Assault, data::Bonus::EternalGift, data::Bonus::FateGift, data::Bonus::Flying, data::Bonus::NoHeal, data::Bonus::PreventiveStrike];
+        assert!(dt.units.iter().all(|u| u.bonus.as_ref().is_none_or(|b| !lacking.contains(b))));
+        assert!(dt.units.iter().all(|u| u.evasion.is_none() && u.mana_drain.is_none() && u.min_magic_power.is_none()));
     }
 
     #[test]

@@ -425,6 +425,30 @@ impl Bonus {
     }
 }
 
+/// The per-build load rules of the unit and artefact data: an older build's exe does not know
+/// the bonus tokens it lacks (they read as no bonus, as an unknown token does), and does not
+/// read the per-type `Evasion`, `ManaDrain` and `MinMagicPower` (evolution-mod.md §1, 0x48f5ce,
+/// 0x48f580). Community 1.2 keeps all of them.
+pub fn apply_build(units: &mut [UnitDef], artefacts: &mut [ArtefactDef], build: Build) {
+    if build.has_12_features() {
+        return;
+    }
+    let lacks = |b: &mut Option<Bonus>| {
+        if b.as_ref().is_some_and(|b| !build.has_bonus(b)) {
+            *b = None;
+        }
+    };
+    for u in units.iter_mut() {
+        lacks(&mut u.bonus);
+        u.evasion = None;
+        u.min_magic_power = None;
+        u.mana_drain = None;
+    }
+    for a in artefacts.iter_mut() {
+        lacks(&mut a.bonus);
+    }
+}
+
 /// Artefact slot kind.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ArtefactType {
@@ -1110,6 +1134,41 @@ pub enum DrainRule {
     Old,
 }
 
+/// Which battle rules the install's exe runs (see `install::build`).
+///
+/// `Community12` is the Community Update 1.2 patch, which Razdor targets and which is the
+/// default everywhere. `OlderCommunity` is an older Community build (the «Evolution Mod»'s exe,
+/// evolution-mod.md): the same patch section without some 1.2 hooks, with other numbers for
+/// Fortify, Stun, Splash and the Elemental speed steps. Its bonus token table stops before
+/// Assault, EternalGift, Evasion, FateGift, Flying, NoHeal and PreventiveStrike (c27df8).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Build {
+    #[default]
+    Community12,
+    OlderCommunity,
+}
+
+impl Build {
+    /// The 1.2 battle features the older build's exe does not have. Community 1.2 only.
+    pub fn has_12_features(self) -> bool {
+        self == Build::Community12
+    }
+
+    /// The drain the build runs: the 1.2 patch's, or the original's own block (0x484466) in
+    /// the older exe.
+    pub fn drain_rule(self) -> DrainRule {
+        match self {
+            Build::Community12 => DrainRule::Community,
+            Build::OlderCommunity => DrainRule::Old,
+        }
+    }
+
+    /// Whether the build's exe has this bonus token (its token table, c27df8).
+    pub fn has_bonus(self, b: &Bonus) -> bool {
+        self.has_12_features() || !matches!(b, Bonus::Assault | Bonus::EternalGift | Bonus::FateGift | Bonus::Flying | Bonus::NoHeal | Bonus::PreventiveStrike)
+    }
+}
+
 /// Gameplay constants from `_Global.ini` (mechanics.md appendix).
 /// [`Default`] gives the vanilla values, for content without the file (the built-in demo).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1182,6 +1241,9 @@ pub struct GlobalOptions {
     pub army_generation: Vec<(String, Vec<u32>)>,
     /// Which magic drain the install runs; set from the exe at load, Community by default.
     pub drain_rule: DrainRule,
+    /// The battle rules of the exe the install runs; set from the exe at load (Community 1.2
+    /// by default). `drain_rule` is `build.drain_rule()`.
+    pub build: Build,
     /// Other `[GlobalOptions]` keys.
     pub extra: BTreeMap<String, String>,
 }
@@ -1273,6 +1335,7 @@ impl Default for GlobalOptions {
             item_sale_cost: 25,
             ship_cost: 250,
             drain_rule: DrainRule::Community,
+            build: Build::Community12,
             battle_effects: BattleEffect::SHIPPED.map(|(f, r, g, b, a, y)| BattleEffect { file: f.to_string(), rgb: [r, g, b], alpha: a, y }),
             ai_targets: AiTargets::default(),
             army_generation: Vec::new(),
@@ -1804,5 +1867,18 @@ mod real_install {
         assert_eq!(unknown, 0, "unknown bonus tokens");
         assert!(known > 0);
         assert_eq!(on_defs, known);
+    }
+
+    #[test]
+    fn the_older_build_drops_the_tokens_and_fields_its_exe_does_not_read() {
+        let ini = Ini::parse("[1 Unit]\r\nGlobalIndex=1\r\nName=One\r\nStartExpirience=1\r\nCost=10\r\nHits=10\r\nAttackBlow=5\r\nBonus=Flying\r\nEvasion=15\r\nManaDrain=2\r\n[2 Unit]\r\nGlobalIndex=2\r\nName=Two\r\nStartExpirience=1\r\nCost=10\r\nHits=10\r\nAttackBlow=5\r\nBonus=Splash\r\n");
+        let mut units = parse_units(&ini).value;
+        let mut none = Vec::new();
+        apply_build(&mut units, &mut none, Build::Community12);
+        assert_eq!((units[0].bonus.clone(), units[0].evasion, units[0].mana_drain), (Some(Bonus::Flying), Some(15), Some(2)));
+        apply_build(&mut units, &mut none, Build::OlderCommunity);
+        assert_eq!(units[0].bonus, None, "Flying is not in the older token table");
+        assert_eq!(units[1].bonus, Some(Bonus::Splash), "Splash is");
+        assert_eq!((units[0].evasion, units[0].mana_drain), (None, None), "not read");
     }
 }

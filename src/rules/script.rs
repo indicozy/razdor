@@ -17,6 +17,7 @@ use super::town::ServiceError;
 use super::units::Unit;
 use super::ai::troop_max_hp;
 use super::world::{Army, EventInfo, Troop};
+use crate::dt::data::Build;
 use crate::dt::dtm::EventKind;
 
 /// Radius revealed around an army an event shows: 6 half-cells (world.md §3, 0x4ab6c3).
@@ -408,6 +409,10 @@ impl Game {
 }
 
 impl EventWorld for Game {
+    fn build(&self) -> Build {
+        self.content.options.build
+    }
+
     fn now(&self) -> u64 {
         self.clock.total_minutes() as u64
     }
@@ -992,9 +997,9 @@ impl EventWorld for Game {
     }
 
     /// Opcode 14: the unit (or every unit) holds each of the spells in one of its slots.
-    fn has_spells(&self, holder: Holder, unit: Option<u8>, spells: &[u8]) -> bool {
+    fn has_spells(&self, holder: Holder, unit: Option<i32>, spells: &[u8]) -> bool {
         let holds = |slots: &[Option<SpellSlot>; SPELL_SLOTS]| spells.iter().all(|&s| slots.iter().flatten().any(|x| x.spell == s as u32));
-        let pick = |k: usize| unit.is_none_or(|n| n as usize == k);
+        let pick = |k: usize| unit.is_none_or(|n| n == k as i32);
         let w = &self.world;
         let troops = match holder {
             Holder::Player => return self.squad.iter().enumerate().filter(|(k, _)| pick(*k)).all(|(_, u)| holds(&u.spells)),

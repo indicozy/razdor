@@ -3093,3 +3093,226 @@ fn max_sacrifices_nothing_in_a_quick_fight_without_a_proven_win() {
     assert_ne!(quick.choice.plan(), sacrifice, "{quick:?}");
     assert!(qa.fighters[2].alive() && qa.outcome() == Outcome::Ongoing);
 }
+
+// --- the older Community build (the Evolution Mod's exe, evolution-mod.md §1) -----------------
+
+/// A battle on `build`'s rules: the content's options set to it.
+fn on_build(build: Build, extra: Vec<UnitDef>, player: &[(u32, Slot)], enemies: &[(u32, Slot)]) -> Battle {
+    let mut c = match Arc::try_unwrap(content_with(extra, Formation::WIDE)) {
+        Ok(c) => c,
+        Err(_) => unreachable!("freshly made"),
+    };
+    c.options.build = build;
+    c.options.drain_rule = build.drain_rule();
+    battle_in(&Arc::new(c), player, enemies)
+}
+
+const OLDER: Build = Build::OlderCommunity;
+const TWELVE: Build = Build::Community12;
+
+#[test]
+fn older_fortify_is_20_percent_of_defence_per_turn() {
+    // c25a51: max(1, DB × 20 / 100) × min(turn − 1, 5); 1.2 has 25 (row36).
+    let wall = bonus(68, Bonus::Fortify, UnitDef { hits: 3000, ..warrior(68, 1, 20) });
+    let mut bt = on_build(OLDER, vec![wall, hammer()], &[(69, f(2)), (11, b(2))], &[(68, f(2))]);
+    let mut seen = Vec::new();
+    for round in 1..=7 {
+        to_round(&mut bt, round);
+        seen.push(bt.physical_damage(0, 2, ActionKind::Melee));
+    }
+    assert_eq!(seen, vec![80, 76, 72, 68, 64, 60, 60]);
+}
+
+#[test]
+fn older_stun_takes_25_percent_on_a_blow_and_21_on_a_spell_and_nothing_on_a_shot() {
+    // c27e93 (blow), c26e44 (magic); the shot path returns at 0x48b2cf. 1.2: 30% each.
+    let hit = |build: Build, how: StunHit| {
+        let stunner = bonus(75, Bonus::Stun, acts(75, 2, warrior(75, 30, 0)));
+        let mut bt = on_build(build, vec![stunner], &[(75, f(0))], &[(18, f(0))]);
+        bt.fighters[1].cur_initiative = 100;
+        bt.stun(0, 1, how);
+        bt.fighters[1].mods.initiative
+    };
+    assert_eq!([hit(OLDER, StunHit::Blow), hit(OLDER, StunHit::Magic), hit(OLDER, StunHit::Shot)], [-25, -21, 0]);
+    assert_eq!([hit(TWELVE, StunHit::Blow), hit(TWELVE, StunHit::Magic), hit(TWELVE, StunHit::Shot)], [-30, -30, -30]);
+}
+
+#[test]
+fn older_stun_blow_takes_25_percent_of_the_current_initiative_each_hit() {
+    let mace = bonus(75, Bonus::Stun, acts(75, 2, warrior(75, 30, 0)));
+    let mut bt = on_build(OLDER, vec![mace], &[(75, f(2))], &[(18, f(2))]);
+    bt.act(1).unwrap();
+    assert_eq!(bt.fighters[1].stats[Stat::Initiative], 8, "10 − 25% of 10");
+    bt.act(1).unwrap();
+    assert_eq!(bt.fighters[1].stats[Stat::Initiative], 6, "the same 2 again");
+    to_round(&mut bt, 2);
+    assert_eq!(bt.fighters[1].stats[Stat::Initiative], 10);
+}
+
+#[test]
+fn older_splash_takes_70_and_30_percent_with_the_multiply_high_constants() {
+    // c270c6, c27320 …: 0xb3333333 and 0x4ccccccd, the same ⌊x·C / 2³²⌋ as 1.2's (§6).
+    let splashy = bonus(86, Bonus::Splash, UnitDef { hits: 3000, ..warrior(86, 100, 0) });
+    let target = UnitDef { hits: 3000, ..warrior(68, 1, 0) };
+    let attacker = |build: Build| {
+        let bt = on_build(build, vec![splashy.clone(), target.clone(), hammer()], &[(86, f(0))], &[(68, f(0))]);
+        bt.physical_damage(0, 1, ActionKind::Melee)
+    };
+    assert_eq!(attacker(OLDER), 69, "100 × 0.7, one less than the exact 70");
+    assert_eq!(attacker(TWELVE), 80, "100 × 0.8 (1.2)");
+    let side = splash_factors(OLDER).1;
+    assert_eq!([5, 10, 25, 100, 7, 50].map(|x| splash_scale(x, side)), [1, 3, 7, 30, 2, 15]);
+    assert_eq!(splash_factors(OLDER), (0xB333_3333, 0x4CCC_CCCD));
+}
+
+#[test]
+fn older_elemental_speed_steps_are_1_for_20_to_44_2_for_45_to_99_3_for_100_to_255() {
+    // 483680. Everything else is 0, unlike 1.2 where 256 and up is 3.
+    let steps = |b| [-5, 0, 19, 20, 44, 45, 99, 100, 255, 256].map(|p| actions_for(b, p));
+    assert_eq!(steps(OLDER), [0, 0, 0, 1, 1, 2, 2, 3, 3, 0]);
+    assert_eq!(steps(TWELVE), [0, 0, 0, 1, 1, 2, 2, 3, 3, 3]);
+}
+
+#[test]
+fn older_evasion_is_not_read_for_the_type() {
+    // 0x485b26; the loader does not read Evasion (0x48f5ce).
+    let dodger = UnitDef { evasion: Some(50), hits: 300, ..warrior(92, 1, 0) };
+    let hit = |build: Build| {
+        let bt = on_build(build, vec![dodger.clone(), hammer()], &[(69, f(0))], &[(92, f(0))]);
+        bt.physical_damage(0, 1, ActionKind::Melee)
+    };
+    assert_eq!(hit(OLDER), 100);
+    assert_eq!(hit(TWELVE), 50, "1.2: 100 × (100 − 50) / 100");
+}
+
+#[test]
+fn older_piercing_ignores_poison_armor_ignore() {
+    // 0x485992, 0x4859f4: PoisonArmorIgnore pierces in 1.2 only.
+    let piercer = bonus(90, Bonus::PoisonArmorIgnore, warrior(90, 90, 0));
+    let hit = |build: Build| {
+        let bt = on_build(build, vec![piercer.clone(), armour()], &[(90, f(0))], &[(84, f(0))]);
+        bt.physical_damage(0, 1, ActionKind::Melee)
+    };
+    assert_eq!(hit(OLDER), 70, "armour 20 stands");
+    assert_eq!(hit(TWELVE), 90, "1.2: the defence counts 0");
+}
+
+#[test]
+fn older_assault_takes_no_two_thirds() {
+    // 0x485a78: the Assault test is 1.2's; the older exe has no hook there.
+    let beast = bonus(91, Bonus::Assault, warrior(91, 1, 0));
+    let hit = |build: Build| {
+        let c = match Arc::try_unwrap(content_with(vec![beast.clone(), hammer()], Formation::WIDE)) {
+            Ok(mut c) => {
+                c.options.build = build;
+                c.options.drain_rule = build.drain_rule();
+                Arc::new(c)
+            }
+            Err(_) => unreachable!("freshly made"),
+        };
+        let mut bt = prepared(&c, &[(69, f(0))], &[(91, f(0))], Team::Player);
+        bt.set_building_defence(Team::Player, 10);
+        bt.begin();
+        bt.physical_damage(0, 1, ActionKind::Melee)
+    };
+    assert_eq!(hit(OLDER), 100);
+    assert_eq!(hit(TWELVE), 66, "1.2: 100 × 2 / 3");
+}
+
+#[test]
+fn older_flying_is_not_in_the_build() {
+    // 0x485554: a row-2 Flying warrior strikes the three front cells in 1.2 only.
+    let bird = bonus(79, Bonus::Flying, warrior(79, 30, 0));
+    let enemies = [(18, f(1)), (18, f(2)), (18, f(3)), (18, f(5)), (18, b(2))];
+    let older = on_build(OLDER, vec![bird.clone()], &[(79, b(2)), (10, f(0))], &enemies);
+    assert!(older.targets(0).is_empty());
+    let twelve = on_build(TWELVE, vec![bird], &[(79, b(2)), (10, f(0))], &enemies);
+    assert_eq!(twelve.targets(0), vec![2, 3, 4]);
+}
+
+#[test]
+fn older_noheal_does_not_stop_a_heal_on_a_crippled_unit() {
+    // 0x485669: the NoHeal target filter is 1.2's.
+    let healer = |build: Build| {
+        let mut bt = on_build(build, vec![], &[(13, b(2)), (10, f(0))], &[(18, f(0))]);
+        bt.fighters[1].hp -= 5;
+        cripple(&mut bt, 1);
+        bt.options(0, 1)
+    };
+    assert!(healer(OLDER).contains(&ActionKind::Heal));
+    assert!(!healer(TWELVE).contains(&ActionKind::Heal));
+}
+
+#[test]
+fn older_bleed_and_noheal_marks_are_not_set_by_a_hit() {
+    // The on-hit block (c291d1, c296bc, c29984): Bleed (0x489f62), NoHeal's marks.
+    let hit = |build: Build, token: Bonus| {
+        let mut bt = on_build(build, vec![bonus_of(93, token)], &[(93, f(0))], &[(18, f(0))]);
+        bt.on_hit(0, 1, 10, false);
+        (bt.fighters[1].bleed, bt.crippled(1))
+    };
+    assert_eq!(hit(OLDER, Bonus::Bleed), (0, false));
+    assert_eq!(hit(TWELVE, Bonus::Bleed), (BLEED_PERCENT, false));
+    assert_eq!(hit(OLDER, Bonus::NoHeal), (0, false));
+    assert_eq!(hit(TWELVE, Bonus::NoHeal), (0, true));
+}
+
+/// A warrior of id `id` with bonus `b` (the battle tests' helper, by value).
+fn bonus_of(id: u32, b: Bonus) -> UnitDef {
+    bonus(id, b, warrior(id, 10, 0))
+}
+
+#[test]
+fn older_fate_gift_does_not_save_on_a_hit() {
+    // The on-hit FateGift (0x48a9f1…): 1.2 only.
+    let hit = |build: Build| {
+        let mut bt = on_build(build, vec![bonus_of(94, Bonus::FateGift)], &[(10, f(0))], &[(94, f(0))]);
+        bt.fighters[1].hp = 0;
+        bt.on_hit(0, 1, 10, false);
+        bt.fighters[1].hp > 0
+    };
+    assert!(!hit(OLDER));
+    assert!(hit(TWELVE));
+}
+
+#[test]
+fn older_eternal_gift_changes_the_turn_modifiers_not_the_base() {
+    // The EternalGift blessing and curse (c2a019…): 1.2 only.
+    let caster = bonus_of(95, Bonus::EternalGift);
+    let change = |build: Build| {
+        let mut bt = on_build(build, vec![caster.clone()], &[(95, f(0))], &[(18, f(0))]);
+        let base = bt.fighters[1].base[Stat::AttackBlow];
+        bt.apply_buff(0, 1, Buff { attack: 5, ..Buff::default() });
+        (bt.fighters[1].base[Stat::AttackBlow] - base, bt.fighters[1].mods.attack)
+    };
+    assert_eq!(change(OLDER), (0, 5));
+    assert_eq!(change(TWELVE), (5, 0));
+}
+
+#[test]
+fn older_preventive_strike_does_not_answer() {
+    // 0x48b214, 0x48b2f6: 1.2 only.
+    let guard = bonus(96, Bonus::PreventiveStrike, warrior(96, 50, 0));
+    let hurt = |build: Build| {
+        let mut bt = on_build(build, vec![guard.clone()], &[(10, f(0))], &[(96, f(0))]);
+        let before = bt.fighters[0].hp;
+        let mut counter = None;
+        bt.preventive_strike(0, 1, ActionKind::Melee, &mut counter);
+        before - bt.fighters[0].hp
+    };
+    assert_eq!(hurt(OLDER), 0);
+    assert!(hurt(TWELVE) > 0);
+}
+
+#[test]
+fn older_tokens_it_lacks_are_no_bonus_and_the_rest_stay() {
+    // The older token table stops before these (c27df8): the feature tests above hold
+    // whatever the data says.
+    for b in [Bonus::Assault, Bonus::EternalGift, Bonus::FateGift, Bonus::Flying, Bonus::NoHeal, Bonus::PreventiveStrike] {
+        assert!(!OLDER.has_bonus(&b), "{b:?}");
+        assert!(TWELVE.has_bonus(&b), "{b:?}");
+    }
+    for b in [Bonus::Bleed, Bonus::Splash, Bonus::Fortify, Bonus::Stun, Bonus::PoisonArmorIgnore, Bonus::Caster] {
+        assert!(OLDER.has_bonus(&b), "{b:?}");
+    }
+}
