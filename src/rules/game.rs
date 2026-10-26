@@ -510,6 +510,17 @@ pub struct Game {
     /// Set by the interface, not part of the save.
     #[serde(skip)]
     pub avoid_armies: bool,
+    /// Razdor's deviation «Сохранять расстановку после боя» (`Settings::keep_formation`, the
+    /// owner's request): on, after a battle every unit returns to the cell it had before it
+    /// (the dead too), instead of the cells the battle left it on (4988c0, 4d2141, 489f50).
+    /// Off, the original's write-back. Set by the interface, not part of the save.
+    #[serde(skip)]
+    pub keep_formation: bool,
+    /// The army's cells per squad index, taken when the battle starts (`start_battle`, before
+    /// `Battle::begin`'s start fix). Not saved: a save made during a battle reopens it, and
+    /// `start_battle` takes them again from the same cells.
+    #[serde(skip)]
+    formation_before_battle: Option<Vec<Slot>>,
     /// Global UI preference: when off, saved battle-disabled marks have no effect.
     #[serde(skip)]
     pub allow_unit_benching: bool,
@@ -692,6 +703,8 @@ impl Game {
             max_ai: false,
             friends_let_pass: false,
             avoid_armies: false,
+            keep_formation: false,
+            formation_before_battle: None,
             allow_unit_benching: false,
             pursue: true,
             walk_pace: 1.0,
@@ -2220,6 +2233,9 @@ impl Game {
     /// makes the player the attacker (the building's extra defence helps the garrison); an
     /// army that catches the player attacks.
     pub fn start_battle(&mut self) -> Battle {
+        // The cells the army stands in now, before `Battle::begin`'s start fix moves its back
+        // row forward (4d2141); `settle_battle` returns the units to them when `keep_formation`.
+        self.formation_before_battle = Some(self.squad.iter().map(|u| u.slot).collect());
         // A stop's snap still due comes first (0x4ad8a0 runs before the battle opens).
         self.armies_snap();
         // An army fights with its items worn (`ai::army_units`).
@@ -2388,6 +2404,28 @@ impl Game {
         }
     }
 
+    /// Puts every unit back on its cell from `before` (squad order); a cell outside the
+    /// formation or already given is taken by [`Formation::after_battle_slot`], the living first.
+    fn return_to_cells(&mut self, before: &[Slot]) {
+        let formation = self.content.formation;
+        let mut taken: Vec<Slot> = Vec::new();
+        let mut placed = vec![false; before.len()];
+        for (i, &s) in before.iter().enumerate() {
+            if formation.contains(s) && !taken.contains(&s) {
+                self.squad[i].slot = s;
+                taken.push(s);
+                placed[i] = true;
+            }
+        }
+        let rest: Vec<usize> = (0..before.len()).filter(|&i| !placed[i] && self.squad[i].alive()).chain((0..before.len()).filter(|&i| !placed[i] && !self.squad[i].alive())).collect();
+        for i in rest {
+            if let Some(s) = formation.after_battle_slot(&taken) {
+                self.squad[i].slot = s;
+                taken.push(s);
+            }
+        }
+    }
+
     fn settle_battle(&mut self, battle: &Battle) -> BattleResult {
         // The battle's end puts him on his cell again (0x4c50ec → 0x497c68): his next step is
         // priced there as it stands.
@@ -2418,6 +2456,15 @@ impl Game {
             if let Some(s) = formation.after_battle_slot(&taken) {
                 self.squad[i].slot = s;
                 taken.push(s);
+            }
+        }
+        // Razdor's deviation «Сохранять расстановку после боя» (`keep_formation`, the owner's
+        // request): every unit goes back to its cell from before the battle, the dead too; a
+        // cell now outside the formation or taken falls back to the rule above. The original
+        // keeps the cells rebuilt here (4988c0), after the start fix (4d2141) and the collapses (489f50).
+        if let Some(before) = self.formation_before_battle.take() {
+            if self.keep_formation && before.len() == self.squad.len() {
+                self.return_to_cells(&before);
             }
         }
         // The potions end with every battle of the player (0x4c50ec → 0x490720), then each
@@ -3152,6 +3199,108 @@ mod tests {
         assert_eq!(g.squad[2].slot, first_free);
         assert_eq!(g.squad[0].slot, f.after_battle_slot(&[Slot::new(crate::rules::formation::Row::Front, 0), first_free]).unwrap());
         assert_eq!(g.squad[0].hp, 1);
+    }
+
+    /// The index in `b.fighters` of squad member `i`.
+    fn fighter_of(b: &Battle, i: usize) -> usize {
+        b.fighters.iter().position(|f| f.squad_index == Some(i)).unwrap()
+    }
+
+    /// A knight, a spearman in front and one in the back row, against the bandit camp.
+    fn formation_game(keep: bool) -> Game {
+        use crate::rules::formation::Row;
+        let mut g = quiet_game(HeroClass::Knight);
+        let spear = unit(&g, "spearman");
+        g.hire(spear).unwrap();
+        g.hire(spear).unwrap();
+        g.squad[0].slot = Slot::new(Row::Front, 0);
+        g.squad[1].slot = Slot::new(Row::Front, 1);
+        g.squad[2].slot = Slot::new(Row::Back, 1);
+        g.keep_formation = keep;
+        g.foe = Some(Foe::Garrison(g.world.index_of("Bandit camp")));
+        g
+    }
+
+    #[test]
+    fn keep_formation_puts_the_units_back_after_a_collapse_the_dead_too() {
+        use crate::rules::formation::Row;
+        let (front, back) = (|c| Slot::new(Row::Front, c), |c| Slot::new(Row::Back, c));
+        // Razdor's deviation: the front row dies, the back row collapses forward (489f50), and
+        // after the battle every unit stands on the cell it had before, the dead included.
+        let mut g = formation_game(true);
+        let mut b = g.start_battle();
+        b.begin();
+        let (hero, first, second) = (fighter_of(&b, 0), fighter_of(&b, 1), fighter_of(&b, 2));
+        b.fighters[hero].hp = 0;
+        b.fighters[first].hp = 0;
+        b.fighters[second].slot = front(1);
+        wipe_enemies(&mut b);
+        g.settle_battle(&b);
+        assert_eq!(g.squad[2].slot, back(1), "the back row returns to its row");
+        assert_eq!(g.squad[1].slot, front(1), "the dead keep their cell");
+        assert_eq!(g.squad[0].slot, front(0));
+        assert!(g.formation_before_battle.is_none(), "the snapshot is used once");
+        // Off, the original's write-back: the survivor keeps the cell it ended on.
+        let mut g = formation_game(false);
+        let mut b = g.start_battle();
+        b.begin();
+        let (hero, first, second) = (fighter_of(&b, 0), fighter_of(&b, 1), fighter_of(&b, 2));
+        b.fighters[hero].hp = 0;
+        b.fighters[first].hp = 0;
+        b.fighters[second].slot = front(1);
+        wipe_enemies(&mut b);
+        g.settle_battle(&b);
+        assert_eq!(g.squad[2].slot, front(1), "the original keeps the collapse");
+    }
+
+    #[test]
+    fn keep_formation_undoes_the_start_fix_when_the_front_row_was_empty() {
+        use crate::rules::formation::Row;
+        let (front, back) = (|c| Slot::new(Row::Front, c), |c| Slot::new(Row::Back, c));
+        // The front row is empty before the battle: `begin` moves the back row forward (4d2141).
+        let mut g = formation_game(true);
+        // Columns inside the wide back row (1..5) and reserve (2..4), valid in both shapes.
+        g.squad[0].slot = back(1);
+        g.squad[1].slot = back(2);
+        g.squad[2].slot = Slot::new(Row::Reserve, 2);
+        let mut b = g.start_battle();
+        b.begin();
+        assert!(b.fighters.iter().any(|f| f.squad_index == Some(0) && f.slot.row == Row::Front), "the start fix moved the hero");
+        wipe_enemies(&mut b);
+        g.settle_battle(&b);
+        assert_eq!(g.squad[0].slot, back(1), "back in the back row after the battle");
+        assert_eq!(g.squad[1].slot, back(2));
+        assert_eq!(g.squad[2].slot, Slot::new(Row::Reserve, 2));
+        // Off, the original keeps the fixed formation.
+        let mut g = formation_game(false);
+        g.squad[0].slot = back(1);
+        g.squad[1].slot = back(2);
+        g.squad[2].slot = Slot::new(Row::Reserve, 2);
+        let mut b = g.start_battle();
+        b.begin();
+        wipe_enemies(&mut b);
+        g.settle_battle(&b);
+        assert_eq!(g.squad[0].slot, front(1), "the original keeps the start fix, the same column");
+    }
+
+    #[test]
+    fn keep_formation_falls_back_when_a_pre_battle_cell_is_taken_or_gone() {
+        use crate::rules::formation::Row;
+        let mut g = formation_game(true);
+        let mut b = g.start_battle();
+        b.begin();
+        wipe_enemies(&mut b);
+        // The snapshot's cells: the second spearman's cell is the first's (taken), the hero's
+        // is outside the formation.
+        let f = g.content.formation;
+        let cell = Slot::new(Row::Front, 1);
+        let gone = Slot::new(Row::Reserve, 9);
+        g.formation_before_battle = Some(vec![gone, cell, cell]);
+        g.settle_battle(&b);
+        assert_eq!(g.squad[1].slot, cell, "the first to claim it keeps it");
+        assert!(f.contains(g.squad[0].slot) && g.squad[0].slot != gone);
+        assert!(f.contains(g.squad[2].slot) && g.squad[2].slot != cell);
+        assert_ne!(g.squad[0].slot, g.squad[2].slot);
     }
 
     #[test]

@@ -88,6 +88,18 @@ transferred into a world garrison use that garrison's ordinary troop records.
 Snapshot scenes can mark a member using `RAZDOR_SCENE_BENCHED=<squad index>`; enable the
 global preference in an isolated snapshot save directory to display its controls.
 
+## Formation after battle
+
+«Сохранять расстановку после боя» (`Settings::keep_formation`, `Game::keep_formation`) is Razdor's
+deviation, asked for by the owner ("why is the army's layout a bit different at every new fight?"),
+on by default, in «Ещё…» beside «Обход армий на пути». The original rewrites the army's formation
+after each battle from the cells the battle left (4988c0), after its start fix (4d2141) and its
+collapses (489f50): survivors keep the cells they ended on, the rest take free ones. On, every
+unit that was in the army before the battle goes back to its cell from before it, the dead too.
+A cell that is outside the formation or taken falls back to the original's rule. HP, XP, deaths,
+items and the rest are unchanged. Off, the original's write-back. The difftests and replays
+build `Game` with the flag off (`Game::new`), so they keep the original's rule.
+
 ## Travel and Shift shortcuts
 
 Route avoidance is Razdor's advanced setting «Обход армий на пути» (`Settings::avoid_armies`,

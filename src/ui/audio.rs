@@ -207,6 +207,10 @@ pub struct Settings {
     /// (`Game::avoid_armies`); off, the original's route, which walks through the armies it
     /// does not stop for.
     pub avoid_armies: bool,
+    /// Advanced, Razdor's deviation: «Сохранять расстановку после боя». On (the default), every
+    /// unit goes back after a battle to the cell it had before it (`Game::keep_formation`); off,
+    /// the original's write-back, where the battle's cells stay.
+    pub keep_formation: bool,
     /// Advanced, Razdor's: «Битвы армий на карте». On (the default), a battle between map
     /// parties that the AI plays out shows a crossed-swords mark on its cell (where the player
     /// sees it) and a notice; off, nothing of it (`Game::take_clashes` still drains).
@@ -266,7 +270,7 @@ pub enum Orientation {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), friends_let_pass: false, pass_on_bridges: false, avoid_armies: false, battle_marks: true, army_list: false, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new() }
+        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), friends_let_pass: false, pass_on_bridges: false, avoid_armies: false, keep_formation: true, battle_marks: true, army_list: false, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new() }
     }
 }
 
@@ -875,6 +879,16 @@ mod tests {
         let enabled = Settings { avoid_armies: true, ..Settings::default() };
         let back: Settings = serde_json::from_str(&serde_json::to_string(&enabled).unwrap()).unwrap();
         assert!(back.avoid_armies);
+    }
+
+    #[test]
+    fn keep_formation_defaults_on_and_survives_serialization() {
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert!(old.keep_formation, "an older file: the units go back to their cells");
+        assert!(Settings::default().keep_formation);
+        let off = Settings { keep_formation: false, ..Settings::default() };
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&off).unwrap()).unwrap();
+        assert!(!back.keep_formation);
     }
 
     #[test]

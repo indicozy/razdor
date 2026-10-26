@@ -37,6 +37,7 @@ open and the step animation has played, then calls `saves::battle` (`src/ui/save
 3. calls `Game::start_battle` and wraps the result in `BattleView::new`.
 
 `Game::start_battle` (`src/rules/game.rs`):
+- records the player's cells per squad index (`Game::formation_before_battle`) before anything else;
 - picks the enemy units (`ai::army_units` for an army, `troop_unit` for a garrison) and
   remembers their indices in `Game::battle_troops` for the write-back;
 - the attacker brings only paid units, the defender all living ones (`unpaid` sits out only
@@ -168,6 +169,13 @@ with `Surrender > 0` units gives up while both stand; its values become the winn
 - the formation is rebuilt from the battle grid (survivors keep their cells; the rest take
   free cells, `Formation::after_battle_slot`); the hero comes back with 1 HP if his army
   survives (`Battle::player_results`);
+- Razdor's optional deviation «Сохранять расстановку после боя» (`Game::keep_formation`, on by
+  default, `Settings::keep_formation`): when on, every unit goes back to the cell it had before
+  the battle, the dead too (`Game::return_to_cells`); a cell now outside the formation or already
+  taken falls back to `after_battle_slot`, the living first. The cells are taken in
+  `start_battle` (`Game::formation_before_battle`), before `begin`'s start fix, and used once;
+  not saved: a save made during a battle reopens it and `start_battle` takes them again. Off,
+  the original's write-back as above (`experimental-rules.md`);
 - potions end, units follow their max HP, then XP is paid (`Battle::player_xp` →
   `experience::player_gain`), then the dead lose their spell slots and get `died_at`;
 - the foe is cleared, the AI rescoring is marked dirty (`mark_dirty`, `recount_hero`);

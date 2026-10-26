@@ -925,6 +925,7 @@ pub fn follow_settings(audio: &super::audio::Settings, g: &mut razdor::rules::ga
     g.walk_pace = walk_pace(audio);
     g.friends_let_pass = audio.friends_let_pass;
     g.avoid_armies = audio.avoid_armies;
+    g.keep_formation = audio.keep_formation;
     g.allow_unit_benching = audio.allow_unit_benching;
     g.pass_on_bridges = audio.pass_on_bridges;
     g.battle_marks = audio.battle_marks;
@@ -1242,6 +1243,11 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     // Razdor's option: the route closes every army's cell (off: the original's route).
     if row(tr("Route around armies"), if audio.avoid_armies { tr("On") } else { tr("Off") }, &mut y) {
         audio.avoid_armies = !audio.avoid_armies;
+    }
+    // Razdor's deviation (the owner's request): after a battle every unit goes back to its cell
+    // from before it (`Game::keep_formation`); off, the original's write-back.
+    if row(tr("Keep formation after battle"), if audio.keep_formation { tr("On") } else { tr("Off") }, &mut y) {
+        audio.keep_formation = !audio.keep_formation;
     }
     // Razdor's options: a battle between armies on the map shows a mark and a notice (on by
     // default); the armies the player sees are listed under the minimap (off by default).
