@@ -23,6 +23,7 @@ Confidence tags used throughout:
 | [saves-data.md](saves-data.md) | How the code reads every ini file and key (matching, defaults), map loading, the save and autosave format, options, the in-memory records a reimplementation needs |
 | [interface.md](interface.md) | Game flow and every screen: start-up and loading, menus, hero choice, the world screen, mouse and keys, camera, windows, hints, message boxes, battle screen, music and sound triggers, timings, options |
 | [community-patches.md](community-patches.md) | Everything the Community Update adds: all 126 hooks into `.mod`, the relocated tables in `.bonus`, every Community unit bonus and ini key, the wide row, and the vanilla behaviour behind each hook |
+| [evolution-mod.md](evolution-mod.md) | The «Community Update Evolution Mod» build (a player install): an older Community executable and its own data; every difference from Community 1.2 with addresses |
 | [engine.md](engine.md) | Display and frame loop, the clock, the random generator (exact algorithm and call sites), input, text and fonts, colour, animation and sound timing |
 
 Each file ends with a **"Razdor now → original"** table listing where the engine still
