@@ -1033,7 +1033,17 @@ pub fn apply_options(audio: &super::audio::Settings) {
     chrome::set_option_override("OptValue8", audio.autosave.map(|on| if on { "1" } else { "0" }.to_string()));
     set_hints(!hints_off(audio));
     super::unit_drag::set_controls(audio.formation_controls);
-    super::touchpad::set_setting(audio.touchpad);
+    // The touchpad mode takes effect on «Принять», not when its box is ticked: while the window
+    // is open the mode stays as it opened (see `touchpad_in_effect`).
+    let opened_with = OPENED_WITH.with(|o| o.borrow().as_ref().map(|before| before.touchpad));
+    super::touchpad::set_setting(touchpad_in_effect(audio.touchpad, opened_with));
+}
+
+/// The touchpad mode the game runs with: while the settings window is open (`opened_with` holds
+/// the settings as the window found them) the value it opened with, so a ticked box applies on
+/// «Принять» only; once closed, the live setting.
+fn touchpad_in_effect(live: Option<bool>, opened_with: Option<Option<bool>>) -> Option<bool> {
+    opened_with.unwrap_or(live)
 }
 
 /// "Настройки звука, графики и геймплея", with what Razdor lets the player change: the
@@ -1457,8 +1467,16 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
         }
         if advanced_window(audio, over_map) {
             ADVANCED.with(|a| a.set(false));
-            // What the advanced window set is kept, whatever the settings window ends with.
-            OPENED_WITH.with(|o| *o.borrow_mut() = Some(audio.clone()));
+            // What the advanced window set is kept, whatever the settings window ends with; the
+            // touchpad mode stays as the settings window opened it, until «Принять».
+            OPENED_WITH.with(|o| {
+                let mut o = o.borrow_mut();
+                let mut kept = audio.clone();
+                if let Some(before) = o.as_ref() {
+                    kept.touchpad = before.touchpad;
+                }
+                *o = Some(kept);
+            });
         }
         return false;
     }
@@ -1730,6 +1748,18 @@ mod tests {
     /// (its 29 px strip and frame off), the Ok button's top 48 px above the bottom, four lines of
     /// the battle AI hint and four of the language's. The pitch keeps the column above the Ok
     /// button, and the original's 44 px when the window has the room.
+    #[test]
+    fn the_touchpad_mode_takes_effect_on_apply_not_when_ticked() {
+        // Window open: the value it opened with, whatever the box says now.
+        assert_eq!(touchpad_in_effect(Some(true), Some(None)), None);
+        assert_eq!(touchpad_in_effect(Some(true), Some(Some(false))), Some(false));
+        assert_eq!(touchpad_in_effect(None, Some(Some(true))), Some(true));
+        // Window closed: the live setting.
+        assert_eq!(touchpad_in_effect(Some(true), None), Some(true));
+        assert_eq!(touchpad_in_effect(Some(false), None), Some(false));
+        assert_eq!(touchpad_in_effect(None, None), None);
+    }
+
     #[test]
     fn advanced_right_column_fits_above_ok() {
         let (top, inner_h, ok_top) = (30.0, 650.0 - 29.0, 650.0 - 29.0 - 48.0);
