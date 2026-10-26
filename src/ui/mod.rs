@@ -25,6 +25,7 @@ pub mod items_view;
 pub mod jukebox;
 pub mod keymap;
 pub mod language;
+pub mod game_import;
 pub mod main_menu;
 pub mod map_import;
 pub mod minimap;
@@ -807,6 +808,18 @@ impl App {
         }
     }
 
+    /// The install's files were replaced by an import (`ui::game_import`): the decoded pictures of
+    /// the old files are dropped, and the install, the content and the maps are read again. The
+    /// audio is not rebuilt: the effects loaded at start stay until the next start.
+    fn reload_install(&mut self) {
+        razdor::dt::preload::forget_ready();
+        if let Some(dt) = dt_art::DtArt::from_env() {
+            self.assets.adopt_install(dt);
+            self.dt_content = dt_content_of(&self.assets, self.audio.settings.impossible);
+            self.scenarios = scenarios_of(&self.assets);
+        }
+    }
+
     /// The install was not there at start. On the menus, loads it when the player asks ("Check
     /// again", or the unpacking's end on the desktop) or, on the phones, when the poll finds it in
     /// place (the storage is granted and an install folder is listed; iOS always has the storage).
@@ -961,7 +974,12 @@ impl App {
         if let Some(written) = map_import::tick(self.assets.dt.as_ref().map(|d| &d.install), self.dt_content.as_deref()) {
             self.maps_written(&written);
         }
-        widgets::set_input_blocked(!self.dialogs.is_empty() || self.help || held || self.map_view.back_to.is_some() || self.update_open || map_import::open() || widgets::popup_open());
+        // «Обновить игру из архива…» (the settings' row): a picked game is examined and imported on a
+        // thread; a finished import reloads the install.
+        if game_import::tick(self.assets.dt.as_ref().map(|d| d.install.dir.as_path())) {
+            self.reload_install();
+        }
+        widgets::set_input_blocked(!self.dialogs.is_empty() || self.help || held || self.map_view.back_to.is_some() || self.update_open || map_import::open() || game_import::busy() || widgets::popup_open());
         let mut restart = false;
         let mut custom_round = false;
         let custom_content = self.custom_content();
@@ -991,6 +1009,11 @@ impl App {
                 None => None,
             },
             (Screen::Authors(started), _) => main_menu::authors(*started).then_some(Screen::MainMenu),
+            // While the import's question or progress is up, the settings under it are only drawn.
+            (Screen::Options, _) if game_import::busy() => {
+                main_menu::backdrop();
+                None
+            }
             (Screen::Options, _) => main_menu::options(&mut self.audio.settings, install_wide).then_some(Screen::MainMenu),
             (Screen::ScenarioSelect, _) => new_game::scenario_select(&self.scenarios, self.dt_content.is_some()),
             (Screen::TutorialOffer, _) => new_game::tutorial_offer(&self.scenarios),
@@ -1207,6 +1230,8 @@ impl App {
         if let Some(written) = map_import::modal() {
             self.maps_written(&written);
         }
+        // «Обновить игру из архива…»: its question, progress or notice, over the settings.
+        game_import::modal();
         // A fight decided on the map or in a building begins once the messages of that moment
         // are read (the original shows a meeting's words over the map, then the battle), and
         // on the map once the step that brought it has played: the attacker is seen arriving.

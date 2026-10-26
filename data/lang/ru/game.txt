@@ -533,4 +533,22 @@ The map «{title}» uses units or items that are not in your game ({ids}). It ne
 units {units}; items {items} = воины {units}; предметы {items}
 units {units} = воины {units}
 items {items} = предметы {items}
+
+# Updating the game from an archive («Обновить игру из архива…» in the settings window, src/ui/game_import.rs)
+Update the game from an archive… = Обновить игру из архива…
+Update the game = Обновление игры
+Game archives = Архивы игры
+The game will be replaced with «{name}»: the game files now in the folder are removed. Your saves stay. Replace? = Игра будет заменена архивом «{name}»: файлы игры из папки удалятся. Сохранения останутся. Заменить?
+The game is updated: «{name}». The saves stay. = Игра обновлена: «{name}». Сохранения на месте.
+Written over the game: {n} files. = Поверх игры записано файлов: {n}.
+«{name}» holds neither the game nor a patch for it. = В «{name}» нет ни игры, ни патча для неё.
+«{name}» is too big for the game. = «{name}» слишком большой для игры.
+A patch goes over the game, and there is no game yet: import the whole game archive first. = Патч ставится поверх игры, а игры ещё нет: сначала обновите её целым архивом.
+The archive does not hold a Discord Times install: the game is not changed. = В архиве нет игры Discord Times: игра не изменена.
+The update failed: {why}. = Обновление не удалось: {why}.
+The update stopped unexpectedly. = Обновление неожиданно прервалось.
+The import cannot start: {e}. = Не удалось начать обновление: {e}.
+Only the game in Razdor's own folder can be updated here. = Здесь обновляется только игра в папке Razdor.
+The game is updated from the main menu. = Игру обновляют из главного меню.
+The update from an archive is not on iPhone yet. = Обновление из архива на iPhone пока не работает.
 «{name}» is too big to be a Discord Times map. = «{name}» слишком большой для карты Discord Times.

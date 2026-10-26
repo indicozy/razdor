@@ -107,19 +107,25 @@ pub fn find_archives(dirs: &[PathBuf]) -> Vec<Found> {
         let mut files: Vec<PathBuf> = entries.flatten().map(|e| e.path()).filter(|p| p.is_file() && format_of(p).is_some()).collect();
         files.sort();
         for path in files {
-            match list(&path) {
-                Ok(entries) => {
-                    let plan = plan(&entries);
-                    if let Some(kind) = plan.kind {
-                        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                        found.push(Found { path, name, kind, strip: plan.strip, size: plan.size });
-                    }
-                }
+            match inspect(&path) {
+                Ok(Some(archive)) => found.push(archive),
+                Ok(None) => {}
                 Err(e) => crate::diag!("unpack: {}: {e}", path.display()),
             }
         }
     }
     found
+}
+
+/// The archive at `path` as [`find_archives`] classifies it: `Ok(None)` when it holds neither the
+/// game nor a patch for it, `Err` with the reason when its listing cannot be read.
+pub fn inspect(path: &Path) -> Result<Option<Found>, String> {
+    let entries = list(path)?;
+    let plan = plan(&entries);
+    Ok(plan.kind.map(|kind| {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        Found { path: path.to_path_buf(), name, kind, strip: plan.strip, size: plan.size }
+    }))
 }
 
 /// Classifies a listing: the entries that are unsafe (see [`components`]) are left out, the top
@@ -233,7 +239,21 @@ fn list(path: &Path) -> Result<Vec<Entry>, String> {
 /// created when missing; files already there are overwritten, none is deleted. `progress` gets
 /// the bytes written so far and the total of the archives' uncompressed sizes. Entries with an
 /// unsafe path are skipped. Stops at the first error, which is returned as text.
+///
+/// The bytes written are capped at the archives' declared sizes, or [`MAX_UNPACKED_BYTES`] when
+/// that is less: an archive whose entries unpack to more than they declare (a zip bomb) stops
+/// with an error, and each entry is read no further than its declared size ([`write_file`]).
 pub fn unpack(archives: &[Found], dest: &Path, progress: &dyn Fn(u64, u64)) -> Result<(), UnpackError> {
+    let total: u64 = archives.iter().map(|a| a.size).sum();
+    unpack_within(archives, dest, progress, total.min(MAX_UNPACKED_BYTES))
+}
+
+/// The largest total an unpacking writes, whatever the archives declare: the guard against a zip
+/// bomb that fills the storage.
+pub const MAX_UNPACKED_BYTES: u64 = 4 << 30;
+
+/// [`unpack`] with the bytes written capped at `limit`.
+pub fn unpack_within(archives: &[Found], dest: &Path, progress: &dyn Fn(u64, u64), limit: u64) -> Result<(), UnpackError> {
     fs::create_dir_all(dest).map_err(|e| write_error(&e, dest))?;
     let total: u64 = archives.iter().map(|a| a.size).sum();
     let mut done = 0u64;
@@ -241,7 +261,11 @@ pub fn unpack(archives: &[Found], dest: &Path, progress: &dyn Fn(u64, u64)) -> R
         for archive in archives.iter().filter(|a| a.kind == kind) {
             unpack_one(archive, dest, &mut |n| {
                 done += n;
+                if done > limit {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, "the archive unpacks to more than it declares"));
+                }
                 progress(done, total);
+                Ok(())
             })
             .map_err(|e| match e {
                 UnpackError::Other(text) => UnpackError::Other(format!("{}: {text}", archive.name)),
@@ -252,8 +276,9 @@ pub fn unpack(archives: &[Found], dest: &Path, progress: &dyn Fn(u64, u64)) -> R
     Ok(())
 }
 
-/// Writes one archive's files under `dest`, calling `written` with each piece's size.
-fn unpack_one(archive: &Found, dest: &Path, written: &mut dyn FnMut(u64)) -> Result<(), UnpackError> {
+/// Writes one archive's files under `dest`, calling `written` with each piece's size; its error
+/// stops the unpacking.
+fn unpack_one(archive: &Found, dest: &Path, written: &mut dyn FnMut(u64) -> io::Result<()>) -> Result<(), UnpackError> {
     let other = |e: &dyn std::fmt::Display| UnpackError::Other(e.to_string());
     match format_of(&archive.path).ok_or_else(|| UnpackError::Other("not a 7z or zip archive".into()))? {
         Format::SevenZ => {
@@ -262,7 +287,7 @@ fn unpack_one(archive: &Found, dest: &Path, written: &mut dyn FnMut(u64)) -> Res
                 .for_each_entries(|entry, input| {
                     let r = match (target(entry.name(), &archive.strip), entry.is_directory()) {
                         (Some(rel), true) => fs::create_dir_all(dest.join(rel)),
-                        (Some(rel), false) => write_file(input, &dest.join(rel), written),
+                        (Some(rel), false) => write_file(input, &dest.join(rel), entry.size(), written),
                         // Not written: the reader must still be drained, the next entry follows it.
                         (None, _) => io::copy(input, &mut io::sink()).map(drop),
                     };
@@ -281,9 +306,10 @@ fn unpack_one(archive: &Found, dest: &Path, written: &mut dyn FnMut(u64)) -> Res
             for i in 0..zip.len() {
                 let mut f = zip.by_index(i).map_err(|e| other(&e))?;
                 let Ok(name) = f.name().map(|n| n.into_owned()) else { continue };
+                let declared = f.size();
                 let r = match (target(&name, &archive.strip), f.is_dir()) {
                     (Some(rel), true) => fs::create_dir_all(dest.join(rel)),
-                    (Some(rel), false) => write_file(&mut f, &dest.join(rel), written),
+                    (Some(rel), false) => write_file(&mut f, &dest.join(rel), declared, written),
                     (None, _) => Ok(()),
                 };
                 r.map_err(|e| match write_error(&e, dest) {
@@ -296,22 +322,30 @@ fn unpack_one(archive: &Found, dest: &Path, written: &mut dyn FnMut(u64)) -> Res
     }
 }
 
-/// Streams one file to `path` (its folder made first), in pieces of [`CHUNK`] bytes.
-fn write_file(input: &mut dyn Read, path: &Path, written: &mut dyn FnMut(u64)) -> io::Result<()> {
+/// Streams one file to `path` (its folder made first), in pieces of [`CHUNK`] bytes. The entry is
+/// read no further than its `declared` size plus one byte: more bytes than it declares is an error
+/// (the listing's size is not trusted to bound the output on its own).
+fn write_file(input: &mut dyn Read, path: &Path, declared: u64, written: &mut dyn FnMut(u64) -> io::Result<()>) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     let mut out = BufWriter::new(File::create(path)?);
+    let mut limited = (&mut *input).take(declared.saturating_add(1));
     let mut buf = vec![0u8; CHUNK];
+    let mut seen = 0u64;
     loop {
-        let n = match input.read(&mut buf) {
+        let n = match limited.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => n,
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
             Err(e) => return Err(e),
         };
+        seen += n as u64;
+        if seen > declared {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "an entry holds more bytes than it declares"));
+        }
         out.write_all(&buf[..n])?;
-        written(n as u64);
+        written(n as u64)?;
     }
     out.flush()
 }
@@ -459,6 +493,40 @@ mod tests {
         assert!(!dest.join("DiscordTimes").exists(), "the top folder is dropped");
         // "map" + "units" + "game spells" in the game, "patched spells" in the patch; the escaped entry is not counted.
         assert_eq!(total.get(), 3 + 5 + 11 + 14);
+    }
+
+    #[test]
+    fn an_entry_is_read_no_further_than_its_declared_size() {
+        let s = Scratch::new("declared");
+        let written = std::cell::Cell::new(0u64);
+        let mut count = |n: u64| -> io::Result<()> {
+            written.set(written.get() + n);
+            Ok(())
+        };
+        // Twenty bytes behind a declaration of ten: refused, and at most ten are reported written.
+        let err = write_file(&mut &b"0123456789ABCDEFGHIJ"[..], &s.0.join("long.ini"), 10, &mut count).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(written.get() <= 10, "the reported bytes stay within the declaration");
+        // The declared size exactly: fine.
+        write_file(&mut &b"0123456789"[..], &s.0.join("exact.ini"), 10, &mut count).unwrap();
+        assert_eq!(read(&s.0.join("exact.ini")), "0123456789");
+    }
+
+    #[test]
+    fn unpacking_stops_at_its_cap() {
+        let s = Scratch::new("cap");
+        make_zip(&s.0.join("g.zip"), &[("Maps_Rus/a.DTm", "123456"), ("Rus_Units.ini", "123456")]);
+        let found = find_archives(std::slice::from_ref(&s.0));
+        assert_eq!(found[0].size, 12, "the declared sizes");
+        // A cap of ten bytes stops the second entry; the error names the archive.
+        let err = unpack_within(&found, &s.0.join("out"), &|_, _| {}, 10).unwrap_err();
+        assert!(
+            matches!(&err, UnpackError::Other(text) if text.starts_with("g.zip: ") && text.ends_with("the archive unpacks to more than it declares")),
+            "{err}"
+        );
+        // The cap of the declared total passes.
+        unpack_within(&found, &s.0.join("ok"), &|_, _| {}, 12).unwrap();
+        assert_eq!(read(&s.0.join("ok/Rus_Units.ini")), "123456");
     }
 
     #[test]

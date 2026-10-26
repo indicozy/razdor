@@ -1391,7 +1391,9 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     // Razdor's two rows at the end (the text size and the large windows, the owner's request:
     // phones' text too small) take 76 px more: the frame line under the checkboxes sits 82 px above
     // the bottom edge, the buttons 68 above.
-    let h = (if orientation_row { 556.0 } else if touch_row { 528.0 } else { 500.0 }) + 76.0;
+    // The import row («Обновить игру из архива…», `ui::game_import`) takes 30 px more under the large
+    // message windows' row.
+    let h = (if orientation_row { 556.0 } else if touch_row { 528.0 } else { 500.0 }) + 76.0 + 30.0;
     let (inner, closed) = if over_map { map_window(&title, 594.0, h) } else { window(&title, 594.0, h) };
     let k = chrome::k();
     let outer = Rect::new(inner.x - 2.0 * k, inner.y - (26.0 * k).round() - 1.0, 594.0 * k, h * k);
@@ -1490,6 +1492,10 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     if row_button(r, if audio.large_windows { tr("On") } else { tr("Off") }) {
         audio.large_windows = !audio.large_windows;
     }
+    // «Обновить игру из архива…» (Razdor's, a row of its own under the large windows): the
+    // button, or why it is not offered (`ui::game_import`). Over a map it is only said.
+    let import_y = large_y + 30.0 * k;
+    super::game_import::settings_row(Rect::new(inner.x + 14.0 * k, import_y, inner.w - 28.0 * k, 28.0 * k), over_map);
     // Razdor's own settings, in a window of their own.
     let button_y = outer.y + (h - 42.0) * k;
     let xr = Rect::new(inner.x + 14.0 * k, button_y, 120.0 * k, 32.0 * k);

@@ -101,6 +101,30 @@ runs, `mobile_install_poll` does not load the install; its end (`unpack_tick`) a
 and the same poll loads it (the desktop has no 5-s poll: that reload is its only one). Snapshot fakes:
 `RAZDOR_SCENE_ARCHIVES`, `RAZDOR_SCENE_UNPACK`.
 
+Updating the game from an archive («Обновить игру из архива…», the settings window of the main menu,
+`ui/game_import.rs`, the pure part `dt/game_import.rs`). `main_menu::options_window` draws the row
+through `game_import::settings_row`: the button, or why it is not offered (over a map, on iPhone, or
+when the install is not the phones' unpack folder: `game_import::target` returns it only for that
+folder or with no install yet, so a player's own copy is never written). The button sets a request;
+`game_import::tick` (in `frame_content`, every frame) opens the platform's picker (the same one as
+«Добавить карту…»: Android's `pick_outcome`, the Java copy by streaming into the cache). The picked
+archive is `dt::game_import::examine` (listing only, the budget `over_budget`): nothing of the game in
+it is a refusal, nothing written. The declared sizes are not trusted alone: `unpack::unpack` caps the bytes
+written at the declared total or `MAX_UNPACKED_BYTES`, and `unpack::write_file` reads each entry no further
+than its declared size, so a zip bomb stops with an error (the side folder is removed, the install kept). A whole game asks first (`Modal::Confirm`) when the install is
+there; a patch goes straight in, and is refused without an install. `dt::game_import::import` unpacks
+into `<install>.new` (beside the install, the same disk), then `swap_in` renames the install to
+`<install>.old`, the new folder to the install's name, and deletes the old one (a failed second rename
+puts it back); a patch's files are moved over the install's (`move_over`). Any failure removes
+`<install>.new` and leaves the install as it was. The job runs on a thread (`Job`, the progress
+window); when it ends, `tick` returns true and `App::reload_install` reads the install again
+(`preload::forget_ready` first: the decode store is keyed by path alone, and its loads started
+before the call are not kept, the generation). The saves (`platform::app_dir`) are never beside
+the install, so they are not read or written. `dt::game_import::recover` (`main`, before the install
+is looked for) puts back an install an interrupted swap moved away. While the import's windows are up
+the settings under them are only drawn (`main_menu::backdrop`, `game_import::busy`). Snapshot fake:
+`RAZDOR_SCENE_IMPORT` (with `RAZDOR_SNAPSHOT`) shows the row as offered.
+
 Thread locals: `local!` (`src/local.rs`), never std's `thread_local!`: std takes one TLS key per static
 on Android, where a process has about 128, and the army window aborted with «out of TLS keys»; one
 test fails if `thread_local!` comes back in `src/`. Touch (phones and tablets,

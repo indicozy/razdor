@@ -333,7 +333,7 @@ fn from_desktop(answer: Option<PathBuf>) -> Poll {
 
 /// A notice: its text, wrapped at the window's width, and OK (or the close box, Enter or Escape).
 /// True when it is closed.
-fn notice_window(title: &str, lines: &[String]) -> bool {
+pub(super) fn notice_window(title: &str, lines: &[String]) -> bool {
     let (inner, closed) = frame(title, lines, true);
     let ok = buttons(inner, &[tr("OK")]).is_some();
     let enter = key(KeyCode::Enter) || key(KeyCode::Escape);
@@ -358,7 +358,7 @@ fn replace_window(taken: &[String]) -> Option<bool> {
 
 /// The window's frame at its width, with its lines wrapped; returns its inside and whether its
 /// close box was pressed.
-fn frame(title: &str, lines: &[String], with_buttons: bool) -> (Rect, bool) {
+pub(super) fn frame(title: &str, lines: &[String], with_buttons: bool) -> (Rect, bool) {
     let k = chrome::k();
     draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.35));
     let w = (460.0 * k).min(screen_width() - 24.0 * k);
@@ -375,7 +375,7 @@ fn frame(title: &str, lines: &[String], with_buttons: bool) -> (Rect, bool) {
 }
 
 /// The window's buttons at its bottom right (as the update window's): the pressed one's index.
-fn buttons(inner: Rect, labels: &[&str]) -> Option<usize> {
+pub(super) fn buttons(inner: Rect, labels: &[&str]) -> Option<usize> {
     let k = chrome::k();
     let (w, h, gap) = (150.0 * k, 28.0 * k, 12.0 * k);
     let mut x = inner.x + inner.w - 24.0 * k - labels.len() as f32 * (w + gap) + gap;

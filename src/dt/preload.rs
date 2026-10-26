@@ -34,6 +34,8 @@ struct Store {
     pending: HashMap<PathBuf, State>,
     queue: VecDeque<PathBuf>,
     workers: usize,
+    /// Bumped by [`forget_ready`]: a picture decoded before it was forgotten is not stored as ready.
+    generation: u64,
 }
 
 static STORE: LazyLock<Mutex<Store>> = LazyLock::new(Default::default);
@@ -47,6 +49,16 @@ fn lock() -> MutexGuard<'static, Store> {
 /// Whether `path` is decoded already (so [`decode_shared`] will not decode it).
 pub fn is_ready(path: &Path) -> bool {
     lock().ready.contains_key(path)
+}
+
+/// Drops every decoded picture from the store: the install's files were replaced (a game import,
+/// `dt::game_import`), and the store is keyed by path alone. Pictures still being decoded are
+/// stored only if they were started after this call (the generation). The persistent cache keys
+/// on the files' modification times, so it misses for the new files on its own.
+pub fn forget_ready() {
+    let mut s = lock();
+    s.ready.clear();
+    s.generation += 1;
 }
 
 /// The frames of the picture at `path`, decoded once and shared. Waits for a worker that is
@@ -70,9 +82,10 @@ pub fn decode_shared(path: &Path) -> Result<Arc<Vec<Image>>, DtError> {
             }
         }
         s.pending.insert(path.to_path_buf(), State::Running);
+        let generation = s.generation;
         drop(s);
         let loaded = load(path);
-        finish(path, loaded)
+        finish(path, loaded, generation)
     })
 }
 
@@ -133,18 +146,18 @@ pub fn upload_within_budget<T>(
 
 fn worker() {
     loop {
-        let path = {
+        let (path, generation) = {
             let mut s = lock();
             loop {
                 if let Some(p) = s.queue.pop_front() {
                     s.pending.insert(p.clone(), State::Running);
-                    break p;
+                    break (p, s.generation);
                 }
                 s = CHANGED.wait(s).unwrap_or_else(|e| e.into_inner());
             }
         };
         let loaded = load(&path);
-        let _ = finish(&path, loaded);
+        let _ = finish(&path, loaded, generation);
     }
 }
 
@@ -161,13 +174,17 @@ fn load(path: &Path) -> Result<(Vec<Image>, Miss), DtError> {
     Ok((frames, cache))
 }
 
-/// Stores a loaded picture as ready, wakes the waiters and writes a decoded one to the cache.
-fn finish(path: &Path, loaded: Result<(Vec<Image>, Miss), DtError>) -> Result<Arc<Vec<Image>>, DtError> {
+/// Stores a loaded picture as ready (unless [`forget_ready`] ran since `generation` was taken),
+/// wakes the waiters and writes a decoded one to the cache.
+fn finish(path: &Path, loaded: Result<(Vec<Image>, Miss), DtError>, generation: u64) -> Result<Arc<Vec<Image>>, DtError> {
     let mut s = lock();
     s.pending.remove(path);
+    let current = s.generation == generation;
     let out = loaded.map(|(frames, miss)| {
         let a = Arc::new(frames);
-        s.ready.insert(path.to_path_buf(), a.clone());
+        if current {
+            s.ready.insert(path.to_path_buf(), a.clone());
+        }
         if let Some((dir, key)) = miss {
             let frames = a.clone();
             let _ = std::thread::Builder::new().name("art cache".into()).spawn(move || picture_cache::write(&dir, key, &frames));
@@ -181,6 +198,25 @@ fn finish(path: &Path, loaded: Result<(Vec<Image>, Miss), DtError>) -> Result<Ar
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn forgetting_drops_the_store_and_a_decode_started_before_is_not_kept() {
+        let path = PathBuf::from("/razdor-test/forget-ready.lit");
+        lock().ready.insert(path.clone(), Arc::new(Vec::new()));
+        assert!(is_ready(&path));
+        forget_ready();
+        assert!(!is_ready(&path), "the old install's pictures are dropped");
+        // A decode that started before the forget (a swap in between) is handed back, not stored.
+        let before = lock().generation;
+        forget_ready();
+        let _ = finish(&path, Ok((Vec::new(), None)), before);
+        assert!(!is_ready(&path));
+        // One started after it is stored as usual.
+        let after = lock().generation;
+        let _ = finish(&path, Ok((Vec::new(), None)), after);
+        assert!(is_ready(&path));
+        forget_ready();
+    }
 
     #[test]
     fn uploads_stop_at_the_budget_and_keep_the_order() {

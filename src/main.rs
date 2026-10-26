@@ -122,6 +122,11 @@ async fn main() {
     // Closing the window sets a flag instead of leaving the loop, so the exit goes through
     // `exit_now`.
     prevent_quit();
+    // An import («Обновить игру из архива…») interrupted while it swapped the game's folders puts the
+    // old game back, before the install is looked for (`dt::game_import::recover`).
+    if let Some(dir) = razdor::platform::unpack_dir() {
+        razdor::dt::game_import::recover(&dir);
+    }
     // The picture cache's folder on Android (the app's private cache, not the shared storage).
     #[cfg(target_os = "android")]
     razdor::platform::set_private_cache_dir(ui::android::private_cache_dir());
