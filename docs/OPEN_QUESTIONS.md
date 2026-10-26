@@ -8,10 +8,20 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
-- **The Evolution Mod's exe differs from Community 1.2 in 74 places in CODE; only the drain is
-  supported; survey in progress (backlog 1305).** The mod's `DiscordTimes.exe` lacks the Community
-  drain patch; Razdor runs the original's own drain block for such an install (battle.md, "Magic
-  power drain"; `install::drain_rule`).
+- **The Evolution Mod's exe: FirstShot's value.** Its 1.2 fix (c28935) is absent, so the +60
+  path at c26e9a runs; the exact initiative of FirstShot on that build is unread. Razdor keeps 1.2's
+  rule (+30, +30 with building defence ≥ 10) there. Step 4 of the mod support reads it
+  (evolution-mod.md §1, §4).
+- **The Evolution Mod's exe: opcode 14's signed unit byte.** Razdor reads the byte signed
+  (`events::opcode14_unit`), but its unit model gives no observable difference (a negative index
+  and a byte past the unit list both match no unit). How the exe uses its loop counter after the
+  signed read (c280b6) is not read.
+- **The Evolution Mod's exe: negative Splash attacks.** The older build's Splash multiply is taken
+  with 70%/30% constants and the same sign-keeping rule as 1.2 (`splash_scale`). Whether that exe
+  wraps a negative attack as 1.2's exe does (battle.md §6) is not verified.
+- **The Evolution Mod's exe: the on-hit block after a spell is gated, not run through a cast.** The
+  gate (the spell path calls `on_hit` only with `has_12_features`) is covered by the on-hit tests
+  (`older_bleed_and_noheal_marks_are_not_set_by_a_hit`); no test casts a spell through `act` on the older build.
 - **iOS: the windows do not move above the on-screen keyboard** (2026-10-26, Razdor extra, not
   parity). `display::keyboard_inset` is 0 on iOS, so the hero and save windows stay under the
   keyboard there. Settles it: a reading of the keyboard's frame on iOS (UIKit's keyboard

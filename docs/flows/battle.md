@@ -92,6 +92,18 @@ fixed floors 15 / 15 / 25 by school and nature. The rule is set at load by `inst
 from the install's `DiscordTimes.exe` (E9 at 0x484466 = Community), or without an exe from
 `MinSpellLife` in `_Global.ini`.
 
+The build (`GlobalOptions::build`, `data::Build`) is set at load by `install::build`, from the same
+exe test: `Community12` (the default, everywhere in tests too) or `OlderCommunity`, the Evolution
+Mod's exe (evolution-mod.md). Its drain is `build.drain_rule()`. The 1.2-only battle features are
+gated by `Build::has_12_features()` (Flying, the NoHeal target filter and marks, PoisonArmorIgnore
+piercing, Assault ×2/3 and its stat ×2, Evasion, Bleed, EternalGift, FateGift, PreventiveStrike,
+the on-hit block after a spell). `data::apply_build` at load drops the bonus tokens the older token
+table lacks (`Build::has_bonus`) and the per-type Evasion, ManaDrain and MinMagicPower. The numbers
+differ too: Fortify 20 (`OLD_FORTIFY_PERCENT`), Stun 25% on a blow, 21% on a spell, none on a shot
+(`stun_percent`), Splash 70/30 (`splash_factors`), the Elemental speed steps (`actions_for`). The
+events read the build through `EventWorld::build`: opcodes 16–21 do nothing and opcode 14's unit
+byte is signed (`events.rs`).
+
 ## 4. One action
 
 All actions cost one action point and go through the same frame:

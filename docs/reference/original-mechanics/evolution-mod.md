@@ -105,3 +105,36 @@ four sliders (no battle-animation row) when the install has `Option0` and no `Op
   (its row offsets and window height are unread; Razdor keeps the 1.2 positions of the
   checkboxes, leaving one row free). `Rus_Spells.ini` needs no loader change (§3a).
 - Everything above is from the executable and data alone; no replay of the build under Wine yet.
+
+## 5. Razdor now → original
+
+Razdor: `src/dt/install.rs` (`build`, `drain_rule`), `src/dt/data.rs` (`Build`, `apply_build`),
+`src/rules/battle.rs` (the gates, `stun_percent`, `splash_factors`, `actions_for`), `src/rules/events.rs`
+(`opcode14_unit`, `run_opcode`), `src/rules/script.rs`. The build is set at load from the exe; Community
+1.2 is the default and unchanged.
+
+| Rule on this build | Razdor now | Status |
+|---|---|---|
+| Build detection | `E9` at 0x484466 → Community 1.2; the IMUL → older build; no exe → `MinSpellLife` decides | Matches |
+| Magic drain | The original's block 0x484466–0x484683 (`Battle::drain_old`) | Matches |
+| Fortify | defence + max(1, DB × 20 / 100) × min(turn − 1, 5) (c25a51) | Matches |
+| Stun on a blow | −25% of the current initiative (c27e93) | Matches |
+| Stun on a spell | −21% (c26e44) | Matches |
+| Stun on a shot | none (the shot path returns at 0x48b2cf) | Matches |
+| Splash | the hit target ×70% (0xb3333333), the neighbours ×30% (0x4ccccccd), the 1.2 multiply-high method; a negative attack keeps its sign (1.2's fix) | Matches the constants; the sign rule not checked on this exe (OPEN_QUESTIONS) |
+| Elemental speed steps (483680) | 20–44 → 1, 45–99 → 2, 100–255 → 3, else 0 | Matches |
+| FirstShot | 1.2's rule (+30, +30 with building defence ≥ 10) | Open: the value on this build is unread (OPEN_QUESTIONS) |
+| Flying (legal cells, 0x485554) | off | Matches |
+| NoHeal target filter (0x485669) and NoHeal marks | off | Matches |
+| PoisonArmorIgnore piercing (0x485992, 0x4859f4) | off; its poison is kept | Matches |
+| Assault ×2/3 (0x485a78) and its turn-1 stat ×2 | off | Matches |
+| Evasion (0x485b26) and the loader (0x48f5ce) | off; the type's Evasion is not read | Matches |
+| Bleed (0x489f62, 0x48a677, the on-hit bleed) | off | Matches |
+| EternalGift (0x48a9f1…0x48b0ac) | off: blessings and curses change this turn's modifiers | Matches |
+| FateGift (on-hit) | off | Matches |
+| PreventiveStrike (0x48b214, 0x48b2f6) | off | Matches |
+| On-hit block after a spell (c29984) | not run (it returns at 0x48b1ed) | Matches |
+| Bonus tokens | Assault, EternalGift, FateGift, Flying, NoHeal, PreventiveStrike read as no bonus; the others as on 1.2 | Matches |
+| Per-type ManaDrain, MinMagicPower, Evasion | not read at load | Matches |
+| Event opcodes 16–21 | do nothing; the cell test of opcode 19 and the named-squad check of 21 are off | Matches |
+| Event condition 14's unit byte (c280b6) | read signed | Matches the read; no observable difference in Razdor's unit model (OPEN_QUESTIONS) |
