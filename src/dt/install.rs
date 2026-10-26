@@ -825,3 +825,49 @@ mod tests {
         assert_eq!(drain_rule_of_exe(&exe), Some(super::DrainRule::Community));
     }
 }
+
+/// The Community Update Evolution Mod's install (`RAZDOR_EVO_DIR`); skipped without it. Numbers
+/// only: its texts and maps are the player's, read at runtime and never asserted.
+#[cfg(test)]
+pub(crate) mod evolution_mod {
+    use super::*;
+
+    /// The mod's install, its translated copies left out; `None` without `RAZDOR_EVO_DIR`.
+    pub(crate) fn evo_install() -> Option<DtInstall> {
+        let dir = std::env::var_os("RAZDOR_EVO_DIR")?;
+        let mut dt = DtInstall::load(Path::new(&dir)).expect("mod install loads");
+        dt.maps.retain(|m| !crate::translate::job::is_translated_file(&m.name));
+        Some(dt)
+    }
+
+    #[test]
+    fn evo_data_definitions() {
+        let Some(dt) = evo_install() else { return };
+        let dir = dt.dir.clone();
+        // Every file loads with no value ignored and no entry skipped.
+        let parsed = [
+            ("units", data::parse_units(&read_ini(&dir, UNITS_FILE).unwrap()).warnings),
+            ("items", data::parse_artefacts(&read_ini(&dir, ARTEFACTS_FILE).unwrap()).warnings),
+            ("spells", data::parse_spells(&read_ini(&dir, SPELLS_FILE).unwrap()).warnings),
+            ("globals", GlobalOptions::from_ini(&read_ini(&dir, GLOBAL_FILE).unwrap()).warnings),
+        ];
+        for (file, warnings) in &parsed {
+            assert!(warnings.is_empty(), "{file}: {warnings:?}");
+        }
+        // Counts: 161 unit types, 192 items; spells are the 40 sections before the empty
+        // editor template (the template is the 41st `[Заклинание]`, its id unused).
+        assert_eq!(dt.units.len(), 161);
+        assert_eq!(dt.artefacts.len(), 192);
+        assert_eq!(dt.spells.len(), 40);
+        assert!(dt.spells.iter().enumerate().all(|(i, s)| s.id == i as u32 + 1));
+        assert!(dt.units.iter().enumerate().all(|(i, u)| u.id == i as u32 + 1));
+        // No unit, item or spell names a missing id.
+        let units: std::collections::HashSet<u32> = dt.units.iter().map(|u| u.id).collect();
+        assert!(dt.units.iter().flat_map(|u| &u.upgrades).all(|u| u.target.is_some_and(|t| units.contains(&t))), "unresolved upgrade");
+        assert!(dt.options.army_generation.iter().flat_map(|(_, ids)| ids).all(|id| units.contains(id)), "army names a missing unit");
+        assert!(dt.units.iter().all(|u| u.bonus.as_ref().is_none_or(|b| b.vanilla_index().is_some())), "community bonus");
+        assert!(dt.artefacts.iter().all(|a| a.bonus.as_ref().is_none_or(|b| b.vanilla_index().is_some())), "community bonus");
+        assert_eq!(dt.options.army_generation.len(), 8);
+        assert_eq!(dt.options.extra.keys().collect::<Vec<_>>(), ["MixHealingTarget"]);
+    }
+}

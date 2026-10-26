@@ -588,6 +588,22 @@ fn campaign_rk1_to_rk3() {
     assert_eq!(d.ended, Some(EventOutcome::Victory(32)), "fired {:?}", d.fired);
 }
 
+/// Every map of the Evolution Mod starts a game with its first class (skipped without
+/// `RAZDOR_EVO_DIR`). Numbers only.
+#[test]
+fn evolution_mod_maps_start() {
+    let Some(dt) = crate::dt::install::evolution_mod::evo_install() else { return };
+    let c = content(&dt);
+    let mut started = 0;
+    for m in &dt.maps {
+        let d = Driver::new(&dt, &c, &m.name, HeroClass::Knight);
+        assert!(d.g.world.map.w > 0, "{}", m.name);
+        started += 1;
+    }
+    assert_eq!(started, dt.maps.len());
+    assert_eq!(dt.maps.len(), 15);
+}
+
 /// Counts data patterns whose reading is in question (`RAZDOR_SCAN=1`).
 #[test]
 fn scan_patterns() {

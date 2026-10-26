@@ -1454,10 +1454,15 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     // A window with 0x48d710's inner frames (the options window is c2953a, 634×556, 4d2f48).
     chrome::window_inner_frames(outer, chrome::opx());
     let row = |i: usize| Rect::new(inner.x + 10.0 * k, inner.y + 8.0 * k + i as f32 * 37.5 * k, inner.w - 20.0 * k, 30.0 * k);
+    // The Evolution Mod has four slider rows, labelled `Option0`…`Option3` (its exe builds the key
+    // from `Option` and the row number); the Community's five are `OptionSld0`…`OptionSld4`. A
+    // Community install names its rows the same way with `OptionSld`.
+    let mod_rows = chrome::install_option("Option0").is_some() && chrome::install_option("OptionSld0").is_none();
+    let slider_label = |n: usize, ours: &'static str| own("Options", &if mod_rows { format!("Option{n}") } else { format!("OptionSld{n}") }, ours);
     // The volumes, in steps of 1%.
     for (i, music) in [(0, true), (1, false)] {
-        let (key, ours, value) = if music { ("OptionSld0", n_("Background music volume"), audio.music_volume) } else { ("OptionSld1", n_("Sound effects volume"), audio.sfx_volume) };
-        if let Some(v) = option_slider(row(i), &own("Options", key, ours), value) {
+        let (ours, value) = if music { (n_("Background music volume"), audio.music_volume) } else { (n_("Sound effects volume"), audio.sfx_volume) };
+        if let Some(v) = option_slider(row(i), &slider_label(i, ours), value) {
             let steps = ((v - value) / super::audio::VOLUME_STEP).round() as i32;
             if music {
                 audio.music_muted = false;
@@ -1469,16 +1474,19 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
         }
     }
     // The map's edge scroll (`ScrollSpeed`, world_view) and the hero's step (`WalkSpeed`).
-    if let Some(v) = option_slider(row(2), &own("Options", "OptionSld2", n_("Map scroll speed")), scroll_speed(audio) / 100.0) {
+    if let Some(v) = option_slider(row(2), &slider_label(2, n_("Map scroll speed")), scroll_speed(audio) / 100.0) {
         audio.scroll_speed = Some((v * 100.0).round());
     }
-    if let Some(v) = option_slider(row(3), &own("Options", "OptionSld3", n_("Hero's walking speed")), walk_speed(audio) / 100.0) {
+    if let Some(v) = option_slider(row(3), &slider_label(3, n_("Hero's walking speed")), walk_speed(audio) / 100.0) {
         audio.walk_speed = Some((v * 100.0).round());
     }
     // The Community's "Скорость анимаций в битве" (`AnimationSpeed`): it caps a strike's
-    // slide at (100 − S)·5 ms and its effect at (100 − S)·3 ms (0x4afd45, 0x4afe7c).
-    if let Some(v) = option_slider(row(4), &own("Options", "OptionSld4", n_("Battle animation speed")), anim_speed(audio).unwrap_or(0.0) / 99.0) {
-        audio.anim_speed = Some((v * 99.0).round());
+    // slide at (100 − S)·5 ms and its effect at (100 − S)·3 ms (0x4afd45, 0x4afe7c). The
+    // Evolution Mod's window has no such row (four sliders).
+    if !mod_rows {
+        if let Some(v) = option_slider(row(4), &slider_label(4, n_("Battle animation speed")), anim_speed(audio).unwrap_or(0.0) / 99.0) {
+            audio.anim_speed = Some((v * 99.0).round());
+        }
     }
     // The eight checkboxes (`Option4`…`Option11`), a gap before the three of battle and
     // difficulty.

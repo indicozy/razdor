@@ -174,4 +174,17 @@ mod tests {
             assert!(u.is_empty(), "{}: units {:?}, items {:?}", map.name, u.units, u.items);
         }
     }
+
+    /// The Evolution Mod's maps name only its content (skipped without `RAZDOR_EVO_DIR`).
+    #[test]
+    fn the_evolution_mod_maps_name_only_its_content() {
+        let Some(dt) = crate::dt::install::evolution_mod::evo_install() else { return };
+        let content = Content::from_dt(&dt);
+        assert!(!dt.maps.is_empty());
+        for map in &dt.maps {
+            let s = map.load().unwrap_or_else(|e| panic!("{}: {e}", map.name));
+            let u = unknown(&s, &content);
+            assert!(u.is_empty(), "{}: units {:?}, items {:?}", map.name, u.units, u.items);
+        }
+    }
 }
