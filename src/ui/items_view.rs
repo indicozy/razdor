@@ -1238,11 +1238,15 @@ pub struct HeroView {
     pub pick: usize,
     pub list_scroll: usize,
     pub text_scroll: usize,
+    /// The phone's diary reader is open (a tap on the entry): the entry's full text over almost
+    /// the whole screen, scrolled by `reader_scroll`.
+    pub reader: bool,
+    pub reader_scroll: usize,
 }
 
 impl Default for HeroView {
     fn default() -> Self {
-        HeroView { scroll: 0, tab: Tab::Active, pick: 0, list_scroll: 0, text_scroll: 0 }
+        HeroView { scroll: 0, tab: Tab::Active, pick: 0, list_scroll: 0, text_scroll: 0, reader: false, reader_scroll: 0 }
     }
 }
 
@@ -1337,6 +1341,11 @@ fn entry_parts(tab: Tab, phone: bool) -> Vec<EntryPart> {
 /// text in SanSerif less 25, 25, 125, a yellow, 0xae24c0; a history entry's date is in the
 /// heading's orange and font.
 fn diary_lines(row: &razdor::rules::journal::Row, tab: Tab, phone: bool, room: f32, title: f32, body: f32) -> Vec<DiaryLine> {
+    diary_lines_of(row, tab, &entry_parts(tab, phone), room, title, body)
+}
+
+/// [`diary_lines`] for the given `parts` (the phone's entry, or the reader's full one).
+fn diary_lines_of(row: &razdor::rules::journal::Row, tab: Tab, parts: &[EntryPart], room: f32, title: f32, body: f32) -> Vec<DiaryLine> {
     use super::dt_font::{with_original_face, Face};
     use razdor::dt::markup::{Align, Ink};
     let own = |key: &str, ours: &'static str| chrome::ui_text("Hero", key).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr(ours).to_string());
@@ -1349,7 +1358,7 @@ fn diary_lines(row: &razdor::rules::journal::Row, tab: Tab, phone: bool, room: f
     let (white, orange, yellow) = (Color::from_rgba(255, 255, 255, 255), Color::from_rgba(235, 165, 75, 255), Color::from_rgba(230, 230, 130, 255));
     let blank = || DiaryLine { row: MarkupRow { text: String::new(), ink: Ink::Plain, align: Align::Centre, last: true }, face: Face::Body, color: yellow, size: body };
     let mut out = Vec::new();
-    for part in entry_parts(tab, phone) {
+    for &part in parts {
         match part {
             EntryPart::Title => out.extend(rows(&row.title, white, Align::Centre, Face::Subtitle, title)),
             EntryPart::Blank => out.push(blank()),
@@ -1428,6 +1437,67 @@ fn fit_row_size(full: f32, floor: f32, width_at: impl Fn(f32) -> f32, room: f32)
     size
 }
 
+/// The phone diary reader's margin from the screen's edges and its safe area, px.
+const READER_MARGIN: f32 = 8.0;
+
+/// The parts the phone's diary reader shows: the desktop's full entry (the reader has the room,
+/// so the title and the «Описание:» heading come back), for every tab.
+fn reader_parts(tab: Tab) -> Vec<EntryPart> {
+    entry_parts(tab, false)
+}
+
+/// The phone diary reader's window: the whole screen less the safe area and [`READER_MARGIN`] on
+/// each side. It covers the bottom bar too: it is a window of its own.
+fn diary_reader_rect((sw, sh): (f32, f32), safe: super::display::SafeArea) -> Rect {
+    let m = READER_MARGIN;
+    Rect::new(safe.left + m, safe.top + m, (sw - safe.left - safe.right - 2.0 * m).max(0.0), (sh - safe.top - safe.bottom - 2.0 * m).max(0.0))
+}
+
+/// The phone's diary reader (a tap on the entry, the owner's and a player's request): the entry's
+/// full text ([`reader_parts`]) at the phone's sizes (`title`, `body`), in a window over almost the
+/// whole screen, scrolled by drag and the wheel. Its close button, its window's cross or Esc closes
+/// it: returns whether it closed this frame.
+fn diary_reader(row: &razdor::rules::journal::Row, tab: Tab, title: f32, body: f32, scroll: &mut usize) -> bool {
+    let k = chrome::k();
+    let win = diary_reader_rect((screen_width(), screen_height()), super::display::safe_area());
+    let (inner, closed) = chrome::window(win, tr(n_("Diary entry")), chrome::Skin::Marble, true);
+    let pad = 8.0 * k;
+    let bar_w = 18.0 * k;
+    // A finger-sized close button (48 dp on a phone), centred under the text.
+    let btn_h = super::display::dp_px().map_or(40.0 * k, |dp| 48.0 * dp);
+    let body_y = inner.y + pad;
+    let body_h = (inner.h - btn_h - 3.0 * pad).max(0.0);
+    let bar = Rect::new(inner.right() - pad - bar_w, body_y, bar_w, body_h);
+    let text = Rect::new(inner.x + pad, body_y, (bar.x - 4.0 * k - (inner.x + pad)).max(0.0), body_h);
+    let room = text.w - 16.0 * k;
+    let lines = super::dt_font::legacy_metrics_if(true, || diary_lines_of(row, tab, &reader_parts(tab), room, title, body));
+    let line_h = (body * 1.15).round();
+    let shown = ((text.h - 12.0 * k) / line_h).floor().max(1.0) as usize;
+    chrome::text_box_base(text);
+    swipe_rows(text, line_h);
+    if mouse_in(text.x, text.y, text.w, text.h) {
+        let w = wheel();
+        if w < 0.0 && *scroll + shown < lines.len() {
+            *scroll += 1;
+        } else if w > 0.0 {
+            *scroll = scroll.saturating_sub(1);
+        }
+    }
+    *scroll = (*scroll).min(lines.len().saturating_sub(shown));
+    scrollbar_always(bar, scroll, shown, lines.len());
+    chrome::text_box_sides(text);
+    chrome::silver_frame(text, k.max(1.0));
+    super::dt_font::legacy_metrics_if(true, || {
+        for (n, line) in lines.iter().skip(*scroll).take(shown).enumerate() {
+            let y = text.y + 6.0 * k + n as f32 * line_h + body * 0.85;
+            draw_markup_row_face(&line.row, text.x + 8.0 * k, y, room, line.size, line.face, Some(line.color));
+        }
+    });
+    let bw = (inner.w * 0.5).min(360.0 * k);
+    let pressed = button(inner.center().x - bw / 2.0, inner.bottom() - pad - btn_h, bw, btn_h, tr("Close"), true);
+    closed || pressed || key(KeyCode::Escape)
+}
+
 /// The hero window («Личные характеристики и инвентарь Героя»), the bottom bar's flag (side
 /// window 5; built by 0x4d8638, its fixed parts drawn by 0x4d1814): the hero's panel on the
 /// left as in the army window; the pack's 5×5 squares with its scroll bar; the item
@@ -1439,6 +1509,14 @@ fn fit_row_size(full: f32, floor: f32, width_at: impl Fn(f32) -> f32, room: f32)
 pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, message: &mut Option<String>) -> Option<Screen> {
     use razdor::dt::markup::Ink;
     use super::dt_font::{sheet_size, with_original_face, Face};
+    // A phone's diary reader (`view.reader`) covers this window: the window below takes no input
+    // while it is open (the reader's own input is taken at its end).
+    let phone = super::display::dp_px().is_some();
+    let below_blocked = input_blocked();
+    let reading = phone && view.reader;
+    if reading {
+        set_input_blocked(true);
+    }
     let bar = super::world_view::window_backdrop(game, assets, Some(super::game_bar::BarButton::Hero));
     let c = game.content.clone();
     let k = chrome::k();
@@ -1509,7 +1587,6 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     // The item description box (310 × 164 at 58): the item under the pointer. On a phone, with a
     // diary entry shown and no item described, the diary takes its place (`diary_column`).
     let described = hover.filter(|_| game.held_item.is_none());
-    let phone = super::display::dp_px().is_some();
     let entry_shown = diary_rows(game, view.tab).get(view.pick).is_some();
     let list0 = o(576.0, 252.0, 292.0, 128.0);
     let list_bar0 = o(868.0, 252.0, 18.0, 128.0);
@@ -1680,6 +1757,11 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     let lines = super::dt_font::legacy_metrics_if(phone, || {
         rows.get(view.pick).map_or_else(Vec::new, |row| diary_lines(row, view.tab, phone, room, entry_title, body))
     });
+    // On a phone a tap on the entry's box opens the reader over the screen (`diary_reader`).
+    if phone && !reading && !lines.is_empty() && mouse_in(entry_box.x, entry_box.y, entry_box.w, entry_box.h) && clicked() {
+        view.reader = true;
+        view.reader_scroll = 0;
+    }
     let line_h = (body * 1.15).round();
     let shown = ((entry.h - 12.0 * s) / line_h).floor().max(1.0) as usize;
     swipe_rows(entry, line_h);
@@ -1700,6 +1782,20 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
             draw_markup_row_face(&line.row, entry.x + 8.0 * s, y, room, line.size, line.face, Some(line.color));
         }
     });
+
+    // The reader, when open: it takes this frame's input (the window below took none), so the
+    // window's own keys and clicks see nothing after it.
+    if reading {
+        set_input_blocked(below_blocked);
+        let closed = match rows.get(view.pick) {
+            Some(row) => diary_reader(row, view.tab, entry_title, body, &mut view.reader_scroll),
+            None => true,
+        };
+        if closed {
+            view.reader = false;
+        }
+        swallow_input();
+    }
 
     // The item held is the pointer; closing the window puts it back in the pack (the screen
     // change in `App::frame`, 0x4b8d28).
@@ -1808,6 +1904,38 @@ mod tests {
         // Rumours and messages are not the quest list's: they keep their title on a phone.
         assert_eq!(entry_parts(Tab::Rumours, true), vec![Title, Blank, Date, Blank, Text]);
         assert_eq!(entry_parts(Tab::Messages, true), vec![Title, Blank, Date, Blank, Text]);
+    }
+
+    /// The phone's reader shows the desktop's full entry for every tab: the title and the
+    /// «Описание:» heading come back (a phone's small box drops them), the time line stays.
+    #[test]
+    fn the_phone_reader_shows_the_desktop_s_full_entry() {
+        use super::EntryPart::*;
+        for tab in razdor::rules::journal::Tab::ALL {
+            assert_eq!(super::reader_parts(tab), super::entry_parts(tab, false), "{tab:?}");
+        }
+        assert_eq!(super::reader_parts(razdor::rules::journal::Tab::Active), vec![Title, Blank, Description, Text, Blank, TimeHeading, Time]);
+        assert_ne!(super::reader_parts(razdor::rules::journal::Tab::Active), super::entry_parts(razdor::rules::journal::Tab::Active, true));
+    }
+
+    /// The reader covers the screen less the safe area and a small margin on each side, so the
+    /// phone's cutouts and rounded corners stay clear of it; with no insets it is the screen less
+    /// the margin.
+    #[test]
+    fn the_reader_is_the_screen_less_the_safe_area_and_a_margin() {
+        use super::super::display::SafeArea;
+        let none = SafeArea::default();
+        let r = super::diary_reader_rect((1080.0, 2400.0), none);
+        assert_eq!((r.x, r.y, r.w, r.h), (8.0, 8.0, 1064.0, 2384.0));
+        // A landscape phone with a cutout on each side, its bottom corners and its bottom inset.
+        let safe = SafeArea { left: 110.0, right: 110.0, bottom: 40.0, corner_bl: 40.0, corner_br: 40.0, ..SafeArea::default() };
+        let r = super::diary_reader_rect((2400.0, 1080.0), safe);
+        assert_eq!((r.x, r.y), (118.0, 8.0));
+        assert_eq!((r.right(), r.bottom()), (2400.0 - 118.0, 1080.0 - 48.0));
+        // A portrait phone with a top inset: the reader starts under it.
+        let top = SafeArea { top: 80.0, ..SafeArea::default() };
+        let r = super::diary_reader_rect((1080.0, 2400.0), top);
+        assert_eq!(r.y, 88.0);
     }
 
     #[test]

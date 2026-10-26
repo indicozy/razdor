@@ -19,7 +19,10 @@
 //! `RAZDOR_SCENE_RULES=1` opens their menu over `scenarios`. `RAZDOR_SCENE_BONUS_ITEMS=1`
 //! equips the hero with available distinct bonus items to exercise the trait scrollbar.
 //! test's action list played to that step. `RAZDOR_SCENE_BATTLE_EXIT=1` opens a battle
-//! scene's leave-battle window. `RAZDOR_SCENE_PACK_AT=<cell>:<id>,…` puts items in those pack
+//! scene's leave-battle window, `RAZDOR_SCENE_BATTLE_RESTART=1` the same with its «Рестарт»
+//! question open; `menu:<map>:restart` is the map's exit window with its question open, and
+//! `RAZDOR_SCENE_READER=1` opens the diary reader of a `hero` scene (a phone's, with `RAZDOR_DP`).
+//! `RAZDOR_SCENE_PACK_AT=<cell>:<id>,…` puts items in those pack
 //! cells; `RAZDOR_SCENE_HELD=<id>` puts an item on the pointer (hero and army windows);
 //! `RAZDOR_SCENE_WEAR=<id>,…` wears those items on the squad member of `army:<map>:<n>:<unit>`.
 //! `RAZDOR_SCENE_PAN=dx,dy` holds the interface's pan at that offset (windows larger than the screen).
@@ -294,6 +297,12 @@ pub fn stage(app: &mut App) {
     if std::env::var("RAZDOR_SCENE_BATTLE_EXIT").is_ok_and(|v| v == "1") {
         if let Screen::Battle(v) | Screen::CustomBattle(v) = &mut app.screen {
             v.open_exit_window();
+        }
+    }
+    // `RAZDOR_SCENE_BATTLE_RESTART=1`: the same window with its «Рестарт» question open.
+    if std::env::var("RAZDOR_SCENE_BATTLE_RESTART").is_ok_and(|v| v == "1") {
+        if let Screen::Battle(v) | Screen::CustomBattle(v) = &mut app.screen {
+            v.open_restart_question();
         }
     }
     // `RAZDOR_SCENE_FILTER=меч`: the inventory filter (army screen, market) holds that.
@@ -642,7 +651,9 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                 );
             }
             let tab = arg.and_then(|t| t.parse::<usize>().ok()).and_then(|i| razdor::rules::journal::Tab::ALL.get(i).copied());
-            Screen::Hero(super::items_view::HeroView { tab: tab.unwrap_or(razdor::rules::journal::Tab::Active), ..Default::default() })
+            // `RAZDOR_SCENE_READER=1`: a phone's diary reader open on the picked entry (`RAZDOR_DP`).
+            let reader = std::env::var_os("RAZDOR_SCENE_READER").is_some();
+            Screen::Hero(super::items_view::HeroView { tab: tab.unwrap_or(razdor::rules::journal::Tab::Active), reader, ..Default::default() })
         }
         "spells" | "spells-pages" => {
             // A book full of the install's spells, to see their pictures. `spells-pages`: 20 of
@@ -653,7 +664,8 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             game.mana = std::env::var("RAZDOR_SCENE_MANA").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(500);
             Screen::Spellbook { selected: 0, page, filter: Default::default() }
         }
-        "menu" => Screen::Menu(false),
+        // `menu:<map>[:restart]`: the exit window over the map, with its «Рестарт» question open.
+        "menu" => Screen::Menu(arg == Some("restart")),
         "save" => {
             // `save:<map>`: the save window over the map (the bar's save button).
             Screen::Save(super::saves::SaveView::new(&game, Back::Map))

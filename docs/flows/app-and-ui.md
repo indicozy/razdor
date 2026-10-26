@@ -257,8 +257,14 @@ game menu's art window (`saves::exit_window`, `exit_dialog`, at the art's 634×5
 (`world_view::window_backdrop`, `backdrop_lit`). The help overlay (F1, «Клавиши» in game, `hotkeys::help_overlay`)
 already spans the phone's width; on a phone with a bar it stands between the top inset and the bar (`has_bar`).
 Landscape and desktop are byte-identical (`window_layout::portrait_game` is None, the old placements stay).
-Not covered: the building, army and hero windows (the stacked layout), the spellbook (landscape window), and the
-battle's exit window (`saves::battle_exit_dialog`, not a title-flow window).
+The exit windows (the game's «Выход из игры» and the battle's `saves::battle_exit_dialog`) have their own
+scale: upright on a phone, `window_layout::game_scale`; sideways on a phone, `window_layout::sideways_exit_k`,
+the large-window scale (`display::popup_scale`, one original px per dp, fitted to the screen less the safe
+area's sides and the bar), so the window and its text and buttons grow together (about 1.3 times the
+interface scale on a 2400×1080 phone). `window_layout::exit_rect` centres them between the safe area's sides
+and between its top and the bar. Their «Рестарт» question (`saves::question_box`) is drawn at that scale
+too, centred between the safe area's sides. On the desktop all of it is as before (no insets, no phone scale).
+Not covered: the building, army and hero windows (the stacked layout), and the spellbook (landscape window).
 The market and the sanctuary scenes of the UI regression check use town 8 of РК3-Столица (the start's
 castle has neither tab); the snapshot clears the start's due places, which otherwise make the building
 window step aside for the map (`world_view::building_flight`).
@@ -333,6 +339,11 @@ original's). The phone's entry also drops the quest's title and the «Описа
 quest list above names the quest; the player's suggestion): it is the text, then the time
 heading and the time; a completed quest keeps its date and text, rumours and messages keep the
 title. The desktop keeps the original's lines (`items_view::entry_parts`, pinned by its tests).
+On a phone a tap on the entry's box opens the reader (`items_view::diary_reader`, `HeroView::reader`): the
+entry's full text (`reader_parts`, the desktop's parts) at the phone's sizes, in a window over the screen
+less the safe area and an 8 px margin (`diary_reader_rect`), scrolled by drag and the wheel, and closed by its
+finger-sized «Закрыть», its cross or Esc. While it is open the window below takes no input (`set_input_blocked`),
+and the reader swallows the frame's keys and clicks.
 Hit areas and scrolling follow the boxes they are given. Hint boxes
 (`widgets::tooltip`, `panel_hint`) fade in over 300 ms as the original's.
 

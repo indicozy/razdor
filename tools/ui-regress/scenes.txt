@@ -98,3 +98,13 @@ phone-keyboard-hero-portrait | classes:РК1-Начало пути | 1080x2376 |
 phone-keyboard-hero-none-portrait | classes:РК1-Начало пути | 1080x2376 | RAZDOR_DP=2.75
 phone-keyboard-save-portrait | save:РК1-Начало пути | 1080x2376 | RAZDOR_DP=2.75;RAZDOR_KEYBOARD=900
 phone-keyboard-save-none-portrait | save:РК1-Начало пути | 1080x2376 | RAZDOR_DP=2.75
+# Phones: the exit and restart windows, and the diary reader (a phone's dp and large windows on)
+phone-exit-landscape | menu:РК1-Начало пути | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1
+phone-exit-portrait | menu:РК1-Начало пути | 1080x2160 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1
+phone-exit-restart-landscape | menu:РК1-Начало пути:restart | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1
+phone-battle-exit-landscape | battle:РК1-Начало пути:0 | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1;RAZDOR_SCENE_BATTLE_EXIT=1
+phone-battle-exit-portrait | battle:РК1-Начало пути:0 | 1080x2160 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1;RAZDOR_SCENE_BATTLE_EXIT=1
+phone-battle-restart-landscape | battle:РК1-Начало пути:0 | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1;RAZDOR_SCENE_BATTLE_RESTART=1
+phone-diary-landscape | hero:РК1-Начало пути:1 | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1;RAZDOR_SCENE_QUEST=1
+phone-diary-reader-landscape | hero:РК1-Начало пути:1 | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1;RAZDOR_SCENE_QUEST=1;RAZDOR_SCENE_READER=1
+phone-diary-reader-portrait | hero:РК1-Начало пути:1 | 1080x2160 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1;RAZDOR_SCENE_QUEST=1;RAZDOR_SCENE_READER=1
