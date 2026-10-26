@@ -7,7 +7,6 @@
 //! All logic is in `razdor::editor::events` (tested there); this module draws and returns
 //! the command a change makes.
 
-use crate::ui::input::{is_key_pressed};
 use macroquad::prelude::*;
 
 use razdor::dt::dtm::{Event, GameDate, Scenario};
@@ -147,7 +146,7 @@ pub fn window(state: &mut EventsState, s: &Scenario, names: &Names) -> EventsAct
     draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.1, 0.095, 0.09, 0.98));
     draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, ACCENT);
     text(tr("Events"), r.x + 14.0, r.y + 28.0, 24.0, ACCENT);
-    if button(r.right() - 130.0, r.bottom() - 50.0, 116.0, 38.0, tr("Close"), true) || (!typing() && !popup_open() && is_key_pressed(KeyCode::Escape)) {
+    if button(r.right() - 130.0, r.bottom() - 50.0, 116.0, 38.0, tr("Close"), true) || (!typing() && !popup_open() && esc_pressed()) {
         return EventsAction::Close;
     }
     if state.selected.is_some_and(|id| s.event(id).is_none()) {

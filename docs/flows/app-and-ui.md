@@ -645,6 +645,12 @@ text is the phone's text (`display::text_for`, drawn under `dt_font::legacy_metr
 tiles wrap to three lines; the desktop keeps the interface scale. Snapshot:
 `RAZDOR_SCENE_OPEN=<frame>:keys`.
 
+Esc is read through `widgets::key(KeyCode::Escape)` (the guarded read) or `widgets::esc_pressed()`
+(raw, for the direct reads). Both also take Android's system Back (`KeyCode::Back`, as miniquad
+delivers it; `widgets::is_escape`): a new Esc check goes through these, never a bare
+`is_key_pressed(KeyCode::Escape)`. Back is never in the key tables (`keymap::bindable` is false for it)
+and, like Alt and F10, never the held key (`widgets::is_system_key`).
+
 ## How to add a window
 
 1. Add a `Screen` variant (or a field on an existing view) in `src/ui/mod.rs`.

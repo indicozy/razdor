@@ -466,7 +466,7 @@ pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
     }
     SCROLL.with(|s| s.set(scroll));
     let closes = !fresh && is_mouse_button_pressed(MouseButton::Left) && !on_control;
-    let done = is_key_pressed(keymap::key(Action::Help)) || is_key_pressed(KeyCode::Escape) || closes || press.is_some();
+    let done = is_key_pressed(keymap::key(Action::Help)) || esc_pressed() || closes || press.is_some();
     if let Some(key) = press {
         tap_key(key);
     }

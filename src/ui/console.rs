@@ -86,7 +86,7 @@ impl Console {
             return (false, None);
         }
         let chars = typed_chars();
-        if key || is_key_pressed(KeyCode::Escape) || chars.iter().copied().any(is_toggle) {
+        if key || esc_pressed() || chars.iter().copied().any(is_toggle) {
             self.open = false;
             return (true, None);
         }

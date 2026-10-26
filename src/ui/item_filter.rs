@@ -276,7 +276,7 @@ fn handle_keys(key: &str, query: &mut String, r: Rect, shortcuts: &[KeyCode]) ->
                 let mut ed = super::text_edit::TextEdit::at_end();
                 ed.type_chars(query, &chars, 60);
                 set_focus_edit(key, ed);
-            } else if is_key_pressed(KeyCode::Escape) && !query.is_empty() {
+            } else if esc_pressed() && !query.is_empty() {
                 query.clear();
                 reply.keys_taken = true;
             }
@@ -285,7 +285,7 @@ fn handle_keys(key: &str, query: &mut String, r: Rect, shortcuts: &[KeyCode]) ->
             let mut ed = focus_edit(key);
             edit_keys(query, &mut ed, &typed_chars(), EditRules::line(60));
             set_focus_edit(key, ed);
-            if is_key_pressed(KeyCode::Escape) {
+            if esc_pressed() {
                 query.clear();
                 clear_focus();
             } else if enter_pressed() {

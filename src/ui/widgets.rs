@@ -354,7 +354,24 @@ pub fn right_clicked() -> bool {
 }
 
 pub fn key(k: KeyCode) -> bool {
-    !input_blocked() && !input_swallowed() && is_key_pressed(k)
+    !input_blocked() && !input_swallowed() && if is_escape(k) { esc_pressed() } else { is_key_pressed(k) }
+}
+
+/// The keys that are Esc: the keyboard's Esc and the system's Back (Android's Back key comes
+/// as `KeyCode::Back`; on a phone it does what Esc does everywhere).
+pub fn is_escape(k: KeyCode) -> bool {
+    matches!(k, KeyCode::Escape | KeyCode::Back)
+}
+
+/// Esc went down this frame, from the keyboard or the system's Back. Raw: no input-blocked
+/// check (use [`key`] for that).
+pub fn esc_pressed() -> bool {
+    is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::Back)
+}
+
+/// The system keys that never become the held key: Alt, F10 and Android's Back.
+fn is_system_key(k: KeyCode) -> bool {
+    matches!(k, KeyCode::LeftAlt | KeyCode::RightAlt | KeyCode::F10 | KeyCode::Back)
 }
 
 local! {
@@ -381,7 +398,7 @@ pub fn track_held_key() {
 /// ends its repeat without passing it to another key still down). Alt and F10 aside, as the
 /// held key. The time is when it went down.
 fn next_repeat(repeat: Option<(KeyCode, f64)>, pressed: impl IntoIterator<Item = KeyCode>, released: &std::collections::HashSet<KeyCode>, now: f64, down: impl Fn(KeyCode) -> bool) -> Option<(KeyCode, f64)> {
-    if let Some(k) = pressed.into_iter().find(|&k| !matches!(k, KeyCode::LeftAlt | KeyCode::RightAlt | KeyCode::F10) && down(k)) {
+    if let Some(k) = pressed.into_iter().find(|&k| !is_system_key(k) && down(k)) {
         return Some((k, now));
     }
     repeat.filter(|&(k, _)| !released.contains(&k) && down(k))
@@ -408,7 +425,7 @@ fn repeated_held(held: Option<KeyCode>, repeat: Option<(KeyCode, f64)>, now: f64
 /// held for good, cutting each walk at its first step.
 fn next_held(held: Option<KeyCode>, pressed: impl IntoIterator<Item = KeyCode>, any_up: bool, down: impl Fn(KeyCode) -> bool) -> Option<KeyCode> {
     let held = if any_up { None } else { held };
-    let pressed = pressed.into_iter().find(|&k| !matches!(k, KeyCode::LeftAlt | KeyCode::RightAlt | KeyCode::F10) && down(k));
+    let pressed = pressed.into_iter().find(|&k| !is_system_key(k) && down(k));
     pressed.or(held)
 }
 
@@ -460,7 +477,7 @@ fn answer_ignored(k: &KeyCode) -> bool {
 
 fn answer_of(keys: impl Iterator<Item = KeyCode>) -> Option<bool> {
     let keys: Vec<KeyCode> = keys.filter(|k| !answer_ignored(k)).collect();
-    if keys.contains(&KeyCode::Escape) || keys.contains(&KeyCode::N) {
+    if keys.iter().any(|&k| is_escape(k)) || keys.contains(&KeyCode::N) {
         Some(false)
     } else if keys.is_empty() {
         None
@@ -1641,7 +1658,7 @@ pub fn text_field(key: &str, x: f32, y: f32, w: f32, h: f32, value: &mut String,
     if active && !input_blocked() {
         let out = edit_keys(value, &mut ed, &typed_chars(), EditRules { max_chars: 2000, multiline, allow: |_| true });
         changed = out.changed;
-        if (out.enter && !multiline) || is_key_pressed(KeyCode::Escape) {
+        if (out.enter && !multiline) || esc_pressed() {
             clear_focus();
         }
     }
@@ -1708,7 +1725,7 @@ pub fn number_field(key: &str, x: f32, y: f32, w: f32, value: i64, min: i64, max
                 out = Some(v);
             }
             clear_focus();
-        } else if is_key_pressed(KeyCode::Escape) {
+        } else if esc_pressed() {
             clear_focus();
         } else {
             FOCUS.with(|f| {
@@ -1902,7 +1919,7 @@ pub fn draw_popup() {
             draw_rectangle(r.x + r.w - 5.0, r.y + 26.0 * s + frac * (track - 20.0 * s), 3.0, 20.0 * s, DIM);
         }
         let outside = is_mouse_button_pressed(MouseButton::Left) && !r.contains(Vec2::from(pointer()));
-        if outside || is_key_pressed(KeyCode::Escape) {
+        if outside || esc_pressed() {
             close = true;
         }
     });
@@ -2137,6 +2154,19 @@ mod tests {
         assert_eq!(held_key(), Some(KeyCode::GraveAccent));
         forget_held_key();
         assert_eq!(held_key(), None, "the console's ~ does not stop the walk once it closes");
+    }
+
+    #[test]
+    fn esc_and_the_system_back_are_the_same_key() {
+        assert!(is_escape(KeyCode::Escape));
+        assert!(is_escape(KeyCode::Back));
+        for k in [KeyCode::Enter, KeyCode::Space, KeyCode::N, KeyCode::Tab] {
+            assert!(!is_escape(k), "{k:?}");
+        }
+        assert!(!crate::ui::keymap::bindable(KeyCode::Back), "Back is never bound");
+        assert_eq!(answer_of([KeyCode::Back].into_iter()), Some(false), "Back answers No, as Esc");
+        assert_eq!(next_held(None, [KeyCode::Back], false, |_| true), None, "Back is no held key");
+        assert_eq!(next_repeat(None, [KeyCode::Back], &Default::default(), 0.0, |_| true), None);
     }
 
     #[test]

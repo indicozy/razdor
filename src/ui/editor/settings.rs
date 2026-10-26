@@ -2,7 +2,6 @@
 //! events, the three hero presets, the faction relations, campaign settings and the named
 //! characters.
 
-use crate::ui::input::{is_key_pressed};
 use macroquad::prelude::*;
 
 use razdor::dt::dtm::{GameDate, Scenario};
@@ -164,7 +163,7 @@ pub fn window(state: &mut SettingsState, s: &Scenario, names: &Names) -> Setting
         }
     }
     state.scroll = state.scroll.clamp(0.0, (content - area.h + 20.0).max(0.0));
-    if button(r.right() - 150.0, r.bottom() - 52.0, 130.0, 40.0, tr("Close"), true) || (!typing() && is_key_pressed(KeyCode::Escape)) {
+    if button(r.right() - 150.0, r.bottom() - 52.0, 130.0, 40.0, tr("Close"), true) || (!typing() && esc_pressed()) {
         return SettingsAction::Close;
     }
     if st != orig {

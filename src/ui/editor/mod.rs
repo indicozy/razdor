@@ -396,7 +396,7 @@ impl EditorScreen {
         let focused = has_focus(FIND_KEY);
         let enter = enter_pressed();
         let f3 = is_key_pressed(KeyCode::F3);
-        if focused && is_key_pressed(KeyCode::Escape) {
+        if focused && esc_pressed() {
             clear_focus();
             self.find = None;
             return;
@@ -634,7 +634,7 @@ impl EditorScreen {
             if is_key_pressed(KeyCode::Delete) {
                 self.tools.delete_selected(&mut self.doc);
             }
-            if is_key_pressed(KeyCode::Escape) {
+            if esc_pressed() {
                 if self.find.is_some() {
                     self.find = None;
                 } else if self.tools.selected.is_some() {
@@ -882,7 +882,7 @@ impl EditorScreen {
         let r = Rect::new((sw - w) / 2.0, ((sh - h) / 2.0).max(10.0), w, h);
         draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.1, 0.095, 0.09, 0.98));
         draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, ACCENT);
-        let esc = !typing() && is_key_pressed(KeyCode::Escape);
+        let esc = !typing() && esc_pressed();
         let (x, mut y) = (r.x + 20.0, r.y + 32.0);
         let cancel = |r: &Rect| button(r.right() - 140.0, r.bottom() - 54.0, 120.0, 40.0, tr("Cancel"), true);
         let mut keep = true;

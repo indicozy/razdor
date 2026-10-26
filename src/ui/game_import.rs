@@ -26,7 +26,6 @@ use razdor::trf;
 
 use super::audio::{cue, Cue};
 use super::chrome;
-use crate::ui::input::is_key_pressed;
 use super::map_import;
 use super::widgets::*;
 
@@ -254,7 +253,7 @@ fn confirm_window(name: &str) -> Option<bool> {
     match map_import::buttons(inner, &[tr("Replace"), tr("Cancel")]) {
         Some(0) => Some(true),
         Some(_) => Some(false),
-        None if closed || is_key_pressed(KeyCode::Escape) => Some(false),
+        None if closed || esc_pressed() => Some(false),
         None => None,
     }
 }
