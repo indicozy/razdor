@@ -272,6 +272,51 @@ pub fn game_rect(video: (f32, f32)) -> Option<Rect> {
     portrait_game_now(video).map(|(_, r)| r)
 }
 
+/// The exit windows' size in original px: the game's «Выход из игры» and the battle's leave
+/// window (634×516, the original's pixels; drawn at `chrome::opx`, 0.9375 of the window scale).
+pub const EXIT_ORIG: (f32, f32) = (634.0, 516.0);
+
+/// The window scale of an exit window on a phone held sideways (the owner's and a player's
+/// request: the windows were too small to use with a finger): the large-window scale of
+/// `display::popup_scale` for [`EXIT_ORIG`], one original px per dp and never above the fit to
+/// the screen's width less the safe area's sides, and to the height between the top inset and the
+/// bar. `base_k` is the window scale it has now; the result is never below it. `None` off the
+/// phone (`dp` None): the desktop keeps its own scale. Large windows off: `base_k`.
+pub fn sideways_exit_k(base_k: f32, dp: Option<f32>, large: bool, (sw, sh): (f32, f32), bar: f32, safe: super::display::SafeArea) -> Option<f32> {
+    dp?;
+    let avail = (sw - safe.left - safe.right, sh - safe.top);
+    let o = super::display::popup_scale(base_k * 0.9375, large, dp, EXIT_ORIG, avail, bar);
+    Some(o / 0.9375)
+}
+
+/// The rectangle of an exit window of `(w, h)` px on a screen `(sw, sh)` with a `bar`-px bottom
+/// bar and the safe area `safe`: centred between the sides' insets, and vertically between the
+/// top inset and the bar (not above the top). On the desktop (no insets) it is the window's
+/// old centring.
+pub fn exit_rect((sw, sh): (f32, f32), bar: f32, safe: super::display::SafeArea, (w, h): (f32, f32)) -> Rect {
+    let x = safe.left + (sw - safe.left - safe.right - w) / 2.0;
+    let y = safe.top + ((sh - safe.top - bar - h) / 2.0).max(0.0);
+    Rect::new(x, y, w, h)
+}
+
+/// The window scale of an exit window (the game's «Выход из игры», the battle's leave window)
+/// for the screen now: on a phone held upright [`game_scale`]; on a phone held sideways
+/// [`sideways_exit_k`]; on the desktop the scale it has (none set: the interface scale).
+pub fn exit_scale() -> super::display::WindowScale {
+    if portrait() {
+        return game_scale((EXIT_ORIG.0 * 0.9375, EXIT_ORIG.1 * 0.9375));
+    }
+    let k = sideways_exit_k(
+        chrome::k(),
+        super::display::dp_px(),
+        super::display::large_windows(),
+        (screen_width(), screen_height()),
+        chrome::bar_height(),
+        super::display::safe_area(),
+    );
+    super::display::enter_window_scale(k.or_else(super::display::window_scale))
+}
+
 /// [`title_scale`] for a window opened from the title screens, or [`game_scale`] for one over
 /// the map (`in_game`): the same guard either way, so a window's frame reads one place.
 pub fn window_scale(in_game: bool, video: (f32, f32)) -> super::display::WindowScale {
@@ -724,5 +769,60 @@ mod title_tests {
         assert_eq!(portrait_game((2376.0, 1080.0), Some(2.75), 0.0, bar_of(), BASE, (594.0, 482.0)), None);
         assert_eq!(portrait_game((1920.0, 1080.0), None, 0.0, bar_of(), BASE, (594.0, 482.0)), None);
         assert_eq!(portrait_game((1080.0, 2376.0), None, 0.0, bar_of(), BASE, (594.0, 482.0)), None);
+    }
+}
+
+#[cfg(test)]
+mod exit_tests {
+    use super::*;
+    use super::super::display::SafeArea;
+
+    const NO_SAFE: SafeArea = SafeArea { left: 0.0, top: 0.0, right: 0.0, bottom: 0.0, corner_bl: 0.0, corner_br: 0.0 };
+    /// A 2400×1080 phone held sideways at 2.625 px per dp, its bar 120 px tall; the interface
+    /// scale of such a screen is 1.5 (`chrome::fit_k` over the 0.9375 reference).
+    const SIDE: (f32, f32) = (2400.0, 1080.0);
+    const BAR: f32 = 120.0;
+    const BASE: f32 = 1.5;
+
+    #[test]
+    fn the_desktop_keeps_its_exit_window_scale_and_centring() {
+        // No phone: no scale of its own, whatever the large windows setting says.
+        assert_eq!(sideways_exit_k(BASE, None, true, SIDE, BAR, NO_SAFE), None);
+        assert_eq!(sideways_exit_k(BASE, None, false, SIDE, BAR, NO_SAFE), None);
+        // The desktop's rectangle is the old centring: (sw - w) / 2 across, and the height
+        // between the top and the bar, never above the top.
+        let (w, h) = (634.0 * 1.4, 516.0 * 1.4);
+        let r = exit_rect((1920.0, 1080.0), 80.0, NO_SAFE, (w, h));
+        assert_eq!(r.x, (1920.0 - w) / 2.0);
+        assert_eq!(r.y, ((1080.0 - 80.0 - h) / 2.0).max(0.0));
+        assert_eq!(exit_rect((1920.0, 300.0), 80.0, NO_SAFE, (w, h)).y, 0.0);
+    }
+
+    #[test]
+    fn a_phone_held_sideways_gets_a_window_at_least_a_fifth_larger_that_fits() {
+        let k = sideways_exit_k(BASE, Some(2.625), true, SIDE, BAR, NO_SAFE).expect("a phone");
+        assert!(k >= 1.2 * BASE, "{k} is not 1.2 times the interface scale {BASE}");
+        // The art (634×516 original px) fits the screen between the top and the bar.
+        let (w, h) = (EXIT_ORIG.0 * k * 0.9375, EXIT_ORIG.1 * k * 0.9375);
+        let r = exit_rect(SIDE, BAR, NO_SAFE, (w, h));
+        assert!(r.x >= 0.0 && r.x + r.w <= SIDE.0 + 0.01, "{r:?} is wider than the screen");
+        assert!(r.y >= 0.0 && r.y + r.h <= SIDE.1 - BAR + 0.01, "{r:?} is taller than the screen above the bar");
+        assert!((r.x + r.w / 2.0 - SIDE.0 / 2.0).abs() < 0.01, "not centred across the screen");
+    }
+
+    #[test]
+    fn the_sideways_window_stays_inside_the_safe_area_sides() {
+        let safe = SafeArea { left: 110.0, right: 110.0, ..NO_SAFE };
+        let k = sideways_exit_k(BASE, Some(2.625), true, SIDE, BAR, safe).expect("a phone");
+        let (w, h) = (EXIT_ORIG.0 * k * 0.9375, EXIT_ORIG.1 * k * 0.9375);
+        let r = exit_rect(SIDE, BAR, safe, (w, h));
+        assert!(r.x >= safe.left - 0.01 && r.x + r.w <= SIDE.0 - safe.right + 0.01, "{r:?} is under the cutouts");
+        assert!((r.x + r.w / 2.0 - SIDE.0 / 2.0).abs() < 0.01, "not centred between the cutouts");
+    }
+
+    #[test]
+    fn large_windows_off_keep_the_phone_s_scale() {
+        let k = sideways_exit_k(BASE, Some(2.625), false, SIDE, BAR, NO_SAFE).expect("a phone");
+        assert!((k - BASE).abs() < 1e-4, "{k} is not the base {BASE}");
     }
 }

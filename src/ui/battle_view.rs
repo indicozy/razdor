@@ -1272,6 +1272,12 @@ impl BattleView {
         self.exiting = true;
     }
 
+    /// The leave-battle window with its «Рестарт» question open (the debug snapshots only).
+    pub fn open_restart_question(&mut self) {
+        self.exiting = true;
+        self.exit_asking = true;
+    }
+
     /// XP needed for fighter `f`'s next level, as the battle began.
     fn need(&self, f: &Fighter) -> i32 {
         self.battle.content().xp_to_next(f.unit, f.level)

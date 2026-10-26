@@ -921,8 +921,9 @@ pub enum ExitChoice {
 /// "Отмена". `asking` is true while the restart question is open.
 pub fn exit_window(game: &Game, assets: &Assets, asking: &mut bool) -> (Option<ExitChoice>, Option<Screen>) {
     world_view::backdrop_lit(game, assets, Some(super::game_bar::BarButton::Menu));
-    // The game menu's window at its own scale on a phone held upright (`exit_dialog`).
-    let _scale = super::window_layout::game_scale(EXIT_ART);
+    // The game menu's window at its own scale on a phone (`exit_dialog`): upright between the
+    // top inset and the bar, sideways the large-window scale (`window_layout::exit_scale`).
+    let _scale = super::window_layout::exit_scale();
     let title = own("ExitGame", "Title", n_("Leave the game"));
     let warning = own("ExitGame", "Warning", n_("Attention!\n\nThe game under way will end.\nTo go on with it another time, save it from the map's bar first."));
     match exit_dialog(&title, &warning, asking, false, true) {
@@ -935,6 +936,8 @@ pub fn exit_window(game: &Game, assets: &Assets, asking: &mut bool) -> (Option<E
 /// be left for the map, and the same choices as the exit window. Returns the choice and
 /// whether it was cancelled.
 pub fn battle_exit_dialog(asking: &mut bool) -> (Option<ExitChoice>, bool) {
+    // The window's scale for this screen, both its variants (`exit_scale`).
+    let _scale = super::window_layout::exit_scale();
     let title = own("ExitBattle", "Title", n_("Ways out of the battle"));
     // Razdor's «Рестарт» here plays this battle again (the user's choice; the original's
     // restarts the scenario, and says so): its own text.
@@ -958,7 +961,10 @@ fn battle_exit_window(title: &str, warning: &str, asking: &mut bool) -> (Option<
     const H: f32 = 516.0;
     let (sw, sh) = (screen_width(), screen_height());
     let o = (chrome::k() * 0.9375).min((sw - 12.0) / W).min((sh - chrome::bar_height() - 4.0) / H);
-    let (wx, wy) = (((sw - W * o) / 2.0).floor(), ((sh - chrome::bar_height() - H * o) / 2.0).floor().max(2.0));
+    // Centred between the safe area's sides and between its top and the bar (on the desktop, the
+    // old centring: no insets).
+    let e = super::window_layout::exit_rect((sw, sh), chrome::bar_height(), super::display::safe_area(), (W * o, H * o));
+    let (wx, wy) = (e.x.floor(), e.y.floor().max(2.0));
     let r = Rect::new(wx, wy, W * o, H * o);
     let closed = chrome::battle_exit_frame(r, title, o);
     if let Some(t) = chrome::win("S_Battle") {
@@ -1094,7 +1100,9 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art:
     let footer_h = 56.0 * px;
     let (w, h) = if art { (634.0 * px, 516.0 * px) } else { (560.0 * k, 250.0 * k) };
     // The art window on a phone held upright: between the top inset and the bar (`game_rect`).
-    let r = art.then(|| super::window_layout::game_rect(EXIT_ART)).flatten().unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, ((screen_height() - super::chrome::bar_height() - h) / 2.0).max(0.0), w, h));
+    let r = art.then(|| super::window_layout::game_rect(EXIT_ART)).flatten().unwrap_or_else(|| {
+        super::window_layout::exit_rect((screen_width(), screen_height()), super::chrome::bar_height(), super::display::safe_area(), (w, h))
+    });
     let (inner, closed) = super::chrome::window(r, title, super::chrome::Skin::Marble, true);
     if art {
         if let Some(t) = super::chrome::win("S_Exit_RUS") {
@@ -1236,7 +1244,9 @@ fn marked_question(title: &str, text: &str) -> Option<bool> {
 fn question_box(title: &str, text: &str, marked: bool) -> Option<bool> {
     let k = super::chrome::k();
     let (w, h) = (380.0 * k, 150.0 * k);
-    let r = Rect::new((screen_width() - w) / 2.0, (screen_height() - h) / 2.0, w, h);
+    // Centred between the safe area's sides (no insets on the desktop: the screen's centre).
+    let safe = super::display::safe_area();
+    let r = Rect::new(safe.left + (screen_width() - safe.left - safe.right - w) / 2.0, (screen_height() - h) / 2.0, w, h);
     let (inner, _) = super::chrome::window(r, title, super::chrome::Skin::Marble, false);
     let size = 13.0 * k;
     let (room, step) = (inner.w - 20.0 * k, 17.0 * k);
