@@ -1192,11 +1192,20 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     let rx = inner.x + 580.0 * k;
     let rw = inner.x + inner.w - 24.0 * k - rx;
     let bw = 150.0 * k;
+    // The column's hints, wrapped first: they set the row pitch, which is the original's 44 px
+    // unless the column would run past the Ok button's top. The column is nine pitches from its
+    // first row to the language row, the hint slot (44 px plus its lines), and the language's
+    // description (48 px down, then its lines).
+    let ai_hint = wrap(tr("Maximum: before each move the enemy of your battles weighs every move and answer ahead and plays each out to the end of the battle."), rw, 12.0 * k);
+    let lang_hint = wrap(super::language::hint(), rw, 12.0 * k);
+    let hints_h = 44.0 * k + ai_hint.len() as f32 * 17.0 * k + 48.0 * k + lang_hint.len() as f32 * 17.0 * k;
+    let ok_top = inner.h - 44.0 * k - 4.0 * k;
+    let pitch = right_column_pitch(30.0 * k, ok_top, 9.0, hints_h, 44.0 * k);
     let mut y = inner.y + 30.0 * k;
     let row = |label: &str, value: &str, y: &mut f32| -> bool {
         chrome::shadow_text(label, rx, *y + 18.0 * k, 14.0 * k, chrome::CREAM);
         let r = Rect::new(rx + rw - bw, *y, bw, 28.0 * k);
-        *y += 44.0 * k;
+        *y += pitch;
         row_button(r, value)
     };
     // Windowed, borderless or full screen, set at once (`display::follow_settings`). A phone
@@ -1231,12 +1240,13 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     if row(tr("Battle AI strength"), strength_label, &mut y) {
         set_ai_strength(audio, strength.next());
     }
-    let hint = tr("Maximum: before each move the enemy of your battles weighs every move and answer ahead and plays each out to the end of the battle.");
-    let lines = wrap(hint, rw, 12.0 * k);
-    for (i, line) in lines.iter().enumerate() {
-        chrome::shadow_text(line, rx, y - 8.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
+    // The hint sits 8 px under the fourth row's button and the next row 8 px under the hint (the
+    // original's 44 px pitch: the hint's top at 4 × 44 - 8 px).
+    let hint_top = y - pitch + 36.0 * k;
+    for (i, line) in ai_hint.iter().enumerate() {
+        chrome::shadow_text(line, rx, hint_top + i as f32 * 17.0 * k, 12.0 * k, WHITE);
     }
-    y += lines.len() as f32 * 17.0 * k;
+    y = hint_top + ai_hint.len() as f32 * 17.0 * k + 8.0 * k;
     if row(tr("Unit battle participation"), if audio.allow_unit_benching { tr("On") } else { tr("Off") }, &mut y) {
         audio.allow_unit_benching = !audio.allow_unit_benching;
     }
@@ -1269,12 +1279,19 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     if row_button(lr, &super::language::current_label()) || super::snapshot::open_language_list() {
         super::language::open_list(lr, k);
     }
-    for (i, line) in wrap(super::language::hint(), rw, 12.0 * k).iter().enumerate() {
+    for (i, line) in lang_hint.iter().enumerate() {
         chrome::shadow_text(line, rx, y + 48.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
     }
     let ok = Rect::new(inner.x + inner.w - 120.0 * k, inner.y + inner.h - 44.0 * k, 96.0 * k, 28.0 * k);
     let ok_label = own("Buttons", "Ok", n_("OK"));
     closed || key(KeyCode::Escape) || key(KeyCode::Enter) || settings_button(ok, &ok_label)
+}
+
+/// The right column's row pitch in the advanced window (px at its scale): `max` (the original's
+/// 44 px), or less when the column's `rows` pitches and its `hints` (px, the hint slots and the
+/// language's description) would run past `limit` (the Ok button's top), counted from `top`.
+fn right_column_pitch(top: f32, limit: f32, rows: f32, hints: f32, max: f32) -> f32 {
+    ((limit - top - hints) / rows).min(max)
 }
 
 fn settings_button(r: Rect, label: &str) -> bool {
@@ -1655,5 +1672,19 @@ mod tests {
             assert!(close(pair[1].y - pair[0].y, 92.0 * k), "pitch of the column");
             assert!(close(pair[0].y + pair[0].h - pair[1].y, 20.0 * k), "the 20 px overlap");
         }
+    }
+
+    /// The advanced window's right column in units of k: the inner height of the 650-high window
+    /// (its 29 px strip and frame off), the Ok button's top 48 px above the bottom, four lines of
+    /// the battle AI hint and four of the language's. The pitch keeps the column above the Ok
+    /// button, and the original's 44 px when the window has the room.
+    #[test]
+    fn advanced_right_column_fits_above_ok() {
+        let (top, inner_h, ok_top) = (30.0, 650.0 - 29.0, 650.0 - 29.0 - 48.0);
+        let hints = 44.0 + 4.0 * 17.0 + 48.0 + 4.0 * 17.0;
+        let p = right_column_pitch(top, ok_top, 9.0, hints, 44.0);
+        assert!(p < 44.0 && p >= 32.0, "pitch {p}");
+        assert!(top + 9.0 * p + hints <= ok_top + 1e-3, "the language description ends above Ok");
+        assert_eq!(right_column_pitch(top, inner_h + 200.0, 9.0, hints, 44.0), 44.0);
     }
 }
