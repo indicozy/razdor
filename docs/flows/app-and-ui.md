@@ -159,10 +159,12 @@ and custom battle windows. The map and building windows are already centred over
 bar (`window_layout::window`, `main_menu::map_window`, the saves and dialogs), so they are not moved again.
 Stacked windows (experiment, main only): a phone held upright (`window_layout::portrait`: `dp_px` set and the
 screen taller than wide) stacks the building, army and hero windows, each with its own layout
-(`window_layout::Stack`, passed to `window_layout::scaled`). Building: the two panes on top at full width, the
-lower pane fills down to a row of the building's tabs (`window_layout::building_tabs`) with Выход centred under
-it (`building_exit`); the quest header row sits at the lower pane's bottom, above the tabs. Army and hero: the
-unit's band under the title (`window_layout::army_band`, `unit_sheet::draw_band`: picture left, stats right),
+(`window_layout::Stack`, passed to `window_layout::scaled`). Building: the two panes on top at full width, each at the
+landscape pane's height (`window_layout::lower_height`), then a row of the building's tabs
+(`window_layout::building_tabs`) with Выход centred under it (`building_exit`), the window 746 design px
+tall; the quest header row sits at the lower pane's bottom, above the tabs. Army and hero: the
+unit's band under the title at the landscape column's height, 571 design px (`window_layout::army_band`,
+`unit_sheet::draw_band`: picture left, stats right; its text fits the shorter band),
 the right side (pack, formation) under it, and a «Закрыть» button under the formation (`army_close`). The
 right side moves by the layout's shift (`window_layout::place`, used by `at`, `point` and the panel helpers),
 and the army seam is a 2 px line under the band (`window_layout::frame`, `window_layout::seam`). These windows are drawn inside

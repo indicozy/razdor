@@ -443,13 +443,12 @@ fn hall_offers_in_face(game: &mut Game, f: &Frame, view: &mut BuildingView, mess
     // Stacked, the header row («Предлагаемые задания и слухи», «Взять задание») sits at the
     // pane's bottom, right above the tabs (thumb reach); the list fills the pane above it.
     let stacked = window_layout::portrait();
-    let natural = window_layout::quest_panel(panel);
     let head_panel = if stacked {
-        // Its header row (the first fifth of the natural panel) ends at the pane's bottom.
-        let header_h = window_layout::quest_rects(natural).0.h;
-        Rect::new(panel.x, panel.bottom() - header_h, panel.w, natural.h)
+        // Its header row (the first fifth of the pane) ends at the pane's bottom.
+        let header_h = window_layout::quest_rects(panel).0.h;
+        Rect::new(panel.x, panel.bottom() - header_h, panel.w, panel.h)
     } else {
-        natural
+        panel
     };
     let (quest_border, take) = window_layout::quest_rects(head_panel);
     let title = tr("Quests and rumours:");

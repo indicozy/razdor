@@ -42,12 +42,12 @@ pub enum Stack {
     Building,
     Army,
 }
-/// The building window's height: the panes, then the tab row and Exit under them (the 1080×2376
-/// phone's window at the width's scale).
-const BUILDING_PH: f32 = 1172.0;
-/// The unit band of the army and hero windows: the landscape column's 244 × 571 at 293 px a
-/// half (the band fills the 586 px width).
-const BAND_H: f32 = 571.0 * 293.0 / 244.0;
+/// The building window's height: the panes at the landscape height, then the tab row and Exit
+/// under them (746 design px; the 1080×2376 phone's window at the width's scale).
+fn building_ph() -> f32 { lower_y() + lower_height() + LOWER_GAP + 2.0 * TAB_H + 2.0 * EDGE }
+/// The unit band of the army and hero windows: the landscape column's height, so its picture
+/// half (234 px) has the landscape column's proportions (244 × 571); the band fills the 586 px width.
+const BAND_H: f32 = 571.0;
 /// The army and hero windows' height: the title, the band, then the right side (571 px).
 const ARMY_PH: f32 = BAND_H + 672.0;
 /// The army and hero windows' «Закрыть» button under the formation (stacked): 64 design px
@@ -83,7 +83,7 @@ fn within<R>(st: Stack, f: impl FnOnce() -> R) -> R {
 
 fn height_of(st: Stack) -> f32 {
     match st {
-        Stack::Building => BUILDING_PH,
+        Stack::Building => building_ph(),
         Stack::Army => ARMY_PH,
     }
 }
@@ -98,17 +98,7 @@ fn shift_of(st: Stack) -> f32 {
 
 /// The top of the building's tab row (stacked); Exit sits under it, the window's bottom under Exit.
 fn tabs_top() -> f32 {
-    BUILDING_PH - 2.0 * TAB_H - 2.0 * EDGE
-}
-
-/// The lower pane's height: the building's (stacked) fills the window down to the tab row; the
-/// other panes keep the landscape size.
-fn lower_height_in(st: Stack, portrait: bool) -> f32 {
-    if portrait && st == Stack::Building {
-        tabs_top() - LOWER_GAP - lower_y()
-    } else {
-        lower_height()
-    }
+    building_ph() - 2.0 * TAB_H - 2.0 * EDGE
 }
 
 /// Whether the window is stacked: a phone (`display::dp_px`) held upright.
@@ -161,7 +151,7 @@ fn left_in(win: Rect, k: f32, portrait: bool) -> Rect {
 }
 fn upper_in(win: Rect, k: f32, portrait: bool) -> Rect { rect_in(win, k, 248.0, 28.0, 586.0, upper_height(), portrait) }
 fn divider_in(win: Rect, k: f32, portrait: bool) -> Rect { rect_in(win, k, 248.0, 28.0 + upper_height(), 586.0, DIVIDER, portrait) }
-fn lower_in(win: Rect, k: f32, portrait: bool) -> Rect { rect_in(win, k, 248.0, lower_y(), 586.0, lower_height_in(stack(), portrait), portrait) }
+fn lower_in(win: Rect, k: f32, portrait: bool) -> Rect { rect_in(win, k, 248.0, lower_y(), 586.0, lower_height(), portrait) }
 
 /// The window's scale when it is stacked: the largest that fits the screen's width and the
 /// height above the bottom bar, never below the interface scale. Called outside the window's
@@ -259,7 +249,7 @@ pub fn building_exit(win: Rect) -> Rect { building_exit_in(win, chrome::k()) }
 fn building_exit_in(win: Rect, k: f32) -> Rect {
     let w = 586.0 * EXIT_SHARE;
     let x = 2.0 + (586.0 - w) / 2.0;
-    Rect::new(win.x + x * k, win.y + (BUILDING_PH - EDGE - TAB_H) * k, w * k, TAB_H * k)
+    Rect::new(win.x + x * k, win.y + (building_ph() - EDGE - TAB_H) * k, w * k, TAB_H * k)
 }
 
 /// The army and hero windows' «Закрыть» button (stacked): under the formation, in thumb reach; the
@@ -276,16 +266,6 @@ pub fn upper(win: Rect) -> Rect { upper_in(win, chrome::k(), portrait()) }
 pub fn divider(win: Rect) -> Rect { divider_in(win, chrome::k(), portrait()) }
 pub fn lower(win: Rect) -> Rect { lower_in(win, chrome::k(), portrait()) }
 pub fn lower_content(win: Rect) -> Rect { let r=lower(win); let k=chrome::k(); Rect::new(r.x+8.0*k,r.y+8.0*k,r.w-14.0*k,r.h-16.0*k) }
-
-/// The lower pane as the quest header sees it: stacked, the building's pane is taller than the
-/// landscape one, and the header keeps the landscape size (the list takes the rest).
-pub fn quest_panel(panel: Rect) -> Rect {
-    if !portrait() || stack() != Stack::Building {
-        return panel;
-    }
-    let natural = (lower_height() - 16.0) * chrome::k();
-    Rect::new(panel.x, panel.y, panel.w, panel.h.min(natural))
-}
 
 /// The stacked army window's seam: the 2 px line under the unit band, across the window (drawn
 /// by [`frame`]; a window that does not call `frame` draws it itself when stacked).
@@ -342,7 +322,7 @@ mod tests {
 
     fn win() -> Rect { Rect::new(10.0, 20.0, 836.0, 600.0) }
 
-    fn stacked_win() -> Rect { Rect::new(10.0, 20.0, 590.0, BUILDING_PH) }
+    fn stacked_win() -> Rect { Rect::new(10.0, 20.0, 590.0, building_ph()) }
 
     #[test]
     fn stacked_places_the_right_side_under_the_top_part() {
@@ -365,14 +345,15 @@ mod tests {
     }
 
     #[test]
-    fn stacked_building_panes_stack_and_the_lower_one_reaches_the_tabs() {
+    fn stacked_building_panes_stack_and_the_lower_one_keeps_the_landscape_height() {
         let w = stacked_win();
         let p = true;
         assert_eq!(within(Stack::Building, || rect_in(w, 1.0, 248.0, 28.0, 586.0, upper_height(), p)), Rect::new(12.0, 48.0, 586.0, upper_height()));
         let lower = within(Stack::Building, || lower_in(w, 1.0, p));
         assert_eq!(lower.y, 20.0 + lower_y());
-        assert_eq!(lower.bottom(), w.y + tabs_top() - LOWER_GAP, "the lower pane ends 8 px above the tab row");
-        assert!(lower.h > 600.0, "the lower pane takes the window's height: {}", lower.h);
+        assert_eq!(lower.h, lower_height(), "the lower pane keeps the landscape height");
+        let tabs = building_tabs_in(w, 1.0, 1);
+        assert!((tabs[0].y - (lower.bottom() + LOWER_GAP)).abs() < 0.01, "the tab row is LOWER_GAP under the lower pane");
     }
 
     #[test]
@@ -413,7 +394,7 @@ mod tests {
         let w = Rect::new(10.0, 20.0, 590.0, ARMY_PH);
         let band = army_band_in(w, 1.0);
         assert_eq!((band.x, band.y, band.w), (12.0, 48.0, 586.0));
-        assert!((band.h - BAND_H).abs() < 0.01);
+        assert_eq!(band.h, 571.0, "the landscape column's height");
         let (pic, txt) = band_halves(band);
         assert_eq!((pic.w, txt.w), (234.0, 352.0));
         assert_eq!((pic.x, txt.x), (12.0, 246.0));
