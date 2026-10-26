@@ -5,10 +5,45 @@ move to a Settled list.
 
 ## Open
 
-- **The Evolution Mod's exe differs from Community 1.2 in 74 places in CODE; only the drain is
-  supported; survey in progress (backlog 1305).** The mod's `DiscordTimes.exe` lacks the Community
-  drain patch; Razdor runs the original's own drain block for such an install (battle.md, "Magic
-  power drain"; `install::drain_rule`).
+- **The Evolution Mod's exe: FirstShot's value.** Its 1.2 fix (c28935) is absent, so the +60
+  path at c26e9a runs; the exact initiative of FirstShot on that build is unread. Razdor keeps 1.2's
+  rule (+30, +30 with building defence ≥ 10) there. Step 4 of the mod support reads it
+  (evolution-mod.md §1, §4).
+- **The Evolution Mod's exe: opcode 14's signed unit byte.** Razdor reads the byte signed
+  (`events::opcode14_unit`), but its unit model gives no observable difference (a negative index
+  and a byte past the unit list both match no unit). How the exe uses its loop counter after the
+  signed read (c280b6) is not read.
+- **The Evolution Mod's exe: negative Splash attacks.** The older build's Splash multiply is taken
+  with 70%/30% constants and the same sign-keeping rule as 1.2 (`splash_scale`). Whether that exe
+  wraps a negative attack as 1.2's exe does (battle.md §6) is not verified.
+- **The Evolution Mod's exe: the on-hit block after a spell is gated, not run through a cast.** The
+  gate (the spell path calls `on_hit` only with `has_12_features`) is covered by the on-hit tests
+  (`older_bleed_and_noheal_marks_are_not_set_by_a_hit`); no test casts a spell through `act` on the older build.
+- **iOS: the windows do not move above the on-screen keyboard** (2026-10-26, Razdor extra, not
+  parity). `display::keyboard_inset` is 0 on iOS, so the hero and save windows stay under the
+  keyboard there. Settles it: a reading of the keyboard's frame on iOS (UIKit's keyboard
+  notifications or `keyboardLayoutGuide` through miniquad's view), stored with `set_keyboard_inset`
+  like Android's IME inset (`ui::android::read_keyboard_inset`).
+
+- **Evolution Mod: the mana payment and the options window's layout** (2026-10-26). Razdor
+  loads the mod's data without a warning and starts a game on each of its 15 maps
+  (`evolution-mod.md` §3a); two things are not done. (1) The mod's mana payment for
+  `Nature=Elemental` units (buying, healing, resurrection, daily pay) and its event
+  extensions: their code is not located in the mod's executable. (2) The mod's four-row options
+  window: its row offsets and height are unread, so Razdor keeps the 1.2 checkbox positions
+  and leaves a free row where the battle-animation slider was. Settles it: a Ghidra pass on the
+  mod's `DiscordTimes.exe` (the Ghidra project holds only 1.2's) for the mana code and the
+  options window's layout, then the same tests and an options snapshot of the mod.
+
+- **AI ships move about twice as fast as the original's (report 1082, 2026-10-23).** A diff
+  test on РК1 (knight, the opening read, 48 one-hour waits, `tools/difftest`) has the sea
+  pirates (army 9) sail 4 cells in the first hour in the original and 7 in Razdor, 6 against 12
+  in the second; over two days the original's ship makes 4–6 cells an hour with whole hours
+  standing still, Razdor's 7–12. The SHIP costs match (world.md §1: coastal 1, shallows 2), so
+  the difference is in how an AI ship's steps are timed (ai.md §2, §13). Settles it: RE of the
+  AI step clock for ship armies (0x4a1ff0 loader, the step cost and delay in the per-frame
+  driver), then the same diff test equal. Players catch the pirates in the village in the
+  original because they sail slowly and wait.
 
 - **Held item: the green card and the acceptance line's face (report 1053, 2026-10-22).** The
   code gives a refused card state 4 (red) and an accepted one state 2 (blue, the block at
