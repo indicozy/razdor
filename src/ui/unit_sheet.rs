@@ -211,6 +211,15 @@ fn traits_of(s: &Sheet) -> Vec<(String, String, Color)> {
 /// the string at 0x4e4e40): the first row of each indents, the icon stands in it.
 const INDENT: &str = "      ";
 
+/// How far a band row's text moves right so it starts after its trait icon. The icon stands at
+/// 16 px and is 25 px wide (right edge 41 px); the text should start 3 px past it (44 px), and
+/// starts at 12 px plus the indent's width (`indent_w`, at the band's font size). Zero where the
+/// indent is already wide enough (the original's own look). Design px times `base`.
+fn icon_text_shift(indent_w: f32, base: f32) -> f32 {
+    let need = (16.0 + 25.0 + 3.0 - 12.0) * base;
+    (need - indent_w).max(0.0)
+}
+
 /// One row of the panel's description list (0x667bdc): its text, ink and the icon drawn
 /// beside it (the first row of a trait).
 #[derive(Clone, Debug, PartialEq)]
@@ -870,7 +879,8 @@ fn band_text_fits(s: &Sheet, content: &Content, txt: Rect, base: f32, px: f32) -
             && measure(s.name, sheet_size(Face::Subtitle, whole_scale(px))).width <= txt.w - 16.0 * k
     });
     let width = |c: char| measure(c.encode_utf8(&mut [0; 4]), size).width;
-    let trait_rows = list_rows(None, &traits_of(s), 238.0 * base, width).len();
+    let shift = icon_text_shift(measure(INDENT, size).width, base);
+    let trait_rows = list_rows(None, &traits_of(s), 238.0 * base - shift, width).len();
     let row_h = 14.0 * px;
     // The name's block (34 px) under its top and the level line (13 px) above the first stat row.
     let stat_y = txt.y + 46.0 * px;
@@ -930,7 +940,9 @@ fn draw_band_in_face(assets: &Assets, content: &Content, band: Rect, s: &Sheet, 
     let width = |c: char| measure(c.encode_utf8(&mut [0; 4]), size).width;
     let room = 238.0 * base;
     let desc_rows = list_rows(desc, &[], room, width);
-    let trait_rows = list_rows(None, &traits, room, width);
+    // A trait's text starts after its icon (`icon_text_shift`): its wrap room shrinks by the same.
+    let shift = icon_text_shift(measure(INDENT, size).width, base);
+    let trait_rows = list_rows(None, &traits, room - shift, width);
     let rows_n = stats.len() + s.status.len();
     let natural_end = stat_y + rows_n as f32 * row_h;
     let avail = ((txt.bottom() - 16.0 * px - natural_end) / row_h).floor().max(0.0) as usize;
@@ -965,7 +977,8 @@ fn draw_band_in_face(assets: &Assets, content: &Content, band: Rect, s: &Sheet, 
     }
     for (i, row) in rows.iter().enumerate() {
         if !row.text.trim().is_empty() {
-            shadow_text(&row.text, txt.x + 12.0 * base, line(list_top + i as f32 * row_h), size, row.ink);
+            let x = txt.x + 12.0 * base + if row.icon.is_some() { shift } else { 0.0 };
+            shadow_text(&row.text, x, line(list_top + i as f32 * row_h), size, row.ink);
         }
     }
     clicked
@@ -1103,6 +1116,18 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, background: Rect, s
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A band row's text starts after its icon: a narrow indent moves the text right so it clears
+    /// the icon's right edge (41 px) by 3 px; a wide indent keeps the original's look.
+    #[test]
+    fn a_narrow_indent_moves_the_trait_text_past_its_icon() {
+        let shift = icon_text_shift(10.0, 1.0);
+        assert!(shift > 0.0);
+        assert!(12.0 + 10.0 + shift >= 41.0 + 3.0 - 1e-4);
+        assert_eq!(icon_text_shift(32.0, 1.0), 0.0);
+        assert_eq!(icon_text_shift(60.0, 1.0), 0.0);
+        assert!((icon_text_shift(0.0, 2.0) - 64.0).abs() < 1e-4, "scales with the band's base");
+    }
 
     /// Razdor's deviation: a negative vampirism reads «Кровопотеря», a positive one keeps the
     /// original's «Вампиризм» (the install's own text, or the English without it).
