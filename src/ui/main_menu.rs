@@ -210,14 +210,8 @@ fn oval(i: usize, label: &str, hot: Option<usize>) -> bool {
     // `mb2.ugs`: the round oval on top, the pointed one (the last button) below.
     if let Some(t) = chrome::win_ugs("mb2") {
         let pointed = i + 1 == BUTTONS.len();
-        let half = t.height() / 2.0;
-        let src = Rect::new(0.0, if pointed { half } else { 0.0 }, t.width(), half);
         let frame = if hover { Color::new(1.0, 0.80, 0.42, 1.0) } else { WHITE };
-        let s = k * 0.9375;
-        // Each oval's middle is 46 px below the top of its half; the pointed one is drawn
-        // in the left 196 px of the picture.
-        let dx = if pointed { 16.0 } else { 0.0 };
-        let dst = Rect::new(c.x - (t.width() / 2.0 - dx) * s, c.y - 46.0 * s, t.width() * s, half * s);
+        let (src, dst) = oval_picture(c, k * 0.9375, t.width(), t.height(), pointed);
         chrome::tex_src(&t, src, dst, frame);
     } else {
         draw_ellipse_lines(c.x, c.y, size.x / 2.0, size.y / 2.0, 0.0, 3.0, if hover { chrome::GOLD } else { chrome::SILVER });
@@ -360,6 +354,29 @@ fn landscape_buttons(sw: f32, sh: f32, k: f32) -> [Rect; 5] {
         let size = OVAL * k;
         Rect::new(c.x - size.x / 2.0, c.y - size.y / 2.0, size.x, size.y)
     })
+}
+
+/// Where the two ovals of `mb2.ugs` (`w` × `h` texels) cut: the round one is rows `0..120`
+/// (its body ends at row 96; rows 96..120 are empty) and the pointed one (the last button)
+/// starts at row 120 with its top ornament. The half (`h / 2` = 125.5) cut the pointed one's
+/// top rows off and drew them under the round oval, as a loose strip.
+const MB2_SPLIT: f32 = 120.0;
+
+/// The source and destination rects of an oval's picture, for the oval centred on `c`, at `s`
+/// screen px per texel. The round oval's middle is 46 texels below the top of its piece. The
+/// pointed one is drawn in the left 196 texels, and its body keeps the place the half cut gave
+/// it (its piece top is `h / 2 - MB2_SPLIT` texels higher), so the landscape body is unchanged.
+fn oval_picture(c: Vec2, s: f32, w: f32, h: f32, pointed: bool) -> (Rect, Rect) {
+    if pointed {
+        let dx = 16.0;
+        let top = c.y - 46.0 * s - (h / 2.0 - MB2_SPLIT) * s;
+        (
+            Rect::new(0.0, MB2_SPLIT, w, h - MB2_SPLIT),
+            Rect::new(c.x - (w / 2.0 - dx) * s, top, w * s, (h - MB2_SPLIT) * s),
+        )
+    } else {
+        (Rect::new(0.0, 0.0, w, MB2_SPLIT), Rect::new(c.x - w / 2.0 * s, c.y - 46.0 * s, w * s, MB2_SPLIT * s))
+    }
 }
 
 /// The menu held upright: the buttons are a column of [`PORTRAIT_SCALE`] × the landscape size
@@ -1595,6 +1612,26 @@ mod tests {
 
     fn close(a: f32, b: f32) -> bool {
         (a - b).abs() < 1e-3
+    }
+
+    #[test]
+    fn oval_pieces_tile_the_picture_with_no_gap() {
+        // `mb2.ugs` is 228 × 251 texels; the two pieces cover it exactly.
+        let (w, h) = (228.0, 251.0);
+        for s in [0.9375, 0.9375 * 1.125, 0.9375 * PORTRAIT_SCALE * 1.125] {
+            let c = vec2(540.0, 900.0);
+            let (rs, _) = oval_picture(c, s, w, h, false);
+            let (ps, _) = oval_picture(c, s, w, h, true);
+            assert!(close(rs.y, 0.0) && close(rs.y + rs.h, ps.y) && close(ps.y + ps.h, h), "{rs:?} {ps:?}");
+            // The round piece's dst is its texels at `s`, with no stray rows of the pointed one.
+            let (_, rd) = oval_picture(c, s, w, h, false);
+            assert!(close(rd.h, MB2_SPLIT * s), "{rd:?}");
+            // The pointed piece's dst maps its texels 1:1 at `s` and its body keeps the old place:
+            // the texel row the half cut used (h / 2) still lands 46 texels above `c`'s row offset.
+            let (_, pd) = oval_picture(c, s, w, h, true);
+            assert!(close(pd.h, (h - MB2_SPLIT) * s), "{pd:?}");
+            assert!(close(pd.y + (h / 2.0 - MB2_SPLIT) * s, c.y - 46.0 * s), "{pd:?}");
+        }
     }
 
     #[test]
