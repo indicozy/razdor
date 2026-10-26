@@ -131,8 +131,11 @@ runs from `Ui::frame` and calls `Activity.setRequestedOrientation(int)` over JNI
 `ActivityInfo`'s 13 (full user), 6 (sensor landscape) and 7 (sensor portrait) when the value
 changes, so it applies at start and on each change. iOS has no row (its rotation lock stays the
 system's).
-The on-screen keyboard follows the text fields: `edit_line` / `edit_rows` drawn active ask for it,
-and `widgets::sync_keyboard` (once a frame, before `next_frame`) shows or hides it with miniquad's
+The on-screen keyboard follows the text fields: `edit_line` / `edit_rows` drawn active ask for it
+(`edit_line_kb` with `keyboard` false draws without asking). The save window's name and the new
+hero's name are always active, so on a phone they ask only after a tap in the field
+(`widgets::name_keyboard` decides, `widgets::tap_rect` is the 48 dp tap target; desktop always
+asks); a window's opening does not show the keyboard. Then `widgets::sync_keyboard` (once a frame, before `next_frame`) shows or hides it with miniquad's
 `show_keyboard`. miniquad's `MainActivity` swallows every key, so `quad.toml` at the repo root
 injects `android/MainActivityInject.java`: the volume keys change the media volume there, and on
 API 30+ its `RESIZING_LAYOUT_ON_APPLY_WINDOW_INSETS` section pads by the system bars only, so the

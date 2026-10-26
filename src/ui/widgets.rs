@@ -1187,6 +1187,53 @@ pub fn reset_keyboard_request() {
     KEYBOARD_WANTED.with(|k| k.set(false));
 }
 
+/// What the player did to a name field this frame, for the phone keyboard ([`name_keyboard`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NameTouch {
+    /// Nothing that concerns the field.
+    Nothing,
+    /// A tap in the field's tap target ([`tap_rect`]).
+    FieldTapped,
+    /// Another save was picked from the list, which replaces the name.
+    RowPicked,
+}
+
+/// Whether a name field that is always drawn active keeps the on-screen keyboard this frame,
+/// given whether it had it before (`typing`). The desktop has no on-screen keyboard and the
+/// name is typed straight into the field: always. On a phone the keyboard comes only with a tap
+/// in the field: a tap shows it, a pick of another save hides it, and nothing else changes it.
+/// A window starts with `typing` false, so opening it does not pop the keyboard up.
+pub fn name_keyboard(phone: bool, typing: bool, touch: NameTouch) -> bool {
+    if !phone {
+        return true;
+    }
+    match touch {
+        NameTouch::FieldTapped => true,
+        NameTouch::RowPicked => false,
+        NameTouch::Nothing => typing,
+    }
+}
+
+/// A name field's tap target. On a phone it is at least 48 dp tall (`display::dp_px`), grown
+/// from the field's top edge down (`up` false) or from its bottom edge up (`up` true); on the
+/// desktop it is the field's own rect. Only the keyboard request uses it: the drawing does not.
+pub fn tap_rect(r: Rect, up: bool) -> Rect {
+    tap_rect_at(r, up, super::display::dp_px())
+}
+
+/// [`tap_rect`] with the phone's density given (`None`: the desktop).
+pub fn tap_rect_at(r: Rect, up: bool, dp: Option<f32>) -> Rect {
+    let Some(dp) = dp else { return r };
+    let h = r.h.max(48.0 * dp);
+    let y = if up { r.y + r.h - h } else { r.y };
+    Rect::new(r.x, y, r.w, h)
+}
+
+/// The left button was pressed in `r` this frame.
+pub fn tapped_in(r: Rect) -> bool {
+    is_mouse_button_pressed(MouseButton::Left) && mouse_in(r.x, r.y, r.w, r.h)
+}
+
 /// Shows or hides the on-screen keyboard (Android and iOS; the desktop has none).
 #[cfg(any(target_os = "android", target_os = "ios"))]
 fn set_keyboard(show: bool) {
@@ -1479,7 +1526,14 @@ fn edit_mouse(id: u64, ed: &mut TextEdit, s: &str, hit: Rect, at: impl Fn(f32, f
 /// `r` places the caret and a drag selects ([`edit_mouse`]).
 #[allow(clippy::too_many_arguments)]
 pub fn edit_line(id: u64, s: &str, ed: &mut TextEdit, active: bool, mouse: bool, r: Rect, y: f32, look: LineLook) {
-    if active {
+    edit_line_kb(id, s, ed, active, mouse, r, y, look, active);
+}
+
+/// [`edit_line`] whose active line asks for the on-screen keyboard only when `keyboard` (a
+/// phone's name field, see [`name_keyboard`]); it is drawn the same either way.
+#[allow(clippy::too_many_arguments)]
+pub fn edit_line_kb(id: u64, s: &str, ed: &mut TextEdit, active: bool, mouse: bool, r: Rect, y: f32, look: LineLook, keyboard: bool) {
+    if active && keyboard {
         want_keyboard(s, ed.caret);
     }
     ed.fit(s);
@@ -2172,5 +2226,41 @@ mod tests {
         }
         assert_eq!(cache.len(), WRAP_CACHE_MAX);
         assert_eq!(cache[0].text, "t1", "t0 was dropped");
+    }
+}
+
+#[cfg(test)]
+mod keyboard_tests {
+    use super::*;
+
+    /// Desktop: the name is typed straight in, whatever the touch.
+    #[test]
+    fn the_desktop_name_field_always_has_the_keyboard_request() {
+        assert!(name_keyboard(false, false, NameTouch::Nothing));
+        assert!(name_keyboard(false, false, NameTouch::RowPicked));
+    }
+
+    /// A phone: opening (no tap, not typing) shows nothing; a tap in the field shows it; a
+    /// pick of another save hides it; with nothing happening it stays as it was.
+    #[test]
+    fn a_phone_name_field_shows_the_keyboard_only_after_a_tap_in_it() {
+        assert!(!name_keyboard(true, false, NameTouch::Nothing), "opening the window: no keyboard");
+        assert!(name_keyboard(true, false, NameTouch::FieldTapped), "a tap in the field: keyboard");
+        assert!(!name_keyboard(true, false, NameTouch::RowPicked), "a save picked: no keyboard");
+        assert!(!name_keyboard(true, true, NameTouch::RowPicked), "a pick hides a keyboard that was up");
+        assert!(name_keyboard(true, true, NameTouch::Nothing), "typing goes on without a new tap");
+    }
+
+    /// The tap target on a phone is 48 dp tall, grown from the field's top or bottom edge; the
+    /// desktop keeps the field's own rect.
+    #[test]
+    fn the_phone_tap_target_is_48_dp_tall_and_the_desktop_keeps_the_field() {
+        let field = Rect::new(10.0, 100.0, 300.0, 30.0);
+        assert_eq!(tap_rect_at(field, true, None), field, "desktop: unchanged");
+        let down = tap_rect_at(field, false, Some(2.75));
+        let up = tap_rect_at(field, true, Some(2.75));
+        assert_eq!(down, Rect::new(10.0, 100.0, 300.0, 48.0 * 2.75));
+        assert_eq!(up.h, 48.0 * 2.75);
+        assert_eq!(up.y + up.h, field.y + field.h, "grown up: the bottom edge stays");
     }
 }

@@ -59,13 +59,15 @@ pub struct SaveView {
     /// Why the last save was refused (shown in the window).
     pub error: Option<String>,
     pub back: Back,
+    /// The name field has the on-screen keyboard (a phone: after a tap in it, `widgets::name_keyboard`).
+    typing: bool,
 }
 
 impl SaveView {
     /// The name starts empty (0x4c0dd0: a new save has no suggested name); the game is not
     /// needed for that any more, the row shows the scenario's title while the window is open.
     pub fn new(_game: &Game, back: Back) -> SaveView {
-        SaveView { name: String::new(), edit: Default::default(), entries: listed(SaveKind::Manual), asked: None, settled: false, scroll: 0, error: None, back }
+        SaveView { name: String::new(), edit: Default::default(), entries: listed(SaveKind::Manual), asked: None, settled: false, scroll: 0, error: None, back, typing: false }
     }
 }
 
@@ -617,10 +619,11 @@ fn now_secs() -> u64 {
 const SNAPSHOT_SECS: u64 = 1_749_988_800;
 
 /// The name is typed in whenever the window is open and not blocked (its row draws the caret
-/// at all times), so it asks for the on-screen keyboard as the other text fields do
-/// (`widgets::edit_line`); the row is drawn by `new_save_row`, not by `edit_line`.
-fn ask_keyboard(name: &str, edit: super::text_edit::TextEdit, blocked: bool) {
-    if !blocked {
+/// at all times); it asks for the on-screen keyboard only while `keyboard` says so (a phone
+/// shows it after a tap in the name, `widgets::name_keyboard`). The row is drawn by
+/// `new_save_row`, not by `edit_line`.
+fn ask_keyboard(name: &str, edit: super::text_edit::TextEdit, blocked: bool, keyboard: bool) {
+    if !blocked && keyboard {
         want_keyboard(name, edit.caret);
     }
 }
@@ -643,14 +646,25 @@ pub fn save_screen(game: &Game, assets: &Assets, view: &mut SaveView, message: &
     if !input_blocked() {
         edit_keys(&mut view.name, &mut view.edit, &typed_chars(), EditRules::line(60));
     }
-    ask_keyboard(&view.name, view.edit, input_blocked());
     fill_metas(&mut view.entries, &mut view.asked, &mut view.settled, view.scroll.saturating_sub(1), None);
     let same = view.entries.iter().position(|e| e.meta.as_ref().is_some_and(|m| m.name == view.name));
     // The first row is the name being typed (a new save, or the one it replaces).
     let typed = new_save_row(&view.name, view.edit, (crate::ui::clock::now() * 2.0) as i64 % 2 == 0, &game.world.title, now_secs());
     let mut rows = vec![typed];
     rows.extend(view.entries.iter().map(row_of));
-    if let (Some(k), _, _) = book.rows(&rows, Some(same.map_or(0, |i| i + 1)), &mut view.scroll, false) {
+    // The name's tap target is the typed row's, grown up into the header while the list is at
+    // its top (a phone: 48 dp tall; the row itself is unchanged).
+    let field = super::widgets::tap_rect(book.row_rect(0), true);
+    let (picked, _, _) = book.rows(&rows, Some(same.map_or(0, |i| i + 1)), &mut view.scroll, false);
+    let touch = match picked {
+        Some(0) => super::widgets::NameTouch::FieldTapped,
+        Some(_) => super::widgets::NameTouch::RowPicked,
+        None if view.scroll == 0 && super::widgets::tapped_in(field) => super::widgets::NameTouch::FieldTapped,
+        None => super::widgets::NameTouch::Nothing,
+    };
+    view.typing = super::widgets::name_keyboard(super::display::dp_px().is_some(), view.typing, touch);
+    ask_keyboard(&view.name, view.edit, input_blocked(), view.typing);
+    if let Some(k) = picked {
         // A save whose meta is not read yet gives no name to take.
         match k.checked_sub(1).map(|i| view.entries[i].meta.as_ref()) {
             None => view.name = String::new(),
@@ -1365,12 +1379,21 @@ mod tests {
     fn the_save_name_asks_for_the_keyboard_unless_input_is_blocked() {
         use crate::ui::widgets::{keyboard_request, reset_keyboard_request};
         reset_keyboard_request();
-        ask_keyboard("Сейв", Default::default(), true);
+        ask_keyboard("Сейв", Default::default(), true, true);
         assert_eq!(keyboard_request(), None, "a blocked window asks for nothing");
         // The caret of the typed name goes to the strip, as with the other fields.
         reset_keyboard_request();
         let edit = crate::ui::text_edit::TextEdit::all("Сейв");
-        ask_keyboard("Сейв", edit, false);
+        ask_keyboard("Сейв", edit, false, true);
         assert_eq!(keyboard_request(), Some(("Сейв".to_string(), edit.caret)));
+    }
+
+    /// A phone's save window asks for nothing until the name is tapped (`keyboard` false).
+    #[test]
+    fn a_phone_save_window_without_a_tap_in_the_name_asks_for_no_keyboard() {
+        use crate::ui::widgets::{keyboard_request, reset_keyboard_request};
+        reset_keyboard_request();
+        ask_keyboard("", Default::default(), false, false);
+        assert_eq!(keyboard_request(), None);
     }
 }

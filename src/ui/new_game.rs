@@ -1148,6 +1148,8 @@ fn fill_name_field() {
     let name = own("NewHero", "PrivateHeroName", n_("(no name)"));
     screens::HERO_EDIT.with(|e| e.set(super::text_edit::TextEdit::at_end()));
     screens::HERO_NAME.with(|n| *n.borrow_mut() = name);
+    // A phone's name field has no keyboard until the player taps it (`widgets::name_keyboard`).
+    screens::HERO_TYPING.with(|t| t.set(false));
 }
 
 /// The class picked after a click on portrait `clicked`: a class the map does not offer
@@ -1213,6 +1215,17 @@ mod tests {
         assert_eq!(wheel_scroll(60.0, 0.0), 60.0, "no turn, no move");
         assert_eq!(wheel_scroll(60.0, -1.0), 90.0, "down a notch");
         assert_eq!(wheel_scroll(60.0, 2.5), 30.0, "up a notch, whatever the wheel's step");
+    }
+
+    /// Opening the hero window on a phone does not ask for the keyboard: the flag a previous
+    /// game left is cleared, and a phone asks only after a tap in the field.
+    #[test]
+    fn the_hero_name_field_on_a_phone_has_no_keyboard_on_opening() {
+        screens::HERO_TYPING.with(|t| t.set(true));
+        fill_name_field();
+        assert!(!screens::HERO_TYPING.with(|t| t.get()), "a new window starts without the keyboard");
+        assert!(!crate::ui::widgets::name_keyboard(true, false, crate::ui::widgets::NameTouch::Nothing));
+        assert!(crate::ui::widgets::name_keyboard(true, false, crate::ui::widgets::NameTouch::FieldTapped), "a tap in the field shows it");
     }
 
     #[test]

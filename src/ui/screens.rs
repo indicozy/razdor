@@ -30,6 +30,8 @@ local! {
     pub(super) static HERO_NAME: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     /// The name field's caret and selection.
     pub(super) static HERO_EDIT: std::cell::Cell<TextEdit> = const { std::cell::Cell::new(TextEdit::at_end()) };
+    /// The name field has the on-screen keyboard (a phone: after a tap in it, see `name_keyboard`).
+    pub(super) static HERO_TYPING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// The fallback scenario screen's last explicitly selected entry (demo is zero).
     static SCENARIO_PICKED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
@@ -40,13 +42,19 @@ local! {
 /// placing the caret and selecting. Razdor's own, beyond the original's box (caret at the
 /// end only): the caret, the selection, the clipboard ([`edit_keys`]). Returns the name.
 pub(super) fn hero_name_field(r: Rect, y: f32, look: LineLook) -> String {
+    // A phone asks for the keyboard only after a tap in the field (its tap target, 48 dp tall
+    // and grown down into the paper below): opening the window does not pop it up.
+    let tap = tap_rect(r, false);
+    let touch = if tapped_in(tap) { NameTouch::FieldTapped } else { NameTouch::Nothing };
+    let typing = name_keyboard(super::display::dp_px().is_some(), HERO_TYPING.with(|t| t.get()), touch);
+    HERO_TYPING.with(|t| t.set(typing));
     HERO_NAME.with(|n| {
         let mut n = n.borrow_mut();
         let mut ed = HERO_EDIT.with(|e| e.get());
         if !input_blocked() {
             edit_keys(&mut n, &mut ed, &typed_chars(), EditRules::line(NAME_MAX));
         }
-        edit_line(field_id("hero:name"), &n, &mut ed, true, true, r, y, look);
+        edit_line_kb(field_id("hero:name"), &n, &mut ed, true, true, tap, y, look, typing);
         HERO_EDIT.with(|e| e.set(ed));
         n.clone()
     })
