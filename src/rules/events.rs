@@ -9,6 +9,7 @@
 //! The original's slips are kept and named where they are reproduced. Choices where the
 //! sources are silent are marked *(guess)*.
 
+use crate::dt::data::Build;
 use crate::dt::dtm::{BuildingType, Event, EventKind, Scenario};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::{BTreeSet, HashMap};
@@ -431,8 +432,14 @@ pub trait EventWorld {
     fn set_named_unit(&mut self, holder: Holder, unit: u8, named: u8, class: u8);
     /// Opcode 13: experience for the unit(s).
     fn give_unit_xp(&mut self, holder: Holder, unit: Option<u8>, xp: i64);
-    /// Opcode 14: all these spells last on the unit(s).
-    fn has_spells(&self, holder: Holder, unit: Option<u8>, spells: &[u8]) -> bool;
+    /// The battle rules of the install's exe (see [`Build`]): Community 1.2 by default. The
+    /// older build has 16 extended opcodes (0xc27862) and reads opcode 14's unit byte signed.
+    fn build(&self) -> Build {
+        Build::Community12
+    }
+    /// Opcode 14: all these spells last on the unit(s). `unit` is the unit's index (a
+    /// negative one, from the older build's signed byte, matches no unit); `None` for all.
+    fn has_spells(&self, holder: Holder, unit: Option<i32>, spells: &[u8]) -> bool;
     /// Opcode 16: the spell leaves the hero's spell book.
     fn forget_spell(&mut self, spell: u8);
     /// Opcode 17: the army's figure on the map (model 0–12).
@@ -624,6 +631,16 @@ fn nonzero<T: Copy + Default + PartialEq>(v: &[T]) -> impl Iterator<Item = T> + 
 pub fn extension(e: &Event) -> Option<Extension> {
     let r = &e.results;
     (r.no_meeting == 1 && r.patrol_delta != 0).then_some(Extension::Opcode(r.patrol_delta as u8))
+}
+
+/// Opcode 14's unit index from the gold field: `None` for all units (a negative field, or one
+/// past a byte). Community 1.2 reads the byte unsigned (c280b6, MOVZX); the older build reads
+/// it signed (MOVSX), so a byte of 128–255 is a negative index, which matches no unit.
+fn opcode14_unit(gold: i16, build: Build) -> Option<i32> {
+    if gold < 0 {
+        return None;
+    }
+    u8::try_from(gold).ok().map(|b| if build.has_12_features() { i32::from(b) } else { i32::from(b as i8) })
 }
 
 /// The opcode of an event in opcode mode, read signed.
@@ -1453,7 +1470,7 @@ impl EventEngine {
         let st = self.st_mut(id);
         st.last_fired = Some(now + 1);
         st.times += 1;
-        if op == Some(18) {
+        if op == Some(18) && w.build().has_12_features() {
             // Raw bytes: the low bytes of the XP and gold fields, read signed.
             let (lo, hi) = (r.experience as i8 as i64, r.gold as i8 as i64);
             self.random_digit = Some(w.random(lo, hi) as u8);
@@ -1575,6 +1592,10 @@ impl EventEngine {
     /// The effect of a Community opcode (events.md §15; arguments: XP `x`, gold `g`, mana
     /// `m`).
     fn run_opcode(&mut self, id: EventId, op: i8, e: &Event, w: &mut dyn EventWorld) {
+        // The older build has no opcodes 16–21 (its table stops at 0x10): they do nothing.
+        if !w.build().has_12_features() && (16..=21).contains(&op) {
+            return;
+        }
         let r = &e.results;
         let (x, g, m) = (r.experience, r.gold, r.mana);
         let holder = Holder::from_code(x);
@@ -1699,7 +1720,10 @@ impl EventEngine {
         let e = self.ev(id);
         let c = &e.conditions;
         let r = &e.results;
-        let op = opcode(e);
+        // The older build has 16 extended opcodes (0xc27862): 16–21 do nothing there, so the
+        // checks of 19 and 21 below do not apply to them.
+        let has12 = w.build().has_12_features();
+        let op = opcode(e).filter(|&o| has12 || !(16..=21).contains(&o));
         let before = |name| Some(Failed { name, after_meeting: false });
         let after = |name| Some(Failed { name, after_meeting: true });
         if c.defeated_check != 0 && !nonzero(&c.defeated_armies).all(|a| w.player_defeated(a)) {
@@ -1742,7 +1766,9 @@ impl EventEngine {
         // Opcode 14 (c28048).
         if op == Some(14) {
             let spells: Vec<u8> = nonzero(&r.spells_learned).collect();
-            let units = if r.gold < 0 { None } else { u8::try_from(r.gold).ok() };
+            // The unit byte is read unsigned in Community 1.2 (c280b6, MOVZX), signed in the
+            // older build (MOVSX): a byte of 128–255 is then a negative index.
+            let units = opcode14_unit(r.gold, w.build());
             if !Holder::from_code(r.experience).is_some_and(|h| w.has_spells(h, units, &spells)) {
                 return after("opcode 14");
             }
@@ -1758,7 +1784,7 @@ impl EventEngine {
             // the patrol value is at most 19 (signed: 0 and below too) and the strength's low
             // byte names an army.
             let army = c.army_strength as u8;
-            if r.no_meeting == 1 && r.patrol_delta <= 19 && army != 0 {
+            if has12 && r.no_meeting == 1 && r.patrol_delta <= 19 && army != 0 {
                 if !w.army_at(army, c.gold as i32, c.holiness_mana as i32) {
                     return after("army at the cell");
                 }
@@ -1964,6 +1990,8 @@ pub(crate) mod mock {
 
     #[derive(Clone, Debug, Default)]
     pub struct MockWorld {
+        /// The battle rules the world's exe runs (the default is Community 1.2).
+        pub build: Build,
         pub now: u64,
         pub archetype: u8,
         pub level: i64,
@@ -2009,6 +2037,10 @@ pub(crate) mod mock {
     }
 
     impl EventWorld for MockWorld {
+        fn build(&self) -> Build {
+            self.build
+        }
+
         fn now(&self) -> u64 {
             self.now
         }
@@ -2164,7 +2196,7 @@ pub(crate) mod mock {
         fn give_unit_xp(&mut self, holder: Holder, unit: Option<u8>, xp: i64) {
             self.log.push(Fx::UnitXp(holder, unit, xp));
         }
-        fn has_spells(&self, holder: Holder, _unit: Option<u8>, spells: &[u8]) -> bool {
+        fn has_spells(&self, holder: Holder, _unit: Option<i32>, spells: &[u8]) -> bool {
             let on = self.spells_on.get(&holder).cloned().unwrap_or_default();
             spells.iter().all(|s| on.contains(s))
         }
@@ -3588,6 +3620,28 @@ mod tests {
         assert!(tick_at(&mut g, &mut w, 10).is_empty(), "type 73 is 72 to the original");
         w.units[1].unit = 74;
         assert_eq!(tick_at(&mut g, &mut w, 20), vec![1]);
+    }
+    #[test]
+    fn older_build_opcode_14_reads_the_unit_byte_signed() {
+        assert_eq!(opcode14_unit(200, Build::Community12), Some(200));
+        assert_eq!(opcode14_unit(200, Build::OlderCommunity), Some(-56), "MOVSX: 200 is −56");
+        assert_eq!(opcode14_unit(5, Build::OlderCommunity), Some(5));
+        assert_eq!(opcode14_unit(300, Build::OlderCommunity), None, "past a byte: all units, as 1.2");
+        assert_eq!(opcode14_unit(-1, Build::OlderCommunity), None, "negative: all units");
+    }
+
+    #[test]
+    fn older_build_opcodes_16_to_21_do_nothing() {
+        let mut forget = op(16, 0, 0, 0);
+        forget.results.spells_learned = [3, 0, 0, 0];
+        let run = |build: Build| {
+            let mut g = engine(vec![forget.clone()]);
+            let mut w = MockWorld { build, ..MockWorld::new() };
+            tick_at(&mut g, &mut w, 0);
+            w.log
+        };
+        assert!(run(Build::Community12).contains(&Fx::Forget(3)), "1.2 removes the spell (opcode 16)");
+        assert!(!run(Build::OlderCommunity).contains(&Fx::Forget(3)), "the older exe has no opcode 16");
     }
 }
 

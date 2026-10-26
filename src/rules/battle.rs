@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use crate::i18n::tr;
-use super::content::{Bonus, Content, DrainRule, HeroClass, ItemId, MagicSchool, Nature, Stat, UnitId};
+use super::content::{Bonus, Build, Content, DrainRule, HeroClass, ItemId, MagicSchool, Nature, Stat, UnitId};
 use super::experience::{self, Role, SideUnit};
 use super::formation::{Formation, Row, Slot};
 use super::units::{Stats, Unit};
@@ -37,6 +37,8 @@ const EXHAUSTION_POINTS: i32 = 10;
 const DRYING_PERCENT: i32 = 8;
 /// `Fortify`: defence bonus per turn after the first, % of DefenceBlow, for up to 5 turns.
 const FORTIFY_PERCENT: i32 = 25;
+/// The older Community build's Fortify: DB × 20 / 100 (c25a51).
+const OLD_FORTIFY_PERCENT: i32 = 20;
 const FORTIFY_TURNS: i32 = 5;
 /// Most steps [`Battle::auto_play_to_end`] plays (as the AI's simulated battles).
 pub const AUTO_PLAY_STEPS: usize = 20_000;
@@ -44,6 +46,10 @@ pub const AUTO_PLAY_STEPS: usize = 20_000;
 /// constants (see [`splash_scale`]).
 const SPLASH_MAIN: u64 = 0xCCCC_CCCD;
 const SPLASH_SIDE: u64 = 0x6666_6666;
+/// The older Community build's Splash: the hit target ×70% and the neighbours ×30% (the
+/// constants at c270c6, c27320, c27346, c2735d, c27383, c27397).
+const OLD_SPLASH_MAIN: u64 = 0xB333_3333;
+const OLD_SPLASH_SIDE: u64 = 0x4CCC_CCCD;
 /// The Splash states (c26f16): the kind of action being splashed.
 const SPLASH_MELEE: u8 = 1;
 const SPLASH_SHOT: u8 = 2;
@@ -70,6 +76,31 @@ const KILLING_STRIKE_PERCENT: i32 = 25;
 const BLEED_PERCENT: i32 = 75;
 /// `Stun`: initiative modifier lost per hit, % of the current initiative.
 const STUN_PERCENT: i32 = 30;
+/// The older Community build's Stun: melee −25% (c27e93), magic −21% (c26e44), shots none (the
+/// shot path returns at 0x48b2cf).
+const OLD_STUN_BLOW_PERCENT: i32 = 25;
+const OLD_STUN_MAGIC_PERCENT: i32 = 21;
+
+/// Which hit a Stun follows: a blow (melee or long strike), a shot or a spell.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StunHit {
+    Blow,
+    Shot,
+    Magic,
+}
+
+/// The percent of the target's initiative a Stun takes for `hit` in `build`; `None` for no
+/// Stun. Community 1.2: 30% for every hit (c27e5a, c2899a, c26e1f).
+fn stun_percent(build: Build, hit: StunHit) -> Option<i32> {
+    if build.has_12_features() {
+        return Some(STUN_PERCENT);
+    }
+    match hit {
+        StunHit::Blow => Some(OLD_STUN_BLOW_PERCENT),
+        StunHit::Shot => None,
+        StunHit::Magic => Some(OLD_STUN_MAGIC_PERCENT),
+    }
+}
 /// `Berserk`: attack modifier = this % of AB × the share of HP lost.
 const BERSERK_PERCENT: i32 = 75;
 /// `Flock`: attack modifier ± this % of AB (or AS).
@@ -534,6 +565,12 @@ fn patch_update(f: impl FnOnce(&mut PatchGlobals)) {
     });
 }
 
+/// The Splash factors (main, follow-up) of `build`: 80% and 40% in Community 1.2, 70% and 30% in
+/// the older build.
+fn splash_factors(build: Build) -> (u64, u64) {
+    if build.has_12_features() { (SPLASH_MAIN, SPLASH_SIDE) } else { (OLD_SPLASH_MAIN, OLD_SPLASH_SIDE) }
+}
+
 /// `x` × 80% or × 40% as the patch computes it (c270ae, c27337, c27374): a 32-bit unsigned
 /// multiply-high. 80% is exactly ⌊0.8x⌋; the 40% constant is a hair low, so a multiple of 5
 /// gives one less (10 → 3, 100 → 39). A negative `x` wraps around: ×80% gives a huge negative
@@ -660,7 +697,7 @@ pub fn bless_effect(o: &super::content::GlobalOptions, school: MagicSchool, p: i
     let (bm, bn, w) = (o.bless_main_spell.max(1), o.bless_next_spell.max(1), o.wizard_main_spell.max(1));
     match school {
         MagicSchool::Life => Buff { defence: 3 * p / (2 * bm) + 1, attack: 3 * p / (2 * bn), ..Buff::default() },
-        MagicSchool::Elemental => Buff { actions: actions_of_power(p), initiative: p / w + 1, ..Buff::default() },
+        MagicSchool::Elemental => Buff { actions: actions_for(o.build, p), initiative: p / w + 1, ..Buff::default() },
         MagicSchool::Death => Buff { attack: p / bm + 1, defence: p / bn, ..Buff::default() },
     }
 }
@@ -673,18 +710,32 @@ pub fn curse_effect(o: &super::content::GlobalOptions, school: MagicSchool, p: i
     let life = (2 * cm / 3).max(1);
     match school {
         MagicSchool::Life => Buff { defence: -(p / life + 1), attack: -(p / 10), ..Buff::default() },
-        MagicSchool::Elemental => Buff { actions: -actions_of_power(p), initiative: -(1 + p / w), ..Buff::default() },
+        MagicSchool::Elemental => Buff { actions: -actions_for(o.build, p), initiative: -(1 + p / w), ..Buff::default() },
         MagicSchool::Death => Buff { attack: -(1 + p / cm), defence: -(p / cn), ..Buff::default() },
     }
 }
 
-/// `f(P)` of mechanics.md 3.3: actions added or removed by Elemental magic.
+/// `f(P)` of mechanics.md 3.3: actions added or removed by Elemental magic (Community 1.2).
 fn actions_of_power(p: i32) -> i32 {
     match p {
         ..=19 => 0,
         20..=44 => 1,
         45..=99 => 2,
         _ => 3,
+    }
+}
+
+/// [`actions_of_power`] for `build`. The older build's steps (483680): 20–44 → 1, 45–99 → 2,
+/// 100–255 → 3, anything else → 0.
+fn actions_for(build: Build, p: i32) -> i32 {
+    if build.has_12_features() {
+        return actions_of_power(p);
+    }
+    match p {
+        20..=44 => 1,
+        45..=99 => 2,
+        100..=255 => 3,
+        _ => 0,
     }
 }
 
@@ -1359,7 +1410,8 @@ impl Battle {
             f.mods.attack = berserk(f);
         }
         if round >= 2 && f.has(Bonus::Fortify) {
-            f.mods.defence += (f.base[Stat::DefenceBlow] * FORTIFY_PERCENT / 100).max(1) * (round - 1).min(FORTIFY_TURNS);
+            let percent = if self.content.options.build.has_12_features() { FORTIFY_PERCENT } else { OLD_FORTIFY_PERCENT };
+            f.mods.defence += (f.base[Stat::DefenceBlow] * percent / 100).max(1) * (round - 1).min(FORTIFY_TURNS);
         }
         // The Community Garrison fix: +AttackShot to the attack modifier.
         if f.has(Bonus::Garrison) && own_building == 10 {
@@ -1375,7 +1427,7 @@ impl Battle {
         if round <= 2 && f.has(Bonus::FasterAttack) {
             f.actions += 1;
         }
-        if round == 1 && f.has(Bonus::Assault) && their_building >= 10 {
+        if round == 1 && self.content.options.build.has_12_features() && f.has(Bonus::Assault) && their_building >= 10 {
             for st in [Stat::AttackBlow, Stat::AttackShot, Stat::DefenceBlow, Stat::DefenceShot] {
                 f.base[st] *= 2;
             }
@@ -1652,7 +1704,7 @@ impl Battle {
             // Flying writes melee on the three front cells opposite after the shots and spells,
             // so a flying shooter or mage strikes there instead (its test of the attack type
             // is always true, c29150).
-            if f.has(Bonus::Flying) && from.row.is_active() && adjacent {
+            if self.content.options.build.has_12_features() && f.has(Bonus::Flying) && from.row.is_active() && adjacent {
                 kind = Some(Melee);
             }
             // A Ghost casts at the three front cells opposite from any row, whatever its
@@ -1679,7 +1731,7 @@ impl Battle {
             } else {
                 // NoHeal's mark is tested only here: a reserve caster still tends a marked
                 // reserve unit (c2967a).
-                if !t.slot.row.is_active() || (t.blessed && !t.wounded()) || self.crippled(target) {
+                if !t.slot.row.is_active() || (t.blessed && !t.wounded()) || (self.content.options.build.has_12_features() && self.crippled(target)) {
                     return None;
                 }
                 if self.school(id) == Some(MagicSchool::Elemental) && t.base.magic == Some(MagicSchool::Elemental) && !t.wounded() {
@@ -1750,11 +1802,19 @@ impl Battle {
     fn attack_factor(&self, a: usize, kind: ActionKind) -> Option<u64> {
         let state = self.splash.state;
         let follow_up = if kind == ActionKind::Shot { state != 0 } else { state == SPLASH_MELEE };
+        let (main, side) = splash_factors(self.content.options.build);
         if follow_up {
-            Some(SPLASH_SIDE)
+            Some(side)
         } else {
-            self.fighters[a].has(Bonus::Splash).then_some(SPLASH_MAIN)
+            self.fighters[a].has(Bonus::Splash).then_some(main)
         }
+    }
+
+    /// Whether the attacker's stats pierce the defence: one of `list` is a bonus it has. The
+    /// older build has no PoisonArmorIgnore piercing (evolution-mod.md §1, 0x485992, 0x4859f4).
+    fn pierces(&self, s: &Stats, list: &[Bonus]) -> bool {
+        let has12 = self.content.options.build.has_12_features();
+        list.iter().any(|b| s.has(b) && (has12 || *b != Bonus::PoisonArmorIgnore))
     }
 
     /// Physical damage of `a` on `t` (before capping at the target's HP), 485908: the same
@@ -1772,7 +1832,7 @@ impl Battle {
         }
         let mut def = if shot { ts[Stat::DefenceShot] } else { ts[Stat::DefenceBlow] };
         if shot {
-            if s.has_any(&PIERCE_SHOT) {
+            if self.pierces(s, &PIERCE_SHOT) {
                 def = 0;
             }
             if tf.slot.row == Row::Back {
@@ -1782,7 +1842,7 @@ impl Battle {
             if self.round == 1 && ts.has(&Bonus::SpearDefense) {
                 def *= 3;
             }
-            if s.has_any(&PIERCE_MELEE) {
+            if self.pierces(s, &PIERCE_MELEE) {
                 def = 0;
             }
             if kind == ActionKind::LongStrike {
@@ -1799,7 +1859,7 @@ impl Battle {
         // its initiative modifier, and the test is "≥ 16". So it applies from a building of
         // 1–127, or in the open with a modifier below 0 or from 4096 (the original's).
         let probe = (((self.building_defence[af.team.index()] as u8 as u32) << 24) | (af.mods.initiative as u32 >> 8)) as i32;
-        let assaulted = ts.has(&Bonus::Assault) && probe >= 16;
+        let assaulted = self.content.options.build.has_12_features() && ts.has(&Bonus::Assault) && probe >= 16;
         if ts.has_any(&[Bonus::Evasive, Bonus::VampirsGist, Bonus::OldVampirsGist]) || assaulted {
             dmg = dmg.wrapping_mul(2) / 3;
         }
@@ -1823,7 +1883,8 @@ impl Battle {
         }
         // Evasion, last (c2a802): the type's value is a byte, so the ini's modulo 256, and it
         // divides unsigned, so a value above 100 gives garbage (the original's).
-        let evasion = ts.evasion as u8 as i32;
+        // The older build does not read the type's Evasion (0x485b26, loader 0x48f5ce).
+        let evasion = if self.content.options.build.has_12_features() { ts.evasion as u8 as i32 } else { 0 };
         if evasion != 0 {
             dmg = (dmg.wrapping_mul(100 - evasion) as u32 / 100) as i32;
             if dmg == 0 {
@@ -1857,10 +1918,11 @@ impl Battle {
     /// while a splash is under way, else ×80% for a `Splash` caster.
     fn cast_power(&self, a: usize) -> i32 {
         let p = self.fighters[a].power;
+        let (main, side) = splash_factors(self.content.options.build);
         if self.splash.state != 0 {
-            splash_scale(p, SPLASH_SIDE)
+            splash_scale(p, side)
         } else if self.fighters[a].has(Bonus::Splash) {
-            splash_scale(p, SPLASH_MAIN)
+            splash_scale(p, main)
         } else {
             p
         }
@@ -2193,7 +2255,7 @@ impl Battle {
     /// over, the neighbour loop still runs).
     fn preventive_strike(&mut self, id: usize, target: usize, kind: ActionKind, counter: &mut Option<i32>) -> bool {
         let t = &self.fighters[target];
-        if !t.alive() || !t.has(Bonus::PreventiveStrike) {
+        if !t.alive() || !self.content.options.build.has_12_features() || !t.has(Bonus::PreventiveStrike) {
             return true;
         }
         let answer = if kind.is_melee() {
@@ -2240,7 +2302,7 @@ impl Battle {
         }
         self.splash.actor_col = self.fighters[id].slot.col as i32;
         self.splash_record(id, target, SPLASH_MELEE);
-        self.stun(id, target);
+        self.stun(id, target, StunHit::Blow);
         self.on_hit(id, target, raw, false);
         // Vampirism on the uncapped damage, not from undead or elementals; after a melee or
         // long strike only: the shot path never reaches it (48b3ce). Any non-zero value
@@ -2308,7 +2370,7 @@ impl Battle {
             self.fighters[target].regen = STRONG_POISON_REGEN;
         }
         self.splash_record(id, target, SPLASH_SHOT);
-        self.stun(id, target);
+        self.stun(id, target, StunHit::Shot);
         self.on_hit(id, target, raw, true);
         let (name, tname, dealt) = (&self.fighters[id].name, &self.fighters[target].name, out.amount);
         let msg = if self.fighters[target].alive() {
@@ -2383,11 +2445,14 @@ impl Battle {
         if poisoned && self.fighters[id].has(Bonus::PoisonS) {
             self.fighters[target].regen = STRONG_POISON_REGEN;
         }
-        self.stun(id, target);
+        self.stun(id, target, StunHit::Magic);
         self.splash_record(id, target, SPLASH_MAGIC);
         // A Bleed caster's spell on a target that already bleeds makes the patch fault (an
         // access violation, c29a14); Razdor keeps the bleeding at 75 instead (a deviation).
-        self.on_hit(id, target, d, false);
+        // The older build's exe has no on-hit block for a spell (it returns at 0x48b1ed).
+        if self.content.options.build.has_12_features() {
+            self.on_hit(id, target, d, false);
+        }
         out.killed = self.kill_check(target, id);
         if out.killed {
             self.log.push(crate::trf!("{name} kills {tname} with magic", name, tname));
@@ -2423,7 +2488,7 @@ impl Battle {
     /// the original). The change of actions left counts for this turn only; a curse cannot
     /// take them below 0.
     fn apply_buff(&mut self, caster: usize, target: usize, b: Buff, bless: bool) {
-        let eternal = self.fighters[caster].has(Bonus::EternalGift);
+        let eternal = self.content.options.build.has_12_features() && self.fighters[caster].has(Bonus::EternalGift);
         let life = self.school(caster) == Some(MagicSchool::Life);
         let t = &mut self.fighters[target];
         if eternal {
@@ -2457,10 +2522,10 @@ impl Battle {
     /// initiative (its base as of the turn start with the turn-1 Artillery or FirstShot bonus,
     /// not lowered by the earlier Stuns) off its initiative modifier, so each hit takes the
     /// same amount.
-    fn stun(&mut self, id: usize, target: usize) {
-        if self.fighters[id].has(Bonus::Stun) {
+    fn stun(&mut self, id: usize, target: usize, hit: StunHit) {
+        if let Some(percent) = stun_percent(self.content.options.build, hit).filter(|_| self.fighters[id].has(Bonus::Stun)) {
             let t = &mut self.fighters[target];
-            t.mods.initiative -= t.cur_initiative * STUN_PERCENT / 100;
+            t.mods.initiative -= t.cur_initiative * percent / 100;
             self.refresh(target);
         }
     }
@@ -2494,12 +2559,13 @@ impl Battle {
         let a = self.fighters[id].base.clone();
         let mark = (self.fighters[target].team.index(), self.record_index(target));
         let finish = crate::trf!("{name} finishes {tname}", name = self.fighters[id].name, tname = self.fighters[target].name);
+        let has12 = self.content.options.build.has_12_features();
         let t = &mut self.fighters[target];
         if d > 1 {
             if a.has(&Bonus::PoisonArmorIgnore) {
                 t.regen = t.regen.min(PIERCING_POISON_REGEN);
             }
-            if a.has(&Bonus::Bleed) && (!shot || t.alive()) {
+            if has12 && a.has(&Bonus::Bleed) && (!shot || t.alive()) {
                 t.bleed = t.bleed.max(BLEED_PERCENT);
             }
             if a.has(&Bonus::ArmorBreaker) {
@@ -2515,7 +2581,7 @@ impl Battle {
             }
         }
         let t = &mut self.fighters[target];
-        if t.has(Bonus::FateGift) && !t.alive() {
+        if has12 && t.has(Bonus::FateGift) && !t.alive() {
             t.base.bonuses.clear();
             t.actions = t.base[Stat::Manevres];
             for st in [Stat::ProtectLife, Stat::ProtectDeath, Stat::ProtectElemental] {
@@ -2532,7 +2598,7 @@ impl Battle {
         if a.has(&Bonus::Neutralize) {
             t.base.bonuses.clear();
         }
-        if a.has(&Bonus::NoHeal) {
+        if has12 && a.has(&Bonus::NoHeal) {
             t.regen = t.regen.min(0);
             if let Some(m) = self.crippled[mark.0].get_mut(mark.1) {
                 *m = true;
@@ -2998,7 +3064,7 @@ impl Battle {
         let f = &self.fighters[id];
         let team = f.team;
         let mp = f.power as i64;
-        let tier = actions_of_power(f.power) as i64;
+        let tier = actions_for(self.content.options.build, f.power) as i64;
         let by_cell = |v: &[usize]| {
             let mut v = v.to_vec();
             v.sort_by_key(|&t| (self.fighters[t].slot.row, self.fighters[t].slot.col));
@@ -3056,7 +3122,7 @@ impl Battle {
         }
         for &t in &by_cell(hostile) {
             let tf = &self.fighters[t];
-            let s = actions_of_power(self.hostile_power_of(id, t, f.power)) as i64 * tf.ai_power as i64;
+            let s = actions_for(self.content.options.build, self.hostile_power_of(id, t, f.power)) as i64 * tf.ai_power as i64;
             let ten = if all_ghost && tf.cursed { 10 } else { 1 };
             if s < 1 || tf.mods.initiative < 0 || tf.actions < 1 {
                 better(&mut alt[1], self.strike_power(id, t) * ten, t);

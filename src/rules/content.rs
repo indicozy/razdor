@@ -8,7 +8,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 pub use crate::dt::data::{
-    ArtefactDef, ArtefactType, Bonus, DrainRule, GlobalOptions, MagicDirection, MagicSchool, Nature, SpellDef, Stat,
+    ArtefactDef, ArtefactType, Bonus, Build, DrainRule, GlobalOptions, MagicDirection, MagicSchool, Nature, SpellDef, Stat,
     StatMods, UnitDef, Upgrade,
 };
 use crate::dt::data::{parse_artefacts, parse_spells, parse_units};
