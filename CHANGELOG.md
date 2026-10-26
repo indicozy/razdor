@@ -14,6 +14,21 @@
 
 ## 1.0.9 — 2026-10-27
 
+Коммит `224c514c` (тег `v1.0.9`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+0e57c6364a58fafe8b5c6a0c10801515e8ae6c0bca04cbb457a44448baf966af  razdor
+c26b03a46a204b7a0ea418ca0e4dfe30a28d8e5ae0587475826147a05b5a0eb0  Razdor.exe
+890231c7adaddfe180ff78f7ab6de2854181e9e45dabaa60396d4797cd20e502  razdor-macos
+dd3a5e0d593afa55fd7d1e2c2a93ff4cddf6ea03550701251783067b2c7dbc28  razdor-translate
+15f0b9b97052a88c70a195d0aad9577d40c66bc4304fb54d9722d4dc34fa7e21  Razdor-translate.exe
+233e76ddf261ff145bca98c2b284bbda3bcc7162dd3fbf865cdd44762fac0c40  razdor-translate-macos
+833788c8c978dea6fbe9929eed2ecd54495d5492ce91378fb0d8502d57b15e8f  razdor.apk
+7bc100ebf4f6ef640b9a9f4bd17a52c248c8910eb1450678d2758f0b11acc93b  razdor.ipa
+```
+
 ### Добавлено
 - Android: системная кнопка «Назад» работает как Esc: закрывает окно, в бою — выход из битвы, на карте — меню игры.
 - В своём замке (форте, городе) появилась вкладка «Склад»: там лежит добыча, которую воины гарнизона не смогли надеть, и её можно забрать герою.
