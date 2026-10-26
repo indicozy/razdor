@@ -22,6 +22,7 @@
 //! scene's leave-battle window, `RAZDOR_SCENE_BATTLE_RESTART=1` the same with its «Рестарт»
 //! question open; `menu:<map>:restart` is the map's exit window with its question open, and
 //! `RAZDOR_SCENE_READER=1` opens the diary reader of a `hero` scene (a phone's, with `RAZDOR_DP`).
+//! `RAZDOR_SCENE_LIST_READER=1` opens the whole-list reader of a `hero` scene (a phone's).
 //! `RAZDOR_SCENE_PACK_AT=<cell>:<id>,…` puts items in those pack
 //! cells; `RAZDOR_SCENE_HELD=<id>` puts an item on the pointer (hero and army windows);
 //! `RAZDOR_SCENE_WEAR=<id>,…` wears those items on the squad member of `army:<map>:<n>:<unit>`.
@@ -665,7 +666,9 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             let tab = arg.and_then(|t| t.parse::<usize>().ok()).and_then(|i| razdor::rules::journal::Tab::ALL.get(i).copied());
             // `RAZDOR_SCENE_READER=1`: a phone's diary reader open on the picked entry (`RAZDOR_DP`).
             let reader = std::env::var_os("RAZDOR_SCENE_READER").is_some();
-            Screen::Hero(super::items_view::HeroView { tab: tab.unwrap_or(razdor::rules::journal::Tab::Active), reader, ..Default::default() })
+            // `RAZDOR_SCENE_LIST_READER=1`: a phone's whole-list reader open («Весь список»).
+            let list_reader = std::env::var_os("RAZDOR_SCENE_LIST_READER").is_some();
+            Screen::Hero(super::items_view::HeroView { tab: tab.unwrap_or(razdor::rules::journal::Tab::Active), reader, list_reader, ..Default::default() })
         }
         "spells" | "spells-pages" => {
             // A book full of the install's spells, to see their pictures. `spells-pages`: 20 of

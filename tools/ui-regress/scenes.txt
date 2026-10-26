@@ -111,3 +111,5 @@ phone-battle-restart-landscape | battle:РК1-Начало пути:0 | 2160x108
 phone-diary-landscape | hero:РК1-Начало пути:1 | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1;RAZDOR_SCENE_QUEST=1
 phone-diary-reader-landscape | hero:РК1-Начало пути:1 | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1;RAZDOR_SCENE_QUEST=1;RAZDOR_SCENE_READER=1
 phone-diary-reader-portrait | hero:РК1-Начало пути:1 | 1080x2160 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1;RAZDOR_SCENE_QUEST=1;RAZDOR_SCENE_READER=1
+phone-diary-buttons-portrait | hero:РК1-Начало пути:1 | 1080x2400 | RAZDOR_DP=2.75;RAZDOR_LARGE_WINDOWS=1;RAZDOR_SCENE_QUEST=1
+phone-diary-list-reader-portrait | hero:РК1-Начало пути:1 | 1080x2400 | RAZDOR_DP=2.75;RAZDOR_LARGE_WINDOWS=1;RAZDOR_SCENE_QUEST=1;RAZDOR_SCENE_LIST_READER=1

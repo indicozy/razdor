@@ -339,8 +339,11 @@ original's). The phone's entry also drops the quest's title and the «Описа
 quest list above names the quest; the player's suggestion): it is the text, then the time
 heading and the time; a completed quest keeps its date and text, rumours and messages keep the
 title. The desktop keeps the original's lines (`items_view::entry_parts`, pinned by its tests).
-On a phone a tap on the entry's box opens the reader (`items_view::diary_reader`, `HeroView::reader`): the
-entry's full text (`reader_parts`, the desktop's parts) at the phone's sizes, in a window over the screen
+On a phone the bottom row of the hero window holds «Весь список» (left, `HeroView::list_reader`, `items_view::diary_list_reader`:
+every line of the tab, scrolled by drag and the wheel, a tap on a row opens its entry, closing the entry returns to the list),
+«Закрыть» (centred) and «Развернуть» (right, `HeroView::reader`, `items_view::diary_reader`): grey without an entry
+(`expand_entry_enabled`) or, for the list, without entries (`whole_list_enabled`). Sideways the row sits at the window's
+foot and the entry box gives up its strip (`items_view::bottom_row_rects`). The entry's full text (`reader_parts`, the desktop's parts) at the phone's sizes, in a window over the screen
 less the safe area and an 8 px margin (`diary_reader_rect`), scrolled by drag and the wheel, and closed by its
 finger-sized «Закрыть», its cross or Esc. While it is open the window below takes no input (`set_input_blocked`),
 and the reader swallows the frame's keys and clicks.

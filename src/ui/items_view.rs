@@ -1154,8 +1154,18 @@ fn close_button(win: Rect) -> bool {
     if !window_layout::portrait() {
         return false;
     }
-    let r = window_layout::army_close(win);
+    let (_, r, _) = bottom_row_rects(win);
     super::widgets::button(r.x, r.y, r.w, r.h, tr("Close"), true)
+}
+
+/// The phone's bottom row of the hero window (see [`bottom_row`]): its height is the stacked
+/// close's (`window_layout::army_close`), on the close's line when held upright and at the
+/// window's foot when sideways (where the window has no close).
+fn bottom_row_rects(win: Rect) -> (Rect, Rect, Rect) {
+    let k = chrome::k();
+    let base = window_layout::army_close(win);
+    let y = if window_layout::portrait() { base.y } else { win.bottom() - base.h - 8.0 * k };
+    bottom_row(win, y, base.h, 12.0 * k, 8.0 * k)
 }
 
 /// The unit's panel of the army and hero windows: the landscape column on the left, or stacked
@@ -1244,12 +1254,46 @@ pub struct HeroView {
     /// the whole screen, scrolled by `reader_scroll`.
     pub reader: bool,
     pub reader_scroll: usize,
+    /// The phone's list reader is open («Весь список»): every line of the tab over the screen.
+    /// An entry opened from it (`reader`) returns to it when closed.
+    pub list_reader: bool,
+    pub list_reader_scroll: usize,
 }
 
 impl Default for HeroView {
     fn default() -> Self {
-        HeroView { scroll: 0, tab: Tab::Active, pick: 0, list_scroll: 0, text_scroll: 0, reader: false, reader_scroll: 0 }
+        HeroView { scroll: 0, tab: Tab::Active, pick: 0, list_scroll: 0, text_scroll: 0, reader: false, reader_scroll: 0, list_reader: false, list_reader_scroll: 0 }
     }
+}
+
+impl HeroView {
+    /// A phone's reader is open (the entry's or the whole list's): the window below takes no input.
+    fn reading(&self) -> bool {
+        self.reader || self.list_reader
+    }
+}
+
+/// The phone's bottom row of the hero window, one line of height `h` at `y` inside `win` (`pad`
+/// from each side, `gap` between): «Весь список» left, «Закрыть» centred (about 36% of the row),
+/// «Развернуть» right. Returns the three rects in that order.
+fn bottom_row(win: Rect, y: f32, h: f32, pad: f32, gap: f32) -> (Rect, Rect, Rect) {
+    let row = (win.w - 2.0 * pad).max(0.0);
+    let close_w = row * 0.36;
+    let side_w = ((row - close_w) / 2.0 - gap).max(0.0);
+    let left = Rect::new(win.x + pad, y, side_w, h);
+    let close = Rect::new(left.right() + gap, y, close_w, h);
+    let right = Rect::new(close.right() + gap, y, side_w, h);
+    (left, close, right)
+}
+
+/// «Развернуть» is enabled when an entry is shown (`pick` is a row of the tab).
+fn expand_entry_enabled(rows_len: usize, pick: usize) -> bool {
+    pick < rows_len
+}
+
+/// «Весь список» is enabled when the tab has entries.
+fn whole_list_enabled(rows_len: usize) -> bool {
+    rows_len > 0
 }
 
 /// The hero window's right side is laid out in the original's pixels (window-relative, x from
@@ -1500,6 +1544,83 @@ fn diary_reader(row: &razdor::rules::journal::Row, tab: Tab, title: f32, body: f
     closed || pressed || key(KeyCode::Escape)
 }
 
+/// The phone's list reader («Весь список», the owner's and a player's request): every line of the
+/// tab (`lines`, the list's own: chapter headings and rows) over the same window as the entry
+/// reader, rows at the list's phone size (`list_t`, shrunk to `row_floor` before they are cut),
+/// scrolled by drag and the wheel. A tap on a row returns its index (the caller opens its entry);
+/// Close, the cross, Esc or Back close it: returns `(closed, picked row)`.
+fn diary_list_reader(game: &Game, rows: &[razdor::rules::journal::Row], lines: &[super::story::Line], tab: Tab, (list_t, row_floor): (f32, f32), scroll: &mut usize, pick: usize) -> (bool, Option<usize>) {
+    use super::dt_font::{legacy_metrics_if, sheet_size, with_original_face, Face};
+    use razdor::dt::markup::Ink;
+    let k = chrome::k();
+    let win = diary_reader_rect((screen_width(), screen_height()), super::display::safe_area());
+    let (inner, closed) = chrome::window(win, tr(diary_tab_label(tab)), chrome::Skin::Marble, true);
+    let pad = 8.0 * k;
+    let bar_w = 18.0 * k;
+    // The same finger-sized close as the entry reader's (48 dp on a phone).
+    let btn_h = super::display::dp_px().map_or(40.0 * k, |dp| 48.0 * dp);
+    let body_y = inner.y + pad;
+    let body_h = (inner.h - btn_h - 3.0 * pad).max(0.0);
+    let bar = Rect::new(inner.right() - pad - bar_w, body_y, bar_w, body_h);
+    let list = Rect::new(inner.x + pad, body_y, (bar.x - 4.0 * k - (inner.x + pad)).max(0.0), body_h);
+    let row_h = (list_t * 1.25).round();
+    let fits = ((list.h - 8.0 * k) / row_h).floor().max(1.0) as usize;
+    chrome::text_box_base(list);
+    swipe_rows(list, row_h);
+    if mouse_in(list.x, list.y, list.w, list.h) {
+        let w = wheel();
+        if w < 0.0 && *scroll + fits < lines.len() {
+            *scroll += 1;
+        } else if w > 0.0 {
+            *scroll = scroll.saturating_sub(1);
+        }
+    }
+    *scroll = (*scroll).min(lines.len().saturating_sub(fits));
+    scrollbar_always(bar, scroll, fits, lines.len());
+    let first = *scroll;
+    let room = list.w - 12.0 * k;
+    if let Some(n) = lines.iter().position(|l| *l == super::story::Line::Row(pick)).filter(|n| (first..first + fits).contains(n)) {
+        let ry = list.y + 4.0 * k + (n - first) as f32 * row_h;
+        draw_rectangle(list.x + 2.0 * k, ry, list.w - 4.0 * k, row_h, Color::new(0.15, 0.15, 0.15, 0.6));
+    }
+    chrome::text_box_sides(list);
+    chrome::silver_frame(list, k.max(1.0));
+    if rows.is_empty() {
+        with_original_face(Face::Body, || chrome::shadow_centered(super::story::empty_note(tab), list.x + list.w / 2.0, list.y + list.h / 2.0, sheet_size(Face::Title, k) * 0.9, DIM));
+    }
+    let mut picked = None;
+    legacy_metrics_if(true, || {
+        for (n, line) in lines.iter().enumerate().skip(first).take(fits) {
+            let ry = list.y + 4.0 * k + (n - first) as f32 * row_h;
+            let center = list.x + list.w / 2.0;
+            match *line {
+                super::story::Line::Heading(chapter) => {
+                    let heading = game.journal.chapter_heading(chapter);
+                    let size = fit_row_size(list_t, row_floor, |z| with_original_face(Face::Bold, || measure(&heading, z).width), room);
+                    with_original_face(Face::Bold, || {
+                        let text = ellipsize(&heading, room, size);
+                        chrome::shadow_centered(&text, center, ry + row_h * 0.78, size, Color::from_rgba(235, 165, 75, 255));
+                    });
+                }
+                super::story::Line::Row(r) => {
+                    let title = &rows[r].title;
+                    let size = fit_row_size(list_t, row_floor, |z| with_original_face(Face::Title, || measure(title, z).width), room);
+                    with_original_face(Face::Title, || {
+                        let text = ellipsize(title, room, size);
+                        chrome::shadow_centered(&text, center, ry + row_h * 0.78, size, ink_color(Ink::Plain));
+                    });
+                    if mouse_in(list.x, ry, list.w, row_h) && ry >= list.y && ry + row_h <= list.bottom() && clicked() {
+                        picked = Some(r);
+                    }
+                }
+            }
+        }
+    });
+    let bw = (inner.w * 0.5).min(360.0 * k);
+    let pressed = button(inner.center().x - bw / 2.0, inner.bottom() - pad - btn_h, bw, btn_h, tr("Close"), true);
+    (closed || pressed || key(KeyCode::Escape), picked)
+}
+
 /// The hero window («Личные характеристики и инвентарь Героя»), the bottom bar's flag (side
 /// window 5; built by 0x4d8638, its fixed parts drawn by 0x4d1814): the hero's panel on the
 /// left as in the army window; the pack's 5×5 squares with its scroll bar; the item
@@ -1515,7 +1636,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     // while it is open (the reader's own input is taken at its end).
     let phone = super::display::dp_px().is_some();
     let below_blocked = input_blocked();
-    let reading = phone && view.reader;
+    let reading = phone && view.reading();
     if reading {
         set_input_blocked(true);
     }
@@ -1594,7 +1715,13 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     let list_bar0 = o(868.0, 252.0, 18.0, 128.0);
     let entry0 = o(576.0, 410.0, 292.0, 220.0);
     let entry_bar0 = o(868.0, 410.0, 18.0, 220.0);
-    let column = diary_column(o(576.0, 58.0, 310.0, 164.0), list0, entry0, phone, described.is_some(), entry_shown);
+    let mut column = diary_column(o(576.0, 58.0, 310.0, 164.0), list0, entry0, phone, described.is_some(), entry_shown);
+    // Sideways a phone's bottom row sits under the diary's right column (no «Закрыть» there): the
+    // entry box gives up that strip, so «Развернуть» does not cover its text.
+    if phone && !window_layout::portrait() {
+        let (_, _, expand) = bottom_row_rects(win);
+        column.entry.h = column.entry.h.min((expand.y - 4.0 * k - column.entry.y).max(0.0));
+    }
     if let Some(desc) = column.desc {
         heading("ItemDescript", n_("Item description"), desc);
         match described {
@@ -1759,11 +1886,6 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     let lines = super::dt_font::legacy_metrics_if(phone, || {
         rows.get(view.pick).map_or_else(Vec::new, |row| diary_lines(row, view.tab, phone, room, entry_title, body))
     });
-    // On a phone a tap on the entry's box opens the reader over the screen (`diary_reader`).
-    if phone && !reading && !lines.is_empty() && mouse_in(entry_box.x, entry_box.y, entry_box.w, entry_box.h) && clicked() {
-        view.reader = true;
-        view.reader_scroll = 0;
-    }
     let line_h = (body * 1.15).round();
     let shown = ((entry.h - 12.0 * s) / line_h).floor().max(1.0) as usize;
     swipe_rows(entry, line_h);
@@ -1785,16 +1907,46 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
         }
     });
 
-    // The reader, when open: it takes this frame's input (the window below took none), so the
-    // window's own keys and clicks see nothing after it.
+    // The phone's bottom row: «Весь список» (the whole tab in its reader) left, «Закрыть» between
+    // (portrait), «Развернуть» (the picked entry in its reader) right. Drawn before the readers,
+    // which cover it while they are open.
+    if phone {
+        let (left, _, right) = bottom_row_rects(win);
+        if button(left.x, left.y, left.w, left.h, tr("Whole list"), whole_list_enabled(rows.len())) {
+            view.list_reader = true;
+            view.list_reader_scroll = 0;
+        }
+        if button(right.x, right.y, right.w, right.h, tr("Expand"), expand_entry_enabled(rows.len(), view.pick)) {
+            view.reader = true;
+            view.reader_scroll = 0;
+        }
+    }
+
+    // The readers, when open: they take this frame's input (the window below took none), so the
+    // window's own keys and clicks see nothing after them. The entry's reader is over the list's
+    // when both are open; closing the entry returns to the list (`list_reader` stays set).
     if reading {
         set_input_blocked(below_blocked);
-        let closed = match rows.get(view.pick) {
-            Some(row) => diary_reader(row, view.tab, entry_title, body, &mut view.reader_scroll),
-            None => true,
-        };
-        if closed {
-            view.reader = false;
+        if view.reader {
+            let closed = match rows.get(view.pick) {
+                Some(row) => diary_reader(row, view.tab, entry_title, body, &mut view.reader_scroll),
+                None => true,
+            };
+            if closed {
+                view.reader = false;
+            }
+        } else if view.list_reader {
+            let all = super::story::journal_lines(&rows);
+            let (closed, picked) = diary_list_reader(game, &rows, &all, view.tab, (list_t, row_floor), &mut view.list_reader_scroll, view.pick);
+            if let Some(k) = picked {
+                view.pick = k;
+                view.text_scroll = 0;
+                view.reader = true;
+                view.reader_scroll = 0;
+            }
+            if closed {
+                view.list_reader = false;
+            }
         }
         swallow_input();
     }
@@ -1938,6 +2090,44 @@ mod tests {
         let top = SafeArea { top: 80.0, ..SafeArea::default() };
         let r = super::diary_reader_rect((1080.0, 2400.0), top);
         assert_eq!(r.y, 88.0);
+    }
+
+    /// The phone's bottom row: «Весь список», «Закрыть» and «Развернуть» side by side inside the
+    /// window, not overlapping, each a finger-sized 44 dp tall at 2.75 px per dp.
+    #[test]
+    fn the_phone_s_bottom_row_fits_the_window_with_three_finger_sized_buttons() {
+        let dp = 2.75;
+        let h = 44.0 * dp;
+        let win = Rect::new(4.0, 130.0, 1080.0, 1900.0);
+        let (left, close, right) = super::bottom_row(win, 1700.0, h, 12.0, 8.0);
+        for r in [left, close, right] {
+            assert!(r.x >= win.x && r.right() <= win.right(), "{r:?} inside the window");
+            assert!(r.h >= 44.0 * dp, "{r:?} at least 44 dp tall");
+        }
+        assert!(left.right() < close.x && close.right() < right.x, "no overlap, gaps between");
+        assert!(close.w >= 200.0, "«Закрыть» stays a wide button");
+    }
+
+    /// «Развернуть» needs a picked entry on the tab; «Весь список» needs any entry on it.
+    #[test]
+    fn the_expand_buttons_are_enabled_only_with_an_entry_to_show() {
+        assert!(!super::expand_entry_enabled(0, 0), "no entries: grey");
+        assert!(super::expand_entry_enabled(3, 2), "a picked entry: enabled");
+        assert!(!super::expand_entry_enabled(3, 3), "a pick past the list: grey");
+        assert!(!super::whole_list_enabled(0));
+        assert!(super::whole_list_enabled(1));
+    }
+
+    /// The entry opened from the whole-list reader closes back to the list, not to the window.
+    #[test]
+    fn closing_an_entry_opened_from_the_list_reader_returns_to_the_list_reader() {
+        let mut v = super::HeroView { list_reader: true, ..super::HeroView::default() };
+        v.reader = true;
+        assert!(v.reading());
+        v.reader = false;
+        assert!(v.list_reader && v.reading(), "back in the list reader");
+        v.list_reader = false;
+        assert!(!v.reading(), "closing the list returns to the window");
     }
 
     #[test]
