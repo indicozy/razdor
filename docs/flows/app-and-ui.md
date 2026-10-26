@@ -312,7 +312,11 @@ rumours and messages over the whole campaign, with dates and a heading per campa
 entry is shown and no artifact is described, the artifact description box is not drawn: the
 quest list moves up to its top and the entry takes its height and the gap
 (`items_view::diary_column`, a Razdor phone choice; the justification of the entry is the
-original's). Hit areas and scrolling follow the boxes they are given. Hint boxes
+original's). The phone's entry also drops the quest's title and the «Описание:» heading (the
+quest list above names the quest; the player's suggestion): it is the text, then the time
+heading and the time; a completed quest keeps its date and text, rumours and messages keep the
+title. The desktop keeps the original's lines (`items_view::entry_parts`, pinned by its tests).
+Hit areas and scrolling follow the boxes they are given. Hint boxes
 (`widgets::tooltip`, `panel_hint`) fade in over 300 ms as the original's.
 
 An item's description, wherever it is shown (the market, the hero window's box, the army

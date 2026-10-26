@@ -1296,38 +1296,47 @@ fn diary_tab_label(tab: Tab) -> &'static str {
     }
 }
 
-/// A history entry's lines (Razdor's tabs, in the diary entry's fonts): the title, then when
-/// it happened, then its text.
-fn history_entry(row: &razdor::rules::journal::Row, tab: Tab, room: f32, title: f32, body: f32) -> Vec<DiaryLine> {
-    use super::dt_font::{with_original_face, Face};
-    use razdor::dt::markup::{Align, Ink};
-    let rows = |s: &str, ink: Color, align: Align, face: Face, size: f32| -> Vec<DiaryLine> {
-        with_original_face(face, || {
-            let width = |c: char| measure(c.encode_utf8(&mut [0; 4]), size).width;
-            razdor::dt::markup::wrap(s, room, width).into_iter().map(|r| DiaryLine { row: MarkupRow { text: r.text, ink: Ink::Plain, align, last: r.last }, face, color: ink, size }).collect()
-        })
-    };
-    let (white, orange, yellow) = (Color::from_rgba(255, 255, 255, 255), Color::from_rgba(235, 165, 75, 255), Color::from_rgba(230, 230, 130, 255));
-    let blank = || DiaryLine { row: MarkupRow { text: String::new(), ink: Ink::Plain, align: Align::Centre, last: true }, face: Face::Body, color: yellow, size: body };
-    let mut out = rows(&row.title, white, Align::Centre, Face::Subtitle, title);
-    out.push(blank());
-    let date = row.date.map_or_else(|| tr("Date unknown").to_string(), |d| d.label());
-    let when = if tab == Tab::Completed { format!("{}: {date}", tr(super::story::QUEST_COMPLETED)) } else { date };
-    out.extend(rows(&when, orange, Align::Centre, Face::Bold, body));
-    out.push(blank());
-    for line in row.text.lines().map(str::trim).filter(|l| !l.is_empty()) {
-        out.extend(rows(&format!("{}{line}", razdor::dt::markup::INDENT), yellow, Align::Justify, Face::Body, body));
-    }
-    out
+/// One line group of a diary entry, in the order it is drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EntryPart {
+    /// The quest's title (white, centred).
+    Title,
+    /// An empty line.
+    Blank,
+    /// `[Hero] QuestFullDescript` (centred), the heading over the description.
+    Description,
+    /// The text (justified), one paragraph per line of the quest's text.
+    Text,
+    /// `[Hero] QuestGetTime` (centred), the heading over the time since the quest was received.
+    TimeHeading,
+    /// The time since the quest was received (centred).
+    Time,
+    /// A history entry's date (centred): when the quest was completed, or when the rumour or
+    /// message happened.
+    Date,
 }
 
-/// The diary entry's lines (0x49c388): the quest's title (white, centred), an empty line,
-/// `[Hero] QuestFullDescript` (centred), the description (justified), an empty line,
-/// `[Hero] QuestGetTime` (centred) and the time since the quest was received (centred).
-/// Each with its font (4dbc26 loads them: the title in white Benguiat 0xae2498, the headings
-/// in SanSerif_Bold less 20, 90, 180, an orange, 0xae24f4, the text in SanSerif less 25, 25,
-/// 125, a yellow, 0xae24c0), its colour and size.
-fn diary_entry(row: &razdor::rules::journal::Row, room: f32, title: f32, body: f32) -> Vec<DiaryLine> {
+/// The parts of a diary entry, per tab. The desktop keeps the original's layout (0x49c388 for
+/// the quests under way). On a phone (Razdor's choice, the player's suggestion) the quest's
+/// title and the «Описание:» heading are dropped: the quest list above already names the quest,
+/// and the box is small. The time line stays at the end. A completed quest on a phone keeps its
+/// completion date and its text. Rumours and messages keep their title on a phone.
+fn entry_parts(tab: Tab, phone: bool) -> Vec<EntryPart> {
+    use EntryPart::*;
+    match (tab, phone) {
+        (Tab::Active, false) => vec![Title, Blank, Description, Text, Blank, TimeHeading, Time],
+        (Tab::Active, true) => vec![Text, Blank, TimeHeading, Time],
+        (Tab::Completed, true) => vec![Date, Blank, Text],
+        _ => vec![Title, Blank, Date, Blank, Text],
+    }
+}
+
+/// A diary entry's lines for `tab` (the quests under way, or a history tab), each with its font,
+/// colour and size, in the order of [`entry_parts`]. The fonts are 4dbc26's: the title in white
+/// Benguiat 0xae2498, the headings in SanSerif_Bold less 20, 90, 180, an orange, 0xae24f4, the
+/// text in SanSerif less 25, 25, 125, a yellow, 0xae24c0; a history entry's date is in the
+/// heading's orange and font.
+fn diary_lines(row: &razdor::rules::journal::Row, tab: Tab, phone: bool, room: f32, title: f32, body: f32) -> Vec<DiaryLine> {
     use super::dt_font::{with_original_face, Face};
     use razdor::dt::markup::{Align, Ink};
     let own = |key: &str, ours: &'static str| chrome::ui_text("Hero", key).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr(ours).to_string());
@@ -1339,16 +1348,29 @@ fn diary_entry(row: &razdor::rules::journal::Row, room: f32, title: f32, body: f
     };
     let (white, orange, yellow) = (Color::from_rgba(255, 255, 255, 255), Color::from_rgba(235, 165, 75, 255), Color::from_rgba(230, 230, 130, 255));
     let blank = || DiaryLine { row: MarkupRow { text: String::new(), ink: Ink::Plain, align: Align::Centre, last: true }, face: Face::Body, color: yellow, size: body };
-    let mut out = rows(&row.title, white, Align::Centre, Face::Subtitle, title);
-    out.push(blank());
-    out.extend(rows(&own("QuestFullDescript", n_("Description:")), orange, Align::Centre, Face::Bold, body));
-    for line in row.text.lines().map(str::trim).filter(|l| !l.is_empty()) {
-        out.extend(rows(&format!("{}{line}", razdor::dt::markup::INDENT), yellow, Align::Justify, Face::Body, body));
+    let mut out = Vec::new();
+    for part in entry_parts(tab, phone) {
+        match part {
+            EntryPart::Title => out.extend(rows(&row.title, white, Align::Centre, Face::Subtitle, title)),
+            EntryPart::Blank => out.push(blank()),
+            EntryPart::Description => out.extend(rows(&own("QuestFullDescript", n_("Description:")), orange, Align::Centre, Face::Bold, body)),
+            EntryPart::Text => {
+                for line in row.text.lines().map(str::trim).filter(|l| !l.is_empty()) {
+                    out.extend(rows(&format!("{}{line}", razdor::dt::markup::INDENT), yellow, Align::Justify, Face::Body, body));
+                }
+            }
+            EntryPart::TimeHeading => out.extend(rows(&own("QuestGetTime", n_("Time since the quest was received:")), orange, Align::Centre, Face::Bold, body)),
+            EntryPart::Time => {
+                let since = row.elapsed.map_or_else(|| tr("unknown").to_string(), |m| razdor::rules::clock::duration_label(m as f64));
+                out.extend(rows(&since, yellow, Align::Centre, Face::Body, body));
+            }
+            EntryPart::Date => {
+                let date = row.date.map_or_else(|| tr("Date unknown").to_string(), |d| d.label());
+                let when = if tab == Tab::Completed { format!("{}: {date}", tr(super::story::QUEST_COMPLETED)) } else { date };
+                out.extend(rows(&when, orange, Align::Centre, Face::Bold, body));
+            }
+        }
     }
-    out.push(blank());
-    out.extend(rows(&own("QuestGetTime", n_("Time since the quest was received:")), orange, Align::Centre, Face::Bold, body));
-    let since = row.elapsed.map_or_else(|| tr("unknown").to_string(), |m| razdor::rules::clock::duration_label(m as f64));
-    out.extend(rows(&since, yellow, Align::Centre, Face::Body, body));
     out
 }
 
@@ -1656,10 +1678,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     // On a phone the entry's title is as large as the quest list's titles (`list_t`).
     let entry_title = diary_title_size(phone, list_t, head, ts, s);
     let lines = super::dt_font::legacy_metrics_if(phone, || {
-        rows.get(view.pick).map_or_else(Vec::new, |row| match view.tab {
-            Tab::Active => diary_entry(row, room, entry_title, body),
-            tab => history_entry(row, tab, room, entry_title, body),
-        })
+        rows.get(view.pick).map_or_else(Vec::new, |row| diary_lines(row, view.tab, phone, room, entry_title, body))
     });
     let line_h = (body * 1.15).round();
     let shown = ((entry.h - 12.0 * s) / line_h).floor().max(1.0) as usize;
@@ -1765,6 +1784,30 @@ mod tests {
         // the desktop keeps the entry's own heading size (head * ts / s).
         assert_eq!(diary_title_size(true, 20.0, 30.0, 3.0, 2.0), 20.0);
         assert_eq!(diary_title_size(false, 20.0, 30.0, 3.0, 2.0), 30.0 * 3.0 / 2.0);
+    }
+
+    #[test]
+    fn the_desktop_diary_entry_keeps_the_original_s_lines() {
+        // 0x49c388: the title, a blank, the description heading, the text, a blank, the time
+        // heading and the time. A completed quest: the title, a blank, the date, a blank, the text.
+        use super::{entry_parts, EntryPart::*, Tab};
+        assert_eq!(entry_parts(Tab::Active, false), vec![Title, Blank, Description, Text, Blank, TimeHeading, Time]);
+        assert_eq!(entry_parts(Tab::Completed, false), vec![Title, Blank, Date, Blank, Text]);
+        assert_eq!(entry_parts(Tab::Rumours, false), vec![Title, Blank, Date, Blank, Text]);
+        assert_eq!(entry_parts(Tab::Messages, false), vec![Title, Blank, Date, Blank, Text]);
+    }
+
+    #[test]
+    fn a_phone_s_diary_entry_drops_the_repeated_title_and_the_description_heading() {
+        // The player's suggestion: the quest list names the quest and the box is small, so the
+        // entry is the text, a blank and the time (its heading and value); the time stays last.
+        use super::{entry_parts, EntryPart::*, Tab};
+        assert_eq!(entry_parts(Tab::Active, true), vec![Text, Blank, TimeHeading, Time]);
+        // A completed quest keeps its completion date and its text; the title and its blank go.
+        assert_eq!(entry_parts(Tab::Completed, true), vec![Date, Blank, Text]);
+        // Rumours and messages are not the quest list's: they keep their title on a phone.
+        assert_eq!(entry_parts(Tab::Rumours, true), vec![Title, Blank, Date, Blank, Text]);
+        assert_eq!(entry_parts(Tab::Messages, true), vec![Title, Blank, Date, Blank, Text]);
     }
 
     #[test]
