@@ -1683,7 +1683,7 @@ mod tests {
         let (top, inner_h, ok_top) = (30.0, 650.0 - 29.0, 650.0 - 29.0 - 48.0);
         let hints = 44.0 + 4.0 * 17.0 + 48.0 + 4.0 * 17.0;
         let p = right_column_pitch(top, ok_top, 9.0, hints, 44.0);
-        assert!(p < 44.0 && p >= 32.0, "pitch {p}");
+        assert!((32.0..44.0).contains(&p), "pitch {p}");
         assert!(top + 9.0 * p + hints <= ok_top + 1e-3, "the language description ends above Ok");
         assert_eq!(right_column_pitch(top, inner_h + 200.0, 9.0, hints, 44.0), 44.0);
     }
