@@ -5,8 +5,10 @@ use super::*;
 use crate::dt::data::AiTargets;
 use crate::dt::dtm::{Army as DtArmy, BuildingType, RecruitSlot, Scenario, Troop as DtTroop};
 use crate::rules::content::testkit as ck;
-use crate::rules::content::{ArtefactType, HeroClass, Stat, StatMods, UnitDef};
+use crate::dt::data::{MagicDirection, MagicSchool};
+use crate::rules::content::{ArtefactDef, ArtefactType, HeroClass, Stat, StatMods, UnitDef};
 use crate::rules::formation::{Row, Slot};
+use crate::rules::world::Stationed;
 use crate::rules::world::testkit::{self as tk, building, hero, scenario, troop};
 
 /// Units 1–3 heroes, 4 a weak warrior (cost 50), 5 a shooter, 6 a strong warrior (cost 200,
@@ -1355,6 +1357,76 @@ fn a_garrison_wiped_out_by_an_army_is_emptied_with_its_stationed_units() {
     assert!(g.world.locations[0].stationed.is_empty());
     assert!(g.world.locations[0].garrison.is_empty());
     assert_eq!(item_holders(&g, ItemId(11)), 1, "the item went to the pool, then to a side");
+}
+
+/// [`content`] with a mage (8, 100 HP) and a staff (14, +10 magic power), and plain rings
+/// 20–33 whose price is their number (none of them raises a unit's tactical cost), and a potion
+/// 15 (no unit wears one).
+fn mage_content() -> Content {
+    // Units 1–7 as in [`content`] (the heroes and the scenario's armies need them), 8 the mage.
+    let mut units = vec![ck::warrior(1, 20, 5), ck::warrior(2, 20, 5), ck::warrior(3, 20, 5), ck::warrior(4, 10, 2), ck::shooter(5, 8)];
+    units.push(UnitDef { cost: 200, hits: 120, ..ck::warrior(6, 60, 20) });
+    units.push(UnitDef { nature: Nature::Rogue, cost: 60, ..ck::warrior(7, 12, 2) });
+    // Two maneuvers: its magic (power 10 over no blow or shot) counts in its strength, and a
+    // staff's +10 raises it.
+    units.push(UnitDef { hits: 300, manevres: 2, ..ck::mage(8, 10, MagicSchool::Elemental, MagicDirection::ToEnemy) });
+    let staff = ArtefactDef { add: StatMods::from([(Stat::MagicPower, 10)]), ..ck::item(14, ArtefactType::Staff) };
+    let mut items = vec![staff];
+    items.extend((20..=33).map(|id| ArtefactDef { cost: id as i32, ..ck::item(id, ArtefactType::Ring) }));
+    items.push(ck::item(15, ArtefactType::Potion));
+    ck::content(units, items)
+}
+
+#[test]
+fn the_players_stationed_mage_wears_the_loot_when_the_garrison_holds() {
+    // 0x4a473c: a garrison that keeps the pool hands it out to its record, the player's units
+    // left in the building included, by the gain rule. The pack (the treasure) joins the pool.
+    let mut s = map();
+    s.buildings = vec![building(BuildingType::Castle, 31, 10, (1, 1))];
+    s.armies = vec![army(1, (30, 10), 4, ENEMY, 0, &[troop(4, 0, 1)])];
+    let mut g = start_with(&s, mage_content());
+    let c = g.content.clone();
+    // A living warrior keeps the garrison's strength above the attacker's (a lone mage counts a
+    // fifth). A fallen warrior wears a ring: its item feeds the pool, and the handout runs only
+    // with a pool.
+    let mut fallen = Troop::new(UnitId(4), 1, slot(2));
+    fallen.died_at = Some(0);
+    fallen.hurt = troop_max_hp(&c, &fallen);
+    fallen.worn[0] = Some(ItemId(15));
+    g.world.locations[0].garrison = vec![Troop::new(UnitId(4), 1, slot(1)), fallen];
+    g.world.locations[0].stationed = vec![Stationed { unit: Unit::new(&c, UnitId(8), slot(0)) }];
+    g.world.locations[0].treasure = vec![ItemId(14)];
+    g.world.armies[0].troops[0].hurt = 45;
+    assert!(!g.ai_battle(0, Defender::Garrison(0)));
+    let loc = &g.world.locations[0];
+    let mage = &loc.stationed[0].unit;
+    assert_eq!(mage.items.iter().flatten().copied().collect::<Vec<_>>(), [ItemId(14)], "{mage:?}");
+    assert_eq!(loc.treasure, [ItemId(15)], "the potion that fell with its troop packs");
+}
+
+#[test]
+fn loot_no_stationed_unit_can_use_goes_to_the_treasure_dearest_first() {
+    let c = mage_content();
+    let mut stationed = vec![Stationed { unit: Unit::new(&c, UnitId(4), slot(0)) }];
+    let mut pack = Vec::new();
+    let pool: Vec<ItemId> = (20..=33).map(ItemId).collect();
+    redistribute_garrison(&c, &mut [], &mut stationed, &mut pack, pool, 0);
+    assert_eq!(pack.len(), 12, "the pack holds 12");
+    assert_eq!(pack[0], ItemId(33), "the dearest first");
+    assert!(!pack.contains(&ItemId(20)) && !pack.contains(&ItemId(21)), "the cheapest are lost: {pack:?}");
+    assert!(stationed[0].unit.items.iter().all(Option::is_none));
+}
+
+#[test]
+fn a_garrison_troop_wears_the_loot_before_a_stationed_unit_of_the_same_gain() {
+    let c = mage_content();
+    let mut troops = vec![Troop::new(UnitId(8), 1, slot(0))];
+    let mut stationed = vec![Stationed { unit: Unit::new(&c, UnitId(8), slot(1)) }];
+    let mut pack = Vec::new();
+    redistribute_garrison(&c, &mut troops, &mut stationed, &mut pack, vec![ItemId(14)], 0);
+    assert_eq!(troops[0].worn[0], Some(ItemId(14)));
+    assert!(stationed[0].unit.items.iter().all(Option::is_none));
+    assert!(pack.is_empty());
 }
 
 #[test]
