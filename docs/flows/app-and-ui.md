@@ -145,7 +145,7 @@ button there too. Swipe areas: each frame the screens register the rectangles a 
 (`input::swipe_area(rect, SwipeKind)`, gestures only; `widgets::swipe_rows` for a list or text box with
 its row height). The map registers `Pan` over the map view (not while a dialog is open; the open minimap
 is `Off`, a blocker that keeps its drag a drag). The registrations of a frame are the next frame's
-(`input::begin_frame` swaps them), the last one registered over the touch acts. A finger that moves past
+(`input::begin_frame` swaps them), the last one registered over the touch acts. Drag sources: the unit grids (the army window, the building's army and garrison, the hire tab's hero grid) register their cards as `Off` (`pan::drag_grid`, `pan::drag_source`) while the canvas overflows and units drag, so a quick slide from a card drags the unit instead of panning the window (the window's own `Pan` area is registered first). A finger that moves past
 the slop within 0.25 s of touching down, on a `Pan` or `ScrollRows` area, is a swipe: no click, the map's
 `Frame::pan` (the finger's slide, applied 1:1 by `world_view::pan` on the idle map), or the list's wheel
 steps (one per row, finger up = content up). A finger held still longer first, or outside any area, is

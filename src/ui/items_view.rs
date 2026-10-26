@@ -1079,6 +1079,8 @@ pub fn squad(
         }
     }
     let cells: Vec<(razdor::rules::formation::Slot, Rect)> = f.slots().map(|s| (s, Rect::new(cell_at(s).x, cell_at(s).y, card.x, card.y))).collect();
+    // A slide over the cards drags a unit, not the window (phones held upright, `ui::pan`).
+    super::pan::drag_grid(cells.iter().map(|&(_, r)| r));
     if let Some((unit, slot)) = super::unit_drag::update(assets, &cells, card) {
         game.move_unit(unit, slot);
         // A drag (Razdor's) ends as the original's swap: nothing selected, the pack up.

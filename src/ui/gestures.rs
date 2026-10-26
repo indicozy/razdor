@@ -733,6 +733,23 @@ mod tests {
     }
 
     #[test]
+    fn a_quick_drag_from_a_drag_source_on_a_window_pan_is_a_drag_and_elsewhere_it_pans() {
+        // A window that pans (the whole screen) with a unit card's cell over it as an Off area
+        // (`pan::drag_source`): a quick slide from the card drags the unit; one elsewhere pans.
+        let mut m = GestureMapper::default();
+        let areas = vec![(Rect::new(0.0, 0.0, 720.0, 1080.0), PAN), (Rect::new(100.0, 400.0, 200.0, 200.0), SwipeKind::Off)];
+        step_in(&mut m, &[touch(1, 150.0, 450.0, Phase::Started)], &areas);
+        let start = step_in(&mut m, &[touch(1, 150.0, 470.0, Phase::Moved)], &areas);
+        assert_eq!((start.left.pressed, start.pan), (true, (0.0, 0.0)), "a quick drag from the card is the left drag");
+        step_in(&mut m, &[touch(1, 150.0, 470.0, Phase::Ended)], &areas);
+        // The same quick slide on the window, off the card: a pan, no drag.
+        step_in(&mut m, &[touch(2, 600.0, 900.0, Phase::Started)], &areas);
+        let pan = step_in(&mut m, &[touch(2, 600.0, 920.0, Phase::Moved)], &areas);
+        assert_eq!(pan.pan, (0.0, 20.0), "the window pans by the finger");
+        assert!(!pan.left.pressed, "and no drag starts");
+    }
+
+    #[test]
     fn the_last_area_registered_over_a_touch_acts() {
         let mut m = GestureMapper::default();
         // A list drawn over the map: its rows, not the map, take the slide.

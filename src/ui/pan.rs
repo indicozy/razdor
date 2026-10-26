@@ -210,6 +210,34 @@ pub fn window_area(r: Rect) {
     super::input::swipe_area(clipped(on_screen(r)), super::gestures::SwipeKind::Pan);
 }
 
+/// A rectangle a unit drag starts on (a card, a grid of cards; `r` in the canvas, as
+/// `window_area`): while the canvas overflows and the units can be dragged, a slide over it is
+/// the drag, not a pan of the window (`SwipeKind::Off`, which keeps a drag a drag). Registered
+/// after the window's own area, so it wins over it there. Clicks-only leaves the window's pan.
+pub fn drag_source(r: Rect) {
+    if !overflows() || !super::unit_drag::controls().drags() {
+        return;
+    }
+    super::input::swipe_area(clipped(on_screen(r)), super::gestures::SwipeKind::Off);
+}
+
+/// [`drag_source`] over the bounding box of a grid's cell rectangles (a contiguous block of
+/// cards); nothing when there are none.
+pub fn drag_grid(cells: impl IntoIterator<Item = Rect>) {
+    if let Some(r) = bounds(cells) {
+        drag_source(r);
+    }
+}
+
+/// The smallest rectangle holding every one of `rects` (`None` for none).
+fn bounds(rects: impl IntoIterator<Item = Rect>) -> Option<Rect> {
+    rects.into_iter().reduce(|a, b| {
+        let (x0, y0) = (a.x.min(b.x), a.y.min(b.y));
+        let (x1, y1) = ((a.x + a.w).max(b.x + b.w), (a.y + a.h).max(b.y + b.h));
+        Rect::new(x0, y0, x1 - x0, y1 - y0)
+    })
+}
+
 /// The top of the bottom bar on the screen (the bar's own scale, `chrome::bar_height`).
 pub fn bar_top() -> f32 {
     screen_height() - chrome::bar_height()
@@ -431,5 +459,12 @@ mod tests {
         assert!(covers(true, 790.0, 711.0));
         assert!(!covers(true, 710.0, 711.0), "just above the bar is the window's");
         assert!(!covers(false, 790.0, 711.0), "no bar over the window, nothing taken");
+    }
+
+    #[test]
+    fn a_grid_of_drag_sources_is_the_box_around_its_cells() {
+        let cells = [Rect::new(10.0, 20.0, 8.0, 12.0), Rect::new(30.0, 20.0, 8.0, 12.0), Rect::new(10.0, 50.0, 8.0, 12.0)];
+        assert_eq!(bounds(cells), Some(Rect::new(10.0, 20.0, 28.0, 42.0)));
+        assert_eq!(bounds(std::iter::empty()), None, "no cells, no drag source");
     }
 }

@@ -1058,6 +1058,8 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
     let selected_now = view.garrison_sel.filter(|&(g, i)| !g && i < game.squad.len()).map(|s| s.1);
     view.hire_panel = hire_panel_on(view.hire_panel, entered, selected_now);
     let cells: Vec<(Slot, Rect)> = form.slots().map(|s| (s, Rect::new(cell_at(s).x, cell_at(s).y, card.x, card.y))).collect();
+    // A slide over the cards drags a unit, not the window (phones held upright, `ui::pan`).
+    super::pan::drag_grid(cells.iter().map(|&(_, r)| r));
     if let Some((unit, slot)) = super::unit_drag::update(assets, &cells, card) {
         game.move_unit(unit, slot);
         view.garrison_sel = None;
@@ -1185,6 +1187,12 @@ fn card_grid(game: &Game, assets: &Assets, f: &Frame, rel_y: f32, units: &[&Unit
             hovered = Some(Hit::Unit(i));
         }
     }
+    // Both grids (the hero's army and the garrison) start drags: a slide over them drags a unit,
+    // not the window (phones held upright, `ui::pan`).
+    super::pan::drag_grid(form.slots().map(|s| {
+        let p = cell_at(s);
+        Rect::new(p.x, p.y, card.x, card.y)
+    }));
     hovered
 }
 
