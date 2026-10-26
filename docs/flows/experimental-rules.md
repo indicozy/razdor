@@ -90,7 +90,7 @@ global preference in an isolated snapshot save directory to display its controls
 
 ## Formation after battle
 
-«Сохранять расстановку после боя» (`Settings::keep_formation`, `Game::keep_formation`) is Razdor's
+«Сохранять расстановку» (`Settings::keep_formation`, `Game::keep_formation`) is Razdor's
 deviation, asked for by the owner ("why is the army's layout a bit different at every new fight?"),
 on by default, in «Ещё…» beside «Обход армий на пути». The original rewrites the army's formation
 after each battle from the cells the battle left (4988c0), after its start fix (4d2141) and its

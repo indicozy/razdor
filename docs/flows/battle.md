@@ -169,7 +169,7 @@ with `Surrender > 0` units gives up while both stand; its values become the winn
 - the formation is rebuilt from the battle grid (survivors keep their cells; the rest take
   free cells, `Formation::after_battle_slot`); the hero comes back with 1 HP if his army
   survives (`Battle::player_results`);
-- Razdor's optional deviation «Сохранять расстановку после боя» (`Game::keep_formation`, on by
+- Razdor's optional deviation «Сохранять расстановку» (`Game::keep_formation`, on by
   default, `Settings::keep_formation`): when on, every unit goes back to the cell it had before
   the battle, the dead too (`Game::return_to_cells`); a cell now outside the formation or already
   taken falls back to `after_battle_slot`, the living first. The cells are taken in
