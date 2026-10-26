@@ -3150,10 +3150,11 @@ impl Game {
                     for t in loc.garrison.iter_mut().filter(|t| !t.alive()) {
                         pool.extend(t.worn.iter_mut().filter_map(Option::take));
                     }
+                    // The dead stay in the record as corpses (0x4a4c68 step 5): their worn items
+                    // go to the pool, the units are not removed.
                     for s in loc.stationed.iter_mut().filter(|s| !s.unit.alive()) {
                         pool.extend(s.unit.items.iter_mut().filter_map(Option::take));
                     }
-                    loc.stationed.retain(|s| s.unit.alive());
                 }
             }
         }

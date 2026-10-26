@@ -1288,6 +1288,75 @@ fn the_players_units_in_a_garrison_gain_and_promote_by_the_ai_rule() {
     assert_ne!(g.rng.state(), before);
 }
 
+/// Where an item is now: worn by a troop or a unit, in an army's pack, or in a building.
+fn item_holders(g: &Game, item: ItemId) -> usize {
+    let mut n = 0;
+    for a in &g.world.armies {
+        n += a.items.iter().filter(|&&i| i == item).count();
+        for t in &a.troops {
+            n += t.worn.iter().filter(|i| **i == Some(item)).count();
+        }
+    }
+    for l in &g.world.locations {
+        n += l.treasure.iter().filter(|&&i| i == item).count();
+        for t in &l.garrison {
+            n += t.worn.iter().filter(|i| **i == Some(item)).count();
+        }
+        for s in &l.stationed {
+            n += s.unit.items.iter().filter(|i| **i == Some(item)).count();
+        }
+    }
+    n
+}
+
+#[test]
+fn a_stationed_unit_that_falls_in_a_surviving_garrison_stays_as_a_corpse() {
+    // 0x4a4c68 step 5: the defender survives, so the player's units left in a building stay in
+    // its garrison record. A unit that falls in the battle stays there with 0 HP and no items;
+    // its worn items go to the loot pool. A corpse is not counted as a fighter (no XP, no roll).
+    let mut s = map();
+    s.buildings = vec![building(BuildingType::Castle, 31, 10, (1, 1))];
+    s.armies = vec![army(1, (30, 10), 4, ENEMY, 0, &[troop(4, 0, 1)])];
+    let mut g = start_with(&s, promoting_content());
+    let c = g.content.clone();
+    g.world.locations[0].garrison.clear();
+    let mut guard = Unit::new(&c, UnitId(4), slot(0));
+    guard.items[0] = Some(ItemId(7));
+    let mut falling = Unit::new(&c, UnitId(4), slot(1));
+    falling.hp = 1;
+    falling.items[0] = Some(ItemId(11));
+    g.world.locations[0].stationed = vec![crate::rules::world::Stationed { unit: guard }, crate::rules::world::Stationed { unit: falling }];
+    g.world.armies[0].troops[0].hurt = 45;
+    assert!(!g.ai_battle(0, Defender::Garrison(0)));
+    let st = &g.world.locations[0].stationed;
+    assert_eq!(st.len(), 2, "the dead stay in the record: {st:?}");
+    let dead = &st[1].unit;
+    assert_eq!((dead.hp, dead.alive(), dead.items[0]), (0, false, None), "{dead:?}");
+    assert!(dead.died_at.is_some());
+    assert_eq!(item_holders(&g, ItemId(11)), 1, "the corpse's item went to the pool");
+    assert!(st[0].unit.alive());
+}
+
+#[test]
+fn a_garrison_wiped_out_by_an_army_is_emptied_with_its_stationed_units() {
+    // 0x4a4c68 step 4: the defender is wiped out, so its record is emptied (garrison and the
+    // player's units left in it), after their worn items went to the pool.
+    let mut s = map();
+    s.buildings = vec![building(BuildingType::Castle, 31, 10, (1, 1))];
+    s.armies = vec![army(1, (30, 10), 4, ENEMY, 0, &[troop(4, 0, 1)])];
+    let mut g = start_with(&s, promoting_content());
+    let c = g.content.clone();
+    g.world.locations[0].garrison.clear();
+    let mut falling = Unit::new(&c, UnitId(4), slot(0));
+    falling.hp = 1;
+    falling.items[0] = Some(ItemId(11));
+    g.world.locations[0].stationed = vec![crate::rules::world::Stationed { unit: falling }];
+    assert!(g.ai_battle(0, Defender::Garrison(0)));
+    assert!(g.world.locations[0].stationed.is_empty());
+    assert!(g.world.locations[0].garrison.is_empty());
+    assert_eq!(item_holders(&g, ItemId(11)), 1, "the item went to the pool, then to a side");
+}
+
 #[test]
 fn hire_xp_takes_the_level_value_without_the_community_floor() {
     // P sums mode 0 (+0x1aa) of the player's records: CostMultipler 0 makes it 0, where the

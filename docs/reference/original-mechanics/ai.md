@@ -511,7 +511,9 @@ fight).
    VictoryGoldDiv` of the garrison's gold — here with **no** `MinVictoryGold` rule. All its
    items go to the pool.
 5. **Defender survives**: XP for its survivors, its leader at 1 HP (armies only), its dead
-   units' items to the pool.
+   units' items to the pool. The dead stay in the record as corpses (0x4a4c68): the count is
+   not changed, a garrison's fallen troops and the player's units left in it alike; only
+   their worn items are taken.
 6. The pool goes to the attacker when its end strength is strictly greater than the defender's,
    otherwise (ties included) to the defender; that side wears the best items (§10.1). The
    attacker re-plans; the survivors rescore all buildings.
@@ -634,6 +636,7 @@ after the parity pass.
 | Greeting / talk | Talk counters per pair (+1 per arrival at a distance, + relation + 1 when friendly), −500 on both sides after a greeting, talk seed `800 − c + Talking`, `c div 100` below 1 | Talk counters (+1 per arrival, + relation + 1), −500 after a greeting, talk seed `800 − c + Talking` (§7.2, §8) | Matches |
 | Messenger | Falls out of the seed rule (a 0 for the player becomes 1) and the greeting | Falls out of the seed rule (value 0 → 1) and the greeting (§7.2) | Matches |
 | AI vs AI loot | Asymmetric: `MinVictoryGold` only when the attacker loses, wage bills by style, a garrison's gold; worn items pooled and handed out by tactical gain to the side with more HP, the rest packed dearest first | Asymmetric (§10): MinVictoryGold only when the attacker loses; wage totals; pooled items to the side with more HP, best-gain wearing | Matches |
+| AI vs AI corpses | A surviving garrison keeps its dead, the player's units left in it included (their worn items pooled); a wiped-out garrison is emptied, its stationed units too | Dead stay in the record when the defender survives; the record is emptied when it is wiped out (§10 steps 4–5) | Fixed 2026-10-26 (Razdor removed the dead stationed units) |
 | Beaten in its own arrival | Off the map, the rest of the arrival runs with its record (another fight with nobody, village gold, shopping, healing, hiring), then it leaves | The arrival goes on with the beaten record (0x4a548c) | Matches |
 | Leader survival | Leader at 1 HP when its side survives; it, and a unit resurrected, keep the first time of death (cleared only by a respawn or an activation) | Leader at 1 HP when its side survives (§10); the time of death is written only when it is 0 | Matches |
 | Lord retreat | None | No retreat; only the respawn rule (§12) | Matches |
