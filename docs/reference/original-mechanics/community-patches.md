@@ -484,6 +484,11 @@ Undead-caster drain still follows Elemental and Death curses. **code**
 
 The patch replaces the vanilla drain (c2851a). **code**
 
+An exe without the patch (for example the Evolution Mod's) runs the original's own block at
+0x484466 instead, with fixed floors and no `MinSpell…` keys: the rules are in battle.md, "Magic
+power drain". Which one an install runs is read from its exe (E9 at 0x484466 = this patch) or,
+without an exe, from `MinSpellLife` in `_Global.ini` (`install::drain_rule`). **code**
+
 **Per-type values**, computed once at load (c283dc, c284e6, c28579):
 - **D (drain)** = `ManaDrain` if the type has a non-zero value. Otherwise it is the vanilla school
   drain: DecSpellLife, DecSpellElemental or DecSpellDeath (2 / 5 / 2 in the shipped `_Global.ini`).

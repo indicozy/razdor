@@ -3,6 +3,10 @@
 Things noticed while playing Razdor, to look into. Newest first. Each note says which branch it
 was seen on and what to check.
 
+## 2026-10-26, main: маги в моде Evolution теряют силу магии до 0 (KtrZ, backlog 1305)
+
+1. Игрок KtrZ («Discord Times Community Update Evolution Mod»): силу магии у магов сводит к 0. **Как в оригинале:** у мода свой `DiscordTimes.exe` без патча Community 1.2, и его бой идёт по старому блоку, который в оригинале стоит на 0x484466–0x484683: силы жизни и стихий не ниже 15, силы смерти не ниже 25 у нежити, без ключей `MinSpell…` из `_Global.ini`. **Причина:** Razdor всегда применял правило Community, а в `_Global.ini` мода нет `MinSpell…`, и полы читались как 0. **Сделано:** правило выбирается по установке: по `DiscordTimes.exe` (E9 на 0x484466 — патч Community), без exe — по ключу `MinSpellLife` в `_Global.ini` (`install::drain_rule`, `Battle::drain_old`). Обычная установка Community не меняется. **Проверить:** бой с магом в моде: сила магии жизни и стихий не падает ниже 15.
+
 ## 2026-10-19, main: характеристики на панели юнита снова не как в оригинале (регресс 0.4.36)
 
 Скриншоты оригинала: строка целиком синяя при росте (жизнь 145, атака 65), красная при падении

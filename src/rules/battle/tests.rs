@@ -2480,6 +2480,67 @@ fn community_row17_18_the_drain_tables_are_per_type() {
     assert_eq!((bt.fighters[0].power, bt.fighters[1].power), (5, 30));
 }
 
+// --- the original's drain block (0x484466–0x484683), for an exe without the Community patch --
+
+/// A battle on the original's drain rule: the content's options set to `Old`.
+fn old_rule(extra: Vec<UnitDef>, player: &[(u32, Slot)], enemies: &[(u32, Slot)]) -> Battle {
+    let mut c = match Arc::try_unwrap(content_with(extra, Formation::WIDE)) {
+        Ok(c) => c,
+        Err(_) => unreachable!("freshly made"),
+    };
+    c.options.drain_rule = DrainRule::Old;
+    battle_in(&Arc::new(c), player, enemies)
+}
+
+/// The power of a lone unit on turn 2, after its first drain.
+fn old_power_on_turn_2(unit: UnitDef) -> i32 {
+    let id = unit.id;
+    let mut bt = old_rule(vec![unit], &[(id, b(1))], &[(18, f(5))]);
+    to_round(&mut bt, 2);
+    bt.fighters[0].power
+}
+
+#[test]
+fn old_rule_drains_by_school_and_floors_by_nature() {
+    use Nature::{Normal, Rogue, Undead};
+    let life = |id, p| mage(id, p, MagicSchool::Life, MagicDirection::ToAlly);
+    let elem = |id, p, n| UnitDef { nature: n, ..mage(id, p, MagicSchool::Elemental, MagicDirection::ToEnemy) };
+    let death = |id, p, n| UnitDef { nature: n, ..mage(id, p, MagicSchool::Death, MagicDirection::ToEnemy) };
+    let cases = [
+        (life(70, 10), 15, "Life 10 − 2 is raised to the Life floor of 15"),
+        (life(71, 30), 28, "Life above the floor drains by DecSpellLife"),
+        (bonus(72, Bonus::Concentration, life(72, 20)), 22, "Concentration adds the drain"),
+        (elem(73, 3, Undead), 0, "Elemental Undead below 0 goes to 0"),
+        (elem(74, 3, Rogue), 0, "Elemental Rogue below 0 goes to 0"),
+        (elem(75, 3, Normal), 15, "Elemental Normal below 0 goes to the floor of 15"),
+        (elem(76, 0, Normal), 0, "no power, no drain and no floor"),
+        (elem(77, 30, Normal), 25, "Elemental above the floor drains by DecSpellelemental"),
+        (death(78, 20, Undead), 25, "Death Undead is raised to 25"),
+        (death(79, 40, Undead), 38, "Death Undead above 25 drains"),
+        (death(80, 1, Normal), 0, "Death Normal below 0 goes to 0"),
+        (death(81, 30, Normal), 28, "Death Normal has no floor"),
+    ];
+    for (unit, want, what) in cases {
+        assert_eq!(old_power_on_turn_2(unit), want, "{what}");
+    }
+    // A type with no school has its power set to 0 at load (units.rs), so the power is set
+    // here: with no school the drain does nothing, not even the floors.
+    let schoolless = UnitDef { magic: None, ..mage(82, 0, MagicSchool::Life, MagicDirection::ToAlly) };
+    let mut bt = old_rule(vec![schoolless], &[(82, b(1))], &[(18, f(5))]);
+    bt.fighters[0].power = 30;
+    to_round(&mut bt, 2);
+    assert_eq!(bt.fighters[0].power, 30, "no school: no change");
+}
+
+#[test]
+fn old_rule_the_drain_starts_on_turn_2() {
+    let unit = mage(83, 3, MagicSchool::Elemental, MagicDirection::ToEnemy);
+    let mut bt = old_rule(vec![unit], &[(83, b(1))], &[(18, f(5))]);
+    assert_eq!(bt.fighters[0].power, 3, "turn 1: no drain");
+    to_round(&mut bt, 2);
+    assert_eq!(bt.fighters[0].power, 15, "turn 2: 3 − 5 is raised to 15");
+}
+
 #[test]
 fn community_row20_cripple_marks_stay_on_the_record_index() {
     let cripple = bonus(87, Bonus::NoHeal, acts(87, 2, warrior(87, 30, 0)));

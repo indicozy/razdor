@@ -5,6 +5,11 @@ move to a Settled list.
 
 ## Open
 
+- **The Evolution Mod's exe differs from Community 1.2 in 74 places in CODE; only the drain is
+  supported; survey in progress (backlog 1305).** The mod's `DiscordTimes.exe` lacks the Community
+  drain patch; Razdor runs the original's own drain block for such an install (battle.md, "Magic
+  power drain"; `install::drain_rule`).
+
 - **Held item: the green card and the acceptance line's face (report 1053, 2026-10-22).** The
   code gives a refused card state 4 (red) and an accepted one state 2 (blue, the block at
   0xadd084); the green frame in the original's screenshot is most likely the selected unit

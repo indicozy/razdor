@@ -1077,6 +1077,20 @@ pub struct AiTargets {
     pub gold_village: Option<ModelPriorities>,
 }
 
+/// Which magic power drain the install's exe runs (see `install::drain_rule`).
+///
+/// `Community` is the Community 1.2 patch (c2851a): the per-type drain tables and the
+/// `MinSpell…` floors from `_Global.ini`. `Old` is the original's own drain block
+/// (0x484466–0x484683), which an exe without the patch runs: fixed floors (15 for Life and
+/// Elemental, 25 for an Undead Death caster, 0 otherwise) and the Elemental and Death rules
+/// by nature.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DrainRule {
+    #[default]
+    Community,
+    Old,
+}
+
 /// Gameplay constants from `_Global.ini` (mechanics.md appendix).
 /// [`Default`] gives the vanilla values, for content without the file (the built-in demo).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1147,6 +1161,8 @@ pub struct GlobalOptions {
     pub ai_targets: AiTargets,
     /// `[AIArmyGeneration]`: army theme → unit ids, in file order.
     pub army_generation: Vec<(String, Vec<u32>)>,
+    /// Which magic drain the install runs; set from the exe at load, Community by default.
+    pub drain_rule: DrainRule,
     /// Other `[GlobalOptions]` keys.
     pub extra: BTreeMap<String, String>,
 }
@@ -1237,6 +1253,7 @@ impl Default for GlobalOptions {
             difficulty_factor: 120,
             item_sale_cost: 25,
             ship_cost: 250,
+            drain_rule: DrainRule::Community,
             battle_effects: BattleEffect::SHIPPED.map(|(f, r, g, b, a, y)| BattleEffect { file: f.to_string(), rgb: [r, g, b], alpha: a, y }),
             ai_targets: AiTargets::default(),
             army_generation: Vec::new(),
