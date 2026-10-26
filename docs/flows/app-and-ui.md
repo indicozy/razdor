@@ -279,7 +279,11 @@ the item description, the four resource lines and the diary); J opens the same w
 diary keeps the original's look; in place of its list title it has four tabs (asked for by the
 owner): the quests under way (the original's diary), and Razdor's history of completed quests,
 rumours and messages over the whole campaign, with dates and a heading per campaign map
-(`items_view::HeroView`, `story::journal_lines`). Hint boxes
+(`items_view::HeroView`, `story::journal_lines`). On a phone (`display::dp_px`), while a diary
+entry is shown and no artifact is described, the artifact description box is not drawn: the
+quest list moves up to its top and the entry takes its height and the gap
+(`items_view::diary_column`, a Razdor phone choice; the justification of the entry is the
+original's). Hit areas and scrolling follow the boxes they are given. Hint boxes
 (`widgets::tooltip`, `panel_hint`) fade in over 300 ms as the original's.
 
 An item's description, wherever it is shown (the market, the hero window's box, the army

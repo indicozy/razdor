@@ -1251,6 +1251,29 @@ impl Default for HeroView {
 /// original's (632 px).
 const HERO_S: f32 = 586.0 / 632.0;
 
+/// The hero window's right column, top down: the artifact description box (`desc`), the quest
+/// list (`list`) and the diary entry (`entry`). `desc` is `None` when it is not drawn.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct DiaryColumn {
+    desc: Option<Rect>,
+    list: Rect,
+    entry: Rect,
+}
+
+/// The hero window's right column (the original's three boxes, 0x49c388 and 0x4d8638, at
+/// `desc`, `list` and `entry`). On a phone, while a diary entry is shown and no artifact is
+/// described, the description box is not drawn: the quest list moves up to its top and the
+/// entry takes the description box's height and the gap under it (Razdor's phone choice: the
+/// entry's text is larger there). The desktop and a described artifact keep the three boxes.
+fn diary_column(desc: Rect, list: Rect, entry: Rect, phone: bool, described: bool, entry_shown: bool) -> DiaryColumn {
+    if !phone || described || !entry_shown {
+        return DiaryColumn { desc: Some(desc), list, entry };
+    }
+    // The description box's height and the gap under it: the list's top less the box's top.
+    let up = list.y - desc.y;
+    DiaryColumn { desc: None, list: Rect::new(list.x, list.y - up, list.w, list.h), entry: Rect::new(entry.x, entry.y - up, entry.w, entry.h + up) }
+}
+
 /// The rows of the hero window's diary for `tab`. The quests under way, oldest first, are the
 /// original's list (0x68e500, a quest added by 0x49c170 as it is received and taken out by
 /// 0x49c2b8 when it is completed); the other tabs are Razdor's history (asked for by the
@@ -1461,12 +1484,22 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
         with_original_face(Face::Title, || chrome::shadow_centered(&t, r.x + r.w / 2.0, r.y - 7.0 * s, head, ACCENT));
     };
 
-    // The item description box (310 × 164 at 58): the item under the pointer.
-    let desc = o(576.0, 58.0, 310.0, 164.0);
-    heading("ItemDescript", n_("Item description"), desc);
-    match hover.filter(|_| game.held_item.is_none()) {
-        Some(item) => super::item_text::draw(game, assets, item, desc, super::item_text::ItemBox::Inventory, s),
-        None => chrome::text_box_no_corners(desc),
+    // The item description box (310 × 164 at 58): the item under the pointer. On a phone, with a
+    // diary entry shown and no item described, the diary takes its place (`diary_column`).
+    let described = hover.filter(|_| game.held_item.is_none());
+    let phone = super::display::dp_px().is_some();
+    let entry_shown = diary_rows(game, view.tab).get(view.pick).is_some();
+    let list0 = o(576.0, 252.0, 292.0, 128.0);
+    let list_bar0 = o(868.0, 252.0, 18.0, 128.0);
+    let entry0 = o(576.0, 410.0, 292.0, 220.0);
+    let entry_bar0 = o(868.0, 410.0, 18.0, 220.0);
+    let column = diary_column(o(576.0, 58.0, 310.0, 164.0), list0, entry0, phone, described.is_some(), entry_shown);
+    if let Some(desc) = column.desc {
+        heading("ItemDescript", n_("Item description"), desc);
+        match described {
+            Some(item) => super::item_text::draw(game, assets, item, desc, super::item_text::ItemBox::Inventory, s),
+            None => chrome::text_box_no_corners(desc),
+        }
     }
 
     // The four resource lines, 78 px apart from 325.
@@ -1493,8 +1526,8 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     // list's title (`QuestList`) Razdor shows its tabs (asked for by the owner): the quests
     // under way (the original's diary), then the history of completed quests, rumours and
     // messages; Left / Right change them.
-    let list = o(576.0, 252.0, 292.0, 128.0);
-    let list_bar = o(868.0, 252.0, 18.0, 128.0);
+    let list = column.list;
+    let list_bar = Rect::new(list_bar0.x, list.y, list_bar0.w, list.h);
     let list_box = Rect::new(list.x, list.y, list_bar.x + list_bar.w - list.x, list.h);
     let at = Tab::ALL.iter().position(|&t| t == view.tab).unwrap_or(0);
     let mut switch = None;
@@ -1545,7 +1578,6 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     // own headings stay at the window's.
     let list_t = sheet_size(Face::Title, super::display::text_for(s, crate::ui::dialog::TEXT_REF));
     // On a phone the list is drawn at its own size, as the entry below.
-    let phone = super::display::dp_px().is_some();
     // A phone's row shrinks to fit the box down to the window's title size before it is cut.
     let row_floor = sheet_size(Face::Title, s).min(list_t);
     let row_h = (list_t * 1.25).round();
@@ -1607,8 +1639,8 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
             view.text_scroll = 0;
         }
     }
-    let entry = o(576.0, 410.0, 292.0, 220.0);
-    let entry_bar = o(868.0, 410.0, 18.0, 220.0);
+    let entry = column.entry;
+    let entry_bar = Rect::new(entry_bar0.x, entry.y, entry_bar0.w, entry.h);
     let entry_box = Rect::new(entry.x, entry.y, entry_bar.x + entry_bar.w - entry.x, entry.h);
     heading("QuestDescript", n_("Diary entry"), entry_box);
     chrome::text_box_base(entry_box);
@@ -1665,7 +1697,40 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
 
 #[cfg(test)]
 mod tests {
-    use super::{card_line, diary_body_size, diary_title_size, held_card_lit, held_hint_ink, class_wage, hero_resources, panel_slots, pointed_line, promo_ease, promo_look, promo_ms, ArmySel, Content, Controls, GridPress, UnitId};
+    use super::{card_line, diary_body_size, diary_column, diary_title_size, held_card_lit, held_hint_ink, class_wage, hero_resources, panel_slots, pointed_line, promo_ease, promo_look, promo_ms, ArmySel, Content, Controls, GridPress, UnitId};
+    use macroquad::prelude::Rect;
+
+    fn column_boxes() -> (Rect, Rect, Rect) {
+        // The hero window's three boxes at the desktop's scale 1 (58, 252, 410 down the column).
+        (Rect::new(576.0, 58.0, 310.0, 164.0), Rect::new(576.0, 252.0, 292.0, 128.0), Rect::new(576.0, 410.0, 292.0, 220.0))
+    }
+
+    #[test]
+    fn the_desktop_keeps_the_three_boxes_whatever_is_shown() {
+        let (desc, list, entry) = column_boxes();
+        for (described, shown) in [(false, false), (false, true), (true, true)] {
+            let c = diary_column(desc, list, entry, false, described, shown);
+            assert_eq!(c, super::DiaryColumn { desc: Some(desc), list, entry });
+        }
+    }
+
+    #[test]
+    fn a_phone_with_a_diary_entry_and_no_artifact_drops_the_description_box() {
+        let (desc, list, entry) = column_boxes();
+        let c = diary_column(desc, list, entry, true, false, true);
+        assert_eq!(c.desc, None);
+        // The list moves to the description box's top, the entry takes its height and the gap.
+        assert_eq!(c.list, Rect::new(576.0, 58.0, 292.0, 128.0));
+        assert_eq!(c.entry, Rect::new(576.0, 216.0, 292.0, 414.0));
+        assert_eq!(c.entry.y + c.entry.h, entry.y + entry.h);
+    }
+
+    #[test]
+    fn a_phone_keeps_the_three_boxes_while_an_artifact_is_described_or_no_entry_is_shown() {
+        let (desc, list, entry) = column_boxes();
+        assert_eq!(diary_column(desc, list, entry, true, true, true), super::DiaryColumn { desc: Some(desc), list, entry });
+        assert_eq!(diary_column(desc, list, entry, true, false, false), super::DiaryColumn { desc: Some(desc), list, entry });
+    }
 
     #[test]
     fn a_phone_s_diary_body_is_as_tall_as_the_message_text() {
