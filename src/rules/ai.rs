@@ -42,7 +42,7 @@ use super::items;
 use super::map::{step_minutes, Tile};
 use super::rng::Rng;
 use super::units::Unit;
-use super::world::{Army, Location, LocationKind, Owner, Troop, World};
+use super::world::{Army, Location, LocationKind, Owner, Stationed, Troop, World};
 
 /// Unit records of an army or a garrison.
 pub const MAX_UNITS: usize = 12;
@@ -672,18 +672,70 @@ pub fn give_item_to(c: &Content, troops: &mut [Troop], pack: &mut Vec<ItemId>, i
     }
 }
 
+/// A unit of a record that the item handout can wear an item on: a garrison's troop, or a
+/// player's unit left in the garrison (the original keeps both in the one record, 0x4a473c).
+trait Wearer {
+    /// The tactical gain of wearing `item` (mode 2), if it can wear it.
+    fn gain_of(&self, c: &Content, item: ItemId, bd: i32) -> Option<i32>;
+    /// Wears `item` if it can (`items::slot_for`'s rules, the dead take only a reviving item).
+    fn wear_item(&mut self, c: &Content, item: ItemId);
+}
+
+impl Wearer for Troop {
+    fn gain_of(&self, c: &Content, item: ItemId, bd: i32) -> Option<i32> {
+        gain_with(c, self, item, bd)
+    }
+    fn wear_item(&mut self, c: &Content, item: ItemId) {
+        wear(c, self, item);
+    }
+}
+
+impl Wearer for Unit {
+    /// The same gain as a troop of this unit with these worn items (0x4979c4 → 0x49765c, then
+    /// the tactical cost mode 2 of [`item_gain`]): its cost now over its level stats.
+    fn gain_of(&self, c: &Content, item: ItemId, bd: i32) -> Option<i32> {
+        let mut tried = self.clone();
+        let slot = items::slot_for(c, &tried, item).ok()?;
+        items::put_on(c, &mut tried, slot, item);
+        let base = super::experience::tactical(c, tried.def, &tried.base_stats(c), bd);
+        let now = super::experience::tactical(c, tried.def, &tried.stats(c), bd);
+        Some(now - base)
+    }
+    fn wear_item(&mut self, c: &Content, item: ItemId) {
+        if let Ok(slot) = items::slot_for(c, self, item) {
+            items::put_on(c, self, slot, item);
+        }
+    }
+}
+
 /// Hands out a pool of items (0x4a473c, ai.md §10.1): the pack joins the pool; then, while
 /// some unit can wear some pool item with a tactical gain above 5, the largest gain (units in
 /// order, items in order, the first of equals) is worn and the item leaves the pool (the
 /// last one takes its place). The pack is then refilled with up to 12 of the rest, the
 /// dearest first; the others are lost.
-pub fn redistribute(c: &Content, troops: &mut [Troop], pack: &mut Vec<ItemId>, mut pool: Vec<ItemId>, bd: i32) {
+pub fn redistribute(c: &Content, troops: &mut [Troop], pack: &mut Vec<ItemId>, pool: Vec<ItemId>, bd: i32) {
+    let units: Vec<&mut dyn Wearer> = troops.iter_mut().map(|t| t as &mut dyn Wearer).collect();
+    hand_out(c, units, pack, pool, bd);
+}
+
+/// [`redistribute`] for a garrison: its troops, then the player's units left in it (the
+/// same record, the same gain rule and order, 0x4a473c).
+pub fn redistribute_garrison(c: &Content, troops: &mut [Troop], stationed: &mut [Stationed], pack: &mut Vec<ItemId>, pool: Vec<ItemId>, bd: i32) {
+    let units: Vec<&mut dyn Wearer> = troops
+        .iter_mut()
+        .map(|t| t as &mut dyn Wearer)
+        .chain(stationed.iter_mut().map(|s| &mut s.unit as &mut dyn Wearer))
+        .collect();
+    hand_out(c, units, pack, pool, bd);
+}
+
+fn hand_out(c: &Content, mut units: Vec<&mut dyn Wearer>, pack: &mut Vec<ItemId>, mut pool: Vec<ItemId>, bd: i32) {
     pool.append(pack);
     loop {
         let mut best: Option<(usize, usize, i32)> = None;
-        for (u, t) in troops.iter().enumerate() {
+        for (u, t) in units.iter().enumerate() {
             for (k, &item) in pool.iter().enumerate() {
-                if let Some(v) = gain_with(c, t, item, bd) {
+                if let Some(v) = t.gain_of(c, item, bd) {
                     if v > WORTH && v > best.map_or(0, |b| b.2) {
                         best = Some((u, k, v));
                     }
@@ -691,7 +743,7 @@ pub fn redistribute(c: &Content, troops: &mut [Troop], pack: &mut Vec<ItemId>, m
             }
         }
         let Some((u, k, _)) = best else { break };
-        wear(c, &mut troops[u], pool[k]);
+        units[u].wear_item(c, pool[k]);
         pool.swap_remove(k);
         if pool.is_empty() {
             break;
@@ -3212,7 +3264,9 @@ impl Game {
                     Defender::Garrison(l) => {
                         let loc = &mut self.world.locations[l];
                         let bd = loc.garrison_defence;
-                        redistribute(&c, &mut loc.garrison, &mut loc.treasure, pool, bd);
+                        // The player's units left here are in the same record (0x4a473c): they
+                        // wear the loot after the garrison's troops, by the same rule.
+                        redistribute_garrison(&c, &mut loc.garrison, &mut loc.stationed, &mut loc.treasure, pool, bd);
                     }
                 }
             }
