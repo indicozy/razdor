@@ -8,6 +8,7 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+
 - **The Evolution Mod's exe: FirstShot's value.** Its 1.2 fix (c28935) is absent, so the +60
   path at c26e9a runs; the exact initiative of FirstShot on that build is unread. Razdor keeps 1.2's
   rule (+30, +30 with building defence ≥ 10) there. Step 4 of the mod support reads it
@@ -488,6 +489,9 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Settled
 
+- **AI battle item handout with an empty pool** (2026-10-26). Razdor runs the handout
+  (0x4a473c) only when the battle left loot; so does the original: 0x4a4c68 skips both calls
+  when the pool count (0xc093e8) is 0 (0x4a53a4). Matches.
 - **A phone's window title strip with the large windows off** (report 1299, 2026-10-25). Settled
   in the follow-up commit: the event windows (normal and village, with or without a portrait)
   move their inner frame and content down by the strip's growth (`chrome::window_inner_frames_grown`,
