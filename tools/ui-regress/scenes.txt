@@ -93,3 +93,7 @@ phone-spells-portrait | spells:РК1-Начало пути | 1080x2160 |
 phone-spells-landscape | spells:РК1-Начало пути | 2160x1080 |
 phone-battle-portrait | battle:РК1-Начало пути:0 | 1080x2160 |
 phone-battle-landscape | battle:РК1-Начало пути:0 | 2160x1080 |
+phone-keyboard-hero-portrait | classes:РК1-Начало пути | 1080x2376 | RAZDOR_DP=2.75;RAZDOR_KEYBOARD=900
+phone-keyboard-hero-none-portrait | classes:РК1-Начало пути | 1080x2376 | RAZDOR_DP=2.75
+phone-keyboard-save-portrait | save:РК1-Начало пути | 1080x2376 | RAZDOR_DP=2.75;RAZDOR_KEYBOARD=900
+phone-keyboard-save-none-portrait | save:РК1-Начало пути | 1080x2376 | RAZDOR_DP=2.75
