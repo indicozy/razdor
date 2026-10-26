@@ -53,6 +53,22 @@ struct State {
     sim_off: bool,
     /// Virtual key taps (`tap_key`): queued in one frame, pressed in the next.
     taps: TapQueue,
+    /// The screen's size at the last frame (zero before the first): a change of it on a phone
+    /// is a turn of the device (`cursor_after_resize`).
+    screen_seen: (f32, f32),
+}
+
+/// The pointer after the screen's size changed (`begin_frame`): on a phone a change of size is
+/// a turn of the device, and the pointer goes to the middle of the new screen, as the player
+/// asked (a pointer left in the new edge zone or off the new screen scrolled the map by
+/// itself). Elsewhere, and while the size is unchanged, the pointer stays. Razdor's extra.
+pub fn cursor_after_resize(old: (f32, f32), new: (f32, f32), phone: bool, cursor: (f32, f32)) -> (f32, f32) {
+    let known = old.0 > 0.0 && old.1 > 0.0 && new.0 > 0.0 && new.1 > 0.0;
+    if phone && known && old != new {
+        (new.0 / 2.0, new.1 / 2.0)
+    } else {
+        cursor
+    }
 }
 
 /// Virtual key presses for the screens: a key tapped in one frame is pressed in the next, once
@@ -101,6 +117,7 @@ pub fn begin_frame() {
     let mouse = mq::mouse_position();
     let mouse_used = [MouseButton::Left, MouseButton::Right, MouseButton::Middle].into_iter().any(mq::is_mouse_button_pressed);
     let screen = (screen_width(), screen_height());
+    let phone = super::display::dp_px().is_some();
     // Out of focus the pad lets everything go: it is read even then, by its own device.
     let pad = pad.filter(|_| super::cursor::has_focus()).unwrap_or_default();
     let touchpad_on = touchpad::enabled();
@@ -118,6 +135,15 @@ pub fn begin_frame() {
             s.active = false;
         }
         s.mouse = Some(mouse);
+        // A turn of the phone: the pointer goes to the middle of the new screen (`cursor_after_resize`).
+        // It is the pad's pointer then, so the stale mouse position (a touch's, before the turn)
+        // is not the pointer, and the next touch or mouse move takes it back as usual.
+        let resized = s.screen_seen.0 > 0.0 && s.screen_seen != screen;
+        if phone && resized {
+            s.active = true;
+            s.at = cursor_after_resize(s.screen_seen, screen, phone, s.at);
+        }
+        s.screen_seen = screen;
         // The touchpad's pointer starts in the middle of the screen and stays the pointer.
         if touchpad_on && !s.touch_on {
             s.active = true;
@@ -436,6 +462,31 @@ mod tests {
             }
         }
         assert!(wrong.is_empty(), "read macroquad's input directly instead of ui::input's:\n{}", wrong.join("\n"));
+    }
+}
+
+#[cfg(test)]
+mod resize_tests {
+    use super::cursor_after_resize;
+
+    /// A turn of a phone puts the pointer in the middle of the new screen, wherever it was.
+    #[test]
+    fn a_turn_of_the_phone_puts_the_pointer_in_the_middle_of_the_new_screen() {
+        assert_eq!(cursor_after_resize((800.0, 400.0), (400.0, 800.0), true, (790.0, 395.0)), (200.0, 400.0));
+        assert_eq!(cursor_after_resize((400.0, 800.0), (800.0, 400.0), true, (2.0, 2.0)), (400.0, 200.0));
+    }
+
+    /// The desktop's window resize does not warp the mouse, and a phone's unchanged size neither.
+    #[test]
+    fn a_resize_on_the_desktop_or_no_change_keeps_the_pointer() {
+        assert_eq!(cursor_after_resize((800.0, 400.0), (400.0, 800.0), false, (790.0, 395.0)), (790.0, 395.0));
+        assert_eq!(cursor_after_resize((800.0, 400.0), (800.0, 400.0), true, (790.0, 395.0)), (790.0, 395.0));
+    }
+
+    /// The first frame has no size before it, so nothing moves.
+    #[test]
+    fn the_first_frame_keeps_the_pointer() {
+        assert_eq!(cursor_after_resize((0.0, 0.0), (400.0, 800.0), true, (10.0, 10.0)), (10.0, 10.0));
     }
 }
 

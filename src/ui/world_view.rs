@@ -3316,6 +3316,19 @@ fn draw_debug(game: &Game, cam: &Camera) {
 mod tests {
     use razdor::rules::content::HeroClass;
 
+    /// A turn of a phone (Razdor's extra): a pointer left in the new screen's edge zone scrolls
+    /// the map, the centre the turn puts it at does not (`input::cursor_after_resize`).
+    #[test]
+    fn a_turn_of_the_phone_does_not_scroll_the_map_from_the_old_pointer() {
+        use crate::ui::input::cursor_after_resize;
+        let (old, new) = ((800.0, 400.0), (400.0, 800.0));
+        // Where the pointer was on the old landscape screen: at the new portrait screen's right edge.
+        let stale = (398.0, 400.0);
+        assert_eq!(edge_dir(stale, new, EDGE), vec2(1.0, 0.0));
+        let centred = cursor_after_resize(old, new, true, (790.0, 395.0));
+        assert_eq!(edge_dir(centred, new, EDGE), Vec2::ZERO);
+    }
+
     /// A figure is drawn in its cell's turn of the map's pass (0x4c9b5b, 0x4c9dca, drawn-occupant
     /// byte cell +9): a building whose top-left footprint cell is (5, 10) covers a figure one row
     /// north of it (the castle's walls hide a hero behind them), and a figure one row south

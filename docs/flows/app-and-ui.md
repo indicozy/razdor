@@ -148,6 +148,10 @@ the held drag as above; taps, double taps and the long press are unchanged. The 
 The screen turns with the device (Android `screenOrientation = fullUser` in `Cargo.toml`,
 following the rotation lock; iOS portrait and landscape in `scripts/dist-ios.sh`'s Info.plist); a
 turn is a resize, and the interface scale fits the new width and height (`chrome::fit_k`).
+On a phone a turn also moves the pointer to the middle of the new screen (`input::cursor_after_resize`,
+run by `input::begin_frame` when the size changed; the pointer is then the pad's, so a touch or a
+mouse move takes it back). Without this a stale pointer in the new edge zone kept scrolling the map
+(report 1316, Razdor's extra). On the desktop a resize never moves the mouse.
 The orientation setting (Android only; the options window's «Ориентация экрана» row, the last one
 on Android, `Settings::orientation: Option<audio::Orientation>`, `None` = Auto): Auto keeps the
 manifest's `fullUser`, Landscape and Portrait lock the activity. `ui::android::follow_orientation`
