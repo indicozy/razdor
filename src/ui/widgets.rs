@@ -1196,6 +1196,9 @@ pub enum NameTouch {
     FieldTapped,
     /// Another save was picked from the list, which replaces the name.
     RowPicked,
+    /// The system hid the on-screen keyboard (its own arrow, Back) since the last frame
+    /// (`display::keyboard_closed_by_system`): the field stops typing.
+    Hidden,
 }
 
 /// Whether a name field that is always drawn active keeps the on-screen keyboard this frame,
@@ -1209,8 +1212,20 @@ pub fn name_keyboard(phone: bool, typing: bool, touch: NameTouch) -> bool {
     }
     match touch {
         NameTouch::FieldTapped => true,
-        NameTouch::RowPicked => false,
+        NameTouch::RowPicked | NameTouch::Hidden => false,
         NameTouch::Nothing => typing,
+    }
+}
+
+/// The phone's name-field touch this frame: a tap in the field's tap target (`tap`) wins; else
+/// the system hiding the keyboard ends the typing; else nothing.
+pub fn name_touch(tapped: bool) -> NameTouch {
+    if tapped {
+        NameTouch::FieldTapped
+    } else if super::display::keyboard_closed_by_system() {
+        NameTouch::Hidden
+    } else {
+        NameTouch::Nothing
     }
 }
 
@@ -2249,6 +2264,14 @@ mod keyboard_tests {
         assert!(!name_keyboard(true, false, NameTouch::RowPicked), "a save picked: no keyboard");
         assert!(!name_keyboard(true, true, NameTouch::RowPicked), "a pick hides a keyboard that was up");
         assert!(name_keyboard(true, true, NameTouch::Nothing), "typing goes on without a new tap");
+    }
+
+    /// The system hiding the keyboard (its arrow, Back) ends the typing; a tap after it starts again.
+    #[test]
+    fn a_keyboard_the_system_hides_ends_the_typing_until_the_next_tap() {
+        assert!(!name_keyboard(true, true, NameTouch::Hidden), "hidden by the system: not typing");
+        assert!(name_keyboard(true, false, NameTouch::FieldTapped), "a tap after it: keyboard again");
+        assert!(!name_keyboard(true, false, NameTouch::Hidden));
     }
 
     /// The tap target on a phone is 48 dp tall, grown from the field's top or bottom edge; the

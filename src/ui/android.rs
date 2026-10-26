@@ -358,7 +358,8 @@ unsafe fn density(env: *mut sys::JNIEnv) -> f32 {
 /// top, right, bottom): `getRootWindowInsets()` on the decor view, then `getInsets` with the
 /// system bars and the cutout on API 30 and later, the system window insets before that. None
 /// while the window has no insets yet (before its first layout).
-unsafe fn system_insets(env: *mut sys::JNIEnv) -> Option<[i32; 4]> {
+/// The activity window's root insets (`WindowInsets` of the decor view); None before the first layout.
+unsafe fn root_window_insets(env: *mut sys::JNIEnv) -> Option<Local> {
     let get_window = method(env, activity_class(env).obj, "getWindow", "()Landroid/view/Window;", false);
     if get_window.is_null() || cleared(env) {
         return None;
@@ -385,7 +386,56 @@ unsafe fn system_insets(env: *mut sys::JNIEnv) -> Option<[i32; 4]> {
     if insets.obj.is_null() || cleared(env) {
         return None;
     }
+    Some(insets)
+}
+
+/// `WindowInsets.getInsets(type)` as a rect (left, top, right, bottom) in physical px; API 30+.
+unsafe fn insets_of_type(env: *mut sys::JNIEnv, insets: &Local, type_mask: i32) -> Option<[i32; 4]> {
     let insets_cls = Local::new(env, ((**env).GetObjectClass.unwrap())(env, insets.obj));
+    let get_insets = method(env, insets_cls.obj, "getInsets", "(I)Landroid/graphics/Insets;", false);
+    if get_insets.is_null() || cleared(env) {
+        return None;
+    }
+    let rect = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, insets.obj, get_insets, type_mask));
+    if rect.obj.is_null() || cleared(env) {
+        return None;
+    }
+    let rect_cls = Local::new(env, ((**env).GetObjectClass.unwrap())(env, rect.obj));
+    let field = |name: &str| -> i32 {
+        let name = CString::new(name).unwrap();
+        let sig = CString::new("I").unwrap();
+        let id = ((**env).GetFieldID.unwrap())(env, rect_cls.obj, name.as_ptr(), sig.as_ptr());
+        if id.is_null() || cleared(env) {
+            return 0;
+        }
+        ((**env).GetIntField.unwrap())(env, rect.obj, id)
+    };
+    Some([field("left"), field("top"), field("right"), field("bottom")])
+}
+
+/// The on-screen keyboard's height in physical px, from the bottom edge: the IME inset
+/// (`WindowInsets.Type.ime()`, API 30+; 0 before that, where the keyboard is not measured, so
+/// the windows do not move). 0 while it is hidden. None before the window's first layout.
+pub fn read_keyboard_inset() -> Option<f32> {
+    // SAFETY: as in `read_safe_insets`; every reference made below is local and freed by `Local`.
+    unsafe {
+        let env = attach_jni_env();
+        let insets = root_window_insets(env)?;
+        if sdk_int(env) < 30 {
+            return Some(0.0);
+        }
+        let type_cls = class(env, "android/view/WindowInsets$Type");
+        let ime_m = method(env, type_cls.obj, "ime", "()I", true);
+        if ime_m.is_null() || cleared(env) {
+            return Some(0.0);
+        }
+        let ime = ((**env).CallStaticIntMethod.unwrap())(env, type_cls.obj, ime_m);
+        Some(insets_of_type(env, &insets, ime).map_or(0.0, |[_, _, _, bottom]| bottom.max(0) as f32))
+    }
+}
+
+unsafe fn system_insets(env: *mut sys::JNIEnv) -> Option<[i32; 4]> {
+    let insets = root_window_insets(env)?;
     if sdk_int(env) >= 30 {
         let type_cls = class(env, "android/view/WindowInsets$Type");
         let bars_m = method(env, type_cls.obj, "systemBars", "()I", true);
@@ -395,26 +445,9 @@ unsafe fn system_insets(env: *mut sys::JNIEnv) -> Option<[i32; 4]> {
         }
         let bars = ((**env).CallStaticIntMethod.unwrap())(env, type_cls.obj, bars_m);
         let cutout = ((**env).CallStaticIntMethod.unwrap())(env, type_cls.obj, cutout_m);
-        let get_insets = method(env, insets_cls.obj, "getInsets", "(I)Landroid/graphics/Insets;", false);
-        if get_insets.is_null() || cleared(env) {
-            return None;
-        }
-        let rect = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, insets.obj, get_insets, bars | cutout));
-        if rect.obj.is_null() || cleared(env) {
-            return None;
-        }
-        let rect_cls = Local::new(env, ((**env).GetObjectClass.unwrap())(env, rect.obj));
-        let field = |name: &str| -> i32 {
-            let name = CString::new(name).unwrap();
-            let sig = CString::new("I").unwrap();
-            let id = ((**env).GetFieldID.unwrap())(env, rect_cls.obj, name.as_ptr(), sig.as_ptr());
-            if id.is_null() || cleared(env) {
-                return 0;
-            }
-            ((**env).GetIntField.unwrap())(env, rect.obj, id)
-        };
-        Some([field("left"), field("top"), field("right"), field("bottom")])
+        insets_of_type(env, &insets, bars | cutout)
     } else {
+        let insets_cls = Local::new(env, ((**env).GetObjectClass.unwrap())(env, insets.obj));
         let int_of = |name: &str| -> i32 {
             let m = method(env, insets_cls.obj, name, "()I", false);
             if m.is_null() || cleared(env) {

@@ -387,6 +387,39 @@ pub fn safe_area() -> SafeArea {
     SafeArea { left: v(0), top: v(1), right: v(2), bottom: v(3), corner_bl: v(4), corner_br: v(5) }
 }
 
+/// The on-screen keyboard's height in physical px, from the bottom edge (the IME inset; 0 while
+/// it is hidden, on the desktop, and on iOS, which has no reading here yet).
+static KEYBOARD: AtomicU32 = AtomicU32::new(0);
+/// Whether the keyboard was hidden by the system (its own arrow, Back) since the last reading:
+/// set by [`set_keyboard_inset`], read by the name fields ([`keyboard_closed_by_system`]).
+static KEYBOARD_CLOSED: AtomicBool = AtomicBool::new(false);
+
+/// The on-screen keyboard's height in physical px (0 when hidden).
+pub fn keyboard_inset() -> f32 {
+    f32::from_bits(KEYBOARD.load(Ordering::Relaxed))
+}
+
+/// Stores the keyboard's height as read this frame, and whether the system hid it since the
+/// last reading ([`hidden_by_system`]).
+#[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
+pub fn set_keyboard_inset(px: f32) {
+    let px = if px.is_finite() && px > 0.0 { px } else { 0.0 };
+    let was = keyboard_inset();
+    KEYBOARD_CLOSED.store(hidden_by_system(was, px), Ordering::Relaxed);
+    KEYBOARD.store(px.to_bits(), Ordering::Relaxed);
+}
+
+/// The keyboard went from up to down since the last reading (this frame's name fields stop typing).
+pub fn keyboard_closed_by_system() -> bool {
+    KEYBOARD_CLOSED.load(Ordering::Relaxed)
+}
+
+/// The keyboard was up (`was` > 0) and is down now (`now` 0): the system hid it, the player's
+/// own arrow or Back, since our own hiding never leaves a field typing.
+pub fn hidden_by_system(was: f32, now: f32) -> bool {
+    was > 0.0 && now <= 0.0
+}
+
 /// Reads the system's dp once, on the first frame of the app (phones only).
 fn read_dp_once() {
     if !DP_READ.swap(true, Ordering::Relaxed) {
@@ -598,6 +631,8 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
         set_large_windows(std::env::var("RAZDOR_LARGE_WINDOWS").is_ok_and(|v| v.trim() == "1"));
         // `RAZDOR_DP=<f32>`: a phone's density (screen px per dp), the phone layout on the desktop.
         set_dp_px(std::env::var("RAZDOR_DP").ok().and_then(|s| s.trim().parse::<f32>().ok()));
+        // `RAZDOR_KEYBOARD=<px>`: the on-screen keyboard's height (physical px), as the phone reads it.
+        set_keyboard_inset(std::env::var("RAZDOR_KEYBOARD").ok().and_then(|s| s.trim().parse::<f32>().ok()).unwrap_or(0.0));
         return;
     }
     read_dp_once();
@@ -1568,6 +1603,14 @@ mod tests {
         assert_eq!(next_text_size(1.25), 1.5);
         assert_eq!(next_text_size(1.5), 1.0);
         assert!(TEXT_SIZES.contains(&next_text_size(0.7)));
+    }
+
+    #[test]
+    fn the_keyboard_counts_as_hidden_by_the_system_only_when_it_goes_from_up_to_down() {
+        assert!(hidden_by_system(900.0, 0.0), "up, then down: the system hid it");
+        assert!(!hidden_by_system(900.0, 900.0), "still up");
+        assert!(!hidden_by_system(0.0, 0.0), "down all along");
+        assert!(!hidden_by_system(0.0, 900.0), "coming up is not hiding");
     }
 
     #[test]

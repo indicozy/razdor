@@ -246,6 +246,30 @@ pub fn title_bottom() -> f32 {
     }
 }
 
+/// How far (up to 0 px) a window moves so that it sits above the on-screen keyboard: its bottom
+/// goes up to the keyboard's top edge (`screen_h` - `keyboard`, physical px), never above `top`
+/// (the safe area's top). A window taller than the space left (`top` to the keyboard's edge)
+/// moves so that its field `field` is at the top, which keeps the field in sight (the confirm
+/// buttons may be under the keyboard then). No keyboard, or a window already above it: 0.
+pub fn keyboard_lift(win: Rect, field: Rect, screen_h: f32, keyboard: f32, top: f32) -> f32 {
+    if keyboard <= 0.0 {
+        return 0.0;
+    }
+    let limit = screen_h - keyboard;
+    if win.bottom() <= limit {
+        return 0.0;
+    }
+    let dy = if win.h <= limit - top { (limit - win.bottom()).max(top - win.y) } else { top - field.y };
+    dy.min(0.0)
+}
+
+/// `win` moved by [`keyboard_lift`] for the keyboard the phone reports now (`display::keyboard_inset`),
+/// with `field` the window's name field at its unmoved place. Desktop and a hidden keyboard: `win`.
+pub fn keyboard_lifted(win: Rect, field: Rect) -> Rect {
+    let dy = keyboard_lift(win, field, screen_height(), super::display::keyboard_inset(), super::display::safe_area().top);
+    Rect::new(win.x, win.y + dy, win.w, win.h)
+}
+
 /// The window's rectangle: the building and army windows' size at the interface scale (the
 /// stacked one when the phone is held upright), centred over the view above the bottom bar.
 pub fn window() -> Rect {
@@ -393,6 +417,49 @@ pub fn army_grid_left(panel: Rect, columns: u8, pitch: f32, trailing: f32) -> f3
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A 1080x2376 phone with a 900 px keyboard: the keyboard's top edge is at 1476 px.
+    const SCREEN_H: f32 = 2376.0;
+    const KB: f32 = 900.0;
+
+    #[test]
+    fn a_window_that_fits_above_the_keyboard_moves_up_until_its_bottom_meets_it() {
+        // Bottom at 1500 px, 24 px under the keyboard's top: it moves up 24 px and fits.
+        let w = Rect::new(100.0, 900.0, 800.0, 600.0);
+        let field = Rect::new(300.0, 1000.0, 400.0, 60.0);
+        let dy = keyboard_lift(w, field, SCREEN_H, KB, 0.0);
+        assert_eq!(dy, -24.0);
+        assert_eq!(w.bottom() + dy, SCREEN_H - KB);
+    }
+
+    #[test]
+    fn a_window_above_the_keyboard_or_with_no_keyboard_does_not_move() {
+        let w = Rect::new(100.0, 300.0, 800.0, 600.0); // bottom 900: above 1476
+        let field = Rect::new(300.0, 400.0, 400.0, 60.0);
+        assert_eq!(keyboard_lift(w, field, SCREEN_H, KB, 0.0), 0.0);
+        let low = Rect::new(100.0, 1200.0, 800.0, 600.0);
+        assert_eq!(keyboard_lift(low, field, SCREEN_H, 0.0, 0.0), 0.0, "no keyboard: no move");
+    }
+
+    #[test]
+    fn a_window_taller_than_the_space_puts_its_field_at_the_top() {
+        // 1500 px tall; the space above the keyboard below the safe top (100) is 1376 px, so the
+        // field (y 900) goes to the top and the window moves with it.
+        let w = Rect::new(100.0, 700.0, 800.0, 1500.0);
+        let field = Rect::new(300.0, 900.0, 400.0, 60.0);
+        let dy = keyboard_lift(w, field, SCREEN_H, KB, 100.0);
+        assert_eq!(dy, -800.0);
+        assert_eq!(field.y + dy, 100.0);
+    }
+
+    #[test]
+    fn a_window_that_fits_never_goes_above_the_safe_top() {
+        // Bottom 2000, the space under the safe top (200) to the keyboard is 1276 px: 1000 px fits.
+        let w = Rect::new(100.0, 1000.0, 800.0, 1000.0);
+        let dy = keyboard_lift(w, w, SCREEN_H, KB, 200.0);
+        assert_eq!(dy, -524.0);
+        assert!(w.y + dy >= 200.0);
+    }
 
     fn win() -> Rect { Rect::new(10.0, 20.0, 836.0, 600.0) }
 

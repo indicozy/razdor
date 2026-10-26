@@ -163,7 +163,15 @@ The on-screen keyboard follows the text fields: `edit_line` / `edit_rows` drawn 
 (`edit_line_kb` with `keyboard` false draws without asking). The save window's name and the new
 hero's name are always active, so on a phone they ask only after a tap in the field
 (`widgets::name_keyboard` decides, `widgets::tap_rect` is the 48 dp tap target; desktop always
-asks); a window's opening does not show the keyboard. Then `widgets::sync_keyboard` (once a frame, before `next_frame`) shows or hides it with miniquad's
+asks); a window's opening does not show the keyboard. While the keyboard is up, the window that holds
+the name field moves above it (`window_layout::keyboard_lifted`, the hero and save windows): the height
+is `display::keyboard_inset`, the IME inset (`WindowInsets.Type.ime()`, API 30+) that
+`mobile::refresh_keyboard_inset` reads every frame on Android; it is 0 on desktop and iOS (no reading
+there yet: the window stays put). A window whose bottom is under the keyboard moves up to its top edge
+(never above the safe area); a window taller than the space left moves so its field is at the top.
+A keyboard the system hides (its own arrow, Back: the inset drops from above 0 to 0,
+`display::keyboard_closed_by_system`) ends the field's typing (`NameTouch::Hidden`), so the strip goes and the
+window returns. Then `widgets::sync_keyboard` (once a frame, before `next_frame`) shows or hides it with miniquad's
 `show_keyboard`. miniquad's `MainActivity` swallows every key, so `quad.toml` at the repo root
 injects `android/MainActivityInject.java`: the volume keys change the media volume there, and on
 API 30+ its `RESIZING_LAYOUT_ON_APPLY_WINDOW_INSETS` section pads by the system bars only, so the

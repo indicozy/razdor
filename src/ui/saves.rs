@@ -364,6 +364,8 @@ impl Book {
         // and the footer (`window_layout::title_rect`); the old placement, at the video's y 190,
         // is above the logo there.
         let win = (!over_map).then(|| super::window_layout::title_rect((Book::W, Book::H))).flatten().unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, y, w, h));
+        // Above the on-screen keyboard while its name field is typed in (`window_layout::keyboard_lifted`).
+        let win = super::window_layout::keyboard_lifted(win, Book { win, k }.row_rect(0));
         let (_, closed) = super::chrome::window(win, title, super::chrome::Skin::Marble, true);
         // The 634×516 window with its inner frames (ae2520, 0x48d710 from 4dc10e).
         super::chrome::window_inner_frames(win, super::chrome::opx());
@@ -662,8 +664,7 @@ pub fn save_screen(game: &Game, assets: &Assets, view: &mut SaveView, message: &
     let touch = match picked {
         Some(0) => super::widgets::NameTouch::FieldTapped,
         Some(_) => super::widgets::NameTouch::RowPicked,
-        None if view.scroll == 0 && super::widgets::tapped_in(field) => super::widgets::NameTouch::FieldTapped,
-        None => super::widgets::NameTouch::Nothing,
+        None => super::widgets::name_touch(view.scroll == 0 && super::widgets::tapped_in(field)),
     };
     view.typing = super::widgets::name_keyboard(super::display::dp_px().is_some(), view.typing, touch);
     ask_keyboard(&view.name, view.edit, input_blocked(), view.typing);

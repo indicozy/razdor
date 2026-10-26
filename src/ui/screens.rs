@@ -45,7 +45,7 @@ pub(super) fn hero_name_field(r: Rect, y: f32, look: LineLook) -> String {
     // A phone asks for the keyboard only after a tap in the field (its tap target, 48 dp tall
     // and grown down into the paper below): opening the window does not pop it up.
     let tap = tap_rect(r, false);
-    let touch = if tapped_in(tap) { NameTouch::FieldTapped } else { NameTouch::Nothing };
+    let touch = name_touch(tapped_in(tap));
     let typing = name_keyboard(super::display::dp_px().is_some(), HERO_TYPING.with(|t| t.get()), touch);
     HERO_TYPING.with(|t| t.set(typing));
     HERO_NAME.with(|n| {

@@ -8,6 +8,12 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **iOS: the windows do not move above the on-screen keyboard** (2026-10-26, Razdor extra, not
+  parity). `display::keyboard_inset` is 0 on iOS, so the hero and save windows stay under the
+  keyboard there. Settles it: a reading of the keyboard's frame on iOS (UIKit's keyboard
+  notifications or `keyboardLayoutGuide` through miniquad's view), stored with `set_keyboard_inset`
+  like Android's IME inset (`ui::android::read_keyboard_inset`).
+
 - **AI ships move about twice as fast as the original's (report 1082, 2026-10-23).** A diff
   test on РК1 (knight, the opening read, 48 one-hour waits, `tools/difftest`) has the sea
   pirates (army 9) sail 4 cells in the first hour in the original and 7 in Razdor, 6 against 12

@@ -948,6 +948,9 @@ pub fn class_select(game: &mut Option<Game>, demo: &Arc<Content>, scenario: Opti
     let _scale = super::window_layout::title_scale((632.0, 516.0));
     let scale = chrome::k();
     let r = super::window_layout::title_rect((632.0, 516.0)).unwrap_or_else(|| Rect::new((screen_width() - 632.0 * scale) / 2.0, (super::chrome::canvas_top() + 202.0 * scale).min(screen_height() - 516.0 * scale), 632.0 * scale, 516.0 * scale));
+    // Above the on-screen keyboard while the name is typed in: the name field's row (y 207 in
+    // video px, the same for every hero) is the one `window_layout::keyboard_lifted` keeps in sight.
+    let r = super::window_layout::keyboard_lifted(r, Win { r, k: scale }.rect(38.0, 207.0, 160.0, 22.0));
     let title = own("NewHero", "Title", n_("The hero's starting characteristics"));
     let (_, closed) = chrome::window(r, &title, chrome::Skin::Marble, true);
     let win = Win { r, k: scale };

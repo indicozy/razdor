@@ -88,6 +88,16 @@ pub fn refresh_safe_insets() {
     }
 }
 
+/// Reads the on-screen keyboard's height every frame (Android; iOS has no reading, so it stays
+/// 0): the windows of a name field move above it (`window_layout::keyboard_lifted`), and a
+/// keyboard the system hid since the last frame ends the field's typing (`display::keyboard_closed_by_system`).
+#[cfg(target_os = "android")]
+pub fn refresh_keyboard_inset() {
+    if let Some(px) = super::android::read_keyboard_inset() {
+        super::display::set_keyboard_inset(px);
+    }
+}
+
 /// Whether Razdor may read the install's folder: Android's storage access; iOS has no
 /// permission (the app's own Documents folder), so it is always granted there.
 pub fn storage_granted() -> bool {

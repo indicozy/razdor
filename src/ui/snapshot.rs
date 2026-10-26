@@ -27,6 +27,8 @@
 //! pop-up message windows on (the original's size and off otherwise; the saved settings are ignored).
 //! `RAZDOR_DP=<f32>` is a phone's density (screen px per dp): the phone layout of the pop-ups and
 //! the event window (their size in dp, the window's width following the screen), on the desktop.
+//! `RAZDOR_KEYBOARD=<px>` is the on-screen keyboard's height (physical px) a phone reports: the
+//! windows with a name field (`classes:<map>`, `save:<map>`) move above it.
 //!
 //! Every map scene starts its map as a new game (`Game::from_scenario`): nothing is carried
 //! over from a campaign's map before, so a later map whose opening events check for what it
