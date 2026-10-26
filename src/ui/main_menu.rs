@@ -1744,10 +1744,6 @@ mod tests {
         }
     }
 
-    /// The advanced window's right column in units of k: the inner height of the 650-high window
-    /// (its 29 px strip and frame off), the Ok button's top 48 px above the bottom, four lines of
-    /// the battle AI hint and four of the language's. The pitch keeps the column above the Ok
-    /// button, and the original's 44 px when the window has the room.
     #[test]
     fn the_touchpad_mode_takes_effect_on_apply_not_when_ticked() {
         // Window open: the value it opened with, whatever the box says now.
@@ -1760,6 +1756,10 @@ mod tests {
         assert_eq!(touchpad_in_effect(None, None), None);
     }
 
+    /// The advanced window's right column in units of k: the inner height of the 650-high window
+    /// (its 29 px strip and frame off), the Ok button's top 48 px above the bottom, four lines of
+    /// the battle AI hint and four of the language's. The pitch keeps the column above the Ok
+    /// button, and the original's 44 px when the window has the room.
     #[test]
     fn advanced_right_column_fits_above_ok() {
         let (top, inner_h, ok_top) = (30.0, 650.0 - 29.0, 650.0 - 29.0 - 48.0);
