@@ -18,6 +18,16 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   notifications or `keyboardLayoutGuide` through miniquad's view), stored with `set_keyboard_inset`
   like Android's IME inset (`ui::android::read_keyboard_inset`).
 
+- **Evolution Mod: the mana payment and the options window's layout** (2026-10-26). Razdor
+  loads the mod's data without a warning and starts a game on each of its 15 maps
+  (`evolution-mod.md` §3a); two things are not done. (1) The mod's mana payment for
+  `Nature=Elemental` units (buying, healing, resurrection, daily pay) and its event
+  extensions: their code is not located in the mod's executable. (2) The mod's four-row options
+  window: its row offsets and height are unread, so Razdor keeps the 1.2 checkbox positions
+  and leaves a free row where the battle-animation slider was. Settles it: a Ghidra pass on the
+  mod's `DiscordTimes.exe` (the Ghidra project holds only 1.2's) for the mana code and the
+  options window's layout, then the same tests and an options snapshot of the mod.
+
 - **AI ships move about twice as fast as the original's (report 1082, 2026-10-23).** A diff
   test on РК1 (knight, the opening read, 48 one-hour waits, `tools/difftest`) has the sea
   pirates (army 9) sail 4 cells in the first hour in the original and 7 in Razdor, 6 against 12

@@ -64,13 +64,44 @@ in the executable), **data** (read in the ini files), **unknown**.
 | `_Global.ini` | no `MinSpellLife`, `MinSpellElemental`, `MinSpellDeath`; `BattleEndTurn` 20 (1.2: 25); `ShotWeaponRange` 80 (1.2: 60); the army composition lists name the new unit ids | **data** |
 | `Rus_Units.ini` | 161 unit types (1.2: 102); no unit uses `ManaDrain`/`MinMagicPower` | **data** |
 | `Rus_Artefacts.ini` | 192 items (1.2: 167) | **data** |
-| `Rus_Spells.ini` | 42 sections (1.2: 2) and a key `DeltaPercentHits` 1.2 does not have: a different layout, to read | **data** |
+| `Rus_Spells.ini` | 40 spells (1.2: 33), then the empty editor template and `[MapEditorSpecialOptions]`, as in 1.2 (42 sections in all, 1.2: 35). The key `DeltaPercentHits` (9 spells) is read beside `DeltaFixedHits` (3 spells; 1.2 has 8). Same layout, more spells. | **data**; the reader is the same (below) |
 | `Rus_DiscordTimes.ini` | no `Bonus22`…`Bonus52` names, no `SBleed`, `AnimationSpeed`, `OptionSld…`; has `Option0`…`Option3` | **data** |
 | Mod mechanics from its changelog | mana payment for `Nature=Elemental` units (buying, healing, resurrection, daily pay); events that change events, alliances and army speed; equipment/spells/named units set per army and building; XP grants; spell checks on armies | **data**; the code is **unknown** (not yet located) |
+
+### 3a. How the original loads the mod's data (code, 1.2's executable)
+
+The loaders are the same code in both builds (the `.mod` patch section is identical), and the
+mod's data loads with them without a warning in Razdor:
+
+- **Spells** (0x4e36cc opens the files; the per-spell reader 0x49ac64): each `[section]` is read
+  for `CostGold`, `CostMana`, `Type`, `TimeWork`, `TimeCast`, `Target`, the icons and effects,
+  then `DeltaFixedHits` (0x49b328, stored at +0x284) and `DeltaPercentHits` (0x49b340, +0x288).
+  Both keys are read in both builds; Razdor keeps them in separate fields
+  (`SpellDef::delta_fixed_hits`, `delta_percent_hits`). A section is a spell when `Name`, `Type`
+  and `CostGold` are all non-empty (0x4e0c60). The trailing empty `[Заклинание]` template is not
+  one. **Confirmed**: the layout is not a loader difference; the mod has 40 spells (1.2: 33).
+- **Units, items**: the counts only differ (161, 192). Every upgrade target and every army
+  composition id resolves; the mod's units and items use only the 21 vanilla bonus tokens
+  (`Bonus=`), so no token is unknown to the mod's loader.
+- **Texts** (`Rus_DiscordTimes.ini`, read through 0x472440): a key the file lacks reads as an
+  empty string, the original's default for every text. The bonus names are looked up as
+  `Bonus` plus the decimal index (0x4e36cc, the loop at 0x4e3dd7, the number built by 0x471c94),
+  so the mod's missing `Bonus22`…`Bonus52` read empty. The mod's option rows are `Option0`…
+  `Option3` (**inferred**: its exe holds the literal `Option` and no `OptionSld`, so the key is
+  built from `Option` and the row number, not yet read in its code); 1.2's are `OptionSld0`…
+  `OptionSld4`.
+- **Maps** (`Maps_Rus`, 15): every map parses, and every unit, item and event id it names is
+  in the mod's content (`rules::map_refs`); each starts a game (`rules::replay`).
+
+Razdor's loader changes for the mod: the options window reads the mod's row labels and draws
+four sliders (no battle-animation row) when the install has `Option0` and no `OptionSld0`
+(`ui/main_menu.rs`). A Community install is unchanged.
 
 ## 4. Open
 
 - FirstShot's value in this build (c26e9a path), the magic on-hit block's absence in practice, and
   what the mod's new event features do in code.
-- Whether `Rus_Spells.ini`'s layout and the mana payment need loader changes in Razdor.
+- The mana payment (mod changelog) and the options window's exact 4-row layout in the mod
+  (its row offsets and window height are unread; Razdor keeps the 1.2 positions of the
+  checkboxes, leaving one row free). `Rus_Spells.ini` needs no loader change (§3a).
 - Everything above is from the executable and data alone; no replay of the build under Wine yet.

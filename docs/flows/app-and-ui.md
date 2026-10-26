@@ -39,6 +39,12 @@ Install lookup order (`src/dt/install.rs` `locate_with`): `RAZDOR_DT_DIR`, the p
 folder when it is an install, the remembered folder (`config_file`), then a search under
 `search_roots`. Without an install Razdor runs the built-in demo.
 
+Other builds of the game: the Community Update Evolution Mod (`docs/reference/original-mechanics/evolution-mod.md`)
+loads with the same readers (`DtInstall::load`); its data differs in counts only, and its
+four option rows are `Option0`…`Option3`, not `OptionSld0`…`OptionSld4`, with no battle-animation
+row (`ui/main_menu.rs` `options_window`). Its tests run with `RAZDOR_EVO_DIR`
+(`dt::install::evolution_mod`).
+
 ## Android and iOS (experimental)
 
 iOS mirrors Android, with no permission. `scripts/dist-ios.sh` (on a Mac; the `ios` job of
