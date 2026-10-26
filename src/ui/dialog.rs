@@ -546,6 +546,44 @@ fn text_fit_width(widest: f32, o: f32, side_w: f32, max_w: f32) -> f32 {
     want.max(EVENT_TEXT_MIN_W + EVENT_SIDES + side_w).min(max_w)
 }
 
+/// The width a window needs for its widest caption, in original px at the scale `o`: the caption
+/// is centred over the window, so it takes the frame's side margins ([`EVENT_SIDES`]) as the
+/// text does. A player's report: «Присоединившиеся персонажи:» ran past the frame of a phone's
+/// narrow large window.
+fn caption_fit_width(widest_caption: f32, o: f32) -> f32 {
+    widest_caption / o + EVENT_SIDES
+}
+
+/// The widest of the captions shown in `d` (the icon rows' and the notice line), in screen px,
+/// in their face and at the text size `size`.
+fn widest_caption(d: &Dialog, size: f32) -> f32 {
+    let mut captions: Vec<String> = Vec::new();
+    if !d.spells.is_empty() {
+        captions.push(caption_text("NewSpell", "New spells learnt:"));
+    }
+    if !d.left.is_empty() {
+        captions.push(caption_text("DelUnit", "Characters departed:"));
+    }
+    if !d.joined.is_empty() {
+        captions.push(caption_text("AddUnit", "Characters joined:"));
+    }
+    if !d.lost.is_empty() {
+        captions.push(caption_text("DelItem", "Items lost:"));
+    }
+    if !d.items.is_empty() {
+        captions.push(caption_text("AddItem", "Items received:"));
+    }
+    captions.extend(d.notice.clone());
+    super::dt_font::with_original_face(super::dt_font::Face::Subtitle, || {
+        captions.iter().map(|c| measure(c, size).width).fold(0.0, f32::max)
+    })
+}
+
+/// A caption's text: the Russian catalog's `[Event]` line in Russian, else the English `ours`.
+fn caption_text(key: &str, ours: &'static str) -> String {
+    chrome::ui_text("Event", key).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr(ours).to_string())
+}
+
 /// The widest of a laid-out text's rows, in screen px.
 fn widest_text(lay: &EventLayout) -> f32 {
     let lines = lay.lines.iter().map(|l| measure(l, lay.size).width);
@@ -649,6 +687,9 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         let probe = event_layout(d, o, t, max_w);
         let side_w = probe.side.map_or(0.0, |(pw, _)| pw + 14.0);
         let width = text_fit_width(widest_text(&probe), o, side_w, max_w);
+        // The captions centred over the window must fit its frame too (never past the cap).
+        let size = super::dt_font::sheet_size(super::dt_font::Face::Subtitle, t);
+        let width = width.max(caption_fit_width(widest_caption(d, size), o)).min(max_w);
         event_layout(d, o, t, width)
     } else {
         event_layout(d, o, t, EVENT_W)
@@ -726,7 +767,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     // the window and its icons spread by their count, centre i at W·(i+1)/(n+1).
     let spread = |n: usize, i: usize| x + w * (i + 1) as f32 / (n + 1) as f32;
     let caption = |key: &str, ours: &'static str, cy: f32| {
-        let t = chrome::ui_text("Event", key).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr(ours).to_string());
+        let t = caption_text(key, ours);
         super::dt_font::with_original_face(super::dt_font::Face::Subtitle, || chrome::shadow_centered(&t, x + w / 2.0, cy + 18.0 * o, size, CAPTION));
     };
     let mut icons: Vec<(bool, u32, Rect)> = Vec::new();
@@ -1085,6 +1126,32 @@ mod tests {
         let widest = 600.0;
         let w = text_fit_width(widest, o, 0.0, 860.0);
         assert!((w - EVENT_SIDES - widest / o).abs() <= 1.0 + 1e-4, "{w}");
+    }
+
+    /// The minimum width for the captions: the widest caption plus the frame's side margins, in
+    /// original px (a player's report: «Присоединившиеся персонажи:» ran past the window's frame).
+    #[test]
+    fn a_window_is_as_wide_as_its_widest_caption_needs() {
+        // A 300 px caption at 2 px per original px: 150 original px of text and the frame's 78.
+        assert_eq!(caption_fit_width(300.0, 2.0), 150.0 + EVENT_SIDES);
+        // A caption on the desktop's 1 px scale is taken as it is, in original px.
+        assert_eq!(caption_fit_width(400.0, 1.0), 400.0 + EVENT_SIDES);
+        // The width it gives is what the text-width rule takes at most: the cap holds.
+        let w = text_fit_width(0.0, 2.0, 0.0, 860.0).max(caption_fit_width(5000.0, 2.0)).min(860.0);
+        assert_eq!(w, 860.0, "a caption as wide as the screen takes the cap");
+    }
+
+    /// The desktop's event window stays the original's 634 px wide: its width cap is `EVENT_W`
+    /// on any screen the desktop can have, so the caption minimum never widens it past that.
+    #[test]
+    fn the_desktop_event_window_is_634_wide() {
+        for o in [1.0_f32, 1.5, 2.0] {
+            assert_eq!(event_width(o, 1920.0, false), EVENT_W, "scale {o}");
+            assert_eq!(event_width(o, 1280.0, false), EVENT_W.min((1280.0 - 12.0) / o), "scale {o}");
+        }
+        assert_eq!(EVENT_W, 634.0);
+        // The phone's cap is no wider than the desktop's rule allows (the caption rule is capped).
+        assert!(event_width(2.0, 2400.0, true) <= EVENT_MAX_W);
     }
 
     /// The title strip grows with the phone's text, and the event window's inner frame and
