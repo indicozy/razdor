@@ -1644,7 +1644,8 @@ impl Game {
                 self.talk_to = None;
                 // The original engages any army stepped onto (world.md §4.2); Razdor's option
                 // lets a friend pass instead.
-                let engage = self.world.armies[i].attitude <= 0 || (!self.friends_let_pass && (deliberate || !self.avoid_armies));
+                // The option skips only the accidental step: the army clicked is still fought.
+                let engage = self.world.armies[i].attitude <= 0 || deliberate || (!self.friends_let_pass && !self.avoid_armies);
                 let e = if engage { Event::Encounter(i) } else { Event::Met(i) };
                 if let Event::Encounter(i) = e {
                     self.foe = Some(Foe::Army(i));
@@ -4298,11 +4299,18 @@ mod tests {
         assert!(g.set_destination((5, 2)));
         let events = walk_until_stopped(&mut g);
         assert_eq!((events.last(), g.tile(), g.foe), (Some(&Event::Encounter(0)), (4, 2), Some(Foe::Army(0))), "a friend too, as the original");
+        // The option: a friend he steps onto by chance (his route goes past it) lets him pass.
+        let mut g = with_walker(2, (5, 2), vec![]);
+        g.friends_let_pass = true;
+        assert!(g.set_destination((6, 2)));
+        let events = walk_until_stopped(&mut g);
+        assert_eq!((events.last(), g.tile(), g.foe), (Some(&Event::Met(0)), (4, 2), None), "the option: a friend lets him pass");
+        // The same friend clicked is still fought under the option.
         let mut g = with_walker(2, (5, 2), vec![]);
         g.friends_let_pass = true;
         assert!(g.set_destination((5, 2)));
         let events = walk_until_stopped(&mut g);
-        assert_eq!((events.last(), g.tile(), g.foe), (Some(&Event::Met(0)), (4, 2), None), "the option: a friend lets him pass");
+        assert_eq!((events.last(), g.tile(), g.foe), (Some(&Event::Encounter(0)), (4, 2), Some(Foe::Army(0))), "the clicked friend is fought");
     }
 
     #[test]
@@ -4429,7 +4437,7 @@ mod tests {
         g.world.armies[0].speed = 10;
         assert!(g.set_destination((8, 2)));
         let events = walk_until_stopped(&mut g);
-        assert!(events.contains(&Event::Met(0)), "met where it went: {events:?}");
+        assert!(events.contains(&Event::Encounter(0)), "fought where it went, as clicked: {events:?}");
         let at = g.world.armies[0].tile(&g.world.map);
         assert!(at.0 > 8 && g.tile() == (at.0 - 1, 2), "next to it: {:?} {at:?}", g.tile());
         // Moved by other means (not a step of its own), it is not followed: he walks to the
@@ -4467,19 +4475,28 @@ mod tests {
     }
 
     #[test]
-    fn clicking_a_friendly_army_meets_it_again() {
-        // The help: "click it to talk or fight": stepping onto it engages it, whatever its
-        // talk counter (with Razdor's option on, a friend is met each time).
+    fn clicking_a_friendly_army_under_the_option_fights_it() {
+        // The option skips only the accidental step: the friend he walks to on purpose is
+        // engaged (world.md §4.2), whatever its talk counter, as it is without the option.
         let mut g = with_walker(1, (10, 2), vec![]);
         g.friends_let_pass = true;
-        for _ in 0..2 {
-            let at = g.world.armies[0].tile(&g.world.map);
-            assert!(g.set_destination(at));
-            let events = walk_until_stopped(&mut g);
-            assert!(events.contains(&Event::Met(0)), "{events:?}");
-            assert_eq!((g.foe, g.tile()), (None, (9, 2)));
-            g.pos = g.world.map.center((4, 2));
-        }
+        let at = g.world.armies[0].tile(&g.world.map);
+        assert!(g.set_destination(at));
+        let events = walk_until_stopped(&mut g);
+        assert!(events.contains(&Event::Encounter(0)), "{events:?}");
+        assert_eq!((g.foe, g.tile()), (Some(Foe::Army(0)), (9, 2)));
+    }
+
+    #[test]
+    fn an_unclicked_friendly_army_passes_the_hero_under_the_option() {
+        // A friend on his route, not clicked: it is met, not fought, and no battle opens.
+        let mut g = with_walker(1, (10, 2), vec![]);
+        g.friends_let_pass = true;
+        assert!(g.set_destination((11, 2)));
+        let events = walk_until_stopped(&mut g);
+        assert!(events.contains(&Event::Met(0)), "{events:?}");
+        assert!(!events.iter().any(|e| matches!(e, Event::Encounter(_))), "{events:?}");
+        assert_eq!((g.foe, g.tile()), (None, (9, 2)));
     }
 
     #[test]

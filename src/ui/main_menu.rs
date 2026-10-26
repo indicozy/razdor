@@ -1135,7 +1135,7 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     if row_button(br, label) {
         audio.friends_let_pass = !audio.friends_let_pass;
     }
-    let hint = tr("With no event of the map for the meeting, the original opens a battle against a friendly army the hero steps onto; Razdor can let him pass instead.");
+    let hint = tr("With no event of the map for the meeting, the original opens a battle against a friendly army the hero steps onto; Razdor can let him pass instead. An army chosen by a click is still fought.");
     for (i, line) in wrap(hint, col.w - 48.0 * k, 12.0 * k).iter().enumerate() {
         chrome::shadow_text(line, col.x + 24.0 * k, y + 56.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
     }

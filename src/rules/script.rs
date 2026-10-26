@@ -233,8 +233,9 @@ impl Game {
         // 0x674966 on each event that does not pass), so the battle opens all the same.
         // РК4's «- Колдуны мертвы» fires silently on every scan once the warlocks are beaten.
         let fired = after.iter().any(super::game::fires);
-        let pass = self.friends_let_pass;
-        let fights = |a: &Army| if on_step { a.attitude <= 0 || !pass } else { a.hostile() };
+        // A step's `Encounter` is already decided by `Game::hero_step` (hostile, clicked, or any
+        // army with the option off), so it fights; an attack fights only a hostile army.
+        let fights = |a: &Army| on_step || a.hostile();
         match e {
             // A battle the events started instead comes with `after`.
             Event::Encounter(_) if after.iter().any(|e| matches!(e, Event::Encounter(_))) => {}

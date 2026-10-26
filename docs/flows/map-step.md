@@ -87,7 +87,8 @@ army or being reached by one runs the event scan with that army as "the met army
 true }` or `Question`). Silent events fire and the battle still opens (commit 6928d9d: РК4's
 repeating silent event blocked every fight). If a window event fired after a step onto the army, the
 army forgets the hero for now (talk counter `TALKED`, path cleared). Razdor's
-`friends_let_pass` option changes only who `fights` on a step; `pass_on_bridges` changes
+`friends_let_pass` option changes only an unclicked step onto a friendly army (`hero_step` meets it);
+a clicked one is engaged, and `meet_as` fights every step's `Encounter`; `pass_on_bridges` changes
 `step_contact` for armies just passing over a bridge.
 
 **Events** (events.md §1–§9). `EventEngine::tick` runs the scan once per time slice and on entering

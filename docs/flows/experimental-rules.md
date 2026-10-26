@@ -109,7 +109,7 @@ through and met on the step. On, every army's cell closes whatever its allegianc
 the route is checked before each hero step and after the world advances, and a blocking army causes
 a route search to the same destination. If no bypass exists, the planner falls back to a route that
 walks up to the first army on the way: an enemy starts combat, a friendly army is met, and a
-friendly army clicked on purpose is fought unless `friends_let_pass` lets him by. Clicking an army
+friendly army clicked on purpose is fought even with `friends_let_pass` on (only an unclicked step is let by). Clicking an army
 directly still selects it as the intentional target, including pursuit. These are convenience
 changes rather than original-game behavior, and they apply only while the option is on.
 

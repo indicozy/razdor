@@ -198,7 +198,7 @@ pub struct Settings {
     /// The corner the minimap window was dragged to (Razdor's); the original's top right.
     pub minimap_corner: super::minimap::Corner,
     /// Advanced: stepping onto a friendly army with no event for the meeting lets the hero
-    /// pass (`Game::friends_let_pass`); off, the original's battle.
+    /// pass (`Game::friends_let_pass`); off, the original's battle. An army clicked is still fought.
     pub friends_let_pass: bool,
     /// Advanced: on a bridge the hero walks through the armies only passing by
     /// (`Game::pass_on_bridges`); off, the original's meeting with each.
