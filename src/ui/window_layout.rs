@@ -201,7 +201,7 @@ pub fn portrait_title(screen: (f32, f32), dp: Option<f32>, top: f32, base_k: f32
     if sh <= sw {
         return None;
     }
-    let bottom = super::main_menu::portrait_foot_top(sw, sh, base_k, dp) - TITLE_FOOT_GAP * base_k;
+    let bottom = super::main_menu::portrait_foot_top(sw, sh, base_k, dp, top) - TITLE_FOOT_GAP * base_k;
     let (vw, vh) = video;
     let fit_w = (sw - 2.0 * TITLE_MARGIN) / vw;
     let fit_h = (bottom - top - 2.0 * TITLE_MARGIN) / vh;
@@ -240,7 +240,7 @@ pub fn title_bottom() -> f32 {
     match super::display::dp_px() {
         Some(dp) if screen_height() > screen_width() => {
             let k = interface_k();
-            super::main_menu::portrait_foot_top(screen_width(), screen_height(), k, dp) - TITLE_FOOT_GAP * k
+            super::main_menu::portrait_foot_top(screen_width(), screen_height(), k, dp, super::display::safe_area().top) - TITLE_FOOT_GAP * k
         }
         _ => screen_height(),
     }
@@ -519,7 +519,8 @@ mod title_tests {
     const VIDEOS: [(f32, f32); 8] = [(594.0, 482.0), (594.0, 480.0), (594.0, 576.0), (594.0, 632.0), (900.0, 650.0), (760.0, 420.0), (632.0, 516.0), (900.0, 600.0)];
 
     fn foot_bottom(sw: f32, sh: f32, dp: f32) -> f32 {
-        super::super::main_menu::portrait_foot_top(sw, sh, BASE, dp) - TITLE_FOOT_GAP * BASE
+        let top = 66.0;
+        super::super::main_menu::portrait_foot_top(sw, sh, BASE, dp, top) - TITLE_FOOT_GAP * BASE
     }
 
     #[test]

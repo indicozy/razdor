@@ -421,8 +421,8 @@ fn portrait_menu(sw: f32, sh: f32, k: f32, dp: f32, safe_top: f32) -> PortraitMe
 
 /// The top of the footer lines (the version and copyright row) of the portrait menu on a `sw` ×
 /// `sh` screen at scale `k`: the title windows keep above it (`window_layout::portrait_title`).
-pub fn portrait_foot_top(sw: f32, sh: f32, k: f32, dp: f32) -> f32 {
-    portrait_menu(sw, sh, k, dp).foot_y
+pub fn portrait_foot_top(sw: f32, sh: f32, k: f32, dp: f32, safe_top: f32) -> f32 {
+    portrait_menu(sw, sh, k, dp, safe_top).foot_y
 }
 
 /// The current menu's portrait geometry, when the phone is held upright.
