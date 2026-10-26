@@ -127,7 +127,8 @@ fn logo() {
     let h = w * 128.0 / 896.0;
     // The letters sit left in the picture: the video shows them centred.
     let x = screen_width() / 2.0 - w / 2.0 + 25.0 * k;
-    let y = chrome::canvas_top() + 50.0 * k;
+    // Held upright, the logo sits over the column (`portrait_menu`); otherwise on the canvas.
+    let y = upright_menu().map_or(chrome::canvas_top() + 50.0 * k, |m| m.logo_top);
     if let Some(fl) = chrome::win_fx("TitleFlame_RUS", Fx::Glow) {
         let fh = fl.height() / 9.0;
         let fw = fl.width() / 2.0;
@@ -390,21 +391,25 @@ impl PortraitMenu {
 }
 
 /// The portrait menu on a `sw` × `sh` screen at interface scale `k`, a phone of `dp` screen px
-/// per dp.
-fn portrait_menu(sw: f32, sh: f32, k: f32, dp: f32) -> PortraitMenu {
-    let top = chrome::centred_top(sw, sh, 720.0 * k);
-    // The logo (`logo`): 50 px under the canvas top, 840 px wide, 128/896 of that high.
-    let logo_top = top + 50.0 * k;
-    let logo_bottom = logo_top + 840.0 * 128.0 / 896.0 * k;
+/// per dp, its top safe inset `safe_top` (physical px).
+fn portrait_menu(sw: f32, sh: f32, k: f32, dp: f32, safe_top: f32) -> PortraitMenu {
+    // The logo (`logo`): 840 px wide, 128/896 of that high.
+    let logo_h = 840.0 * 128.0 / 896.0 * k;
     let size = OVAL * (PORTRAIT_SCALE * k);
     let chip_h = (TOUCH_DP * dp).max(24.0 * k);
     let chip_top = sh - 16.0 * k - chip_h;
     let foot_y = chip_top - 12.0 * k;
-    // The column starts 24 px under the logo and ends above the lines, its gaps shared out
-    // between the five buttons (at least 6 px, at most 20 px).
-    let first = logo_bottom + 24.0 * k;
+    // The column ends above the lines. Its middle is the middle of the area between the top safe
+    // inset and the foot lines; the logo stays 24 px above the column and never above the inset,
+    // and the column moves down only when it must. Its gaps are shared out between the five
+    // buttons (at least 6 px, at most 20 px).
     let column_end = foot_y - 70.0 * k;
-    let gap = ((column_end - first - 5.0 * size.y) / 4.0).clamp(6.0 * k, 20.0 * k);
+    let middle = (safe_top + foot_y) / 2.0;
+    let min_first = safe_top + logo_h + 24.0 * k;
+    let gap = ((column_end - min_first - 5.0 * size.y) / 4.0).clamp(6.0 * k, 20.0 * k);
+    let span = 5.0 * size.y + 4.0 * gap;
+    let first = (middle - span / 2.0).clamp(min_first, (column_end - span).max(min_first));
+    let logo_top = first - 24.0 * k - logo_h;
     let x = sw / 2.0 - size.x / 2.0;
     let buttons = std::array::from_fn(|i| Rect::new(x, first + i as f32 * (size.y + gap), size.x, size.y));
     PortraitMenu { buttons, chip_top, chip_h, foot_y, logo_top }
@@ -413,7 +418,8 @@ fn portrait_menu(sw: f32, sh: f32, k: f32, dp: f32) -> PortraitMenu {
 /// The current menu's portrait geometry, when the phone is held upright.
 fn upright_menu() -> Option<PortraitMenu> {
     let dp = upright_dp()?;
-    Some(portrait_menu(screen_width(), screen_height(), chrome::k(), dp))
+    let safe_top = super::display::safe_area().top;
+    Some(portrait_menu(screen_width(), screen_height(), chrome::k(), dp, safe_top))
 }
 
 /// The screen rectangle of oval button `i`.
@@ -1528,7 +1534,8 @@ mod tests {
     use super::*;
 
     /// A phone of 1080×2376 px at 2.625 px per dp, its interface scale the fit (1.125).
-    const PHONE: (f32, f32, f32, f32) = (1080.0, 2376.0, 1.125, 2.625);
+    /// The device the owner's screenshot came from (OnePlus): 1080×2376 at 2.75 px per dp.
+    const PHONE: (f32, f32, f32, f32) = (1080.0, 2376.0, 1.125, 2.75);
 
     fn close(a: f32, b: f32) -> bool {
         (a - b).abs() < 1e-3
@@ -1537,7 +1544,7 @@ mod tests {
     #[test]
     fn upright_buttons_are_a_column_of_touch_sized_ovals_above_the_chips() {
         let (sw, sh, k, dp) = PHONE;
-        let m = portrait_menu(sw, sh, k, dp);
+        let m = portrait_menu(sw, sh, k, dp, 0.0);
         for r in &m.buttons {
             assert!(close(r.h, OVAL.y * PORTRAIT_SCALE * k), "{r:?}");
             assert!(close(r.w, OVAL.x * PORTRAIT_SCALE * k), "{r:?}");
@@ -1547,19 +1554,46 @@ mod tests {
         for pair in m.buttons.windows(2) {
             assert!(pair[0].y + pair[0].h <= pair[1].y, "{pair:?} overlap");
         }
-        // Under the logo (its bottom 170 px under the canvas top), above the version and notice lines.
-        let top = chrome::centred_top(sw, sh, 720.0 * k);
-        assert!(m.buttons[0].y >= top + 170.0 * k, "{:?} is under the logo", m.buttons[0]);
+        // Above the version and notice lines.
         let last = m.buttons[4];
         assert!(last.y + last.h <= m.notice_y(k) - 16.0 * k, "{last:?} runs into the lines");
         // The not-found block sits above the logo, clear of the column.
-        assert!(m.block_bottom(k) < m.logo_top && m.block_bottom(k) > top, "block over the logo");
+        assert!(m.block_bottom(k) < m.logo_top && m.block_bottom(k) > 0.0, "block over the logo");
+    }
+
+    #[test]
+    fn upright_column_is_centred_between_the_top_and_the_lines() {
+        // 1080×2376 and 1080×1920 (the owner's phone and a shorter one): the column's middle is
+        // the middle of the area above the foot lines, within 4 px.
+        for (sh, dp) in [(2376.0, 2.75), (1920.0, 2.75)] {
+            let m = portrait_menu(1080.0, sh, 1.125, dp, 0.0);
+            let first = m.buttons[0];
+            let last = m.buttons[4];
+            let centre = (first.y + last.y + last.h) / 2.0;
+            assert!((centre - m.foot_y / 2.0).abs() <= 4.0, "{sh}: column centre {centre}, target {}", m.foot_y / 2.0);
+            // The logo's bottom is 24 px above the first button and its top is below the inset.
+            let logo_bottom = m.logo_top + 840.0 * 128.0 / 896.0 * 1.125;
+            assert!(close(logo_bottom + 24.0 * 1.125, first.y), "logo {} over the column", m.logo_top);
+            assert!(m.logo_top > 0.0);
+        }
+    }
+
+    #[test]
+    fn upright_logo_never_goes_above_the_safe_inset() {
+        // A cutout of 120 px: the logo's top is at the inset, and the column moves down to suit.
+        let (sw, sh, k, dp) = PHONE;
+        let m = portrait_menu(sw, sh, k, dp, 120.0);
+        assert!(m.logo_top >= 120.0, "logo at {} is above the inset", m.logo_top);
+        assert!(m.buttons[0].y >= m.logo_top + 840.0 * 128.0 / 896.0 * k);
+        // And with the logo on the inset the column still ends above the lines.
+        let last = m.buttons[4];
+        assert!(last.y + last.h <= m.notice_y(k) - 16.0 * k, "{last:?} runs into the lines");
     }
 
     #[test]
     fn upright_chips_are_touch_sized_and_on_the_bottom_of_the_screen() {
         let (sw, sh, k, dp) = PHONE;
-        let m = portrait_menu(sw, sh, k, dp);
+        let m = portrait_menu(sw, sh, k, dp, 0.0);
         assert!(m.chip_h >= TOUCH_DP * dp, "chips are {} px tall", m.chip_h);
         assert!(m.chip_top + m.chip_h <= sh, "chips leave the screen");
         assert!(m.foot_y <= m.chip_top, "the lines run into the chips");
@@ -1569,7 +1603,7 @@ mod tests {
     #[test]
     fn upright_geometry_fits_a_small_phone_too() {
         // 720×1600 at 2 px per dp: the fit is 0.75.
-        let m = portrait_menu(720.0, 1600.0, 0.75, 2.0);
+        let m = portrait_menu(720.0, 1600.0, 0.75, 2.0, 0.0);
         for pair in m.buttons.windows(2) {
             assert!(pair[0].y + pair[0].h <= pair[1].y);
         }
