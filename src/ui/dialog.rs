@@ -400,9 +400,12 @@ const UNIT_BUST: f32 = 92.0;
 /// The left edges, from the window's left in the original's pixels, of a units row's `n`
 /// cells: centred at W·(i+1)/(n+1) in whole pixels, less 23 (0x4a95a9 and 0x4a9a84: `IMUL`,
 /// `IDIV`, `SUB 0x17`). Each event names at most four units to add or take (+0x61, +0x69).
-fn unit_cells(n: usize) -> Vec<f32> {
+/// `win_w` is the window's width in its own design pixels: the original's window is always
+/// 634 wide (`EVENT_W`), and Razdor's phone and large windows are not, so the row follows
+/// the window it is in.
+fn unit_cells(n: usize, win_w: i32) -> Vec<f32> {
     let n = n.min(4) as i32;
-    (0..n).map(|i| ((EVENT_W as i32 * (i + 1)) / (n + 1) - 23) as f32).collect()
+    (0..n).map(|i| ((win_w * (i + 1)) / (n + 1) - 23) as f32).collect()
 }
 
 /// The first line shown of a text of `total` lines with `shown` in sight in box `tb`: the
@@ -747,7 +750,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
             continue;
         }
         caption(key, ours, cy);
-        for (&u, left) in units.iter().zip(unit_cells(units.len())) {
+        for (&u, left) in units.iter().zip(unit_cells(units.len(), (w / o).round() as i32)) {
             assets.draw_portrait(u, Team::Player, Rect::new(x + left * o, cy + 26.0 * o, UNIT_ICON * o, UNIT_ICON * o));
         }
         cy += UNIT_ROW * o;
@@ -1107,14 +1110,32 @@ mod tests {
     /// 92 × 92 bust, the text box after it and 14 more.
     #[test]
     fn the_units_rows_stand_as_the_original_s() {
-        assert_eq!(unit_cells(1), vec![294.0]);
-        assert_eq!(unit_cells(2), vec![188.0, 399.0]);
-        assert_eq!(unit_cells(3), vec![135.0, 294.0, 452.0]);
-        assert_eq!(unit_cells(4), vec![103.0, 230.0, 357.0, 484.0]);
-        assert_eq!(unit_cells(6).len(), 4);
+        assert_eq!(unit_cells(1, 634), vec![294.0]);
+        assert_eq!(unit_cells(2, 634), vec![188.0, 399.0]);
+        assert_eq!(unit_cells(3, 634), vec![135.0, 294.0, 452.0]);
+        assert_eq!(unit_cells(4, 634), vec![103.0, 230.0, 357.0, 484.0]);
+        assert_eq!(unit_cells(6, 634).len(), 4);
         assert_eq!((UNIT_ICON, UNIT_ROW), (46.0, 79.0));
         let f = event_frame(Some((UNIT_BUST, UNIT_BUST)), 19.0, UNIT_ROW, EVENT_MAX_BOX, EVENT_W);
         assert_eq!(f, EventFrame { w: 634.0, h: 92.0 + 79.0 + 119.0, box_x: 125.0, box_w: 490.0, box_h: 92.0 });
+    }
+
+    /// The units row follows its window's width, not the original's 634: the middle of the
+    /// first and last cell (left + 23) sits within 1 px of the window's middle at any width.
+    #[test]
+    fn the_units_row_is_centred_in_a_window_of_any_width() {
+        for win_w in [480, 634, 860, 900] {
+            for n in 1..=4 {
+                let cells = unit_cells(n, win_w);
+                assert_eq!(cells.len(), n);
+                let first = cells[0] + 23.0;
+                let last = cells[n - 1] + 23.0;
+                let mid = (first + last) / 2.0;
+                assert!((mid - win_w as f32 / 2.0).abs() <= 1.0, "width {win_w}, n {n}: the row's middle at {mid}");
+            }
+        }
+        assert_eq!(unit_cells(2, 900), vec![277.0, 577.0]);
+        assert_eq!(unit_cells(2, 480), vec![137.0, 297.0]);
     }
 
     #[test]

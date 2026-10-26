@@ -7,7 +7,7 @@
 //! `title`, `fonts` (sample lines in many scripts), `update` (a made-up release on offer), `authors[:<seconds>]`, `options[:advanced]`, `scenarios[:<map>]`, `import-notice` (the scenario list with «Добавить карту…»'s notice), `tutorial`, `load[:manual|auto[:<row>]]`, `editor[:<map>[:<text to find>]]`, `classes:<map>`, `map:<map>[:x,y]`, `minimap:<map>`, `clash:<map>` (the first two armies fight on the explored map), `walk:<map>:dx,dy` (the
 //! hero sets off that many cells away), `building:<map>:<n>`
 //! (the hero in the n-th building; `:barracks`, `:garrison`, `:market`, `:sanctuary` open that tab; `:market-pack` the market's pack list), `army:<map>[:<n>[:<unit id>[:<level>]]]` (squad member n selected, made that unit at that level), `journal:<map>` / `hero:<map>[:<tab>]`, `spells:<map>` (`spells-pages:<map>`: 20 spells, page 2 open),
-//! `menu:<map>`, `defeat:<map>` (the lost battle's report), `event:<map>:<n>` (the map's event n's window; `RAZDOR_SCENE_LOST=<id>,…` adds its lost-items row),`learnt:<map>[:<id>,…]` (the event window with new spells, the hero with no mana), `report:<map>[:<gold>]` (the noon report), `settings:<map>[:advanced|keys]` (`keys`: Razdor's keys window over the advanced settings), `battle:<map>:<n>` (against the n-th army), `custom` (the custom battle
+//! `menu:<map>`, `defeat:<map>` (the lost battle's report), `event:<map>:<n>` (the map's event n's window; `RAZDOR_SCENE_LOST=<id>,…` adds its lost-items row; `RAZDOR_SCENE_JOINED=<id>,…` and `RAZDOR_SCENE_LEFT=<id>,…` its units rows),`learnt:<map>[:<id>,…]` (the event window with new spells, the hero with no mana), `report:<map>[:<gold>]` (the noon report), `settings:<map>[:advanced|keys]` (`keys`: Razdor's keys window over the advanced settings), `battle:<map>:<n>` (against the n-th army), `custom` (the custom battle
 //! setup), `custom-battle` (its first round; `custom-battle:watch` watches the AI play it). `RAZDOR_SCENE_DEBUG=1` turns the map's debug overlay (F3) on; `RAZDOR_SCENE_SHOW=x,y,r` shows
 //! a place as a lantern event does; `RAZDOR_SCENE_CONSOLE=help;gold 100` opens the cheat
 //! console after those commands; `RAZDOR_SCENE_FILTER=text` fills the inventory filter
@@ -707,6 +707,14 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             let mut d = super::story::event_dialog(&game, id, false);
             if let Ok(v) = std::env::var("RAZDOR_SCENE_LOST") {
                 d.lost = v.split(',').filter_map(|p| p.trim().parse::<u32>().ok()).map(razdor::rules::content::ItemId).collect();
+            }
+            // `RAZDOR_SCENE_JOINED=<unit id>,…` / `RAZDOR_SCENE_LEFT=…`: the units rows (what the
+            // engine reports as joined or departed, `EventOutcome`).
+            if let Ok(v) = std::env::var("RAZDOR_SCENE_JOINED") {
+                d.joined = v.split(',').filter_map(|p| p.trim().parse::<u32>().ok()).map(razdor::rules::content::UnitId).collect();
+            }
+            if let Ok(v) = std::env::var("RAZDOR_SCENE_LEFT") {
+                d.left = v.split(',').filter_map(|p| p.trim().parse::<u32>().ok()).map(razdor::rules::content::UnitId).collect();
             }
             app.dialogs.push_back(d);
             Screen::WorldMap
