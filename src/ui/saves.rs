@@ -360,7 +360,10 @@ impl Book {
         // the map the original centres it over the view above the bottom bar, as its other
         // map windows (its in-game load and save at y 104 of 768).
         let y = book_top(screen_height(), super::chrome::bar_height(), h, k, over_map);
-        let win = Rect::new((screen_width() - w) / 2.0, y, w, h);
+        // On a phone held upright the title's load window spans the width between the top inset
+        // and the footer (`window_layout::title_rect`); the old placement, at the video's y 190,
+        // is above the logo there.
+        let win = (!over_map).then(|| super::window_layout::title_rect((Book::W, Book::H))).flatten().unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, y, w, h));
         let (_, closed) = super::chrome::window(win, title, super::chrome::Skin::Marble, true);
         // The 634×516 window with its inner frames (ae2520, 0x48d710 from 4dc10e).
         super::chrome::window_inner_frames(win, super::chrome::opx());
@@ -715,7 +718,10 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     let asking = view.confirm_clear || asking_delete || failed;
     let previously_blocked = input_blocked();
     if asking { set_input_blocked(true); }
-    let (book, closed) = Book::at(&own("LoadGame", "Title", n_("Load a saved game")), game.is_some() && view.back != Back::Title);
+    let over_map = game.is_some() && view.back != Back::Title;
+    // The title's load window at its own scale on a phone held upright (`window_layout::title_scale`).
+    let _scale = (!over_map).then(|| super::window_layout::title_scale((Book::W, Book::H)));
+    let (book, closed) = Book::at(&own("LoadGame", "Title", n_("Load a saved game")), over_map);
     book.page(&own("LoadGame", "GameName", n_("Name of the saved game")), &own("LoadGame", "ScenarioName", n_("Name of the scenario")));
     fill_metas(&mut view.entries, &mut view.asked, &mut view.settled, view.scroll, Some(&mut view.selected));
     let rows: Vec<Row> = view.entries.iter().map(row_of).collect();

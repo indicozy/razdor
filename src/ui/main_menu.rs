@@ -15,6 +15,7 @@ use razdor::i18n::{self, n_, tr, Lang};
 use super::audio::{cue, Cue};
 use super::chrome::{self, Fx};
 use super::keymap;
+use super::window_layout;
 use super::widgets::*;
 
 /// What the player picked.
@@ -322,6 +323,9 @@ fn link(label: &str, x: f32, y: f32, right: bool) -> bool {
 
 /// The menu's ruins and logo without the buttons (behind the load and new-game windows).
 pub fn backdrop() {
+    // The ruins, the logo and the foot are the interface's own: a title window's scale (set by
+    // the window's frame, `window_layout::title_scale`) does not reach them.
+    let _scale = super::display::enter_window_scale(None);
     background();
     logo();
     foot_lines();
@@ -413,6 +417,12 @@ fn portrait_menu(sw: f32, sh: f32, k: f32, dp: f32, safe_top: f32) -> PortraitMe
     let x = sw / 2.0 - size.x / 2.0;
     let buttons = std::array::from_fn(|i| Rect::new(x, first + i as f32 * (size.y + gap), size.x, size.y));
     PortraitMenu { buttons, chip_top, chip_h, foot_y, logo_top }
+}
+
+/// The top of the footer lines (the version and copyright row) of the portrait menu on a `sw` ×
+/// `sh` screen at scale `k`: the title windows keep above it (`window_layout::portrait_title`).
+pub fn portrait_foot_top(sw: f32, sh: f32, k: f32, dp: f32) -> f32 {
+    portrait_menu(sw, sh, k, dp).foot_y
 }
 
 /// The current menu's portrait geometry, when the phone is held upright.
@@ -709,7 +719,8 @@ fn thanks_column(page: Rect) {
     } else if left >= min_w {
         side(m, left);
     } else {
-        let strip = Rect::new(m, page.y + page.h + m, sw - 2.0 * m, sh - page.y - page.h - 2.0 * m);
+        // Under the window, down to the footer on a phone held upright (the screen's bottom else).
+    let strip = Rect::new(m, page.y + page.h + m, sw - 2.0 * m, window_layout::title_bottom() - page.y - page.h - 2.0 * m);
         let n = (1..=lines.len()).find(|&n| columns_fit(&lines, n, strip, k) >= COLUMN_MIN_SCALE).unwrap_or(lines.len());
         draw_columns(&lines, n, strip, k);
     }
@@ -747,8 +758,10 @@ fn own(section: &str, key: &str, ours: &'static str) -> String {
 /// whether its close box was clicked.
 fn window(title: &str, w: f32, h: f32) -> (Rect, bool) {
     let k = chrome::k();
-    let (w, h) = (w * k, h * k);
-    let r = Rect::new((screen_width() - w) / 2.0, (chrome::canvas_top() + 190.0 * k).min(screen_height() - h), w, h);
+    let r = window_layout::title_rect((w, h)).unwrap_or_else(|| {
+        let (w, h) = (w * k, h * k);
+        Rect::new((screen_width() - w) / 2.0, (chrome::canvas_top() + 190.0 * k).min(screen_height() - h), w, h)
+    });
     chrome::window(r, title, chrome::Skin::Marble, true)
 }
 
@@ -766,6 +779,7 @@ fn map_window(title: &str, w: f32, h: f32) -> (Rect, bool) {
 /// over it (`started` is when the window opened). A click or Esc closes it.
 pub fn authors(started: f64) -> bool {
     backdrop();
+    let _scale = window_layout::title_scale((594.0, 480.0));
     let title = own("Authors", "Title", n_("About the authors"));
     // The standard window, as the original's (4c82c4): the splash in a framed page, the
     // marble under it with «Ок» in its middle.
@@ -1005,7 +1019,21 @@ pub fn apply_options(audio: &super::audio::Settings) {
 /// closed.
 pub fn options(audio: &mut super::audio::Settings, install_wide: bool) -> bool {
     backdrop();
+    let _scale = window_layout::title_scale((594.0, options_h()));
     options_window(audio, install_wide, false)
+}
+
+/// The settings window's height in video px (its rows, with the phone's own rows).
+fn options_h() -> f32 {
+    // On a phone the touchpad mode's row (`ui::touchpad`) takes 28 more px under the checkboxes.
+    let touch_row = super::touchpad::MOBILE;
+    // The orientation row is Android's: iOS keeps the system's rotation lock for now, so it has no row there.
+    let orientation_row = cfg!(target_os = "android");
+    // Razdor's two rows at the end (the text size and the large windows, the owner's request:
+    // phones' text too small) take 76 px more: the frame line under the checkboxes sits 82 px above
+    // the bottom edge, the buttons 68 above. The import row («Обновить игру из архива…», `ui::game_import`)
+    // takes 30 px more under the large message windows' row.
+    (if orientation_row { 556.0 } else if touch_row { 528.0 } else { 500.0 }) + 76.0 + 30.0
 }
 
 local! {
@@ -1050,17 +1078,19 @@ fn row_button(r: Rect, label: &str) -> bool {
 /// from the original on the left, the screen, the interface scale, the font and the
 /// language on the right. Returns true when closed.
 fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
-    // Razdor's own window, wider than the original's: centred (over the map, above the bar),
-    // not hung from the menu's 190, where its foot reached the screen's bottom edge.
-    let k = chrome::k();
     // 650 high since «Расстановка армии» joined the left column (it still fits the 682 px
     // view above the bar).
     let (ww, wh) = (900.0, 650.0);
+    // Its own scale on a title screen (its own window, not the settings window's).
+    let _scale = (!over_map).then(|| window_layout::title_scale((ww, wh)));
+    // Razdor's own window, wider than the original's: centred (over the map, above the bar),
+    // not hung from the menu's 190, where its foot reached the screen's bottom edge.
+    let k = chrome::k();
     let (inner, closed) = if over_map {
         map_window(tr("Advanced settings"), ww, wh)
     } else {
         let (w, h) = (ww * k, wh * k);
-        let r = Rect::new((screen_width() - w) / 2.0, ((screen_height() - h) / 2.0).max(0.0), w, h);
+        let r = window_layout::title_rect((ww, wh)).unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, ((screen_height() - h) / 2.0).max(0.0), w, h));
         chrome::window(r, tr("Advanced settings"), chrome::Skin::Marble, true)
     };
     // The left column: the rules, each with its explanation.
@@ -1323,10 +1353,11 @@ fn option_check(x: f32, y: f32, label: &str, on: bool, ink: Color) -> bool {
 /// a key waits for the new one (`keymap::listen`); Esc or a click elsewhere cancels, and a
 /// key another action has goes to that action (`keymap::set`). «По умолчанию» puts every key
 /// back; «Ок» (or Esc, when not waiting) closes it. Returns true when closed.
-fn keys_window(audio: &mut super::audio::Settings) -> bool {
+fn keys_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
+    let _scale = (!over_map).then(|| window_layout::title_scale((760.0, 420.0)));
     let k = chrome::k();
     let (w, h) = (760.0 * k, 420.0 * k);
-    let r = Rect::new((screen_width() - w) / 2.0, ((screen_height() - h) / 2.0).max(0.0), w, h);
+    let r = (!over_map).then(|| window_layout::title_rect((760.0, 420.0))).flatten().unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, ((screen_height() - h) / 2.0).max(0.0), w, h));
     let (inner, closed) = chrome::window(r, tr("Keys"), chrome::Skin::Marble, true);
     let waiting = keymap::listening();
     let was_waiting = waiting.is_some();
@@ -1374,7 +1405,7 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     if ADVANCED.with(|a| a.get()) {
         // The keys window stands over the advanced one, which takes no input meanwhile.
         if KEYS_OPEN.with(|o| o.get()) {
-            if keys_window(audio) {
+            if keys_window(audio, over_map) {
                 KEYS_OPEN.with(|o| o.set(false));
             }
             return false;
@@ -1390,16 +1421,10 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
         OPENED_WITH.with(|o| *o.borrow_mut() = Some(audio.clone()));
     }
     let title = own("Options", "Title", n_("Sound, graphics and gameplay settings"));
-    // On a phone the touchpad mode's row (`ui::touchpad`) takes 28 more px under the checkboxes.
+    let h = options_h();
+    // The rows below depend on the phone's own: see `options_h`.
     let touch_row = super::touchpad::MOBILE;
-    // The orientation row is Android's: iOS keeps the system's rotation lock for now, so it has no row there.
     let orientation_row = cfg!(target_os = "android");
-    // Razdor's two rows at the end (the text size and the large windows, the owner's request:
-    // phones' text too small) take 76 px more: the frame line under the checkboxes sits 82 px above
-    // the bottom edge, the buttons 68 above.
-    // The import row («Обновить игру из архива…», `ui::game_import`) takes 30 px more under the large
-    // message windows' row.
-    let h = (if orientation_row { 556.0 } else if touch_row { 528.0 } else { 500.0 }) + 76.0 + 30.0;
     let (inner, closed) = if over_map { map_window(&title, 594.0, h) } else { window(&title, 594.0, h) };
     let k = chrome::k();
     let outer = Rect::new(inner.x - 2.0 * k, inner.y - (26.0 * k).round() - 1.0, 594.0 * k, h * k);

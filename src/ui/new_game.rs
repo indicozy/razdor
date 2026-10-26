@@ -65,7 +65,7 @@ impl Win {
     fn open(title: &str) -> (Win, bool) {
         let k = chrome::k();
         let (w, h) = (594.0 * k, 482.0 * k);
-        let r = Rect::new((screen_width() - w) / 2.0, (super::chrome::canvas_top() + 190.0 * k).min(screen_height() - h), w, h);
+        let r = super::window_layout::title_rect((594.0, 482.0)).unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, (super::chrome::canvas_top() + 190.0 * k).min(screen_height() - h), w, h));
         let (_, closed) = chrome::window(r, title, chrome::Skin::Marble, true);
         // The 634×516 window with its inner frames (ae2520, read by 4d2a30; 0x48d710).
         chrome::window_inner_frames(r, chrome::opx());
@@ -508,6 +508,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         return screens::scenario_select(scenarios, has_install);
     }
     super::main_menu::backdrop();
+    let _scale = super::window_layout::title_scale((594.0, 482.0));
     let (win, closed) = Win::open(&own("NewGame", "Title", n_("Scenario for a new game")));
     let k = win.k;
     let mut m = marks();
@@ -889,6 +890,7 @@ pub fn tutorial_map(scenarios: &[ScenarioEntry]) -> Option<usize> {
 pub fn tutorial_offer(scenarios: &[ScenarioEntry]) -> Option<Screen> {
     let Some(map) = tutorial_map(scenarios) else { return Some(Screen::ScenarioSelect) };
     super::main_menu::backdrop();
+    let _scale = super::window_layout::title_scale((594.0, 482.0));
     let (win, closed) = Win::open(&own("Tutorial", "Title", n_("Tutorial scenario")));
     let k = win.k;
     let pic = win.rect(18.0, 44.0, 152.0, 386.0);
@@ -943,8 +945,9 @@ pub fn class_select(game: &mut Option<Game>, demo: &Arc<Content>, scenario: Opti
     let (e, content) = scenario.expect("checked");
     let content = Arc::new(content.with_experimental(experimental_rules()));
     super::main_menu::backdrop();
+    let _scale = super::window_layout::title_scale((632.0, 516.0));
     let scale = chrome::k();
-    let r = Rect::new((screen_width() - 632.0 * scale) / 2.0, (super::chrome::canvas_top() + 202.0 * scale).min(screen_height() - 516.0 * scale), 632.0 * scale, 516.0 * scale);
+    let r = super::window_layout::title_rect((632.0, 516.0)).unwrap_or_else(|| Rect::new((screen_width() - 632.0 * scale) / 2.0, (super::chrome::canvas_top() + 202.0 * scale).min(screen_height() - 516.0 * scale), 632.0 * scale, 516.0 * scale));
     let title = own("NewHero", "Title", n_("The hero's starting characteristics"));
     let (_, closed) = chrome::window(r, &title, chrome::Skin::Marble, true);
     let win = Win { r, k: scale };

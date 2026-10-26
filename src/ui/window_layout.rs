@@ -183,6 +183,69 @@ pub fn scaled<R>(st: Stack, f: impl FnOnce() -> R) -> R {
     }
 }
 
+/// Margin of a title window from the screen's sides, px (its width is the screen's less this
+/// on each side).
+const TITLE_MARGIN: f32 = 8.0;
+/// The title windows' bottom sits this many px (at the interface scale) above the footer's
+/// baseline, so the version and copyright lines stay clear of it.
+const TITLE_FOOT_GAP: f32 = 16.0;
+
+/// The scale and the rectangle of a title window (`video`: its size in video px, 960×720 frame)
+/// on a phone held upright: the largest scale that spans the screen's width less
+/// [`TITLE_MARGIN`] and fits between the top safe inset `top` and the footer, never below
+/// `base_k` (the interface scale); centred horizontally, and vertically between the inset and
+/// the footer. `sw` × `sh` is the screen, `dp` the phone's px per dp (`None` on the desktop,
+/// and on a screen that is not taller than wide: those get None and are not moved).
+pub fn portrait_title(screen: (f32, f32), dp: Option<f32>, top: f32, base_k: f32, video: (f32, f32)) -> Option<(f32, Rect)> {
+    let ((sw, sh), dp) = (screen, dp.filter(|d| *d > 0.0)?);
+    if sh <= sw {
+        return None;
+    }
+    let bottom = super::main_menu::portrait_foot_top(sw, sh, base_k, dp) - TITLE_FOOT_GAP * base_k;
+    let (vw, vh) = video;
+    let fit_w = (sw - 2.0 * TITLE_MARGIN) / vw;
+    let fit_h = (bottom - top - 2.0 * TITLE_MARGIN) / vh;
+    let k = fit_w.min(fit_h).max(base_k);
+    let (w, h) = ((vw * k).round(), (vh * k).round());
+    let y = (top + ((bottom - top) - h) / 2.0).max(top).round();
+    Some((k, Rect::new(((sw - w) / 2.0).round(), y, w, h)))
+}
+
+/// The interface scale (`chrome::k` outside any window's scale).
+fn interface_k() -> f32 {
+    super::display::scale(super::chrome::fit_k())
+}
+
+/// [`portrait_title`] for the phone on screen now (`None` where it is not held upright).
+fn portrait_title_now(video: (f32, f32)) -> Option<(f32, Rect)> {
+    portrait_title((screen_width(), screen_height()), super::display::dp_px(), super::display::safe_area().top, interface_k(), video)
+}
+
+/// The window scale of a title window of `video` size, as a guard: set until it drops. A
+/// screen that is not held upright keeps the scale it has (none on the title screens).
+pub fn title_scale(video: (f32, f32)) -> super::display::WindowScale {
+    let k = portrait_title_now(video).map(|(k, _)| k);
+    super::display::enter_window_scale(k.or_else(super::display::window_scale))
+}
+
+/// The rectangle of a title window of `video` size (video px, at its own scale) on a phone held
+/// upright; `None` elsewhere, where the window keeps its own placement.
+pub fn title_rect(video: (f32, f32)) -> Option<Rect> {
+    portrait_title_now(video).map(|(_, r)| r)
+}
+
+/// The bottom edge the title screens' windows may reach: the footer's top on a phone held
+/// upright, else the screen's bottom.
+pub fn title_bottom() -> f32 {
+    match super::display::dp_px() {
+        Some(dp) if screen_height() > screen_width() => {
+            let k = interface_k();
+            super::main_menu::portrait_foot_top(screen_width(), screen_height(), k, dp) - TITLE_FOOT_GAP * k
+        }
+        _ => screen_height(),
+    }
+}
+
 /// The window's rectangle: the building and army windows' size at the interface scale (the
 /// stacked one when the phone is held upright), centred over the view above the bottom bar.
 pub fn window() -> Rect {
@@ -442,5 +505,60 @@ mod tests {
         let yy = 28.0 + (100.0 - 28.0) * upper_height() / 272.0;
         assert_eq!((a.x, a.y), (10.0 + 54.0, 20.0 + yy + BAND_H));
         assert_eq!(at_in(w, 1.0, 100.0, 100.0, 10.0, 10.0, true).x, 10.0 + 271.0, "the old left remap");
+    }
+}
+
+#[cfg(test)]
+mod title_tests {
+    use super::*;
+
+    /// The interface scale of a 1080-wide phone (`chrome::fit_k`): 1080 / 1024 over the 0.9375 reference.
+    const BASE: f32 = 1.125;
+    /// The video sizes of the title windows: the scenario list and the new-hero, load, authors,
+    /// settings (its height with the Android row), «Ещё…», keys and custom battle windows.
+    const VIDEOS: [(f32, f32); 8] = [(594.0, 482.0), (594.0, 480.0), (594.0, 576.0), (594.0, 632.0), (900.0, 650.0), (760.0, 420.0), (632.0, 516.0), (900.0, 600.0)];
+
+    fn foot_bottom(sw: f32, sh: f32, dp: f32) -> f32 {
+        super::super::main_menu::portrait_foot_top(sw, sh, BASE, dp) - TITLE_FOOT_GAP * BASE
+    }
+
+    #[test]
+    fn a_title_window_spans_the_phone_held_upright_between_the_inset_and_the_footer() {
+        for (sw, sh) in [(1080.0, 2376.0), (1080.0, 1920.0)] {
+            let dp = 2.75;
+            let top = 66.0;
+            let bottom = foot_bottom(sw, sh, dp);
+            for video in VIDEOS {
+                let (k, r) = portrait_title((sw, sh), Some(dp), top, BASE, video).expect("held upright");
+                assert!(r.w >= 0.95 * sw, "{video:?} on {sw}x{sh}: width {} of {sw}", r.w);
+                assert!(r.x >= 0.0 && r.x + r.w <= sw, "{video:?} off the sides: {r:?}");
+                assert!(r.y >= top && r.y + r.h <= bottom + 0.5, "{video:?} off the inset or the footer: {r:?} bottom {bottom}");
+                assert!(k >= BASE, "never below the interface scale");
+                assert!((r.w - video.0 * k).abs() <= 1.0, "the window keeps its proportions");
+            }
+        }
+    }
+
+    #[test]
+    fn a_title_window_is_centred_between_the_inset_and_the_footer() {
+        let (sw, sh, dp, top) = (1080.0, 2376.0, 2.75, 66.0);
+        let bottom = foot_bottom(sw, sh, dp);
+        let (_, r) = portrait_title((sw, sh), Some(dp), top, BASE, (594.0, 482.0)).expect("held upright");
+        let space = (top + bottom) / 2.0;
+        assert!((r.center().y - space).abs() <= 1.0, "centre {} against {space}", r.center().y);
+    }
+
+    #[test]
+    fn the_scenario_list_is_width_limited_on_the_phone_at_about_1_8_times() {
+        let (k, r) = portrait_title((1080.0, 2376.0), Some(2.75), 66.0, BASE, (594.0, 482.0)).expect("held upright");
+        assert!((k - 1064.0 / 594.0).abs() < 0.01, "k {k}");
+        assert_eq!(r.w.round(), 1064.0);
+    }
+
+    #[test]
+    fn a_landscape_phone_and_the_desktop_keep_their_windows() {
+        assert_eq!(portrait_title((2376.0, 1080.0), Some(2.75), 0.0, BASE, (594.0, 482.0)), None);
+        assert_eq!(portrait_title((1920.0, 1080.0), None, 0.0, BASE, (594.0, 482.0)), None);
+        assert_eq!(portrait_title((1080.0, 2376.0), None, 0.0, BASE, (594.0, 482.0)), None);
     }
 }

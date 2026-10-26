@@ -181,9 +181,10 @@ fn picked_unit(view: &SetupView) -> Option<usize> {
 pub fn frame(view: &mut SetupView, content: &Content, assets: &Assets, audio: &mut Settings) -> Option<Pick> {
     super::main_menu::backdrop();
     view.session.setup.fit(content);
+    let _scale = super::window_layout::title_scale((900.0, 600.0));
     let k = chrome::k();
     let (w, h) = (900.0 * k, 600.0 * k);
-    let r = Rect::new((screen_width() - w) / 2.0, (super::chrome::canvas_top() + 130.0 * k).min(screen_height() - h).max(0.0), w, h);
+    let r = super::window_layout::title_rect((900.0, 600.0)).unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, (super::chrome::canvas_top() + 130.0 * k).min(screen_height() - h).max(0.0), w, h));
     let (inner, closed) = chrome::window(r, tr("Custom battle"), chrome::Skin::Marble, true);
     let size = (14.0 * k).round();
     let row_h = 26.0 * k;

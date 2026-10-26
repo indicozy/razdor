@@ -117,11 +117,28 @@ static WINDOW_K: AtomicU32 = AtomicU32::new(0);
 /// `k` instead of the interface scale; `None` runs it at the interface scale. Only the window's
 /// own drawing takes it: the bottom bar and the map under it are drawn outside.
 pub fn with_window_scale<R>(k: Option<f32>, f: impl FnOnce() -> R) -> R {
+    let _scale = enter_window_scale(k);
+    f()
+}
+
+/// The window scale set by [`enter_window_scale`] until it is dropped; the scale before it is
+/// restored then.
+pub struct WindowScale {
+    prev: u32,
+}
+
+/// Sets the window's own scale (as [`with_window_scale`]) until the returned guard drops, for a
+/// window whose drawing runs over several statements (a title window: `main_menu::backdrop`
+/// first, then the window at its scale).
+pub fn enter_window_scale(k: Option<f32>) -> WindowScale {
     let next = k.filter(|k| *k > 0.0).map_or(0, f32::to_bits);
-    let prev = WINDOW_K.swap(next, Ordering::Relaxed);
-    let r = f();
-    WINDOW_K.store(prev, Ordering::Relaxed);
-    r
+    WindowScale { prev: WINDOW_K.swap(next, Ordering::Relaxed) }
+}
+
+impl Drop for WindowScale {
+    fn drop(&mut self) {
+        WINDOW_K.store(self.prev, Ordering::Relaxed);
+    }
 }
 
 /// The scale [`with_window_scale`] set, if any.

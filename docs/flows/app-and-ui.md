@@ -216,6 +216,18 @@ column, never above the safe inset (the column moves down if it must); the links
 in one row at the bottom, touch targets of 48 dp; the version and copyright lines and an installed update's
 notice sit just above the chips; the not-found block (no install) sits above the logo. Landscape and desktop keep
 the original column and the corner links (`main_menu::landscape_buttons`, `corner_links`).
+Title windows held upright (the owner's request, 1080×2376: the scenario list and the new-hero window, the load
+window, the settings window and its «Ещё…» page, the keys window over it, the authors window and the custom battle
+setup): `window_layout::portrait_title` (pure, with unit tests) gives the window's own scale and rectangle: the
+largest scale that spans the screen's width less 8 px a side and fits between the top safe inset and the footer
+(`main_menu::portrait_foot_top` less 16 px), never below the interface scale, centred between the two. Each frame
+sets that scale after its `main_menu::backdrop()` with `window_layout::title_scale` (a guard that restores the
+scale on drop); `backdrop` always draws at the interface scale, so the logo and the foot do not grow. The window's
+placement takes `window_layout::title_rect` where it is portrait, else its old placement (the load window's
+`book_top`, at video y 190, is above the logo on a phone: that is why it moved). The credits column
+(`thanks_column`) goes under the window down to `window_layout::title_bottom` (the footer), since the window
+leaves no side. Landscape and desktop: `title_scale` keeps the scale it has and `title_rect` is `None`, so nothing
+changes. The save window and the in-game windows over the map are not title windows and are not touched.
 The market and the sanctuary scenes of the UI regression check use town 8 of РК3-Столица (the start's
 castle has neither tab); the snapshot clears the start's due places, which otherwise make the building
 window step aside for the map (`world_view::building_flight`).
