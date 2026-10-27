@@ -1908,6 +1908,35 @@ pub fn title_close_cross(strip: Rect, k: f32, dp: Option<f32>, safe_right: f32, 
     }
 }
 
+/// Whether a phone's close box `cross` lies over a window's content: it starts left of the strip's
+/// right edge and reaches below the strip. A box beside or above the window is not covered by it.
+pub fn crosses_window_content(cross: Rect, strip: Rect) -> bool {
+    cross.x < strip.x + strip.w && cross.y + cross.h > strip.y + strip.h
+}
+
+local! {
+    /// The close cross of the last title bar drawn this frame, when it lies over its window's content
+    /// (its box and whether it is red): drawn by [`draw_queued_crosses`].
+    static QUEUED_CROSS: RefCell<Option<(Rect, bool)>> = const { RefCell::new(None) };
+}
+
+/// Sets the queued cross (`None`: none). Each title bar sets it, so only the last window's cross
+/// waits for the frame's end: a window drawn after an earlier one covers the earlier one's content
+/// and cross, and a modal dialog drawn over a window keeps the window's cross under it.
+fn queue_cross(cross: Option<(Rect, bool)>) {
+    QUEUED_CROSS.with(|q| *q.borrow_mut() = cross);
+}
+
+/// Draws the cross queued this frame (see [`queue_cross`]) and empties the queue. The frame calls it
+/// after its windows, before the pan's end, so the cross keeps the window's offset and is over
+/// every window (the FPS counter and the keyboard strip are drawn after it).
+pub fn draw_queued_crosses() {
+    if let Some((cross, red)) = QUEUED_CROSS.with(|q| q.borrow_mut().take()) {
+        // The box is its own click area; its click was taken with the title bar, so the return is unused.
+        let _ = close_button_at(cross, cross, red);
+    }
+}
+
 /// The title's room (its width, centred) kept clear of a close cross that sits inside the strip:
 /// `room` less the cross's side and gap on each side. A cross outside the strip leaves `room` as it is.
 fn room_clear_of(room: f32, strip: Rect, cross: Rect, k: f32) -> f32 {
@@ -1968,9 +1997,24 @@ fn title_bar_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bo
     if factor == FIXED_TITLE { block() } else { super::dt_font::with_legacy_metrics(block) }
     match cross {
         // A phone's box is its own click area (finger-sized, never smaller than its drawn cross).
-        Some(c) if phone.is_some() => close_button_at(c, c, skin == Skin::Red),
-        Some(c) => close_button(c.x, c.y, c.w, skin == Skin::Red),
-        None => false,
+        // A box inside the window is drawn after the frame, over the content (`draw_queued_crosses`);
+        // its click is taken here as before.
+        Some(c) if phone.is_some() && crosses_window_content(c, r) => {
+            queue_cross(Some((c, skin == Skin::Red)));
+            super::widgets::button_state(c, true).2
+        }
+        Some(c) if phone.is_some() => {
+            queue_cross(None);
+            close_button_at(c, c, skin == Skin::Red)
+        }
+        Some(c) => {
+            queue_cross(None);
+            close_button(c.x, c.y, c.w, skin == Skin::Red)
+        }
+        None => {
+            queue_cross(None);
+            false
+        }
     }
 }
 
@@ -2850,6 +2894,32 @@ mod tests {
         assert!(inside.w >= 44.0 * dp && inside.h >= 44.0 * dp, "{inside:?}");
         // The desktop: the old cross.
         assert_eq!(title_close_cross(strip, 1.0, None, 1000.0, 0.0), Rect::new(576.0, 203.0, 20.0, 20.0));
+    }
+
+    /// A phone's close box over the window's content is drawn last; one beside or above is not. Only
+    /// the last title bar's queued cross is drawn: an earlier one is replaced, and a title bar with no
+    /// queued cross empties the queue.
+    #[test]
+    fn only_the_last_title_bars_cross_over_the_content_is_drawn_after_the_frame() {
+        let dp = 2.75;
+        let side = (44.0f32 * dp).round();
+        let strip = Rect::new(100.0, 200.0, 500.0, 26.0);
+        let inside = title_close_cross(strip, 1.0, Some(dp), 600.0, 150.0);
+        let beside = title_close_cross(strip, 1.0, Some(dp), 1000.0, 0.0);
+        let above = title_close_cross(strip, 1.0, Some(dp), 600.0, 0.0);
+        assert!(crosses_window_content(inside, strip));
+        assert!(!crosses_window_content(beside, strip), "beside: {beside:?}");
+        assert!(!crosses_window_content(above, strip), "above: {above:?}");
+
+        let first = (inside, true);
+        let last = (Rect::new(10.0, 20.0, side, side), false);
+        queue_cross(Some(first));
+        queue_cross(Some(last));
+        assert_eq!(QUEUED_CROSS.with(|q| q.borrow_mut().take()), Some(last));
+        assert_eq!(QUEUED_CROSS.with(|q| q.borrow_mut().take()), None, "drawn once");
+        queue_cross(Some(first));
+        queue_cross(None);
+        assert_eq!(QUEUED_CROSS.with(|q| q.borrow_mut().take()), None, "a window without one clears it");
     }
 
     /// The title stays clear of a phone's cross inside the strip: centred, its ends are 4 px short of

@@ -173,6 +173,9 @@ async fn main() {
         // The text-size probe lists the texts of this frame (`RAZDOR_TEXT_PROBE`, off otherwise).
         ui::text_probe::begin_frame();
         app.frame();
+        // A phone's close box inside its window is drawn over the window's content (before the
+        // pan's end, which keeps the window's offset).
+        ui::chrome::draw_queued_crosses();
         // The FPS counter, the keyboard strip and the pointer stay where the screen is.
         ui::pan::end_frame();
         app.draw_fps();
