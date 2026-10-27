@@ -352,12 +352,16 @@ fn description_box_in_face(desc: &str, x: f32, y: f32, w: f32, h: f32) {
     let k = chrome::k();
     chrome::text_box(Rect::new(x, y, w, h));
     let o = super::dt_font::whole_scale(k * 0.9375);
+    // A phone's description takes the phone's text base (a phone choice, not in the original: one
+    // original px per dp, `dialog::TEXT_REF`); the desktop keeps the original's scale `o`.
+    let phone = super::display::dp_px().map(|_| super::display::text_base(o, super::dialog::TEXT_REF));
+    let base = phone.unwrap_or(o);
     let room = w - 60.0 * k;
     // Razdor's text size (the owner's request: phones' text too small): the description at
-    // its text scale while its rows fit the box above the original's 28 px margin, else at
-    // the original's size.
+    // its text scale while its rows fit the box above the original's 28 px margin, else stepped
+    // down to the base (the smallest).
     let rows_at = |t: f32| markup_rows(&format!("^{desc}"), room, super::dt_font::sheet_size(super::dt_font::Face::Subtitle, t));
-    let t = super::display::text_o_fitting(o, |t| rows_at(t).len() as f32 * 19.0 * t <= h - 28.0 * o);
+    let t = description_scale(super::display::text_size(), o, phone, |t| rows_at(t).len() as f32 * 19.0 * t <= h - 28.0 * base);
     let size = super::dt_font::sheet_size(super::dt_font::Face::Subtitle, t);
     let rows = rows_at(t);
     let line = 19.0 * t;
@@ -365,6 +369,13 @@ fn description_box_in_face(desc: &str, x: f32, y: f32, w: f32, h: f32) {
     for (i, row) in rows.iter().enumerate() {
         draw_markup_row(row, x + 30.0 * k, top + i as f32 * line, room, size);
     }
+}
+
+/// The description's text scale (a pure choice): the phone's text base `phone` when there is one,
+/// else the original's `o`, then the text size `chosen` on top, stepped down while `fits` refuses it
+/// ([`display::text_o_fitting_at`]); the last step is the base itself, the smallest.
+fn description_scale(chosen: f32, o: f32, phone: Option<f32>, fits: impl Fn(f32) -> bool) -> f32 {
+    super::display::text_o_fitting_at(chosen, phone.unwrap_or(o), fits)
 }
 
 /// The main hall's picture (0x4baa30, by the building type): the town, castle and fort,
@@ -2552,7 +2563,7 @@ fn with_back(bar: Option<Screen>, view: &BuildingView) -> Option<Screen> {
 
 #[cfg(test)]
 mod tests {
-    use super::{hall_entry_font, hall_first_row_y, hire_panel_on, tab_state, village_ok_key, Entered, HirePanel};
+    use super::{description_scale, hall_entry_font, hall_first_row_y, hire_panel_on, tab_state, village_ok_key, Entered, HirePanel};
     use razdor::rules::content::UnitId;
     use razdor::rules::script::HallEntry;
 
@@ -2832,5 +2843,18 @@ mod tests {
     fn a_sort_keeps_the_picked_item() {
         assert_eq!(super::same_pick(&[4, 3, 2], &[2, 4, 3], Some(1)), Some(2));
         assert_eq!(super::same_pick(&[4, 3, 2], &[2, 4, 3], None), None);
+    }
+
+    /// The description's size: a phone's is its text base (2.625 px per dp) at the text size 1.0 and
+    /// at 1.25 when its rows fit, else the base; the desktop's is its own scale `o`, as before.
+    #[test]
+    fn a_phones_description_takes_its_text_base_and_the_desktop_its_scale() {
+        let whole = |v: f32| crate::ui::dt_font::whole_scale(v);
+        assert_eq!(description_scale(1.0, 0.5, Some(2.625), |_| true), 2.625, "the phone's base");
+        assert_eq!(description_scale(1.25, 0.5, Some(2.625), |_| true), whole(2.625 * 1.25), "the text size on top");
+        assert_eq!(description_scale(1.25, 0.5, Some(2.625), |t| t <= 2.7), 2.625, "stepped down to the base when the rows do not fit");
+        // The desktop: its own scale, the text size on top, stepped down to it.
+        assert_eq!(description_scale(1.0, 0.9375, None, |_| true), 0.9375);
+        assert_eq!(description_scale(1.25, 0.9375, None, |t| t < 1.0), 0.9375, "the original's scale is the last step");
     }
 }
