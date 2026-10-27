@@ -125,3 +125,11 @@ phone-diary-list-reader-portrait | hero:РК1-Начало пути:1 | 1080x240
 phone-battle-dp-landscape | battle:РК1-Начало пути:0 | 2160x1080 | RAZDOR_DP=2.625
 phone-help-landscape | map:РК1-Начало пути | 2160x1080 | RAZDOR_DP=2.75;RAZDOR_SCENE_OPEN=3:keys
 phone-help-battle-landscape | battle:РК1-Начало пути:0 | 2160x1080 | RAZDOR_DP=2.75;RAZDOR_SCENE_OPEN=3:keys
+# Phones: the title windows at a phone's dp and large windows (the scenario window grows to the screen
+# in landscape, a phone choice), the main hall with its description, and the options window's crosses
+phone-scenarios-dp-portrait | scenarios:РК1-Начало пути | 1080x2160 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1
+phone-scenarios-dp-landscape | scenarios:РК1-Начало пути | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1
+phone-hall-dp-portrait | building:РК1-Начало пути:0 | 1080x2160 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1
+phone-hall-dp-landscape | building:РК1-Начало пути:0 | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1
+phone-options-dp-portrait | options | 1080x2160 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1
+phone-options-dp-landscape | options | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1
