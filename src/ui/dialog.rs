@@ -432,10 +432,18 @@ fn unit_cells(n: usize, win_w: i32) -> Vec<f32> {
     (0..n).map(|i| ((win_w * (i + 1)) / (n + 1) - 23) as f32).collect()
 }
 
-/// The first line shown of a text of `total` lines with `shown` in sight in box `tb`: the
-/// wheel over the box, Up/Down, Page Up/Page Down, Home/End move it; the scrollbar on the
-/// right too.
-fn scrolled(d: &Dialog, total: usize, shown: usize, tb: Rect) -> usize {
+/// Razdor's scrollbar beside a scrolled event text (not in the original): 12 of the window's
+/// pixels wide, 4 in from the box's right edge and 6 from its top and bottom, at the window's
+/// scale `o`, so it grows with the window (on a phone it was 12 screen px: a player's report).
+fn text_scrollbar_rect(tb: Rect, o: f32) -> Rect {
+    let o = o.max(1.0);
+    Rect::new(tb.x + tb.w - 16.0 * o, tb.y + 6.0 * o, 12.0 * o, tb.h - 12.0 * o)
+}
+
+/// The first line shown of a text of `total` lines with `shown` in sight in box `tb` of a
+/// window at the scale `o`: the wheel over the box, Up/Down, Page Up/Page Down, Home/End move
+/// it; the scrollbar on the right too.
+fn scrolled(d: &Dialog, total: usize, shown: usize, tb: Rect, o: f32) -> usize {
     let last = total.saturating_sub(shown);
     let mut first = d.scroll.get().min(last);
     if last > 0 {
@@ -459,7 +467,7 @@ fn scrolled(d: &Dialog, total: usize, shown: usize, tb: Rect) -> usize {
         }
     }
     // Razdor's scrollbar (a touch screen has neither wheel nor keys).
-    scrollbar(Rect::new(tb.x + tb.w - 16.0, tb.y + 6.0, 12.0, tb.h - 12.0), &mut first, shown, total);
+    scrollbar(text_scrollbar_rect(tb, o), &mut first, shown, total);
     d.scroll.set(first);
     first
 }
@@ -763,7 +771,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     cy += pic_h;
     let tb = Rect::new(x + f.box_x * o, cy, f.box_w * o, f.box_h * o);
     chrome::text_box(tb);
-    let first = scrolled(d, total, shown, tb);
+    let first = scrolled(d, total, shown, tb, o);
     let shown_h = lines.iter().skip(first).take(shown).map(|_| line).sum::<f32>() + rows.iter().skip(first).take(shown).map(row_h).sum::<f32>();
     let mut ty = tb.y + ((tb.h - shown_h) / 2.0).max(EVENT_PAD * o).floor() + EVENT_BASELINE * t;
     let text_x = tb.x + 20.0 * o;
@@ -966,7 +974,7 @@ fn draw_village_event(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Optio
     }
     let tb = Rect::new(x + 32.0 * o + pw, top, text_w, panel_h);
     chrome::text_box(tb);
-    let first = scrolled(d, rows.len(), shown, tb);
+    let first = scrolled(d, rows.len(), shown, tb, o);
     let count = rows.len().saturating_sub(first).min(shown);
     let text_top = tb.y + (tb.h - count as f32 * line_h) / 2.0;
     let room = tb.w - 40.0 * o - if rows.len() > shown { 16.0 * o } else { 0.0 };
@@ -1021,6 +1029,14 @@ mod tests {
         assert!(((yes + 47.5) - 347.0).abs() < 4.0, "{yes}");
         assert!(((no + 47.5) - 677.0).abs() < 4.0, "{no}");
         assert_eq!(resource_word(Resource::Experience), tr("Experience"));
+    }
+
+    #[test]
+    fn the_text_scrollbar_grows_with_the_window() {
+        let tb = Rect::new(100.0, 50.0, 600.0, 300.0);
+        assert_eq!(text_scrollbar_rect(tb, 1.0), Rect::new(684.0, 56.0, 12.0, 288.0), "the original's scale: as before");
+        let r = text_scrollbar_rect(tb, 3.0);
+        assert_eq!((r.x, r.y, r.w, r.h), (652.0, 68.0, 36.0, 264.0), "a phone's window three times larger: the bar too");
     }
 
     /// 0x4a9deb: a victory shows only the resources it brought, none when it brought none.
