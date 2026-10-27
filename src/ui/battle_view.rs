@@ -73,8 +73,17 @@ struct Layout {
     pitch: Vec2,
     grid_x: f32,
     formation: Formation,
-    /// Stacked only (a phone held upright): the window's own close box, finger-sized, at the top right.
+    /// A phone's own close box, finger-sized, at the top right (stacked or landscape); None on desktop,
+    /// where the title bar's cross is the close.
     close: Option<Rect>,
+    /// The stacked layout (a phone held upright).
+    stacked: bool,
+}
+
+/// A phone's close box: a 44 dp square at the window's top right, in the close row.
+fn close_box(win: Rect, k: f32, dp: f32) -> Rect {
+    let side = (CLOSE_DP * dp).round();
+    Rect::new(win.right() - side - 4.0 * k, win.y + 3.0 * k, side, side)
 }
 
 /// The stacked battle window's design width: 590 px, as the other stacked windows.
@@ -119,15 +128,18 @@ fn stacked_video(f: Formation) -> (f32, f32) {
 impl Layout {
     fn new(battle: &Battle) -> Layout {
         let (f, k) = (battle.formation, chrome::k());
-        match (window_layout::game_rect(stacked_video(f)), super::display::dp_px()) {
+        let dp = super::display::dp_px();
+        match (window_layout::game_rect(stacked_video(f)), dp) {
             (Some(win), Some(dp)) => Layout::upright(k, win, f, dp),
-            _ => Layout::landscape(k, (screen_width(), screen_height()), chrome::bar_height(), f),
+            _ => Layout::landscape(k, (screen_width(), screen_height()), chrome::bar_height(), f, dp),
         }
     }
 
     /// The landscape window: 836×600 at `k`, centred over the view above the `bar` px bottom bar,
-    /// the unit's column at the left and the formations on the right.
-    fn landscape(k: f32, screen: (f32, f32), bar: f32, f: Formation) -> Layout {
+    /// the unit's column at the left and the formations on the right. On a phone (`dp`, as the
+    /// stacked window's) the close box is the same finger-sized one over the top right corner
+    /// (Razdor's phone choice, not parity), and the title bar's own cross is not drawn.
+    fn landscape(k: f32, screen: (f32, f32), bar: f32, f: Formation, dp: Option<f32>) -> Layout {
         let (sw, sh) = screen;
         let (ww, wh) = ((836.0 * k).round(), (600.0 * k).round());
         let x = ((sw - ww) / 2.0).round();
@@ -141,7 +153,8 @@ impl Layout {
         let card = vec2(88.0 * c * k, 128.0 * c * k).round();
         let pitch = vec2(96.0 * c * k, 133.0 * c * k);
         let grid_w = f.display_cols() as f32 * pitch.x - 8.0 * c * k;
-        Layout { k, win, panel, quick, strip, card, pitch, grid_x: (rx + (rw - grid_w) / 2.0).round(), formation: f, close: None }
+        let close = dp.map(|dp| close_box(win, k, dp));
+        Layout { k, win, panel, quick, strip, card, pitch, grid_x: (rx + (rw - grid_w) / 2.0).round(), formation: f, close, stacked: false }
     }
 
     /// The stacked window (a phone held upright) at `k`, `win` as `window_layout::game_rect` fits
@@ -156,14 +169,13 @@ impl Layout {
         let card = vec2(88.0 * c * k, 128.0 * c * k).round();
         let pitch = vec2(96.0 * c * k, 133.0 * c * k);
         let grid_w = f.display_cols() as f32 * pitch.x - 8.0 * c * k;
-        let side = (CLOSE_DP * dp).round();
-        let close = Rect::new(win.right() - side - 4.0 * k, win.y + 3.0 * k, side, side);
-        Layout { k, win, panel: band, quick, strip, card, pitch, grid_x: (strip.x + (strip.w - grid_w) / 2.0).round(), formation: f, close: Some(close) }
+        let close = close_box(win, k, dp);
+        Layout { k, win, panel: band, quick, strip, card, pitch, grid_x: (strip.x + (strip.w - grid_w) / 2.0).round(), formation: f, close: Some(close), stacked: true }
     }
 
     /// Whether the window is stacked (a phone held upright).
     fn is_stacked(&self) -> bool {
-        self.close.is_some()
+        self.stacked
     }
 
     /// The ground under the unit's card: the landscape column down to the window's bottom, or the band.
@@ -1080,10 +1092,10 @@ impl BattleView {
         // The window: red marble, the title with both armies, the turn in the corner.
         // Its red close button asks to leave the battle, as Esc does (4daa80).
         let ongoing = b.outcome() == Outcome::Ongoing;
-        // Stacked, the close is the finger-sized box over the band, drawn after the title bar; the
-        // title bar's own close box is the landscape window's.
+        // On a phone the close is the finger-sized box over the window's top right, drawn after the
+        // title bar; the title bar's own close box is the desktop's.
         let closable = !self.end_shown();
-        let (_, title_close) = chrome::window(l.win, title, Skin::Red, closable && !l.is_stacked());
+        let (_, title_close) = chrome::window(l.win, title, Skin::Red, closable && l.close.is_none());
         let box_close = l.close.filter(|_| closable).is_some_and(|c| chrome::close_button(c.x, c.y, c.w, true));
         let close = (title_close || box_close) && !self.exiting && !input_blocked();
         // The frame between the panel and the formations (stacked, the band's seam is drawn last).
@@ -1690,7 +1702,8 @@ mod tests {
     #[test]
     fn the_landscape_battle_layout_is_as_before() {
         // 1280×800 at the interface scale 1, an 80 px bar: the window centred above the bar.
-        let l = Layout::landscape(1.0, (1280.0, 800.0), 80.0, Formation::default());
+        let l = Layout::landscape(1.0, (1280.0, 800.0), 80.0, Formation::default(), None);
+        assert!(l.close.is_none());
         assert!(!l.is_stacked());
         assert_eq!(l.win, Rect::new(222.0, 60.0, 836.0, 600.0));
         assert_eq!(l.panel, Rect::new(224.0, 87.0, 244.0, 534.0));
@@ -1700,6 +1713,21 @@ mod tests {
         assert_eq!(l.pitch, vec2(96.0, 133.0));
         assert_eq!(l.grid_x, 479.0);
         assert_eq!(l.column(), Rect::new(224.0, 87.0, 244.0, 600.0 - 2.0 - 27.0));
+    }
+
+    /// Razdor's phone choice, not parity: a phone in landscape has the same finger-sized close box at
+    /// the top right of its window as the stacked one (44 dp), and the desktop has none.
+    #[test]
+    fn a_phone_in_landscape_has_a_44_dp_close_box_at_the_top_right() {
+        let dp = 2.75;
+        let l = Layout::landscape(1.0, (2400.0, 1080.0), 90.0, Formation::default(), Some(dp));
+        let (win, close) = (l.win, l.close.expect("a phone's close box"));
+        assert!(!l.is_stacked());
+        assert!(close.w >= 44.0 * dp && close.h >= 44.0 * dp, "{close:?}");
+        assert!(close.x >= win.x && close.right() <= win.right() && close.y >= win.y && close.bottom() <= win.bottom(), "{close:?}");
+        assert!(close.x > win.x + win.w / 2.0 && close.y < win.y + win.h / 2.0, "top right: {close:?} in {win:?}");
+        assert_eq!(close.right(), win.right() - 4.0);
+        assert_eq!(close.y, win.y + 3.0);
     }
 
     #[test]
