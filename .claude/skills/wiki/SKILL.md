@@ -11,9 +11,12 @@ copy of Discord Times' content (no unit, spell, item or map data or texts; CLAUD
 
 - Engine: Starlight (Astro) in `wiki/`. Russian at `wiki/src/content/docs/<section>/`, English
   at `wiki/src/content/docs/en/<section>/`, same file names.
-- Published at https://indicozy.github.io/razdor/wiki/ by `.github/workflows/wiki.yml` on every
-  push to `main` that touches `wiki/` (it rebuilds into `gh-pages/wiki/` only; the hand-made site
-  around it is untouched).
+- Published at https://indicozy.github.io/razdor/wiki/ by `.github/workflows/pages.yml` on every
+  push to `main` that touches `wiki/`. Pages' source is "GitHub Actions" (the owner's choice,
+  2026-10-27; the ruleset lets no bot push): the workflow deploys the hand-made site from
+  `gh-pages` with the wiki built into its `wiki/`, pushing nothing. A push to `gh-pages` (site
+  edits) redeploys through `gh-pages`' own `.github/workflows/deploy.yml`, which dispatches
+  `pages.yml`; by hand: `gh workflow run pages.yml --ref main`.
 - Screenshots: WebP under `wiki/src/assets/shots/` (the one place Razdor screenshots may be
   committed; the owner's decision, 2026-10-27). Keep each under ~150 KB.
 

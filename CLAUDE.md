@@ -17,7 +17,7 @@ are in `README.md` (Russian).
 - Off-screen screens and profiling: the `offscreen-snapshot` skill.
 - Text size on phones (every text measured in sp, under 12 sp listed): the `text-size` skill.
 - Player wiki (Starlight in `wiki/`, published to https://indicozy.github.io/razdor/wiki/ by
-  `.github/workflows/wiki.yml`): the `wiki` skill.
+  `.github/workflows/pages.yml`): the `wiki` skill.
 - UI regression check (renders the scene list off-screen, compares with the goldens outside the
   repo): `python3 -I tools/ui-regress/ui_regress.py run`; see `tools/ui-regress/README.md`.
 

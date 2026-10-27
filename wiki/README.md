@@ -1,7 +1,7 @@
 # Razdor player wiki
 
-Starlight (Astro) site, published by `.github/workflows/wiki.yml` into the `wiki/` folder of
-the `gh-pages` branch: https://indicozy.github.io/razdor/wiki/
+Starlight (Astro) site, deployed by `.github/workflows/pages.yml` together with the hand-made site
+from the `gh-pages` branch, at its `wiki/`: https://indicozy.github.io/razdor/wiki/
 
 - Russian pages at the root of `src/content/docs/`, English under `en/`. Each section
   folder has an `index.md`; its sidebar order is set in the page frontmatter.

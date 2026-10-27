@@ -1,0 +1,64 @@
+# Deploys GitHub Pages (https://indicozy.github.io/razdor/): the hand-made site from the gh-pages
+# branch plus the player wiki (wiki/, Starlight) built into its wiki/ folder
+# (https://indicozy.github.io/razdor/wiki/). Pages' source is "GitHub Actions", so nothing is
+# pushed to any branch (the "indicozy only" ruleset lets no bot push). A push to gh-pages starts
+# this workflow through gh-pages' own .github/workflows/deploy.yml (a workflow_dispatch).
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "wiki/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: wiki/package-lock.json
+
+      - name: Build the wiki
+        working-directory: wiki
+        run: npm ci && npm run build
+
+      - name: Check out the site (gh-pages)
+        uses: actions/checkout@v5
+        with:
+          ref: gh-pages
+          path: site
+
+      - name: Put the wiki into the site
+        run: |
+          rm -rf site/.git site/.github
+          rsync -a --delete wiki/dist/ site/wiki/
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-22.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
