@@ -425,6 +425,7 @@ impl App {
                 self.load_error = None;
                 self.map_view.reset();
                 self.map_view.forget_shows();
+                items_view::reset_pack_view();
                 razdor::diag::play(&game.clock.label(), &play_game_line(&game, "loaded"));
                 self.dt_content = saves::session_content(self.dt_content.take(), &game);
                 if let Some(q) = game.pending_question() {
@@ -1270,6 +1271,7 @@ impl App {
                         Some(g) => {
                             self.map_view.reset();
                             self.map_view.open_around_hero(&g);
+                            items_view::reset_pack_view();
                             self.message = None;
                             self.game = Some(g);
                             next = Some(Screen::WorldMap);

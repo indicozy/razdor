@@ -1081,6 +1081,7 @@ pub fn class_select(game: &mut Option<Game>, demo: &Arc<Content>, scenario: Opti
     });
     if hero_button(424.0, &own("NewHero", "Start", n_("Start"))) || enter {
         cue(Cue::Button);
+        super::items_view::reset_pack_view();
         *game = Some(screens::start_game(demo, Some((e, &content)), hero, &name));
         return leave_hero_window(Screen::WorldMap);
     }

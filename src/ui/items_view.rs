@@ -119,7 +119,7 @@ local! {
     /// What the backpack's filter line holds (`ui::item_filter`).
     static FILTER: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     /// The backpack's shown group and order (Razdor's, `rules::pack_order`: a view only, the
-    /// pack keeps its order; kept for the session).
+    /// pack keeps its order; reset by `reset_pack_view` when a game starts or a save loads).
     static GROUP: std::cell::Cell<ItemGroup> = const { std::cell::Cell::new(ItemGroup::All) };
     static SORT: std::cell::Cell<PackSort> = const { std::cell::Cell::new(PackSort::Shown) };
     /// The class a promotion portrait under the pointer put on the left panel (0x4c39d8
@@ -232,6 +232,13 @@ pub(super) fn set_pack_filter(query: &str) {
 pub(super) fn set_pack_view(group: ItemGroup, sort: PackSort) {
     GROUP.with(|g| g.set(group));
     SORT.with(|s| s.set(sort));
+}
+
+/// A new game, a campaign map or a loaded save starts the backpack's group and order at the
+/// default (All, as found): the choice is for one game and is not stored in a save (a player's
+/// report).
+pub(super) fn reset_pack_view() {
+    set_pack_view(ItemGroup::All, PackSort::Shown);
 }
 
 /// The backpack's filter as the army screen is left by any way (its own buttons clear it;
@@ -2006,7 +2013,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
 
 #[cfg(test)]
 mod tests {
-    use super::{card_line, diary_body_size, diary_column, diary_title_size, held_card_lit, held_hint_ink, class_wage, hero_resources, panel_slots, pointed_line, promo_ease, promo_look, promo_ms, ArmySel, Content, Controls, GridPress, UnitId};
+    use super::{card_line, diary_body_size, diary_column, diary_title_size, held_card_lit, held_hint_ink, class_wage, hero_resources, panel_slots, pointed_line, promo_ease, promo_look, promo_ms, reset_pack_view, set_pack_view, ArmySel, Content, Controls, GridPress, ItemGroup, PackSort, GROUP, SORT, UnitId};
     use macroquad::prelude::Rect;
 
     fn column_boxes() -> (Rect, Rect, Rect) {
@@ -2364,6 +2371,16 @@ mod tests {
         let mut s = sel(Some(5), Some(5));
         s.clamp(5);
         assert_eq!(s, ArmySel::default());
+    }
+
+    /// A new game starts the backpack at its default group and order; within one game the choice stays.
+    #[test]
+    fn a_new_game_starts_the_backpack_at_the_default_group_and_order() {
+        set_pack_view(ItemGroup::Potions, PackSort::PriceUp);
+        assert_eq!((GROUP.with(|g| g.get()), SORT.with(|s| s.get())), (ItemGroup::Potions, PackSort::PriceUp));
+        reset_pack_view();
+        assert_eq!(GROUP.with(|g| g.get()), ItemGroup::All);
+        assert_eq!(SORT.with(|s| s.get()), PackSort::Shown);
     }
 
     #[test]

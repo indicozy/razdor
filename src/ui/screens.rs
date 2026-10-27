@@ -506,6 +506,7 @@ pub fn class_select(
         }
         if hover && clicked() {
             cue(Cue::MenuPress);
+            super::items_view::reset_pack_view();
             *game = Some(start_game(&content, scenario.as_ref().map(|(e, c)| (*e, c)), hero, &name));
             return Some(Screen::WorldMap);
         }

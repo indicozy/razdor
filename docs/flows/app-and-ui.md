@@ -415,8 +415,8 @@ count, the order and «ПКМ — порядок». A right click on it goes on 
 (`PackSort::next`); a changed order is named small at its bottom (`sort_short_label`), in the
 body face. The pack's cells are then listed through `pack_order::pack_view_order` as the filter
 lists them, so the filter counts within the group and Enter takes the first shown. Changing the
-group or the order starts the pack at its top; both are kept for the session (`GROUP`, `SORT` in
-`items_view`). The market's list has the same eight group buttons under its titles
+group or the order starts the pack at its top; both are kept for the game (`GROUP`, `SORT` in
+`items_view`): a new game, a campaign map's start and a loaded save reset them (`items_view::reset_pack_view`). The market's list has the same eight group buttons under its titles
 (`building_view::market`, a row of 24 px, the list below it; no search: the market keeps its own
 filter line, `item_filter::field_with`): it hides the other groups' rows before the filter, and a
 hidden pick is not the pick.
