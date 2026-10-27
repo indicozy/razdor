@@ -23,6 +23,8 @@ that system.
 2. Run the full suite with the install: `RAZDOR_DT_DIR=… cargo test --release` (with the core pinning prefix from `CLAUDE.local.md`, if present, and `RAZDOR_PERF_BUDGET_SCALE` on slow cores; lib and bins;
    the lib failing stops cargo before the bins, so run `--bins` too if it does). Report any
    failure; a failure that also fails on the previous release's commit is pre-existing, say so.
+   Wiki: every `changelog/unreleased.md` line a player could look up has its wiki page (ru and
+   en, the `wiki` skill); write the missing ones before the release.
 3. Version: the last number by default; "minor version" bumps the middle (0.4.17 → 0.5.0).
    Set `version` in `Cargo.toml`, then `cargo build --release` (same prefix) so `Cargo.lock` follows.
 4. Changelog (layout in `changelog/README.md`): move `changelog/unreleased.md`'s content to

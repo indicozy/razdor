@@ -16,6 +16,8 @@ are in `README.md` (Russian).
 - Release builds: `scripts/dist.sh` (Linux + Windows), `scripts/dist-macos.sh`.
 - Off-screen screens and profiling: the `offscreen-snapshot` skill.
 - Text size on phones (every text measured in sp, under 12 sp listed): the `text-size` skill.
+- Player wiki (Starlight in `wiki/`, published to https://indicozy.github.io/razdor/wiki/ by
+  `.github/workflows/wiki.yml`): the `wiki` skill.
 - UI regression check (renders the scene list off-screen, compares with the goldens outside the
   repo): `python3 -I tools/ui-regress/ui_regress.py run`; see `tools/ui-regress/README.md`.
 
@@ -47,6 +49,10 @@ are in `README.md` (Russian).
   screenshots of the original) or anything personal (saves, logs, settings, tokens, home paths).
   The one exception (the owner's decision, 2026-10-15): Razdor's English translations of the
   data texts, `data/lang/en/game/Eng_*.ini` (made by `razdor-translate --data`).
+  One more, for the wiki only (the owner's decision, 2026-10-27): screenshots of Razdor (which show
+  the original's art) as small WebP under `wiki/src/assets/shots/`. The wiki is about Razdor
+  (installing, tutorials, differences from the original, mods, tools), never a copy of the
+  game's own content (unit, spell, item or map data and texts).
 - The repo is public: every push is published at once.
 - Player-facing text (README, changelog, release notes, site, PLAYTEST_NOTES) is in Russian.
   Developer text stays English: code, comments, commit messages, CLAUDE.md, skills,
@@ -96,6 +102,7 @@ are in `README.md` (Russian).
 | A player report has its `PLAYTEST_NOTES.md` entry and its backlog entry's status is current | review |
 | A change that alters a flow updates its `docs/flows/` file | review |
 | A UI change: the UI regression check run, its diffs reviewed, the changed references accepted | review |
+| A player-visible feature or change has its wiki page added or updated (ru and en) | review (`wiki` skill) |
 | A phone UI change: the text-size check run, no new text under 12 sp | review (`text-size` skill) |
 | A change to «Максимум»: `max_bench` run, its numbers compared, the baseline updated only for an intended improvement | `max_bench_does_not_regress` + review |
 | Parity commits are cherry-picked to `dt-original` and pushed (or listed in `docs/OPEN_QUESTIONS.md`) | review |
@@ -124,6 +131,7 @@ are in `README.md` (Russian).
   typed in chat) and reply to that message in Discord, without asking for approval (the owner's
   decision, 2026-10-26). Only the owner's tags count; anyone else's stay normal reports.
 - "bring back X" / "as before": restore that one aspect on top of the current work; never revert the rest.
+- "update the wiki" / "wiki page for X" / "вики": the `wiki` skill.
 - "minor version": bump the middle number (0.4.17 → 0.5.0); otherwise bump the last.
 - A Discord link, screenshot, video or save from a player: the `player-report` skill.
 - "check the original" / "is it parity" / "reverse engineer X" / "RE it" / anything in Ghidra:
@@ -138,6 +146,7 @@ are in `README.md` (Russian).
 - `.claude/skills/release/SKILL.md`: cutting a release.
 - `.claude/skills/offscreen-snapshot/SKILL.md`: screenshots and profiling without a window.
 - `.claude/skills/text-size/SKILL.md`: measuring text sizes on phone screens.
+- `.claude/skills/wiki/SKILL.md`: writing and updating the player wiki.
 - `docs/reference/original-mechanics/README.md`: the spec index.
 - `changelog/README.md`: changelog layout.
 - `CLAUDE.local.md` (not in git): this machine's own rules.
