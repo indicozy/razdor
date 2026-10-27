@@ -190,6 +190,28 @@ const TITLE_MARGIN: f32 = 8.0;
 /// baseline, so the version and copyright lines stay clear of it.
 const TITLE_FOOT_GAP: f32 = 16.0;
 
+/// The window scale of a title window of `video` size on a phone held sideways (a phone choice, not in
+/// the original: the windows were too small to use with a finger, as the exit windows were,
+/// [`sideways_exit_k`]): one original px per dp, never above the fit to the screen's width less the
+/// safe area's sides and to the height between the top inset and the bar, never below `base_k`. None
+/// off the phone (`dp` None) and with the large windows off: the scale stays as it is.
+pub fn sideways_title_k(base_k: f32, dp: Option<f32>, large: bool, (sw, sh): (f32, f32), bar: f32, safe: super::display::SafeArea, video: (f32, f32)) -> Option<f32> {
+    dp?;
+    if !large {
+        return None;
+    }
+    let avail = (sw - safe.left - safe.right, sh - safe.top);
+    Some(super::display::popup_scale(base_k, large, dp, video, avail, bar))
+}
+
+/// [`sideways_title_k`] for the phone on screen now (None unless it is held sideways).
+fn sideways_title_now(video: (f32, f32)) -> Option<f32> {
+    if portrait() {
+        return None;
+    }
+    sideways_title_k(chrome::k(), super::display::dp_px(), super::display::large_windows(), (screen_width(), screen_height()), chrome::bar_height(), super::display::safe_area(), video)
+}
+
 /// The scale and the rectangle of a title window (`video`: its size in video px, 960×720 frame)
 /// on a phone held upright: the largest scale that spans the screen's width less
 /// [`TITLE_MARGIN`] and fits between the top safe inset `top` and the footer, never below
@@ -242,17 +264,23 @@ fn portrait_title_now(video: (f32, f32)) -> Option<(f32, Rect)> {
     portrait_title((screen_width(), screen_height()), super::display::dp_px(), super::display::safe_area().top, interface_k(), video)
 }
 
-/// The window scale of a title window of `video` size, as a guard: set until it drops. A
-/// screen that is not held upright keeps the scale it has (none on the title screens).
+/// The window scale of a title window of `video` size, as a guard: set until it drops. On a phone
+/// held upright it is [`portrait_title`]'s; held sideways [`sideways_title_k`]'s. Any other screen
+/// keeps the scale it has (none on the title screens).
 pub fn title_scale(video: (f32, f32)) -> super::display::WindowScale {
-    let k = portrait_title_now(video).map(|(k, _)| k);
+    let k = portrait_title_now(video).map(|(k, _)| k).or_else(|| sideways_title_now(video));
     super::display::enter_window_scale(k.or_else(super::display::window_scale))
 }
 
 /// The rectangle of a title window of `video` size (video px, at its own scale) on a phone held
-/// upright; `None` elsewhere, where the window keeps its own placement.
+/// upright, or sideways (centred between the safe area's sides and the top inset and the bar, as an
+/// exit window: [`exit_rect`]); `None` elsewhere, where the window keeps its own placement.
 pub fn title_rect(video: (f32, f32)) -> Option<Rect> {
-    portrait_title_now(video).map(|(_, r)| r)
+    portrait_title_now(video).map(|(_, r)| r).or_else(|| {
+        let k = sideways_title_now(video)?;
+        let (w, h) = ((video.0 * k).round(), (video.1 * k).round());
+        Some(exit_rect((screen_width(), screen_height()), chrome::bar_height(), super::display::safe_area(), (w, h)))
+    })
 }
 
 /// [`portrait_game`] for the phone on screen now (`None` where it is not held upright).
@@ -843,5 +871,53 @@ mod exit_tests {
     fn large_windows_off_keep_the_phone_s_scale() {
         let k = sideways_exit_k(BASE, Some(2.625), false, SIDE, BAR, NO_SAFE).expect("a phone");
         assert!((k - BASE).abs() < 1e-4, "{k} is not the base {BASE}");
+    }
+}
+
+#[cfg(test)]
+mod sideways_title_tests {
+    use super::*;
+    use super::super::display::SafeArea;
+
+    const NO_SAFE: SafeArea = SafeArea { left: 0.0, top: 0.0, right: 0.0, bottom: 0.0, corner_bl: 0.0, corner_br: 0.0 };
+    /// The phone held sideways, as the exit windows' test: 2400×1080 at 2.625 px per dp, its bar 120 px.
+    const SIDE: (f32, f32) = (2400.0, 1080.0);
+    const BAR: f32 = 120.0;
+    const BASE: f32 = 1.5;
+    /// The scenario list's video size (594 × 482).
+    const SCENARIO: (f32, f32) = (594.0, 482.0);
+
+    #[test]
+    fn the_desktop_and_large_windows_off_keep_the_title_window_scale() {
+        assert_eq!(sideways_title_k(BASE, None, true, (1920.0, 1080.0), 80.0, NO_SAFE, SCENARIO), None, "the desktop");
+        assert_eq!(sideways_title_k(BASE, Some(2.625), false, SIDE, BAR, NO_SAFE, SCENARIO), None, "large windows off");
+    }
+
+    #[test]
+    fn a_phone_held_sideways_scales_a_title_window_to_the_height_above_the_bar() {
+        let k = sideways_title_k(BASE, Some(2.625), true, SIDE, BAR, NO_SAFE, SCENARIO).expect("a phone");
+        // The height limits it: (1080 − 120 − 4) / 482 ≈ 1.98, below one px per dp (2.625).
+        assert!((k - (1080.0 - BAR - 4.0) / 482.0).abs() < 0.01, "{k}");
+        assert!(k >= 1.25 * BASE, "{k} is not at least a quarter larger than the base {BASE}");
+        let r = exit_rect(SIDE, BAR, NO_SAFE, (SCENARIO.0 * k, SCENARIO.1 * k));
+        assert!(r.x >= 0.0 && r.x + r.w <= SIDE.0 + 0.01, "{r:?} is wider than the screen");
+        assert!(r.y >= 0.0 && r.y + r.h <= SIDE.1 - BAR + 0.01, "{r:?} is taller than the screen above the bar");
+        assert!((r.x + r.w / 2.0 - SIDE.0 / 2.0).abs() < 0.01, "not centred across the screen");
+    }
+
+    #[test]
+    fn a_small_title_window_takes_one_original_px_per_dp_when_the_screen_has_room() {
+        // A 300 × 200 window on the phone: its width and height fit at one px per dp (2.625).
+        let k = sideways_title_k(BASE, Some(2.625), true, SIDE, BAR, NO_SAFE, (300.0, 200.0)).expect("a phone");
+        assert!((k - 2.625).abs() < 1e-4, "{k}");
+    }
+
+    #[test]
+    fn a_sideways_title_window_stays_inside_the_safe_area() {
+        let safe = SafeArea { left: 110.0, right: 110.0, top: 60.0, ..NO_SAFE };
+        let k = sideways_title_k(BASE, Some(2.625), true, SIDE, BAR, safe, SCENARIO).expect("a phone");
+        let r = exit_rect(SIDE, BAR, safe, (SCENARIO.0 * k, SCENARIO.1 * k));
+        assert!(r.x >= safe.left - 0.01 && r.x + r.w <= SIDE.0 - safe.right + 0.01, "{r:?} is under the cutouts");
+        assert!(r.y >= safe.top - 0.01 && r.y + r.h <= SIDE.1 - BAR + 0.01, "{r:?} is off the top inset or the bar");
     }
 }
