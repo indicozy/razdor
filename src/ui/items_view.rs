@@ -533,6 +533,16 @@ struct Slide {
     ms: i64,
 }
 
+/// The strip's line when a promotion ends: none on success, the original shows no line on a
+/// promotion (it changes the class at 0x4b1dcb, again at 0x4b1f42 if not yet, and hides the
+/// hint at 0x4b1fff); a refused one shows «Not possible.».
+fn promotion_message<E>(r: Result<(), E>) -> Option<String> {
+    match r {
+        Ok(()) => None,
+        Err(_) => Some(tr("Not possible.").into()),
+    }
+}
+
 fn now_ms() -> i64 {
     (get_time() * 1000.0) as i64
 }
@@ -594,10 +604,7 @@ pub fn squad(
         let t = now_ms() - p.t0_ms;
         if !p.done && t > p.ms - 100 {
             p.done = true;
-            *message = Some(match game.promote(p.unit, p.to) {
-                Ok(()) => razdor::trf!("{name} is now a {class} (level 1, XP 0).", name = game.squad_label(p.unit), class = game.content.unit(p.to).name),
-                Err(_) => tr("Not possible.").into(),
-            });
+            *message = promotion_message(game.promote(p.unit, p.to));
         }
         if t >= p.ms {
             *selected = ArmySel { selected: None, shown: Some(p.unit) };
@@ -1267,6 +1274,14 @@ use super::{card_line, held_card_lit, held_hint_ink, class_wage, hero_resources,
         assert_eq!((red.g * 255.0).round() as u8, 103);
         assert_eq!((red.b * 255.0).round() as u8, 96);
         assert_eq!(held_hint_ink(false), super::super::chrome::GOLD);
+    }
+
+    /// The original shows no line when a promotion succeeds (0x4b1dcb, 0x4b1f42, hint hidden
+    /// 0x4b1fff); a refused one keeps «Not possible.».
+    #[test]
+    fn a_promotion_leaves_no_line_in_the_strip() {
+        assert_eq!(super::promotion_message::<()>(Ok(())), None);
+        assert_eq!(super::promotion_message(Err::<(), _>("refused")), Some(razdor::i18n::tr("Not possible.").to_string()));
     }
 
     fn sel(selected: Option<usize>, shown: Option<usize>) -> ArmySel {
