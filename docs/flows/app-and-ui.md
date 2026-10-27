@@ -197,7 +197,13 @@ stores them. On Android `ui::android::read_safe_insets` reads the decor view's `
 `getInsets(systemBars | displayCutout)` on API 30 and later, the system window insets before that, and each
 side is at least 24 dp (`platform::safe_margins`: the rounded corners are not reported by every system).
 On iOS `platform::ios_safe_margins` gives 44 points at the top and bottom in portrait, at the sides in
-landscape. `mobile::refresh_safe_insets` (once a frame in `App::frame`) reads them when the screen turns and
+landscape. The area also holds the radii of the four rounded corners (`display::SafeArea`: `corner_bl`, `corner_br`,
+`corner_tl`, `corner_tr`, physical px; Android reads `getRoundedCorner` at positions 0–3, so the landscape's top
+corners are round too; a corner the system does not report takes 16 dp). `RAZDOR_SAFE_AREA="l,t,r,b,bl,br[,tl,tr]"`
+overrides it for snapshots. `game_bar::on_screen` and `rect_on_screen` test a point or a rectangle against those
+corners. The bottom bar's stat line (mana, gold, income, wages) moves each item inward by the least shift that keeps
+its label's start and its value's end off the bottom corners (`game_bar::stat_centres`, a phone choice; the
+original has no corners). `mobile::refresh_safe_insets` (once a frame in `App::frame`) reads them when the screen turns and
 every 30 frames, since the insets settle after a turn; a turn the system has not laid out is read again on
 the next frame. The keyboard strip (`widgets::draw_keyboard_strip`), the active spells line on the map
 (`world_view`, the notes under the minimap) and the FPS counter (`App::draw_fps`) all sit inside it.
@@ -282,7 +288,8 @@ its rows are as many as keep every card at least the landscape card's 96 px tall
 a page on a 2400 px phone. Its card text takes the phone's text base (`display::text_for`, `dialog::TEXT_REF`).
 Its bottom row is inside that rectangle. The minimap (`minimap::window`) in
 portrait stands inside the safe area (`in_safe_area`, `inset_view`); its phone close cross sits in the frame's top
-corner (`close_box`). The F1 keys list (`hotkeys::help_overlay`) takes the cross on a phone and closes by it.
+corner (`close_box`); where a rounded screen corner would cut the cross or its click area, the cross moves inward
+along the diagonal toward the window's middle (`close_box_with`, the least shift). The F1 keys list (`hotkeys::help_overlay`) takes the cross on a phone and closes by it.
 Close crosses on a phone (a phone choice, not in the original): every title strip is 1.5× the desktop's
 (`chrome::phone_strip_height`, `PHONE_STRIP`) and its cross sits inside it at the right, sized by the desktop's formula
 on the taller strip (`chrome::title_close_cross`). The taller strip grows upward into the room above the window

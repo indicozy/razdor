@@ -492,9 +492,10 @@ unsafe fn system_insets(env: *mut sys::JNIEnv) -> Option<[i32; 4]> {
 }
 
 /// The phone's safe area from the activity's `razdorSafeArea` (physical px: left, top, right,
-/// bottom, then the two bottom corners' radii, -1 where the system does not report them; see
-/// `display::safe_area_from_system`). None while the window has no insets yet.
-pub fn read_safe_area() -> Option<[f32; 6]> {
+/// bottom, then the bottom-left, bottom-right, top-left and top-right corners' radii, -1 where the
+/// system does not report them; see `display::safe_area_from_system`). None while the window has
+/// no insets yet.
+pub fn read_safe_area() -> Option<[f32; 8]> {
     // SAFETY: as in `read_safe_insets`; every reference made below is local and freed by `Local`.
     unsafe {
         let env = attach_jni_env();
@@ -513,7 +514,7 @@ pub fn read_safe_area() -> Option<[f32; 6]> {
         let read = CStr::from_ptr(chars).to_string_lossy().into_owned();
         ((**env).ReleaseStringUTFChars.unwrap())(env, text.obj, chars);
         let values: Vec<f32> = read.split(',').filter_map(|p| p.trim().parse().ok()).collect();
-        <[f32; 6]>::try_from(values).ok()
+        <[f32; 8]>::try_from(values).ok()
     }
 }
 

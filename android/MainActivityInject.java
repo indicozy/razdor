@@ -126,10 +126,10 @@ public String razdorCacheDir() {
     return getCacheDir().getAbsolutePath();
 }
 
-// The phone's safe area in physical px (src/ui/display.rs reads it): "left,top,right,bottom,bl,br",
-// the display cutout's insets and the radii of the two bottom rounded corners. A corner the
-// system does not report (before API 31) is -1; "" while the window has no insets yet. The
-// system bars are left out: the game is in full screen, where they are hidden.
+// The phone's safe area in physical px (src/ui/display.rs reads it): "left,top,right,bottom,bl,br,tl,tr",
+// the display cutout's insets and the radii of the four rounded corners. A corner the system does
+// not report (before API 31) is -1; "" while the window has no insets yet. The system bars are left
+// out: the game is in full screen, where they are hidden.
 public String razdorSafeArea() {
     WindowInsets insets = getWindow().getDecorView().getRootWindowInsets();
     if (insets == null) {
@@ -150,12 +150,17 @@ public String razdorSafeArea() {
     }
     int bottomLeft = -1;
     int bottomRight = -1;
+    int topLeft = -1;
+    int topRight = -1;
     if (Build.VERSION.SDK_INT >= 31) {
-        // RoundedCorner.POSITION_BOTTOM_RIGHT is 2 and POSITION_BOTTOM_LEFT is 3 (API 31).
+        // RoundedCorner.POSITION_TOP_LEFT is 0, POSITION_TOP_RIGHT 1, POSITION_BOTTOM_RIGHT 2 and
+        // POSITION_BOTTOM_LEFT 3 (API 31).
         bottomLeft = razdorCornerRadius(insets, 3);
         bottomRight = razdorCornerRadius(insets, 2);
+        topLeft = razdorCornerRadius(insets, 0);
+        topRight = razdorCornerRadius(insets, 1);
     }
-    return left + "," + top + "," + right + "," + bottom + "," + bottomLeft + "," + bottomRight;
+    return left + "," + top + "," + right + "," + bottom + "," + bottomLeft + "," + bottomRight + "," + topLeft + "," + topRight;
 }
 
 // The radius of the rounded corner at `position`, 0 when the screen has none there, -1 when it

@@ -229,9 +229,34 @@ pub enum Look {
     Glow,
 }
 
+/// The stat line's four items (mana, gold, income, wages) from the left: where each item's centre
+/// stands along the bar's lower strip. An item's icon is at its quarter of the bar's width; its
+/// label stands left of it and its value right of it. An item moves inward by the least shift that
+/// keeps both of its ends (the label's start, the value's end, at the baseline's lowest ink) off
+/// the rounded bottom corners (`safe`): the first two move right, the last two left, by at most
+/// half the bar. Razdor's phone choice: the original's stat line has no corners to keep off.
+/// `widths` are each item's (label, value) text widths, `base` the baseline's y, `size` the text's
+/// size. The lowest ink is a quarter of the size below the baseline, or the screen's edge where
+/// that is lower (the bar sits at the edge, so the descenders are cut there). With no corners
+/// nothing moves.
+pub fn stat_centres(bar: Rect, screen: Vec2, safe: SafeArea, k: f32, widths: [(f32, f32); 4], base: f32, size: f32) -> [f32; 4] {
+    let low = (base + 0.25 * size).min(screen.y);
+    let mut out = [0.0; 4];
+    for (i, (label_w, value_w)) in widths.into_iter().enumerate() {
+        let nominal = bar.x + bar.w * (0.125 + 0.25 * i as f32);
+        // The label's start and the value's end, for the icon at `cx`.
+        let ends = |cx: f32| [cx - label_w - 16.0 * k, cx + 16.0 * k + value_w];
+        let ok = |cx: f32| ends(cx).into_iter().all(|x| on_screen(vec2(x, low), screen, safe));
+        let sign = if i < 2 { 1.0 } else { -1.0 };
+        let shift = smallest_shift(bar.w / 2.0, |s| ok(nominal + sign * s)).unwrap_or(0.0);
+        out[i] = nominal + sign * shift;
+    }
+    out
+}
+
 /// The four resources along the bar's lower strip, inside the bar's width `bar` (not the
-/// screen's: the bar keeps its own width on a wide screen). An item moves inward when its text
-/// would sit under a rounded bottom corner (`safe`).
+/// screen's: the bar keeps its own width on a wide screen). Each item moves off the rounded
+/// bottom corners (`stat_centres`).
 fn resources(game: &Game, y: f32, h: f32, bar: Rect, safe: SafeArea, screen: Vec2) {
     let k = chrome::bar_k();
     let mut wages = format!("- {}", game.daily_wages());
@@ -246,22 +271,16 @@ fn resources(game: &Game, y: f32, h: f32, bar: Rect, safe: SafeArea, screen: Vec
     ];
     let value_size = super::typography::Role::Name.size((19.0 * k).round());
     let label_size = super::typography::Role::Body.size((19.0 * k).round());
-    for (i, (label, art, value, color)) in items.iter().enumerate() {
-        let mut cx = bar.x + bar.w * (0.125 + 0.25 * i as f32);
+    let base = y + h * 0.5 + value_size * 0.36;
+    let widths = items.each_ref().map(|(label, _, value, _)| {
         let lw = super::dt_font::with_face(super::dt_font::Face::Body, || measure(label, label_size).width);
         let vw = super::dt_font::with_face(super::dt_font::Face::Subtitle, || measure(value, value_size).width);
-        let base = y + h * 0.5 + value_size * 0.36;
-        let label_x = cx - lw - 16.0 * k;
-        let value_end = cx + 16.0 * k + vw;
-        let (bl, br) = (safe.corner_bl, safe.corner_br);
-        if i < 2 {
-            let s = smallest_shift(bar.w, |s| on_screen(vec2(label_x + s, base), screen, bl, br)).unwrap_or(0.0);
-            cx += s;
-        } else {
-            let s = smallest_shift(bar.w, |s| on_screen(vec2(value_end - s, base), screen, bl, br)).unwrap_or(0.0);
-            cx -= s;
-        }
-        let label_x = cx - lw - 16.0 * k;
+        (lw, vw)
+    });
+    let centres = stat_centres(bar, screen, safe, k, widths, base, value_size.max(label_size));
+    for (i, (label, art, value, color)) in items.iter().enumerate() {
+        let cx = centres[i];
+        let label_x = cx - widths[i].0 - 16.0 * k;
         let icon = 24.0 * k;
         // Each picture with its own alpha plane and nothing else, as the original's
         // (0x4dcd8d loads them, 0x49d3e5 draws them through 0x476a3c).
@@ -490,29 +509,37 @@ fn draw_bar(game: &Game, look: &impl Fn(BarButton) -> Look, time_buttons: bool) 
     (pressed, timed)
 }
 
-/// Whether the point `p` is on the screen (`size`) with rounded bottom corners of radii `bl`
-/// and `br` (the phone's, `display::SafeArea`): outside the corner's arc is off the screen.
-pub fn on_screen(p: Vec2, size: Vec2, bl: f32, br: f32) -> bool {
+/// Whether the point `p` is on the screen (`size`) with its rounded corners (the phone's radii,
+/// `display::SafeArea`): outside a corner's arc is off the screen.
+pub fn on_screen(p: Vec2, size: Vec2, safe: SafeArea) -> bool {
     if p.x < 0.0 || p.y < 0.0 || p.x > size.x || p.y > size.y {
         return false;
     }
-    if bl > 0.0 && p.x < bl && p.y > size.y - bl {
-        return (p - vec2(bl, size.y - bl)).length() <= bl;
-    }
-    if br > 0.0 && p.x > size.x - br && p.y > size.y - br {
-        return (p - vec2(size.x - br, size.y - br)).length() <= br;
+    // A corner's arc is the circle that sits in its square: inside the square, the circle decides.
+    let corners = [(safe.corner_tl, vec2(0.0, 0.0)), (safe.corner_tr, vec2(size.x, 0.0)), (safe.corner_br, size), (safe.corner_bl, vec2(0.0, size.y))];
+    for (r, corner) in corners {
+        if r > 0.0 && (p.x - corner.x).abs() <= r && (p.y - corner.y).abs() <= r {
+            let centre = vec2(if corner.x > 0.0 { corner.x - r } else { r }, if corner.y > 0.0 { corner.y - r } else { r });
+            return (p - centre).length() <= r;
+        }
     }
     true
 }
 
 /// Whether the disc of radius `rad` at `c` lies on the screen: its centre and 64 points of its
 /// rim are on it ([`on_screen`]).
-pub fn disc_on_screen(c: Vec2, rad: f32, size: Vec2, bl: f32, br: f32) -> bool {
-    on_screen(c, size, bl, br)
+pub fn disc_on_screen(c: Vec2, rad: f32, size: Vec2, safe: SafeArea) -> bool {
+    on_screen(c, size, safe)
         && (0..64).all(|i| {
             let a = i as f32 / 64.0 * std::f32::consts::TAU;
-            on_screen(c + rad * vec2(a.cos(), a.sin()), size, bl, br)
+            on_screen(c + rad * vec2(a.cos(), a.sin()), size, safe)
         })
+}
+
+/// Whether the whole rectangle `r` lies on the screen: its four corners do (the screen's shape is
+/// convex, so the rectangle is inside when they are).
+pub fn rect_on_screen(r: Rect, size: Vec2, safe: SafeArea) -> bool {
+    [vec2(r.x, r.y), vec2(r.x + r.w, r.y), vec2(r.x, r.y + r.h), vec2(r.x + r.w, r.y + r.h)].into_iter().all(|p| on_screen(p, size, safe))
 }
 
 /// The least shift in `[0, max]` for which `ok` holds, found by bisection to half a pixel; `ok`
@@ -570,7 +597,6 @@ pub struct Layout {
 /// button's disc (70 % of its radius, [`disc_on_screen`]) off the rounded bottom corners and
 /// inside the cutout's insets; with no corners and no insets nothing moves.
 pub fn layout(bar: Rect, screen: Vec2, k: f32, row: f32, safe: SafeArea) -> Layout {
-    let (bl, br) = (safe.corner_bl, safe.corner_br);
     let left_at = |s: f32| {
         let mut x = bar.x + 8.0 * k + s;
         let mut out = [Rect::default(); 4];
@@ -593,7 +619,7 @@ pub fn layout(bar: Rect, screen: Vec2, k: f32, row: f32, safe: SafeArea) -> Layo
     };
     let fits = |r: &Rect| {
         let rad = 0.7 * r.w.min(r.h) / 2.0;
-        disc_on_screen(vec2(r.x + r.w / 2.0, r.y + r.h / 2.0), rad, screen, bl, br)
+        disc_on_screen(vec2(r.x + r.w / 2.0, r.y + r.h / 2.0), rad, screen, safe)
     };
     let left_ok = |s: f32| left_at(s).iter().all(|r| r.x >= safe.left && fits(r));
     let right_ok = |s: f32| right_at(s).iter().all(|r| r.x + r.w <= screen.x - safe.right && fits(r));
@@ -691,7 +717,7 @@ mod tests {
 
     /// Whether the button's disc (70 % of its radius) lies on the screen with those corners.
     fn disc_clear(r: &Rect, screen: Vec2, safe: SafeArea) -> bool {
-        disc_on_screen(vec2(r.x + r.w / 2.0, r.y + r.h / 2.0), 0.7 * r.w.min(r.h) / 2.0, screen, safe.corner_bl, safe.corner_br)
+        disc_on_screen(vec2(r.x + r.w / 2.0, r.y + r.h / 2.0), 0.7 * r.w.min(r.h) / 2.0, screen, safe)
     }
 
     #[test]
@@ -755,11 +781,57 @@ mod tests {
     #[test]
     fn corners_cut_the_arc_and_only_the_arc() {
         let size = vec2(1000.0, 1000.0);
+        let bl = SafeArea { corner_bl: 120.0, ..Default::default() };
         // Inside the arc: on screen; in the cut-off corner: not.
-        assert!(on_screen(vec2(120.0, 880.0), size, 120.0, 0.0));
-        assert!(!on_screen(vec2(5.0, 995.0), size, 120.0, 0.0));
+        assert!(on_screen(vec2(120.0, 880.0), size, bl));
+        assert!(!on_screen(vec2(5.0, 995.0), size, bl));
         // The bottom-right corner does not depend on the left one.
-        assert!(on_screen(vec2(5.0, 995.0), size, 0.0, 0.0));
-        assert!(!on_screen(vec2(995.0, 995.0), size, 0.0, 120.0));
+        assert!(on_screen(vec2(5.0, 995.0), size, SafeArea::default()));
+        let br = SafeArea { corner_br: 120.0, ..Default::default() };
+        assert!(!on_screen(vec2(995.0, 995.0), size, br));
+        // The top corners, the landscape's bottom ones turned.
+        let tl = SafeArea { corner_tl: 120.0, ..Default::default() };
+        assert!(!on_screen(vec2(5.0, 5.0), size, tl) && on_screen(vec2(120.0, 120.0), size, tl));
+        let tr = SafeArea { corner_tr: 120.0, ..Default::default() };
+        assert!(!on_screen(vec2(995.0, 5.0), size, tr) && on_screen(vec2(880.0, 120.0), size, tr));
+        assert!(on_screen(vec2(995.0, 5.0), size, SafeArea { corner_bl: 120.0, corner_br: 120.0, ..Default::default() }));
+    }
+
+    /// A portrait phone's stat line: the four items (widths in px) under the bottom corners.
+    /// Returns the bar, the screen, the centres, and the ends of each item for them.
+    fn stat_line(safe: SafeArea) -> (Vec2, [f32; 4], [(f32, f32); 4]) {
+        let screen = vec2(1080.0, 2160.0);
+        let (k, size) = (1.125, 21.0);
+        let bar = bar_on(screen, k, 0.0, 1080.0);
+        let widths = [(60.0, 30.0), (70.0, 25.0), (70.0, 50.0), (70.0, 60.0)];
+        // The baseline as `resources` puts it: the middle of the lower strip (below the row).
+        let row = (60.0 * k).round();
+        let base = bar.y + row + (bar.h - row) / 2.0 + 0.36 * size;
+        let centres = stat_centres(bar, screen, safe, k, widths, base, size);
+        // The four items' label starts and value ends, as `resources` draws them.
+        let ends = [0, 1, 2, 3].map(|i| (centres[i] - widths[i].0 - 16.0 * k, centres[i] + 16.0 * k + widths[i].1));
+        (screen, centres, ends)
+    }
+
+    #[test]
+    fn the_stat_line_keeps_its_text_off_the_bottom_corners() {
+        // 110 px corners: the first label (its start at 57 px) and the last value (its end at
+        // 1023 px) would be cut without a move.
+        let safe = SafeArea { corner_bl: 110.0, corner_br: 110.0, ..Default::default() };
+        let (screen, centres, ends) = stat_line(safe);
+        // The descenders reach the screen's edge (the baseline is a few px above it).
+        let low = screen.y;
+        assert!(centres[0] > 135.0, "the mana label moves in: {}", centres[0]);
+        assert!(centres[3] < 945.0, "the wages value moves in: {}", centres[3]);
+        for (a, b) in ends {
+            assert!(on_screen(vec2(a, low), screen, safe), "label start {a} is clear of the corner");
+            assert!(on_screen(vec2(b, low), screen, safe), "value end {b} is clear of the corner");
+        }
+    }
+
+    #[test]
+    fn the_stat_line_is_unchanged_without_corners() {
+        let (_, centres, _) = stat_line(SafeArea::default());
+        assert_eq!(centres, [135.0, 405.0, 675.0, 945.0]);
     }
 }

@@ -73,7 +73,7 @@ pub fn refresh_safe_insets() {
     let read = super::android::read_safe_insets();
     #[cfg(target_os = "ios")]
     let read = Some(razdor::platform::ios_safe_margins(h >= w, macroquad::window::screen_dpi_scale()));
-    // The bottom bar's area: the cutout and the corners (iOS has no hook for them: the fallback).
+    // The phone's area: the cutout and the four corners (iOS has no hook for them: the fallback).
     #[cfg(target_os = "android")]
     let area = super::android::read_safe_area();
     #[cfg(target_os = "ios")]

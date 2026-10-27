@@ -870,7 +870,7 @@ mod exit_tests {
     use super::*;
     use super::super::display::SafeArea;
 
-    const NO_SAFE: SafeArea = SafeArea { left: 0.0, top: 0.0, right: 0.0, bottom: 0.0, corner_bl: 0.0, corner_br: 0.0 };
+    const NO_SAFE: SafeArea = SafeArea { left: 0.0, top: 0.0, right: 0.0, bottom: 0.0, corner_bl: 0.0, corner_br: 0.0, corner_tl: 0.0, corner_tr: 0.0 };
     /// A 2400×1080 phone held sideways at 2.625 px per dp, its bar 120 px tall; the interface
     /// scale of such a screen is 1.5 (`chrome::fit_k` over the 0.9375 reference).
     const SIDE: (f32, f32) = (2400.0, 1080.0);
@@ -925,7 +925,7 @@ mod sideways_title_tests {
     use super::*;
     use super::super::display::SafeArea;
 
-    const NO_SAFE: SafeArea = SafeArea { left: 0.0, top: 0.0, right: 0.0, bottom: 0.0, corner_bl: 0.0, corner_br: 0.0 };
+    const NO_SAFE: SafeArea = SafeArea { left: 0.0, top: 0.0, right: 0.0, bottom: 0.0, corner_bl: 0.0, corner_br: 0.0, corner_tl: 0.0, corner_tr: 0.0 };
     /// The phone held sideways, as the exit windows' test: 2400×1080 at 2.625 px per dp, its bar 120 px.
     const SIDE: (f32, f32) = (2400.0, 1080.0);
     const BAR: f32 = 120.0;
@@ -973,7 +973,7 @@ mod over_map_sideways_tests {
     use super::*;
     use super::super::display::SafeArea;
 
-    const NO_SAFE: SafeArea = SafeArea { left: 0.0, top: 0.0, right: 0.0, bottom: 0.0, corner_bl: 0.0, corner_br: 0.0 };
+    const NO_SAFE: SafeArea = SafeArea { left: 0.0, top: 0.0, right: 0.0, bottom: 0.0, corner_bl: 0.0, corner_br: 0.0, corner_tl: 0.0, corner_tr: 0.0 };
     /// The phone held sideways, as the exit and title tests: 2400×1080 at 2.625 px per dp, its bar 120 px.
     const SIDE: (f32, f32) = (2400.0, 1080.0);
     const BAR: f32 = 120.0;

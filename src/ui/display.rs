@@ -321,7 +321,8 @@ pub fn dp_px() -> Option<f32> {
 
 /// A phone screen's unsafe areas, in physical pixels: the display cutout's insets (left, top,
 /// right, bottom; the system bars are hidden in full screen, so they are not in it) and the
-/// radii of the two bottom rounded corners. Zeros on desktop.
+/// radii of the four rounded corners (the landscape's top corners are the device's own bottom
+/// ones turned, so all four can be round). Zeros on desktop.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct SafeArea {
     pub left: f32,
@@ -330,6 +331,8 @@ pub struct SafeArea {
     pub bottom: f32,
     pub corner_bl: f32,
     pub corner_br: f32,
+    pub corner_tl: f32,
+    pub corner_tr: f32,
 }
 
 /// The rounded corners' radius when the system does not report it (before API 31, or no
@@ -337,42 +340,57 @@ pub struct SafeArea {
 #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
 pub const FALLBACK_CORNER_DP: f32 = 16.0;
 
-/// The area set by [`set_safe_area`] (six f32 bits: the fields in order).
-static SAFE: [AtomicU32; 6] = [const { AtomicU32::new(0) }; 6];
+/// The area set by [`set_safe_area`] (eight f32 bits: the fields in order).
+static SAFE: [AtomicU32; 8] = [const { AtomicU32::new(0) }; 8];
 
-/// `RAZDOR_SAFE_AREA="l,t,r,b,bl,br"` (physical px): a phone's safe area for snapshots, read once.
+/// `RAZDOR_SAFE_AREA="l,t,r,b,bl,br[,tl,tr]"` (physical px): a phone's safe area for snapshots,
+/// read once.
 fn env_safe_area() -> Option<SafeArea> {
     static ENV: std::sync::OnceLock<Option<SafeArea>> = std::sync::OnceLock::new();
     *ENV.get_or_init(|| std::env::var("RAZDOR_SAFE_AREA").ok().and_then(|s| parse_safe_area(&s)))
 }
 
-/// Parses `"l,t,r,b,bl,br"`: six numbers in physical px. None when they are not six.
+/// Parses `"l,t,r,b,bl,br"` or `"l,t,r,b,bl,br,tl,tr"` (six or eight numbers in physical px; with
+/// six the top corners are square). None when they are neither, or a number is negative.
 pub fn parse_safe_area(text: &str) -> Option<SafeArea> {
     let v: Vec<f32> = text.split(',').map(|p| p.trim().parse::<f32>().ok()).collect::<Option<_>>()?;
-    let [l, t, r, b, bl, br] = v[..] else { return None };
-    let ok = [l, t, r, b, bl, br].iter().all(|x| x.is_finite() && *x >= 0.0);
-    ok.then_some(SafeArea { left: l, top: t, right: r, bottom: b, corner_bl: bl, corner_br: br })
+    let (l, t, r, b, bl, br, tl, tr) = match v[..] {
+        [l, t, r, b, bl, br] => (l, t, r, b, bl, br, 0.0, 0.0),
+        [l, t, r, b, bl, br, tl, tr] => (l, t, r, b, bl, br, tl, tr),
+        _ => return None,
+    };
+    let ok = [l, t, r, b, bl, br, tl, tr].iter().all(|x| x.is_finite() && *x >= 0.0);
+    ok.then_some(SafeArea { left: l, top: t, right: r, bottom: b, corner_bl: bl, corner_br: br, corner_tl: tl, corner_tr: tr })
 }
 
-/// The safe area the system reported, as the phone's layout reads it: `raw` is the six values
+/// The safe area the system reported, as the phone's layout reads it: `raw` is the eight values
 /// of the Android side (`-1` for a corner it does not know), `None` when there is no data.
 /// A corner that is unknown or missing takes [`FALLBACK_CORNER_DP`] (`dp` screen px per dp).
 #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
-pub fn safe_area_from_system(raw: Option<[f32; 6]>, dp: Option<f32>) -> SafeArea {
+pub fn safe_area_from_system(raw: Option<[f32; 8]>, dp: Option<f32>) -> SafeArea {
     let fallback = dp.map_or(0.0, |d| (FALLBACK_CORNER_DP * d).round());
     match raw {
-        Some([l, t, r, b, bl, br]) => {
+        Some([l, t, r, b, bl, br, tl, tr]) => {
             let corner = |c: f32| if c < 0.0 { fallback } else { c };
-            SafeArea { left: l.max(0.0), top: t.max(0.0), right: r.max(0.0), bottom: b.max(0.0), corner_bl: corner(bl), corner_br: corner(br) }
+            SafeArea {
+                left: l.max(0.0),
+                top: t.max(0.0),
+                right: r.max(0.0),
+                bottom: b.max(0.0),
+                corner_bl: corner(bl),
+                corner_br: corner(br),
+                corner_tl: corner(tl),
+                corner_tr: corner(tr),
+            }
         }
-        None => SafeArea { corner_bl: fallback, corner_br: fallback, ..Default::default() },
+        None => SafeArea { corner_bl: fallback, corner_br: fallback, corner_tl: fallback, corner_tr: fallback, ..Default::default() },
     }
 }
 
 /// Stores the area [`safe_area`] returns (on a phone: at start, on a turn, and now and then).
 #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
 pub fn set_safe_area(a: SafeArea) {
-    for (slot, v) in SAFE.iter().zip([a.left, a.top, a.right, a.bottom, a.corner_bl, a.corner_br]) {
+    for (slot, v) in SAFE.iter().zip([a.left, a.top, a.right, a.bottom, a.corner_bl, a.corner_br, a.corner_tl, a.corner_tr]) {
         slot.store(v.to_bits(), Ordering::Relaxed);
     }
 }
@@ -384,7 +402,7 @@ pub fn safe_area() -> SafeArea {
         return a;
     }
     let v = |i: usize| f32::from_bits(SAFE[i].load(Ordering::Relaxed));
-    SafeArea { left: v(0), top: v(1), right: v(2), bottom: v(3), corner_bl: v(4), corner_br: v(5) }
+    SafeArea { left: v(0), top: v(1), right: v(2), bottom: v(3), corner_bl: v(4), corner_br: v(5), corner_tl: v(6), corner_tr: v(7) }
 }
 
 /// The on-screen keyboard's height in physical px, from the bottom edge (the IME inset; 0 while
@@ -1616,8 +1634,10 @@ mod tests {
     #[test]
     fn the_safe_area_parses_six_physical_values() {
         assert_eq!(parse_safe_area("90,0,0,0,110,110"), Some(SafeArea { left: 90.0, corner_bl: 110.0, corner_br: 110.0, ..Default::default() }));
+        assert_eq!(parse_safe_area("0,0,0,0,110,110,120,130"), Some(SafeArea { corner_bl: 110.0, corner_br: 110.0, corner_tl: 120.0, corner_tr: 130.0, ..Default::default() }));
         assert_eq!(parse_safe_area(" 0 , 0 ,0,0, 0,0 "), Some(SafeArea::default()));
         assert_eq!(parse_safe_area("90,0,0,0,110"), None);
+        assert_eq!(parse_safe_area("90,0,0,0,110,110,120"), None);
         assert_eq!(parse_safe_area("a,0,0,0,110,110"), None);
         assert_eq!(parse_safe_area("-1,0,0,0,110,110"), None);
     }
@@ -1626,10 +1646,11 @@ mod tests {
     fn an_unknown_corner_takes_the_16_dp_fallback() {
         // Android below API 31 reports -1 for the corners; no data at all gives the fallback too.
         let dp = Some(2.625);
-        let a = safe_area_from_system(Some([90.0, 0.0, 0.0, 0.0, -1.0, 110.0]), dp);
+        let a = safe_area_from_system(Some([90.0, 0.0, 0.0, 0.0, -1.0, 110.0, 0.0, -1.0]), dp);
         assert_eq!((a.left, a.corner_bl, a.corner_br), (90.0, 42.0, 110.0));
+        assert_eq!((a.corner_tl, a.corner_tr), (0.0, 42.0), "a reported 0 stays square, an unknown one falls back");
         let none = safe_area_from_system(None, dp);
-        assert_eq!((none.left, none.corner_bl, none.corner_br), (0.0, 42.0, 42.0));
+        assert_eq!((none.left, none.corner_bl, none.corner_br, none.corner_tl, none.corner_tr), (0.0, 42.0, 42.0, 42.0, 42.0));
         assert_eq!(safe_area_from_system(None, None), SafeArea::default());
     }
 }

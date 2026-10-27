@@ -25,6 +25,8 @@ use razdor::rules::map::TileMap;
 use razdor::rules::world::LocationKind;
 
 use super::widgets::*;
+use super::display::SafeArea;
+use super::game_bar::{rect_on_screen, smallest_shift};
 
 /// Explored cells within this many cells of the dark are shaded (the feathered edge).
 pub const FEATHER: i32 = 2;
@@ -205,18 +207,30 @@ fn inset_view(view: Rect, a: super::display::SafeArea) -> Rect {
 }
 
 /// The phone's close cross (a finger-sized click area, `chrome::touch_hit`) in the window's top
-/// right corner (on the side the window stands on), inside its frame. None on the desktop.
+/// corner (on the side the window stands on), inside its frame. None on the desktop.
 fn close_box(o: Rect, at: Corner) -> Option<Rect> {
-    close_box_with(o, at, super::chrome::k(), super::display::dp_px().is_some())
+    close_box_with(o, at, super::chrome::k(), super::display::dp_px(), (screen_width(), screen_height()), super::display::safe_area())
 }
 
-/// [`close_box`] at the interface scale `k`, on a phone (`phone`) only.
-fn close_box_with(o: Rect, at: Corner, k: f32, phone: bool) -> Option<Rect> {
-    if !phone {
-        return None;
-    }
+/// [`close_box`] at the interface scale `k`, on a phone (`dp`: its px per dp; None on the
+/// desktop) whose screen is `screen` with the rounded corners `safe`. The cross stands in the
+/// window's corner; where a rounded screen corner would cut it or its click area, it moves inward
+/// along the diagonal toward the window's middle, by the least shift that clears both (Razdor's
+/// phone choice: the original has no rounded corners).
+fn close_box_with(o: Rect, at: Corner, k: f32, dp: Option<f32>, screen: (f32, f32), safe: SafeArea) -> Option<Rect> {
+    let dp = dp?;
     let s = 22.0 * k;
-    Some(Rect::new(if at.left() { o.x + 4.0 * k } else { o.right() - s - 4.0 * k }, o.y + 4.0 * k, s, s))
+    let start = Rect::new(if at.left() { o.x + 4.0 * k } else { o.right() - s - 4.0 * k }, o.y + 4.0 * k, s, s);
+    let dir = (o.center() - start.center()).normalize_or_zero();
+    let moved = |t: f32| Rect::new(start.x + dir.x * t, start.y + dir.y * t, s, s);
+    let size = vec2(screen.0, screen.1);
+    let clear = |t: f32| {
+        let cross = moved(t);
+        // The click area `close_button` takes for this cross (`chrome::touch_hit`).
+        let hit = super::chrome::touch_hit(cross, cross.y + s + 3.0 * k, Some(dp), screen);
+        rect_on_screen(cross, size, safe) && rect_on_screen(hit, size, safe)
+    };
+    Some(moved(smallest_shift(o.w.min(o.h) / 2.0, clear).unwrap_or(0.0)))
 }
 
 /// The window `o` carried to the top-left `at`, kept within `view`.
@@ -1092,12 +1106,35 @@ mod tests {
             for at in [Corner::TopLeft, Corner::TopRight, Corner::BottomLeft, Corner::BottomRight] {
                 let o = outer_sized(view, k, None, 1.0, at);
                 assert!(o.x >= view.x && o.x + o.w <= view.x + view.w, "{at:?} across: {o:?}");
-                let c = close_box_with(o, at, k, true).expect("a phone has a cross");
+                let c = close_box_with(o, at, k, Some(2.625), (1080.0, 1700.0), SafeArea::default()).expect("a phone has a cross");
                 assert!(c.x >= o.x && c.x + c.w <= o.x + o.w && c.y >= o.y && c.y + c.h <= o.y + o.h, "{at:?} inside the frame: {c:?} in {o:?}");
                 assert_eq!(c.x <= o.x + o.w / 2.0, at.left(), "{at:?} on the window's side");
             }
         }
-        assert_eq!(close_box_with(outer_sized(view, 1.0, None, 1.0, Corner::TopRight), Corner::TopRight, 1.0, false), None, "the desktop has none");
+        assert_eq!(close_box_with(outer_sized(view, 1.0, None, 1.0, Corner::TopRight), Corner::TopRight, 1.0, None, (1080.0, 1700.0), SafeArea::default()), None, "the desktop has none");
+    }
+
+    /// A rounded screen corner under a phone's minimap cross moves the cross (and its click area)
+    /// off the arc, inward and no further than needed; with no corners it stays in its place.
+    #[test]
+    fn a_close_cross_in_a_rounded_corner_moves_off_the_arc() {
+        // Landscape: the window in the top-right corner, the screen's top corners round.
+        let (screen, k, dp) = ((2160.0_f32, 1080.0_f32), 1.5_f32, 2.625_f32);
+        let view = Rect::new(0.0, 0.0, screen.0, screen.1);
+        let o = outer_sized(view, k, None, 1.0, Corner::TopRight);
+        let plain = close_box_with(o, Corner::TopRight, k, Some(dp), screen, SafeArea::default()).unwrap();
+        let safe = SafeArea { corner_tr: 110.0, corner_tl: 110.0, corner_bl: 110.0, corner_br: 110.0, ..Default::default() };
+        let c = close_box_with(o, Corner::TopRight, k, Some(dp), screen, safe).unwrap();
+        let hit = super::super::chrome::touch_hit(c, c.y + c.h + 3.0 * k, Some(dp), screen);
+        let size = vec2(screen.0, screen.1);
+        assert!(rect_on_screen(c, size, safe) && rect_on_screen(hit, size, safe), "the cross and its click area clear the arc: {c:?} {hit:?}");
+        assert!(plain.x > c.x && plain.y < c.y, "the cross moved inward: {plain:?} to {c:?}");
+        assert!(c.x >= o.x && c.x + c.w <= o.x + o.w && c.y >= o.y && c.y + c.h <= o.y + o.h, "still in the frame: {c:?} in {o:?}");
+        // The shift is the least one (to half a pixel): 1.5 px less would leave the cross on the arc.
+        let dist = ((plain.x - c.x).powi(2) + (plain.y - c.y).powi(2)).sqrt();
+        let less = Rect::new(c.x + (plain.x - c.x) * 1.5 / dist, c.y + (plain.y - c.y) * 1.5 / dist, c.w, c.h);
+        let less_hit = super::super::chrome::touch_hit(less, less.y + less.h + 3.0 * k, Some(dp), screen);
+        assert!(!(rect_on_screen(less, size, safe) && rect_on_screen(less_hit, size, safe)), "a smaller shift is not clear");
     }
 
     /// The safe area (the top inset, the sides) bounds a phone's minimap view, not the desktop's.
