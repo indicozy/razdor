@@ -1834,6 +1834,22 @@ fn window_frames_grown(r: Rect, px: f32, grow: f32) {
     steel_frame(Rect::new(r.x + 2.0 * px, r.y + 27.0 * px + grow, r.w - 4.0 * px, 2.0 * px), px, 2);
 }
 
+/// [`window_frames`] for a window of the fixed title drawn with [`window`] (its rect `r` as the
+/// caller gave it, before the phone's growth): the frame and the title line follow the strip the
+/// window drew, grown upward on a phone (`phone_title_grow`, `grown_upward`), so no line crosses
+/// the taller strip or its cross. On the desktop it is `window_frames`.
+pub fn window_frames_titled(r: Rect, px: f32) {
+    let (r, grow) = titled_window_rect(r, k(), super::display::dp_px(), super::display::safe_area().top);
+    window_frames_grown(r, px, grow);
+}
+
+/// The rect of a fixed-title window `r` as [`window_styled`] draws it, and the strip's growth in px
+/// (the phone's, `phone_title_grow`, when the safe top leaves room above; else 0 and `r` as it is).
+pub fn titled_window_rect(r: Rect, k: f32, dp: Option<f32>, safe_top: f32) -> (Rect, f32) {
+    let grow = phone_title_grow(k, FIXED_TITLE, dp);
+    (grown_upward(r, grow, safe_top), if grow > 0.0 && r.y - grow >= safe_top { grow } else { 0.0 })
+}
+
 /// The original's empty worn-item slot (0xae2860 with its alpha 0xae2864, built at start-up
 /// near 0x4dbc26): a 55 px square, black inside at alpha 0x66 (40%, 0x47650c fills the alpha
 /// 1..53 with grey 0x66), with a 1 px ring at full alpha whose colours run clockwise from the
@@ -2891,6 +2907,25 @@ mod tests {
         assert_eq!(grown_upward(r, 13.0, 287.0), Rect::new(100.0, 287.0, 500.0, 413.0), "exactly to the safe top");
         assert_eq!(grown_upward(r, 13.0, 288.0), r, "no room above the safe top: the window keeps its rect");
         assert_eq!(grown_upward(r, 0.0, 0.0), r, "the desktop grows nothing");
+    }
+
+    /// Razdor's phone choice, not in the original: a fixed-title window's frame (and its title line)
+    /// follows the phone's taller strip, as `window_styled` draws it. The title line sits at the grown
+    /// strip's bottom (27 px from the grown top plus the growth), not at the caller's top plus 27 px,
+    /// which would cross the strip and its cross. The desktop's frame is the caller's rect.
+    #[test]
+    fn a_phones_window_frame_follows_its_taller_strip_so_no_line_crosses_it() {
+        let r = Rect::new(100.0, 300.0, 500.0, 400.0);
+        let (desk, g0) = titled_window_rect(r, 1.0, None, 0.0);
+        assert_eq!((desk, g0), (r, 0.0), "the desktop: the caller's rect, no growth");
+        let (phone, g) = titled_window_rect(r, 1.0, Some(2.625), 0.0);
+        assert_eq!(g, phone_title_grow(1.0, FIXED_TITLE, Some(2.625)), "the strip's growth");
+        assert_eq!(phone.y, r.y - g, "the grown frame starts at the strip's top");
+        // The title line of window_frames_grown is at phone.y + 27 px + grow: the strip's bottom area,
+        // so the caller's old top (r.y, g px below the new top) is not where it is drawn.
+        assert!(phone.y + 27.0 + g > r.y, "the line is below the caller's old top");
+        let (none, gn) = titled_window_rect(r, 1.0, Some(2.625), 300.0);
+        assert_eq!((none, gn), (r, 0.0), "no room above the safe top: the window keeps its rect and no growth");
     }
 
     /// The title stays clear of a phone's cross inside the strip: centred, its ends are 4 px short of

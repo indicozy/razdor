@@ -1221,7 +1221,8 @@ impl BattleView {
         // The battle window's frame and title line (4daab3: 0x48d710, 896×640) and the
         // 2 px line right of the panel from under the title line (4cd330: x 264, y 29).
         let px = chrome::opx();
-        chrome::window_frames(l.win, px);
+        // On a phone the window's strip grew upward (`chrome::window`): the frame follows it.
+        chrome::window_frames_titled(l.win, px);
         if l.is_stacked() {
             // The band's seam, across the window under the band.
             let y = l.panel.bottom();

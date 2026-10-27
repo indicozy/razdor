@@ -573,7 +573,9 @@ pub fn seam(win: Rect) {
 pub fn frame(win: Rect) {
     let k = chrome::k();
     let px = chrome::opx();
-    chrome::window_frames(win, px);
+    // The caller's window is the one it gave `chrome::window_with_title_color`: on a phone that
+    // strip grew upward, and the frame follows it.
+    chrome::window_frames_titled(win, px);
     let strip = divider(win);
     let from = if portrait() {
         seam(win);
