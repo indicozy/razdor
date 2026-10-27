@@ -15,7 +15,7 @@ This wiki is about Razdor. Other sites cover the game itself, its units, items a
 
 ## Game wikis and references
 
-- [Discord Times wiki on Fandom](https://discorttimes.fandom.com/ru/wiki/) (Russian): units, heroes, scenarios.
+- [Discord Times wiki on Fandom](https://discorttimes.fandom.com/ru/wiki/%D0%92%D1%80%D0%B5%D0%BC%D0%B5%D0%BD%D0%B0_%D0%A0%D0%B0%D0%B7%D0%B4%D0%BE%D1%80%D0%B0) (Russian): units, heroes, scenarios.
 - [Ludovik's Pantry](https://dt-items.github.io/) (Russian): every item in the game, an item editor for mods, comparisons and a tier list.
 - [Discord Times on Igrowiki](https://igrowiki.fandom.com/ru/wiki/%D0%92%D1%80%D0%B5%D0%BC%D0%B5%D0%BD%D0%B0_%D1%80%D0%B0%D0%B7%D0%B4%D0%BE%D1%80%D0%B0) (Russian): the game and unit upgrades.
 

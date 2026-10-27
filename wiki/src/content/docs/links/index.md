@@ -15,7 +15,7 @@ sidebar:
 
 ## Вики и справочники по игре
 
-- [Вики «Времён раздора» на Fandom](https://discorttimes.fandom.com/ru/wiki/): юниты, герои, сценарии.
+- [Вики «Времён раздора» на Fandom](https://discorttimes.fandom.com/ru/wiki/%D0%92%D1%80%D0%B5%D0%BC%D0%B5%D0%BD%D0%B0_%D0%A0%D0%B0%D0%B7%D0%B4%D0%BE%D1%80%D0%B0): юниты, герои, сценарии.
 - [«Кладовая Людовика»](https://dt-items.github.io/): все предметы игры, редактор предметов для модов, сравнение и тир-лист.
 - [«Времена раздора» в Игровики](https://igrowiki.fandom.com/ru/wiki/%D0%92%D1%80%D0%B5%D0%BC%D0%B5%D0%BD%D0%B0_%D1%80%D0%B0%D0%B7%D0%B4%D0%BE%D1%80%D0%B0): об игре и развитии юнитов.
 
