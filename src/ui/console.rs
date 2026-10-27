@@ -23,6 +23,30 @@ const RECALLED: usize = 30;
 const SIDE_DP: f32 = 24.0;
 const CLOSE_DP: f32 = 44.0;
 
+/// Font size, line pitch and inner margin in px at chrome scale `k`, as the console draws them.
+fn metrics(k: f32) -> (f32, f32, f32) {
+    let size = (16.0 * k).round();
+    (size, (size * 1.3).round(), 10.0 * k)
+}
+
+/// Whether the console wants the on-screen keyboard this frame (a phone choice, not in the
+/// original). The desktop has none, so it is always wanted there, as before. On a phone it comes up when the console opens (`opened`) and
+/// with a tap in the input line (`tapped`), and stays while it is wanted; the system hiding the
+/// keyboard (its own arrow, Back: `hidden`) turns it off, so a slide or a tap on the scroll-back
+/// no longer brings it up again.
+pub fn keyboard_wanted(phone: bool, was: bool, opened: bool, tapped: bool, hidden: bool) -> bool {
+    if !phone {
+        return true;
+    }
+    if opened || tapped {
+        true
+    } else if hidden {
+        false
+    } else {
+        was
+    }
+}
+
 /// Where the console's content sits: `content` is the screen inside the safe area (the dark
 /// band is always the full width), `close` the close box (a phone only), and `text_x` to
 /// `text_right` the span the text and the input line take, left of the close box.
@@ -86,6 +110,8 @@ pub struct Console {
     recall_at: Option<usize>,
     /// Lines scrolled up from the newest.
     scroll: usize,
+    /// On a phone: the input line wants the on-screen keyboard ([`keyboard_wanted`]).
+    keyboard: bool,
 }
 
 impl Console {
@@ -114,6 +140,7 @@ impl Console {
             }
             if key || chars.into_iter().any(is_toggle) {
                 self.open = true;
+                self.keyboard = true;
                 if self.log.is_empty() {
                     self.print(tr("Cheat console: help lists the commands; ~ or Esc closes it."), Kind::Said);
                 }
@@ -135,6 +162,12 @@ impl Console {
                 return (true, None);
             }
         }
+        // A phone's keyboard (a phone choice, not in the original): a tap in the input line wants
+        // it, and the system hiding it stops it (`keyboard_wanted`). The input line's tap target is the field, grown to a finger.
+        let k = chrome::k();
+        let phone = display::dp_px().is_some();
+        let tapped = tapped_in(tap_rect(input_field(&layout_now(10.0 * k), k), false));
+        self.keyboard = keyboard_wanted(phone, self.keyboard, false, tapped, display::keyboard_closed_by_system());
         let chars = typed_chars();
         if key || esc_pressed() || chars.iter().copied().any(is_toggle) {
             self.open = false;
@@ -192,9 +225,7 @@ impl Console {
             return;
         }
         let k = chrome::k();
-        let size = (16.0 * k).round();
-        let pitch = (size * 1.3).round();
-        let pad = 10.0 * k;
+        let (size, pitch, pad) = metrics(k);
         let l = layout_now(pad);
         let (w, top) = (screen_width(), l.content.y);
         let h = top + pad * 2.0 + pitch * (SHOWN as f32 + 1.0) + 6.0 * k;
@@ -211,14 +242,19 @@ impl Console {
             };
             text_fit(line, l.text_x, top + pad + pitch * (i as f32 + 0.8), text_w, size, color);
         }
+        // A phone's finger slides the scroll-back: the lines above the input line (a phone choice,
+        // not in the original).
+        swipe_rows(scroll_area(&l, pitch, pad), pitch);
         let ly = top + pad + pitch * (SHOWN as f32 + 0.8) + 4.0 * k;
-        let field_x = l.content.x + pad * 0.5;
-        draw_rectangle(field_x, ly - size - 2.0 * k, l.text_right + pad * 0.5 - field_x, pitch + 2.0 * k, FIELD_BG);
+        let field = input_field(&l, k);
+        draw_rectangle(field.x, field.y, field.w, field.h, FIELD_BG);
         text("> ", l.text_x, ly, size, ACCENT);
         let x = l.text_x + measure("> ", size).width;
         let mut edit = self.edit;
         let look = LineLook { size, color: ACCENT, centred: false, shadow: false };
-        edit_line(field_id("console"), &self.line, &mut edit, true, false, Rect::new(x, ly - size, l.text_right - x, pitch), ly, look);
+        // The keyboard is wanted only while the console wants it (a phone); the desktop has none.
+        let keyboard = display::dp_px().is_none() || self.keyboard;
+        edit_line_kb(field_id("console"), &self.line, &mut edit, true, false, Rect::new(x, ly - size, l.text_right - x, pitch), ly, look, keyboard);
         if self.scroll > 0 {
             let note = tr("PgDn: newer lines");
             let nw = measure(note, size * 0.85).width;
@@ -229,6 +265,22 @@ impl Console {
             chrome::close_button(c.x, c.y, c.w, true);
         }
     }
+}
+
+/// The input line's box: the field behind the prompt, from the console's left margin to the
+/// text's right edge (the close box is clear of it). Its baseline is the console's last row.
+fn input_field(l: &Layout, k: f32) -> Rect {
+    let (size, pitch, pad) = metrics(k);
+    let ly = l.content.y + pad + pitch * (SHOWN as f32 + 0.8) + 4.0 * k;
+    let field_x = l.content.x + pad * 0.5;
+    Rect::new(field_x, ly - size - 2.0 * k, l.text_right + pad * 0.5 - field_x, pitch + 2.0 * k)
+}
+
+/// The scroll-back's rows: the text's span, from the first row to the input line, where a
+/// one-finger slide turns the console's wheel.
+fn scroll_area(l: &Layout, pitch: f32, pad: f32) -> Rect {
+    let top = l.content.y + pad;
+    Rect::new(l.text_x, top, l.text_right - l.text_x, pitch * SHOWN as f32)
 }
 
 /// The wheel whatever holds the input (the console holds it back from the screen).
@@ -280,6 +332,44 @@ mod tests {
         for c in ['e', 'е', 'Е', '1', ' '] {
             assert!(!is_toggle(c));
         }
+    }
+
+    #[test]
+    fn the_keyboard_comes_up_on_open_and_on_a_tap_in_the_input_line_and_stops_when_the_system_hides_it() {
+        // A phone: opening wants it, a tap wants it, a plain frame keeps it, the system's hiding ends it.
+        assert!(keyboard_wanted(true, false, true, false, false), "opened: the keyboard");
+        assert!(keyboard_wanted(true, false, false, true, false), "a tap in the input line: the keyboard");
+        assert!(keyboard_wanted(true, true, false, false, false), "typing goes on without a new tap");
+        assert!(!keyboard_wanted(true, true, false, false, true), "hidden by the system: no keyboard");
+        assert!(!keyboard_wanted(true, false, false, false, false), "a slide on the scroll-back: no keyboard");
+        assert!(!keyboard_wanted(true, false, false, false, true), "a slide after it was hidden: still none");
+        // The desktop has no keyboard; the flag is never asked there.
+        assert!(keyboard_wanted(false, false, false, false, false));
+        assert!(keyboard_wanted(false, false, false, false, true));
+    }
+
+    #[test]
+    fn the_scroll_area_is_inside_the_console_above_the_input_line() {
+        let k = 2.625;
+        let (_, pitch, pad) = metrics(k);
+        let l = layout((1080.0, 2400.0), SafeArea::default(), Some(k), pad);
+        let area = scroll_area(&l, pitch, pad);
+        let field = input_field(&l, k);
+        assert!(area.x >= l.content.x && area.right() <= l.content.right(), "inside the content, left and right");
+        assert!(area.y >= l.content.y, "inside the content, top");
+        assert!(area.bottom() <= field.y, "above the input line");
+        assert!(field.right() <= l.content.right(), "the field stays inside the content");
+        assert!(area.right() <= l.close.expect("a phone's close box").x, "the close box is not in the text");
+    }
+
+    #[test]
+    fn the_input_line_tap_target_is_finger_sized() {
+        let k = 2.625;
+        let l = layout((1080.0, 2400.0), SafeArea::default(), Some(k), metrics(k).2);
+        let f = input_field(&l, k);
+        let t = tap_rect_at(f, false, Some(k));
+        assert!(t.h >= 48.0 * k - 0.5, "at least 48 dp tall");
+        assert_eq!(t.y, f.y, "grown from its top edge down");
     }
 
     #[test]
