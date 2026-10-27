@@ -352,8 +352,9 @@ On a phone the bottom row of the hero window holds «Весь список» (le
 every line of the tab, scrolled by drag and the wheel, a tap on a row opens its entry, closing the entry returns to the list),
 «Закрыть» (centred) and «Развернуть» (right, `HeroView::reader`, `items_view::diary_reader`): grey without an entry
 (`expand_entry_enabled`) or, for the list, without entries (`whole_list_enabled`). Sideways the row sits at the window's
-foot, from the diary's left edge (`items_view::sideways_row`, off the hero's panel), and the entry box gives up its
-strip (`items_view::bottom_row_rects`). The entry's full text (`reader_parts`, the desktop's parts) at the phone's sizes, in a window over the screen
+foot, from the diary's left edge (`items_view::sideways_row`, off the hero's panel): the two stack under the diary's
+column (a phone choice, not in the original, so the labels fit), «Весь список» above «Развернуть», each as wide as the entry
+box. The entry box ends above the upper one (`items_view::entry_above_row`, `items_view::bottom_row_rects`). The entry's full text (`reader_parts`, the desktop's parts) at the phone's sizes, in a window over the screen
 less the safe area and an 8 px margin (`diary_reader_rect`), scrolled by drag and the wheel, and closed by its
 finger-sized «Закрыть», its cross or Esc. While it is open the window below takes no input (`set_input_blocked`),
 and the reader swallows the frame's keys and clicks.
@@ -523,6 +524,11 @@ Building a window (`src/ui/chrome.rs`):
   `chrome::hint_text`, `widgets::button`, `widgets::text_field`, `widgets::scrollbar`,
   `widgets::tabs`. Clicks: `widgets::clicked` / `widgets::mouse_in` (they respect
   `input_blocked`). Sounds: `audio::cue(Cue::Button)`.
+- The cheat console (`console::Console`, on the map and in battle) is scrolled on a phone by a one-finger slide over
+  its scroll-back (`widgets::swipe_rows` over `console::scroll_area`, the wheel it turns is `input::mouse_wheel`). Its
+  on-screen keyboard (a phone choice, not in the original) is wanted while it is open and after a tap in the input line
+  (`console::keyboard_wanted`, the tap target `console::input_field`); the system hiding the keyboard turns the want off,
+  so a slide or a tap on the scroll-back no longer brings it up. The desktop has no keyboard, as before.
 - Text input: every field (`widgets::text_field`, `widgets::number_field`, the drop-down's
   filter, the inventory filter `item_filter::field`, the hero's name
   `screens::hero_name_field`, the save's name, the console) edits through
@@ -671,7 +677,13 @@ menu is the original's four buttons; the phone's five take 4 px between them) op
 the map; `App::help_fresh` keeps the press that opened it from closing it, and `widgets::swallow_input` (set at both
 opening points, the map's and the battle exit window's «Клавиши») keeps it from pressing a tile in the list. On a phone the list's
 text is the phone's text (`display::text_for`, drawn under `dt_font::legacy_metrics_if`) and its
-tiles wrap to three lines; the desktop keeps the interface scale. Snapshot:
+tiles wrap to three lines; the desktop keeps the interface scale. On a phone the keys that have a button on the
+screen fold out of the grid (a phone choice, not in the original): on the map the wait, minimap, centre, journal,
+spell book, hero and army buttons and Esc; in battle Space, Q, W and Esc (`hotkeys::has_screen_button`,
+`hotkeys::split_screen_buttons`). They sit in a list under the grid, behind a full-width toggle button («Показать»
+/ «Скрыть клавиши, для которых есть кнопка на экране»); the list is collapsed when the window opens and closes
+with it (`SECONDARY_OPEN`, reset with `SCROLL`). The toggle counts as a control (a tap on it keeps the window open)
+and runs no key. The desktop shows every key in the grid, with no toggle. Snapshot:
 `RAZDOR_SCENE_OPEN=<frame>:keys`.
 
 Esc is read through `widgets::key(KeyCode::Escape)` (the guarded read) or `widgets::esc_pressed()`
