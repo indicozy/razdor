@@ -362,6 +362,32 @@ fn has_bar(place: Place) -> bool {
     matches!(place, Place::WorldMap | Place::Building | Place::Army | Place::Hero | Place::Spellbook | Place::Menu | Place::Save | Place::Load)
 }
 
+local! {
+    /// Whether the phone's list of the keys that have a button on the screen is open
+    /// (`help_overlay`); it starts closed and closes with the list.
+    static SECONDARY_OPEN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether a key of `place`'s list has a button on the phone's screen, so that it folds into the
+/// list under the grid (a phone choice, not in the original): on the map the wait, minimap,
+/// centre, journal, spell book, hero and army buttons and Esc; in battle Space, Q, W and Esc.
+pub fn has_screen_button(place: Place, t: &Tile) -> bool {
+    match place {
+        Place::WorldMap => {
+            t.key == KeyCode::Escape
+                || matches!(t.action, Some(Action::Wait1 | Action::Wait4 | Action::Minimap | Action::CentreHero | Action::Journal | Action::SpellBook | Action::HeroArmy))
+        }
+        Place::Battle => t.action.is_none() && matches!(t.key, KeyCode::Space | KeyCode::Q | KeyCode::W | KeyCode::Escape),
+        _ => false,
+    }
+}
+
+/// The phone's split of `place`'s tiles (a phone choice, not in the original): the main grid,
+/// then the keys with a button on the screen ([`has_screen_button`]). Together they are the tiles.
+pub fn split_screen_buttons(place: Place, tiles: Vec<Tile>) -> (Vec<Tile>, Vec<Tile>) {
+    tiles.into_iter().partition(|t| !has_screen_button(place, t))
+}
+
 pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
     let (sw, sh) = (screen_width(), screen_height());
     draw_rectangle(0.0, 0.0, sw, sh, Color::new(0.0, 0.0, 0.0, 0.45));
@@ -372,23 +398,43 @@ pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
     // metrics so the sizes are not shrunk to the sheet fonts' own; on the desktop `k`, as before.
     let phone = super::display::dp_px().is_some();
     let t = if phone { super::display::text_for(chrome::k(), super::dialog::TEXT_REF) } else { k };
-    let tiles = tiles(place);
+    // A phone folds the keys that have a button on the screen into a list under the grid (a phone
+    // choice, not in the original); the desktop shows every key in the grid, as before.
+    let (grid, folded) = if phone { split_screen_buttons(place, tiles(place)) } else { (tiles(place), Vec::new()) };
+    let folds = !folded.is_empty();
     let info = info_rows(place);
     let cols = if sw < sh || sw < 760.0 { 2 } else { 3 };
     let (pad, gap) = (14.0 * k, 8.0 * k);
     let w = if cols == 2 { sw - 16.0 } else { (880.0 * k).min(sw - 40.0) };
     let tile_w = (w - 2.0 * pad - 14.0 * k - gap * (cols as f32 - 1.0)) / cols as f32;
+    let grid_w = tile_w * cols as f32 + gap * (cols as f32 - 1.0);
     let size = 18.0 * t;
     // A tile's words wrap to its width: at most two lines on the desktop, three on a phone; a
     // longer text shrinks (to 60 %) until it fits those lines.
     let max_lines = if phone { 3 } else { 2 };
-    let fitted: Vec<(f32, Vec<String>)> = super::dt_font::legacy_metrics_if(phone, || tiles.iter().map(|tl| fit_words(tr(tl.what), tile_w - 16.0 * t, size, max_lines)).collect());
-    let text_rows = fitted.iter().map(|(_, l)| l.len().clamp(1, max_lines)).max().unwrap_or(1) as f32;
+    let fit = |list: &[Tile]| -> Vec<(f32, Vec<String>)> {
+        super::dt_font::legacy_metrics_if(phone, || list.iter().map(|tl| fit_words(tr(tl.what), tile_w - 16.0 * t, size, max_lines)).collect())
+    };
+    let fitted = fit(&grid);
+    let fitted_folded = fit(&folded);
+    let text_rows = fitted.iter().chain(&fitted_folded).map(|(_, l)| l.len().clamp(1, max_lines)).max().unwrap_or(1) as f32;
     let tile_h = if phone { (text_rows * 21.0 * t + 33.0 * t).max(60.0 * k) } else { (60.0 * k).max(40.0) };
-    let grid_h = tiles.len().div_ceil(cols) as f32 * (tile_h + gap);
+    let rows = |n: usize| n.div_ceil(cols) as f32 * (tile_h + gap);
+    // Positions in the body, before its scroll: the grid, then (on a phone with folded keys) the
+    // toggle under it and, open, the folded keys, then the info rows.
+    let grid_y = 4.0 * k;
+    let grid_end = grid_y + rows(grid.len());
+    let open = folds && SECONDARY_OPEN.with(|s| s.get());
+    let toggle_y = grid_end + 6.0 * k;
+    let folded_y = toggle_y + tile_h + gap;
+    let after = match (folds, open) {
+        (false, _) => grid_end,
+        (true, false) => toggle_y + tile_h,
+        (true, true) => folded_y + rows(folded.len()),
+    };
     let line = 24.0 * t;
     let info_h = if info.is_empty() { 0.0 } else { 30.0 * t + info.len() as f32 * line + 6.0 * k };
-    let content = 4.0 * k + grid_h + 6.0 * k + info_h;
+    let content = after + 6.0 * k + info_h;
     // On a phone held upright, over a screen with the bottom bar, the overlay stands between the
     // top safe inset and the bar, as the game's windows do; elsewhere over the whole screen.
     let (top, bottom) = if super::window_layout::portrait() && has_bar(place) { (super::display::safe_area().top, sh - chrome::bar_height()) } else { (0.0, sh) };
@@ -409,43 +455,70 @@ pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
     let bar = Rect::new(body.right() - 12.0 * k, body.y, 10.0 * k, body.h);
     let mut on_control = over(bar);
     let mut press = None;
+    let mut toggled = false;
+    let at = |y_body: f32| body.y + y_body - scroll;
+    // One key's button at `r` (its words fitted as `fit`): a tap on it runs the key (`press`).
+    let draw_tile = |tl: &Tile, fitted: &(f32, Vec<String>), r: Rect, on_control: &mut bool, press: &mut Option<KeyCode>| {
+        if r.bottom() <= body.y || r.y >= body.bottom() {
+            return;
+        }
+        let enabled = tile_enabled(place, tl, guard);
+        let visible = r.y >= body.y - 0.5 && r.bottom() <= body.bottom() + 0.5;
+        let (_, down, pressed) = if visible { super::widgets::button_state(r, enabled) } else { (false, false, false) };
+        *on_control |= visible && over(r);
+        chrome::marble_button(r, "", enabled, down);
+        let ink = if enabled { chrome::CREAM } else { DIM };
+        let (size, lines) = fitted;
+        let step = size * 21.0 / 18.0;
+        let top = r.y + (r.h - 17.0 * t - lines.len() as f32 * step) / 2.0 + size * 0.8;
+        for (n, l) in lines.iter().enumerate() {
+            // One line shrinks to the tile's width; several lines are set as they wrap.
+            if lines.len() == 1 {
+                text_fit(l, r.x + 8.0 * k, top + n as f32 * step, r.w - 16.0 * k, *size, ink);
+            } else {
+                text(l, r.x + 8.0 * k, top + n as f32 * step, *size, ink);
+            }
+        }
+        text_fit(&tl.shown, r.x + 8.0 * k, r.bottom() - 8.0 * t, r.w - 16.0 * k, if phone { 17.0 * t } else { 15.0 * t }, ACCENT);
+        if pressed {
+            super::audio::cue(super::audio::Cue::Button);
+            *press = Some(tl.key);
+        }
+    };
     super::dt_font::legacy_metrics_if(phone, || {
         text(place_name(place), inner.x + pad, inner.y + 22.0 * t, 19.0 * t, ACCENT);
         text_fit(tr("Tap a button to run its action"), inner.x + pad, inner.y + 44.0 * t, inner.w - 2.0 * pad, 15.0 * t, DIM);
         {
             let _clip = super::widgets::Clip::new(body);
-            for (i, tl) in tiles.iter().enumerate() {
+            for (i, tl) in grid.iter().enumerate() {
                 let (col, row) = (i % cols, i / cols);
-                let ty = body.y + 4.0 * k + row as f32 * (tile_h + gap) - scroll;
-                if ty + tile_h <= body.y || ty >= body.bottom() {
-                    continue;
-                }
-                let r = Rect::new(inner.x + pad + col as f32 * (tile_w + gap), ty, tile_w, tile_h);
-                let enabled = tile_enabled(place, tl, guard);
-                let visible = ty >= body.y - 0.5 && ty + tile_h <= body.bottom() + 0.5;
-                let (_, down, pressed) = if visible { super::widgets::button_state(r, enabled) } else { (false, false, false) };
+                let r = Rect::new(inner.x + pad + col as f32 * (tile_w + gap), at(grid_y + row as f32 * (tile_h + gap)), tile_w, tile_h);
+                draw_tile(tl, &fitted[i], r, &mut on_control, &mut press);
+            }
+            if folds {
+                let r = Rect::new(inner.x + pad, at(toggle_y), grid_w, tile_h);
+                let visible = r.y >= body.y - 0.5 && r.bottom() <= body.bottom() + 0.5;
+                let (_, down, pressed) = if visible { super::widgets::button_state(r, true) } else { (false, false, false) };
                 on_control |= visible && over(r);
-                chrome::marble_button(r, "", enabled, down);
-                let ink = if enabled { chrome::CREAM } else { DIM };
-                let (size, lines) = &fitted[i];
-                let step = size * 21.0 / 18.0;
-                let top = r.y + (r.h - 17.0 * t - lines.len() as f32 * step) / 2.0 + size * 0.8;
-                for (n, l) in lines.iter().enumerate() {
-                    // One line shrinks to the tile's width; several lines are set as they wrap.
-                    if lines.len() == 1 {
-                        text_fit(l, r.x + 8.0 * k, top + n as f32 * step, r.w - 16.0 * k, *size, ink);
-                    } else {
-                        text(l, r.x + 8.0 * k, top + n as f32 * step, *size, ink);
-                    }
-                }
-                text_fit(&tl.shown, r.x + 8.0 * k, r.bottom() - 8.0 * t, r.w - 16.0 * k, if phone { 17.0 * t } else { 15.0 * t }, ACCENT);
+                chrome::marble_button(r, "", true, down);
+                let label = if open { tr("Hide the keys that have a button on the screen") } else { tr("Show the keys that have a button on the screen") };
+                let size = 17.0 * t;
+                let lw = measure(label, size).width.min(r.w - 16.0 * k);
+                text_fit(label, r.center().x - lw / 2.0, r.center().y + size * 0.35, r.w - 16.0 * k, size, chrome::CREAM);
                 if pressed {
                     super::audio::cue(super::audio::Cue::Button);
-                    press = Some(tl.key);
+                    toggled = true;
+                }
+            }
+            if open {
+                for (i, tl) in folded.iter().enumerate() {
+                    let (col, row) = (i % cols, i / cols);
+                    let r = Rect::new(inner.x + pad + col as f32 * (tile_w + gap), at(folded_y + row as f32 * (tile_h + gap)), tile_w, tile_h);
+                    draw_tile(tl, &fitted_folded[i], r, &mut on_control, &mut press);
                 }
             }
         }
-        let mut ly = body.y + 4.0 * k + grid_h + 6.0 * k - scroll;
+        let mut ly = at(after + 6.0 * k);
         if !info.is_empty() {
             text(tr("Other keys and mouse"), inner.x + pad, ly + 20.0 * t, 17.0 * t, ACCENT);
             ly += 30.0 * t;
@@ -467,6 +540,9 @@ pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
         super::widgets::scrollbar_px(bar, &mut scroll, most, body.h, 40.0 * k);
     }
     SCROLL.with(|s| s.set(scroll));
+    if toggled {
+        SECONDARY_OPEN.with(|s| s.set(!s.get()));
+    }
     let closes = !fresh && is_mouse_button_pressed(MouseButton::Left) && !on_control;
     let done = is_key_pressed(keymap::key(Action::Help)) || esc_pressed() || closes || box_closed || press.is_some();
     if let Some(key) = press {
@@ -474,6 +550,7 @@ pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
     }
     if done {
         SCROLL.with(|s| s.set(0.0));
+        SECONDARY_OPEN.with(|s| s.set(false));
     }
     done
 }
@@ -576,6 +653,50 @@ mod tests {
         assert!(battle.iter().any(|k| k == "Q"));
         assert!(battle.iter().any(|k| k == "W"), "the watched quick battle");
         assert!(battle.iter().any(|k| k == "~"), "the cheat console");
+    }
+
+    #[test]
+    fn a_phone_folds_the_map_keys_that_have_a_button_on_the_screen() {
+        keymap::reset();
+        let all = tiles(Place::WorldMap);
+        let (main, folded) = split_screen_buttons(Place::WorldMap, all.clone());
+        let mut names: Vec<String> = folded.iter().map(|t| t.action.map_or(format!("{:?}", t.key), |a| format!("{a:?}"))).collect();
+        names.sort();
+        assert_eq!(names, ["CentreHero", "Escape", "HeroArmy", "Journal", "Minimap", "SpellBook", "Wait1", "Wait4"], "the map's buttons, and Esc");
+        assert!(folded.iter().any(|t| t.key == KeyCode::Escape && t.action.is_none()), "Esc is the literal");
+        assert!(main.iter().any(|t| t.action == Some(Action::QuickSave)), "the other keys stay in the grid");
+        assert!(!main.is_empty());
+        assert_eq!(main.len() + folded.len(), all.len(), "main and folded are the tiles");
+        for t in &all {
+            assert!(main.contains(t) != folded.contains(t), "each tile in one part: {:?}", t.key);
+        }
+    }
+
+    #[test]
+    fn a_phone_folds_the_battle_keys_that_have_a_button_on_the_screen() {
+        keymap::reset();
+        let all = tiles(Place::Battle);
+        let (main, folded) = split_screen_buttons(Place::Battle, all.clone());
+        let mut keys: Vec<KeyCode> = folded.iter().map(|t| t.key).collect();
+        keys.sort_by_key(|k| format!("{k:?}"));
+        assert_eq!(keys.len(), 4, "Space, Q, W and Esc: {keys:?}");
+        for key in [KeyCode::Space, KeyCode::Q, KeyCode::W, KeyCode::Escape] {
+            assert!(folded.iter().any(|t| t.key == key && t.action.is_none()), "{key:?} is a literal button");
+        }
+        assert!(main.iter().any(|t| t.key == KeyCode::Enter), "Enter stays in the grid");
+        assert!(main.iter().any(|t| t.action == Some(Action::Console)), "the console stays in the grid");
+        assert!(!main.is_empty());
+        assert_eq!(main.len() + folded.len(), all.len(), "main and folded are the tiles");
+    }
+
+    #[test]
+    fn the_other_screens_keep_every_key_in_the_grid() {
+        for place in [Place::Hero, Place::Spellbook, Place::Menu, Place::ClassSelect] {
+            let all = tiles(place);
+            let (main, folded) = split_screen_buttons(place, all.clone());
+            assert!(folded.is_empty(), "{place:?}");
+            assert_eq!(main, all, "{place:?}");
+        }
     }
 
     #[test]
