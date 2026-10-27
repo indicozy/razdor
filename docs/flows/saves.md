@@ -35,6 +35,7 @@ All code is in `src/rules/save.rs`; the windows are `src/ui/saves.rs`.
 
 ```
 ui: saves::save_screen / App::quick_save / saves::autosave / saves::battle
+      (save window's «Быстрое сохранение» → saves::quick_save_message → save::quick_save)
       │
       ▼
 save::write(dir, kind, name, game)          manual; quick → save::quick_save
@@ -45,6 +46,12 @@ put(): save::meta_of → save::encode (serde_json + BzEncoder) → write .tmp �
        → remember_meta (the meta cache knows the new file at once)
 ```
 
+- The save window's bottom row (`saves::save_button_row`): «Быстрое сохранение» (the owner's
+  request, not in the original; 8 px left of «Сохранить», which keeps the original's place), then
+  «Сохранить» and «Отмена». The quick save is enabled when `hotkeys::allowed` says F5 may fire on
+  the map (`App::frame_content`'s `quick_save_ok`: a game, no foe, no endless wait); it writes the same
+  quick save and shows the same message as F5, then closes the window. On a phone the click area
+  of the row's buttons is at least 44 dp tall (`saves::finger_hit`; drawing unchanged).
 - The map's bytes: `Game::map_bytes` (not serialised; `Game::set_map` keeps them with the origin
   when a map game starts or a campaign map starts, `Game::restart` copies them). `encode` writes
   them as the `map` field only when they hash to the origin's hash. The field is optional: an

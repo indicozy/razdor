@@ -691,13 +691,7 @@ impl App {
     /// F5: writes a quick save (one of five, over the oldest; `save::quick_save`).
     fn quick_save(&mut self) {
         let Some(game) = &self.game else { return };
-        self.message = Some(match save::games_dir() {
-            None => tr("No data folder for saves: set RAZDOR_SAVE_DIR.").to_string(),
-            Some(dir) => match save::quick_save(&dir, game) {
-                Ok(_) => tr("Quick save written (F9 loads it).").to_string(),
-                Err(e) => razdor::trf!("Not saved: {e}.", e),
-            },
-        });
+        self.message = Some(saves::quick_save_message(game));
     }
 
     /// F9: loads the newest quick save, if there is one.
@@ -988,6 +982,8 @@ impl App {
         let mut custom_round = false;
         let custom_content = self.custom_content();
         let install_wide = self.install_wide_row();
+        // The save window's «Быстрое сохранение» is the F5 key's quick save, allowed as on the map (its Back).
+        let quick_save_ok = hotkeys::allowed(hotkeys::Place::WorldMap, hotkeys::Global::QuickSave, hotkeys::Guard { typing: false, ..self.guard() });
         let mut next = match (&mut self.screen, &mut self.game) {
             (Screen::MainMenu, _) => match main_menu::frame(self.dt_content.is_none()) {
                 Some(main_menu::Pick::NewGame) if new_game::tutorial_map(&self.scenarios).is_some() => {
@@ -1065,7 +1061,7 @@ impl App {
                 world_view::backdrop_lit(game, &self.assets, Some(game_bar::BarButton::Settings));
                 main_menu::options_window(&mut self.audio.settings, install_wide, true).then_some(Screen::WorldMap)
             }
-            (Screen::Save(view), Some(game)) => saves::save_screen(game, &self.assets, view, &mut self.message),
+            (Screen::Save(view), Some(game)) => saves::save_screen(game, &self.assets, view, quick_save_ok, &mut self.message),
             (Screen::Load(view), game) => saves::load_screen(game.as_ref(), &self.assets, view, &mut self.pending_load, &mut self.load_error),
             (Screen::Victory, game) => screens::victory(game, &self.scenarios, self.dt_content.clone()),
             (Screen::Editor, _) => None,

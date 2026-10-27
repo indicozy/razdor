@@ -564,6 +564,15 @@ impl Book {
         super::chrome::marble_button(r, label, enabled, down);
         pressed
     }
+
+    /// A button of the save window's bottom row: drawn as [`Book::button`], but its click area is
+    /// finger-sized on a phone ([`finger_hit`]).
+    fn finger_button(&self, x: f32, w: f32, label: &str, enabled: bool) -> bool {
+        let r = self.rect(x, 443.0, w, 28.0);
+        let (_, down, pressed) = super::widgets::button_state(finger_hit(r, super::display::dp_px()), enabled);
+        super::chrome::marble_button(r, label, enabled, down);
+        pressed
+    }
 }
 
 /// The name being typed as its row shows it, and the bytes of it to light: the selection,
@@ -641,9 +650,42 @@ const NAME_ROOM: f32 = 220.0;
 /// The grey of the new save's placeholder name (0x4c0dd0).
 const PLACEHOLDER_INK: [u8; 3] = [150, 150, 150];
 
+/// The bottom row of the save window in its own pixels (the window is `Book::W` wide), as (x, width)
+/// of «Быстрое сохранение», «Сохранить» and «Отмена». The original's two keep their places (369 and
+/// 492); the owner's quick save (not in the original) sits 8 px left of «Сохранить», as the buttons
+/// sit 7-8 px apart. The same row on a phone: the window is scaled as a whole.
+fn save_button_row() -> [(f32, f32); 3] {
+    const SAVE: (f32, f32) = (369.0, 116.0);
+    const CANCEL: (f32, f32) = (492.0, 95.0);
+    const QUICK_W: f32 = 220.0;
+    [(SAVE.0 - 8.0 - QUICK_W, QUICK_W), SAVE, CANCEL]
+}
+
+/// A button's click area: its drawn rect, on a phone (`dp` screen px per dp) at least 44 dp tall,
+/// grown equally up and down so the row's neighbours keep their clicks at the sides; the desktop's is
+/// the button itself. A phone choice, not in the original (the owner's request: finger-sized buttons).
+fn finger_hit(r: Rect, dp: Option<f32>) -> Rect {
+    let Some(dp) = dp.filter(|d| *d > 0.0) else { return r };
+    let h = r.h.max(44.0 * dp);
+    Rect::new(r.x, r.y + r.h / 2.0 - h / 2.0, r.w, h)
+}
+
+/// The message the quick save (F5, and the save window's «Быстрое сохранение») leaves on the map.
+pub fn quick_save_message(game: &Game) -> String {
+    match save::games_dir() {
+        None => tr("No data folder for saves: set RAZDOR_SAVE_DIR.").to_string(),
+        Some(dir) => match save::quick_save(&dir, game) {
+            Ok(_) => tr("Quick save written (F9 loads it).").to_string(),
+            Err(e) => razdor::trf!("Not saved: {e}.", e),
+        },
+    }
+}
+
 /// The save window ("Сохранение активной игры"): the book of manual saves under "(save
-/// anew)"; a click on a save takes its name to replace it, typing edits the name.
-pub fn save_screen(game: &Game, assets: &Assets, view: &mut SaveView, message: &mut Option<String>) -> Option<Screen> {
+/// anew)"; a click on a save takes its name to replace it, typing edits the name. `quick` says
+/// whether a quick save is allowed now (`hotkeys::allowed` for F5); the window's «Быстрое
+/// сохранение» (the owner's request, not in the original) does it and closes the window.
+pub fn save_screen(game: &Game, assets: &Assets, view: &mut SaveView, quick: bool, message: &mut Option<String>) -> Option<Screen> {
     world_view::backdrop(game, assets);
     // The save window at its own scale on a phone (`window_layout::over_map_scale`: upright between the
     // inset and the bar, sideways as the main menu's load window).
@@ -690,8 +732,13 @@ pub fn save_screen(game: &Game, assets: &Assets, view: &mut SaveView, message: &
         let p = book.p(22.0, 435.0);
         text(&ellipsize(w, 330.0 * book.k, 13.0 * book.k), p.x, p.y, 13.0 * book.k, RED);
     }
+    let [(quick_x, quick_w), (save_x, save_w), (cancel_x, cancel_w)] = save_button_row();
+    if book.finger_button(quick_x, quick_w, tr(n_("Quick save")), quick) {
+        *message = Some(quick_save_message(game));
+        return Some(Screen::WorldMap);
+    }
     let ok = can_save(&view.name, dir.is_some());
-    if book.button(369.0, 116.0, &own("SaveGame", "Save", n_("Save")), ok) || (ok && enter) {
+    if book.finger_button(save_x, save_w, &own("SaveGame", "Save", n_("Save")), ok) || (ok && enter) {
         let dir = dir.expect("checked");
         match save::write(&dir, SaveKind::Manual, view.name.trim(), game) {
             Ok(_) => {
@@ -702,7 +749,7 @@ pub fn save_screen(game: &Game, assets: &Assets, view: &mut SaveView, message: &
             Err(e) => view.error = Some(razdor::trf!("Not saved: {e}.", e)),
         }
     }
-    if book.button(492.0, 95.0, &own("Buttons", "Cancel", n_("Cancel")), true) || closed {
+    if book.finger_button(cancel_x, cancel_w, &own("Buttons", "Cancel", n_("Cancel")), true) || closed {
         return Some(view.back.screen());
     }
     if key(KeyCode::Escape) {
@@ -1429,6 +1476,41 @@ mod tests {
         assert_eq!(keyboard_request(), None);
     }
 
+    /// The save window's bottom row: «Быстрое сохранение», «Сохранить» and «Отмена» fit in the window
+    /// with 8 px between the first two, in order and without overlap, all inside the window's rows.
+    #[test]
+    fn the_save_window_button_row_holds_three_buttons_without_overlap() {
+        let [quick, save, cancel] = save_button_row();
+        let (left, right) = (17.0, Book::W - 7.0);
+        assert!(quick.0 >= left, "the quick save is inside the window's rows: {quick:?}");
+        assert!(cancel.0 + cancel.1 <= right, "«Отмена» is inside the window's rows");
+        assert!(quick.0 + quick.1 + 8.0 <= save.0 + 0.5, "«Быстрое сохранение» ends 8 px before «Сохранить»: {quick:?} {save:?}");
+        assert!(save.0 + save.1 + 7.0 <= cancel.0 + 0.5, "«Отмена» keeps its place after «Сохранить»");
+        assert_eq!((save.0, save.1, cancel.0, cancel.1), (369.0, 116.0, 492.0, 95.0), "the original's two buttons keep their places");
+        // The quick save's label is 18 characters in the button face: at least 150 px wide at this height.
+        assert!(quick.1 >= 170.0, "the label «Быстрое сохранение» fits its button");
+    }
+
+    /// A phone's button of the save window is finger-sized (44 dp tall at least, centred on the drawn
+    /// button, so it reaches outside it at the bottom); the desktop's is the button itself.
+    #[test]
+    fn the_save_window_buttons_are_finger_sized_on_a_phone() {
+        let (sw, sh, top) = (1080.0, 2376.0, 66.0);
+        let bar = (80.0f32 * 1.125).round();
+        let (k, win) = crate::ui::window_layout::portrait_game((sw, sh), Some(2.75), top, bar, 1.125, (Book::W, Book::H)).expect("held upright");
+        let book = Book { win, k };
+        let [(quick_x, quick_w), (save_x, save_w), (cancel_x, cancel_w)] = save_button_row();
+        for (x, w) in [(quick_x, quick_w), (save_x, save_w), (cancel_x, cancel_w)] {
+            let drawn = book.rect(x, 443.0, w, 28.0);
+            let hit = finger_hit(drawn, Some(2.75));
+            assert!(hit.h >= 44.0 * 2.75 - 0.5, "at least 44 dp: {hit:?}");
+            assert!((hit.center().y - drawn.center().y).abs() < 0.5, "centred on the button");
+            assert!(hit.x == drawn.x && hit.w == drawn.w, "the sides stay the button's, so the neighbours keep theirs");
+            assert!(hit.y >= book.p(0.0, 410.0).y, "the click area does not reach the list's rows above");
+        }
+        assert_eq!(finger_hit(book.rect(quick_x, 443.0, quick_w, 28.0), None).h, 28.0 * k, "the desktop's click area is the button");
+    }
+
     /// The save window over the map on a phone held upright (1080×2376 at 2.75 px per dp, the
     /// interface scale 1.125, the bar 90 px): its buttons take their clicks at the window's
     /// scale, inside it, and with the on-screen keyboard up the save button is still above it.
@@ -1439,8 +1521,9 @@ mod tests {
         let (k, win) = crate::ui::window_layout::portrait_game((sw, sh), Some(2.75), top, bar, 1.125, (Book::W, Book::H)).expect("held upright");
         let book = Book { win, k };
         // «Сохранить» (369, 116) and «Отмена» (492, 95), 28 design px high, as `Book::button` draws them.
-        let save = book.rect(369.0, 443.0, 116.0, 28.0);
-        let cancel = book.rect(492.0, 443.0, 95.0, 28.0);
+        let [(_, _), (save_x, save_w), (cancel_x, cancel_w)] = save_button_row();
+        let save = book.rect(save_x, 443.0, save_w, 28.0);
+        let cancel = book.rect(cancel_x, 443.0, cancel_w, 28.0);
         assert!((save.h - 28.0 * k).abs() < 1e-3, "the button is drawn at the window's scale");
         assert!(win.contains(save.center()) && win.contains(cancel.center()), "both buttons are in the window");
         assert!(save.contains(save.center()) && !cancel.contains(save.center()), "a click on «Сохранить» hits it alone");
