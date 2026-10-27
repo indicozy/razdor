@@ -272,6 +272,25 @@ pub fn game_rect(video: (f32, f32)) -> Option<Rect> {
     portrait_game_now(video).map(|(_, r)| r)
 }
 
+/// The design size of the spell book on a phone held upright (`w` px wide: two columns of cards), as
+/// tall as the screen takes at that width between the top inset `top` and the bar `bar`, so its rows
+/// fill the height (a phone choice, not in the original). `screen`, `dp` and `base_k` as in
+/// [`portrait_game`]; None where the phone is not held upright.
+pub fn upright_book_video_at(screen: (f32, f32), dp: Option<f32>, top: f32, bar: f32, base_k: f32, w: f32) -> Option<(f32, f32)> {
+    let ((sw, sh), _) = (screen, dp.filter(|d| *d > 0.0)?);
+    if sh <= sw {
+        return None;
+    }
+    let bottom = sh - bar - GAME_BAR_GAP * base_k;
+    let k = ((sw - 2.0 * TITLE_MARGIN) / w).max(base_k);
+    Some((w, ((bottom - top - 2.0 * TITLE_MARGIN) / k).floor()))
+}
+
+/// [`upright_book_video_at`] for the phone on screen now.
+pub fn upright_book_video(w: f32) -> Option<(f32, f32)> {
+    upright_book_video_at((screen_width(), screen_height()), super::display::dp_px(), super::display::safe_area().top, chrome::bar_height(), interface_k(), w)
+}
+
 /// The exit windows' size in original px: the game's «Выход из игры» and the battle's leave
 /// window (634×516, the original's pixels; drawn at `chrome::opx`, 0.9375 of the window scale).
 pub const EXIT_ORIG: (f32, f32) = (634.0, 516.0);

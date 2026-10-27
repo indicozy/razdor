@@ -71,8 +71,18 @@ pub fn shown(enemy: &[bool], filter: BookFilter) -> Vec<usize> {
 /// The book's window in video px (836 × 600, the landscape window's size at the interface scale).
 pub const BOOK_VIDEO: (f32, f32) = (window_layout::WIDTH, window_layout::HEIGHT);
 
-/// The book's 3 columns of 5 cells (0x4dad08: cell `n` is column `n / 5`, row `n % 5`).
-const ROWS: usize = 5;
+/// The book's 3 columns of 5 rows of cells (0x4dad08: cell `n` is column `n / ROWS`, row `n % ROWS`),
+/// so a page is `BOOK_PAGE` spells on the desktop and in landscape.
+const COLS: usize = 3;
+const ROWS: usize = BOOK_PAGE / COLS;
+/// A phone held upright (a phone choice, not in the original): the book is 2 columns in a window
+/// `UPRIGHT_W` design px wide, as tall as the screen takes ([`window_layout::upright_book_video`]).
+const UPRIGHT_COLS: usize = 2;
+const UPRIGHT_W: f32 = 560.0;
+/// The shortest card of the upright book, in design px: the landscape book's card (96 px, its 5
+/// rows of the 836 × 600 window's grid less 6 gaps of 8 px). Its rows are as many as keep every card
+/// at least this tall ([`upright_rows`]).
+const CARD_MIN_H: f32 = 96.0;
 
 /// A card's background (0x49bde4): the paper less a colour, by the card's state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -88,14 +98,23 @@ pub enum CardFill {
     Unaffordable,
 }
 
-/// The book cell `n` sits in: (column, row), the columns filled top to bottom (0x4dad08).
-pub fn book_cell(n: usize) -> (usize, usize) {
-    (n / ROWS, n % ROWS)
+/// The book cell `n` sits in, of a page with `rows` rows: (column, row), the columns filled top to
+/// bottom (0x4dad08 with 5 rows).
+pub fn book_cell(n: usize, rows: usize) -> (usize, usize) {
+    (n / rows, n % rows)
 }
 
-/// Pages a book of `spells` takes, 15 spells each; an empty book still shows one page.
-pub fn page_count(spells: usize) -> usize {
-    spells.div_ceil(BOOK_PAGE).max(1)
+/// Pages a book of `spells` takes, `per_page` spells each (`BOOK_PAGE` on the desktop); an empty book
+/// still shows one page.
+pub fn page_count(spells: usize, per_page: usize) -> usize {
+    spells.div_ceil(per_page).max(1)
+}
+
+/// The rows an upright book takes in a grid `grid_h` design px tall: as many as keep every card at
+/// least [`CARD_MIN_H`] tall with the 8 px gaps between and around them (a grid as tall as the
+/// landscape one gives its 5 rows).
+fn upright_rows(grid_h: f32) -> usize {
+    (((grid_h + 8.0) / (CARD_MIN_H + 8.0)).floor() as usize).max(1)
 }
 
 /// The page `delta` pages from `page`, kept within the `pages` there are.
@@ -194,7 +213,7 @@ fn hours(minutes: u64, many: bool) -> String {
 /// reading time and how long it lasts; empty cells are dark with the knot and "Нет изученных
 /// заклинаний". A click casts the spell; an enemy spell's target is then picked on the map
 /// (`world_view::begin_targeting`). `selected` is the clicked spell's book index; `page` the
-/// page shown (15 spells each, Razdor's choice); `filter` the spells listed (see [`BookFilter`]).
+/// page shown (`per_page` spells each, Razdor's choice); `filter` the spells listed (see [`BookFilter`]).
 pub fn frame(
     game: &mut Game,
     assets: &super::assets::Assets,
@@ -208,9 +227,11 @@ pub fn frame(
     // The book's window: 836 × 600 video pixels over the map. On a phone held upright it spans the
     // width between the top inset and the bar, at its own scale (`window_layout::game_rect`): the
     // book is one spread of 3 × 5 cells, so it is scaled to the width, not stacked. Landscape: as before.
-    let _scale = super::window_layout::game_scale(BOOK_VIDEO);
+    let upright = super::window_layout::upright_book_video(UPRIGHT_W);
+    let video = upright.unwrap_or(BOOK_VIDEO);
+    let _scale = super::window_layout::game_scale(video);
     let k = chrome::k();
-    let r = super::window_layout::game_rect(BOOK_VIDEO).unwrap_or_else(super::window_layout::landscape_window);
+    let r = super::window_layout::game_rect(video).unwrap_or_else(super::window_layout::landscape_window);
     let title = own("Title", n_("The hero's spell book"));
     let (inner, closed) = chrome::window(r, &title, chrome::Skin::Marble, true);
     let book: Vec<SpellDef> = game.book().into_iter().cloned().collect();
@@ -219,19 +240,24 @@ pub fn frame(
     // The bottom row (the filter button, and with more than one page the arrows and "N / M")
     // always leaves its 41 px under the grid, above the message line.
     let grid = Rect::new(inner.x, inner.y, inner.w, inner.h - 41.0 * k);
-    let (cw, ch) = ((grid.w - 4.0 * gap) / 3.0, (grid.h - 6.0 * gap) / 5.0 + gap);
+    // The page's grid: 3 × 5 cells, or upright 2 columns and as many rows as the height keeps tall.
+    let (cols, rows) = if upright.is_some() { (UPRIGHT_COLS, upright_rows(grid.h / k)) } else { (COLS, ROWS) };
+    let per_page = cols * rows;
+    let (cw, ch) = ((grid.w - (cols as f32 + 1.0) * gap) / cols as f32, (grid.h - (rows as f32 + 1.0) * gap) / rows as f32 + gap);
+    // A phone held upright sets its card's text from the phone's text base (a phone choice).
+    let text_k = if upright.is_some() { super::display::text_for(k, super::dialog::TEXT_REF) } else { k };
     // The filter's list: its book indices, paged; a new filter starts on its first page.
     let listed = shown(&enemy, *filter);
-    let pages = page_count(listed.len());
+    let pages = page_count(listed.len(), per_page);
     if bottom_row(r, inner, gap, k, pages, page, filter) {
         *page = 0;
     }
     *page = (*page).min(pages - 1);
-    let first = *page * BOOK_PAGE;
+    let first = *page * per_page;
     let mut cast = None;
-    for cell in 0..BOOK_PAGE {
-        // The 15 cells fill each column top to bottom, then the next column (0x4dad08).
-        let (c, row) = book_cell(cell);
+    for cell in 0..per_page {
+        // The cells fill each column top to bottom, then the next column (0x4dad08).
+        let (c, row) = book_cell(cell, rows);
         let cr = Rect::new(grid.x + gap + c as f32 * (cw + gap), grid.y + gap + row as f32 * ch, cw, ch - gap);
         let book_index = listed.get(first + cell).copied();
         let spell = book_index.map(|i| &book[i]);
@@ -295,7 +321,7 @@ pub fn frame(
         // The book's cells are the original's spell cards (0x4d261c → 0x49bde4): the card
         // text of 0x49ba84 in the room right of the picture, red when unaffordable.
         let text = Rect::new(icon.x + icon.w, cr.y, cr.x + cr.w - icon.x - icon.w, cr.h);
-        super::typography::Role::Body.with(|| card_text(game, s, text, true));
+        super::typography::Role::Body.with(|| card_text(game, s, text, true, text_k));
         if hover {
             if game.mana < cost.mana {
                 tooltip(&[(own("NoManaForSpell", n_("Not enough mana\nto cast this spell!")).replace('\n', " "), chrome::RED_TEXT)]);
@@ -426,7 +452,7 @@ pub fn spell_card(game: &Game, s: &SpellDef, r: Rect, tint_mana: bool) {
         let icon = Rect::new(r.x + 6.0 * k, r.y + (r.h - side) / 2.0, side, side);
         chrome::spell_icon(s, icon);
         let left = icon.x + icon.w + 2.0 * k;
-        card_text(game, s, Rect::new(left, r.y, r.x + r.w - left, r.h), tint_mana);
+        card_text(game, s, Rect::new(left, r.y, r.x + r.w - left, r.h), tint_mana, k);
     });
 }
 
@@ -451,7 +477,7 @@ const UNAFFORDABLE_NAME: Color = Color::new(1.0, 175.0 / 255.0, 85.0 / 255.0, 1.
 /// own army (Razdor: each entry by its sign, a deviation); cost and duration orange. With `tint_mana` a spell over the hero's mana has all
 /// its lines red, its name in the red Benguiat, and its effect is not turned blue
 /// (0x49be2c, 0x49bb36).
-fn card_text(game: &Game, s: &SpellDef, area: Rect, tint_mana: bool) {
+fn card_text(game: &Game, s: &SpellDef, area: Rect, tint_mana: bool, text: f32) {
     use super::chrome::{self, CREAM};
     use super::typography::Role;
     let k = chrome::k();
@@ -460,11 +486,12 @@ fn card_text(game: &Game, s: &SpellDef, area: Rect, tint_mana: bool) {
     let cost = game.cast_cost(s);
     let red = tint_mana && game.mana < cost.mana;
     let effect = razdor::rules::spell_hint::effect_entries(s, &super::spell_badges::label);
-    let name_size = Role::Name.size(17.0 * k);
+    // The text's size is `text` (the window's scale, or the phone's text base for an upright book).
+    let name_size = Role::Name.size(17.0 * text);
     let names = Role::Name.with(|| wrap(&s.name, room, name_size));
-    let name_lh = Role::Name.line_height(18.0 * k);
-    let size = Role::Body.size(12.0 * k);
-    let line_h = Role::Body.line_height(13.0 * k);
+    let name_lh = Role::Name.line_height(18.0 * text);
+    let size = Role::Body.size(12.0 * text);
+    let line_h = Role::Body.line_height(13.0 * text);
     let mut lines: Vec<Vec<(String, Color)>> = Vec::new();
     // Without an effect text the card has the name alone (0x49bb0b).
     if !effect.is_empty() {
@@ -513,15 +540,24 @@ mod tests {
     #[test]
     fn the_book_fills_each_column_before_the_next() {
         // 0x4dad08: column = n / 5, row = n % 5, so cell 1 is under cell 0, not beside it.
-        assert_eq!(book_cell(0), (0, 0));
-        assert_eq!(book_cell(1), (0, 1));
-        assert_eq!(book_cell(4), (0, 4));
-        assert_eq!(book_cell(5), (1, 0));
-        assert_eq!(book_cell(14), (2, 4));
-        let mut seen: Vec<(usize, usize)> = (0..BOOK_PAGE).map(book_cell).collect();
+        assert_eq!(book_cell(0, ROWS), (0, 0));
+        assert_eq!(book_cell(1, ROWS), (0, 1));
+        assert_eq!(book_cell(4, ROWS), (0, 4));
+        assert_eq!(book_cell(5, ROWS), (1, 0));
+        assert_eq!(book_cell(14, ROWS), (2, 4));
+        let mut seen: Vec<(usize, usize)> = (0..BOOK_PAGE).map(|n| book_cell(n, ROWS)).collect();
         seen.sort();
         seen.dedup();
         assert_eq!(seen.len(), BOOK_PAGE, "every cell is its own place");
+        // The desktop's page is the 3 × 5 spread.
+        assert_eq!(COLS * ROWS, BOOK_PAGE);
+        // Upright (a phone choice): the same rule with 10 rows, two columns.
+        assert_eq!(book_cell(9, 10), (0, 9));
+        assert_eq!(book_cell(10, 10), (1, 0));
+        let mut upright: Vec<(usize, usize)> = (0..20).map(|n| book_cell(n, 10)).collect();
+        upright.sort();
+        upright.dedup();
+        assert_eq!(upright.len(), 20, "two columns of ten");
     }
 
     #[test]
@@ -545,11 +581,14 @@ mod tests {
     #[test]
     fn the_book_pages_15_spells_each() {
         // Razdor's choice (the owner's, 2026-10-22): an empty book still has its one page.
-        assert_eq!(page_count(0), 1);
-        assert_eq!(page_count(15), 1);
-        assert_eq!(page_count(16), 2);
-        assert_eq!(page_count(30), 2);
-        assert_eq!(page_count(31), 3);
+        assert_eq!(page_count(0, BOOK_PAGE), 1);
+        assert_eq!(page_count(15, BOOK_PAGE), 1);
+        assert_eq!(page_count(16, BOOK_PAGE), 2);
+        assert_eq!(page_count(30, BOOK_PAGE), 2);
+        assert_eq!(page_count(31, BOOK_PAGE), 3);
+        // An upright page of 2 × 10 holds 20 (a phone choice); the page size is the caller's.
+        assert_eq!(page_count(20, 20), 1);
+        assert_eq!(page_count(21, 20), 2);
         // Turning clamps at the first and the last page.
         assert_eq!(page_turn(0, 1, 1), 0, "one page never turns");
         assert_eq!(page_turn(0, 3, -1), 0);
@@ -568,24 +607,51 @@ mod tests {
         assert_eq!(card_fill(false, true), CardFill::Unaffordable);
     }
 
-    /// On a phone held upright the book is the width's scale: it fits the screen between the top
-    /// inset and the bar, and clears the bar.
+    /// On a phone held upright the book fits the screen between the top inset and the bar, and clears
+    /// the bar; it is 2 columns (560 px wide) and uses the height the screen gives it.
     #[test]
     fn a_phone_spellbook_in_portrait_fits_the_screen_above_the_bar() {
         let dp = 2.75;
         let (sw, sh, top, bar, base) = (1080.0, 2400.0, 60.0, 150.0, 1.0);
-        let (k, r) = super::window_layout::portrait_game((sw, sh), Some(dp), top, bar, base, BOOK_VIDEO).expect("held upright");
+        let video = super::window_layout::upright_book_video_at((sw, sh), Some(dp), top, bar, base, UPRIGHT_W).expect("held upright");
+        assert_eq!(video.0, UPRIGHT_W, "two columns in a 560 px design");
+        let (k, r) = super::window_layout::portrait_game((sw, sh), Some(dp), top, bar, base, video).expect("held upright");
         assert!(r.x >= 0.0 && r.x + r.w <= sw, "across the screen: {r:?}");
         assert!(r.y >= top, "under the inset: {r:?}");
         assert!(r.y + r.h <= sh - bar, "clears the bar: {r:?}");
-        assert!((r.w - BOOK_VIDEO.0 * k).abs() <= 1.0, "one spread, scaled to the width: {r:?}");
+        assert!((r.w - UPRIGHT_W * k).abs() <= 1.0, "the design width scaled to the width: {r:?}");
         assert!(k >= base, "never below the interface scale");
+        // The height is used: at most the two margins (8 px each side) and a fraction of a design px are left over.
+        assert!(r.h >= (sh - bar - 8.0 - top) - 40.0, "fills the height: {r:?}");
     }
 
-    /// The desktop's book keeps its size: the landscape rectangle and the book's video size.
+    /// The upright book is 2 columns with as many rows as keep the cards as tall as the landscape's
+    /// (96 px), so a 1080 × 2400 phone holds 2 × 10 cards per page; a grid as tall as the landscape's
+    /// (530 px) gives its 5 rows, and no grid gives fewer than one row.
+    #[test]
+    fn a_phone_spellbook_in_portrait_has_two_columns_and_rows_that_fill_the_height() {
+        let dp = 2.75;
+        let (sw, sh, top, bar, base) = (1080.0, 2400.0, 60.0, 150.0, 1.0);
+        let video = super::window_layout::upright_book_video_at((sw, sh), Some(dp), top, bar, base, UPRIGHT_W).expect("held upright");
+        // The grid's design height: the window less the title strip (26 px), the bottom row (41 px).
+        let rows = upright_rows(video.1 - 26.0 - 3.0 - 41.0);
+        assert_eq!(UPRIGHT_COLS, 2);
+        assert_eq!(rows, 10, "a 2400 px phone's grid holds 10 rows");
+        assert!((video.1 - 26.0 - 3.0 - 41.0 - 11.0 * 8.0) / rows as f32 >= CARD_MIN_H, "every card is at least as tall as the landscape's");
+        assert_eq!(upright_rows(530.0), 5, "as tall as the landscape grid, the landscape's 5 rows");
+        assert_eq!(upright_rows(0.0), 1, "never fewer than one row");
+        // A phone's card is wider than tall, as the paper is (286 × 112): 2 columns of the 556 px grid.
+        let cw = (UPRIGHT_W - 4.0 - 3.0 * 8.0) / UPRIGHT_COLS as f32;
+        assert!(cw / CARD_MIN_H >= 2.0, "wide cards: {cw} × {CARD_MIN_H}");
+    }
+
+    /// The desktop's book keeps its size: the landscape rectangle and the book's video size, and the
+    /// desktop is not upright (no video of the upright book, whatever the screen).
     #[test]
     fn the_desktop_spellbook_is_the_landscape_window_unchanged() {
         assert_eq!(BOOK_VIDEO, (window_layout::WIDTH, window_layout::HEIGHT));
         assert_eq!(BOOK_VIDEO, (836.0, 600.0));
+        assert_eq!(super::window_layout::upright_book_video_at((1920.0, 1080.0), None, 0.0, 90.0, 1.0, UPRIGHT_W), None);
+        assert_eq!(super::window_layout::upright_book_video_at((1080.0, 2400.0), None, 0.0, 90.0, 1.0, UPRIGHT_W), None, "a phone's book needs the phone");
     }
 }
