@@ -1052,6 +1052,9 @@ impl App {
                 (Some(saves::ExitChoice::Keys), _) => {
                     self.help = true;
                     self.help_fresh = true;
+                    // The tap that opened the list must not press a key in it: its press edge is this
+                    // frame's, and the list's tiles would capture it (`widgets::button_state`).
+                    widgets::swallow_input();
                     Some(Screen::WorldMap)
                 }
                 (None, next) => next,
@@ -1102,6 +1105,8 @@ impl App {
                 Some(saves::ExitChoice::Keys) => {
                     self.help = true;
                     self.help_fresh = true;
+                    // As above: the tap's press edge does not reach the keys window's tiles.
+                    widgets::swallow_input();
                 }
                 // «Рестарт» in a battle: this battle again from the moment it began (Razdor's;
                 // the scenario's restart when that moment was not kept).
