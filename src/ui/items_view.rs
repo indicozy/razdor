@@ -1161,32 +1161,51 @@ fn close_button(win: Rect) -> bool {
     if !window_layout::portrait() {
         return false;
     }
-    let (_, r, _) = bottom_row_rects(win);
+    let Some(r) = bottom_row_rects(win).close else { return false };
     super::widgets::button(r.x, r.y, r.w, r.h, tr("Close"), true)
 }
 
-/// The phone's bottom row of the hero window (see [`bottom_row`]): its height is the stacked
-/// close's (`window_layout::army_close`), on the close's line when held upright and at the
-/// window's foot when sideways (where the window has no close). Sideways the row starts at the
-/// diary's left edge ([`sideways_row`]), so it never covers the hero's panel.
-fn bottom_row_rects(win: Rect) -> (Rect, Rect, Rect) {
+/// The phone's bottom buttons of the hero window: «Весь список» (`whole`), «Закрыть» (`close`:
+/// held upright only, sideways the window has none) and «Развернуть» (`expand`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct BottomRow {
+    whole: Rect,
+    close: Option<Rect>,
+    expand: Rect,
+}
+
+/// The phone's bottom buttons of the hero window: its height is the stacked close's
+/// (`window_layout::army_close`), on the close's line when held upright and at the window's foot
+/// when sideways. Sideways they stack under the diary's column ([`sideways_row`]), so they never
+/// cover the hero's panel.
+fn bottom_row_rects(win: Rect) -> BottomRow {
     let k = chrome::k();
     let base = window_layout::army_close(win);
     if window_layout::portrait() {
-        return bottom_row(win, base.y, base.h, 12.0 * k, 8.0 * k);
+        let (whole, close, expand) = bottom_row(win, base.y, base.h, 12.0 * k, 8.0 * k);
+        return BottomRow { whole, close: Some(close), expand };
     }
-    sideways_row(win, k, win.bottom() - base.h - 8.0 * k, base.h)
+    let (whole, expand) = sideways_row(win, k, win.bottom() - base.h - 8.0 * k, base.h);
+    BottomRow { whole, close: None, expand }
 }
 
-/// The sideways bottom row at `y`, `h` tall: the three buttons of [`bottom_row`] laid across the
-/// window from the diary's left edge (design x 576 of the right side, the hero view's `o` mapping:
-/// the origin 248 plus (576 - 264) times `HERO_S`) to the window's right pad. Pure, so the test
-/// can check it without the screen's state.
-fn sideways_row(win: Rect, k: f32, y: f32, h: f32) -> (Rect, Rect, Rect) {
-    let diary_x = win.x + (248.0 + (576.0 - 264.0) * HERO_S) * k;
-    let pad = 12.0 * k;
-    // `bottom_row` pads from the rect's left edge: the rect starts one pad left of the diary.
-    bottom_row(Rect::new(diary_x - pad, win.y, win.right() - diary_x + pad, win.h), y, h, pad, 8.0 * k)
+/// Sideways, the phone's diary buttons stack under the diary's column (a phone choice, not in the
+/// original), so that their labels fit the narrow column: «Развернуть» at `y`, `h` tall, and
+/// «Весь список» above it with a gap of 8 px. Both are as wide as the entry box (design x 576 to
+/// 868 of the hero view's `o` mapping: the origin 248 plus (x - 264) times `HERO_S`). Returns
+/// (whole list, expand). Pure, so the test can check it without the screen's state.
+fn sideways_row(win: Rect, k: f32, y: f32, h: f32) -> (Rect, Rect) {
+    let left = win.x + (248.0 + (576.0 - 264.0) * HERO_S) * k;
+    let right = win.x + (248.0 + (868.0 - 264.0) * HERO_S) * k;
+    let expand = Rect::new(left, y, right - left, h);
+    let whole = Rect::new(left, y - 8.0 * k - h, right - left, h);
+    (whole, expand)
+}
+
+/// The sideways diary entry box `entry` shortened to end 4 px above the phone's upper bottom
+/// button (`row.whole`), so the button does not cover its text (a phone choice, not in the original).
+fn entry_above_row(entry: Rect, row: &BottomRow, k: f32) -> Rect {
+    Rect::new(entry.x, entry.y, entry.w, entry.h.min((row.whole.y - 4.0 * k - entry.y).max(0.0)))
 }
 
 /// The unit's panel of the army and hero windows: the landscape column on the left, or stacked
@@ -1737,11 +1756,10 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     let entry0 = o(576.0, 410.0, 292.0, 220.0);
     let entry_bar0 = o(868.0, 410.0, 18.0, 220.0);
     let mut column = diary_column(o(576.0, 58.0, 310.0, 164.0), list0, entry0, phone, described.is_some(), entry_shown);
-    // Sideways a phone's bottom row sits under the diary's right column (no «Закрыть» there): the
-    // entry box gives up that strip, so «Развернуть» does not cover its text.
+    // Sideways a phone's bottom buttons stack under the diary's right column (no «Закрыть» there):
+    // the entry box gives up that strip, so «Весь список» does not cover its text.
     if phone && !window_layout::portrait() {
-        let (_, _, expand) = bottom_row_rects(win);
-        column.entry.h = column.entry.h.min((expand.y - 4.0 * k - column.entry.y).max(0.0));
+        column.entry = entry_above_row(column.entry, &bottom_row_rects(win), k);
     }
     if let Some(desc) = column.desc {
         heading("ItemDescript", n_("Item description"), desc);
@@ -1928,11 +1946,12 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
         }
     });
 
-    // The phone's bottom row: «Весь список» (the whole tab in its reader) left, «Закрыть» between
-    // (portrait), «Развернуть» (the picked entry in its reader) right. Drawn before the readers,
-    // which cover it while they are open.
+    // The phone's bottom buttons: «Весь список» (the whole tab in its reader) left, «Закрыть» between
+    // (portrait), «Развернуть» (the picked entry in its reader) right; sideways «Весь список» stands
+    // above «Развернуть». Drawn before the readers, which cover them while they are open.
     if phone {
-        let (left, _, right) = bottom_row_rects(win);
+        let row = bottom_row_rects(win);
+        let (left, right) = (row.whole, row.expand);
         if button(left.x, left.y, left.w, left.h, tr("Whole list"), whole_list_enabled(rows.len())) {
             view.list_reader = true;
             view.list_reader_scroll = 0;
@@ -2129,24 +2148,45 @@ mod tests {
         assert!(close.w >= 200.0, "«Закрыть» stays a wide button");
     }
 
-    /// Sideways, the phone's bottom row starts right of the hero's left panel (design x 246) and
-    /// lies under the diary's column, inside the window, with its three buttons in order.
+    /// Sideways, the phone's bottom buttons start right of the hero's left panel (design x 246) and
+    /// lie under the diary's column, inside the window.
     #[test]
     fn a_landscape_phone_s_bottom_row_starts_off_the_hero_panel() {
         let k = 1.0;
         let win = Rect::new(0.0, 0.0, 836.0, 600.0);
         let panel_right = win.x + 246.0 * k;
         let h = 44.0 * 2.75;
-        let (left, close, right) = super::sideways_row(win, k, 540.0, h);
-        assert!(left.x >= panel_right, "«Весь список» at {left:?} covers the hero's panel (right edge {panel_right})");
-        assert!(left.x > win.x + win.w / 2.0, "the diary's column is the right half: {left:?}");
-        for r in [left, close, right] {
+        let (whole, expand) = super::sideways_row(win, k, 540.0, h);
+        assert!(whole.x >= panel_right, "«Весь список» at {whole:?} covers the hero's panel (right edge {panel_right})");
+        assert!(whole.x > win.x + win.w / 2.0, "the diary's column is the right half: {whole:?}");
+        for r in [whole, expand] {
             assert!(r.x >= win.x && r.right() <= win.right(), "{r:?} inside the window");
         }
-        assert!(left.right() < close.x && close.right() < right.x, "no overlap, in order");
-        // The diary's entry box starts at the same x (design 576).
+    }
+
+    /// Sideways, «Весь список» and «Развернуть» stack under the diary's column, each as wide as the
+    /// entry box, not overlapping, «Весь список» above, and the entry box ends above both.
+    #[test]
+    fn a_landscape_phone_s_diary_buttons_stack_under_the_entry_box() {
+        let k = 1.0;
+        let win = Rect::new(0.0, 0.0, 836.0, 600.0);
+        let h = 44.0 * 2.75;
+        let (whole, expand) = super::sideways_row(win, k, 540.0, h);
         let entry_x = win.x + (248.0 + (576.0 - 264.0) * super::HERO_S) * k;
-        assert!((left.x - entry_x).abs() <= 12.0 * k + 0.5, "{left:?} vs the entry's x {entry_x}");
+        let entry_right = win.x + (248.0 + (868.0 - 264.0) * super::HERO_S) * k;
+        for r in [whole, expand] {
+            assert!((r.x - entry_x).abs() < 0.5 && (r.right() - entry_right).abs() < 0.5, "{r:?} is the entry box's width");
+            assert!(r.h >= h - 0.5, "{r:?} keeps the finger-sized height");
+        }
+        assert!(whole.bottom() <= expand.y, "«Весь список» above «Развернуть» with no overlap: {whole:?} {expand:?}");
+        assert!((expand.y - 540.0).abs() < 0.5, "«Развернуть» stays on the row's line");
+        assert!(expand.y - whole.bottom() >= 8.0 * k - 0.5, "a small gap between them");
+        let row = super::BottomRow { whole, close: None, expand };
+        let entry = Rect::new(entry_x, win.y + 300.0, entry_right - entry_x, 400.0);
+        let cut = super::entry_above_row(entry, &row, k);
+        assert!(cut.bottom() <= whole.y - 4.0 * k + 0.5, "the entry box ends above «Весь список»: {cut:?} vs {whole:?}");
+        assert_eq!(cut.y, entry.y, "its top stays");
+        assert_eq!((cut.x, cut.w), (entry.x, entry.w), "its width stays");
     }
 
     /// «Развернуть» needs a picked entry on the tab; «Весь список» needs any entry on it.
