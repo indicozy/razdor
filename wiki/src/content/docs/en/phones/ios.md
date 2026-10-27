@@ -51,10 +51,12 @@ After copying, open Razdor and press the **"Check Again"** button. If you don't 
 
 ## Data Storage
 
-Saves, image cache, and logs are located in the folder:
+Saves and logs are located in the folder:
 "Files" → On My iPhone → Razdor → **Razdor** (the `saves` folder is located inside).
 
 No additional permissions are required to access this data.
+
+The picture cache is kept separately, in the app's cache (not shown in Files), and takes at most 256 MB.
 
 ## Controls
 

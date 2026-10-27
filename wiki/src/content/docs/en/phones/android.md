@@ -76,4 +76,6 @@ This is how a game with a mod (for example, the Community Update Evolution Mod) 
 
 ## Data storage
 
-Saves, the journal and the picture cache are in `Internal storage/Razdor/saves`. The folder is not deleted with the app, so reinstalling does not erase your saves.
+Saves and the journal are in `Internal storage/Razdor/saves`. The folder is not deleted with the app, so reinstalling does not erase your saves.
+
+The picture cache is in the app's own cache (Settings → Apps → Razdor → Storage) and takes at most 256 MB. Nothing important is in it: "Clear cache" is safe, your saves stay, and pictures just load a little longer on the next start.
