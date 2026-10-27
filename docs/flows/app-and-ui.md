@@ -210,9 +210,7 @@ and custom battle windows. The map and building windows are already centred over
 bar (`window_layout::window`, `main_menu::map_window`, the saves and dialogs), so they are not moved again.
 The battle window held upright (`battle_view::Layout::upright`, pure, with unit tests): the window's scale comes from
 `window_layout::game_scale` (the width less 8 px, above the bar); the unit's band (`unit_sheet::draw_band`) on top at
-design y 76, then the quick buttons, the enemy's grid, the strip, the player's grid; the close box is 44 dp at the top right
-(`close_button`); the landscape phone window gets the same box, beside its top right corner so it does not cover the enemy's top right card, above it or inside when there is no room (`battle_view`'s `Layout::landscape`, now `chrome::close_box_beside`, Razdor's phone choice) and then
-draws no cross in its title bar. The map, the bar and the exit window are drawn at the interface scale (`display::with_window_scale(None, …)`).
+design y 76, then the quick buttons, the enemy's grid, the strip, the player's grid; the close cross is its title bar's, inside the taller strip (see the close crosses below). The landscape phone window is placed below the safe top plus the strip's growth (`battle_view`'s `Layout::landscape`, `chrome::phone_title_grow`). The map, the bar and the exit window are drawn at the interface scale (`display::with_window_scale(None, …)`).
 Stacked windows (experiment, main only): a phone held upright (`window_layout::portrait`: `dp_px` set and the
 screen taller than wide) stacks the building, army and hero windows, each with its own layout
 (`window_layout::Stack`, passed to `window_layout::scaled`). Building: the two panes on top at full width, each at the
@@ -285,11 +283,15 @@ a page on a 2400 px phone. Its card text takes the phone's text base (`display::
 Its bottom row is inside that rectangle. The minimap (`minimap::window`) in
 portrait stands inside the safe area (`in_safe_area`, `inset_view`); its phone close cross sits in the frame's top
 corner (`close_box`). The F1 keys list (`hotkeys::help_overlay`) takes the cross on a phone and closes by it.
-Close crosses on a phone (a phone choice, not in the original): every title bar's cross is a 44 dp box placed by the
-battle's rule (`chrome::title_close_cross`, `close_box_beside`: beside the window's top right if it fits the safe area,
-else above it, else inside, `close_box_inside`); a box inside the strip keeps the title clear of it (`room_clear_of`).
-Its click area is exactly that box (`chrome::close_button_at`). The desktop's cross is as it was, its own click area
-(`chrome::touch_hit` for `close_button`, which the battle's own cross uses). No layout (window rectangles, title strips) changes on a phone.
+Close crosses on a phone (a phone choice, not in the original): every title strip is 1.5× the desktop's
+(`chrome::phone_strip_height`, `PHONE_STRIP`) and its cross sits inside it at the right, sized by the desktop's formula
+on the taller strip (`chrome::title_close_cross`). The taller strip grows upward into the room above the window
+(`chrome::grown_upward`: the frame starts `phone_title_grow` higher), so the window's content and its `inner` rect are
+where the desktop puts them; where the safe top leaves no room above, the window keeps its rect and the strip covers its
+top, so the caller must place the window with that room (the landscape battle window does, `window_layout` for the
+others). The cross's click area is a 44 dp square over it, never below the strip (`chrome::touch_hit`, `close_button_at`).
+The title keeps clear of the cross (`room_clear_of`). The battle window's cross is its title bar's own. The desktop's
+strip and cross are as they were.
 Not covered: the building, army and hero windows (the stacked layout).
 The market and the sanctuary scenes of the UI regression check use town 8 of РК3-Столица (the start's
 castle has neither tab); the snapshot clears the start's due places, which otherwise make the building

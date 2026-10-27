@@ -1794,6 +1794,33 @@ pub fn title_grow() -> f32 {
     strip_height(k(), growing_title()) - (26.0 * k()).round()
 }
 
+/// How much taller a phone's title strip is than the desktop's, as a factor (a phone choice, not in
+/// the original: the close cross sits inside the strip, so the strip is taller there).
+pub const PHONE_STRIP: f32 = 1.5;
+
+/// A title strip `tb` px tall on the desktop, as it is on this screen: 1.5× on a phone (`dp` Some),
+/// `tb` as it is otherwise.
+pub fn phone_strip_height(tb: f32, dp: Option<f32>) -> f32 {
+    match dp.filter(|d| *d > 0.0) {
+        Some(_) => (tb * PHONE_STRIP).round(),
+        None => tb,
+    }
+}
+
+/// How far a phone's title strip grows above its window's rect for `factor` (0 on the desktop): the
+/// strip is `phone_strip_height` tall and the window's frame starts that much higher, so the content
+/// keeps its place (see [`window_styled`]).
+pub fn phone_title_grow(k: f32, factor: f32, dp: Option<f32>) -> f32 {
+    let tb = strip_height(k, factor);
+    phone_strip_height(tb, dp) - tb
+}
+
+/// A window's rect with its title strip grown `grow` px upward (the frame starts that much higher and
+/// is that much taller), when the screen's safe top `safe_top` leaves that room above it; else `r` as it is.
+pub fn grown_upward(r: Rect, grow: f32, safe_top: f32) -> Rect {
+    if grow > 0.0 && r.y - grow >= safe_top { Rect::new(r.x, r.y - grow, r.w, r.h + grow) } else { r }
+}
+
 /// The frames 0x48d3f8 draws on every window: a 2 px frame round it and a 2 px line from
 /// (2, 27) to (w − 2, 29) under the title. `px` as in [`window_inner_frames`].
 pub fn window_frames(r: Rect, px: f32) {
@@ -1870,71 +1897,12 @@ pub fn touch_hit(cross: Rect, strip_bottom: f32, dp: Option<f32>, screen: (f32, 
     Rect::new(x, strip_bottom - h, side, h)
 }
 
-/// A phone's close box inside the window `win` (a phone choice, not in the original): a square of
-/// `dp`-scaled 44 dp at its top right, 4 px in and 3 px down, the battle's stacked close row.
-pub fn close_box_inside(win: Rect, k: f32, dp: f32) -> Rect {
-    let side = (CLOSE_DP * dp).round();
-    Rect::new(win.right() - side - 4.0 * k, win.y + 3.0 * k, side, side)
-}
-
-/// A phone's close box beside the window `win`'s top right corner (a phone choice, not in the
-/// original): the same 44 dp square just right of the corner (4 px gap, top aligned) when it fits
-/// left of the screen's safe right edge `safe_right` and below the safe top `safe_top`, so it covers
-/// nothing of the window's content. Else above the corner when that is below `safe_top`; else inside
-/// ([`close_box_inside`]).
-pub fn close_box_beside(win: Rect, k: f32, dp: f32, safe_right: f32, safe_top: f32) -> Rect {
-    let side = (CLOSE_DP * dp).round();
-    let beside = Rect::new(win.right() + 4.0 * k, win.y, side, side);
-    if beside.right() <= safe_right && beside.y >= safe_top {
-        return beside;
-    }
-    let above = Rect::new(win.right() - side - 4.0 * k, win.y - side - 4.0 * k, side, side);
-    if above.y >= safe_top {
-        return above;
-    }
-    close_box_inside(win, k, dp)
-}
-
-/// The close cross of a title bar whose strip is `strip` (the window's top, its width). On the
-/// desktop (`dp` None) the cross as it always was: the strip's height less 6 px, 3 px down, 4 px in
-/// from the right. On a phone the 44 dp box of [`close_box_beside`].
-pub fn title_close_cross(strip: Rect, k: f32, dp: Option<f32>, safe_right: f32, safe_top: f32) -> Rect {
-    match dp.filter(|d| *d > 0.0) {
-        Some(dp) => close_box_beside(strip, k, dp, safe_right, safe_top),
-        None => {
-            let s = strip.h - 6.0 * k;
-            Rect::new(strip.right() - s - 4.0 * k, strip.y + 3.0 * k, s, s)
-        }
-    }
-}
-
-/// Whether a phone's close box `cross` lies over a window's content: it starts left of the strip's
-/// right edge and reaches below the strip. A box beside or above the window is not covered by it.
-pub fn crosses_window_content(cross: Rect, strip: Rect) -> bool {
-    cross.x < strip.x + strip.w && cross.y + cross.h > strip.y + strip.h
-}
-
-local! {
-    /// The close cross of the last title bar drawn this frame, when it lies over its window's content
-    /// (its box and whether it is red): drawn by [`draw_queued_crosses`].
-    static QUEUED_CROSS: RefCell<Option<(Rect, bool)>> = const { RefCell::new(None) };
-}
-
-/// Sets the queued cross (`None`: none). Each title bar sets it, so only the last window's cross
-/// waits for the frame's end: a window drawn after an earlier one covers the earlier one's content
-/// and cross, and a modal dialog drawn over a window keeps the window's cross under it.
-fn queue_cross(cross: Option<(Rect, bool)>) {
-    QUEUED_CROSS.with(|q| *q.borrow_mut() = cross);
-}
-
-/// Draws the cross queued this frame (see [`queue_cross`]) and empties the queue. The frame calls it
-/// after its windows, before the pan's end, so the cross keeps the window's offset and is over
-/// every window (the FPS counter and the keyboard strip are drawn after it).
-pub fn draw_queued_crosses() {
-    if let Some((cross, red)) = QUEUED_CROSS.with(|q| q.borrow_mut().take()) {
-        // The box is its own click area; its click was taken with the title bar, so the return is unused.
-        let _ = close_button_at(cross, cross, red);
-    }
+/// The close cross of a title bar whose strip is `strip` (its top and its width): the strip's height
+/// less 6 px, 3 px down, 4 px in from the right. On a phone the strip is taller (`phone_strip_height`),
+/// so the cross is larger and still inside it (a phone choice, not in the original).
+pub fn title_close_cross(strip: Rect, k: f32) -> Rect {
+    let s = strip.h - 6.0 * k;
+    Rect::new(strip.right() - s - 4.0 * k, strip.y + 3.0 * k, s, s)
 }
 
 /// The title's room (its width, centred) kept clear of a close cross that sits inside the strip:
@@ -1976,11 +1944,10 @@ fn title_bar_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bo
         }
     }
     let color = title_color.unwrap_or(if skin == Skin::Red { GOLD } else { CREAM });
-    // A phone's cross is a 44 dp box (a phone choice, not in the original): a box inside the strip keeps
-    // the title clear of it; the desktop's cross is narrower than the room left by the formula.
+    // A phone's cross sits inside its taller strip (a phone choice, not in the original): the title
+    // keeps clear of it; the desktop's cross is narrower than the room left by the formula.
     let phone = super::display::dp_px();
-    let safe = super::display::safe_area();
-    let cross = closable.then(|| title_close_cross(r, k, phone, screen_width() - safe.right, safe.top));
+    let cross = closable.then(|| title_close_cross(r, k));
     let room = if ornate { r.w - 300.0 * k } else { r.w - 2.0 * r.h - 8.0 * k };
     let room = match cross {
         Some(c) if phone.is_some() => room_clear_of(room, r, c, k),
@@ -1995,26 +1962,14 @@ fn title_bar_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bo
     });
     // The original's size (factor 1) is drawn as it always was; a grown title takes its size.
     if factor == FIXED_TITLE { block() } else { super::dt_font::with_legacy_metrics(block) }
+    // The cross's click area: the cross itself on the desktop; on a phone a finger-sized square over it,
+    // never below the strip (`touch_hit`).
     match cross {
-        // A phone's box is its own click area (finger-sized, never smaller than its drawn cross).
-        // A box inside the window is drawn after the frame, over the content (`draw_queued_crosses`);
-        // its click is taken here as before.
-        Some(c) if phone.is_some() && crosses_window_content(c, r) => {
-            queue_cross(Some((c, skin == Skin::Red)));
-            super::widgets::button_state(c, true).2
-        }
-        Some(c) if phone.is_some() => {
-            queue_cross(None);
-            close_button_at(c, c, skin == Skin::Red)
-        }
         Some(c) => {
-            queue_cross(None);
-            close_button(c.x, c.y, c.w, skin == Skin::Red)
+            let hit = touch_hit(c, r.bottom(), phone, (screen_width(), screen_height()));
+            close_button_at(c, hit, skin == Skin::Red)
         }
-        None => {
-            queue_cross(None);
-            false
-        }
+        None => false,
     }
 }
 
@@ -2065,6 +2020,18 @@ pub fn battle_exit_frame(r: Rect, title: &str, px: f32) -> bool {
 
 fn window_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bool, title_color: Option<Color>, factor: f32) -> (Rect, bool) {
     let k = k();
+    // The title strip is 26 px at the original's size, taller by the title's factor (a growing window
+    // only; `FIXED_TITLE` keeps 26 px), and 1.5× on a phone (`phone_strip_height`, a phone choice). The
+    // phone's extra height grows upward: the frame starts `grow` higher, so the strip ends where the
+    // desktop's does and `inner` below is the same as on the desktop. Where the screen's safe top leaves
+    // no room above, the window keeps its rect and the strip covers its top; the callers place their
+    // windows with that room (`window_layout`, `battle_view`; `phone_title_grow`).
+    let dp = super::display::dp_px();
+    let tb0 = strip_height(k, factor);
+    let tb = phone_strip_height(tb0, dp);
+    let grow = tb - tb0;
+    let safe = super::display::safe_area();
+    let r = grown_upward(r, grow, safe.top);
     BIGGEST.with(|b| {
         if b.get().is_none_or(|o| o.w * o.h < r.w * r.h) {
             b.set(Some(Rect::new(r.x, r.y, r.w + 6.0 * k, r.h + 6.0 * k)));
@@ -2074,13 +2041,9 @@ fn window_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bool,
     surface(r, skin);
     // A one-finger slide over the window pans it when the canvas overflows (`ui::pan`).
     super::pan::window_area(r);
-    // The title strip grows with the text size, so a large title keeps its room (at the
-    // original's size it is 26 px).
-    // The title strip is 26 px at the original's size, taller by the title's factor (a growing
-    // window only; `FIXED_TITLE` keeps 26 px).
-    let tb = strip_height(k, factor);
     let closed = title_bar_styled(Rect::new(r.x, r.y, r.w, tb), title, skin, closable, ornate, title_color, factor);
-    // The frame round the window and the line under its title (0x48d3f8).
+    // The frame round the window and the line under its title (0x48d3f8): the line stays where the
+    // desktop's is, under the strip's 26 px (or its text-size growth).
     window_frames_grown(r, opx(), tb - (26.0 * k).round());
     // Each caller draws the frames for its own content and footer.
     (Rect::new(r.x + 2.0 * k, r.y + tb + 1.0, r.w - 4.0 * k, r.h - tb - 3.0 * k), closed)
@@ -2875,51 +2838,53 @@ mod tests {
         assert_eq!(touch_hit(cross, strip_bottom, None, (1920.0, 1080.0)), cross);
     }
 
-    /// Razdor's phone choice, not in the original: a phone's title cross is a 44 dp box, beside the
-    /// window's top right when it fits the safe area, else above it, else inside; the desktop keeps
-    /// the cross as it was (the strip less 6 px, 3 px down, 4 px in).
+    /// Razdor's phone choice, not in the original: a phone's title strip is 1.5× the desktop's, and the
+    /// cross sits inside it at the right, sized by the desktop's formula on the taller strip; the
+    /// desktop's strip and cross are as they were.
     #[test]
-    fn a_phones_title_cross_is_a_44_dp_box_beside_above_or_inside_as_the_room_allows() {
-        let dp = 2.75;
-        let side = (44.0f32 * dp).round();
+    fn a_phones_title_strip_is_1_5_times_the_desktops_and_its_cross_sits_inside_it() {
+        for kk in [1.0_f32, 1.125, 2.75] {
+            let tb = strip_height(kk, FIXED_TITLE);
+            assert_eq!(phone_strip_height(tb, None), tb, "k {kk}: the desktop's strip");
+            let phone = phone_strip_height(tb, Some(2.75));
+            assert!((phone - (tb * 1.5).round()).abs() < 1e-3, "k {kk}: {phone} is 1.5× {tb}");
+            assert!((phone_title_grow(kk, FIXED_TITLE, Some(2.75)) - (phone - tb)).abs() < 1e-3, "the growth is the extra height");
+            assert_eq!(phone_title_grow(kk, FIXED_TITLE, None), 0.0, "the desktop grows nothing");
+        }
+        // The desktop's cross: the strip less 6 px, 3 px down, 4 px in (as it was).
         let strip = Rect::new(100.0, 200.0, 500.0, 26.0);
-        let beside = title_close_cross(strip, 1.0, Some(dp), 1000.0, 0.0);
-        assert_eq!(beside, Rect::new(604.0, 200.0, side, side), "beside the top right");
-        // No room right of the window: above it, when that is below the safe top.
-        let above = title_close_cross(strip, 1.0, Some(dp), 600.0, 0.0);
-        assert_eq!(above, Rect::new(600.0 - side - 4.0, 200.0 - side - 4.0, side, side), "above");
-        // No room above either: inside, at the top right, 3 px down.
-        let inside = title_close_cross(strip, 1.0, Some(dp), 600.0, 150.0);
-        assert_eq!(inside, Rect::new(600.0 - side - 4.0, 203.0, side, side), "inside");
-        assert!(inside.w >= 44.0 * dp && inside.h >= 44.0 * dp, "{inside:?}");
-        // The desktop: the old cross.
-        assert_eq!(title_close_cross(strip, 1.0, None, 1000.0, 0.0), Rect::new(576.0, 203.0, 20.0, 20.0));
+        assert_eq!(title_close_cross(strip, 1.0), Rect::new(576.0, 203.0, 20.0, 20.0));
+        // A phone's: the same formula on the taller strip, inside it at the right.
+        let taller = Rect::new(100.0, 200.0, 500.0, 39.0);
+        let cross = title_close_cross(taller, 1.0);
+        assert_eq!(cross, Rect::new(596.0 - 33.0, 203.0, 33.0, 33.0));
+        assert!(cross.y >= taller.y && cross.bottom() <= taller.bottom(), "inside the strip: {cross:?}");
+        assert!(cross.right() <= taller.right() && cross.x >= taller.x, "at the right: {cross:?}");
     }
 
-    /// A phone's close box over the window's content is drawn last; one beside or above is not. Only
-    /// the last title bar's queued cross is drawn: an earlier one is replaced, and a title bar with no
-    /// queued cross empties the queue.
+    /// The phone's click area for that cross is 44 dp (or the strip's height when that is less), never
+    /// below the strip, and it holds the cross; the desktop's is the cross.
     #[test]
-    fn only_the_last_title_bars_cross_over_the_content_is_drawn_after_the_frame() {
-        let dp = 2.75;
-        let side = (44.0f32 * dp).round();
-        let strip = Rect::new(100.0, 200.0, 500.0, 26.0);
-        let inside = title_close_cross(strip, 1.0, Some(dp), 600.0, 150.0);
-        let beside = title_close_cross(strip, 1.0, Some(dp), 1000.0, 0.0);
-        let above = title_close_cross(strip, 1.0, Some(dp), 600.0, 0.0);
-        assert!(crosses_window_content(inside, strip));
-        assert!(!crosses_window_content(beside, strip), "beside: {beside:?}");
-        assert!(!crosses_window_content(above, strip), "above: {above:?}");
+    fn a_phones_cross_click_area_is_44_dp_and_never_below_its_strip() {
+        let strip = Rect::new(100.0, 200.0, 500.0, 39.0);
+        let cross = title_close_cross(strip, 1.0);
+        let hit = touch_hit(cross, strip.bottom(), Some(2.75), (1080.0, 2400.0));
+        let side = (44.0f32 * 2.75).round();
+        assert!(hit.w >= side.min(strip.h) - 1e-3 && hit.h >= side.min(strip.h) - 1e-3, "44 dp, or the strip's height: {hit:?}");
+        assert!(hit.bottom() <= strip.bottom() + 1e-3, "never below the strip: {hit:?}");
+        assert!(hit.contains(cross.center()), "holds the cross: {hit:?}");
+        assert_eq!(touch_hit(cross, strip.bottom(), None, (1080.0, 2400.0)), cross, "the desktop's is the cross");
+    }
 
-        let first = (inside, true);
-        let last = (Rect::new(10.0, 20.0, side, side), false);
-        queue_cross(Some(first));
-        queue_cross(Some(last));
-        assert_eq!(QUEUED_CROSS.with(|q| q.borrow_mut().take()), Some(last));
-        assert_eq!(QUEUED_CROSS.with(|q| q.borrow_mut().take()), None, "drawn once");
-        queue_cross(Some(first));
-        queue_cross(None);
-        assert_eq!(QUEUED_CROSS.with(|q| q.borrow_mut().take()), None, "a window without one clears it");
+    /// A phone's strip grows upward into the room above the window: the frame starts the growth higher
+    /// and the content rect is unchanged; with no room above (the safe top), the window keeps its rect.
+    #[test]
+    fn a_phones_taller_strip_grows_upward_into_the_room_above_the_window() {
+        let r = Rect::new(100.0, 300.0, 500.0, 400.0);
+        assert_eq!(grown_upward(r, 13.0, 0.0), Rect::new(100.0, 287.0, 500.0, 413.0), "frame starts higher");
+        assert_eq!(grown_upward(r, 13.0, 287.0), Rect::new(100.0, 287.0, 500.0, 413.0), "exactly to the safe top");
+        assert_eq!(grown_upward(r, 13.0, 288.0), r, "no room above the safe top: the window keeps its rect");
+        assert_eq!(grown_upward(r, 0.0, 0.0), r, "the desktop grows nothing");
     }
 
     /// The title stays clear of a phone's cross inside the strip: centred, its ends are 4 px short of

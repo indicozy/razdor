@@ -73,9 +73,6 @@ struct Layout {
     pitch: Vec2,
     grid_x: f32,
     formation: Formation,
-    /// A phone's own close box, finger-sized, at the top right (stacked or landscape); None on desktop,
-    /// where the title bar's cross is the close.
-    close: Option<Rect>,
     /// The stacked layout (a phone held upright).
     stacked: bool,
 }
@@ -122,24 +119,24 @@ impl Layout {
         let (f, k) = (battle.formation, chrome::k());
         let dp = super::display::dp_px();
         match (window_layout::game_rect(stacked_video(f)), dp) {
-            (Some(win), Some(dp)) => Layout::upright(k, win, f, dp),
+            (Some(win), Some(_)) => Layout::upright(k, win, f),
             _ => {
                 let (sw, safe) = (screen_width(), super::display::safe_area());
-                Layout::landscape(k, (sw, screen_height()), chrome::bar_height(), f, dp, sw - safe.right, safe.top)
+                Layout::landscape(k, (sw, screen_height()), chrome::bar_height(), f, dp, safe.top)
             }
         }
     }
 
     /// The landscape window: 836×600 at `k`, centred over the view above the `bar` px bottom bar,
-    /// the unit's column at the left and the formations on the right. On a phone (`dp`, as the
-    /// stacked window's) the close box is the same finger-sized one, beside the window's top right
-    /// corner (see [`chrome::close_box_beside`]; `safe_right` and `safe_top` are the screen's safe edges),
-    /// and the title bar's own cross is not drawn. Razdor's phone choice, not parity.
-    fn landscape(k: f32, screen: (f32, f32), bar: f32, f: Formation, dp: Option<f32>, safe_right: f32, safe_top: f32) -> Layout {
+    /// the unit's column at the left and the formations on the right. On a phone (`dp`) its title
+    /// strip is taller and grows upward (`chrome::phone_title_grow`), so the window sits below the
+    /// safe top `safe_top` plus that growth; the close cross is the title bar's own, inside the strip.
+    fn landscape(k: f32, screen: (f32, f32), bar: f32, f: Formation, dp: Option<f32>, safe_top: f32) -> Layout {
         let (sw, sh) = screen;
         let (ww, wh) = ((836.0 * k).round(), (600.0 * k).round());
         let x = ((sw - ww) / 2.0).round();
-        let y = ((sh - bar - wh) / 2.0).max(2.0).round();
+        let grow = chrome::phone_title_grow(k, chrome::FIXED_TITLE, dp);
+        let y = ((sh - bar - wh) / 2.0).max(safe_top.max(2.0) + grow).round();
         let win = Rect::new(x, y, ww, wh);
         let panel = Rect::new(x + 2.0 * k, y + 27.0 * k, 244.0 * k, 534.0 * k);
         let quick = Rect::new(panel.x + 10.0 * k, panel.y + panel.h + 3.0 * k, panel.w - 20.0 * k, 30.0 * k);
@@ -149,14 +146,13 @@ impl Layout {
         let card = vec2(88.0 * c * k, 128.0 * c * k).round();
         let pitch = vec2(96.0 * c * k, 133.0 * c * k);
         let grid_w = f.display_cols() as f32 * pitch.x - 8.0 * c * k;
-        let close = dp.map(|dp| chrome::close_box_beside(win, k, dp, safe_right, safe_top));
-        Layout { k, win, panel, quick, strip, card, pitch, grid_x: (rx + (rw - grid_w) / 2.0).round(), formation: f, close, stacked: false }
+        Layout { k, win, panel, quick, strip, card, pitch, grid_x: (rx + (rw - grid_w) / 2.0).round(), formation: f, stacked: false }
     }
 
     /// The stacked window (a phone held upright) at `k`, `win` as `window_layout::game_rect` fits
     /// it: the unit's band on top, the quick buttons under it, the enemy's grid, the strip, and the
-    /// player's grid. The close box is `dp`-sized over the band's top right, in the close row.
-    fn upright(k: f32, win: Rect, f: Formation, dp: f32) -> Layout {
+    /// player's grid. Its title strip is the window's own (taller on a phone, growing upward).
+    fn upright(k: f32, win: Rect, f: Formation) -> Layout {
         let c = card_scale(f);
         let (strip_y, _) = stacked_rows(f);
         let band = Rect::new(win.x + 2.0 * k, win.y + STACK_BAND_Y * k, 586.0 * k, window_layout::BAND_H * k);
@@ -165,8 +161,7 @@ impl Layout {
         let card = vec2(88.0 * c * k, 128.0 * c * k).round();
         let pitch = vec2(96.0 * c * k, 133.0 * c * k);
         let grid_w = f.display_cols() as f32 * pitch.x - 8.0 * c * k;
-        let close = chrome::close_box_inside(win, k, dp);
-        Layout { k, win, panel: band, quick, strip, card, pitch, grid_x: (strip.x + (strip.w - grid_w) / 2.0).round(), formation: f, close: Some(close), stacked: true }
+        Layout { k, win, panel: band, quick, strip, card, pitch, grid_x: (strip.x + (strip.w - grid_w) / 2.0).round(), formation: f, stacked: true }
     }
 
     /// Whether the window is stacked (a phone held upright).
@@ -1088,12 +1083,9 @@ impl BattleView {
         // The window: red marble, the title with both armies, the turn in the corner.
         // Its red close button asks to leave the battle, as Esc does (4daa80).
         let ongoing = b.outcome() == Outcome::Ongoing;
-        // On a phone the close is the finger-sized box over the window's top right, drawn after the
-        // title bar; the title bar's own close box is the desktop's.
         let closable = !self.end_shown();
-        let (_, title_close) = chrome::window(l.win, title, Skin::Red, closable && l.close.is_none());
-        let box_close = l.close.filter(|_| closable).is_some_and(|c| chrome::close_button(c.x, c.y, c.w, true));
-        let close = (title_close || box_close) && !self.exiting && !input_blocked();
+        let (_, title_close) = chrome::window(l.win, title, Skin::Red, closable);
+        let close = title_close && !self.exiting && !input_blocked();
         // The frame between the panel and the formations (stacked, the band's seam is drawn last).
         if !l.is_stacked() {
             draw_line(l.panel.x + l.panel.w + 1.0, l.panel.y, l.panel.x + l.panel.w + 1.0, l.panel.y + l.panel.h, 1.5 * k, chrome::SILVER);
@@ -1671,7 +1663,7 @@ mod tests {
     /// The stacked window of a 1080×2400 phone at 2.75 px per dp, a 60 px top inset and a 90 px bar.
     fn upright(f: Formation) -> Layout {
         let (k, win) = window_layout::portrait_game((1080.0, 2400.0), Some(2.75), 60.0, 90.0, 1.125, stacked_video(f)).expect("held upright");
-        Layout::upright(k, win, f, 2.75)
+        Layout::upright(k, win, f)
     }
 
     /// Every cell of both armies on `l`'s formation, with its team and rectangle.
@@ -1698,8 +1690,7 @@ mod tests {
     #[test]
     fn the_landscape_battle_layout_is_as_before() {
         // 1280×800 at the interface scale 1, an 80 px bar: the window centred above the bar.
-        let l = Layout::landscape(1.0, (1280.0, 800.0), 80.0, Formation::default(), None, 1280.0, 0.0);
-        assert!(l.close.is_none());
+        let l = Layout::landscape(1.0, (1280.0, 800.0), 80.0, Formation::default(), None, 0.0);
         assert!(!l.is_stacked());
         assert_eq!(l.win, Rect::new(222.0, 60.0, 836.0, 600.0));
         assert_eq!(l.panel, Rect::new(224.0, 87.0, 244.0, 534.0));
@@ -1711,52 +1702,38 @@ mod tests {
         assert_eq!(l.column(), Rect::new(224.0, 87.0, 244.0, 600.0 - 2.0 - 27.0));
     }
 
-    /// Razdor's phone choice, not parity: a phone in landscape has the same finger-sized close box
-    /// (44 dp), beside the window's top right corner so it does not cover the enemy's top right card;
-    /// the desktop has none.
+    /// Razdor's phone choice, not parity: a phone's title strip is 1.5× the desktop's and grows upward,
+    /// so the landscape window sits below the safe top plus that growth (the strip's cross is the
+    /// title bar's own, inside it); the window's size and its content are the desktop's.
     #[test]
-    fn a_phone_in_landscape_has_a_44_dp_close_box_beside_the_top_right() {
+    fn a_phone_in_landscape_leaves_room_above_the_window_for_its_taller_strip() {
         let dp = 2.75;
-        let l = Layout::landscape(1.0, (2400.0, 1080.0), 90.0, Formation::default(), Some(dp), 2400.0, 0.0);
-        let (win, close) = (l.win, l.close.expect("a phone's close box"));
-        assert!(!l.is_stacked());
-        assert!(close.w >= 44.0 * dp && close.h >= 44.0 * dp, "{close:?}");
-        // Right of the window, top aligned with it, inside the screen.
-        assert!(close.x >= win.right() + 4.0 && close.y == win.y, "{close:?} beside {win:?}");
-        assert!(close.right() <= 2400.0 && close.bottom() <= 1080.0, "{close:?}");
-        // It never covers the enemy's grid: the window's right part below the title bar, and every card.
-        let grid = Rect::new(win.x + 248.0, win.y + 27.0, win.w - 248.0, win.h - 27.0);
-        assert!(!overlaps(close, grid), "{close:?} over the grid {grid:?}");
-        for (_, cell) in cell_rects(&l) {
-            assert!(!overlaps(close, cell), "{close:?} over the card {cell:?}");
-        }
+        let grow = chrome::phone_title_grow(1.0, chrome::FIXED_TITLE, Some(dp));
+        assert_eq!(grow, (26.0f32 * 1.5).round() - 26.0, "half the strip is the growth");
+        let l = Layout::landscape(1.0, (2400.0, 1080.0), 90.0, Formation::default(), Some(dp), 0.0);
+        let win = l.win;
+        assert!(win.y >= grow + 2.0 - 1e-3, "{win:?} leaves {grow} px above for the strip");
+        assert_eq!((win.w, win.h), (836.0, 600.0), "the desktop's size");
+        // Content unchanged: the strip of a phone's window sits above `win` by the growth only.
+        let desktop = Layout::landscape(1.0, (2400.0, 1080.0), 90.0, Formation::default(), None, 0.0);
+        assert_eq!(l.strip.y - l.win.y, desktop.strip.y - desktop.win.y, "the content is where the desktop's is, relative to the window");
     }
 
-    /// No room on the right (the screen is the window's width): the box goes above the window's top
-    /// right when that is below the safe top, else inside the window as before.
+    /// No room above the window on the screen's top (a short landscape screen): the window sits below
+    /// the safe top plus the growth, never above it.
     #[test]
-    fn a_phone_in_landscape_without_room_beside_the_window_falls_back() {
+    fn a_phone_in_landscape_with_a_safe_top_keeps_the_window_below_it() {
         let dp = 2.75;
-        let side = (44.0f32 * dp).round();
-        // The window is 836 px wide and centred at x 0 on an 836 px screen; 600 px tall at y 195.
-        let l = Layout::landscape(1.0, (836.0, 1080.0), 90.0, Formation::default(), Some(dp), 836.0, 0.0);
-        let (win, close) = (l.win, l.close.expect("a phone's close box"));
-        assert_eq!(win, Rect::new(0.0, 195.0, 836.0, 600.0));
-        assert_eq!(close, Rect::new(836.0 - side - 4.0, 195.0 - side - 4.0, side, side), "above the top right");
-        assert!(close.bottom() <= win.y && close.right() <= 836.0);
-
-        // The safe top is below that spot: the box stays inside the window's top right.
-        let l = Layout::landscape(1.0, (836.0, 1080.0), 90.0, Formation::default(), Some(dp), 836.0, 150.0);
-        let close = l.close.expect("a phone's close box");
-        assert_eq!(close, Rect::new(836.0 - side - 4.0, 195.0 + 3.0, side, side), "inside the top right");
-        assert!(close.x >= win.x && close.right() <= win.right() && close.y >= win.y && close.bottom() <= win.bottom());
+        let grow = chrome::phone_title_grow(1.0, chrome::FIXED_TITLE, Some(dp));
+        let l = Layout::landscape(1.0, (836.0, 1080.0), 90.0, Formation::default(), Some(dp), 150.0);
+        assert!(l.win.y >= 150.0 + grow - 1e-3, "{:?} under the safe top 150 and the growth {grow}", l.win);
+        assert!(l.win.bottom() <= 1080.0 - 90.0 + 1e-3, "{:?} above the bar", l.win);
     }
 
     #[test]
     fn the_stacked_battle_window_spans_the_phone_with_the_band_the_armies_and_the_strip_in_order() {
         let l = upright(Formation::default());
         let (win, band, quick, strip) = (l.win, l.panel, l.quick, l.strip);
-        let close = l.close.expect("stacked");
         assert!(l.is_stacked());
         // Spans the width less the 8 px margins, centred, below the inset and above the bar.
         assert!((win.w - 1064.0).abs() <= 1.0, "{win:?}");
@@ -1782,9 +1759,8 @@ mod tests {
                 assert!(!overlaps(*a, *b), "{a:?} overlaps {b:?}");
             }
         }
-        // The close box is a 44 dp target at the top right, above the band and inside the window.
-        assert!(close.w >= 44.0 * 2.75 && close.h >= 44.0 * 2.75, "{close:?}");
-        assert!(close.x >= win.x && close.right() <= win.right() && close.y >= win.y && close.bottom() <= band.y, "{close:?}");
+        // The band starts under the title strip (the desktop's 26 px at this scale, the content's own top).
+        assert!(band.y >= win.y + chrome::strip_height(l.k, chrome::FIXED_TITLE), "{band:?} under the strip of {win:?}");
     }
 
     #[test]
