@@ -83,15 +83,22 @@ install file ──► src/dt/gfx.rs decode_file ──► gfx::Image (RGBA, not
   upload per frame at least). Other `Fx` variants and the map's textures are made at first
   use, from the decoded picture (no decode then). Snapshot runs make no early textures.
 - **The persistent picture cache** (`src/dt/picture_cache.rs`): a decoded picture's frames
-  (raw RGBA with their sizes) are kept in `platform::cache_dir()` + `pictures`: desktop
-  `<data>/razdor/cache/pictures` (`%APPDATA%\razdor` on Windows, `~/.local/share/razdor` on Linux);
+  (raw RGBA with their sizes) are kept in `platform::cache_dir()` + `pictures` + one subfolder
+  per release and format, `pictures/<version>-f<format>` (e.g. `pictures/1.1.3-f1`): desktop
+  `<data>/razdor/cache/pictures/…` (`%APPDATA%\razdor` on Windows, `~/.local/share/razdor` on Linux);
   Android the app's private cache (`Context.getCacheDir()`, not the shared storage, so the Files
   app's Recent tab does not list them); iOS `Library/Caches/Razdor`. One `.rzpc` file per
-  install file. `platform::tidy_app_dir` removes the old `<app_dir>/cache/pictures` at start. The key is a hash of the file's path, size and modification time, the cache
-  format and Razdor's version: a changed file or a new release misses. A miss is decoded and
-  written by a background thread (temp file, then rename). A truncated, corrupt or stale entry
-  is ignored and rewritten. The folder is capped (1 GiB: past it nothing new is written);
-  clearing it resets everything. Off in snapshot runs and with `RAZDOR_NO_PICTURE_CACHE=1`.
+  install file. At start `picture_cache::prune` (background thread) removes the other releases'
+  subfolders, the old flat `.rzpc` files of the pre-subfolder layout and stale `.tmp` files
+  (not this process's). `platform::tidy_app_dir` removes the old `<app_dir>/cache/pictures`.
+  The key is a hash of the file's path, size and modification time, the cache format and
+  Razdor's version: a changed file or a new release misses. A miss is decoded and
+  written by a background thread (temp file, then rename). Writes reserve their bytes from a
+  process-wide budget (`Budget`, counted from the folder on first use) before writing, so
+  parallel writers cannot overshoot the cap; a failed write gives them back. A truncated,
+  corrupt or stale entry is ignored and rewritten. The folder is capped (1 GiB on the desktop,
+  256 MiB on the phones: past it nothing new is written); clearing it resets everything. Off in
+  snapshot runs and with `RAZDOR_NO_PICTURE_CACHE=1`.
   Only data derived from the player's own install is in it: never write it into the install
   folder or the repo.
 - **Why a picture can be decoded twice (fixed):** the chrome cache is per path and per `Fx`,

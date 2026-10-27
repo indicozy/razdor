@@ -1,24 +1,33 @@
 //! The persistent cache of decoded pictures: the RGBA of each install file's frames, kept in the
-//! app's cache folder (`platform::cache_dir`, `pictures` in it; outside the shared storage on the
-//! phones), so a picture is
+//! app's cache folder (`platform::cache_dir`, `pictures` in it, then one subfolder per release
+//! and format, `pictures/1.1.3-f1`; outside the shared storage on the phones), so a picture is
 //! decoded once per install file and not on every launch. Everything in it is derived from the
 //! player's own install; nothing is written to the install folder or the repo.
 //!
 //! An entry is named by its key, a hash of the source file's path, size and modification time,
 //! the cache format and Razdor's version (so a new release or a changed file misses). Its body
 //! is the frames' size and RGBA bytes, then a checksum; a truncated or corrupt entry is rejected
-//! and decoded again. Writes go to a temporary file that is renamed into place. Snapshot runs
-//! (`RAZDOR_SNAPSHOT`) never read or write the cache, and neither does `RAZDOR_NO_PICTURE_CACHE`.
+//! and decoded again. Writes go to a temporary file that is renamed into place. At start
+//! [`prune`] removes the other releases' folders, the old flat files and stale temporary files.
+//! The folder's size is kept in a byte budget ([`Budget`]), so parallel writers cannot pass the
+//! cap together. Snapshot runs (`RAZDOR_SNAPSHOT`) never read or write the cache, and neither
+//! does `RAZDOR_NO_PICTURE_CACHE`.
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::UNIX_EPOCH;
 
 use super::gfx::Image;
 
 /// The entry layout. Bump it when the layout changes.
 pub const FORMAT: u32 = 1;
-/// Past this size in the folder nothing new is written (clearing the folder resets it).
+/// Past this size in the current folder nothing new is written. 1 GiB on the desktop, 256 MiB on
+/// the phones (a player's report: the phones' cache grew to 2.30 GB under the old cap).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub const CAP_BYTES: u64 = 1 << 30;
+/// Past this size in the current folder nothing new is written (see the desktop value above).
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub const CAP_BYTES: u64 = 256 << 20;
 
 const MAGIC: &[u8; 4] = b"RZPC";
 const HEADER: usize = 4 + 4 + 8 + 4;
@@ -111,15 +120,100 @@ pub fn decode(key: u64, bytes: &[u8]) -> Option<Vec<Image>> {
     (at == body.len()).then_some(frames)
 }
 
-/// The folder of the cache: `pictures` in `platform::cache_dir` (desktop: `razdor/cache/pictures`
+/// The name of the current release's folder in the cache: `1.1.3-f1` (Razdor's version and the
+/// entry format). A new release writes to a new folder; [`prune`] removes the others.
+pub fn version_folder() -> String {
+    format!("{}-f{FORMAT}", env!("CARGO_PKG_VERSION"))
+}
+
+/// The root of the cache, `pictures` in `platform::cache_dir` (desktop: `razdor/cache/pictures`
 /// in the platform's data folder), or `None` where the cache is off (snapshot runs,
 /// `RAZDOR_NO_PICTURE_CACHE`) or there is no such folder.
-pub fn cache_dir() -> Option<PathBuf> {
+fn root_dir() -> Option<PathBuf> {
     if std::env::var_os("RAZDOR_SNAPSHOT").is_some() || std::env::var_os("RAZDOR_NO_PICTURE_CACHE").is_some() {
         return None;
     }
     crate::platform::cache_dir().map(|d| d.join("pictures"))
 }
+
+/// The folder entries are written to and read from: the current release's subfolder of the
+/// cache root (see [`root_dir`]), or `None` where the cache is off.
+pub fn cache_dir() -> Option<PathBuf> {
+    root_dir().map(|root| root.join(version_folder()))
+}
+
+/// Removes what no release reads any more, at start on a background thread: every subfolder of
+/// the cache root other than the current release's, every plain file directly in the root (the
+/// old flat layout), and in the current folder every temporary file not made by this process.
+/// Nothing else is touched. Does nothing where the cache is off. Errors are ignored.
+pub fn prune() {
+    if let Some(root) = root_dir() {
+        prune_in(&root, &version_folder());
+    }
+}
+
+/// [`prune`] for the cache root `root` and the release folder `current`.
+pub fn prune_in(root: &Path, current: &str) {
+    let own_pid = std::process::id().to_string();
+    if let Ok(entries) = std::fs::read_dir(root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if entry.file_type().is_ok_and(|t| t.is_dir()) {
+                if entry.file_name().to_str() != Some(current) {
+                    let _ = std::fs::remove_dir_all(&path);
+                }
+            } else {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+    }
+    let Ok(entries) = std::fs::read_dir(root.join(current)) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        // A temporary file is `.{key:016x}.{pid}.{nanos}.tmp`; this process's own are kept.
+        if name.ends_with(".tmp") && name.split('.').nth(2) != Some(own_pid.as_str()) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// The bytes of the cache folder in use. It is counted from the folder on first use, then kept
+/// by reservations: a writer reserves its entry's bytes before writing and gives them back if
+/// the write fails. The check and the count happen under one lock, so parallel writers cannot
+/// all pass the cap together.
+#[derive(Default)]
+pub struct Budget(Mutex<Option<u64>>);
+
+impl Budget {
+    pub const fn new() -> Self {
+        Budget(Mutex::new(None))
+    }
+
+    /// Reserves `len` bytes in `dir` if they keep the folder within `cap`.
+    fn reserve(&self, dir: &Path, len: u64, cap: u64) -> bool {
+        let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let used = guard.get_or_insert_with(|| folder_size(dir));
+        if used.saturating_add(len) > cap {
+            return false;
+        }
+        *used = used.saturating_add(len);
+        true
+    }
+
+    /// Gives back `len` reserved bytes (a write that failed).
+    fn release(&self, len: u64) {
+        let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(used) = guard.as_mut() {
+            *used = used.saturating_sub(len);
+        }
+    }
+}
+
+/// The budget of the real cache.
+static BUDGET: Budget = Budget::new();
 
 /// The frames stored under `key` in `dir`, if the entry is whole and current.
 pub fn read(dir: &Path, key: u64) -> Option<Vec<Image>> {
@@ -129,14 +223,22 @@ pub fn read(dir: &Path, key: u64) -> Option<Vec<Image>> {
 /// Stores the frames under `key` in `dir`: a temporary file renamed into place. Best effort: a
 /// full or unwritable folder, or one past [`CAP_BYTES`], just means no entry.
 pub fn write(dir: &Path, key: u64, frames: &[Image]) {
+    write_with(&BUDGET, CAP_BYTES, dir, key, frames);
+}
+
+/// [`write`] with its budget and cap given. An entry whose bytes do not fit the cap is not
+/// written; a failed write gives its reserved bytes back.
+fn write_with(budget: &Budget, cap: u64, dir: &Path, key: u64, frames: &[Image]) {
     let bytes = encode(key, frames);
-    if std::fs::create_dir_all(dir).is_err() || folder_size(dir) + bytes.len() as u64 > CAP_BYTES {
+    let len = bytes.len() as u64;
+    if std::fs::create_dir_all(dir).is_err() || !budget.reserve(dir, len, cap) {
         return;
     }
     let nanos = std::time::SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos());
     let tmp = dir.join(format!(".{key:016x}.{}.{nanos}.tmp", std::process::id()));
     if std::fs::write(&tmp, &bytes).is_err() || std::fs::rename(&tmp, entry_path(dir, key)).is_err() {
         let _ = std::fs::remove_file(&tmp);
+        budget.release(len);
     }
 }
 
@@ -198,5 +300,88 @@ mod tests {
         assert_eq!(read(&dir, key), Some(frames));
         assert!(read(&dir, key ^ 2).is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("razdor-pc-{name}-{}", std::process::id()))
+    }
+
+    #[test]
+    fn pruning_keeps_only_the_current_versions_folder() {
+        let root = scratch("prune");
+        let _ = std::fs::remove_dir_all(&root);
+        let own_tmp = format!(".0000000000000001.{}.5.tmp", std::process::id());
+        let own_path = format!("1.1.3-f1/{own_tmp}");
+        for (path, body) in [
+            ("1.1.2-f1/a.rzpc", &b"old"[..]),
+            ("1.1.3-f1/b.rzpc", &b"new"[..]),
+            ("old.rzpc", &b"flat"[..]),
+            ("1.1.3-f1/.x.99999999.1.tmp", &b"foreign"[..]),
+            (own_path.as_str(), &b"mine"[..]),
+        ] {
+            let file = root.join(path);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(&file, body).unwrap();
+        }
+        prune_in(&root, "1.1.3-f1");
+        let names = |dir: &Path| {
+            let mut v: Vec<String> =
+                std::fs::read_dir(dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+            v.sort();
+            v
+        };
+        assert_eq!(names(&root), vec!["1.1.3-f1".to_string()]);
+        assert_eq!(names(&root.join("1.1.3-f1")), vec![own_tmp, "b.rzpc".to_string()]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn parallel_writes_never_pass_the_cap() {
+        let dir = scratch("cap");
+        let _ = std::fs::remove_dir_all(&dir);
+        let budget = Budget::new();
+        let cap: u64 = 64 << 10;
+        std::thread::scope(|s| {
+            for t in 0..8u64 {
+                let (budget, dir) = (&budget, &dir);
+                s.spawn(move || {
+                    for i in 0..20u64 {
+                        let key = key_for(&format!("thread{t}-{i}.lit"), 1, 1);
+                        write_with(budget, cap, dir, key, &[picture(32, 32, t as u8)]);
+                    }
+                });
+            }
+        });
+        let total = folder_size(&dir);
+        let written = std::fs::read_dir(&dir).unwrap().flatten().count();
+        assert!(total <= cap, "{total} bytes past the {cap} cap");
+        assert!(written >= 1, "at least one entry was written");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_write_gives_its_bytes_back() {
+        let dir = scratch("release");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let cap: u64 = 1 << 20;
+        let budget = Budget::new();
+        // The budget counts the folder from its first reservation.
+        assert!(budget.reserve(&dir, 0, cap));
+        let base = folder_size(&dir);
+        // A directory where the entry should go makes the rename fail.
+        let key = key_for("release.lit", 2, 2);
+        std::fs::create_dir_all(entry_path(&dir, key)).unwrap();
+        write_with(&budget, cap, &dir, key, &[picture(16, 16, 3)]);
+        // The failed write's bytes are back: the whole rest of the cap is still free.
+        assert!(budget.reserve(&dir, cap - base, cap));
+        assert!(!budget.reserve(&dir, 1, cap));
+        let _ = std::fs::remove_dir_all(&dir);
+        // A reserve past the cap fails and reserves nothing (a missing folder counts as empty).
+        let fresh = Budget::new();
+        assert!(fresh.reserve(&dir, 60, 100));
+        assert!(!fresh.reserve(&dir, 50, 100));
+        fresh.release(60);
+        assert!(fresh.reserve(&dir, 100, 100));
     }
 }

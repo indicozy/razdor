@@ -132,6 +132,9 @@ async fn main() {
     razdor::platform::set_private_cache_dir(ui::android::private_cache_dir());
     // The phones' folders are tidied off the main thread (the old picture cache goes, `.nomedia`).
     std::thread::spawn(razdor::platform::tidy_app_dir);
+    // The picture cache's folders of other releases, its old flat files and stale temporary files
+    // go too (off the main thread; the current folder's entries are never touched).
+    std::thread::spawn(razdor::dt::picture_cache::prune);
     {
         let gl = unsafe { get_internal_gl() };
         let info = gl.quad_context.info();
