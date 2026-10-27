@@ -14,6 +14,21 @@
 
 ## 1.1.4 — 2026-10-28
 
+Коммит `1c2397fb` (тег `v1.1.4`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+133f4891e0e2c958341015ef24b189a946a567fe02e65ac87bd4ae5f2cc30d2f  razdor
+00ad4993eaa8446c26f32aab8dbdf904ef692c83547a68ee440b24d55f99b416  Razdor.exe
+86b97b16bbb0a0aece9cfe2a828a98e6fc528cfe4d0d6e8c9e32656ce7a91064  razdor-macos
+cf6cf535d0781b2caac2c6c1842f2fffb4101e7ceaaaf55b6ff8d9845b325f0c  razdor-translate
+0bbaad8bac9bd52af211f2d7eda4c8a7268c044c22461f6f150490da944fc3f1  Razdor-translate.exe
+f52434f75dfec90c8219684e695334a0a94b7410cf14da453d172b20a5c6e669  razdor-translate-macos
+4a6a33f23850b2f5ef534f26890193cf564c85f158a533dc8bf99862ff16454f  razdor.apk
+23d0c6044ee21ef53fdf4cc5e383e2941bbf32ffedf6c9d11c5484897712bddb  razdor.ipa
+```
+
 ### Исправлено
 
 - Кэш картинок больше не разрастается: при запуске удаляется кэш старых версий, на телефонах он занимает не больше 256 МБ.
