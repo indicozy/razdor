@@ -26,6 +26,7 @@
 //! `RAZDOR_SCENE_PACK_AT=<cell>:<id>,…` puts items in those pack
 //! cells; `RAZDOR_SCENE_HELD=<id>` puts an item on the pointer (hero and army windows);
 //! `RAZDOR_SCENE_WEAR=<id>,…` wears those items on the squad member of `army:<map>:<n>:<unit>`.
+//! `RAZDOR_SCENE_SELECT=<n>` selects squad member n in the `building:` window (its card shows).
 //! `RAZDOR_SCENE_PAN=dx,dy` holds the interface's pan at that offset (windows larger than the screen).
 //! `RAZDOR_TEXT_SIZE=<1|1.25|1.5>` sets the text size and `RAZDOR_LARGE_WINDOWS=1` turns the large
 //! pop-up message windows on (the original's size and off otherwise; the saved settings are ignored).
@@ -618,6 +619,14 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                 }
             } else {
                 view.pick = row;
+            }
+            // `RAZDOR_SCENE_SELECT=<n>`: squad member n selected in the building window (its card
+            // shows where the tab keeps it: the picture pane of the barracks and garrison, a phone
+            // held upright).
+            if let Some(i) = std::env::var("RAZDOR_SCENE_SELECT").ok().and_then(|v| v.trim().parse::<usize>().ok()) {
+                if i < game.squad.len() {
+                    view.garrison_sel = Some((false, i));
+                }
             }
             Screen::Building(view)
         }

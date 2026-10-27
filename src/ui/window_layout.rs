@@ -41,6 +41,10 @@ const PW: f32 = 590.0;
 pub enum Stack {
     Building,
     Army,
+    /// The barracks and the garrison tabs on a phone held upright: a picture pane on top
+    /// (`building_picture`), where a selected or pointed unit's card shows, then the same panes
+    /// and tab row as `Building`, all moved down by the picture pane (`shift_of`).
+    Tall,
 }
 /// The building window's height: the panes at the landscape height, then the tab row and Exit
 /// under them (746 design px; the 1080×2376 phone's window at the width's scale).
@@ -86,10 +90,16 @@ fn within<R>(st: Stack, f: impl FnOnce() -> R) -> R {
     r
 }
 
+/// The picture pane of the tall building window: as tall as a unit's card (the upper pane's height,
+/// `unit_sheet::draw_band`), with a gap of `LOWER_GAP` under it.
+fn picture_h() -> f32 { upper_height() }
+const PICTURE_GAP: f32 = LOWER_GAP;
+
 fn height_of(st: Stack) -> f32 {
     match st {
         Stack::Building => building_ph(),
         Stack::Army => ARMY_PH,
+        Stack::Tall => building_ph() + shift_of(Stack::Tall),
     }
 }
 
@@ -98,17 +108,24 @@ fn shift_of(st: Stack) -> f32 {
     match st {
         Stack::Building => 0.0,
         Stack::Army => BAND_H,
+        Stack::Tall => picture_h() + PICTURE_GAP,
     }
 }
 
 /// The top of the building's tab row (stacked); Exit sits under it, the window's bottom under Exit.
 fn tabs_top() -> f32 {
-    building_ph() - 2.0 * TAB_H - 2.0 * EDGE
+    height_of(stack()) - 2.0 * TAB_H - 2.0 * EDGE
 }
 
 /// Whether the window is stacked: a phone (`display::dp_px`) held upright.
 pub fn portrait() -> bool {
     super::display::dp_px().is_some() && screen_height() > screen_width()
+}
+
+/// Whether the window drawn now is the tall building window with its picture pane (`Stack::Tall`,
+/// a phone held upright).
+pub fn tall() -> bool {
+    portrait() && stack() == Stack::Tall
 }
 
 /// A design position moved for the stacked layout: the right side (x ≥ 247) goes from its
@@ -162,13 +179,23 @@ fn lower_in(win: Rect, k: f32, portrait: bool) -> Rect { rect_in(win, k, 248.0, 
 /// height above the bottom bar, never below the interface scale. Called outside the window's
 /// own scale ([`scaled`]).
 fn portrait_k_for(st: Stack) -> f32 {
-    stacked_scale(screen_width(), screen_height(), chrome::bar_height(), height_of(st), chrome::k())
+    stacked_scale(screen_width(), screen_height(), chrome::bar_height(), top_of(st), height_of(st), chrome::k())
 }
 
-/// The stacked scale for a `screen_w`×`screen_h` screen with a `bar`-px bottom bar: the width's
-/// scale (`screen_w / PW`) or the height's (above the bar), whichever is smaller, never below `min_k`.
-fn stacked_scale(screen_w: f32, screen_h: f32, bar: f32, height: f32, min_k: f32) -> f32 {
-    let fit = (screen_w / PW).min((screen_h - bar - 4.0) / height);
+/// The top inset the stacked window keeps clear: the safe area's top for the tall building window
+/// (it is placed below the status bar, [`window`]); none for the others, which keep their place.
+fn top_of(st: Stack) -> f32 {
+    match st {
+        Stack::Tall => super::display::safe_area().top,
+        _ => 0.0,
+    }
+}
+
+/// The stacked scale for a `screen_w`×`screen_h` screen with a `bar`-px bottom bar and a `top` inset:
+/// the width's scale (`screen_w / PW`) or the height's (between the inset and the bar), whichever is
+/// smaller, never below `min_k`.
+fn stacked_scale(screen_w: f32, screen_h: f32, bar: f32, top: f32, height: f32, min_k: f32) -> f32 {
+    let fit = (screen_w / PW).min((screen_h - top - bar - 4.0) / height);
     fit.max(min_k)
 }
 
@@ -460,7 +487,15 @@ pub fn keyboard_lifted(win: Rect, field: Rect) -> Rect {
 pub fn window() -> Rect {
     let k = chrome::k();
     if portrait() {
-        return centred((PW * k).round(), (height_of(stack()) * k).round());
+        let (w, h) = ((PW * k).round(), (height_of(stack()) * k).round());
+        if stack() == Stack::Tall {
+            // Between the status bar's inset and the bottom bar, centred there.
+            let (sw, sh) = (screen_width(), screen_height());
+            let top = super::display::safe_area().top;
+            let y = (top + ((sh - top - chrome::bar_height() - h) / 2.0).max(2.0)).round();
+            return Rect::new(((sw - w) / 2.0).round(), y, w, h);
+        }
+        return centred(w, h);
     }
     landscape_window()
 }
@@ -532,7 +567,7 @@ pub fn building_exit(win: Rect) -> Rect { building_exit_in(win, chrome::k()) }
 fn building_exit_in(win: Rect, k: f32) -> Rect {
     let w = 586.0 * EXIT_SHARE;
     let x = 2.0 + (586.0 - w) / 2.0;
-    Rect::new(win.x + x * k, win.y + (building_ph() - EDGE - TAB_H) * k, w * k, TAB_H * k)
+    Rect::new(win.x + x * k, win.y + (height_of(stack()) - EDGE - TAB_H) * k, w * k, TAB_H * k)
 }
 
 /// The army and hero windows' «Закрыть» button (stacked): under the formation, in thumb reach; the
@@ -543,6 +578,14 @@ fn army_close_in(win: Rect, k: f32) -> Rect {
     let w = 586.0 * EXIT_SHARE;
     let x = 2.0 + (586.0 - w) / 2.0;
     Rect::new(win.x + x * k, win.y + (BAND_H + CLOSE_Y) * k, w * k, TAB_H * k)
+}
+
+/// The tall building window's picture pane (stacked, `Stack::Tall`): the top of the window, the
+/// width of the panes, as tall as a unit's card. Drawn by the caller only in that layout.
+pub fn building_picture(win: Rect) -> Rect { building_picture_in(win, chrome::k()) }
+
+fn building_picture_in(win: Rect, k: f32) -> Rect {
+    Rect::new(win.x + 2.0 * k, win.y + TOP * k, 586.0 * k, picture_h() * k)
 }
 
 pub fn upper(win: Rect) -> Rect { upper_in(win, chrome::k(), portrait()) }
@@ -741,13 +784,13 @@ mod tests {
         // 1080x2376 at 2.75 dp: the window spans the width (scale 1080 / 590), with the map
         // above and below it; the bottom bar takes its own height at the bottom.
         let (sw, sh, bar) = (1080.0, 2376.0, 90.0);
-        let k = stacked_scale(sw, sh, bar, ARMY_PH, 1.0);
+        let k = stacked_scale(sw, sh, bar, 0.0, ARMY_PH, 1.0);
         assert!((k - sw / PW).abs() < 1e-4, "width-limited: {k}");
         let h = (ARMY_PH * k).round();
         assert!(h <= sh - bar - 4.0 - 2.0 * 100.0, "the map shows above and below: {h}");
         assert!(h <= sh - bar - 4.0);
         // A screen too short for the window falls back to the height's scale.
-        let k_short = stacked_scale(sw, 1600.0, bar, ARMY_PH, 1.0);
+        let k_short = stacked_scale(sw, 1600.0, bar, 0.0, ARMY_PH, 1.0);
         assert!(k_short < sw / PW, "height-limited on a short screen: {k_short}");
     }
 
@@ -760,6 +803,74 @@ mod tests {
         assert_eq!((a.x, a.y), (10.0 + 54.0, 20.0 + yy + BAND_H));
         assert_eq!(at_in(w, 1.0, 100.0, 100.0, 10.0, 10.0, true).x, 10.0 + 271.0, "the old left remap");
     }
+
+    fn tall_win() -> Rect { Rect::new(10.0, 20.0, 590.0, height_of(Stack::Tall)) }
+
+    /// The tall building window (barracks and garrison, stacked): a picture pane on top, then the
+    /// panes and the tab row as the building window has them, moved down by the picture pane.
+    #[test]
+    fn the_tall_window_is_the_building_window_with_a_picture_pane_on_top() {
+        let w = tall_win();
+        assert_eq!(height_of(Stack::Tall), building_ph() + upper_height() + PICTURE_GAP);
+        let pic = within(Stack::Tall, || building_picture_in(w, 1.0));
+        assert_eq!((pic.x, pic.y, pic.w, pic.h), (12.0, 48.0, 586.0, upper_height()), "the picture pane");
+        let upper = within(Stack::Tall, || upper_in(w, 1.0, true));
+        assert_eq!(upper.y, pic.bottom() + PICTURE_GAP, "the recruits or the garrison pane under the picture");
+        assert_eq!(upper.h, upper_height(), "the same pane as the building window's");
+        let lower = within(Stack::Tall, || lower_in(w, 1.0, true));
+        assert_eq!(lower.y, upper.y + (lower_y() - 28.0), "the hero's pane keeps its place under the strip");
+        assert_eq!(lower.h, lower_height());
+        let tabs = within(Stack::Tall, || building_tabs_in(w, 1.0, 3));
+        assert!(tabs[0].y >= lower.bottom() + LOWER_GAP - 0.01, "the tab row under the hero's pane");
+        let exit = within(Stack::Tall, || building_exit_in(w, 1.0));
+        assert_eq!(exit.bottom(), w.bottom() - EDGE, "Exit at the window's bottom");
+        assert!(exit.y >= tabs[0].bottom(), "Exit under the tab row");
+    }
+
+    #[test]
+    fn the_tall_window_keeps_the_building_window_s_tab_row_and_targets() {
+        let w = tall_win();
+        let tabs = within(Stack::Tall, || building_tabs_in(w, 1.0, 4));
+        for t in &tabs {
+            assert!(t.h >= 64.0, "a touch target: {} px", t.h);
+            assert!(t.x >= w.x + 2.0 && t.right() <= w.right() - 2.0, "inside the window: {t:?}");
+            assert!(t.bottom() <= w.bottom(), "inside the window's bottom");
+        }
+        // The building window's own tab row, moved down by the picture pane.
+        let b = stacked_win();
+        let plain = building_tabs_in(b, 1.0, 4);
+        let shifted = within(Stack::Tall, || building_tabs_in(w, 1.0, 4));
+        assert_eq!(shifted[0].y - w.y, plain[0].y - b.y + shift_of(Stack::Tall), "the same row, moved down");
+        assert_eq!(shifted[0].x, plain[0].x);
+        assert_eq!(shifted[0].w, plain[0].w);
+    }
+
+    #[test]
+    fn the_tall_window_fits_a_phone_held_upright_above_the_bar() {
+        let bar = 90.0;
+        for (sw, sh) in [(1080.0, 1920.0), (1080.0, 2160.0), (1080.0, 2400.0)] {
+            let k = stacked_scale(sw, sh, bar, 0.0, height_of(Stack::Tall), 1.0);
+            let h = (height_of(Stack::Tall) * k).round();
+            assert!(h <= sh - bar - 4.0, "{sw}x{sh}: the window's {h} px fits above the bar");
+            assert!(k <= sw / PW + 1e-4, "{sw}x{sh}: never wider than the screen");
+        }
+        // 1080x2160 and taller: width-limited, the screen's width spanned.
+        let k = stacked_scale(1080.0, 2160.0, bar, 0.0, height_of(Stack::Tall), 1.0);
+        assert!((k - 1080.0 / PW).abs() < 1e-4, "width-limited at 2160: {k}");
+    }
+
+    /// With a status bar's inset, the tall window keeps under it: its height fits between the inset
+    /// and the bar.
+    #[test]
+    fn the_tall_window_keeps_under_the_status_bar() {
+        let (sw, sh, bar, top) = (1080.0, 1920.0, 90.0, 80.0);
+        let k = stacked_scale(sw, sh, bar, top, height_of(Stack::Tall), 1.0);
+        assert!(height_of(Stack::Tall) * k <= sh - top - bar - 4.0 + 1e-3, "the window fits between the inset and the bar: {k}");
+        // The other stacks are not moved by the inset.
+        assert_eq!(top_of(Stack::Building), 0.0);
+        assert_eq!(top_of(Stack::Army), 0.0);
+    }
+
 }
 
 #[cfg(test)]

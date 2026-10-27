@@ -49,6 +49,10 @@ In the "Sound, graphics and gameplay settings" window, the **"Screen orientation
 * **"Auto"** — the screen turns with the phone;
 * **"Landscape"** or **"Portrait"** — the screen does not turn.
 
+### Building windows
+
+Portrait: the Barracks and Garrison windows are taller. The top is the building's picture, as in the Main hall. Tap a unit (or point at it): its card replaces the picture at the top. When nothing is selected, the picture returns. Below it there is always the row of units (the garrison or the recruits), then the hero's army and the tab buttons.
+
 ## Razdor updates
 
 Razdor on Android updates itself, as on a computer: when a new version is out, a window offers it with the list of changes. **"Update"** downloads the new APK, checks it and hands it to the Android installer; you confirm the installation. An APK already downloaded is not downloaded again, and old ones are removed after installing. More: [Updates](/razdor/wiki/en/start/updates/).

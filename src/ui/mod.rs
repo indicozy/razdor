@@ -1025,7 +1025,7 @@ impl App {
             (Screen::WorldMap, Some(game)) => pan::unpanned(|| {
                 world_view::frame(game, &self.assets, &mut self.map_view, &mut self.message, &mut self.dialogs)
             }),
-            (Screen::Building(view), Some(game)) => window_layout::scaled(window_layout::Stack::Building, || {
+            (Screen::Building(view), Some(game)) => window_layout::scaled(building_view::stack_at(game, view), || {
                 building_view::frame(game, &self.assets, view, &mut self.message, &mut self.dialogs)
             }),
             (Screen::Squad { selected, scroll, back }, Some(game)) => window_layout::scaled(window_layout::Stack::Army, || {

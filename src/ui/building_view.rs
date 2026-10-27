@@ -712,11 +712,44 @@ fn recruit_panel(game: &Game, assets: &Assets, f: &Frame, kind: UnitId) {
     draw_card(assets, c, f, &sheet, &mut hover);
 }
 
-/// A unit's card over the tabs' place: the landscape tabs column, or stacked the upper pane (the
-/// picture and text in its 586 × 271; the tabs and Exit stay tappable under it).
+/// The window's stacking for a tab (a phone held upright): the barracks and the garrison take the
+/// tall window with the picture pane on top (`Stack::Tall`), the other tabs the usual stack.
+pub fn stack_of_tab(tab: Tab) -> window_layout::Stack {
+    match tab {
+        Tab::Barracks | Tab::Garrison => window_layout::Stack::Tall,
+        _ => window_layout::Stack::Building,
+    }
+}
+
+/// The stacking of the building window on screen now: that of its shown tab (the first tab when the
+/// view's tab is not one of the building's, as `frame` switches it).
+pub fn stack_at(game: &Game, view: &BuildingView) -> window_layout::Stack {
+    let tabs = game.tabs_here();
+    let tab = if tabs.contains(&view.tab) { view.tab } else { tabs.first().copied().unwrap_or(view.tab) };
+    stack_of_tab(tab)
+}
+
+/// The tall window's picture pane (`window_layout::building_picture`): the building's picture as the
+/// hall tab shows it (`hall_picture`, the window's own background for a kind without one). A selected
+/// or pointed unit's card (`draw_card`) is drawn over it.
+fn picture_pane(game: &Game, f: &Frame) {
+    let pane = window_layout::building_picture(Rect::new(f.x, f.y, f.w, f.h));
+    let scene = game.location.map(|l| &game.world.locations[l]).and_then(|loc| hall_picture(loc.kind, loc.picture));
+    chrome::surface(pane, chrome::Skin::Marble);
+    if let Some(t) = scene.and_then(chrome::win) {
+        chrome::tex(&t, pane, WHITE);
+    }
+    window_layout::panel_frame(pane);
+}
+
+/// A unit's card over the tabs' place: the landscape tabs column, or stacked the picture pane of the
+/// tall window (barracks and garrison), else the upper pane (the picture and text in its 586 × 271;
+/// the tabs and Exit stay tappable under it).
 fn draw_card(assets: &Assets, c: &razdor::rules::content::Content, f: &Frame, sheet: &unit_sheet::Sheet, hover: &mut Option<razdor::rules::content::ItemId>) {
     let win = Rect::new(f.x, f.y, f.w, f.h);
-    if window_layout::portrait() {
+    if window_layout::tall() {
+        unit_sheet::draw_band(assets, c, window_layout::building_picture(win), sheet, false, hover);
+    } else if window_layout::portrait() {
         unit_sheet::draw_band(assets, c, window_layout::upper(win), sheet, false, hover);
     } else {
         unit_sheet::draw(assets, c, window_layout::left(win), sheet, false, hover);
@@ -2473,6 +2506,9 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut BuildingView, message:
     let k = chrome::k();
     let (_, close) = chrome::window_with_title_color(Rect::new(f.x, f.y, f.w, f.h), &title(game), chrome::Skin::Marble, true, BUILDING_AND_ITEM_NAME);
     window_layout::panel_frame(card_panel_lower(&f));
+    if window_layout::tall() {
+        picture_pane(game, &f);
+    }
 
     // The tabs, then Exit last. Landscape: a column of tabs on light parchment. Stacked: a row
     // across the window's bottom, Exit centred under it.

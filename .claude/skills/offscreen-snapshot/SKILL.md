@@ -43,7 +43,7 @@ Listed at the top of `src/ui/snapshot.rs` (the source of truth). Common ones: `t
 `battle:<map>:<n>`, `custom-battle[:watch]`, `replay:<step>` with `RAZDOR_REPLAY`.
 `<map>` is the install's map file name without `.DTm`. Helpers: `RAZDOR_MOUSE=x,y`,
 `RAZDOR_SCENE_QUIET=1`, `RAZDOR_SCENE_SHOW`, `RAZDOR_SCENE_CONSOLE`, `RAZDOR_SCENE_FILTER`,
-`RAZDOR_SCENE_SPELLS`, `RAZDOR_SCENE_POTION`, `RAZDOR_SCENE_DEBUG`, `RAZDOR_SCENE_LANGUAGE=1` (the language list open). A later campaign map started
+`RAZDOR_SCENE_SPELLS`, `RAZDOR_SCENE_POTION`, `RAZDOR_SCENE_DEBUG`, `RAZDOR_SCENE_SELECT=<n>` (squad member n selected in a `building:` window: its card), `RAZDOR_SCENE_LANGUAGE=1` (the language list open). A later campaign map started
 as a new game may end at once by its own defeat event; that is not a bug.
 
 No scene for what you need (a hover, a tab, a selection)? Add one to `snapshot.rs` rather than

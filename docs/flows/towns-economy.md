@@ -76,6 +76,11 @@ one (palace, smithy, dungeon entrance) leaves the window's own background there 
 no sky, grass or map sprite.
 An ill-disposed building refuses services (`ServiceError::NotHere`).
 
+Phone held upright (Razdor's phone choice, the owner's request; not parity): the barracks and the
+garrison take the tall window (`window_layout::Stack::Tall`, `building_view::stack_of_tab`): a picture
+pane on top (`window_layout::building_picture`, the hall's picture from `hall_picture`), then the
+recruits or the garrison, the hero's army and the tabs, the panes moved down by the picture pane. A
+selected or pointed unit's card (`draw_card`) replaces the picture there. Other tabs keep the stack.
 The hire tab's picture behind the recruits follows the original's table (`barracks_interior`,
 0x4bd3a4 / 0x4bd3f4): town → BI_Town, castle and fort → BI_Castle, church → BI_Church, altar and
 ruins → BI_Ruin; other kinds keep the brown background, the palace aside (see OPEN_QUESTIONS).
