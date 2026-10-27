@@ -264,7 +264,10 @@ the spellbook; the battle's stacked window). The windows over the map that have 
 `options_window` over the map), «Ещё…» (`advanced_window`), the keys window (`keys_window`), the save window (`save_screen`,
 the name field's keyboard lift applies to the scaled rect), the load window (`load_screen`), and `map_window`, which
 centres them over the map. Sideways on a phone these take the title's rule (`window_layout::sideways_window`, the same
-scale and rectangle as the main menu's window, a phone choice: the windows were small in landscape, playtest 1365). The map and the bar under them are drawn at the interface scale
+scale and rectangle as the main menu's window, a phone choice: the windows were small in landscape, playtest 1365).
+Over the map they use `window_layout::sideways_game_window`: the same, but never over the bottom bar; where the title
+rule's floor (the base scale) would make the window taller than the room between the top inset and the bar, it scales
+down to that room and stays centred there (the advanced settings, 900×650, at 2400×1080 and 2.625 px per dp). The map and the bar under them are drawn at the interface scale
 (`world_view::window_backdrop`, `backdrop_lit`). The help overlay (F1, «Клавиши» in game, `hotkeys::help_overlay`)
 already spans the phone's width; on a phone with a bar it stands between the top inset and the bar (`has_bar`).
 Desktop is byte-identical, and so is landscape for the windows with no title twin (`game_rect` is None there, the old placements stay).

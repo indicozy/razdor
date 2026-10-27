@@ -221,6 +221,29 @@ fn sideways_now(video: (f32, f32)) -> Option<(f32, Rect)> {
     sideways_window(chrome::k(), super::display::dp_px(), super::display::large_windows(), (screen_width(), screen_height()), chrome::bar_height(), super::display::safe_area(), video)
 }
 
+/// [`sideways_window`] for a window over the map: it never reaches the bottom bar. The title
+/// rule's floor (the base scale) may make it taller than the room between the top inset and the
+/// bar; then it scales down to that room (its bottom on the bar's top edge), centred there as
+/// [`exit_rect`] places it. A window that fits keeps [`sideways_window`]'s scale and rectangle.
+pub fn sideways_game_window(base_k: f32, dp: Option<f32>, large: bool, screen: (f32, f32), bar: f32, safe: super::display::SafeArea, video: (f32, f32)) -> Option<(f32, Rect)> {
+    let (k, r) = sideways_window(base_k, dp, large, screen, bar, safe, video)?;
+    let room = screen.1 - safe.top - bar;
+    if r.h <= room {
+        return Some((k, r));
+    }
+    let h = room.floor();
+    let k = h / video.1;
+    Some((k, exit_rect(screen, bar, safe, ((video.0 * k).round(), h))))
+}
+
+/// [`sideways_game_window`] for the phone on screen now (None unless it is held sideways).
+fn sideways_game_now(video: (f32, f32)) -> Option<(f32, Rect)> {
+    if portrait() {
+        return None;
+    }
+    sideways_game_window(chrome::k(), super::display::dp_px(), super::display::large_windows(), (screen_width(), screen_height()), chrome::bar_height(), super::display::safe_area(), video)
+}
+
 /// The scale and the rectangle of a title window (`video`: its size in video px, 960×720 frame)
 /// on a phone held upright: the largest scale that spans the screen's width less
 /// [`TITLE_MARGIN`] and fits between the top safe inset `top` and the footer, never below
@@ -311,14 +334,14 @@ pub fn game_rect(video: (f32, f32)) -> Option<Rect> {
 /// same window from the main menu (a phone choice, not in the original: the windows were small in
 /// landscape). The desktop and the other windows over the map ([`game_scale`]) keep theirs.
 pub fn over_map_scale(video: (f32, f32)) -> super::display::WindowScale {
-    let k = portrait_game_now(video).map(|(k, _)| k).or_else(|| sideways_now(video).map(|(k, _)| k));
+    let k = portrait_game_now(video).map(|(k, _)| k).or_else(|| sideways_game_now(video).map(|(k, _)| k));
     super::display::enter_window_scale(k.or_else(super::display::window_scale))
 }
 
 /// The rectangle of a window over the map with a title-screen twin (see [`over_map_scale`]): upright
-/// as [`game_rect`], sideways as the title's ([`sideways_now`]); `None` on the desktop.
+/// as [`game_rect`], sideways as the title's, never over the bar ([`sideways_game_now`]); `None` on the desktop.
 pub fn over_map_rect(video: (f32, f32)) -> Option<Rect> {
-    portrait_game_now(video).map(|(_, r)| r).or_else(|| sideways_now(video).map(|(_, r)| r))
+    portrait_game_now(video).map(|(_, r)| r).or_else(|| sideways_game_now(video).map(|(_, r)| r))
 }
 
 /// The design size of the spell book on a phone held upright (`w` px wide: two columns of cards), as
@@ -955,9 +978,10 @@ mod over_map_sideways_tests {
     const BASE: f32 = 1.5;
     /// The in-game save and load books (594 × 482), and the other windows over the map with a title twin.
     const BOOK: (f32, f32) = (594.0, 482.0);
-    /// The advanced settings (900 × 650) are left out: at the base scale 1.5 of this screen they are 15 px
-    /// taller than the space above the bar, as the title rule's floor ([`sideways_title_k`]) keeps them.
-    const IN_GAME: [(f32, f32); 3] = [BOOK, (760.0, 420.0), (594.0, 606.0)];
+    /// The advanced settings (900 × 650): at the base scale 1.5 of this screen they are 15 px taller than the
+    /// space above the bar, so they scale down to it ([`sideways_game_window`]).
+    const ADVANCED: (f32, f32) = (900.0, 650.0);
+    const IN_GAME: [(f32, f32); 4] = [BOOK, (760.0, 420.0), (594.0, 606.0), ADVANCED];
 
     #[test]
     fn the_desktop_and_large_windows_off_keep_the_in_game_window() {
@@ -977,19 +1001,35 @@ mod over_map_sideways_tests {
         assert!((r.y + r.h / 2.0 - (SIDE.1 - BAR) / 2.0).abs() < 0.01, "not centred above the bar");
     }
 
+    /// A tall window over the map (the advanced settings, 900 × 650 at 2.625 px per dp on 2400×1080) stays
+    /// inside the room above the bar: it scales down below the base, centred there, and never reaches the bar.
+    #[test]
+    fn a_tall_window_over_the_map_stays_above_the_bar_sideways() {
+        let (k, r) = sideways_game_window(BASE, Some(2.625), true, SIDE, BAR, NO_SAFE, ADVANCED).expect("a phone");
+        assert!(k < BASE, "{k}: the advanced window scales down to the room above the bar");
+        assert!(r.y >= 0.0 && r.y + r.h <= SIDE.1 - BAR + 0.01, "{r:?} reaches the bar");
+        assert!((r.y + r.h - (SIDE.1 - BAR)).abs() < 1.0, "{r:?} fills the room above the bar");
+        assert!((r.x + r.w / 2.0 - SIDE.0 / 2.0).abs() < 0.01, "not centred across the screen");
+        assert!((r.y + r.h / 2.0 - (SIDE.1 - BAR) / 2.0).abs() < 1.0, "not centred above the bar");
+        assert!(r.x >= 0.0 && r.x + r.w <= SIDE.0 + 0.01, "{r:?} is wider than the screen");
+    }
+
+    /// Every in-game window with a title twin keeps its title size where it fits, and never reaches the bar.
     #[test]
     fn the_in_game_windows_with_a_title_twin_fit_the_safe_area_above_the_bar() {
-        let safe = SafeArea { left: 110.0, right: 110.0, top: 60.0, ..NO_SAFE };
+        let cutouts = SafeArea { left: 110.0, right: 110.0, top: 60.0, ..NO_SAFE };
         for video in IN_GAME {
-            let (k, r) = sideways_window(BASE, Some(2.625), true, SIDE, BAR, safe, video).expect("a phone");
-            assert!(k >= BASE, "{video:?}: never below the base");
-            // Where the fit raises the scale above the base the window fits; at the base (the floor) it keeps the base.
-            if k > BASE + 1e-4 {
-                assert!(r.x >= safe.left - 0.01 && r.x + r.w <= SIDE.0 - safe.right + 0.01, "{video:?}: {r:?} is under the cutouts");
+            for safe in [NO_SAFE, cutouts] {
+                let (k, r) = sideways_game_window(BASE, Some(2.625), true, SIDE, BAR, safe, video).expect("a phone");
                 assert!(r.y >= safe.top - 0.01 && r.y + r.h <= SIDE.1 - BAR + 0.01, "{video:?}: {r:?} is off the top inset or the bar");
+                assert!(r.x >= safe.left - 0.01 && r.x + r.w <= SIDE.0 - safe.right + 0.01, "{video:?}: {r:?} is under the cutouts");
                 assert!((r.x + r.w / 2.0 - (SIDE.0 + safe.left - safe.right) / 2.0).abs() < 0.01, "{video:?}: not centred between the cutouts");
-            } else {
-                assert!((k - BASE).abs() < 1e-4, "{video:?}: {k} is neither the fit nor the base");
+                // Where it fits, it is the title's window (`sideways_window`), unchanged.
+                let (title_k, title_r) = sideways_window(BASE, Some(2.625), true, SIDE, BAR, safe, video).expect("a phone");
+                if title_r.y + title_r.h <= SIDE.1 - BAR {
+                    assert!((k - title_k).abs() < 1e-4 && title_r == r, "{video:?}: a window that fits keeps its size");
+                }
+                assert!(k <= 2.625 + 1e-4, "{video:?}: {k} is above the phone's own scale");
             }
         }
     }
