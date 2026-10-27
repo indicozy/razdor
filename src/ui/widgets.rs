@@ -1238,6 +1238,42 @@ pub fn name_keyboard(phone: bool, typing: bool, touch: NameTouch) -> bool {
     }
 }
 
+/// What Enter does on a name window this frame (Enter is also the window's OK).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NameEnter {
+    /// No Enter this frame.
+    Nothing,
+    /// Enter is the window's OK.
+    Confirm,
+    /// A phone with the name field's keyboard up: Enter is the keyboard's own key. It closes the
+    /// keyboard and the window stays.
+    HideKeyboard,
+}
+
+/// The decision for Enter on a name window: on a phone whose name field has the keyboard up
+/// (`typing`) Enter hides the keyboard; otherwise (the desktop, or the keyboard hidden) it is OK.
+pub fn name_enter_decision(phone: bool, typing: bool, enter: bool) -> NameEnter {
+    match (enter, phone && typing) {
+        (false, _) => NameEnter::Nothing,
+        (true, true) => NameEnter::HideKeyboard,
+        (true, false) => NameEnter::Confirm,
+    }
+}
+
+/// Enter on a name window this frame, given the field's keyboard flag (`typing`). Returns true
+/// when it confirms the window. A phone's Enter with the keyboard up clears `typing`, which hides
+/// the keyboard at the end of the frame ([`sync_keyboard`]) and confirms nothing.
+pub fn name_enter(phone: bool, typing: &mut bool, enter: bool) -> bool {
+    match name_enter_decision(phone, *typing, enter) {
+        NameEnter::Confirm => true,
+        NameEnter::HideKeyboard => {
+            *typing = false;
+            false
+        }
+        NameEnter::Nothing => false,
+    }
+}
+
 /// The phone's name-field touch this frame: a tap in the field's tap target (`tap`) wins; else
 /// the system hiding the keyboard ends the typing; else nothing.
 pub fn name_touch(tapped: bool) -> NameTouch {
@@ -2298,6 +2334,23 @@ mod keyboard_tests {
         assert!(!name_keyboard(true, false, NameTouch::RowPicked), "a save picked: no keyboard");
         assert!(!name_keyboard(true, true, NameTouch::RowPicked), "a pick hides a keyboard that was up");
         assert!(name_keyboard(true, true, NameTouch::Nothing), "typing goes on without a new tap");
+    }
+
+    /// A phone with the name field's keyboard up: Enter hides it and is not OK; with the keyboard
+    /// down (or on the desktop) Enter is OK, as before.
+    #[test]
+    fn enter_on_a_phone_with_the_keyboard_up_hides_it_and_is_not_ok() {
+        assert_eq!(name_enter_decision(true, true, true), NameEnter::HideKeyboard);
+        assert_eq!(name_enter_decision(true, false, true), NameEnter::Confirm, "the keyboard hidden: a hardware Enter is OK");
+        assert_eq!(name_enter_decision(false, true, true), NameEnter::Confirm, "the desktop: Enter is OK");
+        assert_eq!(name_enter_decision(true, true, false), NameEnter::Nothing, "no Enter");
+        let mut typing = true;
+        assert!(!name_enter(true, &mut typing, true), "the keyboard's Enter confirms nothing");
+        assert!(!typing, "and the keyboard goes");
+        assert!(name_enter(true, &mut typing, true), "the next Enter is OK");
+        let mut desk = true;
+        assert!(name_enter(false, &mut desk, true));
+        assert!(desk, "the desktop's name field keeps its flag");
     }
 
     /// The system hiding the keyboard (its arrow, Back) ends the typing; a tap after it starts again.

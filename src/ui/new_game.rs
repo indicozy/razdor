@@ -1072,7 +1072,14 @@ pub fn class_select(game: &mut Option<Game>, demo: &Arc<Content>, scenario: Opti
         chrome::marble_button(r, label, true, down);
         pressed
     };
-    if hero_button(424.0, &own("NewHero", "Start", n_("Start"))) || key(KeyCode::Enter) {
+    // On a phone with the name's keyboard up, Enter is the keyboard's key: it hides the keyboard, not Start.
+    let enter = screens::HERO_TYPING.with(|t| {
+        let mut typing = t.get();
+        let enter = name_enter(super::display::dp_px().is_some(), &mut typing, key(KeyCode::Enter));
+        t.set(typing);
+        enter
+    });
+    if hero_button(424.0, &own("NewHero", "Start", n_("Start"))) || enter {
         cue(Cue::Button);
         *game = Some(screens::start_game(demo, Some((e, &content)), hero, &name));
         return leave_hero_window(Screen::WorldMap);

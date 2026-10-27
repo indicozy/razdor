@@ -670,7 +670,10 @@ pub fn save_screen(game: &Game, assets: &Assets, view: &mut SaveView, message: &
         Some(_) => super::widgets::NameTouch::RowPicked,
         None => super::widgets::name_touch(view.scroll == 0 && super::widgets::tapped_in(field)),
     };
-    view.typing = super::widgets::name_keyboard(super::display::dp_px().is_some(), view.typing, touch);
+    let phone = super::display::dp_px().is_some();
+    view.typing = super::widgets::name_keyboard(phone, view.typing, touch);
+    // On a phone with the keyboard up, Enter is the keyboard's key: it hides the keyboard, not OK.
+    let enter = super::widgets::name_enter(phone, &mut view.typing, key(KeyCode::Enter));
     ask_keyboard(&view.name, view.edit, input_blocked(), view.typing);
     if let Some(k) = picked {
         // A save whose meta is not read yet gives no name to take.
@@ -688,7 +691,7 @@ pub fn save_screen(game: &Game, assets: &Assets, view: &mut SaveView, message: &
         text(&ellipsize(w, 330.0 * book.k, 13.0 * book.k), p.x, p.y, 13.0 * book.k, RED);
     }
     let ok = can_save(&view.name, dir.is_some());
-    if book.button(369.0, 116.0, &own("SaveGame", "Save", n_("Save")), ok) || (ok && key(KeyCode::Enter)) {
+    if book.button(369.0, 116.0, &own("SaveGame", "Save", n_("Save")), ok) || (ok && enter) {
         let dir = dir.expect("checked");
         match save::write(&dir, SaveKind::Manual, view.name.trim(), game) {
             Ok(_) => {

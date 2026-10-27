@@ -181,7 +181,9 @@ there yet: the window stays put). A window whose bottom is under the keyboard mo
 (never above the safe area); a window taller than the space left moves so its field is at the top.
 A keyboard the system hides (its own arrow, Back: the inset drops from above 0 to 0,
 `display::keyboard_closed_by_system`) ends the field's typing (`NameTouch::Hidden`), so the strip goes and the
-window returns. Then `widgets::sync_keyboard` (once a frame, before `next_frame`) shows or hides it with miniquad's
+window returns. On a phone, Enter with that keyboard up is the keyboard's own key: `widgets::name_enter` clears the
+field's flag (the keyboard goes) and Enter is not the window's OK (the hero's Start, the save's Save); with the keyboard
+down, Enter is OK as on the desktop. Then `widgets::sync_keyboard` (once a frame, before `next_frame`) shows or hides it with miniquad's
 `show_keyboard`. miniquad's `MainActivity` swallows every key, so `quad.toml` at the repo root
 injects `android/MainActivityInject.java`: the volume keys change the media volume there, and on
 API 30+ its `RESIZING_LAYOUT_ON_APPLY_WINDOW_INSETS` section pads by the system bars only, so the
