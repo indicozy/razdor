@@ -163,8 +163,12 @@ on Android, `Settings::orientation: Option<audio::Orientation>`, `None` = Auto):
 manifest's `fullUser`, Landscape and Portrait lock the activity. `ui::android::follow_orientation`
 runs from `Ui::frame` and calls `Activity.setRequestedOrientation(int)` over JNI with
 `ActivityInfo`'s 13 (full user), 6 (sensor landscape) and 7 (sensor portrait) when the value
-changes, so it applies at start and on each change. iOS has no row (its rotation lock stays the
-system's).
+changes, so it applies at start and on each change. The last value asked is cached
+(`audio::must_request`), so a frame asks again only after a change or after the activity resumed:
+the cache is cleared then (`android::resumed_since_last`, its own input subscriber read each frame,
+since miniquad reports the Resume as `window_restored_event` and the pointer's watch does not run on
+a phone). Without it a minimised app came back in the system's orientation, not the setting's
+(a phone choice, a player's report). iOS has no row (its rotation lock stays the system's).
 The on-screen keyboard follows the text fields: `edit_line` / `edit_rows` drawn active ask for it
 (`edit_line_kb` with `keyboard` false draws without asking). The save window's name and the new
 hero's name are always active, so on a phone they ask only after a tap in the field

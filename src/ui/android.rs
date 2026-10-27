@@ -265,28 +265,54 @@ pub fn ask_once() {
     }
 }
 
-/// `ActivityInfo`'s screen orientations: the system's full user rotation (the manifest's
-/// `fullUser`, Auto), the sensor's landscape and the sensor's portrait.
-const ORIENTATION_AUTO: i32 = 13;
-const ORIENTATION_LANDSCAPE: i32 = 6;
-const ORIENTATION_PORTRAIT: i32 = 7;
-
 local! {
     /// The orientation last asked of the system (an `ORIENTATION_*`), none before the first call.
     static ORIENTATION: Cell<Option<i32>> = const { Cell::new(None) };
 }
 
-/// Puts the setting's orientation on the activity when it has changed: at start, and each time
-/// the settings' row changes it (`setRequestedOrientation`; the system turns the screen then).
-/// Called from the UI's frame, which runs on the activity's own thread as the other calls here.
+local! {
+    /// The input subscriber that watches the activity's resume (see [`resumed_since_last`]).
+    static RESUME_SUB: Cell<Option<usize>> = const { Cell::new(None) };
+}
+
+/// Watches the window's restore: miniquad reports the activity's Resume as `window_restored_event`.
+struct ResumeWatch(bool);
+
+impl macroquad::miniquad::EventHandler for ResumeWatch {
+    fn update(&mut self) {}
+    fn draw(&mut self) {}
+    fn window_restored_event(&mut self) {
+        self.0 = true;
+    }
+}
+
+/// Whether the activity resumed since the last call (its own input subscriber, read each frame:
+/// the pointer's watch does not read it on a phone, where the gestures draw no pointer).
+fn resumed_since_last() -> bool {
+    use macroquad::input::utils::{register_input_subscriber, repeat_all_miniquad_input};
+    let sub = RESUME_SUB.with(|r| r.get()).unwrap_or_else(register_input_subscriber);
+    let mut watch = ResumeWatch(false);
+    repeat_all_miniquad_input(&mut watch, sub);
+    RESUME_SUB.with(|r| r.set(Some(sub)));
+    watch.0
+}
+
+/// Forgets the orientation last asked, so the next [`follow_orientation`] asks it again: the
+/// system may have put the screen back in its own orientation while the app was away.
+pub fn orientation_stale() {
+    ORIENTATION.with(|o| o.set(None));
+}
+
+/// Puts the setting's orientation on the activity when it has changed: at start, each time
+/// the settings' row changes it (`setRequestedOrientation`; the system turns the screen then), and
+/// again after the activity resumed (the cache is reset then, so a minimised app comes back in the setting's
+/// orientation, not the system's). Called from the UI's frame, which runs on the activity's own thread as the other calls here.
 pub fn follow_orientation(setting: Option<super::audio::Orientation>) {
-    use super::audio::Orientation;
-    let want = match setting {
-        None => ORIENTATION_AUTO,
-        Some(Orientation::Landscape) => ORIENTATION_LANDSCAPE,
-        Some(Orientation::Portrait) => ORIENTATION_PORTRAIT,
-    };
-    if ORIENTATION.with(|o| o.get()) == Some(want) {
+    if resumed_since_last() {
+        orientation_stale();
+    }
+    let want = super::audio::requested_orientation(setting);
+    if !super::audio::must_request(ORIENTATION.with(|o| o.get()), want) {
         return;
     }
     ORIENTATION.with(|o| o.set(Some(want)));
@@ -508,4 +534,3 @@ pub fn read_safe_insets() -> Option<(f32, f32, f32, f32)> {
         Some(razdor::platform::safe_margins((l as f32, t as f32, r as f32, b as f32), corner))
     }
 }
-
