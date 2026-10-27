@@ -179,6 +179,12 @@ is open in the rules at once, so the fog layer draws them as before (`Game::unsh
 - *Determinism.* All randomness goes through `Game`'s generator (`src/rules/rng.rs`) in the
   original's order; extra draws break the difftests.
 
+- *An attack reads no point.* The original zeroes the noted event point at the start of each walk
+  frame (0x4ae72c) and notes it only when a step completes (0x4aed35), so an attack on an army
+  (the contact check, 0x4ae776 → 0x4ad94c, before the step) scans no point, even on the grave of a
+  repeatable event (events.md §1). `Game::point_zeroed` does this; a test is
+  `an_attack_from_a_point_cell_scans_no_point`, the real-map one `an_attack_from_the_ghosts_grave_starts_the_battle`.
+
 ## Parity: where the truth is and how it's checked
 
 - Specs: `docs/reference/original-mechanics/world.md` (routes §1, steps §2, fog §3, contact §4,

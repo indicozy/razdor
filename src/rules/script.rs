@@ -522,6 +522,9 @@ impl EventWorld for Game {
         if let Some(b) = self.bridge_stood_on {
             return Some(Place::Building(self.world.locations[b].id));
         }
+        if self.point_zeroed {
+            return None;
+        }
         let t = self.tile();
         self.world.points.iter().find(|p| p.tile == t).map(|p| Place::Point(p.id))
     }
@@ -2631,6 +2634,28 @@ mod tests {
     }
 
     #[test]
+    fn an_attack_from_a_point_cell_scans_no_point() {
+        // 0x4ae72c zeroes the noted point at the start of each walk frame, before the step's
+        // contact check (0x4ae776): an attack on an army next to him scans no point, so the
+        // repeatable event of the cell he stands on does not open and the battle starts.
+        // Report 1375 (the ghost's message looped on every attack from the grave).
+        let mut e = ev(EventKind::Local);
+        e.message = "m".into();
+        let mut s = world(vec![e]);
+        let mut p = point(1, 3, 3, 0);
+        p.event_slots[0] = 1;
+        s.points = vec![p];
+        s.armies = vec![army(2, 4, 3, -2, &[troop(4, 0, 1)])];
+        let mut g = start(&s);
+        read(&mut g);
+        g.pos = g.world.map.center((3, 3));
+        assert!(g.set_destination((4, 3)));
+        let events = walk(&mut g);
+        assert!(fired(&events).is_empty(), "{events:?}");
+        assert!(g.foe.is_some(), "the battle opens");
+    }
+
+    #[test]
     fn a_lantern_without_a_radius_reveals_nothing() {
         // World.md §3: both lantern loops test radius > 0 (0x4ab762, 0x4b5a32).
         let mut e = ev(EventKind::Global);
@@ -3360,4 +3385,41 @@ mod real_maps {
         let _ = g.event_window_closed();
         assert_eq!(g.enter_waiting_building(), vec![Event::Arrived(l)]);
     }
+
+    /// Report 1375: Warlock's army (id 23, «Армия Ротгера фон Варлока») attacked from the ghost's
+    /// grave (point 57 at (186, 18)): event 109 «Месть Призрака» must not open on the attack
+    /// (0x4ae72c zeroes the noted point before the contact check, 0x4ae776), so the battle starts.
+    #[test]
+    fn an_attack_from_the_ghosts_grave_starts_the_battle() {
+        let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+        let dt = DtInstall::load(std::path::Path::new(&dir)).expect("install loads");
+        let c = Arc::new(Content::from_dt(&dt));
+        let s = dt.maps.iter().find(|m| m.name == "ДС2-Страшная история").unwrap().load().unwrap();
+        let mut g = Game::from_scenario(c, &s, HeroClass::Knight);
+        let _ = g.drain_events();
+        while g.script().unwrap().holds_window() {
+            let _ = g.event_window_closed();
+        }
+        // The flags of the ghost's chain: 106 «Благодарность Призрака» answered Yes, flag PK set.
+        g.script.as_mut().unwrap().fired_for_test(106);
+        g.script.as_mut().unwrap().set_flag_string("PK ");
+        g.reveal(186, 18, 12);
+        use crate::rules::events::EventWorld as _;
+        g.activate_army(23);
+        let i = g.world.armies.iter().position(|a| a.id == 23).expect("Warlock's army on the map");
+        g.world.armies[i].pos = g.world.map.center((186, 19));
+        g.pos = g.world.map.center((186, 18));
+        assert!(g.set_destination((186, 19)), "the attack route");
+        let mut events = Vec::new();
+        for _ in 0..10_000 {
+            if !g.moving() {
+                break;
+            }
+            events.extend(g.tick(0.15));
+        }
+        let ghost = Event::Script(EventOutcome::Fired { event: 109, message: true });
+        assert!(!events.contains(&ghost), "the ghost opened on the attack: {events:?}");
+        assert!(g.foe.is_some(), "the battle with Warlock opens: {events:?}");
+    }
 }
+
