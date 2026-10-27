@@ -109,10 +109,14 @@ For `bug`/`parity` and clear Razdor-extra bugs: follow the `player-report` skill
 the commit and its test. Independent reports can go to parallel agents; each commits only its
 own files and updates its own reports' status.
 
-When a Discord message is taken into work (fixed, or handed to an agent to fix), put a 👍 on
-it as the bot (the owner asked for this): `PUT /api/v10/channels/<channel>/messages/<id>/reactions/%F0%9F%91%8D/@me`
-with `Authorization: Bot $DISCORD_BOT_TOKEN` (from `.env`) and `Content-Length: 0`; 204 is done.
-Every message of a report that asks for something gets one.
+Reactions as the bot on a report's messages (the owner's decision, 2026-10-27), each with
+`PUT /api/v10/channels/<channel>/messages/<id>/reactions/<emoji>/@me`,
+`Authorization: Bot $DISCORD_BOT_TOKEN` (from `.env`) and `Content-Length: 0`; 204 is done:
+- 👀 (`%F0%9F%91%80`) the moment a report is picked up (taken into work, fixed, or handed to an
+  agent);
+- the server's custom `:yes:` emoji (`yes:1125874482498773074`) once it is done: its fix is
+  released (the `release` skill adds it to the shipped reports' messages).
+Every message of a report that asks for something gets them.
 
 ## 5. Finish
 

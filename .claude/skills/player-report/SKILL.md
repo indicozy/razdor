@@ -11,8 +11,8 @@ make Razdor do that (or explain that it already does).
 ## 1. Get the evidence
 
 - First read `docs/flows/README.md` and the flow for the area the report touches.
-- A report from Discord taken into work gets a 👍 from the bot on its messages (how: the
-  `discord-reports` skill, §4).
+- A report from Discord taken into work gets a 👀 from the bot on its messages, and the custom
+  `:yes:` once its fix is released (how: the `discord-reports` skill, §4).
 - Download every attachment into a **scratch dir outside the repo** (one dir per report), with
   `curl -sSL --retry 3 -o <file> '<url>'`. Discord links expire: fetch them at once.
 - Screenshots: read them; crop and enlarge the part in question with ffmpeg

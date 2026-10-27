@@ -61,6 +61,8 @@ that system.
    - Write a short Russian post in plain player words: «Вышел Раздор X.Y.Z» + the release link,
      the changelog lines, and after each line that came from a report «спасибо <@id>» (each
      reporter once per line). No internals, no issue numbers needed.
+   - Put the custom `:yes:` reaction (`yes:1125874482498773074`, `discord-reports` skill §4) on
+     the messages of every report this release ships.
    - Post it right away, as part of the release, once the release is published: `reports_post`
      with `confirm=true`, no preview or approval needed (the owner's decision, 2026-10-22).
      Posting needs `DISCORD_ALLOW_POST=1`. Give the owner the post's link in the report back.
