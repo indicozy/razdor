@@ -1167,12 +1167,26 @@ fn close_button(win: Rect) -> bool {
 
 /// The phone's bottom row of the hero window (see [`bottom_row`]): its height is the stacked
 /// close's (`window_layout::army_close`), on the close's line when held upright and at the
-/// window's foot when sideways (where the window has no close).
+/// window's foot when sideways (where the window has no close). Sideways the row starts at the
+/// diary's left edge ([`sideways_row`]), so it never covers the hero's panel.
 fn bottom_row_rects(win: Rect) -> (Rect, Rect, Rect) {
     let k = chrome::k();
     let base = window_layout::army_close(win);
-    let y = if window_layout::portrait() { base.y } else { win.bottom() - base.h - 8.0 * k };
-    bottom_row(win, y, base.h, 12.0 * k, 8.0 * k)
+    if window_layout::portrait() {
+        return bottom_row(win, base.y, base.h, 12.0 * k, 8.0 * k);
+    }
+    sideways_row(win, k, win.bottom() - base.h - 8.0 * k, base.h)
+}
+
+/// The sideways bottom row at `y`, `h` tall: the three buttons of [`bottom_row`] laid across the
+/// window from the diary's left edge (design x 576 of the right side, the hero view's `o` mapping:
+/// the origin 248 plus (576 - 264) times `HERO_S`) to the window's right pad. Pure, so the test
+/// can check it without the screen's state.
+fn sideways_row(win: Rect, k: f32, y: f32, h: f32) -> (Rect, Rect, Rect) {
+    let diary_x = win.x + (248.0 + (576.0 - 264.0) * HERO_S) * k;
+    let pad = 12.0 * k;
+    // `bottom_row` pads from the rect's left edge: the rect starts one pad left of the diary.
+    bottom_row(Rect::new(diary_x - pad, win.y, win.right() - diary_x + pad, win.h), y, h, pad, 8.0 * k)
 }
 
 /// The unit's panel of the army and hero windows: the landscape column on the left, or stacked
@@ -2113,6 +2127,26 @@ mod tests {
         }
         assert!(left.right() < close.x && close.right() < right.x, "no overlap, gaps between");
         assert!(close.w >= 200.0, "«Закрыть» stays a wide button");
+    }
+
+    /// Sideways, the phone's bottom row starts right of the hero's left panel (design x 246) and
+    /// lies under the diary's column, inside the window, with its three buttons in order.
+    #[test]
+    fn a_landscape_phone_s_bottom_row_starts_off_the_hero_panel() {
+        let k = 1.0;
+        let win = Rect::new(0.0, 0.0, 836.0, 600.0);
+        let panel_right = win.x + 246.0 * k;
+        let h = 44.0 * 2.75;
+        let (left, close, right) = super::sideways_row(win, k, 540.0, h);
+        assert!(left.x >= panel_right, "«Весь список» at {left:?} covers the hero's panel (right edge {panel_right})");
+        assert!(left.x > win.x + win.w / 2.0, "the diary's column is the right half: {left:?}");
+        for r in [left, close, right] {
+            assert!(r.x >= win.x && r.right() <= win.right(), "{r:?} inside the window");
+        }
+        assert!(left.right() < close.x && close.right() < right.x, "no overlap, in order");
+        // The diary's entry box starts at the same x (design 576).
+        let entry_x = win.x + (248.0 + (576.0 - 264.0) * super::HERO_S) * k;
+        assert!((left.x - entry_x).abs() <= 12.0 * k + 0.5, "{left:?} vs the entry's x {entry_x}");
     }
 
     /// «Развернуть» needs a picked entry on the tab; «Весь список» needs any entry on it.
