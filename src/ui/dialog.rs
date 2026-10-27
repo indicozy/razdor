@@ -34,13 +34,37 @@ fn report_label_ink(r: Resource) -> Color {
     }
 }
 
-/// Where the noon report's `n` resource labels stand in the box from `x` over `w`, at `cy`
-/// and scale `o`: each label's centre x, and the one baseline all of them share (whole pixels;
-/// no label may sit lower than the one before it).
-fn report_label_places(n: usize, x: f32, w: f32, o: f32, cy: f32) -> (Vec<f32>, f32) {
-    let step = (w - 60.0 * o) / n as f32;
-    let centres = (0..n).map(|k| x + 30.0 * o + step * (k as f32 + 0.5)).collect();
-    (centres, (cy + 18.0 * o).round())
+/// The height of one row of the noon report's labels, in the original's pixels: the label's
+/// baseline 18 under the row's top and its icon 62 (70 across), the next row 104 lower.
+const REPORT_ROW: f32 = 104.0;
+
+/// Where the noon report's `n` labels stand in the box from `x` over `w`, at `cy` and scale `o`,
+/// in rows of `cols` (one row: `cols == n`): each label's centre x and its baseline y (whole
+/// pixels). A row's labels share its baseline, and no label sits lower than the one before it
+/// in its row; the next row is [`REPORT_ROW`] lower. A short last row is centred in the box.
+fn report_label_grid(n: usize, cols: usize, x: f32, w: f32, o: f32, cy: f32) -> Vec<(f32, f32)> {
+    (0..n)
+        .map(|i| {
+            let (row, col) = (i / cols, i % cols);
+            let k = (n - row * cols).min(cols);
+            let step = (w - 60.0 * o) / k as f32;
+            let cx = x + 30.0 * o + step * (col as f32 + 0.5);
+            (cx, (cy + row as f32 * REPORT_ROW * o + 18.0 * o).round())
+        })
+        .collect()
+}
+
+/// The noon report's labels per row: Razdor's phone choice (the owner's request), a phone held
+/// upright (`window_layout::portrait`) stacks more than two of them in rows of two, the box too
+/// narrow for four in one row. Every other window, and a report of at most two, is one row as
+/// the original's (0x4a9d29..0x4a9d74).
+fn report_label_cols(report: bool, portrait: bool, n: usize) -> usize {
+    if report && portrait && n > 2 { 2 } else { n.max(1) }
+}
+
+/// The rows the resource labels take: [`report_label_cols`] labels to a row.
+fn report_label_rows(report: bool, portrait: bool, n: usize) -> usize {
+    if n == 0 { 0 } else { n.div_ceil(report_label_cols(report, portrait, n)) }
 }
 
 /// A resource icon with its label.
@@ -619,7 +643,8 @@ fn event_layout(d: &Dialog, o: f32, t: f32, w: f32) -> EventLayout {
     };
     let total = lines.len() + rows.len();
     let full_h = lines.len() as f32 * line + rows.iter().map(|r| event_row_h(d.defeat, line, t, r)).sum::<f32>();
-    let res_h = if d.resources.is_empty() { 0.0 } else { 104.0 * o };
+    // One row of labels per [`report_label_rows`]: the box grows by a row's height for each.
+    let res_h = report_label_rows(d.resource_report, super::window_layout::portrait(), d.resources.len()) as f32 * REPORT_ROW * o;
     // An icon row grows the window by its caption and icons (0x4a8e66: 87 for items, 82
     // for spells).
     let items_h = if d.items.is_empty() { 0.0 } else { 87.0 * o };
@@ -752,13 +777,15 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     }
     cy += tb.h + 10.0 * o;
     if !d.resources.is_empty() {
-        let (centres, baseline) = report_label_places(d.resources.len(), x, w, o, cy);
-        for ((r, label), &cx) in d.resources.iter().zip(&centres) {
+        let cols = report_label_cols(d.resource_report, super::window_layout::portrait(), d.resources.len());
+        let places = report_label_grid(d.resources.len(), cols, x, w, o, cy);
+        for (i, ((r, label), &(cx, baseline))) in d.resources.iter().zip(&places).enumerate() {
             // The original's caption face, every label in its green font ae249c (0x4d6114 sets
             // it on all four places), the mana's too.
             let c = if d.resource_report { report_label_ink(*r) } else { CAPTION };
             super::dt_font::with_original_face(super::dt_font::Face::Subtitle, || chrome::shadow_centered(label, cx, baseline, size, c));
-            resource_icon(*r, cx, cy + 62.0 * o, 70.0 * o);
+            let row = (i / cols) as f32;
+            resource_icon(*r, cx, cy + 62.0 * o + row * REPORT_ROW * o, 70.0 * o);
         }
         cy += res_h;
     }
@@ -1221,11 +1248,61 @@ mod tests {
     #[test]
     fn the_report_s_resource_labels_share_one_baseline() {
         for (o, cy) in [(1.0, 300.0), (1.5, 412.3), (0.75, 97.6)] {
-            let (centres, baseline) = report_label_places(4, 40.0, 500.0, o, cy);
-            assert_eq!(centres.len(), 4);
-            assert_eq!(baseline, (cy + 18.0 * o).round());
-            assert!(centres.windows(2).all(|p| p[0] < p[1]), "{centres:?}");
+            let places = report_label_grid(4, 4, 40.0, 500.0, o, cy);
+            assert_eq!(places.len(), 4);
+            assert!(places.iter().all(|p| p.1 == (cy + 18.0 * o).round()), "{places:?}");
+            assert!(places.windows(2).all(|p| p[0].0 < p[1].0), "{places:?}");
         }
+    }
+
+    /// Razdor's phone choice (the owner's request): held upright, the noon report's four labels
+    /// stand in two rows of two, each row on its own baseline one row height lower; the centres
+    /// of a column match. Landscape and the desktop keep one row (the test above).
+    #[test]
+    fn the_report_s_four_labels_stack_two_by_two_upright() {
+        assert_eq!(report_label_cols(true, true, 4), 2);
+        assert_eq!(report_label_rows(true, true, 4), 2);
+        for (o, cy) in [(1.0, 300.0), (1.5, 412.3), (2.625, 97.6)] {
+            let places = report_label_grid(4, 2, 40.0, 500.0, o, cy);
+            let (top, bottom) = (places[0].1, places[2].1);
+            assert_eq!(places[1].1, top);
+            assert_eq!(places[3].1, bottom);
+            assert_eq!(top, (cy + 18.0 * o).round());
+            assert_eq!(bottom - top, (REPORT_ROW * o).round());
+            assert_eq!(places[0].0, places[2].0, "column 1 centre");
+            assert_eq!(places[1].0, places[3].0, "column 2 centre");
+            assert!(places[0].0 < places[1].0);
+        }
+    }
+
+    /// Three labels upright: the first row holds two, the last one is centred in the box.
+    #[test]
+    fn the_report_s_three_labels_stack_two_then_one_centred() {
+        assert_eq!(report_label_cols(true, true, 3), 2);
+        assert_eq!(report_label_rows(true, true, 3), 2);
+        let (x, w, o, cy) = (40.0, 500.0, 1.5, 300.0);
+        let places = report_label_grid(3, 2, x, w, o, cy);
+        assert_eq!(places[0].1, places[1].1);
+        assert_eq!(places[2].1, places[0].1 + (REPORT_ROW * o).round());
+        assert_eq!(places[2].0, x + w / 2.0, "the lone label is centred");
+        assert!(places[0].0 < places[1].0);
+    }
+
+    /// Up to two labels, and every label outside the upright phone, stay one row as before.
+    #[test]
+    fn the_report_s_labels_stay_one_row_elsewhere() {
+        assert_eq!(report_label_cols(true, true, 2), 2);
+        assert_eq!(report_label_rows(true, true, 2), 1);
+        assert_eq!(report_label_rows(true, true, 1), 1);
+        assert_eq!(report_label_rows(true, true, 0), 0);
+        for n in 1..=4 {
+            assert_eq!(report_label_cols(true, false, n), n, "landscape and desktop");
+            assert_eq!(report_label_rows(true, false, n), 1, "landscape and desktop");
+        }
+        // The victory's labels are not the noon report's: they keep their one row as well.
+        assert_eq!(report_label_rows(false, true, 3), 1);
+        let places = report_label_grid(4, 4, 40.0, 500.0, 1.0, 300.0);
+        assert!(places.iter().all(|p| p.1 == 318.0));
     }
 
     /// Deviation (the owner's decision): the four report labels are of about one brightness,

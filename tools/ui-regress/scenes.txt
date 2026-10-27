@@ -139,3 +139,8 @@ phone-save-dp-landscape | save:РК1-Начало пути | 2160x1080 | RAZDOR_
 phone-load-dp-landscape | map:РК1-Начало пути | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1;RAZDOR_SCENE_OPEN=3:load
 phone-settings-dp-landscape | settings:РК1-Начало пути | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1
 phone-settings-advanced-dp-landscape | settings:РК1-Начало пути:advanced | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1
+# The noon report on phones (all four labels shown: gold 30881, mana 2000, income 500, wages 595):
+# held upright they stack the labels 2 × 2 (the owner's request); landscape keeps one row.
+phone-report-portrait | report:РК1-Начало пути:30881 | 1080x2160 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1
+phone-report-portrait-1920 | report:РК1-Начало пути:30881 | 1080x1920 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1
+phone-report-landscape | report:РК1-Начало пути:30881 | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1
