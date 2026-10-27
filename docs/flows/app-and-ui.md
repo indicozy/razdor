@@ -205,7 +205,7 @@ bar (`window_layout::window`, `main_menu::map_window`, the saves and dialogs), s
 The battle window held upright (`battle_view::Layout::upright`, pure, with unit tests): the window's scale comes from
 `window_layout::game_scale` (the width less 8 px, above the bar); the unit's band (`unit_sheet::draw_band`) on top at
 design y 76, then the quick buttons, the enemy's grid, the strip, the player's grid; the close box is 44 dp at the top right
-(`close_button`); the landscape phone window gets the same box (`Layout::landscape`, Razdor's phone choice) and then
+(`close_button`); the landscape phone window gets the same box, beside its top right corner so it does not cover the enemy's top right card, above it or inside when there is no room (`Layout::landscape`, `landscape_close_box`, Razdor's phone choice) and then
 draws no cross in its title bar. The map, the bar and the exit window are drawn at the interface scale (`display::with_window_scale(None, …)`).
 Stacked windows (experiment, main only): a phone held upright (`window_layout::portrait`: `dp_px` set and the
 screen taller than wide) stacks the building, army and hero windows, each with its own layout

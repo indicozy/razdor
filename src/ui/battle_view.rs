@@ -86,6 +86,24 @@ fn close_box(win: Rect, k: f32, dp: f32) -> Rect {
     Rect::new(win.right() - side - 4.0 * k, win.y + 3.0 * k, side, side)
 }
 
+/// A phone's close box in landscape: the same square just right of the window's top right corner
+/// (4 px gap, top aligned), when it fits left of the screen's safe right edge `safe_right` and
+/// below the safe top `safe_top`, so it does not cover the enemy's top right card. Else above the
+/// window's top right when that is below the safe top; else the inside one ([`close_box`]).
+/// Razdor's phone choice, not parity.
+fn landscape_close_box(win: Rect, k: f32, dp: f32, safe_right: f32, safe_top: f32) -> Rect {
+    let side = (CLOSE_DP * dp).round();
+    let beside = Rect::new(win.right() + 4.0 * k, win.y, side, side);
+    if beside.right() <= safe_right && beside.y >= safe_top {
+        return beside;
+    }
+    let above = Rect::new(win.right() - side - 4.0 * k, win.y - side - 4.0 * k, side, side);
+    if above.y >= safe_top {
+        return above;
+    }
+    close_box(win, k, dp)
+}
+
 /// The stacked battle window's design width: 590 px, as the other stacked windows.
 const STACK_W: f32 = 590.0;
 /// The stacked rows, design px from the window's top: the close row over the band (the close box
@@ -131,15 +149,19 @@ impl Layout {
         let dp = super::display::dp_px();
         match (window_layout::game_rect(stacked_video(f)), dp) {
             (Some(win), Some(dp)) => Layout::upright(k, win, f, dp),
-            _ => Layout::landscape(k, (screen_width(), screen_height()), chrome::bar_height(), f, dp),
+            _ => {
+                let (sw, safe) = (screen_width(), super::display::safe_area());
+                Layout::landscape(k, (sw, screen_height()), chrome::bar_height(), f, dp, sw - safe.right, safe.top)
+            }
         }
     }
 
     /// The landscape window: 836×600 at `k`, centred over the view above the `bar` px bottom bar,
     /// the unit's column at the left and the formations on the right. On a phone (`dp`, as the
-    /// stacked window's) the close box is the same finger-sized one over the top right corner
-    /// (Razdor's phone choice, not parity), and the title bar's own cross is not drawn.
-    fn landscape(k: f32, screen: (f32, f32), bar: f32, f: Formation, dp: Option<f32>) -> Layout {
+    /// stacked window's) the close box is the same finger-sized one, beside the window's top right
+    /// corner (see [`landscape_close_box`]; `safe_right` and `safe_top` are the screen's safe edges),
+    /// and the title bar's own cross is not drawn. Razdor's phone choice, not parity.
+    fn landscape(k: f32, screen: (f32, f32), bar: f32, f: Formation, dp: Option<f32>, safe_right: f32, safe_top: f32) -> Layout {
         let (sw, sh) = screen;
         let (ww, wh) = ((836.0 * k).round(), (600.0 * k).round());
         let x = ((sw - ww) / 2.0).round();
@@ -153,7 +175,7 @@ impl Layout {
         let card = vec2(88.0 * c * k, 128.0 * c * k).round();
         let pitch = vec2(96.0 * c * k, 133.0 * c * k);
         let grid_w = f.display_cols() as f32 * pitch.x - 8.0 * c * k;
-        let close = dp.map(|dp| close_box(win, k, dp));
+        let close = dp.map(|dp| landscape_close_box(win, k, dp, safe_right, safe_top));
         Layout { k, win, panel, quick, strip, card, pitch, grid_x: (rx + (rw - grid_w) / 2.0).round(), formation: f, close, stacked: false }
     }
 
@@ -1702,7 +1724,7 @@ mod tests {
     #[test]
     fn the_landscape_battle_layout_is_as_before() {
         // 1280×800 at the interface scale 1, an 80 px bar: the window centred above the bar.
-        let l = Layout::landscape(1.0, (1280.0, 800.0), 80.0, Formation::default(), None);
+        let l = Layout::landscape(1.0, (1280.0, 800.0), 80.0, Formation::default(), None, 1280.0, 0.0);
         assert!(l.close.is_none());
         assert!(!l.is_stacked());
         assert_eq!(l.win, Rect::new(222.0, 60.0, 836.0, 600.0));
@@ -1715,19 +1737,45 @@ mod tests {
         assert_eq!(l.column(), Rect::new(224.0, 87.0, 244.0, 600.0 - 2.0 - 27.0));
     }
 
-    /// Razdor's phone choice, not parity: a phone in landscape has the same finger-sized close box at
-    /// the top right of its window as the stacked one (44 dp), and the desktop has none.
+    /// Razdor's phone choice, not parity: a phone in landscape has the same finger-sized close box
+    /// (44 dp), beside the window's top right corner so it does not cover the enemy's top right card;
+    /// the desktop has none.
     #[test]
-    fn a_phone_in_landscape_has_a_44_dp_close_box_at_the_top_right() {
+    fn a_phone_in_landscape_has_a_44_dp_close_box_beside_the_top_right() {
         let dp = 2.75;
-        let l = Layout::landscape(1.0, (2400.0, 1080.0), 90.0, Formation::default(), Some(dp));
+        let l = Layout::landscape(1.0, (2400.0, 1080.0), 90.0, Formation::default(), Some(dp), 2400.0, 0.0);
         let (win, close) = (l.win, l.close.expect("a phone's close box"));
         assert!(!l.is_stacked());
         assert!(close.w >= 44.0 * dp && close.h >= 44.0 * dp, "{close:?}");
-        assert!(close.x >= win.x && close.right() <= win.right() && close.y >= win.y && close.bottom() <= win.bottom(), "{close:?}");
-        assert!(close.x > win.x + win.w / 2.0 && close.y < win.y + win.h / 2.0, "top right: {close:?} in {win:?}");
-        assert_eq!(close.right(), win.right() - 4.0);
-        assert_eq!(close.y, win.y + 3.0);
+        // Right of the window, top aligned with it, inside the screen.
+        assert!(close.x >= win.right() + 4.0 && close.y == win.y, "{close:?} beside {win:?}");
+        assert!(close.right() <= 2400.0 && close.bottom() <= 1080.0, "{close:?}");
+        // It never covers the enemy's grid: the window's right part below the title bar, and every card.
+        let grid = Rect::new(win.x + 248.0, win.y + 27.0, win.w - 248.0, win.h - 27.0);
+        assert!(!overlaps(close, grid), "{close:?} over the grid {grid:?}");
+        for (_, cell) in cell_rects(&l) {
+            assert!(!overlaps(close, cell), "{close:?} over the card {cell:?}");
+        }
+    }
+
+    /// No room on the right (the screen is the window's width): the box goes above the window's top
+    /// right when that is below the safe top, else inside the window as before.
+    #[test]
+    fn a_phone_in_landscape_without_room_beside_the_window_falls_back() {
+        let dp = 2.75;
+        let side = (44.0f32 * dp).round();
+        // The window is 836 px wide and centred at x 0 on an 836 px screen; 600 px tall at y 195.
+        let l = Layout::landscape(1.0, (836.0, 1080.0), 90.0, Formation::default(), Some(dp), 836.0, 0.0);
+        let (win, close) = (l.win, l.close.expect("a phone's close box"));
+        assert_eq!(win, Rect::new(0.0, 195.0, 836.0, 600.0));
+        assert_eq!(close, Rect::new(836.0 - side - 4.0, 195.0 - side - 4.0, side, side), "above the top right");
+        assert!(close.bottom() <= win.y && close.right() <= 836.0);
+
+        // The safe top is below that spot: the box stays inside the window's top right.
+        let l = Layout::landscape(1.0, (836.0, 1080.0), 90.0, Formation::default(), Some(dp), 836.0, 150.0);
+        let close = l.close.expect("a phone's close box");
+        assert_eq!(close, Rect::new(836.0 - side - 4.0, 195.0 + 3.0, side, side), "inside the top right");
+        assert!(close.x >= win.x && close.right() <= win.right() && close.y >= win.y && close.bottom() <= win.bottom());
     }
 
     #[test]
