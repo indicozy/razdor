@@ -61,7 +61,9 @@ that system.
      commits are in this release; set each to `released X.Y.Z` in its report and in INDEX.
      `reports_reporters` gives their reporters (the backlog id is the number they're linked
      under; older reports were linked under GitHub issue numbers).
-   - Write a short Russian post in plain player words: «Вышел Раздор X.Y.Z» + the release link,
+   - Write a short Russian post in plain player words: «Вышел Раздор X.Y.Z» + the release link
+     with «(сборка идёт: файлы появятся на странице примерно через час)» — the pipeline takes
+     40–60 min (macOS is the slowest); never «через несколько минут» (a player's remark, 2026-10-27),
      the changelog lines, and after each line that came from a report «спасибо <@id>» (each
      reporter once per line). No internals, no issue numbers needed.
    - Put the custom `:yes:` reaction (`yes:1125874482498773074`, `discord-reports` skill §4) on
