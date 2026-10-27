@@ -20,6 +20,8 @@ that system.
 ## Steps
 
 1. All work for the release is committed; `git status` is clean (other agents' files: ask).
+   If the previous release's `changelog/X.Y.Z.md` has no SHA-256 lines (the machine was shut
+   down right after its tag, `CLAUDE.local.md`), do its follow-up (step 7) first.
 2. Run the full suite with the install: `RAZDOR_DT_DIR=… cargo test --release` (with the core pinning prefix from `CLAUDE.local.md`, if present, and `RAZDOR_PERF_BUDGET_SCALE` on slow cores; lib and bins;
    the lib failing stops cargo before the bins, so run `--bins` too if it does). Report any
    failure; a failure that also fails on the previous release's commit is pre-existing, say so.
