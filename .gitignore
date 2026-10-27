@@ -13,3 +13,8 @@ docs/notes/
 
 # this machine's own rules for Claude Code
 CLAUDE.local.md
+
+# player wiki (Starlight): build output and dependencies
+wiki/node_modules/
+wiki/dist/
+wiki/.astro/

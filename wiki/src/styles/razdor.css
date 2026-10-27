@@ -1,0 +1,72 @@
+/* The wiki's look, after the main site (style.css on gh-pages): Kurale for headings,
+   PT Sans for text, the site's ember, gold and cream colours. */
+
+@font-face { font-family: "Kurale"; src: url("/fonts/Kurale-Regular.ttf") format("truetype"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "PT Sans"; src: url("/fonts/PT_Sans-Regular.ttf") format("truetype"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "PT Sans"; src: url("/fonts/PT_Sans-Bold.ttf") format("truetype"); font-weight: 700; font-display: swap; }
+
+/* Dark (the default): ember ground, cream text, gold accents. */
+:root {
+	--sl-font: "PT Sans", system-ui, sans-serif;
+	--sl-font-system: "PT Sans", system-ui, sans-serif;
+	--sl-font-system-mono: ui-monospace, monospace;
+	--sl-color-black: #1f1109;
+	--sl-color-white: #f1e6c9;
+	--sl-color-gray-1: #f1e6c9;
+	--sl-color-gray-2: #dcb97c;
+	--sl-color-gray-3: #a88d5c;
+	--sl-color-gray-4: #7a6544;
+	--sl-color-gray-5: #4f3c25;
+	--sl-color-gray-6: #2e2014;
+	--sl-color-accent-low: #3b220f;
+	--sl-color-accent: #d8b25a;
+	--sl-color-accent-high: #f0c96a;
+	--sl-color-text: #f1e6c9;
+	--sl-color-text-accent: #f0c96a;
+	--sl-color-bg-nav: #2a1a0e;
+	--sl-color-bg-sidebar: #2a1a0e;
+}
+
+/* Light: parchment ground, dark brown text, the same gold turned darker to stay readable. */
+:root[data-theme="light"] {
+	--sl-color-white: #2c1b0b;
+	--sl-color-gray-1: #2c1b0b;
+	--sl-color-gray-2: #3b220f;
+	--sl-color-gray-3: #5f4a2e;
+	--sl-color-gray-4: #8a7050;
+	--sl-color-gray-5: #c9b48a;
+	--sl-color-gray-6: #e8dab8;
+	--sl-color-gray-7: #f6eedb;
+	--sl-color-black: #fbf5e6;
+	--sl-color-accent-low: #f1e3bd;
+	--sl-color-accent: #8a5a12;
+	--sl-color-accent-high: #5c3a08;
+	--sl-color-text: #2c1b0b;
+	--sl-color-text-accent: #8a5a12;
+	--sl-color-bg-nav: #f3e9cf;
+	--sl-color-bg-sidebar: #fbf5e6;
+}
+
+:where(h1, h2, h3, h4, h5, h6, .site-title, .hero h1, .hero .title) {
+	font-family: "Kurale", serif;
+	font-weight: 400;
+	letter-spacing: 0.01em;
+}
+
+:where(body) {
+	font-size: 1.0625rem;
+}
+
+:root[data-theme="dark"] .hero h1,
+:root:not([data-theme]) .hero h1 {
+	text-shadow: 0 2px 0 #1a0d05, 0 0 22px rgba(255, 150, 60, 0.35);
+}
+
+a {
+	text-underline-offset: 0.18em;
+}
+
+:focus-visible {
+	outline: 2px solid var(--sl-color-accent-high);
+	outline-offset: 3px;
+}

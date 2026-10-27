@@ -1,0 +1,57 @@
+# Builds the player wiki (wiki/, Starlight) and publishes it into the gh-pages branch under
+# wiki/, next to the main site: https://indicozy.github.io/razdor/wiki/
+# Only wiki/ in gh-pages is written; the rest of that branch is left as it is.
+name: Wiki
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "wiki/**"
+      - ".github/workflows/wiki.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wiki-pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: wiki/package-lock.json
+
+      - name: Build the wiki
+        working-directory: wiki
+        run: npm ci && npm run build
+
+      - name: Check out the gh-pages branch
+        uses: actions/checkout@v5
+        with:
+          ref: gh-pages
+          path: site
+
+      - name: Replace the wiki folder in gh-pages
+        run: rsync -a --delete wiki/dist/ site/wiki/
+
+      - name: Commit and push the wiki build
+        working-directory: site
+        run: |
+          if [ -z "$(git status --porcelain -- wiki)" ]; then
+            echo "The wiki build did not change."
+            exit 0
+          fi
+          git add -A -- wiki
+          git -c user.name="github-actions[bot]" \
+            -c user.email="41898699+github-actions[bot]@users.noreply.github.com" \
+            commit -m "Wiki: build of $(git -C "$GITHUB_WORKSPACE" rev-parse --short HEAD)"
+          git push origin HEAD:gh-pages
