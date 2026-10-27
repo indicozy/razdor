@@ -120,7 +120,10 @@ Other diagnostics: `razdor.log` in the data folder (`razdor::diag`, `RAZDOR_LOG=
   requests. Android downloads the APK with `HttpURLConnection` in `razdorDownload`
   (`android/MainActivityInject.java`), checks it the same way, and `razdorInstall` copies it into a
   `PackageInstaller` session whose commit the system confirms on screen (the window says so:
-  `Status::Handed`). No FileProvider: cargo-quad-apk cannot declare a provider, and the
+  `Status::Handed`). The APK is kept in the cache folder as `razdor-<X.Y.Z>.apk` (a `.part` until
+  its SHA-256 matches): an install tried again reuses it without a download (`reuse_download`);
+  `update::init` removes the APKs of this version or older and any `.part` (`clear_downloads`),
+  and the installed one goes on `Outcome::Installed` (`forget_installed`). No FileProvider: cargo-quad-apk cannot declare a provider, and the
   session takes the bytes. The permissions REQUEST_INSTALL_PACKAGES and INTERNET are in `Cargo.toml`.
   Mode Always reads as Ask there (`update::effective`). iOS installs nothing: its window
   opens the release page (`ui::main_menu::open_link`) and the check uses `NSData`.

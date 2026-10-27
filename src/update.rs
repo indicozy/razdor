@@ -11,8 +11,12 @@
 //! `Razdor.exe.old`, deleted at the next start. It runs from the next start on.
 //!
 //! Phones (`update::phone`): Android downloads its `razdor.apk`, checks it the same way and
-//! hands it to the system installer, which the player confirms (`Status::Handed`). iOS
-//! installs nothing: its window opens the release's page (`opens_page`).
+//! hands it to the system installer, which the player confirms (`Status::Handed`). The APK is
+//! kept in the app's cache folder as `razdor-<X.Y.Z>.apk` (written as `.part` until its SHA-256
+//! matches): a download that was already made is reused, even after a cancelled install. At
+//! start the APKs of this version and older, and any partial download, are removed; the APK
+//! the installer took is removed once it reports success. iOS installs nothing: its window
+//! opens the release's page (`opens_page`).
 //!
 //! A program under a `target` folder (a `cargo` build) checks nothing, unless
 //! `RAZDOR_UPDATE_AS=<X.Y.Z>` is set: it then counts as that version, to try the whole flow
@@ -178,15 +182,28 @@ pub fn after_installer(status: Status, outcome: Outcome) -> Status {
 /// Once per frame: while the system installer has an update of Razdor's, takes its report
 /// (Android; nothing else hands an install to a system).
 pub fn poll_installer() {
-    if !matches!(status(), Status::Handed(_)) {
-        return;
-    }
+    let Status::Handed(r) = status() else { return };
     if let Some(outcome) = installer_report() {
         let next = after_installer(status(), outcome.clone());
         crate::diag!("update: the installer ended: {outcome:?}");
+        if outcome == Outcome::Installed {
+            forget_installed(&r);
+        }
         set(next);
     }
 }
+
+/// Android: the installer took its copy of the APK, so the file goes (the new version is
+/// running from the next start, and its cleanup would remove it anyway).
+#[cfg(target_os = "android")]
+fn forget_installed(r: &Release) {
+    if let Ok(dir) = phone::cache_dir() {
+        remove_apk(&dir, r.version);
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+fn forget_installed(_: &Release) {}
 
 #[cfg(target_os = "android")]
 fn installer_report() -> Option<Outcome> {
@@ -250,6 +267,7 @@ pub fn current() -> Version {
 /// Windows program, a download cut short). A phone's program is not a file Razdor replaces.
 pub fn init() {
     if crate::platform::MOBILE {
+        clear_phone_downloads();
         return;
     }
     let program = PROGRAM.get_or_init(|| std::env::current_exe().ok()).clone();
@@ -263,6 +281,16 @@ pub fn init() {
         }
     }
 }
+
+#[cfg(target_os = "android")]
+fn clear_phone_downloads() {
+    if let Ok(dir) = phone::cache_dir() {
+        clear_downloads(&dir, current());
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+fn clear_phone_downloads() {}
 
 fn program() -> Option<PathBuf> {
     PROGRAM.get_or_init(|| std::env::current_exe().ok()).clone()
@@ -477,6 +505,70 @@ pub fn check_sum(bytes: &[u8], want: &str) -> Result<(), String> {
     }
 }
 
+/// The name of release `v`'s APK in the phone's downloads folder: `razdor-X.Y.Z.apk`. Its
+/// download is `<name>.part` until the SHA-256 matches.
+pub fn apk_file_name(v: Version) -> String {
+    format!("razdor-{v}.apk")
+}
+
+/// The version of a download's file name: `razdor-X.Y.Z.apk`, or that with `.part` after it.
+pub fn apk_version(name: &str) -> Option<Version> {
+    let base = name.strip_suffix(".part").unwrap_or(name);
+    Version::parse(base.strip_prefix("razdor-")?.strip_suffix(".apk")?)
+}
+
+/// The old-style download name (before the APK kept its version): a cut-short one is removed.
+const OLD_DOWNLOAD: &str = "razdor.apk.update";
+
+/// Which of the downloads folder's file names the start removes, for the running `running`:
+/// every partial download (`razdor-*.part`) and the old-style `razdor.apk.update`, and the APKs
+/// of this version or older. A newer APK stays (it is not installed yet); other files stay.
+pub fn stale_downloads(names: &[String], running: Version) -> Vec<String> {
+    names
+        .iter()
+        .filter(|n| {
+            if n.as_str() == OLD_DOWNLOAD {
+                return true;
+            }
+            if !n.starts_with("razdor-") {
+                return false;
+            }
+            n.ends_with(".part") || apk_version(n).is_some_and(|v| v <= running)
+        })
+        .cloned()
+        .collect()
+}
+
+/// Removes the stale downloads in `dir` (see [`stale_downloads`]). Errors are logged only.
+pub fn clear_downloads(dir: &Path, running: Version) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let names: Vec<String> = entries.flatten().filter_map(|e| e.file_name().into_string().ok()).collect();
+    for name in stale_downloads(&names, running) {
+        let path = dir.join(&name);
+        match std::fs::remove_file(&path) {
+            Ok(()) => crate::diag!("update: removed {}", path.display()),
+            Err(e) => crate::diag!("update: {}: {e}", path.display()),
+        }
+    }
+}
+
+/// Removes release `v`'s APK from `dir`, if it is there.
+pub fn remove_apk(dir: &Path, v: Version) {
+    let path = dir.join(apk_file_name(v));
+    if path.exists() {
+        match std::fs::remove_file(&path) {
+            Ok(()) => crate::diag!("update: removed {}", path.display()),
+            Err(e) => crate::diag!("update: {}: {e}", path.display()),
+        }
+    }
+}
+
+/// Whether an APK already downloaded can be installed as it is: `existing` is the SHA-256 of
+/// the file (`None` when there is no file), `want` the release's. A mismatch means a download.
+pub fn reuse_download(existing: Option<&str>, want: &str) -> bool {
+    existing.is_some_and(|sum| sum == want)
+}
+
 /// Downloads `r`, checks it and puts it in place of this program. True when the file went to
 /// the system's installer instead (Android): the player confirms it there.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -506,20 +598,35 @@ fn install_now(r: &Release) -> Result<bool, String> {
     checked.map(|()| false)
 }
 
-/// Android: downloads the APK, checks it against `SHA256SUMS` and hands it to the system
-/// installer (which copies it before it returns; the file is removed then). True: handed over.
+/// Android: the APK of `r` is kept in the downloads folder as `razdor-<X.Y.Z>.apk`. A file
+/// there whose SHA-256 is the release's is handed over as it is; otherwise it is downloaded to
+/// `.part`, checked against `SHA256SUMS` and renamed into place. The system installer copies
+/// it before it returns. True: handed over. The file stays after a cancelled session (the next
+/// try reuses it) and is removed once the installer reports success (`forget_installed`).
 #[cfg(target_os = "android")]
 fn install_now(r: &Release) -> Result<bool, String> {
     let asset = asset_name().ok_or("no release for this system")?;
     let sums = fetch(&r.sums_url, 60)?;
     let want = expected_sum(&sums, asset)?;
-    let part = phone::cache_dir()?.join(format!("{asset}.update"));
-    let placed = phone::download(&r.program_url, &part, 900)
-        .and_then(|()| std::fs::read(&part).map_err(|e| format!("{}: {e}", part.display())))
-        .and_then(|bytes| check_sum(&bytes, &want))
-        .and_then(|()| phone::install(&part));
-    let _ = std::fs::remove_file(&part);
-    placed.map(|()| true)
+    let dir = phone::cache_dir()?;
+    let apk = dir.join(apk_file_name(r.version));
+    let existing = std::fs::read(&apk).ok().map(|bytes| sha256_hex(&bytes));
+    if reuse_download(existing.as_deref(), &want) {
+        crate::diag!("update: {} was downloaded already", r.version);
+    } else {
+        let _ = std::fs::remove_file(&apk);
+        let part = dir.join(format!("{}.part", apk_file_name(r.version)));
+        let _ = std::fs::remove_file(&part);
+        let fetched = phone::download(&r.program_url, &part, 900)
+            .and_then(|()| std::fs::read(&part).map_err(|e| format!("{}: {e}", part.display())))
+            .and_then(|bytes| check_sum(&bytes, &want))
+            .and_then(|()| std::fs::rename(&part, &apk).map_err(|e| format!("{}: {e}", apk.display())));
+        if let Err(e) = fetched {
+            let _ = std::fs::remove_file(&part);
+            return Err(e);
+        }
+    }
+    phone::install(&apk).map(|()| true)
 }
 
 /// iOS installs nothing (its window opens the release's page): nothing to do here.
@@ -778,6 +885,66 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(std::fs::metadata(&program).unwrap().permissions().mode() & 0o777, 0o755);
         }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn an_apk_is_named_by_its_version_and_its_download_too() {
+        assert_eq!(apk_file_name(Version(1, 0, 2)), "razdor-1.0.2.apk");
+        assert_eq!(apk_version("razdor-1.0.2.apk"), Some(Version(1, 0, 2)));
+        assert_eq!(apk_version("razdor-1.0.2.apk.part"), Some(Version(1, 0, 2)));
+        assert_eq!(apk_version("razdor.apk.update"), None);
+        assert_eq!(apk_version("razdor-fetch"), None);
+        assert_eq!(apk_version("razdor-x.apk"), None);
+        assert_eq!(apk_version("other-1.0.2.apk"), None);
+    }
+
+    #[test]
+    fn the_start_removes_old_apks_and_partial_downloads_only() {
+        let names: Vec<String> = [
+            "razdor-1.0.1.apk",
+            "razdor-1.0.2.apk",
+            "razdor-1.0.3.apk",
+            "razdor-1.0.3.apk.part",
+            "razdor-1.0.4.apk.part",
+            "razdor.apk.update",
+            "razdor-fetch",
+            "pictures.db",
+            "other.part",
+        ]
+        .map(String::from)
+        .to_vec();
+        assert_eq!(
+            stale_downloads(&names, Version(1, 0, 2)),
+            vec!["razdor-1.0.1.apk", "razdor-1.0.2.apk", "razdor-1.0.3.apk.part", "razdor-1.0.4.apk.part", "razdor.apk.update"]
+        );
+        // A newer APK that is already verified stays for the next start's install.
+        assert_eq!(stale_downloads(&["razdor-1.0.3.apk".to_string()], Version(1, 0, 2)), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_download_is_reused_only_when_its_sum_is_the_releases() {
+        let want = sha256_hex(b"apk bytes");
+        assert!(reuse_download(Some(&want), &want));
+        assert!(!reuse_download(Some(&sha256_hex(b"apk bytes!")), &want));
+        assert!(!reuse_download(None, &want));
+    }
+
+    #[test]
+    fn the_folder_is_cleared_of_stale_downloads_at_start() {
+        let dir = std::env::temp_dir().join(format!("razdor-downloads-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in ["razdor-1.0.1.apk", "razdor-1.0.2.apk.part", "razdor-1.0.3.apk", "razdor.apk.update", "pictures.db"] {
+            std::fs::write(dir.join(name), b"x").unwrap();
+        }
+        clear_downloads(&dir, Version(1, 0, 2));
+        let mut left: Vec<String> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        left.sort();
+        assert_eq!(left, vec!["pictures.db", "razdor-1.0.3.apk"]);
+        // The installed APK goes by its version; another version's file stays.
+        remove_apk(&dir, Version(1, 0, 3));
+        remove_apk(&dir, Version(9, 9, 9));
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

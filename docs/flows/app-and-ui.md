@@ -62,7 +62,7 @@ the poll (`App::mobile_install_poll`, `ui::mobile`: the `RECHECK` / `NEXT_POLL` 
 look for the install, `storage_granted` = always true on iOS) are shared with Android; the JNI parts
 stay in `ui::android` (the shared helpers in `src/jni.rs`). The on-screen keyboard is on for both (`widgets::set_keyboard`). The
 update window (`ui/update_view.rs`) offers a release on the phones too: Android installs it through the system
-installer (`update::poll_installer` takes its report each frame: a cancelled session brings the offer back, a failed one shows why), iOS opens the release page; the Discord link opens through `ui::mobile::open_url` (see the main menu above). `ui/script_font.rs` skips the fontconfig lookup on iOS, as on Android.
+installer (`update::poll_installer` takes its report each frame: a cancelled session brings the offer back, a failed one shows why; the APK is kept as `razdor-<X.Y.Z>.apk` in the cache folder, reused by the next try, removed after a successful install and at start when it is not newer than the running version), iOS opens the release page; the Discord link opens through `ui::mobile::open_url` (see the main menu above). `ui/script_font.rs` skips the fontconfig lookup on iOS, as on Android.
 
 The APK is built by `scripts/dist-android.sh` (cargo-quad-apk, pinned in its header; NDK 29;
 see `[package.metadata.android]` in `Cargo.toml`). The launcher icon is `android/res/mipmap-*/ic_launcher.png`
