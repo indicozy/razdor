@@ -778,6 +778,13 @@ fn figure_rect(r: Rect, w: f32, h: f32, k: f32) -> Rect {
     Rect::new(r.x + (r.w - w) / 2.0, r.y + (FIGURE_BOX * s - h) / 2.0, w, h)
 }
 
+/// Where the figure, `w`×`h` in the picture's own pixels at `s` screen px each, stands centred in
+/// the band's picture half `r` (Razdor's stacked band, not parity; the landscape keeps `figure_rect`).
+fn band_figure_rect(r: Rect, w: f32, h: f32, s: f32) -> Rect {
+    let (w, h) = (w * s, h * s);
+    Rect::new(r.x + (r.w - w) / 2.0, r.y + (r.h - h) / 2.0, w, h)
+}
+
 /// A placeholder figure: a dark sepia silhouette.
 fn silhouette(r: Rect) {
     let c = Color::new(0.30, 0.18, 0.08, 0.55);
@@ -907,9 +914,11 @@ fn draw_band_in_face(assets: &Assets, content: &Content, band: Rect, s: &Sheet, 
     let (pic, txt) = window_layout::band_halves(band);
     // Screen px per design px of the figure and of the worn-item slots.
     let fig = FIGURE_SCALE * band.h / COLUMN_H;
+    // Razdor's phone choice, not parity: the figure is centred in the picture half of the band
+    // (its height), not in the landscape's 436 px box from the top, which left it high in the band.
     match assets.figure(s.kind) {
-        Some(t) => chrome::tex(&t, figure_rect(pic, t.width(), t.height(), fig / FIGURE_SCALE), WHITE),
-        None => silhouette(figure_rect(pic, 0.6 * pic.w / fig, 0.95 * FIGURE_BOX, fig / FIGURE_SCALE)),
+        Some(t) => chrome::tex(&t, band_figure_rect(pic, t.width(), t.height(), fig), WHITE),
+        None => silhouette(band_figure_rect(pic, 0.6 * pic.w / fig, 0.95 * FIGURE_BOX, fig)),
     }
     let clicked = worn_slots(assets, content, slot_rects_at(pic, fig), s, slots, hover);
     // The original's px on the text half (the column's px is its width over the same 262), scaled
@@ -1116,6 +1125,22 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, background: Rect, s
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The stacked band's figure stands inside its picture half and is centred in it both ways
+    /// (a player's phone report: the figure sat in the frame's top-left, not centred).
+    #[test]
+    fn the_band_figure_is_inside_its_parchment_and_centred() {
+        let band = Rect::new(4.0, 300.0, 586.0 * 2.0, 420.0 * 2.0);
+        let (pic, _) = window_layout::band_halves(band);
+        let fig = FIGURE_SCALE * band.h / COLUMN_H;
+        for (w, h) in [(120.0, 300.0), (60.0, 90.0), (200.0, 500.0)] {
+            let r = band_figure_rect(pic, w, h, fig);
+            assert!(r.x >= pic.x && r.right() <= pic.right(), "{r:?} inside the picture half {pic:?}");
+            assert!(r.y >= pic.y && r.bottom() <= pic.bottom(), "{r:?} inside the picture half {pic:?}");
+            assert!((r.x + r.w / 2.0 - (pic.x + pic.w / 2.0)).abs() < 0.5, "horizontally centred");
+            assert!((r.y + r.h / 2.0 - (pic.y + pic.h / 2.0)).abs() < 0.5, "vertically centred");
+        }
+    }
 
     /// A band row's text starts after its icon: a narrow indent moves the text right so it clears
     /// the icon's right edge (41 px) by 3 px; a wide indent keeps the original's look.
