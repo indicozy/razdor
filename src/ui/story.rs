@@ -90,9 +90,8 @@ pub fn event_dialog(game: &Game, id: EventId, asking: bool) -> Dialog {
     d
 }
 
-/// Puts an outcome on screen: a dialog, a question, a notice on the dialog just queued (or
-/// the message line).
-pub fn show(game: &Game, o: &EventOutcome, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) {
+/// Puts an outcome on screen: a dialog, a question, a quest line on the dialog just queued.
+pub fn show(game: &Game, o: &EventOutcome, dialogs: &mut VecDeque<Dialog>) {
     match *o {
         EventOutcome::Fired { event, message: true } => dialogs.push_back(event_dialog(game, event, false)),
         EventOutcome::Question(id) => dialogs.push_back(event_dialog(game, id, true)),
@@ -103,15 +102,13 @@ pub fn show(game: &Game, o: &EventOutcome, message: &mut Option<String>, dialogs
                 d.lost = items.iter().map(|&a| ItemId(a as u32)).collect();
             }
         }
-        EventOutcome::QuestAdded(id) => notice(&quest_line("AddQuest", QUEST_ADDED), Some(id), message, dialogs),
-        EventOutcome::QuestCompleted(_) => notice(&quest_line("DelQuest", QUEST_COMPLETED), None, message, dialogs),
+        EventOutcome::QuestAdded(id) => notice(&quest_line("AddQuest", QUEST_ADDED), id, dialogs),
+        EventOutcome::QuestCompleted { by, .. } => notice(&quest_line("DelQuest", QUEST_COMPLETED), by, dialogs),
         EventOutcome::LoopGuard => razdor::diag!("scenario events: loop guard reached"),
         EventOutcome::Fired { .. } | EventOutcome::Declined(_) | EventOutcome::Victory(_) | EventOutcome::Defeat(_) => {}
     }
 }
 
-/// The notice goes on the last event dialog queued (the event that gave or closed the
-/// quest), if it is that one; the message line shows it too.
 /// The event window's quest line: `[Event] AddQuest` («Новая запись добавлена в дневник
 /// героя!») or `DelQuest` from the install, as 0x4a8ae8 sets it (0x4a8de4, 0x4a8e12); Razdor's
 /// own wording in English or without the install's text.
@@ -120,15 +117,15 @@ fn quest_line(key: &str, ours: &'static str) -> String {
     t.unwrap_or_else(|| tr(ours).to_string())
 }
 
-/// The quest line goes under the event's window, as the original's (0x4a8ae8); the map's
-/// own toast only when no window shows it (the original has no toast).
-fn notice(line: &str, event: Option<EventId>, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) {
-    if let Some(d) = dialogs.back_mut().filter(|d| d.event.is_some() && !d.question && (event.is_none() || d.event == event)) {
+/// The quest line goes under the event's window, as the original's (0x4a8ae8, 0x4a8e12): on the
+/// dialog just queued, if it is the window of `event` (the one that gave or closed the quest)
+/// and not a question. Otherwise it is dropped; there is no message-line fallback, the
+/// original has none (a silent event has no window to carry it).
+fn notice(line: &str, event: EventId, dialogs: &mut VecDeque<Dialog>) {
+    if let Some(d) = dialogs.back_mut().filter(|d| d.event == Some(event) && !d.question) {
         let quest = [quest_line("AddQuest", QUEST_ADDED), quest_line("DelQuest", QUEST_COMPLETED)];
         d.notice = quest_notice(d.notice.take(), line, &quest);
-        return;
     }
-    *message = Some(line.to_string());
 }
 
 /// The window's notice after quest line `line` (`quest`: the added and the completed line).
@@ -191,6 +188,18 @@ mod tests {
         assert_eq!(quest_notice(Some("added".into()), "done", &q).as_deref(), Some("done"));
         assert_eq!(quest_notice(Some("done".into()), "added", &q).as_deref(), Some("done"), "whatever the order");
         assert_eq!(quest_notice(Some("other".into()), "done", &q).as_deref(), Some("other   done"));
+    }
+
+    /// The quest line goes on the window of the event that gave or closed the quest, and on no
+    /// other: a closing event with no window of its own leaves the dialogs alone (no toast).
+    #[test]
+    fn a_quest_line_only_goes_on_the_window_of_the_event_that_gave_or_closed_the_quest() {
+        let game = Game::new(std::sync::Arc::new(razdor::rules::content::Content::builtin()), razdor::rules::content::HeroClass::Knight);
+        let mut dialogs = VecDeque::from([Dialog { event: Some(5), ..Dialog::new("window") }]);
+        show(&game, &EventOutcome::QuestCompleted { quest: 1, by: 7 }, &mut dialogs);
+        assert_eq!(dialogs[0].notice, None, "another event's closing leaves this window alone");
+        show(&game, &EventOutcome::QuestCompleted { quest: 1, by: 5 }, &mut dialogs);
+        assert!(dialogs[0].notice.is_some(), "the closing event's own window carries the line");
     }
 
     #[test]

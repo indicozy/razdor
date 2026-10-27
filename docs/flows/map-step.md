@@ -152,6 +152,11 @@ is open in the rules at once, so the fog layer draws them as before (`Game::unsh
 
 - *Window vs silent events.* Only window events stop a walk, a battle or a wait. Check
   `EventOutcome::Fired { message }` before treating a firing as "something happened" (6928d9d).
+- *Quest outcomes never stop a walk on their own.* `QuestAdded` and `QuestCompleted` do not
+  make `needs_reading`; the quest line is on the event's window, and a silent event that closes a
+  quest finishes at once with no window (0x4a7a40, 0x4a8e12). A closing event that fires again
+  repeats nothing in the diary (`History::completed_last`). Test
+  `a_silent_event_closing_a_quest_again_neither_stops_the_walk_nor_repeats_the_diary_entry`.
 - *Order inside a step.* The check of the cell ahead comes before the move; AI contact comes after
   the time passed. An attack shown before the step's animation ends is a bug (test
   `an_attack_is_shown_after_the_step_that_brought_it_has_played`).

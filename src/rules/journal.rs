@@ -74,6 +74,17 @@ impl History {
         self.entries.push(e);
     }
 
+    /// Whether the quest's latest entry of this chapter is its completion: a closing event that
+    /// fires again, while the quest is still closed, adds nothing (a quest received again since
+    /// is a new entry, and its next completion is recorded).
+    pub fn completed_last(&self, quest: EventId) -> bool {
+        self.entries
+            .iter()
+            .rev()
+            .find(|e| e.chapter == self.chapter && e.event == quest && matches!(e.kind, EntryKind::Quest | EntryKind::Completed))
+            .is_some_and(|e| e.kind == EntryKind::Completed)
+    }
+
     /// Entries of `kind`, newest first.
     pub fn newest(&self, kind: EntryKind) -> impl Iterator<Item = &Entry> {
         self.entries.iter().rev().filter(move |e| e.kind == kind)
@@ -187,7 +198,10 @@ impl Game {
         for o in out {
             let (kind, id) = match *o {
                 EventOutcome::QuestAdded(id) => (EntryKind::Quest, id),
-                EventOutcome::QuestCompleted(id) => (EntryKind::Completed, id),
+                // A completion is recorded once: a silent event that closes the quest again
+                // (the original finishes it at once, 0x4a7a40) repeats nothing in the diary.
+                EventOutcome::QuestCompleted { quest, .. } if self.journal.completed_last(quest) => continue,
+                EventOutcome::QuestCompleted { quest, .. } => (EntryKind::Completed, quest),
                 EventOutcome::Fired { event, message: true } => {
                     match self.script().and_then(|s| s.event(event)).and_then(|e| e.kind()) {
                         // A quest's text is its journal entry.
