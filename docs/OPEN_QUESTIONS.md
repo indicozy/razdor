@@ -8,6 +8,16 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **In-game windows sideways: the base scale is taller than the space above the bar** (2026-10-27, a
+  player's report, 1365). On a 2400×1080 phone the base scale is 1.5 (`chrome::fit_k`), and the
+  advanced settings («Ещё…», 900×650) are 15 px taller than the space above the bar at it; the title
+  rule keeps the base as its floor (`sideways_title_k`, `base.max(...)`), so the in-game window
+  overlaps the bar by about 15 px. The main menu has no bar there, so it fits. Not changed: a fix needs
+  the floor or the window's layout for a bar. Test: `the_in_game_windows_with_a_title_twin_fit_the_safe_area_above_the_bar` (the window is left out there).
+- **In-game save and load books sideways: text under 12 sp** (2026-10-27, text-size check, `phone-save-dp-landscape`,
+  `phone-load-dp-landscape`). At the height-limited fit the book's titles and buttons measure 11.9 sp and its
+  rows 9.7 sp (7.3 sp before 1365, where the window was smaller). The bar's labels (7.3 sp) are as before.
+  Not changed: raising the book's text is a text-size decision for the owner (`display::text_base`).
 - **A noon falling on the step that enters a building with a question** (2026-10-27, a player's
   report, Другой берег, «В Таверне #4»). The building's local question is in the same scan as the
   noon when the walk's last step enters it (world.md §7.2, events.md §2 «Noon»): the question takes

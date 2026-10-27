@@ -360,9 +360,9 @@ impl Book {
         // the map the original centres it over the view above the bottom bar, as its other
         // map windows (its in-game load and save at y 104 of 768).
         let y = book_top(screen_height(), super::chrome::bar_height(), h, k, over_map);
-        // On a phone held upright the title's load window spans the width between the top inset
-        // and the footer (`window_layout::title_rect`), and the window over the map the width
-        // between the inset and the bar (`window_layout::game_rect`); the old placements (the
+        // On a phone the title's load window spans the width between the top inset and the footer
+        // (`window_layout::title_rect`), and the window over the map the width between the inset and
+        // the bar (`window_layout::over_map_rect`; sideways, the title's fit above the bar); the old placements (the
         // video's y 190 on the title, the view's centre over the map) are the fallback.
         let win = super::window_layout::window_rect(over_map, (Book::W, Book::H)).unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, y, w, h));
         // Above the on-screen keyboard while its name field is typed in (`window_layout::keyboard_lifted`).
@@ -645,8 +645,9 @@ const PLACEHOLDER_INK: [u8; 3] = [150, 150, 150];
 /// anew)"; a click on a save takes its name to replace it, typing edits the name.
 pub fn save_screen(game: &Game, assets: &Assets, view: &mut SaveView, message: &mut Option<String>) -> Option<Screen> {
     world_view::backdrop(game, assets);
-    // The save window at its own scale on a phone held upright (`window_layout::game_scale`).
-    let _scale = super::window_layout::game_scale((Book::W, Book::H));
+    // The save window at its own scale on a phone (`window_layout::over_map_scale`: upright between the
+    // inset and the bar, sideways as the main menu's load window).
+    let _scale = super::window_layout::over_map_scale((Book::W, Book::H));
     let (book, closed) = Book::at(&own("SaveGame", "Title", n_("Save the game")), true);
     book.page(&own("SaveGame", "GameName", n_("Name of the saved game")), &own("SaveGame", "ScenarioName", n_("Name of the scenario")));
     // Held Backspace repeats, as in the original's edit box (0x47a624, 0x475748); the caret,
@@ -723,8 +724,8 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     let previously_blocked = input_blocked();
     if asking { set_input_blocked(true); }
     let over_map = game.is_some() && view.back != Back::Title;
-    // The load window at its own scale on a phone held upright: the title's (`window_layout::title_scale`)
-    // or the one over the map (`window_layout::game_scale`).
+    // The load window at its own scale on a phone: the title's (`window_layout::title_scale`) or the one
+    // over the map (`window_layout::over_map_scale`, the same size as the title's when held sideways).
     let _scale = super::window_layout::window_scale(over_map, (Book::W, Book::H));
     let (book, closed) = Book::at(&own("LoadGame", "Title", n_("Load a saved game")), over_map);
     book.page(&own("LoadGame", "GameName", n_("Name of the saved game")), &own("LoadGame", "ScenarioName", n_("Name of the scenario")));

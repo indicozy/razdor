@@ -784,11 +784,11 @@ fn window(title: &str, w: f32, h: f32) -> (Rect, bool) {
 
 /// A window over the map, centred over the view above the bottom bar, as the original's map
 /// windows are (over its 1024×682 view), its foot never on the bar. On a phone held upright it
-/// is centred between the top inset and the bar at its own scale (`window_layout::game_rect`,
+/// is centred between the top inset and the bar at its own scale (`window_layout::over_map_rect`,
 /// the caller's `window_layout::window_scale` guard).
 fn map_window(title: &str, w: f32, h: f32) -> (Rect, bool) {
     let k = chrome::k();
-    let r = window_layout::game_rect((w, h)).unwrap_or_else(|| {
+    let r = window_layout::over_map_rect((w, h)).unwrap_or_else(|| {
         let (w, h) = (w * k, h * k);
         let view = screen_height() - chrome::bar_height();
         Rect::new((screen_width() - w) / 2.0, ((view - h) / 2.0).max(0.0), w, h)
@@ -1488,8 +1488,8 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     // The rows below depend on the phone's own: see `options_h`.
     let touch_row = super::touchpad::MOBILE;
     let orientation_row = cfg!(target_os = "android");
-    // In game on a phone held upright, the window at its own scale (`map_window`); the title's is set by `options`.
-    let _scale = over_map.then(|| window_layout::game_scale((594.0, h)));
+    // In game on a phone, the window at its own scale (`map_window`, `window_layout::over_map_scale`); the title's is set by `options`.
+    let _scale = over_map.then(|| window_layout::over_map_scale((594.0, h)));
     let (inner, closed) = if over_map { map_window(&title, 594.0, h) } else { window(&title, 594.0, h) };
     let k = chrome::k();
     let outer = Rect::new(inner.x - 2.0 * k, inner.y - (26.0 * k).round() - 1.0, 594.0 * k, h * k);

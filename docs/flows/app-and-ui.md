@@ -255,15 +255,17 @@ per dp, fitted to the screen less the safe area and the height above the bar, th
 the scale it has and `title_rect` is `None`, so nothing changes. The in-game windows over the map get the same treatment on a phone held upright, with their own
 rectangle: `window_layout::portrait_game` (pure, with unit tests) fits the window between the top safe inset
 and the top of the bottom bar (`chrome::bar_height`, at the interface scale, 8 px above it), not the footer;
-`window_layout::game_scale` / `game_rect` (and `window_scale` / `window_rect`, which pick the title or the
-game variant by `in_game`) are the guard and the placement. They cover the settings window (its guard is set
-in `options_window` over the map), «Ещё…» (`advanced_window`), the keys window (`keys_window`), the save window
-(`save_screen`, the name field's keyboard lift applies to the scaled rect), the load window (`load_screen`), the
-game menu's art window (`saves::exit_window`, `exit_dialog`, at the art's 634×516 px scaled by `opx`), and
-`map_window`, which centres them over the map. The map and the bar under them are drawn at the interface scale
+`window_layout::game_scale` / `game_rect` are the guard and the placement of the windows over the map that have no
+title twin (the game menu's art window: `saves::exit_window`, `exit_dialog`, at the art's 634×516 px scaled by `opx`;
+the spellbook; the battle's stacked window). The windows over the map that have a title twin take `window_layout::over_map_scale`
+/ `over_map_rect` (`window_scale` / `window_rect` pick them by `in_game`): the settings window (its guard is set in
+`options_window` over the map), «Ещё…» (`advanced_window`), the keys window (`keys_window`), the save window (`save_screen`,
+the name field's keyboard lift applies to the scaled rect), the load window (`load_screen`), and `map_window`, which
+centres them over the map. Sideways on a phone these take the title's rule (`window_layout::sideways_window`, the same
+scale and rectangle as the main menu's window, a phone choice: the windows were small in landscape, playtest 1365). The map and the bar under them are drawn at the interface scale
 (`world_view::window_backdrop`, `backdrop_lit`). The help overlay (F1, «Клавиши» in game, `hotkeys::help_overlay`)
 already spans the phone's width; on a phone with a bar it stands between the top inset and the bar (`has_bar`).
-Landscape and desktop are byte-identical (`window_layout::portrait_game` is None, the old placements stay).
+Desktop is byte-identical, and so is landscape for the windows with no title twin (`game_rect` is None there, the old placements stay).
 The exit windows (the game's «Выход из игры» and the battle's `saves::battle_exit_dialog`) have their own
 scale: upright on a phone, `window_layout::game_scale`; sideways on a phone, `window_layout::sideways_exit_k`,
 the large-window scale (`display::popup_scale`, one original px per dp, fitted to the screen less the safe

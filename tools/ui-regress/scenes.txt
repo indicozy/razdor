@@ -133,3 +133,9 @@ phone-hall-dp-portrait | building:РК1-Начало пути:0 | 1080x2160 | RA
 phone-hall-dp-landscape | building:РК1-Начало пути:0 | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1
 phone-options-dp-portrait | options | 1080x2160 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1
 phone-options-dp-landscape | options | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1
+# Phones held sideways: the in-game save, load and settings windows over the map at a phone's dp and
+# large windows, as the main menu's (the title's rule, a phone choice); the map's load is the book opened from the bar
+phone-save-dp-landscape | save:РК1-Начало пути | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1
+phone-load-dp-landscape | map:РК1-Начало пути | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1;RAZDOR_SCENE_OPEN=3:load
+phone-settings-dp-landscape | settings:РК1-Начало пути | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1
+phone-settings-advanced-dp-landscape | settings:РК1-Начало пути:advanced | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1
