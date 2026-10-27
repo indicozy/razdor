@@ -1825,7 +1825,15 @@ pub fn close_button(x: f32, y: f32, s: f32, red: bool) -> bool {
     // The cross is drawn as it always was; a phone's click area is finger-sized (`touch_hit`). The
     // title strip ends 3 px under the cross (`title_bar_styled`: the cross at 3 px, the strip's height less 6).
     let k = k();
-    let hit = touch_hit(Rect::new(x, y, s, s), y + s + 3.0 * k, super::display::dp_px(), (screen_width(), screen_height()));
+    let cross = Rect::new(x, y, s, s);
+    let hit = touch_hit(cross, y + s + 3.0 * k, super::display::dp_px(), (screen_width(), screen_height()));
+    close_button_at(cross, hit, red)
+}
+
+/// A close cross drawn at `cross` whose click area is `hit` (a phone's title cross is its own click
+/// area: [`title_bar_styled`]); true when clicked.
+fn close_button_at(cross: Rect, hit: Rect, red: bool) -> bool {
+    let (x, y, s) = (cross.x, cross.y, cross.w);
     let (hover, down, pressed) = super::widgets::button_state(hit, true);
     let name = match (red, down) {
         (true, false) => "CloseButtonRed-Up",
@@ -1862,6 +1870,53 @@ pub fn touch_hit(cross: Rect, strip_bottom: f32, dp: Option<f32>, screen: (f32, 
     Rect::new(x, strip_bottom - h, side, h)
 }
 
+/// A phone's close box inside the window `win` (a phone choice, not in the original): a square of
+/// `dp`-scaled 44 dp at its top right, 4 px in and 3 px down, the battle's stacked close row.
+pub fn close_box_inside(win: Rect, k: f32, dp: f32) -> Rect {
+    let side = (CLOSE_DP * dp).round();
+    Rect::new(win.right() - side - 4.0 * k, win.y + 3.0 * k, side, side)
+}
+
+/// A phone's close box beside the window `win`'s top right corner (a phone choice, not in the
+/// original): the same 44 dp square just right of the corner (4 px gap, top aligned) when it fits
+/// left of the screen's safe right edge `safe_right` and below the safe top `safe_top`, so it covers
+/// nothing of the window's content. Else above the corner when that is below `safe_top`; else inside
+/// ([`close_box_inside`]).
+pub fn close_box_beside(win: Rect, k: f32, dp: f32, safe_right: f32, safe_top: f32) -> Rect {
+    let side = (CLOSE_DP * dp).round();
+    let beside = Rect::new(win.right() + 4.0 * k, win.y, side, side);
+    if beside.right() <= safe_right && beside.y >= safe_top {
+        return beside;
+    }
+    let above = Rect::new(win.right() - side - 4.0 * k, win.y - side - 4.0 * k, side, side);
+    if above.y >= safe_top {
+        return above;
+    }
+    close_box_inside(win, k, dp)
+}
+
+/// The close cross of a title bar whose strip is `strip` (the window's top, its width). On the
+/// desktop (`dp` None) the cross as it always was: the strip's height less 6 px, 3 px down, 4 px in
+/// from the right. On a phone the 44 dp box of [`close_box_beside`].
+pub fn title_close_cross(strip: Rect, k: f32, dp: Option<f32>, safe_right: f32, safe_top: f32) -> Rect {
+    match dp.filter(|d| *d > 0.0) {
+        Some(dp) => close_box_beside(strip, k, dp, safe_right, safe_top),
+        None => {
+            let s = strip.h - 6.0 * k;
+            Rect::new(strip.right() - s - 4.0 * k, strip.y + 3.0 * k, s, s)
+        }
+    }
+}
+
+/// The title's room (its width, centred) kept clear of a close cross that sits inside the strip:
+/// `room` less the cross's side and gap on each side. A cross outside the strip leaves `room` as it is.
+fn room_clear_of(room: f32, strip: Rect, cross: Rect, k: f32) -> f32 {
+    if cross.x < strip.x || cross.right() > strip.right() {
+        return room;
+    }
+    room.min(strip.w - 2.0 * (strip.right() - cross.x) - 8.0 * k)
+}
+
 /// Title bar of a window: the window's own skin, the title centred; `ornate` puts the
 /// corner ornaments on a wide one, including town and building windows.
 /// Returns true when its close box (if any) was clicked.
@@ -1892,7 +1947,16 @@ fn title_bar_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bo
         }
     }
     let color = title_color.unwrap_or(if skin == Skin::Red { GOLD } else { CREAM });
+    // A phone's cross is a 44 dp box (a phone choice, not in the original): a box inside the strip keeps
+    // the title clear of it; the desktop's cross is narrower than the room left by the formula.
+    let phone = super::display::dp_px();
+    let safe = super::display::safe_area();
+    let cross = closable.then(|| title_close_cross(r, k, phone, screen_width() - safe.right, safe.top));
     let room = if ornate { r.w - 300.0 * k } else { r.w - 2.0 * r.h - 8.0 * k };
+    let room = match cross {
+        Some(c) if phone.is_some() => room_clear_of(room, r, c, k),
+        _ => room,
+    };
     // The title's size is the one asked for (Razdor's text size), not the interface scale's native.
     let block = || super::dt_font::with_face(face, || {
         // A wide face shrinks to fit first (at most to 70%); what still does not fit is cut.
@@ -1902,11 +1966,12 @@ fn title_bar_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bo
     });
     // The original's size (factor 1) is drawn as it always was; a grown title takes its size.
     if factor == FIXED_TITLE { block() } else { super::dt_font::with_legacy_metrics(block) }
-    if closable {
-        let s = r.h - 6.0 * k;
-        return close_button(r.x + r.w - s - 4.0 * k, r.y + 3.0 * k, s, skin == Skin::Red);
+    match cross {
+        // A phone's box is its own click area (finger-sized, never smaller than its drawn cross).
+        Some(c) if phone.is_some() => close_button_at(c, c, skin == Skin::Red),
+        Some(c) => close_button(c.x, c.y, c.w, skin == Skin::Red),
+        None => false,
     }
-    false
 }
 
 /// A modal window: background, silver frame, title bar. Returns the area below the title
@@ -2764,6 +2829,38 @@ mod tests {
         assert!(top.y >= 0.0 && top.bottom() <= 60.0 + 1e-3, "cut at the top: {top:?}");
         // The desktop keeps the cross as its click area.
         assert_eq!(touch_hit(cross, strip_bottom, None, (1920.0, 1080.0)), cross);
+    }
+
+    /// Razdor's phone choice, not in the original: a phone's title cross is a 44 dp box, beside the
+    /// window's top right when it fits the safe area, else above it, else inside; the desktop keeps
+    /// the cross as it was (the strip less 6 px, 3 px down, 4 px in).
+    #[test]
+    fn a_phones_title_cross_is_a_44_dp_box_beside_above_or_inside_as_the_room_allows() {
+        let dp = 2.75;
+        let side = (44.0f32 * dp).round();
+        let strip = Rect::new(100.0, 200.0, 500.0, 26.0);
+        let beside = title_close_cross(strip, 1.0, Some(dp), 1000.0, 0.0);
+        assert_eq!(beside, Rect::new(604.0, 200.0, side, side), "beside the top right");
+        // No room right of the window: above it, when that is below the safe top.
+        let above = title_close_cross(strip, 1.0, Some(dp), 600.0, 0.0);
+        assert_eq!(above, Rect::new(600.0 - side - 4.0, 200.0 - side - 4.0, side, side), "above");
+        // No room above either: inside, at the top right, 3 px down.
+        let inside = title_close_cross(strip, 1.0, Some(dp), 600.0, 150.0);
+        assert_eq!(inside, Rect::new(600.0 - side - 4.0, 203.0, side, side), "inside");
+        assert!(inside.w >= 44.0 * dp && inside.h >= 44.0 * dp, "{inside:?}");
+        // The desktop: the old cross.
+        assert_eq!(title_close_cross(strip, 1.0, None, 1000.0, 0.0), Rect::new(576.0, 203.0, 20.0, 20.0));
+    }
+
+    /// The title stays clear of a phone's cross inside the strip: centred, its ends are 4 px short of
+    /// the cross; a cross outside the strip leaves the room as it is.
+    #[test]
+    fn a_title_keeps_clear_of_a_phones_cross_inside_the_strip() {
+        let strip = Rect::new(0.0, 0.0, 600.0, 40.0);
+        let cross = Rect::new(600.0 - 121.0 - 4.0, 3.0, 121.0, 121.0);
+        let room = room_clear_of(600.0, strip, cross, 1.0);
+        assert!(300.0 + room / 2.0 <= cross.x - 4.0 + 1e-3, "room {room} under the cross at {cross:?}");
+        assert_eq!(room_clear_of(600.0, strip, Rect::new(610.0, 0.0, 121.0, 121.0), 1.0), 600.0);
     }
 
     /// A fixed-layout window (the hero, army, building and settings windows, the save and the

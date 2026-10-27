@@ -80,30 +80,6 @@ struct Layout {
     stacked: bool,
 }
 
-/// A phone's close box: a 44 dp square at the window's top right, in the close row.
-fn close_box(win: Rect, k: f32, dp: f32) -> Rect {
-    let side = (CLOSE_DP * dp).round();
-    Rect::new(win.right() - side - 4.0 * k, win.y + 3.0 * k, side, side)
-}
-
-/// A phone's close box in landscape: the same square just right of the window's top right corner
-/// (4 px gap, top aligned), when it fits left of the screen's safe right edge `safe_right` and
-/// below the safe top `safe_top`, so it does not cover the enemy's top right card. Else above the
-/// window's top right when that is below the safe top; else the inside one ([`close_box`]).
-/// Razdor's phone choice, not parity.
-fn landscape_close_box(win: Rect, k: f32, dp: f32, safe_right: f32, safe_top: f32) -> Rect {
-    let side = (CLOSE_DP * dp).round();
-    let beside = Rect::new(win.right() + 4.0 * k, win.y, side, side);
-    if beside.right() <= safe_right && beside.y >= safe_top {
-        return beside;
-    }
-    let above = Rect::new(win.right() - side - 4.0 * k, win.y - side - 4.0 * k, side, side);
-    if above.y >= safe_top {
-        return above;
-    }
-    close_box(win, k, dp)
-}
-
 /// The stacked battle window's design width: 590 px, as the other stacked windows.
 const STACK_W: f32 = 590.0;
 /// The stacked rows, design px from the window's top: the close row over the band (the close box
@@ -116,8 +92,6 @@ const STACK_GRID_GAP: f32 = 9.0;
 const STRIP_H: f32 = 20.0;
 const STRIP_GAP: f32 = 10.0;
 const STACK_BOTTOM: f32 = 8.0;
-/// The stacked close box's side in dp: the 44 dp touch target.
-const CLOSE_DP: f32 = 44.0;
 
 /// The card's scale on the formation's lines and columns (the landscape's rule, kept as it is).
 fn card_scale(f: Formation) -> f32 {
@@ -159,7 +133,7 @@ impl Layout {
     /// The landscape window: 836×600 at `k`, centred over the view above the `bar` px bottom bar,
     /// the unit's column at the left and the formations on the right. On a phone (`dp`, as the
     /// stacked window's) the close box is the same finger-sized one, beside the window's top right
-    /// corner (see [`landscape_close_box`]; `safe_right` and `safe_top` are the screen's safe edges),
+    /// corner (see [`chrome::close_box_beside`]; `safe_right` and `safe_top` are the screen's safe edges),
     /// and the title bar's own cross is not drawn. Razdor's phone choice, not parity.
     fn landscape(k: f32, screen: (f32, f32), bar: f32, f: Formation, dp: Option<f32>, safe_right: f32, safe_top: f32) -> Layout {
         let (sw, sh) = screen;
@@ -175,7 +149,7 @@ impl Layout {
         let card = vec2(88.0 * c * k, 128.0 * c * k).round();
         let pitch = vec2(96.0 * c * k, 133.0 * c * k);
         let grid_w = f.display_cols() as f32 * pitch.x - 8.0 * c * k;
-        let close = dp.map(|dp| landscape_close_box(win, k, dp, safe_right, safe_top));
+        let close = dp.map(|dp| chrome::close_box_beside(win, k, dp, safe_right, safe_top));
         Layout { k, win, panel, quick, strip, card, pitch, grid_x: (rx + (rw - grid_w) / 2.0).round(), formation: f, close, stacked: false }
     }
 
@@ -191,7 +165,7 @@ impl Layout {
         let card = vec2(88.0 * c * k, 128.0 * c * k).round();
         let pitch = vec2(96.0 * c * k, 133.0 * c * k);
         let grid_w = f.display_cols() as f32 * pitch.x - 8.0 * c * k;
-        let close = close_box(win, k, dp);
+        let close = chrome::close_box_inside(win, k, dp);
         Layout { k, win, panel: band, quick, strip, card, pitch, grid_x: (strip.x + (strip.w - grid_w) / 2.0).round(), formation: f, close: Some(close), stacked: true }
     }
 
