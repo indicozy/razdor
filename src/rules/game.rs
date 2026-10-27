@@ -1592,13 +1592,23 @@ impl Game {
         self.enter_building(l, before != Some(l), events);
     }
 
+    /// Events the player has not read yet: the step's events still held for its animation
+    /// ([`Game::tick_shown`]), or a question waiting for its answer.
+    fn events_unread(&self) -> bool {
+        self.holds_events() || self.pending_question().is_some()
+    }
+
     /// The building he walked into while an event's window was open, once the windows are
     /// read (the event's OK, 0x4c206c → 0x4ab1ec: with no chained event, the building waiting
     /// at 0x4ed42c is entered, 0x4bbc84). The interface calls it when its last dialog closes;
     /// not while a fight is pending, nor when he no longer stands there.
     pub fn enter_waiting_building(&mut self) -> Vec<Event> {
         let mut events = Vec::new();
-        if self.foe.is_some() {
+        // The windows are not read while the step's events are still held for its animation
+        // (`tick_shown`), or a question waits for its answer: the building waits for them too
+        // (world.md §7.2, 0x4ed42c). The noon report of an earlier step can close while the
+        // arrival's question is still held, which entered the building before it.
+        if self.foe.is_some() || self.events_unread() {
             return events;
         }
         if let Some(l) = self.waiting_entry.take() {
@@ -1613,6 +1623,10 @@ impl Game {
     /// village rolls its offer and pays what has refilled since, as on arrival.
     pub fn reenter_building(&mut self) -> Vec<Event> {
         let mut events = Vec::new();
+        // Not while the step's events are unread (see [`Game::enter_waiting_building`]).
+        if self.events_unread() {
+            return events;
+        }
         if let Some(l) = self.location {
             self.enter_building(l, false, &mut events);
         }
