@@ -25,9 +25,8 @@ sidebar:
 
 ## Сообщество
 
-- [Discord «Времён раздора»](https://discord.gg/wmMksmWFDM): сообщество игры.
-- [Discord Razdor](https://discord.gg/cdTtYz5dH): вопросы о Razdor, сообщения об ошибках.
+- [Discord «Времён раздора»](https://discord.gg/cdTtYz5dH): сообщество игроков (не от Razdor). Там же вопросы о Razdor и сообщения об ошибках.
 
 :::note
-Знаете ещё сайт об игре? Напишите в Discord Razdor, и мы добавим его сюда.
+Знаете ещё сайт об игре? Напишите в Discord «Времён раздора», и мы добавим его сюда.
 :::

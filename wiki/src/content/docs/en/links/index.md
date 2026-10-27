@@ -25,9 +25,8 @@ This wiki is about Razdor. Other sites cover the game itself, its units, items a
 
 ## Community
 
-- [Discord Times Discord](https://discord.gg/wmMksmWFDM): the game's community (Russian).
-- [Razdor Discord](https://discord.gg/cdTtYz5dH): questions about Razdor, bug reports.
+- [Discord Times Discord](https://discord.gg/cdTtYz5dH): the players' community (Russian, not run by Razdor). Questions about Razdor and bug reports go there too.
 
 :::note
-Know another site about the game? Tell us in the Razdor Discord and we'll add it here.
+Know another site about the game? Tell us in the Discord Times Discord and we'll add it here.
 :::
