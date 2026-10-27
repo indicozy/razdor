@@ -1,15 +1,74 @@
 ---
-title: Главная
-description: Вики Razdor — открытого движка для «Времён раздора».
+title: Вики Razdor
+description: "Вики Razdor — открытого движка для «Времён раздора»: установка, уроки, отличия от оригинала, моды, инструменты, телефоны."
 template: splash
 hero:
-  title: Razdor — открытый движок для «Времён раздора»
-  tagline: Игра играет оригинальные сценарии по оригинальным правилам. Карты, данные, тексты и графика берутся из вашей установки «Времён раздора».
+  title: Вики Razdor
+  tagline: "Razdor — открытый движок для «Времён раздора». Он играет оригинальные сценарии и кампании по оригинальным правилам на Windows, Linux, macOS, Android и iOS, беря карты, тексты и графику из вашей копии игры."
+  image:
+    file: ../../assets/shots/title.webp
+    alt: Главное меню Razdor
   actions:
-    - text: Сайт Razdor
-      link: https://indicozy.github.io/razdor/
-      variant: secondary
-    - text: Скачать последнюю версию
-      link: https://github.com/indicozy/razdor/releases/latest
+    - text: С чего начать
+      link: /razdor/wiki/start/install-game/
+      icon: right-arrow
       variant: primary
+    - text: Скачать Razdor
+      link: https://github.com/indicozy/razdor/releases/latest
+      icon: external
+      variant: secondary
 ---
+
+import { Card, CardGrid, LinkCard, Steps } from '@astrojs/starlight/components';
+
+## Первые шаги
+
+<Steps>
+
+1. **Нужна своя копия «Времён раздора».** Razdor не содержит игру: он читает её файлы. Как её подготовить: [Установка игры](/razdor/wiki/start/install-game/).
+
+2. **Скачайте и запустите Razdor** рядом с игрой: [Установка Razdor](/razdor/wiki/start/install-razdor/). На телефоне: [Android](/razdor/wiki/phones/android/) или [iOS](/razdor/wiki/phones/ios/).
+
+3. **Освойтесь с экраном и управлением:** [Интерфейс](/razdor/wiki/tutorials/interface/) и [клавиши и геймпад](/razdor/wiki/tutorials/controls/).
+
+4. **Играйте.** Что Razdor умеет сверх оригинала: [Обзор возможностей](/razdor/wiki/differences/overview/).
+
+</Steps>
+
+## Разделы
+
+<CardGrid>
+	<Card title="Начало" icon="rocket">
+		Установка игры и Razdor, обновления, язык и шрифты.
+		[Открыть раздел →](/razdor/wiki/start/)
+	</Card>
+	<Card title="Уроки" icon="open-book">
+		Экран и окна, клавиши и геймпад, сохранения, быстрый и свой бой, отбор снаряжения.
+		[Открыть раздел →](/razdor/wiki/tutorials/)
+	</Card>
+	<Card title="Отличия от оригинала" icon="star">
+		Что Razdor добавляет к игре, экспериментальные правила, звук и музыка.
+		[Открыть раздел →](/razdor/wiki/differences/)
+	</Card>
+	<Card title="Моды" icon="puzzle">
+		Как поставить мод или патч из архива, свои спрайты.
+		[Открыть раздел →](/razdor/wiki/mods/)
+	</Card>
+	<Card title="Инструменты" icon="setting">
+		Редактор карт, переводчик карт, консоль читов.
+		[Открыть раздел →](/razdor/wiki/tools/)
+	</Card>
+	<Card title="Телефоны" icon="phone">
+		Razdor на Android и iOS: установка, доступ к файлам, жесты, обновления.
+		[Открыть раздел →](/razdor/wiki/phones/)
+	</Card>
+</CardGrid>
+
+## Часто нужно
+
+<CardGrid>
+	<LinkCard title="Поставить мод" description="Обновить игру из архива: Community Update, Evolution и другие." href="/razdor/wiki/mods/install-mod/" />
+	<LinkCard title="Где мои сохранения" description="Сохранение, загрузка и где лежат файлы." href="/razdor/wiki/tutorials/saves/" />
+	<LinkCard title="Частые вопросы" description="Игра не находится, ошибка, как сообщить о проблеме." href="/razdor/wiki/faq/" />
+	<LinkCard title="Другие сайты об игре" description="Юниты, предметы и карты — на вики и справочниках «Времён раздора»." href="/razdor/wiki/links/" />
+</CardGrid>

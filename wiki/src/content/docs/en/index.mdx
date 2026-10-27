@@ -1,15 +1,74 @@
 ---
-title: Home
-description: "The Razdor wiki: an open engine for Discord Times."
+title: Razdor wiki
+description: "The wiki of Razdor, an open engine for Discord Times: installing, tutorials, differences from the original, mods, tools, phones."
 template: splash
 hero:
-  title: Razdor — an open engine for Discord Times
-  tagline: Razdor plays the original scenarios by the original rules. Maps, data, texts and art are read from your own Discord Times install.
+  title: Razdor wiki
+  tagline: "Razdor is an open engine for Discord Times. It plays the original scenarios and campaigns by the original rules on Windows, Linux, macOS, Android and iOS, reading maps, texts and art from your own copy of the game."
+  image:
+    file: ../../../assets/shots/title.webp
+    alt: Razdor's main menu
   actions:
-    - text: Razdor website
-      link: https://indicozy.github.io/razdor/
-      variant: secondary
-    - text: Download the latest release
-      link: https://github.com/indicozy/razdor/releases/latest
+    - text: Get started
+      link: /razdor/wiki/en/start/install-game/
+      icon: right-arrow
       variant: primary
+    - text: Download Razdor
+      link: https://github.com/indicozy/razdor/releases/latest
+      icon: external
+      variant: secondary
 ---
+
+import { Card, CardGrid, LinkCard, Steps } from '@astrojs/starlight/components';
+
+## First steps
+
+<Steps>
+
+1. **You need your own copy of Discord Times.** Razdor does not include the game: it reads its files. How to prepare it: [Installing the game](/razdor/wiki/en/start/install-game/).
+
+2. **Download Razdor and run it** next to the game: [Installing Razdor](/razdor/wiki/en/start/install-razdor/). On a phone: [Android](/razdor/wiki/en/phones/android/) or [iOS](/razdor/wiki/en/phones/ios/).
+
+3. **Learn the screen and the controls:** [Interface](/razdor/wiki/en/tutorials/interface/) and [keys and gamepad](/razdor/wiki/en/tutorials/controls/).
+
+4. **Play.** What Razdor adds to the original: [Feature overview](/razdor/wiki/en/differences/overview/).
+
+</Steps>
+
+## Sections
+
+<CardGrid>
+	<Card title="Getting started" icon="rocket">
+		Installing the game and Razdor, updates, language and fonts.
+		[Open the section →](/razdor/wiki/en/start/)
+	</Card>
+	<Card title="Tutorials" icon="open-book">
+		The screen and windows, keys and gamepad, saves, quick and custom battle, gear search.
+		[Open the section →](/razdor/wiki/en/tutorials/)
+	</Card>
+	<Card title="Differences from the original" icon="star">
+		What Razdor adds to the game, experimental rules, sound and music.
+		[Open the section →](/razdor/wiki/en/differences/)
+	</Card>
+	<Card title="Mods" icon="puzzle">
+		Installing a mod or patch from an archive, custom sprites.
+		[Open the section →](/razdor/wiki/en/mods/)
+	</Card>
+	<Card title="Tools" icon="setting">
+		The map editor, the map translator, the cheat console.
+		[Open the section →](/razdor/wiki/en/tools/)
+	</Card>
+	<Card title="Phones" icon="phone">
+		Razdor on Android and iOS: installing, file access, gestures, updates.
+		[Open the section →](/razdor/wiki/en/phones/)
+	</Card>
+</CardGrid>
+
+## Often needed
+
+<CardGrid>
+	<LinkCard title="Install a mod" description="Update the game from an archive: Community Update, Evolution and others." href="/razdor/wiki/en/mods/install-mod/" />
+	<LinkCard title="Where are my saves" description="Saving, loading and where the files are." href="/razdor/wiki/en/tutorials/saves/" />
+	<LinkCard title="FAQ" description="The game is not found, an error, how to report a problem." href="/razdor/wiki/en/faq/" />
+	<LinkCard title="Other sites about the game" description="Units, items and maps: on the Discord Times wikis and references." href="/razdor/wiki/en/links/" />
+</CardGrid>
