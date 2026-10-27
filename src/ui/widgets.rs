@@ -794,6 +794,10 @@ pub fn text(s: &str, x: f32, y: f32, size: f32, color: Color) {
 
 /// [`text`] at `size` as it is (see [`measure_exact`]).
 pub fn text_exact(s: &str, x: f32, y: f32, size: f32, color: Color) {
+    if super::text_probe::on() {
+        let cap = measure_exact("Н", size).offset_y;
+        super::text_probe::record(s, x, y, measure_exact(s, size).width, size, cap);
+    }
     let color = super::typography::color(color);
     let drawn = super::dt_font::with_current(|f| {
         f.draw(s, x, y, size, color, &|run, px, py| {

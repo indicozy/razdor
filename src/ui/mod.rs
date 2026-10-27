@@ -39,6 +39,7 @@ pub mod spell_badges;
 pub mod spellbook;
 pub mod story;
 pub mod subtract16;
+pub mod text_probe;
 pub mod touchpad;
 pub mod terrain;
 pub mod text_edit;

@@ -170,6 +170,8 @@ async fn main() {
         if ui::snapshot::open_later(&mut app, frames) {
             opened = 6;
         }
+        // The text-size probe lists the texts of this frame (`RAZDOR_TEXT_PROBE`, off otherwise).
+        ui::text_probe::begin_frame();
         app.frame();
         // The FPS counter, the keyboard strip and the pointer stay where the screen is.
         ui::pan::end_frame();
@@ -188,6 +190,7 @@ async fn main() {
         ui::clock::tick();
         if let Some((path, n)) = &snapshot {
             if frames >= *n {
+                ui::text_probe::write();
                 get_screen_data().export_png(path);
                 exit_now(&mut app);
             }

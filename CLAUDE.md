@@ -15,6 +15,7 @@ are in `README.md` (Russian).
 - Lint: `cargo clippy --release`.
 - Release builds: `scripts/dist.sh` (Linux + Windows), `scripts/dist-macos.sh`.
 - Off-screen screens and profiling: the `offscreen-snapshot` skill.
+- Text size on phones (every text measured in sp, under 12 sp listed): the `text-size` skill.
 - UI regression check (renders the scene list off-screen, compares with the goldens outside the
   repo): `python3 -I tools/ui-regress/ui_regress.py run`; see `tools/ui-regress/README.md`.
 
@@ -95,6 +96,7 @@ are in `README.md` (Russian).
 | A player report has its `PLAYTEST_NOTES.md` entry and its backlog entry's status is current | review |
 | A change that alters a flow updates its `docs/flows/` file | review |
 | A UI change: the UI regression check run, its diffs reviewed, the changed references accepted | review |
+| A phone UI change: the text-size check run, no new text under 12 sp | review (`text-size` skill) |
 | A change to «Максимум»: `max_bench` run, its numbers compared, the baseline updated only for an intended improvement | `max_bench_does_not_regress` + review |
 | Parity commits are cherry-picked to `dt-original` and pushed (or listed in `docs/OPEN_QUESTIONS.md`) | review |
 | Unresolved questions are in `docs/OPEN_QUESTIONS.md`; settled ones moved to its Settled list | review |
@@ -133,6 +135,7 @@ are in `README.md` (Russian).
   (Ghidra, the original under Wine) and parity checks.
 - `.claude/skills/release/SKILL.md`: cutting a release.
 - `.claude/skills/offscreen-snapshot/SKILL.md`: screenshots and profiling without a window.
+- `.claude/skills/text-size/SKILL.md`: measuring text sizes on phone screens.
 - `docs/reference/original-mechanics/README.md`: the spec index.
 - `changelog/README.md`: changelog layout.
 - `CLAUDE.local.md` (not in git): this machine's own rules.

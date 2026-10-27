@@ -1420,6 +1420,9 @@ pub fn engraved_centered(s: &str, c: Vec2, (cap, max_w): (f32, f32), (rim, bold)
     let m = at(size);
     let x = (c.x - (m.width + bold) / 2.0).round();
     let y = (c.y + cap_per_size * size as f32 / 2.0).round();
+    if super::text_probe::on() {
+        super::text_probe::record(s, x, y, m.width, size as f32, cap_per_size * size as f32);
+    }
     let draw = |x: f32, y: f32, color: Color| {
         for dx in [0.0, bold] {
             draw_text_ex(s, x + dx, y, TextParams { font: font.as_ref(), font_size: size, color, ..Default::default() });
