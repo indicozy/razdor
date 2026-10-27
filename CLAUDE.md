@@ -115,7 +115,9 @@ are in `README.md` (Russian).
 ## When I say…
 
 - "note it": add to `docs/PLAYTEST_NOTES.md` only; don't fix yet.
-- "release" / "make a release": the `release` skill.
+- "release" / "make a release": the `release` skill. The Discord release post goes out together with
+  the release's start (right after the tag is pushed), without waiting for the release pipeline to
+  finish (the owner's decision, 2026-10-27).
 - "check reports" / "check discord": the `discord-reports` skill (bot via `tools/discord-mcp/`; posts only on approval, except the release announcement, which the `release` skill posts at once).
 - The owner tagging the bot in Discord (the owner is `indicozy` there; a message from them that
   mentions the bot): a request to Claude. While a session is on and sees it, act on it (as if

@@ -53,7 +53,8 @@ that system.
    platforms, the requirements, the install steps, the video when the owner gives a new one).
    Commit `Site: X.Y.Z …`, push as a fast-forward to `gh-pages` (never force), remove the worktree.
 8. Tell the owner: the version, the release link, what is in it (plain words), test results.
-9. Discord announcement, every release (if the `discord-reports` MCP server is connected):
+9. Discord announcement, every release (if the `discord-reports` MCP server is connected), done
+   right after step 5 (see below), before watching the pipeline:
    - Reports shipped: the reports backlog's `fixed` entries (`discord-reports` skill §3) whose
      commits are in this release; set each to `released X.Y.Z` in its report and in INDEX.
      `reports_reporters` gives their reporters (the backlog id is the number they're linked
@@ -63,8 +64,11 @@ that system.
      reporter once per line). No internals, no issue numbers needed.
    - Put the custom `:yes:` reaction (`yes:1125874482498773074`, `discord-reports` skill §4) on
      the messages of every report this release ships.
-   - Post it right away, as part of the release, once the release is published: `reports_post`
-     with `confirm=true`, no preview or approval needed (the owner's decision, 2026-10-22).
+   - Post it together with the release's start: right after the tag is pushed (step 5), without
+     waiting for the pipeline (the owner's decision, 2026-10-27; the release page appears at the
+     link when the pipeline ends). `reports_post` with `confirm=true`, no preview or approval
+     needed (the owner's decision, 2026-10-22). If the pipeline then fails, say so in a reply to
+     the post once it is fixed.
      Posting needs `DISCORD_ALLOW_POST=1`. Give the owner the post's link in the report back.
 
 Release notes are public at once: no personal data, nothing from the game.
