@@ -73,8 +73,9 @@ that system.
    - Post it together with the release's start: right after the tag is pushed (step 5), without
      waiting for the pipeline (the owner's decision, 2026-10-27; the release page appears at the
      link when the pipeline ends). `reports_post` with `confirm=true`, no preview or approval
-     needed (the owner's decision, 2026-10-22). If the pipeline then fails, say so in a reply to
-     the post once it is fixed.
+     needed (the owner's decision, 2026-10-22). **One post per release** (the owner's decision,
+     2026-10-27): no follow-up post or reply when the files are built or a pipeline job is rerun;
+     a failed pipeline is fixed quietly and reported to the owner only.
      Posting needs `DISCORD_ALLOW_POST=1`. Give the owner the post's link in the report back.
 
 Release notes are public at once: no personal data, nothing from the game.
