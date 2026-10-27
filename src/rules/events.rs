@@ -1081,6 +1081,14 @@ impl EventEngine {
         self.ended.as_ref()
     }
 
+    /// Marks an event as fired once, a Yes, at minute 0 (a test's stand-in for the earlier
+    /// events of a chain).
+    #[cfg(test)]
+    pub(crate) fn fired_for_test(&mut self, id: EventId) {
+        self.st_mut(id).times += 1;
+        self.st_mut(id).last_fired = Some(0);
+    }
+
     /// Ends the scenario as `end` would have, for tests of what follows an end.
     #[cfg(test)]
     pub(crate) fn end_for_test(&mut self, end: EventOutcome) {

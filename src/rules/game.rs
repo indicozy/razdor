@@ -286,6 +286,12 @@ pub struct Game {
     /// it to talk or fight"), even if it greeted him before.
     #[serde(default)]
     pub(crate) talk_to: Option<u32>,
+    /// The event point the original's scan reads is zeroed at the start of each walk frame,
+    /// before the contact check of the step (0x4ae72c, the check at 0x4ae776 comes before the
+    /// hero moves): an attack on an army next to him scans no point, not the cell he stands
+    /// on. The point is noted again only when a step completes (0x4aed35), which clears this.
+    #[serde(default)]
+    pub(crate) point_zeroed: bool,
     pub(crate) beaten_armies: BTreeSet<ArmyId>,
     /// Scenario armies beaten by AI armies (`rules::ai`).
     #[serde(default)]
@@ -585,6 +591,7 @@ impl Game {
             shown: Vec::new(),
             met_armies: BTreeSet::new(),
             talk_to: None,
+            point_zeroed: false,
             beaten_armies: BTreeSet::new(),
             ai_beaten: BTreeSet::new(),
             ai_stats: AiStats::default(),
@@ -1473,6 +1480,8 @@ impl Game {
                 // The original engages any army stepped onto, friendly or not (world.md §4.2).
                 let e = Event::Encounter(i);
                 self.foe = Some(Foe::Army(i));
+                // The scan of this contact reads no point (see `point_zeroed`).
+                self.point_zeroed = true;
                 self.engage(e, events);
                 return false;
             }
@@ -1503,6 +1512,7 @@ impl Game {
         let was = self.pos;
         self.pos = self.world.map.center(next);
         self.move_to_cell(from, next);
+        self.point_zeroed = false;
         self.look_around();
         // His facing stays the step's direction until the next one (0x4ae8e0).
         self.facing = Some((next.0 - from.0, next.1 - from.1));

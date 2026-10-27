@@ -43,6 +43,16 @@ The scan (0x4abfbc, §2) is started from these places. **code**
 - **Map start**: Map_Load starts a 250 ms timer (0x4af658 with no event), which runs the scan.
 - **Each hero step**, once the step is complete and no battle is running (0x4aed3a). Before
   the scan, the event point under the hero is noted (0x4aed35).
+- **An attack on an army** (the contact check of a step, 0x4ae776 → 0x4ad94c, before the step
+  moves him): the check runs in the walk frame, and that frame zeroes the noted point at its
+  start (0x4ae72c). So the scan of an attack reads **no** event point, whatever cell he stands on
+  (a point's repeatable event does not open or stop the attack); the point is noted again only
+  when a step completes (0x4aed35), and only then a point counts again. The attack passes no
+  game time (the step is not taken: 0x4ae77d → 0x4ae789 leaves the frame). The contact's scan
+  (0x4abfbc, with the army as the met army) is the same scan as on a step: an event that opens
+  its window ends the attack without a battle (0x4ad94c, the branch after 0x4abfbc). A stationary
+  point's repeatable event can still fire on the next step's scan. **code**
+  Razdor: `Game::point_zeroed`, cleared by the step that moves him (report 1375).
 - **Each tick of a wait or of an event delay** (30 game minutes per tick, 0x4ae4e9).
 - **Contact with an army** (0x4adcde, 0x4adff5, 0x4ae1dc): the scan runs with that army as the
   *met army* (§9). If an event fires, the battle the contact would start does not happen.
