@@ -220,7 +220,7 @@ tall; the quest header row sits at the lower pane's bottom, above the tabs. Army
 unit's band under the title, 420 design px (`window_layout::army_band`, `unit_sheet::draw_band`: picture
 left, stats right; the band is the least height where the stats and the hero's bonus paragraph fit at the
 band's text size, which is never below the landscape column's; the picture is scaled to the band's height,
-its proportions kept and centred in the picture half (`unit_sheet::band_figure_rect`), so it is about two thirds of the landscape size; the window is 1092 design px tall, width-limited
+its proportions kept and centred in the picture half (`unit_sheet::band_figure_rect`), the frame picture (`UnitFrame`) stretched over that same half (`unit_sheet::band_frame_rect`, `chrome::unit_parchment_framed`), so it is about two thirds of the landscape size; the window is 1092 design px tall, width-limited
 on a 1080x2376 phone),
 the right side (pack, formation) under it, and a «Закрыть» button under the formation (`army_close`). The
 right side moves by the layout's shift (`window_layout::place`, used by `at`, `point` and the panel helpers),

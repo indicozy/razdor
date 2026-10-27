@@ -785,6 +785,14 @@ fn band_figure_rect(r: Rect, w: f32, h: f32, s: f32) -> Rect {
     Rect::new(r.x + (r.w - w) / 2.0, r.y + (r.h - h) / 2.0, w, h)
 }
 
+/// Where the band's frame picture (`UnitFrame`) is stretched: over the band's picture half, the
+/// parchment the figure stands on, as the landscape column's frame surrounds its own parchment
+/// (Razdor's phone choice, not parity). Stretched over the whole band, its pieces sat at the
+/// band's corners, the right one over the text half.
+fn band_frame_rect(band: Rect) -> Rect {
+    window_layout::band_halves(band).0
+}
+
 /// A placeholder figure: a dark sepia silhouette.
 fn silhouette(r: Rect) {
     let c = Color::new(0.30, 0.18, 0.08, 0.55);
@@ -910,8 +918,8 @@ pub fn draw_band(assets: &Assets, content: &Content, band: Rect, s: &Sheet, slot
 fn draw_band_in_face(assets: &Assets, content: &Content, band: Rect, s: &Sheet, slots: bool, hover: &mut Option<ItemId>) -> Option<usize> {
     use super::dt_font::{sheet_size, whole_scale, Face};
     let k = k();
-    chrome::unit_parchment(band);
     let (pic, txt) = window_layout::band_halves(band);
+    chrome::unit_parchment_framed(band, band_frame_rect(band));
     // Screen px per design px of the figure and of the worn-item slots.
     let fig = FIGURE_SCALE * band.h / COLUMN_H;
     // Razdor's phone choice, not parity: the figure is centred in the picture half of the band
@@ -1140,6 +1148,19 @@ mod tests {
             assert!((r.x + r.w / 2.0 - (pic.x + pic.w / 2.0)).abs() < 0.5, "horizontally centred");
             assert!((r.y + r.h / 2.0 - (pic.y + pic.h / 2.0)).abs() < 0.5, "vertically centred");
         }
+    }
+
+    /// The band's frame picture surrounds the picture half (the figure's parchment) and nothing of
+    /// the text half: the same rect as the parchment, inside the band (a phone report: the frame's
+    /// pieces sat at the band's corners, not around the parchment).
+    #[test]
+    fn the_band_frame_surrounds_its_parchment_half() {
+        let band = Rect::new(4.0, 300.0, 586.0 * 2.0, 420.0 * 2.0);
+        let (pic, txt) = window_layout::band_halves(band);
+        let frame = band_frame_rect(band);
+        assert_eq!(frame, pic, "the frame is stretched over the picture half");
+        assert!(frame.x == band.x && frame.y == band.y && frame.h == band.h, "{frame:?} at the band's left and top");
+        assert!(frame.right() <= txt.x + 0.5, "{frame:?} stays off the text half {txt:?}");
     }
 
     /// A band row's text starts after its icon: a narrow indent moves the text right so it clears

@@ -2267,9 +2267,15 @@ pub fn shaded_text_box(r: Rect, alpha: f32) {
 
 /// The original parchment treatment used behind a battle unit's hover details.
 pub fn unit_parchment(r: Rect) {
+    unit_parchment_framed(r, r);
+}
+
+/// `unit_parchment` with the frame picture stretched over `frame` rather than the whole parchment
+/// `r`: the stacked unit band frames only its picture half (Razdor's phone choice, not parity).
+pub fn unit_parchment_framed(r: Rect, frame: Rect) {
     paper_panel(r);
     if let Some(t) = win_fx("UnitFrame", Fx::Shade) {
-        tex(&t, r, Color::new(1.0, 1.0, 1.0, 0.8));
+        tex(&t, frame, Color::new(1.0, 1.0, 1.0, 0.8));
     }
     draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.5, Color::new(0.75, 0.6, 0.3, 1.0));
 }
