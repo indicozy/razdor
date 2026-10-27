@@ -2005,6 +2005,60 @@ mod tests {
         assert!(g.enter_waiting_building().is_empty(), "once");
     }
 
+    /// The noon report of the step before is read while the arrival's question is still held
+    /// for the step's animation (`tick_shown`): the building waits for the question, it is not
+    /// entered when the report closes (world.md §7.2: entered only once the window is read).
+    /// Before the fix the building opened, and the hall refused with the question unread.
+    #[test]
+    fn a_building_does_not_open_while_its_question_at_noon_is_still_held() {
+        use crate::rules::clock::Clock;
+        let mut local = ev(EventKind::Local);
+        local.conditions.confirm_question = 1;
+        local.question = "q".into();
+        local.message = String::new();
+        let mut s = world(vec![local]);
+        let mut tavern = building(BuildingType::Tavern, 9, 2, (2, 2));
+        tavern.event_slots[0] = 1;
+        tavern.event_count = 1;
+        s.buildings = vec![tavern];
+        let mut g = start(&s);
+        read(&mut g);
+        // Just before the noon of the day after the start: the first footprint cell's step
+        // brings the noon report, the step onto the last cell brings the question.
+        let day = g.clock.total_minutes() as u64 / 1440 + 1;
+        g.clock = Clock::at_minutes(day * 1440 + 11 * 60 + 55);
+        assert!(g.set_destination((9, 2)));
+        let mut shown = Vec::new();
+        let mut question = false;
+        let mut report_closed = false;
+        for _ in 0..20_000 {
+            if !g.moving() && !g.holds_events() {
+                break;
+            }
+            // He has arrived, the report is on screen and the question is still held: the
+            // player closes the report, and the UI asks for the building to be entered.
+            if !report_closed && !g.moving() && g.holds_events() && shown.iter().any(|e| matches!(e, Event::NewDay(_))) {
+                report_closed = true;
+                assert!(g.enter_waiting_building().is_empty(), "the building waits for the held question");
+            }
+            let batch = g.tick_shown(0.016);
+            question |= batch.contains(&Event::Script(EventOutcome::Question(1)));
+            shown.extend(batch);
+            if question && !g.holds_events() {
+                break;
+            }
+        }
+        assert!(report_closed, "the report came with the arrival: {shown:?}");
+        assert!(shown.iter().any(|e| matches!(e, Event::NewDay(_))), "the noon report came: {shown:?}");
+        assert!(question, "the question is shown: {shown:?}");
+        assert_eq!(g.pending_question(), Some(1));
+        assert!(!shown.contains(&Event::Arrived(0)), "not entered before the question is answered");
+        assert!(g.enter_waiting_building().is_empty(), "still waiting for the answer");
+        let events = g.answer_question(true);
+        assert_eq!(fired(&events), vec![1]);
+        assert_eq!(g.enter_waiting_building(), vec![Event::Arrived(0)], "entered once the question is read");
+    }
+
     #[test]
     fn a_village_entered_as_an_event_opens_waits_for_it_to_be_read() {
         // 0x4ae6dc: the arrival's event scan opens the event's window; the village he
@@ -3251,5 +3305,59 @@ mod real_maps {
             );
             assert!(messages >= 1, "{class:?}: at least one dialog");
         }
+    }
+
+
+    /// Другой берег's tavern «В Таверне #4» (event 164, a question; it opens on day 3 of the
+    /// map, `start_time` 4320): the step onto its first cell brings the noon report, the step
+    /// onto the last cell the question. The building waits for the question (world.md §7.2):
+    /// the report's OK does not enter it, and the answer does, once the event's message is read.
+    #[test]
+    fn a_tavern_question_at_noon_is_read_before_its_building_opens() {
+        use crate::rules::clock::Clock;
+        use crate::rules::world::LocationKind;
+        let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+        let dt = DtInstall::load(std::path::Path::new(&dir)).expect("install loads");
+        let c = Arc::new(Content::from_dt(&dt));
+        let s = dt.maps.iter().find(|m| m.name == "Другой берег").expect("the map").load().unwrap();
+        let mut g = Game::from_scenario(c, &s, HeroClass::Knight);
+        let mut messages = 0;
+        let opening = g.drain_events();
+        settle(&mut g, opening, &mut messages);
+        close_windows(&mut g);
+        // The tavern of event 164: building id 98 (its tile is (12, 37), a 2 × 2 footprint).
+        let l = g.world.locations.iter().position(|l| l.kind == LocationKind::Tavern && l.id == 98).expect("the tavern");
+        let tile = g.world.locations[l].tile;
+        // The hero on the free cell (10, 37), outside the footprint, with the clock just before
+        // the noon of day 3.
+        g.pos = g.world.map.center((tile.0 - 2, tile.1));
+        g.location = None;
+        g.clock = Clock::at_minutes(g.world.start.total_minutes() as u64 + 3 * 1440 + 11 * 60 + 55);
+        assert!(g.set_destination(tile));
+        let mut shown = Vec::new();
+        let mut report_closed = false;
+        for _ in 0..20_000 {
+            if !g.moving() && !g.holds_events() {
+                break;
+            }
+            // He has arrived, the report is on screen and the question is still held.
+            if !report_closed && !g.moving() && g.holds_events() && shown.iter().any(|e| matches!(e, Event::NewDay(_))) {
+                report_closed = true;
+                assert!(g.enter_waiting_building().is_empty(), "the building waits for the held question");
+            }
+            shown.extend(g.tick_shown(0.016));
+            if shown.contains(&Event::Script(EventOutcome::Question(164))) && !g.holds_events() {
+                break;
+            }
+        }
+        assert!(report_closed, "the noon report came with the arrival: {shown:?}");
+        assert_eq!(g.pending_question(), Some(164), "the question is shown: {shown:?}");
+        assert!(g.enter_waiting_building().is_empty(), "still waiting for the answer");
+        // Yes: the event's message is a window of its own, which the building waits for too.
+        let answer = g.answer_question(true);
+        assert!(answer.contains(&Event::Script(EventOutcome::Fired { event: 164, message: true })), "{answer:?}");
+        // Its OK, as the UI reports it when the window closes.
+        let _ = g.event_window_closed();
+        assert_eq!(g.enter_waiting_building(), vec![Event::Arrived(l)]);
     }
 }

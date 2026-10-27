@@ -160,6 +160,10 @@ is open in the rules at once, so the fog layer draws them as before (`Game::unsh
 - *Order inside a step.* The check of the cell ahead comes before the move; AI contact comes after
   the time passed. An attack shown before the step's animation ends is a bug (test
   `an_attack_is_shown_after_the_step_that_brought_it_has_played`).
+- *A building waits for unread events.* `Game::enter_waiting_building` and `reenter_building` do not
+  enter while `tick_shown` still holds the step's events or a question is unanswered: a noon report
+  closing first used to open the building before the arrival's question (world.md §7.2). Test
+  `a_building_does_not_open_while_its_question_at_noon_is_still_held`.
 - *No clicks while a step's events are held.* A village entered twice gave "already taken"
   (5d10303).
 - *Bridges.* A building on a bridge is never entered (no window, `location` stays none). A bridge

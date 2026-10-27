@@ -8,6 +8,18 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **A noon falling on the step that enters a building with a question** (2026-10-27, a player's
+  report, Другой берег, «В Таверне #4»). The building's local question is in the same scan as the
+  noon when the walk's last step enters it (world.md §7.2, events.md §2 «Noon»): the question takes
+  the pass, the noon waits for its OK, then the report and the building. Razdor pays the noon in the
+  step's time slice (`pass_slice`), before the arrival's scan, so the report opens first and the
+  question after it. Fixed for the walk's other case (the report of an earlier step, where the
+  question comes after the report, as in the original): the building waits for the question
+  (`Game::enter_waiting_building`). Not changed here: moving the noon into the step-complete scan
+  changes when every noon is paid, and the specs do not settle where that scan's noon falls against
+  the AI's contact in the same step (events.md §1). Test: `a_tavern_question_at_noon_is_read_before_its_building_opens`
+  shows the order Razdor gives.
+
 
 - **The Evolution Mod's exe: FirstShot's value.** Its 1.2 fix (c28935) is absent, so the +60
   path at c26e9a runs; the exact initiative of FirstShot on that build is unread. Razdor keeps 1.2's
