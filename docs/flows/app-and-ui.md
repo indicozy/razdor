@@ -209,7 +209,7 @@ bar (`window_layout::window`, `main_menu::map_window`, the saves and dialogs), s
 The battle window held upright (`battle_view::Layout::upright`, pure, with unit tests): the window's scale comes from
 `window_layout::game_scale` (the width less 8 px, above the bar); the unit's band (`unit_sheet::draw_band`) on top at
 design y 76, then the quick buttons, the enemy's grid, the strip, the player's grid; the close box is 44 dp at the top right
-(`close_button`); the landscape phone window gets the same box, beside its top right corner so it does not cover the enemy's top right card, above it or inside when there is no room (`Layout::landscape`, `landscape_close_box`, Razdor's phone choice) and then
+(`close_button`); the landscape phone window gets the same box, beside its top right corner so it does not cover the enemy's top right card, above it or inside when there is no room (`battle_view`'s `Layout::landscape`, now `chrome::close_box_beside`, Razdor's phone choice) and then
 draws no cross in its title bar. The map, the bar and the exit window are drawn at the interface scale (`display::with_window_scale(None, …)`).
 Stacked windows (experiment, main only): a phone held upright (`window_layout::portrait`: `dp_px` set and the
 screen taller than wide) stacks the building, army and hero windows, each with its own layout
@@ -249,8 +249,10 @@ scale on drop); `backdrop` always draws at the interface scale, so the logo and 
 placement takes `window_layout::title_rect` where it is portrait, else its old placement (the load window's
 `book_top`, at video y 190, is above the logo on a phone: that is why it moved). The credits column
 (`thanks_column`) goes under the window down to `window_layout::title_bottom` (the footer), since the window
-leaves no side. Landscape and desktop: `title_scale` keeps the scale it has and `title_rect` is `None`, so nothing
-changes. The in-game windows over the map get the same treatment on a phone held upright, with their own
+leaves no side. Landscape: `title_scale` takes `sideways_title_k` (a phone choice, not in the original: one original px
+per dp, fitted to the screen less the safe area and the height above the bar, the large windows setting on), and
+`title_rect` centres the window as an exit window (`exit_rect`). Desktop and portrait-off-phone: `title_scale` keeps
+the scale it has and `title_rect` is `None`, so nothing changes. The in-game windows over the map get the same treatment on a phone held upright, with their own
 rectangle: `window_layout::portrait_game` (pure, with unit tests) fits the window between the top safe inset
 and the top of the bottom bar (`chrome::bar_height`, at the interface scale, 8 px above it), not the footer;
 `window_layout::game_scale` / `game_rect` (and `window_scale` / `window_rect`, which pick the title or the
@@ -269,14 +271,18 @@ area's sides and the bar), so the window and its text and buttons grow together 
 interface scale on a 2400×1080 phone). `window_layout::exit_rect` centres them between the safe area's sides
 and between its top and the bar. Their «Рестарт» question (`saves::question_box`) is drawn at that scale
 too, centred between the safe area's sides. On the desktop all of it is as before (no insets, no phone scale).
-The spellbook in portrait is the same fit (`spellbook::frame`, `window_layout::game_rect`): 836 × 600 scaled to the
-width between the top inset and the bar, its bottom row inside that rectangle. The minimap (`minimap::window`) in
+The spellbook in portrait (`spellbook::frame`, `window_layout::upright_book_video`, a phone choice) is 560 px wide
+(two columns of cards), as tall as the screen takes between the top inset and the bar, so its rows fill the height;
+its rows are as many as keep every card at least the landscape card's 96 px tall (`spellbook::upright_rows`), 20 spells
+a page on a 2400 px phone. Its card text takes the phone's text base (`display::text_for`, `dialog::TEXT_REF`).
+Its bottom row is inside that rectangle. The minimap (`minimap::window`) in
 portrait stands inside the safe area (`in_safe_area`, `inset_view`); its phone close cross sits in the frame's top
 corner (`close_box`). The F1 keys list (`hotkeys::help_overlay`) takes the cross on a phone and closes by it.
-Close crosses on a phone: the cross is drawn as it always was, inside its title strip; its click area is 44 dp
-(`chrome::touch_hit`, used by `chrome::close_button`): a square centred on the cross, its bottom at the strip's bottom,
-so it reaches up and out of the window but never takes a click from the content under the strip; clamped to the screen.
-Desktop: the cross is its own click area. No layout (window rectangles, title strips) changes on a phone.
+Close crosses on a phone (a phone choice, not in the original): every title bar's cross is a 44 dp box placed by the
+battle's rule (`chrome::title_close_cross`, `close_box_beside`: beside the window's top right if it fits the safe area,
+else above it, else inside, `close_box_inside`); a box inside the strip keeps the title clear of it (`room_clear_of`).
+Its click area is exactly that box (`chrome::close_button_at`). The desktop's cross is as it was, its own click area
+(`chrome::touch_hit` for `close_button`, which the battle's own cross uses). No layout (window rectangles, title strips) changes on a phone.
 Not covered: the building, army and hero windows (the stacked layout).
 The market and the sanctuary scenes of the UI regression check use town 8 of РК3-Столица (the start's
 castle has neither tab); the snapshot clears the start's due places, which otherwise make the building
@@ -411,7 +417,8 @@ group or the order starts the pack at its top; both are kept for the session (`G
 filter line, `item_filter::field_with`): it hides the other groups' rows before the filter, and a
 hidden pick is not the pick.
 
-The book (`spellbook::frame`) lays its 15 cells out column by column (`ROWS` = 5, 4dad08). Razdor's
+The book (`spellbook::frame`) lays its cells out column by column (`ROWS` = 5, 4dad08; 3 columns, the 15 of
+`BOOK_PAGE`; upright on a phone 2 columns of as many rows as the height keeps, see above). Razdor's
 choice (the owner's, 2026-10-22): the book pages all its spells 15 at a time (the original shows only the
 first 15, 0x4d261c). A second page turns by the wheel (up is the previous page), PageUp/PageDown or
 Left/Right, and the two arrow buttons with "N / M" in the bottom row under the grid; with one page those
