@@ -539,7 +539,9 @@ Building a window (`src/ui/chrome.rs`):
   +/- step from that (×1.1 a notch) and 0 comes back; locked, the zoom stays `map_zoom`.
   Razdor's: the wheel and +/- zoom out past the settings' range (`ZOOM_RANGE`, 0.4) down to
   the whole map fitting the view (`world_view::zoom_floor`); a map that fits already at 0.4
-  keeps 0.4 as its floor. The floor is passed as `lo` to `zoom_at` and `step_zoom`.
+  keeps 0.4 as its floor. The floor is passed as `lo` to `zoom_at` and `step_zoom`. The steps
+  are refitted to the current floor and home zoom each frame (`world_view::fit_steps`), so a
+  turned phone or a changed settings slider moves the zoom at once.
 - `chrome::window(r, title, skin, closable)` draws background, frame and title bar and
   returns `(inner, closed)`. Skins: `chrome::Skin`.
 - Placement: windows over the map are centred over the view above the bar (as the

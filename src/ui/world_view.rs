@@ -112,6 +112,36 @@ fn zoom_at(home: f32, steps: i32, locked: bool, lo: f32) -> f32 {
     }
 }
 
+/// `steps` brought into the range where every wheel step still changes the zoom (Razdor's):
+/// from the lowest `s` with `home * 1.1^s >= lo` to the highest with `home * 1.1^s <=
+/// ZOOM_RANGE.1`, the same limits [`step_zoom`] keeps. The floor moves with the view (a
+/// rotated phone) and the home zoom with the settings, so the steps are refitted each frame;
+/// a stale count would sit past the new limit and the zoom would stop following the steps.
+fn fit_steps(home: f32, steps: i32, lo: f32) -> i32 {
+    if !(home.is_finite() && home > 0.0 && lo.is_finite() && lo > 0.0) {
+        return steps;
+    }
+    let at = |s: i32| home * 1.1f32.powi(s);
+    let mut low = ((lo / home).ln() / 1.1f32.ln()).ceil() as i32;
+    while at(low) < lo {
+        low += 1;
+    }
+    while at(low - 1) >= lo {
+        low -= 1;
+    }
+    let mut high = ((ZOOM_RANGE.1 / home).ln() / 1.1f32.ln()).floor() as i32;
+    while at(high) > ZOOM_RANGE.1 {
+        high -= 1;
+    }
+    while at(high + 1) <= ZOOM_RANGE.1 {
+        high += 1;
+    }
+    if low > high {
+        return steps;
+    }
+    steps.clamp(low, high)
+}
+
 /// `steps` moved by `by`, kept where it still changes the zoom within `lo` and ZOOM_RANGE.1.
 fn step_zoom(home: f32, steps: i32, by: i32, lo: f32) -> i32 {
     let next = steps + by;
@@ -2710,6 +2740,8 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
         zoom_floor(map.w as f32 * PX * ms, map.h as f32 * map.grid.row_height() * PX * ms, map_area())
     };
     if !locked {
+        // The steps follow the view's floor and the settings' zoom (see `fit_steps`).
+        view.zoom_steps = fit_steps(home, view.zoom_steps, lo);
         let wheel = wheel();
         if wheel != 0.0 {
             view.zoom_steps = step_zoom(home, view.zoom_steps, if wheel > 0.0 { 1 } else { -1 }, lo);
@@ -3431,6 +3463,53 @@ mod tests {
         }
         assert!(zoom_at(1.0, s, false, lo) >= lo && step_zoom(1.0, s, 1, lo) == s + 1);
         assert_eq!(zoom_at(1.0, s, false, lo), (1.1f32.powi(s)).max(lo));
+    }
+
+    #[test]
+    fn a_raised_zoom_floor_brings_the_steps_back() {
+        // Stepped out to a floor of 0.1 (about 25 notches), then the view turns and the floor
+        // rises to 0.3: the steps come back to where the zoom moves again.
+        let mut s = 0;
+        for _ in 0..60 {
+            s = step_zoom(1.0, s, -1, 0.1);
+        }
+        let s = fit_steps(1.0, s, 0.3);
+        let before = zoom_at(1.0, s, false, 0.3);
+        let up = step_zoom(1.0, s, 1, 0.3);
+        assert!(up != s, "a step up is taken");
+        assert!(zoom_at(1.0, up, false, 0.3) > before, "the zoom moves: {before}");
+        // The settings' zoom changes it too.
+        assert_ne!(zoom_at(1.5, s, false, 0.3), zoom_at(1.0, s, false, 0.3));
+    }
+
+    #[test]
+    fn a_lowered_zoom_ceiling_brings_the_steps_back() {
+        // Stepped in to the 2.0 ceiling at home 0.5, then the settings' zoom rises to 2.0:
+        // the steps come back so that the zoom is at most 2.0 and a step out lowers it.
+        let mut s = 0;
+        for _ in 0..40 {
+            s = step_zoom(0.5, s, 1, ZOOM_RANGE.0);
+        }
+        let s = fit_steps(2.0, s, ZOOM_RANGE.0);
+        assert!(zoom_at(2.0, s, false, ZOOM_RANGE.0) <= ZOOM_RANGE.1);
+        let before = zoom_at(2.0, s, false, ZOOM_RANGE.0);
+        let down = step_zoom(2.0, s, -1, ZOOM_RANGE.0);
+        assert!(zoom_at(2.0, down, false, ZOOM_RANGE.0) < before, "one step down lowers the zoom");
+    }
+
+    #[test]
+    fn fit_steps_leaves_steps_in_range_alone() {
+        // Home 1.0 and a floor of 0.4: the steps run from -9 (0.4 is at most 9 notches out)
+        // up to 7 (2.0 is at most 7 notches in); 0 is always in range.
+        assert_eq!(fit_steps(1.0, 0, 0.4), 0);
+        assert_eq!(fit_steps(1.0, -5, 0.4), -5);
+        assert_eq!(fit_steps(1.0, -9, 0.4), -9);
+        assert_eq!(fit_steps(1.0, 7, 0.4), 7);
+        assert_eq!(fit_steps(0.4, 0, 0.4), 0);
+        assert_eq!(fit_steps(2.0, 0, 0.4), 0);
+        // Out of range: brought to the nearest limit.
+        assert_eq!(fit_steps(1.0, -30, 0.4), -9);
+        assert_eq!(fit_steps(1.0, 30, 0.4), 7);
     }
 
     #[test]
