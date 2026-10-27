@@ -205,7 +205,8 @@ bar (`window_layout::window`, `main_menu::map_window`, the saves and dialogs), s
 The battle window held upright (`battle_view::Layout::upright`, pure, with unit tests): the window's scale comes from
 `window_layout::game_scale` (the width less 8 px, above the bar); the unit's band (`unit_sheet::draw_band`) on top at
 design y 76, then the quick buttons, the enemy's grid, the strip, the player's grid; the close box is 44 dp at the top right
-(`close_button`). The map, the bar and the exit window are drawn at the interface scale (`display::with_window_scale(None, …)`).
+(`close_button`); the landscape phone window gets the same box (`Layout::landscape`, Razdor's phone choice) and then
+draws no cross in its title bar. The map, the bar and the exit window are drawn at the interface scale (`display::with_window_scale(None, …)`).
 Stacked windows (experiment, main only): a phone held upright (`window_layout::portrait`: `dp_px` set and the
 screen taller than wide) stacks the building, army and hero windows, each with its own layout
 (`window_layout::Stack`, passed to `window_layout::scaled`). Building: the two panes on top at full width, each at the
@@ -351,7 +352,8 @@ On a phone the bottom row of the hero window holds «Весь список» (le
 every line of the tab, scrolled by drag and the wheel, a tap on a row opens its entry, closing the entry returns to the list),
 «Закрыть» (centred) and «Развернуть» (right, `HeroView::reader`, `items_view::diary_reader`): grey without an entry
 (`expand_entry_enabled`) or, for the list, without entries (`whole_list_enabled`). Sideways the row sits at the window's
-foot and the entry box gives up its strip (`items_view::bottom_row_rects`). The entry's full text (`reader_parts`, the desktop's parts) at the phone's sizes, in a window over the screen
+foot, from the diary's left edge (`items_view::sideways_row`, off the hero's panel), and the entry box gives up its
+strip (`items_view::bottom_row_rects`). The entry's full text (`reader_parts`, the desktop's parts) at the phone's sizes, in a window over the screen
 less the safe area and an 8 px margin (`diary_reader_rect`), scrolled by drag and the wheel, and closed by its
 finger-sized «Закрыть», its cross or Esc. While it is open the window below takes no input (`set_input_blocked`),
 and the reader swallows the frame's keys and clicks.
@@ -666,7 +668,8 @@ once, so the screen under the list runs its action as if the key were pressed (t
 (`hotkeys::tile_enabled`, `allowed`). Phones have no F1: the game menu's «Клавиши» button
 (`saves::ExitChoice::Keys`, drawn by `exit_dialog` on a phone only, `display::dp_px()`; the desktop
 menu is the original's four buttons; the phone's five take 4 px between them) opens the list over
-the map; `App::help_fresh` keeps the press that opened it from closing it. On a phone the list's
+the map; `App::help_fresh` keeps the press that opened it from closing it, and `widgets::swallow_input` (set at both
+opening points, the map's and the battle exit window's «Клавиши») keeps it from pressing a tile in the list. On a phone the list's
 text is the phone's text (`display::text_for`, drawn under `dt_font::legacy_metrics_if`) and its
 tiles wrap to three lines; the desktop keeps the interface scale. Snapshot:
 `RAZDOR_SCENE_OPEN=<frame>:keys`.
