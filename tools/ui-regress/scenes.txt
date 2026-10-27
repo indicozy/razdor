@@ -121,8 +121,7 @@ phone-diary-reader-portrait | hero:РК1-Начало пути:1 | 1080x2160 | R
 phone-diary-buttons-portrait | hero:РК1-Начало пути:1 | 1080x2400 | RAZDOR_DP=2.75;RAZDOR_LARGE_WINDOWS=1;RAZDOR_SCENE_QUEST=1
 phone-diary-list-reader-portrait | hero:РК1-Начало пути:1 | 1080x2400 | RAZDOR_DP=2.75;RAZDOR_LARGE_WINDOWS=1;RAZDOR_SCENE_QUEST=1;RAZDOR_SCENE_LIST_READER=1
 # Phones: the landscape battle at a phone's dp (the large exit cross), the keys window in landscape
-# on the map and in battle, and the cheat console on a phone
+# on the map and in battle
 phone-battle-dp-landscape | battle:РК1-Начало пути:0 | 2160x1080 | RAZDOR_DP=2.625
 phone-help-landscape | map:РК1-Начало пути | 2160x1080 | RAZDOR_DP=2.75;RAZDOR_SCENE_OPEN=3:keys
 phone-help-battle-landscape | battle:РК1-Начало пути:0 | 2160x1080 | RAZDOR_DP=2.75;RAZDOR_SCENE_OPEN=3:keys
-phone-console-upright | map:РК1-Начало пути | 1080x2400 | RAZDOR_DP=2.75;RAZDOR_SCENE_CONSOLE=help
