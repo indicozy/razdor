@@ -14,6 +14,21 @@
 
 ## 1.1.2 — 2026-10-27
 
+Коммит `61f6d420` (тег `v1.1.2`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+ea744245428ca5828e0010be728ca233640547240aab585331023f9e9c5af282  razdor
+991a277853506f1db82651a82019851841805ad84220f5ec9333bf01eac2887c  Razdor.exe
+6a9e3c5f55bc7bb4c4eb7a254a44cf41019bf796a31e98e33c2e7c870b96e905  razdor-macos
+26608641469df4e7dbd3e02e5e86b21c3d6d0550fe8265c3bee4cb170fb74a31  razdor-translate
+3dd87c366c7c67286602d7af70b2b1e5ad522af25f8a736cd7e762b9a44848b9  Razdor-translate.exe
+144cdb5873d86d61e3833d23df287c43c0611d059fec103d29db58403887338f  razdor-translate-macos
+36ec34270aa6c9d0cd040b4b878b29b744b6740c2e63d9d29c78fd35e479a640  razdor.apk
+f0743f6d201f14584d3bf36948144e9be7a809a7c2aa47dcd38a20b7c05df915  razdor.ipa
+```
+
 У Razdor появилась вики: https://indicozy.github.io/razdor/wiki/ — установка, уроки, отличия от оригинала, моды, инструменты и телефоны. И правки для телефонов: окна казармы и гарнизона, полуденный отчёт, рамки и скруглённые углы экрана.
 
 ### Добавлено
