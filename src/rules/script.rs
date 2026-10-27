@@ -42,12 +42,17 @@ pub enum HallEntry {
 }
 
 impl Event {
-    /// Something the player should read before time goes on: a message, a question, a quest
-    /// notice or the end of the scenario.
+    /// Something the player should read before time goes on: a message, a question or the end
+    /// of the scenario.
     pub fn needs_reading(&self) -> bool {
         match self {
             Event::Script(EventOutcome::Fired { message, .. }) => *message,
             Event::Script(EventOutcome::Declined(_) | EventOutcome::LoopGuard | EventOutcome::ItemsLost { .. }) => false,
+            // A quest line never stops the walk on its own: the line is on the event's window,
+            // and a silent event that closes a quest finishes at once with no window (0x4a7a40,
+            // the line written on the window at 0x4a8e12). The window's `Fired { message: true }`
+            // or `Question` is what stops it.
+            Event::Script(EventOutcome::QuestAdded(_) | EventOutcome::QuestCompleted { .. }) => false,
             Event::Script(_) => true,
             // An event's spell stops the walk on its cell (0x4ab1ec clears the route).
             Event::EventSpell { .. } => true,
@@ -2062,6 +2067,53 @@ mod tests {
         assert_eq!((g.gold, g.mana), (11, 3), "no flat price: only the event's own -4 gold");
         assert_eq!(g.take_hall_entry(1), Err(ServiceError::NotHere), "heard");
         assert_eq!(g.hall_entries(), vec![HallEntry::Quest(2)]);
+    }
+
+    #[test]
+    fn quest_lines_never_stop_a_walk_on_their_own() {
+        assert!(!Event::Script(EventOutcome::QuestAdded(1)).needs_reading());
+        assert!(!Event::Script(EventOutcome::QuestCompleted { quest: 1, by: 2 }).needs_reading());
+        assert!(Event::Script(EventOutcome::Fired { event: 2, message: true }).needs_reading(), "the event's own window still does");
+    }
+
+    /// Miguel's death on «Другой берег» (event 22): a silent event that closes a quest, repeats
+    /// on every scan and keeps passing. The original finishes it at once with no window
+    /// (0x4a7a40), so the walks go on, and the diary lists the completion once.
+    #[test]
+    fn a_silent_event_closing_a_quest_again_neither_stops_the_walk_nor_repeats_the_diary_entry() {
+        use crate::rules::journal::{EntryKind, Tab};
+        let mut quest = ev(EventKind::Quest);
+        (quest.title, quest.message) = ("The mill".into(), "Free the mill, #HERONAME.".into());
+        // Closes once the quest was given (happened yes), and fires again on every scan.
+        let mut closing = ev(EventKind::Global);
+        closing.message = String::new();
+        closing.once = 0;
+        closing.results.completes_quest = 1;
+        (closing.conditions.happened_yes_check, closing.conditions.happened_yes) = (1, [1, 0]);
+        let mut s = world(vec![quest, closing]);
+        let mut town = building(BuildingType::Town, 9, 2, (1, 1));
+        town.event_slots[0] = 1;
+        town.event_count = 1;
+        s.buildings = vec![town];
+        let mut g = start(&s);
+        read(&mut g);
+        assert!(g.set_destination((9, 2)));
+        walk(&mut g);
+        g.take_hall_entry(1).unwrap();
+        read(&mut g);
+        let mut walked = Vec::new();
+        for t in [(9, 3), (8, 3), (7, 3), (7, 2)] {
+            assert!(g.set_destination(t), "a route to {t:?}");
+            let events = walk(&mut g);
+            assert!(!events.iter().any(Event::needs_reading), "the silent closing event stops no walk (to {t:?}): {events:?}");
+            walked.extend(events);
+            assert_eq!(g.tile(), t, "the walk reaches {t:?}");
+        }
+        assert!(g.script().unwrap().times_fired(2) >= 2, "the closing event fired again on the walk's scans");
+        assert!(walked.iter().any(|e| matches!(e, Event::Script(EventOutcome::QuestCompleted { quest: 1, by: 2 }))));
+        let completions = g.journal.entries.iter().filter(|e| e.kind == EntryKind::Completed && e.event == 1).count();
+        assert_eq!(completions, 1, "one diary entry for the completion, however often it closes again");
+        assert!(g.journal_rows(Tab::Active).is_empty());
     }
 
     #[test]

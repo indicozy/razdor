@@ -1855,7 +1855,7 @@ fn play_event(game: &Game, event: &Event) {
         Event::Script(O::Question(id)) => format!("EVENT {id} «{}» asks", title(*id)),
         Event::Script(O::Declined(id)) => format!("EVENT {id} «{}» declined", title(*id)),
         Event::Script(O::QuestAdded(id)) => format!("QUEST {id} «{}» added", title(*id)),
-        Event::Script(O::QuestCompleted(id)) => format!("QUEST {id} «{}» completed", title(*id)),
+        Event::Script(O::QuestCompleted { quest, .. }) => format!("QUEST {quest} «{}» completed", title(*quest)),
         Event::Script(other) => format!("EVENT {other:?}"),
         Event::Encounter(i) => format!("ENCOUNTER army {} «{}» at {:?}", game.world.armies.get(*i).map_or(0, |a| a.id), game.world.armies.get(*i).map_or("", |a| &a.name), game.tile()),
         Event::Met(i) => format!("MET army {} «{}»", game.world.armies.get(*i).map_or(0, |a| a.id), game.world.armies.get(*i).map_or("", |a| &a.name)),
@@ -1954,7 +1954,7 @@ pub(super) fn handle_events(game: &mut Game, events: Vec<Event>, message: &mut O
             Event::Captured(_) | Event::Met(_) | Event::Battle(_) => {}
             // A level gained is silent: `Unit-Upgrade` is the promotion screen's (0x4b1af8).
             Event::LevelUp(..) => {}
-            Event::Script(o) => story::show(game, &o, message, dialogs),
+            Event::Script(o) => story::show(game, &o, dialogs),
         }
     }
     if let Some(Screen::Building(v)) = next.as_mut() {

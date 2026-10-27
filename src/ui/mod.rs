@@ -281,7 +281,7 @@ impl App {
                 razdor::diag::play(&game.clock.label(), &play_game_line(&game, "loaded"));
                 self.dt_content = saves::session_content(self.dt_content.take(), &game);
                 if let Some(q) = game.pending_question() {
-                    story::show(&game, &EventOutcome::Question(q), &mut self.message, &mut self.dialogs);
+                    story::show(&game, &EventOutcome::Question(q), &mut self.dialogs);
                 }
                 self.screen = if game.foe.is_some() {
                     Screen::Battle(Box::new(BattleView::new(game.start_battle())))

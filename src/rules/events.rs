@@ -332,8 +332,11 @@ pub enum EventOutcome {
     Question(EventId),
     /// The player answered No; the event did not take effect.
     Declined(EventId),
+    /// The quest was added by this event (its window carries the quest line).
     QuestAdded(EventId),
-    QuestCompleted(EventId),
+    /// The quest `quest` was completed by the event `by` (its window carries the quest line;
+    /// a silent `by` has no window, so the line is dropped, 0x4a8e12).
+    QuestCompleted { quest: EventId, by: EventId },
     /// The scenario's victory or defeat event fired; the engine stops.
     Victory(EventId),
     Defeat(EventId),
@@ -1537,7 +1540,7 @@ impl EventEngine {
             if !self.completed.contains(&done) {
                 self.completed.push(done);
             }
-            out.push(EventOutcome::QuestCompleted(done));
+            out.push(EventOutcome::QuestCompleted { quest: done, by: id });
         }
         // 13–17. Queued: the spell, the battle, the delay; the army moved to the hero (byte
         // 136, not 142) and the new class at once.
@@ -3113,7 +3116,7 @@ mod tests {
         w.place = None;
         w.defeated.insert(4);
         let out = g.tick(&mut w);
-        assert!(out.contains(&EventOutcome::QuestCompleted(1)));
+        assert!(out.contains(&EventOutcome::QuestCompleted { quest: 1, by: 2 }));
         assert_eq!(g.journal(), &[1], "the last entry goes");
         assert_eq!(g.completed_quests(), &[1]);
         assert_eq!(w.gold, 25);
@@ -3797,7 +3800,7 @@ mod real_maps {
         }
         assert_eq!(g.times_fired(220), 0, "the parchment was never received");
         assert_eq!(g.times_fired(221), 1);
-        assert!(out.contains(&EventOutcome::QuestCompleted(220)));
+        assert!(out.contains(&EventOutcome::QuestCompleted { quest: 220, by: 221 }));
     }
 
     /// Другой берег: after the cursed knight's fight, event 54 («В ущелье») takes the sword
