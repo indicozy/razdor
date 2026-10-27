@@ -49,7 +49,7 @@ scenario end:
                    the editor's test play
                  ScriptEnd::Defeat: its window was the last thing shown → the main menu (ui/mod.rs)
 battle defeat:  ui/battle_view.rs close_lost(): the screen closes at once → Dialog::defeat()
-                  250 ms later on the map; its OK drops the game → the main menu
+                  250 ms later on the map; its exit button drops the game → the main menu
 army lost to a spell: Game::army_fallen() → the same Dialog::defeat() (ui/mod.rs)
 ```
 
@@ -97,7 +97,11 @@ dialog-time rows come from the event's record in `event_dialog`. Hall quests and
 (in battle, or to a spell) is a defeat too, without the map's defeat event: the battle screen closes
 at once and 250 ms later the event window shows in its defeat look (`Dialog::defeat`: the red marble,
 `Stnd-1` at its side, `[Event] DefeatTitle` / `Defeat` / `DefeatInfo` from the language file, the red
-«Ок»); its OK returns to the main menu. There is no other end screen for a defeat. An event window
+buttons). Its «Выйти в главное меню» (the OK; the keyboard's close too) returns to the main menu. Razdor's
+own (the owner's request, not in the original): «Загрузить последнее сохранение» beside it loads the save
+written last, of either kind (`ui/mod.rs` `last_save_path`, as F10 does), disabled with no save; the
+report's `load_last` flag is set when it is shown (`Dialog::defeat(load_last)`), so the folder is listed
+once, not every frame. There is no other end screen for a defeat. An event window
 also takes the defeat look when its title holds `#DEFEAT` or it is the map's defeat event (the look
 only). Pictures 200 and 201 are the `Stnd-1` / `Stnd-2` stills (ARGB 4444, `gfx::decode_ugs_argb4444`).
 

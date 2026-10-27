@@ -722,7 +722,8 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
         }
         "defeat" => {
             // `defeat:<map>`: the report after a lost battle over the map (Dialog::defeat).
-            app.dialogs.push_back(super::dialog::Dialog::defeat());
+            // A save exists (the usual case, and the snapshot must not depend on the folder).
+            app.dialogs.push_back(super::dialog::Dialog::defeat(true));
             Screen::WorldMap
         }
         "message" => {

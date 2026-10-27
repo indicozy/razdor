@@ -97,6 +97,8 @@ pub enum Close {
     Ok,
     Yes,
     No,
+    /// The defeat report's «Загрузить последнее сохранение» (Razdor's, the owner's request).
+    LoadLast,
 }
 
 #[derive(Clone, Debug)]
@@ -144,6 +146,10 @@ pub struct Dialog {
     /// Drawn in the original's defeat look (the event window's mode 2, 0x4a8ae8 / 0x4ed458):
     /// the red marble; its OK ends the game for the main menu (0x4c206c → 0x4bfb34).
     pub defeat: bool,
+    /// The plain defeat report has a save to load: its «Загрузить последнее сохранение» is
+    /// enabled (Razdor's, the owner's request; the caller looks at the save folder once, when
+    /// it shows the report).
+    pub load_last: bool,
     /// The first text line shown when the text is taller than the screen allows (Razdor's
     /// scrolling: the wheel over the text, the arrow and page keys).
     pub scroll: std::cell::Cell<usize>,
@@ -176,6 +182,7 @@ impl Dialog {
             cued: false,
             not_before: None,
             defeat: false,
+            load_last: false,
             scroll: std::cell::Cell::new(0),
             key_down: std::cell::Cell::new(false),
         }
@@ -236,8 +243,10 @@ impl Dialog {
     /// (0x674958, loaded at 0x4dc871; 0x4aa1ac), and two centred texts: `[Event] Defeat` in
     /// the plain tint (font ae24a0), an empty row, `[Event] DefeatInfo` in the orange one
     /// (ae24a4; 0x4aa76c). The texts are drawn as typed, their marks taken out. OK goes to the
-    /// main menu (0x4c206c with the defeat mark → 0x4bfb34).
-    pub fn defeat() -> Dialog {
+    /// main menu (0x4c206c with the defeat mark → 0x4bfb34). Razdor's, the owner's request: next to
+    /// it «Загрузить последнее сохранение» (`load_last`: a save exists); the OK is then
+    /// «Выйти в главное меню».
+    pub fn defeat(load_last: bool) -> Dialog {
         let ini = |key: &str, ours: &'static str| {
             super::chrome::ui_text("Event", key).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr(ours).to_string())
         };
@@ -249,6 +258,7 @@ impl Dialog {
         d.picture = super::chrome::win_ugs("Stnd-1").map(Picture::Still);
         d.chord = true;
         d.defeat = true;
+        d.load_last = load_last;
         d
     }
 
@@ -276,6 +286,27 @@ impl Dialog {
 /// centred at 0.24 and 0.76 of its width, as the original's.
 pub fn question_buttons_x(x: f32, w: f32, bw: f32) -> (f32, f32) {
     (x + w * 0.24 - bw / 2.0, x + w * 0.76 - bw / 2.0)
+}
+
+/// The plain defeat report's two buttons (Razdor's, the owner's request): «Загрузить последнее
+/// сохранение» (left) and «Выйти в главное меню» (right), each as wide as its label needs
+/// (`label_w`, padded) and at least 95·`o`, centred at a quarter and three quarters of the
+/// window at `x`, `w` as a question's buttons are ([`question_buttons_x`]), `bh` tall at `by`.
+/// Too wide for the window with the gap between them, both shrink by one factor: they never
+/// overlap and stay inside the window.
+pub fn defeat_button_rects(x: f32, w: f32, by: f32, bh: f32, o: f32, label_w: [f32; 2]) -> [Rect; 2] {
+    let gap = 8.0 * o;
+    let margin = 6.0 * o;
+    let want = label_w.map(|l| (l + 24.0 * o).max(95.0 * o));
+    // A button centred at a quarter stays inside the window at half the window less the margins;
+    // side by side, the two centres half a window apart leave the gap between their edges.
+    let fits_window = (w / 2.0 - 2.0 * margin) / want[0].max(want[1]);
+    let fits_gap = (w - 2.0 * gap) / (want[0] + want[1]);
+    let s = fits_window.min(fits_gap).min(1.0);
+    [0.25, 0.75].into_iter().zip(want).map(|(at, wd)| {
+        let wd = wd * s;
+        Rect::new(x + w * at - wd / 2.0, by, wd, bh)
+    }).collect::<Vec<_>>().try_into().expect("two buttons")
 }
 
 /// A resource's word in the event window's captions, from the install's `[Event]
@@ -906,25 +937,46 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
             None
         };
     }
-    // The label is the language file's `[Buttons] Ok` («Ок»); in the defeat look the button
-    // is the red one (0x4aa263).
-    let ok_label = chrome::ui_text("Buttons", "Ok").filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| "OK".to_string());
-    let ok = if d.defeat {
-        let r = Rect::new(x + (w - bw) / 2.0, by, bw, bh);
-        let (_, down, pressed) = button_state(r, true);
-        chrome::defeat_button(r, &ok_label, true, down);
-        if pressed {
+    // The plain defeat report (the lost army, no event behind it): two red buttons, «Загрузить
+    // последнее сохранение» (Razdor's, the owner's request; disabled with no save) and the OK,
+    // now «Выйти в главное меню» (0x4c206c → 0x4bfb34). Its keyboard close is the exit too.
+    // Any other window keeps the OK, the language file's `[Buttons] Ok` («Ок»); in the defeat
+    // look the button is the red one (0x4aa263).
+    let (ok, load) = if d.defeat && d.event.is_none() {
+        let load_label = tr("Load the last save");
+        let exit_label = tr("Exit to main menu");
+        let [load_r, exit_r] = defeat_button_rects(x, w, by, bh, o, [chrome::button_label_width(bh, load_label), chrome::button_label_width(bh, exit_label)]);
+        let (_, load_down, load_pressed) = button_state(load_r, d.load_last);
+        chrome::defeat_button(load_r, load_label, d.load_last, load_down);
+        let (_, exit_down, exit_pressed) = button_state(exit_r, true);
+        chrome::defeat_button(exit_r, exit_label, true, exit_down);
+        if load_pressed || exit_pressed {
             super::audio::cue(super::audio::Cue::Button);
         }
-        pressed
+        (exit_pressed, load_pressed)
     } else {
-        button(x + (w - bw) / 2.0, by, bw, bh, &ok_label, true)
+        let ok_label = chrome::ui_text("Buttons", "Ok").filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| "OK".to_string());
+        let ok = if d.defeat {
+            let r = Rect::new(x + (w - bw) / 2.0, by, bw, bh);
+            let (_, down, pressed) = button_state(r, true);
+            chrome::defeat_button(r, &ok_label, true, down);
+            if pressed {
+                super::audio::cue(super::audio::Cue::Button);
+            }
+            pressed
+        } else {
+            button(x + (w - bw) / 2.0, by, bw, bh, &ok_label, true)
+        };
+        (ok, false)
     };
     // Any key but Tab, Alt and the Up and Down arrows, on its release (0x4cd558): Space,
     // Enter and Esc alike. Closed on the release, the key is no longer held when the map
     // takes over, so the hero walks on.
     if super::widgets::ok_key_pressed() {
         d.key_down.set(true);
+    }
+    if load {
+        return Some(Close::LoadLast);
     }
     (ok || (d.key_down.get() && super::widgets::ok_key_released())).then_some(Close::Ok)
 }
@@ -1062,6 +1114,33 @@ mod tests {
         assert!(report_resources(0, 0, 0, 0).is_empty());
     }
 
+    /// Razdor's, the owner's request: the defeat report's two buttons fit a 634 and a 480 px
+    /// wide window (× `o`), never overlap, sit centred at a quarter and three quarters, and
+    /// both are at least 95 × 36 px; a label too wide for its share shrinks the pair by one
+    /// factor.
+    #[test]
+    fn the_defeat_buttons_fit_the_window_side_by_side() {
+        for o in [1.0_f32, 1.5, 2.0] {
+            for w_ref in [634.0_f32, 480.0] {
+                let (x, w) = (3.0, w_ref * o);
+                let (bh, by) = (36.0 * o, 500.0);
+                for labels in [[120.0 * o, 90.0 * o], [230.0 * o, 150.0 * o], [400.0 * o, 400.0 * o]] {
+                    let [a, b] = defeat_button_rects(x, w, by, bh, o, labels);
+                    let tag = format!("o {o} w {w} labels {labels:?}: {a:?} {b:?}");
+                    assert!(a.x >= x && b.x + b.w <= x + w, "inside the window: {tag}");
+                    assert!(a.x + a.w <= b.x, "no overlap: {tag}");
+                    assert!(a.w >= 95.0 * o && b.w >= 95.0 * o, "at least 95: {tag}");
+                    assert!(a.y == by && b.y == by && a.h == bh && b.h == bh, "one row: {tag}");
+                    let centre = |r: Rect| r.x + r.w / 2.0;
+                    assert!((centre(a) - (x + w * 0.25)).abs() < 0.01 && (centre(b) - (x + w * 0.75)).abs() < 0.01, "centred at 1/4 and 3/4: {tag}");
+                }
+                // Short labels: each keeps its own width, the label plus its padding (at least 95).
+                let [a, b] = defeat_button_rects(x, w, by, bh, o, [120.0 * o, 90.0 * o]);
+                assert!((a.w - 144.0 * o).abs() < 0.01 && (b.w - 114.0 * o).abs() < 0.01, "unshrunk: {a:?} {b:?}");
+            }
+        }
+    }
+
     /// The won battle's report (0x4a9d88): the beaten one's line in white, then each prize's
     /// line after an empty row, mana in the blue tint; "nothing" only when nothing was won.
     #[test]
@@ -1084,7 +1163,7 @@ mod tests {
     #[test]
     fn the_defeat_report_is_the_event_window_in_its_defeat_look() {
         use razdor::dt::markup::{parse, Align, Ink};
-        let d = Dialog::defeat();
+        let d = Dialog::defeat(true);
         assert!(d.defeat && d.event.is_none() && !d.question && d.chord);
         let lines = parse(d.marked.as_deref().unwrap());
         assert_eq!(lines.len(), 3);

@@ -1557,7 +1557,7 @@ impl BattleView {
     fn close_lost(&self, game: &mut Game, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) -> Screen {
         game.resolve_battle(&self.battle);
         let due = crate::ui::clock::now() + razdor::av::BATTLE_REPORT_GAP_MS as f64 / 1000.0;
-        dialogs.push_back(Dialog { not_before: Some(due), ..Dialog::defeat() });
+        dialogs.push_back(Dialog { not_before: Some(due), ..Dialog::defeat(super::last_save_path().is_some()) });
         *message = None;
         Screen::WorldMap
     }
@@ -1592,7 +1592,7 @@ impl BattleView {
         let result = game.resolve_battle(&self.battle);
         match result {
             BattleResult::Defeat => {
-                dialogs.push_back(Dialog::defeat());
+                dialogs.push_back(Dialog::defeat(super::last_save_path().is_some()));
                 Some(Screen::WorldMap)
             }
             BattleResult::Victory { .. } if game.won() => Some(Screen::Victory),

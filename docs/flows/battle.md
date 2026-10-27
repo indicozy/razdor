@@ -153,8 +153,8 @@ act_with(target, kind) / move_active(to) / pass() / own_cell() / skip()
    in Battle_Step (0x4c57bc → 0x4c50ec), run as the last animation ends (0x4b0135); the rules
    are over at the killing blow, but until its slide and effect end the strip keeps the blow's
    line, the window its close button and the pointer the acting side's. Then a victory holds 2.5 s (`BATTLE_END_HOLD_MS`) then `close_won`; a defeat closes at
-   once (`close_lost`: the defeat report `Dialog::defeat` 250 ms later, its OK to the main
-   menu); a draw shows `result_overlay`. All call `Game::resolve_battle`.
+   once (`close_lost`: the defeat report `Dialog::defeat` 250 ms later, its «Выйти в главное меню» to the
+   main menu, or «Загрузить последнее сохранение» to the newest save); a draw shows `result_overlay`. All call `Game::resolve_battle`.
 
 `player_input`: a click on a card → first entry of `options(active, t)` → `act_with`; a click
 on the active card with no option → `pass`; Space = own-cell action (`own_cell` semantics);

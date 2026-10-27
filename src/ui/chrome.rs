@@ -2433,13 +2433,7 @@ pub fn button_label(r: Rect, label: &str, enabled: bool, _hover: bool, _quest_re
     };
     // Button labels in the buttons' and names' face.
     super::typography::Role::Button.with(|| {
-        let mut size = (r.h * 0.56).clamp(12.0, (22.0 * k()).max(12.0)).round();
-        // In the original's fonts a label is the sheet at the button's own scale (the
-        // original's buttons are 36 px high), never larger: 0.56 of a tall button made
-        // labels run edge to edge on large screens.
-        if super::dt_font::mode() == super::dt_font::FontMode::Original {
-            size = size.min(label_size_original(r.h));
-        }
+        let size = label_size(r.h);
         let size = super::widgets::fit_size(label, r.w - 10.0, size);
         let label = super::widgets::ellipsize(label, r.w - 10.0, size);
         let label = label.as_str();
@@ -2450,6 +2444,24 @@ pub fn button_label(r: Rect, label: &str, enabled: bool, _hover: bool, _quest_re
         text(label, x + offset, y + offset, size, Color::new(0.0, 0.0, 0.0, 0.35 * color.a));
         text(label, x, y, size, color);
     });
+}
+
+/// The size a label of a button `h` tall is drawn at, before the fit to the button's width.
+fn label_size(h: f32) -> f32 {
+    let mut size = (h * 0.56).clamp(12.0, (22.0 * k()).max(12.0)).round();
+    // In the original's fonts a label is the sheet at the button's own scale (the
+    // original's buttons are 36 px high), never larger: 0.56 of a tall button made
+    // labels run edge to edge on large screens.
+    if super::dt_font::mode() == super::dt_font::FontMode::Original {
+        size = size.min(label_size_original(h));
+    }
+    size
+}
+
+/// The width `label` needs on a button `h` tall, drawn as [`button_label`] draws it (before the
+/// fit to a narrower button).
+pub fn button_label_width(h: f32, label: &str) -> f32 {
+    super::typography::Role::Button.with(|| measure(label, label_size(h)).width)
 }
 
 /// A button label's size in the original's fonts: the Benguiat sheet at the button's

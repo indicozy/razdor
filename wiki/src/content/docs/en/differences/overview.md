@@ -24,6 +24,7 @@ Razdor plays the original game's scenarios by the original rules. Below is what 
 * **Map click** while walking stops the hero; **waiting** is interrupted by a click or a key.
 * **Hero's journal:** four tabs, "Quests", "Done", "Rumours", "Messages", with game dates.
 * **Saves:** up to 50 of your own and 30 autosaves instead of 12; pin the saves you need; quick save `F5` and quick load `F9`.
+* **Defeat window:** «Load the last save» loads the newest save of any kind (your own, quick or autosave); «Exit to main menu» is the old «OK».
 * **Backpack:** `Shift`+click equips an item or drinks a potion; `Shift`+click on a worn item takes it off.
 * **Custom battle:** any two armies outside a campaign, with levels and items; a battle code is copied as one line and pasted by another player.
 * **Quick battle:** auto-battle with `Q` or `Enter`; watching a battle (`W`) at 1×, 2× or 4× speed.

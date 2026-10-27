@@ -717,6 +717,18 @@ impl App {
         }
     }
 
+    /// The defeat report's «Загрузить последнее сохранение» (Razdor's, the owner's request): loads
+    /// the save written last, of every kind, as F10 does.
+    fn load_last_save(&mut self) {
+        match last_save_path() {
+            Some(path) => {
+                self.load(&path);
+                self.message = Some(self.load_error.take().unwrap_or_else(|| tr("Save loaded.").to_string()));
+            }
+            None => self.message = Some(tr("No save yet.").to_string()),
+        }
+    }
+
     /// The frame rate in the top right corner, when the settings ask for it: frames counted
     /// over each half second, so the number stays readable.
     pub fn draw_fps(&self) {
@@ -1163,11 +1175,16 @@ impl App {
                 let asked = closed.as_ref().is_some_and(|d| d.question && !d.offer);
                 let read = closed.as_ref().is_some_and(|d| d.event.is_some() && !d.question);
                 // The defeat report's OK ends the game: back to the main menu (0x4c206c with
-                // the defeat mark 0xae6d23 → 0x4bfb34).
+                // the defeat mark 0xae6d23 → 0x4bfb34). Razdor's «Загрузить последнее
+                // сохранение» loads the newest save instead (the owner's request).
                 if closed.as_ref().is_some_and(|d| d.defeat && d.event.is_none()) {
-                    self.dialogs.clear();
-                    self.game = None;
-                    next = Some(Screen::MainMenu);
+                    if close == Close::LoadLast {
+                        self.load_last_save();
+                    } else {
+                        self.dialogs.clear();
+                        self.game = None;
+                        next = Some(Screen::MainMenu);
+                    }
                 }
                 // Closing a dialog while the triumph plays changes the map track at once
                 // (0x4c20b3).
@@ -1291,7 +1308,7 @@ impl App {
             // 250 ms later (0x4906eb → 0x4af658).
             if next.is_none() && !matches!(self.screen, Screen::Battle(..)) && self.game.as_ref().is_some_and(Game::army_fallen) {
                 let due = crate::ui::clock::now() + razdor::av::BATTLE_REPORT_GAP_MS as f64 / 1000.0;
-                self.dialogs.push_back(dialog::Dialog { not_before: Some(due), ..dialog::Dialog::defeat() });
+                self.dialogs.push_back(dialog::Dialog { not_before: Some(due), ..dialog::Dialog::defeat(last_save_path().is_some()) });
             }
         }
         // The noon report asks for an autosave, named by the date.
@@ -1384,9 +1401,31 @@ fn latest_save(saves: impl IntoIterator<Item = (u64, PathBuf)>) -> Option<PathBu
     saves.into_iter().max().map(|(_, path)| path)
 }
 
+/// The save written last of every kind (manual and quick saves, autosaves, battle autosaves
+/// included), pinned or not: the defeat report's «Загрузить последнее сохранение» (Razdor's,
+/// the owner's request). None when there is no save at all.
+fn last_save_path() -> Option<PathBuf> {
+    let dir = save::games_dir()?;
+    let kinds = [save::SaveKind::Manual, save::SaveKind::Auto];
+    latest_save(kinds.into_iter().flat_map(|kind| save::list_files(&dir, kind)).map(|e| (e.written, e.path)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The defeat report's load (Razdor's, the owner's request) takes the newest save of
+    /// either kind, and none when there is no save: the button is then disabled.
+    #[test]
+    fn the_defeat_load_takes_the_newest_save_of_either_kind() {
+        let manual = vec![(120, PathBuf::from("manual/quick")), (40, PathBuf::from("manual/old"))];
+        let auto = vec![(90, PathBuf::from("auto/battle")), (30, PathBuf::from("auto/old"))];
+        let all = manual.into_iter().chain(auto);
+        assert_eq!(latest_save(all), Some(PathBuf::from("manual/quick")));
+        let auto_last = vec![(50, PathBuf::from("manual/a")), (95, PathBuf::from("auto/b"))];
+        assert_eq!(latest_save(auto_last), Some(PathBuf::from("auto/b")));
+        assert_eq!(latest_save(Vec::<(u64, PathBuf)>::new()), None);
+    }
 
     /// F10 (the owner's request) loads the autosave written last, whatever the list's order
     /// (pinned saves first) says.
