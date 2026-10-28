@@ -311,11 +311,17 @@ fn move_secs(px: f32) -> f32 {
     (0.7 * px).round().min(200.0) / 1000.0
 }
 
-/// The distance between the centres of `a`'s and `b`'s cards, in the original's pixels (its
-/// card is 92 wide).
-fn card_distance(l: &Layout, battle: &Battle, a: usize, b: usize) -> f32 {
+/// Fighter `id` as its card shows it: as it was before the action while the action's effect
+/// on it has not ended ([`Fx::shown`]), else as it is in `now`.
+fn shown_cell<'a>(fx: Option<&'a Fx>, now: &'a [Fighter], id: usize) -> &'a Fighter {
+    fx.and_then(|fx| fx.shown(id)).unwrap_or(&now[id])
+}
+
+/// The distance between the centres of `a`'s and `b`'s cards as they are shown, before the
+/// action (`fighters`: the fighters before it), in the original's pixels (its card is 92 wide).
+fn card_distance(l: &Layout, fighters: &[Fighter], a: usize, b: usize) -> f32 {
     let centre = |id: usize| {
-        let f = &battle.fighters[id];
+        let f = &fighters[id];
         l.portrait(l.cell_pos(f.team, f.slot)).center()
     };
     centre(a).distance(centre(b)) * 92.0 / l.card.x
@@ -856,7 +862,7 @@ impl BattleView {
                     let before = self.battle.fighters.clone();
                     self.fx = match self.ai_move() {
                         Some(Step::Act { actor, hit }) => {
-                            let px = card_distance(l, &self.battle, actor, hit.target);
+                            let px = card_distance(l, &before, actor, hit.target);
                             Some(Fx::act(&self.battle, actor, hit, px, before))
                         }
                         Some(Step::Move { actor, from, to }) => {
@@ -1042,7 +1048,7 @@ impl BattleView {
             if let Some(&kind) = opts.first() {
                 let before = self.battle.fighters.clone();
                 if let Ok(hit) = self.battle.act_with(t, kind) {
-                    let px = card_distance(l, &self.battle, active, hit.target);
+                    let px = card_distance(l, &before, active, hit.target);
                     self.fx = Some(Fx::act(&self.battle, active, hit, px, before));
                     self.note_log();
                 }
@@ -1302,7 +1308,7 @@ impl BattleView {
     /// Fighter `id` as the screen shows it: as it was until the action's effect lands on it
     /// ([`Fx::shown`]).
     fn fighter(&self, id: usize) -> &Fighter {
-        self.fx.as_ref().and_then(|fx| fx.shown(id)).unwrap_or(&self.battle.fighters[id])
+        shown_cell(self.fx.as_ref(), &self.battle.fighters, id)
     }
 
     /// The living fighter shown in a cell: while an action plays, where the fighters stood
@@ -1382,8 +1388,10 @@ impl BattleView {
     fn draw_fx(&self, l: &Layout, fx: &Fx) {
         let FxKind::Act { hit, echo, slide, effect, .. } = &fx.kind else { return };
         let (first, echo_at) = fx.marks();
+        // Where the cards are shown (before the action): a back row that stepped forward stays
+        // in its old cells until the effect ends.
         let card = |id: usize| {
-            let f = &self.battle.fighters[id];
+            let f = self.fighter(id);
             l.portrait(l.cell_pos(f.team, f.slot)).center()
         };
         // The slide (0x4afbd8): the action's sprite from one card's centre to the other's.
@@ -1407,7 +1415,7 @@ impl BattleView {
             // The echo on the actor: the action's own picture for a counterblow, the sorcery
             // for a curse.
             let k = (fx.t - echo_at) / effect;
-            let a = &self.battle.fighters[fx.actor];
+            let a = self.fighter(fx.actor);
             let q = l.portrait(l.cell_pos(a.team, a.slot));
             let n = match echo {
                 Some(Echo::Curse) => 2,
@@ -1421,7 +1429,7 @@ impl BattleView {
             return;
         }
         let k = (fx.t - slide) / effect;
-        let f = &self.battle.fighters[hit.target];
+        let f = self.fighter(hit.target);
         let sq = l.portrait(l.cell_pos(f.team, f.slot));
         let drawn = draw_effect(self.battle.content(), effect_number(&self.battle, fx.actor, hit.kind), sq, k);
         let (flash, label, color) = match hit.kind {
@@ -1989,6 +1997,36 @@ mod tests {
         assert_eq!(view.fighter(target).hp, was, "the effect plays");
         view.fx.as_mut().unwrap().t = first;
         assert_eq!(view.fighter(target).hp, view.battle.fighters[target].hp, "the effect is over");
+    }
+
+    /// The bandit camp: a blow's effect plays in the cell its card is shown in. The fighters
+    /// before the action have the target in the back row, the current ones in the front (as
+    /// after a back row steps forward): the effect and the card stay in the back row until the
+    /// effect ends, then move to the front.
+    #[test]
+    fn an_effect_plays_in_the_cell_its_card_is_shown_in() {
+        let mut view = bandit_camp();
+        let (actor, hit, mut before) = loop {
+            assert_eq!(view.battle.outcome(), Outcome::Ongoing, "no blow before the end");
+            let before = view.battle.fighters.clone();
+            if let Some(Step::Act { actor, hit }) = view.battle.auto_step() {
+                if hit.amount > 0 {
+                    break (actor, hit, before);
+                }
+            }
+        };
+        let target = hit.target;
+        let back = Slot::new(Row::Back, 0);
+        let front = Slot::new(Row::Front, 0);
+        before[target].slot = back;
+        view.battle.fighters[target].slot = front;
+        view.fx = Some(Fx::act(&view.battle, actor, hit, 200.0, before));
+        let first = view.fx.as_ref().unwrap().marks().0;
+        view.fx.as_mut().unwrap().t = first - 0.01;
+        assert_eq!(view.fighter(target).slot, back, "the card is shown in the back row");
+        assert_eq!(shown_cell(view.fx.as_ref(), &view.battle.fighters, target).slot, back);
+        view.fx.as_mut().unwrap().t = first;
+        assert_eq!(view.fighter(target).slot, front, "the effect is over: the card moves");
     }
 
     #[test]
