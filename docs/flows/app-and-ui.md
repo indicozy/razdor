@@ -287,9 +287,8 @@ The spellbook in portrait (`spellbook::frame`, `window_layout::upright_book_vide
 its rows are as many as keep every card at least the landscape card's 96 px tall (`spellbook::upright_rows`), 20 spells
 a page on a 2400 px phone. Its card text takes the phone's text base (`display::text_for`, `dialog::TEXT_REF`).
 Its bottom row is inside that rectangle. The minimap (`minimap::window`) in
-portrait stands inside the safe area (`in_safe_area`, `inset_view`); its phone close cross sits in the frame's top
-corner (`close_box`); where a rounded screen corner would cut the cross or its click area, the cross moves inward
-along the diagonal toward the window's middle (`close_box_with`, the least shift). The F1 keys list (`hotkeys::help_overlay`) takes the cross on a phone and closes by it.
+portrait stands inside the safe area (`in_safe_area`, `inset_view`). It has no close cross on a phone (the owner's request, 2026-10-28,
+not in the original): the bottom bar's map button closes it, as M and Esc do. The F1 keys list (`hotkeys::help_overlay`) takes a cross on a phone and closes by it.
 Close crosses on a phone (a phone choice, not in the original): every title strip is 1.5× the desktop's
 (`chrome::phone_strip_height`, `PHONE_STRIP`) and its cross sits inside it at the right, sized by the desktop's formula
 on the taller strip (`chrome::title_close_cross`). The taller strip grows upward into the room above the window

@@ -536,12 +536,6 @@ pub fn disc_on_screen(c: Vec2, rad: f32, size: Vec2, safe: SafeArea) -> bool {
         })
 }
 
-/// Whether the whole rectangle `r` lies on the screen: its four corners do (the screen's shape is
-/// convex, so the rectangle is inside when they are).
-pub fn rect_on_screen(r: Rect, size: Vec2, safe: SafeArea) -> bool {
-    [vec2(r.x, r.y), vec2(r.x + r.w, r.y), vec2(r.x, r.y + r.h), vec2(r.x + r.w, r.y + r.h)].into_iter().all(|p| on_screen(p, size, safe))
-}
-
 /// The least shift in `[0, max]` for which `ok` holds, found by bisection to half a pixel; `ok`
 /// must turn true as the shift grows. None when even `max` is not enough.
 pub fn smallest_shift(max: f32, ok: impl Fn(f32) -> bool) -> Option<f32> {
