@@ -1,35 +1,30 @@
 ---
 title: Gear filter
-description: Searching for items in the hero's and army's backpack and at the market.
+description: Item groups, search and order in the hero's and army's backpack and at the market.
 sidebar:
   order: 5
 ---
 
-## About this feature
-
-A Razdor addition, similar to Spotlight search. The filter field sits:
-
-* on the hero and army screen, above the backpack;
-* on the market tab, above the list of goods and sales.
-
 ## How to use it
 
-Start typing: `Ctrl+F` or a click on the filter field. While the field is empty, the letters **A** and **N** keep their usual actions (A closes the army window, N turns the music off), so do not start a search with them.
+A Razdor addition. Above the hero and army backpack there is a row of buttons.
 
-The list narrows as you type. Only items whose name, type, stats, bonus or description contain **all** the words you typed remain.
+1. Open the **Hero and army** window (or the market in a town).
+2. Above the backpack is a row of buttons: eight groups (helms, armour, weapons, shields, rings, amulets, potions, other) and the **Search** button last. Hover over a button to see its group's name.
+3. Click a group: the backpack keeps only that group's items, and its button stays pressed.
+4. Click the pressed button again: all items show again.
+5. Search: click the **Search** button (or press `Ctrl+F`) and type a word. The list narrows as you type: it keeps the items whose name, type, stats, bonus or description contain **all** the words you typed. **Enter** takes the first match, **Esc** clears the line.
+6. Item order: right click the **Search** button to go to the next order, in turn: as found, by name A–Z, by name Z–A, price ↓, price ↑. The backpack scrolls back to its top each time.
 
 :::tip
 Case does not matter when searching. The letter "Ё" counts as "Е".
 :::
 
-### Controls
+## Good to know
 
-* **Enter** selects the first match:
-  * on the army screen, the selected unit puts the item on or drinks it at once;
-  * at the market, the item is selected for "Buy" or "Sell".
-* **Esc** (first press) clears the search field.
-* **Esc** (second press) closes the window.
-
-:::note
-In the backpack, the matching parts of the names are listed in the description field until you hover over an item.
-:::
+* While the search line is empty, the letters **A** and **N** keep their usual actions (A closes the army window, N turns the music off). To search, first click the button or press `Ctrl+F`.
+* The search covers only the items shown in the chosen group and order.
+* **Esc** (first press) clears the search line, **Esc** (second press) closes the window.
+* On the army screen, **Enter** puts the item on or drinks it for the selected unit at once. While the upgrade tree is open, there is no button row.
+* At the market, the row of eight groups sits above the list of goods. The search line shows only when you click the list, press `Ctrl+F` or type a letter. Enter selects the first match for "Buy" or "Sell". A click on the "Name" or "Price" title sorts the list.
+* In the backpack, the matching parts of the names are listed in the description field until you hover over an item.
