@@ -340,15 +340,38 @@ pub fn clicked() -> bool {
 pub fn button_state(r: Rect, enabled: bool) -> (bool, bool, bool) {
     let hover = enabled && !input_swallowed() && mouse_in(r.x, r.y, r.w, r.h);
     let capture = [r.x.to_bits(), r.y.to_bits(), r.w.to_bits(), r.h.to_bits()];
-    let down_edge = is_mouse_button_pressed(MouseButton::Left);
-    let up_edge = is_mouse_button_released(MouseButton::Left);
+    let (next, down, pressed) = capture_step(
+        BUTTON_CAPTURE.with(|c| c.get()),
+        capture,
+        hover,
+        is_mouse_button_pressed(MouseButton::Left),
+        is_mouse_button_released(MouseButton::Left),
+        is_mouse_button_down(MouseButton::Left),
+    );
+    BUTTON_CAPTURE.with(|c| c.set(next));
+    (hover, down, pressed)
+}
+
+/// One frame of a button's press capture (`button_state`): `captured` is the rect the left
+/// press began on, `mine` this button's rect. Returns the new capture, whether the button
+/// shows as held, and whether it was clicked this frame. A release ends the press that is
+/// captured on this button: released on it, that is a click, and the capture is used up, so
+/// a second release with no new press (a worn switch bouncing) clicks nothing; released off
+/// it, the press is cancelled. A release on another button leaves this one's capture alone.
+fn capture_step(captured: Option<[u32; 4]>, mine: [u32; 4], hover: bool, down_edge: bool, up_edge: bool, held: bool) -> (Option<[u32; 4]>, bool, bool) {
+    let mut next = captured;
     if down_edge && hover {
-        BUTTON_CAPTURE.with(|c| c.set(Some(capture)));
-    } else if !is_mouse_button_down(MouseButton::Left) && !up_edge {
-        BUTTON_CAPTURE.with(|c| c.set(None));
+        next = Some(mine);
+    } else if !held && !up_edge {
+        next = None;
     }
-    let captured = BUTTON_CAPTURE.with(|c| c.get() == Some(capture));
-    (hover, captured && hover && is_mouse_button_down(MouseButton::Left), hover && captured && up_edge)
+    let captured_here = next == Some(mine);
+    let down = captured_here && hover && held;
+    let pressed = captured_here && hover && up_edge;
+    if captured_here && up_edge {
+        next = None;
+    }
+    (next, down, pressed)
 }
 
 pub fn right_clicked() -> bool {
@@ -2123,6 +2146,65 @@ pub fn scrollbar_px(r: Rect, scroll: &mut f32, most: f32, view: f32, step: f32) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Runs `capture_step` over (down edge, up edge, held, hover) frames for one button and
+    /// returns each frame's `pressed`.
+    fn clicks(frames: &[(bool, bool, bool, bool)]) -> Vec<bool> {
+        let mine = [1, 2, 3, 4];
+        let mut captured = None;
+        frames
+            .iter()
+            .map(|&(down, up, held, hover)| {
+                let (next, _, pressed) = capture_step(captured, mine, hover, down, up, held);
+                captured = next;
+                pressed
+            })
+            .collect()
+    }
+
+    /// A press on the button, its release, then a second release with no press in between (a
+    /// worn switch's bounce) clicks once: the press's capture is used up by the first click.
+    #[test]
+    fn a_stray_second_release_without_a_press_does_not_click_again() {
+        let frames = [(true, false, true, true), (false, true, false, true), (false, true, false, true)];
+        assert_eq!(clicks(&frames), [false, true, false]);
+        // Several bounces in a row, and a bounce on a frame with no press at all: still none.
+        let bounces = [(true, false, true, true), (false, true, false, true), (false, true, false, true), (false, true, false, true), (false, false, false, true)];
+        assert_eq!(clicks(&bounces).iter().filter(|&&p| p).count(), 1);
+    }
+
+    /// A release seen by another button (drawn earlier in the frame) does not take this button's
+    /// press: its own release still clicks it.
+    #[test]
+    fn a_release_on_another_button_leaves_the_capture_alone() {
+        let (next, _, pressed) = capture_step(Some([1, 2, 3, 4]), [9, 9, 9, 9], false, false, true, false);
+        assert_eq!((next, pressed), (Some([1, 2, 3, 4]), false));
+        let (next, _, pressed) = capture_step(next, [1, 2, 3, 4], true, false, true, false);
+        assert_eq!((next, pressed), (None, true));
+    }
+
+    /// A normal press and release clicks once, and a press and release in one frame (a tap on a
+    /// phone) clicks once too.
+    #[test]
+    fn a_press_and_release_click_once() {
+        assert_eq!(clicks(&[(true, false, true, true), (false, true, false, true)]), [false, true]);
+        assert_eq!(clicks(&[(true, true, false, true)]), [true]);
+        // The next press clicks again.
+        let twice = [(true, false, true, true), (false, true, false, true), (true, false, true, true), (false, true, false, true)];
+        assert_eq!(clicks(&twice), [false, true, false, true]);
+    }
+
+    /// Holding the button clicks nothing until the release; sliding off and releasing there
+    /// cancels; a press that began off the button never clicks it.
+    #[test]
+    fn holding_sliding_off_and_pressing_outside_do_not_click() {
+        // Held, then released on the button.
+        assert_eq!(clicks(&[(true, false, true, true), (false, false, true, true), (false, true, false, true)]), [false, false, true]);
+        // Slide off and release off: no click, and a later release on the button has no press.
+        assert_eq!(clicks(&[(true, false, true, true), (false, false, true, false), (false, true, false, false), (false, true, false, true)]), [false, false, false, false]);
+        // Press off the button, slide on and release: no capture, no click.
+        assert_eq!(clicks(&[(true, false, true, false), (false, false, true, true), (false, true, false, true)]), [false, false, false]);
+    }
 
     /// The map tooltip's title corners (0x4dbd83, 0x4dbe0b): the hostile pair loses
     /// (128, 192, 250), leaving a dark orange, the normal one (192, 160, 160); the neutral box
