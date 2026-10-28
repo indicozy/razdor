@@ -2711,8 +2711,9 @@ impl Game {
     fn ai_add_hire(&mut self, i: usize, l: usize, k: usize, price: i32, own: bool, p: i32, now: u64) {
         let c = self.content.clone();
         let unit = take_stock(&mut self.world.locations[l], k);
-        let slot = free_slot(&c, &self.world.armies[i].troops);
-        let mut t = Troop::new(unit, 1, slot.unwrap_or(super::formation::Slot::new(super::formation::Row::Reserve, 0)));
+        // Below the cap of 12 there is always a free cell of the formation (see `free_slot`).
+        let slot = free_slot(&c, &self.world.armies[i].troops).expect("below the cap, a free cell");
+        let mut t = Troop::new(unit, 1, slot);
         t.kind = if own { WageKind::Recruit } else { WageKind::Mercenary };
         t.last_paid = now;
         let xp = self.hire_xp(i, unit, p);
@@ -2750,8 +2751,9 @@ impl Game {
                         let price = self.ai_price(i, l, c.unit(r.unit).cost);
                         take_stock(&mut self.world.locations[l], k);
                         self.world.armies[i].gold -= price;
-                        let slot = free_slot(&c, &self.world.locations[l].garrison);
-                        let mut t = Troop::new(r.unit, 1, slot.unwrap_or(super::formation::Slot::new(super::formation::Row::Reserve, 0)));
+                        // Below the cap of 12 there is always a free cell of the formation.
+                        let slot = free_slot(&c, &self.world.locations[l].garrison).expect("below the cap, a free cell");
+                        let mut t = Troop::new(r.unit, 1, slot);
                         t.last_paid = now;
                         let xp = self.hire_xp(i, r.unit, p);
                         let mut pool = Vec::new();

@@ -246,13 +246,15 @@ impl Game {
         }
     }
 
-    /// The garrison here, if the tab is offered, and its free cell for a unit of `row` that
-    /// wants `cell`: that cell when given and free, else its own cell or the first free one.
+    /// The free cell for a unit of `row` that wants `cell` in a formation of `units`: that cell
+    /// when the formation has it and it is free, else the first free one of the row. The
+    /// original has 12 fixed places (0x4c6f50), so a cell off the grid is never kept: that
+    /// would draw the unit past the grid's edge.
     fn free_cell(units: &[Slot], f: super::formation::Formation, want: Slot, row: super::formation::Row) -> Option<Slot> {
         if units.len() >= f.capacity() {
             return None;
         }
-        if units.contains(&want) { f.free_slot(units, row) } else { Some(want) }
+        if f.contains(want) && !units.contains(&want) { Some(want) } else { f.free_slot(units, row) }
     }
 
     /// Leaves squad member `i` in the garrison of the castle or fort here, at `cell` (an empty
@@ -1363,6 +1365,28 @@ mod tests {
         assert_eq!(g.take_from_garrison(0, None, false), Err(ServiceError::NoSuchUnit));
         g.location = Some(1);
         assert_eq!(g.leave_in_garrison(1, None), Err(ServiceError::NotHere), "not the player's castle");
+    }
+
+    #[test]
+    fn a_unit_on_a_cell_past_the_grid_is_seated_on_a_free_one() {
+        // The original has 12 fixed places (0x4c6f50): a unit whose own cell is past the 6-wide
+        // grid (Front 6) is not left on it, in the garrison or taken back into the army.
+        use crate::rules::formation::{Row, Slot};
+        let mut s = map();
+        let mut castle = town(BuildingType::Castle, 2, 2, 3);
+        castle.faction = 1;
+        castle.owner_army = 0;
+        s.buildings = vec![castle];
+        let mut g = inside(&s);
+        g.first_noon_today();
+        g.squad[2].slot = Slot::new(Row::Front, 6);
+        g.leave_in_garrison(2, None).unwrap();
+        let placed = g.garrison_here()[0].unit.slot;
+        assert!(g.content.formation.contains(placed), "left on {placed:?}, off the grid");
+        g.world.locations[0].stationed[0].unit.slot = Slot::new(Row::Front, 6);
+        g.take_from_garrison(0, None, false).unwrap();
+        let back = g.squad[2].slot;
+        assert!(g.content.formation.contains(back), "taken back on {back:?}, off the grid");
     }
 
     /// The knight in his own castle (building 0) with 1000 gold and two militia.
