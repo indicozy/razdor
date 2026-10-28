@@ -40,6 +40,30 @@ Known slow-machine failure: `rules::ai::real_maps::thirty_days_on_every_map` has
 budget per map (`RELEASE_BUDGET_SECS`); on slow cores scale it with
 `RAZDOR_PERF_BUDGET_SCALE=2` (РК6 takes about 8 s on E-cores).
 
+## Community map smoke test
+
+`rules::ai::real_maps::community_maps_smoke` is the community part of the Definition of Done
+(CLAUDE.md): it plays every map of every install in a folder outside the repo for 30 days with
+the AI and reports **every** failing map, not only the first. It has no time budget (a
+compatibility check, not a speed check) and passes when `RAZDOR_COMMUNITY_DIR` is unset.
+
+Layout (a mod is a modified install; a symlink to the install dir is fine):
+
+```
+$RAZDOR_COMMUNITY_DIR/<entry>/install        Discord Times install dir
+$RAZDOR_COMMUNITY_DIR/<entry>/maps/*.DTm     optional extra community maps, played with that install's data
+```
+
+Run it (the path is the machine's own, not for the repo):
+
+```sh
+RAZDOR_DT_DIR=<install> RAZDOR_COMMUNITY_DIR=/path/to/community CARGO_BUILD_JOBS=4 taskset -c 16-19 cargo test --release --lib community_maps_smoke -- --nocapture
+```
+
+It prints one line per map (`<entry>/<map>: ok|FAIL <why>, <days>, AI battles N, player battles N,
+<secs> s`) and panics at the end with the list of failures. When a community map's bug is fixed,
+add that map to `<entry>/maps/` so the smoke test keeps it.
+
 ## Offscreen runs and snapshots
 
 `src/ui/snapshot.rs`. The game itself, on an invisible display:
