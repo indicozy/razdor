@@ -310,11 +310,217 @@ fn tab_state(active: bool, hover: bool, down: bool) -> &'static str {
     }
 }
 
+/// The lettering box of a barracks tab picture, in its pixels (x0, y0, x1, y1; exclusive), inside the
+/// frame's ornaments (their inner edges at x 42 and 216, y 27 and 73 in all three states, as the install's
+/// art has them). The lettering's cap rows are 36 to 61 (the `K` of «Казарма»), its baseline at 62.
+const TAB_LABEL_BOX: (u32, u32, u32, u32) = (44, 29, 214, 72);
+/// The cap height and baseline of the barracks' lettering in its picture (pixels).
+const TAB_CAP: f32 = 26.0;
+const TAB_BASELINE: f32 = 62.0;
+/// A lettering pixel's alpha from this up (the picture's panel is under 40, its letters 160 to 255).
+const TAB_LETTER_ALPHA: u8 = 100;
+
+local! {
+    /// The store tab's pictures, one per tab state and label, built once from the barracks' picture.
+    static STORE_TABS: RefCell<Vec<(&'static str, &'static str, Option<Texture2D>)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The ink of a barracks tab's lettering as its picture has it: the mean colour and alpha of its
+/// letters' pixels (the dark outline apart), and the alpha of a dark outline when it has one.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct TabInk {
+    rgb: [f32; 3],
+    alpha: f32,
+    outline: Option<f32>,
+}
+
+fn tab_ink(img: &Image) -> Option<TabInk> {
+    let (x0, y0, x1, y1) = TAB_LABEL_BOX;
+    // The letters' pixels with their chroma (max less min channel) and alpha, the dark rim apart.
+    let mut letters: Vec<([f32; 3], f32, f32)> = Vec::new();
+    let (mut dark, mut dark_alpha) = (0.0f32, 0.0f32);
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let p = img.pixel(x, y);
+            if p[3] < TAB_LETTER_ALPHA {
+                continue;
+            }
+            let a = p[3] as f32 / 255.0;
+            let (hi, lo) = (p[0].max(p[1]).max(p[2]), p[0].min(p[1]).min(p[2]));
+            if hi < 40 {
+                dark += 1.0;
+                dark_alpha += a;
+                continue;
+            }
+            letters.push(([p[0] as f32 / 255.0, p[1] as f32 / 255.0, p[2] as f32 / 255.0], a, (hi - lo) as f32 / 255.0));
+        }
+    }
+    if letters.is_empty() {
+        return None;
+    }
+    // A coloured lettering (the pressed state's orange-red) is its vivid pixels; a brown one, all of
+    // its pixels, weighted by chroma so the grey-brown rim counts less.
+    let vivid: Vec<_> = letters.iter().filter(|l| l.2 >= 0.4).copied().collect();
+    let used = if vivid.is_empty() { letters.clone() } else { vivid };
+    let (mut sum, mut alpha_sum, mut n) = ([0.0f32; 3], 0.0f32, 0.0f32);
+    for (rgb, a, chroma) in used {
+        let weight = if chroma >= 0.4 { 1.0 } else { 1.0 + chroma * 4.0 };
+        for c in 0..3 {
+            sum[c] += rgb[c] * weight;
+        }
+        alpha_sum += a * weight;
+        n += weight;
+    }
+    Some(TabInk { rgb: sum.map(|v| v / n), alpha: alpha_sum / n, outline: (dark > 0.0).then(|| dark_alpha / dark) })
+}
+
+/// `src` (colour 0..1, alpha 0..1) composited over the RGBA pixel `dst`, not premultiplied.
+fn over_pixel(dst: &mut [u8], src: [f32; 3], a: f32) {
+    let da = dst[3] as f32 / 255.0;
+    let oa = a + da * (1.0 - a);
+    if oa <= 0.0 {
+        return;
+    }
+    for c in 0..3 {
+        let d = dst[c] as f32 / 255.0;
+        dst[c] = ((src[c] * a + d * da * (1.0 - a)) / oa * 255.0).round().clamp(0.0, 255.0) as u8;
+    }
+    dst[3] = (oa * 255.0).round().clamp(0.0, 255.0) as u8;
+}
+
+/// The label written in the Benguiat sheet at the barracks' cap height on its baseline, centred in the
+/// lettering box: its coverage per pixel of a `w` × `h` picture (the sheet's level, nearest-sampled).
+fn tab_label_coverage(sheet: &dt_font::BitmapFont, label: &str, w: usize, h: usize) -> Option<Vec<f32>> {
+    // The sheet's own cap (rows from the top of its H to the baseline) sets the scale.
+    let hg = sheet.cell('H')?;
+    let top = (0..hg.h).find(|&r| (0..hg.w).any(|c| sheet.grey_at(hg.x + c, hg.y + r) > 127))?;
+    let s = TAB_CAP / (sheet.baseline() - top as f32);
+    let (x0, _, x1, _) = TAB_LABEL_BOX;
+    let glyphs: Vec<dt_font::Glyph> = label.chars().map(|c| sheet.cell(c)).collect::<Option<_>>()?;
+    let total: f32 = glyphs.iter().map(|g| g.w as f32 * s).sum();
+    let mut pen = (x0 + x1) as f32 / 2.0 - total / 2.0;
+    let mut cov = vec![0.0f32; w * h];
+    let top_y = TAB_BASELINE - sheet.baseline() * s;
+    // Each picture pixel is the mean of the sheet's level over its area (a 4 × 4 grid of points),
+    // so a sheet drawn larger than the picture's lettering keeps its strokes.
+    const SUB: usize = 4;
+    for g in &glyphs {
+        let (gw, gh) = (g.w as f32 * s, g.h as f32 * s);
+        // The sheet's level at a cell's pixel, emboldened: the sheet's strokes are one sheet pixel wide
+        // at this size, the picture's lettering's about two, so each pixel takes 70% of its neighbours.
+        let ink = |cx: u32, cy: u32| {
+            let mut v = sheet.grey_at(g.x + cx, g.y + cy) as f32 / 255.0;
+            for (dx, dy) in [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                let (nx, ny) = (cx as i32 + dx, cy as i32 + dy);
+                if nx >= 0 && ny >= 0 && (nx as u32) < g.w && (ny as u32) < g.h {
+                    v = v.max(0.7 * sheet.grey_at(g.x + nx as u32, g.y + ny as u32) as f32 / 255.0);
+                }
+            }
+            v
+        };
+        for py in top_y.floor().max(0.0) as usize..((top_y + gh).ceil() as usize).min(h) {
+            for px in pen.floor().max(0.0) as usize..((pen + gw).ceil() as usize).min(w) {
+                let mut total = 0.0f32;
+                for sy in 0..SUB {
+                    for sx in 0..SUB {
+                        let fx = (px as f32 + (sx as f32 + 0.5) / SUB as f32 - pen) / s;
+                        let fy = (py as f32 + (sy as f32 + 0.5) / SUB as f32 - top_y) / s;
+                        if fx < 0.0 || fy < 0.0 || fx >= g.w as f32 || fy >= g.h as f32 {
+                            continue;
+                        }
+                        total += ink(fx as u32, fy as u32);
+                    }
+                }
+                // The thin strokes' partial coverage is brought up to the picture's weight.
+                let v = (total / (SUB * SUB) as f32 * 1.6).min(1.0);
+                if v > 0.0 {
+                    cov[py * w + px] = cov[py * w + px].max(v);
+                }
+            }
+        }
+        pen += gw;
+    }
+    // A light softening, as the picture's own lettering has its edges (one 3 × 3 pass, the centre half).
+    let soft: Vec<f32> = (0..w * h)
+        .map(|i| {
+            let (x, y) = ((i % w) as isize, (i / w) as isize);
+            let (mut sum, mut n) = (0.0f32, 0.0f32);
+            for dy in -1..=1isize {
+                for dx in -1..=1isize {
+                    let (xx, yy) = (x + dx, y + dy);
+                    if xx >= 0 && yy >= 0 && (xx as usize) < w && (yy as usize) < h {
+                        sum += cov[yy as usize * w + xx as usize];
+                        n += 1.0;
+                    }
+                }
+            }
+            0.5 * cov[i] + 0.5 * sum / n
+        })
+        .collect();
+    Some(soft)
+}
+
+/// The picture of a barracks tab in `state` (`TB-`, `TBo`, `TBd`) with «label» in its lettering's place:
+/// the lettering is taken off (its box cleared to the paper: the picture's panel is transparent there
+/// in all three states), and the label is written in the install's Benguiat face at the lettering's
+/// cap height, in the lettering's own ink (its colour and alpha, and its dark outline when it has one).
+/// None without the install's barracks picture or its Benguiat sheet.
+fn store_tab_image(state: &str, label: &str) -> Option<Image> {
+    let mut img = chrome::image(&format!("Windows/{state}2_RUS.lit"))?;
+    let ink = tab_ink(&img)?;
+    let (w, h) = (img.width as usize, img.height as usize);
+    let cov = dt_font::with_face(dt_font::Face::Title, || dt_font::with_sheet(|sheet| tab_label_coverage(sheet, label, w, h)))??;
+    let (x0, y0, x1, y1) = TAB_LABEL_BOX;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            img.rgba[(y as usize * w + x as usize) * 4 + 3] = 0;
+        }
+    }
+    let at = |x: usize, y: usize| cov[y * w + x];
+    if let Some(oa) = ink.outline {
+        // The dark outline is a pixel ring round the letters, outside them.
+        for y in 1..h - 1 {
+            for x in 1..w - 1 {
+                let near = (y - 1..=y + 1).any(|yy| (x - 1..=x + 1).any(|xx| at(xx, yy) >= 0.5));
+                if at(x, y) < 0.5 && near {
+                    over_pixel(&mut img.rgba[(y * w + x) * 4..(y * w + x) * 4 + 4], [0.0; 3], oa);
+                }
+            }
+        }
+    }
+    for y in 0..h {
+        for x in 0..w {
+            let c = at(x, y);
+            if c > 0.0 {
+                over_pixel(&mut img.rgba[(y * w + x) * 4..(y * w + x) * 4 + 4], ink.rgb, ink.alpha * c);
+            }
+        }
+    }
+    Some(img)
+}
+
+/// The store tab's picture in `state`, built once per state and label (the barracks' picture, with the
+/// store's name in it: [`store_tab_image`]). None where the picture cannot be built: the plain frame.
+fn store_tab_art(state: &'static str) -> Option<Texture2D> {
+    let label = tab_label(Tab::Store);
+    if let Some(t) = STORE_TABS.with(|c| c.borrow().iter().find(|(s, l, _)| *s == state && *l == label).map(|(_, _, t)| t.clone())) {
+        return t;
+    }
+    let tex = store_tab_image(state, label).and_then(|img| {
+        let (w, h) = (u16::try_from(img.width).ok()?, u16::try_from(img.height).ok()?);
+        let t = Texture2D::from_rgba8(w, h, &img.rgba);
+        t.set_filter(FilterMode::Linear);
+        Some(t)
+    });
+    STORE_TABS.with(|c| c.borrow_mut().push((state, label, tex.clone())));
+    tex
+}
+
 /// A parchment tab in the left column (`tab` `None` is the exit). Returns true when clicked.
 fn tab_button(label: &str, tab: Option<Tab>, r: Rect, active: bool) -> bool {
     let (hover, down, pressed) = button_state(r, true);
     let state = tab_state(active, hover, down);
-    let art = tab_art(tab).and_then(|n| chrome::win(&format!("{state}{n}_RUS")));
+    let art = if tab == Some(Tab::Store) { store_tab_art(state) } else { tab_art(tab).and_then(|n| chrome::win(&format!("{state}{n}_RUS"))) };
     if let Some(t) = art {
         // The original's tab art has its label baked in. Stacked (a phone held upright) the row's
         // buttons have another shape than the column's, so the art keeps its own proportions,
