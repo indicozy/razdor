@@ -493,12 +493,17 @@ fn desc_max_scroll(steps: &[f32], room: f32) -> usize {
 /// The art's corner ornaments are 34 px at the interface scale (`chrome::text_box_frame`).
 const CORNER_PX: f32 = 34.0;
 
-/// The part of the text box `rows` where a list's rows go: the box less its top and bottom
-/// bands, so the corner ornaments (both ends of each band) never cover a row, the scrollbar or
-/// its arrows. Full width: the sides carry no corner.
+/// The rows' margin from the box's top and bottom edges, at the interface scale.
+const EDGE_PX: f32 = 4.0;
+
+/// The part of the text box `rows` where a list's rows go: the box's full height less a small
+/// margin, and a corner's width cut off each side. The corner ornaments are 34 px squares, and
+/// the rows scroll past every height, so a row's icon, its picked bar and the scrollbar stay in
+/// the columns between the corners; the corners then fall on the box's empty edges only.
 fn list_view(rows: Rect, k: f32) -> Rect {
-    let band = (CORNER_PX * k).min(rows.h / 2.0);
-    Rect::new(rows.x, rows.y + band, rows.w, rows.h - 2.0 * band)
+    let side = (CORNER_PX * k).min(rows.w / 2.0);
+    let edge = (EDGE_PX * k).min(rows.h / 2.0);
+    Rect::new(rows.x + side, rows.y + edge, rows.w - 2.0 * side, rows.h - 2.0 * edge)
 }
 
 /// "Сценарий для Новой Игры".
@@ -534,11 +539,13 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
     let mut picked = PICKED.with(|p| p.get()).min(list.len().saturating_sub(1));
     // The list: per group a round icon and the name, and a campaign's chapters under it in
     // small type; the picked group's block is lit. The wheel and the scrollbar scroll it.
-    // The list ends at 360 (its room is 324 units): «Добавить карту…» and its hint are under it.
-    let rows = win.rect(12.0, 36.0, 270.0, 324.0);
+    // The box's top left is the window's inner pane frame's corner (4, 31), so its silver edge
+    // and the pane's line up (`window_inner_frames`, 0x48d710); its bottom right stays at
+    // (282, 360). «Добавить карту…» and its hint are under it, on the same left edge and width.
+    let rows = win.rect(4.0, 31.0, 278.0, 329.0);
     chrome::text_box_base(rows);
     // The rows, their bar, the scrollbar and the empty-list line live in `view`: the box's
-    // corner ornaments take its top and bottom bands, so nothing under them.
+    // corner ornaments take the columns beside it, so nothing under them.
     let view = list_view(rows, k);
     let (head_h, chapter_h) = (30.0 * k, 18.0 * k);
     let block_h = |g: &Group| head_h + listed_chapters(scenarios, g).len() as f32 * chapter_h + if listed_chapters(scenarios, g).is_empty() { 0.0 } else { 4.0 * k };
@@ -552,7 +559,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
     }
     scroll = scroll.clamp(0.0, max_scroll);
     // Razdor's scrollbar on the right when the list does not all fit (a touch screen has no
-    // wheel); the rows give it room. Its track runs between the two right corners.
+    // wheel); the rows give it room. Its track runs the view's height, inside the right corners.
     let barred = max_scroll > 0.0;
     scrollbar_px(Rect::new(view.x + view.w - 16.0 * k, view.y, 12.0 * k, view.h), &mut scroll, max_scroll, view.h / k, 15.0);
     SCROLL.with(|s| s.set(scroll));
@@ -627,7 +634,9 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         // The name leaves room for the marks it has (none: the original's width).
         let name_w = r.w - (40.0 + if f.completed { 44.0 } else if f.favourite { 24.0 } else { 0.0 }) * k;
         with_face(Face::Subtitle, || {
-            let size = fit_size(name, name_w, 15.0 * k);
+            // The name keeps its 15 px and ends in «…» when it is too long: shrunk to fit it went
+            // to 10.7 sp on a phone, under the text-size check's 12 sp.
+            let size = 15.0 * k;
             chrome::shadow_text(&ellipsize(name, name_w, size), head.x + 32.0 * k, head.y + head.h * 0.5 + size * 0.36, size, name_ink);
         });
         let small = 12.0 * k;
@@ -836,14 +845,14 @@ fn experimental_menu() {
 /// of `labels`, with a small arrow; a click opens the drop-down list `key`. The value picked.
 /// Razdor's «Добавить карту…» under the scenario list, with the hint of what it takes: the
 /// platform's picker copies the map (or the archive's maps) into the install (`ui::map_import`).
-/// The list ends above it (`add_map_button`'s room: the list is 324 units high).
+/// The list ends above it (`add_map_button`'s room: the list is 329 units high).
 fn add_map_button(win: &Win, has_install: bool) {
     if !map_import::available() {
         return;
     }
     let k = win.k;
     let enabled = has_install && map_import::can_start();
-    let r = win.rect(12.0, 366.0, 270.0, 26.0);
+    let r = win.rect(4.0, 366.0, 278.0, 26.0);
     let (_, down, pressed) = button_state(r, enabled);
     chrome::marble_button(r, tr("Add a map…"), enabled, down);
     if pressed {
@@ -852,8 +861,8 @@ fn add_map_button(win: &Win, has_install: bool) {
     }
     let size = 10.0 * k;
     let hint = tr("A .DTm file or a .zip archive: an archive may hold a campaign or several maps.");
-    for (i, line) in wrap(hint, 270.0 * k, size).iter().take(2).enumerate() {
-        let at = win.rect(12.0, 398.0 + i as f32 * 13.0, 270.0, 13.0);
+    for (i, line) in wrap(hint, 278.0 * k, size).iter().take(2).enumerate() {
+        let at = win.rect(4.0, 398.0 + i as f32 * 13.0, 278.0, 13.0);
         chrome::shadow_text(line, at.x + 4.0 * k, at.y + size, size, chrome::CREAM);
     }
 }
@@ -1239,16 +1248,17 @@ mod tests {
     }
 
     #[test]
-    fn the_scenario_list_lies_between_the_corner_ornaments() {
-        // The box is 270 × 324 units; at k = 2 the corners are 68 px and the list keeps the
-        // room between them, full width, so its first icon (x 18 k) and the scrollbar (the
-        // right 16 k) sit beside the corners, not under them.
+    fn the_scenario_list_lies_between_the_corner_columns() {
+        // The box is 278 × 329 units; at k = 2 each corner is 68 px wide and tall. The list
+        // takes the full height less a 4 px margin (8 px at k = 2), and the columns between
+        // the corners: its first icon, the picked bar and the scrollbar never sit under one.
         let rows = Rect::new(12.0, 36.0, 540.0, 648.0);
         let v = list_view(rows, 2.0);
-        assert_eq!((v.x, v.y, v.w, v.h), (12.0, 36.0 + 68.0, 540.0, 648.0 - 136.0));
-        assert!(v.y >= rows.y + CORNER_PX * 2.0 && v.bottom() <= rows.bottom() - CORNER_PX * 2.0);
-        let one = list_view(Rect::new(0.0, 0.0, 270.0, 324.0), 1.0);
-        assert_eq!((one.y, one.h), (34.0, 256.0));
+        assert_eq!((v.x, v.y, v.w, v.h), (12.0 + 68.0, 36.0 + 8.0, 540.0 - 136.0, 648.0 - 16.0));
+        assert!(v.x >= rows.x + CORNER_PX * 2.0 && v.right() <= rows.right() - CORNER_PX * 2.0);
+        assert!(v.y < rows.y + CORNER_PX * 2.0 && v.bottom() > rows.bottom() - CORNER_PX * 2.0, "the full height, bar the margin");
+        let one = list_view(Rect::new(0.0, 0.0, 278.0, 329.0), 1.0);
+        assert_eq!((one.x, one.y, one.w, one.h), (34.0, 4.0, 210.0, 321.0));
     }
 
     #[test]
