@@ -2014,6 +2014,33 @@ mod tests {
         assert!(g.enter_waiting_building().is_empty(), "once");
     }
 
+    #[test]
+    fn a_building_whose_event_ends_the_game_is_not_entered_after_its_window() {
+        // Другой берег «Отец умер» (a player's report): the building's local event is the map's
+        // defeat event. The walk stops on the cell with its window open; once the window is read
+        // the game is over, so the building he walked into is never entered (events.md §11: the
+        // game returns to the main menu, no window of a building opens after it).
+        let e = ev(EventKind::Local);
+        let mut s = world(vec![e]);
+        s.header.heroes[0] = hero(2, 2, 100, &[]);
+        s.header.defeat_event = 1;
+        let mut town = building(BuildingType::Town, 9, 2, (1, 1));
+        town.event_slots[0] = 1;
+        town.event_count = 1;
+        s.buildings = vec![town];
+        let mut g = start(&s);
+        assert!(g.set_destination((9, 2)));
+        let events = walk(&mut g);
+        assert_eq!(fired(&events), vec![1]);
+        assert_eq!(g.script_end(), Some(ScriptEnd::Defeat(1)));
+        assert!(g.waiting_entry.is_some(), "the building waits for its window to be read");
+        // The window's OK, as the interface makes it.
+        let after = read(&mut g);
+        assert!(!after.contains(&Event::Arrived(0)), "{after:?}");
+        assert!(g.enter_waiting_building().is_empty(), "the game is over: no building is entered");
+        assert_eq!(g.waiting_entry, None, "the waiting building is dropped");
+    }
+
     /// The noon report of the step before is read while the arrival's question is still held
     /// for the step's animation (`tick_shown`): the building waits for the question, it is not
     /// entered when the report closes (world.md §7.2: entered only once the window is read).

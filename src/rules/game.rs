@@ -1834,6 +1834,13 @@ impl Game {
     /// not while a fight is pending, nor when he no longer stands there.
     pub fn enter_waiting_building(&mut self) -> Vec<Event> {
         let mut events = Vec::new();
+        // A game that has ended is not continued: after a victory or defeat event's window
+        // (events.md §11, 0x4bfb34) the building he walked into is never entered, and its
+        // window never opens (a player's report: it flashed before the main menu).
+        if self.script_end().is_some() {
+            self.waiting_entry = None;
+            return events;
+        }
         // The windows are not read while the step's events are still held for its animation
         // (`tick_shown`), or a question waits for its answer: the building waits for them too
         // (world.md §7.2, 0x4ed42c). The noon report of an earlier step can close while the
