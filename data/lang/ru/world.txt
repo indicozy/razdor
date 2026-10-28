@@ -44,7 +44,7 @@ The garrison «{winner}» defeated the army «{loser}». = Гарнизон «{w
 Army = Армия
 Leader = Предводитель
 Under spells: {spells} = Под заклинаниями: {spells}
-Wounded by magic: -{hurt} hits = Раны от магии: жизнь -{hurt}
+Wounded: -{hurt} hits = Раны: жизнь -{hurt}
 (tribute already collected) = (дань уже собрана)
 
 # World map: side panel and notices

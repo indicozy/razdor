@@ -1942,8 +1942,9 @@ fn tip_shows_leader(leader: &str, units: usize) -> bool {
 }
 
 /// The original's army tooltip (0x4ca9f0): its name, its 2×6 cards, then "Предводитель" and
-/// the leader's name, the description in orange; world spells on it and their wounds
-/// (Razdor's) under that.
+/// the leader's name, the description in orange; world spells on it under that, then the wounds
+/// (Razdor's line, the original's tooltip has none): all the troops' wounds, battle ones
+/// included, so the line is not called magic.
 fn army_tooltip(game: &Game, a: &Army) -> Tooltip {
     let title = if a.shown_name().is_empty() { info("NoNameArmy", n_("Unknown army")) } else { a.shown_name().to_string() };
     let mut text = Vec::new();
@@ -1968,7 +1969,7 @@ fn army_tooltip(game: &Game, a: &Army) -> Tooltip {
     }
     let hurt: i32 = a.troops.iter().map(|t| t.hurt).sum();
     if hurt > 0 {
-        text.push((trf!("Wounded by magic: -{hurt} hits", hurt), Ink::Mana));
+        text.push((trf!("Wounded: -{hurt} hits", hurt), Ink::Mana));
     }
     // 0x4ca9f0: the hostile frame and colours for an army whose attitude to the player is
     // below 1, neutral ones (0) included.
@@ -3650,6 +3651,22 @@ mod tests {
         let t = army_tooltip(&g, &g.world.armies[a]);
         assert!(t.text.iter().any(|(s, _)| s == "Армия Ivo."), "the army's description");
         assert!(!t.text.iter().any(|(s, _)| s.contains("#HERONAME")));
+    }
+
+    /// An army's wounds line counts every wound, battle ones included (Razdor's line), so it is
+    /// not called magic in the catalog either.
+    #[test]
+    fn an_army_s_wounds_are_not_called_magic() {
+        use std::sync::Arc;
+        use razdor::rules::content::Content;
+        use razdor::i18n::{fill, tr, tr_in, Lang};
+        let mut g = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        let a = g.world.armies.len() - 1;
+        g.world.armies[a].troops[0].hurt = 118;
+        let t = army_tooltip(&g, &g.world.armies[a]);
+        let want = fill(tr("Wounded: -{hurt} hits"), &[("hurt", &118)]);
+        assert!(t.text.iter().any(|(s, _)| *s == want), "the wounds line: {want}");
+        assert!(!tr_in(Lang::Ru, "Wounded: -{hurt} hits").contains("магии"));
     }
 
     /// An army's leader is named only when it has more than one unit (0x4ca9f0).
