@@ -126,4 +126,5 @@ Every message of a report that asks for something gets them.
    - then **the owner's list**: one `AskUserQuestion` (multiSelect) per group of bugs to fix,
      feature requests, deviations and `needs-info` items — each option a short label and the
      report id, the recommended ones first. What they pick gets done; the rest stays open.
-3. Don't release unless asked (the `release` skill does that).
+3. Don't release or offer to: fixes stay `fixed`, their lines in `changelog/unreleased.md`, until
+   the owner's weekly release (`CLAUDE.md`; the `release` skill does that).

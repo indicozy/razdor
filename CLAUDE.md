@@ -122,6 +122,9 @@ are in `README.md` (Russian).
 ## When I say…
 
 - "note it": add to `docs/PLAYTEST_NOTES.md` only; don't fix yet.
+- Releases are weekly (the owner's decision, 2026-10-28): a fix is done once it is on `main`
+  with status `fixed` and its line in `changelog/unreleased.md` (the next release's candidate);
+  never cut or offer a release after a fix. The owner releases the week's pile when they say so.
 - "release" / "make a release": the `release` skill. The Discord release post goes out together with
   the release's start (right after the tag is pushed), without waiting for the release pipeline to
   finish (the owner's decision, 2026-10-27).
