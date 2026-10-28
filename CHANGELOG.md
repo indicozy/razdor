@@ -14,6 +14,21 @@
 
 ## 1.1.8 — 2026-10-28
 
+Коммит `9101d1a0` (тег `v1.1.8`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+8a914d238fcb9317cec11b449f0343f0711800ce7ea57bda8c3211bbaa0901a2  razdor
+63de7ebe8764abf49ed88e6e1941f65e2f7264e8f2b5006a1482fd3ed1c1b0c4  Razdor.exe
+01d8951a7b7aa62c619fd50e78b9419e3dabbcb9d061a27cb6384a14941e9b53  razdor-macos
+c195ee7cb4b752610fc89c7c460aa757a4440f34140a7f262030626f5b87af96  razdor-translate
+cfee1479e507a376facd8c456df99f531c3bbb99795eb8db35a94a4593456065  Razdor-translate.exe
+d463734a30127ffa33202cc0093ba8b86de27f7fff01339ffcdf0d2a4212599b  razdor-translate-macos
+6795cec99026bd378fad39674966e0bf2f6e687497a6b7d3031ee51d1feb8250  razdor.apk
+ff0b7f5727dd60303ac09b9db4c120a3932cabce5df56a9f557e0a1346def04f  razdor.ipa
+```
+
 ### Исправлено
 
 - Список сценариев: уголки рамки больше не закрывают значок первого сценария и концы полосы прокрутки.
