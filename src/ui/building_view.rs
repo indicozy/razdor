@@ -92,6 +92,8 @@ pub struct BuildingView {
     /// Shared quest and rumour selection across non-army building tabs.
     pub hall_pick: Option<usize>,
     hall_scroll: usize,
+    /// How many rows the building's description is scrolled down, when its rows do not fit its box.
+    desc_scroll: usize,
     /// The market shows the "sell" shop (the pack) instead of the goods.
     pub selling: bool,
     /// The garrison tab's selected unit: (in the garrison, index).
@@ -180,7 +182,7 @@ fn now_ms() -> i64 {
 
 impl BuildingView {
     pub fn new(tab: Tab) -> BuildingView {
-        BuildingView { tab, pick: None, scroll: 0, hall_pick: None, hall_scroll: 0, selling: false, garrison_sel: None, garrison_buy: None, filter: String::new(), sort: ListSort::Shown, group: ItemGroup::All, tribute_paid: false, tribute: (0, 0), anim: None, hire_panel: None }
+        BuildingView { tab, pick: None, scroll: 0, hall_pick: None, hall_scroll: 0, desc_scroll: 0, selling: false, garrison_sel: None, garrison_buy: None, filter: String::new(), sort: ListSort::Shown, group: ItemGroup::All, tribute_paid: false, tribute: (0, 0), anim: None, hire_panel: None }
     }
 
     fn switch(&mut self, tab: Tab) {
@@ -344,31 +346,85 @@ fn tab_button(label: &str, tab: Option<Tab>, r: Rect, active: bool) -> bool {
 /// The building's description in its box, as the original's (the castle's main hall at
 /// 1024×768): a marked-up text in Benguiat's plain tint at the sheet's own size, centred,
 /// with no shadow, rows 19 of the original's pixels apart (the event window's text list).
-fn description_box(desc: &str, x: f32, y: f32, w: f32, h: f32) {
-    super::typography::Role::Name.with(|| description_box_in_face(desc, x, y, w, h))
+fn description_box(desc: &str, x: f32, y: f32, w: f32, h: f32, scroll: &mut usize) {
+    super::typography::Role::Name.with(|| description_box_in_face(desc, x, y, w, h, scroll))
 }
 
-fn description_box_in_face(desc: &str, x: f32, y: f32, w: f32, h: f32) {
+/// The description's scroll bar (Razdor's, 12 px at the interface scale), at the box's right
+/// inside the text's margin; the rows rewrap narrower by its room when they scroll.
+const DESC_BAR: f32 = 12.0;
+
+fn description_box_in_face(desc: &str, x: f32, y: f32, w: f32, h: f32, scroll: &mut usize) {
     let k = chrome::k();
-    chrome::text_box(Rect::new(x, y, w, h));
+    let bx = Rect::new(x, y, w, h);
+    chrome::text_box(bx);
     let o = super::dt_font::whole_scale(k * 0.9375);
     // A phone's description takes the phone's text base (a phone choice, not in the original: one
     // original px per dp, `dialog::TEXT_REF`); the desktop keeps the original's scale `o`.
     let phone = super::display::dp_px().map(|_| super::display::text_base(o, super::dialog::TEXT_REF));
-    let base = phone.unwrap_or(o);
     let room = w - 60.0 * k;
     // Razdor's text size (the owner's request: phones' text too small): the description at
-    // its text scale while its rows fit the box above the original's 28 px margin, else stepped
-    // down to the base (the smallest).
-    let rows_at = |t: f32| markup_rows(&format!("^{desc}"), room, super::dt_font::sheet_size(super::dt_font::Face::Subtitle, t));
-    let t = description_scale(super::display::text_size(), o, phone, |t| rows_at(t).len() as f32 * 19.0 * t <= h - 28.0 * base);
+    // its text scale while its rows fit the box between its padding, else stepped down to the
+    // base (the smallest), where the rows scroll instead.
+    let rows_at = |t: f32, room: f32| markup_rows(&format!("^{desc}"), room, super::dt_font::sheet_size(super::dt_font::Face::Subtitle, t));
+    let t = description_scale(super::display::text_size(), o, phone, |t| !description_rows(rows_at(t, room).len(), 19.0 * t, h, 14.0 * t, 0).scrolls);
     let size = super::dt_font::sheet_size(super::dt_font::Face::Subtitle, t);
-    let rows = rows_at(t);
-    let line = 19.0 * t;
-    let top = y + (h - rows.len() as f32 * line) / 2.0 + 14.0 * t;
-    for (i, row) in rows.iter().enumerate() {
-        draw_markup_row(row, x + 30.0 * k, top + i as f32 * line, room, size);
+    let (line, pad) = (19.0 * t, 14.0 * t);
+    let mut row_room = room;
+    let mut rows = rows_at(t, room);
+    let mut fit = description_rows(rows.len(), line, h, pad, *scroll);
+    if fit.scrolls {
+        row_room = room - (DESC_BAR + 12.0) * k;
+        rows = rows_at(t, row_room);
+        fit = description_rows(rows.len(), line, h, pad, *scroll);
+        // The wheel and a finger's slide scroll by rows; the bar moves the same position.
+        swipe_rows(bx, line);
+        if mouse_in(x, y, w, h) {
+            let turn = wheel();
+            if turn < 0.0 {
+                *scroll = (*scroll + 1).min(fit.max_scroll);
+            } else if turn > 0.0 {
+                *scroll = scroll.saturating_sub(1);
+            }
+        }
+        let bar = Rect::new(x + w - (30.0 + DESC_BAR + 4.0) * k, y + pad, DESC_BAR * k, h - 2.0 * pad);
+        scrollbar_always(bar, scroll, fit.shown, rows.len());
+        *scroll = (*scroll).min(fit.max_scroll);
+        fit.first = *scroll;
     }
+    for (n, row) in rows.iter().skip(fit.first).take(fit.shown).enumerate() {
+        // The line's top from the box's top; a line outside the padded area is not drawn.
+        let top = fit.top + n as f32 * line;
+        if top < pad - 0.5 || top + line > h - pad + 0.5 {
+            continue;
+        }
+        // The line's baseline sits 14 t below its top (the original's text list, 19 px lines).
+        draw_markup_row(row, x + 30.0 * k, y + top + 14.0 * t, row_room, size);
+    }
+}
+
+/// Where a description's rows sit in its box `h` tall with `pad` above and below, one line `line`
+/// tall each: `rows` in all, the rows from `scroll` on that show, and the top of the first shown
+/// line from the box's top. A text whose lines fit the padded box is centred and does not scroll
+/// (`scrolls` false, `first` 0, `max_scroll` 0); one that does not starts at the top pad and shows
+/// as many lines as fit (`shown`), its scroll (in rows) at most `max_scroll`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct DescriptionRows {
+    first: usize,
+    shown: usize,
+    top: f32,
+    max_scroll: usize,
+    scrolls: bool,
+}
+
+fn description_rows(rows: usize, line: f32, h: f32, pad: f32, scroll: usize) -> DescriptionRows {
+    let avail = (h - 2.0 * pad).max(0.0);
+    if rows as f32 * line <= avail {
+        return DescriptionRows { first: 0, shown: rows, top: pad + (avail - rows as f32 * line) / 2.0, max_scroll: 0, scrolls: false };
+    }
+    let shown = if line > 0.0 { (avail / line).floor() as usize } else { 0 };
+    let max_scroll = rows.saturating_sub(shown);
+    DescriptionRows { first: scroll.min(max_scroll), shown, top: pad, max_scroll, scrolls: true }
 }
 
 /// The description's text scale (a pure choice): the phone's text base `phone` when there is one,
@@ -447,7 +503,7 @@ fn hall_offers_in_face(game: &mut Game, f: &Frame, view: &mut BuildingView, mess
         if let Some(l) = game.location {
             // The original fills #HERONAME in building/army descriptions at map load (0x4b2930, 0x4b2a46).
             let desc = game.fill_text(&game.world.locations[l].description);
-            description_box(&desc, panel.x, panel.y, panel.w, panel.h);
+            description_box(&desc, panel.x, panel.y, panel.w, panel.h, &mut view.desc_scroll);
         }
         return None;
     }
@@ -2599,7 +2655,7 @@ fn with_back(bar: Option<Screen>, view: &BuildingView) -> Option<Screen> {
 
 #[cfg(test)]
 mod tests {
-    use super::{description_scale, hall_entry_font, hall_first_row_y, hire_panel_on, tab_state, village_ok_key, Entered, HirePanel};
+    use super::{description_rows, description_scale, hall_entry_font, hall_first_row_y, hire_panel_on, tab_state, village_ok_key, Entered, HirePanel};
     use razdor::rules::content::UnitId;
     use razdor::rules::script::HallEntry;
 
@@ -2892,5 +2948,30 @@ mod tests {
         // The desktop: its own scale, the text size on top, stepped down to it.
         assert_eq!(description_scale(1.0, 0.9375, None, |_| true), 0.9375);
         assert_eq!(description_scale(1.25, 0.9375, None, |t| t < 1.0), 0.9375, "the original's scale is the last step");
+    }
+
+    /// Rows that fit the box between its padding are centred and do not scroll (the line's top
+    /// at (h − rows × line) / 2, as before the padding).
+    #[test]
+    fn a_description_that_fits_is_centred_and_does_not_scroll() {
+        let fit = description_rows(3, 20.0, 150.0, 14.0, 0);
+        assert_eq!(fit, super::DescriptionRows { first: 0, shown: 3, top: 45.0, max_scroll: 0, scrolls: false });
+        // Exactly full between the pads: from the top pad, still no scroll.
+        assert_eq!(description_rows(6, 20.0, 148.0, 14.0, 0).top, 14.0);
+        assert!(!description_rows(6, 20.0, 148.0, 14.0, 0).scrolls);
+    }
+
+    /// Rows that do not fit start at the top pad, show the whole lines that fit, and scroll by rows
+    /// up to the last full window; the scroll is clamped at its end.
+    #[test]
+    fn a_description_that_does_not_fit_scrolls_by_rows_inside_the_padding() {
+        // 150 px box, 14 px pads: 122 px of lines, 6 whole lines of 20 px, 10 rows in all.
+        let top = description_rows(10, 20.0, 150.0, 14.0, 0);
+        assert_eq!((top.first, top.shown, top.top, top.max_scroll, top.scrolls), (0, 6, 14.0, 4, true));
+        assert_eq!(description_rows(10, 20.0, 150.0, 14.0, 2).first, 2, "scrolled two rows down");
+        assert_eq!(description_rows(10, 20.0, 150.0, 14.0, 9).first, 4, "clamped at the last window");
+        // The shown lines stay inside the padded area: the last one ends at h − pad.
+        let f = description_rows(10, 20.0, 150.0, 14.0, 4);
+        assert!(f.top + f.shown as f32 * 20.0 <= 150.0 - 14.0 + 1e-3);
     }
 }
