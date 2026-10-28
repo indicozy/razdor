@@ -382,7 +382,12 @@ pub trait EventWorld {
     fn army_inactive(&self, army: ArmyId) -> bool;
     /// It stands in its home building, or it has none.
     fn army_at_home(&self, army: ArmyId) -> bool;
+    /// Where the player stands: a building (his own, or the bridge he is on), else the event
+    /// point under him.
     fn place(&self) -> Option<Place>;
+    /// The event point under him, whatever building he is in too (0x4abfbc reads it first).
+    /// `None` when the scan reads no point (an attack's contact, events.md §1).
+    fn point(&self) -> Option<Place>;
 
     // Effects.
     fn add_experience(&mut self, xp: i64);
@@ -1321,20 +1326,25 @@ impl EventEngine {
     }
 
     /// The events the scan checks where the player stands, in the original's order
-    /// (0x4abfbc): the global events in file order; then the event point's listed events
-    /// whatever their kind; or the building's local events (in villages and shipyards every
-    /// listed event), only on entering it.
-    fn candidates(&self, place: Option<Place>) -> Vec<EventId> {
+    /// (0x4abfbc, events.md §2): the global events in file order; then the event point under
+    /// him, its listed events whatever their kind; then the building he stands in (his own,
+    /// or the bridge he is on), its local events (in villages and shipyards every listed
+    /// event), only on entering it. A point on a building's cell is checked before the
+    /// building, not instead of it.
+    fn candidates(&self, w: &dyn EventWorld) -> Vec<EventId> {
         let mut ids: Vec<EventId> =
             (1..=self.events.len() as EventId).filter(|&id| self.ev(id).kind() == Some(EventKind::Global)).collect();
-        let here = match place {
-            Some(Place::Building(_)) if !self.fresh_visit => None,
-            p => p.and_then(|p| self.places.get(&p)),
-        };
-        let any_kind = place.is_some_and(|p| matches!(p, Place::Point(_)) || self.every_kind.contains(&p));
-        for &id in here.into_iter().flatten() {
-            if any_kind || self.ev(id).kind() == Some(EventKind::Local) {
-                ids.push(id);
+        if let Some(p) = w.point() {
+            ids.extend(self.places.get(&p).into_iter().flatten());
+        }
+        if let Some(b @ Place::Building(_)) = w.place() {
+            if self.fresh_visit {
+                let any_kind = self.every_kind.contains(&b);
+                for &id in self.places.get(&b).into_iter().flatten() {
+                    if any_kind || self.ev(id).kind() == Some(EventKind::Local) {
+                        ids.push(id);
+                    }
+                }
             }
         }
         ids
@@ -1344,7 +1354,7 @@ impl EventEngine {
     /// scope, not eligible, or the first failing condition. `None`: it would fire.
     pub fn why_not(&self, id: EventId, w: &dyn EventWorld) -> Option<String> {
         let e = self.event(id)?;
-        if !self.candidates(w.place()).contains(&id) {
+        if !self.candidates(w).contains(&id) {
             let why = match e.kind() {
                 _ if e.subordinate != 0 => "subordinate: fires only through a chain",
                 Some(EventKind::Quest | EventKind::Rumour) => "quest or rumour: taken in the main hall",
@@ -1373,7 +1383,7 @@ impl EventEngine {
 
     /// The first event that passes the full check.
     fn first_eligible(&self, w: &dyn EventWorld) -> Option<EventId> {
-        self.candidates(w.place()).into_iter().find(|&id| self.passes(id, w))
+        self.candidates(w).into_iter().find(|&id| self.passes(id, w))
     }
 
     // ---------------------------------------------------------------------------------------
@@ -2030,6 +2040,8 @@ pub(crate) mod mock {
         pub inactive: HashSet<ArmyId>,
         pub home: HashSet<ArmyId>,
         pub place: Option<Place>,
+        /// The event point under him (see [`EventWorld::point`]); a point `place` counts too.
+        pub point: Option<Place>,
         /// Lasting spells by holder (opcodes 11 and 14).
         pub spells_on: HashMap<Holder, Vec<u8>>,
         /// Army cells (opcode 19).
@@ -2118,6 +2130,14 @@ pub(crate) mod mock {
         }
         fn place(&self) -> Option<Place> {
             self.place
+        }
+        /// A point `place` is the point under him too, as the game's `place()` gives it when
+        /// no building holds him.
+        fn point(&self) -> Option<Place> {
+            match self.place {
+                Some(p @ Place::Point(_)) => Some(p),
+                _ => self.point,
+            }
         }
         fn add_experience(&mut self, xp: i64) {
             self.log.push(Fx::Xp(xp));
@@ -3162,6 +3182,27 @@ mod tests {
         assert_eq!(tick_at(&mut g, &mut w, 70), vec![3], "a new visit");
         g.visit(inn);
         assert_eq!(tick_at(&mut g, &mut w, 80), vec![3], "re-entered without leaving the cell");
+    }
+
+    /// The scan reads the event point under the hero before the building he stands in, and
+    /// checks both on the same pass (0x4abfbc, events.md §2): a bridge he stands on with a
+    /// point on its cell runs the point's event first, then the bridge's local event. Without
+    /// the point (or with no bridge) the building alone is as before.
+    #[test]
+    fn a_point_on_a_bridge_cell_is_checked_before_the_bridge() {
+        let bridge = Place::Building(9);
+        let at = Place::Point(4);
+        let mut g = EventEngine::from_parts(
+            vec![ev(EventKind::Local), ev(EventKind::Local)],
+            vec![(bridge, vec![1]), (at, vec![2])],
+            0,
+            0,
+        );
+        let mut w = MockWorld { place: Some(bridge), point: Some(at), ..MockWorld::new() };
+        assert_eq!(tick_at(&mut g, &mut w, 0), vec![2, 1], "the point's event first, then the bridge's");
+        let mut g = EventEngine::from_parts(vec![ev(EventKind::Local)], vec![(bridge, vec![1])], 0, 0);
+        let mut w = MockWorld { place: Some(bridge), ..MockWorld::new() };
+        assert_eq!(tick_at(&mut g, &mut w, 0), vec![1], "the bridge alone");
     }
 
     /// The hall lists what passes the full check, the window and once flag included; taking

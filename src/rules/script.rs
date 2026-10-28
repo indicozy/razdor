@@ -522,6 +522,12 @@ impl EventWorld for Game {
         if let Some(b) = self.bridge_stood_on {
             return Some(Place::Building(self.world.locations[b].id));
         }
+        self.point()
+    }
+
+    /// The event point under him (the one the scan reads first, 0x4abfbc), none while the
+    /// scan reads no point (`point_zeroed`).
+    fn point(&self) -> Option<Place> {
         if self.point_zeroed {
             return None;
         }
@@ -3384,6 +3390,62 @@ mod real_maps {
         // Its OK, as the UI reports it when the window closes.
         let _ = g.event_window_closed();
         assert_eq!(g.enter_waiting_building(), vec![Event::Arrived(l)]);
+    }
+
+    /// Другой берег's bridge toll (a player's report: the toll was never asked). The bridge's
+    /// ends are event points 10 (19,120) and 11 (13,114), on its cells: 136 «На мосту» (listed
+    /// on point 11) sets flag BG; the middle point 9 (15,116) lists 137 «Встреча с охраной»,
+    /// which needs BG, clears it and chains the toll question 139. The original reads the point
+    /// under the hero before the building he stands in (0x4abfbc, events.md §2), so both fire
+    /// on the bridge's cells. Walks as a step does, through `set_destination` and `tick_shown`.
+    #[test]
+    fn other_shore_the_bridge_toll_is_asked_on_the_bridge() {
+        let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+        let dt = DtInstall::load(std::path::Path::new(&dir)).expect("install loads");
+        let c = Arc::new(Content::from_dt(&dt));
+        let s = dt.maps.iter().find(|m| m.name == "Другой берег").expect("the map").load().unwrap();
+        let mut g = Game::from_scenario(c, &s, HeroClass::Knight);
+        let _ = g.drain_events();
+        close_windows(&mut g);
+        let tile_of = |g: &Game, id: u8| g.world.points.iter().find(|p| p.id == id).expect("the point").tile;
+        assert_eq!(tile_of(&g, 11), (13, 114), "point 11 is the bridge's end");
+        assert_eq!(tile_of(&g, 9), (15, 116), "point 9 is on the bridge");
+        // Walks as a step does: the scan runs on each step, the windows are read as they open.
+        let walk = |g: &mut Game, to: (i32, i32)| {
+            let mut shown = Vec::new();
+            for _ in 0..20_000 {
+                if !g.moving() && !g.holds_events() {
+                    break;
+                }
+                shown.extend(g.tick_shown(0.016));
+                if g.pending_question().is_some() {
+                    shown.extend(g.answer_question(false));
+                }
+                while g.script().is_some_and(|s| s.holds_window()) {
+                    shown.extend(g.event_window_closed());
+                }
+            }
+            assert_eq!(g.tile(), to, "walked to {to:?}");
+            shown
+        };
+        // The bridge's west end is on the land at (12, 114) (its cells run diagonally from
+        // (13, 114) to (19, 120)); the fog is revealed around it, as a player's walk would
+        // have explored it, because a route runs only over explored cells.
+        g.fog.reveal(15, 117, 8);
+        g.location = None;
+        g.pos = g.world.map.center((12, 114));
+        let end = (13, 114);
+        assert!(g.set_destination(end), "a route from the west end onto point 11");
+        let shown = walk(&mut g, end);
+        assert!(g.script().unwrap().flag("BG"), "136 «На мосту» set BG on the bridge's end: {shown:?}");
+        assert!(g.script().unwrap().times_fired(136) > 0, "{shown:?}");
+        // Onwards to point 9 in the middle: 137 needs BG and chains the toll question 139.
+        assert!(g.set_destination((15, 116)), "a route to point 9");
+        let shown = walk(&mut g, (15, 116));
+        assert!(
+            shown.contains(&Event::Script(EventOutcome::Question(139))) || g.script().unwrap().times_fired(139) > 0,
+            "the toll question opens in the middle of the bridge: {shown:?}"
+        );
     }
 
     /// Report 1375: Warlock's army (id 23, «Армия Ротгера фон Варлока») attacked from the ghost's

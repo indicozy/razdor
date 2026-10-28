@@ -172,6 +172,12 @@ is open in the rules at once, so the fog layer draws them as before (`Game::unsh
   world.md §7.2), so a walk across a bridge runs its local events on that step and goes on unless
   one opens a window. Not the building his move began on (0x4ed434, `click_buildings.1`). Armies on
   bridges block unless the Razdor option is on (`pass_on_bridges`).
+  The scan checks the event point under him first, then the building (0x4abfbc, events.md §2):
+  `EventWorld::point` gives the point (none while `point_zeroed`), `candidates` lists globals, the
+  point's events, then the building's local ones. `EventWorld::place` still prefers the building (or
+  bridge) to the point; it serves the visit tracking and the hall. A point on a bridge cell fires
+  (Другой берег's toll, a player's report); test `a_point_on_a_bridge_cell_is_checked_before_the_bridge`,
+  and `other_shore_the_bridge_toll_is_asked_on_the_bridge` on the real map.
 - *Time and windows.* Never advance time while a dialog is open; the UI only ticks when
   `input_blocked()` is false and `drain_events()` is empty.
 - *Questions asked again.* A declined repeating offer comes back on the next visit, not in the same
