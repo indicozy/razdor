@@ -29,7 +29,9 @@ ui/building_view.rs BuildingView                            tabs = town::tabs_he
   Garrison   → open_garrison(), leave_in_garrison(), take_from_garrison(),
                swap_with_garrison(), move_guard(), garrison_price()      rules/town.rs
   Store      → store_here(), take_from_store(i)  (Razdor's deviation)  rules/town.rs;
-               UI: building_view::store (the grid, a press takes the item)
+               UI: building_view::store (the loot as the backpack's squares in the upper pane,
+               items_view::item_squares, a press takes the item; the hero's pack read-only below;
+               its tab picture is the barracks' one with the label, building_view::store_tab_art)
   Market     → Game::market_here(), buy(), sell(); prices in economy.rs (buy_price, sell_price)
   Sanctuary  → spells_here(), knows_spell(), learn_spell(id)             rules/town.rs
   Tribute    → tribute_available(), collect_tribute(), village_offer(),
