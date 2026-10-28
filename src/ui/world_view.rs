@@ -1992,13 +1992,14 @@ fn tooltip_owner(game: &Game, l: &Location) -> String {
     }
 }
 
-/// The original's building tooltip (0x4cb18c): its name; a text block of "Владелец" and the
-/// owner's name, the description in the label font, "(дань уже собрана)" for a village
+/// The original's building tooltip (0x4cb18c): its name cut at `#` (0x4973a0, called at
+/// 0x4cb62c), «Неизвестное здание» when nothing is left (0x4cb631); a text block of "Владелец"
+/// and the owner's name, the description in the label font, "(дань уже собрана)" for a village
 /// already emptied; a garrison's cells at the bottom under "Состав гарнизона защитников:".
 /// Ruins never show their cells: their text block ends with an empty line, that caption and
 /// "Неизвестная армия" in the name font (only when the block has something else in it).
 fn location_tooltip(game: &Game, l: &Location) -> Tooltip {
-    let title = if l.name.is_empty() { info("NoNameBuilding", n_("Unknown building")) } else { l.name.clone() };
+    let title = if l.shown_name().is_empty() { info("NoNameBuilding", n_("Unknown building")) } else { l.shown_name().to_string() };
     let mut text = Vec::new();
     let owner = tooltip_owner(game, l);
     if !owner.trim().is_empty() {

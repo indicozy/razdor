@@ -221,6 +221,8 @@ pub fn tab_label(t: Tab) -> &'static str {
     }
 }
 
+/// The raw name, `#` and all (0x4bc7db copies it into the title label 0x66d613): unlike the
+/// tooltip's (0x4973a0), it is not cut.
 fn title(game: &Game) -> String {
     let Some(l) = game.location.map(|l| &game.world.locations[l]) else { return String::new() };
     if l.name.is_empty() {

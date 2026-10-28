@@ -481,6 +481,12 @@ pub struct Location {
 }
 
 impl Location {
+    /// The name the player sees in the tooltip (0x4973a0, as an army's): the scenario's name
+    /// up to its first `#` (the editor's numbering, `Дорожные врата #C`), trailing spaces dropped.
+    pub fn shown_name(&self) -> &str {
+        shown_object_name(&self.name)
+    }
+
     fn new(kind: LocationKind, name: &str, tile: Tile) -> Location {
         Location {
             id: 0,
@@ -734,7 +740,9 @@ pub struct Army {
     pub mind: AiMind,
 }
 
-fn shown_army_name(name: &str) -> &str {
+/// The original's MapObject_Name (0x4973a0), which cuts a scenario name at its first `#`
+/// and trims trailing spaces; used by the army and building tooltips alike.
+fn shown_object_name(name: &str) -> &str {
     name.split('#').next().unwrap_or_default().trim_end_matches(' ')
 }
 
@@ -742,7 +750,7 @@ impl Army {
     /// The name the player sees (0x4973a0): the scenario's name up to its first `#` (the
     /// editor's numbering, `Призрак#2`), trailing spaces dropped.
     pub fn shown_name(&self) -> &str {
-        shown_army_name(&self.name)
+        shown_object_name(&self.name)
     }
 
     pub fn tile(&self, map: &TileMap) -> Tile {
@@ -1652,10 +1660,19 @@ mod tests {
 
     #[test]
     fn an_army_s_name_is_shown_up_to_its_hash() {
-        assert_eq!(shown_army_name("Призрак#2"), "Призрак");
-        assert_eq!(shown_army_name("Призрак #2"), "Призрак");
-        assert_eq!(shown_army_name("Банда Хромого"), "Банда Хромого");
-        assert_eq!(shown_army_name("#3"), "");
+        assert_eq!(shown_object_name("Призрак#2"), "Призрак");
+        assert_eq!(shown_object_name("Призрак #2"), "Призрак");
+        assert_eq!(shown_object_name("Банда Хромого"), "Банда Хромого");
+        assert_eq!(shown_object_name("#3"), "");
+    }
+
+    #[test]
+    fn a_building_s_name_is_shown_up_to_its_hash() {
+        // The tooltip's name (0x4973a0 at 0x4cb62c): the editor's `#C` is cut off.
+        let gate = Location::new(LocationKind::Castle, "Дорожные врата #C", Tile::default());
+        assert_eq!(gate.shown_name(), "Дорожные врата");
+        let numbered = Location::new(LocationKind::Castle, "#5", Tile::default());
+        assert_eq!(numbered.shown_name(), "");
     }
     use crate::rules::content::Content;
     use crate::rules::game::Game;
