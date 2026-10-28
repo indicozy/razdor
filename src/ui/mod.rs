@@ -181,6 +181,8 @@ pub struct App {
     last_screen: Option<std::mem::Discriminant<Screen>>,
     /// The map's pictures are queued for the decode store (once, at the first game).
     map_art_queued: bool,
+    /// Where the last left press went down (screen pixels), for the outside tap (`frame_content`).
+    tap_press: Option<(f32, f32)>,
     /// The play log's last screen and message, to write each change once.
     play_last: (&'static str, Option<String>),
     /// The map editor, kept while a test play runs.
@@ -261,6 +263,7 @@ impl App {
             map_music: MapMusic::default(),
             last_screen: None,
             map_art_queued: false,
+            tap_press: None,
             play_last: ("", None),
             editor: None,
             test_play: false,
@@ -885,6 +888,29 @@ impl App {
         }
     }
 
+    /// The bar's windows an outside tap closes (`widgets::outside_tap`): the ones opened from the
+    /// bottom bar over a game, with no dialog, message, popup or pending load over them. Not the
+    /// minimap: the map around it stays live, so a tap there already acts on the map.
+    fn bar_window_open(&self) -> bool {
+        let quiet = self.dialogs.is_empty()
+            && self.message.is_none()
+            && !widgets::input_blocked()
+            && !widgets::popup_open()
+            && self.pending_load.is_none()
+            && self.load_error.is_none()
+            && !self.help
+            && !self.update_open
+            && !self.console.open
+            && self.map_view.back_to.is_none();
+        let game = self.game.is_some();
+        quiet
+            && match &self.screen {
+                Screen::Menu(_) | Screen::Settings | Screen::Save(_) | Screen::Hero(_) | Screen::Squad { .. } | Screen::Spellbook { .. } => game,
+                Screen::Load(v) => game && v.back == saves::Back::Map,
+                _ => false,
+            }
+    }
+
     fn frame_content(&mut self) {
         display::follow_settings(&self.audio.settings);
         // A minimap resized or moved by the player is kept once the drag ends (saved with the
@@ -996,6 +1022,23 @@ impl App {
         let install_wide = self.install_wide_row();
         // The save window's «Быстрое сохранение» is the F5 key's quick save, allowed as on the map (its Back).
         let quick_save_ok = hotkeys::allowed(hotkeys::Place::WorldMap, hotkeys::Global::QuickSave, hotkeys::Guard { typing: false, ..self.guard() });
+        // Razdor's choice (the owner's request, 2026-10-28), not parity: a tap outside a window
+        // opened from the bottom bar, and off the bar, closes it as Esc does; the original keeps
+        // it open. The press is kept; the release is judged against the windows drawn last frame.
+        let pointer = input::screen_pointer();
+        if input::is_mouse_button_pressed(macroquad::input::MouseButton::Left) {
+            self.tap_press = Some(pointer);
+        }
+        let windows = chrome::take_drawn_windows();
+        let release = input::is_mouse_button_released(macroquad::input::MouseButton::Left);
+        let press = if release { self.tap_press.take() } else { None };
+        // The slop: 12 px on a phone (a finger), 6 px on the desktop (in the screen's pixels).
+        let slop = display::dp_px().map_or(6.0, |d| 12.0 * d);
+        let outside = match press {
+            Some(p) => self.bar_window_open() && widgets::outside_tap(macroquad::math::Vec2::from(p), macroquad::math::Vec2::from(pointer), &windows, game_bar::bar_rect(), slop),
+            None => false,
+        };
+        widgets::set_outside_tap(outside);
         let mut next = match (&mut self.screen, &mut self.game) {
             (Screen::MainMenu, _) => match main_menu::frame(self.dt_content.is_none()) {
                 Some(main_menu::Pick::NewGame) if new_game::tutorial_map(&self.scenarios).is_some() => {
@@ -1105,6 +1148,7 @@ impl App {
         // A spell badge's hint over the screen that drew it (under the dialogs).
         spell_badges::flush();
         widgets::set_input_blocked(false);
+        widgets::set_outside_tap(false);
         next = next.or(console_next);
         // "Варианты выхода из битвы" chose.
         if let Screen::Battle(v) = &mut self.screen {

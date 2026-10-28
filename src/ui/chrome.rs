@@ -1221,11 +1221,26 @@ local! {
     static GREY: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
     /// The largest window drawn this frame (what a message greys out).
     static BIGGEST: std::cell::Cell<Option<Rect>> = const { std::cell::Cell::new(None) };
+    /// The windows and popups drawn since the frame loop last took them, on the screen (not the
+    /// canvas): a tap outside them closes a bar window (`ui::widgets::outside_tap`).
+    static DRAWN_WINDOWS: RefCell<Vec<Rect>> = const { RefCell::new(Vec::new()) };
 }
 
 /// A new frame: no window drawn yet.
 pub fn begin_frame() {
     BIGGEST.with(|b| b.set(None));
+}
+
+/// Records a window or popup drawn at `r` (canvas coordinates, as drawn under the pan) for the
+/// outside-tap test: stored on the screen, as the pointer is.
+pub fn note_window(r: Rect) {
+    let on = super::pan::on_screen(r);
+    DRAWN_WINDOWS.with(|w| w.borrow_mut().push(on));
+}
+
+/// The windows and popups recorded since the last call (screen coordinates), cleared.
+pub fn take_drawn_windows() -> Vec<Rect> {
+    DRAWN_WINDOWS.with(|w| std::mem::take(&mut *w.borrow_mut()))
 }
 
 /// Under a message window, as in the original (the video: the town window goes black and
@@ -2048,6 +2063,7 @@ fn window_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bool,
     let grow = tb - tb0;
     let safe = super::display::safe_area();
     let r = grown_upward(r, grow, safe.top);
+    note_window(r);
     BIGGEST.with(|b| {
         if b.get().is_none_or(|o| o.w * o.h < r.w * r.h) {
             b.set(Some(Rect::new(r.x, r.y, r.w + 6.0 * k, r.h + 6.0 * k)));

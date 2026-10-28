@@ -12,6 +12,7 @@ Razdor plays the original game's scenarios by the original rules. Below is what 
 * **Interface scale** from 1× to 4×; "Auto" is the largest size that fits the window.
 * **Screen:** window, borderless window or full screen (the "Screen" setting).
 * **Minimap** can be resized and moved to any corner of the screen.
+* **Closing windows:** a window opened from the bottom bar closes on a click or tap outside it, as Esc does.
 * **Gear filter** (`Ctrl+F`): search items in the backpack and at the market by name, type, stats and description.
 * **Sorting** of goods at the market and in the Sanctuary by name or price.
 * **Battle:** unit cards show changes in stats compared with the start of the battle (blue for a rise, red for a fall); spell icons on the cards.

@@ -386,6 +386,7 @@ finger-sized «Закрыть», its cross or Esc. While it is open the window b
 and the reader swallows the frame's keys and clicks.
 Hit areas and scrolling follow the boxes they are given. Hint boxes
 (`widgets::tooltip`, `panel_hint`) fade in over 300 ms as the original's.
+A tap outside a window opened from the bottom bar (Menu, Settings, Save, Load over a game, Hero, Squad, Spellbook; not the minimap, whose map around it stays live), and off the bar, closes it as Esc does (Razdor's choice, the owner's request, 2026-10-28; the original keeps it open). It is decided in `ui::mod` (`frame_content`, `bar_window_open`) from the press and the release (`widgets::outside_tap`: a tap, not a drag; 12 px on a phone, 6 px on the desktop) against the rects the windows and popups recorded last frame (`chrome::note_window`, `chrome::take_drawn_windows`); on that frame `widgets::esc_pressed` is true.
 
 An item's description, wherever it is shown (the market, the hero window's box, the army
 window's pop-up, the event window's item tooltip), is one box, `item_text::draw` in

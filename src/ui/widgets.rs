@@ -268,6 +268,8 @@ local! {
 local! {
     /// Debug snapshots: where the pointer is said to be (`RAZDOR_MOUSE=x,y`, `ui::snapshot`).
     static POINTER: std::cell::Cell<Option<(f32, f32)>> = const { std::cell::Cell::new(None) };
+    /// This frame an outside tap closes the bar window on screen ([`set_outside_tap`]).
+    static OUTSIDE_TAP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// The pointer's position: the mouse's (or a gamepad's, `ui::input`), or the snapshot's
@@ -364,9 +366,24 @@ pub fn is_escape(k: KeyCode) -> bool {
 }
 
 /// Esc went down this frame, from the keyboard or the system's Back. Raw: no input-blocked
-/// check (use [`key`] for that).
+/// check (use [`key`] for that). Also true on a frame an outside tap closes a bar window
+/// ([`set_outside_tap`]).
 pub fn esc_pressed() -> bool {
-    is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::Back)
+    OUTSIDE_TAP.with(|t| t.get()) || is_key_pressed(KeyCode::Escape) || is_key_pressed(KeyCode::Back)
+}
+
+/// Sets for this frame's dispatch that a tap outside the bar window closed it: the window
+/// reads it as Esc ([`esc_pressed`]). The frame loop sets it and clears it again.
+pub fn set_outside_tap(on: bool) {
+    OUTSIDE_TAP.with(|t| t.set(on));
+}
+
+/// A tap (not a drag) outside every window in `windows` and off the bottom bar `bar`: the
+/// press and the release both outside, the pointer moved less than `slop` between them. The
+/// release decides nothing on its own: both ends must be outside. Coordinates on the screen.
+pub fn outside_tap(press: Vec2, release: Vec2, windows: &[Rect], bar: Rect, slop: f32) -> bool {
+    let outside = |p: Vec2| !bar.contains(p) && !windows.iter().any(|r| r.contains(p));
+    (release - press).length() < slop && outside(press) && outside(release)
 }
 
 /// The system keys that never become the held key: Alt, F10 and Android's Back.
@@ -1914,6 +1931,7 @@ pub fn draw_popup() {
         let mut p = p.borrow_mut();
         let Some(pop) = p.as_mut() else { return };
         let r = pop.rect;
+        super::chrome::note_window(r);
         // Typing filters; Backspace deletes from the filter.
         edit_keys(&mut pop.filter, &mut pop.edit, &typed_chars(), EditRules::line(40));
         // The filter is typed in while the list is open: it asks for the keyboard as a field does.
@@ -2372,5 +2390,33 @@ mod keyboard_tests {
         assert_eq!(down, Rect::new(10.0, 100.0, 300.0, 48.0 * 2.75));
         assert_eq!(up.h, 48.0 * 2.75);
         assert_eq!(up.y + up.h, field.y + field.h, "grown up: the bottom edge stays");
+    }
+}
+
+#[cfg(test)]
+mod outside_tap_tests {
+    use super::*;
+
+    #[test]
+    fn a_tap_outside_a_bar_window_closes_it() {
+        let bar = Rect::new(100.0, 700.0, 760.0, 80.0);
+        let window = Rect::new(200.0, 150.0, 400.0, 300.0);
+        let popup = Rect::new(620.0, 120.0, 150.0, 90.0);
+        let windows = [window, popup];
+        let slop = 6.0;
+        let at = |x: f32, y: f32| Vec2::new(x, y);
+
+        // A tap outside the window and off the bar closes it.
+        assert!(outside_tap(at(50.0, 50.0), at(51.0, 52.0), &windows, bar, slop), "outside both");
+        // A tap inside the window does not.
+        assert!(!outside_tap(at(300.0, 200.0), at(300.0, 200.0), &windows, bar, slop), "inside the window");
+        // A tap on the bar does not.
+        assert!(!outside_tap(at(400.0, 740.0), at(400.0, 740.0), &windows, bar, slop), "on the bar");
+        // A press outside but a release inside (a drag in) does not.
+        assert!(!outside_tap(at(195.0, 200.0), at(200.5, 200.0), &windows, bar, slop), "released inside");
+        // A drag (moved more than the slop) does not, even outside.
+        assert!(!outside_tap(at(50.0, 50.0), at(90.0, 50.0), &windows, bar, slop), "a drag");
+        // A tap inside a second recorded rect (a popup over the window) does not.
+        assert!(!outside_tap(at(640.0, 130.0), at(640.0, 130.0), &windows, bar, slop), "inside the popup");
     }
 }
