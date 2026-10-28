@@ -49,7 +49,7 @@ allow	clean	T=$(gh auth token -u indicozy) && git push -q "https://x-access-toke
 allow	clean	git push origin main
 allow	clean	git push origin v0.4.17
 allow	clean	git push
-allow	clean	git push origin dt-original
+block	clean	git push origin dt-original
 block	clean	git push origin dt-feat
 block	clean	git push origin main:dt-feat
 block	clean	git push origin HEAD:refs/heads/dt-feat

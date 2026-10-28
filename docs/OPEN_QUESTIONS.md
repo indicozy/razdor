@@ -8,6 +8,9 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **The map info windows: fade-in and empty-cell icons** (2026-10-18, a player's report; split
+  out 2026-10-28). Not done on main: the original's 500 ms fade-in (0x4ca728) and the hostile
+  style's empty-cell icons (ae2774).
 - **In-game save and load books sideways: text under 12 sp** (2026-10-27, text-size check, `phone-save-dp-landscape`,
   `phone-load-dp-landscape`). At the height-limited fit the book's titles and buttons measure 11.9 sp and its
   rows 9.7 sp (7.3 sp before 1365, where the window was smaller). The bar's labels (7.3 sp) are as before.
@@ -93,13 +96,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   battle: 360 per unit; manual wins: 200–280). Razdor's quick battle (Razdor extra) and the
   fought battle use one award path, so this is not a bug. Question for the owner: should the
   quick battle pay a lower rate (a Razdor deviation, main only), or stay as it is?
-
-- **dt-original: hall list ink not ported** (2026-10-21, with 56dd8324; dt-original dbbb2b00 ports
-  its spec lines only). The 16-bit subtract of the hall list's names (`subtract16.rs`, `hall_ink.rs`) is
-  main's only. dt-original's list is a GPU parchment with darkened edges, names fitted by `text_fit`
-  at 19 px, and a note column; the CPU panel draws main's paper, ornaments, bands and 16 px sheet
-  text, so porting it would change dt-original's paper, size and rows, which is the owner's call.
-  Until then dt-original keeps the GPU subtract (`hall_entry_ink`).
 
 - **Scroll bar widget of the army window's pack** (2026-10-21, a player's report). Razdor draws the
   pack's bar with the hall list's widget (`scrollbar_always`: ▲ ▼ arrows, dark track, knob) as the
@@ -285,14 +281,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   player's screenshot are a few levels darker in red than Razdor's (plain 76 vs 83), probably
   the Win-paper decode or the screenshot. Not ported to dt-original by this agent.
 
-- **dt-original: the map info windows** (2026-10-18, a player's report). ed53cd1 (opaque
-  tooltip box, the dimmed title corners 0x4dbd83/0x4dbe0b, the fonts by style, the
-  original's layout, 0x48d3f8, 0x4ca9f0, 0x4cb18c) is on main only: dt-original's tooltip
-  code is older (no `garrison_shown`, its own owner and colour handling) and its red skin
-  lacks the (−20, −40, −100) of 0x4dbc34, so the pick conflicts. Port by hand together
-  with the red skin. Also not done on either branch: the 500 ms fade-in (0x4ca728) and the
-  hostile style's empty-cell icons (ae2774).
-
 - **A hire offer's card keeps the last card's building defence** (2026-10-17, found with a
   player's report on the barracks' hire offers). The original paints an offer's card through
   492f24 on a path that skips setting the building-defence value and the in-building flag
@@ -304,15 +292,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   hint) is not on `dt-original`: that branch's building window is the older layout, with no
   unit card panel (`selected_unit_panel`), no `window_layout` and no hint strip under the
   counters (PR #8's), so the pick does not apply. Port it by hand once those are there.
-
-- **dt-original: the unit panel's figure box and the promotion preview's slots** (2026-10-18,
-  a player's report). Main places the engraving unscaled, centred in the original's
-  266 × 436 box under the panel's top (`unit_sheet::figure_rect`, 0x492f24 → 0x476a3c), and a
-  hovered promotion portrait's type card has no item slots (`items_view::panel_slots`,
-  0x4c39d8). dt-original's panel is still the older layout (the figure pinned 10 px under the
-  top, the text laid out under the figure's bottom, `Sheet::battle`), which main replaced
-  earlier with the text stacked from the panel's bottom (492f24); port that layout first,
-  then these two.
 
 - **Event window: the departed row's units** (2026-10-17, found with a player's report on the
   units rows). The original fills the departed row only with units really taken, by the taken
@@ -385,15 +364,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   (1, 1). Other windows set +0x53 per widget (the load window's «Загрузить» may look enabled
   for that reason): read each window's +0x53 before matching the look everywhere.
 
-- **dt-original: real-data tests with translator output in the install** (2026-10-15). An
-  install holding `*_en.DTm` maps from razdor-translate fails dt-original's shipped-map tests
-  (they count 15 maps); main leaves `_en` copies out, dt-original has no translator. Run
-  dt-original's tests on an install without them (or port the filter if this keeps biting).
-
-- **dt-original: unit pictures by section order** (2026-10-14, issue #6). The engraving and
-  bust frame by the unit section's file position (0x4e0448) and the engraving at full alpha
-  (0x476a3c) are on main only so far; cherry-pick to dt-original.
-
 - **Defeat recovery screen from PR #5, owner's decision** (2026-10-14). Eizenvald's PR kept
   Razdor's screen after a defeat with the days played and three actions: new game, load the
   latest save of that map, restart the map. The merge kept main's parity instead (the
@@ -407,10 +377,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   1024×768 against the original's 616 × 500); its description is ragged, the original's
   justified. The scenario list has no scrollbar track at its right (the original's always
   shows one). Shots: /mnt/ai_models/razdor-scratch/pr5/pair/{classes,scenarios}.png.
-- **dt-original: PR #5's parity parts** (2026-10-14). Typography roles and colours, the
-  sanctuary layout, the event pictures on the left, the save window's tabs and steel line, the
-  new hero window's geometry: port to dt-original after checking each against the original.
-
 - **Village window open in the original, not in Razdor** (2026-10-14, explorer C1014-212558,
   Устье Трейна, step 15 `wait 4`). The original had a village window on screen and skipped the
   wait; Razdor had no window and applied it (153 AI draws). Reproduced twice on the original.
@@ -428,11 +394,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   slots) or draws the original's 12 rows over it.
 - **Victory window ~6 px lower** (2026-10-14). At 1024×768 the original's «Победа над врагом!»
   window's top is at y ≈ 187, Razdor's at ≈ 193 (the event window's layout from 1866ec2).
-- **dt-original: round 2 of the UI audit** (2026-10-14). The resource captions from
-  `[Event] Resource0..3` in the event window's face and green (dialog.rs `resource_word`), the
-  load and save windows centred over the map (saves.rs `book_top`) and the question's Yes/No at
-  0.24 W / 0.76 W (dialog.rs `question_buttons_x`) are parity; port them to dt-original.
-
 - **Menus (group 5 of the UI audit, 2026-10-14), approximations left.** ((1), the new-hero
   portraits, is settled below.) (2) The exit window: the standard window's size (`ae2520`) is taken as
   634×512 from the screenshots, and the version line's place on `S_Exit_RUS` (which widget of
@@ -442,12 +403,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   (pair 03): check 0x4c01fc's caller. (5) Hints now follow the install's `OptValue6` until the
   checkbox is touched; the shipped ini has 1 (hints off), so the bar's button names are off
   by default, as in the original.
-- **dt-original: the main hall's quest list** (2026-10-14). On main the list fills the lower
-  panel from the top with a full-width highlight (0x4bedec, 3ad3501); dt-original has its own
-  main hall layout, so only the button text, the market's first row, the descriptions, the
-  quest line, the village bar and the victory report were ported. Compare dt-original's hall
-  with the original and port the list.
-
 - **AI step clock: the tick banked at its start** (2026-10-14). `Game::ai_move` adds a hero
   tick's minutes to every army's bank at the tick's start, so a step can start at once; the
   original banks each frame's `dt` (0x4ade3c → 0x4a399c) and starts a step only in the frame
@@ -488,12 +443,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   card of the same spell is dark red. Not explained: a grow-in or a fade of the original's
   tooltip, or the card under the press's edge. Razdor shows the steady card at once. Needs the
   original's tooltip timing (4cbd58 under Wine, the player's video frame times).
-- **dt-original: spell book port pending** (2026-10-21). The book's column order (4dad08),
-  hover look and hover picture (4c2cf4, 1400/1024), card backgrounds (4dc118, 49bde4), the
-  event card's size (4cbd58), the hero's cell as no target (magic-items.md §3.5) and the spell-
-  target hint shown whatever option 6 says (interface.md §10) are main's. Cherry-pick them to
-  dt-original once it is free (the four "Spell book:" commits of 2026-10-21 on main).
-
 - **Army window strip text size** (2026-10-14, UI audit). The text in the army window's middle
   strip is Razdor's (the original's strip is an ornament; its hints are hint boxes): the audit
   found it large. A Razdor choice to settle with the owner, not a parity fix.
@@ -504,6 +453,59 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   button's own size.
 
 ## Settled
+
+- **dt-original: hall list ink not ported** (2026-10-21, with 56dd8324; dt-original dbbb2b00 ports
+  its spec lines only). The 16-bit subtract of the hall list's names (`subtract16.rs`, `hall_ink.rs`) is
+  main's only. dt-original's list is a GPU parchment with darkened edges, names fitted by `text_fit`
+  at 19 px, and a note column; the CPU panel draws main's paper, ornaments, bands and 16 px sheet
+  text, so porting it would change dt-original's paper, size and rows, which is the owner's call.
+  Until then dt-original keeps the GPU subtract (`hall_entry_ink`). Closed 2026-10-28: `dt-original` is frozen (the owner's decision), nothing more is ported.
+
+- **dt-original: the map info windows** (2026-10-18, a player's report). ed53cd1 (opaque
+  tooltip box, the dimmed title corners 0x4dbd83/0x4dbe0b, the fonts by style, the
+  original's layout, 0x48d3f8, 0x4ca9f0, 0x4cb18c) is on main only: dt-original's tooltip
+  code is older (no `garrison_shown`, its own owner and colour handling) and its red skin
+  lacks the (−20, −40, −100) of 0x4dbc34, so the pick conflicts. Port by hand together
+  with the red skin. Closed 2026-10-28: `dt-original` is frozen (the owner's decision), nothing more is ported.
+
+- **dt-original: the unit panel's figure box and the promotion preview's slots** (2026-10-18,
+  a player's report). Main places the engraving unscaled, centred in the original's
+  266 × 436 box under the panel's top (`unit_sheet::figure_rect`, 0x492f24 → 0x476a3c), and a
+  hovered promotion portrait's type card has no item slots (`items_view::panel_slots`,
+  0x4c39d8). dt-original's panel is still the older layout (the figure pinned 10 px under the
+  top, the text laid out under the figure's bottom, `Sheet::battle`), which main replaced
+  earlier with the text stacked from the panel's bottom (492f24); port that layout first,
+  then these two. Closed 2026-10-28: `dt-original` is frozen (the owner's decision), nothing more is ported.
+
+- **dt-original: real-data tests with translator output in the install** (2026-10-15). An
+  install holding `*_en.DTm` maps from razdor-translate fails dt-original's shipped-map tests
+  (they count 15 maps); main leaves `_en` copies out, dt-original has no translator. Run
+  dt-original's tests on an install without them (or port the filter if this keeps biting). Closed 2026-10-28: `dt-original` is frozen (the owner's decision), nothing more is ported.
+
+- **dt-original: unit pictures by section order** (2026-10-14, issue #6). The engraving and
+  bust frame by the unit section's file position (0x4e0448) and the engraving at full alpha
+  (0x476a3c) are on main only so far; cherry-pick to dt-original. Closed 2026-10-28: `dt-original` is frozen (the owner's decision), nothing more is ported.
+
+- **dt-original: PR #5's parity parts** (2026-10-14). Typography roles and colours, the
+  sanctuary layout, the event pictures on the left, the save window's tabs and steel line, the
+  new hero window's geometry: port to dt-original after checking each against the original. Closed 2026-10-28: `dt-original` is frozen (the owner's decision), nothing more is ported.
+
+- **dt-original: round 2 of the UI audit** (2026-10-14). The resource captions from
+  `[Event] Resource0..3` in the event window's face and green (dialog.rs `resource_word`), the
+  load and save windows centred over the map (saves.rs `book_top`) and the question's Yes/No at
+  0.24 W / 0.76 W (dialog.rs `question_buttons_x`) are parity; port them to dt-original. Closed 2026-10-28: `dt-original` is frozen (the owner's decision), nothing more is ported.
+
+- **dt-original: the main hall's quest list** (2026-10-14). On main the list fills the lower
+  panel from the top with a full-width highlight (0x4bedec, 3ad3501); dt-original has its own
+  main hall layout, so only the button text, the market's first row, the descriptions, the
+  quest line, the village bar and the victory report were ported. Compare dt-original's hall
+  with the original and port the list. Closed 2026-10-28: `dt-original` is frozen (the owner's decision), nothing more is ported.
+
+- **dt-original: spell book port pending** (2026-10-21). The book's column order (4dad08),
+  hover look and hover picture (4c2cf4, 1400/1024), card backgrounds (4dc118, 49bde4), the
+  event card's size (4cbd58), the hero's cell as no target (magic-items.md §3.5) and the spell-
+  target hint shown whatever option 6 says (interface.md §10) are main's. Cherry-pick them to
+  dt-original once it is free (the four "Spell book:" commits of 2026-10-21 on main). Closed 2026-10-28: `dt-original` is frozen (the owner's decision), nothing more is ported.
 
 - **AI battle item handout with an empty pool** (2026-10-26). Razdor runs the handout
   (0x4a473c) only when the battle left loot; so does the original: 0x4a4c68 skips both calls

@@ -45,7 +45,7 @@ import sys
 
 ALLOWED_CPUS = set(range(16, 20))
 PIN_HINT = "CARGO_BUILD_JOBS=4 taskset -c 16-19 cargo …"
-FROZEN = {"dt-feat"}
+FROZEN = {"dt-feat", "dt-original"}
 GAME_EXT = re.compile(r"\.(lit|ugs|dtm|dtc|wav|ogg|mp3|bik|rzsave)$", re.I)
 GAME_INI = re.compile(r"(^|/)(rus_[^/]*|_global)\.ini$", re.I)
 SCRATCH = (re.compile(r"^/tmp/claude-[^/]+/.+"), re.compile(r"^/mnt/ai_models/razdor-scratch/.+"))
@@ -502,7 +502,7 @@ def check_push(args, cwd):
                 dests.append(upstream)
     for d in dests:
         if d in FROZEN:
-            raise Block("dt-feat is frozen: nothing is pushed to it. Work goes to main (parity fixes also cherry-picked to dt-original).")
+            raise Block(f"{d} is frozen: nothing is pushed to it. Work goes to main.")
 
 
 # ---------------------------------------------------------------- deletes

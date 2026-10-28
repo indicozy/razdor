@@ -59,7 +59,9 @@ replay + memory-read state diff tools are in `tools/difftest/`.
 
 ## Deciding
 
-- Original confirmed: make Razdor match, its bugs included, comment each original bug as such.
+- Original confirmed: make Razdor match where maps or mods can see it or it is fun, its bugs
+  included (comment each original bug as such). A crash, softlock or broken UI is fixed instead;
+  a gameplay change goes through the experimental track (CLAUDE.md, Hard rules).
 - Not determinable: keep or choose a documented guess, mark it **unknown** in the spec and in
   the code comment, and tell the owner.
 - A Razdor-only rule found along the way (a clamp, a guess, an extra): report it; remove it

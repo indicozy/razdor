@@ -1,6 +1,6 @@
 ---
 name: player-report
-description: Use for ANY report from a player or the owner about Razdor's behaviour - a Discord link (cdn.discordapp.com attachment), a screenshot, a video (.mp4), a save file (.rzsave), or a message like "X doesn't work", "can't attack", "freezes", "looks broken", "в оригинале не так", "баг", "не могу", "лаг". Covers looking at the evidence, finding what the original does, fixing or explaining, the playtest note, the changelog line and the dt-original port.
+description: Use for ANY report from a player or the owner about Razdor's behaviour - a Discord link (cdn.discordapp.com attachment), a screenshot, a video (.mp4), a save file (.rzsave), or a message like "X doesn't work", "can't attack", "freezes", "looks broken", "в оригинале не так", "баг", "не могу", "лаг". Covers looking at the evidence, finding what the original does, fixing or explaining, the playtest note and the changelog line.
 ---
 
 # Handling a player's report
@@ -38,8 +38,11 @@ Use the `parity-check` skill. Decide one of:
 - **The original does the same**: not a bug. Explain it to the owner in plain words with the
   addresses; change nothing. (Example: magic power draining to 0 is the Community drain with a
   mod's minimum of 0.)
-- **The owner asks for different behaviour anyway**: a deviation. Main only, never ported to
-  `dt-original`; comment it as a Razdor choice with what the original does.
+- **The original does the same, but it is a crash, softlock, broken UI or wrong text**: fix it
+  (no community map relies on it); comment it as a Razdor fix with what the original does.
+- **A gameplay or balance change** (the owner's or a player's wish, or an original bug that
+  changes play): the experimental track (CLAUDE.md, Hard rules): an off-by-default toggle, a poll,
+  the owner's call. Comment it as a Razdor choice with what the original does.
 
 Check the neighbours of the bug too: the same shared code path (a decoder, a scan, a layout
 helper) usually breaks more than the one thing reported. List what else it fixes.
@@ -57,8 +60,8 @@ helper) usually breaks more than the one thing reported. List what else it fixes
 - `changelog/unreleased.md`: one short line in plain player Russian under `### Добавлено`,
   `### Изменено` or `### Исправлено`. No addresses, timings or internals.
 - Commit on `main` (English message: what changed, the addresses, "(a player's report)").
-- Parity fix: cherry-pick `-x` onto `dt-original` (its worktree, its own target dir); resolve
-  conflicts keeping dt-original's original-only behaviour; run its tests; push `dt-original`.
+- A community map's bug: add that map to the community map folder (path in `CLAUDE.local.md`) so
+  its smoke test guards the fix.
 
 ## 4. Report back
 

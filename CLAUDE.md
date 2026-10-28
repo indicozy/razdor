@@ -5,6 +5,12 @@ scenarios by the original rules, reading maps, ini data, text and art from the p
 install at runtime (`RAZDOR_DT_DIR`, set in `.env`). The repo ships the engine only. Player docs
 are in `README.md` (Russian).
 
+Purpose (the owner's decision, 2026-10-28): Razdor is *DT, the definitive edition*, an engine
+for the community. Its job is that the original campaign, community maps and mods (Community
+Update, Evolution Mod, user maps) play well, on desktop and phones. The goal is reached: the
+project is in maintenance mode. The work is QoL, bug fixes (above all for community maps) and
+mobile support; there is no roadmap and nothing else is started unless the owner asks.
+
 **Before working on a feature, read `docs/flows/README.md` and the flow for that area.**
 
 ## Commands
@@ -13,6 +19,9 @@ are in `README.md` (Russian).
 - Tests: `cargo test --release`. Tests on the real game files and the difftests skip unless
   `RAZDOR_DT_DIR` is set; set it (from `.env`, without quotes) before calling a change tested.
 - Lint: `cargo clippy --release`.
+- Community map smoke test: `cargo test --release --lib community_maps_smoke` with
+  `RAZDOR_COMMUNITY_DIR` set (the folder's path is in `CLAUDE.local.md`): every map of every
+  install there (mods are installs) loads and plays 30 days without a panic or a softlock.
 - Release builds: `scripts/dist.sh` (Linux + Windows), `scripts/dist-macos.sh`.
 - Off-screen screens and profiling: the `offscreen-snapshot` skill.
 - Text size on phones (every text measured in sp, under 12 sp listed): the `text-size` skill.
@@ -40,11 +49,23 @@ are in `README.md` (Russian).
 
 ## Hard rules
 
-- Parity first: match the original one to one, its bugs included (comment each as original behaviour).
-- Deviations from the original only when the owner asks; they stay on main only.
-- A feature tied to the original game is reverse engineered from the original first (specs, then
-  Ghidra; the `parity-check` skill) to learn how it really works; never guess its behaviour.
-- Every parity change cites the original's addresses (`0x4…`) in code and commit, and has a test.
+- Parity is a means, not the goal: the original's behaviour, its bugs and imbalances included,
+  stays wherever community maps and mods depend on it, or where it is simply fun. Comment each
+  kept original bug as original behaviour.
+- Who decides a change (the owner's decision, 2026-10-28):
+  - crashes, softlocks, broken UI, wrong text: fix without asking, as long as the community map
+    smoke test stays green;
+  - UI and QoL that leave the rules alone: the owner decides;
+  - gameplay and balance (rules, numbers, AI, fixing an original bug that changes play): the
+    experimental track: ship behind a toggle that is off by default, a Discord 👍/👎 poll for at
+    least one weekly release, then the owner decides (toggle removed and the change made the
+    default, or the code dropped);
+  - breaking a community map or mod: only with the owner's explicit yes, and a changelog line
+    naming it.
+- Behaviour that maps or mods can see (ini fields, map scripts and events, battle and AI rules,
+  saves) is reverse engineered from the original first (specs, then Ghidra; the `parity-check`
+  skill); never guess it. Such a change cites the original's addresses (`0x4…`) in code and
+  commit, and has a test. Razdor's own UI and features need no RE.
 - Never commit anything from the game (maps, ini data, texts, art, sounds, decoded assets,
   screenshots of the original) or anything personal (saves, logs, settings, tokens, home paths).
   The one exception (the owner's decision, 2026-10-15): Razdor's English translations of the
@@ -59,9 +80,9 @@ are in `README.md` (Russian).
   `docs/flows/`, `docs/reference/`.
 - Changelog lines are short plain player Russian: what changed for the player, no internals.
 - Git is plain trunk: commit straight to `main`, no feature branches or PRs.
-- Everything that must work as in the original (parity fixes, specs) is also cherry-picked (`-x`)
-  to `dt-original` and pushed there; deviations never are.
-  `dt-feat` is frozen; `dt-editor` (map editor parity) is paused, untouched unless asked.
+- `dt-original` and `dt-feat` are frozen (the owner's decision for `dt-original`, 2026-10-28):
+  nothing is cherry-picked or pushed to them. `dt-editor` (map editor parity) is paused,
+  untouched unless asked.
 - Player reports go to `docs/PLAYTEST_NOTES.md` (Russian), with what the original does.
 - Every issue goes into the local reports backlog (the path is in `CLAUDE.local.md`; never in
   git: it holds reporters' names and ids and screenshots), whatever its source: a Discord
@@ -85,8 +106,8 @@ are in `README.md` (Russian).
   processes it started (Xvfb, Wine, servers), and delete its scratch files, target dirs and
   temporary probes; leave nothing untracked in the repo. Only what the task created; anything
   else, or anything with uncommitted work, is listed for the owner.
-- Anything left unresolved (a question about the original, a known difference, a parity fix not
-  ported to `dt-original`) goes into `docs/OPEN_QUESTIONS.md`.
+- Anything left unresolved (a question about the original, a known difference) goes into
+  `docs/OPEN_QUESTIONS.md`.
 
 ## Definition of Done
 
@@ -96,8 +117,9 @@ are in `README.md` (Russian).
 | Nothing from the game or personal data is staged | guard hook (`.claude/hooks/`) + review |
 | No push to frozen branches, no force push to `main` | guard hook |
 | Tests on real files pass with `RAZDOR_DT_DIR` set | review (CI has no install) |
-| A feature tied to the original was reverse engineered first; it cites addresses and has a test | review |
-| A deviation was asked for and stays off `dt-original` | review |
+| A fix for a community map: the map is in the community map folder and passes its smoke test | review |
+| A change to behaviour maps or mods can see was reverse engineered first; it cites addresses and has a test | review |
+| A gameplay or balance change went through the experimental track (off-by-default toggle, poll, the owner's call) | review |
 | A player-visible change has a line in `changelog/unreleased.md` | review |
 | A player report has its `PLAYTEST_NOTES.md` entry and its backlog entry's status is current | review |
 | A change that alters a flow updates its `docs/flows/` file | review |
@@ -105,7 +127,6 @@ are in `README.md` (Russian).
 | A player-visible feature or change has its wiki page added or updated (ru and en) | review (`wiki` skill) |
 | A phone UI change: the text-size check run, no new text under 12 sp | review (`text-size` skill) |
 | A change to «Максимум»: `max_bench` run, its numbers compared, the baseline updated only for an intended improvement | `max_bench_does_not_regress` + review |
-| Parity commits are cherry-picked to `dt-original` and pushed (or listed in `docs/OPEN_QUESTIONS.md`) | review |
 | Unresolved questions are in `docs/OPEN_QUESTIONS.md`; settled ones moved to its Settled list | review |
 | The task's worktrees, branches, processes and scratch files are cleaned up | review |
 | The release has its commit id and SHA-256 in the changelog | review (`release` skill) |

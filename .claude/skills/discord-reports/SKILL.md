@@ -104,7 +104,7 @@ skill makes.
 ## 4. Fix
 
 For `bug`/`parity` and clear Razdor-extra bugs: follow the `player-report` skill (test, fix,
-`PLAYTEST_NOTES.md`, `changelog/unreleased.md`, dt-original port for parity). The commit says
+`PLAYTEST_NOTES.md`, `changelog/unreleased.md`). The commit says
 "(a player's report)"; no backlog ids or names in it. Set the report's status to `fixed` with
 the commit and its test. Independent reports can go to parallel agents; each commits only its
 own files and updates its own reports' status.

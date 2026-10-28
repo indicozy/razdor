@@ -25,6 +25,8 @@ that system.
 2. Run the full suite with the install: `RAZDOR_DT_DIR=… cargo test --release` (with the core pinning prefix from `CLAUDE.local.md`, if present, and `RAZDOR_PERF_BUDGET_SCALE` on slow cores; lib and bins;
    the lib failing stops cargo before the bins, so run `--bins` too if it does). Report any
    failure; a failure that also fails on the previous release's commit is pre-existing, say so.
+   Then the community map smoke test (`community_maps_smoke`, with `RAZDOR_COMMUNITY_DIR` from
+   `CLAUDE.local.md`; the command is in `docs/flows/`): every map of every install must pass.
    Wiki: every `changelog/unreleased.md` line a player could look up has its wiki page (ru and
    en, the `wiki` skill); write the missing ones before the release.
 3. Version: the last number by default; "minor version" bumps the middle (0.4.17 → 0.5.0).
