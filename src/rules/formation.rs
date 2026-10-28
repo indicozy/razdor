@@ -187,6 +187,20 @@ impl Formation {
             .find(|s| self.contains(*s) && !occupied.contains(s))
     }
 
+    /// Puts every cell the formation does not have (a save or a row width from before) on a
+    /// free cell of its own row, the cells it has kept where they are. The one helper for
+    /// every list of units: the squad, a garrison, an army ([`Game::reseat_all`]).
+    pub fn reseat<'a>(&self, cells: impl IntoIterator<Item = &'a mut Slot>) {
+        let mut cells: Vec<&mut Slot> = cells.into_iter().collect();
+        let mut taken: Vec<Slot> = cells.iter().filter(|s| self.contains(***s)).map(|s| **s).collect();
+        for s in cells.iter_mut().filter(|s| !self.contains(***s)) {
+            if let Some(free) = self.free_slot(&taken, s.row) {
+                **s = free;
+                taken.push(free);
+            }
+        }
+    }
+
     /// First free cell: the preferred row first, then the other fighting row, then the reserve.
     pub fn free_slot(&self, occupied: &[Slot], preferred: Row) -> Option<Slot> {
         let mut rows = vec![preferred];
@@ -289,6 +303,19 @@ mod tests {
         let w = Formation::WIDE;
         assert_eq!(w.after_battle_slot(&[]), Some(Slot::new(Row::Reserve, 2)));
         assert_eq!(w.after_battle_slot(&[Slot::new(Row::Reserve, 2), Slot::new(Row::Reserve, 3)]), Some(Slot::new(Row::Back, 1)));
+    }
+
+    #[test]
+    fn reseat_moves_only_the_cells_the_formation_lacks() {
+        // Front 6 is past the 6-wide grid; in the 4-wide shape Front 5 is past its row.
+        let mut cells = [Slot::new(Row::Front, 6), Slot::new(Row::Back, 2), Slot::new(Row::Front, 5), Slot::new(Row::Front, 0)];
+        Formation::WIDE.reseat(cells.iter_mut());
+        assert_eq!(cells[1], Slot::new(Row::Back, 2), "a cell the formation has is kept");
+        assert_eq!(cells[2], Slot::new(Row::Front, 5), "Front 5 is a cell of the 6-wide row");
+        assert_eq!(cells[0], Slot::new(Row::Front, 3), "off the grid: the first free cell of its row, centre out");
+        let mut narrow = [Slot::new(Row::Front, 5), Slot::new(Row::Front, 0)];
+        Formation::VANILLA.reseat(narrow.iter_mut());
+        assert_eq!(narrow, [Slot::new(Row::Front, 2), Slot::new(Row::Front, 0)], "4 wide: Front 5 goes to the centre, Front 0 stays");
     }
 
     #[test]

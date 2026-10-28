@@ -897,6 +897,9 @@ pub fn restore(meta: &SaveMeta, mut game: Game, demo: Arc<Content>, install: Opt
     };
     game.content = Arc::new(game.content.with_experimental(game.experimental));
     game.origin = Some(meta.scenario.clone());
+    // A cell the row width lacks (a save from before a width change, or from a build that let
+    // one through) goes to a free cell of its row: the rules' grid has no other places.
+    game.reseat_all();
     // The AI is set up again on every load (0x4a1ff0 from the save loader).
     game.ai_init(meta.version >= 4);
     // The offsets the load drew (after the AI's set-up, which clears the records).
@@ -1525,6 +1528,24 @@ pub(crate) mod tests {
         v.as_object_mut().unwrap().remove("wide_row");
         let old: Game = serde_json::from_value(v).unwrap();
         assert!(old.wide_row);
+    }
+
+    #[test]
+    fn a_load_seats_a_garrison_unit_off_the_grid_on_a_free_cell() {
+        // A save with a unit on a cell its row width lacks (Front 6 of the 6-wide row) comes back
+        // with the unit on a free cell of the grid.
+        use crate::rules::formation::{Row, Slot};
+        use crate::rules::units::Unit;
+        use crate::rules::world::Stationed;
+        let c = demo();
+        let mut g = Game::new(c.clone(), HeroClass::Knight);
+        let unit = Unit::new(&c, g.squad[0].def, Slot::new(Row::Front, 6));
+        g.world.locations[0].stationed.push(Stationed { unit });
+        let meta = meta_of(&g, SaveKind::Manual, "test").unwrap();
+        let (m, loaded) = decode(&encode(&meta, &g).unwrap()).unwrap();
+        let back = restore(&m, loaded, c.clone(), None).unwrap();
+        let placed = back.world.locations[0].stationed.last().unwrap().unit.slot;
+        assert!(c.formation.contains(placed), "loaded on {placed:?}, off the grid");
     }
 
     #[test]

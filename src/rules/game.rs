@@ -872,22 +872,31 @@ impl Game {
     /// rather than only to new games): the game fights in `formation` from its next battle on,
     /// and its saves record the new width. The hero's units keep their cells when the new shape
     /// has them; a unit on a cell it lacks (the two edge cells of a 6-wide row going to 4) moves
-    /// to a free cell, its own row first ([`Formation::free_slot`]). AI armies are arranged when
-    /// their battle starts, so they need nothing. Not during a battle.
+    /// to a free cell, its own row first ([`Formation::free_slot`]). The garrisons and the
+    /// armies are seated the same way ([`Game::reseat_all`]). Not during a battle.
     pub fn set_formation(&mut self, formation: super::formation::Formation) {
         if self.content.formation == formation || self.foe.is_some() {
             return;
         }
         self.content = Arc::new(self.content.with_formation(formation));
         self.wide_row = formation == super::formation::Formation::WIDE;
-        let mut taken: Vec<Slot> = self.squad.iter().map(|u| u.slot).filter(|s| formation.contains(*s)).collect();
-        for u in self.squad.iter_mut() {
-            if !formation.contains(u.slot) {
-                if let Some(s) = formation.free_slot(&taken, u.slot.row) {
-                    u.slot = s;
-                    taken.push(s);
-                }
-            }
+        self.reseat_all();
+    }
+
+    /// Every unit on a cell of the current formation: the squad, each garrison and army
+    /// (see [`Formation::reseat`]). A cell the formation lacks is only ever a leftover: a
+    /// save or a row width from before. Valid cells are kept, so a sound game is unchanged.
+    pub fn reseat_all(&mut self) {
+        let f = self.content.formation;
+        f.reseat(self.squad.iter_mut().map(|u| &mut u.slot));
+        let w = &mut self.world;
+        for l in w.locations.iter_mut() {
+            f.reseat(l.stationed.iter_mut().map(|s| &mut s.unit.slot));
+            f.reseat(l.garrison.iter_mut().map(|t| &mut t.slot));
+        }
+        f.reseat(w.gang.iter_mut().map(|t| &mut t.slot));
+        for a in w.armies.iter_mut().chain(w.inactive.iter_mut()).chain(w.respawns.iter_mut().map(|r| &mut r.army)) {
+            f.reseat(a.troops.iter_mut().map(|t| &mut t.slot));
         }
     }
 
@@ -2929,6 +2938,23 @@ mod tests {
         g.set_formation(Formation::WIDE);
         assert!(g.wide_row);
         assert_eq!(g.squad.iter().map(|u| u.slot).collect::<Vec<_>>(), before);
+    }
+
+    #[test]
+    fn a_narrowed_row_seats_the_garrisons_and_armies_too() {
+        // The 6-wide front row's edge cells (Front 4 and 5 of the 4-wide shape lack them) of a
+        // castle's garrison and of an army go to free cells when the row narrows.
+        use crate::rules::formation::{Formation, Row};
+        let mut g = new_game(HeroClass::Knight, 1);
+        let c = g.content.clone();
+        let edge = Slot::new(Row::Front, 5);
+        let guard = crate::rules::world::Stationed { unit: Unit::new(&c, g.squad[0].def, edge) };
+        g.world.locations[0].stationed.push(guard);
+        let troop = crate::rules::world::Troop::new(g.squad[0].def, 1, edge);
+        g.world.armies[0].troops.push(troop);
+        g.set_formation(Formation::VANILLA);
+        assert!(g.world.locations[0].stationed.iter().all(|s| Formation::VANILLA.contains(s.unit.slot)));
+        assert!(g.world.armies[0].troops.iter().all(|t| Formation::VANILLA.contains(t.slot)));
     }
 
     /// A game with no gangs on the map, for tests about travel and time.
