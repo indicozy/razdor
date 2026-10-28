@@ -991,9 +991,11 @@ pub fn scroll_speed(audio: &super::audio::Settings) -> f32 {
     audio.scroll_speed.unwrap_or_else(|| install_int("ScrollSpeed", 100).clamp(0, 100) as f32)
 }
 
-/// "Скорость перемещения героя" (`WalkSpeed`, 0..100).
+/// "Скорость перемещения героя": the install's `WalkSpeed` (0..100, the original's range) until
+/// the player sets one; the player's own value is 0..`WALK_SPEED_MAX` (200).
 pub fn walk_speed(audio: &super::audio::Settings) -> f32 {
-    audio.walk_speed.unwrap_or_else(|| install_int("WalkSpeed", 100).clamp(0, 100) as f32)
+    let max = razdor::rules::game::WALK_SPEED_MAX as f32;
+    audio.walk_speed.map(|v| v.clamp(0.0, max)).unwrap_or_else(|| install_int("WalkSpeed", 100).clamp(0, 100) as f32)
 }
 
 /// The world's real-time pace for the hero's speed (`Game::walk_pace`).
@@ -1519,8 +1521,10 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     if let Some(v) = option_slider(row(2), &slider_label(2, n_("Map scroll speed")), scroll_speed(audio) / 100.0) {
         audio.scroll_speed = Some((v * 100.0).round());
     }
-    if let Some(v) = option_slider(row(3), &slider_label(3, n_("Hero's walking speed")), walk_speed(audio) / 100.0) {
-        audio.walk_speed = Some((v * 100.0).round());
+    // The slider runs 0..`WALK_SPEED_MAX`: the original's fastest (100) is its middle.
+    let max = razdor::rules::game::WALK_SPEED_MAX as f32;
+    if let Some(v) = option_slider(row(3), &slider_label(3, n_("Hero's walking speed")), walk_speed(audio) / max) {
+        audio.walk_speed = Some((v * max).round());
     }
     // The Community's "Скорость анимаций в битве" (`AnimationSpeed`): it caps a strike's
     // slide at (100 − S)·5 ms and its effect at (100 − S)·3 ms (0x4afd45, 0x4afe7c). The

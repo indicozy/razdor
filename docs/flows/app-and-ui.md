@@ -334,6 +334,8 @@ else no touch. The mappers' tests cover each gesture.
   foe, a battle's «Рестарт»); `main_menu::apply_options` puts the
   scroll speed and the autosave where the interface reads the install's `[Options]`
   (`chrome::set_option_override`) and turns the hint boxes on or off (`widgets::set_hints`);
+  the walking speed slider runs 0..200 (`rules::game::WALK_SPEED_MAX`): 0..100 is the
+  original's `WalkSpeed` range, 100..200 is Razdor's extra speed up to 2× (the owner's request);
 - the cheat console and the update window decide whether input is blocked:
   `widgets::set_input_blocked(true)` while a dialog, the F1 overlay, the console or the
   update window is on top. Screens still draw under them but must check

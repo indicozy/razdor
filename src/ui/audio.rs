@@ -233,7 +233,8 @@ pub struct Settings {
     /// The original's settings window (interface.md §16), each `None` until chosen there:
     /// then the install's `[Options]` value. "Скорость скроллинга карты" (`ScrollSpeed`, 0..100).
     pub scroll_speed: Option<f32>,
-    /// "Скорость перемещения героя" (`WalkSpeed`, 0..100).
+    /// "Скорость перемещения героя" (`WalkSpeed`, 0..`WALK_SPEED_MAX`: 0..100 is the original's
+    /// range, above it is Razdor's extra speed).
     pub walk_speed: Option<f32>,
     /// "Не загружать музыку и звуки" (`OptValue4`; read at start, as the original).
     pub no_sound: Option<bool>,
@@ -356,7 +357,8 @@ impl Settings {
         let map_zoom = if self.map_zoom.is_finite() { self.map_zoom.clamp(lo, hi) } else { 1.0 };
         let anim_speed = self.anim_speed.filter(|s| s.is_finite()).map(|s| s.clamp(0.0, 99.0));
         let pct = |v: Option<f32>| v.filter(|s| s.is_finite()).map(|s| s.clamp(0.0, 100.0));
-        Settings { music_volume: fix(self.music_volume), sfx_volume: fix(self.sfx_volume), ui_scale, text_size, map_zoom, anim_speed, scroll_speed: pct(self.scroll_speed), walk_speed: pct(self.walk_speed), ..self }
+        let walk = |v: Option<f32>| v.filter(|s| s.is_finite()).map(|s| s.clamp(0.0, razdor::rules::game::WALK_SPEED_MAX as f32));
+        Settings { music_volume: fix(self.music_volume), sfx_volume: fix(self.sfx_volume), ui_scale, text_size, map_zoom, anim_speed, scroll_speed: pct(self.scroll_speed), walk_speed: walk(self.walk_speed), ..self }
     }
 
     fn save(&self) {
@@ -742,6 +744,14 @@ mod tests {
         assert_eq!(s.text_size, super::super::display::default_text_size());
         assert_eq!(s.large_windows, super::super::display::default_large_windows());
         assert_eq!(s.layout_version, LAYOUT_VERSION);
+    }
+
+    #[test]
+    fn a_walking_speed_above_100_survives_loading() {
+        let kept = Settings { walk_speed: Some(180.0), ..Settings::default() }.clamped();
+        assert_eq!(kept.walk_speed, Some(180.0));
+        let capped = Settings { walk_speed: Some(250.0), ..Settings::default() }.clamped();
+        assert_eq!(capped.walk_speed, Some(200.0));
     }
 
     #[test]

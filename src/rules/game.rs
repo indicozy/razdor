@@ -30,12 +30,21 @@ fn pace_default() -> f32 {
     1.0
 }
 
-/// The pace of the world's real time for `WalkSpeed` (0..100): the original's step takes
-/// `WalkDelay = (100 - w) * 250 div 100 + 150` ms (0x4b8c54, integer division), and every
-/// step, wait tick and walk of the world is paced by it; Razdor's [`STEP_SECONDS`] is that
-/// delay at the shipped 100, so the world runs `150 / WalkDelay` as fast.
+/// The player's largest `WalkSpeed` setting: 100 is the original's fastest, 200 is twice it.
+pub const WALK_SPEED_MAX: i32 = 200;
+
+/// The pace of the world's real time for the walking speed (0..[`WALK_SPEED_MAX`]). The 0..100
+/// part is the original's (0x4b8c54): a step takes `WalkDelay = (100 - w) * 250 div 100 + 150`
+/// ms (integer division), and every step, wait tick and walk of the world is paced by it;
+/// Razdor's [`STEP_SECONDS`] is that delay at the shipped 100, so the world runs
+/// `150 / WalkDelay` as fast. Above 100 is Razdor's choice (the owner's request, 2026-10-28),
+/// not parity: up to 2× the original's fastest at 200, the pace rising linearly from 1 at 100
+/// (a step of 75 ms at 200).
 pub fn walk_pace(walk_speed: i32) -> f32 {
-    let w = walk_speed.clamp(0, 100);
+    let w = walk_speed.clamp(0, WALK_SPEED_MAX);
+    if w > 100 {
+        return 1.0 + (w - 100) as f32 / 100.0;
+    }
     150.0 / ((100 - w) * 250 / 100 + 150) as f32
 }
 
@@ -5096,7 +5105,9 @@ mod tests {
         assert_eq!(walk_pace(100), 1.0);
         assert_eq!(walk_pace(0), 150.0 / 400.0);
         assert_eq!(walk_pace(1), 150.0 / 397.0, "integer division: 99 * 250 / 100 = 247");
-        assert_eq!(walk_pace(140), 1.0, "clamped");
+        assert_eq!(walk_pace(150), 1.5);
+        assert_eq!(walk_pace(200), 2.0);
+        assert_eq!(walk_pace(250), 2.0, "clamped");
     }
 
     #[test]
