@@ -496,14 +496,32 @@ const CORNER_PX: f32 = 34.0;
 /// The rows' margin from the box's top and bottom edges, at the interface scale.
 const EDGE_PX: f32 = 4.0;
 
-/// The part of the text box `rows` where a list's rows go: the box's full height less a small
-/// margin, and a corner's width cut off each side. The corner ornaments are 34 px squares, and
-/// the rows scroll past every height, so a row's icon, its picked bar and the scrollbar stay in
-/// the columns between the corners; the corners then fall on the box's empty edges only.
+/// The list's left inset from the box's left edge. The top-left ornament (`Corner_Frame-LU`, a
+/// dense filigree over its 34 px square) leaves clear, at 34 px in, the icon column from x 24 px
+/// and from y 16 px down: a row's icon is 20-24 px and sits 20 px in from the rows' left edge
+/// (`scenario_icon`, 14 px to its centre), so the inset is 16 px. Checked on the art's opaque
+/// pixels (`Corner_Frame-LU.lit`, 34×34).
+const LEFT_PX: f32 = 16.0;
+
+/// The first row's top, from the rows' top edge, at scroll 0: 7 px, so its icon's top (5 px below
+/// the row's top) lands at 16 px, under the ornament's clear part (see `LEFT_PX`).
+const FIRST_ROW_PX: f32 = 7.0;
+
+/// The part of the text box `rows` where a list's rows go: the box's full width less the left
+/// inset (`LEFT_PX`) and the box's full height less a small margin. The right corners and the
+/// bottom corners are left to the scrollbar (`list_track`) and the last visible row's clip.
 fn list_view(rows: Rect, k: f32) -> Rect {
-    let side = (CORNER_PX * k).min(rows.w / 2.0);
+    let left = (LEFT_PX * k).min(rows.w / 2.0);
     let edge = (EDGE_PX * k).min(rows.h / 2.0);
-    Rect::new(rows.x + side, rows.y + edge, rows.w - 2.0 * side, rows.h - 2.0 * edge)
+    Rect::new(rows.x + left, rows.y + edge, rows.w - left, rows.h - 2.0 * edge)
+}
+
+/// The scrollbar's track: beside the rows on the right, from below the top-right ornament to
+/// above the bottom-right one (`CORNER_PX` at each end), so its arrow buttons (each a bar's
+/// width square at its ends) are never under a corner.
+fn list_track(rows: Rect, view: Rect, k: f32) -> Rect {
+    let corner = (CORNER_PX * k).min(rows.h / 2.0);
+    Rect::new(view.right() - 16.0 * k, rows.y + corner, 12.0 * k, rows.h - 2.0 * corner)
 }
 
 /// "Сценарий для Новой Игры".
@@ -561,7 +579,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
     // Razdor's scrollbar on the right when the list does not all fit (a touch screen has no
     // wheel); the rows give it room. Its track runs the view's height, inside the right corners.
     let barred = max_scroll > 0.0;
-    scrollbar_px(Rect::new(view.x + view.w - 16.0 * k, view.y, 12.0 * k, view.h), &mut scroll, max_scroll, view.h / k, 15.0);
+    scrollbar_px(list_track(rows, view, k), &mut scroll, max_scroll, view.h / k, 15.0);
     SCROLL.with(|s| s.set(scroll));
     let row_w = view.w - if barred { 22.0 * k } else { 8.0 * k };
     chrome::text_box_decoration(rows);
@@ -569,7 +587,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
     // The rows are clipped to the list's view, so a block only partly in view shows its part (a
     // campaign taller than the room left was hidden, with the gap it left).
     let clip = crate::ui::widgets::Clip::new(inside);
-    let mut selection_y = view.y + 6.0 * k - scroll * k;
+    let mut selection_y = view.y + FIRST_ROW_PX * k - scroll * k;
     for (row, g) in list.iter().enumerate() {
         let r = Rect::new(view.x + 4.0 * k, selection_y, row_w, block_h(g) - 2.0 * k);
         selection_y += block_h(g);
@@ -578,7 +596,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         }
     }
     let mut next = None;
-    let mut y = view.y + 6.0 * k - scroll * k;
+    let mut y = view.y + FIRST_ROW_PX * k - scroll * k;
     for (row, g) in list.iter().enumerate() {
         let r = Rect::new(view.x + 4.0 * k, y, row_w, block_h(g) - 2.0 * k);
         y += block_h(g);
@@ -631,12 +649,13 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
             // Single scenarios use the original list's cyan, rather than the blue markup tint.
             Color::from_rgba(90, 231, 255, 255)
         };
-        // The name leaves room for the marks it has (none: the original's width).
-        let name_w = r.w - (40.0 + if f.completed { 44.0 } else if f.favourite { 24.0 } else { 0.0 }) * k;
+        // The name leaves room for the marks it has (none: the original's width). The row's right
+        // end is 32 px past the name's start (the name ends at the row's edge, 2 px short of the
+        // scrollbar), so a name fits the row as it was before the corner insets (208 px).
+        let name_w = r.w - (32.0 + if f.completed { 44.0 } else if f.favourite { 24.0 } else { 0.0 }) * k;
         with_face(Face::Subtitle, || {
-            // The name keeps its 15 px and ends in «…» when it is too long: shrunk to fit it went
-            // to 10.7 sp on a phone, under the text-size check's 12 sp.
-            let size = 15.0 * k;
+            // Shrunk to fit the name's room (`fit_size`, 15 px at most), as before the insets.
+            let size = fit_size(name, name_w, 15.0 * k);
             chrome::shadow_text(&ellipsize(name, name_w, size), head.x + 32.0 * k, head.y + head.h * 0.5 + size * 0.36, size, name_ink);
         });
         let small = 12.0 * k;
@@ -1249,16 +1268,27 @@ mod tests {
 
     #[test]
     fn the_scenario_list_lies_between_the_corner_columns() {
-        // The box is 278 × 329 units; at k = 2 each corner is 68 px wide and tall. The list
-        // takes the full height less a 4 px margin (8 px at k = 2), and the columns between
-        // the corners: its first icon, the picked bar and the scrollbar never sit under one.
+        // The box is 278 × 329 units; each corner is 34 px square (at k = 1). The rows take the
+        // full height less a 4 px margin and the box's width less a 16 px left inset: the first
+        // icon (x 24..44 from the box's left, y from 16 at scroll 0, see `LEFT_PX`) clears the
+        // top-left ornament. The scrollbar's track runs from below the top-right ornament to
+        // above the bottom-right one, so its arrows are never under a corner.
         let rows = Rect::new(12.0, 36.0, 540.0, 648.0);
         let v = list_view(rows, 2.0);
-        assert_eq!((v.x, v.y, v.w, v.h), (12.0 + 68.0, 36.0 + 8.0, 540.0 - 136.0, 648.0 - 16.0));
-        assert!(v.x >= rows.x + CORNER_PX * 2.0 && v.right() <= rows.right() - CORNER_PX * 2.0);
-        assert!(v.y < rows.y + CORNER_PX * 2.0 && v.bottom() > rows.bottom() - CORNER_PX * 2.0, "the full height, bar the margin");
-        let one = list_view(Rect::new(0.0, 0.0, 278.0, 329.0), 1.0);
-        assert_eq!((one.x, one.y, one.w, one.h), (34.0, 4.0, 210.0, 321.0));
+        assert_eq!((v.x, v.y, v.w, v.h), (12.0 + 32.0, 36.0 + 8.0, 540.0 - 32.0, 648.0 - 16.0));
+        assert_eq!(v.right(), rows.right(), "the rows run to the box's right edge; the track sits inside it");
+        let t = list_track(rows, v, 2.0);
+        assert_eq!((t.x, t.y, t.w, t.h), (v.right() - 32.0, rows.y + 68.0, 24.0, rows.h - 136.0));
+        assert!(t.y >= rows.y + CORNER_PX * 2.0 && t.bottom() <= rows.bottom() - CORNER_PX * 2.0);
+        // At 1280 × 800 (k ≈ 1.11) of the box at (4, 31) of 278 × 329: the first row's head sits
+        // 11 units into the box, and the name's room is the 208 units the list had before.
+        let one = list_view(Rect::new(4.0, 31.0, 278.0, 329.0), 1.0);
+        assert_eq!((one.x, one.y, one.w, one.h), (20.0, 35.0, 262.0, 321.0));
+        assert_eq!(one.y + FIRST_ROW_PX - 31.0, 11.0);
+        let row_w = one.w - 22.0;
+        assert_eq!(row_w - 32.0, 208.0, "the name's room: the row less the icon column");
+        let t1 = list_track(Rect::new(4.0, 31.0, 278.0, 329.0), one, 1.0);
+        assert_eq!((t1.x, t1.w), (266.0, 12.0));
     }
 
     #[test]
