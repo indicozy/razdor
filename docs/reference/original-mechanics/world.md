@@ -319,13 +319,13 @@ Checked for the cell he is about to enter, before he moves (§2.2):
 
 1. **An AI army stands there** (occupant code of an army, not the ship): it is engaged,
    **friendly or not**, unless the cell belongs to a town, tavern, church, smithy, shipyard,
-   altar or dungeon (types 1, 5, 7–11), or the army's attitude to the player is > 0 and the
-   cell is a building other than a bridge. On open ground every army is engaged.
+   altar or dungeon (types 1, 5, 7–11), or the army's own attitude to the player (+0x16af)
+   is > 0 and the cell is a building other than a bridge. On open ground every army is engaged.
 2. Else, **a building cell** of a village, castle, fort, ruins or bridge (types 2–4, 12–14):
    the last on-map army **standing in** that building guards it (army +0x3788, the building
    under its cell, cleared when it leaves; not its home building: a castle's own army away
-   on patrol does not guard it); the guard is engaged when its attitude to the player is
-   ≤ 0, or always on a bridge.
+   on patrol does not guard it); the guard is engaged when its own attitude to the player
+   (+0x16af, 0x4ccc8a) is ≤ 0, or always on a bridge.
 3. No guard: a castle, fort or ruins whose attitude (+0x152) is ≤ 0 (ruins always) with a
    garrison record: an empty garrison means the building is **captured** (owner = player,
    the hero's faction and attitudes copied); otherwise the garrison is engaged. An unguarded
@@ -355,7 +355,14 @@ Checked for the cell he is about to enter, before he moves (§2.2):
 
 Two armies are **in contact** when `|dx| ≤ 1 and |dy| ≤ 1` (0x4a56c1). Relation (0x4a0868):
 let a = my attitude to his faction, b = his to mine; both ≥ 0 → (a+b) div 2; a < 0 → a;
-otherwise −1. A hostile army in contact attacks the hero when its cached battle score
+otherwise −1. Two attitudes per army, not one: the army's **own** attitude to the player is
+its raw byte +0x16af (the army's row of the file, `relations[0]`, changed only by opcode 10 of
+the events); the relation above, with the player's row, is what makes it hostile here and in
+battle. Razdor: `Army::own_attitude` (friendly tests) and `Army::attitude` (relation). The
+friendly tests read the own byte: the minimap's ally colour (0x49e3c9), the hostile tooltip
+frame (0x4ca9f0), the building guard (0x4ccc8a), the friendly question mark and the curse
+refusal (magic-items.md §3.5). **code**
+A hostile army in contact attacks the hero when its cached battle score
 against him is > 0; a target standing in a building is attacked only when the building is a
 bridge or the target's own (otherwise both armies' scores against each other are tripled, cap
 10000; `ai.md`). A friendly army in contact greets the hero (meeting) only right

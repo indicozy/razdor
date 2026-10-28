@@ -304,13 +304,13 @@ over the minimap:
 | Over an unexplored cell | question mark (static "Ask") | static |
 | Over an explored cell that cannot be entered | "Denied" | static |
 | Over an army | crossed swords | frame = (ms / 30) mod 50 |
-| Over an army whose meeting event is waiting and that is friendly (attitude ≥ 1) | animated question mark | (ms / 25) mod 50 |
+| Over an army whose meeting event is waiting and that is friendly (own attitude +0x16af ≥ 1) | animated question mark | (ms / 25) mod 50 |
 | Over a building (not a bridge) | house | (ms / 50) mod 50 |
 | Over ruins whose owner is not a map army, or building type 15 | animated question mark | (ms / 25) mod 50 |
 | Busy (loading, glides, battle pauses) | clock | (ms / 30) mod 50 |
 
 Over a village, castle, fort, ruins or bridge the game first looks for a guard: the last army
-on the map standing in that building (+0x3788) that is hostile (attitude ≤ 0), or any such
+on the map standing in that building (+0x3788) that is hostile (own attitude +0x16af ≤ 0), or any such
 army on a bridge. A castle, fort or ruins with a garrison counts as hostile when its attitude
 to the player is ≤ 0 (ruins always). A guard or a hostile garrison gives the swords (a
 friendly guard of a bridge with a meeting waiting, the animated question mark); ruins with an
@@ -426,7 +426,7 @@ stops the hero or moves the map. **code** (4cc217–4cc35a, 4ccf10; fade in the 
 4ca728: alpha = elapsed × 255 / 500)
 
 Tooltip box: centred on the mouse, kept inside the 1024×682 view; styles normal, hostile
-(attitude < 1) and neutral (bridges, empty ruins). The army panel lists up to 2×6 unit
+(own attitude +0x16af < 1, 0x4ca9f0) and neutral (bridges, empty ruins). The army panel lists up to 2×6 unit
 portraits with a darkened band of height `46 × (1 − HP/max HP)` px on wounded units; ruins
 never show their defenders. **code** (4ca8ac, 4ca9f0, 4cb18c)
 

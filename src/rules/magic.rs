@@ -323,13 +323,13 @@ impl Game {
 
     /// Army `i` can be pointed at with an enemy spell (0x4cc148): it stands on a cell a
     /// click can target ([`Game::can_target`], 0x4cbf20: explored, open on the hero's planner
-    /// map), outside any building, and it is not a friend (attitude 1 or more) with a meeting
+    /// map), outside any building, and it is not a friend (own attitude +0x16af 1 or more) with a meeting
     /// event waiting. No distance, no sight: an army under the fog of explored ground
     /// counts, and other friends may be cursed.
     fn can_curse(&self, i: usize) -> bool {
         let a = &self.world.armies[i];
         let t = a.tile(&self.world.map);
-        let talks = a.attitude >= 1 && self.script.as_deref().is_some_and(|e| e.meeting_waiting(self, a.id));
+        let talks = a.own_attitude() >= 1 && self.script.as_deref().is_some_and(|e| e.meeting_waiting(self, a.id));
         // The hero's own cell is never a target: the hit test skips his army (magic-items.md §3.5).
         t != self.tile() && self.can_target(t) && self.world.location_at(t).is_none() && !talks
     }

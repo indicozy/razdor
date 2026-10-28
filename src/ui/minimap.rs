@@ -582,10 +582,11 @@ fn location_color(l: &razdor::rules::world::Location) -> Color {
 }
 
 /// An army's marker is in the ally colour only when a meeting event waits for it (+0x3826)
-/// and its attitude to the player (+0x16af) is above 0; every other army, friends included,
-/// has the enemy colour (0x49e3c9 with the hooks 0xc27773 / 0xc27784).
-fn army_is_ally(attitude: i8, meeting_waiting: bool) -> bool {
-    meeting_waiting && attitude > 0
+/// and its own attitude to the player (+0x16af, [`crate::rules::world::Army::own_attitude`])
+/// is above 0; every other army, friends included, has the enemy colour (0x49e3c9 with the
+/// hooks 0xc27773 / 0xc27784).
+fn army_is_ally(own_attitude: i8, meeting_waiting: bool) -> bool {
+    meeting_waiting && own_attitude > 0
 }
 
 /// Draws the minimap window. `view_world` is the part of the world the map view shows (world
@@ -695,7 +696,7 @@ pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_
             continue;
         }
         let waits = game.script().is_some_and(|e| e.meeting_waiting(game, a.id));
-        marks.push((t, if army_is_ally(a.attitude, waits) { ally } else { enemy }));
+        marks.push((t, if army_is_ally(a.own_attitude(), waits) { ally } else { enemy }));
     }
     // The `routes` cheat (Razdor's): each enemy army's planned path as a line from where it
     // stands, and a ring where it heads, under the shields.
@@ -811,7 +812,7 @@ pub fn army_list(game: &Game, o: Rect, bottom: f32, unnamed: &str) -> Option<(f3
             draw_rectangle(rr.x, rr.y, rr.w, rr.h, Color::new(1.0, 1.0, 1.0, 0.14));
         }
         let waits = game.script().is_some_and(|e| e.meeting_waiting(game, a.id));
-        let col = if army_is_ally(a.attitude, waits) { ally } else { enemy };
+        let col = if army_is_ally(a.own_attitude(), waits) { ally } else { enemy };
         draw_circle(rr.x + 7.0 * k, y + row * 0.5, 3.5 * k, BLACK);
         draw_circle(rr.x + 7.0 * k, y + row * 0.5, 2.5 * k, col);
         let full = if a.shown_name().is_empty() { unnamed } else { a.shown_name() };

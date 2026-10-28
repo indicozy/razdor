@@ -275,8 +275,9 @@ pub struct MapHover {
     pub building: Option<BuildingHover>,
 }
 
-/// Cursor_OverArmy (0x48edc8): an army with a meeting waiting and an attitude of 1 or more
-/// gets the question mark, any other the swords.
+/// Cursor_OverArmy (0x48edc8): an army with a meeting waiting and its own attitude (+0x16af)
+/// of 1 or more gets the question mark, any other the swords. The callers pass the own
+/// attitude ([`crate::rules::world::Army::own_attitude`]), as the guard test 0x4ccc8a does.
 fn over_army(attitude: i8, meeting: bool) -> Shape {
     if meeting && attitude >= 1 {
         Shape::Query

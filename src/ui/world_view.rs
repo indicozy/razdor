@@ -1971,9 +1971,9 @@ fn army_tooltip(game: &Game, a: &Army) -> Tooltip {
     if hurt > 0 {
         text.push((trf!("Wounded: -{hurt} hits", hurt), Ink::Mana));
     }
-    // 0x4ca9f0: the hostile frame and colours for an army whose attitude to the player is
-    // below 1, neutral ones (0) included.
-    let style = if a.attitude < 1 { TipStyle::Hostile } else { TipStyle::Normal };
+    // 0x4ca9f0: the hostile frame and colours for an army whose own attitude to the player
+    // (+0x16af, not the relation) is below 1, neutral ones (0) included.
+    let style = if a.own_attitude() < 1 { TipStyle::Hostile } else { TipStyle::Normal };
     let team = if a.hostile() { Team::Enemy } else { Team::Player };
     Tooltip { title, text, troops: a.troops.clone(), garrison: None, army: true, team, style }
 }
@@ -2307,7 +2307,7 @@ fn map_hover(game: &Game, t: Tile, on_minimap: bool) -> MapHover {
     h.army = if t == game.tile() {
         CellArmy::Hero
     } else if let Some(a) = w.armies.iter().find(|a| a.tile(map) == t) {
-        CellArmy::Army { attitude: a.attitude, meeting: meeting(a) }
+        CellArmy::Army { attitude: a.own_attitude(), meeting: meeting(a) }
     } else if game.parked_ship() == Some(t) {
         CellArmy::Ship
     } else {
@@ -2320,7 +2320,7 @@ fn map_hover(game: &Game, t: Tile, on_minimap: bool) -> MapHover {
         }
         h.building = Some(BuildingHover {
             kind: building_type(loc.kind),
-            standing: w.armies.iter().filter(|a| a.mind.standing == Some(l)).map(|a| (a.attitude, meeting(a))).collect(),
+            standing: w.armies.iter().filter(|a| a.mind.standing == Some(l)).map(|a| (a.own_attitude(), meeting(a))).collect(),
             garrison: !loc.cleared && loc.garrison.iter().any(|t| t.alive()),
             attitude: loc.attitude,
             ownerless: loc.owner == Owner::Neutral,

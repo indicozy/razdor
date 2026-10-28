@@ -768,6 +768,16 @@ impl Army {
         self.attitude < HOSTILE_BELOW
     }
 
+    /// The army's own attitude to the player, its raw byte +0x16af (the army's row of the
+    /// file, `relations[0]`, changed only by the events that set attitudes: opcode 10). The
+    /// original reads it for everything friendly: the minimap's ally colour (0x49e3c9), the
+    /// hostile tooltip frame (0x4ca9f0), the building guard (0x4ccc8a), the friendly question
+    /// mark and the curse refusal (magic-items.md §3.5). The combined [`Army::attitude`]
+    /// (0x4a0868) is the hostility only.
+    pub fn own_attitude(&self) -> i8 {
+        self.ai.relations[0]
+    }
+
     /// The troop in the middle of the front row, else the first one.
     pub fn leader(&self) -> Option<UnitId> {
         self.troops.first().map(|t| t.unit)
@@ -1710,6 +1720,23 @@ mod tests {
     }
 
     #[test]
+    fn a_friendly_armys_own_attitude_differs_from_its_hostility() {
+        // Другой берег's neighbours (faction 3): own attitude +1 (their file row, +0x16af),
+        // the player's row says −1 towards faction 3. The combined relation (0x4a0868) is −1,
+        // so they are hostile for battle and AI, while the minimap and the tooltip read +1.
+        let mut s = scenario(20, 6);
+        s.header.relations[0] = [3, 2, -1, -2];
+        let neighbour = army(1, 5, 2, 1, &[troop(4, 0, 1)]);
+        s.armies = vec![neighbour];
+        let w = World::from_scenario(&s, &content());
+        let a = &w.armies[0];
+        assert_eq!(a.faction, 3);
+        assert_eq!(a.own_attitude(), 1, "+0x16af: the army's own row");
+        assert_eq!(a.attitude, -1, "the relation with the player's row (0x4a0868)");
+        assert!(a.hostile(), "hostility stays the relation");
+    }
+
+    #[test]
     fn standard_world_places_every_location_on_a_passable_tile() {
         let w = World::standard(&Content::builtin());
         assert_eq!(w.locations.len(), 8);
@@ -2198,6 +2225,16 @@ mod real_maps {
                 let d = s.armies.iter().find(|d| d.id == a.id).expect("its record");
                 assert_eq!(a.tile(&w.map), (d.x as i32, d.y as i32), "{}", m.name);
                 assert!(a.figure <= 12, "{}: army {} figure {}", m.name, a.id, a.figure);
+            }
+            // Другой берег's «Купец Михаил» and the «фон Монтерок» army (neighbours, faction 3)
+            // have an own attitude to the player above 0 (+0x16af), so a waiting meeting marks
+            // them as allies (0x49e3c9), while their combined relation stays hostile.
+            if m.name == "Другой берег" {
+                for name in ["Купец Михаил", "Монтерок"] {
+                    let a = w.armies.iter().chain(&w.inactive).find(|a| a.name.contains(name) || a.leader_name.contains(name)).unwrap_or_else(|| panic!("{name} on {}", m.name));
+                    assert!(a.own_attitude() > 0, "{name}: own attitude {}", a.own_attitude());
+                    assert!(a.hostile(), "{name}: the combined relation is hostile");
+                }
             }
             // Другой берег's "Разбойники у дороги" (army 40, editor picture 7, style 1, a
             // rogue leader) walks as the Rogue, not the Knight.

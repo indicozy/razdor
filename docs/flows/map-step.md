@@ -115,6 +115,9 @@ grow, the army may re-plan (`ai_plan`: one flood seeded with every target, with 
 then its arrival rules run (`ai_arrive`). Wander points: `ai_wander`. Respawns: `ai_respawns`. Noon
 per army at its first arrival after 12:00 (`ai_noon`). Attitude between sides: `relation`,
 `player_attitude_to` (`src/rules/world.rs`); a merchant ship keeps its file attitude (b3e247f).
+The army's own attitude to the player (its file byte +0x16af, `Army::own_attitude`) is what the
+friendly tests read: the minimap's ally colour, the hostile tooltip, the building guard, the
+friendly question mark and the curse refusal; `Army::attitude` (the relation) is only hostility.
 
 **Battles between map parties** (Razdor's, not a rule). When the AI resolves a fight between an
 army and an army or a garrison (`ai_battle`, `rules/ai.rs`), with one

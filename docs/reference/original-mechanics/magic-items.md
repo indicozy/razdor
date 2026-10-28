@@ -208,7 +208,7 @@ clearly "the hero's army has a Caster". **code**
   cell whether or not the army is currently visible, so an army under fog on explored ground can
   be targeted. Armies inside a building are not in the cell layer and cannot be targeted.
 - An army is refused when it both has a meeting event (army byte +0x3826) and a positive
-  attitude to the player (+0x16af ≥ 1): friendly talking armies. Any other army, friendly or
+  own attitude to the player (+0x16af ≥ 1): friendly talking armies. Any other army, friendly or
   not, can be cursed.
 - A click on a valid target starts the cast. Right-click or Esc leaves target mode (0x4cd016).
 
@@ -480,7 +480,7 @@ Razdor's code read: `src/rules/items.rs`, `src/rules/magic.rs`, `src/rules/units
 | Spell book order | Razdor's spell book fills each row of 3 (`spellbook::frame`), the original fills each column of 5 top to bottom (4dad08) | Column-major (`ROWS` = 5) | §2 | Razdor now matches |
 | Hover in the book | Frame on the hovered card, and on unaffordable cards too | Hover redraws the card in its own colour, no frame (4c2cf4); the cannot-afford card is dark red (49bde4) | §3.5 | Razdor now matches (the hover picture brightened 1400/1024) |
 | Hero's cell in target mode | Red ring on the hero's cell | No ring; the hero's army is no target | §3.5 | Razdor now matches |
-| Enemy target range | Any army on an explored cell a click can target, outside buildings, at any distance; friends too unless they have a meeting event waiting and attitude ≥ 1 (`Game::can_curse`, `EventEngine::meeting_waiting`) | Any army on an explored, passable cell, no distance, visible or not; friendly armies may be cursed unless they are "talking" friends | §3.5 | Matches |
+| Enemy target range | Any army on an explored cell a click can target, outside buildings, at any distance; friends too unless they have a meeting event waiting and own attitude (+0x16af) ≥ 1 (`Game::can_curse`, `EventEngine::meeting_waiting`) | Any army on an explored, passable cell, no distance, visible or not; friendly armies may be cursed unless they are "talking" friends | §3.5 | Matches |
 | Target moves during the cast | Lost only if it leaves the map (removed from it, destroyed or deactivated) | Lost only if it leaves the map or is destroyed | §3.2 | Matches |
 | Mana short at the end | The cost, worked out again when the spell lands, is subtracted with no check; mana may go negative | Mana is subtracted anyway and can go negative | §3.4 | Matches |
 | Event during the cast | An event that opens its window (message or question) in a casting step ends the wait and the spell lands at once; a silent event does not | The same (0x4ae4e9, 0x4abfbc) | §3.2 | Matches (since 2026-10-23: silent events ended it too) |
