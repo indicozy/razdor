@@ -29,7 +29,7 @@ use super::hall_ink;
 use super::audio::{cue, cued, Cue};
 use super::dialog::{resource_icon, Dialog, Picture, Resource, MANA};
 use super::item_filter;
-use super::items_view::unit_stat_lines;
+use super::items_view::{item_squares, unit_stat_lines};
 use super::keymap::{self, Action};
 use super::story;
 use super::unit_sheet;
@@ -94,6 +94,9 @@ pub struct BuildingView {
     hall_scroll: usize,
     /// How many rows the building's description is scrolled down, when its rows do not fit its box.
     desc_scroll: usize,
+    /// The store's squares and the hero's pack in the store tab: rows scrolled down.
+    store_scroll: usize,
+    store_pack_scroll: usize,
     /// The market shows the "sell" shop (the pack) instead of the goods.
     pub selling: bool,
     /// The garrison tab's selected unit: (in the garrison, index).
@@ -182,7 +185,7 @@ fn now_ms() -> i64 {
 
 impl BuildingView {
     pub fn new(tab: Tab) -> BuildingView {
-        BuildingView { tab, pick: None, scroll: 0, hall_pick: None, hall_scroll: 0, desc_scroll: 0, selling: false, garrison_sel: None, garrison_buy: None, filter: String::new(), sort: ListSort::Shown, group: ItemGroup::All, tribute_paid: false, tribute: (0, 0), anim: None, hire_panel: None }
+        BuildingView { tab, pick: None, scroll: 0, hall_pick: None, hall_scroll: 0, desc_scroll: 0, store_scroll: 0, store_pack_scroll: 0, selling: false, garrison_sel: None, garrison_buy: None, filter: String::new(), sort: ListSort::Shown, group: ItemGroup::All, tribute_paid: false, tribute: (0, 0), anim: None, hire_panel: None }
     }
 
     fn switch(&mut self, tab: Tab) {
@@ -1436,38 +1439,39 @@ fn garrison(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
 /// its garrison could not wear, as squares of the pack's kind. A press takes the item into the
 /// hero's pack (`Game::take_from_store`); nothing goes in. The tab is offered only while the
 /// store holds something (`town::tabs`).
-fn store(game: &mut Game, assets: &Assets, f: &Frame, message: &mut Option<String>) {
+/// A pane's inner rectangle: the margin the lower panels keep (8 px at the interface scale).
+fn pane_inner(r: Rect, k: f32) -> Rect {
+    Rect::new(r.x + 8.0 * k, r.y + 8.0 * k, r.w - 16.0 * k, r.h - 16.0 * k)
+}
+
+/// The store tab (Razdor's): the loot in the building as the backpack's squares in the upper pane,
+/// a click takes an item into the hero's pack. The hero's pack sits in the lower pane, read-only,
+/// so the player sees where the items go.
+fn store(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, message: &mut Option<String>) {
     let k = chrome::k();
+    let win = Rect::new(f.x, f.y, f.w, f.h);
     let c = game.content.clone();
     let items: Vec<ItemId> = game.store_here().to_vec();
-    let origin = at(f, CARD_PANEL_X + 24.0, 60.0, 0.0, 0.0);
-    let (cell, gap) = (56.0 * k, 6.0 * k);
-    const COLS: usize = 6;
+    let mut pack_hover = None;
+    let lower = pane_inner(card_panel_lower(f), k);
+    let pack = &game.pack;
+    let _ = item_squares(assets, lower, &mut view.store_pack_scroll, |cols| pack.len() / cols + 1, |i| pack.get(i), false, &mut pack_hover);
     let mut hover = None;
-    for (i, &item) in items.iter().enumerate() {
-        let (col, row) = ((i % COLS) as f32, (i / COLS) as f32);
-        let cr = Rect::new(origin.x + col * (cell + gap), origin.y + row * (cell + gap), cell, cell);
-        chrome::surface(cr, chrome::Skin::Paper);
-        draw_rectangle_lines(cr.x, cr.y, cr.w, cr.h, 1.0, Color::new(0.5, 0.35, 0.2, 0.8));
-        assets.draw_item(item, cr.x + 2.0 * k, cr.y + 2.0 * k, cell - 4.0 * k);
-        if mouse_in(cr.x, cr.y, cr.w, cr.h) {
-            draw_rectangle_lines(cr.x, cr.y, cr.w, cr.h, 2.0, chrome::GOLD);
-            hover = Some(item);
-            if clicked() {
-                *message = match game.take_from_store(i) {
-                    Ok(taken) => {
-                        cue(Cue::Item(c.item(taken).kind));
-                        None
-                    }
-                    Err(e) => Some(service_error(e)),
-                };
+    let upper = pane_inner(window_layout::upper(win), k);
+    let pressed = item_squares(assets, upper, &mut view.store_scroll, |cols| items.len() / cols + 1, |i| items.get(i).copied(), false, &mut hover);
+    if let Some(i) = pressed.filter(|&i| i < items.len()) {
+        *message = match game.take_from_store(i) {
+            Ok(taken) => {
+                cue(Cue::Item(c.item(taken).kind));
+                None
             }
-        }
+            Err(e) => Some(service_error(e)),
+        };
     }
     let strip = card_panel_divider(f);
     chrome::army_divider_fill(strip);
     chrome::hint_text(strip, tr("Click an item to take it into your pack."), Color::new(0.4, 1.0, 0.8, 1.0));
-    if let Some(item) = hover {
+    if let Some(item) = hover.or(pack_hover) {
         tooltip_later(&[(c.item(item).name.clone(), ACCENT)]);
     }
 }
@@ -2615,7 +2619,7 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut BuildingView, message:
         Tab::MainHall => next = next.or(main_hall(game, &f, view, message, dialogs)),
         Tab::Barracks => next = next.or(barracks(game, assets, &f, view, message, dialogs)),
         Tab::Garrison => garrison(game, assets, &f, view, message),
-        Tab::Store => store(game, assets, &f, message),
+        Tab::Store => store(game, assets, &f, view, message),
         Tab::Market => next = next.or_else(|| market(game, assets, &f, view, message, dialogs)),
         Tab::Sanctuary => next = next.or_else(|| sanctuary(game, &f, view, message, dialogs)),
         Tab::Tribute | Tab::Shipyard => {}

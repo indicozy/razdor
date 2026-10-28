@@ -497,6 +497,23 @@ fn pack_rows(len: usize, cols: usize) -> usize {
 /// cell (`Some(i)`, an empty one too: an item put there stays there, 0x4c24f4), or on an empty
 /// row of the filtered list (`None`).
 fn pack_view(game: &Game, assets: &Assets, r: Rect, scroll: &mut usize, hover: &mut Option<ItemId>, kept: Option<&[usize]>) -> Option<Option<usize>> {
+    // A cell's item: the pack's own cell `i`, or with a filter the `i`th kept one.
+    let item = |i: usize| match kept {
+        Some(v) => v.get(i).and_then(|&p| game.pack.get(p)),
+        None => game.pack.get(i),
+    };
+    let rows_of = |cols: usize| kept.map_or_else(|| pack_rows(game.pack.len(), cols), |v| v.len().max(1).div_ceil(cols));
+    let cell = item_squares(assets, r, scroll, rows_of, item, game.held_item.is_some(), hover)?;
+    Some(kept.map_or(Some(cell), |v| v.get(cell).copied()))
+}
+
+/// The original's inventory squares (the backpack, the building's store): the cells `item(i)` in
+/// order (`None` an empty one), a row at a time, as many across as the width takes (the original's
+/// five in its 300 px, more in a wider grid) and `rows_of(cols)` rows in all, scrolling by `scroll`
+/// with the original's scroll bar right of them. A swipe or the wheel over it scrolls a row a step.
+/// The cell under the pointer shows gold when it holds an item (or when `held` says an item is
+/// held), and its item goes to `hover`. Returns the cell pressed, `Some(i)`, empty cells too.
+pub(crate) fn item_squares(assets: &Assets, r: Rect, scroll: &mut usize, rows_of: impl Fn(usize) -> usize, item: impl Fn(usize) -> Option<ItemId>, held: bool, hover: &mut Option<ItemId>) -> Option<usize> {
     let k = chrome::k();
     // As many of the original's squares as the width takes (5 in its 300 px), then as many
     // rows as fill the height, the squares shrunk to fit them: no empty band under the pack.
@@ -505,7 +522,7 @@ fn pack_view(game: &Game, assets: &Assets, r: Rect, scroll: &mut usize, hover: &
     let rows_shown = ((r.h / wide).round() as usize).max(1);
     let cell = wide.min(r.h / rows_shown as f32).floor();
     let cols = ((room / cell).floor() as usize).max(PACK_COLS);
-    let rows = kept.map_or_else(|| pack_rows(game.pack.len(), cols), |v| v.len().max(1).div_ceil(cols)).max(rows_shown);
+    let rows = rows_of(cols).max(rows_shown);
     let max_scroll = rows.saturating_sub(rows_shown);
     swipe_rows(r, cell);
     if mouse_in(r.x, r.y, r.w, r.h) {
@@ -539,23 +556,19 @@ fn pack_view(game: &Game, assets: &Assets, r: Rect, scroll: &mut usize, hover: &
                     draw_rectangle_lines(cr.x, cr.y, cr.w, cr.h, 1.0, Color::new(0.5, 0.35, 0.2, 0.8));
                 }
             }
-            let cell_at = match kept {
-                Some(v) => v.get(i).copied(),
-                None => Some(i),
-            };
-            let item = cell_at.and_then(|i| game.pack.get(i));
-            if let Some(item) = item {
-                assets.draw_item(item, cr.x + 2.0, cr.y + 2.0, cell - 4.0);
+            let it = item(i);
+            if let Some(it) = it {
+                assets.draw_item(it, cr.x + 2.0, cr.y + 2.0, cell - 4.0);
             }
             if mouse_in(cr.x, cr.y, cr.w, cr.h) {
-                if item.is_some() || game.held_item.is_some() {
+                if it.is_some() || held {
                     draw_rectangle_lines(cr.x, cr.y, cr.w, cr.h, 2.0, chrome::GOLD);
                 }
-                if item.is_some() {
-                    *hover = item;
+                if it.is_some() {
+                    *hover = it;
                 }
                 if clicked() {
-                    hit = Some(cell_at);
+                    hit = Some(i);
                 }
             }
         }
