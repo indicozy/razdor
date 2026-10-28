@@ -490,6 +490,17 @@ fn desc_max_scroll(steps: &[f32], room: f32) -> usize {
     first
 }
 
+/// The art's corner ornaments are 34 px at the interface scale (`chrome::text_box_frame`).
+const CORNER_PX: f32 = 34.0;
+
+/// The part of the text box `rows` where a list's rows go: the box less its top and bottom
+/// bands, so the corner ornaments (both ends of each band) never cover a row, the scrollbar or
+/// its arrows. Full width: the sides carry no corner.
+fn list_view(rows: Rect, k: f32) -> Rect {
+    let band = (CORNER_PX * k).min(rows.h / 2.0);
+    Rect::new(rows.x, rows.y + band, rows.w, rows.h - 2.0 * band)
+}
+
 /// "Сценарий для Новой Игры".
 /// The list's scroll after the wheel turned by `turned` this frame: 30 px a notch. A frame
 /// without a turn leaves it (`signum` of 0.0 is 1.0, which pulled the list back to its top
@@ -526,40 +537,43 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
     // The list ends at 360 (its room is 324 units): «Добавить карту…» and its hint are under it.
     let rows = win.rect(12.0, 36.0, 270.0, 324.0);
     chrome::text_box_base(rows);
+    // The rows, their bar, the scrollbar and the empty-list line live in `view`: the box's
+    // corner ornaments take its top and bottom bands, so nothing under them.
+    let view = list_view(rows, k);
     let (head_h, chapter_h) = (30.0 * k, 18.0 * k);
     let block_h = |g: &Group| head_h + listed_chapters(scenarios, g).len() as f32 * chapter_h + if listed_chapters(scenarios, g).is_empty() { 0.0 } else { 4.0 * k };
     let content_h: f32 = list.iter().map(block_h).sum::<f32>() + 12.0 * k;
-    let max_scroll = (content_h - rows.h).max(0.0) / k;
+    let max_scroll = (content_h - view.h).max(0.0) / k;
     let mut scroll = SCROLL.with(|s| s.get());
-    swipe_rows(rows, 30.0 * k);
-    let over_list = !input_blocked() && rows.contains(crate::ui::widgets::pointer().into());
+    swipe_rows(view, 30.0 * k);
+    let over_list = !input_blocked() && view.contains(crate::ui::widgets::pointer().into());
     if over_list {
         scroll = wheel_scroll(scroll, wheel());
     }
     scroll = scroll.clamp(0.0, max_scroll);
     // Razdor's scrollbar on the right when the list does not all fit (a touch screen has no
-    // wheel); the rows give it room.
+    // wheel); the rows give it room. Its track runs between the two right corners.
     let barred = max_scroll > 0.0;
-    scrollbar_px(Rect::new(rows.x + rows.w - 16.0 * k, rows.y + 4.0 * k, 12.0 * k, rows.h - 8.0 * k), &mut scroll, max_scroll, rows.h / k, 15.0);
+    scrollbar_px(Rect::new(view.x + view.w - 16.0 * k, view.y, 12.0 * k, view.h), &mut scroll, max_scroll, view.h / k, 15.0);
     SCROLL.with(|s| s.set(scroll));
-    let row_w = rows.w - if barred { 22.0 * k } else { 8.0 * k };
+    let row_w = view.w - if barred { 22.0 * k } else { 8.0 * k };
     chrome::text_box_decoration(rows);
-    let inside = Rect::new(rows.x, rows.y + 2.0 * k, rows.w, rows.h - 4.0 * k);
-    let mut selection_y = rows.y + 6.0 * k - scroll * k;
+    let inside = view;
+    // The rows are clipped to the list's view, so a block only partly in view shows its part (a
+    // campaign taller than the room left was hidden, with the gap it left).
+    let clip = crate::ui::widgets::Clip::new(inside);
+    let mut selection_y = view.y + 6.0 * k - scroll * k;
     for (row, g) in list.iter().enumerate() {
-        let r = Rect::new(rows.x + 4.0 * k, selection_y, row_w, block_h(g) - 2.0 * k);
+        let r = Rect::new(view.x + 4.0 * k, selection_y, row_w, block_h(g) - 2.0 * k);
         selection_y += block_h(g);
         if row == PICKED.with(|p| p.get()).min(list.len().saturating_sub(1)) && r.y < inside.y + inside.h && r.y + r.h > inside.y {
             picked_bar(r);
         }
     }
     let mut next = None;
-    let mut y = rows.y + 6.0 * k - scroll * k;
-    // The rows are clipped to the box, so a block only partly in view shows its part (a
-    // campaign taller than the room left was hidden, with the gap it left).
-    let clip = crate::ui::widgets::Clip::new(inside);
+    let mut y = view.y + 6.0 * k - scroll * k;
     for (row, g) in list.iter().enumerate() {
-        let r = Rect::new(rows.x + 4.0 * k, y, row_w, block_h(g) - 2.0 * k);
+        let r = Rect::new(view.x + 4.0 * k, y, row_w, block_h(g) - 2.0 * k);
         y += block_h(g);
         if r.y >= inside.y + inside.h || r.y + r.h <= inside.y {
             continue;
@@ -654,7 +668,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
         with_face(Face::Body, || {
             let size = 13.0 * k;
             let t = tr("No scenario fits this choice.");
-            chrome::shadow_text(&ellipsize(t, rows.w - 24.0 * k, size), rows.x + 12.0 * k, rows.y + 24.0 * k, size, super::typography::Ink::Orange.color());
+            chrome::shadow_text(&ellipsize(t, view.w - 24.0 * k, size), view.x + 12.0 * k, view.y + 24.0 * k, size, super::typography::Ink::Orange.color());
         });
     }
     PICKED.with(|p| p.set(picked));
@@ -1222,6 +1236,19 @@ mod tests {
         let src = include_str!("new_game.rs");
         let body = &src[src.find("fn scenario_icon(").unwrap()..src.find("fn icon_rect(").unwrap()];
         assert!(!body.contains("win_fx(\"si-border\"") && !body.contains("draw_circle"), "no ring and no disc under the icon");
+    }
+
+    #[test]
+    fn the_scenario_list_lies_between_the_corner_ornaments() {
+        // The box is 270 × 324 units; at k = 2 the corners are 68 px and the list keeps the
+        // room between them, full width, so its first icon (x 18 k) and the scrollbar (the
+        // right 16 k) sit beside the corners, not under them.
+        let rows = Rect::new(12.0, 36.0, 540.0, 648.0);
+        let v = list_view(rows, 2.0);
+        assert_eq!((v.x, v.y, v.w, v.h), (12.0, 36.0 + 68.0, 540.0, 648.0 - 136.0));
+        assert!(v.y >= rows.y + CORNER_PX * 2.0 && v.bottom() <= rows.bottom() - CORNER_PX * 2.0);
+        let one = list_view(Rect::new(0.0, 0.0, 270.0, 324.0), 1.0);
+        assert_eq!((one.y, one.h), (34.0, 256.0));
     }
 
     #[test]
