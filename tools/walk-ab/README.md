@@ -12,9 +12,12 @@ the desktop run by a factor `k` (see below). Stdlib only.
 - Each run: `RAZDOR_SIZE` (default 1440x3168), `RAZDOR_SCENE=walk:<map>:dx,dy` with
   `RAZDOR_SCENE_SAVE=<save>` (the walk starts from the saved hero's tile), `RAZDOR_PROFILE=1`,
   `RAZDOR_PROFILE_FRAMES=<run>/frames.csv` (one row per frame), `RAZDOR_QUIT_AFTER=<frames>`,
-  its own `RAZDOR_LOG`, `RAZDOR_SAVE_DIR` and `XDG_RUNTIME_DIR`, `RAZDOR_NO_AUDIO=1`. No
-  `RAZDOR_SCENE_QUIET`: the day change's window is part of what is measured. No other
-  `RAZDOR_*` variable of the parent shell is passed on.
+  its own `RAZDOR_LOG`, `RAZDOR_SAVE_DIR` and `XDG_RUNTIME_DIR`, `RAZDOR_NO_AUDIO=1`. With
+  `--quiet`, `RAZDOR_SCENE_QUIET=1` too. No other `RAZDOR_*` variable of the parent shell is
+  passed on.
+- `--quiet` is needed for a walk past the noon report: without it the report window stays
+  open, the hero stops, and every later frame is `other` (not a walk frame). The midnight
+  change raises no window, so it is measured with or without the flag.
 - Runs alternate A, B, A, B for `--repeats` repeats (default 3).
 - A run fails when the process exits non-zero, when the scene does not stage (its log line
   `RAZDOR_SCENE=…: <reason>`, e.g. a save from another install), or when no frames are written.
@@ -42,8 +45,8 @@ scene's map name is not used with a save) and defaults to `-`.
 
 ```
 RAZDOR_DT_DIR=<install> python3 -I tools/walk-ab/walk_ab.py \
-  --a <razdor-A> --b <razdor-B> --save <file.rzsave> --walk 20,5 --frames 900 \
-  --repeats 3 --out <scratch>/walk-ab
+  --a <razdor-A> --b <razdor-B> --save <file.rzsave> --walk -40,24 --frames 90 \
+  --quiet --repeats 3 --out <scratch>/walk-ab
 ```
 
 Build the binaries with `cargo build --release` (`CARGO_PROFILE_RELEASE_DEBUG=true` for symbols

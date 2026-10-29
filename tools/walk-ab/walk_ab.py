@@ -53,6 +53,9 @@ def parse_args(argv):
     p.add_argument("--xvfb-cpu", default="16", help="E-core for Xvfb (default 16)")
     p.add_argument("--razdor-cpu", default="19", help="E-core for Razdor (default 19)")
     p.add_argument("--timeout", type=int, default=900, help="seconds per run (default 900)")
+    p.add_argument("--quiet", action="store_true",
+                   help="RAZDOR_SCENE_QUIET=1: the scene's windows are dropped each frame. Needed for a walk past "
+                        "the noon report (it stops the hero while it is open, and the rest of the run is 'other').")
     p.add_argument("--perf", action="store_true",
                    help="wrap the first run in perf record -F 999 -g --call-graph dwarf (perf.data in its run dir)")
     cfg = p.parse_args(argv)
@@ -121,6 +124,8 @@ def run_env(cfg, dt_dir, run_dir, scene):
         "RAZDOR_NO_AUDIO": "1",
         "LP_NUM_THREADS": "1",
     })
+    if cfg.quiet:
+        env["RAZDOR_SCENE_QUIET"] = "1"
     return env
 
 
