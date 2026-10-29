@@ -1528,11 +1528,11 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     }
     // The Community's "Скорость анимаций в битве" (`AnimationSpeed`): it caps a strike's
     // slide at (100 − S)·5 ms and its effect at (100 − S)·3 ms (0x4afd45, 0x4afe7c). The
-    // Evolution Mod's window has no such row (four sliders).
-    if !mod_rows {
-        if let Some(v) = option_slider(row(4), &slider_label(4, n_("Battle animation speed")), anim_speed(audio).unwrap_or(0.0) / 99.0) {
-            audio.anim_speed = Some((v * 99.0).round());
-        }
+    // Evolution Mod's window has only four sliders (its `Option4` is a checkbox); Razdor shows
+    // this row for every install, under its own label (the owner's decision, 2026-10-29).
+    let anim_label = if mod_rows { tr(n_("Battle animation speed")).to_string() } else { slider_label(4, n_("Battle animation speed")) };
+    if let Some(v) = option_slider(row(4), &anim_label, anim_speed(audio).unwrap_or(0.0) / 99.0) {
+        audio.anim_speed = Some((v * 99.0).round());
     }
     // The eight checkboxes (`Option4`…`Option11`), a gap before the three of battle and
     // difficulty.
