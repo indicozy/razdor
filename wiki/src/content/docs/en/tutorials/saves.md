@@ -23,11 +23,23 @@ An autosave is made automatically before each battle and at the daily report at 
 
 ## Autosaves
 
-There are up to 12 autosave slots, as in the original. When the slots are full, the oldest one is overwritten. An autosave on the same map replaces the previous one with the same name.
+There are up to 30 autosave slots (12 in the original). When the slots are full, the oldest one is overwritten. An autosave on the same map replaces the previous one with the same name.
 
 :::caution
 If the install has the autosave option turned off (`OptValue8`), no autosaves are made.
 :::
+
+## Continuing after the game was closed
+
+While playing, Razdor creates an additional autosave called "Last session". It updates approximately every 30 seconds, as well as when the game window loses focus (on a computer) or before the start of each battle.
+
+If the game was closed without a proper exit (crash, power loss, swiping the app away from recent apps, or the phone unloading it from memory), a "Continue the game?" window with the map name and date will appear over the main menu upon the next launch. Clicking "Yes" will return you to that moment, while "No" will simply close the window. If you exited the game properly (via "Exit" or by returning to the main menu), this window will not appear.
+
+:::note
+"Last session" is located in the autosaves tab within the loading window. It can be loaded manually at any time. This save does not occupy one of the 30 slots and is available even if autosaves are disabled.
+:::
+
+If the game closed during a battle, "Last session" stores the moment before the battle: after loading, the hero will be standing on the map next to the enemy, and the battle will restart upon your attack. Open windows (town or hero) are not restored — the game will continue on the map. On mobile devices, a loss of the last ~30 seconds of gameplay is possible.
 
 ## Where saves are kept
 
