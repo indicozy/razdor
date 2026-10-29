@@ -73,8 +73,17 @@ For "did this UI change alter any other screen?": `tools/ui-regress/` renders th
 - `RAZDOR_PROFILE=1`: frames over 100 ms are logged with their screen, and slow picture decodes
   as "slow load". `RAZDOR_PROFILE=<ms>` sets another threshold. Every 5 s the frame probe logs
   a `frame probe` line per kind (walk-step, walk, idle, other): percentiles of total, work,
-  present and each stage, in ms. For a walk scene add `RAZDOR_SCENE_QUIET=1`, or the
-  scenario's messages hold the hero.
+  present and each stage, in ms. For a walk scene on a fresh map add `RAZDOR_SCENE_QUIET=1`,
+  or the scenario's messages hold the hero. With `RAZDOR_SCENE_SAVE` leave it off: the day
+  change's window is part of what the walk measures.
+- `RAZDOR_PROFILE_FRAMES=<csv path>` (desktop): one CSV row per frame
+  (`frame,kind,work_ms,total_ms,tick,terrain,world,fog,minimap,rebuilds`), buffered and written
+  every 5 s and at exit. The `frame` column counts the probed frames from 1.
+- `RAZDOR_SCENE_SAVE=<file.rzsave>`: a map scene (`walk:<map>:dx,dy`, `map:…`) takes its game
+  from that save, as the Load screen loads it, instead of a fresh scenario; the scene's map
+  name is then unused. A save that does not load (another install hash, a damaged file) is
+  logged as `RAZDOR_SCENE=…: cannot load the save <path>: <reason>`, and the scene stays on
+  the title screen.
 - `RAZDOR_SCENE_OPEN=<frame>:<window>[,…]` (`load`, `army`, `spells`, `journal`, `menu`,
   `building:<n>`, `map`): opens a window at that frame and logs the frames after it.
 - Many saves: point `RAZDOR_SAVE_DIR` at a scratch folder of copied saves (0, 85, 500).

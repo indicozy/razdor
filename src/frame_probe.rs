@@ -9,13 +9,23 @@
 //! rebuilds ([`tex_rebuilt`]). Every 5 s it logs one summary line per kind that had frames
 //! ([`summary_lines`]); [`flush`] logs the pending ones at exit.
 //!
+//! Desktop only: `RAZDOR_PROFILE_FRAMES=<csv path>` also writes one row per frame
+//! ([`csv_row`], header [`CSV_HEADER`]). Rows are buffered and appended at each summary and at
+//! [`flush`], never per frame. The file is truncated when the first rows are written.
+//!
 //! The stage times are CPU time spent building the frame. Macroquad batches draws and issues
 //! the GL calls in `next_frame`, so GL submission and the wait for vsync (`eglSwapBuffers`)
 //! land in "present" (total minus work). GPU time itself is not visible here.
 
 use crate::local;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::io::Write;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
+
+/// The per-frame CSV's columns (`RAZDOR_PROFILE_FRAMES`): the times in ms, `tick` the game's
+/// tick, `world` the map with `terrain` inside it, `rebuilds` the texture rebuilds.
+pub const CSV_HEADER: &str = "frame,kind,work_ms,total_ms,tick,terrain,world,fog,minimap,rebuilds";
 
 /// The parts of a frame that are timed.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -67,16 +77,22 @@ struct State {
     samples: Vec<Sample>,
     /// When the samples since the last summary began.
     since: Option<Instant>,
+    /// Frames probed so far (the CSV's `frame` column counts from 1).
+    frames: u64,
+    /// CSV rows not yet appended to the file (`RAZDOR_PROFILE_FRAMES`).
+    csv_rows: Vec<String>,
 }
 
 impl State {
     const fn new() -> State {
-        State { stage: [Duration::ZERO; Stage::COUNT], rebuilds: 0, kind: Kind::Other, samples: Vec::new(), since: None }
+        State { stage: [Duration::ZERO; Stage::COUNT], rebuilds: 0, kind: Kind::Other, samples: Vec::new(), since: None, frames: 0, csv_rows: Vec::new() }
     }
 }
 
 local! {
     static STATE: RefCell<State> = const { RefCell::new(State::new()) };
+    /// The CSV file has its header and rows: the next write appends.
+    static CSV_STARTED: Cell<bool> = const { Cell::new(false) };
 }
 
 /// The time between two summaries.
@@ -120,46 +136,117 @@ pub fn end_frame(work: Duration, total: Duration) {
         return;
     }
     let now = Instant::now();
-    let due = STATE.with_borrow_mut(|s| {
+    let csv = csv_path().is_some();
+    let (due, rows) = STATE.with_borrow_mut(|s| {
         let since = *s.since.get_or_insert(now);
-        s.samples.push(Sample {
+        let sample = Sample {
             kind: s.kind,
             work_ms: ms(work),
             total_ms: ms(total),
             stage_ms: s.stage.map(ms),
             rebuilds: s.rebuilds,
-        });
+        };
+        s.frames += 1;
+        if csv {
+            s.csv_rows.push(csv_row(s.frames, &sample));
+        }
+        s.samples.push(sample);
         s.stage = [Duration::ZERO; Stage::COUNT];
         s.rebuilds = 0;
         s.kind = Kind::Other;
         let elapsed = now.duration_since(since);
         if elapsed < PERIOD {
-            return None;
+            return (None, Vec::new());
         }
         s.since = Some(now);
-        Some((elapsed.as_secs_f32(), std::mem::take(&mut s.samples)))
+        (Some((elapsed.as_secs_f32(), std::mem::take(&mut s.samples))), std::mem::take(&mut s.csv_rows))
     });
+    write_csv(&rows);
     if let Some((secs, samples)) = due {
         log_lines(secs, &samples);
     }
 }
 
-/// Logs the pending samples' summary now (at exit). Does nothing when there are none.
+/// Logs the pending samples' summary now (at exit), and appends the pending CSV rows. Does
+/// nothing when there are none.
 pub fn flush() {
     if !on() {
         return;
     }
-    let (secs, samples) = STATE.with_borrow_mut(|s| {
+    let (secs, samples, rows) = STATE.with_borrow_mut(|s| {
         let secs = s.since.map_or(0.0, |t| t.elapsed().as_secs_f32());
         s.since = None;
-        (secs, std::mem::take(&mut s.samples))
+        (secs, std::mem::take(&mut s.samples), std::mem::take(&mut s.csv_rows))
     });
+    write_csv(&rows);
     log_lines(secs, &samples);
 }
 
 fn log_lines(secs: f32, samples: &[Sample]) {
     for line in summary_lines(secs, samples) {
         crate::diag::log(&line);
+    }
+}
+
+/// The per-frame CSV's file: `RAZDOR_PROFILE_FRAMES` (desktop; no env vars on Android).
+fn csv_path() -> Option<PathBuf> {
+    static PATH: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    PATH.get_or_init(|| std::env::var_os("RAZDOR_PROFILE_FRAMES").filter(|p| !p.is_empty()).map(PathBuf::from)).clone()
+}
+
+/// A kind's name in the summary lines and the CSV.
+fn kind_name(kind: Kind) -> &'static str {
+    match kind {
+        Kind::WalkStep => "walk-step",
+        Kind::Walk => "walk",
+        Kind::Idle => "idle",
+        Kind::Other => "other",
+    }
+}
+
+/// One CSV row of frame `frame` (the probe's count, from 1). The kind's name is the summary's
+/// (`walk-step`, `walk`, `idle`, `other`); times in ms with 3 decimals.
+pub fn csv_row(frame: u64, s: &Sample) -> String {
+    let stage = |st: Stage| s.stage_ms[st as usize];
+    format!(
+        "{frame},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{}",
+        kind_name(s.kind),
+        s.work_ms,
+        s.total_ms,
+        stage(Stage::Tick),
+        stage(Stage::Terrain),
+        stage(Stage::World),
+        stage(Stage::Fog),
+        stage(Stage::Minimap),
+        s.rebuilds,
+    )
+}
+
+/// Appends rows to the CSV file: the header first, the file truncated, on the first write of
+/// the run. Errors are logged, once per write.
+fn write_csv(rows: &[String]) {
+    if rows.is_empty() {
+        return;
+    }
+    let Some(path) = csv_path() else { return };
+    let first = !CSV_STARTED.get();
+    let mut text = String::new();
+    if first {
+        text.push_str(CSV_HEADER);
+        text.push('\n');
+    }
+    for row in rows {
+        text.push_str(row);
+        text.push('\n');
+    }
+    let result = if first {
+        std::fs::write(&path, text.as_bytes())
+    } else {
+        std::fs::OpenOptions::new().append(true).open(&path).and_then(|mut f| f.write_all(text.as_bytes()))
+    };
+    match result {
+        Ok(()) => CSV_STARTED.set(true),
+        Err(e) => crate::diag!("RAZDOR_PROFILE_FRAMES: cannot write {}: {e}", path.display()),
     }
 }
 
@@ -180,12 +267,7 @@ pub fn summary_lines(secs: f32, samples: &[Sample]) -> Vec<String> {
 }
 
 fn kind_line(secs: f32, kind: Kind, of: &[&Sample]) -> String {
-    let name = match kind {
-        Kind::WalkStep => "walk-step",
-        Kind::Walk => "walk",
-        Kind::Idle => "idle",
-        Kind::Other => "other",
-    };
+    let name = kind_name(kind);
     let rebuilds: u32 = of.iter().map(|s| s.rebuilds).sum();
     let stage = |idx: usize| dist(of.iter().map(|s| s.stage_ms[idx])).narrow();
     format!(
@@ -313,5 +395,23 @@ mod tests {
         assert!(lines[0].contains(" walk-step n=1 "), "{}", lines[0]);
         assert!(lines[0].ends_with("tex rebuilds 2"), "{}", lines[0]);
         assert!(lines[1].contains(" idle n=1 "), "{}", lines[1]);
+    }
+
+    #[test]
+    fn a_csv_row_has_the_header_columns_in_order() {
+        let mut step = sample(Kind::WalkStep, 3.0, 4.25, [1.0, 0.5, 2.0, 0.25, 0.125]);
+        step.rebuilds = 2;
+        let row = csv_row(7, &step);
+        assert_eq!(row, "7,walk-step,3.000,4.250,1.000,0.500,2.000,0.250,0.125,2");
+        assert_eq!(row.split(',').count(), CSV_HEADER.split(',').count());
+        let other = sample(Kind::Other, 0.5, 1.0, [0.0; Stage::COUNT]);
+        assert!(csv_row(1, &other).starts_with("1,other,0.500,1.000,0.000,"));
+    }
+
+    #[test]
+    fn the_csv_names_the_kinds_as_the_summary_does() {
+        let s = sample(Kind::Walk, 1.0, 1.0, [0.0; Stage::COUNT]);
+        assert!(csv_row(1, &s).starts_with("1,walk,"));
+        assert!(summary_lines(5.0, &[s]).iter().all(|l| l.contains(" walk n=1 ")));
     }
 }

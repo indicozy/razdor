@@ -28,6 +28,9 @@
 //! `RAZDOR_SCENE_WEAR=<id>,…` wears those items on the squad member of `army:<map>:<n>:<unit>`.
 //! `RAZDOR_SCENE_SELECT=<n>` selects squad member n in the `building:` window (its card shows).
 //! `RAZDOR_SCENE_PAN=dx,dy` holds the interface's pan at that offset (windows larger than the screen).
+//! `RAZDOR_SCENE_SAVE=<file.rzsave>` takes the game of a map scene (`walk`, `map`, …) from that
+//! save, loaded as the Load screen loads one, instead of a fresh scenario; the scene's map name is
+//! then not used (only `classes` needs it). A save that does not load is logged with its reason.
 //! `RAZDOR_TEXT_SIZE=<1|1.25|1.5>` sets the text size and `RAZDOR_LARGE_WINDOWS=1` turns the large
 //! pop-up message windows on (the original's size and off otherwise; the saved settings are ignored).
 //! `RAZDOR_DP=<f32>` is a phone's density (screen px per dp): the phone layout of the pop-ups and
@@ -334,6 +337,19 @@ pub fn stage(app: &mut App) {
     }
 }
 
+/// `RAZDOR_SCENE_SAVE=<file.rzsave>`: the game of that save, loaded as the Load screen loads one
+/// (`save::load` with the install, then the settings' follow). `Ok(None)` when it is not set; a
+/// save that does not load (another install, another version, a damaged file) is an error, and
+/// its message names the file.
+fn game_from_save(app: &mut App) -> Result<Option<Game>, String> {
+    let Some(path) = std::env::var("RAZDOR_SCENE_SAVE").ok().filter(|p| !p.is_empty()) else { return Ok(None) };
+    let install = app.assets.dt.as_ref().zip(app.dt_content.clone()).map(|(d, content)| razdor::rules::save::Install { dir: &d.install.dir, content });
+    let mut game = razdor::rules::save::load(std::path::Path::new(&path), app.demo.clone(), install.as_ref())
+        .map_err(|e| format!("cannot load the save {path}: {e}"))?;
+    super::main_menu::follow_settings(&app.audio.settings, &mut game);
+    Ok(Some(game))
+}
+
 fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
     let mut parts = scene.split(':');
     let kind = parts.next().unwrap_or_default();
@@ -429,16 +445,27 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
         _ => {}
     }
     let map = parts.next().ok_or("no map named")?;
-    let index = app.scenarios.iter().position(|e| e.file == map).ok_or_else(|| format!("no map {map} in the install"))?;
+    // `RAZDOR_SCENE_SAVE=<file.rzsave>`: the game is that save's, and the scene's map name is then
+    // not used (only `classes` needs it: the map must still be in the install).
+    let saved = if kind == "classes" { None } else { game_from_save(app)? };
+    let index = app.scenarios.iter().position(|e| e.file == map);
     if kind == "classes" {
+        let index = index.ok_or_else(|| format!("no map {map} in the install"))?;
         app.screen = Screen::ClassSelect { scenario: Some(index) };
         return Ok(());
     }
-    let content = app.dt_content.clone().ok_or("no install content")?;
-    let content = std::sync::Arc::new(content.with_experimental(super::new_game::experimental_rules()));
-    let mut game = Game::from_scenario(content, &app.scenarios[index].scenario, HeroClass::Knight);
-    // The event generator's fixed seed (its clock seed would differ on every run).
-    game.seed_events(0x5EED);
+    let mut game = match saved {
+        Some(game) => game,
+        None => {
+            let index = index.ok_or_else(|| format!("no map {map} in the install"))?;
+            let content = app.dt_content.clone().ok_or("no install content")?;
+            let content = std::sync::Arc::new(content.with_experimental(super::new_game::experimental_rules()));
+            let mut game = Game::from_scenario(content, &app.scenarios[index].scenario, HeroClass::Knight);
+            // The event generator's fixed seed (its clock seed would differ on every run).
+            game.seed_events(0x5EED);
+            game
+        }
+    };
     // `RAZDOR_SCENE_MAX=1`: the battles of the scene are «Максимум»'s (`Game::max_ai`, as a new game takes it).
     if std::env::var("RAZDOR_SCENE_MAX").is_ok_and(|v| v == "1") {
         game.max_ai = true;

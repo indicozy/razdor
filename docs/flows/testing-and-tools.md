@@ -112,7 +112,8 @@ placeholder `0.0.0` (`update_view::shown_version`), so a version bump changes no
    in ms: on Android that is `/storage/emulated/0/Razdor/profile`.
    The frame probe (`razdor::frame_probe`) takes every frame and every 5 s logs one
    `frame probe` line per kind: `walk-step` (the hero moved to another cell), `walk` (the hero
-   walking, no step), `idle` (the map, the hero still), `other` (any other screen). Each line
+   walking, no step), `idle` (the map, the hero still), `other` (any other screen, and any
+   map frame whose tick did not run: a window open or events held over it). Each line
    has the percentiles of total, work and present, and p50/p99/max of each stage (tick,
    terrain, objects, fog, minimap, rest), all in ms, and the texture rebuilds. Present is
    total minus work: the GL submission and the wait for vsync. The stage times are CPU time;
@@ -120,6 +121,14 @@ placeholder `0.0.0` (`update_view::shown_version`), so a version bump changes no
    `RAZDOR_SCENE_OPEN=<frame>:<window>[,…]` (`snapshot::open_later`: `load`, `army`,
    `spells`, `journal`, `menu`, `building:<n>`, `map`) opens a window at a set frame and
    logs the frames after it.
+   Desktop only: `RAZDOR_PROFILE_FRAMES=<csv path>` writes one row per frame (`frame,kind,
+   work_ms,total_ms,tick,terrain,world,fog,minimap,rebuilds`; `frame_probe::csv_row`), with
+   the same kinds and stage times as the summary. Rows are buffered and appended every 5 s
+   and at exit, never per frame.
+   `RAZDOR_SCENE_SAVE=<file.rzsave>` makes a map scene (`walk:…`, `map:…`) take its game from
+   that save, loaded as the Load screen loads it (a save from another install is refused, and
+   the scene's log line says why). The map name in the scene is then unused. It replays a real
+   game state for A/B walks (`tools/walk-ab/`).
 4. `perf record -g` the offscreen run, `perf report --no-children`; `strace -c -f` for file
    I/O. Mesa's software renderer under Xvfb inflates render times; compare *work* times.
 5. Fix on the main thread's work: cache, decode ahead (`gfx::prefetch`), read on threads

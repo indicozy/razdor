@@ -2905,17 +2905,22 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     // Time stands still while a window is open.
     let mut events = game.drain_events();
     let tile0 = game.tile();
-    if !input_blocked() && events.is_empty() {
+    let ticked = !input_blocked() && events.is_empty();
+    if ticked {
         events = frame_probe::time(Stage::Tick, || game.tick_shown(crate::ui::clock::frame_dt().min(0.1)));
     }
-    // The frame probe's kind: a step (the hero moved to another cell), a walk, or idle.
-    frame_probe::set_kind(if game.tile() != tile0 {
-        Kind::WalkStep
-    } else if game.moving() {
-        Kind::Walk
-    } else {
-        Kind::Idle
-    });
+    // The frame probe's kind: a step (the hero moved to another cell), a walk, or idle. Only a
+    // frame whose tick ran is one of these; a frame with a window open or events held stays
+    // `Other` (a window over a walk is not a walk frame).
+    if ticked {
+        frame_probe::set_kind(if game.tile() != tile0 {
+            Kind::WalkStep
+        } else if game.moving() {
+            Kind::Walk
+        } else {
+            Kind::Idle
+        });
+    }
     let mut next = handle_events(game, events, message, dialogs).or(reopened);
     // Battles between map parties (Razdor's): taken every frame, shown where the player sees
     // the cell and the option is on; the notice replaces the battle's plain line.
