@@ -10,7 +10,9 @@ block	clean	cargo test
 block	clean	cargo build --release
 block	clean	CARGO_BUILD_JOBS=4 cargo clippy
 block	clean	taskset -c 0-15 cargo test
-block	clean	taskset -c 8-19 cargo build
+allow	clean	CARGO_BUILD_JOBS=12 nice -n 19 taskset -c 8-19 cargo build
+block	clean	taskset -c 7-19 cargo build
+block	clean	nice -n 19 taskset -c 0-7 cargo test
 block	clean	cd src && cargo test --lib
 block	clean	bash -c "cargo test"
 block	clean	eval cargo build

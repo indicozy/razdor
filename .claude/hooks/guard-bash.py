@@ -3,8 +3,8 @@
 
 Reads the hook's JSON on stdin and exits 2 (with the reason on stderr) to block a command:
 
-- cargo build/test/run/clippy/check/bench not pinned with `taskset -c 16-19`
-  (the other cores belong to the owner and other sessions);
+- cargo build/test/run/clippy/check/bench not pinned inside CPUs 8-19, e.g. `nice -n 19 taskset -c 8-19`
+  (CPUs 0-7 belong to the owner's desktop);
 - the game started in a window (`target/*/razdor`, `cargo run`, `Razdor.exe`, `wine …Razdor`)
   unless under `xvfb-run`, with `DISPLAY` set to another (Xvfb) display in the same command,
   or with `RAZDOR_ALLOW_WINDOW=1` (the owner asked for a visible run);
@@ -43,8 +43,8 @@ import shlex
 import subprocess
 import sys
 
-ALLOWED_CPUS = set(range(16, 20))
-PIN_HINT = "CARGO_BUILD_JOBS=4 taskset -c 16-19 cargo …"
+ALLOWED_CPUS = set(range(8, 20))
+PIN_HINT = "CARGO_BUILD_JOBS=12 nice -n 19 taskset -c 8-19 cargo …"
 FROZEN = {"dt-feat", "dt-original"}
 GAME_EXT = re.compile(r"\.(lit|ugs|dtm|dtc|wav|ogg|mp3|bik|rzsave)$", re.I)
 GAME_INI = re.compile(r"(^|/)(rus_[^/]*|_global)\.ini$", re.I)
@@ -252,7 +252,7 @@ def unwrap(words, nested):
                 elif flag.startswith("--cpu-list="):
                     spec = flag.split("=", 1)[1]
             if spec is None and w:
-                w = w[1:]  # a hex mask: not the E-cores by list
+                w = w[1:]  # a hex mask: not CPUs 8-19 by list
             try:
                 pinned = spec is not None and cpus(spec) <= ALLOWED_CPUS
             except ValueError:
@@ -685,7 +685,7 @@ def check_segment(words, cwd, exported, depth):
         rest = [a for a in argv[1:] if not a.startswith("+")]
         sub = next((a for a in rest if not a.startswith("-")), "")
         if sub in CARGO_PINNED and not pinned:
-            raise Block(f"cargo {sub} must run on the E-cores: {PIN_HINT} (cores 0–15 are the owner's and other sessions').")
+            raise Block(f"cargo {sub} must run on CPUs 8-19 at low priority: {PIN_HINT} (CPUs 0-7 are the owner's desktop).")
     if launches_game(argv, cwd):
         display = allenv.get("DISPLAY")
         if not (xvfb or allenv.get("RAZDOR_ALLOW_WINDOW") == "1" or (display and display not in (":0", ":0.0", os.environ.get("DISPLAY", ":0")))):

@@ -61,7 +61,7 @@ RAZDOR_DT_DIR=<install> python3 -I tools/walk-ab/walk_ab.py \
 ```
 
 Build the binaries with `cargo build --release` (`CARGO_PROFILE_RELEASE_DEBUG=true` for symbols
-to profile), pinned to the E-cores (`CARGO_BUILD_JOBS=4 taskset -c 16-19 cargo build --release`).
+to profile), pinned to CPUs 8-19 (`CARGO_BUILD_JOBS=12 nice -n 19 taskset -c 8-19 cargo build --release`).
 `--perf` wraps the first run in `perf record -F 999 -g --call-graph dwarf`, pinned as the rest.
 Keep `--out` and the perf data in scratch (`/mnt/ai_models/razdor-scratch/`), not in the repo.
 

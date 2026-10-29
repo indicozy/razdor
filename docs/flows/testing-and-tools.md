@@ -57,7 +57,7 @@ $RAZDOR_COMMUNITY_DIR/<entry>/maps/*.DTm     optional extra community maps, play
 Run it (the path is the machine's own, not for the repo):
 
 ```sh
-RAZDOR_DT_DIR=<install> RAZDOR_COMMUNITY_DIR=/path/to/community CARGO_BUILD_JOBS=4 taskset -c 16-19 cargo test --release --lib community_maps_smoke -- --nocapture
+RAZDOR_DT_DIR=<install> RAZDOR_COMMUNITY_DIR=/path/to/community CARGO_BUILD_JOBS=12 nice -n 19 taskset -c 8-19 cargo test --release --lib community_maps_smoke -- --nocapture
 ```
 
 It prints one line per map (`<entry>/<map>: ok|FAIL <why>, <days>, AI battles N, player battles N,

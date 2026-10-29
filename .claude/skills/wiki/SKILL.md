@@ -34,7 +34,7 @@ Claude plans, picks the sources and reviews; it does not write page prose itself
 
 Ollama must be running (`systemctl is-active ollama`); the first call loads the model (~100 s).
 Gemma and Qwen share the GPUs: run them one after the other, not at once. Screenshots are
-off-screen runs (Xvfb, E-cores), so they need no go-ahead, but never while a heavy build runs.
+off-screen runs (Xvfb, CPUs 8-19), so they need no go-ahead, but never while a heavy build runs.
 
 ## Page map: section → sources
 
@@ -73,7 +73,7 @@ Give gemma only the sources for that page (small inputs, fewer invented facts).
    Shrink: `magick f.webp -resize '1024x>' -quality 72 f.webp`. Reference them as
    `![alt](../../../assets/shots/<name>.webp)` (one more `../` under `en/`).
 5. `gemma.py translate` → the English page; spot-check names against `data/lang/en/`.
-6. Build: `cd wiki && taskset -c 16-19 npm ci && taskset -c 16-19 npm run build`. It must pass
+6. Build: `cd wiki && nice -n 19 taskset -c 8-19 npm ci && nice -n 19 taskset -c 8-19 npm run build`. It must pass
    with no broken links; then delete `wiki/dist` and `wiki/.astro`.
 7. Commit with the feature (same commit or the next): `Wiki: <page> for <feature>`. The push
    to `main` publishes it.

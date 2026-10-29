@@ -22,8 +22,8 @@ only show that a screen changed; this check measures every text drawn and names 
 
 ## Run it
 
-1. Build the silent binary the UI regression check uses (`tools/ui-regress/README.md`), E-cores only:
-   `CARGO_TARGET_DIR=/mnt/ai_models/razdor-scratch/ui-regress/target CARGO_BUILD_JOBS=4 taskset -c 16-19 cargo build --release --no-default-features`
+1. Build the silent binary the UI regression check uses (`tools/ui-regress/README.md`), on CPUs 8-19:
+   `CARGO_TARGET_DIR=/mnt/ai_models/razdor-scratch/ui-regress/target CARGO_BUILD_JOBS=12 nice -n 19 taskset -c 8-19 cargo build --release --no-default-features`
 2. `python3 -I tools/ui-regress/text_size.py run` (`--only <text>` for some cases; `--bin` for
    another binary). Output: `/mnt/ai_models/razdor-scratch/text-size/<time>/`.
 3. Read `report.md`: per case the counts and the smallest sp, then every text under 14 sp, smallest
