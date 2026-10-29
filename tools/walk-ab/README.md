@@ -32,7 +32,15 @@ In `--out`: `runs/<A|B>-<n>/` (`frames.csv`, `razdor.log`, `razdor-play.log`, `s
   the play log names. Runs of A against A should match.
 - Per kind (`walk-step`, `walk`, `idle`): work p50/p90/p99/max, and each stage's p50/p99/max,
   for A and B pooled over the repeats. `B/A` is the ratio. `phone~ A` and `phone~ B` are the
-  desktop times times `k`.
+  desktop times times `k`. The stages are the probe's: `tick` and its parts (`route`, `look`,
+  `armies`, `script`, `day`, `snap`), `tick-rest` (the tick less its parts), the map (`terrain`,
+  `world`, `fog`, `minimap`), `autosave` (outside the tick) and `rest` (the work less the tick, the
+  map, the fog, the minimap and the autosave). `tick-rest` and `rest` are worked out here from the
+  CSV, clamped at zero. A CSV without these columns (an older probe build) is refused.
+- Where the walk-step work goes: each part's total over all walk-step frames of all runs, its share
+  of the work, and the sum of the parts (it equals the work when nothing is clamped).
+- The worst five walk-step frames, with their stage split and `phone~` (work times `k`).
+- With `--detail 13,69` (frame numbers), the stage split of those frames in every run.
 - `k = 3.0 / (A's walk-kind work p50)`: the phone's walk work p50 (about 3 ms) over the
   desktop's on the same walk. `k` is printed in the header.
 - The worst 5 frames by work over all runs, with their kind and stage split.

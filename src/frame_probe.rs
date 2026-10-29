@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 
 /// The per-frame CSV's columns (`RAZDOR_PROFILE_FRAMES`): the times in ms, `tick` the game's
 /// tick, `world` the map with `terrain` inside it, `rebuilds` the texture rebuilds.
-pub const CSV_HEADER: &str = "frame,kind,work_ms,total_ms,tick,terrain,world,fog,minimap,rebuilds";
+pub const CSV_HEADER: &str = "frame,kind,work_ms,total_ms,tick,terrain,world,fog,minimap,route,look,armies,script,day,snap,autosave,rebuilds";
 
 /// The parts of a frame that are timed.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -40,10 +40,26 @@ pub enum Stage {
     Fog,
     /// The minimap window.
     Minimap,
+    /// The hero's route: the army he follows and the reroute around armies (`hero_step`, in the
+    /// tick).
+    Route,
+    /// The fog reveal around the hero (`look_around`, in the tick).
+    Look,
+    /// The AI armies' moves and plans and the midnights among them (`move_armies`, in the
+    /// tick's time).
+    Armies,
+    /// The scenario's events (`run_script`, in the tick's time).
+    Script,
+    /// The noon payment and report (`new_day`, in the tick's time).
+    Day,
+    /// The armies' snap due from the last stop (`armies_snap`, at the tick's start).
+    Snap,
+    /// The autosave the noon report asks for. It runs outside the tick (in the UI's frame).
+    Autosave,
 }
 
 impl Stage {
-    pub const COUNT: usize = 5;
+    pub const COUNT: usize = 12;
 }
 
 /// What the frame was: the map with the hero walking, or not.
@@ -209,7 +225,7 @@ fn kind_name(kind: Kind) -> &'static str {
 pub fn csv_row(frame: u64, s: &Sample) -> String {
     let stage = |st: Stage| s.stage_ms[st as usize];
     format!(
-        "{frame},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{}",
+        "{frame},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{}",
         kind_name(s.kind),
         s.work_ms,
         s.total_ms,
@@ -218,6 +234,13 @@ pub fn csv_row(frame: u64, s: &Sample) -> String {
         stage(Stage::World),
         stage(Stage::Fog),
         stage(Stage::Minimap),
+        stage(Stage::Route),
+        stage(Stage::Look),
+        stage(Stage::Armies),
+        stage(Stage::Script),
+        stage(Stage::Day),
+        stage(Stage::Snap),
+        stage(Stage::Autosave),
         s.rebuilds,
     )
 }
@@ -269,18 +292,26 @@ pub fn summary_lines(secs: f32, samples: &[Sample]) -> Vec<String> {
 fn kind_line(secs: f32, kind: Kind, of: &[&Sample]) -> String {
     let name = kind_name(kind);
     let rebuilds: u32 = of.iter().map(|s| s.rebuilds).sum();
-    let stage = |idx: usize| dist(of.iter().map(|s| s.stage_ms[idx])).narrow();
+    let stage = |st: Stage| dist(of.iter().map(|s| s.stage_ms[st as usize])).narrow();
     format!(
-        "frame probe {secs:.1} s {name} n={} | total {} | work {} | present {} | tick {} | terrain {} | objects {} | fog {} | minimap {} | rest {} | tex rebuilds {rebuilds}",
+        "frame probe {secs:.1} s {name} n={} | total {} | work {} | present {} | tick {} | route {} | look {} | armies {} | script {} | day {} | snap {} | tick-rest {} | terrain {} | objects {} | fog {} | minimap {} | autosave {} | rest {} | tex rebuilds {rebuilds}",
         of.len(),
         dist(of.iter().map(|s| s.total_ms)).wide(),
         dist(of.iter().map(|s| s.work_ms)).wide(),
         dist(of.iter().map(|s| present_ms(s))).wide(),
-        stage(Stage::Tick as usize),
-        stage(Stage::Terrain as usize),
+        stage(Stage::Tick),
+        stage(Stage::Route),
+        stage(Stage::Look),
+        stage(Stage::Armies),
+        stage(Stage::Script),
+        stage(Stage::Day),
+        stage(Stage::Snap),
+        dist(of.iter().map(|s| tick_rest_ms(s))).narrow(),
+        stage(Stage::Terrain),
         dist(of.iter().map(|s| objects_ms(s))).narrow(),
-        stage(Stage::Fog as usize),
-        stage(Stage::Minimap as usize),
+        stage(Stage::Fog),
+        stage(Stage::Minimap),
+        stage(Stage::Autosave),
         dist(of.iter().map(|s| rest_ms(s))).narrow(),
     )
 }
@@ -295,12 +326,24 @@ fn objects_ms(s: &Sample) -> f32 {
     (s.stage_ms[Stage::World as usize] - s.stage_ms[Stage::Terrain as usize]).max(0.0)
 }
 
-/// What the work spends outside the timed stages, clamped at zero.
+/// The tick's time outside its timed parts (route, look, armies, script, day, snap), clamped at
+/// zero.
+fn tick_rest_ms(s: &Sample) -> f32 {
+    let parts: f32 = [Stage::Route, Stage::Look, Stage::Armies, Stage::Script, Stage::Day, Stage::Snap]
+        .iter()
+        .map(|st| s.stage_ms[*st as usize])
+        .sum();
+    (s.stage_ms[Stage::Tick as usize] - parts).max(0.0)
+}
+
+/// What the work spends outside the timed stages, clamped at zero. The tick counts as one stage
+/// (its parts are inside it); the autosave is outside the tick.
 fn rest_ms(s: &Sample) -> f32 {
     let timed = s.stage_ms[Stage::Tick as usize]
         + s.stage_ms[Stage::World as usize]
         + s.stage_ms[Stage::Fog as usize]
-        + s.stage_ms[Stage::Minimap as usize];
+        + s.stage_ms[Stage::Minimap as usize]
+        + s.stage_ms[Stage::Autosave as usize];
     (s.work_ms - timed).max(0.0)
 }
 
@@ -364,16 +407,35 @@ mod tests {
         assert_eq!(percentile(&[], 50.0), 0.0);
     }
 
+    /// A stage array with the given stages' times; the others are zero.
+    fn stages(list: &[(Stage, f32)]) -> [f32; Stage::COUNT] {
+        let mut a = [0.0; Stage::COUNT];
+        for (st, ms) in list {
+            a[*st as usize] = *ms;
+        }
+        a
+    }
+
     #[test]
     fn objects_and_rest_are_worked_out_per_frame() {
-        // Stages: tick 1, terrain 2, world 5 (terrain inside it), fog 1, minimap 0.5.
-        let s = sample(Kind::Walk, 10.0, 12.0, [1.0, 2.0, 5.0, 1.0, 0.5]);
+        // Tick 6 (route 1, look 0.5, armies 2, script 0.5 inside it), terrain 2, world 5 (terrain
+        // inside it), fog 1, minimap 0.5, autosave 3 (outside the tick).
+        let s = sample(
+            Kind::Walk,
+            20.0,
+            22.0,
+            stages(&[(Stage::Tick, 6.0), (Stage::Route, 1.0), (Stage::Look, 0.5), (Stage::Armies, 2.0), (Stage::Script, 0.5), (Stage::Terrain, 2.0), (Stage::World, 5.0), (Stage::Fog, 1.0), (Stage::Minimap, 0.5), (Stage::Autosave, 3.0)]),
+        );
         assert_eq!(objects_ms(&s), 3.0);
-        assert_eq!(rest_ms(&s), 2.5);
+        assert_eq!(tick_rest_ms(&s), 2.0);
+        assert_eq!(rest_ms(&s), 4.5);
         assert_eq!(present_ms(&s), 2.0);
         // Stages that add up to more than the work: the rest is clamped at zero.
-        let over = sample(Kind::Walk, 5.0, 6.0, [2.0, 0.0, 4.0, 2.0, 0.0]);
+        let over = sample(Kind::Walk, 5.0, 6.0, stages(&[(Stage::Tick, 2.0), (Stage::World, 4.0), (Stage::Fog, 2.0)]));
         assert_eq!(rest_ms(&over), 0.0);
+        // The tick's parts above the tick: its rest is clamped at zero too.
+        let parts_over = sample(Kind::Walk, 5.0, 6.0, stages(&[(Stage::Tick, 2.0), (Stage::Route, 3.0)]));
+        assert_eq!(tick_rest_ms(&parts_over), 0.0);
     }
 
     #[test]
@@ -387,22 +449,28 @@ mod tests {
 
     #[test]
     fn the_lines_follow_the_order_and_carry_the_rebuilds() {
-        let mut step = sample(Kind::WalkStep, 3.0, 4.0, [1.0, 1.0, 2.0, 0.0, 0.0]);
+        let mut step = sample(Kind::WalkStep, 3.0, 4.0, stages(&[(Stage::Tick, 1.0), (Stage::Terrain, 1.0), (Stage::World, 2.0)]));
         step.rebuilds = 2;
         let idle = sample(Kind::Idle, 2.0, 3.0, [0.0; Stage::COUNT]);
         let lines = summary_lines(5.0, &[idle, step]);
         assert_eq!(lines.len(), 2);
         assert!(lines[0].contains(" walk-step n=1 "), "{}", lines[0]);
         assert!(lines[0].ends_with("tex rebuilds 2"), "{}", lines[0]);
+        assert!(lines[0].contains(" | tick-rest p50 "), "{}", lines[0]);
         assert!(lines[1].contains(" idle n=1 "), "{}", lines[1]);
     }
 
     #[test]
     fn a_csv_row_has_the_header_columns_in_order() {
-        let mut step = sample(Kind::WalkStep, 3.0, 4.25, [1.0, 0.5, 2.0, 0.25, 0.125]);
+        let mut step = sample(
+            Kind::WalkStep,
+            3.0,
+            4.25,
+            stages(&[(Stage::Tick, 1.0), (Stage::Terrain, 0.5), (Stage::World, 2.0), (Stage::Fog, 0.25), (Stage::Minimap, 0.125), (Stage::Route, 0.5), (Stage::Look, 0.25), (Stage::Armies, 0.75), (Stage::Autosave, 0.125)]),
+        );
         step.rebuilds = 2;
         let row = csv_row(7, &step);
-        assert_eq!(row, "7,walk-step,3.000,4.250,1.000,0.500,2.000,0.250,0.125,2");
+        assert_eq!(row, "7,walk-step,3.000,4.250,1.000,0.500,2.000,0.250,0.125,0.500,0.250,0.750,0.000,0.000,0.000,0.125,2");
         assert_eq!(row.split(',').count(), CSV_HEADER.split(',').count());
         let other = sample(Kind::Other, 0.5, 1.0, [0.0; Stage::COUNT]);
         assert!(csv_row(1, &other).starts_with("1,other,0.500,1.000,0.000,"));

@@ -24,7 +24,15 @@ import time
 from pathlib import Path
 
 KINDS = ["walk-step", "walk", "idle"]
-STAGES = ["tick", "terrain", "world", "fog", "minimap"]
+# The frame probe's timed columns (CSV). The tick's parts are inside `tick`; `autosave` is outside it.
+TIMED = ["tick", "terrain", "world", "fog", "minimap", "route", "look", "armies", "script", "day", "snap", "autosave"]
+TICK_PARTS = ["route", "look", "armies", "script", "day", "snap"]
+# The table's rows per kind: the timed columns and the two that are worked out here, `tick-rest`
+# (the tick less its parts) and `rest` (the work less tick, world, fog, minimap and autosave), both
+# clamped at zero as the probe's summary clamps them (frame_probe.rs: tick_rest_ms, rest_ms).
+STAGES = ["tick", "route", "look", "armies", "script", "day", "snap", "tick-rest", "terrain", "world", "fog", "minimap", "autosave", "rest"]
+# The parts of a walk-step frame's work that add up to it (world includes terrain).
+SHARE_PARTS = ["route", "look", "armies", "script", "day", "snap", "tick-rest", "world", "fog", "minimap", "autosave", "rest"]
 # The phone's work p50 the desktop run is scaled to (ms): k = PHONE_WORK_P50 / A's walk work p50.
 PHONE_WORK_P50 = 3.0
 # The scene's log line when it fails: `RAZDOR_SCENE=<scene>: <reason>` (snapshot.rs). The start-up
@@ -56,6 +64,9 @@ def parse_args(argv):
     p.add_argument("--quiet", action="store_true",
                    help="RAZDOR_SCENE_QUIET=1: the scene's windows are dropped each frame. Needed for a walk past "
                         "the noon report (it stops the hero while it is open, and the rest of the run is 'other').")
+    p.add_argument("--detail", default="",
+                   help="frame numbers whose stage split the report prints for every run, e.g. 13,69,70 (the midnight "
+                        "and noon frames of the 06 walk)")
     p.add_argument("--perf", action="store_true",
                    help="wrap the first run in perf record -F 999 -g --call-graph dwarf (perf.data in its run dir)")
     cfg = p.parse_args(argv)
@@ -63,6 +74,10 @@ def parse_args(argv):
         p.error("--walk must be dx,dy")
     if cfg.repeats < 1 or cfg.frames < 1:
         p.error("--repeats and --frames must be 1 or more")
+    try:
+        cfg.detail = [int(x) for x in cfg.detail.split(",") if x.strip()]
+    except ValueError:
+        p.error("--detail must be frame numbers, e.g. 13,69")
     return cfg
 
 
@@ -172,20 +187,23 @@ def read_rows(path):
     if not path.exists():
         return []
     with open(path, newline="") as f:
+        reader = csv.DictReader(f)
+        have = set(reader.fieldnames or [])
+        if not {"frame", "kind", "work_ms", "total_ms", "rebuilds", *TIMED} <= have:
+            raise RunError(f"{path} lacks the stage columns (a probe build before the tick's parts): rebuild and rerun")
         out = []
-        for r in csv.DictReader(f):
-            out.append({
+        for r in reader:
+            row = {
                 "frame": int(r["frame"]),
                 "kind": r["kind"],
                 "work_ms": float(r["work_ms"]),
                 "total_ms": float(r["total_ms"]),
-                "tick": float(r["tick"]),
-                "terrain": float(r["terrain"]),
-                "world": float(r["world"]),
-                "fog": float(r["fog"]),
-                "minimap": float(r["minimap"]),
                 "rebuilds": int(r["rebuilds"]),
-            })
+            }
+            row.update({c: float(r[c]) for c in TIMED})
+            row["tick-rest"] = max(0.0, row["tick"] - sum(row[p] for p in TICK_PARTS))
+            row["rest"] = max(0.0, row["work_ms"] - (row["tick"] + row["world"] + row["fog"] + row["minimap"] + row["autosave"]))
+            out.append(row)
     return out
 
 
@@ -240,6 +258,54 @@ def table(rows):
     return "\n".join(lines)
 
 
+def grid(body):
+    """Left-aligned first column, right-aligned others; the first row is the header."""
+    widths = [max(len(str(row[i])) for row in body) for i in range(len(body[0]))]
+    lines = []
+    for n, row in enumerate(body):
+        lines.append("  ".join(str(c).ljust(widths[i]) if i == 0 else str(c).rjust(widths[i]) for i, c in enumerate(row)))
+        if n == 0:
+            lines.append("  ".join("-" * w for w in widths))
+    return "\n".join(lines)
+
+
+def share_lines(runs):
+    """Where the walk-step frames' work goes, over all runs: each part's total and its share of
+    the work. The parts add up to the work (the sum is printed as a check)."""
+    rows = pooled(runs, "walk-step")
+    if not rows:
+        return ["(no walk-step frames)"]
+    work = sum(r["work_ms"] for r in rows)
+    body = [("part", "total ms", "share", "per frame ms")]
+    parts = [(p, sum(r[p] for r in rows)) for p in SHARE_PARTS]
+    for name, total in parts:
+        body.append((name, f"{total:.2f}", f"{100 * total / work:.1f}%", f"{total / len(rows):.3f}"))
+    body.append(("work", f"{work:.2f}", "100.0%", f"{work / len(rows):.3f}"))
+    summed = sum(total for _, total in parts)
+    text = grid(body).splitlines()
+    text.append(f"parts sum to {summed:.2f} ms of {work:.2f} ms over {len(rows)} walk-step frames ({len(runs)} runs)")
+    return text
+
+
+SPLIT_COLUMNS = ["work", "phone~", "tick", "route", "look", "armies", "script", "day", "snap", "tick-rest",
+                 "world", "fog", "minimap", "autosave", "rest"]
+
+
+def split_lines(pairs, k):
+    """One row per (run, frame) with the stage split: `pairs` are (run label, row)."""
+    keys = {"work": "work_ms"}
+    body = [("run", "frame", "kind", *SPLIT_COLUMNS)]
+    for label, r in pairs:
+        cells = []
+        for col in SPLIT_COLUMNS:
+            if col == "phone~":
+                cells.append(f"{r['work_ms'] * k:.1f}")
+            else:
+                cells.append(f"{r[keys.get(col, col)]:.2f}")
+        body.append((label, r["frame"], r["kind"], *cells))
+    return grid(body).splitlines()
+
+
 def worst_frames(runs, n=5):
     frames = [(run["label"], r) for run in runs for r in run["rows"]]
     frames.sort(key=lambda lr: lr[1]["work_ms"], reverse=True)
@@ -288,6 +354,29 @@ def report(cfg, runs_a, runs_b):
             continue
         out.append("```")
         out.append(table(metric_lines(ra, rb, k)))
+        out.append("```")
+        out.append("")
+    out.append("## Where the walk-step work goes (all runs pooled)")
+    out.append("")
+    out.append("```")
+    out.extend(share_lines(runs_a + runs_b))
+    out.append("```")
+    out.append("")
+    steps = [(run["label"], r) for run in runs_a + runs_b for r in run["rows"] if r["kind"] == "walk-step"]
+    steps.sort(key=lambda lr: lr[1]["work_ms"], reverse=True)
+    out.append("## Worst walk-step frames: stage split (top 5 of all runs; phone~ = work x k)")
+    out.append("")
+    out.append("```")
+    out.extend(split_lines(steps[:5], k))
+    out.append("```")
+    out.append("")
+    if cfg.detail:
+        out.append(f"## Frames {','.join(str(f) for f in cfg.detail)}: stage split of every run")
+        out.append("")
+        out.append("```")
+        named = [(run["label"], r) for run in runs_a + runs_b for r in run["rows"] if r["frame"] in cfg.detail]
+        named.sort(key=lambda lr: (lr[1]["frame"], lr[0]))
+        out.extend(split_lines(named, k))
         out.append("```")
         out.append("")
     out.append("## Worst frames by work (top 5 of all runs)")

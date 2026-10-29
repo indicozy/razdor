@@ -1358,7 +1358,7 @@ impl App {
         // The noon report asks for an autosave, named by the date.
         if let Some(g) = self.game.as_mut() {
             if let Some(name) = g.autosave_due.take() {
-                saves::autosave(g, &name, false);
+                razdor::frame_probe::time(razdor::frame_probe::Stage::Autosave, || saves::autosave(g, &name, false));
             }
         }
         if let Some(path) = self.pending_load.take() {

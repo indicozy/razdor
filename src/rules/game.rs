@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use crate::dt::dtm::Scenario;
+use crate::frame_probe::{self, Stage};
 
 use super::ai::{self, AiNews, AiStats, Beaten};
 use super::battle::{Battle, Outcome, Team};
@@ -1574,7 +1575,7 @@ impl Game {
         }
         self.step_elapsed += real_dt;
         // A snap still due from the last stop comes before the world moves again.
-        self.armies_snap();
+        frame_probe::time(Stage::Snap, || self.armies_snap());
         let (mut walked, mut waited) = (false, false);
         self.snapped = false;
         while self.step_elapsed >= STEP_SECONDS && (self.moving() || self.wait_ticks > 0) {
@@ -1649,7 +1650,7 @@ impl Game {
     /// ([`Game::ai_contact`]). At the end of the route he stops, and the building he stands
     /// in (not a bridge or an obelisk) opens. Returns false when the walk ended.
     fn hero_step(&mut self, events: &mut Vec<Event>) -> bool {
-        if !self.follow_army() || !self.reroute_around_armies() {
+        if !frame_probe::time(Stage::Route, || self.follow_army()) || !frame_probe::time(Stage::Route, || self.reroute_around_armies()) {
             return false;
         }
         let Some(&next) = self.path.first() else { return false };
@@ -1708,7 +1709,7 @@ impl Game {
         self.pos = self.world.map.center(next);
         self.move_to_cell(from, next);
         self.point_zeroed = false;
-        self.look_around();
+        frame_probe::time(Stage::Look, || self.look_around());
         // His facing stays the step's direction until the next one (0x4ae8e0).
         self.facing = Some((next.0 - from.0, next.1 - from.1));
         self.stand_on_bridge(next);
@@ -1735,7 +1736,7 @@ impl Game {
                 return false;
             }
         }
-        if !self.reroute_around_armies() {
+        if !frame_probe::time(Stage::Route, || self.reroute_around_armies()) {
             return false;
         }
         if self.path.is_empty() {
@@ -1756,7 +1757,7 @@ impl Game {
         self.location = None;
         self.bridge_stood_on = None;
         self.step_base = None;
-        self.look_around();
+        frame_probe::time(Stage::Look, || self.look_around());
         self.facing = Some((next.0 - from.0, next.1 - from.1));
         self.pass_time_walking(minutes, from, events);
         self.hero_glide = Some((was, self.world.map.center(next)));
@@ -2087,7 +2088,7 @@ impl Game {
             Tick::Midnight(day) => Some((day * super::clock::MINUTES_PER_DAY) as f64),
             Tick::Noon(_) => None,
         }).collect();
-        self.move_armies(minutes, start, &midnights, events);
+        frame_probe::time(Stage::Armies, || self.move_armies(minutes, start, &midnights, events));
         for tick in ticks {
             match tick {
                 Tick::Midnight(_) => {}
@@ -2100,7 +2101,7 @@ impl Game {
             }
         }
         // Time passed: the scenario's events run.
-        let script = self.run_script();
+        let script = frame_probe::time(Stage::Script, || self.run_script());
         let fired = script.iter().any(fires);
         events.extend(script);
         if let Some(day) = self.noon_due.filter(|_| !fired && self.reading.is_none()) {
@@ -2108,7 +2109,7 @@ impl Game {
             // The next noon is the day after now (0x4a41d8): a noon paid late, after
             // midnight, skips that day's own noon (the original's behaviour).
             self.noon_from = Some(self.clock.day_index() + 1);
-            if let Some(report) = self.new_day(day) {
+            if let Some(report) = frame_probe::time(Stage::Day, || self.new_day(day)) {
                 events.push(Event::NewDay(report));
                 // The original autosaves as the noon report opens, named by the date; a noon
                 // with no report (no wages, no income) writes none (0x4abfbc).
