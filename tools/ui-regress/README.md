@@ -13,13 +13,13 @@ a reference image, and reports what changed. Use it after any change to what is 
 Build the release binary first (silent, no ALSA):
 
 ```
-CARGO_BUILD_JOBS=4 CARGO_TARGET_DIR=/mnt/ai_models/razdor-scratch/ui-regress/target \
-  taskset -c 16-19 cargo build --release --no-default-features
+CARGO_BUILD_JOBS=12 CARGO_TARGET_DIR=/mnt/ai_models/razdor-scratch/ui-regress/target \
+  nice -n 19 taskset -c 8-19 cargo build --release --no-default-features
 python3 -I tools/ui-regress/ui_regress.py run --bin /mnt/ai_models/razdor-scratch/ui-regress/target/release/razdor
 ```
 
 `run` needs `RAZDOR_DT_DIR` (the install): from the environment, or from the repo's `.env`. It
-runs 4 cases at a time, each pinned to cores 16-19, with its own X display, `XDG_RUNTIME_DIR`,
+runs 4 cases at a time, each pinned to CPUs 8-19 at nice 19, with its own X display, `XDG_RUNTIME_DIR`,
 log and save folder, and a 60 s timeout. Options: `--only TEXT` (cases whose name contains the
 text), `--out DIR` (default: a timestamped folder under
 `/mnt/ai_models/razdor-scratch/ui-regress/out/`), `--goldens DIR`, `--tolerance N` (largest channel

@@ -33,7 +33,7 @@ DEFAULT_BIN = Path("/mnt/ai_models/razdor-scratch/ui-regress/target/release/razd
 SCRATCH = Path("/mnt/ai_models/razdor-scratch/ui-regress/out")
 TIMEOUT_S = 60
 WORKERS = 4
-CPUS = "16-19"
+CPUS = "8-19"
 XVFB_FIRST_DISPLAY = 100  # :100, :101, … (one per case)
 
 
@@ -111,7 +111,7 @@ def run_case(case, index, out, dt_dir, binary):
     w, h = case["size"].split("x")
     # A display number of its own per case: `xvfb-run -a` races when several start at once.
     display = str(XVFB_FIRST_DISPLAY + index)
-    cmd = ["taskset", "-c", CPUS, "xvfb-run", "-n", display, "-w", "10", "-s", f"-screen 0 {w}x{h}x24",
+    cmd = ["nice", "-n", "19", "taskset", "-c", CPUS, "xvfb-run", "-n", display, "-w", "10", "-s", f"-screen 0 {w}x{h}x24",
            str(binary)]
     started = time.monotonic()
     with open(log, "w", encoding="utf-8") as fh:
