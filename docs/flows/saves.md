@@ -75,6 +75,38 @@ put(): save::meta_of → save::encode (serde_json + BzEncoder) → write .tmp �
   `main_menu::follow_settings` before the battle starts, so the restarted battle is fought by
   the same AI (#19; before, it fell back to the original's AI on its normal level).
 
+## Session slot (resume after the OS kills the app)
+
+The phone's OS may end the app in the background, and the game may crash: the player then
+loses what was played since the last save. The session slot is the answer (the owner's
+decision, 2026-10-29; `ui::session`, `save::SESSION`):
+
+- The slot is `auto/session.rzsave`, named «Последний сеанс» (`save::SESSION`). It is listed
+  in the load window's autosave tab (with its name translated), but `write_autosave` leaves it
+  out of the rotation and out of `AUTOSAVES_KEPT`, so it is never reused as an autosave.
+  `save::session_json` builds it (`to_json`, the same JSON as a save), `save::write_session`
+  packs and writes it (`.tmp` + rename) and then makes the marker `session.live` in the
+  save folder (`save::session_marker`).
+- The marker says a session is under way. It is removed when the game is left (the game
+  is gone: the main menu, the editor, a custom battle), when the app closes (`App::shutdown`,
+  after the pending writes), and at the launch.
+- When it is written: at battle start (`saves::battle`, with the foe taken off, the same
+  moment as the battle autosave); then every 30 s of play (`Keeper::tick`, `EVERY`) when the
+  game has changed (the hash is of the JSON from the `"game"` field on, so the meta's time
+  alone does not count), and at once when the window loses its focus. Only where F5 may
+  fire on the map (the quick save's guard of the frame), and never in a test play or a battle.
+- The writes run on one writer thread, in the order sent (`Write`, `End`, `Flush`); the
+  bzip2 packing is off the frame loop.
+- The launch: when the marker is still there, the app ended without a proper exit. The
+  marker goes, and when the slot exists a question «Продолжить игру?» (the map's title and
+  the game date) is the first window. Yes loads the slot (a failed load is told in a
+  plain window); No does nothing. Only the Yes button answers it: a key does not load a
+  game (the scenario questions still take any key as Yes, `widgets::answer_of`). It is not a
+  scenario question (`Dialog::resume`), and it is looked for again once a phone's install
+  is adopted (`App::session_checked`).
+- No Android `onPause` hook: once the surface is gone the frame loop does not run, so the
+  30 s timer bounds what can be lost. See `docs/OPEN_QUESTIONS.md`.
+
 ## Loading
 
 ```

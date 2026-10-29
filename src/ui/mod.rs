@@ -33,6 +33,7 @@ pub mod new_game;
 pub mod pan;
 pub mod saves;
 pub mod screens;
+pub mod session;
 pub mod script_font;
 pub mod snapshot;
 pub mod spell_badges;
@@ -63,7 +64,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use razdor::dt::dtm::Scenario;
-use razdor::i18n::tr;
+use razdor::i18n::{n_, tr};
 use razdor::rules::content::Content;
 use razdor::rules::formation::Formation;
 use razdor::rules::events::EventOutcome;
@@ -207,6 +208,10 @@ pub struct App {
     pub quit: bool,
     /// The update window (`update_view`) is over the screen this frame.
     update_open: bool,
+    /// The session slot's writer (`session`), and whether the launch looked for an unfinished
+    /// session yet (again once the install is adopted on a phone).
+    session: session::Keeper,
+    session_checked: bool,
 }
 
 /// The install's content for the new-game windows (`None` without an install).
@@ -275,6 +280,8 @@ impl App {
             lang: (razdor::i18n::lang(), language::data_prefix()),
             quit: false,
             update_open: false,
+            session: session::Keeper::default(),
+            session_checked: false,
         };
         app.follow_row_setting();
         app
@@ -411,7 +418,7 @@ impl App {
                 main_menu::follow_settings(&self.audio.settings, &mut game);
                 self.dialogs.clear();
                 self.message = None;
-                self.screen = saves::battle(&mut game);
+                self.screen = saves::battle(&mut game, (!self.test_play).then_some(&mut self.session));
                 self.game = Some(game);
             }
             Err(e) => self.message = Some(razdor::trf!("Cannot load: {e}.", e)),
@@ -489,7 +496,24 @@ impl App {
 
     /// Before the process ends: the music stops and the settings are written.
     pub fn shutdown(&mut self) {
+        self.session.end();
         self.audio.shutdown();
+    }
+
+    /// The launch after the app ended without a proper exit (the session marker is still there):
+    /// the marker goes, and the session slot, if there is one, is offered as «Продолжить игру?».
+    fn check_session(&mut self) {
+        let Some(dir) = save::games_dir() else { return };
+        if !save::session_marker(&dir).exists() {
+            return;
+        }
+        let _ = std::fs::remove_file(save::session_marker(&dir));
+        let Ok(meta) = save::read_meta(&save::session_path(&dir)) else { return };
+        let mut d = Dialog::new(tr(n_("Continue the game?")));
+        d.question = true;
+        d.resume = true;
+        d.text = vec![meta.title, meta.date];
+        self.dialogs.push_back(d);
     }
 
     /// The music the current screen wants.
@@ -869,6 +893,8 @@ impl App {
             self.audio = Audio::new(self.assets.dt.as_ref().map(|d| &d.install));
             self.dt_content = dt_content_of(&self.assets, self.audio.settings.impossible);
             self.scenarios = scenarios_of(&self.assets);
+            // The saves are the install's now: its session slot is looked for again.
+            self.session_checked = false;
         }
     }
 
@@ -963,6 +989,11 @@ impl App {
             if let Some(c) = self.custom.as_mut() {
                 c.session.end_round();
             }
+        }
+        // The launch after an unfinished session offers to continue it (once, at the first frame).
+        if !self.session_checked {
+            self.session_checked = true;
+            self.check_session();
         }
         self.sounds();
         // The battle AI's level from the settings: the next battle uses it.
@@ -1078,7 +1109,7 @@ impl App {
             }
             // The map itself stays where it is; a dialog over it is panned (`ui::pan`).
             (Screen::WorldMap, Some(game)) => pan::unpanned(|| {
-                world_view::frame(game, &self.assets, &mut self.map_view, &mut self.message, &mut self.dialogs)
+                world_view::frame(game, &self.assets, &mut self.map_view, &mut self.message, &mut self.dialogs, (!self.test_play).then_some(&mut self.session))
             }),
             (Screen::Building(view), Some(game)) => window_layout::scaled(building_view::stack_at(game, view), || {
                 building_view::frame(game, &self.assets, view, &mut self.message, &mut self.dialogs)
@@ -1216,7 +1247,19 @@ impl App {
                 let closed = self.dialogs.pop_front();
                 let offer = closed.as_ref().is_some_and(|d| d.offer);
                 let offer_result = closed.as_ref().is_some_and(|d| d.village_event && !d.offer);
-                let asked = closed.as_ref().is_some_and(|d| d.question && !d.offer);
+                let asked = closed.as_ref().is_some_and(|d| d.question && !d.offer && !d.resume);
+                // «Продолжить игру?» (the launch after the app ended): Yes loads the session slot;
+                // a failed load is told in a plain window (this is the main menu).
+                if let (true, Some(Close::Yes)) = (closed.as_ref().is_some_and(|d| d.resume), Some(close)) {
+                    if let Some(path) = save::games_dir().map(|dir| save::session_path(&dir)) {
+                        self.load(&path);
+                        if let Some(error) = self.load_error.take() {
+                            let mut d = Dialog::new(tr(n_("Continue the game?")));
+                            d.text = vec![error];
+                            self.dialogs.push_back(d);
+                        }
+                    }
+                }
                 let read = closed.as_ref().is_some_and(|d| d.event.is_some() && !d.question);
                 // The defeat report's OK ends the game: back to the main menu (0x4c206c with
                 // the defeat mark 0xae6d23 → 0x4bfb34). Razdor's «Загрузить последнее
@@ -1303,7 +1346,7 @@ impl App {
         // on the map once the step that brought it has played: the attacker is seen arriving.
         if next.is_none() && self.dialogs.is_empty() && matches!(self.screen, Screen::WorldMap | Screen::Building(_)) {
             if let Some(game) = self.game.as_mut().filter(|g| g.foe.is_some() && !(matches!(self.screen, Screen::WorldMap) && g.step_playing())) {
-                next = Some(saves::battle(game));
+                next = Some(saves::battle(game, (!self.test_play).then_some(&mut self.session)));
             }
         }
         // A victory or defeat event ends the game once its window is read (not while a custom
@@ -1361,6 +1404,10 @@ impl App {
                 razdor::frame_probe::time(razdor::frame_probe::Stage::Autosave, || saves::autosave_at_noon(g, &name));
             }
         }
+        // The session slot (`session`): kept fresh while the game is played; no game on screen
+        // (the main menu, the editor) ends the session.
+        let session_ok = quick_save_ok && !self.test_play && !matches!(self.screen, Screen::Battle(_) | Screen::CustomBattle(_) | Screen::Editor);
+        self.session.tick(self.game.as_ref(), session_ok, crate::ui::clock::now());
         if let Some(path) = self.pending_load.take() {
             self.load(&path);
             return;

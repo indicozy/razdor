@@ -238,10 +238,14 @@ pub fn session_content(install: Option<Arc<Content>>, game: &Game) -> Option<Arc
 /// battle. The autosave is the moment just before it: without the pending foe, so loading
 /// it puts the hero on the map next to the enemy (potions, spells and the army can still be
 /// seen to) instead of straight into the fight, which starts again when he moves or waits.
-pub fn battle(game: &mut Game) -> Screen {
+pub fn battle(game: &mut Game, session: Option<&mut super::session::Keeper>) -> Screen {
     let name = battle_name(game);
     let foe = game.foe.take();
     autosave(game, &name, true);
+    // The session slot holds the same moment, the foe taken off too (`None`: a test play has none).
+    if let Some(session) = session {
+        session.save_now(game);
+    }
     game.foe = foe;
     // The moment just before it, its foe pending, kept for «Рестарт» (this battle again).
     let state = save::meta_of(game, SaveKind::Auto, &name).ok().and_then(|m| save::encode(&m, game).ok().map(|b| (m, b)));
@@ -294,7 +298,7 @@ fn row_of(e: &ListedSave) -> Row {
     let Some(m) = &e.meta else {
         return Row { name: "…".to_string(), scenario: String::new(), time: time_line(e.written), pinned: e.pinned, waiting: true, mark: None, placeholder: false, caret: None };
     };
-    let name = if m.name == save::QUICK_SAVE { tr(save::QUICK_SAVE).to_string() } else { m.name.clone() };
+    let name = if m.name == save::QUICK_SAVE || m.name == save::SESSION { tr(&m.name).to_string() } else { m.name.clone() };
     // A game in which the cheat console worked says so after its scenario.
     let scenario = if m.cheats { razdor::trf!("{title} (cheats)", title = m.title) } else { m.title.clone() };
     Row { name, scenario, time: time_line(m.saved_at), pinned: e.pinned, waiting: false, mark: None, placeholder: false, caret: None }

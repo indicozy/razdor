@@ -2398,7 +2398,7 @@ fn hover_look(game: &Game, t: Tile, h: &MapHover) -> MapHoverLook {
 /// (0x4cd0aa → 0x4bbc84: a village's offer, or its window paying what has refilled), or the
 /// battle with a garrison still to beat. Nothing for a burnt camp. `None` when the click was
 /// not on that building.
-fn reopen_here(game: &mut Game, t: Tile, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) -> Option<Option<Screen>> {
+fn reopen_here(game: &mut Game, t: Tile, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>, session: Option<&mut super::session::Keeper>) -> Option<Option<Screen>> {
     let l = game.location?;
     if game.world.location_covering(t).or_else(|| game.world.location_at(t)) != Some(l) {
         return None;
@@ -2409,7 +2409,7 @@ fn reopen_here(game: &mut Game, t: Tile, message: &mut Option<String>, dialogs: 
     }
     if loc.defended() {
         game.foe = Some(Foe::Garrison(l));
-        return Some(Some(saves::battle(game)));
+        return Some(Some(saves::battle(game, session)));
     }
     let events = game.reenter_building();
     Some(handle_events(game, events, message, dialogs))
@@ -2722,8 +2722,8 @@ fn plan_click(planned: &mut Option<(Tile, Vec<Tile>, Tile)>, target: Tile, here:
     MapClick::Planned
 }
 
-pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) -> Option<Screen> {
-    let next = map_frame(game, assets, view, message, dialogs);
+pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>, session: Option<&mut super::session::Keeper>) -> Option<Screen> {
+    let next = map_frame(game, assets, view, message, dialogs, session);
     // Opening any window ends the spell's targeting (0x4b8d28).
     if next.is_some() {
         end_targeting();
@@ -2731,7 +2731,7 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     next
 }
 
-fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) -> Option<Screen> {
+fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>, session: Option<&mut super::session::Keeper>) -> Option<Screen> {
     clear_background(rgb(10, 12, 10));
 
     // The original's world frame acts on the map only while it is idle (interface.md §7.3,
@@ -2874,7 +2874,7 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
         // Not while the last step is drawn with its events held: they come at its end, and a
         // click on the building it entered would enter it again before them (a village's
         // window "already taken" over its tribute).
-        if let Some(screen) = hovered.and_then(|t| reopen_here(game, t, message, dialogs)) {
+        if let Some(screen) = hovered.and_then(|t| reopen_here(game, t, message, dialogs, session)) {
             // A click on the building the party stands in opens it again.
             reopened = screen;
         } else if let Some(target) = hovered.map(|t| figure_aim(game, assets.dt.as_ref(), &cam, t, Vec2::from(pointer()))).filter(|&t| game.can_target(t)) {

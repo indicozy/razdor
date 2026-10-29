@@ -72,6 +72,11 @@ pub const AUTOSAVES_KEPT: usize = 30;
 pub const MANUAL_SAVES_KEPT: usize = 50;
 /// Quick saves (F5), reused oldest first: Razdor's (the original has none).
 pub const QUICK_SAVES_KEPT: usize = 5;
+/// The session slot (Razdor's, the owner's decision): the game as it was a few seconds ago,
+/// kept while it is played, so the next launch can offer to continue after the OS ended the
+/// app in the background or the game crashed. Listed with the autosaves, never rotated (see
+/// [`session_path`], [`session_marker`] and `ui::session`).
+pub const SESSION: &str = crate::i18n::n_("Last session");
 const MANUAL_DIR: &str = "manual";
 const AUTO_DIR: &str = "auto";
 
@@ -271,6 +276,40 @@ fn now_millis() -> u128 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis())
 }
 
+/// The session slot's file in save folder `dir`: `auto/session.rzsave`.
+pub fn session_path(dir: &Path) -> PathBuf {
+    kind_dir(dir, SaveKind::Auto).join(format!("session.{EXTENSION}"))
+}
+
+/// The marker in save folder `dir` that says a session is under way. It is written with the
+/// session slot and removed when the game is left or the app closes: still there at a launch,
+/// the app ended without a proper exit.
+pub fn session_marker(dir: &Path) -> PathBuf {
+    dir.join("session.live")
+}
+
+/// The meta and the JSON of the session slot for `game` as it is now (see [`write_session`]).
+pub fn session_json(game: &Game) -> Result<(SaveMeta, Vec<u8>), SaveError> {
+    let meta = meta_of(game, SaveKind::Auto, SESSION)?;
+    let json = encode_json(&meta, game)?;
+    Ok((meta, json))
+}
+
+/// Writes the session slot of save folder `dir` from `json` (see [`session_json`]), aside
+/// first and then moved into place as [`put`] does; then the marker is made.
+pub fn write_session(dir: &Path, meta: &SaveMeta, json: &[u8]) -> Result<PathBuf, SaveError> {
+    std::fs::create_dir_all(kind_dir(dir, SaveKind::Auto))?;
+    let path = session_path(dir);
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, pack(json)?)?;
+    std::fs::rename(&tmp, &path)?;
+    if let Ok(stamp) = file_stamp(&path) {
+        remember_meta(&path, stamp, meta);
+    }
+    std::fs::write(session_marker(dir), b"")?;
+    Ok(path)
+}
+
 /// The meta of `game` saved now as `name`.
 pub fn meta_of(game: &Game, kind: SaveKind, name: &str) -> Result<SaveMeta, SaveError> {
     let scenario = game.origin.clone().ok_or(SaveError::NoScenario)?;
@@ -318,8 +357,9 @@ pub fn encode(meta: &SaveMeta, game: &Game) -> Result<Vec<u8>, SaveError> {
 }
 
 /// The save's JSON, before [`pack`]: the cheap part of [`encode`] (about a millisecond for a
-/// map game), which the noon autosave does on the frame while the packing runs on its thread.
-fn encode_json(meta: &SaveMeta, game: &Game) -> Result<Vec<u8>, SaveError> {
+/// map game), which the noon autosave and the session slot do on the frame while the packing
+/// runs on their threads.
+pub fn encode_json(meta: &SaveMeta, game: &Game) -> Result<Vec<u8>, SaveError> {
     let map = embedded_map(game).map(base64_encode);
     serde_json::to_vec(&SaveOut { meta, game, map }).map_err(|e| SaveError::Corrupt(e.to_string()))
 }
@@ -332,7 +372,8 @@ fn embedded_map(game: &Game) -> Option<&[u8]> {
     }
 }
 
-fn pack(json: &[u8]) -> Result<Vec<u8>, SaveError> {
+/// The bytes of a save file holding `json` (bzip2-compressed).
+pub fn pack(json: &[u8]) -> Result<Vec<u8>, SaveError> {
     let mut enc = bzip2::write::BzEncoder::new(Vec::new(), bzip2::Compression::default());
     enc.write_all(json)?;
     Ok(enc.finish()?)
@@ -726,7 +767,8 @@ pub fn finish_pending_writes() {
 fn store_autosave(dir: &Path, meta: &SaveMeta, bytes: &[u8], in_battle: bool) -> Result<PathBuf, SaveError> {
     let folder = kind_dir(dir, SaveKind::Auto);
     std::fs::create_dir_all(&folder)?;
-    let saves: Vec<SaveEntry> = by_time(dir, SaveKind::Auto).into_iter().filter(|e| !e.pinned).collect();
+    // Pinned autosaves and the session slot are left out of the rotation (the slot is still listed).
+    let saves: Vec<SaveEntry> = by_time(dir, SaveKind::Auto).into_iter().filter(|e| !e.pinned && e.meta.name != SESSION).collect();
     let same = |e: &&SaveEntry| e.meta.name == meta.name && (in_battle || e.meta.title == meta.title);
     let reused = saves.iter().filter(same).next_back().or_else(|| saves.get(AUTOSAVES_KEPT - 1));
     let path = match reused {
@@ -1566,6 +1608,55 @@ pub(crate) mod tests {
         write_autosave(&dir, "auto 6", &other, true).unwrap();
         let now = names(&dir);
         assert_eq!((now.len(), now.iter().filter(|n| *n == "auto 6").count(), now.contains(&"auto 2".to_string())), (AUTOSAVES_KEPT, 1, true));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_session_slot_is_listed_but_never_rotated() {
+        // The slot is written first (the oldest), then 30 autosaves fill the rotation: a 31st
+        // reuses the oldest autosave, and the slot is left alone (it is not counted either).
+        let dir = temp_dir("session-rotation");
+        let g = Game::new(demo(), HeroClass::Ranger);
+        let tick = || std::thread::sleep(std::time::Duration::from_millis(10));
+        let (meta, json) = session_json(&g).unwrap();
+        write_session(&dir, &meta, &json).unwrap();
+        let before = std::fs::read(session_path(&dir)).unwrap();
+        tick();
+        for k in 0..AUTOSAVES_KEPT {
+            write(&dir, SaveKind::Auto, &format!("auto {k}"), &g).unwrap();
+            tick();
+        }
+        let names = |dir: &Path| list(dir, SaveKind::Auto).iter().map(|s| s.meta.name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(&dir).len(), AUTOSAVES_KEPT + 1, "the slot is listed with the autosaves");
+        write(&dir, SaveKind::Auto, "new", &g).unwrap();
+        let now = names(&dir);
+        assert_eq!(now.len(), AUTOSAVES_KEPT + 1);
+        assert_eq!(now[0], "new");
+        assert!(now.contains(&SESSION.to_string()), "the slot stays");
+        assert!(!now.contains(&"auto 0".to_string()), "the oldest autosave was reused");
+        assert_eq!(std::fs::read(session_path(&dir)).unwrap(), before, "the slot's file is untouched");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_session_writes_the_slot_and_the_marker_and_the_slot_loads_back() {
+        let dir = temp_dir("session");
+        let mut g = Game::new(demo(), HeroClass::Knight);
+        g.gold = 1234;
+        assert!(!session_marker(&dir).exists());
+        let (meta, json) = session_json(&g).unwrap();
+        assert_eq!(meta.name, SESSION);
+        let path = write_session(&dir, &meta, &json).unwrap();
+        assert_eq!(path, session_path(&dir));
+        assert!(session_marker(&dir).exists(), "the session is under way");
+        assert_eq!(read_meta(&path).unwrap().name, SESSION);
+        assert_eq!(load(&path, demo(), None).unwrap().gold, 1234);
+        // A later write replaces the slot; the marker stays until the game is left.
+        g.gold = 99;
+        let (meta, json) = session_json(&g).unwrap();
+        write_session(&dir, &meta, &json).unwrap();
+        assert_eq!(load(&path, demo(), None).unwrap().gold, 99);
+        assert_eq!(list(&dir, SaveKind::Auto).len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

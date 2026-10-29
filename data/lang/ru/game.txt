@@ -74,6 +74,8 @@ No save yet. = Сохранений ещё нет.
 Load the last save = Загрузить последнее сохранение
 Exit to main menu = Выйти в главное меню
 Quick save = Быстрое сохранение
+Last session = Последний сеанс
+Continue the game? = Продолжить игру?
 
 # Save and load windows
 Battle - {foe} = Битва - {foe}

@@ -150,6 +150,9 @@ pub struct Dialog {
     /// enabled (Razdor's, the owner's request; the caller looks at the save folder once, when
     /// it shows the report).
     pub load_last: bool,
+    /// The launch's «Продолжить игру?» (`session`): a question whose Yes loads the session slot
+    /// (`App::check_session`); not a scenario question.
+    pub resume: bool,
     /// The first text line shown when the text is taller than the screen allows (Razdor's
     /// scrolling: the wheel over the text, the arrow and page keys).
     pub scroll: std::cell::Cell<usize>,
@@ -183,6 +186,7 @@ impl Dialog {
             not_before: None,
             defeat: false,
             load_last: false,
+            resume: false,
             scroll: std::cell::Cell::new(0),
             key_down: std::cell::Cell::new(false),
         }
@@ -1059,7 +1063,8 @@ fn draw_village_event(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Optio
     let (bw, bh) = (96.0 * o, 35.0 * o);
     let by = footer.y + (footer.h - bh) / 2.0;
     if d.question {
-        let answer = answer_key();
+        // The launch's «Продолжить игру?» loads a game: only its button says yes (a key does not).
+        let answer = answer_key().filter(|&yes| !(yes && d.resume));
         let yes = button(x + w * 0.24 - bw / 2.0, by, bw, bh, tr("Yes"), true);
         let no = button(x + w * 0.76 - bw / 2.0, by, bw, bh, tr("No"), true);
         return if yes || answer == Some(true) { Some(Close::Yes) } else if no || answer == Some(false) { Some(Close::No) } else { None };
