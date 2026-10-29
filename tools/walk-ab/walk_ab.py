@@ -25,14 +25,20 @@ from pathlib import Path
 
 KINDS = ["walk-step", "walk", "idle"]
 # The frame probe's timed columns (CSV). The tick's parts are inside `tick`; `autosave` is outside it.
-TIMED = ["tick", "terrain", "world", "fog", "minimap", "route", "look", "armies", "script", "day", "snap", "autosave"]
+# `ai_move` is inside `armies` and `ai_plan` inside `ai_move` (both "of which", not parts).
+TIMED = ["tick", "terrain", "world", "fog", "minimap", "route", "look", "armies", "script", "day", "snap", "autosave",
+         "ai_move", "ai_plan"]
 TICK_PARTS = ["route", "look", "armies", "script", "day", "snap"]
-# The table's rows per kind: the timed columns and the two that are worked out here, `tick-rest`
-# (the tick less its parts) and `rest` (the work less tick, world, fog, minimap and autosave), both
-# clamped at zero as the probe's summary clamps them (frame_probe.rs: tick_rest_ms, rest_ms).
-STAGES = ["tick", "route", "look", "armies", "script", "day", "snap", "tick-rest", "terrain", "world", "fog", "minimap", "autosave", "rest"]
+# The table's rows per kind: the timed columns and three that are worked out here: `tick-rest` (the
+# tick less its parts), `armies-other` (armies less ai_move: the non-managed armies and the midnights)
+# and `rest` (the work less tick, world, fog, minimap and autosave). All clamped at zero, as the
+# probe's summary clamps them (frame_probe.rs: tick_rest_ms, rest_ms).
+STAGES = ["tick", "route", "look", "armies", "ai_move", "ai_plan", "armies-other", "script", "day", "snap", "tick-rest",
+          "terrain", "world", "fog", "minimap", "autosave", "rest"]
 # The parts of a walk-step frame's work that add up to it (world includes terrain).
 SHARE_PARTS = ["route", "look", "armies", "script", "day", "snap", "tick-rest", "world", "fog", "minimap", "autosave", "rest"]
+# Of the armies part: ai_move (ai_plan inside it) and the rest of the armies (armies-other).
+ARMIES_PARTS = ["ai_move", "ai_plan", "armies-other"]
 # The phone's work p50 the desktop run is scaled to (ms): k = PHONE_WORK_P50 / A's walk work p50.
 PHONE_WORK_P50 = 3.0
 # The scene's log line when it fails: `RAZDOR_SCENE=<scene>: <reason>` (snapshot.rs). The start-up
@@ -202,7 +208,8 @@ def read_rows(path):
             }
             row.update({c: float(r[c]) for c in TIMED})
             row["tick-rest"] = max(0.0, row["tick"] - sum(row[p] for p in TICK_PARTS))
-            row["rest"] = max(0.0, row["work_ms"] - (row["tick"] + row["world"] + row["fog"] + row["minimap"] + row["autosave"]))
+            row["armies-other"] = max(0.0, row["armies"] - row["ai_move"])
+            row["rest"] =max(0.0, row["work_ms"] - (row["tick"] + row["world"] + row["fog"] + row["minimap"] + row["autosave"]))
             out.append(row)
     return out
 
@@ -283,12 +290,19 @@ def share_lines(runs):
     body.append(("work", f"{work:.2f}", "100.0%", f"{work / len(rows):.3f}"))
     summed = sum(total for _, total in parts)
     text = grid(body).splitlines()
+    # The armies part's own split (its sub-stages are not parts: ai_plan is inside ai_move).
+    of_armies = [("armies", f"{sum(r['armies'] for r in rows):.2f}", "", "")]
+    for name in ARMIES_PARTS:
+        total = sum(r[name] for r in rows)
+        of_armies.append((f"  {name}", f"{total:.2f}", f"{100 * total / work:.1f}%", f"{total / len(rows):.3f}"))
+    text.append("")
+    text.extend(grid([("of work", "total ms", "share", "per frame ms"), *of_armies]).splitlines())
     text.append(f"parts sum to {summed:.2f} ms of {work:.2f} ms over {len(rows)} walk-step frames ({len(runs)} runs)")
     return text
 
 
-SPLIT_COLUMNS = ["work", "phone~", "tick", "route", "look", "armies", "script", "day", "snap", "tick-rest",
-                 "world", "fog", "minimap", "autosave", "rest"]
+SPLIT_COLUMNS = ["work", "phone~", "tick", "route", "look", "armies", "ai_move", "ai_plan", "armies-other", "script",
+                 "day", "snap", "tick-rest", "world", "fog", "minimap", "autosave", "rest"]
 
 
 def split_lines(pairs, k):

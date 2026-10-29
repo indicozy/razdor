@@ -30,6 +30,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use crate::dt::dtm::Army as DtArmy;
+use crate::frame_probe::{self, Stage};
 
 use super::battle::{Battle, Outcome, Team, RECORDS};
 use super::clock::MINUTES_PER_DAY;
@@ -1963,7 +1964,7 @@ impl Game {
             dist.push((p, d));
         }
         if replan {
-            self.ai_plan(i, &dist, hero);
+            frame_probe::time(Stage::AiPlan, || self.ai_plan(i, &dist, hero));
         }
         // The step clock ends by setting the direction of the next step from the path, 8
         // when it has no next cell (0x4a399c), before the arrival rules run (0x4ade3c).

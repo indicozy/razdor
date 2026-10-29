@@ -35,8 +35,11 @@ In `--out`: `runs/<A|B>-<n>/` (`frames.csv`, `razdor.log`, `razdor-play.log`, `s
   desktop times times `k`. The stages are the probe's: `tick` and its parts (`route`, `look`,
   `armies`, `script`, `day`, `snap`), `tick-rest` (the tick less its parts), the map (`terrain`,
   `world`, `fog`, `minimap`), `autosave` (outside the tick) and `rest` (the work less the tick, the
-  map, the fog, the minimap and the autosave). `tick-rest` and `rest` are worked out here from the
-  CSV, clamped at zero. A CSV without these columns (an older probe build) is refused.
+  map, the fog, the minimap and the autosave). Inside `armies`: `ai_move` (the AI's moves and plans)
+  and, inside it, `ai_plan` (the replans); `armies-other` is armies less `ai_move` (the non-managed
+  armies and the midnights). `ai_plan` is "of which", never added to a part. `tick-rest`,
+  `armies-other` and `rest` are worked out here from the CSV, clamped at zero. A CSV without these
+  columns (an older probe build) is refused.
 - Where the walk-step work goes: each part's total over all walk-step frames of all runs, its share
   of the work, and the sum of the parts (it equals the work when nothing is clamped).
 - The worst five walk-step frames, with their stage split and `phone~` (work times `k`).

@@ -2181,7 +2181,7 @@ impl Game {
         };
         // At the tick's end his step has ended: his cell and the one ahead of him.
         let hero_end = HeroCells { cells: [Some(hero_tile), ahead], at: hero_tile, boundary: walking || self.step_flag };
-        let later = self.ai_move(minutes, &hero, &hero_end, start, midnights);
+        let later = frame_probe::time(Stage::AiMove, || self.ai_move(minutes, &hero, &hero_end, start, midnights));
         events.append(&mut self.ai_events);
         let mut armies = std::mem::take(&mut self.world.armies);
         let world = &self.world;
