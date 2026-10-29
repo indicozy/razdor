@@ -14,6 +14,21 @@
 
 ## 1.1.12 — 2026-10-29
 
+Коммит `618fe574` (тег `v1.1.12`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+c615d8b450b595e137494ac5a663c1656b09fbdfa387b9e13ba1f93bdf0917f1  razdor
+2a4f0222c9493d7a2044367455c3f9c3a55b8ffe7613eb139b88b36b19c93db5  Razdor.exe
+582d2c021b413f52e9d235a1589bd572476410a8ff67ef27e784fe2410ca6212  razdor-macos
+b9f49aaaaa4a6b9e4e8cdf806ddfea5b9e7fd04b504d9f733dec48b394eab6e9  razdor-translate
+03371fa82265d1335861c2e64171ed7c1d27b8317feb7b967a875f52745f3931  Razdor-translate.exe
+8abd1d38d6eb0f622ca2a1c28b62473a23c72a9707e267dd0973efb37a83590b  razdor-translate-macos
+d2ac2e3bde683c1e7e1da13f86b3313b13a3adc03fa585303a7b1b389f2e0998  razdor.apk
+d54e1bcd52a9019b6017f4049271202bf18d323ed606a6fc634e4d71f4e4cef5  razdor.ipa
+```
+
 ### Изменено
 
 - Ходьба по карте стала ещё плавнее: армии компьютера быстрее просчитывают бои.
