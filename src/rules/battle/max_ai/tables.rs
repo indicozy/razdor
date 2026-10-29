@@ -98,6 +98,7 @@ impl Battle {
             fighters,
             round,
             log: _,
+            log_on: _,
             attacker,
             building_defence,
             strength_defence,

@@ -610,6 +610,9 @@ pub struct Battle {
     /// Battle turn, 1-based once the fight starts.
     pub round: u32,
     pub log: Vec<String>,
+    /// Whether the log is kept: a simulated battle (the AI's off-screen fights) keeps none, its
+    /// text is never shown, so it is not even made.
+    log_on: bool,
     /// The side that started the fight. The original gives its +1 initiative to the player
     /// whoever attacks, so this is for information only.
     pub attacker: Team,
@@ -796,6 +799,7 @@ impl Battle {
             fighters,
             round: 0,
             log: Vec::new(),
+            log_on: true,
             attacker,
             building_defence: [0; 2],
             strength_defence: [None; 2],
@@ -869,6 +873,7 @@ impl Battle {
         self.interactive = false;
         self.screen_object = false;
         self.ai_level = 0;
+        self.log_on = false;
     }
 
     /// The cells of the player's army formation whose units stay out of the battle (the dead,
@@ -1225,10 +1230,12 @@ impl Battle {
             f.hp = 0;
             f.suicided = false;
         }
-        self.log.push(match winner {
-            Team::Player => tr("The enemy falls to a cheat").to_string(),
-            Team::Enemy => tr("Your army falls to a cheat").to_string(),
-        });
+        if self.log_on {
+            self.log.push(match winner {
+                Team::Player => tr("The enemy falls to a cheat").to_string(),
+                Team::Enemy => tr("Your army falls to a cheat").to_string(),
+            });
+        }
     }
 
     /// Fighter whose turn it is; `None` while deploying or once the battle is over.
@@ -1282,7 +1289,9 @@ impl Battle {
         self.threshold = if round == 1 { TURN_ONE_THRESHOLD } else { self.first_threshold };
         self.first_threshold = 0;
         self.cursor = (0, 0);
-        self.log.push(crate::trf!("-- Turn {round} --", round));
+        if self.log_on {
+            self.log.push(crate::trf!("-- Turn {round} --", round));
+        }
         for t in 0..2 {
             self.max_turn_lost[t] = self.max_turn_lost[t].max(self.turn_lost[t]);
             self.turn_lost[t] = 0;
@@ -1413,14 +1422,14 @@ impl Battle {
         let change = new - f.hp;
         f.hp = new;
         if change < 0 {
-            let msg = crate::trf!("{name} loses {loss} to poison", name = f.name, loss = -change);
-            self.log.push(msg);
+            if self.log_on {
+                self.log.push(crate::trf!("{name} loses {loss} to poison", name = f.name, loss = -change));
+            }
             if !self.fighters[i].alive() {
                 self.died(i);
             }
-        } else {
-            let msg = crate::trf!("{name} regenerates +{change}", name = f.name, change);
-            self.log.push(msg);
+        } else if self.log_on {
+            self.log.push(crate::trf!("{name} regenerates +{change}", name = f.name, change));
         }
     }
 
@@ -1601,7 +1610,7 @@ impl Battle {
             }
             moved = true;
         }
-        if moved {
+        if moved && self.log_on {
             let msg = match (team == Team::Player, back) {
                 (true, true) => tr("Your rear steps forward"),
                 (true, false) => tr("Your reserve steps forward"),
@@ -1653,8 +1662,10 @@ impl Battle {
                 f.hp = 0;
             }
             self.surrender_mana[team.other().index()] += mana;
-            let msg = if team == Team::Player { tr("Your army surrenders") } else { tr("The enemy surrenders") };
-            self.log.push(msg.to_string());
+            if self.log_on {
+                let msg = if team == Team::Player { tr("Your army surrenders") } else { tr("The enemy surrenders") };
+                self.log.push(msg.to_string());
+            }
         }
         if !standing.iter().all(|&s| s) {
             // A side wiped out: the battle is over anyway (a beaten player stays beaten).
@@ -1665,7 +1676,9 @@ impl Battle {
             self.ended = Some(EndReason::Surrender(team));
         } else if limit {
             self.ended = Some(EndReason::TurnLimit);
-            self.log.push(crate::trf!("Turn {round} ends the battle", round = self.round));
+            if self.log_on {
+                self.log.push(crate::trf!("Turn {round} ends the battle", round = self.round));
+            }
         }
     }
 
@@ -1674,8 +1687,15 @@ impl Battle {
     // ------------------------------------------------------------------------------------
 
     /// Occupied front cells of `team` in columns c−1..c+1.
-    fn front_near(&self, team: Team, col: u8) -> Vec<u8> {
-        self.living(team).filter(|f| f.slot.row == Row::Front && f.slot.col.abs_diff(col) <= 1).map(|f| f.slot.col).collect()
+    /// Whether `team` has a unit in the front row within one column of `col` that stands in
+    /// column `c` (no list is built for the test).
+    fn front_near_at(&self, team: Team, col: u8, c: u8) -> bool {
+        self.living(team).any(|f| f.slot.row == Row::Front && f.slot.col.abs_diff(col) <= 1 && f.slot.col == c)
+    }
+
+    /// Whether `team` has no unit in the front row within one column of `col`.
+    fn front_near_empty(&self, team: Team, col: u8) -> bool {
+        !self.living(team).any(|f| f.slot.row == Row::Front && f.slot.col.abs_diff(col) <= 1)
     }
 
     /// Long-strike targets from column `col`: the nearest front unit of `team` to the right
@@ -1694,7 +1714,7 @@ impl Battle {
     fn front_clear(&self, team: Team, col: u8) -> bool {
         col > 0
             && col + 1 < self.formation.cols
-            && self.front_near(team, col).is_empty()
+            && self.front_near_empty(team, col)
             && (col - 1..=col + 1).all(|c| self.is_open(team, Slot::new(Row::Front, c)))
     }
 
@@ -1728,15 +1748,14 @@ impl Battle {
             if !t.slot.row.is_active() {
                 return None;
             }
-            let near = self.front_near(t.team, from.col);
-            let adjacent = t.slot.row == Row::Front && near.contains(&t.slot.col);
+            let adjacent = t.slot.row == Row::Front && self.front_near_at(t.team, from.col, t.slot.col);
             let clear = self.front_clear(t.team, from.col);
             let magic = if t.weakened() { Strike } else { Curse };
             let mut kind = None;
             if f.is_warrior() && from.row == Row::Front {
                 if adjacent {
                     kind = Some(Melee);
-                } else if near.is_empty() && self.long_strike_targets(t.team, from.col).contains(&target) {
+                } else if self.front_near_empty(t.team, from.col) && self.long_strike_targets(t.team, from.col).contains(&target) {
                     kind = Some(LongStrike);
                 }
             }
@@ -2117,8 +2136,9 @@ impl Battle {
             let loss = if self.god && f.team == Team::Player { 0 } else { loss };
             if loss > 0 {
                 f.hp -= loss;
-                let msg = crate::trf!("{name} bleeds for {loss}", name = f.name, loss);
-                self.log.push(msg);
+                if self.log_on {
+                    self.log.push(crate::trf!("{name} bleeds for {loss}", name = f.name, loss));
+                }
                 if !self.fighters[id].alive() {
                     // Removed plainly (no on-kill effects), and its bleed is cleared.
                     self.fighters[id].bleed = 0;
@@ -2159,8 +2179,9 @@ impl Battle {
                 f.reserve_move = false;
             }
             f.slot = to;
-            let msg = crate::trf!("{name} moves", name = f.name);
-            self.log.push(msg);
+            if self.log_on {
+                self.log.push(crate::trf!("{name} moves", name = f.name));
+            }
         }
         self.finish_action(id);
         Ok(())
@@ -2191,7 +2212,9 @@ impl Battle {
     /// and tests; the original has no such key).
     pub fn skip(&mut self) {
         if let Some(id) = self.active() {
-            self.log.push(crate::trf!("{name} waits", name = self.fighters[id].name));
+            if self.log_on {
+                self.log.push(crate::trf!("{name} waits", name = self.fighters[id].name));
+            }
             for _ in 0..self.fighters[id].actions {
                 if self.active() != Some(id) {
                     break;
@@ -2326,7 +2349,9 @@ impl Battle {
         let dmg = self.spare(id, dmg);
         self.fighters[id].hp -= dmg;
         *counter = Some(counter.unwrap_or(0) + dmg);
-        self.log.push(crate::trf!("{name} strikes first for {dmg}", name = self.fighters[target].name, dmg));
+        if self.log_on {
+            self.log.push(crate::trf!("{name} strikes first for {dmg}", name = self.fighters[target].name, dmg));
+        }
         if self.fighters[id].hp <= 0 {
             self.died(id);
             return false;
@@ -2385,13 +2410,15 @@ impl Battle {
         let (name, tname) = (&self.fighters[id].name, &self.fighters[target].name);
         let killed = !self.fighters[target].alive();
         let dealt = out.amount;
-        let msg = match (killed, long) {
-            (true, false) => crate::trf!("{name} kills {tname} ({dealt})", name, tname, dealt),
-            (true, true) => crate::trf!("{name} kills {tname} with a long strike ({dealt})", name, tname, dealt),
-            (false, false) => crate::trf!("{name} hits {tname} for {dealt}", name, tname, dealt),
-            (false, true) => crate::trf!("{name} hits {tname} with a long strike for {dealt}", name, tname, dealt),
-        };
-        self.log.push(msg);
+        if self.log_on {
+            let msg = match (killed, long) {
+                (true, false) => crate::trf!("{name} kills {tname} ({dealt})", name, tname, dealt),
+                (true, true) => crate::trf!("{name} kills {tname} with a long strike ({dealt})", name, tname, dealt),
+                (false, false) => crate::trf!("{name} hits {tname} for {dealt}", name, tname, dealt),
+                (false, true) => crate::trf!("{name} hits {tname} with a long strike for {dealt}", name, tname, dealt),
+            };
+            self.log.push(msg);
+        }
         // Counterblow: a surviving target answers with a blow, even a Suicide striker waiting
         // for its removal; a striker it kills is removed with no on-kill effects (48b4b3).
         let t = &self.fighters[target];
@@ -2400,7 +2427,9 @@ impl Battle {
             let dmg = self.spare(id, dmg);
             self.fighters[id].hp -= dmg;
             *counter = Some(counter.unwrap_or(0) + dmg);
-            self.log.push(crate::trf!("{name} hits back for {dmg}", name = self.fighters[target].name, dmg));
+            if self.log_on {
+                self.log.push(crate::trf!("{name} hits back for {dmg}", name = self.fighters[target].name, dmg));
+            }
             if self.fighters[id].hp <= 0 {
                 self.died(id);
             }
@@ -2433,12 +2462,14 @@ impl Battle {
         self.stun(id, target, StunHit::Shot);
         self.on_hit(id, target, raw, true);
         let (name, tname, dealt) = (&self.fighters[id].name, &self.fighters[target].name, out.amount);
-        let msg = if self.fighters[target].alive() {
-            crate::trf!("{name} hits {tname} for {dealt}", name, tname, dealt)
-        } else {
-            crate::trf!("{name} kills {tname} ({dealt})", name, tname, dealt)
-        };
-        self.log.push(msg);
+        if self.log_on {
+            let msg = if self.fighters[target].alive() {
+                crate::trf!("{name} hits {tname} for {dealt}", name, tname, dealt)
+            } else {
+                crate::trf!("{name} kills {tname} ({dealt})", name, tname, dealt)
+            };
+            self.log.push(msg);
+        }
         out.killed = self.kill_check(target, id);
         out
     }
@@ -2459,7 +2490,9 @@ impl Battle {
             d = raw;
             out.amount = raw.min(self.fighters[target].hp);
             self.wound(target, out.amount);
-            self.log.push(crate::trf!("{name} hits {tname} with magic for {dealt}", name, tname, dealt = out.amount));
+            if self.log_on {
+                self.log.push(crate::trf!("{name} hits {tname} with magic for {dealt}", name, tname, dealt = out.amount));
+            }
             // Vampirism on magic: Death strikes only, not from undead or elementals.
             let vamp = self.fighters[id].stats[Stat::Vampirizm];
             if school == Some(MagicSchool::Death) && vamp > 0 && !matches!(self.fighters[target].stats.nature, Nature::Undead | Nature::Elemental) {
@@ -2471,7 +2504,9 @@ impl Battle {
             out.buff = self.curse_of(id, p);
             self.apply_buff(id, target, out.buff);
             self.fighters[target].cursed = true;
-            self.log.push(crate::trf!("{name} curses {tname}: {what}", name, tname, what = out.buff.describe()));
+            if self.log_on {
+                self.log.push(crate::trf!("{name} curses {tname}: {what}", name, tname, what = out.buff.describe()));
+            }
             // An undead caster's Elemental or Death curse drains life to it.
             if self.fighters[id].base.nature == Nature::Undead && matches!(school, Some(MagicSchool::Elemental | MagicSchool::Death)) {
                 // The target's loss is capped at its HP, but the caster gains the whole
@@ -2514,7 +2549,7 @@ impl Battle {
             self.on_hit(id, target, d, false);
         }
         out.killed = self.kill_check(target, id);
-        if out.killed {
+        if out.killed && self.log_on {
             self.log.push(crate::trf!("{name} kills {tname} with magic", name, tname));
         }
         out
@@ -2531,7 +2566,9 @@ impl Battle {
         if t.wounded() && heal > 0 {
             out.amount = heal.min(t.max_hp() - t.hp);
             self.fighters[target].hp += out.amount;
-            self.log.push(crate::trf!("{name} heals {tname} +{healed}", name, tname, healed = out.amount));
+            if self.log_on {
+                self.log.push(crate::trf!("{name} heals {tname} +{healed}", name, tname, healed = out.amount));
+            }
         } else if t.blessed {
             // Razdor fixes the original's bug (the owner's decision, main only): no second
             // blessing in a turn (see `option_at`). Only a Splash follow-up on a blessed
@@ -2543,7 +2580,9 @@ impl Battle {
             out.buff = self.bless_of(id, target, p);
             self.apply_buff(id, target, out.buff);
             self.fighters[target].blessed = true;
-            self.log.push(crate::trf!("{name} blesses {tname}: {what}", name, tname, what = out.buff.describe()));
+            if self.log_on {
+                self.log.push(crate::trf!("{name} blesses {tname}: {what}", name, tname, what = out.buff.describe()));
+            }
         }
         self.splash_record(id, target, SPLASH_FRIENDLY);
         out
@@ -2608,8 +2647,9 @@ impl Battle {
         f.base[Stat::Manevres] = 0;
         f.actions = 0;
         f.suicided = true;
-        let msg = crate::trf!("{name} gives its life", name = f.name);
-        self.log.push(msg);
+        if self.log_on {
+            self.log.push(crate::trf!("{name} gives its life", name = f.name));
+        }
         self.refresh(id);
     }
 
@@ -2622,7 +2662,7 @@ impl Battle {
     fn on_hit(&mut self, id: usize, target: usize, d: i32, shot: bool) {
         let a = self.fighters[id].base.clone();
         let mark = (self.fighters[target].team.index(), self.record_index(target));
-        let finish = crate::trf!("{name} finishes {tname}", name = self.fighters[id].name, tname = self.fighters[target].name);
+        let finish = self.log_on.then(|| crate::trf!("{name} finishes {tname}", name = self.fighters[id].name, tname = self.fighters[target].name));
         let god = self.god;
         let poisonable = self.poisonable(target);
         let has12 = self.content.options.build.has_12_features();
@@ -2641,7 +2681,9 @@ impl Battle {
             }
             if a.has(&Bonus::KillingStrike) && t.base.max_hp() * KILLING_STRIKE_PERCENT / 100 >= t.hp && !(god && t.team == Team::Player) {
                 if t.alive() {
-                    self.log.push(finish);
+                    if let Some(msg) = finish {
+                        self.log.push(msg);
+                    }
                 }
                 t.hp = 0;
             }
@@ -2658,8 +2700,9 @@ impl Battle {
             t.base[Stat::Hits] += t.base[Stat::Hits] * FATE_HP_PERCENT / 100;
             t.hp = t.base.max_hp();
             t.mods.initiative += FATE_INITIATIVE;
-            let msg = crate::trf!("{name} is spared by fate", name = t.name);
-            self.log.push(msg);
+            if self.log_on {
+                self.log.push(crate::trf!("{name} is spared by fate", name = t.name));
+            }
         }
         let t = &mut self.fighters[target];
         if a.has(&Bonus::Neutralize) {
@@ -2719,8 +2762,9 @@ impl Battle {
                 kf.lost += hp;
                 self.turn_lost[kf.team.index()] += hp as i64;
                 kf.hp = 0;
-                let msg = crate::trf!("{name} dies by {caster}'s curse", name = self.fighters[killer].name, caster = self.fighters[i].name);
-                self.log.push(msg);
+                if self.log_on {
+                    self.log.push(crate::trf!("{name} dies by {caster}'s curse", name = self.fighters[killer].name, caster = self.fighters[i].name));
+                }
                 self.died(killer);
             }
         }

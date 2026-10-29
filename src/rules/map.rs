@@ -833,8 +833,10 @@ impl TileMap {
                 }
             }
             Grid::HexOddR => {
-                for (dir, o) in out.iter_mut().enumerate() {
-                    *o = self.neighbour_index(i, dir);
+                // The same cells as `neighbour_index` in every direction (its offsets are
+                // this row's, `directions(y)`), with the row's offsets worked out once.
+                for (o, d) in out.iter_mut().zip(self.grid.directions(y)) {
+                    *o = d.and_then(|(dx, dy)| self.index((x + dx, y + dy)));
                 }
             }
         }

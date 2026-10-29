@@ -1262,8 +1262,13 @@ impl Game {
     /// Σ Round(Cost/CostRecrutDiv)) div 3`, a feudal army keeps `NeedUpkeepDay` days of `W`
     /// minus the income of the days between, the others one day; within `0..gold`.
     pub fn spare_gold(&self, i: usize) -> i32 {
+        self.spare_gold_with(i, &self.army_totals(i))
+    }
+
+    /// [`Game::spare_gold`] with army `i`'s totals already counted (the planner counts them
+    /// once for both its heal bill and this).
+    fn spare_gold_with(&self, i: usize, t: &Totals) -> i32 {
         let a = &self.world.armies[i];
-        let t = self.army_totals(i);
         let cost = (t.wages + 2 * t.recruit_sum) / 3;
         let n = self.content.options.need_upkeep_day;
         let m = &a.mind;
@@ -1319,11 +1324,15 @@ impl Game {
     /// village, purchase, attack and garrison parts, 0 for none, −1 when the attack part
     /// forbids it.
     pub fn building_score(&self, i: usize, l: usize) -> i32 {
-        self.building_score_with(i, l, self.spare_gold(i), self.army_totals(i).strength)
+        let side = self.army_side(i, true).0;
+        let parties = self.parties();
+        self.building_score_with(i, l, self.spare_gold(i), self.army_totals(i).strength, &side, &parties)
     }
 
-    /// [`Game::building_score`] with the army's spare gold and strength worked out.
-    fn building_score_with(&self, i: usize, l: usize, spare: i32, strength: i32) -> i32 {
+    /// [`Game::building_score`] with the army's spare gold and strength worked out, its side
+    /// in battle (`army_side(i, true)`) and the parties (`parties()`), which the caller counts
+    /// once for every building.
+    fn building_score_with(&self, i: usize, l: usize, spare: i32, strength: i32, side: &Side, parties: &[Party]) -> i32 {
         let c = &self.content;
         let o = &c.options;
         let w = &self.world;
@@ -1399,8 +1408,7 @@ impl Game {
             if garrison < 1 {
                 attack = attack / 4 + 1;
             } else {
-                let (side, _) = self.army_side(i, true);
-                let s = self.sims.borrow_mut().get(c, &side, &self.garrison_side(l));
+                let s = self.sims.borrow_mut().get(c, side, &self.garrison_side(l));
                 let (a0, b0) = (s.own, s.theirs);
                 let (a1, b1) = (s.own_left.min(a0), s.theirs_left.min(b0));
                 if !((a1 == a0 && b1 == b0) || s.turn as i32 == o.battle_end_turn) {
@@ -1424,7 +1432,7 @@ impl Game {
                 attack *= 50;
             }
             // A stationary guard in it that it cannot beat forbids it.
-            for p in self.parties() {
+            for &p in parties {
                 if self.guard(p) && self.standing_in(p) == Some(l) {
                     let key = self.key_of(p);
                     if self.cached(i, key) < 0 || self.army_score_of(i, p) < 0 {
@@ -1472,7 +1480,10 @@ impl Game {
     /// Army `i` scores every building afresh.
     pub(crate) fn rescore_buildings(&mut self, i: usize) {
         let (spare, strength) = (self.spare_gold(i), self.army_totals(i).strength);
-        let scores: Vec<i32> = (0..self.world.locations.len()).map(|l| self.building_score_with(i, l, spare, strength)).collect();
+        // The army's side and the parties are the same for every building.
+        let side = self.army_side(i, true).0;
+        let parties = self.parties();
+        let scores: Vec<i32> = (0..self.world.locations.len()).map(|l| self.building_score_with(i, l, spare, strength, &side, &parties)).collect();
         self.world.armies[i].mind.buildings = scores;
     }
 
@@ -2023,7 +2034,7 @@ impl Game {
         let mut mult = vec![1u16; (w.max(0) * h.max(0)) as usize];
         // Healing lowers the stored building scores.
         let t = self.army_totals(i);
-        let spare = self.spare_gold(i);
+        let spare = self.spare_gold_with(i, &t);
         if (t.heal_bill > 0 || t.res_bill > 0) && spare > 0 {
             let (lo, hi) = pr.heal;
             let mut v = fpu_round((1.0 - t.missing as f64 / t.max_living as f64) * (hi - lo) as f64 + lo as f64);

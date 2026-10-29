@@ -136,6 +136,7 @@ impl Clone for Battle {
             fighters: Vec::new(),
             round: 0,
             log: Vec::new(),
+            log_on: true,
             attacker: self.attacker,
             building_defence: [0; 2],
             strength_defence: [None; 2],
@@ -180,6 +181,7 @@ impl Clone for Battle {
             fighters,
             round,
             log,
+            log_on,
             attacker,
             building_defence,
             strength_defence,
@@ -220,6 +222,7 @@ impl Clone for Battle {
         self.fighters.clone_from(fighters);
         self.round = *round;
         self.log.clone_from(log);
+        self.log_on = *log_on;
         self.attacker = *attacker;
         self.building_defence = *building_defence;
         self.strength_defence = *strength_defence;
