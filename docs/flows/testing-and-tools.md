@@ -104,9 +104,19 @@ placeholder `0.0.0` (`update_view::shown_version`), so a version bump changes no
 
 1. Build with symbols: `CARGO_PROFILE_RELEASE_DEBUG=true cargo build --release`.
 2. Use a scratch save folder (`RAZDOR_SAVE_DIR=<scratch>`) — never the player's.
-3. Time frames: `RAZDOR_PROFILE=1` logs frames over 100 ms as
+3. Time frames: `RAZDOR_PROFILE=1` logs frames over the threshold as
    `slow frame: N ms = work W + render R (screen -> screen)` and slow decodes as
-   "slow load" (`razdor::diag::profiling`, `diag::timed`).
+   "slow load" (`razdor::diag::profiling`, `diag::timed`). The threshold is 100 ms; set
+   another with `RAZDOR_PROFILE=<ms>` (2 or more). Where env vars cannot be set (Android), a
+   file `profile` in the app folder turns it on, and its content (optional) is the threshold
+   in ms: on Android that is `/storage/emulated/0/Razdor/profile`.
+   The frame probe (`razdor::frame_probe`) takes every frame and every 5 s logs one
+   `frame probe` line per kind: `walk-step` (the hero moved to another cell), `walk` (the hero
+   walking, no step), `idle` (the map, the hero still), `other` (any other screen). Each line
+   has the percentiles of total, work and present, and p50/p99/max of each stage (tick,
+   terrain, objects, fog, minimap, rest), all in ms, and the texture rebuilds. Present is
+   total minus work: the GL submission and the wait for vsync. The stage times are CPU time;
+   GPU time is not visible there.
    `RAZDOR_SCENE_OPEN=<frame>:<window>[,…]` (`snapshot::open_later`: `load`, `army`,
    `spells`, `journal`, `menu`, `building:<n>`, `map`) opens a window at a set frame and
    logs the frames after it.

@@ -101,6 +101,7 @@ fn quit_after() -> Option<u64> {
 /// closed synchronously before this, so skipping the handlers loses nothing.
 fn exit_now(app: &mut App) -> ! {
     razdor::diag::step("quitting");
+    razdor::frame_probe::flush();
     app.shutdown();
     // "Restart now" after an update: the new program, once the lock is free.
     release_instance();
@@ -163,7 +164,8 @@ async fn main() {
     let quiet = ui::snapshot::quiet();
     let quit_after = quit_after();
     let mut frames = 0u64;
-    // RAZDOR_PROFILE=1: frames whose work takes over 40 ms are logged with their screen.
+    // Profiling (`diag::profiling`): frames over `diag::slow_frame_ms` (100 ms by default) are
+    // logged with their screen, and the frame probe takes every frame.
     let profile = razdor::diag::profiling();
     // With RAZDOR_PROFILE, the frames after a window opens are logged whatever they take.
     let mut opened = 0u32;
@@ -208,9 +210,10 @@ async fn main() {
         }
         if profile {
             // The whole frame: the game's work, then drawing and the GPU (textures and font
-            // atlases go up there), vsync included (~16 ms). Over 100 ms is a visible hitch.
+            // atlases go up there), vsync included (~16 ms). Over the threshold is a hitch.
             let total = started.elapsed();
-            if total.as_millis() > 100 || opened > 0 {
+            razdor::frame_probe::end_frame(work, total);
+            if total.as_millis() > razdor::diag::slow_frame_ms() || opened > 0 {
                 opened = opened.saturating_sub(1);
                 let (w, r) = (work.as_secs_f32() * 1000.0, (total - work).as_secs_f32() * 1000.0);
                 razdor::diag!("slow frame: {:.0} ms = work {w:.0} + render {r:.0} ({before} -> {})", w + r, app.screen_name());

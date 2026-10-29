@@ -70,8 +70,11 @@ For "did this UI change alter any other screen?": `tools/ui-regress/` renders th
 
 ## Profiling
 
-- `RAZDOR_PROFILE=1`: frames whose work takes over 40 ms are logged with their screen, and
-  slow picture decodes as "slow load".
+- `RAZDOR_PROFILE=1`: frames over 100 ms are logged with their screen, and slow picture decodes
+  as "slow load". `RAZDOR_PROFILE=<ms>` sets another threshold. Every 5 s the frame probe logs
+  a `frame probe` line per kind (walk-step, walk, idle, other): percentiles of total, work,
+  present and each stage, in ms. For a walk scene add `RAZDOR_SCENE_QUIET=1`, or the
+  scenario's messages hold the hero.
 - `RAZDOR_SCENE_OPEN=<frame>:<window>[,…]` (`load`, `army`, `spells`, `journal`, `menu`,
   `building:<n>`, `map`): opens a window at that frame and logs the frames after it.
 - Many saves: point `RAZDOR_SAVE_DIR` at a scratch folder of copied saves (0, 85, 500).

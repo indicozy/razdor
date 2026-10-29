@@ -11,6 +11,7 @@ use crate::ui::input::{get_keys_pressed, is_mouse_button_down};
 use macroquad::prelude::*;
 
 use razdor::i18n::{n_, tr};
+use razdor::frame_probe::{self, Kind, Stage};
 use razdor::rules::ai::{Clash, Combatant};
 use razdor::rules::battle::Team;
 use razdor::trf;
@@ -1646,7 +1647,7 @@ fn first_footprint_cell(l: &razdor::rules::world::Location) -> Tile {
 fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<MapHoverLook>) {
     let art = assets.dt.as_ref();
     stamp_idle(game, clock_ms());
-    draw_terrain(game, art, cam);
+    frame_probe::time(Stage::Terrain, || draw_terrain(game, art, cam));
     let map = &game.world.map;
     let ((c0, c1), (r0, r1)) = cam.visible(map);
     // Sprites stand on their cell and reach up to ~8 cells above it.
@@ -2903,9 +2904,18 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
 
     // Time stands still while a window is open.
     let mut events = game.drain_events();
+    let tile0 = game.tile();
     if !input_blocked() && events.is_empty() {
-        events = game.tick_shown(crate::ui::clock::frame_dt().min(0.1));
+        events = frame_probe::time(Stage::Tick, || game.tick_shown(crate::ui::clock::frame_dt().min(0.1)));
     }
+    // The frame probe's kind: a step (the hero moved to another cell), a walk, or idle.
+    frame_probe::set_kind(if game.tile() != tile0 {
+        Kind::WalkStep
+    } else if game.moving() {
+        Kind::Walk
+    } else {
+        Kind::Idle
+    });
     let mut next = handle_events(game, events, message, dialogs).or(reopened);
     // Battles between map parties (Razdor's): taken every frame, shown where the player sees
     // the cell and the option is on; the notice replaces the battle's plain line.
@@ -3003,8 +3013,8 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
             MapHoverLook { cell: t, ring, building: None }
         });
     }
-    draw_world(game, assets, &cam, view.preview.as_ref().map(|p| p.1.as_slice()), show.as_ref(), hover);
-    cam.draw_fog(game);
+    frame_probe::time(Stage::World, || draw_world(game, assets, &cam, view.preview.as_ref().map(|p| p.1.as_slice()), show.as_ref(), hover));
+    frame_probe::time(Stage::Fog, || cam.draw_fog(game));
     draw_clash_marks(view, &cam, crate::ui::clock::now());
     cam.draw_showing(game, view.opening.iter().chain(&view.shows), show_now);
     if let Some(s) = view.shows.front() {
@@ -3093,7 +3103,7 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
         view.minimap = !view.minimap;
     }
     if view.minimap {
-        if let Some(at) = minimap::window(game, assets.dt.as_ref(), cam.view, cam.world_rect(), surface_color) {
+        if let Some(at) = frame_probe::time(Stage::Minimap, || minimap::window(game, assets.dt.as_ref(), cam.view, cam.world_rect(), surface_color)) {
             view.look = Some(at);
         }
         // Razdor's army list under the minimap (advanced option): a click on a row goes there.

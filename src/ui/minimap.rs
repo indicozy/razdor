@@ -44,6 +44,7 @@ fn cached(cache: &'static razdor::local::Local<RefCell<Option<Cached>>>, key: u6
     cache.with(|c| {
         let mut c = c.borrow_mut();
         if c.as_ref().is_none_or(|c| c.key != key) {
+            razdor::frame_probe::tex_rebuilt();
             let (w, h, rgba) = make();
             let tex = Texture2D::from_rgba8(w, h, &rgba);
             tex.set_filter(filter);

@@ -70,10 +70,31 @@ pub fn log(msg: &str) {
     }
 }
 
-/// `RAZDOR_PROFILE` is set: slow frames and slow loads are logged.
+/// Profiling is on: `RAZDOR_PROFILE` is set, or the app folder has a `profile` file (how
+/// Android turns it on, where env vars cannot be set: `/storage/emulated/0/Razdor/profile`).
+/// Slow frames and slow loads are logged, and the frame probe (`frame_probe`) summarises frames.
 pub fn profiling() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("RAZDOR_PROFILE").is_some())
+    *ON.get_or_init(|| {
+        std::env::var_os("RAZDOR_PROFILE").is_some()
+            || crate::platform::app_dir().is_some_and(|d| d.join("profile").is_file())
+    })
+}
+
+/// A frame over this many ms is logged as slow (with [`profiling`]): `RAZDOR_PROFILE=<ms>`,
+/// else the `profile` file's content (the same), else 100. Values under 2 mean just "on".
+pub fn slow_frame_ms() -> u128 {
+    static MS: std::sync::OnceLock<u128> = std::sync::OnceLock::new();
+    *MS.get_or_init(|| {
+        let env = std::env::var("RAZDOR_PROFILE").ok();
+        let file = crate::platform::app_dir().and_then(|d| std::fs::read_to_string(d.join("profile")).ok());
+        threshold_from(env.as_deref()).or_else(|| threshold_from(file.as_deref())).unwrap_or(100)
+    })
+}
+
+/// A threshold in ms from a setting's text: an integer of 2 or more, else none.
+fn threshold_from(s: Option<&str>) -> Option<u128> {
+    s?.trim().parse::<u128>().ok().filter(|&ms| ms >= 2)
 }
 
 /// Runs `f`; with [`profiling`] on, logs `what` when it took over 2 ms.
@@ -276,7 +297,18 @@ fn redirect_output(file: &File) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{create_log_file, known_cause};
+    use super::{create_log_file, known_cause, threshold_from};
+
+    #[test]
+    fn the_slow_frame_threshold_is_read_from_a_number_of_ms_of_two_or_more() {
+        assert_eq!(threshold_from(None), None);
+        assert_eq!(threshold_from(Some("1")), None, "1 only means on");
+        assert_eq!(threshold_from(Some("0")), None);
+        assert_eq!(threshold_from(Some("")), None);
+        assert_eq!(threshold_from(Some("slow")), None);
+        assert_eq!(threshold_from(Some(" 250\n")), Some(250));
+        assert_eq!(threshold_from(Some("8")), Some(8));
+    }
 
     #[test]
     fn the_log_is_made_in_a_folder_that_does_not_exist_yet() {
