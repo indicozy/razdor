@@ -14,6 +14,21 @@
 
 ## 1.1.13 — 2026-10-29
 
+Коммит `7636c4c5` (тег `v1.1.13`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+0e789f8a05012ca57ca7646c22c455c10326ecdf03f721c7a5609409d405bd66  razdor
+4708368d9291d1e1734e1d0118ad8beea8da3affb56f4311cb2454f5d5a9a89c  Razdor.exe
+0968dbdb4f1d5cfa1dcf9d646cab5de65b34678586209831f794d6e79142aa8b  razdor-macos
+b4dcd6a33df4699bed67801eaf6d9907e61fa5143c01ea9ac6d69b64b190d157  razdor-translate
+49980243a0af5d0f8f2892c8201c7dd48b49689524f70eed09dce651f310ad14  Razdor-translate.exe
+e88bbaf188ac30e4380176228f2e2d09a546109f833ef485afdbe74f64be69fb  razdor-translate-macos
+7bbe6077cd4949a3c2367e150c787cf2e918f057b72123dee0622bc30e2e019e  razdor.apk
+4f5faf431502a49e2f9fcd85b1a999bd1a975a2023c09e3f23b29a17e94e85e5  razdor.ipa
+```
+
 ### Исправлено
 
 - Время сохранений в списках теперь показывается по местному времени компьютера, а не по Гринвичу.
