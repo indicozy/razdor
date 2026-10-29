@@ -271,6 +271,75 @@ fn real_time(secs: u64) -> String {
     format!("{y}-{mo:02}-{d:02} {h:02}:{m:02}")
 }
 
+/// `real_time` of `secs` moved by `offset` seconds (the local zone's, see `local_offset`), never
+/// before 1970.
+fn local_real_time(secs: u64, offset: i64) -> String {
+    real_time(u64::try_from(secs as i64 + offset).unwrap_or(0))
+}
+
+/// The computer's clock minus UTC, in seconds, at the moment `secs` (daylight saving as it was
+/// then). The original shows the computer's local time (0x49c94c), not Greenwich time; 0 when
+/// the zone cannot be read.
+#[cfg(unix)]
+fn local_offset(secs: u64) -> i64 {
+    let t = secs as libc::time_t;
+    // SAFETY: `tm` is plain old data, zeroed before `localtime_r` fills it in.
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    if unsafe { libc::localtime_r(&t, &mut tm) }.is_null() {
+        return 0;
+    }
+    // A `c_long`: i64 on 64-bit targets (where the conversion is a no-op), i32 on 32-bit ones.
+    #[allow(clippy::useless_conversion)]
+    let off = i64::from(tm.tm_gmtoff);
+    off
+}
+
+/// The same as `local_offset` on Windows, through kernel32 (no extra crate): the UTC time as a
+/// FILETIME, its local SYSTEMTIME, and both back as FILETIMEs; the difference is the offset.
+#[cfg(windows)]
+fn local_offset(secs: u64) -> i64 {
+    use std::ffi::c_void;
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct SystemTime {
+        year: u16,
+        month: u16,
+        day_of_week: u16,
+        day: u16,
+        hour: u16,
+        minute: u16,
+        second: u16,
+        milliseconds: u16,
+    }
+
+    extern "system" {
+        fn FileTimeToSystemTime(file_time: *const u64, system_time: *mut SystemTime) -> i32;
+        fn SystemTimeToTzSpecificLocalTime(zone: *const c_void, utc: *const SystemTime, local: *mut SystemTime) -> i32;
+        fn SystemTimeToFileTime(system_time: *const SystemTime, file_time: *mut u64) -> i32;
+    }
+
+    // FILETIME: 100-ns ticks since 1601-01-01; the Unix epoch is 11 644 473 600 s after it.
+    let utc_ft = (secs + 11_644_473_600) * 10_000_000;
+    let (mut utc, mut local, mut local_ft) = (SystemTime::default(), SystemTime::default(), 0u64);
+    // SAFETY: every pointer is to a live local of the right type; a null zone means this computer's.
+    unsafe {
+        if FileTimeToSystemTime(&utc_ft, &mut utc) == 0
+            || SystemTimeToTzSpecificLocalTime(std::ptr::null(), &utc, &mut local) == 0
+            || SystemTimeToFileTime(&local, &mut local_ft) == 0
+        {
+            return 0;
+        }
+    }
+    (local_ft as i64 - utc_ft as i64) / 10_000_000
+}
+
+/// Any other target: UTC.
+#[cfg(not(any(unix, windows)))]
+fn local_offset(_secs: u64) -> i64 {
+    0
+}
+
 /// One row of the book: the save's name, its scenario and when it was saved.
 struct Row {
     name: String,
@@ -333,9 +402,12 @@ fn draw_pin(r: Rect, on: bool, hover: bool) {
     draw_circle(head.x, head.y, r.w * 0.22, c);
 }
 
-/// "2023 год, 1 месяц, 31 день, 13:01": when a file was saved, in the original's words.
+/// "2023 год, 1 месяц, 31 день, 13:01": when a file was saved, in the original's words, on the
+/// computer's local clock (0x49c94c).
 fn saved_label(secs: u64) -> String {
-    let t = real_time(secs);
+    // A snapshot shows its fixed UTC date whatever the machine's zone, so its pictures stay the same.
+    let offset = if crate::ui::clock::is_snapshot() { 0 } else { local_offset(secs) };
+    let t = local_real_time(secs, offset);
     let (date, clock) = t.split_once(' ').unwrap_or((&t, ""));
     let mut p = date.split('-');
     let (y, m, d) = (p.next().unwrap_or(""), p.next().unwrap_or(""), p.next().unwrap_or(""));
@@ -1470,6 +1542,24 @@ mod tests {
     fn real_time_labels() {
         assert_eq!(real_time(0), "1970-01-01 00:00");
         assert_eq!(real_time(1_790_000_000), "2026-09-21 14:13");
+    }
+
+    /// The local label is the UTC one moved by the offset, across midnight and back before 1970.
+    #[test]
+    fn local_real_time_moves_the_clock_by_the_offset() {
+        assert_eq!(local_real_time(1_790_000_000, 5 * 3600), "2026-09-21 19:13");
+        assert_eq!(local_real_time(1_790_000_000, 10 * 3600), "2026-09-22 00:13", "past midnight");
+        assert_eq!(local_real_time(1_790_000_000, -15 * 3600), "2026-09-20 23:13", "before midnight");
+        assert_eq!(local_real_time(0, -3600), "1970-01-01 00:00", "never before 1970");
+        assert_eq!(local_real_time(1_790_000_000, 0), real_time(1_790_000_000));
+    }
+
+    /// This computer's offset from UTC is a real zone (within ±14 h, whole quarter hours).
+    #[test]
+    fn the_local_offset_of_this_computer_is_a_real_zone() {
+        let off = local_offset(1_790_000_000);
+        assert!((-14 * 3600..=14 * 3600).contains(&off), "offset {off}");
+        assert_eq!(off % 900, 0, "zones are whole quarter hours: {off}");
     }
 
     #[test]
