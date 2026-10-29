@@ -28,15 +28,18 @@ KINDS = ["walk-step", "walk", "idle"]
 # `ai_move` is inside `armies` and `ai_plan` inside `ai_move` (both "of which", not parts).
 TIMED = ["tick", "terrain", "world", "fog", "minimap", "route", "look", "armies", "script", "day", "snap", "autosave",
          "ai_move", "ai_plan"]
+# The session slot's look (outside the tick, `Stage::Session`): a column of newer probe builds only,
+# so an older build's CSV (the A side of a comparison with the main branch) reads it as zero.
+OPTIONAL_TIMED = ["session"]
 TICK_PARTS = ["route", "look", "armies", "script", "day", "snap"]
 # The table's rows per kind: the timed columns and three that are worked out here: `tick-rest` (the
 # tick less its parts), `armies-other` (armies less ai_move: the non-managed armies and the midnights)
 # and `rest` (the work less tick, world, fog, minimap and autosave). All clamped at zero, as the
 # probe's summary clamps them (frame_probe.rs: tick_rest_ms, rest_ms).
 STAGES = ["tick", "route", "look", "armies", "ai_move", "ai_plan", "armies-other", "script", "day", "snap", "tick-rest",
-          "terrain", "world", "fog", "minimap", "autosave", "rest"]
+          "terrain", "world", "fog", "minimap", "autosave", "session", "rest"]
 # The parts of a walk-step frame's work that add up to it (world includes terrain).
-SHARE_PARTS = ["route", "look", "armies", "script", "day", "snap", "tick-rest", "world", "fog", "minimap", "autosave", "rest"]
+SHARE_PARTS = ["route", "look", "armies", "script", "day", "snap", "tick-rest", "world", "fog", "minimap", "autosave", "session", "rest"]
 # Of the armies part: ai_move (ai_plan inside it) and the rest of the armies (armies-other).
 ARMIES_PARTS = ["ai_move", "ai_plan", "armies-other"]
 # The phone's work p50 the desktop run is scaled to (ms): k = PHONE_WORK_P50 / A's walk work p50.
@@ -207,9 +210,10 @@ def read_rows(path):
                 "rebuilds": int(r["rebuilds"]),
             }
             row.update({c: float(r[c]) for c in TIMED})
+            row.update({c: float(r[c]) if c in have else 0.0 for c in OPTIONAL_TIMED})
             row["tick-rest"] = max(0.0, row["tick"] - sum(row[p] for p in TICK_PARTS))
             row["armies-other"] = max(0.0, row["armies"] - row["ai_move"])
-            row["rest"] =max(0.0, row["work_ms"] - (row["tick"] + row["world"] + row["fog"] + row["minimap"] + row["autosave"]))
+            row["rest"] = max(0.0, row["work_ms"] - (row["tick"] + row["world"] + row["fog"] + row["minimap"] + row["autosave"] + row["session"]))
             out.append(row)
     return out
 

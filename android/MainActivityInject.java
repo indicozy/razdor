@@ -36,6 +36,10 @@ import java.net.URL;
 
 //% MAIN_ACTIVITY_BODY
 
+// The Rust side of the session slot (src/ui/android.rs): written when the activity pauses
+// (MAIN_ACTIVITY_ON_PAUSE below). Runs on the activity's UI thread; no game work is done here.
+private static native void razdorOnPause();
+
 // Razdor's self-update on Android (src/update/phone.rs calls these through the JNI, on the
 // update's own thread; the game never waits on them). Each returns "" when it worked, else why
 // not. The download is plain HttpURLConnection (the phone has no curl); the install hands the
@@ -444,5 +448,13 @@ setVolumeControlStream(AudioManager.STREAM_MUSIC);
 //% MAIN_ACTIVITY_ON_ACTIVITY_RESULT
 
 razdorOnActivityResult(requestCode, resultCode, data);
+
+//% END
+
+//% MAIN_ACTIVITY_ON_PAUSE
+
+// The session slot is written now, while the activity still runs: the frame loop stops in the
+// background, so the Rust side (src/ui/android.rs, razdorOnPause) cannot write it on a frame.
+razdorOnPause();
 
 //% END

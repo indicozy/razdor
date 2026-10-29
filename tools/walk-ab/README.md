@@ -39,7 +39,8 @@ In `--out`: `runs/<A|B>-<n>/` (`frames.csv`, `razdor.log`, `razdor-play.log`, `s
   and, inside it, `ai_plan` (the replans); `armies-other` is armies less `ai_move` (the non-managed
   armies and the midnights). `ai_plan` is "of which", never added to a part. `tick-rest`,
   `armies-other` and `rest` are worked out here from the CSV, clamped at zero. A CSV without these
-  columns (an older probe build) is refused.
+  columns (an older probe build) is refused. `session` (the session slot's look, `Stage::Session`,
+  outside the tick) is optional: a CSV without it reads as zero, so an older build compares fine.
 - Where the walk-step work goes: each part's total over all walk-step frames of all runs, its share
   of the work, and the sum of the parts (it equals the work when nothing is clamped).
 - The worst five walk-step frames, with their stage split and `phone~` (work times `k`).

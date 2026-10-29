@@ -157,6 +157,12 @@ async fn main() {
     razdor::diag::step("loading the art and sounds");
     let mut app = App::new(Assets::load(content.clone()).await, content);
     razdor::diag::step("started");
+    // The session slot is written when the game is ended by a signal (the desktop) or when the
+    // app goes to the background (iOS; Android's pause is a JNI call, `ui::android`).
+    #[cfg(all(unix, not(any(target_os = "android", target_os = "ios"))))]
+    ui::session::install_exit_hooks();
+    #[cfg(target_os = "ios")]
+    ui::ios::observe_app_state();
     // `--editor`: start in the map editor.
     if std::env::args().skip(1).any(|a| a == "--editor") {
         app.open_editor();

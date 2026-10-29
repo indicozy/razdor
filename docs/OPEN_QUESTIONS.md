@@ -8,14 +8,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
-- **The session slot on Android: write it when the app is backgrounded** (2026-10-29, the session
-  resume feature, `docs/flows/saves.md` «Session slot»). The slot is written every 30 s of play,
-  at battle start and when the window loses focus, so a phone the OS kills in the background
-  loses up to 30 s. Razdor's frame loop does not run once the surface is gone, so nothing can
-  write at that moment. A JNI hook in miniquad's `MainActivity` `onPause` could call into Razdor
-  and write the slot there (the game state lives on the frame thread: it would take a copy made
-  at the last frame, or a flag the next frame answers). Not done: it needs the NDK side and a
-  phone to test on.
 - **The map info windows: fade-in and empty-cell icons** (2026-10-18, a player's report; split
   out 2026-10-28). Not done on main: the original's 500 ms fade-in (0x4ca728) and the hostile
   style's empty-cell icons (ae2774).
@@ -461,6 +453,12 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   button's own size.
 
 ## Settled
+
+- **The session slot on Android: written when the app is backgrounded** (2026-10-29, the session
+  pause hooks, `docs/flows/saves.md` «Session slot»). `MainActivity.onPause` calls `razdorOnPause`
+  (the JNI export in `ui/android.rs`), which writes the newest state of the session at once
+  (`ui::session::flush_now`). The same hook serves iOS's background notification and the desktop's
+  SIGTERM and SIGHUP. Not tested on a device yet: the APK build and the symbol are checked, not a phone.
 
 - **dt-original: hall list ink not ported** (2026-10-21, with 56dd8324; dt-original dbbb2b00 ports
   its spec lines only). The 16-bit subtract of the hall list's names (`subtract16.rs`, `hall_ink.rs`) is

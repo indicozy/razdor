@@ -50,6 +50,8 @@ pub mod unit_sheet;
 pub mod update_view;
 #[cfg(target_os = "android")]
 pub mod android;
+#[cfg(target_os = "ios")]
+pub mod ios;
 pub mod mobile;
 pub mod widgets;
 pub mod window_layout;
@@ -1407,7 +1409,7 @@ impl App {
         // The session slot (`session`): kept fresh while the game is played; no game on screen
         // (the main menu, the editor) ends the session.
         let session_ok = quick_save_ok && !self.test_play && !matches!(self.screen, Screen::Battle(_) | Screen::CustomBattle(_) | Screen::Editor);
-        self.session.tick(self.game.as_ref(), session_ok, crate::ui::clock::now());
+        razdor::frame_probe::time(razdor::frame_probe::Stage::Session, || self.session.tick(self.game.as_ref(), session_ok, crate::ui::clock::now()));
         if let Some(path) = self.pending_load.take() {
             self.load(&path);
             return;

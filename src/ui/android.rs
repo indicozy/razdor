@@ -535,3 +535,12 @@ pub fn read_safe_insets() -> Option<(f32, f32, f32, f32)> {
         Some(razdor::platform::safe_margins((l as f32, t as f32, r as f32, b as f32), corner))
     }
 }
+
+/// `MainActivity.razdorOnPause` (the native method of `android/MainActivityInject.java`, called
+/// from `onPause`). The app is going to the background, and the frame loop does not run there:
+/// the newest state of the session is written now, on the activity's UI thread, not on a frame.
+/// Declared in the Java inject; the name is the JNI name of the class in `Cargo.toml`'s package.
+#[no_mangle]
+pub extern "C" fn Java_io_github_indicozy_razdor_MainActivity_razdorOnPause(_env: *mut sys::JNIEnv, _class: sys::jclass) {
+    super::session::flush_now();
+}

@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 
 /// The per-frame CSV's columns (`RAZDOR_PROFILE_FRAMES`): the times in ms, `tick` the game's
 /// tick, `world` the map with `terrain` inside it, `rebuilds` the texture rebuilds.
-pub const CSV_HEADER: &str = "frame,kind,work_ms,total_ms,tick,terrain,world,fog,minimap,route,look,armies,script,day,snap,autosave,ai_move,ai_plan,rebuilds";
+pub const CSV_HEADER: &str = "frame,kind,work_ms,total_ms,tick,terrain,world,fog,minimap,route,look,armies,script,day,snap,autosave,session,ai_move,ai_plan,rebuilds";
 
 /// The parts of a frame that are timed.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -56,6 +56,9 @@ pub enum Stage {
     Snap,
     /// The autosave the noon report asks for. It runs outside the tick (in the UI's frame).
     Autosave,
+    /// The session slot's look at the game (`ui::session::Keeper::tick`). It runs outside the
+    /// tick (in the UI's frame).
+    Session,
     /// The AI armies' moves and plans (`ai_move`, inside [`Stage::Armies`]). Includes
     /// [`Stage::AiPlan`].
     AiMove,
@@ -64,7 +67,7 @@ pub enum Stage {
 }
 
 impl Stage {
-    pub const COUNT: usize = 14;
+    pub const COUNT: usize = 15;
 }
 
 /// What the frame was: the map with the hero walking, or not.
@@ -230,7 +233,7 @@ fn kind_name(kind: Kind) -> &'static str {
 pub fn csv_row(frame: u64, s: &Sample) -> String {
     let stage = |st: Stage| s.stage_ms[st as usize];
     format!(
-        "{frame},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{}",
+        "{frame},{},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{}",
         kind_name(s.kind),
         s.work_ms,
         s.total_ms,
@@ -246,6 +249,7 @@ pub fn csv_row(frame: u64, s: &Sample) -> String {
         stage(Stage::Day),
         stage(Stage::Snap),
         stage(Stage::Autosave),
+        stage(Stage::Session),
         stage(Stage::AiMove),
         stage(Stage::AiPlan),
         s.rebuilds,
@@ -346,13 +350,14 @@ fn tick_rest_ms(s: &Sample) -> f32 {
 }
 
 /// What the work spends outside the timed stages, clamped at zero. The tick counts as one stage
-/// (its parts are inside it); the autosave is outside the tick.
+/// (its parts are inside it); the autosave and the session's look are outside the tick.
 fn rest_ms(s: &Sample) -> f32 {
     let timed = s.stage_ms[Stage::Tick as usize]
         + s.stage_ms[Stage::World as usize]
         + s.stage_ms[Stage::Fog as usize]
         + s.stage_ms[Stage::Minimap as usize]
-        + s.stage_ms[Stage::Autosave as usize];
+        + s.stage_ms[Stage::Autosave as usize]
+        + s.stage_ms[Stage::Session as usize];
     (s.work_ms - timed).max(0.0)
 }
 
@@ -475,11 +480,11 @@ mod tests {
             Kind::WalkStep,
             3.0,
             4.25,
-            stages(&[(Stage::Tick, 1.0), (Stage::Terrain, 0.5), (Stage::World, 2.0), (Stage::Fog, 0.25), (Stage::Minimap, 0.125), (Stage::Route, 0.5), (Stage::Look, 0.25), (Stage::Armies, 0.75), (Stage::Autosave, 0.125), (Stage::AiMove, 0.5), (Stage::AiPlan, 0.25)]),
+            stages(&[(Stage::Tick, 1.0), (Stage::Terrain, 0.5), (Stage::World, 2.0), (Stage::Fog, 0.25), (Stage::Minimap, 0.125), (Stage::Route, 0.5), (Stage::Look, 0.25), (Stage::Armies, 0.75), (Stage::Autosave, 0.125), (Stage::Session, 0.25), (Stage::AiMove, 0.5), (Stage::AiPlan, 0.25)]),
         );
         step.rebuilds = 2;
         let row = csv_row(7, &step);
-        assert_eq!(row, "7,walk-step,3.000,4.250,1.000,0.500,2.000,0.250,0.125,0.500,0.250,0.750,0.000,0.000,0.000,0.125,0.500,0.250,2");
+        assert_eq!(row, "7,walk-step,3.000,4.250,1.000,0.500,2.000,0.250,0.125,0.500,0.250,0.750,0.000,0.000,0.000,0.125,0.250,0.500,0.250,2");
         assert_eq!(row.split(',').count(), CSV_HEADER.split(',').count());
         let other = sample(Kind::Other, 0.5, 1.0, [0.0; Stage::COUNT]);
         assert!(csv_row(1, &other).starts_with("1,other,0.500,1.000,0.000,"));

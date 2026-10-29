@@ -90,13 +90,39 @@ decision, 2026-10-29; `ui::session`, `save::SESSION`):
 - The marker says a session is under way. It is removed when the game is left (the game
   is gone: the main menu, the editor, a custom battle), when the app closes (`App::shutdown`,
   after the pending writes), and at the launch.
-- When it is written: at battle start (`saves::battle`, with the foe taken off, the same
-  moment as the battle autosave); then every 30 s of play (`Keeper::tick`, `EVERY`) when the
-  game has changed (the hash is of the JSON from the `"game"` field on, so the meta's time
-  alone does not count), and at once when the window loses its focus. Only where F5 may
-  fire on the map (the quick save's guard of the frame), and never in a test play or a battle.
-- The writes run on one writer thread, in the order sent (`Write`, `End`, `Flush`); the
-  bzip2 packing is off the frame loop.
+- When it is written: the newest state is kept in `ui::session` (`LATEST`). It is looked at on a rest
+  frame only (the hero stands and no step's window is playing), at most every 2 s of play, so a walk
+  costs nothing and the first rest frame after a walk takes the look (the last stop's state). A look
+  serialises only when a cheap key changed (the game clock, the hero's place and purse, the army's
+  hit points, experience and levels; no allocation), and every 30 s regardless.
+  Battle start (`saves::battle`, with the foe taken off) sets it and writes it at once. The slot is
+  written every 30 s of play when the game changed (the hash is of the JSON from the `"game"` field on,
+  so the meta's time alone does not count), and when the window loses its focus, even in a battle
+  (the last savable state). Only where F5 may fire on the map (the quick save's guard of the frame),
+  and never in a test play or a battle.
+- Leaving the app writes at once (`ui::session::flush_now`, callable from any thread): Android
+  `onPause` (the Java inject `android/MainActivityInject.java` declares `razdorOnPause` and calls it
+  from `MAIN_ACTIVITY_ON_PAUSE`; the export is `Java_io_github_indicozy_razdor_MainActivity_razdorOnPause`
+  in `ui/android.rs`); iOS's `UIApplicationDidEnterBackgroundNotification` and
+  `UIApplicationWillTerminateNotification` (`ui/ios.rs`, an observer registered at start); the
+  desktop's SIGTERM and SIGHUP (`install_exit_hooks`: the handler only stores the signal, a watcher
+  thread writes the slot and `_exit`s with 128 + the signal, the marker stays so the next launch
+  offers to continue; SIGINT is left alone). Windows: nothing extra, since the focus loss already
+  writes and miniquad does not deliver the logoff or shutdown messages. The frame loop does not run
+  in the background, so these hooks are the only writes at the moment of leaving.
+- Locks: `WRITE_LOCK` is held around every write of the slot and every removal of the marker (the
+  writer thread and the hooks), and taken before `LATEST` and `WRITTEN`. `WRITTEN` is the hash on
+  disk, so a state already written is not written again. When the session ends (the game is left,
+  `end_session`), `LATEST` and `WRITTEN` are dropped under the lock before the marker goes: a hook
+  after that writes nothing and never brings the marker back.
+- Cost: the look is the frame probe's `Stage::Session` (outside the tick; the CSV's `session`
+  column). A walk frame does no look and no key computation (`session` is 0 on walk-step frames);
+  a rest frame between looks does a time check and the focus check only. A look computes the
+  cheap key (no allocation); the JSON and its hash run only when the key changed, or every 30 s.
+  Measured on CPUs 8-19: the JSON and hash take 0.5 ms on the walk save, 1.3 to 1.7 ms on a fresh
+  largest community map (Другой берег, community-update), and 0.7 to 0.9 ms on Evolution's.
+- The writes run on one writer thread, in the order sent (`Write` writes `LATEST` when it is not on
+  disk yet, `End`, `Flush`); the bzip2 packing is off the frame loop.
 - The launch: when the marker is still there, the app ended without a proper exit. The
   marker goes, and when the slot exists a question «Продолжить игру?» (the map's title and
   the game date) is the first window. Yes loads the slot (a failed load is told in a
@@ -104,8 +130,6 @@ decision, 2026-10-29; `ui::session`, `save::SESSION`):
   game (the scenario questions still take any key as Yes, `widgets::answer_of`). It is not a
   scenario question (`Dialog::resume`), and it is looked for again once a phone's install
   is adopted (`App::session_checked`).
-- No Android `onPause` hook: once the surface is gone the frame loop does not run, so the
-  30 s timer bounds what can be lost. See `docs/OPEN_QUESTIONS.md`.
 
 ## Loading
 
