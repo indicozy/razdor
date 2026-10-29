@@ -39,7 +39,7 @@ If the game was closed without a proper exit (crash, power loss, swiping the app
 "Last session" is located in the autosaves tab within the loading window. It can be loaded manually at any time. This save does not occupy one of the 30 slots and is available even if autosaves are disabled.
 :::
 
-If the game closed during a battle, "Last session" stores the moment before the battle: after loading, the hero will be standing on the map next to the enemy, and the battle will restart upon your attack. Open windows (town or hero) are not restored — the game will continue on the map. On mobile devices, a loss of the last ~30 seconds of gameplay is possible.
+If the game closed during a battle, "Last session" stores the moment before the battle: after loading, the hero will be standing on the map next to the enemy, and the battle will restart upon your attack. Open windows (town or hero) are not restored — the game will continue on the map. When the game goes to the background (on a phone) or the computer shuts down, "Last session" is written at once; if the hero was walking at that moment, the game continues from where he last stopped.
 
 ## Where saves are kept
 
