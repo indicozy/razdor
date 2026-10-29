@@ -202,6 +202,20 @@ pub fn autosave(game: &Game, name: &str, in_battle: bool) {
     }
 }
 
+/// The noon report's autosave (Razdor's): the frame takes the game's JSON, and a writer thread
+/// packs and writes it ([`save::write_autosave_in_background`]). The same file and name as
+/// [`autosave`], with the same rotation.
+pub fn autosave_at_noon(game: &Game, name: &str) {
+    if !autosaves_on(super::chrome::has_texts().then(|| super::chrome::options_value("OptValue8")).flatten().as_deref()) {
+        return;
+    }
+    save::finish_pending_writes();
+    let Some(dir) = save::games_dir() else { return };
+    if let Err(e) = save::write_autosave_in_background(dir, name, game) {
+        razdor::diag!("autosave: {e}");
+    }
+}
+
 /// Whether autosaves are written, by the install's `[Options] OptValue8` (`None`: no install
 /// texts, or no such key): an install that sets it follows it as the original does (on when it
 /// reads 1, 0x4b7410); without it Razdor autosaves, as it always did before the parity pass.

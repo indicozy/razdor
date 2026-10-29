@@ -102,6 +102,8 @@ fn quit_after() -> Option<u64> {
 fn exit_now(app: &mut App) -> ! {
     razdor::diag::step("quitting");
     razdor::frame_probe::flush();
+    // The noon autosave still being written on its thread is finished first (the file is whole).
+    razdor::rules::save::finish_pending_writes();
     app.shutdown();
     // "Restart now" after an update: the new program, once the lock is free.
     release_instance();

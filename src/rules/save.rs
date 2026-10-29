@@ -314,9 +314,14 @@ struct MetaIn {
 /// whose map bytes the game holds and that hash to the scenario's, the map's bytes
 /// (base64): the save loads without the map file in the install (saves-data §12.2).
 pub fn encode(meta: &SaveMeta, game: &Game) -> Result<Vec<u8>, SaveError> {
+    pack(&encode_json(meta, game)?)
+}
+
+/// The save's JSON, before [`pack`]: the cheap part of [`encode`] (about a millisecond for a
+/// map game), which the noon autosave does on the frame while the packing runs on its thread.
+fn encode_json(meta: &SaveMeta, game: &Game) -> Result<Vec<u8>, SaveError> {
     let map = embedded_map(game).map(base64_encode);
-    let json = serde_json::to_vec(&SaveOut { meta, game, map }).map_err(|e| SaveError::Corrupt(e.to_string()))?;
-    pack(&json)
+    serde_json::to_vec(&SaveOut { meta, game, map }).map_err(|e| SaveError::Corrupt(e.to_string()))
 }
 
 /// The map bytes a save of `game` carries: those of its map, if they hash to the stored hash.
@@ -570,6 +575,7 @@ impl ListedSave {
 /// first. The metas known already are filled in; the others are asked of the reader threads
 /// ([`want_metas`]).
 pub fn list_files(dir: &Path, kind: SaveKind) -> Vec<ListedSave> {
+    finish_pending_writes();
     let folder = kind_dir(dir, kind);
     let pins = pins(&folder);
     let mut v: Vec<ListedSave> = files_of(dir, kind)
@@ -667,11 +673,62 @@ pub fn write(dir: &Path, kind: SaveKind, name: &str, game: &Game) -> Result<Path
 /// match a new one is made while there are fewer than [`AUTOSAVES_KEPT`], else the last of
 /// the list, the oldest, is overwritten. Pinned autosaves are left out of all of it.
 pub fn write_autosave(dir: &Path, name: &str, game: &Game, in_battle: bool) -> Result<PathBuf, SaveError> {
+    finish_pending_writes();
+    let meta = meta_of(game, SaveKind::Auto, name)?;
+    let bytes = encode(&meta, game)?;
+    store_autosave(dir, &meta, &bytes, in_battle)
+}
+
+/// The noon autosave, written on a writer thread (Razdor's): the frame only takes the save's
+/// JSON ([`encode_json`]); the thread packs it, rotates the autosaves as [`write_autosave`]
+/// does and writes the file, the same bytes the synchronous path writes. The next autosave
+/// joins the writer first, as do [`finish_pending_writes`] (before the game quits, before a
+/// save is loaded or the save folder listed) and the listings.
+pub fn write_autosave_in_background(dir: PathBuf, name: &str, game: &Game) -> Result<(), SaveError> {
+    finish_pending_writes();
+    let meta = meta_of(game, SaveKind::Auto, name)?;
+    let json = encode_json(&meta, game)?;
+    spawn_autosave(dir, meta, json);
+    Ok(())
+}
+
+/// The writer thread of [`write_autosave_in_background`]; its errors are logged, as the
+/// frame's autosave logs its own.
+fn spawn_autosave(dir: PathBuf, meta: SaveMeta, json: Vec<u8>) {
+    let writer = std::thread::Builder::new().name("autosave".into()).spawn(move || {
+        if let Err(e) = pack(&json).and_then(|bytes| store_autosave(&dir, &meta, &bytes, false)) {
+            crate::diag!("autosave: {e}");
+        }
+    });
+    match writer {
+        Ok(handle) => *PENDING_WRITE.lock().unwrap_or_else(|e| e.into_inner()) = Some(handle),
+        Err(e) => crate::diag!("autosave: {e}"),
+    }
+}
+
+/// The autosave writer in progress, if any (joined by [`finish_pending_writes`]).
+static PENDING_WRITE: std::sync::Mutex<Option<std::thread::JoinHandle<()>>> = std::sync::Mutex::new(None);
+
+/// Waits for the background autosave in progress, if any (Razdor's). Called before the game
+/// quits, before a save is loaded and before the save folder is listed, so each sees every
+/// autosave written. With nothing pending it returns at once.
+pub fn finish_pending_writes() {
+    let pending = PENDING_WRITE.lock().unwrap_or_else(|e| e.into_inner()).take();
+    if let Some(handle) = pending {
+        if handle.join().is_err() {
+            crate::diag!("autosave: the writer thread panicked");
+        }
+    }
+}
+
+/// Stores a packed autosave (`bytes`) as [`write_autosave`] picks its slot: the rotation reads
+/// the autosaves of `dir`. Runs on the writer thread or the frame, never both at once.
+fn store_autosave(dir: &Path, meta: &SaveMeta, bytes: &[u8], in_battle: bool) -> Result<PathBuf, SaveError> {
     let folder = kind_dir(dir, SaveKind::Auto);
     std::fs::create_dir_all(&folder)?;
     let saves: Vec<SaveEntry> = by_time(dir, SaveKind::Auto).into_iter().filter(|e| !e.pinned).collect();
-    let same = |e: &&SaveEntry| e.meta.name == name && (in_battle || e.meta.title == game.world.title);
-    let reused = saves.iter().filter(same).last().or_else(|| saves.get(AUTOSAVES_KEPT - 1));
+    let same = |e: &&SaveEntry| e.meta.name == meta.name && (in_battle || e.meta.title == meta.title);
+    let reused = saves.iter().filter(same).next_back().or_else(|| saves.get(AUTOSAVES_KEPT - 1));
     let path = match reused {
         Some(e) => e.path.clone(),
         None => {
@@ -680,7 +737,7 @@ pub fn write_autosave(dir: &Path, name: &str, game: &Game, in_battle: bool) -> R
             (0..).map(|k| folder.join(format!("{stamp:015}-{k:02}.{EXTENSION}"))).find(|p| !p.exists()).expect("a free name")
         }
     };
-    put(&path, SaveKind::Auto, name, game)
+    put_bytes(&path, meta, bytes)
 }
 
 /// Writes the save file `path`: aside first, then moved into place, so a crash never leaves
@@ -688,11 +745,16 @@ pub fn write_autosave(dir: &Path, name: &str, game: &Game, in_battle: bool) -> R
 fn put(path: &Path, kind: SaveKind, name: &str, game: &Game) -> Result<PathBuf, SaveError> {
     let meta = meta_of(game, kind, name)?;
     let bytes = encode(&meta, game)?;
+    put_bytes(path, &meta, &bytes)
+}
+
+/// Writes the packed save `bytes` of `meta` to `path` (see [`put`]).
+fn put_bytes(path: &Path, meta: &SaveMeta, bytes: &[u8]) -> Result<PathBuf, SaveError> {
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, bytes)?;
     std::fs::rename(&tmp, path)?;
     if let Ok(stamp) = file_stamp(path) {
-        remember_meta(path, stamp, &meta);
+        remember_meta(path, stamp, meta);
     }
     Ok(path.to_path_buf())
 }
@@ -731,6 +793,7 @@ pub fn quick_save(dir: &Path, game: &Game) -> Result<PathBuf, SaveError> {
 
 /// The newest quick save's file (F9), if there is one.
 pub fn quick_save_path(dir: &Path) -> Option<PathBuf> {
+    finish_pending_writes();
     quick_saves(dir).into_iter().next().map(|e| e.path)
 }
 
@@ -745,6 +808,7 @@ pub struct SaveEntry {
 
 /// Save files of one kind, pinned first, then newest first. Unreadable files are skipped.
 pub fn list(dir: &Path, kind: SaveKind) -> Vec<SaveEntry> {
+    finish_pending_writes();
     let mut v = by_time(dir, kind);
     v.sort_by_key(|e| !e.pinned);
     v
@@ -843,6 +907,7 @@ pub struct Install<'a> {
 
 /// Reads and restores a save file (see [`restore`]).
 pub fn load(path: &Path, demo: Arc<Content>, install: Option<&Install>) -> Result<Game, SaveError> {
+    finish_pending_writes();
     let (meta, game) = decode(&std::fs::read(path)?)?;
     restore(&meta, game, demo, install)
 }
@@ -1809,5 +1874,71 @@ pub(crate) mod tests {
             g.wait(12);
         }
         assert_eq!(json(&a), json(&b), "the loaded game goes on like the original");
+    }
+
+    /// The autosave file's game as JSON, with the time it was saved set aside (the one value
+    /// the two paths read off the clock).
+    fn autosave_json_without_time(path: &Path) -> Vec<u8> {
+        let mut v: serde_json::Value = serde_json::from_slice(&unpack(&std::fs::read(path).unwrap()).unwrap()).unwrap();
+        v["meta"]["saved_at"] = serde_json::Value::from(0);
+        serde_json::to_vec(&v).unwrap()
+    }
+
+    /// The noon autosave's writer thread writes the same bytes as the synchronous path for the
+    /// same meta: the file is the same packed save, byte for byte.
+    #[test]
+    fn a_background_autosave_writes_the_bytes_of_the_synchronous_one() {
+        let c = demo();
+        let mut g = Game::new(c.clone(), HeroClass::Archmage);
+        g.set_destination(g.world.locations[g.world.index_of("Millbrook")].tile);
+        walk(&mut g, 200);
+        let (dir_sync, dir_bg) = (temp_dir("autosave-sync"), temp_dir("autosave-bg"));
+        let meta = meta_of(&g, SaveKind::Auto, "1204.06.03, 12 h").unwrap();
+        let sync_bytes = encode(&meta, &g).unwrap();
+        let sync_path = store_autosave(&dir_sync, &meta, &sync_bytes, false).unwrap();
+        spawn_autosave(dir_bg.clone(), meta.clone(), encode_json(&meta, &g).unwrap());
+        finish_pending_writes();
+        // The names are stamped with the time: the one file of each folder is compared.
+        let bg_files = files_of(&dir_bg, SaveKind::Auto);
+        assert_eq!(bg_files.len(), 1);
+        assert_eq!(std::fs::read(&sync_path).unwrap(), sync_bytes);
+        assert_eq!(std::fs::read(&bg_files[0].0).unwrap(), sync_bytes, "the writer thread's file is the synchronous file");
+        let _ = std::fs::remove_dir_all(&dir_sync);
+        let _ = std::fs::remove_dir_all(&dir_bg);
+    }
+
+    /// The public pair: the noon autosave on its thread and the synchronous autosave save the
+    /// same game (the time they were saved aside), each as a file of the same name.
+    #[test]
+    fn the_background_autosave_is_the_same_save_as_the_synchronous_one() {
+        let c = demo();
+        let mut g = Game::new(c.clone(), HeroClass::Knight);
+        walk(&mut g, 60);
+        let (dir_sync, dir_bg) = (temp_dir("autosave-same-sync"), temp_dir("autosave-same-bg"));
+        let sync_path = write_autosave(&dir_sync, "1204.06.03, 12 h", &g, false).unwrap();
+        write_autosave_in_background(dir_bg.clone(), "1204.06.03, 12 h", &g).unwrap();
+        finish_pending_writes();
+        let listed = list(&dir_bg, SaveKind::Auto);
+        assert_eq!(listed.len(), 1, "the writer's file is listed once it is written");
+        assert_eq!(listed[0].meta.name, "1204.06.03, 12 h");
+        assert_eq!(autosave_json_without_time(&sync_path), autosave_json_without_time(&listed[0].path));
+        let _ = std::fs::remove_dir_all(&dir_sync);
+        let _ = std::fs::remove_dir_all(&dir_bg);
+    }
+
+    /// The listing and the next autosave wait for the writer: its file is listed at once, and
+    /// the autosaves that follow rotate as they would have synchronously.
+    #[test]
+    fn the_listing_and_the_next_autosave_wait_for_the_writer() {
+        let g = Game::new(demo(), HeroClass::Archmage);
+        let dir = temp_dir("autosave-join");
+        write_autosave_in_background(dir.clone(), "first", &g).unwrap();
+        assert_eq!(list_files(&dir, SaveKind::Auto).len(), 1, "the listing joins the writer");
+        write_autosave_in_background(dir.clone(), "second", &g).unwrap();
+        write_autosave(&dir, "third", &g, false).unwrap();
+        finish_pending_writes();
+        finish_pending_writes();
+        assert_eq!(list(&dir, SaveKind::Auto).len(), 3, "each autosave kept under its own name");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

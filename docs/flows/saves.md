@@ -60,6 +60,15 @@ put(): save::meta_of → save::encode (serde_json + BzEncoder) → write .tmp �
   fight with the foe taken off, so loading it puts the hero next to the enemy) and one at
   the noon report (`Game::autosave_due`, named by `save::date_name`). The install's
   `OptValue8` can turn them off (`autosaves_on`).
+- The noon autosave is written on a background thread (Razdor's; `saves::autosave_at_noon`,
+  `save::write_autosave_in_background`). The frame takes the save's meta and its JSON
+  (`encode_json`, about a millisecond); the thread (`spawn_autosave`) packs it (bzip2, the
+  most of the cost), rotates the autosaves as `write_autosave` does (`store_autosave`) and
+  writes the file. The file is the same bytes the synchronous path writes. The writer is held
+  in `PENDING_WRITE`: `finish_pending_writes` joins it. It is joined before the next
+  autosave (battle or noon), before the game quits (`exit_now`), before a save is loaded
+  (`save::load`) and before a folder is listed (`list_files`, `list`, `quick_save_path`).
+  The battle autosave stays synchronous.
 - «Рестарт» of a battle keeps the encoded bytes of that moment in
   `BattleView::restart_state`, not a file. A save holds no AI level (`Game::improved_ai`,
   `max_ai` are the settings'): `App::restart_battle` and `App::load` call
