@@ -46,9 +46,19 @@ fn cached(cache: &'static razdor::local::Local<RefCell<Option<Cached>>>, key: u6
         if c.as_ref().is_none_or(|c| c.key != key) {
             razdor::frame_probe::tex_rebuilt();
             let (w, h, rgba) = make();
-            let tex = Texture2D::from_rgba8(w, h, &rgba);
-            tex.set_filter(filter);
-            *c = Some(Cached { key, tex });
+            // The same size: the texture is rewritten in place, not a new GPU texture per
+            // change of the key (its filter is already set).
+            match c.as_mut().filter(|old| old.tex.width() == f32::from(w) && old.tex.height() == f32::from(h)) {
+                Some(old) => {
+                    old.tex.update_from_bytes(u32::from(w), u32::from(h), &rgba);
+                    old.key = key;
+                }
+                None => {
+                    let tex = Texture2D::from_rgba8(w, h, &rgba);
+                    tex.set_filter(filter);
+                    *c = Some(Cached { key, tex });
+                }
+            }
         }
         c.as_ref().unwrap().tex.clone()
     })

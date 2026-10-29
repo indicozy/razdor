@@ -1271,17 +1271,26 @@ fn draw_leaning(texture: &Texture2D, src: Rect, at: Vec2, size: Vec2, lean: f32)
     let (tw, th) = (texture.width(), texture.height());
     let (u0, v0, u1, v1) = (src.x / tw, src.y / th, (src.x + src.w) / tw, (src.y + src.h) / th);
     let vertex = |x: f32, y: f32, u: f32, v: f32| Vertex::new(x, y, 0.0, u, v, WHITE);
-    let mesh = Mesh {
-        vertices: vec![
+    // One quad mesh, reused by every swaying tree (its vertex buffer keeps its capacity).
+    LEAN_MESH.with(|m| {
+        let mut m = m.borrow_mut();
+        m.vertices.clear();
+        m.vertices.extend([
             vertex(at.x + lean, at.y, u0, v0),
             vertex(at.x + size.x + lean, at.y, u1, v0),
             vertex(at.x + size.x, at.y + size.y, u1, v1),
             vertex(at.x, at.y + size.y, u0, v1),
-        ],
-        indices: vec![0, 1, 2, 0, 2, 3],
-        texture: Some(texture.clone()),
-    };
-    draw_mesh(&mesh);
+        ]);
+        m.texture = Some(texture.clone());
+        draw_mesh(&m);
+    });
+}
+
+local! {
+    /// The swaying trees' quad (`draw_leaning`): indices fixed, vertices and texture refilled.
+    static LEAN_MESH: std::cell::RefCell<Mesh> = std::cell::RefCell::new(Mesh { vertices: Vec::new(), indices: vec![0, 1, 2, 0, 2, 3], texture: None });
+    /// The map's painter's list (`draw_world`): cleared and refilled each frame.
+    static WORLD_ITEMS: std::cell::RefCell<Vec<(i64, Drawable)>> = std::cell::RefCell::new(Vec::new());
 }
 
 fn draw_object(o: &Decoration, art: Option<&DtArt>, cam: &Camera) {
@@ -1652,7 +1661,9 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
     let ((c0, c1), (r0, r1)) = cam.visible(map);
     // Sprites stand on their cell and reach up to ~8 cells above it.
     let (below, side) = (10, 8);
-    let mut items: Vec<(i64, Drawable)> = Vec::new();
+    // The list is the thread's buffer taken for this frame (its capacity is kept).
+    let mut items = WORLD_ITEMS.with(|c| std::mem::take(&mut *c.borrow_mut()));
+    items.clear();
     let fog = &game.fog;
     // The original (0x4c8864) draws the hills of classes 1-3 in a pass of their own before
     // anything else, so they lie under every tree, mountain, building and army, the ones
@@ -1754,6 +1765,8 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
             }
         }
     }
+    items.clear();
+    WORLD_ITEMS.with(|c| *c.borrow_mut() = items);
 }
 
 /// The route being walked, as the original draws it (0x49e520): a white arrow on every cell
