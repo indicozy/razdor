@@ -49,9 +49,23 @@ The texts come from the text probe (`RAZDOR_TEXT_PROBE`), the targets from the t
 `src/ui/widgets.rs`).
 
 ```
-python3 -I tools/ui-regress/mobile_ui.py run [--only TEXT]
+python3 -I tools/ui-regress/mobile_ui.py run [--only TEXT] [--text-size 1.25]
 python3 -I tools/ui-regress/mobile_ui.py accept OUTDIR
+python3 -I tools/ui-regress/mobile_ui.py adapt [--only TEXT] [--profile small] [--low 1] [--high 1.5] [--min-ratio 1.2]
 ```
+
+`run --text-size T` renders the cases at another player text size (`RAZDOR_TEXT_SIZE`; 1.25 is the
+phone default). A case at another size is named with a `-t<T>` suffix (`mobile-small-portrait-barracks-t1.5`),
+so the names and the baseline at 1.25 stay as they are.
+
+`adapt` checks that buttons grow with the player's text size (the owner's rule: at 1 they keep the
+original's size, and they grow at 1.25 and 1.5). It renders the screens of one profile at `--low` and at
+`--high`, matches the touch targets that have a label between the two by place and label, and compares the
+label's capital height at high with low. A target whose ratio is under `--min-ratio` (1.2) does not grow.
+It writes `adapt.md` in the run folder: per screen and orientation a table (`place | label | low sp | high
+sp | ratio | status | drawn height ratio`), the non-growing targets first, and a summary line per case. It
+exits 0 (it is a report, and the pilot covers only some screens) and prints how many targets do not grow.
+Targets without a label are skipped, and the summary counts them.
 
 `run` writes into `/mnt/ai_models/razdor-scratch/mobile-ui/<time>/`: `report.md` (a table per case,
 then each case with a finding: its texts and targets with their places, and the crowded pairs), `view/`

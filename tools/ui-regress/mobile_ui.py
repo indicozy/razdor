@@ -3,12 +3,24 @@
 (`RAZDOR_TEXT_PROBE`, src/ui/text_probe.rs) and the touch probe (`RAZDOR_TOUCH_PROBE`,
 src/ui/touch_probe.rs), and reports the text and touch targets that are too small for a finger.
 
-    python3 -I tools/ui-regress/mobile_ui.py run [--bin PATH] [--only TEXT] [--out DIR] [--floor 12] [--body 14]
-                                               [--too-small 40] [--small 48] [--gap 8]
+    python3 -I tools/ui-regress/mobile_ui.py run [--bin PATH] [--only TEXT] [--out DIR] [--text-size 1.25]
+                                               [--floor 12] [--body 14] [--too-small 40] [--small 48] [--gap 8]
     python3 -I tools/ui-regress/mobile_ui.py accept OUTDIR
+    python3 -I tools/ui-regress/mobile_ui.py adapt [--bin PATH] [--only TEXT] [--out DIR] [--profile small]
+                                                 [--low 1] [--high 1.5] [--min-ratio 1.2]
 
 The cases are generated here: PROFILES x orientations x SCREENS (72 at the time of writing), each
-named `mobile-<profile>-<orientation>-<screen>`.
+named `mobile-<profile>-<orientation>-<screen>`. `run --text-size T` renders them at another player
+text size (RAZDOR_TEXT_SIZE; 1.25 is the phone default); a case at another size is named with a
+`-t<T>` suffix (`mobile-small-portrait-barracks-t1.5`), so the 1.25 names and the baseline stay as they are.
+
+Adaptation (`adapt`): buttons must grow with the player's text size, and at the low size they keep the
+original's size. `adapt` renders each selected case of one profile at `--low` and at `--high` text size,
+matches the touch targets with a label between the two by place and label, and compares the label's
+capital height at high with low. A target whose ratio is under `--min-ratio` does not grow. It writes
+OUTDIR/adapt.md (per screen and orientation a table, the non-growing targets first, and a summary line per
+case) and exits 0: it is a report, and the pilot covers only some screens. Targets without a label are
+skipped (counted in the report).
 
 Texts: a text's size in sp is its capital's height / dp / 0.7 (a capital is about 0.7 of the font
 size, the size Android counts in sp). Under `--floor` (12, Android's smallest recommended text) it
@@ -80,30 +92,42 @@ SCREENS = [
 ]
 
 
-def build_cases(only, out):
-    """The cases of every profile, orientation and screen (name containing `only`), each with the
-    text and touch probes on, writing into `out`."""
+def build_cases(only, out, text_size="1.25"):
+    """The cases of every profile, orientation and screen (base name containing `only`), each with
+    the text and touch probes on, writing into `out`, at player text size `text_size`. A size other
+    than 1.25 adds `-t<size>` to the name (and so to the key); `base` is the name without it."""
     cases = []
     for pname, pw, ph, dp in PROFILES:
         for orient in ORIENTATIONS:
             w, h = (pw, ph) if orient == "portrait" else (ph, pw)
             for sname, scene, extra in SCREENS:
-                name = f"mobile-{pname}-{orient}-{sname}"
-                if only and only not in name:
+                base = f"mobile-{pname}-{orient}-{sname}"
+                if only and only not in base:
                     continue
+                name = base if text_size == "1.25" else f"{base}-t{text_size}"
                 key = f"{name}@{w}x{h}"
                 env = dict(extra)
                 # The phone defaults of `display::default_text_size` (1.25 on a phone, 1.0 on the
                 # desktop build the snapshot runs) and `display::default_large_windows` (true on a
                 # phone, false on the desktop), so the cases measure the text players see. A
-                # SCREENS entry may override them.
-                env.setdefault("RAZDOR_TEXT_SIZE", "1.25")
+                # SCREENS entry may override them; `text_size` replaces the 1.25 of a phone.
+                env.setdefault("RAZDOR_TEXT_SIZE", text_size)
                 env.setdefault("RAZDOR_LARGE_WINDOWS", "1")
                 env["RAZDOR_DP"] = str(dp)
                 env["RAZDOR_TEXT_PROBE"] = str(out / "probe" / f"{key}.tsv")
                 env["RAZDOR_TOUCH_PROBE"] = str(out / "touch" / f"{key}.tsv")
-                cases.append({"name": name, "scene": scene, "size": f"{w}x{h}", "extra": env, "key": key, "dp": dp})
+                cases.append({"name": name, "base": base, "scene": scene, "size": f"{w}x{h}", "extra": env,
+                              "key": key, "dp": dp})
     return cases
+
+
+def text_size_arg(value):
+    """An argparse type for a player text size: a number, kept as the string the game reads."""
+    try:
+        float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a text size: {value}")
+    return value
 
 
 def parse(tsv, dp):
@@ -170,15 +194,23 @@ def text_centre(t):
     return t["x"] + t["w"] / 2, t["y"] - t["cap"] * 0.45
 
 
-def label_of(target, texts):
-    """The texts whose box centre is inside the target, in reading order, at most two, joined by
-    ' / ' and cut to 40 characters; '(no text)' when none."""
+def texts_inside(target, texts):
+    """The text records whose box centre is inside the target, in reading order."""
     inside = []
     for t in sorted(texts, key=lambda t: (t["y"], t["x"])):
         cx, cy = text_centre(t)
         if target["x"] <= cx <= target["x"] + target["w"] and target["y"] <= cy <= target["y"] + target["h"]:
-            if t["text"] not in inside:
-                inside.append(t["text"])
+            inside.append(t)
+    return inside
+
+
+def label_of(target, texts):
+    """The texts inside the target (`texts_inside`), without repeats, in reading order, at most two,
+    joined by ' / ' and cut to 40 characters; '(no text)' when none."""
+    inside = []
+    for t in texts_inside(target, texts):
+        if t["text"] not in inside:
+            inside.append(t["text"])
     if not inside:
         return "(no text)"
     return " / ".join(inside[:2])[:40]
@@ -324,12 +356,136 @@ def case_report(case, out, limits, baseline, result):
     }
 
 
+def label_targets(targets):
+    """The labelled touch targets, grouped by (place, label), each group in reading order."""
+    groups = {}
+    for t in sorted(targets, key=lambda t: (t["y"], t["x"])):
+        if t["label"] != "(no text)":
+            groups.setdefault((t["place"], t["label"]), []).append(t)
+    return groups
+
+
+def adapt_case(low_case, high_case, out, limits, min_ratio):
+    """The label rows of one screen and orientation, and the count of targets without a label at
+    the low size. The labelled targets of the two sizes are matched by place and label (in reading
+    order when a label repeats). A row is a dict with place, label, low and high (the label's sp at
+    each size, None when no match), ratio (the label's capital height at high over low), height
+    (the drawn height at high over low) and status: 'does not grow' under `min_ratio`, 'grows', or
+    'no match at high'."""
+    texts_lo, targets_lo, _ = analyse(low_case, out, limits)
+    texts_hi, targets_hi, _ = analyse(high_case, out, limits)
+    groups_hi = label_targets(targets_hi)
+    rows = []
+    for (place, label), group in label_targets(targets_lo).items():
+        matches = groups_hi.get((place, label), [])
+        for i, lo_t in enumerate(group):
+            lo = texts_inside(lo_t, texts_lo)[0]
+            if i >= len(matches):
+                rows.append({"place": place, "label": label, "low": lo["sp"], "high": None, "ratio": None,
+                             "height": None, "status": "no match at high"})
+                continue
+            hi_t = matches[i]
+            hi = texts_inside(hi_t, texts_hi)[0]
+            ratio = hi["cap"] / lo["cap"] if lo["cap"] > 0 else 0.0
+            rows.append({"place": place, "label": label, "low": lo["sp"], "high": hi["sp"], "ratio": ratio,
+                         "height": hi_t["h"] / lo_t["h"] if lo_t["h"] > 0 else None,
+                         "status": "does not grow" if ratio < min_ratio else "grows"})
+    rank = {"does not grow": 0, "no match at high": 1, "grows": 2}
+    rows.sort(key=lambda r: (rank[r["status"]], r["ratio"] or 0.0, r["place"], r["label"]))
+    unlabelled = sum(1 for t in targets_lo if t["label"] == "(no text)")
+    return rows, unlabelled
+
+
+def md_cell(value):
+    """A table cell: the text with its pipes escaped, or '-' for None."""
+    return "-" if value is None else str(value).replace("|", "\\|")
+
+
+def adapt_table(rows):
+    """The markdown table lines of the label rows (sp to one decimal, ratios to two)."""
+    lines = ["| place | label | low sp | high sp | ratio | status | drawn height ratio |",
+             "|---|---|---|---|---|---|---|"]
+    for r in rows:
+        low = "-" if r["low"] is None else f"{r['low']:.1f}"
+        high = "-" if r["high"] is None else f"{r['high']:.1f}"
+        ratio = "-" if r["ratio"] is None else f"{r['ratio']:.2f}"
+        height = "-" if r["height"] is None else f"{r['height']:.2f}"
+        lines.append(f"| {md_cell(r['place'])} | {md_cell(r['label'])} | {low} | {high} | {ratio} | "
+                     f"{md_cell(r['status'])} | {height} |")
+    return lines
+
+
+def cmd_adapt(args):
+    """Render each case of one profile at the low and the high text size, and write adapt.md: which
+    labelled touch targets do not grow with the player's text size."""
+    if args.low == args.high:
+        sys.exit("--low and --high are the same text size")
+    out = Path(args.out).resolve() if args.out else (OUT / datetime.datetime.now().strftime("%Y%m%d-%H%M%S")).resolve()
+    for sub in ("probe", "touch"):
+        (out / sub).mkdir(parents=True, exist_ok=True)
+
+    def cases_at(size):
+        return [c for c in build_cases(args.only, out, size) if c["base"].startswith(f"mobile-{args.profile}-")]
+
+    lows, highs = cases_at(args.low), cases_at(args.high)
+    if not lows:
+        sys.exit("no mobile case matches")
+    high_by_base = {c["base"]: c for c in highs}
+    binary = Path(args.bin)
+    if not binary.is_file():
+        sys.exit(f"no binary at {binary}: build it first (tools/ui-regress/README.md)")
+    dt_dir = ui_regress.install_dir()
+    cases = lows + highs
+    print(f"{len(cases)} mobile cases ({len(lows)} screens at text sizes {args.low} and {args.high}), "
+          f"{ui_regress.WORKERS} at a time, into {out}", flush=True)
+    started = time.monotonic()
+    status = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=ui_regress.WORKERS) as pool:
+        futures = [pool.submit(ui_regress.run_case, c, i, out, dt_dir, binary) for i, c in enumerate(cases)]
+        for fut in concurrent.futures.as_completed(futures):
+            r = fut.result()
+            status[r["case"]["key"]] = r["status"]
+            print(f"  {r['case']['key']}: {r['status']} ({r['secs']:.1f} s)", flush=True)
+    limits = {"floor": 12.0, "body": 14.0, "too_small": 40.0, "small": 48.0, "gap": 8.0}
+    summary, sections, total_rows, total_bad = [], [], 0, 0
+    for lo in lows:
+        base, hi = lo["base"], high_by_base[lo["base"]]
+        if status.get(lo["key"]) != "ok" or status.get(hi["key"]) != "ok":
+            summary.append(f"- {base}: crashed ({status.get(lo['key'])} at {args.low}, {status.get(hi['key'])} at {args.high})")
+            continue
+        rows, unlabelled = adapt_case(lo, hi, out, limits, args.min_ratio)
+        bad = sum(1 for r in rows if r["status"] == "does not grow")
+        total_rows += len(rows)
+        total_bad += bad
+        nomatch = sum(1 for r in rows if r["status"] == "no match at high")
+        line = f"- {base}: {bad} of {len(rows)} labelled targets do not grow; {unlabelled} without a label skipped"
+        summary.append(line + (f"; {nomatch} with no match at {args.high}" if nomatch else ""))
+        sections.extend(["", f"## {base}", "", *adapt_table(rows)])
+    elapsed = time.monotonic() - started
+    report = [
+        "# Mobile UI adaptation report",
+        "",
+        f"Run {datetime.datetime.now().isoformat(timespec='seconds')}, profile {args.profile}, {len(lows)} screens "
+        f"at player text sizes {args.low} (low) and {args.high} (high) in {elapsed:.0f} s. A label's ratio is its "
+        f"capital height at high over low (sp = capital height / dp / 0.7). A target does not grow when its ratio "
+        f"is under {args.min_ratio:g}: a button must grow with the text. Targets without a label are skipped.",
+        "",
+        "## Summary",
+        "",
+        *summary,
+        *sections,
+    ]
+    (out / "adapt.md").write_text("\n".join(report) + "\n", encoding="utf-8")
+    print(f"{total_bad} of {total_rows} labelled targets do not grow; report {out / 'adapt.md'}", flush=True)
+    return 0
+
+
 def cmd_run(args):
     out = Path(args.out).resolve() if args.out else (OUT / datetime.datetime.now().strftime("%Y%m%d-%H%M%S")).resolve()
     (out / "probe").mkdir(parents=True, exist_ok=True)
     (out / "touch").mkdir(parents=True, exist_ok=True)
     (out / "specs").mkdir(parents=True, exist_ok=True)
-    cases = build_cases(args.only, out)
+    cases = build_cases(args.only, out, args.text_size)
     if not cases:
         sys.exit("no mobile case matches")
     binary = Path(args.bin)
@@ -418,6 +574,8 @@ def main():
     r.add_argument("--bin", default=str(ui_regress.DEFAULT_BIN), help="the release razdor binary (with the probes)")
     r.add_argument("--only", help="only the cases whose name contains this text")
     r.add_argument("--out", help="output folder (default: a timestamped one under razdor-scratch/mobile-ui)")
+    r.add_argument("--text-size", type=text_size_arg, default="1.25",
+                   help="the player text size of every case (RAZDOR_TEXT_SIZE: 1, 1.25 or 1.5); not 1.25 adds -t<size> to the names")
     r.add_argument("--floor", type=float, default=12.0, help="a text is too small under this many sp")
     r.add_argument("--body", type=float, default=14.0, help="a text is small under this many sp")
     r.add_argument("--too-small", type=float, default=40.0, help="a touch target is too small under this many dp (smaller side)")
@@ -427,6 +585,16 @@ def main():
     a = sub.add_parser("accept", help="write a run's too-small texts and targets as the baseline")
     a.add_argument("outdir")
     a.set_defaults(func=cmd_accept)
+    d = sub.add_parser("adapt", help="check that the labelled buttons grow with the player's text size (adapt.md)")
+    d.add_argument("--bin", default=str(ui_regress.DEFAULT_BIN), help="the release razdor binary (with the probes)")
+    d.add_argument("--only", help="only the screens whose name contains this text")
+    d.add_argument("--out", help="output folder (default: a timestamped one under razdor-scratch/mobile-ui)")
+    d.add_argument("--profile", default="small", choices=[p[0] for p in PROFILES], help="the phone profile")
+    d.add_argument("--low", type=text_size_arg, default="1", help="the low player text size (the original's size)")
+    d.add_argument("--high", type=text_size_arg, default="1.5", help="the high player text size")
+    d.add_argument("--min-ratio", type=float, default=1.2,
+                   help="a label's capital height at high over low must reach this, or the button does not grow")
+    d.set_defaults(func=cmd_adapt)
     args = p.parse_args()
     return args.func(args)
 
