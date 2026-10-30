@@ -34,4 +34,4 @@ Razdor сам проверяет новые выпуски на GitHub и пре
 
 ## Как сообщить об ошибке?
 
-Напишите в [Discord](https://discord.gg/cdTtYz5dH) или заведите задачу в [GitHub issues](https://github.com/indicozy/razdor/issues).
+Напишите в [Discord](https://discord.gg/wmMksmWFDM) или заведите задачу в [GitHub issues](https://github.com/indicozy/razdor/issues).

@@ -34,4 +34,4 @@ The language is changed by the language name in the corner of the main menu, by 
 
 ## How do I report a bug?
 
-Write to the [Discord](https://discord.gg/cdTtYz5dH) or open an issue on [GitHub](https://github.com/indicozy/razdor/issues).
+Write to the [Discord](https://discord.gg/wmMksmWFDM) or open an issue on [GitHub](https://github.com/indicozy/razdor/issues).

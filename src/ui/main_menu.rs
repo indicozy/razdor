@@ -278,7 +278,7 @@ fn word(i: usize, label: &str, c: Vec2, hover: bool, k: f32) {
 }
 
 /// The Razdor players' Discord server, as the site links it (where the community shares the game).
-pub(super) const DISCORD_INVITE: &str = "https://discord.gg/cdTtYz5dH";
+pub(super) const DISCORD_INVITE: &str = "https://discord.gg/wmMksmWFDM";
 /// The illustrated install guide on the website (the pages of the gh-pages branch of the repo),
 /// in Russian and in English: the not-found block's «How to install» picks by the interface language.
 const INSTALL_GUIDE_RU: &str = "https://indicozy.github.io/razdor/install.html";

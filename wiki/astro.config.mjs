@@ -22,7 +22,7 @@ export default defineConfig({
 			},
 			social: [
 				{ icon: 'github', label: 'GitHub', href: 'https://github.com/indicozy/razdor' },
-				{ icon: 'discord', label: 'Discord', href: 'https://discord.gg/cdTtYz5dH' },
+				{ icon: 'discord', label: 'Discord', href: 'https://discord.gg/wmMksmWFDM' },
 			],
 			editLink: {
 				baseUrl: 'https://github.com/indicozy/razdor/edit/main/wiki/',
