@@ -14,6 +14,21 @@
 
 ## 1.1.15 — 2026-10-31
 
+Коммит `f5f303c6` (тег `v1.1.15`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+011c60117e21faa8ca2ec563d36251eaa0c69fad8a1b039cece2a16b84145b6c  razdor
+524d646c6b4c1f6cf69388588463e16385d5197a91c11a8668daf0f3ff9f5573  Razdor.exe
+4f29d088a9b7f86fc2ea67b03f380a77a3558198e7e44310dfa0e96c137dc838  razdor-macos
+0e374688c428eaee56b1451afd86f24a412d3afb1ad25b864d71a1c88b1d5ddf  razdor-translate
+6fda40b5a3e42cfb42d0b6f85fd640c54c7a7ffa22f7cf178f1fe7a845a5f931  Razdor-translate.exe
+9a8235c0c25b7356ca770a79368e1e110b92e059d84cb505b464c9cc3dbfb865  razdor-translate-macos
+bcee6f83ee91f000a3b3ac375c6936e4eb023ab05ea6c51068c5302c88a1deae  razdor.apk
+076d1e4ad42114fc566dc68c7a538672bb0e2e35862c97066880f234f67ae87b  razdor.ipa
+```
+
 ### Добавлено
 
 - Телефон, режим тачпада: все подсказки и описания предметов (на карте, в окнах победы и события, в рюкзаке и в окне героя) показываются, если задержать курсор на треть секунды.
