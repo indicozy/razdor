@@ -77,8 +77,12 @@ use super::dialog::MANA;
 static HOME_ZOOM: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x3f80_0000);
 static ZOOM_LOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// The zoom range the wheel and the settings keep to.
+/// The zoom range the settings' slider keeps to, and the home zoom is clamped to.
 pub const ZOOM_RANGE: (f32, f32) = (0.4, 2.0);
+
+/// The wheel's, pinch's and +/- keys' highest zoom (Razdor's, the owner's request 2026-10-30:
+/// closer for tapping on phones), above the settings' range.
+pub const ZOOM_WHEEL_MAX: f32 = 4.0;
 
 /// Takes the settings' map zoom and lock in (every frame).
 pub fn set_zoom_prefs(home: f32, locked: bool) {
@@ -104,18 +108,18 @@ fn zoom_floor(map_w: f32, map_h_px: f32, view: Rect) -> f32 {
 }
 
 /// The zoom `steps` wheel notches from `home` (×1.1 each), within `lo` (the wheel's lowest,
-/// see [`zoom_floor`]) and ZOOM_RANGE.1; locked, always `home`.
+/// see [`zoom_floor`]) and ZOOM_WHEEL_MAX; locked, always `home`.
 fn zoom_at(home: f32, steps: i32, locked: bool, lo: f32) -> f32 {
     if locked {
         home
     } else {
-        (home * 1.1f32.powi(steps)).clamp(lo, ZOOM_RANGE.1)
+        (home * 1.1f32.powi(steps)).clamp(lo, ZOOM_WHEEL_MAX)
     }
 }
 
 /// `steps` brought into the range where every wheel step still changes the zoom (Razdor's):
 /// from the lowest `s` with `home * 1.1^s >= lo` to the highest with `home * 1.1^s <=
-/// ZOOM_RANGE.1`, the same limits [`step_zoom`] keeps. The floor moves with the view (a
+/// ZOOM_WHEEL_MAX`, the same limits [`step_zoom`] keeps. The floor moves with the view (a
 /// rotated phone) and the home zoom with the settings, so the steps are refitted each frame;
 /// a stale count would sit past the new limit and the zoom would stop following the steps.
 fn fit_steps(home: f32, steps: i32, lo: f32) -> i32 {
@@ -130,11 +134,11 @@ fn fit_steps(home: f32, steps: i32, lo: f32) -> i32 {
     while at(low - 1) >= lo {
         low -= 1;
     }
-    let mut high = ((ZOOM_RANGE.1 / home).ln() / 1.1f32.ln()).floor() as i32;
-    while at(high) > ZOOM_RANGE.1 {
+    let mut high = ((ZOOM_WHEEL_MAX / home).ln() / 1.1f32.ln()).floor() as i32;
+    while at(high) > ZOOM_WHEEL_MAX {
         high -= 1;
     }
-    while at(high + 1) <= ZOOM_RANGE.1 {
+    while at(high + 1) <= ZOOM_WHEEL_MAX {
         high += 1;
     }
     if low > high {
@@ -143,11 +147,11 @@ fn fit_steps(home: f32, steps: i32, lo: f32) -> i32 {
     steps.clamp(low, high)
 }
 
-/// `steps` moved by `by`, kept where it still changes the zoom within `lo` and ZOOM_RANGE.1.
+/// `steps` moved by `by`, kept where it still changes the zoom within `lo` and ZOOM_WHEEL_MAX.
 fn step_zoom(home: f32, steps: i32, by: i32, lo: f32) -> i32 {
     let next = steps + by;
     let z = home * 1.1f32.powi(next);
-    if (z < lo && by < 0) || (z > ZOOM_RANGE.1 && by > 0) {
+    if (z < lo && by < 0) || (z > ZOOM_WHEEL_MAX && by > 0) {
         steps
     } else {
         next
@@ -3492,6 +3496,17 @@ mod tests {
         }
         assert!(zoom_at(1.0, s, false, lo) >= lo && step_zoom(1.0, s, 1, lo) == s + 1);
         assert_eq!(zoom_at(1.0, s, false, lo), (1.1f32.powi(s)).max(lo));
+        // In, the steps stop at the wheel's ×4 ceiling, above the settings' ×2 (the owner's request).
+        let mut t = 0;
+        for _ in 0..60 {
+            t = step_zoom(1.0, t, 1, lo);
+        }
+        // The top notch is the highest one still at most ×4 (×3.8 here: a notch is ×1.1).
+        let top = zoom_at(1.0, t, false, lo);
+        assert!(top <= ZOOM_WHEEL_MAX && top * 1.1 > ZOOM_WHEEL_MAX, "the top notch: {top}");
+        assert_eq!(step_zoom(1.0, t, 1, lo), t, "no step past ×4");
+        // The settings' slider keeps its own range (×0.4 to ×2).
+        assert_eq!(ZOOM_RANGE, (0.4, 2.0));
     }
 
     #[test]
@@ -3513,14 +3528,14 @@ mod tests {
 
     #[test]
     fn a_lowered_zoom_ceiling_brings_the_steps_back() {
-        // Stepped in to the 2.0 ceiling at home 0.5, then the settings' zoom rises to 2.0:
-        // the steps come back so that the zoom is at most 2.0 and a step out lowers it.
+        // Stepped in to the ×4 ceiling at home 0.5, then the settings' zoom rises to 2.0:
+        // the steps come back so that the zoom is at most ×4 and a step out lowers it.
         let mut s = 0;
         for _ in 0..40 {
             s = step_zoom(0.5, s, 1, ZOOM_RANGE.0);
         }
         let s = fit_steps(2.0, s, ZOOM_RANGE.0);
-        assert!(zoom_at(2.0, s, false, ZOOM_RANGE.0) <= ZOOM_RANGE.1);
+        assert!(zoom_at(2.0, s, false, ZOOM_RANGE.0) <= ZOOM_WHEEL_MAX);
         let before = zoom_at(2.0, s, false, ZOOM_RANGE.0);
         let down = step_zoom(2.0, s, -1, ZOOM_RANGE.0);
         assert!(zoom_at(2.0, down, false, ZOOM_RANGE.0) < before, "one step down lowers the zoom");
@@ -3529,16 +3544,18 @@ mod tests {
     #[test]
     fn fit_steps_leaves_steps_in_range_alone() {
         // Home 1.0 and a floor of 0.4: the steps run from -9 (0.4 is at most 9 notches out)
-        // up to 7 (2.0 is at most 7 notches in); 0 is always in range.
+        // up to 14 (×4 is at most 14 notches in); 0 is always in range.
         assert_eq!(fit_steps(1.0, 0, 0.4), 0);
         assert_eq!(fit_steps(1.0, -5, 0.4), -5);
         assert_eq!(fit_steps(1.0, -9, 0.4), -9);
         assert_eq!(fit_steps(1.0, 7, 0.4), 7);
+        assert_eq!(fit_steps(1.0, 14, 0.4), 14);
         assert_eq!(fit_steps(0.4, 0, 0.4), 0);
         assert_eq!(fit_steps(2.0, 0, 0.4), 0);
         // Out of range: brought to the nearest limit.
         assert_eq!(fit_steps(1.0, -30, 0.4), -9);
-        assert_eq!(fit_steps(1.0, 30, 0.4), 7);
+        assert_eq!(fit_steps(1.0, 30, 0.4), 14);
+        assert!(zoom_at(1.0, fit_steps(1.0, 30, 0.4), false, 0.4) <= ZOOM_WHEEL_MAX);
     }
 
     #[test]
