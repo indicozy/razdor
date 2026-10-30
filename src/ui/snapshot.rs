@@ -10,7 +10,8 @@
 //! `menu:<map>`, `defeat:<map>` (the lost battle's report), `event:<map>:<n>` (the map's event n's window; `RAZDOR_SCENE_LOST=<id>,…` adds its lost-items row; `RAZDOR_SCENE_JOINED=<id>,…` and `RAZDOR_SCENE_LEFT=<id>,…` its units rows),`learnt:<map>[:<id>,…]` (the event window with new spells, the hero with no mana), `report:<map>[:<gold>]` (the noon report), `settings:<map>[:advanced|keys]` (`keys`: Razdor's keys window over the advanced settings), `battle:<map>:<n>` (against the n-th army), `custom` (the custom battle
 //! setup), `custom-battle` (its first round; `custom-battle:watch` watches the AI play it). `RAZDOR_SCENE_DEBUG=1` turns the map's debug overlay (F3) on; `RAZDOR_SCENE_SHOW=x,y,r` shows
 //! a place as a lantern event does; `RAZDOR_SCENE_CONSOLE=help;gold 100` opens the cheat
-//! console after those commands; `RAZDOR_SCENE_FILTER=text` fills the inventory filter
+//! console after those commands, `RAZDOR_SCENE_CONSOLE_LINE=go` opens it with that line typed (the
+//! completion list under it); `RAZDOR_SCENE_FILTER=text` fills the inventory filter
 //! (army screen, market); `RAZDOR_SCENE_QUIET=1` drops
 //! the scenario's messages every frame, to see the screen under them; `RAZDOR_MOUSE=x,y`
 //! puts the pointer there (`RAZDOR_MOUSE_RIGHT=1` also holds the right button there: the map's tooltips); `RAZDOR_SCENE_SPELLS=<id>,…` puts those spells on every unit; `RAZDOR_SCENE_TARGET=<id>` starts the targeting of that enemy spell on the map; `RAZDOR_SCENE_MANA=<n>` sets the hero's mana in the `spells` scene; `RAZDOR_SCENE_PREVIEW=1` shows the first spell's card at the pointer in the `learnt` scene; `RAZDOR_SCENE_POTION=1` gives every unit of the army a
@@ -334,6 +335,11 @@ pub fn stage(app: &mut App) {
                 app.screen = next;
             }
         }
+    }
+    // `RAZDOR_SCENE_CONSOLE_LINE=go`: the console open with that line typed (its completion list shows).
+    if let Ok(line) = std::env::var("RAZDOR_SCENE_CONSOLE_LINE") {
+        app.console.open = true;
+        app.console.preset_line(&line);
     }
 }
 

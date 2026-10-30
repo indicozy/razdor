@@ -572,6 +572,13 @@ Building a window (`src/ui/chrome.rs`):
   on-screen keyboard (a phone choice, not in the original) is wanted while it is open and after a tap in the input line
   (`console::keyboard_wanted`, the tap target `console::input_field`); the system hiding the keyboard turns the want off,
   so a slide or a tap on the scroll-back no longer brings it up. The desktop has no keyboard, as before.
+- The console's completion (a Source-style choice, not in the original): as the line is typed, a list of up to 8
+  rows shows under the input line (`cheats::suggestions`: the commands by their first word; after `item `, `spell `
+  or `unit ` the game's names from `cheats::Names`, built by `Console::set_content` only when the game changes).
+  Tab (Shift+Tab back) completes to the next row and goes on through the list (`cheats::cycle`); Up and Down pick a
+  row (with a list up they no longer recall the history); Enter completes to the picked row and runs it only when it is
+  a command with no argument (`reveal`); on a phone a tap on a row completes to it (`row_rects`, a finger's target). The
+  list is made again only when the line is typed: a Tab's completion or a recalled line keeps the list it has.
 - Text input: every field (`widgets::text_field`, `widgets::number_field`, the drop-down's
   filter, the inventory filter `item_filter::field`, the hero's name
   `screens::hero_name_field`, the save's name, the console) edits through

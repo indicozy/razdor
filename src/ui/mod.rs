@@ -1031,6 +1031,10 @@ impl App {
             && self.map_view.back_to.is_none()
             && !widgets::popup_open();
         self.update_open = update_view::wanted(self.audio.settings.updates, calm);
+        // The console's completion names are the game's; they are built again only for another game.
+        if self.console.open {
+            self.console.set_content(self.game.as_ref().map(|g| &g.content));
+        }
         let (held, entered) = self.console.input(console_here && self.dialogs.is_empty() && !self.help && !self.update_open && !widgets::typing());
         self.console_held = held;
         if held {

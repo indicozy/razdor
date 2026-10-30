@@ -20,6 +20,12 @@ While the console is open, all key presses are sent to it rather than to the gam
 * **Up and Down Arrows**: cycle through previously entered commands.
 * **~** or **Esc**: close the console.
 
+### Suggestions While Typing
+
+As you type, a list of up to 8 suggestions appears under the input line: command names, and after `item `, `spell ` or `unit ` the names of items, spells and units in the current game. Each row shows the command's usage, with its description in grey.
+
+Tab completes the first suggestion, and each further Tab moves to the next row (Shift+Tab goes back). Up and Down arrows select a row while the list is open; the command history is not recalled then. Enter completes the selected row and runs it only if it is a command that takes no arguments (for example, `reveal`); otherwise Enter only completes the line, and you press Enter again to run it. On a phone, tapping a row completes to it, as Tab does.
+
 ### Commands
 
 Command names are written in English. Case does not matter. If you enter the name of an item, spell, or unit, the engine first looks for an exact match, then a prefix match, and finally a substring match. If multiple objects meet the criteria, the console will notify you.

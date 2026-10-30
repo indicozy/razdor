@@ -232,6 +232,109 @@ pub fn help() -> Vec<String> {
     COMMANDS.iter().map(|(u, what)| format!("{u} — {}", tr(what))).collect()
 }
 
+/// Most rows the console's completion list shows.
+pub const MOST_SUGGESTIONS: usize = 8;
+
+/// The names the completion of `item`, `spell` and `unit` draws from: the current game's, as
+/// [`find_item`], [`find_spell`] and [`find_unit`] search them.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Names {
+    pub items: Vec<String>,
+    pub spells: Vec<String>,
+    pub units: Vec<String>,
+}
+
+impl Names {
+    pub fn of(content: &Content) -> Names {
+        Names {
+            items: content.items.iter().map(|a| a.name.clone()).collect(),
+            spells: content.spells.iter().map(|s| s.name.clone()).collect(),
+            units: content.units.iter().filter(|u| u.hits > 0).map(|u| u.name.clone()).collect(),
+        }
+    }
+}
+
+/// A row of the console's completion list.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Suggestion {
+    /// The line once completed: `gold `, `item Long Sword`, `unit Bandit 3`.
+    pub completion: String,
+    /// What the row shows: a command's usage, or a name.
+    pub label: String,
+    /// A command's description, untranslated (`tr` it to show); empty for a name.
+    pub hint: &'static str,
+    /// A command that needs no argument: Enter runs it once it is completed.
+    pub alone: bool,
+}
+
+/// The completion list for the console's line. While the first word is typed (no space yet),
+/// the commands whose name starts with it (any case); after `item `, `spell ` or `unit `, the
+/// names of the game that start with the typed text, then those that contain it. An empty
+/// line, an empty name query, no game (no names) or another command give none. At most
+/// [`MOST_SUGGESTIONS`] rows.
+pub fn suggestions(line: &str, names: &Names) -> Vec<Suggestion> {
+    let typed = line.trim_start();
+    let Some(at) = typed.find(char::is_whitespace) else {
+        if typed.is_empty() {
+            return Vec::new();
+        }
+        let word = search::fold(typed);
+        return COMMANDS
+            .iter()
+            .filter(|c| search::fold(command_name(c.0)).starts_with(&word))
+            .take(MOST_SUGGESTIONS)
+            .map(|c| Suggestion { completion: format!("{} ", command_name(c.0)), label: c.0.to_string(), hint: c.1, alone: !c.0.contains(' ') })
+            .collect();
+    };
+    let cmd = typed[..at].to_lowercase();
+    let list = match cmd.as_str() {
+        "item" => &names.items,
+        "spell" => &names.spells,
+        "unit" => &names.units,
+        _ => return Vec::new(),
+    };
+    // `unit <name> <level>`: a last number is the level, kept as typed; the name is what before it.
+    let mut words: Vec<&str> = typed[at..].split_whitespace().collect();
+    let mut tail = String::new();
+    if cmd == "unit" && words.len() > 1 && words.last().is_some_and(|w| w.parse::<i64>().is_ok()) {
+        tail = format!(" {}", words.pop().unwrap_or_default());
+    }
+    let query = words.join(" ");
+    if query.is_empty() {
+        return Vec::new();
+    }
+    let q = search::fold(&query);
+    let starts = |n: &&String| search::fold(n).starts_with(&q);
+    let contains = |n: &&String| search::find(n, &query).is_some();
+    let first = list.iter().filter(starts);
+    let then = list.iter().filter(|n| !starts(n) && contains(n));
+    first
+        .chain(then)
+        .take(MOST_SUGGESTIONS)
+        .map(|n| Suggestion { completion: format!("{cmd} {n}{tail}"), label: n.clone(), hint: "", alone: false })
+        .collect()
+}
+
+/// The name of a command's usage: `gold` for `gold N`.
+fn command_name(usage: &str) -> &str {
+    usage.split(' ').next().unwrap_or(usage)
+}
+
+/// The row the selection goes to from `current` (None: none picked yet) by one step: forward
+/// to the next row (the first from none), back to the previous (the last from none); wrapping
+/// at both ends. None for an empty list.
+pub fn cycle(current: Option<usize>, len: usize, forward: bool) -> Option<usize> {
+    if len == 0 {
+        return None;
+    }
+    Some(match (current, forward) {
+        (None, true) => 0,
+        (None, false) => len - 1,
+        (Some(i), true) => (i + 1) % len,
+        (Some(i), false) => (i + len - 1) % len,
+    })
+}
+
 /// Runs `cheat` on the game (`None` in a custom battle) and the battle on screen (`None` on
 /// the map). The commands that change the army, its experience or the time wait for the
 /// battle to end; `win` and `lose` need one. A command that worked marks the game.
@@ -704,5 +807,88 @@ mod tests {
         let back = crate::rules::save::tests::roundtrip(&g, g.content.clone(), None);
         assert_eq!(back.cheats, CheatState { used: true, god: true, speed: 2, noclip: true, peace: true, routes: true });
         assert!(crate::rules::save::meta_of(&g, crate::rules::save::SaveKind::Manual, "x").unwrap().cheats);
+    }
+
+    fn labels(line: &str, names: &Names) -> Vec<String> {
+        suggestions(line, names).into_iter().map(|s| s.label).collect()
+    }
+
+    fn completions(line: &str, names: &Names) -> Vec<String> {
+        suggestions(line, names).into_iter().map(|s| s.completion).collect()
+    }
+
+    fn names() -> Names {
+        Names {
+            items: vec!["Iron Helm".into(), "Long Sword".into(), "Sword of Lore".into(), "Lodestone".into()],
+            spells: vec!["Fireball".into(), "Heal Wounds".into()],
+            units: vec!["Bandit".into(), "Archer".into()],
+        }
+    }
+
+    #[test]
+    fn a_command_prefix_lists_the_commands_it_starts_case_insensitively() {
+        let none = Names::default();
+        assert_eq!(labels("go", &none), vec!["gold N", "god"], "gold and god, in COMMANDS order");
+        assert_eq!(labels("GO", &none), labels("go", &none), "any case");
+        assert_eq!(completions("go", &none), vec!["gold ", "god "], "a command completes to its name and a space");
+        let rows = suggestions("god", &none);
+        assert_eq!(rows[0].hint, "on / off: your army takes no damage in battle", "the dim description");
+        assert!(rows[0].alone, "god needs no argument");
+        assert!(!suggestions("gold", &none)[0].alone, "gold needs its N");
+        assert!(suggestions("", &none).is_empty(), "an empty line shows no list");
+        assert!(suggestions("   ", &none).is_empty(), "nor a blank one");
+        assert!(suggestions("zzz", &none).is_empty(), "no command starts with it");
+        assert_eq!(labels("s", &none), vec!["spell <id | name>", "speed N"], "spell and speed");
+        assert!(labels("t", &none).len() <= MOST_SUGGESTIONS);
+    }
+
+    #[test]
+    fn item_spell_and_unit_names_match_the_prefix_first_then_the_inside() {
+        let n = names();
+        assert_eq!(labels("item lo", &n), vec!["Long Sword", "Lodestone", "Sword of Lore"], "prefix first, then contains");
+        assert_eq!(completions("item lo", &n), vec!["item Long Sword", "item Lodestone", "item Sword of Lore"]);
+        assert_eq!(labels("ITEM LO", &n), labels("item lo", &n), "the command and the name in any case");
+        assert_eq!(completions("ITEM LO", &n)[0], "item Long Sword", "the command completes in lower case");
+        assert_eq!(labels("spell heal", &n), vec!["Heal Wounds"]);
+        assert_eq!(completions("spell fire", &n), vec!["spell Fireball"]);
+        assert_eq!(completions("unit ban", &n), vec!["unit Bandit"]);
+        assert_eq!(completions("unit ban 3", &n), vec!["unit Bandit 3"], "a typed level is kept");
+        let hit = suggestions("item lo", &n)[0].clone();
+        assert!(!hit.alone && hit.hint.is_empty(), "a name is not a command and has no description");
+    }
+
+    #[test]
+    fn names_are_at_most_eight_and_need_a_query_and_a_game() {
+        let many = Names { items: (0..12).map(|i| format!("Amulet {i}")).collect(), ..Default::default() };
+        assert_eq!(suggestions("item am", &many).len(), MOST_SUGGESTIONS, "at most 8");
+        assert!(suggestions("item lo", &Names::default()).is_empty(), "no game, no names");
+        assert!(suggestions("item ", &many).is_empty(), "no query, no names");
+        assert!(suggestions("item", &many).len() <= MOST_SUGGESTIONS, "the bare word is a command prefix");
+        assert!(suggestions("gold 5", &many).is_empty(), "a command with no name list");
+        assert!(suggestions("foo bar", &many).is_empty(), "an unknown command with a space");
+        assert!(suggestions("item zzz", &names()).is_empty(), "no name holds it");
+    }
+
+    #[test]
+    fn the_names_of_the_content_are_the_ones_the_commands_find() {
+        let c = Content::builtin();
+        let n = Names::of(&c);
+        assert_eq!(n.items.len(), c.items.len());
+        assert_eq!(n.spells.len(), c.spells.len());
+        assert_eq!(n.units.len(), c.units.iter().filter(|u| u.hits > 0).count());
+        let spell = &c.spells[0].name;
+        let part: String = spell.chars().take(3).collect();
+        assert!(suggestions(&format!("spell {part}"), &n).iter().any(|s| s.label == *spell), "{spell} is offered");
+    }
+
+    #[test]
+    fn the_selection_wraps_forwards_and_backwards() {
+        assert_eq!(cycle(None, 3, true), Some(0), "Tab with no row picked: the first");
+        assert_eq!(cycle(None, 3, false), Some(2), "Shift+Tab with none: the last");
+        assert_eq!(cycle(Some(0), 3, true), Some(1));
+        assert_eq!(cycle(Some(2), 3, true), Some(0), "wraps to the first");
+        assert_eq!(cycle(Some(0), 3, false), Some(2), "wraps to the last");
+        assert_eq!(cycle(Some(0), 1, true), Some(0), "one row stays");
+        assert_eq!(cycle(None, 0, true), None, "no rows, no selection");
     }
 }

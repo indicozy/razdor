@@ -2,11 +2,21 @@
 //! layout) on the world map and in battle opens a command line over the top of the screen
 //! with a short scroll-back. The commands are `rules::cheats`; `help` lists them. While it is
 //! open every key goes to it: the screen below takes none.
+//!
+//! As the line is typed, a list of completions shows under it (`cheats::suggestions`): the
+//! commands, or after `item `, `spell ` or `unit ` the game's names. Tab (Shift+Tab back)
+//! completes to the next row and goes on through the list; Up and Down move the selection
+//! through it (with a list up, they no longer recall the history); Enter completes to the
+//! selected row and runs it only when it is a command that needs no argument (`reveal`); on a
+//! phone a tap on a row completes to it.
 
-use crate::ui::input::{is_key_pressed, is_mouse_button_pressed, mouse_position, mouse_wheel};
+use crate::ui::input::{is_key_down, is_key_pressed, is_mouse_button_pressed, mouse_position, mouse_wheel};
 use macroquad::prelude::*;
+use std::sync::Arc;
 
 use razdor::i18n::tr;
+use razdor::rules::cheats::{self, Names, Suggestion};
+use razdor::rules::content::Content;
 
 use super::chrome;
 use super::display::{self, SafeArea};
@@ -112,6 +122,16 @@ pub struct Console {
     scroll: usize,
     /// On a phone: the input line wants the on-screen keyboard ([`keyboard_wanted`]).
     keyboard: bool,
+    /// The completion list (`cheats::suggestions`) and the line it was made for. A Tab's
+    /// completion is recorded as that line too, so the list stays while Tab goes through it.
+    shown: Vec<Suggestion>,
+    shown_for: String,
+    /// The row picked (Tab, the arrows, a tap), an index into `shown`.
+    picked: Option<usize>,
+    /// The game's names the list draws from, and the content they were built from (kept, so
+    /// the same game is recognised; [`Console::set_content`]).
+    names: Names,
+    names_of: Option<Arc<Content>>,
 }
 
 impl Console {
@@ -121,6 +141,55 @@ impl Console {
             self.log.remove(0);
         }
         self.scroll = 0;
+    }
+
+    /// Hands the console the game's content to complete names from. The names are built again
+    /// only when the content is another game's, not every frame.
+    pub fn set_content(&mut self, content: Option<&Arc<Content>>) {
+        let same = match (&self.names_of, content) {
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            (None, None) => true,
+            _ => false,
+        };
+        if same {
+            return;
+        }
+        self.names = content.map_or_else(Names::default, |c| Names::of(c));
+        self.names_of = content.cloned();
+        self.shown.clear();
+        self.shown_for.clear();
+        self.picked = None;
+    }
+
+    /// The snapshot's typed line (`RAZDOR_SCENE_CONSOLE_LINE`), as if typed.
+    pub fn preset_line(&mut self, line: &str) {
+        self.line = line.to_string();
+        self.edit = Default::default();
+    }
+
+    /// The list is made again when the line was typed (not by a Tab, an arrow or a recall).
+    fn refresh_shown(&mut self) {
+        if self.line != self.shown_for {
+            self.shown = cheats::suggestions(&self.line, &self.names);
+            self.shown_for = self.line.clone();
+            self.picked = None;
+        }
+    }
+
+    /// Completes the line to row `i` (Tab, a tap, Enter); the list stays, with that row picked.
+    fn complete(&mut self, i: usize) {
+        self.line = self.shown[i].completion.clone();
+        self.shown_for = self.line.clone();
+        self.picked = Some(i);
+        self.edit = Default::default();
+    }
+
+    /// A line brought back from the history: no list for it.
+    fn recalled(&mut self) {
+        self.shown_for = self.line.clone();
+        self.shown.clear();
+        self.picked = None;
+        self.edit = Default::default();
     }
 
     /// Before the screen's frame: opens on the console's key where it is `allowed`, and while
@@ -173,16 +242,37 @@ impl Console {
             self.open = false;
             return (true, None);
         }
-        let typed: Vec<char> = chars.into_iter().filter(|c| !is_toggle(*c)).collect();
-        let rules = EditRules { max_chars: 200, multiline: false, allow: |c| !is_toggle(c) };
+        let typed: Vec<char> = chars.into_iter().filter(|c| !is_toggle(*c) && *c != '\t').collect();
+        let rules = EditRules { max_chars: 200, multiline: false, allow: |c| !is_toggle(c) && c != '\t' };
         edit_keys(&mut self.line, &mut self.edit, &typed, rules);
-        if is_key_pressed(KeyCode::Up) && !self.recall.is_empty() {
+        self.refresh_shown();
+        // A tap on a row of the list completes to it (a phone); the tap is taken, as the close box's.
+        let rows = row_rects(&layout_now(10.0 * k), k, display::dp_px(), self.shown.len());
+        if let Some(i) = rows.iter().position(|r| tapped_in(*r)) {
+            self.complete(i);
+            swallow_input();
+            return (true, None);
+        }
+        // Tab goes on through the list (Shift+Tab back); with no row picked, to the first.
+        let listed = self.shown.len();
+        if is_key_pressed(KeyCode::Tab) && listed > 0 {
+            let back = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
+            if let Some(i) = cheats::cycle(self.picked, listed, !back) {
+                self.complete(i);
+            }
+        }
+        // With a list up, the arrows pick a row; without one they recall the history.
+        if is_key_pressed(KeyCode::Up) && listed > 0 {
+            self.picked = cheats::cycle(self.picked, listed, false);
+        } else if is_key_pressed(KeyCode::Up) && !self.recall.is_empty() {
             let at = self.recall_at.map_or(self.recall.len() - 1, |i| i.saturating_sub(1));
             self.recall_at = Some(at);
             self.line = self.recall[at].clone();
-            self.edit = Default::default();
+            self.recalled();
         }
-        if is_key_pressed(KeyCode::Down) {
+        if is_key_pressed(KeyCode::Down) && listed > 0 {
+            self.picked = cheats::cycle(self.picked, listed, true);
+        } else if is_key_pressed(KeyCode::Down) {
             match self.recall_at {
                 Some(i) if i + 1 < self.recall.len() => {
                     self.recall_at = Some(i + 1);
@@ -193,7 +283,7 @@ impl Console {
                     self.line.clear();
                 }
             }
-            self.edit = Default::default();
+            self.recalled();
         }
         let most = self.log.len().saturating_sub(SHOWN);
         if is_key_pressed(KeyCode::PageUp) || wheel_raw() > 0.0 {
@@ -203,7 +293,14 @@ impl Console {
             self.scroll = self.scroll.saturating_sub(3);
         }
         let mut entered = None;
-        if enter_pressed() && !self.line.trim().is_empty() {
+        let mut enter = enter_pressed();
+        // Enter with a row picked completes to it, and runs it only when it is a command that needs
+        // no argument (`reveal`); a name or a command with an argument waits for another Enter.
+        if let Some(i) = self.picked.filter(|&i| enter && i < self.shown.len()) {
+            enter = self.shown[i].alone;
+            self.complete(i);
+        }
+        if enter && !self.line.trim().is_empty() {
             let line = std::mem::take(&mut self.line).trim().to_string();
             self.edit = Default::default();
             if self.recall.last() != Some(&line) {
@@ -213,6 +310,9 @@ impl Console {
                 }
             }
             self.recall_at = None;
+            self.shown.clear();
+            self.shown_for.clear();
+            self.picked = None;
             self.print(format!("> {line}"), Kind::Typed);
             entered = Some(line);
         }
@@ -228,9 +328,14 @@ impl Console {
         let (size, pitch, pad) = metrics(k);
         let l = layout_now(pad);
         let (w, top) = (screen_width(), l.content.y);
-        let h = top + pad * 2.0 + pitch * (SHOWN as f32 + 1.0) + 6.0 * k;
+        let base = top + pad * 2.0 + pitch * (SHOWN as f32 + 1.0) + 6.0 * k;
+        let rows = row_rects(&l, k, display::dp_px(), self.shown.len());
+        let h = rows.last().map_or(base, |r| r.bottom());
         draw_rectangle(0.0, 0.0, w, h, Color::new(0.02, 0.02, 0.02, 0.86));
-        draw_line(0.0, h, w, h, 2.0 * k, chrome::GOLD);
+        draw_line(0.0, base, w, base, 2.0 * k, chrome::GOLD);
+        if !rows.is_empty() {
+            draw_line(0.0, h, w, h, 2.0 * k, chrome::GOLD);
+        }
         let end = self.log.len() - self.scroll.min(self.log.len());
         let start = end.saturating_sub(SHOWN);
         let text_w = l.text_right - l.text_x;
@@ -260,6 +365,23 @@ impl Console {
             let nw = measure(note, size * 0.85).width;
             text(note, l.text_right - nw, top + pad + pitch * 0.8, size * 0.85, DIM);
         }
+        // The completion list under the input line: the command or name, then its dim description.
+        for (i, s) in self.shown.iter().enumerate() {
+            let r = rows[i];
+            let picked = self.picked == Some(i);
+            if picked {
+                draw_rectangle(r.x, r.y, r.w, r.h, FIELD_BG);
+            }
+            let ty = r.y + (r.h - pitch) / 2.0 + pitch * 0.8;
+            let label_w = measure(&s.label, size).width.min(text_w * 0.5);
+            text_fit(&s.label, l.text_x, ty, label_w, size, if picked { ACCENT } else { INK });
+            if !s.hint.is_empty() {
+                let hx = l.text_x + label_w + 2.0 * pad;
+                if l.text_right > hx {
+                    text_fit(tr(s.hint), hx, ty, l.text_right - hx, size, DIM);
+                }
+            }
+        }
         if let Some(c) = l.close {
             // The tap that closes it is taken in `input`; this only draws the box.
             chrome::close_button(c.x, c.y, c.w, true);
@@ -281,6 +403,15 @@ fn input_field(l: &Layout, k: f32) -> Rect {
 fn scroll_area(l: &Layout, pitch: f32, pad: f32) -> Rect {
     let top = l.content.y + pad;
     Rect::new(l.text_x, top, l.text_right - l.text_x, pitch * SHOWN as f32)
+}
+
+/// The completion rows under the console's last line, `n` of them: each a line's pitch on the
+/// desktop and a finger's target on a phone (`tap_rect_at`), so the drawn row is the tap's too.
+fn row_rects(l: &Layout, k: f32, dp: Option<f32>, n: usize) -> Vec<Rect> {
+    let (_, pitch, pad) = metrics(k);
+    let top = l.content.y + pad * 2.0 + pitch * (SHOWN as f32 + 1.0) + 6.0 * k;
+    let rh = tap_rect_at(Rect::new(0.0, 0.0, 1.0, pitch), false, dp).h;
+    (0..n).map(|i| Rect::new(l.content.x, top + rh * i as f32, l.content.w, rh)).collect()
 }
 
 /// The wheel whatever holds the input (the console holds it back from the screen).
@@ -370,6 +501,71 @@ mod tests {
         let t = tap_rect_at(f, false, Some(k));
         assert!(t.h >= 48.0 * k - 0.5, "at least 48 dp tall");
         assert_eq!(t.y, f.y, "grown from its top edge down");
+    }
+
+    #[test]
+    fn the_completion_rows_sit_under_the_input_line_and_are_finger_sized_on_a_phone() {
+        let k = 2.625;
+        let pad = metrics(k).2;
+        let phone = layout((1080.0, 2400.0), SafeArea::default(), Some(k), pad);
+        let field = input_field(&phone, k);
+        let rows = row_rects(&phone, k, Some(k), 8);
+        assert_eq!(rows.len(), 8);
+        assert!(rows[0].y >= field.bottom(), "under the input line");
+        assert!(rows.iter().all(|r| r.h >= 48.0 * k - 0.5), "a phone row is at least 48 dp");
+        assert!(rows.windows(2).all(|w| (w[1].y - w[0].bottom()).abs() < 0.5), "the rows stack");
+        let desk = layout((1280.0, 800.0), SafeArea::default(), None, pad);
+        let rows = row_rects(&desk, 1.0, None, 3);
+        assert_eq!(rows[0].h, metrics(1.0).1, "on the desktop a row is a line");
+        assert!(row_rects(&desk, 1.0, None, 0).is_empty());
+    }
+
+    #[test]
+    fn tab_goes_on_through_the_list_and_the_list_stays_until_the_line_is_typed() {
+        let mut c = Console::default();
+        c.preset_line("go");
+        c.refresh_shown();
+        assert_eq!(c.shown.len(), 2, "gold and god");
+        c.complete(cheats::cycle(c.picked, c.shown.len(), true).unwrap());
+        assert_eq!(c.line, "gold ", "the first Tab: the first row");
+        c.refresh_shown();
+        assert_eq!(c.shown.len(), 2, "a Tab's completion keeps the list");
+        c.complete(cheats::cycle(c.picked, c.shown.len(), true).unwrap());
+        assert_eq!(c.line, "god ", "the next Tab: the next row");
+        c.line.push('x');
+        c.refresh_shown();
+        assert_eq!(c.picked, None, "a typed key starts the list again");
+        assert!(c.shown.is_empty(), "god x is no command");
+    }
+
+    #[test]
+    fn a_recalled_line_shows_no_list_until_it_is_typed_on() {
+        let mut c = Console::default();
+        c.recall.push("gold 5".into());
+        c.line = c.recall[0].clone();
+        c.recalled();
+        c.refresh_shown();
+        assert!(c.shown.is_empty(), "history recall keeps no list");
+        c.line.push('0');
+        c.refresh_shown();
+        assert_eq!(c.shown_for, "gold 50", "typed on: the list is made again for the new line");
+    }
+
+    #[test]
+    fn the_names_are_the_games_and_are_built_once_per_game() {
+        let mut c = Console::default();
+        c.set_content(None);
+        assert_eq!(c.names, Names::default());
+        let content = Arc::new(Content::builtin());
+        c.set_content(Some(&content));
+        assert_eq!(c.names.items.len(), content.items.len());
+        c.preset_line("item ");
+        c.refresh_shown();
+        assert!(c.shown.is_empty(), "no query, no names");
+        c.set_content(Some(&content));
+        assert!(Arc::ptr_eq(c.names_of.as_ref().unwrap(), &content), "the same game: kept");
+        c.set_content(None);
+        assert_eq!(c.names, Names::default(), "no game, no names");
     }
 
     #[test]
