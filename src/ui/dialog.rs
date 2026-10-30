@@ -930,7 +930,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         // The item tooltip is 272 wide and as tall as its text plus 32 (0x4cbab0). The spell card is
         // the book's cell size (286 × 112) at the window's scale: the original's full card at the
         // pointer, with its cost and duration lines (the player's frames 625-626: 402 × 157 px at 1920).
-        let (pw, ph) = if spell { (286.0 * o, 112.0 * o) } else { (super::item_text::TOOLTIP_W * o, super::item_text::tooltip_height(game, ItemId(id), o)) };
+        let (pw, ph) = if spell { (286.0 * o, 112.0 * o) } else { super::item_text::tooltip_size(game, ItemId(id), o) };
         let px = (at.x - pw / 2.0).clamp(x + 10.0, (x + w - 10.0 - pw).max(x + 10.0));
         let py = (at.y - ph / 2.0).clamp(y + 10.0, (y + h - 10.0 - ph).max(y + 10.0));
         draw_rectangle(px + 8.0, py + 8.0, pw, ph, Color::new(0.0, 0.0, 0.0, 0.45));
@@ -1067,7 +1067,7 @@ fn draw_village_event(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Optio
             let pressed = is_mouse_button_down(MouseButton::Left) || is_mouse_button_down(MouseButton::Right);
             if r.contains(pointer().into()) && (pressed || (super::touchpad::enabled() && super::rest::rested())) {
                 if let Some(game) = game {
-                    let (tw, th) = (super::item_text::TOOLTIP_W * o, super::item_text::tooltip_height(game, item, o));
+                    let (tw, th) = super::item_text::tooltip_size(game, item, o);
                     super::item_text::draw(game, assets, item, Rect::new(x + (w - tw) / 2.0, y, tw, th), super::item_text::ItemBox::Tooltip, o);
                     return None;
                 }

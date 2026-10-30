@@ -72,14 +72,17 @@ struct Line {
 /// times `fit` (1 unless `draw` shrinks a long text). Their text takes Razdor's text size on
 /// the phone's text base (`display::text_for`; the owner's request: phones' text too small),
 /// as the messages do.
-fn lines(game: &Game, item: ItemId, room: f32, s: f32, fit: f32) -> Vec<Line> {
+fn lines(game: &Game, item: ItemId, room: f32, s: f32, fit: f32, grown: bool) -> Vec<Line> {
     // A phone's text takes its own size: measured with the legacy metrics (see `draw`).
-    super::dt_font::legacy_metrics_if(super::display::dp_px().is_some(), || lines_at(game, item, room, s, fit))
+    super::dt_font::legacy_metrics_if(super::display::dp_px().is_some(), || lines_at(game, item, room, s, fit, grown))
 }
 
-fn lines_at(game: &Game, item: ItemId, room: f32, s: f32, fit: f32) -> Vec<Line> {
+/// The lines of `item`; `grown` for a pop-up, whose text takes the grown size
+/// (`display::item_text_for`), else the window's text (`display::text_for`).
+fn lines_at(game: &Game, item: ItemId, room: f32, s: f32, fit: f32, grown: bool) -> Vec<Line> {
     let d = game.content.item(item);
-    let t = super::display::text_for(s, crate::ui::dialog::TEXT_REF) * fit;
+    let base = if grown { super::display::item_text_for(s, crate::ui::dialog::TEXT_REF) } else { super::display::text_for(s, crate::ui::dialog::TEXT_REF) };
+    let t = base * fit;
     let (title, body) = (sheet_size(Face::Subtitle, t), sheet_size(Face::Body, t));
     let mut out = Vec::new();
     let mut add = |text: &str, face: Face, size: f32, color: Color| {
@@ -120,10 +123,25 @@ fn height(lines: &[Line]) -> f32 {
     lines.iter().map(advance).sum()
 }
 
-/// The tooltip's height for `item` at `s` screen pixels per original pixel: its text plus
-/// twice the margin (0x4cbb15).
-pub fn tooltip_height(game: &Game, item: ItemId, s: f32) -> f32 {
-    height(&lines(game, item, (TOOLTIP_W - 2.0 * TOOLTIP_MARGIN) * s, s, 1.0)) + 2.0 * TOOLTIP_MARGIN * s
+/// The tooltip's width at `s` screen pixels per original pixel and the item text growth
+/// `factor` (`display::item_text_factor`), kept to the screen's width less 6 px a side.
+pub fn tooltip_width(s: f32, factor: f32, screen_w: f32) -> f32 {
+    (TOOLTIP_W * s * factor).min(screen_w - 12.0)
+}
+
+/// The tooltip's height for `item` in a box `w` wide at `s` screen pixels per original pixel:
+/// its text plus twice the margin (0x4cbb15), its text at the grown size.
+pub fn tooltip_height(game: &Game, item: ItemId, s: f32, w: f32) -> f32 {
+    height(&lines(game, item, w - 2.0 * TOOLTIP_MARGIN * s, s, 1.0, true)) + 2.0 * TOOLTIP_MARGIN * s
+}
+
+/// The pop-up box `(width, height)` for `item` at `s` screen pixels per original pixel: the
+/// width grown with the text size, the height as its text needs, both kept on the screen
+/// (the height at 4 px above and below; a text too tall for it is drawn smaller by [`draw`]).
+pub fn tooltip_size(game: &Game, item: ItemId, s: f32) -> (f32, f32) {
+    let (sw, sh) = (macroquad::window::screen_width(), macroquad::window::screen_height());
+    let w = tooltip_width(s, super::display::item_text_factor(), sw);
+    (w, tooltip_height(game, item, s, w).min(sh - 8.0))
 }
 
 /// The next `(scale, fit)` of a text that is taller than its room. On the desktop the text's
@@ -161,12 +179,14 @@ pub fn draw(game: &Game, assets: &Assets, item: ItemId, r: Rect, kind: ItemBox, 
     let above = if kind == ItemBox::Market { PICTURE_TOP + PICTURE } else { 0.0 };
     let room_h = |s: f32| r.h - above * s - if kind == ItemBox::Tooltip { 2.0 * TOOLTIP_MARGIN * s } else { 0.0 };
     let phone = super::display::dp_px().is_some();
-    let t = super::display::text_for(s, crate::ui::dialog::TEXT_REF);
+    // Only a pop-up grows its text with the text size (its box grows with it, `tooltip_size`).
+    let grown = kind == ItemBox::Tooltip;
+    let t = if grown { super::display::item_text_for(s, crate::ui::dialog::TEXT_REF) } else { super::display::text_for(s, crate::ui::dialog::TEXT_REF) };
     let (mut scale, mut fit) = (s, 1.0);
-    let mut text = lines(game, item, r.w - 2.0 * side * scale, scale, fit);
+    let mut text = lines(game, item, r.w - 2.0 * side * scale, scale, fit, grown);
     while height(&text) > room_h(scale) && can_shrink(phone, s, scale, t, fit) {
         (scale, fit) = fit_step(phone, scale, fit);
-        text = lines(game, item, r.w - 2.0 * side * scale, scale, fit);
+        text = lines(game, item, r.w - 2.0 * side * scale, scale, fit, grown);
     }
     let h = height(&text);
     let top = match kind {
@@ -219,5 +239,22 @@ mod tests {
         }
         assert!(n > 0 && t * fit <= s * 0.6 && fit < 1.0);
         assert_eq!(fit_step(true, s, fit).0, s);
+    }
+
+    #[test]
+    fn a_pop_up_grows_its_text_and_box_together_and_stays_on_the_screen() {
+        use super::super::display::{item_text_factor_at, item_text_scale_at};
+        // Large and Largest grow by the same factor; the normal size does not grow.
+        assert_eq!(item_text_factor_at(1.0), 1.0);
+        assert_eq!(item_text_factor_at(1.25), 1.2);
+        assert_eq!(item_text_factor_at(1.5), 1.2);
+        // The box is 272 original px at the normal size, 1.2 times that at Large and Largest.
+        assert_eq!(tooltip_width(1.0, 1.0, 1600.0), TOOLTIP_W);
+        assert!((tooltip_width(1.0, 1.2, 1600.0) - TOOLTIP_W * 1.2).abs() < 1e-3);
+        // Kept to the screen less 6 px a side.
+        assert_eq!(tooltip_width(2.0, 1.2, 400.0), 388.0);
+        // The text: the normal size's scale at the normal size, else grown by the factor.
+        assert_eq!(item_text_scale_at(1.0, 2.625), 2.625);
+        assert!((item_text_scale_at(1.5, 2.0) - 2.4).abs() < 1e-3);
     }
 }

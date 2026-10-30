@@ -275,6 +275,37 @@ pub fn text_for_at(t: f32, dp: Option<f32>, base: f32, reference: (f32, f32), sc
     text_o_at(t, phone_text_base(dp, base, reference, screen, bar))
 }
 
+/// How much an item's pop-up description grows at a larger text size (the owner's request,
+/// 2026-10-30: a phone's pop-up was a narrow tall strip at Large and Largest). Its text is this
+/// times the normal size's text, the same for Large and Largest, and its box grows as much, so a
+/// line holds as many words as at the normal size.
+pub const ITEM_TEXT_GROW: f32 = 1.2;
+
+/// The growth of an item's pop-up for the text size `t`: [`ITEM_TEXT_GROW`] above the normal
+/// size, 1 at it.
+pub fn item_text_factor_at(t: f32) -> f32 {
+    if t > 1.0 + 1e-3 { ITEM_TEXT_GROW } else { 1.0 }
+}
+
+/// [`item_text_factor_at`] for the chosen text size.
+pub fn item_text_factor() -> f32 {
+    item_text_factor_at(text_size())
+}
+
+/// The scale of an item's pop-up text for the normal size's scale `normal` (what
+/// [`text_for_at`] gives at the normal size): `normal` at the normal size, else it grown by the
+/// factor, as `text_o_at` rounds it.
+pub fn item_text_scale_at(t: f32, normal: f32) -> f32 {
+    let f = item_text_factor_at(t);
+    if f == 1.0 { normal } else { crate::ui::dt_font::whole_scale(normal * f) }
+}
+
+/// [`text_for`] of an item's pop-up for the window's scale `base` and the message `reference`.
+pub fn item_text_for(base: f32, reference: (f32, f32)) -> f32 {
+    let normal = text_for_at(1.0, dp_px(), base, reference, (macroquad::window::screen_width(), macroquad::window::screen_height()), crate::ui::chrome::bar_height());
+    item_text_scale_at(text_size(), normal)
+}
+
 /// Whether the text is the original's own (the desktop at the original's size): then the texts
 /// keep the interface scale's native metrics, as before the text size. Off, they take the sizes
 /// asked for (`dt_font::with_legacy_metrics`).

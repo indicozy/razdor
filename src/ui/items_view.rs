@@ -1122,9 +1122,10 @@ pub fn squad(
     // press only (`input::hint_hover`).
     if let Some(item) = hover.filter(|_| game.held_item.is_none() && super::input::hint_hover()) {
         // The original's item tooltip (0x4cbab0): 272 wide, as tall as its text plus 32.
-        let (pw, ph) = (super::item_text::TOOLTIP_W * k, super::item_text::tooltip_height(game, item, k));
+        let (pw, ph) = super::item_text::tooltip_size(game, item, k);
         let (mx, my) = pointer();
         let px = if mx + 21.0 * k + pw > sw { mx - 21.0 * k - pw } else { mx + 21.0 * k };
+        let px = px.clamp(6.0, (sw - pw - 6.0).max(6.0));
         let py = (my + 37.0 * k).min(sh - ph - 4.0).max(4.0);
         draw_rectangle(px + 6.0 * k, py + 6.0 * k, pw, ph, Color::new(0.0, 0.0, 0.0, 0.45));
         super::item_text::draw(game, assets, item, Rect::new(px, py, pw, ph), super::item_text::ItemBox::Tooltip, k);

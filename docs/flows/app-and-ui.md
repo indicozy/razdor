@@ -407,7 +407,13 @@ An item's description, wherever it is shown (the market, the hero window's box, 
 window's pop-up, the event window's item tooltip), is one box, `item_text::draw` in
 `src/ui/item_text.rs`, laid out per window by `item_text::ItemBox`; its usage line, effect text
 and bonus line are the original's (interface.md §9.2), built by `rules::item_text` from the
-install's `[Skills]` labels (`spell_badges::label`).
+install's `[Skills]` labels (`spell_badges::label`). The pop-up (`ItemBox::Tooltip`, the army
+window's and the event windows' pointer pop-ups) grows with «Размер текста» (Razdor's, the
+owner's request, 2026-10-30): its text is `display::item_text_for` (1.2 times the normal size's
+text at Large and Largest, `display::item_text_factor`) and its box is `item_text::tooltip_size`,
+1.2 times the 272 px at the normal size, kept to the screen (6 px a side; the height at 4 px
+above and below, the text drawn smaller if it still does not fit). The hero window's box and the
+market's stay at the window's text size (`display::text_for`).
 
 The pack is the original's cells with holes (`pack::Pack`, `Game::pack`): an item stays in
 the cell it was put in, gains fill the first empty cell. On main it has no last cell (the
