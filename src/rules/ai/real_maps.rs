@@ -395,6 +395,9 @@ fn hub_real_catalog() {
             Ok(Err(why)) => fail(what, why, &mut failures),
             Err(p) => fail(what, format!("panic: {}", panic_text(&*p)), &mut failures),
         }
+        // Its built folder is a full copy of the base where the hub is on another disk: gone
+        // after the check (its files stay; the install of the next entries does not need it).
+        crate::hub::drop_game_folder(&hub.local, &e.id);
     }
 
     // 3. The maps and campaigns, each installed and checked.

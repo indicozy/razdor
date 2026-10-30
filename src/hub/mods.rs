@@ -238,6 +238,29 @@ pub fn prepare_mod(local: &Path, base: &Path, id: &str) -> Result<PathBuf, Strin
     Ok(game)
 }
 
+/// Removes mod `id`'s built game folder (and a half-built one). Its `files/` stay, so playing
+/// the mod again rebuilds it. Saves are never in it (`save::saves_dir_of`).
+pub fn drop_game_folder(local: &Path, id: &str) {
+    if !safe_id(id) {
+        return;
+    }
+    let _ = std::fs::remove_dir_all(mod_game_dir(local, id));
+    let _ = std::fs::remove_dir_all(mod_dir(local, id).join("game.tmp"));
+}
+
+/// Keeps only the built game folder of `keep` (`None`: the base game, so none): every other
+/// mod's game folder under `mods/` goes. Each is a full copy of the base where the hub is on
+/// another disk than the install, so only the one in use is kept.
+pub fn keep_only_game_folder(local: &Path, keep: Option<&str>) {
+    let Ok(read) = std::fs::read_dir(local.join("mods")) else { return };
+    for entry in read.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if Some(name.as_str()) != keep && entry.path().is_dir() {
+            drop_game_folder(local, &name);
+        }
+    }
+}
+
 fn read_stamp(game: &Path) -> Option<Stamp> {
     serde_json::from_slice(&std::fs::read(game.join(STAMP)).ok()?).ok()
 }
@@ -745,5 +768,40 @@ mod tests {
         assert_eq!(unpack_zip_within(&zip, &dir.join("ok"), 20, MAX_ZIP_ENTRIES).unwrap().len(), 2);
         assert!(unpack_zip(&dir.join("missing.zip"), &dir.join("m")).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn keeping_one_game_folder_removes_the_others_and_never_the_saves() {
+        let base = base_install("keep");
+        let local = temp("keep-hub");
+        install_mod(&local, "a", "1.0", &[("Data/Units.ini", "A units")]);
+        install_mod(&local, "b", "1.0", &[("Data/Extra.ini", "B extra")]);
+        let game_a = prepare_mod(&local, &base, "a").unwrap();
+        let game_b = prepare_mod(&local, &base, "b").unwrap();
+        // The saves of a's folder: the app's saves root, never inside a game folder.
+        let saves_root = temp("keep-saves");
+        let saves = crate::rules::save::saves_dir_of(&saves_root, &game_a);
+        put(&saves.join("slot1.rzsave"), "a save");
+        assert!(!saves.starts_with(&game_a), "saves are not inside the game folder");
+        assert!(!saves.starts_with(mod_dir(&local, "a")), "nor inside the mod's folder");
+
+        keep_only_game_folder(&local, Some("b"));
+        assert!(!game_a.exists(), "a's built folder goes");
+        assert!(game_b.join("Data/Extra.ini").exists(), "b's built folder stays");
+        assert!(mod_files_dir(&local, "a").join("Data/Units.ini").exists(), "a's files stay: a rebuilds on the next play");
+        assert_eq!(std::fs::read_to_string(saves.join("slot1.rzsave")).unwrap(), "a save", "saves are not deleted");
+        assert_eq!(std::fs::read_to_string(base.join("Data/Units.ini")).unwrap(), "base units", "the base is not touched");
+
+        // Playing a again rebuilds its folder, with the same saves path (same folder path).
+        let again = prepare_mod(&local, &base, "a").unwrap();
+        assert_eq!(again, game_a);
+        assert_eq!(crate::rules::save::saves_dir_of(&saves_root, &again), saves, "the saves key is the same after a rebuild");
+
+        keep_only_game_folder(&local, None);
+        assert!(!game_a.exists() && !game_b.exists(), "the base game keeps no mod folder");
+        assert!(saves.join("slot1.rzsave").exists(), "saves still there");
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&local);
+        let _ = std::fs::remove_dir_all(&saves_root);
     }
 }

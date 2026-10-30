@@ -357,7 +357,10 @@ impl App {
         self.refresh_mods();
         if self.active_mod != id {
             self.message = Some(tr("The mod does not play; the base game is played.").into());
+            return;
         }
+        // The game reads the new folder now: the others' built folders go (their files stay).
+        razdor::hub::keep_only_game_folder(&local, id.as_deref());
     }
 
     /// Opens the map editor (the title screen's button and `--editor`).

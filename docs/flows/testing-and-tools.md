@@ -76,10 +76,10 @@ one line per entry (`ok` or `FAIL <why>`) and a summary, then fails listing ever
 RAZDOR_HUB_CATALOG_DIR=/path/to/catalog RAZDOR_DT_DIR=<install> RAZDOR_HUB_TEST_DIR=/big/disk CARGO_BUILD_JOBS=12 nice -n 19 taskset -c 8-19 cargo test --release --lib hub_real_catalog -- --nocapture
 ```
 
-The community release's catalog (370 entries: 25 mods, 289 maps, 56 campaigns) takes about a minute and
-peaks near 5.7 GB of temp hub: a mod's folder hard-links the base's files, but where the hub is on another
-disk than the install every mod folder copies the base (about 128 MB each), so put `RAZDOR_HUB_TEST_DIR` on
-the install's disk to keep it small. On the release catalog it reports 6 campaigns whose next-map name is in
+The community release's catalog (370 entries: 25 mods, 289 maps, 56 campaigns) takes about a minute. Each
+mod's built game folder is removed after its check (`hub::drop_game_folder`): where the hub is on another
+disk than the install, a built folder is a full copy of the base (about 100-130 MB), so only one is on disk
+at a time. Put `RAZDOR_HUB_TEST_DIR` on the install's disk if the copies still matter. On the release catalog it reports 6 campaigns whose next-map name is in
 neither the catalog nor the base install (a data problem in the catalog, not in the hub).
 
 ## Offscreen runs and snapshots

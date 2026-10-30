@@ -667,7 +667,13 @@ stamp differs is rebuilt (a reinstall, a changed base or file list). `hub::activ
 (called by `DtInstall::from_env` after `locate`, so the whole app reads it: assets, content, maps,
 language, `save::set_install`) returns the active mod's folder, else `base`; the choice is
 `<hub>/active.json` (`{"mod": "<id>"}`, none = the base). A choice whose mod is gone or does not build
-is cleared and the base played. `install::base_dir()` is the base (the folder that imports write to:
+is cleared and the base played. Only the active mod's built folder is kept: `choose_mod` calls
+`hub::keep_only_game_folder` after the reload has landed on the new choice (never before, so the folder in
+use is not removed); a mod's `files/` stay, so playing it again rebuilds its folder. Each built folder is a
+full copy of the base where the hub is on another disk than the install (Windows: install on D:, app data on
+C:), which is why the others go. A mod's saves are not in its folder: `save::saves_dir_of(app saves root, game
+folder)` keys them by the game folder's path, beside the other installs' saves, and that path is the same
+after a rebuild, so removing `game/` never deletes them (test `keeping_one_game_folder_removes_the_others_and_never_the_saves`). `install::base_dir()` is the base (the folder that imports write to:
 the game's update, «Добавить карту…»). Saves: `save::games_dir` keys them by the install folder's path,
 so a mod's folder (`…/mods/<id>/game`, named `game`) has its own save folder beside the base's; they
 are not in the mod's folder.

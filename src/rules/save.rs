@@ -226,11 +226,18 @@ pub fn set_install(dir: &Path) {
 pub fn games_dir() -> Option<PathBuf> {
     let root = default_dir()?;
     let Some(install) = INSTALL.lock().unwrap_or_else(|e| e.into_inner()).clone() else { return Some(root) };
-    let own = root.join(install_key(&install));
+    let own = saves_dir_of(&root, &install);
     if !own.exists() {
         claim_old_saves(&root, &own, &install);
     }
     Some(own)
+}
+
+/// The saves folder of `install` under the saves root `root`: one per install, beside the
+/// others. It is keyed by the install's path, so a mod's merged game folder keeps its saves
+/// across rebuilds, and it is never inside that folder (`root` is the app's saves folder).
+pub fn saves_dir_of(root: &Path, install: &Path) -> PathBuf {
+    root.join(install_key(install))
 }
 
 /// The name of install `dir`'s save folder: its folder name and the FNV-1a hash of its path.
