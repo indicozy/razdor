@@ -87,8 +87,9 @@ Razdor keeps one choice: an erased name falls back to the class name.
 
 **Scripts** (events.md). See `map-step.md` for the scan. The window's artifacts-lost row is the
 one result the window takes from the engine: `EventOutcome::ItemsLost` (sent right after the
-event's `Fired`, only with the artifacts really taken) → `story::show` → `Dialog::lost`; the other
-dialog-time rows come from the event's record in `event_dialog`. Hall quests and rumours come from
+event's `Fired`, only with the artifacts really taken) → `story::show` → `Dialog::lost`. The
+departed row is the same: `EventOutcome::UnitsLost` (the unit types really removed, one per unit)
+→ `story::show` → `Dialog::left`. The other dialog-time rows come from the event's record in `event_dialog`. Hall quests and rumours come from
 `EventEngine::hall` / `Game::take_hall_entry`; `QuestAdded` / `QuestCompleted` go into the journal
 (`History::record_outcomes`); `#HERONAME` is the only text placeholder (`Game::fill_text`).
 

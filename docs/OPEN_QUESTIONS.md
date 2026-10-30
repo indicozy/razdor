@@ -303,16 +303,12 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   unit card panel (`selected_unit_panel`), no `window_layout` and no hint strip under the
   counters (PR #8's), so the pick does not apply. Port it by hand once those are there.
 
-- **Event window: the departed row's units** (2026-10-17, found with a player's report on the
-  units rows). The original fills the departed row only with units really taken, by the taken
-  unit's type (0x4a9711, 0x4961d0). Razdor shows every unit type the event lists under
-  "departed" (`src/ui/story.rs` `event_dialog`). Settling it needs the event engine to report
-  the units it actually removed, as it now reports the items (`EventOutcome::ItemsLost`,
-  `src/rules/events.rs`). The items lost row itself is settled (see Settled). On `dt-original`
-  the units rows are ported (23151b6) but not the 92 × 92 unit bust at the side of the text:
-  that branch still draws an event's unit picture 128 × 128 above the text (main moved it to
-  the side earlier, not ported). The items lost row is not on `dt-original` yet (to port: the
-  commit that adds it; see the Settled entry).
+- **dt-original: the units rows' side bust** (2026-10-17, from the departed row's report). On
+  `dt-original` the units rows are ported (23151b6) but not the 92 × 92 unit bust at the side of the
+  text: that branch still draws an event's unit picture 128 × 128 above the text (main moved it to the
+  side earlier, not ported). `dt-original` is frozen (the owner's decision), so this stays until it is
+  unfrozen or the owner drops it.
+
 - **A ring round the whole building** (2026-10-17, Ivan's report in Discord: the hero drawn on
   top of a tent). Razdor now hides a figure inside a building as the Community exe does
   (0x497abc) and keeps its one-cell ring. The player's snapshot of «the original» shows a
@@ -463,6 +459,14 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   button's own size.
 
 ## Settled
+
+- **Event window: the departed row's units** (2026-10-17, a player's report on the units rows;
+  settled 2026-10-30). The original fills the departed row only with units really taken, one icon
+  per unit removed, by the taken unit's type (0x4a9711, 0x4961d0). Razdor now does the same: the
+  event engine reports the types it removed (`EventOutcome::UnitsLost`, `src/rules/events.rs`) and
+  `story::show` builds the row from them (`src/ui/story.rs`); a question window shows no departed row
+  before its answer. Tests: `the_departed_row_lists_only_the_units_really_removed`,
+  `the_departed_row_shows_the_units_really_removed`.
 
 - **The session slot on Android: written when the app is backgrounded** (2026-10-29, the session
   pause hooks, `docs/flows/saves.md` «Session slot»). `MainActivity.onPause` calls `razdorOnPause`

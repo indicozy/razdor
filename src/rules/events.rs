@@ -327,6 +327,11 @@ pub enum EventOutcome {
     /// (0x4a8fe5, the `[Event] DelItem` row). Sent right after the event's `Fired`, and only
     /// when at least one was taken.
     ItemsLost { event: EventId, items: Vec<u8> },
+    /// The unit types the event's window took from the player, one per unit really removed,
+    /// in removal order (the taken unit's own type, 0x4a9711 and 0x4961d0). Sent right after the
+    /// event's `Fired`, and only when at least one was removed; the window's departed row shows
+    /// exactly these.
+    UnitsLost { event: EventId, units: Vec<u32> },
     /// The event asks its yes/no question; call [`EventEngine::answer`]. Nothing else runs
     /// until then.
     Question(EventId),
@@ -1472,10 +1477,16 @@ impl EventEngine {
         let slots: Vec<(u8, u8)> = (0..4).filter(|&i| r.units_remove[i] != 0).map(|i| (r.units_remove[i], r.units_remove_named[i])).collect();
         let units = w.player_units();
         if slots.iter().any(|&(t, n)| find_unit(&units, t, n, 1).is_some()) {
+            let mut taken = Vec::new();
             for (t, n) in slots {
-                if let Some(i) = find_unit(&w.player_units(), t, n, 1) {
+                let now = w.player_units();
+                if let Some(i) = find_unit(&now, t, n, 1) {
+                    taken.push(now[i].unit);
                     w.remove_unit(i, n != 0, to);
                 }
+            }
+            if !taken.is_empty() {
+                out.push(EventOutcome::UnitsLost { event: id, units: taken });
             }
         }
         // The Community hook (0xc28604) skips the learning whenever the event's "no meeting"
@@ -3389,6 +3400,35 @@ mod tests {
 
     /// The lost row lists exactly the artifacts taken (0x4a8fe5): a slot whose item the player
     /// does not hold takes nothing, and a second slot for an item he holds once takes nothing.
+    /// The departed row lists the unit types really removed (0x4a9711, 0x4961d0): two removal
+    /// slots for one unit in the army remove one, two units remove two, and a listed type the
+    /// army does not have removes nothing and reports nothing.
+    #[test]
+    fn the_departed_row_lists_only_the_units_really_removed() {
+        let units_lost = |out: &[EventOutcome]| out.iter().find_map(|o| match o {
+            EventOutcome::UnitsLost { units, .. } => Some(units.clone()),
+            _ => None,
+        });
+        let run = |army: &[u32], remove: [u8; 4]| {
+            let mut e = with_message(many(global()));
+            e.results.units_remove = remove;
+            let mut g = engine(vec![e]);
+            let mut w = MockWorld::new();
+            w.units.extend(army.iter().map(|&u| unit(u, 0)));
+            g.tick(&mut w)
+        };
+        // The shape of event 75 of «Устье Трейна»: two of a type listed, one in the army.
+        let out = run(&[40], [40, 40, 0, 0]);
+        assert_eq!(units_lost(&out), Some(vec![40]), "{out:?}");
+        assert_eq!(out.iter().position(|o| matches!(o, EventOutcome::Fired { .. })), Some(0));
+        // Two of them in the army: both go.
+        assert_eq!(units_lost(&run(&[40, 40], [40, 40, 0, 0])), Some(vec![40, 40]));
+        // A listed type with no match: nothing is removed, no row.
+        assert_eq!(units_lost(&run(&[40], [41, 0, 0, 0])), None);
+        // Two different types: each taken type, in the order the slots list them.
+        assert_eq!(units_lost(&run(&[41, 40], [40, 41, 0, 0])), Some(vec![40, 41]));
+    }
+
     #[test]
     fn the_lost_row_lists_only_what_was_taken() {
         let mut e = with_message(many(global()));

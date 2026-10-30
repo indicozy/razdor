@@ -66,7 +66,8 @@ pub fn event_dialog(game: &Game, id: EventId, asking: bool) -> Dialog {
     d.spells = r.spells_learned.iter().filter(|&&s| s != 0).map(|&s| s as u32).filter(|&s| game.content.spells.iter().any(|x| x.id == s)).collect();
     let known = |u: u8| game.content.try_unit(UnitId(u as u32)).map(|_| UnitId(u as u32));
     d.joined = r.units_add.iter().filter_map(|&u| known(u)).collect();
-    d.left = r.units_remove.iter().filter(|&&u| u != 0xFE && u != 0xFF).filter_map(|&u| known(u)).collect();
+    // The departed row is not built here: it lists the units the event really removed, which
+    // the engine reports as `EventOutcome::UnitsLost` right after `Fired` (`show`).
     // The items gained are left out only for opcode 6, whose fields are its arguments
     // (c278e8).
     if !(r.no_meeting == 1 && r.patrol_delta == 6) {
@@ -100,6 +101,13 @@ pub fn show(game: &Game, o: &EventOutcome, dialogs: &mut VecDeque<Dialog>) {
         EventOutcome::ItemsLost { event, ref items } => {
             if let Some(d) = dialogs.back_mut().filter(|d| d.event == Some(event)) {
                 d.lost = items.iter().map(|&a| ItemId(a as u32)).collect();
+            }
+        }
+        // The departed row: the unit types really removed (0x4a9711), one icon each. A question
+        // shows none before its answer (`event_dialog` returns before the rows).
+        EventOutcome::UnitsLost { event, ref units } => {
+            if let Some(d) = dialogs.back_mut().filter(|d| d.event == Some(event)) {
+                d.left = units.iter().filter(|&&u| game.content.try_unit(UnitId(u)).is_some()).map(|&u| UnitId(u)).collect();
             }
         }
         EventOutcome::QuestAdded(id) => notice(&quest_line("AddQuest", QUEST_ADDED), id, dialogs),
@@ -200,6 +208,35 @@ mod tests {
         assert_eq!(dialogs[0].notice, None, "another event's closing leaves this window alone");
         show(&game, &EventOutcome::QuestCompleted { quest: 1, by: 5 }, &mut dialogs);
         assert!(dialogs[0].notice.is_some(), "the closing event's own window carries the line");
+    }
+
+    /// The departed row is what the engine removed (0x4a9711): one icon per unit type it reports,
+    /// none for a window still asking its question (the rows come with the answer).
+    #[test]
+    fn the_departed_row_shows_the_units_really_removed() {
+        let game = Game::new(std::sync::Arc::new(razdor::rules::content::Content::builtin()), razdor::rules::content::HeroClass::Knight);
+        let unit = game.content.units[0].id;
+        let other = game.content.units[1].id;
+        let window = || VecDeque::from([Dialog { event: Some(75), ..Dialog::new("window") }]);
+        // Two removal slots for one unit in the army: one icon.
+        let mut dialogs = window();
+        show(&game, &EventOutcome::UnitsLost { event: 75, units: vec![unit] }, &mut dialogs);
+        assert_eq!(dialogs[0].left, vec![UnitId(unit)]);
+        // Two units taken: two icons, in removal order.
+        let mut dialogs = window();
+        show(&game, &EventOutcome::UnitsLost { event: 75, units: vec![unit, other] }, &mut dialogs);
+        assert_eq!(dialogs[0].left, vec![UnitId(unit), UnitId(other)]);
+        // A type the content does not know gives no icon.
+        let mut dialogs = window();
+        show(&game, &EventOutcome::UnitsLost { event: 75, units: vec![9999] }, &mut dialogs);
+        assert!(dialogs[0].left.is_empty());
+        // Not for another event's window.
+        let mut dialogs = window();
+        show(&game, &EventOutcome::UnitsLost { event: 76, units: vec![unit] }, &mut dialogs);
+        assert!(dialogs[0].left.is_empty());
+        // A question window builds no departed row before its answer.
+        let asking = event_dialog(&game, 75, true);
+        assert!(asking.left.is_empty());
     }
 
     #[test]
