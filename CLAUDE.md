@@ -24,7 +24,8 @@ mobile support; there is no roadmap and nothing else is started unless the owner
   install there (mods are installs) loads and plays 30 days without a panic or a softlock.
 - Release builds: `scripts/dist.sh` (Linux + Windows), `scripts/dist-macos.sh`.
 - Off-screen screens and profiling: the `offscreen-snapshot` skill.
-- Text size on phones (every text measured in sp, under 12 sp listed): the `text-size` skill.
+- Phone screens (every text measured in sp, every touch target in dp, small and crowded ones
+  listed; specs on request): the `mobile-ui` skill.
 - Player wiki (Starlight in `wiki/`, published to https://indicozy.github.io/razdor/wiki/ by
   `.github/workflows/pages.yml`): the `wiki` skill.
 - UI regression check (renders the scene list off-screen, compares with the goldens outside the
@@ -125,7 +126,7 @@ mobile support; there is no roadmap and nothing else is started unless the owner
 | A change that alters a flow updates its `docs/flows/` file | review |
 | A UI change: the UI regression check run, its diffs reviewed, the changed references accepted | review |
 | A player-visible feature or change has its wiki page added or updated (ru and en) | review (`wiki` skill) |
-| A phone UI change: the text-size check run, no new text under 12 sp | review (`text-size` skill) |
+| A phone UI change: the mobile UI check run, no new text under 12 sp, no new touch target under 40 dp | review (`mobile-ui` skill) |
 | A change to «Максимум»: `max_bench` run, its numbers compared, the baseline updated only for an intended improvement | `max_bench_does_not_regress` + review |
 | Unresolved questions are in `docs/OPEN_QUESTIONS.md`; settled ones moved to its Settled list | review |
 | The task's worktrees, branches, processes and scratch files are cleaned up | review |
@@ -169,7 +170,7 @@ mobile support; there is no roadmap and nothing else is started unless the owner
   (Ghidra, the original under Wine) and parity checks.
 - `.claude/skills/release/SKILL.md`: cutting a release.
 - `.claude/skills/offscreen-snapshot/SKILL.md`: screenshots and profiling without a window.
-- `.claude/skills/text-size/SKILL.md`: measuring text sizes on phone screens.
+- `.claude/skills/mobile-ui/SKILL.md`: measuring text and touch target sizes on phone screens.
 - `.claude/skills/wiki/SKILL.md`: writing and updating the player wiki.
 - `docs/reference/original-mechanics/README.md`: the spec index.
 - `changelog/README.md`: changelog layout.
