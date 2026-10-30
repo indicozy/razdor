@@ -301,7 +301,8 @@ pub fn question_buttons_x(x: f32, w: f32, bw: f32) -> (f32, f32) {
 pub fn defeat_button_rects(x: f32, w: f32, by: f32, bh: f32, o: f32, label_w: [f32; 2]) -> [Rect; 2] {
     let gap = 8.0 * o;
     let margin = 6.0 * o;
-    let want = label_w.map(|l| (l + 24.0 * o).max(95.0 * o));
+    let min_w = 95.0 * o * super::display::button_grow();
+    let want = label_w.map(|l| (l + 24.0 * o).max(min_w));
     // A button centred at a quarter stays inside the window at half the window less the margins;
     // side by side, the two centres half a window apart leave the gap between their edges.
     let fits_window = (w / 2.0 - 2.0 * margin) / want[0].max(want[1]);
@@ -587,6 +588,13 @@ fn event_row_h(defeat: bool, line: f32, t: f32, r: &MarkupRow) -> f32 {
     if defeat && r.text.is_empty() { EVENT_GAP * t } else { line }
 }
 
+/// The footer's extra height at the scale `o` (screen px): the buttons' footer of 58 (Razdor's
+/// own, the owner's decision of 2026-10-31) grows with the text size (`button_grow`), and the
+/// window with it, so its buttons grow with their labels. Zero at Normal.
+fn footer_grow(o: f32) -> f32 {
+    58.0 * o * (super::display::button_grow() - 1.0)
+}
+
 /// The event window's widest width in the original's pixels at the scale `o` on a `sw`-wide
 /// screen: 634 on the desktop; on a phone (Razdor's, the owner's request: a portrait phone's
 /// window was 60% of the width) the screen's width less 12 px, up to [`EVENT_MAX_W`]. A large
@@ -703,7 +711,7 @@ fn event_layout(d: &Dialog, o: f32, t: f32, w: f32) -> EventLayout {
     // The box stops at 499 (and short of the screen): the text scrolls in it, the buttons
     // stay in sight.
     // The title strip's growth (`chrome::title_grow`) is part of the window's height too.
-    let screen_box = (sh - chrome::bar_height() - 4.0) / o - below / o - EVENT_REST - chrome::title_grow() / o;
+    let screen_box = (sh - chrome::bar_height() - 4.0) / o - below / o - EVENT_REST - (chrome::title_grow() + footer_grow(o)) / o;
     let max_box = EVENT_MAX_BOX.min(screen_box);
     let f = event_frame(side, full_h / o, below / o, max_box, w);
     let shown = if full_h / o + 2.0 * EVENT_PAD <= f.box_h { total } else { (((f.box_h - 2.0 * EVENT_PAD) * o / line).floor().max(1.0) as usize).min(total) };
@@ -770,7 +778,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         let min_w = if phone { EVENT_MIN_W } else { EVENT_W };
         // The smallest window: the box at its minimum, the rows under it as they are.
         let first = event_layout(d, plain, t, EVENT_W);
-        let min_h = event_frame(first.side, 0.0, first.below / plain, EVENT_MAX_BOX, min_w).h + chrome::title_grow() / plain;
+        let min_h = event_frame(first.side, 0.0, first.below / plain, EVENT_MAX_BOX, min_w).h + (chrome::title_grow() + footer_grow(plain)) / plain;
         o = super::dt_font::whole_scale(super::display::popup_o(base, min_w, min_h)).min((sw - 12.0) / min_w).max(plain);
     }
     let lay = if large {
@@ -790,7 +798,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     let row_h = |r: &MarkupRow| event_row_h(defeat, line, t, r);
     // The title strip's growth: the window is taller by it, and its frame and content move down.
     let grow = chrome::title_grow();
-    let (w, h) = (f.w * o, f.h * o + grow);
+    let (w, h) = (f.w * o, f.h * o + grow + footer_grow(o));
     let (x, y) = event_origin(sw, sh, chrome::bar_height(), w, h);
     // The defeat look is the red marble (the original's window after a lost battle).
     let skin = if d.defeat { chrome::Skin::Red } else { chrome::Skin::Marble };
@@ -917,9 +925,12 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         // In the event text's own face and size, the original's cyan (90, 231, 255).
         super::dt_font::with_original_face(super::dt_font::Face::Subtitle, || chrome::shadow_centered(n, x + w / 2.0, cy + 18.0 * o, size, Color::new(0.35, 0.9, 1.0, 1.0)));
     }
-    // The buttons, 95 × 36, 45 from the window's bottom.
-    let (bw, bh) = (95.0 * o, 36.0 * o);
-    let by = y + h - 58.0 * o + (58.0 * o - bh) / 2.0;
+    // The buttons, 95 × 36, 45 from the window's bottom; Razdor's own: they grow with the text
+    // size (`button_grow`), centred in the footer, which grows with them (`footer_grow`).
+    let g = super::display::button_grow();
+    let (bw, bh) = (95.0 * o * g, 36.0 * o * g);
+    let foot = 58.0 * o * g;
+    let by = y + h - foot + (foot - bh) / 2.0;
     // A left or right press on an icon shows its item or spell centred on the press, kept
     // inside the window, until the button is let go (0x4c1fec / 0x4c2048, the frame handler
     // 0x4cd558); the window's buttons wait meanwhile.
@@ -1033,7 +1044,12 @@ fn draw_village_event(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Optio
     let text_w = w - pw - 50.0 * o;
     let rows = markup_rows(d.marked.as_deref().unwrap_or(""), text_w - 40.0 * o, size);
     let reward_h = if rewards { 110.0 * o } else { 0.0 };
-    let fixed = 114.0 * o + reward_h;
+    // Razdor's own: the OK, Yes and No buttons grow with the text size (`button_grow`), and the
+    // footer with them: the window is taller by the buttons' growth, its footer keeps its top.
+    let g = super::display::button_grow();
+    let (bw, bh) = (96.0 * o * g, 35.0 * o * g);
+    let foot_grow = bh - 35.0 * o;
+    let fixed = 114.0 * o + reward_h + foot_grow;
     // The title strip's growth is part of the window's height (`chrome::title_grow`).
     let grow = chrome::title_grow();
     let available = (screen_height() - chrome::bar_height() - fixed - grow - 8.0).max(60.0 * o);
@@ -1043,7 +1059,7 @@ fn draw_village_event(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Optio
     let x = ((screen_width() - w) / 2.0).round();
     let y = ((screen_height() - chrome::bar_height() - h) / 2.0).max(2.0).round();
     chrome::window_grown(Rect::new(x, y, w, h), &d.title, chrome::Skin::Marble, false);
-    let footer = Rect::new(x + 2.0 * o, y + h - 55.0 * o, w - 4.0 * o, 53.0 * o);
+    let footer = Rect::new(x + 2.0 * o, y + h - 55.0 * o - foot_grow, w - 4.0 * o, 53.0 * o + foot_grow);
     // The village window is ae2520's kind, with 0x48d710's inner frames (moved down with the
     // taller title strip).
     chrome::window_inner_frames_grown(Rect::new(x, y, w, h), o, grow);
@@ -1088,7 +1104,6 @@ fn draw_village_event(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Optio
         chrome::shadow_centered(label, cx, reward_y + 15.0 * o, size, MANA);
         resource_icon(*resource, cx, reward_y + 56.0 * o, 65.0 * o);
     }
-    let (bw, bh) = (96.0 * o, 35.0 * o);
     let by = footer.y + (footer.h - bh) / 2.0;
     if d.question {
         // The launch's «Продолжить игру?» loads a game: only its button says yes (a key does not).

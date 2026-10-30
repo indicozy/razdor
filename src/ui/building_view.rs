@@ -1073,6 +1073,14 @@ fn recruit_x(i: usize, n: usize) -> f32 {
     area_x + gap + i as f32 * (card + gap)
 }
 
+/// A recruit's face in the barracks. Razdor's own: the card moves up by the growth of its hire
+/// pill and price (button_grow), so the block keeps its bottom edge.
+fn recruit_face(f: &Frame, i: usize, n: usize) -> Rect {
+    let mut face = at(f, recruit_x(i, n), 74.0, 88.0, 88.0);
+    face.y -= 36.0 * chrome::k() * (super::display::button_grow() - 1.0);
+    face
+}
+
 /// The barracks' counters, as the original's row under the recruits: money, the army's
 /// wages and the income, each with its picture.
 fn barracks_counters(game: &Game, r: Rect) {
@@ -1172,7 +1180,7 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
     }
     let shown = recruits.len().min(6);
     for (i, r) in recruits.iter().take(6).enumerate() {
-        let face = at(f, recruit_x(i, shown), 74.0, 88.0, 88.0);
+        let face = recruit_face(f, i, shown);
         // A hire offer is a card of the type (49462c, the hire view's template): its shadow
         // takes the card's height under the face.
         chrome::unit_shadow(Rect::new(face.x, face.y, face.w, face.w * 128.0 / 88.0));
@@ -1190,10 +1198,12 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
         }
         let price = game.hire_price(r.unit);
         let can = hires && stock_left && game.can_afford(price) && game.squad.len() < game.max_squad();
-        let pill = Rect::new(face.x + 4.0 * k, face.y + face.h + 2.0 * k, face.w - 8.0 * k, 17.0 * k);
+        // Razdor's own: the pill, its backing and the price grow with the text size (button_grow).
+        let g = super::display::button_grow();
+        let pill = Rect::new(face.x + 4.0 * k, face.y + face.h + 2.0 * k, face.w - 8.0 * k, 17.0 * k * g);
         // The hire pill now has a transparent black matte. Keep its card backing and the
         // price on parchment, instead of letting the scene show through the button area.
-        chrome::surface(Rect::new(face.x, face.y + face.h, face.w, 36.0 * k), chrome::Skin::Strip);
+        chrome::surface(Rect::new(face.x, face.y + face.h, face.w, 36.0 * k * g), chrome::Skin::Strip);
         let hire = own_text("Army", "HireArmy", n_("Hire"));
         if chrome::pill_button(pill, &hire, can, true) {
             // The original plays the gold on the press and again in the click action on the
@@ -1214,7 +1224,7 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
         }
         let cost = trf!("Price {price}", price = price.amount);
         let color = if price.currency == Currency::Mana { MANA } else { chrome::GOLD };
-        chrome::shadow_centered(&cost, face.center().x, pill.y + pill.h + 13.0 * k, 12.0 * k, color);
+        chrome::shadow_centered(&cost, face.center().x, pill.y + pill.h + 13.0 * k * g, 12.0 * k * g, color);
     }
     barracks_counters(game, at(f, 256.0, 242.0, 572.0, 48.0));
     let strip = card_panel_divider(f);
@@ -1268,7 +1278,7 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
         let mut p = cell_at(u.slot);
         if let Some((CardAnimKind::Hired { unit, recruit }, t)) = anim {
             if unit == i {
-                let from = at(f, recruit_x(recruit, recruits.len().min(6)), 74.0, 88.0, 88.0);
+                let from = recruit_face(f, recruit, recruits.len().min(6));
                 p = vec2(from.x, from.y).lerp(p, t).round();
             }
         }
@@ -1292,12 +1302,18 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
         match (label, price) {
             (Some(label), Some(pr)) => {
                 chrome::surface(strip, chrome::Skin::Strip);
-                let pill = Rect::new(strip.x + 4.0 * k, strip.y + 3.0 * k, strip.w - 8.0 * k, 17.0 * k);
+                // Razdor's own: the pill and price grow with the text size (button_grow); they stay
+                // inside the card, moved up if the grown block would leave it.
+                let g = super::display::button_grow();
+                let pill_h = 17.0 * k * g;
+                // (A short strip at Normal keeps the original's top; only the grown block moves up.)
+                let pill_y = if g > 1.0 { (strip.y + 3.0 * k).min(strip.bottom() - 3.0 * k - 13.0 * k * g - pill_h) } else { strip.y + 3.0 * k };
+                let pill = Rect::new(strip.x + 4.0 * k, pill_y, strip.w - 8.0 * k, pill_h);
                 if chrome::pill_button(pill, &label, game.can_pay_service(pr), false) {
                     action = Some((i, raise));
                 }
                 let cost = trf!("Price {price}", price = pr.amount);
-                chrome::shadow_centered(&cost, strip.center().x, pill.y + pill.h + 13.0 * k, 12.0 * k, chrome::GOLD);
+                chrome::shadow_centered(&cost, strip.center().x, pill.y + pill.h + 13.0 * k * g, 12.0 * k * g, chrome::GOLD);
             }
             _ => super::unit_sheet::stat_strip(strip, &vs, &vs, vs[razdor::rules::content::Stat::MagicPower], super::unit_sheet::caster(&c, u.def), super::unit_sheet::strip_place(form, u.slot), u.hp, back_row_def(&c, u.slot), game.hero_building_defence(), false, super::unit_sheet::StripPanel::of_squad(i, u.named)),
         }
@@ -1580,17 +1596,23 @@ fn garrison(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
     }
     if let Some((j, cell, price)) = view.garrison_buy {
         // The purchase question (the garrison move event, 0x4acff4).
-        let r = at(f, 250.0, 290.0, 584.0, 44.0);
+        // Razdor's own: the Yes/No pair grows with the text size (button_grow); the row grows with it.
+        let g = super::display::button_grow();
+        let (bw, bh) = (85.0 * k * g, 32.0 * k * g);
+        let mut r = at(f, 250.0, 290.0, 584.0, 44.0);
+        if g > 1.0 {
+            r.h = r.h.max(bh + 12.0 * k);
+        }
         draw_rectangle(r.x, r.y, r.w, r.h, PANEL);
         let name = guards.get(j).map_or_else(String::new, |s| s.unit.name(&c).to_string());
         text(&trf!("Pay {price} gold to take {name} back?", price, name), r.x + 10.0 * k, r.y + 28.0 * k, 18.0 * k, ACCENT);
-        if button(r.x + r.w - 190.0 * k, r.y + 6.0 * k, 85.0 * k, 32.0 * k, tr("Yes"), true) {
+        if button(r.x + r.w - 10.0 * k - 2.0 * bw - 10.0 * k * g, r.y + 6.0 * k, bw, bh, tr("Yes"), true) {
             view.garrison_buy = None;
             *message = Some(match game.take_from_garrison(j, Some(cell), true) {
                 Ok(()) => cued(Cue::CardMove, tr("Back in your army.").to_string()),
                 Err(e) => service_error(e),
             });
-        } else if button(r.x + r.w - 95.0 * k, r.y + 6.0 * k, 85.0 * k, 32.0 * k, tr("No"), true) {
+        } else if button(r.x + r.w - 10.0 * k - bw, r.y + 6.0 * k, bw, bh, tr("No"), true) {
             view.garrison_buy = None;
         }
         tooltip_later(&hover);
@@ -2140,14 +2162,18 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
             text_centered(tr("Pick an item from the list."), dx + dw / 2.0, card_y + dh / 2.0, 18.0 * k, BOX_INK);
         }
     }
-    let by = point(f, 248.0, 249.0).y;
+    // Razdor's own: the four buttons grow with the text size (button_grow), up to the 50-px
+    // frames they sit in, centred where they are at Normal.
+    let g = super::display::button_grow();
+    let bh = (34.0 * k * g).min(46.0 * k);
+    let by = point(f, 248.0, 249.0).y + 17.0 * k - bh / 2.0;
     for (offset, width) in [(0.0, 166.0), (166.0, 134.0), (300.0, 108.0), (408.0, 164.0)] {
         chrome::silver_frame(Rect::new(x + offset * k, point(f, 248.0, 241.0).y, width * k, 50.0 * k), k.max(1.0));
     }
     let [invent_button, shop_button] = market_list_buttons(view.selling, goods.len());
     let (invent, shop) = (own_text("Building", "Invent", n_("Inventory")), own_text("Building", "Market", n_("Trading shop")));
     // The list button of the list shown is locked (greyed), as the original's (0x479bbc).
-    if button(x + 8.0 * k, by, 150.0 * k, 34.0 * k, &invent, invent_button.enabled) {
+    if button(x + 8.0 * k, by, 150.0 * k, bh, &invent, invent_button.enabled) {
         view.selling = invent_button.shows_pack;
         view.pick = None;
         view.scroll = 0;
@@ -2162,7 +2188,7 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
         _ => false,
     };
     // The trade button plays the gold sound (interface.md §14).
-    if button_sounding(x + 308.0 * k, by, 90.0 * k, 34.0 * k, &label, can, Cue::Gold) {
+    if button_sounding(x + 308.0 * k, by, 90.0 * k, bh, &label, can, Cue::Gold) {
         let k = view.pick.unwrap_or(0);
         let mut done = false;
         *message = Some(if view.selling {
@@ -2192,7 +2218,7 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
             view.pick = next_pick(k, left);
         }
     }
-    if button(x + 416.0 * k, by, 148.0 * k, 34.0 * k, &shop, shop_button.enabled) {
+    if button(x + 416.0 * k, by, 148.0 * k, bh, &shop, shop_button.enabled) {
         view.selling = shop_button.shows_pack;
         view.pick = None;
         view.scroll = 0;
@@ -2489,12 +2515,24 @@ fn village_ok_key(down: bool, up: bool) -> bool {
     })
 }
 
+/// A pop-up's button at scale `o` (its picture in the window's art, `name`): its width and height,
+/// and how much taller the box is for it. Razdor's own: the button grows with the text size
+/// (`button_grow`); the box grows by the extra height, so its buttons stay at its bottom and the
+/// text above is not covered. At Normal this is the original's button and box.
+fn popup_button(name: &str, o: f32) -> (f32, f32, f32) {
+    let (w0, h0) = chrome::win(name).map_or((180.0, 40.0), |t| (t.width(), t.height()));
+    let g = super::display::button_grow();
+    let (w, h) = (w0 * o * g, h0 * o * g);
+    (w, h, h - h0 * o)
+}
+
 fn village_window(game: &mut Game, view: &BuildingView, message: &mut Option<String>) -> Option<Screen> {
     let l = game.location?;
     // Razdor's large windows (the owner's request: phones' text too small): the largest scale
     // that fits the screen, up to twice the interface scale's (`display::popup_o`).
     let o = super::display::popup_o(chrome::k() * 0.9375, 634.0, 516.0);
-    let (w, h) = ((634.0 * o).round(), (516.0 * o).round());
+    let (btn_w, btn_h, grow) = popup_button("Btn1Up", o);
+    let (w, h) = ((634.0 * o).round(), (516.0 * o + grow).round());
     let (x, y) = (((screen_width() - w) / 2.0).round(), ((screen_height() - chrome::bar_height() - h) / 2.0).max(2.0).round());
     let loc = &game.world.locations[l];
     let (_, closed) = chrome::window(Rect::new(x, y, w, h), &loc.name, chrome::Skin::Marble, true);
@@ -2510,8 +2548,6 @@ fn village_window(game: &mut Game, view: &BuildingView, message: &mut Option<Str
     let line_h = (17.0 * o).round();
     // The original's texts here are Benguiat's tints (0x4dbb0c fonts ae24a0..ae24ac).
     super::dt_font::with_original_face(super::dt_font::Face::Subtitle, || village_texts(game, view, l, (x, y, o), size, line_h));
-    let (btn_w, btn_h) = chrome::win("Btn1Up").map_or((180.0, 40.0), |t| (t.width(), t.height()));
-    let (btn_w, btn_h) = (btn_w * o, btn_h * o);
     let btn_x = x + (w - btn_w) / 2.0;
     let btn_y = y + h - 10.0 * o - btn_h;
     let label = own_text("Buttons", "Ok", n_("OK"));
@@ -2663,7 +2699,8 @@ fn ship_window(game: &mut Game) -> Option<Screen> {
     // Screen pixels per pixel of the original's 1024×768; Razdor's large windows take the
     // largest scale that fits the screen, up to twice the interface scale's (`display::popup_o`).
     let o = super::display::popup_o(chrome::k() * 0.9375, 634.0, 516.0);
-    let (w, h) = ((634.0 * o).round(), (516.0 * o).round());
+    let (btn_w, btn_h, grow) = popup_button("Btn3Up", o);
+    let (w, h) = ((634.0 * o).round(), (516.0 * o + grow).round());
     let (x, y) = (((screen_width() - w) / 2.0).round(), ((screen_height() - chrome::bar_height() - h) / 2.0).max(2.0).round());
     let loc = &game.world.locations[l];
     // The title is the building's name as it is, even an empty one (0x4bbc84).
@@ -2713,8 +2750,6 @@ fn ship_window(game: &mut Game) -> Option<Screen> {
     }
     let cost = format!("{} = {price}", own_text("Building", "CostShip", n_("Price of hiring a ship")));
     chrome::shadow_centered(&cost, x + w / 2.0, by + bh + 17.0 * o + size, size, chrome::GOLD);
-    let (btn_w, btn_h) = chrome::win("Btn3Up").map_or((180.0, 40.0), |t| (t.width(), t.height()));
-    let (btn_w, btn_h) = (btn_w * o, btn_h * o);
     let btn_y = y + h - 10.0 * o - btn_h;
     let buy = own_text("Building", "BuyShip", n_("Hire a ship"));
     let cancel = own_text("Buttons", "Cancel", n_("Cancel"));

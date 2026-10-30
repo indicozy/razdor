@@ -2488,7 +2488,8 @@ pub fn button_label(r: Rect, label: &str, enabled: bool, _hover: bool, _quest_re
 
 /// The size a label of a button `h` tall is drawn at, before the fit to the button's width.
 fn label_size(h: f32) -> f32 {
-    let mut size = (h * 0.56).clamp(12.0, (22.0 * k()).max(12.0)).round();
+    // Razdor's own: the cap grows with the text size (button_grow), see display.rs.
+    let mut size = (h * 0.56).clamp(12.0, (22.0 * k() * super::display::button_grow()).max(12.0)).round();
     // In the original's fonts a label is the sheet at the button's own scale (the
     // original's buttons are 36 px high), never larger: 0.56 of a tall button made
     // labels run edge to edge on large screens.
@@ -2540,7 +2541,7 @@ pub fn pill_button(r: Rect, label: &str, enabled: bool, green: bool) -> bool {
         }
     }
     super::typography::Role::Body.with(|| {
-        let size = super::widgets::fit_size(label, r.w - 8.0, (r.h * 0.62).round().clamp(11.0, (18.0 * k()).max(11.0)));
+        let size = super::widgets::fit_size(label, r.w - 8.0, (r.h * 0.62).round().clamp(11.0, (18.0 * k() * super::display::button_grow()).max(11.0)));
         let label = super::widgets::ellipsize(label, r.w - 8.0, size);
         let label = label.as_str();
         let d = measure(label, size);

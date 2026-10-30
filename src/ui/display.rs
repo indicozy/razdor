@@ -226,6 +226,18 @@ pub fn next_text_size(s: f32) -> f32 {
     TEXT_SIZES[(at + 1) % TEXT_SIZES.len()]
 }
 
+/// How much buttons grow with the text size (the owner's decision, 2026-10-31): at the
+/// original's size (1.0) the original's sizes; at Large and Largest a button, its label and the
+/// price under it grow with the text. Razdor's own, not in the original.
+pub fn button_grow_at(t: f32) -> f32 {
+    t.max(1.0)
+}
+
+/// [`button_grow_at`] for the chosen text size.
+pub fn button_grow() -> f32 {
+    button_grow_at(text_size())
+}
+
 /// The settings' label of a text size.
 pub fn text_size_label(s: f32) -> &'static str {
     use razdor::i18n::tr;
@@ -1644,6 +1656,14 @@ mod tests {
         assert!(at(1.25) > at(1.0), "the large size is larger");
         assert!(at(1.5) > at(1.25), "the largest size is larger still");
         assert_eq!(text_for_at(1.25, None, k, reference, (sw, sh), bar), text_o_at(1.25, k), "the desktop keeps its scale");
+    }
+
+    #[test]
+    fn buttons_grow_with_the_text_size_from_large_on() {
+        assert_eq!(button_grow_at(1.0), 1.0);
+        assert_eq!(button_grow_at(1.25), 1.25);
+        assert_eq!(button_grow_at(1.5), 1.5);
+        assert_eq!(button_grow_at(0.5), 1.0);
     }
 
     #[test]
