@@ -313,6 +313,55 @@ def dtm_next_map(path):
     return strings[3]
 
 
+def game_ref_key(ref):
+    """The key a next-map field is looked up by, as the game does it (src/ui/screens.rs `next_campaign_map`): the
+    field trimmed, the exact suffix `.DTm` or `.dtm` removed, lower case. Quotes are NOT stripped, so a field in
+    quotes finds nothing, as in the game."""
+    s = ref.strip()
+    for suffix in (".DTm", ".dtm"):
+        if s.endswith(suffix):
+            s = s[:-len(suffix)]
+            break
+    return s.lower()
+
+
+def game_name_key(name):
+    """The key of a chapter file: its name without its extension, lower case (the game's `ScenarioEntry.file`)."""
+    return os.path.splitext(name)[0].lower()
+
+
+REASON_TEXT = {
+    "quoted": "in quotes; the game does not find it",
+    "extension": "the extension is not the exact .DTm or .dtm the game strips, so the game does not find it",
+    "missing": "no chapter of the campaign has that name",
+}
+
+
+def unresolved_reason(ref, chapter_names):
+    """Why the game does not find a next-map name (kinds in REASON_TEXT): a quote character in it, a chapter with
+    the same stem but another extension, or no such chapter."""
+    if '"' in ref:
+        return "quoted"
+    if any(game_name_key(n) == game_name_key(ref.strip()) for n in chapter_names):
+        return "extension"
+    return "missing"
+
+
+def chain_position(links, chapter):
+    """The 1-based place of `chapter` in the chain of chapters it belongs to (a chain starts at a chapter no other
+    chapter names). Falls back to the campaign's size when no chain reaches it."""
+    targets = {t for t in links.values() if t}
+    for start in (n for n in links if n not in targets):
+        seen, count, cur = set(), 0, start
+        while cur is not None and cur not in seen:
+            seen.add(cur)
+            count += 1
+            if cur == chapter:
+                return count
+            cur = links.get(cur)
+    return len(links)
+
+
 class Assets:
     """The asset files of the release: each named by its content, `<sha256 first 16>.<ext>`."""
 
@@ -1038,29 +1087,48 @@ class Pack:
                     raise Fail(f"{e['id']}: bad file {f['name']!r} or asset {f['path']!r}")
 
     def resolve_chains(self):
-        """Every campaign's next-map links must name another chapter of the same campaign (the game follows them by
-        file name; a reference in literal quotes is matched without them). A link that does not resolve is allowed
-        only where the fixes mark the campaign `break`: the campaign then ends there (status partial)."""
+        """Every campaign's next-map links must resolve to another chapter of the same campaign, by the game's own
+        rule (game_ref_key and game_name_key; quotes are not stripped, as in the game). A link that does not resolve
+        is allowed only where the fixes mark the campaign `break`: the campaign then ends at that chapter (status
+        partial). Its chapters all stay in the entry."""
         for e in self.entries:
             if e["kind"] != "campaign":
                 continue
-            names = {f["name"].lower() for f in e["files"]}
-            broken = []
+            chapters = {game_name_key(f["name"]): f["name"] for f in e["files"]}
+            links, broken = {}, []
             for f in e["files"]:
-                ref = (dtm_next_map(os.path.join(self.out, f["path"])) or "").strip().strip('"').strip()
-                if ref and ref.lower() not in names:
-                    broken.append((f["name"], ref))
+                ref = dtm_next_map(os.path.join(self.out, f["path"])) or ""
+                if not ref.strip():
+                    links[f["name"]] = None
+                    continue
+                target = chapters.get(game_ref_key(ref))
+                links[f["name"]] = target
+                if target is None:
+                    broken.append((f["name"], ref.strip()))
             if not broken:
                 continue
             tid = e["id"].split("-", 1)[1]
             if not self.fixes.get(tid, {}).get("break"):
                 self.failures.append(f"{e['id']}: {broken[0][0]} links to {broken[0][1]!r}, not one of its files")
                 continue
-            n = len(e["files"])
+            names = [f["name"] for f in e["files"]]
+            for chapter, ref in broken:
+                self.chain_log.append(f"{e['id']}: `{chapter}` names `{ref}`: {REASON_TEXT[unresolved_reason(ref, names)]}")
+            # the break the note names: a quoted name first, then an extension, then a missing name; within a kind,
+            # the first in chain order (the note says where the campaign ends)
+            rank = {"quoted": 0, "extension": 1, "missing": 2}
+            chapter, ref = min(broken, key=lambda b: (rank[unresolved_reason(b[1], names)], chain_position(links, b[0])))
+            n = chain_position(links, chapter)
+            why = unresolved_reason(ref, names)
+            if why == "quoted":
+                ru = f"Кампания обрывается после главы {n}: имя следующей карты записано в кавычках, игра его не находит."
+            elif why == "extension":
+                ru = f"Кампания обрывается после главы {n}: имя следующей карты записано с расширением «.Dtm», игра его не находит."
+            else:
+                ru = f"Кампания обрывается после главы {n}: следующей карты ({ref}) нет в архиве автора."
             e["status"] = "partial"
-            e["status_note"] = {"ru": f"Кампания обрывается после главы {n}: следующей карты ({broken[0][1]}) нет в архиве автора.",
-                                "en": ""}
-            self.chain_log.append(f"{e['id']}: ends after chapter {n}; `{broken[0][1]}` is in no source (status partial)")
+            e["status_note"] = {"ru": ru, "en": ""}
+            self.chain_log.append(f"{e['id']}: ends after chapter {n} (status partial)")
 
     def write(self):
         """report.md always; index.json only when every mod rebuilt from its chain and every campaign link resolves."""
@@ -1332,6 +1400,14 @@ def selftest():
         write_bytes(legacy, comp)
         check_selftest("dtm: the next-map name is read from a plain map and from a container map",
                        dtm_next_map(plain) == "Next map.DTm" and dtm_next_map(legacy) == "Next2.DTm")
+    check_selftest("game lookup: a reference is found as the game finds it (trim, exact .DTm/.dtm, no quote stripping)",
+                   game_ref_key(" Name.DTm ") == game_name_key("Name.dtm") == game_ref_key("Name")
+                   and game_ref_key("Name.dtm") == "name"
+                   and game_ref_key('"Name.dtm"') != game_name_key("Name.dtm")
+                   and game_ref_key("Name.Dtm") != game_name_key("Name.Dtm"))
+    chain_links = {"a": "b", "b": None, "c": "a"}
+    check_selftest("game lookup: a chapter's place in its chain", chain_position(chain_links, "b") == 3
+                   and chain_position(chain_links, "c") == 1)
     refused = {n: hub_name_problem(n) for n in ["a:b.DTm", "CON.txt", "x ", "a.", "..", "q?.DTm", "a\x01", "a" * 256]}
     check_selftest("hub names: each forbidden name is refused", all(refused.values()))
     check_selftest("archive author from Author-Title", archive_author("Crumb-Duchy_ravaged1") == ("Crumb", "Crumb"))
