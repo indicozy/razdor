@@ -28,6 +28,7 @@ Checks:   python3 -I tools/community-pack/build.py --selftest
 """
 
 import argparse
+import bz2
 import csv
 import datetime
 import hashlib
@@ -36,6 +37,7 @@ import os
 import re
 import shutil
 import string
+import struct
 import subprocess
 import sys
 import tempfile
@@ -47,6 +49,7 @@ FORUMS = ("mods", "maps", "maps-le")
 CU_TITLE = "Community Update"
 UNKNOWN_AUTHOR = "неизвестен"
 TEXT_LIMIT = 1500
+DTM_HEADER_SIZE = 0x12F  # src/dt/dtm.rs HEADER_SIZE
 PREVIEW_BOX = "480x270"
 CHUNK = 1 << 20
 ZIP_TIME = (1980, 1, 1, 0, 0, 0)
@@ -245,6 +248,69 @@ def verify_package(zip_path, base):
                 raise Fail(f"{zip_path}: {rel} must not be in a package")
             if rel in base.paths and sha256_bytes(zf.read(info)) == base.sha(rel):
                 raise Fail(f"{zip_path}: {rel} is the base's own file, byte for byte; the package must not carry it")
+
+
+def dtm_container_payload(data):
+    """The payload of a `.DTm` in the `AIpf` container (src/dt/container.rs `decode`): the legacy layout is one
+    bzip2 stream after 12 bytes (scramble mode 1 XORs byte i with i+1); the new layout is chunks of (u32 length,
+    bzip2 stream), with `size div block + 1` chunks."""
+    if data[1:2] == b"I":
+        body = bytearray(data[12:])
+        if data[7] == 1:
+            for i in range(len(body)):
+                body[i] ^= (i + 1) & 0xFF
+        elif data[7] != 0:
+            raise Fail(f"scramble mode {data[7]} cannot be read")
+        return bz2.decompress(bytes(body))
+    block = struct.unpack_from("<H", data, 4)[0] * 1024
+    size = struct.unpack_from("<I", data, 8)[0]
+    chunks = 1 if block == 0 else size // block + 1
+    at, out = 12, bytearray()
+    for _ in range(chunks):
+        n = struct.unpack_from("<I", data, at)[0]
+        out += bz2.decompress(data[at + 4:at + 4 + n])
+        at += 4 + n
+    return bytes(out)
+
+
+def dtm_text(raw):
+    """A string of the text section (src/dt/text.rs `decode`): UTF-8 when it is valid and has a character cp1251
+    cannot hold, else cp1251."""
+    if any(b >= 0x80 for b in raw):
+        try:
+            s = raw.decode("utf-8")
+            if any(not _in_cp1251(c) for c in s):
+                return s
+        except UnicodeDecodeError:
+            pass
+    return raw.decode("cp1251", errors="replace")
+
+
+def _in_cp1251(c):
+    try:
+        c.encode("cp1251")
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
+def dtm_next_map(path):
+    """The next-map name a `.DTm` holds: the fourth string at the header's text offset (src/dt/dtm.rs
+    `parse_payload`; the title, description and campaign name come before it). None for a file that is not a map."""
+    with open(path, "rb") as f:
+        data = f.read()
+    if len(data) >= 4 and data[0:1] == b"A" and data[2:3] == b"p" and data[3:4] == b"f":
+        data = dtm_container_payload(data)
+    if len(data) < DTM_HEADER_SIZE or data[9] < ord("4"):
+        return None
+    pos = struct.unpack_from("<I", data, 0x18)[0]
+    strings = []
+    for _ in range(4):
+        end = data.find(b"\0", pos)
+        end = len(data) if end < 0 else end
+        strings.append(dtm_text(data[pos:end]) if pos < len(data) else "")
+        pos = end + 1
+    return strings[3]
 
 
 class Assets:
@@ -584,13 +650,16 @@ def archive_path(adir, row):
 class Pack:
     """The catalog being built: its entries, asset store, skip, rename and note lists."""
 
-    def __init__(self, src, archive, base_dir, out, work, extra=None):
+    def __init__(self, src, archive, base_dir, out, work, extra=None, fixes=None):
         self.src = src
         self.archive = archive
         self.base_dir = base_dir
         self.out = out
         self.work = work
         self.extra = extra or {}  # thread id -> zip of its map files (the owner's downloads, see --extra)
+        self.fixes = fixes or {}  # thread id -> chain fixes (add, drop, break), see --fixes
+        self.chain_log = []       # what the campaign fixes did, for report.md
+        self.failures = []        # campaign links that do not resolve and are not marked break
         self.threads = load_threads(src)
         self.users = user_names(self.threads)
         self.assets = Assets(out)
@@ -840,7 +909,26 @@ class Pack:
         keep = [r for r in newest if r["sha256"] not in cu_maps]
         if not keep:
             raise Skip("every map of its newest version is one Community Update ships")
-        mod = map_mod(newest, test_of, bymod)
+        fix = self.fixes.get(tid, {})
+        drop = set(fix.get("drop", []))
+        keep = [r for r in keep if r["file_name"] not in drop]
+        for add in fix.get("add", []):
+            if add["name"].lower() in {package_name(r["file_name"]).lower() for r in keep}:
+                self.chain_log.append(f"{tid}: `{add['name']}` is already one of its chapters (not added again)")
+                continue
+            if not os.path.isfile(add["file"]):
+                raise Fail(f"fixes for {tid}: {add['file']} is missing")
+            sha = sha256_file(add["file"])
+            if add.get("result") == "ok":
+                test_of[sha] = {"slug": add.get("slug", "vanilla"), "result": "ok"}
+            keep.append({"file_name": add["name"], "file_path": add["file"], "sha256": sha})
+            self.chain_log.append(f"{tid}: added `{add['name']}` from `{add['file']}`" +
+                                  (f" ({add['note']})" if add.get("note") else ""))
+        if drop:
+            self.chain_log.append(f"{tid}: dropped {', '.join(sorted(drop))}")
+        if not keep:
+            raise Skip("nothing left after the chain fixes")
+        mod = map_mod(keep, test_of, bymod)
         requires = self.map_requires(mod)
         status, note = map_status(keep, test_of)
         tags = " ".join(t.get("applied_tags") or [])
@@ -949,9 +1037,34 @@ class Pack:
                 if not ok or not ASSET_RE.match(f["path"]) or not os.path.isfile(os.path.join(self.out, f["path"])):
                     raise Fail(f"{e['id']}: bad file {f['name']!r} or asset {f['path']!r}")
 
+    def resolve_chains(self):
+        """Every campaign's next-map links must name another chapter of the same campaign (the game follows them by
+        file name; a reference in literal quotes is matched without them). A link that does not resolve is allowed
+        only where the fixes mark the campaign `break`: the campaign then ends there (status partial)."""
+        for e in self.entries:
+            if e["kind"] != "campaign":
+                continue
+            names = {f["name"].lower() for f in e["files"]}
+            broken = []
+            for f in e["files"]:
+                ref = (dtm_next_map(os.path.join(self.out, f["path"])) or "").strip().strip('"').strip()
+                if ref and ref.lower() not in names:
+                    broken.append((f["name"], ref))
+            if not broken:
+                continue
+            tid = e["id"].split("-", 1)[1]
+            if not self.fixes.get(tid, {}).get("break"):
+                self.failures.append(f"{e['id']}: {broken[0][0]} links to {broken[0][1]!r}, not one of its files")
+                continue
+            n = len(e["files"])
+            e["status"] = "partial"
+            e["status_note"] = {"ru": f"Кампания обрывается после главы {n}: следующей карты ({broken[0][1]}) нет в архиве автора.",
+                                "en": ""}
+            self.chain_log.append(f"{e['id']}: ends after chapter {n}; `{broken[0][1]}` is in no source (status partial)")
+
     def write(self):
-        """report.md always; index.json only when every mod rebuilt from its chain."""
-        if not self.mismatches:
+        """report.md always; index.json only when every mod rebuilt from its chain and every campaign link resolves."""
+        if not self.mismatches and not self.failures:
             catalog = {"format": FORMAT, "entries": sorted(self.entries, key=lambda e: e["id"])}
             with open(os.path.join(self.out, "index.json"), "w", encoding="utf-8") as f:
                 f.write(json.dumps(catalog, ensure_ascii=False, indent=2) + "\n")
@@ -997,6 +1110,8 @@ class Pack:
         own_files = sorted(rel for rel in cu.paths if razdor_made(rel, cu_prefixes))
         lines += ["", f"## Razdor-made files left out ({len(own_files)} in Community Update)", ""]
         lines += [f"- `{rel}`" for rel in own_files[:40]] or ["None."]
+        lines += ["", f"## Campaign chains ({len(self.chain_log)} notes)", ""]
+        lines += [f"- {line}" for line in self.chain_log] or ["None."]
         lines += ["", "## Notes", ""]
         lines += [f"- {n}" for n in self.notes] or ["None."]
         return "\n".join(lines) + "\n"
@@ -1009,23 +1124,27 @@ def clear_old(out):
             os.remove(os.path.join(out, fn))
 
 
-def build(src, archive, base_dir, out, forum_maps=True, extra=None):
+def build(src, archive, base_dir, out, forum_maps=True, extra=None, fixes=None):
     os.makedirs(out, exist_ok=True)
     clear_old(out)
     work = tempfile.mkdtemp(prefix=".work-", dir=out)
     try:
-        pack = Pack(src, archive, base_dir, out, work, extra)
+        pack = Pack(src, archive, base_dir, out, work, extra, fixes)
         pack.add_mods()
         if forum_maps:
             pack.add_forum_maps()
         else:
             pack.notes.append("The forum maps were left out (--no-forum-maps).")
         pack.add_archive_maps()
+        pack.resolve_chains()
         pack.check()
         pack.write()
         if pack.mismatches:
             raise Fail("mod(s) do not rebuild from Community Update plus their chain: " +
                        ", ".join(pack.mismatches) + " (see report.md; index.json was not written)")
+        if pack.failures:
+            raise Fail("campaign links do not resolve (add the chapter with --fixes, or mark the campaign break): " +
+                       "; ".join(pack.failures) + " (see report.md; index.json was not written)")
         return pack
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -1037,6 +1156,21 @@ def write_file(path, text):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
+
+
+def write_bytes(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
+
+
+def fake_dtm(next_name):
+    """A minimal uncompressed `.DTm` payload: the header with its text offset, then the title, description,
+    campaign name and next-map strings (what dtm_next_map reads)."""
+    head = bytearray(DTM_HEADER_SIZE)
+    head[9] = ord("4")
+    struct.pack_into("<I", head, 0x18, DTM_HEADER_SIZE)
+    return bytes(head) + b"T\0D\0C\0" + next_name.encode("cp1251") + b"\0"
 
 
 def write_fixture(root):
@@ -1086,12 +1220,13 @@ def write_fixture(root):
     write_file(os.path.join(src, "mods", "status.tsv"),
                "slug\tstatus\tdownload ok?\tnote\n"
                "modA\tfull\tyes\t\nmodC\tpartial\tpartial (1 of 2)\tfixture\nmodB\tmissing\tyes\tfixture\n")
+    dtm = {"old": fake_dtm("c1.DTm"), "c1": fake_dtm("c2.DTm"), "c2": fake_dtm(""), "cu": b"cu map"}
     shas = {k: sha256_bytes(v.encode()) for k, v in
-            {"old": "old map", "c1": "c1 content", "c2": "c2 content", "cu": "cu map",
-             "arc": "arc one", "crumb": "crumb map", "bad": "bad"}.items()}
-    for name, text in (("old.DTm", "old map"), ("c1.DTm", "c1 content"), ("c2.DTm", "c2 content"),
-                       ("cu.DTm", "cu map")):
-        write_file(os.path.join(src, "maps", "unpacked", "300", name), text)
+            {"arc": "arc one", "crumb": "crumb map", "bad": "bad"}.items()}
+    shas.update({k: sha256_bytes(v) for k, v in dtm.items()})
+    for name, data in (("old.DTm", dtm["old"]), ("c1.DTm", dtm["c1"]), ("c2.DTm", dtm["c2"]),
+                       ("cu.DTm", dtm["cu"])):
+        write_bytes(os.path.join(src, "maps", "unpacked", "300", name), data)
     files = [("300", "300", "old.DTm", "maps/unpacked/300/old.DTm", shas["old"], "no"),
              ("300", "301", "c1.DTm", "maps/unpacked/300/c1.DTm", shas["c1"], "yes"),
              ("300", "301", "c2.DTm", "maps/unpacked/300/c2.DTm", shas["c2"], "yes"),
@@ -1118,7 +1253,7 @@ def write_fixture(root):
                "Crumb-Set__Crumb-Duchy.final.DTm\tCrumb-Set\t\tok\tok\t\n" +
                "top__bad.DTm\ttop\t\tfail\tfail\tcrash\n")
     write_file(os.path.join(adir, "raw", "dtm", "arc1.DTm"), "arc one")
-    write_file(os.path.join(adir, "raw", "dtm", "dup.DTm"), "c1 content")
+    write_bytes(os.path.join(adir, "raw", "dtm", "dup.DTm"), dtm["c1"])
     write_file(os.path.join(adir, "raw", "dtm", "copy.DTm"), "arc one")
     write_file(os.path.join(adir, "raw", "dtm", "bad.DTm"), "bad")
     write_file(os.path.join(adir, "nested", "Crumb-Set", "Crumb-Duchy.final.DTm"), "crumb map")
@@ -1157,6 +1292,15 @@ def selftest():
                    and razdor_made("Eng_Units.ini", {"eng"}) and razdor_made("eng_spells.INI", {"eng"})
                    and not razdor_made("Rus_Units.ini", {"eng"}) and not razdor_made("Graphics/a.lit", {"eng"})
                    and not razdor_made("Maps/Карта.DTm", {"eng"}))
+    with tempfile.TemporaryDirectory() as d:
+        plain = os.path.join(d, "plain.DTm")
+        write_bytes(plain, fake_dtm("Next map.DTm"))
+        legacy_payload = fake_dtm("Next2.DTm")
+        comp = b"AIpf" + b"\r\n" + bytes([19, 0]) + struct.pack("<I", len(legacy_payload)) + bz2.compress(legacy_payload)
+        legacy = os.path.join(d, "legacy.DTm")
+        write_bytes(legacy, comp)
+        check_selftest("dtm: the next-map name is read from a plain map and from a container map",
+                       dtm_next_map(plain) == "Next map.DTm" and dtm_next_map(legacy) == "Next2.DTm")
     refused = {n: hub_name_problem(n) for n in ["a:b.DTm", "CON.txt", "x ", "a.", "..", "q?.DTm", "a\x01", "a" * 256]}
     check_selftest("hub names: each forbidden name is refused", all(refused.values()))
     check_selftest("archive author from Author-Title", archive_author("Crumb-Duchy_ravaged1") == ("Crumb", "Crumb"))
@@ -1293,6 +1437,21 @@ def selftest():
             check_selftest("rebuild: a mod that does not rebuild fails loudly, is listed, writes no index",
                            refused and "extra Extra/old.ini" in bad_report
                            and not os.path.exists(os.path.join(bad_root, "out", "index.json")))
+            chain_root = os.path.join(root, "chain")
+            csrc, ccu, cadir = write_fixture(chain_root)
+            write_bytes(os.path.join(csrc, "maps", "unpacked", "300", "c2.DTm"), fake_dtm("Gone.DTm"))
+            refused = False
+            try:
+                build(csrc, cadir, ccu, os.path.join(chain_root, "out"))
+            except Fail as e:
+                refused = "Gone.DTm" in str(e)
+            check_selftest("chain: a link to a missing chapter fails the build unless the campaign is marked break",
+                           refused and not os.path.exists(os.path.join(chain_root, "out", "index.json")))
+            cpack = build(csrc, cadir, ccu, os.path.join(chain_root, "out2"), fixes={"300": {"break": True}})
+            camp = [e for e in cpack.entries if e["id"] == "campaign-300"][0]
+            check_selftest("chain: a campaign marked break ends there, partial, with the note",
+                           camp["status"] == "partial" and "Gone.DTm" in camp["status_note"]["ru"]
+                           and "после главы 2" in camp["status_note"]["ru"])
             os.makedirs(out2)
             write_file(os.path.join(out2, "0000000000000000.zip"), "stale")
             build(src, adir, cu, out2)
@@ -1321,8 +1480,15 @@ def main(argv=None):
                     help="leave the forum maps out (until maps/files.tsv and maps/test.tsv exist)")
     ap.add_argument("--extra", action="append", default=[], metavar="THREAD=ZIP",
                     help="the map files of a forum thread from a zip the owner downloaded (repeatable)")
+    ap.add_argument("--fixes", metavar="JSON",
+                    help="campaign chain fixes by map thread id: add (a chapter under the name its next-map names), "
+                         "drop (chapter files), break (the campaign ends at its last chapter)")
     ap.add_argument("--selftest", action="store_true", help="run the offline checks and exit")
     a = ap.parse_args(argv)
+    fixes = {}
+    if a.fixes:
+        with open(a.fixes, encoding="utf-8") as f:
+            fixes = {k: v for k, v in json.load(f).items() if not k.startswith("_")}
     extra = {}
     for item in a.extra:
         tid, sep, path = item.partition("=")
@@ -1335,7 +1501,7 @@ def main(argv=None):
     if missing:
         ap.error("missing " + ", ".join("--" + m.replace("_", "-") for m in missing))
     try:
-        build(a.src, a.archive_maps, a.base, a.out, forum_maps=not a.no_forum_maps, extra=extra)
+        build(a.src, a.archive_maps, a.base, a.out, forum_maps=not a.no_forum_maps, extra=extra, fixes=fixes)
     except Fail as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
