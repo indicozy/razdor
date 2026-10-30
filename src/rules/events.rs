@@ -1373,12 +1373,29 @@ impl EventEngine {
     /// some event that needs a meeting with it is eligible and every condition checked
     /// before the meet-army test holds.
     pub fn meeting_waiting(&self, w: &dyn EventWorld, army: ArmyId) -> bool {
-        let waits = |id: EventId| {
-            self.ev(id).conditions.meet_army == army
-                && self.eligible(id, w).is_ok()
-                && self.check(id, w, Some(army)).is_none_or(|f| f.after_meeting)
-        };
+        let waits = |id: EventId| self.ev(id).conditions.meet_army == army && self.meeting_mark_holds(id, w);
         army != 0 && (1..=self.events.len() as EventId).any(waits)
+    }
+
+    /// The armies marked "meeting event waiting" now (0x4abf44's loop): it clears every army's
+    /// mark, then runs the mark's check (0x4a801a) for each meet-army event and sets the army
+    /// of each one that holds. One pass over the events; the same test as [`Self::meeting_waiting`].
+    pub fn meeting_marks(&self, w: &dyn EventWorld) -> Vec<ArmyId> {
+        let mut marks: Vec<ArmyId> = Vec::new();
+        for id in 1..=self.events.len() as EventId {
+            let army = self.ev(id).conditions.meet_army;
+            if army != 0 && !marks.contains(&army) && self.meeting_mark_holds(id, w) {
+                marks.push(army);
+            }
+        }
+        marks
+    }
+
+    /// The mark's check for one event: it is eligible and every condition before its meet-army
+    /// test holds (a question asked at the meeting keeps it, `after_meeting`).
+    fn meeting_mark_holds(&self, id: EventId, w: &dyn EventWorld) -> bool {
+        let army = self.ev(id).conditions.meet_army;
+        self.eligible(id, w).is_ok() && self.check(id, w, Some(army)).is_none_or(|f| f.after_meeting)
     }
 
     /// The first event that passes the full check.
@@ -2950,6 +2967,32 @@ mod tests {
         w.active.insert(9);
         assert!(g.meeting_waiting(&w, 4), "the HP test comes after the meeting");
         assert!(!g.meeting_waiting(&w, 5));
+    }
+
+    /// The one-pass list of marks is exactly the armies `meeting_waiting` answers true for.
+    #[test]
+    fn the_meeting_marks_list_is_the_set_meeting_waiting_answers_for() {
+        let mut talk = global();
+        (talk.conditions.meet_army, talk.conditions.army_active) = (4, 9);
+        let mut other = global();
+        other.conditions.meet_army = 6;
+        let mut none = global();
+        none.conditions.meet_army = 0;
+        let g = engine(vec![talk, other, none]);
+        let mut w = MockWorld::new();
+        for active in [false, true] {
+            if active {
+                w.active.insert(9);
+            }
+            let marks = g.meeting_marks(&w);
+            for army in 0..=10 {
+                assert_eq!(marks.contains(&army), g.meeting_waiting(&w, army), "army {army}, active {active}: {marks:?}");
+            }
+        }
+        w.active.insert(9);
+        let mut marks = g.meeting_marks(&w);
+        marks.sort_unstable();
+        assert_eq!(marks, vec![4, 6], "army 0 is never marked, and each army once");
     }
 
     /// A question asked at a meeting keeps the meeting for the rest of the run.

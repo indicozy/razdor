@@ -1577,8 +1577,7 @@ impl Game {
     /// while the meeting's dialog shows. The interface calls this only while the event
     /// display is idle.
     pub fn refresh_meeting_marks(&mut self) {
-        let marks: Vec<ArmyId> = self.world.armies.iter().filter(|a| self.script().is_some_and(|e| e.meeting_waiting(self, a.id))).map(|a| a.id).collect();
-        self.meeting_marks = Some(marks);
+        self.meeting_marks = Some(self.script().map(|e| e.meeting_marks(self)).unwrap_or_default());
     }
 
     /// The minimap's meeting mark of army `army` (+0x3826 with +0x16af above 0, 0x49e3c9): the
