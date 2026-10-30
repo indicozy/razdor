@@ -2,7 +2,7 @@
 //! Numbers only: texts are read at runtime and never asserted.
 
 use crate::dt::dtm::Scenario;
-use crate::dt::install::DtInstall;
+use crate::dt::install::{map_stem, DtInstall};
 
 fn install() -> Option<DtInstall> {
     let dir = std::env::var_os(crate::dt::install::ENV_VAR)?;
@@ -387,7 +387,7 @@ impl Driver {
     /// The next campaign map after a victory, with what carries over.
     pub fn next_map(&self, dt: &DtInstall, content: &Arc<Content>) -> Driver {
         let next = self.g.next_map().expect("a victory with a next map");
-        let stem = next.name.trim().trim_end_matches(".DTm").to_string();
+        let stem = map_stem(&next.name).to_string();
         let m = dt.maps.iter().find(|m| m.name == stem).expect("the next map is installed");
         let s = m.load().unwrap();
         let mut g = Game::from_campaign(content.clone(), &s, &next);
@@ -691,7 +691,7 @@ fn smoke_every_map() {
             continue;
         }
         // A campaign map goes on from the last one's victory, as a player gets there.
-        let follows = prev.as_ref().and_then(|p| p.g.next_map()).is_some_and(|n| n.name.trim().trim_end_matches(".DTm") == m.name);
+        let follows = prev.as_ref().and_then(|p| p.g.next_map()).is_some_and(|n| map_stem(&n.name) == m.name);
         let mut d = match prev.take() {
             Some(p) if follows => p.next_map(&dt, &c),
             _ => Driver::new(&dt, &c, &m.name, HeroClass::Knight),

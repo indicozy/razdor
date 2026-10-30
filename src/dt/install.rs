@@ -20,6 +20,16 @@ pub const SETTINGS_FILE: &str = "Rus_DiscordTimes.ini";
 pub const MAPS_DIR: &str = "Maps_Rus";
 pub const MAP_EXTENSION: &str = "DTm";
 
+/// A campaign's next-map name without its map extension: trimmed, and the trailing `.DTm` taken
+/// off whatever its case (community campaigns name chapters `Name.Dtm`; the original's Windows
+/// file system ignored case). Nothing else is changed, so `x.dtm.final.DTm` gives `x.dtm.final`.
+pub fn map_stem(name: &str) -> &str {
+    let name = name.trim();
+    let Some(at) = name.len().checked_sub(MAP_EXTENSION.len() + 1) else { return name };
+    let ext_is_map = at > 0 && name.is_char_boundary(at) && name[at..].starts_with('.') && name[at + 1..].eq_ignore_ascii_case(MAP_EXTENSION);
+    if ext_is_map { &name[..at] } else { name }
+}
+
 /// A scenario file found in the maps folder.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MapEntry {
@@ -516,6 +526,20 @@ pub fn drain_rule(dir: &Path, global: &Ini) -> DrainRule {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn map_stem_strips_the_extension_whatever_its_case() {
+        for name in ["a.DTm", "a.dtm", "a.Dtm", "a.DTM", "a.dTm", "a.DTm ", " a.DTm"] {
+            assert_eq!(map_stem(name), "a", "{name:?}");
+        }
+        assert_eq!(map_stem("a"), "a");
+        assert_eq!(map_stem("x.dtm.final.DTm"), "x.dtm.final");
+        assert_eq!(map_stem("x.dtm.final"), "x.dtm.final");
+        assert_eq!(map_stem("DTm"), "DTm");
+        assert_eq!(map_stem(".DTm"), ".DTm", "no stem, so nothing to strip");
+        assert_eq!(map_stem("Обучающий2.DTm"), "Обучающий2");
+        assert_eq!(map_stem("Карта.тест"), "Карта.тест");
+    }
 
     fn fake_install(dir: &Path) {
         std::fs::create_dir_all(dir.join(MAPS_DIR)).unwrap();

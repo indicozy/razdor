@@ -4,6 +4,7 @@ use macroquad::prelude::*;
 use std::sync::Arc;
 
 use razdor::dt::data::MagicSchool;
+use razdor::dt::install::map_stem;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use razdor::dt::install::Problem;
 use razdor::i18n::tr;
@@ -547,8 +548,7 @@ fn end_event(game: &Option<Game>) -> Option<String> {
 /// 0x110), with the flags, and that map's entry.
 fn next_campaign_map<'a>(game: &Option<Game>, scenarios: &'a [ScenarioEntry]) -> Option<(NextMap, &'a ScenarioEntry)> {
     let next = game.as_ref().and_then(Game::next_map)?;
-    let stem = next.name.trim();
-    let stem = stem.strip_suffix(".DTm").or_else(|| stem.strip_suffix(".dtm")).unwrap_or(stem).to_lowercase();
+    let stem = map_stem(&next.name).to_lowercase();
     let entry = scenarios.iter().find(|e| e.file.to_lowercase() == stem)?;
     Some((next, entry))
 }
