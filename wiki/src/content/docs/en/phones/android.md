@@ -40,7 +40,8 @@ By default, your finger works as the cursor.
 Touchpad mode is off by default. It is switched on with the **"Touchpad mode"** checkbox in the "Sound, graphics and gameplay settings" window (the last item in the list). The screen then works like a laptop touchpad, and the game draws the cursor:
 
 * dragging one finger moves the cursor, wherever the finger is;
-* a tap is a left click at the cursor's position.
+* a tap is a left click at the cursor's position;
+* the cursor resting over an item or spell icon in the victory or event window shows its description.
 
 ### Screen orientation
 

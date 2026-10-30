@@ -318,7 +318,9 @@ is on, and merges its frame with the pad's (`merge`): its pointer starts at the 
 centre and stays the pointer. `ui::cursor::draw` draws the pointer as a plain arrow, counting
 the touchpad as focus, as a phone has no system pointer; in gesture mode it draws nothing (the
 finger is the pointer). `input::begin_frame` picks the mode: touchpad, else gestures on mobile,
-else no touch. The mappers' tests cover each gesture.
+else no touch. The mappers' tests cover each gesture. In this mode the event and victory windows'
+item and spell icons show their description while the cursor rests over them (`dialog::shown_preview`),
+as the backpack's hover; the original shows it only while a button is held (0x4c1fec / 0x4c2048).
 
 ## The frame
 
