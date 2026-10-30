@@ -363,7 +363,8 @@ fn install_mod_and_play(hub: &crate::hub::Hub, catalog: &crate::hub::Catalog, ba
 ///    days;
 /// 3. every map and campaign installs (with its requirements); every installed map loads as a
 ///    scenario and its SHA-256 is still the catalog's (a name another entry took is caught); each
-///    campaign chapter's next-map name is an installed file.
+///    campaign chapter's next-map name is an installed file, unless the campaign is marked partial
+///    (it breaks off there on purpose).
 ///
 /// Prints one line per entry (`ok` or `FAIL reason`), then fails listing every failure. Run it with
 /// `RAZDOR_HUB_CATALOG_DIR=<catalog folder> RAZDOR_DT_DIR=<base install> cargo test --release
@@ -419,11 +420,18 @@ fn hub_real_catalog() {
                 Err(p) => problem = Some(format!("{}: panic loading: {}", f.name, panic_text(&*p))),
             }
         }
+        // A campaign marked partial may break off at a missing next map (its status note says why);
+        // any other campaign must have every next map installed.
+        let mut broke_off = None;
         if e.kind == crate::hub::Kind::Campaign && problem.is_none() {
             let installed: Vec<String> = std::fs::read_dir(&maps_dir).map(|r| r.filter_map(|x| x.ok()).map(|x| x.file_name().to_string_lossy().to_lowercase()).collect()).unwrap_or_default();
             for f in &files {
                 let Ok(s) = Scenario::load(&maps_dir.join(&f.name)) else { continue };
                 if !s.next_map.trim().is_empty() && !installed.contains(&s.next_map.trim().to_lowercase()) {
+                    if e.status == crate::hub::Status::Partial {
+                        broke_off = Some(format!("{} breaks off at {:?}", f.name, s.next_map));
+                        continue;
+                    }
                     problem = Some(format!("{}: its next map {:?} is not installed", f.name, s.next_map));
                     break;
                 }
@@ -431,7 +439,10 @@ fn hub_real_catalog() {
         }
         match problem {
             Some(why) => fail(what, why, &mut failures),
-            None => println!("{what}: ok ({} files)", files.len()),
+            None => match broke_off {
+                Some(note) => println!("{what}: ok (partial: {note}; {} files)", files.len()),
+                None => println!("{what}: ok ({} files)", files.len()),
+            },
         }
     }
 
