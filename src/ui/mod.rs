@@ -942,11 +942,15 @@ impl App {
 
     fn frame_content(&mut self) {
         display::follow_settings(&self.audio.settings);
-        // A minimap resized or moved by the player is kept once the drag ends (saved with the
-        // settings).
-        if !minimap::resizing() {
-            self.audio.settings.minimap_size = minimap::size();
-            self.audio.settings.minimap_corner = minimap::corner();
+        // A minimap resized or moved by the player (or set in the settings) is kept, and written
+        // to the settings file once the drag ends: a phone's app may be killed with no clean exit.
+        let moving = minimap::resizing();
+        let live = (minimap::size(), minimap::corner());
+        let saved = (self.audio.settings.minimap_size, self.audio.settings.minimap_corner);
+        if minimap::placement_to_write(saved, live, moving) {
+            self.audio.settings.minimap_size = live.0;
+            self.audio.settings.minimap_corner = live.1;
+            self.audio.save_now();
         }
         // The key bindings the player changed (saved with the settings, as the minimap's).
         self.audio.settings.keys = keymap::overrides();

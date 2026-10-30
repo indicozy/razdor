@@ -15,6 +15,7 @@ use razdor::i18n::{self, n_, tr, Lang};
 use super::audio::{cue, Cue};
 use super::chrome::{self, Fx};
 use super::keymap;
+use super::minimap;
 use super::window_layout;
 use super::widgets::*;
 
@@ -1227,14 +1228,14 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     let rw = inner.x + inner.w - 24.0 * k - rx;
     let bw = 150.0 * k;
     // The column's hints, wrapped first: they set the row pitch, which is the original's 44 px
-    // unless the column would run past the Ok button's top. The column is nine pitches from its
+    // unless the column would run past the Ok button's top. The column is eleven pitches from its
     // first row to the language row, the hint slot (44 px plus its lines), and the language's
     // description (48 px down, then its lines).
     let ai_hint = wrap(tr("Maximum: before each move the enemy of your battles weighs every move and answer ahead and plays each out to the end of the battle."), rw, 12.0 * k);
     let lang_hint = wrap(super::language::hint(), rw, 12.0 * k);
     let hints_h = 44.0 * k + ai_hint.len() as f32 * 17.0 * k + 48.0 * k + lang_hint.len() as f32 * 17.0 * k;
     let ok_top = inner.h - 44.0 * k - 4.0 * k;
-    let pitch = right_column_pitch(30.0 * k, ok_top, 9.0, hints_h, 44.0 * k);
+    let pitch = right_column_pitch(30.0 * k, ok_top, 11.0, hints_h, 44.0 * k);
     let mut y = inner.y + 30.0 * k;
     let row = |label: &str, value: &str, y: &mut f32| -> bool {
         chrome::shadow_text(label, rx, *y + 18.0 * k, 14.0 * k, chrome::CREAM);
@@ -1300,6 +1301,20 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     }
     if row(tr("Minimap army list"), if audio.army_list { tr("On") } else { tr("Off") }, &mut y) {
         audio.army_list = !audio.army_list;
+    }
+    // Razdor's options (a player's report: the minimap dragged where it is hard to move back):
+    // its corner, cycled clockwise, and «Сбросить» puts its size and place back to the default.
+    let corner_label = match minimap::corner() {
+        minimap::Corner::TopRight => tr("Top right"),
+        minimap::Corner::BottomRight => tr("Bottom right"),
+        minimap::Corner::BottomLeft => tr("Bottom left"),
+        minimap::Corner::TopLeft => tr("Top left"),
+    };
+    if row(tr("Minimap corner"), corner_label, &mut y) {
+        minimap::set_corner(minimap::corner().next());
+    }
+    if row(tr("Minimap size and place"), tr("Reset"), &mut y) {
+        minimap::reset();
     }
     // The keys window (Razdor's, the owner's request): every action's key, rebound by a click.
     if row(tr("Keyboard shortcuts"), tr("Keys…"), &mut y) {

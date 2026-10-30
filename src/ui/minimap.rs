@@ -235,6 +235,17 @@ pub enum Corner {
 }
 
 impl Corner {
+    /// The next corner clockwise (the settings' cycle): top right, bottom right, bottom left,
+    /// top left, and back.
+    pub fn next(self) -> Corner {
+        match self {
+            Corner::TopRight => Corner::BottomRight,
+            Corner::BottomRight => Corner::BottomLeft,
+            Corner::BottomLeft => Corner::TopLeft,
+            Corner::TopLeft => Corner::TopRight,
+        }
+    }
+
     fn left(self) -> bool {
         matches!(self, Corner::TopLeft | Corner::BottomLeft)
     }
@@ -330,6 +341,20 @@ pub fn corner() -> Corner {
 /// Sets the window's corner from the settings.
 pub fn set_corner(at: Corner) {
     CORNER.with(|c| c.set(at));
+}
+
+/// Puts the window back to the default: the top right, the original's size (the settings'
+/// «Сбросить»).
+pub fn reset() {
+    set_size(None);
+    set_corner(Corner::default());
+}
+
+/// Whether the placement (size and corner) must be written to the settings file now: it
+/// differs from the saved one and no drag is under way. A drag is written once, when it
+/// ends, not on every frame of it.
+pub fn placement_to_write(saved: (Option<(f32, f32)>, Corner), live: (Option<(f32, f32)>, Corner), moving: bool) -> bool {
+    !moving && saved != live
 }
 
 /// The window is being resized or moved: the map takes no pointer meanwhile.
@@ -1087,5 +1112,47 @@ mod tests {
         let o = outer_sized(v, 2.75, None, 1.0, Corner::TopRight);
         assert!(o.y >= 80.0 && o.x >= 12.0 && o.x + o.w <= 1068.0, "inside the inset: {o:?}");
         assert_eq!(inset_view(view, super::super::display::SafeArea::default()), view, "no inset: the view as it is");
+    }
+}
+
+#[cfg(test)]
+mod placement_tests {
+    use super::*;
+
+    #[test]
+    fn the_corner_cycles_through_all_four_and_back() {
+        let mut c = Corner::TopRight;
+        let mut seen = Vec::new();
+        for _ in 0..4 {
+            seen.push(c);
+            c = c.next();
+        }
+        assert_eq!(c, Corner::TopRight, "four steps come back to the start");
+        assert_eq!(seen.len(), 4);
+        for (i, a) in seen.iter().enumerate() {
+            assert!(seen[i + 1..].iter().all(|b| b != a), "each corner once");
+        }
+    }
+
+    #[test]
+    fn reset_puts_the_default_size_and_corner_back() {
+        set_size(Some((300.0, 240.0)));
+        set_corner(Corner::BottomLeft);
+        reset();
+        assert_eq!(size(), None);
+        assert_eq!(corner(), Corner::TopRight);
+    }
+
+    #[test]
+    fn a_placement_is_written_once_when_the_drag_ends() {
+        let saved = (None, Corner::TopRight);
+        let moved = (Some((300.0, 240.0)), Corner::TopLeft);
+        // During the drag nothing is written, however often the placement changes.
+        assert!(!placement_to_write(saved, moved, true));
+        assert!(!placement_to_write(saved, moved, true));
+        // At the end of the drag it is written once.
+        assert!(placement_to_write(saved, moved, false));
+        // Once saved, it is not written again.
+        assert!(!placement_to_write(moved, moved, false));
     }
 }

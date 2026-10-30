@@ -545,6 +545,16 @@ impl Audio {
         audio
     }
 
+    /// Writes the changed settings now (the minimap's placement, as its drag ends: the OS may
+    /// kill a phone's app without a clean exit, so it cannot wait for `shutdown`).
+    pub fn save_now(&mut self) {
+        if self.settings != self.saved {
+            self.settings = self.settings.clone().clamped();
+            self.settings.save();
+            self.saved = self.settings.clone();
+        }
+    }
+
     /// Stops the music and writes changed settings (the app is quitting).
     pub fn shutdown(&mut self) {
         if let Some(b) = self.backend.as_mut() {

@@ -34,6 +34,7 @@ Razdor plays the original game's scenarios by the original rules. Below is what 
 * **New game:** a campaign is grouped as one line; the list can be filtered and sorted; an "Add map…" button.
 * **Experimental scenario rules:** six switches for a new game (see [Experimental rules](/razdor/wiki/en/differences/experimental-rules/)).
 * **Route around armies** and **Keep formation after battle** in the advanced settings.
+* **Minimap corner** in the advanced settings: the minimap can stand in any corner, and **Reset** puts its size and place back to the default.
 
 ## Sound
 
