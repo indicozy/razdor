@@ -325,6 +325,9 @@ finger is the pointer). `input::begin_frame` picks the mode: touchpad, else gest
 else no touch. The mappers' tests cover each gesture. In this mode the event and victory windows'
 item and spell icons show their description while the cursor rests over them (`dialog::shown_preview`),
 as the backpack's hover; the original shows it only while a button is held (0x4c1fec / 0x4c2048).
+The rest is `ui::rest` (`rest::tick` in `App::frame`, `rest::rested()`: the pointer still for
+`REST_SECS`, 0.35 s, the gestures' long-press delay, with no button down); the map's tooltip of an
+army or building (`world_view`) and the icons above both wait for it in this mode.
 
 ## The frame
 

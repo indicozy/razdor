@@ -31,6 +31,7 @@ pub mod map_import;
 pub mod minimap;
 pub mod new_game;
 pub mod pan;
+pub mod rest;
 pub mod saves;
 pub mod screens;
 pub mod session;
@@ -958,6 +959,7 @@ impl App {
         };
         pan::begin_frame(pannable, std::mem::discriminant(&self.screen), self.dialogs.len());
         input::begin_frame();
+        rest::tick();
         chrome::begin_frame();
         // The first game queues the map's pictures for the background decoders (once: the set
         // is the install's), and each frame uploads the textures of those decoded so far.

@@ -3149,7 +3149,11 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     // is not drawn meanwhile (0x4cc269, 0x474a81).
     let dragging = view.grab.is_some_and(|g| g.moved);
     let right_held = !input_blocked() && !dragging && is_mouse_button_down(MouseButton::Right) && !is_mouse_button_down(MouseButton::Left);
-    if let Some(t) = hover_tooltip(game, &cam).filter(|_| idle && right_held && !on_minimap) {
+    // The touchpad mode (Razdor's, a player's suggestion): the cursor resting still for
+    // [`super::rest::REST_SECS`] with no button down shows it too. The tooltip is centred on the
+    // pointer, so the pointer is hidden here as in the held case.
+    let rest_tip = super::touchpad::enabled() && super::rest::rested() && !input_blocked() && !dragging;
+    if let Some(t) = hover_tooltip(game, &cam).filter(|_| idle && (right_held || rest_tip) && !on_minimap) {
         draw_tooltip(game, assets, &t);
         cursor::set(Shape::Hidden);
     }

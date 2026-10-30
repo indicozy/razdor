@@ -725,14 +725,15 @@ pub fn draw(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Close> {
 }
 
 /// The icon preview shown this frame: the held one (a press on an icon, kept while a button is
-/// down), else, in the touchpad mode, the icon under the cursor at the cursor (Razdor's: a
-/// trackpad has no hold under one finger, so the cursor resting on the icon shows it, as the
-/// backpack's hover; the original shows it only while a button is held).
-fn shown_preview(held: Option<(bool, u32, Vec2)>, touchpad: bool, hovered: Option<(bool, u32)>, at: Vec2) -> Option<(bool, u32, Vec2)> {
+/// down), else, in the touchpad mode once the cursor has rested on it (`resting`: the touchpad
+/// and [`super::rest::rested`]), the icon under the cursor at the cursor (Razdor's: a trackpad
+/// has no hold under one finger, so the cursor resting on the icon shows it; the original shows
+/// it only while a button is held).
+fn shown_preview(held: Option<(bool, u32, Vec2)>, resting: bool, hovered: Option<(bool, u32)>, at: Vec2) -> Option<(bool, u32, Vec2)> {
     if held.is_some() {
         return held;
     }
-    if !touchpad {
+    if !resting {
         return None;
     }
     hovered.map(|(spell, id)| (spell, id, at))
@@ -925,7 +926,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     }
     let p: Vec2 = pointer().into();
     let hovered = icons.iter().find(|(_, _, r)| r.contains(p)).map(|&(spell, id, _)| (spell, id));
-    if let (Some((spell, id, at)), Some(game)) = (shown_preview(d.preview.get(), super::touchpad::enabled(), hovered, p), game) {
+    if let (Some((spell, id, at)), Some(game)) = (shown_preview(d.preview.get(), super::touchpad::enabled() && super::rest::rested(), hovered, p), game) {
         // The item tooltip is 272 wide and as tall as its text plus 32 (0x4cbab0). The spell card is
         // the book's cell size (286 × 112) at the window's scale: the original's full card at the
         // pointer, with its cost and duration lines (the player's frames 625-626: 402 × 157 px at 1920).
@@ -1064,7 +1065,7 @@ fn draw_village_event(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Optio
             assets.draw_item(item, r.x, r.y, r.w);
             // In the touchpad mode the cursor resting on the icon shows it (no hold there).
             let pressed = is_mouse_button_down(MouseButton::Left) || is_mouse_button_down(MouseButton::Right);
-            if r.contains(pointer().into()) && (pressed || super::touchpad::enabled()) {
+            if r.contains(pointer().into()) && (pressed || (super::touchpad::enabled() && super::rest::rested())) {
                 if let Some(game) = game {
                     let (tw, th) = (super::item_text::TOOLTIP_W * o, super::item_text::tooltip_height(game, item, o));
                     super::item_text::draw(game, assets, item, Rect::new(x + (w - tw) / 2.0, y, tw, th), super::item_text::ItemBox::Tooltip, o);
@@ -1104,11 +1105,11 @@ mod tests {
         let other = Vec2::new(7.0, 9.0);
         // A held preview wins over a hover.
         assert_eq!(shown_preview(Some((true, 3, other)), true, Some((false, 5)), at), Some((true, 3, other)));
-        // Off, a hover shows nothing.
+        // Not resting (the caller passes touchpad && rested: off, or not rested yet), a hover shows nothing.
         assert_eq!(shown_preview(None, false, Some((false, 5)), at), None);
-        // On, a hover shows the icon at the cursor.
+        // On and rested, a hover shows the icon at the cursor.
         assert_eq!(shown_preview(None, true, Some((false, 5)), at), Some((false, 5, at)));
-        // On, with no icon under the cursor, nothing.
+        // On and rested, with no icon under the cursor, nothing.
         assert_eq!(shown_preview(None, true, None, at), None);
     }
 
