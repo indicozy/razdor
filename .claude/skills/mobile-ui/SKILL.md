@@ -1,6 +1,6 @@
 ---
 name: mobile-ui
-description: Use to check that phone screens are readable and easy to tap - "text too small", "font size", "мелкий текст", "шрифт мелкий", "маленькая кнопка", "не попасть по кнопке", "small button", "hard to tap", "touch target", "can't read it on the phone", "mobile UI check", after every phone UI change and before a release. Renders every phone screen off-screen on two phones in portrait and landscape, measures every text in sp and every touch target in dp, lists what is too small or crowded with marked screenshots, and on request turns the findings into per-screen specs for the owner.
+description: Use to check that phone screens are readable and easy to tap - "text too small", "font size", "мелкий текст", "шрифт мелкий", "маленькая кнопка", "не попасть по кнопке", "small button", "hard to tap", "touch target", "can't read it on the phone", "mobile UI check", "buttons grow with the text size", "кнопки под размер текста", after every phone UI change and before a release. Renders every phone screen off-screen on two phones in portrait and landscape, measures every text in sp and every touch target in dp, lists what is too small or crowded with marked screenshots, and on request turns the findings into per-screen specs for the owner.
 ---
 
 # Mobile UI check (phones)
@@ -45,6 +45,23 @@ Limits:
    one the baseline does not list. Exit 1: a case crashed, or a new too-small text or target.
 
 After a UI change, the report is enough. Look at the pictures only for specs (below).
+
+## Buttons grow with the text size
+
+The owner's rule (2026-10-31): at «Размер текста» Normal (1.0) every button keeps the original's
+size; at Large (1.25) and Largest (1.5) a button, its label and the line under it (a price) grow
+with the text (`display::button_grow()`), on the desktop and on phones. Phones start at Large, so
+their buttons are grown by default.
+
+- `python3 -I tools/ui-regress/mobile_ui.py adapt [--only <text>]` renders the screens at 1 and 1.5
+  and lists every labelled button whose label grows less than 1.2× as "does not grow"
+  (`adapt.md` in the run folder). `run --text-size 1.5` measures a screen at Largest.
+- A screen changed for this: `adapt` shows its buttons growing, `run --text-size 1.5` shows no
+  new overlap or crowding, and the UI regression check shows **no** change at Normal.
+- Growing a button: its height, width (if the label needs it) and label size times the factor; the
+  layout around it makes room (move the neighbours, grow the box), never shrinks the label.
+  Off the pilot screens (building windows, event and message windows) buttons do not grow yet: the
+  rollout goes screen by screen.
 
 ## Specs (on the owner's request, and at the release check)
 
