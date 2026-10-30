@@ -35,6 +35,7 @@ import json
 import os
 import re
 import shutil
+import string
 import subprocess
 import sys
 import tempfile
@@ -168,11 +169,53 @@ def changed_files(game, base):
     return [(rel, full) for rel, full in sorted(game.paths.items()) if not same_file(base, rel, full)]
 
 
-def excluded(rel):
-    """Files a package leaves out: programs, saves, logs and crash logs (Razdor never runs them)."""
+ENGLISH_PREFIX = "eng"
+RAZDOR_HEADER = "; Razdor translation:"
+
+
+def is_translated_map(name):
+    """Mirror of `is_translated_file` in src/translate/job.rs: `Name_<lang>.DTm` with a non-ASCII name
+    and a lowercase language suffix (2 to 27 of a-z, 0-9, `-`). The translator writes these copies next
+    to the originals, and the repo drops them from the map lists (dt/install.rs, the editor)."""
+    stem = os.path.splitext(name)[0]
+    if "_" not in stem:
+        return False
+    base, suffix = stem.rsplit("_", 1)
+    return (2 <= len(suffix) <= 27 and all(c in string.ascii_lowercase + string.digits + "-" for c in suffix)
+            and not base.isascii())
+
+
+def razdor_prefixes(tree):
+    """The data-file prefixes Razdor writes into an install (src/dt/english.rs): `Eng`, and the prefix of
+    each `<Prefix>_Units.ini` whose first line is Razdor's header `; Razdor translation: <language>`."""
+    out = {ENGLISH_PREFIX}
+    for rel, full in tree.paths.items():
+        m = re.match(r"^(.+)_Units\.ini$", rel.rsplit("/", 1)[-1], re.IGNORECASE)
+        if not m or m.group(1).lower() == "rus":
+            continue
+        with open(full, encoding="utf-8", errors="replace") as f:
+            first = f.readline().lstrip("﻿")
+        if first.startswith(RAZDOR_HEADER):
+            out.add(m.group(1).lower())
+    return out
+
+
+def razdor_made(rel, prefixes):
+    """Whether a file is Razdor's own output written into an install, never part of the game or a mod:
+    a translated map copy (is_translated_map) or a data file of a Razdor language (razdor_prefixes)."""
+    low = rel.lower().rsplit("/", 1)[-1]
+    if low.endswith(".dtm"):
+        return is_translated_map(rel.rsplit("/", 1)[-1])
+    return low.endswith(".ini") and any(low.startswith(p + "_") for p in prefixes)
+
+
+def excluded(rel, prefixes=frozenset({ENGLISH_PREFIX})):
+    """Files a package leaves out: programs, saves, logs, crash logs (Razdor never runs them) and Razdor's own
+    translation output (razdor_made)."""
     low = rel.lower()
     name = low.rsplit("/", 1)[-1]
-    return low.endswith(SKIP_EXT) or name.startswith("unins") or low.startswith(SKIP_DIRS) or "crashlog" in name
+    return (low.endswith(SKIP_EXT) or name.startswith("unins") or low.startswith(SKIP_DIRS)
+            or "crashlog" in name or razdor_made(rel, prefixes))
 
 
 def build_zip(members, zip_path):
@@ -189,10 +232,11 @@ def build_zip(members, zip_path):
 
 def verify_package(zip_path, base):
     """Refuses a package with an excluded file or with a file the base already has, byte for byte."""
+    prefixes = razdor_prefixes(base)
     with zipfile.ZipFile(zip_path) as zf:
         for info in zf.infolist():
             rel = info.filename
-            if excluded(rel):
+            if excluded(rel, prefixes):
                 raise Fail(f"{zip_path}: {rel} must not be in a package")
             if rel in base.paths and sha256_bytes(zf.read(info)) == base.sha(rel):
                 raise Fail(f"{zip_path}: {rel} is the base's own file, byte for byte; the package must not carry it")
@@ -668,7 +712,8 @@ class Pack:
             raise Skip(f"no built folder at mods/{slug}/game")
         game = self.tree(game_dir)
         diffs = changed_files(game, base)
-        members = [(rel, full) for rel, full in diffs if not excluded(rel)]
+        prefixes = razdor_prefixes(game) | razdor_prefixes(base)
+        members = [(rel, full) for rel, full in diffs if not excluded(rel, prefixes)]
         if not members:
             raise Skip("no file differs from its base")
         decoded = [rel for rel, _ in members if rel in game.decoded]
@@ -713,8 +758,10 @@ class Pack:
         for slug in before:
             state.update(self.pkgs[slug])
         state.update(own)
-        have = {k: (rel, cu.sha(rel) if sha is None else sha) for k, (rel, sha) in state.items() if not excluded(rel)}
-        want = {rel.lower(): (rel, game.sha(rel)) for rel in game.paths if not excluded(rel)}
+        prefixes = razdor_prefixes(cu) | razdor_prefixes(game)
+        have = {k: (rel, cu.sha(rel) if sha is None else sha) for k, (rel, sha) in state.items()
+                if not excluded(rel, prefixes)}
+        want = {rel.lower(): (rel, game.sha(rel)) for rel in game.paths if not excluded(rel, prefixes)}
         problems = [f"missing {want[k][0]}" for k in sorted(set(want) - set(have))]
         problems += [f"extra {have[k][0]}" for k in sorted(set(have) - set(want))]
         problems += [f"differs {want[k][0]}" for k in sorted(set(want) & set(have)) if want[k][1] != have[k][1]]
@@ -915,6 +962,11 @@ class Pack:
                 lines.append(f"- FAIL {via}: {len(problems)} difference(s): " + "; ".join(problems[:40]))
             else:
                 lines.append(f"- ok {via}")
+        cu = self.cu()
+        cu_prefixes = razdor_prefixes(cu)
+        own_files = sorted(rel for rel in cu.paths if razdor_made(rel, cu_prefixes))
+        lines += ["", f"## Razdor-made files left out ({len(own_files)} in Community Update)", ""]
+        lines += [f"- `{rel}`" for rel in own_files[:40]] or ["None."]
         lines += ["", "## Notes", ""]
         lines += [f"- {n}" for n in self.notes] or ["None."]
         return "\n".join(lines) + "\n"
@@ -1060,6 +1112,13 @@ def selftest():
     check_selftest("version: decoration removed", clean_version("** 2.0") == "2.0" and clean_version("▪︎▪︎") == "")
     check_selftest("hub names: parentheses, apostrophes and Cyrillic are kept",
                    all(hub_name_problem(n) is None for n in ["Coven Time(2).DTm", "Let's Go.DTm", "Карта 1.DTm"]))
+    check_selftest("razdor-made: translated map copies and Razdor's data files are recognised",
+                   is_translated_map("Другой берег_en.DTm") and is_translated_map("РК1-Начало пути_hindi-native.DTm")
+                   and not is_translated_map("Другой берег.DTm") and not is_translated_map("Map_ab.DTm")
+                   and razdor_made("Maps_Rus/Другой берег_en.DTm", {"eng"})
+                   and razdor_made("Eng_Units.ini", {"eng"}) and razdor_made("eng_spells.INI", {"eng"})
+                   and not razdor_made("Rus_Units.ini", {"eng"}) and not razdor_made("Graphics/a.lit", {"eng"})
+                   and not razdor_made("Maps/Карта.DTm", {"eng"}))
     refused = {n: hub_name_problem(n) for n in ["a:b.DTm", "CON.txt", "x ", "a.", "..", "q?.DTm", "a\x01", "a" * 256]}
     check_selftest("hub names: each forbidden name is refused", all(refused.values()))
     check_selftest("archive author from Author-Title", archive_author("Crumb-Duchy_ravaged1") == ("Crumb", "Crumb"))
