@@ -91,8 +91,10 @@ install file ──► src/dt/gfx.rs decode_file ──► gfx::Image (RGBA, not
   portrait and item icon textures queued by `preload_all`, both within one 4 ms budget per frame
   (`preload::upload_within_budget`; one upload per frame at least). Other `Fx` variants and the
   map's atlas and figure sheets are made at first use, from the decoded picture (no decode
-  then). The minimap's picture is made when the game starts (`minimap::prebuild`), not at its
-  first open; its key includes the fog, so it is reused only while the fog has not changed.
+  then). The minimap's ground (terrain, objects, bridges) is made once per map when the game starts
+  (`minimap::prebuild`, keyed by the map's identity, not the fog); the fog's dark is drawn over it
+  as `minimap::fog_texture`, the same texture the map view draws, so a step of the hero only
+  remakes the dark.
   Snapshot runs make no early textures.
 - **The persistent picture cache** (`src/dt/picture_cache.rs`): a decoded picture's frames
   (raw RGBA with their sizes) are kept in `platform::cache_dir()` + `pictures` + one subfolder

@@ -149,6 +149,15 @@ pub fn reveal_overlay(kept: u8, now: u8) -> u8 {
     ((k - n) * 255).div_ceil(255 - n).min(255) as u8
 }
 
+/// The fog's dark as a black texture, one texel per cell, alpha = its darkness ([`darkness_held`]),
+/// made when the fog or its held cells change. The map view and the minimap draw the same one.
+pub fn fog_texture(fog: &Fog, held: &[(i32, i32)]) -> Texture2D {
+    cached(&FOG_TEX, fog.fingerprint() ^ held_key(held), FilterMode::Linear, || {
+        let rgba = darkness_held(fog, held).into_iter().flat_map(|a| [0, 0, 0, a]).collect();
+        (fog.w as u16, fog.h as u16, rgba)
+    })
+}
+
 /// Draws the fog over the map. `tl` and `br` are the screen positions of world points
 /// `(-0.5, -0.5·row)` and `(w − 0.5, (h − 0.5)·row)`: the outer corners of the edge cells,
 /// so texel centres fall on cell centres.
@@ -156,10 +165,7 @@ pub fn draw_fog(fog: &Fog, held: &[(i32, i32)], tl: Vec2, br: Vec2) {
     if !fog.enabled || fog.w <= 0 || fog.h <= 0 {
         return;
     }
-    let tex = cached(&FOG_TEX, fog.fingerprint() ^ held_key(held), FilterMode::Linear, || {
-        let rgba = darkness_held(fog, held).into_iter().flat_map(|a| [0, 0, 0, a]).collect();
-        (fog.w as u16, fog.h as u16, rgba)
-    });
+    let tex = fog_texture(fog, held);
     draw_texture_ex(&tex, tl.x, tl.y, WHITE, DrawTextureParams { dest_size: Some(br - tl), ..Default::default() });
 }
 
@@ -625,13 +631,31 @@ fn army_is_ally(own_attitude: i8, meeting_waiting: bool) -> bool {
     meeting_waiting && own_attitude > 0
 }
 
-/// The minimap's picture of the game's ground, fog and held cells, made when its key changed
-/// (see [`cached`]): the terrain, the objects, the bridges and the dark.
+/// The key of the ground picture: the map's identity (its size, surface, object places and
+/// bridge cells) and whether the art is there. The fog is not in it: it is drawn over the
+/// ground ([`fog_texture`]), so a step of the hero does not make the ground again.
+fn ground_key(game: &Game, art: bool) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let map = &game.world.map;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (map.w, map.h, art).hash(&mut h);
+    map.surface_codes().hash(&mut h);
+    for o in map.objects_in_rows(0, map.h) {
+        (o.tile, o.class, o.sprite).hash(&mut h);
+    }
+    for l in game.world.locations.iter().filter(|l| l.kind.is_bridge()) {
+        for t in l.cells() {
+            t.hash(&mut h);
+        }
+    }
+    h.finish()
+}
+
+/// The minimap's picture of the game's ground, made once per map ([`ground_key`], see
+/// [`cached`]): the terrain, the objects, the bridges. Its dark is [`fog_texture`], drawn over it.
 fn ground(game: &Game, art: Option<&super::dt_art::DtArt>, surface_color: fn(u8) -> Color) -> Texture2D {
     let map = &game.world.map;
-    let fog = &game.fog;
-    let held = game.unshown_cells();
-    cached(&MINI_TEX, fog.fingerprint() ^ held_key(&held) ^ (map.w as u64) << 20 ^ map.h as u64 ^ art.is_some() as u64, FilterMode::Linear, || {
+    cached(&MINI_TEX, ground_key(game, art.is_some()), FilterMode::Linear, || {
         // The ground: the terrain texture's own colours; the map objects on it in their
         // sprites' colours; building footprints (bridges, roads through towns) light.
         let (w, h) = (map.w as usize, map.h as usize);
@@ -668,22 +692,20 @@ fn ground(game: &Game, art: Option<&super::dt_art::DtArt>, surface_color: fn(u8)
                 }
             }
         }
-        // The dark with the map's soft edge.
-        let dark = darkness_held(fog, &held);
         let mut rgba = Vec::with_capacity(w * h * 4);
-        for (i, c) in rgb.iter().enumerate() {
-            let lit = 255 - dark.get(i).copied().unwrap_or(255) as u32;
-            rgba.extend([c[0], c[1], c[2]].map(|v| (v as u32 * lit / 255) as u8));
+        for c in rgb.iter() {
+            rgba.extend(c);
             rgba.push(255);
         }
         (map.w as u16, map.h as u16, rgba)
     })
 }
 
-/// Makes the minimap's picture ahead, when the game starts ([`ground`]): the first open finds it
-/// made if the fog has not changed since.
+/// Makes the minimap's pictures ahead, when the game starts ([`ground`], [`fog_texture`]): the
+/// first open finds them made.
 pub fn prebuild(game: &Game, art: Option<&super::dt_art::DtArt>, surface_color: fn(u8) -> Color) {
     let _ = ground(game, art, surface_color);
+    let _ = fog_texture(&game.fog, &game.unshown_cells());
 }
 
 /// Draws the minimap window. `view_world` is the part of the world the map view shows (world
@@ -703,6 +725,9 @@ pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_
     }
     let tex = ground(game, art, surface_color);
     draw_texture_ex(&tex, r.x, r.y, WHITE, DrawTextureParams { dest_size: Some(vec2(r.w, r.h)), ..Default::default() });
+    // The dark over the ground: the same fog texture the main view draws, over the minimap's rect.
+    let dark = fog_texture(fog, &game.unshown_cells());
+    draw_texture_ex(&dark, r.x, r.y, WHITE, DrawTextureParams { dest_size: Some(vec2(r.w, r.h)), ..Default::default() });
 
     // Cells → minimap pixels (world units: rows are `row_height` apart).
     let rh = map.grid.row_height();
