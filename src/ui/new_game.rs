@@ -557,6 +557,8 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
     let (win, closed) = Win::open(&own("NewGame", "Title", n_("Scenario for a new game")));
     let k = win.k;
     let mut m = marks();
+    // The mod row takes room from the list's foot (`MOD_LIFT`); without mods nothing moves.
+    let lift = if mods.is_empty() { 0.0 } else { MOD_LIFT };
     let (show, order) = (Show::of(m.show), Order::of(m.order));
     let list = arrange(scenario_groups(scenarios), |g| facts_of(scenarios, g, &m), show, order);
     if let Some(name) = PICK.with(|p| p.borrow_mut().take()) {
@@ -571,7 +573,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
     // The box's top left is the window's inner pane frame's corner (4, 31), so its silver edge
     // and the pane's line up (`window_inner_frames`, 0x48d710); its bottom right stays at
     // (282, 360). «Добавить карту…» and its hint are under it, on the same left edge and width.
-    let rows = win.rect(4.0, 31.0, 278.0, 329.0);
+    let rows = win.rect(4.0, 31.0, 278.0, 329.0 - lift);
     chrome::text_box_base(rows);
     // The rows, their bar, the scrollbar and the empty-list line live in `view`: the box's
     // corner ornaments take the columns beside it, so nothing under them.
@@ -789,7 +791,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
         }
         drop(clip);
     }
-    add_map_button(&win, has_install, !mods.is_empty());
+    add_map_button(&win, has_install, lift);
     // Razdor's filter and order (a players' wish), under the list where the original's window
     // has nothing: each opens a drop-down list; the choice is kept in the settings.
     let pick_show = view_choice(&win, 12.0, "razdor:scenario-show", show as i64, &Show::ALL.map(|s| s.label()));
@@ -809,7 +811,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
         labels.extend(mods.iter().map(|(_, title)| format!("{}: {}", tr("Mod"), title.get(i18n::lang()))));
         let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
         let current = active.and_then(|a| mods.iter().position(|(id, _)| id == a)).map_or(0, |i| i + 1);
-        if let Some(v) = view_choice_at(&win, win.rect(4.0, MOD_ROW_Y, 278.0, MOD_ROW_H), "razdor:scenario-mod", current as i64, &refs) {
+        if let Some(v) = view_choice_at(&win, win.rect(4.0, MOD_ROW_Y - lift, 278.0, MOD_ROW_H), "razdor:scenario-mod", current as i64, &refs) {
             let id = (v > 0).then(|| mods[v as usize - 1].0.clone());
             MOD_REQUEST.with_borrow_mut(|r| *r = Some(id));
             PICKED.with(|p| p.set(0));
@@ -891,13 +893,13 @@ fn experimental_menu() {
 /// Razdor's «Добавить карту…» under the scenario list, with the hint of what it takes: the
 /// platform's picker copies the map (or the archive's maps) into the install (`ui::map_import`).
 /// The list ends above it (`add_map_button`'s room: the list is 329 units high).
-fn add_map_button(win: &Win, has_install: bool, mod_row: bool) {
+fn add_map_button(win: &Win, has_install: bool, lift: f32) {
     if !map_import::available() {
         return;
     }
     let k = win.k;
     let enabled = has_install && map_import::can_start();
-    let r = win.rect(4.0, 366.0, 278.0, 26.0);
+    let r = win.rect(4.0, 366.0 - lift, 278.0, 26.0);
     let (_, down, pressed) = button_state(r, enabled);
     chrome::marble_button(r, tr("Add a map…"), enabled, down);
     if pressed {
@@ -906,8 +908,9 @@ fn add_map_button(win: &Win, has_install: bool, mod_row: bool) {
     }
     let size = 10.0 * k;
     let hint = tr("A .DTm file or a .zip archive: an archive may hold a campaign or several maps.");
-    // With the mod row (under the button) the hint moves below it, two lines tighter.
-    let (top, gap) = if mod_row { (MOD_ROW_Y + MOD_ROW_H + 2.0, 10.0) } else { (398.0, 13.0) };
+    // With the mod row (under the button, lifted with the list) the hint sits below it, two
+    // lines tighter; the two lines end well above the window's bottom row (442).
+    let (top, gap) = if lift > 0.0 { (MOD_ROW_Y - lift + MOD_ROW_H + 3.0, 10.0) } else { (398.0, 13.0) };
     for (i, line) in wrap(hint, 278.0 * k, size).iter().take(2).enumerate() {
         let at = win.rect(4.0, top + i as f32 * gap, 278.0, 13.0);
         chrome::shadow_text(line, at.x + 4.0 * k, at.y + size, size, chrome::CREAM);
@@ -918,9 +921,12 @@ fn view_choice(win: &Win, x: f32, key: &str, current: i64, labels: &[&str]) -> O
     view_choice_at(win, win.rect(x, 442.0, 140.0, 28.0), key, current, labels)
 }
 
-/// The mod row's place under «Добавить карту…» (window units): full width, the hint below it.
+/// The mod row's place under «Добавить карту…» (window units, with no mods; the hint below it).
 const MOD_ROW_Y: f32 = 396.0;
 const MOD_ROW_H: f32 = 22.0;
+/// How far the list's box, «Добавить карту…» and the rows under them rise when the mod row is
+/// shown: the list gives up the room the row takes.
+const MOD_LIFT: f32 = 24.0;
 
 /// [`view_choice`] in the rectangle `r` (screen pixels).
 fn view_choice_at(win: &Win, r: Rect, key: &str, current: i64, labels: &[&str]) -> Option<i64> {
