@@ -229,7 +229,7 @@ fn stage_replay(app: &mut App, step: Option<&str>) -> Result<(), String> {
 
 /// `RAZDOR_SCENE_OPEN=<frame>:<window>[,<frame>:<window>…]`: at that frame the window
 /// opens over the scene, as its button opens it (`load`, `army`, `spells`, `journal`,
-/// `menu`, `keys` (the F1 list), `building:<n>`; `map` closes it), for the frame timer (`RAZDOR_PROFILE`) to time
+/// `menu`, `keys` (the F1 list), `minimap`, `building:<n>`; `map` closes it), for the frame timer (`RAZDOR_PROFILE`) to time
 /// its opening. Returns true at such a frame.
 pub fn open_later(app: &mut App, frame: u64) -> bool {
     let Ok(specs) = std::env::var("RAZDOR_SCENE_OPEN") else { return false };
@@ -243,6 +243,11 @@ pub fn open_later(app: &mut App, frame: u64) -> bool {
     // The F1 key list (`keys`) over the scene: the phones' «Клавиши» opens it the same way.
     if what == "keys" {
         app.help = true;
+        return true;
+    }
+    // The minimap (`M`) over the map: its first open is timed by the frame probe.
+    if what == "minimap" {
+        app.map_view.minimap = true;
         return true;
     }
     let mut parts = what.split(':');

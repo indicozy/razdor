@@ -85,7 +85,10 @@ For "did this UI change alter any other screen?": `tools/ui-regress/` renders th
   logged as `RAZDOR_SCENE=…: cannot load the save <path>: <reason>`, and the scene stays on
   the title screen.
 - `RAZDOR_SCENE_OPEN=<frame>:<window>[,…]` (`load`, `army`, `spells`, `journal`, `menu`,
-  `building:<n>`, `map`): opens a window at that frame and logs the frames after it.
+  `building:<n>`, `minimap`, `map`): opens a window at that frame and logs the frames after it.
+  Its first open of the minimap or a building is what the game's start prepares (the decode
+  queue and the textures): time it with `RAZDOR_PROFILE=1` and `RAZDOR_PROFILE_FRAMES`, without
+  `RAZDOR_SNAPSHOT` (snapshot runs queue nothing).
 - Many saves: point `RAZDOR_SAVE_DIR` at a scratch folder of copied saves (0, 85, 500).
 - CPU: `perf record -F 999 -g` (or `--call-graph dwarf`) on the run, then
   `perf report --no-children`; I/O: `strace -c -f`.

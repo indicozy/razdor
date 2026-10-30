@@ -32,6 +32,7 @@ pub struct Assets {
 /// translations, the saves' folder and the saves' summaries.
 fn announce_install(d: &DtArt) {
     super::chrome::set_install(d.install.dir.clone());
+    d.preload_all();
     super::language::set_install(&d.install.dir);
     razdor::rules::save::set_install(&d.install.dir);
     razdor::rules::save::warm_meta_cache();

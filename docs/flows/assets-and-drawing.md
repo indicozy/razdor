@@ -71,17 +71,29 @@ install file ──► src/dt/gfx.rs decode_file ──► gfx::Image (RGBA, not
   taken off the queue and decoded there. Slow main-thread waits and decodes are logged
   ("slow load") with `RAZDOR_PROFILE=1`. Snapshot runs (`RAZDOR_SNAPSHOT`) queue nothing and
   decode on demand, so their frames do not depend on timing.
-- **What is queued:** `chrome::set_install` queues `WINDOWS_AHEAD` (the menus and the title,
-  the window frames and buttons, fonts, cursors, the battle's art and sheets, the paper,
-  portrait and icon sheets, the load window's book, building tabs). The first game queues
-  `DtArt::preload_map` once: the terrain textures, the water frames and every
-  `Graphics/Units/*.ugs` figure sheet (the install's set, not one map's). Add a file to
-  `WINDOWS_AHEAD` when profiling shows a window's first open decoding it.
+- **What is queued, at start** (`ui::assets::announce_install`, once per install): first
+  `chrome::set_install` queues `WINDOWS_AHEAD` (the menus and the title, the window frames and
+  buttons, fonts, cursors, the battle's art and sheets, the paper, portrait and icon sheets,
+  the load window's book, building tabs). Then `DtArt::preload_all` queues the rest of the
+  install, most likely first: the terrain textures, the water frames and every
+  `Graphics/Units/*.ugs` figure sheet; the map objects, the minimap's icons and frame; the unit
+  portrait and item icon sheets; then every other `.lit`/`.ugs`/`.spi`/`.bmp` under `Graphics/`
+  in path order. The store keeps at most `picture_cache::CAP_BYTES` of decoded RGBA (1 GiB on
+  the desktop, 256 MiB on the phones): a queued picture past it is not kept and the rest of the
+  queue is dropped (those decode on demand, as before). A snapshot run queues nothing.
+  The queue's end is logged (`art ahead: queue done, N pictures, X MiB decoded, Y s`).
+  Measured on the desktop (the install's 456 pictures, 176 MiB decoded, cold cache,
+  `RAZDOR_NO_PICTURE_CACHE=1`): the queue is done in about 0.4 s with the two workers.
 - **Textures are made on the main thread** (macroquad/OpenGL): `chrome::warm(4.0)` runs each
-  frame and uploads the lit pictures of `WINDOWS_AHEAD` (`WARM`) that the store has ready,
-  through `chrome::art(rel, Fx::Plain)`, within 4 ms (`preload::upload_within_budget`; one
-  upload per frame at least). Other `Fx` variants and the map's textures are made at first
-  use, from the decoded picture (no decode then). Snapshot runs make no early textures.
+  frame and uploads the lit pictures of `WINDOWS_AHEAD` (`WARM`), then the install's other
+  `Graphics/Windows/*.lit` (`other_lit_windows`), that the store has ready, through
+  `chrome::art(rel, Fx::Plain)`; `DtArt::warm` then uploads the terrain textures and the unit
+  portrait and item icon textures queued by `preload_all`, both within one 4 ms budget per frame
+  (`preload::upload_within_budget`; one upload per frame at least). Other `Fx` variants and the
+  map's atlas and figure sheets are made at first use, from the decoded picture (no decode
+  then). The minimap's picture is made when the game starts (`minimap::prebuild`), not at its
+  first open; its key includes the fog, so it is reused only while the fog has not changed.
+  Snapshot runs make no early textures.
 - **The persistent picture cache** (`src/dt/picture_cache.rs`): a decoded picture's frames
   (raw RGBA with their sizes) are kept in `platform::cache_dir()` + `pictures` + one subfolder
   per release and format, `pictures/<version>-f<format>` (e.g. `pictures/1.1.3-f1`): desktop
@@ -293,7 +305,9 @@ The original finds a unit's and an ability's pictures as follows, and Razdor doe
    `parity-check` skill): which file, frame, blend, alpha.
 2. Load it through `chrome::win` / `chrome::art` (window art) or a `DtArt` method (unit,
    item, map art). Do not add a new cache.
-3. If it is big and a window needs it on first open, add it to `WINDOWS_AHEAD`.
+3. Every picture under `Graphics/` is queued at start, so a new picture needs no list entry for
+   its decode. Add it to `WINDOWS_AHEAD` only when its texture must be up before the menus, or to
+   the upload list of `chrome::warm` when its first open must find the texture made.
 4. Check it offscreen (`RAZDOR_SCENE` + `RAZDOR_SNAPSHOT`, see
    [testing-and-tools.md](testing-and-tools.md)); a decoder change gets a unit test on
    synthetic bytes plus a real-file test gated on `RAZDOR_DT_DIR`.

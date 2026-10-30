@@ -5,11 +5,13 @@
 #![allow(dead_code)]
 
 use std::cell::{OnceCell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::path::Path;
 
 use macroquad::prelude::*;
 
-use razdor::dt::gfx::{self, water_frame_file, Image, ObjectSprite, ObjectSprites, TERRAIN_TEXTURES, TEXTURES_DIR, WATER_FRAMES};
+use razdor::dt::gfx::{self, water_frame_file, Image, ObjectSprite, ObjectSprites, ITEM_ICONS, MAP_OBJECTS, TERRAIN_TEXTURES, TEXTURES_DIR, UNIT_FIGURES, UNIT_PORTRAITS, WATER_FRAMES};
+use razdor::dt::preload;
 use std::path::PathBuf;
 use razdor::dt::install::DtInstall;
 use razdor::dt::DtError;
@@ -26,6 +28,14 @@ enum Key {
     Terrain(u8),
     Object(u8, u8),
     Building(u8, u8),
+}
+
+/// A texture [`DtArt::warm`] makes ahead, once its picture is decoded.
+#[derive(Clone, Copy)]
+enum Warm {
+    Terrain(u8),
+    Portrait(u32),
+    Item(u32),
 }
 
 /// Every map object and building sprite in one texture, so the world map draws in few batches.
@@ -65,6 +75,8 @@ pub struct DtArt {
     textures: RefCell<HashMap<Key, Option<Texture2D>>>,
     /// Map figures (`Graphics/Units/*.ugs`) as 8×8 sheets of 64×64 frames, by file stem.
     figures_sheets: RefCell<HashMap<String, Option<Texture2D>>>,
+    /// Textures [`DtArt::warm`] makes ahead, in order, with the picture each waits for.
+    warm: RefCell<VecDeque<(PathBuf, Warm)>>,
 }
 
 fn or_log<T: Default>(what: &str, r: Result<T, DtError>) -> T {
@@ -72,6 +84,20 @@ fn or_log<T: Default>(what: &str, r: Result<T, DtError>) -> T {
         razdor::diag!("Discord Times art: {what}: {e}");
         T::default()
     })
+}
+
+/// The picture files under `dir`, in path order: `.lit`, `.ugs`, `.spi` and `.bmp`.
+fn graphics_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let mut entries: Vec<PathBuf> = entries.filter_map(|e| Some(e.ok()?.path())).collect();
+    entries.sort();
+    for p in entries {
+        if p.is_dir() {
+            graphics_files(&p, out);
+        } else if matches!(p.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).as_deref(), Some("lit" | "ugs" | "spi" | "bmp")) {
+            out.push(p);
+        }
+    }
 }
 
 fn texture(img: &Image) -> Option<Texture2D> {
@@ -94,6 +120,7 @@ impl DtArt {
             terrain_images: OnceCell::new(),
             textures: RefCell::new(HashMap::new()),
             figures_sheets: RefCell::new(HashMap::new()),
+            warm: RefCell::new(VecDeque::new()),
         }
     }
 
@@ -166,12 +193,16 @@ impl DtArt {
 
     /// The blended terrain renderer over all terrain textures (`None` if none loads or the
     /// shader fails).
-    /// Queues what a map draws for the decode store ([`razdor::dt::preload`]): the terrain
-    /// textures, the water frames and every unit's figure sheet of the install. The set is the
-    /// install's, not one map's, so it is queued once; the frames come after the windows' art.
-    pub fn preload_map(&self) {
-        let mut paths: Vec<PathBuf> = TERRAIN_TEXTURES.iter().filter_map(|name| self.install.file(&format!("{TEXTURES_DIR}/{name}")).ok()).collect();
-        paths.extend((0..WATER_FRAMES).filter_map(|i| self.install.file(&water_frame_file(i)).ok()));
+    /// Queues every picture of the install for the decode store ([`preload::preload`]), most
+    /// likely first: the map's terrain, water and figures, the map objects and the minimap's
+    /// art, the building windows' portraits and item icons, then every other picture under
+    /// `Graphics/` in path order. The store keeps up to its cap ([`preload`]), so the rest
+    /// decodes on demand. Also queues the textures [`DtArt::warm`] makes: the terrain, the
+    /// portraits and the item icons. The window art was queued before ([`super::chrome::set_install`]).
+    pub fn preload_all(&self) {
+        let file = |rel: &str| self.install.file(rel).ok();
+        let mut paths: Vec<PathBuf> = TERRAIN_TEXTURES.iter().filter_map(|name| file(&format!("{TEXTURES_DIR}/{name}"))).collect();
+        paths.extend((0..WATER_FRAMES).filter_map(|i| file(&water_frame_file(i))));
         if let Ok(units) = self.install.file("Graphics/Units") {
             if let Ok(entries) = std::fs::read_dir(units) {
                 let mut figures: Vec<PathBuf> = entries.filter_map(|e| Some(e.ok()?.path())).filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("ugs"))).collect();
@@ -179,7 +210,62 @@ impl DtArt {
                 paths.extend(figures);
             }
         }
-        razdor::dt::preload::preload(paths);
+        paths.extend(file(MAP_OBJECTS));
+        paths.extend(file("Graphics/Windows/MM_Icons.ugs"));
+        paths.extend(file("Graphics/Windows/MiniMap_Frame_400x400.lit"));
+        paths.extend(file(UNIT_PORTRAITS));
+        paths.extend(file(UNIT_FIGURES));
+        paths.extend(file(ITEM_ICONS));
+        if let Ok(graphics) = self.install.file("Graphics") {
+            graphics_files(&graphics, &mut paths);
+        }
+        preload::preload(paths);
+
+        let mut warm: VecDeque<(PathBuf, Warm)> = VecDeque::new();
+        for code in 0..TERRAIN_TEXTURES.len() as u8 {
+            if let Some(p) = file(&format!("{TEXTURES_DIR}/{}", TERRAIN_TEXTURES[code as usize])) {
+                warm.push_back((p, Warm::Terrain(code)));
+            }
+        }
+        if let Some(p) = file(UNIT_PORTRAITS) {
+            warm.extend(self.install.unit_pictures.iter().map(|&(id, _)| (p.clone(), Warm::Portrait(id))));
+        }
+        if let Some(p) = file(ITEM_ICONS) {
+            warm.extend(self.install.artefacts.iter().map(|a| (p.clone(), Warm::Item(a.id))));
+        }
+        *self.warm.borrow_mut() = warm;
+    }
+
+    /// Makes the textures [`DtArt::preload_all`] queued whose pictures the decode store has ready,
+    /// within `budget_ms` (see [`preload::upload_within_budget`]); a few per frame.
+    pub fn warm(&self, budget_ms: f64) {
+        // Snapshot runs make their textures on demand, as before.
+        if std::env::var_os("RAZDOR_SNAPSHOT").is_some() {
+            return;
+        }
+        let mut queue = std::mem::take(&mut *self.warm.borrow_mut());
+        if queue.is_empty() {
+            return;
+        }
+        let start = std::time::Instant::now();
+        preload::upload_within_budget(
+            &mut queue,
+            |(path, _)| preload::is_ready(path),
+            |(_, item)| match *item {
+                Warm::Terrain(code) => {
+                    self.terrain(code);
+                }
+                Warm::Portrait(id) => {
+                    self.unit_portrait(id);
+                }
+                Warm::Item(id) => {
+                    self.item_icon(id);
+                }
+            },
+            || start.elapsed().as_secs_f64() * 1000.0,
+            budget_ms,
+        );
+        *self.warm.borrow_mut() = queue;
     }
 
     pub fn terrain_layer(&self) -> Option<&TerrainLayer> {

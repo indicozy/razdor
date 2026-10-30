@@ -11,7 +11,7 @@
 use razdor::local;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use macroquad::prelude::*;
 
@@ -82,7 +82,9 @@ pub fn set_install(dir: PathBuf) {
     // The decode store decodes them in order, in the background; the lit ones are uploaded
     // a few per frame ([`warm`]) so that their first use finds the texture made.
     preload::preload(ahead.iter().map(|(p, _)| p.clone()).collect());
-    WARM.with(|w| *w.borrow_mut() = ahead.into_iter().filter(|(_, n)| n.ends_with(".lit")).map(|(p, n)| (p, n.to_string())).collect());
+    let mut warm: Vec<(PathBuf, String)> = ahead.into_iter().filter(|(_, n)| n.ends_with(".lit")).map(|(p, n)| (p, n.to_string())).collect();
+    warm.extend(other_lit_windows(&dir));
+    WARM.with(|w| *w.borrow_mut() = warm.into());
     CHROME.with(|c| {
         *c.borrow_mut() = Some(Chrome { dir, textures: HashMap::new(), visual_textures: HashMap::new(), visual_images: HashMap::new(), animations: HashMap::new(), texts: None, english_texts: None, english_fallback: None })
     });
@@ -212,8 +214,23 @@ const WINDOWS_AHEAD: &[&str] = &[
     "Windows/TBd6_RUS.lit",
 ];
 
-// Lit pictures of [`WINDOWS_AHEAD`] whose textures [`warm`] makes ahead: the path and the name
-// as [`art`] takes it.
+/// The install's other window pictures (`Graphics/Windows/*.lit`, not in [`WINDOWS_AHEAD`]): the
+/// building windows and the other screens draw some of them, so [`warm`] makes them too, after
+/// the ones of [`WINDOWS_AHEAD`]. The path and the name as [`art`] takes it.
+fn other_lit_windows(dir: &Path) -> Vec<(PathBuf, String)> {
+    let Ok(folder) = find_path(dir, "Graphics/Windows") else { return Vec::new() };
+    let Ok(entries) = std::fs::read_dir(folder) else { return Vec::new() };
+    let mut rels: Vec<String> = entries
+        .filter_map(|e| Some(e.ok()?.file_name().to_string_lossy().into_owned()))
+        .filter(|n| n.to_ascii_lowercase().ends_with(".lit"))
+        .map(|n| format!("Windows/{n}"))
+        .filter(|rel| !WINDOWS_AHEAD.contains(&rel.as_str()))
+        .collect();
+    rels.sort();
+    rels.into_iter().filter_map(|rel| Some((find_path(dir, &format!("Graphics/{rel}")).ok()?, rel))).collect()
+}
+
+// Lit pictures whose textures [`warm`] makes ahead: the path and the name as [`art`] takes it.
 local! {
     static WARM: RefCell<std::collections::VecDeque<(PathBuf, String)>> = RefCell::new(Default::default());
 }
@@ -221,10 +238,11 @@ local! {
 /// Uploads the textures of pictures the decode store has ready, a few per frame, within
 /// `budget_ms`, so that the first use of each finds it made (see
 /// [`preload::upload_within_budget`]). Pictures not decoded yet are kept for later frames.
-pub fn warm(budget_ms: f64) {
+/// Returns the milliseconds it took.
+pub fn warm(budget_ms: f64) -> f64 {
     // Snapshot runs make their textures on demand, as before, so their frames stay the same.
     if std::env::var_os("RAZDOR_SNAPSHOT").is_some() {
-        return;
+        return 0.0;
     }
     let start = std::time::Instant::now();
     WARM.with(|w| {
@@ -243,6 +261,7 @@ pub fn warm(budget_ms: f64) {
         );
         *w.borrow_mut() = queue;
     });
+    start.elapsed().as_secs_f64() * 1000.0
 }
 
 // ------------------------------------------------------------------------------------------

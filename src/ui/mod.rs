@@ -183,8 +183,8 @@ pub struct App {
     map_music: MapMusic,
     /// The screen of the last frame, to hear windows open and battles begin.
     last_screen: Option<std::mem::Discriminant<Screen>>,
-    /// The map's pictures are queued for the decode store (once, at the first game).
-    map_art_queued: bool,
+    /// The minimap's picture is made ahead once per game (see [`minimap::prebuild`]).
+    minimap_prebuilt: bool,
     /// Where the last left press went down (screen pixels), for the outside tap (`frame_content`).
     tap_press: Option<(f32, f32)>,
     /// The play log's last screen and message, to write each change once.
@@ -270,7 +270,7 @@ impl App {
             audio,
             map_music: MapMusic::default(),
             last_screen: None,
-            map_art_queued: false,
+            minimap_prebuilt: false,
             tap_press: None,
             play_last: ("", None),
             editor: None,
@@ -965,15 +965,22 @@ impl App {
         input::begin_frame();
         rest::tick();
         chrome::begin_frame();
-        // The first game queues the map's pictures for the background decoders (once: the set
-        // is the install's), and each frame uploads the textures of those decoded so far.
-        if !self.map_art_queued && self.game.is_some() {
-            self.map_art_queued = true;
-            if let Some(d) = self.assets.dt.as_ref() {
-                d.preload_map();
+        // The install's pictures are queued for the background decoders at start
+        // (`Assets::load`). Each frame uploads the textures of those decoded so far, within one
+        // 4 ms budget shared by the window art and the install's textures.
+        let used = chrome::warm(4.0);
+        if let Some(d) = self.assets.dt.as_ref() {
+            d.warm((4.0 - used).max(0.0));
+        }
+        // The minimap's picture is made once the game starts, not at its first open.
+        if self.game.is_none() {
+            self.minimap_prebuilt = false;
+        } else if !self.minimap_prebuilt {
+            self.minimap_prebuilt = true;
+            if let Some(game) = self.game.as_ref() {
+                minimap::prebuild(game, self.assets.dt.as_ref(), world_view::surface_color);
             }
         }
-        chrome::warm(4.0);
         cursor::begin_frame();
         widgets::track_held_key();
         // Alt+Enter: the next display mode on any screen; the screens do not see its Enter.

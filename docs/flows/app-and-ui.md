@@ -25,8 +25,8 @@ except what the screen value, the `App` fields and a few `thread_local!`s hold.
    `Assets::load` (`src/ui/assets.rs`) which finds the install (`DtArt::from_env` →
    `razdor::dt::install::locate`) and, when there is one, calls
    `ui::language::set_install` (the install's data translations join the language list),
-   `ui::chrome::set_install` (starts decoding window art ahead, see
-   [assets-and-drawing.md](assets-and-drawing.md)), `razdor::rules::save::set_install` and
+   `ui::chrome::set_install` and `DtArt::preload_all` (start decoding the install's pictures ahead,
+   see [assets-and-drawing.md](assets-and-drawing.md)), `razdor::rules::save::set_install` and
    `razdor::rules::save::warm_meta_cache` (see [saves.md](saves.md)).
 3. `App::new` (`src/ui/mod.rs`): the install's `Content` (`Content::from_dt`), every map of
    the install parsed into `ScenarioEntry`s, `Audio::new` (settings are loaded here).

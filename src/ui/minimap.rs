@@ -625,23 +625,13 @@ fn army_is_ally(own_attitude: i8, meeting_waiting: bool) -> bool {
     meeting_waiting && own_attitude > 0
 }
 
-/// Draws the minimap window. `view_world` is the part of the world the map view shows (world
-/// units). Returns the look point (where the map's view goes, while the picture is held). The
-/// window closes from the bottom bar's map button (and Esc), not from a cross of its own.
-pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_world: Rect, surface_color: fn(u8) -> Color) -> Option<(f32, f32)> {
+/// The minimap's picture of the game's ground, fog and held cells, made when its key changed
+/// (see [`cached`]): the terrain, the objects, the bridges and the dark.
+fn ground(game: &Game, art: Option<&super::dt_art::DtArt>, surface_color: fn(u8) -> Color) -> Texture2D {
     let map = &game.world.map;
     let fog = &game.fog;
-    let r = rect(map, view);
-    let o = outer(map, view);
-    // The window: black behind the map, the original's silver frame over it (or a stone-grey
-    // one).
-    let frame_art = super::chrome::win_fx("MiniMap_Frame_400x400", super::chrome::Fx::KeyBlack);
-    draw_rectangle(o.x, o.y, o.w, o.h, BLACK);
-    if frame_art.is_none() {
-        draw_rectangle_lines(o.x + 1.0, o.y + 1.0, o.w - 2.0, o.h - 2.0, 2.0, Color::new(0.62, 0.64, 0.62, 1.0));
-    }
     let held = game.unshown_cells();
-    let tex = cached(&MINI_TEX, fog.fingerprint() ^ held_key(&held) ^ (map.w as u64) << 20 ^ map.h as u64 ^ art.is_some() as u64, FilterMode::Linear, || {
+    cached(&MINI_TEX, fog.fingerprint() ^ held_key(&held) ^ (map.w as u64) << 20 ^ map.h as u64 ^ art.is_some() as u64, FilterMode::Linear, || {
         // The ground: the terrain texture's own colours; the map objects on it in their
         // sprites' colours; building footprints (bridges, roads through towns) light.
         let (w, h) = (map.w as usize, map.h as usize);
@@ -687,7 +677,31 @@ pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_
             rgba.push(255);
         }
         (map.w as u16, map.h as u16, rgba)
-    });
+    })
+}
+
+/// Makes the minimap's picture ahead, when the game starts ([`ground`]): the first open finds it
+/// made if the fog has not changed since.
+pub fn prebuild(game: &Game, art: Option<&super::dt_art::DtArt>, surface_color: fn(u8) -> Color) {
+    let _ = ground(game, art, surface_color);
+}
+
+/// Draws the minimap window. `view_world` is the part of the world the map view shows (world
+/// units). Returns the look point (where the map's view goes, while the picture is held). The
+/// window closes from the bottom bar's map button (and Esc), not from a cross of its own.
+pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_world: Rect, surface_color: fn(u8) -> Color) -> Option<(f32, f32)> {
+    let map = &game.world.map;
+    let fog = &game.fog;
+    let r = rect(map, view);
+    let o = outer(map, view);
+    // The window: black behind the map, the original's silver frame over it (or a stone-grey
+    // one).
+    let frame_art = super::chrome::win_fx("MiniMap_Frame_400x400", super::chrome::Fx::KeyBlack);
+    draw_rectangle(o.x, o.y, o.w, o.h, BLACK);
+    if frame_art.is_none() {
+        draw_rectangle_lines(o.x + 1.0, o.y + 1.0, o.w - 2.0, o.h - 2.0, 2.0, Color::new(0.62, 0.64, 0.62, 1.0));
+    }
+    let tex = ground(game, art, surface_color);
     draw_texture_ex(&tex, r.x, r.y, WHITE, DrawTextureParams { dest_size: Some(vec2(r.w, r.h)), ..Default::default() });
 
     // Cells → minimap pixels (world units: rows are `row_height` apart).

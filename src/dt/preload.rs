@@ -16,6 +16,13 @@ use super::gfx::{self, Image};
 use super::picture_cache;
 use super::DtError;
 
+/// Most decoded picture bytes the queue keeps: the same caps as the disk cache (1 GiB on the
+/// desktop, 256 MiB on the phones, [`picture_cache::CAP_BYTES`]). A queued picture that would go
+/// past it is not kept, and the rest of the queue is dropped (those decode on demand).
+fn default_cap() -> usize {
+    usize::try_from(picture_cache::CAP_BYTES).unwrap_or(usize::MAX)
+}
+
 /// Background decoders. Two is enough to keep up with the windows' art while the game runs.
 const WORKERS: usize = 2;
 
@@ -36,6 +43,14 @@ struct Store {
     workers: usize,
     /// Bumped by [`forget_ready`]: a picture decoded before it was forgotten is not stored as ready.
     generation: u64,
+    /// Bytes of the ready pictures' frames (RGBA), against [`default_cap`].
+    ready_bytes: usize,
+    /// The first queue of the process ([`preload`]): its start, for the log of its end.
+    started: Option<std::time::Instant>,
+    /// Pictures the queue has stored as ready since [`preload`] started.
+    queued_done: usize,
+    /// The end of the queue is logged once per [`preload`] round.
+    done_logged: bool,
 }
 
 static STORE: LazyLock<Mutex<Store>> = LazyLock::new(Default::default);
@@ -58,7 +73,23 @@ pub fn is_ready(path: &Path) -> bool {
 pub fn forget_ready() {
     let mut s = lock();
     s.ready.clear();
+    s.ready_bytes = 0;
     s.generation += 1;
+}
+
+/// The ready pictures: how many, and their RGBA bytes (the decode store's memory).
+pub fn stored() -> (usize, usize) {
+    let s = lock();
+    (s.ready.len(), s.ready_bytes)
+}
+
+/// Whether a queued picture of `bytes` fits beside `ready` bytes under `cap`.
+fn fits(ready: usize, bytes: usize, cap: usize) -> bool {
+    ready.saturating_add(bytes) <= cap
+}
+
+fn frames_bytes(frames: &[Image]) -> usize {
+    frames.iter().map(|f| f.rgba.len()).sum()
 }
 
 /// The frames of the picture at `path`, decoded once and shared. Waits for a worker that is
@@ -85,7 +116,7 @@ pub fn decode_shared(path: &Path) -> Result<Arc<Vec<Image>>, DtError> {
         let generation = s.generation;
         drop(s);
         let loaded = load(path);
-        finish(path, loaded, generation)
+        finish(path, loaded, generation, false)
     })
 }
 
@@ -98,6 +129,8 @@ pub fn preload(paths: Vec<PathBuf>) {
     }
     let spawn = {
         let mut s = lock();
+        s.started.get_or_insert_with(std::time::Instant::now);
+        s.done_logged = false;
         for p in paths {
             if s.ready.contains_key(&p) || s.pending.contains_key(&p) {
                 continue;
@@ -157,7 +190,14 @@ fn worker() {
             }
         };
         let loaded = load(&path);
-        let _ = finish(&path, loaded, generation);
+        let _ = finish(&path, loaded, generation, true);
+        let mut s = lock();
+        if s.queue.is_empty() && s.pending.is_empty() && !s.done_logged && s.queued_done > 0 {
+            s.done_logged = true;
+            if let Some(started) = s.started {
+                crate::diag!("art ahead: queue done, {} pictures, {:.1} MiB decoded, {:.1} s", s.ready.len(), s.ready_bytes as f64 / 1048576.0, started.elapsed().as_secs_f64());
+            }
+        }
     }
 }
 
@@ -175,15 +215,28 @@ fn load(path: &Path) -> Result<(Vec<Image>, Miss), DtError> {
 }
 
 /// Stores a loaded picture as ready (unless [`forget_ready`] ran since `generation` was taken),
-/// wakes the waiters and writes a decoded one to the cache.
-fn finish(path: &Path, loaded: Result<(Vec<Image>, Miss), DtError>, generation: u64) -> Result<Arc<Vec<Image>>, DtError> {
+/// wakes the waiters and writes a decoded one to the cache. A queued picture (`queued`) is not
+/// stored past [`default_cap`]: the queue is dropped then.
+fn finish(path: &Path, loaded: Result<(Vec<Image>, Miss), DtError>, generation: u64, queued: bool) -> Result<Arc<Vec<Image>>, DtError> {
     let mut s = lock();
     s.pending.remove(path);
     let current = s.generation == generation;
     let out = loaded.map(|(frames, miss)| {
+        let bytes = frames_bytes(&frames);
         let a = Arc::new(frames);
-        if current {
-            s.ready.insert(path.to_path_buf(), a.clone());
+        if current && (!queued || fits(s.ready_bytes, bytes, default_cap())) {
+            if let Some(old) = s.ready.insert(path.to_path_buf(), a.clone()) {
+                s.ready_bytes -= frames_bytes(&old);
+            }
+            s.ready_bytes += bytes;
+            if queued {
+                s.queued_done += 1;
+            }
+        } else if current && queued {
+            for p in std::mem::take(&mut s.queue) {
+                s.pending.remove(&p);
+            }
+            crate::diag!("art ahead: the {} MiB cap is reached, the rest of the queue decodes on demand", default_cap() >> 20);
         }
         if let Some((dir, key)) = miss {
             let frames = a.clone();
@@ -209,13 +262,21 @@ mod tests {
         // A decode that started before the forget (a swap in between) is handed back, not stored.
         let before = lock().generation;
         forget_ready();
-        let _ = finish(&path, Ok((Vec::new(), None)), before);
+        let _ = finish(&path, Ok((Vec::new(), None)), before, false);
         assert!(!is_ready(&path));
         // One started after it is stored as usual.
         let after = lock().generation;
-        let _ = finish(&path, Ok((Vec::new(), None)), after);
+        let _ = finish(&path, Ok((Vec::new(), None)), after, true);
         assert!(is_ready(&path));
         forget_ready();
+    }
+
+    #[test]
+    fn a_queued_picture_past_the_cap_is_not_kept() {
+        assert!(fits(0, 100, 100), "exactly at the cap is kept");
+        assert!(!fits(1, 100, 100), "one byte past the cap is not");
+        assert!(fits(usize::MAX - 1, 1, usize::MAX));
+        assert!(!fits(usize::MAX, 1, usize::MAX - 1), "no overflow past the cap");
     }
 
     #[test]
