@@ -1646,9 +1646,30 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     false
 }
 
+/// Closes the in-game settings window with its changes kept, as «Принять» does (the bar's
+/// settings button, a second press: the owner's request). The advanced and keys windows close
+/// with it; the settings already set in `audio` stay.
+pub fn close_options_kept() {
+    ADVANCED.with(|a| a.set(false));
+    KEYS_OPEN.with(|o| o.set(false));
+    OPENED_WITH.with(|o| *o.borrow_mut() = None);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The bar's settings button closes the window with what was changed kept: the state the
+    /// window opened with is dropped (no revert), and the sub-windows close with it.
+    #[test]
+    fn closing_from_the_bar_keeps_the_changes() {
+        OPENED_WITH.with(|o| *o.borrow_mut() = Some(super::super::audio::Settings::default()));
+        ADVANCED.with(|a| a.set(true));
+        KEYS_OPEN.with(|o| o.set(true));
+        close_options_kept();
+        assert!(OPENED_WITH.with(|o| o.borrow().is_none()));
+        assert!(!ADVANCED.with(|a| a.get()) && !KEYS_OPEN.with(|o| o.get()));
+    }
 
     /// A phone of 1080×2376 px at 2.625 px per dp, its interface scale the fit (1.125).
     /// The device the owner's screenshot came from (OnePlus): 1080×2376 at 2.75 px per dp.

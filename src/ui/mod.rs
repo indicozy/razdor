@@ -1163,8 +1163,14 @@ impl App {
                 (None, next) => next,
             },
             (Screen::Settings, Some(game)) => {
-                world_view::backdrop_lit(game, &self.assets, Some(game_bar::BarButton::Settings));
-                main_menu::options_window(&mut self.audio.settings, install_wide, true).then_some(Screen::WorldMap)
+                // The bar's settings button closes its window with the changes kept (as «Принять»),
+                // a second press of the button that opened it.
+                if world_view::settings_backdrop(game, &self.assets) {
+                    main_menu::close_options_kept();
+                    Some(Screen::WorldMap)
+                } else {
+                    main_menu::options_window(&mut self.audio.settings, install_wide, true).then_some(Screen::WorldMap)
+                }
             }
             (Screen::Save(view), Some(game)) => saves::save_screen(game, &self.assets, view, quick_save_ok, &mut self.message),
             (Screen::Load(view), game) => saves::load_screen(game.as_ref(), &self.assets, view, &mut self.pending_load, &mut self.load_error),

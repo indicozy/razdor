@@ -2557,6 +2557,14 @@ fn backdrop_camera(game: &Game, full: Rect) -> Camera {
 /// The map under a building window or a dialog: drawn over the whole screen, not
 /// interactive, with the bar's buttons greyed (`lit`: the open screen's button).
 pub fn backdrop_lit(game: &Game, assets: &Assets, lit: Option<BarButton>) {
+    draw_map_backdrop(game, assets);
+    game_bar::draw(game, |b| if Some(b) == lit { Look::Lit } else { Look::Grey });
+    // The window or dialog drawn next stays above the bar (`ui::pan`).
+    super::pan::cover_bar();
+}
+
+/// The map under a window: clear, drawn, fogged and dimmed (the bar is drawn by the caller).
+fn draw_map_backdrop(game: &Game, assets: &Assets) {
     // The map stays where it is when the window over it is panned (`ui::pan`).
     super::pan::unpanned(|| {
         clear_background(rgb(10, 12, 10));
@@ -2566,9 +2574,16 @@ pub fn backdrop_lit(game: &Game, assets: &Assets, lit: Option<BarButton>) {
         cam.draw_fog(game);
         draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.2));
     });
-    game_bar::draw(game, |b| if Some(b) == lit { Look::Lit } else { Look::Grey });
-    // The window or dialog drawn next stays above the bar (`ui::pan`).
+}
+
+/// The map under the settings window: the bar's settings button is live (lit), the others
+/// grey and not pressable, as `backdrop_lit`. Returns whether the settings button was pressed
+/// this frame (the caller closes the window with its changes kept).
+pub fn settings_backdrop(game: &Game, assets: &Assets) -> bool {
+    draw_map_backdrop(game, assets);
+    let pressed = game_bar::draw(game, |b| if b == BarButton::Settings { Look::Lit } else { Look::Grey });
     super::pan::cover_bar();
+    pressed == Some(BarButton::Settings)
 }
 
 pub fn backdrop(game: &Game, assets: &Assets) {
