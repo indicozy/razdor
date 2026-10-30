@@ -192,13 +192,16 @@ impl DtInstall {
         super::english::Dictionary::load_prefix(&self.dir, prefix).map(std::borrow::Cow::Owned)
     }
 
-    /// Load the install named by `RAZDOR_DT_DIR`.
+    /// Load the install named by `RAZDOR_DT_DIR`, or the active mod's merged folder over it
+    /// (`hub::active_install_dir`; [`base_dir`] is the install itself).
     pub fn from_env() -> Result<DtInstall, DtError> {
-        let Some(dir) = locate() else {
+        let Some(base) = locate() else {
             let own = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf));
             set_problem(own.map(|dir| Problem::NotInstall { missing: missing(&dir), dir }));
             return Err(DtError::NoInstallDir);
         };
+        *BASE.lock().unwrap_or_else(|e| e.into_inner()) = Some(base.clone());
+        let dir = crate::hub::active_install_dir(&base);
         let loaded = DtInstall::load(&dir);
         match &loaded {
             Ok(dt) => crate::diag!("install loaded: {} units, {} items, {} spells, {} maps", dt.units.len(), dt.artefacts.len(), dt.spells.len(), dt.maps.len()),
@@ -247,6 +250,15 @@ pub enum Problem {
 }
 
 static PROBLEM: std::sync::Mutex<Option<Problem>> = std::sync::Mutex::new(None);
+
+/// The install's own folder, as [`DtInstall::from_env`] found it (the base a mod is laid over).
+static BASE: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
+/// The base install's folder, as [`DtInstall::from_env`] last found it (`None` before that or
+/// without an install). The game may read the active mod's folder instead.
+pub fn base_dir() -> Option<PathBuf> {
+    BASE.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
 
 fn set_problem(why: Option<Problem>) {
     if let Ok(mut p) = PROBLEM.lock() {

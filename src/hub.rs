@@ -10,12 +10,22 @@
 //! - **Install**: a map or campaign needs its mods first ([`plan_install`] orders them,
 //!   dependencies before what needs them). Every file is checked against the catalog's size
 //!   and SHA-256, then written atomically: maps into `<hub>/maps/` (flat, so a campaign's
-//!   next-map names find each other and the new-game list can read them), mods into
-//!   `<hub>/mods/<id>/`. `<hub>/installed.json` records what went where.
-//! - **Remove**: refused while an installed entry still needs the mod ([`needed_by`]).
+//!   next-map names find each other and the new-game list can read them), a mod's files into
+//!   `<hub>/mods/<id>/files/` under their paths inside the mod (a mod ships only the files that
+//!   differ from the base install, never the base's own). `<hub>/installed.json` records what
+//!   went where.
+//! - **Mods play as layers** ([`mods`]): [`prepare_mod`] builds `<hub>/mods/<id>/game/`, the
+//!   base install's files hard-linked and the mod's files laid over them; [`active_install_dir`]
+//!   is the folder the game reads (the active mod's, else the base's) and [`use_mod`] picks it.
+//! - **Remove**: refused while an installed entry still needs the mod ([`needed_by`]); a mod's
+//!   whole folder goes, its game folder with it.
 //!
-//! The hub folder is `RAZDOR_HUB_DIR`, else `razdor/hub` in the platform data folder. Mods are
-//! only recorded for now: the game does not switch to a mod's data yet.
+//! The hub folder is `RAZDOR_HUB_DIR`, else `hub` in the app's folder ([`crate::platform::app_dir`],
+//! which is also the phones' storage).
+
+mod mods;
+
+pub use mods::*;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -55,6 +65,21 @@ pub enum Kind {
     Map,
     Campaign,
     Mod,
+}
+
+/// How well an entry works, as its author or the hub's checks say.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Status {
+    /// Works as its author meant.
+    Full,
+    /// Works with the limits its note names.
+    Partial,
+    /// Does not start (its note says why).
+    Broken,
+    /// Not checked yet.
+    #[default]
+    Unknown,
 }
 
 /// One file of an entry.
@@ -97,6 +122,17 @@ pub struct Entry {
     /// Date it was added, `YYYY-MM-DD`.
     #[serde(default)]
     pub added: String,
+    /// How well it works, with the note that says why not all of it.
+    #[serde(default)]
+    pub status: Status,
+    #[serde(default)]
+    pub status_note: Text,
+    /// A picture for the window, when the hub has one (shown in the picked entry's place).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<FileRef>,
+    /// For a mod: the base install it is made for (e.g. "Community Update 1.2"). Nothing checks it.
+    #[serde(default)]
+    pub base: String,
     pub files: Vec<FileRef>,
 }
 
@@ -135,9 +171,14 @@ impl Catalog {
                 return Err(format!("index.json: bad id {:?}", e.id));
             }
             for f in &e.files {
-                if !safe_name(&f.name) || !safe_path(&f.path) {
+                // A mod's file keeps its place in the mod (`data/units.ini`); a map's is a name.
+                let name_ok = if e.kind == Kind::Mod { safe_rel_name(&f.name) } else { safe_name(&f.name) };
+                if !name_ok || !safe_path(&f.path) {
                     return Err(format!("index.json: {}: bad file name {:?}", e.id, f.name));
                 }
+            }
+            if e.preview.as_ref().is_some_and(|p| !safe_path(&p.path)) {
+                return Err(format!("index.json: {}: bad preview path", e.id));
             }
         }
         Ok(c)
@@ -156,6 +197,11 @@ fn safe_id(id: &str) -> bool {
 /// A file name the hub may write: no folders, no dots in front, nothing odd.
 fn safe_name(name: &str) -> bool {
     !name.is_empty() && !name.starts_with('.') && name.chars().all(|c| c.is_alphanumeric() || "-_. ".contains(c))
+}
+
+/// A file name inside a mod: `/`-separated names the same way, relative, none empty or dotted.
+pub fn safe_rel_name(name: &str) -> bool {
+    !name.is_empty() && name.split('/').all(safe_name)
 }
 
 /// A path inside the hub: relative, no `..`.
@@ -180,6 +226,12 @@ pub struct InstalledEntry {
     pub kind: Kind,
     #[serde(default)]
     pub lang: String,
+    /// Its title when it was installed (the picker lists mods without the catalog).
+    #[serde(default)]
+    pub title: Text,
+    /// The mods it needed, so the new-game list can hide its maps without the mod.
+    #[serde(default)]
+    pub requires: Vec<String>,
     /// Relative to the hub folder.
     pub files: Vec<String>,
 }
@@ -188,6 +240,11 @@ impl Installed {
     pub fn has(&self, id: &str) -> bool {
         self.entries.contains_key(id)
     }
+}
+
+/// What is installed in `local`, or nothing when the record is missing or does not read.
+pub fn read_installed(local: &Path) -> Installed {
+    std::fs::read(local.join("installed.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
 }
 
 /// Why an entry cannot be installed.
@@ -262,12 +319,14 @@ impl Source {
     }
 }
 
-/// The local hub folder: `RAZDOR_HUB_DIR`, else `razdor/hub` in the platform data folder.
+/// The local hub folder: `RAZDOR_HUB_DIR`, else `hub` in the app's folder ([`crate::platform::app_dir`]:
+/// the data folder on the desktop, the storage Razdor keeps across an uninstall on Android,
+/// `Documents/Razdor` on iOS).
 pub fn local_dir() -> Option<PathBuf> {
     if let Some(d) = std::env::var_os(DIR_ENV).filter(|d| !d.is_empty()) {
         return Some(PathBuf::from(d));
     }
-    dirs::data_dir().map(|d| d.join("razdor").join("hub"))
+    crate::platform::app_dir().map(|d| d.join("hub"))
 }
 
 /// The folder installed maps go to.
@@ -309,7 +368,7 @@ impl Hub {
     }
 
     pub fn installed(&self) -> Installed {
-        std::fs::read(self.local.join("installed.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+        read_installed(&self.local)
     }
 
     fn save_installed(&self, i: &Installed) -> Result<(), String> {
@@ -340,17 +399,22 @@ impl Hub {
                 }
                 got.push((f, bytes));
             }
+            if e.kind == Kind::Mod {
+                // A reinstall replaces the mod's files (a file the new version dropped goes too).
+                let _ = std::fs::remove_dir_all(mod_files_dir(&self.local, &e.id));
+            }
             let mut written = Vec::new();
             for (f, bytes) in got {
                 let rel = match e.kind {
-                    Kind::Mod => format!("mods/{}/{}", e.id, f.name),
+                    Kind::Mod => format!("mods/{}/files/{}", e.id, f.name),
                     Kind::Map | Kind::Campaign => format!("maps/{}", f.name),
                 };
                 crate::editor::files::write_atomically(&self.local.join(&rel), &bytes).map_err(|err| format!("{rel}: {err}"))?;
                 written.push(rel);
             }
             let lang = files.iter().find_map(|f| f.lang.clone()).unwrap_or_default();
-            installed.entries.insert(e.id.clone(), InstalledEntry { version: e.version.clone(), kind: e.kind, lang, files: written });
+            let record = InstalledEntry { version: e.version.clone(), kind: e.kind, lang, title: e.title.clone(), requires: e.requires.clone(), files: written };
+            installed.entries.insert(e.id.clone(), record);
             self.save_installed(&installed)?;
         }
         Ok(plan)
@@ -364,13 +428,15 @@ impl Hub {
             return Err(format!("{id}: needed by {}", users.join(", ")));
         }
         let Some(e) = installed.entries.remove(id) else { return Ok(()) };
-        for rel in &e.files {
-            if safe_path(rel) {
-                let _ = std::fs::remove_file(self.local.join(rel));
-            }
-        }
         if e.kind == Kind::Mod && safe_id(id) {
-            let _ = std::fs::remove_dir(self.local.join("mods").join(id));
+            // The mod's folder: its files and its merged game folder.
+            let _ = std::fs::remove_dir_all(mod_dir(&self.local, id));
+        } else {
+            for rel in &e.files {
+                if safe_path(rel) {
+                    let _ = std::fs::remove_file(self.local.join(rel));
+                }
+            }
         }
         self.save_installed(&installed)
     }
@@ -437,6 +503,12 @@ pub mod mock {
                     files.push(self.file(format!("maps/{id}/{lang}/{name}"), &name, Some(lang), &bytes)?);
                 }
             }
+            // The mock's states: one that works, one partly, one that does not start, the rest unchecked.
+            let (status, note) = match id {
+                "black-wood" => (Status::Broken, ("Не запускается: в карте нет входа для героя.", "Does not start: the map has no entrance for the hero.")),
+                "north-march" => (Status::Partial, ("Вторая глава без озвучки.", "The second chapter has no sounds.")),
+                _ => (Status::Full, ("", "")),
+            };
             self.entries.push(Entry {
                 id: id.into(),
                 kind,
@@ -449,6 +521,10 @@ pub mod mock {
                 requires: requires.iter().map(|r| r.to_string()).collect(),
                 source_url: String::new(),
                 added: added.into(),
+                status,
+                status_note: Text { ru: note.0.into(), en: note.1.into() },
+                preview: None,
+                base: String::new(),
                 files,
             });
             Ok(())
@@ -460,6 +536,11 @@ pub mod mock {
             let manifest = serde_json::json!({ "id": id, "name": title.0, "version": version, "mock": true });
             let bytes = serde_json::to_vec_pretty(&manifest).expect("json");
             let f = self.file(format!("mods/{id}/mod.json"), "mod.json", None, &bytes)?;
+            let (status, note) = if id == "evolution-mock" {
+                (Status::Partial, ("Пока только отряды: предметов и заклинаний нет.", "Units only so far: no items or spells."))
+            } else {
+                (Status::Unknown, ("", ""))
+            };
             self.entries.push(Entry {
                 id: id.into(),
                 kind: Kind::Mod,
@@ -472,6 +553,10 @@ pub mod mock {
                 requires: requires.iter().map(|r| r.to_string()).collect(),
                 source_url: String::new(),
                 added: added.into(),
+                status,
+                status_note: Text { ru: note.0.into(), en: note.1.into() },
+                preview: None,
+                base: "Community Update 1.2".into(),
                 files: vec![f],
             });
             Ok(())
@@ -631,7 +716,7 @@ mod tests {
         assert_eq!(plan_install(&c, &none, "ford-outpost").unwrap(), ["ford-outpost"]);
         assert_eq!(plan_install(&c, &none, "lost-update"), Err(PlanError::Missing("community-update".into())));
         let mut some = Installed::default();
-        some.entries.insert("evolution-mock".into(), InstalledEntry { version: "9.0".into(), kind: Kind::Mod, lang: String::new(), files: vec![] });
+        some.entries.insert("evolution-mock".into(), InstalledEntry { version: "9.0".into(), kind: Kind::Mod, lang: String::new(), title: Text::default(), requires: vec![], files: vec![] });
         assert_eq!(plan_install(&c, &some, "merc-road").unwrap(), ["evolution-mercs", "merc-road"]);
     }
 
@@ -649,7 +734,7 @@ mod tests {
         assert_eq!(done.len(), 3);
         let maps = maps_dir(&hub.local);
         assert!(maps.join("Hub_Merc1.DTm").is_file());
-        assert!(hub.local.join("mods/evolution-mock/mod.json").is_file());
+        assert!(hub.local.join("mods/evolution-mock/files/mod.json").is_file());
         let inst = hub.installed();
         assert_eq!(inst.entries["merc-road"].lang, "ru", "no English files: the Russian ones");
         assert!(hub.remove(&c, "evolution-mock").is_err(), "the add-on needs it");

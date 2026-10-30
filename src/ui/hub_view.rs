@@ -10,7 +10,7 @@ use std::sync::mpsc::{channel, Receiver};
 
 use macroquad::prelude::*;
 
-use razdor::hub::{self, Catalog, Entry, Hub, Installed, Kind, PlanError, Source};
+use razdor::hub::{self, Catalog, Entry, Hub, Installed, Kind, PlanError, Source, Status};
 use razdor::i18n::{lang, tr};
 use razdor::trf;
 
@@ -159,6 +159,17 @@ fn state(c: &Catalog, inst: &Installed, e: &Entry) -> (String, Color) {
     }
 }
 
+/// The entry's state as its author or the hub's checks say it: the words and their ink.
+fn status_line(e: &Entry) -> (String, Color) {
+    let note = e.status_note.get(lang());
+    match e.status {
+        Status::Full => (tr("Works fully").into(), GREEN_TEXT),
+        Status::Partial => (trf!("Works partly: {note}", note = note), GOLD),
+        Status::Broken => (trf!("Does not start: {note}", note = note), RED_TEXT),
+        Status::Unknown => (tr("Not checked yet").into(), Color::new(0.85, 0.80, 0.68, 1.0)),
+    }
+}
+
 /// A row of the list: the blue bar when picked, a warm wash under the mouse. True when clicked.
 fn row(r: Rect, picked: bool) -> bool {
     let over = !input_blocked() && mouse_in(r.x, r.y, r.w, r.h);
@@ -278,6 +289,9 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, r: Rect, size: f32, small
         by_line = format!("{by_line} · {}", e.added);
     }
     text_fit(&by_line, r.x, y, r.w, small, dim);
+    y += 18.0 * k;
+    let (words, ink) = status_line(e);
+    text_fit(&words, r.x, y, r.w, small, ink);
     if e.kind == Kind::Campaign {
         y += 18.0 * k;
         text_fit(&trf!("Chapters: {n}", n = e.map_count()), r.x, y, r.w, small, dim);
@@ -320,7 +334,7 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, r: Rect, size: f32, small
     }
     if e.kind == Kind::Mod {
         y += 8.0 * k;
-        for l in wrap(tr("Mods are only recorded for now: the game does not play with a mod's data yet."), r.w, small).iter() {
+        for l in wrap(tr("A mod is played from the new game window's Mod list, over the base game."), r.w, small).iter() {
             chrome::shadow_text(l, r.x, y, small, dim);
             y += 16.0 * k;
         }

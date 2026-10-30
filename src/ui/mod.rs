@@ -142,7 +142,18 @@ fn load_entry(m: &razdor::dt::install::MapEntry) -> Option<ScenarioEntry> {
 /// The maps installed from the hub (`razdor::hub`), after the install's in the new-game list.
 fn hub_entries() -> Vec<ScenarioEntry> {
     let Some(dir) = razdor::hub::local_dir() else { return Vec::new() };
-    razdor::editor::files::list_dir(&razdor::hub::maps_dir(&dir)).iter().filter_map(load_entry).collect()
+    let gate = razdor::hub::MapGate::read(&dir);
+    razdor::editor::files::list_dir(&razdor::hub::maps_dir(&dir)).iter().filter(|m| gate.shows(&m.name)).filter_map(load_entry).collect()
+}
+
+/// The installed mods (id and title) for the new-game window's picker.
+fn hub_mods() -> Vec<(String, razdor::hub::Text)> {
+    razdor::hub::local_dir().map(|dir| razdor::hub::installed_mods(&dir)).unwrap_or_default()
+}
+
+/// The mod the game plays, if any.
+fn hub_active() -> Option<String> {
+    razdor::hub::local_dir().and_then(|dir| razdor::hub::active_mod(&dir))
 }
 
 /// A scenario of the player's install, loaded for the select screen.
@@ -236,6 +247,10 @@ pub struct App {
     /// session yet (again once the install is adopted on a phone).
     session: session::Keeper,
     session_checked: bool,
+    /// The installed mods (id and title) for the new-game window's «Мод» picker.
+    mods: Vec<(String, razdor::hub::Text)>,
+    /// The mod the game plays (`razdor::hub::use_mod`), if any.
+    active_mod: Option<String>,
 }
 
 /// The install's content for the new-game windows (`None` without an install).
@@ -302,6 +317,8 @@ impl App {
             update_open: false,
             session: session::Keeper::default(),
             session_checked: false,
+            mods: hub_mods(),
+            active_mod: hub_active(),
         };
         app.follow_row_setting();
         app
@@ -310,9 +327,37 @@ impl App {
     /// The new-game list after the hub installed or removed maps: the install's maps, then
     /// the hub's again.
     fn reload_hub_maps(&mut self) {
+        // A mod played may have changed or gone: the install is read again, which rebuilds its
+        // folder or, when the mod is gone, goes back to the base.
+        if self.active_mod.is_some() {
+            self.reload_install();
+        }
+        self.refresh_mods();
         let dir = razdor::hub::local_dir().map(|d| razdor::hub::maps_dir(&d));
         self.scenarios.retain(|e| dir.as_ref().is_none_or(|d| !e.path.starts_with(d)));
         self.scenarios.extend(hub_entries());
+    }
+
+    /// Reads the installed mods and the one played again (after the hub or a switch changed them).
+    fn refresh_mods(&mut self) {
+        self.mods = hub_mods();
+        self.active_mod = hub_active();
+    }
+
+    /// The new-game window's «Мод» choice: `None` is the base game. The mod's folder is built
+    /// (synchronously; a big mod takes a moment), the choice is kept and the install is read
+    /// again. A mod that cannot be played says why, and the base game is played.
+    fn choose_mod(&mut self, id: Option<String>) {
+        let (Some(local), Some(base)) = (razdor::hub::local_dir(), razdor::dt::install::base_dir()) else { return };
+        if let Err(e) = razdor::hub::use_mod(&local, &base, id.as_deref()) {
+            self.message = Some(razdor::trf!("Cannot play the mod: {e}.", e));
+            return;
+        }
+        self.reload_install();
+        self.refresh_mods();
+        if self.active_mod != id {
+            self.message = Some(tr("The mod does not play; the base game is played.").into());
+        }
     }
 
     /// Opens the map editor (the title screen's button and `--editor`).
@@ -390,6 +435,10 @@ impl App {
     /// The maps folder changed (`written`: the names copied in): the install's list and the
     /// scenario list are read again, and the first map copied in is picked.
     fn maps_written(&mut self, written: &[String]) {
+        // The maps went into the base install; a mod's folder is laid over it again first.
+        if self.active_mod.is_some() {
+            self.reload_install();
+        }
         if let Some(d) = self.assets.dt.as_mut() {
             match razdor::dt::install::list_maps(&d.install.dir) {
                 Ok(maps) => d.install.maps = maps,
@@ -882,6 +931,8 @@ impl App {
             self.dt_content = dt_content_of(&self.assets, self.audio.settings.impossible);
             self.scenarios = scenarios_of(&self.assets);
         }
+        // The install read may have dropped a stale mod choice.
+        self.refresh_mods();
     }
 
     /// The install was not there at start. On the menus, loads it when the player asks ("Check
@@ -1089,7 +1140,9 @@ impl App {
         }
         // «Обновить игру из архива…» (the settings' row): a picked game is examined and imported on a
         // thread; a finished import reloads the install.
-        if game_import::tick(self.assets.dt.as_ref().map(|d| d.install.dir.as_path())) {
+        // The game is imported into the base install, never a mod's folder built over it.
+        let base = razdor::dt::install::base_dir();
+        if game_import::tick(base.as_deref().or(self.assets.dt.as_ref().map(|d| d.install.dir.as_path()))) {
             self.reload_install();
         }
         widgets::set_input_blocked(!self.dialogs.is_empty() || self.help || held || self.map_view.back_to.is_some() || self.update_open || map_import::open() || game_import::busy() || widgets::popup_open());
@@ -1148,7 +1201,17 @@ impl App {
                 None
             }
             (Screen::Options, _) => main_menu::options(&mut self.audio.settings, install_wide).then_some(Screen::MainMenu),
-            (Screen::ScenarioSelect, _) => new_game::scenario_select(&self.scenarios, self.dt_content.is_some()),
+            (Screen::ScenarioSelect, _) => {
+                let next = new_game::scenario_select(&self.scenarios, self.dt_content.is_some(), &self.mods, self.active_mod.as_deref());
+                match new_game::take_mod_request() {
+                    // A mod picked: it is played from the next frame, on the list it brings.
+                    Some(id) => {
+                        self.choose_mod(id);
+                        None
+                    }
+                    None => next,
+                }
+            }
             (Screen::TutorialOffer, _) => new_game::tutorial_offer(&self.scenarios),
             (Screen::ClassSelect { scenario }, game) => {
                 let pick = scenario.and_then(|i| Some((self.scenarios.get(i)?, self.dt_content.clone()?)));

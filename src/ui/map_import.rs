@@ -174,7 +174,9 @@ pub fn tick(install: Option<&DtInstall>, content: Option<&Content>) -> Option<Ve
             return None;
         }
     };
-    let folder = map_import::maps_folder(&install.dir);
+    // The base install's maps (a mod's merged folder is built from it, so a map goes there).
+    let base = razdor::dt::install::base_dir().unwrap_or_else(|| install.dir.clone());
+    let folder = map_import::maps_folder(&base);
     let warnings = content.map(|c| warnings(&maps, c)).unwrap_or_default();
     let taken = map_import::conflicts(&folder, &maps);
     if taken.is_empty() {

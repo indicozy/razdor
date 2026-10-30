@@ -626,15 +626,48 @@ The map's F3 debug overlay (Razdor's, `world_view::draw_debug`) also tints every
 for impassable; aboard the ship blue for sailable, red otherwise, all faint so the map shows through.
 ### Maps and mods (the hub; a Razdor extra, mock)
 
-`main_menu` link → `Screen::Hub(HubView)` (`ui/hub_view.rs`) → `razdor::hub` on a thread:
+`main_menu` link (the corner row, or the chips held upright) → `Screen::Hub(HubView)` (`ui/hub_view.rs`) → `razdor::hub` on a thread:
 `Hub::catalog()` reads `index.json` from `RAZDOR_HUB` (an `https://` address or a folder; unset:
 the mock hub `hub::mock::build` writes under the hub folder), `Hub::install()` installs the
 entry after the mods it needs (`plan_install`), checking each file's size and SHA-256, into
-`RAZDOR_HUB_DIR` (else `razdor/hub` in the data folder): maps to `maps/`, mods to
-`mods/<id>/`, the record in `installed.json`; `Hub::remove()` refuses a mod still needed.
-Leaving the window after a change re-reads the hub's maps into `App::scenarios`
-(`hub_entries`), after the install's, so they show in the new-game list. Mods are only recorded:
-the game does not switch to a mod's data yet. Snapshot scene: `hub[:<tab>[:<id>]]`.
+`RAZDOR_HUB_DIR` (else `hub` in `platform::app_dir`, the same storage on the phones): maps to `maps/`,
+a mod's files to `mods/<id>/files/<path inside the mod>` (a mod ships only what differs from the
+base install), the record in `installed.json` (version, title, `requires`, files). `Hub::remove()` refuses a
+mod still needed and removes a mod's whole folder. Each entry carries `status` (`full`, `partial`,
+`broken`, `unknown`, with `status_note`) shown as the window's state line, an optional `preview`
+(not drawn yet) and, for a mod, `base` (the base it is made for; nothing checks it).
+
+**Mods play as layers** (`hub/mods.rs`). `prepare_mod(local, base, id)` builds `mods/<id>/game/`:
+every file of the base install (`DtInstall`'s `RAZDOR_DT_DIR`) hard-linked (a copy where links fail),
+then each file of `files/` laid over the base file of the same path ignoring ASCII case per component,
+keeping the base's spelling (`Data/Units.ini` replaced by `data/units.ini`); a file with no match is
+added. A link is removed before its file is replaced, so the base is never written. The build goes into
+`game.tmp/` and is renamed into place; `stamp.json` in the folder holds the base path, a digest of the
+base's names, sizes and times, the mod's version and the SHA-256 of each mod file, and a folder whose
+stamp differs is rebuilt (a reinstall, a changed base or file list). `hub::active_install_dir(base)`
+(called by `DtInstall::from_env` after `locate`, so the whole app reads it: assets, content, maps,
+language, `save::set_install`) returns the active mod's folder, else `base`; the choice is
+`<hub>/active.json` (`{"mod": "<id>"}`, none = the base). A choice whose mod is gone or does not build
+is cleared and the base played. `install::base_dir()` is the base (the folder that imports write to:
+the game's update, «Добавить карту…»). Saves: `save::games_dir` keys them by the install folder's path,
+so a mod's folder (`…/mods/<id>/game`, named `game`) has its own save folder beside the base's; they
+are not in the mod's folder.
+
+**Switching** (the new-game window, `new_game::scenario_select`): when a mod is installed, a «Мод» drop-down
+(`view_choice_at`, a full-width row under «Добавить карту…», the hub hint moves below it; «Мод: нет» then
+«Мод: <title>» per installed mod) sets
+`MOD_REQUEST`; `App::choose_mod` calls `hub::use_mod` (builds the folder synchronously, writes
+`active.json`), then `reload_install` (`DtArt::from_env` → `Assets::adopt_install` → content → scenarios).
+A mod that does not build shows its reason in `App::message` and the base is played. Titles come from
+`installed.json` (`hub::installed_mods`), not from the catalog, so the picker reads no network.
+
+**Maps by mod**: `hub::MapGate` (read in `ui::hub_entries`, the hub's maps only) hides a map whose
+installed entry `requires` a mod unless that mod is the active one; maps with no `requires` always
+show, and the install's own maps are never gated.
+
+Leaving the window after a change re-reads the hub's maps into `App::scenarios` (`reload_hub_maps`:
+the install is read again while a mod is played, so its folder is rebuilt or the base is back), after
+the install's, so they show in the new-game list. Snapshot scene: `hub[:<tab>[:<id>]]`.
 
 ## Text
 
