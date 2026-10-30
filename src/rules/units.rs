@@ -296,6 +296,12 @@ pub struct Unit {
     /// See [`HpCarry`].
     #[serde(default)]
     pub carry: HpCarry,
+    /// The level at which the player switched this unit's promotion sign off («Не
+    /// напоминать» in the army window's tree; 0: none). It hides the green «+» only while the
+    /// unit stays at that level: a level gained shows it again, and a promotion clears it
+    /// ([`Unit::promote`]). Razdor's own setting, not in the original.
+    #[serde(default)]
+    pub sign_off_level: i32,
 }
 
 impl Unit {
@@ -323,6 +329,7 @@ impl Unit {
             spells: [None; SPELL_SLOTS],
             drain: 0,
             carry: HpCarry::default(),
+            sign_off_level: 0,
         }
     }
 
@@ -428,6 +435,28 @@ impl Unit {
         self.upgrade_tree(content).into_iter().filter(|&(_, _, ok)| ok).map(|(id, _, _)| id).collect()
     }
 
+    /// Whether an option of its upgrade tree is open now.
+    pub fn promotion_ready(&self, content: &Content) -> bool {
+        self.upgrade_tree(content).iter().any(|&(_, _, ok)| ok)
+    }
+
+    /// The green «+» on its card: it can be promoted now, and the player has not switched
+    /// the sign off at this level ([`Unit::set_sign_off`]). The promotion itself is not
+    /// affected: the tree still offers it.
+    pub fn promotion_sign(&self, content: &Content) -> bool {
+        self.promotion_ready(content) && !self.sign_off()
+    }
+
+    /// The «+» is switched off for this unit at its current level.
+    pub fn sign_off(&self) -> bool {
+        self.sign_off_level != 0 && self.sign_off_level == self.level
+    }
+
+    /// Switches the «+» off at the unit's current level, or on again.
+    pub fn set_sign_off(&mut self, off: bool) {
+        self.sign_off_level = if off { self.level } else { 0 };
+    }
+
     /// Switch to class `to` from the upgrade tree, free of charge. The unit starts the new
     /// class at level 1 (experience.md §4, 0x4b1df0). The original drops its XP there; Razdor
     /// keeps it, banked into the new class by the gain rule, as the hero keeps what is left
@@ -442,6 +471,9 @@ impl Unit {
         let banked = self.xp;
         self.def = to;
         (self.level, self.xp, _) = experience::add_xp(1, 0, banked, |l| content.xp_to_next(to, l));
+        // A new class is a new chance: the sign shows again, even if the banked XP brings the
+        // unit back to the level it was switched off at.
+        self.sign_off_level = 0;
         self.follow_max(content, before);
         Ok(())
     }
@@ -531,6 +563,56 @@ mod tests {
         // The guard's maximum is 50 against the militia's 55: 50 × 30 / 55 = 27.27.
         assert_eq!((u.def, u.level, u.xp, u.hp), (UnitId(2), 1, 20, 27), "level 1, XP kept, HP rescaled");
         assert!((u.carry.0 - 0.272_727).abs() < 1e-4, "{}", u.carry.0);
+    }
+
+    #[test]
+    fn the_promotion_sign_can_be_switched_off_per_level() {
+        let c = content(vec![militia(), warrior(2, 30, 8)], vec![]);
+        let mut u = Unit::new(&c, UnitId(1), slot());
+        u.gain_xp(&c, 60);
+        assert!(u.promotion_sign(&c), "a level 2 unit with an open option shows the sign");
+        u.set_sign_off(true);
+        assert!(!u.promotion_sign(&c), "switched off: no sign");
+        assert!(u.promotion_ready(&c) && u.sign_off(), "the tree still offers the promotion");
+        assert_eq!(u.promotions(&c), vec![UnitId(2)], "promotion stays possible while hidden");
+        u.gain_xp(&c, 0);
+        assert!(!u.promotion_sign(&c), "a gain of nothing keeps it off");
+        u.gain_xp(&c, 1_000);
+        assert!(u.level > 2, "the unit gains a level");
+        assert!(u.promotion_sign(&c), "a new level shows the sign again");
+        assert!(!u.sign_off());
+        u.set_sign_off(true);
+        u.set_sign_off(false);
+        assert!(u.promotion_sign(&c), "switched back on");
+    }
+
+    #[test]
+    fn a_promotion_clears_the_switch() {
+        let c = content(vec![militia(), warrior(2, 30, 8)], vec![]);
+        let mut u = Unit::new(&c, UnitId(1), slot());
+        u.gain_xp(&c, 60);
+        u.set_sign_off(true);
+        assert_eq!(u.promote(&c, UnitId(2)), Ok(()));
+        assert_eq!(u.sign_off_level, 0, "the new class starts with the sign on");
+        assert!(!u.sign_off());
+    }
+
+    #[test]
+    fn the_switch_is_saved_and_an_older_save_loads_it_off() {
+        let c = content(vec![militia()], vec![]);
+        let mut u = Unit::new(&c, UnitId(1), slot());
+        u.gain_xp(&c, 60);
+        u.set_sign_off(true);
+        let text = serde_json::to_string(&u).unwrap();
+        let back: Unit = serde_json::from_str(&text).unwrap();
+        assert_eq!(back, u);
+        assert!(back.sign_off());
+        // A save from before the switch has no such field: the sign is on.
+        let mut old: serde_json::Value = serde_json::from_str(&text).unwrap();
+        old.as_object_mut().unwrap().remove("sign_off_level");
+        let old: Unit = serde_json::from_value(old).unwrap();
+        assert_eq!(old.sign_off_level, 0);
+        assert!(!old.sign_off());
     }
 
     #[test]

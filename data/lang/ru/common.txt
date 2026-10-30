@@ -29,6 +29,7 @@ Unit battle participation = Отключение бойцов
 On = Включено
 Return to battle = Вернуть в бой
 Exclude from battles = Не участвует в боях
+Don't remind = Не напоминать
 Not fighting = Не в бою
 Potions before next battle: {used}/2 = Зелий до следующего боя: {used}/2
 Four equipment slots. Duplicate abilities do not stack. = Четыре слота экипировки. Одинаковые способности не суммируются.

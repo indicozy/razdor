@@ -941,6 +941,21 @@ pub fn squad(
         }
     }
 
+    // The switch above the Dismiss row, in the empty space right of the tree: the tree's own
+    // bottom-left corner is too small for its text at a phone's size (no text under 12 sp).
+    // It hides the «+» of this unit only, at its level (`Unit::set_sign_off`). Shown while the
+    // unit can be promoted now; the tree keeps offering the promotion.
+    if let Some(t) = tree_of.filter(|&t| game.squad[t].promotion_ready(&c)) {
+        let on = game.squad[t].sign_off();
+        let spot = at(574.0, 150.0, 248.0, 76.0);
+        // A phone's label is 33 px (about 12.3 sp at 2.75 px per dp, the check's floor); the
+        // desktop keeps the army window's own size.
+        let size = if super::display::dp_px().is_some() { 33.0 } else { 16.0 * k };
+        if let Some(off) = super::widgets::checkbox_stacked(spot.x, spot.y, spot.w, size, tr("Don't remind"), on) {
+            game.squad[t].set_sign_off(off);
+        }
+    }
+
     // The strip under the top half: the last message, or what to do (drawn after the grid,
     // which says what the pointer is over).
     let strip = window_layout::divider(win);
@@ -1003,7 +1018,7 @@ pub fn squad(
         // The original's signs from the top left (493a64): the promotion, then a drunk potion.
         // Razdor's deviation (the owner's decision): no helmet sign on the hero's card, which has
         // its own coloured field; Razdor drew the helmet here, not the original.
-        let upgrade = i > 0 && v.upgrade_tree(&c).iter().any(|&(_, _, ok)| ok);
+        let upgrade = i > 0 && v.promotion_sign(&c);
         chrome::card_signs(sq, true, &[(upgrade, "Sign-Upgrade", GREEN), (!v.potions.is_empty(), "sign-potion", GREEN)]);
         super::spell_badges::draw(sq, &v.spells, v.drain, game.clock.total_minutes() as u64, &c);
         if let Some(fx) = CARD_FX.with(|f| f.get()).filter(|fx| fx.unit == i) {

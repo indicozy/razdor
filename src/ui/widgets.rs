@@ -1899,6 +1899,39 @@ pub fn checkbox(x: f32, y: f32, max_w: f32, label: &str, value: bool) -> Option<
     None
 }
 
+/// A check box with its label set under it, word-wrapped to `w` in up to two lines at `size`
+/// exactly (not the font's native size: a phone's label keeps its own size, never shrunk). For
+/// a spot too narrow for [`checkbox`]'s line. Returns the new state when clicked.
+pub fn checkbox_stacked(x: f32, y: f32, w: f32, size: f32, label: &str, value: bool) -> Option<bool> {
+    let spacing = size + 2.0;
+    let mut lines: Vec<String> = Vec::new();
+    for word in label.split_whitespace() {
+        match lines.last_mut() {
+            Some(line) if measure_exact(&format!("{line} {word}"), size).width <= w => {
+                line.push(' ');
+                line.push_str(word);
+            }
+            _ => lines.push(word.to_string()),
+        }
+    }
+    lines.truncate(2);
+    let hover = mouse_in(x, y, w, 22.0 + spacing * lines.len() as f32);
+    draw_rectangle(x, y + 2.0, 18.0, 18.0, FIELD_BG);
+    draw_rectangle_lines(x, y + 2.0, 18.0, 18.0, 1.0, if hover { INK } else { DIM });
+    if value {
+        draw_line(x + 4.0, y + 11.0, x + 8.0, y + 16.0, 2.5, ACCENT);
+        draw_line(x + 8.0, y + 16.0, x + 15.0, y + 5.0, 2.5, ACCENT);
+    }
+    for (i, text_line) in lines.iter().enumerate() {
+        text_exact(text_line, x, y + 22.0 + size + spacing * i as f32, size, INK);
+    }
+    if hover && clicked() {
+        claim();
+        return Some(!value);
+    }
+    None
+}
+
 /// A drop-down list: shows the option with value `current` (or its number) and opens a list
 /// to pick from (type to filter, wheel to scroll). Returns the value picked.
 pub fn dropdown(key: &str, x: f32, y: f32, w: f32, current: i64, options: &[(i64, String)]) -> Option<i64> {

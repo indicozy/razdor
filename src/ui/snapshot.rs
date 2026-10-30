@@ -27,6 +27,7 @@
 //! `RAZDOR_SCENE_PACK_AT=<cell>:<id>,…` puts items in those pack
 //! cells; `RAZDOR_SCENE_HELD=<id>` puts an item on the pointer (hero and army windows);
 //! `RAZDOR_SCENE_WEAR=<id>,…` wears those items on the squad member of `army:<map>:<n>:<unit>`.
+//! `RAZDOR_SCENE_SIGN_OFF=1` switches that member's promotion sign off (`army:<map>:<n>:<unit>`).
 //! `RAZDOR_SCENE_SELECT=<n>` selects squad member n in the `building:` window (its card shows).
 //! `RAZDOR_SCENE_PAN=dx,dy` holds the interface's pan at that offset (windows larger than the screen).
 //! `RAZDOR_SCENE_SAVE=<file.rzsave>` takes the game of a map scene (`walk`, `map`, …) from that
@@ -713,6 +714,11 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                     let mut u = razdor::rules::units::Unit::new(&game.content, def, slot);
                     u.level = parts.next().and_then(|v| v.parse().ok()).unwrap_or(2);
                     game.squad[i] = u;
+                }
+                // `RAZDOR_SCENE_SIGN_OFF=1`: the promotion sign of that member switched off (its
+                // tree's «Не напоминать» lit).
+                if std::env::var_os("RAZDOR_SCENE_SIGN_OFF").is_some() {
+                    game.squad[i].set_sign_off(true);
                 }
                 // `RAZDOR_SCENE_WEAR=<id>,<id>…`: those items worn by the squad member n.
                 if let Ok(v) = std::env::var("RAZDOR_SCENE_WEAR") {

@@ -1415,7 +1415,7 @@ pub fn back_row_def(c: &razdor::rules::content::Content, slot: Slot) -> i32 {
 /// The signs from a card's top left (493a64): the promotion for a unit that can take one
 /// (`promotable`: of the hero's army, not the hero, or of a garrison), then a drunk potion.
 fn top_left_signs(c: &razdor::rules::content::Content, sq: Rect, u: &Unit, promotable: bool) {
-    let upgrade = promotable && u.upgrade_tree(c).iter().any(|&(_, _, ok)| ok);
+    let upgrade = promotable && u.promotion_sign(c);
     chrome::card_signs(sq, true, &[(upgrade, "Sign-Upgrade", GREEN), (!u.potions.is_empty(), "sign-potion", GREEN)]);
 }
 
