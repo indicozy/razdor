@@ -516,7 +516,7 @@ fn pack_view(game: &Game, assets: &Assets, r: Rect, scroll: &mut usize, hover: &
         None => game.pack.get(i),
     };
     let rows_of = |cols: usize| kept.map_or_else(|| pack_rows(game.pack.len(), cols), |v| v.len().max(1).div_ceil(cols));
-    let (cell, at) = item_squares(assets, r, scroll, rows_of, item, game.held_item.is_some(), hover)?;
+    let (cell, at) = item_squares(assets, r, scroll, rows_of, item, game.held_item.is_some(), hover, true)?;
     Some((kept.map_or(Some(cell), |v| v.get(cell).copied()), at))
 }
 
@@ -526,9 +526,11 @@ fn pack_view(game: &Game, assets: &Assets, r: Rect, scroll: &mut usize, hover: &
 /// with the original's scroll bar right of them. A swipe or the wheel over it scrolls a row a step.
 /// The cell under the pointer shows gold when it holds an item (or when `held` says an item is
 /// held), and its item goes to `hover`. Returns the cell pressed, `Some(i)`, empty cells too, and its
-/// rectangle. A cell holding an item is a pull's origin (`pan::pull_source`), and while `held` a
+/// rectangle. With `pull` (the army and hero windows' pack only) a cell holding an item is a
+/// pull's origin (`pan::pull_source`); the store keeps its long press over its names. While `held` a
 /// pulled item dropped on a cell is a press there (`item_pull::dropped`).
-pub(crate) fn item_squares(assets: &Assets, r: Rect, scroll: &mut usize, rows_of: impl Fn(usize) -> usize, item: impl Fn(usize) -> Option<ItemId>, held: bool, hover: &mut Option<ItemId>) -> Option<(usize, Rect)> {
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn item_squares(assets: &Assets, r: Rect, scroll: &mut usize, rows_of: impl Fn(usize) -> usize, item: impl Fn(usize) -> Option<ItemId>, held: bool, hover: &mut Option<ItemId>, pull: bool) -> Option<(usize, Rect)> {
     let k = chrome::k();
     // As many of the original's squares as the width takes (5 in its 300 px), then as many
     // rows as fill the height, the squares shrunk to fit them: no empty band under the pack.
@@ -575,7 +577,7 @@ pub(crate) fn item_squares(assets: &Assets, r: Rect, scroll: &mut usize, rows_of
             if let Some(it) = it {
                 assets.draw_item(it, cr.x + 2.0, cr.y + 2.0, cell - 4.0);
             }
-            if it.is_some() {
+            if pull && it.is_some() {
                 super::pan::pull_source(cr, Some(cell));
             }
             if mouse_in(cr.x, cr.y, cr.w, cr.h) {

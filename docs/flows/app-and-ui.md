@@ -142,7 +142,7 @@ delay) holds the right one, two fingers pinch the wheel
 (the map's zoom) or slide (the map's scroll, or the list's wheel). A long press keeps the pointer
 where the press began while the right button is held (`GestureMapper::press_at`): the finger may
 slide to uncover the view, and the info window (army, building) stays put; the lift releases the
-button there too. Hints: `input::hint_hover()` gates every hover hint (`widgets::tooltip`, `widgets::tooltip_later`, the bar's hint, the map's tooltips), with the 0.35 s delay. Item descriptions use `input::item_hint_hover()` instead, at once with no delay (the owner's decision, 2026-10-31): the army and hero windows' pack and worn slots, and the event and victory windows' item and spell icons (`dialog`). In gesture mode an item's description shows while a finger is down on it (no long press is needed there), in the touchpad mode while the cursor is over it, else as `touch_hover`. The other hints in gesture mode in the touchpad mode they show while the cursor rests (`rest::rested`), and
+button there too. Hints: `input::hint_hover()` gates every hover hint (`widgets::tooltip`, `widgets::tooltip_later`, the bar's hint, the map's tooltips), with the 0.35 s delay. Item descriptions use `input::item_hint_hover()` instead, at once with no delay (the owner's decision, 2026-10-31): the army and hero windows' pack and worn slots. The event and victory windows' item and spell icons (`dialog`) use `dialog::icon_hover()`: the same, but only in a phone's touch modes; on the desktop they show while a button is held, as the original. In gesture mode an item's description shows while a finger is down on it (no long press is needed there), in the touchpad mode while the cursor is over it, else as `touch_hover`. The other hints in gesture mode in the touchpad mode they show while the cursor rests (`rest::rested`), and
 with no touch, as `input::touch_hover` (no hint after a lift until a finger comes down). `input::HINT_DELAY_SECS`
 (0.35 s) is the one delay for both the long press and the rest. Swipe areas: each frame the screens register the rectangles a one-finger swipe acts on
 (`input::swipe_area(rect, SwipeKind)`, gestures only; `widgets::swipe_rows` for a list or text box with
@@ -329,10 +329,10 @@ is on, and merges its frame with the pad's (`merge`): its pointer starts at the 
 centre and stays the pointer. `ui::cursor::draw` draws the pointer as a plain arrow, counting
 the touchpad as focus, as a phone has no system pointer; in gesture mode it draws nothing (the
 finger is the pointer). `input::begin_frame` picks the mode: touchpad, else gestures on mobile,
-else no touch. The mappers' tests cover each gesture. In this mode the event and victory windows' item and spell icons show their description while the cursor is over them (`dialog::shown_preview`, `input::item_hint_hover`: at once, as the items' hover); the original shows it only while a button is held (0x4c1fec / 0x4c2048).
+else no touch. The mappers' tests cover each gesture. In this mode the event and victory windows' item and spell icons show their description while the cursor is over them (`dialog::shown_preview`, `dialog::icon_hover`: at once, as the items' hover); the desktop keeps the original's, shown only while a button is held (0x4c1fec / 0x4c2048).
 The rest is `ui::rest` (`rest::tick` in `App::frame`, `rest::rested()`: the pointer still for
 `REST_SECS` = `input::HINT_DELAY_SECS`, 0.35 s, the gestures' long-press delay, with no button down). In this
-mode every hint waits for it, through `input::hint_hover()`: the bar's and the widgets' hints and the map's tooltip of an army or building (`world_view`). The item descriptions of the backpack and the hero window (`items_view`) and the icons above (`dialog`) do not wait: they use `input::item_hint_hover`, at once.
+mode every hint waits for it, through `input::hint_hover()`: the bar's and the widgets' hints and the map's tooltip of an army or building (`world_view`). The item descriptions of the backpack and the hero window (`items_view`) and the icons above (`dialog`) do not wait: they use `input::item_hint_hover` and `dialog::icon_hover`, at once.
 
 ## The frame
 
