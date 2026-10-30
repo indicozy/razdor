@@ -20,6 +20,7 @@ pub mod hall_ink;
 pub mod hotkeys;
 pub mod input;
 pub mod item_filter;
+pub mod item_pull;
 pub mod item_text;
 pub mod items_view;
 pub mod jukebox;
@@ -965,6 +966,7 @@ impl App {
         pan::begin_frame(pannable, std::mem::discriminant(&self.screen), self.dialogs.len());
         input::begin_frame();
         rest::tick();
+        item_pull::tick();
         chrome::begin_frame();
         // The install's pictures are queued for the background decoders at start
         // (`Assets::load`). Each frame uploads the textures of those decoded so far, within one

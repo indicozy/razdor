@@ -255,6 +255,31 @@ pub fn hint_hover() -> bool {
     )
 }
 
+/// Whether an item's description may show this frame (`item_hint_shown`): the items' hover, which
+/// unlike the map's [`hint_hover`] has no delay (the owner's decision, 2026-10-31). The gesture
+/// mode shows it while a finger is down (no long press is needed over an item: `gestures`), the
+/// touchpad mode while the cursor is over it, and the other modes as [`touch_hover`].
+pub fn item_hint_hover() -> bool {
+    let (finger_down, long_pressed) = STATE.with(|s| {
+        let s = s.borrow();
+        (s.down_now, s.gestures.long_pressed())
+    });
+    item_hint_shown(gestures::enabled(), touchpad::enabled(), finger_down, long_pressed, touch_hover())
+}
+
+/// The item descriptions' rule: the gesture mode's follow a touch that is down (or a long press,
+/// which is still a finger down); the touchpad mode's always show (the cursor over the item is
+/// the hover); the other modes' follow the touch hover.
+fn item_hint_shown(gestures_on: bool, touchpad_on: bool, finger_down: bool, long_pressed: bool, touched: bool) -> bool {
+    if gestures_on {
+        finger_down || long_pressed
+    } else if touchpad_on {
+        true
+    } else {
+        touched
+    }
+}
+
 /// The gesture mode's hints follow its long press; the touchpad mode's follow the cursor's rest;
 /// the other modes' follow the touch hover.
 fn hint_shown(gestures_on: bool, touchpad_on: bool, long_pressed: bool, rested: bool, touched: bool) -> bool {
@@ -426,6 +451,23 @@ mod tests {
         assert!(hint_shown(false, false, false, false, true));
         assert!(!hint_shown(false, false, true, true, false));
         assert!(!hint_shown(false, false, false, false, false));
+    }
+
+    /// An item's description shows at once: in gesture mode while a finger is down or in a long
+    /// press, with the touchpad always (the cursor is the hover), else as the touch hover.
+    #[test]
+    fn item_descriptions_show_at_once_by_the_finger_or_the_cursor() {
+        use super::item_hint_shown;
+        // Gestures: a finger down shows it at once; a lift with no long press hides it.
+        assert!(item_hint_shown(true, false, true, false, false));
+        assert!(item_hint_shown(true, false, false, true, false));
+        assert!(!item_hint_shown(true, false, false, false, true));
+        // Touchpad: shown whatever the finger and the long press do.
+        assert!(item_hint_shown(false, true, false, false, false));
+        // Desktop: as the touch hover, whatever the finger or the long press.
+        assert!(item_hint_shown(false, false, false, false, true));
+        assert!(!item_hint_shown(false, false, true, true, false));
+        assert!(!item_hint_shown(false, false, false, false, false));
     }
 
     /// After a lift no hover shows a hint until a finger comes down; a finger held still (a long

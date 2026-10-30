@@ -1666,7 +1666,7 @@ fn store(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, m
     let _ = item_squares(assets, lower, &mut view.store_pack_scroll, |cols| pack.len() / cols + 1, |i| pack.get(i), false, &mut pack_hover);
     let mut hover = None;
     let upper = pane_inner(window_layout::upper(win), k);
-    let pressed = item_squares(assets, upper, &mut view.store_scroll, |cols| items.len() / cols + 1, |i| items.get(i).copied(), false, &mut hover);
+    let pressed = item_squares(assets, upper, &mut view.store_scroll, |cols| items.len() / cols + 1, |i| items.get(i).copied(), false, &mut hover).map(|(i, _)| i);
     if let Some(i) = pressed.filter(|&i| i < items.len()) {
         *message = match game.take_from_store(i) {
             Ok(taken) => {

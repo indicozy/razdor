@@ -810,8 +810,8 @@ fn silhouette(r: Rect) {
 /// The worn-item slots (`rects`, one per slot of the unit's content): an item is its picture alone
 /// on the parchment, an empty slot the original's empty-slot picture (0xae2860, built at start-up: a
 /// steel ring over a 40% black square, `chrome::empty_item_slot`), set by 0x492f24 only for an empty
-/// slot. Returns the slot pressed; the item under the mouse goes to `hover`.
-fn worn_slots(assets: &Assets, content: &Content, rects: [Rect; MAX_SLOTS], s: &Sheet, slots: bool, hover: &mut Option<ItemId>) -> Option<usize> {
+/// slot. Returns the slot pressed and its rectangle; the item under the mouse goes to `hover`.
+fn worn_slots(assets: &Assets, content: &Content, rects: [Rect; MAX_SLOTS], s: &Sheet, slots: bool, hover: &mut Option<ItemId>) -> Option<(usize, Rect)> {
     let mut clicked = None;
     for (i, sr) in rects.iter().take(slot_count(content)).enumerate() {
         let item = s.items[i];
@@ -822,12 +822,17 @@ fn worn_slots(assets: &Assets, content: &Content, rects: [Rect; MAX_SLOTS], s: &
             Some(it) => assets.draw_item(it, sr.x, sr.y, sr.w),
             None => chrome::empty_item_slot(*sr),
         }
+        // Razdor's: a worn item of the army and hero windows (`slots`) is pulled out of its slot
+        // (`item_pull`), and a pulled item dropped on a slot is a press there, as a click.
+        if slots && item.is_some() {
+            super::pan::pull_source(*sr, None);
+        }
         if mouse_in(sr.x, sr.y, sr.w, sr.h) {
             if item.is_some() {
                 *hover = item;
             }
-            if super::widgets::clicked() {
-                clicked = Some(i);
+            if super::widgets::clicked() || (slots && super::item_pull::dropped()) {
+                clicked = Some((i, *sr));
             }
         }
     }
@@ -909,13 +914,13 @@ fn band_text_fits(s: &Sheet, content: &Content, txt: Rect, base: f32, px: f32) -
 /// half the name, the level, the stats and the traits, top down. The picture is the column's
 /// figure fitted to the band's height, the text at the band's scale (1.2 times the column's on
 /// the army band).
-pub fn draw_band(assets: &Assets, content: &Content, band: Rect, s: &Sheet, slots: bool, hover: &mut Option<ItemId>) -> Option<usize> {
+pub fn draw_band(assets: &Assets, content: &Content, band: Rect, s: &Sheet, slots: bool, hover: &mut Option<ItemId>) -> Option<(usize, Rect)> {
     // The band's text grows with its half (`band_text_scale`): the original's sheet fonts take the
     // asked size only outside the frame's native metrics (as the phone's diary text, 1307).
     super::dt_font::legacy_metrics_if(true, || super::typography::Role::Body.with(|| draw_band_in_face(assets, content, band, s, slots, hover)))
 }
 
-fn draw_band_in_face(assets: &Assets, content: &Content, band: Rect, s: &Sheet, slots: bool, hover: &mut Option<ItemId>) -> Option<usize> {
+fn draw_band_in_face(assets: &Assets, content: &Content, band: Rect, s: &Sheet, slots: bool, hover: &mut Option<ItemId>) -> Option<(usize, Rect)> {
     use super::dt_font::{sheet_size, whole_scale, Face};
     let k = k();
     let (pic, txt) = window_layout::band_halves(band);
@@ -1003,7 +1008,7 @@ fn draw_band_in_face(assets: &Assets, content: &Content, band: Rect, s: &Sheet, 
 
 /// Draws the panel in `r`. `slots` shows the four item slots (empty ones too) and returns
 /// the one clicked; the item under the mouse goes to `hover`.
-pub fn draw(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: bool, hover: &mut Option<ItemId>) -> Option<usize> {
+pub fn draw(assets: &Assets, content: &Content, r: Rect, s: &Sheet, slots: bool, hover: &mut Option<ItemId>) -> Option<(usize, Rect)> {
     super::typography::Role::Body.with(|| draw_in_face(assets, content, r, r, s, slots, hover))
 }
 
@@ -1012,7 +1017,7 @@ pub fn draw_extended(assets: &Assets, content: &Content, r: Rect, background: Re
     super::typography::Role::Body.with(|| draw_in_face(assets, content, r, background, s, false, hover));
 }
 
-fn draw_in_face(assets: &Assets, content: &Content, r: Rect, background: Rect, s: &Sheet, slots: bool, hover: &mut Option<ItemId>) -> Option<usize> {
+fn draw_in_face(assets: &Assets, content: &Content, r: Rect, background: Rect, s: &Sheet, slots: bool, hover: &mut Option<ItemId>) -> Option<(usize, Rect)> {
     use super::dt_font::{sheet_size, whole_scale, Face};
     let k = k();
     chrome::unit_parchment(background);

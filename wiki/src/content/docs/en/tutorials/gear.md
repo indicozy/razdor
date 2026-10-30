@@ -29,3 +29,4 @@ Case does not matter when searching. The letter "Ё" counts as "Е".
 * In the upgrade tree, the **Don't remind** switch at the bottom left hides the green "+" on the selected unit's card while it stays at its current level; the "+" comes back when it reaches the next level. You can still promote it while the "+" is hidden.
 * At the market, the row of eight groups sits above the list of goods. The search line shows only when you click the list, press `Ctrl+F` or type a letter. Enter selects the first match for "Buy" or "Sell". A click on the "Name" or "Price" title sorts the list.
 * In the backpack, the matching parts of the names are listed in the description field until you hover over an item.
+* An item can be dragged: press it in the backpack or on a slot, pull it out of its cell and release it over another cell, a slot or a unit, and it goes there. A plain click picks it up, as before.

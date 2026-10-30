@@ -19,6 +19,7 @@ use super::screens::attack_line;
 use super::unit_drag::{grid_press_in, Controls, GridPress};
 use super::chrome;
 use super::item_filter;
+use super::item_pull;
 use super::keymap::{self, Action};
 use super::unit_sheet;
 use super::widgets::*;
@@ -317,6 +318,18 @@ fn worn_press(game: &mut Game, unit: usize, slot: usize) -> Option<String> {
     }
 }
 
+/// Runs a press on the cell or slot at `at` (`act`); when it picked an item up from there, the
+/// item is pulled from `at` (`item_pull::picked`): dragged out and released elsewhere, it is put
+/// there. Razdor's (the owner's decision, 2026-10-31).
+fn pressed_at<R>(game: &mut Game, at: Rect, act: impl FnOnce(&mut Game) -> R) -> R {
+    let was_free = game.held_item.is_none();
+    let done = act(game);
+    if was_free && game.held_item.is_some() {
+        item_pull::picked(at);
+    }
+    done
+}
+
 fn shift_down() -> bool {
     [KeyCode::LeftShift, KeyCode::RightShift].into_iter().any(super::input::is_key_down)
 }
@@ -495,16 +508,16 @@ fn pack_rows(len: usize, cols: usize) -> usize {
 /// The backpack: the original's inventory squares, the pack's cells in order a row at a time,
 /// scrolling; with a filter, only the cells `kept`, in their order. Returns the press: on a
 /// cell (`Some(i)`, an empty one too: an item put there stays there, 0x4c24f4), or on an empty
-/// row of the filtered list (`None`).
-fn pack_view(game: &Game, assets: &Assets, r: Rect, scroll: &mut usize, hover: &mut Option<ItemId>, kept: Option<&[usize]>) -> Option<Option<usize>> {
+/// row of the filtered list (`None`), with the cell's rectangle.
+fn pack_view(game: &Game, assets: &Assets, r: Rect, scroll: &mut usize, hover: &mut Option<ItemId>, kept: Option<&[usize]>) -> Option<(Option<usize>, Rect)> {
     // A cell's item: the pack's own cell `i`, or with a filter the `i`th kept one.
     let item = |i: usize| match kept {
         Some(v) => v.get(i).and_then(|&p| game.pack.get(p)),
         None => game.pack.get(i),
     };
     let rows_of = |cols: usize| kept.map_or_else(|| pack_rows(game.pack.len(), cols), |v| v.len().max(1).div_ceil(cols));
-    let cell = item_squares(assets, r, scroll, rows_of, item, game.held_item.is_some(), hover)?;
-    Some(kept.map_or(Some(cell), |v| v.get(cell).copied()))
+    let (cell, at) = item_squares(assets, r, scroll, rows_of, item, game.held_item.is_some(), hover)?;
+    Some((kept.map_or(Some(cell), |v| v.get(cell).copied()), at))
 }
 
 /// The original's inventory squares (the backpack, the building's store): the cells `item(i)` in
@@ -512,8 +525,10 @@ fn pack_view(game: &Game, assets: &Assets, r: Rect, scroll: &mut usize, hover: &
 /// five in its 300 px, more in a wider grid) and `rows_of(cols)` rows in all, scrolling by `scroll`
 /// with the original's scroll bar right of them. A swipe or the wheel over it scrolls a row a step.
 /// The cell under the pointer shows gold when it holds an item (or when `held` says an item is
-/// held), and its item goes to `hover`. Returns the cell pressed, `Some(i)`, empty cells too.
-pub(crate) fn item_squares(assets: &Assets, r: Rect, scroll: &mut usize, rows_of: impl Fn(usize) -> usize, item: impl Fn(usize) -> Option<ItemId>, held: bool, hover: &mut Option<ItemId>) -> Option<usize> {
+/// held), and its item goes to `hover`. Returns the cell pressed, `Some(i)`, empty cells too, and its
+/// rectangle. A cell holding an item is a pull's origin (`pan::pull_source`), and while `held` a
+/// pulled item dropped on a cell is a press there (`item_pull::dropped`).
+pub(crate) fn item_squares(assets: &Assets, r: Rect, scroll: &mut usize, rows_of: impl Fn(usize) -> usize, item: impl Fn(usize) -> Option<ItemId>, held: bool, hover: &mut Option<ItemId>) -> Option<(usize, Rect)> {
     let k = chrome::k();
     // As many of the original's squares as the width takes (5 in its 300 px), then as many
     // rows as fill the height, the squares shrunk to fit them: no empty band under the pack.
@@ -560,6 +575,9 @@ pub(crate) fn item_squares(assets: &Assets, r: Rect, scroll: &mut usize, rows_of
             if let Some(it) = it {
                 assets.draw_item(it, cr.x + 2.0, cr.y + 2.0, cell - 4.0);
             }
+            if it.is_some() {
+                super::pan::pull_source(cr, Some(cell));
+            }
             if mouse_in(cr.x, cr.y, cr.w, cr.h) {
                 if it.is_some() || held {
                     draw_rectangle_lines(cr.x, cr.y, cr.w, cr.h, 2.0, chrome::GOLD);
@@ -567,8 +585,8 @@ pub(crate) fn item_squares(assets: &Assets, r: Rect, scroll: &mut usize, rows_of
                 if it.is_some() {
                     *hover = it;
                 }
-                if clicked() {
-                    hit = Some(i);
+                if clicked() || (held && item_pull::dropped()) {
+                    hit = Some((i, cr));
                 }
             }
         }
@@ -801,8 +819,8 @@ pub fn squad(
     let locked = |slot: usize| showing_type || (u.alive() && slot < u.personal as usize);
     let pressed_slot = super::dt_font::with_native_metrics(|| draw_sheet(assets, &c, win, &sheet, panel_slots(showing_type), &mut hover));
     let personal_hover = hover.is_some_and(|h| u.items.iter().enumerate().any(|(s, i)| *i == Some(h) && locked(s)));
-    if let Some(slot) = pressed_slot.filter(|_| !showing_type) {
-        *message = worn_press(game, sel, slot);
+    if let Some((slot, at)) = pressed_slot.filter(|_| !showing_type) {
+        *message = pressed_at(game, at, |g| worn_press(g, sel, slot));
     }
     // Stacked (a phone held upright) the seam is drawn across the window (`window_layout::seam`).
     if window_layout::portrait() {
@@ -884,9 +902,9 @@ pub fn squad(
             let who = game.squad_label(t);
             tree_hint = chrome::ui_line("Army", n).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).map(|line| line.replace("#NAME1", &format!("\"{who}\"")));
         }
-    } else if let Some(cell) = pack_view(game, assets, content, scroll, &mut hover, (filtering || arranged).then_some(&kept_ids[..])) {
+    } else if let Some((cell, at)) = pack_view(game, assets, content, scroll, &mut hover, (filtering || arranged).then_some(&kept_ids[..])) {
         *message = None;
-        *message = pack_click(game, cell);
+        *message = pressed_at(game, at, |g| pack_click(g, cell));
     }
     // Enter (Razdor's filter) picks the first match up onto the pointer.
     if filter.pick && game.held_item.is_none() {
@@ -1048,7 +1066,8 @@ pub fn squad(
         } else if over {
             chrome::glow_frame(sq, Color::new(0.35, 0.55, 1.0, 0.9), false);
         }
-        if over && clicked() {
+        // A pulled item dropped on a card is a press there, as a click (`item_pull`).
+        if over && (clicked() || (game.held_item.is_some() && item_pull::dropped())) {
             pressed = Some((Some(i), v.slot));
         }
     }
@@ -1138,9 +1157,9 @@ pub fn squad(
 
     // The item under the pointer, in the pack or worn: its description pops up by the pointer
     // (not while one is held: 0x4c280c shows the item text with nothing held). Drawn after the
-    // frame lines, so the window's steel lines do not cross it. On a phone it shows on a long
-    // press only (`input::hint_hover`).
-    if let Some(item) = hover.filter(|_| game.held_item.is_none() && super::input::hint_hover()) {
+    // frame lines, so the window's steel lines do not cross it. On a phone it shows at once while
+    // a finger is on it (`input::item_hint_hover`, the owner's decision of 2026-10-31).
+    if let Some(item) = hover.filter(|_| game.held_item.is_none() && super::input::item_hint_hover()) {
         // The original's item tooltip (0x4cbab0): 272 wide, as tall as its text plus 32.
         let (pw, ph) = super::item_text::tooltip_size(game, item, k);
         let (mx, my) = pointer();
@@ -1252,7 +1271,7 @@ fn entry_above_row(entry: Rect, row: &BottomRow, k: f32) -> Rect {
 
 /// The unit's panel of the army and hero windows: the landscape column on the left, or stacked
 /// (a phone held upright) the band under the title, its picture left and its stats right.
-fn draw_sheet(assets: &Assets, c: &razdor::rules::content::Content, win: Rect, sheet: &unit_sheet::Sheet, slots: bool, hover: &mut Option<razdor::rules::content::ItemId>) -> Option<usize> {
+fn draw_sheet(assets: &Assets, c: &razdor::rules::content::Content, win: Rect, sheet: &unit_sheet::Sheet, slots: bool, hover: &mut Option<razdor::rules::content::ItemId>) -> Option<(usize, Rect)> {
     if window_layout::portrait() {
         unit_sheet::draw_band(assets, c, window_layout::army_band(win), sheet, slots, hover)
     } else {
@@ -1777,8 +1796,8 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     };
     // A press on a worn slot picks its item up or puts the held one on (0x4c24f4; the hero
     // window shows the hero's slots: 0x4b8d28 selects him as it opens).
-    if let Some(slot) = draw_sheet(assets, &c, win, &sheet, true, &mut hover) {
-        *message = worn_press(game, 0, slot);
+    if let Some((slot, at)) = draw_sheet(assets, &c, win, &sheet, true, &mut hover) {
+        *message = pressed_at(game, at, |g| worn_press(g, 0, slot));
     }
     // Stacked (a phone held upright) the seam is drawn across the window (`window_layout::seam`).
     if window_layout::portrait() {
@@ -1789,9 +1808,9 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
 
     // The pack: 25 squares of 55 px from (274, 37), the scroll bar right of them.
     let pack = o(274.0, 37.0, 275.0 + 18.0 / HERO_S, 275.0);
-    if let Some(cell) = pack_view(game, assets, pack, &mut view.scroll, &mut hover, None) {
+    if let Some((cell, at)) = pack_view(game, assets, pack, &mut view.scroll, &mut hover, None) {
         *message = None;
-        *message = pack_click(game, cell);
+        *message = pressed_at(game, at, |g| pack_click(g, cell));
     }
 
     // A box's title over it, as 0x48e750 draws them: centred, in Benguiat.
@@ -1803,8 +1822,8 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
 
     // The item description box (310 × 164 at 58): the item under the pointer. On a phone, with a
     // diary entry shown and no item described, the diary takes its place (`diary_column`).
-    // On a phone the description shows on a long press only (`input::hint_hover`).
-    let described = hover.filter(|_| game.held_item.is_none() && super::input::hint_hover());
+    // On a phone the description shows at once while a finger is on it (`input::item_hint_hover`).
+    let described = hover.filter(|_| game.held_item.is_none() && super::input::item_hint_hover());
     let entry_shown = diary_rows(game, view.tab).get(view.pick).is_some();
     let list0 = o(576.0, 252.0, 292.0, 128.0);
     let list_bar0 = o(868.0, 252.0, 18.0, 128.0);

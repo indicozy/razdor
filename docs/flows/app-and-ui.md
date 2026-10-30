@@ -142,15 +142,13 @@ delay) holds the right one, two fingers pinch the wheel
 (the map's zoom) or slide (the map's scroll, or the list's wheel). A long press keeps the pointer
 where the press began while the right button is held (`GestureMapper::press_at`): the finger may
 slide to uncover the view, and the info window (army, building) stays put; the lift releases the
-button there too. Hints: `input::hint_hover()` gates every hover hint and item description (`widgets::tooltip`,
-`widgets::tooltip_later`, the bar's hint, the backpack and hero window's item descriptions). In gesture mode
-they show only while the long press holds; in the touchpad mode they show while the cursor rests (`rest::rested`), and
+button there too. Hints: `input::hint_hover()` gates every hover hint (`widgets::tooltip`, `widgets::tooltip_later`, the bar's hint, the map's tooltips), with the 0.35 s delay. Item descriptions use `input::item_hint_hover()` instead, at once with no delay (the owner's decision, 2026-10-31): the army and hero windows' pack and worn slots, and the event and victory windows' item and spell icons (`dialog`). In gesture mode an item's description shows while a finger is down on it (no long press is needed there), in the touchpad mode while the cursor is over it, else as `touch_hover`. The other hints in gesture mode in the touchpad mode they show while the cursor rests (`rest::rested`), and
 with no touch, as `input::touch_hover` (no hint after a lift until a finger comes down). `input::HINT_DELAY_SECS`
 (0.35 s) is the one delay for both the long press and the rest. Swipe areas: each frame the screens register the rectangles a one-finger swipe acts on
 (`input::swipe_area(rect, SwipeKind)`, gestures only; `widgets::swipe_rows` for a list or text box with
 its row height). The map registers `Pan` over the map view (not while a dialog is open; the open minimap
 is `Off`, a blocker that keeps its drag a drag). The registrations of a frame are the next frame's
-(`input::begin_frame` swaps them), the last one registered over the touch acts. Drag sources: the unit grids (the army window, the building's army and garrison, the hire tab's hero grid) register their cards as `Off` (`pan::drag_grid`, `pan::drag_source`) while the canvas overflows and units drag, so a quick slide from a card drags the unit instead of panning the window (the window's own `Pan` area is registered first). A finger that moves past
+(`input::begin_frame` swaps them), the last one registered over the touch acts. Item cells and worn slots that hold an item register `SwipeKind::Pull` (`pan::pull_source`; a cell's row height for the pack, none for a worn slot): a finger held still on one holds no long press, a slide pulls the item out of its cell (`item_pull`: released over a pack cell, a worn slot or a unit's card, the item is put, swapped or given there as a click would; released on its own cell it is put back), and a quick mostly vertical slide over the pack scrolls it. A plain tap or press picks the item up, as the original's click (`clicked() || item_pull::dropped()` in `items_view`). Drag sources: the unit grids (the army window, the building's army and garrison, the hire tab's hero grid) register their cards as `Off` (`pan::drag_grid`, `pan::drag_source`) while the canvas overflows and units drag, so a quick slide from a card drags the unit instead of panning the window (the window's own `Pan` area is registered first). A finger that moves past
 the slop within 0.25 s of touching down, on a `Pan` or `ScrollRows` area, is a swipe: no click, the map's
 `Frame::pan` (the finger's slide, applied 1:1 by `world_view::pan` on the idle map), or the list's wheel
 steps (one per row, finger up = content up). A finger held still longer first, or outside any area, is
@@ -331,14 +329,10 @@ is on, and merges its frame with the pad's (`merge`): its pointer starts at the 
 centre and stays the pointer. `ui::cursor::draw` draws the pointer as a plain arrow, counting
 the touchpad as focus, as a phone has no system pointer; in gesture mode it draws nothing (the
 finger is the pointer). `input::begin_frame` picks the mode: touchpad, else gestures on mobile,
-else no touch. The mappers' tests cover each gesture. In this mode the event and victory windows'
-item and spell icons show their description while the cursor rests over them (`dialog::shown_preview`),
-as the backpack's hover; the original shows it only while a button is held (0x4c1fec / 0x4c2048).
+else no touch. The mappers' tests cover each gesture. In this mode the event and victory windows' item and spell icons show their description while the cursor is over them (`dialog::shown_preview`, `input::item_hint_hover`: at once, as the items' hover); the original shows it only while a button is held (0x4c1fec / 0x4c2048).
 The rest is `ui::rest` (`rest::tick` in `App::frame`, `rest::rested()`: the pointer still for
 `REST_SECS` = `input::HINT_DELAY_SECS`, 0.35 s, the gestures' long-press delay, with no button down). In this
-mode every hint waits for it, through `input::hint_hover()`: the bar's and the widgets' hints and the item
-descriptions of the backpack and the hero window (`items_view`); the map's tooltip of an army or building
-(`world_view`) and the icons above (`dialog`) use it directly.
+mode every hint waits for it, through `input::hint_hover()`: the bar's and the widgets' hints and the map's tooltip of an army or building (`world_view`). The item descriptions of the backpack and the hero window (`items_view`) and the icons above (`dialog`) do not wait: they use `input::item_hint_hover`, at once.
 
 ## The frame
 

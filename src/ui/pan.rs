@@ -221,6 +221,13 @@ pub fn drag_source(r: Rect) {
     super::input::swipe_area(clipped(on_screen(r)), super::gestures::SwipeKind::Off);
 }
 
+/// An item's cell or worn slot (`item_pull`, Razdor's): a one-finger slide over it pulls the item
+/// (a drag), or, a quick vertical one over a list of `row_px` rows, scrolls the list. Clipped as
+/// `drag_source`; gestures only.
+pub fn pull_source(r: Rect, row_px: Option<f32>) {
+    super::input::swipe_area(clipped(on_screen(r)), super::gestures::SwipeKind::Pull { row_px });
+}
+
 /// [`drag_source`] over the bounding box of a grid's cell rectangles (a contiguous block of
 /// cards); nothing when there are none.
 pub fn drag_grid(cells: impl IntoIterator<Item = Rect>) {

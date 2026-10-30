@@ -51,6 +51,11 @@ pub enum SwipeKind {
     ScrollRows { row_px: f32 },
     /// Not a swipe (the minimap, drawn over the map): a drag there stays the drag it is.
     Off,
+    /// An item's cell (`pan::pull_source`): a finger held still there is no long press (the
+    /// item's description shows by the finger), and a slide is the held drag, the item pulled
+    /// out of its cell (`item_pull`). `row_px`: the scrollable list's row height under it, if any:
+    /// a quick, mostly vertical slide there swipes the list as `ScrollRows` does.
+    Pull { row_px: Option<f32> },
 }
 
 /// A registered rectangle and its swipe. Later ones are drawn on top: the last over a point
@@ -197,7 +202,13 @@ impl GestureMapper {
                     // The first move past the slop judges it: a swipe over its area if it came
                     // before the hold time, else the held drag or long press as before.
                     g.decided = true;
-                    g.swiping = self.now - g.since < SWIPE_TIME && matches!(g.area, Some(SwipeKind::Pan | SwipeKind::ScrollRows { .. }));
+                    let (dx, dy) = (g.last.0 - g.down.0, g.last.1 - g.down.1);
+                    g.swiping = self.now - g.since < SWIPE_TIME
+                        && match g.area {
+                            Some(SwipeKind::Pan | SwipeKind::ScrollRows { .. }) => true,
+                            Some(SwipeKind::Pull { row_px: Some(_) }) => dy.abs() > dx.abs(),
+                            _ => false,
+                        };
                     // The slide from the touch counts too: the map follows the finger from its place.
                     movement = (g.last.0 - g.down.0, g.last.1 - g.down.1);
                 }
@@ -207,7 +218,7 @@ impl GestureMapper {
                     f.pointer = Some(g.anchor);
                     match g.area {
                         Some(SwipeKind::Pan) => f.pan = (f.pan.0 + movement.0, f.pan.1 + movement.1),
-                        Some(SwipeKind::ScrollRows { row_px }) => {
+                        Some(SwipeKind::ScrollRows { row_px }) | Some(SwipeKind::Pull { row_px: Some(row_px) }) => {
                             self.rows += movement.1;
                             let steps = (self.rows / row_px).trunc();
                             self.rows -= steps * row_px;
@@ -223,7 +234,10 @@ impl GestureMapper {
                     f.left.down = true;
                     f.pointer = Some(g.anchor);
                 } else {
-                    if !g.moved && !self.left_held && !self.right_held && self.now - g.since >= LONG_TIME {
+                    // Not over an item (`SwipeKind::Pull`): a finger held still there shows its
+                    // description and holds no button (the item's pull is the slide).
+                    let on_item = matches!(g.area, Some(SwipeKind::Pull { .. }));
+                    if !g.moved && !self.left_held && !self.right_held && !on_item && self.now - g.since >= LONG_TIME {
                         self.right_held = true;
                         f.right.pressed = true;
                         f.right.down = true;
@@ -844,5 +858,68 @@ mod tests {
         assert_eq!((slide.pan, slide.pointer, slide.right.down, slide.left), ((0.0, 0.0), Some((50.0, 60.0)), true, Edge::default()));
         let lift = step_in(&mut m, &[touch(1, 50.0, 400.0, Phase::Ended)], &areas);
         assert_eq!(lift.right, Edge { pressed: false, down: false, released: true });
+    }
+
+    /// An item's cell in a list of 40 px rows, and an item's worn slot (no list).
+    const PULL_ROWS: SwipeKind = SwipeKind::Pull { row_px: Some(40.0) };
+    const PULL_SLOT: SwipeKind = SwipeKind::Pull { row_px: None };
+
+    #[test]
+    fn a_finger_held_still_over_an_item_holds_no_button() {
+        let mut m = GestureMapper::default();
+        let areas = all(PULL_ROWS);
+        step_in(&mut m, &[touch(1, 50.0, 60.0, Phase::Started)], &areas);
+        for _ in 0..40 {
+            let f = step_in(&mut m, &[touch(1, 50.0, 60.0, Phase::Stationary)], &areas);
+            assert_eq!((f.left, f.right), (Edge::default(), Edge::default()));
+        }
+        assert!(!m.long_pressed());
+        let lift = step_in(&mut m, &[touch(1, 50.0, 60.0, Phase::Ended)], &areas);
+        assert_eq!((lift.left, lift.right), (Edge::default(), Edge::default()));
+    }
+
+    #[test]
+    fn a_slide_over_an_item_holds_the_left_button_from_the_touch() {
+        let mut m = GestureMapper::default();
+        let areas = all(PULL_ROWS);
+        step_in(&mut m, &[touch(1, 100.0, 500.0, Phase::Started)], &areas);
+        // A quick horizontal slide: past the slop, not a vertical flick, so the item is dragged.
+        let start = step_in(&mut m, &[touch(1, 140.0, 500.0, Phase::Moved)], &areas);
+        assert_eq!((start.left, start.pointer), (Edge { pressed: true, down: true, released: false }, Some((100.0, 500.0))));
+        assert_eq!(start.pan, (0.0, 0.0));
+        let lift = step_in(&mut m, &[touch(1, 140.0, 500.0, Phase::Ended)], &areas);
+        assert_eq!(lift.left, Edge { pressed: false, down: false, released: true });
+        // A slow slide over an item with no list (a worn slot) is the drag too.
+        let slots = all(PULL_SLOT);
+        step_in(&mut m, &[touch(2, 100.0, 500.0, Phase::Started)], &slots);
+        for _ in 0..16 {
+            step_in(&mut m, &[touch(2, 100.0, 500.0, Phase::Stationary)], &slots);
+        }
+        let slow = step_in(&mut m, &[touch(2, 100.0, 520.0, Phase::Moved)], &slots);
+        assert_eq!(slow.left, Edge { pressed: true, down: true, released: false });
+    }
+
+    #[test]
+    fn a_quick_vertical_slide_over_an_item_in_a_list_turns_the_wheel() {
+        let mut m = GestureMapper::default();
+        let areas = all(PULL_ROWS);
+        step_in(&mut m, &[touch(1, 300.0, 500.0, Phase::Started)], &areas);
+        let mut wheel = 0.0;
+        for i in 1..=4 {
+            // Up 20 px a frame: two rows, as over a list (no click, no drag).
+            let f = step_in(&mut m, &[touch(1, 300.0, 500.0 - 20.0 * i as f32, Phase::Moved)], &areas);
+            assert_eq!((f.left, f.right, f.pan), (Edge::default(), Edge::default(), (0.0, 0.0)));
+            wheel += f.wheel;
+        }
+        assert_eq!(wheel, -2.0);
+    }
+
+    #[test]
+    fn a_quick_vertical_slide_over_a_worn_slot_is_the_drag_as_it_has_no_list() {
+        let mut m = GestureMapper::default();
+        let areas = all(PULL_SLOT);
+        step_in(&mut m, &[touch(1, 300.0, 500.0, Phase::Started)], &areas);
+        let start = step_in(&mut m, &[touch(1, 300.0, 520.0, Phase::Moved)], &areas);
+        assert_eq!((start.left.pressed, start.wheel), (true, 0.0));
     }
 }
