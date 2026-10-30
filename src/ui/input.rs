@@ -237,17 +237,32 @@ pub fn touch_hover() -> bool {
 /// a phone's long press (`gestures`) lasts this long, and so does the hover of a hint.
 pub const HINT_DELAY_SECS: f32 = 0.35;
 
-/// Whether a hover may show a description or hint this frame. In the gesture mode only while a
-/// long press holds (the owner's choice, 2026-10-30: every hint on a long press, as the
-/// map's); with the touchpad mode and with no touch, as [`touch_hover`].
+/// Whether a hover may show a description or hint this frame. On a phone's gesture mode only
+/// while a long press holds (the owner's choice, 2026-10-30: every hint on a long press, as the
+/// map's). In the touchpad mode while the cursor has rested [`HINT_DELAY_SECS`] still
+/// (`rest::rested`, the same delay; a touch alone does not count there). With no touch, as
+/// [`touch_hover`].
 pub fn hint_hover() -> bool {
     let long_pressed = STATE.with(|s| s.borrow().gestures.long_pressed());
-    hint_shown(gestures::enabled(), long_pressed, touch_hover())
+    hint_shown(
+        gestures::enabled(),
+        touchpad::enabled(),
+        long_pressed,
+        super::rest::rested(),
+        touch_hover(),
+    )
 }
 
-/// The gesture mode's hints follow its long press; the other modes' follow the touch hover.
-fn hint_shown(gestures_on: bool, long_pressed: bool, touched: bool) -> bool {
-    if gestures_on { long_pressed } else { touched }
+/// The gesture mode's hints follow its long press; the touchpad mode's follow the cursor's rest;
+/// the other modes' follow the touch hover.
+fn hint_shown(gestures_on: bool, touchpad_on: bool, long_pressed: bool, rested: bool, touched: bool) -> bool {
+    if gestures_on {
+        long_pressed
+    } else if touchpad_on {
+        rested
+    } else {
+        touched
+    }
 }
 
 /// The lift latch after this frame's `touches`: a finger coming down clears it, a lift sets it,
@@ -398,12 +413,17 @@ mod tests {
     fn hints_follow_the_long_press_in_gestures_and_the_touch_hover_elsewhere() {
         use super::hint_shown;
         // Gestures: a hover with no long press shows nothing; a long press shows, lifted or not.
-        assert!(!hint_shown(true, false, true));
-        assert!(hint_shown(true, true, false));
-        // Touchpad and desktop: as the touch hover says, whatever the long press.
-        assert!(hint_shown(false, false, true));
-        assert!(!hint_shown(false, true, false));
-        assert!(!hint_shown(false, false, false));
+        assert!(!hint_shown(true, false, false, false, true));
+        assert!(hint_shown(true, false, true, false, false));
+        // Touchpad: as the cursor's rest says, whatever a finger does and whatever the long press.
+        assert!(hint_shown(false, true, false, true, false));
+        assert!(hint_shown(false, true, false, true, true));
+        assert!(!hint_shown(false, true, false, false, true));
+        assert!(!hint_shown(false, true, true, false, false));
+        // Desktop: as the touch hover says, whatever the long press or the rest.
+        assert!(hint_shown(false, false, false, false, true));
+        assert!(!hint_shown(false, false, true, true, false));
+        assert!(!hint_shown(false, false, false, false, false));
     }
 
     /// After a lift no hover shows a hint until a finger comes down; a finger held still (a long

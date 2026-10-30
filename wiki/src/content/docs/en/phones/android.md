@@ -41,8 +41,7 @@ Touchpad mode is off by default. It is switched on with the **"Touchpad mode"** 
 
 * dragging one finger moves the cursor, wherever the finger is;
 * a tap is a left click at the cursor's position;
-* the cursor resting for a third of a second over an item or spell icon in the victory or event window shows its description;
-* resting the cursor over an army or building on the map for a third of a second shows its information;
+* the cursor resting for a third of a second shows the hints and item descriptions: the information about an army or a building on the map, the description of an item or spell icon in the victory or event window, the description of an item in the backpack and in the hero window;
 
 ### Screen orientation
 

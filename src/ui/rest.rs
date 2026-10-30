@@ -12,9 +12,10 @@ use razdor::local;
 use super::clock;
 use crate::ui::input::is_mouse_button_down;
 
-/// How long the pointer must rest before its tooltip shows, in seconds: the same 350 ms as the
-/// gestures' long press (the owner's one delay for holding still).
-pub const REST_SECS: f32 = 0.35;
+/// How long the pointer must rest before its tooltip shows, in seconds: the input's one hint
+/// delay, [`crate::ui::input::HINT_DELAY_SECS`], the same as the gestures' long press (the
+/// owner's one delay for holding still).
+pub const REST_SECS: f32 = crate::ui::input::HINT_DELAY_SECS;
 
 /// Pixels the pointer may wander and still count as resting.
 const SLOP: f32 = 2.0;

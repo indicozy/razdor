@@ -144,8 +144,9 @@ where the press began while the right button is held (`GestureMapper::press_at`)
 slide to uncover the view, and the info window (army, building) stays put; the lift releases the
 button there too. Hints: `input::hint_hover()` gates every hover hint and item description (`widgets::tooltip`,
 `widgets::tooltip_later`, the bar's hint, the backpack and hero window's item descriptions). In gesture mode
-they show only while the long press holds; in the touchpad mode and with no touch, as `input::touch_hover`
-(no hint after a lift until a finger comes down). Swipe areas: each frame the screens register the rectangles a one-finger swipe acts on
+they show only while the long press holds; in the touchpad mode they show while the cursor rests (`rest::rested`), and
+with no touch, as `input::touch_hover` (no hint after a lift until a finger comes down). `input::HINT_DELAY_SECS`
+(0.35 s) is the one delay for both the long press and the rest. Swipe areas: each frame the screens register the rectangles a one-finger swipe acts on
 (`input::swipe_area(rect, SwipeKind)`, gestures only; `widgets::swipe_rows` for a list or text box with
 its row height). The map registers `Pan` over the map view (not while a dialog is open; the open minimap
 is `Off`, a blocker that keeps its drag a drag). The registrations of a frame are the next frame's
@@ -326,8 +327,10 @@ else no touch. The mappers' tests cover each gesture. In this mode the event and
 item and spell icons show their description while the cursor rests over them (`dialog::shown_preview`),
 as the backpack's hover; the original shows it only while a button is held (0x4c1fec / 0x4c2048).
 The rest is `ui::rest` (`rest::tick` in `App::frame`, `rest::rested()`: the pointer still for
-`REST_SECS`, 0.35 s, the gestures' long-press delay, with no button down); the map's tooltip of an
-army or building (`world_view`) and the icons above both wait for it in this mode.
+`REST_SECS` = `input::HINT_DELAY_SECS`, 0.35 s, the gestures' long-press delay, with no button down). In this
+mode every hint waits for it, through `input::hint_hover()`: the bar's and the widgets' hints and the item
+descriptions of the backpack and the hero window (`items_view`); the map's tooltip of an army or building
+(`world_view`) and the icons above (`dialog`) use it directly.
 
 ## The frame
 
