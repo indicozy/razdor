@@ -1200,11 +1200,14 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
         let can = hires && stock_left && game.can_afford(price) && game.squad.len() < game.max_squad();
         // Razdor's own: the pill, its backing and the price grow with the text size (button_grow).
         let g = super::display::button_grow();
-        let pill = Rect::new(face.x + 4.0 * k, face.y + face.h + 2.0 * k, face.w - 8.0 * k, 17.0 * k * g);
+        let hire = own_text("Army", "HireArmy", n_("Hire"));
+        // Razdor's own: a grown label may not fit the card's width (a narrow phone), so the pill
+        // widens about the card's centre to hold it; at Normal it is the card's width, as before.
+        let pill_w = (face.w - 8.0 * k).max(chrome::pill_label_width(17.0 * k * g, &hire) + 8.0 * k);
+        let pill = Rect::new(face.x + face.w / 2.0 - pill_w / 2.0, face.y + face.h + 2.0 * k, pill_w, 17.0 * k * g);
         // The hire pill now has a transparent black matte. Keep its card backing and the
         // price on parchment, instead of letting the scene show through the button area.
         chrome::surface(Rect::new(face.x, face.y + face.h, face.w, 36.0 * k * g), chrome::Skin::Strip);
-        let hire = own_text("Army", "HireArmy", n_("Hire"));
         if chrome::pill_button(pill, &hire, can, true) {
             // The original plays the gold on the press and again in the click action on the
             // release (0x4c7370, 0x4c7380): the one buffer restarts.
@@ -1224,7 +1227,8 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
         }
         let cost = trf!("Price {price}", price = price.amount);
         let color = if price.currency == Currency::Mana { MANA } else { chrome::GOLD };
-        chrome::shadow_centered(&cost, face.center().x, pill.y + pill.h + 13.0 * k * g, 12.0 * k * g, color);
+        // Razdor's own: the price's growth takes the requested size (see `chrome::button_label`).
+        super::dt_font::legacy_metrics_if(g > 1.0, || chrome::shadow_centered(&cost, face.center().x, pill.y + pill.h + 13.0 * k * g, 12.0 * k * g, color));
     }
     barracks_counters(game, at(f, 256.0, 242.0, 572.0, 48.0));
     let strip = card_panel_divider(f);
@@ -1313,7 +1317,8 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
                     action = Some((i, raise));
                 }
                 let cost = trf!("Price {price}", price = pr.amount);
-                chrome::shadow_centered(&cost, strip.center().x, pill.y + pill.h + 13.0 * k * g, 12.0 * k * g, chrome::GOLD);
+                // Razdor's own: the price's growth takes the requested size (see `chrome::button_label`).
+                super::dt_font::legacy_metrics_if(g > 1.0, || chrome::shadow_centered(&cost, strip.center().x, pill.y + pill.h + 13.0 * k * g, 12.0 * k * g, chrome::GOLD));
             }
             _ => super::unit_sheet::stat_strip(strip, &vs, &vs, vs[razdor::rules::content::Stat::MagicPower], super::unit_sheet::caster(&c, u.def), super::unit_sheet::strip_place(form, u.slot), u.hp, back_row_def(&c, u.slot), game.hero_building_defence(), false, super::unit_sheet::StripPanel::of_squad(i, u.named)),
         }

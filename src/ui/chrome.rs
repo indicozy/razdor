@@ -2471,8 +2471,9 @@ pub fn button_label(r: Rect, label: &str, enabled: bool, _hover: bool, _quest_re
     } else {
         Color::new(1.0, 0.98, 0.94, 1.0)
     };
-    // Button labels in the buttons' and names' face.
-    super::typography::Role::Button.with(|| {
+    // Button labels in the buttons' and names' face. Razdor's own: the text size's growth needs
+    // the requested size, not the font sheet's native one (legacy metrics only when grown).
+    super::dt_font::legacy_metrics_if(super::display::button_grow() > 1.0, || super::typography::Role::Button.with(|| {
         let size = label_size(r.h);
         let size = super::widgets::fit_size(label, r.w - 10.0, size);
         let label = super::widgets::ellipsize(label, r.w - 10.0, size);
@@ -2483,7 +2484,7 @@ pub fn button_label(r: Rect, label: &str, enabled: bool, _hover: bool, _quest_re
         let offset = (size / 22.0).max(1.0);
         text(label, x + offset, y + offset, size, Color::new(0.0, 0.0, 0.0, 0.35 * color.a));
         text(label, x, y, size, color);
-    });
+    }));
 }
 
 /// The size a label of a button `h` tall is drawn at, before the fit to the button's width.
@@ -2509,6 +2510,17 @@ pub fn button_label_width(h: f32, label: &str) -> f32 {
 /// scale against the original's 36 px buttons, snapped like the sheets.
 fn label_size_original(h: f32) -> f32 {
     super::dt_font::sheet_size(super::dt_font::Face::Subtitle, super::dt_font::whole_scale(h / 36.0))
+}
+
+/// The width `label` takes on a pill `h` tall, as [`pill_button`] draws it (before the fit to the pill).
+pub fn pill_label_width(h: f32, label: &str) -> f32 {
+    let mut width = 0.0;
+    // Razdor's own: the grown label takes the requested size (see `button_label`).
+    super::dt_font::legacy_metrics_if(super::display::button_grow() > 1.0, || super::typography::Role::Body.with(|| {
+        let size = (h * 0.62).round().clamp(11.0, (18.0 * k() * super::display::button_grow()).max(11.0));
+        width = measure(label, size).width;
+    }));
+    width
 }
 
 /// The small pill buttons of the barracks ("Hire" green, "Heal" blue). They pay: the
@@ -2540,13 +2552,14 @@ pub fn pill_button(r: Rect, label: &str, enabled: bool, green: bool) -> bool {
             draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.5, if hover { GOLD } else { SILVER });
         }
     }
-    super::typography::Role::Body.with(|| {
+    // Razdor's own: the grown pill label takes the requested size (see `button_label`).
+    super::dt_font::legacy_metrics_if(super::display::button_grow() > 1.0, || super::typography::Role::Body.with(|| {
         let size = super::widgets::fit_size(label, r.w - 8.0, (r.h * 0.62).round().clamp(11.0, (18.0 * k() * super::display::button_grow()).max(11.0)));
         let label = super::widgets::ellipsize(label, r.w - 8.0, size);
         let label = label.as_str();
         let d = measure(label, size);
         shadow_text(label, r.x + (r.w - d.width) / 2.0, r.y + (r.h + d.offset_y) / 2.0 - 1.0, size, if enabled { WHITE } else { Color::new(0.8, 0.8, 0.8, 1.0) });
-    });
+    }));
     if pressed {
         super::audio::cue(super::audio::Cue::Gold);
     }
