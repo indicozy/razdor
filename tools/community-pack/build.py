@@ -1092,6 +1092,8 @@ class Pack:
                   "## Biggest assets", "", "| bytes | file | used by |", "|---:|---|---|"]
         for name in sorted(sizes, key=lambda n: (-sizes[n], n))[:15]:
             lines.append(f"| {sizes[name]} | `{name}` | {', '.join(sorted(owners[name]))} |")
+        lines += ["", f"## Asset files ({len(sizes)})", "", "| file | bytes |", "|---|---:|"]
+        lines += [f"| `{name}` | {sizes[name]} |" for name in sorted(sizes)]
         lines += ["", f"## Skipped ({len(self.skipped)})", ""]
         lines += [f"- {what}: {reason}" for what, reason in self.skipped] or ["None."]
         lines += ["", f"## Rebuild check: {len(self.rebuild_log)} mod(s), {len(self.mismatches)} failed", ""]
@@ -1117,19 +1119,34 @@ class Pack:
         return "\n".join(lines) + "\n"
 
 
-def clear_old(out):
-    """Removes this tool's own files from the output folder (assets, index, report, partial copies)."""
-    for fn in os.listdir(out):
-        if ASSET_RE.match(fn) or fn in ("index.json", "report.md") or fn.endswith(".part"):
-            os.remove(os.path.join(out, fn))
+def verify_folder(folder, entries):
+    """The folder holds exactly index.json, report.md and the assets the index names, and the asset list in
+    report.md is that same set. Fail otherwise (nothing is published then)."""
+    refs = {f["path"] for e in entries for f in e["files"] + ([e["preview"]] if "preview" in e else [])}
+    listing = set(os.listdir(folder))
+    want = refs | {"index.json", "report.md"}
+    if listing != want:
+        raise Fail(f"the folder holds files the index does not name ({sorted(listing - want)[:5]}) "
+                   f"or lacks some it names ({sorted(want - listing)[:5]})")
+    with open(os.path.join(folder, "report.md"), encoding="utf-8") as f:
+        text = f.read()
+    section = text.split("## Asset files", 1)[1].split("\n## ", 1)[0]
+    printed = set(re.findall(r"^\| `([^`]+)` \| \d+ \|$", section, re.M))
+    if printed != refs:
+        raise Fail("the asset list in report.md differs from the folder")
 
 
 def build(src, archive, base_dir, out, forum_maps=True, extra=None, fixes=None):
-    os.makedirs(out, exist_ok=True)
-    clear_old(out)
-    work = tempfile.mkdtemp(prefix=".work-", dir=out)
+    """Builds the catalog in `<out>.tmp` and swaps it in for `out` only when it is complete and checked. A build
+    that fails leaves `out` as it was and keeps its folder as `<out>.failed` (report.md) for reading."""
+    final = os.path.abspath(out)
+    tmp, failed, old = final + ".tmp", final + ".failed", final + ".old"
+    for stale in (tmp, failed, old):
+        shutil.rmtree(stale, ignore_errors=True)
+    os.makedirs(tmp)
+    work = tempfile.mkdtemp(prefix=".work-", dir=tmp)
     try:
-        pack = Pack(src, archive, base_dir, out, work, extra, fixes)
+        pack = Pack(src, archive, base_dir, tmp, work, extra, fixes)
         pack.add_mods()
         if forum_maps:
             pack.add_forum_maps()
@@ -1139,15 +1156,29 @@ def build(src, archive, base_dir, out, forum_maps=True, extra=None, fixes=None):
         pack.resolve_chains()
         pack.check()
         pack.write()
-        if pack.mismatches:
-            raise Fail("mod(s) do not rebuild from Community Update plus their chain: " +
-                       ", ".join(pack.mismatches) + " (see report.md; index.json was not written)")
-        if pack.failures:
-            raise Fail("campaign links do not resolve (add the chapter with --fixes, or mark the campaign break): " +
-                       "; ".join(pack.failures) + " (see report.md; index.json was not written)")
-        return pack
-    finally:
+    except BaseException:
         shutil.rmtree(work, ignore_errors=True)
+        os.rename(tmp, failed)
+        raise
+    shutil.rmtree(work, ignore_errors=True)
+    problems = []
+    if pack.mismatches:
+        problems.append("mod(s) do not rebuild from Community Update plus their chain: " + ", ".join(pack.mismatches))
+    if pack.failures:
+        problems.append("campaign links do not resolve (add the chapter with --fixes, or mark the campaign break): "
+                        + "; ".join(pack.failures))
+    try:
+        if problems:
+            raise Fail("; ".join(problems))
+        verify_folder(tmp, pack.entries)
+    except Fail:
+        os.rename(tmp, failed)
+        raise
+    if os.path.isdir(final):
+        os.rename(final, old)
+    os.rename(tmp, final)
+    shutil.rmtree(old, ignore_errors=True)
+    return pack
 
 
 # ---------------------------------------------------------------- self-test
@@ -1418,6 +1449,14 @@ def selftest():
                            pack.mismatches == [] and len(modc) == 1 and modc[0][1] == ["modA"] and modc[0][2] == [])
             check_selftest("build: archive maps carry their file's date",
                            all(re.match(r"^\d{4}-\d{2}-\d{2}$", e["added"]) for e in arcs))
+            write_file(os.path.join(out1, "stray.webp"), "left from an old build")
+            stray_refused = False
+            try:
+                verify_folder(out1, pack.entries)
+            except Fail:
+                stray_refused = True
+            os.remove(os.path.join(out1, "stray.webp"))
+            check_selftest("folder: a file the index does not name is refused", stray_refused)
             check_selftest("build: every asset file exists and has its size",
                            all(os.path.getsize(os.path.join(out1, f["path"])) == f["size"]
                                for e in cat["entries"] for f in e["files"]))
@@ -1432,7 +1471,7 @@ def selftest():
                 build(bsrc, badir, bcu, os.path.join(bad_root, "out"))
             except Fail as e:
                 refused = "rebuild" in str(e)
-            with open(os.path.join(bad_root, "out", "report.md"), encoding="utf-8") as f:
+            with open(os.path.join(bad_root, "out.failed", "report.md"), encoding="utf-8") as f:
                 bad_report = f.read()
             check_selftest("rebuild: a mod that does not rebuild fails loudly, is listed, writes no index",
                            refused and "extra Extra/old.ini" in bad_report
