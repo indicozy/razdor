@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::{read_installed, safe_id, safe_rel_name, Kind, Text};
+use super::{read_installed, safe_id, safe_rel_name, Installed, Kind, Text};
 
 /// The file naming the active mod, under the hub folder.
 const ACTIVE: &str = "active.json";
@@ -151,10 +151,50 @@ struct Stamp {
     base: String,
     /// The base's files: a digest of their names, sizes and times.
     base_files: String,
-    /// The mod's installed version.
+    /// Every mod laid, in the order they are laid (see [`layer_chain`]).
+    layers: Vec<LayerStamp>,
+}
+
+/// One mod laid over the base: its id, its installed version and each of its files' path and
+/// SHA-256. A change in any of them rebuilds every folder that lays it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct LayerStamp {
+    id: String,
     version: String,
-    /// Each file of the mod: its path and SHA-256.
     files: Vec<(String, String)>,
+}
+
+/// The mods a mod plays on, in the order they are laid: each requirement (after its own
+/// requirements), each once, then `id` itself. A requirement that is not installed, and mods
+/// that need each other in a circle, are refused with the reason.
+pub fn layer_chain(installed: &Installed, id: &str) -> Result<Vec<String>, String> {
+    fn visit(installed: &Installed, id: &str, path: &mut Vec<String>, out: &mut Vec<String>) -> Result<(), String> {
+        if out.iter().any(|o| o == id) {
+            return Ok(());
+        }
+        if path.iter().any(|p| p == id) {
+            return Err(format!("{id}: mods need each other in a circle"));
+        }
+        let entry = match installed.entries.get(id).filter(|e| e.kind == Kind::Mod) {
+            Some(entry) => entry,
+            None => {
+                return Err(match path.last() {
+                    Some(parent) => format!("{parent} needs {id}, which is not installed"),
+                    None => format!("{id}: not installed"),
+                })
+            }
+        };
+        path.push(id.to_string());
+        for r in &entry.requires {
+            visit(installed, r, path, out)?;
+        }
+        path.pop();
+        out.push(id.to_string());
+        Ok(())
+    }
+    let mut out = Vec::new();
+    visit(installed, id, &mut Vec::new(), &mut out)?;
+    Ok(out)
 }
 
 /// Builds the merged game folder of installed mod `id` over `base` (see the module doc), or
@@ -163,21 +203,29 @@ pub fn prepare_mod(local: &Path, base: &Path, id: &str) -> Result<PathBuf, Strin
     if !safe_id(id) {
         return Err(format!("{id}: not a mod id"));
     }
-    let entry = read_installed(local).entries.get(id).filter(|e| e.kind == Kind::Mod).cloned().ok_or_else(|| format!("{id}: not installed"))?;
-    let files = list_mod_files(&mod_files_dir(local, id))?;
-    let mut digests = Vec::with_capacity(files.len());
-    for (rel, path) in &files {
-        let bytes = std::fs::read(path).map_err(|e| format!("{rel}: {e}"))?;
-        digests.push((rel.clone(), crate::update::sha256_hex(&bytes)));
+    let installed = read_installed(local);
+    let order = layer_chain(&installed, id)?;
+    let mut layers = Vec::with_capacity(order.len());
+    let mut stamps = Vec::with_capacity(order.len());
+    for lid in &order {
+        let version = installed.entries[lid].version.clone();
+        let files = list_mod_files(&mod_files_dir(local, lid))?;
+        let mut digests = Vec::with_capacity(files.len());
+        for (rel, path) in &files {
+            let bytes = std::fs::read(path).map_err(|e| format!("{lid}: {rel}: {e}"))?;
+            digests.push((rel.clone(), crate::update::sha256_hex(&bytes)));
+        }
+        stamps.push(LayerStamp { id: lid.clone(), version, files: digests });
+        layers.push(files);
     }
-    let stamp = Stamp { base: base.display().to_string(), base_files: base_fingerprint(base)?, version: entry.version, files: digests };
+    let stamp = Stamp { base: base.display().to_string(), base_files: base_fingerprint(base)?, layers: stamps };
     let game = mod_game_dir(local, id);
     if read_stamp(&game).as_ref() == Some(&stamp) {
         return Ok(game);
     }
     let tmp = mod_dir(local, id).join("game.tmp");
     let _ = std::fs::remove_dir_all(&tmp);
-    let built = build(base, &files, &tmp).and_then(|()| {
+    let built = build(base, &layers, &tmp).and_then(|()| {
         let json = serde_json::to_vec_pretty(&stamp).map_err(|e| e.to_string())?;
         write_fresh(&tmp.join(STAMP), &json)
     });
@@ -201,9 +249,10 @@ fn write_fresh(path: &Path, bytes: &[u8]) -> Result<(), String> {
     std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// Builds the merged folder `tmp` from `base` and the mod's files (`(path, source)`, the paths
-/// as the mod has them).
-fn build(base: &Path, mod_files: &[(String, PathBuf)], tmp: &Path) -> Result<(), String> {
+/// Builds the merged folder `tmp` from `base` and the layers: each layer's files (`(path in the
+/// mod, source)`) laid in turn, a later layer's file replacing an earlier one at the same path
+/// (ignoring case).
+fn build(base: &Path, layers: &[Vec<(String, PathBuf)>], tmp: &Path) -> Result<(), String> {
     // Lower-cased path → the path as it is in the merged folder (the base's spelling where the
     // base has the folder or file).
     let mut known: BTreeMap<String, String> = BTreeMap::new();
@@ -223,19 +272,21 @@ fn build(base: &Path, mod_files: &[(String, PathBuf)], tmp: &Path) -> Result<(),
             std::fs::copy(&path, &target).map_err(|e| format!("{rel}: {e}"))?;
         }
     }
-    let mut seen = HashSet::new();
-    for (rel, src) in mod_files {
-        if !seen.insert(rel.to_ascii_lowercase()) {
-            return Err(format!("{rel}: two files of the mod differ only in case"));
+    for mod_files in layers {
+        let mut seen = HashSet::new();
+        for (rel, src) in mod_files {
+            if !seen.insert(rel.to_ascii_lowercase()) {
+                return Err(format!("{rel}: two files of one mod differ only in case"));
+            }
+            let target = resolve(&mut known, rel);
+            let dst = tmp.join(&target);
+            if let Some(parent) = dst.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| format!("{target}: {e}"))?;
+            }
+            // Breaks the link to the base's file (or an earlier layer's copy) first; the base keeps its own.
+            let _ = std::fs::remove_file(&dst);
+            std::fs::copy(src, &dst).map_err(|e| format!("{target}: {e}"))?;
         }
-        let target = resolve(&mut known, rel);
-        let dst = tmp.join(&target);
-        if let Some(parent) = dst.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("{target}: {e}"))?;
-        }
-        // Breaks the link to the base's file first; the base keeps its own.
-        let _ = std::fs::remove_file(&dst);
-        std::fs::copy(src, &dst).map_err(|e| format!("{target}: {e}"))?;
     }
     Ok(())
 }
@@ -373,7 +424,7 @@ fn base_fingerprint(base: &Path) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hub::{Catalog, Installed};
+    use crate::hub::{safe_name, Catalog, Installed};
 
     fn temp(tag: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
@@ -396,6 +447,11 @@ mod tests {
     /// Installs mod `id` the way the hub does: its files under `files/`, the record in
     /// `installed.json`.
     fn install_mod(local: &Path, id: &str, version: &str, files: &[(&str, &str)]) {
+        install_mod_on(local, id, version, &[], files);
+    }
+
+    /// [`install_mod`] for a mod that requires `requires` (installed before it).
+    fn install_mod_on(local: &Path, id: &str, version: &str, requires: &[&str], files: &[(&str, &str)]) {
         let _ = std::fs::remove_dir_all(mod_files_dir(local, id));
         for (rel, text) in files {
             put(&mod_files_dir(local, id).join(rel), text);
@@ -406,7 +462,7 @@ mod tests {
             kind: Kind::Mod,
             lang: String::new(),
             title: Text { ru: id.into(), en: String::new() },
-            requires: Vec::new(),
+            requires: requires.iter().map(|r| r.to_string()).collect(),
             files: files.iter().map(|(rel, _)| format!("mods/{id}/files/{rel}")).collect(),
         };
         installed.entries.insert(id.into(), record);
@@ -526,12 +582,104 @@ mod tests {
         let entry = |kind: &str, name: &str| {
             format!(r#"{{"format":1,"entries":[{{"id":"m","kind":"{kind}","title":{{"ru":"x"}},"author":"a","version":"1","files":[{{"path":"p","name":"{name}","size":1,"sha256":"00000000000000000000000000000000000000000000000000000000000000ab"}}]}}]}}"#)
         };
-        for bad in ["../x.ini", "a/../b.ini", "/abs.ini", "a\\b.ini", "a//b.ini", "a/", "", ".hidden/x.ini", "a/.x.ini"] {
+        for bad in ["../x.ini", "a/../b.ini", "/abs.ini", "a\\b.ini", "a//b.ini", "a/", "", "a/CON/x.ini"] {
             assert!(Catalog::parse(entry("mod", bad).as_bytes()).is_err(), "{bad} must be refused");
         }
         assert!(Catalog::parse(entry("mod", "data/units.ini").as_bytes()).is_ok());
         assert!(Catalog::parse(entry("map", "data/units.ini").as_bytes()).is_err(), "a map's file is a name, not a path");
         assert!(safe_rel_name("Data/Units.ini"));
+    }
+
+    #[test]
+    fn community_file_names_are_accepted_and_the_bad_ones_refused() {
+        // Real names: brackets, apostrophes, commas, Cyrillic, dots inside, a long name.
+        let good: Vec<String> = [
+            "Слова автора(ПРОЧИТАТЬ ОБЯЗАТЕЛЬНО).txt",
+            "Стражи Тиара'с.DTm",
+            "Карта, часть 2 [новая].DTm",
+            "a b.c",
+            "Имя.с.точками.DTm",
+            "CONSOLE.txt",
+            "com10.dtm",
+            ".hidden",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .chain(["é".repeat(127)])
+        .collect();
+        for name in &good {
+            assert!(safe_name(name), "{name:?} must be accepted");
+            assert!(safe_rel_name(&format!("data/{name}")), "{name:?} as a folder's file");
+        }
+        let bad: Vec<String> = [
+            "", ".", "..", "a/b", "a\\b", "c:x", "a<b", "a>b", "a\"b", "a|b", "a?b", "a*b", "tab\there", "bell\u{7}",
+            " lead.DTm", "trail.DTm ", "trail.", "CON", "con.txt", "Aux.DTm", "NUL", "COM1", "lpt9.txt", "LPT1.DTm",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .chain(["x".repeat(256), "é".repeat(128)])
+        .collect();
+        for name in &bad {
+            assert!(!safe_name(name), "{name:?} must be refused");
+            // A name with a `/` is a path of folders (checked on its own); the others as a folder's file.
+            if !name.contains('/') {
+                assert!(!safe_rel_name(&format!("data/{name}")), "{name:?} as a folder's file");
+            }
+        }
+        assert!(!safe_rel_name("data/../x.ini"), "traversal in a mod's path");
+        assert!(!safe_rel_name("data/CON/x.ini"), "a device name as a folder");
+    }
+
+    #[test]
+    fn a_zip_unpacks_community_names_and_refuses_a_device_name() {
+        let dir = temp("zip-names");
+        let zip = zip_file(&dir, "names.zip", &[("Карта [1], часть 'два'.DTm", b"a"), ("Слова автора(ПРОЧИТАТЬ).txt", b"b")]);
+        let names = unpack_zip(&zip, &dir.join("out")).unwrap();
+        assert_eq!(names, ["Карта [1], часть 'два'.DTm", "Слова автора(ПРОЧИТАТЬ).txt"]);
+        let bad = zip_file(&dir, "dev.zip", &[("NUL.txt", b"x")]);
+        assert!(unpack_zip(&bad, &dir.join("out2")).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn three_layers_each_replace_the_one_below_and_a_change_rebuilds_the_upper_folder() {
+        // base → A (requires nothing) → B (requires A). B's file wins over A's, A's over the base's.
+        let base = base_install("layers");
+        put(&base.join("Pictures/a.lit"), "base-pic");
+        let local = temp("layers-hub");
+        install_mod(&local, "a", "1.0", &[("Data/Units.ini", "A units"), ("Pictures/a.lit", "A-pic"), ("Scripts/a.txt", "a")]);
+        install_mod_on(&local, "b", "1.0", &["a"], &[("data/units.ini", "B units"), ("Scripts/b.txt", "b")]);
+        let game = prepare_mod(&local, &base, "b").unwrap();
+        assert_eq!(std::fs::read_to_string(game.join("Data/Units.ini")).unwrap(), "B units", "B's file overrides A's, keeping the base's spelling");
+        assert_eq!(std::fs::read_to_string(game.join("Pictures/a.lit")).unwrap(), "A-pic", "A's file overrides the base's, B has none");
+        assert_eq!(std::fs::read_to_string(game.join("Scripts/a.txt")).unwrap(), "a", "A's own file is there");
+        assert_eq!(std::fs::read_to_string(game.join("Scripts/b.txt")).unwrap(), "b", "B's own file is there");
+        assert_eq!(std::fs::read_to_string(base.join("Data/Units.ini")).unwrap(), "base units", "the base is not written");
+        // A changes: B's folder is rebuilt, B's file still wins.
+        put(&game.join("marker.txt"), "stale");
+        install_mod(&local, "a", "1.1", &[("Data/Units.ini", "A units"), ("Pictures/a.lit", "A-pic-2"), ("Scripts/a.txt", "a2")]);
+        let game = prepare_mod(&local, &base, "b").unwrap();
+        assert!(!game.join("marker.txt").exists(), "a change in A rebuilds B's folder");
+        assert_eq!(std::fs::read_to_string(game.join("Pictures/a.lit")).unwrap(), "A-pic-2");
+        assert_eq!(std::fs::read_to_string(game.join("Scripts/a.txt")).unwrap(), "a2");
+        assert_eq!(std::fs::read_to_string(game.join("Data/Units.ini")).unwrap(), "B units");
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    #[test]
+    fn a_missing_requirement_and_a_circle_are_refused_with_the_reason() {
+        let base = base_install("chain-errors");
+        let local = temp("chain-errors-hub");
+        install_mod_on(&local, "b", "1.0", &["gone"], &[("x.ini", "b")]);
+        let err = prepare_mod(&local, &base, "b").unwrap_err();
+        assert!(err.contains("b needs gone"), "{err}");
+        install_mod_on(&local, "gone", "1.0", &["c"], &[("y.ini", "g")]);
+        install_mod_on(&local, "c", "1.0", &["gone"], &[("z.ini", "c")]);
+        let err = prepare_mod(&local, &base, "gone").unwrap_err();
+        assert!(err.contains("circle"), "{err}");
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&local);
     }
 
     #[test]
@@ -580,7 +728,7 @@ mod tests {
     #[test]
     fn a_zip_with_a_path_out_of_the_mod_is_refused_whole() {
         let dir = temp("zip-slip");
-        for bad in ["../x.ini", "a/../../x.ini", "/abs.ini", "..\\x.ini", "a/.hidden/x.ini"] {
+        for bad in ["../x.ini", "a/../../x.ini", "/abs.ini", "..\\x.ini", "a/CON/x.ini"] {
             let zip = zip_file(&dir, "bad.zip", &[("ok.ini", b"ok"), (bad, b"x")]);
             let out = dir.join("out");
             assert!(unpack_zip(&zip, &out).is_err(), "{bad} must be refused");

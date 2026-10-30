@@ -645,6 +645,17 @@ checked by size and SHA-256, unpacked into `files.tmp/` under the zip's own path
 the same name checks as a mod's file; at most 2 GiB and 20 000 entries, `hub::mods::unpack_zip`), and
 `files.tmp/` then replaces `files/` in one rename. The window's downloads show «Загрузка…».
 
+**Stacked mods**: a mod that requires others is laid over them: `layer_chain` orders its `requires` chain
+(each requirement after its own, each once, like `plan_install`; a missing one or a circle is refused
+with the reason), and `build` lays each layer in turn over one path map, a later layer's file replacing
+the earlier one's at the same path (ignoring case). The stamp holds every layer's id, version and file
+digests, so a change in any layer rebuilds the folders that lay it.
+
+**File names** (`hub::safe_name`, for maps and for each folder of a mod's file path, and the zip's names):
+any Unicode except control characters, `/`, `\` and `< > : " | ? *`; not empty, `.` or `..`; no leading or
+trailing space; no trailing dot; at most 255 bytes; not a Windows device name (CON, PRN, AUX, NUL, COM1-9,
+LPT1-9, with or without an extension). A leading dot is allowed.
+
 **Mods play as layers** (`hub/mods.rs`). `prepare_mod(local, base, id)` builds `mods/<id>/game/`:
 every file of the base install (`DtInstall`'s `RAZDOR_DT_DIR`) hard-linked (a copy where links fail),
 then each file of `files/` laid over the base file of the same path ignoring ASCII case per component,

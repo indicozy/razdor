@@ -251,7 +251,26 @@ fn safe_id(id: &str) -> bool {
 
 /// A file name the hub may write: no folders, no dots in front, nothing odd.
 fn safe_name(name: &str) -> bool {
-    !name.is_empty() && !name.starts_with('.') && name.chars().all(|c| c.is_alphanumeric() || "-_. ".contains(c))
+    // What a Windows folder takes: no control characters, no separators, none of `<>:"|?*`.
+    const FORBIDDEN: &str = "/\\<>:\"|?*";
+    if name.is_empty() || name.len() > 255 || name == "." || name == ".." {
+        return false;
+    }
+    if name.starts_with(' ') || name.ends_with(' ') || name.ends_with('.') {
+        return false;
+    }
+    if name.chars().any(|c| c.is_control() || FORBIDDEN.contains(c)) {
+        return false;
+    }
+    !is_windows_device(name)
+}
+
+/// A Windows device name (`CON`, `NUL`, `COM1`…, with or without an extension, any case): such
+/// a file cannot be made on Windows.
+fn is_windows_device(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or(name).to_ascii_uppercase();
+    let numbered = |p: &str| stem.len() == 4 && stem.starts_with(p) && matches!(stem.as_bytes()[3], b'1'..=b'9');
+    matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL") || numbered("COM") || numbered("LPT")
 }
 
 /// A file name inside a mod: `/`-separated names the same way, relative, none empty or dotted.
