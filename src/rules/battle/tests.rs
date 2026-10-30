@@ -500,6 +500,23 @@ fn reserve_cannot_be_targeted_or_attack() {
 }
 
 #[test]
+fn wide_player_side_steps_only_to_the_cells_the_screen_shows() {
+    // Razdor's fix (a player's report, the AI playing the player's side): the player's grid
+    // opens the wide row's blocked cells (0x4d2233), but the screen shows 12 places, so a
+    // unit stepped into a hidden cell drawn over another card. The witch in front column 1 has
+    // the hidden back cell 0 next to her; no move or AI step may take her there.
+    let mut bt = battle(&[(10, f(1)), (10, f(2)), (10, f(3))], &[(18, f(2))]);
+    assert!(bt.is_open(Team::Player, b(0)) && bt.is_open(Team::Player, r(0)), "the hidden cells are open");
+    turn_of(&mut bt, 0);
+    assert!(bt.moves(0).contains(&b(1)), "a shown cell next to her is a move");
+    assert!(bt.moves(0).iter().all(|&s| bt.formation.contains(s)), "moves {:?}", bt.moves(0));
+    assert_eq!(bt.move_active(b(0)), Err(ActionError::InvalidTarget));
+    if let Some(Step::Move { to, .. }) = bt.hero_auto_step() {
+        assert!(bt.formation.contains(to), "the AI's step went to {to:?}");
+    }
+}
+
+#[test]
 fn row12_a_voluntary_move_collapses_only_after_the_movers_last_action() {
     let walker = acts(59, 2, warrior(59, 30, 5));
     let mut bt = with(vec![walker], &[(59, f(2)), (11, b(2))], &[(18, f(5))]);
@@ -3076,13 +3093,16 @@ fn max_sacrifices_a_unit_for_a_proven_win_only_in_a_quick_fight() {
     assert!(after.fighters[1].alive() && after.outcome() == Outcome::Ongoing);
 }
 
-/// The same rule with no proven win: a second player unit (armour 20, 300 HP) keeps the
+/// The same rule with no proven win: a second player unit (armour 20, 900 HP) keeps the
 /// battle going past the forced-win search's reach, so the quick fight's Max plays as on the
 /// map, and neither throws the hammer away on the cursed warrior (the original's AI would).
+/// The HP is high enough because the player's steps into the hidden cells are gone (row 20),
+/// which leaves the search a smaller tree and so a longer reach; at 300 HP it found the win.
 #[test]
 fn max_sacrifices_nothing_in_a_quick_fight_without_a_proven_win() {
     let curse = UnitDef { hits: 5, ..bonus(70, Bonus::DeathCurse, warrior(70, 1, 0)) };
-    let mut bt = with(vec![curse, hammer(), armour()], &[(70, f(3)), (84, f(4))], &[(69, f(3)), (10, f(2))]);
+    let tank = UnitDef { hits: 900, ..armour() };
+    let mut bt = with(vec![curse, hammer(), tank], &[(70, f(3)), (84, f(4))], &[(69, f(3)), (10, f(2))]);
     turn_of(&mut bt, 2);
     let sacrifice = Some(Plan::Act(0, ActionKind::Melee));
     let (quick, qa) = max_with_stakes(&bt, MaxStakes::Quick);

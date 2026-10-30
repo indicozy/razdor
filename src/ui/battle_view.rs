@@ -1077,9 +1077,8 @@ impl BattleView {
         let acting = active.map(|a| b.fighters[a].team);
         let player_turn = acting.is_some_and(|t| self.human(t)) && self.fx.is_none();
         let (targets, moves) = match (player_turn, active) {
-            // The player's battle grid has no blocked cells (4d2233), but the screen shows
-            // only the formation's cells, as the original's does.
-            (true, Some(a)) => (b.targets(a), b.moves(a).into_iter().filter(|&m| b.formation.contains(m)).collect()),
+            // `moves` keeps the player's side to the cells the screen shows (Battle::shows_move).
+            (true, Some(a)) => (b.targets(a), b.moves(a)),
             _ => (Vec::new(), Vec::new()),
         };
         let hovered_cell = self.cell_under_mouse(l);

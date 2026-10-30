@@ -933,7 +933,7 @@ were implemented and tested earlier (`src/rules/battle/tests.rs`, `rowN_…`); t
 | 17 | Collapse timing | Only after a death and after the actor's last action | Only after a death and after the actor's last action; never at a turn start | 2 | Matches |
 | 18 | Battle start | At `begin()` (after Razdor's deployment) only the player's back row moves into an empty front row; it persists. The front counts as taken while a unit that does not fight (a corpse, an unpaid unit of an attack) holds a cell there (`Battle::set_bench`) | Only the player's army back row moves into an empty front row, in the army formation (persists) | 2, 9 | Matches |
 | 19 | Reserve collapse | Reserve to row 1, actions 0 | Same | 2 | Matches |
-| 20 | Wide formation | Per-side battle grid: the enemy's has the blocks, the player's none (the screen still offers only the formation's 12 cells); a collapse copies a row's blocks forward and opens the row left | Same, but the player's battle grid has no blocks (4d2233) and a collapse moves the blocks between rows | 6, 2 | Matches (what the screen shows for opened cells is unknown) |
+| 20 | Wide formation | Per-side battle grid: the enemy's has the blocks, the player's none (4d2233); the player's side, the hero's auto-battle and «Максимум» included, steps only to the 12 cells the screen shows (`Battle::shows_move`, the same set the player's input offers); the enemy's moves are unchanged; a collapse copies a row's blocks forward and opens the row left | Same, but the player's battle grid has no blocks (4d2233) and a collapse moves the blocks between rows; its screen shows 12 places (492940) | 6, 2 | **differs** (a Razdor fix, the owner's decision: the opened cells the screen does not show are not steps; what the original shows for them is unknown) |
 | 21 | Enemy formation | Auto-arranged every battle (`Battle::auto_arrange`); off-screen both sides. Not written back to the enemy's troops: a beaten army or garrison is gone and a lost battle ends the game, so it shows nowhere | **Auto-arranged** every battle (483b3c) and written back to the army; off-screen both sides | 9, 10 | Matches (write-back: no effect) |
 | 22 | Who fights | The attacker's unpaid units sit out, the defender's fight (AI troops have no unpaid units). Who attacks is Razdor's: walking into a garrison is the player's attack, an army contact the army's | The **attacker's** unpaid units sit out, the defender's fight | 9 | Matches (who attacks: world.md) |
 | 23 | Deployment | A deployment phase before the first turn (`move_card`) | None seen; the battle starts from the army formation | 9 | Razdor extra (**unknown** in the original) |
@@ -971,7 +971,9 @@ were implemented and tested earlier (`src/rules/battle/tests.rs`, `rowN_…`); t
 
 ## Unknowns and open points
 - **Wide-row quirks on screen.** What the screen shows when the player's side uses a cell that is
-  blocked in the formation, or after a collapse has moved the −1 blocks (sections 2 and 6).
+  blocked in the formation, or after a collapse has moved the −1 blocks (sections 2 and 6). Razdor
+  keeps every player's step to the 12 places the screen shows (row 20, `Battle::shows_move`); what
+  the original shows for the other cells is still unknown (docs/OPEN_QUESTIONS.md).
 - **Deployment.** Whether the original battle screen lets the player rearrange units before the
   first action (nothing seen in the window's open handler).
 - **AI kill-test bug in play.** The wrong-side "killable" reading (486d03, 486feb) is read in the

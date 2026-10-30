@@ -1842,9 +1842,21 @@ impl Battle {
         could && !self.all_options(id).iter().any(|o| o.1.is_hostile())
     }
 
+    /// Whether a unit of `team` may step onto `s`, as the screen shows it. Razdor's fix (a
+    /// player's report): the original opens the wide row's blocked cells on the player's
+    /// grid (0x4d2233), but its screen shows 12 places (492940), and what it shows for the
+    /// others is unknown. So the player's side steps only to the cells the screen shows
+    /// (`formation.contains`), whether the player moves them or the AI plays his side
+    /// (the hero's auto-battle, «Максимум»). The enemy's grid is unchanged. The player's
+    /// input highlights and the AI's moves both read [`Battle::moves`], so they agree.
+    pub fn shows_move(&self, team: Team, s: Slot) -> bool {
+        team != Team::Player || self.formation.contains(s)
+    }
+
     /// Empty own cells the fighter could step to (484c4c): from row 1 or 2, columns c−1..c+1
     /// of rows 1 and 2; any reserve cell while it may still use the reserve this turn. From
-    /// the reserve (with the same permission): any cell of rows 1 and 2. No swaps.
+    /// the reserve (with the same permission): any cell of rows 1 and 2. No swaps. The
+    /// player's side also keeps to the cells the screen shows ([`Battle::shows_move`]).
     pub fn moves(&self, id: usize) -> Vec<Slot> {
         let f = &self.fighters[id];
         if !f.standing() {
@@ -1852,7 +1864,7 @@ impl Battle {
         }
         let from = f.slot;
         self.grid(f.team)
-            .filter(|&s| s != from && self.at(f.team, s).is_none())
+            .filter(|&s| s != from && self.at(f.team, s).is_none() && self.shows_move(f.team, s))
             .filter(|s| match (from.row, s.row) {
                 (Row::Reserve, Row::Reserve) => false,
                 (Row::Reserve, _) | (_, Row::Reserve) => f.reserve_move,

@@ -8,6 +8,16 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **Wide-row cells the battle screen does not show** (2026-10-30, a player's report: the witch
+  stepped into a hidden reserve cell drawn over the woman standing there). The original opens the
+  wide row's blocked cells on the player's battle grid (0x4d2233), so its rules allow a step into
+  them, but its screen shows 12 places (492940). The original's screen for those opened cells is
+  unknown: where it would draw a unit there, or whether it offers them to the player. Razdor's
+  choice (the owner's decision, row 20 of battle.md): the player's side, the hero's auto-battle
+  and «Максимум» included, steps only to the 12 shown cells (`Battle::shows_move`), so the AI never
+  picks a hidden cell and the player's input offers the same set. The enemy's grid is unchanged.
+  Settled by a reference screen of the original's battle window with opened cells (a collapse on
+  the wide row, then a step into a back-row end or a reserve end); until then the choice stays.
 - **The map info windows: fade-in and empty-cell icons** (2026-10-18, a player's report; split
   out 2026-10-28). Not done on main: the original's 500 ms fade-in (0x4ca728) and the hostile
   style's empty-cell icons (ae2774).
