@@ -8,6 +8,13 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **A campaign's next-map name in quotes** (2026-10-31, the community catalog). Two community
+  campaigns («Dark Hike», «Время смуты») store their next map with literal quote characters
+  (`"Озеро Эленьер.final.DTm"`). Razdor matches the name as written (`next_campaign_map` in
+  `src/ui/screens.rs`: trimmed, case-insensitive, `.DTm` optional), so the campaign stops after
+  that chapter; the Hub catalog marks both partial. Unknown: whether the original strips the
+  quotes when it opens the next map. Settled by the original's next-map open path in Ghidra
+  (the `parity-check` skill); if it strips them, Razdor does too and the two campaigns become full.
 - **Wide-row cells the battle screen does not show** (2026-10-30, a player's report: the witch
   stepped into a hidden reserve cell drawn over the woman standing there). The original opens the
   wide row's blocked cells on the player's battle grid (0x4d2233), so its rules allow a step into
