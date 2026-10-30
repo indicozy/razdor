@@ -51,7 +51,12 @@ PREVIEW_BOX = "480x270"
 CHUNK = 1 << 20
 ZIP_TIME = (1980, 1, 1, 0, 0, 0)
 PROGRAM_EXT = (".exe", ".dll")
-SKIP_EXT = (".exe", ".dll", ".sav", ".rzsave", ".log")
+# The file types the game reads (the ones Community Update ships, checked against its install). A package
+# and the rebuild comparison carry only these. Everything else is left out and counted by extension in
+# report.md, so a game-read type that gets left out shows up there: the authors' notes and documents
+# (.txt .doc .docx .pdf .htm .css .ico ...), archives inside a mod, screenshots, programs (.exe .dll), saves.
+# The notes stay in their threads; the Hub shows the first post.
+GAME_EXT = frozenset({".lit", ".ugs", ".bmp", ".tga", ".spi", ".wav", ".raw", ".dtm", ".ini"})
 SKIP_DIRS = ("saves/", "logs/")
 ASSET_RE = re.compile(r"^[0-9a-f]{16}\.(zip|dtm|png)$")
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -210,11 +215,11 @@ def razdor_made(rel, prefixes):
 
 
 def excluded(rel, prefixes=frozenset({ENGLISH_PREFIX})):
-    """Files a package leaves out: programs, saves, logs, crash logs (Razdor never runs them) and Razdor's own
-    translation output (razdor_made)."""
+    """Files a package leaves out: any type not in GAME_EXT (programs, documents, archives, saves, logs),
+    the uninstaller, crash logs, and Razdor's own translation output (razdor_made)."""
     low = rel.lower()
     name = low.rsplit("/", 1)[-1]
-    return (low.endswith(SKIP_EXT) or name.startswith("unins") or low.startswith(SKIP_DIRS)
+    return (os.path.splitext(name)[1] not in GAME_EXT or name.startswith("unins") or low.startswith(SKIP_DIRS)
             or "crashlog" in name or razdor_made(rel, prefixes))
 
 
@@ -600,6 +605,7 @@ class Pack:
         self.chains = {}      # mod slug -> the mods whose packages come before its own, in order
         self.mismatches = []  # mods whose rebuild differs from their tested game folder
         self.rebuild_log = [] # (slug, chain, problems) for report.md
+        self.left_out = {}    # extension -> [files left out of packages, set of mod slugs]
         self.trees = {}
         self.cu_maps = None
         if self.conv is None:
@@ -728,6 +734,12 @@ class Pack:
         diffs = changed_files(game, base)
         prefixes = razdor_prefixes(game) | razdor_prefixes(base)
         members = [(rel, full) for rel, full in diffs if not excluded(rel, prefixes)]
+        for rel, _ in diffs:
+            if excluded(rel, prefixes):
+                ext = os.path.splitext(rel)[1].lower() or "(no extension)"
+                entry = self.left_out.setdefault(ext, [0, set()])
+                entry[0] += 1
+                entry[1].add(slug)
         if not members:
             raise Skip("no file differs from its base")
         decoded = [rel for rel, _ in members if rel in game.decoded]
@@ -976,6 +988,10 @@ class Pack:
                 lines.append(f"- FAIL {via}: {len(problems)} difference(s): " + "; ".join(problems[:40]))
             else:
                 lines.append(f"- ok {via}")
+        lines += ["", f"## Left out of packages, by extension ({len(self.left_out)} types)", "",
+                  "| extension | files | mods |", "|---|---:|---:|"]
+        for ext, (count, mods) in sorted(self.left_out.items(), key=lambda kv: (-kv[1][0], kv[0])):
+            lines.append(f"| `{ext}` | {count} | {len(mods)} ({', '.join(sorted(mods)[:6])}{', ...' if len(mods) > 6 else ''}) |")
         cu = self.cu()
         cu_prefixes = razdor_prefixes(cu)
         own_files = sorted(rel for rel in cu.paths if razdor_made(rel, cu_prefixes))
@@ -1130,6 +1146,10 @@ def selftest():
                    == "krestonostsy-plus")
     check_selftest("hub names: parentheses, apostrophes and Cyrillic are kept",
                    all(hub_name_problem(n) is None for n in ["Coven Time(2).DTm", "Let's Go.DTm", "Карта 1.DTm"]))
+    check_selftest("game types: the game's types stay, documents, archives, music, programs and saves go",
+                   all(not excluded(p) for p in ["Graphics/a.lit", "Maps/x.DTm", "data/Units.INI", "Pic/A.TGA"])
+                   and all(excluded(p) for p in ["Sounds/x.ogg", "Doc/Readme.txt", "Doc/a.DOCX", "pic.jpg",
+                                                 "DiscordTimes.exe", "Saves/s.sav", "unins000.dat", "noext"]))
     check_selftest("razdor-made: translated map copies and Razdor's data files are recognised",
                    is_translated_map("Другой берег_en.DTm") and is_translated_map("РК1-Начало пути_hindi-native.DTm")
                    and not is_translated_map("Другой берег.DTm") and not is_translated_map("Map_ab.DTm")
