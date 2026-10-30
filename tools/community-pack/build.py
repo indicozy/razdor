@@ -526,11 +526,25 @@ def test_result(row):
     return False, res or "not ok"
 
 
+def test_mod(row):
+    """The mod a test row names. `CU` is no mod (vanilla, `vanilla`); `mod <slug>` is that mod; `CU (no build
+    for guessed mod)` was played on Community Update, but its mod is the row's `guessed_slug`, which has no
+    build here (so the map needs that mod and gets no entry unless the catalog has it)."""
+    slug = (row.get("slug") or "").strip()
+    if slug.lower().startswith("cu (no build"):
+        return (row.get("guessed_slug") or "").strip()
+    if slug.lower().startswith("mod "):
+        return slug[4:].strip()
+    if slug.lower() == "cu":
+        return "vanilla"
+    return slug
+
+
 def map_mod(rows, test_of, bymod):
     for r in rows:
         t = test_of.get(r["sha256"])
-        if t and t["slug"]:
-            return t["slug"]
+        if t and test_mod(t):
+            return test_mod(t)
     return bymod
 
 
@@ -1110,6 +1124,10 @@ def selftest():
     check_selftest("title: only the last bracket goes", clean_title("A [b] [c]") == "A [b]")
     check_selftest("title: no bracket, unchanged", clean_title("No bracket") == "No bracket")
     check_selftest("version: decoration removed", clean_version("** 2.0") == "2.0" and clean_version("▪︎▪︎") == "")
+    check_selftest("test rows: CU is vanilla, `mod X` is X, a no-build row names its guessed mod",
+                   test_mod({"slug": "CU"}) == "vanilla" and test_mod({"slug": "mod new-units"}) == "new-units"
+                   and test_mod({"slug": "CU (no build for guessed mod)", "guessed_slug": "krestonostsy-plus"})
+                   == "krestonostsy-plus")
     check_selftest("hub names: parentheses, apostrophes and Cyrillic are kept",
                    all(hub_name_problem(n) is None for n in ["Coven Time(2).DTm", "Let's Go.DTm", "Карта 1.DTm"]))
     check_selftest("razdor-made: translated map copies and Razdor's data files are recognised",
