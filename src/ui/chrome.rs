@@ -1898,6 +1898,7 @@ pub fn empty_item_slot(r: Rect) {
 }
 
 /// The window's close box; true when clicked.
+#[track_caller]
 pub fn close_button(x: f32, y: f32, s: f32, red: bool) -> bool {
     // The cross is drawn as it always was; a phone's click area is finger-sized (`touch_hit`). The
     // title strip ends 3 px under the cross (`title_bar_styled`: the cross at 3 px, the strip's height less 6).
@@ -1909,6 +1910,7 @@ pub fn close_button(x: f32, y: f32, s: f32, red: bool) -> bool {
 
 /// A close cross drawn at `cross` whose click area is `hit` (a phone's title cross is its own click
 /// area: [`title_bar_styled`]); true when clicked.
+#[track_caller]
 fn close_button_at(cross: Rect, hit: Rect, red: bool) -> bool {
     let (x, y, s) = (cross.x, cross.y, cross.w);
     let (hover, down, pressed) = super::widgets::button_state(hit, true);
@@ -1967,6 +1969,7 @@ fn room_clear_of(room: f32, strip: Rect, cross: Rect, k: f32) -> f32 {
 /// Title bar of a window: the window's own skin, the title centred; `ornate` puts the
 /// corner ornaments on a wide one, including town and building windows.
 /// Returns true when its close box (if any) was clicked.
+#[track_caller]
 fn title_bar_styled(r: Rect, title: &str, skin: Skin, closable: bool, ornate: bool, title_color: Option<Color>, factor: f32) -> bool {
     let k = k();
     surface(r, skin);
@@ -2045,6 +2048,7 @@ pub fn window_with_title_color_grown(r: Rect, title: &str, skin: Skin, closable:
 }
 
 /// The battle exit window uses the artwork's own pixel scale for its title and nested frames.
+#[track_caller]
 pub fn battle_exit_frame(r: Rect, title: &str, px: f32) -> bool {
     BIGGEST.with(|b| {
         if b.get().is_none_or(|old| old.w * old.h < r.w * r.h) { b.set(Some(r)); }
@@ -2507,6 +2511,7 @@ fn label_size_original(h: f32) -> f32 {
 
 /// The small pill buttons of the barracks ("Hire" green, "Heal" blue). They pay: the
 /// press plays `Item-Gold` (interface.md §14).
+#[track_caller]
 pub fn pill_button(r: Rect, label: &str, enabled: bool, green: bool) -> bool {
     let (hover, down, pressed) = super::widgets::button_state(r, enabled);
     let name = if !enabled {

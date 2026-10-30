@@ -192,8 +192,10 @@ async fn main() {
         if ui::snapshot::open_later(&mut app, frames) {
             opened = 6;
         }
-        // The text-size probe lists the texts of this frame (`RAZDOR_TEXT_PROBE`, off otherwise).
+        // The text-size and touch probes list the texts and the touch targets of this frame
+        // (`RAZDOR_TEXT_PROBE`, `RAZDOR_TOUCH_PROBE`, off otherwise).
         ui::text_probe::begin_frame();
+        ui::touch_probe::begin_frame();
         app.frame();
         // The FPS counter, the keyboard strip and the pointer stay where the screen is.
         ui::pan::end_frame();
@@ -213,6 +215,7 @@ async fn main() {
         if let Some((path, n)) = &snapshot {
             if frames >= *n {
                 ui::text_probe::write();
+                ui::touch_probe::write();
                 let mut shot = get_screen_data();
                 opaque_rgba(&mut shot.bytes);
                 shot.export_png(path);

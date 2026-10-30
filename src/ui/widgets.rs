@@ -337,7 +337,9 @@ pub fn clicked() -> bool {
 
 /// Tracks a button from mouse-down to mouse-up. Returns its hover, held-down visual state,
 /// and activation edge; dragging out cancels activation and dragging back in restores it.
+#[track_caller]
 pub fn button_state(r: Rect, enabled: bool) -> (bool, bool, bool) {
+    super::touch_probe::record("button", r, enabled);
     let hover = enabled && !input_swallowed() && mouse_in(r.x, r.y, r.w, r.h);
     let capture = [r.x.to_bits(), r.y.to_bits(), r.w.to_bits(), r.h.to_bits()];
     let (next, down, pressed) = capture_step(
@@ -801,13 +803,16 @@ fn neutral_tip_image(img: &mut razdor::dt::gfx::Image) {
 }
 
 /// Draws a button and returns true when it was clicked this frame.
+#[track_caller]
 pub fn button(x: f32, y: f32, w: f32, h: f32, label: &str, enabled: bool) -> bool {
     button_sounding(x, y, w, h, label, enabled, super::audio::Cue::Button)
 }
 
 /// [`button`] in the original's red (its buttons with their channels turned, 0x4dba90): the
 /// army window's Dismiss and its confirmation, the defeat report.
+#[track_caller]
 pub fn red_button(x: f32, y: f32, w: f32, h: f32, label: &str, enabled: bool) -> bool {
+    super::touch_probe::record("button", Rect::new(x, y, w, h), enabled);
     let hover = enabled && mouse_in(x, y, w, h);
     super::chrome::defeat_button(Rect::new(x, y, w, h), label, enabled, hover);
     let pressed = hover && clicked();
@@ -818,6 +823,7 @@ pub fn red_button(x: f32, y: f32, w: f32, h: f32, label: &str, enabled: bool) ->
 }
 
 /// [`button`] with its own press sound (the money buttons play `Item-Gold`).
+#[track_caller]
 pub fn button_sounding(x: f32, y: f32, w: f32, h: f32, label: &str, enabled: bool, sound: super::audio::Cue) -> bool {
     let r = Rect::new(x, y, w, h);
     let (_, down, pressed) = button_state(r, enabled);
@@ -1343,7 +1349,9 @@ pub fn tap_rect_at(r: Rect, up: bool, dp: Option<f32>) -> Rect {
 }
 
 /// The left button was pressed in `r` this frame.
+#[track_caller]
 pub fn tapped_in(r: Rect) -> bool {
+    super::touch_probe::record("tap", r, true);
     is_mouse_button_pressed(MouseButton::Left) && mouse_in(r.x, r.y, r.w, r.h)
 }
 
@@ -1761,6 +1769,7 @@ pub fn text_field(key: &str, x: f32, y: f32, w: f32, h: f32, value: &mut String,
 /// A whole number between `min` and `max`: − and + step it (Shift: by 10), the wheel over
 /// it too, and a click on the number lets you type one (Enter or a click elsewhere takes
 /// it). Returns the new value when it changed.
+#[track_caller]
 pub fn number_field(key: &str, x: f32, y: f32, w: f32, value: i64, min: i64, max: i64) -> Option<i64> {
     let id = field_id(key);
     let h = 24.0;
@@ -1830,6 +1839,7 @@ pub fn number_field(key: &str, x: f32, y: f32, w: f32, value: i64, min: i64, max
 }
 
 /// A compact button (no sound, for steppers and list rows).
+#[track_caller]
 pub fn small_button(x: f32, y: f32, w: f32, h: f32, label: &str, enabled: bool) -> bool {
     let r = Rect::new(x, y, w, h);
     let (_, down, pressed) = button_state(r, enabled);
@@ -1850,6 +1860,7 @@ pub fn small_button(x: f32, y: f32, w: f32, h: f32, label: &str, enabled: bool) 
 }
 
 /// A button that stays lit while `on` (tool and mode pickers). True when clicked.
+#[track_caller]
 pub fn toggle_button(x: f32, y: f32, w: f32, h: f32, label: &str, on: bool) -> bool {
     let (hover, down, pressed) = button_state(Rect::new(x, y, w, h), true);
     let bg = if on { Color::new(0.55, 0.42, 0.18, 1.0) } else if down { Color::new(0.36, 0.28, 0.18, 1.0) } else if hover { Color::new(0.28, 0.22, 0.14, 1.0) } else { Color::new(0.22, 0.18, 0.12, 1.0) };
@@ -2012,6 +2023,7 @@ pub fn draw_popup() {
 }
 
 /// A row of tabs; the clicked one becomes `selected`. Returns the height used.
+#[track_caller]
 pub fn tabs(x: f32, y: f32, w: f32, labels: &[&str], selected: &mut usize) -> f32 {
     let n = labels.len().max(1) as f32;
     let tw = w / n;
