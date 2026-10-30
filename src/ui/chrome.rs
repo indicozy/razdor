@@ -2473,24 +2473,28 @@ pub fn button_label(r: Rect, label: &str, enabled: bool, _hover: bool, _quest_re
     };
     // Button labels in the buttons' and names' face. Razdor's own: the text size's growth needs
     // the requested size, not the font sheet's native one (legacy metrics only when grown).
-    super::dt_font::legacy_metrics_if(super::display::button_grow() > 1.0, || super::typography::Role::Button.with(|| {
-        let size = label_size(r.h);
-        let size = super::widgets::fit_size(label, r.w - 10.0, size);
-        let label = super::widgets::ellipsize(label, r.w - 10.0, size);
-        let label = label.as_str();
-        let d = measure(label, size);
-        let x = r.x + (r.w - d.width) / 2.0;
-        let y = r.y + (r.h + d.offset_y) / 2.0 - 1.0;
-        let offset = (size / 22.0).max(1.0);
-        text(label, x + offset, y + offset, size, Color::new(0.0, 0.0, 0.0, 0.35 * color.a));
-        text(label, x, y, size, color);
-    }));
+    let g = super::display::button_grow();
+    super::typography::Role::Button.with(|| {
+        // The size as drawn at Normal (the original's cap), then at g times it when grown.
+        let normal = super::widgets::fit_size(label, r.w - 10.0, label_size(r.h, 1.0));
+        super::dt_font::legacy_metrics_if(g > 1.0, || {
+            let size = if g > 1.0 { super::widgets::fit_size(label, r.w - 10.0, super::display::grown_text(normal, g)) } else { normal };
+            let label = super::widgets::ellipsize(label, r.w - 10.0, size);
+            let label = label.as_str();
+            let d = measure(label, size);
+            let x = r.x + (r.w - d.width) / 2.0;
+            let y = r.y + (r.h + d.offset_y) / 2.0 - 1.0;
+            let offset = (size / 22.0).max(1.0);
+            text(label, x + offset, y + offset, size, Color::new(0.0, 0.0, 0.0, 0.35 * color.a));
+            text(label, x, y, size, color);
+        })
+    });
 }
 
 /// The size a label of a button `h` tall is drawn at, before the fit to the button's width.
-fn label_size(h: f32) -> f32 {
-    // Razdor's own: the cap grows with the text size (button_grow), see display.rs.
-    let mut size = (h * 0.56).clamp(12.0, (22.0 * k() * super::display::button_grow()).max(12.0)).round();
+fn label_size(h: f32, g: f32) -> f32 {
+    // Razdor's own: the cap grows with the text size (`g`, see display.rs).
+    let mut size = (h * 0.56).clamp(12.0, (22.0 * k() * g).max(12.0)).round();
     // In the original's fonts a label is the sheet at the button's own scale (the
     // original's buttons are 36 px high), never larger: 0.56 of a tall button made
     // labels run edge to edge on large screens.
@@ -2503,7 +2507,7 @@ fn label_size(h: f32) -> f32 {
 /// The width `label` needs on a button `h` tall, drawn as [`button_label`] draws it (before the
 /// fit to a narrower button).
 pub fn button_label_width(h: f32, label: &str) -> f32 {
-    super::typography::Role::Button.with(|| measure(label, label_size(h)).width)
+    super::typography::Role::Button.with(|| measure(label, label_size(h, super::display::button_grow())).width)
 }
 
 /// A button label's size in the original's fonts: the Benguiat sheet at the button's
@@ -2553,13 +2557,18 @@ pub fn pill_button(r: Rect, label: &str, enabled: bool, green: bool) -> bool {
         }
     }
     // Razdor's own: the grown pill label takes the requested size (see `button_label`).
-    super::dt_font::legacy_metrics_if(super::display::button_grow() > 1.0, || super::typography::Role::Body.with(|| {
-        let size = super::widgets::fit_size(label, r.w - 8.0, (r.h * 0.62).round().clamp(11.0, (18.0 * k() * super::display::button_grow()).max(11.0)));
+    let g = super::display::button_grow();
+    super::typography::Role::Body.with(|| {
+        // The size as drawn at Normal (the pill's height at Normal is its height over g).
+        let normal = super::widgets::fit_size(label, r.w - 8.0, ((r.h / g) * 0.62).round().clamp(11.0, (18.0 * k()).max(11.0)));
+        super::dt_font::legacy_metrics_if(g > 1.0, || {
+        let size = if g > 1.0 { super::widgets::fit_size(label, r.w - 8.0, super::display::grown_text(normal, g)) } else { normal };
         let label = super::widgets::ellipsize(label, r.w - 8.0, size);
         let label = label.as_str();
         let d = measure(label, size);
         shadow_text(label, r.x + (r.w - d.width) / 2.0, r.y + (r.h + d.offset_y) / 2.0 - 1.0, size, if enabled { WHITE } else { Color::new(0.8, 0.8, 0.8, 1.0) });
-    }));
+        })
+    });
     if pressed {
         super::audio::cue(super::audio::Cue::Gold);
     }

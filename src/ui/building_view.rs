@@ -1227,8 +1227,9 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
         }
         let cost = trf!("Price {price}", price = price.amount);
         let color = if price.currency == Currency::Mana { MANA } else { chrome::GOLD };
-        // Razdor's own: the price's growth takes the requested size (see `chrome::button_label`).
-        super::dt_font::legacy_metrics_if(g > 1.0, || chrome::shadow_centered(&cost, face.center().x, pill.y + pill.h + 13.0 * k * g, 12.0 * k * g, color));
+        // Razdor's own: the price is g times its Normal size (as drawn at Normal, the native one).
+        let price = if g > 1.0 { super::display::grown_text(super::dt_font::native_size(super::dt_font::face(), 12.0 * k), g) } else { 12.0 * k };
+        super::dt_font::legacy_metrics_if(g > 1.0, || chrome::shadow_centered(&cost, face.center().x, pill.y + pill.h + 13.0 * k * g, price, color));
     }
     barracks_counters(game, at(f, 256.0, 242.0, 572.0, 48.0));
     let strip = card_panel_divider(f);
@@ -1317,8 +1318,9 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
                     action = Some((i, raise));
                 }
                 let cost = trf!("Price {price}", price = pr.amount);
-                // Razdor's own: the price's growth takes the requested size (see `chrome::button_label`).
-                super::dt_font::legacy_metrics_if(g > 1.0, || chrome::shadow_centered(&cost, strip.center().x, pill.y + pill.h + 13.0 * k * g, 12.0 * k * g, chrome::GOLD));
+                // Razdor's own: the price is g times its Normal size (as drawn at Normal, the native one).
+                let price = if g > 1.0 { super::display::grown_text(super::dt_font::native_size(super::dt_font::face(), 12.0 * k), g) } else { 12.0 * k };
+                super::dt_font::legacy_metrics_if(g > 1.0, || chrome::shadow_centered(&cost, strip.center().x, pill.y + pill.h + 13.0 * k * g, price, chrome::GOLD));
             }
             _ => super::unit_sheet::stat_strip(strip, &vs, &vs, vs[razdor::rules::content::Stat::MagicPower], super::unit_sheet::caster(&c, u.def), super::unit_sheet::strip_place(form, u.slot), u.hp, back_row_def(&c, u.slot), game.hero_building_defence(), false, super::unit_sheet::StripPanel::of_squad(i, u.named)),
         }
@@ -2167,6 +2169,8 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
             text_centered(tr("Pick an item from the list."), dx + dw / 2.0, card_y + dh / 2.0, 18.0 * k, BOX_INK);
         }
     }
+    // Pilot exception (the owner to decide): the market's labels are bound by the original row's
+    // widths, so they grow less than the rest (no re-layout of the row).
     // Razdor's own: the four buttons grow with the text size (button_grow), up to the 50-px
     // frames they sit in, centred where they are at Normal.
     let g = super::display::button_grow();

@@ -238,6 +238,12 @@ pub fn button_grow() -> f32 {
     button_grow_at(text_size())
 }
 
+/// The size a grown text is drawn at: `g` times its size at Normal (Razdor's own, the owner's
+/// decision of 2026-10-31; `normal` is the size as drawn at Normal, not the requested one).
+pub fn grown_text(normal: f32, g: f32) -> f32 {
+    normal * g
+}
+
 /// The settings' label of a text size.
 pub fn text_size_label(s: f32) -> &'static str {
     use razdor::i18n::tr;
@@ -1656,6 +1662,12 @@ mod tests {
         assert!(at(1.25) > at(1.0), "the large size is larger");
         assert!(at(1.5) > at(1.25), "the largest size is larger still");
         assert_eq!(text_for_at(1.25, None, k, reference, (sw, sh), bar), text_o_at(1.25, k), "the desktop keeps its scale");
+    }
+
+    #[test]
+    fn a_grown_text_is_g_times_its_normal_size() {
+        assert_eq!(grown_text(10.0, 1.5), 15.0);
+        assert_eq!(grown_text(10.0, 1.0), 10.0);
     }
 
     #[test]
