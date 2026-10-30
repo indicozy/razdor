@@ -314,14 +314,12 @@ def dtm_next_map(path):
 
 
 def game_ref_key(ref):
-    """The key a next-map field is looked up by, as the game does it (src/ui/screens.rs `next_campaign_map`): the
-    field trimmed, the exact suffix `.DTm` or `.dtm` removed, lower case. Quotes are NOT stripped, so a field in
-    quotes finds nothing, as in the game."""
+    """The key a next-map field is looked up by, following the fixed `next_campaign_map` (src/ui/screens.rs): the
+    field trimmed, the map extension `.dtm` removed whatever its case (Windows opens files ignoring case), lower
+    case. Quotes are NOT stripped, so a field in quotes finds nothing."""
     s = ref.strip()
-    for suffix in (".DTm", ".dtm"):
-        if s.endswith(suffix):
-            s = s[:-len(suffix)]
-            break
+    if s.lower().endswith(".dtm"):
+        s = s[:-4]
     return s.lower()
 
 
@@ -332,7 +330,7 @@ def game_name_key(name):
 
 REASON_TEXT = {
     "quoted": "in quotes; the game does not find it",
-    "extension": "the extension is not the exact .DTm or .dtm the game strips, so the game does not find it",
+    "extension": "the name has a different extension than the map's, so the game does not find it",
     "missing": "no chapter of the campaign has that name",
 }
 
@@ -1404,7 +1402,8 @@ def selftest():
                    game_ref_key(" Name.DTm ") == game_name_key("Name.dtm") == game_ref_key("Name")
                    and game_ref_key("Name.dtm") == "name"
                    and game_ref_key('"Name.dtm"') != game_name_key("Name.dtm")
-                   and game_ref_key("Name.Dtm") != game_name_key("Name.Dtm"))
+                   and game_ref_key("Name.Dtm") == game_name_key("Name.dtm") == "name"
+                   and game_ref_key("Name.txt") != game_name_key("Name.txt"))
     chain_links = {"a": "b", "b": None, "c": "a"}
     check_selftest("game lookup: a chapter's place in its chain", chain_position(chain_links, "b") == 3
                    and chain_position(chain_links, "c") == 1)
