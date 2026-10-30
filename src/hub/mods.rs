@@ -524,7 +524,7 @@ mod tests {
     #[test]
     fn bad_mod_file_names_are_refused_by_the_catalog() {
         let entry = |kind: &str, name: &str| {
-            format!(r#"{{"format":1,"entries":[{{"id":"m","kind":"{kind}","title":{{"ru":"x"}},"author":"a","version":"1","files":[{{"path":"p","name":"{name}","size":1,"sha256":""}}]}}]}}"#)
+            format!(r#"{{"format":1,"entries":[{{"id":"m","kind":"{kind}","title":{{"ru":"x"}},"author":"a","version":"1","files":[{{"path":"p","name":"{name}","size":1,"sha256":"00000000000000000000000000000000000000000000000000000000000000ab"}}]}}]}}"#)
         };
         for bad in ["../x.ini", "a/../b.ini", "/abs.ini", "a\\b.ini", "a//b.ini", "a/", "", ".hidden/x.ini", "a/.x.ini"] {
             assert!(Catalog::parse(entry("mod", bad).as_bytes()).is_err(), "{bad} must be refused");

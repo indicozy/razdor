@@ -200,28 +200,40 @@ pub struct Catalog {
 }
 
 impl Catalog {
+    /// Reads a catalog. Refused whole when any string that becomes part of a path is not safe:
+    /// an id, a file name, a path, a SHA-256. The SHA-256s are stored lower-cased.
     pub fn parse(bytes: &[u8]) -> Result<Catalog, String> {
-        let c: Catalog = serde_json::from_slice(bytes).map_err(|e| format!("index.json: {e}"))?;
+        let mut c: Catalog = serde_json::from_slice(bytes).map_err(|e| format!("index.json: {e}"))?;
         if c.format != 1 {
             return Err(format!("index.json: format {} is not known", c.format));
         }
-        for e in &c.entries {
-            // An id names a mod's folder (`mods/<id>/`): letters, digits, `-` and `_` only.
+        for e in &mut c.entries {
+            // An id names a mod's folder (`mods/<id>/`) and the downloads' names: letters, digits, `-` and `_` only.
             if !safe_id(&e.id) || !e.requires.iter().all(|r| safe_id(r)) {
                 return Err(format!("index.json: bad id {:?}", e.id));
             }
-            for f in &e.files {
+            for f in &mut e.files {
                 // A mod's file keeps its place in the mod (`data/units.ini`); a map's is a name.
                 let name_ok = if e.kind == Kind::Mod { safe_rel_name(&f.name) } else { safe_name(&f.name) };
-                if !name_ok || !safe_path(&f.path) {
+                if !name_ok || !safe_location(&f.path) {
                     return Err(format!("index.json: {}: bad file name {:?}", e.id, f.name));
                 }
+                if !safe_sha256(&f.sha256) {
+                    return Err(format!("index.json: {}: {}: the SHA-256 is not 64 hex digits", e.id, f.name));
+                }
+                f.sha256 = f.sha256.to_ascii_lowercase();
                 if f.archive && e.kind != Kind::Mod {
                     return Err(format!("index.json: {}: only a mod may be an archive", e.id));
                 }
             }
-            if e.preview.as_ref().is_some_and(|p| !safe_path(&p.path)) {
-                return Err(format!("index.json: {}: bad preview path", e.id));
+            if let Some(p) = &mut e.preview {
+                if !safe_location(&p.path) {
+                    return Err(format!("index.json: {}: bad preview path", e.id));
+                }
+                if !safe_sha256(&p.sha256) {
+                    return Err(format!("index.json: {}: the preview's SHA-256 is not 64 hex digits", e.id));
+                }
+                p.sha256 = p.sha256.to_ascii_lowercase();
             }
         }
         Ok(c)
@@ -250,6 +262,29 @@ pub fn safe_rel_name(name: &str) -> bool {
 /// A path inside the hub: relative, no `..`.
 fn safe_path(path: &str) -> bool {
     !path.is_empty() && !path.starts_with('/') && !path.contains('\\') && path.split('/').all(|p| p != ".." && !p.is_empty())
+}
+
+/// The file `rel` in a folder hub: a path inside the folder, never an address or a path out.
+fn folder_file(folder: &Path, rel: &str) -> Result<PathBuf, String> {
+    if rel.starts_with("https://") || !safe_path(rel) {
+        return Err(format!("{rel}: not a path inside the hub folder"));
+    }
+    Ok(folder.join(rel))
+}
+
+/// Where a file is in the hub: a path inside it, or an `https://` address (no spaces or
+/// backslashes; it is fetched, never joined onto a folder).
+fn safe_location(path: &str) -> bool {
+    match path.strip_prefix("https://") {
+        Some(rest) => !rest.is_empty() && !path.chars().any(|c| c.is_whitespace() || c == '\\'),
+        None => safe_path(path),
+    }
+}
+
+/// A SHA-256 as the catalog spells it: exactly 64 ASCII hex digits, either case. It names
+/// the preview and download files, so nothing else may get into a path.
+fn safe_sha256(sum: &str) -> bool {
+    sum.len() == 64 && sum.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 fn is_map_name(name: &str) -> bool {
@@ -411,7 +446,7 @@ impl Hub {
     fn fetch(&self, rel: &str) -> Result<Vec<u8>, String> {
         match self.root()? {
             Root::Url(u) => crate::update::fetch(&resolve(&u, rel), 60),
-            Root::Dir(d) => std::fs::read(d.join(rel)).map_err(|e| format!("{rel}: {e}")),
+            Root::Dir(d) => std::fs::read(folder_file(&d, rel)?).map_err(|e| format!("{rel}: {e}")),
         }
     }
 
@@ -421,7 +456,7 @@ impl Hub {
         let _ = std::fs::remove_file(dest);
         match self.root()? {
             Root::Url(u) => crate::update::download_to(&resolve(&u, rel), dest, 900, max_bytes),
-            Root::Dir(d) => std::fs::copy(d.join(rel), dest).map(|_| ()).map_err(|e| format!("{rel}: {e}")),
+            Root::Dir(d) => std::fs::copy(folder_file(&d, rel)?, dest).map(|_| ()).map_err(|e| format!("{rel}: {e}")),
         }
     }
 
@@ -994,6 +1029,53 @@ mod tests {
         assert!(Catalog::parse(bad_need).is_err());
     }
 
+    /// A catalog with one mod whose file (and, with `preview`, its picture) has the SHA-256 `sum`.
+    fn catalog_with_sum(sum: &str, preview: bool) -> String {
+        let picture = if preview { format!(r#","preview":{{"path":"previews/p.png","name":"p.png","size":1,"sha256":"{sum}"}}"#) } else { String::new() };
+        format!(
+            r#"{{"format":1,"entries":[{{"id":"m","kind":"mod","title":{{"ru":"x"}},"author":"a","version":"1","files":[{{"path":"mods/m/a.ini","name":"a.ini","size":1,"sha256":"{sum}"}}]{picture}}}]}}"#
+        )
+    }
+
+    #[test]
+    fn a_sha256_that_is_not_64_hex_digits_refuses_the_whole_catalog() {
+        assert!(Catalog::parse(catalog_with_sum(&"ab".repeat(32), true).as_bytes()).is_ok());
+        let bad = vec![
+            "../../x".to_string(),
+            "a".repeat(63),
+            "a".repeat(65),
+            format!("{}/..", "a".repeat(62)),
+            format!("{}\\", "a".repeat(63)),
+            "g".repeat(64),
+            String::new(),
+        ];
+        for sum in &bad {
+            assert!(Catalog::parse(catalog_with_sum(sum, false).as_bytes()).is_err(), "{sum:?} as a file's SHA-256");
+            assert!(Catalog::parse(catalog_with_sum(sum, true).as_bytes()).is_err(), "{sum:?} as the preview's SHA-256");
+        }
+    }
+
+    #[test]
+    fn the_sha256_is_kept_in_lower_case() {
+        let c = Catalog::parse(catalog_with_sum(&"AB".repeat(32), true).as_bytes()).unwrap();
+        assert_eq!(c.entries[0].files[0].sha256, "ab".repeat(32));
+        assert_eq!(c.entries[0].preview.as_ref().unwrap().sha256, "ab".repeat(32));
+    }
+
+    #[test]
+    fn an_address_path_is_fetched_as_it_is_and_never_joined_onto_a_folder() {
+        let sum = "ab".repeat(32);
+        let json = |path: &str| {
+            format!(r#"{{"format":1,"entries":[{{"id":"m","kind":"mod","title":{{"ru":"x"}},"author":"a","version":"1","files":[{{"path":"{path}","name":"a.ini","size":1,"sha256":"{sum}"}}]}}]}}"#)
+        };
+        assert!(Catalog::parse(json("https://example.org/a.ini").as_bytes()).is_ok());
+        assert!(Catalog::parse(json("https://exa mple.org/a.ini").as_bytes()).is_err(), "a space in an address");
+        assert!(Catalog::parse(json("https://").as_bytes()).is_err(), "no address after the scheme");
+        assert!(folder_file(Path::new("/hub"), "https://example.org/a.ini").is_err());
+        assert!(folder_file(Path::new("/hub"), "../a.ini").is_err());
+        assert_eq!(folder_file(Path::new("/hub"), "mods/m/a.ini").unwrap(), Path::new("/hub/mods/m/a.ini"));
+    }
+
     #[test]
     fn the_default_source_is_the_release_and_the_mock_only_when_asked() {
         assert_eq!(Source::from_setting(None, false), Source::Url(DEFAULT_SOURCE.to_string()));
@@ -1015,7 +1097,7 @@ mod tests {
     #[test]
     fn an_archive_is_for_a_mod_only() {
         let file = |kind: &str| {
-            format!(r#"{{"format":1,"entries":[{{"id":"x","kind":"{kind}","title":{{"ru":"x"}},"author":"a","version":"1","files":[{{"path":"p.zip","name":"x.zip","size":1,"sha256":"","archive":true}}]}}]}}"#)
+            format!(r#"{{"format":1,"entries":[{{"id":"x","kind":"{kind}","title":{{"ru":"x"}},"author":"a","version":"1","files":[{{"path":"p.zip","name":"x.zip","size":1,"sha256":"00000000000000000000000000000000000000000000000000000000000000ab","archive":true}}]}}]}}"#)
         };
         assert!(Catalog::parse(file("mod").as_bytes()).is_ok());
         assert!(Catalog::parse(file("map").as_bytes()).is_err());
