@@ -18,7 +18,7 @@ use razdor::trf;
 use razdor::rules::clock::duration_label;
 use razdor::rules::game::{Event, Foe, Game};
 use razdor::rules::idle;
-use razdor::rules::magic::{CastOutcome, CastTarget};
+use razdor::rules::magic::{CastOutcome, CastTarget, SpellLine};
 use razdor::rules::map::{object_class, Decoration, Grid, Tile, TileMap, ROAD};
 use razdor::rules::world::{Army, Location, LocationKind, Owner, Troop};
 
@@ -3073,13 +3073,9 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     };
     let now = game.clock.total_minutes() as u64;
     let notes: Vec<(String, Color)> = game
-        .active_spells()
+        .spell_list()
         .iter()
-        .filter_map(|e| {
-            let name = &game.spell(e.spell)?.name;
-            Some(format!("{name} ({})", duration_label(e.until.saturating_sub(now) as f64)))
-        })
-        .map(|l| (l, MANA))
+        .filter_map(|l| Some((spell_line_label(&game.spell(l.spell)?.name, l, now), MANA)))
         .collect();
     // Inside the safe area (zeros on desktop): the corner's and the cutout's margins.
     let (inset_left, inset_top, _, _) = razdor::platform::safe_insets();
@@ -3388,9 +3384,37 @@ fn draw_debug(game: &Game, cam: &Camera) {
     }
 }
 
+/// A line of the top-left spell list: the spell's name and its time left, "∞" when endless,
+/// and how many squad units it is on when that is not the whole squad: "Name (∞, 1 из 12)".
+fn spell_line_label(name: &str, l: &SpellLine, now: u64) -> String {
+    let time = if l.endless { "∞".to_string() } else { duration_label(l.until.saturating_sub(now) as f64) };
+    if l.units < l.of {
+        format!("{name} ({time}, {})", trf!("{n} of {total}", n = l.units, total = l.of))
+    } else {
+        format!("{name} ({time})")
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use razdor::rules::clock::duration_label;
     use razdor::rules::content::HeroClass;
+    use razdor::rules::magic::SpellLine;
+    use razdor::trf;
+
+    #[test]
+    fn the_spell_list_shows_endless_as_infinity_and_the_units_under_a_part_of_the_squad() {
+        let now = 1_000;
+        let timed = SpellLine { spell: 2, until: now + 600, endless: false, units: 12, of: 12 };
+        assert_eq!(spell_line_label("Bless", &timed, now), format!("Bless ({})", duration_label(600.0)));
+        let part = SpellLine { units: 1, ..timed };
+        assert_eq!(spell_line_label("Bless", &part, now), format!("Bless ({}, {})", duration_label(600.0), trf!("{n} of {total}", n = 1, total = 12)));
+        let endless = SpellLine { until: razdor::rules::world::MAP_ARMY_SPELL_END, endless: true, units: 1, ..timed };
+        let line = spell_line_label("Bless", &endless, now);
+        assert!(line.starts_with("Bless (∞, "), "{line}");
+        assert!(line.ends_with(&format!("{})", trf!("{n} of {total}", n = 1, total = 12))), "{line}");
+        assert_eq!(spell_line_label("Bless", &SpellLine { endless: true, ..timed }, now), "Bless (∞)");
+    }
 
     /// A turn of a phone (Razdor's extra): a pointer left in the new screen's edge zone scrolls
     /// the map, the centre the turn puts it at does not (`input::cursor_after_resize`).

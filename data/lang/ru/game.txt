@@ -272,6 +272,7 @@ less than an hour = меньше часа
 {h} h = {h} час
 {d} d = {d} дн.
 {d} d {h} h = {d} дн. {h} ч
+{n} of {total} = {n} из {total}
 
 # Save errors
 cannot read or write the save: {e} = не удаётся прочитать или записать сохранение: {e}
