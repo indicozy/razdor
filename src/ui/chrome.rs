@@ -1255,6 +1255,7 @@ pub fn begin_frame() {
 pub fn note_window(r: Rect) {
     let on = super::pan::on_screen(r);
     DRAWN_WINDOWS.with(|w| w.borrow_mut().push(on));
+    super::widgets::note_finger_window(on);
 }
 
 /// The windows and popups recorded since the last call (screen coordinates), cleared.

@@ -16,8 +16,8 @@ is too small, under `--body` (14) small.
 
 Touch targets: a target's size is its hit rectangle, clipped to the screen, in dp (px / dp) and mm
 (dp * 25.4 / 160). Under `--too-small` (40 dp on its smaller side) it is too small, under `--small`
-(48 dp) small. Two targets closer than `--gap` dp (neither inside the other, and their projections
-overlapping on one axis, or overlapping each other) are crowded.
+(48 dp) small. Two targets are crowded (neither inside the other) when their hit areas overlap, or when
+they are closer than `--gap` dp and one of the two is small (its shorter side under `--small`).
 
 `run` writes OUTDIR/probe/<case>.tsv, OUTDIR/touch/<case>.tsv, OUTDIR/shots, OUTDIR/marked/<case>.png
 (every target outlined cyan, too small red, small orange, crowded pairs joined by magenta, the texts
@@ -189,11 +189,13 @@ def contains(a, b):
     return a["x"] <= b["x"] and a["y"] <= b["y"] and a["x"] + a["w"] >= b["x"] + b["w"] and a["y"] + a["h"] >= b["y"] + b["h"]
 
 
-def crowded_pairs(targets, dp, gap_limit):
-    """The pairs of targets less than `gap_limit` dp apart, nearest first: each as a dict with
-    the two targets and the gap in dp. Neither may contain the other. Partly overlapping pairs
-    have gap 0; pairs whose projections overlap on one axis have the distance on the other; pairs
-    apart on both axes are not compared."""
+def crowded_pairs(targets, dp, gap_limit, small):
+    """The crowded pairs of targets, nearest first: each as a dict with the two targets and the
+    gap in dp. Neither may contain the other. A pair is crowded when its hit areas partly overlap
+    (gap 0, always), or when their gap is under `gap_limit` dp and at least one of the two has its
+    shorter side under `small` dp (a small target next to another is the risk; two big ones with
+    a small gap are the layout's own). Partly overlapping pairs have gap 0; pairs whose projections
+    overlap on one axis have the distance on the other; pairs apart on both axes are not compared."""
     pairs = []
     for i, a in enumerate(targets):
         for b in targets[i + 1:]:
@@ -209,7 +211,8 @@ def crowded_pairs(targets, dp, gap_limit):
                 gap = max(b["x"] - (a["x"] + a["w"]), a["x"] - (b["x"] + b["w"]))
             else:
                 continue
-            if gap / dp < gap_limit:
+            short = min(min(a["w"], a["h"]), min(b["w"], b["h"])) / dp
+            if gap == 0 or (gap / dp < gap_limit and short < small):
                 pairs.append({"a": a, "b": b, "gap": gap / dp})
     pairs.sort(key=lambda p: p["gap"])
     return pairs
@@ -234,7 +237,7 @@ def analyse(case, out, limits):
         t["id"] = f"{t['place']}|{t['label']}"
         t["x_dp"] = t["x"] / dp
         t["y_dp"] = t["y"] / dp
-    crowded = crowded_pairs(targets, dp, limits["gap"])
+    crowded = crowded_pairs(targets, dp, limits["gap"], limits["small"])
     return texts, targets, crowded
 
 
@@ -372,7 +375,7 @@ def cmd_run(args):
         f"Run {datetime.datetime.now().isoformat(timespec='seconds')}, {len(results)} cases in {elapsed:.0f} s. "
         f"Texts: too small under {args.floor:g} sp, small under {args.body:g} sp (sp = capital height / dp / 0.7). "
         f"Touch targets: too small under {args.too_small:g} dp on the smaller side, small under {args.small:g} dp; "
-        f"crowded when closer than {args.gap:g} dp. Baseline: `{BASELINE}`.",
+        f"crowded when the areas overlap, or closer than {args.gap:g} dp with a small target. Baseline: `{BASELINE}`.",
         "",
         "| case | status | texts | too small text | small text | smallest sp | targets | too small targets | small targets | crowded | new |",
         "|---|---|---|---|---|---|---|---|---|---|---|",

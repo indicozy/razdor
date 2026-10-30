@@ -325,10 +325,198 @@ pub fn input_blocked() -> bool {
     BLOCKED.with(|b| b.get())
 }
 
-pub fn mouse_in(x: f32, y: f32, w: f32, h: f32) -> bool {
+local! {
+    /// The rectangles the pointer is tested against this frame (`mouse_in`, `button_state`),
+    /// and last frame's, which the phone's finger areas keep clear (`finger_hit`). Phones only.
+    static FINGER_NOW: RefCell<Vec<Rect>> = const { RefCell::new(Vec::new()) };
+    static FINGER_LAST: RefCell<Vec<Rect>> = const { RefCell::new(Vec::new()) };
+    /// The windows and popups drawn this frame (`chrome::note_window`), and last frame's: a
+    /// finger area never grows out of the smallest one that holds its target. Phones only.
+    static FINGER_WINDOWS_NOW: RefCell<Vec<Rect>> = const { RefCell::new(Vec::new()) };
+    static FINGER_WINDOWS_LAST: RefCell<Vec<Rect>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Android's minimum touch target, in dp: a phone's finger areas grow to this size where there
+/// is room (`finger_hit_at`).
+pub const FINGER_DP: f32 = 48.0;
+
+/// Notes a rectangle as a pointer obstacle for the next frame's finger areas. Only on a phone
+/// (`display::dp_px`); nothing is kept on the desktop.
+fn note_finger_obstacle(r: Rect) {
+    if super::display::dp_px().is_some() {
+        FINGER_NOW.with(|n| n.borrow_mut().push(r));
+    }
+}
+
+/// Notes a window or popup (its on-screen rectangle, `chrome::note_window`) for the next frame's
+/// finger areas. Only on a phone, as [`note_finger_obstacle`].
+pub fn note_finger_window(on: Rect) {
+    if super::display::dp_px().is_some() {
+        FINGER_WINDOWS_NOW.with(|n| n.borrow_mut().push(on));
+    }
+}
+
+/// Starts a frame's finger obstacles and windows: this frame's become last frame's, and this
+/// frame starts empty. `input::begin_frame` calls it once per frame, before anything is tested.
+pub fn finger_frame() {
+    let now = FINGER_NOW.with(|n| std::mem::take(&mut *n.borrow_mut()));
+    FINGER_LAST.with(|l| *l.borrow_mut() = now);
+    let windows = FINGER_WINDOWS_NOW.with(|n| std::mem::take(&mut *n.borrow_mut()));
+    FINGER_WINDOWS_LAST.with(|l| *l.borrow_mut() = windows);
+}
+
+/// The room a finger area of `r` may grow into: the smallest of `windows` that fully holds `r`
+/// (the window it is drawn in, so a button at a window's edge stays in that window), or `screen`
+/// when no window holds it. Pure; see [`finger_hit`].
+pub fn finger_room(r: Rect, windows: &[Rect], screen: Rect) -> Rect {
+    let holds = |w: &Rect| w.x <= r.x && w.y <= r.y && w.right() >= r.right() && w.bottom() >= r.bottom();
+    windows
+        .iter()
+        .filter(|w| holds(w))
+        .min_by(|a, b| (a.w * a.h).total_cmp(&(b.w * b.h)))
+        .copied()
+        .unwrap_or(screen)
+}
+
+/// The finger-sized hit area of the target `r` on a phone, computed by [`finger_hit_at`] from
+/// last frame's obstacles, with the room of [`finger_room`]: the smallest window drawn last frame
+/// that holds `r`, else the screen. The desktop gets `r` back at once, at no cost.
+pub fn finger_hit(r: Rect) -> Rect {
+    let dp = super::display::dp_px();
+    if dp.is_none() {
+        return r;
+    }
+    let screen = Rect::new(0.0, 0.0, screen_width(), screen_height());
+    FINGER_WINDOWS_LAST.with(|w| {
+        let room = finger_room(r, &w.borrow(), screen);
+        FINGER_LAST.with(|l| finger_hit_at(r, dp, room, super::pan::bar_top(), &l.borrow()))
+    })
+}
+
+/// Grows a target's hit area to a finger's size on a phone, as a pure function of its inputs.
+///
+/// `r` is the target as drawn. `dp` is the phone's pixels per dp; `None` (the desktop) returns
+/// `r` unchanged, as does a target with no area. `screen` is the screen, `bar_top` the top of
+/// the bottom bar, and `others` the rectangles the pointer is tested against (the obstacles).
+///
+/// Each axis grows to [`FINGER_DP`] dp (`want`), centred on `r`, as far as there is room:
+/// - the screen's edges are free room;
+/// - the bottom bar's top: a target on the bar (its top at or under `bar_top`) does not grow
+///   above it, a target above the bar does not grow into it, and a target that straddles it
+///   has no bar limit;
+/// - an obstacle that overlaps `r` on one axis (its projections meet on the other axis) and is
+///   beside it on the first limits the growth to the midline between the two, so two areas
+///   never share room. An obstacle that contains `r`, is inside it or overlaps it (the target
+///   itself, a container, or something drawn in it) is skipped: it has its own pointer test;
+/// - an obstacle apart from `r` on both axes (diagonal) is handled after the growth: if the
+///   grown area still overlaps it, the axis on which the two are farther apart (the bigger gap)
+///   is cut at the midline between them.
+///
+/// Room blocked on one side goes to the other side, so a target can grow to `want` on an axis
+/// with room on one side only. The result is never smaller than `r` and never leaves the
+/// screen, unless `r` itself does. Razdor's phone choice, not the original's: the drawing stays
+/// `r`.
+pub fn finger_hit_at(r: Rect, dp: Option<f32>, screen: Rect, bar_top: f32, others: &[Rect]) -> Rect {
+    let dp = match dp {
+        Some(dp) if r.w > 0.0 && r.h > 0.0 => dp,
+        _ => return r,
+    };
+    let want = FINGER_DP * dp;
+    let (mut x_lo, mut x_hi) = (screen.x, screen.x + screen.w);
+    let (mut y_lo, mut y_hi) = (screen.y, screen.y + screen.h);
+    if r.y >= bar_top - 0.5 {
+        y_lo = y_lo.max(bar_top);
+    } else if r.y + r.h <= bar_top + 0.5 {
+        y_hi = y_hi.min(bar_top);
+    }
+    let mut diagonal = Vec::new();
+    for &o in others {
+        if !(o.w > 0.0 && o.h > 0.0) {
+            continue;
+        }
+        let x_over = o.x < r.right() && r.x < o.right();
+        let y_over = o.y < r.bottom() && r.y < o.bottom();
+        if x_over && y_over {
+            // The target itself, a container or something inside it: not a neighbour.
+            continue;
+        }
+        if x_over {
+            if o.bottom() <= r.y {
+                y_lo = y_lo.max((o.bottom() + r.y) / 2.0);
+            }
+            if o.y >= r.bottom() {
+                y_hi = y_hi.min((r.bottom() + o.y) / 2.0);
+            }
+        } else if y_over {
+            if o.right() <= r.x {
+                x_lo = x_lo.max((o.right() + r.x) / 2.0);
+            }
+            if o.x >= r.right() {
+                x_hi = x_hi.min((r.right() + o.x) / 2.0);
+            }
+        } else {
+            diagonal.push(o);
+        }
+    }
+    let (x, w) = grow_axis(r.x, r.w, x_lo, x_hi, want);
+    let (y, h) = grow_axis(r.y, r.h, y_lo, y_hi, want);
+    let mut hit = Rect::new(x, y, w, h);
+    for o in diagonal {
+        let overlaps = o.x < hit.right() && hit.x < o.right() && o.y < hit.bottom() && hit.y < o.bottom();
+        if !overlaps {
+            continue;
+        }
+        let gap_x = if o.x >= r.right() { o.x - r.right() } else { r.x - o.right() };
+        let gap_y = if o.y >= r.bottom() { o.y - r.bottom() } else { r.y - o.bottom() };
+        if gap_x >= gap_y {
+            // Cut on x: the grown edge facing `o` stops at the midline, never inside `r`.
+            let (left, right) = (hit.x, hit.right());
+            if o.x >= r.right() {
+                hit.w = (r.right() + o.x) / 2.0 - left;
+            } else {
+                let new_left = (o.right() + r.x) / 2.0;
+                hit.x = new_left;
+                hit.w = right - new_left;
+            }
+        } else {
+            // Cut on y, the same way.
+            let (top, bottom) = (hit.y, hit.bottom());
+            if o.y >= r.bottom() {
+                hit.h = (r.bottom() + o.y) / 2.0 - top;
+            } else {
+                let new_top = (o.bottom() + r.y) / 2.0;
+                hit.y = new_top;
+                hit.h = bottom - new_top;
+            }
+        }
+    }
+    hit
+}
+
+/// One axis of [`finger_hit_at`]: the start and length of the span `start..start + len` grown
+/// to `want` within the free interval `lo..hi`, centred on the span. The result is never smaller
+/// than the span and stays inside `lo..hi` unless the span does not.
+fn grow_axis(start: f32, len: f32, lo: f32, hi: f32, want: f32) -> (f32, f32) {
+    let lo = lo.min(start);
+    let hi = hi.max(start + len);
+    let grown = len.max(want.min(hi - lo));
+    let at = (start + len / 2.0 - grown / 2.0).max(lo).min(hi - grown);
+    (at, grown)
+}
+
+/// Whether the pointer may act on the rectangle at (`x`, `y`) of size `w` × `h`: it is over it,
+/// no dialog is open, and no window covers it.
+fn pointer_in(x: f32, y: f32, w: f32, h: f32) -> bool {
     let (mx, my) = pointer();
     // A window's controls take no pointer over the bottom bar (`pan::cover_bar`).
     !input_blocked() && !super::pan::covered((mx, my)) && mx >= x && mx < x + w && my >= y && my < y + h
+}
+
+/// Whether the pointer may act on the rectangle (`pointer_in`). The rectangle is also a
+/// pointer obstacle for the phone's finger areas of the next frame (`finger_hit`).
+pub fn mouse_in(x: f32, y: f32, w: f32, h: f32) -> bool {
+    note_finger_obstacle(Rect::new(x, y, w, h));
+    pointer_in(x, y, w, h)
 }
 
 pub fn clicked() -> bool {
@@ -337,10 +525,15 @@ pub fn clicked() -> bool {
 
 /// Tracks a button from mouse-down to mouse-up. Returns its hover, held-down visual state,
 /// and activation edge; dragging out cancels activation and dragging back in restores it.
+/// The pointer is tested against the hit area, not the drawn `r`: on a phone that is the
+/// finger-sized area of [`finger_hit`], where there is room. The press is captured on `r`.
+/// A phone choice of Razdor, not the original's.
 #[track_caller]
 pub fn button_state(r: Rect, enabled: bool) -> (bool, bool, bool) {
-    super::touch_probe::record("button", r, enabled);
-    let hover = enabled && !input_swallowed() && mouse_in(r.x, r.y, r.w, r.h);
+    note_finger_obstacle(r);
+    let hit = finger_hit(r);
+    super::touch_probe::record("button", hit, enabled);
+    let hover = enabled && !input_swallowed() && pointer_in(hit.x, hit.y, hit.w, hit.h);
     let capture = [r.x.to_bits(), r.y.to_bits(), r.w.to_bits(), r.h.to_bits()];
     let (next, down, pressed) = capture_step(
         BUTTON_CAPTURE.with(|c| c.get()),
@@ -2538,5 +2731,140 @@ mod outside_tap_tests {
         assert!(!outside_tap(at(50.0, 50.0), at(90.0, 50.0), &windows, bar, slop), "a drag");
         // A tap inside a second recorded rect (a popup over the window) does not.
         assert!(!outside_tap(at(640.0, 130.0), at(640.0, 130.0), &windows, bar, slop), "inside the popup");
+    }
+}
+
+#[cfg(test)]
+mod finger_tests {
+    use super::*;
+
+    /// The phone of the checks: 2.75 px per dp, a 1080 × 2400 screen, the bar's top at 2300.
+    const DP: Option<f32> = Some(2.75);
+    const BAR: f32 = 2300.0;
+    const EPS: f32 = 1e-3;
+
+    fn screen() -> Rect {
+        Rect::new(0.0, 0.0, 1080.0, 2400.0)
+    }
+
+    fn hit(r: Rect, others: &[Rect]) -> Rect {
+        finger_hit_at(r, DP, screen(), BAR, others)
+    }
+
+    fn same(a: Rect, b: Rect) -> bool {
+        (a.x - b.x).abs() < EPS && (a.y - b.y).abs() < EPS && (a.w - b.w).abs() < EPS && (a.h - b.h).abs() < EPS
+    }
+
+    fn overlaps(a: Rect, b: Rect) -> bool {
+        a.x < b.right() && b.x < a.right() && a.y < b.bottom() && b.y < a.bottom()
+    }
+
+    fn contains(outer: Rect, inner: Rect) -> bool {
+        outer.x <= inner.x + EPS && outer.y <= inner.y + EPS && outer.right() + EPS >= inner.right() && outer.bottom() + EPS >= inner.bottom()
+    }
+
+    #[test]
+    fn desktop_gets_the_drawn_rect() {
+        let r = Rect::new(500.0, 1000.0, 50.0, 20.0);
+        assert!(same(finger_hit_at(r, None, screen(), BAR, &[]), r));
+    }
+
+    #[test]
+    fn a_lone_small_target_grows_to_48_dp_around_its_centre() {
+        let r = Rect::new(500.0, 1000.0, 50.0, 20.0);
+        let g = hit(r, &[]);
+        assert!((g.w - 132.0).abs() < EPS && (g.h - 132.0).abs() < EPS, "{g:?}");
+        assert!((g.x + g.w / 2.0 - (r.x + r.w / 2.0)).abs() < EPS, "{g:?}");
+        assert!((g.y + g.h / 2.0 - (r.y + r.h / 2.0)).abs() < EPS, "{g:?}");
+    }
+
+    #[test]
+    fn a_target_at_the_screens_top_grows_down_from_zero() {
+        let g = hit(Rect::new(500.0, 0.0, 30.0, 30.0), &[]);
+        assert!(g.y.abs() < EPS, "{g:?}");
+        assert!((g.h - 132.0).abs() < EPS, "{g:?}");
+    }
+
+    #[test]
+    fn neighbours_share_the_midline_and_each_keeps_its_free_side() {
+        let a = Rect::new(300.0, 1000.0, 60.0, 30.0);
+        let b = Rect::new(370.0, 1000.0, 60.0, 30.0);
+        let ga = hit(a, &[b]);
+        let gb = hit(b, &[a]);
+        assert!(ga.right() <= gb.x + EPS, "{ga:?} {gb:?}");
+        assert!(!overlaps(ga, gb), "{ga:?} {gb:?}");
+        assert!((ga.w - 132.0).abs() < EPS, "{ga:?}");
+        assert!((gb.w - 132.0).abs() < EPS, "{gb:?}");
+        assert!((ga.right() - 365.0).abs() < EPS, "a stops at the midline: {ga:?}");
+        assert!((gb.x - 365.0).abs() < EPS, "b starts at the midline: {gb:?}");
+    }
+
+    #[test]
+    fn a_target_above_the_bar_never_crosses_it() {
+        let g = hit(Rect::new(500.0, 2200.0, 50.0, 50.0), &[]);
+        assert!(g.bottom() <= BAR + EPS, "{g:?}");
+        assert!((g.h - 132.0).abs() < EPS, "{g:?}");
+    }
+
+    #[test]
+    fn a_target_on_the_bar_never_goes_above_it() {
+        let g = hit(Rect::new(500.0, 2310.0, 50.0, 20.0), &[]);
+        assert!(g.y >= BAR - EPS, "{g:?}");
+        assert!(g.h >= 20.0 - EPS, "{g:?}");
+    }
+
+    #[test]
+    fn a_container_or_an_overlapping_rect_is_no_obstacle() {
+        let r = Rect::new(500.0, 1000.0, 50.0, 20.0);
+        let plain = hit(r, &[]);
+        let container = Rect::new(400.0, 950.0, 300.0, 200.0);
+        let partly = Rect::new(530.0, 1010.0, 100.0, 100.0);
+        assert!(same(hit(r, &[container]), plain));
+        assert!(same(hit(r, &[partly]), plain));
+        assert!(same(hit(r, &[r]), plain));
+    }
+
+    #[test]
+    fn a_target_already_big_enough_is_unchanged() {
+        let r = Rect::new(400.0, 800.0, 200.0, 200.0);
+        assert!(same(hit(r, &[]), r));
+    }
+
+    #[test]
+    fn a_diagonal_neighbour_is_not_entered() {
+        let r = Rect::new(300.0, 1000.0, 50.0, 20.0);
+        let o = Rect::new(360.0, 1040.0, 50.0, 20.0);
+        let g = hit(r, &[o]);
+        assert!(!overlaps(g, o), "{g:?}");
+        assert!(contains(g, r), "{g:?}");
+    }
+
+    #[test]
+    fn the_room_is_the_smallest_window_that_holds_the_target_else_the_screen() {
+        let big = Rect::new(100.0, 100.0, 800.0, 800.0);
+        let small = Rect::new(300.0, 300.0, 200.0, 200.0);
+        let windows = [big, small];
+        let screen = screen();
+        assert!(same(finger_room(Rect::new(350.0, 350.0, 20.0, 20.0), &windows, screen), small));
+        assert!(same(finger_room(Rect::new(120.0, 120.0, 20.0, 20.0), &windows, screen), big));
+        // Sticking out of the small window but inside the big one: the big one.
+        assert!(same(finger_room(Rect::new(480.0, 350.0, 40.0, 20.0), &windows, screen), big));
+        // Held by no window: the screen.
+        assert!(same(finger_room(Rect::new(10.0, 10.0, 20.0, 20.0), &windows, screen), screen));
+        assert!(same(finger_room(Rect::new(10.0, 10.0, 20.0, 20.0), &[], screen), screen));
+    }
+
+    #[test]
+    fn the_result_is_never_smaller_than_the_target_nor_off_the_screen() {
+        let others = [Rect::new(340.0, 1100.0, 40.0, 40.0), Rect::new(150.0, 900.0, 30.0, 300.0)];
+        // Targets wholly on the screen: a target that sticks out keeps its own edge (the rule).
+        for x in (0..=1050).step_by(97) {
+            for y in (0..=2380).step_by(151) {
+                let r = Rect::new(x as f32, y as f32, 30.0, 20.0);
+                let g = hit(r, &others);
+                assert!(contains(g, r), "{g:?} must contain {r:?}");
+                assert!(g.x >= -EPS && g.y >= -EPS && g.right() <= 1080.0 + EPS && g.bottom() <= 2400.0 + EPS, "{g:?}");
+            }
+        }
     }
 }
