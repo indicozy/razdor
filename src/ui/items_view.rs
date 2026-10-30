@@ -1508,18 +1508,30 @@ fn hero_resources(gold: i32, mana: i32, income: i32, wages: i32) -> [String; 4] 
     ]
 }
 
+/// Share of the message windows' text size (`Face::Subtitle`) that the phone's diary body takes
+/// in the hero window. A Razdor choice (the owner's decision, 2026-10-30): at the message size
+/// the body was larger than the rest of the window.
+const DIARY_PHONE_BODY: f32 = 0.8;
+
 /// The diary entry's line size (`QuestDescript`, its body text). The original draws the body in
 /// its small SanSerif (`Face::Body`) and the desktop keeps that. A Razdor choice for phones (the
-/// players' request: the phone's diary text is too small): there the body is as tall as the
-/// message windows' Benguiat text (`Face::Subtitle`, `dialog::event_layout`), so it grows with
-/// «Размер текста» like they do.
+/// players' request: the phone's diary text is too small): there the body is
+/// `DIARY_PHONE_BODY` of the message windows' Benguiat text (`Face::Subtitle`,
+/// `dialog::event_layout`), so it grows with «Размер текста» like they do.
 fn diary_body_size(phone: bool, ts: f32) -> f32 {
     use super::dt_font::{sheet_size, Face};
     if phone {
-        sheet_size(Face::Subtitle, ts)
+        DIARY_PHONE_BODY * sheet_size(Face::Subtitle, ts)
     } else {
         sheet_size(Face::Body, ts)
     }
+}
+
+/// The phone's full-screen diary reader («Развернуть») keeps the message windows' size
+/// (`Face::Subtitle`), not the smaller hero-window body (`diary_body_size`).
+fn diary_reader_body_size(ts: f32) -> f32 {
+    use super::dt_font::{sheet_size, Face};
+    sheet_size(Face::Subtitle, ts)
 }
 
 /// The diary entry's title size: on a phone it is as large as the quest list's titles (`list_t`),
@@ -1989,7 +2001,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
         set_input_blocked(below_blocked);
         if view.reader {
             let closed = match rows.get(view.pick) {
-                Some(row) => diary_reader(row, view.tab, entry_title, body, &mut view.reader_scroll),
+                Some(row) => diary_reader(row, view.tab, entry_title, diary_reader_body_size(ts), &mut view.reader_scroll),
                 None => true,
             };
             if closed {
@@ -2026,7 +2038,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
 
 #[cfg(test)]
 mod tests {
-    use super::{card_line, diary_body_size, diary_column, diary_title_size, held_card_lit, held_hint_ink, class_wage, hero_resources, panel_slots, pointed_line, promo_ease, promo_look, promo_ms, reset_pack_view, set_pack_view, ArmySel, Content, Controls, GridPress, ItemGroup, PackSort, GROUP, SORT, UnitId};
+    use super::{card_line, diary_body_size, diary_column, diary_reader_body_size, diary_title_size, held_card_lit, held_hint_ink, class_wage, hero_resources, panel_slots, pointed_line, promo_ease, promo_look, promo_ms, reset_pack_view, set_pack_view, ArmySel, Content, Controls, GridPress, ItemGroup, PackSort, GROUP, SORT, UnitId};
     use macroquad::prelude::Rect;
 
     fn column_boxes() -> (Rect, Rect, Rect) {
@@ -2062,13 +2074,16 @@ mod tests {
     }
 
     #[test]
-    fn a_phone_s_diary_body_is_as_tall_as_the_message_text() {
-        // Razdor's phone choice: the diary body takes the message windows' Subtitle size on a
-        // phone; the desktop keeps the original's SanSerif (Face::Body) size.
+    fn a_phone_s_diary_body_is_four_fifths_of_the_message_text() {
+        // Razdor's phone choice (the owner's decision, 2026-10-30): the hero window's diary body
+        // is 80% of the message windows' Subtitle size on a phone; the reader («Развернуть»)
+        // keeps the full Subtitle size; the desktop keeps the original's SanSerif (Face::Body).
         use super::super::dt_font::{sheet_size, Face};
         let t = 3.0;
-        assert_eq!(diary_body_size(true, t), sheet_size(Face::Subtitle, t));
+        let message = sheet_size(Face::Subtitle, t);
+        assert!((diary_body_size(true, t) - 0.8 * message).abs() < 1e-3);
         assert_eq!(diary_body_size(false, t), sheet_size(Face::Body, t));
+        assert_eq!(diary_reader_body_size(t), message);
     }
 
     #[test]
