@@ -422,6 +422,13 @@ fn promotable_after(level: i32, has_next: bool) -> bool {
     level >= 2 && has_next
 }
 
+/// The card's «+» after the award: promotable, unless the player switched the sign off at
+/// that very level («Не напоминать», `Unit::sign_off`); a level gained in this battle shows
+/// it again.
+fn sign_after(level: i32, has_next: bool, sign_off_level: i32) -> bool {
+    promotable_after(level, has_next) && !(sign_off_level != 0 && sign_off_level == level)
+}
+
 fn all_cells(battle: &Battle) -> Vec<(Team, Slot)> {
     [Team::Enemy, Team::Player].into_iter().flat_map(|t| battle.formation.slots().map(move |s| (t, s))).collect()
 }
@@ -1297,11 +1304,13 @@ impl BattleView {
     }
 
     /// The experience card's `Sign-Upgrade` (4b0684): after the award the unit is past its
-    /// first level (the original's L > 0) and its type has a next one (492dd4).
+    /// first level (the original's L > 0) and its type has a next one (492dd4). The «Не
+    /// напоминать» switch hides it too (Razdor's own).
     fn can_promote_after(&self, a: &XpAward) -> bool {
         let f = &self.battle.fighters[a.fighter];
         let c = self.battle.content();
-        promotable_after(f.level + self.levels_gained(a), c.unit(f.unit).upgrades.iter().any(|u| u.target.is_some()))
+        let level = f.level + self.levels_gained(a);
+        sign_after(level, c.unit(f.unit).upgrades.iter().any(|u| u.target.is_some()), f.sign_off_level)
     }
 
     /// Fighter `id` as the screen shows it: as it was until the action's effect lands on it
@@ -2078,5 +2087,14 @@ mod tests {
         assert_eq!(move_secs(96.0), 0.067, "a card's slide to the next cell");
         assert_eq!(move_secs(400.0), 0.2, "capped at 200 ms");
         assert_eq!(slide_sprite(ActionKind::Shot, Team::Enemy), "army-3");
+    }
+
+    #[test]
+    fn xp_card_sign_respects_dont_remind() {
+        assert!(sign_after(3, true, 0));
+        assert!(!sign_after(3, true, 3), "the switched-off level hides the sign");
+        assert!(sign_after(4, true, 3), "a level gained in this battle shows it again");
+        assert!(!sign_after(1, true, 0), "first level: no sign");
+        assert!(!sign_after(3, false, 0), "no next type: no sign");
     }
 }

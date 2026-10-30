@@ -19,6 +19,7 @@ impl Clone for Fighter {
             named: 0,
             level: 0,
             xp: 0,
+            sign_off_level: 0,
             base: self.base.clone(),
             stats: self.stats.clone(),
             at_start: self.at_start.clone(),
@@ -62,6 +63,7 @@ impl Clone for Fighter {
             named,
             level,
             xp,
+            sign_off_level,
             base,
             stats,
             at_start,
@@ -99,6 +101,7 @@ impl Clone for Fighter {
         self.named = *named;
         self.level = *level;
         self.xp = *xp;
+        self.sign_off_level = *sign_off_level;
         self.base.clone_from(base);
         self.stats.clone_from(stats);
         self.at_start.clone_from(at_start);
