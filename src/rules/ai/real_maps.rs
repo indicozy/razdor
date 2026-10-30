@@ -314,3 +314,138 @@ fn community_maps_smoke() {
     }
     assert!(played > 0, "RAZDOR_COMMUNITY_DIR {} has no <entry>/install with a map to play", root.display());
 }
+
+/// The temp hub of [`hub_real_catalog`], removed when the test ends (also when it fails).
+struct TempHub(std::path::PathBuf);
+
+impl Drop for TempHub {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// The bytes under `dir` (recursively; hard links count once per name, as the disk shows them
+/// the same way for a copy).
+fn tree_bytes(dir: &std::path::Path) -> u64 {
+    let Ok(read) = std::fs::read_dir(dir) else { return 0 };
+    read.filter_map(|e| e.ok()).map(|e| match e.metadata() {
+        Ok(m) if m.is_dir() => tree_bytes(&e.path()),
+        Ok(m) => m.len(),
+        Err(_) => 0,
+    }).sum()
+}
+
+/// Installs and plays a catalog's mod: its requirements and it install through the normal path,
+/// its folder is built over the base, the result loads as an install, and its first map plays 3
+/// days. Returns a summary line, or why not.
+fn install_mod_and_play(hub: &crate::hub::Hub, catalog: &crate::hub::Catalog, base: &std::path::Path, id: &str) -> Result<String, String> {
+    hub.install(catalog, id, crate::i18n::Lang::Ru)?;
+    let game = crate::hub::prepare_mod(&hub.local, base, id)?;
+    let dt = DtInstall::load(&game).map_err(|e| format!("the folder does not load as an install: {e}"))?;
+    let c = Arc::new(Content::from_dt(&dt));
+    let first = dt.maps.first().ok_or("the install has no map to play")?;
+    let s = first.load().map_err(|e| format!("{}: does not load: {e}", first.name))?;
+    let run = std::panic::catch_unwind(AssertUnwindSafe(|| play_days(&c, &s, 3))).map_err(|p| format!("{}: panic: {}", first.name, panic_text(&*p)))?;
+    if run.stalled {
+        return Err(format!("{}: stalled (softlock) over 3 days", first.name));
+    }
+    Ok(format!("{} maps, {} played 3 days, AI battles {}, {:.2} s", dt.maps.len(), first.name, run.ai.battles, run.secs))
+}
+
+/// The community release's catalog, end to end (env-gated: passes without
+/// `RAZDOR_HUB_CATALOG_DIR`, which names a catalog folder: `index.json` and the flat files it
+/// names, as the release's assets). `RAZDOR_DT_DIR` names the base install. In a temp hub
+/// (`RAZDOR_HUB_TEST_DIR`, else the system temp folder; removed at the end):
+///
+/// 1. the catalog parses (its counts are printed);
+/// 2. every mod installs through the normal path (with its requirements), its folder is built
+///    over the base (`prepare_mod`), the result loads as an install, and its first map plays 3
+///    days;
+/// 3. every map and campaign installs (with its requirements); every installed map loads as a
+///    scenario and its SHA-256 is still the catalog's (a name another entry took is caught); each
+///    campaign chapter's next-map name is an installed file.
+///
+/// Prints one line per entry (`ok` or `FAIL reason`), then fails listing every failure. Run it with
+/// `RAZDOR_HUB_CATALOG_DIR=<catalog folder> RAZDOR_DT_DIR=<base install> cargo test --release
+/// --lib hub_real_catalog -- --nocapture`.
+#[test]
+fn hub_real_catalog() {
+    let Some(catalog_dir) = std::env::var_os("RAZDOR_HUB_CATALOG_DIR") else { return };
+    let catalog_dir = std::path::PathBuf::from(catalog_dir);
+    let base = std::path::PathBuf::from(std::env::var_os(crate::dt::install::ENV_VAR).expect("RAZDOR_DT_DIR must name the base install"));
+    let t0 = Instant::now();
+    let scratch = std::env::var_os("RAZDOR_HUB_TEST_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    let temp = TempHub(scratch.join(format!("razdor-hub-real-{}", std::process::id())));
+    let hub = crate::hub::Hub { source: crate::hub::Source::Dir(catalog_dir.clone()), local: temp.0.clone() };
+    let catalog = hub.catalog().unwrap_or_else(|e| panic!("the catalog does not parse: {e}"));
+    let count = |k| catalog.entries.iter().filter(|e| e.kind == k).count();
+    let (mods, campaigns, maps) = (count(crate::hub::Kind::Mod), count(crate::hub::Kind::Campaign), count(crate::hub::Kind::Map));
+    println!("catalog: {} entries parse: {mods} mods, {campaigns} campaigns, {maps} maps", catalog.entries.len());
+    let mut failures: Vec<String> = Vec::new();
+    let fail = |what: String, why: String, failures: &mut Vec<String>| {
+        println!("{what}: FAIL {why}");
+        failures.push(format!("{what}: {why}"));
+    };
+
+    // 2. The mods, each played.
+    for e in catalog.entries.iter().filter(|e| e.kind == crate::hub::Kind::Mod) {
+        let what = format!("mod {}", e.id);
+        match std::panic::catch_unwind(AssertUnwindSafe(|| install_mod_and_play(&hub, &catalog, &base, &e.id))) {
+            Ok(Ok(line)) => println!("{what}: ok ({line})"),
+            Ok(Err(why)) => fail(what, why, &mut failures),
+            Err(p) => fail(what, format!("panic: {}", panic_text(&*p)), &mut failures),
+        }
+    }
+
+    // 3. The maps and campaigns, each installed and checked.
+    let maps_dir = crate::hub::maps_dir(&temp.0);
+    let mut installed_maps: Vec<(String, String, String)> = Vec::new(); // (entry, file name, sha256)
+    for e in catalog.entries.iter().filter(|e| e.kind != crate::hub::Kind::Mod) {
+        let what = format!("{} {}", if e.kind == crate::hub::Kind::Campaign { "campaign" } else { "map" }, e.id);
+        if let Err(why) = hub.install(&catalog, &e.id, crate::i18n::Lang::Ru) {
+            fail(what, format!("does not install: {why}"), &mut failures);
+            continue;
+        }
+        let files = e.files_for("ru");
+        let mut problem = None;
+        for f in &files {
+            let path = maps_dir.join(&f.name);
+            match std::panic::catch_unwind(AssertUnwindSafe(|| Scenario::load(&path))) {
+                Ok(Ok(_)) => installed_maps.push((e.id.clone(), f.name.clone(), f.sha256.to_lowercase())),
+                Ok(Err(err)) => problem = Some(format!("{}: does not load: {err}", f.name)),
+                Err(p) => problem = Some(format!("{}: panic loading: {}", f.name, panic_text(&*p))),
+            }
+        }
+        if e.kind == crate::hub::Kind::Campaign && problem.is_none() {
+            let installed: Vec<String> = std::fs::read_dir(&maps_dir).map(|r| r.filter_map(|x| x.ok()).map(|x| x.file_name().to_string_lossy().to_lowercase()).collect()).unwrap_or_default();
+            for f in &files {
+                let Ok(s) = Scenario::load(&maps_dir.join(&f.name)) else { continue };
+                if !s.next_map.trim().is_empty() && !installed.contains(&s.next_map.trim().to_lowercase()) {
+                    problem = Some(format!("{}: its next map {:?} is not installed", f.name, s.next_map));
+                    break;
+                }
+            }
+        }
+        match problem {
+            Some(why) => fail(what, why, &mut failures),
+            None => println!("{what}: ok ({} files)", files.len()),
+        }
+    }
+
+    // Every installed map still has the catalog's bytes: a later entry with the same name would
+    // have overwritten it.
+    for (entry, name, sum) in &installed_maps {
+        let on_disk = crate::update::sha256_file(&maps_dir.join(name)).unwrap_or_default();
+        if on_disk != *sum {
+            fail(format!("map file {name}"), format!("the file of {entry} is no longer the catalog's (another entry took its name)"), &mut failures);
+        }
+    }
+
+    println!(
+        "summary: {mods} mods, {campaigns} campaigns, {maps} maps; {} failure(s); {:.1} s; temp hub {:.1} MB",
+        failures.len(),
+        t0.elapsed().as_secs_f64(),
+        tree_bytes(&temp.0) as f64 / 1e6
+    );
+    assert!(failures.is_empty(), "{} failure(s) in the real catalog:\n{}", failures.len(), failures.join("\n"));
+}

@@ -64,6 +64,24 @@ It prints one line per map (`<entry>/<map>: ok|FAIL <why>, <days>, AI battles N,
 <secs> s`) and panics at the end with the list of failures. When a community map's bug is fixed,
 add that map to `<entry>/maps/` so the smoke test keeps it.
 
+`rules::ai::real_maps::hub_real_catalog` is the end-to-end check of the hub against a real catalog
+(the community release's assets, as a folder). It passes without `RAZDOR_HUB_CATALOG_DIR`. With it, in a
+temp hub (`RAZDOR_HUB_TEST_DIR`, else the system temp folder; removed at the end): the catalog parses;
+every mod installs through the normal path with its requirements, its folder is built over
+`RAZDOR_DT_DIR`, and its first map plays 3 days; every map and campaign installs, each installed map
+loads, the installed bytes are the catalog's, and each campaign's next-map names are installed. It prints
+one line per entry (`ok` or `FAIL <why>`) and a summary, then fails listing every failure:
+
+```sh
+RAZDOR_HUB_CATALOG_DIR=/path/to/catalog RAZDOR_DT_DIR=<install> RAZDOR_HUB_TEST_DIR=/big/disk CARGO_BUILD_JOBS=12 nice -n 19 taskset -c 8-19 cargo test --release --lib hub_real_catalog -- --nocapture
+```
+
+The community release's catalog (370 entries: 25 mods, 289 maps, 56 campaigns) takes about a minute and
+peaks near 5.7 GB of temp hub: a mod's folder hard-links the base's files, but where the hub is on another
+disk than the install every mod folder copies the base (about 128 MB each), so put `RAZDOR_HUB_TEST_DIR` on
+the install's disk to keep it small. On the release catalog it reports 6 campaigns whose next-map name is in
+neither the catalog nor the base install (a data problem in the catalog, not in the hub).
+
 ## Offscreen runs and snapshots
 
 `src/ui/snapshot.rs`. The game itself, on an invisible display:
