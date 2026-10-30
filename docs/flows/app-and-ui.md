@@ -163,6 +163,15 @@ On a phone a turn also moves the pointer to the middle of the new screen (`input
 run by `input::begin_frame` when the size changed; the pointer is then the pad's, so a touch or a
 mouse move takes it back). Without this a stale pointer in the new edge zone kept scrolling the map
 (report 1316, Razdor's extra). On the desktop a resize never moves the mouse.
+
+Finger-sized hit areas (phones only, a Razdor choice): `widgets::button_state` tests the pointer against
+`widgets::finger_hit(r)`, not the drawn `r`: each side grown to `FINGER_DP` (48 dp) where there is room.
+Room ends at its window (the smallest window drawn last frame that holds it, `chrome::note_window`, so a button
+at a window's edge never grows onto the map or another window), at the screen, at the bottom bar's top (a target on the bar stays on it, one above stays above),
+and at the midline to every other rectangle that `button_state`, `tapped_in` or `mouse_in` tested in the
+last frame (`finger_frame`, swapped in `input::begin_frame`) and that does not overlap the target, so
+neighbours never share a hit area and controls with their own pointer test keep their taps; space blocked
+on one side goes to the other. The touch probe records this hit area. The desktop uses the drawn rectangles.
 The orientation setting (Android only; the options window's «Ориентация экрана» row, the last one
 on Android, `Settings::orientation: Option<audio::Orientation>`, `None` = Auto): Auto keeps the
 manifest's `fullUser`, Landscape and Portrait lock the activity. `ui::android::follow_orientation`

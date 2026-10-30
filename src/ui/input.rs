@@ -113,6 +113,8 @@ local! {
 
 /// Once per frame, before anything reads input: reads the pad and works out its mouse.
 pub fn begin_frame() {
+    // The phone's finger obstacles and windows of the frame before become last frame's (`widgets::finger_hit`).
+    super::widgets::finger_frame();
     let pad = gamepad::poll();
     let mouse = mq::mouse_position();
     let mouse_used = [MouseButton::Left, MouseButton::Right, MouseButton::Middle].into_iter().any(mq::is_mouse_button_pressed);

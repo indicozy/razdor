@@ -16,7 +16,8 @@ check measures every text and every touch target and names the small ones.
   `chrome::engraved_centered`.
 - `src/ui/touch_probe.rs` (`RAZDOR_TOUCH_PROBE=<file.tsv>`): every touch target's hit rectangle,
   whether it is enabled, and the screen code that asked for it (`file:line`, through
-  `#[track_caller]`). Hooked in `widgets::button_state` and `widgets::tapped_in`, which most
+  `#[track_caller]`). On a phone that is the finger-sized hit area (`widgets::finger_hit`), not
+  the drawing. Hooked in `widgets::button_state` and `widgets::tapped_in`, which most
   buttons go through (`button`, `small_button`, `pill_button`, `close_button`, …). A screen that
   tests the pointer itself (`mouse_in` + `clicked`) is not seen: those are the gaps (below).
 - Snapshot runs only; the game never sets either variable.
@@ -31,7 +32,7 @@ Limits:
 |---|---|---|
 | text, capital height / dp / 0.7 | under 12 sp | under 14 sp |
 | touch target, its shorter side | under 40 dp | under 48 dp (Android's minimum) |
-| two targets side by side | | crowded: gap under 8 dp, or partly overlapping |
+| two targets side by side | | crowded: hit areas partly overlapping, or under 8 dp apart while one is under 48 dp |
 
 ## Run it
 
@@ -57,6 +58,8 @@ No local model writes them: Claude does, from the report, the code and the pictu
 3. Write `specs/<screen>-<orientation>.md` in the run folder, one per screen and orientation (both
    profiles together): each finding with its source place, size now (dp, mm, both profiles), the
    target size, and the fix. Fixes, in order of preference:
+   - for a `button_state` target, `widgets::finger_hit` already grows the hit area where there is
+     room: a target still small has neighbours too close; give it room (layout) or move them;
    - grow the hit area only, the drawing as it is (as `chrome::touch_hit`, `widgets::tap_rect` and
      `saves::finger_hit` do);
    - change the layout (wrap, fewer columns, a scroll, more gap);

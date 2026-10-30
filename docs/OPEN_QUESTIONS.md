@@ -18,6 +18,15 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   picks a hidden cell and the player's input offers the same set. The enemy's grid is unchanged.
   Settled by a reference screen of the original's battle window with opened cells (a collapse on
   the wide row, then a step into a back-row end or a reserve end); until then the choice stays.
+- **Phone bottom bar buttons are 31×17 dp in portrait** (2026-10-30, mobile-ui check, `game_bar.rs`
+  `oval`). The finger hit areas (S1 in `docs/specs/mobile-ui-2026-10-30.md`) cannot grow them: the bar's
+  band is about 33 dp tall in portrait and the eight ovals sit side by side. Needs a phone layout of the
+  bar (taller in portrait, or fewer, larger buttons with the rest in a menu): the owner's design call (S2).
+- **Phone text under 12 sp outside messages** (2026-10-30, mobile-ui check). «Размер текста» scales only
+  message, pop-up and hint text (`display::text_for`); labels, titles, stats and lists are the original
+  layout scaled to the width, 5-7 sp in portrait. Needs phone layouts for the windows or a phone text base
+  for labels: the owner's design call (S3, `docs/specs/mobile-ui-2026-10-30.md`).
+
 - **The map info windows: fade-in and empty-cell icons** (2026-10-18, a player's report; split
   out 2026-10-28). Not done on main: the original's 500 ms fade-in (0x4ca728) and the hostile
   style's empty-cell icons (ae2774).
