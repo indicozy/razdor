@@ -40,6 +40,42 @@ pub const SOURCE_ENV: &str = "RAZDOR_HUB";
 pub const DIR_ENV: &str = "RAZDOR_HUB_DIR";
 /// The catalog's file name at the hub's root.
 pub const INDEX: &str = "index.json";
+/// The default hub: the latest release of the community repository (its assets are the
+/// catalog and the files it names).
+pub const DEFAULT_SOURCE: &str = "https://github.com/indicozy/razdor-community/releases/latest/download";
+/// The most a downloaded archive may be (the desktop's curl stops there).
+pub const MAX_ARCHIVE_DOWNLOAD: u64 = 256 << 20;
+/// The most a preview picture may be.
+const MAX_PREVIEW_DOWNLOAD: u64 = 4 << 20;
+/// A preview is at most this big (pixels); a bigger picture is not shown.
+pub const PREVIEW_MAX_W: u32 = 480;
+pub const PREVIEW_MAX_H: u32 = 270;
+
+/// The address of `rel` in a hub at `base`: an `https://` address as it is, else under `base`.
+pub fn resolve(base: &str, rel: &str) -> String {
+    if rel.starts_with("https://") {
+        rel.to_string()
+    } else {
+        format!("{}/{}", base.trim_end_matches('/'), rel.trim_start_matches('/'))
+    }
+}
+
+/// Where a cached preview of `f` is: `<hub>/previews/<sha256>.png`.
+pub fn preview_path(local: &Path, f: &FileRef) -> PathBuf {
+    local.join("previews").join(format!("{}.png", f.sha256.to_lowercase()))
+}
+
+/// Whether `bytes` is a PNG no bigger than the preview limit (read from its header; the picture
+/// is not decoded). Macroquad decodes PNG and TGA only, so the catalog's previews are PNG.
+pub fn preview_ok(bytes: &[u8]) -> bool {
+    const SIGNATURE: &[u8] = &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+    if bytes.len() < 24 || !bytes.starts_with(SIGNATURE) || &bytes[12..16] != b"IHDR" {
+        return false;
+    }
+    let w = u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
+    let h = u32::from_be_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]);
+    (1..=PREVIEW_MAX_W).contains(&w) && (1..=PREVIEW_MAX_H).contains(&h)
+}
 
 /// A text in both interface languages.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -95,6 +131,10 @@ pub struct FileRef {
     pub lang: Option<String>,
     pub size: u64,
     pub sha256: String,
+    /// A `.zip` of files (mods only): `size` and `sha256` are the zip's, and its entries are
+    /// unpacked under the mod's folder at their own paths.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub archive: bool,
 }
 
 /// An entry of the catalog.
@@ -175,6 +215,9 @@ impl Catalog {
                 let name_ok = if e.kind == Kind::Mod { safe_rel_name(&f.name) } else { safe_name(&f.name) };
                 if !name_ok || !safe_path(&f.path) {
                     return Err(format!("index.json: {}: bad file name {:?}", e.id, f.name));
+                }
+                if f.archive && e.kind != Kind::Mod {
+                    return Err(format!("index.json: {}: only a mod may be an archive", e.id));
                 }
             }
             if e.preview.as_ref().is_some_and(|p| !safe_path(&p.path)) {
@@ -300,12 +343,21 @@ pub enum Source {
 }
 
 impl Source {
-    /// `RAZDOR_HUB`, else the mock.
+    /// `RAZDOR_HUB`, read with [`Source::from_setting`]; snapshot runs render offline.
     pub fn from_env() -> Source {
-        match std::env::var(SOURCE_ENV) {
-            Ok(s) if s.starts_with("https://") => Source::Url(s.trim_end_matches('/').to_string()),
-            Ok(s) if !s.trim().is_empty() => Source::Dir(PathBuf::from(s)),
-            _ => Source::Mock,
+        let snapshot = std::env::var_os("RAZDOR_SNAPSHOT").is_some();
+        Source::from_setting(std::env::var(SOURCE_ENV).ok().as_deref(), snapshot)
+    }
+
+    /// The source a setting names: `mock`, an `https://` address, or a folder. Unset, the
+    /// default release ([`DEFAULT_SOURCE`]), or the mock in a snapshot run.
+    pub fn from_setting(value: Option<&str>, snapshot: bool) -> Source {
+        match value.map(str::trim).filter(|s| !s.is_empty()) {
+            Some("mock") => Source::Mock,
+            Some(s) if s.starts_with("https://") => Source::Url(s.trim_end_matches('/').to_string()),
+            Some(s) => Source::Dir(PathBuf::from(s)),
+            None if snapshot => Source::Mock,
+            None => Source::Url(DEFAULT_SOURCE.to_string()),
         }
     }
 
@@ -358,8 +410,52 @@ impl Hub {
 
     fn fetch(&self, rel: &str) -> Result<Vec<u8>, String> {
         match self.root()? {
-            Root::Url(u) => crate::update::fetch(&format!("{u}/{rel}"), 60),
+            Root::Url(u) => crate::update::fetch(&resolve(&u, rel), 60),
             Root::Dir(d) => std::fs::read(d.join(rel)).map_err(|e| format!("{rel}: {e}")),
+        }
+    }
+
+    /// Downloads `rel` into the file `dest`, streamed (a folder hub copies it), at most
+    /// `max_bytes` on the desktop.
+    fn download(&self, rel: &str, dest: &Path, max_bytes: u64) -> Result<(), String> {
+        let _ = std::fs::remove_file(dest);
+        match self.root()? {
+            Root::Url(u) => crate::update::download_to(&resolve(&u, rel), dest, 900, max_bytes),
+            Root::Dir(d) => std::fs::copy(d.join(rel), dest).map(|_| ()).map_err(|e| format!("{rel}: {e}")),
+        }
+    }
+
+    /// The file `f` is as the catalog says (its size and SHA-256), at `path`.
+    fn check_file(path: &Path, f: &FileRef) -> Result<(), String> {
+        let len = std::fs::metadata(path).map(|m| m.len()).map_err(|e| format!("{}: {e}", f.path))?;
+        let sum = crate::update::sha256_file(path).map_err(|e| format!("{}: {e}", f.path))?;
+        if len != f.size || sum != f.sha256.to_lowercase() {
+            return Err(format!("{}: the file does not match the catalog", f.path));
+        }
+        Ok(())
+    }
+
+    /// The cached picture of an entry (`<hub>/previews/<sha256>.png`), downloaded when it is
+    /// not there yet. Refused unless it is the catalog's file and a PNG within the preview limit.
+    pub fn cache_preview(&self, f: &FileRef) -> Result<PathBuf, String> {
+        let path = preview_path(&self.local, f);
+        if path.is_file() {
+            return Ok(path);
+        }
+        let dir = self.local.join("previews");
+        std::fs::create_dir_all(&dir).map_err(|e| format!("previews: {e}"))?;
+        let part = dir.join(format!("{}.part", f.sha256.to_lowercase()));
+        self.download(&f.path, &part, MAX_PREVIEW_DOWNLOAD)?;
+        let checked = Hub::check_file(&part, f).and_then(|()| {
+            let bytes = std::fs::read(&part).map_err(|e| format!("{}: {e}", f.path))?;
+            if preview_ok(&bytes) { Ok(()) } else { Err(format!("{}: not a PNG within {PREVIEW_MAX_W}x{PREVIEW_MAX_H}", f.path)) }
+        });
+        match checked {
+            Ok(()) => std::fs::rename(&part, &path).map(|()| path).map_err(|e| format!("previews: {e}")),
+            Err(e) => {
+                let _ = std::fs::remove_file(&part);
+                Err(e)
+            }
         }
     }
 
@@ -378,7 +474,7 @@ impl Hub {
 
     /// Installs `id` and the mods it needs (see [`plan_install`]); returns the ids installed.
     pub fn install(&self, catalog: &Catalog, id: &str, lang: Lang) -> Result<Vec<String>, String> {
-        let mut installed = self.installed();
+        let installed = self.installed();
         let plan = plan_install(catalog, &installed, id).map_err(|e| match e {
             PlanError::Missing(m) => format!("{m}: not in the hub"),
             PlanError::Cycle(m) => format!("{m}: mods need each other"),
@@ -387,37 +483,91 @@ impl Hub {
             Lang::En => "en",
             Lang::Ru => "ru",
         };
-        for pid in &plan {
+        // Downloads (the archives) go to a scratch folder, removed after the install either way.
+        let downloads = self.local.join("downloads");
+        let _ = std::fs::remove_dir_all(&downloads);
+        let done = self.install_plan(catalog, &plan, code, &downloads);
+        let _ = std::fs::remove_dir_all(&downloads);
+        done.map(|()| plan)
+    }
+
+    fn install_plan(&self, catalog: &Catalog, plan: &[String], code: &str, downloads: &Path) -> Result<(), String> {
+        let mut installed = self.installed();
+        for pid in plan {
             let e = catalog.entry(pid).expect("planned from the catalog");
             let files = e.files_for(code);
             // All files are fetched and checked before any is written.
-            let mut got = Vec::new();
-            for f in &files {
-                let bytes = self.fetch(&f.path)?;
-                if bytes.len() as u64 != f.size || crate::update::sha256_hex(&bytes) != f.sha256.to_lowercase() {
-                    return Err(format!("{}: the file does not match the catalog", f.path));
+            let mut got: Vec<(&FileRef, Got)> = Vec::new();
+            for (n, &f) in files.iter().enumerate() {
+                if f.archive {
+                    std::fs::create_dir_all(downloads).map_err(|err| format!("downloads: {err}"))?;
+                    let part = downloads.join(format!("{}-{n}.zip", e.id));
+                    self.download(&f.path, &part, MAX_ARCHIVE_DOWNLOAD)?;
+                    Hub::check_file(&part, f)?;
+                    got.push((f, Got::Zip(part)));
+                } else {
+                    let bytes = self.fetch(&f.path)?;
+                    if bytes.len() as u64 != f.size || crate::update::sha256_hex(&bytes) != f.sha256.to_lowercase() {
+                        return Err(format!("{}: the file does not match the catalog", f.path));
+                    }
+                    got.push((f, Got::Bytes(bytes)));
                 }
-                got.push((f, bytes));
             }
-            if e.kind == Kind::Mod {
-                // A reinstall replaces the mod's files (a file the new version dropped goes too).
-                let _ = std::fs::remove_dir_all(mod_files_dir(&self.local, &e.id));
-            }
-            let mut written = Vec::new();
-            for (f, bytes) in got {
-                let rel = match e.kind {
-                    Kind::Mod => format!("mods/{}/files/{}", e.id, f.name),
-                    Kind::Map | Kind::Campaign => format!("maps/{}", f.name),
-                };
-                crate::editor::files::write_atomically(&self.local.join(&rel), &bytes).map_err(|err| format!("{rel}: {err}"))?;
-                written.push(rel);
-            }
+            let written = match e.kind {
+                Kind::Mod => self.write_mod(&e.id, &got)?,
+                Kind::Map | Kind::Campaign => {
+                    let mut written = Vec::new();
+                    for (f, g) in got {
+                        let Got::Bytes(bytes) = g else { return Err(format!("{}: only a mod may be an archive", f.path)) };
+                        let rel = format!("maps/{}", f.name);
+                        crate::editor::files::write_atomically(&self.local.join(&rel), &bytes).map_err(|err| format!("{rel}: {err}"))?;
+                        written.push(rel);
+                    }
+                    written
+                }
+            };
             let lang = files.iter().find_map(|f| f.lang.clone()).unwrap_or_default();
             let record = InstalledEntry { version: e.version.clone(), kind: e.kind, lang, title: e.title.clone(), requires: e.requires.clone(), files: written };
             installed.entries.insert(e.id.clone(), record);
             self.save_installed(&installed)?;
         }
-        Ok(plan)
+        Ok(())
+    }
+
+    /// Writes a mod's files: the files it ships and its archives' entries, built in
+    /// `files.tmp/` and put in place of the old `files/` in one rename (a reinstall replaces
+    /// them all, and a file the new version dropped goes too). Returns the records' paths.
+    fn write_mod(&self, id: &str, got: &[(&FileRef, Got)]) -> Result<Vec<String>, String> {
+        let tmp = mod_dir(&self.local, id).join("files.tmp");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let built = self.build_mod_files(&tmp, got);
+        let names = match built {
+            Ok(names) => names,
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&tmp);
+                return Err(e);
+            }
+        };
+        let files = mod_files_dir(&self.local, id);
+        let _ = std::fs::remove_dir_all(&files);
+        std::fs::rename(&tmp, &files).map_err(|e| format!("{}: {e}", files.display()))?;
+        Ok(names.into_iter().map(|n| format!("mods/{id}/files/{n}")).collect())
+    }
+
+    /// The files of `got` built in `tmp` (a fresh folder); their names.
+    fn build_mod_files(&self, tmp: &Path, got: &[(&FileRef, Got)]) -> Result<Vec<String>, String> {
+        std::fs::create_dir_all(tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
+        let mut names = Vec::new();
+        for (f, g) in got {
+            match g {
+                Got::Bytes(bytes) => {
+                    crate::editor::files::write_atomically(&tmp.join(&f.name), bytes).map_err(|e| format!("{}: {e}", f.name))?;
+                    names.push(f.name.clone());
+                }
+                Got::Zip(path) => names.extend(unpack_zip(path, tmp)?),
+            }
+        }
+        Ok(names)
     }
 
     /// Removes `id`'s files, unless an installed entry needs it.
@@ -445,6 +595,12 @@ impl Hub {
 enum Root {
     Url(String),
     Dir(PathBuf),
+}
+
+/// A file of an entry as it is fetched: its bytes, or the zip it is in (a file on disk).
+enum Got {
+    Bytes(Vec<u8>),
+    Zip(PathBuf),
 }
 
 /// The mock hub: small empty maps made here (nothing from the game), with catalog texts of our
@@ -485,7 +641,7 @@ pub mod mock {
     impl Out<'_> {
         fn file(&self, path: String, name: &str, lang: Option<&str>, bytes: &[u8]) -> std::io::Result<FileRef> {
             crate::editor::files::write_atomically(&self.dir.join(&path), bytes)?;
-            Ok(FileRef { path, name: name.into(), lang: lang.map(Into::into), size: bytes.len() as u64, sha256: crate::update::sha256_hex(bytes) })
+            Ok(FileRef { path, name: name.into(), lang: lang.map(Into::into), size: bytes.len() as u64, sha256: crate::update::sha256_hex(bytes), archive: false })
         }
 
         /// A map or campaign: its chapters in `langs`, linked by their next-map names.
@@ -563,10 +719,69 @@ pub mod mock {
         }
     }
 
+    /// A PNG of `width` x `height` (a gradient), made here: stored deflate blocks, no compression.
+    pub fn preview_png(width: u32, height: u32) -> Vec<u8> {
+        let mut raw = Vec::new();
+        for y in 0..height {
+            raw.push(0);
+            for x in 0..width {
+                raw.extend_from_slice(&[(x * 255 / width.max(1)) as u8, (y * 255 / height.max(1)) as u8, 120]);
+            }
+        }
+        let mut z = vec![0x78, 0x01];
+        let blocks: Vec<&[u8]> = raw.chunks(65535).collect();
+        for (i, block) in blocks.iter().enumerate() {
+            z.push(u8::from(i + 1 == blocks.len()));
+            let len = block.len() as u16;
+            z.extend_from_slice(&len.to_le_bytes());
+            z.extend_from_slice(&(!len).to_le_bytes());
+            z.extend_from_slice(block);
+        }
+        z.extend_from_slice(&adler32(&raw).to_be_bytes());
+        let mut header = Vec::new();
+        header.extend_from_slice(&width.to_be_bytes());
+        header.extend_from_slice(&height.to_be_bytes());
+        header.extend_from_slice(&[8, 2, 0, 0, 0]);
+        let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+        png_chunk(&mut png, b"IHDR", &header);
+        png_chunk(&mut png, b"IDAT", &z);
+        png_chunk(&mut png, b"IEND", &[]);
+        png
+    }
+
+    fn png_chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
+        out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        let mut body = kind.to_vec();
+        body.extend_from_slice(data);
+        out.extend_from_slice(&body);
+        out.extend_from_slice(&crc32(&body).to_be_bytes());
+    }
+
+    fn crc32(bytes: &[u8]) -> u32 {
+        let mut crc = !0u32;
+        for &b in bytes {
+            crc ^= u32::from(b);
+            for _ in 0..8 {
+                crc = if crc & 1 != 0 { 0xEDB8_8320 ^ (crc >> 1) } else { crc >> 1 };
+            }
+        }
+        !crc
+    }
+
+    fn adler32(bytes: &[u8]) -> u32 {
+        let (mut a, mut b) = (1u32, 0u32);
+        for &x in bytes {
+            a = (a + u32::from(x)) % 65521;
+            b = (b + a) % 65521;
+        }
+        (b << 16) | a
+    }
+
     /// Writes the mock hub (its files and `index.json`) into `dir`.
     pub fn build(dir: &Path) -> std::io::Result<()> {
         let mut o = Out { dir, entries: Vec::new() };
         let map = |file, title, about, size, fill| MapSpec { file, title, about, size, fill };
+        let picture = preview_png(PREVIEW_MAX_W, PREVIEW_MAX_H * 2 / 3);
         o.maps(
             "ford-outpost",
             Kind::Map,
@@ -578,6 +793,10 @@ pub mod mock {
             "2026-09-02",
             &[map("Hub_Ford", ("Застава у брода", "The Outpost at the Ford"), ("Удержите брод.", "Hold the ford."), 40, 6)],
         )?;
+        let preview = o.file("previews/ford-outpost.png".into(), "preview.png", None, &picture)?;
+        if let Some(entry) = o.entries.last_mut() {
+            entry.preview = Some(preview);
+        }
         o.maps(
             "black-wood",
             Kind::Map,
@@ -773,5 +992,115 @@ mod tests {
         assert!(Catalog::parse(bad_id).is_err());
         let bad_need = br#"{"format":1,"entries":[{"id":"x","kind":"map","title":{"ru":"x"},"author":"a","version":"1","requires":["a/b"],"files":[]}]}"#;
         assert!(Catalog::parse(bad_need).is_err());
+    }
+
+    #[test]
+    fn the_default_source_is_the_release_and_the_mock_only_when_asked() {
+        assert_eq!(Source::from_setting(None, false), Source::Url(DEFAULT_SOURCE.to_string()));
+        assert_eq!(Source::from_setting(Some("  "), false), Source::Url(DEFAULT_SOURCE.to_string()));
+        assert_eq!(Source::from_setting(Some("mock"), false), Source::Mock);
+        assert_eq!(Source::from_setting(None, true), Source::Mock, "a snapshot renders offline");
+        assert_eq!(Source::from_setting(Some("https://example.org/hub/"), false), Source::Url("https://example.org/hub".into()));
+        assert_eq!(Source::from_setting(Some("/games/hub"), false), Source::Dir(PathBuf::from("/games/hub")));
+    }
+
+    #[test]
+    fn paths_resolve_under_the_hub_or_as_their_own_address() {
+        assert_eq!(resolve(DEFAULT_SOURCE, "mods/m/pack.zip"), format!("{DEFAULT_SOURCE}/mods/m/pack.zip"));
+        assert_eq!(resolve(DEFAULT_SOURCE, "index.json"), format!("{DEFAULT_SOURCE}/index.json"));
+        assert_eq!(resolve(DEFAULT_SOURCE, "https://example.org/a.png"), "https://example.org/a.png");
+        assert_eq!(resolve("https://example.org/hub/", "maps/a.DTm"), "https://example.org/hub/maps/a.DTm");
+    }
+
+    #[test]
+    fn an_archive_is_for_a_mod_only() {
+        let file = |kind: &str| {
+            format!(r#"{{"format":1,"entries":[{{"id":"x","kind":"{kind}","title":{{"ru":"x"}},"author":"a","version":"1","files":[{{"path":"p.zip","name":"x.zip","size":1,"sha256":"","archive":true}}]}}]}}"#)
+        };
+        assert!(Catalog::parse(file("mod").as_bytes()).is_ok());
+        assert!(Catalog::parse(file("map").as_bytes()).is_err());
+        assert!(Catalog::parse(file("campaign").as_bytes()).is_err());
+    }
+
+    /// A folder hub with one mod, `pack`, whose files are a zip: returns the hub and the zip's
+    /// size and SHA-256.
+    fn zip_hub(tag: &str) -> (PathBuf, PathBuf, u64, String) {
+        use std::io::Write;
+        let root = temp(&format!("{tag}-root"));
+        let local = temp(&format!("{tag}-local"));
+        std::fs::create_dir_all(root.join("mods/pack")).unwrap();
+        let mut w = zip::ZipWriter::new(std::fs::File::create(root.join("mods/pack/pack.zip")).unwrap());
+        w.start_file("data/units.ini", zip::write::SimpleFileOptions::default()).unwrap();
+        w.write_all(b"units").unwrap();
+        w.start_file("Pictures/a.lit", zip::write::SimpleFileOptions::default()).unwrap();
+        w.write_all(b"pic").unwrap();
+        w.finish().unwrap();
+        let bytes = std::fs::read(root.join("mods/pack/pack.zip")).unwrap();
+        let sum = crate::update::sha256_hex(&bytes);
+        let json = serde_json::json!({"format": 1, "entries": [{
+            "id": "pack", "kind": "mod", "title": {"ru": "Пакет"}, "author": "a", "version": "1.0",
+            "files": [{"path": "mods/pack/pack.zip", "name": "pack.zip", "size": bytes.len(), "sha256": sum, "archive": true}]
+        }]});
+        std::fs::write(root.join(INDEX), json.to_string()).unwrap();
+        (root, local, bytes.len() as u64, sum)
+    }
+
+    #[test]
+    fn a_mod_zip_installs_its_entries_from_a_folder_hub() {
+        let (root, local, _, _) = zip_hub("zip-install");
+        let hub = Hub { source: Source::Dir(root.clone()), local: local.clone() };
+        let catalog = hub.catalog().unwrap();
+        assert_eq!(hub.install(&catalog, "pack", Lang::Ru).unwrap(), ["pack"]);
+        assert_eq!(std::fs::read(local.join("mods/pack/files/data/units.ini")).unwrap(), b"units");
+        assert_eq!(std::fs::read(local.join("mods/pack/files/Pictures/a.lit")).unwrap(), b"pic");
+        assert!(hub.installed().entries["pack"].files.contains(&"mods/pack/files/data/units.ini".to_string()));
+        assert!(!local.join("downloads").exists(), "the download is removed after the install");
+        assert!(!local.join("mods/pack/files.tmp").exists());
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    #[test]
+    fn a_mod_zip_that_does_not_match_the_catalog_writes_nothing() {
+        let (root, local, size, _) = zip_hub("zip-bad");
+        let json = std::fs::read_to_string(root.join(INDEX)).unwrap();
+        let wrong = json.replace(&crate::update::sha256_hex(&std::fs::read(root.join("mods/pack/pack.zip")).unwrap()), &"0".repeat(64));
+        std::fs::write(root.join(INDEX), wrong).unwrap();
+        let hub = Hub { source: Source::Dir(root.clone()), local: local.clone() };
+        let catalog = hub.catalog().unwrap();
+        assert!(hub.install(&catalog, "pack", Lang::Ru).is_err());
+        assert!(!local.join("mods/pack/files").exists());
+        assert!(!local.join("mods/pack/files.tmp").exists());
+        assert!(!hub.installed().has("pack"));
+        assert!(size > 0);
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    #[test]
+    fn previews_are_png_within_the_limit_and_the_mock_one_decodes() {
+        let png = mock::preview_png(480, 270);
+        assert!(preview_ok(&png));
+        assert!(!preview_ok(&mock::preview_png(481, 270)), "wider than the limit");
+        assert!(!preview_ok(b"GIF89a................................"));
+        let img = macroquad::texture::Image::from_file_with_format(&png, None).expect("the mock's PNG decodes");
+        assert_eq!((img.width, img.height), (480, 270));
+    }
+
+    #[test]
+    fn a_preview_is_downloaded_once_into_the_cache() {
+        let root = temp("preview-root");
+        let local = temp("preview-local");
+        std::fs::create_dir_all(root.join("previews")).unwrap();
+        let png = mock::preview_png(320, 180);
+        std::fs::write(root.join("previews/p.png"), &png).unwrap();
+        let f = FileRef { path: "previews/p.png".into(), name: "p.png".into(), lang: None, size: png.len() as u64, sha256: crate::update::sha256_hex(&png), archive: false };
+        let hub = Hub { source: Source::Dir(root.clone()), local: local.clone() };
+        let path = hub.cache_preview(&f).unwrap();
+        assert_eq!(path, preview_path(&local, &f));
+        std::fs::remove_file(root.join("previews/p.png")).unwrap();
+        assert_eq!(hub.cache_preview(&f).unwrap(), path, "the cached picture is used, not fetched again");
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&local);
     }
 }

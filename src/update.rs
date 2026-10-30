@@ -469,6 +469,53 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// The SHA-256 of a file, read in pieces (a big download is not held in memory).
+pub fn sha256_file(path: &Path) -> std::io::Result<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    let mut hash = Sha256::new();
+    let mut buf = vec![0u8; 64 << 10];
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hash.update(&buf[..n]);
+    }
+    Ok(hash.finalize().iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// Downloads `url` into the file `path`, streamed, following redirects. On the desktop at
+/// most `max_bytes` (curl stops there); the phones take what the system's downloader gives.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub(crate) fn download_to(url: &str, path: &Path, seconds: u32, max_bytes: u64) -> Result<(), String> {
+    let out = curl()
+        .args(["--max-time", &seconds.to_string(), "--max-filesize", &max_bytes.to_string(), "-o"])
+        .arg(path)
+        .arg(url)
+        .output()
+        .map_err(|e| format!("curl: {e}"))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let why = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    Err(if why.is_empty() { format!("curl: {}", out.status) } else { why })
+}
+
+/// Downloads `url` into the file `path` through the system's downloader (Android).
+#[cfg(target_os = "android")]
+pub(crate) fn download_to(url: &str, path: &Path, seconds: u32, _max_bytes: u64) -> Result<(), String> {
+    phone::download(url, path, seconds)
+}
+
+/// Downloads `url` into the file `path` (iOS: the body, then written).
+#[cfg(target_os = "ios")]
+pub(crate) fn download_to(url: &str, path: &Path, seconds: u32, _max_bytes: u64) -> Result<(), String> {
+    let body = phone::get(url, seconds)?;
+    std::fs::write(path, body).map_err(|e| format!("{}: {e}", path.display()))
+}
+
 /// Puts file `new` in place of `program`: a rename over it on Unix (made executable first);
 /// on Windows the running program moves aside to `<name>.old` first, and back if the new
 /// one cannot take its place.

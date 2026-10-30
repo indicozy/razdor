@@ -6,6 +6,7 @@
 //! Install or Remove. Reading the catalog and installing run on a thread; the window only
 //! shows what they say. The layout is ours: the original has no such window.
 
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver};
 
 use macroquad::prelude::*;
@@ -43,12 +44,62 @@ pub struct HubView {
     /// Something was installed or removed while the window was open (the new-game list is
     /// read again on the way out).
     pub changed: bool,
+    /// The picked entry's picture (`ensure_preview`).
+    preview: Option<Preview>,
+}
+
+/// The picture of an entry: its texture once it is in the cache, and the download on its way
+/// when it is not.
+struct Preview {
+    id: String,
+    texture: Option<Texture2D>,
+    job: Option<Receiver<Result<PathBuf, String>>>,
+}
+
+/// The most a preview is drawn tall (window units).
+const PREVIEW_H: f32 = 150.0;
+
+/// Keeps the picked entry's picture: loaded from the cache, or downloaded on a thread (once,
+/// into the cache) when it is not there yet. A download that fails leaves no picture.
+fn ensure_preview(view: &mut HubView, e: &Entry) {
+    if let Some(p) = view.preview.as_mut().filter(|p| p.id == e.id) {
+        if let Some(done) = p.job.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            p.job = None;
+            match done {
+                Ok(path) => p.texture = load_texture(&path),
+                Err(why) => razdor::diag!("hub: the picture of {} is not shown: {why}", e.id),
+            }
+        }
+        return;
+    }
+    let mut p = Preview { id: e.id.clone(), texture: None, job: None };
+    if let (Some(f), Some(hub)) = (e.preview.as_ref(), view.hub.clone()) {
+        let path = hub::preview_path(&hub.local, f);
+        if path.is_file() {
+            p.texture = load_texture(&path);
+        } else {
+            let (tx, rx) = channel();
+            let f = f.clone();
+            std::thread::spawn(move || {
+                let _ = tx.send(hub.cache_preview(&f));
+            });
+            p.job = Some(rx);
+        }
+    }
+    view.preview = Some(p);
+}
+
+/// A cached PNG as a texture (macroquad decodes PNG and TGA; `None` when it does not read).
+fn load_texture(path: &Path) -> Option<Texture2D> {
+    let bytes = std::fs::read(path).ok()?;
+    let img = Image::from_file_with_format(&bytes, None).ok()?;
+    Some(Texture2D::from_image(&img))
 }
 
 impl HubView {
     pub fn new() -> HubView {
         let hub = hub::local_dir().map(|local| Hub { source: Source::from_env(), local });
-        let mut v = HubView { hub, catalog: None, installed: Installed::default(), tab: 0, picked: None, scroll: 0, job: None, note: None, changed: false };
+        let mut v = HubView { hub, catalog: None, installed: Installed::default(), tab: 0, picked: None, scroll: 0, job: None, note: None, changed: false, preview: None };
         v.reload();
         v
     }
@@ -252,6 +303,7 @@ pub fn frame(view: &mut HubView) -> bool {
             }
             let picked = view.picked.clone().and_then(|p| c.entry(&p).cloned());
             if let Some(e) = picked {
+                ensure_preview(view, &e);
                 let dx = lx + lw + 16.0 * k;
                 details(view, c, &e, Rect::new(dx, inner.y + 10.0 * k, inner.x + inner.w - dx - 10.0 * k, by - inner.y - 20.0 * k), size, small, by, bh);
             }
@@ -265,7 +317,7 @@ pub fn frame(view: &mut HubView) -> bool {
     }
     let status_x = lx + 300.0 * k;
     if view.job.is_some() && view.catalog.is_some() {
-        chrome::shadow_text(tr("Working…"), status_x, by + 20.0 * k, size, GOLD);
+        chrome::shadow_text(tr("Downloading…"), status_x, by + 20.0 * k, size, GOLD);
     } else if let Some((s, bad)) = &view.note {
         text_fit(s, status_x, by + 20.0 * k, 260.0 * k, size, if *bad { RED_TEXT } else { GREEN_TEXT });
     }
@@ -282,6 +334,19 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, r: Rect, size: f32, small
     let k = chrome::k();
     let dim = Color::new(0.85, 0.80, 0.68, 1.0);
     let mut y = r.y + 22.0 * k;
+    if e.preview.is_some() {
+        // The picture at the top of the panel: as wide as the panel, at most PREVIEW_H tall, its
+        // aspect kept. Room for it is kept while it loads (a dark frame of 16:9 until then).
+        let loaded = view.preview.as_ref().filter(|p| p.id == e.id).and_then(|p| p.texture.clone());
+        let (w, h) = loaded.as_ref().map_or((16.0, 9.0), |t| (t.width(), t.height()));
+        let scale = (r.w / w).min(PREVIEW_H * k / h);
+        let (dw, dh) = (w * scale, h * scale);
+        match loaded {
+            Some(t) => draw_texture_ex(&t, r.x, r.y, WHITE, DrawTextureParams { dest_size: Some(vec2(dw, dh)), ..Default::default() }),
+            None => draw_rectangle(r.x, r.y, dw, dh, Color::new(0.05, 0.04, 0.03, 0.8)),
+        }
+        y = r.y + dh + 16.0 * k;
+    }
     text_fit(e.title.get(lang()), r.x, y, r.w, (18.0 * k).round(), GOLD);
     y += 22.0 * k;
     let mut by_line = trf!("{kind} by {author}, version {version}", kind = kind_label(e.kind), author = e.author, version = e.version);

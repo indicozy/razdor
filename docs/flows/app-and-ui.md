@@ -628,14 +628,22 @@ for impassable; aboard the ship blue for sailable, red otherwise, all faint so t
 
 `main_menu` link (the corner row, or the chips held upright) → `Screen::Hub(HubView)` (`ui/hub_view.rs`) → `razdor::hub` on a thread:
 `Hub::catalog()` reads `index.json` from `RAZDOR_HUB` (an `https://` address or a folder; unset:
-the mock hub `hub::mock::build` writes under the hub folder), `Hub::install()` installs the
+`hub::DEFAULT_SOURCE`, the latest release of indicozy/razdor-community; `RAZDOR_HUB=mock`, or a
+snapshot run, the mock hub `hub::mock::build` writes under the hub folder; a file's `path` that is
+`https://` is fetched as it is, else under the source), `Hub::install()` installs the
 entry after the mods it needs (`plan_install`), checking each file's size and SHA-256, into
 `RAZDOR_HUB_DIR` (else `hub` in `platform::app_dir`, the same storage on the phones): maps to `maps/`,
 a mod's files to `mods/<id>/files/<path inside the mod>` (a mod ships only what differs from the
 base install), the record in `installed.json` (version, title, `requires`, files). `Hub::remove()` refuses a
 mod still needed and removes a mod's whole folder. Each entry carries `status` (`full`, `partial`,
-`broken`, `unknown`, with `status_note`) shown as the window's state line, an optional `preview`
-(not drawn yet) and, for a mod, `base` (the base it is made for; nothing checks it).
+`broken`, `unknown`, with `status_note`) shown as the window's state line, an optional `preview` (a PNG
+no bigger than 480x270, read from its header; macroquad decodes PNG and TGA only, so no WebP), cached
+once in `<hub>/previews/<sha256>.png` and drawn at the top of the right panel (`ui/hub_view.rs`
+`ensure_preview`), and, for a mod, `base` (the base it is made for; nothing checks it). A mod file
+may be an `archive` (a zip, mods only): it is downloaded to `downloads/` (streamed, at most 256 MiB),
+checked by size and SHA-256, unpacked into `files.tmp/` under the zip's own paths (a `\` counts as `/`;
+the same name checks as a mod's file; at most 2 GiB and 20 000 entries, `hub::mods::unpack_zip`), and
+`files.tmp/` then replaces `files/` in one rename. The window's downloads show «Загрузка…».
 
 **Mods play as layers** (`hub/mods.rs`). `prepare_mod(local, base, id)` builds `mods/<id>/game/`:
 every file of the base install (`DtInstall`'s `RAZDOR_DT_DIR`) hard-linked (a copy where links fail),

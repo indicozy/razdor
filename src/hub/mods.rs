@@ -9,6 +9,7 @@
 //! and contents change (`stamp.json` in the folder).
 
 use std::collections::{BTreeMap, HashSet};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -301,6 +302,57 @@ fn list_mod_files(files_dir: &Path) -> Result<Vec<(String, PathBuf)>, String> {
     Ok(files)
 }
 
+/// The most a mod's archive may unpack to, in all.
+pub const MAX_UNPACKED_BYTES: u64 = 2 << 30;
+/// The most entries a mod's archive may hold.
+pub const MAX_ZIP_ENTRIES: usize = 20_000;
+
+/// Unpacks the zip `zip_path` into `dest` (a fresh folder): every file at its path in the zip
+/// (a `\` counts as `/`), each name checked as a mod's file name is. Returns the paths written.
+/// A zip over the limits or with a bad name is refused whole.
+pub fn unpack_zip(zip_path: &Path, dest: &Path) -> Result<Vec<String>, String> {
+    unpack_zip_within(zip_path, dest, MAX_UNPACKED_BYTES, MAX_ZIP_ENTRIES)
+}
+
+fn unpack_zip_within(zip_path: &Path, dest: &Path, max_bytes: u64, max_entries: usize) -> Result<Vec<String>, String> {
+    let shown = zip_path.display();
+    let file = std::fs::File::open(zip_path).map_err(|e| format!("{shown}: {e}"))?;
+    let mut zip = zip::ZipArchive::new(file).map_err(|e| format!("{shown}: not a zip ({e})"))?;
+    if zip.len() > max_entries {
+        return Err(format!("{shown}: {} entries, at most {max_entries}", zip.len()));
+    }
+    let mut names = Vec::new();
+    let mut total: u64 = 0;
+    for index in 0..zip.len() {
+        let mut entry = zip.by_index(index).map_err(|e| format!("{shown}: {e}"))?;
+        if entry.is_dir() {
+            continue;
+        }
+        let name = entry.name().map_err(|e| format!("{shown}: {e}"))?.replace('\\', "/");
+        if !safe_rel_name(&name) {
+            return Err(format!("{name}: not a file name a mod may use"));
+        }
+        // The declared size first, then what is really read (an entry may lie about its size).
+        let left = max_bytes.saturating_sub(total);
+        if entry.size() > left {
+            return Err(format!("{shown}: unpacks to more than {} MiB", max_bytes >> 20));
+        }
+        let target = dest.join(&name);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("{name}: {e}"))?;
+        }
+        let mut out = std::fs::File::create(&target).map_err(|e| format!("{name}: {e}"))?;
+        // One byte past what is left, so an entry that runs over shows it.
+        let copied = std::io::copy(&mut entry.by_ref().take(left + 1), &mut out).map_err(|e| format!("{name}: {e}"))?;
+        total += copied;
+        if total > max_bytes {
+            return Err(format!("{shown}: unpacks to more than {} MiB", max_bytes >> 20));
+        }
+        names.push(name);
+    }
+    Ok(names)
+}
+
 /// A digest of the base's files: their names, sizes and modification times.
 fn base_fingerprint(base: &Path) -> Result<String, String> {
     let mut all = Vec::new();
@@ -497,5 +549,53 @@ mod tests {
         assert_eq!(std::fs::read(install.join("_Global.ini")).unwrap(), global, "the install is not written");
         assert!(crate::dt::install::DtInstall::load(&game).is_ok(), "the merged folder loads as an install");
         let _ = std::fs::remove_dir_all(&local);
+    }
+
+    /// A zip of `entries` (name, bytes), written to `dir/name`.
+    fn zip_file(dir: &Path, name: &str, entries: &[(&str, &[u8])]) -> PathBuf {
+        use std::io::Write;
+        std::fs::create_dir_all(dir).unwrap();
+        let path = dir.join(name);
+        let mut w = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+        for (entry, bytes) in entries {
+            w.start_file(*entry, zip::write::SimpleFileOptions::default()).unwrap();
+            w.write_all(bytes).unwrap();
+        }
+        w.finish().unwrap();
+        path
+    }
+
+    #[test]
+    fn a_good_zip_unpacks_at_its_paths_and_backslashes_count_as_folders() {
+        let dir = temp("zip-good");
+        let zip = zip_file(&dir, "pack.zip", &[("data/units.ini", b"units"), ("Pictures\\a.lit", b"pic"), ("empty/", b"")]);
+        let out = dir.join("out");
+        let names = unpack_zip(&zip, &out).unwrap();
+        assert_eq!(names, ["data/units.ini", "Pictures/a.lit"]);
+        assert_eq!(std::fs::read(out.join("data/units.ini")).unwrap(), b"units");
+        assert_eq!(std::fs::read(out.join("Pictures/a.lit")).unwrap(), b"pic");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_zip_with_a_path_out_of_the_mod_is_refused_whole() {
+        let dir = temp("zip-slip");
+        for bad in ["../x.ini", "a/../../x.ini", "/abs.ini", "..\\x.ini", "a/.hidden/x.ini"] {
+            let zip = zip_file(&dir, "bad.zip", &[("ok.ini", b"ok"), (bad, b"x")]);
+            let out = dir.join("out");
+            assert!(unpack_zip(&zip, &out).is_err(), "{bad} must be refused");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_zip_over_the_entry_or_size_limit_is_refused() {
+        let dir = temp("zip-limits");
+        let zip = zip_file(&dir, "big.zip", &[("a.ini", b"0123456789"), ("b.ini", b"0123456789")]);
+        assert!(unpack_zip_within(&zip, &dir.join("e"), MAX_UNPACKED_BYTES, 1).is_err(), "two entries, one allowed");
+        assert!(unpack_zip_within(&zip, &dir.join("s"), 15, MAX_ZIP_ENTRIES).is_err(), "twenty bytes, fifteen allowed");
+        assert_eq!(unpack_zip_within(&zip, &dir.join("ok"), 20, MAX_ZIP_ENTRIES).unwrap().len(), 2);
+        assert!(unpack_zip(&dir.join("missing.zip"), &dir.join("m")).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
