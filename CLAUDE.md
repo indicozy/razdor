@@ -75,6 +75,11 @@ mobile support; there is no roadmap and nothing else is started unless the owner
   the original's art) as small WebP under `wiki/src/assets/shots/`. The wiki is about Razdor
   (installing, tutorials, differences from the original, mods, tools), never a copy of the
   game's own content (unit, spell, item or map data and texts).
+  Community content (the owner's decision, 2026-10-31): community maps and mods (from the
+  server's сокровищница-модов and библиотека-карт; the server's admin says they are free to
+  share) may be repacked and published, outside git, in the `razdor-community` repo's
+  releases for the in-game Hub, each credited to its author. Never the base game's own files:
+  a mod is packed as its difference from Community Update.
 - The repo is public: every push is published at once.
 - Player-facing text (README, changelog, release notes, site, PLAYTEST_NOTES) is in Russian.
   Developer text stays English: code, comments, commit messages, CLAUDE.md, skills,
