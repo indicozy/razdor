@@ -6,7 +6,7 @@ description: Use when the owner asks to go through the Discord reports thread - 
 # Discord reports → the reports backlog → fixes
 
 The `discord-reports` MCP server reads one channel or thread (`DISCORD_REPORTS_CHANNEL` in
-`.env`) with a bot. It posts only through `reports_post` (a preview first; sending needs the
+`.env`) with a bot. Its read-only tools also read any other channel or thread the bot can see: pass a message link as `message_id` to `reports_get_message` / `reports_download_attachments`, or `channel` (+ `after` to page forward, oldest first) to `reports_fetch_recent`, e.g. a mod's announcement thread the owner links. Posting, the cursor and reporter records stay on the reports channel. It posts only through `reports_post` (a preview first; sending needs the
 owner's approval and `DISCORD_ALLOW_POST=1`). In this skill it posts only the replies to
 `needs-info` reports (section 3); the release announcement is the `release` skill's step 9, posted at once without approval. The cursor and the report → reporter map are a
 local file.

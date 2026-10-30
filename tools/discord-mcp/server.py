@@ -2,9 +2,11 @@
 """MCP server for Razdor's player reports on Discord.
 
 Speaks MCP (JSON-RPC 2.0, one message per line) on stdin/stdout, standard library only.
-It reads one channel or thread with a bot token. Every Discord call is a GET except the writes
-of `reports_post`: a POST for its message (with up to 10 attached images) and a PUT per reaction
-(up to 5). They go to that same channel only when DISCORD_ALLOW_POST=1 and the call passes
+It reads the reports channel or thread with a bot token. The read-only tools (fetch_recent,
+get_message, download_attachments) can also read any other channel or thread the bot sees, by a
+`channel` argument or a message link. Every Discord call is a GET except the writes of
+`reports_post`: a POST for its message (with up to 10 attached images) and a PUT per reaction
+(up to 5). Writes go only to the reports channel, and only when DISCORD_ALLOW_POST=1 and the call passes
 confirm=true (without it, it returns a preview). Its mentions are limited
 to users recorded as reporters; @everyone, @here and roles never ping. Locally it writes
 downloaded attachments and a state file: the cursor and which Discord users reported which
@@ -76,14 +78,53 @@ class Fail(Exception):
     pass
 
 
+CHANNEL_RE = re.compile(r"channels/(\d+|@me)/(\d+)")  # group 2: the channel id
+MESSAGE_RE = re.compile(r"channels/(\d+|@me)/(\d+)/(\d+)")  # group 2: channel, group 3: message
+
+
 def channel_id():
     raw = (ENV.get("DISCORD_REPORTS_CHANNEL") or "").strip()
-    m = re.search(r"channels/(\d+|@me)/(\d+)", raw)
+    m = CHANNEL_RE.search(raw)
     if m:
         return m.group(2)
     if raw.isdigit():
         return raw
     raise Fail("DISCORD_REPORTS_CHANNEL is not set (an id or a discord.com/channels/... link)")
+
+
+def channel_of(raw):
+    """A channel id, or a link to a channel (a message link's message part is ignored)."""
+    raw = str(raw).strip()
+    m = CHANNEL_RE.search(raw)
+    if m:
+        return m.group(2)
+    if raw.isdigit():
+        return raw
+    raise Fail("channel must be a channel id or a discord.com/channels/... link")
+
+
+def parse_ref(message_id=None, channel=None):
+    """(channel id, message id or None). A message link sets both and ignores `channel`."""
+    raw = str(message_id or "").strip()
+    m = MESSAGE_RE.search(raw)
+    if m:
+        return m.group(2), m.group(3)
+    cid = channel_of(channel) if channel and str(channel).strip() else channel_id()
+    if raw and not raw.isdigit():
+        raise Fail("message_id must be a number")
+    return cid, raw or None
+
+
+def message_part(raw, name):
+    """A message id from an id or a message link (None when empty)."""
+    raw = str(raw or "").strip()
+    if not raw:
+        return None
+    m = MESSAGE_RE.search(raw)
+    raw = m.group(3) if m else raw
+    if not raw.isdigit():
+        raise Fail(f"{name} must be a message id or a message link")
+    return raw
 
 
 def request(method, path, data=None, ctype=None, params=None):
@@ -203,17 +244,19 @@ def fetch_new(limit=50):
             "note": "Call reports_mark_read with the last id handled to move the cursor."}
 
 
-def fetch_recent(limit=20):
-    cid = channel_id()
-    page = get(f"/channels/{cid}/messages", {"limit": max(1, min(int(limit), 100))})
-    return {"channel": cid, "messages": [shape(m, cid) for m in reversed(page)]}
+def fetch_recent(limit=20, channel=None, before=None, after=None):
+    cid, _ = parse_ref(None, channel)
+    b, a = message_part(before, "before"), message_part(after, "after")
+    params = {"limit": max(1, min(int(limit), 100)), **({"before": b} if b else {}), **({"after": a} if a else {})}
+    page = sorted(get(f"/channels/{cid}/messages", params), key=lambda m: int(m["id"]))
+    return {"channel": cid, "messages": [shape(m, cid) for m in page]}
 
 
-def get_message(message_id):
-    cid = channel_id()
-    if not str(message_id).isdigit():
+def get_message(message_id, channel=None):
+    cid, mid = parse_ref(message_id, channel)
+    if not mid:
         raise Fail("message_id must be a number")
-    return shape(get(f"/channels/{cid}/messages/{message_id}"), cid)
+    return shape(get(f"/channels/{cid}/messages/{mid}"), cid)
 
 
 def safe_name(name):
@@ -221,12 +264,12 @@ def safe_name(name):
     return name[:120]
 
 
-def download(message_id):
-    cid = channel_id()
-    if not str(message_id).isdigit():
+def download(message_id, channel=None):
+    cid, mid = parse_ref(message_id, channel)
+    if not mid:
         raise Fail("message_id must be a number")
-    m = get(f"/channels/{cid}/messages/{message_id}")
-    folder = DOWNLOADS / str(message_id)
+    m = get(f"/channels/{cid}/messages/{mid}")
+    folder = DOWNLOADS / mid
     folder.mkdir(parents=True, exist_ok=True)
     files = []
     for i, a in enumerate(m.get("attachments", [])):
@@ -450,7 +493,9 @@ def status():
     return out
 
 
-ID = {"type": "string", "description": "A Discord message id (digits)."}
+ID = {"type": "string", "description": "A Discord message id (digits), or a message link (its channel is then used)."}
+CHANNEL = {"type": "string", "description": "Another channel or thread to read (its id or a discord.com/channels/... link); "
+           "default the reports channel. Read-only."}
 TOOLS = [
     ("reports_status", "Check the setup: token present, which channel/thread is read, the cursor.",
      {}, lambda a: status()),
@@ -458,14 +503,19 @@ TOOLS = [
      "Without a cursor: the newest `limit` messages. Read-only; does not move the cursor.",
      {"limit": {"type": "integer", "description": "At most this many (1-500, default 50)."}},
      lambda a: fetch_new(a.get("limit", 50))),
-    ("reports_fetch_recent", "The newest messages regardless of the cursor, oldest first.",
-     {"limit": {"type": "integer", "description": "1-100, default 20."}},
-     lambda a: fetch_recent(a.get("limit", 20))),
-    ("reports_get_message", "One message by id (e.g. the one a report replies to).",
-     {"message_id": ID}, lambda a: get_message(a["message_id"])),
+    ("reports_fetch_recent", "The newest messages regardless of the cursor, oldest first. Reads the reports channel, or "
+     "`channel` (any channel or thread the bot can see); `before`/`after` page through it.",
+     {"limit": {"type": "integer", "description": "1-100, default 20."}, "channel": CHANNEL,
+      "before": {"type": "string", "description": "Message id or link: only messages before it."},
+      "after": {"type": "string", "description": "Message id or link: only messages after it."}},
+     lambda a: fetch_recent(a.get("limit", 20), a.get("channel"), a.get("before"), a.get("after"))),
+    ("reports_get_message", "One message by id or link (e.g. the one a report replies to), in the reports channel or any "
+     "channel/thread the bot can see.",
+     {"message_id": ID, "channel": CHANNEL}, lambda a: get_message(a["message_id"], a.get("channel"))),
     ("reports_download_attachments", "Download a message's attachments (screenshots, videos, saves) to a folder of their own "
-     "and return the paths. Fetches fresh links, so it works after the old CDN links expired.",
-     {"message_id": ID}, lambda a: download(a["message_id"])),
+     "and return the paths. Fetches fresh links, so it works after the old CDN links expired. By id or link, in the reports "
+     "channel or any channel/thread the bot can see.",
+     {"message_id": ID, "channel": CHANNEL}, lambda a: download(a["message_id"], a.get("channel"))),
     ("reports_link_issue", "Record (locally) that these messages' authors reported GitHub issue N, for crediting them "
      "when it ships. Call it when filing or commenting on an issue.",
      {"issue": {"type": "integer"}, "message_ids": {"type": "array", "items": ID}},
@@ -620,6 +670,24 @@ def selftest():
             ENV["DISCORD_BOT_TOKEN"] = old_token
         else:
             ENV.pop("DISCORD_BOT_TOKEN", None)
+
+    # References: no Discord call (channel_id() reads the reports channel set here).
+    had_channel, old_channel = "DISCORD_REPORTS_CHANNEL" in ENV, ENV.get("DISCORD_REPORTS_CHANNEL")
+    ENV["DISCORD_REPORTS_CHANNEL"] = "111"
+    try:
+        ok(parse_ref("https://discord.com/channels/9/222/333") == ("222", "333"), "a message link gives its channel and message")
+        ok(parse_ref("333", "https://discord.com/channels/9/444") == ("444", "333"), "digits with a channel link")
+        ok(parse_ref("https://discord.com/channels/@me/555/666", "777") == ("555", "666"), "an @me link works and beats channel")
+        ok(parse_ref() == ("111", None), "no arguments: the reports channel")
+        ok(message_part("https://discord.com/channels/9/1/2", "before") == "2", "before: a link's message part")
+        refused(lambda: parse_ref("abc"), "a non-number message refused")
+        refused(lambda: parse_ref("1", "nope"), "a bad channel refused")
+        refused(lambda: message_part("abc", "after"), "a bad after refused")
+    finally:
+        if had_channel:
+            ENV["DISCORD_REPORTS_CHANNEL"] = old_channel
+        else:
+            ENV.pop("DISCORD_REPORTS_CHANNEL", None)
     print("selftest passed")
 
 
