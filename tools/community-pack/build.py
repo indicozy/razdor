@@ -29,6 +29,7 @@ Checks:   python3 -I tools/community-pack/build.py --selftest
 
 import argparse
 import csv
+import datetime
 import hashlib
 import json
 import os
@@ -67,7 +68,7 @@ NOTE_PART = "Загружена только часть мода: остальн
 NOTE_PARTIAL = "Мод работает не со всем, что есть в оригинале, поэтому часть возможностей в Razdor может не работать."
 
 FILES_COLS = ["thread_id", "message_id", "file_name", "file_path", "sha256", "is_newest"]
-TEST_COLS = ["sha256", "mod", "result", "reason"]
+TEST_COLS = ["thread_id", "file_name", "sha256", "slug", "result"]
 BYMOD_COLS = ["thread_id", "mod_slug"]
 MAPS_COLS = ["flat_name", "original_relative_path", "source", "sha256", "duplicate_of"]
 REPORT_COLS = ["flat_name", "cu_vanilla_result", "evo_mod_result", "first_failure_line"]
@@ -276,15 +277,38 @@ def named_author(content, users):
     return strip_markup(m.group(1), users).strip() if m else ""
 
 
-def map_file_name(raw):
-    """A map's file name the hub accepts: letters, digits, `-`, `_`, `.` and spaces; others become `_`."""
-    base = os.path.basename(raw.replace("\\", "/")) or "map.DTm"
-    name = "".join(c if (c.isalnum() or c in "-_. ") else "_" for c in base).lstrip(".").strip()
-    return name or "map.DTm"
+WIN_DEVICES = {"CON", "PRN", "AUX", "NUL"} | {f"COM{i}" for i in range(1, 10)} | {f"LPT{i}" for i in range(1, 10)}
+BAD_NAME_CHARS = set('/\\<>:"|?*')
 
 
-def safe_name(name):
-    return bool(name) and not name.startswith(".") and all(c.isalnum() or c in "-_. " for c in name)
+def hub_name_problem(name):
+    """Why the hub cannot store this file name (None when it can). The hub keeps any Unicode
+    name except these, so one name works on every platform."""
+    try:
+        size = len(name.encode("utf-8"))
+    except UnicodeEncodeError:
+        return "not valid Unicode"
+    if not name or name in (".", ".."):
+        return "empty, or . or .."
+    if size > 255:
+        return "over 255 UTF-8 bytes"
+    if any(ord(c) < 32 or ord(c) == 127 for c in name):
+        return "control character"
+    bad = sorted(c for c in name if c in BAD_NAME_CHARS)
+    if bad:
+        return f"character {bad[0]!r}"
+    if name != name.strip(" "):
+        return "leading or trailing space"
+    if name.endswith("."):
+        return "trailing dot"
+    if name.split(".")[0].upper() in WIN_DEVICES:
+        return "Windows device name"
+    return None
+
+
+def file_date(path):
+    """The date the file carries (its mtime, kept from the archive it was extracted from), YYYY-MM-DD."""
+    return datetime.datetime.fromtimestamp(os.path.getmtime(path), datetime.timezone.utc).strftime("%Y-%m-%d")
 
 
 def archive_author(source):
@@ -446,20 +470,31 @@ def mod_note(status, download, program):
     return " ".join(parts) or NOTE_PARTIAL
 
 
+def test_result(row):
+    """(ok, reason) of a test row whose result is `ok`, `FAIL <reason>` or `hang`."""
+    res = row["result"].strip()
+    if res == "ok":
+        return True, ""
+    if res.startswith("FAIL"):
+        return False, res[4:].strip() or "the smoke test failed"
+    if res == "hang":
+        return False, "hang (no end in the test time)"
+    return False, res or "not ok"
+
+
 def map_mod(rows, test_of, bymod):
     for r in rows:
         t = test_of.get(r["sha256"])
-        if t and t["mod"]:
-            return t["mod"]
+        if t and t["slug"]:
+            return t["slug"]
     return bymod
 
 
 def map_status(rows, test_of):
     found = [test_of.get(r["sha256"]) for r in rows]
-    bad = [t for t in found if t and t["result"] != "ok"]
+    bad = [why for t in found if t for ok, why in [test_result(t)] if not ok]
     if bad:
-        why = bad[0]["reason"] or "the smoke test failed"
-        return "broken", {"ru": f"Не проходит проверку: {why}", "en": why}
+        return "broken", {"ru": f"Не проходит проверку: {bad[0]}", "en": bad[0]}
     if any(t is None for t in found):
         return "unknown", {}
     return "full", {}
@@ -486,12 +521,13 @@ def archive_path(adir, row):
 class Pack:
     """The catalog being built: its entries, asset store, skip, rename and note lists."""
 
-    def __init__(self, src, archive, base_dir, out, work):
+    def __init__(self, src, archive, base_dir, out, work, extra=None):
         self.src = src
         self.archive = archive
         self.base_dir = base_dir
         self.out = out
         self.work = work
+        self.extra = extra or {}  # thread id -> zip of its map files (the owner's downloads, see --extra)
         self.threads = load_threads(src)
         self.users = user_names(self.threads)
         self.assets = Assets(out)
@@ -501,8 +537,11 @@ class Pack:
         self.map_shas = set()
         self.names = set()
         self.skipped = []
-        self.renamed = []
         self.notes = []
+        self.pkgs = {}        # mod slug -> its package: {lower name: (name, sha256)}
+        self.chains = {}      # mod slug -> the mods whose packages come before its own, in order
+        self.mismatches = []  # mods whose rebuild differs from their tested game folder
+        self.rebuild_log = [] # (slug, chain, problems) for report.md
         self.trees = {}
         self.cu_maps = None
         if self.conv is None:
@@ -532,18 +571,19 @@ class Pack:
         if entry["kind"] == "mod":
             self.mod_ids.add(entry["id"])
 
-    def unique_name(self, raw, digest, owner):
-        """A file name no other map has: unsafe characters become `_`; a clash gets the digest before the extension."""
-        name = map_file_name(raw)
-        if name != raw:
-            self.renamed.append((owner, raw, name))
-        if name.lower() in self.names:
-            stem, ext = os.path.splitext(name)
-            new = f"{stem} {digest[:8]}{ext}"
-            self.renamed.append((owner, name, new))
-            name = new
-        self.names.add(name.lower())
-        return name
+    def claim_names(self, raws):
+        """Claims the file names of an entry, kept as they are. Refused (Skip) when the hub cannot store one,
+        or when another map already has it (the hub keeps all maps in one folder; names ignore case)."""
+        local = set()
+        for raw in raws:
+            why = hub_name_problem(raw)
+            if why:
+                raise Skip(f"file name {raw!r} breaks the hub's name rules: {why}")
+            key = raw.lower()
+            if key in self.names or key in local:
+                raise Skip(f"file name {raw!r} is already used by another map")
+            local.add(key)
+        self.names |= local
 
     def preview(self, image, owner):
         if image is None or self.conv is None:
@@ -587,7 +627,7 @@ class Pack:
         if b == "evo":
             return (self.mod_json("evolution")["title"], "evolution", "game")
         if b == "evo9":
-            return ("Evolution 9.0", "evolution", "game-9.0")
+            return (self.mod_json("evolution")["title"], "evolution", "game")
         if b.startswith("mod:"):
             dep = b[4:]
             return (self.mod_json(dep)["title"], dep, "game")
@@ -636,6 +676,19 @@ class Pack:
             self.notes.append(f"{slug}: {len(decoded)} file name(s) were not UTF-8 and are read as cp866, e.g. `{decoded[0]}`.")
         program = any(rel.lower().endswith(PROGRAM_EXT) and not rel.lower().rsplit("/", 1)[-1].startswith("unins")
                       for rel, _ in diffs)
+        for rel, _ in members:
+            why = next((hub_name_problem(p) for p in rel.split("/") if hub_name_problem(p)), None)
+            if why:
+                raise Skip(f"file {rel!r} breaks the hub's name rules: {why}")
+        own = {rel.lower(): (rel, game.sha(rel)) for rel, _ in members}
+        before = (self.chains[dep] + [dep]) if dep else []
+        problems = self.rebuild_problems(game, before, own)
+        self.rebuild_log.append((slug, before, problems))
+        if problems:
+            self.mismatches.append(slug)
+            raise Skip(f"does not rebuild from its chain ({len(problems)} difference(s), see the rebuild check)")
+        self.pkgs[slug] = own
+        self.chains[slug] = before
         zip_path = os.path.join(self.work, slug + ".zip")
         build_zip(members, zip_path)
         verify_package(zip_path, base)
@@ -650,6 +703,22 @@ class Pack:
                                   [dep] if dep else [], status, note,
                                   [file_ref(asset, slug + ".zip", archive=True)],
                                   base=base_title, preview=preview))
+
+    def rebuild_problems(self, game, before, own):
+        """What differs between the game folder and Community Update plus the packages of `before` (in
+        order) plus the mod's own package. Names compare ignoring case, the way an overlay does;
+        executables, DLLs, the uninstaller, saves and logs are left out on both sides."""
+        cu = self.cu()
+        state = {rel.lower(): (rel, None) for rel in cu.paths}  # None: the Community Update file's own hash
+        for slug in before:
+            state.update(self.pkgs[slug])
+        state.update(own)
+        have = {k: (rel, cu.sha(rel) if sha is None else sha) for k, (rel, sha) in state.items() if not excluded(rel)}
+        want = {rel.lower(): (rel, game.sha(rel)) for rel in game.paths if not excluded(rel)}
+        problems = [f"missing {want[k][0]}" for k in sorted(set(want) - set(have))]
+        problems += [f"extra {have[k][0]}" for k in sorted(set(have) - set(want))]
+        problems += [f"differs {want[k][0]}" for k in sorted(set(want) & set(have)) if want[k][1] != have[k][1]]
+        return problems
 
     # forum maps
 
@@ -666,6 +735,13 @@ class Pack:
         groups = {}
         for r in files:
             groups.setdefault(r["thread_id"], []).append(r)
+        for tid, path in sorted(self.extra.items()):
+            if tid not in self.threads or self.threads[tid]["forum"] != "maps":
+                raise Fail(f"--extra {tid}: no map thread {tid} in the crawl")
+            groups[tid] = self.extra_rows(tid, path)
+            for r in groups[tid]:
+                # owner's download, tested ok on Community Update in an earlier run
+                test_of[r["sha256"]] = {"slug": "vanilla", "result": "ok"}
         for tid, t in sorted(self.threads.items()):
             if t["forum"] != "maps" or tid in groups:
                 continue
@@ -698,15 +774,37 @@ class Pack:
         kind = "campaign" if ("Кампания" in tags or "Campaign" in tags or len(keep) > 1) else "map"
         eid = f"{kind}-{tid}"
         paths = [self.map_file(r["file_path"]) for r in keep]
+        names = [package_name(r["file_name"]) for r in keep]
+        self.claim_names(names)
         meta = self.thread_fields(t, t["name"], "")
         refs = []
-        for r, full in zip(keep, paths):
+        for name, full in zip(names, paths):
             asset = self.assets.add(full, ".dtm", eid)
             self.map_shas.add(asset["sha256"])
-            refs.append(file_ref(asset, self.unique_name(package_name(r["file_name"]), asset["sha256"], eid),
-                                 lang="ru"))
+            refs.append(file_ref(asset, name, lang="ru"))
         self.add_entry(make_entry(eid, kind, meta, "", ["ru"], requires, status, note, refs,
                                   preview=self.preview(meta["image"], eid)))
+
+    def extra_rows(self, tid, path):
+        """The .dtm files of a zip given with --extra, extracted into the work folder, as files.tsv rows."""
+        if not os.path.isfile(path):
+            raise Fail(f"--extra {tid}: {path} is missing")
+        folder = os.path.join(self.work, "extra", tid)
+        os.makedirs(folder, exist_ok=True)
+        rows = []
+        with zipfile.ZipFile(path) as zf:
+            for info in zf.infolist():
+                name = os.path.basename(info.filename)
+                if info.is_dir() or not name.lower().endswith(".dtm"):
+                    continue
+                full = os.path.join(folder, name)
+                with open(full, "wb") as f:
+                    f.write(zf.read(info))
+                rows.append({"thread_id": tid, "message_id": tid, "file_name": name, "file_path": full,
+                             "sha256": sha256_file(full), "is_newest": "yes"})
+        if not rows:
+            raise Fail(f"--extra {tid}: no .dtm file in {path}")
+        return rows
 
     def map_requires(self, mod):
         if not mod:
@@ -752,12 +850,13 @@ class Pack:
         author, prefix = archive_author(package_name(row["source"]))
         eid = "arc-" + sha[:16]
         status, note = archive_status(rep)
+        self.claim_names([base])
         asset = self.assets.add(path, ".dtm", eid)
         seen.add(sha)
         meta = {"title": archive_title(base, prefix), "author": author, "description": "",
-                "added": "", "source_url": ""}
+                "added": file_date(path), "source_url": ""}
         self.add_entry(make_entry(eid, "map", meta, "", ["ru"], [], status, note,
-                                  [file_ref(asset, self.unique_name(base, sha, eid), lang="ru")]))
+                                  [file_ref(asset, base, lang="ru")]))
 
     # output
 
@@ -773,14 +872,16 @@ class Pack:
                 if r not in self.mod_ids:
                     raise Fail(f"{e['id']} requires {r}, which has no entry")
             for f in e["files"]:
-                ok = all(safe_name(p) for p in f["name"].split("/")) if e["kind"] == "mod" else safe_name(f["name"])
+                ok = not any(hub_name_problem(p) for p in f["name"].split("/"))
                 if not ok or not ASSET_RE.match(f["path"]) or not os.path.isfile(os.path.join(self.out, f["path"])):
                     raise Fail(f"{e['id']}: bad file {f['name']!r} or asset {f['path']!r}")
 
     def write(self):
-        catalog = {"format": FORMAT, "entries": sorted(self.entries, key=lambda e: e["id"])}
-        with open(os.path.join(self.out, "index.json"), "w", encoding="utf-8") as f:
-            f.write(json.dumps(catalog, ensure_ascii=False, indent=2) + "\n")
+        """report.md always; index.json only when every mod rebuilt from its chain."""
+        if not self.mismatches:
+            catalog = {"format": FORMAT, "entries": sorted(self.entries, key=lambda e: e["id"])}
+            with open(os.path.join(self.out, "index.json"), "w", encoding="utf-8") as f:
+                f.write(json.dumps(catalog, ensure_ascii=False, indent=2) + "\n")
         with open(os.path.join(self.out, "report.md"), "w", encoding="utf-8") as f:
             f.write(self.report_text())
 
@@ -807,8 +908,13 @@ class Pack:
             lines.append(f"| {sizes[name]} | `{name}` | {', '.join(sorted(owners[name]))} |")
         lines += ["", f"## Skipped ({len(self.skipped)})", ""]
         lines += [f"- {what}: {reason}" for what, reason in self.skipped] or ["None."]
-        lines += ["", f"## Renamed map files ({len(self.renamed)})", ""]
-        lines += [f"- {owner}: `{old}` -> `{new}`" for owner, old, new in self.renamed] or ["None."]
+        lines += ["", f"## Rebuild check: {len(self.rebuild_log)} mod(s), {len(self.mismatches)} failed", ""]
+        for slug, before, problems in self.rebuild_log:
+            via = " + ".join(["Community Update"] + before + [slug])
+            if problems:
+                lines.append(f"- FAIL {via}: {len(problems)} difference(s): " + "; ".join(problems[:40]))
+            else:
+                lines.append(f"- ok {via}")
         lines += ["", "## Notes", ""]
         lines += [f"- {n}" for n in self.notes] or ["None."]
         return "\n".join(lines) + "\n"
@@ -821,12 +927,12 @@ def clear_old(out):
             os.remove(os.path.join(out, fn))
 
 
-def build(src, archive, base_dir, out, forum_maps=True):
+def build(src, archive, base_dir, out, forum_maps=True, extra=None):
     os.makedirs(out, exist_ok=True)
     clear_old(out)
     work = tempfile.mkdtemp(prefix=".work-", dir=out)
     try:
-        pack = Pack(src, archive, base_dir, out, work)
+        pack = Pack(src, archive, base_dir, out, work, extra)
         pack.add_mods()
         if forum_maps:
             pack.add_forum_maps()
@@ -835,6 +941,9 @@ def build(src, archive, base_dir, out, forum_maps=True):
         pack.add_archive_maps()
         pack.check()
         pack.write()
+        if pack.mismatches:
+            raise Fail("mod(s) do not rebuild from Community Update plus their chain: " +
+                       ", ".join(pack.mismatches) + " (see report.md; index.json was not written)")
         return pack
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -908,9 +1017,11 @@ def write_fixture(root):
     write_file(os.path.join(src, "maps", "files.tsv"),
                "thread_id\tmessage_id\tfile_name\tfile_path\tsha256\tis_newest\n" +
                "".join("\t".join(r) + "\n" for r in files))
-    write_file(os.path.join(src, "maps", "test.tsv"), "sha256\tmod\tresult\treason\n" +
-               f"{shas['old']}\tmodA\tfail\told\n" + f"{shas['c1']}\tmodA\tok\t\n" +
-               f"{shas['c2']}\tmodA\tfail\tcrash on day 3\n")
+    write_file(os.path.join(src, "maps", "test.tsv"),
+               "thread_id\tfile_name\tsha256\tslug\tresult\n" +
+               f"300\told.DTm\t{shas['old']}\tmodA\tFAIL old\n" +
+               f"300\tc1.DTm\t{shas['c1']}\tmodA\tok\n" +
+               f"300\tc2.DTm\t{shas['c2']}\tmodA\tFAIL crash on day 3\n")
     write_file(os.path.join(src, "maps", "by_mod.tsv"), "thread_id\tmod_slug\n300\tmodA\n302\tvanilla\n")
     arc_rows = [("top__arc1.DTm", "dtm/arc1.DTm", "top", shas["arc"], ""),
                 ("top__dup.DTm", "dtm/dup.DTm", "top", shas["c1"], ""),
@@ -947,7 +1058,10 @@ def selftest():
     check_selftest("title: only the last bracket goes", clean_title("A [b] [c]") == "A [b]")
     check_selftest("title: no bracket, unchanged", clean_title("No bracket") == "No bracket")
     check_selftest("version: decoration removed", clean_version("** 2.0") == "2.0" and clean_version("▪︎▪︎") == "")
-    check_selftest("map name: unsafe characters become _", map_file_name("Frans (new)?.DTm") == "Frans _new__.DTm")
+    check_selftest("hub names: parentheses, apostrophes and Cyrillic are kept",
+                   all(hub_name_problem(n) is None for n in ["Coven Time(2).DTm", "Let's Go.DTm", "Карта 1.DTm"]))
+    refused = {n: hub_name_problem(n) for n in ["a:b.DTm", "CON.txt", "x ", "a.", "..", "q?.DTm", "a\x01", "a" * 256]}
+    check_selftest("hub names: each forbidden name is refused", all(refused.values()))
     check_selftest("archive author from Author-Title", archive_author("Crumb-Duchy_ravaged1") == ("Crumb", "Crumb"))
     check_selftest("archive author: none without a hyphen", archive_author("top") == (UNKNOWN_AUTHOR, ""))
     check_selftest("archive author: underscore before hyphen is no author",
@@ -960,7 +1074,6 @@ def selftest():
     check_selftest("author line: explicit name wins", named_author("**Автор:** Иван (<@1>)", users) == "Иван")
     check_selftest("id: slug kept, bad ids refused",
                    bool(ID_RE.match("iz-gryazi-v-knyazi")) and not ID_RE.match("a b"))
-    check_selftest("safe name refuses a dot or a bracket", safe_name("a(b).DTm") is False and safe_name(".x") is False)
     raw_dos = os.fsdecode("Посыльный.dtm".encode("cp866"))
     check_selftest("names: a non-UTF-8 DOS name reads as cp866, a UTF-8 one is kept",
                    package_name(raw_dos) == "Посыльный.dtm" and package_name("plain.ini") == "plain.ini")
@@ -1026,7 +1139,7 @@ def selftest():
         with tempfile.TemporaryDirectory() as root:
             src, cu, adir = write_fixture(root)
             out1, out2, out3 = (os.path.join(root, n) for n in ("out1", "out2", "out3"))
-            build(src, adir, cu, out1)
+            pack = build(src, adir, cu, out1)
             with open(os.path.join(out1, "index.json"), encoding="utf-8") as f:
                 cat = json.load(f)
             by_id = {e["id"]: e for e in cat["entries"]}
@@ -1059,12 +1172,30 @@ def selftest():
                            len(crumb) == 1 and crumb[0]["title"]["ru"] == "Duchy")
             check_selftest("build: the broken archive map is broken with its reason",
                            any(e["status"] == "broken" and e["files"][0]["name"] == "bad.DTm" for e in arcs))
+            modc = [x for x in pack.rebuild_log if x[0] == "modC"]
+            check_selftest("build: mod C rebuilds from Community Update plus mod A's package",
+                           pack.mismatches == [] and len(modc) == 1 and modc[0][1] == ["modA"] and modc[0][2] == [])
+            check_selftest("build: archive maps carry their file's date",
+                           all(re.match(r"^\d{4}-\d{2}-\d{2}$", e["added"]) for e in arcs))
             check_selftest("build: every asset file exists and has its size",
                            all(os.path.getsize(os.path.join(out1, f["path"])) == f["size"]
                                for e in cat["entries"] for f in e["files"]))
             report = open(os.path.join(out1, "report.md"), encoding="utf-8").read()
             check_selftest("report: lists the skipped items with reasons",
                            "mod modB: status missing" in report and "no map file in the crawl" in report)
+            bad_root = os.path.join(root, "bad")
+            bsrc, bcu, badir = write_fixture(bad_root)
+            write_file(os.path.join(bcu, "Extra", "old.ini"), "only in Community Update")
+            refused = False
+            try:
+                build(bsrc, badir, bcu, os.path.join(bad_root, "out"))
+            except Fail as e:
+                refused = "rebuild" in str(e)
+            with open(os.path.join(bad_root, "out", "report.md"), encoding="utf-8") as f:
+                bad_report = f.read()
+            check_selftest("rebuild: a mod that does not rebuild fails loudly, is listed, writes no index",
+                           refused and "extra Extra/old.ini" in bad_report
+                           and not os.path.exists(os.path.join(bad_root, "out", "index.json")))
             os.makedirs(out2)
             write_file(os.path.join(out2, "0000000000000000.zip"), "stale")
             build(src, adir, cu, out2)
@@ -1091,15 +1222,23 @@ def main(argv=None):
     ap.add_argument("--out", help="the output folder")
     ap.add_argument("--no-forum-maps", action="store_true",
                     help="leave the forum maps out (until maps/files.tsv and maps/test.tsv exist)")
+    ap.add_argument("--extra", action="append", default=[], metavar="THREAD=ZIP",
+                    help="the map files of a forum thread from a zip the owner downloaded (repeatable)")
     ap.add_argument("--selftest", action="store_true", help="run the offline checks and exit")
     a = ap.parse_args(argv)
+    extra = {}
+    for item in a.extra:
+        tid, sep, path = item.partition("=")
+        if not sep or not tid or not path:
+            ap.error(f"--extra wants THREAD=ZIP, got {item!r}")
+        extra[tid] = path
     if a.selftest:
         return selftest()
     missing = [n for n in ("src", "archive_maps", "base", "out") if not getattr(a, n)]
     if missing:
         ap.error("missing " + ", ".join("--" + m.replace("_", "-") for m in missing))
     try:
-        build(a.src, a.archive_maps, a.base, a.out, forum_maps=not a.no_forum_maps)
+        build(a.src, a.archive_maps, a.base, a.out, forum_maps=not a.no_forum_maps, extra=extra)
     except Fail as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
