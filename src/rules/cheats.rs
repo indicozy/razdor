@@ -418,6 +418,7 @@ pub fn routes(game: &Game) -> Vec<Route> {
 mod tests {
     use super::*;
     use crate::rules::content::HeroClass;
+    use crate::rules::game::STEP_SECONDS;
     use std::sync::Arc;
 
     fn game() -> Game {
@@ -573,6 +574,41 @@ mod tests {
         assert_eq!(g.step_time((2, 2), (3, 2)), normal / 4.0);
         cheat(&mut g, "speed 1").unwrap();
         assert_eq!(g.step_time((2, 2), (3, 2)), normal);
+    }
+
+    /// The game minutes of one real step of the hero, on a cell he came onto (his step base
+    /// is set then, so the walk prices it from that base), with `speed N` on or off. The
+    /// armies' clock runs by these minutes, so `speed` shortens only the hero's walk.
+    #[test]
+    fn speed_shortens_every_hero_step_so_the_armies_move_less_meanwhile() {
+        // One real step to a passable neighbour: the game minutes it took.
+        fn step(g: &mut Game) -> f64 {
+            let from = g.tile();
+            let to = [(1, 0), (0, 1), (-1, 0), (0, -1)]
+                .iter()
+                .map(|&(dx, dy)| (from.0 + dx, from.1 + dy))
+                .find(|&t| g.set_destination(t))
+                .expect("a passable neighbour");
+            assert_eq!(g.path, vec![to]);
+            let t0 = g.clock.total_minutes();
+            while g.tile() == from {
+                g.tick(STEP_SECONDS / 10.0);
+            }
+            g.clock.total_minutes() - t0
+        }
+        let minutes = |speed: Option<u32>| {
+            let mut g = game();
+            if let Some(n) = speed {
+                cheat(&mut g, &format!("speed {n}")).unwrap();
+            }
+            step(&mut g);
+            // The second step is priced from the cell the first one brought him onto.
+            step(&mut g)
+        };
+        let normal = minutes(None);
+        assert!(normal > 0.0);
+        assert_eq!(minutes(Some(4)), normal / 4.0, "a quarter of the minutes, the hero's step only");
+        assert_eq!(minutes(Some(1)), normal);
     }
 
     /// A battle against three spearmen.

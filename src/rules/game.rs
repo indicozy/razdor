@@ -1029,7 +1029,10 @@ impl Game {
 
     /// Game minutes of the hero's step from `from` onto its neighbour `to` (world.md §2.1):
     /// the cost of the cell he leaves on LAND, or on MIXED at sea, times his speed, ×1.5
-    /// diagonally; divided by the cheat console's `speed` (`rules::cheats`).
+    /// diagonally; divided by the cheat console's `speed` (`rules::cheats`), which shortens
+    /// only his walk. Used for the route's estimate, for the `noclip` steps and for a walk
+    /// step with no [`Game::step_base`]; a walk step with one takes
+    /// [`Game::hero_step_minutes`], which divides its base by the same `speed`.
     pub fn step_time(&self, from: Tile, to: Tile) -> f32 {
         let w = &self.world;
         let left = if self.aboard() { w.mixed_cost(from) } else { w.map.cost(from).unwrap_or(0) };
@@ -1037,10 +1040,12 @@ impl Game {
     }
 
     /// Minutes of the hero's step from `from` onto `to` as he takes it: the base the original
-    /// set when he came onto `from` ([`Game::step_base`]), ×1.5 diagonally.
+    /// set when he came onto `from` ([`Game::step_base`]), ×1.5 diagonally, divided by the
+    /// cheat console's `speed` like [`Game::step_time`] (the `None` branch goes through it, so
+    /// the cheat applies once either way).
     fn hero_step_minutes(&self, from: Tile, to: Tile) -> f32 {
         match self.step_base {
-            Some(base) => step_minutes(self.world.map.grid, from, to, 1, base),
+            Some(base) => step_minutes(self.world.map.grid, from, to, 1, base) / self.cheats.speed() as f32,
             None => self.step_time(from, to),
         }
     }

@@ -40,7 +40,7 @@ Command names are written in English. Case does not matter. If you enter the nam
 | `win` | Ends the battle with your victory |
 | `lose` | Ends the battle with your defeat |
 | `god` | Toggles army invincibility in battle |
-| `speed N` | Sets the hero's movement speed (1 — normal speed) |
+| `speed N` | Speeds up the hero only: each of his steps takes N times less game time, so enemy armies move less meanwhile (1 — normal speed) |
 | `noclip` | Toggles the ability to pass through obstacles |
 | `peace` | Toggles peace mode (enemies will not attack the hero, but the hero can attack them) |
 | `routes` | Toggles the display of enemy army paths on the minimap |
