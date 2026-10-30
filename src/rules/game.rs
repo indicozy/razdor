@@ -304,6 +304,11 @@ pub struct Game {
     /// for the map to fly to and fade in; the interface takes them. Not saved.
     #[serde(skip)]
     pub shown: Vec<Shown>,
+    /// The armies the minimap marks as met-and-waiting (+0x3826, [`Game::meeting_marked`]),
+    /// as they were at the last [`Game::refresh_meeting_marks`]. Not saved; `None` until the
+    /// first refresh (a fresh load reads the live state).
+    #[serde(skip)]
+    pub(crate) meeting_marks: Option<Vec<ArmyId>>,
     /// Scenario armies (ids) the player has met / beaten.
     pub(crate) met_armies: BTreeSet<ArmyId>,
     /// The army the player clicked (its `uid`): reaching it always starts a meeting ("click
@@ -664,6 +669,7 @@ impl Game {
             effect_events: Vec::new(),
             pending_reveals: Vec::new(),
             shown: Vec::new(),
+            meeting_marks: None,
             met_armies: BTreeSet::new(),
             talk_to: None,
             point_zeroed: false,
@@ -1551,6 +1557,38 @@ impl Game {
     /// places their lanterns showed.
     pub fn holds_events(&self) -> bool {
         !self.held.is_empty() || !self.held_shown.is_empty()
+    }
+
+    /// Whether the event display is busy: an event's outcome not yet taken, held or shown
+    /// places, an event window on screen or a question waiting. The minimap's meeting marks
+    /// are recomputed only while it is idle ([`Game::refresh_meeting_marks`]); the interface
+    /// adds its own open dialogs and camera flights to this.
+    pub fn event_display_busy(&self) -> bool {
+        !self.pending.is_empty()
+            || self.holds_events()
+            || !self.shown.is_empty()
+            || self.script().is_some_and(|e| e.holds_window() || e.pending_question().is_some())
+    }
+
+    /// Recomputes the meeting marks of every army (0x4abf44: the scan's idle end clears
+    /// +0x3826 of all armies and sets it again for each army with a meeting event waiting,
+    /// 0x4a801a). The original does this only once the event scan is idle, after the event
+    /// dialogs are done, so an army met keeps its ally colour on the minimap (0x49e3c9)
+    /// while the meeting's dialog shows. The interface calls this only while the event
+    /// display is idle.
+    pub fn refresh_meeting_marks(&mut self) {
+        let marks: Vec<ArmyId> = self.world.armies.iter().filter(|a| self.script().is_some_and(|e| e.meeting_waiting(self, a.id))).map(|a| a.id).collect();
+        self.meeting_marks = Some(marks);
+    }
+
+    /// The minimap's meeting mark of army `army` (+0x3826 with +0x16af above 0, 0x49e3c9): the
+    /// last refresh's answer ([`Game::refresh_meeting_marks`]), or the live one before any
+    /// refresh. The rules keep reading [`EventEngine::meeting_waiting`] live.
+    pub fn meeting_marked(&self, army: ArmyId) -> bool {
+        match &self.meeting_marks {
+            Some(marks) => marks.contains(&army),
+            None => self.script().is_some_and(|e| e.meeting_waiting(self, army)),
+        }
     }
 
     /// The cells an event has uncovered whose place is not shown yet (waiting in

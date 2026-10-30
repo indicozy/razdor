@@ -2321,7 +2321,7 @@ fn map_hover(game: &Game, t: Tile, on_minimap: bool) -> MapHover {
     if on_minimap || unexplored {
         return h;
     }
-    let meeting = |a: &Army| game.script().is_some_and(|e| e.meeting_waiting(game, a.id));
+    let meeting = |a: &Army| game.meeting_marked(a.id);
     h.army = if t == game.tile() {
         CellArmy::Hero
     } else if let Some(a) = w.armies.iter().find(|a| a.tile(map) == t) {
@@ -2737,6 +2737,12 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
 
 fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>, session: Option<&mut super::session::Keeper>) -> Option<Screen> {
     clear_background(rgb(10, 12, 10));
+    // The minimap's meeting marks are recomputed only while the event display is idle (the
+    // original's 0x4abf44 runs when the scan is idle, after the dialogs): an army met keeps its
+    // ally colour while the meeting's dialog or a showing is on screen.
+    if dialogs.is_empty() && !view.flying() && view.spell_fx.is_empty() && !game.event_display_busy() {
+        game.refresh_meeting_marks();
+    }
 
     // The original's world frame acts on the map only while it is idle (interface.md §7.3,
     // 0x4cc1ff): while the hero walks or waits, it only watches for the stop.

@@ -706,7 +706,7 @@ pub fn window(game: &Game, art: Option<&super::dt_art::DtArt>, view: Rect, view_
         if !fog.explored(t) || game.world.location_at(t).is_some() {
             continue;
         }
-        let waits = game.script().is_some_and(|e| e.meeting_waiting(game, a.id));
+        let waits = game.meeting_marked(a.id);
         marks.push((t, if army_is_ally(a.own_attitude(), waits) { ally } else { enemy }));
     }
     // The `routes` cheat (Razdor's): each enemy army's planned path as a line from where it
@@ -822,7 +822,7 @@ pub fn army_list(game: &Game, o: Rect, bottom: f32, unnamed: &str) -> Option<(f3
         if hot {
             draw_rectangle(rr.x, rr.y, rr.w, rr.h, Color::new(1.0, 1.0, 1.0, 0.14));
         }
-        let waits = game.script().is_some_and(|e| e.meeting_waiting(game, a.id));
+        let waits = game.meeting_marked(a.id);
         let col = if army_is_ally(a.own_attitude(), waits) { ally } else { enemy };
         draw_circle(rr.x + 7.0 * k, y + row * 0.5, 3.5 * k, BLACK);
         draw_circle(rr.x + 7.0 * k, y + row * 0.5, 2.5 * k, col);

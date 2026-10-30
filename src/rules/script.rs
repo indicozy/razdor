@@ -2621,6 +2621,38 @@ mod tests {
     }
 
     #[test]
+    fn the_minimap_meeting_mark_holds_until_the_event_display_is_idle() {
+        // 0x4a801a sets the "meeting event waiting" mark and 0x4abf44 recomputes it only when
+        // the event scan is idle, after the dialogs (0x49e3c9 draws the army ally-coloured
+        // while it is set). Once the meeting's event has run, the live answer is no longer
+        // "waiting", but the minimap's mark holds while the display is busy and is recomputed
+        // on the first idle refresh.
+        let mut talk = ev(EventKind::Global);
+        talk.conditions.meet_army = 2;
+        let mut s = world(vec![talk]);
+        s.armies = vec![army(2, 5, 2, 1, &[troop(4, 0, 1)])];
+        let mut g = start(&s);
+        read(&mut g);
+        g.refresh_meeting_marks();
+        assert!(g.meeting_marked(2), "the event waits for the meeting");
+        let a = &mut g.world.armies[0];
+        a.mind.scripted = true;
+        a.path = vec![(4, 2)];
+        a.mind.scores.insert(super::super::ai::HERO, 1);
+        assert!(g.set_destination((8, 4)));
+        let events = walk(&mut g);
+        assert_eq!(fired(&events), vec![1]);
+        assert!(!g.script().is_some_and(|e| e.meeting_waiting(&g, 2)), "the event has run");
+        assert!(g.event_display_busy(), "its window is on screen");
+        assert!(g.meeting_marked(2), "the mark holds while the dialog shows");
+        read(&mut g);
+        assert!(!g.event_display_busy(), "the dialog is done");
+        assert!(g.meeting_marked(2), "still the mark until the idle refresh");
+        g.refresh_meeting_marks();
+        assert!(!g.meeting_marked(2), "recomputed at the idle refresh (0x4abf44)");
+    }
+
+    #[test]
     fn a_victory_met_on_a_step_is_over_before_its_window_is_on_screen() {
         // Обучающий1 ends with victory event 21, "meet army 11" (the royal herald walking up).
         // The rules end the scenario inside the step, but the screen gets the step's events,
