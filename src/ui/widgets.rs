@@ -1899,33 +1899,25 @@ pub fn checkbox(x: f32, y: f32, max_w: f32, label: &str, value: bool) -> Option<
     None
 }
 
-/// A check box with its label set under it, word-wrapped to `w` in up to two lines at `size`
-/// exactly (not the font's native size: a phone's label keeps its own size, never shrunk). For
-/// a spot too narrow for [`checkbox`]'s line. Returns the new state when clicked.
-pub fn checkbox_stacked(x: f32, y: f32, w: f32, size: f32, label: &str, value: bool) -> Option<bool> {
-    let spacing = size + 2.0;
-    let mut lines: Vec<String> = Vec::new();
-    for word in label.split_whitespace() {
-        match lines.last_mut() {
-            Some(line) if measure_exact(&format!("{line} {word}"), size).width <= w => {
-                line.push(' ');
-                line.push_str(word);
-            }
-            _ => lines.push(word.to_string()),
-        }
-    }
-    lines.truncate(2);
-    let hover = mouse_in(x, y, w, 22.0 + spacing * lines.len() as f32);
-    draw_rectangle(x, y + 2.0, 18.0, 18.0, FIELD_BG);
-    draw_rectangle_lines(x, y + 2.0, 18.0, 18.0, 1.0, if hover { INK } else { DIM });
+/// A check box beside its label on one line: the box left, the label right at `size` exactly
+/// (not the font's native size, never shrunk). The box is 0.8 of the label size, at
+/// least 18 px (the settings' check box). The whole row is the target: on a phone it grows
+/// upward to 48 dp ([`tap_rect`]), so `r` is the row's place and its bottom stays. Returns the
+/// new state when clicked.
+pub fn checkbox_row(r: Rect, size: f32, label: &str, value: bool) -> Option<bool> {
+    let side = (size * 0.8).max(18.0);
+    let hit = tap_rect(Rect::new(r.x, r.y, r.w, side), true);
+    let (hover, _down, pressed) = button_state(hit, true);
+    draw_rectangle(r.x, r.y + r.h - side, side, side, FIELD_BG);
+    draw_rectangle_lines(r.x, r.y + r.h - side, side, side, 1.0, if hover { INK } else { DIM });
     if value {
-        draw_line(x + 4.0, y + 11.0, x + 8.0, y + 16.0, 2.5, ACCENT);
-        draw_line(x + 8.0, y + 16.0, x + 15.0, y + 5.0, 2.5, ACCENT);
+        let (bx, by, k) = (r.x, r.y + r.h - side, side / 18.0);
+        draw_line(bx + 4.0 * k, by + 11.0 * k, bx + 8.0 * k, by + 16.0 * k, 2.5 * k, ACCENT);
+        draw_line(bx + 8.0 * k, by + 16.0 * k, bx + 15.0 * k, by + 5.0 * k, 2.5 * k, ACCENT);
     }
-    for (i, text_line) in lines.iter().enumerate() {
-        text_exact(text_line, x, y + 22.0 + size + spacing * i as f32, size, INK);
-    }
-    if hover && clicked() {
+    let label = ellipsize(label, (r.w - side - 8.0).max(0.0), size);
+    text_exact(&label, r.x + side + 8.0, r.y + r.h - side / 2.0 + size * 0.35, size, INK);
+    if pressed {
         claim();
         return Some(!value);
     }

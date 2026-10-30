@@ -947,11 +947,16 @@ pub fn squad(
     // unit can be promoted now; the tree keeps offering the promotion.
     if let Some(t) = tree_of.filter(|&t| game.squad[t].promotion_ready(&c)) {
         let on = game.squad[t].sign_off();
-        let spot = at(574.0, 150.0, 248.0, 76.0);
-        // A phone's label is 33 px (about 12.3 sp at 2.75 px per dp, the check's floor); the
-        // desktop keeps the army window's own size.
-        let size = if super::display::dp_px().is_some() { 33.0 } else { 16.0 * k };
-        if let Some(off) = super::widgets::checkbox_stacked(spot.x, spot.y, spot.w, size, tr("Don't remind"), on) {
+        // A phone's label is 12.5 px per dp (its capital about 12.5 sp, the check's floor of 12
+        // sp; a fixed px size would shrink on a denser phone); the desktop keeps the army
+        // window's own size. The row sits in the empty block above the Dismiss row, 76 px tall,
+        // its bottom at 226.
+        let size = match super::display::dp_px() {
+            Some(dp) => 12.5 * dp,
+            None => 16.0 * k,
+        };
+        let row = at(574.0, 150.0, 248.0, 76.0);
+        if let Some(off) = super::widgets::checkbox_row(row, size, tr("Don't remind"), on) {
             game.squad[t].set_sign_off(off);
         }
     }
