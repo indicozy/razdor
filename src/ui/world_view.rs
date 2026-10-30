@@ -18,7 +18,7 @@ use razdor::trf;
 use razdor::rules::clock::duration_label;
 use razdor::rules::game::{Event, Foe, Game};
 use razdor::rules::idle;
-use razdor::rules::magic::{CastOutcome, CastTarget, SpellLine};
+use razdor::rules::magic::{spell_lines, CastOutcome, CastTarget, SpellLine};
 use razdor::rules::map::{object_class, Decoration, Grid, Tile, TileMap, ROAD};
 use razdor::rules::world::{Army, Location, LocationKind, Owner, Troop};
 
@@ -1975,12 +1975,8 @@ fn army_tooltip(game: &Game, a: &Army) -> Tooltip {
         text.push((game.fill_text(&a.description), Ink::Orange));
     }
     let now = game.clock.total_minutes() as u64;
-    let mut spells: Vec<&str> = Vec::new();
-    for s in a.troops.iter().flat_map(|t| t.spells.iter().flatten()).filter(|s| s.until > now).filter_map(|s| game.spell(s.spell)) {
-        if !spells.contains(&s.name.as_str()) {
-            spells.push(s.name.as_str());
-        }
-    }
+    let groups: Vec<_> = a.troops.iter().map(|t| &t.spells[..]).collect();
+    let spells: Vec<String> = spell_lines(&groups, now).iter().filter_map(|l| Some(spell_entry(&game.spell(l.spell)?.name, l, now))).collect();
     if !spells.is_empty() {
         // Wrapped as the description: an army of several units can list more names than fit.
         text.push((trf!("Under spells: {spells}", spells = spells.join(", ")), Ink::Mana));
@@ -2254,6 +2250,15 @@ fn hover_tooltip(game: &Game, cam: &Camera) -> Option<Tooltip> {
         return Some(army_tooltip(game, a));
     }
     Some(location_tooltip(game, &game.world.locations[l]))
+}
+
+/// The pointer's place over army `i` for an off-screen snapshot (`RAZDOR_SCENE_ARMY_HOVER`):
+/// the point the map's hover test takes for it (its cell, 12 px above its foot, as
+/// [`army_tooltip`]'s hit test), at the default zoom.
+pub fn army_pointer(game: &Game, i: usize) -> Option<(f32, f32)> {
+    let a = game.world.armies.get(i)?;
+    let cam = Camera::looking_at(game, 1.0, game.display_pos());
+    Some((cam.to_screen(game.army_display_pos(a)) - vec2(0.0, 12.0 * cam.scale / PX)).into())
 }
 
 /// The original's tooltip of the hero's own army (0x4ca9f0 with army 0): "Отряд героя",
@@ -3079,24 +3084,6 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
         super::chrome::shadow_centered(&label, c.x, c.y - 14.0 * cam.scale / PX, size, ACCENT);
     }
 
-    // The original has no side panel: the map fills the screen above the bar. Lasting
-    // world spells stand small in the top left corner, under the minimap when it was moved
-    // there.
-    let notes_top = match view.minimap.then(|| minimap::outer(&game.world.map, cam.view)) {
-        Some(o) if o.x < 10.0 + 200.0 * super::chrome::k() && o.y < 40.0 => minimap::below(game, o, screen_height() - bar_h()) + 4.0,
-        _ => 0.0,
-    };
-    let now = game.clock.total_minutes() as u64;
-    let notes: Vec<(String, Color)> = game
-        .spell_list()
-        .iter()
-        .filter_map(|l| Some((spell_line_label(&game.spell(l.spell)?.name, l, now), MANA)))
-        .collect();
-    // Inside the safe area (zeros on desktop): the corner's and the cutout's margins.
-    let (inset_left, inset_top, _, _) = razdor::platform::safe_insets();
-    for (i, (line, color)) in notes.iter().enumerate() {
-        super::chrome::shadow_text(line, 10.0 + inset_left, inset_top + notes_top + 22.0 + i as f32 * 18.0, 16.0, *color);
-    }
     // Waiting: the three buttons over the message box (shown while the pointer is on it, the
     // panel's centre; interface.md §6) and keys 1 / 4. A click elsewhere on the panel does
     // nothing, as the original's (0x4b930c, 0x4b93a8; interface.md §6, §7). Waits play in real
@@ -3399,9 +3386,10 @@ fn draw_debug(game: &Game, cam: &Camera) {
     }
 }
 
-/// A line of the top-left spell list: the spell's name and its time left, "∞" when endless,
-/// and how many squad units it is on when that is not the whole squad: "Name (∞, 1 из 12)".
-fn spell_line_label(name: &str, l: &SpellLine, now: u64) -> String {
+/// An entry of an army's "Under spells" line: the spell's name and its time left, "∞" when
+/// endless, and how many of the army's units it is on when that is not all of them: "Name
+/// (∞, 1 из 12)".
+fn spell_entry(name: &str, l: &SpellLine, now: u64) -> String {
     let time = if l.endless { "∞".to_string() } else { duration_label(l.until.saturating_sub(now) as f64) };
     if l.units < l.of {
         format!("{name} ({time}, {})", trf!("{n} of {total}", n = l.units, total = l.of))
@@ -3418,17 +3406,17 @@ mod tests {
     use razdor::trf;
 
     #[test]
-    fn the_spell_list_shows_endless_as_infinity_and_the_units_under_a_part_of_the_squad() {
+    fn an_army_spell_shows_endless_as_infinity_and_the_units_under_a_part_of_the_army() {
         let now = 1_000;
         let timed = SpellLine { spell: 2, until: now + 600, endless: false, units: 12, of: 12 };
-        assert_eq!(spell_line_label("Bless", &timed, now), format!("Bless ({})", duration_label(600.0)));
+        assert_eq!(spell_entry("Bless", &timed, now), format!("Bless ({})", duration_label(600.0)));
         let part = SpellLine { units: 1, ..timed };
-        assert_eq!(spell_line_label("Bless", &part, now), format!("Bless ({}, {})", duration_label(600.0), trf!("{n} of {total}", n = 1, total = 12)));
+        assert_eq!(spell_entry("Bless", &part, now), format!("Bless ({}, {})", duration_label(600.0), trf!("{n} of {total}", n = 1, total = 12)));
         let endless = SpellLine { until: razdor::rules::world::MAP_ARMY_SPELL_END, endless: true, units: 1, ..timed };
-        let line = spell_line_label("Bless", &endless, now);
+        let line = spell_entry("Bless", &endless, now);
         assert!(line.starts_with("Bless (∞, "), "{line}");
         assert!(line.ends_with(&format!("{})", trf!("{n} of {total}", n = 1, total = 12))), "{line}");
-        assert_eq!(spell_line_label("Bless", &SpellLine { endless: true, ..timed }, now), "Bless (∞)");
+        assert_eq!(spell_entry("Bless", &SpellLine { endless: true, ..timed }, now), "Bless (∞)");
     }
 
     /// A turn of a phone (Razdor's extra): a pointer left in the new screen's edge zone scrolls

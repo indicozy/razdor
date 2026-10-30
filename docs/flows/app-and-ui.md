@@ -210,8 +210,7 @@ corners. The bottom bar's stat line (mana, gold, income, wages) moves each item 
 its label's start and its value's end off the bottom corners (`game_bar::stat_centres`, a phone choice; the
 original has no corners). `mobile::refresh_safe_insets` (once a frame in `App::frame`) reads them when the screen turns and
 every 30 frames, since the insets settle after a turn; a turn the system has not laid out is read again on
-the next frame. The keyboard strip (`widgets::draw_keyboard_strip`), the active spells line on the map
-(`world_view`, the notes under the minimap) and the FPS counter (`App::draw_fps`) all sit inside it.
+the next frame. The keyboard strip (`widgets::draw_keyboard_strip`) and the FPS counter (`App::draw_fps`) all sit inside it.
 
 Portrait (a phone taller than 4:3): the width sets the interface scale, so the 960×720 canvas is shorter
 than the screen. `chrome::centred_top` centres it vertically, only on screens narrower than 4:3 (a 4:3 or

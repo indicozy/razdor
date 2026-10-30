@@ -29,12 +29,6 @@ pub use super::units::SPELL_SLOTS;
 
 /// The Community bonus token of units that cast world spells 20% faster and cheaper.
 pub const CASTER_BONUS: &str = "Caster";
-/// Razdor's choice: a spell with at least this many minutes left is endless (shown as ∞).
-/// Timed spells run for hours (`TimeWork`), far less than 100 years; the endless ones end at
-/// [`crate::rules::world::MAP_ARMY_SPELL_END`] (1 036 800 000 minutes after the game's zero,
-/// a map army's own spell) and at the Community opcode's end, which is the one case left
-/// short of this mark (about 108 days, see `docs/OPEN_QUESTIONS.md`).
-pub const ENDLESS_FROM_MINUTES: u64 = 100 * 365 * 24 * 60;
 /// Game time passes in half-hour steps while casting.
 pub const CAST_STEP_MINUTES: u64 = 30;
 /// Cells on one page of the spell book (3 × 5). The original's whole book is this one page
@@ -144,24 +138,56 @@ pub fn is_lasting(spell: &SpellDef) -> bool {
     mods && Duration::of(spell) != Duration::Instant
 }
 
-/// Whether a slot that ends at minute `until` is endless at minute `now` (see
-/// [`ENDLESS_FROM_MINUTES`]).
-pub fn endless(until: u64, now: u64) -> bool {
-    until.saturating_sub(now) >= ENDLESS_FROM_MINUTES
+/// Whether a slot that ends at minute `until` is endless: a map army's own spell ends at
+/// [`crate::rules::world::MAP_ARMY_SPELL_END`] (see `world.rs`), and nothing else reaches it.
+/// Timed spells run for hours (`TimeWork`). The Community opcode 11's spells end at
+/// [`OPCODE_SPELL_END`], so they count as timed.
+pub fn endless(until: u64) -> bool {
+    until >= crate::rules::world::MAP_ARMY_SPELL_END
 }
 
-/// One line of the squad's spell list ([`Game::spell_list`]): a spell on some or all units,
-/// endless or timed.
+/// One line of a unit group's spell list ([`spell_lines`]): a spell on some or all of its
+/// units, endless or timed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SpellLine {
     pub spell: u32,
     /// The latest end among the line's slots (game minute).
     pub until: u64,
     pub endless: bool,
-    /// Squad units holding this spell of this kind.
+    /// Units of the group holding this spell of this kind.
     pub units: usize,
-    /// The squad's size.
+    /// The group's size.
     pub of: usize,
+}
+
+/// The lasting spells of a group of units (the squad, or an army's troops): one line per spell
+/// and kind (endless or timed, see [`endless`]), in order of first appearance. A line's `until`
+/// is the latest end of its slots, its `units` the units holding it, `of` the group's size.
+/// Slots already over at minute `now` are left out.
+pub fn spell_lines(units: &[&[Option<SpellSlot>]], now: u64) -> Vec<SpellLine> {
+    let of = units.len();
+    let mut v: Vec<SpellLine> = Vec::new();
+    for slots in units {
+        // This unit's own groups first, so that a unit counts once per group.
+        let mut mine: Vec<(u32, bool, u64)> = Vec::new();
+        for s in slots.iter().flatten().filter(|s| s.until > now) {
+            let is_endless = endless(s.until);
+            match mine.iter_mut().find(|m| m.0 == s.spell && m.1 == is_endless) {
+                Some(m) => m.2 = m.2.max(s.until),
+                None => mine.push((s.spell, is_endless, s.until)),
+            }
+        }
+        for (spell, is_endless, until) in mine {
+            match v.iter_mut().find(|l| l.spell == spell && l.endless == is_endless) {
+                Some(l) => {
+                    l.until = l.until.max(until);
+                    l.units += 1;
+                }
+                None => v.push(SpellLine { spell, until, endless: is_endless, units: 1, of }),
+            }
+        }
+    }
+    v
 }
 
 /// What a spell does to one unit (0x4900fc, magic-items.md §4.1), `max` being its maximum
@@ -394,36 +420,6 @@ impl Game {
         v
     }
 
-    /// The lasting spells of the squad for the top-left list: one line per spell and kind
-    /// (endless or timed, see [`endless`]), in order of first appearance. A line's `until` is
-    /// the latest end of its slots, its `units` the squad units holding it, `of` the squad's
-    /// size. Slots already over are left out.
-    pub fn spell_list(&self) -> Vec<SpellLine> {
-        let now = self.clock.total_minutes() as u64;
-        let of = self.squad.len();
-        let mut v: Vec<SpellLine> = Vec::new();
-        for u in &self.squad {
-            // This unit's own groups first, so that a unit counts once per group.
-            let mut mine: Vec<(u32, bool, u64)> = Vec::new();
-            for s in u.spells.iter().flatten().filter(|s| s.until > now) {
-                let is_endless = endless(s.until, now);
-                match mine.iter_mut().find(|m| m.0 == s.spell && m.1 == is_endless) {
-                    Some(m) => m.2 = m.2.max(s.until),
-                    None => mine.push((s.spell, is_endless, s.until)),
-                }
-            }
-            for (spell, is_endless, until) in mine {
-                match v.iter_mut().find(|l| l.spell == spell && l.endless == is_endless) {
-                    Some(l) => {
-                        l.until = l.until.max(until);
-                        l.units += 1;
-                    }
-                    None => v.push(SpellLine { spell, until, endless: is_endless, units: 1, of }),
-                }
-            }
-        }
-        v
-    }
 
     /// The spells on the units of army `i` of the map.
     pub fn spells_on_army(&self, i: usize) -> Vec<&SpellDef> {
@@ -933,17 +929,19 @@ mod tests {
     }
 
     #[test]
-    fn endless_is_a_hundred_years_left() {
-        let now = 1_000;
-        assert!(!endless(now + ENDLESS_FROM_MINUTES - 1, now));
-        assert!(endless(now + ENDLESS_FROM_MINUTES, now));
-        assert!(endless(crate::rules::world::MAP_ARMY_SPELL_END, 14_400), "a map army's own spell");
-        assert!(!endless(now + 40_000, now), "a timed spell of a few weeks is not endless");
-        assert!(!endless(now, now + 5), "over: not endless");
+    fn endless_is_the_map_army_spell_end() {
+        assert!(endless(crate::rules::world::MAP_ARMY_SPELL_END), "a map army's own spell");
+        assert!(!endless(crate::rules::world::MAP_ARMY_SPELL_END - 1));
+        assert!(!endless(OPCODE_SPELL_END), "the Community opcode 11's spells are timed");
+        assert!(!endless(40_000), "a timed spell of a few weeks is not endless");
     }
 
     #[test]
-    fn the_list_groups_by_spell_and_kind_and_counts_units() {
+    fn the_lines_group_by_spell_and_kind_and_count_units() {
+        let lines = |g: &Game| {
+            let units: Vec<&[Option<SpellSlot>]> = g.squad.iter().map(|u| &u.spells[..]).collect();
+            spell_lines(&units, now(g))
+        };
         let mut g = game(HeroClass::Knight);
         let of = g.squad.len();
         assert!(of >= 3, "the test needs three units");
@@ -956,14 +954,14 @@ mod tests {
             u.spells[0] = Some(slot(2, timed + if k == 0 { 60 } else { 0 }));
         }
         assert_eq!(
-            g.spell_list(),
+            lines(&g),
             vec![SpellLine { spell: 2, until: timed + 60, endless: false, units: of, of }],
             "a whole-squad timed spell is one line, its latest end"
         );
         // An endless copy of spell 2 on one unit: a line of its own, apart from the timed one.
         g.squad[1].spells[1] = Some(slot(2, endless_end));
         assert_eq!(
-            g.spell_list(),
+            lines(&g),
             vec![
                 SpellLine { spell: 2, until: timed + 60, endless: false, units: of, of },
                 SpellLine { spell: 2, until: endless_end, endless: true, units: 1, of },
@@ -972,15 +970,15 @@ mod tests {
         // Spell 3 on the first unit (live) and on the second (over: not listed).
         g.squad[0].spells[2] = Some(slot(3, timed));
         g.squad[1].spells[2] = Some(slot(3, t));
-        let lines = g.spell_list();
-        assert_eq!(lines.len(), 3, "a slot past its end is left out: {lines:?}");
+        let all = lines(&g);
+        assert_eq!(all.len(), 3, "a slot past its end is left out: {all:?}");
         let line = |lines: &[SpellLine], spell: u32| lines.iter().copied().find(|l| l.spell == spell && !l.endless);
-        assert_eq!(line(&lines, 3), Some(SpellLine { spell: 3, until: timed, endless: false, units: 1, of }));
+        assert_eq!(line(&all, 3), Some(SpellLine { spell: 3, until: timed, endless: false, units: 1, of }));
         // Now on the second unit too, and twice on the first (its two slots: one unit's count).
         g.squad[1].spells[2] = Some(slot(3, timed));
         g.squad[0].spells[3] = Some(slot(3, timed + 5));
-        let lines = g.spell_list();
-        assert_eq!(line(&lines, 3), Some(SpellLine { spell: 3, until: timed + 5, endless: false, units: 2, of }));
+        let all = lines(&g);
+        assert_eq!(line(&all, 3), Some(SpellLine { spell: 3, until: timed + 5, endless: false, units: 2, of }));
     }
 
     #[test]

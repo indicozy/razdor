@@ -280,6 +280,27 @@ pub fn open_later(app: &mut App, frame: u64) -> bool {
     }
 }
 
+/// `RAZDOR_SCENE_ARMY_HOVER=enemy`: the hero stands two cells off the first enemy army on the
+/// map and the pointer sits on that army with the right button held (`RAZDOR_MOUSE_RIGHT=1`),
+/// so its hover card shows (the spells on its units).
+fn hover_army_for_snapshot(app: &mut App) {
+    if std::env::var("RAZDOR_SCENE_ARMY_HOVER").is_err() {
+        return;
+    }
+    let Some(game) = app.game.as_mut() else { return };
+    let Some(i) = game.world.armies.iter().position(|a| a.hostile()) else {
+        razdor::diag!("RAZDOR_SCENE_ARMY_HOVER: no enemy army on the map");
+        return;
+    };
+    let tile = game.world.armies[i].tile(&game.world.map);
+    game.pos = game.world.map.center((tile.0 + 2, tile.1));
+    // The hero's sight opens the fog round him, so the army is explored (its tooltip needs it).
+    game.look_around();
+    if let Some(p) = super::world_view::army_pointer(game, i) {
+        super::widgets::set_pointer(Some(p));
+    }
+}
+
 /// Sets up the scene of `RAZDOR_SCENE`, if any; a scene that cannot be set up is reported.
 pub fn stage(app: &mut App) {
     super::widgets::set_pointer(pointer());
@@ -298,6 +319,7 @@ pub fn stage(app: &mut App) {
     if let Err(e) = try_stage(app, &scene) {
         razdor::diag!("RAZDOR_SCENE={scene}: {e}");
     }
+    hover_army_for_snapshot(app);
     // `RAZDOR_SCENE_ARCHIVES=a.7z,b.zip`: the not-found block with those game archives found;
     // `RAZDOR_SCENE_UNPACK=<pct>` with it: the unpacking at that percentage (`ui::mobile`).
     if let Ok(names) = std::env::var("RAZDOR_SCENE_ARCHIVES") {
@@ -527,8 +549,16 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             fill(&mut u.spells);
             u.drain = 20;
         }
+        // `RAZDOR_SCENE_SPELLS_ENDLESS=1`: the map armies' spells are their own endless ones
+        // (until `MAP_ARMY_SPELL_END`), as the map's own spells are.
+        let endless = std::env::var("RAZDOR_SCENE_SPELLS_ENDLESS").is_ok_and(|v| v == "1");
         for t in game.world.armies.iter_mut().flat_map(|a| a.troops.iter_mut()) {
             fill(&mut t.spells);
+            if endless {
+                for s in t.spells.iter_mut().flatten() {
+                    s.until = razdor::rules::world::MAP_ARMY_SPELL_END;
+                }
+            }
         }
     }
     // `RAZDOR_SCENE_POTION=1`: every unit of the hero's army has drunk the install's first

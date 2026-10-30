@@ -8,11 +8,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
-- **Endless spells in the top-left list: the opcode 11 ones** (2026-10-30, the list's ∞ change). The
-  original's "for good" spells of Community opcode 11 end 156 588 minutes after the map start (about
-  108 days), so they are not endless by the list's mark (100 years, `ENDLESS_FROM_MINUTES`) and show
-  as a duration such as "108 d". The original's own hint calls anything from 40 000 minutes on
-  "RemainedTimeOfEffectAll". Not changed: whether those show ∞ too is the owner's decision.
 - **The map info windows: fade-in and empty-cell icons** (2026-10-18, a player's report; split
   out 2026-10-28). Not done on main: the original's 500 ms fade-in (0x4ca728) and the hostile
   style's empty-cell icons (ae2774).

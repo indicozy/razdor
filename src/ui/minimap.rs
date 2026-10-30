@@ -849,11 +849,6 @@ fn list_rect(n: usize, o: Rect, bottom: f32, k: f32) -> Option<Rect> {
     Some(Rect::new(o.x, top, o.w, h))
 }
 
-/// The bottom of what sits under the minimap `o`: the list's, or the window's own.
-pub fn below(game: &Game, o: Rect, bottom: f32) -> f32 {
-    list_rect(game.visible_armies().len(), o, bottom, super::chrome::k()).map_or(o.y + o.h, |r| r.y + r.h)
-}
-
 /// The pointer is over the army list under the minimap `o`.
 pub fn list_under_pointer(game: &Game, o: Rect, bottom: f32) -> bool {
     list_rect(game.visible_armies().len(), o, bottom, super::chrome::k()).is_some_and(|r| r.contains(Vec2::from(crate::ui::widgets::pointer())))
