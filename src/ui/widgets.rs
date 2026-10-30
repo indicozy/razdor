@@ -2092,14 +2092,20 @@ pub fn checkbox(x: f32, y: f32, max_w: f32, label: &str, value: bool) -> Option<
     None
 }
 
+/// The tap area of a [`checkbox_row`]: the bottom line of the row `r` (where the box and label
+/// are drawn), grown upward to 48 dp on a phone (`dp`, see [`tap_rect_at`]).
+fn checkbox_row_hit(r: Rect, side: f32, dp: Option<f32>) -> Rect {
+    tap_rect_at(Rect::new(r.x, r.y + r.h - side, r.w, side), true, dp)
+}
+
 /// A check box beside its label on one line: the box left, the label right at `size` exactly
 /// (not the font's native size, never shrunk). The box is 0.8 of the label size, at
 /// least 18 px (the settings' check box). The whole row is the target: on a phone it grows
-/// upward to 48 dp ([`tap_rect`]), so `r` is the row's place and its bottom stays. Returns the
-/// new state when clicked.
+/// upward to 48 dp ([`checkbox_row_hit`]), so `r` is the row's place and its bottom stays.
+/// Returns the new state when clicked.
 pub fn checkbox_row(r: Rect, size: f32, label: &str, value: bool) -> Option<bool> {
     let side = (size * 0.8).max(18.0);
-    let hit = tap_rect(Rect::new(r.x, r.y, r.w, side), true);
+    let hit = checkbox_row_hit(r, side, super::display::dp_px());
     let (hover, _down, pressed) = button_state(hit, true);
     draw_rectangle(r.x, r.y + r.h - side, side, side, FIELD_BG);
     draw_rectangle_lines(r.x, r.y + r.h - side, side, side, 1.0, if hover { INK } else { DIM });
@@ -2865,6 +2871,23 @@ mod finger_tests {
                 assert!(contains(g, r), "{g:?} must contain {r:?}");
                 assert!(g.x >= -EPS && g.y >= -EPS && g.right() <= 1080.0 + EPS && g.bottom() <= 2400.0 + EPS, "{g:?}");
             }
+        }
+    }
+
+    /// The check row's tap area covers its box (drawn at the row's bottom, not its top), and
+    /// its bottom stays at the row's bottom, on the desktop and on a phone.
+    #[test]
+    fn the_check_row_s_tap_area_covers_its_box() {
+        let r = Rect::new(574.0, 150.0, 248.0, 76.0);
+        let side = 18.0;
+        let boxed = Rect::new(r.x, r.y + r.h - side, side, side);
+        for dp in [None, Some(2.75)] {
+            let hit = checkbox_row_hit(r, side, dp);
+            assert!(
+                hit.x <= boxed.x && hit.y <= boxed.y && hit.right() >= boxed.right() && hit.bottom() >= boxed.bottom(),
+                "dp {dp:?}: hit {hit:?} does not cover the box {boxed:?}"
+            );
+            assert_eq!(hit.bottom(), r.y + r.h, "dp {dp:?}");
         }
     }
 }
