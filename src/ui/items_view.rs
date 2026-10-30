@@ -1118,8 +1118,9 @@ pub fn squad(
 
     // The item under the pointer, in the pack or worn: its description pops up by the pointer
     // (not while one is held: 0x4c280c shows the item text with nothing held). Drawn after the
-    // frame lines, so the window's steel lines do not cross it.
-    if let Some(item) = hover.filter(|_| game.held_item.is_none()) {
+    // frame lines, so the window's steel lines do not cross it. On a phone it shows on a long
+    // press only (`input::hint_hover`).
+    if let Some(item) = hover.filter(|_| game.held_item.is_none() && super::input::hint_hover()) {
         // The original's item tooltip (0x4cbab0): 272 wide, as tall as its text plus 32.
         let (pw, ph) = (super::item_text::TOOLTIP_W * k, super::item_text::tooltip_height(game, item, k));
         let (mx, my) = pointer();
@@ -1781,7 +1782,8 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
 
     // The item description box (310 × 164 at 58): the item under the pointer. On a phone, with a
     // diary entry shown and no item described, the diary takes its place (`diary_column`).
-    let described = hover.filter(|_| game.held_item.is_none());
+    // On a phone the description shows on a long press only (`input::hint_hover`).
+    let described = hover.filter(|_| game.held_item.is_none() && super::input::hint_hover());
     let entry_shown = diary_rows(game, view.tab).get(view.pick).is_some();
     let list0 = o(576.0, 252.0, 292.0, 128.0);
     let list_bar0 = o(868.0, 252.0, 18.0, 128.0);

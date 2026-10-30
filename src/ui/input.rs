@@ -233,6 +233,23 @@ pub fn touch_hover() -> bool {
     })
 }
 
+/// Razdor's one delay for every hint shown on a hold or a rest (the owner's decision, 2026-10-30):
+/// a phone's long press (`gestures`) lasts this long, and so does the hover of a hint.
+pub const HINT_DELAY_SECS: f32 = 0.35;
+
+/// Whether a hover may show a description or hint this frame. In the gesture mode only while a
+/// long press holds (the owner's choice, 2026-10-30: every hint on a long press, as the
+/// map's); with the touchpad mode and with no touch, as [`touch_hover`].
+pub fn hint_hover() -> bool {
+    let long_pressed = STATE.with(|s| s.borrow().gestures.long_pressed());
+    hint_shown(gestures::enabled(), long_pressed, touch_hover())
+}
+
+/// The gesture mode's hints follow its long press; the other modes' follow the touch hover.
+fn hint_shown(gestures_on: bool, long_pressed: bool, touched: bool) -> bool {
+    if gestures_on { long_pressed } else { touched }
+}
+
 /// The lift latch after this frame's `touches`: a finger coming down clears it, a lift sets it,
 /// and a frame with neither keeps it. A touch that came down and up within one frame arrives
 /// only as its lift, so it counts as one.
@@ -377,6 +394,18 @@ pub fn pad_key_pressed(k: KeyCode) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hints_follow_the_long_press_in_gestures_and_the_touch_hover_elsewhere() {
+        use super::hint_shown;
+        // Gestures: a hover with no long press shows nothing; a long press shows, lifted or not.
+        assert!(!hint_shown(true, false, true));
+        assert!(hint_shown(true, true, false));
+        // Touchpad and desktop: as the touch hover says, whatever the long press.
+        assert!(hint_shown(false, false, true));
+        assert!(!hint_shown(false, true, false));
+        assert!(!hint_shown(false, false, false));
+    }
+
     /// After a lift no hover shows a hint until a finger comes down; a finger held still (a long
     /// press) keeps them, and a tap that starts and ends in one frame counts as a lift.
     #[test]

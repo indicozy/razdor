@@ -137,11 +137,15 @@ test fails if `thread_local!` comes back in `src/`. Touch (phones and tablets,
 `touchpad::MOBILE`): two modes, with miniquad's simulated mouse off (`simulate_mouse_with_touch(false)`,
 once). The default is the gestures (`src/ui/gestures.rs`, `GestureMapper`): the finger is the
 pointer, a tap clicks where it lifts, a double tap clicks at the first tap's place, a dragged
-finger holds the left button, a long press holds the right one, two fingers pinch the wheel
+finger holds the left button, a long press (still for `input::HINT_DELAY_SECS`, 0.35 s, the one hint
+delay) holds the right one, two fingers pinch the wheel
 (the map's zoom) or slide (the map's scroll, or the list's wheel). A long press keeps the pointer
 where the press began while the right button is held (`GestureMapper::press_at`): the finger may
 slide to uncover the view, and the info window (army, building) stays put; the lift releases the
-button there too. Swipe areas: each frame the screens register the rectangles a one-finger swipe acts on
+button there too. Hints: `input::hint_hover()` gates every hover hint and item description (`widgets::tooltip`,
+`widgets::tooltip_later`, the bar's hint, the backpack and hero window's item descriptions). In gesture mode
+they show only while the long press holds; in the touchpad mode and with no touch, as `input::touch_hover`
+(no hint after a lift until a finger comes down). Swipe areas: each frame the screens register the rectangles a one-finger swipe acts on
 (`input::swipe_area(rect, SwipeKind)`, gestures only; `widgets::swipe_rows` for a list or text box with
 its row height). The map registers `Pan` over the map view (not while a dialog is open; the open minimap
 is `Off`, a blocker that keeps its drag a drag). The registrations of a frame are the next frame's

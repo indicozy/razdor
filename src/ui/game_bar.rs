@@ -502,8 +502,8 @@ fn draw_bar(game: &Game, look: &impl Fn(BarButton) -> Look, time_buttons: bool) 
         }
         hovered_hint = hint.or(hovered_hint);
     }
-    // Both are hover hints: none after a phone's finger lifted (`input::touch_hover`).
-    if let Some(hint) = timed_hint.or(hovered_hint).filter(|_| super::input::touch_hover()) {
+    // Both are hover hints: on a phone only while a long press holds (`input::hint_hover`).
+    if let Some(hint) = timed_hint.or(hovered_hint).filter(|_| super::input::hint_hover()) {
         panel_hint(&[(hint, CREAM)]);
     }
     (pressed, timed)

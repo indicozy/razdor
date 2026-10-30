@@ -1,7 +1,7 @@
 use razdor::local;
 use std::cell::RefCell;
 
-use crate::ui::input::{get_keys_pressed, get_keys_released, is_key_down, is_key_pressed, is_mouse_button_down, is_mouse_button_pressed, is_mouse_button_released, mouse_position, mouse_wheel, touch_hover};
+use crate::ui::input::{get_keys_pressed, get_keys_released, hint_hover, is_key_down, is_key_pressed, is_mouse_button_down, is_mouse_button_pressed, is_mouse_button_released, mouse_position, mouse_wheel};
 use macroquad::prelude::*;
 
 use super::text_edit::{self, TextEdit};
@@ -565,9 +565,10 @@ impl Drop for Clip {
 /// A translucent panel of lines next to the mouse: the original's ordinary hint box, which
 /// fades in to 160/255 over 300 ms (49ee4b–49ef0d: `elapsed × 160 / 300`).
 /// Not shown with the hints off (interface.md hint boxes: only pushed and spell-target hints
-/// stay), nor on a phone after a finger lifted (`input::touch_hover`).
+/// stay), nor on a phone unless a long press holds (gestures) or after a finger lifted (touchpad:
+/// `input::hint_hover`).
 pub fn tooltip(lines: &[(String, Color)]) {
-    if !hints_on() || !touch_hover() {
+    if !hints_on() || !hint_hover() {
         return;
     }
     tooltip_at_alpha(lines, hint_fade(lines, 160.0 / 255.0));
@@ -585,7 +586,7 @@ local! {
 /// building windows): queued now, drawn by [`draw_later`] once the frame is up, so no steel
 /// line crosses the box (the original draws its pop-ups over the frame).
 pub fn tooltip_later(lines: &[(String, Color)]) {
-    if !hints_on() || !touch_hover() {
+    if !hints_on() || !hint_hover() {
         return;
     }
     let alpha = hint_fade(lines, 160.0 / 255.0);

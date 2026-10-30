@@ -2,7 +2,7 @@
 //! phone or tablet, where the finger is the pointer. A tap clicks where the finger lifts; a
 //! double tap clicks at the first tap's place (the second tap does not shift the hero's route);
 //! a finger dragged holds the left button; a long press holds the right one (army and building
-//! information, tooltips); two fingers pinch the wheel (the map's zoom) or slide together (the
+//! information, tooltips, and every hint and item description in gesture mode); two fingers pinch the wheel (the map's zoom) or slide together (the
 //! map's scroll, or the wheel of a list). A one-finger swipe that starts on a registered area
 //! (`ui::input::swipe_area`: the map pans, a list or text box scrolls) is no click at all: it
 //! moves the map or turns the list's wheel; only a finger held still before it moves drags as
@@ -22,11 +22,13 @@ pub fn enabled() -> bool {
     touchpad::MOBILE && !touchpad::enabled()
 }
 
-/// A tap is down and up within this many seconds and stays within [`TAP_SLOP`] pixels.
+/// A tap is down and up within this many seconds and stays within [`TAP_SLOP`] pixels. Shorter
+/// than [`LONG_TIME`]: a press between the two is nothing.
 const TAP_TIME: f32 = 0.25;
 const TAP_SLOP: f32 = 12.0;
-/// A finger still within the slop for this long holds the right button (a long press).
-const LONG_TIME: f32 = 0.5;
+/// A finger still within the slop for this long holds the right button (a long press): the one
+/// hint delay, [`crate::ui::input::HINT_DELAY_SECS`] (0.5 s until 2026-10-30).
+const LONG_TIME: f32 = super::input::HINT_DELAY_SECS;
 /// A tap within this many seconds of the last one's click, within [`DOUBLE_SLOP`] pixels of it,
 /// is a double tap: it clicks at the last click's place.
 const DOUBLE_TIME: f32 = 0.35;
@@ -246,6 +248,11 @@ impl GestureMapper {
         f
     }
 
+    /// Whether a long press holds the right button this frame (the hints show: `ui::input::hint_hover`).
+    pub fn long_pressed(&self) -> bool {
+        self.right_held
+    }
+
     /// The first two fingers, frame by frame. The distance between them changing more than their
     /// slide is a pinch: the wheel, a step per [`PINCH_STEP`], fingers apart zoom in. Otherwise
     /// they slide together: the map's scroll (the stick, from the moving fingers' velocity) or
@@ -409,13 +416,45 @@ mod tests {
 
     #[test]
     fn a_press_too_long_for_a_tap_and_too_short_for_a_long_press_is_nothing() {
+        // 18 frames (0.3 s) down: past TAP_TIME (0.25 s), short of LONG_TIME (0.35 s).
         let mut m = GestureMapper::default();
         step(&mut m, &[touch(1, 50.0, 50.0, Phase::Started)], false);
-        for _ in 0..20 {
+        for _ in 0..17 {
             step(&mut m, &[touch(1, 50.0, 50.0, Phase::Stationary)], false);
         }
         let f = step(&mut m, &[touch(1, 50.0, 50.0, Phase::Ended)], false);
         assert_eq!((f.left, f.right), (Edge::default(), Edge::default()));
+    }
+
+    #[test]
+    fn a_finger_held_still_for_0_35_seconds_holds_the_right_button() {
+        let mut m = GestureMapper::default();
+        step(&mut m, &[touch(1, 50.0, 60.0, Phase::Started)], false);
+        let mut pressed = None;
+        for i in 1..=30 {
+            if step(&mut m, &[touch(1, 50.0, 60.0, Phase::Stationary)], false).right.pressed {
+                pressed = Some(i);
+                break;
+            }
+        }
+        // Frame 21 is 0.35 s after the touch (the float clock may land a frame later).
+        assert!(pressed.is_some_and(|i| (20..=22).contains(&i)), "{pressed:?}");
+        assert!(m.long_pressed());
+        assert!(step(&mut m, &[touch(1, 50.0, 60.0, Phase::Ended)], false).right.released);
+        assert!(!m.long_pressed());
+    }
+
+    #[test]
+    fn a_touch_of_0_15_seconds_is_a_tap_and_no_long_press() {
+        let mut m = GestureMapper::default();
+        step(&mut m, &[touch(1, 50.0, 60.0, Phase::Started)], false);
+        for _ in 0..8 {
+            step(&mut m, &[touch(1, 50.0, 60.0, Phase::Stationary)], false);
+        }
+        // Lifted 9 frames (0.15 s) after the touch: a tap, no right button.
+        let lift = step(&mut m, &[touch(1, 50.0, 60.0, Phase::Ended)], false);
+        assert_eq!(lift.left, Edge { pressed: true, down: true, released: false });
+        assert_eq!((lift.right, m.long_pressed()), (Edge::default(), false));
     }
 
     #[test]
@@ -432,7 +471,7 @@ mod tests {
                 break;
             }
         }
-        assert!(pressed.is_some_and(|i| (25..35).contains(&i)), "{pressed:?}");
+        assert!(pressed.is_some_and(|i| (19..24).contains(&i)), "{pressed:?}");
         let held = step(&mut m, &[touch(1, 50.0, 60.0, Phase::Stationary)], false);
         assert_eq!(held.right, Edge { pressed: false, down: true, released: false });
         let lift = step(&mut m, &[touch(1, 50.0, 60.0, Phase::Ended)], false);
@@ -703,7 +742,7 @@ mod tests {
         let mut m = GestureMapper::default();
         let areas = all(PAN);
         step_in(&mut m, &[touch(1, 100.0, 500.0, Phase::Started)], &areas);
-        // Held past the swipe time (0.25 s = 15 frames) and short of the long press: then a drag.
+        // Held past the swipe time (0.25 s = 15 frames) and short of the long press (0.35 s): then a drag.
         for _ in 0..16 {
             step_in(&mut m, &[touch(1, 100.0, 500.0, Phase::Stationary)], &areas);
         }
