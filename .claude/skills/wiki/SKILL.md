@@ -70,7 +70,8 @@ Give gemma only the sources for that page (small inputs, fewer invented facts).
    `tools/ui-regress/scenes.txt`, e.g. `РК1-Начало пути`); a bare `map` silently shows the title
    screen. Identical files (`md5sum`) mean a fallen-back scene. Look at them all at once:
    `magick montage -label '%t' *.webp -tile 4x3 -geometry 360x225+4+4 sheet.jpg`, then Read it.
-   Shrink: `magick f.webp -resize '1024x>' -quality 72 f.webp`. Reference them as
+   Shrink and drop the alpha: `magick f.webp -alpha off -resize '1024x>' -quality 72 f.webp`
+   (`shot.sh` already writes no alpha; a shot with alpha looks washed out in viewers). Reference them as
    `![alt](../../../assets/shots/<name>.webp)` (one more `../` under `en/`).
 5. `gemma.py translate` → the English page; spot-check names against `data/lang/en/`.
 6. Build: `cd wiki && nice -n 19 taskset -c 8-19 npm ci && nice -n 19 taskset -c 8-19 npm run build`. It must pass

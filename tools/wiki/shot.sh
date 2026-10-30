@@ -102,9 +102,9 @@ fi
 
 mkdir -p "$(dirname "$OUT")"
 case "$CONVERTER" in
-	cwebp) taskset -c 16-19 cwebp -quiet -q 82 "$TMP/shot.png" -o "$OUT" ;;
-	magick) taskset -c 16-19 magick "$TMP/shot.png" +repage -quality 82 "$OUT" ;;
-	convert) taskset -c 16-19 convert "$TMP/shot.png" +repage -quality 82 "$OUT" ;;
+	cwebp) taskset -c 16-19 cwebp -quiet -noalpha -q 82 "$TMP/shot.png" -o "$OUT" ;;
+	magick) taskset -c 16-19 magick "$TMP/shot.png" +repage -alpha off -quality 82 "$OUT" ;;
+	convert) taskset -c 16-19 convert "$TMP/shot.png" +repage -alpha off -quality 82 "$OUT" ;;
 	pil) taskset -c 16-19 python3 -I -c "
 import sys
 from PIL import Image

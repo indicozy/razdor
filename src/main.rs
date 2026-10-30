@@ -93,6 +93,15 @@ fn quit_after() -> Option<u64> {
     std::env::var("RAZDOR_QUIT_AFTER").ok()?.trim().parse().ok()
 }
 
+/// Makes every pixel of an RGBA buffer opaque. The window shows the frame without its alpha
+/// channel; a PNG keeps it, and viewers then blend the transparent pixels with their
+/// background, so the snapshot looks washed out.
+fn opaque_rgba(rgba: &mut [u8]) {
+    for px in rgba.chunks_exact_mut(4) {
+        px[3] = 255;
+    }
+}
+
 /// Ends the process without running the C `atexit` handlers.
 ///
 /// A normal return from `main` crashed with SIGSEGV every time: `exit` runs the exit handlers
@@ -204,7 +213,9 @@ async fn main() {
         if let Some((path, n)) = &snapshot {
             if frames >= *n {
                 ui::text_probe::write();
-                get_screen_data().export_png(path);
+                let mut shot = get_screen_data();
+                opaque_rgba(&mut shot.bytes);
+                shot.export_png(path);
                 exit_now(&mut app);
             }
         }
@@ -227,5 +238,17 @@ async fn main() {
                 razdor::diag!("slow frame: {:.0} ms = work {w:.0} + render {r:.0} ({before} -> {})", w + r, app.screen_name());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::opaque_rgba;
+
+    #[test]
+    fn opaque_rgba_sets_every_alpha_and_keeps_rgb() {
+        let mut px = vec![1, 2, 3, 0, 4, 5, 6, 128, 7, 8, 9, 255];
+        opaque_rgba(&mut px);
+        assert_eq!(px, vec![1, 2, 3, 255, 4, 5, 6, 255, 7, 8, 9, 255]);
     }
 }

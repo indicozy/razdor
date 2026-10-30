@@ -87,7 +87,8 @@ xvfb-run -a -s "-screen 0 1280x800x24" target/release/razdor
   quits. Helpers: `RAZDOR_MOUSE=x,y` (hover looks, tooltips), `RAZDOR_SCENE_QUIET=1` (drop
   the scenario's messages), `RAZDOR_SCENE_DEBUG=1`, `RAZDOR_SCENE_SPELLS`,
   `RAZDOR_SCENE_POTION`, `RAZDOR_SCENE_FILTER`, `RAZDOR_SCENE_LANGUAGE` (the language list open), `RAZDOR_SCENE_CONSOLE`,
-  `RAZDOR_SCENE_ITEMS=<id>,…` (items in the hero's pack).
+  `RAZDOR_SCENE_ITEMS=<id>,…` (items in the hero's pack). The PNG is written opaque: the
+  window shows the frame without its alpha, and a PNG that kept it would look washed out.
 - A map scene starts its map as a new game: later campaign maps may end at once by their
   own defeat event (nothing carried over) — not a bug.
 - Add a scene for every new window (`try_stage` in `src/ui/snapshot.rs`).
