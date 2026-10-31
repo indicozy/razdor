@@ -1,4 +1,4 @@
-//! The map hub (Razdor's own; a mock for now): a catalog of community maps, campaigns and
+//! The map hub (Razdor's own): a catalog of community maps, campaigns and
 //! mods that the player browses and installs from inside the game (`ui::hub_view`).
 //!
 //! - **Catalog**: an `index.json` ([`Catalog`]) next to the files it names. Each entry is a
