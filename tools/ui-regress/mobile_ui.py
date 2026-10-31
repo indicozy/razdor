@@ -89,6 +89,8 @@ SCREENS = [
     ("spells", "spells:РК1-Начало пути", {}),
     ("battle", "battle:РК1-Начало пути:0", {}),
     ("classes", "classes:РК1-Начало пути", {}),
+    ("hub", "hub", {}),
+    ("hub-mods", "hub:1:evolution-mock", {}),
 ]
 
 

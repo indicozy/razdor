@@ -144,3 +144,8 @@ phone-settings-advanced-dp-landscape | settings:РК1-Начало пути:adva
 phone-report-portrait | report:РК1-Начало пути:30881 | 1080x2160 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1
 phone-report-portrait-1920 | report:РК1-Начало пути:30881 | 1080x1920 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1
 phone-report-landscape | report:РК1-Начало пути:30881 | 2160x1080 | RAZDOR_DP=2.625;RAZDOR_LARGE_WINDOWS=1
+# Maps and mods (the hub, on the mock source a snapshot run uses): its tabs and an entry picked
+hub-1280 | hub | 1280x800 |
+hub-mods-1280 | hub:1 | 1280x800 |
+hub-entry-1280 | hub:1:evolution-mock | 1280x800 |
+hub-800 | hub | 800x600 |
