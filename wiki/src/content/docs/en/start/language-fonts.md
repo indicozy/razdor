@@ -39,7 +39,7 @@ In the Sound, Graphics, and Gameplay settings window, there is a "Font" item. It
 
 ### Text size
 
-The "Text size" item in the same settings: Normal, Large and Largest. At Normal everything is as in the original. At Large and Largest the buttons grow with the text: "Hire" and "Heal" with their prices in the barracks, the market and sanctuary buttons, and "Yes", "No" and "OK" in event windows. Phones start at Large. Other windows don't change yet.
+The "Text size" item in the same settings: Normal, Large and Largest. At Normal everything is as in the original. At Large and Largest the buttons grow with the text throughout the game: in the menus and settings, the scenario list and saves, the army, hero and battle windows, the buildings ("Hire" and "Heal" with their prices), event windows and the map editor. Phones start at Large. Only the bottom bar's readouts and the market buttons stay as they are: the original's frame bounds them.
 
 ### Character Support
 

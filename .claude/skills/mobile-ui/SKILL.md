@@ -60,8 +60,10 @@ their buttons are grown by default.
   new overlap or crowding, and the UI regression check shows **no** change at Normal.
 - Growing a button: its height, width (if the label needs it) and label size times the factor; the
   layout around it makes room (move the neighbours, grow the box), never shrinks the label.
-  Off the pilot screens (building windows, event and message windows) buttons do not grow yet: the
-  rollout goes screen by screen.
+  Every screen grows its buttons (rolled out 2026-10-31), except the bottom bar's readouts
+  (`game_bar.rs`, the original's panel art) and the market row (bound by the original row's
+  widths; the owner's call). `small_button` and `toggle_button` grow their labels themselves; a
+  screen grows their rects. A new button on any screen grows from the start.
 
 ## Specs (on the owner's request, and at the release check)
 
