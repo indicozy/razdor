@@ -31,7 +31,7 @@ By default, your finger works as the cursor.
 * **Drag one finger over the map** — moves the map with the finger.
 * **Drag over a list** — scrolls the list or the text in a window.
 * **Hold and move** — drags an item or a unit, scroll bars, the minimap and windows. An item pulled out of its cell is dropped where you lift the finger: on a cell, a slot or a unit.
-* **Long press** (the finger almost still for about a third of a second) — the right mouse button: details of an army or a building and tooltips on the map. Item descriptions show at once while the finger is on the item; no long press is needed there. Lifting the finger releases the button; there is no left click after it.
+* **Long press** (the finger almost still for about a third of a second) — the right mouse button: details of an army or a building and tooltips on the map. Item descriptions show at once while the finger is on the item; no long press is needed there. A tooltip or description appears above the finger (beside it when there is no room above), not under it. Lifting the finger releases the button; there is no left click after it.
 * **Pinch with two fingers** — map zoom: spread to zoom in, pinch to zoom out.
 * **Two fingers together, or one held while the other moves** — scrolls the map. Lists scroll with two fingers moved up or down, or with the scroll bar.
 

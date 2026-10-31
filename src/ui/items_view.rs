@@ -1186,8 +1186,10 @@ pub fn squad(
         let px = if mx + 21.0 * k + pw > sw { mx - 21.0 * k - pw } else { mx + 21.0 * k };
         let px = px.clamp(6.0, (sw - pw - 6.0).max(6.0));
         let py = (my + 37.0 * k).min(sh - ph - 4.0).max(4.0);
-        draw_rectangle(px + 6.0 * k, py + 6.0 * k, pw, ph, Color::new(0.0, 0.0, 0.0, 0.45));
-        super::item_text::draw(game, assets, item, Rect::new(px, py, pw, ph), super::item_text::ItemBox::Tooltip, k);
+        // On a phone the description goes above the finger, clear of it (`popup::placed`).
+        let card = super::popup::placed(Rect::new(px, py, pw, ph), (mx, my), (pw, ph));
+        draw_rectangle(card.x + 6.0 * k, card.y + 6.0 * k, pw, ph, Color::new(0.0, 0.0, 0.0, 0.45));
+        super::item_text::draw(game, assets, item, card, super::item_text::ItemBox::Tooltip, k);
     }
     // The group button's name, queued by the row (drawn after the frame, as the item's text).
     draw_later();

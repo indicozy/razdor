@@ -2190,9 +2190,11 @@ fn draw_tooltip_at(game: &Game, assets: &Assets, t: &Tooltip) {
     // Centred on the mouse and kept inside the map's view, above the bottom bar (interface.md
     // §7.4; 0x4ca8ac).
     let (mx, my) = crate::ui::widgets::pointer();
-    let x = (mx - w / 2.0).min(screen_width() - w).max(0.0);
-    let y = (my - h / 2.0).min(screen_height() - bar_h() - h).max(0.0);
-    tooltip_panel_styled(Rect::new(x, y, w, h), t.style, tk);
+    let desktop = Rect::new((mx - w / 2.0).min(screen_width() - w).max(0.0), (my - h / 2.0).min(screen_height() - bar_h() - h).max(0.0), w, h);
+    // On a phone it goes above the finger, clear of it (`popup::placed`).
+    let placed = super::popup::placed(desktop, (mx, my), (w, h));
+    let (x, y) = (placed.x, placed.y);
+    tooltip_panel_styled(placed, t.style, tk);
     // The title in the yellow Benguiat over its shadow, centred in the strip (27 px at `tk`).
     let title_size = glyph(Face::Title, tk);
     with_face(Face::Title, || {

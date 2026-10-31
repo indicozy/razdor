@@ -334,6 +334,8 @@ The rest is `ui::rest` (`rest::tick` in `App::frame`, `rest::rested()`: the poin
 `REST_SECS` = `input::HINT_DELAY_SECS`, 0.35 s, the gestures' long-press delay, with no button down). In this
 mode every hint waits for it, through `input::hint_hover()`: the bar's and the widgets' hints and the map's tooltip of an army or building (`world_view`). The item descriptions of the backpack and the hero window (`items_view`) and the icons above (`dialog`) do not wait: they use `input::item_hint_hover` and `dialog::icon_hover`, at once.
 
+Phone placement (backlog 1449): every pop-up that follows the pointer goes through `popup::placed`. On the desktop (`display::dp_px()` is None) it returns the caller's own rectangle, unchanged. On a phone it calls `popup::place_popup`: above the finger with a finger's gap (`widgets::FINGER_DP`), else beside it (right, then left), kept inside `popup::usable()` (the screen above the bottom bar). The sites: `widgets::tooltip_content` (every `tooltip`, `tooltip_later` and `draw_later` box), `widgets::hint_box_always` (the spell-target hint), `world_view::draw_tooltip_at` (the map's army and building tooltip), `dialog` (the icon preview under a press), `items_view` (the item description in the army and hero windows), `spell_badges::flush` and `battle_view`'s preview. The event window's reward-item tooltip (fixed at the window's top) and the bottom bar's panel hint do not follow the pointer and keep their places.
+
 ## The frame
 
 `App::frame` in order:

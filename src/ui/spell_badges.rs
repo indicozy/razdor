@@ -114,7 +114,9 @@ pub fn flush() {
     if y + hh > screen_height() {
         y = my - 37.0 * k - hh;
     }
-    let r = Rect::new(x.clamp(0.0, (screen_width() - w).max(0.0)).round(), y.clamp(0.0, (screen_height() - hh).max(0.0)).round(), w, hh);
+    let desktop = Rect::new(x.clamp(0.0, (screen_width() - w).max(0.0)).round(), y.clamp(0.0, (screen_height() - hh).max(0.0)).round(), w, hh);
+    // On a phone the hint goes above the finger, clear of it (`popup::placed`).
+    let r = super::popup::placed(desktop, (mx, my), (w, hh)).round();
     draw_rectangle(r.x + 6.0 * k, r.y + 6.0 * k, r.w, r.h, Color::new(0.0, 0.0, 0.0, 0.4));
     chrome::surface_alpha(r, chrome::Skin::Strip, 0.95);
     chrome::silver_frame(r, 1.0);

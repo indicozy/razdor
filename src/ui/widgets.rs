@@ -889,7 +889,9 @@ pub fn hint_box_always(lines: &[(String, Color)], w: f32) {
     if y + h > screen_height() {
         y = my - 37.0 * k - h;
     }
-    let r = Rect::new(x.clamp(4.0, (screen_width() - w - 4.0).max(4.0)), y.clamp(4.0, (screen_height() - h - 4.0).max(4.0)), w, h);
+    let desktop = Rect::new(x.clamp(4.0, (screen_width() - w - 4.0).max(4.0)), y.clamp(4.0, (screen_height() - h - 4.0).max(4.0)), w, h);
+    // On a phone the box goes above the finger, clear of it (`popup::placed`).
+    let r = super::popup::placed(desktop, (mx, my), (w, h));
     super::chrome::surface_alpha(r, super::chrome::Skin::Marble, 1.0);
     draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, 0.05, 0.03, 0.2));
     super::chrome::silver_frame(r, 1.5);
@@ -912,9 +914,10 @@ fn tooltip_content(lines: &[(String, Color)], alpha: f32) {
     let line_h = super::dt_font::native_line_height(super::dt_font::face(), 21.0);
     let h = lines.len() as f32 * line_h + 14.0;
     let (mx, my) = pointer();
-    let x = (mx + 18.0).min(screen_width() - w - 4.0);
-    let y = (my + 18.0).min(screen_height() - h - 4.0);
-    let r = Rect::new(x, y, w, h);
+    let desktop = Rect::new((mx + 18.0).min(screen_width() - w - 4.0), (my + 18.0).min(screen_height() - h - 4.0), w, h);
+    // On a phone the box goes above the finger, clear of it (`popup::placed`).
+    let r = super::popup::placed(desktop, (mx, my), (w, h));
+    let (x, y) = (r.x, r.y);
     super::chrome::surface_alpha(r, super::chrome::Skin::Marble, alpha);
     draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, 0.05, 0.03, 0.2 * alpha));
     let edge = Color { a: super::chrome::SILVER.a * alpha, ..super::chrome::SILVER };

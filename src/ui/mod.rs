@@ -33,6 +33,7 @@ pub mod map_import;
 pub mod minimap;
 pub mod new_game;
 pub mod pan;
+pub mod popup;
 pub mod rest;
 pub mod saves;
 pub mod screens;

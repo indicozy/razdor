@@ -952,13 +952,15 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         let (pw, ph) = if spell { (286.0 * o, 112.0 * o) } else { super::item_text::tooltip_size(game, ItemId(id), o) };
         let px = (at.x - pw / 2.0).clamp(x + 10.0, (x + w - 10.0 - pw).max(x + 10.0));
         let py = (at.y - ph / 2.0).clamp(y + 10.0, (y + h - 10.0 - ph).max(y + 10.0));
-        draw_rectangle(px + 8.0, py + 8.0, pw, ph, Color::new(0.0, 0.0, 0.0, 0.45));
+        // On a phone the card goes above the finger, clear of it (`popup::placed`).
+        let card = super::popup::placed(Rect::new(px, py, pw, ph), (at.x, at.y), (pw, ph));
+        draw_rectangle(card.x + 8.0, card.y + 8.0, pw, ph, Color::new(0.0, 0.0, 0.0, 0.45));
         if spell {
             if let Some(s) = game.content.spells.iter().find(|s| s.id == id) {
-                super::spellbook::spell_card(game, s, Rect::new(px, py, pw, ph), true);
+                super::spellbook::spell_card(game, s, card, true);
             }
         } else {
-            super::item_text::draw(game, assets, ItemId(id), Rect::new(px, py, pw, ph), super::item_text::ItemBox::Tooltip, o);
+            super::item_text::draw(game, assets, ItemId(id), card, super::item_text::ItemBox::Tooltip, o);
         }
         return None;
     }
