@@ -26,6 +26,8 @@ pub mod item_text;
 pub mod items_view;
 pub mod jukebox;
 pub mod keymap;
+#[allow(dead_code)] // the screens that use the kit come next
+pub mod kit;
 pub mod language;
 pub mod game_import;
 pub mod main_menu;
