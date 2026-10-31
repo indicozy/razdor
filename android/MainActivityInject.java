@@ -402,6 +402,20 @@ private void razdorApplyImmersive(boolean on) {
     }
 }
 
+// Quitting («Выход»): the app leaves the screen at once, with the system's own animation, and the
+// game writes its saves off the screen (src/ui/android.rs, `hide_for_exit`; `exit_now` in
+// src/main.rs). Called from the game's thread; the move is made on the UI thread. Without it the
+// window stays frozen on the screen until the process is gone, and the system removes it only
+// after it notices the death.
+public void razdorHideForExit() {
+    runOnUiThread(new Runnable() {
+        @Override
+        public void run() {
+            moveTaskToBack(true);
+        }
+    });
+}
+
 @Override
 public void onWindowFocusChanged(boolean hasFocus) {
     super.onWindowFocusChanged(hasFocus);

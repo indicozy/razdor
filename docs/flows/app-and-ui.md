@@ -35,12 +35,15 @@ except what the screen value, the `App` fields and a few `thread_local!`s hold.
    `next_frame().await`. Quitting goes through `exit_now` (it skips C `atexit` handlers,
    which crashed on exit). Every quit (the main menu's «Выход», the game's «Выйти из игры»,
    the battle's leave window, the window's close button) sets the quit flag, and `exit_now`
-   does, in order: the frame probe's flush, the pending autosave's join
+   does, in order: on Android, `ui::display::hide_for_exit` first (the activity's
+   `razdorHideForExit` moves the app to the background at once, on its UI thread, so the slow
+   writes below happen off the screen; the activity's pause then flushes the session slot, which
+   writes nothing already written); the frame probe's flush, the pending autosave's join
    (`finish_pending_writes`), `App::shutdown` (the session end, the audio's stop and settings),
-   then `ui::display::hide_for_exit` (X11: the window is unmapped at once, so the memory the
+   then on X11 `ui::display::hide_for_exit` (the window is unmapped at once, so the memory the
    kernel frees before the X connection closes is freed off the screen), the update restart,
    and the process ends at once (no teardown of the C libraries). Nothing after `App::shutdown` writes a save. Under `RAZDOR_PROFILE` each step
-   is logged as `exit timing`.
+   is logged as `exit timing` (on Android its hide is logged as ~0 ms: it ran before the timer).
 
 Install lookup order (`src/dt/install.rs` `locate_with`): `RAZDOR_DT_DIR`, the program's own
 folder when it is an install, the remembered folder (`config_file`), then a search under

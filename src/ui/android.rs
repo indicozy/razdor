@@ -346,6 +346,23 @@ pub fn set_immersive(on: bool) {
     }
 }
 
+/// Moves the app to the background at once, as the game quits (`main::exit_now`, first of all:
+/// the saves are written off the screen). The activity's `razdorHideForExit` does it on its UI
+/// thread (`moveTaskToBack`).
+pub fn hide_for_exit() {
+    // SAFETY: as in `set_immersive`; the activity exists while the game quits.
+    unsafe {
+        let env = attach_jni_env();
+        let hide = method(env, activity_class(env).obj, "razdorHideForExit", "()V", false);
+        if hide.is_null() || cleared(env) {
+            razdor::diag!("razdorHideForExit is missing");
+            return;
+        }
+        ((**env).CallVoidMethod.unwrap())(env, ACTIVITY, hide);
+        cleared(env);
+    }
+}
+
 /// The margin the rounded corners and the bars keep at least, in dp: the corners of a phone's
 /// screen are not reported by every system, so the interface keeps this much from each edge.
 const CORNER_DP: f32 = 24.0;

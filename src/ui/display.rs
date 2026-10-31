@@ -779,13 +779,21 @@ pub fn pointer_outside() -> bool {
 pub use sys::WM_CLASS;
 
 /// Hides the game's window at once, as the game ends (`main::exit_now`, after the saves): the
-/// process's memory is then freed without the window on screen. Only X11 can do it here; on
-/// other systems the window stays until the process is gone.
+/// process's memory is then freed without the window on screen. Here X11 unmaps the window; on
+/// Android the app is moved to the background (see the Android version below).
 #[cfg(all(target_os = "linux", not(target_os = "android")))]
 pub use sys::hide_for_exit;
 
-/// Nothing to hide on this system (see the X11 version).
-#[cfg(not(all(target_os = "linux", not(target_os = "android"))))]
+/// Android: the app is moved to the background (`ui::android::hide_for_exit`), as the game
+/// quits. Nothing to hide on the other systems (no X11 window here; the window stays until the
+/// process is gone).
+#[cfg(target_os = "android")]
+pub fn hide_for_exit() {
+    crate::ui::android::hide_for_exit();
+}
+
+/// Nothing to hide on this system (see the X11 and Android versions).
+#[cfg(not(any(all(target_os = "linux", not(target_os = "android")), target_os = "android")))]
 pub fn hide_for_exit() {}
 
 #[cfg(all(target_os = "linux", not(target_os = "android")))]

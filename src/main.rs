@@ -110,6 +110,12 @@ fn opaque_rgba(rgba: &mut [u8]) {
 /// closed synchronously before this, so skipping the handlers loses nothing.
 fn exit_now(app: &mut App) -> ! {
     razdor::diag::step("quitting");
+    // Android: the app leaves the screen first, so the slow writes below happen off the screen
+    // (on a phone the window would stay frozen on it until the process is gone). The activity's
+    // onPause then flushes the session slot on its UI thread (`ui::android`, `razdorOnPause`),
+    // which is harmless: `session::flush_now` writes nothing that is already written.
+    #[cfg(target_os = "android")]
+    ui::display::hide_for_exit();
     let timed = razdor::diag::profiling();
     let t0 = std::time::Instant::now();
     razdor::frame_probe::flush();
@@ -121,7 +127,8 @@ fn exit_now(app: &mut App) -> ! {
     let t3 = std::time::Instant::now();
     // The saves are written: the window goes now, so the memory the process frees below is
     // freed off the screen (the kernel frees it before the X connection closes, and the window
-    // would stay up meanwhile).
+    // would stay up meanwhile). Android hid the app before the saves (above).
+    #[cfg(not(target_os = "android"))]
     ui::display::hide_for_exit();
     let t4 = std::time::Instant::now();
     // "Restart now" after an update: the new program, once the lock is free.
