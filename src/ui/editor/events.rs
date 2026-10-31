@@ -265,7 +265,9 @@ fn properties(state: &mut EventsState, s: &Scenario, names: &Names, id: u16, r: 
     if state.tab != before {
         state.scroll = 0.0;
     }
-    let area = Rect::new(r.x, r.y + 66.0, r.w, r.h - 66.0);
+    // The tab row grows with the text size (Razdor's own): the form starts below it.
+    let tabs_grow = 26.0 * (button_grow() - 1.0);
+    let area = Rect::new(r.x, r.y + 66.0 + tabs_grow, r.w, r.h - 66.0 - tabs_grow);
     let mut f = Form::new(&format!("e{id}"), area, state.scroll);
     f.label_w = (area.w * 0.36).min(230.0);
     let mut action = EventsAction::None;

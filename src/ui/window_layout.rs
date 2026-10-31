@@ -638,7 +638,10 @@ pub fn panel_frame(r: Rect) {
 }
 pub fn quest_rects(panel: Rect) -> (Rect,Rect) {
     let map=|x:f32,y:f32,w:f32,h:f32| Rect::new(panel.x+x*panel.w,panel.y+y*panel.h,w*panel.w,h*panel.h);
-    (map(0.0000,0.0000,0.7389,0.1989),map(0.7471,0.0313,0.2459,0.1440))
+    // Razdor's own (the owner's decision, 2026-10-31): the take button grows with the text size
+    // (`button_grow`); the header row grows by the same room under it, so the button stays in it.
+    let g = super::display::button_grow();
+    (map(0.0000,0.0000,0.7389,0.1989 + 0.1440 * (g - 1.0)),map(0.7471,0.0313,0.2459,0.1440 * g))
 }
 pub fn army_grid_left(panel: Rect, columns: u8, pitch: f32, trailing: f32) -> f32 {
     (panel.x+(panel.w-(columns as f32*pitch-trailing))/2.0).round()

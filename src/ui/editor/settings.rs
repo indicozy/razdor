@@ -58,9 +58,11 @@ pub fn window(state: &mut SettingsState, s: &Scenario, names: &Names) -> Setting
     if state.tab != before {
         state.scroll = 0.0;
     }
-    // The footer's Close grows with the text size (Razdor's own): the form gives it room.
+    // The tabs and the footer's Close grow with the text size (Razdor's own): the form gives them
+    // room (the tab row's extra height is 26 px times `g - 1`).
     let g = button_grow();
-    let area = Rect::new(r.x + 20.0, r.y + 80.0, r.w - 40.0, r.h - 100.0 - 40.0 * g);
+    let tabs_grow = 26.0 * (g - 1.0);
+    let area = Rect::new(r.x + 20.0, r.y + 80.0 + tabs_grow, r.w - 40.0, r.h - 100.0 - tabs_grow - 40.0 * g);
     let orig = Settings {
         header: s.header.clone(),
         title: s.title.clone(),

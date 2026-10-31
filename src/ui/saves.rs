@@ -1374,8 +1374,12 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art:
     // desktop; a phone's five share the same row, 4 px apart).
     let plain_gap = if phone_menu { 4.0 * k } else { 10.0 * k };
     let bw = (inner.w - 20.0 * k - plain_gap * (n as f32 - 1.0)) / n as f32;
-    let button_h = 36.0 * 0.9375 * k;
-    let by = if art { r.bottom() - (footer_h + button_h) / 2.0 } else { inner.y + inner.h - 42.0 * k };
+    // The buttons grow with the text size (Razdor's own, the owner's decision of 2026-10-31): their
+    // bottom edge stays where it is at Normal, and they grow up (`button_grow`).
+    let g = super::display::button_grow();
+    let button_h0 = 36.0 * 0.9375 * k;
+    let button_h = button_h0 * g;
+    let by = if art { r.bottom() - (footer_h + button_h0) / 2.0 - (button_h - button_h0) } else { inner.y + inner.h - 12.0 * k - 30.0 * k * g };
     // The original's buttons: three from the left 8 apart, «Отмена» on the right.
     let mut choice = None;
     let mut cancel = closed;
@@ -1388,7 +1392,7 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art:
                 else { r.x + 9.375 * k + widths[..i].iter().map(|w| w * fit + gap).sum::<f32>() };
             Rect::new(x, by, widths[i] * fit, button_h)
         } else {
-            Rect::new(inner.x + 10.0 * k + i as f32 * (bw + plain_gap), by, bw, 30.0 * k)
+            Rect::new(inner.x + 10.0 * k + i as f32 * (bw + plain_gap), by, bw, 30.0 * k * g)
         };
         let (_, down, pressed) = super::widgets::button_state(b, !*asking);
         super::chrome::marble_button(b, label, true, down);

@@ -919,25 +919,33 @@ pub fn squad(
     }
 
     // Top right: for a unit other than the hero, its face and the button that sends it away.
-    let row = at(570.0, 234.0, 256.0, 62.0);
+    // Razdor's own (the owner's decision, 2026-10-31): the buttons grow with the text size
+    // (`button_grow`) and the box grows up by the same room (its bottom stays); at Normal it is
+    // the original's box.
+    let g = super::display::button_grow();
     if let Some(sel) = tree_of {
         let u = game.squad[sel].clone();
+        let bench_control = game.allow_unit_benching && sel > 0 && u.alive();
+        let lift = dismiss_lift(bench_control, g);
+        let row = at(570.0, 234.0 - lift, 256.0, 62.0 + lift);
+        let face_rect = at(570.0, 234.0, 256.0, 62.0);
         draw_rectangle(row.x, row.y, row.w, row.h, Color::new(0.25, 0.04, 0.02, 0.55));
         chrome::silver_frame(row, 1.0);
-        let face = Rect::new(row.x + 4.0 * k, row.y + 4.0 * k, row.h - 8.0 * k, row.h - 8.0 * k);
+        let face = Rect::new(row.x + 4.0 * k, row.y + 4.0 * k, face_rect.h - 8.0 * k, face_rect.h - 8.0 * k);
         assets.draw_portrait(u.def, Team::Player, face);
         chrome::wounds(face, u.hp, u.max_hp(&c));
         let label = if u.alive() { own("Dismiss", n_("Dismiss")) } else { own("Bury", n_("Bury")) };
         let label = label.as_str();
-        let bench_control = game.allow_unit_benching && sel > 0 && u.alive();
-        let b = Rect::new(face.x + face.w + 12.0 * k,
-            row.y + if bench_control { 5.0*k } else { 14.0*k },
-            row.w - face.w - 24.0 * k, if bench_control { 24.0*k } else { row.h - 28.0*k });
+        let b = if bench_control {
+            Rect::new(face.x + face.w + 12.0 * k, row.y + 5.0 * k, row.w - face.w - 24.0 * k, 24.0 * k * g)
+        } else {
+            Rect::new(face.x + face.w + 12.0 * k, row.y + 14.0 * k, row.w - face.w - 24.0 * k, (row.h - 28.0 * k) * g)
+        };
         // One confirmation step, as the original's confirm and cancel buttons; all three in its
         // red (0x4dc118 makes them with 0x4dba90: Btn3 for Dismiss, Btn1 for the pair).
         let confirming = CONFIRM.with(|c| c.get()) == Some(sel);
         if bench_control && !confirming {
-            let toggle=Rect::new(b.x,row.y+33.0*k,b.w,24.0*k);
+            let toggle = Rect::new(b.x, b.y + b.h + 4.0 * k, b.w, 24.0 * k * g);
             let label=if u.battle_disabled { tr("Return to battle") } else { tr("Exclude from battles") };
             if red_button(toggle.x,toggle.y,toggle.w,toggle.h,label,true) {
                 game.set_unit_battle_disabled(sel,!u.battle_disabled);
@@ -978,7 +986,9 @@ pub fn squad(
             Some(dp) => 12.5 * dp,
             None => 16.0 * k,
         };
-        let row = at(574.0, 150.0, 248.0, 76.0);
+        // Moved up with the Dismiss box's lift (`dismiss_lift`), so the two keep their 8 px gap.
+        let bench = game.allow_unit_benching && t > 0 && game.squad[t].alive();
+        let row = at(574.0, 150.0 - dismiss_lift(bench, super::display::button_grow()), 248.0, 76.0);
         if let Some(off) = super::widgets::checkbox_row(row, size, tr("Don't remind"), on) {
             game.squad[t].set_sign_off(off);
         }
@@ -991,7 +1001,12 @@ pub fn squad(
     // The army: the cards as in battle, the selected one lit.
     let f = c.formation;
     let lines = f.display_lines() as f32;
-    let pane = window_layout::lower(win);
+    let mut pane = window_layout::lower(win);
+    // Stacked, the «Закрыть» under the grid grows with the text size (`button_grow`) upwards: the
+    // grid's cards give it the room.
+    if window_layout::portrait() {
+        pane.h -= window_layout::army_close(win).h * (super::display::button_grow() - 1.0);
+    }
     let cols = f.display_cols() as f32;
     let cs = 1.0f32.min(2.0 / lines).min(6.0 / cols)
         .min((pane.w - 16.0*k) / ((cols*96.0-8.0)*k))
@@ -1286,6 +1301,14 @@ fn draw_sheet(assets: &Assets, c: &razdor::rules::content::Content, win: Rect, s
     } else {
         unit_sheet::draw(assets, c, window_layout::left(win), sheet, slots, hover)
     }
+}
+
+/// How far the army window's Dismiss box grows up at the text size `g` (Razdor's own, the owner's
+/// decision of 2026-10-31), in the layout's design pixels (`at` scales them): with the benching
+/// switch its two 24 px buttons and their margins take 48 px more, else the 34 px button 34 px
+/// more. Its bottom edge stays where it is, so the switch above it moves up by the same.
+fn dismiss_lift(bench: bool, g: f32) -> f32 {
+    (if bench { 48.0 } else { 34.0 }) * (g - 1.0)
 }
 
 fn panel_slots(showing_type: bool) -> bool {
@@ -1631,8 +1654,9 @@ fn diary_reader(row: &razdor::rules::journal::Row, tab: Tab, title: f32, body: f
     let (inner, closed) = chrome::window(win, tr(n_("Diary entry")), chrome::Skin::Marble, true);
     let pad = 8.0 * k;
     let bar_w = 18.0 * k;
-    // A finger-sized close button (48 dp on a phone), centred under the text.
-    let btn_h = super::display::dp_px().map_or(40.0 * k, |dp| 48.0 * dp);
+    // A finger-sized close button (48 dp on a phone), centred under the text. It grows with the
+    // text size (`button_grow`, the owner's decision of 2026-10-31); the text above gives it room.
+    let btn_h = super::display::dp_px().map_or(40.0 * k, |dp| 48.0 * dp) * super::display::button_grow();
     let body_y = inner.y + pad;
     let body_h = (inner.h - btn_h - 3.0 * pad).max(0.0);
     let bar = Rect::new(inner.right() - pad - bar_w, body_y, bar_w, body_h);
@@ -1679,8 +1703,9 @@ fn diary_list_reader(game: &Game, rows: &[razdor::rules::journal::Row], lines: &
     let (inner, closed) = chrome::window(win, tr(diary_tab_label(tab)), chrome::Skin::Marble, true);
     let pad = 8.0 * k;
     let bar_w = 18.0 * k;
-    // The same finger-sized close as the entry reader's (48 dp on a phone).
-    let btn_h = super::display::dp_px().map_or(40.0 * k, |dp| 48.0 * dp);
+    // The same finger-sized close as the entry reader's (48 dp on a phone), grown with the text
+    // size too (`button_grow`).
+    let btn_h = super::display::dp_px().map_or(40.0 * k, |dp| 48.0 * dp) * super::display::button_grow();
     let body_y = inner.y + pad;
     let body_h = (inner.h - btn_h - 3.0 * pad).max(0.0);
     let bar = Rect::new(inner.right() - pad - bar_w, body_y, bar_w, body_h);

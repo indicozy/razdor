@@ -2265,12 +2265,15 @@ pub fn draw_popup() {
 pub fn tabs(x: f32, y: f32, w: f32, labels: &[&str], selected: &mut usize) -> f32 {
     let n = labels.len().max(1) as f32;
     let tw = w / n;
+    // The tab row grows with the text size (`button_grow`, the owner's decision of 2026-10-31):
+    // 26 px at Normal, and the 4 px under them stay. The callers give the row's room.
+    let h = 26.0 * super::display::button_grow();
     for (i, l) in labels.iter().enumerate() {
-        if toggle_button(x + i as f32 * tw, y, tw - 2.0, 26.0, l, *selected == i) {
+        if toggle_button(x + i as f32 * tw, y, tw - 2.0, h, l, *selected == i) {
             *selected = i;
         }
     }
-    30.0
+    4.0 + h
 }
 
 local! {

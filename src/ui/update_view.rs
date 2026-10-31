@@ -138,9 +138,12 @@ pub fn title_line() {
 /// A row of buttons from the right edge of `inner`; the index of the one clicked.
 fn buttons(inner: Rect, labels: &[&str]) -> Option<usize> {
     let k = chrome::k();
-    let (w, h, gap) = (150.0 * k, 28.0 * k, 12.0 * k);
+    // The buttons grow with the text size (Razdor's own, the owner's decision of 2026-10-31): 28 px
+    // at Normal, their bottom edge where it is, so they grow up (`button_grow`).
+    let g = super::display::button_grow();
+    let (w, h, gap) = (150.0 * k * g, 28.0 * k * g, 12.0 * k);
     let mut x = inner.x + inner.w - 24.0 * k - labels.len() as f32 * (w + gap) + gap;
-    let y = inner.y + inner.h - 44.0 * k;
+    let y = inner.y + inner.h - 16.0 * k - h;
     let mut picked = None;
     for (i, label) in labels.iter().enumerate() {
         let r = Rect::new(x, y, w, h);
@@ -215,7 +218,18 @@ pub fn frame(on_title: bool, mode: &mut Mode) -> bool {
     let k = chrome::k();
     let status = update::status();
     let offer = matches!(&status, Status::Found(r) if !r.notes.is_empty());
-    let (w, h) = if offer { (680.0 * k, (520.0 * k).min(screen_height() - 16.0 * k)) } else { (600.0 * k, 190.0 * k) };
+    // The window takes the buttons' extra height and width (`button_grow`: up to three buttons of
+    // 150 px more each), its text and list keep their room.
+    let g = super::display::button_grow();
+    let grow = 28.0 * k * (g - 1.0);
+    let wide = 3.0 * 150.0 * k * (g - 1.0);
+    // Only a grown window is kept on the screen's width (at Normal it is as it always was).
+    let fit_w = |w: f32| if wide > 0.0 { w.min(screen_width() - 16.0 * k) } else { w };
+    let (w, h) = if offer {
+        (fit_w(680.0 * k + wide), (520.0 * k + grow).min(screen_height() - 16.0 * k))
+    } else {
+        (fit_w(600.0 * k + wide), 190.0 * k + grow)
+    };
     let r = Rect::new((screen_width() - w) / 2.0, (screen_height() - h) / 2.0, w, h);
     draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.35));
     let (title, lines) = match &status {
@@ -235,7 +249,7 @@ pub fn frame(on_title: bool, mode: &mut Mode) -> bool {
     }
     if let (true, Status::Found(rel)) = (offer, &status) {
         let top = inner.y + 34.0 * k + wrapped.len().min(5) as f32 * 20.0 * k;
-        let bottom = inner.y + inner.h - 56.0 * k;
+        let bottom = inner.y + inner.h - 56.0 * k - grow;
         notes(Rect::new(inner.x + 24.0 * k, top, inner.w - 48.0 * k, bottom - top), &rel.notes);
     }
     let close = closed || key(KeyCode::Escape);
