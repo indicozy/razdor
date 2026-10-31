@@ -21,11 +21,21 @@ repo and the output holds game content, so it lives only in the scratch folder.
   memory and compared with the mod's tested `game/` folder file by file (by sha256, names
   ignoring case, programs and saves left out on both sides). A mod that differs is not
   catalogued; the build lists it in `report.md`, writes no `index.json`, and exits 1.
-- **Forum maps** (`maps/files.tsv`, `maps/test.tsv`, `maps/by_mod.tsv`): one entry per map
-  thread, from the newest version's files only. A `campaign` when it has several map files or
-  the Кампания tag. Maps Community Update ships are dropped. The `requires` is the mod from
+- **Forum maps** (`maps/files.tsv`, `maps/test.tsv`, `maps/by_mod.tsv`): from the newest
+  version's files only. Maps Community Update ships are dropped. The `requires` is the mod from
   the test (or by_mod) when the catalog has that mod; a map of a missing mod gets no entry.
-  `maps-le` is not read.
+  `maps-le` is not read. How a thread's files become entries (`forum_groups`):
+  - a **campaign** (one entry, all its files) when the files chain: a file's next-map field names
+    another of them, looked up as the game looks names up. A single file is a campaign only with the
+    Кампания tag;
+  - otherwise, when the files are language versions of one scenario (two or more files, one per
+    language, each file's language read from its title and description: `ru` when Cyrillic letters
+    outnumber Latin ones, `en` when Latin ones do), one **map** with all of them. Its files carry no
+    `lang`, so the hub installs both versions and lists both (`Entry.files_for` would install only one
+    language of a file that has one), and its `languages` lists them (`["ru", "en"]`);
+  - otherwise one **map** per file.
+  Several entries from one thread take the ids `map-<thread>-<n>`; report.md lists the threads whose
+  kind the rule changed.
 - **Archive maps** (`maps.tsv` and `report.tsv` of the archive folder): one `map` entry per
   map that no forum entry and no Community Update map already covers (dedupe by sha256).
 - **Previews**: the first image of the first post, as a PNG at most 480x270 (ImageMagick
@@ -37,8 +47,13 @@ repo and the output holds game content, so it lives only in the scratch folder.
   without a thread (archive maps, mods with no thread) has no `rating` key. Without the reactions
   file no entry has a rating. `report.md` counts the rated entries and lists the top 10 by U minus D.
 
-Ids: a mod is its slug; a forum map `map-<thread>`, a campaign `campaign-<thread>`, an archive
-map `arc-<sha256 first 16>`. Asset names: `<sha256 first 16 hex>.<ext>`, so the same content
+Ids: a mod is its slug; a forum map `map-<thread>` (or `map-<thread>-<n>` when the thread gives
+several entries), a campaign `campaign-<thread>`, an archive map `arc-<sha256 first 16>`.
+
+Text: titles and descriptions lose the unicode emoji and pictographs the game's font draws as boxes
+(the Emoji_Presentation and Extended_Pictographic ranges, keycaps, variation selectors) and the
+Discord custom emoji (`<:name:id>`); the spaces they leave are collapsed, and no line starts or ends
+with a space. Asset names: `<sha256 first 16 hex>.<ext>`, so the same content
 is one file.
 
 ## Inputs

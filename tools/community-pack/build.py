@@ -79,6 +79,11 @@ DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 TITLE_TAIL_RE = re.compile(r"\s*\[[^\[\]]*\]\s*$")
 MENTION_RE = re.compile(r"<(@!?|@&|#)(\d+)>")
 EMOJI_RE = re.compile(r"<a?:\w+:\d+>")
+# Unicode emoji and pictographs (the Emoji_Presentation and Extended_Pictographic ranges, the variation selectors,
+# the zero-width joiner, the keycap mark, the tag characters of flag sequences): the game's font draws them as boxes.
+PICTO_RE = re.compile("[\U0001F000-\U0001FAFF\u2300-\u23FF\u2600-\u27BF\u2B00-\u2BFF"
+                      "\uFE0E\uFE0F\u200D\u20E3\U000E0020-\U000E007F]")
+KEYCAP_RE = re.compile(r"[0-9#*]\uFE0F?\u20E3")
 URL_RE = re.compile(r"https?://\S+")
 AUTHOR_RE = re.compile(r"Автор[ы]?\s*:\s*\**\s*([^\n<(*]+)")
 AUTHOR_MENTION_RE = re.compile(r"Автор[ы]?\s*:\s*\**\s*<@!?(\d+)>")
@@ -388,9 +393,9 @@ def _in_cp1251(c):
         return False
 
 
-def dtm_next_map(path):
-    """The next-map name a `.DTm` holds: the fourth string at the header's text offset (src/dt/dtm.rs
-    `parse_payload`; the title, description and campaign name come before it). None for a file that is not a map."""
+def dtm_strings(path):
+    """The first four strings of a `.DTm`'s text section, in order: the title, the description, the campaign name
+    and the next-map name (src/dt/dtm.rs `parse_payload`). None for a file that is not a map."""
     with open(path, "rb") as f:
         data = f.read()
     if len(data) >= 4 and data[0:1] == b"A" and data[2:3] == b"p" and data[3:4] == b"f":
@@ -404,7 +409,27 @@ def dtm_next_map(path):
         end = len(data) if end < 0 else end
         strings.append(dtm_text(data[pos:end]) if pos < len(data) else "")
         pos = end + 1
-    return strings[3]
+    return strings
+
+
+def dtm_next_map(path):
+    """The next-map name a `.DTm` holds (None for a file that is not a map)."""
+    strings = dtm_strings(path)
+    return strings[3] if strings else None
+
+
+def map_language(path):
+    """The language a map is written in, from its title and description: "ru" when they hold more Cyrillic letters
+    than Latin ones, "en" when more Latin, None when neither (or the file is not a map)."""
+    strings = dtm_strings(path)
+    if not strings:
+        return None
+    text = strings[0] + " " + strings[1]
+    cyrillic = len(re.findall(r"[А-Яа-яЁё]", text))
+    latin = len(re.findall(r"[A-Za-z]", text))
+    if cyrillic == latin:
+        return None
+    return "ru" if cyrillic > latin else "en"
 
 
 def game_ref_key(ref):
@@ -454,6 +479,27 @@ def chain_position(links, chapter):
     return len(links)
 
 
+def forum_groups(names, paths, tagged):
+    """How a forum thread's map files become entries: a list of (kind, file indexes, languages).
+
+    A thread is one campaign when its files chain: a file's next-map field names another of them, looked up as the
+    game looks names up (game_ref_key, game_name_key). One file is a campaign only when its thread is tagged as one.
+    Files that do not chain are language versions of one scenario when there is one file per language (two or more
+    files, every file's language known, no language twice): one map with all of them, both kept. Anything else is
+    one map per file."""
+    if len(names) == 1:
+        return [("campaign" if tagged else "map", [0], ["ru"])]
+    chapters = {game_name_key(n) for n in names}
+    for name, path in zip(names, paths):
+        key = game_ref_key(dtm_next_map(path) or "")
+        if key and key in chapters and key != game_name_key(name):
+            return [("campaign", list(range(len(names))), ["ru"])]
+    langs = [map_language(p) for p in paths]
+    if None not in langs and len(set(langs)) == len(langs):
+        return [("map", list(range(len(names))), sorted(langs, key=lambda lang: (lang != "ru", lang)))]
+    return [("map", [i], ["ru"]) for i in range(len(names))]
+
+
 class Assets:
     """The asset files of the release: each named by its content, `<sha256 first 16>.<ext>`."""
 
@@ -489,7 +535,13 @@ def strip_markup(text, users):
         out.append(m.group(0))
         pos = m.end()
     out.append(_plain(text[pos:], users))
-    return "".join(out).strip()
+    # no space at the start or end of a line (an emoji that began a line leaves one behind)
+    return re.sub(r"(?m)^[ \t]+|[ \t]+$", "", "".join(out)).strip()
+
+
+def strip_emoji(text):
+    """The text without unicode emoji and pictographs (PICTO_RE, KEYCAP_RE)."""
+    return PICTO_RE.sub("", KEYCAP_RE.sub("", text))
 
 
 def _plain(seg, users):
@@ -498,6 +550,7 @@ def _plain(seg, users):
 
     seg = MENTION_RE.sub(mention, seg)
     seg = EMOJI_RE.sub("", seg)
+    seg = strip_emoji(seg)
     seg = re.sub(r"\*\*|__|~~|\|\||`|\*", "", seg)
     seg = re.sub(r"\(\s*\)", "", seg)
     seg = re.sub(r"[ \t]+", " ", seg)
@@ -518,8 +571,9 @@ def cut_text(text, limit=TEXT_LIMIT):
 
 
 def clean_title(name):
-    """A thread's name without its trailing `[...]` bracket."""
-    return TITLE_TAIL_RE.sub("", name).strip() or name.strip()
+    """A thread's name without its emoji and its trailing `[...]` bracket."""
+    plain = re.sub(r"[ \t]+", " ", strip_emoji(name))
+    return TITLE_TAIL_RE.sub("", plain).strip() or plain.strip() or name.strip()
 
 
 def clean_version(raw):
@@ -831,6 +885,7 @@ class Pack:
         self.fixes = fixes or {}  # thread id -> chain fixes (add, drop, break), see --fixes
         self.chain_log = []       # what the campaign fixes did, for report.md
         self.failures = []        # campaign links that do not resolve and are not marked break
+        self.kind_log = []        # forum threads whose kind the grouping rule changed (forum_groups), for report.md
         self.threads = load_threads(src)
         self.users = user_names(self.threads)
         self.assets = Assets(out)
@@ -1107,22 +1162,40 @@ class Pack:
             self.chain_log.append(f"{tid}: dropped {', '.join(sorted(drop))}")
         if not keep:
             raise Skip("nothing left after the chain fixes")
-        mod = map_mod(keep, test_of, bymod)
-        requires = self.map_requires(mod)
-        status, note = map_status(keep, test_of)
         tags = " ".join(t.get("applied_tags") or [])
-        kind = "campaign" if ("Кампания" in tags or "Campaign" in tags or len(keep) > 1) else "map"
-        eid = f"{kind}-{tid}"
-        paths = [self.map_file(r["file_path"]) for r in keep]
+        tagged = "Кампания" in tags or "Campaign" in tags
         names = [package_name(r["file_name"]) for r in keep]
-        self.claim_names(names)
+        paths = [self.map_file(r["file_path"]) for r in keep]
+        groups = forum_groups(names, paths, tagged)
+        # what the thread was before the grouping rule (a campaign when tagged or with several files)
+        was = "campaign" if (tagged or len(keep) > 1) else "map"
+        if [kind for kind, _, _ in groups] != [was]:
+            self.kind_log.append(f"{tid} {t['name']}: {was} → " + ", ".join(
+                f"{kind} ({', '.join(names[i] for i in idx)})" for kind, idx, _ in groups))
         meta = self.thread_fields(t, t["name"], "")
+        for n, (kind, idx, langs) in enumerate(groups, 1):
+            eid = f"{kind}-{tid}" if len(groups) == 1 else f"{kind}-{tid}-{n}"
+            try:
+                self.add_forum_entry(eid, kind, langs, idx, keep, names, paths, test_of, bymod, meta)
+            except Skip as e:
+                label = f"map thread {tid} {t['name']}" + (f" ({names[idx[0]]})" if len(groups) > 1 else "")
+                self.skip(label, str(e))
+
+    def add_forum_entry(self, eid, kind, langs, idx, keep, names, paths, test_of, bymod, meta):
+        """One entry of a forum thread: its files (keep[i] for i in idx, named names[i], read at paths[i]). The
+        preview is made only once the entry is certain, so a refused entry leaves no asset behind."""
+        rows = [keep[i] for i in idx]
+        requires = self.map_requires(map_mod(rows, test_of, bymod))
+        status, note = map_status(rows, test_of)
+        self.claim_names([names[i] for i in idx])
         refs = []
-        for name, full in zip(names, paths):
-            asset = self.assets.add(full, ".dtm", eid)
+        for i in idx:
+            asset = self.assets.add(paths[i], ".dtm", eid)
             self.map_shas.add(asset["sha256"])
-            refs.append(file_ref(asset, name, lang="ru"))
-        self.add_entry(make_entry(eid, kind, meta, "", ["ru"], requires, status, note, refs,
+            # A language pair's files carry no lang: the hub installs only the files of one language when
+            # the files carry one (Entry.files_for), and both versions must be installed and listed.
+            refs.append(file_ref(asset, names[i], lang=None if len(langs) > 1 else "ru"))
+        self.add_entry(make_entry(eid, kind, meta, "", langs, requires, status, note, refs,
                                   preview=self.preview(meta["image"], eid)))
 
     def extra_rows(self, tid, path):
@@ -1323,6 +1396,8 @@ class Pack:
         lines += [f"| {slug} | {n} | {s} |" for slug, (n, s) in sorted(self.sound_log.items())]
         lines += ["", f"## Campaign chains ({len(self.chain_log)} notes)", ""]
         lines += [f"- {line}" for line in self.chain_log] or ["None."]
+        lines += ["", f"## Forum threads whose kind changed ({len(self.kind_log)} threads)", ""]
+        lines += [f"- {line}" for line in self.kind_log] or ["None."]
         lines += ["", "## Notes", ""]
         lines += [f"- {n}" for n in self.notes] or ["None."]
         return "\n".join(lines) + "\n"
@@ -1406,13 +1481,13 @@ def write_bytes(path, data):
         f.write(data)
 
 
-def fake_dtm(next_name):
+def fake_dtm(next_name, title="T", description="D"):
     """A minimal uncompressed `.DTm` payload: the header with its text offset, then the title, description,
-    campaign name and next-map strings (what dtm_next_map reads)."""
+    campaign name and next-map strings (what dtm_strings and dtm_next_map read)."""
     head = bytearray(DTM_HEADER_SIZE)
     head[9] = ord("4")
     struct.pack_into("<I", head, 0x18, DTM_HEADER_SIZE)
-    return bytes(head) + b"T\0D\0C\0" + next_name.encode("cp1251") + b"\0"
+    return bytes(head) + f"{title}\0{description}\0C\0{next_name}\0".encode("cp1251")
 
 
 def write_fixture(root):
@@ -1437,6 +1512,8 @@ def write_fixture(root):
                                 "content": "**Автор:** Иван (<@9>). Кампания из двух карт.", "attachments": []},
                                later]})
     thread("maps", "302", "Пустая", "", owner="5")
+    thread("maps", "310", "⚔️ Пара [Test]", "**⚔️ Сложность карты**\n1️⃣  Первая  <:x:1>  ✨ конец", owner="5")
+    thread("maps", "320", "Два сценария [Test]", "Две карты разных сценариев.", owner="5")
     thread("maps-le", "400", "LE", "")
     write_file(os.path.join(base, "Data", "units.ini"), "base units")
     write_file(os.path.join(base, "Graphics", "a.lit"), "lit")
@@ -1462,17 +1539,27 @@ def write_fixture(root):
     write_file(os.path.join(src, "mods", "status.tsv"),
                "slug\tstatus\tdownload ok?\tnote\n"
                "modA\tfull\tyes\t\nmodC\tpartial\tpartial (1 of 2)\tfixture\nmodB\tmissing\tyes\tfixture\n")
-    dtm = {"old": fake_dtm("c1.DTm"), "c1": fake_dtm("c2.DTm"), "c2": fake_dtm(""), "cu": b"cu map"}
+    dtm = {"old": fake_dtm("c1.DTm"), "c1": fake_dtm("c2.DTm"), "c2": fake_dtm(""), "cu": b"cu map",
+           "veil_ru": fake_dtm("", "Церковь", "Русская карта"), "veil_en": fake_dtm("", "Church", "An English map"),
+           "alpha": fake_dtm("", "Альфа", "Первый сценарий"), "beta": fake_dtm("", "Бета", "Второй сценарий")}
     shas = {k: sha256_bytes(v.encode()) for k, v in
             {"arc": "arc one", "crumb": "crumb map", "bad": "bad"}.items()}
     shas.update({k: sha256_bytes(v) for k, v in dtm.items()})
     for name, data in (("old.DTm", dtm["old"]), ("c1.DTm", dtm["c1"]), ("c2.DTm", dtm["c2"]),
                        ("cu.DTm", dtm["cu"])):
         write_bytes(os.path.join(src, "maps", "unpacked", "300", name), data)
+    write_bytes(os.path.join(src, "maps", "unpacked", "310", "veil_ru.DTm"), dtm["veil_ru"])
+    write_bytes(os.path.join(src, "maps", "unpacked", "310", "veil_en.DTm"), dtm["veil_en"])
+    write_bytes(os.path.join(src, "maps", "unpacked", "320", "alpha.DTm"), dtm["alpha"])
+    write_bytes(os.path.join(src, "maps", "unpacked", "320", "beta.DTm"), dtm["beta"])
     files = [("300", "300", "old.DTm", "maps/unpacked/300/old.DTm", shas["old"], "no"),
              ("300", "301", "c1.DTm", "maps/unpacked/300/c1.DTm", shas["c1"], "yes"),
              ("300", "301", "c2.DTm", "maps/unpacked/300/c2.DTm", shas["c2"], "yes"),
-             ("300", "301", "cu.DTm", "maps/unpacked/300/cu.DTm", shas["cu"], "yes")]
+             ("300", "301", "cu.DTm", "maps/unpacked/300/cu.DTm", shas["cu"], "yes"),
+             ("310", "310", "veil_ru.DTm", "maps/unpacked/310/veil_ru.DTm", shas["veil_ru"], "yes"),
+             ("310", "310", "veil_en.DTm", "maps/unpacked/310/veil_en.DTm", shas["veil_en"], "yes"),
+             ("320", "320", "alpha.DTm", "maps/unpacked/320/alpha.DTm", shas["alpha"], "yes"),
+             ("320", "320", "beta.DTm", "maps/unpacked/320/beta.DTm", shas["beta"], "yes")]
     write_file(os.path.join(src, "maps", "files.tsv"),
                "thread_id\tmessage_id\tfile_name\tfile_path\tsha256\tis_newest\n" +
                "".join("\t".join(r) + "\n" for r in files))
@@ -1480,8 +1567,13 @@ def write_fixture(root):
                "thread_id\tfile_name\tsha256\tslug\tresult\n" +
                f"300\told.DTm\t{shas['old']}\tmodA\tFAIL old\n" +
                f"300\tc1.DTm\t{shas['c1']}\tmodA\tok\n" +
-               f"300\tc2.DTm\t{shas['c2']}\tmodA\tFAIL crash on day 3\n")
-    write_file(os.path.join(src, "maps", "by_mod.tsv"), "thread_id\tmod_slug\n300\tmodA\n302\tvanilla\n")
+               f"300\tc2.DTm\t{shas['c2']}\tmodA\tFAIL crash on day 3\n" +
+               f"310\tveil_ru.DTm\t{shas['veil_ru']}\tmodA\tok\n" +
+               f"310\tveil_en.DTm\t{shas['veil_en']}\tmodA\tok\n" +
+               f"320\talpha.DTm\t{shas['alpha']}\tmodA\tok\n" +
+               f"320\tbeta.DTm\t{shas['beta']}\tmodA\tok\n")
+    write_file(os.path.join(src, "maps", "by_mod.tsv"),
+               "thread_id\tmod_slug\n300\tmodA\n302\tvanilla\n310\tmodA\n320\tmodA\n")
     arc_rows = [("top__arc1.DTm", "dtm/arc1.DTm", "top", shas["arc"], ""),
                 ("top__dup.DTm", "dtm/dup.DTm", "top", shas["c1"], ""),
                 ("top__copy.DTm", "dtm/copy.DTm", "top", shas["arc"], "top__arc1.DTm"),
@@ -1586,6 +1678,12 @@ def selftest():
     check_selftest("markup: mentions, emoji, marks, links",
                    strip_markup("**bold** <@1> and <:e:2> https://a.b/c_d_e x", users) == "bold Zed and https://a.b/c_d_e x")
     check_selftest("markup: unknown mention goes", strip_markup("<@5> hi", users) == "hi")
+    check_selftest("emoji: pictographs, keycaps and custom emoji go, and the spaces they leave collapse",
+                   strip_markup("**⚔️ Сложность карты**\n1️⃣  Первая  <:x:1>  ✨ конец", users)
+                   == "Сложность карты\nПервая конец")
+    check_selftest("emoji: a title loses its emoji and its bracket", clean_title("⚔️ Пара [Test]") == "Пара")
+    check_selftest("emoji: letters, digits and punctuation stay",
+                   strip_emoji("Карта №1 (2-е) — ок!") == "Карта №1 (2-е) — ок!")
     check_selftest("title: one trailing bracket goes", clean_title("X [New units]") == "X")
     check_selftest("title: only the last bracket goes", clean_title("A [b] [c]") == "A [b]")
     check_selftest("title: no bracket, unchanged", clean_title("No bracket") == "No bracket")
@@ -1616,6 +1714,25 @@ def selftest():
         write_bytes(legacy, comp)
         check_selftest("dtm: the next-map name is read from a plain map and from a container map",
                        dtm_next_map(plain) == "Next map.DTm" and dtm_next_map(legacy) == "Next2.DTm")
+
+        def mk(name, next_name, title, description):
+            path = os.path.join(d, name)
+            write_bytes(path, fake_dtm(next_name, title, description))
+            return path
+
+        chained = forum_groups(["a.DTm", "b.DTm"], [mk("a.DTm", "b.DTm", "Один", "Глава"),
+                                                    mk("b.DTm", "", "Два", "Глава")], False)
+        pair = forum_groups(["ru.DTm", "en.DTm"], [mk("ru.DTm", "", "Карта", "Русское описание"),
+                                                   mk("en.DTm", "", "Map", "An English description")], False)
+        unrelated = forum_groups(["x.DTm", "y.DTm"], [mk("x.DTm", "", "Альфа", "Первая"),
+                                                      mk("y.DTm", "", "Бета", "Вторая")], False)
+        single = forum_groups(["s.DTm"], [mk("s.DTm", "", "Одна", "Карта")], True)
+        check_selftest("groups: a chain is one campaign, a language pair one map with both languages (ru first), "
+                       "unrelated maps one map each, a tagged single map a campaign",
+                       chained == [("campaign", [0, 1], ["ru"])]
+                       and pair == [("map", [0, 1], ["ru", "en"])]
+                       and unrelated == [("map", [0], ["ru"]), ("map", [1], ["ru"])]
+                       and single == [("campaign", [0], ["ru"])])
     check_selftest("game lookup: a reference is found as the game finds it (trim, exact .DTm/.dtm, no quote stripping)",
                    game_ref_key(" Name.DTm ") == game_name_key("Name.dtm") == game_ref_key("Name")
                    and game_ref_key("Name.dtm") == "name"
@@ -1730,6 +1847,20 @@ def selftest():
                            and camp["author"] == "Иван" and "crash on day 3" in camp["status_note"]["en"])
             check_selftest("build: a mod with no entry gets no map entry",
                            "map-302" not in by_id and "modB" not in by_id)
+            pair = by_id.get("map-310")
+            check_selftest("build: two language versions of one scenario are one map with both files, unlabelled, "
+                           "listed ru and en, emoji gone from the title and the description",
+                           pair is not None and pair["kind"] == "map" and pair["languages"] == ["ru", "en"]
+                           and len(pair["files"]) == 2 and all("lang" not in f for f in pair["files"])
+                           and pair["title"]["ru"] == "Пара" and pair["description"]["ru"] == "Сложность карты\nПервая конец"
+                           and "campaign-310" not in by_id)
+            two = [by_id.get("map-320-1"), by_id.get("map-320-2")]
+            check_selftest("build: unrelated maps of one thread are one map entry each",
+                           all(e and e["kind"] == "map" and e["languages"] == ["ru"] and len(e["files"]) == 1
+                               for e in two) and "campaign-320" not in by_id)
+            check_selftest("build: a thread whose kind changed is listed in report.md",
+                           "Forum threads whose kind changed (2 threads)" in open(
+                               os.path.join(out1, "report.md"), encoding="utf-8").read())
             arcs = [e for e in cat["entries"] if e["id"].startswith("arc-")]
             check_selftest("build: archive maps: duplicates and covered files dropped, the rest kept",
                            len(arcs) == 3 and all(e["kind"] == "map" and e["requires"] == [] for e in arcs))
