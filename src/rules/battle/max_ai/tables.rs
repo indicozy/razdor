@@ -130,6 +130,8 @@ impl Battle {
             bench,
             god,
             max_ai: _,
+            // The root's move filter only (`Search`'s root, never a table entry).
+            max_guard: _,
             // One value for the whole battle, as the battle's tables are; the evaluations
             // that read it (the forced-win search) keep no table entries.
             max_stakes: _,

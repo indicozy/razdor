@@ -520,6 +520,10 @@ pub struct Game {
     /// owner's request): set by the interface, not part of the save.
     #[serde(skip)]
     pub max_ai: bool,
+    /// The experimental «Максимум бережёт магов» (`Settings::max_guard`, [`Battle::set_max_guard`]):
+    /// set by the interface, not part of the save.
+    #[serde(skip)]
+    pub max_guard: bool,
     /// Razdor's option: stepping onto a friendly army (attitude above 0) with no event for
     /// the meeting lets the hero pass. Off (the default) is the original: every army he
     /// steps onto is engaged, and with no event firing the battle opens (world.md §4.2).
@@ -724,6 +728,7 @@ impl Game {
             snapped: false,
             improved_ai: false,
             max_ai: false,
+            max_guard: false,
             friends_let_pass: false,
             avoid_armies: false,
             keep_formation: false,
@@ -2381,6 +2386,7 @@ impl Game {
         b.set_xp_correction(correction);
         b.set_improved_ai(self.improved_ai);
         b.set_max_ai(self.max_ai);
+        b.set_max_guard(self.max_guard);
         b.god = self.cheats.god;
         // Lasting world spells are in the units' stats already (their slots).
         // An enemy army attacked in a building of its own side (one hostile to the hero)

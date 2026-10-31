@@ -171,6 +171,7 @@ impl Clone for Battle {
             bench: Vec::new(),
             god: false,
             max_ai: false,
+            max_guard: false,
             max_stakes: MaxStakes::Campaign,
         };
         b.clone_from(self);
@@ -216,6 +217,7 @@ impl Clone for Battle {
             bench,
             god,
             max_ai,
+            max_guard,
             max_stakes,
         } = src;
         if !Arc::ptr_eq(&self.content, content) {
@@ -257,6 +259,7 @@ impl Clone for Battle {
         self.bench.clone_from(bench);
         self.god = *god;
         self.max_ai = *max_ai;
+        self.max_guard = *max_guard;
         self.max_stakes = *max_stakes;
     }
 }

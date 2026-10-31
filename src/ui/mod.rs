@@ -514,6 +514,7 @@ impl App {
         view.session.end_round();
         let mut battle = view.session.start_round(&content, expert)?;
         battle.set_max_ai(main_menu::ai_strength(&self.audio.settings) == main_menu::AiStrength::Max);
+        battle.set_max_guard(self.audio.settings.max_guard);
         Some(Screen::CustomBattle(Box::new(BattleView::custom(battle, view.session.setup.control))))
     }
 

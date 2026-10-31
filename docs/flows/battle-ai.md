@@ -257,6 +257,23 @@ BattleView::ai_move (computer's turn) → max_move → MaxThinker::poll(battle)
 - The Community patch's globals (thread-local) are saved and put back around every simulated
   action; the worker thread starts from a copy of the screen's. The battle's own state is
   never touched (`max_choice` takes `&self`).
+- **Caster guard** (experimental, the 2026-10-31 report 1459: the archmage and the saint stood
+  where an enemy knight killed them at once; `Battle::guard_moves`, `Battle::caster_exposed`,
+  `MaxBudget::guard`; the switch «Бережёт магов (опыт)», `Settings::max_guard` → `Game::max_guard`
+  → `Battle::set_max_guard`, off by default, see `experimental-rules.md`). At the root, a move
+  of the searching side that leaves a caster of its side (role Mage: mages and healers) in a
+  cell where one action of an opposing unit deals lethal damage is dropped, when the caster was
+  not exposed before the move and some move leaves none exposed. The original's pick (the first
+  move) stays, so the Safety floor holds, and a position with no safe move keeps all moves. The
+  search below the root is unchanged, and the tables do not see the switch (the filter is a
+  root-only move set). Measured on 80 custom battles of the install's units (both sides, Max on
+  each): casters of Max's side killed 93 → 91 of 215, Max's wins 87 → 87 of 160, the mean time
+  per decision 2.79 → 2.54 ms (noise). Measured on the bench (`max_bench`, `RAZDOR_MAX_GUARD=1`):
+  wins, worth kept and the decision count unchanged (see the table of §7). With the guard off,
+  the steps that leave a caster exposed are 47 of 927 for Max on the enemy's side and 145 of
+  1039 for the original's AI on the same 80 battles (the scan of 2026-10-31). The test
+  `max_guard_keeps_casters_out_of_a_lethal_hit` (install battles 46 and 71 of `custom_battles`
+  seed 99) fails with the filter removed.
 - **Tables** (`max_ai/tables.rs`, `MaxTables`, one per battle in the `MaxThinker`, shared by
   its searches): positions are keyed by `Battle::max_key`, a 128-bit hash (two SipHash
   digests) of every field of `Battle` and `Fighter` that the future depends on (the fields are

@@ -956,6 +956,7 @@ pub fn set_ai_strength(audio: &mut super::audio::Settings, s: AiStrength) {
 pub fn follow_settings(audio: &super::audio::Settings, g: &mut razdor::rules::game::Game) {
     g.improved_ai = expert_ai(audio);
     g.max_ai = ai_strength(audio) == AiStrength::Max;
+    g.max_guard = audio.max_guard;
     g.pursue = pursue(audio);
     g.walk_pace = walk_pace(audio);
     g.friends_let_pass = audio.friends_let_pass;
@@ -1336,6 +1337,11 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     // from before it (`Game::keep_formation`); off, the original's write-back.
     if row(tr("Keep formation after battle"), if audio.keep_formation { tr("On") } else { tr("Off") }, &mut y) {
         audio.keep_formation = !audio.keep_formation;
+    }
+    // Razdor's experimental option (`Battle::set_max_guard`, `docs/flows/experimental-rules.md`):
+    // off by default, a gameplay change of «Максимум».
+    if row(tr("Max guards casters (experimental)"), if audio.max_guard { tr("On") } else { tr("Off") }, &mut y) {
+        audio.max_guard = !audio.max_guard;
     }
     // Razdor's options: a battle between armies on the map shows a mark and a notice (on by
     // default); the armies the player sees are listed under the minimap (off by default).

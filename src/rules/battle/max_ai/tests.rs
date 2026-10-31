@@ -1069,3 +1069,44 @@ fn max_blunders_over_the_battles_to_the_end() {
     println!("all: {} decisions, reserve steps {}, idle with a damaging strike {}, of which a kill {}", t.decisions, t.reserve.len(), t.idle, t.idle_kill);
     assert!(t.reserve.is_empty(), "{} steps into the reserve:\n{}", t.reserve.len(), t.reserve.join("\n"));
 }
+
+/// The install's content (`RAZDOR_DT_DIR`; `None` without it).
+fn install_content() -> Option<Arc<Content>> {
+    use crate::dt::install::DtInstall;
+    let dir = std::env::var_os(crate::dt::install::ENV_VAR)?;
+    let dt = DtInstall::load(std::path::Path::new(&dir)).unwrap();
+    Some(Arc::new(Content::from_dt(&dt)))
+}
+
+/// «Максимум бережёт магов» (experimental, the owner's report 1459: the archmage and the saint
+/// stood where an enemy knight killed them at once). With the guard on, Max's own move never
+/// leaves a caster of its side newly exposed to a lethal hit while another move does not. Two
+/// of the install's custom battles (`custom_battles`, seed 99: 46 and 71) where Max's healer
+/// stepped into the front row into a kill, with the original's move safe.
+#[test]
+fn max_guard_keeps_casters_out_of_a_lethal_hit() {
+    let Some(c) = install_content() else { return };
+    let battles = custom_battles(&c, "scan", 80, 5, 99);
+    for index in [46, 71] {
+        let (name, mut b) = battles[index].clone();
+        b.set_max_guard(true);
+        b.begin();
+        let tables = MaxTables::default();
+        for _ in 0..AUTO_PLAY_STEPS {
+            let Some(id) = b.active() else { break };
+            if b.fighters[id].team != Team::Enemy {
+                b.auto_step();
+                continue;
+            }
+            let before = b.caster_exposed(Team::Enemy);
+            let r = b.max_choice_with(harness(TEST_BUDGET), with_tables().then_some(&tables), None).unwrap();
+            let mut after = b.clone();
+            after.play_max_move(r.choice);
+            assert!(before || !after.caster_exposed(Team::Enemy), "{name}: Max's {:?} leaves a caster to a lethal hit", r.choice.plan());
+            b.play_max_move(r.choice);
+            if b.outcome() != Outcome::Ongoing {
+                break;
+            }
+        }
+    }
+}

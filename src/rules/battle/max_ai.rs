@@ -148,6 +148,9 @@ pub struct MaxBudget {
     /// [`Battle::greedy_move`], instead of the original's AI; the minimax plies are unchanged).
     /// Its table entries are kept apart ([`MaxBudget::key_salt`]).
     pub player_model: bool,
+    /// The experimental «Максимум бережёт магов» at the root ([`Battle::guard_moves`]); the
+    /// battle's own switch ([`Battle::set_max_guard`]) turns it on as well.
+    pub guard: bool,
 }
 
 impl MaxBudget {
@@ -157,12 +160,12 @@ impl MaxBudget {
     }
 
     /// The battle on screen: [`MAX_AI_BUDGET`] per decision.
-    pub const GAME: MaxBudget = MaxBudget { time: Some(MAX_AI_BUDGET), max_depth: MAX_DEPTH, max_nodes: u64::MAX, short_rollouts: false, parallel: true, prefetch: false, player_model: false };
+    pub const GAME: MaxBudget = MaxBudget { time: Some(MAX_AI_BUDGET), max_depth: MAX_DEPTH, max_nodes: u64::MAX, short_rollouts: false, parallel: true, prefetch: false, player_model: false, guard: false };
 
     /// No clock: at most `max_depth` actions ahead and `max_nodes` positions, the same
     /// choice on any machine.
     pub const fn fixed(max_depth: u32, max_nodes: u64) -> MaxBudget {
-        MaxBudget { time: None, max_depth, max_nodes, short_rollouts: false, parallel: false, prefetch: false, player_model: false }
+        MaxBudget { time: None, max_depth, max_nodes, short_rollouts: false, parallel: false, prefetch: false, player_model: false, guard: false }
     }
 }
 
@@ -219,6 +222,50 @@ impl Battle {
 
     pub fn max_ai(&self) -> bool {
         self.max_ai
+    }
+
+    /// The experimental «Максимум бережёт магов» (`Settings::max_guard`): the root's moves
+    /// that step a caster into a lethal hit are dropped while another move does not ([`Battle::guard_moves`]).
+    pub fn set_max_guard(&mut self, on: bool) {
+        self.max_guard = on;
+    }
+
+    pub fn max_guard(&self) -> bool {
+        self.max_guard
+    }
+
+    /// Whether a caster (a mage or healer) of `team` stands where one action of an opposing
+    /// unit kills it outright (a hostile action whose damage reaches its HP).
+    fn caster_exposed(&self, team: Team) -> bool {
+        self.fighters.iter().enumerate().filter(|(_, f)| f.team == team && f.role == Role::Mage && f.alive()).any(|(t, tf)| {
+            self.fighters.iter().enumerate().filter(|(_, f)| f.team != team && f.alive()).any(|(id, _)| {
+                self.all_options(id).into_iter().any(|(tg, k)| tg == t && k.is_hostile() && matches!(self.preview(id, tg, k), Preview::Damage(d) if d >= tf.hp))
+            })
+        })
+    }
+
+    /// «Максимум бережёт магов» (experimental; the owner's report 1459: the archmage and the
+    /// saint stood where an enemy knight killed them at once). Of the active unit `id`'s root
+    /// moves, one that leaves a caster of its side exposed to a lethal hit it was not exposed to
+    /// before is dropped, when some move leaves none exposed. The original's pick (the first
+    /// move) stays, as the Safety floor; with no exposure to avoid, the moves are unchanged.
+    fn guard_moves(&self, id: usize, moves: Vec<MaxMove>) -> Vec<MaxMove> {
+        let team = self.fighters[id].team;
+        if self.caster_exposed(team) {
+            return moves;
+        }
+        let exposes: Vec<bool> = moves
+            .iter()
+            .map(|&m| {
+                let mut after = self.clone();
+                after.play_max_move(m);
+                after.caster_exposed(team)
+            })
+            .collect();
+        if exposes.iter().all(|&e| e) {
+            return moves;
+        }
+        moves.into_iter().zip(exposes).enumerate().filter(|(i, (_, e))| *i == 0 || !e).map(|(_, (m, _))| m).collect()
     }
 
     /// What the battle is fought for, as Max weighs it ([`MaxStakes`]; a campaign battle
@@ -539,6 +586,9 @@ impl Battle {
         root.log.clear();
         root.stale_reads.borrow_mut().clear();
         let mut moves = root.max_order(id, true);
+        if budget.guard || root.max_guard {
+            moves = root.guard_moves(id, moves);
+        }
         let original = moves[0];
         let mut s = Search {
             side: root.fighters[id].team,

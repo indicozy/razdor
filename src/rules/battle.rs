@@ -698,6 +698,9 @@ pub struct Battle {
     /// Razdor's «Максимум» for the computer's side of the battle on screen
     /// ([`Battle::set_max_ai`], the owner's request); the rules never read it.
     max_ai: bool,
+    /// The experimental «Максимум бережёт магов» (`Settings::max_guard`, [`Battle::set_max_guard`]):
+    /// the rules never read it.
+    max_guard: bool,
     /// What the battle is fought for, as «Максимум» weighs it ([`MaxStakes`]; Razdor's rule,
     /// the owner's decision of 2026-10-19); the rules never read it.
     max_stakes: MaxStakes,
@@ -834,6 +837,7 @@ impl Battle {
             bench: Vec::new(),
             god: false,
             max_ai: false,
+            max_guard: false,
             max_stakes: MaxStakes::Campaign,
         };
         b.fit_to_formation();

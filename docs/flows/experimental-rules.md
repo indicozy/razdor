@@ -119,3 +119,13 @@ dead units and capacity still apply; retrieving an unpaid garrison member pays t
 price immediately. Shift-clicking a backpack item equips it on the hero, or drinks it if
 it is a potion. Shift-clicking worn gear returns it to the pack. Failed quick actions
 keep the item and show the existing refusal. All equipment rules and potion limits apply.
+
+## Battle AI: Caster guard (Максимум)
+
+Advanced settings (the «Ещё…» window) have **«Бережёт магов (опыт)»**, off by default
+(`Settings::max_guard`, saved in the settings file, not in a save; `Game::max_guard` and
+`Battle::set_max_guard` are set from it when a battle starts, as `Game::max_ai` is). It is a
+gameplay change of the «Максимум» AI, so it stays behind this switch until the owner decides.
+With it on, «Максимум» does not move a mage or healer of its side into a cell where one action
+of an opposing unit kills it, while another move leaves none exposed (`battle-ai.md` §8,
+`Battle::guard_moves`). Off, «Максимум» plays as before (the `max_bench` baseline).

@@ -29,7 +29,9 @@ fn bench_budget() -> MaxBudget {
         Ok("1") => true,
         _ => MaxBudget::GAME.player_model,
     };
-    MaxBudget { player_model, ..MaxBudget::fixed(4, 600) }
+    // `RAZDOR_MAX_GUARD=1` plays the experimental «Максимум бережёт магов» (off in the game by default).
+    let guard = std::env::var("RAZDOR_MAX_GUARD").as_deref() == Ok("1");
+    MaxBudget { player_model, guard, ..MaxBudget::fixed(4, 600) }
 }
 /// The demo's battles in the set (all of them in the fast check too).
 const DEMO_BATTLES: usize = 24;
