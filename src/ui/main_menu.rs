@@ -3,7 +3,7 @@
 //! (`Title_RUS.ugs`) with flames rising off its letters (`TitleFlame_RUS.lit`), and five oval
 //! buttons (`mb2.ugs`, the last one pointed) whose marble middles swirl in violet
 //! (`MenuFlame.lit`) under the words of `SMText_RUS.lit`; the button under the mouse turns
-//! gold. Razdor's own extras, the map editor, the custom battle and the interface language,
+//! gold. Razdor's own extras, the custom battle and the interface language,
 //! sit small in the bottom corners. Layout numbers are pixels of the 960×720 video, scaled by [`chrome::k`].
 
 use razdor::local;
@@ -27,7 +27,6 @@ pub enum Pick {
     Options,
     Authors,
     Exit,
-    Editor,
     /// Razdor's custom battle (`ui::custom_battle`).
     Custom,
     /// Razdor's "Maps and mods" (`ui::hub_view`).
@@ -535,23 +534,19 @@ pub fn frame(no_install: bool) -> Option<Pick> {
     pick
 }
 
-/// The links in the landscape corners, over the original's version and copyright lines: the map
-/// editor, the custom battle, the Discord and the language. Returns what was picked.
+/// The links in the landscape corners, over the original's version and copyright lines: the custom
+/// battle, the maps and mods, the Discord and the language. (The map editor's link is gone: the
+/// editor is not ready; its code and `--editor` stay.) Returns what was picked.
 fn corner_links(k: f32) -> Option<Pick> {
     let mut pick = None;
     let y = screen_height() - 22.0 * k;
     // The links grow with the text size (`button_grow`, the owner's decision of 2026-10-31).
     let size = 18.0 * k * super::display::button_grow();
-    let editor = tr("Map editor");
-    if link(editor, 16.0 * k, y, false, size) {
-        pick = Some(Pick::Editor);
-    }
-    let x = 16.0 * k + measure(editor, size).width + 28.0 * k;
     let custom = tr("Custom battle");
-    if link(custom, x, y, false, size) {
+    if link(custom, 16.0 * k, y, false, size) {
         pick = Some(Pick::Custom);
     }
-    let x = x + measure(custom, size).width + 28.0 * k;
+    let x = 16.0 * k + measure(custom, size).width + 28.0 * k;
     if link(tr("Maps and mods"), x, y, false, size) {
         pick = Some(Pick::Hub);
     }
@@ -579,7 +574,7 @@ fn corner_links(k: f32) -> Option<Pick> {
 fn chip_links(m: &PortraitMenu, k: f32) -> Option<Pick> {
     let mut pick = None;
     let lang = super::language::current_label();
-    let labels: [&str; 5] = [tr("Map editor"), tr("Custom battle"), tr("Maps and mods"), "Discord", &lang];
+    let labels: [&str; 4] = [tr("Custom battle"), tr("Maps and mods"), "Discord", &lang];
     // The chips grow with the text size (`button_grow`, the owner's decision of 2026-10-31).
     let g = super::display::button_grow();
     let size = 22.0 * k * g;
@@ -600,11 +595,10 @@ fn chip_links(m: &PortraitMenu, k: f32) -> Option<Pick> {
             cue(Cue::Button);
         }
         match j {
-            0 if pressed => pick = Some(Pick::Editor),
-            1 if pressed => pick = Some(Pick::Custom),
-            2 if pressed => pick = Some(Pick::Hub),
-            3 if pressed => open_link(DISCORD_INVITE),
-            4 => (lang_chip, lang_pressed) = (r, pressed),
+            0 if pressed => pick = Some(Pick::Custom),
+            1 if pressed => pick = Some(Pick::Hub),
+            2 if pressed => open_link(DISCORD_INVITE),
+            3 => (lang_chip, lang_pressed) = (r, pressed),
             _ => {}
         }
         x += widths[j] + gap;

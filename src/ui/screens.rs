@@ -162,9 +162,6 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
     if button(screen_width() - 40.0 - 180.0 * g, 40.0, 180.0 * g, 44.0 * g, tr("Load a game"), true) {
         return Some(Screen::Load(super::saves::LoadView::new(super::saves::Back::Title)));
     }
-    if button(40.0, 40.0, 180.0 * g, 44.0 * g, tr("Map editor"), true) {
-        return Some(Screen::Editor);
-    }
     let y = screen_height() - 110.0;
     if let Some((Some(_), desc)) = hovered {
         for (i, line) in wrap(&desc, w, 18.0).iter().take(4).enumerate() {

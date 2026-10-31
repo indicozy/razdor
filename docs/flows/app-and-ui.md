@@ -262,7 +262,7 @@ The title menu held upright (`main_menu::portrait_menu`, pure, with unit tests):
 landscape size in one column, its middle at the middle of the area between the top safe inset and the foot lines
 (the owner's OnePlus, 1080×2376 at 2.75 px per dp: the column's top moved from ~1001 px to ~561 px, its middle
 from ~1570 to ~1110); the logo sits 24 px above the
-column, never above the safe inset (the column moves down if it must); the links (map editor, custom battle, Discord, language) are chips
+column, never above the safe inset (the column moves down if it must); the links (custom battle, maps and mods, Discord, language) are chips
 in one row at the bottom, touch targets of 48 dp; the version and copyright lines and an installed update's
 notice sit just above the chips; the not-found block (no install) sits above the logo. Landscape and desktop keep
 the original column and the corner links (`main_menu::landscape_buttons`, `corner_links`).

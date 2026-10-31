@@ -12,8 +12,7 @@ Razdor includes a built-in scenario editor that allows you to create `.DTm` form
 ## Launching the Editor
 
 There are two ways to launch the editor:
-1. Click the **"Map Editor"** button on the game's splash screen.
-2. Use the console command: `cargo run --release -- --editor`.
+The game's menu has no editor button yet: the editor is not ready. Start it with the console command: `cargo run --release -- --editor`.
 
 :::tip
 If the `RAZDOR_DT_DIR` environment variable is set on your system, the editor will use original graphics, load object and building images, and use the names of warriors, artifacts, and spells from your installed game. If the variable is not set, placeholders will be displayed instead.

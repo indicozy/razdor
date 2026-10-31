@@ -1312,7 +1312,6 @@ impl App {
                     Some(Screen::ScenarioSelect)
                 }
                 Some(main_menu::Pick::Load) => Some(Screen::Load(saves::LoadView::new(saves::Back::Title))),
-                Some(main_menu::Pick::Editor) => Some(Screen::Editor),
                 Some(main_menu::Pick::Custom) => {
                     self.custom.get_or_insert_with(|| custom_battle::SetupView::new(&custom_content));
                     Some(Screen::CustomSetup)
