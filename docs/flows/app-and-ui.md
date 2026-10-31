@@ -624,7 +624,7 @@ Input goes through `src/ui/input.rs` (mouse/keys with gamepad emulation from
 The map's F3 debug overlay (Razdor's, `world_view::draw_debug`) also tints every visible cell
 (`world_view::draw_walkable`, `walk_tint`): on foot green for passable (brighter on roads), red
 for impassable; aboard the ship blue for sailable, red otherwise, all faint so the map shows through.
-### Maps and mods (the hub; a Razdor extra, mock)
+### Maps and mods (the hub; a Razdor extra)
 
 `main_menu` link (the corner row, or the chips held upright) → `Screen::Hub(HubView)` (`ui/hub_view.rs`) → `razdor::hub` on a thread:
 `Hub::catalog()` reads `index.json` from `RAZDOR_HUB` (an `https://` address or a folder; unset:
