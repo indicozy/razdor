@@ -78,7 +78,9 @@ SCREENS = [
     ("title", "title", {}),
     ("options", "options", {}),
     ("scenarios", "scenarios:РК1-Начало пути", {}),
-    ("map", "map:РК1-Начало пути", {}),
+    # The experimental scenario rules window over the scenario list (a player's report 1461).
+    ("rules", "scenarios:РК1-Начало пути", {"RAZDOR_SCENE_RULES": "1"}),
+    ("map","map:РК1-Начало пути", {}),
     ("minimap", "minimap:РК1-Начало пути", {}),
     ("settings", "settings:РК1-Начало пути", {}),
     ("keys", "settings:РК1-Начало пути:keys", {}),

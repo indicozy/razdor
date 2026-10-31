@@ -120,6 +120,15 @@ price immediately. Shift-clicking a backpack item equips it on the hero, or drin
 it is a potion. Shift-clicking worn gear returns it to the pack. Failed quick actions
 keep the item and show the existing refusal. All equipment rules and potion limits apply.
 
+## The rules window (new_game.rs `experimental_menu`)
+
+Opened from the scenario list's «Экспериментальные правила» button. Its scale is `display::popup_o`
+fitted to the screen. Its six rows and OK are touch targets (40 dp on a phone); its texts are one
+px per dp on a phone, grown with the text size (`button_grow`) and never under Normal; the hints
+wrap to its width and the window grows with them. On a phone's landscape the rows take two columns
+when one column would not fit the height, and the window takes the screen's width. Snapshot:
+`RAZDOR_SCENE=scenarios RAZDOR_SCENE_RULES=1`; the mobile check's case «rules».
+
 ## Battle AI: Caster guard (Максимум)
 
 Advanced settings (the «Ещё…» window) have **«Бережёт магов»**, on by default (the owner shipped it without the poll, 2026-10-31)

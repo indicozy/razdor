@@ -1100,21 +1100,60 @@ fn slots_hint(six_cells: bool) -> &'static str {
     }
 }
 
+/// The touch target's least side in dp (Razdor's phone rule; the mobile-ui check's limit).
+const TOUCH_DP: f32 = 40.0;
+
 /// Kept modal so clicks and Enter cannot start a scenario behind the options.
+///
+/// The window's scale `o` is the pop-ups' (`display::popup_o`), fitted to the screen. Its rows and
+/// OK are touch targets: `big` (`o` times the text size's growth), and at least 40 dp on a phone.
+/// Its texts take Razdor's text size: a phone's text is one px per dp (`tx`), grown with the text
+/// size (`button_grow`), never under its Normal size. The hints wrap to the window's width and the
+/// window grows with them. On a phone's landscape the rows take two columns when one column would
+/// not fit the height; the window then takes the screen's width.
 fn experimental_menu() {
+    let (sw, sh) = (screen_width(), screen_height());
     let k = chrome::k();
-    let r = Rect::new((screen_width() - 550.0*k)/2.0, (screen_height() - 410.0*k)/2.0, 550.0*k, 410.0*k);
+    let o = super::display::popup_o(k, 550.0, 410.0).min((sw - 12.0) / 550.0).min((sh - 12.0) / 410.0);
+    let dp = super::display::dp_px();
+    let tx = dp.map_or(o, |d| d.max(o));
+    let g = super::display::button_grow();
+    let big = o * g;
+    let touch = dp.map_or(0.0, |d| TOUCH_DP * d);
+    let (row_h, gap) = ((28.0 * big).max(touch), 10.0 * big);
+    let ok_h = (28.0 * big).max(touch);
+    let (hint_size, hint_pitch) = (14.0 * tx * g, 21.0 * tx * g);
+    let hints = [slots_hint(experimental_rules().six_cells), tr("One weapon per unit always."), tr("Applies to all armies; saved with this playthrough."), tr("The potion limit resets after a battle.")];
+    let wrapped = |iw: f32| -> Vec<String> { super::dt_font::legacy_metrics_if(true, || hints.iter().flat_map(|l| wrap_cached(l, iw, hint_size)).collect()) };
+    // The window's height with `cols` columns of rows and `lines` lines of hints.
+    let height = |cols: usize, lines: usize| {
+        let per = 6_usize.div_ceil(cols) as f32;
+        54.0 * o + per * row_h + (per - 1.0) * gap + 8.0 * big + lines as f32 * hint_pitch + 8.0 * big + ok_h + 12.0 * big
+    };
+    let w1 = (550.0 * big).min(sw - 12.0);
+    let lines1 = wrapped(w1 - 40.0 * big);
+    let cols = if height(1, lines1.len()) <= sh - 12.0 { 1 } else { 2 };
+    let (w, lines) = if cols == 1 { (w1, lines1) } else { let w = (1100.0 * big).min(sw - 12.0); (w, wrapped(w - 40.0 * big)) };
+    let h = height(cols, lines.len()).min(sh - 12.0);
+    let r = Rect::new(((sw - w) / 2.0).round(), ((sh - h) / 2.0).round(), w, h);
+    let iw = w - 40.0 * big;
+    let per_col = 6_usize.div_ceil(cols);
+    let col_gap = 20.0 * big;
+    let col_w = if cols == 1 { iw } else { (iw - col_gap) / 2.0 };
     let (_, close) = chrome::window(r, tr("Experimental scenario rules"), chrome::Skin::Marble, true);
     let mut rules = experimental_rules();
     let check = |index: usize, label: &str, value: &mut bool| {
-        let row = Rect::new(r.x+20.0*k, r.y+(54.0+index as f32*38.0)*k, r.w-40.0*k, 28.0*k);
-        let box_r = Rect::new(row.x, row.y+3.0*k, 20.0*k, 20.0*k);
-        chrome::silver_frame(box_r, k.max(1.0));
+        let (c, rr) = (index / per_col, index % per_col);
+        let row = Rect::new(r.x + 20.0 * big + c as f32 * (col_w + col_gap), r.y + 54.0 * o + rr as f32 * (row_h + gap), col_w, row_h);
+        let box_r = Rect::new(row.x, row.y + (row_h - 20.0 * big) / 2.0, 20.0 * big, 20.0 * big);
+        chrome::silver_frame(box_r, big.max(1.0));
         if *value {
-            draw_line(box_r.x+4.0*k,box_r.y+10.0*k,box_r.x+8.0*k,box_r.y+15.0*k,2.0*k,chrome::GOLD);
-            draw_line(box_r.x+8.0*k,box_r.y+15.0*k,box_r.x+17.0*k,box_r.y+5.0*k,2.0*k,chrome::GOLD);
+            draw_line(box_r.x+4.0*big,box_r.y+10.0*big,box_r.x+8.0*big,box_r.y+15.0*big,2.0*big,chrome::GOLD);
+            draw_line(box_r.x+8.0*big,box_r.y+15.0*big,box_r.x+17.0*big,box_r.y+5.0*big,2.0*big,chrome::GOLD);
         }
-        chrome::shadow_text(label,row.x+30.0*k,row.y+20.0*k,16.0*k,chrome::CREAM);
+        let normal = 16.0 * tx;
+        let size = row_text_size(label, normal, g, row.w - 30.0 * big);
+        super::dt_font::legacy_metrics_if(true, || chrome::shadow_text(label, row.x + 30.0 * big, row.y + row_h / 2.0 + size * 0.375, size, chrome::CREAM));
         if row.contains(pointer().into()) && clicked() { *value = !*value; }
     };
     check(0,tr("All special bonuses simultaneously"),&mut rules.simultaneous_bonuses);
@@ -1124,11 +1163,12 @@ fn experimental_menu() {
     check(4,tr("At most two potions per character"),&mut rules.two_potions);
     check(5,tr("Six equipment cells"),&mut rules.six_cells);
     EXPERIMENTAL.with(|p| p.set(rules));
-    let lines = [slots_hint(rules.six_cells), tr("One weapon per unit always."), tr("Applies to all armies; saved with this playthrough."), tr("The potion limit resets after a battle.")];
-    for (i,line) in lines.iter().enumerate() {
-        chrome::shadow_text(line,r.x+20.0*k,r.y+(284.0+i as f32*19.0)*k,12.0*k,chrome::CREAM);
+    let hints_top = r.y + 54.0 * o + per_col as f32 * row_h + (per_col as f32 - 1.0) * gap + 8.0 * big;
+    for (i, line) in lines.iter().enumerate() {
+        // The baseline sits 0.8 of the size below the line's top.
+        super::dt_font::legacy_metrics_if(true, || chrome::shadow_text(line, r.x + 20.0 * big, hints_top + i as f32 * hint_pitch + hint_size * 0.8, hint_size, chrome::CREAM));
     }
-    let b = Rect::new(r.center().x-50.0*k,r.bottom()-44.0*k,100.0*k,28.0*k);
+    let b = Rect::new(r.center().x - 50.0 * big, r.bottom() - 12.0 * big - ok_h, 100.0 * big, ok_h);
     let (_, down, pressed) = button_state(b,true);
     chrome::marble_button(b,tr("OK"),true,down);
     if close || pressed || key(KeyCode::Escape) || key(KeyCode::Enter) { RULES_OPEN.with(|p| p.set(false)); }
