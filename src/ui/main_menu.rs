@@ -46,22 +46,11 @@ const BUTTONS: [(Pick, &str); 5] = [
 /// Size of an oval button (video pixels): `mb2.ugs` drawn 1:1 at 1024×768.
 const OVAL: Vec2 = Vec2::new(214.0, 112.0);
 
-/// The landscape column's first oval starts under the logo, at this video y (the original's).
-const COLUMN_TOP: f32 = 176.0;
-/// The landscape column's lowest edge (video px): above the links and the foot lines.
-const COLUMN_END: f32 = 700.0;
-
-/// The pitch of the landscape column's ovals (video px): the original's 92, or less when grown
-/// ovals would run past [`COLUMN_END`] (their neighbours then overlap more). Razdor's own, the
-/// owner's decision of 2026-10-31: the ovals grow with the text size (`button_grow`).
-fn column_pitch(g: f32) -> f32 {
-    (92.0 * g).min((COLUMN_END - COLUMN_TOP - OVAL.y * g) / 4.0)
-}
-
-/// Centre y of landscape oval `i` (video px from the canvas top): the original's column at
-/// Normal (232 + 92 · i).
-fn button_centre(i: usize, g: f32) -> f32 {
-    COLUMN_TOP + OVAL.y * g / 2.0 + i as f32 * column_pitch(g)
+/// Centre y of landscape oval `i` (video px from the canvas top): the original's column
+/// (232 + 92 · i). The ovals keep the original's size at every text size: their words are large
+/// already, and grown ovals ran into each other and the foot lines.
+fn button_centre(i: usize) -> f32 {
+    232.0 + i as f32 * 92.0
 }
 
 /// A phone held upright (`upright_dp`): the buttons are this many times the landscape size,
@@ -188,10 +177,7 @@ local! {
 /// true when clicked.
 fn oval(i: usize, label: &str, hot: Option<usize>) -> bool {
     let upright = upright_dp().is_some();
-    // Razdor's own (the owner's decision, 2026-10-31): the oval, its flame and its word grow with
-    // the text size (`button_grow`); the rect `oval_rect` gives is grown the same.
-    let g = super::display::button_grow();
-    let k = chrome::k() * if upright { PORTRAIT_SCALE } else { 1.0 } * g;
+    let k = chrome::k() * if upright { PORTRAIT_SCALE } else { 1.0 };
     let r = oval_rect(i);
     let c = r.center();
     let size = OVAL * k;
@@ -361,11 +347,10 @@ fn upright_dp() -> Option<f32> {
 /// The five buttons in the landscape layout: the original's column (video geometry, 1:1 at
 /// `k`, centred on a `sw` × `sh` screen; neighbouring ovals overlap by 20 px at Normal).
 fn landscape_buttons(sw: f32, sh: f32, k: f32) -> [Rect; 5] {
-    let g = super::display::button_grow();
     let top = chrome::centred_top(sw, sh, 720.0 * k);
     std::array::from_fn(|i| {
-        let c = vec2(sw / 2.0, top + button_centre(i, g) * k);
-        let size = OVAL * (k * g);
+        let c = vec2(sw / 2.0, top + button_centre(i) * k);
+        let size = OVAL * k;
         Rect::new(c.x - size.x / 2.0, c.y - size.y / 2.0, size.x, size.y)
     })
 }
@@ -430,9 +415,10 @@ impl PortraitMenu {
 fn portrait_menu(sw: f32, sh: f32, k: f32, dp: f32, safe_top: f32) -> PortraitMenu {
     // The logo (`logo`): 840 px wide, 128/896 of that high.
     let logo_h = 840.0 * 128.0 / 896.0 * k;
-    // The buttons grow with the text size (`button_grow`, the owner's decision of 2026-10-31).
+    // The chips grow with the text size (`button_grow`, the owner's decision of 2026-10-31); the
+    // ovals keep their size (see `button_centre`).
     let g = super::display::button_grow();
-    let size = OVAL * (PORTRAIT_SCALE * k * g);
+    let size = OVAL * (PORTRAIT_SCALE * k);
     let chip_h = (TOUCH_DP * dp).max(24.0 * k) * g;
     let chip_top = sh - 16.0 * k - chip_h;
     let foot_y = chip_top - 12.0 * k;
@@ -1568,6 +1554,13 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     let g = super::display::button_grow();
     // In game on a phone, the window at its own scale (`map_window`, `window_layout::over_map_scale`); the title's is set by `options`.
     let _scale = over_map.then(|| window_layout::over_map_scale((594.0, h)));
+    // Razdor's own: grown by the text size, the window may be taller than the room it has (above
+    // the bar over the map); it is then drawn at the scale that fits it. Never at Normal.
+    let _fit = (g > 1.0).then(|| {
+        let room = if over_map { screen_height() - chrome::bar_height() } else { screen_height() };
+        let need = (h + 30.0) * chrome::k();
+        (need > room).then(|| super::display::enter_window_scale(Some(chrome::k() * room / need)))
+    });
     let (inner, closed) = if over_map { map_window(&title, 594.0, h) } else { window(&title, 594.0, h) };
     let k = chrome::k();
     let outer = Rect::new(inner.x - 2.0 * k, inner.y - (26.0 * k).round() - 1.0, 594.0 * k, h * k);
