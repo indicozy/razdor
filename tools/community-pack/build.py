@@ -81,6 +81,7 @@ MENTION_RE = re.compile(r"<(@!?|@&|#)(\d+)>")
 EMOJI_RE = re.compile(r"<a?:\w+:\d+>")
 URL_RE = re.compile(r"https?://\S+")
 AUTHOR_RE = re.compile(r"Автор[ы]?\s*:\s*\**\s*([^\n<(*]+)")
+AUTHOR_MENTION_RE = re.compile(r"Автор[ы]?\s*:\s*\**\s*<@!?(\d+)>")
 ARCHIVE_AUTHOR_RE = re.compile(r"^([^\s_\-]+)-.+$")
 
 NOTE_PROGRAM = ("Мод также меняет программу игры (DiscordTimes.exe или ddraw.dll). "
@@ -529,7 +530,11 @@ def clean_version(raw):
 def named_author(content, users):
     """The name a first post gives in its `Автор: …` line, or ''."""
     m = AUTHOR_RE.search(content)
-    return strip_markup(m.group(1), users).strip() if m else ""
+    name = strip_markup(m.group(1), users).strip() if m else ""
+    if name:
+        return name
+    m = AUTHOR_MENTION_RE.search(content)  # `Автор: <@id>`: the mentioned member
+    return users.get(m.group(1), "") if m else ""
 
 
 WIN_DEVICES = {"CON", "PRN", "AUX", "NUL"} | {f"COM{i}" for i in range(1, 10)} | {f"LPT{i}" for i in range(1, 10)}
@@ -1631,6 +1636,7 @@ def selftest():
                    cut_text("Первое. " * 400, 1500).endswith("Первое.") and len(cut_text("Первое. " * 400, 1500)) <= 1500)
     check_selftest("cut: short text unchanged", cut_text("коротко") == "коротко")
     check_selftest("author line: explicit name wins", named_author("**Автор:** Иван (<@1>)", users) == "Иван")
+    check_selftest("author line: a bare mention names the member", named_author("Автор: <@1>\nСсылка", users) == users.get("1"))
     check_selftest("id: slug kept, bad ids refused",
                    bool(ID_RE.match("iz-gryazi-v-knyazi")) and not ID_RE.match("a b"))
     raw_dos = os.fsdecode("Посыльный.dtm".encode("cp866"))

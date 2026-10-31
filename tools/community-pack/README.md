@@ -115,7 +115,7 @@ Vorbis, not as the game's files:
 nice -n 19 taskset -c 8-19 python3 -I tools/community-pack/build.py \
   --src /mnt/ai_models/razdor-scratch/community-pack \
   --archive-maps /mnt/ai_models/razdor-scratch/maps-2026-10-01 \
-  --base "/home/indicozy/Games/Discord Times Community Update" \
+  --base "<your Community Update install>" \
   --out /mnt/ai_models/razdor-scratch/community-pack/out \
   --fixes /mnt/ai_models/razdor-scratch/community-pack/campaign-fixes.json \
   --reactions /mnt/ai_models/razdor-scratch/community-pack/discord/reactions.json \
