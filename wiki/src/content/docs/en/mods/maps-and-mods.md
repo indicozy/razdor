@@ -51,7 +51,7 @@ The catalog itself is in the releases of [razdor-community](https://github.com/i
 
 ## Playing a mod
 
-In the new game window, pick the mod in the "Mod" list. The game then runs on that mod's data over the normal game. Maps that need a mod are listed only when that mod is chosen. With a mod chosen, the maps for the base game come last in the list, in a "Base game maps" group: it is collapsed, tap its heading to open it. Saves are kept separately for each mod.
+In the new game window, pick the mod in the "Mod" list. The game then runs on that mod's data over the normal game. Maps that need a mod are listed only when that mod is chosen. With a mod chosen, the maps for the base game come last in the list, in a "Base game maps" group: it is collapsed, tap its heading to open it. Saves are kept separately for each mod. The green ticks of finished maps are kept for each mod too: a map finished under one mod is ticked only under that mod, and with no mod chosen the ticks of the base game show.
 
 ## Partial entries
 

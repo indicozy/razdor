@@ -1626,9 +1626,9 @@ impl App {
                 // the original goes to the main menu once the window is read (0x4aba30 →
                 // 0x4bfb34); Razdor's victory screen stays for the editor's test play.
                 Some(ScriptEnd::Victory(_)) if !matches!(self.screen, Screen::Victory) => {
-                    // The scenario list marks the map as won (Razdor's, kept in the settings).
+                    // The scenario list marks the map as won under the mod played (Razdor's, kept in the settings).
                     if let Some(razdor::rules::save::ScenarioRef::Map { file, .. }) = self.game.as_ref().and_then(|g| g.origin.as_ref()).filter(|_| !self.test_play) {
-                        language::mark_completed(file);
+                        language::mark_completed(self.active_mod.as_deref(), file);
                     }
                     let handed = (!self.test_play).then(|| screens::hand_over(&self.game, &self.scenarios, self.dt_content.clone())).flatten();
                     match handed {

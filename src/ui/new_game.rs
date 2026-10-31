@@ -21,6 +21,7 @@ use super::assets::Assets;
 use super::audio::{cue, Cue};
 use super::chrome;
 use super::dt_font::{with_face, Face};
+use super::language;
 use super::map_import;
 use super::widgets::*;
 use super::{screens, ScenarioEntry, Screen};
@@ -404,7 +405,8 @@ fn arrange(list: Vec<Group>, facts: impl Fn(&Group) -> Facts, show: Show, order:
 /// The marks the player keeps on the list (`settings.json`), read when the list opens.
 #[derive(Clone, Debug, Default)]
 struct Marks {
-    completed: Vec<String>,
+    /// The ticks of every mod (1456): the list shows the chosen mod's only (`language::won_under`).
+    completed: language::Won,
     favourites: Vec<String>,
     show: i64,
     order: i64,
@@ -419,7 +421,7 @@ fn marks() -> Marks {
         m.borrow_mut()
             .get_or_insert_with(|| {
                 let s = super::language::Settings::load();
-                Marks { completed: s.completed_scenarios, favourites: s.favourite_scenarios, show: s.scenario_show, order: s.scenario_order }
+                Marks { completed: s.completed_by_mod, favourites: s.favourite_scenarios, show: s.scenario_show, order: s.scenario_order }
             })
             .clone()
     })
@@ -437,13 +439,13 @@ fn listed(names: &[String], file: &str) -> bool {
 }
 
 /// A row's facts: a campaign counts as completed once its last map is won.
-fn facts_of(scenarios: &[ScenarioEntry], g: &Group, m: &Marks) -> Facts {
+fn facts_of(scenarios: &[ScenarioEntry], g: &Group, m: &Marks, active: Option<&str>) -> Facts {
     let e = &scenarios[g.first];
     let last = g.chapters.last().map_or(g.first, |&c| c);
     Facts {
         campaign: !g.chapters.is_empty(),
         original: is_original_map(&e.file),
-        completed: listed(&m.completed, &scenarios[last].file),
+        completed: listed(language::won_under(&m.completed, active), &scenarios[last].file),
         favourite: listed(&m.favourites, &e.file),
         width: e.scenario.width(),
         name: group_name(scenarios, g).to_string(),
@@ -677,8 +679,8 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
     // The maps made for the base game under a played mod (1445b) are a group of their own, after
     // the rest, shut unless its header row is opened (`BASE_OPEN`); the snapshot scene opens it once.
     let (main, base): (Vec<Group>, Vec<Group>) = scenario_groups(scenarios).into_iter().partition(|g| !is_base_group(scenarios, g));
-    let main = arrange(main, |g| facts_of(scenarios, g, &m), show, order);
-    let base = arrange(base, |g| facts_of(scenarios, g, &m), show, order);
+    let main = arrange(main, |g| facts_of(scenarios, g, &m, active), show, order);
+    let base = arrange(base, |g| facts_of(scenarios, g, &m, active), show, order);
     let base_count = base.len();
     let main_len = main.len();
     if base_count > 0 {
@@ -777,7 +779,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
         let head_pressed = head.contains(pointer().into()) && clicked() && over_list && !on_star;
         // The finger area stops at the scrollbar's left edge: its arrows and knob win the tap (1444).
         let (_, _, star_pressed) = mark_button_state(star_r, bar, over_list);
-        let f = facts_of(scenarios, g, &m);
+        let f = facts_of(scenarios, g, &m, active);
         if f.favourite || row_hover || on_star {
             let ink = if f.favourite { STAR_GOLD } else { Color::new(0.85, 0.85, 0.85, if on_star { 0.9 } else { 0.45 }) };
             star(star_r.center(), 8.0 * k, ink, f.favourite);
@@ -832,7 +834,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
         with_face(Face::Body, || for (n, &c) in chapters.iter().enumerate() {
             let ink = if lit { super::typography::Ink::Plain } else { super::typography::Ink::Orange };
             // Each map of a campaign won has its tick too.
-            let won = listed(&m.completed, &scenarios[c].file);
+            let won = listed(language::won_under(&m.completed, active), &scenarios[c].file);
             let room = r.w - (if won { 84.0 } else { 60.0 }) * k;
             let small = row_text_size(title(&scenarios[c]), small_normal, grow, room);
             let is_grown = small > small_normal;
@@ -1480,6 +1482,22 @@ fn choose_class(offered: [bool; 3], pick: usize, clicked: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A tick shows for the chosen mod only (1456): a map won with no mod is not ticked under
+    /// Evolution, a map won under Evolution is not ticked with no mod, and an old no-mod tick
+    /// shows with no mod.
+    #[test]
+    fn a_tick_shows_for_the_chosen_mod_only() {
+        let mut won = language::Won::new();
+        language::add_won(&mut won, None, "Тихая пристань");
+        language::add_won(&mut won, Some("evolution"), "Осада");
+        let ticked = |active: Option<&str>, file: &str| listed(language::won_under(&won, active), file);
+        assert!(ticked(None, "Тихая пристань"), "the base game's tick under no mod");
+        assert!(!ticked(Some("evolution"), "Тихая пристань"), "no tick under Evolution for a map won without it");
+        assert!(ticked(Some("evolution"), "Осада"), "Evolution's own tick");
+        assert!(!ticked(None, "Осада"), "and not with no mod");
+        assert!(!ticked(Some("other"), "Осада"), "another mod shows none");
+    }
 
     /// The equipment hint follows the six-cell switch alone, in both languages.
     #[test]

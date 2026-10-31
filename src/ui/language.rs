@@ -11,6 +11,7 @@
 //! other choice; the game's data texts (unit, item and spell names and descriptions, the
 //! game's interface texts) come from the chosen language's files.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -33,15 +34,26 @@ pub struct Settings {
     /// The tutorial's last event finished (its title test holds `end_tutorial`): the original
     /// writes `[Tutorial] Completed=1` into its language ini (0x4ac9fc); Razdor keeps it here.
     pub tutorial_completed: bool,
-    /// The maps whose victory was reached (file names without the extension), for the
-    /// scenario list's marks (Razdor's, a players' wish; the original keeps no such record).
+    /// The maps whose victory was reached before the ticks were kept by mod (1456): the no-mod
+    /// list. `Settings::load` moves it into `completed_by_mod[NO_MOD]`; `save` writes it back too,
+    /// so an older version still shows its ticks.
     pub completed_scenarios: Vec<String>,
+    /// The maps whose victory was reached, by the mod played then (`NO_MOD` for the base game):
+    /// file names without the extension, for the scenario list's ticks (Razdor's, a players'
+    /// wish; the original keeps no such record). A tick belongs to its mod: see `won_under`.
+    pub completed_by_mod: Won,
     /// The maps the player marked as favourites in the scenario list (Razdor's).
     pub favourite_scenarios: Vec<String>,
     /// The scenario list's filter and order (`ui::new_game`; 0, 0: all, as the original).
     pub scenario_show: i64,
     pub scenario_order: i64,
 }
+
+/// The maps won, by mod: the mod's id (`hub::active_mod`), or `NO_MOD` for the base game.
+pub type Won = BTreeMap<String, Vec<String>>;
+
+/// The key of the base game's ticks in `Won` (a hub mod's id is a safe name and never this).
+pub const NO_MOD: &str = "none";
 
 impl Settings {
     fn path() -> Option<PathBuf> {
@@ -50,7 +62,12 @@ impl Settings {
 
     pub fn load() -> Settings {
         let read = Settings::path().and_then(|p| std::fs::read(p).ok());
-        read.and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+        let mut s: Settings = read.and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        // Ticks kept before they were per mod count for the base game (1456).
+        for file in std::mem::take(&mut s.completed_scenarios) {
+            add_won(&mut s.completed_by_mod, None, &file);
+        }
+        s
     }
 
     /// Writes the settings, keeping fields of the file this version does not know.
@@ -63,7 +80,9 @@ impl Settings {
             .unwrap_or_else(|| serde_json::json!({}));
         json["language"] = serde_json::Value::String(self.language.clone());
         json["tutorial_completed"] = serde_json::Value::Bool(self.tutorial_completed);
-        json["completed_scenarios"] = serde_json::json!(self.completed_scenarios);
+        json["completed_by_mod"] = serde_json::json!(self.completed_by_mod);
+        // The base game's list stays in the old field too, for an older version.
+        json["completed_scenarios"] = serde_json::json!(won_under(&self.completed_by_mod, None));
         json["favourite_scenarios"] = serde_json::json!(self.favourite_scenarios);
         json["scenario_show"] = serde_json::json!(self.scenario_show);
         json["scenario_order"] = serde_json::json!(self.scenario_order);
@@ -76,21 +95,27 @@ impl Settings {
     }
 }
 
-/// Notes that the victory of map `file` (its name without the extension) was reached, for the
-/// scenario list's mark; written at once.
-pub fn mark_completed(file: &str) {
+/// Notes that the victory of map `file` (its name without the extension) was reached under the
+/// mod `mod_id` (`None`: the base game), for the scenario list's tick; written at once.
+pub fn mark_completed(mod_id: Option<&str>, file: &str) {
     let mut s = Settings::load();
-    if add_completed(&mut s, file) {
+    if add_won(&mut s.completed_by_mod, mod_id, file) {
         s.save();
     }
 }
 
-/// Adds `file` to the maps won, unless it is there already (any case). True when added.
-fn add_completed(s: &mut Settings, file: &str) -> bool {
-    if file.is_empty() || s.completed_scenarios.iter().any(|f| f.to_lowercase() == file.to_lowercase()) {
+/// The maps won under `mod_id` (`None`: the base game): that mod's ticks only.
+pub fn won_under<'a>(won: &'a Won, mod_id: Option<&str>) -> &'a [String] {
+    won.get(mod_id.unwrap_or(NO_MOD)).map_or(&[], Vec::as_slice)
+}
+
+/// Adds `file` to the maps won under `mod_id`, unless it is there already (any case). True when added.
+pub fn add_won(won: &mut Won, mod_id: Option<&str>, file: &str) -> bool {
+    let list = won.entry(mod_id.unwrap_or(NO_MOD).to_string()).or_default();
+    if file.is_empty() || list.iter().any(|f| f.to_lowercase() == file.to_lowercase()) {
         return false;
     }
-    s.completed_scenarios.push(file.to_string());
+    list.push(file.to_string());
     true
 }
 
@@ -287,12 +312,46 @@ mod tests {
     #[test]
     fn a_won_map_is_noted_once() {
         let mut s = Settings::default();
-        assert!(add_completed(&mut s, "Тихая пристань"));
-        assert!(!add_completed(&mut s, "тихая пристань"), "once");
-        assert!(!add_completed(&mut s, ""));
-        assert_eq!(s.completed_scenarios, ["Тихая пристань"]);
+        assert!(add_won(&mut s.completed_by_mod, None, "Тихая пристань"));
+        assert!(!add_won(&mut s.completed_by_mod, None, "тихая пристань"), "once");
+        assert!(!add_won(&mut s.completed_by_mod, None, ""));
+        assert_eq!(won_under(&s.completed_by_mod, None), ["Тихая пристань"]);
         let back: Settings = serde_json::from_value(serde_json::to_value(&s).unwrap()).unwrap();
         assert_eq!(back, s);
+    }
+
+    #[test]
+    fn a_tick_is_recorded_and_read_per_mod() {
+        let mut won = Won::new();
+        assert!(add_won(&mut won, None, "Тихая пристань"));
+        assert!(add_won(&mut won, Some("evolution"), "Тихая пристань"), "the same map under a mod is its own tick");
+        assert!(add_won(&mut won, Some("evolution"), "Осада"));
+        assert!(!add_won(&mut won, Some("evolution"), "осада"), "once per mod");
+        assert_eq!(won_under(&won, None), ["Тихая пристань"]);
+        assert_eq!(won_under(&won, Some("evolution")), ["Тихая пристань", "Осада"]);
+        assert!(won_under(&won, Some("other")).is_empty(), "a mod never won shows no tick");
+        let back: Won = serde_json::from_value(serde_json::to_value(&won).unwrap()).unwrap();
+        assert_eq!(back, won, "the file's format keeps each mod's list");
+    }
+
+    #[test]
+    fn old_ticks_read_as_the_base_game() {
+        // A settings file from before 1.2: the flat list only, no per-mod field.
+        let old: Settings = serde_json::from_str(r#"{"completed_scenarios":["Тихая пристань","Осада"],"language":"ru"}"#).unwrap();
+        assert!(old.completed_by_mod.is_empty());
+        let mut merged = old.clone();
+        for file in std::mem::take(&mut merged.completed_scenarios) {
+            add_won(&mut merged.completed_by_mod, None, &file);
+        }
+        assert_eq!(won_under(&merged.completed_by_mod, None), ["Тихая пристань", "Осада"], "old entries: no mod");
+        assert!(won_under(&merged.completed_by_mod, Some("evolution")).is_empty(), "no base-game tick under a mod");
+        // A file written by this version has both fields: the merge does not double the entries.
+        let both: Settings = serde_json::from_str(r#"{"completed_scenarios":["Осада"],"completed_by_mod":{"none":["Осада"]}}"#).unwrap();
+        let mut merged = both.clone();
+        for file in std::mem::take(&mut merged.completed_scenarios) {
+            add_won(&mut merged.completed_by_mod, None, &file);
+        }
+        assert_eq!(won_under(&merged.completed_by_mod, None), ["Осада"]);
     }
 
     #[test]

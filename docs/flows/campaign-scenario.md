@@ -40,7 +40,9 @@ ui/screens.rs    start_game(demo, Some((entry, content)), class, name)
 … play (map-step.md, towns-economy.md, battles) …
 scenario end:
   EventOutcome::Victory / Defeat → Game::script_end() → ScriptEnd
-  ui/mod.rs      ScriptEnd::Victory: language::mark_completed(map file) for the list's tick
+  ui/mod.rs      ScriptEnd::Victory: language::mark_completed(active mod, map file) for the list's tick
+                 (kept per mod in settings.json `completed_by_mod`, «none» for no mod; the old
+                 `completed_scenarios` is read as «none»)
                    (not in the editor's test play), then screens::hand_over() → Game::next_map() → NextMap
                    campaign_game() → Game::from_campaign(content, scenario, &prev)
                                        → apply_carry_over(&prev); journal.next_chapter()

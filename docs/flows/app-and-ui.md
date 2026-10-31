@@ -766,6 +766,8 @@ mobile check's 12 sp), in two lines when the label does not fit one. A pick of a
 the chosen mod as any listed map. Snapshot scene: `RAZDOR_SCENE_BASE_MAPS=end|open` (scroll to the group,
 and open it). The install's maps are gated only under a played mod (1445c, above).
 
+**Ticks by mod** (1456, Razdor's): a map's green tick (a campaign: its last map) is kept per mod, `language::Settings::completed_by_mod` (`Won`, the mod's id or `language::NO_MOD`), written by `language::mark_completed(App::active_mod, file)` on a victory. `new_game::marks` reads the whole map once per open of the list, and `facts_of` and the chapters' ticks look up the chosen mod only (`language::won_under`). The old flat list (`completed_scenarios`) is merged into «none» on load and still written, so an older version keeps its ticks.
+
 Leaving the window after a change re-reads the hub's maps into `App::scenarios` (`reload_hub_maps`:
 the install is read again while a mod is played, so its folder is rebuilt or the base is back), after
 the install's, so they show in the new-game list. Snapshot scene: `hub[:<tab>[:<id>]]`.
