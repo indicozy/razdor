@@ -27,6 +27,9 @@ use super::widgets::*;
 
 const GREEN_TEXT: Color = Color::new(0.55, 0.88, 0.45, 1.0);
 
+/// The search field's key (`widgets::text_field`).
+const SEARCH_KEY: &str = "hub-search";
+
 /// What a job on the thread came back with.
 enum Done {
     Catalog(Result<Catalog, String>),
@@ -52,6 +55,9 @@ pub struct HubView {
     detail_scroll: f32,
     detail_h: f32,
     detail_for: Option<String>,
+    /// The search field's text: the list shows the entries whose title or author match it
+    /// (`matches`).
+    query: String,
     job: Option<Receiver<Done>>,
     /// The last job's word: the text and whether it went wrong.
     note: Option<(String, bool)>,
@@ -135,6 +141,7 @@ impl HubView {
             detail_scroll: 0.0,
             detail_h: 0.0,
             detail_for: None,
+            query: String::new(),
             job: None,
             note: None,
             changed: false,
@@ -233,12 +240,27 @@ fn kind_label(k: Kind) -> &'static str {
     }
 }
 
-/// The tab's entries, best rated first (`hub::by_rating`).
-fn shown(c: &Catalog, tab: usize) -> Vec<&Entry> {
+/// The tab's entries that match the search, best rated first (`hub::by_rating`).
+fn shown<'a>(c: &'a Catalog, tab: usize, query: &str) -> Vec<&'a Entry> {
     let want = [None, Some(Kind::Map), Some(Kind::Campaign), Some(Kind::Mod)][tab.min(3)];
-    let mut list: Vec<&Entry> = c.entries.iter().filter(|e| want.is_none_or(|k| e.kind == k)).collect();
+    let mut list: Vec<&Entry> = c.entries.iter().filter(|e| want.is_none_or(|k| e.kind == k)).filter(|e| matches(e, query)).collect();
     list.sort_by(|a, b| hub::by_rating(a, b));
     list
+}
+
+/// Whether an entry matches the search `query`: its Russian or English title, or its author,
+/// contains it, ignoring case. An empty query (or only spaces) matches everything.
+pub fn matches(e: &Entry, query: &str) -> bool {
+    matches_text(query, &[&e.title.ru, &e.title.en], &e.author)
+}
+
+/// [`matches`] on the texts: `titles` are the entry's titles in each language, `author` its author.
+pub fn matches_text(query: &str, titles: &[&str], author: &str) -> bool {
+    let q = query.trim().to_lowercase();
+    if q.is_empty() {
+        return true;
+    }
+    titles.iter().any(|t| t.to_lowercase().contains(&q)) || author.to_lowercase().contains(&q)
 }
 
 /// A row's state: its words and ink.
@@ -442,7 +464,12 @@ pub fn frame(view: &mut HubView) -> bool {
     let ty = inner.y + pad;
     // A phone held upright lays its four tabs out two by two, so each keeps its label whole.
     let cols = if narrow { 2 } else { 4 };
-    let head = if narrow { 2.0 * th + gap } else { th };
+    // Portrait: the search field's row sits under the tabs (`field_y`) and the list under it.
+    // Elsewhere (a phone held sideways, the desktop) the field is in the bottom row, so no list row
+    // is lost there.
+    let tabs_h = if narrow { 2.0 * th + gap } else { th };
+    let field_y = ty + tabs_h + gap;
+    let head = tabs_h + gap + if narrow { th } else { 0.0 };
     let list_y = ty + head + 8.0 * k;
     // A phone held upright keeps 40 units above the bottom row for the job's word.
     let list_bottom = by - if narrow { 40.0 * k } else { 16.0 * k };
@@ -470,6 +497,41 @@ pub fn frame(view: &mut HubView) -> bool {
         }
     }
 
+    // The search field (a tap in it types; the phone's keyboard comes only then, as the
+    // dropdowns' filter does) and its clear button: above the list in portrait, in the bottom row
+    // between «Обновить» and «Установить» elsewhere.
+    let search_esc = if !detail {
+        let step = 150.0 * k * g;
+        let bx = inner.x + inner.w - 10.0 * k - bw;
+        let x0 = lx + step + back_w + gap;
+        let (fx, fy, fh, avail) = if narrow { (lx, field_y, th, lw) } else { (x0, by, bh, bx - gap - x0) };
+        // The clear control is a square as tall as the field (44 dp on a phone, grown with the
+        // text size), drawn with the window's own close cross (`chrome::close_button`).
+        let sq = fh;
+        let field_w = avail - sq - gap;
+        let was_typing = has_focus(SEARCH_KEY);
+        let before = view.query.clone();
+        text_field(SEARCH_KEY, fx, fy, field_w, fh, &mut view.query, false);
+        if view.query != before {
+            view.scroll = 0;
+        }
+        if view.query.is_empty() && !has_focus(SEARCH_KEY) {
+            text_fit(tr("Search…"), fx + 8.0 * k, fy + fh / 2.0 + small * 0.35, field_w - 16.0 * k, small, Color::new(0.85, 0.80, 0.68, 0.7));
+        }
+        if !view.query.is_empty() && chrome::close_button(fx + field_w + gap, fy, sq, false) {
+            view.query.clear();
+            view.scroll = 0;
+        }
+        // Esc while the field has the keyboard clears the search and does not close the window.
+        was_typing && esc_pressed()
+    } else {
+        false
+    };
+    if search_esc {
+        view.query.clear();
+        view.scroll = 0;
+    }
+
     let catalog = view.catalog.clone();
     match &catalog {
         None if !detail => chrome::shadow_text(tr("Reading the hub…"), lx + 12.0 * k, list.y + 26.0 * k, size, CREAM),
@@ -481,7 +543,7 @@ pub fn frame(view: &mut HubView) -> bool {
         }
         Some(Err(_)) => {}
         Some(Ok(c)) => {
-            let entries = shown(c, view.tab);
+            let entries = shown(c, view.tab, &view.query);
             let max_scroll = entries.len().saturating_sub(rows);
             if !detail {
                 // The bar takes room only when the list scrolls.
@@ -526,7 +588,8 @@ pub fn frame(view: &mut HubView) -> bool {
                     }
                 }
                 if entries.is_empty() {
-                    chrome::shadow_text(tr("Nothing here yet."), lx + 12.0 * k, list.y + 26.0 * k, size, CREAM);
+                    let none = if view.query.trim().is_empty() { tr("Nothing here yet.") } else { tr("Nothing matches the search.") };
+                    chrome::shadow_text(none, lx + 12.0 * k, list.y + 26.0 * k, size, CREAM);
                 }
             }
             if let Some(e) = view.picked.clone().and_then(|p| c.entry(&p).cloned()) {
@@ -547,7 +610,11 @@ pub fn frame(view: &mut HubView) -> bool {
     }
 
     // The bottom row: the list's Back and Refresh, or a phone's details' «To the list».
-    let mut close = closed || key(KeyCode::Escape);
+    let mut close = closed || (key(KeyCode::Escape) && !search_esc);
+    if close {
+        // Closing the window hides the keyboard the search field may have.
+        clear_focus();
+    }
     if detail {
         if button(lx, by, back_w, bh, tr("To the list"), true) {
             view.detail = false;
@@ -569,10 +636,10 @@ pub fn frame(view: &mut HubView) -> bool {
         chrome::shadow_text(tr("Downloading…"), status_x, note_y, size, GOLD);
     } else if let Some((s, bad)) = &view.note {
         text_fit(s, status_x, note_y, status_w, size, if *bad { RED_TEXT } else { GREEN_TEXT });
-    } else if let (true, Some(h)) = (narrow, &view.hub) {
-        text_fit(&trf!("Hub: {place}", place = h.source.label()), lx, note_y, lw, small, Color::new(0.85, 0.80, 0.68, 0.8));
     }
-    if let (false, Some(h)) = (narrow, &view.hub) {
+    // The hub's place under the list: on the desktop only (a phone's space goes to the list; a
+    // hub that can't be read says so in the list).
+    if let (false, false, Some(h)) = (narrow, phone, &view.hub) {
         let from = trf!("Hub: {place}", place = h.source.label());
         text_fit(&from, lx, list.y + list.h + 18.0 * k, lw, small, Color::new(0.85, 0.80, 0.68, 0.8));
     }
@@ -735,7 +802,7 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
     }
     match plan {
         Some(Ok(plan)) => {
-            let label = if plan.len() > 1 { trf!("Install with {n} mods", n = plan.len() - 1) } else { tr("Install").into() };
+            let label = if plan.len() > 1 { trf!("Install (+{n})", n = plan.len() - 1) } else { tr("Install").into() };
             if button(bx, by, bw, bh, &label, !busy) {
                 let id = e.id.clone();
                 let lang_code = lang();
@@ -789,6 +856,20 @@ mod tests {
         assert_eq!(row_index((10.0, 150.0), area, 46.0, 4, 5), None);
         assert_eq!(row_index((205.0, 150.0), area, 46.0, 0, 5), None);
         assert_eq!(row_index((10.0, 99.0), area, 46.0, 0, 5), None);
+    }
+
+    /// The search matches a title in either language or the author, whatever the case; a blank
+    /// search matches everything; a word found nowhere matches nothing.
+    #[test]
+    fn the_search_matches_titles_and_author_ignoring_case() {
+        let titles = ["Эволюция", "Evolution"];
+        assert!(matches_text("", &titles, "Ivan"));
+        assert!(matches_text("   ", &titles, "Ivan"), "a blank search is no search");
+        assert!(matches_text("эвол", &titles, "Ivan"), "a Russian title, lower case");
+        assert!(matches_text("EVOLU", &titles, "Ivan"), "an English title, upper case");
+        assert!(matches_text("ivan", &titles, "Ivan Тихончук"), "the author");
+        assert!(matches_text("  Иван  ", &titles, "Иван"), "the query is trimmed");
+        assert!(!matches_text("ragnarok", &titles, "Ivan"));
     }
 
     /// A word wider than the box is cut where the next character would not fit; a line that

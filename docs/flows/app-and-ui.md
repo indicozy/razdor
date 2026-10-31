@@ -650,6 +650,15 @@ checked by size and SHA-256, unpacked into `files.tmp/` under the zip's own path
 the same name checks as a mod's file; at most 2 GiB and 20 000 entries, `hub::mods::unpack_zip`), and
 `files.tmp/` then replaces `files/` in one rename. The window's downloads show «Загрузка…».
 
+**Search** (`ui/hub_view.rs`, Razdor's): a field (`widgets::text_field`, key `hub-search`, placeholder «Поиск…») with a square cross button (`chrome::close_button`),
+above the list on a phone held upright, and in the bottom row between «Обновить» and «Установить» elsewhere (a phone
+held sideways, the desktop), so the list keeps its rows. On a phone the hub's place line «Хаб: …» is not drawn; the
+desktop keeps it under the list. The search narrows the current tab by `matches`: a Russian or English title, or the author, contains the query, ignoring case
+(the rating order stays). A tap in the field types; the phone's keyboard comes only with that tap (the field takes
+focus on a click, as the dropdowns' filter does), so opening the window never raises it. «Очистить всё» and Esc empty
+the field (the cross or Esc clears the search and does not close the window while the field has focus); closing the window drops
+the focus. Nothing matching shows «Ничего не подходит к поиску».
+
 **Scrolling** (`ui/hub_view.rs`, Razdor's): the list and the details pane scroll by the wheel, a
 one-finger swipe (`widgets::swipe_rows`), a drag (`drag_frame`: a press that moves more than 12 px is a
 drag and picks nothing; a press released where it began without a drag picks that row, so a tap picks as

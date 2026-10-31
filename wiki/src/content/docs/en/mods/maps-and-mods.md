@@ -20,6 +20,10 @@ Entries are split into tabs:
 
 Each entry in the list shows its kind (map, campaign or mod), its author, its rating on Discord (👍 and 👎) and its state. Entries are sorted by rating, best first. Entries without a Discord post come last, sorted by name.
 
+## Search
+
+A field above the list narrows it as you type: part of a title (Russian or English) or the author's name; the cross at its right or Esc empties the field.
+
 ## Opening an entry
 
 Select an entry, and its details open on the right:
