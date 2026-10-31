@@ -149,3 +149,6 @@ hub-1280 | hub | 1280x800 |
 hub-mods-1280 | hub:1 | 1280x800 |
 hub-entry-1280 | hub:1:evolution-mock | 1280x800 |
 hub-800 | hub | 800x600 |
+# The map editor (desktop only): the map open, and its find window over the properties of a building.
+editor-1280 | editor:РК1-Начало пути | 1280x800 |
+editor-find-props-1280 | editor:РК1-Начало пути:Казарм | 1280x800 |

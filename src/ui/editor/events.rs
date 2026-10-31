@@ -18,6 +18,7 @@ use razdor::editor::{Command, Target};
 use razdor::rules::events::EventEdit;
 
 use super::form::*;
+use crate::ui::display::button_grow;
 use crate::ui::widgets::*;
 
 /// The window's state between frames.
@@ -146,7 +147,10 @@ pub fn window(state: &mut EventsState, s: &Scenario, names: &Names) -> EventsAct
     draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.1, 0.095, 0.09, 0.98));
     draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, ACCENT);
     text(tr("Events"), r.x + 14.0, r.y + 28.0, 24.0, ACCENT);
-    if button(r.right() - 130.0, r.bottom() - 50.0, 116.0, 38.0, tr("Close"), true) || (!typing() && !popup_open() && esc_pressed()) {
+    // Close and the list's buttons grow with the text size (Razdor's own): the rows and the
+    // properties give them room.
+    let g = button_grow();
+    if button(r.right() - 14.0 - 116.0 * g, r.bottom() - 12.0 - 38.0 * g, 116.0 * g, 38.0 * g, tr("Close"), true) || (!typing() && !popup_open() && esc_pressed()) {
         return EventsAction::Close;
     }
     if state.selected.is_some_and(|id| s.event(id).is_none()) {
@@ -156,7 +160,7 @@ pub fn window(state: &mut EventsState, s: &Scenario, names: &Names) -> EventsAct
     if let Some(a) = event_list(state, s, list) {
         return a;
     }
-    let area = Rect::new(list.right() + 14.0, r.y + 40.0, r.right() - list.right() - 26.0, r.h - 100.0);
+    let area = Rect::new(list.right() + 14.0, r.y + 40.0, r.right() - list.right() - 26.0, r.h - 62.0 - 38.0 * g);
     match state.selected {
         Some(id) => properties(state, s, names, id, area),
         None => {
@@ -168,17 +172,18 @@ pub fn window(state: &mut EventsState, s: &Scenario, names: &Names) -> EventsAct
 
 /// The list column; returns an action for its buttons.
 fn event_list(state: &mut EventsState, s: &Scenario, r: Rect) -> Option<EventsAction> {
+    let grow = button_grow();
     let mut y = r.y;
     // Type filter.
     let kinds: [(Option<u8>, &str); 5] = [(None, n_("All")), (Some(1), n_("Global")), (Some(2), n_("Local")), (Some(3), n_("Quest")), (Some(4), n_("Rumour"))];
     let bw = (r.w - 16.0) / 5.0;
     for (i, (k, l)) in kinds.iter().enumerate() {
-        if toggle_button(r.x + i as f32 * (bw + 4.0), y, bw, 26.0, tr(l), state.filter.kind == *k) {
+        if toggle_button(r.x + i as f32 * (bw + 4.0), y, bw, 26.0 * grow, tr(l), state.filter.kind == *k) {
             state.filter.kind = *k;
             state.list_scroll = 0;
         }
     }
-    y += 32.0;
+    y += 6.0 + 26.0 * grow;
     let mut groups: Options = vec![(-1, tr("All groups").into())];
     groups.extend(group_options());
     let g = state.filter.group.map_or(-1, |g| g as i64);
@@ -192,7 +197,9 @@ fn event_list(state: &mut EventsState, s: &Scenario, r: Rect) -> Option<EventsAc
     }
     y += 32.0;
     let ids = ev::filtered(s, &state.filter);
-    let rows_h = r.bottom() - y - 76.0;
+    // The footer's buttons grow with the text size (Razdor's own), and the count above them.
+    let by = r.bottom() - 10.0 - 30.0 * grow;
+    let rows_h = r.bottom() - y - 46.0 - 30.0 * grow;
     let rows = (rows_h / 24.0).floor().max(1.0) as usize;
     if mouse_in(r.x, y, r.w, rows_h) && !popup_open() {
         let wh = wheel();
@@ -223,19 +230,18 @@ fn event_list(state: &mut EventsState, s: &Scenario, r: Rect) -> Option<EventsAc
             state.selected = Some(*id);
         }
     }
-    text(&trf!("{shown} of {total} events", shown = ids.len(), total = s.events.len()), r.x, r.bottom() - 58.0, 15.0, DIM);
-    let by = r.bottom() - 40.0;
+    text(&trf!("{shown} of {total} events", shown = ids.len(), total = s.events.len()), r.x, by - 18.0, 15.0, DIM);
     let bw = (r.w - 8.0) / 3.0;
     let full = s.events.len() >= ev::MAX_EVENTS;
-    if small_button(r.x, by, bw, 30.0, tr("New"), !full) {
+    if small_button(r.x, by, bw, 30.0 * grow, tr("New"), !full) {
         let kind = state.filter.kind.unwrap_or(1);
         return Some(EventsAction::Apply(Command::NewEvent { kind }, String::new()));
     }
-    if small_button(r.x + bw + 4.0, by, bw, 30.0, tr("Duplicate"), state.selected.is_some() && !full) {
+    if small_button(r.x + bw + 4.0, by, bw, 30.0 * grow, tr("Duplicate"), state.selected.is_some() && !full) {
         let id = state.selected?;
         return Some(EventsAction::Apply(Command::DuplicateEvent { id }, String::new()));
     }
-    if small_button(r.x + 2.0 * (bw + 4.0), by, bw, 30.0, tr("Delete"), state.selected.is_some()) {
+    if small_button(r.x + 2.0 * (bw + 4.0), by, bw, 30.0 * grow, tr("Delete"), state.selected.is_some()) {
         return Some(EventsAction::Delete(state.selected?));
     }
     None

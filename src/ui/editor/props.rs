@@ -12,6 +12,7 @@ use razdor::trf;
 use razdor::rules::content::Content;
 
 use super::form::*;
+use crate::ui::display::button_grow;
 use crate::ui::widgets::*;
 
 /// Panel state kept between frames.
@@ -39,12 +40,14 @@ pub struct Ctx<'a> {
     pub content: Option<&'a Content>,
 }
 
-/// The panel's frame and title; returns the area under the title and tabs for the form.
+/// The panel's frame and title; returns the area under the title and tabs for the form. The
+/// header and the footer grow with the text size (Razdor's own): the form gives them room.
 fn frame(rect: Rect, title: &str, tabs_labels: &[&str], state: &mut PanelState) -> Rect {
+    let g = button_grow();
     draw_rectangle(rect.x, rect.y, rect.w, rect.h, Color::new(0.1, 0.095, 0.09, 0.96));
     draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 1.0, DIM);
     text_fit(title, rect.x + 10.0, rect.y + 24.0, rect.w - 20.0, 20.0, ACCENT);
-    let mut y = rect.y + 34.0;
+    let mut y = rect.y + 10.0 + 24.0 * g;
     if !tabs_labels.is_empty() {
         let before = state.tab;
         y += tabs(rect.x + 6.0, y, rect.w - 12.0, tabs_labels, &mut state.tab);
@@ -52,7 +55,7 @@ fn frame(rect: Rect, title: &str, tabs_labels: &[&str], state: &mut PanelState) 
             state.scroll = 0.0;
         }
     }
-    Rect::new(rect.x + 10.0, y + 4.0, rect.w - 20.0, rect.bottom() - y - 50.0)
+    Rect::new(rect.x + 10.0, y + 4.0, rect.w - 20.0, rect.bottom() - y - 20.0 - 30.0 * g)
 }
 
 /// Mouse wheel over the form scrolls it.
@@ -67,8 +70,10 @@ fn scroll(state: &mut PanelState, area: Rect, content: f32) {
 }
 
 /// The footer button ("Delete building" etc., `label` already translated): true when clicked.
+/// Grows with the text size (Razdor's own): its box is 170 x 30 at Normal.
 fn footer(rect: Rect, label: &str) -> bool {
-    small_button(rect.x + 10.0, rect.bottom() - 40.0, 170.0, 30.0, label, true)
+    let g = button_grow();
+    small_button(rect.x + 10.0, rect.bottom() - 10.0 - 30.0 * g, 170.0 * g, 30.0 * g, label, true)
 }
 
 fn changed<T: PartialEq>(before: &T, after: &T, form: &Form) -> Option<String> {

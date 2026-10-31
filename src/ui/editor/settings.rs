@@ -12,6 +12,7 @@ use razdor::i18n::{n_, tr};
 use razdor::trf;
 
 use super::form::*;
+use crate::ui::display::button_grow;
 use crate::ui::widgets::*;
 
 #[derive(Default)]
@@ -57,7 +58,9 @@ pub fn window(state: &mut SettingsState, s: &Scenario, names: &Names) -> Setting
     if state.tab != before {
         state.scroll = 0.0;
     }
-    let area = Rect::new(r.x + 20.0, r.y + 80.0, r.w - 40.0, r.h - 140.0);
+    // The footer's Close grows with the text size (Razdor's own): the form gives it room.
+    let g = button_grow();
+    let area = Rect::new(r.x + 20.0, r.y + 80.0, r.w - 40.0, r.h - 100.0 - 40.0 * g);
     let orig = Settings {
         header: s.header.clone(),
         title: s.title.clone(),
@@ -163,7 +166,7 @@ pub fn window(state: &mut SettingsState, s: &Scenario, names: &Names) -> Setting
         }
     }
     state.scroll = state.scroll.clamp(0.0, (content - area.h + 20.0).max(0.0));
-    if button(r.right() - 150.0, r.bottom() - 52.0, 130.0, 40.0, tr("Close"), true) || (!typing() && esc_pressed()) {
+    if button(r.right() - 20.0 - 130.0 * g, r.bottom() - 12.0 - 40.0 * g, 130.0 * g, 40.0 * g, tr("Close"), true) || (!typing() && esc_pressed()) {
         return SettingsAction::Close;
     }
     if st != orig {

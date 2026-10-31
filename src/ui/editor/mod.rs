@@ -31,6 +31,7 @@ use razdor::rules::content::{Content, HeroClass};
 use razdor::trf;
 
 use crate::ui::assets::Assets;
+use crate::ui::display::button_grow;
 use crate::ui::widgets::*;
 
 use canvas::{Cam, Overlays, Overview};
@@ -39,7 +40,9 @@ use props::{Ctx, PanelState};
 use events::{EventsAction, EventsState};
 use settings::{SettingsAction, SettingsState};
 
-const TOP: f32 = 44.0;
+/// The toolbar's buttons and their gap (at Normal one row of 28 px buttons: the window's top is 44 px).
+const BAR_H: f32 = 28.0;
+const BAR_GAP: f32 = 4.0;
 const RIGHT_W: f32 = 300.0;
 const STATUS_H: f32 = 26.0;
 const PANEL_W: f32 = 390.0;
@@ -121,6 +124,84 @@ struct FindState {
     scroll: usize,
 }
 
+/// The toolbar's labels, in order (the buttons' enabled flags are the document's, see `toolbar`).
+fn bar_labels() -> Vec<&'static str> {
+    vec![tr("New"), tr("Open"), tr("Save"), tr("Save as"), tr("Save to game folder"), tr("Undo"), tr("Redo"), tr("Settings"), tr("Events"), tr("Check"), tr("Test play"), tr("Exit")]
+}
+
+/// One toolbar button: its index in [`bar_labels`], its place (`row` from the top) and its box.
+struct BarSlot {
+    i: usize,
+    row: usize,
+    x: f32,
+    w: f32,
+}
+
+/// The toolbar's buttons over a window `w` wide, and its row count. Each button is as wide as
+/// its label. At Normal (`g` = 1) they are one row, all narrower when it would not fit (as
+/// before). With the text grown they wrap into more rows instead, never narrower than their
+/// labels (Razdor's own, the owner's decision, 2026-10-31).
+fn toolbar_layout(labels: &[&str], w: f32, g: f32) -> (Vec<BarSlot>, usize) {
+    let natural: Vec<f32> = labels.iter().map(|l| (measure(l, 17.0).width + 16.0) * g).collect();
+    let room = w - 12.0 - BAR_GAP * (labels.len() - 1) as f32;
+    let total: f32 = natural.iter().sum();
+    if g <= 1.0 || total <= room {
+        let k = (room / total).min(1.0);
+        let mut x = 6.0;
+        let slots = natural
+            .iter()
+            .enumerate()
+            .map(|(i, nw)| {
+                let slot = BarSlot { i, row: 0, x, w: nw * k };
+                x += nw * k + BAR_GAP;
+                slot
+            })
+            .collect();
+        return (slots, 1);
+    }
+    let (mut row, mut x) = (0, 6.0);
+    let mut slots = Vec::new();
+    for (i, nw) in natural.iter().enumerate() {
+        if x > 6.0 && x + nw > w - 6.0 {
+            row += 1;
+            x = 6.0;
+        }
+        slots.push(BarSlot { i, row, x, w: *nw });
+        x += nw + BAR_GAP;
+    }
+    (slots, row + 1)
+}
+
+/// The toolbar's height over `rows` rows of buttons grown by `g`.
+fn bar_h(rows: usize, g: f32) -> f32 {
+    16.0 + rows as f32 * BAR_H * g + (rows - 1) as f32 * BAR_GAP
+}
+
+/// Top of toolbar row `row`.
+fn bar_y(row: usize, g: f32) -> f32 {
+    8.0 + row as f32 * (BAR_H * g + BAR_GAP)
+}
+
+/// The height of the toolbar, which is the map's top (it grows with the text size: Razdor's own).
+fn top() -> f32 {
+    let g = button_grow();
+    let (_, rows) = toolbar_layout(&bar_labels(), screen_width(), g);
+    bar_h(rows, g)
+}
+
+/// A modal's footer button `k` (0: the rightmost, where Cancel and Close are; 1: the one left of
+/// it, Yes, Save, Create, Open file). 120 x 40 at Normal, grown with the text size.
+fn foot_rect(r: &Rect, k: usize) -> Rect {
+    let g = button_grow();
+    let (w, h) = (120.0 * g, 40.0 * g);
+    Rect::new(r.right() - 20.0 - w - k as f32 * (w + 10.0), r.bottom() - 14.0 - h, w, h)
+}
+
+fn foot_button(r: &Rect, k: usize, label: &str, enabled: bool) -> bool {
+    let b = foot_rect(r, k);
+    button(b.x, b.y, b.w, b.h, label, enabled)
+}
+
 fn ctrl() -> bool {
     is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl)
 }
@@ -178,7 +259,8 @@ impl EditorScreen {
     }
 
     fn view_rect() -> Rect {
-        Rect::new(0.0, TOP, screen_width() - RIGHT_W, screen_height() - TOP - STATUS_H)
+        let top = top();
+        Rect::new(0.0, top, screen_width() - RIGHT_W, screen_height() - top - STATUS_H)
     }
 
     fn set_doc(&mut self, doc: EditorDoc) {
@@ -387,7 +469,9 @@ impl EditorScreen {
     fn find_rect(&self, view: Rect) -> Option<Rect> {
         // Narrower beside a record's panel when the window is small.
         let w = FIND_W.min(view.w - PANEL_W - 32.0).max(280.0);
-        self.find.as_ref().map(|_| Rect::new(view.right() - w - 8.0, view.y + 8.0, w, 92.0 + FIND_ROWS as f32 * 22.0))
+        // The header grows with its close button (Razdor's own): the rows below move down.
+        let d = 24.0 * (button_grow() - 1.0);
+        self.find.as_ref().map(|_| Rect::new(view.right() - w - 8.0, view.y + 8.0, w, 92.0 + d + FIND_ROWS as f32 * 22.0))
     }
 
     /// The find window: the field, the count and the hits; a click on a hit jumps to it,
@@ -403,14 +487,17 @@ impl EditorScreen {
         }
         draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.1, 0.095, 0.09, 0.97));
         draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, ACCENT);
+        // Razdor's own (the owner's decision, 2026-10-31): the close button grows with the text.
+        let g = button_grow();
+        let d = 24.0 * (g - 1.0);
         text(tr("Find on the map"), r.x + 10.0, r.y + 22.0, 18.0, ACCENT);
-        if small_button(r.right() - 34.0, r.y + 6.0, 26.0, 24.0, "x", true) {
+        if small_button(r.right() - 8.0 - 26.0 * g, r.y + 6.0, 26.0 * g, 24.0 * g, "x", true) {
             clear_focus();
             self.find = None;
             return;
         }
         let mut query = self.find_query.clone();
-        text_field(FIND_KEY, r.x + 10.0, r.y + 32.0, r.w - 20.0, 26.0, &mut query, false);
+        text_field(FIND_KEY, r.x + 10.0, r.y + 32.0 + d, r.w - 20.0, 26.0, &mut query, false);
         if query != self.find_query {
             self.find_query = query;
         }
@@ -431,8 +518,8 @@ impl EditorScreen {
         } else {
             trf!("{n} found; Enter / F3: next, Shift: back", n)
         };
-        text_fit(&head, r.x + 10.0, r.y + 76.0, r.w - 20.0, 15.0, DIM);
-        let list = Rect::new(r.x + 6.0, r.y + 84.0, r.w - 12.0, FIND_ROWS as f32 * 22.0);
+        text_fit(&head, r.x + 10.0, r.y + 76.0 + d, r.w - 20.0, 15.0, DIM);
+        let list = Rect::new(r.x + 6.0, r.y + 84.0 + d, r.w - 12.0, FIND_ROWS as f32 * 22.0);
         let Some(state) = self.find.as_mut() else { return };
         if mouse_in(list.x, list.y, list.w, list.h) {
             let wh = mouse_wheel().1;
@@ -543,7 +630,7 @@ impl EditorScreen {
             action = self.shortcuts();
         }
         let overview = self.overview.texture(&self.doc);
-        let panel_rect = self.tools.selected.map(|_| Rect::new(8.0, TOP + 8.0, PANEL_W, view.h - 16.0));
+        let panel_rect = self.tools.selected.map(|_| Rect::new(8.0, top() + 8.0, PANEL_W, view.h - 16.0));
         let find_rect = self.find_rect(view);
         self.canvas_input(view, &[panel_rect, find_rect]);
         let cam = self.cam.expect("set above");
@@ -553,7 +640,9 @@ impl EditorScreen {
 
         // Right column: minimap and tools.
         let rx = screen_width() - RIGHT_W;
-        let mini = Rect::new(rx + 6.0, TOP + 6.0, RIGHT_W - 12.0, MINIMAP_H);
+        // The minimap gives way to the grown tool options under it (Razdor's own): 40 px less at 1.5.
+        let mini_h = MINIMAP_H - 40.0 * (button_grow() - 1.0);
+        let mini = Rect::new(rx + 6.0, top() + 6.0, RIGHT_W - 12.0, mini_h);
         if let Some(at) = canvas::minimap(&self.doc, overview.as_ref(), &cam, mini) {
             if let Some(c) = self.cam.as_mut() {
                 c.centre = at;
@@ -571,7 +660,8 @@ impl EditorScreen {
                 Target::Army(id) => props::army_panel(&mut self.panel, s, id, &ctx, pr),
                 Target::Point(id) => props::point_panel(&mut self.panel, s, id, pr),
             };
-            if small_button(pr.right() - 34.0, pr.y + 6.0, 26.0, 24.0, "x", true) {
+            let g = button_grow();
+            if small_button(pr.right() - 8.0 - 26.0 * g, pr.y + 6.0, 26.0 * g, 24.0 * g, "x", true) {
                 self.tools.selected = None;
             } else if let Some((cmd, key)) = edit {
                 self.apply(cmd, &key);
@@ -751,8 +841,10 @@ impl EditorScreen {
 
     fn toolbar(&mut self, _assets: &Assets) -> EditorAction {
         let w = screen_width();
-        draw_rectangle(0.0, 0.0, w, TOP, Color::new(0.14, 0.12, 0.1, 1.0));
-        draw_line(0.0, TOP, w, TOP, 1.0, DIM);
+        let g = button_grow();
+        let top = top();
+        draw_rectangle(0.0, 0.0, w, top, Color::new(0.14, 0.12, 0.1, 1.0));
+        draw_line(0.0, top, w, top, 1.0, DIM);
         let (cu, cr) = (self.doc.can_undo(), self.doc.can_redo());
         let buttons = [
             (tr("New"), true),
@@ -768,16 +860,13 @@ impl EditorScreen {
             (tr("Test play"), true),
             (tr("Exit"), true),
         ];
-        // Each button as wide as its label; all narrower (smaller labels) if the row would
-        // not fit the window.
-        let natural: Vec<f32> = buttons.iter().map(|(l, _)| measure(l, 17.0).width + 16.0).collect();
-        let room = w - 12.0 - 4.0 * (buttons.len() - 1) as f32;
-        let k = (room / natural.iter().sum::<f32>()).min(1.0);
-        let mut x = 6.0;
+        let labels: Vec<&str> = buttons.iter().map(|(l, _)| *l).collect();
+        let (slots, _) = toolbar_layout(&labels, w, g);
         let mut hit = None;
-        for (i, ((label, enabled), nw)) in buttons.iter().zip(&natural).enumerate() {
-            let bw = nw * k;
-            if small_button(x, 8.0, bw, 28.0, label, *enabled) {
+        for slot in &slots {
+            let (i, enabled) = (slot.i, buttons[slot.i].1);
+            let (x, y, bw) = (slot.x, bar_y(slot.row, g), slot.w);
+            if small_button(x, y, bw, BAR_H * g, buttons[i].0, enabled) {
                 hit = Some(i);
             }
             // Undo / Redo: what they would undo or redo.
@@ -786,10 +875,9 @@ impl EditorScreen {
                 6 => self.doc.redo_label(),
                 _ => None,
             };
-            if let Some(what) = what.filter(|_| mouse_in(x, 8.0, bw, 28.0)) {
+            if let Some(what) = what.filter(|_| mouse_in(x, y, bw, BAR_H * g)) {
                 tooltip(&[(tr(what).to_string(), INK)]);
             }
-            x += bw + 4.0;
         }
         let mut action = EditorAction::None;
         match hit {
@@ -819,8 +907,14 @@ impl EditorScreen {
         let s = &self.doc.scenario;
         let title = format!("{}{}  ({} x {})", if self.doc.dirty() { "* " } else { "" }, self.doc.suggested_name(), s.width(), s.height());
         let tw = measure(&title, 18.0).width;
-        if x + tw + 12.0 < w {
-            text(&title, w - tw - 10.0, 28.0, 18.0, INK);
+        // On the last row that has room after its buttons (the first row at Normal).
+        let rows = slots.iter().map(|s| s.row).max().unwrap_or(0);
+        for row in (0..=rows).rev() {
+            let end = slots.iter().filter(|s| s.row == row).map(|s| s.x + s.w).fold(6.0, f32::max);
+            if end + tw + 12.0 < w {
+                text(&title, w - tw - 10.0, bar_y(row, g) + 20.0 * g, 18.0, INK);
+                break;
+            }
         }
         action
     }
@@ -872,11 +966,13 @@ impl EditorScreen {
             return action;
         }
         draw_rectangle(0.0, 0.0, sw, sh, Color::new(0.0, 0.0, 0.0, 0.55));
+        // Heights grow with the footer (and the hero and size buttons above it): Razdor's own.
+        let g = button_grow();
         let (w, h) = match &modal {
-            Modal::Confirm { .. } => (560.0, 200.0),
-            Modal::TestPlay => (560.0, 230.0),
-            Modal::SaveAs { .. } => (620.0, 260.0),
-            Modal::NewMap { .. } => (560.0, 330.0),
+            Modal::Confirm { .. } => (560.0, 200.0 + 40.0 * (g - 1.0)),
+            Modal::TestPlay => (560.0, 230.0 + 84.0 * (g - 1.0)),
+            Modal::SaveAs { .. } => (620.0, 260.0 + 40.0 * (g - 1.0)),
+            Modal::NewMap { .. } => (560.0, 330.0 + 68.0 * (g - 1.0)),
             _ => (720.0f32.min(sw - 40.0), (sh - 100.0).max(300.0)),
         };
         let r = Rect::new((sw - w) / 2.0, ((sh - h) / 2.0).max(10.0), w, h);
@@ -884,7 +980,7 @@ impl EditorScreen {
         draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, ACCENT);
         let esc = !typing() && esc_pressed();
         let (x, mut y) = (r.x + 20.0, r.y + 32.0);
-        let cancel = |r: &Rect| button(r.right() - 140.0, r.bottom() - 54.0, 120.0, 40.0, tr("Cancel"), true);
+        let cancel = |r: &Rect| foot_button(r, 0, tr("Cancel"), true);
         let mut keep = true;
         let mut next = modal;
         match &mut next {
@@ -893,7 +989,7 @@ impl EditorScreen {
                 for (i, line) in wrap(message, r.w - 40.0, 18.0).iter().take(4).enumerate() {
                     text(line, x, y + 32.0 + i as f32 * 22.0, 18.0, INK);
                 }
-                if button(r.right() - 270.0, r.bottom() - 54.0, 120.0, 40.0, tr("Yes"), true) {
+                if foot_button(&r, 1, tr("Yes"), true) {
                     let then = then.clone();
                     self.modal = None;
                     return self.run(then);
@@ -910,7 +1006,7 @@ impl EditorScreen {
                 text_fit(tr("Esc > Main menu in the game comes back here."), x, y + 48.0, r.w - 40.0, 16.0, DIM);
                 y += 70.0;
                 for (k, class) in HeroClass::ALL.into_iter().enumerate() {
-                    if button(x + k as f32 * 170.0, y, 160.0, 44.0, tr(razdor::editor::palette::HERO_CLASSES[k]), true) {
+                    if button(x + k as f32 * 170.0, y, 160.0, 44.0 * g, tr(razdor::editor::palette::HERO_CLASSES[k]), true) {
                         self.modal = None;
                         return self.start_test_play(class);
                     }
@@ -928,7 +1024,7 @@ impl EditorScreen {
                 for (i, line) in wrap(tr("Use \"Save to game folder\" in the toolbar to put it where the game finds it."), r.w - 40.0, 15.0).iter().enumerate() {
                     text(line, x, y + 100.0 + i as f32 * 18.0, 15.0, DIM);
                 }
-                let go = button(r.right() - 270.0, r.bottom() - 54.0, 120.0, 40.0, tr("Save"), true) || (enter_pressed() && !popup_open());
+                let go = foot_button(&r, 1, tr("Save"), true) || (enter_pressed() && !popup_open());
                 if go {
                     let n = name.clone();
                     self.modal = None;
@@ -944,15 +1040,15 @@ impl EditorScreen {
                 y += 20.0;
                 text_fit(tr("Size"), x, y + 18.0, 86.0, 17.0, INK);
                 for (k, n) in MAP_SIZES.iter().enumerate() {
-                    if toggle_button(x + 90.0 + k as f32 * 94.0, y, 88.0, 28.0, &format!("{n} x {n}"), *size == k) {
+                    if toggle_button(x + 90.0 + k as f32 * 94.0, y, 88.0, 28.0 * g, &format!("{n} x {n}"), *size == k) {
                         *size = k;
                         (*mw, *mh) = (*n, *n);
                     }
                 }
-                if toggle_button(x + 90.0 + 3.0 * 94.0, y, 88.0, 28.0, tr("Custom"), *size == 3) {
+                if toggle_button(x + 90.0 + 3.0 * 94.0, y, 88.0, 28.0 * g, tr("Custom"), *size == 3) {
                     *size = 3;
                 }
-                y += 40.0;
+                y += 12.0 + 28.0 * g;
                 if *size == 3 {
                     text_fit(tr("Width"), x, y + 18.0, 86.0, 17.0, INK);
                     if let Some(v) = number_field("new:w", x + 90.0, y, 150.0, *mw as i64, 10, 800) {
@@ -969,7 +1065,7 @@ impl EditorScreen {
                 if let Some(v) = dropdown("new:fill", x + 90.0, y, 240.0, *fill as i64, &surfaces) {
                     *fill = v as u8;
                 }
-                if button(r.right() - 270.0, r.bottom() - 54.0, 120.0, 40.0, tr("Create"), true) {
+                if foot_button(&r, 1, tr("Create"), true) {
                     let o = NewMap { width: *mw, height: *mh, fill: *fill };
                     self.modal = None;
                     return self.guarded(Then::New(o));
@@ -990,8 +1086,10 @@ impl EditorScreen {
                         entries.push((trf!("Yours: {name}", name = m.name), m.path));
                     }
                 }
+                // Rows grow with their buttons (Razdor's own).
+                let pitch = 24.0 * g + 2.0;
                 let list = Rect::new(x, y, r.w - 40.0, r.h - 190.0);
-                let rows = (list.h / 26.0).floor() as usize;
+                let rows = (list.h / pitch).floor() as usize;
                 if mouse_in(list.x, list.y, list.w, list.h) {
                     let wh = mouse_wheel().1;
                     if wh > 0.0 {
@@ -1008,15 +1106,15 @@ impl EditorScreen {
                 }
                 let mut pick = None;
                 for (i, (label, p)) in entries.iter().enumerate().skip(*scroll).take(rows) {
-                    let ry = y + (i - *scroll) as f32 * 26.0;
-                    if small_button(list.x, ry, list.w, 24.0, label, true) {
+                    let ry = y + (i - *scroll) as f32 * pitch;
+                    if small_button(list.x, ry, list.w, 24.0 * g, label, true) {
                         pick = Some(p.clone());
                     }
                 }
                 let fy = r.bottom() - 110.0;
                 text_fit(tr("Or a file:"), x, fy + 18.0, 86.0, 17.0, INK);
                 text_field("open:path", x + 90.0, fy, r.w - 130.0, 26.0, path, false);
-                if button(r.right() - 270.0, r.bottom() - 54.0, 120.0, 40.0, tr("Open file"), !path.trim().is_empty()) {
+                if foot_button(&r, 1, tr("Open file"), !path.trim().is_empty()) {
                     pick = Some(PathBuf::from(path.trim()));
                 }
                 if let Some(p) = pick {
@@ -1034,7 +1132,7 @@ impl EditorScreen {
                 text(tr("Map check"), x, y, 22.0, ACCENT);
                 text_fit(&head, x, y + 26.0, r.w - 40.0, 16.0, if errors > 0 { RED } else { INK });
                 y += 40.0;
-                let list = Rect::new(x, y, r.w - 40.0, r.h - 130.0);
+                let list = Rect::new(x, y, r.w - 40.0, r.h - 90.0 - 40.0 * g);
                 let rows = (list.h / 24.0).floor() as usize;
                 if mouse_in(list.x, list.y, list.w, list.h) {
                     let wh = mouse_wheel().1;
@@ -1065,7 +1163,7 @@ impl EditorScreen {
                     self.go_to(p);
                     return action;
                 }
-                if button(r.right() - 140.0, r.bottom() - 54.0, 120.0, 40.0, tr("Close"), true) || esc {
+                if foot_button(&r, 0, tr("Close"), true) || esc {
                     keep = false;
                 }
             }

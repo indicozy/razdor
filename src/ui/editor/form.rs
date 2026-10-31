@@ -11,9 +11,24 @@ use razdor::dt::dtm::{Scenario, Troop};
 use razdor::editor::palette::{building_type_label, Names};
 use razdor::i18n::tr;
 
+use crate::ui::display::button_grow;
 use crate::ui::widgets::*;
 
 pub const ROW: f32 = 28.0;
+/// The gap between two rows of buttons.
+const BTN_GAP: f32 = 4.0;
+
+/// The row pitch of a row whose small button is 24 px high at Normal: grown with the text size
+/// (`display::button_grow`), the button and its row grow with it; `ROW` at Normal.
+fn small_row(g: f32) -> f32 {
+    (24.0 * g + 4.0).max(ROW)
+}
+
+/// Where a `h`-high control sits in a `row`-high row: centred (Razdor's own, with the grown
+/// rows); at Normal (`ROW` high, controls 24 px) the row's top, as before.
+fn in_row(row: f32, h: f32) -> f32 {
+    (row - h) / 2.0 - (ROW - 24.0) / 2.0
+}
 
 /// Options of a picker: (stored value, label).
 pub type Options = Vec<(i64, String)>;
@@ -70,6 +85,11 @@ impl Form {
         self.y += h;
     }
 
+    /// A label at `y` (the row's text line).
+    fn label_at(&self, s: &str, y: f32) {
+        text_fit(tr(s), self.x, y, self.label_w - 6.0, 16.0, DIM);
+    }
+
     fn mark(&mut self, k: &str) {
         self.changed = Some(self.key(k));
     }
@@ -92,7 +112,7 @@ impl Form {
     }
 
     fn label(&self, s: &str) {
-        text_fit(tr(s), self.x, self.y + 17.0, self.label_w - 6.0, 16.0, DIM);
+        self.label_at(s, self.y + 17.0);
     }
 
     fn field_x(&self) -> (f32, f32) {
@@ -222,20 +242,24 @@ impl Form {
     /// the original stores it (the sign is the switch).
     pub fn threshold(&mut self, k: &str, label: &str, v: &mut i16, max: i64) {
         use razdor::editor::events::Threshold;
-        if self.shown(ROW) {
-            self.label(label);
+        let g = button_grow();
+        let row = small_row(g);
+        if self.shown(row) {
+            self.label_at(label, self.y + 17.0 + (row - ROW) / 2.0);
             let (fx, _) = self.field_x();
             let t = Threshold::from_raw(*v);
-            if small_button(fx, self.y, 38.0, 24.0, if t.at_least { ">=" } else { "<=" }, t.value != 0) {
+            // The switch grows with the text (Razdor's own); the value field keeps its place.
+            let bw = 38.0 * g;
+            if small_button(fx, self.y + in_row(row, 24.0 * g), bw, 24.0 * g, if t.at_least { ">=" } else { "<=" }, t.value != 0) {
                 *v = Threshold { at_least: !t.at_least, ..t }.raw();
                 self.mark(&format!("{k}s"));
             }
-            if let Some(n) = number_field(&self.key(k), fx + 42.0, self.y, 110.0, t.value as i64, 0, max) {
+            if let Some(n) = number_field(&self.key(k), fx + bw + 4.0, self.y + in_row(row, 24.0), 110.0, t.value as i64, 0, max) {
                 *v = Threshold { value: n as u16, ..t }.raw();
                 self.mark(k);
             }
         }
-        self.next(ROW);
+        self.next(row);
     }
 
     /// Several pickers side by side on one row (widths in parts of the row). The values are
@@ -258,45 +282,53 @@ impl Form {
         self.next(ROW);
     }
 
-    /// A small button on its own row; true when clicked.
+    /// A small button on its own row; true when clicked. Razdor's own (the owner's decision,
+    /// 2026-10-31): the button and its label grow with the text size (`button_grow`).
     pub fn button(&mut self, label: &str, enabled: bool) -> bool {
         let mut hit = false;
-        if self.shown(ROW + 2.0) {
+        let g = button_grow();
+        let row = 26.0 * g + BTN_GAP;
+        if self.shown(row) {
             let label = tr(label);
-            let w = (measure(label, 17.0).width + 24.0).min(self.w);
-            hit = small_button(self.x, self.y, w, 26.0, label, enabled);
+            let w = ((measure(label, 17.0).width + 24.0) * g).min(self.w);
+            hit = small_button(self.x, self.y, w, 26.0 * g, label, enabled);
         }
-        self.next(ROW + 2.0);
+        self.next(row);
         hit
     }
 
-    /// Row of up to four small buttons; returns the index clicked.
+    /// Row of up to four small buttons; returns the index clicked. Grows like [`Form::button`].
     pub fn buttons(&mut self, labels: &[&str]) -> Option<usize> {
         let mut hit = None;
-        if self.shown(ROW + 2.0) {
+        let g = button_grow();
+        let row = 26.0 * g + BTN_GAP;
+        if self.shown(row) {
             let bw = (self.w - 4.0 * (labels.len() as f32 - 1.0)) / labels.len() as f32;
             for (i, l) in labels.iter().enumerate() {
-                if small_button(self.x + i as f32 * (bw + 4.0), self.y, bw, 26.0, tr(l), true) {
+                if small_button(self.x + i as f32 * (bw + 4.0), self.y, bw, 26.0 * g, tr(l), true) {
                     hit = Some(i);
                 }
             }
         }
-        self.next(ROW + 2.0);
+        self.next(row);
         hit
     }
 
     /// An event list with a remove button per row and an "add" picker (local events).
     pub fn event_list(&mut self, k: &str, used: &[u16], events: &[(i64, String)]) -> EventListEdit {
         let mut out = EventListEdit::None;
+        // The remove buttons grow with the text size (Razdor's own): their rows grow with them.
+        let g = button_grow();
+        let row = small_row(g);
         for (i, id) in used.iter().enumerate() {
-            if self.shown(ROW) {
+            if self.shown(row) {
                 let label = events.iter().find(|e| e.0 == *id as i64).map_or(format!("#{id} {}", tr("(missing)")), |e| e.1.clone());
-                text(&ellipsize(&label, self.w - 40.0, 16.0), self.x, self.y + 17.0, 16.0, INK);
-                if small_button(self.x + self.w - 26.0, self.y, 26.0, 24.0, "x", true) {
+                text(&ellipsize(&label, self.w - 40.0, 16.0), self.x, self.y + 17.0 + (row - ROW) / 2.0, 16.0, INK);
+                if small_button(self.x + self.w - 26.0 * g, self.y + in_row(row, 24.0 * g), 26.0 * g, 24.0 * g, "x", true) {
                     out = EventListEdit::Remove(i);
                 }
             }
-            self.next(ROW);
+            self.next(row);
         }
         let mut add: i64 = 0;
         let mut options = vec![(0, tr("Add an event...").to_string())];

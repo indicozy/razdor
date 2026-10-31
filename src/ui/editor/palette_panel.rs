@@ -9,6 +9,7 @@ use razdor::editor::{ObjectFilter, TerrainShape, Tool, ToolState};
 use razdor::i18n::{n_, tr};
 use razdor::trf;
 
+use crate::ui::display::button_grow;
 use crate::ui::dt_art::DtArt;
 use crate::ui::widgets::*;
 use crate::ui::world_view::{draw_wrapped, surface_color};
@@ -108,11 +109,21 @@ fn tool_index(t: &Tool) -> usize {
     }
 }
 
+/// The palette's option buttons grow with the text size (Razdor's own, the owner's decision,
+/// 2026-10-31): each is `button_h()` high, one row is `pitch()` (the button and its gap).
+fn button_h() -> f32 {
+    26.0 * button_grow()
+}
+
+fn pitch() -> f32 {
+    button_h() + 4.0
+}
+
 fn size_buttons(x: f32, y: f32, w: f32, current: u32) -> Option<u32> {
     let bw = (w - 3.0 * 4.0) / 4.0;
     let mut out = None;
     for (i, s) in BRUSH_SIZES.iter().enumerate() {
-        if toggle_button(x + i as f32 * (bw + 4.0), y, bw, 26.0, &format!("{s}x{s}"), current == *s) {
+        if toggle_button(x + i as f32 * (bw + 4.0), y, bw, button_h(), &format!("{s}x{s}"), current == *s) {
             out = Some(*s);
         }
     }
@@ -168,12 +179,12 @@ pub fn tool_panel(state: &mut PaletteState, tools: &mut ToolState, palette: &Pal
     let current = tool_index(&tools.tool);
     let bw = (w - 4.0) / 2.0;
     for (k, (label, _)) in TOOL_KEYS.iter().enumerate() {
-        let (bx, by) = (x + (k % 2) as f32 * (bw + 4.0), y + (k / 2) as f32 * 30.0);
-        if toggle_button(bx, by, bw, 26.0, tr(label), current == k) {
+        let (bx, by) = (x + (k % 2) as f32 * (bw + 4.0), y + (k / 2) as f32 * pitch());
+        if toggle_button(bx, by, bw, button_h(), tr(label), current == k) {
             tools.set_tool(state.tool(k));
         }
     }
-    y += 4.0 * 30.0 + 6.0;
+    y += 4.0 * pitch() + 6.0;
     draw_line(x, y, x + w, y, 1.0, DIM);
     y += 8.0;
     let atlas = art.and_then(|a| a.map_atlas());
@@ -211,12 +222,12 @@ pub fn tool_panel(state: &mut PaletteState, tools: &mut ToolState, palette: &Pal
                 state.shape = TerrainShape::Brush(s);
                 changed = true;
             }
-            y += 30.0;
-            if toggle_button(x, y, bw, 26.0, tr("Flood fill"), state.shape == TerrainShape::Fill) {
+            y += pitch();
+            if toggle_button(x, y, bw, button_h(), tr("Flood fill"), state.shape == TerrainShape::Fill) {
                 state.shape = TerrainShape::Fill;
                 changed = true;
             }
-            if toggle_button(x + bw + 4.0, y, bw, 26.0, tr("Rectangle"), state.shape == TerrainShape::Rect) {
+            if toggle_button(x + bw + 4.0, y, bw, button_h(), tr("Rectangle"), state.shape == TerrainShape::Rect) {
                 state.shape = TerrainShape::Rect;
                 changed = true;
             }
@@ -237,7 +248,7 @@ pub fn tool_panel(state: &mut PaletteState, tools: &mut ToolState, palette: &Pal
                 state.size = s;
                 changed = true;
             }
-            y += 32.0;
+            y += pitch() + 2.0;
             let sprites: Vec<_> = palette.sprites_of(state.class).collect();
             let sel = sprites.iter().position(|o| o.sprite == state.sprite);
             let grid = Rect::new(x, y, w, r.bottom() - y - 40.0);
@@ -262,15 +273,15 @@ pub fn tool_panel(state: &mut PaletteState, tools: &mut ToolState, palette: &Pal
                 state.erase_size = s;
                 changed = true;
             }
-            y += 34.0;
+            y += pitch() + 4.0;
             text(tr("Erase"), x, y + 14.0, 17.0, ACCENT);
             y += 22.0;
             for (f, label) in [(ObjectFilter::All, tr("Everything")), (ObjectFilter::Massifs, tr("Hills, mountains, stones")), (ObjectFilter::Plants, tr("Trees and thickets"))] {
-                if toggle_button(x, y, w, 26.0, label, state.filter == f) {
+                if toggle_button(x, y, w, button_h(), label, state.filter == f) {
                     state.filter = f;
                     changed = true;
                 }
-                y += 30.0;
+                y += pitch();
             }
             note(tr("Buildings, armies and points: select them and press Delete."), x, y, w, DIM);
         }
@@ -302,15 +313,15 @@ pub fn tool_panel(state: &mut PaletteState, tools: &mut ToolState, palette: &Pal
             text_fit(tr("Click: the cell is the bottom-right corner."), x, r.bottom() - 10.0, w, 14.0, DIM);
         }
         Tool::Point { .. } => {
-            if toggle_button(x, y, w, 26.0, tr("Lantern (reveals an area)"), state.lantern) {
+            if toggle_button(x, y, w, button_h(), tr("Lantern (reveals an area)"), state.lantern) {
                 state.lantern = true;
                 changed = true;
             }
-            if toggle_button(x, y + 30.0, w, 26.0, tr("Event point"), !state.lantern) {
+            if toggle_button(x, y + pitch(), w, button_h(), tr("Event point"), !state.lantern) {
                 state.lantern = false;
                 changed = true;
             }
-            note(tr("Click the map to place one."), x, y + 64.0, w, DIM);
+            note(tr("Click the map to place one."), x, y + 2.0 * pitch() + 4.0, w, DIM);
         }
         Tool::Army => {
             note(tr("Click the map to place an army; set it up in its panel."), x, y, w, DIM);
