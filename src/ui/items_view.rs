@@ -846,10 +846,13 @@ pub fn squad(
     // Razdor gives the backpack the whole top right (the user's choice, 2026-10-09: no item
     // description box; an item's description pops up by the pointer, as a spell badge's).
     // Under the row of group and search buttons (below) the pack starts at y 66.
-    let content = if show_tree { at(258.0, 54.0, 300.0, 242.0) } else { at(258.0, 66.0, 568.0, 230.0) };
+    // The group and search row grows with the text size (`button_grow`, the owner's decision of
+    // 2026-10-31); the pack gives it the room (its top moves down, its height shrinks by the same).
+    let row_grow = 30.0 * (super::display::button_grow() - 1.0);
+    let content = if show_tree { at(258.0, 54.0, 300.0, 242.0) } else { at(258.0, 66.0 + row_grow, 568.0, 230.0 - row_grow) };
     let (mut group, mut sort) = (GROUP.with(|g| g.get()), SORT.with(|s| s.get()));
     // The row over the pack: nine equal buttons across the backpack, the last one the search.
-    let row = item_filter::row_cells::<9>(at(258.0, 31.0, 568.0, 30.0));
+    let row = item_filter::row_cells::<9>(at(258.0, 31.0, 568.0, 30.0 + row_grow));
     if !show_tree {
         // The row (Razdor's, view only, the owner's approved mockup): eight group buttons (a
         // picture each, a click shows that group, a click on the lit one shows all), then the
@@ -1244,11 +1247,15 @@ struct BottomRow {
 fn bottom_row_rects(win: Rect) -> BottomRow {
     let k = chrome::k();
     let base = window_layout::army_close(win);
+    // The buttons grow with the text size (`button_grow`, the owner's decision of 2026-10-31): their
+    // bottom edge stays where it was, and they grow up.
+    let h = base.h * super::display::button_grow();
+    let bottom = base.y + base.h;
     if window_layout::portrait() {
-        let (whole, close, expand) = bottom_row(win, base.y, base.h, 12.0 * k, 8.0 * k);
+        let (whole, close, expand) = bottom_row(win, bottom - h, h, 12.0 * k, 8.0 * k);
         return BottomRow { whole, close: Some(close), expand };
     }
-    let (whole, expand) = sideways_row(win, k, win.bottom() - base.h - 8.0 * k, base.h);
+    let (whole, expand) = sideways_row(win, k, win.bottom() - h - 8.0 * k, h);
     BottomRow { whole, close: None, expand }
 }
 

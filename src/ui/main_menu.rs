@@ -43,13 +43,26 @@ const BUTTONS: [(Pick, &str); 5] = [
     (Pick::Exit, n_("Exit")),
 ];
 
-/// Centre of button `i` (video pixels, x from the screen centre).
-fn button_centre(i: usize) -> Vec2 {
-    vec2(0.0, 232.0 + i as f32 * 92.0)
-}
-
 /// Size of an oval button (video pixels): `mb2.ugs` drawn 1:1 at 1024×768.
 const OVAL: Vec2 = Vec2::new(214.0, 112.0);
+
+/// The landscape column's first oval starts under the logo, at this video y (the original's).
+const COLUMN_TOP: f32 = 176.0;
+/// The landscape column's lowest edge (video px): above the links and the foot lines.
+const COLUMN_END: f32 = 700.0;
+
+/// The pitch of the landscape column's ovals (video px): the original's 92, or less when grown
+/// ovals would run past [`COLUMN_END`] (their neighbours then overlap more). Razdor's own, the
+/// owner's decision of 2026-10-31: the ovals grow with the text size (`button_grow`).
+fn column_pitch(g: f32) -> f32 {
+    (92.0 * g).min((COLUMN_END - COLUMN_TOP - OVAL.y * g) / 4.0)
+}
+
+/// Centre y of landscape oval `i` (video px from the canvas top): the original's column at
+/// Normal (232 + 92 · i).
+fn button_centre(i: usize, g: f32) -> f32 {
+    COLUMN_TOP + OVAL.y * g / 2.0 + i as f32 * column_pitch(g)
+}
 
 /// A phone held upright (`upright_dp`): the buttons are this many times the landscape size,
 /// in one column under the logo, and the links are chips at the bottom (the owner's choice,
@@ -64,11 +77,6 @@ const LOGO_FLAME_Y: f32 = 12.0;
 const LOGO_FLAME_WIDTH: f32 = 0.95;
 const LOGO_FLAME_HEIGHT: f32 = 1.52;
 const LOGO_FLAME_GLOW: f32 = 0.85;
-
-fn video(p: Vec2) -> Vec2 {
-    let k = chrome::k();
-    vec2(screen_width() / 2.0 + p.x * k, chrome::canvas_top() + p.y * k)
-}
 
 /// The burning ruins over the whole screen, a little warmer where the fire glows. Not panned:
 /// the screen behind a panned title stays covered (`ui::pan`).
@@ -180,9 +188,12 @@ local! {
 /// true when clicked.
 fn oval(i: usize, label: &str, hot: Option<usize>) -> bool {
     let upright = upright_dp().is_some();
-    let k = chrome::k() * if upright { PORTRAIT_SCALE } else { 1.0 };
+    // Razdor's own (the owner's decision, 2026-10-31): the oval, its flame and its word grow with
+    // the text size (`button_grow`); the rect `oval_rect` gives is grown the same.
+    let g = super::display::button_grow();
+    let k = chrome::k() * if upright { PORTRAIT_SCALE } else { 1.0 } * g;
     let r = oval_rect(i);
-    let c = if upright { r.center() } else { video(button_centre(i)) };
+    let c = r.center();
     let size = OVAL * k;
     let (hover, _down, pressed) = super::widgets::button_state(r, hot == Some(i));
     // The bell as the pointer comes onto an item (interface.md §4, 0x4b9b3c); leaving clears
@@ -303,9 +314,8 @@ pub fn open_link(url: &str) {
     razdor::update::open_in_browser(url);
 }
 
-/// A small text link (the Razdor extras). Returns true when clicked.
-fn link(label: &str, x: f32, y: f32, right: bool) -> bool {
-    let size = 18.0 * chrome::k();
+/// A small text link (the Razdor extras) of text `size`. Returns true when clicked.
+fn link(label: &str, x: f32, y: f32, right: bool, size: f32) -> bool {
     let w = measure(label, size).width;
     let x = if right { x - w } else { x };
     let (_, down, pressed) = super::widgets::button_state(Rect::new(x, y - size, w, size * 1.3), true);
@@ -349,12 +359,13 @@ fn upright_dp() -> Option<f32> {
 }
 
 /// The five buttons in the landscape layout: the original's column (video geometry, 1:1 at
-/// `k`, centred on a `sw` × `sh` screen; neighbouring ovals overlap by 20 px).
+/// `k`, centred on a `sw` × `sh` screen; neighbouring ovals overlap by 20 px at Normal).
 fn landscape_buttons(sw: f32, sh: f32, k: f32) -> [Rect; 5] {
+    let g = super::display::button_grow();
     let top = chrome::centred_top(sw, sh, 720.0 * k);
     std::array::from_fn(|i| {
-        let c = vec2(sw / 2.0, top + button_centre(i).y * k);
-        let size = OVAL * k;
+        let c = vec2(sw / 2.0, top + button_centre(i, g) * k);
+        let size = OVAL * (k * g);
         Rect::new(c.x - size.x / 2.0, c.y - size.y / 2.0, size.x, size.y)
     })
 }
@@ -419,8 +430,10 @@ impl PortraitMenu {
 fn portrait_menu(sw: f32, sh: f32, k: f32, dp: f32, safe_top: f32) -> PortraitMenu {
     // The logo (`logo`): 840 px wide, 128/896 of that high.
     let logo_h = 840.0 * 128.0 / 896.0 * k;
-    let size = OVAL * (PORTRAIT_SCALE * k);
-    let chip_h = (TOUCH_DP * dp).max(24.0 * k);
+    // The buttons grow with the text size (`button_grow`, the owner's decision of 2026-10-31).
+    let g = super::display::button_grow();
+    let size = OVAL * (PORTRAIT_SCALE * k * g);
+    let chip_h = (TOUCH_DP * dp).max(24.0 * k) * g;
     let chip_top = sh - 16.0 * k - chip_h;
     let foot_y = chip_top - 12.0 * k;
     // The column ends above the lines. Its middle is the middle of the area between the top safe
@@ -541,31 +554,32 @@ pub fn frame(no_install: bool) -> Option<Pick> {
 fn corner_links(k: f32) -> Option<Pick> {
     let mut pick = None;
     let y = screen_height() - 22.0 * k;
+    // The links grow with the text size (`button_grow`, the owner's decision of 2026-10-31).
+    let size = 18.0 * k * super::display::button_grow();
     let editor = tr("Map editor");
-    if link(editor, 16.0 * k, y, false) {
+    if link(editor, 16.0 * k, y, false, size) {
         pick = Some(Pick::Editor);
     }
-    let x = 16.0 * k + measure(editor, 18.0 * k).width + 28.0 * k;
+    let x = 16.0 * k + measure(editor, size).width + 28.0 * k;
     let custom = tr("Custom battle");
-    if link(custom, x, y, false) {
+    if link(custom, x, y, false, size) {
         pick = Some(Pick::Custom);
     }
-    let x = x + measure(custom, 18.0 * k).width + 28.0 * k;
-    if link(tr("Maps and mods"), x, y, false) {
+    let x = x + measure(custom, size).width + 28.0 * k;
+    if link(tr("Maps and mods"), x, y, false, size) {
         pick = Some(Pick::Hub);
     }
     // The players' Discord (the owner's wish): the invite of the site, in the browser; on phones
     // too (`open_link` hands it to the system's browser there).
-    let x = x + measure(tr("Maps and mods"), 18.0 * k).width + 28.0 * k;
-    if link("Discord", x, y, false) {
+    let x = x + measure(tr("Maps and mods"), size).width + 28.0 * k;
+    if link("Discord", x, y, false, size) {
         open_link(DISCORD_INVITE);
     }
     // The language list (Razdor's): the current language; a click opens the list over it.
     let lang = super::language::current_label();
-    let size = 18.0 * k;
     let lw = measure(&lang, size).width;
     let anchor = Rect::new(screen_width() - 16.0 * k - lw, y - size, lw, size * 1.3);
-    if link(&lang, screen_width() - 16.0 * k, y, true) || super::snapshot::open_language_list() {
+    if link(&lang, screen_width() - 16.0 * k, y, true, size) || super::snapshot::open_language_list() {
         super::language::open_list(anchor, k);
     }
     if super::widgets::mouse_in(anchor.x, anchor.y, anchor.w, anchor.h) {
@@ -580,9 +594,11 @@ fn chip_links(m: &PortraitMenu, k: f32) -> Option<Pick> {
     let mut pick = None;
     let lang = super::language::current_label();
     let labels: [&str; 5] = [tr("Map editor"), tr("Custom battle"), tr("Maps and mods"), "Discord", &lang];
-    let size = 22.0 * k;
-    let pad = 18.0 * k;
-    let gap = 12.0 * k;
+    // The chips grow with the text size (`button_grow`, the owner's decision of 2026-10-31).
+    let g = super::display::button_grow();
+    let size = 22.0 * k * g;
+    let pad = 18.0 * k * g;
+    let gap = 12.0 * k * g;
     let widths: Vec<f32> = labels.iter().map(|l| measure(l, size).width + 2.0 * pad).collect();
     let total = widths.iter().sum::<f32>() + gap * (labels.len() - 1) as f32;
     let mut x = (screen_width() - total) / 2.0;
@@ -815,8 +831,11 @@ pub fn authors(started: f64) -> bool {
     // marble under it with «Ок» in its middle.
     let (page, closed) = window(&title, 594.0, 480.0);
     let k = chrome::k();
-    let inner = Rect::new(page.x + 2.0 * k, page.y + 2.0 * k, page.w - 4.0 * k, page.h - 54.0 * k);
-    let ok = Rect::new(page.center().x - 44.0 * k, page.y + page.h - 44.0 * k, 89.0 * k, 32.0 * k);
+    // Razdor's own (the owner's decision, 2026-10-31): the OK button grows with the text size
+    // (`button_grow`), its bottom edge where it was and the picture's frame above it.
+    let g = super::display::button_grow();
+    let inner = Rect::new(page.x + 2.0 * k, page.y + 2.0 * k, page.w - 4.0 * k, page.h - (22.0 + 32.0 * g) * k);
+    let ok = Rect::new(page.center().x - 44.0 * k * g, page.y + page.h - (12.0 + 32.0 * g) * k, 89.0 * k * g, 32.0 * k * g);
     let over_ok = ok.contains(crate::ui::widgets::pointer().into()) && !input_blocked();
     let ok_label = own("Buttons", "Ok", n_("OK"));
     chrome::marble_button(ok, &ok_label, true, over_ok);
@@ -1076,7 +1095,16 @@ fn options_h() -> f32 {
     // phones' text too small) take 76 px more: the frame line under the checkboxes sits 82 px above
     // the bottom edge, the buttons 68 above. The import row («Обновить игру из архива…», `ui::game_import`)
     // takes 30 px more under the large message windows' row.
-    (if orientation_row { 556.0 } else if touch_row { 528.0 } else { 500.0 }) + 76.0 + 30.0
+    // Razdor's own (the owner's decision, 2026-10-31): the three rows under the checkboxes and the
+    // buttons grow with the text size; the window takes the 84 px their rows add and the 32 px
+    // its buttons add (`button_grow`).
+    (if orientation_row { 556.0 } else if touch_row { 528.0 } else { 500.0 }) + 76.0 + 30.0 + 116.0 * (super::display::button_grow() - 1.0)
+}
+
+/// The step between the options window's rows under the checkboxes (video px): 30 at Normal,
+/// and a button grown by `g` (28 × g high) keeps its 2 px gap (`button_grow`).
+fn option_row_step(g: f32) -> f32 {
+    30.0 + 28.0 * (g - 1.0)
 }
 
 local! {
@@ -1130,6 +1158,9 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     // Razdor's own window, wider than the original's: centred (over the map, above the bar),
     // not hung from the menu's 190, where its foot reached the screen's bottom edge.
     let k = chrome::k();
+    // The rows' and the Ok button's height grows with the text size (`button_grow`, the owner's
+    // decision of 2026-10-31); the Ok button keeps its bottom edge.
+    let row_h = 28.0 * k * super::display::button_grow();
     let (inner, closed) = if over_map {
         map_window(tr("Advanced settings"), ww, wh)
     } else {
@@ -1141,7 +1172,7 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     let col = Rect::new(inner.x, inner.y, 560.0 * k, inner.h);
     let y = col.y + 30.0 * k;
     chrome::shadow_text(tr("Stepping onto a friendly army"), col.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
-    let br = Rect::new(col.x + col.w - 24.0 * k - 170.0 * k, y, 170.0 * k, 28.0 * k);
+    let br = Rect::new(col.x + col.w - 24.0 * k - 170.0 * k, y, 170.0 * k, row_h);
     let label = if audio.friends_let_pass { tr("Let pass") } else { tr("Battle (original)") };
     if row_button(br, label) {
         audio.friends_let_pass = !audio.friends_let_pass;
@@ -1235,6 +1266,7 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     let rx = inner.x + 580.0 * k;
     let rw = inner.x + inner.w - 24.0 * k - rx;
     let bw = 150.0 * k;
+    let ok_h = row_h;
     // The column's hints, wrapped first: they set the row pitch, which is the original's 44 px
     // unless the column would run past the Ok button's top. The column is eleven pitches from its
     // first row to the language row, the hint slot (44 px plus its lines), and the language's
@@ -1242,12 +1274,16 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     let ai_hint = wrap(tr("Maximum: before each move the enemy of your battles weighs every move and answer ahead and plays each out to the end of the battle."), rw, 12.0 * k);
     let lang_hint = wrap(super::language::hint(), rw, 12.0 * k);
     let hints_h = 44.0 * k + ai_hint.len() as f32 * 17.0 * k + 48.0 * k + lang_hint.len() as f32 * 17.0 * k;
-    let ok_top = inner.h - 44.0 * k - 4.0 * k;
-    let pitch = right_column_pitch(30.0 * k, ok_top, 11.0, hints_h, 44.0 * k);
+    let ok_top = inner.h - 16.0 * k - ok_h - 4.0 * k;
+    let mut pitch = right_column_pitch(30.0 * k, ok_top, 11.0, hints_h, 44.0 * k);
+    // At a grown size the rows keep a 2 px gap under their grown buttons (at Normal nothing).
+    if row_h > 28.0 * k {
+        pitch = pitch.max(row_h + 2.0 * k);
+    }
     let mut y = inner.y + 30.0 * k;
     let row = |label: &str, value: &str, y: &mut f32| -> bool {
         chrome::shadow_text(label, rx, *y + 18.0 * k, 14.0 * k, chrome::CREAM);
-        let r = Rect::new(rx + rw - bw, *y, bw, 28.0 * k);
+        let r = Rect::new(rx + rw - bw, *y, bw, row_h);
         *y += pitch;
         row_button(r, value)
     };
@@ -1332,14 +1368,14 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     // in the install; the button opens it.
     chrome::shadow_text(tr("Language"), rx, y + 18.0 * k, 14.0 * k, chrome::CREAM);
     let lw = (rw - 100.0 * k).max(bw);
-    let lr = Rect::new(rx + rw - lw, y, lw, 28.0 * k);
+    let lr = Rect::new(rx + rw - lw, y, lw, row_h);
     if row_button(lr, &super::language::current_label()) || super::snapshot::open_language_list() {
         super::language::open_list(lr, k);
     }
     for (i, line) in lang_hint.iter().enumerate() {
         chrome::shadow_text(line, rx, y + 48.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
     }
-    let ok = Rect::new(inner.x + inner.w - 120.0 * k, inner.y + inner.h - 44.0 * k, 96.0 * k, 28.0 * k);
+    let ok = Rect::new(inner.x + inner.w - 120.0 * k, inner.y + inner.h - 16.0 * k - ok_h, 96.0 * k, ok_h);
     let ok_label = own("Buttons", "Ok", n_("OK"));
     closed || key(KeyCode::Escape) || key(KeyCode::Enter) || settings_button(ok, &ok_label)
 }
@@ -1433,11 +1469,25 @@ fn option_check(x: f32, y: f32, label: &str, on: bool, ink: Color) -> bool {
 /// a key waits for the new one (`keymap::listen`); Esc or a click elsewhere cancels, and a
 /// key another action has goes to that action (`keymap::set`). «По умолчанию» puts every key
 /// back; «Ок» (or Esc, when not waiting) closes it. Returns true when closed.
+/// The keys window's rows (nine to a column), its hint and its height in video px at the text
+/// size's growth `g` (Razdor's own, the owner's decision of 2026-10-31): a row's button is 28 × g
+/// high and keeps its 4 px gap, the hint and the bottom buttons (30 × g) follow the rows down.
+/// At Normal: 32 px pitch, the hint at 318, a 420 px window.
+fn keys_layout(g: f32) -> (f32, f32, f32) {
+    let row_h = 28.0 * g;
+    let pitch = row_h + 4.0;
+    let hint_y = 16.0 + 8.0 * pitch + row_h + 18.0;
+    let height = 420.0 + (hint_y + 45.0 + 30.0 * g) - (318.0 + 45.0 + 30.0);
+    (pitch, row_h, height)
+}
+
 fn keys_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
-    let _scale = window_layout::window_scale(over_map, (760.0, 420.0));
+    let g = super::display::button_grow();
+    let (pitch, row_h, keys_h) = keys_layout(g);
+    let _scale = window_layout::window_scale(over_map, (760.0, keys_h));
     let k = chrome::k();
-    let (w, h) = (760.0 * k, 420.0 * k);
-    let r = window_layout::window_rect(over_map, (760.0, 420.0)).unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, ((screen_height() - h) / 2.0).max(0.0), w, h));
+    let (w, h) = (760.0 * k, keys_h * k);
+    let r = window_layout::window_rect(over_map, (760.0, keys_h)).unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, ((screen_height() - h) / 2.0).max(0.0), w, h));
     let (inner, closed) = chrome::window(r, tr("Keys"), chrome::Skin::Marble, true);
     let waiting = keymap::listening();
     let was_waiting = waiting.is_some();
@@ -1445,9 +1495,9 @@ fn keys_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     let mut started = false;
     for (i, a) in keymap::ALL.into_iter().enumerate() {
         let x = inner.x + 20.0 * k + (i / 9) as f32 * (col_w + 20.0 * k);
-        let y = inner.y + 16.0 * k + (i % 9) as f32 * 32.0 * k;
-        text_fit(tr(a.label()), x, y + 18.0 * k, col_w - 170.0 * k, 14.0 * k, chrome::CREAM);
-        let br = Rect::new(x + col_w - 150.0 * k, y, 150.0 * k, 28.0 * k);
+        let y = inner.y + 16.0 * k + (i % 9) as f32 * pitch * k;
+        text_fit(tr(a.label()), x, y + row_h * k / 2.0 + 4.0 * k, col_w - 170.0 * k, 14.0 * k, chrome::CREAM);
+        let br = Rect::new(x + col_w - 150.0 * k, y, 150.0 * k, row_h * k);
         let shown = if waiting == Some(a) { tr("press a key…").to_string() } else { keymap::display(keymap::key(a)) };
         if row_button(br, &shown) && waiting != Some(a) {
             keymap::listen(Some(a));
@@ -1468,9 +1518,11 @@ fn keys_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
         }
     }
     let hint = tr("Click a key, then press the new one. Esc cancels; a key another action has goes to that action.");
-    text_fit(hint, inner.x + 20.0 * k, inner.y + 318.0 * k, inner.w - 40.0 * k, 12.0 * k, WHITE);
-    let defaults = Rect::new(inner.x + 20.0 * k, inner.y + inner.h - 44.0 * k, 150.0 * k, 30.0 * k);
-    let ok = Rect::new(inner.x + inner.w - 120.0 * k, inner.y + inner.h - 44.0 * k, 96.0 * k, 30.0 * k);
+    let hint_y = 16.0 + 8.0 * pitch + row_h + 18.0;
+    text_fit(hint, inner.x + 20.0 * k, inner.y + hint_y * k, inner.w - 40.0 * k, 12.0 * k, WHITE);
+    let bh = 30.0 * g * k;
+    let defaults = Rect::new(inner.x + 20.0 * k, inner.y + inner.h - 14.0 * k - bh, 150.0 * k, bh);
+    let ok = Rect::new(inner.x + inner.w - 120.0 * k, inner.y + inner.h - 14.0 * k - bh, 96.0 * k, bh);
     if settings_button(defaults, tr("Defaults")) {
         keymap::reset();
         keymap::listen(None);
@@ -1513,6 +1565,7 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     // The rows below depend on the phone's own: see `options_h`.
     let touch_row = super::touchpad::MOBILE;
     let orientation_row = cfg!(target_os = "android");
+    let g = super::display::button_grow();
     // In game on a phone, the window at its own scale (`map_window`, `window_layout::over_map_scale`); the title's is set by `options`.
     let _scale = over_map.then(|| window_layout::over_map_scale((594.0, h)));
     let (inner, closed) = if over_map { map_window(&title, 594.0, h) } else { window(&title, 594.0, h) };
@@ -1597,7 +1650,7 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     if orientation_row {
         let y = cy(9) - 4.0 * k;
         chrome::shadow_text(tr("Screen orientation"), cx, y + 18.0 * k, 14.0 * k, chrome::CREAM);
-        let r = Rect::new(inner.x + inner.w - 14.0 * k - 170.0 * k, y, 170.0 * k, 28.0 * k);
+        let r = Rect::new(inner.x + inner.w - 14.0 * k - 170.0 * k, y, 170.0 * k, 28.0 * k * g);
         if row_button(r, orientation_label(audio.orientation)) {
             audio.orientation = match audio.orientation {
                 None => Some(super::audio::Orientation::Landscape),
@@ -1611,32 +1664,34 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     // сообщений» toggles. The step is 30 px, the button 170 px wide at the right, as the
     // orientation row's.
     let last_y = if orientation_row { cy(9) - 4.0 * k } else if touch_row { cy(8) } else { cy(7) };
-    let text_y = last_y + 30.0 * k;
+    let step = option_row_step(g) * k;
+    let text_y = last_y + step;
     chrome::shadow_text(tr("Text size"), cx, text_y + 18.0 * k, 14.0 * k, chrome::CREAM);
-    let r = Rect::new(inner.x + inner.w - 14.0 * k - 170.0 * k, text_y, 170.0 * k, 28.0 * k);
+    let r = Rect::new(inner.x + inner.w - 14.0 * k - 170.0 * k, text_y, 170.0 * k, 28.0 * k * g);
     if row_button(r, super::display::text_size_label(audio.text_size)) {
         audio.text_size = super::display::next_text_size(audio.text_size);
     }
-    let large_y = text_y + 30.0 * k;
+    let large_y = text_y + step;
     chrome::shadow_text(tr("Large message windows"), cx, large_y + 18.0 * k, 14.0 * k, chrome::CREAM);
-    let r = Rect::new(inner.x + inner.w - 14.0 * k - 170.0 * k, large_y, 170.0 * k, 28.0 * k);
+    let r = Rect::new(inner.x + inner.w - 14.0 * k - 170.0 * k, large_y, 170.0 * k, 28.0 * k * g);
     if row_button(r, if audio.large_windows { tr("On") } else { tr("Off") }) {
         audio.large_windows = !audio.large_windows;
     }
     // «Обновить игру из архива…» (Razdor's, a row of its own under the large windows): the
     // button, or why it is not offered (`ui::game_import`). Over a map it is only said.
-    let import_y = large_y + 30.0 * k;
+    let import_y = large_y + step;
     super::game_import::settings_row(Rect::new(inner.x + 14.0 * k, import_y, inner.w - 28.0 * k, 28.0 * k), over_map);
     // Razdor's own settings, in a window of their own.
-    let button_y = outer.y + (h - 42.0) * k;
-    let xr = Rect::new(inner.x + 14.0 * k, button_y, 120.0 * k, 32.0 * k);
+    let bh = 32.0 * g;
+    let button_y = outer.y + (h - 10.0 - bh) * k;
+    let xr = Rect::new(inner.x + 14.0 * k, button_y, 120.0 * k * g, bh * k);
     if row_button(xr, tr("Advanced…")) {
         ADVANCED.with(|a| a.set(true));
         return false;
     }
     // «Принять» keeps what was changed, «Отмена» (the close box and Esc too) puts it back.
-    let cancel = Rect::new(inner.x + inner.w - 14.0 * k - 89.0 * k, button_y, 89.0 * k, 32.0 * k);
-    let apply = Rect::new(cancel.x - 8.0 * k - 89.0 * k, cancel.y, 89.0 * k, 32.0 * k);
+    let cancel = Rect::new(inner.x + inner.w - 14.0 * k - 89.0 * k * g, button_y, 89.0 * k * g, bh * k);
+    let apply = Rect::new(cancel.x - 8.0 * k - 89.0 * k * g, cancel.y, 89.0 * k * g, bh * k);
     let (apply_label, cancel_label) = (own("Buttons", "Apply", n_("Apply")), own("Buttons", "Cancel", n_("Cancel")));
     // Both act when the button is let go over it (PR #5's buttons).
     let apply_pressed = settings_button(apply, &apply_label);

@@ -238,8 +238,9 @@ pub fn frame(
     let enemy: Vec<bool> = book.iter().map(magic::targets_enemy).collect();
     let gap = 8.0 * k;
     // The bottom row (the filter button, and with more than one page the arrows and "N / M")
-    // always leaves its 41 px under the grid, above the message line.
-    let grid = Rect::new(inner.x, inner.y, inner.w, inner.h - 41.0 * k);
+    // always leaves its 41 px under the grid, above the message line; its buttons grow with the
+    // text size (`button_grow`, the owner's decision of 2026-10-31), and the grid gives them room.
+    let grid = Rect::new(inner.x, inner.y, inner.w, inner.h - 23.0 * k - bottom_row_h(k));
     // The page's grid: 3 × 5 cells, or upright 2 columns and as many rows as the height keeps tall.
     let (cols, rows) = if upright.is_some() { (UPRIGHT_COLS, upright_rows(grid.h / k)) } else { (COLS, ROWS) };
     let per_page = cols * rows;
@@ -354,6 +355,12 @@ pub fn frame(
     next.or(bar_pick)
 }
 
+/// The height of the bottom row's buttons: 18 px at Normal, grown with the text size (`button_grow`,
+/// the owner's decision of 2026-10-31).
+fn bottom_row_h(k: f32) -> f32 {
+    18.0 * k * super::display::button_grow()
+}
+
 /// The bottom row under the grid: the filter button at its left end (Razdor's choice, the
 /// owner's 2026-10-22), and with `pages` > 1 the two arrows at the right and "N / M" between
 /// them. The arrows, the wheel over the window, PageUp/PageDown and Left/Right turn `page` (the
@@ -361,8 +368,9 @@ pub fn frame(
 /// filter changed, so the caller starts its first page.
 fn bottom_row(r: Rect, inner: Rect, gap: f32, k: f32, pages: usize, page: &mut usize, filter: &mut BookFilter) -> bool {
     use super::chrome;
-    let row_h = 18.0 * k;
-    let row_y = r.y + r.h - 44.0 * k;
+    let row_h = bottom_row_h(k);
+    // The row's bottom edge stays 26 px above the window's bottom (at Normal: 44 px from it).
+    let row_y = r.y + r.h - 26.0 * k - row_h;
     let fw = 150.0 * k;
     let mut changed = false;
     if button(inner.x + gap, row_y, fw, row_h, filter.label(), true) {

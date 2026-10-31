@@ -186,7 +186,7 @@ pub fn search_button(key: &str, query: &mut String, r: Rect, shortcuts: &[KeyCod
     let marked = sort != PackSort::Shown;
     let (mid, size_max) = if marked { (0.4, 0.32) } else { (0.5, 0.5) };
     if active || !query.is_empty() {
-        let size = (r.h * size_max).round().min(16.0 * k);
+        let size = (r.h * size_max).round().min(16.0 * k * super::display::button_grow());
         let ty = r.y + mid * r.h + size * 0.36;
         let mut ed = focus_edit(key);
         let look = LineLook { size, color: chrome::CREAM, centred: false, shadow: false };
@@ -197,7 +197,7 @@ pub fn search_button(key: &str, query: &mut String, r: Rect, shortcuts: &[KeyCod
         // cell is narrow.
         let label = tr("Search");
         super::typography::Role::Button.with(|| {
-            let size = fit_size(label, r.w - 6.0 * k, (r.h * size_max).round().min(16.0 * k));
+            let size = fit_size(label, r.w - 6.0 * k, (r.h * size_max).round().min(16.0 * k * super::display::button_grow()));
             let d = measure(label, size);
             let x = r.x + (r.w - d.width) / 2.0;
             let y = r.y + mid * r.h + size * 0.36;
@@ -208,7 +208,7 @@ pub fn search_button(key: &str, query: &mut String, r: Rect, shortcuts: &[KeyCod
     if marked {
         // The body face: the smallest of the texts (the sheets fix a face's size).
         super::typography::Role::Hint.with(|| {
-            let size = fit_size(sort_short_label(sort), r.w - 6.0 * k, 10.0 * k);
+            let size = fit_size(sort_short_label(sort), r.w - 6.0 * k, 10.0 * k * super::display::button_grow());
             let s = ellipsize(sort_short_label(sort), r.w - 6.0 * k, size);
             let d = measure(&s, size);
             text(&s, r.x + (r.w - d.width) / 2.0, r.y + 0.92 * r.h, size, chrome::CREAM);
