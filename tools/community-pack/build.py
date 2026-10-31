@@ -588,6 +588,29 @@ def thread_url(tid):
     return f"https://discord.com/channels/{GUILD}/{tid}"
 
 
+# A rating is the reactions on a forum thread's first post: 👍 and its skin tones count up, 👎 and its
+# skin tones count down; every other emoji (and every custom emoji, `name:id`) is ignored.
+THUMB_UP = "\U0001F44D"
+THUMB_DOWN = "\U0001F44E"
+SKIN_TONES = [chr(c) for c in range(0x1F3FB, 0x1F400)]  # the five Fitzpatrick modifiers
+UP_EMOJI = {THUMB_UP} | {THUMB_UP + t for t in SKIN_TONES}
+DOWN_EMOJI = {THUMB_DOWN} | {THUMB_DOWN + t for t in SKIN_TONES}
+
+
+def rating_of(counts):
+    """{"up": U, "down": D} from one thread's reactions ({emoji key: count})."""
+    return {"up": sum(int(n) for k, n in counts.items() if k in UP_EMOJI),
+            "down": sum(int(n) for k, n in counts.items() if k in DOWN_EMOJI)}
+
+
+def load_reactions(path):
+    """thread id -> {emoji key: count}, or None (with a note) when the file is missing: no ratings then."""
+    if not os.path.isfile(path):
+        print(f"note: no reactions file at {path}: no entry gets a rating")
+        return None
+    return load_json(path)
+
+
 # ---------------------------------------------------------------- threads
 
 def load_threads(src):
@@ -709,6 +732,8 @@ def make_entry(eid, kind, meta, version, languages, requires, status, note, file
         "base": base,
         "files": files,
     }
+    if meta.get("rating") is not None:
+        entry["rating"] = meta["rating"]
     if preview:
         entry["preview"] = preview
     return entry
@@ -790,8 +815,9 @@ def archive_path(adir, row):
 class Pack:
     """The catalog being built: its entries, asset store, skip, rename and note lists."""
 
-    def __init__(self, src, archive, base_dir, out, work, extra=None, fixes=None):
+    def __init__(self, src, archive, base_dir, out, work, extra=None, fixes=None, reactions=None):
         self.src = src
+        self.reactions = reactions  # thread id -> {emoji key: count}, or None: no ratings (see load_reactions)
         self.archive = archive
         self.base_dir = base_dir
         self.out = out
@@ -887,6 +913,7 @@ class Pack:
             "added": created_date(t),
             "source_url": thread_url(t["id"]),
             "image": first_image(t),
+            "rating": None if self.reactions is None else rating_of(self.reactions.get(str(t["id"]), {})),
         }
 
     # mods
@@ -1253,7 +1280,13 @@ class Pack:
             counts = [sum(1 for e in self.entries if e["kind"] == kind and e["status"] == s) for s in statuses]
             lines.append(f"| {kind} | " + " | ".join(str(c) for c in counts) + f" | {sum(counts)} |")
         previews = sum(1 for e in self.entries if "preview" in e)
+        rated = [e for e in self.entries if "rating" in e]
         lines += ["", f"Entries with a preview: {previews} of {len(self.entries)}.", "",
+                  f"Entries with a rating: {len(rated)} of {len(self.entries)} (reactions on the forum thread's first post).", "",
+                  "## Top 10 by up minus down", "", "| entry | title | up | down |", "|---|---|---:|---:|"]
+        top = sorted(rated, key=lambda e: (-(e["rating"]["up"] - e["rating"]["down"]), -e["rating"]["up"], e["id"]))[:10]
+        lines += [f"| `{e['id']}` | {e['title']['ru']} | {e['rating']['up']} | {e['rating']['down']} |" for e in top] or ["None."]
+        lines += ["",
                   f"Assets: {len(sizes)} files, {total} bytes ({total / 1e6:.1f} MB).", "",
                   "## Biggest assets", "", "| bytes | file | used by |", "|---:|---|---|"]
         for name in sorted(sizes, key=lambda n: (-sizes[n], n))[:15]:
@@ -1306,7 +1339,7 @@ def verify_folder(folder, entries):
         raise Fail("the asset list in report.md differs from the folder")
 
 
-def build(src, archive, base_dir, out, forum_maps=True, extra=None, fixes=None):
+def build(src, archive, base_dir, out, forum_maps=True, extra=None, fixes=None, reactions=None):
     """Builds the catalog in `<out>.tmp` and swaps it in for `out` only when it is complete and checked. A build
     that fails leaves `out` as it was and keeps its folder as `<out>.failed` (report.md) for reading."""
     final = os.path.abspath(out)
@@ -1316,7 +1349,9 @@ def build(src, archive, base_dir, out, forum_maps=True, extra=None, fixes=None):
     os.makedirs(tmp)
     work = tempfile.mkdtemp(prefix=".work-", dir=tmp)
     try:
-        pack = Pack(src, archive, base_dir, tmp, work, extra, fixes)
+        if reactions is None:
+            reactions = os.path.join(src, "discord", "reactions.json")
+        pack = Pack(src, archive, base_dir, tmp, work, extra, fixes, load_reactions(reactions))
         pack.add_mods()
         if forum_maps:
             pack.add_forum_maps()
@@ -1757,6 +1792,17 @@ def selftest():
                 cat3 = json.load(f)
             check_selftest("build: --no-forum-maps leaves the forum maps out",
                            not any(e["id"].startswith(("campaign-", "map-")) for e in cat3["entries"]))
+    check_selftest("rating: skin tones add up, other emoji and custom emoji are ignored",
+                   rating_of({"👍": 2, "👍🏽": 3, "👎🏿": 4, "👎": 1, "🔥": 9, "🤨": 5, "YBbI:1147275885284704377": 7})
+                   == {"up": 5, "down": 5}
+                   and rating_of({}) == {"up": 0, "down": 0})
+    check_selftest("rating: a thread with no reactions is 0 and 0, an entry without a thread has no rating key",
+                   make_entry("x", "map", {"title": "t", "author": "", "description": "", "source_url": "",
+                                           "added": "", "rating": {"up": 0, "down": 0}},
+                              "", [], [], "full", {}, [])["rating"] == {"up": 0, "down": 0}
+                   and "rating" not in make_entry("y", "map", {"title": "t", "author": "", "description": "",
+                                                               "source_url": "", "added": "", "image": None},
+                                                  "", [], [], "full", {}, []))
     check_sound_packages()
     print("selftest: all checks passed")
     return 0
@@ -1775,6 +1821,9 @@ def main(argv=None):
     ap.add_argument("--fixes", metavar="JSON",
                     help="campaign chain fixes by map thread id: add (a chapter under the name its next-map names), "
                          "drop (chapter files), break (the campaign ends at its last chapter)")
+    ap.add_argument("--reactions", metavar="JSON",
+                    help="the reactions on the forum threads' first posts (default: <src>/discord/reactions.json; "
+                         "without the file no entry gets a rating)")
     ap.add_argument("--selftest", action="store_true", help="run the offline checks and exit")
     a = ap.parse_args(argv)
     fixes = {}
@@ -1793,7 +1842,8 @@ def main(argv=None):
     if missing:
         ap.error("missing " + ", ".join("--" + m.replace("_", "-") for m in missing))
     try:
-        pack = build(a.src, a.archive_maps, a.base, a.out, forum_maps=not a.no_forum_maps, extra=extra, fixes=fixes)
+        pack = build(a.src, a.archive_maps, a.base, a.out, forum_maps=not a.no_forum_maps, extra=extra, fixes=fixes,
+                     reactions=a.reactions)
         saved = sum(s for _, s in pack.sound_log.values())
         print(f"sounds: {sum(n for n, _ in pack.sound_log.values())} files of {len(pack.sound_log)} mods packed as "
               f"Ogg Vorbis, {saved} bytes saved")

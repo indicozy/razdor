@@ -30,6 +30,12 @@ repo and the output holds game content, so it lives only in the scratch folder.
   map that no forum entry and no Community Update map already covers (dedupe by sha256).
 - **Previews**: the first image of the first post, as a PNG at most 480x270 (ImageMagick
   `magick` or `convert`, else `ffmpeg`). Without one of them, entries have no preview.
+- **Ratings**: an entry made from a forum thread (a mod, a forum map, a campaign) gets
+  `"rating": {"up": U, "down": D}` from the reactions on the thread's first post. U is the count of
+  👍 and its skin-tone variants (👍🏻 👍🏼 👍🏽 👍🏾 👍🏿), D the same for 👎; every other emoji and
+  every custom emoji is ignored. A thread with no 👍 or 👎 gets `{"up": 0, "down": 0}`. An entry
+  without a thread (archive maps, mods with no thread) has no `rating` key. Without the reactions
+  file no entry has a rating. `report.md` counts the rated entries and lists the top 10 by U minus D.
 
 Ids: a mod is its slug; a forum map `map-<thread>`, a campaign `campaign-<thread>`, an archive
 map `arc-<sha256 first 16>`. Asset names: `<sha256 first 16 hex>.<ext>`, so the same content
@@ -47,6 +53,9 @@ Under `--src` (the scratch `community-pack` folder):
 - `maps/test.tsv`: read by header name: `thread_id`, `file_name`, `sha256`, `slug` (the mod
   tested on), `result` (`ok`, `FAIL <reason>` or `hang`). Other columns are ignored.
 - `maps/by_mod.tsv`: columns `thread_id`, `mod_slug`.
+- `discord/reactions.json` (or `--reactions JSON`): `{thread_id: {emoji key: count}}`, the reactions
+  on each thread's first post. The emoji key is the unicode emoji, or `name:id` for a custom emoji.
+  A missing file is a note on the console and gives no ratings.
 
 Map names are kept as they are (campaign chapters link to each other by file name). A name
 the hub cannot store (see the rules below) or one another map already uses is refused: that
@@ -109,8 +118,10 @@ nice -n 19 taskset -c 8-19 python3 -I tools/community-pack/build.py \
   --base "/home/indicozy/Games/Discord Times Community Update" \
   --out /mnt/ai_models/razdor-scratch/community-pack/out \
   --fixes /mnt/ai_models/razdor-scratch/community-pack/campaign-fixes.json \
+  --reactions /mnt/ai_models/razdor-scratch/community-pack/discord/reactions.json \
   --extra 1155867978567516210=/mnt/ai_models/razdor-scratch/community-pack/maps/external/erzgess/Stinger-Paramount_War.zip
 # --no-forum-maps leaves the forum maps out (for a build before maps/test.tsv exists)
+# --reactions defaults to <--src>/discord/reactions.json
 ```
 
 The run is deterministic: sorted entries, sorted zip members, fixed zip times and modes, so
