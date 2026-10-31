@@ -181,14 +181,20 @@ fn picked_unit(view: &SetupView) -> Option<usize> {
 pub fn frame(view: &mut SetupView, content: &Content, assets: &Assets, audio: &mut Settings) -> Option<Pick> {
     super::main_menu::backdrop();
     view.session.setup.fit(content);
-    let _scale = super::window_layout::title_scale((900.0, 600.0));
+    // Razdor's own (the owner's decision, 2026-10-31): the buttons grow with the text size
+    // (`button_grow`, `g`), and the window with them: 24 video px for the tabs and 60 for the battle
+    // code's and the bottom row's buttons, so the lists keep their places.
+    let g = super::display::button_grow();
+    let video_h = 600.0 + 84.0 * (g - 1.0);
+    let _scale = super::window_layout::title_scale((900.0, video_h));
     let k = chrome::k();
-    let (w, h) = (900.0 * k, 600.0 * k);
-    let r = super::window_layout::title_rect((900.0, 600.0)).unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, (super::chrome::canvas_top() + 130.0 * k).min(screen_height() - h).max(0.0), w, h));
+    let (w, h) = (900.0 * k, video_h * k);
+    let r = super::window_layout::title_rect((900.0, video_h)).unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, (super::chrome::canvas_top() + 130.0 * k).min(screen_height() - h).max(0.0), w, h));
     let (inner, closed) = chrome::window(r, tr("Custom battle"), chrome::Skin::Marble, true);
     let size = (14.0 * k).round();
     let row_h = 26.0 * k;
-    let list_y = inner.y + 40.0 * k;
+    let tab_h = 24.0 * k * g;
+    let list_y = inner.y + 40.0 * k + 24.0 * k * (g - 1.0);
     let list_h = ROWS as f32 * row_h;
 
     // This frame's typed letters: over a list they jump; the filter line, when it has the
@@ -199,10 +205,10 @@ pub fn frame(view: &mut SetupView, content: &Content, assets: &Assets, audio: &m
     let lx = inner.x + 10.0 * k;
     let lw = 270.0 * k;
     let tw = (lw - 6.0 * k) / 2.0;
-    if toggle_button(lx, inner.y + 8.0 * k, tw, 24.0 * k, tr("Unit types"), view.tab == Tab::Units) {
+    if toggle_button(lx, inner.y + 8.0 * k, tw, tab_h, tr("Unit types"), view.tab == Tab::Units) {
         view.tab = Tab::Units;
     }
-    if toggle_button(lx + tw + 6.0 * k, inner.y + 8.0 * k, tw, 24.0 * k, tr("Items"), view.tab == Tab::Items) {
+    if toggle_button(lx + tw + 6.0 * k, inner.y + 8.0 * k, tw, tab_h, tr("Items"), view.tab == Tab::Items) {
         view.tab = Tab::Items;
     }
     let left = Rect::new(lx, list_y, lw, list_h);
@@ -223,8 +229,9 @@ pub fn frame(view: &mut SetupView, content: &Content, assets: &Assets, audio: &m
     items_row(view, content, Rect::new(lx + lw + 12.0 * k, iy, 2.0 * aw + 12.0 * k, 52.0 * k), size);
 
     // The battle code.
-    let by = inner.y + inner.h - 40.0 * k;
-    let bh = 30.0 * k;
+    // The bottom row stays 10 px above the window's bottom, grown up from there (`button_grow`).
+    let bh = 30.0 * k * g;
+    let by = inner.y + inner.h - 40.0 * k + (30.0 * k - bh);
     let cy = by - bh - 10.0 * k;
     let strength = super::main_menu::ai_strength(audio);
     let keys_free = !typing() && !input_blocked();
@@ -522,7 +529,8 @@ fn army_column(view: &mut SetupView, content: &Content, assets: &Assets, team: T
     }
     text_fit(&head, hr.x, hr.y + 18.0 * k, hr.w, size, if chosen { GOLD } else { CREAM });
     let control = setup.control[team.index()];
-    let cr = Rect::new(list.x + list.w * 0.57, top + 6.0 * k, list.w * 0.43, 26.0 * k);
+    // The control button grows with the text size (`button_grow`); the lists start below it.
+    let cr = Rect::new(list.x + list.w * 0.57, top + 6.0 * k, list.w * 0.43, 26.0 * k * super::display::button_grow());
     if button(cr.x, cr.y, cr.w, cr.h, control_label(control), true) {
         view.session.setup.control[team.index()] = control.other();
     }

@@ -436,6 +436,19 @@ fn book_top(sh: f32, bar: f32, h: f32, k: f32, over_map: bool) -> f32 {
 struct Book {
     win: Rect,
     k: f32,
+    /// The text size's growth (`button_grow`): the rows, their text and the buttons grow with it.
+    grow: f32,
+    /// The footer's extra height in screen px (the window's growth, see [`book_video_h`]).
+    foot: f32,
+}
+
+/// The book window's height in its video pixels at the text size `g` (Razdor's own, the owner's
+/// decision of 2026-10-31): 482 at Normal. The buttons' row grows with the text, and the window
+/// with it; the save window's «Быстрое сохранение» takes a row of its own under the others at Large
+/// and Largest (`quick_row`), since its wide label needs the room.
+fn book_video_h(g: f32, quick_row: bool) -> f32 {
+    let b = 28.0 * g;
+    if quick_row && g > 1.0 { 443.0 + b + 6.0 + b + 11.0 } else { 443.0 + b + 11.0 }
 }
 
 impl Book {
@@ -443,9 +456,12 @@ impl Book {
     const H: f32 = 482.0;
     const ROWS: usize = 12;
 
-    fn at(title: &str, over_map: bool) -> (Book, bool) {
+    fn at(title: &str, over_map: bool, quick_row: bool) -> (Book, bool) {
         let k = super::chrome::k();
-        let (w, h) = (Book::W * k, Book::H * k);
+        let grow = super::display::button_grow();
+        let video_h = book_video_h(grow, quick_row);
+        let foot = (video_h - Book::H) * k;
+        let (w, h) = (Book::W * k, video_h * k);
         // Over the menu the video's window stands low (y 190 of 720), clear of the logo; over
         // the map the original centres it over the view above the bottom bar, as its other
         // map windows (its in-game load and save at y 104 of 768).
@@ -454,13 +470,21 @@ impl Book {
         // (`window_layout::title_rect`), and the window over the map the width between the inset and
         // the bar (`window_layout::over_map_rect`; sideways, the title's fit above the bar); the old placements (the
         // video's y 190 on the title, the view's centre over the map) are the fallback.
-        let win = super::window_layout::window_rect(over_map, (Book::W, Book::H)).unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, y, w, h));
+        let win = super::window_layout::window_rect(over_map, (Book::W, video_h)).unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, y, w, h));
         // Above the on-screen keyboard while its name field is typed in (`window_layout::keyboard_lifted`).
-        let win = super::window_layout::keyboard_lifted(win, Book { win, k }.row_rect(0));
+        let win = super::window_layout::keyboard_lifted(win, Book { win, k, grow, foot }.row_rect(0));
         let (_, closed) = super::chrome::window(win, title, super::chrome::Skin::Marble, true);
-        // The 634×516 window with its inner frames (ae2520, 0x48d710 from 4dc10e).
-        super::chrome::window_inner_frames(win, super::chrome::opx());
-        (Book { win, k }, closed)
+        // The 634×516 window with its inner frames (ae2520, 0x48d710 from 4dc10e); the footer's growth
+        // is the window's, and the frames keep their place above the buttons.
+        super::chrome::window_inner_frames_footed(win, super::chrome::opx(), 0.0, foot);
+        (Book { win, k, grow, foot }, closed)
+    }
+
+    /// The rows the list shows: 12 at Normal; at Large and Largest the rows are taller, so the page
+    /// shows as many as its 350 units take (Razdor's own, see [`book_video_h`]).
+    fn shown(&self) -> usize {
+        let fit = ((410.0 - 64.0 - 27.0 * self.grow) / (29.0 * self.grow)).floor().max(0.0) as usize + 1;
+        fit.min(Book::ROWS)
     }
 
     /// A point of the window in video pixels.
@@ -491,31 +515,35 @@ impl Book {
     }
 
     fn row_rect(&self, i: usize) -> Rect {
-        self.rect(17.0, 64.0 + i as f32 * 29.0, 560.0, 27.0)
+        // Razdor's own: the rows grow with the text size (`button_grow`), their pitch too.
+        self.rect(17.0, 64.0 + i as f32 * 29.0 * self.grow, 560.0, 27.0 * self.grow)
     }
 
     /// The rows from `scroll` on; returns the row clicked, the delete icon clicked and the pin
     /// icon clicked (`deletable`: the selected row has both icons).
     fn rows(&self, rows: &[Row], selected: Option<usize>, scroll: &mut usize, deletable: bool) -> (Option<usize>, Option<usize>, Option<usize>) {
         let k = self.k;
+        let shown = self.shown();
+        let grow = self.grow;
         // The rows and the scrollbar right of them.
         let list = self.rect(17.0, 60.0, 574.0, 350.0);
         swipe_rows(list, 29.0 * k);
         if list.contains(crate::ui::widgets::pointer().into()) && !input_blocked() {
             let wh = wheel();
-            if wh < 0.0 && *scroll + Book::ROWS < rows.len() {
+            if wh < 0.0 && *scroll + shown < rows.len() {
                 *scroll += 1;
             } else if wh > 0.0 && *scroll > 0 {
                 *scroll -= 1;
             }
         }
         // Razdor's scrollbar right of the page, when the rows do not all fit.
-        scrollbar(self.rect(579.0, 60.0, 12.0, 350.0), scroll, Book::ROWS, rows.len());
+        scrollbar(self.rect(579.0, 60.0, 12.0, 350.0), scroll, shown, rows.len());
         let (mut picked, mut delete, mut pin) = (None, None, None);
-        for (i, row) in rows.iter().enumerate().skip(*scroll).take(Book::ROWS) {
+        for (i, row) in rows.iter().enumerate().skip(*scroll).take(shown) {
             let r = self.row_rect(i - *scroll);
             let hover = !input_blocked() && r.contains(crate::ui::widgets::pointer().into());
-            let sign = 22.0 * k;
+            // The signs grow with the row (`button_grow`).
+            let sign = 22.0 * k * self.grow;
             let row_hit = if deletable && selected == Some(i) {
                 Rect::new(r.x, r.y, r.w - 2.0 * sign - 10.0 * k, r.h)
             } else {
@@ -559,7 +587,7 @@ impl Book {
                 draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.1, 0.15, 0.45, 0.35));
             }
             if row.pinned && !(deletable && selected == Some(i)) {
-                let sign = 18.0 * k;
+                let sign = 18.0 * k * self.grow;
                 draw_pin(Rect::new(r.x + 6.0 * k, r.y + (r.h - sign) / 2.0, sign, sign), true, false);
             }
             let lh = r.h;
@@ -568,8 +596,14 @@ impl Book {
             // sign (its right edge at 43): 2 × (157 − 47).
             let lit = |c: [u8; 3]| dim(row_ink(c, selected == Some(i)));
             let name_color = lit(if row.placeholder { PLACEHOLDER_INK } else { NAME_INK });
+            // Razdor's own: the row's text grows with the row (`button_grow`), each kept at its
+            // Normal size where the grown one does not fit.
             super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
-                let size = fit_size(&row.name, NAME_ROOM * k, 16.0 * k);
+                let name_normal = fit_size(&row.name, NAME_ROOM * k, 16.0 * k);
+                let name_grown = super::new_game::row_text_size(name_normal, grow);
+                let name_is_grown = name_grown > name_normal;
+                super::dt_font::legacy_metrics_if(name_is_grown, || {
+                let size = if name_is_grown { name_grown } else { name_normal };
                 let shown = match row.caret {
                     Some(at) => caret_window(&row.name, at, NAME_ROOM * k, |t| measure(t, size).width),
                     None => ellipsize(&row.name, NAME_ROOM * k, size),
@@ -582,13 +616,19 @@ impl Book {
                     draw_rectangle(x0 + a, y - size * 0.82, b - a, size * 1.05, SELECTION);
                 }
                 super::chrome::shadow_centered(&shown, cx, y, size, name_color);
+                });
             });
             let cx = self.p(437.0, 0.0).x;
+            // The scenario's and the time's lines grow with the row too (their own Normal of 11 px).
             super::dt_font::with_face(super::dt_font::Face::Bold, || {
-                super::chrome::shadow_centered(&ellipsize(&row.scenario, 250.0 * k, 11.0 * k), cx, r.y + lh * 0.42, 11.0 * k, lit(SCENARIO_INK));
+                let normal = 11.0 * k;
+                let size = super::new_game::row_text_size(normal, grow);
+                super::dt_font::legacy_metrics_if(size > normal, || super::chrome::shadow_centered(&ellipsize(&row.scenario, 250.0 * k, size), cx, r.y + lh * 0.42, size, lit(SCENARIO_INK)));
             });
             super::dt_font::with_face(super::dt_font::Face::Body, || {
-                super::chrome::shadow_centered(&ellipsize(&row.time, 250.0 * k, 11.0 * k), cx, r.y + lh * 0.9, 11.0 * k, lit(TIME_INK));
+                let normal = 11.0 * k;
+                let size = super::new_game::row_text_size(normal, grow);
+                super::dt_font::legacy_metrics_if(size > normal, || super::chrome::shadow_centered(&ellipsize(&row.time, 250.0 * k, size), cx, r.y + lh * 0.9, size, lit(TIME_INK)));
             });
             // Keep the play mark above long save names and the selected row highlight.
             if selected == Some(i) {
@@ -631,9 +671,11 @@ impl Book {
             super::chrome::surface(r, super::chrome::Skin::Paper);
         }
         super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
-            let size = 15.0 * k;
+            // Razdor's own: the caption grows with the text size (`button_grow`), the tab's art does not.
+            let g = super::display::button_grow();
+            let size = super::display::grown_text(15.0 * k, g);
             // The right end is a torn tail; centre the caption over the solid spine.
-            super::chrome::shadow_centered(label, r.x + r.w * 0.4, r.y + r.h * 0.55, size, WHITE);
+            super::dt_font::legacy_metrics_if(g > 1.0, || super::chrome::shadow_centered(label, r.x + r.w * 0.4, r.y + r.h * 0.55, size, WHITE));
         });
         pressed
     }
@@ -642,14 +684,15 @@ impl Book {
     /// right of the tabs, under the book).
     fn tab_line(&self) {
         // The window's line over the buttons (0x48d710: (2, h − 56) to (w − 2, h − 54)),
-        // drawn again over the hanging tabs.
+        // drawn again over the hanging tabs; the footer's growth is below it.
         let px = super::chrome::opx();
         let w = self.win;
-        super::chrome::steel_frame(Rect::new(w.x + 2.0 * px, w.bottom() - 56.0 * px, w.w - 4.0 * px, 2.0 * px), px, 2);
+        super::chrome::steel_frame(Rect::new(w.x + 2.0 * px, w.bottom() - 56.0 * px - self.foot, w.w - 4.0 * px, 2.0 * px), px, 2);
     }
 
+    /// A button of the bottom row (28 high at Normal, grown with the text size).
     fn button(&self, x: f32, w: f32, label: &str, enabled: bool) -> bool {
-        let r = self.rect(x, 443.0, w, 28.0);
+        let r = self.rect(x, 443.0, w, 28.0 * self.grow);
         let (_, down, pressed) = super::widgets::button_state(r, enabled);
         super::chrome::marble_button(r, label, enabled, down);
         pressed
@@ -657,8 +700,8 @@ impl Book {
 
     /// A button of the save window's bottom row: drawn as [`Book::button`], but its click area is
     /// finger-sized on a phone ([`finger_hit`]).
-    fn finger_button(&self, x: f32, w: f32, label: &str, enabled: bool) -> bool {
-        let r = self.rect(x, 443.0, w, 28.0);
+    fn finger_button(&self, x: f32, y: f32, w: f32, label: &str, enabled: bool) -> bool {
+        let r = self.rect(x, y, w, 28.0 * self.grow);
         let (_, down, pressed) = super::widgets::button_state(finger_hit(r, super::display::dp_px()), enabled);
         super::chrome::marble_button(r, label, enabled, down);
         pressed
@@ -740,15 +783,22 @@ const NAME_ROOM: f32 = 220.0;
 /// The grey of the new save's placeholder name (0x4c0dd0).
 const PLACEHOLDER_INK: [u8; 3] = [150, 150, 150];
 
-/// The bottom row of the save window in its own pixels (the window is `Book::W` wide), as (x, width)
+/// The bottom row of the save window in its own pixels (the window is `Book::W` wide), as (x, y, width)
 /// of «Быстрое сохранение», «Сохранить» and «Отмена». The original's two keep their places (369 and
 /// 492); the owner's quick save (not in the original) sits 8 px left of «Сохранить», as the buttons
-/// sit 7-8 px apart. The same row on a phone: the window is scaled as a whole.
-fn save_button_row() -> [(f32, f32); 3] {
-    const SAVE: (f32, f32) = (369.0, 116.0);
-    const CANCEL: (f32, f32) = (492.0, 95.0);
-    const QUICK_W: f32 = 220.0;
-    [(SAVE.0 - 8.0 - QUICK_W, QUICK_W), SAVE, CANCEL]
+/// sit 7-8 px apart. The same row on a phone: the window is scaled as a whole. Razdor's own, at Large
+/// and Largest (`button_grow` = `g`): the buttons are `g` times as wide, from their right ends, and the
+/// quick save takes a row of its own under them at the left (`book_video_h`).
+fn save_button_row(g: f32) -> [(f32, f32, f32); 3] {
+    let (cancel_w, save_w) = (95.0 * g, 116.0 * g);
+    let cancel_x = 587.0 - cancel_w;
+    let save_x = cancel_x - 7.0 - save_w;
+    let quick_w = 220.0 * g;
+    if g > 1.0 {
+        [(17.0, 443.0 + 28.0 * g + 6.0, quick_w), (save_x, 443.0, save_w), (cancel_x, 443.0, cancel_w)]
+    } else {
+        [(save_x - 8.0 - quick_w, 443.0, quick_w), (save_x, 443.0, save_w), (cancel_x, 443.0, cancel_w)]
+    }
 }
 
 /// A button's click area: its drawn rect, on a phone (`dp` screen px per dp) at least 44 dp tall,
@@ -779,8 +829,8 @@ pub fn save_screen(game: &Game, assets: &Assets, view: &mut SaveView, quick: boo
     world_view::backdrop(game, assets);
     // The save window at its own scale on a phone (`window_layout::over_map_scale`: upright between the
     // inset and the bar, sideways as the main menu's load window).
-    let _scale = super::window_layout::over_map_scale((Book::W, Book::H));
-    let (book, closed) = Book::at(&own("SaveGame", "Title", n_("Save the game")), true);
+    let _scale = super::window_layout::over_map_scale((Book::W, book_video_h(super::display::button_grow(), true)));
+    let (book, closed) = Book::at(&own("SaveGame", "Title", n_("Save the game")), true, true);
     book.page(&own("SaveGame", "GameName", n_("Name of the saved game")), &own("SaveGame", "ScenarioName", n_("Name of the scenario")));
     // Held Backspace repeats, as in the original's edit box (0x47a624, 0x475748); the caret,
     // the selection and the clipboard are Razdor's own (`widgets::edit_keys`).
@@ -822,13 +872,13 @@ pub fn save_screen(game: &Game, assets: &Assets, view: &mut SaveView, quick: boo
         let p = book.p(22.0, 435.0);
         text(&ellipsize(w, 330.0 * book.k, 13.0 * book.k), p.x, p.y, 13.0 * book.k, RED);
     }
-    let [(quick_x, quick_w), (save_x, save_w), (cancel_x, cancel_w)] = save_button_row();
-    if book.finger_button(quick_x, quick_w, tr(n_("Quick save")), quick) {
+    let [(quick_x, quick_y, quick_w), (save_x, save_y, save_w), (cancel_x, cancel_y, cancel_w)] = save_button_row(book.grow);
+    if book.finger_button(quick_x, quick_y, quick_w, tr(n_("Quick save")), quick) {
         *message = Some(quick_save_message(game));
         return Some(Screen::WorldMap);
     }
     let ok = can_save(&view.name, dir.is_some());
-    if book.finger_button(save_x, save_w, &own("SaveGame", "Save", n_("Save")), ok) || (ok && enter) {
+    if book.finger_button(save_x, save_y, save_w, &own("SaveGame", "Save", n_("Save")), ok) || (ok && enter) {
         let dir = dir.expect("checked");
         match save::write(&dir, SaveKind::Manual, view.name.trim(), game) {
             Ok(_) => {
@@ -839,7 +889,7 @@ pub fn save_screen(game: &Game, assets: &Assets, view: &mut SaveView, quick: boo
             Err(e) => view.error = Some(razdor::trf!("Not saved: {e}.", e)),
         }
     }
-    if book.finger_button(cancel_x, cancel_w, &own("Buttons", "Cancel", n_("Cancel")), true) || closed {
+    if book.finger_button(cancel_x, cancel_y, cancel_w, &own("Buttons", "Cancel", n_("Cancel")), true) || closed {
         return Some(view.back.screen());
     }
     if key(KeyCode::Escape) {
@@ -866,8 +916,9 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     let over_map = game.is_some() && view.back != Back::Title;
     // The load window at its own scale on a phone: the title's (`window_layout::title_scale`) or the one
     // over the map (`window_layout::over_map_scale`, the same size as the title's when held sideways).
-    let _scale = super::window_layout::window_scale(over_map, (Book::W, Book::H));
-    let (book, closed) = Book::at(&own("LoadGame", "Title", n_("Load a saved game")), over_map);
+    let grow = super::display::button_grow();
+    let _scale = super::window_layout::window_scale(over_map, (Book::W, book_video_h(grow, false)));
+    let (book, closed) = Book::at(&own("LoadGame", "Title", n_("Load a saved game")), over_map, false);
     book.page(&own("LoadGame", "GameName", n_("Name of the saved game")), &own("LoadGame", "ScenarioName", n_("Name of the scenario")));
     fill_metas(&mut view.entries, &mut view.asked, &mut view.settled, view.scroll, Some(&mut view.selected));
     let rows: Vec<Row> = view.entries.iter().map(row_of).collect();
@@ -888,7 +939,7 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
         // The save stays selected where the list now puts it.
         if let Some(k) = view.entries.iter().position(|e| e.path == path) {
             view.selected = k;
-            view.scroll = k.saturating_sub(Book::ROWS - 1);
+            view.scroll = k.saturating_sub(book.shown() - 1);
         }
     }
     if let Some(k) = picked.filter(|_| !asking) {
@@ -922,15 +973,20 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
         view.refresh();
     }
     let clearable = view.entries.iter().any(|e| !e.pinned);
-    if book.button(17.0, 140.0, tr("Clear all"), clearable) && !asking {
+    // Razdor's own: the buttons grow with the text (`button_grow`): «Очистить всё» keeps its left end,
+    // «Загрузить» and «Отмена» their right ends (587 and 7 units apart, as at Normal).
+    let (cancel_w, load_w) = (95.0 * grow, 116.0 * grow);
+    let cancel_x = 587.0 - cancel_w;
+    let load_x = cancel_x - 7.0 - load_w;
+    if book.button(17.0, 140.0 * grow, tr("Clear all"), clearable) && !asking {
         view.confirm_clear = true;
         return None;
     }
     let chosen = view.entries.get(view.selected);
-    if (book.button(369.0, 116.0, &own("LoadGame", "Load", n_("Load")), chosen.is_some()) || key(KeyCode::Enter)) && !asking && chosen.is_some() {
+    if (book.button(load_x, load_w, &own("LoadGame", "Load", n_("Load")), chosen.is_some()) || key(KeyCode::Enter)) && !asking && chosen.is_some() {
         *pending = chosen.map(|e| e.path.clone());
     }
-    if (book.button(492.0, 95.0, &own("Buttons", "Cancel", n_("Cancel")), true) || closed) && !asking {
+    if (book.button(cancel_x, cancel_w, &own("Buttons", "Cancel", n_("Cancel")), true) || closed) && !asking {
         return Some(view.back.screen());
     }
     set_input_blocked(previously_blocked);
@@ -997,12 +1053,16 @@ fn load_failed_box(message: &str) -> bool {
     let lines = wrap(message, 330.0 * k, size);
     let h = (60.0 * k + lines.len() as f32 * step).max(150.0 * k);
     let w = 380.0 * k;
+    // Razdor's own: the OK grows with the text size (`button_grow`), the box with it.
+    let g = super::display::button_grow();
+    let h = h + 28.0 * k * (g - 1.0);
     let r = Rect::new((screen_width() - w) / 2.0, (screen_height() - h) / 2.0, w, h);
     let (inner, _) = super::chrome::window(r, &title, super::chrome::Skin::Marble, false);
     for (i, line) in lines.iter().enumerate() {
         super::chrome::shadow_centered(line, inner.center().x, inner.y + 24.0 * k + i as f32 * step, size, super::chrome::CREAM);
     }
-    let ok = Rect::new(inner.center().x - 45.0 * k, inner.y + inner.h - 38.0 * k, 90.0 * k, 28.0 * k);
+    let (bw, bh) = (90.0 * k * g, 28.0 * k * g);
+    let ok = Rect::new(inner.center().x - bw / 2.0, inner.y + inner.h - 38.0 * k + (28.0 * k - bh), bw, bh);
     let ok_label = own("Buttons", "Ok", n_("OK"));
     let (_, down, pressed) = super::widgets::button_state(ok, true);
     super::chrome::marble_button(ok, &ok_label, true, down);
@@ -1012,7 +1072,9 @@ fn load_failed_box(message: &str) -> bool {
 /// The original's delete confirmation: a parchment panel and two green buttons.
 fn delete_save_question(book: &Book, name: &str) -> Option<bool> {
     let k = book.k;
-    let r = Rect::new(book.win.center().x - 190.0 * k, book.win.center().y - 110.0 * k, 380.0 * k, 220.0 * k);
+    // Razdor's own: the buttons grow with the text size (`button_grow`), the box with them.
+    let g = book.grow;
+    let r = Rect::new(book.win.center().x - 190.0 * k, book.win.center().y - (110.0 + 16.0 * (g - 1.0)) * k, 380.0 * k, (220.0 + 32.0 * (g - 1.0)) * k);
     let title = own("MessageBox", "DeleteSave_Title", n_("Delete the save"));
     super::chrome::window(r, &title, super::chrome::Skin::Marble, false);
     let panel = Rect::new(r.x + 17.0 * k, r.y + 43.0 * k, r.w - 34.0 * k, 110.0 * k);
@@ -1034,7 +1096,7 @@ fn delete_save_question(book: &Book, name: &str) -> Option<bool> {
         }
     });
     super::chrome::silver_frame(Rect::new(r.x + 3.0 * k, r.y + 29.0 * k, r.w - 6.0 * k, 140.0 * k), k);
-    let yes = Rect::new(r.x + 55.0 * k, r.y + 179.0 * k, 90.0 * k, 32.0 * k);
+    let yes = Rect::new(r.x + 55.0 * k, r.y + 179.0 * k, 90.0 * k * g, 32.0 * k * g);
     let no = Rect::new(r.x + 235.0 * k, yes.y, yes.w, yes.h);
     let (yes_label, no_label) = (own("Buttons", "Yes", n_("Yes")), own("Buttons", "No", n_("No")));
     let (_, down, yes_pressed) = button_state(yes, true);
@@ -1384,7 +1446,9 @@ fn marked_question(title: &str, text: &str) -> Option<bool> {
 
 fn question_box(title: &str, text: &str, marked: bool) -> Option<bool> {
     let k = super::chrome::k();
-    let (w, h) = (380.0 * k, 150.0 * k);
+    // Razdor's own: the Yes and No grow with the text size (`button_grow`), the box with them.
+    let g = super::display::button_grow();
+    let (w, h) = (380.0 * k, (150.0 + 28.0 * (g - 1.0)) * k);
     // Centred between the safe area's sides (no insets on the desktop: the screen's centre).
     let safe = super::display::safe_area();
     let r = Rect::new(safe.left + (screen_width() - safe.left - safe.right - w) / 2.0, (screen_height() - h) / 2.0, w, h);
@@ -1402,10 +1466,10 @@ fn question_box(title: &str, text: &str, marked: bool) -> Option<bool> {
             super::chrome::shadow_centered(line, inner.center().x, inner.y + 24.0 * k + i as f32 * step, size, super::chrome::CREAM);
         }
     }
-    let bw = 90.0 * k;
-    let by = inner.y + inner.h - 38.0 * k;
-    let yes = Rect::new(inner.center().x - bw - 8.0 * k, by, bw, 28.0 * k);
-    let no = Rect::new(inner.center().x + 8.0 * k, by, bw, 28.0 * k);
+    let (bw, bh) = (90.0 * k * g, 28.0 * k * g);
+    let by = inner.y + inner.h - 38.0 * k + (28.0 * k - bh);
+    let yes = Rect::new(inner.center().x - bw - 8.0 * k, by, bw, bh);
+    let no = Rect::new(inner.center().x + 8.0 * k, by, bw, bh);
     let (yes_label, no_label) = (own("Buttons", "Yes", n_("Yes")), own("Buttons", "No", n_("No")));
     let (_, yes_down, yes_pressed) = super::widgets::button_state(yes, true);
     super::chrome::marble_button(yes, &yes_label, true, yes_down);
@@ -1588,7 +1652,7 @@ mod tests {
     /// with 8 px between the first two, in order and without overlap, all inside the window's rows.
     #[test]
     fn the_save_window_button_row_holds_three_buttons_without_overlap() {
-        let [quick, save, cancel] = save_button_row();
+        let [quick, save, cancel] = save_button_row(1.0).map(|(x, _, w)| (x, w));
         let (left, right) = (17.0, Book::W - 7.0);
         assert!(quick.0 >= left, "the quick save is inside the window's rows: {quick:?}");
         assert!(cancel.0 + cancel.1 <= right, "«Отмена» is inside the window's rows");
@@ -1606,8 +1670,8 @@ mod tests {
         let (sw, sh, top) = (1080.0, 2376.0, 66.0);
         let bar = (80.0f32 * 1.125).round();
         let (k, win) = crate::ui::window_layout::portrait_game((sw, sh), Some(2.75), top, bar, 1.125, (Book::W, Book::H)).expect("held upright");
-        let book = Book { win, k };
-        let [(quick_x, quick_w), (save_x, save_w), (cancel_x, cancel_w)] = save_button_row();
+        let book = Book { win, k, grow: 1.0, foot: 0.0 };
+        let [(quick_x, _, quick_w), (save_x, _, save_w), (cancel_x, _, cancel_w)] = save_button_row(1.0);
         for (x, w) in [(quick_x, quick_w), (save_x, save_w), (cancel_x, cancel_w)] {
             let drawn = book.rect(x, 443.0, w, 28.0);
             let hit = finger_hit(drawn, Some(2.75));
@@ -1627,9 +1691,9 @@ mod tests {
         let (sw, sh, top) = (1080.0, 2376.0, 66.0);
         let bar = (80.0f32 * 1.125).round();
         let (k, win) = crate::ui::window_layout::portrait_game((sw, sh), Some(2.75), top, bar, 1.125, (Book::W, Book::H)).expect("held upright");
-        let book = Book { win, k };
+        let book = Book { win, k, grow: 1.0, foot: 0.0 };
         // «Сохранить» (369, 116) and «Отмена» (492, 95), 28 design px high, as `Book::button` draws them.
-        let [(_, _), (save_x, save_w), (cancel_x, cancel_w)] = save_button_row();
+        let [(_, _, _), (save_x, _, save_w), (cancel_x, _, cancel_w)] = save_button_row(1.0);
         let save = book.rect(save_x, 443.0, save_w, 28.0);
         let cancel = book.rect(cancel_x, 443.0, cancel_w, 28.0);
         assert!((save.h - 28.0 * k).abs() < 1e-3, "the button is drawn at the window's scale");

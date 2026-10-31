@@ -80,6 +80,8 @@ SCREENS = [
     ("keys", "settings:РК1-Начало пути:keys", {}),
     ("help", "map:РК1-Начало пути", {"RAZDOR_SCENE_OPEN": "3:keys"}),
     ("save", "save:РК1-Начало пути", {}),
+    ("load", "load", {}),
+    ("custom-battle", "custom-battle", {}),
     ("victory", "victory:РК1-Начало пути", {}),
     ("barracks", "building:РК1-Начало пути:0:barracks", {}),
     ("store", "building:РК1-Начало пути:0:store", {}),
