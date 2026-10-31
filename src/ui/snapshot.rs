@@ -858,6 +858,23 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             if let Some(u) = std::env::var("RAZDOR_SCENE_UNIT").ok().and_then(|v| v.trim().parse::<u32>().ok()) {
                 d.picture = Some(super::dialog::Picture::Unit(razdor::rules::content::UnitId(u)));
             }
+            // The event window's reward rows, as an event's outcome gives them: `RAZDOR_SCENE_MANA=<n>`
+            // (a «Мана + n» row), `RAZDOR_SCENE_GOLD=<n>`, and the id lists `RAZDOR_SCENE_ITEMS`,
+            // `RAZDOR_SCENE_JOINED`, `RAZDOR_SCENE_LEFT` (units), `RAZDOR_SCENE_LOST` (items),
+            // `RAZDOR_SCENE_SPELLS`, comma-separated.
+            let ids = |var: &str| -> Vec<u32> { std::env::var(var).map(|v| v.split(',').filter_map(|p| p.trim().parse::<u32>().ok()).collect()).unwrap_or_default() };
+            let signed = |v: i32| if v < 0 { format!("- {}", -v) } else { format!("+ {v}") };
+            if let Some(n) = std::env::var("RAZDOR_SCENE_GOLD").ok().and_then(|v| v.trim().parse::<i32>().ok()) {
+                d.resources.push((super::dialog::Resource::Gold, format!("Деньги {}", signed(n))));
+            }
+            if let Some(n) = std::env::var("RAZDOR_SCENE_MANA").ok().and_then(|v| v.trim().parse::<i32>().ok()) {
+                d.resources.push((super::dialog::Resource::Mana, format!("Мана {}", signed(n))));
+            }
+            d.items = ids("RAZDOR_SCENE_ITEMS").into_iter().map(razdor::rules::content::ItemId).collect();
+            d.lost = ids("RAZDOR_SCENE_LOST").into_iter().map(razdor::rules::content::ItemId).collect();
+            d.joined = ids("RAZDOR_SCENE_JOINED").into_iter().map(razdor::rules::content::UnitId).collect();
+            d.left = ids("RAZDOR_SCENE_LEFT").into_iter().map(razdor::rules::content::UnitId).collect();
+            d.spells = ids("RAZDOR_SCENE_SPELLS");
             app.dialogs.push_back(d);
             Screen::WorldMap
         }

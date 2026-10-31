@@ -159,6 +159,9 @@ pub struct Dialog {
     /// A key that closes it went down while it was shown: its release presses OK (0x4cd558).
     /// A key already held as it opened does nothing (0x47f358).
     pub key_down: std::cell::Cell<bool>,
+    /// The first pixel shown of the rewards when they are taller than the room under the text
+    /// on a phone (Razdor's scrolling, see [`phone_fit`]).
+    pub rewards_scroll: std::cell::Cell<f32>,
 }
 
 impl Dialog {
@@ -189,6 +192,7 @@ impl Dialog {
             resume: false,
             scroll: std::cell::Cell::new(0),
             key_down: std::cell::Cell::new(false),
+            rewards_scroll: std::cell::Cell::new(0.0),
         }
     }
 
@@ -547,6 +551,25 @@ const EVENT_GAP: f32 = 12.0;
 /// From a row's top to its baseline.
 const EVENT_BASELINE: f32 = 13.0;
 
+/// The event text's shortest box on a phone, in lines (Razdor's, a player's report 1453: the
+/// rewards left the text two lines): a text shorter than this keeps its full height.
+const TEXT_FLOOR_LINES: f32 = 5.0;
+
+/// A phone's event window that does not fit the screen (Razdor's; the original's window grows
+/// instead, and its rewards are never cut). All in the original's pixels: `text_box` is the
+/// box its whole text needs (at most the box's cap), `floor` the box at [`TEXT_FLOOR_LINES`],
+/// `below` the rewards under it, `avail` the room left for the box and the rewards together.
+/// The box keeps its full text while the rest fits; else it gives up its text down to `floor`
+/// before the rewards are cut. Returns the box's height and the rewards' visible height, which
+/// the rewards scroll within when `below` is more.
+fn phone_fit(text_box: f32, floor: f32, below: f32, avail: f32) -> (f32, f32) {
+    if text_box + below <= avail {
+        return (text_box, below);
+    }
+    let box_h = (avail - below).max(floor).min(text_box);
+    (box_h, (avail - box_h).clamp(0.0, below))
+}
+
 fn event_frame(side: Option<(f32, f32)>, text_h: f32, below: f32, max_box: f32, w: f32) -> EventFrame {
     let side_w = side.map_or(0.0, |(pw, _)| pw + 14.0);
     let min_box = side.map_or(EVENT_MIN_BOX, |(_, ph)| ph.max(EVENT_MIN_BOX));
@@ -669,7 +692,7 @@ fn widest_text(lay: &EventLayout) -> f32 {
 /// Measures the event window `d` at the scale `o` and the text scale `t` (`display::text_o_at`,
 /// its size on its own): the text wrapped at the text scale, the rows and the frame around
 /// them, in the window `w` original px wide.
-fn event_layout(d: &Dialog, o: f32, t: f32, w: f32) -> EventLayout {
+fn event_layout(d: &Dialog, o: f32, t: f32, w: f32, fit: bool) -> EventLayout {
     let sh = screen_height();
     let size = super::dt_font::sheet_size(super::dt_font::Face::Subtitle, t);
     let line = EVENT_LINE * t;
@@ -712,8 +735,16 @@ fn event_layout(d: &Dialog, o: f32, t: f32, w: f32) -> EventLayout {
     // stay in sight.
     // The title strip's growth (`chrome::title_grow`) is part of the window's height too.
     let screen_box = (sh - chrome::bar_height() - 4.0) / o - below / o - EVENT_REST - (chrome::title_grow() + footer_grow(o)) / o;
-    let max_box = EVENT_MAX_BOX.min(screen_box);
-    let f = event_frame(side, full_h / o, below / o, max_box, w);
+    let (max_box, below_vis) = if fit {
+        // A phone: the text keeps five lines and the rewards scroll (`phone_fit`).
+        let avail = screen_box + below / o;
+        let text_box = (full_h / o + 2.0 * EVENT_PAD).min(EVENT_MAX_BOX);
+        let floor = (full_h / o).min(TEXT_FLOOR_LINES * line / o) + 2.0 * EVENT_PAD;
+        phone_fit(text_box, floor, below / o, avail)
+    } else {
+        (EVENT_MAX_BOX.min(screen_box), below / o)
+    };
+    let f = event_frame(side, full_h / o, below_vis, max_box, w);
     let shown = if full_h / o + 2.0 * EVENT_PAD <= f.box_h { total } else { (((f.box_h - 2.0 * EVENT_PAD) * o / line).floor().max(1.0) as usize).min(total) };
     EventLayout { o, t, size, line, side, room, lines, rows, total, pic_h, res_h, items_h, lost_h, spells_h, below, f, shown }
 }
@@ -776,25 +807,31 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     let mut o = plain;
     if large {
         let min_w = if phone { EVENT_MIN_W } else { EVENT_W };
-        // The smallest window: the box at its minimum, the rows under it as they are.
-        let first = event_layout(d, plain, t, EVENT_W);
-        let min_h = event_frame(first.side, 0.0, first.below / plain, EVENT_MAX_BOX, min_w).h + (chrome::title_grow() + footer_grow(plain)) / plain;
+        // The smallest window: the box at its minimum, the rows under it as they are. On a
+        // phone the rewards scroll, so the smallest window holds the text's five lines only.
+        let first = event_layout(d, plain, t, EVENT_W, phone);
+        let frame_h = if phone {
+            event_frame(first.side, TEXT_FLOOR_LINES * first.line / plain, 0.0, EVENT_MAX_BOX, min_w).h
+        } else {
+            event_frame(first.side, 0.0, first.below / plain, EVENT_MAX_BOX, min_w).h
+        };
+        let min_h = frame_h + (chrome::title_grow() + footer_grow(plain)) / plain;
         o = super::dt_font::whole_scale(super::display::popup_o(base, min_w, min_h)).min((sw - 12.0) / min_w).max(plain);
     }
     let lay = if large {
         let max_w = event_width(o, sw, phone);
-        let probe = event_layout(d, o, t, max_w);
+        let probe = event_layout(d, o, t, max_w, phone);
         let side_w = probe.side.map_or(0.0, |(pw, _)| pw + 14.0);
         let width = text_fit_width(widest_text(&probe), o, side_w, max_w);
         // The captions centred over the window must fit its frame too (never past the cap).
         let size = super::dt_font::sheet_size(super::dt_font::Face::Subtitle, t);
         let width = width.max(caption_fit_width(widest_caption(d, size), o)).min(max_w);
-        event_layout(d, o, t, width)
+        event_layout(d, o, t, width, phone)
     } else {
-        event_layout(d, o, t, EVENT_W)
+        event_layout(d, o, t, EVENT_W, false)
     };
     chrome::under_message();
-    let EventLayout { o, t, size, line, side, room, lines, rows, total, pic_h, res_h, items_h, lost_h, spells_h, f, shown, .. } = lay;
+    let EventLayout { o, t, size, line, side, room, lines, rows, total, pic_h, res_h, items_h, lost_h, spells_h, below, f, shown, .. } = lay;
     let row_h = |r: &MarkupRow| event_row_h(defeat, line, t, r);
     // The title strip's growth: the window is taller by it, and its frame and content move down.
     let grow = chrome::title_grow();
@@ -850,6 +887,32 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         ty += row_h(row);
     }
     cy += tb.h + 10.0 * o;
+    // The rewards (Razdor's, a phone): when they are taller than the room under the text
+    // (`phone_fit`), they scroll in a clipped area of that room, by the wheel, a swipe or the bar.
+    // The original's window grows instead, so its rewards never scroll (the room is their height
+    // plus 5 px there).
+    let rewards_top = cy;
+    let rewards_room = (y + h - 58.0 * o * super::display::button_grow()) - rewards_top;
+    let rewards_px = below - pic_h;
+    let rew_clip = Rect::new(x, rewards_top, w, rewards_room.max(0.0));
+    let scroll = rewards_px > rewards_room + 0.5;
+    let mut clip = None;
+    if scroll {
+        let most = rewards_px - rewards_room;
+        let mut s = d.rewards_scroll.get().clamp(0.0, most);
+        swipe_rows(rew_clip, 40.0 * o);
+        if !input_blocked() && rew_clip.contains(pointer().into()) {
+            let wh = wheel();
+            if wh != 0.0 {
+                s = (s - wh.signum() * 40.0 * o).clamp(0.0, most);
+            }
+        }
+        let bar = Rect::new(x + w - 16.0 * o, rewards_top + 6.0 * o, 12.0 * o, (rewards_room - 12.0 * o).max(0.0));
+        scrollbar_px(bar, &mut s, most, rewards_room, 40.0 * o);
+        d.rewards_scroll.set(s);
+        clip = Some(super::widgets::Clip::new(rew_clip));
+        cy = rewards_top - s;
+    }
     if !d.resources.is_empty() {
         let cols = report_label_cols(d.resource_report, super::window_layout::portrait(), d.resources.len());
         let places = report_label_grid(d.resources.len(), cols, x, w, o, cy);
@@ -925,6 +988,11 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         // In the event text's own face and size, the original's cyan (90, 231, 255).
         super::dt_font::with_original_face(super::dt_font::Face::Subtitle, || chrome::shadow_centered(n, x + w / 2.0, cy + 18.0 * o, size, Color::new(0.35, 0.9, 1.0, 1.0)));
     }
+    // A scrolled reward out of its area is not pressed or hovered; the clip ends before the buttons.
+    if scroll {
+        icons.retain(|(_, _, r)| rew_clip.contains(vec2(r.x + r.w / 2.0, r.y + r.h / 2.0)));
+    }
+    drop(clip);
     // The buttons, 95 × 36, 45 from the window's bottom; Razdor's own: they grow with the text
     // size (`button_grow`), centred in the footer, which grows with them (`footer_grow`).
     let g = super::display::button_grow();
@@ -1257,6 +1325,18 @@ mod tests {
     /// Razdor's phone table (the owner's request): how large the event text is on phones, in dp
     /// (one original px is one dp there), against the original's own size. Each device in both
     /// orientations; the window fits the screen, and its line is no smaller than before.
+    /// A phone's rewards that do not fit beside the text: the box keeps five lines and the
+    /// rewards scroll in the rest; a short text keeps its whole height; short rewards cost the
+    /// text nothing (a player's report 1453: the rewards left the text two lines).
+    #[test]
+    fn a_phone_s_text_keeps_five_lines_and_the_rewards_scroll() {
+        let (box_h, vis) = phone_fit(300.0, 127.0, 500.0, 400.0);
+        assert_eq!((box_h, vis), (127.0, 273.0), "the text gives up its box to five lines; the rewards get the rest");
+        assert_eq!(phone_fit(300.0, 127.0, 60.0, 400.0), (300.0, 60.0), "rewards that fit leave the text whole");
+        assert_eq!(phone_fit(51.0, 51.0, 500.0, 400.0), (51.0, 349.0), "a one-line text keeps its full height");
+        assert_eq!(phone_fit(300.0, 127.0, 200.0, 400.0), (200.0, 200.0), "the text gives up what the rewards need");
+    }
+
     #[test]
     fn a_phone_s_event_text_is_as_large_as_its_dp_allows() {
         use crate::ui::dt_font::whole_scale;

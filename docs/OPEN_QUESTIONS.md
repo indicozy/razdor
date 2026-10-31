@@ -8,6 +8,16 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **The event window's OK label under 12 sp on a small portrait phone** (2026-10-31, backlog 1453's
+  check). The mobile UI check measures «Ок» at 11.4 sp on the 1080×2400 phone in portrait, in the
+  victory window too (it was there before 1453's fix): the label follows the window's scale `o`
+  (the window is narrower in portrait), not the text size. The fix belongs in `dialog.rs`'s OK
+  button (its label size), with a check that no other window's button changes.
+- **Event rewards: no side-by-side packing of the unit and item rows** (2026-10-31, backlog 1453).
+  The rewards on a phone scroll when they do not fit under the text (five lines kept); the mana
+  and gold labels already sit side by side. Packing the units and items rows beside each other
+  was not done: the original stacks them (0x4a8ae8), and the scroll covers any count.
+
 - **A campaign's next-map name in quotes** (2026-10-31, the community catalog). Two community
   campaigns («Dark Hike», «Время смуты») store their next map with literal quote characters
   (`"Озеро Эленьер.final.DTm"`). Razdor matches the name as written (`next_campaign_map` in

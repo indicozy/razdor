@@ -35,6 +35,9 @@ help-battle-1280 | battle:РК1-Начало пути:0 | 1280x800 | RAZDOR_SCEN
 save-1280 | save:РК1-Начало пути | 1280x800 |
 report-1280 | report:РК1-Начало пути | 1280x800 |
 victory-1280 | victory:РК1-Начало пути | 1280x800 |
+# An event's rewards: mana, a joined unit and items, and more rows (a player's report 1453)
+event-rewards-1280 | message:РК1-Начало пути | 1280x800 | RAZDOR_SCENE_TITLE=Разговор со святым отцом;RAZDOR_SCENE_TEXT=Зайдя внутрь церкви, вы обнаружили Отца Тука, дающего наставления послушникам, которые вскоре отправятся на помощь ополчению.;RAZDOR_SCENE_UNIT=31;RAZDOR_SCENE_MANA=200;RAZDOR_SCENE_ITEMS=99,99;RAZDOR_SCENE_JOINED=31
+event-more-1280 | message:РК1-Начало пути | 1280x800 | RAZDOR_SCENE_TITLE=Разговор со святым отцом;RAZDOR_SCENE_TEXT=Зайдя внутрь церкви, вы обнаружили Отца Тука, дающего наставления послушникам, которые вскоре отправятся на помощь ополчению.;RAZDOR_SCENE_UNIT=31;RAZDOR_SCENE_MANA=200;RAZDOR_SCENE_GOLD=150;RAZDOR_SCENE_ITEMS=99,99,99,99,99,99,99,99;RAZDOR_SCENE_JOINED=31,31,31,31;RAZDOR_SCENE_LEFT=31,31;RAZDOR_SCENE_LOST=99,99,99;RAZDOR_SCENE_SPELLS=1,2
 defeat-1280 | defeat:РК1-Начало пути | 1280x800 |
 building-barracks-1280 | building:РК1-Начало пути:0:barracks | 1280x800 |
 building-garrison-1280 | building:РК1-Начало пути:0:garrison | 1280x800 |

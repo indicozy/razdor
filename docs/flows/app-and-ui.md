@@ -552,7 +552,13 @@ Building a window (`src/ui/chrome.rs`):
   screen less 12 px, 860 on a phone, 634 on the desktop), so a one-line message is narrow. With
   the large windows off the event window is the original's 634 px. A taller title strip
   (`chrome::title_grow`, the text's growth over the original's 26 px) is added to the event
-  windows' height (normal and village), and their inner frame and content move down by it. `display::dp_px` is
+  windows' height (normal and village), and their inner frame and content move down by it.
+  The rewards on a phone (backlog 1453; Razdor's, the original's window grows instead): the
+  event window fits the screen (`dialog::phone_fit`): the text box keeps its whole text while
+  the rewards fit, else it gives up its text down to five lines (`TEXT_FLOOR_LINES`, or its
+  whole text when shorter), and the rewards that still do not fit scroll in a clipped area
+  under the text (`Clip`, the wheel, the swipe and `widgets::scrollbar_px`, `Dialog::rewards_scroll`).
+  The desktop takes the old path, so its window is the original's, unchanged. `display::dp_px` is
   `RAZDOR_DP` in snapshots; `RAZDOR_SCENE_TEXT` and `RAZDOR_SCENE_TITLE` give the `message`
   scene its text. `Settings::layout_version` (`LAYOUT_VERSION`): a file saved before 1.0.2 is
   reset once on load (interface scale back to Auto, text size and large windows to the

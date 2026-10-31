@@ -70,6 +70,10 @@ MAGENTA = (255, 0, 255)
 PROFILES = [("small", 1080, 2400, 2.75), ("big", 1440, 3120, 3.5)]
 ORIENTATIONS = ("portrait", "landscape")
 # name, scene, extra env: the phone screens of `scenes.txt`, with the scene strings copied from it.
+# The event text of the rewards screens below (a made-up text: the game's own is not in git).
+EVENT_TEXT = ("Зайдя внутрь церкви, вы обнаружили Отца Тука, дающего наставления послушникам, которые вскоре "
+              "отправятся на помощь ополчению. Заметив вас, он поднялся из-за аналоя и подошёл ближе. "
+              "Дитя моё, возьми эти средства и помолись за нас. Вы поблагодарили его и приняли дар.")
 SCREENS = [
     ("title", "title", {}),
     ("options", "options", {}),
@@ -83,6 +87,9 @@ SCREENS = [
     ("load", "load", {}),
     ("custom-battle", "custom-battle", {}),
     ("victory", "victory:РК1-Начало пути", {}),
+    # An event's rewards (a player's report 1453): mana, a joined unit and items; and more rows.
+    ("event", "message:РК1-Начало пути", {"RAZDOR_SCENE_TITLE": "Разговор со святым отцом", "RAZDOR_SCENE_TEXT": EVENT_TEXT, "RAZDOR_SCENE_UNIT": "31", "RAZDOR_SCENE_MANA": "200", "RAZDOR_SCENE_ITEMS": "99,99", "RAZDOR_SCENE_JOINED": "31"}),
+    ("event-more", "message:РК1-Начало пути", {"RAZDOR_SCENE_TITLE": "Разговор со святым отцом", "RAZDOR_SCENE_TEXT": EVENT_TEXT, "RAZDOR_SCENE_UNIT": "31", "RAZDOR_SCENE_MANA": "200", "RAZDOR_SCENE_GOLD": "150", "RAZDOR_SCENE_ITEMS": "99,99,99,99,99,99,99,99", "RAZDOR_SCENE_JOINED": "31,31,31,31", "RAZDOR_SCENE_LEFT": "31,31", "RAZDOR_SCENE_LOST": "99,99,99", "RAZDOR_SCENE_SPELLS": "1,2"}),
     ("barracks", "building:РК1-Начало пути:0:barracks", {}),
     ("store", "building:РК1-Начало пути:0:store", {}),
     ("market", "building:РК3-Столица:8:market", {}),
