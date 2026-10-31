@@ -139,11 +139,19 @@ fn load_entry(m: &razdor::dt::install::MapEntry) -> Option<ScenarioEntry> {
     }
 }
 
-/// The maps installed from the hub (`razdor::hub`), after the install's in the new-game list.
-fn hub_entries() -> Vec<ScenarioEntry> {
+/// The maps installed from the hub (`razdor::hub`), after the install's in the new-game list: the
+/// ones the mod played lists (`MapGate`, `map_listed`), each once, not where the install has the
+/// same map (the same bytes).
+fn hub_entries(assets: &Assets) -> Vec<ScenarioEntry> {
     let Some(dir) = razdor::hub::local_dir() else { return Vec::new() };
     let gate = razdor::hub::MapGate::read(&dir);
-    razdor::editor::files::list_dir(&razdor::hub::maps_dir(&dir)).iter().filter(|m| gate.shows(&m.name)).filter_map(load_entry).collect()
+    let install: Vec<PathBuf> = assets.dt.iter().flat_map(|d| d.install.maps.iter()).map(|m| m.path.clone()).collect();
+    let install = razdor::hub::InstallMaps::new(&install);
+    razdor::editor::files::list_dir(&razdor::hub::maps_dir(&dir))
+        .iter()
+        .filter(|m| gate.listed(&m.name, install.has_same(&m.path)))
+        .filter_map(load_entry)
+        .collect()
 }
 
 /// The installed mods (id and title) for the new-game window's picker.
@@ -275,7 +283,7 @@ fn scenarios_of(assets: &Assets) -> Vec<ScenarioEntry> {
         .iter()
         .flat_map(|d| d.install.maps.iter())
         .filter_map(load_entry)
-        .chain(hub_entries())
+        .chain(hub_entries(assets))
         .collect()
 }
 
@@ -335,7 +343,7 @@ impl App {
         self.refresh_mods();
         let dir = razdor::hub::local_dir().map(|d| razdor::hub::maps_dir(&d));
         self.scenarios.retain(|e| dir.as_ref().is_none_or(|d| !e.path.starts_with(d)));
-        self.scenarios.extend(hub_entries());
+        self.scenarios.extend(hub_entries(&self.assets));
     }
 
     /// Reads the installed mods and the one played again (after the hub or a switch changed them).

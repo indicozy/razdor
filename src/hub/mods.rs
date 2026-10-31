@@ -111,31 +111,70 @@ fn active_install_dir_in(local: &Path, base: &Path) -> PathBuf {
     }
 }
 
-/// The maps of the hub's folder the new-game list shows. A map of an entry that needs mods
-/// shows only while those are the active mod; the install's maps are not gated.
+/// Whether a hub map is listed in the new-game list (the rule of 1445). With no mod played
+/// (`chain` empty) the base game's maps: a hub map that needs no mod. With a mod played, its
+/// `chain` (the mod and the mods it is laid over, [`layer_chain`]): the hub maps that need one of
+/// them; a map made for the base game is not the mod's. A map the install already has (the same
+/// bytes, `same_as_install`) is listed once, from the install, so it is never listed here.
+pub fn map_listed(requires: &[String], chain: &[String], same_as_install: bool) -> bool {
+    let for_this = if chain.is_empty() { requires.is_empty() } else { requires.iter().any(|r| chain.contains(r)) };
+    for_this && !same_as_install
+}
+
+/// The maps of the install, for the duplicate check of [`map_listed`]: each file's size, read
+/// once. A hub map is the install's when an install map has its size and the same bytes.
+pub struct InstallMaps {
+    files: Vec<(u64, PathBuf)>,
+}
+
+impl InstallMaps {
+    /// The install's map files (those that do not read are left out).
+    pub fn new(paths: &[PathBuf]) -> InstallMaps {
+        InstallMaps { files: paths.iter().filter_map(|p| std::fs::metadata(p).ok().map(|m| (m.len(), p.clone()))).collect() }
+    }
+
+    /// Whether an install map has the same bytes as the file `path` (the sizes first).
+    pub fn has_same(&self, path: &Path) -> bool {
+        let Ok(size) = std::fs::metadata(path).map(|m| m.len()) else { return false };
+        self.files.iter().filter(|(s, _)| *s == size).any(|(_, p)| same_bytes(p, path))
+    }
+}
+
+fn same_bytes(a: &Path, b: &Path) -> bool {
+    matches!((std::fs::read(a), std::fs::read(b)), (Ok(x), Ok(y)) if x == y)
+}
+
+/// The maps of the hub's folder the new-game list shows, by [`map_listed`]: the mod played and the
+/// mods it is laid over (`chain`), and the entries' `requires` by file name.
 pub struct MapGate {
     /// Lower-cased file name → the mods its entry needs.
     needs: BTreeMap<String, Vec<String>>,
-    active: Option<String>,
+    /// The mod played and the mods it is laid over (empty: the base game).
+    chain: Vec<String>,
 }
 
 impl MapGate {
-    /// Reads the gate from the hub folder `local`.
+    /// Reads the gate from the hub folder `local`. A played mod whose chain does not read (a
+    /// mod gone) is treated as the base game, as [`active_install_dir`] plays it.
     pub fn read(local: &Path) -> MapGate {
+        let installed = read_installed(local);
         let mut needs: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        for e in read_installed(local).entries.values().filter(|e| e.kind != Kind::Mod && !e.requires.is_empty()) {
+        for e in installed.entries.values().filter(|e| e.kind != Kind::Mod && !e.requires.is_empty()) {
             for f in &e.files {
                 if let Some(name) = f.strip_prefix("maps/") {
                     needs.entry(stem_key(name)).or_default().extend(e.requires.iter().cloned());
                 }
             }
         }
-        MapGate { needs, active: active_mod(local) }
+        let chain = active_mod(local).and_then(|id| layer_chain(&installed, &id).ok()).unwrap_or_default();
+        MapGate { needs, chain }
     }
 
-    /// Whether the map `name` (its file name, or the stem the new-game list gives) is listed.
-    pub fn shows(&self, name: &str) -> bool {
-        self.needs.get(&stem_key(name)).is_none_or(|reqs| reqs.iter().all(|r| self.active.as_deref() == Some(r.as_str())))
+    /// Whether the map `name` (its file name, or the stem the new-game list gives) is listed,
+    /// given whether it is the install's (`same_as_install`, see [`InstallMaps::has_same`]).
+    pub fn listed(&self, name: &str, same_as_install: bool) -> bool {
+        let requires = self.needs.get(&stem_key(name)).map_or(&[][..], Vec::as_slice);
+        map_listed(requires, &self.chain, same_as_install)
     }
 }
 
@@ -605,18 +644,57 @@ mod tests {
             "ford".into(),
             super::super::InstalledEntry { version: "1".into(), kind: Kind::Map, lang: String::new(), title: Text::default(), requires: vec![], files: vec!["maps/Hub_Ford.DTm".into()] },
         );
+        installed.entries.insert("evo".into(), super::super::InstalledEntry { version: "1".into(), kind: Kind::Mod, lang: String::new(), title: Text::default(), requires: vec![], files: vec![] });
         std::fs::create_dir_all(&local).unwrap();
         std::fs::write(local.join("installed.json"), serde_json::to_vec(&installed).unwrap()).unwrap();
-        let gate = MapGate::read(&local);
-        assert!(!gate.shows("Hub_Rotten.DTm"), "no mod is active");
-        assert!(!gate.shows("hub_rotten"), "the new-game list names a map by its stem, in any case");
-        assert!(gate.shows("Hub_Ford.DTm"), "a map with no requires always shows");
-        assert!(gate.shows("Install_Map.DTm"), "a map the hub did not install is not gated");
+        assert!(!MapGate::read(&local).listed("Hub_Rotten.DTm", false), "no mod is active");
+        assert!(!MapGate::read(&local).listed("hub_rotten", false), "the new-game list names a map by its stem, in any case");
+        assert!(MapGate::read(&local).listed("Hub_Ford.DTm", false), "a map for the base game shows with no mod");
+        assert!(MapGate::read(&local).listed("Install_Map.DTm", false), "a map the hub did not install is a base map");
         write_active(&local, Some("evo")).unwrap();
-        assert!(MapGate::read(&local).shows("Hub_Rotten.DTm"));
+        assert!(MapGate::read(&local).listed("Hub_Rotten.DTm", false));
+        assert!(!MapGate::read(&local).listed("Hub_Ford.DTm", false), "a mod is chosen: the base game's hub map is hidden");
         write_active(&local, Some("other")).unwrap();
-        assert!(!MapGate::read(&local).shows("Hub_Rotten.DTm"), "another mod does not show it");
+        assert!(!MapGate::read(&local).listed("Hub_Rotten.DTm", false), "another mod does not show it");
         let _ = std::fs::remove_dir_all(&local);
+    }
+
+    /// The rule of 1445, as a pure function: the base game shows the maps that need no mod; a
+    /// chosen mod shows the maps that need it or a mod it is laid over; an identical copy of an
+    /// install map is never listed twice.
+    #[test]
+    fn the_new_game_list_shows_the_base_maps_or_the_mods_maps_once() {
+        let none: &[String] = &[];
+        let evo = vec!["evolution".to_string()];
+        let builds_on = vec!["evolution".to_string(), "dt-orders".to_string()];
+        assert!(map_listed(none, none, false), "base: a base map is listed");
+        assert!(!map_listed(&evo, none, false), "base: a map that needs Evolution is hidden");
+        assert!(map_listed(&evo, &evo, false), "Evolution chosen: its own map is listed");
+        assert!(!map_listed(none, &evo, false), "Evolution chosen: a base map is hidden (the base copy of the map)");
+        assert!(!map_listed(&["other".to_string()], &evo, false), "Evolution chosen: another mod's map is hidden");
+        assert!(map_listed(&evo, &builds_on, false), "a mod built on Evolution: Evolution's map is listed");
+        assert!(!map_listed(none, none, true), "base: the hub's copy of an install map is not listed twice");
+        assert!(!map_listed(&evo, &evo, true), "Evolution chosen: an identical copy is not listed twice");
+    }
+
+    /// The duplicate check (1445): a hub map is the install's when an install map has the same
+    /// bytes; the same size with other bytes, or a file that does not read, is not.
+    #[test]
+    fn a_hub_map_with_the_install_s_bytes_is_the_same_map() {
+        let dir = temp("same-map");
+        std::fs::create_dir_all(&dir).unwrap();
+        let install = dir.join("install.DTm");
+        let copy = dir.join("hub_copy.DTm");
+        let other = dir.join("hub_other.DTm");
+        std::fs::write(&install, b"map bytes").unwrap();
+        std::fs::write(&copy, b"map bytes").unwrap();
+        std::fs::write(&other, b"map bytez").unwrap();
+        let maps = InstallMaps::new(std::slice::from_ref(&install));
+        assert!(maps.has_same(&copy), "the same bytes");
+        assert!(!maps.has_same(&other), "the same size, other bytes");
+        assert!(!maps.has_same(&dir.join("missing.DTm")), "a file that does not read is not the install's");
+        assert!(!InstallMaps::new(&[]).has_same(&copy), "no install maps: nothing is the same");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

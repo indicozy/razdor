@@ -708,9 +708,12 @@ are not in the mod's folder.
 A mod that does not build shows its reason in `App::message` and the base is played. Titles come from
 `installed.json` (`hub::installed_mods`), not from the catalog, so the picker reads no network.
 
-**Maps by mod**: `hub::MapGate` (read in `ui::hub_entries`, the hub's maps only) hides a map whose
-installed entry `requires` a mod unless that mod is the active one; maps with no `requires` always
-show, and the install's own maps are never gated.
+**Maps by mod**: `hub::MapGate` (read in `ui::hub_entries`, the hub's maps only) lists a hub map by
+`hub::map_listed` (the rule of 1445). With no mod played, the maps that need no mod. With a mod played
+(its `layer_chain`: the mod and the mods it is laid over), the maps whose `requires` name one of them;
+a map made for the base game is hidden (the install's own copy of the mod's map is listed). A hub map
+with the same bytes as an install map (`hub::InstallMaps::has_same`: sizes first, then the bytes) is
+never listed twice. The install's own maps are never gated.
 
 Leaving the window after a change re-reads the hub's maps into `App::scenarios` (`reload_hub_maps`:
 the install is read again while a mod is played, so its folder is rebuilt or the base is back), after
