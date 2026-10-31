@@ -12,7 +12,11 @@ Each run:
      platform "all"), and appends a live snapshot (approx=0).
   2. Prints a summary: the latest finished window, the current release so far,
      the Hub catalog (with its delta since the previous snapshot in the CSV),
-     and a text chart of downloads per day over the last releases.
+     a weekly view (downloads of the releases published each ISO week, with the
+     week-over-week change), a daily view of the last 14 days, and a text chart
+     of downloads per day over the last releases. The weekly and daily views
+     are the trend to read: per-release numbers are noisy while releases were
+     more frequent than daily.
 
 Backfill: when the CSV does not exist yet, a one-time reconstructed history is
 written before the live snapshot. For each razdor release that has a successor,
@@ -28,7 +32,7 @@ containing "linux", and *.tar.gz / *.tgz / *.AppImage -> linux; anything else
 -> other (listed in the output so the mapping can be checked).
 
 Usage:
-  python3 -I tools/stats/downloads.py [--csv PATH] [--no-save] [--releases N]
+  python3 -I tools/stats/downloads.py [--csv PATH] [--no-save] [--releases N] [--weeks N]
 
 The CSV defaults to $RAZDOR_STATS_CSV, else /mnt/ai_models/razdor-stats/downloads.csv.
 It is private (download counts of the owner's players): never commit it.
@@ -45,13 +49,14 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 RAZDOR = "indicozy/razdor"
 COMMUNITY = "indicozy/razdor-community"
 DEFAULT_CSV = "/mnt/ai_models/razdor-stats/downloads.csv"
 COLUMNS = ["snapshot_utc", "repo", "tag", "published_at", "platform", "downloads", "approx"]
 PLATFORM_ORDER = ["windows", "linux", "macos", "android", "ios", "other"]
+COMPACT_ORDER = ["windows", "linux", "macos", "android", "ios"]
 CATALOG_RE = re.compile(r"^catalog-\d{4}-\d{2}-\d{2}$")
 BAR_WIDTH = 40
 TREND = ("Trend, not a headcount: manual downloads count too, a retried update can count twice, "
@@ -313,8 +318,113 @@ def section_catalog(catalogs, existing):
         print(f"  since {taken}: {signed(diff)} ({change_pct(newest['total'], downloads)})")
 
 
+def empty_bucket():
+    return {"total": 0, "platforms": {}, "releases": 0}
+
+
+def bucket_by(releases, key):
+    """Sum the releases per key (a date); each bucket holds total, platforms and a release count."""
+    buckets = {}
+    for rel in releases:
+        bucket = buckets.setdefault(key(rel), empty_bucket())
+        bucket["total"] += rel["total"]
+        bucket["releases"] += 1
+        for platform, downloads in rel["platforms"].items():
+            bucket["platforms"][platform] = bucket["platforms"].get(platform, 0) + downloads
+    return buckets
+
+
+def weekly_rows(releases, now):
+    """(week start, bucket) for every ISO week from the first release to the current one, oldest first."""
+    if not releases:
+        return []
+    buckets = bucket_by(releases, lambda r: week_start(r["published"]))
+    rows, start, current = [], week_start(releases[0]["published"]), week_start(now)
+    while start <= current:
+        rows.append((start, buckets.get(start, empty_bucket())))
+        start += timedelta(days=7)
+    return rows
+
+
+def daily_rows(releases, now, days=14):
+    """(UTC date, bucket) for the last `days` UTC dates, oldest first, zero days included."""
+    buckets = bucket_by(releases, lambda r: r["published"].date())
+    today = now.date()
+    dates = [today - timedelta(days=k) for k in range(days - 1, -1, -1)]
+    return [(day, buckets.get(day, empty_bucket())) for day in dates]
+
+
+def week_start(dt):
+    """Monday of the ISO week of dt (UTC date)."""
+    return dt.date() - timedelta(days=dt.weekday())
+
+
+def compact_platforms(platforms):
+    """Downloads as win/linux/mac/android/ios, plus other when there is any."""
+    text = "/".join(f"{platforms.get(p, 0):,}" for p in COMPACT_ORDER)
+    other = platforms.get("other", 0)
+    return f"{text} +{other:,} other" if other else text
+
+
+def bar(value, top):
+    width = round(value / top * BAR_WIDTH) if top > 0 else 0
+    if value > 0 and width == 0:
+        width = 1
+    return "█" * width
+
+
+def section_weekly(releases, now, weeks):
+    print("== Downloads by week (releases published that ISO week, Monday-start, UTC) ==")
+    rows = weekly_rows(releases, now)
+    if not rows:
+        print("  no razdor release yet")
+        return
+    shown = rows[-weeks:]
+    labels = []
+    current = week_start(now)
+    for start, _ in shown:
+        label = start.isoformat()
+        if start == current:
+            label += f" (so far, {(now.date() - start).days + 1} days)"
+        labels.append(label)
+    label_width = max(len(label) for label in labels + ["week of (Monday)"])
+    compacts = [compact_platforms(bucket["platforms"]) for _, bucket in shown]
+    compact_width = max(len(text) for text in compacts + ["win/linux/mac/android/ios"])
+    top = max(bucket["total"] for _, bucket in shown)
+    print(f"  {'week of (Monday)':<{label_width}}  {'total':>9}  {'win/linux/mac/android/ios':<{compact_width}}")
+    for label, text, (_, bucket) in zip(labels, compacts, shown):
+        print(f"  {label:<{label_width}}  {bucket['total']:>9,}  {text:<{compact_width}}  "
+              f"{bar(bucket['total'], top)}")
+    # The current week is always the last row, so the complete weeks are the rest.
+    complete = rows[:-1]
+    if len(complete) < 2:
+        print("  week over week: not enough complete weeks yet")
+        return
+    (prev_start, prev), (last_start, last) = complete[-2], complete[-1]
+    diff = last["total"] - prev["total"]
+    print(f"  last complete week vs the one before (week of {last_start} vs {prev_start}): "
+          f"{signed(diff)} ({change_pct(last['total'], prev['total'])}), "
+          f"{last['total']:,} vs {prev['total']:,}")
+
+
+def section_daily(releases, now):
+    print("== Downloads by day, last 14 days (releases published that UTC day) ==")
+    rows = daily_rows(releases, now)
+    if not any(bucket["releases"] for _, bucket in rows):
+        print("  no razdor release in the last 14 days")
+        return
+    compacts = [compact_platforms(bucket["platforms"]) for _, bucket in rows]
+    compact_width = max(len(text) for text in compacts + ["win/linux/mac/android/ios"])
+    top = max(bucket["total"] for _, bucket in rows)
+    print(f"  {'day (UTC)':<10}  {'total':>9}  {'win/linux/mac/android/ios':<{compact_width}}")
+    for (day, bucket), text in zip(rows, compacts):
+        print(f"  {day.isoformat():<10}  {bucket['total']:>9,}  {text:<{compact_width}}  "
+              f"{bar(bucket['total'], top)}")
+
+
 def section_chart(releases, now, count):
-    print(f"== Downloads per day, last {min(count, len(releases))} releases (oldest -> newest) ==")
+    print(f"== Downloads per day, last {min(count, len(releases))} releases: per release "
+          f"(noisy while releases were more frequent than daily), oldest -> newest ==")
     if not releases:
         print("  no razdor release yet")
         return
@@ -359,6 +469,10 @@ def run(args):
     print()
     section_catalog(catalogs, existing)
     print()
+    section_weekly(releases, now, args.weeks)
+    print()
+    section_daily(releases, now)
+    print()
     section_chart(releases, now, args.releases)
     print()
     print(TREND)
@@ -371,9 +485,12 @@ def main(argv=None):
                         help="CSV to append to (default: $RAZDOR_STATS_CSV or %(default)s)")
     parser.add_argument("--no-save", action="store_true", help="print the summary only, write nothing")
     parser.add_argument("--releases", type=int, default=12, help="releases in the chart (default 12)")
+    parser.add_argument("--weeks", type=int, default=8, help="weeks in the weekly view (default 8)")
     args = parser.parse_args(argv)
     if args.releases < 1:
         parser.error("--releases must be at least 1")
+    if args.weeks < 1:
+        parser.error("--weeks must be at least 1")
     try:
         return run(args)
     except StatsError as e:
