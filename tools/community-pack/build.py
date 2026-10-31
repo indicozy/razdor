@@ -44,6 +44,7 @@ import subprocess
 import sys
 import tempfile
 import wave
+import unicodedata
 import zipfile
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -773,14 +774,39 @@ def file_ref(asset, name, lang=None, archive=False):
     return ref
 
 
+# Letters the game's fonts lack, read as the Latin or Cyrillic letter they imitate (decorative names such as
+# «Ꙇѵαη Ꚍɣkhøηςhʋk»): the hub would draw a box for each.
+LOOKALIKES = {"Ꙇ": "I", "ꙇ": "i", "Ꚍ": "T", "ꚍ": "t", "Ꙅ": "S", "ꙅ": "s", "Ꙋ": "Y", "ꙋ": "y", "Ꙍ": "W", "ꙍ": "w",
+              "Ꚁ": "D", "ꚁ": "d", "Ꚃ": "W", "ꚃ": "w", "Ꚅ": "Z", "ꚅ": "z", "Ꚇ": "C", "ꚇ": "c", "Ꚉ": "Z", "ꚉ": "z",
+              "Ꚋ": "T", "ꚋ": "t", "Ꚏ": "Ts", "ꚏ": "ts", "Ꚑ": "Ts", "ꚑ": "ts", "Ꚓ": "Ch", "ꚓ": "ch", "Ꚕ": "H", "ꚕ": "h"}
+
+
+def font_safe_char(c):
+    """`c` as the hub can draw it: kept when it is in the blocks the game's fonts cover (Latin with its extensions
+    and IPA, Greek, Cyrillic, general punctuation, letterlike symbols and arrows); a known lookalike otherwise; else
+    its compatibility decomposition's base letter when that is covered; else nothing."""
+    o = ord(c)
+    if o < 0x2B0 or 0x370 <= o < 0x530 or 0x1E00 <= o < 0x2200 or c in "\n\t":
+        return c
+    if c in LOOKALIKES:
+        return LOOKALIKES[c]
+    base = "".join(ch for ch in unicodedata.normalize("NFKD", c) if not unicodedata.combining(ch))
+    return base if base and all(ord(ch) < 0x2B0 or 0x370 <= ord(ch) < 0x530 for ch in base) else ""
+
+
+def font_safe(text):
+    """`text` with every letter the hub's fonts lack replaced (font_safe_char)."""
+    return "".join(font_safe_char(c) for c in text)
+
+
 def make_entry(eid, kind, meta, version, languages, requires, status, note, files, base="", preview=None):
     entry = {
         "id": eid,
         "kind": kind,
-        "title": {"ru": meta["title"], "en": ""},
-        "author": meta["author"],
+        "title": {"ru": font_safe(meta["title"]), "en": ""},
+        "author": font_safe(meta["author"]),
         "version": version,
-        "description": {"ru": meta["description"], "en": ""},
+        "description": {"ru": font_safe(meta["description"]), "en": ""},
         "languages": languages,
         "machine_translated": False,
         "requires": requires,
@@ -1753,6 +1779,8 @@ def selftest():
     check_selftest("cut: at the last sentence end within the limit",
                    cut_text("Первое. " * 400, 1500).endswith("Первое.") and len(cut_text("Первое. " * 400, 1500)) <= 1500)
     check_selftest("cut: short text unchanged", cut_text("коротко") == "коротко")
+    check_selftest("font: a decorative name reads as the letters it imitates", font_safe("Ꙇѵαη Ꚍɣkhøηςhʋk") == "Iѵαη Tɣkhøηςhʋk")
+    check_selftest("font: Cyrillic, Latin and punctuation stay", font_safe("Иван — Ivan «x»") == "Иван — Ivan «x»")
     check_selftest("author line: explicit name wins", named_author("**Автор:** Иван (<@1>)", users) == "Иван")
     check_selftest("author line: a bare mention names the member", named_author("Автор: <@1>\nСсылка", users) == users.get("1"))
     check_selftest("id: slug kept, bad ids refused",
