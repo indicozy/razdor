@@ -531,7 +531,28 @@ pub fn clicked() -> bool {
 #[track_caller]
 pub fn button_state(r: Rect, enabled: bool) -> (bool, bool, bool) {
     note_finger_obstacle(r);
-    let hit = finger_hit(r);
+    button_state_in(r, finger_hit(r), enabled)
+}
+
+/// [`button_state`] for a small mark in a row whose finger area must not reach under a scrollbar
+/// `bar` (a list's track, when it shows): the area ends at the bar's left edge ([`clip_left_of`]),
+/// so the bar's arrows and knob always win the tap.
+pub fn mark_button_state(r: Rect, bar: Option<Rect>, enabled: bool) -> (bool, bool, bool) {
+    note_finger_obstacle(r);
+    button_state_in(r, clip_left_of(finger_hit(r), bar), enabled)
+}
+
+/// The finger area `hit` of the target `r`, cut at the left edge of `bar` (no cut without a bar).
+/// Pure: a row's mark whose grown area reaches under the scrollbar keeps its part left of it.
+pub fn clip_left_of(hit: Rect, bar: Option<Rect>) -> Rect {
+    match bar {
+        Some(bar) => Rect::new(hit.x, hit.y, (bar.x - hit.x).clamp(0.0, hit.w), hit.h),
+        None => hit,
+    }
+}
+
+/// [`button_state`] with the hit area `hit` given (its finger area, or a part of it).
+fn button_state_in(r: Rect, hit: Rect, enabled: bool) -> (bool, bool, bool) {
     super::touch_probe::record("button", hit, enabled);
     let hover = enabled && !input_swallowed() && pointer_in(hit.x, hit.y, hit.w, hit.h);
     let capture = [r.x.to_bits(), r.y.to_bits(), r.w.to_bits(), r.h.to_bits()];

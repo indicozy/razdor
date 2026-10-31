@@ -639,6 +639,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
     // Razdor's scrollbar on the right when the list does not all fit (a touch screen has no
     // wheel); the rows give it room. Its track runs the view's height, inside the right corners.
     let barred = max_scroll > 0.0;
+    let bar = barred.then(|| list_track(rows, view, k));
     scrollbar_px(list_track(rows, view, k), &mut scroll, max_scroll, view.h / k, 15.0);
     SCROLL.with(|s| s.set(scroll));
     let row_w = view.w - if barred { 22.0 * k } else { 8.0 * k };
@@ -673,7 +674,8 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
         let on_star = over_list && star_r.contains(crate::ui::widgets::pointer().into());
         let (row_hover, _, _) = button_state(r, over_list && !on_star);
         let head_pressed = head.contains(pointer().into()) && clicked() && over_list && !on_star;
-        let (_, _, star_pressed) = button_state(star_r, over_list);
+        // The finger area stops at the scrollbar's left edge: its arrows and knob win the tap (1444).
+        let (_, _, star_pressed) = mark_button_state(star_r, bar, over_list);
         let f = facts_of(scenarios, g, &m);
         if f.favourite || row_hover || on_star {
             let ink = if f.favourite { STAR_GOLD } else { Color::new(0.85, 0.85, 0.85, if on_star { 0.9 } else { 0.45 }) };
@@ -1420,6 +1422,30 @@ mod tests {
         assert_eq!(row_w - 32.0, 208.0, "the name's room: the row less the icon column");
         let t1 = list_track(Rect::new(4.0, 31.0, 278.0, 329.0), one, 1.0);
         assert_eq!((t1.x, t1.w), (266.0, 12.0));
+    }
+
+    /// The favourite star's tap area (a player's report, 1444): a finger area grown to 48 dp
+    /// reaches under the scrollbar; cut at its left edge, the arrows and knob win the tap, and the
+    /// star still takes a tap on itself.
+    #[test]
+    fn the_favourite_star_s_tap_area_ends_left_of_the_scrollbar() {
+        // A barred list at k = 2 (the box at (4, 31) of 278 × 329 at 1280 × 800 scale 2, with its
+        // rows as `scenario_select` lays them).
+        let k = 2.0;
+        let rows = Rect::new(4.0, 31.0, 278.0, 329.0);
+        let view = list_view(rows, k);
+        let bar = list_track(rows, view, k);
+        let row_w = view.w - 22.0 * k;
+        let head = Rect::new(view.x + 4.0 * k, view.y + FIRST_ROW_PX * k, row_w, 30.0 * k - 2.0 * k);
+        let star = Rect::new(head.x + head.w - 22.0 * k, head.y + head.h / 2.0 - 9.0 * k, 18.0 * k, 18.0 * k);
+        let screen = Rect::new(0.0, 0.0, 1280.0 * 2.0, 800.0 * 2.0);
+        let grown = finger_hit_at(star, Some(2.0), screen, screen.h, &[]);
+        assert!(grown.right() > bar.x, "the unclipped area reaches the bar: the bug");
+        let hit = clip_left_of(grown, Some(bar));
+        assert!(hit.right() <= bar.x, "the tap area ends left of the bar");
+        assert!(hit.contains(star.center()), "the star's own tap still works");
+        assert!(!hit.contains(vec2(bar.x + 4.0 * k, star.center().y)), "a tap on the bar's track is not the star's");
+        assert_eq!(clip_left_of(grown, None), grown, "no bar: the area as grown");
     }
 
     #[test]
