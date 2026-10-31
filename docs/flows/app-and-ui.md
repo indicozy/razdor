@@ -639,7 +639,10 @@ mod still needed and removes a mod's whole folder. Each entry carries `status` (
 `broken`, `unknown`, with `status_note`) shown as the window's state line, an optional `preview` (a PNG
 no bigger than 480x270, read from its header; macroquad decodes PNG and TGA only, so no WebP), cached
 once in `<hub>/previews/<sha256>.png` and drawn at the top of the right panel (`ui/hub_view.rs`
-`ensure_preview`), and, for a mod, `base` (the base it is made for; nothing checks it). A mod file
+`ensure_preview`), and, for a mod, `base` (the base it is made for; nothing checks it). An optional `rating`
+({up, down}: the 👍/👎 on its Discord post, absent when it has none) shows in the row (`· +up / -down`) and in the
+panel («Оценка в Discord»); the list is sorted by `hub::by_rating`: rated first by score (up minus down), then by
+votes, unrated after, ties by the Russian title. A mod file
 may be an `archive` (a zip, mods only): it is downloaded to `downloads/` (streamed, at most 256 MiB),
 checked by size and SHA-256, unpacked into `files.tmp/` under the zip's own paths (a `\` counts as `/`;
 the same name checks as a mod's file; at most 2 GiB and 20 000 entries, `hub::mods::unpack_zip`), and

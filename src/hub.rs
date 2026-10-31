@@ -137,6 +137,38 @@ pub struct FileRef {
     pub archive: bool,
 }
 
+/// Likes and dislikes (👍/👎) on an entry's Discord post.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Rating {
+    pub up: u32,
+    pub down: u32,
+}
+
+impl Rating {
+    /// Likes minus dislikes.
+    pub fn score(&self) -> i64 {
+        i64::from(self.up) - i64::from(self.down)
+    }
+
+    /// All the votes.
+    pub fn votes(&self) -> u64 {
+        u64::from(self.up) + u64::from(self.down)
+    }
+}
+
+/// The order of the list: rated entries first, by score, then by votes; unrated ones after
+/// them; ties by the Russian title (case-insensitive).
+pub fn by_rating(a: &Entry, b: &Entry) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let by_title = || a.title.ru.to_lowercase().cmp(&b.title.ru.to_lowercase());
+    match (a.rating, b.rating) {
+        (Some(x), Some(y)) => y.score().cmp(&x.score()).then_with(|| y.votes().cmp(&x.votes())).then_with(by_title),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => by_title(),
+    }
+}
+
 /// An entry of the catalog.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Entry {
@@ -173,6 +205,9 @@ pub struct Entry {
     /// For a mod: the base install it is made for (e.g. "Community Update 1.2"). Nothing checks it.
     #[serde(default)]
     pub base: String,
+    /// Likes and dislikes (👍/👎) on the post it came from, when it came from one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rating: Option<Rating>,
     pub files: Vec<FileRef>,
 }
 
@@ -735,6 +770,7 @@ pub mod mock {
                 status_note: Text { ru: note.0.into(), en: note.1.into() },
                 preview: None,
                 base: String::new(),
+                rating: None,
                 files,
             });
             Ok(())
@@ -767,6 +803,7 @@ pub mod mock {
                 status_note: Text { ru: note.0.into(), en: note.1.into() },
                 preview: None,
                 base: "Community Update 1.2".into(),
+                rating: None,
                 files: vec![f],
             });
             Ok(())
@@ -931,6 +968,11 @@ pub mod mock {
             "2026-10-08",
             &[map("Hub_Isle", ("Забытый остров", "The Forgotten Isle"), ("Найдите остров.", "Find the isle."), 30, 2)],
         )?;
+        // The mock's votes: a few rated entries (two that tie on score, told apart by votes), the rest unrated.
+        let votes = [("ford-outpost", 12, 1), ("north-march", 5, 0), ("rotten-castle", 7, 3), ("merc-road", 5, 1), ("evolution-mock", 20, 2)];
+        for e in &mut o.entries {
+            e.rating = votes.iter().find(|v| v.0 == e.id).map(|&(_, up, down)| Rating { up, down });
+        }
         let catalog = Catalog { format: 1, entries: o.entries };
         let json = serde_json::to_vec_pretty(&catalog).expect("json");
         crate::editor::files::write_atomically(&dir.join(INDEX), &json)
@@ -991,6 +1033,29 @@ mod tests {
         let mut some = Installed::default();
         some.entries.insert("evolution-mock".into(), InstalledEntry { version: "9.0".into(), kind: Kind::Mod, lang: String::new(), title: Text::default(), requires: vec![], files: vec![] });
         assert_eq!(plan_install(&c, &some, "merc-road").unwrap(), ["evolution-mercs", "merc-road"]);
+    }
+
+    #[test]
+    fn entries_sort_by_rating_then_votes_then_title() {
+        use std::cmp::Ordering::{Greater, Less};
+        let (_, c) = mock_hub("sort");
+        let with = |title: &str, rating: Option<(u32, u32)>| {
+            let mut e = c.entry("ford-outpost").unwrap().clone();
+            e.title.ru = title.into();
+            e.rating = rating.map(|(up, down)| Rating { up, down });
+            e
+        };
+        // Higher score first.
+        assert_eq!(by_rating(&with("Б", Some((5, 0))), &with("А", Some((3, 0)))), Less);
+        // Equal score: more votes first, whatever the titles say.
+        assert_eq!(by_rating(&with("А", Some((2, 0))), &with("Б", Some((4, 2)))), Greater);
+        // Rated before unrated, even with a poor score.
+        assert_eq!(by_rating(&with("А", Some((0, 9))), &with("Б", None)), Less);
+        // Unrated entries share the rest by title, case-insensitively.
+        assert_eq!(by_rating(&with("abc", None), &with("ABD", None)), Less);
+        // Same score and votes: the title decides.
+        assert_eq!(by_rating(&with("Яблоко", Some((1, 1))), &with("берёза", Some((1, 1)))), Greater);
+        assert_eq!(Rating { up: 1, down: 4 }.score(), -3);
     }
 
     #[test]

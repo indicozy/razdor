@@ -192,10 +192,12 @@ fn kind_label(k: Kind) -> &'static str {
     }
 }
 
-/// The tab's entries.
+/// The tab's entries, best rated first (`hub::by_rating`).
 fn shown(c: &Catalog, tab: usize) -> Vec<&Entry> {
     let want = [None, Some(Kind::Map), Some(Kind::Campaign), Some(Kind::Mod)][tab.min(3)];
-    c.entries.iter().filter(|e| want.is_none_or(|k| e.kind == k)).collect()
+    let mut list: Vec<&Entry> = c.entries.iter().filter(|e| want.is_none_or(|k| e.kind == k)).collect();
+    list.sort_by(|a, b| hub::by_rating(a, b));
+    list
 }
 
 /// A row's state: its words and ink.
@@ -292,7 +294,10 @@ pub fn frame(view: &mut HubView) -> bool {
                 let (words, ink) = state(c, &view.installed, e);
                 let sw = if words.is_empty() { 0.0 } else { measure(&words, small).width + 8.0 * k };
                 text_fit(e.title.get(lang()), rr.x + 6.0 * k, rr.y + 15.0 * k, rr.w - sw - 12.0 * k, size, if picked { GOLD } else { CREAM });
-                let by_line = format!("{} · {}", kind_label(e.kind), e.author);
+                let mut by_line = format!("{} · {}", kind_label(e.kind), e.author);
+                if let Some(rating) = e.rating {
+                    by_line = format!("{by_line} · +{} / -{}", rating.up, rating.down);
+                }
                 text_fit(&by_line, rr.x + 6.0 * k, rr.y + 29.0 * k, rr.w - 12.0 * k, small, Color::new(0.85, 0.80, 0.68, 1.0));
                 if !words.is_empty() {
                     chrome::shadow_right(&words, rr.x + rr.w - 6.0 * k, rr.y + 15.0 * k, small, ink);
@@ -355,6 +360,10 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, r: Rect, size: f32, small
     }
     text_fit(&by_line, r.x, y, r.w, small, dim);
     y += 18.0 * k;
+    if let Some(rating) = e.rating {
+        text_fit(&trf!("Rating on Discord: +{up} / -{down}", up = rating.up, down = rating.down), r.x, y, r.w, small, dim);
+        y += 18.0 * k;
+    }
     let (words, ink) = status_line(e);
     text_fit(&words, r.x, y, r.w, small, ink);
     if e.kind == Kind::Campaign {

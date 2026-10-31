@@ -118,6 +118,7 @@ Downloading… = Загрузка…
 Hub: {place} = Хаб: {place}
 {kind} by {author}, version {version} = {kind}, автор: {author}, версия {version}
 Chapters: {n} = Глав: {n}
+Rating on Discord: +{up} / -{down} = Оценка в Discord: +{up} / -{down}
 Russian = русский
 English (machine translation) = английский (машинный перевод)
 English = английский
