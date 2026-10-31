@@ -104,7 +104,7 @@ Keys do nothing while you type text (the hero's name, a save name, the editor fi
 | Esc (in totals) | Change armies |
 
 :::tip
-Keys for the map, windows, minimap and F1 can be changed: **"Options"** → **"Advanced…"** → **"Keys…"**. Click a key, then press the new one. A key already used by another action moves to it.
+Keys for the map, windows, minimap and F1 can be changed: **"Options"** → **"Advanced…"** → **"Keys…"**. Click a key, then press the new one. A key already used by another action moves to it. On the map, the **"Change the keys…"** button at the bottom of the key list (F1) opens the same window.
 :::
 
 ## Gamepad

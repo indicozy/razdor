@@ -1104,6 +1104,8 @@ local! {
 local! {
     /// The keys window («Клавиши») is open over the advanced settings.
     static KEYS_OPEN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The F1 list's «Изменить клавиши…» was pressed (`take_keys_request` takes it).
+    static KEYS_ASKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Opens the advanced settings over the settings window (a snapshot scene).
@@ -1111,10 +1113,21 @@ pub fn open_advanced() {
     ADVANCED.with(|a| a.set(true));
 }
 
-/// Opens the keys window over the advanced settings (a snapshot scene).
+/// Opens the keys window over the advanced settings (a snapshot scene, and the F1 list's button).
 pub fn open_keys() {
     open_advanced();
     KEYS_OPEN.with(|o| o.set(true));
+}
+
+/// The F1 list (over the map) asks for the keys window: the map's frame then opens the settings
+/// over the map with the keys window on top, as the bar's gears and «Ещё…» → «Клавиши…» do.
+pub fn ask_keys() {
+    KEYS_ASKED.with(|a| a.set(true));
+}
+
+/// True once after `ask_keys`.
+pub fn take_keys_request() -> bool {
+    KEYS_ASKED.with(|a| a.replace(false))
 }
 
 /// The orientation row's value: Auto (None), Landscape or Portrait.

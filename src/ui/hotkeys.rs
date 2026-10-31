@@ -388,6 +388,12 @@ pub fn split_screen_buttons(place: Place, tiles: Vec<Tile>) -> (Vec<Tile>, Vec<T
     tiles.into_iter().partition(|t| !has_screen_button(place, t))
 }
 
+/// Whether the F1 list over `place` has the «Изменить клавиши…» button (it opens the keys window
+/// over the map). Other screens get a line that says where the keys are changed instead.
+pub fn keys_button_on(place: Place) -> bool {
+    place == Place::WorldMap
+}
+
 pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
     let (sw, sh) = (screen_width(), screen_height());
     draw_rectangle(0.0, 0.0, sw, sh, Color::new(0.0, 0.0, 0.0, 0.45));
@@ -403,6 +409,10 @@ pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
     let (grid, folded) = if phone { split_screen_buttons(place, tiles(place)) } else { (tiles(place), Vec::new()) };
     let folds = !folded.is_empty();
     let info = info_rows(place);
+    // The foot under the list: on the map a button to the keys window, elsewhere a line that says
+    // where the keys are changed. A phone's button is at least 40 dp high.
+    let button = keys_button_on(place);
+    let foot_h = if button { (34.0 * k * super::display::button_grow()).max(40.0 * k) } else { 24.0 * t };
     let cols = if sw < sh || sw < 760.0 { 2 } else { 3 };
     let (pad, gap) = (14.0 * k, 8.0 * k);
     let w = if cols == 2 { sw - 16.0 } else { (880.0 * k).min(sw - 40.0) };
@@ -435,15 +445,17 @@ pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
     let line = 24.0 * t;
     let info_h = if info.is_empty() { 0.0 } else { 30.0 * t + info.len() as f32 * line + 6.0 * k };
     let content = after + 6.0 * k + info_h;
+    // The foot (its button or line) stays in view under the scrolled body, with its gap.
+    let foot_gap = foot_h + 8.0 * k;
     // On a phone held upright, over a screen with the bottom bar, the overlay stands between the
     // top safe inset and the bar, as the game's windows do; elsewhere over the whole screen.
     let (top, bottom) = if super::window_layout::portrait() && has_bar(place) { (super::display::safe_area().top, sh - chrome::bar_height()) } else { (0.0, sh) };
-    let h = (content + 52.0 * t + 72.0 * k).min(bottom - top - 16.0);
+    let h = (content + 52.0 * t + 72.0 * k + foot_gap).min(bottom - top - 16.0);
     let (x, y) = ((sw - w) / 2.0, top + (bottom - top - h) / 2.0);
     // A phone's list has a close cross (its click area is finger-sized, `chrome::touch_hit`); it closes
     // by Esc and a tap outside, as the desktop's.
     let (inner, box_closed) = chrome::window(Rect::new(x, y, w, h), tr("Keys"), Skin::Marble, phone);
-    let body = Rect::new(inner.x, inner.y + 52.0 * t, inner.w, inner.bottom() - 40.0 * k - (inner.y + 52.0 * t));
+    let body = Rect::new(inner.x, inner.y + 52.0 * t, inner.w, inner.bottom() - 40.0 * k - foot_gap - (inner.y + 52.0 * t));
     let most = (content - body.h).max(0.0);
     let mut scroll = SCROLL.with(|s| s.get()).clamp(0.0, most);
     let (mx, my) = input::screen_pointer();
@@ -456,6 +468,7 @@ pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
     let mut on_control = over(bar);
     let mut press = None;
     let mut toggled = false;
+    let mut asked = false;
     let at = |y_body: f32| body.y + y_body - scroll;
     // One key's button at `r` (its words fitted as `fit`): a tap on it runs the key (`press`).
     let draw_tile = |tl: &Tile, fitted: &(f32, Vec<String>), r: Rect, on_control: &mut bool, press: &mut Option<KeyCode>| {
@@ -534,6 +547,24 @@ pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
                 ly += line;
             }
         }
+        // The foot, under the body: the keys window's button (over the map), or the line that says
+        // where the keys are changed.
+        let foot = Rect::new(inner.x + pad, inner.bottom() - 40.0 * k - foot_h, grid_w, foot_h);
+        if button {
+            let (_, down, pressed) = super::widgets::button_state(foot, true);
+            on_control |= over(foot);
+            chrome::marble_button(foot, "", true, down);
+            let label = tr("Change the keys…");
+            let size = 17.0 * t;
+            let lw = measure(label, size).width.min(foot.w - 16.0 * k);
+            text_fit(label, foot.center().x - lw / 2.0, foot.center().y + size * 0.35, foot.w - 16.0 * k, size, chrome::CREAM);
+            if pressed {
+                super::audio::cue(super::audio::Cue::Button);
+                asked = true;
+            }
+        } else {
+            text_fit(tr("Keys change in: Settings → Advanced… → Keys…"), inner.x + pad, foot.center().y + 6.0 * t, inner.w - 2.0 * pad, 16.0 * t, DIM);
+        }
         text_centered(tr("F1, Esc or a click closes this list"), inner.center().x, inner.bottom() - 12.0 * k, 15.0 * t, DIM);
     });
     if most > 0.0 {
@@ -544,7 +575,11 @@ pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
         SECONDARY_OPEN.with(|s| s.set(!s.get()));
     }
     let closes = !fresh && is_mouse_button_pressed(MouseButton::Left) && !on_control;
-    let done = is_key_pressed(keymap::key(Action::Help)) || esc_pressed() || closes || box_closed || press.is_some();
+    let done = is_key_pressed(keymap::key(Action::Help)) || esc_pressed() || closes || box_closed || press.is_some() || asked;
+    if asked {
+        // The keys window opens over the map (the map's frame takes the request, `main_menu::take_keys_request`).
+        super::main_menu::ask_keys();
+    }
     if let Some(key) = press {
         tap_key(key);
     }
@@ -591,6 +626,16 @@ mod tests {
         assert!(!shortcuts_allowed(Guard { dialog: true, ..in_game() }), "N is No in a question");
         assert!(typing(Place::Save, false) && typing(Place::ClassSelect, false) && typing(Place::WorldMap, true));
         assert!(!typing(Place::WorldMap, false));
+    }
+
+    /// The F1 list's «Изменить клавиши…» button is on the map only (the keys window opens over
+    /// the map); the other screens' lists say where the keys are changed instead.
+    #[test]
+    fn keys_button_only_on_the_map() {
+        assert!(keys_button_on(Place::WorldMap));
+        for place in ALL_PLACES.into_iter().filter(|p| *p != Place::WorldMap) {
+            assert!(!keys_button_on(place), "{place:?} has no keys button");
+        }
     }
 
     #[test]

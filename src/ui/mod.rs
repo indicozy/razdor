@@ -1448,6 +1448,13 @@ impl App {
             let here = next.as_ref().map_or(place, Self::place_of);
             if hotkeys::help_overlay(here, guard, std::mem::take(&mut self.help_fresh)) {
                 self.help = false;
+                // «Изменить клавиши…» (the list over the map): the settings open over the map with the
+                // keys window on top, as the bar's gears and «Ещё…» → «Клавиши…» do.
+                if main_menu::take_keys_request() {
+                    main_menu::open_keys();
+                    widgets::swallow_input();
+                    next = Some(Screen::Settings);
+                }
             }
         } else if pressed(hotkeys::Global::Help) {
             self.help = true;

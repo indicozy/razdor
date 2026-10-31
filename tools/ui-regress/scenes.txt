@@ -28,6 +28,10 @@ clash-rk3-1280 | clash:РК3-Столица | 1280x800 |
 menu-1280 | menu:РК1-Начало пути | 1280x800 |
 settings-1280 | settings:РК1-Начало пути | 1280x800 |
 settings-advanced-1280 | settings:РК1-Начало пути:advanced | 1280x800 |
+keys-1280 | settings:РК1-Начало пути:keys | 1280x800 |
+# The F1 list on the map (its «Изменить клавиши…» button) and in battle (the line that says where the keys change)
+help-map-1280 | map:РК1-Начало пути | 1280x800 | RAZDOR_SCENE_OPEN=3:keys
+help-battle-1280 | battle:РК1-Начало пути:0 | 1280x800 | RAZDOR_SCENE_OPEN=3:keys
 save-1280 | save:РК1-Начало пути | 1280x800 |
 report-1280 | report:РК1-Начало пути | 1280x800 |
 victory-1280 | victory:РК1-Начало пути | 1280x800 |
