@@ -132,7 +132,7 @@ pub enum Screen {
 
 fn load_entry(m: &razdor::dt::install::MapEntry) -> Option<ScenarioEntry> {
     match m.load() {
-        Ok(scenario) => Some(ScenarioEntry { file: m.name.clone(), path: m.path.clone(), scenario }),
+        Ok(scenario) => Some(ScenarioEntry { file: m.name.clone(), path: m.path.clone(), scenario, base_game: false }),
         Err(e) => {
             razdor::diag!("{}: {e}", m.name);
             None
@@ -141,8 +141,8 @@ fn load_entry(m: &razdor::dt::install::MapEntry) -> Option<ScenarioEntry> {
 }
 
 /// The maps installed from the hub (`razdor::hub`), after the install's in the new-game list: the
-/// ones the mod played lists (`MapGate`, `map_listed`), each once, not where the install has the
-/// same map (the same bytes).
+/// ones the list shows (`MapGate`, `map_group`: the mod played's, and with a mod played the base
+/// game's, flagged `base_game`), each once, not where the install has the same map (the same bytes).
 fn hub_entries(install: Option<&razdor::dt::install::DtInstall>) -> Vec<ScenarioEntry> {
     let Some(dir) = razdor::hub::local_dir() else { return Vec::new() };
     let gate = razdor::hub::MapGate::read(&dir);
@@ -150,8 +150,10 @@ fn hub_entries(install: Option<&razdor::dt::install::DtInstall>) -> Vec<Scenario
     let install = razdor::hub::InstallMaps::new(&install_maps);
     razdor::editor::files::list_dir(&razdor::hub::maps_dir(&dir))
         .iter()
-        .filter(|m| gate.listed(&m.name, install.has_same(&m.path)))
-        .filter_map(load_entry)
+        .filter_map(|m| {
+            let group = gate.group(&m.name, install.has_same(&m.path));
+            (group != razdor::hub::MapGroup::Hidden).then(|| load_entry(m).map(|e| ScenarioEntry { base_game: group == razdor::hub::MapGroup::Base, ..e })).flatten()
+        })
         .collect()
 }
 
@@ -235,6 +237,9 @@ pub struct ScenarioEntry {
     pub file: String,
     pub path: PathBuf,
     pub scenario: Scenario,
+    /// A hub map made for the base game, listed while a mod is played (1445b): under the new-game
+    /// list's «Карты обычной игры» group. False for every other map.
+    pub base_game: bool,
 }
 
 /// The map music's rotation as the original runs it (interface.md §13): the last pick, when

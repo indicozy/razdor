@@ -111,17 +111,39 @@ fn active_install_dir_in(local: &Path, base: &Path) -> PathBuf {
     }
 }
 
-/// Whether a hub map is listed in the new-game list (the rule of 1445). With no mod played
-/// (`chain` empty) the base game's maps: a hub map that needs no mod. With a mod played, its
-/// `chain` (the mod and the mods it is laid over, [`layer_chain`]): the hub maps that need one of
-/// them; a map made for the base game is not the mod's. A map the install already has (the same
-/// bytes, `same_as_install`) is listed once, from the install, so it is never listed here.
-pub fn map_listed(requires: &[String], chain: &[String], same_as_install: bool) -> bool {
-    let for_this = if chain.is_empty() { requires.is_empty() } else { requires.iter().any(|r| chain.contains(r)) };
-    for_this && !same_as_install
+/// Where a hub map is shown in the new-game list (the rule of 1445, 1445b).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MapGroup {
+    /// In the list's main part: with no mod played, the base game's maps (a hub map that needs
+    /// no mod); with a mod played, the maps that need it or a mod it is laid over.
+    Chosen,
+    /// With a mod played, a map made for the base game (it needs no mod): under the list's
+    /// «Карты обычной игры» group, collapsed by default (1445b).
+    Base,
+    /// Not in the list.
+    Hidden,
 }
 
-/// The maps of the install, for the duplicate check of [`map_listed`]: each file's size, read
+/// Where a hub map is shown (see [`MapGroup`]). `chain` is the played mod and the mods it is laid
+/// over ([`layer_chain`]), empty with no mod played. A map the install already has (the same
+/// bytes, `same_as_install`) is shown once, from the install, so it is [`MapGroup::Hidden`] here.
+pub fn map_group(requires: &[String], chain: &[String], same_as_install: bool) -> MapGroup {
+    if same_as_install {
+        return MapGroup::Hidden;
+    }
+    if chain.is_empty() {
+        return if requires.is_empty() { MapGroup::Chosen } else { MapGroup::Hidden };
+    }
+    if requires.iter().any(|r| chain.contains(r)) {
+        MapGroup::Chosen
+    } else if requires.is_empty() {
+        MapGroup::Base
+    } else {
+        MapGroup::Hidden
+    }
+}
+
+/// The maps of the install, for the duplicate check of [`map_group`]: each file's size, read
 /// once. A hub map is the install's when an install map has its size and the same bytes.
 pub struct InstallMaps {
     files: Vec<(u64, PathBuf)>,
@@ -144,7 +166,7 @@ fn same_bytes(a: &Path, b: &Path) -> bool {
     matches!((std::fs::read(a), std::fs::read(b)), (Ok(x), Ok(y)) if x == y)
 }
 
-/// The maps of the hub's folder the new-game list shows, by [`map_listed`]: the mod played and the
+/// The maps of the hub's folder the new-game list shows, by [`map_group`]: the mod played and the
 /// mods it is laid over (`chain`), and the entries' `requires` by file name.
 pub struct MapGate {
     /// Lower-cased file name → the mods its entry needs.
@@ -170,11 +192,11 @@ impl MapGate {
         MapGate { needs, chain }
     }
 
-    /// Whether the map `name` (its file name, or the stem the new-game list gives) is listed,
-    /// given whether it is the install's (`same_as_install`, see [`InstallMaps::has_same`]).
-    pub fn listed(&self, name: &str, same_as_install: bool) -> bool {
+    /// Where the map `name` (its file name, or the stem the new-game list gives) is shown, given
+    /// whether it is the install's (`same_as_install`, see [`InstallMaps::has_same`]).
+    pub fn group(&self, name: &str, same_as_install: bool) -> MapGroup {
         let requires = self.needs.get(&stem_key(name)).map_or(&[][..], Vec::as_slice);
-        map_listed(requires, &self.chain, same_as_install)
+        map_group(requires, &self.chain, same_as_install)
     }
 }
 
@@ -647,34 +669,37 @@ mod tests {
         installed.entries.insert("evo".into(), super::super::InstalledEntry { version: "1".into(), kind: Kind::Mod, lang: String::new(), title: Text::default(), requires: vec![], files: vec![] });
         std::fs::create_dir_all(&local).unwrap();
         std::fs::write(local.join("installed.json"), serde_json::to_vec(&installed).unwrap()).unwrap();
-        assert!(!MapGate::read(&local).listed("Hub_Rotten.DTm", false), "no mod is active");
-        assert!(!MapGate::read(&local).listed("hub_rotten", false), "the new-game list names a map by its stem, in any case");
-        assert!(MapGate::read(&local).listed("Hub_Ford.DTm", false), "a map for the base game shows with no mod");
-        assert!(MapGate::read(&local).listed("Install_Map.DTm", false), "a map the hub did not install is a base map");
+        assert!(MapGate::read(&local).group("Hub_Rotten.DTm", false) == MapGroup::Hidden, "no mod is active");
+        assert!(MapGate::read(&local).group("hub_rotten", false) == MapGroup::Hidden, "the new-game list names a map by its stem, in any case");
+        assert!(MapGate::read(&local).group("Hub_Ford.DTm", false) == MapGroup::Chosen, "a map for the base game shows with no mod");
+        assert!(MapGate::read(&local).group("Install_Map.DTm", false) == MapGroup::Chosen, "a map the hub did not install is a base map");
         write_active(&local, Some("evo")).unwrap();
-        assert!(MapGate::read(&local).listed("Hub_Rotten.DTm", false));
-        assert!(!MapGate::read(&local).listed("Hub_Ford.DTm", false), "a mod is chosen: the base game's hub map is hidden");
+        assert_eq!(MapGate::read(&local).group("Hub_Rotten.DTm", false), MapGroup::Chosen);
+        assert!(MapGate::read(&local).group("Hub_Ford.DTm", false) == MapGroup::Base, "a mod is chosen: the base game's hub map is under its group");
         write_active(&local, Some("other")).unwrap();
-        assert!(!MapGate::read(&local).listed("Hub_Rotten.DTm", false), "another mod does not show it");
+        assert!(MapGate::read(&local).group("Hub_Rotten.DTm", false) == MapGroup::Hidden, "another mod does not show it");
         let _ = std::fs::remove_dir_all(&local);
     }
 
-    /// The rule of 1445, as a pure function: the base game shows the maps that need no mod; a
-    /// chosen mod shows the maps that need it or a mod it is laid over; an identical copy of an
-    /// install map is never listed twice.
+    /// The rule of 1445 and 1445b, as a pure function: the base game shows the maps that need no
+    /// mod; a chosen mod shows the maps that need it or a mod it is laid over, and the maps made
+    /// for the base game under their own group; an identical copy of an install map is never shown
+    /// twice.
     #[test]
     fn the_new_game_list_shows_the_base_maps_or_the_mods_maps_once() {
         let none: &[String] = &[];
         let evo = vec!["evolution".to_string()];
         let builds_on = vec!["evolution".to_string(), "dt-orders".to_string()];
-        assert!(map_listed(none, none, false), "base: a base map is listed");
-        assert!(!map_listed(&evo, none, false), "base: a map that needs Evolution is hidden");
-        assert!(map_listed(&evo, &evo, false), "Evolution chosen: its own map is listed");
-        assert!(!map_listed(none, &evo, false), "Evolution chosen: a base map is hidden (the base copy of the map)");
-        assert!(!map_listed(&["other".to_string()], &evo, false), "Evolution chosen: another mod's map is hidden");
-        assert!(map_listed(&evo, &builds_on, false), "a mod built on Evolution: Evolution's map is listed");
-        assert!(!map_listed(none, none, true), "base: the hub's copy of an install map is not listed twice");
-        assert!(!map_listed(&evo, &evo, true), "Evolution chosen: an identical copy is not listed twice");
+        assert_eq!(map_group(none, none, false), MapGroup::Chosen, "base: a base map is in the list");
+        assert_eq!(map_group(&evo, none, false), MapGroup::Hidden, "base: a map that needs Evolution is hidden");
+        assert_eq!(map_group(&evo, &evo, false), MapGroup::Chosen, "Evolution chosen: its own map is in the list");
+        assert_eq!(map_group(none, &evo, false), MapGroup::Base, "Evolution chosen: a base map is under the base game's group");
+        assert_eq!(map_group(&["other".to_string()], &evo, false), MapGroup::Hidden, "Evolution chosen: another mod's map is hidden");
+        assert_eq!(map_group(&evo, &builds_on, false), MapGroup::Chosen, "a mod built on Evolution: Evolution's map is in the list");
+        assert_eq!(map_group(none, &builds_on, false), MapGroup::Base, "a mod built on Evolution: a base map is under the group");
+        assert_eq!(map_group(none, none, true), MapGroup::Hidden, "base: the hub's copy of an install map is not listed twice");
+        assert_eq!(map_group(&evo, &evo, true), MapGroup::Hidden, "Evolution chosen: an identical copy is not listed twice");
+        assert_eq!(map_group(none, &evo, true), MapGroup::Hidden, "Evolution chosen: an identical base copy is not listed twice");
     }
 
     /// The duplicate check (1445): a hub map is the install's when an install map has the same

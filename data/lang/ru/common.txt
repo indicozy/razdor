@@ -10,6 +10,7 @@ Authors = Авторы
 
 # New game: the scenario and the hero
 Scenario for a new game = Сценарий для Новой Игры
+Base game maps = Карты обычной игры
 Tutorial scenario = Обучение
 Welcome to the world of "A Time of Discord"!\n\nThe tutorial scenario shows you the game's interface and how to play it with each of the heroes.\n\n\n\nPress "No" to open the list of all scenarios and campaigns.\n\nPress "Yes" to start the tutorial and choose your hero. = Приветствуем вас во «Временах раздора»!\n\nОбучающая карта покажет, как устроен интерфейс игры и как играть каждым из героев.\n\n\n\n«Нет» откроет список всех сценариев и кампаний.\n\n«Да» начнёт обучение: сначала вы выберете героя.
 Next = Далее

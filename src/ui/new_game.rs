@@ -36,6 +36,8 @@ local! {
     /// The specific chapter selected in a campaign, when one is picked.
     static PICKED_MAP: Cell<Option<usize>> = const { Cell::new(None) };
     static SCROLL: Cell<f32> = const { Cell::new(0.0) };
+    /// Whether the base game's group under a played mod is open (1445b): shut when the list opens.
+    static BASE_OPEN: Cell<bool> = const { Cell::new(false) };
     /// The description's first shown line, and the group it was scrolled for.
     static DESC_SCROLL: Cell<(usize, usize)> = const { Cell::new((usize::MAX, 0)) };
     static HERO: Cell<usize> = const { Cell::new(0) };
@@ -449,6 +451,7 @@ pub fn open_list() {
     PICKED.with(|p| p.set(0));
     PICKED_MAP.with(|p| p.set(None));
     SCROLL.with(|s| s.set(0.0));
+    BASE_OPEN.with(|b| b.set(false));
     MARKS.with(|m| *m.borrow_mut() = None);
 }
 
@@ -480,6 +483,58 @@ fn tick(x: f32, y: f32, s: f32, color: Color) {
 
 const TICK_GREEN: Color = Color::new(0.45, 0.95, 0.35, 1.0);
 const STAR_GOLD: Color = Color::new(1.0, 0.82, 0.25, 1.0);
+
+/// The header row of the base game's group under a played mod (1445b): a triangle (pointing right
+/// shut, down open) and the group's name. A tap on it opens or shuts the group.
+fn base_header(r: Rect, k: f32, grow: f32, open: bool) {
+    let ink = super::typography::Ink::Yellow.color();
+    let (x, cy) = (r.x + 5.0 * k, r.y + r.h / 2.0);
+    if open {
+        draw_triangle(vec2(x - k, cy - 3.0 * k), vec2(x + 9.0 * k, cy - 3.0 * k), vec2(x + 4.0 * k, cy + 4.0 * k), ink);
+    } else {
+        draw_triangle(vec2(x, cy - 5.0 * k), vec2(x, cy + 5.0 * k), vec2(x + 8.0 * k, cy), ink);
+    }
+    let label = tr("Base game maps");
+    // The text starts close to the triangle: its room is the row's width, so it keeps the names' size.
+    let room = r.w - 17.0 * k;
+    let phone = super::display::dp_px();
+    with_face(Face::Subtitle, || {
+        let normal = fit_size(label, room, 15.0 * k);
+        let grown = row_text_size(label, normal, grow, room);
+        // On a phone at least 13.2 dp of text (its capital at least 12 sp by the touch check's measure,
+        // 0.7 of the size per sp), in two lines when the label is too long for one (the row is 40 dp
+        // there). The desktop row is one line, cut when too long.
+        let size = grown.max(phone.map_or(0.0, |dp| 13.2 * dp));
+        super::dt_font::legacy_metrics_if(size > normal, || match phone {
+            Some(_) => {
+                let lines = wrap_lines(label, room, size);
+                let line_h = size * 1.15;
+                let mut y = r.y + r.h / 2.0 - (lines.len() as f32 - 1.0) * line_h / 2.0 + size * 0.36;
+                for line in &lines {
+                    chrome::shadow_text(line, r.x + 16.0 * k, y, size, ink);
+                    y += line_h;
+                }
+            }
+            None => chrome::shadow_text(&ellipsize(label, room, size), r.x + 16.0 * k, r.y + r.h * 0.5 + size * 0.36, size, ink),
+        });
+    });
+}
+
+/// `s` broken into lines of at most `width` at `size`, at its spaces (a word wider than the line
+/// stays whole on its own line).
+fn wrap_lines(s: &str, width: f32, size: f32) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for word in s.split_whitespace() {
+        match lines.last_mut() {
+            Some(line) if measure(&format!("{line} {word}"), size).width <= width => {
+                line.push(' ');
+                line.push_str(word);
+            }
+            _ => lines.push(word.to_string()),
+        }
+    }
+    lines
+}
 
 /// Picks the row of the map whose file name starts with `name` when the list next shows
 /// (the `scenarios:<map>` snapshot scene).
@@ -612,7 +667,24 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
     // with the text size (`button_grow`), it rises by its extra height too, its bottom where it was.
     let lift = if mods.is_empty() { 0.0 } else { MOD_LIFT + MOD_ROW_H * (grow - 1.0) };
     let (show, order) = (Show::of(m.show), Order::of(m.order));
-    let list = arrange(scenario_groups(scenarios), |g| facts_of(scenarios, g, &m), show, order);
+    // The maps made for the base game under a played mod (1445b) are a group of their own, after
+    // the rest, shut unless its header row is opened (`BASE_OPEN`); the snapshot scene opens it once.
+    let (main, base): (Vec<Group>, Vec<Group>) = scenario_groups(scenarios).into_iter().partition(|g| !scenarios[g.first].base_game);
+    let main = arrange(main, |g| facts_of(scenarios, g, &m), show, order);
+    let base = arrange(base, |g| facts_of(scenarios, g, &m), show, order);
+    let base_count = base.len();
+    let main_len = main.len();
+    if base_count > 0 {
+        if let Some(open) = super::snapshot::base_maps_scene() {
+            SCROLL.with(|s| s.set(f32::MAX));
+            BASE_OPEN.with(|b| b.set(open));
+        }
+    }
+    let base_open = base_count > 0 && BASE_OPEN.with(Cell::get);
+    let mut list = main;
+    if base_open {
+        list.extend(base);
+    }
     if let Some(name) = PICK.with(|p| p.borrow_mut().take()) {
         if let Some(i) = list.iter().position(|g| std::iter::once(&g.first).chain(&g.chapters).any(|&m| scenarios[m].file.starts_with(&name))) {
             PICKED.with(|p| p.set(i));
@@ -633,8 +705,14 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
     let view = list_view(rows, k);
     // Razdor's own: the rows grow with the text size (`button_grow`), so does their text.
     let (head_h, chapter_h) = (30.0 * k * grow, 18.0 * k * grow);
+    // The base game's header row (1445b) is as tall as a group's head; on a phone at least a finger's
+    // size, as a touch target.
+    let section_h = match super::display::dp_px() {
+        Some(dp) => head_h.max(FINGER_DP * dp + 2.0 * k),
+        None => head_h,
+    };
     let block_h = |g: &Group| head_h + listed_chapters(scenarios, g).len() as f32 * chapter_h + if listed_chapters(scenarios, g).is_empty() { 0.0 } else { 4.0 * k };
-    let content_h: f32 = list.iter().map(block_h).sum::<f32>() + 12.0 * k;
+    let content_h: f32 = list.iter().map(block_h).sum::<f32>() + if base_count > 0 { section_h } else { 0.0 } + 12.0 * k;
     let max_scroll = (content_h - view.h).max(0.0) / k;
     let mut scroll = SCROLL.with(|s| s.get());
     swipe_rows(view, 30.0 * k);
@@ -656,7 +734,13 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
     // campaign taller than the room left was hidden, with the gap it left).
     let clip = crate::ui::widgets::Clip::new(inside);
     let mut selection_y = view.y + FIRST_ROW_PX * k - scroll * k;
+    // The base game's header row sits before its first row (`main_len`), at the main rows' end.
+    let main_h: f32 = list[..main_len].iter().map(block_h).sum();
+    let header = Rect::new(view.x + 4.0 * k, view.y + FIRST_ROW_PX * k - scroll * k + main_h, row_w, section_h - 2.0 * k);
     for (row, g) in list.iter().enumerate() {
+        if base_open && row == main_len {
+            selection_y += section_h;
+        }
         let r = Rect::new(view.x + 4.0 * k, selection_y, row_w, block_h(g) - 2.0 * k);
         selection_y += block_h(g);
         if row == PICKED.with(|p| p.get()).min(list.len().saturating_sub(1)) && r.y < inside.y + inside.h && r.y + r.h > inside.y {
@@ -666,6 +750,9 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
     let mut next = None;
     let mut y = view.y + FIRST_ROW_PX * k - scroll * k;
     for (row, g) in list.iter().enumerate() {
+        if base_open && row == main_len {
+            y += section_h;
+        }
         let r = Rect::new(view.x + 4.0 * k, y, row_w, block_h(g) - 2.0 * k);
         y += block_h(g);
         if r.y >= inside.y + inside.h || r.y + r.h <= inside.y {
@@ -766,6 +853,22 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
                     PICKED_MAP.with(|p| p.set(Some(chapter_index)));
                     break;
                 }
+            }
+        }
+    }
+    if base_count > 0 {
+        let visible = header.y < inside.y + inside.h && header.y + header.h > inside.y;
+        if visible {
+            base_header(header, k, grow, base_open);
+        }
+        // A touch target (`button_state`: its finger area on a phone), tapped open or shut.
+        let (_, _, tapped) = button_state(header, over_list && visible);
+        if tapped {
+            BASE_OPEN.with(|b| b.set(!base_open));
+            // Shut, the picked row may be one of the group's: the list's first row is picked then.
+            if base_open && picked >= main_len {
+                picked = 0;
+                PICKED_MAP.with(|p| p.set(None));
             }
         }
     }
@@ -1601,7 +1704,7 @@ mod tests {
         let Some(dir) = std::env::var_os(razdor::dt::install::ENV_VAR) else { return };
         let dt = razdor::dt::install::DtInstall::load(std::path::Path::new(&dir)).unwrap();
         let sc: Vec<ScenarioEntry> =
-            dt.maps.iter().filter(|m| !razdor::translate::job::is_translated_file(&m.name)).map(|m| ScenarioEntry { file: m.name.clone(), path: m.path.clone(), scenario: m.load().unwrap() }).collect();
+            dt.maps.iter().filter(|m| !razdor::translate::job::is_translated_file(&m.name)).map(|m| ScenarioEntry { file: m.name.clone(), path: m.path.clone(), scenario: m.load().unwrap(), base_game: false }).collect();
         let maps: Vec<(&str, u8, &str)> = sc.iter().map(|e| (e.file.as_str(), e.scenario.header.scenario_kind, e.scenario.next_map.as_str())).collect();
         let list = groups(&maps);
         let rk: Vec<&Group> = list.iter().filter(|g| g.chapters.iter().any(|&c| sc[c].file.starts_with("РК6"))).collect();

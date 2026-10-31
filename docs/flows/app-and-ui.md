@@ -727,12 +727,24 @@ scenarios). While it runs the window's mod row reads «Готовлю мод…�
 A mod that does not build shows its reason in `App::message` and the base is played. Titles come from
 `installed.json` (`hub::installed_mods`), not from the catalog, so the picker reads no network.
 
-**Maps by mod**: `hub::MapGate` (read in `ui::hub_entries`, the hub's maps only) lists a hub map by
-`hub::map_listed` (the rule of 1445). With no mod played, the maps that need no mod. With a mod played
-(its `layer_chain`: the mod and the mods it is laid over), the maps whose `requires` name one of them;
-a map made for the base game is hidden (the install's own copy of the mod's map is listed). A hub map
-with the same bytes as an install map (`hub::InstallMaps::has_same`: sizes first, then the bytes) is
-never listed twice. The install's own maps are never gated.
+**Maps by mod**: `hub::MapGate` (read in `ui::hub_entries`, the hub's maps only) gives a hub map its
+`hub::MapGroup` by `hub::map_group` (the rule of 1445, 1445b). With no mod played: `Chosen` (the main
+part) for the maps that need no mod, else hidden. With a mod played (its `layer_chain`: the mod and the
+mods it is laid over): `Chosen` for the maps whose `requires` name one of them; `Base` for a map made for
+the base game (no `requires`), which is not hidden but listed under its own group; the rest hidden. A hub
+map with the same bytes as an install map (`hub::InstallMaps::has_same`: sizes first, then the bytes) is
+hidden, never listed twice. The install's own maps are never gated. `ui::hub_entries` sets
+`ScenarioEntry::base_game` for the `Base` maps.
+
+**The base game's group** (`new_game::scenario_select`, 1445b): the list is split into the main groups
+and the `base_game` ones (`partition`), each arranged by the filter and the order. With a mod played and
+`Base` maps listed, a header row «Карты обычной игры» (`base_header`, a triangle shut or open) follows
+the main groups; a tap on it (`widgets::button_state`, the finger area on a phone) opens or shuts it
+(`BASE_OPEN`, shut when the list opens and not kept). Shut, its rows are not in `list`; opened, they are
+after the header. On a phone the header is at least 40 dp tall (`FINGER_DP`) and its text 13.2 dp (the
+mobile check's 12 sp), in two lines when the label does not fit one. A pick of a `Base` map starts it with
+the chosen mod as any listed map. Snapshot scene: `RAZDOR_SCENE_BASE_MAPS=end|open` (scroll to the group,
+and open it). The install's own maps are never gated.
 
 Leaving the window after a change re-reads the hub's maps into `App::scenarios` (`reload_hub_maps`:
 the install is read again while a mod is played, so its folder is rebuilt or the base is back), after

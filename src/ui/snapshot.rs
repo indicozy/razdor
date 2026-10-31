@@ -140,6 +140,8 @@ local! {
     static LANGUAGE_OPENED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// `RAZDOR_SCENE_MOD_LIST` has opened the «Мод» list of the new-game window.
     static MOD_LIST_OPENED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// `RAZDOR_SCENE_BASE_MAPS` has scrolled the new-game list to the base game's group.
+    static BASE_MAPS_SHOWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// `RAZDOR_SCENE_MOD_LIST=1`: the new-game window's «Мод» drop-down opens, once (1441: the phone
@@ -150,6 +152,22 @@ pub fn open_mod_list() -> bool {
     }
     MOD_LIST_OPENED.with(|o| o.set(true));
     true
+}
+
+/// `RAZDOR_SCENE_BASE_MAPS=end|open`: the new-game list is scrolled to its end, where the base
+/// game's group is (1445b), once; `open` opens that group too. Returns whether it opens (`None`:
+/// the scene does not ask).
+pub fn base_maps_scene() -> Option<bool> {
+    let mode = std::env::var("RAZDOR_SCENE_BASE_MAPS").ok()?;
+    if BASE_MAPS_SHOWN.with(|o| o.get()) {
+        return None;
+    }
+    BASE_MAPS_SHOWN.with(|o| o.set(true));
+    match mode.as_str() {
+        "end" => Some(false),
+        "open" => Some(true),
+        _ => None,
+    }
 }
 
 /// `RAZDOR_SCENE_MOD_BUSY=1`: the new-game window shows a mod being built («Готовлю мод…»).
