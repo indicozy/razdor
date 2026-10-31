@@ -419,6 +419,18 @@ def dtm_next_map(path):
     return strings[3] if strings else None
 
 
+def dtm_title(path):
+    """The title a `.DTm` holds ("" for a file that is not a map)."""
+    strings = dtm_strings(path)
+    return strings[0] if strings else ""
+
+
+def message_key(row):
+    """The post a files.tsv row came from, as an order: a Discord snowflake grows with time; 0 when unknown."""
+    mid = row.get("message_id") or ""
+    return int(mid) if mid.isdigit() else 0
+
+
 def map_language(path):
     """The language a map is written in, from its title and description: "ru" when they hold more Cyrillic letters
     than Latin ones, "en" when more Latin, None when neither (or the file is not a map)."""
@@ -480,25 +492,81 @@ def chain_position(links, chapter):
     return len(links)
 
 
-def forum_groups(names, paths, tagged):
-    """How a forum thread's map files become entries: a list of (kind, file indexes, languages).
+def scenario_key(file):
+    """The scenario a map file is: its title with the case, the spaces and the emoji ignored. A file with no title
+    is a scenario of its own."""
+    title = " ".join(clean_title(file["title"]).split()).casefold()
+    return title or "#" + file["name"].lower()
+
+
+def scenario_title(file):
+    """The title an entry of its own takes: the map's title (its bracket and emoji gone), else its file name."""
+    return clean_title(file["title"]) or os.path.splitext(file["name"])[0]
+
+
+def scenario_file(name, path, msg, sha=None):
+    """A map file of a forum thread as forum_groups reads it: its name, its file, its post (msg, see message_key)."""
+    return {"name": name, "path": path, "sha256": sha or sha256_file(path), "msg": msg, "title": dtm_title(path)}
+
+
+def newest_per_scenario(files):
+    """Which of a thread's files are current. A byte-identical copy counts once (its newest post). Of the files of one
+    scenario (scenario_key), the ones in its newest post are kept, every variant of that post with them (EASY and
+    HARD, say); the ones of older posts are superseded. Returns (kept indexes, in order, and the superseded as
+    (index, index of the file that replaces it, reason))."""
+    copy_of = {}  # sha256 -> index of its newest copy
+    for i, f in enumerate(files):
+        j = copy_of.get(f["sha256"])
+        if j is None or files[j]["msg"] < f["msg"]:
+            copy_of[f["sha256"]] = i
+    copies = [i for i in range(len(files)) if copy_of[files[i]["sha256"]] == i]
+    top = {}  # scenario -> index of one of its files in the newest post
+    for i in copies:
+        k = scenario_key(files[i])
+        if k not in top or files[top[k]]["msg"] < files[i]["msg"]:
+            top[k] = i
+    kept = [i for i in copies if files[i]["msg"] == files[top[scenario_key(files[i])]]["msg"]]
+    superseded = []
+    for i in range(len(files)):
+        if i in kept:
+            continue
+        if i in copies:
+            superseded.append((i, top[scenario_key(files[i])], "an older version"))
+        else:
+            superseded.append((i, copy_of[files[i]["sha256"]], "the same file"))
+    return kept, superseded
+
+
+def forum_groups(files, tagged):
+    """How a forum thread's map files become entries: (groups, superseded). A group is (kind, file indexes,
+    languages); `files` are dicts (name, path, sha256, msg, title), `superseded` as newest_per_scenario gives it.
 
     A thread is one campaign when its files chain: a file's next-map field names another of them, looked up as the
     game looks names up (game_ref_key, game_name_key). One file is a campaign only when its thread is tagged as one.
-    Files that do not chain are language versions of one scenario when there is one file per language (two or more
-    files, every file's language known, no language twice): one map with all of them, both kept. Anything else is
-    one map per file."""
-    if len(names) == 1:
-        return [("campaign" if tagged else "map", [0], ["ru"])]
+    Otherwise only the current files count (newest_per_scenario). Those that are language versions of one scenario
+    (two or more, every file's language known, no language twice) are one map with all of them, both kept. Anything
+    else is one map per scenario, with all its files (variants): a scenario's files are one entry, not one each."""
+    if len(files) == 1:
+        return [("campaign" if tagged else "map", [0], ["ru"])], []
+    names = [f["name"] for f in files]
     chapters = {game_name_key(n) for n in names}
-    for name, path in zip(names, paths):
-        key = game_ref_key(dtm_next_map(path) or "")
-        if key and key in chapters and key != game_name_key(name):
-            return [("campaign", list(range(len(names))), ["ru"])]
-    langs = [map_language(p) for p in paths]
-    if None not in langs and len(set(langs)) == len(langs):
-        return [("map", list(range(len(names))), sorted(langs, key=lambda lang: (lang != "ru", lang)))]
-    return [("map", [i], ["ru"]) for i in range(len(names))]
+    for f in files:
+        key = game_ref_key(dtm_next_map(f["path"]) or "")
+        if key and key in chapters and key != game_name_key(f["name"]):
+            return [("campaign", list(range(len(files))), ["ru"])], []
+    kept, superseded = newest_per_scenario(files)
+    langs = [map_language(files[i]["path"]) for i in kept]
+    if len(kept) > 1 and None not in langs and len(set(langs)) == len(langs):
+        return [("map", kept, sorted(langs, key=lambda lang: (lang != "ru", lang)))], superseded
+    groups, where = [], {}
+    for i in kept:
+        k = scenario_key(files[i])
+        if k in where:
+            groups[where[k]][1].append(i)
+        else:
+            where[k] = len(groups)
+            groups.append(("map", [i], ["ru"]))
+    return groups, superseded
 
 
 class Assets:
@@ -912,6 +980,7 @@ class Pack:
         self.chain_log = []       # what the campaign fixes did, for report.md
         self.failures = []        # campaign links that do not resolve and are not marked break
         self.kind_log = []        # forum threads whose kind the grouping rule changed (forum_groups), for report.md
+        self.version_log = []     # map files left out as older versions or copies of a kept file, for report.md
         self.threads = load_threads(src)
         self.users = user_names(self.threads)
         self.assets = Assets(out)
@@ -1192,7 +1261,11 @@ class Pack:
         tagged = "Кампания" in tags or "Campaign" in tags
         names = [package_name(r["file_name"]) for r in keep]
         paths = [self.map_file(r["file_path"]) for r in keep]
-        groups = forum_groups(names, paths, tagged)
+        files = [{"name": n, "path": p, "sha256": r["sha256"], "msg": message_key(r), "title": dtm_title(p)}
+                 for n, p, r in zip(names, paths, keep)]
+        groups, superseded = forum_groups(files, tagged)
+        for i, newer, why in superseded:
+            self.version_log.append(f"{tid} {t['name']}: `{names[i]}` is {why} (`{names[newer]}` is kept)")
         # what the thread was before the grouping rule (a campaign when tagged or with several files)
         was = "campaign" if (tagged or len(keep) > 1) else "map"
         if [kind for kind, _, _ in groups] != [was]:
@@ -1201,8 +1274,10 @@ class Pack:
         meta = self.thread_fields(t, t["name"], "")
         for n, (kind, idx, langs) in enumerate(groups, 1):
             eid = f"{kind}-{tid}" if len(groups) == 1 else f"{kind}-{tid}-{n}"
+            # a thread with several scenarios names each entry by its own map's title
+            emeta = dict(meta, title=scenario_title(files[idx[0]])) if len(groups) > 1 else meta
             try:
-                self.add_forum_entry(eid, kind, langs, idx, keep, names, paths, test_of, bymod, meta)
+                self.add_forum_entry(eid, kind, langs, idx, keep, names, paths, test_of, bymod, emeta)
             except Skip as e:
                 label = f"map thread {tid} {t['name']}" + (f" ({names[idx[0]]})" if len(groups) > 1 else "")
                 self.skip(label, str(e))
@@ -1218,9 +1293,10 @@ class Pack:
         for i in idx:
             asset = self.assets.add(paths[i], ".dtm", eid)
             self.map_shas.add(asset["sha256"])
-            # A language pair's files carry no lang: the hub installs only the files of one language when
-            # the files carry one (Entry.files_for), and both versions must be installed and listed.
-            refs.append(file_ref(asset, names[i], lang=None if len(langs) > 1 else "ru"))
+            # A language pair's files, and the variants of one scenario (EASY and HARD), carry no lang: the hub
+            # installs only the files of one language when the files carry one (Entry.files_for), and all of
+            # them must be installed and listed.
+            refs.append(file_ref(asset, names[i], lang=None if len(langs) > 1 or len(idx) > 1 else "ru"))
         self.add_entry(make_entry(eid, kind, meta, "", langs, requires, status, note, refs,
                                   preview=self.preview(meta["image"], eid)))
 
@@ -1306,6 +1382,15 @@ class Pack:
             if not ID_RE.match(e["id"]) or e["id"] in ids:
                 raise Fail(f"bad or repeated id {e['id']!r}")
             ids.add(e["id"])
+        # two entries with one title and the same requires look like one scenario twice to the player
+        same = {}
+        for e in self.entries:
+            key = (" ".join(e["title"]["ru"].split()).casefold(), tuple(e["requires"]))
+            same.setdefault(key, []).append(e["id"])
+        clashes = [f"«{title}» (requires {', '.join(req) or 'nothing'}): {', '.join(sorted(ids_))}"
+                   for (title, req), ids_ in sorted(same.items()) if len(ids_) > 1]
+        if clashes:
+            raise Fail("entries with the same title and requires: " + "; ".join(clashes))
         for e in self.entries:
             for r in e["requires"]:
                 if r not in self.mod_ids:
@@ -1424,6 +1509,8 @@ class Pack:
         lines += [f"- {line}" for line in self.chain_log] or ["None."]
         lines += ["", f"## Forum threads whose kind changed ({len(self.kind_log)} threads)", ""]
         lines += [f"- {line}" for line in self.kind_log] or ["None."]
+        lines += ["", f"## Map files left out as older versions or copies ({len(self.version_log)})", ""]
+        lines += [f"- {line}" for line in self.version_log] or ["None."]
         lines += ["", "## Notes", ""]
         lines += [f"- {n}" for n in self.notes] or ["None."]
         return "\n".join(lines) + "\n"
@@ -1540,6 +1627,8 @@ def write_fixture(root):
     thread("maps", "302", "Пустая", "", owner="5")
     thread("maps", "310", "⚔️ Пара [Test]", "**⚔️ Сложность карты**\n1️⃣  Первая  <:x:1>  ✨ конец", owner="5")
     thread("maps", "320", "Два сценария [Test]", "Две карты разных сценариев.", owner="5")
+    thread("maps", "330", "Версии [Test]", "Вторая версия той же карты.", owner="5")
+    thread("maps", "340", "Сложность [Test]", "Две сложности одной карты.", owner="5")
     thread("maps-le", "400", "LE", "")
     write_file(os.path.join(base, "Data", "units.ini"), "base units")
     write_file(os.path.join(base, "Graphics", "a.lit"), "lit")
@@ -1567,7 +1656,9 @@ def write_fixture(root):
                "modA\tfull\tyes\t\nmodC\tpartial\tpartial (1 of 2)\tfixture\nmodB\tmissing\tyes\tfixture\n")
     dtm = {"old": fake_dtm("c1.DTm"), "c1": fake_dtm("c2.DTm"), "c2": fake_dtm(""), "cu": b"cu map",
            "veil_ru": fake_dtm("", "Церковь", "Русская карта"), "veil_en": fake_dtm("", "Church", "An English map"),
-           "alpha": fake_dtm("", "Альфа", "Первый сценарий"), "beta": fake_dtm("", "Бета", "Второй сценарий")}
+           "alpha": fake_dtm("", "Альфа", "Первый сценарий"), "beta": fake_dtm("", "Бета", "Второй сценарий"),
+           "v1": fake_dtm("", "Версия", "Первая"), "v2": fake_dtm("", "Версия", "Вторая"),
+           "easy": fake_dtm("", "Кошмар", "Лёгкая"), "hard": fake_dtm("", "Кошмар", "Сложная")}
     shas = {k: sha256_bytes(v.encode()) for k, v in
             {"arc": "arc one", "crumb": "crumb map", "bad": "bad"}.items()}
     shas.update({k: sha256_bytes(v) for k, v in dtm.items()})
@@ -1578,6 +1669,10 @@ def write_fixture(root):
     write_bytes(os.path.join(src, "maps", "unpacked", "310", "veil_en.DTm"), dtm["veil_en"])
     write_bytes(os.path.join(src, "maps", "unpacked", "320", "alpha.DTm"), dtm["alpha"])
     write_bytes(os.path.join(src, "maps", "unpacked", "320", "beta.DTm"), dtm["beta"])
+    write_bytes(os.path.join(src, "maps", "unpacked", "330", "v1.DTm"), dtm["v1"])
+    write_bytes(os.path.join(src, "maps", "unpacked", "330", "v2.DTm"), dtm["v2"])
+    write_bytes(os.path.join(src, "maps", "unpacked", "340", "easy.DTm"), dtm["easy"])
+    write_bytes(os.path.join(src, "maps", "unpacked", "340", "hard.DTm"), dtm["hard"])
     files = [("300", "300", "old.DTm", "maps/unpacked/300/old.DTm", shas["old"], "no"),
              ("300", "301", "c1.DTm", "maps/unpacked/300/c1.DTm", shas["c1"], "yes"),
              ("300", "301", "c2.DTm", "maps/unpacked/300/c2.DTm", shas["c2"], "yes"),
@@ -1585,7 +1680,11 @@ def write_fixture(root):
              ("310", "310", "veil_ru.DTm", "maps/unpacked/310/veil_ru.DTm", shas["veil_ru"], "yes"),
              ("310", "310", "veil_en.DTm", "maps/unpacked/310/veil_en.DTm", shas["veil_en"], "yes"),
              ("320", "320", "alpha.DTm", "maps/unpacked/320/alpha.DTm", shas["alpha"], "yes"),
-             ("320", "320", "beta.DTm", "maps/unpacked/320/beta.DTm", shas["beta"], "yes")]
+             ("320", "320", "beta.DTm", "maps/unpacked/320/beta.DTm", shas["beta"], "yes"),
+             ("330", "331", "v1.DTm", "maps/unpacked/330/v1.DTm", shas["v1"], "yes"),
+             ("330", "332", "v2.DTm", "maps/unpacked/330/v2.DTm", shas["v2"], "yes"),
+             ("340", "341", "easy.DTm", "maps/unpacked/340/easy.DTm", shas["easy"], "yes"),
+             ("340", "341", "hard.DTm", "maps/unpacked/340/hard.DTm", shas["hard"], "yes")]
     write_file(os.path.join(src, "maps", "files.tsv"),
                "thread_id\tmessage_id\tfile_name\tfile_path\tsha256\tis_newest\n" +
                "".join("\t".join(r) + "\n" for r in files))
@@ -1597,9 +1696,13 @@ def write_fixture(root):
                f"310\tveil_ru.DTm\t{shas['veil_ru']}\tmodA\tok\n" +
                f"310\tveil_en.DTm\t{shas['veil_en']}\tmodA\tok\n" +
                f"320\talpha.DTm\t{shas['alpha']}\tmodA\tok\n" +
-               f"320\tbeta.DTm\t{shas['beta']}\tmodA\tok\n")
+               f"320\tbeta.DTm\t{shas['beta']}\tmodA\tok\n" +
+               f"330\tv1.DTm\t{shas['v1']}\tmodA\tok\n" +
+               f"330\tv2.DTm\t{shas['v2']}\tmodA\tok\n" +
+               f"340\teasy.DTm\t{shas['easy']}\tmodA\tok\n" +
+               f"340\thard.DTm\t{shas['hard']}\tmodA\tok\n")
     write_file(os.path.join(src, "maps", "by_mod.tsv"),
-               "thread_id\tmod_slug\n300\tmodA\n302\tvanilla\n310\tmodA\n320\tmodA\n")
+               "thread_id\tmod_slug\n300\tmodA\n302\tvanilla\n310\tmodA\n320\tmodA\n330\tmodA\n340\tmodA\n")
     arc_rows = [("top__arc1.DTm", "dtm/arc1.DTm", "top", shas["arc"], ""),
                 ("top__dup.DTm", "dtm/dup.DTm", "top", shas["c1"], ""),
                 ("top__copy.DTm", "dtm/copy.DTm", "top", shas["arc"], "top__arc1.DTm"),
@@ -1746,19 +1849,53 @@ def selftest():
             write_bytes(path, fake_dtm(next_name, title, description))
             return path
 
-        chained = forum_groups(["a.DTm", "b.DTm"], [mk("a.DTm", "b.DTm", "Один", "Глава"),
-                                                    mk("b.DTm", "", "Два", "Глава")], False)
-        pair = forum_groups(["ru.DTm", "en.DTm"], [mk("ru.DTm", "", "Карта", "Русское описание"),
-                                                   mk("en.DTm", "", "Map", "An English description")], False)
-        unrelated = forum_groups(["x.DTm", "y.DTm"], [mk("x.DTm", "", "Альфа", "Первая"),
-                                                      mk("y.DTm", "", "Бета", "Вторая")], False)
-        single = forum_groups(["s.DTm"], [mk("s.DTm", "", "Одна", "Карта")], True)
+        def sf(name, next_name, title, description, msg, content=None):
+            """A file of a thread: its DTm and its post (msg)."""
+            path = os.path.join(d, name)
+            write_bytes(path, content or fake_dtm(next_name, title, description))
+            return scenario_file(name, path, msg)
+
+        chained, _ = forum_groups([sf("a.DTm", "b.DTm", "Один", "Глава", 1),
+                                   sf("b.DTm", "", "Два", "Глава", 1)], False)
+        pair, _ = forum_groups([sf("ru.DTm", "", "Карта", "Русское описание", 1),
+                                sf("en.DTm", "", "Map", "An English description", 1)], False)
+        unrelated, _ = forum_groups([sf("x.DTm", "", "Альфа", "Первая", 1),
+                                     sf("y.DTm", "", "Бета", "Вторая", 1)], False)
+        single, _ = forum_groups([sf("s.DTm", "", "Одна", "Карта", 1)], True)
         check_selftest("groups: a chain is one campaign, a language pair one map with both languages (ru first), "
                        "unrelated maps one map each, a tagged single map a campaign",
                        chained == [("campaign", [0, 1], ["ru"])]
                        and pair == [("map", [0, 1], ["ru", "en"])]
                        and unrelated == [("map", [0], ["ru"]), ("map", [1], ["ru"])]
                        and single == [("campaign", [0], ["ru"])])
+        # versions: the newest post's file of a scenario stays, the older one is superseded
+        versions, sup = forum_groups([sf("v1.DTm", "", "Версия", "Первая", 10),
+                                      sf("v2.DTm", "", "Версия", "Вторая", 20)], False)
+        check_selftest("groups: versions of one scenario (same title, other names) are one map, the newest",
+                       versions == [("map", [1], ["ru"])] and sup == [(0, 1, "an older version")])
+        # byte-identical copies count once
+        copy_a = os.path.join(d, "copy_a.DTm")
+        write_bytes(copy_a, fake_dtm("", "Копия", "Одна"))
+        copies, sup = forum_groups([sf("c1.DTm", "", "Копия", "Одна", 10, open(copy_a, "rb").read()),
+                                    sf("c2.DTm", "", "Копия", "Одна", 20, open(copy_a, "rb").read())], False)
+        check_selftest("groups: identical copies are one map, the newest copy kept",
+                       copies == [("map", [1], ["ru"])] and sup == [(0, 1, "the same file")])
+        # variants: EASY and HARD in one post are one map with both files
+        variants, sup = forum_groups([sf("easy.DTm", "", "Кошмар", "Лёгкая", 30),
+                                      sf("hard.DTm", "", "Кошмар", "Сложная", 30)], False)
+        check_selftest("groups: variants of one scenario in one post are one map with all of them",
+                       variants == [("map", [0, 1], ["ru"])] and sup == [])
+        # a scenario with variants in an older post and one newer file: only the newer post's files
+        mixed, sup = forum_groups([sf("e1.DTm", "", "Смесь", "А", 10), sf("h1.DTm", "", "Смесь", "Б", 10),
+                                   sf("n.DTm", "", "Смесь", "В", 20)], False)
+        check_selftest("groups: the newest post's files of a scenario are kept, the older post's are superseded",
+                       mixed == [("map", [2], ["ru"])] and [s[0] for s in sup] == [0, 1])
+        # each scenario of a thread is an entry of its own, and the language pair of a newer version is one map
+        pair_versions, _ = forum_groups([sf("ru1.DTm", "", "Карта", "Старое", 10),
+                                         sf("ru2.DTm", "", "Карта", "Новое", 20),
+                                         sf("en.DTm", "", "Map", "An English description", 20)], False)
+        check_selftest("groups: a language pair is found among the newest versions",
+                       pair_versions == [("map", [1, 2], ["ru", "en"])])
     check_selftest("game lookup: a reference is found as the game finds it (trim, exact .DTm/.dtm, no quote stripping)",
                    game_ref_key(" Name.DTm ") == game_name_key("Name.dtm") == game_ref_key("Name")
                    and game_ref_key("Name.dtm") == "name"
@@ -1883,11 +2020,23 @@ def selftest():
                            and pair["title"]["ru"] == "Пара" and pair["description"]["ru"] == "Сложность карты\nПервая конец"
                            and "campaign-310" not in by_id)
             two = [by_id.get("map-320-1"), by_id.get("map-320-2")]
-            check_selftest("build: unrelated maps of one thread are one map entry each",
+            check_selftest("build: unrelated maps of one thread are one map entry each, named by their own titles",
                            all(e and e["kind"] == "map" and e["languages"] == ["ru"] and len(e["files"]) == 1
-                               for e in two) and "campaign-320" not in by_id)
+                               for e in two) and "campaign-320" not in by_id
+                           and [e["title"]["ru"] for e in two] == ["Альфа", "Бета"])
+            versioned = by_id.get("map-330")
+            check_selftest("build: versions of one scenario are one entry with the newest file only",
+                           versioned is not None and [f["name"] for f in versioned["files"]] == ["v2.DTm"]
+                           and versioned["title"]["ru"] == "Версии" and "map-330-1" not in by_id)
+            variants = by_id.get("map-340")
+            check_selftest("build: EASY and HARD are one entry with both files, no lang, the thread's title",
+                           variants is not None and sorted(f["name"] for f in variants["files"]) == ["easy.DTm", "hard.DTm"]
+                           and all("lang" not in f for f in variants["files"]) and variants["title"]["ru"] == "Сложность")
             check_selftest("build: a thread whose kind changed is listed in report.md",
-                           "Forum threads whose kind changed (2 threads)" in open(
+                           "Forum threads whose kind changed (4 threads)" in open(
+                               os.path.join(out1, "report.md"), encoding="utf-8").read())
+            check_selftest("build: the superseded version is listed in report.md",
+                           "Map files left out as older versions or copies (1)" in open(
                                os.path.join(out1, "report.md"), encoding="utf-8").read())
             arcs = [e for e in cat["entries"] if e["id"].startswith("arc-")]
             check_selftest("build: archive maps: duplicates and covered files dropped, the rest kept",
@@ -1969,6 +2118,24 @@ def selftest():
                    and "rating" not in make_entry("y", "map", {"title": "t", "author": "", "description": "",
                                                                "source_url": "", "added": "", "image": None},
                                                   "", [], [], "full", {}, []))
+    def entry_of(eid, title, requires):
+        return {"id": eid, "title": {"ru": title, "en": ""}, "requires": requires, "files": []}
+
+    with tempfile.TemporaryDirectory() as d:
+        clash = Pack.__new__(Pack)
+        clash.out, clash.mod_ids = d, {"evolution"}
+        clash.entries = [entry_of("map-1", "Мятежные земли", []), entry_of("map-2", "мятежные  Земли", []),
+                         entry_of("map-3", "Мятежные земли", ["evolution"])]
+        refused = ""
+        try:
+            clash.check()
+        except Fail as e:
+            refused = str(e)
+        check_selftest("check: two entries with one title and the same requires fail the build, both named",
+                       "map-1, map-2" in refused and "map-3" not in refused)
+        clash.entries = [entry_of("map-1", "Мятежные земли", []), entry_of("map-2", "Мятежные земли", ["evolution"])]
+        clash.check()
+        check_selftest("check: one title with other requires is allowed", True)
     check_sound_packages()
     print("selftest: all checks passed")
     return 0

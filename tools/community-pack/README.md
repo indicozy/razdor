@@ -27,15 +27,24 @@ repo and the output holds game content, so it lives only in the scratch folder.
   `maps-le` is not read. How a thread's files become entries (`forum_groups`):
   - a **campaign** (one entry, all its files) when the files chain: a file's next-map field names
     another of them, looked up as the game looks names up. A single file is a campaign only with the
-    Кампания tag;
-  - otherwise, when the files are language versions of one scenario (two or more files, one per
+    Кампания tag. A campaign keeps every file of its thread's newest version (as before);
+  - otherwise only the **current** files count (`newest_per_scenario`). A scenario is the map files
+    whose titles (the DTm's own title, case and spaces ignored) are the same. Of one scenario, the
+    files of its newest post are kept, with every variant of that post (EASY and HARD posted together):
+    older posts' files are versions the author replaced, and they are left out. A byte-identical copy
+    counts once. report.md lists every file left out and the file that replaced it;
+  - of the current files, when they are language versions of one scenario (two or more files, one per
     language, each file's language read from its title and description: `ru` when Cyrillic letters
     outnumber Latin ones, `en` when Latin ones do), one **map** with all of them. Its files carry no
     `lang`, so the hub installs both versions and lists both (`Entry.files_for` would install only one
     language of a file that has one), and its `languages` lists them (`["ru", "en"]`);
-  - otherwise one **map** per file.
+  - otherwise one **map** per scenario, with all of its current files (variants such as EASY and
+    HARD): a scenario's files are one entry, never one entry each. Such files carry no `lang` (the
+    hub installs all of them). Its title is the scenario's title, unless the thread has one entry only:
+    then the thread's title.
   Several entries from one thread take the ids `map-<thread>-<n>`; report.md lists the threads whose
-  kind the rule changed.
+  kind the rule changed. The build fails when two entries have the same title and the same `requires`
+  (both ids are printed): the player would see one map twice.
 - **Archive maps** (`maps.tsv` and `report.tsv` of the archive folder): one `map` entry per
   map that no forum entry and no Community Update map already covers (dedupe by sha256).
 - **Previews**: the first image of the first post, as a PNG at most 480x270 (ImageMagick
