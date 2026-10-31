@@ -2475,8 +2475,8 @@ pub fn button_label(r: Rect, label: &str, enabled: bool, _hover: bool, _quest_re
     // the requested size, not the font sheet's native one (legacy metrics only when grown).
     let g = super::display::button_grow();
     super::typography::Role::Button.with(|| {
-        // The size as drawn at Normal (the original's cap), then at g times it when grown.
-        let normal = super::widgets::fit_size(label, r.w - 10.0, label_size(r.h, 1.0));
+        // The size as drawn at Normal (the button at Normal is its height over g), then g times it.
+        let normal = super::widgets::fit_size(label, r.w - 10.0, label_size(r.h / g, 1.0));
         // The grown size (measured with the requested sizes); when it does not fit, the label is
         // drawn exactly as at Normal (its fit and ellipsis as today).
         let grown = if g > 1.0 { super::dt_font::legacy_metrics_if(true, || super::display::grown_label_size(normal, g, r.w - 10.0, |s| measure(label, s).width)) } else { normal };
