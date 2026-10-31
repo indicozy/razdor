@@ -9,6 +9,9 @@
 //!   Razdor assumes 22050 Hz *(guess: the ini says all PCM is 22050 Hz, and the spectrum rolls
 //!   off just below 11 kHz as a 22050 Hz recording would)*. `RAZDOR_MUSIC_RATE` overrides it.
 //!   A trailing odd byte is dropped.
+//! - `*.ogg`: Ogg Vorbis, Razdor's own addition, not read by the original. The Hub's mod
+//!   packages carry their sounds re-encoded this way, so a `.ogg` with the same stem as the
+//!   named file (`battle1.ogg` for `battle1.raw`) is played in its place.
 //!
 //! Everything is read from the player's install at runtime and converted in memory; nothing
 //! is written anywhere.
@@ -16,6 +19,7 @@
 use super::ini::Ini;
 use super::install::{find_path, DtInstall};
 use super::DtError;
+use lewton::inside_ogg::OggStreamReader;
 use std::path::Path;
 
 pub const SOUNDS_INI: &str = "_Sounds.ini";
@@ -240,11 +244,31 @@ pub fn parse_wav(bytes: &[u8]) -> Result<Pcm, DtError> {
     Err(bad("WAV has no data"))
 }
 
-/// Decodes the bytes of `file`: `.raw` at `raw_rate`, anything else as WAV.
+/// Reads an Ogg Vorbis file (Razdor's own addition, not read by the original): all its
+/// packets as interleaved 16-bit little-endian PCM at the file's own sample rate.
+pub fn parse_ogg(bytes: &[u8]) -> Result<Pcm, DtError> {
+    let mut rdr = OggStreamReader::new(std::io::Cursor::new(bytes)).map_err(|e| bad(&format!("bad Ogg Vorbis: {e}")))?;
+    let (rate, channels) = (rdr.ident_hdr.audio_sample_rate, rdr.ident_hdr.audio_channels as u16);
+    if rate == 0 || channels == 0 {
+        return Err(bad("Ogg Vorbis with no rate or no channels"));
+    }
+    let mut data = Vec::new();
+    while let Some(packet) = rdr.read_dec_packet_itl().map_err(|e| bad(&format!("bad Ogg Vorbis: {e}")))? {
+        for sample in packet {
+            data.extend_from_slice(&sample.to_le_bytes());
+        }
+    }
+    Ok(Pcm { rate, channels, bits: 16, data })
+}
+
+/// Decodes the bytes of `file`: `.raw` at `raw_rate`, `.ogg` as Ogg Vorbis (any case), anything
+/// else as WAV.
 pub fn decode(file: &str, bytes: &[u8], raw_rate: u32) -> Result<Pcm, DtError> {
-    let is_raw = Path::new(file).extension().is_some_and(|e| e.eq_ignore_ascii_case("raw"));
-    if is_raw {
+    let ext = Path::new(file).extension();
+    if ext.is_some_and(|e| e.eq_ignore_ascii_case("raw")) {
         Ok(Pcm::from_raw(bytes, raw_rate))
+    } else if ext.is_some_and(|e| e.eq_ignore_ascii_case("ogg")) {
+        parse_ogg(bytes)
     } else {
         parse_wav(bytes)
     }
@@ -278,8 +302,15 @@ pub fn read_table(dir: &Path) -> Result<SoundTable, DtError> {
     Ok(SoundTable::from_ini(&Ini::from_cp1251(&bytes)))
 }
 
-/// Reads and decodes `<install dir>/Sounds/<file>`, the name matched ignoring case.
+/// Reads and decodes `<install dir>/Sounds/<file>`, the name matched ignoring case. A
+/// `Sounds/<stem>.ogg` with the same stem (a mod's re-encoded sound, see the module doc) is
+/// read in its place when there is one; otherwise `file` itself is read as it is.
 pub fn read_sound(dir: &Path, file: &str, raw_rate: u32) -> Result<Pcm, DtError> {
+    let stem = Path::new(file).file_stem().and_then(|s| s.to_str()).unwrap_or(file);
+    if let Ok(ogg) = find_path(dir, &format!("{SOUNDS_DIR}/{stem}.ogg")) {
+        let bytes = std::fs::read(&ogg).map_err(|source| DtError::Io { path: ogg.clone(), source })?;
+        return parse_ogg(&bytes);
+    }
     let path = find_path(dir, &format!("{SOUNDS_DIR}/{file}"))?;
     let bytes = std::fs::read(&path).map_err(|source| DtError::Io { path: path.clone(), source })?;
     decode(file, &bytes, raw_rate)
@@ -381,6 +412,72 @@ mod tests {
         assert_eq!(parse_rate(Some(" 44100 ")), 44100);
         assert_eq!(parse_rate(Some("fast")), 22050);
         assert_eq!(parse_rate(Some("12")), 22050);
+    }
+
+    /// A fresh, empty temp dir for one test.
+    fn test_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("razdor-sound-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A 0.25 s sine at 440 Hz (22050 Hz mono Ogg Vorbis, peak about 0.375), made by ffmpeg as
+    /// `<dir>/sine.ogg`. None (the test is skipped) when ffmpeg with libvorbis is missing or fails.
+    fn sine_ogg(dir: &Path) -> Option<Vec<u8>> {
+        let path = dir.join("sine.ogg");
+        let made = std::process::Command::new("ffmpeg")
+            .args(["-nostdin", "-hide_banner", "-loglevel", "error", "-f", "lavfi"])
+            .args(["-i", "sine=frequency=440:sample_rate=22050:duration=0.25", "-af", "volume=3"])
+            .args(["-ac", "1", "-c:a", "libvorbis", "-q:a", "3"])
+            .arg(&path)
+            .status()
+            .is_ok_and(|s| s.success());
+        match made.then(|| std::fs::read(&path).ok()).flatten() {
+            Some(bytes) => Some(bytes),
+            None => {
+                eprintln!("skipped: no ffmpeg with libvorbis");
+                None
+            }
+        }
+    }
+
+    #[test]
+    fn ogg_decodes() {
+        let dir = test_dir("ogg-decodes");
+        let Some(ogg) = sine_ogg(&dir) else {
+            let _ = std::fs::remove_dir_all(&dir);
+            return;
+        };
+        let pcm = parse_ogg(&ogg).unwrap();
+        assert_eq!((pcm.rate, pcm.channels, pcm.bits), (22050, 1, 16));
+        assert!((0.2..0.3).contains(&pcm.duration()), "{}", pcm.duration());
+        let peak = samples(&pcm).iter().fold(0.0f64, |m, v| m.max(v.abs()));
+        assert!(peak > 0.3, "{peak}");
+        assert_eq!(decode("SOUND.OGG", &ogg, 44100).unwrap(), pcm);
+        assert!(parse_ogg(b"OggS not really").is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn ogg_wins_over_the_named_file() {
+        let dir = test_dir("ogg-wins");
+        let sounds = dir.join(SOUNDS_DIR);
+        std::fs::create_dir_all(&sounds).unwrap();
+        let Some(ogg) = sine_ogg(&dir) else {
+            std::fs::remove_dir_all(&dir).unwrap();
+            return;
+        };
+        std::fs::write(sounds.join("battle1.raw"), [1u8, 0, 2, 0, 3, 0, 4, 0]).unwrap();
+        std::fs::write(sounds.join("Battle1.OGG"), &ogg).unwrap();
+        let pcm = read_sound(&dir, "battle1.raw", 44100).unwrap();
+        assert_eq!(pcm, parse_ogg(&ogg).unwrap());
+        assert_eq!(pcm.rate, 22050);
+        assert!((0.2..0.3).contains(&pcm.duration()));
+        std::fs::remove_file(sounds.join("Battle1.OGG")).unwrap();
+        let raw = read_sound(&dir, "battle1.raw", 44100).unwrap();
+        assert_eq!((raw.rate, raw.frames()), (44100, 4));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

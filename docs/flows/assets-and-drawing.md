@@ -222,6 +222,9 @@ its restart count changes, and `MapView::forget_shows` drops the stamps of the l
 - `src/dt/sound.rs`: `SoundTable::from_ini` (`_Sounds.ini`: `[Backgrounds]` music keys,
   `[SFX-Effects]`), `parse_wav`, `.raw` music as 16-bit PCM at an assumed 22050 Hz
   (`RAZDOR_MUSIC_RATE` overrides; `raw_to_wav`).
+- `read_sound`: a `Sounds/<stem>.ogg` (Ogg Vorbis, `parse_ogg`, Razdor's own addition) with the
+  same stem as the named `.raw`/`.wav` is played in its place, so a mod's re-encoded sounds win
+  over the base install's.
 - `src/ui/audio.rs`: screens call `audio::cue(Cue::…)` (a per-frame queue, de-duplicated);
   `Audio::frame` plays them and drives the music. `audio::cue_on_release` repeats a cue on
   the mouse release, as the original's hire button does.
