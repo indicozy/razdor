@@ -2477,8 +2477,12 @@ pub fn button_label(r: Rect, label: &str, enabled: bool, _hover: bool, _quest_re
     super::typography::Role::Button.with(|| {
         // The size as drawn at Normal (the original's cap), then at g times it when grown.
         let normal = super::widgets::fit_size(label, r.w - 10.0, label_size(r.h, 1.0));
-        super::dt_font::legacy_metrics_if(g > 1.0, || {
-            let size = if g > 1.0 { super::widgets::fit_size(label, r.w - 10.0, super::display::grown_text(normal, g)) } else { normal };
+        // The grown size (measured with the requested sizes); when it does not fit, the label is
+        // drawn exactly as at Normal (its fit and ellipsis as today).
+        let grown = if g > 1.0 { super::dt_font::legacy_metrics_if(true, || super::display::grown_label_size(normal, g, r.w - 10.0, |s| measure(label, s).width)) } else { normal };
+        let is_grown = grown > normal;
+        super::dt_font::legacy_metrics_if(is_grown, || {
+            let size = if is_grown { grown } else { normal };
             let label = super::widgets::ellipsize(label, r.w - 10.0, size);
             let label = label.as_str();
             let d = measure(label, size);
@@ -2561,8 +2565,10 @@ pub fn pill_button(r: Rect, label: &str, enabled: bool, green: bool) -> bool {
     super::typography::Role::Body.with(|| {
         // The size as drawn at Normal (the pill's height at Normal is its height over g).
         let normal = super::widgets::fit_size(label, r.w - 8.0, ((r.h / g) * 0.62).round().clamp(11.0, (18.0 * k()).max(11.0)));
-        super::dt_font::legacy_metrics_if(g > 1.0, || {
-        let size = if g > 1.0 { super::widgets::fit_size(label, r.w - 8.0, super::display::grown_text(normal, g)) } else { normal };
+        let grown = if g > 1.0 { super::dt_font::legacy_metrics_if(true, || super::display::grown_label_size(normal, g, r.w - 8.0, |s| measure(label, s).width)) } else { normal };
+        let is_grown = grown > normal;
+        super::dt_font::legacy_metrics_if(is_grown, || {
+        let size = if is_grown { grown } else { normal };
         let label = super::widgets::ellipsize(label, r.w - 8.0, size);
         let label = label.as_str();
         let d = measure(label, size);

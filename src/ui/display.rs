@@ -244,6 +244,21 @@ pub fn grown_text(normal: f32, g: f32) -> f32 {
     normal * g
 }
 
+/// The size a grown label is drawn at in a `width`-wide button: the largest size from
+/// `normal · g` down (a pixel at a time) that `width_of` fits, but never below `normal`. A
+/// grown label is never shrunk or cut by the width while it fits at Normal (Razdor's own).
+/// `normal` itself when even that does not fit: the caller's fit and ellipsis then apply.
+pub fn grown_label_size(normal: f32, g: f32, width: f32, width_of: impl Fn(f32) -> f32) -> f32 {
+    let mut size = grown_text(normal, g);
+    while size > normal {
+        if width_of(size) <= width {
+            return size;
+        }
+        size -= 1.0;
+    }
+    normal
+}
+
 /// The settings' label of a text size.
 pub fn text_size_label(s: f32) -> &'static str {
     use razdor::i18n::tr;
@@ -1668,6 +1683,17 @@ mod tests {
     fn a_grown_text_is_g_times_its_normal_size() {
         assert_eq!(grown_text(10.0, 1.5), 15.0);
         assert_eq!(grown_text(10.0, 1.0), 10.0);
+    }
+
+    #[test]
+    fn a_grown_label_fits_at_g_or_the_largest_size_that_fits_but_not_below_normal() {
+        // Width grows 2 px per size px: at 15 it is 30 px.
+        let wide = |s: f32| s * 2.0;
+        assert_eq!(grown_label_size(10.0, 1.5, 30.0, wide), 15.0, "fits at g");
+        assert_eq!(grown_label_size(10.0, 1.5, 25.0, wide), 12.0, "largest that fits");
+        assert_eq!(grown_label_size(10.0, 1.5, 19.0, wide), 10.0, "too wide at g: floor at normal");
+        assert_eq!(grown_label_size(10.0, 1.5, 15.0, wide), 10.0, "too wide even at normal: normal");
+        assert_eq!(grown_label_size(10.0, 1.0, 100.0, wide), 10.0, "at Normal the size is normal");
     }
 
     #[test]
