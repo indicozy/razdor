@@ -117,11 +117,61 @@ pub enum MapGroup {
     /// In the list's main part: with no mod played, the base game's maps (a hub map that needs
     /// no mod); with a mod played, the maps that need it or a mod it is laid over.
     Chosen,
-    /// With a mod played, a map made for the base game (it needs no mod): under the list's
-    /// «Карты обычной игры» group, collapsed by default (1445b).
+    /// With a mod played, a map made for the base game (it needs no mod), or a base install map
+    /// the mods leave unchanged (1445c): under the list's «Карты обычной игры» group, collapsed by
+    /// default (1445b).
     Base,
     /// Not in the list.
     Hidden,
+}
+
+/// Where an install map of the played folder comes from (1445c): the base install's own map,
+/// unchanged, or a map a mod adds or replaces (with other bytes than the base's).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MapOrigin {
+    Base,
+    Mod,
+}
+
+/// Where an install map of the played folder is shown (1445c). With no mod played (`chain`
+/// empty) every install map is in the list's main part. With a mod played, a base map the mods
+/// leave unchanged is under the base game's group ([`MapGroup::Base`]); a map the mods added or
+/// changed is the played mod's ([`MapGroup::Chosen`]).
+pub fn install_map_group(origin: MapOrigin, chain: &[String]) -> MapGroup {
+    match origin {
+        MapOrigin::Base if !chain.is_empty() => MapGroup::Base,
+        _ => MapGroup::Chosen,
+    }
+}
+
+/// The base install's maps, for [`BaseMaps::origin`]: each file's lower-cased name, size and path.
+pub struct BaseMaps {
+    files: Vec<(String, u64, PathBuf)>,
+}
+
+impl BaseMaps {
+    /// The base's map files (those that do not read are left out).
+    pub fn new(paths: &[PathBuf]) -> BaseMaps {
+        BaseMaps { files: paths.iter().filter_map(|p| Some((file_key(p)?, std::fs::metadata(p).ok()?.len(), p.clone()))).collect() }
+    }
+
+    /// Where the install map `path` (of the played folder) comes from: [`MapOrigin::Base`] when the
+    /// base has a map of the same file name (ignoring case) with the same bytes, else
+    /// [`MapOrigin::Mod`], a map a mod added or replaced.
+    pub fn origin(&self, path: &Path) -> MapOrigin {
+        let (Some(key), Ok(size)) = (file_key(path), std::fs::metadata(path).map(|m| m.len())) else { return MapOrigin::Mod };
+        let same = self.files.iter().filter(|(k, s, _)| *k == key && *s == size).any(|(_, _, p)| same_bytes(p, path));
+        if same {
+            MapOrigin::Base
+        } else {
+            MapOrigin::Mod
+        }
+    }
+}
+
+/// A map's file name, lower-cased (the overlay ignores case).
+fn file_key(path: &Path) -> Option<String> {
+    path.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase())
 }
 
 /// Where a hub map is shown (see [`MapGroup`]). `chain` is the played mod and the mods it is laid
@@ -197,6 +247,17 @@ impl MapGate {
     pub fn group(&self, name: &str, same_as_install: bool) -> MapGroup {
         let requires = self.needs.get(&stem_key(name)).map_or(&[][..], Vec::as_slice);
         map_group(requires, &self.chain, same_as_install)
+    }
+
+    /// Whether a mod is played (its chain reads), so the install's maps are told apart by
+    /// [`BaseMaps::origin`] (1445c).
+    pub fn plays_mod(&self) -> bool {
+        !self.chain.is_empty()
+    }
+
+    /// Where an install map of the played folder is shown, given its [`MapOrigin`] (1445c).
+    pub fn install_group(&self, origin: MapOrigin) -> MapGroup {
+        install_map_group(origin, &self.chain)
     }
 }
 
@@ -700,6 +761,34 @@ mod tests {
         assert_eq!(map_group(none, none, true), MapGroup::Hidden, "base: the hub's copy of an install map is not listed twice");
         assert_eq!(map_group(&evo, &evo, true), MapGroup::Hidden, "Evolution chosen: an identical copy is not listed twice");
         assert_eq!(map_group(none, &evo, true), MapGroup::Hidden, "Evolution chosen: an identical base copy is not listed twice");
+    }
+
+    /// 1445c: with a mod played, an install map the base install has unchanged (the same file name
+    /// ignoring case, the same bytes) is the base game's; one the mods add or change is the mod's.
+    /// With no mod played every install map is in the main part.
+    #[test]
+    fn an_install_map_the_mod_leaves_unchanged_is_the_base_games() {
+        let none: &[String] = &[];
+        let evo = vec!["evolution".to_string()];
+        assert_eq!(install_map_group(MapOrigin::Base, none), MapGroup::Chosen, "no mod: a base map is in the main part");
+        assert_eq!(install_map_group(MapOrigin::Mod, none), MapGroup::Chosen, "no mod: a mod's map is in the main part");
+        assert_eq!(install_map_group(MapOrigin::Base, &evo), MapGroup::Base, "Evolution: a base map it leaves is under the base game's group");
+        assert_eq!(install_map_group(MapOrigin::Mod, &evo), MapGroup::Chosen, "Evolution: a map it adds or changes is in the main part");
+
+        let dir = temp("origin");
+        let base_dir = dir.join("base");
+        put(&base_dir.join("Maps/Same.DTm"), "same bytes");
+        put(&base_dir.join("Maps/Changed.DTm"), "base bytes");
+        let played = dir.join("game");
+        put(&played.join("Maps/same.dtm"), "same bytes");
+        put(&played.join("Maps/Changed.DTm"), "mod bytes!");
+        put(&played.join("Maps/New.DTm"), "new");
+        let base = BaseMaps::new(&[base_dir.join("Maps/Same.DTm"), base_dir.join("Maps/Changed.DTm")]);
+        assert_eq!(base.origin(&played.join("Maps/same.dtm")), MapOrigin::Base, "the same name ignoring case, the same bytes: unchanged");
+        assert_eq!(base.origin(&played.join("Maps/Changed.DTm")), MapOrigin::Mod, "the same size, other bytes: the mod replaced it");
+        assert_eq!(base.origin(&played.join("Maps/New.DTm")), MapOrigin::Mod, "a map the base does not have: the mod's");
+        assert_eq!(base.origin(&played.join("Maps/missing.DTm")), MapOrigin::Mod, "a file that does not read is not the base's");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The duplicate check (1445): a hub map is the install's when an install map has the same

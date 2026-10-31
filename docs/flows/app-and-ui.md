@@ -733,8 +733,15 @@ part) for the maps that need no mod, else hidden. With a mod played (its `layer_
 mods it is laid over): `Chosen` for the maps whose `requires` name one of them; `Base` for a map made for
 the base game (no `requires`), which is not hidden but listed under its own group; the rest hidden. A hub
 map with the same bytes as an install map (`hub::InstallMaps::has_same`: sizes first, then the bytes) is
-hidden, never listed twice. The install's own maps are never gated. `ui::hub_entries` sets
-`ScenarioEntry::base_game` for the `Base` maps.
+hidden, never listed twice. `ui::hub_entries` sets `ScenarioEntry::base_game` for the `Base` maps.
+
+**The install's maps under a played mod** (1445c, `ui::install_entries`): the install's `maps` are read from the
+played folder, the mod's merged folder, which holds the base install's maps too. With a mod played, `hub::BaseMaps::origin`
+gives each map `MapOrigin::Base` when the base install (`install::base_dir()`) has a map of the same file name
+(ignoring case) with the same bytes, else `MapOrigin::Mod` (added or replaced by a mod). `MapGate::install_group` (by
+`hub::install_map_group`) sends a `Base` map to the `Base` group and a `Mod` map to `Chosen`; with no mod played all
+are `Chosen`. A group moves to «Карты обычной игры» only when every map in it (its chapters too) is `base_game`
+(`new_game::is_base_group`), so a campaign moves as a unit and a campaign with a map the mod changed stays on top.
 
 **The base game's group** (`new_game::scenario_select`, 1445b): the list is split into the main groups
 and the `base_game` ones (`partition`), each arranged by the filter and the order. With a mod played and
@@ -744,7 +751,7 @@ the main groups; a tap on it (`widgets::button_state`, the finger area on a phon
 after the header. On a phone the header is at least 40 dp tall (`FINGER_DP`) and its text 13.2 dp (the
 mobile check's 12 sp), in two lines when the label does not fit one. A pick of a `Base` map starts it with
 the chosen mod as any listed map. Snapshot scene: `RAZDOR_SCENE_BASE_MAPS=end|open` (scroll to the group,
-and open it). The install's own maps are never gated.
+and open it). The install's maps are gated only under a played mod (1445c, above).
 
 Leaving the window after a change re-reads the hub's maps into `App::scenarios` (`reload_hub_maps`:
 the install is read again while a mod is played, so its folder is rebuilt or the base is back), after

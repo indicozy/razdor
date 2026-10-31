@@ -244,6 +244,13 @@ fn groups(maps: &[(&str, u8, &str)]) -> Vec<Group> {
         .collect()
 }
 
+/// Whether a group belongs to the base game's group under a played mod (1445b, 1445c): every map
+/// of it, its chapters too, is `base_game`, so a campaign moves as a unit and a campaign with a
+/// map the mod changed stays in the main part.
+fn is_base_group(scenarios: &[ScenarioEntry], g: &Group) -> bool {
+    std::iter::once(&g.first).chain(&g.chapters).all(|&m| scenarios[m].base_game)
+}
+
 fn scenario_groups(scenarios: &[ScenarioEntry]) -> Vec<Group> {
     let maps: Vec<(&str, u8, &str)> = scenarios.iter().map(|e| (e.file.as_str(), e.scenario.header.scenario_kind, e.scenario.next_map.as_str())).collect();
     let tutorial = chrome::ui_text("Tutorial", "Tutorial_MapName").unwrap_or_default();
@@ -669,7 +676,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
     let (show, order) = (Show::of(m.show), Order::of(m.order));
     // The maps made for the base game under a played mod (1445b) are a group of their own, after
     // the rest, shut unless its header row is opened (`BASE_OPEN`); the snapshot scene opens it once.
-    let (main, base): (Vec<Group>, Vec<Group>) = scenario_groups(scenarios).into_iter().partition(|g| !scenarios[g.first].base_game);
+    let (main, base): (Vec<Group>, Vec<Group>) = scenario_groups(scenarios).into_iter().partition(|g| !is_base_group(scenarios, g));
     let main = arrange(main, |g| facts_of(scenarios, g, &m), show, order);
     let base = arrange(base, |g| facts_of(scenarios, g, &m), show, order);
     let base_count = base.len();

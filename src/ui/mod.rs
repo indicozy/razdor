@@ -333,7 +333,29 @@ fn dt_content_of(assets: &Assets, impossible: Option<bool>) -> Option<Arc<Conten
 /// The install's maps, each read once (a map that fails to load is logged and left out), then the
 /// hub's maps.
 fn scenarios_of(install: Option<&razdor::dt::install::DtInstall>) -> Vec<ScenarioEntry> {
-    install.iter().flat_map(|d| d.maps.iter()).filter_map(load_entry).chain(hub_entries(install)).collect()
+    install_entries(install).into_iter().chain(hub_entries(install)).collect()
+}
+
+/// The install's maps for the list (1445c). The folder read is the played one, a mod's merged
+/// folder, which holds the base install's maps too: with a mod played, a map the base install has
+/// unchanged is the base game's (`base_game`, under its group), a map the mods added or changed is
+/// the mod's, in the main part. With no mod played every map is in the main part.
+fn install_entries(install: Option<&razdor::dt::install::DtInstall>) -> Vec<ScenarioEntry> {
+    let Some(install) = install else { return Vec::new() };
+    let gate = razdor::hub::local_dir().map(|dir| razdor::hub::MapGate::read(&dir)).filter(razdor::hub::MapGate::plays_mod);
+    let base = gate.as_ref().and_then(|_| razdor::dt::install::base_dir()).and_then(|dir| razdor::dt::install::list_maps(&dir).ok()).map(|maps| {
+        let paths: Vec<PathBuf> = maps.into_iter().map(|m| m.path).collect();
+        razdor::hub::BaseMaps::new(&paths)
+    });
+    install
+        .maps
+        .iter()
+        .filter_map(|m| {
+            let origin = base.as_ref().map_or(razdor::hub::MapOrigin::Mod, |b| b.origin(&m.path));
+            let base_game = gate.as_ref().is_some_and(|g| g.install_group(origin) == razdor::hub::MapGroup::Base);
+            load_entry(m).map(|e| ScenarioEntry { base_game, ..e })
+        })
+        .collect()
 }
 
 impl App {
