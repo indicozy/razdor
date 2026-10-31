@@ -493,6 +493,17 @@ mod tests {
         std::fs::write(local.join("installed.json"), serde_json::to_vec(&installed).unwrap()).unwrap();
     }
 
+    /// Whether the file system under `dir` tells names apart by case (macOS's usually does not):
+    /// the checks of a second folder spelled in another case only mean something where it does.
+    fn case_sensitive(dir: &Path) -> bool {
+        std::fs::create_dir_all(dir).unwrap();
+        let probe = dir.join("case-probe");
+        std::fs::write(&probe, b"").unwrap();
+        let sensitive = !dir.join("CASE-PROBE").exists();
+        let _ = std::fs::remove_file(&probe);
+        sensitive
+    }
+
     #[test]
     fn a_mod_file_replaces_the_base_file_ignoring_case_and_keeps_the_base_spelling() {
         let base = base_install("overlay");
@@ -500,7 +511,9 @@ mod tests {
         install_mod(&local, "m1", "1.0", &[("data/units.ini", "mod units"), ("Scripts/New.txt", "new")]);
         let game = prepare_mod(&local, &base, "m1").unwrap();
         assert_eq!(std::fs::read_to_string(game.join("Data/Units.ini")).unwrap(), "mod units");
-        assert!(!game.join("data").exists(), "no second folder spelled as the mod has it");
+        if case_sensitive(&local) {
+            assert!(!game.join("data").exists(), "no second folder spelled as the mod has it");
+        }
         assert_eq!(std::fs::read_to_string(game.join("Scripts/New.txt")).unwrap(), "new");
         assert_eq!(std::fs::read_to_string(game.join("Pictures/a.lit")).unwrap(), "picture", "the base's files are there");
         assert_eq!(std::fs::read_to_string(base.join("Data/Units.ini")).unwrap(), "base units", "the base is not written");
@@ -558,6 +571,12 @@ mod tests {
     fn a_mod_that_does_not_build_is_not_played() {
         let base = base_install("broken");
         let local = temp("broken-hub");
+        // Two files differing only in case cannot both exist where names ignore case (macOS).
+        if !case_sensitive(&local) {
+            let _ = std::fs::remove_dir_all(&base);
+            let _ = std::fs::remove_dir_all(&local);
+            return;
+        }
         // Two files differing only in case: the mod cannot be laid over the base.
         install_mod(&local, "m1", "1.0", &[("Data/A.ini", "a"), ("data/a.ini", "b")]);
         write_active(&local, Some("m1")).unwrap();
