@@ -1256,6 +1256,7 @@ class Pack:
                 ru = f"Кампания обрывается после главы {n}: имя следующей карты записано с расширением «.Dtm», игра его не находит."
             else:
                 ru = f"Кампания обрывается после главы {n}: следующей карты ({ref}) нет в архиве автора."
+            ru = self.fixes.get(tid, {}).get("note") or ru  # the author's own word, e.g. a beta with chapters to come
             e["status"] = "partial"
             e["status_note"] = {"ru": ru, "en": ""}
             self.chain_log.append(f"{e['id']}: ends after chapter {n} (status partial)")
