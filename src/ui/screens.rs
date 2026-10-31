@@ -112,7 +112,10 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
     clear_background(Color::from_rgba(24, 22, 20, 255));
     text_centered("RAZDOR", screen_width() / 2.0, 80.0, 64.0, ACCENT);
     text_centered(tr("Choose a scenario"), screen_width() / 2.0, 114.0, 24.0, DIM);
-    if button(60.0, 20.0, 48.0, 32.0, "...", true) {
+    // Razdor's own (the owner's decision, 2026-10-31): the buttons grow with the text size
+    // (`button_grow`); at Normal each keeps its size and place.
+    let g = super::display::button_grow();
+    if button(60.0, 20.0, 48.0 * g, 32.0 * g, "...", true) {
         super::new_game::open_experimental_menu();
         return None;
     }
@@ -155,10 +158,11 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool) -> Option
             }
         }
     }
-    if button(screen_width() - 220.0, 40.0, 180.0, 44.0, tr("Load a game"), true) {
+    // Kept 40 px from the right edge at Normal; grown to the left.
+    if button(screen_width() - 40.0 - 180.0 * g, 40.0, 180.0 * g, 44.0 * g, tr("Load a game"), true) {
         return Some(Screen::Load(super::saves::LoadView::new(super::saves::Back::Title)));
     }
-    if button(40.0, 40.0, 180.0, 44.0, tr("Map editor"), true) {
+    if button(40.0, 40.0, 180.0 * g, 44.0 * g, tr("Map editor"), true) {
         return Some(Screen::Editor);
     }
     let y = screen_height() - 110.0;
@@ -238,8 +242,10 @@ pub fn menu_not_found(no_install: bool) {
     let sh = screen_height();
     let k = super::chrome::k();
     let (x, w, bottom) = super::main_menu::not_found_box(k);
-    let btn_h = button_height(sh, k);
-    let btn_w = (240.0 * k).min(w);
+    // Razdor's own: the buttons grow with the text size (`button_grow`); the block grows upward.
+    let g = super::display::button_grow();
+    let btn_h = button_height(sh, k) * g;
+    let btn_w = (240.0 * k * g).min(w);
     let gap = 12.0 * k;
     let (title_size, body_size, lead) = (20.0 * k, 16.0 * k, 22.0 * k);
     let mut body = vec![tr("Razdor plays your own copy of Discord Times: version 1.8 with Community Update 1.2.").to_string()];
@@ -409,8 +415,10 @@ impl PhoneBlock {
     fn new(w: f32, buttons: u32) -> PhoneBlock {
         let sh = screen_height();
         let k = (sh / 600.0).max(1.0);
-        let btn_h = (sh * 0.12).max(34.0 * k);
-        let btn_w = (200.0 * k).min((w - 16.0 * k * (buttons - 1) as f32) / buttons as f32);
+        // Razdor's own: the buttons grow with the text size (`button_grow`); at Normal as before.
+        let g = super::display::button_grow();
+        let btn_h = (sh * 0.12).max(34.0 * k) * g;
+        let btn_w = (200.0 * k * g).min((w - 16.0 * k * (buttons - 1) as f32) / buttons as f32);
         let buttons_y = sh - 20.0 * k - btn_h;
         PhoneBlock { k, btn_h, btn_w, buttons_y, y: buttons_y - 66.0 * k }
     }
@@ -512,7 +520,9 @@ pub fn class_select(
             return Some(Screen::WorldMap);
         }
     }
-    if button(30.0, screen_height() - 70.0, 160.0, 44.0, tr("Back"), true) {
+    // Razdor's own: grows with the text size (`button_grow`), its bottom edge where it is at Normal.
+    let g = super::display::button_grow();
+    if button(30.0, screen_height() - 26.0 - 44.0 * g, 160.0 * g, 44.0 * g, tr("Back"), true) {
         return Some(Screen::ScenarioSelect);
     }
     None
@@ -523,7 +533,9 @@ fn end_screen(title: &str, subtitle: &str, color: Color, game: &mut Option<Game>
     clear_background(Color::from_rgba(20, 18, 16, 255));
     text_centered(title, screen_width() / 2.0, 260.0, 64.0, color);
     text_centered(subtitle, screen_width() / 2.0, 310.0, 26.0, DIM);
-    if button(screen_width() / 2.0 - 110.0, 380.0, 220.0, 50.0, tr("New game"), true) {
+    // Razdor's own: grows with the text size (`button_grow`), centred as at Normal.
+    let (w, h) = (220.0 * super::display::button_grow(), 50.0 * super::display::button_grow());
+    if button(screen_width() / 2.0 - w / 2.0, 380.0, w, h, tr("New game"), true) {
         *game = None;
         return Some(Screen::MainMenu);
     }
@@ -593,7 +605,11 @@ pub fn victory(game: &mut Option<Game>, scenarios: &[ScenarioEntry], content: Op
         // The button only when the next map can start: a map that needs a mod's units or items is
         // not offered (`hand_over` refuses it the same way).
         let startable = razdor::rules::map_refs::unknown(&e.scenario, &c).is_empty();
-        if startable && button(screen_width() / 2.0 - 160.0, 450.0, 320.0, 50.0, &trf!("Next map: {title}", title = e.scenario.title), true) {
+        // Below «New game», which is grown: the 20 px gap is kept (as at Normal, 450).
+        let g = super::display::button_grow();
+        let (w, h) = (320.0 * g, 50.0 * g);
+        let y = 380.0 + 50.0 * g + 20.0;
+        if startable && button(screen_width() / 2.0 - w / 2.0, y, w, h, &trf!("Next map: {title}", title = e.scenario.title), true) {
             cue(Cue::MenuPress);
             *game = Some(campaign_game(c, &prev, e));
             return Some(Screen::WorldMap);

@@ -101,10 +101,16 @@ fn grid_height(f: Formation) -> f32 {
     128.0 * c + (f.display_lines() as f32 - 1.0) * 133.0 * c
 }
 
+/// The stacked quick buttons' height in design px: 30, grown with the text size (`button_grow`,
+/// Razdor's own, the owner's decision of 2026-10-31); at Normal 30.
+fn stack_quick_h() -> f32 {
+    STACK_QUICK_H * super::display::button_grow()
+}
+
 /// The stacked window's strip top and its height, in design px (see [`STACK_BAND_Y`]).
 fn stacked_rows(f: Formation) -> (f32, f32) {
     let g = grid_height(f);
-    let enemy_top = STACK_BAND_Y + window_layout::BAND_H + STACK_QUICK_GAP + STACK_QUICK_H + STACK_GRID_GAP;
+    let enemy_top = STACK_BAND_Y + window_layout::BAND_H + STACK_QUICK_GAP + stack_quick_h() + STACK_GRID_GAP;
     let strip_y = enemy_top + g + STACK_GRID_GAP;
     (strip_y, strip_y + STRIP_H + STRIP_GAP + g + STACK_BOTTOM)
 }
@@ -138,8 +144,11 @@ impl Layout {
         let grow = chrome::phone_title_grow(k, chrome::FIXED_TITLE, dp);
         let y = ((sh - bar - wh) / 2.0).max(safe_top.max(2.0) + grow).round();
         let win = Rect::new(x, y, ww, wh);
-        let panel = Rect::new(x + 2.0 * k, y + 27.0 * k, 244.0 * k, 534.0 * k);
-        let quick = Rect::new(panel.x + 10.0 * k, panel.y + panel.h + 3.0 * k, panel.w - 20.0 * k, 30.0 * k);
+        // Razdor's own (the owner's decision, 2026-10-31): the quick buttons grow with the text size
+        // (`button_grow`); the unit's column gives up their growth, so the buttons keep the window's bottom.
+        let quick_grow = 30.0 * k * (super::display::button_grow() - 1.0);
+        let panel = Rect::new(x + 2.0 * k, y + 27.0 * k, 244.0 * k, 534.0 * k - quick_grow);
+        let quick = Rect::new(panel.x + 10.0 * k, panel.y + panel.h + 3.0 * k, panel.w - 20.0 * k, 30.0 * k + quick_grow);
         let (rx, rw) = (x + 248.0 * k, 586.0 * k);
         let strip = Rect::new(rx, y + 302.0 * k, rw, 20.0 * k);
         let c = card_scale(f);
@@ -156,7 +165,7 @@ impl Layout {
         let c = card_scale(f);
         let (strip_y, _) = stacked_rows(f);
         let band = Rect::new(win.x + 2.0 * k, win.y + STACK_BAND_Y * k, 586.0 * k, window_layout::BAND_H * k);
-        let quick = Rect::new(band.x + 10.0 * k, band.bottom() + STACK_QUICK_GAP * k, band.w - 20.0 * k, STACK_QUICK_H * k);
+        let quick = Rect::new(band.x + 10.0 * k, band.bottom() + STACK_QUICK_GAP * k, band.w - 20.0 * k, stack_quick_h() * k);
         let strip = Rect::new(win.x + 2.0 * k, win.y + strip_y * k, 586.0 * k, STRIP_H * k);
         let card = vec2(88.0 * c * k, 128.0 * c * k).round();
         let pitch = vec2(96.0 * c * k, 133.0 * c * k);
@@ -1582,7 +1591,9 @@ impl BattleView {
     /// badges on the cards stay visible.
     fn result_overlay(&self, l: &Layout, game: &mut Game, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>, outcome: Outcome) -> Option<Screen> {
         let k = l.k;
-        let r = Rect::new(l.panel.x + 8.0 * k, l.panel.y + 150.0 * k, l.panel.w - 16.0 * k, 200.0 * k);
+        // Razdor's own: the OK button grows with the text size (`button_grow`), and the box with it.
+        let g = super::display::button_grow();
+        let r = Rect::new(l.panel.x + 8.0 * k, l.panel.y + 150.0 * k, l.panel.w - 16.0 * k, (200.0 + 30.0 * (g - 1.0)) * k);
         let (title, sub, color) = match (outcome, self.battle.end_reason()) {
             (Outcome::Victory, Some(EndReason::Surrender(_))) => (tr("Victory!"), tr("The enemy surrenders."), GOLD),
             (Outcome::Victory, Some(EndReason::TurnLimit)) => (tr("Victory!"), tr("The turns run out; the field is yours."), GOLD),
@@ -1600,7 +1611,7 @@ impl BattleView {
         if total > 0 {
             shadow_centered(&razdor::trf!("Experience gained: {total}", total), inner.x + inner.w / 2.0, inner.y + 100.0 * k, (14.0 * k).round(), XP_COLOR);
         }
-        let (bw, bh) = (120.0 * k, 30.0 * k);
+        let (bw, bh) = (120.0 * k * g, 30.0 * k * g);
         let pressed = button(inner.x + (inner.w - bw) / 2.0, inner.y + inner.h - bh - 10.0 * k, bw, bh, "OK", true) || key(KeyCode::Enter);
         if !pressed {
             return None;
@@ -1634,7 +1645,9 @@ impl BattleView {
     /// score, and the ways on: "Again" (Enter), "Change armies" (Esc), "Main menu".
     fn custom_result(&self, l: &Layout, session: &Session) -> Option<CustomEnd> {
         let k = l.k;
-        let r = Rect::new(l.panel.x + 8.0 * k, l.panel.y + 130.0 * k, l.panel.w - 16.0 * k, 250.0 * k);
+        // Razdor's own: the three buttons grow with the text size (`button_grow`), and the box with them.
+        let g = super::display::button_grow();
+        let r = Rect::new(l.panel.x + 8.0 * k, l.panel.y + 130.0 * k, l.panel.w - 16.0 * k, (250.0 + 3.0 * 28.0 * (g - 1.0)) * k);
         let won = self.battle.outcome() == Outcome::Victory;
         let (title, color) = if won { (tr("Your army wins!"), GOLD) } else { (tr("The enemy army wins!"), RED_TEXT) };
         let sub = match self.battle.end_reason() {
@@ -1652,7 +1665,7 @@ impl BattleView {
         }
         let score = razdor::trf!("Rounds won: {won}, lost: {lost}", won = session.won, lost = session.lost);
         shadow_centered(&score, cx, inner.y + 96.0 * k, (13.0 * k).round(), GOLD);
-        let (bw, bh) = (inner.w - 30.0 * k, 28.0 * k);
+        let (bw, bh) = (inner.w - 30.0 * k, 28.0 * k * super::display::button_grow());
         let bx = inner.x + 15.0 * k;
         let by = |i: f32| inner.y + inner.h - (3.0 - i) * (bh + 6.0 * k) - 4.0 * k;
         if button(bx, by(0.0), bw, bh, tr("Again (Enter)"), true) || key(KeyCode::Enter) || key(KeyCode::KpEnter) {

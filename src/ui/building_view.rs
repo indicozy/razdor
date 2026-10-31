@@ -2296,7 +2296,11 @@ fn sanctuary(game: &mut Game, f: &Frame, view: &mut BuildingView, message: &mut 
     chrome::silver_frame(at(f, 255.0, 241.0, 266.0, 50.0), k.max(1.0));
     chrome::silver_frame(at(f, 255.0, 241.0, 160.0, 50.0), k.max(1.0));
     gold_group(game, at(f, 255.0, 241.0, 160.0, 50.0));
-    let buy = at(f, 424.0, 247.0, 92.0, 36.0);
+    // Razdor's own: the Buy button grows with the text size (`button_grow`), up to the 50-px frame it
+    // sits in, centred on the frame's middle as at Normal (its 36 px at y 247).
+    let g = super::display::button_grow();
+    let bh = (36.0 * g).min(46.0);
+    let buy = at(f, 424.0, 265.0 - bh / 2.0, 92.0, bh);
     if button_sounding(buy.x, buy.y, buy.w, buy.h, tr("Buy"), can, Cue::Gold) {
         if let Some(s) = chosen {
             *message = game.learn_spell(s.id).err().map(service_error);
