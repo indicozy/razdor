@@ -2043,13 +2043,32 @@ pub fn small_button(x: f32, y: f32, w: f32, h: f32, label: &str, enabled: bool) 
     };
     draw_rectangle(x, y, w, h, bg);
     draw_rectangle_lines(x, y, w, h, 1.0, if enabled { DIM } else { Color::new(0.3, 0.3, 0.3, 1.0) });
-    super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
-        let size = fit_size(label, w - 6.0, 17.0);
-        let label = &ellipsize(label, w - 6.0, size);
-        let d = measure(label, size);
-        text(label, x + (w - d.width) / 2.0, y + (h + d.offset_y) / 2.0 - 1.0, size, if enabled { INK } else { DIM });
-    });
+    compact_label(Rect::new(x, y, w, h), label, if enabled { INK } else { DIM });
     pressed
+}
+
+/// The centred label of [`small_button`] and [`toggle_button`]. Razdor's own (the owner's
+/// decision, 2026-10-31): at Large and Largest text it grows with the text size
+/// (`display::button_grow`), up to what the button's width and height take; never below its size
+/// at Normal, which is drawn exactly as before.
+fn compact_label(r: Rect, label: &str, color: Color) {
+    super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
+        let normal = fit_size(label, r.w - 6.0, 17.0);
+        let g = super::display::button_grow();
+        let grown = if g > 1.0 {
+            let tallest = (r.h * 0.75).floor().max(normal);
+            super::dt_font::legacy_metrics_if(true, || super::display::grown_label_size(normal, g, r.w - 6.0, |s| measure(label, s).width)).min(tallest)
+        } else {
+            normal
+        };
+        let is_grown = grown > normal;
+        super::dt_font::legacy_metrics_if(is_grown, || {
+            let size = if is_grown { grown } else { normal };
+            let label = &ellipsize(label, r.w - 6.0, size);
+            let d = measure(label, size);
+            text(label, r.x + (r.w - d.width) / 2.0, r.y + (r.h + d.offset_y) / 2.0 - 1.0, size, color);
+        });
+    });
 }
 
 /// A button that stays lit while `on` (tool and mode pickers). True when clicked.
@@ -2059,12 +2078,7 @@ pub fn toggle_button(x: f32, y: f32, w: f32, h: f32, label: &str, on: bool) -> b
     let bg = if on { Color::new(0.55, 0.42, 0.18, 1.0) } else if down { Color::new(0.36, 0.28, 0.18, 1.0) } else if hover { Color::new(0.28, 0.22, 0.14, 1.0) } else { Color::new(0.22, 0.18, 0.12, 1.0) };
     draw_rectangle(x, y, w, h, bg);
     draw_rectangle_lines(x, y, w, h, 1.0, if on { ACCENT } else { DIM });
-    super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
-        let size = fit_size(label, w - 6.0, 17.0);
-        let label = &ellipsize(label, w - 6.0, size);
-        let d = measure(label, size);
-        text(label, x + (w - d.width) / 2.0, y + (h + d.offset_y) / 2.0 - 1.0, size, INK);
-    });
+    compact_label(Rect::new(x, y, w, h), label, INK);
     if pressed {
         claim();
     }
