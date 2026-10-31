@@ -703,8 +703,11 @@ are not in the mod's folder.
 **Switching** (the new-game window, `new_game::scenario_select`): when a mod is installed, a «Мод» drop-down
 (`view_choice_at`, a full-width row under «Добавить карту…», the hub hint moves below it; «Мод: нет» then
 «Мод: <title>» per installed mod) sets
-`MOD_REQUEST`; `App::choose_mod` calls `hub::use_mod` (builds the folder synchronously, writes
-`active.json`), then `reload_install` (`DtArt::from_env` → `Assets::adopt_install` → content → scenarios).
+`MOD_REQUEST`; `App::choose_mod` starts `build_mod` on a worker (1441): `hub::use_mod` builds the folder and
+writes `active.json`, then `DtInstall::from_env` and the scenario list are made there too. `App::poll_mod_switch`
+(each frame) applies the result on the UI thread (`apply_mod`: `DtArt::load` → `Assets::adopt_install` → content →
+scenarios). While it runs the window's mod row reads «Готовлю мод…» and takes no choice, and Next, Enter and
+«Добавить карту…» wait (`new_game::start_allowed`): no game starts on a half-built folder.
 A mod that does not build shows its reason in `App::message` and the base is played. Titles come from
 `installed.json` (`hub::installed_mods`), not from the catalog, so the picker reads no network.
 

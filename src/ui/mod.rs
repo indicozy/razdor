@@ -142,11 +142,11 @@ fn load_entry(m: &razdor::dt::install::MapEntry) -> Option<ScenarioEntry> {
 /// The maps installed from the hub (`razdor::hub`), after the install's in the new-game list: the
 /// ones the mod played lists (`MapGate`, `map_listed`), each once, not where the install has the
 /// same map (the same bytes).
-fn hub_entries(assets: &Assets) -> Vec<ScenarioEntry> {
+fn hub_entries(install: Option<&razdor::dt::install::DtInstall>) -> Vec<ScenarioEntry> {
     let Some(dir) = razdor::hub::local_dir() else { return Vec::new() };
     let gate = razdor::hub::MapGate::read(&dir);
-    let install: Vec<PathBuf> = assets.dt.iter().flat_map(|d| d.install.maps.iter()).map(|m| m.path.clone()).collect();
-    let install = razdor::hub::InstallMaps::new(&install);
+    let install_maps: Vec<PathBuf> = install.iter().flat_map(|d| d.maps.iter()).map(|m| m.path.clone()).collect();
+    let install = razdor::hub::InstallMaps::new(&install_maps);
     razdor::editor::files::list_dir(&razdor::hub::maps_dir(&dir))
         .iter()
         .filter(|m| gate.listed(&m.name, install.has_same(&m.path)))
@@ -162,6 +162,53 @@ fn hub_mods() -> Vec<(String, razdor::hub::Text)> {
 /// The mod the game plays, if any.
 fn hub_active() -> Option<String> {
     razdor::hub::local_dir().and_then(|dir| razdor::hub::active_mod(&dir))
+}
+
+/// A mod switch on its worker (1441): the mod's folder is built and the install read there, and
+/// the App applies the result on the UI thread (`poll_mod_switch`). The new-game window waits for
+/// it and starts nothing meanwhile, so a folder is never played half-built.
+struct ModSwitch {
+    /// The mod asked for (`None`: the base game).
+    id: Option<String>,
+    job: std::sync::mpsc::Receiver<ModBuilt>,
+}
+
+/// What a mod switch's worker made.
+struct ModBuilt {
+    /// The folder built (`razdor::hub::use_mod`), or why not.
+    built: Result<(), String>,
+    /// The install read again (the mod's folder when it plays), if it reads.
+    install: Option<razdor::dt::install::DtInstall>,
+    /// The scenario list of that install (`scenarios_of`).
+    scenarios: Vec<ScenarioEntry>,
+}
+
+/// The worker's work of a mod switch: the choice `id` made (its folder built, `use_mod`), then
+/// the install read again and its scenario list. A choice that does not build reads nothing.
+fn build_mod(local: &std::path::Path, base: &std::path::Path, id: Option<&str>) -> ModBuilt {
+    let built = razdor::hub::use_mod(local, base, id).map(|_| ());
+    if built.is_err() {
+        return ModBuilt { built, install: None, scenarios: Vec::new() };
+    }
+    razdor::dt::preload::forget_ready();
+    let install = match razdor::dt::install::DtInstall::from_env() {
+        Ok(install) => Some(install),
+        Err(e) => {
+            razdor::diag!("Discord Times install not usable, using placeholders: {e}");
+            None
+        }
+    };
+    let scenarios = scenarios_of(install.as_ref());
+    ModBuilt { built, install, scenarios }
+}
+
+/// A worker's result once it is there: `None` while it runs; `Err` when it ended without one.
+fn finished<T>(job: &std::sync::mpsc::Receiver<T>) -> Option<Result<T, ()>> {
+    match job.try_recv() {
+        Ok(v) => Some(Ok(v)),
+        Err(std::sync::mpsc::TryRecvError::Empty) => None,
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(Err(())),
+    }
 }
 
 /// A scenario of the player's install, loaded for the select screen.
@@ -259,6 +306,8 @@ pub struct App {
     mods: Vec<(String, razdor::hub::Text)>,
     /// The mod the game plays (`razdor::hub::use_mod`), if any.
     active_mod: Option<String>,
+    /// A mod switch whose folder is built on a worker (`choose_mod`, 1441), until it is applied.
+    mod_switch: Option<ModSwitch>,
 }
 
 /// The install's content for the new-game windows (`None` without an install).
@@ -277,21 +326,15 @@ fn dt_content_of(assets: &Assets, impossible: Option<bool>) -> Option<Arc<Conten
 
 /// The install's maps, each read once (a map that fails to load is logged and left out), then the
 /// hub's maps.
-fn scenarios_of(assets: &Assets) -> Vec<ScenarioEntry> {
-    assets
-        .dt
-        .iter()
-        .flat_map(|d| d.install.maps.iter())
-        .filter_map(load_entry)
-        .chain(hub_entries(assets))
-        .collect()
+fn scenarios_of(install: Option<&razdor::dt::install::DtInstall>) -> Vec<ScenarioEntry> {
+    install.iter().flat_map(|d| d.maps.iter()).filter_map(load_entry).chain(hub_entries(install)).collect()
 }
 
 impl App {
     pub fn new(assets: Assets, demo: Arc<Content>) -> Self {
         let audio = Audio::new(assets.dt.as_ref().map(|d| &d.install));
         let dt_content = dt_content_of(&assets, audio.settings.impossible);
-        let scenarios = scenarios_of(&assets);
+        let scenarios = scenarios_of(assets.dt.as_ref().map(|d| &d.install));
         minimap::set_size(audio.settings.minimap_size);
         minimap::set_corner(audio.settings.minimap_corner);
         keymap::load(&audio.settings.keys);
@@ -327,6 +370,7 @@ impl App {
             session_checked: false,
             mods: hub_mods(),
             active_mod: hub_active(),
+            mod_switch: None,
         };
         app.follow_row_setting();
         app
@@ -343,7 +387,7 @@ impl App {
         self.refresh_mods();
         let dir = razdor::hub::local_dir().map(|d| razdor::hub::maps_dir(&d));
         self.scenarios.retain(|e| dir.as_ref().is_none_or(|d| !e.path.starts_with(d)));
-        self.scenarios.extend(hub_entries(&self.assets));
+        self.scenarios.extend(hub_entries(self.assets.dt.as_ref().map(|d| &d.install)));
     }
 
     /// Reads the installed mods and the one played again (after the hub or a switch changed them).
@@ -352,23 +396,65 @@ impl App {
         self.active_mod = hub_active();
     }
 
-    /// The new-game window's «Мод» choice: `None` is the base game. The mod's folder is built
-    /// (synchronously; a big mod takes a moment), the choice is kept and the install is read
-    /// again. A mod that cannot be played says why, and the base game is played.
+    /// The new-game window's «Мод» choice: `None` is the base game. The mod's folder is built and
+    /// the install read again on a worker (`build_mod`: a big mod takes seconds, 1441); the App
+    /// applies it when it lands (`poll_mod_switch`). Meanwhile the window says so and starts nothing.
     fn choose_mod(&mut self, id: Option<String>) {
+        if self.mod_switch.is_some() {
+            return;
+        }
         let (Some(local), Some(base)) = (razdor::hub::local_dir(), razdor::dt::install::base_dir()) else { return };
-        if let Err(e) = razdor::hub::use_mod(&local, &base, id.as_deref()) {
+        let (job_local, job_base, asked) = (local.clone(), base.clone(), id.clone());
+        let (tx, job) = std::sync::mpsc::channel();
+        let spawned = std::thread::Builder::new().name("mod-switch".into()).spawn(move || {
+            let _ = tx.send(build_mod(&job_local, &job_base, asked.as_deref()));
+        });
+        if spawned.is_ok() {
+            self.mod_switch = Some(ModSwitch { id, job });
+        } else {
+            // No thread to be had: the switch is made here, as before.
+            let built = build_mod(&local, &base, id.as_deref());
+            self.apply_mod(id, built);
+        }
+    }
+
+    /// Takes the worker's result once it is there (each frame, on the UI thread).
+    fn poll_mod_switch(&mut self) {
+        let Some(switch) = self.mod_switch.as_ref() else { return };
+        let Some(done) = finished(&switch.job) else { return };
+        let id = switch.id.clone();
+        self.mod_switch = None;
+        match done {
+            Ok(built) => self.apply_mod(id, built),
+            Err(()) => {
+                // The worker ended without a result: the base game's list stays, and the player is told.
+                self.refresh_mods();
+                self.message = Some(tr("The mod does not play; the base game is played.").into());
+            }
+        }
+    }
+
+    /// Applies a finished switch: the install the worker read is adopted (the art is made here,
+    /// it is cheap), the list is the one it made, and the others' built folders go, as the
+    /// game reads the new one now.
+    fn apply_mod(&mut self, id: Option<String>, built: ModBuilt) {
+        if let Err(e) = built.built {
             self.message = Some(razdor::trf!("Cannot play the mod: {e}.", e));
             return;
         }
-        self.reload_install();
+        if let Some(install) = built.install {
+            self.assets.adopt_install(dt_art::DtArt::load(install));
+            self.dt_content = dt_content_of(&self.assets, self.audio.settings.impossible);
+            self.scenarios = built.scenarios;
+        }
         self.refresh_mods();
         if self.active_mod != id {
             self.message = Some(tr("The mod does not play; the base game is played.").into());
             return;
         }
-        // The game reads the new folder now: the others' built folders go (their files stay).
-        razdor::hub::keep_only_game_folder(&local, id.as_deref());
+        if let Some(local) = razdor::hub::local_dir() {
+            razdor::hub::keep_only_game_folder(&local, id.as_deref());
+        }
     }
 
     /// Opens the map editor (the title screen's button and `--editor`).
@@ -456,7 +542,7 @@ impl App {
                 Err(e) => razdor::diag!("maps: {e}"),
             }
         }
-        self.scenarios = scenarios_of(&self.assets);
+        self.scenarios = scenarios_of(self.assets.dt.as_ref().map(|d| &d.install));
         if let Some(first) = written.first() {
             new_game::pick_map(first.rsplit_once('.').map_or(first.as_str(), |(stem, _)| stem));
         }
@@ -940,7 +1026,7 @@ impl App {
         if let Some(dt) = dt_art::DtArt::from_env() {
             self.assets.adopt_install(dt);
             self.dt_content = dt_content_of(&self.assets, self.audio.settings.impossible);
-            self.scenarios = scenarios_of(&self.assets);
+            self.scenarios = scenarios_of(self.assets.dt.as_ref().map(|d| &d.install));
         }
         // The install read may have dropped a stale mod choice.
         self.refresh_mods();
@@ -983,7 +1069,7 @@ impl App {
             // The settings as they are now (nothing changed them on the title screen).
             self.audio = Audio::new(self.assets.dt.as_ref().map(|d| &d.install));
             self.dt_content = dt_content_of(&self.assets, self.audio.settings.impossible);
-            self.scenarios = scenarios_of(&self.assets);
+            self.scenarios = scenarios_of(self.assets.dt.as_ref().map(|d| &d.install));
             // The saves are the install's now: its session slot is looked for again.
             self.session_checked = false;
         }
@@ -995,6 +1081,7 @@ impl App {
         #[cfg(target_os = "android")]
         mobile::refresh_keyboard_inset();
         self.mobile_install_poll();
+        self.poll_mod_switch();
         // The screen's orientation from the settings (Android; applied at start and on each change).
         #[cfg(target_os = "android")]
         android::follow_orientation(self.audio.settings.orientation);
@@ -1213,7 +1300,7 @@ impl App {
             }
             (Screen::Options, _) => main_menu::options(&mut self.audio.settings, install_wide).then_some(Screen::MainMenu),
             (Screen::ScenarioSelect, _) => {
-                let next = new_game::scenario_select(&self.scenarios, self.dt_content.is_some(), &self.mods, self.active_mod.as_deref());
+                let next = new_game::scenario_select(&self.scenarios, self.dt_content.is_some(), &self.mods, self.active_mod.as_deref(), self.mod_switch.is_some());
                 match new_game::take_mod_request() {
                     // A mod picked: it is played from the next frame, on the list it brings.
                     Some(id) => {
@@ -1662,5 +1749,35 @@ mod tests {
         let saves = vec![(50, PathBuf::from("pinned")), (90, PathBuf::from("b")), (90, PathBuf::from("c")), (70, PathBuf::from("a"))];
         assert_eq!(latest_save(saves), Some(PathBuf::from("c")));
         assert_eq!(latest_save(Vec::new()), None);
+    }
+}
+
+#[cfg(test)]
+mod mod_switch_tests {
+    use super::*;
+
+    /// The poll (1441): a worker's result is none while it runs, its value once it is sent, and
+    /// an error when the worker ended without one (it panicked).
+    #[test]
+    fn a_worker_result_is_taken_once_it_is_there() {
+        let (tx, rx) = std::sync::mpsc::channel::<u32>();
+        assert!(finished(&rx).is_none(), "still running: nothing to apply");
+        tx.send(7).unwrap();
+        assert!(matches!(finished(&rx), Some(Ok(7))));
+        let (tx, rx) = std::sync::mpsc::channel::<u32>();
+        drop(tx);
+        assert!(matches!(finished(&rx), Some(Err(()))), "a worker that ended without a result");
+    }
+
+    /// A choice that does not build reads no install and lists nothing: the list and the install
+    /// stay as they were, and the reason is given (the switch is refused before the install is read).
+    #[test]
+    fn a_choice_that_does_not_build_reads_no_install() {
+        let dir = std::env::temp_dir().join(format!("razdor-switch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let built = build_mod(&dir, &dir, Some("no/such"));
+        assert!(built.built.is_err(), "a mod id that is no file name is refused");
+        assert!(built.install.is_none() && built.scenarios.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

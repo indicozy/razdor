@@ -138,6 +138,23 @@ pub fn quiet() -> bool {
 local! {
     /// `RAZDOR_SCENE_LANGUAGE` has opened the language list.
     static LANGUAGE_OPENED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// `RAZDOR_SCENE_MOD_LIST` has opened the «Мод» list of the new-game window.
+    static MOD_LIST_OPENED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// `RAZDOR_SCENE_MOD_LIST=1`: the new-game window's «Мод» drop-down opens, once (1441: the phone
+/// check of the filter that must not bring the keyboard up).
+pub fn open_mod_list() -> bool {
+    if MOD_LIST_OPENED.with(|o| o.get()) || !std::env::var("RAZDOR_SCENE_MOD_LIST").is_ok_and(|v| v == "1") {
+        return false;
+    }
+    MOD_LIST_OPENED.with(|o| o.set(true));
+    true
+}
+
+/// `RAZDOR_SCENE_MOD_BUSY=1`: the new-game window shows a mod being built («Готовлю мод…»).
+pub fn mod_busy() -> bool {
+    std::env::var("RAZDOR_SCENE_MOD_BUSY").is_ok_and(|v| v == "1")
 }
 
 /// `RAZDOR_SCENE_LANGUAGE=1`: the first language button drawn (the main menu's, the advanced
@@ -417,6 +434,12 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             // `scenarios:<map>`: that map's row picked.
             if let Some(name) = parts.next() {
                 super::new_game::pick_map(name);
+            }
+            if mod_busy() {
+                // A mod being built: a worker whose result never comes (its sender is kept alive).
+                let (tx, job) = std::sync::mpsc::channel();
+                std::mem::forget(tx);
+                app.mod_switch = Some(super::ModSwitch { id: None, job });
             }
             app.screen = Screen::ScenarioSelect;
             return Ok(());

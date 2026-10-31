@@ -586,7 +586,14 @@ pub fn take_mod_request() -> Option<Option<String>> {
 
 /// The new-game window (`scenarios` its list, `mods` the installed mods with their titles,
 /// `active` the one played).
-pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(String, razdor::hub::Text)], active: Option<&str>) -> Option<Screen> {
+/// Whether the new game can be started (Next, Enter) with the list `can` and a mod being built
+/// (`busy`): not while the folder is built (1441), so the game never plays a half-built one.
+pub fn start_allowed(can: bool, busy: bool) -> bool {
+    can && !busy
+}
+
+/// The scenario list window. `busy`: a mod is being built on a worker (`App::choose_mod`).
+pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(String, razdor::hub::Text)], active: Option<&str>, busy: bool) -> Option<Screen> {
     if RULES_OPEN.with(Cell::get) {
         super::main_menu::backdrop();
         experimental_menu();
@@ -849,7 +856,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
         }
         drop(clip);
     }
-    add_map_button(&win, has_install, lift);
+    add_map_button(&win, has_install && !busy, lift);
     // Razdor's filter and order (a players' wish), under the list where the original's window
     // has nothing: each opens a drop-down list; the choice is kept in the settings.
     // The footer (Razdor's own, see `footer_video_h`): at Normal the original's row, unchanged; at
@@ -874,7 +881,19 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
         labels.extend(mods.iter().map(|(_, title)| format!("{}: {}", tr("Mod"), title.get(i18n::lang()))));
         let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
         let current = active.and_then(|a| mods.iter().position(|(id, _)| id == a)).map_or(0, |i| i + 1);
-        if let Some(v) = view_choice_at(&win, win.rect(4.0, MOD_ROW_Y - lift, 278.0, MOD_ROW_H * grow), "razdor:scenario-mod", current as i64, &refs) {
+        let row = win.rect(4.0, MOD_ROW_Y - lift, 278.0, MOD_ROW_H * grow);
+        // While the folder is built the row says so and takes no choice (1441).
+        let picked = if busy {
+            chrome::marble_button(row, tr("Preparing the mod…"), false, false);
+            None
+        } else {
+            view_choice_at(&win, row, "razdor:scenario-mod", current as i64, &refs)
+        };
+        if !busy && super::snapshot::open_mod_list() {
+            let options: Vec<(i64, String)> = labels.iter().enumerate().map(|(i, l)| (i as i64, l.clone())).collect();
+            super::widgets::open_list("razdor:scenario-mod", row, current as i64, &options, win.k);
+        }
+        if let Some(v) = picked {
             let id = (v > 0).then(|| mods[v as usize - 1].0.clone());
             MOD_REQUEST.with_borrow_mut(|r| *r = Some(id));
             PICKED.with(|p| p.set(0));
@@ -883,6 +902,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
         }
     }
     let can = !list.is_empty();
+    let start = start_allowed(can, busy);
     if experimental_rules() != ExperimentalRules::default() {
         let label_y = if two_rows { choice_y + b + 2.0 } else { 470.0 };
         let label = win.rect(12.0, label_y, 306.0, 12.0);
@@ -901,7 +921,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
         return None;
     }
     let selected_map = campaign_start(&list, picked);
-    if (win.button(next_x, next_w, &own("Buttons", "Next", n_("Next")), can) || (can && key(KeyCode::Enter))) && next.is_none() {
+    if (win.button(next_x, next_w, &own("Buttons", "Next", n_("Next")), start) || (start && key(KeyCode::Enter))) && next.is_none() {
         cue(Cue::Button);
         next = selected_map.map(|i| Screen::ClassSelect { scenario: Some(i) });
     }
@@ -1446,6 +1466,15 @@ mod tests {
         assert!(hit.contains(star.center()), "the star's own tap still works");
         assert!(!hit.contains(vec2(bar.x + 4.0 * k, star.center().y)), "a tap on the bar's track is not the star's");
         assert_eq!(clip_left_of(grown, None), grown, "no bar: the area as grown");
+    }
+
+    /// A mod being built starts nothing (1441): Next and Enter wait for the folder, as an empty
+    /// list does, so a game never starts on a half-built folder.
+    #[test]
+    fn a_mod_being_built_starts_nothing() {
+        assert!(start_allowed(true, false), "the list and no mod being built: Next starts");
+        assert!(!start_allowed(true, true), "the folder is being built: no start");
+        assert!(!start_allowed(false, false), "an empty list: no start");
     }
 
     #[test]

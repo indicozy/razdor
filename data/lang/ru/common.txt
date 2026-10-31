@@ -138,6 +138,7 @@ Does not start: {note} = Не запускается: {note}
 Not checked yet = Статус ещё не проверен
 No mod = нет
 Cannot play the mod: {e}. = Мод не открыть: {e}.
+Preparing the mod… = Готовлю мод…
 The mod does not play; the base game is played. = Мод не запускается: играется базовая игра.
 Its maps are in the new game's list. = Её карты есть в списке новой игры.
 Needed by: {names} = Нужен для: {names}
