@@ -15,7 +15,8 @@ repo and the output holds game content, so it lives only in the scratch folder.
   `requires` it, the way the hub builds it: Community Update, then each required package in
   dependency order, then the mod's own package. Programs (`.exe`, `.dll`), the uninstaller
   (`unins*`), saves (`.sav`, `Saves/`) and logs (`Logs/`, `.log`, crash logs) are left out. A
-  file the base already has, byte for byte, is refused.
+  file the base already has, byte for byte, is refused. The sounds in it are encoded (see
+  Sounds below).
 - **Rebuild check**: for every mod, that chain (Community Update + packages) is rebuilt in
   memory and compared with the mod's tested `game/` folder file by file (by sha256, names
   ignoring case, programs and saves left out on both sides). A mod that differs is not
@@ -69,6 +70,36 @@ thread's newest files, mod `vanilla`, status full.
 Archive maps take `added` from the file's own mtime, which the extraction kept from the
 archive (YYYY-MM-DD, UTC).
 
+## Sounds in mod packages
+
+A mod's `Sounds/*.raw` music is most of its size, so a package carries its sounds as Ogg
+Vorbis, not as the game's files:
+
+- Every member under `Sounds/` whose extension is `.raw` becomes `.ogg` under the same folder
+  and stem (`Sounds/battle1.raw` → `Sounds/battle1.ogg`). The package carries only the ogg.
+- A `.wav` under `Sounds/` becomes `.ogg` only when the ogg is under half its size; otherwise
+  the wav stays as it is.
+- Encoding: ffmpeg with libvorbis at quality 3, mono, with no metadata and bit-exact output.
+  A `.raw` is read as headerless signed 16-bit little-endian mono at 22050 Hz; a `.wav` is
+  read from its own header. The command, per file:
+  `nice -n 19 taskset -c 8-19 ffmpeg -nostdin -hide_banner -loglevel error -f s16le -ar 22050 -ac 1 -i SRC -c:a libvorbis -q:a 3 -ac 1 -map_metadata -1 -fflags +bitexact -flags:a +bitexact OUT.ogg`
+  (for a `.wav` the `-f s16le -ar 22050 -ac 1` input options are left out).
+- The encodes are cached in `<--src>/ogg-cache/` as `<sha256 of the source bytes>-q3.ogg`;
+  each is written to a temp name and renamed, so a cached file is always whole. A rerun
+  re-encodes only what is new. The cache is scratch data, not part of the output.
+- At most 12 encodes run at once, all at the CPU pin (CPUs 8-19, nice 19).
+- The engine plays a same-stem `.ogg` in place of the file the ini names, and a `.ogg` wins over
+  a `.raw` or `.wav` of the same stem in the same folder. The rebuild check still compares the
+  original files, since it models the tested game folder.
+- Kept as they are (a note in `report.md`): two members that would share an ogg name (for
+  example `Battle1.raw` and `battle1.wav`), and a member whose mod ships a same-stem `.ogg`
+  in its own `Sounds/`.
+- A build with mods needs `ffmpeg` on PATH; without it the build stops before any mod.
+- `verify_package` allows `.ogg` members under `Sounds/` (each must start with `OggS`). A
+  mod's own `.ogg` files are still left out of packages, since `.ogg` is not in `GAME_EXT`.
+- `report.md` lists the mods with the files packed as Ogg and the bytes saved, and the total.
+  The build also prints the total.
+
 ## Run
 
 ```sh
@@ -77,12 +108,14 @@ nice -n 19 taskset -c 8-19 python3 -I tools/community-pack/build.py \
   --archive-maps /mnt/ai_models/razdor-scratch/maps-2026-10-01 \
   --base "/home/indicozy/Games/Discord Times Community Update" \
   --out /mnt/ai_models/razdor-scratch/community-pack/out \
+  --fixes /mnt/ai_models/razdor-scratch/community-pack/campaign-fixes.json \
   --extra 1155867978567516210=/mnt/ai_models/razdor-scratch/community-pack/maps/external/erzgess/Stinger-Paramount_War.zip
 # --no-forum-maps leaves the forum maps out (for a build before maps/test.tsv exists)
 ```
 
 The run is deterministic: sorted entries, sorted zip members, fixed zip times and modes, so
-the same inputs give the same bytes. The run hashes the mod folders, so it takes a few minutes.
+the same inputs give the same bytes. The run hashes the mod folders and encodes the sounds
+(the first run of a new mod is slow; the cache makes the reruns quick). It takes a few minutes.
 Each run clears the tool's own files (assets, `index.json`, `report.md`) from `--out`.
 
 Self-test (offline, temp folders, includes a small end-to-end build):

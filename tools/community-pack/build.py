@@ -7,7 +7,8 @@ files it names. The assets become the files of a GitHub release on indicozy/razd
 - One entry per mod with status full or partial: a zip (`archive: true`) with the files that
   differ from its base. The base is Community Update, or the built folder of the mod it is
   made on (then the entry requires that mod). Programs (`.exe`, `.dll`), the uninstaller, saves
-  and logs are left out. A file the base already has is refused, byte for byte.
+  and logs are left out. A file the base already has is refused, byte for byte. A mod's
+  `Sounds/*.raw` (and each `.wav` that halves) go in as Ogg Vorbis under the same stem.
 - One entry per map thread of the maps forum (its newest version's files only; a campaign when
   it has several map files; the maps of a mod the catalog carries, requiring it). `maps-le` is
   not read.
@@ -33,6 +34,7 @@ import csv
 import datetime
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -41,7 +43,10 @@ import struct
 import subprocess
 import sys
 import tempfile
+import wave
 import zipfile
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 
 GUILD = "1007626631059361792"
 FORMAT = 1
@@ -51,6 +56,13 @@ UNKNOWN_AUTHOR = "неизвестен"
 TEXT_LIMIT = 1500
 DTM_HEADER_SIZE = 0x12F  # src/dt/dtm.rs HEADER_SIZE
 PREVIEW_BOX = "480x270"
+# A mod's Sounds files go in as Ogg Vorbis (the engine plays a same-stem .ogg in place of the named file).
+# `.raw` is headerless s16le mono 22050 Hz; `.wav` is read from its header. A `.wav` changes only when its
+# ogg is under half its size. The encodes of one mod run in parallel; the CPU pin keeps them off the desktop.
+OGG_QUALITY = "3"
+SOUND_EXT = (".raw", ".wav")
+ENCODE_WORKERS = 12
+CPU_PIN = ["nice", "-n", "19", "taskset", "-c", "8-19"]
 CHUNK = 1 << 20
 ZIP_TIME = (1980, 1, 1, 0, 0, 0)
 PROGRAM_EXT = (".exe", ".dll")
@@ -238,13 +250,94 @@ def build_zip(members, zip_path):
             zf.writestr(info, data, compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
 
 
+def package_ogg(rel):
+    """Whether a package member is an encoded sound (an .ogg under Sounds/, see package_sounds). A mod's own
+    .ogg files are not: `excluded` leaves them out of the members, so they never reach a package."""
+    parts = rel.split("/")
+    return len(parts) > 1 and parts[0].lower() == "sounds" and rel.lower().endswith(".ogg")
+
+
+def ffmpeg_available():
+    return shutil.which("ffmpeg") is not None
+
+
+def ogg_encode(src_path, ext, cache_dir):
+    """The Ogg Vorbis (quality 3, mono) of a sound file, cached as `<sha256 of its bytes>-q3.ogg` in cache_dir.
+    A `.raw` is headerless s16le 22050 Hz mono; a `.wav` is read from its header. Encoded to a temp name, then
+    renamed, so a cached file is always whole. Runs ffmpeg at the CPU pin (CPUs 8-19, nice 19)."""
+    final = os.path.join(cache_dir, f"{sha256_file(src_path)}-q3.ogg")
+    if os.path.isfile(final):
+        return final
+    os.makedirs(cache_dir, exist_ok=True)
+    work = tempfile.mkdtemp(prefix=".enc-", dir=cache_dir)
+    try:
+        out = os.path.join(work, "out.ogg")
+        argv = CPU_PIN + ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error"]
+        if ext == ".raw":
+            argv += ["-f", "s16le", "-ar", "22050", "-ac", "1"]
+        argv += ["-i", src_path, "-c:a", "libvorbis", "-q:a", OGG_QUALITY, "-ac", "1",
+                 "-map_metadata", "-1", "-fflags", "+bitexact", "-flags:a", "+bitexact", out]
+        try:
+            done = subprocess.run(argv, capture_output=True, encoding="utf-8", errors="replace")
+        except OSError as e:
+            raise Fail(f"cannot run ffmpeg (or the CPU pin, nice and taskset): {e}")
+        if done.returncode != 0 or not os.path.isfile(out) or os.path.getsize(out) == 0:
+            raise Fail(f"ffmpeg could not encode {src_path}: {done.stderr.strip()[-300:] or 'no output'}")
+        os.replace(out, final)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    return final
+
+
+def package_sounds(slug, members, game, cache_dir, notes):
+    """The members of a package with each `Sounds/` `.raw` (and each `.wav` whose ogg is under half its size)
+    replaced by its Ogg Vorbis under the same folder and stem, extension `.ogg`. Returns (members, bytes saved,
+    number replaced). Two members that would share an ogg name (ignoring case) keep their originals, and so
+    does a member whose mod ships a same-stem `.ogg` itself; both are noted. The encodes run in parallel."""
+    def ogg_key(rel):
+        return os.path.splitext(rel)[0].lower() + ".ogg"
+
+    shipped = {rel.lower() for rel in game.paths}
+    cands = [i for i, (rel, _) in enumerate(members)
+             if len(rel.split("/")) > 1 and rel.split("/")[0].lower() == "sounds"
+             and os.path.splitext(rel)[1].lower() in SOUND_EXT]
+    count = Counter(ogg_key(members[i][0]) for i in cands)
+    todo = []
+    for i in cands:
+        rel = members[i][0]
+        if count[ogg_key(rel)] > 1:
+            notes.append(f"{slug}: {rel} and another Sounds file would share the name {ogg_key(rel)}; both are packed as they are.")
+        elif ogg_key(rel) in shipped:
+            notes.append(f"{slug}: the mod ships {ogg_key(rel)} itself; {rel} is packed as it is.")
+        else:
+            todo.append(i)
+    with ThreadPoolExecutor(max_workers=ENCODE_WORKERS) as pool:
+        futures = {i: pool.submit(ogg_encode, members[i][1], os.path.splitext(members[i][0])[1].lower(), cache_dir)
+                   for i in todo}
+        encoded = {i: f.result() for i, f in futures.items()}
+    out, saved, replaced = list(members), 0, 0
+    for i in todo:
+        rel, full = members[i]
+        src_size, ogg_size = os.path.getsize(full), os.path.getsize(encoded[i])
+        if os.path.splitext(rel)[1].lower() == ".wav" and ogg_size * 2 >= src_size:
+            continue  # the wav stays: its ogg is not under half of it
+        out[i] = (os.path.splitext(rel)[0] + ".ogg", encoded[i])
+        saved += src_size - ogg_size
+        replaced += 1
+    return out, saved, replaced
+
+
 def verify_package(zip_path, base):
-    """Refuses a package with an excluded file or with a file the base already has, byte for byte."""
+    """Refuses a package with an excluded file or with a file the base already has, byte for byte. An encoded
+    sound (package_ogg) must be an Ogg file (`OggS`)."""
     prefixes = razdor_prefixes(base)
     with zipfile.ZipFile(zip_path) as zf:
         for info in zf.infolist():
             rel = info.filename
-            if excluded(rel, prefixes):
+            if package_ogg(rel):
+                if not zf.read(info).startswith(b"OggS"):
+                    raise Fail(f"{zip_path}: {rel} is not an Ogg file")
+            elif excluded(rel, prefixes):
                 raise Fail(f"{zip_path}: {rel} must not be in a package")
             if rel in base.paths and sha256_bytes(zf.read(info)) == base.sha(rel):
                 raise Fail(f"{zip_path}: {rel} is the base's own file, byte for byte; the package must not carry it")
@@ -721,6 +814,8 @@ class Pack:
         self.chains = {}      # mod slug -> the mods whose packages come before its own, in order
         self.mismatches = []  # mods whose rebuild differs from their tested game folder
         self.rebuild_log = [] # (slug, chain, problems) for report.md
+        self.sound_log = {}   # mod slug -> (files packed as Ogg Vorbis, bytes saved), for report.md
+        self.ogg_cache = os.path.join(src, "ogg-cache")  # the encodes, kept across runs (see ogg_encode)
         self.left_out = {}    # extension -> [files left out of packages, set of mod slugs]
         self.trees = {}
         self.cu_maps = None
@@ -824,6 +919,8 @@ class Pack:
     def add_mods(self):
         rows = {r["slug"]: r for r in read_tsv(os.path.join(self.src, "mods", "status.tsv"),
                                                 ["slug", "status", "download ok?"])}
+        if any(r["status"] in ("full", "partial") for r in rows.values()) and not ffmpeg_available():
+            raise Fail("ffmpeg is needed to pack the mods' Sounds as Ogg Vorbis: install it (it must be on PATH)")
         specs = {s: self.base_spec(s) for s in rows}
         # A mod made on another mod comes after it: that mod's folder is its base.
         order = sorted(rows, key=lambda s: (isinstance(specs[s], tuple) and specs[s][1] is not None, s))
@@ -876,6 +973,9 @@ class Pack:
             raise Skip(f"does not rebuild from its chain ({len(problems)} difference(s), see the rebuild check)")
         self.pkgs[slug] = own
         self.chains[slug] = before
+        members, saved, replaced = package_sounds(slug, members, game, self.ogg_cache, self.notes)
+        if replaced:
+            self.sound_log[slug] = (replaced, saved)
         zip_path = os.path.join(self.work, slug + ".zip")
         build_zip(members, zip_path)
         verify_package(zip_path, base)
@@ -1178,6 +1278,10 @@ class Pack:
         own_files = sorted(rel for rel in cu.paths if razdor_made(rel, cu_prefixes))
         lines += ["", f"## Razdor-made files left out ({len(own_files)} in Community Update)", ""]
         lines += [f"- `{rel}`" for rel in own_files[:40]] or ["None."]
+        saved_total = sum(s for _, s in self.sound_log.values())
+        lines += ["", f"## Sounds packed as Ogg Vorbis ({len(self.sound_log)} mods, {saved_total} bytes saved in total)", "",
+                  "| mod | files | bytes saved |", "|---|---:|---:|"]
+        lines += [f"| {slug} | {n} | {s} |" for slug, (n, s) in sorted(self.sound_log.items())]
         lines += ["", f"## Campaign chains ({len(self.chain_log)} notes)", ""]
         lines += [f"- {line}" for line in self.chain_log] or ["None."]
         lines += ["", "## Notes", ""]
@@ -1361,6 +1465,79 @@ def check_selftest(name, ok):
     if not ok:
         raise AssertionError(name)
     print(f"ok  {name}")
+
+
+def sine_samples(seconds):
+    """A 440 Hz sine as signed 16-bit little-endian mono samples at 22050 Hz."""
+    return b"".join(struct.pack("<h", int(12000 * math.sin(2 * math.pi * 440 * i / 22050)))
+                    for i in range(int(22050 * seconds)))
+
+
+def sine_wav(path, seconds):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(22050)
+        w.writeframes(sine_samples(seconds))
+
+
+def sound_package(root, game_files):
+    """Packs a fake mod: `game_files` (rel -> function writing its file) over a Community Update folder with one
+    file, through package_sounds, build_zip and verify_package as add_mod does. Returns (zip members, notes, saved)."""
+    cu, game = os.path.join(root, "cu"), os.path.join(root, "game")
+    write_bytes(os.path.join(cu, "Data", "units.ini"), b"base")
+    write_bytes(os.path.join(game, "Data", "units.ini"), b"base")
+    for rel, write in game_files.items():
+        write(os.path.join(game, rel))
+    base_tree, game_tree = Tree(cu), Tree(game)
+    prefixes = razdor_prefixes(game_tree) | razdor_prefixes(base_tree)
+    members = [(rel, full) for rel, full in changed_files(game_tree, base_tree) if not excluded(rel, prefixes)]
+    notes = []
+    members, saved, _ = package_sounds("testmod", members, game_tree, os.path.join(root, "cache"), notes)
+    zip_path = os.path.join(root, "pkg.zip")
+    build_zip(members, zip_path)
+    verify_package(zip_path, base_tree)
+    with zipfile.ZipFile(zip_path) as zf:
+        names = sorted(zf.namelist())
+        data = {n: zf.read(n) for n in names}
+    return names, data, notes, saved
+
+
+def check_sound_packages():
+    """Sounds in a package: a .raw and a sine .wav become .ogg; a same-stem collision and a mod's own same-stem
+    .ogg keep the originals; verify_package refuses an encoded sound that is not Ogg. Needs ffmpeg."""
+    if not ffmpeg_available():
+        print("skip  Sounds to Ogg Vorbis (ffmpeg is not installed)")
+        return
+    with tempfile.TemporaryDirectory() as d:
+        raw = {"Sounds/Battle1.raw": lambda p: write_bytes(p, sine_samples(0.2))}
+        names, data, _, saved = sound_package(os.path.join(d, "raw"), raw)
+        check_selftest("sounds: a Sounds/*.raw is packed as Sounds/*.ogg (OggS), no .raw, and bytes are saved",
+                       names == ["Sounds/Battle1.ogg"] and data[names[0]].startswith(b"OggS") and saved > 0)
+        wav = {"Sounds/Hymn.wav": lambda p: sine_wav(p, 0.5)}
+        names, data, _, _ = sound_package(os.path.join(d, "wav"), wav)
+        check_selftest("sounds: a .wav whose ogg is under half its size is packed as .ogg",
+                       names == ["Sounds/Hymn.ogg"] and data[names[0]].startswith(b"OggS"))
+        clash = {"Sounds/Battle1.raw": lambda p: write_bytes(p, sine_samples(0.2)),
+                 "Sounds/battle1.wav": lambda p: sine_wav(p, 0.2)}
+        names, _, notes, _ = sound_package(os.path.join(d, "clash"), clash)
+        check_selftest("sounds: two members of one ogg name keep their originals, with a note",
+                       names == ["Sounds/Battle1.raw", "Sounds/battle1.wav"] and len(notes) == 2)
+        own = {"Sounds/Hymn.raw": lambda p: write_bytes(p, sine_samples(0.2)),
+               "Sounds/Hymn.ogg": lambda p: write_bytes(p, b"OggS mod's own")}
+        names, _, notes, _ = sound_package(os.path.join(d, "own"), own)
+        check_selftest("sounds: a mod's own same-stem .ogg keeps the .raw, and the mod's .ogg is not packed",
+                       names == ["Sounds/Hymn.raw"] and len(notes) == 1)
+        bad = os.path.join(d, "bad.zip")
+        with zipfile.ZipFile(bad, "w") as zf:
+            zf.writestr("Sounds/Bad.ogg", b"not an ogg")
+        refused = False
+        try:
+            verify_package(bad, Tree(os.path.join(d, "raw", "cu")))
+        except Fail as e:
+            refused = "not an Ogg file" in str(e)
+        check_selftest("sounds: verify_package refuses an encoded sound that is not Ogg", refused)
 
 
 def selftest():
@@ -1580,6 +1757,7 @@ def selftest():
                 cat3 = json.load(f)
             check_selftest("build: --no-forum-maps leaves the forum maps out",
                            not any(e["id"].startswith(("campaign-", "map-")) for e in cat3["entries"]))
+    check_sound_packages()
     print("selftest: all checks passed")
     return 0
 
@@ -1615,7 +1793,10 @@ def main(argv=None):
     if missing:
         ap.error("missing " + ", ".join("--" + m.replace("_", "-") for m in missing))
     try:
-        build(a.src, a.archive_maps, a.base, a.out, forum_maps=not a.no_forum_maps, extra=extra, fixes=fixes)
+        pack = build(a.src, a.archive_maps, a.base, a.out, forum_maps=not a.no_forum_maps, extra=extra, fixes=fixes)
+        saved = sum(s for _, s in pack.sound_log.values())
+        print(f"sounds: {sum(n for n, _ in pack.sound_log.values())} files of {len(pack.sound_log)} mods packed as "
+              f"Ogg Vorbis, {saved} bytes saved")
     except Fail as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
