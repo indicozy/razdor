@@ -342,6 +342,21 @@ fn install_mod_and_play(hub: &crate::hub::Hub, catalog: &crate::hub::Catalog, ba
     hub.install(catalog, id, crate::i18n::Lang::Ru)?;
     let game = crate::hub::prepare_mod(&hub.local, base, id)?;
     let dt = DtInstall::load(&game).map_err(|e| format!("the folder does not load as an install: {e}"))?;
+    // Every sound the mod's table names that has a `.ogg` stand-in (the packages re-encode
+    // their sounds) decodes to something playable.
+    let table = dt.sound_table().map_err(|e| format!("its sound table does not read: {e}"))?;
+    let mut oggs = 0;
+    for (_, file) in table.backgrounds.iter().chain(&table.effects).filter(|(_, f)| !f.trim().is_empty()) {
+        let stem = std::path::Path::new(file).file_stem().and_then(|s| s.to_str()).unwrap_or(file);
+        if crate::dt::install::find_path(&game, &format!("{}/{stem}.ogg", crate::dt::sound::SOUNDS_DIR)).is_err() {
+            continue;
+        }
+        let pcm = dt.read_sound(file, crate::dt::sound::DEFAULT_RAW_RATE).map_err(|e| format!("sound {file}: {e}"))?;
+        if pcm.frames() == 0 {
+            return Err(format!("sound {file}: its .ogg decodes to nothing"));
+        }
+        oggs += 1;
+    }
     let c = Arc::new(Content::from_dt(&dt));
     let first = dt.maps.first().ok_or("the install has no map to play")?;
     let s = first.load().map_err(|e| format!("{}: does not load: {e}", first.name))?;
@@ -349,7 +364,7 @@ fn install_mod_and_play(hub: &crate::hub::Hub, catalog: &crate::hub::Catalog, ba
     if run.stalled {
         return Err(format!("{}: stalled (softlock) over 3 days", first.name));
     }
-    Ok(format!("{} maps, {} played 3 days, AI battles {}, {:.2} s", dt.maps.len(), first.name, run.ai.battles, run.secs))
+    Ok(format!("{} maps, {oggs} .ogg sounds decode, {} played 3 days, AI battles {}, {:.2} s", dt.maps.len(), first.name, run.ai.battles, run.secs))
 }
 
 /// The community release's catalog, end to end (env-gated: passes without
@@ -359,8 +374,8 @@ fn install_mod_and_play(hub: &crate::hub::Hub, catalog: &crate::hub::Catalog, ba
 ///
 /// 1. the catalog parses (its counts are printed);
 /// 2. every mod installs through the normal path (with its requirements), its folder is built
-///    over the base (`prepare_mod`), the result loads as an install, and its first map plays 3
-///    days;
+///    over the base (`prepare_mod`), the result loads as an install, every sound with a `.ogg`
+///    stand-in decodes, and its first map plays 3 days;
 /// 3. every map and campaign installs (with its requirements); every installed map loads as a
 ///    scenario and its SHA-256 is still the catalog's (a name another entry took is caught); each
 ///    campaign chapter's next-map name is an installed file, unless the campaign is marked partial

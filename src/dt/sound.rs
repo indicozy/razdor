@@ -244,16 +244,23 @@ pub fn parse_wav(bytes: &[u8]) -> Result<Pcm, DtError> {
     Err(bad("WAV has no data"))
 }
 
+/// Most PCM bytes one `.ogg` may decode to (256 MiB, over an hour and a half of 22050 Hz
+/// stereo): a small file that claims more is refused rather than filling memory.
+const MAX_OGG_PCM: usize = 256 << 20;
+
 /// Reads an Ogg Vorbis file (Razdor's own addition, not read by the original): all its
 /// packets as interleaved 16-bit little-endian PCM at the file's own sample rate.
 pub fn parse_ogg(bytes: &[u8]) -> Result<Pcm, DtError> {
     let mut rdr = OggStreamReader::new(std::io::Cursor::new(bytes)).map_err(|e| bad(&format!("bad Ogg Vorbis: {e}")))?;
     let (rate, channels) = (rdr.ident_hdr.audio_sample_rate, rdr.ident_hdr.audio_channels as u16);
-    if rate == 0 || channels == 0 {
-        return Err(bad("Ogg Vorbis with no rate or no channels"));
+    if !(4000..=192_000).contains(&rate) || !(1..=2).contains(&channels) {
+        return Err(bad(&format!("Ogg Vorbis at {rate} Hz with {channels} channels")));
     }
     let mut data = Vec::new();
     while let Some(packet) = rdr.read_dec_packet_itl().map_err(|e| bad(&format!("bad Ogg Vorbis: {e}")))? {
+        if data.len() + 2 * packet.len() > MAX_OGG_PCM {
+            return Err(bad("Ogg Vorbis longer than Razdor plays"));
+        }
         for sample in packet {
             data.extend_from_slice(&sample.to_le_bytes());
         }
