@@ -8,12 +8,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
-- **Author names in letters the bundled fonts lack** (2026-10-31, a player's report, 1438). A name
-  such as «Ꙇѵαη Ꚍɣkhøηςhʋk» draws its Cyrillic Extended-B letters (U+A646, U+A68C) as boxes on
-  Android: the modern fonts (PT Serif, PT Sans, Noto Sans subset, Noto Devanagari) have no glyph for
-  them, and the fallback chain (`script_font`) finds system fonts only on Linux, macOS and Windows,
-  so a phone has none. Fix would be a bundled subset covering U+A640–U+A69F (licence and size to
-  decide). The other letters of such names draw through the chain as before.
 - **A campaign's next-map name in quotes** (2026-10-31, the community catalog). Two community
   campaigns («Dark Hike», «Время смуты») store their next map with literal quote characters
   (`"Озеро Эленьер.final.DTm"`). Razdor matches the name as written (`next_campaign_map` in
@@ -482,6 +476,12 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Settled
 
+- **Author names in letters the bundled fonts lack** (2026-10-31, a player's report, 1438). A name
+  such as «Ꙇѵαη Ꚍɣkhøηςhʋk» draws its Cyrillic Extended-B letters (U+A646, U+A68C) as boxes on
+  Android: the modern fonts (PT Serif, PT Sans, Noto Sans subset, Noto Devanagari) have no glyph for
+  them, and the fallback chain (`script_font`) finds system fonts only on Linux, macOS and Windows,
+  so a phone has none. Fix would be a bundled subset covering U+A640–U+A69F (licence and size to
+  decide). The other letters of such names draw through the chain as before. Settled for the Hub (b263bde7): the catalog generator writes such letters as the Latin or Cyrillic letter they imitate (`font_safe` in tools/community-pack/build.py), so the published names, titles and descriptions have no letter the fonts lack; a bundled subset stays unneeded.
 - **Event window: the departed row's units** (2026-10-17, a player's report on the units rows;
   settled 2026-10-30). The original fills the departed row only with units really taken, one icon
   per unit removed, by the taken unit's type (0x4a9711, 0x4961d0). Razdor now does the same: the
