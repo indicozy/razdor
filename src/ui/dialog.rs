@@ -809,7 +809,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     }
     let edge = o.max(1.0);
     // The event window's inner frames (0x4aaa4b, 0x4aaa79), as 0x48d710's.
-    chrome::window_inner_frames_grown(Rect::new(x, y, w, h), o, grow);
+    chrome::window_inner_frames_footed(Rect::new(x, y, w, h), o, grow, footer_grow(o));
     let top = y + EVENT_BOX_TOP * o + grow;
     let mut cy = top;
     match &d.picture {

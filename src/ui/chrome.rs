@@ -1801,9 +1801,16 @@ pub fn window_inner_frames(r: Rect, px: f32) {
 /// [`window_inner_frames`] for a window whose title strip is taller by `grow` px: the top of
 /// the inner frame moves down with it, the bottom stays where it is (`r` includes the growth).
 pub fn window_inner_frames_grown(r: Rect, px: f32, grow: f32) {
+    window_inner_frames_footed(r, px, grow, 0.0);
+}
+
+/// [`window_inner_frames_grown`] over a buttons' footer `foot` px taller than the original's
+/// (Razdor's own: the buttons grow with the text size): the divider and the inner frame end
+/// that much higher, so they stay above the grown buttons.
+pub fn window_inner_frames_footed(r: Rect, px: f32, grow: f32, foot: f32) {
     let (w, h) = (r.w / px, r.h / px);
-    steel_frame(Rect::new(r.x + 2.0 * px, r.y + (h - 56.0) * px, (w - 4.0) * px, 2.0 * px), px, 2);
-    steel_frame(Rect::new(r.x + 4.0 * px, r.y + (31.0 * px + grow), (w - 8.0) * px, (h - 89.0) * px - grow), px, 1);
+    steel_frame(Rect::new(r.x + 2.0 * px, r.y + (h - 56.0) * px - foot, (w - 4.0) * px, 2.0 * px), px, 2);
+    steel_frame(Rect::new(r.x + 4.0 * px, r.y + (31.0 * px + grow), (w - 8.0) * px, (h - 89.0) * px - grow - foot), px, 1);
 }
 
 /// A title strip's height in px at the interface scale `k` and the title factor `factor`
