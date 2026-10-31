@@ -110,16 +110,37 @@ fn opaque_rgba(rgba: &mut [u8]) {
 /// closed synchronously before this, so skipping the handlers loses nothing.
 fn exit_now(app: &mut App) -> ! {
     razdor::diag::step("quitting");
+    let timed = razdor::diag::profiling();
+    let t0 = std::time::Instant::now();
     razdor::frame_probe::flush();
+    let t1 = std::time::Instant::now();
     // The noon autosave still being written on its thread is finished first (the file is whole).
     razdor::rules::save::finish_pending_writes();
+    let t2 = std::time::Instant::now();
     app.shutdown();
+    let t3 = std::time::Instant::now();
+    // The saves are written: the window goes now, so the memory the process frees below is
+    // freed off the screen (the kernel frees it before the X connection closes, and the window
+    // would stay up meanwhile).
+    ui::display::hide_for_exit();
+    let t4 = std::time::Instant::now();
     // "Restart now" after an update: the new program, once the lock is free.
     release_instance();
     razdor::update::restart();
     use std::io::Write;
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
+    if timed {
+        let ms = |a: std::time::Instant, b: std::time::Instant| (b - a).as_secs_f64() * 1000.0;
+        razdor::diag!(
+            "exit timing: frame probe {:.1} ms, autosave join {:.1} ms, app shutdown {:.1} ms, hide {:.1} ms, restart {:.1} ms",
+            ms(t0, t1),
+            ms(t1, t2),
+            ms(t2, t3),
+            ms(t3, t4),
+            ms(t4, std::time::Instant::now())
+        );
+    }
     // SAFETY: `_exit` only ends the process; no Rust state is used after it.
     #[cfg(unix)]
     unsafe {

@@ -33,7 +33,14 @@ except what the screen value, the `App` fields and a few `thread_local!`s hold.
 4. `ui::snapshot::stage` (only with `RAZDOR_SCENE`), then the loop: `App::frame`,
    `App::draw_fps`, `ui::cursor::draw` (the pointer is drawn last, over everything), and
    `next_frame().await`. Quitting goes through `exit_now` (it skips C `atexit` handlers,
-   which crashed on exit).
+   which crashed on exit). Every quit (the main menu's «Выход», the game's «Выйти из игры»,
+   the battle's leave window, the window's close button) sets the quit flag, and `exit_now`
+   does, in order: the frame probe's flush, the pending autosave's join
+   (`finish_pending_writes`), `App::shutdown` (the session end, the audio's stop and settings),
+   then `ui::display::hide_for_exit` (X11: the window is unmapped at once, so the memory the
+   kernel frees before the X connection closes is freed off the screen), the update restart,
+   and the process ends at once (no teardown of the C libraries). Nothing after `App::shutdown` writes a save. Under `RAZDOR_PROFILE` each step
+   is logged as `exit timing`.
 
 Install lookup order (`src/dt/install.rs` `locate_with`): `RAZDOR_DT_DIR`, the program's own
 folder when it is an install, the remembered folder (`config_file`), then a search under

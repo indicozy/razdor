@@ -698,8 +698,13 @@ impl App {
 
     /// Before the process ends: the music stops and the settings are written.
     pub fn shutdown(&mut self) {
+        let t0 = std::time::Instant::now();
         self.session.end();
+        let t1 = std::time::Instant::now();
         self.audio.shutdown();
+        if razdor::diag::profiling() {
+            razdor::diag!("exit timing: session end {:.1} ms, audio shutdown {:.1} ms", (t1 - t0).as_secs_f64() * 1000.0, t1.elapsed().as_secs_f64() * 1000.0);
+        }
     }
 
     /// The launch after the app ended without a proper exit (the session marker is still there):

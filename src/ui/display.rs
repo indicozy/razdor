@@ -778,6 +778,16 @@ pub fn pointer_outside() -> bool {
 #[cfg(target_os = "linux")]
 pub use sys::WM_CLASS;
 
+/// Hides the game's window at once, as the game ends (`main::exit_now`, after the saves): the
+/// process's memory is then freed without the window on screen. Only X11 can do it here; on
+/// other systems the window stays until the process is gone.
+#[cfg(all(target_os = "linux", not(target_os = "android")))]
+pub use sys::hide_for_exit;
+
+/// Nothing to hide on this system (see the X11 version).
+#[cfg(not(all(target_os = "linux", not(target_os = "android"))))]
+pub fn hide_for_exit() {}
+
 #[cfg(all(target_os = "linux", not(target_os = "android")))]
 mod sys {
     //! X11: `_NET_WM_STATE_FULLSCREEN` for full screen; for borderless the Motif hints drop the
@@ -855,6 +865,7 @@ mod sys {
         translate: unsafe extern "C" fn(*mut Display, XWindow, XWindow, c_int, c_int, *mut c_int, *mut c_int, *mut XWindow) -> c_int,
         raise: unsafe extern "C" fn(*mut Display, XWindow) -> c_int,
         sync: unsafe extern "C" fn(*mut Display, c_int) -> c_int,
+        unmap_window: unsafe extern "C" fn(*mut Display, XWindow) -> c_int,
         query_pointer: unsafe extern "C" fn(*mut Display, XWindow, *mut XWindow, *mut XWindow, *mut c_int, *mut c_int, *mut c_int, *mut c_int, *mut c_uint) -> c_int,
         /// libXrandr's, when it loads.
         get_monitors: Option<unsafe extern "C" fn(*mut Display, XWindow, c_int, *mut c_int) -> *mut XRRMonitorInfo>,
@@ -894,6 +905,7 @@ mod sys {
                 translate: sym(x, c"XTranslateCoordinates")?,
                 raise: sym(x, c"XRaiseWindow")?,
                 sync: sym(x, c"XSync")?,
+                unmap_window: sym(x, c"XUnmapWindow")?,
                 query_pointer: sym(x, c"XQueryPointer")?,
                 get_monitors: if r.is_null() { None } else { sym(r, c"XRRGetMonitors") },
                 free_monitors: if r.is_null() { None } else { sym(r, c"XRRFreeMonitors") },
@@ -903,6 +915,18 @@ mod sys {
 
     /// The window's WM_CLASS (`main::conf`), how the game's own window is found.
     pub const WM_CLASS: &str = "razdor";
+
+    /// Unmaps the game's window on a connection of its own, and waits until the server has done
+    /// it. The connection stays open: the process ends next (`main::exit_now`). No window, or no
+    /// X server: nothing to do.
+    pub fn hide_for_exit() {
+        // SAFETY: plain Xlib calls on a connection of our own; nothing it returns is kept.
+        unsafe {
+            let Some(c) = Conn::open() else { return };
+            (c.x.unmap_window)(c.dpy, c.win);
+            (c.x.sync)(c.dpy, 0);
+        }
+    }
 
     struct Conn {
         x: Xlib,
