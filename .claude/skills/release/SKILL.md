@@ -59,6 +59,10 @@ that system.
    platforms, the requirements, the install steps, the video when the owner gives a new one).
    Commit `Site: X.Y.Z …`, push as a fast-forward to `gh-pages` (never force), remove the worktree.
 8. Tell the owner: the version, the release link, what is in it (plain words), test results.
+   Add the download statistics: run `python3 -I tools/stats/downloads.py` (it appends a live
+   snapshot to the private CSV; the default path needs no argument, or see `CLAUDE.local.md`)
+   and paste its summary into the report to the owner (`tools/stats/README.md`). The numbers are
+   private: never in the Discord post, the changelog or the site, unless the owner asks.
 9. Discord announcement, every release (if the `discord-reports` MCP server is connected), done
    right after step 5 (see below), before watching the pipeline:
    - Reports shipped: the reports backlog's `fixed` entries (`discord-reports` skill §3) whose
