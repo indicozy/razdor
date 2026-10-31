@@ -37,6 +37,10 @@ In the Sound, Graphics, and Gameplay settings window, there is a "Font" item. It
     * For headings — **Becker Medium**.
     * For buttons and names — **Kurale**.
 
+### Text size
+
+The "Text size" item in the same settings: Normal, Large and Largest. At Normal everything is as in the original. At Large and Largest the buttons grow with the text: "Hire" and "Heal" with their prices in the barracks, the market and sanctuary buttons, and "Yes", "No" and "OK" in event windows. Phones start at Large. Other windows don't change yet.
+
 ### Character Support
 
 The engine can display characters from different languages, even if they are not present in the primary font. If a required character is missing, Razdor searches for it in the following order:

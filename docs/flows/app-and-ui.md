@@ -505,6 +505,16 @@ Building a window (`src/ui/chrome.rs`):
   (`display::scale_reset_pressed`, `ui/mod.rs`) sets it back to Auto on any screen, with a notice
   (`display::notice_scale`), and swallows the key so the world map's 0 does not fire. The bottom bar, the FPS counter and the keyboard strip use `chrome::bar_k`, the chosen
   scale cut to the fit (`display::fitted_scale`), so they stay as large as the fit allows.
+- Buttons grow with the text size (Razdor's, the owner's decision of 2026-10-31; a pilot on the
+  building windows and the event and message windows, the other screens to follow). At ×1 every
+  button keeps the original's size; above it `display::button_grow` (the text size) multiplies
+  the button, its footer or backing, the price line under a pill, and the label. A label is drawn
+  at `g` times its size at ×1 (`display::grown_text`), under `dt_font::legacy_metrics_if` (the
+  native metrics ignore the size asked for), the largest size from there that fits the button's
+  width and never below ×1 (`display::grown_label_size`): a grown label is never cut. The
+  event window's inner frames end above the grown footer (`chrome::window_inner_frames_footed`).
+  The market's labels are bound by the original row's widths. Checked by `mobile_ui.py adapt`
+  (the `mobile-ui` skill).
 - Text size and large windows (Razdor's, the owner's request: phones' text too small). The
   two settings are independent (players' reports, 1.0.3). «Размер текста» (`Settings::text_size`,
   `display::TEXT_SIZES`: ×1, ×1.25, ×1.5; on phones ×1.25 by default) multiplies the text base and
