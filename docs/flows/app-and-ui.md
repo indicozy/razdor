@@ -675,6 +675,20 @@ with the reason), and `build` lays each layer in turn over one path map, a later
 the earlier one's at the same path (ignoring case). The stamp holds every layer's id, version and file
 digests, so a change in any layer rebuilds the folders that lay it.
 
+**The catalog cache** (`hub::write_cache`, `read_cache`, `Hub::cached_catalog`, `Hub::fetch_catalog`; the window's
+`HubView::reload`, `show_cache`, `landed`, `keep_pick`). From an `https://` source the last catalog fetched is kept at
+`<hub>/cache/index.json` as `{"source": <address>, "catalog": <the index>}`, written atomically by the fetch thread.
+Opening the window puts the cached catalog on the screen at once (no «Читаю хаб…» wait) when it was fetched from the
+same address and reads back whole (`Catalog::checked`); a missing, corrupt or other-address cache is ignored and the
+hub is read as without one. The current catalog is fetched in the background (`fetching`): the same catalog as the one
+shown changes nothing, a different one replaces the list and keeps the pick by id (`keep_pick`), the tab, the search
+and the scroll. A failed fetch with a list on the screen keeps it and sets `offline` (the line under the list: «Нет
+связи: показан сохранённый список»; a phone held upright shows it above the bottom row); with no list, the error is
+the list, as before. «Обновить» fetches again and is off while a fetch runs. A folder source and the mock are read in
+place and have no cache. Previews are cached per picture (`preview_path`, `<hub>/previews/<sha256>.png`, checked
+against the SHA-256 when written and not fetched again); the window's texture follows the picture's SHA-256 too
+(`preview_key`), so a refreshed entry's new picture is loaded.
+
 **File names** (`hub::safe_name`, for maps and for each folder of a mod's file path, and the zip's names):
 any Unicode except control characters, `/`, `\` and `< > : " | ? *`; not empty, `.` or `..`; no leading or
 trailing space; no trailing dot; at most 255 bytes; not a Windows device name (CON, PRN, AUX, NUL, COM1-9,

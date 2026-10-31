@@ -32,7 +32,6 @@ const SEARCH_KEY: &str = "hub-search";
 
 /// What a job on the thread came back with.
 enum Done {
-    Catalog(Result<Catalog, String>),
     Installed(Result<Vec<String>, String>),
     Removed(Result<String, String>),
 }
@@ -59,6 +58,11 @@ pub struct HubView {
     /// (`matches`).
     query: String,
     job: Option<Receiver<Done>>,
+    /// The catalog fetched in the background (`reload`): it replaces the list on the screen when it
+    /// differs (`landed`); the thread writes it to the cache.
+    fetching: Option<Receiver<Result<Catalog, String>>>,
+    /// The fetch failed while a catalog was on the screen (the saved one): the window says so.
+    offline: bool,
     /// The last job's word: the text and whether it went wrong.
     note: Option<(String, bool)>,
     /// Something was installed or removed while the window was open (the new-game list is
@@ -71,7 +75,8 @@ pub struct HubView {
 /// The picture of an entry: its texture once it is in the cache, and the download on its way
 /// when it is not.
 struct Preview {
-    id: String,
+    /// `preview_key`: the entry and its picture, so a refreshed catalog's new picture is loaded.
+    key: String,
     texture: Option<Texture2D>,
     job: Option<Receiver<Result<PathBuf, String>>>,
 }
@@ -91,7 +96,8 @@ const PREVIEW_H: f32 = 150.0;
 /// Keeps the picked entry's picture: loaded from the cache, or downloaded on a thread (once,
 /// into the cache) when it is not there yet. A download that fails leaves no picture.
 fn ensure_preview(view: &mut HubView, e: &Entry) {
-    if let Some(p) = view.preview.as_mut().filter(|p| p.id == e.id) {
+    let key = preview_key(e);
+    if let Some(p) = view.preview.as_mut().filter(|p| p.key == key) {
         if let Some(done) = p.job.as_ref().and_then(|rx| rx.try_recv().ok()) {
             p.job = None;
             match done {
@@ -101,7 +107,7 @@ fn ensure_preview(view: &mut HubView, e: &Entry) {
         }
         return;
     }
-    let mut p = Preview { id: e.id.clone(), texture: None, job: None };
+    let mut p = Preview { key, texture: None, job: None };
     if let (Some(f), Some(hub)) = (e.preview.as_ref(), view.hub.clone()) {
         let path = hub::preview_path(&hub.local, f);
         if path.is_file() {
@@ -116,6 +122,11 @@ fn ensure_preview(view: &mut HubView, e: &Entry) {
         }
     }
     view.preview = Some(p);
+}
+
+/// The key of an entry's picture: the entry's id and the picture's SHA-256.
+fn preview_key(e: &Entry) -> String {
+    e.preview.as_ref().map_or_else(|| e.id.clone(), |f| format!("{}:{}", e.id, f.sha256))
 }
 
 /// A cached PNG as a texture (macroquad decodes PNG and TGA; `None` when it does not read).
@@ -143,6 +154,8 @@ impl HubView {
             detail_for: None,
             query: String::new(),
             job: None,
+            fetching: None,
+            offline: false,
             note: None,
             changed: false,
             preview: None,
@@ -155,22 +168,64 @@ impl HubView {
     pub fn stage(&mut self, tab: usize, pick: Option<&str>) {
         self.tab = tab.min(3);
         self.picked = pick.map(Into::into);
+        if let Some(Ok(c)) = &self.catalog {
+            self.picked = keep_pick(self.picked.as_deref(), c);
+        }
         self.detail = pick.is_some();
     }
 
-    /// Reads the catalog again (on the thread) and what is installed.
+    /// Shows the cached catalog at once (`show_cache`) and reads the current one on a thread
+    /// (`fetching`); a catalog already on the screen stays until the new one lands (`landed`).
+    /// Also reads what is installed.
     fn reload(&mut self) {
         let Some(hub) = self.hub.clone() else {
             self.catalog = Some(Err(tr("No folder for the hub.").into()));
             return;
         };
         self.installed = hub.installed();
-        self.catalog = None;
+        self.offline = false;
+        self.show_cache(&hub);
         let (tx, rx) = channel();
         std::thread::spawn(move || {
-            let _ = tx.send(Done::Catalog(hub.catalog()));
+            let _ = tx.send(hub.fetch_catalog());
         });
-        self.job = Some(rx);
+        self.fetching = Some(rx);
+    }
+
+    /// Puts the cached catalog on the screen when there is none yet. A corrupt cache, or one of
+    /// another address, is no catalog: the window reads the hub as it does without one.
+    fn show_cache(&mut self, hub: &Hub) {
+        if matches!(self.catalog, Some(Ok(_))) {
+            return;
+        }
+        match hub.cached_catalog() {
+            Some(c) => {
+                self.picked = keep_pick(self.picked.as_deref(), &c);
+                self.catalog = Some(Ok(c));
+            }
+            None => self.catalog = None,
+        }
+    }
+
+    /// A fetch of the catalog came back. The same catalog as the one shown changes nothing; a
+    /// different one replaces it, keeping the pick by id. A failed fetch keeps a catalog already on
+    /// the screen (the cache or an earlier fetch) and sets `offline`; with none, the error is the list.
+    fn landed(&mut self, fetched: Result<Catalog, String>) {
+        match fetched {
+            Ok(c) => {
+                self.offline = false;
+                if matches!(&self.catalog, Some(Ok(shown)) if *shown == c) {
+                    return;
+                }
+                self.picked = keep_pick(self.picked.as_deref(), &c);
+                self.catalog = Some(Ok(c));
+            }
+            Err(why) if matches!(self.catalog, Some(Ok(_))) => {
+                razdor::diag!("hub: the catalog is not fetched, the saved list stays: {why}");
+                self.offline = true;
+            }
+            Err(why) => self.catalog = Some(Err(why)),
+        }
     }
 
     fn start(&mut self, work: impl FnOnce(Hub, Catalog) -> Done + Send + 'static) {
@@ -183,8 +238,12 @@ impl HubView {
         self.note = None;
     }
 
-    /// Takes a finished job's result.
+    /// Takes a finished job's result, and a finished catalog fetch.
     fn poll(&mut self) {
+        if let Some(fetched) = self.fetching.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            self.fetching = None;
+            self.landed(fetched);
+        }
         let Some(done) = self.job.as_ref().and_then(|rx| rx.try_recv().ok()) else { return };
         self.job = None;
         let refresh = |v: &mut HubView| {
@@ -194,14 +253,6 @@ impl HubView {
             v.changed = true;
         };
         match done {
-            Done::Catalog(c) => {
-                if let Ok(c) = &c {
-                    if self.picked.as_ref().is_none_or(|p| c.entry(p).is_none()) {
-                        self.picked = c.entries.first().map(|e| e.id.clone());
-                    }
-                }
-                self.catalog = Some(c);
-            }
             Done::Installed(Ok(ids)) => {
                 cue(Cue::Button);
                 refresh(self);
@@ -237,6 +288,15 @@ fn kind_label(k: Kind) -> &'static str {
         Kind::Map => tr("Map"),
         Kind::Campaign => tr("Campaign"),
         Kind::Mod => tr("Mod"),
+    }
+}
+
+/// The entry to pick in `c` after its catalog changed: the one picked before when it is still
+/// there, else the first.
+pub fn keep_pick(picked: Option<&str>, c: &Catalog) -> Option<String> {
+    match picked {
+        Some(p) if c.entry(p).is_some() => Some(p.to_string()),
+        _ => c.entries.first().map(|e| e.id.clone()),
     }
 }
 
@@ -624,7 +684,7 @@ pub fn frame(view: &mut HubView) -> bool {
         if button(lx, by, w_b, bh, tr("Back"), true) {
             close = true;
         }
-        if button(lx + step, by, w_b, bh, tr("Refresh"), view.job.is_none()) {
+        if button(lx + step, by, w_b, bh, tr("Refresh"), view.job.is_none() && view.fetching.is_none()) {
             view.reload();
         }
     }
@@ -636,12 +696,18 @@ pub fn frame(view: &mut HubView) -> bool {
         chrome::shadow_text(tr("Downloading…"), status_x, note_y, size, GOLD);
     } else if let Some((s, bad)) = &view.note {
         text_fit(s, status_x, note_y, status_w, size, if *bad { RED_TEXT } else { GREEN_TEXT });
+    } else if view.offline && narrow {
+        text_fit(tr("No connection: showing the saved list."), status_x, note_y, status_w, size, GOLD);
     }
-    // The hub's place under the list: on the desktop only (a phone's space goes to the list; a
-    // hub that can't be read says so in the list).
-    if let (false, false, Some(h)) = (narrow, phone, &view.hub) {
+    // The line under the list: the saved list's notice when the hub could not be reached (a phone
+    // held upright has it above the bottom row instead), else the hub's place on the desktop only (a
+    // phone's space goes to the list; a hub that can't be read says so in the list).
+    let under = list.y + list.h + 18.0 * k;
+    if view.offline && !narrow {
+        text_fit(tr("No connection: showing the saved list."), lx, under, lw, small, GOLD);
+    } else if let (false, false, Some(h)) = (narrow, phone, &view.hub) {
         let from = trf!("Hub: {place}", place = h.source.label());
-        text_fit(&from, lx, list.y + list.h + 18.0 * k, lw, small, Color::new(0.85, 0.80, 0.68, 0.8));
+        text_fit(&from, lx, under, lw, small, Color::new(0.85, 0.80, 0.68, 0.8));
     }
     close
 }
@@ -682,7 +748,7 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
         // The picture at the top of the pane: as wide as the pane, at most PREVIEW_H tall (and
         // 40% of the pane, a phone held sideways), its aspect kept. Room for it is kept while it
         // loads (a dark frame of 16:9 until then).
-        let loaded = view.preview.as_ref().filter(|p| p.id == e.id).and_then(|p| p.texture.clone());
+        let loaded = view.preview.as_ref().filter(|p| p.key == preview_key(e)).and_then(|p| p.texture.clone());
         let (w, h) = loaded.as_ref().map_or((16.0, 9.0), |t| (t.width(), t.height()));
         let max_h = (PREVIEW_H * k).min(pane.h * 0.4);
         let scale = (r.w / w).min(max_h / h);
@@ -881,5 +947,115 @@ mod tests {
         assert_eq!(break_long("ok", fits), ["ok"]);
         assert_eq!(break_long("ЖЖЖЖЖЖЖЖ", |t| t.chars().count() <= 3), ["ЖЖЖ", "ЖЖЖ", "ЖЖ"]);
         assert_eq!(break_long("ab", |_| false), ["a", "b"]);
+    }
+
+    /// The mock hub's catalog (nothing from the game), in a folder of its own.
+    fn mock_catalog(tag: &str) -> Catalog {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let local = std::env::temp_dir().join(format!("razdor-hubview-{tag}-{}-{nanos}", std::process::id()));
+        Hub { source: Source::Mock, local }.catalog().unwrap()
+    }
+
+    /// A window with its catalog and pick set; no thread, no drawing (the tests call the pure parts).
+    fn window(hub: Option<Hub>, catalog: Option<Result<Catalog, String>>, picked: Option<&str>) -> HubView {
+        HubView {
+            hub,
+            catalog,
+            installed: Installed::default(),
+            tab: 0,
+            picked: picked.map(Into::into),
+            detail: false,
+            scroll: 0,
+            list_drag: None,
+            pane_drag: None,
+            detail_scroll: 0.0,
+            detail_h: 0.0,
+            detail_for: None,
+            query: String::new(),
+            job: None,
+            fetching: None,
+            offline: false,
+            note: None,
+            changed: false,
+            preview: None,
+        }
+    }
+
+    const URL: &str = "https://example.org/hub/latest/download";
+
+    fn hub_at(source: Source, tag: &str) -> Hub {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        Hub { source, local: std::env::temp_dir().join(format!("razdor-hubview-{tag}-{}-{nanos}", std::process::id())) }
+    }
+
+    /// A swap keeps the entry picked when the new catalog still has it, and takes the first when not.
+    #[test]
+    fn a_swap_keeps_the_pick_by_id_or_takes_the_first() {
+        let c = mock_catalog("pick");
+        let (first, other) = (c.entries[0].id.clone(), c.entries[1].id.clone());
+        assert_eq!(keep_pick(Some(&other), &c), Some(other.clone()));
+        assert_eq!(keep_pick(Some("gone"), &c), Some(first.clone()));
+        assert_eq!(keep_pick(None, &c), Some(first.clone()));
+        assert_eq!(keep_pick(Some(&other), &Catalog { format: 1, entries: vec![] }), None);
+
+        // The same entries in another order, and one title changed: the pick is the same entry.
+        let mut fresh = c.clone();
+        fresh.entries.reverse();
+        fresh.entries.iter_mut().find(|e| e.id == other).unwrap().title.ru = "Новое название".into();
+        let mut v = window(None, Some(Ok(c.clone())), Some(&other));
+        v.landed(Ok(fresh.clone()));
+        assert_eq!(v.picked.as_deref(), Some(other.as_str()));
+        assert_eq!(v.catalog, Some(Ok(fresh)));
+        assert!(!v.offline);
+    }
+
+    /// A failed fetch with a list on the screen keeps the list and sets the offline state; the
+    /// next good fetch clears it.
+    #[test]
+    fn a_failed_fetch_keeps_the_saved_list_and_says_so() {
+        let c = mock_catalog("offline");
+        let other = c.entries[1].id.clone();
+        let mut v = window(None, Some(Ok(c.clone())), Some(&other));
+        v.landed(Err("curl: could not resolve host".into()));
+        assert_eq!(v.catalog, Some(Ok(c.clone())), "the saved list stays");
+        assert_eq!(v.picked.as_deref(), Some(other.as_str()));
+        assert!(v.offline, "the status line says the list is saved");
+        v.landed(Ok(c.clone()));
+        assert!(!v.offline, "a fetch that works clears it");
+    }
+
+    /// A failed fetch with no list on the screen shows the error in the list, as before the cache.
+    #[test]
+    fn a_failed_fetch_with_no_list_shows_the_error() {
+        let mut v = window(None, None, None);
+        v.landed(Err("boom".into()));
+        assert_eq!(v.catalog, Some(Err("boom".to_string())));
+        assert!(!v.offline);
+    }
+
+    /// The cache is on the screen at once, for the address it was fetched from only; a corrupt
+    /// cache leaves the window reading the hub.
+    #[test]
+    fn the_cache_is_shown_at_once_for_its_own_address_only() {
+        let c = mock_catalog("cache-view");
+        let first = c.entries[0].id.clone();
+        let mine = hub_at(Source::Url(URL.into()), "mine");
+        hub::write_cache(&mine.local, URL, &c).unwrap();
+
+        let mut v = window(Some(mine.clone()), None, None);
+        v.show_cache(&mine);
+        assert_eq!(v.catalog, Some(Ok(c.clone())));
+        assert_eq!(v.picked.as_deref(), Some(first.as_str()), "the first entry is picked");
+
+        let other = Hub { source: Source::Url("https://example.org/other".into()), local: mine.local.clone() };
+        let mut v = window(Some(other.clone()), None, None);
+        v.show_cache(&other);
+        assert_eq!(v.catalog, None, "another address's cache is not shown");
+
+        std::fs::write(mine.local.join(hub::CACHE_DIR).join(hub::INDEX), b"{ corrupt").unwrap();
+        let mut v = window(Some(mine.clone()), None, None);
+        v.show_cache(&mine);
+        assert_eq!(v.catalog, None, "a corrupt cache is ignored");
+        let _ = std::fs::remove_dir_all(&mine.local);
     }
 }

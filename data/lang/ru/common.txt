@@ -111,6 +111,7 @@ Maps = Карты
 Campaigns = Кампании
 Mods = Моды
 Reading the hub… = Читаю хаб…
+No connection: showing the saved list. = Нет связи: показан сохранённый список
 The hub can't be read: {e} = Хаб не прочитать: {e}
 Nothing here yet. = Здесь пока пусто.
 Nothing matches the search. = Ничего не подходит к поиску.

@@ -41,6 +41,8 @@ Select an entry, and its details open on the right:
 * **"Remove"** removes the entry. A mod is not removed while an installed entry still needs it.
 * **"Refresh"** reads the catalog again.
 
+The window opens at once: the list is the copy saved on the last opening, and a newer list loads in the background; without a connection you see the saved list and the line "No connection: showing the saved list".
+
 ## Where the maps come from
 
 The catalog comes from the forums of the community Discord server: the sections «сокровищница-модов» and «библиотека-карт». The entries are republished with the server admins' permission, and each one is credited to its author with a link to the author's thread.

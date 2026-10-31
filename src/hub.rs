@@ -7,6 +7,8 @@
 //!   (Russian as written, English from the import's translation) and the mods it needs.
 //! - **Source** ([`Source`]): `RAZDOR_HUB` names an `https://` address or a folder; unset, a
 //!   mock hub is written once under the hub folder ([`mock::build`]) and read from there.
+//! - **Cache** ([`read_cache`], [`write_cache`]): from an address, the catalog last fetched is kept
+//!   with its address, and the window shows it at once while the current one is read.
 //! - **Install**: a map or campaign needs its mods first ([`plan_install`] orders them,
 //!   dependencies before what needs them). Every file is checked against the catalog's size
 //!   and SHA-256, then written atomically: maps into `<hub>/maps/` (flat, so a campaign's
@@ -238,7 +240,12 @@ impl Catalog {
     /// Reads a catalog. Refused whole when any string that becomes part of a path is not safe:
     /// an id, a file name, a path, a SHA-256. The SHA-256s are stored lower-cased.
     pub fn parse(bytes: &[u8]) -> Result<Catalog, String> {
-        let mut c: Catalog = serde_json::from_slice(bytes).map_err(|e| format!("index.json: {e}"))?;
+        let c: Catalog = serde_json::from_slice(bytes).map_err(|e| format!("index.json: {e}"))?;
+        Catalog::checked(c)
+    }
+
+    /// The checks [`Catalog::parse`] makes, also on a catalog read back from the cache.
+    fn checked(mut c: Catalog) -> Result<Catalog, String> {
         if c.format != 1 {
             return Err(format!("index.json: format {} is not known", c.format));
         }
@@ -450,6 +457,15 @@ impl Source {
         }
     }
 
+    /// The address a catalog cache is kept for: an `https://` source only (a folder or the mock
+    /// is read in place, instantly).
+    pub fn cache_key(&self) -> Option<&str> {
+        match self {
+            Source::Url(u) => Some(u),
+            Source::Dir(_) | Source::Mock => None,
+        }
+    }
+
     /// Short words for the window's corner.
     pub fn label(&self) -> String {
         match self {
@@ -473,6 +489,39 @@ pub fn local_dir() -> Option<PathBuf> {
 /// The folder installed maps go to.
 pub fn maps_dir(local: &Path) -> PathBuf {
     local.join("maps")
+}
+
+/// The folder of the catalog cache.
+pub const CACHE_DIR: &str = "cache";
+
+/// The cache file: the catalog as last fetched from `source`, in `<hub>/cache/index.json`.
+#[derive(Deserialize)]
+struct CacheRead {
+    source: String,
+    catalog: Catalog,
+}
+
+#[derive(Serialize)]
+struct CacheWrite<'a> {
+    source: &'a str,
+    catalog: &'a Catalog,
+}
+
+/// Writes `c`, fetched from `source`, to the cache (atomically: a temp file, then a rename).
+pub fn write_cache(local: &Path, source: &str, c: &Catalog) -> Result<(), String> {
+    let json = serde_json::to_vec(&CacheWrite { source, catalog: c }).map_err(|e| e.to_string())?;
+    crate::editor::files::write_atomically(&local.join(CACHE_DIR).join(INDEX), &json).map_err(|e| format!("cache: {e}"))
+}
+
+/// The cached catalog, when it was fetched from `source` and reads back whole. A missing,
+/// corrupt, or other-source cache is None (and is fetched again).
+pub fn read_cache(local: &Path, source: &str) -> Option<Catalog> {
+    let bytes = std::fs::read(local.join(CACHE_DIR).join(INDEX)).ok()?;
+    let read: CacheRead = serde_json::from_slice(&bytes).ok()?;
+    if read.source != source {
+        return None;
+    }
+    Catalog::checked(read.catalog).ok()
 }
 
 /// A hub and the local folder it installs into.
@@ -550,6 +599,24 @@ impl Hub {
 
     pub fn catalog(&self) -> Result<Catalog, String> {
         Catalog::parse(&self.fetch(INDEX)?)
+    }
+
+    /// The catalog the cache holds for this hub's address (see [`read_cache`]); None for a
+    /// folder or the mock.
+    pub fn cached_catalog(&self) -> Option<Catalog> {
+        read_cache(&self.local, self.source.cache_key()?)
+    }
+
+    /// Fetches the catalog and, from an address, writes it to the cache. A failed write is
+    /// logged: the fetched catalog is still returned.
+    pub fn fetch_catalog(&self) -> Result<Catalog, String> {
+        let c = self.catalog()?;
+        if let Some(source) = self.source.cache_key() {
+            if let Err(why) = write_cache(&self.local, source, &c) {
+                crate::diag!("hub: the catalog cache is not written: {why}");
+            }
+        }
+        Ok(c)
     }
 
     pub fn installed(&self) -> Installed {
@@ -1268,5 +1335,75 @@ mod tests {
         assert_eq!(hub.cache_preview(&f).unwrap(), path, "the cached picture is used, not fetched again");
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&local);
+    }
+
+    const URL: &str = "https://example.org/hub/latest/download";
+
+    /// The cache reads back the whole catalog, optional fields and all, for the source it came from.
+    #[test]
+    fn the_catalog_cache_reads_back_for_its_source() {
+        let (hub, mut c) = mock_hub("cache-rt");
+        let local = hub.local.clone();
+        // Fields the mock leaves out: a preview, a rating, an archive, a status note.
+        let e = &mut c.entries[0];
+        e.preview = Some(FileRef { path: "previews/x.png".into(), name: "x.png".into(), lang: None, size: 9, sha256: "ab".repeat(32), archive: false });
+        e.rating = Some(Rating { up: 3, down: 1 });
+        e.status_note = Text { ru: "Примечание".into(), en: "A note".into() };
+        if let Some(m) = c.entries.iter_mut().find(|e| e.kind == Kind::Mod) {
+            m.files[0].archive = true;
+        }
+        write_cache(&local, URL, &c).unwrap();
+        assert!(cache_path_of(&local).is_file());
+        assert_eq!(read_cache(&local, URL), Some(c.clone()));
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    fn cache_path_of(local: &Path) -> PathBuf {
+        local.join(CACHE_DIR).join(INDEX)
+    }
+
+    /// A cache is used only for the address it was fetched from: another address, or the same one
+    /// with a trailing slash, finds nothing.
+    #[test]
+    fn a_cache_of_another_source_is_not_used() {
+        let (hub, c) = mock_hub("cache-other");
+        let local = hub.local.clone();
+        write_cache(&local, URL, &c).unwrap();
+        assert_eq!(read_cache(&local, "https://example.org/other/latest/download"), None);
+        assert_eq!(read_cache(&local, &format!("{URL}/")), None, "the address as it was saved");
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    /// Whatever does not read back whole is ignored: a missing file, text that is no JSON, a
+    /// catalog of another format, or a catalog with a path out of the hub.
+    #[test]
+    fn a_corrupt_cache_is_ignored() {
+        let (hub, c) = mock_hub("cache-bad");
+        let local = hub.local.clone();
+        assert_eq!(read_cache(&local, URL), None, "no cache yet");
+        std::fs::create_dir_all(local.join(CACHE_DIR)).unwrap();
+        std::fs::write(cache_path_of(&local), b"{ not json").unwrap();
+        assert_eq!(read_cache(&local, URL), None);
+        let good = serde_json::to_string(&CacheWrite { source: URL, catalog: &c }).unwrap();
+        std::fs::write(cache_path_of(&local), good.replacen("\"format\":1", "\"format\":7", 1)).unwrap();
+        assert_eq!(read_cache(&local, URL), None, "a format this build does not know");
+        let evil = good.replacen("\"id\":\"ford-outpost\"", "\"id\":\"../../x\"", 1);
+        assert!(evil.contains("../../x"), "the test edits an id");
+        std::fs::write(cache_path_of(&local), evil).unwrap();
+        assert_eq!(read_cache(&local, URL), None, "an id that would leave the folder");
+        std::fs::write(cache_path_of(&local), good).unwrap();
+        assert!(read_cache(&local, URL).is_some(), "the good one reads");
+        let _ = std::fs::remove_dir_all(&local);
+    }
+
+    /// Only an address has a cache: a folder or the mock is read in place.
+    #[test]
+    fn only_an_address_has_a_cache() {
+        assert_eq!(Source::Url(URL.into()).cache_key(), Some(URL));
+        assert_eq!(Source::Dir("/tmp/hub".into()).cache_key(), None);
+        assert_eq!(Source::Mock.cache_key(), None);
+        let (hub, _) = mock_hub("cache-mock");
+        assert_eq!(hub.cached_catalog(), None);
+        let _ = std::fs::remove_dir_all(&hub.local);
     }
 }
