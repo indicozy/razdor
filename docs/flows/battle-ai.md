@@ -259,7 +259,7 @@ BattleView::ai_move (computer's turn) → max_move → MaxThinker::poll(battle)
   never touched (`max_choice` takes `&self`).
 - **Caster guard** (experimental, the 2026-10-31 report 1459: the archmage and the saint stood
   where an enemy knight killed them at once; `Battle::guard_moves`, `Battle::caster_exposed`,
-  `MaxBudget::guard`; the switch «Бережёт магов (опыт)», `Settings::max_guard` → `Game::max_guard`
+  `MaxBudget::guard`; the switch «Бережёт магов» (on by default), `Settings::max_guard` → `Game::max_guard`
   → `Battle::set_max_guard`, off by default, see `experimental-rules.md`). At the root, a move
   of the searching side that leaves a caster of its side (role Mage: mages and healers) in a
   cell where one action of an opposing unit deals lethal damage is dropped, when the caster was

@@ -122,10 +122,10 @@ keep the item and show the existing refusal. All equipment rules and potion limi
 
 ## Battle AI: Caster guard (Максимум)
 
-Advanced settings (the «Ещё…» window) have **«Бережёт магов (опыт)»**, off by default
+Advanced settings (the «Ещё…» window) have **«Бережёт магов»**, on by default (the owner shipped it without the poll, 2026-10-31)
 (`Settings::max_guard`, saved in the settings file, not in a save; `Game::max_guard` and
 `Battle::set_max_guard` are set from it when a battle starts, as `Game::max_ai` is). It is a
-gameplay change of the «Максимум» AI, so it stays behind this switch until the owner decides.
+gameplay change of the «Максимум» AI; the switch stays so a player can turn it off.
 With it on, «Максимум» does not move a mage or healer of its side into a cell where one action
 of an opposing unit kills it, while another move leaves none exposed (`battle-ai.md` §8,
 `Battle::guard_moves`). Off, «Максимум» plays as before (the `max_bench` baseline).

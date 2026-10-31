@@ -48,6 +48,6 @@ Two extra Razdor settings are in "Advanced…":
 * **Equip an item:** `Shift` and a click on an item in the backpack equips it on the hero (or drinks it, for a potion).
 * **Take off an item:** `Shift` and a click on a worn item returns it to the backpack.
 
-## «Максимум» guards its casters (experimental)
+## «Максимум» guards its casters
 
-The advanced settings («Ещё…») have **«Бережёт магов (опыт)»** (Guards casters (experimental)), off by default. When it is on, «Максимум» does not place its mage or healer where one enemy hit kills it, if a move without that exists. The original's AI does not do this, so the switch is off: it changes battle rules and the owner has not approved it yet.
+The advanced settings («Ещё…») have **«Бережёт магов»** (Guards casters), on by default. When it is on, «Максимум» does not place its mage or healer where one enemy hit kills it, if a move without that exists. The original's AI does not do this; turn the switch off for «Максимум» as before.

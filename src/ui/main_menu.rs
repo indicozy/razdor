@@ -1338,9 +1338,9 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     if row(tr("Keep formation after battle"), if audio.keep_formation { tr("On") } else { tr("Off") }, &mut y) {
         audio.keep_formation = !audio.keep_formation;
     }
-    // Razdor's experimental option (`Battle::set_max_guard`, `docs/flows/experimental-rules.md`):
+    // «Максимум бережёт магов» (`Battle::set_max_guard`), on by default (the owner's decision, 2026-10-31):
     // off by default, a gameplay change of «Максимум».
-    if row(tr("Max guards casters (experimental)"), if audio.max_guard { tr("On") } else { tr("Off") }, &mut y) {
+    if row(tr("Max guards casters"), if audio.max_guard { tr("On") } else { tr("Off") }, &mut y) {
         audio.max_guard = !audio.max_guard;
     }
     // Razdor's options: a battle between armies on the map shows a mark and a notice (on by

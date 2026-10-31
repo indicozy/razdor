@@ -172,9 +172,9 @@ pub struct Settings {
     /// Razdor's «Максимум» for the enemy's battle AI (the owner's request, `main_menu::AiStrength`);
     /// on, `expert_ai` is on too.
     pub max_ai: bool,
-    /// Advanced, Razdor's experimental «Максимум бережёт магов» (`Battle::set_max_guard`): «Максимум»
-    /// does not step a caster into a lethal hit while another move does not. Off by default: a
-    /// gameplay change (`docs/flows/experimental-rules.md`).
+    /// Advanced, «Максимум бережёт магов» (`Battle::set_max_guard`): «Максимум» does not step a
+    /// caster into a lethal hit while another move does not. On by default: the owner shipped it
+    /// without the experimental track (2026-10-31); the switch stays to turn it off.
     pub max_guard: bool,
     /// The front row's width for new games: `Some(true)` 6 cells (the Community's wide row),
     /// `Some(false)` 4 (its two edge places are the reserve's, as the back row's are);
@@ -301,7 +301,7 @@ pub fn must_request(asked: Option<i32>, want: i32) -> bool {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: false, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), friends_let_pass: false, pass_on_bridges: false, avoid_armies: false, keep_formation: true, battle_marks: true, army_list: false, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new() }
+        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), friends_let_pass: false, pass_on_bridges: false, avoid_armies: false, keep_formation: true, battle_marks: true, army_list: false, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new() }
     }
 }
 
