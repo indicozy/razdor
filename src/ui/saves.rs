@@ -600,7 +600,7 @@ impl Book {
             // Normal size where the grown one does not fit.
             super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
                 let name_normal = fit_size(&row.name, NAME_ROOM * k, 16.0 * k);
-                let name_grown = super::new_game::row_text_size(name_normal, grow);
+                let name_grown = super::new_game::row_text_size(&row.name, name_normal, grow, NAME_ROOM * k);
                 let name_is_grown = name_grown > name_normal;
                 super::dt_font::legacy_metrics_if(name_is_grown, || {
                 let size = if name_is_grown { name_grown } else { name_normal };
@@ -622,12 +622,12 @@ impl Book {
             // The scenario's and the time's lines grow with the row too (their own Normal of 11 px).
             super::dt_font::with_face(super::dt_font::Face::Bold, || {
                 let normal = 11.0 * k;
-                let size = super::new_game::row_text_size(normal, grow);
+                let size = super::new_game::row_text_size(&row.scenario, normal, grow, 250.0 * k);
                 super::dt_font::legacy_metrics_if(size > normal, || super::chrome::shadow_centered(&ellipsize(&row.scenario, 250.0 * k, size), cx, r.y + lh * 0.42, size, lit(SCENARIO_INK)));
             });
             super::dt_font::with_face(super::dt_font::Face::Body, || {
                 let normal = 11.0 * k;
-                let size = super::new_game::row_text_size(normal, grow);
+                let size = super::new_game::row_text_size(&row.time, normal, grow, 250.0 * k);
                 super::dt_font::legacy_metrics_if(size > normal, || super::chrome::shadow_centered(&ellipsize(&row.time, 250.0 * k, size), cx, r.y + lh * 0.9, size, lit(TIME_INK)));
             });
             // Keep the play mark above long save names and the selected row highlight.

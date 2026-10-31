@@ -1468,7 +1468,17 @@ fn keys_layout(g: f32) -> (f32, f32, f32) {
 }
 
 fn keys_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
-    let g = super::display::button_grow();
+    // The rows grow with the text size, unless that only makes the window's scale smaller (a phone
+    // held sideways fits the window to its height): then they keep their Normal size, and the
+    // window's text stays as large as before.
+    let g = {
+        let k_at = |h: f32| {
+            let _scale = window_layout::window_scale(over_map, (760.0, h));
+            chrome::k()
+        };
+        let g = super::display::button_grow();
+        if g > 1.0 && k_at(keys_layout(g).2) < k_at(keys_layout(1.0).2) * 0.999 { 1.0 } else { g }
+    };
     let (pitch, row_h, keys_h) = keys_layout(g);
     let _scale = window_layout::window_scale(over_map, (760.0, keys_h));
     let k = chrome::k();

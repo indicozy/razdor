@@ -119,10 +119,15 @@ impl Win {
 }
 
 /// The size a text of a list row is drawn at (Razdor's own, the owner's decision of 2026-10-31): the
-/// row's text grows with the row, `grow` times its Normal size; a text too long for the row is cut
-/// (`ellipsize`), never shrunk. Drawn inside `legacy_metrics_if` when it is grown (see `button_label`).
-pub(super) fn row_text_size(normal: f32, grow: f32) -> f32 {
-    super::display::grown_text(normal, grow)
+/// row's text `s` grows with the row, up to `grow` times its Normal size: the largest size from
+/// there that fits `width`, never below Normal (`display::grown_label_size`), so a text that fits at
+/// Normal is never cut by its growth. Drawn inside `legacy_metrics_if` when it is grown (see
+/// `button_label`).
+pub(super) fn row_text_size(s: &str, normal: f32, grow: f32, width: f32) -> f32 {
+    if grow <= 1.0 {
+        return normal;
+    }
+    super::dt_font::legacy_metrics_if(true, || super::display::grown_label_size(normal, grow, width, |size| measure(s, size).width))
 }
 
 /// The picked item's light: (0, 30, 90) added over its lines (the list's highlight colour
@@ -712,7 +717,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
             // Shrunk to fit the name's room (`fit_size`, 15 px at most), as before the insets; grown
             // with its row (`row_text_size`), cut by its room when the grown name is longer.
             let normal = fit_size(name, name_w, 15.0 * k);
-            let grown = row_text_size(normal, grow);
+            let grown = row_text_size(name, normal, grow, name_w);
             let is_grown = grown > normal;
             super::dt_font::legacy_metrics_if(is_grown, || {
                 let size = if is_grown { grown } else { normal };
@@ -721,14 +726,14 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
         });
         // The chapters' size: the Normal 12 px, grown with the row (`row_text_size`).
         let small_normal = 12.0 * k;
-        let small = row_text_size(small_normal, grow);
-        let is_grown = small > small_normal;
         with_face(Face::Body, || for (n, &c) in chapters.iter().enumerate() {
-            let cy = r.y + head_h + n as f32 * chapter_h + chapter_h * 0.5 + small * 0.36;
             let ink = if lit { super::typography::Ink::Plain } else { super::typography::Ink::Orange };
             // Each map of a campaign won has its tick too.
             let won = listed(&m.completed, &scenarios[c].file);
             let room = r.w - (if won { 84.0 } else { 60.0 }) * k;
+            let small = row_text_size(title(&scenarios[c]), small_normal, grow, room);
+            let is_grown = small > small_normal;
+            let cy = r.y + head_h + n as f32 * chapter_h + chapter_h * 0.5 + small * 0.36;
             super::dt_font::legacy_metrics_if(is_grown, || chrome::shadow_text(&ellipsize(title(&scenarios[c]), room, small), r.x + 52.0 * k, cy, small, ink.color()));
             if won {
                 tick(head.x + head.w - 40.0 * k, cy - small * 0.36 - 5.0 * k, 10.0 * k, TICK_GREEN);
