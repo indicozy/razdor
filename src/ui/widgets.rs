@@ -1368,6 +1368,9 @@ struct Popup {
     edit: TextEdit,
     /// Its size against the editor's (rows, text): the game's windows pass `chrome::k()`.
     scale: f32,
+    /// The filter has the on-screen keyboard (a phone: only after a tap in the filter row,
+    /// [`popup_keyboard`]).
+    typing: bool,
 }
 
 local! {
@@ -2171,7 +2174,7 @@ pub fn open_list(key: &str, anchor: Rect, current: i64, options: &[(i64, String)
     let pw = anchor.w.max(220.0 * scale);
     let px = anchor.x.min(screen_width() - pw).max(0.0);
     let at = options.iter().position(|o| o.0 == current).unwrap_or(0);
-    let popup = Popup { id: field_id(key), rect: Rect::new(px, py, pw, ph), options: options.to_vec(), scroll: at.saturating_sub(POPUP_ROWS / 2), filter: String::new(), edit: TextEdit::at_end(), scale };
+    let popup = Popup { id: field_id(key), rect: Rect::new(px, py, pw, ph), options: options.to_vec(), scroll: at.saturating_sub(POPUP_ROWS / 2), filter: String::new(), edit: TextEdit::at_end(), scale, typing: false };
     POPUP.with(|p| *p.borrow_mut() = Some(popup));
 }
 
@@ -2185,6 +2188,26 @@ pub fn take_pick(key: &str) -> Option<i64> {
         }
         _ => None,
     })
+}
+
+/// Whether a drop-down list's filter has the on-screen keyboard this frame, given whether it had
+/// it (`typing`), a tap in its filter row (`tapped`) and whether the system hid the keyboard since
+/// the last frame. The same policy as a name field ([`name_keyboard`]): the desktop always types;
+/// a phone opens the list without the keyboard and shows it only on a tap in the filter.
+pub fn popup_keyboard(phone: bool, typing: bool, tapped: bool, closed_by_system: bool) -> bool {
+    let touch = if tapped {
+        NameTouch::FieldTapped
+    } else if closed_by_system {
+        NameTouch::Hidden
+    } else {
+        NameTouch::Nothing
+    };
+    name_keyboard(phone, typing, touch)
+}
+
+/// The pointer is in `r` (the pointer's own test, without a finger's growth).
+fn pointer_in_rect(r: Rect) -> bool {
+    pointer_in(r.x, r.y, r.w, r.h)
 }
 
 /// The drop-down list of `key` is open.
@@ -2207,8 +2230,12 @@ pub fn draw_popup() {
         super::chrome::note_window(r);
         // Typing filters; Backspace deletes from the filter.
         edit_keys(&mut pop.filter, &mut pop.edit, &typed_chars(), EditRules::line(40));
-        // The filter is typed in while the list is open: it asks for the keyboard as a field does.
-        want_keyboard(&pop.filter, pop.edit.caret);
+        // The filter asks for the keyboard as a name field does (`popup_keyboard`): on a phone only
+        // after a tap in the filter row, so opening the list does not cover it with the keyboard.
+        let s = pop.scale;
+        let filter_row = Rect::new(r.x, r.y, r.w, 26.0 * s);
+        let tapped = is_mouse_button_pressed(MouseButton::Left) && pointer_in_rect(tap_rect(filter_row, false));
+        pop.typing = popup_keyboard(super::display::dp_px().is_some(), pop.typing, tapped, super::display::keyboard_closed_by_system());
         let needle = pop.filter.to_lowercase();
         let shown: Vec<&(i64, String)> = pop.options.iter().filter(|o| needle.is_empty() || o.1.to_lowercase().contains(&needle) || o.0.to_string() == needle).collect();
         let max_scroll = shown.len().saturating_sub(POPUP_ROWS);
@@ -2224,7 +2251,6 @@ pub fn draw_popup() {
         draw_rectangle(r.x + 4.0, r.y + 4.0, r.w, r.h, Color::new(0.0, 0.0, 0.0, 0.4));
         draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.1, 0.09, 0.08, 0.98));
         draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, ACCENT);
-        let s = pop.scale;
         let row_h = POPUP_ROW_H * s;
         let hint = if pop.filter.is_empty() { razdor::i18n::tr("type to filter").to_string() } else { razdor::trf!("filter: {filter}", filter = pop.filter) };
         text(&hint, r.x + 8.0 * s, r.y + 19.0 * s, 15.0 * s, DIM);
@@ -2252,6 +2278,10 @@ pub fn draw_popup() {
         let outside = is_mouse_button_pressed(MouseButton::Left) && !r.contains(Vec2::from(pointer()));
         if outside || esc_pressed() {
             close = true;
+        }
+        // A list that stays open keeps the keyboard it has; a pick or a close hides it.
+        if !close && pop.typing {
+            want_keyboard(&pop.filter, pop.edit.caret);
         }
     });
     if close {
@@ -2906,5 +2936,27 @@ mod finger_tests {
             );
             assert_eq!(hit.bottom(), r.y + r.h, "dp {dp:?}");
         }
+    }
+
+    /// A drop-down list's filter (a player's report, 1440): on a phone the list opens without the
+    /// keyboard, a tap in the filter row shows it, and it stays up until the system hides it. The
+    /// desktop always types. Every drop-down goes through `draw_popup`, so this is all of them.
+    #[test]
+    fn a_dropdown_filter_on_a_phone_has_no_keyboard_on_opening() {
+        assert!(!popup_keyboard(true, false, false, false), "opening the list: no keyboard");
+        assert!(popup_keyboard(true, false, true, false), "a tap in the filter row: keyboard");
+        assert!(popup_keyboard(true, true, false, false), "typing goes on without a new tap");
+        assert!(!popup_keyboard(true, true, false, true), "hidden by the system: not typing");
+        assert!(popup_keyboard(false, false, false, false), "the desktop types straight in");
+    }
+
+    /// The filter row is a finger target on a phone: its tap area is 48 dp tall from the row's top.
+    #[test]
+    fn the_dropdown_filter_row_is_a_48_dp_tap_target_on_a_phone() {
+        let row = Rect::new(10.0, 20.0, 200.0, 26.0);
+        let t = tap_rect_at(row, false, Some(2.0));
+        assert_eq!((t.x, t.y, t.w), (row.x, row.y, row.w));
+        assert_eq!(t.h, 96.0);
+        assert_eq!(tap_rect_at(row, false, None), row, "desktop: the row itself");
     }
 }
