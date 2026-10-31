@@ -8,6 +8,12 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **Author names in letters the bundled fonts lack** (2026-10-31, a player's report, 1438). A name
+  such as «Ꙇѵαη Ꚍɣkhøηςhʋk» draws its Cyrillic Extended-B letters (U+A646, U+A68C) as boxes on
+  Android: the modern fonts (PT Serif, PT Sans, Noto Sans subset, Noto Devanagari) have no glyph for
+  them, and the fallback chain (`script_font`) finds system fonts only on Linux, macOS and Windows,
+  so a phone has none. Fix would be a bundled subset covering U+A640–U+A69F (licence and size to
+  decide). The other letters of such names draw through the chain as before.
 - **A campaign's next-map name in quotes** (2026-10-31, the community catalog). Two community
   campaigns («Dark Hike», «Время смуты») store their next map with literal quote characters
   (`"Озеро Эленьер.final.DTm"`). Razdor matches the name as written (`next_campaign_map` in

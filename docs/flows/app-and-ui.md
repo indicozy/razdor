@@ -650,6 +650,14 @@ checked by size and SHA-256, unpacked into `files.tmp/` under the zip's own path
 the same name checks as a mod's file; at most 2 GiB and 20 000 entries, `hub::mods::unpack_zip`), and
 `files.tmp/` then replaces `files/` in one rename. The window's downloads show «Загрузка…».
 
+**Scrolling** (`ui/hub_view.rs`, Razdor's): the list and the details pane scroll by the wheel, a
+one-finger swipe (`widgets::swipe_rows`), a drag (`drag_frame`: a press that moves more than 12 px is a
+drag and picks nothing; a press released where it began without a drag picks that row, so a tap picks as
+before) and the scrollbar beside them (24 dp wide on a phone). The pane holds the whole entry (picture,
+status, the mods it needs, description, the reason an install is refused) and is clipped above the bottom
+row, so no text reaches Install or Remove; words too long for its width (a link) are broken there
+(`wrap_long`). The pane's scroll starts at the top for each new pick. The list's arrows still move one row.
+
 **Stacked mods**: a mod that requires others is laid over them: `layer_chain` orders its `requires` chain
 (each requirement after its own, each once, like `plan_install`; a missing one or a circle is refused
 with the reason), and `build` lays each layer in turn over one path map, a later layer's file replacing
