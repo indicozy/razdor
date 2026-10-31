@@ -323,6 +323,22 @@ fn portrait_title_now(video: (f32, f32)) -> Option<(f32, Rect)> {
     portrait_title((screen_width(), screen_height()), super::display::dp_px(), super::display::safe_area().top, interface_k(), video)
 }
 
+/// The tallest video height a title window `video_w` wide may take on the phone held upright, so
+/// that it still spans the screen's width (Razdor's own: a window that grows down the free height
+/// gives its list more rows). The screen between the top inset and the foot, as [`portrait_title`]
+/// fits it, at the width's scale (never below the interface scale). `None` where the phone is not
+/// held upright, or with no phone.
+pub fn portrait_title_fill(video_w: f32) -> Option<f32> {
+    let ((sw, sh), dp) = ((screen_width(), screen_height()), super::display::dp_px().filter(|d| *d > 0.0)?);
+    if sh <= sw || video_w <= 0.0 {
+        return None;
+    }
+    let (top, base_k) = (super::display::safe_area().top, interface_k());
+    let bottom = super::main_menu::portrait_foot_top(sw, sh, base_k, dp, top) - TITLE_FOOT_GAP * base_k;
+    let k = ((sw - 2.0 * TITLE_MARGIN) / video_w).max(base_k);
+    Some(((bottom - top - 2.0 * TITLE_MARGIN) / k).floor())
+}
+
 /// The window scale of a title window of `video` size, as a guard: set until it drops. On a phone
 /// held upright it is [`portrait_title`]'s; held sideways [`sideways_title_k`]'s. Any other screen
 /// keeps the scale it has (none on the title screens).

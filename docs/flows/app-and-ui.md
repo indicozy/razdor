@@ -730,7 +730,7 @@ so a mod's folder (`…/mods/<id>/game`, named `game`) has its own save folder b
 are not in the mod's folder.
 
 **Switching** (the new-game window, `new_game::scenario_select`): when a mod is installed, a «Мод» drop-down
-(`view_choice_at`, a full-width row under «Добавить карту…», the hub hint moves below it; «Мод: нет» then
+(`view_choice_at`, the extras row under the buttons (1458: `new_game::extra_top`, half the width beside «Добавить карту…», full alone; the hint is «Добавить карту…»'s tooltip); «Мод: нет» then
 «Мод: <title>» per installed mod) sets
 `MOD_REQUEST`; `App::choose_mod` starts `build_mod` on a worker (1441): `hub::use_mod` builds the folder and
 writes `active.json`, then `DtInstall::from_env` and the scenario list are made there too. `App::poll_mod_switch`

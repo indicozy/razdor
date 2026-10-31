@@ -61,56 +61,92 @@ fn own(section: &str, key: &str, ours: &'static str) -> String {
     t.unwrap_or_else(|| tr(ours).to_string())
 }
 
-/// The window's buttons' row, 28 high at Normal (the original's), at this y in the window.
+/// The window's buttons' row, 28 high at Normal (the original's), at this y in the window at
+/// Normal. The footer hangs from the window's bottom: a window taller than 482 (a phone held
+/// upright, or the extras row below) moves the buttons down with it (see `window_video_h`).
 const FOOT_Y: f32 = 443.0;
 const FOOT_H: f32 = 28.0;
+/// Razdor's extras row under the buttons («Добавить карту…» and «Мод»), 26 high at Normal.
+const EXTRA_ROW_H: f32 = 26.0;
+/// The gap between the buttons' row (or the filter's row) and the extras row.
+const EXTRA_GAP: f32 = 12.0;
 
-/// The window's height in its video pixels, the footer's growth included (Razdor's own, the
-/// owner's decision of 2026-10-31): the buttons grow with the text size (`button_grow`), and the
-/// window with them. At Large and Largest the filter and the order take a row of their own under
-/// the buttons, since their wide labels need the room; at Normal the footer is the original's one
-/// row and nothing moves.
-fn footer_video_h(g: f32) -> f32 {
+/// The footer's height in video pixels, from the buttons' row's top to the window's bottom: the
+/// buttons grow with the text size (`button_grow`), and at Large and Largest the filter and the
+/// order take a row of their own under them, since their wide labels need the room. At Normal the
+/// original's one row, 11 px below it (the window's 482); `extras` adds the extras row (Razdor's own,
+/// the owner's request of 2026-10-31) under it.
+fn foot_block(g: f32, extras: bool) -> f32 {
+    let b = FOOT_H * g;
+    let mut h = b;
     if g > 1.0 {
-        let b = FOOT_H * g;
-        FOOT_Y + b + 6.0 + b + 14.0
-    } else {
-        482.0
+        h += 6.0 + b;
+    }
+    if extras {
+        h += EXTRA_GAP + EXTRA_ROW_H * g;
+    }
+    h + if g > 1.0 { 14.0 } else { 11.0 }
+}
+
+/// The window's height in video pixels: the footer at its place under the list, and with `fill`
+/// on a phone held upright the rest of the screen (the list then gets its rows, Razdor's own, the
+/// owner's request of 2026-10-31); elsewhere that place only.
+fn window_video_h(g: f32, extras: bool, fill: bool) -> f32 {
+    let base = FOOT_Y + foot_block(g, extras);
+    match if fill { super::window_layout::portrait_title_fill(594.0) } else { None } {
+        Some(h) => base.max(h),
+        None => base,
     }
 }
 
-/// The footer's extra height in the window's video pixels (0 at Normal).
-fn footer_extra(g: f32) -> f32 {
-    footer_video_h(g) - 482.0
+/// The footer's extra height in the window's video pixels, over the original's footer (0 at Normal
+/// without the extras row): the inner frames' divider moves up by it.
+fn footer_extra(g: f32, extras: bool) -> f32 {
+    foot_block(g, extras) - 39.0
+}
+
+/// The top of the extras row in video pixels, under the buttons' row (and the filter's row).
+fn extra_top(foot_y: f32, g: f32) -> f32 {
+    foot_y + FOOT_H * g + if g > 1.0 { 6.0 + FOOT_H * g } else { 0.0 } + EXTRA_GAP
 }
 
 /// The window, 594×482 video pixels as the load window, low on the screen under the logo.
 struct Win {
     r: Rect,
     k: f32,
+    /// The buttons' row's top in video pixels (the footer hangs from the window's bottom).
+    foot_y: f32,
 }
 
 impl Win {
-    fn open(title: &str) -> (Win, bool) {
+    /// Opens the window. `extras`: the extras row is under the buttons; `fill`: a phone held upright
+    /// gives the window the screen's free height (the scenario list only).
+    fn open(title: &str, extras: bool, fill: bool) -> (Win, bool) {
         let k = chrome::k();
         let g = super::display::button_grow();
-        let video_h = footer_video_h(g);
+        let video_h = window_video_h(g, extras, fill);
         let (w, h) = (594.0 * k, video_h * k);
         let r = super::window_layout::title_rect((594.0, video_h)).unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, (super::chrome::canvas_top() + 190.0 * k).min(screen_height() - h), w, h));
         let (_, closed) = chrome::window(r, title, chrome::Skin::Marble, true);
         // The 634×516 window with its inner frames (ae2520, read by 4d2a30; 0x48d710); the footer's
         // growth is the window's, and the frames keep their place above it.
-        chrome::window_inner_frames_footed(r, chrome::opx(), 0.0, footer_extra(g) * k);
-        (Win { r, k }, closed)
+        chrome::window_inner_frames_footed(r, chrome::opx(), 0.0, footer_extra(g, extras) * k);
+        (Win { r, k, foot_y: video_h - foot_block(g, extras) }, closed)
     }
 
     fn rect(&self, x: f32, y: f32, w: f32, h: f32) -> Rect {
         Rect::new(self.r.x + x * self.k, self.r.y + y * self.k, w * self.k, h * self.k)
     }
 
-    /// A footer button on the buttons' row (grown high with the text, see `footer_video_h`).
+    /// The bottom of the list and of the description box, in video pixels: 11 above the buttons'
+    /// row (the original's 432 at Normal without the extras row, 432 with it too).
+    fn content_bottom(&self) -> f32 {
+        self.foot_y - 11.0
+    }
+
+    /// A footer button on the buttons' row (grown high with the text, see `foot_block`).
     fn button(&self, x: f32, w: f32, label: &str, enabled: bool) -> bool {
-        self.button_at(x, FOOT_Y, w, FOOT_H * super::display::button_grow(), label, enabled)
+        self.button_at(x, self.foot_y, w, FOOT_H * super::display::button_grow(), label, enabled)
     }
 
     fn button_at(&self, x: f32, y: f32, w: f32, h: f32, label: &str, enabled: bool) -> bool {
@@ -668,13 +704,13 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
     }
     super::main_menu::backdrop();
     let grow = super::display::button_grow();
-    let _scale = super::window_layout::title_scale((594.0, footer_video_h(grow)));
-    let (win, closed) = Win::open(&own("NewGame", "Title", n_("Scenario for a new game")));
+    // Razdor's «Добавить карту…» and «Мод» take the extras row under the buttons (Razdor's own, the
+    // owner's request of 2026-10-31): the window takes that row only where one of them is shown.
+    let extras = map_import::available() || !mods.is_empty();
+    let _scale = super::window_layout::title_scale((594.0, window_video_h(grow, extras, true)));
+    let (win, closed) = Win::open(&own("NewGame", "Title", n_("Scenario for a new game")), extras, true);
     let k = win.k;
     let mut m = marks();
-    // The mod row takes room from the list's foot (`MOD_LIFT`); without mods nothing moves. Grown
-    // with the text size (`button_grow`), it rises by its extra height too, its bottom where it was.
-    let lift = if mods.is_empty() { 0.0 } else { MOD_LIFT + MOD_ROW_H * (grow - 1.0) };
     let (show, order) = (Show::of(m.show), Order::of(m.order));
     // The maps made for the base game under a played mod (1445b) are a group of their own, after
     // the rest, shut unless its header row is opened (`BASE_OPEN`); the snapshot scene opens it once.
@@ -704,10 +740,10 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
     // The list: per group a round icon and the name, and a campaign's chapters under it in
     // small type; the picked group's block is lit. The wheel and the scrollbar scroll it.
     // The box's top left is the window's inner pane frame's corner (4, 31), so its silver edge
-    // and the pane's line up (`window_inner_frames`, 0x48d710); its bottom right stays at
-    // (282, 360). «Добавить карту…» and its hint are under it, on the same left edge and width.
-    // The box gives up the room the grown «Добавить карту…» takes under it (`add_map_grow`).
-    let rows = win.rect(4.0, 31.0, 278.0, 329.0 - lift - add_map_grow(grow));
+    // and the pane's line up (`window_inner_frames`, 0x48d710). Its bottom is the description
+    // box's (`Win::content_bottom`): the room under the list is Razdor's extras row's, moved down
+    // below the buttons, so the list takes it (the owner's request, backlog 1458).
+    let rows = win.rect(4.0, 31.0, 278.0, win.content_bottom() - 31.0);
     chrome::text_box_base(rows);
     // The rows, their bar, the scrollbar and the empty-list line live in `view`: the box's
     // corner ornaments take the columns beside it, so nothing under them.
@@ -916,7 +952,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
         // Under it the description box (0x4d2a30, 65ae00): the name centred in white (ae2498,
         // 0x4c1b4b), the description in the bold SanSerif's orange (ae24f4 over ae2510,
         // 0x4c1bb4), from the box's top.
-        let bottom = win.rect(0.0, 432.0, 0.0, 0.0).y;
+        let bottom = win.rect(0.0, win.content_bottom(), 0.0, 0.0).y;
         let desc = Rect::new(frame.x, frame.y + frame.h + 8.0 * k, frame.w, (bottom - frame.y - frame.h - 8.0 * k).max(0.0));
         chrome::text_box(desc);
         let size = 12.0 * k;
@@ -968,14 +1004,20 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
         }
         drop(clip);
     }
-    add_map_button(&win, has_install && !busy, lift);
+    // The extras row under the buttons (Razdor's own, the owner's request of 2026-10-31): «Добавить
+    // карту…» and «Мод» side by side, each half of the window's width; alone, the whole width.
+    let both = map_import::available() && !mods.is_empty();
+    let (x_mod, w_mod) = if both { (306.0, 276.0) } else { (12.0, 570.0) };
+    let extras_y = extra_top(win.foot_y, grow);
+    let extras_h = EXTRA_ROW_H * grow;
+    add_map_button(&win, has_install && !busy, if both { (12.0, extras_y, 276.0, extras_h) } else { (12.0, extras_y, 570.0, extras_h) });
     // Razdor's filter and order (a players' wish), under the list where the original's window
     // has nothing: each opens a drop-down list; the choice is kept in the settings.
-    // The footer (Razdor's own, see `footer_video_h`): at Normal the original's row, unchanged; at
+    // The footer (Razdor's own, see `foot_block`): at Normal the original's row, unchanged; at
     // Large and Largest the filter and the order take a row of their own under the grown buttons.
     let two_rows = grow > 1.0;
     let b = FOOT_H * grow;
-    let (choice_y, choice_h, choice_w) = if two_rows { (FOOT_Y + b + 6.0, b, 140.0 * grow) } else { (442.0, FOOT_H, 140.0) };
+    let (choice_y, choice_h, choice_w) = if two_rows { (win.foot_y + b + 6.0, b, 140.0 * grow) } else { (win.foot_y - 1.0, FOOT_H, 140.0) };
     let pick_show = view_choice(&win, (12.0, choice_y, choice_w, choice_h), "razdor:scenario-show", show as i64, &Show::ALL.map(|s| s.label()));
     let pick_order = view_choice(&win, (12.0 + choice_w + 6.0, choice_y, choice_w, choice_h), "razdor:scenario-order", order as i64, &Order::ALL.map(|o| o.label()));
     if pick_show.is_some() || pick_order.is_some() {
@@ -993,7 +1035,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
         labels.extend(mods.iter().map(|(_, title)| format!("{}: {}", tr("Mod"), title.get(i18n::lang()))));
         let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
         let current = active.and_then(|a| mods.iter().position(|(id, _)| id == a)).map_or(0, |i| i + 1);
-        let row = win.rect(4.0, MOD_ROW_Y - lift, 278.0, MOD_ROW_H * grow);
+        let row = win.rect(x_mod, extras_y, w_mod, extras_h);
         // While the folder is built the row says so and takes no choice (1441).
         let picked = if busy {
             chrome::marble_button(row, tr("Preparing the mod…"), false, false);
@@ -1016,7 +1058,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
     let can = !list.is_empty();
     let start = start_allowed(can, busy);
     if experimental_rules() != ExperimentalRules::default() {
-        let label_y = if two_rows { choice_y + b + 2.0 } else { 470.0 };
+        let label_y = if two_rows { choice_y + b + 2.0 } else { win.foot_y + 27.0 };
         let label = win.rect(12.0, label_y, 306.0, 12.0);
         chrome::shadow_text(tr("Experimental rules enabled"), label.x, label.y + 9.0 * k, 9.0 * k, chrome::ORANGE_TEXT);
     }
@@ -1092,54 +1134,29 @@ fn experimental_menu() {
     if close || pressed || key(KeyCode::Escape) || key(KeyCode::Enter) { RULES_OPEN.with(|p| p.set(false)); }
 }
 
-/// A marble button at `x` (window pixels) on the buttons' line showing the choice `current`
-/// of `labels`, with a small arrow; a click opens the drop-down list `key`. The value picked.
-/// How much higher «Добавить карту…» stands at the text size `g` (the list above gives up as much;
-/// Razdor's own, see `add_map_button`). Zero where the button is not shown.
-fn add_map_grow(g: f32) -> f32 {
-    if map_import::available() { 26.0 * (g - 1.0) } else { 0.0 }
-}
-
-/// Razdor's «Добавить карту…» under the scenario list, with the hint of what it takes: the
+/// Razdor's «Добавить карту…» on the extras row under the buttons (`at`: window units), with the
+/// hint of what it takes as its tooltip (Razdor's own, the owner's request of 2026-10-31): the
 /// platform's picker copies the map (or the archive's maps) into the install (`ui::map_import`).
-/// The list ends above it (`add_map_button`'s room: the list is 329 units high).
-fn add_map_button(win: &Win, has_install: bool, lift: f32) {
+fn add_map_button(win: &Win, has_install: bool, at: (f32, f32, f32, f32)) {
     if !map_import::available() {
         return;
     }
-    let k = win.k;
     let enabled = has_install && map_import::can_start();
-    // Razdor's own: the button grows with the text size, up from its place (its bottom stays), and
-    // the list above gives up that room (`add_map_grow`).
-    let grow = super::display::button_grow();
-    let r = win.rect(4.0, 366.0 - lift - add_map_grow(grow), 278.0, 26.0 * grow);
+    let r = win.rect(at.0, at.1, at.2, at.3);
     let (_, down, pressed) = button_state(r, enabled);
     chrome::marble_button(r, tr("Add a map…"), enabled, down);
     if pressed {
         cue(Cue::Button);
         map_import::request();
     }
-    let size = 10.0 * k;
-    let hint = tr("A .DTm file or a .zip archive: an archive may hold a campaign or several maps.");
-    // With the mod row (under the button, lifted with the list) the hint sits below it, two
-    // lines tighter; the two lines end well above the window's bottom row (442).
-    let (top, gap) = if lift > 0.0 { (MOD_ROW_Y - lift + MOD_ROW_H + 3.0, 10.0) } else { (398.0, 13.0) };
-    for (i, line) in wrap(hint, 278.0 * k, size).iter().take(2).enumerate() {
-        let at = win.rect(4.0, top + i as f32 * gap, 278.0, 13.0);
-        chrome::shadow_text(line, at.x + 4.0 * k, at.y + size, size, chrome::CREAM);
+    if mouse_in(r.x, r.y, r.w, r.h) {
+        tooltip(&[(tr("A .DTm file or a .zip archive: an archive may hold a campaign or several maps.").to_string(), INK)]);
     }
 }
 
 fn view_choice(win: &Win, (x, y, w, h): (f32, f32, f32, f32), key: &str, current: i64, labels: &[&str]) -> Option<i64> {
     view_choice_at(win, win.rect(x, y, w, h), key, current, labels)
 }
-
-/// The mod row's place under «Добавить карту…» (window units, with no mods; the hint below it).
-const MOD_ROW_Y: f32 = 396.0;
-const MOD_ROW_H: f32 = 22.0;
-/// How far the list's box, «Добавить карту…» and the rows under them rise when the mod row is
-/// shown: the list gives up the room the row takes.
-const MOD_LIFT: f32 = 24.0;
 
 /// [`view_choice`] in the rectangle `r` (screen pixels).
 fn view_choice_at(win: &Win, r: Rect, key: &str, current: i64, labels: &[&str]) -> Option<i64> {
@@ -1187,8 +1204,8 @@ pub fn tutorial_map(scenarios: &[ScenarioEntry]) -> Option<usize> {
 pub fn tutorial_offer(scenarios: &[ScenarioEntry]) -> Option<Screen> {
     let Some(map) = tutorial_map(scenarios) else { return Some(Screen::ScenarioSelect) };
     super::main_menu::backdrop();
-    let _scale = super::window_layout::title_scale((594.0, footer_video_h(super::display::button_grow())));
-    let (win, closed) = Win::open(&own("Tutorial", "Title", n_("Tutorial scenario")));
+    let _scale = super::window_layout::title_scale((594.0, window_video_h(super::display::button_grow(), false, false)));
+    let (win, closed) = Win::open(&own("Tutorial", "Title", n_("Tutorial scenario")), false, false);
     let k = win.k;
     let pic = win.rect(18.0, 44.0, 152.0, 386.0);
     let picture = chrome::ui_text("Tutorial", "Picture")
@@ -1251,10 +1268,10 @@ pub fn class_select(game: &mut Option<Game>, demo: &Arc<Content>, scenario: Opti
     let r = super::window_layout::title_rect((632.0, hero_h)).unwrap_or_else(|| Rect::new((screen_width() - 632.0 * scale) / 2.0, (super::chrome::canvas_top() + 202.0 * scale).min(screen_height() - hero_h * scale), 632.0 * scale, hero_h * scale));
     // Above the on-screen keyboard while the name is typed in: the name field's row (y 207 in
     // video px, the same for every hero) is the one `window_layout::keyboard_lifted` keeps in sight.
-    let r = super::window_layout::keyboard_lifted(r, Win { r, k: scale }.rect(38.0, 207.0, 160.0, 22.0));
+    let r = super::window_layout::keyboard_lifted(r, Win { r, k: scale, foot_y: 0.0 }.rect(38.0, 207.0, 160.0, 22.0));
     let title = own("NewHero", "Title", n_("The hero's starting characteristics"));
     let (_, closed) = chrome::window(r, &title, chrome::Skin::Marble, true);
-    let win = Win { r, k: scale };
+    let win = Win { r, k: scale, foot_y: 0.0 };
     let k = win.k;
     // As the original (0x4c1804, 0x4743c8): only a class whose preset has a start cell is
     // offered; the window opens on the first one, or is not opened at all when there is
@@ -1482,6 +1499,26 @@ fn choose_class(offered: [bool; 3], pick: usize, clicked: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The footer at Normal keeps the original's places: the buttons at 443 and the list and the
+    /// description ending at 432, with or without the extras row (1458); the extras row sits under
+    /// the buttons and fits the window at Large and Largest too.
+    #[test]
+    fn the_footer_keeps_the_original_places_and_the_extras_row_fits() {
+        assert_eq!(window_video_h(1.0, false, false), 482.0, "the original's window without the extras");
+        let h = window_video_h(1.0, true, false);
+        assert_eq!(h, 520.0, "the extras row takes 38 units under the buttons");
+        let win = Win { r: Rect::new(0.0, 0.0, 594.0, h), k: 1.0, foot_y: h - foot_block(1.0, true) };
+        assert_eq!((win.foot_y, win.content_bottom()), (443.0, 432.0), "the buttons and the list's foot keep their places");
+        assert_eq!(extra_top(win.foot_y, 1.0), 483.0);
+        for g in [1.0, 1.25, 1.5] {
+            let h = window_video_h(g, true, false);
+            let foot_y = h - foot_block(g, true);
+            let last = extra_top(foot_y, g) + EXTRA_ROW_H * g;
+            assert!(last <= h - 11.0, "the extras row ends above the window's bottom at {g}");
+            assert!(extra_top(foot_y, g) > foot_y + FOOT_H * g, "under the buttons at {g}");
+        }
+    }
 
     /// A tick shows for the chosen mod only (1456): a map won with no mod is not ticked under
     /// Evolution, a map won under Evolution is not ticked with no mod, and an old no-mod tick
