@@ -368,7 +368,8 @@ fn phone_frame(game: &mut Game, r: Rect, selected: &mut usize, page: &mut usize,
     use super::chrome::{self, CREAM};
     use super::dt_font::Face;
     let k = chrome::k();
-    let (inner, closed) = chrome::window(r, &own("Title", n_("The hero's spell book")), chrome::Skin::Marble, true);
+    let title = own("Title", n_("The hero's spell book"));
+    let (inner, closed) = chrome::window(r, &title, chrome::Skin::Marble, true);
     let book: Vec<SpellDef> = game.book().into_iter().cloned().collect();
     let enemy: Vec<bool> = book.iter().map(magic::targets_enemy).collect();
     let gap = 6.0 * k;
