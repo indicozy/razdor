@@ -29,6 +29,7 @@ use super::hall_ink;
 use super::audio::{cue, cued, Cue};
 use super::dialog::{resource_icon, Dialog, Picture, Resource, MANA};
 use super::item_filter;
+use super::kit;
 use super::items_view::{item_squares, unit_stat_lines};
 use super::keymap::{self, Action};
 use super::story;
@@ -42,6 +43,8 @@ const PARCHMENT_INK: Color = Color::new(0.45, 0.28, 0.14, 1.0);
 const BOX_INK: Color = Color::new(1.0, 0.86, 0.58, 1.0);
 const SILVER: Color = Color::new(0.78, 0.78, 0.82, 1.0);
 const TAB_RED: Color = Color::new(0.75, 0.18, 0.12, 1.0);
+/// The market's phone window's design size (its width and height are the room the phone gives: `kit::phone_window`).
+const MARKET_PHONE_DESIGN: (f32, f32) = (600.0, 800.0);
 const MARKET_HEADING: Color = Color::new(156.0 / 255.0, 1.0, 156.0 / 255.0, 1.0);
 const BUILDING_AND_ITEM_NAME: Color = Color::new(211.0 / 255.0, 228.0 / 255.0, 161.0 / 255.0, 1.0);
 const QUEST_HEADING: Color = Color::new(189.0 / 255.0, 190.0 / 255.0, 90.0 / 255.0, 1.0);
@@ -2198,34 +2201,7 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
     };
     // The trade button plays the gold sound (interface.md §14).
     if button_sounding(x + 308.0 * k, by, 90.0 * k, bh, &label, can, Cue::Gold) {
-        let k = view.pick.unwrap_or(0);
-        let mut done = false;
-        *message = Some(if view.selling {
-            let pack_index = sellable[order[k]];
-            let name = c.item(game.pack[pack_index]).name.clone();
-            match game.sell(pack_index) {
-                Ok(g) => {
-                    done = true;
-                    trf!("Sold {name} for {g} gold.", name, g)
-                }
-                Err(e) => trade_error(e),
-            }
-        } else {
-            match game.buy(order[k]) {
-                Ok(item) => {
-                    done = true;
-                    trf!("Bought {item}. It is in your pack.", item = c.item(item).name)
-                }
-                Err(e) => trade_error(e),
-            }
-        });
-        // For many buys (or sales) in a row the selection stays: on the item that moved up
-        // into the bought one's row, or the one above when it was the last; none when the
-        // list is empty. A refused trade keeps it where it was.
-        if done {
-            let left = if view.selling { game.pack.iter().filter(|&i| game.can_sell(i)).count() } else { game.market_here().map_or(0, |g| g.len()) };
-            view.pick = next_pick(k, left);
-        }
+        trade(game, &c, view, message, &sellable, &order);
     }
     if button(x + 416.0 * k, by, 148.0 * k, bh, &shop, shop_button.enabled) {
         view.selling = shop_button.shows_pack;
@@ -2234,6 +2210,317 @@ fn market(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView, 
     }
     FILTER_KEYS.with(|f| f.set(reply.keys_taken));
     hall_offers(game, f, view, message, dialogs)
+}
+
+/// The market's phone window (Razdor's own, the owner's decision, 2026-11-01), at one design px per dp
+/// (`kit::phone_window`): the title; the switch between the goods and the pack («Торговая лавка»,
+/// «Инвентарь»); the filter and the group row; the two titles, which sort the list as on the desktop;
+/// the list as finger-tall rows; the picked item's description, or the town's quests and rumours (or its
+/// description), in a box that scrolls; the money, a message and the trade button full width at the
+/// foot; the tabs and Exit under them. Upright, one column, the list with its own scroll (three rows).
+/// Sideways, the list on the left (44%) and the description and the trade on the right; the left pane
+/// is one column that scrolls (the filter, the groups, the titles, every row). The same actions as the
+/// desktop's (`market`, `trade`, `tab_clicked`).
+#[allow(clippy::too_many_arguments)]
+fn market_phone(game: &mut Game, assets: &Assets, view: &mut BuildingView, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>, rect: Rect, tabs: &[Tab]) -> Option<Screen> {
+    let k = chrome::k();
+    let gap = 4.0 * k;
+    let pad = 8.0 * k;
+    let bh = kit::touch_h(40.0);
+    let up = kit::upright();
+    let c = game.content.clone();
+    let (inner, close) = chrome::window_with_title_color(rect, &title(game), chrome::Skin::Marble, true, BUILDING_AND_ITEM_NAME);
+    let halves = |r: Rect| {
+        let hw = (r.w - gap) / 2.0;
+        (Rect::new(r.x, r.y, hw, r.h), Rect::new(r.x + hw + gap, r.y, hw, r.h))
+    };
+
+    // The tabs and Exit at the foot: rows of three upright, one row sideways.
+    let n = tabs.len() + 1;
+    let cols = if up { n.min(3) } else { n };
+    let frows = n.div_ceil(cols);
+    let cell_w = (inner.w - 2.0 * pad - gap * (cols - 1) as f32) / cols as f32;
+    let foot_y = inner.y + inner.h - pad - (frows as f32 * bh + (frows - 1) as f32 * gap);
+    let cells: Vec<Rect> = (0..n).map(|i| Rect::new(inner.x + pad + (i % cols) as f32 * (cell_w + gap), foot_y + (i / cols) as f32 * (bh + gap), cell_w, bh)).collect();
+    // The body starts 14 px down: the window's close cross stays clear of the trade row (the touch probe's rule).
+    let body = Rect::new(inner.x + pad, inner.y + 14.0 * k, inner.w - 2.0 * pad, (foot_y - gap - inner.y - 14.0 * k).max(0.0));
+    let mut next = None;
+    for (i, &t) in tabs.iter().enumerate() {
+        let r = cells[i];
+        if toggle_button(r.x, r.y, r.w, r.h, tab_label(t), view.tab == t) && view.tab != t && view.garrison_sel.is_none() {
+            tab_clicked(game, view, message, t);
+        }
+    }
+    let exit = kit::button(cells[tabs.len()], tr("Exit"), true) && view.garrison_sel.is_none();
+
+    // The panes: upright, one column (the left is the body); sideways, the list on the left (44%).
+    let (left, right) = if up {
+        (body, body)
+    } else {
+        let lw = (body.w * 0.44).floor();
+        (Rect::new(body.x, body.y, lw, body.h), Rect::new(body.x + lw + 8.0 * k, body.y, body.w - lw - 8.0 * k, body.h))
+    };
+    let trade_pane = if up { body } else { right };
+    // A row of the list is a finger tall (48 dp) with 4 dp between the rows.
+    let pitch = kit::finger_h(26.0 * k) + gap;
+    let row_h = pitch - gap;
+    let trade_r = Rect::new(trade_pane.x, trade_pane.y, trade_pane.w, bh);
+    let left_top = if up { trade_r.bottom() + gap } else { left.y };
+    // Upright, the list is three rows tall and the description takes the rest.
+    let upright_list_bottom = left_top + bh + gap + 2.0 * bh + gap + gap + bh + gap + 3.0 * pitch;
+    // The foot: the money, the message (if any) and the trade button, at the bottom of the trade's pane.
+    let money_h = 24.0 * k;
+    let msg_h = match message.as_deref() {
+        Some(m) => kit::Text::new(m, 13.0, ACCENT).height(trade_pane.w) + gap,
+        None => 0.0,
+    };
+    let foot_h = money_h + gap + msg_h + bh;
+    let foot_top = trade_pane.bottom() - foot_h;
+    let info_top = if up { upright_list_bottom + gap } else { trade_r.bottom() + gap };
+    let info = Rect::new(trade_pane.x, info_top, trade_pane.w, (foot_top - gap - info_top).max(0.0));
+
+    // The goods, or the pack, cheapest first (the desktop's rules: `market`).
+    let sellable: Vec<usize> = game.pack.entries().filter(|&(_, i)| game.can_sell(i)).map(|(n, _)| n).collect();
+    let goods = game.market_here().unwrap_or_default();
+    let prices: Vec<_> = if view.selling { sellable.iter().map(|&n| game.sell_price(game.pack[n])).collect() } else { goods.iter().map(|&i| game.buy_price(i)).collect() };
+    let names: Vec<&str> = if view.selling { sellable.iter().map(|&n| c.item(game.pack[n]).name.as_str()).collect() } else { goods.iter().map(|&i| c.item(i).name.as_str()).collect() };
+    let own_order = cheapest_first(&prices);
+    let (name_head, price_head) = (own_text("Building", "ItemName", n_("Name")), own_text("Building", "ItemCost", n_("Price")));
+
+    // The left pane's blocks: sideways one column in a flow that scrolls (its rows all in it), upright
+    // in the stack above the description. The titles' rectangles are the same both ways.
+    let mut lf = if up { None } else { Some(kit::Flow::begin(left, "market-left")) };
+    let lclip = if up { None } else { Some(Clip::new(left)) };
+    let base = match &lf {
+        Some(f) => f.cursor(),
+        None => left_top,
+    };
+    // The blocks stop 12 px short of the pane's right edge: the flow's scroll bar is there (sideways).
+    let blocks_w = left.w - if up { 0.0 } else { 12.0 * k };
+    let filter_r = Rect::new(left.x, base, blocks_w, bh);
+    // The group row: eight 48 dp buttons in two rows of four (a row of eight would be under 48 dp each).
+    let group_r = Rect::new(left.x, filter_r.bottom() + gap, blocks_w, 2.0 * bh + gap);
+    let titles_r = Rect::new(left.x, group_r.bottom() + gap, blocks_w, bh);
+    let (name_r, price_r) = halves(titles_r);
+    // Whether a block of the left pane is whole (a block cut by its flow's edge is drawn, not pressed).
+    let whole = |r: Rect| lf.as_ref().is_none_or(|f| !f.cut(r));
+    let press = |r: Rect, label: &str| match &lf {
+        Some(f) => kit::button_in(f, r, label, true),
+        None => kit::button(r, label, true),
+    };
+    let sorted_by = if press(name_r, &name_head) {
+        Some(Column::Name)
+    } else if press(price_r, &price_head) {
+        Some(Column::Price)
+    } else {
+        None
+    };
+    if let Some(column) = sorted_by {
+        let before = sorted_rows(&own_order, &names, &prices, view.sort);
+        view.sort = view.sort.clicked(column);
+        let after = sorted_rows(&own_order, &names, &prices, view.sort);
+        view.pick = same_pick(&before, &after, view.pick);
+    }
+    let order = sorted_rows(&own_order, &names, &prices, view.sort);
+    let rows: Vec<(Option<ItemId>, String, String, bool)> = if view.selling {
+        order.iter().map(|&n| game.pack[sellable[n]]).map(|i| (Some(i), c.item(i).name.clone(), game.sell_price(i).to_string(), false)).collect()
+    } else {
+        order.iter().map(|&n| goods[n]).map(|i| (Some(i), c.item(i).name.clone(), game.buy_price(i).to_string(), game.buy_price(i) > game.gold)).collect()
+    };
+    let all: Vec<(usize, ItemId)> = rows.iter().enumerate().filter_map(|(n, r)| r.0.map(|i| (n, i))).filter(|&(_, i)| view.group.holds(c.item(i).kind)).collect();
+    let before = item_filter::keep(&c, all.iter().copied(), &view.filter).len();
+    let reply = if whole(filter_r) {
+        item_filter::field_hinted(FILTER_KEY, &mut view.filter, filter_r, &[keymap::key(Action::Music)], before, all.len(), true, tr("Search…"))
+    } else {
+        item_filter::Reply::default()
+    };
+    if whole(group_r) {
+        let (top, bottom) = (Rect::new(group_r.x, group_r.y, group_r.w, bh), Rect::new(group_r.x, group_r.y + bh + gap, group_r.w, bh));
+        let [g0, g1, g2, g3] = item_filter::row_cells::<4>(top);
+        let [g4, g5, g6, g7] = item_filter::row_cells::<4>(bottom);
+        let shown_group = item_filter::group_row(&c, assets, &[g0, g1, g2, g3, g4, g5, g6, g7], view.group);
+        if shown_group != view.group {
+            view.group = shown_group;
+            view.scroll = 0;
+        }
+    }
+    let kept = item_filter::keep(&c, all, &view.filter);
+    if view.pick.is_none() && view.filter.trim().is_empty() && view.group == ItemGroup::All {
+        view.pick = first_pick(rows.len());
+    }
+    let pick_pos = view.pick.and_then(|p| kept.iter().position(|(n, _)| *n == p));
+
+    // The list: upright, three rows with a wheel and a scroll bar; sideways, every row (the pane scrolls).
+    let total = kept.len();
+    let rows_shown = if up { 3 } else { total.max(1) };
+    let list = Rect::new(left.x, titles_r.bottom() + gap, blocks_w, rows_shown as f32 * pitch);
+    let max_scroll = total.saturating_sub(rows_shown);
+    if up {
+        swipe_rows(list, pitch);
+        if mouse_in(list.x, list.y, list.w, list.h) {
+            let wh = wheel();
+            if wh < 0.0 {
+                view.scroll = (view.scroll + 1).min(max_scroll);
+            } else if wh > 0.0 {
+                view.scroll = view.scroll.saturating_sub(1);
+            }
+        }
+        view.scroll = view.scroll.min(max_scroll);
+    } else {
+        view.scroll = 0;
+    }
+    chrome::text_box(list);
+    if up {
+        scrollbar(Rect::new(list.right() - 14.0 * k, list.y + 2.0 * k, 12.0 * k, list.h - 4.0 * k), &mut view.scroll, rows_shown, total);
+        view.scroll = view.scroll.min(max_scroll);
+    }
+    let bar_w = if up { 14.0 * k } else { 0.0 };
+    let mut hit = None;
+    for (pos, &(n, _)) in kept.iter().enumerate().skip(view.scroll).take(rows_shown) {
+        let (item, name, price, red) = &rows[n];
+        let y = list.y + 2.0 * k + (pos - view.scroll) as f32 * pitch;
+        let rr = Rect::new(list.x + 2.0 * k, y, list.w - 4.0 * k - bar_w, row_h);
+        if !whole(rr) {
+            continue;
+        }
+        if pick_pos == Some(pos) {
+            chrome::additive(|| draw_rectangle(rr.x, rr.y, rr.w, rr.h, blend_color(MARKET_PICK_ADDED)));
+        }
+        if button_state(rr, true).2 {
+            hit = Some(pos);
+        }
+        if let Some(item) = item {
+            assets.draw_item(*item, rr.x + 3.0 * k, rr.y + 3.0 * k, rr.h - 6.0 * k);
+        }
+        let ink = market_ink(*red);
+        let price_t = kit::Text::new(price, 15.0, ink);
+        let name_x = rr.x + rr.h + 6.0 * k;
+        let name_t = kit::Text::new(name, 15.0, ink);
+        let room = rr.right() - 6.0 * k - price_t.width() - 8.0 * k - name_x;
+        let shown = ellipsize(name, room, name_t.size());
+        let base_y = rr.y + rr.h / 2.0 + name_t.size() * 0.35;
+        kit::Text::new(&shown, 15.0, ink).draw_one(name_x, base_y);
+        price_t.draw_right_one(rr.right() - 6.0 * k, base_y);
+    }
+    if let Some(pos) = hit {
+        view.pick = Some(kept[pos].0);
+    }
+    if reply.pick {
+        view.pick = kept.first().map(|(n, _)| *n);
+    }
+    // A row the group or the filter hides is not the one picked.
+    if view.pick.is_some_and(|p| !kept.iter().any(|(n, _)| *n == p)) {
+        view.pick = None;
+    }
+    if view.pick.is_some_and(|q| q >= rows.len()) {
+        view.pick = None;
+    }
+    // The sideways pane's flow: its content is the blocks and every row.
+    if let Some(f) = lf.as_mut() {
+        f.row_h(list.bottom() - base, |_| {});
+    }
+    if let Some(f) = lf.take() {
+        f.finish();
+    }
+    drop(lclip);
+
+    // The trade row: the goods' and the pack's switch (the desktop's two list buttons).
+    let [invent_button, shop_button] = market_list_buttons(view.selling, goods.len());
+    let (invent_r, shop_r) = halves(trade_r);
+    let (invent, shop) = (own_text("Building", "Invent", n_("Inventory")), own_text("Building", "Market", n_("Trading shop")));
+    if kit::button(invent_r, &invent, invent_button.enabled) {
+        view.selling = invent_button.shows_pack;
+        view.pick = None;
+        view.scroll = 0;
+    }
+    if kit::button(shop_r, &shop, shop_button.enabled) {
+        view.selling = shop_button.shows_pack;
+        view.pick = None;
+        view.scroll = 0;
+    }
+
+    // The description box (a scroll box): the picked item's card, then the town's quests and rumours,
+    // or its description when it has none. Clipped to its box while it scrolls.
+    chrome::text_box(info);
+    let clip = Clip::new(info);
+    let mut flow = kit::Flow::begin(info, "market-info");
+    flow.gap(6.0);
+    match view.pick.and_then(|q| rows.get(q)).and_then(|r| r.0) {
+        Some(item) => {
+            let side = 48.0 * k;
+            flow.row_h(side + 6.0 * k, |r| assets.draw_item(item, r.x + (r.w - side) / 2.0, r.y, side));
+            let h = super::item_text::column_height(game, item, info.w, k);
+            flow.row_h(h, |r| super::item_text::draw_column(game, item, r.x, r.y, r.w, k));
+        }
+        None => {
+            let t = kit::Text::new(tr("Pick an item from the list."), 15.0, BOX_INK);
+            flow.text_at(&t, info.x + 8.0 * k, t.size(), info.w - 16.0 * k, 0.0);
+        }
+    }
+    let entries = game.hall_entries();
+    if entries.is_empty() {
+        if let Some(l) = game.location {
+            let desc = game.fill_text(&game.world.locations[l].description);
+            let t = kit::Text::new(&desc, 15.0, chrome::CREAM);
+            flow.text_at(&t, info.x + 8.0 * k, t.size(), info.w - 16.0 * k, 0.0);
+        }
+    } else {
+        view.hall_pick = view.hall_pick.filter(|&n| n < entries.len());
+        for (n, entry) in entries.iter().enumerate() {
+            let id = match *entry {
+                HallEntry::Rumour(id) | HallEntry::Quest(id) => id,
+            };
+            let title = story::event_title(game, id);
+            let r = flow.row_h(kit::finger_h(26.0 * k), |_| {});
+            if !flow.cut(r) && toggle_button(r.x, r.y, r.w, r.h, &title, view.hall_pick == Some(n)) {
+                view.hall_pick = Some(n);
+            }
+        }
+        let picked = view.hall_pick.and_then(|n| entries.get(n).copied());
+        let take = own_text("Building", "TakeQuest", n_("Take quest"));
+        let r = flow.row_h(bh, |_| {});
+        if kit::button_in(&flow, r, &take, picked.is_some()) {
+            if let Some(HallEntry::Rumour(id) | HallEntry::Quest(id)) = picked {
+                match game.take_hall_entry(id) {
+                    Ok(events) => {
+                        view.hall_pick = None;
+                        *message = None;
+                        next = world_view::handle_events(game, events, message, dialogs);
+                    }
+                    Err(e) => *message = Some(service_error(e)),
+                }
+            }
+        }
+    }
+    flow.finish();
+    drop(clip);
+
+    // The foot: the money, the message, the trade button (Sell or Buy) full width.
+    let money = format!("{}: {}", own_text("Building", "Gold", n_("Money")), game.gold);
+    let money_t = kit::Text::new(&money, 15.0, chrome::GOLD);
+    money_t.draw_one(trade_pane.x + 4.0 * k, foot_top + money_h / 2.0 + money_t.size() * 0.35);
+    if let Some(m) = message.as_deref() {
+        let mt = kit::Text::new(m, 13.0, ACCENT);
+        mt.draw(trade_pane.x, foot_top + money_h + gap + mt.size(), trade_pane.w);
+    }
+    let buy_r = Rect::new(trade_pane.x, foot_top + foot_h - bh, trade_pane.w, bh);
+    let label = if view.selling { own_text("Building", "Trade", n_("Sell")) } else { own_text("Building", "Buy", n_("Buy")) };
+    // Sell is always on; Buy only when the price is at most the gold, the purchase's test (as `market`).
+    let can = match (view.selling, view.pick) {
+        (true, Some(q)) => q < order.len(),
+        (false, Some(q)) => rows.get(q).and_then(|r| r.0).is_some_and(|i| game.gold >= game.buy_price(i)),
+        _ => false,
+    };
+    if button_sounding(buy_r.x, buy_r.y, buy_r.w, buy_r.h, &label, can, Cue::Gold) {
+        trade(game, &c, view, message, &sellable, &order);
+    }
+
+    if close || exit || (!reply.keys_taken && key(KeyCode::Escape)) {
+        *message = None;
+        return Some(Screen::WorldMap);
+    }
+    draw_later();
+    next
 }
 
 /// Sanctuary: spells for sale; a spell bought goes into the hero's book.
@@ -2785,6 +3072,54 @@ fn ship_window(game: &mut Game) -> Option<Screen> {
 }
 
 /// The building window. `Exit` (or Escape) returns to the map.
+/// A tab of the building window is clicked: it opens with the cast sound (interface.md §9.8, §14).
+fn tab_clicked(game: &mut Game, view: &mut BuildingView, message: &mut Option<String>, t: Tab) {
+    cue(Cue::CastSpell);
+    view.switch(t);
+    *message = None;
+    if t == Tab::Garrison {
+        game.open_garrison();
+    }
+    // The market opens on the goods when the shop has some, else on the sell list.
+    if t == Tab::Market {
+        view.selling = game.market_here().is_none_or(|g| g.is_empty());
+    }
+}
+
+/// The market's trade of the picked row (the desktop's button and the phone's): sells the pack item
+/// `order[k]` of `sellable`, or buys the goods' row `order[k]`, and says what happened. A sale or a
+/// purchase keeps the selection on the row that moved up into it (`next_pick`).
+fn trade(game: &mut Game, c: &razdor::rules::content::Content, view: &mut BuildingView, message: &mut Option<String>, sellable: &[usize], order: &[usize]) {
+    let k = view.pick.unwrap_or(0);
+    let mut done = false;
+    *message = Some(if view.selling {
+        let pack_index = sellable[order[k]];
+        let name = c.item(game.pack[pack_index]).name.clone();
+        match game.sell(pack_index) {
+            Ok(g) => {
+                done = true;
+                trf!("Sold {name} for {g} gold.", name, g)
+            }
+            Err(e) => trade_error(e),
+        }
+    } else {
+        match game.buy(order[k]) {
+            Ok(item) => {
+                done = true;
+                trf!("Bought {item}. It is in your pack.", item = c.item(item).name)
+            }
+            Err(e) => trade_error(e),
+        }
+    });
+    // For many buys (or sales) in a row the selection stays: on the item that moved up
+    // into the bought one's row, or the one above when it was the last; none when the
+    // list is empty. A refused trade keeps it where it was.
+    if done {
+        let left = if view.selling { game.pack.iter().filter(|&i| game.can_sell(i)).count() } else { game.market_here().map_or(0, |g| g.len()) };
+        view.pick = next_pick(k, left);
+    }
+}
+
 pub fn frame(game: &mut Game, assets: &Assets, view: &mut BuildingView, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) -> Option<Screen> {
     // The village window is modal, the bar's buttons greyed under it, as the original's
     // (the audit's capture of «Деревня Замковая»); the building window keeps the bar live.
@@ -2817,6 +3152,14 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut BuildingView, message:
     }
     if !tabs.contains(&view.tab) {
         view.switch(tabs[0]);
+    }
+    // The market's phone window (Razdor's own, the owner's decision, 2026-11-01): its own layout at
+    // one design px per dp (`market_phone`); the desktop's market goes on below.
+    if view.tab == Tab::Market && kit::phone().is_some() {
+        if let Some((k, rect)) = kit::phone_window(true, MARKET_PHONE_DESIGN, true) {
+            let shown = super::display::with_window_scale(Some(k), || market_phone(game, assets, view, message, dialogs, rect, &tabs));
+            return early.or(shown).or(with_back(bar, view));
+        }
     }
     let f = window();
     let k = chrome::k();
@@ -2855,17 +3198,7 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut BuildingView, message:
     for (i, &t) in tabs.iter().enumerate() {
         let r = tab_rects[i];
         if tab_button(tab_label(t), Some(t), r, view.tab == t) && view.tab != t && view.garrison_sel.is_none() {
-            // The tab is highlighted with the cast sound (interface.md §9.8, §14).
-            cue(Cue::CastSpell);
-            view.switch(t);
-            *message = None;
-            if t == Tab::Garrison {
-                game.open_garrison();
-            }
-            // The market opens on the goods when the shop has some, else on the sell list.
-            if t == Tab::Market {
-                view.selling = game.market_here().is_none_or(|g| g.is_empty());
-            }
+            tab_clicked(game, view, message, t);
         }
     }
     let exit = tab_button(tr("Exit"), None, exit_r, false) && view.garrison_sel.is_none();

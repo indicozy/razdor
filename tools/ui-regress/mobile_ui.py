@@ -106,6 +106,8 @@ SCREENS = [
     ("classes", "classes:РК1-Начало пути", {}),
     ("hub", "hub", {}),
     ("hub-mods", "hub:1:evolution-mock", {}),
+    # The market's pack (the sell list, Razdor's phone window): the pack's own layout (building-market-pack).
+    ("market-pack", "building:РК3-Столица:8:market-pack", {}),
 ]
 
 

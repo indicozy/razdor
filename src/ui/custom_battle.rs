@@ -15,6 +15,7 @@ use macroquad::miniquad::window::{clipboard_get, clipboard_set};
 use macroquad::prelude::*;
 
 use razdor::i18n::tr;
+use razdor::local;
 use razdor::rules::battle::Team;
 use razdor::rules::content::{Content, ItemId};
 use razdor::rules::custom::{self, Category, Control, PriceOrder, Session, MAX_LEVEL};
@@ -30,6 +31,27 @@ use super::item_filter;
 use super::kit;
 use super::main_menu::AiStrength;
 use super::widgets::*;
+
+local! {
+    /// The phone's scrolling body while its setup is drawn (`frame_phone`): a row or a button cut by
+    /// its edge is drawn, not pressed (`live`). None on the desktop.
+    static PHONE_BODY: std::cell::Cell<Option<Rect>> = std::cell::Cell::new(None);
+}
+
+/// A phone row's room: the flow's scroll bar takes its right 12 px (`kit::Flow`'s bar is drawn inside
+/// the flow's area), so the rows stop short of it.
+fn room(r: Rect) -> Rect {
+    Rect::new(r.x, r.y, r.w - 12.0 * chrome::k(), r.h)
+}
+
+/// Whether `r` is whole in the phone's body, so that it can be pressed (a row cut by the body's
+/// edge is drawn, clipped, and waits until it is whole). Always true off the phone.
+fn live(r: Rect) -> bool {
+    PHONE_BODY.with(|b| match b.get() {
+        None => true,
+        Some(body) => r.y >= body.y - 0.5 && r.y + r.h <= body.y + body.h + 0.5,
+    })
+}
 
 /// What the setup window chose.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -323,11 +345,6 @@ fn paste_code(view: &mut SetupView, content: &Content, audio: &mut Settings) {
     view.note = Some((msg, err, crate::ui::clock::now()));
 }
 
-/// The stepper's width: 48 dp on a phone (a finger), 20 px on the desktop.
-fn stepper_w(k: f32) -> f32 {
-    if kit::phone().is_some() { 48.0 * k } else { 20.0 * k }
-}
-
 /// Razdor's own (the owner's decision, 2026-11-01): the phone layout. Upright, the setup is one
 /// scrolling column: the tabs and the list, the two armies, the picked unit's worn items, the
 /// formation, the battle AI and the battle code's buttons. Sideways it is two columns: the list on
@@ -342,10 +359,15 @@ fn frame_phone(view: &mut SetupView, content: &Content, assets: &Assets, audio: 
     let half = (inner.w - 2.0 * pad - 8.0 * k) / 2.0;
     let back_r = Rect::new(inner.x + pad, end_y, half, bh);
     let fight_r = Rect::new(back_r.x + half + 8.0 * k, end_y, half, bh);
-    let body = Rect::new(inner.x + pad, inner.y + 8.0 * k, inner.w - 2.0 * pad, (end_y - pad - inner.y - 8.0 * k).max(0.0));
+    // The body starts 14 px down: the window's close cross stays clear of the tabs (the touch probe's rule).
+    let body = Rect::new(inner.x + pad, inner.y + 14.0 * k, inner.w - 2.0 * pad, (end_y - pad - inner.y - 14.0 * k).max(0.0));
     let letters = if typing() { Vec::new() } else { typed_chars() };
     let strength = super::main_menu::ai_strength(audio);
     let keys_free = !typing() && !input_blocked();
+    // The body clips what scrolls out of it (the flow clips only once it overflows), and only its
+    // whole rows and buttons are pressable; the footer is drawn below it, not clipped.
+    let body_clip = Clip::new(body);
+    PHONE_BODY.with(|b| b.set(Some(body)));
     let keys_taken = if kit::upright() {
         let mut flow = kit::Flow::begin(body, "custom-battle");
         let taken = lists_phone(view, content, assets, &mut flow, &letters);
@@ -364,6 +386,8 @@ fn frame_phone(view: &mut SetupView, content: &Content, assets: &Assets, audio: 
         right.finish();
         taken
     };
+    PHONE_BODY.with(|b| b.set(None));
+    drop(body_clip);
     let ready = view.session.setup.ready();
     let back = kit::button(back_r, tr("Back"), true);
     let fight = kit::button(fight_r, tr("Fight! (Enter)"), ready);
@@ -383,18 +407,25 @@ fn lists_phone(view: &mut SetupView, content: &Content, assets: &Assets, flow: &
     let size = (14.0 * k).round();
     const ROWS_PHONE: usize = 6;
     let ui_h = kit::finger_h(22.0 * k);
-    let row_h = kit::finger_h(26.0 * k);
-    let items_top = (ui_h + 4.0 * k) + 2.0 * (ui_h + 2.0 * k) + 2.0 * k;
-    let block = items_top + ROWS_PHONE as f32 * row_h + 24.0 * k;
-    let tabs = flow.row_h(ui_h, |_| {});
+    // A row is a 48 dp target with 4 dp between the rows (`units_list`, `items_list`).
+    let row_h = kit::finger_h(26.0 * k) + 4.0 * k;
+    // The list's head: the units' filter (one line) or the items' filter, kinds and price order
+    // (three lines), then the rows; 24 px under them for the «first–last» note.
+    let head_h = match view.tab {
+        Tab::Units => ui_h + 4.0 * k,
+        Tab::Items => (ui_h + 4.0 * k) + 2.0 * (ui_h + 2.0 * k) + 2.0 * k,
+    };
+    let block = head_h + ROWS_PHONE as f32 * row_h + 24.0 * k;
+    let tabs = room(flow.row_h(ui_h, |_| {}));
     let tw = (tabs.w - 6.0 * k) / 2.0;
-    if toggle_button(tabs.x, tabs.y, tw, ui_h, tr("Unit types"), view.tab == Tab::Units) {
+    let (unit_tab, item_tab) = (Rect::new(tabs.x, tabs.y, tw, ui_h), Rect::new(tabs.x + tw + 6.0 * k, tabs.y, tw, ui_h));
+    if live(unit_tab) && toggle_button(unit_tab.x, unit_tab.y, unit_tab.w, unit_tab.h, tr("Unit types"), view.tab == Tab::Units) {
         view.tab = Tab::Units;
     }
-    if toggle_button(tabs.x + tw + 6.0 * k, tabs.y, tw, ui_h, tr("Items"), view.tab == Tab::Items) {
+    if live(item_tab) && toggle_button(item_tab.x, item_tab.y, item_tab.w, item_tab.h, tr("Items"), view.tab == Tab::Items) {
         view.tab = Tab::Items;
     }
-    let r = flow.row_h(block, |_| {});
+    let r = room(flow.row_h(block, |_| {}));
     let area = Rect::new(r.x, r.y, r.w, r.h - 24.0 * k);
     let reply = match view.tab {
         Tab::Units => units_list(view, content, assets, area, size, row_h, letters, ui_h, ROWS_PHONE),
@@ -403,20 +434,24 @@ fn lists_phone(view: &mut SetupView, content: &Content, assets: &Assets, flow: &
     reply.keys_taken
 }
 
-/// The two armies on a phone, each a head row (its name and count, the control button) over its
-/// units, then the picked unit's worn items.
+/// The two armies on a phone, each a head row (its name and count) over its control button, then its
+/// units (`army_column_phone`), then the picked unit's worn items. A unit is two finger-tall lines, so
+/// its steppers are 48 dp buttons with room between them. An army's box shows its units and two
+/// rows at least (its capacity is in the head).
 fn armies_phone(view: &mut SetupView, content: &Content, assets: &Assets, flow: &mut kit::Flow) {
     let k = chrome::k();
     let size = (14.0 * k).round();
     let g = super::display::button_grow();
     let cr_h = kit::finger_h(26.0 * k * g);
-    let row_h = kit::finger_h(26.0 * k);
-    let n = view.session.setup.capacity().max(1);
+    let line = kit::finger_h(24.0 * k);
+    let row_h = 2.0 * line + 6.0 * k;
     for team in Team::BOTH {
-        // The head: the name (24 px), the control button (`cr_h`) under it, then the units.
-        let r = flow.row_h(36.0 * k + cr_h + n as f32 * row_h + 6.0 * k, |_| {});
-        let list = Rect::new(r.x, r.y + 36.0 * k + cr_h, r.w, n as f32 * row_h);
-        army_column(view, content, assets, team, list, r.y - 6.0 * k, size, row_h);
+        let rows = view.session.setup.army(team).len().max(2);
+        // The head (its name, 24 px, at the top), the control button (`cr_h`) under it, the units.
+        let r = room(flow.row_h(36.0 * k + cr_h + 8.0 * k + rows as f32 * row_h + 6.0 * k, |_| {}));
+        let cr = Rect::new(r.x, r.y + 28.0 * k, r.w, cr_h);
+        let list = Rect::new(r.x, r.y + 36.0 * k + cr_h, r.w, rows as f32 * row_h);
+        army_column_phone(view, content, assets, team, flow, list, cr, r.y, size, line, row_h);
     }
     worn_items_phone(view, content, flow);
 }
@@ -425,7 +460,7 @@ fn armies_phone(view: &mut SetupView, content: &Content, assets: &Assets, flow: 
 fn worn_items_phone(view: &mut SetupView, content: &Content, flow: &mut kit::Flow) {
     let k = chrome::k();
     let team = view.side;
-    let (x, w) = (flow.area().x, flow.width());
+    let (x, w) = (flow.area().x, flow.width() - 12.0 * chrome::k());
     let Some(i) = picked_unit(view) else {
         let t = kit::Text::new(tr("Pick a unit of an army to give it items."), 14.0, CREAM);
         flow.text_at(&t, x, t.size(), w, 0.0);
@@ -442,7 +477,7 @@ fn worn_items_phone(view: &mut SetupView, content: &Content, flow: &mut kit::Flo
     let mut off = None;
     for (n, &item) in pick.items.iter().enumerate() {
         let name = content.try_item(item).map_or_else(|| "?".to_string(), |d| d.name.clone());
-        let r = flow.row_h(kit::finger_h(26.0 * k), |_| {});
+        let r = room(flow.row_h(kit::finger_h(26.0 * k), |_| {}));
         if kit::button_in(flow, r, &name, true) {
             off = Some(n);
         }
@@ -459,14 +494,14 @@ fn worn_items_phone(view: &mut SetupView, content: &Content, flow: &mut kit::Flo
 /// The phone's settings and the battle code's buttons, then the note of the last code and the
 /// warning while an army is empty.
 fn setup_phone(view: &mut SetupView, content: &Content, audio: &mut Settings, strength: AiStrength, keys_free: bool, flow: &mut kit::Flow) {
-    let (x, w) = (flow.area().x, flow.width());
+    let (x, w) = (flow.area().x, flow.width() - 12.0 * chrome::k());
     let bh = kit::touch_h(32.0);
     flow.gap(8.0);
-    let r = flow.row_h(bh, |_| {});
+    let r = room(flow.row_h(bh, |_| {}));
     if kit::button_in(flow, r, tr("Copy the battle code"), true) || (keys_free && shortcut_held() && is_key_pressed(KeyCode::C)) {
         copy_code(view, content, strength);
     }
-    let r = flow.row_h(bh, |_| {});
+    let r = room(flow.row_h(bh, |_| {}));
     if kit::button_in(flow, r, tr("Paste the battle code"), true) || (keys_free && shortcut_held() && is_key_pressed(KeyCode::V)) {
         paste_code(view, content, audio);
     }
@@ -477,11 +512,11 @@ fn setup_phone(view: &mut SetupView, content: &Content, audio: &mut Settings, st
         }
     }
     flow.gap(8.0);
-    let r = flow.row_h(bh, |_| {});
+    let r = room(flow.row_h(bh, |_| {}));
     if kit::button_in(flow, r, formation_label(view.session.setup.wide), true) {
         toggle_formation(view, content);
     }
-    let r = flow.row_h(bh, |_| {});
+    let r = room(flow.row_h(bh, |_| {}));
     if kit::button_in(flow, r, ai_label(strength), true) {
         super::main_menu::set_ai_strength(audio, strength.next());
     }
@@ -521,7 +556,9 @@ fn load_code(view: &mut SetupView, content: &Content, audio: &mut Settings, text
 
 /// The filter line over a left list, in `r`, with the count of what it keeps.
 fn filter_line(key: &str, query: &mut String, r: Rect, found: usize, of: usize) -> item_filter::Reply {
-    item_filter::field_hinted(key, query, r, &[], found, of, true, tr("Filter (click, Ctrl+F); a letter jumps"))
+    // A phone has no Ctrl+F or click to speak of: its filter says the catalog's «Search…».
+    let hint = if kit::phone().is_some() { tr("Search…") } else { tr("Filter (click, Ctrl+F); a letter jumps") };
+    item_filter::field_hinted(key, query, r, &[], found, of, true, hint)
 }
 
 /// A letter typed over a list of `names`: the list jumps to the next name starting with it.
@@ -585,6 +622,7 @@ fn units_list(view: &mut SetupView, content: &Content, assets: &Assets, area: Re
         }
     }
     let list = Rect::new(area.x, area.y + ui_h + 4.0 * k, area.w, rows as f32 * row_h);
+    let phone_rows = kit::phone().is_some();
     let names: Vec<&str> = kept.iter().map(|(u, _)| content.unit(*u).name.as_str()).collect();
     jump_to(&mut view.units, &names, letters, rows);
     chrome::text_box(list);
@@ -592,8 +630,9 @@ fn units_list(view: &mut SetupView, content: &Content, assets: &Assets, area: Re
     let full = view.session.setup.army(view.side).len() >= view.session.setup.capacity();
     for (n, (id, m)) in kept.iter().enumerate().skip(view.units.scroll).take(rows) {
         let y = list.y + (n - view.units.scroll) as f32 * row_h;
-        let rr = Rect::new(list.x + 2.0 * k, y + 1.0 * k, list.w - 4.0 * k - bar_w, row_h - 2.0 * k);
-        if row_lit(rr, false, view.units.cursor == Some(n)) && !full {
+        // A phone's rows are 48 dp targets with 4 dp between them; the desktop's keep their inset.
+        let rr = if phone_rows { Rect::new(list.x + 2.0 * k, y + 2.0 * k, list.w - 4.0 * k - bar_w, row_h - 4.0 * k) } else { Rect::new(list.x + 2.0 * k, y + 1.0 * k, list.w - 4.0 * k - bar_w, row_h - 2.0 * k) };
+        if live(rr) && row_lit(rr, false, view.units.cursor == Some(n)) && !full {
             view.units.cursor = Some(n);
             add_unit(view, *id);
         }
@@ -663,6 +702,7 @@ fn items_list(view: &mut SetupView, content: &Content, assets: &Assets, area: Re
     }
     let top = area.y + head + 2.0 * pitch + 2.0 * k;
     let list = Rect::new(area.x, top, area.w, rows as f32 * row_h);
+    let phone_rows = kit::phone().is_some();
     let names: Vec<&str> = kept.iter().map(|(i, _)| content.item(*i).name.as_str()).collect();
     jump_to(&mut view.items, &names, letters, rows);
     chrome::text_box(list);
@@ -675,8 +715,8 @@ fn items_list(view: &mut SetupView, content: &Content, assets: &Assets, area: Re
     let mut hover = None;
     for (n, (item, m)) in kept.iter().enumerate().skip(view.items.scroll).take(rows) {
         let y = list.y + (n - view.items.scroll) as f32 * row_h;
-        let rr = Rect::new(list.x + 2.0 * k, y + 1.0 * k, list.w - 4.0 * k - bar_w, row_h - 2.0 * k);
-        if row_lit(rr, false, view.items.cursor == Some(n)) {
+        let rr = if phone_rows { Rect::new(list.x + 2.0 * k, y + 2.0 * k, list.w - 4.0 * k - bar_w, row_h - 4.0 * k) } else { Rect::new(list.x + 2.0 * k, y + 1.0 * k, list.w - 4.0 * k - bar_w, row_h - 2.0 * k) };
+        if live(rr) && row_lit(rr, false, view.items.cursor == Some(n)) {
             view.items.cursor = Some(n);
             wear(view, *item);
         }
@@ -708,19 +748,16 @@ fn shadow_right_fit(s: &str, rx: f32, y: f32, size: f32) {
     chrome::shadow_right(s, rx, y, size, Color::new(0.85, 0.80, 0.68, 1.0));
 }
 
-/// One army: its name and count (a click picks it for new units), who plays it, and its
-/// units with their level steppers, items and the × that removes them. A click on a unit
-/// picks it and opens the items tab.
+/// One army on the desktop: its name and count (a click picks it for new units), who plays it, and
+/// its units with their level steppers, items and the × that removes them. A click on a unit
+/// picks it and opens the items tab. (On a phone: `army_column_phone`.)
 #[allow(clippy::too_many_arguments)]
 fn army_column(view: &mut SetupView, content: &Content, assets: &Assets, team: Team, list: Rect, top: f32, size: f32, row_h: f32) {
     let k = chrome::k();
     let setup = &view.session.setup;
     let head = format!("{}: {}/{}", side_name(team), setup.army(team).len(), setup.capacity());
     let chosen = view.side == team;
-    // On a phone the head's name takes the row and the control button its own row under it (its
-    // label is never cut); on the desktop the control sits beside the name.
-    let phone = kit::phone().is_some();
-    let hr = Rect::new(list.x, top + 8.0 * k, if phone { list.w } else { list.w * 0.55 }, 24.0 * k);
+    let hr = Rect::new(list.x, top + 8.0 * k, list.w * 0.55, 24.0 * k);
     if mouse_in(hr.x, hr.y, hr.w, hr.h) && clicked() {
         view.side = team;
         view.picked = None;
@@ -728,11 +765,7 @@ fn army_column(view: &mut SetupView, content: &Content, assets: &Assets, team: T
     text_fit(&head, hr.x, hr.y + 18.0 * k, hr.w, size, if chosen { GOLD } else { CREAM });
     let control = setup.control[team.index()];
     // The control button grows with the text size (`button_grow`); the lists start below it.
-    let cr = if phone {
-        Rect::new(list.x, top + 34.0 * k, list.w, kit::finger_h(26.0 * k * super::display::button_grow()))
-    } else {
-        Rect::new(list.x + list.w * 0.57, top + 6.0 * k, list.w * 0.43, kit::finger_h(26.0 * k * super::display::button_grow()))
-    };
+    let cr = Rect::new(list.x + list.w * 0.57, top + 6.0 * k, list.w * 0.43, kit::finger_h(26.0 * k * super::display::button_grow()));
     if button(cr.x, cr.y, cr.w, cr.h, control_label(control), true) {
         view.session.setup.control[team.index()] = control.other();
     }
@@ -746,7 +779,7 @@ fn army_column(view: &mut SetupView, content: &Content, assets: &Assets, team: T
         let rr = Rect::new(list.x + 2.0 * k, y + 1.0 * k, list.w - 4.0 * k, row_h - 2.0 * k);
         let picked = chosen && view.picked == Some(i);
         // The steppers and the × take their clicks before the row does.
-        let (bw, bx) = (stepper_w(k), rr.x + rr.w - 4.0 * k);
+        let (bw, bx) = (20.0 * k, rr.x + rr.w - 4.0 * k);
         let minus = Rect::new(bx - 3.0 * bw - 46.0 * k, rr.y + 2.0 * k, bw, rr.h - 4.0 * k);
         let plus = Rect::new(bx - 2.0 * bw - 4.0 * k, minus.y, bw, minus.h);
         let cross = Rect::new(bx - bw, minus.y, bw, minus.h);
@@ -774,6 +807,89 @@ fn army_column(view: &mut SetupView, content: &Content, assets: &Assets, team: T
             view.session.setup.set_level(team, i, p.level + 1);
         }
         if small_button(cross.x, cross.y, cross.w, cross.h, "×", true) {
+            remove = Some(i);
+        }
+    }
+    if let Some(i) = remove {
+        cue(Cue::Button);
+        view.session.setup.remove(team, i);
+        if view.side == team {
+            view.picked = match view.picked {
+                Some(p) if p == i => None,
+                Some(p) if p > i => Some(p - 1),
+                other => other,
+            };
+        }
+    }
+}
+
+/// One army on a phone (Razdor's own, the owner's decision, 2026-11-01): its name and count (a click
+/// picks it for new units) over its control button (`cr`), then its units. A unit is two lines, each
+/// `line` tall: the portrait, the name and the × on the first; the level's «-» and «+» (48 dp) with the
+/// level between them on the second. A click on a unit picks it and opens the items tab. `top` is the
+/// head's top, `list` the units' box; the rows are `row_h` apart.
+#[allow(clippy::too_many_arguments)]
+fn army_column_phone(view: &mut SetupView, content: &Content, assets: &Assets, team: Team, flow: &kit::Flow, list: Rect, cr: Rect, top: f32, size: f32, line: f32, row_h: f32) {
+    let k = chrome::k();
+    let head = format!("{}: {}/{}", side_name(team), view.session.setup.army(team).len(), view.session.setup.capacity());
+    let chosen = view.side == team;
+    let hr = Rect::new(list.x, top + 8.0 * k, list.w, 24.0 * k);
+    if mouse_in(hr.x, hr.y, hr.w, hr.h) && clicked() && live(hr) {
+        view.side = team;
+        view.picked = None;
+    }
+    text_fit(&head, hr.x, hr.y + 18.0 * k, hr.w, size, if chosen { GOLD } else { CREAM });
+    let control = view.session.setup.control[team.index()];
+    if kit::button_in(flow, cr, control_label(control), true) {
+        view.session.setup.control[team.index()] = control.other();
+    }
+    chrome::text_box(list);
+    if chosen {
+        chrome::glow_frame(list, GOLD, false);
+    }
+    let bw = 48.0 * k;
+    let bh = line - 4.0 * k;
+    let mut remove = None;
+    for (i, p) in view.session.setup.army(team).to_vec().into_iter().enumerate() {
+        let y = list.y + i as f32 * row_h;
+        let rr = Rect::new(list.x + 2.0 * k, y + 3.0 * k, list.w - 4.0 * k, 2.0 * line);
+        let picked = chosen && view.picked == Some(i);
+        // The first line: the portrait, the name, the × at its right end.
+        let side = line - 4.0 * k;
+        let name_x = rr.x + line + 2.0 * k;
+        let cross = Rect::new(rr.right() - 2.0 * k - bw, rr.y + 2.0 * k, bw, bh);
+        // The second line: «-», the level, «+», under the name.
+        let minus = Rect::new(name_x, rr.y + line + 2.0 * k, bw, bh);
+        let lvl_x = minus.right() + 6.0 * k;
+        let plus = Rect::new(lvl_x + 56.0 * k + 6.0 * k, minus.y, bw, bh);
+        let on_buttons = [minus, plus, cross].iter().any(|b| mouse_in(b.x, b.y, b.w, b.h));
+        if !on_buttons && live(rr) && row(rr, picked) {
+            view.side = team;
+            view.picked = Some(i);
+            view.tab = Tab::Items;
+            view.items.cursor = None;
+        } else if on_buttons && live(rr) {
+            row(rr, picked);
+        }
+        assets.draw_portrait(p.unit, team, Rect::new(rr.x + 2.0 * k, rr.y + 2.0 * k, side, side));
+        let name = match p.items.len() {
+            0 => content.unit(p.unit).name.clone(),
+            n => format!("{} +{n}", content.unit(p.unit).name),
+        };
+        let name_t = kit::Text::new(&name, 14.0, CREAM);
+        let room = cross.x - 6.0 * k - name_x;
+        let shown = ellipsize(&name, room, name_t.size());
+        kit::Text::new(&shown, 14.0, CREAM).draw_one(name_x, rr.y + line / 2.0 + name_t.size() * 0.35);
+        let lvl = trf!("Lv {level}", level = p.level);
+        let lvl_t = kit::Text::new(&lvl, 13.0, GOLD);
+        lvl_t.draw_one(lvl_x, minus.y + bh / 2.0 + lvl_t.size() * 0.35);
+        if kit::button_in(flow, minus, "-", p.level > 1) {
+            view.session.setup.set_level(team, i, p.level - 1);
+        }
+        if kit::button_in(flow, plus, "+", p.level < MAX_LEVEL) {
+            view.session.setup.set_level(team, i, p.level + 1);
+        }
+        if kit::button_in(flow, cross, "×", true) {
             remove = Some(i);
         }
     }
