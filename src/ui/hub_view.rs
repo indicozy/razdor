@@ -90,7 +90,8 @@ struct Drag {
     moved: bool,
 }
 
-/// The most a preview is drawn tall (window units).
+/// The most a preview is drawn tall (window units); a phone held upright draws it up to 45% of
+/// the pane instead, the full width.
 const PREVIEW_H: f32 = 150.0;
 
 /// Keeps the picked entry's picture: loaded from the cache, or downloaded on a thread (once,
@@ -370,6 +371,8 @@ struct Lay {
     bw: f32,
     /// A phone (one unit one dp): its text stops above the bottom row.
     phone: bool,
+    /// A phone held upright: the details pane takes the list's place, so its picture and text are drawn larger.
+    narrow: bool,
 }
 
 /// A tab on a phone: a marble button (its label grows with the button, `button_label`), the
@@ -538,7 +541,7 @@ pub fn frame(view: &mut HubView) -> bool {
     let detail = narrow && view.detail && view.picked.is_some();
     let back_w = 140.0 * k * g;
     let bw = if narrow { lw - back_w - gap } else { 220.0 * k * g };
-    let lay = Lay { k, g, size, small, by, bh, bw, phone };
+    let lay = Lay { k, g, size, small, by, bh, bw, phone, narrow };
     if !detail {
         chrome::text_box(list);
     }
@@ -718,6 +721,12 @@ pub fn frame(view: &mut HubView) -> bool {
 fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
     let (k, size, small, by, bh, bw) = (lay.k, lay.size, lay.small, lay.by, lay.bh, lay.bw);
     let s = k * lay.g;
+    // A phone held upright draws the pane's text larger; elsewhere the sizes are the original's.
+    let (title_px, info_px, body_px, info_step, body_step) = if lay.narrow {
+        ((24.0 * s).round(), (15.0 * s).round(), (16.0 * s).round(), 22.0 * s, 24.0 * s)
+    } else {
+        ((18.0 * s).round(), small, size, 18.0 * s, 19.0 * s)
+    };
     let dim = Color::new(0.85, 0.80, 0.68, 1.0);
     if view.detail_for.as_deref() != Some(e.id.as_str()) {
         view.detail_for = Some(e.id.clone());
@@ -743,116 +752,131 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
     let users = if installed { hub::needed_by(c, &view.installed, &e.id) } else { Vec::new() };
     let plan = (!installed).then(|| hub::plan_install(c, &view.installed, &e.id));
     let clip = Clip::new(pane);
-    let mut y = r.y + 22.0 * s;
-    if e.preview.is_some() {
-        // The picture at the top of the pane: as wide as the pane, at most PREVIEW_H tall (and
-        // 40% of the pane, a phone held sideways), its aspect kept. Room for it is kept while it
-        // loads (a dark frame of 16:9 until then).
-        let loaded = view.preview.as_ref().filter(|p| p.key == preview_key(e)).and_then(|p| p.texture.clone());
-        let (w, h) = loaded.as_ref().map_or((16.0, 9.0), |t| (t.width(), t.height()));
-        let max_h = (PREVIEW_H * k).min(pane.h * 0.4);
-        let scale = (r.w / w).min(max_h / h);
-        let (dw, dh) = (w * scale, h * scale);
-        match loaded {
-            Some(t) => draw_texture_ex(&t, r.x, r.y, WHITE, DrawTextureParams { dest_size: Some(vec2(dw, dh)), ..Default::default() }),
-            None => draw_rectangle(r.x, r.y, dw, dh, Color::new(0.05, 0.04, 0.03, 0.8)),
+    // A phone held upright: the pane's text takes its own sizes (Razdor's), not the original
+    // font's native size, as item_text does (`dt_font::legacy_metrics_if`).
+    let content_h = super::dt_font::legacy_metrics_if(lay.narrow, || {
+        let mut y = r.y + 22.0 * s;
+        if e.preview.is_some() {
+            // The picture at the top of the pane: as wide as the pane, at most PREVIEW_H tall (and
+            // 40% of the pane, a phone held sideways), its aspect kept. Room for it is kept while it
+            // loads (a dark frame of 16:9 until then).
+            let loaded = view.preview.as_ref().filter(|p| p.key == preview_key(e)).and_then(|p| p.texture.clone());
+            let (w, h) = loaded.as_ref().map_or((16.0, 9.0), |t| (t.width(), t.height()));
+            // Razdor's phone layout choice: a phone held upright takes 45% of the pane, no PREVIEW_H cap,
+            // so the picture spans the pane's full width.
+            let max_h = if lay.narrow { pane.h * 0.45 } else { (PREVIEW_H * k).min(pane.h * 0.4) };
+            let scale = (r.w / w).min(max_h / h);
+            let (dw, dh) = (w * scale, h * scale);
+            match loaded {
+                Some(t) => draw_texture_ex(&t, r.x, r.y, WHITE, DrawTextureParams { dest_size: Some(vec2(dw, dh)), ..Default::default() }),
+                None => draw_rectangle(r.x, r.y, dw, dh, Color::new(0.05, 0.04, 0.03, 0.8)),
+            }
+            // The title is drawn on its baseline: a phone held upright, whose title is larger, keeps
+            // room for its capitals under the picture.
+            y = r.y + dh + if lay.narrow { 30.0 * s } else { 16.0 * k };
         }
-        y = r.y + dh + 16.0 * k;
-    }
-    text_fit(e.title.get(lang()), r.x, y, r.w, (18.0 * s).round(), GOLD);
-    y += 22.0 * s;
-    let mut by_line = if e.version.trim().is_empty() {
-        trf!("{kind} by {author}", kind = kind_label(e.kind), author = e.author)
-    } else {
-        trf!("{kind} by {author}, version {version}", kind = kind_label(e.kind), author = e.author, version = e.version)
-    };
-    if !e.added.is_empty() {
-        by_line = format!("{by_line} · {}", e.added);
-    }
-    text_fit(&by_line, r.x, y, r.w, small, dim);
-    y += 18.0 * s;
-    if let Some(rating) = e.rating {
-        text_fit(&trf!("Rating on Discord: +{up} / -{down}", up = rating.up, down = rating.down), r.x, y, r.w, small, dim);
-        y += 18.0 * s;
-    }
-    // The status is read whole: its lines wrap.
-    let (words, ink) = status_line(e);
-    for l in wrap_long(&words, r.w, small).iter() {
-        chrome::shadow_text(l, r.x, y, small, ink);
-        y += 18.0 * s;
-    }
-    if e.kind == Kind::Campaign {
-        text_fit(&trf!("Chapters: {n}", n = e.map_count()), r.x, y, r.w, small, dim);
-        y += 18.0 * s;
-    }
-    if e.kind != Kind::Mod {
-        let langs: Vec<&str> = e
-            .languages
-            .iter()
-            .map(|l| match l.as_str() {
-                "ru" => tr("Russian"),
-                "en" if e.machine_translated => tr("English (machine translation)"),
-                "en" => tr("English"),
-                other => other,
-            })
-            .collect();
-        text_fit(&trf!("Languages: {list}", list = langs.join(", ")), r.x, y, r.w, small, dim);
-        y += 18.0 * s;
-    }
-    // Why a mod can't be installed, in the text (the bottom row keeps its disabled Install).
-    if let Some(Err(why)) = &plan {
-        y += 4.0 * s;
-        let why_text = match why {
-            PlanError::Missing(m) => trf!("Can't be installed: the hub has no mod «{m}».", m),
-            PlanError::Cycle(m) => trf!("Can't be installed: mods need each other («{m}»).", m),
+        text_fit(e.title.get(lang()), r.x, y, r.w, title_px, GOLD);
+        y += if lay.narrow { 30.0 * s } else { 22.0 * s };
+        let mut by_line = if e.version.trim().is_empty() {
+            trf!("{kind} by {author}", kind = kind_label(e.kind), author = e.author)
+        } else {
+            trf!("{kind} by {author}, version {version}", kind = kind_label(e.kind), author = e.author, version = e.version)
         };
-        for l in wrap_long(&why_text, r.w, small).iter() {
-            chrome::shadow_text(l, r.x, y, small, RED_TEXT);
-            y += 16.0 * s;
+        if !e.added.is_empty() {
+            by_line = format!("{by_line} · {}", e.added);
         }
-    }
-
-    // The mods it needs, each with its state.
-    if !e.requires.is_empty() {
-        y += 8.0 * s;
-        chrome::shadow_text(tr("Needs:"), r.x, y, size, CREAM);
-        y += 19.0 * s;
-        for id in &e.requires {
-            let (name, words, ink) = match c.entry(id) {
-                None => (id.as_str(), tr("not in the hub"), RED_TEXT),
-                Some(m) if view.installed.has(id) => (m.title.get(lang()), tr("installed"), GREEN_TEXT),
-                Some(m) => (m.title.get(lang()), tr("will be installed too"), GOLD),
+        text_fit(&by_line, r.x, y, r.w, info_px, dim);
+        y += info_step;
+        if let Some(rating) = e.rating {
+            text_fit(&trf!("Rating on Discord: +{up} / -{down}", up = rating.up, down = rating.down), r.x, y, r.w, info_px, dim);
+            y += info_step;
+        }
+        // The status is read whole: its lines wrap.
+        let (words, ink) = status_line(e);
+        for l in wrap_long(&words, r.w, info_px).iter() {
+            chrome::shadow_text(l, r.x, y, info_px, ink);
+            y += info_step;
+        }
+        if e.kind == Kind::Campaign {
+            text_fit(&trf!("Chapters: {n}", n = e.map_count()), r.x, y, r.w, info_px, dim);
+            y += info_step;
+        }
+        if e.kind != Kind::Mod {
+            let langs: Vec<&str> = e
+                .languages
+                .iter()
+                .map(|l| match l.as_str() {
+                    "ru" => tr("Russian"),
+                    "en" if e.machine_translated => tr("English (machine translation)"),
+                    "en" => tr("English"),
+                    other => other,
+                })
+                .collect();
+            text_fit(&trf!("Languages: {list}", list = langs.join(", ")), r.x, y, r.w, info_px, dim);
+            y += info_step;
+        }
+        // Why a mod can't be installed, in the text (the bottom row keeps its disabled Install).
+        if let Some(Err(why)) = &plan {
+            y += 4.0 * s;
+            let why_text = match why {
+                PlanError::Missing(m) => trf!("Can't be installed: the hub has no mod «{m}».", m),
+                PlanError::Cycle(m) => trf!("Can't be installed: mods need each other («{m}»).", m),
             };
-            text_fit(&format!("• {name}: {words}"), r.x + 8.0 * k, y, r.w - 8.0 * k, small, ink);
-            y += 19.0 * s;
+            for l in wrap_long(&why_text, r.w, info_px).iter() {
+                chrome::shadow_text(l, r.x, y, info_px, RED_TEXT);
+                y += if lay.narrow { info_step } else { 16.0 * s };
+            }
         }
-    }
 
-    // The description, whole (scrolled, not cut): its long words wrap at the pane's width.
-    y += 10.0 * s;
-    for l in wrap_long(e.description.get(lang()), r.w, size).iter() {
-        chrome::shadow_text(l, r.x, y, size, CREAM);
-        y += 19.0 * s;
-    }
-    if e.kind == Kind::Mod {
-        y += 8.0 * s;
-        for l in wrap_long(tr("A mod is played from the new game window's Mod list, over the base game."), r.w, small).iter() {
-            chrome::shadow_text(l, r.x, y, small, dim);
-            y += 16.0 * s;
+        // The mods it needs, each with its state.
+        if !e.requires.is_empty() {
+            y += 8.0 * s;
+            chrome::shadow_text(tr("Needs:"), r.x, y, body_px, CREAM);
+            y += body_step;
+            for id in &e.requires {
+                let (name, words, ink) = match c.entry(id) {
+                    None => (id.as_str(), tr("not in the hub"), RED_TEXT),
+                    Some(m) if view.installed.has(id) => (m.title.get(lang()), tr("installed"), GREEN_TEXT),
+                    Some(m) => (m.title.get(lang()), tr("will be installed too"), GOLD),
+                };
+                text_fit(&format!("• {name}: {words}"), r.x + 8.0 * k, y, r.w - 8.0 * k, info_px, ink);
+                y += if lay.narrow { info_step } else { 19.0 * s };
+            }
         }
-    }
-    if e.kind != Kind::Mod && installed {
-        y += 8.0 * s;
-        text_fit(tr("Its maps are in the new game's list."), r.x, y, r.w, small, GREEN_TEXT);
-        y += 18.0 * s;
-    }
-    if !users.is_empty() {
-        y += 8.0 * s;
-        let names = view.titles(&users);
-        text_fit(&trf!("Needed by: {names}", names), r.x, y, r.w, small, GOLD);
-        y += 18.0 * s;
-    }
-    let content_h = y - r.y + 8.0 * s;
+
+        // The description, whole (scrolled, not cut): its long words wrap at the pane's width.
+        y += 10.0 * s;
+        if lay.narrow && !e.description.get(lang()).trim().is_empty() {
+            // A phone held upright: a thin gold rule and a heading set the description apart.
+            draw_line(r.x, y - 4.0 * s, r.x + r.w, y - 4.0 * s, 1.0 * k, Color::new(0.85, 0.70, 0.35, 0.6));
+            y += 18.0 * s;
+            chrome::shadow_text(tr("Description"), r.x, y, info_px, GOLD);
+            y += body_step;
+        }
+        for l in wrap_long(e.description.get(lang()), r.w, body_px).iter() {
+            chrome::shadow_text(l, r.x, y, body_px, CREAM);
+            y += body_step;
+        }
+        if e.kind == Kind::Mod {
+            y += 8.0 * s;
+            for l in wrap_long(tr("A mod is played from the new game window's Mod list, over the base game."), r.w, info_px).iter() {
+                chrome::shadow_text(l, r.x, y, info_px, dim);
+                y += if lay.narrow { info_step } else { 16.0 * s };
+            }
+        }
+        if e.kind != Kind::Mod && installed {
+            y += 8.0 * s;
+            text_fit(tr("Its maps are in the new game's list."), r.x, y, r.w, info_px, GREEN_TEXT);
+            y += info_step;
+        }
+        if !users.is_empty() {
+            y += 8.0 * s;
+            let names = view.titles(&users);
+            text_fit(&trf!("Needed by: {names}", names), r.x, y, r.w, info_px, GOLD);
+            y += info_step;
+        }
+        y - r.y + 8.0 * s
+    });
     drop(clip);
     view.detail_h = content_h;
 

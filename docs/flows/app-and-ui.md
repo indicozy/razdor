@@ -686,7 +686,7 @@ drag and picks nothing; a press released where it began without a drag picks tha
 before) and the scrollbar beside them (24 dp wide on a phone). The pane holds the whole entry (picture,
 status, the mods it needs, description, the reason an install is refused) and is clipped above the bottom
 row, so no text reaches Install or Remove; words too long for its width (a link) are broken there
-(`wrap_long`). The pane's scroll starts at the top for each new pick. The list's arrows still move one row.
+(`wrap_long`). The pane's scroll starts at the top for each new pick. On a phone held upright (`Lay::narrow`) the pane is drawn larger (Razdor's): the picture spans the pane's width up to 45% of its height (no 150-unit cap), the title is 24 units, the info lines 15 and the description 16, drawn with `dt_font::legacy_metrics_if` so the original font's native size does not snap them back, and a gold rule with «Описание» sets the description apart. The list's arrows still move one row.
 
 **Stacked mods**: a mod that requires others is laid over them: `layer_chain` orders its `requires` chain
 (each requirement after its own, each once, like `plan_install`; a missing one or a circle is refused

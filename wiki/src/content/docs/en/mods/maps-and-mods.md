@@ -35,6 +35,8 @@ Select an entry, and its details open on the right:
 * languages;
 * the description from the author's Discord post.
 
+On a phone held upright the details open in place of the list: the picture spans the full width, and the title and text are large; "To the list" goes back.
+
 ## Installing and removing
 
 * **"Install"** downloads the entry together with the mods it needs.
