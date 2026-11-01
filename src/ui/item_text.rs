@@ -258,3 +258,23 @@ mod tests {
         assert!((item_text_scale_at(1.5, 2.0) - 2.4).abs() < 1e-3);
     }
 }
+
+/// An item's text as a column `w` px wide at `s` px per original px, for a phone's scrolling box (the
+/// market's description): the lines wrapped to the width, as tall as they take.
+pub fn column_height(game: &Game, item: ItemId, w: f32, s: f32) -> f32 {
+    height(&lines(game, item, w - 2.0 * SIDE * s, s, 1.0, false))
+}
+
+/// Draws [`column_height`]'s text in a column `w` px wide from `y` (its lines' top), at `x` (the column's left).
+pub fn draw_column(game: &Game, item: ItemId, x: f32, y: f32, w: f32, s: f32) {
+    let room = w - 2.0 * SIDE * s;
+    let text = lines(game, item, room, s, 1.0, false);
+    // As `draw`: a phone's lines are measured and drawn with the legacy metrics.
+    super::dt_font::legacy_metrics_if(super::display::dp_px().is_some(), || {
+        let mut top = y;
+        for l in &text {
+            draw_markup_row_face(&l.row, x + SIDE * s, top + l.size * 0.85, room, l.size, l.face, Some(l.color));
+            top += advance(l);
+        }
+    });
+}

@@ -997,6 +997,15 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     // size (`button_grow`), centred in the footer, which grows with them (`footer_grow`).
     let g = super::display::button_grow();
     let (bw, bh) = (95.0 * o * g, 36.0 * o * g);
+    // On a phone held upright (Razdor's own, the owner's decision, 2026-11-01) the answers and the
+    // OK take the window's width (inside the frame's 19 px), each at least 44 dp tall; the
+    // desktop keeps its buttons.
+    let upright_phone = super::display::dp_px().is_some() && super::window_layout::portrait();
+    let side = if upright_phone { 19.0 * o } else { 0.0 };
+    let bh = match super::display::dp_px() {
+        Some(dp) if upright_phone => bh.max(44.0 * dp),
+        _ => bh,
+    };
     let foot = 58.0 * o * g;
     let by = y + h - foot + (foot - bh) / 2.0;
     // A left or right press on an icon shows its item or spell centred on the press, kept
@@ -1036,9 +1045,15 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         let answer = answer_key();
         // Yes at a quarter of the window, No at three quarters (the original's question,
         // measured on its «Просьба торговца»: centres at 0.24 W and 0.76 W).
-        let (yes_x, no_x) = question_buttons_x(x, w, bw);
-        let yes = button(yes_x, by, bw, bh, tr("Yes"), true) || answer == Some(true);
-        let no = button(no_x, by, bw, bh, tr("No"), true) || answer == Some(false);
+        let (yes_x, no_x, qw) = if upright_phone {
+            let half = (w - 2.0 * side - 8.0 * o) / 2.0;
+            (x + side, x + side + half + 8.0 * o, half)
+        } else {
+            let (a, b) = question_buttons_x(x, w, bw);
+            (a, b, bw)
+        };
+        let yes = button(yes_x, by, qw, bh, tr("Yes"), true) || answer == Some(true);
+        let no = button(no_x, by, qw, bh, tr("No"), true) || answer == Some(false);
         return if yes {
             Some(Close::Yes)
         } else if no {
@@ -1066,8 +1081,9 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         (exit_pressed, load_pressed)
     } else {
         let ok_label = chrome::ui_text("Buttons", "Ok").filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| "OK".to_string());
+        let (ok_x, ok_w) = if upright_phone { (x + side, w - 2.0 * side) } else { (x + (w - bw) / 2.0, bw) };
         let ok = if d.defeat {
-            let r = Rect::new(x + (w - bw) / 2.0, by, bw, bh);
+            let r = Rect::new(ok_x, by, ok_w, bh);
             let (_, down, pressed) = button_state(r, true);
             chrome::defeat_button(r, &ok_label, true, down);
             if pressed {
@@ -1075,7 +1091,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
             }
             pressed
         } else {
-            button(x + (w - bw) / 2.0, by, bw, bh, &ok_label, true)
+            button(ok_x, by, ok_w, bh, &ok_label, true)
         };
         (ok, false)
     };
