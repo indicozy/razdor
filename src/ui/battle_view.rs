@@ -175,10 +175,12 @@ impl Layout {
         // (`button_grow`); the unit's column gives up their growth, so the buttons keep the window's bottom.
         let quick_grow = 30.0 * k * (super::display::button_grow() - 1.0);
         // On a phone the buttons stack, `rows` of them each a touch target (at least 44 dp), 3 px apart.
+        // Razdor's own (the owner's decision, 2026-11-01): the phone layout. Sideways the rows keep 8 dp
+        // apart (`controls_phone`), so their touch areas do not crowd.
         let block = match dp {
-            Some(_) => {
+            Some(d) => {
                 let h = kit::touch_h_at(30.0, k, super::display::button_grow(), dp);
-                rows as f32 * h + (rows as f32 - 1.0) * 3.0 * k
+                rows as f32 * h + (rows as f32 - 1.0) * 8.0 * d
             }
             None => 30.0 * k + quick_grow,
         };
@@ -991,7 +993,9 @@ impl BattleView {
     /// by side under the band; sideways they stack, one per row, the full width of the column.
     fn controls_phone(&mut self, l: &Layout) {
         let q = l.quick;
-        let gap = 3.0 * l.k;
+        // Held upright the buttons stand side by side 3 px apart; sideways they stack 8 dp apart (Razdor's
+        // own, the owner's decision, 2026-11-01: the phone layout), so their touch areas do not crowd.
+        let gap = if l.is_stacked() { 3.0 * l.k } else { 8.0 * kit::phone().unwrap_or(0.0) };
         let watching = self.watching();
         let n = self.quick_rows();
         let cells: Vec<Rect> = (0..n)

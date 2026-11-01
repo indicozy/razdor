@@ -10,7 +10,7 @@ use razdor::local;
 use macroquad::prelude::*;
 
 use razdor::i18n::tr;
-use razdor::rules::clock::duration_label;
+use razdor::rules::clock::{duration_label, Clock};
 use razdor::rules::game::Game;
 use razdor::trf;
 
@@ -403,19 +403,23 @@ pub fn draw_with_time(game: &Game, look: impl Fn(BarButton) -> Look, time_button
     super::pan::unpanned(|| super::display::with_fitted(super::chrome::fit_k(), || draw_bar(game, &look, time_buttons)))
 }
 
-/// The time panel's height on a phone (the bar's full height, from the top row's top): the bar's
-/// `row` scaled to its 80 px height.
-fn bar_h_of(row: f32) -> f32 {
-    (row * 80.0 / 60.0).round().max(row)
-}
-
 fn draw_bar(game: &Game, look: &impl Fn(BarButton) -> Look, time_buttons: bool) -> (Option<BarButton>, Option<TimeButton>) {
     let k = chrome::bar_k();
     let (w, h) = (screen_width(), screen_height());
     let row = (60.0 * k).round();
     let lay = current_layout();
     let bar = lay.bar;
-    let y = bar.y;
+    // The buttons' row and the stat row stay at the bottom (`current_layout`). Razdor's own (the
+    // owner's decision, 2026-11-01): the phone layout. A phone held upright has its bar grown above
+    // them by `extra`, the rows its time panel needs; the wooden middle stands over them.
+    let base_h = (80.0 * k).round();
+    let extra = (bar.h - base_h).max(0.0);
+    let y = bar.y + extra;
+    let ribbon = Rect::new(bar.x, y, bar.w, base_h);
+    let visual = super::window_layout::visual();
+    if extra > 0.0 {
+        chrome::tex(&lower_strip_gradient(visual.bar_gradient_bottom), Rect::new(bar.x, bar.y, bar.w, extra), WHITE);
+    }
     // The top row: the original's ribbon (`Win2a`), its ends kept, the wooden middle stretched.
     match chrome::win("Win2a") {
         Some(t) => {
@@ -424,21 +428,20 @@ fn draw_bar(game: &Game, look: &impl Fn(BarButton) -> Look, time_buttons: bool) 
             let ew = end * s;
             chrome::tex_src(&t, Rect::new(0.0, 0.0, end, t.height()), Rect::new(bar.x, y, ew, row), WHITE);
             chrome::tex_src(&t, Rect::new(t.width() - end, 0.0, end, t.height()), Rect::new(bar.x + bar.w - ew, y, ew, row), WHITE);
-            chrome::tex_src(&t, Rect::new(end, 0.0, t.width() - 2.0 * end, t.height()), Rect::new(bar.x + ew, y, bar.w - 2.0 * ew, row), WHITE);
+            chrome::tex_src(&t, Rect::new(end, 0.0, t.width() - 2.0 * end, t.height()), Rect::new(bar.x + ew, bar.y, bar.w - 2.0 * ew, row + extra), WHITE);
         }
         None => {
             chrome::surface(Rect::new(bar.x, y, bar.w, row), chrome::Skin::Marble);
             let ew = 370.0 * row / 64.0;
-            draw_rectangle(bar.x + ew, y + 3.0, bar.w - 2.0 * ew, row - 6.0, Color::new(0.42, 0.22, 0.10, 1.0));
-            draw_rectangle_lines(bar.x + ew, y + 3.0, bar.w - 2.0 * ew, row - 6.0, 2.0, chrome::SILVER);
+            draw_rectangle(bar.x + ew, bar.y + 3.0, bar.w - 2.0 * ew, row + extra - 6.0, Color::new(0.42, 0.22, 0.10, 1.0));
+            draw_rectangle_lines(bar.x + ew, bar.y + 3.0, bar.w - 2.0 * ew, row + extra - 6.0, 2.0, chrome::SILVER);
             draw_rectangle_lines(bar.x, y, bar.w, row, 2.0, chrome::SILVER);
         }
     }
-    chrome::silver_line(vec2(bar.x, y), vec2(bar.x + bar.w, y), k.max(1.0));
+    chrome::silver_line(vec2(bar.x, bar.y), vec2(bar.x + bar.w, bar.y), k.max(1.0));
     // The lower strip, the bar's own width.
     let sy = y + row;
-    let sh = bar.h - row;
-    let visual = super::window_layout::visual();
+    let sh = base_h - row;
     chrome::tex(&lower_strip_gradient(visual.bar_gradient_bottom), Rect::new(bar.x, sy, bar.w, sh), WHITE);
     if let Some(t) = chrome::bottom_bar_ornament() {
         let ow = t.width() * sh / t.height();
@@ -448,7 +451,7 @@ fn draw_bar(game: &Game, look: &impl Fn(BarButton) -> Look, time_buttons: bool) 
             x += bar.w * 0.25;
         }
     }
-    resources(game, sy, sh, bar, safe_area(), vec2(w, h));
+    resources(game, sy, sh, ribbon, safe_area(), vec2(w, h));
 
     // The time panel.
     let cx = w / 2.0;
@@ -466,17 +469,37 @@ fn draw_bar(game: &Game, look: &impl Fn(BarButton) -> Look, time_buttons: bool) 
     // Russian dates run longer: the lines shrink to the time panel's width.
     let room = (lay.time.w - 16.0 * k).max(60.0 * k);
     let phone = super::display::dp_px().is_some();
-    // A phone's panel keeps every line whole (Razdor's own, the owner's decision, 2026-11-01): its
-    // lines wrap to the panel's width at the text's floor size, set close together in the bar's
-    // full height (three lines of the time panel do not fit the bar's top row).
+    // A phone's panel keeps its lines whole (Razdor's own, the owner's decision, 2026-11-01): its
+    // lines wrap to the panel's width at the text's floor size, set close together in the time
+    // panel (`lay.time`, the bar's rows above the buttons when held upright, see `upright_extra`).
     let (size, lines) = if phone {
         let base = super::typography::Role::Bold.with(|| super::kit::floored(size));
-        let wrapped: Vec<(String, Color)> = super::typography::Role::Bold.with(|| {
-            lines.iter().flat_map(|(l, c)| super::widgets::wrap(l, room, base).into_iter().map(move |w| (w, *c))).collect()
-        });
         let lh = base * 1.05;
-        let block_h = lh * (wrapped.len() as f32 - 1.0) + base;
-        let mid = y + bar_h_of(row) / 2.0;
+        let wrap_all = |ls: &[(String, Color)]| -> Vec<(String, Color)> {
+            super::typography::Role::Bold.with(|| {
+                ls.iter().flat_map(|(l, c)| super::widgets::wrap(l, room, base).into_iter().map(move |w| (w, *c))).collect()
+            })
+        };
+        let block = |n: usize| if n == 0 { 0.0 } else { lh * (n as f32 - 1.0) + base };
+        // Razdor's own (the owner's decision, 2026-11-01): the phone layout. Held upright, the panel is
+        // as tall as its lines need (`upright_extra`): the label, the date and the status while
+        // walking; when they are more than it holds, the label goes, then the status. The date always
+        // fits. Landscape, the panel is the row: when the label and the date do not fit it, the label
+        // goes and the date alone is set.
+        let mut wrapped = wrap_all(&lines);
+        if super::window_layout::portrait() {
+            let capacity = upright_time(room, k).1;
+            if wrapped.len() > capacity && lines.len() > 1 {
+                wrapped = wrap_all(&lines[1..]);
+            }
+            if wrapped.len() > capacity && lines.len() > 2 {
+                wrapped = wrap_all(&lines[1..2]);
+            }
+        } else if block(wrapped.len()) > row - 4.0 * k && lines.len() > 1 {
+            wrapped = wrap_all(&lines[1..]);
+        }
+        let mid = lay.time.y + lay.time.h / 2.0;
+        let block_h = block(wrapped.len());
         (base, wrapped.into_iter().enumerate().map(|(i, (l, c))| (l, c, mid - block_h / 2.0 + base * 0.8 + i as f32 * lh)).collect::<Vec<_>>())
     } else {
         let size = super::typography::Role::Bold.with(|| lines.iter().map(|(l, _)| fit_size(l, room, size)).fold(size, f32::min));
@@ -592,6 +615,42 @@ pub fn bar_rect() -> Rect {
     Rect::new(((w - bw) / 2.0).round(), h - bar, bw, bar)
 }
 
+/// Razdor's own (the owner's decision, 2026-11-01): the phone layout. A phone held upright grows
+/// its bar upward by [`upright_extra`], the rows its time panel needs; the buttons' row and the
+/// stat row keep their place at the bottom, and the windows stay clear of the taller bar
+/// (`chrome::bar_height`).
+pub fn upright_extra() -> f32 {
+    if !super::window_layout::portrait() {
+        return 0.0;
+    }
+    let (w, h) = (screen_width(), screen_height());
+    let k = chrome::bar_k();
+    let row = (60.0 * k).round();
+    let base_h = (80.0 * k).round();
+    let bw = (BAR_W * k).round().min(w);
+    // The buttons' row as `current_layout` lays it: its width sets the time panel's room.
+    let ribbon = Rect::new(((w - bw) / 2.0).round(), h - base_h, bw, base_h);
+    let room = (layout(ribbon, vec2(w, h), k, row, safe_area()).time.w - 16.0 * k).max(60.0 * k);
+    let (base, lines) = upright_time(room, k);
+    let block = if lines == 0 { 0.0 } else { base * 1.05 * (lines as f32 - 1.0) + base };
+    (block + 6.0 * k - row).max(0.0).ceil()
+}
+
+/// The time panel's text upright at the floor size: the size, and the lines the panel holds. The
+/// widest date and the longer status line (a walk of 99 days), wrapped at `room`, so a date of any
+/// length fits and the bar's height does not move with the date.
+fn upright_time(room: f32, k: f32) -> (f32, usize) {
+    let size = super::typography::Role::Bold.size((13.0 * k).round());
+    let base = super::typography::Role::Bold.with(|| super::kit::floored(size));
+    let left = duration_label(99.0 * 24.0 * 60.0 + 23.0 * 60.0);
+    let widest = [Clock::label_of(1299, 12, 29, 23), trf!("Path left: {left}", left = left.clone()), trf!("Reading: {left}", left = left)];
+    let lines = super::typography::Role::Bold.with(|| {
+        let count = |s: &str| super::widgets::wrap(s, room, base).len();
+        count(&widest[0]) + count(&widest[1]).max(count(&widest[2]))
+    });
+    (base, lines)
+}
+
 /// A bar button's size at the bar's row height `row` (the original's art sizes).
 fn button_size(b: BarButton, row: f32) -> (f32, f32) {
     let (h, w) = if b.small() { (44.0, 80.0) } else { (54.0, 98.0) };
@@ -656,9 +715,17 @@ pub fn layout(bar: Rect, screen: Vec2, k: f32, row: f32, safe: SafeArea) -> Layo
 /// The layout the bar is drawn and hit with now (the screen's size, the safe area).
 pub fn current_layout() -> Layout {
     let bar = bar_rect();
-    let row = (60.0 * chrome::bar_k()).round();
+    let k = chrome::bar_k();
+    let row = (60.0 * k).round();
     let screen = vec2(screen_width(), screen_height());
-    layout(bar, screen, chrome::bar_k(), row, safe_area())
+    // The buttons' row and the stat row sit at the bottom; a phone held upright has its bar grown
+    // above them (`upright_extra`), and its time panel takes those rows (Razdor's own, the owner's
+    // decision, 2026-11-01: the phone layout). On the desktop the bar is the 80 px row.
+    let ribbon = Rect::new(bar.x, screen.y - (80.0 * k).round(), bar.w, (80.0 * k).round());
+    let mut lay = layout(ribbon, screen, k, row, safe_area());
+    lay.bar = bar;
+    lay.time = Rect::new(lay.time.x, bar.y, lay.time.w, bar.h - ribbon.h + row);
+    lay
 }
 
 /// The time panel in the middle of the bar (clicks on it do not reach the map).

@@ -308,6 +308,10 @@ pub(crate) fn raise_to_cap(size: f32, min: f32, cap_at: impl Fn(f32) -> f32) -> 
 local! {
     /// A modal dialog is open: the screen below draws but takes no input.
     static BLOCKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// A phone's window that takes the input is up (`set_under_modal`), and the drawing that runs
+    /// now is that window's own (`modal_window`).
+    static UNDER_MODAL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static IN_MODAL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 local! {
@@ -368,6 +372,23 @@ pub fn set_input_blocked(blocked: bool) {
 
 pub fn input_blocked() -> bool {
     BLOCKED.with(|b| b.get())
+}
+
+/// Phones (Razdor's own, the owner's decision, 2026-11-01): the phone layout. Whether a window that
+/// takes the input is up this frame (the update window, the map import's notice). The screen under
+/// it still draws, but its targets are neither pressed nor recorded by the touch probe, so they do
+/// not cross the window's own (`modal_window`). The desktop never sets it.
+pub fn set_under_modal(on: bool) {
+    UNDER_MODAL.with(|m| m.set(on));
+}
+
+/// Runs the drawing of a window that takes the input over the screen (`set_under_modal`): its
+/// targets take the input while the screen under it does not.
+pub fn modal_window<T>(f: impl FnOnce() -> T) -> T {
+    let prev = IN_MODAL.with(|m| m.replace(true));
+    let out = f();
+    IN_MODAL.with(|m| m.set(prev));
+    out
 }
 
 local! {
@@ -598,6 +619,10 @@ pub fn clip_left_of(hit: Rect, bar: Option<Rect>) -> Rect {
 
 /// [`button_state`] with the hit area `hit` given (its finger area, or a part of it).
 fn button_state_in(r: Rect, hit: Rect, enabled: bool) -> (bool, bool, bool) {
+    // Under a phone's window that takes the input (`set_under_modal`) the screen below has no target.
+    if UNDER_MODAL.with(|m| m.get()) && !IN_MODAL.with(|m| m.get()) {
+        return (false, false, false);
+    }
     super::touch_probe::record("button", hit, enabled);
     let hover = enabled && !input_swallowed() && pointer_in(hit.x, hit.y, hit.w, hit.h);
     let capture = [r.x.to_bits(), r.y.to_bits(), r.w.to_bits(), r.h.to_bits()];

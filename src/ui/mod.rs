@@ -1281,6 +1281,9 @@ impl App {
             self.reload_install();
         }
         widgets::set_input_blocked(!self.dialogs.is_empty() || self.help || held || self.map_view.back_to.is_some() || self.update_open || map_import::open() || game_import::busy() || widgets::popup_open());
+        // Razdor's own (the owner's decision, 2026-11-01): on a phone the update window and the map
+        // import's notice take the input over the screen below (`widgets::set_under_modal`).
+        widgets::set_under_modal(display::dp_px().is_some() && (self.update_open || map_import::open()));
         let mut restart = false;
         let mut custom_round = false;
         let custom_content = self.custom_content();

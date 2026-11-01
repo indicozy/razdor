@@ -1331,9 +1331,11 @@ pub fn bar_k() -> f32 {
     super::display::fitted_scale(fit_k())
 }
 
-/// Height of the bottom game bar.
+/// Height of the bottom game bar: its 80 px row at the bar's scale, and on a phone held upright the
+/// rows its time panel needs above it (Razdor's own, the owner's decision, 2026-11-01: the phone
+/// layout, `game_bar::upright_extra`). Every window and the map take the bar's height from here.
 pub fn bar_height() -> f32 {
-    (80.0 * bar_k()).round()
+    (80.0 * bar_k()).round() + super::game_bar::upright_extra()
 }
 
 /// Top of a `canvas_h`-tall canvas centred vertically on a `screen_w`×`screen_h` screen. Only

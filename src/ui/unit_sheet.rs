@@ -952,6 +952,121 @@ fn band_text_fits(s: &Sheet, content: &Content, txt: Rect, base: f32, px: f32) -
     fits_width && fits_height
 }
 
+/// Where a phone's stat label goes beside its value: the value's room is at least this share of
+/// the row's width, else the value goes on a line of its own under the label.
+const LABEL_SHARE: f32 = 0.45;
+
+/// A phone's stat row (Razdor's own, the owner's decision, 2026-11-01): the label's lines, and
+/// whether the value goes under them (else it sits on the label's last line).
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct StatRow {
+    pub lines: Vec<String>,
+    pub value_below: bool,
+}
+
+/// Plans a phone stat row `w` wide with a value `value_w` wide and `gap` between them. The label
+/// stays whole on one line when it fits beside the value; else it wraps (`wrap`) to the room left
+/// of the value while that room is at least [`LABEL_SHARE`] of `w`; else it takes the whole width
+/// and the value goes under it. A label is never cut with "…". `width` measures a line.
+pub(super) fn stat_row_plan(label: &str, value_w: f32, w: f32, gap: f32, width: impl Fn(&str) -> f32, wrap: impl Fn(&str, f32) -> Vec<String>) -> StatRow {
+    if width(label) + value_w + gap <= w {
+        return StatRow { lines: vec![label.to_string()], value_below: false };
+    }
+    let room = w - value_w - gap;
+    if room >= LABEL_SHARE * w {
+        StatRow { lines: wrap(label, room), value_below: false }
+    } else {
+        StatRow { lines: wrap(label, w), value_below: true }
+    }
+}
+
+/// A phone's band line of `s` at 13 px in `color` and `face`.
+fn stat_text(s: &str, color: Color, face: super::dt_font::Face) -> super::kit::Text<'_> {
+    super::kit::Text::new(s, 13.0, color).face(face)
+}
+
+/// The band's text half on a phone (Razdor's own, the owner's decision, 2026-11-01): one kit `Flow`
+/// over the half, every line at 12 sp or more. The name (wrapped, centred), the level and the
+/// experience, the stat lines (each label wrapped beside its value, its line pitch the kit's;
+/// `stat_row_plan`), the status lines, the description and the traits with their icons. A band
+/// too short for it all scrolls; nothing is cut with "…".
+fn band_text_phone(content: &Content, txt: Rect, s: &Sheet) {
+    use super::dt_font::Face;
+    use super::kit::{Flow, Text};
+    let k = k();
+    chrome::multiply(|| draw_rectangle(txt.x, txt.y, txt.w, txt.h, Color::new(0.5, 0.35, 0.0, 1.0)));
+    // The text's room: 6 px in from the left; the flow's bar (10 px) stands at the right edge.
+    let top = txt.y + 4.0 * k;
+    let inner = Rect::new(txt.x + 6.0 * k, top, (txt.w - 12.0 * k).max(1.0), (txt.bottom() - 4.0 * k - top).max(1.0));
+    let (x, w, gap) = (inner.x, (inner.w - 12.0 * k).max(1.0), 6.0 * k);
+    // Clipped to the half from the first frame: the flow clips only once it knows it overflows.
+    let _clip = widgets::Clip::new(inner);
+    let mut flow = Flow::begin(inner, "band-text");
+    // A text's first baseline in a row of its own line pitch: centred in the pitch.
+    let base = |t: &Text| t.line_pitch() * 0.5 + t.size() * 0.35;
+    let name_ink = if s.named { NAMED_INK } else { CREAM };
+    let name = Text::new(s.name, 16.0, name_ink).face(Face::Subtitle);
+    for line in name.lines(w) {
+        let lt = Text::new(&line, 16.0, name_ink).face(Face::Subtitle);
+        let lb = base(&lt);
+        flow.row_h(lt.line_pitch(), |r| lt.draw_one(x + (w - lt.width()) / 2.0, r.y + lb));
+    }
+    let level_text = razdor::trf!("Level {level}", level = s.level);
+    let xp_text = razdor::trf!("XP {xp} / {need}", xp = s.xp, need = s.need);
+    let level = Text::new(&level_text, 13.0, CREAM);
+    let xp = Text::new(&xp_text, 13.0, CREAM);
+    let lb = base(&level);
+    // The experience beside the level when both fit, else on a line of its own.
+    if level.width() + xp.width() + 8.0 * k <= w {
+        flow.row_h(level.line_pitch() + gap, |r| {
+            level.draw_one(r.x, r.y + lb);
+            xp.draw_right_one(x + w, r.y + lb);
+        });
+    } else {
+        flow.row_h(level.line_pitch() + gap, |r| level.draw_one(r.x, r.y + lb));
+        flow.row_h(xp.line_pitch() + gap, |r| xp.draw_one(r.x, r.y + base(&xp)));
+    }
+    for (label, value, color) in stat_lines(content, s) {
+        // The daily wage's label and value are in the bold orange face (as `stat_block`).
+        let face = if color == ORANGE_TEXT { Face::Bold } else { Face::Body };
+        let vt = stat_text(&value, color, face);
+        let plan = stat_row_plan(&label, vt.width(), w, 8.0 * k, |t| stat_text(t, color, face).width(), |t, wd| stat_text(t, color, face).lines(wd));
+        let lt = stat_text(&label, color, face);
+        let (lp, b) = (lt.line_pitch(), base(&lt));
+        let n = plan.lines.len() as f32;
+        let (value_row, rows) = if plan.value_below { (n, n + 1.0) } else { (n - 1.0, n) };
+        flow.row_h(rows * lp + gap, |r| {
+            for (i, line) in plan.lines.iter().enumerate() {
+                stat_text(line, color, face).draw_one(x, r.y + b + i as f32 * lp);
+            }
+            vt.draw_right_one(x + w, r.y + b + value_row.max(0.0) * lp);
+        });
+    }
+    for (status, color) in &s.status {
+        let t = Text::new(status, 13.0, *color);
+        flow.text_at(&t, x, base(&t), w, 0.0);
+    }
+    let desc = content.unit(s.kind).description.as_str();
+    if s.hero.is_none() && !desc.is_empty() {
+        let t = Text::new(desc, 13.0, CREAM);
+        flow.gap(4.0);
+        flow.text_at(&t, x, base(&t), w, 0.0);
+    }
+    // A trait's icon stands at the left, its text starts after it.
+    let icon = 25.0 * k;
+    let tw = (w - icon - gap).max(1.0);
+    for (art, text, ink) in traits_of(s) {
+        let t = Text::new(&text, 13.0, ink);
+        let b = base(&t);
+        let h = (t.lines(tw).len() as f32 * t.line_pitch()).max(icon) + gap;
+        flow.row_h(h, |r| {
+            chrome::trait_icon(&art, r.x, r.y, icon);
+            t.draw(r.x + icon + gap, r.y + b, tw);
+        });
+    }
+    flow.finish();
+}
+
 /// The band (the army and hero windows stacked) and a pane's card (the hire tab's unit over the
 /// upper pane): the unit's picture on the band's left half with its worn items, and on its right
 /// half the name, the level, the stats and the traits, top down. The picture is the column's
@@ -977,6 +1092,12 @@ fn draw_band_in_face(assets: &Assets, content: &Content, band: Rect, s: &Sheet, 
         None => silhouette(band_figure_rect(pic, 0.6 * pic.w / fig, 0.95 * FIGURE_BOX, fig)),
     }
     let clicked = worn_slots(assets, content, slot_rects_at(pic, fig), s, slots, hover);
+    // Razdor's own (the owner's decision, 2026-11-01): a phone's text half is one scrolling flow
+    // (`band_text_phone`); the desktop's fixed rows below stay as they were.
+    if super::display::dp_px().is_some() {
+        band_text_phone(content, txt, s);
+        return clicked;
+    }
     // The original's px on the text half (the column's px is its width over the same 262), scaled
     // up to fill the half (`band_text_scale`; never below the column's size).
     let base = txt.w / PANEL_W;
@@ -1838,5 +1959,37 @@ mod tests {
         assert_eq!(hits_line(45, 50, short), "45");
         assert_eq!(hits_line(0, 50, short), "0", "a dead unit shows 0, never a negative");
         assert_eq!(hits_line(-3, 50, short), "0");
+    }
+
+    /// A phone's stat label is never cut with "…", however narrow the row: it wraps to the room
+    /// left of its value, or the value goes under it (Razdor's own, the owner's decision, 2026-11-01).
+    #[test]
+    fn a_phone_stat_label_is_wrapped_never_cut() {
+        // Six px a character, words wrapped greedily to the width (a stand-in for `widgets::wrap`).
+        let width = |s: &str| s.chars().count() as f32 * 6.0;
+        let wrap = |s: &str, w: f32| {
+            let mut lines: Vec<String> = Vec::new();
+            for word in s.split_whitespace() {
+                match lines.last_mut() {
+                    Some(line) if width(&format!("{line} {word}")) <= w => {
+                        line.push(' ');
+                        line.push_str(word);
+                    }
+                    _ => lines.push(word.to_string()),
+                }
+            }
+            lines
+        };
+        let label = "Атака рукопашного боя";
+        let fits = stat_row_plan(label, 12.0, 400.0, 8.0, width, wrap);
+        assert_eq!(fits, StatRow { lines: vec![label.to_string()], value_below: false });
+        let beside = stat_row_plan(label, 18.0, 120.0, 8.0, width, wrap);
+        assert!(beside.lines.len() > 1 && !beside.value_below, "{beside:?}");
+        let under = stat_row_plan(label, 18.0, 40.0, 8.0, width, wrap);
+        assert!(under.value_below, "{under:?}");
+        for plan in [beside, under] {
+            assert!(plan.lines.iter().all(|l| !l.contains('…')), "{plan:?}");
+            assert_eq!(plan.lines.join(" "), label);
+        }
     }
 }

@@ -773,13 +773,15 @@ fn squad_in(
     let title = chrome::ui_text("Army", "Title").filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr("The hero's characteristics and army").to_string());
     let (inner, close) = chrome::window(win, &title, chrome::Skin::Marble, true);
     // The phone's places (`army_phone`): the band, the pack, the cards and «Закрыть».
+    // The hint strip holds `HINT_LINES` lines of the phone's hint text (`army_hint_phone`).
+    let strip_h = army_hint_h(k);
     let lay = phone.map(|_| {
         let f = c.formation;
         let (cols, lines) = (f.display_cols() as usize, f.display_lines());
         if window_layout::portrait() {
-            super::army_phone::upright(inner, k, cols, lines)
+            super::army_phone::upright(inner, k, cols, lines, strip_h)
         } else {
-            super::army_phone::sideways(inner, k, cols, lines)
+            super::army_phone::sideways(inner, k, cols, lines, strip_h)
         }
     });
     let close = match &lay {
@@ -1218,10 +1220,16 @@ fn squad_in(
         (None, None) => (tr("Click an item to pick it up, then a unit to give it; drag a unit to another cell to move it; Esc returns").to_string(), Color::new(1.0, 0.55, 0.25, 1.0)),
     };
     chrome::army_divider_fill(strip);
-    super::dt_font::with_native_metrics(|| {
+    if super::kit::phone().is_some() {
+        // Razdor's own (the owner's decision, 2026-11-01): the phone's hint is wrapped in full.
         let ink = if super::dt_font::native_metrics() && message.is_none() && hover_refusal.is_none() { super::typography::Ink::Green.color() } else { hc };
-        chrome::hint_text(strip, &hint, ink);
-    });
+        army_hint_phone(strip, &hint, ink);
+    } else {
+        super::dt_font::with_native_metrics(|| {
+            let ink = if super::dt_font::native_metrics() && message.is_none() && hover_refusal.is_none() { super::typography::Ink::Green.color() } else { hc };
+            chrome::hint_text(strip, &hint, ink);
+        });
+    }
     // The press, as the original's (0x4c346c), ignored while a card slides (busy 0x68dc63).
     // With «Расстановка армии: Перетаскивание» (Razdor's default, the owner's decision) it
     // only selects (no swap or slide; units move by dragging), where the original's second
@@ -1416,6 +1424,41 @@ pub(super) fn potion_status(c: &Content, u: &Unit) -> Vec<(String, Color)> {
     }
     let names: Vec<&str> = u.potions.iter().map(|&p| c.item(p).name.as_str()).collect();
     vec![(razdor::trf!("Until the next battle: {names}", names = names.join(", ")), chrome::BLUE_TEXT)]
+}
+
+/// The design px of the army strip's hint on a phone (its text at 12 sp or more: the floor).
+const HINT_DESIGN: f32 = 10.0;
+
+/// The lines the army strip's hint holds on a phone before it scrolls.
+const HINT_LINES: f32 = 3.0;
+
+/// The height in px of the army strip on a phone at scale `k`: `HINT_LINES` lines and a margin.
+fn army_hint_h(k: f32) -> f32 {
+    let line = super::kit::Text::new("Ж", HINT_DESIGN, chrome::CREAM).line_pitch();
+    HINT_LINES * line + 6.0 * k
+}
+
+/// The army strip's hint on a phone (Razdor's own, the owner's decision, 2026-11-01): the whole
+/// text wrapped to the strip's width and centred, in a kit `Flow` (it scrolls when it needs more
+/// than the strip's lines); never cut with "…".
+fn army_hint_phone(strip: Rect, hint: &str, ink: Color) {
+    use super::kit::{Flow, Text};
+    let k = chrome::k();
+    let inner = Rect::new(strip.x + 6.0 * k, strip.y, (strip.w - 12.0 * k).max(1.0), strip.h);
+    let _clip = Clip::new(inner);
+    let whole = Text::new(hint, HINT_DESIGN, ink);
+    let lines = whole.lines(inner.w);
+    let pitch = whole.line_pitch();
+    let mut flow = Flow::begin(inner, "army-hint");
+    // Centred vertically while the text fits the strip.
+    let spare = (inner.h - lines.len() as f32 * pitch).max(0.0);
+    flow.row_h(spare / 2.0, |_| {});
+    for line in &lines {
+        let t = Text::new(line, HINT_DESIGN, ink);
+        let b = pitch * 0.5 + t.size() * 0.35;
+        flow.row_h(pitch, |r| t.draw_one(inner.x + (inner.w - t.width()) / 2.0, r.y + b));
+    }
+    flow.finish();
 }
 
 /// The `[Army]` hint line over the card of unit `under` with `selected` selected, and whose

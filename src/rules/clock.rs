@@ -108,7 +108,12 @@ impl Clock {
 
     /// "1204, month 5, day 19, 11 h".
     pub fn label(&self) -> String {
-        crate::trf!("{year}, month {month}, day {day}, {hour} h", year = self.year(), month = self.month(), day = self.day(), hour = self.hour())
+        Self::label_of(self.year(), self.month(), self.day(), self.hour())
+    }
+
+    /// [`Clock::label`] for these parts (the bar sizes its date panel from the widest one).
+    pub fn label_of(year: u64, month: u64, day: u64, hour: u64) -> String {
+        crate::trf!("{year}, month {month}, day {day}, {hour} h", year = year, month = month, day = day, hour = hour)
     }
 
     /// The original's wording: "1204 год, 5 месяц, 19 день, 11 час".

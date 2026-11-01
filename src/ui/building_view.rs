@@ -2473,19 +2473,23 @@ fn market_phone(game: &mut Game, assets: &Assets, view: &mut BuildingView, messa
     // The description box (a scroll box): the picked item's card, then the town's quests and rumours,
     // or its description when it has none. Clipped to its box while it scrolls.
     chrome::text_box(info);
-    let clip = Clip::new(info);
-    let mut flow = kit::Flow::begin(info, "market-info");
+    // Razdor's own (the owner's decision, 2026-11-01): the phone layout. The text is clipped to the
+    // box's inner rect (inside its frame and side ornaments), so nothing runs over the frame, and
+    // scrolls inside it as a flow.
+    let inner = if kit::phone().is_some() { Rect::new(info.x + 6.0 * k, info.y + 6.0 * k, (info.w - 12.0 * k).max(1.0), (info.h - 12.0 * k).max(1.0)) } else { info };
+    let clip = Clip::new(inner);
+    let mut flow = kit::Flow::begin(inner, "market-info");
     flow.gap(6.0);
     match view.pick.and_then(|q| rows.get(q)).and_then(|r| r.0) {
         Some(item) => {
             let side = 48.0 * k;
             flow.row_h(side + 6.0 * k, |r| assets.draw_item(item, r.x + (r.w - side) / 2.0, r.y, side));
-            let h = super::item_text::column_height(game, item, info.w, k);
+            let h = super::item_text::column_height(game, item, inner.w, k);
             flow.row_h(h, |r| super::item_text::draw_column(game, item, r.x, r.y, r.w, k));
         }
         None => {
             let t = kit::Text::new(tr("Pick an item from the list."), 15.0, BOX_INK);
-            flow.text_at(&t, info.x + 8.0 * k, t.size(), info.w - 16.0 * k, 0.0);
+            flow.text_at(&t, inner.x + 8.0 * k, t.size(), inner.w - 16.0 * k, 0.0);
         }
     }
     let entries = game.hall_entries();
@@ -2493,7 +2497,7 @@ fn market_phone(game: &mut Game, assets: &Assets, view: &mut BuildingView, messa
         if let Some(l) = game.location {
             let desc = game.fill_text(&game.world.locations[l].description);
             let t = kit::Text::new(&desc, 15.0, chrome::CREAM);
-            flow.text_at(&t, info.x + 8.0 * k, t.size(), info.w - 16.0 * k, 0.0);
+            flow.text_at(&t, inner.x + 8.0 * k, t.size(), inner.w - 16.0 * k, 0.0);
         }
     } else {
         view.hall_pick = view.hall_pick.filter(|&n| n < entries.len());

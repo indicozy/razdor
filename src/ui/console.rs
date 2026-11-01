@@ -448,9 +448,16 @@ fn completion_text(s: &Suggestion, l: &Layout, size: f32, pad: f32, phone: bool)
 /// drawn row is the tap's too.
 fn row_rects(l: &Layout, k: f32, dp: Option<f32>, shown: &[Suggestion]) -> Vec<Rect> {
     let (size, pitch, pad) = metrics(k);
-    let top = l.content.y + pad * 2.0 + pitch * (SHOWN as f32 + 1.0) + 6.0 * k;
+    let mut top = l.content.y + pad * 2.0 + pitch * (SHOWN as f32 + 1.0) + 6.0 * k;
     let min_h = tap_rect_at(Rect::new(0.0, 0.0, 1.0, pitch), false, dp).h;
     let phone = dp.is_some();
+    // Razdor's own (the owner's decision, 2026-11-01): the phone layout. The rows keep 8 dp apart,
+    // and the first starts 8 dp below the input line's touch area (it reaches a finger's height).
+    let gap = dp.map_or(0.0, |d| 8.0 * d);
+    if let Some(d) = dp {
+        let field = input_field(l, k);
+        top = top.max(field.y + tap_rect_at(field, false, Some(d)).h + gap);
+    }
     let mut y = top;
     shown
         .iter()
@@ -460,7 +467,7 @@ fn row_rects(l: &Layout, k: f32, dp: Option<f32>, shown: &[Suggestion]) -> Vec<R
             let lines = if phone && !s.hint.is_empty() { completion_text(s, l, size, pad, true).2.len().max(1) } else { 1 };
             let h = if phone { min_h.max(lines as f32 * pitch + 4.0 * k) } else { min_h };
             let r = Rect::new(l.content.x, y, l.content.w, h);
-            y += h;
+            y += h + gap;
             r
         })
         .collect()
@@ -565,8 +572,9 @@ mod tests {
         let rows = row_rects(&phone, k, Some(k), &shown);
         assert_eq!(rows.len(), 8);
         assert!(rows[0].y >= field.bottom(), "under the input line");
+        assert!(rows[0].y >= field.y + tap_rect_at(field, false, Some(k)).h + 8.0 * k - 0.5, "8 dp below the input line's touch area");
         assert!(rows.iter().all(|r| r.h >= 48.0 * k - 0.5), "a phone row is at least 48 dp");
-        assert!(rows.windows(2).all(|w| (w[1].y - w[0].bottom()).abs() < 0.5), "the rows stack");
+        assert!(rows.windows(2).all(|w| (w[1].y - w[0].bottom() - 8.0 * k).abs() < 0.5), "the rows stack 8 dp apart");
         let desk = layout((1280.0, 800.0), SafeArea::default(), None, pad);
         let rows = row_rects(&desk, 1.0, None, &shown[..3]);
         assert_eq!(rows[0].h, metrics(1.0).1, "on the desktop a row is a line");

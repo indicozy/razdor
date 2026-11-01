@@ -24,7 +24,8 @@ pub struct Army {
     pub cells: [Rect; 9],
     /// The pack, or the selected unit's promotion tree (the same place).
     pub pack: Rect,
-    /// The hint strip (text only, not a touch target).
+    /// The hint strip (text only, not a touch target): its height is the caller's (the hint wraps
+    /// to it in full on a phone, `items_view::army_hint_phone`).
     pub strip: Rect,
     /// The army's grid of cards: its top left cell and the pitch between cells.
     pub grid: Rect,
@@ -65,8 +66,8 @@ fn filter_cells(x: f32, y: f32, w: f32, k: f32, per_row: usize) -> [Rect; 9] {
 }
 
 /// Upright: the army window laid out in one column inside `inner` (the window's inner rectangle),
-/// for a formation of `cols` × `lines` cards.
-pub fn upright(inner: Rect, k: f32, cols: usize, lines: usize) -> Army {
+/// for a formation of `cols` × `lines` cards; the hint strip `strip_h` px tall.
+pub fn upright(inner: Rect, k: f32, cols: usize, lines: usize, strip_h: f32) -> Army {
     let pad = 6.0 * k;
     let gap = GAP * k;
     let x = inner.x + pad;
@@ -81,7 +82,6 @@ pub fn upright(inner: Rect, k: f32, cols: usize, lines: usize) -> Army {
     let band_h = (0.26 * inner.h).clamp(170.0 * k, 230.0 * k);
     // The filter: two rows of five and four touch-tall buttons.
     let filter_h = 2.0 * TOUCH * k + TOUCH_GAP * k;
-    let strip_h = 36.0 * k;
     let close_h = 52.0 * k;
     let fixed = band_h + filter_h + strip_h + grid_h + close_h + 5.0 * gap;
     let pack_h = (inner.h - 2.0 * pad - fixed).max(120.0 * k);
@@ -101,9 +101,9 @@ pub fn upright(inner: Rect, k: f32, cols: usize, lines: usize) -> Army {
     Army { band, filter, cells, pack, strip, grid, pitch: (pitch_x, pitch_y), card: (card_w, card_h), close }
 }
 
-/// Sideways: the filter row runs across the top; under it two columns. The left column holds the band
+/// Sideways (the hint strip `strip_h` px tall): the filter row runs across the top; under it two columns. The left column holds the band
 /// over «Закрыть»; the right the pack, the strip and the cards.
-pub fn sideways(inner: Rect, k: f32, cols: usize, lines: usize) -> Army {
+pub fn sideways(inner: Rect, k: f32, cols: usize, lines: usize, strip_h: f32) -> Army {
     let pad = 6.0 * k;
     let gap = GAP * k;
     let cols = cols.max(1) as f32;
@@ -133,7 +133,6 @@ pub fn sideways(inner: Rect, k: f32, cols: usize, lines: usize) -> Army {
     let pitch_y = card_h + gap;
     let grid_h = lines * card_h + (lines - 1.0) * gap;
     let grid_y = bottom - grid_h;
-    let strip_h = 30.0 * k;
     let strip = Rect::new(rx, grid_y - gap - strip_h, rw, strip_h);
     let pack = Rect::new(rx, below, rw, (strip.y - gap - below).max(1.0));
     let grid = Rect::new(rx + (rw - cols * pitch_x) / 2.0, grid_y, cols * pitch_x, grid_h);
@@ -287,16 +286,19 @@ fn res_boxes(x: f32, y: f32, w: f32, h: f32, gap: f32) -> [Rect; 4] {
 mod tests {
     use super::*;
 
+    /// A hint strip three lines of the floor size tall at 2.75 px per dp (`items_view::HINT_LINES`).
+    const STRIP: f32 = 60.0 * 2.75;
+
     fn inner_upright() -> Rect {
-        // A 1080x2400 phone at 2.75 px per dp: the window about 1064 px wide and 2000 px tall.
-        Rect::new(8.0, 40.0, 1064.0, 1960.0)
+        // A 1080x2400 phone at 2.75 px per dp: the window about 1064 px wide and 2200 px tall.
+        Rect::new(8.0, 40.0, 1064.0, 2200.0)
     }
 
     #[test]
     fn upright_targets_are_touch_sized_and_inside_the_window() {
         let k = 2.75;
         let inner = inner_upright();
-        let a = upright(inner, k, 6, 2);
+        let a = upright(inner, k, 6, 2, STRIP);
         assert!(a.filter.h >= 40.0 * k && a.close.h >= 40.0 * k);
         for r in [a.band, a.filter, a.pack, a.strip, a.grid, a.close] {
             assert!(r.x >= inner.x - 0.5 && r.right() <= inner.right() + 0.5, "{r:?}");
@@ -308,7 +310,7 @@ mod tests {
     #[test]
     fn upright_cards_are_touch_sized_for_six_columns() {
         let k = 2.75;
-        let a = upright(inner_upright(), k, 6, 2);
+        let a = upright(inner_upright(), k, 6, 2, STRIP);
         assert!(a.card.0 >= 40.0 * k, "a card is at least 40 dp wide: {:?}", a.card);
         let x = a.grid.x + 5.0 * a.pitch.0;
         assert!(x + a.card.0 <= a.grid.right() + 0.5);
@@ -316,7 +318,7 @@ mod tests {
 
     #[test]
     fn upright_rows_do_not_overlap() {
-        let a = upright(inner_upright(), 2.75, 6, 2);
+        let a = upright(inner_upright(), 2.75, 6, 2, STRIP);
         let rows = [a.band, a.filter, a.pack, a.strip, a.grid, a.close];
         for (i, p) in rows.iter().enumerate() {
             for q in rows.iter().skip(i + 1) {
@@ -330,7 +332,7 @@ mod tests {
     fn sideways_keeps_both_columns_in_the_window() {
         let k = 2.75;
         let inner = Rect::new(8.0, 8.0, 2384.0, 1000.0);
-        let a = sideways(inner, k, 6, 2);
+        let a = sideways(inner, k, 6, 2, STRIP);
         for r in [a.band, a.filter, a.pack, a.strip, a.grid, a.close] {
             assert!(r.x >= inner.x - 0.5 && r.right() <= inner.right() + 0.5, "{r:?}");
             assert!(r.y >= inner.y - 0.5 && r.bottom() <= inner.bottom() + 0.5, "{r:?}");
@@ -395,15 +397,15 @@ mod tests {
     #[test]
     fn filter_buttons_are_touch_sized_and_apart() {
         let k = 2.75;
-        check_filter(upright(inner_upright(), k, 6, 2).cells, k);
-        check_filter(sideways(Rect::new(8.0, 8.0, 2384.0, 1000.0), k, 6, 2).cells, k);
+        check_filter(upright(inner_upright(), k, 6, 2, STRIP).cells, k);
+        check_filter(sideways(Rect::new(8.0, 8.0, 2384.0, 1000.0), k, 6, 2, STRIP).cells, k);
     }
 
     #[test]
     fn sideways_filter_clears_the_title() {
         let k = 2.75;
         let inner = Rect::new(8.0, 8.0, 2384.0, 1000.0);
-        let a = sideways(inner, k, 6, 2);
+        let a = sideways(inner, k, 6, 2, STRIP);
         assert!(a.filter.y >= inner.y + 8.0 * k, "the filter row sits below the title's close button");
     }
 

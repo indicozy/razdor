@@ -233,7 +233,14 @@ pub fn frame(
     let _scale = super::window_layout::game_scale(video);
     let k = chrome::k();
     let r = super::window_layout::game_rect(video).unwrap_or_else(super::window_layout::landscape_window);
-    if kit::phone().is_some() {
+    if let Some(dp) = kit::phone() {
+        // Razdor's own (the owner's decision, 2026-11-01): the phone layout. The title strip ends where the
+        // window's top plus the desktop's strip height ends (`chrome::window`), so the window starts low
+        // enough that the strip's bottom is 41 dp from the screen's top: the close cross's touch area
+        // (`chrome::touch_hit`) is then a finger tall.
+        let want = super::display::safe_area().top + 41.0 * dp;
+        let top = r.y.max(want - super::chrome::strip_height(k, super::chrome::FIXED_TITLE));
+        let r = Rect::new(r.x, top, r.w, (r.h - (top - r.y)).max(1.0));
         return phone_frame(game, r, selected, page, filter, message).or(bar_pick);
     }
     let title = own("Title", n_("The hero's spell book"));
@@ -380,7 +387,10 @@ fn phone_frame(game: &mut Game, r: Rect, selected: &mut usize, page: &mut usize,
     let msg = message.as_ref().filter(|_| true).map(|m| kit::Text::new(m, 14.0, ACCENT).face(Face::Subtitle));
     let msg_h = msg.as_ref().map_or(0.0, |t| t.height(inner.w - 16.0 * k));
     let bottom_h = bh + gap + msg_h;
-    let list = Rect::new(inner.x + 4.0 * k, inner.y + 4.0 * k, inner.w - 8.0 * k, (inner.h - bottom_h - 8.0 * k).max(1.0));
+    // Razdor's own (the owner's decision, 2026-11-01): the phone layout. The list starts 10 dp lower, so
+    // the close cross's touch area (under the title strip) keeps 8 dp from the first card's.
+    let top = inner.y + 4.0 * k + 10.0 * kit::phone().unwrap_or(0.0);
+    let list = Rect::new(inner.x + 4.0 * k, top, inner.w - 8.0 * k, (inner.bottom() - bottom_h - 8.0 * k - top).max(1.0));
     let shown_idx = shown(&enemy, *filter);
     let mut flow = kit::Flow::begin(list, "spellbook");
     let cw = (list.w - (cols as f32 + 1.0) * gap) / cols as f32;

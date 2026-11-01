@@ -258,7 +258,7 @@ pub fn frame(on_title: bool, mode: &mut Mode) -> bool {
     };
     // A phone: its own layout in the phone window (`phone_frame`).
     if let Some((kp, rect)) = kit::phone_window(!on_title, (680.0, 520.0), true) {
-        return super::display::with_window_scale(Some(kp), || phone_frame(rect, on_title, mode, &status, title, &lines));
+        return super::display::with_window_scale(Some(kp), || super::widgets::modal_window(|| phone_frame(rect, on_title, mode, &status, title, &lines)));
     }
     let (inner, closed) = chrome::window(r, title, chrome::Skin::Marble, true);
     let wrapped = wrap(&lines, inner.w - 48.0 * k, 14.0 * k);

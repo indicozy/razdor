@@ -490,7 +490,22 @@ fn upright_menu() -> Option<PortraitMenu> {
 fn oval_rect(i: usize) -> Rect {
     match upright_menu() {
         Some(m) => m.buttons[i],
-        None => landscape_buttons(screen_width(), screen_height(), chrome::k())[i],
+        None => {
+            let r = landscape_buttons(screen_width(), screen_height(), chrome::k())[i];
+            match super::display::dp_px() {
+                // Razdor's own (the owner's decision, 2026-11-01): the phone layout. The desktop's ovals
+                // overlap by 20 px (the original's column); a phone's touch area is the oval's band
+                // through its centre, so neighbouring targets keep 8 dp apart. The picture is unchanged.
+                Some(dp) => {
+                    // The column rises 4 dp (the last oval's finger area keeps its room above the bottom bar).
+                    let pitch = 92.0 * chrome::k();
+                    let h = r.h.min(pitch - 8.5 * dp);
+                    let cy = r.center().y - 4.0 * dp;
+                    Rect::new(r.x, cy - h / 2.0, r.w, h)
+                }
+                None => r,
+            }
+        }
     }
 }
 

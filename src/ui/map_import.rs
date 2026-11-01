@@ -339,7 +339,7 @@ fn from_desktop(answer: Option<PathBuf>) -> Poll {
 pub(super) fn notice_window(title: &str, lines: &[String]) -> bool {
     // A phone: its own window (`phone_window`), the same answers.
     if let Some((k, rect)) = kit::phone_window(false, (634.0, 516.0), true) {
-        let (picked, closed) = display::with_window_scale(Some(k), || phone_window(rect, k, title, lines, &[tr("OK")]));
+        let (picked, closed) = display::with_window_scale(Some(k), || super::widgets::modal_window(|| phone_window(rect, k, title, lines, &[tr("OK")])));
         let enter = key(KeyCode::Enter) || key(KeyCode::Escape);
         return picked.is_some() || closed || enter;
     }
@@ -358,7 +358,7 @@ fn replace_window(taken: &[String]) -> Option<bool> {
     let text = trf!("These maps are already in the game: {names}. Replace them?", names = taken.join(", "));
     let labels = [tr("Replace"), tr("Keep the old")];
     let (picked, closed) = match kit::phone_window(false, (634.0, 516.0), true) {
-        Some((k, rect)) => display::with_window_scale(Some(k), || phone_window(rect, k, tr("Replace?"), std::slice::from_ref(&text), &labels)),
+        Some((k, rect)) => display::with_window_scale(Some(k), || super::widgets::modal_window(|| phone_window(rect, k, tr("Replace?"), std::slice::from_ref(&text), &labels))),
         None => {
             let (inner, closed) = frame(tr("Replace?"), &[text], true);
             (buttons(inner, &labels), closed)
