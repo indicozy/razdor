@@ -893,11 +893,7 @@ question keys (Y, Enter, N, Esc) are no tile. A tap closes the list and calls `i
 the key is queued and on the next frame `input::is_key_pressed` and `get_keys_pressed` report it
 once, so the screen under the list runs its action as if the key were pressed (the queue is
 `input::TapQueue`, consumed in `begin_frame`). A tile the rules forbid now is drawn disabled
-(`hotkeys::tile_enabled`, `allowed`). Phones have no F1: the game menu's «Клавиши» button
-(`saves::ExitChoice::Keys`, drawn by `exit_dialog` on a phone only, `display::dp_px()`; the desktop
-menu is the original's four buttons; the phone's five take 4 px between them) opens the list over
-the map; `App::help_fresh` keeps the press that opened it from closing it, and `widgets::swallow_input` (set at both
-opening points, the map's and the battle exit window's «Клавиши») keeps it from pressing a tile in the list. On a phone the list's
+(`hotkeys::tile_enabled`, `allowed`). Phones have no F1 and no keys window (the owner's decision, 2026-11-01): the game menu's and the battle's leave windows have no «Клавиши» on a phone, and the list's «Изменить клавиши…» button and «Keys change in» line are the desktop's only (`hotkeys::help_overlay`, `keys_button_on`). The list is single-column upright on a phone (`cols`). On a phone the list's
 text is the phone's text (`display::text_for`, drawn under `dt_font::legacy_metrics_if`) and its
 tiles wrap to three lines; the desktop keeps the interface scale. On a phone the keys that have a button on the
 screen fold out of the grid (a phone choice, not in the original): on the map the wait, minimap, centre, journal,

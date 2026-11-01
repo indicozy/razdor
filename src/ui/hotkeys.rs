@@ -389,7 +389,8 @@ pub fn split_screen_buttons(place: Place, tiles: Vec<Tile>) -> (Vec<Tile>, Vec<T
 }
 
 /// Whether the F1 list over `place` has the «Изменить клавиши…» button (it opens the keys window
-/// over the map). Other screens get a line that says where the keys are changed instead.
+/// over the map). Other screens get a line that says where the keys are changed instead. On a phone
+/// there is no keys window and the list has no such foot (`help_overlay`).
 pub fn keys_button_on(place: Place) -> bool {
     place == Place::WorldMap
 }
@@ -409,13 +410,28 @@ pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
     let (grid, folded) = if phone { split_screen_buttons(place, tiles(place)) } else { (tiles(place), Vec::new()) };
     let folds = !folded.is_empty();
     let info = info_rows(place);
-    // The foot under the list: on the map a button to the keys window, elsewhere a line that says
-    // where the keys are changed. A phone's button is at least 40 dp high.
-    let button = keys_button_on(place);
-    let foot_h = if button { (34.0 * k * super::display::button_grow()).max(40.0 * k) } else { 24.0 * t };
-    let cols = if sw < sh || sw < 760.0 { 2 } else { 3 };
+    // The foot under the list: on the desktop, on the map a button to the keys window, elsewhere a
+    // line that says where the keys are changed. A phone has no keys window (Razdor's own, the
+    // owner's decision, 2026-11-01): no foot there.
+    let button = keys_button_on(place) && !phone;
+    let foot_h = if button {
+        (34.0 * k * super::display::button_grow()).max(40.0 * k)
+    } else if phone {
+        0.0
+    } else {
+        24.0 * t
+    };
+    // Held upright a phone's list is one column of touch-tall keys (Razdor's own, the owner's decision,
+    // 2026-11-01), then the rows that make no key below it; held sideways, two columns, three on a wide screen.
+    let cols = if phone && sw < sh {
+        1
+    } else if sw < sh || sw < 760.0 {
+        2
+    } else {
+        3
+    };
     let (pad, gap) = (14.0 * k, 8.0 * k);
-    let w = if cols == 2 { sw - 16.0 } else { (880.0 * k).min(sw - 40.0) };
+    let w = if cols <= 2 { sw - 16.0 } else { (880.0 * k).min(sw - 40.0) };
     let tile_w = (w - 2.0 * pad - 14.0 * k - gap * (cols as f32 - 1.0)) / cols as f32;
     let grid_w = tile_w * cols as f32 + gap * (cols as f32 - 1.0);
     let size = 18.0 * t;
@@ -455,7 +471,10 @@ pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
     // A phone's list has a close cross (its click area is finger-sized, `chrome::touch_hit`); it closes
     // by Esc and a tap outside, as the desktop's.
     let (inner, box_closed) = chrome::window(Rect::new(x, y, w, h), tr("Keys"), Skin::Marble, phone);
-    let body = Rect::new(inner.x, inner.y + 52.0 * t, inner.w, inner.bottom() - 40.0 * k - foot_gap - (inner.y + 52.0 * t));
+    // The line that closes the list («F1, Esc или щелчок…») sits 12 px above the bottom; a phone with
+    // no foot keeps the body above it too (Razdor's own: its line is a line of the phone's text).
+    let closing = if phone && !button { 16.0 * t } else { 0.0 };
+    let body = Rect::new(inner.x, inner.y + 52.0 * t, inner.w, inner.bottom() - 40.0 * k - foot_gap - closing - (inner.y + 52.0 * t));
     let most = (content - body.h).max(0.0);
     let mut scroll = SCROLL.with(|s| s.get()).clamp(0.0, most);
     let (mx, my) = input::screen_pointer();
@@ -562,7 +581,7 @@ pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
                 super::audio::cue(super::audio::Cue::Button);
                 asked = true;
             }
-        } else {
+        } else if !phone {
             text_fit(tr("Keys change in: Settings → Advanced… → Keys…"), inner.x + pad, foot.center().y + 6.0 * t, inner.w - 2.0 * pad, 16.0 * t, DIM);
         }
         text_centered(tr("F1, Esc or a click closes this list"), inner.center().x, inner.bottom() - 12.0 * k, 15.0 * t, DIM);

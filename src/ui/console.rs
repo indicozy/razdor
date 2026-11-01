@@ -325,7 +325,14 @@ impl Console {
             return;
         }
         let k = chrome::k();
-        let (size, pitch, pad) = metrics(k);
+        let (mut size, mut pitch, pad) = metrics(k);
+        // A phone's text is at least 12 sp, and a row holds it (Razdor's own, the owner's decision,
+        // 2026-11-01); the desktop keeps the metrics above.
+        let phone = display::dp_px().is_some();
+        if phone {
+            size = super::kit::floored(size);
+            pitch = pitch.max((size * 1.3).round());
+        }
         let l = layout_now(pad);
         let (w, top) = (screen_width(), l.content.y);
         let base = top + pad * 2.0 + pitch * (SHOWN as f32 + 1.0) + 6.0 * k;
@@ -339,13 +346,22 @@ impl Console {
         let end = self.log.len() - self.scroll.min(self.log.len());
         let start = end.saturating_sub(SHOWN);
         let text_w = l.text_right - l.text_x;
-        for (i, (line, kind)) in self.log[start..end].iter().enumerate() {
-            let color = match kind {
-                Kind::Typed => DIM,
-                Kind::Said => INK,
-                Kind::Error => chrome::RED_TEXT,
-            };
-            text_fit(line, l.text_x, top + pad + pitch * (i as f32 + 0.8), text_w, size, color);
+        let colour = |kind: &Kind| match kind {
+            Kind::Typed => DIM,
+            Kind::Said => INK,
+            Kind::Error => chrome::RED_TEXT,
+        };
+        if phone {
+            // A phone's lines wrap to the width: the newest `SHOWN` rows of the wrapped lines.
+            let rows_of: Vec<(String, Color)> = self.log[start..end].iter().flat_map(|(line, kind)| wrap(line, text_w, size).into_iter().map(move |w| (w, colour(kind)))).collect();
+            let skip = rows_of.len().saturating_sub(SHOWN);
+            for (i, (line, color)) in rows_of.iter().skip(skip).enumerate() {
+                text(line, l.text_x, top + pad + pitch * (i as f32 + 0.8), size, *color);
+            }
+        } else {
+            for (i, (line, kind)) in self.log[start..end].iter().enumerate() {
+                text_fit(line, l.text_x, top + pad + pitch * (i as f32 + 0.8), text_w, size, colour(kind));
+            }
         }
         // A phone's finger slides the scroll-back: the lines above the input line (a phone choice,
         // not in the original).

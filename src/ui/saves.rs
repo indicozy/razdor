@@ -1684,8 +1684,6 @@ pub enum ExitChoice {
     Quit,
     MainMenu,
     Restart,
-    /// Razdor's «Клавиши» (the game menu only): the key list over the map.
-    Keys,
 }
 
 /// The bar's X button (and Esc on the map): "Выход из игры", the original's warning that the
@@ -1701,7 +1699,6 @@ pub fn exit_window(game: &Game, assets: &Assets, asking: &mut bool) -> (Option<E
             (own("ExitGame", "Exit", n_("Quit the game")), Some(ExitChoice::Quit), None),
             (own("ExitGame", "ExitToMenu", n_("To the menu")), Some(ExitChoice::MainMenu), None),
             (own("ExitGame", "Restart", n_("Restart")), Some(ExitChoice::Restart), None),
-            (tr(n_("Keys")).to_string(), Some(ExitChoice::Keys), None),
             (own("Buttons", "Cancel", n_("Cancel")), None, None),
         ];
         let version = super::chrome::ui_text("SpecialTexts", "VerInfo");
@@ -1732,7 +1729,6 @@ pub fn battle_exit_dialog(asking: &mut bool) -> (Option<ExitChoice>, bool) {
                 (own("ExitGame", "Exit", n_("Quit the game")), Some(ExitChoice::Quit), Some("Btn3")),
                 (own("ExitGame", "ExitToMenu", n_("To the menu")), Some(ExitChoice::MainMenu), Some("Btn3")),
                 (own("ExitGame", "Restart", n_("Restart")), Some(ExitChoice::Restart), Some("Btn2")),
-                (tr(n_("Keys")).to_string(), Some(ExitChoice::Keys), Some("Btn2")),
                 (own("Buttons", "Cancel", n_("Cancel")), None, Some("Btn1")),
             ];
             return super::display::with_window_scale(Some(k), || exit_phone((rect, k), (&title, warning), asking, true, &rows, "S_Battle", None));
@@ -1801,9 +1797,8 @@ fn battle_exit_window(title: &str, warning: &str, asking: &mut bool) -> (Option<
     let art = |name: &str| chrome::win(&format!("{name}Up")).map(|t| (t.width(), t.height()));
     let (b3, b2, b1) = (art("Btn3").unwrap_or((160.0, 36.0)), art("Btn2").unwrap_or((128.0, 36.0)), art("Btn1").unwrap_or((96.0, 36.0)));
     let by = 460.0 + (H - 460.0 - b1.1) / 2.0;
-    // The phone's «Клавиши» (between «Рестарт» and «Отмена») takes its own slot in the row.
-    let phone = super::display::dp_px().is_some();
-    let row = battle_exit_row(phone, (b3.0, b2.0, b1.0));
+    // The desktop's row (this window is drawn on the desktop only: a phone has `exit_phone`).
+    let row = battle_exit_row((b3.0, b2.0, b1.0));
     // (x and width, height, art, label, choice) of each button.
     type Button = ((f32, f32), f32, &'static str, String, Option<ExitChoice>);
     let mut buttons: Vec<Button> = vec![
@@ -1811,9 +1806,6 @@ fn battle_exit_window(title: &str, warning: &str, asking: &mut bool) -> (Option<
         (row[1], b3.1, "Btn3", own("ExitGame", "ExitToMenu", n_("To the menu")), Some(ExitChoice::MainMenu)),
         (row[2], b2.1, "Btn2", own("ExitGame", "Restart", n_("Restart")), Some(ExitChoice::Restart)),
     ];
-    if phone {
-        buttons.push((row[3], b2.1, "Btn2", tr(n_("Keys")).to_string(), Some(ExitChoice::Keys)));
-    }
     buttons.push((row[row.len() - 1], b1.1, "Btn1", own("Buttons", "Cancel", n_("Cancel")), None));
     let mut choice = None;
     let mut cancel = closed;
@@ -1849,33 +1841,15 @@ fn battle_exit_window(title: &str, warning: &str, asking: &mut bool) -> (Option<
 }
 
 /// The leave-battle window's button row in its own pixels (the window is `W` = 634 wide), as
-/// `(x, width)` in order: «Выйти из игры», «Выйти в меню», «Рестарт», then on phones «Клавиши»,
-/// and «Отмена» last. `art` is the widths of the `Btn3`, `Btn2` and `Btn1` pictures.
-///
-/// The desktop row is the original's: 10 px from the left, 8 px between the buttons, «Отмена»
-/// 10 px from the right. A phone's row takes the window less 10 px at each side, 4 px between
-/// the five buttons; their widths shrink together when they would not fit (the labels are
-/// shrunk to fit their buttons by `button_label`).
-fn battle_exit_row(phone: bool, art: (f32, f32, f32)) -> Vec<(f32, f32)> {
+/// `(x, width)` in order: «Выйти из игры», «Выйти в меню», «Рестарт», and «Отмена» last. `art` is
+/// the widths of the `Btn3`, `Btn2` and `Btn1` pictures. The desktop row is the original's: 10 px
+/// from the left, 8 px between the buttons, «Отмена» 10 px from the right.
+fn battle_exit_row(art: (f32, f32, f32)) -> Vec<(f32, f32)> {
     const W: f32 = 634.0;
     let (b3, b2, b1) = art;
-    if !phone {
-        let menu_x = 10.0 + b3 + 8.0;
-        let restart_x = menu_x + b3 + 8.0;
-        return vec![(10.0, b3), (menu_x, b3), (restart_x, b2), (W - 10.0 - b1, b1)];
-    }
-    let widths = [150.0f32, 150.0, 110.0, 104.0, 84.0];
-    let gap = 4.0;
-    let fit = ((W - 20.0 - gap * (widths.len() as f32 - 1.0)) / widths.iter().sum::<f32>()).min(1.0);
-    let mut x = 10.0;
-    widths
-        .iter()
-        .map(|w| {
-            let row = (x, w * fit);
-            x += w * fit + gap;
-            row
-        })
-        .collect()
+    let menu_x = 10.0 + b3 + 8.0;
+    let restart_x = menu_x + b3 + 8.0;
+    vec![(10.0, b3), (menu_x, b3), (restart_x, b2), (W - 10.0 - b1, b1)]
 }
 
 /// The window of [`exit_window`] and [`battle_exit_dialog`]: the warning and "Выйти из
@@ -1948,25 +1922,18 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art:
         (own("ExitGame", "ExitToMenu", n_("To the menu")), Some(ExitChoice::MainMenu)),
         (own("ExitGame", "Restart", n_("Restart")), Some(ExitChoice::Restart)),
     ];
-    // Razdor's «Клавиши» in the game menu and in the battle's leave window: on phones only (the
-    // key list over the screen; phones have no F1). The desktop windows are the original's
-    // four-button rows, as before.
+    // The phone menu's buttons take a little less between them (4 px, not 7.5), and «Отмена» is
+    // narrower, so the row keeps the labels whole. The desktop windows are the original's rows.
     let phone_menu = (art || battle) && super::display::dp_px().is_some();
     let mut widths = vec![150.0 * k, 150.0 * k, if phone_menu { 110.0 * k } else { 120.0 * k }];
-    // The phone menu's five buttons take a little less between them (4 px, not 7.5) and
-    // «Клавиши» and «Отмена» are narrower, so the row keeps the labels whole.
     let gap = if phone_menu { 4.0 * k } else { 7.5 * k };
-    if phone_menu {
-        labels.push((tr(n_("Keys")).to_string(), Some(ExitChoice::Keys)));
-        widths.push(104.0 * k);
-    }
     labels.push((own("Buttons", "Cancel", n_("Cancel")), None));
     widths.push(if phone_menu { 84.0 * k } else { 90.0 * k });
     let n = labels.len();
     // The phone's row fits the window: the buttons shrink together when they would not.
     let fit = if phone_menu { ((r.w - 18.75 * k - gap * (n as f32 - 1.0)) / widths.iter().sum::<f32>()).min(1.0) } else { 1.0 };
     // The plain window's row: 10 px from the sides and between the buttons (four on the
-    // desktop; a phone's five share the same row, 4 px apart).
+    // desktop; a phone's share the same row, 4 px apart).
     let plain_gap = if phone_menu { 4.0 * k } else { 10.0 * k };
     let bw = (inner.w - 20.0 * k - plain_gap * (n as f32 - 1.0)) / n as f32;
     // The buttons grow with the text size (Razdor's own, the owner's decision of 2026-10-31): their
@@ -2051,7 +2018,7 @@ fn exit_button(r: Rect, label: &str, art: Option<&str>, enabled: bool) -> bool {
 
 /// A leave window on a phone (the game menu's and the battle's; Razdor's own, the owner's decision,
 /// 2026-11-01), `k` px per dp in `rect`: the picture (`picture`, the game's name or the battle's), the
-/// game's version line, the warning in a box, and the buttons. Sideways, the five buttons share one
+/// game's version line, the warning in a box, and the buttons. Sideways, the buttons share one
 /// row; held upright they are two columns with «Отмена» across the foot. The middle scrolls when the
 /// picture and the warning do not fit. Every text is a `kit::Text` (at least 12 sp), every button
 /// touch-tall. `rows`: each button's label, its choice (None: «Отмена») and its art (the battle's).
@@ -2211,25 +2178,8 @@ mod tests {
     /// (Btn3, Btn3, Btn2), «Отмена» 10 px from the right; four buttons, as before.
     #[test]
     fn the_desktop_battle_exit_row_is_the_original_s_four_buttons() {
-        let row = battle_exit_row(false, ART);
+        let row = battle_exit_row(ART);
         assert_eq!(row, vec![(10.0, 160.0), (178.0, 160.0), (346.0, 128.0), (528.0, 96.0)]);
-    }
-
-    /// On a phone the five buttons (Quit, MainMenu, Restart, Keys, Cancel) keep their order, sit
-    /// inside the window's 10 px margins with equal gaps, and never overlap.
-    #[test]
-    fn the_phone_battle_exit_row_has_five_buttons_that_fit_the_window() {
-        let row = battle_exit_row(true, ART);
-        assert_eq!(row.len(), 5, "Quit, MainMenu, Restart, Keys, Cancel");
-        assert!(row[0].0 >= 10.0, "the first button starts inside the margin");
-        let last = row[4];
-        assert!(last.0 + last.1 <= 634.0 - 10.0 + 1e-3, "the row ends inside the margin: {last:?}");
-        for pair in row.windows(2) {
-            let gap = pair[1].0 - (pair[0].0 + pair[0].1);
-            assert!((gap - 4.0).abs() < 1e-3, "gaps are 4 px: {row:?}");
-        }
-        // The art sizes do not matter on a phone: the row is the same whatever they are.
-        assert_eq!(battle_exit_row(true, (300.0, 300.0, 300.0)), row);
     }
 
     /// 0x4b6338, 0x47d71c: the picked save's lines keep their fonts with (0, 30, 90) added.
