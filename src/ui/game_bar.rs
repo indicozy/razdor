@@ -403,6 +403,12 @@ pub fn draw_with_time(game: &Game, look: impl Fn(BarButton) -> Look, time_button
     super::pan::unpanned(|| super::display::with_fitted(super::chrome::fit_k(), || draw_bar(game, &look, time_buttons)))
 }
 
+/// The time panel's height on a phone (the bar's full height, from the top row's top): the bar's
+/// `row` scaled to its 80 px height.
+fn bar_h_of(row: f32) -> f32 {
+    (row * 80.0 / 60.0).round().max(row)
+}
+
 fn draw_bar(game: &Game, look: &impl Fn(BarButton) -> Look, time_buttons: bool) -> (Option<BarButton>, Option<TimeButton>) {
     let k = chrome::bar_k();
     let (w, h) = (screen_width(), screen_height());
@@ -459,9 +465,25 @@ fn draw_bar(game: &Game, look: &impl Fn(BarButton) -> Look, time_buttons: bool) 
     }
     // Russian dates run longer: the lines shrink to the time panel's width.
     let room = (lay.time.w - 16.0 * k).max(60.0 * k);
-    let size = super::typography::Role::Bold.with(|| lines.iter().map(|(l, _)| fit_size(l, room, size)).fold(size, f32::min));
-    let lh = super::typography::Role::Bold.line_height(size * 1.25);
-    let top = y + row / 2.0 - lh * (lines.len() as f32 - 1.0) / 2.0 + size * 0.36;
+    let phone = super::display::dp_px().is_some();
+    // A phone's panel keeps every line whole (Razdor's own, the owner's decision, 2026-11-01): its
+    // lines wrap to the panel's width at the text's floor size, set close together in the bar's
+    // full height (three lines of the time panel do not fit the bar's top row).
+    let (size, lines) = if phone {
+        let base = super::typography::Role::Bold.with(|| super::kit::floored(size));
+        let wrapped: Vec<(String, Color)> = super::typography::Role::Bold.with(|| {
+            lines.iter().flat_map(|(l, c)| super::widgets::wrap(l, room, base).into_iter().map(move |w| (w, *c))).collect()
+        });
+        let lh = base * 1.05;
+        let block_h = lh * (wrapped.len() as f32 - 1.0) + base;
+        let mid = y + bar_h_of(row) / 2.0;
+        (base, wrapped.into_iter().enumerate().map(|(i, (l, c))| (l, c, mid - block_h / 2.0 + base * 0.8 + i as f32 * lh)).collect::<Vec<_>>())
+    } else {
+        let size = super::typography::Role::Bold.with(|| lines.iter().map(|(l, _)| fit_size(l, room, size)).fold(size, f32::min));
+        let lh = super::typography::Role::Bold.line_height(size * 1.25);
+        let top = y + row / 2.0 - lh * (lines.len() as f32 - 1.0) / 2.0 + size * 0.36;
+        (size, lines.into_iter().enumerate().map(|(i, (l, c))| (l, c, top + i as f32 * lh)).collect::<Vec<_>>())
+    };
     // The message box hovered on the idle map: the three buttons stand over it, its text
     // hidden (as the original draws it).
     let s = row / PANEL_ROW;
@@ -479,8 +501,9 @@ fn draw_bar(game: &Game, look: &impl Fn(BarButton) -> Look, time_buttons: bool) 
         }
     } else {
         super::dt_font::with_face(super::dt_font::Face::Bold, || {
-            for (i, (l, c)) in lines.iter().enumerate() {
-                shadow_centered(&super::widgets::ellipsize(l, room, size), lay.time.x + lay.time.w / 2.0, top + i as f32 * lh, size, *c);
+            for (l, c, baseline) in lines.iter() {
+                let l = if phone { l.clone() } else { super::widgets::ellipsize(l, room, size) };
+                shadow_centered(&l, lay.time.x + lay.time.w / 2.0, *baseline, size, *c);
             }
         });
     }

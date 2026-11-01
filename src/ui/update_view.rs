@@ -15,6 +15,7 @@ use razdor::update::{self, Mode, Note, Release, Status};
 
 use super::audio::{cue, Cue};
 use super::chrome;
+use super::kit;
 use super::widgets::*;
 
 local! {
@@ -131,6 +132,19 @@ pub fn title_line() {
     if let Status::Installed(r) = update::status() {
         let k = chrome::k();
         let line = trf!("Razdor {v} is installed and starts next time", v = r.version);
+        // A phone's line wraps to the screen's width, its last line on the notice's baseline (Razdor's
+        // own, the owner's decision, 2026-11-01); the desktop's is one line, as before.
+        if super::display::dp_px().is_some() {
+            let t = kit::Text::new(&line, 16.0, chrome::GOLD);
+            let lines = t.lines(screen_width() - 16.0 * k);
+            let (pitch, size) = (t.line_pitch(), t.size());
+            let last = super::main_menu::notice_y(k);
+            for (i, l) in lines.iter().enumerate() {
+                let y = last - (lines.len() - 1 - i) as f32 * pitch;
+                chrome::shadow_centered(l, screen_width() / 2.0, y, size, chrome::GOLD);
+            }
+            return;
+        }
         text_centered(&line, screen_width() / 2.0, super::main_menu::notice_y(k), 16.0 * k, chrome::GOLD);
     }
 }
@@ -242,6 +256,10 @@ pub fn frame(on_title: bool, mode: &mut Mode) -> bool {
         Status::InstallFailed(r, why) => (tr("Update failed"), trf!("Razdor {v} could not be installed: {why}", v = r.version, why)),
         _ => return false,
     };
+    // A phone: its own layout in the phone window (`phone_frame`).
+    if let Some((kp, rect)) = kit::phone_window(!on_title, (680.0, 520.0), true) {
+        return super::display::with_window_scale(Some(kp), || phone_frame(rect, on_title, mode, &status, title, &lines));
+    }
     let (inner, closed) = chrome::window(r, title, chrome::Skin::Marble, true);
     let wrapped = wrap(&lines, inner.w - 48.0 * k, 14.0 * k);
     for (i, line) in wrapped.iter().take(5).enumerate() {
@@ -310,6 +328,127 @@ pub fn frame(on_title: bool, mode: &mut Mode) -> bool {
         _ => {}
     }
     // The screen below takes none of this frame's input.
+    swallow_input();
+    false
+}
+
+/// The update window on a phone (Razdor's own, the owner's decision, 2026-11-01), in its phone
+/// window `rect`: the title, the text and the list of changes in one scrolling column, and the
+/// buttons across the foot (stacked when their labels do not fit side by side). The buttons do what
+/// the desktop's do (`frame`), and the desktop keeps its own row and sizes.
+fn phone_frame(rect: Rect, on_title: bool, mode: &mut Mode, status: &Status, title: &str, lines: &str) -> bool {
+    let k = chrome::k();
+    let (inner, closed) = chrome::window(rect, title, chrome::Skin::Marble, true);
+    let close = closed || key(KeyCode::Escape);
+    let desktop = !razdor::platform::MOBILE;
+    let labels: Vec<&str> = match status {
+        Status::Found(_) if update::opens_page() => vec![tr("Open the release page"), tr("Later")],
+        Status::Found(_) if desktop => vec![tr("Update"), tr("Always update"), tr("Later")],
+        Status::Found(_) => vec![tr("Update"), tr("Later")],
+        Status::Handed(_) => vec![tr("OK")],
+        Status::Installed(_) if on_title => vec![tr("Restart now"), tr("OK")],
+        Status::Installed(_) => vec![tr("OK")],
+        Status::InstallFailed(..) => vec![tr("Open the release page"), tr("OK")],
+        _ => return false,
+    };
+    let pad = 16.0 * k;
+    let gap = 8.0 * k;
+    let bh = kit::finger_h(kit::touch_h(28.0));
+    let width = inner.w - 2.0 * pad;
+    let n = labels.len();
+    let row_w = (width - gap * (n as f32 - 1.0)) / n as f32;
+    // Sideways the window is wide and short: its buttons stay in one row (the labels shrink to it);
+    // held upright they stack when the labels do not fit side by side.
+    let side = !kit::upright() || labels.iter().all(|l| chrome::button_label_width(bh, l) + 24.0 * k <= row_w);
+    let foot_top = inner.bottom() - pad - (if side { bh } else { n as f32 * bh + (n as f32 - 1.0) * gap });
+    let rects: Vec<Rect> = (0..n)
+        .map(|i| {
+            if side {
+                Rect::new(inner.x + pad + i as f32 * (row_w + gap), foot_top, row_w, bh)
+            } else {
+                Rect::new(inner.x + pad, foot_top + i as f32 * (bh + gap), width, bh)
+            }
+        })
+        .collect();
+    let mut picked = None;
+    for (i, (label, r)) in labels.iter().zip(&rects).enumerate() {
+        if kit::button(*r, label, true) && picked.is_none() {
+            picked = Some(i);
+        }
+    }
+    // The text and the changes: one column that scrolls above the buttons.
+    let area = Rect::new(inner.x + pad, inner.y + 8.0 * k, width, (foot_top - gap - (inner.y + 8.0 * k)).max(0.0));
+    let mut flow = kit::Flow::begin(area, "update-text");
+    let (x, w) = (area.x, area.w);
+    let body = kit::Text::new(lines, 14.0, chrome::CREAM);
+    flow.text_at(&body, x, body.size() * 0.85, w, 0.0);
+    if let (true, Status::Found(rel)) = (matches!(status, Status::Found(r) if !r.notes.is_empty()), status) {
+        // (text, size, colour, gap above in design px) of each note; the release's first has none.
+        let notes: Vec<(String, f32, Color, f32)> = rel
+            .notes
+            .iter()
+            .enumerate()
+            .map(|(i, note)| match note {
+                Note::Release(v) => (trf!("Razdor {v}", v), 16.0, chrome::GOLD, if i == 0 { 0.0 } else { 10.0 }),
+                Note::Section(s) => (s.clone(), 14.0, chrome::CREAM, 4.0),
+                Note::Item(s) => (format!("•  {s}"), 13.0, WHITE, 2.0),
+                Note::Text(s) => (s.clone(), 13.0, WHITE, 0.0),
+            })
+            .collect();
+        for (text, size, color, gap_design) in &notes {
+            let t = kit::Text::new(text, *size, *color);
+            flow.gap(*gap_design);
+            flow.text_at(&t, x, t.size() * 0.85, w, 0.0);
+        }
+    }
+    flow.finish();
+    // The same actions as the desktop's (`frame`).
+    let later = n - 1;
+    match status {
+        Status::Found(rel) if update::opens_page() => match picked {
+            Some(0) => {
+                super::main_menu::open_link(&rel.page);
+                LATER.with(|l| l.set(true));
+            }
+            Some(_) => LATER.with(|l| l.set(true)),
+            None if close => LATER.with(|l| l.set(true)),
+            None => {}
+        },
+        Status::Found(rel) => {
+            let always = desktop && picked == Some(1);
+            if picked == Some(0) || always || (picked.is_none() && key(KeyCode::Enter)) {
+                if always {
+                    *mode = Mode::Always;
+                }
+                ASKED.with(|a| a.set(true));
+                TOLD.with(|t| t.set(false));
+                update::install(rel.clone());
+            } else if picked == Some(later) || close {
+                LATER.with(|l| l.set(true));
+            }
+        }
+        Status::Handed(_) => {
+            if picked.is_some() || close || key(KeyCode::Enter) {
+                TOLD.with(|t| t.set(true));
+            }
+        }
+        Status::Installed(_) => {
+            if on_title && picked == Some(0) {
+                update::request_restart();
+                return true;
+            }
+            if picked.is_some() || close || key(KeyCode::Enter) {
+                TOLD.with(|t| t.set(true));
+            }
+        }
+        Status::InstallFailed(rel, _) => match picked {
+            Some(0) => super::main_menu::open_link(&rel.page),
+            Some(_) => TOLD.with(|t| t.set(true)),
+            None if close || key(KeyCode::Enter) => TOLD.with(|t| t.set(true)),
+            None => {}
+        },
+        _ => {}
+    }
     swallow_input();
     false
 }

@@ -325,18 +325,48 @@ pub fn backdrop() {
 }
 
 /// The menu's foot (4c7774): the version line (`[SpecialTexts] VerInfo`) at the left and the
-/// copyright (`CopyrightsMessage`) after it, small and white, on the bottom row.
+/// copyright (`CopyrightsMessage`) after it, small and white, on the bottom row. On a phone
+/// (Razdor's own, the owner's decision, 2026-11-01) both are one paragraph wrapped to the screen's
+/// width, its last line on the foot (`foot_block`), so the copyright never runs off the screen.
 fn foot_lines() {
     let k = chrome::k();
+    let ink = Color::new(0.92, 0.92, 0.92, 1.0);
+    if super::display::dp_px().is_some() {
+        let text = foot_string();
+        let t = kit::Text::new(&text, 11.0, ink);
+        let width = screen_width() - 10.0 * k;
+        let (top, _, _) = foot_block(&t, width);
+        t.draw(5.0 * k, top, width);
+        return;
+    }
     let size = 11.0 * k;
     let y = upright_menu().map_or(screen_height() - 4.0 * k, |m| m.foot_y);
-    let ink = Color::new(0.92, 0.92, 0.92, 1.0);
     if let Some(v) = chrome::ui_text("SpecialTexts", "VerInfo") {
         chrome::shadow_text(&v, 5.0 * k, y, size, ink);
     }
     if let Some(c) = chrome::ui_text("SpecialTexts", "CopyrightsMessage") {
         chrome::shadow_text(&c, 264.0 * k, y, size, ink);
     }
+}
+
+/// The footer's text on a phone: Razdor's version, the game's version and the copyright, three
+/// spaces apart (the desktop's version tag in the corner is part of it here).
+fn foot_string() -> String {
+    let razdor = format!("v{}", super::update_view::shown_version(env!("CARGO_PKG_VERSION"), super::clock::is_snapshot()));
+    let mut parts = vec![razdor];
+    parts.extend(chrome::ui_text("SpecialTexts", "VerInfo"));
+    parts.extend(chrome::ui_text("SpecialTexts", "CopyrightsMessage"));
+    parts.join("   ")
+}
+
+/// The footer on a phone, the paragraph `t` wrapped to `width`: its first baseline, its number of
+/// lines and its line pitch. The last line sits on the foot: `foot_y` held upright, the bottom row
+/// sideways.
+fn foot_block(t: &kit::Text, width: f32) -> (f32, usize, f32) {
+    let n = t.lines(width).len().max(1);
+    let pitch = t.line_pitch();
+    let bottom = upright_menu().map_or(screen_height() - 4.0 * chrome::k(), |m| m.foot_y);
+    (bottom - (n as f32 - 1.0) * pitch, n, pitch)
 }
 
 /// The dp of a phone held upright (its stacked menu), else None.
@@ -378,6 +408,9 @@ fn oval_picture(c: Vec2, s: f32, w: f32, h: f32, pointed: bool) -> (Rect, Rect) 
     }
 }
 
+/// A line of the title's foot on a phone, in dp (the 12 sp text's pitch, grown with the text size).
+const FOOT_LINE_DP: f32 = 18.0;
+
 /// The menu held upright: the buttons are a column of [`PORTRAIT_SCALE`] × the landscape size
 /// starting under the logo, and the links are a row of chips at the bottom.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -386,21 +419,19 @@ struct PortraitMenu {
     /// The chips' row: its top and height (a touch target of at least [`TOUCH_DP`]).
     chip_top: f32,
     chip_h: f32,
-    /// The baseline of the foot lines (the version and copyright), just above the chips.
+    /// The baseline of the foot's last line (the version and copyright, above the chips).
     foot_y: f32,
+    /// The space a foot line takes (the footer's room: up to three lines, a tag and the notice).
+    foot_line: f32,
     /// The top of the logo: the space above it is free for the not-found block.
     logo_top: f32,
 }
 
 impl PortraitMenu {
-    /// The baseline of the version line (above the foot lines).
-    fn version_y(&self, k: f32) -> f32 {
-        self.foot_y - 24.0 * k
-    }
-
-    /// The baseline of an installed update's notice (above the version line).
-    fn notice_y(&self, k: f32) -> f32 {
-        self.foot_y - 48.0 * k
+    /// The baseline of an installed update's notice: above the foot's room (three lines of the
+    /// footer, its version tag, the notice).
+    fn notice_y(&self, _k: f32) -> f32 {
+        self.foot_y - 4.0 * self.foot_line
     }
 
     /// The bottom of the not-found block: above the logo, where the screen is empty (the column
@@ -426,7 +457,9 @@ fn portrait_menu(sw: f32, sh: f32, k: f32, dp: f32, safe_top: f32) -> PortraitMe
     // inset and the foot lines; the logo stays 24 px above the column and never above the inset,
     // and the column moves down only when it must. Its gaps are shared out between the five
     // buttons (at least 6 px, at most 20 px).
-    let column_end = foot_y - 70.0 * k;
+    // The foot's room: its paragraph (up to three lines), the version tag above it and the notice.
+    let foot_line = FOOT_LINE_DP * dp * g;
+    let column_end = foot_y - 4.0 * foot_line - 16.0 * k;
     let middle = (safe_top + foot_y) / 2.0;
     let min_first = safe_top + logo_h + 24.0 * k;
     let gap = ((column_end - min_first - 5.0 * size.y) / 4.0).clamp(6.0 * k, 20.0 * k);
@@ -435,13 +468,15 @@ fn portrait_menu(sw: f32, sh: f32, k: f32, dp: f32, safe_top: f32) -> PortraitMe
     let logo_top = first - 24.0 * k - logo_h;
     let x = sw / 2.0 - size.x / 2.0;
     let buttons = std::array::from_fn(|i| Rect::new(x, first + i as f32 * (size.y + gap), size.x, size.y));
-    PortraitMenu { buttons, chip_top, chip_h, foot_y, logo_top }
+    PortraitMenu { buttons, chip_top, chip_h, foot_y, foot_line, logo_top }
 }
 
-/// The top of the footer lines (the version and copyright row) of the portrait menu on a `sw` ×
-/// `sh` screen at scale `k`: the title windows keep above it (`window_layout::portrait_title`).
+/// The top of the footer (the version and copyright paragraph, up to three lines) of the portrait
+/// menu on a `sw` × `sh` screen at scale `k`: the title windows keep above it
+/// (`window_layout::portrait_title`).
 pub fn portrait_foot_top(sw: f32, sh: f32, k: f32, dp: f32, safe_top: f32) -> f32 {
-    portrait_menu(sw, sh, k, dp, safe_top).foot_y
+    let m = portrait_menu(sw, sh, k, dp, safe_top);
+    m.foot_y - 3.0 * m.foot_line
 }
 
 /// The current menu's portrait geometry, when the phone is held upright.
@@ -511,19 +546,21 @@ pub fn frame(no_install: bool) -> Option<Pick> {
             if let Some(p) = chip_links(&m, k) {
                 pick = Some(p);
             }
-            m.version_y(k)
+            m.foot_y
         }
         None => {
             if let Some(p) = corner_links(k) {
                 pick = Some(p);
             }
-            screen_height() - 22.0 * k - 26.0 * k
+            corner_y(k) - 26.0 * k
         }
     };
-    // This program's version, small in the corner above the links.
-    let version = format!("v{}", super::update_view::shown_version(env!("CARGO_PKG_VERSION"), super::clock::is_snapshot()));
-    let vw = measure(&version, 12.0 * k).width;
-    chrome::shadow_text(&version, screen_width() - 16.0 * k - vw, version_y, 12.0 * k, Color::new(0.95, 0.88, 0.72, 0.6));
+    // This program's version, small in the corner above the links (a phone's is in the footer).
+    if super::display::dp_px().is_none() {
+        let version = format!("v{}", super::update_view::shown_version(env!("CARGO_PKG_VERSION"), super::clock::is_snapshot()));
+        let vw = measure(&version, 12.0 * k).width;
+        chrome::shadow_text(&version, screen_width() - 16.0 * k - vw, version_y, 12.0 * k, Color::new(0.95, 0.88, 0.72, 0.6));
+    }
     // An update put in place says so (an "Always" update has no window of its own).
     super::update_view::title_line();
     // Esc quits the game at once, without a question, as in the original (0x4c8059); a
@@ -540,7 +577,7 @@ pub fn frame(no_install: bool) -> Option<Pick> {
 /// editor is not ready; its code and `--editor` stay.) Returns what was picked.
 fn corner_links(k: f32) -> Option<Pick> {
     let mut pick = None;
-    let y = screen_height() - 22.0 * k;
+    let y = corner_y(k);
     // The links grow with the text size (`button_grow`, the owner's decision of 2026-10-31).
     let size = 18.0 * k * super::display::button_grow();
     let custom = tr("Custom battle");
@@ -568,6 +605,24 @@ fn corner_links(k: f32) -> Option<Pick> {
         super::widgets::tooltip(&[(super::language::hint().to_string(), super::widgets::INK)]);
     }
     pick
+}
+
+/// The baseline of the sideways corner links: the bottom row, and on a phone above the footer's
+/// paragraph (its lines are on the bottom row too).
+fn corner_y(k: f32) -> f32 {
+    let base = screen_height() - 22.0 * k;
+    match foot_metrics() {
+        Some((_, n, pitch)) => base - n as f32 * pitch,
+        None => base,
+    }
+}
+
+/// The footer on a phone as `(first baseline, lines, pitch)`, or None on the desktop.
+fn foot_metrics() -> Option<(f32, usize, f32)> {
+    super::display::dp_px()?;
+    let text = foot_string();
+    let t = kit::Text::new(&text, 11.0, WHITE);
+    Some(foot_block(&t, screen_width() - 10.0 * chrome::k()))
 }
 
 /// The links held upright: a row of chips at the bottom, each a dark rounded plate and a touch
@@ -1569,7 +1624,9 @@ fn option_slider(r: Rect, label: &str, value: f32) -> Option<f32> {
     }
     // The arrows are 17 px squares; on a phone they are 80% of the row, so they are easy to tap.
     let a = if kit::phone().is_some() { r.h * 0.8 } else { 17.0 * k };
-    let left = Rect::new(r.x + r.w * 0.505, r.y + (r.h - a) / 2.0, a, a);
+    // A row with no label (a phone's, the label is above it) takes the whole row for its track.
+    let left_x = if label.is_empty() { r.x } else { r.x + r.w * 0.505 };
+    let left = Rect::new(left_x, r.y + (r.h - a) / 2.0, a, a);
     let right = Rect::new(r.x + r.w - 6.0 * k - a, left.y, a, a);
     let track = Rect::new(left.x + left.w, left.y, right.x - left.x - left.w, a);
     for (art, ar) in [("HArrowLeft", left), ("HArrowRight", right)] {
@@ -1999,6 +2056,8 @@ fn options_phone(audio: &mut super::audio::Settings, install_wide: bool, over_ma
     if !flow.cut(import) {
         super::game_import::settings_row(import, over_map);
     }
+    // The last row's gap is part of the content, so a scrolled bottom keeps the row clear of the footer.
+    flow.gap(8.0);
     flow.finish();
     // The footer: «Ещё…» opens the advanced settings (the window closes with no change), the rest as the desktop's.
     if kit::button(more, tr("Advanced…"), true) {
@@ -2146,7 +2205,7 @@ mod tests {
         assert!(m.chip_h >= TOUCH_DP * dp, "chips are {} px tall", m.chip_h);
         assert!(m.chip_top + m.chip_h <= sh, "chips leave the screen");
         assert!(m.foot_y <= m.chip_top, "the lines run into the chips");
-        assert!(m.version_y(k) < m.foot_y && m.notice_y(k) < m.version_y(k));
+        assert!(m.notice_y(k) < m.foot_y - 2.0 * m.foot_line, "the notice sits above the foot's paragraph");
     }
 
     #[test]

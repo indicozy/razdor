@@ -509,7 +509,7 @@ pub fn frame(view: &mut HubView) -> bool {
     let size = (14.0 * k * g).round();
     let small = (12.0 * k * g).round();
     // Touch targets: a phone's are 44 dp at Normal (the 40 dp rule), the desktop's the original's.
-    let (bh, th, row_h, gap) = if phone { (44.0 * k * g, 44.0 * k * g, 46.0 * k * g, 8.0 * k) } else { (30.0 * k * g, 26.0 * k * g, 34.0 * k * g, 4.0 * k) };
+    let (bh, th, row_h, gap) = if phone { (44.0 * k * g, 44.0 * k * g, if super::kit::upright() { 58.0 * k * g } else { 46.0 * k * g }, 8.0 * k) } else { (30.0 * k * g, 26.0 * k * g, 34.0 * k * g, 4.0 * k) };
     let by = inner.y + inner.h - pad - bh;
     let lx = inner.x + pad;
     // The list's width: the desktop's 380 units; a phone held sideways takes more of the window,
@@ -636,15 +636,41 @@ pub fn frame(view: &mut HubView) -> bool {
                     let picked = view.picked.as_deref() == Some(e.id.as_str());
                     row_paint(rr, picked);
                     let (words, ink) = state(c, &view.installed, e);
-                    let sw = if words.is_empty() { 0.0 } else { measure(&words, small).width + 8.0 * k };
-                    text_fit(e.title.get(lang()), rr.x + 6.0 * k, rr.y + 15.0 * g * k, rr.w - sw - 12.0 * k, size, if picked { GOLD } else { CREAM });
                     let mut by_line = format!("{} · {}", kind_label(e.kind), e.author);
                     if let Some(rating) = e.rating {
                         by_line = format!("{by_line} · +{} / -{}", rating.up, rating.down);
                     }
-                    text_fit(&by_line, rr.x + 6.0 * k, rr.y + 29.0 * g * k, rr.w - 12.0 * k, small, Color::new(0.85, 0.80, 0.68, 1.0));
-                    if !words.is_empty() {
-                        chrome::shadow_right(&words, rr.x + rr.w - 6.0 * k, rr.y + 15.0 * g * k, small, ink);
+                    let title_ink = if picked { GOLD } else { CREAM };
+                    let by_ink = Color::new(0.85, 0.80, 0.68, 1.0);
+                    if phone {
+                        // Razdor's own (the owner's decision, 2026-11-01): a phone's title wraps to two
+                        // lines (never cut with "…"), its state words go on the author line.
+                        let w = rr.w - 12.0 * k;
+                        let mut lines = wrap_long(e.title.get(lang()), w, size);
+                        if lines.len() > 2 {
+                            let rest = lines.split_off(1).join(" ");
+                            lines.push(rest);
+                        }
+                        // Sideways the list is short: its rows are 46 dp, and the lines sit closer.
+                        let pitch = if super::kit::upright() { 16.0 * g * k } else { 14.0 * g * k };
+                        let block = (lines.len() as f32 + 1.0) * pitch;
+                        let top = rr.y + (rr.h - block) / 2.0 + pitch * 0.8;
+                        for (i, l) in lines.iter().enumerate() {
+                            text_fit(l, rr.x + 6.0 * k, top + i as f32 * pitch, w, size, title_ink);
+                        }
+                        let by_y = top + lines.len() as f32 * pitch;
+                        let sw = if words.is_empty() { 0.0 } else { measure(&words, small).width + 8.0 * k };
+                        text_fit(&by_line, rr.x + 6.0 * k, by_y, rr.w - 12.0 * k - sw, small, by_ink);
+                        if !words.is_empty() {
+                            chrome::shadow_right(&words, rr.x + rr.w - 6.0 * k, by_y, small, ink);
+                        }
+                    } else {
+                        let sw = if words.is_empty() { 0.0 } else { measure(&words, small).width + 8.0 * k };
+                        text_fit(e.title.get(lang()), rr.x + 6.0 * k, rr.y + 15.0 * g * k, rr.w - sw - 12.0 * k, size, title_ink);
+                        text_fit(&by_line, rr.x + 6.0 * k, rr.y + 29.0 * g * k, rr.w - 12.0 * k, small, by_ink);
+                        if !words.is_empty() {
+                            chrome::shadow_right(&words, rr.x + rr.w - 6.0 * k, rr.y + 15.0 * g * k, small, ink);
+                        }
                     }
                 }
                 if entries.is_empty() {
@@ -712,6 +738,21 @@ pub fn frame(view: &mut HubView) -> bool {
     close
 }
 
+/// A line of the details pane at `(x, y)`, `width` px wide, its baseline first. On the desktop it is
+/// one line (shrunk to fit, as it always was) and the pitch is the advance. On a phone it wraps
+/// (`wrap_long`): a phone's text is read whole, never cut with "…". Returns the advance.
+fn detail_text(text: &str, x: f32, y: f32, width: f32, size: f32, ink: Color, pitch: f32) -> f32 {
+    if super::display::dp_px().is_none() {
+        text_fit(text, x, y, width, size, ink);
+        return pitch;
+    }
+    let lines = wrap_long(text, width, size);
+    for (i, l) in lines.iter().enumerate() {
+        chrome::shadow_text(l, x, y + i as f32 * pitch, size, ink);
+    }
+    lines.len().max(1) as f32 * pitch
+}
+
 /// The picked entry in the details pane `pane`, scrolled by the wheel, a swipe, a drag or the
 /// bar on its right, and clipped to the pane so no text reaches the bottom row. Install or
 /// Remove sits at the bottom right of the window (`lay`), below the pane.
@@ -759,8 +800,7 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
         }
         y = r.y + dh + 16.0 * k;
     }
-    text_fit(e.title.get(lang()), r.x, y, r.w, (18.0 * s).round(), GOLD);
-    y += 22.0 * s;
+    y += detail_text(e.title.get(lang()), r.x, y, r.w, (18.0 * s).round(), GOLD, 22.0 * s);
     let mut by_line = if e.version.trim().is_empty() {
         trf!("{kind} by {author}", kind = kind_label(e.kind), author = e.author)
     } else {
@@ -769,11 +809,9 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
     if !e.added.is_empty() {
         by_line = format!("{by_line} · {}", e.added);
     }
-    text_fit(&by_line, r.x, y, r.w, small, dim);
-    y += 18.0 * s;
+    y += detail_text(&by_line, r.x, y, r.w, small, dim, 18.0 * s);
     if let Some(rating) = e.rating {
-        text_fit(&trf!("Rating on Discord: +{up} / -{down}", up = rating.up, down = rating.down), r.x, y, r.w, small, dim);
-        y += 18.0 * s;
+        y += detail_text(&trf!("Rating on Discord: +{up} / -{down}", up = rating.up, down = rating.down), r.x, y, r.w, small, dim, 18.0 * s);
     }
     // The status is read whole: its lines wrap.
     let (words, ink) = status_line(e);
@@ -782,8 +820,7 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
         y += 18.0 * s;
     }
     if e.kind == Kind::Campaign {
-        text_fit(&trf!("Chapters: {n}", n = e.map_count()), r.x, y, r.w, small, dim);
-        y += 18.0 * s;
+        y += detail_text(&trf!("Chapters: {n}", n = e.map_count()), r.x, y, r.w, small, dim, 18.0 * s);
     }
     if e.kind != Kind::Mod {
         let langs: Vec<&str> = e
@@ -796,8 +833,7 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
                 other => other,
             })
             .collect();
-        text_fit(&trf!("Languages: {list}", list = langs.join(", ")), r.x, y, r.w, small, dim);
-        y += 18.0 * s;
+        y += detail_text(&trf!("Languages: {list}", list = langs.join(", ")), r.x, y, r.w, small, dim, 18.0 * s);
     }
     // Why a mod can't be installed, in the text (the bottom row keeps its disabled Install).
     if let Some(Err(why)) = &plan {
@@ -823,8 +859,7 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
                 Some(m) if view.installed.has(id) => (m.title.get(lang()), tr("installed"), GREEN_TEXT),
                 Some(m) => (m.title.get(lang()), tr("will be installed too"), GOLD),
             };
-            text_fit(&format!("• {name}: {words}"), r.x + 8.0 * k, y, r.w - 8.0 * k, small, ink);
-            y += 19.0 * s;
+            y += detail_text(&format!("• {name}: {words}"), r.x + 8.0 * k, y, r.w - 8.0 * k, small, ink, 19.0 * s);
         }
     }
 

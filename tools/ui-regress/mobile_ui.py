@@ -83,9 +83,8 @@ SCREENS = [
     ("map","map:РК1-Начало пути", {}),
     ("minimap", "minimap:РК1-Начало пути", {}),
     ("settings", "settings:РК1-Начало пути", {}),
-    ("keys", "settings:РК1-Начало пути:keys", {}),
     ("advanced", "settings:РК1-Начало пути:advanced", {}),
-    ("help", "map:РК1-Начало пути", {"RAZDOR_SCENE_OPEN": "3:keys"}),
+    ("help", "map:РК1-Начало пути", {"RAZDOR_SCENE_OPEN": "3:keys", "RAZDOR_SCENE_QUIET": "1"}),
     ("save", "save:РК1-Начало пути", {}),
     ("load", "load", {}),
     # The game menu's exit window and the battle's leave window (phone-exit-*, phone-battle-exit-*).
@@ -106,6 +105,13 @@ SCREENS = [
     ("classes", "classes:РК1-Начало пути", {}),
     ("hub", "hub", {}),
     ("hub-mods", "hub:1:evolution-mock", {}),
+    # The update window on offer (over the title screen), the import's notice over the scenario list,
+    # and the cheat console over the map (Razdor's own screens: the phone layouts of the misc group).
+    ("update", "update", {}),
+    ("import", "import-notice", {}),
+    ("console", "map:РК1-Начало пути", {"RAZDOR_SCENE_CONSOLE": "help", "RAZDOR_SCENE_QUIET": "1"}),
+    # The cheat console with a line typed: its completion rows, whose hints wrap on a phone.
+    ("console-complete", "map:РК1-Начало пути", {"RAZDOR_SCENE_CONSOLE": "help", "RAZDOR_SCENE_CONSOLE_LINE": "s", "RAZDOR_SCENE_QUIET": "1"}),
 ]
 
 
