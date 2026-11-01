@@ -1227,7 +1227,8 @@ fn won_file(m: &Marks, active: Option<&str>, file: &str) -> bool {
 fn scenario_phone(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(String, razdor::hub::Text)], active: Option<&str>, busy: bool, k: f32, rect: Rect) -> Option<Screen> {
     let grow = super::display::button_grow();
     let (add, modm) = (map_import::available(), !mods.is_empty());
-    let (inner, closed) = chrome::window(rect, &own("NewGame", "Title", n_("Scenario for a new game")), chrome::Skin::Marble, true);
+    let title = own("NewGame", "Title", n_("Scenario for a new game"));
+    let (inner, closed) = chrome::window(rect, &title, chrome::Skin::Marble, true);
     let win = Win { r: rect, k, foot_y: 0.0 };
     let mut m = marks();
     let set = list_set(scenarios, &m, active);

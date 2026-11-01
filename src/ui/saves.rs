@@ -1405,14 +1405,16 @@ fn save_phone(game: &Game, view: &mut SaveView, quick: bool, message: &mut Optio
         return quick_now(game, message);
     }
     let ok = can_save(&view.name, dir.is_some());
-    if kit::button(save_b, &own("SaveGame", "Save", n_("Save")), ok) || (ok && enter) {
+    let save_label = own("SaveGame", "Save", n_("Save"));
+    if kit::button(save_b, &save_label, ok) || (ok && enter) {
         if let Some(d) = &dir {
             if let Some(s) = save_typed(game, view, d, message) {
                 return Some(s);
             }
         }
     }
-    if kit::button(cancel_b, &own("Buttons", "Cancel", n_("Cancel")), true) || closed {
+    let cancel_label = own("Buttons", "Cancel", n_("Cancel"));
+    if kit::button(cancel_b, &cancel_label, true) || closed {
         return Some(view.back.screen());
     }
     if key(KeyCode::Escape) {
@@ -1486,11 +1488,13 @@ fn load_phone(view: &mut LoadView, pending: &mut Option<PathBuf>, error: &mut Op
         return None;
     }
     let chosen = view.entries.get(view.selected);
-    let load_now = kit::button(load_b, &own("LoadGame", "Load", n_("Load")), chosen.is_some()) || key(KeyCode::Enter);
+    let load_label = own("LoadGame", "Load", n_("Load"));
+    let load_now = kit::button(load_b, &load_label, chosen.is_some()) || key(KeyCode::Enter);
     if load_now && !ask.asking && chosen.is_some() {
         *pending = chosen.map(|e| e.path.clone());
     }
-    if (kit::button(cancel_b, &own("Buttons", "Cancel", n_("Cancel")), true) || closed) && !ask.asking {
+    let cancel_label = own("Buttons", "Cancel", n_("Cancel"));
+    if (kit::button(cancel_b, &cancel_label, true) || closed) && !ask.asking {
         return Some(view.back.screen());
     }
     set_input_blocked(ask.previously_blocked);
