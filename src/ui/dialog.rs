@@ -1013,32 +1013,31 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     }
     let p: Vec2 = pointer().into();
     let hovered = icons.iter().find(|(_, _, r)| r.contains(p)).map(|&(spell, id, _)| (spell, id));
-    if let (Some((spell, id, at)), Some(game)) = (shown_preview(d.preview.get(), icon_hover(), hovered, p), game) {
-        // The item tooltip is 272 wide and as tall as its text plus 32 (0x4cbab0). The spell card is
-        // the book's cell size (286 × 112) at the window's scale: the original's full card at the
-        // pointer, with its cost and duration lines (the player's frames 625-626: 402 × 157 px at 1920).
-        let (pw, ph) = if spell { (286.0 * o, 112.0 * o) } else { super::item_text::tooltip_size(game, ItemId(id), o) };
-        let px = (at.x - pw / 2.0).clamp(x + 10.0, (x + w - 10.0 - pw).max(x + 10.0));
-        let py = (at.y - ph / 2.0).clamp(y + 10.0, (y + h - 10.0 - ph).max(y + 10.0));
-        // On a phone the card goes above the finger, clear of it (`popup::placed`).
-        let card = super::popup::placed(Rect::new(px, py, pw, ph), (at.x, at.y), (pw, ph));
-        draw_rectangle(card.x + 8.0, card.y + 8.0, pw, ph, Color::new(0.0, 0.0, 0.0, 0.45));
-        if spell {
-            if let Some(s) = game.content.spells.iter().find(|s| s.id == id) {
-                super::spellbook::spell_card(game, s, card, true);
-            }
-        } else {
-            super::item_text::draw(game, assets, ItemId(id), card, super::item_text::ItemBox::Tooltip, o);
+    // The card of the item or spell under the pointer (or held) is drawn last, over the buttons
+    // (`draw_tip`): it no longer ends the frame, so the buttons stay drawn; a button the card
+    // covers is not pressable while the pointer is on the card (`tip_covers`).
+    let tip = match (shown_preview(d.preview.get(), icon_hover(), hovered, p), game) {
+        (Some((spell, id, at)), Some(game)) => {
+            // The item tooltip is 272 wide and as tall as its text plus 32 (0x4cbab0). The spell card is
+            // the book's cell size (286 × 112) at the window's scale: the original's full card at the
+            // pointer, with its cost and duration lines (the player's frames 625-626: 402 × 157 px at 1920).
+            let (pw, ph) = if spell { (286.0 * o, 112.0 * o) } else { super::item_text::tooltip_size(game, ItemId(id), o) };
+            let px = (at.x - pw / 2.0).clamp(x + 10.0, (x + w - 10.0 - pw).max(x + 10.0));
+            let py = (at.y - ph / 2.0).clamp(y + 10.0, (y + h - 10.0 - ph).max(y + 10.0));
+            // On a phone the card goes above the finger, clear of it (`popup::placed`).
+            let card = super::popup::placed(Rect::new(px, py, pw, ph), (at.x, at.y), (pw, ph));
+            Some((spell, id, card))
         }
-        return None;
-    }
+        _ => None,
+    };
     if d.question {
         let answer = answer_key();
         // Yes at a quarter of the window, No at three quarters (the original's question,
         // measured on its «Просьба торговца»: centres at 0.24 W and 0.76 W).
         let (yes_x, no_x) = question_buttons_x(x, w, bw);
-        let yes = button(yes_x, by, bw, bh, tr("Yes"), true) || answer == Some(true);
-        let no = button(no_x, by, bw, bh, tr("No"), true) || answer == Some(false);
+        let yes = button(yes_x, by, bw, bh, tr("Yes"), !tip_covers(tip.map(|t| t.2), p, Rect::new(yes_x, by, bw, bh))) || answer == Some(true);
+        let no = button(no_x, by, bw, bh, tr("No"), !tip_covers(tip.map(|t| t.2), p, Rect::new(no_x, by, bw, bh))) || answer == Some(false);
+        draw_tip(tip, game, assets, o);
         return if yes {
             Some(Close::Yes)
         } else if no {
@@ -1056,26 +1055,30 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         let load_label = tr("Load the last save");
         let exit_label = tr("Exit to main menu");
         let [load_r, exit_r] = defeat_button_rects(x, w, by, bh, o, [chrome::button_label_width(bh, load_label), chrome::button_label_width(bh, exit_label)]);
-        let (_, load_down, load_pressed) = button_state(load_r, d.load_last);
-        chrome::defeat_button(load_r, load_label, d.load_last, load_down);
-        let (_, exit_down, exit_pressed) = button_state(exit_r, true);
-        chrome::defeat_button(exit_r, exit_label, true, exit_down);
+        let tip_rect = tip.map(|t| t.2);
+        let load_on = d.load_last && !tip_covers(tip_rect, p, load_r);
+        let exit_on = !tip_covers(tip_rect, p, exit_r);
+        let (_, load_down, load_pressed) = button_state(load_r, load_on);
+        chrome::defeat_button(load_r, load_label, load_on, load_down);
+        let (_, exit_down, exit_pressed) = button_state(exit_r, exit_on);
+        chrome::defeat_button(exit_r, exit_label, exit_on, exit_down);
         if load_pressed || exit_pressed {
             super::audio::cue(super::audio::Cue::Button);
         }
         (exit_pressed, load_pressed)
     } else {
         let ok_label = chrome::ui_text("Buttons", "Ok").filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| "OK".to_string());
+        let ok_r = Rect::new(x + (w - bw) / 2.0, by, bw, bh);
+        let ok_on = !tip_covers(tip.map(|t| t.2), p, ok_r);
         let ok = if d.defeat {
-            let r = Rect::new(x + (w - bw) / 2.0, by, bw, bh);
-            let (_, down, pressed) = button_state(r, true);
-            chrome::defeat_button(r, &ok_label, true, down);
+            let (_, down, pressed) = button_state(ok_r, ok_on);
+            chrome::defeat_button(ok_r, &ok_label, ok_on, down);
             if pressed {
                 super::audio::cue(super::audio::Cue::Button);
             }
             pressed
         } else {
-            button(x + (w - bw) / 2.0, by, bw, bh, &ok_label, true)
+            button(ok_r.x, ok_r.y, bw, bh, &ok_label, ok_on)
         };
         (ok, false)
     };
@@ -1085,10 +1088,33 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     if super::widgets::ok_key_pressed() {
         d.key_down.set(true);
     }
+    draw_tip(tip, game, assets, o);
     if load {
         return Some(Close::LoadLast);
     }
     (ok || (d.key_down.get() && super::widgets::ok_key_released())).then_some(Close::Ok)
+}
+
+/// The item or spell card shown over a window (`draw_content`, `draw_village_event`): a spell's
+/// card or an item's tooltip, its rectangle `card` (already placed), drawn with its shadow.
+fn draw_tip(tip: Option<(bool, u32, Rect)>, game: Option<&Game>, assets: &Assets, o: f32) {
+    let (Some((spell, id, card)), Some(game)) = (tip, game) else {
+        return;
+    };
+    draw_rectangle(card.x + 8.0, card.y + 8.0, card.w, card.h, Color::new(0.0, 0.0, 0.0, 0.45));
+    if spell {
+        if let Some(s) = game.content.spells.iter().find(|s| s.id == id) {
+            super::spellbook::spell_card(game, s, card, true);
+        }
+    } else {
+        super::item_text::draw(game, assets, ItemId(id), card, super::item_text::ItemBox::Tooltip, o);
+    }
+}
+
+/// Whether the card `tip` (drawn over a window) covers the button `r` while the pointer `p` is on
+/// the card: then the button is not pressable (it is drawn, under the card). Pure.
+pub fn tip_covers(tip: Option<Rect>, p: Vec2, r: Rect) -> bool {
+    tip.is_some_and(|t| t.contains(p) && t.overlaps(&r))
 }
 
 /// Village offers and results share the original's 634 px wide event window.
@@ -1149,6 +1175,10 @@ fn draw_village_event(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Optio
         draw_markup_row(row, tb.x + 20.0 * o, text_top + i as f32 * line_h + size, room, size);
     }
     let reward_y = top + panel_h + 14.0 * o;
+    // The reward's card under the pointer, drawn last over the buttons (`draw_tip`), as the
+    // window's own (`draw_content`): the buttons stay drawn.
+    let mut tip: Option<(bool, u32, Rect)> = None;
+    let p: Vec2 = pointer().into();
     if !d.items.is_empty() {
         let caption = chrome::ui_text("Event", "AddItem").filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru)
             .unwrap_or_else(|| tr("Items received:").to_string());
@@ -1163,8 +1193,9 @@ fn draw_village_event(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Optio
             if r.contains(pointer().into()) && (pressed || icon_hover()) {
                 if let Some(game) = game {
                     let (tw, th) = super::item_text::tooltip_size(game, item, o);
-                    super::item_text::draw(game, assets, item, Rect::new(x + (w - tw) / 2.0, y, tw, th), super::item_text::ItemBox::Tooltip, o);
-                    return None;
+                    if tip.is_none() {
+                        tip = Some((false, item.0, Rect::new(x + (w - tw) / 2.0, y, tw, th)));
+                    }
                 }
             }
         }
@@ -1178,12 +1209,18 @@ fn draw_village_event(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Optio
     if d.question {
         // The launch's «Продолжить игру?» loads a game: only its button says yes (a key does not).
         let answer = answer_key().filter(|&yes| !(yes && d.resume));
-        let yes = button(x + w * 0.24 - bw / 2.0, by, bw, bh, tr("Yes"), true);
-        let no = button(x + w * 0.76 - bw / 2.0, by, bw, bh, tr("No"), true);
+        let tip_rect = tip.map(|t| t.2);
+        let yes_r = Rect::new(x + w * 0.24 - bw / 2.0, by, bw, bh);
+        let no_r = Rect::new(x + w * 0.76 - bw / 2.0, by, bw, bh);
+        let yes = button(yes_r.x, by, bw, bh, tr("Yes"), !tip_covers(tip_rect, p, yes_r));
+        let no = button(no_r.x, by, bw, bh, tr("No"), !tip_covers(tip_rect, p, no_r));
+        draw_tip(tip, game, assets, o);
         return if yes || answer == Some(true) { Some(Close::Yes) } else if no || answer == Some(false) { Some(Close::No) } else { None };
     }
-    let ok = button(x + (w - bw) / 2.0, by, bw, bh, tr("OK"), true);
+    let ok_r = Rect::new(x + (w - bw) / 2.0, by, bw, bh);
+    let ok = button(ok_r.x, by, bw, bh, tr("OK"), !tip_covers(tip.map(|t| t.2), p, ok_r));
     if super::widgets::ok_key_pressed() { d.key_down.set(true); }
+    draw_tip(tip, game, assets, o);
     (ok || (d.key_down.get() && super::widgets::ok_key_released())).then_some(Close::Ok)
 }
 
@@ -1205,6 +1242,20 @@ mod tests {
         assert_eq!(shown_preview(None, true, Some((false, 5)), at), Some((false, 5, at)));
         // On and rested, with no icon under the cursor, nothing.
         assert_eq!(shown_preview(None, true, None, at), None);
+    }
+
+    /// Razdor's (a player's report, 2026-11-01): an item's card over the window never takes the
+    /// OK button away. Only a button the card covers, with the pointer on the card, is not
+    /// pressable; with no card, or the pointer off it, every button is.
+    #[test]
+    fn a_card_under_the_pointer_covers_only_the_buttons_it_overlaps() {
+        let card = Some(Rect::new(100.0, 100.0, 272.0, 200.0));
+        let ok = Rect::new(300.0, 400.0, 95.0, 36.0);
+        let low = Rect::new(200.0, 260.0, 95.0, 36.0);
+        assert!(tip_covers(card, vec2(150.0, 150.0), low), "the pointer on the card, the button under it");
+        assert!(!tip_covers(card, vec2(10.0, 10.0), low), "the pointer off the card: pressable");
+        assert!(!tip_covers(card, vec2(150.0, 150.0), ok), "the card does not reach the button");
+        assert!(!tip_covers(None, vec2(150.0, 150.0), low), "no card: pressable");
     }
 
     #[test]

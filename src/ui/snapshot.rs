@@ -25,7 +25,7 @@
 //! `RAZDOR_SCENE_READER=1` opens the diary reader of a `hero` scene (a phone's, with `RAZDOR_DP`).
 //! `RAZDOR_SCENE_LIST_READER=1` opens the whole-list reader of a `hero` scene (a phone's).
 //! `RAZDOR_SCENE_PACK_AT=<cell>:<id>,…` puts items in those pack
-//! cells; `RAZDOR_SCENE_HELD=<id>` puts an item on the pointer (hero and army windows);
+//! cells; `RAZDOR_SCENE_HELD=<id>` puts an item on the pointer (hero and army windows); `RAZDOR_SCENE_PREVIEW=1` in `message:` (with `RAZDOR_MOUSE` on an item and `RAZDOR_MOUSE_RIGHT=1`) shows the first item's card at the pointer over the window;
 //! `RAZDOR_SCENE_WEAR=<id>,…` wears those items on the squad member of `army:<map>:<n>:<unit>`.
 //! `RAZDOR_SCENE_SIGN_OFF=1` switches that member's promotion sign off (`army:<map>:<n>:<unit>`).
 //! `RAZDOR_SCENE_SELECT=<n>` selects squad member n in the `building:` window (its card shows).
@@ -875,6 +875,14 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             d.joined = ids("RAZDOR_SCENE_JOINED").into_iter().map(razdor::rules::content::UnitId).collect();
             d.left = ids("RAZDOR_SCENE_LEFT").into_iter().map(razdor::rules::content::UnitId).collect();
             d.spells = ids("RAZDOR_SCENE_SPELLS");
+            // `RAZDOR_SCENE_PREVIEW=1`: the card of the first item is up at RAZDOR_MOUSE, as after a
+            // press on its icon (the press's edge is never seen in a snapshot; with
+            // RAZDOR_MOUSE_RIGHT=1 the button stays held, so the card stays).
+            if let (Some((x, y)), Some(first)) = (pointer(), d.items.first()) {
+                if std::env::var("RAZDOR_SCENE_PREVIEW").is_ok_and(|v| v == "1") {
+                    d.preview.set(Some((false, first.0, macroquad::math::Vec2::new(x, y))));
+                }
+            }
             app.dialogs.push_back(d);
             Screen::WorldMap
         }
