@@ -1,4 +1,5 @@
 //! macroquad presentation layer. Reads rules state and calls rules methods.
+pub mod army_phone;
 pub mod assets;
 pub mod audio;
 pub mod battle_view;
