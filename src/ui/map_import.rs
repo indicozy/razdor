@@ -24,6 +24,7 @@ use razdor::trf;
 
 use super::audio::{cue, Cue};
 use super::chrome;
+use super::{display, kit};
 use super::widgets::*;
 use super::ScenarioEntry;
 
@@ -336,6 +337,12 @@ fn from_desktop(answer: Option<PathBuf>) -> Poll {
 /// A notice: its text, wrapped at the window's width, and OK (or the close box, Enter or Escape).
 /// True when it is closed.
 pub(super) fn notice_window(title: &str, lines: &[String]) -> bool {
+    // A phone: its own window (`phone_window`), the same answers.
+    if let Some((k, rect)) = kit::phone_window(false, (634.0, 516.0), true) {
+        let (picked, closed) = display::with_window_scale(Some(k), || phone_window(rect, k, title, lines, &[tr("OK")]));
+        let enter = key(KeyCode::Enter) || key(KeyCode::Escape);
+        return picked.is_some() || closed || enter;
+    }
     let (inner, closed) = frame(title, lines, true);
     let ok = buttons(inner, &[tr("OK")]).is_some();
     let enter = key(KeyCode::Enter) || key(KeyCode::Escape);
@@ -349,13 +356,63 @@ pub(super) fn notice_window(title: &str, lines: &[String]) -> bool {
 /// The question: Replace (`Some(true)`), keep the old ones (`Some(false)`), or no answer yet.
 fn replace_window(taken: &[String]) -> Option<bool> {
     let text = trf!("These maps are already in the game: {names}. Replace them?", names = taken.join(", "));
-    let (inner, closed) = frame(tr("Replace?"), &[text], true);
-    match buttons(inner, &[tr("Replace"), tr("Keep the old")]) {
+    let labels = [tr("Replace"), tr("Keep the old")];
+    let (picked, closed) = match kit::phone_window(false, (634.0, 516.0), true) {
+        Some((k, rect)) => display::with_window_scale(Some(k), || phone_window(rect, k, tr("Replace?"), std::slice::from_ref(&text), &labels)),
+        None => {
+            let (inner, closed) = frame(tr("Replace?"), &[text], true);
+            (buttons(inner, &labels), closed)
+        }
+    };
+    match picked {
         Some(0) => Some(true),
         Some(_) => Some(false),
         None if closed || key(KeyCode::Escape) => Some(false),
         None => None,
     }
+}
+
+/// A notice or a question on a phone (Razdor's own, the owner's decision, 2026-11-01): the window
+/// fills the room between the safe area and the bar's edge, its text (`kit::Text`, at least 12 sp)
+/// in a scrolling flow above the buttons, each button touch-tall: one per row held upright, in a
+/// row at the foot sideways. Returns the button pressed (its index) and whether the close box was.
+fn phone_window(rect: Rect, k: f32, title: &str, lines: &[String], labels: &[&str]) -> (Option<usize>, bool) {
+    draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.35));
+    let (inner, closed) = chrome::window(rect, title, chrome::Skin::Marble, true);
+    let pad = 8.0 * k;
+    let gap = 8.0 * k;
+    let bh = kit::finger_h(kit::touch_h(36.0));
+    let n = labels.len().max(1);
+    let mut slots = vec![Rect::new(0.0, 0.0, 0.0, 0.0); labels.len()];
+    let footer_top = if kit::upright() {
+        for (i, slot) in slots.iter_mut().enumerate() {
+            let y = inner.bottom() - pad - (n - i) as f32 * bh - (n - i - 1) as f32 * gap;
+            *slot = Rect::new(inner.x + pad, y, inner.w - 2.0 * pad, bh);
+        }
+        inner.bottom() - pad - n as f32 * bh - (n - 1) as f32 * gap
+    } else {
+        let bw = ((inner.w - 2.0 * pad - gap * (n as f32 - 1.0)) / n as f32).min(260.0 * k);
+        let y = inner.bottom() - pad - bh;
+        for (i, slot) in slots.iter_mut().enumerate() {
+            *slot = Rect::new(inner.right() - pad - (n - i) as f32 * bw - (n - i - 1) as f32 * gap, y, bw, bh);
+        }
+        y
+    };
+    let area = Rect::new(inner.x + pad, inner.y + pad, inner.w - 2.0 * pad, (footer_top - gap - (inner.y + pad)).max(0.0));
+    let mut flow = kit::Flow::begin(area, "map-notice");
+    for line in lines {
+        let t = kit::Text::new(line, 16.0, chrome::CREAM);
+        flow.text_at(&t, area.x, t.size() * 0.9, area.w, 0.0);
+        flow.gap(6.0);
+    }
+    flow.finish();
+    let mut picked = None;
+    for (i, (label, slot)) in labels.iter().zip(slots.iter()).enumerate() {
+        if kit::button(*slot, label, true) {
+            picked = Some(i);
+        }
+    }
+    (picked, closed)
 }
 
 /// The window's frame at its width, with its lines wrapped; returns its inside and whether its

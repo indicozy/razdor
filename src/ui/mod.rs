@@ -290,7 +290,8 @@ pub struct App {
     test_play: bool,
     /// The F1 key list is open over the screen.
     help: bool,
-    /// The key list was opened this frame by a button: the press that opened it does not close it.
+    /// The key list was opened this frame by a button (`ExitChoice::Keys`): the press that
+    /// opened it does not close it.
     help_fresh: bool,
     /// The custom battles of this run: their setup and score, kept from round to round.
     custom: Option<custom_battle::SetupView>,
@@ -1374,6 +1375,15 @@ impl App {
                     restart = true;
                     None
                 }
+                // «Клавиши»: the key list over the map (Razdor's; phones have no F1).
+                (Some(saves::ExitChoice::Keys), _) => {
+                    self.help = true;
+                    self.help_fresh = true;
+                    // The tap that opened the list must not press a key in it: its press edge is this
+                    // frame's, and the list's tiles would capture it (`widgets::button_state`).
+                    widgets::swallow_input();
+                    Some(Screen::WorldMap)
+                }
                 (None, next) => next,
             },
             (Screen::Settings, Some(game)) => {
@@ -1435,6 +1445,13 @@ impl App {
             match v.exit.take() {
                 Some(saves::ExitChoice::Quit) => self.quit = true,
                 Some(saves::ExitChoice::MainMenu) => next = Some(Screen::MainMenu),
+                // «Клавиши» (phones): the battle stays, the key list opens over it (Place::Battle).
+                Some(saves::ExitChoice::Keys) => {
+                    self.help = true;
+                    self.help_fresh = true;
+                    // As above: the tap's press edge does not reach the keys window's tiles.
+                    widgets::swallow_input();
+                }
                 // «Рестарт» in a battle: this battle again from the moment it began (Razdor's;
                 // the scenario's restart when that moment was not kept).
                 Some(saves::ExitChoice::Restart) => match v.restart_state.take() {

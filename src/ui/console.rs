@@ -33,10 +33,17 @@ const RECALLED: usize = 30;
 const SIDE_DP: f32 = 24.0;
 const CLOSE_DP: f32 = 44.0;
 
-/// Font size, line pitch and inner margin in px at chrome scale `k`, as the console draws them.
+/// Font size, line pitch and inner margin in px at chrome scale `k`, as the console draws them. A
+/// phone's text is raised to its floor (`kit::floored`, Razdor's own, the owner's decision of
+/// 2026-11-01) and its pitch grows with it: every place that lays the console out reads this one.
 fn metrics(k: f32) -> (f32, f32, f32) {
     let size = (16.0 * k).round();
-    (size, (size * 1.3).round(), 10.0 * k)
+    let pitch = (size * 1.3).round();
+    if display::dp_px().is_some() {
+        let floored = super::kit::floored(size);
+        return (floored, pitch.max((floored * 1.3).round()), 10.0 * k);
+    }
+    (size, pitch, 10.0 * k)
 }
 
 /// Whether the console wants the on-screen keyboard this frame (a phone choice, not in the
@@ -247,7 +254,7 @@ impl Console {
         edit_keys(&mut self.line, &mut self.edit, &typed, rules);
         self.refresh_shown();
         // A tap on a row of the list completes to it (a phone); the tap is taken, as the close box's.
-        let rows = row_rects(&layout_now(10.0 * k), k, display::dp_px(), self.shown.len());
+        let rows = row_rects(&layout_now(10.0 * k), k, display::dp_px(), &self.shown);
         if let Some(i) = rows.iter().position(|r| tapped_in(*r)) {
             self.complete(i);
             swallow_input();
@@ -325,18 +332,13 @@ impl Console {
             return;
         }
         let k = chrome::k();
-        let (mut size, mut pitch, pad) = metrics(k);
-        // A phone's text is at least 12 sp, and a row holds it (Razdor's own, the owner's decision,
-        // 2026-11-01); the desktop keeps the metrics above.
+        let (size, pitch, pad) = metrics(k);
+        // A phone's lines wrap and its text is at least 12 sp (`metrics`).
         let phone = display::dp_px().is_some();
-        if phone {
-            size = super::kit::floored(size);
-            pitch = pitch.max((size * 1.3).round());
-        }
         let l = layout_now(pad);
         let (w, top) = (screen_width(), l.content.y);
         let base = top + pad * 2.0 + pitch * (SHOWN as f32 + 1.0) + 6.0 * k;
-        let rows = row_rects(&l, k, display::dp_px(), self.shown.len());
+        let rows = row_rects(&l, k, display::dp_px(), &self.shown);
         let h = rows.last().map_or(base, |r| r.bottom());
         draw_rectangle(0.0, 0.0, w, h, Color::new(0.02, 0.02, 0.02, 0.86));
         draw_line(0.0, base, w, base, 2.0 * k, chrome::GOLD);
@@ -388,14 +390,16 @@ impl Console {
             if picked {
                 draw_rectangle(r.x, r.y, r.w, r.h, FIELD_BG);
             }
-            let ty = r.y + (r.h - pitch) / 2.0 + pitch * 0.8;
-            let label_w = measure(&s.label, size).width.min(text_w * 0.5);
+            let (label_w, hx, hint) = completion_text(s, &l, size, pad, phone);
+            // The row's lines (its hint's) centred in it; the label on the first.
+            let ty = r.y + (r.h - hint.len().max(1) as f32 * pitch) / 2.0 + pitch * 0.8;
             text_fit(&s.label, l.text_x, ty, label_w, size, if picked { ACCENT } else { INK });
-            if !s.hint.is_empty() {
-                let hx = l.text_x + label_w + 2.0 * pad;
-                if l.text_right > hx {
-                    text_fit(tr(s.hint), hx, ty, l.text_right - hx, size, DIM);
+            if phone {
+                for (n, line) in hint.iter().enumerate() {
+                    text(line, hx, ty + n as f32 * pitch, size, DIM);
                 }
+            } else if !s.hint.is_empty() && l.text_right > hx {
+                text_fit(tr(s.hint), hx, ty, l.text_right - hx, size, DIM);
             }
         }
         if let Some(c) = l.close {
@@ -421,13 +425,45 @@ fn scroll_area(l: &Layout, pitch: f32, pad: f32) -> Rect {
     Rect::new(l.text_x, top, l.text_right - l.text_x, pitch * SHOWN as f32)
 }
 
-/// The completion rows under the console's last line, `n` of them: each a line's pitch on the
-/// desktop and a finger's target on a phone (`tap_rect_at`), so the drawn row is the tap's too.
-fn row_rects(l: &Layout, k: f32, dp: Option<f32>, n: usize) -> Vec<Rect> {
-    let (_, pitch, pad) = metrics(k);
+/// A completion's label width, the x its hint starts at, and the hint's lines: on a phone the
+/// hint wraps to what is left of the row beside the label (`phone`), never cut with "…"; on the
+/// desktop it is one line (shrunk to fit where it is drawn).
+fn completion_text(s: &Suggestion, l: &Layout, size: f32, pad: f32, phone: bool) -> (f32, f32, Vec<String>) {
+    let text_w = l.text_right - l.text_x;
+    let label_w = measure(&s.label, size).width.min(text_w * 0.5);
+    let hx = l.text_x + label_w + 2.0 * pad;
+    let avail = l.text_right - hx;
+    let lines = if s.hint.is_empty() || avail <= 0.0 {
+        Vec::new()
+    } else if phone {
+        wrap(tr(s.hint), avail, size)
+    } else {
+        vec![tr(s.hint).to_string()]
+    };
+    (label_w, hx, lines)
+}
+
+/// The completion rows under the console's last line, one per `shown`: each a finger's target on
+/// a phone (`tap_rect_at`), grown to the lines its hint wraps to; on the desktop a line each. The
+/// drawn row is the tap's too.
+fn row_rects(l: &Layout, k: f32, dp: Option<f32>, shown: &[Suggestion]) -> Vec<Rect> {
+    let (size, pitch, pad) = metrics(k);
     let top = l.content.y + pad * 2.0 + pitch * (SHOWN as f32 + 1.0) + 6.0 * k;
-    let rh = tap_rect_at(Rect::new(0.0, 0.0, 1.0, pitch), false, dp).h;
-    (0..n).map(|i| Rect::new(l.content.x, top + rh * i as f32, l.content.w, rh)).collect()
+    let min_h = tap_rect_at(Rect::new(0.0, 0.0, 1.0, pitch), false, dp).h;
+    let phone = dp.is_some();
+    let mut y = top;
+    shown
+        .iter()
+        .map(|s| {
+            // The desktop's row is a line (`min_h`, the pitch); a phone's holds its hint's lines (a row
+            // with no hint is a line, and measures nothing).
+            let lines = if phone && !s.hint.is_empty() { completion_text(s, l, size, pad, true).2.len().max(1) } else { 1 };
+            let h = if phone { min_h.max(lines as f32 * pitch + 4.0 * k) } else { min_h };
+            let r = Rect::new(l.content.x, y, l.content.w, h);
+            y += h;
+            r
+        })
+        .collect()
 }
 
 /// The wheel whatever holds the input (the console holds it back from the screen).
@@ -525,15 +561,16 @@ mod tests {
         let pad = metrics(k).2;
         let phone = layout((1080.0, 2400.0), SafeArea::default(), Some(k), pad);
         let field = input_field(&phone, k);
-        let rows = row_rects(&phone, k, Some(k), 8);
+        let shown: Vec<Suggestion> = (0..8).map(|_| Suggestion { completion: String::new(), label: "speed N".into(), hint: "", alone: false }).collect();
+        let rows = row_rects(&phone, k, Some(k), &shown);
         assert_eq!(rows.len(), 8);
         assert!(rows[0].y >= field.bottom(), "under the input line");
         assert!(rows.iter().all(|r| r.h >= 48.0 * k - 0.5), "a phone row is at least 48 dp");
         assert!(rows.windows(2).all(|w| (w[1].y - w[0].bottom()).abs() < 0.5), "the rows stack");
         let desk = layout((1280.0, 800.0), SafeArea::default(), None, pad);
-        let rows = row_rects(&desk, 1.0, None, 3);
+        let rows = row_rects(&desk, 1.0, None, &shown[..3]);
         assert_eq!(rows[0].h, metrics(1.0).1, "on the desktop a row is a line");
-        assert!(row_rects(&desk, 1.0, None, 0).is_empty());
+        assert!(row_rects(&desk, 1.0, None, &[]).is_empty());
     }
 
     #[test]

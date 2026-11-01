@@ -551,6 +551,9 @@ pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
             }
         }
         let mut ly = at(after + 6.0 * k);
+        // A phone clips the info block to the list's body (Razdor's own, the owner's decision of
+        // 2026-11-01): its heading and rows scroll with the list and never run over the foot's line.
+        let _info_clip = phone.then(|| super::widgets::Clip::new(body));
         if !info.is_empty() {
             text(tr("Other keys and mouse"), inner.x + pad, ly + 20.0 * t, 17.0 * t, ACCENT);
             ly += 30.0 * t;
@@ -566,6 +569,7 @@ pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
                 ly += line;
             }
         }
+        drop(_info_clip);
         // The foot, under the body: the keys window's button (over the map), or the line that says
         // where the keys are changed.
         let foot = Rect::new(inner.x + pad, inner.bottom() - 40.0 * k - foot_h, grid_w, foot_h);

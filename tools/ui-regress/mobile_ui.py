@@ -110,6 +110,8 @@ SCREENS = [
     ("update", "update", {}),
     ("import", "import-notice", {}),
     ("console", "map:РК1-Начало пути", {"RAZDOR_SCENE_CONSOLE": "help", "RAZDOR_SCENE_QUIET": "1"}),
+    # The cheat console with a line typed: its completion rows, whose hints wrap on a phone.
+    ("console-complete", "map:РК1-Начало пути", {"RAZDOR_SCENE_CONSOLE": "help", "RAZDOR_SCENE_CONSOLE_LINE": "s", "RAZDOR_SCENE_QUIET": "1"}),
 ]
 
 

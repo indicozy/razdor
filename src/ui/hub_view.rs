@@ -509,7 +509,7 @@ pub fn frame(view: &mut HubView) -> bool {
     let size = (14.0 * k * g).round();
     let small = (12.0 * k * g).round();
     // Touch targets: a phone's are 44 dp at Normal (the 40 dp rule), the desktop's the original's.
-    let (bh, th, row_h, gap) = if phone { (44.0 * k * g, 44.0 * k * g, 46.0 * k * g, 8.0 * k) } else { (30.0 * k * g, 26.0 * k * g, 34.0 * k * g, 4.0 * k) };
+    let (bh, th, row_h, gap) = if phone { (44.0 * k * g, 44.0 * k * g, if super::kit::upright() { 58.0 * k * g } else { 46.0 * k * g }, 8.0 * k) } else { (30.0 * k * g, 26.0 * k * g, 34.0 * k * g, 4.0 * k) };
     let by = inner.y + inner.h - pad - bh;
     let lx = inner.x + pad;
     // The list's width: the desktop's 380 units; a phone held sideways takes more of the window,
@@ -636,15 +636,41 @@ pub fn frame(view: &mut HubView) -> bool {
                     let picked = view.picked.as_deref() == Some(e.id.as_str());
                     row_paint(rr, picked);
                     let (words, ink) = state(c, &view.installed, e);
-                    let sw = if words.is_empty() { 0.0 } else { measure(&words, small).width + 8.0 * k };
-                    text_fit(e.title.get(lang()), rr.x + 6.0 * k, rr.y + 15.0 * g * k, rr.w - sw - 12.0 * k, size, if picked { GOLD } else { CREAM });
                     let mut by_line = format!("{} · {}", kind_label(e.kind), e.author);
                     if let Some(rating) = e.rating {
                         by_line = format!("{by_line} · +{} / -{}", rating.up, rating.down);
                     }
-                    text_fit(&by_line, rr.x + 6.0 * k, rr.y + 29.0 * g * k, rr.w - 12.0 * k, small, Color::new(0.85, 0.80, 0.68, 1.0));
-                    if !words.is_empty() {
-                        chrome::shadow_right(&words, rr.x + rr.w - 6.0 * k, rr.y + 15.0 * g * k, small, ink);
+                    let title_ink = if picked { GOLD } else { CREAM };
+                    let by_ink = Color::new(0.85, 0.80, 0.68, 1.0);
+                    if phone {
+                        // Razdor's own (the owner's decision, 2026-11-01): a phone's title wraps to two
+                        // lines (never cut with "…"), its state words go on the author line.
+                        let w = rr.w - 12.0 * k;
+                        let mut lines = wrap_long(e.title.get(lang()), w, size);
+                        if lines.len() > 2 {
+                            let rest = lines.split_off(1).join(" ");
+                            lines.push(rest);
+                        }
+                        // Sideways the list is short: its rows are 46 dp, and the lines sit closer.
+                        let pitch = if super::kit::upright() { 16.0 * g * k } else { 14.0 * g * k };
+                        let block = (lines.len() as f32 + 1.0) * pitch;
+                        let top = rr.y + (rr.h - block) / 2.0 + pitch * 0.8;
+                        for (i, l) in lines.iter().enumerate() {
+                            text_fit(l, rr.x + 6.0 * k, top + i as f32 * pitch, w, size, title_ink);
+                        }
+                        let by_y = top + lines.len() as f32 * pitch;
+                        let sw = if words.is_empty() { 0.0 } else { measure(&words, small).width + 8.0 * k };
+                        text_fit(&by_line, rr.x + 6.0 * k, by_y, rr.w - 12.0 * k - sw, small, by_ink);
+                        if !words.is_empty() {
+                            chrome::shadow_right(&words, rr.x + rr.w - 6.0 * k, by_y, small, ink);
+                        }
+                    } else {
+                        let sw = if words.is_empty() { 0.0 } else { measure(&words, small).width + 8.0 * k };
+                        text_fit(e.title.get(lang()), rr.x + 6.0 * k, rr.y + 15.0 * g * k, rr.w - sw - 12.0 * k, size, title_ink);
+                        text_fit(&by_line, rr.x + 6.0 * k, rr.y + 29.0 * g * k, rr.w - 12.0 * k, small, by_ink);
+                        if !words.is_empty() {
+                            chrome::shadow_right(&words, rr.x + rr.w - 6.0 * k, rr.y + 15.0 * g * k, small, ink);
+                        }
                     }
                 }
                 if entries.is_empty() {

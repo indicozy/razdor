@@ -2056,6 +2056,8 @@ fn options_phone(audio: &mut super::audio::Settings, install_wide: bool, over_ma
     if !flow.cut(import) {
         super::game_import::settings_row(import, over_map);
     }
+    // The last row's gap is part of the content, so a scrolled bottom keeps the row clear of the footer.
+    flow.gap(8.0);
     flow.finish();
     // The footer: «Ещё…» opens the advanced settings (the window closes with no change), the rest as the desktop's.
     if kit::button(more, tr("Advanced…"), true) {
