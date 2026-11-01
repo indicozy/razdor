@@ -28,6 +28,7 @@ use super::assets::Assets;
 use super::audio::{cue, Cue};
 use super::chrome::{self, shadow_centered, shadow_right, CellIcon, Skin, BLUE_TEXT, CREAM, GOLD, RED_TEXT};
 use super::dialog::Dialog;
+use super::kit;
 use super::unit_sheet::{self, Sheet};
 use super::widgets::*;
 use super::window_layout;
@@ -77,6 +78,10 @@ struct Layout {
     stacked: bool,
 }
 
+/// A phone's landscape battle window, design px wide (the desktop's is 836): the strip between the
+/// formations gets the room its hint line needs at 12 sp.
+const PHONE_WIDE_W: f32 = 980.0;
+
 /// The stacked battle window's design width: 590 px, as the other stacked windows.
 const STACK_W: f32 = 590.0;
 /// The stacked rows, design px from the window's top: the close row over the band (the close box
@@ -102,9 +107,23 @@ fn grid_height(f: Formation) -> f32 {
 }
 
 /// The stacked quick buttons' height in design px: 30, grown with the text size (`button_grow`,
-/// Razdor's own, the owner's decision of 2026-10-31); at Normal 30.
+/// Razdor's own, the owner's decision of 2026-10-31); at Normal 30. On a phone at least 44 dp
+/// ([`stack_quick_h_at`]).
 fn stack_quick_h() -> f32 {
-    STACK_QUICK_H * super::display::button_grow()
+    let dp = super::display::dp_px();
+    // The screen's width is asked on a phone only (the desktop tests run without a window).
+    let sw = if dp.is_some() { screen_width() } else { 0.0 };
+    stack_quick_h_at(STACK_QUICK_H * super::display::button_grow(), dp, sw)
+}
+
+/// The stacked quick buttons' height `h` design px, and on a phone (`dp` px per dp) at least
+/// [`kit::TOUCH_DP`] dp: the stacked window is as wide as the screen less 8 px each side (590 design
+/// px across it), so a dp is `dp * 590 / (screen_w - 16)` design px. Pure twin of [`stack_quick_h`].
+fn stack_quick_h_at(h: f32, dp: Option<f32>, screen_w: f32) -> f32 {
+    match dp {
+        Some(d) if screen_w > 16.0 => h.max(kit::TOUCH_DP * d * STACK_W / (screen_w - 16.0)),
+        _ => h,
+    }
 }
 
 /// The stacked window's strip top and its height, in design px (see [`STACK_BAND_Y`]).
@@ -121,14 +140,16 @@ fn stacked_video(f: Formation) -> (f32, f32) {
 }
 
 impl Layout {
-    fn new(battle: &Battle) -> Layout {
+    /// The layout with `rows` quick buttons: on a phone held sideways they stack, one row each
+    /// (a 140 dp column is too narrow for two side by side); the desktop keeps its two in a row.
+    fn new(battle: &Battle, rows: usize) -> Layout {
         let (f, k) = (battle.formation, chrome::k());
         let dp = super::display::dp_px();
         match (window_layout::game_rect(stacked_video(f)), dp) {
             (Some(win), Some(_)) => Layout::upright(k, win, f),
             _ => {
                 let (sw, safe) = (screen_width(), super::display::safe_area());
-                Layout::landscape(k, (sw, screen_height()), chrome::bar_height(), f, dp, safe.top)
+                Layout::landscape(k, (sw, screen_height()), chrome::bar_height(), f, dp, safe.top, rows)
             }
         }
     }
@@ -137,9 +158,15 @@ impl Layout {
     /// the unit's column at the left and the formations on the right. On a phone (`dp`) its title
     /// strip is taller and grows upward (`chrome::phone_title_grow`), so the window sits below the
     /// safe top `safe_top` plus that growth; the close cross is the title bar's own, inside the strip.
-    fn landscape(k: f32, screen: (f32, f32), bar: f32, f: Formation, dp: Option<f32>, safe_top: f32) -> Layout {
+    fn landscape(k: f32, screen: (f32, f32), bar: f32, f: Formation, dp: Option<f32>, safe_top: f32, rows: usize) -> Layout {
         let (sw, sh) = screen;
-        let (ww, wh) = ((836.0 * k).round(), (600.0 * k).round());
+        // On a phone the window is wider than the desktop's (`PHONE_WIDE_W`, as much as the screen gives):
+        // the hint line of the strip reads in one line at 12 sp. The formations keep their size, centred.
+        let ww = match dp {
+            Some(_) => (PHONE_WIDE_W * k).min(sw - 16.0).round(),
+            None => (836.0 * k).round(),
+        };
+        let wh = (600.0 * k).round();
         let x = ((sw - ww) / 2.0).round();
         let grow = chrome::phone_title_grow(k, chrome::FIXED_TITLE, dp);
         let y = ((sh - bar - wh) / 2.0).max(safe_top.max(2.0) + grow).round();
@@ -147,9 +174,20 @@ impl Layout {
         // Razdor's own (the owner's decision, 2026-10-31): the quick buttons grow with the text size
         // (`button_grow`); the unit's column gives up their growth, so the buttons keep the window's bottom.
         let quick_grow = 30.0 * k * (super::display::button_grow() - 1.0);
-        let panel = Rect::new(x + 2.0 * k, y + 27.0 * k, 244.0 * k, 534.0 * k - quick_grow);
-        let quick = Rect::new(panel.x + 10.0 * k, panel.y + panel.h + 3.0 * k, panel.w - 20.0 * k, 30.0 * k + quick_grow);
-        let (rx, rw) = (x + 248.0 * k, 586.0 * k);
+        // On a phone the buttons stack, `rows` of them each a touch target (at least 44 dp), 3 px apart.
+        let block = match dp {
+            Some(_) => {
+                let h = kit::touch_h_at(30.0, k, super::display::button_grow(), dp);
+                rows as f32 * h + (rows as f32 - 1.0) * 3.0 * k
+            }
+            None => 30.0 * k + quick_grow,
+        };
+        let panel = Rect::new(x + 2.0 * k, y + 27.0 * k, 244.0 * k, 534.0 * k - (block - 30.0 * k));
+        let quick = Rect::new(panel.x + 10.0 * k, panel.y + panel.h + 3.0 * k, panel.w - 20.0 * k, block);
+        let (rx, rw) = match dp {
+            Some(_) => (x + 248.0 * k, ww - 250.0 * k),
+            None => (x + 248.0 * k, 586.0 * k),
+        };
         let strip = Rect::new(rx, y + 302.0 * k, rw, 20.0 * k);
         let c = card_scale(f);
         let card = vec2(88.0 * c * k, 128.0 * c * k).round();
@@ -910,6 +948,10 @@ impl BattleView {
         if over || self.battle.outcome() != Outcome::Ongoing || self.quick.is_some() {
             return;
         }
+        if kit::phone().is_some() {
+            self.controls_phone(l);
+            return;
+        }
         let (q, gap) = (l.quick, 4.0 * l.k);
         if self.watching() {
             let w = (q.w - 2.0 * gap) / 3.0;
@@ -935,6 +977,56 @@ impl BattleView {
         }
     }
 
+    /// The quick buttons' rows: 3 while watching (the pace, the skip, the way back), else 2.
+    fn quick_rows(&self) -> usize {
+        if self.watching() {
+            3
+        } else {
+            2
+        }
+    }
+
+    /// [`BattleView::controls`] on a phone (Razdor's own, the owner's decision, 2026-11-01): the same
+    /// buttons with the same actions, each a touch target at least 44 dp. Held upright they stand side
+    /// by side under the band; sideways they stack, one per row, the full width of the column.
+    fn controls_phone(&mut self, l: &Layout) {
+        let q = l.quick;
+        let gap = 3.0 * l.k;
+        let watching = self.watching();
+        let n = self.quick_rows();
+        let cells: Vec<Rect> = (0..n)
+            .map(|i| {
+                if l.is_stacked() {
+                    let w = (q.w - (n as f32 - 1.0) * gap) / n as f32;
+                    Rect::new(q.x + i as f32 * (w + gap), q.y, w, q.h)
+                } else {
+                    let h = (q.h - (n as f32 - 1.0) * gap) / n as f32;
+                    Rect::new(q.x, q.y + i as f32 * (h + gap), q.w, h)
+                }
+            })
+            .collect();
+        if watching {
+            let speed = razdor::trf!("Speed {n}x (S)", n = self.speed);
+            if kit::button(cells[0], &speed, true) {
+                self.next_speed();
+            }
+            if kit::button(cells[1], tr("Skip (Q)"), true) {
+                self.quick_battle();
+            }
+            if kit::button(cells[2], tr("Take over (W)"), true) {
+                self.toggle_watch();
+            }
+            return;
+        }
+        let label = if self.untouched() { tr("Quick battle (Q)") } else { tr("Finish automatically (Q)") };
+        if kit::button(cells[0], label, true) {
+            self.quick_battle();
+        }
+        if kit::button(cells[1], tr("Watch (W)"), true) {
+            self.toggle_watch();
+        }
+    }
+
     /// The result box shows: the first time, a victory's triumph starts (it carries on over
     /// the map afterwards, a sting is not cut by the move to the map). True that first time.
     fn result_shown(&mut self) -> bool {
@@ -951,7 +1043,7 @@ impl BattleView {
     pub fn frame(&mut self, game: &mut Game, assets: &Assets, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) -> Option<Screen> {
         // A phone held upright stacks the window at its own scale (`window_layout::game_scale`).
         let _window = window_layout::game_scale(stacked_video(self.battle.formation));
-        let l = Layout::new(&self.battle);
+        let l = Layout::new(&self.battle, self.quick_rows());
         // Input the app holds back (the cheat console) stays held for the exit window too.
         let outer = input_blocked();
         let (over, just_opened) = self.advance(&l);
@@ -1002,7 +1094,7 @@ impl BattleView {
     /// `session` when its result shows. Esc asks before leaving for the setup.
     pub fn frame_custom(&mut self, assets: &Assets, session: &mut Session) -> Option<CustomEnd> {
         let _window = window_layout::game_scale(stacked_video(self.battle.formation));
-        let l = Layout::new(&self.battle);
+        let l = Layout::new(&self.battle, self.quick_rows());
         // Input the app holds back (the cheat console) stays held for the exit window too.
         let outer = input_blocked();
         let (over, just_opened) = self.advance(&l);
@@ -1134,15 +1226,25 @@ impl BattleView {
         // The strip between the formations: what to do, or what just happened.
         let (hint, color) = self.strip_text(player_turn, &targets, &moves);
         chrome::army_divider(l.strip);
-        let text_r = Rect { w: l.strip.w - 60.0 * k, x: l.strip.x + 30.0 * k, ..l.strip };
-        if color == EXIT_HINT_INK {
-            super::dt_font::with_face(super::dt_font::Face::Bold, || chrome::hint_text(text_r, &hint, color));
-        } else {
-            chrome::hint_text(text_r, &hint, color);
-        }
         let limit = b.content().options.battle_end_turn;
-        let size = (11.0 * k).round();
-        shadow_right(&razdor::trf!("Turn {round}/{limit}", round = b.round, limit), l.strip.x + l.strip.w - 6.0 * k, l.strip.y + l.strip.h * 0.5 + size * 0.36, size, GOLD);
+        let turn = razdor::trf!("Turn {round}/{limit}", round = b.round, limit = limit);
+        if kit::phone().is_some() {
+            // Razdor's own (the owner's decision, 2026-11-01): on a phone the hint is one line across the
+            // whole strip (it reads in 12 sp, with no ellipsis), and the turn goes to the unit panel's top
+            // (beside the hint it would not fit).
+            let face = if color == EXIT_HINT_INK { super::dt_font::Face::Bold } else { super::dt_font::Face::Body };
+            let t = kit::Text::new(&hint, 13.0, color).face(face);
+            t.draw_one(l.strip.x + ((l.strip.w - t.width()) / 2.0).max(0.0), l.strip.y + l.strip.h * 0.5 + t.size() * 0.36);
+        } else {
+            let text_r = Rect { w: l.strip.w - 60.0 * k, x: l.strip.x + 30.0 * k, ..l.strip };
+            if color == EXIT_HINT_INK {
+                super::dt_font::with_face(super::dt_font::Face::Bold, || chrome::hint_text(text_r, &hint, color));
+            } else {
+                chrome::hint_text(text_r, &hint, color);
+            }
+            let size = (11.0 * k).round();
+            shadow_right(&turn, l.strip.x + l.strip.w - 6.0 * k, l.strip.y + l.strip.h * 0.5 + size * 0.36, size, GOLD);
+        }
 
         // Cards: the order of the next units after the active one, as small numbers.
         let queue: Vec<usize> = if b.outcome() == Outcome::Ongoing { b.queue().skip(1).take(3).collect() } else { Vec::new() };
@@ -1235,7 +1337,7 @@ impl BattleView {
         }
         // The left panel: the hovered unit, else the one acting.
         if let Some(id) = self.fighter_under_mouse(l).filter(|&i| self.fighter(i).alive()).or(active).or_else(|| b.fighters.iter().position(|f| f.is_hero)) {
-            self.draw_panel(l, assets, id);
+            self.draw_panel(l, assets, id, &turn);
         } else {
             chrome::parchment(l.column(), true);
         }
@@ -1506,7 +1608,7 @@ impl BattleView {
     }
 
     /// The unit panel on the left, as the original's.
-    fn draw_panel(&self, l: &Layout, assets: &Assets, id: usize) {
+    fn draw_panel(&self, l: &Layout, assets: &Assets, id: usize, turn: &str) {
         let b = &self.battle;
         let f = self.fighter(id);
         // What it wears, an enemy's too (an army wears its items, `ai::army_units`).
@@ -1554,6 +1656,25 @@ impl BattleView {
             hero,
             status,
         };
+        if kit::phone().is_some() {
+            // Razdor's own (the owner's decision, 2026-11-01): the phone layout. Upright, the band's
+            // picture and text halves; sideways, the column's picture over its scrolling text.
+            // Sideways the text stops above the quick buttons (`l.panel`); the parchment is the column's.
+            let (pic, txt) = if l.is_stacked() {
+                window_layout::band_halves(l.panel)
+            } else {
+                let c = l.panel;
+                let ph = (c.h * 0.36).round();
+                (Rect::new(c.x, c.y, c.w, ph), Rect::new(c.x, c.y + ph, c.w, c.h - ph))
+            };
+            if l.is_stacked() {
+                chrome::unit_parchment_framed(l.panel, pic);
+            } else {
+                chrome::unit_parchment(l.column());
+            }
+            unit_sheet::phone_panel(assets, b.content(), pic, txt, l.is_stacked(), &sheet, turn, "battle-unit");
+            return;
+        }
         let mut hover = None;
         if l.is_stacked() {
             // Stacked: the unit's band, its picture and its text, as the army windows' (no items to pick).
@@ -1593,9 +1714,6 @@ impl BattleView {
     /// badges on the cards stay visible.
     fn result_overlay(&self, l: &Layout, game: &mut Game, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>, outcome: Outcome) -> Option<Screen> {
         let k = l.k;
-        // Razdor's own: the OK button grows with the text size (`button_grow`), and the box with it.
-        let g = super::display::button_grow();
-        let r = Rect::new(l.panel.x + 8.0 * k, l.panel.y + 150.0 * k, l.panel.w - 16.0 * k, (200.0 + 30.0 * (g - 1.0)) * k);
         let (title, sub, color) = match (outcome, self.battle.end_reason()) {
             (Outcome::Victory, Some(EndReason::Surrender(_))) => (tr("Victory!"), tr("The enemy surrenders."), GOLD),
             (Outcome::Victory, Some(EndReason::TurnLimit)) => (tr("Victory!"), tr("The turns run out; the field is yours."), GOLD),
@@ -1604,17 +1722,24 @@ impl BattleView {
             _ => (tr("Defeat"), tr("Your whole army has fallen."), RED_TEXT),
         };
         let window_title = if outcome == Outcome::Victory { tr("Victory over the enemy!") } else { tr("Defeat in battle!") };
-        let (inner, _) = chrome::window(r, window_title, Skin::Marble, false);
-        shadow_centered(title, inner.x + inner.w / 2.0, inner.y + 40.0 * k, (32.0 * k).round(), color);
-        for (i, line) in wrap(sub, inner.w - 16.0 * k, (13.0 * k).round()).iter().enumerate() {
-            shadow_centered(line, inner.x + inner.w / 2.0, inner.y + 64.0 * k + i as f32 * 15.0 * k, (13.0 * k).round(), CREAM);
-        }
         let total: i32 = self.xp.iter().flatten().map(|a| a.xp).sum();
-        if total > 0 {
-            shadow_centered(&razdor::trf!("Experience gained: {total}", total), inner.x + inner.w / 2.0, inner.y + 100.0 * k, (14.0 * k).round(), XP_COLOR);
-        }
-        let (bw, bh) = (120.0 * k * g, 30.0 * k * g);
-        let pressed = button(inner.x + (inner.w - bw) / 2.0, inner.y + inner.h - bh - 10.0 * k, bw, bh, "OK", true) || key(KeyCode::Enter);
+        let pressed = if kit::phone().is_some() {
+            self.result_box_phone(window_title, title, sub, color, total)
+        } else {
+            // Razdor's own: the OK button grows with the text size (`button_grow`), and the box with it.
+            let g = super::display::button_grow();
+            let r = Rect::new(l.panel.x + 8.0 * k, l.panel.y + 150.0 * k, l.panel.w - 16.0 * k, (200.0 + 30.0 * (g - 1.0)) * k);
+            let (inner, _) = chrome::window(r, window_title, Skin::Marble, false);
+            shadow_centered(title, inner.x + inner.w / 2.0, inner.y + 40.0 * k, (32.0 * k).round(), color);
+            for (i, line) in wrap(sub, inner.w - 16.0 * k, (13.0 * k).round()).iter().enumerate() {
+                shadow_centered(line, inner.x + inner.w / 2.0, inner.y + 64.0 * k + i as f32 * 15.0 * k, (13.0 * k).round(), CREAM);
+            }
+            if total > 0 {
+                shadow_centered(&razdor::trf!("Experience gained: {total}", total), inner.x + inner.w / 2.0, inner.y + 100.0 * k, (14.0 * k).round(), XP_COLOR);
+            }
+            let (bw, bh) = (120.0 * k * g, 30.0 * k * g);
+            button(inner.x + (inner.w - bw) / 2.0, inner.y + inner.h - bh - 10.0 * k, bw, bh, "OK", true) || key(KeyCode::Enter)
+        };
         if !pressed {
             return None;
         }
@@ -1643,6 +1768,51 @@ impl BattleView {
 }
 
 impl BattleView {
+    /// The result box on a phone (Razdor's own, the owner's decision, 2026-11-01): centred on the
+    /// screen over the battle, its marble title, the outcome in 20 sp, the line under it and the
+    /// experience, each wrapped and centred at 12 sp or more, and OK touch-tall at the foot. True
+    /// when OK is pressed or Enter is.
+    fn result_box_phone(&self, window_title: &str, title: &str, sub: &str, color: Color, total: i32) -> bool {
+        use super::dt_font::Face;
+        let k = chrome::k();
+        let dp = kit::phone().unwrap_or(1.0);
+        let (sw, sh) = (screen_width(), screen_height());
+        let safe = super::display::safe_area();
+        let w = (440.0 * dp).min(sw - safe.left - safe.right - 16.0).max(1.0);
+        let room = w - 24.0 * k;
+        let t_title = kit::Text::new(title, 20.0, color).face(Face::Subtitle);
+        let t_sub = kit::Text::new(sub, 13.0, CREAM).face(Face::Subtitle);
+        let xp_text = razdor::trf!("Experience gained: {total}", total);
+        let t_xp = kit::Text::new(&xp_text, 14.0, XP_COLOR).face(Face::Subtitle);
+        let bh = kit::finger_h(kit::touch_h(28.0));
+        let sub_h = if sub.is_empty() { 0.0 } else { t_sub.height(room) + 6.0 * k };
+        let xp_h = if total > 0 { t_xp.height(room) + 6.0 * k } else { 0.0 };
+        let strip = chrome::phone_strip_height(chrome::strip_height(k, chrome::FIXED_TITLE), kit::phone());
+        let h = strip + 10.0 * k + t_title.height(room) + 6.0 * k + sub_h + xp_h + 12.0 * k + bh + 10.0 * k;
+        let r = Rect::new(safe.left + ((sw - safe.left - safe.right - w) / 2.0).round(), ((sh - h) / 2.0).max(safe.top).round(), w.round(), h.round());
+        let (inner, _) = chrome::window(r, window_title, Skin::Marble, false);
+        let cx = inner.center().x;
+        let centred = |t: &kit::Text, top: f32| -> f32 {
+            let p = t.line_pitch();
+            for (i, line) in t.lines(room).iter().enumerate() {
+                let one = kit::Text { s: line, design: t.design, color: t.color, face: t.face, shadow: t.shadow, pitch: t.pitch };
+                one.draw_one(cx - one.width() / 2.0, top + i as f32 * p + p * 0.5 + one.size() * 0.35);
+            }
+            t.height(room)
+        };
+        let mut y = inner.y + 10.0 * k;
+        y += centred(&t_title, y) + 6.0 * k;
+        if !sub.is_empty() {
+            y += centred(&t_sub, y) + 6.0 * k;
+        }
+        if total > 0 {
+            centred(&t_xp, y);
+        }
+        let by = inner.bottom() - 10.0 * k - bh;
+        let b = Rect::new(cx - (inner.w * 0.5 - 10.0 * k) / 2.0 - 0.0, by, (inner.w * 0.5).max(1.0), bh);
+        kit::button(Rect::new(inner.center().x - b.w / 2.0, b.y, b.w, b.h), "OK", true) || key(KeyCode::Enter)
+    }
+
     /// A custom battle's result box over the unit panel: who won and how, the session's
     /// score, and the ways on: "Again" (Enter), "Change armies" (Esc), "Main menu".
     fn custom_result(&self, l: &Layout, session: &Session) -> Option<CustomEnd> {
@@ -1719,10 +1889,20 @@ mod tests {
         a.x < b.right() && b.x < a.right() && a.y < b.bottom() && b.y < a.bottom()
     }
 
+    /// On a phone the stacked quick buttons are at least 44 dp: on a 1080 px screen at 2.75 px per dp
+    /// the window is 590 design px across 1064 px, so 44 dp is 66 design px; the desktop keeps 30.
+    #[test]
+    fn a_phone_quick_button_is_a_touch_target_and_the_desktop_keeps_its_height() {
+        assert_eq!(stack_quick_h_at(30.0, None, 1080.0), 30.0);
+        let h = stack_quick_h_at(30.0, Some(2.75), 1080.0);
+        assert!((h - 44.0 * 2.75 * 590.0 / 1064.0).abs() < 1e-3, "{h}");
+        assert!(h * 1064.0 / 590.0 >= 44.0 * 2.75 - 1e-3, "at least 44 dp");
+    }
+
     #[test]
     fn the_landscape_battle_layout_is_as_before() {
         // 1280×800 at the interface scale 1, an 80 px bar: the window centred above the bar.
-        let l = Layout::landscape(1.0, (1280.0, 800.0), 80.0, Formation::default(), None, 0.0);
+        let l = Layout::landscape(1.0, (1280.0, 800.0), 80.0, Formation::default(), None, 0.0, 2);
         assert!(!l.is_stacked());
         assert_eq!(l.win, Rect::new(222.0, 60.0, 836.0, 600.0));
         assert_eq!(l.panel, Rect::new(224.0, 87.0, 244.0, 534.0));
@@ -1742,12 +1922,13 @@ mod tests {
         let dp = 2.75;
         let grow = chrome::phone_title_grow(1.0, chrome::FIXED_TITLE, Some(dp));
         assert_eq!(grow, (26.0f32 * 1.5).round() - 26.0, "half the strip is the growth");
-        let l = Layout::landscape(1.0, (2400.0, 1080.0), 90.0, Formation::default(), Some(dp), 0.0);
+        let l = Layout::landscape(1.0, (2400.0, 1080.0), 90.0, Formation::default(), Some(dp), 0.0, 2);
         let win = l.win;
         assert!(win.y >= grow + 2.0 - 1e-3, "{win:?} leaves {grow} px above for the strip");
-        assert_eq!((win.w, win.h), (836.0, 600.0), "the desktop's size");
+        assert_eq!(win.h, 600.0, "the desktop's height");
+        assert!(win.w > 836.0 && win.w <= PHONE_WIDE_W * 1.0 + 1e-3, "wider on a phone: {win:?}");
         // Content unchanged: the strip of a phone's window sits above `win` by the growth only.
-        let desktop = Layout::landscape(1.0, (2400.0, 1080.0), 90.0, Formation::default(), None, 0.0);
+        let desktop = Layout::landscape(1.0, (2400.0, 1080.0), 90.0, Formation::default(), None, 0.0, 2);
         assert_eq!(l.strip.y - l.win.y, desktop.strip.y - desktop.win.y, "the content is where the desktop's is, relative to the window");
     }
 
@@ -1757,7 +1938,7 @@ mod tests {
     fn a_phone_in_landscape_with_a_safe_top_keeps_the_window_below_it() {
         let dp = 2.75;
         let grow = chrome::phone_title_grow(1.0, chrome::FIXED_TITLE, Some(dp));
-        let l = Layout::landscape(1.0, (836.0, 1080.0), 90.0, Formation::default(), Some(dp), 150.0);
+        let l = Layout::landscape(1.0, (836.0, 1080.0), 90.0, Formation::default(), Some(dp), 150.0, 2);
         assert!(l.win.y >= 150.0 + grow - 1e-3, "{:?} under the safe top 150 and the growth {grow}", l.win);
         assert!(l.win.bottom() <= 1080.0 - 90.0 + 1e-3, "{:?} above the bar", l.win);
     }

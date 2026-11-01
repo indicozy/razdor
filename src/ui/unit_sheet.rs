@@ -1135,6 +1135,97 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, background: Rect, s
     clicked
 }
 
+/// The unit panel on a phone (Razdor's own, the owner's decision, 2026-11-01): the figure fitted
+/// into `pic` and centred there, and the text in `txt` as a scrolling kit `Flow`, every line at
+/// 12 sp or more: the name, the level and the experience, the stat lines (the label wrapped
+/// beside its value when they do not fit together), the status lines, the description and the
+/// traits with their icons, each wrapped to the width. `band`: the stacked band, whose text
+/// ground is the band's brown (as [`draw_band`]); else the landscape column. `note` (the turn, may be
+/// empty) stays on top of the text, out of the scroll. The caller draws the parchment. `id` keys the
+/// flow's scroll position.
+#[allow(clippy::too_many_arguments)]
+pub fn phone_panel(assets: &Assets, content: &Content, pic: Rect, txt: Rect, band: bool, s: &Sheet, note: &str, id: &'static str) {
+    use super::dt_font::Face;
+    use super::kit::{Flow, Text};
+    let k = k();
+    match assets.figure(s.kind) {
+        Some(t) => {
+            let fit = (pic.w / t.width()).min(pic.h / t.height());
+            chrome::tex(&t, band_figure_rect(pic, t.width(), t.height(), fit), WHITE);
+        }
+        None => silhouette(pic),
+    }
+    if band {
+        chrome::multiply(|| draw_rectangle(txt.x, txt.y, txt.w, txt.h, Color::new(0.5, 0.35, 0.0, 1.0)));
+    }
+    // The text's room: 6 px in from the left, and 18 px from the right, where the flow's bar stands.
+    let mut top = txt.y + 4.0 * k;
+    if !note.is_empty() {
+        let t = Text::new(note, 13.0, chrome::GOLD);
+        t.draw_one(txt.x + 6.0 * k, top + t.line_pitch() * 0.5 + t.size() * 0.35);
+        top += t.line_pitch();
+    }
+    // The flow's bar (10 px) stands at the right edge of `inner`: the text stops 12 px short of it.
+    let inner = Rect::new(txt.x + 6.0 * k, top, (txt.w - 12.0 * k).max(1.0), (txt.bottom() - 4.0 * k - top).max(1.0));
+    let (x, w, gap) = (inner.x, (inner.w - 12.0 * k).max(1.0), 6.0 * k);
+    let mut flow = Flow::begin(inner, id);
+    // A text's first baseline in a row of its own line pitch: centred in the pitch, as the kit's rows.
+    let base = |t: &Text| t.line_pitch() * 0.5 + t.size() * 0.35;
+    let name_ink = if s.named { NAMED_INK } else { CREAM };
+    let name = Text::new(s.name, 16.0, name_ink).face(Face::Subtitle);
+    flow.text_at(&name, x, base(&name), w, 0.0);
+    let level_text = razdor::trf!("Level {level}", level = s.level);
+    let xp_text = razdor::trf!("XP {xp} / {need}", xp = s.xp, need = s.need);
+    let level = Text::new(&level_text, 13.0, CREAM);
+    let xp = Text::new(&xp_text, 13.0, CREAM);
+    let lb = base(&level);
+    // The experience beside the level when both fit, else on a line of its own.
+    if level.width() + xp.width() + 8.0 * k <= w {
+        flow.row_h(level.line_pitch() + gap, |r| {
+            level.draw_one(r.x, r.y + lb);
+            xp.draw_right_one(x + w, r.y + lb);
+        });
+    } else {
+        flow.row_h(level.line_pitch() + gap, |r| level.draw_one(r.x, r.y + lb));
+        flow.row_h(xp.line_pitch() + gap, |r| xp.draw_one(r.x, r.y + base(&xp)));
+    }
+    for (label, value, color) in stat_lines(content, s) {
+        let vt = Text::new(&value, 13.0, color);
+        let lt = Text::new(&label, 13.0, color);
+        let lw = (w - vt.width() - 8.0 * k).max(1.0);
+        let lines = lt.lines(lw).len() as f32;
+        let b = base(&lt);
+        let h = (lines * lt.line_pitch()).max(vt.line_pitch()) + gap;
+        flow.row_h(h, |r| {
+            lt.draw(r.x, r.y + b, lw);
+            vt.draw_right_one(x + w, r.y + b);
+        });
+    }
+    for (status, color) in &s.status {
+        let t = Text::new(status, 13.0, *color);
+        flow.text_at(&t, x, base(&t), w, 0.0);
+    }
+    let desc = content.unit(s.kind).description.as_str();
+    if s.hero.is_none() && !desc.is_empty() {
+        let t = Text::new(desc, 13.0, CREAM);
+        flow.gap(4.0);
+        flow.text_at(&t, x, base(&t), w, 0.0);
+    }
+    // A trait's icon stands at the left, its text starts after it (as the band's list does).
+    let icon = 25.0 * k;
+    let tw = (w - icon - gap).max(1.0);
+    for (art, text, ink) in traits_of(s) {
+        let t = Text::new(&text, 13.0, ink);
+        let b = base(&t);
+        let h = (t.lines(tw).len() as f32 * t.line_pitch()).max(icon) + gap;
+        flow.row_h(h, |r| {
+            chrome::trait_icon(&art, r.x, r.y, icon);
+            t.draw(r.x + icon + gap, r.y + b, tw);
+        });
+    }
+    flow.finish();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
