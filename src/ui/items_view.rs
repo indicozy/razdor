@@ -974,8 +974,9 @@ pub fn squad(
 
     // The switch above the Dismiss row, in the empty space right of the tree: the tree's own
     // bottom-left corner is too small for its text at a phone's size (no text under 12 sp).
-    // It hides the «+» of this unit only, at its level (`Unit::set_sign_off`). Shown while the
-    // unit can be promoted now; the tree keeps offering the promotion.
+    // It hides the «+» of this unit only, until the player switches it on again
+    // (`Unit::set_sign_off`). Shown while the unit can be promoted now; the tree keeps
+    // offering the promotion.
     if let Some(t) = tree_of.filter(|&t| game.squad[t].promotion_ready(&c)) {
         let on = game.squad[t].sign_off();
         // A phone's label is 12.5 px per dp (its capital about 12.5 sp, the check's floor of 12

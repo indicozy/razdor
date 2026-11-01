@@ -297,8 +297,9 @@ pub struct Unit {
     #[serde(default)]
     pub carry: HpCarry,
     /// The player switched this unit's promotion sign off («Не напоминать» in the army
-    /// window's tree). It hides the green «+» until the unit is promoted ([`Unit::promote`]
-    /// clears it); a level gained keeps it off. Razdor's own setting, not in the original.
+    /// window's tree). It hides the green «+» until the player switches it on again: nothing
+    /// clears it by itself, neither a level gained nor a promotion ([`Unit::promote`]).
+    /// Razdor's own setting, not in the original.
     /// Older saves hold the level it was switched off at (under the key `sign_off_level`, 0:
     /// none): any non-zero value reads as off ([`sign_off_from_save`]).
     #[serde(default, alias = "sign_off_level", deserialize_with = "sign_off_from_save")]
@@ -462,7 +463,7 @@ impl Unit {
         self.promotion_ready(content) && !self.sign_off()
     }
 
-    /// The «+» is switched off for this unit (until it is promoted).
+    /// The «+» is switched off for this unit (until the player switches it on again).
     pub fn sign_off(&self) -> bool {
         self.sign_off
     }
@@ -486,8 +487,7 @@ impl Unit {
         let banked = self.xp;
         self.def = to;
         (self.level, self.xp, _) = experience::add_xp(1, 0, banked, |l| content.xp_to_next(to, l));
-        // A new class is a new chance: the sign shows again.
-        self.sign_off = false;
+        // The switch is the player's, not the class's: a promotion keeps it, as a level gain does.
         self.follow_max(content, before);
         Ok(())
     }
@@ -612,13 +612,17 @@ mod tests {
     }
 
     #[test]
-    fn a_promotion_clears_the_switch() {
+    fn promotion_keeps_the_sign_switched_off() {
+        // The switch belongs to the player, not to the class: a promotion keeps it.
         let c = content(vec![militia(), warrior(2, 30, 8)], vec![]);
         let mut u = Unit::new(&c, UnitId(1), slot());
         u.gain_xp(&c, 60);
         u.set_sign_off(true);
         assert_eq!(u.promote(&c, UnitId(2)), Ok(()));
-        assert!(!u.sign_off, "the new class starts with the sign on");
+        assert_eq!(u.def, UnitId(2));
+        assert!(u.sign_off(), "the promoted unit keeps the switch");
+        assert!(!u.promotion_sign(&c), "and its «+» stays hidden");
+        u.set_sign_off(false);
         assert!(!u.sign_off());
     }
 

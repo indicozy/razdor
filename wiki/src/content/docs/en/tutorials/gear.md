@@ -26,7 +26,7 @@ Case does not matter when searching. The letter "Ё" counts as "Е".
 * The search covers only the items shown in the chosen group and order.
 * **Esc** (first press) clears the search line, **Esc** (second press) closes the window.
 * On the army screen, **Enter** puts the item on or drinks it for the selected unit at once. While the upgrade tree is open, there is no button row.
-* In the upgrade tree, the **Don't remind** switch at the bottom left hides the green "+" on the selected unit's card. It stays on when the unit gains new levels; the "+" comes back only when the unit is promoted to another type. You can still promote it while the "+" is hidden.
+* In the upgrade tree, the **Don't remind** switch at the bottom left hides the green "+" on the selected unit's card. It stays on through new levels and promotions: only you switch it off or on again. You can still promote a unit while the "+" is hidden.
 * At the market, the row of eight groups sits above the list of goods. The search line shows only when you click the list, press `Ctrl+F` or type a letter. Enter selects the first match for "Buy" or "Sell". A click on the "Name" or "Price" title sorts the list.
 * In the backpack, the matching parts of the names are listed in the description field until you hover over an item.
 * An item can be dragged: press it in the backpack or on a slot, pull it out of its cell and release it over another cell, a slot or a unit, and it goes there. A plain click picks it up, as before.
