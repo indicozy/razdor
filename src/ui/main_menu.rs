@@ -587,10 +587,12 @@ fn chip_links(m: &PortraitMenu, k: f32) -> Option<Pick> {
     for (j, label) in labels.iter().enumerate() {
         let r = Rect::new(x, m.chip_top, widths[j], m.chip_h);
         let (hover, down, pressed) = super::widgets::button_state(r, true);
-        plate(r, 14.0 * k, Color::new(0.08, 0.05, 0.03, 1.0));
+        // The chip is drawn at the grown rect on a phone held upright (`upright_button_rect`).
+        let d = upright_button_rect(r);
+        plate(d, 14.0 * k, Color::new(0.08, 0.05, 0.03, 1.0));
         let color = if down || hover { chrome::GOLD } else { Color::new(0.95, 0.88, 0.72, 1.0) };
         let tw = measure(label, size).width;
-        chrome::shadow_text(label, r.x + (r.w - tw) / 2.0, r.y + r.h / 2.0 + size * 0.35, size, color);
+        chrome::shadow_text(label, d.x + (d.w - tw) / 2.0, d.y + d.h / 2.0 + size * 0.35, size, color);
         if pressed {
             cue(Cue::Button);
         }

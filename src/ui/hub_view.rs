@@ -377,7 +377,9 @@ struct Lay {
 fn tab_button(x: f32, y: f32, w: f32, h: f32, label: &str, on: bool) -> bool {
     let clicked = button_sounding(x, y, w, h, label, true, Cue::Button);
     if on {
-        draw_rectangle_lines(x, y, w, h, 3.0, GOLD);
+        // The ring at the drawn rect (a phone held upright grows the tab, `upright_button_rect`).
+        let d = upright_button_rect(Rect::new(x, y, w, h));
+        draw_rectangle_lines(d.x, d.y, d.w, d.h, 3.0, GOLD);
     }
     clicked
 }

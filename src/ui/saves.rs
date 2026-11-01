@@ -562,7 +562,7 @@ impl Book {
                     // Razdor's pin, left of the delete sign.
                     let p = Rect::new(r.x + r.w - 2.0 * sign - 10.0 * k, r.y + (r.h - sign) / 2.0, sign, sign);
                     let (over, down, pressed) = super::widgets::button_state(p, true);
-                    draw_pin(p, row.pinned, down);
+                    draw_pin(super::widgets::upright_button_rect(p), row.pinned, down);
                     if over {
                         tooltip(&[(if row.pinned { tr("Unpin the save (P)") } else { tr("Pin the save (P): it is never overwritten, stays on top and is not counted in the save limit") }.to_string(), INK)]);
                     }
@@ -572,7 +572,7 @@ impl Book {
                     let d = Rect::new(r.x + r.w - sign - 4.0 * k, r.y + (r.h - sign) / 2.0, sign, sign);
                     let (over, down, pressed) = super::widgets::button_state(d, true);
                     if let Some(t) = super::chrome::win(if down { "LSign-Delete-Down" } else { "LSign-Delete" }) {
-                        super::chrome::tex(&t, d, WHITE);
+                        super::chrome::tex(&t, super::widgets::upright_button_rect(d), WHITE);
                     }
                     if over {
                         tooltip(&[(own("LoadGame", "DeleteHint", n_("Delete the saved game")), INK)]);

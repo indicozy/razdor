@@ -84,22 +84,23 @@ pub fn row_cells<const N: usize>(r: Rect) -> [Rect; N] {
 
 /// A button of the row: the green marble art of the original's buttons, three-sliced so its
 /// ends keep their shape, Down while `lit`. A hover edge marks an unlit one. Without the art, a
-/// plain green panel.
-fn row_face(r: Rect, lit: bool, hover: bool) {
+/// plain green panel. Drawn in `d` (the caller's drawn rectangle: the target, or the grown one on
+/// a phone held upright, `upright_button_rect`); the art is picked by the target's width `r`.
+fn row_face(r: Rect, d: Rect, lit: bool, hover: bool) {
     let name = if r.w < 110.0 { "Btn1" } else if r.w < 145.0 { "Btn2" } else { "Btn3" };
     let state = if lit { "Down" } else { "Up" };
     match chrome::win_fx(&format!("{name}{state}"), chrome::Fx::Plain) {
-        Some(t) => chrome::three_slice(&t, r, 14.0, WHITE),
+        Some(t) => chrome::three_slice(&t, d, 14.0, WHITE),
         None => {
             let bg = if lit { Color::new(0.16, 0.36, 0.28, 1.0) } else { Color::new(0.10, 0.25, 0.19, 1.0) };
-            draw_rectangle(r.x, r.y, r.w, r.h, bg);
-            draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, chrome::SILVER);
+            draw_rectangle(d.x, d.y, d.w, d.h, bg);
+            draw_rectangle_lines(d.x, d.y, d.w, d.h, 2.0, chrome::SILVER);
         }
     }
     if lit {
-        draw_rectangle_lines(r.x + 1.0, r.y + 1.0, r.w - 2.0, r.h - 2.0, 2.0, ACCENT);
+        draw_rectangle_lines(d.x + 1.0, d.y + 1.0, d.w - 2.0, d.h - 2.0, 2.0, ACCENT);
     } else if hover {
-        draw_rectangle_lines(r.x + 1.0, r.y + 1.0, r.w - 2.0, r.h - 2.0, 1.0, INK);
+        draw_rectangle_lines(d.x + 1.0, d.y + 1.0, d.w - 2.0, d.h - 2.0, 1.0, INK);
     }
 }
 
@@ -114,13 +115,16 @@ pub fn group_row(content: &Content, assets: &Assets, cells: &[Rect], group: Item
         let on = group == g;
         let (hover, down, pressed) = button_state(*b, true);
         let lit = on || down;
-        row_face(*b, lit, hover);
+        // The group row is not grown on a phone held upright: its cells sit on a list with no room
+        // between (the grown face covered the list's header and first row).
+        row_face(*b, *b, lit, hover);
         // The picture inside the button, a little lower while it is held down.
-        let pad = 0.07 * b.h;
-        let side = (b.h - 2.0 * pad).min(b.w - 2.0 * pad).max(0.0);
+        let d = *b;
+        let pad = 0.07 * d.h;
+        let side = (d.h - 2.0 * pad).min(d.w - 2.0 * pad).max(0.0);
         let dy = if lit { k } else { 0.0 };
         if let Some(item) = representative(content, g) {
-            assets.draw_item(item, b.x + (b.w - side) / 2.0, b.y + (b.h - side) / 2.0 + dy, side);
+            assets.draw_item(item, d.x + (d.w - side) / 2.0, d.y + (d.h - side) / 2.0 + dy, side);
         }
         if pressed {
             claim();
@@ -180,7 +184,7 @@ pub fn search_button(key: &str, query: &mut String, r: Rect, shortcuts: &[KeyCod
     let active = has_focus(key);
     let (hover, _, _) = button_state(r, true);
     let typed = !query.trim().is_empty();
-    row_face(r, active || typed, hover);
+    row_face(r, super::widgets::upright_button_rect(r), active || typed, hover);
     // A changed order is named small at the bottom of the button (fractions of its height: the
     // marble's bevel takes the outer tenth); the label then sits in the upper half.
     let marked = sort != PackSort::Shown;

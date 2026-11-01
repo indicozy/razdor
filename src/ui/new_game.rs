@@ -818,7 +818,9 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
         let f = facts_of(scenarios, g, &m, active);
         if f.favourite || row_hover || on_star {
             let ink = if f.favourite { STAR_GOLD } else { Color::new(0.85, 0.85, 0.85, if on_star { 0.9 } else { 0.45 }) };
-            star(star_r.center(), 8.0 * k, ink, f.favourite);
+            // The mark is drawn at its grown rect on a phone held upright (`upright_button_rect`).
+            let star_d = upright_button_rect(star_r);
+            star(star_d.center(), 8.0 * k * star_d.w / star_r.w, ink, f.favourite);
         }
         if star_pressed {
             let file = e.file.clone();

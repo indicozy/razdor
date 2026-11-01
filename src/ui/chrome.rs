@@ -1920,8 +1920,18 @@ pub fn close_button(x: f32, y: f32, s: f32, red: bool) -> bool {
 /// area: [`title_bar_styled`]); true when clicked.
 #[track_caller]
 fn close_button_at(cross: Rect, hit: Rect, red: bool) -> bool {
-    let (x, y, s) = (cross.x, cross.y, cross.w);
     let (hover, down, pressed) = super::widgets::button_state(hit, true);
+    // On a phone held upright the cross is drawn bigger (`upright_button_rect`), but never out of
+    // its click area `hit` (it may reach up over the strip, never down into the window's content).
+    let grown = super::widgets::upright_button_rect(cross);
+    let drawn = if grown == cross {
+        cross
+    } else {
+        let (x0, y0) = (grown.x.max(hit.x).min(cross.x), grown.y.max(hit.y).min(cross.y));
+        let (x1, y1) = (grown.right().min(hit.right()).max(cross.right()), grown.bottom().min(hit.bottom()).max(cross.bottom()));
+        Rect::new(x0, y0, x1 - x0, y1 - y0)
+    };
+    let (x, y) = (drawn.x, drawn.y);
     let name = match (red, down) {
         (true, false) => "CloseButtonRed-Up",
         (true, true) => "CloseButtonRed-Down2",
@@ -1929,14 +1939,14 @@ fn close_button_at(cross: Rect, hit: Rect, red: bool) -> bool {
         (false, true) => "CloseButtonGreen-Down2",
     };
     if let Some(t) = win(name) {
-        tex(&t, Rect::new(x, y, s, s), WHITE);
+        tex(&t, Rect::new(x, y, drawn.w, drawn.h), WHITE);
     } else {
-        draw_rectangle(x, y, s, s, Color::new(0.05, 0.08, 0.06, 1.0));
-        draw_rectangle_lines(x, y, s, s, 1.5, if hover { GOLD } else { SILVER });
+        draw_rectangle(x, y, drawn.w, drawn.h, Color::new(0.05, 0.08, 0.06, 1.0));
+        draw_rectangle_lines(x, y, drawn.w, drawn.h, 1.5, if hover { GOLD } else { SILVER });
         let c = if red { RED_TEXT } else { Color::new(0.4, 0.9, 0.5, 1.0) };
-        let p = s * 0.25;
-        draw_line(x + p, y + p, x + s - p, y + s - p, 2.0, c);
-        draw_line(x + s - p, y + p, x + p, y + s - p, 2.0, c);
+        let p = drawn.w * 0.25;
+        draw_line(x + p, y + p, x + drawn.w - p, y + drawn.h - p, 2.0, c);
+        draw_line(x + drawn.w - p, y + p, x + p, y + drawn.h - p, 2.0, c);
     }
     pressed
 }
@@ -2425,8 +2435,9 @@ pub fn defeat_button(r: Rect, label: &str, enabled: bool, hover: bool) {
     let state = if hover && enabled { "Down" } else { "Up" };
     match win_fx(&format!("{name}{state}"), Fx::RotateRgb) {
         Some(t) if enabled => {
-            three_slice(&t, r, 14.0, WHITE);
-            button_label(r, label, enabled, hover, false);
+            let drawn = super::widgets::upright_button_rect(r);
+            three_slice(&t, drawn, 14.0, WHITE);
+            button_label_in(r, drawn, label, enabled, hover, false);
         }
         _ => marble_button(r, label, enabled, hover),
     }
@@ -2438,8 +2449,9 @@ pub fn defeat_button_art(r: Rect, art: &str, label: &str, hover: bool) {
     let state = if hover { "Down" } else { "Up" };
     match win_fx(&format!("{art}{state}"), Fx::RotateRgb) {
         Some(t) => {
-            three_slice(&t, r, 14.0, WHITE);
-            button_label(r, label, true, hover, false);
+            let drawn = super::widgets::upright_button_rect(r);
+            three_slice(&t, drawn, 14.0, WHITE);
+            button_label_in(r, drawn, label, true, hover, false);
         }
         None => marble_button(r, label, true, hover),
     }
@@ -2451,11 +2463,14 @@ pub fn quest_button(r: Rect, label: &str, enabled: bool, hover: bool) {
 }
 
 fn marble_button_tinted(r: Rect, label: &str, enabled: bool, hover: bool, quest_red: bool) {
+    // The art is picked by the target's width; the frame is drawn at the grown rect (phones held
+    // upright, `upright_button_rect`) and the label centred in it.
     let name = if r.w < 110.0 { "Btn1" } else if r.w < 145.0 { "Btn2" } else { "Btn3" };
     let state = if hover && enabled { "Down" } else { "Up" };
     let fx = if !enabled { Fx::Grey } else if quest_red { Fx::ButtonRed } else { Fx::Plain };
+    let drawn = super::widgets::upright_button_rect(r);
     if let Some(t) = win_fx(&format!("{name}{state}"), fx) {
-        three_slice(&t, r, 14.0, WHITE);
+        three_slice(&t, drawn, 14.0, WHITE);
     } else {
         let bg = match (enabled, hover, quest_red) {
             (false, _, _) => Color::new(0.2, 0.22, 0.21, 1.0),
@@ -2464,15 +2479,17 @@ fn marble_button_tinted(r: Rect, label: &str, enabled: bool, hover: bool, quest_
             (true, true, false) => Color::new(0.16, 0.36, 0.28, 1.0),
             (true, false, false) => Color::new(0.10, 0.25, 0.19, 1.0),
         };
-        draw_rectangle(r.x, r.y, r.w, r.h, bg);
-        draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, if enabled { SILVER } else { SILVER_DARK });
-        draw_rectangle_lines(r.x + 2.0, r.y + 2.0, r.w - 4.0, r.h - 4.0, 1.0, Color::new(0.0, 0.0, 0.0, 0.5));
+        draw_rectangle(drawn.x, drawn.y, drawn.w, drawn.h, bg);
+        draw_rectangle_lines(drawn.x, drawn.y, drawn.w, drawn.h, 2.0, if enabled { SILVER } else { SILVER_DARK });
+        draw_rectangle_lines(drawn.x + 2.0, drawn.y + 2.0, drawn.w - 4.0, drawn.h - 4.0, 1.0, Color::new(0.0, 0.0, 0.0, 0.5));
     }
-    button_label(r, label, enabled, hover, quest_red);
+    button_label_in(r, drawn, label, enabled, hover, quest_red);
 }
 
-/// A button's label, centred, smaller if it must be to fit.
-pub fn button_label(r: Rect, label: &str, enabled: bool, _hover: bool, _quest_red: bool) {
+/// A button's label, centred in `drawn` (the button's drawn rectangle,
+/// [`super::widgets::upright_button_rect`]; `drawn == r` on the desktop), smaller if it must be
+/// to fit. Its size is taken from the target `r`.
+pub fn button_label_in(r: Rect, drawn: Rect, label: &str, enabled: bool, _hover: bool, _quest_red: bool) {
     let color = if !enabled {
         Color::new(0.6, 0.6, 0.58, 1.0)
     } else {
@@ -2493,8 +2510,8 @@ pub fn button_label(r: Rect, label: &str, enabled: bool, _hover: bool, _quest_re
             let label = super::widgets::ellipsize(label, r.w - 10.0, size);
             let label = label.as_str();
             let d = measure(label, size);
-            let x = r.x + (r.w - d.width) / 2.0;
-            let y = r.y + (r.h + d.offset_y) / 2.0 - 1.0;
+            let x = drawn.x + (drawn.w - d.width) / 2.0;
+            let y = drawn.y + (drawn.h + d.offset_y) / 2.0 - 1.0;
             let offset = (size / 22.0).max(1.0);
             text(label, x + offset, y + offset, size, Color::new(0.0, 0.0, 0.0, 0.35 * color.a));
             text(label, x, y, size, color);
@@ -2550,21 +2567,22 @@ pub fn pill_button(r: Rect, label: &str, enabled: bool, green: bool) -> bool {
     } else {
         "smb-up"
     };
+    let drawn = super::widgets::upright_button_rect(r);
     match win_fx(name, if green && enabled { Fx::KeyBlackSwapGreenBlue } else { Fx::KeyBlack }) {
         Some(t) if green && enabled => {
             // The blue pill with its green and blue swapped, as the original makes the green
             // one from smb-up and smb-down at start (0x48dd40(…, 1, 3, 2)).
-            three_slice(&t, r, 12.0, WHITE);
+            three_slice(&t, drawn, 12.0, WHITE);
         }
-        Some(t) => three_slice(&t, r, 12.0, WHITE),
+        Some(t) => three_slice(&t, drawn, 12.0, WHITE),
         None => {
             let c = match (enabled, green) {
                 (false, _) => Color::new(0.35, 0.35, 0.35, 1.0),
                 (true, true) => Color::new(0.15, 0.55, 0.15, 1.0),
                 (true, false) => Color::new(0.12, 0.25, 0.65, 1.0),
             };
-            draw_rectangle(r.x, r.y, r.w, r.h, c);
-            draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.5, if hover { GOLD } else { SILVER });
+            draw_rectangle(drawn.x, drawn.y, drawn.w, drawn.h, c);
+            draw_rectangle_lines(drawn.x, drawn.y, drawn.w, drawn.h, 1.5, if hover { GOLD } else { SILVER });
         }
     }
     // Razdor's own: the grown pill label takes the requested size (see `button_label`).
@@ -2579,7 +2597,7 @@ pub fn pill_button(r: Rect, label: &str, enabled: bool, green: bool) -> bool {
         let label = super::widgets::ellipsize(label, r.w - 8.0, size);
         let label = label.as_str();
         let d = measure(label, size);
-        shadow_text(label, r.x + (r.w - d.width) / 2.0, r.y + (r.h + d.offset_y) / 2.0 - 1.0, size, if enabled { WHITE } else { Color::new(0.8, 0.8, 0.8, 1.0) });
+        shadow_text(label, drawn.x + (drawn.w - d.width) / 2.0, drawn.y + (drawn.h + d.offset_y) / 2.0 - 1.0, size, if enabled { WHITE } else { Color::new(0.8, 0.8, 0.8, 1.0) });
         })
     });
     if pressed {
