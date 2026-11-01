@@ -34,7 +34,7 @@ SCRATCH = Path("/mnt/ai_models/razdor-scratch/ui-regress/out")
 TIMEOUT_S = 60
 WORKERS = 4
 CPUS = "8-19"
-XVFB_FIRST_DISPLAY = 100  # :100, :101, … (one per case)
+XVFB_FIRST_DISPLAY = int(os.environ.get("RAZDOR_XVFB_FIRST", "100"))  # :100, :101, … (one per case)
 
 
 def install_dir():
