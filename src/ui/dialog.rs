@@ -1021,7 +1021,14 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
             // The item tooltip is 272 wide and as tall as its text plus 32 (0x4cbab0). The spell card is
             // the book's cell size (286 × 112) at the window's scale: the original's full card at the
             // pointer, with its cost and duration lines (the player's frames 625-626: 402 × 157 px at 1920).
-            let (pw, ph) = if spell { (286.0 * o, 112.0 * o) } else { super::item_text::tooltip_size(game, ItemId(id), o) };
+            // Its text and box grow as the item pop-up's do (Razdor's, a phone's text was tiny).
+            let spell_def = if spell { game.content.spells.iter().find(|s| s.id == id) } else { None };
+            let spell_text = super::display::spell_tip_text_for(chrome::k(), o, TEXT_REF);
+            let (pw, ph) = if spell {
+                spell_def.map_or((286.0 * o, 112.0 * o), |s| super::spellbook::spell_tip_size(game, s, o, spell_text))
+            } else {
+                super::item_text::tooltip_size(game, ItemId(id), o)
+            };
             let px = (at.x - pw / 2.0).clamp(x + 10.0, (x + w - 10.0 - pw).max(x + 10.0));
             let py = (at.y - ph / 2.0).clamp(y + 10.0, (y + h - 10.0 - ph).max(y + 10.0));
             // On a phone the card goes above the finger, clear of it (`popup::placed`).
@@ -1104,7 +1111,7 @@ fn draw_tip(tip: Option<(bool, u32, Rect)>, game: Option<&Game>, assets: &Assets
     draw_rectangle(card.x + 8.0, card.y + 8.0, card.w, card.h, Color::new(0.0, 0.0, 0.0, 0.45));
     if spell {
         if let Some(s) = game.content.spells.iter().find(|s| s.id == id) {
-            super::spellbook::spell_card(game, s, card, true);
+            super::spellbook::spell_tip_card(game, s, card, o, super::display::spell_tip_text_for(chrome::k(), o, TEXT_REF));
         }
     } else {
         super::item_text::draw(game, assets, ItemId(id), card, super::item_text::ItemBox::Tooltip, o);

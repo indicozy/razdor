@@ -339,6 +339,29 @@ pub fn item_text_for(base: f32, reference: (f32, f32)) -> f32 {
     item_text_scale_at(text_size(), normal)
 }
 
+/// The text scale of a spell's pop-up card (the event window's spell icons; `k` the interface
+/// scale, `o` the window's scale): on a phone the item pop-up's own text (`item_text_for`), so a
+/// spell reads as large as an item; on the desktop the card's `k` grown the item pop-up's way
+/// with the text size (`item_text_scale_at`), which is `k` at the original's size, as before.
+pub fn spell_tip_text_for(k: f32, o: f32, reference: (f32, f32)) -> f32 {
+    match dp_px() {
+        Some(dp) => spell_tip_text_at(item_text_for(o, reference), dp),
+        None => item_text_scale_at(text_size(), text_o_at(text_size(), k)),
+    }
+}
+
+/// The smallest text scale of a spell's pop-up on a phone, in dp per text unit: the card's body
+/// capitals are 0.625 of its size (the probe's measure, Becker at the body's size), so 12 sp
+/// (capitals 0.7 dp × 12 = 8.4 dp) needs 8.4 / (12 × 0.625) = 1.12 dp of text scale. Razdor's
+/// own: the item pop-up's text is 11 sp on the phone, under the mobile check's 12 sp.
+pub const SPELL_TIP_MIN_DP: f32 = 1.12;
+
+/// The phone's spell pop-up text scale for the item pop-up's `item` at `dp` px per dp: the item's,
+/// but never under [`SPELL_TIP_MIN_DP`] × dp.
+pub fn spell_tip_text_at(item: f32, dp: f32) -> f32 {
+    item.max(SPELL_TIP_MIN_DP * dp)
+}
+
 /// Whether the text is the original's own (the desktop at the original's size): then the texts
 /// keep the interface scale's native metrics, as before the text size. Off, they take the sizes
 /// asked for (`dt_font::with_legacy_metrics`).
@@ -1694,6 +1717,17 @@ mod tests {
         let tooltip = phone_text_base(Some(2.625), k, reference, (sw, sh), bar);
         assert_eq!(message, tooltip, "one text scale on the phone");
         assert_eq!(phone_text_base(None, k, reference, (sw, sh), bar), k, "off the phone the window's own scale");
+    }
+
+    #[test]
+    fn a_phone_spell_card_reads_twelve_sp_at_least() {
+        // The body's capitals are 0.625 of its size (12 × text): at the item's scale on a small
+        // phone (2.4 at 2.75 dp, 11 sp) it is raised to the minimum; a larger item keeps its own.
+        let dp = 2.75;
+        let t = spell_tip_text_at(2.4, dp);
+        let cap = 0.625 * 12.0 * t;
+        assert!(cap / dp / 0.7 >= 12.0 - 1e-3, "{} sp", cap / dp / 0.7);
+        assert_eq!(spell_tip_text_at(4.0, dp), 4.0, "a larger item text is kept");
     }
 
     #[test]

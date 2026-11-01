@@ -92,6 +92,9 @@ SCREENS = [
     # An event's rewards (a player's report 1453): mana, a joined unit and items; and more rows.
     ("event", "message:РК1-Начало пути", {"RAZDOR_SCENE_TITLE": "Разговор со святым отцом", "RAZDOR_SCENE_TEXT": EVENT_TEXT, "RAZDOR_SCENE_UNIT": "31", "RAZDOR_SCENE_MANA": "200", "RAZDOR_SCENE_ITEMS": "99,99", "RAZDOR_SCENE_JOINED": "31"}),
     ("event-more", "message:РК1-Начало пути", {"RAZDOR_SCENE_TITLE": "Разговор со святым отцом", "RAZDOR_SCENE_TEXT": EVENT_TEXT, "RAZDOR_SCENE_UNIT": "31", "RAZDOR_SCENE_MANA": "200", "RAZDOR_SCENE_GOLD": "150", "RAZDOR_SCENE_ITEMS": "99,99,99,99,99,99,99,99", "RAZDOR_SCENE_JOINED": "31,31,31,31", "RAZDOR_SCENE_LEFT": "31,31", "RAZDOR_SCENE_LOST": "99,99,99", "RAZDOR_SCENE_SPELLS": "1,2"}),
+    # A spell icon's pop-up card (a player's report: its text was tiny on an upright phone): the
+    # event's first spell held at the pointer, which sits at the screen's centre (`centre`).
+    ("learnt-spell", "learnt:РК1-Начало пути", {"RAZDOR_SCENE_PREVIEW": "1", "RAZDOR_MOUSE_RIGHT": "1", "RAZDOR_MOUSE": "centre"}),
     ("barracks", "building:РК1-Начало пути:0:barracks", {}),
     ("store", "building:РК1-Начало пути:0:store", {}),
     ("market", "building:РК3-Столица:8:market", {}),
@@ -127,6 +130,8 @@ def build_cases(only, out, text_size="1.25"):
                 env.setdefault("RAZDOR_TEXT_SIZE", text_size)
                 env.setdefault("RAZDOR_LARGE_WINDOWS", "1")
                 env["RAZDOR_DP"] = str(dp)
+                if env.get("RAZDOR_MOUSE") == "centre":
+                    env["RAZDOR_MOUSE"] = f"{w // 2},{h // 2}"
                 env["RAZDOR_TEXT_PROBE"] = str(out / "probe" / f"{key}.tsv")
                 env["RAZDOR_TOUCH_PROBE"] = str(out / "touch" / f"{key}.tsv")
                 cases.append({"name": name, "base": base, "scene": scene, "size": f"{w}x{h}", "extra": env,

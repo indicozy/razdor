@@ -449,6 +449,12 @@ pub(super) fn cast(game: &mut Game, spell: u32, target: CastTarget, message: &mu
 /// to its right the card text ([`card_text`]). `tint_mana`: a spell over the hero's mana turns red, as
 /// everywhere but the sanctuary's tab (0x49be2c skips the mana test on tab 4, 0x68dc88).
 pub fn spell_card(game: &Game, s: &SpellDef, r: Rect, tint_mana: bool) {
+    let k = super::chrome::k();
+    spell_card_at(game, s, r, tint_mana, k, (r.h - 12.0 * k).min(100.0 * k));
+}
+
+/// [`spell_card`] with its text at the size `text` and its picture `side` px square.
+fn spell_card_at(game: &Game, s: &SpellDef, r: Rect, tint_mana: bool, text: f32, side: f32) {
     use super::chrome;
     super::typography::Role::Body.with(|| {
         let k = chrome::k();
@@ -456,12 +462,39 @@ pub fn spell_card(game: &Game, s: &SpellDef, r: Rect, tint_mana: bool) {
         // normal paper otherwise; the sanctuary's tab never tints (`tint_mana` false).
         let red = tint_mana && game.mana < game.cast_cost(s).mana;
         card_paper(r, card_fill(!red, false));
-        let side = (r.h - 12.0 * k).min(100.0 * k);
         let icon = Rect::new(r.x + 6.0 * k, r.y + (r.h - side) / 2.0, side, side);
         chrome::spell_icon(s, icon);
         let left = icon.x + icon.w + 2.0 * k;
-        card_text(game, s, Rect::new(left, r.y, r.x + r.w - left, r.h), tint_mana, k);
+        card_text(game, s, Rect::new(left, r.y, r.x + r.w - left, r.h), tint_mana, text);
     });
+}
+
+/// The picture's side of a spell's pop-up card at the window's scale `o`: the card's height less
+/// its margins, at most 100 px (as [`spell_card`] takes it from the box). Fixed by `o`, not by the
+/// box's grown height, so the text is laid out for the room it is drawn in.
+fn tip_side(o: f32) -> f32 {
+    let k = super::chrome::k();
+    (112.0 * o - 12.0 * k).min(100.0 * k)
+}
+
+/// The box `(width, height)` of spell `s`'s pop-up card at the window's scale `o`, its text at
+/// `text` (`display::spell_tip_text_for`). Its width is the card's (286 × o) grown with the text
+/// size as the item pop-up's is (`display::item_text_factor`); its height is the card's (112 × o),
+/// or what its text needs when that is more. Kept to the screen's height.
+pub fn spell_tip_size(game: &Game, s: &SpellDef, o: f32, text: f32) -> (f32, f32) {
+    let k = super::chrome::k();
+    let w = (286.0 * o * super::display::item_text_factor()).min(screen_width() - 12.0);
+    let h = 112.0 * o;
+    // The text's room: the box less the picture and its gaps (`spell_card_at`), less the margins.
+    let room = w - 20.0 * k - tip_side(o);
+    let need = super::typography::Role::Body.with(|| card_layout(game, s, room, true, text).height()) + 6.0 * k;
+    (w, need.max(h).min(screen_height() - 8.0))
+}
+
+/// Draws the pop-up card of spell `s` in `r` at the window's scale `o` with its text at `text`
+/// (the box from [`spell_tip_size`]).
+pub fn spell_tip_card(game: &Game, s: &SpellDef, r: Rect, o: f32, text: f32) {
+    spell_card_at(game, s, r, true, text, tip_side(o));
 }
 
 /// The card's fonts (0x49bde4 → 0x49ba84; the SanSerif tints of 0x4dbc26, white less a delta).
@@ -489,8 +522,53 @@ fn card_text(game: &Game, s: &SpellDef, area: Rect, tint_mana: bool, text: f32) 
     use super::chrome::{self, CREAM};
     use super::typography::Role;
     let k = chrome::k();
-    let room = area.w - 12.0 * k;
     let tx = area.x + area.w / 2.0;
+    let laid = card_layout(game, s, area.w - 12.0 * k, tint_mana, text);
+    let top = area.y + ((area.h - laid.height()) / 2.0).max(3.0 * k);
+    let name_ink = if laid.red { UNAFFORDABLE_NAME } else { CREAM };
+    Role::Name.with(|| {
+        for (n, name) in laid.names.iter().enumerate() {
+            let y = top + n as f32 * laid.name_lh + laid.name_size * 0.72;
+            probe_text(name, tx, y, laid.name_size);
+            chrome::shadow_centered(name, tx, y, laid.name_size, name_ink);
+        }
+    });
+    let mut y = top + laid.names.len() as f32 * laid.name_lh + laid.gap + laid.size * 0.72;
+    for line in &laid.lines {
+        if y > area.y + area.h - 2.0 * k {
+            break;
+        }
+        let joined: String = line.iter().map(|(t, _)| t.as_str()).collect();
+        probe_text(&joined, tx, y, laid.size);
+        shadow_coloured(line, tx, y, laid.size, true);
+        y += laid.line_h;
+    }
+}
+
+/// The card's text as laid out ([`card_layout`]): the name's lines, the body's lines and the sizes
+/// that place them. `red`: the spell is over the hero's mana.
+struct CardText {
+    names: Vec<String>,
+    name_size: f32,
+    name_lh: f32,
+    lines: Vec<Vec<(String, Color)>>,
+    size: f32,
+    line_h: f32,
+    gap: f32,
+    red: bool,
+}
+
+impl CardText {
+    /// The text's height: the name's lines, the gap, the body's lines.
+    fn height(&self) -> f32 {
+        self.names.len() as f32 * self.name_lh + self.gap + self.lines.len() as f32 * self.line_h
+    }
+}
+
+/// The card's text of spell `s` word-wrapped to `room` px at the text size `text`, the colours of
+/// its parts with `tint_mana` (see [`card_text`]). The caller's font role is the body's.
+fn card_layout(game: &Game, s: &SpellDef, room: f32, tint_mana: bool, text: f32) -> CardText {
+    use super::typography::Role;
     let cost = game.cast_cost(s);
     let red = tint_mana && game.mana < cost.mana;
     let effect = razdor::rules::spell_hint::effect_entries(s, &super::spell_badges::label);
@@ -523,21 +601,16 @@ fn card_text(game: &Game, s: &SpellDef, area: Rect, tint_mana: bool, text: f32) 
         lines.extend(wrap(&last, room, size).into_iter().map(|l| vec![(l, ink)]));
     }
     let gap = if lines.is_empty() { 0.0 } else { line_h };
-    let block = names.len() as f32 * name_lh + gap + lines.len() as f32 * line_h;
-    let top = area.y + ((area.h - block) / 2.0).max(3.0 * k);
-    let name_ink = if red { UNAFFORDABLE_NAME } else { CREAM };
-    Role::Name.with(|| {
-        for (n, name) in names.iter().enumerate() {
-            chrome::shadow_centered(name, tx, top + n as f32 * name_lh + name_size * 0.72, name_size, name_ink);
-        }
-    });
-    let mut y = top + names.len() as f32 * name_lh + gap + size * 0.72;
-    for line in lines {
-        if y > area.y + area.h - 2.0 * k {
-            break;
-        }
-        shadow_coloured(&line, tx, y, size, true);
-        y += line_h;
+    CardText { names, name_size, name_lh, lines, size, line_h, gap, red }
+}
+
+/// Records a card's line for the mobile check's text probe (`text_probe`): the card's shadowed
+/// lines do not go through `widgets::text_exact`. Its centre `cx`, baseline `y`, font size `size`.
+fn probe_text(s: &str, cx: f32, y: f32, size: f32) {
+    if super::text_probe::on() {
+        let w = measure_exact(s, size).width;
+        let cap = measure_exact("Н", size).offset_y;
+        super::text_probe::record(s, cx - w / 2.0, y, w, size, cap);
     }
 }
 

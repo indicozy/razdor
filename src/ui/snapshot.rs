@@ -923,6 +923,13 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                     d.preview.set(Some((true, first, macroquad::math::Vec2::new(x, y))));
                 }
             }
+            // `RAZDOR_SCENE_PREVIEW=item:<id>`: the item's pop-up at the pointer instead (the item
+            // tooltip's text, to compare the spell card's text with it).
+            if let (Some((x, y)), Ok(v)) = (pointer(), std::env::var("RAZDOR_SCENE_PREVIEW")) {
+                if let Some(id) = v.strip_prefix("item:").and_then(|n| n.parse::<u32>().ok()) {
+                    d.preview.set(Some((false, id, macroquad::math::Vec2::new(x, y))));
+                }
+            }
             d.spells = ids;
             app.dialogs.push_back(d);
             Screen::WorldMap

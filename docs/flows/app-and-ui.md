@@ -481,6 +481,9 @@ that list; a new filter starts on page 1. `Screen::Spellbook` keeps the page, th
 normal, hovered (the hover is the colour, no frame), or dark red over the hero's mana. Every card has
 the 1 px steel line the original draws into all its card backgrounds (0x4dc118, 0x48d1d4). The event window's spell tooltip is the same card at the book's cell
 size, scaled with the window (`dialog.rs`, the spell preview), so its cost and duration lines show.
+On a phone its text is the item pop-up's text (`display::spell_tip_text_for`), never under 12 sp
+(`display::SPELL_TIP_MIN_DP`), and its box grows with the text (`spellbook::spell_tip_size`, `spell_tip_card`);
+on the desktop at the original's size it is the card's own scale, as before.
 A spell's card, wherever it is shown (the spell book's cells, the sanctuary's description, the
 event window's spell tooltip), has the same text, drawn by `spellbook::card_text` in
 `src/ui/spellbook.rs` (`spellbook::spell_card` adds the box and picture): the name, then the
