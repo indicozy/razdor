@@ -1863,6 +1863,17 @@ pub fn grown_upward(r: Rect, grow: f32, safe_top: f32) -> Rect {
     if grow > 0.0 && r.y - grow >= safe_top { Rect::new(r.x, r.y - grow, r.w, r.h + grow) } else { r }
 }
 
+/// The inner rectangle [`window`] returns for the window `r` (its strip and frames as they are
+/// drawn), worked out without drawing: a window's content can be placed before the window is
+/// drawn (the keyboard lift of a name field, `window_layout::keyboard_lifted`).
+pub fn window_inner(r: Rect) -> Rect {
+    let k = k();
+    let tb0 = strip_height(k, FIXED_TITLE);
+    let tb = phone_strip_height(tb0, super::display::dp_px());
+    let r = grown_upward(r, tb - tb0, super::display::safe_area().top);
+    Rect::new(r.x + 2.0 * k, r.y + tb + 1.0, r.w - 4.0 * k, r.h - tb - 3.0 * k)
+}
+
 /// The frames 0x48d3f8 draws on every window: a 2 px frame round it and a 2 px line from
 /// (2, 27) to (w − 2, 29) under the title. `px` as in [`window_inner_frames`].
 pub fn window_frames(r: Rect, px: f32) {

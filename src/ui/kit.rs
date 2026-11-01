@@ -195,6 +195,17 @@ impl<'a> Text<'a> {
         self.draw_line(self.s, x, baseline);
     }
 
+    /// The width of the text as one line, in px (the size and metrics `draw_one` uses).
+    pub fn width(&self) -> f32 {
+        let phone = display::dp_px().is_some();
+        self.in_face(|| dt_font::legacy_metrics_if(phone, || widgets::measure(self.s, self.size()).width))
+    }
+
+    /// Draws the text as one line with its right end at `x_right`, its baseline at `baseline`.
+    pub fn draw_right_one(&self, x_right: f32, baseline: f32) {
+        self.draw_one(x_right - self.width(), baseline);
+    }
+
     /// Draws one line at `(x, y)`: the desktop as the hand-written code did (`design * k`, no
     /// legacy metrics), the phone with the legacy metrics at [`Text::size`].
     fn draw_line(&self, s: &str, x: f32, y: f32) {

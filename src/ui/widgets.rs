@@ -1395,6 +1395,8 @@ struct Popup {
     /// The filter has the on-screen keyboard (a phone: only after a tap in the filter row,
     /// [`popup_keyboard`]).
     typing: bool,
+    /// The rows shown at once ([`popup_visible`]).
+    visible: usize,
 }
 
 local! {
@@ -1413,6 +1415,26 @@ local! {
 pub const FIELD_BG: Color = Color::new(0.07, 0.07, 0.065, 1.0);
 const POPUP_ROWS: usize = 12;
 const POPUP_ROW_H: f32 = 22.0;
+
+/// A drop-down row's height at `scale` px per design px: 22 design px on the desktop; on a phone at
+/// least a finger (48 dp), so each row is a touch target (Razdor's own, the owner's decision of
+/// 2026-11-01).
+fn popup_row_h(scale: f32) -> f32 {
+    let h = POPUP_ROW_H * scale;
+    match super::display::dp_px() {
+        Some(dp) => h.max(FINGER_DP * dp),
+        None => h,
+    }
+}
+
+/// The rows a drop-down list shows at once: 12 on the desktop; on a phone as many as fit in 90% of
+/// the screen's height (at least three), so a list taller than the screen scrolls.
+fn popup_visible(scale: f32) -> usize {
+    match super::display::dp_px() {
+        Some(_) => ((screen_height() * 0.9 - 30.0 * scale) / popup_row_h(scale)).floor().clamp(3.0, POPUP_ROWS as f32) as usize,
+        None => POPUP_ROWS,
+    }
+}
 
 /// A stable id for a field from its key (unique per record and field, e.g. `"b12:name"`).
 pub fn field_id(key: &str) -> u64 {
@@ -2191,14 +2213,18 @@ pub fn dropdown(key: &str, x: f32, y: f32, w: f32, current: i64, options: &[(i64
 pub fn open_list(key: &str, anchor: Rect, current: i64, options: &[(i64, String)], scale: f32) {
     claim();
     clear_focus();
-    let rows = options.len().min(POPUP_ROWS) as f32;
-    let ph = (rows * POPUP_ROW_H + 30.0) * scale;
+    let visible = popup_visible(scale);
+    let rows = options.len().min(visible) as f32;
+    let ph = match super::display::dp_px() {
+        Some(_) => rows * popup_row_h(scale) + 30.0 * scale,
+        None => (rows * POPUP_ROW_H + 30.0) * scale,
+    };
     let (y, h) = (anchor.y, anchor.h);
     let py = if y + h + ph > screen_height() { (y - ph).max(0.0) } else { y + h };
     let pw = anchor.w.max(220.0 * scale);
     let px = anchor.x.min(screen_width() - pw).max(0.0);
     let at = options.iter().position(|o| o.0 == current).unwrap_or(0);
-    let popup = Popup { id: field_id(key), rect: Rect::new(px, py, pw, ph), options: options.to_vec(), scroll: at.saturating_sub(POPUP_ROWS / 2), filter: String::new(), edit: TextEdit::at_end(), scale, typing: false };
+    let popup = Popup { id: field_id(key), rect: Rect::new(px, py, pw, ph), options: options.to_vec(), scroll: at.saturating_sub(visible / 2), filter: String::new(), edit: TextEdit::at_end(), scale, typing: false, visible };
     POPUP.with(|p| *p.borrow_mut() = Some(popup));
 }
 
@@ -2262,7 +2288,7 @@ pub fn draw_popup() {
         pop.typing = popup_keyboard(super::display::dp_px().is_some(), pop.typing, tapped, super::display::keyboard_closed_by_system());
         let needle = pop.filter.to_lowercase();
         let shown: Vec<&(i64, String)> = pop.options.iter().filter(|o| needle.is_empty() || o.1.to_lowercase().contains(&needle) || o.0.to_string() == needle).collect();
-        let max_scroll = shown.len().saturating_sub(POPUP_ROWS);
+        let max_scroll = shown.len().saturating_sub(pop.visible);
         if r.contains(Vec2::from(pointer())) {
             let wh = mouse_wheel().1;
             if wh > 0.0 {
@@ -2275,10 +2301,11 @@ pub fn draw_popup() {
         draw_rectangle(r.x + 4.0, r.y + 4.0, r.w, r.h, Color::new(0.0, 0.0, 0.0, 0.4));
         draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.1, 0.09, 0.08, 0.98));
         draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, ACCENT);
-        let row_h = POPUP_ROW_H * s;
+        let row_h = popup_row_h(s);
+        let phone = super::display::dp_px().is_some();
         let hint = if pop.filter.is_empty() { razdor::i18n::tr("type to filter").to_string() } else { razdor::trf!("filter: {filter}", filter = pop.filter) };
         text(&hint, r.x + 8.0 * s, r.y + 19.0 * s, 15.0 * s, DIM);
-        for (i, (v, label)) in shown.iter().skip(pop.scroll).take(POPUP_ROWS).enumerate() {
+        for (i, (v, label)) in shown.iter().skip(pop.scroll).take(pop.visible).enumerate() {
             let ry = r.y + 26.0 * s + i as f32 * row_h;
             let hover = Rect::new(r.x, ry, r.w, row_h).contains(Vec2::from(pointer()));
             if hover {
@@ -2288,13 +2315,15 @@ pub fn draw_popup() {
             while measure(&l, 16.0 * s).width > r.w - 16.0 * s && !l.is_empty() {
                 l.pop();
             }
-            text(&l, r.x + 8.0 * s, ry + 16.0 * s, 16.0 * s, INK);
+            // A phone's row is a finger tall: its text is centred in it (the desktop's sits at 16 of 22).
+            let base = if phone { ry + row_h / 2.0 + 5.6 * s } else { ry + 16.0 * s };
+            text(&l, r.x + 8.0 * s, base, 16.0 * s, INK);
             if hover && is_mouse_button_pressed(MouseButton::Left) {
                 PICKED.with(|k| k.set(Some((pop.id, *v))));
                 close = true;
             }
         }
-        if shown.len() > POPUP_ROWS {
+        if shown.len() > pop.visible {
             let frac = pop.scroll as f32 / max_scroll.max(1) as f32;
             let track = r.h - 30.0 * s;
             draw_rectangle(r.x + r.w - 5.0, r.y + 26.0 * s + frac * (track - 20.0 * s), 3.0, 20.0 * s, DIM);
