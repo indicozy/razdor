@@ -383,7 +383,7 @@ impl Game {
         let t = a.tile(&self.world.map);
         let talks = a.own_attitude() >= 1 && self.script.as_deref().is_some_and(|e| e.meeting_waiting(self, a.id));
         // The hero's own cell is never a target: the hit test skips his army (magic-items.md §3.5).
-        t != self.tile() && self.can_target(t) && self.world.location_at(t).is_none() && !talks
+        t != self.tile() && self.spell_can_reach(t) && self.world.location_at(t).is_none() && !talks
     }
 
     /// An enemy spell aimed at cell `t` on the map (0x4ccb8f-0x4ccc4c): the army there, on a
@@ -391,7 +391,7 @@ impl Game {
     /// (the target -1: the hint refuses it and a click does nothing). The hero's own cell is
     /// no target: the original's hit test skips the hero's army (magic-items.md §3.5).
     pub fn curse_aim(&self, t: Tile) -> Option<Result<u32, ()>> {
-        if t == self.tile() || !self.can_target(t) || self.world.location_at(t).is_some() {
+        if t == self.tile() || !self.spell_can_reach(t) || self.world.location_at(t).is_some() {
             return None;
         }
         let i = (0..self.world.armies.len()).find(|&i| self.world.armies[i].tile(&self.world.map) == t)?;
@@ -1069,6 +1069,44 @@ mod tests {
         assert_eq!(g.curse_aim(here), None, "the hero's cell is no target");
         assert!(!g.spell_targets().iter().any(|&i| g.world.armies[i].uid == uid));
         assert_eq!(g.begin_cast(3, CastTarget::Army(uid)), Err(CastError::NotATarget));
+    }
+
+    /// A land hero (the default scenario's grass) and an enemy army on the water at (12, 2),
+    /// explored. The water is a boat's cell: a spell from land reaches it (Razdor's own,
+    /// the owner's decision, 2026-11-02; the original refuses it, see `Game::spell_can_reach`).
+    fn shore_game() -> (Game, u32) {
+        let mut s = scenario(24, 6);
+        for y in 0..6 {
+            for x in 10..16 {
+                tk::set(&mut s, x, y, crate::dt::dtm::Surface::CoastalWater);
+            }
+        }
+        s.header.heroes[0] = hero(2, 2, 200, &[troop(4, 0, 2)]);
+        s.header.heroes[1] = hero(2, 2, 200, &[troop(4, 0, 2)]);
+        let mut g = Game::from_scenario(content(), &s, HeroClass::Knight);
+        g.mana = 1000;
+        g.spells = (1..=6).collect();
+        let uid = with_enemy(&mut g, (12, 2), &[troop(4, 0, 1)]);
+        g.world.armies[0].ignore_until = f64::MAX;
+        g.fog.mark((12, 2));
+        (g, uid)
+    }
+
+    #[test]
+    fn a_land_hero_curses_an_army_on_the_water() {
+        let (mut g, uid) = shore_game();
+        assert_eq!(g.planner_cost((12, 2)), 0, "water is no step on foot");
+        assert_eq!(g.curse_aim((12, 2)), Some(Ok(uid)));
+        assert!(g.spell_targets().iter().any(|&i| g.world.armies[i].uid == uid));
+        assert!(g.cast(3, CastTarget::Army(uid)).is_ok(), "the spell lands on the boat");
+    }
+
+    #[test]
+    fn an_unexplored_cell_on_the_water_is_still_no_target() {
+        let (mut g, uid) = shore_game();
+        g.fog = crate::rules::fog::Fog::new(g.world.map.w, g.world.map.h);
+        assert_eq!(g.curse_aim((12, 2)), None, "fog still hides it");
+        assert!(!g.spell_targets().iter().any(|&i| g.world.armies[i].uid == uid));
     }
 
     #[test]

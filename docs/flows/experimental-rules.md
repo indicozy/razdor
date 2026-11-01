@@ -67,6 +67,16 @@ For reproducible screenshots, `RAZDOR_SCENE_EXPERIMENTAL=bonuses,rings,amulets` 
 rules in snapshot scenes; `RAZDOR_SCENE_RULES=1` opens the options over `scenarios`, and
 `RAZDOR_SCENE_BONUS_ITEMS=1` equips available distinct bonus items on the hero in an army scene.
 
+## Map spells reach any army (not a switch)
+
+Razdor's own (the owner's decision, 2026-11-02): a map spell may aim at an army on any explored
+cell, the water and the bridges included, from land and back. The original refuses those
+(0x4cbf20, magic-items.md §3.5: the cell must be passable on the hero's movement map). The
+check is `Game::spell_can_reach`, used by `Game::curse_aim`, `spell_targets` and the
+target-mode ring. Only the terrain test is lifted: the cell must be on the map and explored,
+and range, ownership, the hero's own cell, buildings and the friends' meeting rule are as before.
+There is no option for it.
+
 ## Noncombatants
 
 Advanced settings (the regular settings window's More button) has **Unit battle

@@ -1181,6 +1181,20 @@ impl Game {
         self.planner_cost(t) != 0 || self.parked_ship() == Some(t)
     }
 
+    /// Whether a map spell can be aimed at cell `t` (the spell target mode's hit test).
+    /// Razdor's own (the owner's decision, 2026-11-02): map spells reach armies on water from
+    /// land and back; the original refuses. Original behaviour: its hit test (0x4cbf20, see
+    /// magic-items.md §3.5) requires the cell to be passable on the hero's movement map, so a
+    /// land hero cannot curse a boat and a ship cannot curse an army on a bridge. Here only that
+    /// terrain test is lifted: the cell must be on the map and explored (fog), as before.
+    /// The console's `noclip` already allows every cell.
+    pub fn spell_can_reach(&self, t: Tile) -> bool {
+        if self.cheats.noclip {
+            return self.can_target(t);
+        }
+        self.world.map.in_bounds(t) && self.fog.explored(t)
+    }
+
     /// Walk to `to` along the planned route (the second click, world.md §1.3). A click on an
     /// army makes it the chased army, unless it stands in a building other than a bridge.
     /// Returns false if it can't be reached. Razdor fixes the original's bug (0x4cc99f): the

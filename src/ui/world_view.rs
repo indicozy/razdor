@@ -3057,7 +3057,7 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
             let ring = match game.curse_aim(t) {
                 Some(Ok(_)) => Some(("Selection-2", rgb(0x00, 0xc4, 0xff))),
                 // The hero's own cell is no target (the original's hit test skips his army): no ring.
-                _ if game.can_target(t) && t != game.tile() => Some(("Selection-2", rgb(0xdf, 0x00, 0x00))),
+                _ if game.spell_can_reach(t) && t != game.tile() => Some(("Selection-2", rgb(0xdf, 0x00, 0x00))),
                 _ => None,
             };
             MapHoverLook { cell: t, ring, building: None }
