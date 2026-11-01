@@ -15,7 +15,7 @@ use razdor::rules::units::Stats;
 use super::assets::Assets;
 use super::chrome::{self, k, BLUE_TEXT, CREAM, ORANGE_TEXT, RED_TEXT};
 use super::window_layout;
-use super::widgets::{measure, measure_exact, mouse_in};
+use super::widgets::{self, measure, measure_exact, mouse_in};
 
 local! {
     static TRAIT_SCROLL: std::cell::RefCell<std::collections::HashMap<String, f32>> = std::cell::RefCell::new(std::collections::HashMap::new());
@@ -658,10 +658,15 @@ fn defence_ink(now: &Stats, base: &Stats, row2: i32) -> StripInk {
 
 #[allow(clippy::too_many_arguments)]
 fn stat_strip_impl(strip: Rect, now: &Stats, base: &Stats, power: i32, caster: bool, place: usize, hp: i32, row2: i32, building: i32, lit: bool, panel: StripPanel) {
-    // The strip's own picture, made from the paper at start-up (0x4de0f0,
-    // `chrome::strip_picture`): dark brown, the hero's deep red-brown, a named character's
-    // deep blue, in battle and on the army and building screens alike (0x49462c draws
-    // ae2698, then ae269c or ae26a0 over it).
+    strip_surface(strip, lit, panel);
+    super::typography::Role::Body.with(|| strip_text(strip, now, base, power, caster, place, hp, row2, building));
+}
+
+/// The strip's background: its own picture, made from the paper at start-up (0x4de0f0,
+/// `chrome::strip_picture`): dark brown, the hero's deep red-brown, a named character's
+/// deep blue, in battle and on the army and building screens alike (0x49462c draws
+/// ae2698, then ae269c or ae26a0 over it), reddened when `lit`.
+fn strip_surface(strip: Rect, lit: bool, panel: StripPanel) {
     match chrome::strip_texture(panel) {
         Some(t) => chrome::tex(&t, strip, WHITE),
         None => chrome::surface(strip, chrome::Skin::Strip),
@@ -669,7 +674,36 @@ fn stat_strip_impl(strip: Rect, now: &Stats, base: &Stats, power: i32, caster: b
     if lit {
         draw_rectangle(strip.x, strip.y, strip.w, strip.h, Color::new(0.75, 0.25, 0.0, 0.4));
     }
-    super::typography::Role::Body.with(|| strip_text(strip, now, base, power, caster, place, hp, row2, building));
+}
+
+/// The hits line a phone's battle card shows (Razdor's own, the owner's decision, 2026-11-01): the
+/// strip's Hits text, "Hits: 45/50", else "45/50", else the current hits alone, the first that `fits`
+/// the strip; a unit at full hits shows "Hits: 50", else "50". Pure, so the choice is tested.
+fn hits_line(hp: i32, max: i32, fits: impl Fn(&str) -> bool) -> String {
+    let (cur, full) = if hp < max { (hp.max(0), true) } else { (max, false) };
+    let candidates = if full {
+        [razdor::trf!("Hits: {hp}/{max}", hp = cur, max), format!("{cur}/{max}"), cur.to_string()]
+    } else {
+        [razdor::trf!("Hits: {max}", max), max.to_string(), max.to_string()]
+    };
+    candidates.iter().find(|c| fits(c)).cloned().unwrap_or_else(|| cur.to_string())
+}
+
+/// [`battle_stat_strip`] on a phone (Razdor's own, the owner's decision, 2026-11-01): at 12 sp three
+/// lines do not fit a battle card's strip, so it shows one line, the unit's hits ([`hits_line`]),
+/// centred and in the Hits line's colour. The attack, defence and manoeuvres stay in the unit panel.
+pub fn battle_hits_strip(strip: Rect, now: &Stats, hp: i32, lit: bool, panel: StripPanel) {
+    strip_surface(strip, lit, panel);
+    super::typography::Role::Body.with(|| {
+        let l = StripLayout::of(strip);
+        let fs = super::dt_font::sheet_size(super::dt_font::Face::Body, super::dt_font::whole_scale(l.scale));
+        let max = now.max_hp();
+        let ink = if hp < max { StripInk::Red } else { StripInk::Orange };
+        let line = hits_line(hp, max, |c| measure(c, fs).width <= strip.w - 4.0 * l.scale);
+        let cap = measure("Н", fs).offset_y;
+        let x = strip.x + (strip.w - measure(&line, fs).width) / 2.0;
+        widgets::text(&line, x, strip.y + (strip.h + cap) / 2.0, fs, ink.color());
+    });
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1147,6 +1181,100 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, background: Rect, s
         }
     }
     clicked
+}
+
+/// The unit panel on a phone (Razdor's own, the owner's decision, 2026-11-01): the figure fitted
+/// into `pic` and centred there, and the text in `txt` as a scrolling kit `Flow`, every line at
+/// 12 sp or more: the name, the level and the experience, the stat lines (the label wrapped
+/// beside its value when they do not fit together), the status lines, the description and the
+/// traits with their icons, each wrapped to the width. `band`: the stacked band, whose text
+/// ground is the band's brown (as [`draw_band`]); else the landscape column. `note` (the turn, may be
+/// empty) stays on top of the text, out of the scroll. The caller draws the parchment. `id` keys the
+/// flow's scroll position.
+#[allow(clippy::too_many_arguments)]
+pub fn phone_panel(assets: &Assets, content: &Content, pic: Rect, txt: Rect, band: bool, s: &Sheet, note: &str, id: &'static str) {
+    use super::dt_font::Face;
+    use super::kit::{Flow, Text};
+    let k = k();
+    match assets.figure(s.kind) {
+        Some(t) => {
+            let fit = (pic.w / t.width()).min(pic.h / t.height());
+            chrome::tex(&t, band_figure_rect(pic, t.width(), t.height(), fit), WHITE);
+        }
+        None => silhouette(pic),
+    }
+    if band {
+        chrome::multiply(|| draw_rectangle(txt.x, txt.y, txt.w, txt.h, Color::new(0.5, 0.35, 0.0, 1.0)));
+    }
+    // The text's room: 6 px in from the left, and 18 px from the right, where the flow's bar stands.
+    let mut top = txt.y + 4.0 * k;
+    if !note.is_empty() {
+        let t = Text::new(note, 13.0, chrome::GOLD);
+        t.draw_one(txt.x + 6.0 * k, top + t.line_pitch() * 0.5 + t.size() * 0.35);
+        top += t.line_pitch();
+    }
+    // The flow's bar (10 px) stands at the right edge of `inner`: the text stops 12 px short of it.
+    let inner = Rect::new(txt.x + 6.0 * k, top, (txt.w - 12.0 * k).max(1.0), (txt.bottom() - 4.0 * k - top).max(1.0));
+    let (x, w, gap) = (inner.x, (inner.w - 12.0 * k).max(1.0), 6.0 * k);
+    // The text is clipped to the panel from the first frame: the flow clips only once it knows it
+    // overflows, so a unit with more lines than the last one would draw past the panel until then.
+    let _clip = widgets::Clip::new(inner);
+    let mut flow = Flow::begin(inner, id);
+    // A text's first baseline in a row of its own line pitch: centred in the pitch, as the kit's rows.
+    let base = |t: &Text| t.line_pitch() * 0.5 + t.size() * 0.35;
+    let name_ink = if s.named { NAMED_INK } else { CREAM };
+    let name = Text::new(s.name, 16.0, name_ink).face(Face::Subtitle);
+    flow.text_at(&name, x, base(&name), w, 0.0);
+    let level_text = razdor::trf!("Level {level}", level = s.level);
+    let xp_text = razdor::trf!("XP {xp} / {need}", xp = s.xp, need = s.need);
+    let level = Text::new(&level_text, 13.0, CREAM);
+    let xp = Text::new(&xp_text, 13.0, CREAM);
+    let lb = base(&level);
+    // The experience beside the level when both fit, else on a line of its own.
+    if level.width() + xp.width() + 8.0 * k <= w {
+        flow.row_h(level.line_pitch() + gap, |r| {
+            level.draw_one(r.x, r.y + lb);
+            xp.draw_right_one(x + w, r.y + lb);
+        });
+    } else {
+        flow.row_h(level.line_pitch() + gap, |r| level.draw_one(r.x, r.y + lb));
+        flow.row_h(xp.line_pitch() + gap, |r| xp.draw_one(r.x, r.y + base(&xp)));
+    }
+    for (label, value, color) in stat_lines(content, s) {
+        let vt = Text::new(&value, 13.0, color);
+        let lt = Text::new(&label, 13.0, color);
+        let lw = (w - vt.width() - 8.0 * k).max(1.0);
+        let lines = lt.lines(lw).len() as f32;
+        let b = base(&lt);
+        let h = (lines * lt.line_pitch()).max(vt.line_pitch()) + gap;
+        flow.row_h(h, |r| {
+            lt.draw(r.x, r.y + b, lw);
+            vt.draw_right_one(x + w, r.y + b);
+        });
+    }
+    for (status, color) in &s.status {
+        let t = Text::new(status, 13.0, *color);
+        flow.text_at(&t, x, base(&t), w, 0.0);
+    }
+    let desc = content.unit(s.kind).description.as_str();
+    if s.hero.is_none() && !desc.is_empty() {
+        let t = Text::new(desc, 13.0, CREAM);
+        flow.gap(4.0);
+        flow.text_at(&t, x, base(&t), w, 0.0);
+    }
+    // A trait's icon stands at the left, its text starts after it (as the band's list does).
+    let icon = 25.0 * k;
+    let tw = (w - icon - gap).max(1.0);
+    for (art, text, ink) in traits_of(s) {
+        let t = Text::new(&text, 13.0, ink);
+        let b = base(&t);
+        let h = (t.lines(tw).len() as f32 * t.line_pitch()).max(icon) + gap;
+        flow.row_h(h, |r| {
+            chrome::trait_icon(&art, r.x, r.y, icon);
+            t.draw(r.x + icon + gap, r.y + b, tw);
+        });
+    }
+    flow.finish();
 }
 
 #[cfg(test)]
@@ -1694,4 +1822,21 @@ mod tests {
         assert_eq!(line_of(&content, &sheet, "SDefenceBlow", "Melee defence"), (label("SDefenceBlow", "Melee defence"), format!("{} + 20", v - 4), RED_TEXT));
     }
 
+    /// A phone's battle card shows the hits that fit its width: "Hits: 45/50", else "45/50", else the
+    /// current hits; at full hits "Hits: 50", else "50" (the owner's decision, 2026-11-01).
+    #[test]
+    fn a_phone_card_shows_the_hits_that_fit() {
+        let wide = |_: &str| true;
+        assert_eq!(hits_line(45, 50, wide), razdor::trf!("Hits: {hp}/{max}", hp = 45, max = 50));
+        assert_eq!(hits_line(50, 50, wide), razdor::trf!("Hits: {max}", max = 50));
+        // Only "45/50" and shorter fit: the prefix goes.
+        let no_prefix = |s: &str| !s.starts_with("Hits");
+        assert_eq!(hits_line(45, 50, no_prefix), "45/50");
+        assert_eq!(hits_line(50, 50, no_prefix), "50");
+        // Only the current hits fit.
+        let short = |s: &str| s.len() <= 2;
+        assert_eq!(hits_line(45, 50, short), "45");
+        assert_eq!(hits_line(0, 50, short), "0", "a dead unit shows 0, never a negative");
+        assert_eq!(hits_line(-3, 50, short), "0");
+    }
 }

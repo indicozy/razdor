@@ -2938,6 +2938,53 @@ pub fn effect(rel: &str, c: Vec2, size: f32, t: f32, color: Color) -> bool {
     true
 }
 
+/// The battle window's title on a phone (Razdor's own, the owner's decision, 2026-11-01), drawn over
+/// the title strip of `win` (the caller draws the window with an empty title). Its room is the title
+/// bar's (clear of the close cross). It shrinks to the phone's floor (never under 12 sp) until it fits in
+/// one line; else two lines when two fit the strip; else one line shortened with "…".
+/// The desktop never calls it: its title is drawn by [`window`] as before.
+pub fn phone_title_text(win: Rect, title: &str, skin: Skin, closable: bool) {
+    let k = k();
+    let dp = super::display::dp_px();
+    let tb0 = strip_height(k, FIXED_TITLE);
+    let tb = phone_strip_height(tb0, dp);
+    let r = grown_upward(win, tb - tb0, super::display::safe_area().top);
+    let strip = Rect::new(r.x, r.y, r.w, tb);
+    let color = if skin == Skin::Red { GOLD } else { CREAM };
+    let cross = closable.then(|| title_close_cross(strip, k));
+    let room = strip.w - 2.0 * strip.h - 8.0 * k;
+    let room = match cross {
+        Some(c) if dp.is_some() => room_clear_of(room, strip, c, k),
+        _ => room,
+    };
+    let face = super::typography::Role::Title.face();
+    let size = super::typography::Role::Title.size((16.0 * k).round());
+    super::dt_font::with_face(face, || {
+        // Shrink while the drawn size (the floor binds once `phone_floor` stops falling) is too wide.
+        let mut s = size;
+        while measure(title, super::widgets::phone_floor(s)).width > room && super::widgets::phone_floor(s - 0.5) < super::widgets::phone_floor(s) {
+            s -= 0.5;
+        }
+        let size = super::widgets::phone_floor(s);
+        // Two lines one em apart (a capital is about 0.7 em, so they keep a gap).
+        let pitch = size;
+        let lines = if measure(title, size).width <= room {
+            vec![title.to_string()]
+        } else {
+            let two = super::widgets::wrap(title, room, size);
+            if two.len() == 2 && 2.0 * pitch <= strip.h {
+                two
+            } else {
+                vec![super::widgets::ellipsize(title, room, size)]
+            }
+        };
+        let first = strip.center().y - (lines.len() as f32 - 1.0) * pitch / 2.0 + size * 0.36;
+        for (i, line) in lines.iter().enumerate() {
+            shadow_centered(line, strip.center().x, first + i as f32 * pitch, size, color);
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

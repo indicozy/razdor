@@ -19,6 +19,7 @@ use razdor::rules::magic::{self, CastError, CastOutcome, CastTarget, Duration, B
 
 use super::audio::{cue, Cue};
 use super::keymap::{self, Action};
+use super::kit;
 use super::widgets::*;
 use super::window_layout;
 use super::world_view;
@@ -232,6 +233,9 @@ pub fn frame(
     let _scale = super::window_layout::game_scale(video);
     let k = chrome::k();
     let r = super::window_layout::game_rect(video).unwrap_or_else(super::window_layout::landscape_window);
+    if kit::phone().is_some() {
+        return phone_frame(game, r, selected, page, filter, message).or(bar_pick);
+    }
     let title = own("Title", n_("The hero's spell book"));
     let (inner, closed) = chrome::window(r, &title, chrome::Skin::Marble, true);
     let book: Vec<SpellDef> = game.book().into_iter().cloned().collect();
@@ -355,6 +359,141 @@ pub fn frame(
     next.or(bar_pick)
 }
 
+/// The book on a phone (Razdor's own, the owner's decision, 2026-11-01), upright or sideways: a
+/// scrolling list of the spells, one card per spell (its picture, name, what it does, cost and
+/// duration, each wrapped at 12 sp or more; upright one card a row, sideways two), a tap on a card
+/// casts it as a click on the desktop card does, and the filter button is touch-tall at the foot.
+/// The paging of the desktop book becomes the list's scroll here; the filter still cycles.
+fn phone_frame(game: &mut Game, r: Rect, selected: &mut usize, page: &mut usize, filter: &mut BookFilter, message: &mut Option<String>) -> Option<Screen> {
+    use super::chrome::{self, CREAM};
+    use super::dt_font::Face;
+    let k = chrome::k();
+    let (inner, closed) = chrome::window(r, &own("Title", n_("The hero's spell book")), chrome::Skin::Marble, true);
+    let book: Vec<SpellDef> = game.book().into_iter().cloned().collect();
+    let enemy: Vec<bool> = book.iter().map(magic::targets_enemy).collect();
+    let gap = 6.0 * k;
+    let upright = kit::upright();
+    let cols = if upright { 1 } else { 2 };
+    // The bottom: the filter button (a touch target), and the message line above it when there is one.
+    let bh = kit::touch_h(18.0);
+    let msg = message.as_ref().filter(|_| true).map(|m| kit::Text::new(m, 14.0, ACCENT).face(Face::Subtitle));
+    let msg_h = msg.as_ref().map_or(0.0, |t| t.height(inner.w - 16.0 * k));
+    let bottom_h = bh + gap + msg_h;
+    let list = Rect::new(inner.x + 4.0 * k, inner.y + 4.0 * k, inner.w - 8.0 * k, (inner.h - bottom_h - 8.0 * k).max(1.0));
+    let shown_idx = shown(&enemy, *filter);
+    let mut flow = kit::Flow::begin(list, "spellbook");
+    let cw = (list.w - (cols as f32 + 1.0) * gap) / cols as f32;
+    let mut cast = None;
+    if shown_idx.is_empty() {
+        let none = own("NoSpell", n_("No\nspells\nlearnt")).replace('\n', " ");
+        let t = kit::Text::new(&none, 15.0, CREAM).face(Face::Subtitle);
+        flow.text_at(&t, list.x + gap, t.line_pitch() * 0.5 + t.size() * 0.35, list.w - 2.0 * gap, 0.0);
+    }
+    for row in shown_idx.chunks(cols) {
+        // The row's height: its tallest card (at least a finger tall).
+        let text_w = cw - 2.0 * gap - (cw - 2.0 * gap).min(96.0 * k) - 6.0 * k;
+        let heights: Vec<f32> = row.iter().map(|&i| phone_card_height(game, &book[i], text_w)).collect();
+        let row_h = (heights.iter().cloned().fold(0.0, f32::max) + 8.0 * k).max(kit::finger_h(56.0 * k));
+        flow.row_h(row_h + gap, |band| {
+            for (c, &i) in row.iter().enumerate() {
+                let cr = Rect::new(band.x + gap + c as f32 * (cw + gap), band.y + gap / 2.0, cw, row_h);
+                let s = &book[i];
+                let hover = !input_blocked() && cr.contains(pointer().into());
+                let affordable = game.mana >= game.cast_cost(s).mana;
+                // A card cut by the list's edge is drawn but cannot be pressed until it is whole.
+                let inside = cr.y >= list.y - 0.5 && cr.bottom() <= list.bottom() + 0.5;
+                if inside && widgets_pressed(cr) {
+                    *selected = i;
+                    cast = Some(s.clone());
+                }
+                card_paper(cr, card_fill(affordable, hover && inside));
+                let side = (cr.h - 8.0 * k).min(96.0 * k);
+                let icon = Rect::new(cr.x + 4.0 * k, cr.y + (cr.h - side) / 2.0, side, side);
+                chrome::spell_icon(s, icon);
+                let tx = icon.x + icon.w + 6.0 * k;
+                phone_card_draw(game, s, tx, cr.y + 4.0 * k, cr.x + cr.w - tx - 4.0 * k);
+            }
+        });
+    }
+    flow.finish();
+    // The filter button at the foot, the message under the list.
+    let fy = inner.bottom() - 6.0 * k - bh - msg_h - if msg_h > 0.0 { gap } else { 0.0 };
+    let fb = Rect::new(inner.x + 4.0 * k, fy, inner.w - 8.0 * k, bh);
+    if kit::button(fb, filter.label(), true) {
+        *filter = filter.next();
+        *page = 0;
+    }
+    if let Some(t) = msg {
+        t.draw(inner.x + 8.0 * k, inner.bottom() - 6.0 * k - msg_h + t.line_pitch() * 0.5 + t.size() * 0.35, inner.w - 16.0 * k);
+    }
+    if closed || key(KeyCode::Escape) || key(keymap::key(Action::SpellBook)) {
+        return Some(Screen::WorldMap);
+    }
+    if let Some(s) = cast.filter(|s| game.mana >= game.cast_cost(s).mana) {
+        if magic::targets_enemy(&s) {
+            if game.foe.is_none() {
+                world_view::begin_targeting(s.id);
+                return Some(Screen::WorldMap);
+            }
+        } else {
+            return self::cast(game, s.id, CastTarget::Own, message);
+        }
+    }
+    None
+}
+
+/// A card's press on a phone: the row's rectangle is pressed this frame (a touch or a click).
+fn widgets_pressed(r: Rect) -> bool {
+    super::widgets::button_state(r, true).2
+}
+
+/// A phone card's text for a spell: its lines as (text, ink, name?) in the desktop card's colours
+/// (the name in 15 sp, the effect entries in blue or yellow, the cost and the duration in gold, all
+/// red when the hero cannot afford it). Each wraps at the card's width.
+fn phone_card_lines(game: &Game, s: &SpellDef) -> Vec<(String, Color, bool)> {
+    use super::chrome::CREAM;
+    let cost = game.cast_cost(s);
+    let red = game.mana < cost.mana;
+    let effect = razdor::rules::spell_hint::effect_entries(s, &super::spell_badges::label);
+    let mut lines = vec![(s.name.clone(), if red { UNAFFORDABLE_NAME } else { CREAM }, true)];
+    for e in effect {
+        let ink = if red { UNAFFORDABLE } else if e.good { EFFECT_BLUE } else { EFFECT_YELLOW };
+        lines.push((e.text, ink, false));
+    }
+    let card_hours = game.card_cast_hours(s).max(0) as u64;
+    let mana_line = format!("{} {}, {} {}", own("Mana", n_("Mana:")), cost.mana, own("Reading", n_("Reading:")), hours(card_hours * 60, false));
+    let last = match Duration::of(s) {
+        Duration::Instant => own("MomentaryEffect", n_("Instant effect")),
+        Duration::Minutes(m) => format!("{} {}", own("TimeOfEffect", n_("Lasts:")), hours(m, true)),
+    };
+    let ink = if red { UNAFFORDABLE } else { GOLD };
+    lines.push((mana_line, ink, false));
+    lines.push((last, ink, false));
+    lines
+}
+
+/// The text of a phone card as `kit::Text`s at `width` px (the name in the Subtitle face at 15).
+fn phone_text<'a>(line: &'a (String, Color, bool)) -> kit::Text<'a> {
+    let t = kit::Text::new(&line.0, if line.2 { 15.0 } else { 13.0 }, line.1);
+    if line.2 { t.face(super::dt_font::Face::Subtitle) } else { t }
+}
+
+/// The height of a phone card's text `width` px wide.
+fn phone_card_height(game: &Game, s: &SpellDef, width: f32) -> f32 {
+    phone_card_lines(game, s).iter().map(|l| phone_text(l).height(width)).sum::<f32>() + 4.0
+}
+
+/// Draws a phone card's text from `(x, y)` (its top) `width` px wide.
+fn phone_card_draw(game: &Game, s: &SpellDef, x: f32, y: f32, width: f32) {
+    let mut y = y;
+    for l in phone_card_lines(game, s) {
+        let t = phone_text(&l);
+        t.draw(x, y + t.line_pitch() * 0.5 + t.size() * 0.35, width);
+        y += t.height(width);
+    }
+}
+
+/// A row press on a phone: the rectangle is pressed this frame (a touch or a click).
 /// The height of the bottom row's buttons: 18 px at Normal, grown with the text size (`button_grow`,
 /// the owner's decision of 2026-10-31).
 fn bottom_row_h(k: f32) -> f32 {
