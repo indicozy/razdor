@@ -59,8 +59,10 @@ pub fn floored(size: f32) -> f32 {
     let Some(min_cap) = min_cap_px() else {
         return size;
     };
-    let cap = dt_font::legacy_metrics_if(true, || widgets::measure_exact("Н", size).offset_y);
-    floored_at(size, cap, Some(min_cap))
+    // `measure_exact` applies the phone floor itself, so the capital is measured without it.
+    dt_font::legacy_metrics_if(true, || {
+        widgets::without_floor(|| widgets::raise_to_cap(size, min_cap, |s| widgets::measure_exact("Н", s).offset_y))
+    })
 }
 
 /// The pre-floor size of a text the design gives `design` px: desktop `design * k`, phone
