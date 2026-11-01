@@ -1197,7 +1197,13 @@ impl BattleView {
         // Its red close button asks to leave the battle, as Esc does (4daa80).
         let ongoing = b.outcome() == Outcome::Ongoing;
         let closable = !self.end_shown();
-        let (_, title_close) = chrome::window(l.win, title, Skin::Red, closable);
+        // On a phone the title is drawn over the strip by `chrome::phone_title_text` (it wraps to two
+        // lines rather than being cut with "…"); the bar itself is drawn without it.
+        let phone = kit::phone().is_some();
+        let (_, title_close) = chrome::window(l.win, if phone { "" } else { title }, Skin::Red, closable);
+        if phone {
+            chrome::phone_title_text(l.win, title, Skin::Red, closable);
+        }
         let close = title_close && !self.exiting && !input_blocked();
         // The frame between the panel and the formations (stacked, the band's seam is drawn last).
         if !l.is_stacked() {
@@ -1231,10 +1237,13 @@ impl BattleView {
         if kit::phone().is_some() {
             // Razdor's own (the owner's decision, 2026-11-01): on a phone the hint is one line across the
             // whole strip (it reads in 12 sp, with no ellipsis), and the turn goes to the unit panel's top
-            // (beside the hint it would not fit).
-            let face = if color == EXIT_HINT_INK { super::dt_font::Face::Bold } else { super::dt_font::Face::Body };
-            let t = kit::Text::new(&hint, 13.0, color).face(face);
-            t.draw_one(l.strip.x + ((l.strip.w - t.width()) / 2.0).max(0.0), l.strip.y + l.strip.h * 0.5 + t.size() * 0.36);
+            // (beside the hint it would not fit). The "press ESC" hint is left out: a phone has no Esc, and
+            // its window's close cross leaves the battle (the owner's decision, 2026-11-01).
+            if color != EXIT_HINT_INK {
+                let face = super::dt_font::Face::Body;
+                let t = kit::Text::new(&hint, 13.0, color).face(face);
+                t.draw_one(l.strip.x + ((l.strip.w - t.width()) / 2.0).max(0.0), l.strip.y + l.strip.h * 0.5 + t.size() * 0.36);
+            }
         } else {
             let text_r = Rect { w: l.strip.w - 60.0 * k, x: l.strip.x + 30.0 * k, ..l.strip };
             if color == EXIT_HINT_INK {
@@ -1466,8 +1475,6 @@ impl BattleView {
             chrome::card_highlight(sq, lit, pulse_ms);
         }
         let strip = Rect::new(p.x, p.y + w, w, h - w);
-        let row2 = if f.slot.row == Row::Back { self.battle.content().options.row2_def } else { 0 };
-        let (caster, place) = (unit_sheet::caster(self.battle.content(), f.unit), unit_sheet::strip_place(self.battle.formation, f.slot));
         // The hero's and the enemy's first unit's strip is red, a named character's blue
         // (0x49462c, in battle for both sides).
         let first_enemy = f.team == Team::Enemy && self.battle.fighters.iter().position(|x| x.team == Team::Enemy) == Some(id);
@@ -1478,7 +1485,16 @@ impl BattleView {
         } else {
             unit_sheet::StripPanel::Plain
         };
-        unit_sheet::battle_stat_strip(strip, s, base, f.power, caster, place, f.hp, row2, lit == Some(chrome::Lit::Current), panel);
+        let lit_current = lit == Some(chrome::Lit::Current);
+        if kit::phone().is_some() {
+            // Razdor's own (the owner's decision, 2026-11-01): on a phone the card's strip shows only its hits
+            // (the three lines overlap at 12 sp); the unit panel has the rest.
+            unit_sheet::battle_hits_strip(strip, s, f.hp, lit_current, panel);
+        } else {
+            let row2 = if f.slot.row == Row::Back { self.battle.content().options.row2_def } else { 0 };
+            let (caster, place) = (unit_sheet::caster(self.battle.content(), f.unit), unit_sheet::strip_place(self.battle.formation, f.slot));
+            unit_sheet::battle_stat_strip(strip, s, base, f.power, caster, place, f.hp, row2, lit_current, panel);
+        }
 
         // The original's signs (493a64): a drunk potion, then the blessing, from the top
         // left; poison (a negative regeneration), then the curse, from the top right; 23 px
