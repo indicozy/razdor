@@ -88,6 +88,9 @@ SCREENS = [
     ("help", "map:РК1-Начало пути", {"RAZDOR_SCENE_OPEN": "3:keys"}),
     ("save", "save:РК1-Начало пути", {}),
     ("load", "load", {}),
+    # The game menu's exit window and the battle's leave window (phone-exit-*, phone-battle-exit-*).
+    ("exit", "menu:РК1-Начало пути", {}),
+    ("battle-exit", "battle:РК1-Начало пути:0", {"RAZDOR_SCENE_BATTLE_EXIT": "1"}),
     ("custom-battle", "custom-battle", {}),
     ("victory", "victory:РК1-Начало пути", {}),
     # An event's rewards (a player's report 1453): mana, a joined unit and items; and more rows.

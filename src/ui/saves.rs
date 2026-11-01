@@ -17,6 +17,7 @@ use razdor::rules::save::{self, ListedSave, MetaState, SaveKind};
 use super::assets::Assets;
 use super::battle_view::BattleView;
 use super::widgets::*;
+use super::kit;
 use super::world_view;
 use super::Screen;
 
@@ -827,6 +828,10 @@ pub fn quick_save_message(game: &Game) -> String {
 /// сохранение» (the owner's request, not in the original) does it and closes the window.
 pub fn save_screen(game: &Game, assets: &Assets, view: &mut SaveView, quick: bool, message: &mut Option<String>) -> Option<Screen> {
     world_view::backdrop(game, assets);
+    // A phone (held upright or sideways): its own layout (`save_phone`), over the map.
+    if let Some((k, rect)) = kit::phone_window(true, (Book::W, Book::H), true) {
+        return super::display::with_window_scale(Some(k), || save_phone(game, view, quick, message, k, rect));
+    }
     // The save window at its own scale on a phone (`window_layout::over_map_scale`: upright between the
     // inset and the bar, sideways as the main menu's load window).
     let _scale = super::window_layout::over_map_scale((Book::W, book_video_h(super::display::button_grow(), true)));
@@ -874,19 +879,13 @@ pub fn save_screen(game: &Game, assets: &Assets, view: &mut SaveView, quick: boo
     }
     let [(quick_x, quick_y, quick_w), (save_x, save_y, save_w), (cancel_x, cancel_y, cancel_w)] = save_button_row(book.grow);
     if book.finger_button(quick_x, quick_y, quick_w, tr(n_("Quick save")), quick) {
-        *message = Some(quick_save_message(game));
-        return Some(Screen::WorldMap);
+        return quick_now(game, message);
     }
     let ok = can_save(&view.name, dir.is_some());
     if book.finger_button(save_x, save_y, save_w, &own("SaveGame", "Save", n_("Save")), ok) || (ok && enter) {
         let dir = dir.expect("checked");
-        match save::write(&dir, SaveKind::Manual, view.name.trim(), game) {
-            Ok(_) => {
-                *message = Some(razdor::trf!("Saved: {name}", name = view.name.trim()));
-                return Some(Screen::WorldMap);
-            }
-            // The window stays: a save to replace can be picked.
-            Err(e) => view.error = Some(razdor::trf!("Not saved: {e}.", e)),
+        if let Some(s) = save_typed(game, view, &dir, message) {
+            return Some(s);
         }
     }
     if book.finger_button(cancel_x, cancel_y, cancel_w, &own("Buttons", "Cancel", n_("Cancel")), true) || closed {
@@ -914,6 +913,11 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     let previously_blocked = input_blocked();
     if asking { set_input_blocked(true); }
     let over_map = game.is_some() && view.back != Back::Title;
+    // A phone (held upright or sideways): its own layout (`load_phone`), from the title or over the map.
+    if let Some((k, rect)) = kit::phone_window(over_map, (Book::W, Book::H), true) {
+        let ask = LoadAsk { previously_blocked, asking, asking_delete };
+        return super::display::with_window_scale(Some(k), || load_phone(view, pending, error, ask, k, rect));
+    }
     // The load window at its own scale on a phone: the title's (`window_layout::title_scale`) or the one
     // over the map (`window_layout::over_map_scale`, the same size as the title's when held sideways).
     let grow = super::display::button_grow();
@@ -929,18 +933,8 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     let (picked, delete, pin) = book.rows(&rows, Some(view.selected), &mut view.scroll, true);
     // Razdor's pin: the icon, or P for the selected save.
     let pin = pin.or_else(|| key(KeyCode::P).then_some(view.selected));
-    if let Some(e) = pin.filter(|_| !asking).and_then(|k| view.entries.get(k)) {
-        let (path, on) = (e.path.clone(), !e.pinned);
-        if let Err(err) = save::set_pinned(&path, on) {
-            razdor::diag!("{}: {err}", path.display());
-        }
-        view.refresh();
-        fill_metas(&mut view.entries, &mut view.asked, &mut view.settled, 0, None);
-        // The save stays selected where the list now puts it.
-        if let Some(k) = view.entries.iter().position(|e| e.path == path) {
-            view.selected = k;
-            view.scroll = k.saturating_sub(book.shown() - 1);
-        }
+    if let Some(at) = pin.filter(|_| !asking).and_then(|k| toggle_pin(view, k)) {
+        view.scroll = at.saturating_sub(book.shown() - 1);
     }
     if let Some(k) = picked.filter(|_| !asking) {
         if k == view.selected {
@@ -967,10 +961,7 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
         }
     }
     if let Some(tab) = switched {
-        super::audio::cue(super::audio::Cue::CastSpell);
-        view.tab = tab;
-        LAST_TAB.with(|t| t.set(tab));
-        view.refresh();
+        switch_tab(view, tab);
     }
     let clearable = view.entries.iter().any(|e| !e.pinned);
     // Razdor's own: the buttons grow with the text (`button_grow`): «Очистить всё» keeps its left end,
@@ -996,17 +987,9 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
         return None;
     }
     if asking_delete {
-        let (path, name) = view.confirm_delete.as_ref().expect("delete confirmation");
+        let (_, name) = view.confirm_delete.as_ref().expect("delete confirmation");
         match delete_save_question(&book, name) {
-            Some(true) => {
-                if let Err(err) = save::delete(path) {
-                    razdor::diag!("{}: {err}", path.display());
-                }
-                let selected = view.selected;
-                view.confirm_delete = None;
-                view.refresh();
-                view.selected = selected.min(view.entries.len().saturating_sub(1));
-            }
+            Some(true) => finish_delete(view),
             Some(false) => view.confirm_delete = None,
             None => {}
         }
@@ -1015,27 +998,606 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     // "Clear all"'s question. It opens on the next frame, so the click that asked it cannot
     // also answer it.
     if view.confirm_clear {
-        let tab = if view.tab == SaveKind::Manual { own("LoadGame", "PrivateSave", n_("Private")) } else { own("LoadGame", "AutoSave", n_("Autosaves")) };
-        let q = format!("^{}", razdor::trf!("Delete every save of the \"{tab}\" tab? The pinned ones stay.", tab));
-        match marked_question(&own("MessageBox", "DeleteSave_Title", n_("Delete the save")), &q) {
-            Some(true) => {
-                for e in view.entries.iter().filter(|e| !e.pinned) {
-                    if let Err(err) = save::delete(&e.path) {
-                        razdor::diag!("{}: {err}", e.path.display());
-                    }
-                }
-                view.confirm_clear = false;
-                view.refresh();
-            }
-            Some(false) => view.confirm_clear = false,
-            None => {}
-        }
+        ask_clear(view);
         return None;
     }
     if key(KeyCode::Escape) {
         return Some(view.back.escape());
     }
     None
+}
+
+// ------------------------------------------------------------------------------------------
+// Actions shared by the desktop's and the phone's layouts (Razdor's own: the same state, only
+// the places differ).
+// ------------------------------------------------------------------------------------------
+
+/// The quick save's button: the message on the map, and the window closes.
+fn quick_now(game: &Game, message: &mut Option<String>) -> Option<Screen> {
+    *message = Some(quick_save_message(game));
+    Some(Screen::WorldMap)
+}
+
+/// Writes the typed name as a manual save into `dir`. True-ish: `Some` when it is written and the
+/// window closes; a failed save keeps the window (a save to replace can be picked).
+fn save_typed(game: &Game, view: &mut SaveView, dir: &std::path::Path, message: &mut Option<String>) -> Option<Screen> {
+    match save::write(dir, SaveKind::Manual, view.name.trim(), game) {
+        Ok(_) => {
+            *message = Some(razdor::trf!("Saved: {name}", name = view.name.trim()));
+            Some(Screen::WorldMap)
+        }
+        Err(e) => {
+            view.error = Some(razdor::trf!("Not saved: {e}.", e));
+            None
+        }
+    }
+}
+
+/// Pins or unpins the save `k` of the load list (its pin sign, or P for the selected save): the
+/// file is written, the list read again, and the save stays selected where the list now puts it.
+/// Returns its new place.
+fn toggle_pin(view: &mut LoadView, k: usize) -> Option<usize> {
+    let e = view.entries.get(k)?;
+    let (path, on) = (e.path.clone(), !e.pinned);
+    if let Err(err) = save::set_pinned(&path, on) {
+        razdor::diag!("{}: {err}", path.display());
+    }
+    view.refresh();
+    fill_metas(&mut view.entries, &mut view.asked, &mut view.settled, 0, None);
+    let at = view.entries.iter().position(|e| e.path == path)?;
+    view.selected = at;
+    Some(at)
+}
+
+/// Shows the load window's tab `tab` (the cue, the tab kept for the next open, the list read again).
+fn switch_tab(view: &mut LoadView, tab: SaveKind) {
+    super::audio::cue(super::audio::Cue::CastSpell);
+    view.tab = tab;
+    LAST_TAB.with(|t| t.set(tab));
+    view.refresh();
+}
+
+/// The delete question's yes: the file goes, the list is read again and the selection kept.
+fn finish_delete(view: &mut LoadView) {
+    let Some((path, _)) = view.confirm_delete.take() else { return };
+    if let Err(err) = save::delete(&path) {
+        razdor::diag!("{}: {err}", path.display());
+    }
+    let selected = view.selected;
+    view.refresh();
+    view.selected = selected.min(view.entries.len().saturating_sub(1));
+}
+
+/// "Clear all"'s question: yes deletes the tab's saves but the pinned ones.
+fn ask_clear(view: &mut LoadView) {
+    let tab = if view.tab == SaveKind::Manual { own("LoadGame", "PrivateSave", n_("Private")) } else { own("LoadGame", "AutoSave", n_("Autosaves")) };
+    let q = format!("^{}", razdor::trf!("Delete every save of the \"{tab}\" tab? The pinned ones stay.", tab));
+    match marked_question(&own("MessageBox", "DeleteSave_Title", n_("Delete the save")), &q) {
+        Some(true) => {
+            for e in view.entries.iter().filter(|e| !e.pinned) {
+                if let Err(err) = save::delete(&e.path) {
+                    razdor::diag!("{}: {err}", e.path.display());
+                }
+            }
+            view.confirm_clear = false;
+            view.refresh();
+        }
+        Some(false) => view.confirm_clear = false,
+        None => {}
+    }
+}
+
+// ------------------------------------------------------------------------------------------
+// Phones (Razdor's own, the owner's decision, 2026-11-01): the phone layout of the save and load
+// windows. Upright: the name field (save) or the two tabs (load) on top, the list of saves in
+// cards that scrolls, and the buttons under it. Sideways, or upright when the list would have
+// fewer than three cards: the buttons stack on the right of the list. Every text is a `kit::Text`
+// (at least 12 sp), every button a `kit::button` (at least 48 dp). The window's design units are
+// dp here (`display::with_window_scale`), so `k` is one dp in screen px.
+// ------------------------------------------------------------------------------------------
+
+/// The smallest card of a save on a phone, in dp.
+const CARD_MIN_DP: f32 = 56.0;
+/// The left strip of a card, where the play and the pin marks sit, in dp.
+const MARK_STRIP_DP: f32 = 36.0;
+/// The space above and below a card's text, in dp.
+const CARD_PAD_DP: f32 = 5.0;
+
+/// The gap between a phone window's parts, in px at `k` (8 dp: the buttons' gap the touch check wants).
+fn phone_gap(k: f32) -> f32 {
+    8.0 * k
+}
+
+/// The gap under each card of a phone's list, in dp.
+const CARD_GAP_DP: f32 = 6.0;
+
+/// The inner rectangle of a phone window `r` at `k` px per dp: below its title strip, as
+/// `chrome::window` makes it (the same strip).
+fn phone_inner(r: Rect, k: f32) -> Rect {
+    let tb = super::chrome::phone_strip_height(super::chrome::strip_height(k, super::chrome::FIXED_TITLE), super::display::dp_px());
+    Rect::new(r.x + 2.0 * k, r.y + tb + 1.0, r.w - 4.0 * k, r.h - tb - 3.0 * k)
+}
+
+/// The parts of a phone's save or load window, in px: `head` (the name field or the tabs), `warning`
+/// (a message under the head, empty when none), `list`, and the three buttons in order: the first
+/// is the full-width one (quick save, clear all), then the two halves (save or load, and cancel). When
+/// sideways, or upright with fewer than three cards, the three stack on the right of the list.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PhoneBook {
+    head: Rect,
+    warning: Rect,
+    list: Rect,
+    buttons: [Rect; 3],
+}
+
+fn phone_book(inner: Rect, k: f32, bh: f32, warn_h: f32) -> PhoneBook {
+    let pad = 8.0 * k;
+    let gap = phone_gap(k);
+    let w = (inner.w - 2.0 * pad).max(1.0);
+    let x = inner.x + pad;
+    let bottom = inner.bottom() - pad;
+    // The head starts below the window's close sign's finger area (48 dp from the window's top).
+    let head = Rect::new(x, inner.y + pad + 6.0 * k, w, bh);
+    let warning = Rect::new(x, head.bottom() + gap, w, warn_h);
+    let list_top = if warn_h > 0.0 { warning.bottom() + gap } else { head.bottom() + gap };
+    let half = (w - gap) / 2.0;
+    let foot_h = 2.0 * bh + gap;
+    let column_list_h = (bottom - foot_h - gap) - list_top;
+    if column_list_h >= 3.0 * CARD_MIN_DP * k + 2.0 * 4.0 * k {
+        let (full_y, half_y) = (bottom - foot_h, bottom - bh);
+        PhoneBook {
+            head,
+            warning,
+            list: Rect::new(x, list_top, w, column_list_h),
+            buttons: [Rect::new(x, full_y, w, bh), Rect::new(x, half_y, half, bh), Rect::new(x + half + gap, half_y, half, bh)],
+        }
+    } else {
+        let lw = (w - gap) * 0.65;
+        let rx = x + lw + gap;
+        let rw = w - lw - gap;
+        let at = |i: usize| Rect::new(rx, list_top + i as f32 * (bh + gap), rw, bh);
+        PhoneBook {
+            head,
+            warning,
+            list: Rect::new(x, list_top, lw, (bottom - list_top).max(0.0)),
+            buttons: [at(0), at(1), at(2)],
+        }
+    }
+}
+
+/// A save's card on a phone: what its row shows (the desktop's row, with the in-game date).
+struct Card {
+    name: String,
+    scenario: String,
+    date: String,
+    time: String,
+    pinned: bool,
+    waiting: bool,
+}
+
+fn card_of(e: &ListedSave) -> Card {
+    match &e.meta {
+        None => Card { name: "…".to_string(), scenario: String::new(), date: String::new(), time: time_line(e.written), pinned: e.pinned, waiting: true },
+        Some(m) => {
+            let name = if m.name == save::QUICK_SAVE || m.name == save::SESSION { tr(&m.name).to_string() } else { m.name.clone() };
+            let scenario = if m.cheats { razdor::trf!("{title} (cheats)", title = m.title) } else { m.title.clone() };
+            Card { name, scenario, date: m.date.clone(), time: time_line(m.saved_at), pinned: e.pinned, waiting: false }
+        }
+    }
+}
+
+/// The card's three lines as strings: the name, the scenario with the in-game date, the real time.
+fn card_parts(c: &Card) -> [String; 3] {
+    let second = match (c.scenario.is_empty(), c.date.is_empty()) {
+        (true, _) => String::new(),
+        (false, true) => c.scenario.clone(),
+        (false, false) => format!("{}, {}", c.scenario, c.date),
+    };
+    [c.name.clone(), second, c.time.clone()]
+}
+
+/// The card's texts: the name (15, the save's name ink), the scenario and date (13, Bold), the real
+/// time (13, Body); lit as the picked row and dimmed while its meta is read.
+fn card_texts<'a>(parts: &'a [String; 3], c: &Card, is_sel: bool) -> [kit::Text<'a>; 3] {
+    let ink = |base: [u8; 3]| {
+        let col = row_ink(base, is_sel);
+        if c.waiting { Color { a: col.a * 0.55, ..col } } else { col }
+    };
+    [
+        kit::Text::new(&parts[0], 15.0, ink(NAME_INK)).face(super::dt_font::Face::Subtitle),
+        kit::Text::new(&parts[1], 13.0, ink(SCENARIO_INK)).face(super::dt_font::Face::Bold),
+        kit::Text::new(&parts[2], 13.0, ink(TIME_INK)).face(super::dt_font::Face::Body),
+    ]
+}
+
+/// The width a card's text may take: the list less the left strip and, for the load window, the right
+/// strip of the pin and delete signs (kept on every card, so a picked card does not change its height).
+fn card_text_w(list_w: f32, deletable: bool, k: f32) -> f32 {
+    let sq = kit::finger_h(0.0);
+    let right = if deletable { 2.0 * sq + 6.0 * k } else { 8.0 * k };
+    (list_w - MARK_STRIP_DP * k - right - 6.0 * k).max(1.0)
+}
+
+/// The height of a card in a list `list_w` wide: its wrapped lines and the padding, at least
+/// [`CARD_MIN_DP`].
+fn card_h(c: &Card, list_w: f32, deletable: bool, k: f32) -> f32 {
+    let parts = card_parts(c);
+    let w = card_text_w(list_w, deletable, k);
+    let texts = card_texts(&parts, c, false);
+    let content: f32 = texts.iter().zip(parts.iter()).filter(|(_, s)| !s.is_empty()).map(|(t, _)| t.height(w)).sum();
+    (content + 2.0 * CARD_PAD_DP * k).max(CARD_MIN_DP * k)
+}
+
+/// The width of `s` as the kit draws it with `t` (its size, its face, the phone's metrics).
+fn kit_width(t: &kit::Text, s: &str) -> f32 {
+    let size = t.size();
+    let measure_it = || super::dt_font::legacy_metrics_if(true, || measure(s, size).width);
+    match t.face {
+        Some(face) => super::dt_font::with_face(face, measure_it),
+        None => measure_it(),
+    }
+}
+
+/// A text of `design` px drawn centred on `cx`, wrapped to `width`, its top at `top`. Returns its height.
+fn centred(s: &str, design: f32, color: Color, face: super::dt_font::Face, cx: f32, top: f32, width: f32) -> f32 {
+    let t = kit::Text::new(s, design, color).face(face);
+    let (size, pitch) = (t.size(), t.line_pitch());
+    for (i, line) in t.lines(width).iter().enumerate() {
+        let one = kit::Text::new(line, design, color).face(face);
+        one.draw_one(cx - kit_width(&one, line) / 2.0, top + size * 0.85 + i as f32 * pitch);
+    }
+    t.height(width)
+}
+
+/// A text drawn left aligned at `x`, wrapped to `width`, its top at `top`. Returns its height.
+fn at_top(t: &kit::Text, x: f32, top: f32, width: f32) -> f32 {
+    t.draw(x, top + t.size() * 0.85, width);
+    t.height(width)
+}
+
+/// The list of a phone's save or load window: one card per save, from the list's top, scrolling
+/// with the wheel and a swipe. `selected` is lit (the load window's pin and delete signs sit on it
+/// when `deletable`). Returns the card picked, the delete sign's and the pin sign's (indices).
+fn phone_list(flow: &mut kit::Flow, cards: &[Card], selected: Option<usize>, deletable: bool) -> (Option<usize>, Option<usize>, Option<usize>) {
+    let k = super::chrome::k();
+    let sq = kit::finger_h(0.0);
+    let (mut picked, mut delete, mut pin) = (None, None, None);
+    for (i, c) in cards.iter().enumerate() {
+        let r = flow.row_h(card_h(c, flow.width(), deletable, k), |_| {});
+        flow.gap(CARD_GAP_DP);
+        if !flow.visible(r) {
+            continue;
+        }
+        let live = !flow.cut(r);
+        let is_sel = selected == Some(i);
+        let signs = deletable && is_sel;
+        let right = if signs { 2.0 * sq + 6.0 * k } else { 0.0 };
+        // A card cut by the list's edge is drawn but takes no press (and no touch target).
+        let (hover, down, row_pressed) = if live { super::widgets::button_state(Rect::new(r.x, r.y, r.w - right, r.h), true) } else { (false, false, false) };
+        if is_sel {
+            // The video's blue bar, as the desktop's picked row.
+            for s in 0..8 {
+                let t = s as f32 / 7.0;
+                let a = 0.85 - 0.5 * (t - 0.5).abs();
+                draw_rectangle(r.x, r.y + r.h * s as f32 / 8.0, r.w, r.h / 8.0 + 0.5, Color::new(0.12, 0.2, 0.62, a));
+            }
+        } else if down {
+            draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.16, 0.24, 0.54, 0.55));
+        } else if hover {
+            draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.1, 0.15, 0.45, 0.35));
+        }
+        let cy = r.y + r.h / 2.0;
+        if signs {
+            let d = Rect::new(r.right() - sq - 2.0 * k, cy - sq / 2.0, sq, sq);
+            let p = Rect::new(d.x - sq - 2.0 * k, cy - sq / 2.0, sq, sq);
+            let (_, pin_down, pin_pressed) = if live { super::widgets::button_state(p, true) } else { (false, false, false) };
+            draw_pin(Rect::new(p.x + 12.0 * k, p.y + 12.0 * k, sq - 24.0 * k, sq - 24.0 * k), c.pinned, pin_down);
+            let (_, del_down, del_pressed) = if live { super::widgets::button_state(d, true) } else { (false, false, false) };
+            if let Some(t) = super::chrome::win(if del_down { "LSign-Delete-Down" } else { "LSign-Delete" }) {
+                super::chrome::tex(&t, Rect::new(d.x + 8.0 * k, d.y + 8.0 * k, sq - 16.0 * k, sq - 16.0 * k), WHITE);
+            }
+            if pin_pressed {
+                pin = Some(i);
+            }
+            if del_pressed {
+                delete = Some(i);
+            }
+        }
+        if is_sel {
+            if let Some(t) = super::chrome::win("LSign-Load") {
+                super::chrome::tex(&t, Rect::new(r.x + 4.0 * k, cy - 14.0 * k, 28.0 * k, 28.0 * k), WHITE);
+            }
+        } else if c.pinned {
+            draw_pin(Rect::new(r.x + 8.0 * k, cy - 10.0 * k, 20.0 * k, 20.0 * k), true, false);
+        }
+        let parts = card_parts(c);
+        let texts = card_texts(&parts, c, is_sel);
+        let w = card_text_w(r.w, deletable, k);
+        let x = r.x + MARK_STRIP_DP * k;
+        let content: f32 = texts.iter().zip(parts.iter()).filter(|(_, s)| !s.is_empty()).map(|(t, _)| t.height(w)).sum();
+        let mut y = r.y + (r.h - content) / 2.0;
+        for (t, s) in texts.iter().zip(parts.iter()) {
+            if !s.is_empty() {
+                y += at_top(t, x, y, w);
+            }
+        }
+        if row_pressed && pin.is_none() && delete.is_none() {
+            picked = Some(i);
+        }
+    }
+    (picked, delete, pin)
+}
+
+/// The name field of a phone's save window: a text box with the typed name and its caret (the same
+/// text as the desktop's row: `typed_name`), or the grey placeholder while nothing is typed. A long
+/// name keeps the caret's side in sight; a selection is lit.
+fn phone_name_field(field: Rect, name: &str, edit: super::text_edit::TextEdit, caret_on: bool, k: f32) {
+    use super::dt_font::Face;
+    super::chrome::text_box(field);
+    super::chrome::silver_frame(field, k);
+    let size = kit::Text::new("", 15.0, WHITE).face(Face::Subtitle).size();
+    let room = field.w - 16.0 * k;
+    let base = field.y + field.h / 2.0 + size * 0.35;
+    let x = field.x + 8.0 * k;
+    if name.is_empty() {
+        let placeholder = own("Buttons", "NewSave", n_("(save anew)"));
+        kit::Text::new(&placeholder, 15.0, row_ink(PLACEHOLDER_INK, false)).face(Face::Subtitle).draw_one(x, base);
+        return;
+    }
+    let width = |s: &str| super::dt_font::with_face(Face::Subtitle, || super::dt_font::legacy_metrics_if(true, || measure(s, size).width));
+    let (typed, mark) = typed_name(name, edit, caret_on);
+    let mut edit = edit;
+    edit.fit(name);
+    let shown = if width(&typed) <= room { typed.clone() } else { caret_window(&typed, edit.caret, room, width) };
+    if let Some(m) = mark.filter(|m| shown == typed && m.end <= shown.len()) {
+        let (a, b) = (width(&shown[..m.start]), width(&shown[..m.end]));
+        draw_rectangle(x + a, base - size * 0.82, b - a, size * 1.05, SELECTION);
+    }
+    kit::Text::new(&shown, 15.0, row_ink(NAME_INK, false)).face(Face::Subtitle).draw_one(x, base);
+}
+
+/// The phone's save window over the map (`kit::phone_window`, `k` px per dp): the name field, the
+/// list of saves, and «Быстрое сохранение», «Сохранить», «Отмена».
+fn save_phone(game: &Game, view: &mut SaveView, quick: bool, message: &mut Option<String>, k: f32, rect: Rect) -> Option<Screen> {
+    let title = own("SaveGame", "Title", n_("Save the game"));
+    let bh = kit::finger_h(kit::touch_h(32.0));
+    // Above the on-screen keyboard while the name is typed (`window_layout::keyboard_lifted`).
+    let field = phone_book(phone_inner(rect, k), k, bh, 0.0).head;
+    let rect = super::window_layout::keyboard_lifted(rect, field);
+    let (inner, closed) = super::chrome::window(rect, &title, super::chrome::Skin::Marble, true);
+    if !input_blocked() {
+        edit_keys(&mut view.name, &mut view.edit, &typed_chars(), EditRules::line(60));
+    }
+    let dir = save::games_dir();
+    let warning = if dir.is_none() { Some(tr("No data folder for saves: set RAZDOR_SAVE_DIR.").to_string()) } else { view.error.clone() };
+    let warn_w = (inner.w - 16.0 * k).max(1.0);
+    let warn_h = warning.as_deref().map_or(0.0, |w| kit::Text::new(w, 12.0, RED).height(warn_w));
+    let book = phone_book(inner, k, bh, warn_h);
+    super::chrome::text_box(book.list);
+    super::chrome::silver_frame(book.list, k);
+    fill_metas(&mut view.entries, &mut view.asked, &mut view.settled, 0, None);
+    let same = view.entries.iter().position(|e| e.meta.as_ref().is_some_and(|m| m.name == view.name));
+    let cards: Vec<Card> = view.entries.iter().map(card_of).collect();
+    let caret_on = (crate::ui::clock::now() * 2.0) as i64 % 2 == 0;
+    phone_name_field(book.head, &view.name, view.edit, caret_on, k);
+    let field_tapped = super::widgets::tapped_in(super::widgets::tap_rect(book.head, false));
+    let mut flow = kit::Flow::begin(book.list, "save-phone");
+    let (picked, _, _) = phone_list(&mut flow, &cards, same, false);
+    flow.finish();
+    let touch = match picked {
+        Some(_) => super::widgets::NameTouch::RowPicked,
+        None => super::widgets::name_touch(field_tapped),
+    };
+    view.typing = super::widgets::name_keyboard(true, view.typing, touch);
+    let enter = super::widgets::name_enter(true, &mut view.typing, key(KeyCode::Enter));
+    ask_keyboard(&view.name, view.edit, input_blocked(), view.typing);
+    if let Some(i) = picked {
+        if let Some(m) = view.entries[i].meta.as_ref() {
+            view.name = m.name.clone();
+        }
+        view.edit = Default::default();
+    }
+    if let Some(w) = warning.as_deref() {
+        at_top(&kit::Text::new(w, 12.0, RED), book.warning.x, book.warning.y, warn_w);
+    }
+    let [quick_b, save_b, cancel_b] = book.buttons;
+    if kit::button(quick_b, tr(n_("Quick save")), quick) {
+        return quick_now(game, message);
+    }
+    let ok = can_save(&view.name, dir.is_some());
+    if kit::button(save_b, &own("SaveGame", "Save", n_("Save")), ok) || (ok && enter) {
+        if let Some(d) = &dir {
+            if let Some(s) = save_typed(game, view, d, message) {
+                return Some(s);
+            }
+        }
+    }
+    if kit::button(cancel_b, &own("Buttons", "Cancel", n_("Cancel")), true) || closed {
+        return Some(view.back.screen());
+    }
+    if key(KeyCode::Escape) {
+        return Some(view.back.escape());
+    }
+    None
+}
+
+/// What the load window is doing this frame: its input was blocked before, a question or the failed
+/// load's box is open, and a delete question in particular.
+#[derive(Clone, Copy)]
+struct LoadAsk {
+    previously_blocked: bool,
+    asking: bool,
+    asking_delete: bool,
+}
+
+/// The phone's load window, from the title or over the map (`kit::phone_window`, `k` px per dp): the
+/// tabs, the list of saves with their pin and delete signs, and «Очистить всё», «Загрузить», «Отмена».
+fn load_phone(view: &mut LoadView, pending: &mut Option<PathBuf>, error: &mut Option<String>, ask: LoadAsk, k: f32, rect: Rect) -> Option<Screen> {
+    let title = own("LoadGame", "Title", n_("Load a saved game"));
+    let bh = kit::finger_h(kit::touch_h(32.0));
+    let (inner, closed) = super::chrome::window(rect, &title, super::chrome::Skin::Marble, true);
+    let book = phone_book(inner, k, bh, 0.0);
+    super::chrome::text_box(book.list);
+    super::chrome::silver_frame(book.list, k);
+    fill_metas(&mut view.entries, &mut view.asked, &mut view.settled, 0, Some(&mut view.selected));
+    let cards: Vec<Card> = view.entries.iter().map(card_of).collect();
+    // The tabs: the two halves of the head, the open one is not pressed (as the desktop's).
+    let gap = phone_gap(k);
+    let hw = (book.head.w - gap) / 2.0;
+    let tab_rects = [Rect::new(book.head.x, book.head.y, hw, bh), Rect::new(book.head.x + hw + gap, book.head.y, hw, bh)];
+    let tab_labels = [own("LoadGame", "PrivateSave", n_("Private")), own("LoadGame", "AutoSave", n_("Autosaves"))];
+    let mut switched = None;
+    for (i, tab) in [SaveKind::Manual, SaveKind::Auto].into_iter().enumerate() {
+        let open = view.tab == tab;
+        if kit::button(tab_rects[i], &tab_labels[i], !open && !ask.asking) {
+            switched = Some(tab);
+        }
+    }
+    let mut flow = kit::Flow::begin(book.list, "load-phone");
+    let (picked, delete, pin) = if cards.is_empty() {
+        let no_saves = tr("No saves here yet.");
+        centred(no_saves, 14.0, super::chrome::CREAM, super::dt_font::Face::Subtitle, book.list.center().x, book.list.y + 8.0 * k, book.list.w);
+        (None, None, None)
+    } else {
+        phone_list(&mut flow, &cards, Some(view.selected), true)
+    };
+    flow.finish();
+    let pin = pin.or_else(|| key(KeyCode::P).then_some(view.selected));
+    if let Some(at) = pin.filter(|_| !ask.asking) {
+        toggle_pin(view, at);
+    }
+    if let Some(at) = picked.filter(|_| !ask.asking) {
+        if at == view.selected {
+            *pending = view.entries.get(at).map(|e| e.path.clone());
+        }
+        view.selected = at;
+    }
+    if let Some(e) = delete.filter(|_| !ask.asking).and_then(|at| view.entries.get(at)) {
+        let name = if e.meta.is_some() { card_of(e).name } else { e.path.file_stem().unwrap_or_default().to_string_lossy().into_owned() };
+        view.confirm_delete = Some((e.path.clone(), name));
+    }
+    if let Some(tab) = switched.filter(|_| !ask.asking) {
+        switch_tab(view, tab);
+    }
+    let clearable = view.entries.iter().any(|e| !e.pinned);
+    let [clear_b, load_b, cancel_b] = book.buttons;
+    if kit::button(clear_b, tr("Clear all"), clearable) && !ask.asking {
+        view.confirm_clear = true;
+        return None;
+    }
+    let chosen = view.entries.get(view.selected);
+    let load_now = kit::button(load_b, &own("LoadGame", "Load", n_("Load")), chosen.is_some()) || key(KeyCode::Enter);
+    if load_now && !ask.asking && chosen.is_some() {
+        *pending = chosen.map(|e| e.path.clone());
+    }
+    if (kit::button(cancel_b, &own("Buttons", "Cancel", n_("Cancel")), true) || closed) && !ask.asking {
+        return Some(view.back.screen());
+    }
+    set_input_blocked(ask.previously_blocked);
+    if ask.asking {
+        super::chrome::grey_out(rect);
+    }
+    if let Some(message) = error.as_deref() {
+        if load_failed_box(message) {
+            *error = None;
+        }
+        return None;
+    }
+    if ask.asking_delete {
+        let name = view.confirm_delete.as_ref().map(|(_, n)| n.clone()).expect("delete confirmation");
+        match delete_question_phone(&name) {
+            Some(true) => finish_delete(view),
+            Some(false) => view.confirm_delete = None,
+            None => {}
+        }
+        return None;
+    }
+    if view.confirm_clear {
+        ask_clear(view);
+        return None;
+    }
+    if key(KeyCode::Escape) {
+        return Some(view.back.escape());
+    }
+    None
+}
+
+/// The phone's message box (Razdor's own): a window centred on the screen, its title, the text
+/// (`parts`, each its colour; `marked` for the original's markup text, drawn in its own lines and
+/// tints) wrapped and centred in 13 px, and its buttons at the foot, touch-tall. Returns the index
+/// of the button pressed, or of the answer key (Y the first, N the second).
+fn phone_box(title: &str, parts: &[(&str, Color)], marked: bool, labels: &[&str]) -> Option<usize> {
+    let dp = super::display::dp_px()?;
+    super::display::with_window_scale(Some(dp), || phone_box_at(title, parts, marked, labels))
+}
+
+fn phone_box_at(title: &str, parts: &[(&str, Color)], marked: bool, labels: &[&str]) -> Option<usize> {
+    use super::dt_font::Face;
+    let k = super::chrome::k();
+    let safe = super::display::safe_area();
+    let probe = kit::Text::new("", 13.0, super::chrome::CREAM).face(Face::Subtitle);
+    let (size, pitch) = (probe.size(), probe.line_pitch());
+    let w = (380.0 * k).min((screen_width() - safe.left - safe.right - 16.0 * k).max(1.0));
+    let room = w - 24.0 * k;
+    let paras: Vec<(String, Color)> = parts.iter().flat_map(|(s, c)| s.split('\n').map(move |p| (p.to_string(), *c))).collect();
+    let markup = parts.first().filter(|_| marked).map(|p| super::widgets::markup_rows(&p.0.replace('\n', "#\\"), room, size));
+    let text_h = match &markup {
+        Some(rows) => rows.len() as f32 * pitch,
+        None => paras.iter().map(|(s, c)| kit::Text::new(s, 13.0, *c).face(Face::Subtitle).height(room)).sum(),
+    };
+    let bh = kit::finger_h(kit::touch_h(28.0));
+    let strip = super::chrome::phone_strip_height(super::chrome::strip_height(k, super::chrome::FIXED_TITLE), super::display::dp_px());
+    let h = strip + 10.0 * k + text_h + 12.0 * k + bh + 10.0 * k + 3.0 * k;
+    let r = Rect::new(safe.left + (screen_width() - safe.left - safe.right - w) / 2.0, ((screen_height() - h) / 2.0).max(safe.top), w, h);
+    let (inner, _) = super::chrome::window(r, title, super::chrome::Skin::Marble, false);
+    let top = inner.y + 10.0 * k;
+    match &markup {
+        Some(rows) => super::dt_font::legacy_metrics_if(true, || {
+            for (i, row) in rows.iter().enumerate() {
+                super::widgets::draw_markup_row(row, inner.x + 12.0 * k, top + size * 0.85 + i as f32 * pitch, room, size);
+            }
+        }),
+        None => {
+            let mut y = top;
+            for (s, c) in &paras {
+                y += centred(s, 13.0, *c, Face::Subtitle, inner.center().x, y, room);
+            }
+        }
+    }
+    let n = labels.len().max(1) as f32;
+    let gap = 8.0 * k;
+    let bw = (inner.w - 20.0 * k - gap * (n - 1.0)) / n;
+    let by = inner.bottom() - 10.0 * k - bh;
+    let mut pressed = None;
+    for (i, label) in labels.iter().enumerate() {
+        let b = Rect::new(inner.x + 10.0 * k + i as f32 * (bw + gap), by, bw, bh);
+        if kit::button(b, label, true) && pressed.is_none() {
+            pressed = Some(i);
+        }
+    }
+    pressed.or_else(|| answer_key().map(|yes| if yes || labels.len() < 2 { 0 } else { 1 }))
+}
+
+/// The phone's delete question: the original's words, the name in its blue.
+fn delete_question_phone(name: &str) -> Option<bool> {
+    let title = own("MessageBox", "DeleteSave_Title", n_("Delete the save"));
+    let question = tr("Do you really want to delete the saved game").to_string();
+    let who = format!("\"{name}\"?");
+    let (yes, no) = (own("Buttons", "Yes", n_("Yes")), own("Buttons", "No", n_("No")));
+    phone_box(&title, &[(question.as_str(), ACCENT), (who.as_str(), Color::from_rgba(55, 180, 255, 255))], false, &[yes.as_str(), no.as_str()]).map(|i| i == 0)
+}
+
+/// The phone's question with Yes and No (`question_box` on a phone).
+fn question_phone(title: &str, text: &str, marked: bool) -> Option<bool> {
+    let (yes, no) = (own("Buttons", "Yes", n_("Yes")), own("Buttons", "No", n_("No")));
+    phone_box(title, &[(text, super::chrome::CREAM)], marked, &[yes.as_str(), no.as_str()]).map(|i| i == 0)
+}
+
+/// The phone's failed-load box: its message and one OK.
+fn load_failed_phone(message: &str) -> bool {
+    let title = own("LoadGame", "Title", n_("Load a saved game"));
+    let ok = own("Buttons", "Ok", n_("OK"));
+    phone_box(&title, &[(message, super::chrome::CREAM)], false, &[ok.as_str()]).is_some()
 }
 
 /// The exit window's version line: the original's blue (ae24a8, Benguiat with red − 200,
@@ -1046,6 +1608,9 @@ const WARNING_INK: Color = Color::new(1.0, 1.0, 0.61, 1.0);
 /// Razdor's message box for a failed load: the message wrapped over as many lines as it takes,
 /// and one OK (or Enter, Escape). True once it is answered.
 fn load_failed_box(message: &str) -> bool {
+    if super::display::dp_px().is_some() {
+        return load_failed_phone(message);
+    }
     let k = super::chrome::k();
     let title = own("LoadGame", "Title", n_("Load a saved game"));
     let size = 13.0 * k;
@@ -1124,11 +1689,24 @@ pub enum ExitChoice {
 /// "Отмена". `asking` is true while the restart question is open.
 pub fn exit_window(game: &Game, assets: &Assets, asking: &mut bool) -> (Option<ExitChoice>, Option<Screen>) {
     world_view::backdrop_lit(game, assets, Some(super::game_bar::BarButton::Menu));
+    let title = own("ExitGame", "Title", n_("Leave the game"));
+    let warning = own("ExitGame", "Warning", n_("Attention!\n\nThe game under way will end.\nTo go on with it another time, save it from the map's bar first."));
+    // A phone (held upright or sideways): its own layout (`exit_phone`), over the map.
+    if let Some((k, rect)) = kit::phone_window(true, (634.0, 516.0), true) {
+        let rows = vec![
+            (own("ExitGame", "Exit", n_("Quit the game")), Some(ExitChoice::Quit), None),
+            (own("ExitGame", "ExitToMenu", n_("To the menu")), Some(ExitChoice::MainMenu), None),
+            (own("ExitGame", "Restart", n_("Restart")), Some(ExitChoice::Restart), None),
+            (tr(n_("Keys")).to_string(), Some(ExitChoice::Keys), None),
+            (own("Buttons", "Cancel", n_("Cancel")), None, None),
+        ];
+        let version = super::chrome::ui_text("SpecialTexts", "VerInfo");
+        let (choice, cancel) = super::display::with_window_scale(Some(k), || exit_phone((rect, k), (&title, &warning), asking, false, &rows, "S_Exit_RUS", version));
+        return if cancel { (None, Some(Screen::WorldMap)) } else { (choice, None) };
+    }
     // The game menu's window at its own scale on a phone (`exit_dialog`): upright between the
     // top inset and the bar, sideways the large-window scale (`window_layout::exit_scale`).
     let _scale = super::window_layout::exit_scale();
-    let title = own("ExitGame", "Title", n_("Leave the game"));
-    let warning = own("ExitGame", "Warning", n_("Attention!\n\nThe game under way will end.\nTo go on with it another time, save it from the map's bar first."));
     match exit_dialog(&title, &warning, asking, false, true) {
         (_, true) => (None, Some(Screen::WorldMap)),
         (choice, false) => (choice, None),
@@ -1139,12 +1717,25 @@ pub fn exit_window(game: &Game, assets: &Assets, asking: &mut bool) -> (Option<E
 /// be left for the map, and the same choices as the exit window. Returns the choice and
 /// whether it was cancelled.
 pub fn battle_exit_dialog(asking: &mut bool) -> (Option<ExitChoice>, bool) {
-    // The window's scale for this screen, both its variants (`exit_scale`).
-    let _scale = super::window_layout::exit_scale();
     let title = own("ExitBattle", "Title", n_("Ways out of the battle"));
     // Razdor's «Рестарт» here plays this battle again (the user's choice; the original's
     // restarts the scenario, and says so): its own text.
     let warning = tr(n_("Attention!\n\nYou cannot go back to the map without finishing the battle!\nTo stop the game under way, leave to the main menu (the game is not saved), or start this battle again (restart)."));
+    // A phone (held upright or sideways) with the battle's picture: its own layout (`exit_phone`).
+    if super::chrome::win("S_Battle").is_some() {
+        if let Some((k, rect)) = kit::phone_window(true, (634.0, 516.0), true) {
+            let rows = vec![
+                (own("ExitGame", "Exit", n_("Quit the game")), Some(ExitChoice::Quit), Some("Btn3")),
+                (own("ExitGame", "ExitToMenu", n_("To the menu")), Some(ExitChoice::MainMenu), Some("Btn3")),
+                (own("ExitGame", "Restart", n_("Restart")), Some(ExitChoice::Restart), Some("Btn2")),
+                (tr(n_("Keys")).to_string(), Some(ExitChoice::Keys), Some("Btn2")),
+                (own("Buttons", "Cancel", n_("Cancel")), None, Some("Btn1")),
+            ];
+            return super::display::with_window_scale(Some(k), || exit_phone((rect, k), (&title, warning), asking, true, &rows, "S_Battle", None));
+        }
+    }
+    // The window's scale for this screen, both its variants (`exit_scale`).
+    let _scale = super::window_layout::exit_scale();
     if super::chrome::win("S_Battle").is_none() {
         return exit_dialog(&title, warning, asking, true, false);
     }
@@ -1408,18 +1999,131 @@ fn exit_dialog(title: &str, warning: &str, asking: &mut bool, battle: bool, art:
         super::chrome::window_inner_frames(r, px);
     }
     if was_asking {
-        let (t, q) = if battle {
-            (tr(n_("Restart the battle")).to_string(), format!("^{}", tr(n_("Do you really want to start this battle again?"))))
-        } else {
-            let t = own("MessageBox", "Restart_Title", n_("Restart the game"));
-            // The restart box reads its text as markup (0x4bf748 → 0x48e438); Razdor's own
-            // text is centred as the install's (`^`).
-            let q = (razdor::i18n::lang() == razdor::i18n::Lang::Ru)
-                .then(|| super::chrome::ui_text("MessageBox", "Restart_Text"))
-                .flatten()
-                .unwrap_or_else(|| format!("^{}", tr(n_("Do you really want to start the scenario under way again from the beginning?"))));
-            (t, q)
-        };
+        let (t, q) = restart_question(battle);
+        match marked_question(&t, &q) {
+            Some(true) => {
+                *asking = false;
+                return (Some(ExitChoice::Restart), false);
+            }
+            Some(false) => *asking = false,
+            None => {}
+        }
+        return (None, false);
+    }
+    if *asking {
+        return (None, false);
+    }
+    (choice, cancel || key(KeyCode::Escape))
+}
+
+/// The restart question's title and text: the battle's (Razdor's own: it plays this battle again),
+/// or the game's (the install's own Russian text, as the original's box).
+fn restart_question(battle: bool) -> (String, String) {
+    if battle {
+        return (tr(n_("Restart the battle")).to_string(), format!("^{}", tr(n_("Do you really want to start this battle again?"))));
+    }
+    let t = own("MessageBox", "Restart_Title", n_("Restart the game"));
+    // The restart box reads its text as markup (0x4bf748 → 0x48e438); Razdor's own text is centred as the install's (`^`).
+    let q = (razdor::i18n::lang() == razdor::i18n::Lang::Ru)
+        .then(|| super::chrome::ui_text("MessageBox", "Restart_Text"))
+        .flatten()
+        .unwrap_or_else(|| format!("^{}", tr(n_("Do you really want to start the scenario under way again from the beginning?"))));
+    (t, q)
+}
+
+/// A leave window's buttons on a phone: the battle's red art (`art`) or a marble button, touch-tall
+/// (`button_state` gives the finger's area). True when pressed.
+fn exit_button(r: Rect, label: &str, art: Option<&str>, enabled: bool) -> bool {
+    let (_, down, pressed) = super::widgets::button_state(r, enabled);
+    match art {
+        Some(a) => super::chrome::defeat_button_art(r, a, label, down),
+        None => super::chrome::marble_button(r, label, enabled, down),
+    }
+    if pressed {
+        super::audio::cue(super::audio::Cue::Button);
+    }
+    pressed
+}
+
+/// A leave window on a phone (the game menu's and the battle's; Razdor's own, the owner's decision,
+/// 2026-11-01), `k` px per dp in `rect`: the picture (`picture`, the game's name or the battle's), the
+/// game's version line, the warning in a box, and the buttons. Sideways, the five buttons share one
+/// row; held upright they are two columns with «Отмена» across the foot. The middle scrolls when the
+/// picture and the warning do not fit. Every text is a `kit::Text` (at least 12 sp), every button
+/// touch-tall. `rows`: each button's label, its choice (None: «Отмена») and its art (the battle's).
+/// Returns the choice and whether it was cancelled.
+fn exit_phone(place: (Rect, f32), text: (&str, &str), asking: &mut bool, battle: bool, rows: &[(String, Option<ExitChoice>, Option<&'static str>)], picture: &str, version: Option<String>) -> (Option<ExitChoice>, bool) {
+    use super::dt_font::Face;
+    let (rect, k) = place;
+    let (title, warning) = text;
+    let (inner, closed) = super::chrome::window(rect, title, super::chrome::Skin::Marble, true);
+    let pad = 8.0 * k;
+    let gap = phone_gap(k);
+    let bh = kit::finger_h(kit::touch_h(36.0));
+    let n = rows.len().max(1);
+    let mut slots = vec![Rect::new(0.0, 0.0, 0.0, 0.0); rows.len()];
+    let footer_top = if kit::upright() {
+        // The last row is «Отмена», across the foot; the others in two columns above it.
+        let others = rows.len().saturating_sub(1);
+        let grid_rows = others.div_ceil(2);
+        let cw = (inner.w - 2.0 * pad - gap) / 2.0;
+        let top = inner.bottom() - pad - (grid_rows as f32 + 1.0) * bh - grid_rows as f32 * gap;
+        for (i, slot) in slots.iter_mut().enumerate().take(others) {
+            *slot = Rect::new(inner.x + pad + (i % 2) as f32 * (cw + gap), top + (i / 2) as f32 * (bh + gap), cw, bh);
+        }
+        if let Some(last) = slots.last_mut() {
+            *last = Rect::new(inner.x + pad, inner.bottom() - pad - bh, inner.w - 2.0 * pad, bh);
+        }
+        top
+    } else {
+        let bw = (inner.w - 2.0 * pad - gap * (n as f32 - 1.0)) / n as f32;
+        let y = inner.bottom() - pad - bh;
+        for (i, slot) in slots.iter_mut().enumerate() {
+            *slot = Rect::new(inner.x + pad + i as f32 * (bw + gap), y, bw, bh);
+        }
+        y
+    };
+    let area = Rect::new(inner.x + pad, inner.y + pad, inner.w - 2.0 * pad, (footer_top - gap - (inner.y + pad)).max(0.0));
+    let mut flow = kit::Flow::begin(area, "exit-phone");
+    if let Some(t) = super::chrome::win(picture) {
+        // The picture takes up to half the middle upright, less sideways, where the warning needs its room.
+        let share = if kit::upright() { 0.5 } else { 0.3 };
+        let ph = (flow.width() * t.height() / t.width()).min(area.h * share);
+        let pw = ph * t.width() / t.height();
+        flow.row_h(ph, |r| super::chrome::tex(&t, Rect::new(r.center().x - pw / 2.0, r.y, pw, ph), WHITE));
+    }
+    if let Some(v) = version.filter(|v| !v.is_empty()) {
+        let h = kit::Text::new(&v, 15.0, VERSION_INK).face(Face::Subtitle).height(flow.width());
+        flow.row_h(h + 4.0 * k, |r| {
+            centred(&v, 15.0, VERSION_INK, Face::Subtitle, r.center().x, r.y, r.w);
+        });
+    }
+    let paras: Vec<&str> = warning.split('\n').collect();
+    let text_w = (flow.width() - 20.0 * k).max(1.0);
+    let text_h: f32 = paras.iter().map(|p| kit::Text::new(p, 16.0, WARNING_INK).face(Face::Subtitle).height(text_w)).sum();
+    flow.row_h(text_h + 16.0 * k, |r| {
+        super::chrome::text_box(r);
+        let mut y = r.y + 8.0 * k;
+        for p in &paras {
+            y += centred(p, 16.0, WARNING_INK, Face::Subtitle, r.center().x, y, text_w);
+        }
+    });
+    flow.finish();
+    let mut choice = None;
+    let mut cancel = closed;
+    let was_asking = *asking;
+    for ((label, what, art), slot) in rows.iter().zip(slots.iter()) {
+        let enabled = !*asking;
+        if exit_button(*slot, label, *art, enabled) {
+            match what {
+                Some(ExitChoice::Restart) => *asking = true,
+                Some(c) => choice = Some(*c),
+                None => cancel = true,
+            }
+        }
+    }
+    if was_asking {
+        let (t, q) = restart_question(battle);
         match marked_question(&t, &q) {
             Some(true) => {
                 *asking = false;
@@ -1449,6 +2153,9 @@ fn marked_question(title: &str, text: &str) -> Option<bool> {
 }
 
 fn question_box(title: &str, text: &str, marked: bool) -> Option<bool> {
+    if super::display::dp_px().is_some() {
+        return question_phone(title, text, marked);
+    }
     let k = super::chrome::k();
     // Razdor's own: the Yes and No grow with the text size (`button_grow`), the box with them.
     let g = super::display::button_grow();
@@ -1709,5 +2416,18 @@ mod tests {
         let lifted = Rect::new(win.x, win.y + dy, win.w, win.h);
         assert!(lifted.y >= top - 0.5 && lifted.bottom() <= sh - keyboard + 0.5, "the window is above the keyboard: {lifted:?}");
         assert!(save.y + dy + save.h <= sh - keyboard + 0.5, "the save button is above the keyboard");
+    }
+
+    /// A phone's save or load window: with room for three cards the buttons sit under the list; with
+    /// less they stack on its right, the list taking 65% of the width.
+    #[test]
+    fn the_phone_book_puts_its_buttons_under_the_list_or_beside_it_when_the_list_is_short() {
+        let k = 2.75;
+        let tall = phone_book(Rect::new(0.0, 0.0, 1000.0, 2000.0), k, 132.0, 0.0);
+        assert!(tall.buttons[0].y >= tall.list.bottom() - 0.5, "under the list: {tall:?}");
+        assert!((tall.buttons[0].w - tall.list.w).abs() < 0.5, "the full-width button spans the list");
+        let short = phone_book(Rect::new(0.0, 0.0, 1000.0, 400.0), k, 132.0, 0.0);
+        assert!(short.buttons[0].x >= short.list.right(), "beside the list: {short:?}");
+        assert!(short.list.w < tall.list.w * 0.7, "the list takes 65%: {short:?}");
     }
 }
