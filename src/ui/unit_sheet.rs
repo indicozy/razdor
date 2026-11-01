@@ -846,9 +846,16 @@ fn worn_slots(assets: &Assets, content: &Content, rects: [Rect; MAX_SLOTS], s: &
 fn stat_block(s: &Sheet, stats: Vec<Line>, x0: f32, x1: f32, level_y: f32, stat_y: f32, size: f32, bold: f32, pitch: f32, share_line: bool) {
     use super::dt_font::Face;
     let k = k();
+    let phone = super::display::dp_px().is_some();
     let line = |top: f32| top + cell_baseline(size);
     shadow_text(&razdor::trf!("Level {level}", level = s.level), x0, line(level_y), size, CREAM);
-    shadow_right(&razdor::trf!("XP {xp} / {need}", xp = s.xp, need = s.need), x1, line(level_y), size, CREAM);
+    if phone && share_line {
+        // Razdor's own (the owner's decision, 2026-11-01): on a phone the experience is on the line
+        // under the level, at the left, so the two never share a line.
+        shadow_text(&razdor::trf!("XP {xp} / {need}", xp = s.xp, need = s.need), x0, line(level_y + (stat_y - level_y) / 2.0), size, CREAM);
+    } else {
+        shadow_right(&razdor::trf!("XP {xp} / {need}", xp = s.xp, need = s.need), x1, line(level_y), size, CREAM);
+    }
     let mut y = stat_y;
     for (label, value, color) in stats {
         // The daily wage's label and value are in the bold orange SanSerif over its shadow
@@ -903,7 +910,9 @@ fn band_text_fits(s: &Sheet, content: &Content, txt: Rect, base: f32, px: f32) -
     let trait_rows = list_rows(None, &traits_of(s), 238.0 * base - shift, width).len();
     let row_h = 14.0 * px;
     // The name's block (34 px) under its top and the level line (13 px) above the first stat row.
-    let stat_y = txt.y + 46.0 * px;
+    // On a phone the experience line adds one line under the level (`draw_band_in_face`).
+    let phone_line = if super::display::dp_px().is_some() { (13.0 * px).max(size * 1.3) } else { 0.0 };
+    let stat_y = txt.y + 46.0 * px + phone_line;
     let natural_end = stat_y + (stats.len() + s.status.len()) as f32 * row_h;
     let fits_height = natural_end + (trait_rows as f32 + 1.0) * row_h <= txt.bottom();
     fits_width && fits_height
@@ -951,10 +960,15 @@ fn draw_band_in_face(assets: &Assets, content: &Content, band: Rect, s: &Sheet, 
     });
     // The columns keep the column's width (`base`); only the text grows with `px`.
     let (x0, x1) = (txt.x + 28.0 * base, txt.x + 234.0 * base);
-    let level_y = name_top + 21.0 * px;
-    let stat_y = level_y + 13.0 * px;
+    // Razdor's own (the owner's decision, 2026-11-01): on a phone the lines are spaced from the
+    // floored text sizes (`size`, `name_size`), not the design's fixed px, so they never collide.
+    let phone = super::display::dp_px().is_some();
+    let level_y = name_top + if phone { (21.0 * px).max(name_size * 1.3) } else { 21.0 * px };
+    // On a phone the experience has its own line under the level (`stat_block`): two lines down.
+    let line_step = if phone { (13.0 * px).max(size * 1.3) } else { 13.0 * px };
+    let stat_y = level_y + if phone { 2.0 * line_step } else { line_step };
     let stats = stat_lines(content, s);
-    let row_h = 14.0 * px;
+    let row_h = if phone { (14.0 * px).max(size * 1.3) } else { 14.0 * px };
     // The description, then the traits, at the half's bottom. The description goes when the whole
     // list does not fit the band's text half; what still does not fit is cut at its end with "…".
     let traits = traits_of(s);

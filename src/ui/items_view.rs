@@ -694,6 +694,24 @@ pub fn squad(
     back: &Option<BuildingView>,
     message: &mut Option<String>,
 ) -> Option<Screen> {
+    // Razdor's own (the owner's decision, 2026-11-01): on a phone the window is its own
+    // (`kit::phone_window`, one design px per dp) and laid out by `army_phone`; the desktop and the
+    // stacked windows keep their geometry.
+    match super::kit::phone_window(true, (590.0, 960.0), true) {
+        Some((dp, r)) => super::display::with_window_scale(Some(dp), || squad_in(game, assets, selected, scroll, back, message, Some(r))),
+        None => squad_in(game, assets, selected, scroll, back, message, None),
+    }
+}
+
+fn squad_in(
+    game: &mut Game,
+    assets: &Assets,
+    selected: &mut ArmySel,
+    scroll: &mut usize,
+    back: &Option<BuildingView>,
+    message: &mut Option<String>,
+    phone: Option<Rect>,
+) -> Option<Screen> {
     let bar = super::world_view::window_backdrop(game, assets, Some(super::game_bar::BarButton::Squad));
     selected.clamp(game.squad.len());
     // A slide that has ended clears the selection (0x4b0c04).
@@ -751,12 +769,34 @@ pub fn squad(
     let c = game.content.clone();
     let k = chrome::k();
     let (sw, sh) = (screen_width(), screen_height());
-    let win = window_layout::window();
+    let win = phone.unwrap_or_else(window_layout::window);
     let title = chrome::ui_text("Army", "Title").filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr("The hero's characteristics and army").to_string());
-    let (_, close) = chrome::window(win, &title, chrome::Skin::Marble, true);
-    let close = close_button(win) || close;
-    window_layout::panel_frame(window_layout::upper(win));
-    window_layout::panel_frame(window_layout::lower(win));
+    let (inner, close) = chrome::window(win, &title, chrome::Skin::Marble, true);
+    // The phone's places (`army_phone`): the band, the pack, the cards and «Закрыть».
+    let lay = phone.map(|_| {
+        let f = c.formation;
+        let (cols, lines) = (f.display_cols() as usize, f.display_lines());
+        if window_layout::portrait() {
+            super::army_phone::upright(inner, k, cols, lines)
+        } else {
+            super::army_phone::sideways(inner, k, cols, lines)
+        }
+    });
+    let close = match &lay {
+        Some(l) => super::kit::button(l.close, tr("Close"), true) || close,
+        None => close_button(win) || close,
+    };
+    match &lay {
+        Some(l) => {
+            window_layout::panel_frame(l.band);
+            window_layout::panel_frame(l.pack);
+            window_layout::panel_frame(l.grid);
+        }
+        None => {
+            window_layout::panel_frame(window_layout::upper(win));
+            window_layout::panel_frame(window_layout::lower(win));
+        }
+    }
     let at = |x: f32, y: f32, w: f32, h: f32| window_layout::at(win, x, y, w, h);
     let mut hover = None;
     // The left panel: the selected unit, else the hero (or the unit just promoted); items go
@@ -819,13 +859,19 @@ pub fn squad(
     // A living unit's first `personal` worn slots are his own: not taken up (0x4c24f4), and
     // hovering one says so (0x4c280c, `[Army] ItemI`).
     let locked = |slot: usize| showing_type || (u.alive() && slot < u.personal as usize);
-    let pressed_slot = super::dt_font::with_native_metrics(|| draw_sheet(assets, &c, win, &sheet, panel_slots(showing_type), &mut hover));
+    let pressed_slot = super::dt_font::with_native_metrics(|| match &lay {
+        // A phone's band shows the full stats (`army_phone`); the desktop's sheet as before.
+        Some(l) => super::unit_sheet::draw_band(assets, &c, l.band, &sheet, panel_slots(showing_type), &mut hover),
+        None => draw_sheet(assets, &c, win, &sheet, panel_slots(showing_type), &mut hover),
+    });
     let personal_hover = hover.is_some_and(|h| u.items.iter().enumerate().any(|(s, i)| *i == Some(h) && locked(s)));
     if let Some((slot, at)) = pressed_slot.filter(|_| !showing_type) {
         *message = pressed_at(game, at, |g| worn_press(g, sel, slot));
     }
     // Stacked (a phone held upright) the seam is drawn across the window (`window_layout::seam`).
-    if window_layout::portrait() {
+    if lay.is_some() {
+        // The phone's panels are framed above; no seam or column line.
+    } else if window_layout::portrait() {
         window_layout::seam(win);
     } else {
         draw_line(win.x + 247.0 * k, win.y + 27.0 * k, win.x + 247.0 * k, win.y + win.h - 2.0, 1.5 * k, chrome::SILVER);
@@ -836,7 +882,7 @@ pub fn squad(
     let show_tree = tree_of.is_some();
     let head = (13.0 * k).round();
     let own = |key: &str, ours: &'static str| chrome::ui_text("Army", key).filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr(ours).to_string());
-    if show_tree {
+    if show_tree && lay.is_none() {
         let title = own("UpgradeTree", n_("Upgrade tree"));
         let tree = window_layout::point(win, 408.0, 40.0);
         super::dt_font::with_face(super::dt_font::Face::Title, || {
@@ -849,10 +895,22 @@ pub fn squad(
     // The group and search row grows with the text size (`button_grow`, the owner's decision of
     // 2026-10-31); the pack gives it the room (its top moves down, its height shrinks by the same).
     let row_grow = 30.0 * (super::display::button_grow() - 1.0);
-    let content = if show_tree { at(258.0, 54.0, 300.0, 242.0) } else { at(258.0, 66.0 + row_grow, 568.0, 230.0 - row_grow) };
+    let content = match &lay {
+        // A phone's tree takes the pack's place above the dismiss zone and the benching switch.
+        Some(l) if show_tree => {
+            let zone = super::army_phone::dismiss(l.pack, true, k).zone;
+            Rect::new(l.pack.x, l.pack.y, l.pack.w, (zone.y - 48.0 * k - l.pack.y).max(1.0))
+        }
+        Some(l) => l.pack,
+        None if show_tree => at(258.0, 54.0, 300.0, 242.0),
+        None => at(258.0, 66.0 + row_grow, 568.0, 230.0 - row_grow),
+    };
     let (mut group, mut sort) = (GROUP.with(|g| g.get()), SORT.with(|s| s.get()));
     // The row over the pack: nine equal buttons across the backpack, the last one the search.
-    let row = item_filter::row_cells::<9>(at(258.0, 31.0, 568.0, 30.0 + row_grow));
+    let row = match &lay {
+        Some(l) => l.cells,
+        None => item_filter::row_cells::<9>(at(258.0, 31.0, 568.0, 30.0 + row_grow)),
+    };
     if !show_tree {
         // The row (Razdor's, view only, the owner's approved mockup): eight group buttons (a
         // picture each, a click shows that group, a click on the lit one shows all), then the
@@ -927,25 +985,36 @@ pub fn squad(
         let u = game.squad[sel].clone();
         let bench_control = game.allow_unit_benching && sel > 0 && u.alive();
         let lift = dismiss_lift(bench_control, g);
-        let row = at(570.0, 234.0 - lift, 256.0, 62.0 + lift);
-        let face_rect = at(570.0, 234.0, 256.0, 62.0);
+        // The phone's zone at the pack's foot (`army_phone::dismiss`): the switch above, the face and
+        // the button in touch-tall rows; the desktop's box as it was.
+        let (row, face, b, phone_toggle) = match &lay {
+            Some(l) => {
+                let d = super::army_phone::dismiss(l.pack, bench_control, k);
+                (d.zone, d.face, d.button, d.toggle)
+            }
+            None => {
+                let row = at(570.0, 234.0 - lift, 256.0, 62.0 + lift);
+                let face_rect = at(570.0, 234.0, 256.0, 62.0);
+                let face = Rect::new(row.x + 4.0 * k, row.y + 4.0 * k, face_rect.h - 8.0 * k, face_rect.h - 8.0 * k);
+                let b = if bench_control {
+                    Rect::new(face.x + face.w + 12.0 * k, row.y + 5.0 * k, row.w - face.w - 24.0 * k, 24.0 * k * g)
+                } else {
+                    Rect::new(face.x + face.w + 12.0 * k, row.y + 14.0 * k, row.w - face.w - 24.0 * k, (row.h - 28.0 * k) * g)
+                };
+                (row, face, b, None)
+            }
+        };
         draw_rectangle(row.x, row.y, row.w, row.h, Color::new(0.25, 0.04, 0.02, 0.55));
         chrome::silver_frame(row, 1.0);
-        let face = Rect::new(row.x + 4.0 * k, row.y + 4.0 * k, face_rect.h - 8.0 * k, face_rect.h - 8.0 * k);
         assets.draw_portrait(u.def, Team::Player, face);
         chrome::wounds(face, u.hp, u.max_hp(&c));
         let label = if u.alive() { own("Dismiss", n_("Dismiss")) } else { own("Bury", n_("Bury")) };
         let label = label.as_str();
-        let b = if bench_control {
-            Rect::new(face.x + face.w + 12.0 * k, row.y + 5.0 * k, row.w - face.w - 24.0 * k, 24.0 * k * g)
-        } else {
-            Rect::new(face.x + face.w + 12.0 * k, row.y + 14.0 * k, row.w - face.w - 24.0 * k, (row.h - 28.0 * k) * g)
-        };
         // One confirmation step, as the original's confirm and cancel buttons; all three in its
         // red (0x4dc118 makes them with 0x4dba90: Btn3 for Dismiss, Btn1 for the pair).
         let confirming = CONFIRM.with(|c| c.get()) == Some(sel);
         if bench_control && !confirming {
-            let toggle = Rect::new(b.x, b.y + b.h + 4.0 * k, b.w, 24.0 * k * g);
+            let toggle = phone_toggle.unwrap_or_else(|| Rect::new(b.x, b.y + b.h + 4.0 * k, b.w, 24.0 * k * g));
             let label=if u.battle_disabled { tr("Return to battle") } else { tr("Exclude from battles") };
             if red_button(toggle.x,toggle.y,toggle.w,toggle.h,label,true) {
                 game.set_unit_battle_disabled(sel,!u.battle_disabled);
@@ -988,7 +1057,14 @@ pub fn squad(
         };
         // Moved up with the Dismiss box's lift (`dismiss_lift`), so the two keep their 8 px gap.
         let bench = game.allow_unit_benching && t > 0 && game.squad[t].alive();
-        let row = at(574.0, 150.0 - dismiss_lift(bench, super::display::button_grow()), 248.0, 76.0);
+        let row = match &lay {
+            // On a phone the switch sits above the dismiss zone, 40 dp tall (`army_phone::dismiss`).
+            Some(l) => {
+                let zone = super::army_phone::dismiss(l.pack, true, k).zone;
+                Rect::new(l.pack.x, zone.y - 44.0 * k, l.pack.w, 40.0 * k)
+            }
+            None => at(574.0, 150.0 - dismiss_lift(bench, super::display::button_grow()), 248.0, 76.0),
+        };
         if let Some(off) = super::widgets::checkbox_row(row, size, tr("Don't remind"), on) {
             game.squad[t].set_sign_off(off);
         }
@@ -996,26 +1072,37 @@ pub fn squad(
 
     // The strip under the top half: the last message, or what to do (drawn after the grid,
     // which says what the pointer is over).
-    let strip = window_layout::divider(win);
+    let strip = match &lay {
+        Some(l) => l.strip,
+        None => window_layout::divider(win),
+    };
 
     // The army: the cards as in battle, the selected one lit.
     let f = c.formation;
     let lines = f.display_lines() as f32;
-    let mut pane = window_layout::lower(win);
-    // Stacked, the «Закрыть» under the grid grows with the text size (`button_grow`) upwards: the
-    // grid's cards give it the room.
-    if window_layout::portrait() {
-        pane.h -= window_layout::army_close(win).h * (super::display::button_grow() - 1.0);
-    }
-    let cols = f.display_cols() as f32;
-    let cs = 1.0f32.min(2.0 / lines).min(6.0 / cols)
-        .min((pane.w - 16.0*k) / ((cols*96.0-8.0)*k))
-        .min((pane.h - 16.0*k) / (((lines-1.0)*133.0+128.0)*k));
-    let (card, pitch) = (vec2(88.0 * cs * k, 128.0 * cs * k).round(), vec2(96.0 * cs * k, 133.0 * cs * k));
-    let gx = window_layout::army_grid_left(window_layout::lower(win), f.display_cols(), pitch.x, 8.0 * cs * k);
+    // The cards' size and the grid's origin: a phone's from `army_phone` (its places), else as the
+    // desktop and the stacked window draw them.
+    let (card, pitch, gx, gy) = match &lay {
+        Some(l) => (vec2(l.card.0, l.card.1).round(), vec2(l.pitch.0, l.pitch.1), l.grid.x, l.grid.y),
+        None => {
+            let mut pane = window_layout::lower(win);
+            // Stacked, the «Закрыть» under the grid grows with the text size (`button_grow`) upwards: the
+            // grid's cards give it the room.
+            if window_layout::portrait() {
+                pane.h -= window_layout::army_close(win).h * (super::display::button_grow() - 1.0);
+            }
+            let cols = f.display_cols() as f32;
+            let cs = 1.0f32.min(2.0 / lines).min(6.0 / cols)
+                .min((pane.w - 16.0*k) / ((cols*96.0-8.0)*k))
+                .min((pane.h - 16.0*k) / (((lines-1.0)*133.0+128.0)*k));
+            let (card, pitch) = (vec2(88.0 * cs * k, 128.0 * cs * k).round(), vec2(96.0 * cs * k, 133.0 * cs * k));
+            let gx = window_layout::army_grid_left(window_layout::lower(win), f.display_cols(), pitch.x, 8.0 * cs * k);
+            (card, pitch, gx, window_layout::lower_content(win).y)
+        }
+    };
     let cell_at = |slot: razdor::rules::formation::Slot| {
         let (line, col) = f.display(slot);
-        vec2(gx + col as f32 * pitch.x, window_layout::lower_content(win).y + line as f32 * pitch.y).round()
+        vec2(gx + col as f32 * pitch.x, gy + line as f32 * pitch.y).round()
     };
     // A press on a card or an empty cell, acted on after the grid is drawn.
     let mut pressed = None;
@@ -1042,13 +1129,16 @@ pub fn squad(
         if let Some(s) = slide.filter(|s| s.unit == i) {
             p = s.from.lerp(p, (now_ms() - s.t0_ms) as f32 / s.ms.max(1) as f32).round();
         }
-        let sq = Rect::new(p.x, p.y, card.x, card.x);
+        // A phone's card is all picture (the band has the stats): fewer stats per card.
+        let sq = Rect::new(p.x, p.y, card.x, if lay.is_some() { card.y } else { card.x });
         chrome::unit_shadow(Rect::new(p.x, p.y, card.x, card.y));
         assets.draw_portrait(v.def, Team::Player, sq);
         chrome::wounds(sq, v.hp, v.max_hp(&c));
         draw_rectangle_lines(sq.x, sq.y, sq.w, sq.h, 1.0, Color::new(0.85, 0.85, 0.85, 0.8));
         let vs = v.stats(&c);
-        super::dt_font::with_native_metrics(|| unit_sheet::stat_strip(Rect::new(p.x, p.y + card.x, card.x, card.y - card.x), &vs, &vs, vs[Stat::MagicPower], unit_sheet::caster(&c, v.def), unit_sheet::strip_place(f, v.slot), v.hp, super::building_view::back_row_def(&c, v.slot), game.hero_building_defence(), selected.selected == Some(i), unit_sheet::StripPanel::of_squad(i, v.named)));
+        if lay.is_none() {
+            super::dt_font::with_native_metrics(|| unit_sheet::stat_strip(Rect::new(p.x, p.y + card.x, card.x, card.y - card.x), &vs, &vs, vs[Stat::MagicPower], unit_sheet::caster(&c, v.def), unit_sheet::strip_place(f, v.slot), v.hp, super::building_view::back_row_def(&c, v.slot), game.hero_building_defence(), selected.selected == Some(i), unit_sheet::StripPanel::of_squad(i, v.named)));
+        }
         if !v.alive() {
             chrome::death_veil(sq);
         } else if v.unpaid {
@@ -1173,7 +1263,10 @@ pub fn squad(
         *selected = ArmySel::default();
     }
 
-    window_layout::frame(win);
+    // The desktop's and the stacked window's lines (a phone's panels are framed above).
+    if lay.is_none() {
+        window_layout::frame(win);
+    }
 
     // The item under the pointer, in the pack or worn: its description pops up by the pointer
     // (not while one is held: 0x4c280c shows the item text with nothing held). Drawn after the
@@ -1376,9 +1469,11 @@ pub(super) fn row_text(f: razdor::rules::formation::Formation, slot: razdor::rul
 
 /// The hero window's state (side window 5, built by 0x4d8638): the pack's scroll, the
 /// diary's tab, its picked entry (0x6668bf) and how far its list and its entry are scrolled.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HeroView {
     pub scroll: usize,
+    /// Sideways on a phone: how far the diary column is scrolled, in px (`army_phone::hero_sideways`).
+    pub side_scroll: f32,
     /// The diary's tab: the quests under way (the original's diary), or Razdor's history of
     /// completed quests, rumours and messages (asked for by the owner).
     pub tab: Tab,
@@ -1397,7 +1492,7 @@ pub struct HeroView {
 
 impl Default for HeroView {
     fn default() -> Self {
-        HeroView { scroll: 0, tab: Tab::Active, pick: 0, list_scroll: 0, text_scroll: 0, reader: false, reader_scroll: 0, list_reader: false, list_reader_scroll: 0 }
+        HeroView { scroll: 0, side_scroll: 0.0, tab: Tab::Active, pick: 0, list_scroll: 0, text_scroll: 0, reader: false, reader_scroll: 0, list_reader: false, list_reader_scroll: 0 }
     }
 }
 
@@ -1443,6 +1538,19 @@ struct DiaryColumn {
     desc: Option<Rect>,
     list: Rect,
     entry: Rect,
+}
+
+/// Whether the pointer is over `pane` (a phone's scrolling column), or there is no pane.
+fn pane_hit(pane: Option<Rect>) -> bool {
+    pane.is_none_or(|p| {
+        let (x, y) = super::widgets::pointer();
+        p.contains(vec2(x, y))
+    })
+}
+
+/// Whether `r` lies inside `pane` (a button scrolled out of the column is not pressed), or there is none.
+fn fully_in(pane: Option<Rect>, r: Rect) -> bool {
+    pane.is_none_or(|p| r.y >= p.y - 0.5 && r.bottom() <= p.bottom() + 0.5)
 }
 
 /// The hero window's right column (the original's three boxes, 0x49c388 and 0x4d8638, at
@@ -1779,6 +1887,15 @@ fn diary_list_reader(game: &Game, rows: &[razdor::rules::journal::Row], lines: &
 /// (`QuestList`, the quests under way) over the picked one's entry (`QuestDescript`,
 /// 0x49c388). Razdor's journal (all quests, rumours and messages of the campaign) stays on J.
 pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, message: &mut Option<String>) -> Option<Screen> {
+    // Razdor's own (the owner's decision, 2026-11-01): on a phone the window is its own
+    // (`kit::phone_window`) and laid out by `army_phone`; the desktop and the stacked window keep theirs.
+    match super::kit::phone_window(true, (590.0, 960.0), true) {
+        Some((dp, r)) => super::display::with_window_scale(Some(dp), || hero_in(game, assets, view, message, Some(r))),
+        None => hero_in(game, assets, view, message, None),
+    }
+}
+
+fn hero_in(game: &mut Game, assets: &Assets, view: &mut HeroView, message: &mut Option<String>, phone_win: Option<Rect>) -> Option<Screen> {
     use razdor::dt::markup::Ink;
     use super::dt_font::{sheet_size, with_original_face, Face};
     // A phone's diary reader (`view.reader`) covers this window: the window below takes no input
@@ -1794,10 +1911,32 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     let k = chrome::k();
     let ru = razdor::i18n::lang() == razdor::i18n::Lang::Ru;
     let own = |key: &str, ours: &'static str| chrome::ui_text("Hero", key).filter(|_| ru).unwrap_or_else(|| tr(ours).to_string());
-    let win = window_layout::window();
+    let win = phone_win.unwrap_or_else(window_layout::window);
     let title = own("Title", n_("The hero's characteristics and inventory"));
-    let (_, close) = chrome::window(win, &title, chrome::Skin::Marble, true);
-    let close = close_button(win) || close;
+    let (inner, close) = chrome::window(win, &title, chrome::Skin::Marble, true);
+    // The phone's places (`army_phone::hero_upright` / `hero_sideways`); the desktop's are `o` below.
+    let sideways = phone_win.is_some() && !window_layout::portrait();
+    let lay = phone_win.map(|_| if window_layout::portrait() { super::army_phone::hero_upright(inner, k) } else { super::army_phone::hero_sideways(inner, k, view.side_scroll) });
+    // Sideways, the right column (the diary, the resources, the buttons) scrolls as one when it does
+    // not fit (`army_phone::hero_sideways`): the wheel over it, its bar at its right. While it
+    // scrolls, the list and the entry take no wheel or swipe of their own (their bars stay).
+    let side = lay.as_ref().filter(|_| sideways).map(|l| (l.pane, (l.content - l.pane.h).max(0.0)));
+    let pane_rect = side.map(|(p, _)| p);
+    let overflow = side.is_some_and(|(_, most)| most > 0.5);
+    if let Some((pane, most)) = side {
+        if most > 0.5 && pane_hit(Some(pane)) {
+            view.side_scroll -= wheel() * 30.0 * k;
+        }
+        view.side_scroll = view.side_scroll.clamp(0.0, most);
+    }
+    let close = match &lay {
+        Some(l) => l.close.is_some_and(|r| button(r.x, r.y, r.w, r.h, tr("Close"), true)) || close,
+        None => close_button(win) || close,
+    };
+    if let Some(l) = &lay {
+        window_layout::panel_frame(l.band);
+        window_layout::panel_frame(l.pack);
+    }
     // The original's right side, window-relative.
     let s = HERO_S * k;
     // Its origin is the right side's (248, 28) as the window places it (below the left column when stacked).
@@ -1832,18 +1971,27 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     };
     // A press on a worn slot picks its item up or puts the held one on (0x4c24f4; the hero
     // window shows the hero's slots: 0x4b8d28 selects him as it opens).
-    if let Some((slot, at)) = draw_sheet(assets, &c, win, &sheet, true, &mut hover) {
+    let pressed_slot = match &lay {
+        Some(l) => super::unit_sheet::draw_band(assets, &c, l.band, &sheet, true, &mut hover),
+        None => draw_sheet(assets, &c, win, &sheet, true, &mut hover),
+    };
+    if let Some((slot, at)) = pressed_slot {
         *message = pressed_at(game, at, |g| worn_press(g, 0, slot));
     }
     // Stacked (a phone held upright) the seam is drawn across the window (`window_layout::seam`).
-    if window_layout::portrait() {
+    if lay.is_some() {
+        // The phone's panels are framed above.
+    } else if window_layout::portrait() {
         window_layout::seam(win);
     } else {
         draw_line(win.x + 247.0 * k, win.y + 27.0 * k, win.x + 247.0 * k, win.y + win.h - 2.0, 1.5 * k, chrome::SILVER);
     }
 
     // The pack: 25 squares of 55 px from (274, 37), the scroll bar right of them.
-    let pack = o(274.0, 37.0, 275.0 + 18.0 / HERO_S, 275.0);
+    let pack = match &lay {
+        Some(l) => l.pack,
+        None => o(274.0, 37.0, 275.0 + 18.0 / HERO_S, 275.0),
+    };
     if let Some((cell, at)) = pack_view(game, assets, pack, &mut view.scroll, &mut hover, None) {
         *message = None;
         *message = pressed_at(game, at, |g| pack_click(g, cell));
@@ -1853,7 +2001,10 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     let head = sheet_size(Face::Title, s);
     let heading = |key: &str, ours: &'static str, r: Rect| {
         let t = own(key, ours);
-        with_original_face(Face::Title, || chrome::shadow_centered(&t, r.x + r.w / 2.0, r.y - 7.0 * s, head, ACCENT));
+        // On a phone the heading sits in its reserved row above the box (`army_phone::HEAD`), its
+        // baseline 4 dp over the box's top; the desktop keeps its own offset.
+        let base = if lay.is_some() { r.y - 4.0 * k } else { r.y - 7.0 * s };
+        with_original_face(Face::Title, || chrome::shadow_centered(&t, r.x + r.w / 2.0, base, head, ACCENT));
     };
 
     // The item description box (310 × 164 at 58): the item under the pointer. On a phone, with a
@@ -1861,14 +2012,21 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     // On a phone the description shows at once while a finger is on it (`input::item_hint_hover`).
     let described = hover.filter(|_| game.held_item.is_none() && super::input::item_hint_hover());
     let entry_shown = diary_rows(game, view.tab).get(view.pick).is_some();
-    let list0 = o(576.0, 252.0, 292.0, 128.0);
-    let list_bar0 = o(868.0, 252.0, 18.0, 128.0);
-    let entry0 = o(576.0, 410.0, 292.0, 220.0);
-    let entry_bar0 = o(868.0, 410.0, 18.0, 220.0);
-    let mut column = diary_column(o(576.0, 58.0, 310.0, 164.0), list0, entry0, phone, described.is_some(), entry_shown);
+    let (desc0, list0, list_bar0, entry0, entry_bar0) = match &lay {
+        Some(l) => (l.desc, l.list, l.list_bar, l.entry, l.entry_bar),
+        None => (o(576.0, 58.0, 310.0, 164.0), o(576.0, 252.0, 292.0, 128.0), o(868.0, 252.0, 18.0, 128.0), o(576.0, 410.0, 292.0, 220.0), o(868.0, 410.0, 18.0, 220.0)),
+    };
+    let mut column = if sideways {
+        // Sideways the description box has no place of its own: while an item is described it takes
+        // the entry's place (and the entry is not drawn then); otherwise the entry is shown.
+        DiaryColumn { desc: described.is_some().then_some(desc0), list: list0, entry: entry0 }
+    } else {
+        diary_column(desc0, list0, entry0, phone, described.is_some(), entry_shown)
+    };
     // Sideways a phone's bottom buttons stack under the diary's right column (no «Закрыть» there):
-    // the entry box gives up that strip, so «Весь список» does not cover its text.
-    if phone && !window_layout::portrait() {
+    // the entry box gives up that strip, so «Весь список» does not cover its text. (The phone's
+    // layout (`lay`) places them clear of the entry, so this is the desktop's guard only.)
+    if phone && lay.is_none() && !window_layout::portrait() {
         column.entry = entry_above_row(column.entry, &bottom_row_rects(win), k);
     }
     if let Some(desc) = column.desc {
@@ -1879,12 +2037,30 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
         }
     }
 
+    // The sideways right column is clipped to its pane while it is drawn (to the buttons below).
+    let side_clip = pane_rect.map(super::widgets::Clip::new);
     // The four resource lines, 78 px apart from 325.
     let values = hero_resources(game.gold, game.mana, game.daily_income(), game.daily_wages());
     let ours = [n_("Gold reserve"), n_("Mana reserve"), n_("Income from castles"), n_("Army upkeep")];
     let frame = chrome::win_scaled("ResFrame", [1024; 3], [0, -15, -22]);
     for (i, value) in values.iter().enumerate() {
         let y = 325.0 + 78.0 * i as f32;
+        if let Some(l) = &lay {
+            // The phone's box: the name at its left, the value at its right, one line (`army_phone`).
+            let r = l.res[i];
+            if let Some(t) = &frame {
+                chrome::tex(t, r, WHITE);
+            }
+            let name = chrome::ui_line("Hero", i).filter(|_| ru).unwrap_or_else(|| tr(ours[i]).to_string());
+            // Two measured lines: the name on top, the value under it at the right; the box is as
+            // tall as the two (`army_phone`'s resource rows), so neither overlaps the other.
+            let name_t = super::kit::Text::new(&name, 13.0, ink_color(Ink::Plain));
+            let value_t = super::kit::Text::new(value, 14.0, ink_color(Ink::Star));
+            let name_base = r.y + 4.0 * k + name_t.size();
+            name_t.draw_one(r.x + 8.0 * k, name_base);
+            value_t.draw_right_one(r.right() - 8.0 * k, name_base + value_t.line_pitch());
+            continue;
+        }
         if let Some(t) = &frame {
             chrome::tex(t, o(271.0, y, t.width(), t.height()), WHITE);
         }
@@ -1911,7 +2087,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     let cell = list_box.w / Tab::ALL.len() as f32;
     for (i, tab) in Tab::ALL.into_iter().enumerate() {
         let r = Rect::new(list_box.x + i as f32 * cell, list_box.y - head * 1.45, cell, head * 1.4);
-        let over = mouse_in(r.x, r.y, r.w, r.h);
+        let over = mouse_in(r.x, r.y, r.w, r.h) && pane_hit(pane_rect);
         let ink = if tab == view.tab { ACCENT } else if over { INK } else { DIM };
         // In the diary's bold face (the original's bitmap fonts come in one size each, and the
         // four titles do not fit in the title face).
@@ -1957,10 +2133,13 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     // On a phone the list is drawn at its own size, as the entry below.
     // A phone's row shrinks to fit the box down to the window's title size before it is cut.
     let row_floor = sheet_size(Face::Title, s).min(list_t);
-    let row_h = (list_t * 1.25).round();
+    // Sideways the list's rows are touch-tall (three of them fit its box).
+    let row_h = if sideways { (list_t * 1.25).round().max((44.0 * k).round()) } else { (list_t * 1.25).round() };
     let fits = ((list.h - 8.0 * s) / row_h).floor().max(1.0) as usize;
-    swipe_rows(list, row_h);
-    if mouse_in(list.x, list.y, list.w, list.h) {
+    if !overflow {
+        swipe_rows(list, row_h);
+    }
+    if !overflow && mouse_in(list.x, list.y, list.w, list.h) {
         let w = wheel();
         if w < 0.0 && view.list_scroll + fits < lines.len() {
             view.list_scroll += 1;
@@ -2011,11 +2190,17 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
             title.pop();
         }
         super::dt_font::legacy_metrics_if(phone, || with_original_face(Face::Title, || chrome::shadow_centered(&title, list.x + list.w / 2.0, ry + row_h * 0.78, size, ink_color(Ink::Plain))));
-        if mouse_in(list.x, ry, list.w, row_h) && clicked() && view.pick != k {
+        if mouse_in(list.x, ry, list.w, row_h) && pane_hit(pane_rect) && clicked() && view.pick != k {
             view.pick = k;
             view.text_scroll = 0;
         }
     }
+    let ts = super::display::text_for(s, crate::ui::dialog::TEXT_REF);
+    // On a phone the entry's title is as large as the quest list's titles (`list_t`).
+    let entry_title = diary_title_size(phone, list_t, head, ts, s);
+    // Not drawn while a sideways description takes its place.
+    let entry_free = !(sideways && column.desc.is_some());
+    if entry_free {
     let entry = column.entry;
     let entry_bar = Rect::new(entry_bar0.x, entry.y, entry_bar0.w, entry.h);
     let entry_box = Rect::new(entry.x, entry.y, entry_bar.x + entry_bar.w - entry.x, entry.h);
@@ -2027,18 +2212,17 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     // scale), so the diary reads as large as the messages do; the desktop is unchanged.
     // Under native metrics (the whole frame) the sheet fonts ignore the size passed, so the
     // phone's diary (its wrap and its drawing) runs with the legacy metrics, which take it.
-    let ts = super::display::text_for(s, crate::ui::dialog::TEXT_REF);
     let body = diary_body_size(phone, ts);
     let room = entry.w - 16.0 * s;
-    // On a phone the entry's title is as large as the quest list's titles (`list_t`).
-    let entry_title = diary_title_size(phone, list_t, head, ts, s);
     let lines = super::dt_font::legacy_metrics_if(phone, || {
         rows.get(view.pick).map_or_else(Vec::new, |row| diary_lines(row, view.tab, phone, room, entry_title, body))
     });
     let line_h = (body * 1.15).round();
     let shown = ((entry.h - 12.0 * s) / line_h).floor().max(1.0) as usize;
-    swipe_rows(entry, line_h);
-    if mouse_in(entry.x, entry.y, entry.w, entry.h) {
+    if !overflow {
+        swipe_rows(entry, line_h);
+    }
+    if !overflow && mouse_in(entry.x, entry.y, entry.w, entry.h) {
         let w = wheel();
         if w < 0.0 && view.text_scroll + shown < lines.len() {
             view.text_scroll += 1;
@@ -2055,21 +2239,34 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
             draw_markup_row_face(&line.row, entry.x + 8.0 * s, y, room, line.size, line.face, Some(line.color));
         }
     });
+    }
 
     // The phone's bottom buttons: «Весь список» (the whole tab in its reader) left, «Закрыть» between
     // (portrait), «Развернуть» (the picked entry in its reader) right; sideways «Весь список» stands
     // above «Развернуть». Drawn before the readers, which cover them while they are open.
     if phone {
-        let row = bottom_row_rects(win);
-        let (left, right) = (row.whole, row.expand);
-        if button(left.x, left.y, left.w, left.h, tr("Whole list"), whole_list_enabled(rows.len())) {
+        let (left, right) = match &lay {
+            Some(l) => (l.whole, l.expand),
+            None => {
+                let row = bottom_row_rects(win);
+                (row.whole, row.expand)
+            }
+        };
+        if button(left.x, left.y, left.w, left.h, tr("Whole list"), whole_list_enabled(rows.len()) && fully_in(pane_rect, left)) {
             view.list_reader = true;
             view.list_reader_scroll = 0;
         }
-        if button(right.x, right.y, right.w, right.h, tr("Expand"), expand_entry_enabled(rows.len(), view.pick)) {
+        if button(right.x, right.y, right.w, right.h, tr("Expand"), expand_entry_enabled(rows.len(), view.pick) && fully_in(pane_rect, right)) {
             view.reader = true;
             view.reader_scroll = 0;
         }
+    }
+
+    drop(side_clip);
+    if let Some((pane, most)) = side.filter(|_| overflow) {
+        let mut at = view.side_scroll;
+        super::widgets::scrollbar_px(Rect::new(pane.right() - 10.0 * k, pane.y, 10.0 * k, pane.h), &mut at, most, pane.h, 30.0 * k);
+        view.side_scroll = at;
     }
 
     // The readers, when open: they take this frame's input (the window below took none), so the
