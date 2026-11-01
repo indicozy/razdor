@@ -11,6 +11,9 @@ before (the UI regression goldens prove it).
   upright and sideways. `display::dp_px()` is `Some` on a phone, `None` on the desktop.
 - Text on a phone: never under 12 sp at the phone's default text size (1.25); a larger text size
   only makes it larger (`kit::min_cap_px`). sp is measured as the probe does: capital height / dp / 0.7.
+  Safety net for every screen, kit or not (Razdor's own, the owner's decision, 2026-11-01): `widgets::phone_floor`
+  raises the size in `text_exact` (drawing) and `measure_exact` (measuring, so a layout that measures makes room),
+  and the engraved title path floors its whole pixel size. `widgets::without_floor` is for the floor's own measurement.
 - Touch targets on a phone: at least 40 dp on the shorter side, 48 dp (`widgets::FINGER_DP`)
   where there is room (`kit::touch_h`).
 - The desktop (and any `dp_px() == None` run) keeps today's pixels: every kit function returns

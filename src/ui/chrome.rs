@@ -1451,7 +1451,12 @@ pub fn engraved_centered(s: &str, c: Vec2, (cap, max_w): (f32, f32), (rim, bold)
     let at = |size: u16| measure_text(s, font.as_ref(), size, 1.0);
     let probe = at(100);
     let cap_per_size = measure_text("H", font.as_ref(), 100, 1.0).offset_y / 100.0;
-    let size = engraved_size(cap, max_w - bold, cap_per_size, probe.width / 100.0).round().max(1.0) as u16;
+    let mut size = engraved_size(cap, max_w - bold, cap_per_size, probe.width / 100.0).round().max(1.0) as u16;
+    // The phone's floor (Razdor's own, the owner's decision, 2026-11-01): whole pixels, so the
+    // capitals reach `kit::min_cap_px` exactly (`widgets::phone_floor` for the TrueType faces).
+    if let Some(min) = super::kit::min_cap_px().filter(|_| cap_per_size > 0.0) {
+        size = size.max((min / cap_per_size).ceil() as u16);
+    }
     let m = at(size);
     let x = (c.x - (m.width + bold) / 2.0).round();
     let y = (c.y + cap_per_size * size as f32 / 2.0).round();

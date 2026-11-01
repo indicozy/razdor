@@ -250,14 +250,59 @@ pub fn measure(s: &str, size: f32) -> TextDimensions {
 
 /// [`measure`] at `size` as it is: no native sizing, so a caller that shrinks a text to fit
 /// measures and draws (`text_exact`) at the same size. Equal to `measure` outside native
-/// metrics.
+/// metrics. On a phone the size is raised to the floor first ([`phone_floor`]), as it is drawn.
 pub fn measure_exact(s: &str, size: f32) -> TextDimensions {
+    measure_raw(s, phone_floor(size))
+}
+
+/// [`measure_exact`] at `size` exactly, without the phone floor.
+fn measure_raw(s: &str, size: f32) -> TextDimensions {
     let bitmap = super::dt_font::with_current(|f| {
         let width = f.width(s, size, &|run| measure_ttf(run, size).width);
         let cap = f.cap_height(size);
         TextDimensions { width, height: size, offset_y: cap }
     });
     bitmap.unwrap_or_else(|| measure_ttf(s, size))
+}
+
+local! {
+    /// Inside [`without_floor`]: texts are measured and drawn at the size asked for.
+    static NO_FLOOR: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs `f` with the phone floor off ([`phone_floor`]): for a caller that needs the exact size,
+/// such as the floor's own capital measurement.
+pub fn without_floor<R>(f: impl FnOnce() -> R) -> R {
+    let before = NO_FLOOR.with(|c| c.replace(true));
+    let r = f();
+    NO_FLOOR.with(|c| c.set(before));
+    r
+}
+
+/// `size` raised to the phone's floor. Razdor's own (the owner's decision, 2026-11-01): on a phone
+/// no text is under 12 sp, so its capital "Н" is at least `kit::min_cap_px` tall. Unchanged on the
+/// desktop and inside [`without_floor`]. Measuring and drawing both go through it, so a layout that
+/// measures makes room for the size that is drawn.
+pub fn phone_floor(size: f32) -> f32 {
+    match super::kit::min_cap_px() {
+        Some(min) if !NO_FLOOR.with(std::cell::Cell::get) => raise_to_cap(size, min, |s| measure_raw("Н", s).offset_y),
+        _ => size,
+    }
+}
+
+/// `size` raised until its capital (`cap_at`, measured at a size) reaches `min`: `kit::floored_at`
+/// scales it, then whole pixels are added while the drawn capital is still short (a TrueType size
+/// is drawn at whole pixels, rounded down, so the scaled size can fall just short).
+pub(crate) fn raise_to_cap(size: f32, min: f32, cap_at: impl Fn(f32) -> f32) -> f32 {
+    let mut s = super::kit::floored_at(size, cap_at(size), Some(min));
+    for _ in 0..8 {
+        let cap = cap_at(s);
+        if cap >= min || cap <= 0.0 {
+            break;
+        }
+        s = (s + 1.0).floor();
+    }
+    s
 }
 
 local! {
@@ -1058,6 +1103,8 @@ pub fn text(s: &str, x: f32, y: f32, size: f32, color: Color) {
 
 /// [`text`] at `size` as it is (see [`measure_exact`]).
 pub fn text_exact(s: &str, x: f32, y: f32, size: f32, color: Color) {
+    // The floor first, so the probe records the size drawn (see `phone_floor`).
+    let size = phone_floor(size);
     if super::text_probe::on() {
         let cap = measure_exact("Н", size).offset_y;
         super::text_probe::record(s, x, y, measure_exact(s, size).width, size, cap);
@@ -2454,6 +2501,23 @@ pub fn scrollbar_px(r: Rect, scroll: &mut f32, most: f32, view: f32, step: f32) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn raise_to_cap_reaches_the_minimum_for_linear_and_whole_pixel_faces() {
+        // A linear face: the capital is 0.7 of the size, so 12 px becomes 14 px for a 9.8 px cap.
+        let linear = |s: f32| 0.7 * s;
+        let s = raise_to_cap(10.0, 9.8, linear);
+        assert!((s - 14.0).abs() < 1e-4, "{s}");
+        // A face drawn at whole pixels, rounded down: the scaled size falls just short, so
+        // whole pixels are added until the capital reaches the minimum.
+        let rounded = |s: f32| 0.7 * s.floor();
+        let s = raise_to_cap(10.0, 9.8, rounded);
+        assert!(rounded(s) >= 9.8, "{s}");
+        // Already big enough: unchanged.
+        assert_eq!(raise_to_cap(20.0, 9.8, linear), 20.0);
+        // No capital at all (no glyph): unchanged, no loop.
+        assert_eq!(raise_to_cap(10.0, 9.8, |_| 0.0), 10.0);
+    }
 
     /// Runs `capture_step` over (down edge, up edge, held, hover) frames for one button and
     /// returns each frame's `pressed`.
