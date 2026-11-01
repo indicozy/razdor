@@ -271,15 +271,12 @@ pub fn follow_pick() {
 /// click opens the list.
 pub fn picker_box(r: Rect) {
     let (hover, down, pressed) = super::widgets::button_state(r, true);
-    // Drawn at the grown rect on a phone held upright (`upright_button_rect`); the text's size
-    // stays the target's.
-    let d = super::widgets::upright_button_rect(r);
-    draw_rectangle(d.x, d.y, d.w, d.h, PANEL);
-    draw_rectangle_lines(d.x, d.y, d.w, d.h, 2.0, if down || list_open() { ACCENT } else if hover { INK } else { DIM });
+    draw_rectangle(r.x, r.y, r.w, r.h, PANEL);
+    draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, if down || list_open() { ACCENT } else if hover { INK } else { DIM });
     let size = (r.h * 0.55).clamp(12.0, 22.0);
-    let tw = d.w - 30.0;
-    text_fit(&current_label(), d.x + 8.0, d.y + d.h / 2.0 + size * 0.35, tw, size, ACCENT);
-    let (cx, cy) = (d.x + d.w - 13.0, d.y + d.h / 2.0);
+    let tw = r.w - 30.0;
+    text_fit(&current_label(), r.x + 8.0, r.y + r.h / 2.0 + size * 0.35, tw, size, ACCENT);
+    let (cx, cy) = (r.x + r.w - 13.0, r.y + r.h / 2.0);
     draw_triangle(vec2(cx - 5.0, cy - 3.0), vec2(cx + 5.0, cy - 3.0), vec2(cx, cy + 4.0), DIM);
     if hover {
         tooltip(&[(hint().to_string(), INK)]);

@@ -521,8 +521,6 @@ fn store_tab_art(state: &'static str) -> Option<Texture2D> {
 /// A parchment tab in the left column (`tab` `None` is the exit). Returns true when clicked.
 fn tab_button(label: &str, tab: Option<Tab>, r: Rect, active: bool) -> bool {
     let (hover, down, pressed) = button_state(r, true);
-    // The tab is drawn at the grown rect on a phone held upright (`upright_button_rect`).
-    let r = super::widgets::upright_button_rect(r);
     let state = tab_state(active, hover, down);
     let art = if tab == Some(Tab::Store) { store_tab_art(state) } else { tab_art(tab).and_then(|n| chrome::win(&format!("{state}{n}_RUS"))) };
     if let Some(t) = art {

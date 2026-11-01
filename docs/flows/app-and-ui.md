@@ -180,21 +180,6 @@ and at the midline to every other rectangle that `button_state`, `tapped_in` or 
 last frame (`finger_frame`, swapped in `input::begin_frame`) and that does not overlap the target, so
 neighbours never share a hit area and controls with their own pointer test keep their taps; space blocked
 on one side goes to the other. The touch probe records this hit area. The desktop uses the drawn rectangles.
-
-Phone buttons drawn bigger (Razdor's own, the owner's decision, 2026-11-01): on a phone held upright (`dp_px` set and
-`window_layout::portrait`) a button is drawn at `widgets::upright_button_rect(r)`, not at its layout rectangle `r`: its
-shorter side grows toward 40 dp, and 40 dp × `max(1, text_size / 1.25)` at a bigger player text size (48 dp at Largest).
-It grows centred on `r`, only as far as the room the finger area has (`finger_hit_at` with no size limit: the
-pointer's obstacles, the bar, the windows and the screen), and also out of the text boxes drawn last frame
-(`note_text`, from `text_exact`: a button keeps off a label beside it, as off a neighbour). It keeps 2 dp inside any
-edge a neighbour, a text or the bar cut, and never gets smaller than `r`. The hit area is still `finger_hit`. Pictures
-and rules the screen draws are not obstacles: a button next to a picture or a list may grow over it, so a screen whose
-row sits on a list keeps its size (the item filter's group row, `item_filter::group_row`). Where the layout leaves no
-room (a price under a hire button) a button stays at its size: the layout is not changed. The shared helpers (`marble_button`, `defeat_button`,
-`pill_button`, `small_button`, `toggle_button`, `close_button`, the language picker, the tabs) draw there, and the label
-is centred in the drawn rectangle (`chrome::button_label_in`). The layout, the windows, the fonts and the bottom bar
-do not change; the desktop and a sideways phone draw `r` as before. The pictures of a button's art (the title ovals,
-the list rows, the check boxes, the slider arrows) are not grown.
 The orientation setting (Android only; the options window's «Ориентация экрана» row, the last one
 on Android, `Settings::orientation: Option<audio::Orientation>`, `None` = Auto): Auto keeps the
 manifest's `fullUser`, Landscape and Portrait lock the activity. `ui::android::follow_orientation`

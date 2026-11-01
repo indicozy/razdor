@@ -334,10 +334,6 @@ local! {
     /// finger area never grows out of the smallest one that holds its target. Phones only.
     static FINGER_WINDOWS_NOW: RefCell<Vec<Rect>> = const { RefCell::new(Vec::new()) };
     static FINGER_WINDOWS_LAST: RefCell<Vec<Rect>> = const { RefCell::new(Vec::new()) };
-    /// The text boxes drawn this frame, and last frame's: a button drawn bigger on a phone held
-    /// upright (`upright_button_rect`) keeps out of them as out of a neighbour. Phones only.
-    static TEXT_NOW: RefCell<Vec<Rect>> = const { RefCell::new(Vec::new()) };
-    static TEXT_LAST: RefCell<Vec<Rect>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Android's minimum touch target, in dp: a phone's finger areas grow to this size where there
@@ -367,18 +363,6 @@ pub fn finger_frame() {
     FINGER_LAST.with(|l| *l.borrow_mut() = now);
     let windows = FINGER_WINDOWS_NOW.with(|n| std::mem::take(&mut *n.borrow_mut()));
     FINGER_WINDOWS_LAST.with(|l| *l.borrow_mut() = windows);
-    let texts = TEXT_NOW.with(|n| std::mem::take(&mut *n.borrow_mut()));
-    TEXT_LAST.with(|l| *l.borrow_mut() = texts);
-}
-
-/// Notes a text box drawn at (`x`, baseline `y`) of `width` and `size` for the next frame's grown
-/// buttons (`upright_button_rect`). Only on a phone (`display::dp_px`); the box is the capitals'
-/// height above the baseline and a quarter of the size below it.
-fn note_text(x: f32, y: f32, width: f32, size: f32) {
-    if super::display::dp_px().is_some() {
-        let cap = measure_exact("Н", size).offset_y;
-        TEXT_NOW.with(|n| n.borrow_mut().push(Rect::new(x, y - cap, width, cap + size * 0.25)));
-    }
 }
 
 /// The room a finger area of `r` may grow into: the smallest of `windows` that fully holds `r`
@@ -518,91 +502,6 @@ fn grow_axis(start: f32, len: f32, lo: f32, hi: f32, want: f32) -> (f32, f32) {
     let grown = len.max(want.min(hi - lo));
     let at = (start + len / 2.0 - grown / 2.0).max(lo).min(hi - grown);
     (at, grown)
-}
-
-/// The size a button's shorter side grows to on a phone held upright, in dp (Razdor's own, the
-/// owner's decision 2026-11-01), at the default text size [`UPRIGHT_TEXT`]. It scales with the
-/// player's text size above that (`upright_button_rect_at`).
-pub const UPRIGHT_DP: f32 = 40.0;
-
-/// The text size at which a button's upright target is [`UPRIGHT_DP`] (Large, the phone default).
-const UPRIGHT_TEXT: f32 = 1.25;
-
-/// The gap, in dp, a drawn button keeps from a neighbour (or the bottom bar) that cut its growth.
-const UPRIGHT_GAP_DP: f32 = 2.0;
-
-/// How many times the finger area's size is taken for the room a drawn button grows into: so
-/// [`finger_hit_at`] gives the room alone (its edges are the obstacles, the bar and the screen).
-const ROOM_DP: f32 = 1000.0;
-
-/// The rectangle a button is DRAWN at, for its target `r`: on a phone held upright its shorter
-/// side is grown toward `UPRIGHT_DP` dp (scaled with the text size), within the room of its
-/// finger area. Everywhere else it is `r`. Draw the frame here and the label centred in it.
-///
-/// Razdor's own (the owner's decision, 2026-11-01): on a phone held upright buttons are drawn
-/// bigger, scaling with the text size; layouts unchanged. The hit area stays [`finger_hit`],
-/// which is at least as big.
-pub fn upright_button_rect(r: Rect) -> Rect {
-    let dp = super::display::dp_px();
-    let upright = super::window_layout::portrait();
-    if dp.is_none() || !upright {
-        return r;
-    }
-    let screen = Rect::new(0.0, 0.0, screen_width(), screen_height());
-    let text = super::display::text_size();
-    FINGER_WINDOWS_LAST.with(|w| {
-        let room = finger_room(r, &w.borrow(), screen);
-        FINGER_LAST.with(|l| {
-        // The pointer's obstacles and last frame's texts: a grown button keeps out of both.
-        let mut others = l.borrow().clone();
-        TEXT_LAST.with(|t| others.extend(t.borrow().iter().copied()));
-        upright_button_rect_at(r, dp, upright, text, room, super::pan::bar_top(), &others)
-    })
-    })
-}
-
-/// [`upright_button_rect`] as a pure function of its inputs. `dp` is the phone's pixels per dp,
-/// `upright` whether the phone is held upright, `text_size` the player's text size, `screen`
-/// the room (the screen, or the window the target is in), `bar_top` the top of the bottom bar and
-/// `others` the pointer obstacles, as for [`finger_hit_at`].
-///
-/// The shorter side of `r` (both sides of a square) grows toward `UPRIGHT_DP × max(1, text_size /
-/// 1.25)` dp, centred on `r`, never beyond the room [`finger_hit_at`] gives it. Where a neighbour
-/// or the bar cut the growth, the drawn edge stays [`UPRIGHT_GAP_DP`] dp inside that cut, so two
-/// buttons keep a visible gap. The result is never smaller than `r`.
-pub fn upright_button_rect_at(r: Rect, dp: Option<f32>, upright: bool, text_size: f32, screen: Rect, bar_top: f32, others: &[Rect]) -> Rect {
-    let dp = match dp {
-        Some(dp) if upright && dp > 0.0 && r.w > 0.0 && r.h > 0.0 => dp,
-        _ => return r,
-    };
-    let target = UPRIGHT_DP * dp * (text_size / UPRIGHT_TEXT).max(1.0);
-    // The room: the finger area with no size limit (`ROOM_DP`), so its edges are only the
-    // obstacles, the bar and the screen, never the 48 dp of the finger area itself.
-    let room = finger_hit_at(r, Some(dp * ROOM_DP), screen, bar_top, others);
-    let gap = UPRIGHT_GAP_DP * dp;
-    let grow_x = r.w < target && r.w <= r.h;
-    let grow_y = r.h < target && r.h <= r.w;
-    let (x, w) = upright_axis((r.x, r.w), (room.x, room.right()), (screen.x, screen.x + screen.w), target, gap, grow_x);
-    let (y, h) = upright_axis((r.y, r.h), (room.y, room.bottom()), (screen.y, screen.y + screen.h), target, gap, grow_y);
-    Rect::new(x, y, w, h)
-}
-
-/// One axis of [`upright_button_rect_at`]: `span` (start, length) of the target, drawn grown
-/// toward `target` when `grow`, within `room` (lo, hi). An edge the room cuts (not the screen's
-/// edge `screen`) keeps `gap` inside the cut. Never smaller than the span.
-fn upright_axis(span: (f32, f32), room: (f32, f32), screen: (f32, f32), target: f32, gap: f32, grow: bool) -> (f32, f32) {
-    let (start, len) = span;
-    if !grow {
-        return (start, len);
-    }
-    let (lo, hi) = (room.0.min(start), room.1.max(start + len));
-    let grown = len.max(target.min(hi - lo));
-    let at = (start + len / 2.0 - grown / 2.0).max(lo).min(hi - grown);
-    let cut_lo = lo > screen.0 + 0.5 && at <= lo + 0.5;
-    let cut_hi = hi < screen.1 - 0.5 && at + grown >= hi - 0.5;
-    let new_lo = if cut_lo { (at + gap).min(start) } else { at.min(start) };
-    let new_hi = if cut_hi { (at + grown - gap).max(start + len) } else { (at + grown).max(start + len) };
-    (new_lo, new_hi - new_lo)
 }
 
 /// Whether the pointer may act on the rectangle at (`x`, `y`) of size `w` × `h`: it is over it,
@@ -1162,9 +1061,6 @@ pub fn text_exact(s: &str, x: f32, y: f32, size: f32, color: Color) {
     if super::text_probe::on() {
         let cap = measure_exact("Н", size).offset_y;
         super::text_probe::record(s, x, y, measure_exact(s, size).width, size, cap);
-    }
-    if super::display::dp_px().is_some() {
-        note_text(x, y, measure_exact(s, size).width, size);
     }
     let color = super::typography::color(color);
     let drawn = super::dt_font::with_current(|f| {
@@ -2172,19 +2068,17 @@ pub fn small_button(x: f32, y: f32, w: f32, h: f32, label: &str, enabled: bool) 
         (true, true) => Color::new(0.45, 0.35, 0.2, 1.0),
         (true, false) => Color::new(0.26, 0.21, 0.14, 1.0),
     };
-    let drawn = upright_button_rect(r);
-    draw_rectangle(drawn.x, drawn.y, drawn.w, drawn.h, bg);
-    draw_rectangle_lines(drawn.x, drawn.y, drawn.w, drawn.h, 1.0, if enabled { DIM } else { Color::new(0.3, 0.3, 0.3, 1.0) });
-    compact_label(r, drawn, label, if enabled { INK } else { DIM });
+    draw_rectangle(x, y, w, h, bg);
+    draw_rectangle_lines(x, y, w, h, 1.0, if enabled { DIM } else { Color::new(0.3, 0.3, 0.3, 1.0) });
+    compact_label(Rect::new(x, y, w, h), label, if enabled { INK } else { DIM });
     pressed
 }
 
-/// The centred label of [`small_button`] and [`toggle_button`]: its size from the target `r`,
-/// its position centred in `drawn` (the button's drawn rectangle). Razdor's own (the owner's
+/// The centred label of [`small_button`] and [`toggle_button`]. Razdor's own (the owner's
 /// decision, 2026-10-31): at Large and Largest text it grows with the text size
 /// (`display::button_grow`), up to what the button's width and height take; never below its size
 /// at Normal, which is drawn exactly as before.
-fn compact_label(r: Rect, drawn: Rect, label: &str, color: Color) {
+fn compact_label(r: Rect, label: &str, color: Color) {
     super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
         let normal = fit_size(label, r.w - 6.0, 17.0);
         let g = super::display::button_grow();
@@ -2199,7 +2093,7 @@ fn compact_label(r: Rect, drawn: Rect, label: &str, color: Color) {
             let size = if is_grown { grown } else { normal };
             let label = &ellipsize(label, r.w - 6.0, size);
             let d = measure(label, size);
-            text(label, drawn.x + (drawn.w - d.width) / 2.0, drawn.y + (drawn.h + d.offset_y) / 2.0 - 1.0, size, color);
+            text(label, r.x + (r.w - d.width) / 2.0, r.y + (r.h + d.offset_y) / 2.0 - 1.0, size, color);
         });
     });
 }
@@ -2209,10 +2103,9 @@ fn compact_label(r: Rect, drawn: Rect, label: &str, color: Color) {
 pub fn toggle_button(x: f32, y: f32, w: f32, h: f32, label: &str, on: bool) -> bool {
     let (hover, down, pressed) = button_state(Rect::new(x, y, w, h), true);
     let bg = if on { Color::new(0.55, 0.42, 0.18, 1.0) } else if down { Color::new(0.36, 0.28, 0.18, 1.0) } else if hover { Color::new(0.28, 0.22, 0.14, 1.0) } else { Color::new(0.22, 0.18, 0.12, 1.0) };
-    let drawn = upright_button_rect(Rect::new(x, y, w, h));
-    draw_rectangle(drawn.x, drawn.y, drawn.w, drawn.h, bg);
-    draw_rectangle_lines(drawn.x, drawn.y, drawn.w, drawn.h, 1.0, if on { ACCENT } else { DIM });
-    compact_label(Rect::new(x, y, w, h), drawn, label, INK);
+    draw_rectangle(x, y, w, h, bg);
+    draw_rectangle_lines(x, y, w, h, 1.0, if on { ACCENT } else { DIM });
+    compact_label(Rect::new(x, y, w, h), label, INK);
     if pressed {
         claim();
     }
@@ -3089,117 +2982,5 @@ mod finger_tests {
         assert_eq!((t.x, t.y, t.w), (row.x, row.y, row.w));
         assert_eq!(t.h, 96.0);
         assert_eq!(tap_rect_at(row, false, None), row, "desktop: the row itself");
-    }
-}
-
-#[cfg(test)]
-mod upright_tests {
-    use super::*;
-
-    /// The phone of the checks: 2.75 px per dp, a 1080 × 2400 screen, the bar's top at 2300.
-    const DP: Option<f32> = Some(2.75);
-    const BAR: f32 = 2300.0;
-    const EPS: f32 = 1e-3;
-
-    fn screen() -> Rect {
-        Rect::new(0.0, 0.0, 1080.0, 2400.0)
-    }
-
-    fn drawn(r: Rect, text: f32, others: &[Rect]) -> Rect {
-        upright_button_rect_at(r, DP, true, text, screen(), BAR, others)
-    }
-
-    fn hit(r: Rect, others: &[Rect]) -> Rect {
-        finger_hit_at(r, DP, screen(), BAR, others)
-    }
-
-    fn overlaps(a: Rect, b: Rect) -> bool {
-        a.x < b.right() && b.x < a.right() && a.y < b.bottom() && b.y < a.bottom()
-    }
-
-    fn contains(outer: Rect, inner: Rect) -> bool {
-        outer.x <= inner.x + EPS && outer.y <= inner.y + EPS && outer.right() + EPS >= inner.right() && outer.bottom() + EPS >= inner.bottom()
-    }
-
-    #[test]
-    fn desktop_and_sideways_phones_get_the_rect_back() {
-        let r = Rect::new(500.0, 1000.0, 50.0, 20.0);
-        assert_eq!(upright_button_rect_at(r, None, true, 1.25, screen(), BAR, &[]), r, "desktop");
-        assert_eq!(upright_button_rect_at(r, DP, false, 1.25, screen(), BAR, &[]), r, "sideways");
-        assert_eq!(upright_button_rect_at(r, Some(0.0), true, 1.25, screen(), BAR, &[]), r, "no density");
-        assert_eq!(upright_button_rect_at(Rect::new(0.0, 0.0, 0.0, 20.0), DP, true, 1.25, screen(), BAR, &[]).h, 20.0, "no area");
-    }
-
-    #[test]
-    fn a_lone_small_target_grows_its_shorter_side_to_40_dp_at_large_text() {
-        let r = Rect::new(500.0, 1000.0, 50.0, 20.0);
-        let d = drawn(r, 1.25, &[]);
-        let want = 40.0 * 2.75;
-        assert!((d.h - want).abs() < EPS, "{d:?}");
-        assert!((d.w - r.w).abs() < EPS, "the longer side stays: {d:?}");
-        assert!((d.y + d.h / 2.0 - (r.y + r.h / 2.0)).abs() < EPS, "centred on r: {d:?}");
-        assert!((d.x - r.x).abs() < EPS, "{d:?}");
-    }
-
-    #[test]
-    fn the_target_scales_with_the_text_size_and_is_40_dp_at_normal_too() {
-        let r = Rect::new(500.0, 1000.0, 50.0, 20.0);
-        let normal = drawn(r, 1.0, &[]).h;
-        let large = drawn(r, 1.25, &[]).h;
-        let largest = drawn(r, 1.5, &[]).h;
-        assert!((normal - 40.0 * 2.75).abs() < EPS, "Normal: {normal}");
-        assert!((large - 40.0 * 2.75).abs() < EPS, "Large: {large}");
-        assert!((largest - 48.0 * 2.75).abs() < EPS, "Largest: {largest}");
-    }
-
-    #[test]
-    fn a_target_already_big_enough_is_not_changed() {
-        let r = Rect::new(100.0, 800.0, 300.0, 120.0);
-        assert_eq!(drawn(r, 1.0, &[]), r, "120 px is over 40 dp at Normal");
-        assert_ne!(drawn(r, 1.5, &[]), r, "at Largest the target is 48 dp: 132 px");
-        let square = Rect::new(100.0, 800.0, 150.0, 150.0);
-        assert_eq!(drawn(square, 1.25, &[]), square, "wider and taller than 40 dp: no growth");
-    }
-
-    #[test]
-    fn a_neighbour_below_cuts_the_growth_with_a_gap() {
-        let r = Rect::new(500.0, 1000.0, 50.0, 20.0);
-        let below = Rect::new(500.0, 1060.0, 50.0, 20.0);
-        let d = drawn(r, 1.25, &[below]);
-        assert!(!overlaps(d, below), "{d:?}");
-        assert!(d.bottom() <= below.y - UPRIGHT_GAP_DP * 2.75 + EPS, "keeps the gap: {d:?}");
-        assert!(d.h > r.h, "grows toward the midline: {d:?}");
-        assert!(contains(d, r), "never smaller than the target: {d:?}");
-        assert!(contains(hit(r, &[below]), d), "inside the finger area");
-        // A neighbour closer than the target's own edge keeps the target: never smaller than r.
-        let close = Rect::new(500.0, 1024.0, 50.0, 20.0);
-        assert!(contains(drawn(r, 1.25, &[close]), r), "{:?}", drawn(r, 1.25, &[close]));
-    }
-
-    #[test]
-    fn the_bottom_bar_cuts_the_growth_above_it_with_a_gap() {
-        let r = Rect::new(500.0, 2270.0, 50.0, 20.0);
-        let d = drawn(r, 1.25, &[]);
-        assert!(d.bottom() <= BAR - UPRIGHT_GAP_DP * 2.75 + EPS, "{d:?}");
-        assert!(contains(d, r), "{d:?}");
-    }
-
-    #[test]
-    fn a_target_on_the_bar_stays_on_the_bar() {
-        let r = Rect::new(500.0, 2330.0, 50.0, 20.0);
-        let d = drawn(r, 1.25, &[]);
-        assert!(d.y >= BAR + UPRIGHT_GAP_DP * 2.75 - EPS, "{d:?}");
-        assert!(contains(d, r), "{d:?}");
-    }
-
-    #[test]
-    fn a_neighbour_beside_takes_its_share_of_the_width_growth() {
-        // A square-ish target grows its shorter side only; a wide one beside a close neighbour
-        // on its right keeps its drawn edge inside the midline.
-        let r = Rect::new(500.0, 1000.0, 20.0, 20.0);
-        let right = Rect::new(530.0, 1000.0, 20.0, 20.0);
-        let d = drawn(r, 1.25, &[right]);
-        assert!(!overlaps(d, right), "{d:?}");
-        assert!(contains(d, r), "{d:?}");
     }
 }
