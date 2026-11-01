@@ -26,6 +26,7 @@ use super::assets::Assets;
 use super::chrome;
 use super::dt_font;
 use super::hall_ink;
+use super::kit;
 use super::audio::{cue, cued, Cue};
 use super::dialog::{resource_icon, Dialog, Picture, Resource, MANA};
 use super::item_filter;
@@ -947,7 +948,16 @@ fn selected_unit_panel(game: &Game, assets: &Assets, f: &Frame, view: &BuildingV
 /// in-building flags (0x492f98 → 0x493106 jumps past 0x4930ab / 0x4930ff), so they keep the
 /// last card's values; Razdor shows the offer with neither.
 fn recruit_panel(game: &Game, assets: &Assets, f: &Frame, kind: UnitId) {
-    let c = &game.content;
+    recruit_sheet(game, kind, |c, sheet| {
+        let mut hover = None;
+        draw_card(assets, c, f, sheet, &mut hover);
+    });
+}
+
+/// The hire offer's sheet (see [`recruit_panel`]), handed to `show` with the content. Nothing for a
+/// type the game does not have.
+fn recruit_sheet(game: &Game, kind: UnitId, show: impl FnOnce(&razdor::rules::content::Content, &unit_sheet::Sheet)) {
+    let c: &razdor::rules::content::Content = &game.content;
     if c.try_unit(kind).is_none() {
         return;
     }
@@ -975,8 +985,7 @@ fn recruit_panel(game: &Game, assets: &Assets, f: &Frame, kind: UnitId) {
         hero: None,
         status: Vec::new(),
     };
-    let mut hover = None;
-    draw_card(assets, c, f, &sheet, &mut hover);
+    show(c, &sheet);
 }
 
 /// The window's stacking for a tab (a phone held upright): the barracks and the garrison take the
@@ -1024,14 +1033,23 @@ fn draw_card(assets: &Assets, c: &razdor::rules::content::Content, f: &Frame, sh
 }
 
 /// The card of a unit of the hero's army or of the garrison (`guard`), index `i`.
-fn unit_panel(game: &Game, assets: &Assets, f: &Frame, (guard, i): (bool, usize)) {
+fn unit_panel(game: &Game, assets: &Assets, f: &Frame, sel: (bool, usize)) {
+    squad_sheet(game, sel, |c, sheet| {
+        let mut hover = None;
+        draw_card(assets, c, f, sheet, &mut hover);
+    });
+}
+
+/// The sheet of a unit of the hero's army or of the garrison (`(guard, i)`, see [`unit_panel`]),
+/// handed to `show` with the content. Nothing when there is no such unit.
+fn squad_sheet(game: &Game, (guard, i): (bool, usize), show: impl FnOnce(&razdor::rules::content::Content, &unit_sheet::Sheet)) {
     let unit = if guard {
         game.garrison_here().get(i).map(|s| &s.unit)
     } else {
         game.squad.get(i)
     };
     let Some(unit) = unit else { return };
-    let c = &game.content;
+    let c: &razdor::rules::content::Content = &game.content;
     // The panel shows the building's defence with the unit's own, "15 + 20" (492f24, as the
     // cards add army +0x378c: 0x49462c).
     let bd = if guard { game.garrison_defence_here() } else { game.hero_building_defence() };
@@ -1060,8 +1078,7 @@ fn unit_panel(game: &Game, assets: &Assets, f: &Frame, (guard, i): (bool, usize)
         hero,
         status: super::items_view::potion_status(c, unit),
     };
-    let mut hover = None;
-    draw_card(assets, c, f, &sheet, &mut hover);
+    show(c, &sheet);
 }
 
 /// The left edge of recruit card `i` of `n` (window pixels): the cards and the `n + 1` gaps
@@ -1361,34 +1378,7 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
     // card moves (busy 0x68dc63). With «Расстановка армии: Перетаскивание» (Razdor's default,
     // the owner's decision) it only selects and units move by dragging; the original's second
     // press swaps or slides.
-    if let (Some((on, slot)), None) = (pressed, anim) {
-        let press = super::unit_drag::grid_press_in(super::unit_drag::controls(), selected, on);
-        view.garrison_sel = match press {
-            super::unit_drag::GridPress::Select(i) => Some((false, i)),
-            // Dragging only: an empty cell clears this grid's selection.
-            super::unit_drag::GridPress::Nothing => view.garrison_sel.filter(|_| selected.is_none()),
-            _ => None,
-        };
-        match press {
-            super::unit_drag::GridPress::Swap { selected: s, pressed: p } => {
-                cue(Cue::CardMove);
-                game.move_unit(s, game.squad[p].slot);
-            }
-            super::unit_drag::GridPress::Slide(s) => {
-                cue(Cue::CardMove);
-                let from = cell_at(game.squad[s].slot);
-                let ms = super::unit_drag::slide_ms(from, cell_at(slot), k);
-                game.move_unit(s, slot);
-                view.anim = Some(CardAnim { kind: CardAnimKind::Slid { unit: s, from: (from.x as i32, from.y as i32), ms }, t0_ms: now_ms() });
-            }
-            // Razdor's drag starts from a press that does not swap.
-            _ => {
-                if let Some(i) = on {
-                    super::unit_drag::press(i, game.squad[i].def, (game.squad[i].hp, game.squad[i].max_hp(&c)));
-                }
-            }
-        }
-    }
+    army_press(game, view, pressed, anim, selected, &cell_at, k);
     let selected_now = view.garrison_sel.filter(|&(g, i)| !g && i < game.squad.len()).map(|s| s.1);
     view.hire_panel = hire_panel_on(view.hire_panel, entered, selected_now);
     let cells: Vec<(Slot, Rect)> = form.slots().map(|s| (s, Rect::new(cell_at(s).x, cell_at(s).y, card.x, card.y))).collect();
@@ -1398,24 +1388,66 @@ fn barracks(game: &mut Game, assets: &Assets, f: &Frame, view: &mut BuildingView
         game.move_unit(unit, slot);
         view.garrison_sel = None;
     }
-    let mut next = None;
-    if let Some((i, raise)) = action {
-        let name = game.squad[i].name(&c).to_string();
-        let r = if raise { game.resurrect(i) } else { game.heal(i) };
-        match r {
-            Ok(events) => {
-                // The cure over the card, with its sound (0x4b11cc, `Battle-Cure`).
-                cue(Cue::Cure);
-                view.anim = Some(CardAnim { kind: CardAnimKind::Cured { unit: i }, t0_ms: now_ms() });
-                *message = Some(if raise { trf!("{name} rises again.", name) } else { trf!("{name} is healed.", name) });
-                // What happened meanwhile: a noon report, the scenario's events.
-                next = world_view::handle_events(game, events, message, dialogs);
-            }
-            Err(e) => *message = Some(service_error(e)),
-        }
-    }
+    let next = action.and_then(|(i, raise)| heal_or_raise(game, view, i, raise, message, dialogs));
     tooltip_later(&hover_lines);
     next
+}
+
+/// A press on the army's grid (`pressed`: the unit of a card, `None` an empty cell, and its slot)
+/// when no card moves (`anim` `None`): the original's hero grid within the hero's army (0x4c653c)
+/// selects, swaps or slides. With «Расстановка армии: Перетаскивание» (Razdor's default, the owner's
+/// decision) it only selects and units move by dragging. `selected` is the grid's selected unit.
+fn army_press(game: &mut Game, view: &mut BuildingView, pressed: Option<(Option<usize>, Slot)>, anim: Option<(CardAnimKind, f32)>, selected: Option<usize>, cell_at: &dyn Fn(Slot) -> Vec2, k: f32) {
+    let Some((on, slot)) = pressed.filter(|_| anim.is_none()) else { return };
+    let press = super::unit_drag::grid_press_in(super::unit_drag::controls(), selected, on);
+    view.garrison_sel = match press {
+        super::unit_drag::GridPress::Select(i) => Some((false, i)),
+        // Dragging only: an empty cell clears this grid's selection.
+        super::unit_drag::GridPress::Nothing => view.garrison_sel.filter(|_| selected.is_none()),
+        _ => None,
+    };
+    match press {
+        super::unit_drag::GridPress::Swap { selected: s, pressed: p } => {
+            cue(Cue::CardMove);
+            game.move_unit(s, game.squad[p].slot);
+        }
+        super::unit_drag::GridPress::Slide(s) => {
+            cue(Cue::CardMove);
+            let from = cell_at(game.squad[s].slot);
+            let ms = super::unit_drag::slide_ms(from, cell_at(slot), k);
+            game.move_unit(s, slot);
+            view.anim = Some(CardAnim { kind: CardAnimKind::Slid { unit: s, from: (from.x as i32, from.y as i32), ms }, t0_ms: now_ms() });
+        }
+        // Razdor's drag starts from a press that does not swap.
+        _ => {
+            if let Some(i) = on {
+                let c = game.content.clone();
+                super::unit_drag::press(i, game.squad[i].def, (game.squad[i].hp, game.squad[i].max_hp(&c)));
+            }
+        }
+    }
+}
+
+/// The heal or the raise of the army's unit `i` (the barracks' button, 0x4b11cc): the cure over its
+/// card with its sound, the message, and what happened meanwhile (the returned screen).
+fn heal_or_raise(game: &mut Game, view: &mut BuildingView, i: usize, raise: bool, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) -> Option<Screen> {
+    let c = game.content.clone();
+    let name = game.squad[i].name(&c).to_string();
+    let r = if raise { game.resurrect(i) } else { game.heal(i) };
+    match r {
+        Ok(events) => {
+            // The cure over the card, with its sound (0x4b11cc, `Battle-Cure`).
+            cue(Cue::Cure);
+            view.anim = Some(CardAnim { kind: CardAnimKind::Cured { unit: i }, t0_ms: now_ms() });
+            *message = Some(if raise { trf!("{name} rises again.", name) } else { trf!("{name} is healed.", name) });
+            // What happened meanwhile: a noon report, the scenario's events.
+            world_view::handle_events(game, events, message, dialogs)
+        }
+        Err(e) => {
+            *message = Some(service_error(e));
+            None
+        }
+    }
 }
 
 /// A 2×6 grid of the army screen's cards (portrait and stat strip) at `rel_y` of the building
@@ -2784,6 +2816,21 @@ fn ship_window(game: &mut Game) -> Option<Screen> {
     (cancelled || closed || key(KeyCode::Escape)).then_some(Screen::WorldMap)
 }
 
+/// A tab's press, on the desktop and on a phone: the tab opens with the cast sound (interface.md §9.8,
+/// §14); the garrison's and the market's own state is set up as they open.
+fn open_tab(game: &mut Game, view: &mut BuildingView, message: &mut Option<String>, t: Tab) {
+    cue(Cue::CastSpell);
+    view.switch(t);
+    *message = None;
+    if t == Tab::Garrison {
+        game.open_garrison();
+    }
+    // The market opens on the goods when the shop has some, else on the sell list.
+    if t == Tab::Market {
+        view.selling = game.market_here().is_none_or(|g| g.is_empty());
+    }
+}
+
 /// The building window. `Exit` (or Escape) returns to the map.
 pub fn frame(game: &mut Game, assets: &Assets, view: &mut BuildingView, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) -> Option<Screen> {
     // The village window is modal, the bar's buttons greyed under it, as the original's
@@ -2817,6 +2864,19 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut BuildingView, message:
     }
     if !tabs.contains(&view.tab) {
         view.switch(tabs[0]);
+    }
+    // Razdor's own (the owner's decision, 2026-11-01): the barracks and the store on a phone have
+    // their own layout (`phone_frame`), in a window of `kit::phone_window`; the stacked window is
+    // not drawn there.
+    if matches!(view.tab, Tab::Barracks | Tab::Store) {
+        if let Some((k, rect)) = kit::phone_window(true, PHONE_DESIGN, true) {
+            let (next, close) = super::display::with_window_scale(Some(k), || phone_frame(game, assets, view, message, dialogs, &tabs, rect));
+            if close {
+                *message = None;
+                return Some(Screen::WorldMap);
+            }
+            return early.or(next).or(with_back(bar, view));
+        }
     }
     let f = window();
     let k = chrome::k();
@@ -2855,17 +2915,7 @@ pub fn frame(game: &mut Game, assets: &Assets, view: &mut BuildingView, message:
     for (i, &t) in tabs.iter().enumerate() {
         let r = tab_rects[i];
         if tab_button(tab_label(t), Some(t), r, view.tab == t) && view.tab != t && view.garrison_sel.is_none() {
-            // The tab is highlighted with the cast sound (interface.md §9.8, §14).
-            cue(Cue::CastSpell);
-            view.switch(t);
-            *message = None;
-            if t == Tab::Garrison {
-                game.open_garrison();
-            }
-            // The market opens on the goods when the shop has some, else on the sell list.
-            if t == Tab::Market {
-                view.selling = game.market_here().is_none_or(|g| g.is_empty());
-            }
+            open_tab(game, view, message, t);
         }
     }
     let exit = tab_button(tr("Exit"), None, exit_r, false) && view.garrison_sel.is_none();
@@ -2911,6 +2961,399 @@ fn with_back(bar: Option<Screen>, view: &BuildingView) -> Option<Screen> {
         Screen::Squad { selected, scroll, .. } => Screen::Squad { selected, scroll, back: Some(view.clone()) },
         other => other,
     })
+}
+
+// ------------------------------------------------------------------------------------------
+// The barracks and the store on a phone (Razdor's own, the owner's decision, 2026-11-01: the
+// phone layout). One design px per dp (`kit::phone_window`). Held upright, the tabs sit in rows
+// above one column that scrolls; sideways, the tabs are a column on the left and the column
+// scrolls on the right. The actions are the desktop's (`barracks`, `store`): the deals are shared
+// (`heal_or_raise`, `army_press`, `open_tab`), only the places differ.
+// ------------------------------------------------------------------------------------------
+
+/// The phone window's design size, in design px (dp): the screen's width or height limits it.
+const PHONE_DESIGN: (f32, f32) = (590.0, 600.0);
+
+/// The sideways tab column's width, in design px (dp).
+const PHONE_TAB_COL: f32 = 170.0;
+
+/// The gap between tabs, rows and blocks on a phone, in design px (dp).
+const PHONE_GAP: f32 = 6.0;
+
+/// A phone's item square is at least this many design px (dp) across: the touch size.
+const PHONE_CELL: f32 = 60.0;
+
+/// A phone's unit card keeps the card band's proportions (586 × 272 design px).
+const PHONE_BAND: f32 = 272.0 / 586.0;
+
+/// The phone window of the barracks or the store, in `rect` (its scale is set by the caller): its
+/// title, its tabs and Exit, and the tab's content in a scrolling column. Returns the screen the
+/// actions asked for and whether the window closes (its close, Exit or Escape).
+fn phone_frame(game: &mut Game, assets: &Assets, view: &mut BuildingView, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>, tabs: &[Tab], rect: Rect) -> (Option<Screen>, bool) {
+    let k = chrome::k();
+    let (inner, closed) = chrome::window_with_title_color(rect, &title(game), chrome::Skin::Marble, true, BUILDING_AND_ITEM_NAME);
+    let pad = 8.0 * k;
+    let gap = PHONE_GAP * k;
+    let area = Rect::new(inner.x + pad, inner.y + pad, (inner.w - 2.0 * pad).max(0.0), (inner.h - 2.0 * pad).max(0.0));
+    let (body, exit_r, tab_rects, paper) = if kit::upright() {
+        // Rows of two tabs, then Exit across the width; the column below them scrolls.
+        let th = kit::touch_h(52.0);
+        let w = (area.w - gap) / 2.0;
+        let rects: Vec<Rect> = (0..tabs.len()).map(|i| Rect::new(area.x + (i % 2) as f32 * (w + gap), area.y + (i / 2) as f32 * (th + gap), w, th)).collect();
+        let exit_r = Rect::new(area.x, area.y + tabs.len().div_ceil(2) as f32 * (th + gap), area.w, th);
+        let top = exit_r.bottom() + gap;
+        let paper = Rect::new(area.x - 2.0 * k, area.y - 2.0 * k, area.w + 4.0 * k, exit_r.bottom() - area.y + 4.0 * k);
+        (Rect::new(area.x, top, area.w, (area.bottom() - top).max(0.0)), exit_r, rects, paper)
+    } else {
+        // A column of tabs on the left, Exit at its foot, as tall as the column allows (44 dp at least).
+        let n = (tabs.len() + 1) as f32;
+        let col_w = (PHONE_TAB_COL * k).min(area.w * 0.4);
+        let th = ((area.h - (n - 1.0) * gap) / n).max(kit::touch_h(0.0));
+        let rects: Vec<Rect> = (0..tabs.len()).map(|i| Rect::new(area.x, area.y + i as f32 * (th + gap), col_w, th)).collect();
+        let exit_r = Rect::new(area.x, area.y + (n - 1.0) * (th + gap), col_w, th);
+        let x = area.x + col_w + gap;
+        let paper = Rect::new(area.x - 2.0 * k, area.y - 2.0 * k, col_w + 4.0 * k, area.h + 4.0 * k);
+        (Rect::new(x, area.y, (area.right() - x).max(0.0), area.h), exit_r, rects, paper)
+    };
+    // The tabs stand on the light parchment, as the desktop's (the tab art is see-through).
+    chrome::paper_panel(paper);
+    let mut picked = None;
+    for (&t, &r) in tabs.iter().zip(&tab_rects) {
+        if tab_button(tab_label(t), Some(t), r, view.tab == t) && view.tab != t && view.garrison_sel.is_none() {
+            picked = Some(t);
+        }
+    }
+    if let Some(t) = picked {
+        open_tab(game, view, message, t);
+    }
+    let exit = tab_button(tr("Exit"), None, exit_r, false) && view.garrison_sel.is_none();
+    let mut next = None;
+    if matches!(view.tab, Tab::Barracks | Tab::Store) {
+        let mut flow = kit::Flow::begin(body, if view.tab == Tab::Store { "store-phone" } else { "barracks-phone" });
+        next = if view.tab == Tab::Store { store_phone(game, assets, view, message, &mut flow) } else { barracks_phone(game, assets, view, message, dialogs, &mut flow) };
+        flow.finish();
+    }
+    let escape = key(KeyCode::Escape);
+    if escape && view.garrison_sel.is_some() {
+        view.garrison_sel = None;
+        return (next, false);
+    }
+    (next, closed || exit || escape)
+}
+
+/// The barracks on a phone (see [`phone_frame`]): the message, the counters, the hire offers as rows
+/// (a press picks one), the picked offer's card or the picked unit's with its button under it, then
+/// the army's grid. The picked unit is the army's selection (`garrison_sel`).
+fn barracks_phone(game: &mut Game, assets: &Assets, view: &mut BuildingView, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>, flow: &mut kit::Flow) -> Option<Screen> {
+    let l = game.location?;
+    let c = game.content.clone();
+    let k = chrome::k();
+    let recruits = game.world.locations[l].recruits.clone();
+    let hires = game.world.locations[l].hires(&c);
+    let mut next = None;
+    phone_message(flow, message);
+    counters_phone(game, flow);
+    phone_heading(flow, tr("For hire"));
+    if recruits.is_empty() {
+        phone_hint(flow, tr("No recruits here."));
+    }
+    for r in recruits.iter().take(6) {
+        // A gap between the offers: rows touching would be one target (the touch probe's rule).
+        flow.gap(PHONE_GAP);
+        let name = c.unit(r.unit).name.clone();
+        let price = game.hire_price(r.unit);
+        let cost = trf!("Price {price}", price = price.amount);
+        let cost_color = if price.currency == Currency::Mana { MANA } else { chrome::GOLD };
+        let name_t = kit::Text::new(&name, 15.0, chrome::CREAM);
+        let cost_t = kit::Text::new(&cost, 14.0, cost_color);
+        let cost_w = cost_t.width() + 4.0 * k;
+        let name_w = (flow.width() - cost_w - 24.0 * k).max(1.0);
+        let row = flow.row_h(kit::touch_h(52.0).max(name_t.height(name_w) + 12.0 * k), |_| {});
+        let picked = matches!(view.hire_panel, Some(HirePanel::Recruit(u)) if u == r.unit);
+        phone_row(row, picked);
+        text_in(&name_t, row, row.x + 10.0 * k, name_w);
+        text_in(&cost_t, row, row.right() - 10.0 * k - cost_w, cost_w);
+        if phone_pressed(flow, row) {
+            view.hire_panel = Some(HirePanel::Recruit(r.unit));
+            view.garrison_sel = None;
+        }
+    }
+    // The details: the picked offer's card or the picked unit's, with its button under it.
+    let band_h = (flow.width() * PHONE_BAND).round();
+    let bh = kit::touch_h(52.0);
+    let det = flow.row_h(band_h + 8.0 * k + bh, |_| {});
+    let band = Rect::new(det.x, det.y, det.w, band_h);
+    let btn = Rect::new(det.x, det.y + band_h + 8.0 * k, det.w, bh);
+    let offer = match view.hire_panel {
+        Some(HirePanel::Recruit(u)) => recruits.iter().take(6).find(|r| r.unit == u).cloned(),
+        _ => None,
+    };
+    let picked_unit = view.garrison_sel.filter(|&(g, i)| !g && i < game.squad.len()).map(|s| s.1);
+    if let Some(r) = offer {
+        recruit_sheet(game, r.unit, |c, sheet| {
+            let mut hover = None;
+            unit_sheet::draw_band(assets, c, band, sheet, false, &mut hover);
+        });
+        let stock_left = r.stock != Some(0);
+        let price = game.hire_price(r.unit);
+        let can = hires && stock_left && game.can_afford(price) && game.squad.len() < game.max_squad();
+        let label = format!("{} · {}", own_text("Army", "HireArmy", n_("Hire")), trf!("Price {price}", price = price.amount));
+        if kit::button_in(flow, btn, &label, can) {
+            // The gold plays on the release, as the desktop's hire pill (0x4c7370, 0x4c7380).
+            super::audio::cue_on_release(Cue::Gold);
+            let name = c.unit(r.unit).name.clone();
+            *message = Some(match game.hire(r.unit) {
+                Ok(()) => {
+                    cue(Cue::CardMove);
+                    trf!("{name} joins your army.", name)
+                }
+                Err(HireError::NotEnoughGold) => tr("You cannot afford it.").into(),
+                Err(HireError::SquadFull) => tr("Your army is full.").into(),
+                Err(HireError::NotOffered) => tr("Not offered here.").into(),
+            });
+        }
+    } else if let Some(i) = picked_unit {
+        squad_sheet(game, (false, i), |c, sheet| {
+            let mut hover = None;
+            unit_sheet::draw_band(assets, c, band, sheet, false, &mut hover);
+        });
+        let heals = game.heals_here();
+        let raises = game.resurrects_here();
+        let (label, price, raise) = match (game.heal_price(i).filter(|_| heals), game.resurrect_price(i).filter(|_| raises)) {
+            (Some(pr), _) => (own_text("Army", "CureArmy", n_("Heal")), Some(pr), false),
+            (None, Some(pr)) => (own_text("Army", "ResurrectArmy", n_("Raise")), Some(pr), true),
+            _ => (String::new(), None, false),
+        };
+        if let Some(pr) = price {
+            let text = format!("{label} · {}", trf!("Price {price}", price = pr.amount));
+            if kit::button_in(flow, btn, &text, game.can_pay_service(pr)) {
+                next = heal_or_raise(game, view, i, raise, message, dialogs);
+            }
+        }
+    } else {
+        chrome::text_box_no_corners(band);
+        text_in(&kit::Text::new(tr("Pick a unit to see it here."), 14.0, chrome::CREAM), band, band.x + 10.0 * k, band.w - 20.0 * k);
+    }
+    // The army: the formation's squares, touch-sized, dragged or picked as the desktop's.
+    phone_heading(flow, tr("Hero's army"));
+    let form = c.formation;
+    let cols = form.display_cols() as f32;
+    let lines = form.display_lines() as f32;
+    let w = flow.width();
+    let cs = (w / k / (cols * 96.0 - 8.0)).min(1.0);
+    let side = 88.0 * cs * k;
+    let pitch = vec2(96.0 * cs * k, 96.0 * cs * k);
+    let grid = flow.row_h((lines - 1.0) * pitch.y + side, |_| {});
+    let gx = grid.x + ((w - (cols * pitch.x - 8.0 * cs * k)) / 2.0).round();
+    let pressable = !flow.cut(grid);
+    let cell_at = |slot: Slot| {
+        let (line, col) = form.display(slot);
+        vec2(gx + col as f32 * pitch.x, grid.y + line as f32 * pitch.y).round()
+    };
+    let mut pressed = None;
+    for slot in form.slots() {
+        let p = cell_at(slot);
+        let cr = Rect::new(p.x, p.y, side, side);
+        if !game.squad.iter().any(|u| u.slot == slot) {
+            chrome::empty_cell(cr, chrome::CellIcon::of(form, slot), true);
+            if pressable && button_state(cr, true).2 {
+                pressed = Some((None, slot));
+            }
+        }
+    }
+    for i in 0..game.squad.len() {
+        let u = game.squad[i].clone();
+        let p = cell_at(u.slot);
+        let sq = Rect::new(p.x, p.y, side, side);
+        chrome::unit_shadow(sq);
+        assets.draw_portrait(u.def, Team::Player, sq);
+        chrome::wounds(sq, u.hp, u.max_hp(&c));
+        draw_rectangle_lines(sq.x, sq.y, sq.w, sq.h, 1.0, Color::new(0.85, 0.85, 0.85, 0.8));
+        if !u.alive() {
+            chrome::death_veil(sq);
+        } else if u.unpaid {
+            chrome::badge("sign-payment", sq.x + sq.w - 12.0 * k, sq.y + 12.0 * k, 20.0 * k, RED);
+        }
+        top_left_signs(&c, sq, &u, i > 0);
+        super::spell_badges::draw(sq, &u.spells, u.drain, game.clock.total_minutes() as u64, &c);
+        if super::unit_drag::dragged() == Some(i) {
+            draw_rectangle(sq.x, sq.y, sq.w, sq.h, Color::new(0.0, 0.0, 0.0, 0.55));
+        }
+        if picked_unit == Some(i) {
+            chrome::card_highlight(sq, chrome::Lit::Current, now_ms() as u64);
+        }
+        if pressable && button_state(sq, true).2 {
+            pressed = Some((Some(i), u.slot));
+        }
+    }
+    army_press(game, view, pressed, None, picked_unit, &cell_at, k);
+    if view.garrison_sel.is_some() {
+        view.hire_panel = None;
+    }
+    let cells: Vec<(Slot, Rect)> = form.slots().map(|s| (s, Rect::new(cell_at(s).x, cell_at(s).y, side, side))).collect();
+    super::pan::drag_grid(cells.iter().map(|&(_, r)| r));
+    if let Some((unit, slot)) = super::unit_drag::update(assets, &cells, vec2(side, side)) {
+        game.move_unit(unit, slot);
+        view.garrison_sel = None;
+    }
+    next
+}
+
+/// The store on a phone (see [`phone_frame`]): the message, the store's squares (a press picks one),
+/// the picked item's description, «Take into the pack» under it, then the hero's pack. The desktop's
+/// press takes the item at once; here the press picks it and the button takes it.
+fn store_phone(game: &mut Game, assets: &Assets, view: &mut BuildingView, message: &mut Option<String>, flow: &mut kit::Flow) -> Option<Screen> {
+    let c = game.content.clone();
+    let k = chrome::k();
+    let items: Vec<ItemId> = game.store_here().to_vec();
+    phone_message(flow, message);
+    phone_heading(flow, tr("In the store"));
+    let cells: Vec<Option<ItemId>> = items.iter().map(|&i| Some(i)).collect();
+    if let Some(i) = item_grid_phone(flow, assets, &cells, view.pick, true, false) {
+        view.pick = Some(i);
+    }
+    let picked = view.pick.filter(|&i| i < items.len());
+    let desc = flow.row(150.0, |_| {});
+    match picked {
+        Some(i) => super::item_text::draw(game, assets, items[i], desc, super::item_text::ItemBox::Inventory, k),
+        None => {
+            chrome::text_box_no_corners(desc);
+            text_in(&kit::Text::new(tr("Pick an item from the list."), 14.0, chrome::CREAM), desc, desc.x + 10.0 * k, desc.w - 20.0 * k);
+        }
+    }
+    let take = flow.row_h(kit::touch_h(52.0), |_| {});
+    if kit::button_in(flow, take, tr("Take into the pack"), picked.is_some()) {
+        if let Some(i) = picked {
+            match game.take_from_store(i) {
+                Ok(taken) => {
+                    cue(Cue::Item(c.item(taken).kind));
+                    view.pick = None;
+                    *message = None;
+                }
+                Err(e) => *message = Some(service_error(e)),
+            }
+        }
+    }
+    phone_heading(flow, tr("Your pack"));
+    let pack: Vec<Option<ItemId>> = (0..game.pack.len()).map(|i| game.pack.get(i)).collect();
+    item_grid_phone(flow, assets, &pack, None, false, true);
+    None
+}
+
+/// The item squares on a phone: as many across as the width takes, at least [`PHONE_CELL`] dp each,
+/// every row drawn (the flow scrolls them). With `spare` the rows are the pack's (one empty row
+/// under the last used one), else at least two. A press on a square (`pressable`) returns its index.
+fn item_grid_phone(flow: &mut kit::Flow, assets: &Assets, cells: &[Option<ItemId>], pick: Option<usize>, pressable: bool, spare: bool) -> Option<usize> {
+    let k = chrome::k();
+    let w = flow.width();
+    let cols = ((w / (PHONE_CELL * k)).floor() as usize).max(4);
+    let cell = (w / cols as f32).floor();
+    let rows = if spare { cells.len() / cols + 1 } else { cells.len().div_ceil(cols).max(2) };
+    let grid = flow.row_h(rows as f32 * cell, |_| {});
+    let pressable = pressable && !flow.cut(grid);
+    let mut hit = None;
+    for row in 0..rows {
+        for col in 0..cols {
+            let i = row * cols + col;
+            // Each square keeps a 4 dp gap to its neighbours (touching squares would be one target).
+            let cr = Rect::new(grid.x + col as f32 * cell + 2.0 * k, grid.y + row as f32 * cell + 2.0 * k, cell - 4.0 * k, cell - 4.0 * k);
+            chrome::surface(cr, chrome::Skin::Paper);
+            draw_rectangle_lines(cr.x, cr.y, cr.w, cr.h, 1.0, Color::new(0.5, 0.35, 0.2, 0.8));
+            if let Some(Some(item)) = cells.get(i) {
+                assets.draw_item(*item, cr.x + 3.0 * k, cr.y + 3.0 * k, cr.w - 6.0 * k);
+            }
+            if pick == Some(i) {
+                draw_rectangle_lines(cr.x + 1.0, cr.y + 1.0, cr.w - 2.0, cr.h - 2.0, 3.0 * k, chrome::GOLD);
+            }
+            if pressable && i < cells.len() && button_state(cr, true).2 {
+                hit = Some(i);
+            }
+        }
+    }
+    hit
+}
+
+/// The barracks' counters on a phone: money, the army's wages and the income, each under its name,
+/// in a row as tall as its wrapped names need (at least 56 dp).
+fn counters_phone(game: &Game, flow: &mut kit::Flow) {
+    let k = chrome::k();
+    let mut wages = format!("- {}", game.daily_wages());
+    if game.daily_mana_wages() > 0 {
+        wages += &format!(" / {}", trf!("{mana} mana", mana = game.daily_mana_wages()));
+    }
+    let cells = [
+        (own_text("Army", "Gold", n_("Money")), format!("{}", game.gold)),
+        (own_text("Army", "Payment", n_("Army wages")), wages),
+        (own_text("Army", "Incom", n_("Income")), format!("+ {}", game.daily_income())),
+    ];
+    let texts: Vec<(kit::Text, kit::Text)> = cells
+        .iter()
+        .map(|(label, value)| (kit::Text::new(label, 13.0, Color::new(0.85, 0.9, 0.45, 1.0)), kit::Text::new(value, 16.0, chrome::CREAM)))
+        .collect();
+    let step = flow.width() / texts.len() as f32;
+    let tw = step - 16.0 * k;
+    let h = texts.iter().map(|(l, v)| l.height(tw) + v.height(tw)).fold(0.0, f32::max) + 16.0 * k;
+    let row = flow.row_h(h.max(56.0 * k), |_| {});
+    draw_rectangle(row.x, row.y, row.w, row.h, Color::new(0.1, 0.06, 0.03, 0.55));
+    chrome::silver_frame(row, 1.0);
+    for (i, (label, value)) in texts.iter().enumerate() {
+        let x0 = row.x + step * i as f32;
+        if i > 0 {
+            draw_line(x0, row.y + 4.0 * k, x0, row.bottom() - 4.0 * k, 1.0, Color::new(0.6, 0.55, 0.45, 0.6));
+        }
+        let top = row.y + 8.0 * k;
+        label.draw(x0 + 8.0 * k, top + 0.75 * label.size(), tw);
+        value.draw(x0 + 8.0 * k, top + label.height(tw) + 0.75 * value.size(), tw);
+    }
+}
+
+/// A heading on a phone: one row, its text in the building's name colour.
+fn phone_heading(flow: &mut kit::Flow, s: &str) {
+    let t = kit::Text::new(s, 15.0, BUILDING_AND_ITEM_NAME);
+    let w = flow.width();
+    let r = flow.row_h(t.height(w) + 8.0 * chrome::k(), |_| {});
+    text_in(&t, r, r.x, w);
+}
+
+/// A line of cream text on a phone, as tall as it wraps.
+fn phone_hint(flow: &mut kit::Flow, s: &str) {
+    let t = kit::Text::new(s, 14.0, chrome::CREAM);
+    let w = flow.width();
+    let r = flow.row_h(t.height(w) + 8.0 * chrome::k(), |_| {});
+    text_in(&t, r, r.x, w);
+}
+
+/// The message of the last action, on a phone, in the window's accent.
+fn phone_message(flow: &mut kit::Flow, message: &Option<String>) {
+    let Some(m) = message else { return };
+    let t = kit::Text::new(m, 14.0, ACCENT);
+    let w = flow.width();
+    let r = flow.row_h(t.height(w) + 8.0 * chrome::k(), |_| {});
+    text_in(&t, r, r.x, w);
+}
+
+/// Draws `t` wrapped to `w` px from `x`, its block centred vertically in `r`.
+fn text_in(t: &kit::Text, r: Rect, x: f32, w: f32) {
+    let block = t.height(w);
+    t.draw(x, r.y + (r.h - block) / 2.0 + t.line_pitch() / 2.0 + t.size() * 0.35, w);
+}
+
+/// A row of a phone's list: the brown strip, lit red when picked.
+fn phone_row(r: Rect, picked: bool) {
+    chrome::surface(r, chrome::Skin::Strip);
+    if picked {
+        draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.72, 0.07, 0.04, 0.34));
+    }
+    draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.0, SILVER);
+}
+
+/// Whether a phone's row `r` was tapped this frame (not when a flow has it cut by its edge).
+fn phone_pressed(flow: &kit::Flow, r: Rect) -> bool {
+    let pressed = !flow.cut(r) && button_state(r, true).2;
+    if pressed {
+        cue(Cue::Button);
+    }
+    pressed
 }
 
 #[cfg(test)]
