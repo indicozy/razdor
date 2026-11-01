@@ -273,8 +273,8 @@ pub struct Fighter {
     pub level: i32,
     /// XP towards the next level as the battle began (for display).
     pub xp: i32,
-    /// The unit's «Не напоминать» level (`Unit::sign_off_level`), for the experience card's «+». Razdor's own.
-    pub sign_off_level: i32,
+    /// The unit's «Не напоминать» switch (`Unit::sign_off`), for the experience card's «+». Razdor's own.
+    pub sign_off: bool,
     /// Battle stats: the start of the battle (level, items, potions, spells) plus what the
     /// battle changed for good (EternalGift, ArmorBreaker, Bastion, Exhaustion …).
     pub base: Stats,
@@ -355,7 +355,7 @@ impl Fighter {
             squad_index,
             level: unit.level,
             xp: unit.xp,
-            sign_off_level: unit.sign_off_level,
+            sign_off: unit.sign_off,
             power: base[Stat::MagicPower],
             regen: base[Stat::Regen],
             stats: base.clone(),

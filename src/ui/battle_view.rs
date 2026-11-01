@@ -431,11 +431,10 @@ fn promotable_after(level: i32, has_next: bool) -> bool {
     level >= 2 && has_next
 }
 
-/// The card's «+» after the award: promotable, unless the player switched the sign off at
-/// that very level («Не напоминать», `Unit::sign_off`); a level gained in this battle shows
-/// it again.
-fn sign_after(level: i32, has_next: bool, sign_off_level: i32) -> bool {
-    promotable_after(level, has_next) && !(sign_off_level != 0 && sign_off_level == level)
+/// The card's «+» after the award: promotable, unless the player switched the sign off
+/// («Не напоминать», `Unit::sign_off`).
+fn sign_after(level: i32, has_next: bool, sign_off: bool) -> bool {
+    promotable_after(level, has_next) && !sign_off
 }
 
 fn all_cells(battle: &Battle) -> Vec<(Team, Slot)> {
@@ -1319,7 +1318,7 @@ impl BattleView {
         let f = &self.battle.fighters[a.fighter];
         let c = self.battle.content();
         let level = f.level + self.levels_gained(a);
-        sign_after(level, c.unit(f.unit).upgrades.iter().any(|u| u.target.is_some()), f.sign_off_level)
+        sign_after(level, c.unit(f.unit).upgrades.iter().any(|u| u.target.is_some()), f.sign_off)
     }
 
     /// Fighter `id` as the screen shows it: as it was until the action's effect lands on it
@@ -2106,10 +2105,10 @@ mod tests {
 
     #[test]
     fn xp_card_sign_respects_dont_remind() {
-        assert!(sign_after(3, true, 0));
-        assert!(!sign_after(3, true, 3), "the switched-off level hides the sign");
-        assert!(sign_after(4, true, 3), "a level gained in this battle shows it again");
-        assert!(!sign_after(1, true, 0), "first level: no sign");
-        assert!(!sign_after(3, false, 0), "no next type: no sign");
+        assert!(sign_after(3, true, false));
+        assert!(!sign_after(3, true, true), "the switched-off sign stays hidden");
+        assert!(!sign_after(4, true, true), "a level gained in this battle keeps it hidden");
+        assert!(!sign_after(1, true, false), "first level: no sign");
+        assert!(!sign_after(3, false, false), "no next type: no sign");
     }
 }

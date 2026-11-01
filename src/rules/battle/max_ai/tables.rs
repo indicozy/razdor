@@ -184,7 +184,7 @@ impl Battle {
                 named,
                 level,
                 xp,
-                sign_off_level: _,
+                sign_off: _,
                 base,
                 stats,
                 at_start: _,
