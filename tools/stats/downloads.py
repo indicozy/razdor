@@ -8,8 +8,9 @@ players with updates off are missing.
 
 Each run:
   1. Fetches the releases of indicozy/razdor (one CSV row per release and
-     platform) and of indicozy/razdor-community (one row per catalog release,
-     platform "all"), and appends a live snapshot (approx=0).
+     platform, plus a "translate" row with the bot floor and a "sums" row with
+     the SHA256SUMS downloads) and of indicozy/razdor-community (one row per
+     catalog release, platform "all"), and appends a live snapshot (approx=0).
   2. Prints a summary: the latest finished window, the current release so far,
      the Hub catalog (with its delta since the previous snapshot in the CSV),
      a weekly view (downloads of the releases published each ISO week, with the
@@ -18,6 +19,18 @@ Each run:
      are the trend to read: per-release numbers are noisy while releases were
      more frequent than daily.
 
+Bot floor: every release also ships developer tools (razdor-translate,
+razdor-translate-macos, Razdor-translate.exe) that players never download; bots
+(mirrors, scanners, crawlers) fetch every asset about once per release. So
+floor = min(download_count) over the translate assets of the release, and the
+"after bots" count of a player platform = max(0, raw - floor). A release with no
+translate assets (the early releases) uses an assumed floor of 1, the level seen
+on every release that has them. Approximate: it assumes bots hit every file
+equally, once per release.
+
+Updater count: the in-game updater downloads SHA256SUMS to verify, manual
+downloads almost never do, so updater = max(0, sums - floor).
+
 Backfill: when the CSV does not exist yet, a one-time reconstructed history is
 written before the live snapshot. For each razdor release that has a successor,
 its current total per platform is stamped with the successor's published_at
@@ -25,8 +38,9 @@ its current total per platform is stamped with the successor's published_at
 releases: their counts today include downloads that came long after their
 window closed (late downloads, people who updated weeks later).
 
-Asset-to-platform mapping (razdor): names with "translate" and SHA256SUMS are
-developer tools and checksums, skipped; *.exe -> windows; *.apk -> android;
+Asset-to-platform mapping (razdor): names with "translate" are the bot-floor
+tools and SHA256SUMS is the checksum file (both counted separately, see above);
+*.sha256, *.sig, *.txt and *.md are skipped; *.exe -> windows; *.apk -> android;
 *.ipa -> ios; names containing "mac" (or *.dmg) -> macos; "razdor" itself, names
 containing "linux", and *.tar.gz / *.tgz / *.AppImage -> linux; anything else
 -> other (listed in the output so the mapping can be checked).
@@ -59,8 +73,13 @@ PLATFORM_ORDER = ["windows", "linux", "macos", "android", "ios", "other"]
 COMPACT_ORDER = ["windows", "linux", "macos", "android", "ios"]
 CATALOG_RE = re.compile(r"^catalog-\d{4}-\d{2}-\d{2}$")
 BAR_WIDTH = 40
+BOT_FLOOR_ASSUMED = 1
 TREND = ("Trend, not a headcount: manual downloads count too, a retried update can count twice, "
-         "players with updates off are missing; backfilled history overestimates old releases.")
+         "players with updates off are missing; backfilled history overestimates old releases. "
+         "'After bots' subtracts the bot floor per platform (approximate: assumes bots fetch every "
+         "file equally, once per release).")
+UPDATER_NOTE = ("updater = SHA256SUMS downloads minus bots: the in-game updater downloads SHA256SUMS "
+                "to verify, manual downloads almost never do.")
 
 
 class StatsError(Exception):
@@ -131,7 +150,7 @@ def fetch_releases(repo, token):
 
 
 def platform_of(name):
-    """Map an asset name to a platform; None for developer tools and checksums."""
+    """Map an asset name to a player platform; None for developer tools, checksums and other non-player files."""
     low = name.lower()
     if "translate" in low or low == "sha256sums" or low.endswith((".sha256", ".sig", ".txt", ".md")):
         return None
@@ -154,25 +173,44 @@ def ordered(platforms):
 
 
 def razdor_releases(raw):
-    """Published razdor releases, oldest first, with downloads per platform."""
+    """Published razdor releases, oldest first, with raw and after-bots downloads per platform."""
     releases, unknown = [], set()
     for rel in raw:
         if rel.get("draft") or not rel.get("published_at"):
             continue
-        platforms = {}
+        platforms, translate_counts, sums = {}, [], 0
         for asset in rel.get("assets") or []:
             name = asset.get("name") or ""
+            low = name.lower()
+            count = int(asset.get("download_count") or 0)
+            if "translate" in low:
+                translate_counts.append(count)
+                continue
+            if low == "sha256sums":
+                sums = count
+                continue
             platform = platform_of(name)
             if platform is None:
                 continue
             if platform == "other":
                 unknown.add(name)
-            platforms[platform] = platforms.get(platform, 0) + int(asset.get("download_count") or 0)
+            platforms[platform] = platforms.get(platform, 0) + count
+        if translate_counts:
+            floor, assumed = min(translate_counts), False
+        else:
+            floor, assumed = BOT_FLOOR_ASSUMED, True
+        clean = {p: max(0, n - floor) for p, n in platforms.items()}
         releases.append({
             "tag": rel.get("tag_name") or "?",
             "published": parse_time(rel["published_at"]),
             "platforms": platforms,
             "total": sum(platforms.values()),
+            "clean": clean,
+            "clean_total": sum(clean.values()),
+            "floor": floor,
+            "floor_assumed": assumed,
+            "sums": sums,
+            "updater": max(0, sums - floor),
         })
     releases.sort(key=lambda r: r["published"])
     return releases, unknown
@@ -231,6 +269,8 @@ def live_rows(snapshot, releases, catalogs):
     for rel in releases:
         for platform, downloads in ordered(rel["platforms"]):
             rows.append(csv_row(snapshot, RAZDOR, rel["tag"], rel["published"], platform, downloads, 0))
+        rows.append(csv_row(snapshot, RAZDOR, rel["tag"], rel["published"], "translate", rel["floor"], 0))
+        rows.append(csv_row(snapshot, RAZDOR, rel["tag"], rel["published"], "sums", rel["sums"], 0))
     for cat in catalogs:
         rows.append(csv_row(snapshot, COMMUNITY, cat["tag"], cat["published"], "all", cat["total"], 0))
     return rows
@@ -266,6 +306,14 @@ def window_days(releases, i, now):
     return days_between(end, releases[i]["published"])
 
 
+def after_bots(rel):
+    return f"{rel['clean_total']:,} after bots (raw {rel['total']:,})"
+
+
+def floor_text(rel):
+    return f"{rel['floor']:,}" + (" assumed" if rel["floor_assumed"] else "")
+
+
 def section_window(releases, now):
     print("== Latest finished window ==")
     if len(releases) < 2:
@@ -273,19 +321,20 @@ def section_window(releases, now):
         return
     prev, newest = releases[-2], releases[-1]
     days = window_days(releases, len(releases) - 2, now)
-    pd = per_day(prev["total"], days)
-    print(f"{prev['tag']}: {prev['total']:,} downloads, newest for {days:.2f} days "
+    pd = per_day(prev["clean_total"], days)
+    print(f"{prev['tag']}: {after_bots(prev)}, newest for {days:.2f} days "
           f"({fmt_time(prev['published'])} to {fmt_time(newest['published'])})")
-    print(f"  per day: {pd:,.1f}")
-    print(f"  by platform: {platform_line(prev['platforms'])}")
+    print(f"  per day: {pd:,.1f} (raw {per_day(prev['total'], days):,.1f})")
+    print(f"  by platform, after bots: {platform_line(prev['clean'])}")
+    print(f"  updater: {prev['updater']:,} (SHA256SUMS {prev['sums']:,} minus bots {floor_text(prev)})")
     if len(releases) >= 3:
         before = releases[-3]
         bdays = window_days(releases, len(releases) - 3, now)
-        bpd = per_day(before["total"], bdays)
-        diff = prev["total"] - before["total"]
-        print(f"  vs {before['tag']}: downloads {prev['total']:,} vs {before['total']:,}: "
-              f"{signed(diff)} ({change_pct(prev['total'], before['total'])})")
-        print(f"  vs {before['tag']}: per day {pd:,.1f} vs {bpd:,.1f}: "
+        bpd = per_day(before["clean_total"], bdays)
+        diff = prev["clean_total"] - before["clean_total"]
+        print(f"  vs {before['tag']}: after bots {prev['clean_total']:,} vs {before['clean_total']:,}: "
+              f"{signed(diff)} ({change_pct(prev['clean_total'], before['clean_total'])})")
+        print(f"  vs {before['tag']}: per day after bots {pd:,.1f} vs {bpd:,.1f}: "
               f"{signed(pd - bpd)} ({change_pct(pd, bpd)})")
 
 
@@ -296,10 +345,11 @@ def section_current(releases, now):
         return
     newest = releases[-1]
     days = max(days_between(now, newest["published"]), 0.0)
-    print(f"{newest['tag']}: {newest['total']:,} downloads so far, published {fmt_time(newest['published'])}, "
+    print(f"{newest['tag']}: {after_bots(newest)} so far, published {fmt_time(newest['published'])}, "
           f"{days:.2f} days ago")
-    print(f"  per day: {per_day(newest['total'], days):,.1f}")
-    print(f"  by platform: {platform_line(newest['platforms'])}")
+    print(f"  per day: {per_day(newest['clean_total'], days):,.1f} (raw {per_day(newest['total'], days):,.1f})")
+    print(f"  by platform, after bots: {platform_line(newest['clean'])}")
+    print(f"  updater so far: {newest['updater']:,} (SHA256SUMS {newest['sums']:,} minus bots {floor_text(newest)})")
 
 
 def section_catalog(catalogs, existing):
@@ -319,17 +369,19 @@ def section_catalog(catalogs, existing):
 
 
 def empty_bucket():
-    return {"total": 0, "platforms": {}, "releases": 0}
+    return {"total": 0, "raw": 0, "platforms": {}, "updater": 0, "releases": 0}
 
 
 def bucket_by(releases, key):
-    """Sum the releases per key (a date); each bucket holds total, platforms and a release count."""
+    """Sum the releases per key (a date); total and platforms are after bots, raw is before."""
     buckets = {}
     for rel in releases:
         bucket = buckets.setdefault(key(rel), empty_bucket())
-        bucket["total"] += rel["total"]
+        bucket["total"] += rel["clean_total"]
+        bucket["raw"] += rel["total"]
+        bucket["updater"] += rel["updater"]
         bucket["releases"] += 1
-        for platform, downloads in rel["platforms"].items():
+        for platform, downloads in rel["clean"].items():
             bucket["platforms"][platform] = bucket["platforms"].get(platform, 0) + downloads
     return buckets
 
@@ -366,6 +418,10 @@ def compact_platforms(platforms):
     return f"{text} +{other:,} other" if other else text
 
 
+def total_text(bucket):
+    return f"{bucket['total']:,} (raw {bucket['raw']:,})"
+
+
 def bar(value, top):
     width = round(value / top * BAR_WIDTH) if top > 0 else 0
     if value > 0 and width == 0:
@@ -388,13 +444,16 @@ def section_weekly(releases, now, weeks):
             label += f" (so far, {(now.date() - start).days + 1} days)"
         labels.append(label)
     label_width = max(len(label) for label in labels + ["week of (Monday)"])
+    totals = [total_text(bucket) for _, bucket in shown]
+    total_width = max(len(text) for text in totals + ["after bots (raw)"])
     compacts = [compact_platforms(bucket["platforms"]) for _, bucket in shown]
     compact_width = max(len(text) for text in compacts + ["win/linux/mac/android/ios"])
     top = max(bucket["total"] for _, bucket in shown)
-    print(f"  {'week of (Monday)':<{label_width}}  {'total':>9}  {'win/linux/mac/android/ios':<{compact_width}}")
-    for label, text, (_, bucket) in zip(labels, compacts, shown):
-        print(f"  {label:<{label_width}}  {bucket['total']:>9,}  {text:<{compact_width}}  "
-              f"{bar(bucket['total'], top)}")
+    print(f"  {'week of (Monday)':<{label_width}}  {'after bots (raw)':<{total_width}}  "
+          f"{'updater':>8}  {'win/linux/mac/android/ios':<{compact_width}}")
+    for label, text, compact, (_, bucket) in zip(labels, totals, compacts, shown):
+        print(f"  {label:<{label_width}}  {text:<{total_width}}  {bucket['updater']:>8,}  "
+              f"{compact:<{compact_width}}  {bar(bucket['total'], top)}")
     # The current week is always the last row, so the complete weeks are the rest.
     complete = rows[:-1]
     if len(complete) < 2:
@@ -402,7 +461,7 @@ def section_weekly(releases, now, weeks):
         return
     (prev_start, prev), (last_start, last) = complete[-2], complete[-1]
     diff = last["total"] - prev["total"]
-    print(f"  last complete week vs the one before (week of {last_start} vs {prev_start}): "
+    print(f"  last complete week vs the one before (week of {last_start} vs {prev_start}), after bots: "
           f"{signed(diff)} ({change_pct(last['total'], prev['total'])}), "
           f"{last['total']:,} vs {prev['total']:,}")
 
@@ -413,18 +472,21 @@ def section_daily(releases, now):
     if not any(bucket["releases"] for _, bucket in rows):
         print("  no razdor release in the last 14 days")
         return
+    totals = [total_text(bucket) for _, bucket in rows]
+    total_width = max(len(text) for text in totals + ["after bots (raw)"])
     compacts = [compact_platforms(bucket["platforms"]) for _, bucket in rows]
     compact_width = max(len(text) for text in compacts + ["win/linux/mac/android/ios"])
     top = max(bucket["total"] for _, bucket in rows)
-    print(f"  {'day (UTC)':<10}  {'total':>9}  {'win/linux/mac/android/ios':<{compact_width}}")
-    for (day, bucket), text in zip(rows, compacts):
-        print(f"  {day.isoformat():<10}  {bucket['total']:>9,}  {text:<{compact_width}}  "
-              f"{bar(bucket['total'], top)}")
+    print(f"  {'day (UTC)':<10}  {'after bots (raw)':<{total_width}}  "
+          f"{'updater':>8}  {'win/linux/mac/android/ios':<{compact_width}}")
+    for (day, bucket), text, compact in zip(rows, totals, compacts):
+        print(f"  {day.isoformat():<10}  {text:<{total_width}}  {bucket['updater']:>8,}  "
+              f"{compact:<{compact_width}}  {bar(bucket['total'], top)}")
 
 
 def section_chart(releases, now, count):
-    print(f"== Downloads per day, last {min(count, len(releases))} releases: per release "
-          f"(noisy while releases were more frequent than daily), oldest -> newest ==")
+    print(f"== Downloads per day, last {min(count, len(releases))} releases: per release, after bots "
+          f"(raw in brackets; noisy while releases were more frequent than daily), oldest -> newest ==")
     if not releases:
         print("  no razdor release yet")
         return
@@ -432,13 +494,14 @@ def section_chart(releases, now, count):
     points = []
     for i in range(start, len(releases)):
         rel = releases[i]
-        points.append((rel["tag"], per_day(rel["total"], window_days(releases, i, now))))
-    top = max(value for _, value in points)
-    for tag, value in points:
-        width = round(value / top * BAR_WIDTH) if top > 0 else 0
-        if value > 0 and width == 0:
+        days = window_days(releases, i, now)
+        points.append((rel["tag"], per_day(rel["clean_total"], days), per_day(rel["total"], days)))
+    top = max(clean for _, clean, _ in points)
+    for tag, clean, raw in points:
+        width = round(clean / top * BAR_WIDTH) if top > 0 else 0
+        if clean > 0 and width == 0:
             width = 1
-        print(f"{tag:<10} {value:>9,.1f}  {'█' * width}")
+        print(f"{tag:<10} {clean:>9,.1f} (raw {raw:,.1f})  {'█' * width}")
 
 
 def run(args):
@@ -463,6 +526,11 @@ def run(args):
     if unknown:
         print("Note: asset names counted as 'other': " + ", ".join(sorted(unknown)))
         print()
+    assumed = [rel["tag"] for rel in releases if rel["floor_assumed"]]
+    if assumed:
+        print(f"Note: {len(assumed)} releases have no translate assets; their bot floor is assumed to be "
+              f"{BOT_FLOOR_ASSUMED} (the level seen on every release that has them).")
+        print()
     section_window(releases, now)
     print()
     section_current(releases, now)
@@ -475,6 +543,7 @@ def run(args):
     print()
     section_chart(releases, now, args.releases)
     print()
+    print(UPDATER_NOTE)
     print(TREND)
     return 0
 
