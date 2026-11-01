@@ -84,6 +84,7 @@ SCREENS = [
     ("minimap", "minimap:РК1-Начало пути", {}),
     ("settings", "settings:РК1-Начало пути", {}),
     ("keys", "settings:РК1-Начало пути:keys", {}),
+    ("advanced", "settings:РК1-Начало пути:advanced", {}),
     ("help", "map:РК1-Начало пути", {"RAZDOR_SCENE_OPEN": "3:keys"}),
     ("save", "save:РК1-Начало пути", {}),
     ("load", "load", {}),
@@ -126,6 +127,8 @@ def build_cases(only, out, text_size="1.25"):
                 # SCREENS entry may override them; `text_size` replaces the 1.25 of a phone.
                 env.setdefault("RAZDOR_TEXT_SIZE", text_size)
                 env.setdefault("RAZDOR_LARGE_WINDOWS", "1")
+                # Phones default to the Modern fonts (the owner's decision, 2026-11-01).
+                env.setdefault("RAZDOR_FONT_MODE", "modern")
                 env["RAZDOR_DP"] = str(dp)
                 env["RAZDOR_TEXT_PROBE"] = str(out / "probe" / f"{key}.tsv")
                 env["RAZDOR_TOUCH_PROBE"] = str(out / "touch" / f"{key}.tsv")

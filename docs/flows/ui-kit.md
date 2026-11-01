@@ -33,7 +33,7 @@ before (the UI regression goldens prove it).
 - `kit::touch_h(design_h) -> f32`: a button's height: `design_h × k × button_grow()` and, on a
   phone, at least 44 dp. Pure twin `touch_h_at(design_h, k, g, dp)`.
 
-Fonts on a phone: the Modern faces by default (`audio::Settings` migration, once). A player who picks
+Fonts on a phone: the Modern faces by default (`audio::Settings` default and `migrate_font`, once). A player who picks
 the original's sheets on a phone gets them at any zoom: kit text on a phone is drawn with
 `dt_font::legacy_metrics_if(true, …)`, so the size asked for is the size drawn.
 
@@ -72,18 +72,31 @@ route their hit tests through `button_state`/`tapped_in` so the probe sees them.
 
 ## Windows
 
-`kit::Window`: where a window stands and at what scale.
+- Desktop: today's helpers (`window_layout::title_rect`, `over_map_rect` under the window scale,
+  `main_menu::window`/`map_window`), unchanged.
+- Phone, held upright or sideways: a kit window is at one design px per dp (`kit::phone_window`,
+  pure twin `kit::phone_window_at`), so its scale is the phone's `dp`. It is as wide as its design
+  (594 px for the settings, 640 for the advanced settings) or the screen allows, and as tall as its
+  design (grown by the button growth) or the room it has: from the top inset (8 px down) to the
+  title's foot upright (`window_layout::title_bottom`), to the bottom inset sideways, or to the bar's
+  top over the map. Its content is a `Flow` that scrolls when it must.
+- A row cut by the flow's edge is drawn but cannot be pressed until it is whole (its hit area is
+  never half a row). Rows of a phone's column keep 4 px (checkboxes) or 6 px (settings) between them
+  and are at least `kit::finger_h` (48 dp) tall, so the touch probe finds no crowded targets.
+- The phone's layout code runs only when `kit::phone()` is Some; the desktop never reaches it.
 
-- Desktop and phone sideways: today's helpers (`window_layout::title_rect`, `over_map_rect`,
-  `sideways_window`, `main_menu::window`/`map_window`) with the design width and height.
-- Upright phone: the full width less the margins and the safe insets, from the top safe inset to the
-  title foot (`window_layout::title_bottom`) or above the bottom bar (over the map). Its scale is
-  `width / kit::UPRIGHT_W` (360 design px), so a design px is about a dp and the design's 12–15 px
-  texts are 12–15 sp before the text size. Its content is a `Flow` (it scrolls when it must).
+## Rows on a phone
+
+- `kit::check(r, label, on, ink, box_design)` / `check_in(flow, …)`: a checkbox row, the box 32 design
+  px square at the left, the label wrapped beside it; `kit::check_h` gives its height.
+- `kit::setting(flow, label, value, button_design_w) -> (bool, Rect)`: the label on the left and the
+  button on the right. When the value does not fit beside the label at its own size, the label goes on
+  its own line and the button takes the full width under it: a phone's value is never shrunk to an
+  ellipsis.
 
 ## Where each screen stands
 
-| Screen | Upright layout |
+| Screen | Phone layout |
 |---|---|
-| Settings («Настройки», `main_menu::options_window`) | one column: sliders (label over the track), checkboxes (wrapped), the rows, the buttons at the foot |
-| Advanced settings (`main_menu::advanced_window`) | one column: the left column's rules, then the right column's rows |
+| Settings («Настройки», `main_menu::options_phone`) | one scrolling column: five sliders (the label above the track when narrow), eight checkboxes and the touchpad's, the rows (orientation, text size, large windows, the import); a footer of «Ещё…», «Принять», «Отмена» (one row at 440 design px and wider, two rows below) |
+| Advanced settings (`main_menu::advanced_phone`) | one scrolling column: the left column's rules with their hints, then the right column's rows, «Ок» at the foot; no «Updates» row (the phone has its own update window) and no «Keyboard shortcuts» row (no keyboard) |

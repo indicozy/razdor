@@ -15,6 +15,7 @@ use razdor::i18n::{self, n_, tr, Lang};
 use super::audio::{cue, Cue};
 use super::chrome::{self, Fx};
 use super::keymap;
+use super::kit;
 use super::minimap;
 use super::window_layout;
 use super::widgets::*;
@@ -1139,10 +1140,186 @@ fn row_button(r: Rect, label: &str) -> bool {
     settings_button(r, label)
 }
 
+/// «Вкл.»/«Выкл.» (On/Off) of a toggle row.
+fn on_off(on: bool) -> &'static str {
+    if on { tr("On") } else { tr("Off") }
+}
+
+/// The value of «Stepping onto a friendly army» (`friends_let_pass`).
+fn friends_text(audio: &super::audio::Settings) -> &'static str {
+    if audio.friends_let_pass { tr("Let pass") } else { tr("Battle (original)") }
+}
+
+/// The value of «Armies on bridges» (`pass_on_bridges`).
+fn bridges_text(audio: &super::audio::Settings) -> &'static str {
+    if audio.pass_on_bridges { tr("Let pass") } else { tr("Stop (original)") }
+}
+
+/// The value of «Map zoom»'s lock (`zoom_locked`).
+fn zoom_lock_text(audio: &super::audio::Settings) -> &'static str {
+    if audio.zoom_locked { tr("Locked") } else { tr("Wheel and +/-") }
+}
+
+/// The value of «Army arrangement» (`formation_controls`).
+fn army_text(audio: &super::audio::Settings) -> &'static str {
+    match audio.formation_controls {
+        super::unit_drag::Controls::Clicks => tr("Clicks"),
+        super::unit_drag::Controls::Drag => tr("Dragging"),
+        super::unit_drag::Controls::Both => tr("Both"),
+    }
+}
+
+/// The value of «Font» (`font`).
+fn font_text(audio: &super::audio::Settings) -> &'static str {
+    match audio.font {
+        super::dt_font::FontMode::Original => tr("As in the original"),
+        super::dt_font::FontMode::Modern => tr("Modern"),
+    }
+}
+
+/// The value of «Battle AI strength».
+fn strength_text(strength: AiStrength) -> &'static str {
+    match strength {
+        AiStrength::Original => tr("As in the original"),
+        AiStrength::Improved => tr("Improved"),
+        AiStrength::Max => tr("Maximum (Razdor)"),
+    }
+}
+
+/// The value of «Minimap corner», the minimap's corner now.
+fn corner_text() -> &'static str {
+    match minimap::corner() {
+        minimap::Corner::TopRight => tr("Top right"),
+        minimap::Corner::BottomRight => tr("Bottom right"),
+        minimap::Corner::BottomLeft => tr("Bottom left"),
+        minimap::Corner::TopLeft => tr("Top left"),
+    }
+}
+
+/// The advanced settings on a phone (`kit::phone_window`, at `k` px per design px): the left
+/// column's rules and the right column's rows in one scrolling column, under «Ок». Two rows are
+/// left out: «Updates» (a phone has its own update window) and «Keyboard shortcuts» (a phone has no
+/// keyboard). Returns true when closed.
+fn advanced_phone(audio: &mut super::audio::Settings, k: f32, rect: Rect) -> bool {
+    let (inner, closed) = chrome::window(rect, tr("Advanced settings"), chrome::Skin::Marble, true);
+    let pad = 10.0 * k;
+    let ok_h = kit::touch_h(28.0);
+    let ok = Rect::new(inner.x + inner.w - pad - 110.0 * k, inner.y + inner.h - pad - ok_h, 110.0 * k, ok_h);
+    let top = inner.y + 8.0 * k;
+    let area = Rect::new(inner.x + pad, top, inner.w - 2.0 * pad, (ok.y - 8.0 * k - top).max(0.0));
+    let mut flow = kit::Flow::begin(area, "advanced");
+    // The left column: the rules, each with its explanation.
+    let (pressed, _) = kit::setting(&mut flow, tr("Stepping onto a friendly army"), friends_text(audio), 170.0);
+    if pressed {
+        audio.friends_let_pass = !audio.friends_let_pass;
+    }
+    phone_text(&mut flow, &kit::Text::new(tr("With no event of the map for the meeting, the original opens a battle against a friendly army the hero steps onto; Razdor can let him pass instead. An army chosen by a click is still fought."), 12.0, WHITE));
+    flow.gap(10.0);
+    // Armies only passing by on a bridge (Razdor's): the original meets each one.
+    let (pressed, _) = kit::setting(&mut flow, tr("Armies on bridges"), bridges_text(audio), 170.0);
+    if pressed {
+        audio.pass_on_bridges = !audio.pass_on_bridges;
+    }
+    phone_text(&mut flow, &kit::Text::new(tr("The original stops the hero at any army on a bridge. Razdor can let him through those only passing by; guards, enemies and the army clicked still meet him."), 12.0, WHITE));
+    flow.gap(10.0);
+    // The map's own zoom (Razdor's): its lock, then the slider with its value.
+    let (pressed, _) = kit::setting(&mut flow, tr("Map zoom"), zoom_lock_text(audio), 170.0);
+    if pressed {
+        audio.zoom_locked = !audio.zoom_locked;
+    }
+    let (lo, hi) = super::world_view::ZOOM_RANGE;
+    let value = format!("×{:.2}", audio.map_zoom);
+    let track_row = flow.row_h(kit::touch_h(18.0), |_| {});
+    if flow.visible(track_row) {
+        let track = Rect::new(track_row.x, track_row.y + (track_row.h - 18.0 * k) / 2.0, track_row.w - 80.0 * k, 18.0 * k);
+        let vt = kit::Text::new(&value, 14.0, chrome::GOLD);
+        vt.draw_one(track.x + track.w + 8.0 * k, track.y + track.h / 2.0 + vt.size() * 0.35);
+        // Not moved while cut by the flow's edge (as every control of a phone's column).
+        if let Some(v) = slider(track, (audio.map_zoom - lo) / (hi - lo)).filter(|_| !flow.cut(track_row)) {
+            audio.map_zoom = ((lo + v * (hi - lo)) / 0.05).round() * 0.05;
+        }
+    }
+    phone_text(&mut flow, &kit::Text::new(tr("The zoom the map plays at. The wheel steps away from it and the 0 key comes back to it; locked, the map always shows it."), 12.0, WHITE));
+    flow.gap(10.0);
+    // The army's arrangement outside battle (Razdor's): clicks, dragging or both.
+    let (pressed, _) = kit::setting(&mut flow, tr("Army arrangement"), army_text(audio), 170.0);
+    if pressed {
+        audio.formation_controls = audio.formation_controls.next();
+    }
+    phone_text(&mut flow, &kit::Text::new(tr("Clicks: the first click picks a unit or an item, the second places it. Dragging: a click only selects, and units and items are moved by dragging. Both: clicks and dragging at once."), 12.0, WHITE));
+    flow.gap(12.0);
+    // The right column: how Razdor shows the game.
+    let (pressed, _) = kit::setting(&mut flow, tr("Screen"), audio.display.for_device(true).label(), 150.0);
+    if pressed {
+        audio.display = audio.display.next_on(true);
+    }
+    let fit = chrome::fit_k();
+    let (pressed, _) = kit::setting(&mut flow, tr("Interface scale"), &super::display::scale_label(audio.ui_scale, fit), 150.0);
+    if pressed {
+        audio.ui_scale = super::display::next_scale(audio.ui_scale, fit);
+    }
+    let (pressed, _) = kit::setting(&mut flow, tr("Font"), font_text(audio), 150.0);
+    if pressed {
+        audio.font = audio.font.next();
+    }
+    let strength = ai_strength(audio);
+    let (pressed, _) = kit::setting(&mut flow, tr("Battle AI strength"), strength_text(strength), 150.0);
+    if pressed {
+        set_ai_strength(audio, strength.next());
+    }
+    phone_text(&mut flow, &kit::Text::new(tr("Maximum: before each move the enemy of your battles weighs every move and answer ahead and plays each out to the end of the battle."), 12.0, WHITE));
+    flow.gap(4.0);
+    let (pressed, _) = kit::setting(&mut flow, tr("Unit battle participation"), on_off(audio.allow_unit_benching), 150.0);
+    if pressed {
+        audio.allow_unit_benching = !audio.allow_unit_benching;
+    }
+    let (pressed, _) = kit::setting(&mut flow, tr("Route around armies"), on_off(audio.avoid_armies), 150.0);
+    if pressed {
+        audio.avoid_armies = !audio.avoid_armies;
+    }
+    let (pressed, _) = kit::setting(&mut flow, tr("Keep formation after battle"), on_off(audio.keep_formation), 150.0);
+    if pressed {
+        audio.keep_formation = !audio.keep_formation;
+    }
+    let (pressed, _) = kit::setting(&mut flow, tr("Max guards casters"), on_off(audio.max_guard), 150.0);
+    if pressed {
+        audio.max_guard = !audio.max_guard;
+    }
+    let (pressed, _) = kit::setting(&mut flow, tr("Battles on the map"), on_off(audio.battle_marks), 150.0);
+    if pressed {
+        audio.battle_marks = !audio.battle_marks;
+    }
+    let (pressed, _) = kit::setting(&mut flow, tr("Minimap army list"), on_off(audio.army_list), 150.0);
+    if pressed {
+        audio.army_list = !audio.army_list;
+    }
+    let (pressed, _) = kit::setting(&mut flow, tr("Minimap corner"), corner_text(), 150.0);
+    if pressed {
+        minimap::set_corner(minimap::corner().next());
+    }
+    let (pressed, _) = kit::setting(&mut flow, tr("Minimap size and place"), tr("Reset"), 150.0);
+    if pressed {
+        minimap::reset();
+    }
+    // The language list (Razdor's): the button opens it over the window.
+    let (pressed, lr) = kit::setting(&mut flow, tr("Language"), &super::language::current_label(), 150.0);
+    if pressed || super::snapshot::open_language_list() {
+        super::language::open_list(lr, k);
+    }
+    phone_text(&mut flow, &kit::Text::new(super::language::hint(), 12.0, WHITE));
+    flow.finish();
+    let ok_label = own("Buttons", "Ok", n_("OK"));
+    closed || key(KeyCode::Escape) || key(KeyCode::Enter) || kit::button(ok, &ok_label, true)
+}
+
 /// Razdor's advanced settings (the settings window's "Ещё…"): rules where Razdor can differ
 /// from the original on the left, the screen, the interface scale, the font and the
 /// language on the right. Returns true when closed.
 fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
+    // On a phone (`kit::phone_window`): its own layout, one column (`advanced_phone`).
+    if let Some((k, rect)) = kit::phone_window(over_map, (640.0, 650.0), true) {
+        return super::display::with_window_scale(Some(k), || advanced_phone(audio, k, rect));
+    }
     // 650 high since «Расстановка армии» joined the left column (it still fits the 682 px
     // view above the bar).
     let (ww, wh) = (900.0, 650.0);
@@ -1167,7 +1344,7 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     let y = col.y + 30.0 * k;
     chrome::shadow_text(tr("Stepping onto a friendly army"), col.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
     let br = Rect::new(col.x + col.w - 24.0 * k - 170.0 * k, y, 170.0 * k, row_h);
-    let label = if audio.friends_let_pass { tr("Let pass") } else { tr("Battle (original)") };
+    let label = friends_text(audio);
     if row_button(br, label) {
         audio.friends_let_pass = !audio.friends_let_pass;
     }
@@ -1179,7 +1356,7 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     let y = y + 100.0 * k;
     chrome::shadow_text(tr("Armies on bridges"), col.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
     let pr = Rect::new(br.x, y, br.w, br.h);
-    let label = if audio.pass_on_bridges { tr("Let pass") } else { tr("Stop (original)") };
+    let label = bridges_text(audio);
     if row_button(pr, label) {
         audio.pass_on_bridges = !audio.pass_on_bridges;
     }
@@ -1224,7 +1401,7 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     let y = y + 100.0 * k;
     chrome::shadow_text(tr("Map zoom"), col.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
     let zr = Rect::new(br.x, y, br.w, br.h);
-    let lock_label = if audio.zoom_locked { tr("Locked") } else { tr("Wheel and +/-") };
+    let lock_label = zoom_lock_text(audio);
     if row_button(zr, lock_label) {
         audio.zoom_locked = !audio.zoom_locked;
     }
@@ -1244,11 +1421,7 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     let y = y + 136.0 * k;
     chrome::shadow_text(tr("Army arrangement"), col.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
     let ar = Rect::new(br.x, y, br.w, br.h);
-    let label = match audio.formation_controls {
-        super::unit_drag::Controls::Clicks => tr("Clicks"),
-        super::unit_drag::Controls::Drag => tr("Dragging"),
-        super::unit_drag::Controls::Both => tr("Both"),
-    };
+    let label = army_text(audio);
     if row_button(ar, label) {
         audio.formation_controls = audio.formation_controls.next();
     }
@@ -1296,20 +1469,13 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     }
     // The interface's fonts (Razdor's choice): the original's sheets from the install, or PT
     // Serif; at once.
-    let font_label = match audio.font {
-        super::dt_font::FontMode::Original => tr("As in the original"),
-        super::dt_font::FontMode::Modern => tr("Modern"),
-    };
+    let font_label = font_text(audio);
     if row(tr("Font"), font_label, &mut y) {
         audio.font = audio.font.next();
     }
     // The battle AI's strength (Razdor's): the original's, its improved level, or «Максимум».
     let strength = ai_strength(audio);
-    let strength_label = match strength {
-        AiStrength::Original => tr("As in the original"),
-        AiStrength::Improved => tr("Improved"),
-        AiStrength::Max => tr("Maximum (Razdor)"),
-    };
+    let strength_label = strength_text(strength);
     if row(tr("Battle AI strength"), strength_label, &mut y) {
         set_ai_strength(audio, strength.next());
     }
@@ -1320,39 +1486,34 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
         chrome::shadow_text(line, rx, hint_top + i as f32 * 17.0 * k, 12.0 * k, WHITE);
     }
     y = hint_top + ai_hint.len() as f32 * 17.0 * k + 8.0 * k;
-    if row(tr("Unit battle participation"), if audio.allow_unit_benching { tr("On") } else { tr("Off") }, &mut y) {
+    if row(tr("Unit battle participation"), on_off(audio.allow_unit_benching), &mut y) {
         audio.allow_unit_benching = !audio.allow_unit_benching;
     }
     // Razdor's option: the route closes every army's cell (off: the original's route).
-    if row(tr("Route around armies"), if audio.avoid_armies { tr("On") } else { tr("Off") }, &mut y) {
+    if row(tr("Route around armies"), on_off(audio.avoid_armies), &mut y) {
         audio.avoid_armies = !audio.avoid_armies;
     }
     // Razdor's deviation (the owner's request): after a battle every unit goes back to its cell
     // from before it (`Game::keep_formation`); off, the original's write-back.
-    if row(tr("Keep formation after battle"), if audio.keep_formation { tr("On") } else { tr("Off") }, &mut y) {
+    if row(tr("Keep formation after battle"), on_off(audio.keep_formation), &mut y) {
         audio.keep_formation = !audio.keep_formation;
     }
     // «Максимум бережёт магов» (`Battle::set_max_guard`), on by default (the owner's decision, 2026-10-31):
     // off by default, a gameplay change of «Максимум».
-    if row(tr("Max guards casters"), if audio.max_guard { tr("On") } else { tr("Off") }, &mut y) {
+    if row(tr("Max guards casters"), on_off(audio.max_guard), &mut y) {
         audio.max_guard = !audio.max_guard;
     }
     // Razdor's options: a battle between armies on the map shows a mark and a notice (on by
     // default); the armies the player sees are listed under the minimap (off by default).
-    if row(tr("Battles on the map"), if audio.battle_marks { tr("On") } else { tr("Off") }, &mut y) {
+    if row(tr("Battles on the map"), on_off(audio.battle_marks), &mut y) {
         audio.battle_marks = !audio.battle_marks;
     }
-    if row(tr("Minimap army list"), if audio.army_list { tr("On") } else { tr("Off") }, &mut y) {
+    if row(tr("Minimap army list"), on_off(audio.army_list), &mut y) {
         audio.army_list = !audio.army_list;
     }
     // Razdor's options (a player's report: the minimap dragged where it is hard to move back):
     // its corner, cycled clockwise, and «Сбросить» puts its size and place back to the default.
-    let corner_label = match minimap::corner() {
-        minimap::Corner::TopRight => tr("Top right"),
-        minimap::Corner::BottomRight => tr("Bottom right"),
-        minimap::Corner::BottomLeft => tr("Bottom left"),
-        minimap::Corner::TopLeft => tr("Top left"),
-    };
+    let corner_label = corner_text();
     if row(tr("Minimap corner"), corner_label, &mut y) {
         minimap::set_corner(minimap::corner().next());
     }
@@ -1400,10 +1561,14 @@ fn option_slider(r: Rect, label: &str, value: f32) -> Option<f32> {
     let k = chrome::k();
     draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, 0.0, 0.0, 0.35));
     chrome::silver_frame(r, 1.0);
-    super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
-        chrome::shadow_text(label, r.x + 8.0 * k, r.y + r.h * 0.5 + 6.0 * k, 15.0 * k, OPTION_INK);
-    });
-    let a = 17.0 * k;
+    if !label.is_empty() {
+        let t = kit::Text::new(label, 15.0, OPTION_INK).face(super::dt_font::Face::Subtitle);
+        // The desktop's label sits 6 px under the centre, as the original's; a phone's is centred on its size.
+        let baseline = if kit::phone().is_some() { r.y + r.h * 0.5 + t.size() * 0.35 } else { r.y + r.h * 0.5 + 6.0 * k };
+        t.draw_one(r.x + 8.0 * k, baseline);
+    }
+    // The arrows are 17 px squares; on a phone they are 80% of the row, so they are easy to tap.
+    let a = if kit::phone().is_some() { r.h * 0.8 } else { 17.0 * k };
     let left = Rect::new(r.x + r.w * 0.505, r.y + (r.h - a) / 2.0, a, a);
     let right = Rect::new(r.x + r.w - 6.0 * k - a, left.y, a, a);
     let track = Rect::new(left.x + left.w, left.y, right.x - left.x - left.w, a);
@@ -1569,6 +1734,10 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     if OPENED_WITH.with(|o| o.borrow().is_none()) {
         OPENED_WITH.with(|o| *o.borrow_mut() = Some(audio.clone()));
     }
+    // On a phone (`kit::phone_window`, one design px per dp) the same rows in a scrolling column.
+    if let Some((k, rect)) = kit::phone_window(over_map, (594.0, options_h()), true) {
+        return super::display::with_window_scale(Some(k), || options_phone(audio, install_wide, over_map, k, rect));
+    }
     let title = own("Options", "Title", n_("Sound, graphics and gameplay settings"));
     let h = options_h();
     // The rows below depend on the phone's own: see `options_h`.
@@ -1590,75 +1759,26 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     // A window with 0x48d710's inner frames (the options window is c2953a, 634×556, 4d2f48).
     chrome::window_inner_frames(outer, chrome::opx());
     let row = |i: usize| Rect::new(inner.x + 10.0 * k, inner.y + 8.0 * k + i as f32 * 37.5 * k, inner.w - 20.0 * k, 30.0 * k);
-    // The Evolution Mod has four slider rows, labelled `Option0`…`Option3` (its exe builds the key
-    // from `Option` and the row number); the Community's five are `OptionSld0`…`OptionSld4`. A
-    // Community install names its rows the same way with `OptionSld`.
-    let mod_rows = chrome::install_option("Option0").is_some() && chrome::install_option("OptionSld0").is_none();
-    let slider_label = |n: usize, ours: &'static str| own("Options", &if mod_rows { format!("Option{n}") } else { format!("OptionSld{n}") }, ours);
-    // The volumes, in steps of 1%.
-    for (i, music) in [(0, true), (1, false)] {
-        let (ours, value) = if music { (n_("Background music volume"), audio.music_volume) } else { (n_("Sound effects volume"), audio.sfx_volume) };
-        if let Some(v) = option_slider(row(i), &slider_label(i, ours), value) {
-            let steps = ((v - value) / super::audio::VOLUME_STEP).round() as i32;
-            if music {
-                audio.music_muted = false;
-                audio.step_music(steps);
-            } else {
-                audio.sfx_muted = false;
-                audio.step_sfx(steps);
-            }
+    // The five sliders: the volumes, the scroll speed, the hero's walk, the battle animations.
+    for (i, (label, value)) in slider_rows(audio).iter().enumerate() {
+        if let Some(v) = option_slider(row(i), label, *value) {
+            slider_moved(audio, i, v, *value);
         }
-    }
-    // The map's edge scroll (`ScrollSpeed`, world_view) and the hero's step (`WalkSpeed`).
-    if let Some(v) = option_slider(row(2), &slider_label(2, n_("Map scroll speed")), scroll_speed(audio) / 100.0) {
-        audio.scroll_speed = Some((v * 100.0).round());
-    }
-    // The slider runs 0..`WALK_SPEED_MAX`: the original's fastest (100) is its middle.
-    let max = razdor::rules::game::WALK_SPEED_MAX as f32;
-    if let Some(v) = option_slider(row(3), &slider_label(3, n_("Hero's walking speed")), walk_speed(audio) / max) {
-        audio.walk_speed = Some((v * max).round());
-    }
-    // The Community's "Скорость анимаций в битве" (`AnimationSpeed`): it caps a strike's
-    // slide at (100 − S)·5 ms and its effect at (100 − S)·3 ms (0x4afd45, 0x4afe7c). The
-    // Evolution Mod's window has only four sliders (its `Option4` is a checkbox); Razdor shows
-    // this row for every install, under its own label (the owner's decision, 2026-10-29).
-    let anim_label = if mod_rows { tr(n_("Battle animation speed")).to_string() } else { slider_label(4, n_("Battle animation speed")) };
-    if let Some(v) = option_slider(row(4), &anim_label, anim_speed(audio).unwrap_or(0.0) / 99.0) {
-        audio.anim_speed = Some((v * 99.0).round());
     }
     // The eight checkboxes (`Option4`…`Option11`), a gap before the three of battle and
     // difficulty.
     let cx = inner.x + 14.0 * k;
     let cy = |i: usize| row(5).y + 4.0 * k + i as f32 * 27.0 * k + if i >= 5 { 11.0 * k } else { 0.0 };
-    let checks: [(&str, &'static str, bool, Color); 8] = [
-        ("Option4", n_("Do not load music and sounds (needs a restart)"), no_sound(audio), CHECK_ORANGE),
-        ("Option5", n_("Show FPS"), audio.show_fps, CHECK_INK),
-        ("Option6", n_("Turn off hints"), hints_off(audio), CHECK_INK),
-        ("Option7", n_("Automatically pursue the chosen army"), pursue(audio), CHECK_INK),
-        ("Option8", n_("Automatically save the current game"), autosave(audio), CHECK_INK),
-        ("Option9", n_("Improved enemy AI in battle"), expert_ai(audio), CHECK_INK),
-        ("Option10", n_("Impossible difficulty (needs a restart)"), impossible(audio), CHECK_INK),
-        ("Option11", n_("Wide front row in battle (for new games)"), wide_row(audio, install_wide), CHECK_INK),
-    ];
-    for (i, (key, ours, on, ink)) in checks.into_iter().enumerate() {
+    for (i, (key, ours, on, ink)) in check_items(audio, install_wide).into_iter().enumerate() {
         if option_check(cx, cy(i), &own("Options", key, ours), on, ink) {
-            match i {
-                0 => audio.no_sound = Some(!on),
-                1 => audio.show_fps = !on,
-                2 => audio.hints_off = Some(!on),
-                3 => audio.pursue = Some(!on),
-                4 => audio.autosave = Some(!on),
-                5 => toggle_expert_ai(audio),
-                6 => audio.impossible = Some(!on),
-                _ => audio.wide_row = Some(!on),
-            }
+            toggle_check(i, on, audio);
         }
     }
     // Razdor's touchpad mode (phones and tablets only), off unless the player turned it on.
     if touch_row {
         let on = audio.touchpad.unwrap_or(false);
         if option_check(cx, cy(8), &own("Options", "RazdorTouchpad", n_("Touchpad mode (the screen moves a cursor)")), on, CHECK_INK) {
-            audio.touchpad = Some(!on);
+            toggle_check(8, on, audio);
         }
     }
     // Razdor's screen orientation (Android only): Auto (the system's, the device's turn), then
@@ -1668,11 +1788,7 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
         chrome::shadow_text(tr("Screen orientation"), cx, y + 18.0 * k, 14.0 * k, chrome::CREAM);
         let r = Rect::new(inner.x + inner.w - 14.0 * k - 170.0 * k, y, 170.0 * k, 28.0 * k * g);
         if row_button(r, orientation_label(audio.orientation)) {
-            audio.orientation = match audio.orientation {
-                None => Some(super::audio::Orientation::Landscape),
-                Some(super::audio::Orientation::Landscape) => Some(super::audio::Orientation::Portrait),
-                Some(super::audio::Orientation::Portrait) => None,
-            };
+            audio.orientation = next_orientation(audio.orientation);
         }
     }
     // Razdor's text size and large pop-up message windows (the owner's request: phones' text
@@ -1690,7 +1806,7 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     let large_y = text_y + step;
     chrome::shadow_text(tr("Large message windows"), cx, large_y + 18.0 * k, 14.0 * k, chrome::CREAM);
     let r = Rect::new(inner.x + inner.w - 14.0 * k - 170.0 * k, large_y, 170.0 * k, 28.0 * k * g);
-    if row_button(r, if audio.large_windows { tr("On") } else { tr("Off") }) {
+    if row_button(r, on_off(audio.large_windows)) {
         audio.large_windows = !audio.large_windows;
     }
     // «Обновить игру из архива…» (Razdor's, a row of its own under the large windows): the
@@ -1712,6 +1828,85 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     // Both act when the button is let go over it (PR #5's buttons).
     let apply_pressed = settings_button(apply, &apply_label);
     let cancel_pressed = settings_button(cancel, &cancel_label);
+    options_end(audio, apply_pressed, cancel_pressed, closed)
+}
+
+/// The settings window's five sliders (`Option0`…`Option4`, see `options_window`): each label and
+/// its value (0..1). The Evolution Mod has four sliders, labelled `Option0`…`Option3` (its exe builds
+/// the key from `Option` and the row number); the Community's five are `OptionSld0`…`OptionSld4`. A
+/// Community install names its rows the same way with `OptionSld`.
+fn slider_rows(audio: &super::audio::Settings) -> [(String, f32); 5] {
+    let mod_rows = chrome::install_option("Option0").is_some() && chrome::install_option("OptionSld0").is_none();
+    let slider_label = |n: usize, ours: &'static str| own("Options", &if mod_rows { format!("Option{n}") } else { format!("OptionSld{n}") }, ours);
+    // The slider runs 0..`WALK_SPEED_MAX`: the original's fastest (100) is its middle.
+    let max = razdor::rules::game::WALK_SPEED_MAX as f32;
+    // The Community's "Скорость анимаций в битве" (`AnimationSpeed`); the Evolution Mod's window has
+    // only four sliders (its `Option4` is a checkbox), so Razdor shows this row for every install,
+    // under its own label (the owner's decision, 2026-10-29).
+    let anim_label = if mod_rows { tr(n_("Battle animation speed")).to_string() } else { slider_label(4, n_("Battle animation speed")) };
+    [
+        (slider_label(0, n_("Background music volume")), audio.music_volume),
+        (slider_label(1, n_("Sound effects volume")), audio.sfx_volume),
+        // The map's edge scroll (`ScrollSpeed`, world_view) and the hero's step (`WalkSpeed`).
+        (slider_label(2, n_("Map scroll speed")), scroll_speed(audio) / 100.0),
+        (slider_label(3, n_("Hero's walking speed")), walk_speed(audio) / max),
+        (anim_label, anim_speed(audio).unwrap_or(0.0) / 99.0),
+    ]
+}
+
+/// Applies a moved slider `i` of `slider_rows` (its new value `v`, from `value`): the volumes in
+/// steps of 1%, the others as their settings.
+fn slider_moved(audio: &mut super::audio::Settings, i: usize, v: f32, value: f32) {
+    match i {
+        0 | 1 => {
+            let steps = ((v - value) / super::audio::VOLUME_STEP).round() as i32;
+            if i == 0 {
+                audio.music_muted = false;
+                audio.step_music(steps);
+            } else {
+                audio.sfx_muted = false;
+                audio.step_sfx(steps);
+            }
+        }
+        2 => audio.scroll_speed = Some((v * 100.0).round()),
+        3 => audio.walk_speed = Some((v * razdor::rules::game::WALK_SPEED_MAX as f32).round()),
+        _ => audio.anim_speed = Some((v * 99.0).round()),
+    }
+}
+
+/// The settings window's checkboxes (`Option4`…`Option11`): key, label, on, ink.
+fn check_items(audio: &super::audio::Settings, install_wide: bool) -> [(&'static str, &'static str, bool, Color); 8] {
+    [
+        ("Option4", n_("Do not load music and sounds (needs a restart)"), no_sound(audio), CHECK_ORANGE),
+        ("Option5", n_("Show FPS"), audio.show_fps, CHECK_INK),
+        ("Option6", n_("Turn off hints"), hints_off(audio), CHECK_INK),
+        ("Option7", n_("Automatically pursue the chosen army"), pursue(audio), CHECK_INK),
+        ("Option8", n_("Automatically save the current game"), autosave(audio), CHECK_INK),
+        ("Option9", n_("Improved enemy AI in battle"), expert_ai(audio), CHECK_INK),
+        ("Option10", n_("Impossible difficulty (needs a restart)"), impossible(audio), CHECK_INK),
+        ("Option11", n_("Wide front row in battle (for new games)"), wide_row(audio, install_wide), CHECK_INK),
+    ]
+}
+
+/// Ticks the settings window's checkbox `i` (0..8 of `check_items`, 8 the touchpad mode) that was
+/// `on`.
+fn toggle_check(i: usize, on: bool, audio: &mut super::audio::Settings) {
+    match i {
+        0 => audio.no_sound = Some(!on),
+        1 => audio.show_fps = !on,
+        2 => audio.hints_off = Some(!on),
+        3 => audio.pursue = Some(!on),
+        4 => audio.autosave = Some(!on),
+        5 => toggle_expert_ai(audio),
+        6 => audio.impossible = Some(!on),
+        7 => audio.wide_row = Some(!on),
+        _ => audio.touchpad = Some(!on),
+    }
+}
+
+/// The settings window's end: «Принять» (or Enter) keeps what was changed; «Отмена», the close box
+/// or Esc puts it back. True when the window closes.
+fn options_end(audio: &mut super::audio::Settings, apply_pressed: bool, cancel_pressed: bool, closed: bool) -> bool {
     if apply_pressed || key(KeyCode::Enter) {
         OPENED_WITH.with(|o| *o.borrow_mut() = None);
         return true;
@@ -1723,6 +1918,123 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
         return true;
     }
     false
+}
+
+/// The settings window on a phone (`kit::phone_window`, at `k` px per design px): the desktop's
+/// rows and actions in one scrolling column, under a footer of buttons. The footer is one row when
+/// the window is 440 design px wide or more, two rows when it is narrower. Returns true when closed.
+fn options_phone(audio: &mut super::audio::Settings, install_wide: bool, over_map: bool, k: f32, rect: Rect) -> bool {
+    let title = own("Options", "Title", n_("Sound, graphics and gameplay settings"));
+    let (inner, closed) = chrome::window(rect, &title, chrome::Skin::Marble, true);
+    let design_w = rect.w / k;
+    let pad = 10.0 * k;
+    let bh = kit::touch_h(32.0);
+    // The footer: «Ещё…» (140 design px), «Принять» and «Отмена» (110 each), 10 px above the bottom.
+    let wide = design_w >= 440.0;
+    let end_y = inner.y + inner.h - pad - bh;
+    let more = if wide { Rect::new(inner.x + pad, end_y, 140.0 * k, bh) } else { Rect::new(inner.x + pad, end_y - 8.0 * k - bh, inner.w - 2.0 * pad, bh) };
+    let footer_top = more.y;
+    let (apply, cancel) = if wide {
+        let cancel = Rect::new(inner.x + inner.w - pad - 110.0 * k, end_y, 110.0 * k, bh);
+        (Rect::new(cancel.x - 8.0 * k - 110.0 * k, end_y, 110.0 * k, bh), cancel)
+    } else {
+        let half = (inner.w - 2.0 * pad - 8.0 * k) / 2.0;
+        (Rect::new(inner.x + pad, end_y, half, bh), Rect::new(inner.x + pad + half + 8.0 * k, end_y, half, bh))
+    };
+    let top = inner.y + 8.0 * k;
+    let area = Rect::new(inner.x + pad, top, inner.w - 2.0 * pad, (footer_top - 8.0 * k - top).max(0.0));
+    let mut flow = kit::Flow::begin(area, "options");
+    // The sliders: side by side with their label when the window is wide, else the label above.
+    let wide_sliders = design_w >= 520.0;
+    for (i, (label, value)) in slider_rows(audio).iter().enumerate() {
+        if i > 0 {
+            flow.gap(6.0);
+        }
+        if wide_sliders {
+            let r = flow.row_h(kit::touch_h(30.0), |_| {});
+            if flow.visible(r) {
+                if let Some(v) = option_slider(r, label, *value).filter(|_| !flow.cut(r)) {
+                    slider_moved(audio, i, v, *value);
+                }
+            }
+        } else {
+            phone_text(&mut flow, &kit::Text::new(label, 15.0, OPTION_INK).face(super::dt_font::Face::Subtitle));
+            let r = flow.row_h(kit::touch_h(30.0), |_| {});
+            if flow.visible(r) {
+                if let Some(v) = option_slider(r, "", *value).filter(|_| !flow.cut(r)) {
+                    slider_moved(audio, i, v, *value);
+                }
+            }
+        }
+    }
+    // The checkboxes, the touchpad mode's (phones) last; a gap before the three of battle and difficulty.
+    flow.gap(12.0);
+    for (i, (key, ours, on, ink)) in check_items(audio, install_wide).into_iter().enumerate() {
+        if i == 5 {
+            flow.gap(11.0);
+        }
+        check_row(&mut flow, audio, i, &own("Options", key, ours), on, ink);
+    }
+    if super::touchpad::MOBILE {
+        let on = audio.touchpad.unwrap_or(false);
+        check_row(&mut flow, audio, 8, &own("Options", "RazdorTouchpad", n_("Touchpad mode (the screen moves a cursor)")), on, CHECK_INK);
+    }
+    // The settings' rows: the orientation (Android), the text size, the large windows, the import.
+    flow.gap(12.0);
+    if cfg!(target_os = "android") {
+        let (pressed, _) = kit::setting(&mut flow, tr("Screen orientation"), orientation_label(audio.orientation), 170.0);
+        if pressed {
+            audio.orientation = next_orientation(audio.orientation);
+        }
+    }
+    let (pressed, _) = kit::setting(&mut flow, tr("Text size"), super::display::text_size_label(audio.text_size), 170.0);
+    if pressed {
+        audio.text_size = super::display::next_text_size(audio.text_size);
+    }
+    let (pressed, _) = kit::setting(&mut flow, tr("Large message windows"), on_off(audio.large_windows), 170.0);
+    if pressed {
+        audio.large_windows = !audio.large_windows;
+    }
+    let import = flow.row_h(super::game_import::settings_row_h(flow.width(), over_map), |_| {});
+    if !flow.cut(import) {
+        super::game_import::settings_row(import, over_map);
+    }
+    flow.finish();
+    // The footer: «Ещё…» opens the advanced settings (the window closes with no change), the rest as the desktop's.
+    if kit::button(more, tr("Advanced…"), true) {
+        ADVANCED.with(|a| a.set(true));
+        return false;
+    }
+    let (apply_label, cancel_label) = (own("Buttons", "Apply", n_("Apply")), own("Buttons", "Cancel", n_("Cancel")));
+    let apply_pressed = kit::button(apply, &apply_label, true);
+    let cancel_pressed = kit::button(cancel, &cancel_label, true);
+    options_end(audio, apply_pressed, cancel_pressed, closed)
+}
+
+/// A checkbox row of a phone's settings column (`toggle_check`'s index `i`): ticked when clicked.
+fn check_row(flow: &mut kit::Flow, audio: &mut super::audio::Settings, i: usize, label: &str, on: bool, ink: Color) {
+    let h = kit::check_h(label, flow.width(), 32.0);
+    let r = flow.row_h(h, |_| {});
+    if kit::check_in(flow, r, label, on, ink, 32.0) {
+        toggle_check(i, on, audio);
+    }
+    // A gap under each row: touching targets are crowded (the mobile-ui check).
+    flow.gap(4.0);
+}
+
+/// A text of a phone's column, wrapped to its width, the cursor below it.
+fn phone_text(flow: &mut kit::Flow, t: &kit::Text) {
+    let (x, width) = (flow.area().x, flow.width());
+    flow.text_at(t, x, t.size() * 0.85, width, 0.0);
+}
+
+/// The next orientation of the Android setting's button: Auto, landscape, portrait, Auto.
+fn next_orientation(o: Option<super::audio::Orientation>) -> Option<super::audio::Orientation> {
+    match o {
+        None => Some(super::audio::Orientation::Landscape),
+        Some(super::audio::Orientation::Landscape) => Some(super::audio::Orientation::Portrait),
+        Some(super::audio::Orientation::Portrait) => None,
+    }
 }
 
 /// Closes the in-game settings window with its changes kept, as «Принять» does (the bar's

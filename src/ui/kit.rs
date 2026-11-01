@@ -322,16 +322,13 @@ impl Flow {
         r.x < self.area.x + self.area.w && r.x + r.w > self.area.x && r.y < self.area.y + self.area.h && r.y + r.h > self.area.y
     }
 
-    /// The part of `r` inside the area, `None` when none of it is.
-    pub fn hit(&self, r: Rect) -> Option<Rect> {
-        let x0 = r.x.max(self.area.x);
-        let y0 = r.y.max(self.area.y);
-        let x1 = (r.x + r.w).min(self.area.x + self.area.w);
-        let y1 = (r.y + r.h).min(self.area.y + self.area.h);
-        (x1 > x0 && y1 > y0).then(|| Rect::new(x0, y0, x1 - x0, y1 - y0))
+    /// Whether `r` runs past the area at its top or bottom (it is partly scrolled out; half a px
+    /// of rounding is not).
+    pub fn cut(&self, r: Rect) -> bool {
+        r.y < self.area.y - 0.5 || r.y + r.h > self.area.y + self.area.h + 0.5
     }
 
-    /// Ends the flow: stores the content's height for the next frame, draws the scrollbar when
+        /// Ends the flow: stores the content's height for the next frame, draws the scrollbar when
     /// the column overflowed, keeps the offset and drops the clip.
     pub fn finish(mut self) {
         let content = (self.y + self.offset) - self.area.y;
@@ -369,7 +366,8 @@ pub fn button(r: Rect, label: &str, enabled: bool) -> bool {
 /// be pressed.
 #[track_caller]
 pub fn button_in(flow: &Flow, r: Rect, label: &str, enabled: bool) -> bool {
-    if flow.hit(r).is_none() {
+    // A control cut by the flow's edge is drawn but not pressable until it is whole.
+    if flow.cut(r) {
         chrome::marble_button(r, label, enabled, false);
         return false;
     }
@@ -377,36 +375,140 @@ pub fn button_in(flow: &Flow, r: Rect, label: &str, enabled: bool) -> bool {
 }
 
 // ------------------------------------------------------------------------------------------
-// Upright window
+// Phone windows
 // ------------------------------------------------------------------------------------------
 
-/// The design width an upright window is laid out at: its scale is `width / UPRIGHT_W`.
-pub const UPRIGHT_W: f32 = 360.0;
-
-/// An upright window `margin` px in from each side of a `screen` (w, h), from `top` to
-/// `bottom`. Returns its scale (`width / UPRIGHT_W`) and its rectangle. Pure twin of
-/// [`upright_window`].
-pub fn upright_window_at(screen: (f32, f32), top: f32, bottom: f32, margin: f32) -> (f32, Rect) {
-    let width = screen.0 - 2.0 * margin;
-    (width / UPRIGHT_W, Rect::new(margin, top, width, bottom - top))
+/// A phone window (Razdor's own, the owner's decision, 2026-11-01): one design px per dp on every
+/// phone, held upright or sideways. `design` is its size in design px; it is as wide as the design
+/// or the screen allows (`screen` less `side` on each side), and as tall as the design grown by `g`
+/// (the button growth) or the room between `top` and `bottom`, the whole room when `fill`. Centred
+/// horizontally and vertically in `top`..`bottom`. Returns its scale (`dp`) and its rectangle.
+/// Pure twin of [`phone_window`].
+#[allow(clippy::too_many_arguments)] // the room (`top`, `bottom`, `side`) and the design, as they are read
+pub fn phone_window_at(screen: (f32, f32), dp: f32, top: f32, bottom: f32, side: f32, design: (f32, f32), fill: bool, g: f32) -> (f32, Rect) {
+    let k = dp;
+    let avail_w = (screen.0 - 2.0 * side).max(0.0);
+    let avail_h = (bottom - top).max(0.0);
+    let w = (design.0 * k).min(avail_w);
+    let h = if fill { avail_h } else { (design.1 * k * g).min(avail_h) };
+    let x = (screen.0 - w) / 2.0;
+    let y = top + (avail_h - h) / 2.0;
+    (k, Rect::new(x.round(), y.round(), w.round(), h.round()))
 }
 
-/// The upright window's scale and rectangle for the current phone: `None` unless the phone is
-/// held upright. It starts under the top safe inset and ends at the title's foot, or above the
-/// bottom bar when it is over the map (`over_map`).
-pub fn upright_window(over_map: bool) -> Option<(f32, Rect)> {
-    if !upright() {
-        return None;
-    }
+/// A phone window's scale and rectangle for the phone on screen, `None` on the desktop. Its room
+/// runs from the top inset (8 px down) to the title's foot when held upright, to the bottom inset
+/// sideways, or to the bar's top over the map (`over_map`). See [`phone_window_at`].
+pub fn phone_window(over_map: bool, design: (f32, f32), fill: bool) -> Option<(f32, Rect)> {
+    let dp = phone()?;
     let safe = display::safe_area();
     let top = safe.top + 8.0;
+    let side = 8.0 + safe.left.max(safe.right);
     let bottom = if over_map {
         screen_height() - chrome::bar_height() - 8.0
-    } else {
+    } else if upright() {
         window_layout::title_bottom()
+    } else {
+        screen_height() - safe.bottom - 8.0
     };
-    let margin = 8.0 + safe.left.max(safe.right);
-    Some(upright_window_at((screen_width(), screen_height()), top, bottom, margin))
+    Some(phone_window_at((screen_width(), screen_height()), dp, top, bottom, side, design, fill, display::button_grow()))
+}
+
+// ------------------------------------------------------------------------------------------
+// Phone rows: a checkbox and a setting
+// ------------------------------------------------------------------------------------------
+
+/// A phone checkbox row `r`: the box `box_design` px square (× k) at the row's left, vertically
+/// centred, the label wrapped beside it in the Subtitle face. The whole row is the hit area. True
+/// when it is clicked (the button cue plays).
+#[track_caller]
+pub fn check(r: Rect, label: &str, on: bool, ink: Color, box_design: f32) -> bool {
+    check_at(r, true, label, on, ink, box_design)
+}
+
+/// [`check`] inside a flow: a row cut by the flow's edge is drawn but cannot be ticked until it is
+/// whole (its hit area is never half a row).
+#[track_caller]
+pub fn check_in(flow: &Flow, r: Rect, label: &str, on: bool, ink: Color, box_design: f32) -> bool {
+    check_at(r, !flow.cut(r), label, on, ink, box_design)
+}
+
+/// Draws the checkbox in `r`; `live`: whether it takes presses (not measured or pressed otherwise).
+fn check_at(r: Rect, live: bool, label: &str, on: bool, ink: Color, box_design: f32) -> bool {
+    let k = chrome::k();
+    let bs = box_design * k;
+    let b = Rect::new(r.x, r.y + (r.h - bs) / 2.0, bs, bs);
+    let (art, mask) = if on { ("CBoxChecked", "CBoxChecked-Alpha") } else { ("CBoxUn", "CBoxUn-Alpha") };
+    match chrome::win_masked(art, mask) {
+        Some(t) => chrome::tex(&t, b, WHITE),
+        None => {
+            draw_rectangle(b.x, b.y, b.w, b.h, Color::new(0.0, 0.0, 0.0, 0.5));
+            chrome::silver_frame(b, 1.0);
+            if on {
+                // The fallback tick of `main_menu::option_check`, drawn for a 26 px box.
+                let s = bs / 26.0;
+                draw_line(b.x + 3.0 * s, b.y + 9.0 * s, b.x + 8.0 * s, b.y + 15.0 * s, 2.5 * s, GREEN);
+                draw_line(b.x + 8.0 * s, b.y + 15.0 * s, b.x + 16.0 * s, b.y + 2.0 * s, 2.5 * s, GREEN);
+            }
+        }
+    }
+    let t = Text::new(label, 15.0, ink).face(dt_font::Face::Subtitle);
+    let lw = (r.w - bs - 8.0 * k).max(1.0);
+    let pitch = t.line_pitch();
+    let block = t.lines(lw).len() as f32 * pitch;
+    t.draw(r.x + bs + 8.0 * k, r.y + (r.h - block) / 2.0 + pitch / 2.0 + t.size() * 0.35, lw);
+    let pressed = live && widgets::button_state(r, true).2;
+    if pressed {
+        audio::cue(audio::Cue::Button);
+    }
+    pressed
+}
+
+/// A phone target at least [`widgets::FINGER_DP`] dp (48) on its shorter side, so that the rows
+/// next to it are not crowded (the touch probe's rule). `h` is at least `h`.
+pub fn finger_h(h: f32) -> f32 {
+    match phone() {
+        Some(d) => h.max(widgets::FINGER_DP * d),
+        None => h,
+    }
+}
+
+/// The height of a phone checkbox row `width` px wide for `label` ([`check`]): the touch height
+/// (26 design px grown, at least [`finger_h`]), or the label's wrapped lines plus 8 px, whichever is
+/// taller.
+pub fn check_h(label: &str, width: f32, box_design: f32) -> f32 {
+    let k = chrome::k();
+    let lw = (width - box_design * k - 8.0 * k).max(1.0);
+    let text_h = Text::new(label, 15.0, WHITE).face(dt_font::Face::Subtitle).height(lw);
+    finger_h(touch_h(26.0)).max(text_h + 8.0 * k)
+}
+
+/// A setting row on a phone, in `flow`: `label` (14 px, cream) on the left and the button `value` on
+/// the right, `button_design_w` px wide (at most half the flow) and [`touch_h`] 28 high (at least
+/// [`finger_h`]). When the value does not fit beside the label at its own size, the label goes on
+/// its own line and the button takes the full width under it: a phone's value is never shrunk to
+/// an ellipsis. The label's lines are centred on the button beside it; the row is as tall as its
+/// content, plus 6 px. Returns whether the button was clicked, and its rectangle.
+#[track_caller]
+pub fn setting(flow: &mut Flow, label: &str, value: &str, button_design_w: f32) -> (bool, Rect) {
+    let k = chrome::k();
+    let (w, bh) = (flow.width(), finger_h(touch_h(28.0)));
+    let side_w = (button_design_w * k).min(w * 0.5);
+    let beside = chrome::button_label_width(bh, value) <= side_w - 12.0 * k;
+    let (bw, lw) = if beside { (side_w, (w - side_w - 12.0 * k).max(1.0)) } else { (w, w) };
+    let t = Text::new(label, 14.0, chrome::CREAM);
+    let (pitch, size) = (t.line_pitch(), t.size());
+    let block = t.lines(lw).len() as f32 * pitch;
+    let content = if beside { bh.max(block) } else { block + 4.0 * k + bh };
+    let row = flow.row_h(content + 6.0 * k, |_| {});
+    let (label_y, br) = if beside {
+        let centre = row.y + content / 2.0;
+        (centre - block / 2.0 + pitch / 2.0 + size * 0.35, Rect::new(row.x + row.w - bw, centre - bh / 2.0, bw, bh))
+    } else {
+        (row.y + pitch / 2.0 + size * 0.35, Rect::new(row.x, row.y + block + 4.0 * k, bw, bh))
+    };
+    t.draw(row.x, label_y, lw);
+    (button_in(flow, br, value, true), br)
 }
 
 #[cfg(test)]
@@ -463,9 +565,27 @@ mod tests {
     }
 
     #[test]
-    fn upright_window_fills_the_width_less_the_margins() {
-        let (k, r) = upright_window_at((1080.0, 1920.0), 40.0, 1500.0, 8.0);
-        assert!(close(k, (1080.0 - 16.0) / 360.0), "{k}");
-        assert!(close(r.x, 8.0) && close(r.y, 40.0) && close(r.w, 1064.0) && close(r.h, 1460.0), "{r:?}");
+    fn phone_window_is_one_px_per_dp_and_as_wide_as_the_screen_allows_upright() {
+        // 594 design px at 2.75 px per dp is wider than a 1080 px screen less its margins: the screen decides.
+        let (k, r) = phone_window_at((1080.0, 2400.0), 2.75, 40.0, 2000.0, 16.0, (594.0, 500.0), true, 1.0);
+        assert!(close(k, 2.75), "{k}");
+        assert!(close(r.w, 1080.0 - 32.0) && close(r.x, 16.0), "{r:?}");
+        assert!(close(r.y, 40.0) && close(r.h, 1960.0), "fills the room from the top to the bottom: {r:?}");
+    }
+
+    #[test]
+    fn phone_window_takes_its_design_width_sideways() {
+        let (k, r) = phone_window_at((2400.0, 1080.0), 2.75, 8.0, 1072.0, 20.0, (594.0, 650.0), true, 1.0);
+        assert!(close(k, 2.75));
+        assert!(close(r.w, (594.0 * 2.75f32).round()), "the design width, rounded: {r:?}");
+        assert!(close(r.x, ((2400.0 - r.w) / 2.0).round()), "centred: {r:?}");
+    }
+
+    #[test]
+    fn phone_window_grows_its_design_height_with_the_button_growth_and_is_centred() {
+        // 300 design px tall at 2.75 px per dp, grown 1.2×: 990 px in a 1064 px room, centred in it.
+        let (_, r) = phone_window_at((2400.0, 1080.0), 2.75, 8.0, 1072.0, 20.0, (594.0, 300.0), false, 1.2);
+        assert!(close(r.h, 990.0), "{r:?}");
+        assert!(close(r.y, 45.0), "8 + (1064 - 990) / 2: {r:?}");
     }
 }

@@ -276,17 +276,9 @@ fn progress_window() {
 /// the reason it is not offered, in its place.
 pub fn settings_row(r: Rect, over_map: bool) {
     let k = chrome::k();
-    let reason = if over_map {
-        Some(tr("The game is updated from the main menu."))
-    } else if cfg!(target_os = "ios") {
-        Some(tr("The update from an archive is not on iPhone yet."))
-    } else if !offered() {
-        Some(tr("Only the game in Razdor's own folder can be updated here."))
-    } else {
-        None
-    };
-    if let Some(text) = reason {
-        chrome::shadow_text(text, r.x + 4.0 * k, r.y + 19.0 * k, 13.0 * k, Color::new(0.93, 0.87, 0.75, 0.75));
+    if let Some(text) = reason(over_map) {
+        // Wraps to the row's width on a phone (`kit::Text`); on the desktop it is one line, as before.
+        super::kit::Text::new(text, 13.0, REASON_INK).draw(r.x + 4.0 * k, r.y + 19.0 * k, r.w - 8.0 * k);
         return;
     }
     let enabled = !busy();
@@ -295,6 +287,35 @@ pub fn settings_row(r: Rect, over_map: bool) {
     if pressed {
         cue(Cue::Button);
         request();
+    }
+}
+
+/// The colour of the reason a row offers no button (the pale cream of the settings' hints).
+const REASON_INK: Color = Color::new(0.93, 0.87, 0.75, 0.75);
+
+/// Why the row offers no button (`None`: it offers one).
+fn reason(over_map: bool) -> Option<&'static str> {
+    if over_map {
+        Some(tr("The game is updated from the main menu."))
+    } else if cfg!(target_os = "ios") {
+        Some(tr("The update from an archive is not on iPhone yet."))
+    } else if !offered() {
+        Some(tr("Only the game in Razdor's own folder can be updated here."))
+    } else {
+        None
+    }
+}
+
+/// The height of the settings row `width` px wide ([`settings_row`]) on a phone: the reason's
+/// wrapped lines plus 10 px, or the button's touch height. On the desktop the row is 28 px (× k).
+pub fn settings_row_h(width: f32, over_map: bool) -> f32 {
+    let k = chrome::k();
+    if super::kit::phone().is_none() {
+        return 28.0 * k;
+    }
+    match reason(over_map) {
+        Some(text) => super::kit::Text::new(text, 13.0, REASON_INK).height(width - 8.0 * k) + 10.0 * k,
+        None => super::kit::touch_h(28.0),
     }
 }
 

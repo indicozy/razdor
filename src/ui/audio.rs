@@ -259,10 +259,22 @@ pub struct Settings {
     pub keys: Vec<(String, String)>,
 }
 
-/// The version of the layout defaults (text size, large windows, interface scale). Bumped when
+/// The version of the layout defaults (text size, large windows, interface scale, font). Bumped when
 /// those defaults change and must reach the players who saved older settings. v1 (1.0.2):
-/// interface scale back to Auto, text size and large windows to their platform defaults.
-pub const LAYOUT_VERSION: u32 = 1;
+/// interface scale back to Auto, text size and large windows to their platform defaults. v2
+/// (2026-11-01, Razdor's own): phones default to the Modern fonts (`migrate_font`).
+pub const LAYOUT_VERSION: u32 = 2;
+
+/// The font a settings file gets when it is migrated (the owner's decision, 2026-11-01): phones
+/// default to the Modern fonts. A phone's saved Original, which was only the old default, becomes
+/// Modern once; a file of version 2 or later keeps what the player chose, Original included.
+pub fn migrate_font(font: super::dt_font::FontMode, version: u32, mobile: bool) -> super::dt_font::FontMode {
+    if mobile && version < 2 && font == super::dt_font::FontMode::Original {
+        super::dt_font::FontMode::Modern
+    } else {
+        font
+    }
+}
 
 /// The screen's orientation the player chose on a phone: Auto turns with the device, the others
 /// stay in landscape or in portrait.
@@ -301,7 +313,7 @@ pub fn must_request(asked: Option<i32>, want: i32) -> bool {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), friends_let_pass: false, pass_on_bridges: false, avoid_armies: false, keep_formation: true, battle_marks: true, army_list: false, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new() }
+        Settings { allow_unit_benching: false, music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), friends_let_pass: false, pass_on_bridges: false, avoid_armies: false, keep_formation: true, battle_marks: true, army_list: false, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, anim_speed: None, font: if razdor::platform::MOBILE { super::dt_font::FontMode::Modern } else { super::dt_font::FontMode::Original }, scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new() }
     }
 }
 
@@ -332,20 +344,23 @@ impl Settings {
         settings
     }
 
-    /// Resets the layout defaults of a file older than `LAYOUT_VERSION` (Razdor's, the owner's
-    /// request: after the phones' text came out too small): the interface scale back to Auto,
-    /// the text size and the large windows to their platform defaults. Returns whether it did.
+    /// Migrates a file older than `LAYOUT_VERSION`. A file below version 1 (Razdor's, the owner's
+    /// request: after the phones' text came out too small) is reset: the interface scale back to
+    /// Auto, the text size and the large windows to their platform defaults. Every older file gets
+    /// `migrate_font`, and its version becomes `LAYOUT_VERSION`, so a player who picks Original on
+    /// a phone again keeps it. Returns whether it migrated.
     fn migrated(self) -> (Settings, bool) {
         if self.layout_version >= LAYOUT_VERSION {
             return (self, false);
         }
-        let settings = Settings {
-            ui_scale: 0.0,
-            text_size: super::display::default_text_size(),
-            large_windows: super::display::default_large_windows(),
-            layout_version: LAYOUT_VERSION,
-            ..self
-        };
+        let font = migrate_font(self.font, self.layout_version, razdor::platform::MOBILE);
+        let reset = self.layout_version < 1;
+        let mut settings = Settings { font, layout_version: LAYOUT_VERSION, ..self };
+        if reset {
+            settings.ui_scale = 0.0;
+            settings.text_size = super::display::default_text_size();
+            settings.large_windows = super::display::default_large_windows();
+        }
         (settings, true)
     }
 
@@ -770,7 +785,7 @@ mod tests {
 
     #[test]
     fn a_current_file_keeps_its_layout_settings() {
-        let (s, migrated) = read_back(r#"{"ui_scale": 1.5, "text_size": 1.5, "large_windows": true, "layout_version": 1}"#);
+        let (s, migrated) = read_back(r#"{"ui_scale": 1.5, "text_size": 1.5, "large_windows": true, "layout_version": 2}"#);
         assert!(!migrated);
         assert_eq!((s.ui_scale, s.text_size, s.large_windows), (1.5, 1.5, true));
     }
@@ -779,12 +794,31 @@ mod tests {
     fn an_empty_file_is_migrated_to_the_current_version() {
         let (s, migrated) = read_back("{}");
         assert!(migrated, "a file without the version is older");
-        assert_eq!(s.layout_version, 1);
+        assert_eq!(s.layout_version, LAYOUT_VERSION);
+    }
+
+    #[test]
+    fn migrate_font_moves_a_phones_original_to_modern_once() {
+        use super::super::dt_font::FontMode::{Modern, Original};
+        assert_eq!(migrate_font(Original, 1, true), Modern, "a phone's saved Original from version 1");
+        assert_eq!(migrate_font(Original, 0, true), Modern, "a file below version 1 too");
+        assert_eq!(migrate_font(Original, 1, false), Original, "the desktop keeps its font");
+        assert_eq!(migrate_font(Modern, 1, false), Modern);
+        assert_eq!(migrate_font(Original, 2, true), Original, "a version 2 file keeps Original, the player's choice");
+    }
+
+    #[test]
+    fn a_version_1_file_keeps_its_layout_settings_and_is_migrated() {
+        // The phone's font rule is checked through `migrate_font` above (the tests run on the desktop).
+        let (s, migrated) = read_back(r#"{"ui_scale": 1.5, "text_size": 1.5, "large_windows": true, "layout_version": 1, "font": "original"}"#);
+        assert!(migrated, "version 1 is migrated to 2");
+        assert_eq!(s.layout_version, LAYOUT_VERSION);
+        assert_eq!((s.ui_scale, s.text_size, s.large_windows), (1.5, 1.5, true), "version 1 keeps the layout settings");
     }
 
     #[test]
     fn a_bad_text_size_goes_to_the_default() {
-        let (s, _) = read_back(r#"{"text_size": 0.3, "layout_version": 1}"#);
+        let (s, _) = read_back(r#"{"text_size": 0.3, "layout_version": 2}"#);
         assert_eq!(s.text_size, super::super::display::default_text_size());
     }
 
