@@ -119,7 +119,7 @@ impl Assets {
         }
     }
 
-    fn dt_portrait(&self, kind: UnitId) -> Option<Texture2D> {
+    pub fn dt_portrait(&self, kind: UnitId) -> Option<Texture2D> {
         self.dt.as_ref()?.unit_portrait(self.dt_id(kind)?)
     }
 

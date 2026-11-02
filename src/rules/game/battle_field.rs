@@ -12,7 +12,8 @@ use std::collections::BTreeMap;
 
 use crate::rules::ai;
 use crate::rules::battle::{Battle, Team};
-use crate::rules::field::{self, Action, FieldBattle, FieldScript, FieldState, Moves, Side, Snapshot};
+use crate::rules::field::{self, Action, FieldBattle, FieldScript, FieldState, Side, Snapshot};
+use crate::rules::content::UnitId;
 use crate::rules::units::Unit;
 
 use super::{troop_unit, BattleResult, Foe, Game};
@@ -58,15 +59,34 @@ impl Game {
     /// The board, the units and the turn, for the screen (and the scripts' view of them).
     pub fn field_snapshot(&mut self) -> Option<Snapshot> {
         let p = self.field_live()?;
-        let active = p.fb.current();
+        let active = p.fb.acting();
         Some(p.fb.snapshot(active))
     }
 
-    /// What the unit `unit` can do this turn, when it is the one to act: the cells it can walk
-    /// to, the units it can hit, the gates it can break (see [`FieldBattle::moves`]).
-    pub fn field_legal_moves(&mut self, unit: usize) -> Option<Moves> {
+    /// The unit due to act, starting or ending rounds as the battle needs (saved as it goes);
+    /// `None` once the battle is over.
+    pub fn field_acting(&mut self) -> Option<usize> {
         let p = self.field_live()?;
-        (p.fb.current() == Some(unit)).then(|| p.fb.moves(unit))
+        let f = p.fb.next_actor(&mut *p.hooks);
+        self.field_store();
+        f
+    }
+
+    /// The DT unit a battle unit is drawn as.
+    pub fn field_kind(&mut self, unit: usize) -> Option<UnitId> {
+        self.field_live()?.fb.shadow.fighters.get(unit).map(|f| f.unit)
+    }
+
+    /// The coming units (see [`FieldBattle::queue`]).
+    pub fn field_queue(&mut self) -> Vec<usize> {
+        self.field_live().map_or_else(Vec::new, |p| p.fb.queue())
+    }
+
+    /// Every action the unit `unit` may take now, when it is the one to act: the cells it can
+    /// walk to with or without a blow or shot from each, the gates it can break (see
+    /// [`FieldBattle::legal`]). Empty for any other unit.
+    pub fn field_legal(&mut self, unit: usize) -> Vec<Action> {
+        self.field_live().map_or_else(Vec::new, |p| p.fb.legal(unit))
     }
 
     /// The acting unit's action, as the player gives it. An invalid part is logged and left out.
@@ -183,33 +203,37 @@ impl Game {
         self.field_play.as_mut()
     }
 
-    /// One action of the acting unit (the given one, or the AI's), then the turn's end and the
-    /// next round when they are due; the state and the squads are updated.
+    /// One action of the acting unit (the given one, or the AI's), then the round's end and the
+    /// next round's start when they are due (so the state shows them at once); the state and the
+    /// squads are updated.
     fn field_step(&mut self, action: Option<Action>) -> Result<(), String> {
-        if self.field_live().is_none() {
-            return Err("no field battle is under way".into());
-        }
-        let Some(mut p) = self.field_play.take() else { return Err("no field battle is under way".into()) };
-        let Some(f) = p.fb.current() else {
-            self.field_play = Some(p);
-            return Err("no unit is to act".into());
-        };
-        let action = match action {
-            Some(a) => a,
-            None => p.fb.ai_action(f, &mut *p.hooks),
-        };
-        let out = p.fb.act(f, action, &mut *p.hooks);
-        if out.is_ok() && p.fb.outcome().is_none() && p.fb.current().is_none() {
-            p.fb.end_round(&mut *p.hooks);
-            if p.fb.outcome().is_none() {
-                p.fb.start_round(&mut *p.hooks);
+        let p = self.field_live().ok_or("no field battle is under way")?;
+        let out = match action {
+            None => {
+                if p.fb.auto_step(&mut *p.hooks) {
+                    Ok(())
+                } else {
+                    Err("no unit is to act".into())
+                }
             }
-        }
+            Some(a) => match p.fb.next_actor(&mut *p.hooks) {
+                Some(f) => p.fb.act(f, a, &mut *p.hooks),
+                None => Err("no unit is to act".into()),
+            },
+        };
+        p.fb.next_actor(&mut *p.hooks);
+        self.field_store();
+        out
+    }
+
+    /// The live battle's state into the save, and its HP into the squads (as a DT battle's
+    /// write-back does), after every change the screen can see.
+    fn field_store(&mut self) {
+        let Some(mut p) = self.field_play.take() else { return };
         p.fb.sync(&*p.hooks);
         self.field = Some(p.fb.state.clone());
         self.field_write_back(&p);
         self.field_play = Some(p);
-        out
     }
 
     /// The shadow's HP into the squad and the enemy's troops (as a DT battle's write-back), and
@@ -325,7 +349,7 @@ mod tests {
     /// whose battle is `lua:field`, and the script `field.lua` (`script`).
     fn package(script: &str) -> Package {
         let manifest = "id = \"field-test\"\nversion = \"0.1.0\"\nformat = 1\ntitle = \"story.title\"\nauthor = \"Razdor\"\nlicense = \"MIT\"\n";
-        let map = "title = \"map.title\"\nstart_date = \"1300-04-01\"\nrelations = [[3,3,0,-3],[3,3,0,-3],[0,0,3,-3],[-3,-3,-3,3]]\n\n[hero]\ncell = [5, 5]\nclasses = [\"knight\"]\ngold = 100\ntroops = [{ unit = \"dt:militiaman\", level = 1, count = 3 }]\n\n[[army]]\nid = \"e\"\nname = \"army.e\"\ncell = [30, 30]\nfaction = \"enemy\"\nmodel = \"bandits\"\nbattle = \"lua:field\"\ntroops = [{ unit = \"dt:bandit\", level = 1, count = 2 }]\n\n[victory]\nkind = \"reach\"\ncell = [45, 45]\nmessage = \"win.message\"\n";
+        let map = "title = \"map.title\"\nstart_date = \"1300-04-01\"\nrelations = [[3,3,0,-3],[3,3,0,-3],[0,0,3,-3],[-3,-3,-3,3]]\n\n[hero]\ncell = [5, 5]\nclasses = [\"knight\"]\ngold = 100\ntroops = [{ unit = \"dt:militiaman\", level = 1, count = 3 }]\n\n[[army]]\nid = \"e\"\nname = \"army.e\"\ncell = [30, 30]\nfaction = \"enemy\"\nmodel = \"bandits\"\nbattle = \"lua:field\"\ntroops = [{ unit = \"dt:militiaman\", level = 1, count = 2 }]\n\n[victory]\nkind = \"reach\"\ncell = [45, 45]\nmessage = \"win.message\"\n";
         let mut f = Files::default();
         f.insert("package.toml", manifest);
         f.insert("texts/en.toml", "[story]\ntitle = \"Field test\"\n\n[map]\ntitle = \"Map\"\n\n[win]\nmessage = \"Won\"\n\n[army]\ne = \"Bandits\"\n");

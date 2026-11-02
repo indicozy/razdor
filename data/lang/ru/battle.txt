@@ -380,3 +380,17 @@ day = день
 hour = час
 Your enemy proved stronger than your army, and you lost this battle. = Враг оказался сильнее, и битва проиграна.
 You let your hero perish, and the game on this scenario cannot go on. = Герой погиб, и этот сценарий продолжить нельзя.
+
+# Field battle screen (Razdor 2.0): the board, the panel, the end
+Field battle = Полевой бой
+Turn {n} of {max} = Ход {n} из {max}
+Your move: {name} = Ваш ход: {name}
+Auto: {name} = Авто: {name}
+Their move: {name} = Ход противника: {name}
+Waiting = Ожидание
+Wait = Ждать
+Log = Журнал
+Victory = Победа
+Defeat = Поражение
+The defenders hold the field = Защитники удержали поле
+The attackers hold the field = Нападающие захватили поле

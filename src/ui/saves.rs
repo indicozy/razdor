@@ -249,7 +249,12 @@ pub fn battle(game: &mut Game, session: Option<&mut super::session::Keeper>) -> 
     game.foe = foe;
     // The moment just before it, its foe pending, kept for «Рестарт» (this battle again).
     let state = save::meta_of(game, SaveKind::Auto, &name).ok().and_then(|m| save::encode(&m, game).ok().map(|b| (m, b)));
-    let mut view = BattleView::new(game.start_battle());
+    let placeholder = game.start_battle();
+    // A field battle (the package's script) is driven by its own screen; the placeholder is not played.
+    if game.field_active() {
+        return Screen::Field(Box::new(super::field_view::FieldScreen::default()));
+    }
+    let mut view = BattleView::new(placeholder);
     view.restart_state = state;
     Screen::Battle(Box::new(view))
 }

@@ -554,6 +554,16 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             app.screen = Screen::CustomBattle(view);
             return Ok(());
         }
+        // `field:siege[:n|end]`: the demo siege of the field battle (`field_view`), at the start,
+        // after n unit actions by the AI, or played to its end.
+        "field" => {
+            let _scene = parts.next();
+            let content = app.dt_content.clone().unwrap_or_else(|| std::sync::Arc::new(razdor::rules::content::Content::builtin()));
+            app.assets.set_content(content.clone());
+            let screen = super::field_view::siege_screen(content, parts.next())?;
+            app.screen = Screen::Field(Box::new(screen));
+            return Ok(());
+        }
         "replay" => return stage_replay(app, parts.next()),
         _ => {}
     }

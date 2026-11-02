@@ -12,6 +12,7 @@ pub mod dialog;
 pub mod display;
 pub mod dt_art;
 pub mod dt_font;
+pub mod field_view;
 pub mod editor;
 pub mod game_bar;
 pub mod gamepad;
@@ -111,6 +112,8 @@ pub enum Screen {
     /// "Back" returns to (the map if none).
     Squad { selected: items_view::ArmySel, scroll: usize, back: Option<BuildingView> },
     Battle(Box<BattleView>),
+    /// A field battle (Razdor 2.0): a board with walls, a gate and battlements (`field_view`).
+    Field(Box<field_view::FieldScreen>),
     /// The journal: its tab, selected line and scrolling.
     /// The hero window (the bar's flag, the original's side window 5).
     Hero(items_view::HeroView),
@@ -670,7 +673,11 @@ impl App {
                 if let Some(q) = game.pending_question() {
                     story::show(&game, &EventOutcome::Question(q), &mut self.dialogs);
                 }
-                self.screen = if game.foe.is_some() {
+                // A field battle saved under way reopens its screen (its state is the game's; the
+                // placeholder battle is not played); a DT battle pending starts as before.
+                self.screen = if game.field_active() {
+                    Screen::Field(Box::new(field_view::FieldScreen::default()))
+                } else if game.foe.is_some() {
                     Screen::Battle(Box::new(BattleView::new(game.start_battle())))
                 } else {
                     Screen::WorldMap
@@ -769,6 +776,7 @@ impl App {
             Screen::CustomBattle(_) => Mood::Battle { garrison: false },
             Screen::Load(v) if v.back == saves::Back::Title || self.game.is_none() => Mood::Menu,
             Screen::Battle(_) => Mood::Battle { garrison: matches!(self.game.as_ref().and_then(|g| g.foe.as_ref()), Some(Foe::Garrison(_))) },
+            Screen::Field(_) => Mood::Battle { garrison: false },
             Screen::Victory => Mood::Won,
             // The defeat report plays the defeat theme (4c57ad, 0x4a8ae8's mode 2 → 0x482290).
             _ if self.dialogs.iter().any(|d| d.defeat) => Mood::Lost,
@@ -821,7 +829,7 @@ impl App {
                 }
                 // The building window opens on its first tab, highlighted (interface.md §14).
                 Screen::Building(_) => audio::cue(Cue::CastSpell),
-                Screen::Battle(_) | Screen::CustomBattle(_) => audio::cue(Cue::BattleHorn),
+                Screen::Battle(_) | Screen::CustomBattle(_) | Screen::Field(_) => audio::cue(Cue::BattleHorn),
                 _ => {}
             }
         }
@@ -899,7 +907,7 @@ impl App {
             Screen::WorldMap => Place::WorldMap,
             Screen::Building(_) => Place::Building,
             Screen::Squad { .. } => Place::Army,
-            Screen::Battle(_) | Screen::CustomBattle(_) => Place::Battle,
+            Screen::Battle(_) | Screen::CustomBattle(_) | Screen::Field(_) => Place::Battle,
             Screen::CustomSetup => Place::Custom,
             Screen::Hero(_) => Place::Hero,
             Screen::Spellbook { .. } => Place::Spellbook,
@@ -1055,6 +1063,7 @@ impl App {
             Screen::Building(_) => "building",
             Screen::Squad { .. } => "army",
             Screen::Battle(_) => "battle",
+            Screen::Field(_) => "field",
             Screen::Hero(_) => "hero",
             Screen::Spellbook { .. } => "spell book",
             Screen::Menu(_) => "menu",
@@ -1398,6 +1407,19 @@ impl App {
                 items_view::squad(game, &self.assets, selected, scroll, back, &mut self.message)
             }),
             (Screen::Battle(view), Some(game)) => view.frame(game, &self.assets, &mut self.message, &mut self.dialogs),
+            // A field battle: the game's (`Game::field_*`), or the snapshot scene's own demo. Its
+            // end's «Дальше» settles the battle and goes on as a DT battle's close does.
+            (Screen::Field(f), _) if f.demo.is_some() => {
+                if let Some(demo) = f.demo.as_mut() {
+                    f.view.frame(demo, &self.assets);
+                }
+                None
+            }
+            (Screen::Field(f), Some(game)) => {
+                let ended = f.view.frame(game, &self.assets);
+                ended.then(|| field_view::finish(game, &mut self.message, &mut self.dialogs))
+            }
+            (Screen::Field(_), None) => None,
             (Screen::Hero(view), Some(game)) => window_layout::scaled(window_layout::Stack::Army, || items_view::hero_window(game, &self.assets, view, &mut self.message)),
             (Screen::Spellbook { selected, page, filter }, Some(game)) => {
                 spellbook::frame(game, &self.assets, selected, page, filter, &mut self.message)
@@ -1717,7 +1739,7 @@ impl App {
             }
             // A world spell that killed the whole army loses the game: the defeat report,
             // 250 ms later (0x4906eb → 0x4af658).
-            if next.is_none() && !matches!(self.screen, Screen::Battle(..)) && self.game.as_ref().is_some_and(Game::army_fallen) {
+            if next.is_none() && !matches!(self.screen, Screen::Battle(..) | Screen::Field(_)) && self.game.as_ref().is_some_and(Game::army_fallen) {
                 let due = crate::ui::clock::now() + razdor::av::BATTLE_REPORT_GAP_MS as f64 / 1000.0;
                 self.dialogs.push_back(dialog::Dialog { not_before: Some(due), ..dialog::Dialog::defeat(last_save_path().is_some()) });
             }
@@ -1730,7 +1752,7 @@ impl App {
         }
         // The session slot (`session`): kept fresh while the game is played; no game on screen
         // (the main menu, the editor) ends the session.
-        let session_ok = quick_save_ok && !self.test_play && !matches!(self.screen, Screen::Battle(_) | Screen::CustomBattle(_) | Screen::Editor);
+        let session_ok = quick_save_ok && !self.test_play && !matches!(self.screen, Screen::Battle(_) | Screen::CustomBattle(_) | Screen::Field(_) | Screen::Editor);
         razdor::frame_probe::time(razdor::frame_probe::Stage::Session, || self.session.tick(self.game.as_ref(), session_ok, crate::ui::clock::now()));
         if let Some(path) = self.pending_load.take() {
             self.load(&path);

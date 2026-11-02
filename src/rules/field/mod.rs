@@ -118,17 +118,6 @@ pub struct FieldBattle {
     pub state: FieldState,
 }
 
-/// The legal moves of one unit this turn (see [`FieldBattle::moves`]).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Moves {
-    /// Cells the unit can walk to, its own included, row by row.
-    pub cells: Vec<(i32, i32)>,
-    /// Units it can hit from one of those cells (their ids).
-    pub units: Vec<usize>,
-    /// Standing gates next to one of those cells.
-    pub gates: Vec<(i32, i32)>,
-}
-
 /// The shadow DT battle of a fight: the squad (its living units, the hero always) against the
 /// enemy units, begun as a DT battle begins (the shadow's pre-simulation is off).
 pub fn shadow(content: Arc<Content>, squad: &[Unit], enemies: &[Unit]) -> Battle {
@@ -611,44 +600,97 @@ impl FieldBattle {
         self.state.outcome
     }
 
-    /// What `f` can do this turn from where it stands: the cells it can walk to with its
-    /// manevres (its own cell included), the units it can hit from one of them, and the gates
-    /// next to them it can break. The rules only: a script's `can_enter` is asked when it walks.
-    pub fn moves(&self, f: usize) -> Moves {
-        let Some(at) = self.state.cells[f] else { return Moves::default() };
-        if !self.shadow.fighters[f].alive() {
-            return Moves::default();
+    /// The unit whose action is due now: the first living unit left in this round's order.
+    /// `None` before the first round, between a round's end and the next one's start, or once
+    /// the battle is over. Does not move the battle on (see [`FieldBattle::next_actor`]).
+    pub fn acting(&self) -> Option<usize> {
+        if self.state.outcome.is_some() {
+            return None;
         }
-        let budget = self.shadow.fighters[f].stats[Stat::Manevres];
+        self.state.order.get(self.state.cursor..)?.iter().copied().find(|&f| self.alive_on_board(f))
+    }
+
+    /// The next unit to act, starting and ending rounds as the battle needs (the turn limit
+    /// included). `None` once the battle is over.
+    pub fn next_actor(&mut self, hooks: &mut dyn FieldScript) -> Option<usize> {
+        loop {
+            if self.state.outcome.is_some() {
+                return None;
+            }
+            if self.state.round == 0 || self.state.cursor >= self.state.order.len() {
+                if self.state.round > 0 {
+                    self.end_round(hooks);
+                    if self.state.outcome.is_some() {
+                        return None;
+                    }
+                }
+                self.start_round(hooks);
+                continue;
+            }
+            if let Some(f) = self.current() {
+                return Some(f);
+            }
+        }
+    }
+
+    /// Plays the next unit's action by the AI (the script's, else the Rust one). `false` once
+    /// the battle is over, with nothing played.
+    pub fn auto_step(&mut self, hooks: &mut dyn FieldScript) -> bool {
+        let Some(f) = self.next_actor(hooks) else { return false };
+        let a = self.ai_action(f, hooks);
+        // `f` is the current unit, so `act` cannot refuse it.
+        let _ = self.act(f, a, hooks);
+        true
+    }
+
+    /// Every action unit `f` may take now, as the rules allow: waiting, a move to each cell it
+    /// reaches within its manevres (rubble costs 2), with or without a blow or shot from there
+    /// (a living enemy in reach, or a standing gate next to the cell). Empty unless `f` is the
+    /// unit to act. A script's `can_enter` is asked only when the action is played.
+    pub fn legal(&self, f: usize) -> Vec<Action> {
+        if self.acting() != Some(f) {
+            return Vec::new();
+        }
+        let at = self.state.cells[f].expect("a unit on the board has a cell");
         let blocked = self.blocked_except(f);
-        let costs = self.state.board.costs(at, &blocked);
-        let mut out = Moves::default();
-        for y in 0..self.state.board.h {
-            for x in 0..self.state.board.w {
-                if costs[(y * self.state.board.w + x) as usize].is_some_and(|c| c <= budget) {
-                    out.cells.push((x, y));
+        let budget = self.shadow.fighters[f].stats[Stat::Manevres];
+        let board = &self.state.board;
+        let costs = board.costs(at, &blocked);
+        let mut out = Vec::new();
+        for y in 0..board.h {
+            for x in 0..board.w {
+                let c = (x, y);
+                let reachable = costs[(y * board.w + x) as usize].is_some_and(|cost| cost <= budget);
+                if !reachable {
+                    continue;
                 }
-            }
-        }
-        for &c in &out.cells {
-            for t in 0..self.fighters() {
-                if self.reaches(f, c, t) && !out.units.contains(&t) {
-                    out.units.push(t);
+                let stand = (c != at).then_some(c);
+                if stand.is_none() {
+                    out.push(Action::default());
+                } else {
+                    out.push(Action { move_to: stand, attack: None });
                 }
-            }
-            for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
-                let g = (c.0 + dx, c.1 + dy);
-                if matches!(self.state.board.get(g.0, g.1), Some(Tile::Gate { hp: 1.. })) && !out.gates.contains(&g) {
-                    out.gates.push(g);
+                for t in (0..self.fighters()).filter(|&t| self.reaches(f, c, t)) {
+                    out.push(Action { move_to: stand, attack: Some(Target::Unit(t)) });
+                }
+                for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                    let g = (x + dx, y + dy);
+                    if matches!(board.get(g.0, g.1), Some(Tile::Gate { hp: 1.. })) {
+                        out.push(Action { move_to: stand, attack: Some(Target::Tile(g.0, g.1)) });
+                    }
                 }
             }
         }
         out
     }
 
-    /// The units that act this round, and the one to act now (`None`: none left).
-    pub fn order(&self) -> &[usize] {
-        &self.state.order
+    /// The order of the coming units: the rest of this round (living units), then the next
+    /// round's order (every living unit on the board, by initiative then id).
+    pub fn queue(&self) -> Vec<usize> {
+        let rest: Vec<usize> = self.state.order.get(self.state.cursor..).unwrap_or_default().iter().copied().filter(|&f| self.alive_on_board(f)).collect();
+        let mut next: Vec<usize> = (0..self.fighters()).filter(|&f| self.alive_on_board(f)).collect();
+        next.sort_by_key(|&f| (-self.shadow.fighters[f].stats[Stat::Initiative], f));
+        rest.into_iter().chain(next).collect()
     }
 
     /// The default AI: a unit that can strike or shoot a unit from where it stands does so (the
