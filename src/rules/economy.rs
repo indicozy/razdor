@@ -370,9 +370,13 @@ impl Game {
             }
         }
         self.gold += income;
+        // Razdor's play statistics (`PlayStats`), not the original's.
+        self.stats.income += i64::from(income);
         self.stored_income = stored;
         let (_, mana_bill) = self.bills();
-        self.gold -= self.daily_wages();
+        let wages = self.daily_wages();
+        self.gold -= wages;
+        self.stats.wages += i64::from(wages);
         self.pay_mana_bill(mana_bill);
         let c = self.content.clone();
         let elemental = |u: &Unit| c.paid_in_mana(u.def);
