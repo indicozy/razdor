@@ -52,6 +52,8 @@ pub const CONCAT_BYTES: usize = 1 << 20;
 
 const BOOTSTRAP: &str = include_str!("bootstrap.lua");
 
+pub mod field;
+
 /// The bounds of the sink of `print`, held by one state.
 #[derive(Default)]
 struct Sink {
@@ -141,6 +143,11 @@ impl SeedRng {
         z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
         z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
         z ^ (z >> 31)
+    }
+
+    /// The generator's state: a new generator from it continues the same numbers.
+    pub fn state(&self) -> u64 {
+        self.0
     }
 
     /// A float in `[0, 1)`.
