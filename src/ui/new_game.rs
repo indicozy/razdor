@@ -200,13 +200,13 @@ struct Portrait {
 impl Portrait {
     fn new(win: &Win, dp: f32, grow: f32, mods: bool) -> Portrait {
         let r = win.r;
-        let (m, btn_h, gap) = (8.0 * dp, 44.0 * dp, 6.0 * dp);
+        let (m, btn_h, gap) = (8.0 * dp, 42.0 * dp, 6.0 * dp);
         let x0 = r.x + 10.0 * dp;
         let w = r.w - 20.0 * dp;
         let top = r.y + 31.0 * win.k + 2.0 * dp;
         // The top block: the picture (its frame's 295:162) at 44% of the width, the description beside it.
-        let block_h = 150.0 * dp;
-        let picture_w = (w * 0.44).min(block_h * 295.0 / 162.0);
+        let block_h = 190.0 * dp;
+        let picture_w = (w * 0.38).min(block_h * 295.0 / 162.0);
         let picture_px = picture_w / 295.0;
         let desc = Rect::new(x0 + picture_w + m, top, w - picture_w - m, block_h);
         let row_y = top + block_h + m;
@@ -226,7 +226,7 @@ impl Portrait {
         let next = Rect::new(x0 + dots_w + m, foot_y, half, btn_h);
         let cancel = Rect::new(next.x + half + m, foot_y, half, btn_h);
         // The description is 14 dp (its title 16 of its 12 parts), not grown with the text size: its box is small.
-        let desc_body = 14.0 * dp;
+        let desc_body = 13.0 * dp;
         Portrait {
             picture: vec2(x0, top),
             picture_px,
@@ -239,10 +239,10 @@ impl Portrait {
             dots,
             next,
             cancel,
-            head_h: 40.0 * dp * grow,
-            chapter_h: 36.0 * dp * grow,
-            name_px: 15.0 * dp * grow,
-            chapter_px: 14.0 * dp * grow,
+            head_h: 36.0 * dp * grow,
+            chapter_h: 30.0 * dp * grow,
+            name_px: 15.0 * dp,
+            chapter_px: 14.0 * dp,
             desc_k: desc_body / 12.0,
         }
     }
@@ -976,7 +976,7 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
             // Each map of a campaign won has its tick too.
             let won = listed(language::won_under(&m.completed, active), &scenarios[c].file);
             let room = r.w - (if won { 84.0 } else { 60.0 }) * k;
-            let small = row_text_size(title(&scenarios[c]), small_normal, grow, room);
+            let small = if pl.is_some() { small_normal } else { row_text_size(title(&scenarios[c]), small_normal, grow, room) };
             let is_grown = small > small_normal;
             let cy = r.y + head_h + n as f32 * chapter_h + chapter_h * 0.5 + small * 0.36;
             super::dt_font::legacy_metrics_if(is_grown, || chrome::shadow_text(&ellipsize(title(&scenarios[c]), room, small), r.x + 52.0 * k, cy, small, ink.color()));
@@ -1084,6 +1084,10 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
         let (for_group, mut first) = DESC_SCROLL.with(|d| d.get());
         if for_group != picked {
             first = 0;
+        }
+        // A phone held upright scrolls it with a finger too (a swipe turns into the wheel's lines).
+        if pl.is_some() {
+            swipe_rows(desc, 14.0 * kk);
         }
         if !input_blocked() && desc.contains(crate::ui::widgets::pointer().into()) {
             let turned = wheel();
