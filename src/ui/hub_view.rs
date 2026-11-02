@@ -17,7 +17,7 @@ use std::sync::mpsc::{channel, Receiver};
 use macroquad::prelude::*;
 
 use razdor::hub::{self, Catalog, Entry, FileRef, Hub, Installed, Kind, PlanError, Source, Status};
-use razdor::i18n::{lang, tr};
+use razdor::i18n::{self, lang, tr, Lang};
 use razdor::trf;
 
 use super::audio::{cue, Cue};
@@ -330,6 +330,14 @@ pub fn matches_text(query: &str, titles: &[&str], author: &str) -> bool {
     titles.iter().any(|t| t.to_lowercase().contains(&q)) || author.to_lowercase().contains(&q)
 }
 
+/// The words that name the mods an entry still needs: «Нужен мод: A» for one, «Нужны моды: A, B»
+/// for several (`names` in install order, the catalog's own titles).
+pub fn needs_words(lang: Lang, names: &[&str]) -> String {
+    let list = names.join(", ");
+    let template = if names.len() == 1 { "Needs mod: {names}" } else { "Needs mods: {names}" };
+    i18n::fill(i18n::tr_in(lang, template), &[("names", &list as &dyn std::fmt::Display)])
+}
+
 /// A row's state: its words and ink.
 fn state(c: &Catalog, inst: &Installed, e: &Entry) -> (String, Color) {
     if inst.has(&e.id) {
@@ -337,7 +345,12 @@ fn state(c: &Catalog, inst: &Installed, e: &Entry) -> (String, Color) {
     }
     match hub::plan_install(c, inst, &e.id) {
         Err(_) => (tr("Can't be installed").into(), RED_TEXT),
-        Ok(plan) if plan.len() > 1 => (trf!("Needs {n} mods", n = plan.len() - 1), GOLD),
+        Ok(plan) if plan.len() > 1 => {
+            // The plan ends with the entry itself; the rest are the mods it needs, by their titles.
+            let names: Vec<String> = plan[..plan.len() - 1].iter().map(|id| c.entry(id).map_or(id.clone(), |m| m.title.get(lang()).to_string())).collect();
+            let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+            (needs_words(lang(), &refs), GOLD)
+        }
         Ok(_) => (String::new(), CREAM),
     }
 }
@@ -518,7 +531,11 @@ pub fn frame(view: &mut HubView) -> bool {
     let size = (14.0 * k * g).round();
     let small = (12.0 * k * g).round();
     // Touch targets: a phone's are 44 dp at Normal (the 40 dp rule), the desktop's the original's.
-    let (bh, th, row_h, gap) = if phone { (44.0 * k * g, 44.0 * k * g, 46.0 * k * g, 8.0 * k) } else { (30.0 * k * g, 26.0 * k * g, 34.0 * k * g, 4.0 * k) };
+    let (bh, th, mut row_h, gap) = if phone { (44.0 * k * g, 44.0 * k * g, 46.0 * k * g, 8.0 * k) } else { (30.0 * k * g, 26.0 * k * g, 34.0 * k * g, 4.0 * k) };
+    // A phone held upright: two readable lines per row (title and the line under it).
+    if narrow {
+        row_h = 58.0 * k * g;
+    }
     let by = inner.y + inner.h - pad - bh;
     let lx = inner.x + pad;
     // The list's width: the desktop's 380 units; a phone held sideways takes more of the window,
@@ -644,17 +661,29 @@ pub fn frame(view: &mut HubView) -> bool {
                     let rr = Rect::new(lx + 2.0 * k, y + 1.0 * k, lw - 4.0 * k - room, row_h - 2.0 * k);
                     let picked = view.picked.as_deref() == Some(e.id.as_str());
                     row_paint(rr, picked);
+                    super::dt_font::legacy_metrics_if(narrow, || {
                     let (words, ink) = state(c, &view.installed, e);
-                    let sw = if words.is_empty() { 0.0 } else { measure(&words, small).width + 8.0 * k };
-                    text_fit(e.title.get(lang()), rr.x + 6.0 * k, rr.y + 15.0 * g * k, rr.w - sw - 12.0 * k, size, if picked { GOLD } else { CREAM });
-                    let mut by_line = format!("{} · {}", kind_label(e.kind), e.author);
-                    if let Some(rating) = e.rating {
-                        by_line = format!("{by_line} · +{} / -{}", rating.up, rating.down);
+                    // Upright: the title takes the whole row and the line under it says the state
+                    // (what is missing, the install's word) or else the kind, author and rating.
+                    // Elsewhere the state sits at the title's end, shortened to half the row.
+                    let (title_px, line_px, t_y, l_y) = if narrow { ((16.0 * k * g).round(), (14.0 * k * g).round(), 23.0, 44.0) } else { (size, small, 15.0, 29.0) };
+                    let state_here = !words.is_empty() && narrow;
+                    let words = if words.is_empty() || narrow { words } else { ellipsize(&words, rr.w * 0.5, small) };
+                    let sw = if words.is_empty() || narrow { 0.0 } else { measure(&words, small).width + 8.0 * k };
+                    text_fit(e.title.get(lang()), rr.x + 6.0 * k, rr.y + t_y * g * k, rr.w - sw - 12.0 * k, title_px, if picked { GOLD } else { CREAM });
+                    if state_here {
+                        chrome::shadow_text(&ellipsize(&words, rr.w - 12.0 * k, line_px), rr.x + 6.0 * k, rr.y + l_y * g * k, line_px, ink);
+                    } else {
+                        let mut by_line = format!("{} · {}", kind_label(e.kind), e.author);
+                        if let Some(rating) = e.rating {
+                            by_line = format!("{by_line} · +{} / -{}", rating.up, rating.down);
+                        }
+                        text_fit(&by_line, rr.x + 6.0 * k, rr.y + l_y * g * k, rr.w - 12.0 * k, line_px, Color::new(0.85, 0.80, 0.68, 1.0));
                     }
-                    text_fit(&by_line, rr.x + 6.0 * k, rr.y + 29.0 * g * k, rr.w - 12.0 * k, small, Color::new(0.85, 0.80, 0.68, 1.0));
-                    if !words.is_empty() {
-                        chrome::shadow_right(&words, rr.x + rr.w - 6.0 * k, rr.y + 15.0 * g * k, small, ink);
+                    if !words.is_empty() && !narrow {
+                        chrome::shadow_right(&words, rr.x + rr.w - 6.0 * k, rr.y + t_y * g * k, small, ink);
                     }
+                    });
                 }
                 if entries.is_empty() {
                     let none = if view.query.trim().is_empty() { tr("Nothing here yet.") } else { tr("Nothing matches the search.") };
@@ -1082,6 +1111,15 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The mods an entry needs are named: one («Нужен мод»), or several («Нужны моды», comma-separated).
+    #[test]
+    fn needs_words_name_the_mods() {
+        assert_eq!(needs_words(Lang::Ru, &["Evolution"]), "Нужен мод: Evolution");
+        assert_eq!(needs_words(Lang::Ru, &["A", "B"]), "Нужны моды: A, B");
+        assert_eq!(needs_words(Lang::En, &["Evolution"]), "Needs mod: Evolution");
+        assert_eq!(needs_words(Lang::En, &["A", "B", "C"]), "Needs mods: A, B, C");
+    }
 
     /// A scroll stays between nothing to scroll and the most.
     #[test]
