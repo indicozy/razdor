@@ -178,3 +178,50 @@ fn the_budget_resets_for_each_call() {
         assert_eq!(r.call::<i64>("scripts/t.lua", "f", ()).unwrap(), Some(20000100000));
     }
 }
+
+#[test]
+fn print_copies_a_bounded_part_of_a_huge_string() {
+    // Fifty 1 MB strings (the sandbox's own string.rep limit), each printed, and 40 unpacked.
+    let src = "function f()\n local big = {}\n for i = 1, 50 do big[i] = string.rep('x', 1 << 20) end\n for i = 1, 50 do print(big[i]) end\n print(table.unpack(big, 1, 40))\nend\n";
+    let r = rt(&[("scripts/t.lua", src)]);
+    r.load_script("scripts/t.lua").unwrap();
+    r.call::<()>("scripts/t.lua", "f", ()).unwrap();
+    let log = r.take_log();
+    let total: usize = log.iter().map(|l| l.len()).sum();
+    assert!(total <= 64 << 10, "the log holds {total} bytes");
+    assert!(log.iter().all(|l| l.len() <= 4 << 10), "a line is longer than 4 KB");
+    assert!(log.len() <= 200);
+    assert!(!r.exhausted());
+    assert!(r.take_log().is_empty());
+}
+
+#[test]
+fn a_catastrophic_pattern_is_rejected_at_once() {
+    let src = "function f()\n local ok, e = pcall(string.find, string.rep('a', 60000), '.-.-.-.-.-.-.-.-.-x')\n return ok, e\nend\n";
+    let r = rt(&[("scripts/t.lua", src)]);
+    r.load_script("scripts/t.lua").unwrap();
+    let started = std::time::Instant::now();
+    let (ok, msg): (bool, String) = r.call("scripts/t.lua", "f", ()).unwrap().unwrap();
+    assert!(started.elapsed() < std::time::Duration::from_millis(500), "took {:?}", started.elapsed());
+    assert!(!ok);
+    assert!(msg.contains("quantifiers"), "{msg}");
+}
+
+#[test]
+fn an_oversized_rep_is_rejected() {
+    let r = rt(&[("scripts/t.lua", "function f() return string.rep('x', 2000000) end\nfunction g() return #string.rep('x', 1 << 20) end\n")]);
+    r.load_script("scripts/t.lua").unwrap();
+    let e = r.call::<Value>("scripts/t.lua", "f", ()).unwrap_err();
+    assert!(e.message.contains("longer than"), "{e}");
+    assert_eq!(r.call::<i64>("scripts/t.lua", "g", ()).unwrap(), Some(1 << 20));
+}
+
+#[test]
+fn oversized_subjects_patterns_and_concats_are_rejected() {
+    let src = "function subj() return string.find(string.rep('a', 65537), 'b') end\nfunction pat() return string.find('abc', string.rep('a', 257)) end\nfunction cat() local t = {} for i = 1, 40 do t[i] = string.rep('x', 60000) end return table.concat(t) end\n";
+    let r = rt(&[("scripts/t.lua", src)]);
+    r.load_script("scripts/t.lua").unwrap();
+    assert!(r.call::<Value>("scripts/t.lua", "subj", ()).unwrap_err().message.contains("subject"));
+    assert!(r.call::<Value>("scripts/t.lua", "pat", ()).unwrap_err().message.contains("pattern"));
+    assert!(r.call::<Value>("scripts/t.lua", "cat", ()).unwrap_err().message.contains("longer than"));
+}

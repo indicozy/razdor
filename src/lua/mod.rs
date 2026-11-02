@@ -30,8 +30,55 @@ pub const MEMORY_LIMIT: usize = 64 << 20;
 const HOOK_STEP: u32 = 1_000;
 /// Lines of `print` kept until the host reads them.
 const LOG_LINES: usize = 200;
+/// `print` copies at most this much of each argument, of each line, and of the whole log.
+const ARG_BYTES: usize = 2 << 10;
+const LINE_BYTES: usize = 4 << 10;
+const LOG_BYTES: usize = 64 << 10;
+/// Wall-clock backstop per call. It is NOT a determinism input: a call that takes longer than
+/// this is aborted with an error, and the same call run on a faster machine would finish. It
+/// exists because a C library call (a pattern match, a huge `string.rep`) does not count
+/// instructions, so the budget cannot stop it. The sandbox also bounds those calls by size
+/// (`bootstrap.lua`); the hook here stops the next instruction after the deadline.
+const TIME_LIMIT: std::time::Duration = std::time::Duration::from_secs(2);
+/// Sizes the sandbox's string and table wrappers accept (`bootstrap.lua`).
+pub const SUBJECT_BYTES: usize = 64 << 10;
+pub const PATTERN_BYTES: usize = 256;
+pub const PATTERN_QUANTIFIERS: usize = 8;
+pub const REP_BYTES: usize = 1 << 20;
+pub const CONCAT_BYTES: usize = 1 << 20;
 
 const BOOTSTRAP: &str = include_str!("bootstrap.lua");
+
+/// The bounds of the sink of `print`, held by one state.
+#[derive(Default)]
+struct Sink {
+    lines: Vec<String>,
+    bytes: usize,
+}
+
+/// Cuts `s` to at most `max` bytes, on a character boundary.
+fn cut(s: &mut String, max: usize) {
+    if s.len() > max {
+        let mut i = max;
+        while !s.is_char_boundary(i) {
+            i -= 1;
+        }
+        s.truncate(i);
+    }
+}
+
+/// Keeps one line of `print` within every bound.
+fn keep(sink: &mut Sink, mut line: String) {
+    if sink.lines.len() >= LOG_LINES || sink.bytes >= LOG_BYTES {
+        return;
+    }
+    cut(&mut line, LINE_BYTES);
+    cut(&mut line, LOG_BYTES - sink.bytes);
+    if !line.is_empty() {
+        sink.bytes += line.len();
+        sink.lines.push(line);
+    }
+}
 
 /// A failed script: where it failed and what it said. `message` starts with the script's
 /// `scripts/x.lua:LINE:` when Lua knows the line.
@@ -67,8 +114,10 @@ pub struct Runtime {
     exhausted: Rc<Cell<bool>>,
     /// The generator behind `math.random`.
     rng: Rc<RefCell<SeedRng>>,
-    log: Rc<RefCell<Vec<String>>>,
+    log: Rc<RefCell<Sink>>,
     scripts: Rc<Scripts>,
+    /// The wall-clock deadline of the call under way (see [`TIME_LIMIT`]).
+    deadline: Rc<Cell<Option<std::time::Instant>>>,
 }
 
 /// A small seeded generator (splitmix64) for `math.random`: the same seed gives the same numbers
@@ -114,7 +163,7 @@ fn message(e: &mlua::Error) -> String {
 }
 
 fn is_exhausted(e: &mlua::Error) -> bool {
-    matches!(e, mlua::Error::MemoryError(_)) || message(e).contains("instruction budget")
+    matches!(e, mlua::Error::MemoryError(_)) || message(e).contains("instruction budget") || message(e).contains("time limit")
 }
 
 impl Runtime {
@@ -126,17 +175,23 @@ impl Runtime {
         let spent = Rc::new(Cell::new(0u64));
         let exhausted = Rc::new(Cell::new(false));
         let rng = Rc::new(RefCell::new(SeedRng::new(seed)));
-        let log = Rc::new(RefCell::new(Vec::new()));
+        let log = Rc::new(RefCell::new(Sink::default()));
         let scripts = Rc::new(scripts);
+        let deadline: Rc<Cell<Option<std::time::Instant>>> = Rc::new(Cell::new(None));
 
         let counter = spent.clone();
         let flag = exhausted.clone();
+        let due = deadline.clone();
         lua.set_hook(HookTriggers::new().every_nth_instruction(HOOK_STEP), move |_, _| {
             let n = counter.get() + HOOK_STEP as u64;
             counter.set(n);
             if n > INSTRUCTION_BUDGET {
                 flag.set(true);
                 return Err(mlua::Error::runtime("instruction budget exceeded"));
+            }
+            if due.get().is_some_and(|d| std::time::Instant::now() > d) {
+                flag.set(true);
+                return Err(mlua::Error::runtime("time limit exceeded"));
             }
             Ok(VmState::Continue)
         })
@@ -191,11 +246,28 @@ impl Runtime {
         let sink = log.clone();
         let print = lua
             .create_function(move |_, args: mlua::MultiValue| {
-                let text: Vec<String> = args.iter().map(show).collect();
-                let mut sink = sink.borrow_mut();
-                if sink.len() < LOG_LINES {
-                    sink.push(text.join("\t"));
+                // Each argument is copied in part only, and the arguments stop once a line is full.
+                let mut line = String::new();
+                for v in args.iter() {
+                    if !line.is_empty() {
+                        line.push('\t');
+                    }
+                    match v {
+                        Value::String(s) => {
+                            let b = s.as_bytes();
+                            let n = b.len().min(ARG_BYTES);
+                            line.push_str(&String::from_utf8_lossy(&b[..n]));
+                            if b.len() > ARG_BYTES {
+                                line.push_str("...");
+                            }
+                        }
+                        other => line.push_str(&show(other)),
+                    }
+                    if line.len() >= LINE_BYTES {
+                        break;
+                    }
                 }
+                keep(&mut sink.borrow_mut(), line);
                 Ok(())
             })
             .map_err(fail)?;
@@ -237,12 +309,27 @@ impl Runtime {
             .map_err(fail)?;
         g.set("require", require).map_err(fail)?;
 
-        // The bootstrap, with the host's check of the spent budget.
+        // The bootstrap, with the host's checks (spent budget, passed deadline) and the bounds.
         let flag = exhausted.clone();
         let check = lua.create_function(move |_, ()| Ok(flag.get())).map_err(fail)?;
-        lua.load(BOOTSTRAP).set_name("@razdor/bootstrap.lua").call::<()>(check).map_err(fail)?;
+        let due = deadline.clone();
+        let late = exhausted.clone();
+        let overdue = lua
+            .create_function(move |_, ()| {
+                let over = due.get().is_some_and(|d| std::time::Instant::now() > d);
+                if over {
+                    late.set(true);
+                }
+                Ok(over)
+            })
+            .map_err(fail)?;
+        let limits = lua.create_table().map_err(fail)?;
+        for (k, v) in [("subject", SUBJECT_BYTES), ("pattern", PATTERN_BYTES), ("quantifiers", PATTERN_QUANTIFIERS), ("rep", REP_BYTES), ("concat", CONCAT_BYTES)] {
+            limits.set(k, v).map_err(fail)?;
+        }
+        lua.load(BOOTSTRAP).set_name("@razdor/bootstrap.lua").call::<()>((check, overdue, limits)).map_err(fail)?;
 
-        Ok(Runtime { lua, spent, exhausted, rng, log, scripts })
+        Ok(Runtime { lua, spent, exhausted, rng, log, scripts, deadline })
     }
 
     /// The Lua state, for the host's own functions (`razdor.path` and the like).
@@ -255,9 +342,12 @@ impl Runtime {
         self.rng.borrow_mut()
     }
 
-    /// The lines `print` wrote since the last call of this method.
+    /// The lines `print` wrote since the last call of this method (at most 200 lines of 4 KB,
+    /// 64 KB in all).
     pub fn take_log(&self) -> Vec<String> {
-        std::mem::take(&mut *self.log.borrow_mut())
+        let mut sink = self.log.borrow_mut();
+        sink.bytes = 0;
+        std::mem::take(&mut sink.lines)
     }
 
     /// Runs a script's main chunk (its top-level code: the functions it defines, its tables).
@@ -284,10 +374,16 @@ impl Runtime {
 
     fn run<T>(&self, script: &str, call: &str, f: impl FnOnce() -> mlua::Result<T>) -> Result<T, ScriptError> {
         self.spent.set(0);
-        f().map_err(|e| {
+        self.exhausted.set(false);
+        self.deadline.set(Some(std::time::Instant::now() + TIME_LIMIT));
+        let out = f();
+        self.deadline.set(None);
+        out.map_err(|e| {
             let text = message(&e);
             if is_exhausted(&e) && text.contains("instruction budget") {
                 ScriptError { script: script.into(), call: call.into(), message: format!("{script}: the instruction budget of {INSTRUCTION_BUDGET} instructions is spent") }
+            } else if is_exhausted(&e) && text.contains("time limit") {
+                ScriptError { script: script.into(), call: call.into(), message: format!("{script}: the time limit of {} s is spent", TIME_LIMIT.as_secs()) }
             } else if is_exhausted(&e) {
                 ScriptError { script: script.into(), call: call.into(), message: format!("{script}: not enough memory (the limit is {} MB)", MEMORY_LIMIT >> 20) }
             } else {
