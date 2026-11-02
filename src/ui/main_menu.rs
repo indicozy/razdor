@@ -58,6 +58,8 @@ fn button_centre(i: usize) -> f32 {
 const PORTRAIT_SCALE: f32 = 1.6;
 /// The smallest touch target of a phone's link, in dp.
 const TOUCH_DP: f32 = 48.0;
+/// A tile of the bottom bar held upright, in dp (the mockup's four tiles, 64–72 dp tall).
+const TILE_DP: f32 = 68.0;
 
 // Final title-flame placement from the temporary development tuner.
 const LOGO_FLAME_X: f32 = -16.0;
@@ -418,15 +420,18 @@ fn portrait_menu(sw: f32, sh: f32, k: f32, dp: f32, safe_top: f32) -> PortraitMe
     // ovals keep their size (see `button_centre`).
     let g = super::display::button_grow();
     let size = OVAL * (PORTRAIT_SCALE * k);
-    let chip_h = (TOUCH_DP * dp).max(24.0 * k) * g;
+    let chip_h = TILE_DP * dp;
     let chip_top = sh - 16.0 * k - chip_h;
     let foot_y = chip_top - 12.0 * k;
+    // The column keeps the place it had over the old, shorter link row (its foot line at
+    // `column_foot`), so the menu's buttons do not move with the taller tiles.
+    let column_foot = sh - 16.0 * k - (TOUCH_DP * dp).max(24.0 * k) * g - 12.0 * k;
     // The column ends above the lines. Its middle is the middle of the area between the top safe
     // inset and the foot lines; the logo stays 24 px above the column and never above the inset,
     // and the column moves down only when it must. Its gaps are shared out between the five
     // buttons (at least 6 px, at most 20 px).
-    let column_end = foot_y - 70.0 * k;
-    let middle = (safe_top + foot_y) / 2.0;
+    let column_end = column_foot - 70.0 * k;
+    let middle = (safe_top + column_foot) / 2.0;
     let min_first = safe_top + logo_h + 24.0 * k;
     let gap = ((column_end - min_first - 5.0 * size.y) / 4.0).clamp(6.0 * k, 20.0 * k);
     let span = 5.0 * size.y + 4.0 * gap;
@@ -569,28 +574,54 @@ fn corner_links(k: f32) -> Option<Pick> {
     pick
 }
 
-/// The links held upright: a row of chips at the bottom, each a dark rounded plate and a touch
-/// target of at least [`TOUCH_DP`]. The language chip opens the list above the row.
+/// The links held upright: a bottom bar of four equal tiles (the mockup's), each a marble frame
+/// with its icon (the game bar's own art, when the install has it) and its label under it. A
+/// tile is a touch target of [`TILE_DP`] high. The language tile opens the list above the bar.
 fn chip_links(m: &PortraitMenu, k: f32) -> Option<Pick> {
     let mut pick = None;
+    let dp = upright_dp().unwrap_or(1.0);
     let lang = super::language::current_label();
     let labels: [&str; 4] = [tr("Custom battle"), tr("Maps and mods"), "Discord", &lang];
-    // The chips grow with the text size (`button_grow`, the owner's decision of 2026-10-31).
-    let g = super::display::button_grow();
-    let size = 22.0 * k * g;
-    let pad = 18.0 * k * g;
-    let gap = 12.0 * k * g;
-    let widths: Vec<f32> = labels.iter().map(|l| measure(l, size).width + 2.0 * pad).collect();
-    let total = widths.iter().sum::<f32>() + gap * (labels.len() - 1) as f32;
-    let mut x = (screen_width() - total) / 2.0;
-    let (mut lang_chip, mut lang_pressed) = (Rect::new(0.0, 0.0, 0.0, 0.0), false);
+    // The game bar's icons (`button-icon-N`): 6 the crossed swords, 8 the map; the Discord and
+    // language tiles have no icon in the install and show their label alone.
+    let icons: [Option<&str>; 4] = [Some("button-icon-6"), Some("button-icon-8"), None, None];
+    let margin = 12.0 * dp;
+    let gap = 8.0 * dp;
+    let w = (screen_width() - 2.0 * margin - 3.0 * gap) / 4.0;
+    // The labels grow with the text size (`button_grow`), and shrink to the tile's width.
+    let base = 14.0 * dp * super::display::button_grow();
+    let marble = chrome::win("Win-marble");
+    let (mut lang_tile, mut lang_pressed) = (Rect::new(0.0, 0.0, 0.0, 0.0), false);
     for (j, label) in labels.iter().enumerate() {
-        let r = Rect::new(x, m.chip_top, widths[j], m.chip_h);
+        let r = Rect::new(margin + j as f32 * (w + gap), m.chip_top, w, m.chip_h);
         let (hover, down, pressed) = super::widgets::button_state(r, true);
-        plate(r, 14.0 * k, Color::new(0.08, 0.05, 0.03, 1.0));
+        // The marble tile, its silver edge and the gold when the pointer is on it.
+        match &marble {
+            Some(t) => chrome::tile(t, r, k, Color::new(0.8, 0.8, 0.8, 1.0)),
+            None => plate(r, 10.0 * k, Color::new(0.08, 0.05, 0.03, 1.0)),
+        }
+        let edge = if down || hover { chrome::GOLD } else { chrome::SILVER };
+        draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, edge);
         let color = if down || hover { chrome::GOLD } else { Color::new(0.95, 0.88, 0.72, 1.0) };
-        let tw = measure(label, size).width;
-        chrome::shadow_text(label, r.x + (r.w - tw) / 2.0, r.y + r.h / 2.0 + size * 0.35, size, color);
+        // The label is drawn at its own size, not snapped to the original's bitmap sizes (phones).
+        super::dt_font::legacy_metrics_if(true, || {
+            let mut size = base;
+            let tw = measure(label, size).width;
+            if tw > w - 8.0 * dp {
+                size *= (w - 8.0 * dp) / tw;
+            }
+            let tw = measure(label, size).width;
+            let text_y = match icons[j].and_then(|n| chrome::win_fx(n, Fx::Glow)) {
+                Some(t) => {
+                    let ih = 28.0 * dp;
+                    let iw = t.width() * ih / t.height();
+                    chrome::tex(&t, Rect::new(r.x + (r.w - iw) / 2.0, r.y + 7.0 * dp, iw, ih), WHITE);
+                    r.y + r.h - 9.0 * dp
+                }
+                None => r.y + r.h / 2.0 + size * 0.35,
+            };
+            chrome::shadow_text(label, r.x + (r.w - tw) / 2.0, text_y, size, color);
+        });
         if pressed {
             cue(Cue::Button);
         }
@@ -598,15 +629,14 @@ fn chip_links(m: &PortraitMenu, k: f32) -> Option<Pick> {
             0 if pressed => pick = Some(Pick::Custom),
             1 if pressed => pick = Some(Pick::Hub),
             2 if pressed => open_link(DISCORD_INVITE),
-            3 => (lang_chip, lang_pressed) = (r, pressed),
+            3 => (lang_tile, lang_pressed) = (r, pressed),
             _ => {}
         }
-        x += widths[j] + gap;
     }
     if lang_pressed || super::snapshot::open_language_list() {
-        super::language::open_list(lang_chip, k);
+        super::language::open_list(lang_tile, k);
     }
-    if super::widgets::mouse_in(lang_chip.x, lang_chip.y, lang_chip.w, lang_chip.h) {
+    if super::widgets::mouse_in(lang_tile.x, lang_tile.y, lang_tile.w, lang_tile.h) {
         super::widgets::tooltip(&[(super::language::hint().to_string(), super::widgets::INK)]);
     }
     pick
@@ -1916,7 +1946,9 @@ mod tests {
             let first = m.buttons[0];
             let last = m.buttons[4];
             let centre = (first.y + last.y + last.h) / 2.0;
-            assert!((centre - m.foot_y / 2.0).abs() <= 4.0, "{sh}: column centre {centre}, target {}", m.foot_y / 2.0);
+            // The column keeps the place of the old, shorter link row (`portrait_menu`'s `column_foot`).
+            let column_foot = sh - 16.0 * 1.125 - TOUCH_DP * dp - 12.0 * 1.125;
+            assert!((centre - column_foot / 2.0).abs() <= 4.0, "{sh}: column centre {centre}, target {}", column_foot / 2.0);
             // The logo's bottom is 24 px above the first button and its top is below the inset.
             let logo_bottom = m.logo_top + 840.0 * 128.0 / 896.0 * 1.125;
             assert!(close(logo_bottom + 24.0 * 1.125, first.y), "logo {} over the column", m.logo_top);
