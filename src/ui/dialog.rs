@@ -1097,6 +1097,17 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
             let py = (at.y - ph / 2.0).clamp(y + 10.0, (y + h - 10.0 - ph).max(y + 10.0));
             // On a phone the card goes above the finger, clear of it (`popup::placed`).
             let card = super::popup::placed(Rect::new(px, py, pw, ph), (at.x, at.y), (pw, ph));
+            // The learnt-spell window held upright: the card stays inside the window, `pad` clear of
+            // its sides and of its title strip (the owner's note of 2026-11-02, the mockup's inset card).
+            let card = if pad > 0.0 {
+                let inset = pad + 4.0 * o;
+                let top = outer.y + 31.0 * o + grow + pad;
+                let cx = card.x.clamp(outer.x + inset, (outer.x + outer.w - inset - card.w).max(outer.x + inset));
+                let cy = card.y.clamp(top, (outer.y + outer.h - inset - card.h).max(top));
+                Rect::new(cx, cy, card.w, card.h)
+            } else {
+                card
+            };
             Some((spell, id, card))
         }
         _ => None,

@@ -106,6 +106,7 @@ SCREENS = [
     ("hub", "hub", {}),
     ("hub-mods", "hub:1:evolution-mock", {}),
     ("update", "update", {}),
+    ("diary", "hero:РК1-Начало пути:1", {"RAZDOR_SCENE_QUEST": "1"}),
 ]
 
 
