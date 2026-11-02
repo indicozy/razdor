@@ -244,6 +244,29 @@ fn gmatch_checks_the_deadline_on_every_step() {
 }
 
 #[test]
+fn pattern_features_outside_the_subset_are_refused() {
+    let src = "function try(p) return pcall(string.find, 'abc abc', p) end\n";
+    let r = rt(&[("scripts/t.lua", src)]);
+    r.load_script("scripts/t.lua").unwrap();
+    for p in ["(a)%1", "%9", "%b()", "%f[%w]", "[%1]", "x[%b]y"] {
+        let (ok, msg): (bool, String) = r.call("scripts/t.lua", "try", p).unwrap().unwrap();
+        assert!(!ok, "{p} was allowed");
+        assert!(msg.contains("pattern feature not allowed in Razdor scripts"), "{p}: {msg}");
+    }
+}
+
+#[test]
+fn an_escaped_percent_and_normal_patterns_work() {
+    let src = "function f() return string.find('x%1', '%%1') end\nfunction g() return string.find('hello world', 'w%a+') end\nfunction h() return string.find(string.rep('a', 60000), '[*+]') end\n";
+    let r = rt(&[("scripts/t.lua", src)]);
+    r.load_script("scripts/t.lua").unwrap();
+    assert_eq!(r.call::<Option<i64>>("scripts/t.lua", "f", ()).unwrap(), Some(Some(2)), "%%1 is a literal percent and a 1");
+    assert_eq!(r.call::<Option<i64>>("scripts/t.lua", "g", ()).unwrap(), Some(Some(7)));
+    // A quantifier inside a set is a set character, not a backtracking item: the long subject is allowed.
+    assert_eq!(r.call::<Option<i64>>("scripts/t.lua", "h", ()).unwrap(), Some(None));
+}
+
+#[test]
 fn an_oversized_rep_is_rejected() {
     let r = rt(&[("scripts/t.lua", "function f() return string.rep('x', 2000000) end\nfunction g() return #string.rep('x', 1 << 20) end\n")]);
     r.load_script("scripts/t.lua").unwrap();

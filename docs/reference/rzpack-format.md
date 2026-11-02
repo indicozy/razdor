@@ -597,3 +597,39 @@ read yet. Also not yet: `render`, the other packages' units in maps, and `defeat
   `ci/package-pr.yml`, and the owner's steps in its README): the gate on a pull request to razdor-community.
 
 The example's terrain is painted by `tools/pack-example-terrain.py` (stdlib only).
+
+## Scripts (Lua)
+
+Slice 3 (in progress). A script is `scripts/<name>.lua`, Lua 5.4 run in a sandbox (`src/lua/`,
+feature `lua`). The sandbox, the limits and why they exist:
+
+- **Libraries:** `base` (without `dofile`, `loadfile`, binary `load`, and `collectgarbage` except
+  `"count"`), `table`, `string` (without `dump`), `math` and `utf8`. `io`, `os`, `package`,
+  `debug` and `coroutine` are not loaded.
+- **`require`** loads only `scripts/<name>.lua` of the package (names `[a-z0-9_]+`), once each.
+- **`math.random`** is the game's seeded generator; `math.randomseed` is refused. There is no clock.
+- **`pairs`** visits keys in an unspecified order; `razdor.sorted_pairs(t)` gives a fixed one
+  (keys of numbers, strings and booleans).
+- **`print`** goes to the game's log: at most 2 KB of each argument, 4 KB of each line, 64 KB in all.
+- **Budgets per call:** 5,000,000 instructions and 64 MB of memory. A `pcall` cannot swallow them.
+- **Wall-clock backstop:** 2 s per call. It is not an input to the result (a call aborted by it
+  is an error, not a different outcome); it exists because C library work is not counted.
+
+**String matching is limited, and why.** Lua's pattern matcher is C code: the instruction budget
+does not run inside it, and its cost grows like n^(items+1) in the subject length n. So:
+
+- a subject is at most 64 KB; a pattern at most 256 bytes;
+- a pattern has at most 4 *backtracking items* (each quantifier `* + - ?`, and each `.` or
+  `%class` a quantifier follows; a set `[...]` is one class with no count of its own);
+- a subject of n bytes is allowed only while n^(items+1) is at most 2e8: about 14 KB for one item,
+  584 bytes for two, 64 KB for none;
+- the features that the cost count does not see are refused: back-references `%1` to `%9`, the
+  balanced match `%b` and the frontier `%f` (`pattern feature not allowed in Razdor scripts`).
+  `%%` is an escaped percent; `%%1` is allowed;
+- `string.rep` makes at most 1 MB, `table.concat` at most 1 MB.
+
+`gmatch` checks the deadline at every step, and `gsub` before each replacement made by a function
+or a table. A single C call that is already running is not interrupted.
+
+The field battle hooks (`setup`, `on_turn_start`, `on_damage`, `can_enter`, `check_end`, `ai_turn`)
+are described under «Field battles» once the battle is in place.

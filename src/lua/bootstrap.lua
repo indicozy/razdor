@@ -91,7 +91,18 @@ end
 -- `.` or %class item that a quantifier follows (it is the one that backtracks). A set
 -- ([...]) is one class. Matching cost grows like n^(items+1) in the subject length n, and the
 -- instruction hook does not run inside the matcher, so the length is bounded by that.
-local function backtracking(p)
+-- The pattern features a script may not use: back-references (%1 to %9) and the balanced
+-- (%b) and frontier (%f) matches, whose cost grows with the subject in ways the count below
+-- does not see. Checked after an escape `%` wherever it stands, inside a set too; `%%` is an
+-- escaped percent, so `%%1` is allowed.
+local function feature(where, p, pos)
+  local d = p:sub(pos, pos)
+  if d:match("^[1-9bf]$") then
+    reject(where, "pattern feature not allowed in Razdor scripts (%" .. d .. ")")
+  end
+end
+
+local function backtracking(where, p)
   local q, i, n = 0, 1, #p
   local function quant(pos)
     local c = p:byte(pos)
@@ -100,16 +111,20 @@ local function backtracking(p)
   while i <= n do
     local c = p:byte(i)
     local kind
-    if c == 37 then -- %x: a class
+    if c == 37 then -- %x: a class (or an escaped %)
+      feature(where, p, i + 1)
       kind = "any"
       i = i + 2
-    elseif c == 91 then -- [...]: a set
+    elseif c == 91 then -- [...]: a set; its own escapes and ] are read as Lua reads them
       kind = "any"
       local j = i + 1
       if p:byte(j) == 94 then j = j + 1 end
       if p:byte(j) == 93 then j = j + 1 end
       while j <= n and p:byte(j) ~= 93 do
-        if p:byte(j) == 37 then j = j + 1 end
+        if p:byte(j) == 37 then
+          feature(where, p, j + 1)
+          j = j + 1
+        end
         j = j + 1
       end
       i = j + 1
@@ -148,7 +163,7 @@ local function check_pattern(where, s, p)
     if #p > limits.pattern then
       reject(where, "the pattern is longer than " .. limits.pattern .. " bytes")
     end
-    local q = backtracking(p)
+    local q = backtracking(where, p)
     if q > limits.quantifiers then
       reject(where, "the pattern has more than " .. limits.quantifiers .. " backtracking items")
     end
