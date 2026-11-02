@@ -192,6 +192,8 @@ pub enum Act {
     GiveXp(i64, Who),
     Spawn { army: ArmyId, at: Tile, faction: u8, model: u8, troops: Vec<UnitId> },
     RemoveArmy(ArmyId),
+    /// The army meets the hero now; `rules` is `dt` or `lua:<script>` (a field battle).
+    StartBattle(ArmyId, String),
     TeleportHero(Tile),
     TeleportArmy(ArmyId, Dest),
     SetFaction(Entity, u8),
@@ -258,6 +260,12 @@ pub struct Story {
     pub texts: BTreeMap<String, String>,
     /// The display names of the package's named characters: the k-th is `PACKAGE_BASE + k`.
     pub named: Vec<String>,
+    /// The battle of an army the hero meets, by id: a script's (`lua:<script>`, a field battle)
+    /// or the DT's (`dt`). From the map's `[[army]] battle`; an army not listed fights the DT battle.
+    pub battles: BTreeMap<ArmyId, String>,
+    /// The package's scripts (`scripts/<name>.lua`, by path): the field battles' hooks are opened
+    /// from them when the story is attached (`Game::attach_story`). None without scripts.
+    pub scripts: Option<Arc<BTreeMap<String, String>>>,
     /// The names (as the story writes them) of the armies and buildings it refers to, by id: for
     /// the trace.
     pub army_names: BTreeMap<ArmyId, String>,
@@ -272,7 +280,7 @@ pub struct Story {
 impl Story {
     /// No triggers and no dialogs: attaching it changes nothing.
     pub fn is_empty(&self) -> bool {
-        self.triggers.is_empty() && self.dialogs.is_empty()
+        self.triggers.is_empty() && self.dialogs.is_empty() && self.battles.is_empty()
     }
 }
 
@@ -748,6 +756,7 @@ impl Builder<'_> {
                 Act::Spawn { army: self.army(army)?, at: *at, faction: *faction, model: *model, troops: self.units(troops)? }
             }
             pt::Action::RemoveArmy(a) => Act::RemoveArmy(self.army(a)?),
+            pt::Action::StartBattle { army, rules } => Act::StartBattle(self.army(army)?, rules.clone()),
             pt::Action::TeleportHero(t) => Act::TeleportHero(*t),
             pt::Action::TeleportArmy { army, to } => {
                 let id = self.army(army)?;
@@ -925,6 +934,11 @@ impl Game {
         if story.is_empty() {
             self.story = None;
             return;
+        }
+        // The field battles' hooks come from the package's scripts (the Lua runtime, feature `lua`).
+        #[cfg(feature = "lua")]
+        {
+            self.field_host = story.scripts.clone().map(|s| Arc::new(crate::lua::field::Host::new(s)) as Arc<dyn super::field::FieldHost>);
         }
         for (name, (_, default)) in &story.vars {
             self.triggers.vars.entry(name.clone()).or_insert_with(|| default.clone());
@@ -1185,6 +1199,7 @@ impl Game {
             Act::GiveXp(n, who) => self.give_package_xp(*n, *who),
             Act::Spawn { army, at, faction, model, troops } => self.spawn_package_army(*army, *at, *faction, *model, troops),
             Act::RemoveArmy(id) => self.deactivate_army(*id),
+            Act::StartBattle(id, rules) => self.start_field_battle(*id, rules),
             Act::TeleportHero(t) => self.teleport_player(t.0, t.1),
             Act::TeleportArmy(id, dest) => self.teleport_package_army(*id, *dest),
             Act::SetFaction(of, faction) => {

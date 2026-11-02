@@ -101,11 +101,23 @@ pub fn open(path: &Path, map: Option<&str>, lang: &str, install: &DtInstall) -> 
     build(&package, hash, path, &map_id, compiled, lang)
 }
 
+/// The package's scripts (`scripts/<name>.lua`) by path. A file that is not UTF-8 text is left out
+/// (`check` reports it).
+pub fn package_scripts(files: &Files) -> BTreeMap<String, String> {
+    files
+        .paths()
+        .filter(|p| p.starts_with("scripts/") && p.ends_with(".lua"))
+        .filter_map(|p| files.get(p).and_then(|b| std::str::from_utf8(b).ok()).map(|t| (p.to_string(), t.to_string())))
+        .collect()
+}
+
 /// The opened map from a compiled map of `package`: its story is compiled against the map's ids.
 /// `hash` is the package's [`package_hash`]. The tests open packages this way without an install.
 pub fn build(package: &Package, hash: u64, path: &Path, map: &str, compiled: Compiled, lang: &str) -> Result<Opened, String> {
     let manifest = package.manifest.as_ref().ok_or("the package has no package.toml")?;
-    let story = triggers::compile(package, lang, map, &compiled.names, story_seed(hash)).map_err(|errors| errors.join("\n"))?;
+    let mut story = triggers::compile(package, lang, map, &compiled.names, story_seed(hash)).map_err(|errors| errors.join("\n"))?;
+    story.battles = compiled.names.battles.clone();
+    story.scripts = Some(Arc::new(package_scripts(&package.files)));
     let routes = campaign::routes(package, map).map_err(|errors| errors.join("\n"))?;
     let points = campaign::points_of(package, map).into_iter().collect();
     let texts = package.texts.get(lang).or_else(|| package.texts.values().next());

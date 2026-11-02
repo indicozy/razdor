@@ -241,6 +241,8 @@ enum ArmyBlock {
 
 /// The whole game state. It is saved with serde (`rules::save`), except the content and the
 /// statics of the world and the event engine, which a load rebuilds from the scenario.
+mod battle_field;
+
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Game {
     /// Persisted per playthrough, independently of the new-game menu and installation.
@@ -600,6 +602,27 @@ pub struct Game {
     /// on and the stored states of the revisit maps it left. Absent in any other game.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub campaign: Option<Box<super::campaign::CampaignState>>,
+    /// A field battle under way (`rules::field`, `game/field.rs`): its state, saved with the game.
+    /// None for a DT battle, and in any save before field battles (the field is then absent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field: Option<super::field::FieldState>,
+    /// The rules a trigger asked for the next battle (`start_battle` with `rules = "lua:…"`), taken
+    /// by the battle's start. Saved while pending, so a save made then keeps the request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field_request: Option<String>,
+    /// The garrison a field battle's hero defends (its building), and the troops of it that
+    /// fight for him, by index: they are written back after each action. Not saved in DT games.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field_garrison: Option<usize>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub field_joined: Vec<usize>,
+    /// The hooks' host of field battles: the attached package's scripts. Not saved; the caller
+    /// sets it with the story (`pack::open`).
+    #[serde(skip)]
+    pub field_host: Option<Arc<dyn super::field::FieldHost>>,
+    /// The live field battle (its shadow and its hooks), rebuilt from `field` when needed.
+    #[serde(skip)]
+    field_play: Option<battle_field::FieldPlay>,
 }
 
 /// What an AI army's step needs of the hero: the cells it may not enter (his logical cell
@@ -718,6 +741,12 @@ impl Game {
             step_flag: false,
             hero_strength_bd: 0,
             battle_troops: Vec::new(),
+            field: None,
+            field_request: None,
+            field_garrison: None,
+            field_joined: Vec::new(),
+            field_host: None,
+            field_play: None,
             facing: None,
             noon_from: None,
             click_buildings: (None, None),
@@ -2384,6 +2413,15 @@ impl Game {
     /// makes the player the attacker (the building's extra defence helps the garrison); an
     /// army that catches the player attacks.
     pub fn start_battle(&mut self) -> Battle {
+        let request = self.field_request.take();
+        if self.field.is_some() {
+            // A field battle under way (a load, or the screen asking again): its placeholder.
+            self.field_live();
+            return self.field_shadow().battle;
+        }
+        if let Some(b) = self.field_start(request) {
+            return b;
+        }
         // The cells the army stands in now, before `Battle::begin`'s start fix moves its back
         // row forward (4d2141); `settle_battle` returns the units to them when `keep_formation`.
         self.formation_before_battle = Some(self.squad.iter().map(|u| u.slot).collect());

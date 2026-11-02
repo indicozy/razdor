@@ -139,6 +139,10 @@ pub struct ArmySpec {
     /// A named leader: a character with a name of his own.
     #[serde(default)]
     pub leader: Option<LeaderSpec>,
+    /// How the battle with the hero is fought: `dt` (the default) or `lua:<script>`, a field
+    /// battle run by `scripts/<script>.lua` (`docs/reference/rzpack-format.md`, «Field battles»).
+    #[serde(default)]
+    pub battle: Option<String>,
 }
 
 /// A named leader of an army.

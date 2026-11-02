@@ -129,6 +129,7 @@ pub fn compile_with(pkg: &Package, base: &Base, lang: &str, map_id: &str) -> Res
         items: items.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
         armies: spec.army.iter().enumerate().map(|(i, a)| (a.get_ref().id.clone(), (i + 1) as u8)).collect(),
         buildings: spec.building.iter().enumerate().map(|(i, b)| (b.get_ref().id.clone(), (i + 1) as u16)).collect(),
+        battles: spec.army.iter().enumerate().filter_map(|(i, a)| a.get_ref().battle.as_ref().map(|r| ((i + 1) as u8, r.clone()))).collect(),
     };
     Ok(Compiled { scenario, units: out_units, items: out_items, pictures, names })
 }
@@ -137,6 +138,8 @@ pub fn compile_with(pkg: &Package, base: &Base, lang: &str, map_id: &str) -> Res
 /// to the engine's ids (`rules::triggers::Resolve`). Built by [`compile_with`].
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MapNames {
+    /// The battle of each map army that names one (`[[army]] battle`), by the army's id.
+    pub battles: std::collections::BTreeMap<u8, String>,
     /// The package's units and items by their local ids.
     pub units: BTreeMap<String, u32>,
     pub items: BTreeMap<String, u32>,

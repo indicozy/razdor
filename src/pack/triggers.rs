@@ -47,6 +47,7 @@ pub const ACTIONS: [&str; 27] = [
     "give_xp",
     "spawn_army",
     "remove_army",
+    "start_battle",
     "teleport_hero",
     "teleport_army",
     "set_faction",
@@ -428,6 +429,8 @@ pub enum Action {
     GiveXp { amount: i64, to: Holder },
     SpawnArmy { army: String, at: (i32, i32), faction: u8, model: u8, troops: Vec<Ref> },
     RemoveArmy(String),
+    /// The army meets the hero now, in a battle run by `rules` (`dt`, or `lua:<script>`: a field battle).
+    StartBattle { army: String, rules: String },
     TeleportHero((i32, i32)),
     TeleportArmy { army: String, to: Dest },
     SetFaction { of: Entity, faction: u8 },
@@ -832,6 +835,16 @@ pub fn parse_action(t: &Table) -> Res<Action> {
         "remove_army" => {
             check_args(t, kind, &[])?;
             Ok(Action::RemoveArmy(name_of(v, "army")?))
+        }
+        "start_battle" => {
+            check_args(t, kind, &["rules"])?;
+            let rules = need(t, kind, "rules")?.as_str().unwrap_or_default().to_string();
+            let script = rules.strip_prefix("lua:");
+            let ok = rules == "dt" || script.is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_'));
+            if !ok {
+                return bad("`rules` is `dt` or `lua:<script>` (a script of the package, in `scripts/`)", "e.g. `rules = \"lua:siege\"`");
+            }
+            Ok(Action::StartBattle { army: name_of(v, "army")?, rules })
         }
         "teleport_hero" => {
             check_args(t, kind, &[])?;
@@ -1329,7 +1342,7 @@ impl Scope<'_, '_> {
             Action::GiveItem { to, .. } | Action::GiveXp { to, .. } => self.holder(file, line, to),
             Action::Cast { holder, .. } | Action::RemoveSpells(holder) => self.holder(file, line, holder),
             Action::SpawnArmy { at, .. } => self.cell(file, line, "spawn_army", at.0, at.1),
-            Action::RemoveArmy(army) => self.army(file, line, army),
+            Action::RemoveArmy(army) | Action::StartBattle { army, .. } => self.army(file, line, army),
             Action::TeleportHero(t) => self.cell(file, line, "teleport_hero", t.0, t.1),
             Action::TeleportArmy { army, to } => {
                 self.army(file, line, army);

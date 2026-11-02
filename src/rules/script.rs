@@ -302,6 +302,17 @@ impl Game {
 
     /// Brings a waiting army onto the map. Returns its index. A ship comes onto the water
     /// (`rules::ships`); a land army with no land near its post stays out.
+    /// A battle the story asked for: the army meets the hero now, and the battle is `rules`
+    /// (`lua:<script>` for a field battle, `dt` for the DT's). The battle opens as a meeting does.
+    pub(crate) fn start_field_battle(&mut self, army: ArmyId, rules: &str) {
+        if let Some(i) = self.activate(army) {
+            self.path.clear();
+            self.foe = Some(Foe::Army(i));
+            self.field_request = Some(rules.to_string());
+            self.effect_events.push(Event::Encounter(i));
+        }
+    }
+
     fn activate(&mut self, id: ArmyId) -> Option<usize> {
         if let Some(i) = self.army_index(id) {
             return Some(i);
