@@ -524,6 +524,8 @@ struct EventFrame {
     box_x: f32,
     box_w: f32,
     box_h: f32,
+    /// The picture stacked above the text box (held upright, [`stacked_top`]); 0 when it is beside it.
+    top: f32,
 }
 
 const EVENT_W: f32 = 634.0;
@@ -612,11 +614,36 @@ fn phone_fit(text_box: f32, floor: f32, below: f32, avail: f32) -> (f32, f32) {
     (box_h, (avail - box_h).clamp(0.0, below))
 }
 
-fn event_frame(side: Option<(f32, f32)>, text_h: f32, below: f32, max_box: f32, w: f32) -> EventFrame {
-    let side_w = side.map_or(0.0, |(pw, _)| pw + 14.0);
-    let min_box = side.map_or(EVENT_MIN_BOX, |(_, ph)| ph.max(EVENT_MIN_BOX));
+/// The gap between a picture stacked above the text box and the box (original px, the desktop's gap
+/// under a text box).
+const STACK_GAP: f32 = 10.0;
+
+/// The height a stacked picture takes above the text box, in original px: the picture's own height
+/// from one px under the content's top, then [`STACK_GAP`]. 0 when the picture is not stacked (it
+/// sits beside the box, or there is none). Pure.
+fn stacked_top(stacked: bool, side: Option<(f32, f32)>) -> f32 {
+    match (stacked, side) {
+        (true, Some((_, ph))) => 1.0 + ph + STACK_GAP,
+        _ => 0.0,
+    }
+}
+
+/// Where the picture's left edge sits across the window's content `w` wide (original px). Beside the
+/// text it is the desktop's (20 px: the box's 19 and 1); stacked it is centred across the window.
+/// Pure.
+fn picture_x(stacked: bool, w: f32, pw: f32) -> f32 {
+    if stacked { ((w - pw) / 2.0).max(0.0) } else { 20.0 }
+}
+
+/// The event window's frame (original px). Stacked (`stacked`: held upright with a picture, a phone
+/// choice, not in the original), the picture stands on top at full size and the text box takes the
+/// frame's full inner width under it; else the picture is beside the box as the original has it.
+fn event_frame(side: Option<(f32, f32)>, stacked: bool, text_h: f32, below: f32, max_box: f32, w: f32) -> EventFrame {
+    let top = stacked_top(stacked, side);
+    let side_w = if stacked { 0.0 } else { side.map_or(0.0, |(pw, _)| pw + 14.0) };
+    let min_box = if stacked { EVENT_MIN_BOX } else { side.map_or(EVENT_MIN_BOX, |(_, ph)| ph.max(EVENT_MIN_BOX)) };
     let box_h = (text_h + 2.0 * EVENT_PAD).max(min_box).min(max_box.max(min_box));
-    EventFrame { w, h: box_h + below + EVENT_REST, box_x: 19.0 + side_w, box_w: w - 38.0 - side_w, box_h }
+    EventFrame { w, h: top + box_h + below + EVENT_REST, box_x: 19.0 + side_w, box_w: w - 38.0 - side_w, box_h, top }
 }
 
 /// Where the window stands: centred over the map view above the bottom bar (the original's
@@ -633,6 +660,10 @@ struct EventLayout {
     size: f32,
     line: f32,
     side: Option<(f32, f32)>,
+    /// The picture stands above the text box (held upright, see [`event_frame`]).
+    stacked: bool,
+    /// The width the picture takes beside the text box (0 when stacked), with its 14 px gap.
+    side_w: f32,
     room: f32,
     lines: Vec<String>,
     rows: Vec<MarkupRow>,
@@ -756,7 +787,9 @@ fn event_layout(d: &Dialog, o: f32, t: f32, w: f32, fit: bool) -> EventLayout {
         Some(Picture::Still(t)) => Some((t.width() * pk, t.height() * pk)),
         _ => None,
     };
-    let side_w = side.map_or(0.0, |(pw, _)| pw + 14.0);
+    // Held upright with a picture, the picture stands above the text, which takes the full width.
+    let stacked = fit && super::window_layout::portrait() && side.is_some();
+    let side_w = if stacked { 0.0 } else { side.map_or(0.0, |(pw, _)| pw + 14.0) };
     let room = (w - 38.0 - side_w - 40.0) * o;
     let (lines, rows): (Vec<String>, Vec<MarkupRow>) = match &d.marked {
         Some(t) => (Vec::new(), markup_rows(t, room, size)),
@@ -782,7 +815,8 @@ fn event_layout(d: &Dialog, o: f32, t: f32, w: f32, fit: bool) -> EventLayout {
     // The box stops at 499 (and short of the screen): the text scrolls in it, the buttons
     // stay in sight.
     // The title strip's growth (`chrome::title_grow`) is part of the window's height too.
-    let screen_box = (sh - chrome::bar_height() - 4.0) / o - below / o - EVENT_REST - (chrome::title_grow() + footer_grow(o)) / o;
+    let top_o = stacked_top(stacked, side);
+    let screen_box = (sh - chrome::bar_height() - 4.0) / o - below / o - EVENT_REST - top_o - (chrome::title_grow() + footer_grow(o)) / o;
     let (max_box, below_vis) = if fit {
         // A phone: the text keeps five lines and the rewards scroll (`phone_fit`).
         let avail = screen_box + below / o;
@@ -792,9 +826,9 @@ fn event_layout(d: &Dialog, o: f32, t: f32, w: f32, fit: bool) -> EventLayout {
     } else {
         (EVENT_MAX_BOX.min(screen_box), below / o)
     };
-    let f = event_frame(side, full_h / o, below_vis, max_box, w);
+    let f = event_frame(side, stacked, full_h / o, below_vis, max_box, w);
     let shown = if full_h / o + 2.0 * EVENT_PAD <= f.box_h { total } else { (((f.box_h - 2.0 * EVENT_PAD) * o / line).floor().max(1.0) as usize).min(total) };
-    EventLayout { o, t, size, line, side, room, lines, rows, total, pic_h, res_h, items_h, lost_h, spells_h, below, f, shown, rs }
+    EventLayout { o, t, size, line, side, stacked, side_w, room, lines, rows, total, pic_h, res_h, items_h, lost_h, spells_h, below, f, shown, rs }
 }
 
 /// Draws `d` over the map; returns how it was closed: OK (or Enter, Escape), or for a
@@ -864,9 +898,9 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         // phone the rewards scroll, so the smallest window holds the text's five lines only.
         let first = event_layout(d, plain, t, EVENT_W, phone);
         let frame_h = if phone {
-            event_frame(first.side, TEXT_FLOOR_LINES * first.line / plain, 0.0, EVENT_MAX_BOX, min_w).h
+            event_frame(first.side, first.stacked, TEXT_FLOOR_LINES * first.line / plain, 0.0, EVENT_MAX_BOX, min_w).h
         } else {
-            event_frame(first.side, 0.0, first.below / plain, EVENT_MAX_BOX, min_w).h
+            event_frame(first.side, false, 0.0, first.below / plain, EVENT_MAX_BOX, min_w).h
         };
         let min_h = frame_h + (chrome::title_grow() + footer_grow(plain)) / plain;
         o = super::dt_font::whole_scale(super::display::popup_o(base, min_w, min_h)).min((sw - 12.0) / min_w).max(plain);
@@ -874,8 +908,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     let lay = if large {
         let max_w = event_width(o, sw, phone);
         let probe = event_layout(d, o, t, max_w, phone);
-        let side_w = probe.side.map_or(0.0, |(pw, _)| pw + 14.0);
-        let width = text_fit_width(widest_text(&probe), o, side_w, max_w);
+        let width = text_fit_width(widest_text(&probe), o, probe.side_w, max_w);
         // The captions centred over the window must fit its frame too (never past the cap).
         let size = super::dt_font::sheet_size(super::dt_font::Face::Subtitle, t);
         let width = width.max(caption_fit_width(widest_caption(d, size), o)).min(max_w);
@@ -884,7 +917,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         event_layout(d, o, t, EVENT_W, false)
     };
     chrome::under_message();
-    let EventLayout { o, t, size, line, side, room, lines, rows, total, pic_h, res_h, items_h, lost_h, spells_h, below, f, shown, rs, .. } = lay;
+    let EventLayout { o, t, size, line, side, stacked, room, lines, rows, total, pic_h, res_h, items_h, lost_h, spells_h, below, f, shown, rs, .. } = lay;
     let row_h = |r: &MarkupRow| event_row_h(defeat, line, t, r);
     // The title strip's growth: the window is taller by it, and its frame and content move down.
     let grow = chrome::title_grow();
@@ -925,34 +958,37 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     chrome::window_inner_frames_footed(outer, o, grow, footer_grow(o));
     let top = y + EVENT_BOX_TOP * o + grow;
     let mut cy = top;
+    // The picture's left edge: beside the text (20 px in) or, stacked, centred across the window.
+    let pic_x = |pw: f32| x + picture_x(stacked, f.w, pw) * o;
     match &d.picture {
         Some(Picture::Unit(u)) => {
             // Left of the text box, as the original's portrait (the box starts at 19 +
-            // picture + 14).
+            // picture + 14); stacked, centred above it.
             let (pw, _) = side.unwrap_or((UNIT_BUST, UNIT_BUST));
-            let r = Rect::new(x + 20.0 * o, top + o, pw * o, pw * o);
+            let r = Rect::new(pic_x(pw), top + o, pw * o, pw * o);
             assets.draw_portrait(*u, Team::Player, r);
             chrome::silver_frame(r, 1.5 * o);
         }
         Some(Picture::Image(tex)) => {
             let (tw, th) = side.expect("picture dimensions");
-            let r = Rect::new(x + 20.0 * o, top + o, tw * o, th * o);
+            let r = Rect::new(pic_x(tw), top + o, tw * o, th * o);
             draw_texture_ex(tex, r.x, r.y, WHITE, DrawTextureParams { dest_size: Some(vec2(r.w, r.h)), ..Default::default() });
             draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0 * o, MARBLE_EDGE);
         }
         Some(Picture::Still(tex)) => {
             let (pw, ph) = side.unwrap_or((tex.width(), tex.height()));
-            chrome::tex(tex, Rect::new(x + 20.0 * o, top + o, pw * o, ph * o), WHITE)
+            chrome::tex(tex, Rect::new(pic_x(pw), top + o, pw * o, ph * o), WHITE)
         }
         Some(Picture::Side(tex)) => {
             let (pw, ph) = side.unwrap_or((tex.width(), tex.height()));
-            let r = Rect::new(x + 20.0 * o, top + o, pw * o, ph * o);
+            let r = Rect::new(pic_x(pw), top + o, pw * o, ph * o);
             chrome::tex(tex, r, WHITE);
             draw_rectangle_lines(r.x - 1.0, r.y - 1.0, r.w + 2.0, r.h + 2.0, 1.0, WHITE);
         }
         None => {}
     }
-    cy += pic_h;
+    // The text box: under the picture when stacked (`f.top`), else where the picture's rows put it.
+    cy += pic_h + f.top * o;
     let tb = Rect::new(x + f.box_x * o, cy, f.box_w * o, f.box_h * o);
     // The learnt-spell window held upright draws its spell card there instead of the empty box.
     if !card_slot {
@@ -1493,15 +1529,43 @@ mod tests {
     /// lines (4 × 19 + 12 = 88, centred in it).
     #[test]
     fn the_event_window_stands_as_the_original_s() {
-        let f = event_frame(Some((128.0, 128.0)), 88.0, 0.0, EVENT_MAX_BOX, EVENT_W);
-        assert_eq!(f, EventFrame { w: 634.0, h: 247.0, box_x: 161.0, box_w: 454.0, box_h: 128.0 });
+        let f = event_frame(Some((128.0, 128.0)), false, 88.0, 0.0, EVENT_MAX_BOX, EVENT_W);
+        assert_eq!(f, EventFrame { w: 634.0, h: 247.0, box_x: 161.0, box_w: 454.0, box_h: 128.0, top: 0.0 });
         assert_eq!(event_origin(1024.0, 768.0, 86.0, f.w, f.h), (195.0, 217.0));
         // No picture: the box at least 92, else the text and 16 above and below.
-        assert_eq!(event_frame(None, 19.0, 0.0, EVENT_MAX_BOX, EVENT_W).box_h, 92.0);
-        assert_eq!(event_frame(None, 190.0, 0.0, EVENT_MAX_BOX, EVENT_W), EventFrame { w: 634.0, h: 341.0, box_x: 19.0, box_w: 596.0, box_h: 222.0 });
+        assert_eq!(event_frame(None, false, 19.0, 0.0, EVENT_MAX_BOX, EVENT_W).box_h, 92.0);
+        assert_eq!(event_frame(None, false, 190.0, 0.0, EVENT_MAX_BOX, EVENT_W), EventFrame { w: 634.0, h: 341.0, box_x: 19.0, box_w: 596.0, box_h: 222.0, top: 0.0 });
         // A text taller than 499 scrolls in a box of 499 (0x4aa88a), or less on a short screen.
-        assert_eq!(event_frame(None, 900.0, 0.0, EVENT_MAX_BOX, EVENT_W).box_h, 499.0);
-        assert_eq!(event_frame(None, 900.0, 0.0, 300.0, EVENT_W).box_h, 300.0);
+        assert_eq!(event_frame(None, false, 900.0, 0.0, EVENT_MAX_BOX, EVENT_W).box_h, 499.0);
+        assert_eq!(event_frame(None, false, 900.0, 0.0, 300.0, EVENT_W).box_h, 300.0);
+    }
+
+    /// Held upright, a unit's portrait (or any picture) stands centred on top of the event text, and
+    /// the text box takes the window's full inner width under it (a player's request: the portrait
+    /// squeezed the text into a narrow box). Nothing overlaps: the box ends above the rewards, which end
+    /// above the OK's footer. Beside the text (the desktop, sideways) the picture keeps its place.
+    #[test]
+    fn a_picture_held_upright_stands_above_a_full_width_text_box() {
+        let w = EVENT_W;
+        let rewards = 79.0;
+        for side in [(UNIT_BUST * BIG_PICTURE, UNIT_BUST * BIG_PICTURE), (220.0, 128.0)] {
+            let f = event_frame(Some(side), true, 190.0, rewards, EVENT_MAX_BOX, w);
+            let pic = Rect::new(picture_x(true, w, side.0), 1.0, side.0, side.1);
+            assert!((pic.x + pic.w / 2.0 - w / 2.0).abs() < 0.01, "the picture is centred across the window: {pic:?}");
+            assert_eq!(f.top, pic.bottom() + STACK_GAP, "the box starts STACK_GAP under the picture");
+            assert_eq!((f.box_x, f.box_w), (19.0, w - 38.0), "the text box takes the full inner width");
+            assert_eq!(f.h, f.top + f.box_h + rewards + EVENT_REST, "the window is the picture, the box, the rewards and the footer");
+            assert!(f.box_h >= EVENT_MIN_BOX, "the box keeps its minimum height");
+            // A short window: the box shrinks to the room the caller gives it, never over the picture.
+            let g = event_frame(Some(side), true, 900.0, rewards, 300.0, w);
+            assert_eq!(g.box_h, 300.0, "the box gives up its height, not the picture's place");
+            assert_eq!(g.top, f.top, "the picture keeps its place");
+            // Beside the text (the desktop, sideways): no stacked top, the box starts past the picture.
+            let beside = event_frame(Some(side), false, 190.0, rewards, EVENT_MAX_BOX, w);
+            assert_eq!(beside.top, 0.0);
+            assert_eq!(beside.box_x, 19.0 + side.0 + 14.0);
+        }
+        assert_eq!(picture_x(false, w, 92.0), 20.0, "beside the text: the desktop's 20 px in");
     }
 
     /// Razdor's phone table (the owner's request): how large the event text is on phones, in dp
@@ -1631,8 +1695,8 @@ mod tests {
         assert_eq!(unit_cells(4, 634, 1.0), vec![103.0, 230.0, 357.0, 484.0]);
         assert_eq!(unit_cells(6, 634, 1.0).len(), 4);
         assert_eq!((UNIT_ICON, unit_row(1.0)), (46.0, 79.0));
-        let f = event_frame(Some((UNIT_BUST, UNIT_BUST)), 19.0, unit_row(1.0), EVENT_MAX_BOX, EVENT_W);
-        assert_eq!(f, EventFrame { w: 634.0, h: 92.0 + 79.0 + 119.0, box_x: 125.0, box_w: 490.0, box_h: 92.0 });
+        let f = event_frame(Some((UNIT_BUST, UNIT_BUST)), false, 19.0, unit_row(1.0), EVENT_MAX_BOX, EVENT_W);
+        assert_eq!(f, EventFrame { w: 634.0, h: 92.0 + 79.0 + 119.0, box_x: 125.0, box_w: 490.0, box_h: 92.0, top: 0.0 });
     }
 
     /// The units row follows its window's width, not the original's 634: the middle of the
