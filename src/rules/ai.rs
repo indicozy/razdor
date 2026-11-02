@@ -1769,6 +1769,7 @@ impl Game {
         }
         self.clock.set_total_minutes(end);
         self.flush_goal_arrivals();
+        self.flush_lost_buildings();
         midnights
     }
 
@@ -2419,6 +2420,10 @@ impl Game {
                         self.world.armies[i].home = Some(l);
                     }
                     self.ai_stats.captures += 1;
+                    if was_players && self.story().is_some() {
+                        let b = self.world.locations[l].id;
+                        self.triggers.lost.push(b);
+                    }
                     let text = crate::trf!("{name} took {place}.", name = army_name(&self.world.armies[i]), place = building_name(&self.world.locations[l]));
                     let tile = self.world.locations[l].tile;
                     self.report(text, tile, was_players);
@@ -3474,8 +3479,13 @@ impl Game {
             } else {
                 if army.ai.style != Style::Feudal && matches!(self.world.locations[home].kind, LocationKind::Village | LocationKind::Shipyard | LocationKind::Altar | LocationKind::Ruins) {
                     let loc = &mut self.world.locations[home];
+                    let was_players = loc.owned();
                     loc.take_sides(army.faction, army.ai.relations);
                     loc.owner = Owner::Army(army.id);
+                    if was_players && self.story().is_some() {
+                        let b = self.world.locations[home].id;
+                        self.triggers.lost.push(b);
+                    }
                 }
                 home
             };

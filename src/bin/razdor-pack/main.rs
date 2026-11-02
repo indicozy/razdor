@@ -15,7 +15,10 @@ const HELP: &str = "razdor-pack: content packages (.rzpack) for Razdor 2.0
                              exit status: 0 no errors, 1 errors, 2 usage or read problem
   razdor-pack sim <folder-or-.rzpack> [--map <id>] [--days <n>=30] [--json]
                              [--trace] [--choices first|random|<dialog>=<choice>,…]
-                             [--campaign [--auto-win-after <days>]]
+                             [--set var=value]… [--campaign [--auto-win-after <days>]]
+                             --set forces a story variable before the story starts (a
+                             developer switch to drive branches; repeatable; on a campaign it
+                             is set for its first map and carries on).
                              --campaign plays the whole campaign (campaign.toml) from its
                              start: each map for n days, and a victory or a travel goes to the
                              next map with what carries; --auto-win-after fires each map's
@@ -112,6 +115,7 @@ struct Args {
     choices: Option<String>,
     campaign: bool,
     auto_win: Option<u64>,
+    set: Vec<String>,
 }
 
 fn package_args(cmd: &str, args: &[String], allow_sim: bool) -> Result<Args, String> {
@@ -132,6 +136,7 @@ fn package_args(cmd: &str, args: &[String], allow_sim: bool) -> Result<Args, Str
                 out.auto_win = Some(v.parse().map_err(|_| format!("--auto-win-after {v}: a whole number of days"))?);
             }
             "--choices" if allow_sim => out.choices = Some(it.next().ok_or("--choices needs first, random or dialog=choice,…")?.clone()),
+            "--set" if allow_sim => out.set.push(it.next().ok_or("--set needs var=value")?.clone()),
             flag if flag.starts_with('-') => return Err(format!("unknown option `{flag}` for {cmd}")),
             p if out.path.is_none() => out.path = Some(PathBuf::from(p)),
             _ => return Err(format!("{cmd} takes one folder or .rzpack file")),
@@ -174,6 +179,7 @@ fn sim(args: &[String]) -> Result<u8, String> {
     razdor::dt::install::load_dotenv();
     let dir = razdor::dt::install::locate().ok_or("no Discord Times install found (set RAZDOR_DT_DIR)")?;
     let install = razdor::dt::install::DtInstall::load(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let preset = parse_presets(&package, &a)?;
     let opts = pack::sim::SimOptions {
         days: a.days.unwrap_or(30),
         choices: match &a.choices {
@@ -182,6 +188,7 @@ fn sim(args: &[String]) -> Result<u8, String> {
         },
         // The JSON carries the trace too: `--json` is the same data as `--trace`.
         trace: a.trace || a.json,
+        preset: preset.clone(),
     };
     let mut failed = false;
     let mut json = Vec::new();
@@ -214,6 +221,13 @@ fn sim(args: &[String]) -> Result<u8, String> {
     Ok(if failed { 1 } else { 0 })
 }
 
+/// The `--set` variables of a sim, read and checked against the package's declarations.
+fn parse_presets(package: &Package, a: &Args) -> Result<Vec<(String, pack::triggers::VarValue)>, String> {
+    let preset = a.set.iter().map(|s| pack::sim::parse_set(s)).collect::<Result<Vec<_>, _>>()?;
+    pack::sim::check_presets(package, &preset)?;
+    Ok(preset)
+}
+
 /// `sim --campaign`: the campaign from its start, each map for `--days`, the graph walked on the
 /// victories and travels. Exit status 1 on a panic, a softlock or an error.
 fn sim_campaign_cmd(package: &Package, a: &Args) -> Result<u8, String> {
@@ -226,6 +240,7 @@ fn sim_campaign_cmd(package: &Package, a: &Args) -> Result<u8, String> {
     razdor::dt::install::load_dotenv();
     let dir = razdor::dt::install::locate().ok_or("no Discord Times install found (set RAZDOR_DT_DIR)")?;
     let install = razdor::dt::install::DtInstall::load(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let preset = parse_presets(package, a)?;
     let opts = pack::sim::CampaignOptions {
         days: a.days.unwrap_or(60),
         choices: match &a.choices {
@@ -234,6 +249,8 @@ fn sim_campaign_cmd(package: &Package, a: &Args) -> Result<u8, String> {
         },
         trace: a.trace || a.json,
         auto_win_after: a.auto_win,
+        preset,
+        save_on_revisit: false,
     };
     let run = pack::sim::sim_campaign(package, &install, &opts).map_err(|r| r.to_text())?;
     if a.json {

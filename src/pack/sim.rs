@@ -85,6 +85,33 @@ pub struct SimOptions {
     pub days: u64,
     pub choices: Choices,
     pub trace: bool,
+    /// Variables forced at the start (`--set var=value`).
+    pub preset: Vec<(String, VarValue)>,
+}
+
+/// Reads `--set var=value`: a whole number, or `true` / `false`.
+pub fn parse_set(spec: &str) -> Result<(String, VarValue), String> {
+    let (name, value) = spec.split_once('=').ok_or_else(|| format!("--set: `{spec}` is not var=value"))?;
+    let name = name.trim();
+    let value = value.trim();
+    let value = match value {
+        "true" => VarValue::Bool(true),
+        "false" => VarValue::Bool(false),
+        v => VarValue::Int(v.parse().map_err(|_| format!("--set {name}={v}: a whole number, true or false"))?),
+    };
+    Ok((name.to_string(), value))
+}
+
+/// The `--set` variables must be declared by the package, with the value's type.
+pub fn check_presets(pkg: &Package, presets: &[(String, VarValue)]) -> Result<(), String> {
+    for (name, value) in presets {
+        let declared = pkg.vars.iter().find(|v| v.value.name == *name).ok_or_else(|| format!("--set {name}: no variable `{name}` is declared"))?;
+        let ok = matches!((&declared.value.default, value), (VarValue::Int(_), VarValue::Int(_)) | (VarValue::Bool(_), VarValue::Bool(_)));
+        if !ok {
+            return Err(format!("--set {name}: `{name}` takes {}", if matches!(declared.value.default, VarValue::Int(_)) { "a whole number" } else { "true or false" }));
+        }
+    }
+    Ok(())
 }
 
 /// What a simulation of one map saw.
@@ -212,7 +239,7 @@ pub fn sim_map(pkg: &Package, install: &DtInstall, map: &str, opts: &SimOptions)
     let start = std::time::Instant::now();
     let mut state = 0x9E37_79B9u32;
     let mut pick = |d: &PendingDialog| opts.choices.pick(&mut state, d);
-    let play = StoryPlay { story: opened.story.clone(), trace: opts.trace, pick: &mut pick };
+    let play = StoryPlay { story: opened.story.clone(), trace: opts.trace, preset: opts.preset.clone(), pick: &mut pick };
     let run = std::panic::catch_unwind(AssertUnwindSafe(|| sim::play_days_with(&content, &opened.scenario, class, opts.days, Some(play))));
     let seconds = start.elapsed().as_secs_f64();
     Ok(match run {
@@ -264,6 +291,11 @@ pub struct CampaignOptions {
     pub choices: Choices,
     pub trace: bool,
     pub auto_win_after: Option<u64>,
+    /// Variables forced before the campaign's first map starts (`--set var=value`); they carry on.
+    pub preset: Vec<(String, VarValue)>,
+    /// Each map entered a second time is saved and restored first (`rules::save`): the sim's check
+    /// that a campaign's save round-trips mid-campaign. A developer switch.
+    pub save_on_revisit: bool,
 }
 
 /// One map of a campaign run: what it was entered with, how its play ended and on which day, and
@@ -445,15 +477,22 @@ fn walk(pkg: &Package, base: &Content, open: &mut dyn FnMut(&str) -> Result<Open
         let mut g = match left.take() {
             None => {
                 let class = opened.scenario.header.first_offered_class().map_or(HeroClass::Knight, |k| HeroClass::ALL[k]);
-                let mut g = Game::from_scenario(content, &opened.scenario, class);
+                let mut g = Game::from_scenario(content.clone(), &opened.scenario, class);
                 if opts.trace {
                     g.triggers.trace = Some(Vec::new());
+                }
+                // Forced before the story starts, so its game_start moment sees them (`--set`).
+                for (name, value) in &opts.preset {
+                    g.triggers.vars.insert(name.clone(), value.clone());
                 }
                 opened.start(&mut g);
                 g
             }
-            Some((old, from, at)) => enter(&old, &from, &opened, at.as_deref(), content).map_err(|e| (steps.clone(), e))?,
+            Some((old, from, at)) => enter(&old, &from, &opened, at.as_deref(), content.clone()).map_err(|e| (steps.clone(), e))?,
         };
+        if opts.save_on_revisit && steps.iter().any(|s| s.map == map) {
+            g = save_round_trip(g, content.clone()).map_err(|e| (steps.clone(), format!("the save of {map} does not round-trip: {e}")))?;
+        }
         let entered_with = carried_text(&g);
         let t0 = g.clock.total_minutes();
         let entered_at = t0 as u64;
@@ -499,6 +538,20 @@ fn walk(pkg: &Package, base: &Content, open: &mut dyn FnMut(&str) -> Result<Open
     }
 }
 
+/// A game saved and loaded again, as the game does (`rules::save`): the story, the campaign's stored
+/// maps and the clock come back as they were. The content is the map's own, as on a load.
+fn save_round_trip(g: Game, content: Arc<Content>) -> Result<Game, String> {
+    use crate::rules::save::{decode, encode, meta_of, SaveKind};
+    let meta = meta_of(&g, SaveKind::Manual, "campaign").map_err(|e| format!("{e:?}"))?;
+    let bytes = encode(&meta, &g).map_err(|e| format!("{e:?}"))?;
+    let (_, mut back) = decode(&bytes).map_err(|e| format!("{e:?}"))?;
+    back.content = content;
+    if back.triggers != g.triggers {
+        return Err("the story's state changed".into());
+    }
+    Ok(back)
+}
+
 /// `razdor-pack sim --campaign`: the package's campaign played headless (see [`run_campaign`]),
 /// its maps opened on the install. A compile error is returned as the report (the package is
 /// checked first).
@@ -524,7 +577,7 @@ mod tests {
     }
 
     fn options(days: u64) -> SimOptions {
-        SimOptions { days, choices: Choices::First, trace: false }
+        SimOptions { days, choices: Choices::First, trace: false, preset: Vec::new() }
     }
 
     #[test]
@@ -585,5 +638,62 @@ mod tests {
         let knight = install.unit_picture_frame(1).unwrap();
         assert!(c.pictures.contains(&(200, knight)), "{:?}", c.pictures);
         assert_eq!(c.units.iter().map(|u| u.id).collect::<Vec<_>>(), vec![200]);
+    }
+
+    /// A save on the hub's revisit (marka, the second time) round-trips, and the restored game goes on
+    /// to the ending: the route ally=1 with the save made in the campaign walk (`save_on_revisit`).
+    #[test]
+    fn a_save_on_the_hub_revisit_round_trips_and_the_campaign_goes_on_to_its_ending() {
+        let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+        let install = DtInstall::load(std::path::Path::new(&dir)).unwrap();
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/packs/pepelnaya-marka");
+        let pkg = Package::parse(Files::from_dir(&root).unwrap()).0;
+        let opts = CampaignOptions {
+            days: 60,
+            choices: Choices::parse("council=order,bw_council=iron").unwrap(),
+            trace: false,
+            auto_win_after: Some(20),
+            preset: vec![("quests_done".into(), VarValue::Int(2)), ("order".into(), VarValue::Int(2)), ("crown".into(), VarValue::Int(1))],
+            save_on_revisit: true,
+        };
+        let run = sim_campaign(&pkg, &install, &opts).unwrap_or_else(|r| panic!("{}", r.to_text()));
+        assert!(run.ok(), "{}", run.text());
+        let maps: Vec<&str> = run.steps.iter().map(|s| s.map.as_str()).collect();
+        assert_eq!(maps.iter().filter(|m| **m == "marka").count(), 2, "{maps:?}");
+        assert_eq!(run.ending.as_deref(), Some("end_iron"), "{}", run.text());
+    }
+
+    /// The four routes of «Пепельная Марка», each as `razdor-pack sim --campaign --auto-win-after 20`
+    /// with its `--set` and `--choices`: each must end on its ending, with no panic or softlock.
+    #[test]
+    fn the_four_routes_of_pepelnaya_marka_end_on_their_endings() {
+        let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+        let install = DtInstall::load(std::path::Path::new(&dir)).unwrap();
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/packs/pepelnaya-marka");
+        let pkg = Package::parse(Files::from_dir(&root).unwrap()).0;
+        type Preset = &'static [(&'static str, VarValue)];
+        let routes: [(Preset, &str, &str); 4] = [
+            (&[("quests_done", VarValue::Int(2)), ("order", VarValue::Int(2)), ("crown", VarValue::Int(1))], "council=order,bw_council=iron", "end_iron"),
+            (&[("quests_done", VarValue::Int(2)), ("marsh_trust", VarValue::Int(3))], "council=marsh,bw_council=free", "end_free"),
+            (&[("quests_done", VarValue::Int(2)), ("companies", VarValue::Int(2))], "council=companies,bw_council=free", "end_free"),
+            (
+                &[("quests_done", VarValue::Int(2)), ("order", VarValue::Int(1)), ("ilm", VarValue::Int(2)), ("grey_bargain_offered", VarValue::Bool(true))],
+                "council=order",
+                "end_grey",
+            ),
+        ];
+        for (preset, choices, ending) in routes {
+            let opts = CampaignOptions {
+                days: 60,
+                choices: Choices::parse(choices).unwrap(),
+                trace: false,
+                auto_win_after: Some(20),
+                preset: preset.iter().map(|(k, v)| (k.to_string(), v.clone())).collect(),
+                save_on_revisit: false,
+            };
+            let run = sim_campaign(&pkg, &install, &opts).unwrap_or_else(|r| panic!("{}", r.to_text()));
+            assert!(run.ok(), "{}", run.text());
+            assert_eq!(run.ending.as_deref(), Some(ending), "{}", run.text());
+        }
     }
 }

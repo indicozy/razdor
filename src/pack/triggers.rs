@@ -18,7 +18,7 @@ use super::load::{Located, Package};
 use super::refs::{valid_id, DtKind, Ref};
 
 /// The events a trigger can wait for (`when`).
-pub const EVENTS: [&str; 11] = [
+pub const EVENTS: [&str; 13] = [
     "game_start",
     "day_start",
     "week_start",
@@ -27,6 +27,8 @@ pub const EVENTS: [&str; 11] = [
     "hero_enters_building",
     "army_defeated",
     "building_captured",
+    "building_lost",
+    "sim_victory",
     "dialog_choice",
     "var_changed",
     "army_arrives",
@@ -34,7 +36,7 @@ pub const EVENTS: [&str; 11] = [
 /// The conditions (`if`). Each is a table with one of these keys (its kind).
 pub const CONDITIONS: [&str; 10] = ["var", "random", "hero_at", "army_at", "has_named_unit", "has_item", "gold", "army_alive", "building_owner", "has_spell"];
 /// The actions (`then`), each a table with one of these keys.
-pub const ACTIONS: [&str; 26] = [
+pub const ACTIONS: [&str; 27] = [
     "set",
     "add",
     "random_var",
@@ -59,6 +61,7 @@ pub const ACTIONS: [&str; 26] = [
     "army_speed",
     "hero_figure",
     "army_figure",
+    "remove_unit",
     "travel",
     "ending",
 ];
@@ -143,6 +146,15 @@ fn check_args(t: &Table, kind: &str, allowed: &[&str]) -> Res<()> {
         }
     }
     Ok(())
+}
+
+/// The `value` of a condition that is a presence (`has_named_unit`, `army_alive`): true when it is
+/// not given, `false` for the absence (`value = false`).
+fn flag_of(t: &Table, kind: &str) -> Res<bool> {
+    match arg(t, "value") {
+        None => Ok(true),
+        Some(v) => v.as_bool().map_or_else(|| bad(format!("`{kind}`'s `value` is true or false"), "`value = false` for the absence"), Ok),
+    }
 }
 
 fn arg<'a>(t: &'a Table, key: &str) -> Option<&'a Value> {
@@ -316,6 +328,12 @@ pub enum Event {
     HeroEntersBuilding(String),
     ArmyDefeated(String),
     BuildingCaptured(String),
+    /// A building the player owned changes owner (`building_lost`).
+    BuildingLost(String),
+    /// Raised by `razdor-pack sim --auto-win-after` before a map's victory is taken (a developer
+    /// moment: the game never raises it). A story plays its last dialog then, so the sim walks
+    /// the endings.
+    SimVictory,
     DialogChoice { dialog: String, choice: String },
     VarChanged(String),
     /// An army with a goal reaches it: at a cell (`at`), or in a building (`building`); none:
@@ -387,10 +405,12 @@ pub enum Cond {
     Random(u8),
     HeroAt(Place),
     ArmyAt { army: String, at: Place },
-    HasNamed { named: String, unit: Ref, holder: Holder },
+    /// `present`: true (the default) when the named character is there; `value = false` when he is not.
+    HasNamed { named: String, unit: Ref, holder: Holder, present: bool },
     HasItem { item: Ref, holder: Holder },
     Gold { amount: i64, cmp: Cmp },
-    ArmyAlive(String),
+    /// `alive`: true (the default) when the army stands; `value = false` when it is gone.
+    ArmyAlive { army: String, alive: bool },
     BuildingOwner { building: String, faction: u8 },
     HasSpell { spell: Ref, holder: Holder, all: bool },
 }
@@ -398,7 +418,8 @@ pub enum Cond {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
     Set { name: String, value: VarValue },
-    Add { name: String, value: i64 },
+    /// `value` added to a number variable; with `min` and/or `max` the result is clamped to them.
+    Add { name: String, value: i64, min: Option<i64>, max: Option<i64> },
     RandomVar { name: String, min: i64, max: i64 },
     Dialog(String),
     GiveGold(i64),
@@ -420,8 +441,10 @@ pub enum Action {
     ArmyGoal { army: String, goal: GoalSpec },
     ArmySpeed { army: String, percent: u32 },
     /// `None`: the hero's own figure (`hero_figure = "default"`).
-    HeroFigure(Option<Ref>),
-    ArmyFigure { army: String, unit: Ref },
+    HeroFigure(Option<Figure>),
+    ArmyFigure { army: String, figure: Figure },
+    /// `remove_unit = "<named>"`: the named character leaves the holder (the hero's army by default).
+    RemoveUnit { named: String, holder: Holder },
     /// `victory = true, next = "<map>"`: a victory whose campaign goes to that map (the override
     /// of the campaign's graph, `campaign.toml`).
     VictoryTo(String),
@@ -430,6 +453,39 @@ pub enum Action {
     Travel { map: String, at: Option<String> },
     /// `ending = "<dialog>"`: the dialog shows, then the campaign ends.
     Ending(String),
+}
+
+/// A map figure: a unit's (its kind's picture, `dt:<alias>`) or an army model's (`model = "bandits"`).
+/// A model is its [`ArmyModel`](crate::dt::dtm::ArmyModel) code (1 to 12): see [`model_code`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Figure {
+    Unit(Ref),
+    Model(u8),
+}
+
+/// The army models a figure may take, by their names in a package: the army models of the
+/// base game that are drawn as a figure (`ArmyModel` 1 to 6, 10 to 12).
+pub const MODELS: [(&str, u8); 9] = [
+    ("knight", 1),
+    ("archmage", 2),
+    ("ranger", 3),
+    ("feudal", 4),
+    ("bandits", 5),
+    ("peasants", 6),
+    ("necromancer", 10),
+    ("ghosts", 11),
+    ("zombies", 12),
+];
+
+/// The code of an army model by its name (see [`MODELS`]).
+pub fn model_code(name: &str) -> Res<u8> {
+    MODELS.iter().find(|(n, _)| *n == name).map(|(_, code)| *code).map_or_else(
+        || {
+            let names: Vec<&str> = MODELS.iter().map(|(n, _)| *n).collect();
+            bad(format!("`{name}` is not an army model"), format!("use one of {}", names.join(", ")))
+        },
+        Ok,
+    )
 }
 
 /// What an `army_goal` asks for (exactly one key of the action).
@@ -577,6 +633,11 @@ pub fn parse_event(t: &Table) -> Res<Event> {
             rest(&["building"])?;
             Ok(Event::BuildingCaptured(name_of(need(t, "building_captured", "building")?, "building")?))
         }
+        "sim_victory" => rest(&[]).map(|()| Event::SimVictory),
+        "building_lost" => {
+            rest(&["building"])?;
+            Ok(Event::BuildingLost(name_of(need(t, "building_lost", "building")?, "building")?))
+        }
         "dialog_choice" => {
             rest(&["dialog", "choice"])?;
             Ok(Event::DialogChoice {
@@ -640,12 +701,13 @@ pub fn parse_cond(t: &Table) -> Res<Cond> {
             Ok(Cond::ArmyAt { army: name_of(v, "army")?, at: at_of(t, kind)? })
         }
         "has_named_unit" => {
-            check_args(t, kind, &["unit", "in", "garrison"])?;
+            check_args(t, kind, &["unit", "in", "garrison", "value"])?;
             let holder = holder_key(t, kind, "in", Holder::Player)?;
             if matches!(holder, Holder::Pack | Holder::Named(_)) {
                 return bad("`has_named_unit` looks in the player's army, an army or a garrison", "use `in = \"<army id>\"`, `garrison = \"<building>\"` or leave both out");
             }
-            Ok(Cond::HasNamed { named: name_of(v, "named character")?, unit: unit_ref(need(t, kind, "unit")?)?, holder })
+            let present = flag_of(t, kind)?;
+            Ok(Cond::HasNamed { named: name_of(v, "named character")?, unit: unit_ref(need(t, kind, "unit")?)?, holder, present })
         }
         "has_item" => {
             check_args(t, kind, &["in", "garrison"])?;
@@ -664,8 +726,8 @@ pub fn parse_cond(t: &Table) -> Res<Cond> {
             Ok(Cond::Gold { amount: int_of(v, "`gold`")?, cmp })
         }
         "army_alive" => {
-            check_args(t, kind, &[])?;
-            Ok(Cond::ArmyAlive(name_of(v, "army")?))
+            check_args(t, kind, &["value"])?;
+            Ok(Cond::ArmyAlive { army: name_of(v, "army")?, alive: flag_of(t, kind)? })
         }
         "building_owner" => {
             check_args(t, kind, &["faction"])?;
@@ -702,8 +764,15 @@ pub fn parse_action(t: &Table) -> Res<Action> {
             Ok(Action::Set { name: name_of(v, "variable")?, value: value2_of(need(t, kind, "value")?)? })
         }
         "add" => {
-            check_args(t, kind, &["value"])?;
-            Ok(Action::Add { name: name_of(v, "variable")?, value: int_of(need(t, kind, "value")?, "`value`")? })
+            check_args(t, kind, &["value", "min", "max"])?;
+            let min = arg(t, "min").map(|m| int_of(m, "`min`")).transpose()?;
+            let max = arg(t, "max").map(|m| int_of(m, "`max`")).transpose()?;
+            if let (Some(lo), Some(hi)) = (min, max) {
+                if lo > hi {
+                    return bad("`min` is above `max`", "swap them");
+                }
+            }
+            Ok(Action::Add { name: name_of(v, "variable")?, value: int_of(need(t, kind, "value")?, "`value`")?, min, max })
         }
         "random_var" => {
             check_args(t, kind, &["min", "max"])?;
@@ -854,14 +923,34 @@ pub fn parse_action(t: &Table) -> Res<Action> {
         }
         "hero_figure" => {
             check_args(t, kind, &[])?;
-            match v.as_str() {
-                Some("default") => Ok(Action::HeroFigure(None)),
-                _ => Ok(Action::HeroFigure(Some(unit_ref(v)?))),
+            match v {
+                Value::String(s) if s == "default" => Ok(Action::HeroFigure(None)),
+                Value::Table(m) => {
+                    if let Some(k) = m.keys().find(|k| k.as_str() != "model") {
+                        return bad(format!("`{k}` is not a key of `hero_figure`"), "a figure table takes only `model`, e.g. `hero_figure = { model = \"bandits\" }`");
+                    }
+                    Ok(Action::HeroFigure(Some(Figure::Model(model_code(str_of(need(m, "model", "model")?, "`model`")?)?))))
+                }
+                _ => Ok(Action::HeroFigure(Some(Figure::Unit(unit_ref(v)?)))),
             }
         }
         "army_figure" => {
-            check_args(t, kind, &["unit"])?;
-            Ok(Action::ArmyFigure { army: name_of(v, "army")?, unit: unit_ref(need(t, kind, "unit")?)? })
+            check_args(t, kind, &["unit", "model"])?;
+            let figure = match (arg(t, "unit"), arg(t, "model")) {
+                (Some(u), None) => Figure::Unit(unit_ref(u)?),
+                (None, Some(m)) => Figure::Model(model_code(str_of(m, "`model`")?)?),
+                (Some(_), Some(_)) => return bad("`army_figure` takes `unit` or `model`, not both", "pick one: a unit's picture or an army model"),
+                (None, None) => return bad("`army_figure` needs `unit` or `model`", "e.g. `unit = \"dt:bandit\"` or `model = \"bandits\"`"),
+            };
+            Ok(Action::ArmyFigure { army: name_of(v, "army")?, figure })
+        }
+        "remove_unit" => {
+            check_args(t, kind, &["in", "garrison"])?;
+            let holder = holder_key(t, kind, "in", Holder::Player)?;
+            if matches!(holder, Holder::Pack | Holder::Named(_)) {
+                return bad("`remove_unit` takes the player's army, an army or a garrison", "use `in = \"<army id>\"`, `garrison = \"<building>\"` or leave both out");
+            }
+            Ok(Action::RemoveUnit { named: name_of(v, "named character")?, holder })
         }
         "victory" | "defeat" => {
             let allowed: &[&str] = if kind == "victory" { &["next"] } else { &[] };
@@ -1199,7 +1288,7 @@ impl Scope<'_, '_> {
     fn trigger(&mut self, file: &str, line: u32, t: &Trigger) {
         match &t.when {
             Event::HeroEnters(p) => self.place(file, line, "hero_enters", p),
-            Event::HeroEntersBuilding(b) | Event::BuildingCaptured(b) => self.building(file, line, b),
+            Event::HeroEntersBuilding(b) | Event::BuildingCaptured(b) | Event::BuildingLost(b) => self.building(file, line, b),
             Event::ArmyDefeated(a) => self.army(file, line, a),
             Event::ArmyArrives { army, at, building } => {
                 self.army(file, line, army);
@@ -1227,7 +1316,7 @@ impl Scope<'_, '_> {
                 self.army(file, line, army);
                 self.place(file, line, "army_at", at);
             }
-            Cond::ArmyAlive(a) => self.army(file, line, a),
+            Cond::ArmyAlive { army, .. } => self.army(file, line, army),
             Cond::BuildingOwner { building, .. } => self.building(file, line, building),
             Cond::HasItem { holder, .. } | Cond::HasSpell { holder, .. } | Cond::HasNamed { holder, .. } => self.holder(file, line, holder),
             _ => {}
@@ -1269,6 +1358,7 @@ impl Scope<'_, '_> {
                 }
             }
             Action::ArmySpeed { army, .. } | Action::ArmyFigure { army, .. } => self.army(file, line, army),
+            Action::RemoveUnit { holder, .. } => self.holder(file, line, holder),
             _ => {}
         }
     }
@@ -1322,7 +1412,19 @@ impl Ctx<'_> {
                     }
                 }
             }
-            Action::Add { name, .. } | Action::RandomVar { name, .. } => {
+            Action::Add { name, min, max, .. } => {
+                if let Some(kind) = self.var(r, file, line, name) {
+                    if kind == VarKind::Bool {
+                        r.error_hint(file, Some(line), format!("`{name}` is true or false: it cannot be added to or randomised"), "use set = … with true or false");
+                    }
+                }
+                if let (Some(lo), Some(hi)) = (min, max) {
+                    if lo > hi {
+                        r.error_hint(file, Some(line), "`min` is above `max`", "swap them");
+                    }
+                }
+            }
+            Action::RandomVar { name, .. } => {
                 if let Some(kind) = self.var(r, file, line, name) {
                     if kind == VarKind::Bool {
                         r.error_hint(file, Some(line), format!("`{name}` is true or false: it cannot be added to or randomised"), "use set = … with true or false");
@@ -1338,13 +1440,13 @@ impl Ctx<'_> {
             }
             Action::GiveItem { item, .. } => self.item(r, file, line, item),
             Action::GiveUnit { unit, .. } => self.unit(r, file, line, unit),
+            Action::HeroFigure(Some(Figure::Unit(unit))) | Action::ArmyFigure { figure: Figure::Unit(unit), .. } => self.unit(r, file, line, unit),
             Action::SpawnArmy { troops, .. } | Action::AddUnits { troops, .. } => {
                 for t in troops {
                     self.unit(r, file, line, t);
                 }
             }
             Action::Cast { spell, .. } | Action::ForgetSpell(spell) => self.spell(r, file, line, spell),
-            Action::HeroFigure(Some(unit)) | Action::ArmyFigure { unit, .. } => self.unit(r, file, line, unit),
             _ => {}
         }
     }
@@ -1436,6 +1538,34 @@ mod tests {
 
     fn table(text: &str) -> Table {
         toml::from_str(text).unwrap()
+    }
+
+    #[test]
+    fn the_new_forms_read_their_arguments_and_refuse_the_bad_ones() {
+        assert_eq!(parse_action(&table("hero_figure = { model = \"bandits\" }")), Ok(Action::HeroFigure(Some(Figure::Model(5)))));
+        assert!(parse_action(&table("hero_figure = { model = \"dragons\" }")).unwrap_err().message.contains("not an army model"));
+        assert_eq!(
+            parse_action(&table("army_figure = \"e\"\nmodel = \"necromancer\"")),
+            Ok(Action::ArmyFigure { army: "e".into(), figure: Figure::Model(10) })
+        );
+        assert!(parse_action(&table("army_figure = \"e\"\nmodel = \"ghosts\"\nunit = \"dt:mage\"")).unwrap_err().message.contains("not both"));
+        assert_eq!(
+            parse_action(&table("remove_unit = \"varga\"\nin = \"guard\"")),
+            Ok(Action::RemoveUnit { named: "varga".into(), holder: Holder::Army("guard".into()) })
+        );
+        assert_eq!(
+            parse_action(&table("add = \"crown\"\nvalue = 1\nmin = -5\nmax = 5")),
+            Ok(Action::Add { name: "crown".into(), value: 1, min: Some(-5), max: Some(5) })
+        );
+        assert!(parse_action(&table("add = \"crown\"\nvalue = 1\nmin = 5\nmax = -5")).unwrap_err().message.contains("above"));
+        assert_eq!(parse_event(&table("event = \"building_lost\"\nbuilding = \"abbey\"")), Ok(Event::BuildingLost("abbey".into())));
+        assert_eq!(parse_event(&table("event = \"sim_victory\"")), Ok(Event::SimVictory));
+        assert_eq!(
+            parse_cond(&table("has_named_unit = \"varga\"\nunit = \"dt:halberdier\"\nvalue = false")),
+            Ok(Cond::HasNamed { named: "varga".into(), unit: Ref::parse("dt:halberdier").unwrap(), holder: Holder::Player, present: false })
+        );
+        assert_eq!(parse_cond(&table("army_alive = \"caravan\"\nvalue = false")), Ok(Cond::ArmyAlive { army: "caravan".into(), alive: false }));
+        assert!(parse_cond(&table("army_alive = \"caravan\"\nvalue = 1")).unwrap_err().message.contains("true or false"));
     }
 
     #[test]
@@ -1591,10 +1721,10 @@ mod wish_reader_tests {
         assert_eq!(parse_action(&table("army_speed = \"ghost\"\npercent = 150")), Ok(Action::ArmySpeed { army: "ghost".into(), percent: 150 }));
         assert!(parse_action(&table("army_speed = \"ghost\"\npercent = 5")).unwrap_err().message.contains("10 to 1000"));
         assert_eq!(parse_action(&table("hero_figure = \"default\"")), Ok(Action::HeroFigure(None)));
-        assert_eq!(parse_action(&table("hero_figure = \"dt:bandit\"")), Ok(Action::HeroFigure(Some(Ref::parse("dt:bandit").unwrap()))));
+        assert_eq!(parse_action(&table("hero_figure = \"dt:bandit\"")), Ok(Action::HeroFigure(Some(Figure::Unit(Ref::parse("dt:bandit").unwrap())))));
         assert_eq!(
             parse_action(&table("army_figure = \"ghost\"\nunit = \"dt:mage\"")),
-            Ok(Action::ArmyFigure { army: "ghost".into(), unit: Ref::parse("dt:mage").unwrap() })
+            Ok(Action::ArmyFigure { army: "ghost".into(), figure: Figure::Unit(Ref::parse("dt:mage").unwrap()) })
         );
         assert!(parse_action(&table("army_figure = \"ghost\"")).unwrap_err().message.contains("needs `unit`"));
     }
@@ -1638,11 +1768,11 @@ mod wish_reader_tests {
         assert_eq!(parse_action(&table("remove_spells = \"garrison\"\ngarrison = \"tower\"")), Ok(Action::RemoveSpells(Holder::Garrison("tower".into()))));
         assert_eq!(
             parse_cond(&table("has_named_unit = \"ivo\"\nunit = \"dt:knight\"\ngarrison = \"tower\"")),
-            Ok(Cond::HasNamed { named: "ivo".into(), unit: Ref::parse("dt:knight").unwrap(), holder: Holder::Garrison("tower".into()) })
+            Ok(Cond::HasNamed { named: "ivo".into(), unit: Ref::parse("dt:knight").unwrap(), holder: Holder::Garrison("tower".into()), present: true })
         );
         assert_eq!(
             parse_cond(&table("has_named_unit = \"ivo\"\nunit = \"dt:knight\"\nin = \"guard\"")),
-            Ok(Cond::HasNamed { named: "ivo".into(), unit: Ref::parse("dt:knight").unwrap(), holder: Holder::Army("guard".into()) })
+            Ok(Cond::HasNamed { named: "ivo".into(), unit: Ref::parse("dt:knight").unwrap(), holder: Holder::Army("guard".into()), present: true })
         );
     }
 

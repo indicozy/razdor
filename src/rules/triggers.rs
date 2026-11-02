@@ -101,6 +101,10 @@ pub enum When {
     HeroEntersBuilding(u16),
     ArmyDefeated(ArmyId),
     BuildingCaptured(u16),
+    /// A building the player owned changed owner (`building_lost`).
+    BuildingLost(u16),
+    /// The sim's developer moment before an auto-win (`sim_victory`): never raised in the game.
+    SimVictory,
     DialogChoice { dialog: String, choice: String },
     VarChanged(String),
     /// As a trigger: an army's arrival at a cell and/or in a building, each if given (`None`:
@@ -138,6 +142,23 @@ pub enum Dest {
     Building(u16),
 }
 
+/// A map figure, resolved: a unit's picture, or an army model's (its code, 1 to 12).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FigureOf {
+    Unit(UnitId),
+    Model(u8),
+}
+
+impl FigureOf {
+    /// The index of the map figure ([`Army::figure`]) this picture draws.
+    pub fn index(self, content: &crate::rules::content::Content) -> u8 {
+        match self {
+            FigureOf::Unit(u) => Army::figure_of_unit(content, u),
+            FigureOf::Model(code) => Army::figure_of_model(code),
+        }
+    }
+}
+
 /// A condition (`if`), resolved.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Cond {
@@ -146,10 +167,12 @@ pub enum Cond {
     Random(u8),
     HeroAt(Place),
     ArmyAt(ArmyId, Place),
-    HasNamed { named: u8, unit: UnitId, who: Who },
+    /// `present`: false for the absence of the named character (`value = false`).
+    HasNamed { named: u8, unit: UnitId, who: Who, present: bool },
     HasItem(ItemId, Who),
     Gold(i64, Cmp),
-    ArmyAlive(ArmyId),
+    /// `alive`: false for an army that is gone (`value = false`).
+    ArmyAlive(ArmyId, bool),
     BuildingOwner(u16, u8),
     HasSpell { spell: u32, who: Who, all: bool },
 }
@@ -158,7 +181,8 @@ pub enum Cond {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Act {
     Set(String, VarValue),
-    Add(String, i64),
+    /// `value` added to a number variable, the result clamped to `min` and `max` when given.
+    Add { name: String, value: i64, min: Option<i64>, max: Option<i64> },
     RandomVar(String, i64, i64),
     Dialog(String),
     GiveGold(i64),
@@ -181,8 +205,10 @@ pub enum Act {
     ArmyGoal { army: ArmyId, goal: Option<Goal> },
     ArmySpeed { army: ArmyId, percent: u32 },
     /// The hero's map figure (`None`: his own).
-    HeroFigure(Option<UnitId>),
-    ArmyFigure { army: ArmyId, unit: UnitId },
+    HeroFigure(Option<FigureOf>),
+    ArmyFigure { army: ArmyId, figure: FigureOf },
+    /// A named character leaves the holder (the hero's army, an army or a garrison).
+    RemoveUnit { named: u8, who: Who },
     /// A victory whose campaign goes to map `String` (the campaign graph's override).
     VictoryTo(String),
     /// The campaign leaves this map for `map` (entering at point `at`, else the start).
@@ -280,6 +306,10 @@ pub struct TriggerState {
     /// Goal arrivals queued until the AI's tick is over (see [`goals`]); never saved.
     #[serde(skip)]
     pub arrivals: Vec<Arrival>,
+    /// Buildings the player lost to the AI, queued until the AI's tick is over (`building_lost`);
+    /// never saved.
+    #[serde(skip)]
+    pub lost: Vec<u16>,
     /// The map a `victory = true, next = "…"` names (the campaign's override), once a victory ran.
     #[serde(default)]
     pub next: Option<String>,
@@ -402,7 +432,7 @@ pub fn compile(pkg: &Package, lang: &str, map: &str, resolve: &dyn Resolve, seed
             story.dialogs.push(dd);
         }
     }
-    story.named = b.named_order.iter().map(|id| story.texts.get(&format!("named.{id}")).cloned().unwrap_or_else(|| id.clone())).collect();
+    story.named = b.named_order.iter().map(|id| named_text(&story.texts, id, map)).collect();
     story.army_names = b.army_names.clone();
     story.army_names.extend(b.spawns.iter().map(|(name, id)| (*id, name.clone())));
     story.building_names = b.building_names.clone();
@@ -411,6 +441,20 @@ pub fn compile(pkg: &Package, lang: &str, map: &str, resolve: &dyn Resolve, seed
     } else {
         Err(b.errors)
     }
+}
+
+/// The display name of named character `id` in the story of `map`: its key `named.<id>`; else the
+/// map's own `<map>.named.<id>`; else the first key `<block>.named.<id>` of any chapter (in key
+/// order); else the id itself.
+pub fn named_text(texts: &BTreeMap<String, String>, id: &str, map: &str) -> String {
+    if let Some(t) = texts.get(&format!("named.{id}")) {
+        return t.clone();
+    }
+    if let Some(t) = texts.get(&format!("{map}.named.{id}")) {
+        return t.clone();
+    }
+    let suffix = format!(".named.{id}");
+    texts.iter().find(|(k, _)| k.ends_with(&suffix)).map_or_else(|| id.to_string(), |(_, v)| v.clone())
 }
 
 /// Compiles conditions (a campaign's `if`, `campaign.toml`) against the names of a map, as a
@@ -623,6 +667,8 @@ impl Builder<'_> {
             pt::Event::HeroEntersBuilding(b) => When::HeroEntersBuilding(self.building(b)?),
             pt::Event::ArmyDefeated(a) => When::ArmyDefeated(self.army(a)?),
             pt::Event::BuildingCaptured(b) => When::BuildingCaptured(self.building(b)?),
+            pt::Event::BuildingLost(b) => When::BuildingLost(self.building(b)?),
+            pt::Event::SimVictory => When::SimVictory,
             pt::Event::DialogChoice { dialog, choice } => When::DialogChoice { dialog: dialog.clone(), choice: choice.clone() },
             pt::Event::VarChanged(name) => {
                 self.declared(name)?;
@@ -647,10 +693,10 @@ impl Builder<'_> {
             pt::Cond::Random(p) => Cond::Random(*p),
             pt::Cond::HeroAt(p) => Cond::HeroAt(*p),
             pt::Cond::ArmyAt { army, at } => Cond::ArmyAt(self.army(army)?, *at),
-            pt::Cond::HasNamed { named, unit, holder } => Cond::HasNamed { named: self.named(named)?, unit: self.unit(unit)?, who: self.who(holder)? },
+            pt::Cond::HasNamed { named, unit, holder, present } => Cond::HasNamed { named: self.named(named)?, unit: self.unit(unit)?, who: self.who(holder)?, present: *present },
             pt::Cond::HasItem { item, holder } => Cond::HasItem(self.item(item)?, self.who(holder)?),
             pt::Cond::Gold { amount, cmp } => Cond::Gold(*amount, *cmp),
-            pt::Cond::ArmyAlive(a) => Cond::ArmyAlive(self.army(a)?),
+            pt::Cond::ArmyAlive { army, alive } => Cond::ArmyAlive(self.army(army)?, *alive),
             pt::Cond::BuildingOwner { building, faction } => Cond::BuildingOwner(self.building(building)?, *faction),
             pt::Cond::HasSpell { spell, holder, all } => Cond::HasSpell { spell: self.spell(spell)?, who: self.who(holder)?, all: *all },
         })
@@ -660,15 +706,22 @@ impl Builder<'_> {
         troops.iter().map(|t| self.unit(t)).collect()
     }
 
+    fn figure(&mut self, f: &pt::Figure) -> Option<FigureOf> {
+        Some(match f {
+            pt::Figure::Unit(u) => FigureOf::Unit(self.unit(u)?),
+            pt::Figure::Model(code) => FigureOf::Model(*code),
+        })
+    }
+
     fn act(&mut self, a: &pt::Action) -> Option<Act> {
         Some(match a {
             pt::Action::Set { name, value } => {
                 self.declared(name)?;
                 Act::Set(name.clone(), value.clone())
             }
-            pt::Action::Add { name, value } => {
+            pt::Action::Add { name, value, min, max } => {
                 self.declared(name)?;
-                Act::Add(name.clone(), *value)
+                Act::Add { name: name.clone(), value: *value, min: *min, max: *max }
             }
             pt::Action::RandomVar { name, min, max } => {
                 self.declared(name)?;
@@ -725,11 +778,12 @@ impl Builder<'_> {
                 Act::ArmyGoal { army, goal }
             }
             pt::Action::ArmySpeed { army, percent } => Act::ArmySpeed { army: self.army(army)?, percent: *percent },
-            pt::Action::HeroFigure(unit) => Act::HeroFigure(match unit {
-                Some(u) => Some(self.unit(u)?),
+            pt::Action::HeroFigure(figure) => Act::HeroFigure(match figure {
+                Some(f) => Some(self.figure(f)?),
                 None => None,
             }),
-            pt::Action::ArmyFigure { army, unit } => Act::ArmyFigure { army: self.army(army)?, unit: self.unit(unit)? },
+            pt::Action::ArmyFigure { army, figure } => Act::ArmyFigure { army: self.army(army)?, figure: self.figure(figure)? },
+            pt::Action::RemoveUnit { named, holder } => Act::RemoveUnit { named: self.named(named)?, who: self.who(holder)? },
             pt::Action::VictoryTo(map) => Act::VictoryTo(map.clone()),
             pt::Action::Travel { map, at } => Act::Travel { map: map.clone(), at: at.clone() },
             pt::Action::Ending(dialog) => {
@@ -781,6 +835,8 @@ fn moment_name(story: &Story, when: &When) -> String {
         When::HeroEntersBuilding(b) => format!("hero_enters_building {}", building(b)),
         When::ArmyDefeated(a) => format!("army_defeated {}", army(a)),
         When::BuildingCaptured(b) => format!("building_captured {}", building(b)),
+        When::BuildingLost(b) => format!("building_lost {}", building(b)),
+        When::SimVictory => "sim_victory".into(),
         When::DialogChoice { dialog, choice } => format!("dialog_choice {dialog}.{choice}"),
         When::VarChanged(v) => format!("var_changed {v}"),
         When::ArmyArrives { army: a, at, building: b } => {
@@ -910,6 +966,7 @@ impl Game {
         let events = self.story_events(When::GameStart);
         self.pending.extend(events);
     }
+
 
     /// The player chose `choice` in dialog `dialog` (`None`: its «Далее»): the choice's actions run,
     /// then the triggers on `dialog_choice`. Returns what followed.
@@ -1067,10 +1124,10 @@ impl Game {
                 let (x, y) = a.tile(&self.world.map);
                 place_has(p, x, y)
             }),
-            Cond::HasNamed { named, unit, who } => self.named_unit_in(*who, *named, *unit),
+            Cond::HasNamed { named, unit, who, present } => self.named_unit_in(*who, *named, *unit) == *present,
             Cond::HasItem(item, who) => self.holds_item(*item, *who),
             Cond::Gold(n, cmp) => compare(i64::from(self.gold), *cmp, *n),
-            Cond::ArmyAlive(id) => self.army_active(*id) || self.army_inactive(*id),
+            Cond::ArmyAlive(id, alive) => (self.army_active(*id) || self.army_inactive(*id)) == *alive,
             Cond::BuildingOwner(b, faction) => self.building_state(*b).is_some_and(|(_, f)| f == *faction),
             Cond::HasSpell { spell, who, all } => {
                 let now = self.now();
@@ -1086,9 +1143,10 @@ impl Game {
 
     /// A named character of `named` (of unit type `unit`) among the troops `who` names.
     fn named_unit_in(&self, who: Who, named: u8, unit: UnitId) -> bool {
-        let troop = |t: &Troop| t.named == named && t.unit == unit;
+        // A named character who died in battle is not in the army any more (his record stays).
+        let troop = |t: &Troop| t.named == named && t.unit == unit && t.alive();
         match who {
-            Who::Player | Who::Pack | Who::Named(_) => self.squad.iter().any(|u| u.named == named && u.def == unit),
+            Who::Player | Who::Pack | Who::Named(_) => self.squad.iter().any(|u| u.named == named && u.def == unit && u.alive()),
             Who::Army(id) => self.army_ref(id).is_some_and(|a| a.troops.iter().any(troop)),
             Who::Garrison(b) => self.location_ref(b).is_some_and(|l| l.garrison.iter().any(troop)),
         }
@@ -1106,9 +1164,15 @@ impl Game {
     fn act(&mut self, a: &Act, story: &Story, queue: &mut VecDeque<When>) {
         match a {
             Act::Set(name, v) => self.set_var(name, v.clone(), queue),
-            Act::Add(name, n) => {
-                let v = VarValue::Int(self.var_int(name).saturating_add(*n));
-                self.set_var(name, v, queue);
+            Act::Add { name, value, min, max } => {
+                let mut v = self.var_int(name).saturating_add(*value);
+                if let Some(lo) = min {
+                    v = v.max(*lo);
+                }
+                if let Some(hi) = max {
+                    v = v.min(*hi);
+                }
+                self.set_var(name, VarValue::Int(v), queue);
             }
             Act::RandomVar(name, lo, hi) => {
                 let v = VarValue::Int(lo + self.draw(hi - lo + 1));
@@ -1123,9 +1187,21 @@ impl Game {
             Act::RemoveArmy(id) => self.deactivate_army(*id),
             Act::TeleportHero(t) => self.teleport_player(t.0, t.1),
             Act::TeleportArmy(id, dest) => self.teleport_package_army(*id, *dest),
-            Act::SetFaction(of, faction) => self.set_faction(entity_holder(*of), *faction),
+            Act::SetFaction(of, faction) => {
+                let was = match of {
+                    Entity::Building(b) => self.location_ref(*b).is_some_and(|l| l.owned()),
+                    Entity::Army(_) => false,
+                };
+                self.set_faction(entity_holder(*of), *faction);
+                if let Entity::Building(b) = of {
+                    if was && !self.location_ref(*b).is_some_and(|l| l.owned()) {
+                        queue.push_back(When::BuildingLost(*b));
+                    }
+                }
+            }
             Act::SetRelation(of, towards, value) => self.set_relation(entity_holder(*of), *towards, *value),
             Act::AddUnits(of, troops) => self.add_package_troops(*of, troops),
+            Act::RemoveUnit { named, who } => self.remove_named(*named, *who),
             Act::Cast { spell, who, until } => self.cast_package_spell(*spell, *who, *until),
             Act::RemoveSpells(who) => {
                 for slots in self.slots_mut(*who) {
@@ -1144,11 +1220,11 @@ impl Game {
             Act::ArmySpeed { army, percent } => {
                 self.set_army_pace(*army, *percent);
             }
-            Act::HeroFigure(unit) => {
-                self.triggers.hero_sheet = unit.map(|u| Army::figure_of_unit(&self.content, u));
+            Act::HeroFigure(figure) => {
+                self.triggers.hero_sheet = figure.map(|f| f.index(&self.content));
             }
-            Act::ArmyFigure { army, unit } => {
-                let figure = Army::figure_of_unit(&self.content, *unit);
+            Act::ArmyFigure { army, figure } => {
+                let figure = figure.index(&self.content);
                 if let Some(a) = self.army_mut_any(*army) {
                     a.figure = figure;
                 }
@@ -1327,6 +1403,38 @@ impl Game {
         }
     }
 
+    /// `remove_unit`: the named character leaves the holder; his worn items go to the pack.
+    fn remove_named(&mut self, named: u8, who: Who) {
+        let mut worn: Vec<ItemId> = Vec::new();
+        match who {
+            Who::Player | Who::Pack | Who::Named(_) => {
+                for u in self.squad.iter().filter(|u| u.named == named) {
+                    worn.extend(u.items.iter().flatten());
+                }
+                self.squad.retain(|u| u.named != named);
+            }
+            Who::Army(id) => {
+                if let Some(a) = self.army_mut_any(id) {
+                    for t in a.troops.iter().filter(|t| t.named == named) {
+                        worn.extend(t.worn.iter().flatten());
+                    }
+                    a.troops.retain(|t| t.named != named);
+                }
+            }
+            Who::Garrison(b) => {
+                if let Some(l) = self.world.locations.iter_mut().find(|l| l.id == b) {
+                    for t in l.garrison.iter().filter(|t| t.named == named) {
+                        worn.extend(t.worn.iter().flatten());
+                    }
+                    l.garrison.retain(|t| t.named != named);
+                }
+            }
+        }
+        for item in worn {
+            self.pack.add(item);
+        }
+    }
+
     fn add_package_troops(&mut self, of: Entity, troops: &[UnitId]) {
         let content = self.content.clone();
         let fresh = |troops: &[UnitId]| -> Vec<Troop> { troops.iter().map(|u| Troop::new(*u, 1, Slot::new(Row::Front, 0))).collect() };
@@ -1473,7 +1581,7 @@ mod tests {
     #[test]
     fn variable_actions_and_the_change_moment() {
         let mut g = game();
-        let watch = trig("watch", When::VarChanged("dread".into()), vec![], vec![Act::Add("alarm".into(), 1)]);
+        let watch = trig("watch", When::VarChanged("dread".into()), vec![], vec![Act::Add { name: "alarm".into(), value: 1, min: None, max: None }]);
         g.attach_story(story(
             &[("dread", VarValue::Int(0)), ("alarm", VarValue::Int(0))],
             vec![watch],
@@ -1481,7 +1589,7 @@ mod tests {
         ));
         let mut q = VecDeque::new();
         let s = g.story.clone().unwrap();
-        g.act(&Act::Add("dread".into(), 2), &s, &mut q);
+        g.act(&Act::Add { name: "dread".into(), value: 2, min: None, max: None }, &s, &mut q);
         assert_eq!(g.story_var("dread"), Some(VarValue::Int(2)));
         g.act(&Act::Set("dread".into(), VarValue::Int(2)), &s, &mut q);
         assert_eq!(q.len(), 1, "setting the same value is no change");
@@ -1496,7 +1604,7 @@ mod tests {
     fn runaway_triggers_stop_at_the_loop_guard() {
         // Each change raises the next change: the chain never ends, and the guard stops it.
         let mut g = game();
-        let mut bump = trig("bump", When::VarChanged("n".into()), vec![], vec![Act::Add("n".into(), 1)]);
+        let mut bump = trig("bump", When::VarChanged("n".into()), vec![], vec![Act::Add { name: "n".into(), value: 1, min: None, max: None }]);
         bump.once = false;
         g.attach_story(story(&[("n", VarValue::Int(0))], vec![bump], vec![dialog("d", vec![])]));
         g.story_events(When::VarChanged("n".into()));
@@ -1509,9 +1617,9 @@ mod tests {
     #[test]
     fn day_week_and_moon_moments() {
         let mut g = game();
-        let day = trig("day", When::DayStart, vec![], vec![Act::Add("days".into(), 1)]);
-        let week = trig("week", When::WeekStart, vec![], vec![Act::Add("weeks".into(), 1)]);
-        let moon = trig("moon", When::NewMoon, vec![], vec![Act::Add("moons".into(), 1)]);
+        let day = trig("day", When::DayStart, vec![], vec![Act::Add { name: "days".into(), value: 1, min: None, max: None }]);
+        let week = trig("week", When::WeekStart, vec![], vec![Act::Add { name: "weeks".into(), value: 1, min: None, max: None }]);
+        let moon = trig("moon", When::NewMoon, vec![], vec![Act::Add { name: "moons".into(), value: 1, min: None, max: None }]);
         let repeat = |mut t: Trigger| {
             t.once = false;
             t
@@ -1533,8 +1641,8 @@ mod tests {
     fn a_hero_step_onto_a_cell_or_into_an_area_raises_its_moment() {
         let mut g = game();
         let (x, y) = g.tile();
-        let on_cell = trig("cell", When::HeroEnters(Place::Cell(x, y)), vec![], vec![Act::Add("hits".into(), 1)]);
-        let mut on_area = trig("area", When::HeroEnters(Place::Area(x - 1, y - 1, 3, 3)), vec![], vec![Act::Add("area".into(), 1)]);
+        let on_cell = trig("cell", When::HeroEnters(Place::Cell(x, y)), vec![], vec![Act::Add { name: "hits".into(), value: 1, min: None, max: None }]);
+        let mut on_area = trig("area", When::HeroEnters(Place::Area(x - 1, y - 1, 3, 3)), vec![], vec![Act::Add { name: "area".into(), value: 1, min: None, max: None }]);
         on_area.once = false;
         g.attach_story(story(&[("hits", VarValue::Int(0)), ("area", VarValue::Int(0))], vec![on_cell, on_area], vec![dialog("d", vec![])]));
         g.story_events(When::HeroEnters(Place::Cell(x, y)));
@@ -1618,8 +1726,8 @@ mod tests {
     fn a_choice_runs_its_triggers_and_the_others_do_not() {
         let mut g = game();
         let d = dialog("d", vec![choice("a", vec![], vec![]), choice("b", vec![], vec![])]);
-        let on_a = trig("on_a", When::DialogChoice { dialog: "d".into(), choice: "a".into() }, vec![], vec![Act::Add("a".into(), 1)]);
-        let on_b = trig("on_b", When::DialogChoice { dialog: "d".into(), choice: "b".into() }, vec![], vec![Act::Add("b".into(), 1)]);
+        let on_a = trig("on_a", When::DialogChoice { dialog: "d".into(), choice: "a".into() }, vec![], vec![Act::Add { name: "a".into(), value: 1, min: None, max: None }]);
+        let on_b = trig("on_b", When::DialogChoice { dialog: "d".into(), choice: "b".into() }, vec![], vec![Act::Add { name: "b".into(), value: 1, min: None, max: None }]);
         g.attach_story(story(&[("a", VarValue::Int(0)), ("b", VarValue::Int(0))], vec![on_a, on_b], vec![d]));
         g.answer_story_dialog("d", Some("b"));
         assert_eq!(g.story_var("a"), Some(VarValue::Int(0)));
@@ -1677,7 +1785,7 @@ mod tests {
         g.act(&Act::Spawn { army: 201, at: (3, 3), faction: 4, model: 5, troops: troops.clone() }, &s, &mut q);
         assert_eq!(g.world.armies.len(), n, "an id in use spawns nothing");
         assert!(g.holds(&Cond::ArmyAt(201, Place::Cell(3, 3))));
-        assert!(g.holds(&Cond::ArmyAlive(201)));
+        assert!(g.holds(&Cond::ArmyAlive(201, true)));
         g.act(&Act::TeleportArmy(201, Dest::Cell(4, 4)), &s, &mut q);
         assert!(g.holds(&Cond::ArmyAt(201, Place::Area(4, 4, 1, 1))), "teleported");
         g.act(&Act::RemoveArmy(201), &s, &mut q);
@@ -1870,9 +1978,9 @@ mod wish_tests {
         assert_ne!(before, after, "the garrison's units gain experience");
 
         g.world.locations[0].garrison.push(Troop { named: 200, ..Troop::new(unit("knight"), 1, Slot::new(Row::Front, 5)) });
-        let named = Cond::HasNamed { named: 200, unit: unit("knight"), who: Who::Garrison(b) };
+        let named = Cond::HasNamed { named: 200, unit: unit("knight"), who: Who::Garrison(b), present: true };
         assert!(g.holds(&named), "a named character of the garrison");
-        assert!(!g.holds(&Cond::HasNamed { named: 200, unit: unit("knight"), who: Who::Player }), "not in the hero's army");
+        assert!(!g.holds(&Cond::HasNamed { named: 200, unit: unit("knight"), who: Who::Player, present: true }), "not in the hero's army");
     }
 
     #[test]
@@ -1884,8 +1992,8 @@ mod wish_tests {
         g.act(&Act::Spawn { army: 201, at: (3, 3), faction: 4, model: 5, troops: vec![unit("knight")] }, &s, &mut q);
         let i = g.world.armies.iter().position(|a| a.id == 201).expect("spawned");
         g.world.armies[i].troops.push(Troop { named: 201, ..Troop::new(unit("knight"), 1, Slot::new(Row::Front, 5)) });
-        assert!(g.holds(&Cond::HasNamed { named: 201, unit: unit("knight"), who: Who::Army(201) }));
-        assert!(!g.holds(&Cond::HasNamed { named: 202, unit: unit("knight"), who: Who::Army(201) }));
+        assert!(g.holds(&Cond::HasNamed { named: 201, unit: unit("knight"), who: Who::Army(201), present: true }));
+        assert!(!g.holds(&Cond::HasNamed { named: 202, unit: unit("knight"), who: Who::Army(201), present: true }));
     }
 
     #[test]
@@ -1903,9 +2011,9 @@ mod wish_tests {
         assert_eq!(g.world.armies[i].mind.pace, 150);
         g.act(&Act::ArmySpeed { army: 201, percent: 100 }, &s, &mut q);
         assert_eq!(g.world.armies[i].mind.pace, 0, "the normal pace is not stored");
-        g.act(&Act::ArmyFigure { army: 201, unit: unit("knight") }, &s, &mut q);
+        g.act(&Act::ArmyFigure { army: 201, figure: FigureOf::Unit(unit("knight")) }, &s, &mut q);
         assert_eq!(figure_of(&g, 201), Some(6), "a knight's army shows the knight figure");
-        g.act(&Act::HeroFigure(Some(unit("knight"))), &s, &mut q);
+        g.act(&Act::HeroFigure(Some(FigureOf::Unit(unit("knight")))), &s, &mut q);
         assert_eq!(g.triggers.hero_sheet, Some(6));
         g.act(&Act::HeroFigure(None), &s, &mut q);
         assert_eq!(g.triggers.hero_sheet, None, "default restores");
@@ -1920,7 +2028,7 @@ mod wish_tests {
     fn army_arrives_fires_on_its_cell_and_on_its_building() {
         let mut g = game();
         let b = g.world.locations[0].id;
-        let count = |name: &str| Trigger { id: name.into(), when: When::ArmyArrives { army: 201, at: None, building: None }, cond: vec![], then: vec![Act::Add(name.into(), 1)], once: false, chance: 100 };
+        let count = |name: &str| Trigger { id: name.into(), when: When::ArmyArrives { army: 201, at: None, building: None }, cond: vec![], then: vec![Act::Add { name: name.into(), value: 1, min: None, max: None }], once: false, chance: 100 };
         let mut on_cell = count("cell");
         on_cell.when = When::ArmyArrives { army: 201, at: Some((9, 9)), building: None };
         let mut in_building = count("house");
@@ -1960,5 +2068,78 @@ mod wish_tests {
         let c = Content::builtin();
         assert_eq!(Army::figure_of_unit(&c, unit("knight")), 6, "an ordinary unit: the knight figure");
         assert_eq!(Army::figure_of_unit(&c, UnitId(2)), 10, "the archmage's own unit: the mage figure, as the loader gives it");
+    }
+
+    #[test]
+    fn an_army_model_is_a_figure_of_its_own_picture() {
+        assert_eq!(Army::figure_of_model(1), 0, "knight");
+        assert_eq!(Army::figure_of_model(5), 4, "bandits: the Rogue");
+        assert_eq!(Army::figure_of_model(6), 5, "peasants");
+        assert_eq!(Army::figure_of_model(4), 6, "feudal: the Knight");
+        assert_eq!(Army::figure_of_model(10), 7, "necromancer");
+        assert_eq!(Army::figure_of_model(12), 8, "zombies");
+        assert_eq!(Army::figure_of_model(11), 9, "ghosts");
+        assert_eq!(FigureOf::Unit(unit("bandit")).index(&Content::builtin()), 6, "a bandit unit draws the knight, as the loader does");
+        assert_eq!(FigureOf::Model(5).index(&Content::builtin()), 4);
+    }
+
+    #[test]
+    fn add_clamps_the_result_to_its_bounds() {
+        let mut g = game();
+        let s = Story::default();
+        let mut q = std::collections::VecDeque::new();
+        g.triggers.vars.insert("crown".into(), VarValue::Int(4));
+        g.act(&Act::Add { name: "crown".into(), value: 3, min: Some(-5), max: Some(5) }, &s, &mut q);
+        assert_eq!(g.var_int("crown"), 5, "clamped at the top");
+        g.act(&Act::Add { name: "crown".into(), value: -20, min: Some(-5), max: Some(5) }, &s, &mut q);
+        assert_eq!(g.var_int("crown"), -5, "clamped at the bottom");
+        g.act(&Act::Add { name: "crown".into(), value: 2, min: None, max: None }, &s, &mut q);
+        assert_eq!(g.var_int("crown"), -3, "no bounds: plain");
+    }
+
+    #[test]
+    fn a_named_character_who_died_is_not_in_the_army_any_more() {
+        let mut g = game();
+        g.attach_story(story());
+        let s = g.story.clone().unwrap();
+        let mut q = VecDeque::new();
+        g.act(&Act::Spawn { army: 201, at: (3, 3), faction: 4, model: 5, troops: vec![unit("knight")] }, &s, &mut q);
+        let i = g.world.armies.iter().position(|a| a.id == 201).expect("spawned");
+        g.world.armies[i].troops.push(Troop { named: 201, ..Troop::new(unit("knight"), 1, Slot::new(Row::Front, 5)) });
+        let here = Cond::HasNamed { named: 201, unit: unit("knight"), who: Who::Army(201), present: true };
+        assert!(g.holds(&here), "alive: in the army");
+        g.world.armies[i].troops.iter_mut().find(|t| t.named == 201).expect("the named troop").died_at = Some(1);
+        assert!(!g.holds(&here), "dead in battle: not in the army");
+        assert!(g.holds(&Cond::HasNamed { named: 201, unit: unit("knight"), who: Who::Army(201), present: false }), "its absence holds");
+    }
+
+    #[test]
+    fn remove_unit_takes_the_named_character_out_and_his_items_to_the_pack() {
+        let mut g = game();
+        g.attach_story(story());
+        let s = g.story.clone().unwrap();
+        let mut q = VecDeque::new();
+        g.act(&Act::Spawn { army: 202, at: (3, 3), faction: 4, model: 5, troops: vec![unit("knight")] }, &s, &mut q);
+        let i = g.world.armies.iter().position(|a| a.id == 202).expect("spawned");
+        let item = ItemId(200);
+        let mut worn = [None; crate::rules::items::MAX_SLOTS];
+        worn[0] = Some(item);
+        g.world.armies[i].troops.push(Troop { named: 200, worn, ..Troop::new(unit("knight"), 1, Slot::new(Row::Front, 5)) });
+        assert!(g.holds(&Cond::HasNamed { named: 200, unit: unit("knight"), who: Who::Army(202), present: true }));
+        g.act(&Act::RemoveUnit { named: 200, who: Who::Army(202) }, &s, &mut q);
+        assert!(!g.world.armies[i].troops.iter().any(|t| t.named == 200), "the named character leaves the army");
+        assert!(g.pack.contains(item), "his worn item goes to the pack");
+    }
+
+    #[test]
+    fn a_name_is_looked_up_by_its_key_then_its_map_then_any_chapter() {
+        let mut t = BTreeMap::new();
+        t.insert("marka.named.ilm".to_string(), "Brother Ilm".to_string());
+        t.insert("camp.named.kord".to_string(), "Kord".to_string());
+        assert_eq!(named_text(&t, "ilm", "marka"), "Brother Ilm", "the map's own chapter block");
+        assert_eq!(named_text(&t, "ilm", "salt"), "Brother Ilm", "another chapter's block");
+        assert_eq!(named_text(&t, "tess", "salt"), "tess", "no name: the id");
+        t.insert("named.ilm".to_string(), "Ilm".to_string());
+        assert_eq!(named_text(&t, "ilm", "salt"), "Ilm", "the package-wide key first");
     }
 }

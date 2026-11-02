@@ -403,7 +403,7 @@ fn check_cond(pkg: &Package, cond: &pt::Cond, line: u32, r: &mut Report) {
                 }
             }
         },
-        pt::Cond::ArmyAt { .. } | pt::Cond::ArmyAlive(_) | pt::Cond::BuildingOwner { .. } | pt::Cond::HeroAt(_) => {
+        pt::Cond::ArmyAt { .. } | pt::Cond::ArmyAlive { .. } | pt::Cond::BuildingOwner { .. } | pt::Cond::HeroAt(_) => {
             r.error_hint(FILE, Some(line), "a campaign condition names no army, building or place", "use a variable, gold, an item or a spell: the map's own conditions are in its triggers");
         }
         _ => {}

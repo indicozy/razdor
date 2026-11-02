@@ -246,6 +246,26 @@ mod tests {
         Some((g, opened, install))
     }
 
+    /// Varga's id: the package numbers its named characters by first mention (Ilm is first, in
+    /// chapter 3а's triggers), so she is found by her name.
+    fn varga_id(g: &Game) -> u8 {
+        let story = g.story().expect("the story is attached");
+        crate::rules::triggers::PACKAGE_BASE + story.named.iter().position(|n| n == "Varga").expect("Varga is a named character") as u8
+    }
+
+    /// The id of the bog charm (the package numbers its items by file order: chapter 1's is not first).
+    fn bog_charm(g: &Game) -> u32 {
+        let content = &g.content;
+        (200..256).find(|&i| content.try_item(crate::rules::content::ItemId(i)).is_some_and(|d| d.name == "Bog charm")).expect("the bog charm is an item")
+    }
+
+    /// The id of the package army `host` (armies are numbered by their first spawn: chapter 1's is
+    /// not the first in file order).
+    fn host_id(g: &Game) -> u8 {
+        let story = g.story().expect("the story is attached");
+        story.army_names.iter().find(|(_, n)| n.as_str() == "host").map(|(id, _)| *id).expect("the host is a package army")
+    }
+
     /// The dialogs among `events`, by id.
     fn dialogs(events: Vec<Event>) -> Vec<String> {
         events.into_iter().filter_map(|e| if let Event::Package(d) = e { Some(d.id) } else { None }).collect()
@@ -271,7 +291,7 @@ mod tests {
         g.answer_story_dialog("arrival", None);
         assert_eq!(dialogs(g.story_events(When::HeroEnters(Place::Cell(33, 19)))), ["varga_meet"], "the ruins by the road");
         g.answer_story_dialog("varga_meet", Some("join"));
-        assert!(g.squad.iter().any(|u| u.named == 200), "Varga joins the hero's army");
+        assert!(g.squad.iter().any(|u| u.named == varga_id(g)), "Varga joins the hero's army");
         let gold = g.gold;
         assert_eq!(dialogs(g.story_events(When::HeroEnters(Place::Cell(35, 23)))), ["toll"], "the toll, as the hero nears the bandits");
         g.answer_story_dialog("toll", Some("fight"));
@@ -281,15 +301,15 @@ mod tests {
         g.answer_story_dialog("marsh_plea", Some("help"));
         let thanks = beat(g, 2);
         assert_eq!(dialogs(thanks), ["marsh_thanks"], "Tess is named");
-        assert!(g.squad.iter().any(|u| u.named == 200 && u.items.contains(&Some(crate::rules::content::ItemId(200)))), "the charm goes to Varga");
+        assert!(g.squad.iter().any(|u| u.named == varga_id(g) && u.items.contains(&Some(crate::rules::content::ItemId(bog_charm(g))))), "the charm goes to Varga");
         assert_eq!(g.story_var("marsh_trust"), Some(crate::pack::triggers::VarValue::Int(2)));
         assert_eq!(dialogs(g.story_events(When::BuildingCaptured(2))), ["stones"], "the watchtower taken");
         let mut out = Vec::new();
         g.pass_time(14.0 * 24.0 * 60.0, &mut out);
         assert_eq!(g.story_var("dread"), Some(crate::pack::triggers::VarValue::Int(2)), "two weeks of dread");
         assert!(dialogs(out).contains(&"host_rises".to_string()), "the host rises at the ford");
-        assert!(g.triggers.spawned.contains(&200), "the host is on the map");
-        let ended = beat(g, 200);
+        assert!(g.triggers.spawned.contains(&host_id(g)), "the host is on the map");
+        let ended = beat(g, host_id(g));
         assert_eq!(dialogs(ended), ["end_mercy"], "the mill was spared: the mercy ending");
     }
 
@@ -331,8 +351,9 @@ mod tests {
         assert_eq!(b.story_var("marsh_trust"), Some(crate::pack::triggers::VarValue::Int(-1)));
         let mut out = Vec::new();
         b.pass_time(7.0 * 24.0 * 60.0, &mut out);
-        assert!(b.triggers.spawned.contains(&200), "the host rises at the first week with dread 2 or more");
-        assert_eq!(dialogs(beat(&mut b, 200)), ["end_fire"], "the mill burned: the fire ending");
+        assert!(b.triggers.spawned.contains(&host_id(&b)), "the host rises at the first week with dread 2 or more");
+        let host = host_id(&b);
+        assert_eq!(dialogs(beat(&mut b, host)), ["end_fire"], "the mill burned: the fire ending");
         assert_eq!(b.story_end(), Some(Ending::Victory));
         all.extend(fired(&b));
 

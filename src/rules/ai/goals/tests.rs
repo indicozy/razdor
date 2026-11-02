@@ -54,7 +54,7 @@ fn tile_of(g: &Game, id: u8) -> Tile {
 fn counting(when: When) -> Story {
     Story {
         vars: BTreeMap::from([("n".to_string(), (VarKind::Int, VarValue::Int(0)))]),
-        triggers: vec![Trigger { id: "count".into(), when, cond: vec![], then: vec![Act::Add("n".into(), 1)], once: false, chance: 100 }],
+        triggers: vec![Trigger { id: "count".into(), when, cond: vec![], then: vec![Act::Add { name: "n".into(), value: 1, min: None, max: None }], once: false, chance: 100 }],
         dialogs: Vec::new(),
         seed: 7,
         ..Story::default()

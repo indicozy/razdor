@@ -292,6 +292,16 @@ impl Game {
     /// Runs the `army_arrives` triggers for the arrivals queued in this AI tick, each at its
     /// minute, and hands their dialogs to the tick's events (`ai_events`). Each arrival is traced
     /// (`razdor-pack sim --trace`).
+    /// The `building_lost` moments of the buildings the AI took from the player this tick, once
+    /// the tick is over (their triggers may move armies, so they do not run inside the AI's loop).
+    pub(crate) fn flush_lost_buildings(&mut self) {
+        let lost = std::mem::take(&mut self.triggers.lost);
+        for b in lost {
+            let events = self.story_events(When::BuildingLost(b));
+            self.ai_events.extend(events);
+        }
+    }
+
     pub(crate) fn flush_goal_arrivals(&mut self) {
         let arrivals = std::mem::take(&mut self.triggers.arrivals);
         if arrivals.is_empty() {

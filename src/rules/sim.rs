@@ -14,6 +14,7 @@ use crate::rules::clock::MINUTES_PER_DAY;
 use crate::rules::content::{Content, HeroClass};
 use crate::rules::game::{Event, Game};
 use crate::rules::script::ScriptEnd;
+use crate::rules::triggers::When;
 use crate::rules::triggers::{Ending, PendingDialog, Story, Trace};
 
 /// What [`play_days`] saw on one scenario.
@@ -45,6 +46,8 @@ pub struct DaysRun {
 pub struct StoryPlay<'a> {
     pub story: Story,
     pub trace: bool,
+    /// Variables forced before the story starts (`razdor-pack sim --set`): a developer switch.
+    pub preset: Vec<(String, crate::pack::triggers::VarValue)>,
     pub pick: &'a mut dyn FnMut(&PendingDialog) -> Option<String>,
 }
 
@@ -68,6 +71,10 @@ pub fn play_days_with(c: &Arc<Content>, s: &Scenario, hero: HeroClass, days: u64
     let mut g = Game::from_scenario(c.clone(), s, hero);
     if let Some(p) = story.as_mut() {
         g.attach_story(p.story.clone());
+        // Forced before the story starts, so its game_start moment sees them (`--set`).
+        for (name, value) in &p.preset {
+            g.triggers.vars.insert(name.clone(), value.clone());
+        }
         if p.trace {
             g.triggers.trace = Some(Vec::new());
         }
@@ -177,9 +184,17 @@ pub fn play_campaign_map(g: &mut Game, days: u64, auto_win_after: Option<u64>, p
     let end = start + (days * MINUTES_PER_DAY) as f64;
     let day_now = |g: &Game| (g.clock.total_minutes() - start) / MINUTES_PER_DAY as f64;
     let mut calls = 0;
+    let mut auto_fired = false;
     while g.clock.total_minutes() < end && calls < 200_000 {
         calls += 1;
-        if auto_win_after.is_some_and(|d| day_now(g) >= d as f64) {
+        if !auto_fired && auto_win_after.is_some_and(|d| day_now(g) >= d as f64) {
+            // The story gets its moment first: a chapter's last dialog (a council, a sim end) plays
+            // as the victory would have, and an ending it reaches ends the campaign instead.
+            auto_fired = true;
+            let events = g.story_events(When::SimVictory);
+            answer_picks(g, events, pick);
+        }
+        if auto_fired && g.triggers.ending.is_none() {
             g.triggers.ended.get_or_insert(Ending::Victory);
         }
         match g.script_end() {

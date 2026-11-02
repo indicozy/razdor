@@ -83,6 +83,11 @@ Every text key used (the manifest's `title` and `description`, a unit's or item'
 `description`) must exist in at least one language (error), and in every language (warning
 listing the languages that lack it).
 
+**Named characters' names.** A named character (`named = "<id>"`) takes its display name from the text key
+`named.<id>`; else from `<map>.named.<id>` of the map the story runs on; else from the first key `<block>.named.<id>`
+of any chapter in key order (so a later chapter can name the character it brings: `[marka.named] ilm = "Brother Ilm"`);
+else the id itself. The rule is `rules::triggers::named_text`.
+
 ## Units: `units/*.toml`
 
 Each file holds `[[unit]]` tables (any file under `units/` with a `.toml` extension; other files
@@ -208,6 +213,8 @@ then = [ { give_gold = -20 } ]                      # optional actions
 | `building_captured` | `building` | the hero takes a building (walking in, or its garrison beaten) |
 | `dialog_choice` | `dialog`, `choice` | the player picks that choice |
 | `var_changed` | `var` | a variable changes value |
+| `building_lost` | `building` | the player's building changes owner: the AI takes it (after the AI's tick), or a `set_faction` takes it |
+| `sim_victory` | | developer only: `razdor-pack sim --auto-win-after` raises it before a map's victory, so a story can play its last dialog (the game never raises it) |
 
 ### Conditions (`if`): all must hold, checked in order
 
@@ -217,10 +224,10 @@ then = [ { give_gold = -20 } ]                      # optional actions
 | `random` | | true with that percent (the package generator) |
 | `hero_at` | the place: `[x, y]` or `[x, y, w, h]` | the hero stands there |
 | `army_at` | `army` (a spawned or scenario army id), `at` | the army is on the map at that place |
-| `has_named_unit` | `named` (the character's id), `unit`, and `in` (the hero's army by default, or an army id) or `garrison` (a building id) | a named character of that unit type is in that army or garrison |
+| `has_named_unit` | `named` (the character's id), `unit`, and `in` (the hero's army by default, or an army id) or `garrison` (a building id), `value` (true by default; `false` for the absence) | a named character of that unit type is in that army or garrison, and alive (a named character who died in battle is not) |
 | `has_item` | `in` (`player`, the default, `pack`, an army id) or `garrison` (a building id) | the item is in the pack or worn by that holder's units (a garrison's pack too) |
 | `gold` | `op` (default `>=`) | the hero's gold compares with the number |
-| `army_alive` | | the army exists and is not beaten |
+| `army_alive` | `value` (true by default; `false` for the absence) | the army exists and is not beaten (`value = false`: it is gone) |
 | `building_owner` | `faction` (`player`, `ally`, `neighbour`, `enemy`, or 1 to 4) | the building's faction |
 | `has_spell` | `in` (`player` or an army id; default `player`), or `garrison` (a building id), `all` (default false) | a unit holds the spell (in its slots, not expired); `all` for every unit |
 
@@ -229,7 +236,7 @@ then = [ { give_gold = -20 } ]                      # optional actions
 | Kind | Arguments | Effect |
 |---|---|---|
 | `set` | `value` | a variable gets a value (its change fires `var_changed`) |
-| `add` | `value` | a number variable grows |
+| `add` | `value`, and optionally `min` and `max` | a number variable grows; with `min` and/or `max` the result is clamped to them (`{ add = "crown", value = 1, min = -5, max = 5 }`) |
 | `random_var` | `min`, `max` | a number variable gets a random value in the range |
 | `dialog` | | opens the dialog (its choices visible now) |
 | `give_gold` | | the hero's gold (negative takes; never below 0) |
@@ -248,8 +255,9 @@ then = [ { give_gold = -20 } ]                      # optional actions
 | `remove_spell_from_book` | the spell | the hero's spell book drops it |
 | `army_goal` | the army is the value; exactly one of: `go_to = [x, y]`, `go_to_building = "<building>"`, `follow = "hero"` or an army id, `patrol = [[x, y], …]` (at least two cells), `attack = "hero"` or an army id, `clear = true` | the army walks to the goal instead of the AI's own choice (see below) |
 | `army_speed` | the army is the value, `percent = n` (10 to 1000, 100 normal) | the army's map steps take 100/n of their time (saved) |
-| `hero_figure` | `"default"` or a unit `dt:<alias>` | the hero is drawn with that unit's map figure (saved) |
-| `army_figure` | the army is the value, `unit = "dt:<alias>"` | the army is drawn with that unit's map figure (saved) |
+| `hero_figure` | `"default"`, a unit `dt:<alias>`, or `{ model = "<army model>" }` | the hero is drawn with that unit's map figure, or an army model's (saved) |
+| `army_figure` | the army is the value, `unit = "dt:<alias>"` or `model = "<army model>"` | the army is drawn with that unit's map figure, or an army model's (saved) |
+| `remove_unit` | the named character is the value, `in` (the hero's army by default, or an army id) or `garrison` (a building id) | the named character leaves that holder; his worn items go to the pack |
 | `victory` / `defeat` | `= true` | the scenario ends (after the dialogs shown; the first ending holds) |
 | `victory` | `= true`, `next = "<map>"` | the same victory, and the campaign goes to that map (the override of `campaign.toml`, «Campaigns») |
 | `travel` | `= "<map>"`, `at = "<point-id>"` (optional) | the campaign leaves this map for that one, at its point (else its start), once the dialogs are read («Campaigns») |
@@ -557,6 +565,9 @@ as data.
   none), `random` (a seeded rule: the same answers every run), or `dialog=choice,…` (the choice
   named, if it shows, else the first). Needs `RAZDOR_DT_DIR`. Exit 1 on a panic, a softlock or a
   check error.
+- `razdor-pack sim … --set var=value` (repeatable): forces a story variable before the story starts, so its
+  `game_start` triggers see it (a developer switch to drive branches). On a campaign it is set for the first map and
+  carries on. `--auto-win-after` raises `sim_victory` before a map's victory is taken (a developer moment).
 - `razdor-pack play <folder-or-.rzpack> [--map <id>]`: runs `razdor --pack <path> [--map <id>]`, the
   `razdor` binary next to this one.
 - `razdor --pack <folder-or-.rzpack> [--map <id>]` (or `RAZDOR_PACK`, `RAZDOR_PACK_MAP`): starts a

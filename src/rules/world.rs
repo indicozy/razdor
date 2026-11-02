@@ -821,6 +821,25 @@ impl Army {
         special_figure(content, unit.0.saturating_sub(1)).unwrap_or(6)
     }
 
+    /// The map figure of an army model (its `ArmyModel` code, 1 to 12, as a package names it: its
+    /// `model = "…"`). Each model is drawn with the figure of its picture (the editor's stems,
+    /// `ui::world_view::figure_stem`): the heroes' three, the feudal Knight (the loader's figure for
+    /// a feudal army), the Rogue (bandits), the Peasant, and the undead. A code that is not drawn
+    /// as a figure (inactive, lantern, event point) gets the Knight's.
+    pub fn figure_of_model(code: u8) -> u8 {
+        match code {
+            1 => 0,
+            2 => 1,
+            3 => 2,
+            5 => 4,
+            6 => 5,
+            10 => 7,
+            11 => 9,
+            12 => 8,
+            _ => 6,
+        }
+    }
+
     /// The figure of an army loaded afloat, by its ship byte 72 (0x4b4a90): 0 and 1 the
     /// hero's galley (3), 2 the pirate (12), 3 the merchant (11); another value keeps its
     /// land figure.
@@ -1587,7 +1606,9 @@ impl World {
             patrol_radius: 0,
             troops,
             faction,
-            attitude: if faction == 1 { 3 } else { -3 },
+            // The loader's rule (`relation`, 0x4a0868): the player's attitude to the faction, from the
+            // scenario's matrix. A spawned army was always hostile before: a package's ally was an enemy.
+            attitude: relation(player_attitude_to(&self.relations, faction), 0),
             gold: 0,
             items: Vec::new(),
             speed,
