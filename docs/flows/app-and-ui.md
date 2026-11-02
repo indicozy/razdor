@@ -665,7 +665,7 @@ once in `<hub>/previews/<sha256>.png` and drawn at the top of the right panel (`
 `ensure_preview`), and, for a mod, `base` (the base it is made for; nothing checks it). An optional `picture`
 (the map's own LIT picture in the `.DTm`, made by `razdor --map-picture`, `hub::export_cli`; the same checks and
 caching as `preview`) is what newer clients show in its place; older ones ignore it. An optional `about` ({ru, en}: the map's own story, its `.DTm` description, a
-campaign's first chapter's) is read into `Entry::about` but not drawn yet (the window shows `description` only). An optional `rating`
+campaign's first chapter's) is drawn first in the details (`details`), the post's text (`description`) after it under «Из поста автора»; without it the description alone, as before. An optional `rating`
 ({up, down}: the 👍/👎 on its Discord post, absent when it has none) shows in the row (`· +up / -down`) and in the
 panel («Оценка в Discord»); the list is sorted by `hub::by_rating`: rated first by score (up minus down), then by
 votes, unrated after, ties by the Russian title. A mod file
@@ -689,7 +689,7 @@ drag and picks nothing; a press released where it began without a drag picks tha
 before) and the scrollbar beside them (24 dp wide on a phone). The pane holds the whole entry (picture,
 status, the mods it needs, description, the reason an install is refused) and is clipped above the bottom
 row, so no text reaches Install or Remove; words too long for its width (a link) are broken there
-(`wrap_long`). The pane's scroll starts at the top for each new pick. On a phone held upright (`Lay::narrow`) the pane is drawn larger (Razdor's): the picture spans the pane's width up to 45% of its height (no 150-unit cap), the title is 24 units, the info lines 15 and the description 16, drawn with `dt_font::legacy_metrics_if` so the original font's native size does not snap them back, and a gold rule with «Описание» sets the description apart. The list's arrows still move one row.
+(`wrap_long`). The pane's scroll starts at the top for each new pick. On a phone held upright (`Lay::narrow`) the pane is a card (Razdor's): the picture (`shown_picture`: `picture`, else `preview`) spans the pane's width up to 45% of its height, its centre band cropped, with a dark fade over its bottom half and the title over it in the title font (`Face::Title`, the largest of 28, 24, 20 units that keeps it on one line, else two, else three lines; no picture: the title centered at the top); under it «Автор: …» between gold rules, tags (kind, version, date, rating, short status) in centred rows, the status note, a diamond rule, then the story and the post's text. Info lines are 15 units and the story 16, drawn with `dt_font::legacy_metrics_if` so the original font's native size does not snap them back. The list's arrows still move one row.
 
 **Stacked mods**: a mod that requires others is laid over them: `layer_chain` orders its `requires` chain
 (each requirement after its own, each once, like `plan_install`; a missing one or a circle is refused

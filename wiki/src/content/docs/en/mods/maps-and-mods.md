@@ -35,7 +35,9 @@ Select an entry, and its details open on the right:
 * languages;
 * the description from the author's Discord post.
 
-On a phone held upright the details open in place of the list: the picture spans the full width, and the title and text are large; "To the list" goes back.
+When a map has its own picture and story (the intro from the map itself), those are shown, and the author's post comes after them under "From the author's post".
+
+On a phone held upright the details open in place of the list as a card: the picture spans the full width with the title over it, then the author and framed tags, then the story and the author's post; "To the list" goes back.
 
 ## Installing and removing
 

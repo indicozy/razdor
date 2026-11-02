@@ -16,7 +16,7 @@ use std::sync::mpsc::{channel, Receiver};
 
 use macroquad::prelude::*;
 
-use razdor::hub::{self, Catalog, Entry, Hub, Installed, Kind, PlanError, Source, Status};
+use razdor::hub::{self, Catalog, Entry, FileRef, Hub, Installed, Kind, PlanError, Source, Status};
 use razdor::i18n::{lang, tr};
 use razdor::trf;
 
@@ -94,6 +94,12 @@ struct Drag {
 /// the pane instead, the full width.
 const PREVIEW_H: f32 = 150.0;
 
+/// The picture shown for an entry: the map's own picture when the catalog has one, else the
+/// post's image (`preview`).
+fn shown_picture(e: &Entry) -> Option<&FileRef> {
+    e.picture.as_ref().or(e.preview.as_ref())
+}
+
 /// Keeps the picked entry's picture: loaded from the cache, or downloaded on a thread (once,
 /// into the cache) when it is not there yet. A download that fails leaves no picture.
 fn ensure_preview(view: &mut HubView, e: &Entry) {
@@ -109,7 +115,7 @@ fn ensure_preview(view: &mut HubView, e: &Entry) {
         return;
     }
     let mut p = Preview { key, texture: None, job: None };
-    if let (Some(f), Some(hub)) = (e.preview.as_ref(), view.hub.clone()) {
+    if let (Some(f), Some(hub)) = (shown_picture(e), view.hub.clone()) {
         let path = hub::preview_path(&hub.local, f);
         if path.is_file() {
             p.texture = load_texture(&path);
@@ -127,7 +133,7 @@ fn ensure_preview(view: &mut HubView, e: &Entry) {
 
 /// The key of an entry's picture: the entry's id and the picture's SHA-256.
 fn preview_key(e: &Entry) -> String {
-    e.preview.as_ref().map_or_else(|| e.id.clone(), |f| format!("{}:{}", e.id, f.sha256))
+    shown_picture(e).map_or_else(|| e.id.clone(), |f| format!("{}:{}", e.id, f.sha256))
 }
 
 /// A cached PNG as a texture (macroquad decodes PNG and TGA; `None` when it does not read).
@@ -723,7 +729,7 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
     let s = k * lay.g;
     // A phone held upright draws the pane's text larger; elsewhere the sizes are the original's.
     let (title_px, info_px, body_px, info_step, body_step) = if lay.narrow {
-        ((24.0 * s).round(), (15.0 * s).round(), (16.0 * s).round(), 22.0 * s, 24.0 * s)
+        ((28.0 * s).round(), (15.0 * s).round(), (16.0 * s).round(), 22.0 * s, 24.0 * s)
     } else {
         ((18.0 * s).round(), small, size, 18.0 * s, 19.0 * s)
     };
@@ -756,46 +762,179 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
     // font's native size, as item_text does (`dt_font::legacy_metrics_if`).
     let content_h = super::dt_font::legacy_metrics_if(lay.narrow, || {
         let mut y = r.y + 22.0 * s;
-        if e.preview.is_some() {
+        let picture = shown_picture(e).is_some();
+        let loaded = view.preview.as_ref().filter(|p| p.key == preview_key(e)).and_then(|p| p.texture.clone());
+        if picture && !lay.narrow {
             // The picture at the top of the pane: as wide as the pane, at most PREVIEW_H tall (and
-            // 40% of the pane, a phone held sideways), its aspect kept. Room for it is kept while it
-            // loads (a dark frame of 16:9 until then).
-            let loaded = view.preview.as_ref().filter(|p| p.key == preview_key(e)).and_then(|p| p.texture.clone());
+            // 40% of the pane), its aspect kept. Room for it is kept while it loads (a dark frame of
+            // 16:9 until then).
             let (w, h) = loaded.as_ref().map_or((16.0, 9.0), |t| (t.width(), t.height()));
-            // Razdor's phone layout choice: a phone held upright takes 45% of the pane, no PREVIEW_H cap,
-            // so the picture spans the pane's full width.
-            let max_h = if lay.narrow { pane.h * 0.45 } else { (PREVIEW_H * k).min(pane.h * 0.4) };
+            let max_h = (PREVIEW_H * k).min(pane.h * 0.4);
             let scale = (r.w / w).min(max_h / h);
             let (dw, dh) = (w * scale, h * scale);
-            match loaded {
-                Some(t) => draw_texture_ex(&t, r.x, r.y, WHITE, DrawTextureParams { dest_size: Some(vec2(dw, dh)), ..Default::default() }),
+            match &loaded {
+                Some(t) => draw_texture_ex(t, r.x, r.y, WHITE, DrawTextureParams { dest_size: Some(vec2(dw, dh)), ..Default::default() }),
                 None => draw_rectangle(r.x, r.y, dw, dh, Color::new(0.05, 0.04, 0.03, 0.8)),
             }
-            // The title is drawn on its baseline: a phone held upright, whose title is larger, keeps
-            // room for its capitals under the picture.
-            y = r.y + dh + if lay.narrow { 30.0 * s } else { 16.0 * k };
+            y = r.y + dh + 16.0 * k;
         }
-        text_fit(e.title.get(lang()), r.x, y, r.w, title_px, GOLD);
-        y += if lay.narrow { 30.0 * s } else { 22.0 * s };
-        let mut by_line = if e.version.trim().is_empty() {
-            trf!("{kind} by {author}", kind = kind_label(e.kind), author = e.author)
+        if lay.narrow {
+            if picture {
+                // A phone held upright: the picture is the hero, as wide as the pane and at most 45% of
+                // the pane tall, its centre band cropped to that height. The title sits over its bottom half.
+                let (w, h) = loaded.as_ref().map_or((16.0, 9.0), |t| (t.width(), t.height()));
+                let hh = (r.w * h / w).min(pane.h * 0.45);
+                match &loaded {
+                    Some(t) => {
+                        let sh = w * hh / r.w;
+                        let sy = (h - sh) / 2.0;
+                        draw_texture_ex(t, r.x, r.y, WHITE, DrawTextureParams { dest_size: Some(vec2(r.w, hh)), source: Some(Rect::new(0.0, sy, w, sh)), ..Default::default() });
+                    }
+                    None => draw_rectangle(r.x, r.y, r.w, hh, Color::new(0.05, 0.04, 0.03, 0.8)),
+                }
+                // A dark fade over the bottom half, from clear to 85% black: one pixel row at a time on
+                // whole pixels, so no seam between bands shows through the title.
+                let (top, bottom) = ((r.y + hh / 2.0).floor(), (r.y + hh).floor());
+                let rows = (bottom - top).max(1.0);
+                let mut py = top;
+                while py < bottom {
+                    let a = 0.85 * (py - top + 1.0) / rows;
+                    draw_rectangle(r.x, py, r.w, 1.0, Color::new(0.02, 0.03, 0.02, a));
+                    py += 1.0;
+                }
+                draw_rectangle_lines(r.x, r.y, r.w, hh, 2.0 * k, Color::new(0.75, 0.72, 0.62, 0.8));
+                // The title in the title font, centered over the fade: at most two lines, the last one's
+                // baseline 16 units above the picture's bottom, the first 32 units above that.
+                let width = r.w - 24.0 * s;
+                super::dt_font::with_face(super::dt_font::Face::Title, || {
+                    // The largest size that keeps the title on one line (28, 24, then 20 units), else the
+                    // largest that keeps it on two, else three lines at 20; a longer one is cut with an ellipsis.
+                    let title = e.title.get(lang());
+                    let sizes = [title_px, (24.0 * s).round(), (20.0 * s).round()];
+                    let fits = |n: usize| sizes.iter().map(|&z| (z, wrap_long(title, width, z))).find(|(_, l)| l.len() <= n);
+                    let (tz, mut lines) = fits(1).or_else(|| fits(2)).unwrap_or_else(|| (sizes[2], wrap_long(title, width, sizes[2])));
+                    if lines.len() > 3 {
+                        let rest = lines.split_off(2).join(" ");
+                        lines.push(ellipsize(&rest, width, tz));
+                    }
+                    let last = r.y + hh - 16.0 * s;
+                    for (i, l) in lines.iter().enumerate() {
+                        let up = (lines.len() - 1 - i) as f32;
+                        let tx = r.x + (r.w - measure(l, tz).width) / 2.0;
+                        chrome::shadow_text(l, tx, last - up * 32.0 * s * tz / title_px, tz, GOLD);
+                    }
+                });
+                y = r.y + hh + 34.0 * s;
+            } else {
+                // No picture: the title is centered at the top, each line of it, in the title font.
+                super::dt_font::with_face(super::dt_font::Face::Title, || {
+                    for l in wrap_long(e.title.get(lang()), r.w, title_px).iter() {
+                        let tx = r.x + (r.w - measure(l, title_px).width) / 2.0;
+                        chrome::shadow_text(l, tx, y, title_px, GOLD);
+                        y += 30.0 * s;
+                    }
+                });
+            }
+            // Upright: the author is centered between gold rules.
+            let author = trf!("Author: {author}", author = e.author);
+            let aw = measure(&author, info_px).width.min(r.w - 2.0 * (34.0 * s));
+            let ax = r.x + (r.w - aw) / 2.0;
+            text_fit(&author, ax, y, aw, info_px, dim);
+            let mid = y - 0.35 * info_px;
+            let rule = Color::new(0.85, 0.70, 0.35, 0.7);
+            draw_line(ax - 10.0 * s - 24.0 * s, mid, ax - 10.0 * s, mid, 1.0 * k, rule);
+            draw_line(ax + aw + 10.0 * s, mid, ax + aw + 10.0 * s + 24.0 * s, mid, 1.0 * k, rule);
+            y += info_step + 6.0 * s;
+            // The chips: kind, version, date, rating and the status, in rows centered under the author.
+            let mut chips: Vec<(String, Color)> = vec![(kind_label(e.kind).to_string(), dim)];
+            if !e.version.trim().is_empty() {
+                chips.push((format!("v{}", e.version), dim));
+            }
+            if !e.added.is_empty() {
+                chips.push((e.added.clone(), dim));
+            }
+            if let Some(rating) = e.rating {
+                chips.push((format!("+{} / -{}", rating.up, rating.down), GREEN_TEXT));
+            }
+            chips.push(match e.status {
+                Status::Full => (tr("Works fully").into(), GREEN_TEXT),
+                Status::Partial => (tr("Works partly").into(), GOLD),
+                Status::Broken => (tr("Does not start").into(), RED_TEXT),
+                Status::Unknown => (tr("Not checked yet").into(), dim),
+            });
+            let ch = (info_px * 1.8).round();
+            let pad = 10.0 * s;
+            let gap = 8.0 * s;
+            // Each chip's width: its label and a pad either side, never wider than the pane.
+            let widths: Vec<f32> = chips.iter().map(|(l, _)| (measure(l, info_px).width + 2.0 * pad).min(r.w)).collect();
+            let mut rows: Vec<Vec<usize>> = Vec::new();
+            let mut used = 0.0;
+            for (i, w) in widths.iter().enumerate() {
+                match rows.last_mut() {
+                    Some(row) if used + gap + w <= r.w => {
+                        row.push(i);
+                        used += gap + w;
+                    }
+                    _ => {
+                        rows.push(vec![i]);
+                        used = *w;
+                    }
+                }
+            }
+            let mut top = y - info_px;
+            for row in &rows {
+                let total: f32 = row.iter().map(|&i| widths[i]).sum::<f32>() + gap * (row.len() - 1) as f32;
+                let mut cx = r.x + (r.w - total) / 2.0;
+                for &i in row {
+                    let (label, ink) = &chips[i];
+                    let w = widths[i];
+                    draw_rectangle(cx, top, w, ch, Color::new(0.0, 0.0, 0.0, 0.35));
+                    draw_rectangle_lines(cx, top, w, ch, 2.0 * k, Color::new(0.85, 0.70, 0.35, 0.55));
+                    if measure(label, info_px).width + 2.0 * pad <= w {
+                        chrome::shadow_text(label, cx + pad, top + ch / 2.0 + info_px * 0.35, info_px, *ink);
+                    } else {
+                        text_fit(label, cx + pad, top + ch / 2.0 + info_px * 0.35, w - 2.0 * pad, info_px, *ink);
+                    }
+                    cx += w + gap;
+                }
+                top += ch + gap;
+            }
+            // The next line is drawn on its baseline: its capitals start 14 units under the chips.
+            y = top - gap + info_px + 14.0 * s;
+            // A status that is not full says why, under the chips.
+            if matches!(e.status, Status::Partial | Status::Broken) {
+                let note = e.status_note.get(lang());
+                if !note.trim().is_empty() {
+                    let ink = if e.status == Status::Partial { GOLD } else { RED_TEXT };
+                    for l in wrap_long(note, r.w, info_px).iter() {
+                        chrome::shadow_text(l, r.x, y, info_px, ink);
+                        y += info_step;
+                    }
+                }
+            }
         } else {
-            trf!("{kind} by {author}, version {version}", kind = kind_label(e.kind), author = e.author, version = e.version)
-        };
-        if !e.added.is_empty() {
-            by_line = format!("{by_line} · {}", e.added);
-        }
-        text_fit(&by_line, r.x, y, r.w, info_px, dim);
-        y += info_step;
-        if let Some(rating) = e.rating {
-            text_fit(&trf!("Rating on Discord: +{up} / -{down}", up = rating.up, down = rating.down), r.x, y, r.w, info_px, dim);
+            text_fit(e.title.get(lang()), r.x, y, r.w, title_px, GOLD);
+            y += 22.0 * s;
+            let mut by_line = if e.version.trim().is_empty() {
+                trf!("{kind} by {author}", kind = kind_label(e.kind), author = e.author)
+            } else {
+                trf!("{kind} by {author}, version {version}", kind = kind_label(e.kind), author = e.author, version = e.version)
+            };
+            if !e.added.is_empty() {
+                by_line = format!("{by_line} · {}", e.added);
+            }
+            text_fit(&by_line, r.x, y, r.w, info_px, dim);
             y += info_step;
-        }
-        // The status is read whole: its lines wrap.
-        let (words, ink) = status_line(e);
-        for l in wrap_long(&words, r.w, info_px).iter() {
-            chrome::shadow_text(l, r.x, y, info_px, ink);
-            y += info_step;
+            if let Some(rating) = e.rating {
+                text_fit(&trf!("Rating on Discord: +{up} / -{down}", up = rating.up, down = rating.down), r.x, y, r.w, info_px, dim);
+                y += info_step;
+            }
+            // The status is read whole: its lines wrap.
+            let (words, ink) = status_line(e);
+            for l in wrap_long(&words, r.w, info_px).iter() {
+                chrome::shadow_text(l, r.x, y, info_px, ink);
+                y += info_step;
+            }
         }
         if e.kind == Kind::Campaign {
             text_fit(&trf!("Chapters: {n}", n = e.map_count()), r.x, y, r.w, info_px, dim);
@@ -845,17 +984,52 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
         }
 
         // The description, whole (scrolled, not cut): its long words wrap at the pane's width.
+        // The map's own story (`about`) comes first; the post's text (`description`) follows it under a
+        // heading. Without a story the description is drawn alone, as before.
         y += 10.0 * s;
-        if lay.narrow && !e.description.get(lang()).trim().is_empty() {
-            // A phone held upright: a thin gold rule and a heading set the description apart.
-            draw_line(r.x, y - 4.0 * s, r.x + r.w, y - 4.0 * s, 1.0 * k, Color::new(0.85, 0.70, 0.35, 0.6));
+        let story = e.about.get(lang()).trim();
+        let post = e.description.get(lang()).trim();
+        if lay.narrow && (!story.is_empty() || !post.is_empty()) {
+            // A phone held upright: a thin gold rule with a small diamond in its middle sets the text apart.
+            let (cx, cy, half) = (r.x + r.w / 2.0, y - 4.0 * s, 5.0 * s);
+            let rule = Color::new(0.85, 0.70, 0.35, 0.6);
+            let ink = Color::new(0.85, 0.70, 0.35, 0.9);
+            draw_line(r.x, cy, cx - half - 6.0 * s, cy, 1.0 * k, rule);
+            draw_line(cx + half + 6.0 * s, cy, r.x + r.w, cy, 1.0 * k, rule);
+            draw_triangle(vec2(cx - half, cy), vec2(cx, cy - half), vec2(cx, cy + half), ink);
+            draw_triangle(vec2(cx, cy - half), vec2(cx + half, cy), vec2(cx, cy + half), ink);
             y += 18.0 * s;
-            chrome::shadow_text(tr("Description"), r.x, y, info_px, GOLD);
-            y += body_step;
         }
-        for l in wrap_long(e.description.get(lang()), r.w, body_px).iter() {
-            chrome::shadow_text(l, r.x, y, body_px, CREAM);
-            y += body_step;
+        if !story.is_empty() {
+            for l in wrap_long(story, r.w, body_px).iter() {
+                chrome::shadow_text(l, r.x, y, body_px, CREAM);
+                y += body_step;
+            }
+            if !post.is_empty() {
+                let heading = tr("From the author's post");
+                if lay.narrow {
+                    y += 14.0 * s;
+                    text_fit(heading, r.x, y, r.w, info_px, GOLD);
+                    y += info_step;
+                    for l in wrap_long(post, r.w, info_px).iter() {
+                        chrome::shadow_text(l, r.x, y, info_px, dim);
+                        y += info_step;
+                    }
+                } else {
+                    y += 8.0 * s;
+                    text_fit(heading, r.x, y, r.w, small, GOLD);
+                    y += 18.0 * s;
+                    for l in wrap_long(post, r.w, small).iter() {
+                        chrome::shadow_text(l, r.x, y, small, dim);
+                        y += 16.0 * s;
+                    }
+                }
+            }
+        } else {
+            for l in wrap_long(e.description.get(lang()), r.w, body_px).iter() {
+                chrome::shadow_text(l, r.x, y, body_px, CREAM);
+                y += body_step;
+            }
         }
         if e.kind == Kind::Mod {
             y += 8.0 * s;
