@@ -1,70 +1,71 @@
 ---
-title: Overview of features
-description: What Razdor adds to the original Discord Times (Времена раздора).
+title: Feature Overview
+description: What Razdor adds to the original "Discord Times".
 sidebar:
   order: 1
 ---
 
-Razdor plays the original game's scenarios by the original rules. Below is what it adds on top of the original. Bug fixes are not listed here.
+Razdor plays the original game's scenarios using its original rules. Below is what it adds beyond the original. Bug fixes are not listed here.
 
-## Interface and screen
+## Interface and Screen
 
-* **Interface scale** from 1× to 4×; "Auto" is the largest size that fits the window.
-* **Screen:** window, borderless window or full screen (the "Screen" setting).
+* **UI Scale** from 1× to 4×, "Auto" is the largest that fits within the window.
+* **Screen:** window, borderless window, or full screen (via "Screen" settings).
 * **Minimap** can be resized and moved to any corner of the screen.
-* **Closing windows:** a window opened from the bottom bar closes on a click or tap outside it, as Esc does.
-* **Gear filter** (`Ctrl+F`): search items in the backpack and at the market by name, type, stats and description.
-* **Sorting** of goods at the market and in the Sanctuary by name or price.
-* **Battle:** unit cards show changes in stats compared with the start of the battle (blue for a rise, red for a fall); spell icons on the cards.
-* **Revealed places:** a place shown by an event opens from the fog in a circle, from the centre outwards.
-* **Touch modes and gamepads:** gamepad support on Windows, Linux and macOS; a touchpad mode on phones.
+* **Closing windows:** a window opened from the bottom panel can be closed by clicking or tapping outside of it, or by pressing `Esc`.
+* **Equipment Search** (`Ctrl+F`): filters items in your backpack and at the market by name, type, stats, and description.
+* **Sorting** of goods at the market and shrine by name or price.
+* **Combat:** warrior cards show stat changes relative to the start of the battle (blue for increase, red for decrease); spell icons on cards.
+* **Uncovering locations:** a location revealed by an event unfolds from the fog in a circle, from the center to the edges.
+* **Touch modes and gamepads:** gamepad support on Windows, Linux, and macOS; touchpad mode on mobile devices.
 
 ## Convenience
 
-* **Armies:** rearrange units by dragging; pursue a chosen army until you meet it; a route is shown on a click, and a second click sends the hero on it.
-* **Map click** while walking stops the hero; **waiting** is interrupted by a click or a key.
-* **Hero speed:** the «Hero's walking speed» slider goes up to 2× the original's fastest (the slider's middle is the original's maximum).
-* **Hero's journal:** four tabs, "Quests", "Done", "Rumours", "Messages", with game dates.
-* **Saves:** up to 50 of your own and 30 autosaves instead of 12; pin the saves you need; quick save `F5` and quick load `F9`.
-* **Continuing the game:** if the phone unloaded the game from memory or the game crashed, the next launch offers to continue from the same place ([more](/razdor/wiki/en/tutorials/saves/)).
-* **Defeat window:** «Load the last save» loads the newest save of any kind (your own, quick or autosave); «Exit to main menu» is the old «OK».
-* **Backpack:** `Shift`+click equips an item or drinks a potion; `Shift`+click on a worn item takes it off.
-* **Custom battle:** any two armies outside a campaign, with levels and items; a battle code is copied as one line and pasted by another player.
-* **Quick battle:** auto-battle with `Q` or `Enter`; watching a battle (`W`) at 1×, 2× or 4× speed.
-* **New game:** a campaign is grouped as one line; the list can be filtered and sorted; an "Add map…" button.
-* **Experimental scenario rules:** six switches for a new game (see [Experimental rules](/razdor/wiki/en/differences/experimental-rules/)).
-* **Route around armies** and **Keep formation after battle** in the advanced settings.
-* **Minimap corner** in the advanced settings: the minimap can stand in any corner, and **Reset** puts its size and place back to the default.
+* **Armies:** reorder warriors by dragging; pursue a selected army until an encounter occurs; the path is shown on click, and a second click sends the hero on the journey.
+* **Warriors leaving the army:** if a warrior simply leaves the army, their items (except personal ones) are added to the hero's backpack. If a map event transfers a warrior to another army, they leave with their items, as in the original.
+* **Clicking on the map** while walking stops the hero; **waiting** can be interrupted by a click or a keypress.
+* **Hero Speed:** the "Hero Movement Speed" slider goes up to 2× faster than the fastest speed in the original (the middle of the slider is the original maximum).
+* **Hero Log:** four tabs — "Quests", "Completed", "Rumors", "Messages", with entries marked by in-game date.
+* **Saves:** up to 50 manual saves and 30 autosaves instead of 12; pin important saves with a thumbtack; quick save `F5` and quick load `F9`.
+* **Resuming a game:** if your phone clears the game from memory or the game crashes, upon the next launch, it will offer to resume from where you left off ([more details](/razdor/wiki/en/tutorials/saves/)).
+* **Defeat screen:** the "Load last save" button loads the most recent save of any type (manual, quick, or autosave); "Exit to main menu" replaces the old "OK" button.
+* **Backpack:** `Shift`+click equips an item or drinks a potion; `Shift`+click on an equipped item unequips it.
+* **Custom Battle:** any two armies outside of a campaign, with levels and items; the battle code can be copied to a string and pasted for another player.
+* **Quick Battle:** autobattle via `Q` or `Enter`; battle replay (`W`) with 1×, 2×, or 4× speed.
+* **New Game:** campaigns are grouped into a single line; the list can be filtered and sorted; "Add map..." button.
+* **Experimental Scenario Rules:** six toggles for new games; selections are remembered between games (see [Experimental Rules](/razdor/wiki/en/differences/experimental-rules/)).
+* **Bypass armies on path** and **Save formation** in additional settings.
+* **Minimap corner** in additional settings: the minimap can be placed in any corner, and the "Reset" button will return it to its default size and position.
 
 ## Sound
 
-* Music changes with the context, as in the original; volume settings are in the `Esc` menu.
-* More: [Sound and music](/razdor/wiki/en/differences/sound-music/).
+* Music changes based on context, just like in the original; volume settings are in the `Esc` menu.
+* More details: [Sound and Music](/razdor/wiki/en/differences/sound-music/).
 
-## Tools and mods
+## Tools and Mods
 
-* **Map editor** with search (`Ctrl+F`) and an events panel.
-* **Map translator** `razdor-translate` translates maps and game data with a language model.
-* **Cheat console** (the `~` key).
-* **Debug layer** (`F3` on the map) shows events, lanterns and walkable cells.
-* **Mods:** an installed game with a mod (its own `Rus_*.ini`, graphics and maps) is played with the mod's units, items and spells.
-* **Updates:** Razdor checks for new releases on GitHub itself and offers an update.
+* **Map Editor** with map search (`Ctrl+F`) and an event panel.
+* **Map Translator** `razdor-translate` translates maps and game data using a language model.
+* **Cheat Console** (key `~`).
+* **Debug Layer** (`F3` on the map) shows events, lights, and tile passability.
+* **Mods:** a game installed with a mod (custom `Rus_*.ini`, graphics, and maps) is playable with its warriors, items, and spells. The selected mod is visible in the main menu and can be changed directly there.
+* **Updates:** Razdor checks for new releases on GitHub itself and offers updates.
 
 :::note
-Automatic updates on Windows, macOS and Linux need the `curl` program.
+For automatic updates on Windows, macOS, and Linux, the `curl` program is required.
 :::
 
 ## Phones
 
-* **Android** (trial version): the `razdor.apk` file, touch controls, touchpad mode, screen orientation.
-* **iPhone and iPad** (trial version): the `razdor.ipa` file, touch controls.
-* More: [Razdor on Android](/razdor/wiki/en/phones/android/), [Razdor on iOS](/razdor/wiki/en/phones/ios/).
+* **Android** (trial version): `razdor.apk` file, touch controls, touchpad mode, screen orientation.
+* **iPhone and iPad** (trial version): `razdor.ipa` file, touch controls.
+* More details: [Razdor on Android](/razdor/wiki/en/phones/android/), [Razdor on iOS](/razdor/wiki/en/phones/ios/).
 
 ## Game AI
 
-* **Improved intelligence** of the opponent in battle, as in the original's settings.
-* **"Maximum (Razdor)"** — an experimental mode: the enemy works out moves and replies several actions ahead. Chosen in "Advanced…" → "Battle AI strength".
+* **Improved enemy intelligence** in combat, as found in the original settings.
+* **"Maximum (Razdor)"** — an experimental mode: the enemy calculates moves and responses several actions ahead. Selected via "More..." → "Battle AI Strength".
 
 :::caution
-After using the cheat console, the load list marks the save with "(cheats)".
+After using the cheat console, a save file will be marked with "(cheats)" in the load list.
 :::

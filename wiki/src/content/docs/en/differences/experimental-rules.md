@@ -1,53 +1,53 @@
 ---
-title: Experimental scenario rules
-description: The experimental scenario rule switches in Razdor and what each one changes.
+title: Experimental Scenario Rules
+description: Experimental scenario rule toggles in Razdor and what each one changes.
 sidebar:
   order: 2
 ---
 
-On the scenario screen, beside the "Next" button, there is a "..." button. It opens six independent switches that change the game's rules. Razdor adds them; the original has none of them.
+On the scenario screen, next to the "Next" button, there is a "..." button. It opens six independent toggles that change the game rules. Razdor added these; they are not in the original game.
 
 :::caution
-By default, for a new game everything is off except the duplicate-item restriction (the "Allow duplicate items" switch is off). The choices reset when a new game is started from the main menu. Returning from hero selection keeps them. For a game already under way, these switches cannot be changed from this menu.
+By default, for a new game, all six are turned off, except for the restriction on duplicate items (the "Allow duplicate items" toggle is off). Your selection is remembered: it is saved in the settings when closing the window ("OK", Esc, Enter, or the close button) and upon starting a game, so when you next open the list of new games, the toggles will be as you left them, and will remain so after restarting the game. In the scenario list, an orange "Experimental rules enabled" label indicates that a toggle is on. Returning from the hero selection window preserves it. For an already started game, toggles cannot be changed through this menu.
 :::
 
-![Choosing a scenario](../../../../assets/shots/scenarios.webp)
+![Scenario Selection](../../../../assets/shots/scenarios.webp)
 
-## The switches
+## Toggles
 
-* **All special bonuses simultaneously:** a unit keeps the abilities of its type and the abilities of the items it wears. Identical abilities do not stack: a repeated copy does not strengthen the effect.
-* **Six equipment cells:** a unit has six item cells instead of four (a third pair is added).
-* **Allow multiple rings** and **Allow multiple amulets:** these items may occupy any equipment cells. Restrictions by class, magic school, holy items and weapon type still apply.
-* **Allow duplicate items:** off — one unit cannot wear two identical items. On — several copies of one item are allowed, but a unit still has only one weapon.
-* **At most two potions per character:** between battles, an army can drink no more than two potions (healing and revival potions included).
+* **All special bonuses simultaneously:** the fighter retains their type abilities and the abilities of equipped items. Identical abilities do not stack: a duplicate copy does not enhance the effect.
+* **Six equipment slots:** the fighter has six item slots instead of four (a third pair is added).
+* **Allow multiple rings** and **Allow multiple amulets:** these items can occupy any equipment slots. Restrictions on class, magic school, holy items, and weapon type remain.
+* **Allow duplicate items:** if off — a single fighter cannot have two identical items. If on — you can have multiple copies of one item, but the fighter still has only one weapon.
+* **No more than two potions per character:** between army battles, you can drink no more than two potions (including healing and resurrection potions).
 
 :::tip
-The rules apply to all armies: your troops, the opponents and the garrisons.
+Rules apply to all armies: your troops, opponents, and garrisons.
 :::
 
-## Unit battle participation
+## Warrior Participation in Battles
 
-In the advanced settings (the "Advanced…" button in the settings window) there is **"Unit battle participation"**, off by default.
+In the advanced settings (the "More..." button in the settings window), there is a parameter called **"Disable fighters"**, which is off by default.
 
-When it is on, select a living non-hero in the army window and press **"Exclude from battles"** beside the dismiss button. To return a unit to battle, press **"Return to battle"**.
+When it is enabled, select a living non-hero in the army window and click the **"Does not participate in battle"** button next to the disband button. To return a warrior to battle, click **"Return to battle"**.
 
-* A marked unit stays in the squad, keeps its place in the formation and still gets its wages.
-* It does not fight, gets no experience, and is not counted among the battle's participants.
-* The hero cannot be marked.
+* The marked warrior remains in the squad, occupies their cell in the formation, and receives wages.
+* They do not participate in battle, do not gain experience, and are not counted among the battle participants.
+* A hero cannot be excluded.
 
-## Formation and routing around armies
+## Army Deployment and Pathfinding
 
-Two extra Razdor settings are in "Advanced…":
+In the "More..." menu, there are two additional Razdor parameters:
 
-* **"Keep formation after battle"** (on by default): after a battle every unit, including the dead, returns to the cells it held before the fight. When off, units stay in the cells where the battle ended, as in the original.
-* **"Route around armies"** (off by default): when off, the hero walks through the cells of other armies, and a meeting starts a battle, as in the original. When on, the route is searched around armies. If no way around exists, the hero takes the shortest route up to the first army on the way.
+* **"Preserve formation"** (on by default): after a battle, all warriors, including those who perished, return to the cells they occupied before the battle. If off — warriors remain in the cells where they ended the battle, as in the original.
+* **"Avoid armies on path"** (off by default): if off — the hero passes through the cells of other armies, and a battle begins upon encounter, as in the original. If on — the route is searched to bypass armies. If a bypass is impossible, the hero takes the shortest path to the first army encountered.
 
-## Shift shortcuts
+## Quick Actions with Shift
 
-* **Move a unit:** `Shift` and a click on a garrison or squad card moves the unit to a free place in the other formation.
-* **Equip an item:** `Shift` and a click on an item in the backpack equips it on the hero (or drinks it, for a potion).
-* **Take off an item:** `Shift` and a click on a worn item returns it to the backpack.
+* **Moving a warrior:** `Shift` + click on a garrison or squad card moves the warrior to an empty slot in another formation.
+* **Equip item:** `Shift` + click on an item in the backpack equips it to the hero (or drinks a potion).
+* **Unequip item:** `Shift` + click on an equipped item returns it to the backpack.
 
-## «Максимум» guards its casters
+## "Maximum" Protects Mages
 
-The advanced settings («Ещё…») have **«Бережёт магов»** (Guards casters), on by default. When it is on, «Максимум» does not place its mage or healer where one enemy hit kills it, if a move without that exists. The original's AI does not do this; turn the switch off for «Максимум» as before.
+In the advanced settings ("More..."), there is a parameter called **"Protects mages"**, which is on by default. When enabled, "Maximum" will not place their mage or healer where a single enemy strike would kill them, if a move exists that avoids this. The original AI does not do this; disable the parameter to make "Maximum" play as before.
