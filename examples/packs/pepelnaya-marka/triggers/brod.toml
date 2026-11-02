@@ -1,0 +1,195 @@
+# Chapter 1 «Брод»: the variables and the triggers of the map `brod`. Every trigger names its map
+# (`map`), so the package's later maps can share this file. The moments are the game's: the start,
+# the hero's steps, the buildings and armies, each week and each new moon, and the dialogs' answers.
+
+[vars]
+dread = 0              # Страх: +1 each week, +2 when the mill burns; at 2 or more the host rises
+omen = 0               # the new moon's roll: 1 is a bad sign (+1 dread), 3 a gift (+15 gold)
+toll_settled = false   # the ford toll is paid, fought or talked away
+toll_talked = false    # the bandits agreed to leave for a price later (chapter 3в)
+mill_burned = false    # the ruined mill was burned for the gold under it
+varga_joined = false   # Varga walks with the hero
+varga_refused = false  # Varga was sent on her way
+marsh_trust = 0        # the marsh folk's trust: helping them +2, riding past -1
+marsh_hunt = false     # the hero took the marsh folk's quarrel on
+tower_taken = false    # the watchtower is the hero's
+
+# The arrival: the game starts with the officer's orders.
+[[trigger]]
+id = "arrival"
+map = "brod"
+when = { event = "game_start" }
+then = [ { dialog = "arrival" } ]
+
+# The ruins by the road: Varga waits among the burned walls.
+[[trigger]]
+id = "varga_meet"
+map = "brod"
+when = { event = "hero_enters", at = [30, 15, 6, 5] }
+if = [ { var = "varga_joined", value = false }, { var = "varga_refused", value = false } ]
+then = [ { dialog = "varga_meet" } ]
+
+[[trigger]]
+id = "varga_join"
+map = "brod"
+when = { event = "dialog_choice", dialog = "varga_meet", choice = "join" }
+then = [ { set = "varga_joined", value = true } ]
+
+[[trigger]]
+id = "varga_refuse"
+map = "brod"
+when = { event = "dialog_choice", dialog = "varga_meet", choice = "refuse" }
+then = [ { set = "varga_refused", value = true } ]
+
+[[trigger]]
+id = "varga_burn"
+map = "brod"
+when = { event = "dialog_choice", dialog = "varga_meet", choice = "burn" }
+then = [ { set = "varga_refused", value = true } ]
+
+# The ford toll: a bandit band on the road, once the hero comes near it and it still holds the road.
+[[trigger]]
+id = "toll_ford"
+map = "brod"
+when = { event = "hero_enters", at = [31, 21, 5, 5] }
+if = [ { var = "toll_settled", value = false }, { army_at = "toll", at = [29, 23] } ]
+then = [ { dialog = "toll" } ]
+
+[[trigger]]
+id = "toll_pay"
+map = "brod"
+when = { event = "dialog_choice", dialog = "toll", choice = "pay" }
+then = [ { set = "toll_settled", value = true } ]
+
+[[trigger]]
+id = "toll_fight"
+map = "brod"
+when = { event = "dialog_choice", dialog = "toll", choice = "fight" }
+then = [ { set = "toll_settled", value = true } ]
+
+[[trigger]]
+id = "toll_talk"
+map = "brod"
+when = { event = "dialog_choice", dialog = "toll", choice = "talk" }
+then = [ { set = "toll_talked", value = true }, { set = "toll_settled", value = true } ]
+
+[[trigger]]
+id = "toll_beaten"
+map = "brod"
+when = { event = "army_defeated", army = "toll" }
+then = [ { give_gold = 25 }, { set = "toll_settled", value = true } ]
+
+# The Dread: each week one more; at 2 the host of the dead rises at the ford, once.
+[[trigger]]
+id = "dread_week"
+map = "brod"
+when = { event = "week_start" }
+once = false
+then = [ { add = "dread", value = 1 } ]
+
+[[trigger]]
+id = "host_rises"
+map = "brod"
+when = { event = "week_start" }
+if = [ { var = "dread", op = ">=", value = 2 } ]
+then = [
+    { spawn_army = "host", at = [28, 25], faction = "enemy", model = 10, troops = ["dt:death_knight", "dt:ghoul", "dt:ghost"] },
+    { dialog = "host_rises" },
+]
+
+# The marsh folk's village: the wraiths trouble it, and its people ask for help.
+[[trigger]]
+id = "marsh_plea"
+map = "brod"
+when = { event = "hero_enters", at = [4, 34, 12, 12] }
+if = [ { var = "marsh_hunt", value = false } ]
+then = [ { dialog = "marsh_plea" } ]
+
+[[trigger]]
+id = "marsh_help"
+map = "brod"
+when = { event = "dialog_choice", dialog = "marsh_plea", choice = "help" }
+then = [ { set = "marsh_hunt", value = true } ]
+
+[[trigger]]
+id = "marsh_ride_on"
+map = "brod"
+when = { event = "dialog_choice", dialog = "marsh_plea", choice = "ride_on" }
+then = [ { add = "marsh_trust", value = -1 } ]
+
+# The wraiths beaten: the charm goes to Varga when she fought beside him, else to his pack.
+[[trigger]]
+id = "wraiths_helped"
+map = "brod"
+when = { event = "army_defeated", army = "wraiths" }
+if = [ { has_named_unit = "varga", unit = "dt:halberdier" } ]
+then = [
+    { give_item = "marsh_charm", to = "named:varga" },
+    { add = "marsh_trust", value = 2 },
+    { dialog = "marsh_thanks" },
+]
+
+[[trigger]]
+id = "wraiths_helped_alone"
+map = "brod"
+when = { event = "army_defeated", army = "wraiths" }
+if = [ { var = "varga_joined", value = false } ]
+then = [
+    { give_item = "marsh_charm" },
+    { add = "marsh_trust", value = 2 },
+    { dialog = "marsh_thanks" },
+]
+
+[[trigger]]
+id = "marsh_reward"
+map = "brod"
+when = { event = "var_changed", var = "marsh_trust" }
+if = [ { var = "marsh_trust", op = ">=", value = 2 } ]
+then = [ { give_gold = 20 } ]
+
+# The watchtower taken: the standing stones show on the hill (a tease for chapter 4's waygates).
+[[trigger]]
+id = "tower_taken"
+map = "brod"
+when = { event = "building_captured", building = "tower" }
+then = [ { set = "tower_taken", value = true }, { dialog = "stones" } ]
+
+# The new moon: a roll that may bring a bad sign or a gift. Its moments repeat.
+[[trigger]]
+id = "omen_roll"
+map = "brod"
+when = { event = "new_moon" }
+once = false
+chance = 60
+then = [ { random_var = "omen", min = 1, max = 3 } ]
+
+[[trigger]]
+id = "omen_bad"
+map = "brod"
+when = { event = "var_changed", var = "omen" }
+if = [ { var = "omen", value = 1 } ]
+once = false
+then = [ { add = "dread", value = 1 }, { dialog = "omen" } ]
+
+[[trigger]]
+id = "omen_good"
+map = "brod"
+when = { event = "var_changed", var = "omen" }
+if = [ { var = "omen", value = 3 } ]
+once = false
+then = [ { give_gold = 15 }, { dialog = "omen" } ]
+
+# The host defeated at the ford ends the chapter: the victory's look follows what he did with the mill.
+[[trigger]]
+id = "won_fire"
+map = "brod"
+when = { event = "army_defeated", army = "host" }
+if = [ { var = "mill_burned", value = true } ]
+then = [ { dialog = "end_fire" }, { victory = true } ]
+
+[[trigger]]
+id = "won_mercy"
+map = "brod"
+when = { event = "army_defeated", army = "host" }
+if = [ { var = "mill_burned", value = false } ]
+then = [ { dialog = "end_mercy" }, { victory = true } ]

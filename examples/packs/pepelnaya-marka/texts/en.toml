@@ -1,0 +1,86 @@
+# English texts of chapter 1 «Брод». The keys are those of texts/ru.toml.
+
+[story]
+title = "Pepelnaya Marka"
+description = "The first chapter: burned fields, the river Pepelka and three fords."
+
+[map]
+title = "The Ford"
+description = "Burned fields, the river Pepelka and three fords. Bandits hold one of them."
+won = "The ford holds. The barrows remember who stood at the water."
+
+[item.marsh_charm]
+name = "Bog charm"
+description = "A bone plate with a name burned into it. The marsh folk hang these on their thresholds."
+
+[named]
+varga = "Varga"
+
+[building.mill]
+name = "The burnt mill"
+description = "The wheel stands in the stream. They say there is gold under the mill."
+
+[building.tower]
+name = "The watchtower"
+description = "A stone tower over the ford. The Crown's men left it when the dead came."
+
+[building.reedmere]
+name = "Reedmere"
+description = "A village on a dry island in the bog."
+
+[army.toll]
+name = "Bandits at the ford"
+
+[army.wraiths]
+name = "Wraiths of the bog"
+
+[army.barrow_host]
+name = "Barrow host"
+
+[arrival]
+title = "A new posting"
+text = "They sent you to hold the March with a handful of men and an empty purse. Nobody asked whether you wanted it. Across the river, the barrows have stopped being quiet."
+
+[varga_meet]
+title = "The halberdier"
+text = "Among the blackened walls sits a halberdier in a torn cuirass. She is waiting for neither the Order nor the dead. 'The Crown sent you, so you will not last long,' she says. 'Choose.'"
+join = "Walk with me"
+refuse = "Let her go her own way"
+burn = "Burn the ruins: there is gold under them"
+
+[toll]
+title = "The ford"
+text = "A band with spears stands at the ford. Their leader grins: 'There is one crossing, and it is ours. Pay up, officer, or fight.'"
+pay = "Pay twenty gold"
+fight = "Fight"
+talk = "Talk: they leave for a promise"
+
+[marsh_plea]
+title = "The marsh folk"
+text = "An old woman with a soaked hem holds your stirrup. Wraiths come out of the bog every night, and her son did not come back from the last. 'Help us, or ride past. But remember who rode past.'"
+help = "Help her"
+ride_on = "Ride past"
+
+[marsh_thanks]
+title = "The bog's thanks"
+text = "The marsh folk bow and give a name: Tess, the witch's daughter from the far side of the bog. 'She knows the paths through the swamp,' the old woman says. 'She will come when the bog calls her.'"
+
+[host_rises]
+title = "The barrows"
+text = "The earth by the ford hums. From under the burnt fields the dead rise: knights in rusted mail and things that crawl on four legs. They come to the ford, and no one leads them."
+
+[stones]
+title = "The tower and the stones"
+text = "From the tower you can see the standing stones on the hill above the barrows. Their marks can still be read. People say that once someone walked through them without touching the ground. For now, it is only talk."
+
+[omen]
+title = "The new moon"
+text = "The new moon. Someone laughs in the reeds. In the morning there is something on your threshold: a bad sign, or a gift."
+
+[end_fire]
+title = "Smoke over the March"
+text = "The dead lie down at the ford. Smoke still rises from the burnt mill, and the farmers who stayed look at you the way they look at a fire. The March lives, and your name is written among its arsonists."
+
+[end_mercy]
+title = "The ford holds"
+text = "The dead lie down at the ford. The mill still stands, and the field behind it is green with the first grass. The March will not forget who held it, and will not forgive him if he leaves."

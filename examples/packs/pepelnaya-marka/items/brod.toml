@@ -1,0 +1,7 @@
+# The marsh folk's charm, given to Varga when she fights the wraiths beside the hero.
+[[item]]
+id = "marsh_charm"
+base = "dt:item/blue_stone"
+name = "item.marsh_charm.name"
+description = "item.marsh_charm.description"
+cost = 40

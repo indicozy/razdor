@@ -1,0 +1,136 @@
+# Chapter 1 «Брод», 50×50: the burned March, the river Pepelka from north to south with three
+# fords, the ruined mill on the east bank, the watchtower on the rise, the barrows in the north-east
+# and the marsh folk's village in the south-west. terrain.png is painted by
+# tools/pepelnaya-marka-terrain.py. The map's own victory is a placeholder that never fires: the
+# barrow host is an inactive army, so the chapter ends by the story's `victory` (see triggers/brod.toml).
+title = "map.title"
+description = "map.description"
+start_date = "1300-04-01"
+relations = [[3, 3, 0, -3], [3, 3, 0, -3], [0, 0, 3, -3], [-3, -3, -3, 3]]
+
+[hero]
+cell = [40, 28]
+classes = ["knight"]
+gold = 60
+mana = 10
+troops = [{ unit = "dt:militiaman", level = 1, count = 3 }]
+
+# Woods on the north-west bank and the burned orchards on the east.
+[[object]]
+kind = "trees"
+cell = [4, 9]
+[[object]]
+kind = "trees"
+cell = [7, 11]
+[[object]]
+kind = "trees"
+cell = [12, 7]
+[[object]]
+kind = "dead_trees"
+cell = [30, 27]
+[[object]]
+kind = "dead_trees"
+cell = [33, 30]
+[[object]]
+kind = "dead_trees"
+cell = [36, 32]
+[[object]]
+kind = "dead_trees"
+cell = [42, 34]
+[[object]]
+kind = "dead_trees"
+cell = [45, 38]
+[[object]]
+kind = "dead_trees"
+cell = [38, 42]
+[[object]]
+kind = "dead_trees"
+cell = [47, 45]
+# The barrow hills and their standing stones in the north-east.
+[[object]]
+kind = "hills"
+cell = [39, 6]
+[[object]]
+kind = "hills"
+cell = [45, 5]
+[[object]]
+kind = "hills"
+cell = [47, 10]
+[[object]]
+kind = "stones"
+cell = [41, 3]
+[[object]]
+kind = "stones"
+cell = [42, 9]
+
+# The ruined mill, the watchtower (a garrison of the Crown's men, the Order's hold), and the
+# marsh folk's village on its dry island.
+[[building]]
+id = "mill"
+type = "ruins"
+name = "building.mill.name"
+description = "building.mill.description"
+cell = [33, 19]
+faction = "neighbour"
+
+[[building]]
+id = "tower"
+type = "fort"
+name = "building.tower.name"
+description = "building.tower.description"
+cell = [44, 14]
+faction = "enemy"
+garrison = [{ unit = "dt:militiaman", level = 1, count = 2 }]
+
+[[building]]
+id = "reedmere"
+type = "village"
+name = "building.reedmere.name"
+description = "building.reedmere.description"
+cell = [9, 38]
+faction = "neighbour"
+
+# The ford toll: a bandit band on the road, just past the river.
+[[army]]
+id = "toll"
+name = "army.toll.name"
+cell = [29, 23]
+faction = "enemy"
+model = "bandits"
+gold = 40
+troops = [
+    { unit = "dt:bandit", level = 1, count = 4 },
+    { unit = "dt:archer", level = 1, count = 2 },
+]
+
+# The wraiths that trouble the marsh folk, in the bog beside their village.
+[[army]]
+id = "wraiths"
+name = "army.wraiths.name"
+cell = [6, 44]
+faction = "enemy"
+model = "ghosts"
+troops = [
+    { unit = "dt:ghost", level = 1, count = 3 },
+    { unit = "dt:ghoul", level = 1, count = 1 },
+]
+
+# The barrow host's place: it stays inactive; the story raises the host at the ford instead.
+[[army]]
+id = "barrow_host"
+name = "army.barrow_host.name"
+cell = [43, 7]
+faction = "enemy"
+model = "inactive"
+troops = [{ unit = "dt:death_knight", level = 1, count = 2 }]
+
+# A lantern on the burned road, lit from the start.
+[[point]]
+cell = [27, 21]
+radius = 3
+active = true
+
+[victory]
+kind = "defeat_army"
+army = "barrow_host"
+message = "map.won"

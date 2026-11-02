@@ -1,0 +1,94 @@
+# Chapter 1 «Брод»: the dialogs. Their texts are text keys (texts/<lang>.toml). A choice's actions
+# run when it is picked; a choice with no actions of its own is followed by its `dialog_choice`
+# trigger in triggers/brod.toml, which does the rest.
+
+[[dialog]]
+id = "arrival"
+title = "arrival.title"
+text = "arrival.text"
+speaker = "dt:swordsman"
+
+[[dialog]]
+id = "varga_meet"
+title = "varga_meet.title"
+text = "varga_meet.text"
+speaker = "dt:halberdier"
+
+[[dialog.choice]]
+id = "join"
+text = "varga_meet.join"
+then = [ { give_unit = "dt:halberdier", named = "varga" } ]
+
+[[dialog.choice]]
+id = "refuse"
+text = "varga_meet.refuse"
+
+[[dialog.choice]]
+id = "burn"
+text = "varga_meet.burn"
+then = [ { add = "dread", value = 2 }, { give_gold = 40 }, { set = "mill_burned", value = true } ]
+
+[[dialog]]
+id = "toll"
+title = "toll.title"
+text = "toll.text"
+speaker = "dt:bandit"
+
+[[dialog.choice]]
+id = "pay"
+text = "toll.pay"
+if = [ { gold = 20, op = ">=" } ]
+then = [ { give_gold = -20 }, { remove_army = "toll" } ]
+
+[[dialog.choice]]
+id = "fight"
+text = "toll.fight"
+
+[[dialog.choice]]
+id = "talk"
+text = "toll.talk"
+then = [ { remove_army = "toll" } ]
+
+[[dialog]]
+id = "marsh_plea"
+title = "marsh_plea.title"
+text = "marsh_plea.text"
+
+[[dialog.choice]]
+id = "help"
+text = "marsh_plea.help"
+
+[[dialog.choice]]
+id = "ride_on"
+text = "marsh_plea.ride_on"
+
+[[dialog]]
+id = "marsh_thanks"
+title = "marsh_thanks.title"
+text = "marsh_thanks.text"
+
+[[dialog]]
+id = "host_rises"
+title = "host_rises.title"
+text = "host_rises.text"
+speaker = "dt:death_knight"
+
+[[dialog]]
+id = "stones"
+title = "stones.title"
+text = "stones.text"
+
+[[dialog]]
+id = "omen"
+title = "omen.title"
+text = "omen.text"
+
+[[dialog]]
+id = "end_fire"
+title = "end_fire.title"
+text = "end_fire.text"
+
+[[dialog]]
+id = "end_mercy"
+title = "end_mercy.title"
+text = "end_mercy.text"

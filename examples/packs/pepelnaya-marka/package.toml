@@ -1,0 +1,11 @@
+# Пепельная Марка, глава 1 «Брод»: the reference campaign's first chapter (docs/ideas/pepelnaya-marka.md).
+id = "pepelnaya-marka"
+version = "0.1.0"
+format = 1
+title = "story.title"
+description = "story.description"
+author = "Razdor"
+license = "MIT"
+base = "community-update"
+requires = []
+rules = "dt"
