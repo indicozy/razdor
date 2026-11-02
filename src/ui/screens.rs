@@ -559,6 +559,13 @@ fn end_event(game: &Option<Game>) -> Option<String> {
     Some(super::story::event_title(g, id))
 }
 
+/// The title of a package campaign's ending: the ending dialog's title text.
+fn campaign_ending(game: &Option<Game>) -> Option<String> {
+    let g = game.as_ref()?;
+    let id = g.campaign_ended()?;
+    Some(g.story_dialog(id).map_or_else(|| id.to_string(), |d| g.story_text(&d.title)))
+}
+
 /// After a campaign victory whose next map is in the install: what carries over (header
 /// 0x110), with the flags, and that map's entry.
 fn next_campaign_map<'a>(game: &Option<Game>, scenarios: &'a [ScenarioEntry]) -> Option<(NextMap, &'a ScenarioEntry)> {
@@ -597,9 +604,11 @@ pub fn hand_over(game: &Option<Game>, scenarios: &[ScenarioEntry], content: Opti
 pub fn victory(game: &mut Option<Game>, scenarios: &[ScenarioEntry], content: Option<Arc<Content>>) -> Option<Screen> {
     let days = days_played(game);
     let next = next_campaign_map(game, scenarios);
-    let shown = match end_event(game) {
-        Some(title) => end_screen(tr("Victory!"), &trf!("{title}, after {days} days.", title, days), ACCENT, game),
-        None => end_screen(tr("The bandits are broken"), &trf!("Peace returns to the land after {days} days.", days), ACCENT, game),
+    let ending = campaign_ending(game);
+    let shown = match (ending, end_event(game)) {
+        (Some(title), _) => end_screen(&title, &trf!("The campaign is over, after {days} days.", days), ACCENT, game),
+        (None, Some(title)) => end_screen(tr("Victory!"), &trf!("{title}, after {days} days.", title, days), ACCENT, game),
+        (None, None) => end_screen(tr("The bandits are broken"), &trf!("Peace returns to the land after {days} days.", days), ACCENT, game),
     };
     if shown.is_some() {
         return shown;

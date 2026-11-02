@@ -596,6 +596,10 @@ pub struct Game {
     /// it again after a load.
     #[serde(skip)]
     pub story: Option<std::sync::Arc<super::triggers::Story>>,
+    /// The campaign of a content package this game is part of (`rules::campaign`): the map it is
+    /// on and the stored states of the revisit maps it left. Absent in any other game.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub campaign: Option<Box<super::campaign::CampaignState>>,
 }
 
 /// What an AI army's step needs of the hero: the cells it may not enter (his logical cell
@@ -660,6 +664,7 @@ impl Game {
         let mut g = Game {
             triggers: TriggerState::default(),
             story: None,
+            campaign: None,
             experimental: content.experimental,
             squad,
             gold: 0,

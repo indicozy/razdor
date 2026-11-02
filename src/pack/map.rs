@@ -157,6 +157,9 @@ pub struct LeaderSpec {
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PointSpec {
+    /// The point's name, for a campaign's `travel` to enter at it (`campaign.toml`); optional.
+    #[serde(default)]
+    pub id: Option<String>,
     pub cell: [u32; 2],
     /// Visibility radius at the start, in cells (at most 24).
     #[serde(default)]

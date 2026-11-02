@@ -17,10 +17,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use razdor::pack::{self, compile, trust, Opened};
+use razdor::rules::campaign::{after_victory, enter};
 use razdor::rules::save::{ScenarioRef, SaveError};
 use razdor::{hub, platform};
 
-use super::{App, Screen, ScenarioEntry};
+use super::{items_view, App, Screen, ScenarioEntry};
 
 /// The package's map the run plays: the opened package (`pack::open`).
 pub struct PackPlay {
@@ -110,16 +111,81 @@ impl App {
     }
 
     /// Keeps the open package's map in the scenario list (the install's maps are read again on a
-    /// reload, which drops it); a package opened before is replaced.
+    /// reload, which drops it); a package opened before is replaced. A campaign's maps show the
+    /// campaign's name.
     pub(super) fn keep_pack_map(&mut self) {
         let Some(p) = &self.pack else { return };
         self.scenarios.retain(|e| e.pack.is_none());
+        let mut scenario = p.opened.scenario.clone();
+        if let Some(title) = &p.opened.campaign_title {
+            scenario.title.clone_from(title);
+        }
         self.scenarios.push(ScenarioEntry {
             file: p.opened.map.clone(),
             path: PathBuf::new(),
-            scenario: p.opened.scenario.clone(),
+            scenario,
             base_game: false,
             pack: Some(p.opened.clone()),
         });
+    }
+
+    /// Whether a campaign package's game is on screen (not the editor's test play).
+    pub(super) fn campaign_playing(&self) -> bool {
+        !self.test_play && self.game.is_some() && self.pack.as_ref().is_some_and(|p| p.opened.campaign.is_some())
+    }
+
+    /// The campaign's victory on the map on screen: the next map the graph names, entered with what
+    /// carries (`rules::campaign::enter`). When no route holds, the campaign ends with the victory
+    /// screen.
+    pub(super) fn campaign_victory(&mut self) -> Option<Screen> {
+        let routes = self.pack.as_ref()?.opened.routes.clone();
+        let next = after_victory(self.game.as_mut()?, &routes);
+        match next {
+            Some(map) => match self.campaign_go(&map, None) {
+                Ok(()) => Some(Screen::WorldMap),
+                Err(e) => {
+                    razdor::diag!("campaign: {e}; the campaign ends here");
+                    Some(Screen::Victory)
+                }
+            },
+            None => Some(Screen::Victory),
+        }
+    }
+
+    /// A story's request once its dialogs are read: a `travel` goes to its map (at its point), an
+    /// `ending` ends the campaign on the victory screen, which shows the ending's dialog title.
+    pub(super) fn campaign_request(&mut self) -> Option<Screen> {
+        let travel = self.game.as_mut()?.triggers.travel.take();
+        if let Some(t) = travel {
+            return match self.campaign_go(&t.map, t.at.as_deref()) {
+                Ok(()) => Some(Screen::WorldMap),
+                Err(e) => {
+                    razdor::diag!("campaign: travel to {}: {e}", t.map);
+                    None
+                }
+            };
+        }
+        let ending = self.game.as_mut()?.triggers.ending.take()?;
+        self.game.as_mut()?.set_campaign_ended(&ending);
+        Some(Screen::Victory)
+    }
+
+    /// The campaign moves to map `map` (entered at point `at`, else its start): the package's map
+    /// is opened from its file, the game of it is made by `enter`, and the map on screen is the new
+    /// one. Nothing changes when the map cannot be opened or restored.
+    fn campaign_go(&mut self, map: &str, at: Option<&str>) -> Result<(), String> {
+        let install = self.assets.dt.as_ref().map(|d| &d.install).ok_or("no Discord Times install (set RAZDOR_DT_DIR)")?;
+        let path = self.pack.as_ref().ok_or("no package open")?.opened.path.clone();
+        let to = pack::open::open(&path, Some(map), pack::open::lang(), install)?;
+        let content = self.install_content().ok_or("no game content")?;
+        let from = &self.pack.as_ref().ok_or("no package open")?.opened;
+        let game = enter(self.game.as_ref().ok_or("no game")?, from, &to, at, content)?;
+        self.adopt_pack(to);
+        self.map_view.reset();
+        self.map_view.open_around_hero(&game);
+        items_view::reset_pack_view();
+        self.message = None;
+        self.game = Some(game);
+        Ok(())
     }
 }

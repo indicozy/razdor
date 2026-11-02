@@ -1209,7 +1209,7 @@ impl Game {
     }
 
     /// All this game hands over to map `name`: the next map's header chooses what it takes.
-    fn hand_over(&self, name: String, branch: Option<(i16, i16)>) -> NextMap {
+    pub(crate) fn hand_over(&self, name: String, branch: Option<(i16, i16)>) -> NextMap {
         // Every unit of the army loses its lasting spells at the hand-over.
         let unspelled = |u: &Unit| Unit { spells: [None; SPELL_SLOTS], ..u.clone() };
         NextMap {

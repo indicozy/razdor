@@ -4,8 +4,11 @@
 //! finds the package again among the packages the player opened (`trust`), by its hash, never from
 //! the save's path as it is.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use super::campaign::{self, Campaign};
 use super::check::check;
 use super::compile::{self, Compiled};
 use super::files::Files;
@@ -13,6 +16,7 @@ use super::load::Package;
 use crate::dt::data::{ArtefactDef, UnitDef};
 use crate::dt::dtm::Scenario;
 use crate::dt::install::DtInstall;
+use crate::rules::campaign::{CampaignState, Route};
 use crate::rules::game::Game;
 use crate::rules::save::{fnv1a, ScenarioRef};
 use crate::rules::triggers::{self, Story};
@@ -37,6 +41,16 @@ pub struct Opened {
     pub pictures: Vec<(u32, usize)>,
     /// The package's triggers and dialogs for this map.
     pub story: Story,
+    /// The package's campaign (`campaign.toml`), if it has one: the whole graph, not this map only.
+    pub campaign: Option<Arc<Campaign>>,
+    /// The routes out of this map (its campaign `next` entries, their conditions compiled), in
+    /// order. Empty outside a campaign.
+    pub routes: Vec<Route>,
+    /// This map's points that have an id: a campaign's `travel` enters at one of them.
+    pub points: BTreeMap<String, (i32, i32)>,
+    /// The campaign's name: its title text in the package's language (the key when the text is
+    /// missing, which `check` reports).
+    pub campaign_title: Option<String>,
 }
 
 /// The language the package's texts are read in: Russian when the game is, else English.
@@ -78,7 +92,10 @@ pub fn open(path: &Path, map: Option<&str>, lang: &str, install: &DtInstall) -> 
     }
     let map_id = match map {
         Some(m) => m.to_string(),
-        None => package.maps.keys().next().cloned().ok_or("the package has no map (maps/<id>/map.toml)")?,
+        None => match package.campaign.as_ref() {
+            Some(c) => c.start.clone(),
+            None => package.maps.keys().next().cloned().ok_or("the package has no map (maps/<id>/map.toml)")?,
+        },
     };
     let compiled = compile::compile(&package, install, lang, &map_id).map_err(|r| r.to_text())?;
     build(&package, hash, path, &map_id, compiled, lang)
@@ -89,6 +106,10 @@ pub fn open(path: &Path, map: Option<&str>, lang: &str, install: &DtInstall) -> 
 pub fn build(package: &Package, hash: u64, path: &Path, map: &str, compiled: Compiled, lang: &str) -> Result<Opened, String> {
     let manifest = package.manifest.as_ref().ok_or("the package has no package.toml")?;
     let story = triggers::compile(package, lang, map, &compiled.names, story_seed(hash)).map_err(|errors| errors.join("\n"))?;
+    let routes = campaign::routes(package, map).map_err(|errors| errors.join("\n"))?;
+    let points = campaign::points_of(package, map).into_iter().collect();
+    let texts = package.texts.get(lang).or_else(|| package.texts.values().next());
+    let campaign_title = package.campaign.as_ref().and_then(|c| c.title.as_ref()).map(|key| texts.and_then(|t| t.get(key)).cloned().unwrap_or_else(|| key.clone()));
     Ok(Opened {
         id: manifest.id.clone(),
         version: manifest.version.clone(),
@@ -100,6 +121,10 @@ pub fn build(package: &Package, hash: u64, path: &Path, map: &str, compiled: Com
         items: compiled.items,
         pictures: compiled.pictures,
         story,
+        campaign: package.campaign.clone().map(Arc::new),
+        routes,
+        points,
+        campaign_title,
     })
 }
 
@@ -113,8 +138,16 @@ impl Opened {
     /// events wait in `Game::drain_events`, as the scenario's opening events do).
     pub fn start(&self, g: &mut Game) {
         g.set_origin(self.origin());
+        if self.campaign.is_some() {
+            g.campaign = Some(Box::new(CampaignState::start(&self.map)));
+        }
         g.attach_story(self.story.clone());
         g.start_story();
+    }
+
+    /// Whether this map is a campaign's revisit map: leaving it keeps its state (`rules::campaign`).
+    pub fn revisit(&self) -> bool {
+        self.campaign.as_ref().and_then(|c| c.map(&self.map)).is_some_and(|m| m.revisit)
     }
 
     /// Whether this is the package a save names: the same id, version, content hash and map. The

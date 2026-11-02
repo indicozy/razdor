@@ -37,6 +37,8 @@ pub struct Package {
     pub dialogs: Vec<Located<Dialog>>,
     /// Maps by folder id (`maps/<id>/`).
     pub maps: BTreeMap<String, MapEntry>,
+    /// The campaign's graph (`campaign.toml`), if the package has one.
+    pub campaign: Option<super::campaign::Campaign>,
     pub problems: Report,
 }
 
@@ -92,6 +94,7 @@ impl Package {
             triggers: Vec::new(),
             dialogs: Vec::new(),
             maps: BTreeMap::new(),
+            campaign: None,
             problems: Report::default(),
         };
         // Game files are never read; `check` reports them.
@@ -100,6 +103,11 @@ impl Package {
         // package.toml
         if let Some(text) = text_of(&files, "package.toml", &mut report) {
             package.manifest = parse_toml::<Manifest>("package.toml", text, &mut report);
+        }
+
+        // campaign.toml: the graph of the maps (`pack::campaign`).
+        if let Some(text) = text_of(&files, super::campaign::FILE, &mut report) {
+            package.campaign = super::campaign::read(text, &mut report);
         }
 
         // texts/<lang>.toml

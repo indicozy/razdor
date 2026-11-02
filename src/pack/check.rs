@@ -17,7 +17,7 @@ use super::refs::{valid_id, valid_package_id, DtKind, Ref};
 /// Directories a package may have at its top.
 const TOP_DIRS: [&str; 8] = ["texts", "units", "items", "maps", "dialogs", "triggers", "art", "scripts"];
 /// Files a package may have at its top.
-const TOP_FILES: [&str; 3] = ["package.toml", "README.md", "LICENSE"];
+const TOP_FILES: [&str; 4] = ["package.toml", "README.md", "LICENSE", "campaign.toml"];
 
 /// The TrueType fonts Razdor ships (`data/fonts`): a text's character none of them draws needs a
 /// system font to show (`check_text_chars`).
@@ -45,6 +45,7 @@ pub fn check(pkg: &Package) -> Report {
     check_bases(pkg, &units, &items, &mut r);
     check_cycles(&units, &mut r);
     super::triggers::check(pkg, &mut r);
+    super::campaign::check(pkg, &mut r);
     check_limits(pkg, &mut r);
     map_check::check_maps(pkg, &mut r);
     r

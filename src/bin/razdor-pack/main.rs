@@ -15,6 +15,12 @@ const HELP: &str = "razdor-pack: content packages (.rzpack) for Razdor 2.0
                              exit status: 0 no errors, 1 errors, 2 usage or read problem
   razdor-pack sim <folder-or-.rzpack> [--map <id>] [--days <n>=30] [--json]
                              [--trace] [--choices first|random|<dialog>=<choice>,…]
+                             [--campaign [--auto-win-after <days>]]
+                             --campaign plays the whole campaign (campaign.toml) from its
+                             start: each map for n days, and a victory or a travel goes to the
+                             next map with what carries; --auto-win-after fires each map's
+                             victory after that many days (a developer switch: the hero does
+                             not walk in the sim, so this walks the graph).
                              the AI plays a map headless for n days, the community map
                              smoke test's way (RAZDOR_DT_DIR): a panic, a softlock or a
                              check error fails; reports the day of victory or defeat.
@@ -104,6 +110,8 @@ struct Args {
     json: bool,
     trace: bool,
     choices: Option<String>,
+    campaign: bool,
+    auto_win: Option<u64>,
 }
 
 fn package_args(cmd: &str, args: &[String], allow_sim: bool) -> Result<Args, String> {
@@ -118,6 +126,11 @@ fn package_args(cmd: &str, args: &[String], allow_sim: bool) -> Result<Args, Str
             }
             "--json" if allow_sim => out.json = true,
             "--trace" if allow_sim => out.trace = true,
+            "--campaign" if allow_sim => out.campaign = true,
+            "--auto-win-after" if allow_sim => {
+                let v = it.next().ok_or("--auto-win-after needs a number of days")?;
+                out.auto_win = Some(v.parse().map_err(|_| format!("--auto-win-after {v}: a whole number of days"))?);
+            }
             "--choices" if allow_sim => out.choices = Some(it.next().ok_or("--choices needs first, random or dialog=choice,…")?.clone()),
             flag if flag.starts_with('-') => return Err(format!("unknown option `{flag}` for {cmd}")),
             p if out.path.is_none() => out.path = Some(PathBuf::from(p)),
@@ -144,6 +157,12 @@ fn sim(args: &[String]) -> Result<u8, String> {
     if report.has_errors() {
         print!("{}", report.to_text());
         return Ok(1);
+    }
+    if a.campaign {
+        return sim_campaign_cmd(&package, &a);
+    }
+    if a.auto_win.is_some() {
+        return Err("--auto-win-after needs --campaign".into());
     }
     let maps = match &a.map {
         Some(m) => vec![m.clone()],
@@ -193,6 +212,36 @@ fn sim(args: &[String]) -> Result<u8, String> {
         println!("{}", serde_json::Value::Array(json));
     }
     Ok(if failed { 1 } else { 0 })
+}
+
+/// `sim --campaign`: the campaign from its start, each map for `--days`, the graph walked on the
+/// victories and travels. Exit status 1 on a panic, a softlock or an error.
+fn sim_campaign_cmd(package: &Package, a: &Args) -> Result<u8, String> {
+    if a.map.is_some() {
+        return Err("--campaign plays from the campaign's start: --map does not go with it".into());
+    }
+    if package.campaign.is_none() {
+        return Err("the package has no campaign.toml (see docs/reference/rzpack-format.md, Campaigns)".into());
+    }
+    razdor::dt::install::load_dotenv();
+    let dir = razdor::dt::install::locate().ok_or("no Discord Times install found (set RAZDOR_DT_DIR)")?;
+    let install = razdor::dt::install::DtInstall::load(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let opts = pack::sim::CampaignOptions {
+        days: a.days.unwrap_or(60),
+        choices: match &a.choices {
+            Some(spec) => pack::sim::Choices::parse(spec)?,
+            None => pack::sim::Choices::First,
+        },
+        trace: a.trace || a.json,
+        auto_win_after: a.auto_win,
+    };
+    let run = pack::sim::sim_campaign(package, &install, &opts).map_err(|r| r.to_text())?;
+    if a.json {
+        println!("{}", run.json());
+    } else {
+        print!("{}", run.text());
+    }
+    Ok(if run.ok() { 0 } else { 1 })
 }
 
 /// Opens the package's map in Razdor: `razdor --pack <path> --map <id>`, the binary next to this one.

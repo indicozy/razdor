@@ -1670,13 +1670,21 @@ impl App {
         // brought is held until the step has played (`Game::tick_shown`), so it is waited for
         // too: the end comes after it, never before (events.md §11).
         let unshown = self.game.as_ref().is_some_and(Game::holds_events);
+        if next.is_none() && self.dialogs.is_empty() && !unshown && !self.in_custom() && self.campaign_playing() {
+            // A campaign's travel or ending a story asked for, once its dialogs are read.
+            next = self.campaign_request();
+        }
         if next.is_none() && self.dialogs.is_empty() && !unshown && !self.in_custom() {
-            let end = self.game.as_ref().and_then(Game::script_end);
+            let end = self.game.as_ref().and_then(Game::script_end).filter(|_| next.is_none());
             match end {
                 // A campaign map: the next map starts at once (0x4b5b64), as in the original.
                 // With no next map (not a campaign map, or its next map not in the install)
                 // the original goes to the main menu once the window is read (0x4aba30 →
                 // 0x4bfb34); Razdor's victory screen stays for the editor's test play.
+                // A campaign package: the graph names the next map (`pack_play::campaign_victory`).
+                Some(ScriptEnd::Victory(_) | ScriptEnd::Package(razdor::rules::triggers::Ending::Victory)) if !matches!(self.screen, Screen::Victory) && self.campaign_playing() => {
+                    next = self.campaign_victory();
+                }
                 Some(ScriptEnd::Victory(_) | ScriptEnd::Package(razdor::rules::triggers::Ending::Victory)) if !matches!(self.screen, Screen::Victory) => {
                     // The scenario list marks the map as won under the mod played (Razdor's, kept in the settings).
                     if let Some(razdor::rules::save::ScenarioRef::Map { file, .. }) = self.game.as_ref().and_then(|g| g.origin.as_ref()).filter(|_| !self.test_play) {

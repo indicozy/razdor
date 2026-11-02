@@ -375,7 +375,9 @@ fn scenario_of(pkg: &Package, ids: &BTreeMap<&str, u32>, texts: &Texts, file: &s
     let (year, month, day) = parse_date(&m.start_date).map_err(|e| one_error(format!("{file}: {e}")))?;
     let start_time = GameDate { year, month, day, hour: 0, minute: 0 }.to_minutes();
     let text = |key: &str| texts.get(key).map_err(|e| one_error(format!("{file}: {e}")));
-    let mut header = Header { width: terrain.width, height: terrain.height, start_time, relations: m.relations, ..Header::default() };
+    // Every campaign hand-over byte is set: a package's campaign masks what carries (`[carry]` in
+    // `campaign.toml`, `rules::campaign`), so the header takes all of it.
+    let mut header = Header { width: terrain.width, height: terrain.height, start_time, relations: m.relations, carry_over: [1; 7], ..Header::default() };
 
     // The hero: each offered class gets the same start, gold, mana and troops.
     let troops = troop_slots(&m.hero.troops, ids).map_err(|e| one_error(format!("{file}: hero: {e}")))?;

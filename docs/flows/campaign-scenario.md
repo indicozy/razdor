@@ -120,6 +120,32 @@ dropped); flags always carry over. Named characters travel with the army (`set_n
 `name_chapter`), newest first; Razdor keeps the history across maps (an addition; the original's
 journal is per map).
 
+## Campaigns of a package (`campaign.toml`)
+
+A package with a `campaign.toml` (format: `docs/reference/rzpack-format.md`, «Campaigns») is a graph of
+its maps. The graph is read and checked by `pack::campaign`; the game side is `rules/campaign.rs`:
+
+- `enter(g, from, to, at, content)` builds the game of the next map. It takes the original's hand-over
+  (`Game::hand_over`) masked by the graph's `[carry]` flags, and starts the map as `from_campaign` does
+  (carry first, then the opening events), with the story's variables and fired-once triggers that name no
+  map set before its game-start moment runs. A revisit map (`revisit = true`, with stored state) is restored
+  instead: `World::restore_statics`, the fog, the event engine (`EventEngine::restore_statics`), the beaten
+  armies, its own fired triggers and spawned armies; no opening runs.
+- The state lives in `Game.campaign` (`CampaignState`: the current map, the stored states of the revisit maps
+  left, the clock, the ending). It is saved with the game, so a load finds the current map's package (its
+  `Opened` names the map) and the stored states come back with the save.
+- `after_victory(g, routes)` picks the route: the story's `victory … next` override, else the first route
+  whose `if` holds (`Opened.routes`, compiled per map by `pack::campaign::routes`).
+- A story's `travel` and `ending` are requests on `TriggerState` (`travel`, `ending`); the UI takes them
+  once the dialogs are read (`ui/pack_play.rs` `campaign_request`), with the victory (`campaign_victory`).
+- The UI: `screens::victory` shows the ending's title; a map with no route ends on the victory screen.
+- Sim: `rules::sim::play_campaign_map` plays one map; `pack::sim::run_campaign` walks the graph
+  (`razdor-pack sim --campaign`).
+
+Tests: `rules/campaign.rs` (a three-map package in memory: the branch, the carry, a revisit that keeps its
+defeated army, an ending, a mid-campaign save round trip, the sim's walk, named characters) and
+`pack/campaign.rs` (reading and the checks).
+
 ## Packages (`razdor --pack`)
 
 A content package's map (`maps/<id>/map.toml`, `docs/reference/rzpack-format.md`) starts the same way

@@ -57,6 +57,7 @@ Victory! = Победа!
 {title}, after {days} days. = {title}. Прошло дней: {days}.
 The bandits are broken = Разбойники разбиты
 Peace returns to the land after {days} days. = В край возвращается мир. Прошло дней: {days}.
+The campaign is over, after {days} days. = Кампания окончена. Прошло дней: {days}.
 Next map: {title} = Следующая карта: {title}
 
 # Quick save, loading and test play

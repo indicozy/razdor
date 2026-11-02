@@ -138,10 +138,80 @@ fn note_ending(g: &Game, day_now: &dyn Fn(&Game) -> f64, victory_day: &mut Optio
 /// opens are answered in turn.
 fn answer_dialogs(g: &mut Game, events: Vec<Event>, story: Option<&mut StoryPlay>) {
     let Some(p) = story else { return };
+    answer_picks(g, events, &mut *p.pick);
+}
+
+/// [`answer_dialogs`] with the choice rule given directly.
+fn answer_picks(g: &mut Game, events: Vec<Event>, pick: &mut dyn FnMut(&PendingDialog) -> Option<String>) {
     let mut queue: VecDeque<PendingDialog> = dialogs_of(events).collect();
     while let Some(d) = queue.pop_front() {
-        let choice = (p.pick)(&d);
+        let choice = pick(&d);
         queue.extend(dialogs_of(g.answer_story_dialog(&d.id, choice.as_deref())));
+    }
+}
+
+/// How a campaign map's play ended (`play_campaign_map`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MapEnd {
+    /// The scenario's or the story's victory.
+    Victory,
+    /// The hero fell, or the defeat fired.
+    Defeat,
+    /// A story asked to travel to another map (`Game::triggers.travel`).
+    Travel,
+    /// A story reached its ending (`Game::triggers.ending`).
+    Ending,
+    /// The day limit came first.
+    Days,
+    /// The clock did not reach the limit within the call budget (a softlock).
+    Stalled,
+}
+
+/// Plays campaign map `g` (the game of one map, begun) for `days` days, answering its dialogs with
+/// `pick`. `auto_win_after` (a developer switch of `razdor-pack sim --auto-win-after`) fires the
+/// map's victory once that many days have passed, so a campaign's graph can be walked without the
+/// hero reaching the victory. Returns how the map's play ended; the caller takes the travel or
+/// the ending from the game.
+pub fn play_campaign_map(g: &mut Game, days: u64, auto_win_after: Option<u64>, pick: &mut dyn FnMut(&PendingDialog) -> Option<String>) -> MapEnd {
+    let start = g.clock.total_minutes();
+    let end = start + (days * MINUTES_PER_DAY) as f64;
+    let day_now = |g: &Game| (g.clock.total_minutes() - start) / MINUTES_PER_DAY as f64;
+    let mut calls = 0;
+    while g.clock.total_minutes() < end && calls < 200_000 {
+        calls += 1;
+        if auto_win_after.is_some_and(|d| day_now(g) >= d as f64) {
+            g.triggers.ended.get_or_insert(Ending::Victory);
+        }
+        match g.script_end() {
+            Some(ScriptEnd::Victory(_) | ScriptEnd::Package(Ending::Victory)) => return MapEnd::Victory,
+            Some(ScriptEnd::Defeat(_) | ScriptEnd::Package(Ending::Defeat)) => return MapEnd::Defeat,
+            None => {}
+        }
+        if g.pending_question().is_some() {
+            g.answer_question(true);
+            continue;
+        }
+        if g.foe.is_some() {
+            if fight_it_out(g) == Outcome::Defeat {
+                return MapEnd::Defeat;
+            }
+            continue;
+        }
+        let events = g.drain_events();
+        answer_picks(g, events, pick);
+        if g.triggers.travel.is_some() {
+            return MapEnd::Travel;
+        }
+        if g.triggers.ending.is_some() {
+            return MapEnd::Ending;
+        }
+        let waited = g.wait(4);
+        answer_picks(g, waited, pick);
+    }
+    if g.clock.total_minutes() < end {
+        MapEnd::Stalled
+    } else {
+        MapEnd::Days
     }
 }
 

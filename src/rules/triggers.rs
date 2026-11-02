@@ -82,6 +82,10 @@ pub enum Trace {
     Goal { army: String, goal: String },
     /// A goal's army arrived at a cell, or in a building (`go_to_building`).
     Arrive { army: String, cell: (i32, i32), building: Option<String> },
+    /// The story asked for a travel to another campaign map.
+    Travel(String),
+    /// The story reached its ending (the dialog).
+    Ending(String),
 }
 
 /// A moment a trigger can wait for, as the trigger says it (`when`), or as the game raises it.
@@ -179,6 +183,12 @@ pub enum Act {
     /// The hero's map figure (`None`: his own).
     HeroFigure(Option<UnitId>),
     ArmyFigure { army: ArmyId, unit: UnitId },
+    /// A victory whose campaign goes to map `String` (the campaign graph's override).
+    VictoryTo(String),
+    /// The campaign leaves this map for `map` (entering at point `at`, else the start).
+    Travel { map: String, at: Option<String> },
+    /// The dialog shows, then the campaign ends (the dialog's id).
+    EndCampaign(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -228,6 +238,9 @@ pub struct Story {
     pub building_names: BTreeMap<u16, String>,
     /// The seed of the package generator (not zero).
     pub seed: u32,
+    /// The ids of the triggers that name a map (`map = "…"`): their fired state belongs to that
+    /// map, and a campaign keeps it with the map's state (`rules::campaign`).
+    pub scoped: BTreeSet<String>,
 }
 
 impl Story {
@@ -235,6 +248,13 @@ impl Story {
     pub fn is_empty(&self) -> bool {
         self.triggers.is_empty() && self.dialogs.is_empty()
     }
+}
+
+/// A campaign request a story made: the map to travel to, and the point of it to come in at.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Travel {
+    pub map: String,
+    pub at: Option<String>,
 }
 
 /// The story's state in the game: saved only while a story is attached ([`TriggerState::is_empty`]).
@@ -260,6 +280,15 @@ pub struct TriggerState {
     /// Goal arrivals queued until the AI's tick is over (see [`goals`]); never saved.
     #[serde(skip)]
     pub arrivals: Vec<Arrival>,
+    /// The map a `victory = true, next = "…"` names (the campaign's override), once a victory ran.
+    #[serde(default)]
+    pub next: Option<String>,
+    /// A `travel` the story asked for, taken by the campaign when the moment has played (`rules::campaign`).
+    #[serde(default)]
+    pub travel: Option<Travel>,
+    /// An `ending` the story reached: the dialog that ends the campaign.
+    #[serde(default)]
+    pub ending: Option<String>,
     /// What the run did, with the game minute of each thing, while a trace is asked for
     /// (`razdor-pack sim --trace`). Never saved.
     #[serde(skip)]
@@ -269,7 +298,16 @@ pub struct TriggerState {
 impl TriggerState {
     /// Nothing recorded: the game's save omits the field.
     pub fn is_empty(&self) -> bool {
-        self.vars.is_empty() && self.fired.is_empty() && self.rng == 0 && self.dialogs.is_empty() && self.spawned.is_empty() && self.ended.is_none() && self.hero_sheet.is_none()
+        self.vars.is_empty()
+            && self.fired.is_empty()
+            && self.rng == 0
+            && self.dialogs.is_empty()
+            && self.spawned.is_empty()
+            && self.ended.is_none()
+            && self.hero_sheet.is_none()
+            && self.next.is_none()
+            && self.travel.is_none()
+            && self.ending.is_none()
     }
 }
 
@@ -322,6 +360,27 @@ pub fn compile(pkg: &Package, lang: &str, map: &str, resolve: &dyn Resolve, seed
         errors: Vec::new(),
     };
     b.assign_spawns();
+    // Named characters keep their ids over the package's maps (a campaign carries them): they are
+    // numbered by first mention in every trigger and dialog, whichever map each is for.
+    let mut scratch = Builder {
+        pkg,
+        resolve,
+        spawns: b.spawns.clone(),
+        named: BTreeMap::new(),
+        named_order: Vec::new(),
+        army_names: BTreeMap::new(),
+        building_names: BTreeMap::new(),
+        at: String::new(),
+        errors: Vec::new(),
+    };
+    for t in &pkg.triggers {
+        let _ = scratch.trigger(&t.value);
+    }
+    for d in &pkg.dialogs {
+        let _ = scratch.dialog(&d.value);
+    }
+    b.named = scratch.named;
+    b.named_order = scratch.named_order;
     let mut story = Story { seed: seed.max(1), ..Story::default() };
     for v in &pkg.vars {
         story.vars.insert(v.value.name.clone(), (v.value.kind, default_of(&v.value)));
@@ -330,6 +389,9 @@ pub fn compile(pkg: &Package, lang: &str, map: &str, resolve: &dyn Resolve, seed
     for t in pkg.triggers.iter().filter(|t| applies(&t.value, map)) {
         b.at = format!("{}:{}", t.file, t.line);
         if let Some(tr) = b.trigger(&t.value) {
+            if t.value.map.is_some() {
+                story.scoped.insert(tr.id.clone());
+            }
             story.triggers.push(tr);
         }
     }
@@ -348,6 +410,27 @@ pub fn compile(pkg: &Package, lang: &str, map: &str, resolve: &dyn Resolve, seed
         Ok(story)
     } else {
         Err(b.errors)
+    }
+}
+
+/// Compiles conditions (a campaign's `if`, `campaign.toml`) against the names of a map, as a
+/// trigger's `if` is compiled.
+pub fn compile_conditions(pkg: &Package, resolve: &dyn Resolve, conds: &[pt::Cond]) -> Result<Vec<Cond>, Vec<String>> {
+    let mut b = Builder {
+        pkg,
+        resolve,
+        spawns: BTreeMap::new(),
+        named: BTreeMap::new(),
+        named_order: Vec::new(),
+        army_names: BTreeMap::new(),
+        building_names: BTreeMap::new(),
+        at: String::new(),
+        errors: Vec::new(),
+    };
+    let out: Option<Vec<Cond>> = conds.iter().map(|c| b.cond(c)).collect();
+    match out {
+        Some(out) if b.errors.is_empty() => Ok(out),
+        _ => Err(b.errors),
     }
 }
 
@@ -373,7 +456,12 @@ fn opened_dialogs(pkg: &Package, map: &str) -> BTreeSet<String> {
 
 /// The dialogs an action list opens.
 fn opens(then: &[pt::Action]) -> Vec<String> {
-    then.iter().filter_map(|a| if let pt::Action::Dialog(d) = a { Some(d.clone()) } else { None }).collect()
+    then.iter()
+        .filter_map(|a| match a {
+            pt::Action::Dialog(d) | pt::Action::Ending(d) => Some(d.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 fn default_of(v: &pt::Var) -> VarValue {
@@ -642,6 +730,14 @@ impl Builder<'_> {
                 None => None,
             }),
             pt::Action::ArmyFigure { army, unit } => Act::ArmyFigure { army: self.army(army)?, unit: self.unit(unit)? },
+            pt::Action::VictoryTo(map) => Act::VictoryTo(map.clone()),
+            pt::Action::Travel { map, at } => Act::Travel { map: map.clone(), at: at.clone() },
+            pt::Action::Ending(dialog) => {
+                if !self.pkg.dialogs.iter().any(|x| &x.value.id == dialog) {
+                    return self.fail(format!("no dialog `{dialog}`"));
+                }
+                Act::EndCampaign(dialog.clone())
+            }
         })
     }
 
@@ -950,7 +1046,7 @@ impl Game {
         }
     }
 
-    fn holds(&mut self, c: &Cond) -> bool {
+    pub(crate) fn holds(&mut self, c: &Cond) -> bool {
         match c {
             Cond::Var { name, cmp, value } => match (self.var_value(name), value) {
                 (Some(VarValue::Int(a)), VarValue::Int(b)) => compare(a, *cmp, *b),
@@ -1062,6 +1158,19 @@ impl Game {
                     self.note(Trace::End(*e));
                 }
                 self.triggers.ended.get_or_insert(*e);
+            }
+            Act::VictoryTo(map) => {
+                self.triggers.next.get_or_insert_with(|| map.clone());
+                self.act(&Act::End(Ending::Victory), story, queue);
+            }
+            Act::Travel { map, at } => {
+                self.note(Trace::Travel(map.clone()));
+                self.triggers.travel = Some(Travel { map: map.clone(), at: at.clone() });
+            }
+            Act::EndCampaign(dialog) => {
+                self.open_dialog(dialog, story);
+                self.note(Trace::Ending(dialog.clone()));
+                self.triggers.ending.get_or_insert_with(|| dialog.clone());
             }
         }
     }

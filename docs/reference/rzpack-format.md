@@ -251,6 +251,9 @@ then = [ { give_gold = -20 } ]                      # optional actions
 | `hero_figure` | `"default"` or a unit `dt:<alias>` | the hero is drawn with that unit's map figure (saved) |
 | `army_figure` | the army is the value, `unit = "dt:<alias>"` | the army is drawn with that unit's map figure (saved) |
 | `victory` / `defeat` | `= true` | the scenario ends (after the dialogs shown; the first ending holds) |
+| `victory` | `= true`, `next = "<map>"` | the same victory, and the campaign goes to that map (the override of `campaign.toml`, «Campaigns») |
+| `travel` | `= "<map>"`, `at = "<point-id>"` (optional) | the campaign leaves this map for that one, at its point (else its start), once the dialogs are read («Campaigns») |
+| `ending` | `= "<dialog-id>"` | the dialog shows, then the campaign ends with it («Campaigns») |
 
 Units and items are `dt:<alias>` or the package's own ids; spells are `dt:spell/<alias>`. A
 «holder» is `player`, `pack`, an army id, `named:<id>` or a garrison (`garrison = "<building>"`).
@@ -330,7 +333,7 @@ none), the armies that came onto the map, and the ending. It is kept only while 
 
 ### Not in this step
 
-Not in format 1 yet: branching campaigns (10). Named characters can be in an army or a garrison
+Branching campaigns (10) are «Campaigns» above. Named characters can be in an army or a garrison
 for `has_named_unit` to find, but no action yet puts one there (only the hero's squad gets named
 units, by `give_unit`). Goals and paces on a demo gang (an army not steered by the AI) do nothing.
 
@@ -383,6 +386,7 @@ troops = [{ unit = "dt:swordsman", level = 1, count = 2 }]      # one to six
 leader = { unit = "dt:mounted_knight", level = 2, name = "leader.raider_chief.name" }   # optional named leader
 
 [[point]]                           # a lantern
+id = "gate"                         # optional: a campaign's travel enters the map here
 cell = [25, 20]
 radius = 3                          # 0 to 24
 active = true                       # lit from the start
@@ -450,6 +454,93 @@ dead_trees (10, 108), thicket (11, 0, impassable); `sprite` overrides the sprite
 buildings (their names and garrisons), armies (named leaders become named characters), points, and
 the one victory event. A compiled scenario survives `to_payload` and `parse_payload` unchanged. The
 game's own limits apply: 32 named characters, 255 armies, 6 troop slots per list.
+
+## Campaigns: `campaign.toml`
+
+An optional file at the package's top: the graph of its maps. Without it the package plays as
+before (`razdor --pack` opens its first map, and nothing changes maps). The code is `src/pack/campaign.rs`
+(reading, checks, the routes) and `src/rules/campaign.rs` (the game); the design is in
+`docs/flows/campaign-scenario.md`.
+
+```toml
+start = "brod"                 # the map a new campaign starts on
+title = "campaign.title"       # text key, optional: the campaign's name in the new-game list
+
+[carry]                        # what moves from map to map; every flag defaults to true
+hero = true                    # level, xp, spells and worn items of the hero
+army = true                    # the squad: named units with their levels and items
+pack = true                    # unworn items
+gold = true                    # gold, and the god's favour (mana) with it
+vars = true                    # every variable, and the fired-once triggers that name no map
+
+[[map]]
+id = "brod"
+[[map.next]]
+to = "marka"
+if = [ { var = "ally", value = 1 } ]     # all of its conditions must hold
+[[map.next]]
+to = "salt"
+if = [ { var = "ally", value = 2 } ]
+
+[[map]]
+id = "marka"
+revisit = true                 # leaving keeps the map's state; coming back restores it
+[[map.next]]
+to = "salt"
+```
+
+**Graph.** `start` and every `[[map]] id` are maps of the package (`maps/<id>/`), each listed once. A
+map's victory (the map's own `[victory]`, or a story's `victory = true`) goes to its first `[[map.next]]`
+whose `if` holds (in file order), and a route with no `if` always holds. When none holds, the campaign
+ends there: the victory screen. A map with no `next` ends the campaign on its victory too. A story's
+`victory = true, next = "<map>"` overrides the graph for that victory.
+
+**Conditions** (`if`) are the trigger conditions, with the variables declared in `triggers/*.toml`
+(`var`, `gold`, `has_item`, `has_named_unit`, `has_spell`, `random`). A campaign names no army, building
+or place: `army_at`, `army_alive`, `building_owner` and `hero_at` are refused (the map's own triggers
+hold those).
+
+**Travel and endings.** `{ travel = "marka", at = "gate" }` in a story's `then` leaves the current map
+once the dialogs are read; the hero comes in at the map's `[[point]]` with that `id`, else at the map's
+start. The current map keeps its state when it is a `revisit` map. `{ ending = "the_end" }` opens that
+dialog, then the campaign ends with it: the victory screen shows the dialog's title, and the ending is
+recorded in the save. A travel or ending is checked: its map is a campaign map, its point exists, its
+dialog exists.
+
+**Checks** (`razdor-pack check`). Errors: a map that is not in the package, a `next` or a victory to a
+map that is not in the campaign, an undeclared variable or a value of the wrong kind in an `if`, an
+`if` that names an army, a building or a place, a travel to a point the map lacks, a `start` that is not a
+campaign map, no path from `start` to a map that can end the campaign. Warnings: a package map that is not
+in the campaign, a campaign map no route, travel or victory reaches.
+
+**What carries** (on every change of map, the victory's or a travel's). Per `[carry]`: the hero (level,
+xp, spells, worn items; off: the new map's hero), the squad with its named characters (off: the new map's
+squad), the pack (off: the new map's), gold and mana (off: the new map's), and the variables with the
+fired-once triggers that name no map (off: the new map's defaults). The journal and the flags always carry,
+as in the original. The hero's map sheet (`hero_figure = …` in a story, the story's own choice of his
+figure) resets to the default on every change of map; the story sets it again if it needs it. The
+original's own hero figure (set by an event) carries as before. A named character keeps its id over the package's maps: the package numbers them once,
+by first mention in all its triggers and dialogs. A map is entered as the original's campaign hand-over
+(`docs/flows/campaign-scenario.md`): its opening events and its story's `game_start` run on the first entry.
+
+**Revisits.** Leaving a `revisit = true` map keeps its state: the world (armies, buildings, objects, relations),
+the fog, the event engine, the armies beaten, and the map's own fired triggers and spawned armies. An army's
+goal, speed and figure (`army_goal`, `army_speed`, `army_figure`) are part of its record in the world, so they
+are kept too. Entering it
+again restores that state and runs no opening events again, and the hero comes in at the travel's point or at
+the start. The game's clock goes on from the point it left the map (the stored state is the world's and the
+map's dynamic parts only; the statics come from the map again).
+
+**Saves.** A save mid-campaign keeps the campaign: the map it is on, the stored states of the revisit maps it
+left, the clock and any ending. The carried values are the game's own, saved as always. A save before
+campaigns loads as before.
+
+**Sim.** `razdor-pack sim <package> --campaign [--days <n>=60] [--choices …] [--trace] [--auto-win-after <days>]`
+plays the campaign from its start: each map for `--days`, the victory or travel goes to the next map with what
+carries, the ending stops it. `--auto-win-after n` fires each map's victory after n days (a developer switch:
+the sim's hero does not walk, so the graph is walked this way). `--trace` prints each map's entry values (gold,
+squad, named characters, the pack, the variables) and what the story did on it, by day; `--json` gives the same
+as data.
 
 ## Commands
 

@@ -34,7 +34,7 @@ pub const EVENTS: [&str; 11] = [
 /// The conditions (`if`). Each is a table with one of these keys (its kind).
 pub const CONDITIONS: [&str; 10] = ["var", "random", "hero_at", "army_at", "has_named_unit", "has_item", "gold", "army_alive", "building_owner", "has_spell"];
 /// The actions (`then`), each a table with one of these keys.
-pub const ACTIONS: [&str; 24] = [
+pub const ACTIONS: [&str; 26] = [
     "set",
     "add",
     "random_var",
@@ -59,12 +59,14 @@ pub const ACTIONS: [&str; 24] = [
     "army_speed",
     "hero_figure",
     "army_figure",
+    "travel",
+    "ending",
 ];
 /// The keys that are arguments, not kinds. A kind key is one of the lists above; a key here
 /// never is.
-const ARGUMENTS: [&str; 32] = [
+const ARGUMENTS: [&str; 33] = [
     "value", "op", "at", "faction", "to", "of", "in", "unit", "named", "class", "spell", "all", "building", "army", "item", "min", "max", "minutes",
-    "permanent", "towards", "troops", "model", "choice", "event", "garrison", "percent", "go_to", "go_to_building", "follow", "patrol", "attack", "clear",
+    "permanent", "towards", "troops", "model", "choice", "event", "garrison", "percent", "go_to", "go_to_building", "follow", "patrol", "attack", "clear", "next",
 ];
 
 /// A problem with one table: what is wrong, and what to do about it.
@@ -420,6 +422,14 @@ pub enum Action {
     /// `None`: the hero's own figure (`hero_figure = "default"`).
     HeroFigure(Option<Ref>),
     ArmyFigure { army: String, unit: Ref },
+    /// `victory = true, next = "<map>"`: a victory whose campaign goes to that map (the override
+    /// of the campaign's graph, `campaign.toml`).
+    VictoryTo(String),
+    /// `travel = "<map>"`, with `at = "<point>"` where the hero comes in: the campaign leaves this
+    /// map for another one, without a victory.
+    Travel { map: String, at: Option<String> },
+    /// `ending = "<dialog>"`: the dialog shows, then the campaign ends.
+    Ending(String),
 }
 
 /// What an `army_goal` asks for (exactly one key of the action).
@@ -854,12 +864,28 @@ pub fn parse_action(t: &Table) -> Res<Action> {
             Ok(Action::ArmyFigure { army: name_of(v, "army")?, unit: unit_ref(need(t, kind, "unit")?)? })
         }
         "victory" | "defeat" => {
-            check_args(t, kind, &[])?;
+            let allowed: &[&str] = if kind == "victory" { &["next"] } else { &[] };
+            check_args(t, kind, allowed)?;
             match v.as_bool() {
-                Some(true) if kind == "victory" => Ok(Action::Victory),
+                Some(true) if kind == "victory" => match arg(t, "next") {
+                    Some(next) => Ok(Action::VictoryTo(str_of(next, "`next`")?.to_string())),
+                    None => Ok(Action::Victory),
+                },
                 Some(true) => Ok(Action::Defeat),
                 _ => bad(format!("`{kind}` is written `{kind} = true`"), "the scenario ends with it"),
             }
+        }
+        "travel" => {
+            check_args(t, kind, &["at"])?;
+            let at = match arg(t, "at") {
+                Some(a) => Some(str_of(a, "`at`")?.to_string()),
+                None => None,
+            };
+            Ok(Action::Travel { map: str_of(v, "`travel`")?.to_string(), at })
+        }
+        "ending" => {
+            check_args(t, kind, &[])?;
+            Ok(Action::Ending(name_of(v, "dialog")?))
         }
         _ => unreachable!("kind_of returns an action"),
     }
@@ -1210,7 +1236,7 @@ impl Scope<'_, '_> {
 
     fn action(&mut self, file: &str, line: u32, a: &Action) {
         match a {
-            Action::Dialog(d) => self.opened.push(d.clone()),
+            Action::Dialog(d) | Action::Ending(d) => self.opened.push(d.clone()),
             Action::GiveItem { to, .. } | Action::GiveXp { to, .. } => self.holder(file, line, to),
             Action::Cast { holder, .. } | Action::RemoveSpells(holder) => self.holder(file, line, holder),
             Action::SpawnArmy { at, .. } => self.cell(file, line, "spawn_army", at.0, at.1),
@@ -1303,7 +1329,7 @@ impl Ctx<'_> {
                     }
                 }
             }
-            Action::Dialog(d) => {
+            Action::Dialog(d) | Action::Ending(d) => {
                 if self.dialogs.contains_key(d.as_str()) {
                     opened.insert(d.clone());
                 } else {

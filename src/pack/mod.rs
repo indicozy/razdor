@@ -3,6 +3,7 @@
 
 pub mod aliases;
 pub mod archive;
+pub mod campaign;
 pub mod check;
 pub mod compile;
 pub mod content;

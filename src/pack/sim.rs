@@ -14,9 +14,13 @@ use super::load::Package;
 use super::open;
 use super::triggers::VarValue;
 use crate::dt::install::DtInstall;
+use crate::rules::campaign::{after_victory, enter};
 use crate::rules::content::{Content, HeroClass};
-use crate::rules::sim::{self, StoryPlay};
+use crate::rules::game::Game;
+use crate::rules::sim::{self, MapEnd, StoryPlay};
 use crate::rules::triggers::{Ending, PendingDialog, Trace};
+
+use super::open::Opened;
 
 /// How the sim answers a dialog (`--choices`).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -181,6 +185,8 @@ fn describe(what: &Trace) -> String {
         Trace::Arrive { army, cell: (x, y), building: None } => format!("army `{army}` arrives at [{x}, {y}]"),
         Trace::End(Ending::Victory) => "the story ends: victory".to_string(),
         Trace::End(Ending::Defeat) => "the story ends: defeat".to_string(),
+        Trace::Travel(map) => format!("the story travels to `{map}`"),
+        Trace::Ending(dialog) => format!("the story ends the campaign: `{dialog}`"),
     }
 }
 
@@ -248,6 +254,262 @@ fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
     } else {
         "panic with a non-text payload".to_string()
     }
+}
+
+/// What `razdor-pack sim --campaign` does: the days each map is played, the dialog choices, whether
+/// the trace is kept, and the developer switch that fires each map's victory after some days.
+#[derive(Clone, Debug)]
+pub struct CampaignOptions {
+    pub days: u64,
+    pub choices: Choices,
+    pub trace: bool,
+    pub auto_win_after: Option<u64>,
+}
+
+/// One map of a campaign run: what it was entered with, how its play ended and on which day, and
+/// where the campaign went from it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CampaignStep {
+    pub map: String,
+    /// The carried values the map was entered with (gold, squad, named characters, variables).
+    pub entered_with: String,
+    pub end: MapEnd,
+    /// Days after the map was entered when its play ended.
+    pub day: f64,
+    /// The map the campaign went to from here (a route, a travel, or a victory's override).
+    pub next: Option<String>,
+    /// What the story did on the map, by game minute since the map was entered, when the trace
+    /// was asked for.
+    pub trace: Vec<(u64, Trace)>,
+}
+
+/// A campaign played headless from its start map.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CampaignRun {
+    /// The package's id and version.
+    pub campaign: String,
+    pub steps: Vec<CampaignStep>,
+    /// The ending dialog the campaign reached, if a story's `ending` ended it.
+    pub ending: Option<String>,
+    /// The panic's message, if the run panicked.
+    pub panic: Option<String>,
+    /// What stopped the walk without a panic (a map that does not open, too many maps).
+    pub error: Option<String>,
+    pub seconds: f64,
+}
+
+/// The most maps one run plays: a campaign that loops (a map back to itself by victories) stops here.
+const MAX_CAMPAIGN_MAPS: usize = 64;
+
+impl CampaignRun {
+    /// No panic, no error and no softlock: the exit status of `razdor-pack sim --campaign`.
+    pub fn ok(&self) -> bool {
+        self.panic.is_none() && self.error.is_none() && !self.steps.iter().any(|s| s.end == MapEnd::Stalled)
+    }
+
+    /// The run for a person: one line per map, its entry and its trace when asked for, and how the
+    /// campaign ended.
+    pub fn text(&self) -> String {
+        let mut out = format!("campaign {}: {} maps, {:.2} s\n", self.campaign, self.steps.len(), self.seconds);
+        for step in &self.steps {
+            out.push_str(&format!("{}: {}\n", step.map, step_text(step)));
+            out.push_str(&format!("  entered with {}\n", step.entered_with));
+            for (minute, what) in &step.trace {
+                out.push_str(&format!("  {}\n", trace_line(what, *minute)));
+            }
+        }
+        out.push_str(&format!("{}\n", self.outcome()));
+        out
+    }
+
+    /// How the campaign ended, for a person.
+    fn outcome(&self) -> String {
+        if let Some(p) = &self.panic {
+            return format!("PANIC: {p}");
+        }
+        if let Some(e) = &self.error {
+            return format!("ERROR: {e}");
+        }
+        if self.steps.iter().any(|s| s.end == MapEnd::Stalled) {
+            return "STALLED (softlock)".to_string();
+        }
+        match &self.ending {
+            Some(dialog) => format!("the campaign ends with the ending `{dialog}`"),
+            None => match self.steps.last().and_then(|s| (s.end == MapEnd::Victory).then_some(())) {
+                Some(()) => "the campaign ends: no route from the last map holds".to_string(),
+                None => "the campaign stops before its end".to_string(),
+            },
+        }
+    }
+
+    /// The run as JSON (`razdor-pack sim --campaign --json`).
+    pub fn json(&self) -> serde_json::Value {
+        let steps: Vec<serde_json::Value> = self
+            .steps
+            .iter()
+            .map(|s| {
+                let trace: Vec<serde_json::Value> = s.trace.iter().map(|(minute, what)| serde_json::json!({"minute": minute, "what": what})).collect();
+                serde_json::json!({
+                    "map": s.map,
+                    "entered_with": s.entered_with,
+                    "end": format!("{:?}", s.end),
+                    "day": s.day,
+                    "next": s.next,
+                    "trace": trace,
+                })
+            })
+            .collect();
+        serde_json::json!({
+            "campaign": self.campaign,
+            "ok": self.ok(),
+            "ending": self.ending,
+            "panic": self.panic,
+            "error": self.error,
+            "outcome": self.outcome(),
+            "steps": steps,
+            "seconds": self.seconds,
+        })
+    }
+}
+
+fn step_text(step: &CampaignStep) -> String {
+    let when = format!("on day {:.1}", step.day);
+    match (&step.end, &step.next) {
+        (MapEnd::Victory, Some(next)) => format!("victory {when} -> {next}"),
+        (MapEnd::Victory, None) => format!("victory {when} -> the campaign ends"),
+        (MapEnd::Travel, Some(next)) => format!("travels {when} -> {next}"),
+        (MapEnd::Travel, None) => format!("travels {when}"),
+        (MapEnd::Ending, _) => format!("ending {when}"),
+        (MapEnd::Defeat, _) => format!("defeat {when}"),
+        (MapEnd::Days, _) => "no victory or defeat within the day limit".to_string(),
+        (MapEnd::Stalled, _) => "STALLED (softlock)".to_string(),
+    }
+}
+
+/// One trace step with its day (after the map was entered).
+fn trace_line(what: &Trace, minute: u64) -> String {
+    format!("day {:.1}: {}", minute as f64 / crate::rules::clock::MINUTES_PER_DAY as f64, describe(what))
+}
+
+/// The values a map is entered with: gold, the squad with its named characters, the pack, and the
+/// variables.
+fn carried_text(g: &Game) -> String {
+    let named: Vec<String> = g
+        .squad
+        .iter()
+        .filter(|u| u.named != 0)
+        .map(|u| {
+            let name = g.story().and_then(|s| s.named.get(usize::from(u.named) - usize::from(crate::rules::triggers::PACKAGE_BASE))).cloned();
+            name.unwrap_or_else(|| u.named.to_string())
+        })
+        .collect();
+    let named = if named.is_empty() { String::new() } else { format!(" ({})", named.join(", ")) };
+    let vars: Vec<String> = g.triggers.vars.iter().map(|(k, v)| format!("{k}={}", value_text(v))).collect();
+    format!("gold {}, squad {}{named}, pack {} items, vars {}", g.gold, g.squad.len(), g.pack.count(), if vars.is_empty() { "-".into() } else { vars.join(" ") })
+}
+
+/// Plays the campaign of `pkg` from its start map: each map is opened with `open`, played for
+/// `opts.days`, and the campaign goes on by the victory's route (or the travel the story asked for)
+/// with what carries. A panic is caught and reported. `base` is the install's content, which each
+/// map's package units and items join.
+pub fn run_campaign(pkg: &Package, base: &Content, open: &mut dyn FnMut(&str) -> Result<Opened, String>, opts: &CampaignOptions) -> CampaignRun {
+    let t0 = std::time::Instant::now();
+    let campaign = pkg.manifest.as_ref().map_or_else(String::new, |m| format!("{} {}", m.id, m.version));
+    let walked = std::panic::catch_unwind(AssertUnwindSafe(|| walk(pkg, base, open, opts)));
+    let seconds = t0.elapsed().as_secs_f64();
+    match walked {
+        Ok(Ok((steps, ending))) => CampaignRun { campaign, steps, ending, panic: None, error: None, seconds },
+        Ok(Err((steps, error))) => CampaignRun { campaign, steps, ending: None, panic: None, error: Some(error), seconds },
+        Err(payload) => CampaignRun { campaign, steps: Vec::new(), ending: None, panic: Some(panic_text(payload.as_ref())), error: None, seconds },
+    }
+}
+
+/// The walk of [`run_campaign`]: the steps made, and the ending or the error that stopped it.
+type Walk = Result<(Vec<CampaignStep>, Option<String>), (Vec<CampaignStep>, String)>;
+
+fn walk(pkg: &Package, base: &Content, open: &mut dyn FnMut(&str) -> Result<Opened, String>, opts: &CampaignOptions) -> Walk {
+    let mut steps = Vec::new();
+    let Some(campaign) = pkg.campaign.as_ref() else { return Err((steps, "the package has no campaign.toml".into())) };
+    let mut map = campaign.start.clone();
+    // The game just left, the map it was on and the point the next map is entered at.
+    let mut left: Option<(Game, Opened, Option<String>)> = None;
+    let mut state = 0x9E37_79B9u32;
+    let mut pick = |d: &PendingDialog| opts.choices.pick(&mut state, d);
+    loop {
+        if steps.len() >= MAX_CAMPAIGN_MAPS {
+            return Err((steps, format!("the campaign goes on past {MAX_CAMPAIGN_MAPS} maps: a loop?")));
+        }
+        let opened = open(&map).map_err(|e| (steps.clone(), e))?;
+        let content = Arc::new(base.with_package(opened.units.clone(), opened.items.clone()));
+        // A game entered from one that is traced is traced from its start (`enter`).
+        let mut g = match left.take() {
+            None => {
+                let class = opened.scenario.header.first_offered_class().map_or(HeroClass::Knight, |k| HeroClass::ALL[k]);
+                let mut g = Game::from_scenario(content, &opened.scenario, class);
+                if opts.trace {
+                    g.triggers.trace = Some(Vec::new());
+                }
+                opened.start(&mut g);
+                g
+            }
+            Some((old, from, at)) => enter(&old, &from, &opened, at.as_deref(), content).map_err(|e| (steps.clone(), e))?,
+        };
+        let entered_with = carried_text(&g);
+        let t0 = g.clock.total_minutes();
+        let entered_at = t0 as u64;
+        let end = sim::play_campaign_map(&mut g, opts.days, opts.auto_win_after, &mut pick);
+        let mut step = CampaignStep {
+            map: map.clone(),
+            entered_with,
+            end,
+            day: (g.clock.total_minutes() - t0) / crate::rules::clock::MINUTES_PER_DAY as f64,
+            next: None,
+            trace: g.triggers.trace.clone().unwrap_or_default().into_iter().map(|(minute, what)| (minute.saturating_sub(entered_at), what)).collect(),
+        };
+        match end {
+            MapEnd::Victory => {
+                let next = after_victory(&mut g, &opened.routes);
+                step.next = next.clone();
+                steps.push(step);
+                match next {
+                    Some(n) => {
+                        left = Some((g, opened, None));
+                        map = n;
+                    }
+                    None => return Ok((steps, None)),
+                }
+            }
+            MapEnd::Travel => {
+                let travel = g.triggers.travel.take().unwrap_or_else(|| unreachable!("a travel ended the play"));
+                step.next = Some(travel.map.clone());
+                steps.push(step);
+                left = Some((g, opened, travel.at));
+                map = travel.map;
+            }
+            MapEnd::Ending => {
+                let dialog = g.triggers.ending.take();
+                steps.push(step);
+                return Ok((steps, dialog));
+            }
+            MapEnd::Defeat | MapEnd::Days | MapEnd::Stalled => {
+                steps.push(step);
+                return Ok((steps, None));
+            }
+        }
+    }
+}
+
+/// `razdor-pack sim --campaign`: the package's campaign played headless (see [`run_campaign`]),
+/// its maps opened on the install. A compile error is returned as the report (the package is
+/// checked first).
+pub fn sim_campaign(pkg: &Package, install: &DtInstall, opts: &CampaignOptions) -> Result<CampaignRun, Report> {
+    let base = Content::from_dt(install);
+    let hash = open::package_hash(&pkg.files);
+    let mut open_map = |map: &str| -> Result<Opened, String> {
+        let compiled = compile::compile(pkg, install, "en", map).map_err(|r| r.to_text())?;
+        open::build(pkg, hash, Path::new(""), map, compiled, "en")
+    };
+    Ok(run_campaign(pkg, &base, &mut open_map, opts))
 }
 
 #[cfg(test)]
