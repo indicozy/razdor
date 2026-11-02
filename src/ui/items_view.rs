@@ -1270,7 +1270,12 @@ fn bottom_row_rects(win: Rect) -> BottomRow {
     let h = base.h * super::display::button_grow();
     let bottom = base.y + base.h;
     if window_layout::portrait() {
-        let (whole, close, expand) = bottom_row(win, bottom - h, h, 12.0 * k, 8.0 * k);
+        // A phone's «Закрыть» is a normal button (44 dp tall, the owner's notes of 2026-11-02), a little
+        // wider than the desktop's share, its label bigger with it; the desktop keeps the grown size.
+        // The widget grows its height with the text size too, so the height is divided by that growth.
+        let phone = super::display::dp_px().map(|dp| (44.0 * dp / super::display::button_grow(), 0.44));
+        let (h, share) = phone.unwrap_or((h, 0.36));
+        let (whole, close, expand) = bottom_row(win, bottom - h, h, 12.0 * k, 8.0 * k, share);
         return BottomRow { whole, close: Some(close), expand };
     }
     let (whole, expand) = sideways_row(win, k, win.bottom() - h - 8.0 * k, h);
@@ -1411,10 +1416,10 @@ impl HeroView {
 
 /// The phone's bottom row of the hero window, one line of height `h` at `y` inside `win` (`pad`
 /// from each side, `gap` between): «Весь список» left, «Закрыть» centred (about 36% of the row),
-/// «Развернуть» right. Returns the three rects in that order.
-fn bottom_row(win: Rect, y: f32, h: f32, pad: f32, gap: f32) -> (Rect, Rect, Rect) {
+/// «Развернуть» right; «Закрыть» takes `share` of the row. Returns the three rects in that order.
+fn bottom_row(win: Rect, y: f32, h: f32, pad: f32, gap: f32, share: f32) -> (Rect, Rect, Rect) {
     let row = (win.w - 2.0 * pad).max(0.0);
-    let close_w = row * 0.36;
+    let close_w = row * share;
     let side_w = ((row - close_w) / 2.0 - gap).max(0.0);
     let left = Rect::new(win.x + pad, y, side_w, h);
     let close = Rect::new(left.right() + gap, y, close_w, h);
@@ -2253,7 +2258,7 @@ mod tests {
         let dp = 2.75;
         let h = 44.0 * dp;
         let win = Rect::new(4.0, 130.0, 1080.0, 1900.0);
-        let (left, close, right) = super::bottom_row(win, 1700.0, h, 12.0, 8.0);
+        let (left, close, right) = super::bottom_row(win, 1700.0, h, 12.0, 8.0, 0.36);
         for r in [left, close, right] {
             assert!(r.x >= win.x && r.right() <= win.right(), "{r:?} inside the window");
             assert!(r.h >= 44.0 * dp, "{r:?} at least 44 dp tall");

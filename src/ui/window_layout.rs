@@ -487,6 +487,12 @@ pub fn over_map_scale(video: (f32, f32)) -> super::display::WindowScale {
     super::display::enter_window_scale(k.or_else(super::display::window_scale))
 }
 
+/// The window scale of a window of `video` size over the map on the phone held upright (`None`
+/// elsewhere): the scale [`over_map_scale`] takes there, for layouts that size themselves in dp.
+pub fn upright_game_k(video: (f32, f32)) -> Option<f32> {
+    portrait_game_now(video).map(|(k, _)| k)
+}
+
 /// The rectangle of a window over the map with a title-screen twin (see [`over_map_scale`]): upright
 /// as [`game_rect`], sideways as the title's, never over the bar ([`sideways_game_now`]); `None` on the desktop.
 pub fn over_map_rect(video: (f32, f32)) -> Option<Rect> {
