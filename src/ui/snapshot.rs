@@ -593,7 +593,15 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             return Ok(());
         }
         // `pack`: the game the package opened (`RAZDOR_PACK`, `RAZDOR_PACK_CLASS`) stays as it is.
-        "pack" => return Ok(()),
+        // `RAZDOR_SCENE_AT=x,y` pans the package game's view to that cell (a bridge to look at).
+        "pack" => {
+            let at = std::env::var("RAZDOR_SCENE_AT").ok().and_then(|a| a.split_once(',').map(|(x, y)| (x.parse::<i32>(), y.parse::<i32>())));
+            if let (Some((Ok(x), Ok(y))), Some(game)) = (at, app.game.as_mut()) {
+                game.pos = game.world.map.center((x, y));
+                game.reveal(x, y, 4);
+            }
+            return Ok(());
+        }
         "replay" => return stage_replay(app, parts.next()),
         _ => {}
     }
