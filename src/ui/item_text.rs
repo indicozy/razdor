@@ -43,6 +43,11 @@ pub enum ItemBox {
 /// and to the text (Razdor's own).
 const STRIP_PICTURE: f32 = 72.0;
 const STRIP_GAP: f32 = 8.0;
+/// The strip's picture sits this many dp in from its left edge (a phone's dp).
+const STRIP_PICTURE_DP: f32 = 12.0;
+/// The strip's text is drawn this much larger than the window's text (its name about 17 sp, its
+/// description and stats about 14 sp on a phone; Razdor's own, this box only).
+const STRIP_TEXT_GROW: f32 = 1.25;
 
 /// The tooltip's width and margin, in the original's pixels (0x4cbab0).
 pub const TOOLTIP_W: f32 = 272.0;
@@ -80,17 +85,17 @@ struct Line {
 /// times `fit` (1 unless `draw` shrinks a long text). Their text takes Razdor's text size on
 /// the phone's text base (`display::text_for`; the owner's request: phones' text too small),
 /// as the messages do.
-fn lines(game: &Game, item: ItemId, room: f32, s: f32, fit: f32, grown: bool) -> Vec<Line> {
+fn lines(game: &Game, item: ItemId, room: f32, s: f32, fit: f32, grown: bool, grow: f32) -> Vec<Line> {
     // A phone's text takes its own size: measured with the legacy metrics (see `draw`).
-    super::dt_font::legacy_metrics_if(super::display::dp_px().is_some(), || lines_at(game, item, room, s, fit, grown))
+    super::dt_font::legacy_metrics_if(super::display::dp_px().is_some(), || lines_at(game, item, room, s, fit, grown, grow))
 }
 
 /// The lines of `item`; `grown` for a pop-up, whose text takes the grown size
-/// (`display::item_text_for`), else the window's text (`display::text_for`).
-fn lines_at(game: &Game, item: ItemId, room: f32, s: f32, fit: f32, grown: bool) -> Vec<Line> {
+/// (`display::item_text_for`), else the window's text (`display::text_for`); `grow` scales it.
+fn lines_at(game: &Game, item: ItemId, room: f32, s: f32, fit: f32, grown: bool, grow: f32) -> Vec<Line> {
     let d = game.content.item(item);
     let base = if grown { super::display::item_text_for(s, crate::ui::dialog::TEXT_REF) } else { super::display::text_for(s, crate::ui::dialog::TEXT_REF) };
-    let t = base * fit;
+    let t = base * grow * fit;
     let (title, body) = (sheet_size(Face::Subtitle, t), sheet_size(Face::Body, t));
     let mut out = Vec::new();
     let mut add = |text: &str, face: Face, size: f32, color: Color| {
@@ -140,7 +145,7 @@ pub fn tooltip_width(s: f32, factor: f32, screen_w: f32) -> f32 {
 /// The tooltip's height for `item` in a box `w` wide at `s` screen pixels per original pixel:
 /// its text plus twice the margin (0x4cbb15), its text at the grown size.
 pub fn tooltip_height(game: &Game, item: ItemId, s: f32, w: f32) -> f32 {
-    height(&lines(game, item, w - 2.0 * TOOLTIP_MARGIN * s, s, 1.0, true)) + 2.0 * TOOLTIP_MARGIN * s
+    height(&lines(game, item, w - 2.0 * TOOLTIP_MARGIN * s, s, 1.0, true, 1.0)) + 2.0 * TOOLTIP_MARGIN * s
 }
 
 /// The pop-up box `(width, height)` for `item` at `s` screen pixels per original pixel: the
@@ -187,17 +192,21 @@ pub fn draw(game: &Game, assets: &Assets, item: ItemId, r: Rect, kind: ItemBox, 
     let above = if kind == ItemBox::Market { PICTURE_TOP + PICTURE } else { 0.0 };
     let room_h = |s: f32| r.h - above * s - if kind == ItemBox::Tooltip { 2.0 * TOOLTIP_MARGIN * s } else { 0.0 };
     // The text's left and right insets: the strip's picture column is on the left of its text.
-    let (inset_l, inset_r) = if kind == ItemBox::MarketStrip { (STRIP_PICTURE + 2.0 * STRIP_GAP, side) } else { (side, side) };
+    // The strip's picture is 12 dp in (`pad`, in design px at this scale); its text follows the picture.
+    let strip = kind == ItemBox::MarketStrip;
+    let pad = if strip { STRIP_PICTURE_DP * super::display::dp_px().unwrap_or(0.0) / s } else { 0.0 };
+    let grow = if strip { STRIP_TEXT_GROW } else { 1.0 };
+    let (inset_l, inset_r) = if strip { (pad + STRIP_PICTURE + STRIP_GAP, side) } else { (side, side) };
     let room_w = |s: f32| r.w - (inset_l + inset_r) * s;
     let phone = super::display::dp_px().is_some();
     // Only a pop-up grows its text with the text size (its box grows with it, `tooltip_size`).
     let grown = kind == ItemBox::Tooltip;
     let t = if grown { super::display::item_text_for(s, crate::ui::dialog::TEXT_REF) } else { super::display::text_for(s, crate::ui::dialog::TEXT_REF) };
     let (mut scale, mut fit) = (s, 1.0);
-    let mut text = lines(game, item, room_w(scale), scale, fit, grown);
+    let mut text = lines(game, item, room_w(scale), scale, fit, grown, grow);
     while height(&text) > room_h(scale) && can_shrink(phone, s, scale, t, fit) {
         (scale, fit) = fit_step(phone, scale, fit);
-        text = lines(game, item, room_w(scale), scale, fit, grown);
+        text = lines(game, item, room_w(scale), scale, fit, grown, grow);
     }
     let h = height(&text);
     let top = match kind {
@@ -214,7 +223,7 @@ pub fn draw(game: &Game, assets: &Assets, item: ItemId, r: Rect, kind: ItemBox, 
         // Razdor's: the picture on the strip's left, centred; the text centred on the strip's height.
         ItemBox::MarketStrip => {
             let p = STRIP_PICTURE * scale;
-            assets.draw_item(item, r.x + STRIP_GAP * scale, r.y + ((r.h - p) / 2.0).floor(), p);
+            assets.draw_item(item, r.x + pad * scale, r.y + ((r.h - p) / 2.0).floor(), p);
             ((r.h - h) / 2.0).floor().max(0.0)
         }
     };

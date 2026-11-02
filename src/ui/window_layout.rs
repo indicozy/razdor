@@ -52,16 +52,17 @@ pub enum Stack {
     Market,
 }
 /// The market's stacked layout (design px, H the window's height): the heading at 28, the
-/// description strip from 48 (its height `MARKET_STRIP_BASE`, plus 30% of the window's extra
-/// height), the list's titles, the category row, the list (rows of `PHONE_ROW_H`, about 42 dp at
-/// the phone's scale, as many as fit: at least `PHONE_MIN_ROWS`), the money and buttons row
+/// The market's stacked layout: the heading under the title strip (6 dp below it, the title's
+/// bottom at `TOP`), the description strip (`MARKET_STRIP_DP`, sized to its text), the list's
+/// titles, the category row, the list (rows of `PHONE_ROW_H`, about 42 dp at the phone's scale, as
+/// many as fit in the rest of the window: at least `PHONE_MIN_ROWS`), the money and buttons row
 /// (H − 210 to H − 146), then the tab row (H − 140) and Exit.
-const MARKET_STRIP_BASE: f32 = 180.0;
+const MARKET_STRIP_DP: f32 = 145.0;
 /// The list's row height in design px, and the fewest rows it shows.
 const PHONE_ROW_H: f32 = 64.0;
 const PHONE_MIN_ROWS: usize = 4;
 /// The market window's lowest height (design px): the four rows at the base strip.
-const MARKET_MIN_PH: f32 = 792.0;
+const MARKET_MIN_PH: f32 = 840.0;
 /// A few dp kept clear above and below the market window (the status bar's inset, the bottom bar).
 const MARKET_MARGIN_DP: f32 = 4.0;
 
@@ -197,19 +198,21 @@ pub fn market_panes(win: Rect) -> MarketPanes { market_panes_in(win, chrome::k()
 
 fn market_panes_in(win: Rect, k: f32) -> MarketPanes {
     let r = |x: f32, y: f32, w: f32, h: f32| Rect::new(win.x + x * k, win.y + y * k, w * k, h * k);
-    // The window's height in design px: the extra over the lowest height goes 30% to the strip, 70% to the list.
+    // The window's height in design px; a phone's dp in design px (`dd`, 1 in the tests).
     let h = win.h / k;
-    let extra = (h - MARKET_MIN_PH).max(0.0);
-    let strip_h = MARKET_STRIP_BASE + 0.3 * extra;
-    let head_y = 48.0 + strip_h + 6.0;
+    let dd = super::display::dp_px().map_or(1.0, |d| d / k);
+    let heading_top = TOP + 6.0 * dd;
+    let strip_y = heading_top + 21.0;
+    let strip_h = MARKET_STRIP_DP * dd;
+    let head_y = strip_y + strip_h + 6.0;
     let group_y = head_y + 21.0;
     let list_top = group_y + 65.0;
     let buttons_y = h - 210.0;
     let list_h = (buttons_y - 6.0) - list_top;
     let rows = ((list_h / PHONE_ROW_H).floor() as usize).max(PHONE_MIN_ROWS);
     MarketPanes {
-        heading_y: win.y + 45.0 * k,
-        strip: r(2.0, 48.0, 586.0, strip_h),
+        heading_y: win.y + (heading_top + 15.0) * k,
+        strip: r(2.0, strip_y, 586.0, strip_h),
         head: r(2.0, head_y, 586.0, 18.0),
         group: r(2.0, group_y, 586.0, 60.0),
         list: r(2.0, list_top, 586.0, list_h),
@@ -957,7 +960,7 @@ mod tests {
         // A taller window (the phone's full height) shows more rows, and the strip grows a little.
         let tall = Rect::new(0.0, 0.0, 590.0, MARKET_MIN_PH + 300.0);
         let q = within(Stack::Market, || market_panes_in(tall, 1.0));
-        assert!(q.rows > p.rows && q.strip.h > p.strip.h, "the extra height goes to the list and the strip");
+        assert!(q.rows > p.rows && q.strip.h == p.strip.h, "the extra height goes to the list; the strip keeps its text's size");
         assert!(q.buttons[0].bottom() + EDGE <= MARKET_MIN_PH + 300.0 - 2.0 * TAB_H - 2.0 * EDGE + 0.01, "the buttons stay above the tabs");
     }
 
