@@ -78,12 +78,56 @@ fn market_height() -> f32 {
     if cfg!(test) {
         return MARKET_MIN_PH;
     }
-    let (sw, sh) = (screen_width(), screen_height());
+    market_height_in(screen_width(), screen_height(), market_top(), chrome::bar_height(), super::display::dp_px().unwrap_or(0.0))
+}
+
+/// [`market_height`] for a `sw`×`sh` screen with a `top` inset (the market's top, [`market_top`]) and
+/// a `bar`-px bottom bar (pure).
+fn market_height_in(sw: f32, sh: f32, top: f32, bar: f32, dp: f32) -> f32 {
     if sw <= 0.0 || sh <= 0.0 {
         return MARKET_MIN_PH;
     }
-    let avail = sh - market_top() - chrome::bar_height() - MARKET_MARGIN_DP * super::display::dp_px().unwrap_or(0.0);
+    let avail = sh - top - bar - MARKET_MARGIN_DP * dp;
     (avail / (sw / PW)).max(MARKET_MIN_PH)
+}
+
+/// The town windows (the building, the barracks and garrison, the market) held upright share one
+/// bottom edge and one scale, so their tab row and Exit stay at the same place and size between
+/// sections (a player's report: the buttons jumped when the section changed).
+fn is_town(st: Stack) -> bool {
+    matches!(st, Stack::Building | Stack::Tall | Stack::Market)
+}
+
+/// The town windows' bottom edge in px: a few dp above the bottom bar, where the market window
+/// has always ended (pure).
+fn town_bottom_in(sh: f32, bar: f32, dp: f32) -> f32 {
+    sh - bar - MARKET_MARGIN_DP * dp
+}
+
+/// A town window's height in design px; `market_h` is the market's own height.
+fn town_height(st: Stack, market_h: f32) -> f32 {
+    if st == Stack::Market { market_h } else { height_of(st) }
+}
+
+/// The scale the town windows share (pure): the smallest of their own stacked scales, so the
+/// tallest one still fits between its top inset and the bar. `safe_top` is the status bar's inset.
+fn town_k_in(screen: (f32, f32), bar: f32, dp: f32, safe_top: f32, market_h: f32, min_k: f32) -> f32 {
+    let (sw, sh) = screen;
+    let market_top = safe_top + MARKET_MARGIN_DP * dp;
+    [(Stack::Building, 0.0), (Stack::Tall, safe_top), (Stack::Market, market_top)]
+        .into_iter()
+        .map(|(st, top)| stacked_scale(sw, sh, bar, top, town_height(st, market_h), min_k))
+        .fold(f32::INFINITY, f32::min)
+}
+
+/// The rectangle of a town window at scale `k` (pure): centred across the width, its bottom at
+/// the town bottom ([`town_bottom_in`]), so the three windows differ only in their tops.
+fn town_rect_in(st: Stack, screen: (f32, f32), bar: f32, dp: f32, k: f32, market_h: f32) -> Rect {
+    let (sw, sh) = screen;
+    let w = (PW * k).round();
+    let h = (town_height(st, market_h) * k).round();
+    let bottom = town_bottom_in(sh, bar, dp);
+    Rect::new(((sw - w) / 2.0).round(), (bottom - h).max(2.0).round(), w, h)
 }
 /// The building window's height: the panes at the landscape height, then the tab row and Exit
 /// under them (746 design px; the 1080×2376 phone's window at the width's scale).
@@ -153,9 +197,10 @@ fn shift_of(st: Stack) -> f32 {
     }
 }
 
-/// The top of the building's tab row (stacked); Exit sits under it, the window's bottom under Exit.
-fn tabs_top() -> f32 {
-    height_of(stack()) - 2.0 * TAB_H - 2.0 * EDGE
+/// The top of the building's tab row (stacked) in a window `h` design px tall; Exit sits under it, the
+/// window's bottom under Exit.
+fn tabs_top(h: f32) -> f32 {
+    h - 2.0 * TAB_H - 2.0 * EDGE
 }
 
 /// Whether the window is stacked: a phone (`display::dp_px`) held upright.
@@ -284,6 +329,11 @@ fn lower_in(win: Rect, k: f32, portrait: bool) -> Rect { rect_in(win, k, 248.0, 
 /// height above the bottom bar, never below the interface scale. Called outside the window's
 /// own scale ([`scaled`]).
 fn portrait_k_for(st: Stack) -> f32 {
+    if is_town(st) {
+        let dp = super::display::dp_px().unwrap_or(0.0);
+        let market_h = market_height();
+        return town_k_in((screen_width(), screen_height()), chrome::bar_height(), dp, super::display::safe_area().top, market_h, chrome::k());
+    }
     stacked_scale(screen_width(), screen_height(), chrome::bar_height(), top_of(st), height_of(st), chrome::k())
 }
 
@@ -615,19 +665,12 @@ pub fn keyboard_lifted(win: Rect, field: Rect) -> Rect {
 pub fn window() -> Rect {
     let k = chrome::k();
     if portrait() {
+        if is_town(stack()) {
+            // The town windows end at one bottom edge (`town_rect_in`); their tops differ.
+            let dp = super::display::dp_px().unwrap_or(0.0);
+            return town_rect_in(stack(), (screen_width(), screen_height()), chrome::bar_height(), dp, k, market_height());
+        }
         let (w, h) = ((PW * k).round(), (height_of(stack()) * k).round());
-        if stack() == Stack::Tall {
-            // Between the status bar's inset and the bottom bar, centred there.
-            let (sw, sh) = (screen_width(), screen_height());
-            let top = super::display::safe_area().top;
-            let y = (top + ((sh - top - chrome::bar_height() - h) / 2.0).max(2.0)).round();
-            return Rect::new(((sw - w) / 2.0).round(), y, w, h);
-        }
-        if stack() == Stack::Market {
-            // The phone's full height: from the top safe area (a few dp in) to a few dp above the bottom bar.
-            let sw = screen_width();
-            return Rect::new(((sw - w) / 2.0).round(), market_top().round(), w, h);
-        }
         return centred(w, h);
     }
     landscape_window()
@@ -688,7 +731,7 @@ fn building_tabs_in(win: Rect, k: f32, n: usize) -> Vec<Rect> {
     (0..n)
         .map(|i| {
             let x = 2.0 + i as f32 * (w + TAB_GAP);
-            Rect::new(win.x + x * k, win.y + tabs_top() * k, w * k, TAB_H * k)
+            Rect::new(win.x + x * k, win.y + tabs_top(win.h / k) * k, w * k, TAB_H * k)
         })
         .collect()
 }
@@ -700,7 +743,7 @@ pub fn building_exit(win: Rect) -> Rect { building_exit_in(win, chrome::k()) }
 fn building_exit_in(win: Rect, k: f32) -> Rect {
     let w = 586.0 * EXIT_SHARE;
     let x = 2.0 + (586.0 - w) / 2.0;
-    Rect::new(win.x + x * k, win.y + (height_of(stack()) - EDGE - TAB_H) * k, w * k, TAB_H * k)
+    Rect::new(win.x + x * k, win.y + (win.h / k - EDGE - TAB_H) * k, w * k, TAB_H * k)
 }
 
 /// The army and hero windows' «Закрыть» button (stacked): under the formation, in thumb reach; the
@@ -872,7 +915,7 @@ mod tests {
     #[test]
     fn building_tabs_are_a_row_of_big_touch_targets_under_the_panes() {
         let w = stacked_win();
-        let lower_bottom = w.y + tabs_top() - LOWER_GAP;
+        let lower_bottom = w.y + tabs_top(building_ph()) - LOWER_GAP;
         for n in 1..=5 {
             let tabs = building_tabs_in(w, 1.0, n);
             assert_eq!(tabs.len(), n);
@@ -953,7 +996,7 @@ mod tests {
     fn the_phone_market_stacks_its_panes_above_the_tabs() {
         let w = Rect::new(0.0, 0.0, 590.0, height_of(Stack::Market));
         let p = within(Stack::Market, || market_panes_in(w, 1.0));
-        let tabs = within(Stack::Market, tabs_top);
+        let tabs = tabs_top(height_of(Stack::Market));
         assert!(p.strip.y >= 28.0 && p.strip.bottom() < p.head.y, "the strip is above the list's titles");
         assert!(p.head.bottom() < p.group.y && p.group.bottom() < p.list.y, "titles, then the category row, then the list");
         assert!((p.rows as f32 * p.row_h - p.list.h).abs() < 0.01, "the rows fill the list");
@@ -968,6 +1011,38 @@ mod tests {
         let q = within(Stack::Market, || market_panes_in(tall, 1.0));
         assert!(q.rows > p.rows && q.strip.h == p.strip.h, "the extra height goes to the list; the strip keeps its text's size");
         assert!(q.buttons[0].bottom() + EDGE <= MARKET_MIN_PH + 300.0 - 2.0 * TAB_H - 2.0 * EDGE + 0.01, "the buttons stay above the tabs");
+    }
+
+    /// The town windows on a 1080×2400 phone held upright (2.75 px per dp, a 90 px status bar's inset, a
+    /// 150 px bottom bar): the building, the barracks and the market share one bottom edge and one scale,
+    /// so their tab row and Exit are at the same place and size whatever section is open.
+    #[test]
+    fn the_town_tabs_stay_put_between_sections() {
+        let (sw, sh, dp, bar, safe) = (1080.0, 2400.0, 2.75, 150.0, 90.0);
+        let market_h = market_height_in(sw, sh, safe + MARKET_MARGIN_DP * dp, bar, dp);
+        let k = town_k_in((sw, sh), bar, dp, safe, market_h, 1.0);
+        let at = |st: Stack| {
+            let w = town_rect_in(st, (sw, sh), bar, dp, k, market_h);
+            (w, within(st, || building_tabs_in(w, k, 3)), within(st, || building_exit_in(w, k)))
+        };
+        let same = |a: Rect, b: Rect| (a.x - b.x).abs() < 0.01 && (a.y - b.y).abs() < 0.01 && (a.w - b.w).abs() < 0.01 && (a.h - b.h).abs() < 0.01;
+        let (wb, tb, eb) = at(Stack::Building);
+        for st in [Stack::Tall, Stack::Market] {
+            let (w, t, e) = at(st);
+            assert!((w.bottom() - wb.bottom()).abs() < 0.01, "{st:?}: the same bottom edge as the building window");
+            for (a, b) in t.iter().zip(&tb) {
+                assert!(same(*a, *b), "{st:?}: the tab row is where it is in the building window: {a:?} vs {b:?}");
+            }
+            assert!(same(e, eb), "{st:?}: Exit is where it is in the building window");
+        }
+        assert!(tb[0].h >= 64.0 && eb.h >= 64.0, "the tabs and Exit keep their touch size");
+        // The bottom edge is the market's old one: a few dp above the bottom bar.
+        assert!((wb.bottom() - (sh - bar - MARKET_MARGIN_DP * dp)).abs() < 1.0, "the bottom edge a few dp above the bar");
+        // Every town window fits between the status bar's inset and the bar, at the shared scale.
+        for st in [Stack::Building, Stack::Tall, Stack::Market] {
+            let (w, _, _) = at(st);
+            assert!(w.y >= safe - 0.01 && w.bottom() <= sh - bar, "{st:?} fits the room");
+        }
     }
 
     fn tall_win() -> Rect {Rect::new(10.0, 20.0, 590.0, height_of(Stack::Tall)) }
