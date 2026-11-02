@@ -1,0 +1,242 @@
+# Chapter 4 «Врата»: the dialogs. Their texts are text keys (texts/<lang>.toml, `gates.<dialog>.*`).
+# A stone's choices teleport the hero to another open gate's arrival cell (the cell beside its stone).
+
+[[dialog]]
+id = "gt_arrive_order"
+title = "gates.gt_arrive_order.title"
+text = "gates.gt_arrive_order.text"
+speaker = "dt:inquisitor"
+
+[[dialog]]
+id = "gt_arrive_marsh"
+title = "gates.gt_arrive_marsh.title"
+text = "gates.gt_arrive_marsh.text"
+speaker = "dt:hunter"
+
+[[dialog]]
+id = "gt_arrive_companies"
+title = "gates.gt_arrive_companies.title"
+text = "gates.gt_arrive_companies.text"
+speaker = "dt:marauder"
+
+# The east gate, closed: Ilm's rite opens it (an inquisitor or a heretic can read it), or its guard.
+[[dialog]]
+id = "gt_closed_e"
+title = "gates.gt_closed_e.title"
+text = "gates.gt_closed_e.text"
+
+[[dialog.choice]]
+id = "rite"
+text = "gates.gt_closed_e.rite"
+if = [ { var = "ilm", op = ">=", value = 1 } ]
+then = [ { set = "gt_east", value = true } ]
+
+[[dialog.choice]]
+id = "walk"
+text = "gates.gt_closed_e.walk"
+
+# The south gate, closed: the gatekeeper's toll opens it, or its guard.
+[[dialog]]
+id = "gt_closed_s"
+title = "gates.gt_closed_s.title"
+text = "gates.gt_closed_s.text"
+
+[[dialog.choice]]
+id = "pay"
+text = "gates.gt_closed_s.pay"
+if = [ { gold = 100, op = ">=" } ]
+then = [ { give_gold = -100 }, { set = "gt_south", value = true } ]
+
+[[dialog.choice]]
+id = "walk"
+text = "gates.gt_closed_s.walk"
+
+# The west gate, closed: the marsh charm opens it, Tess's path opens it, or its guard.
+[[dialog]]
+id = "gt_closed_w"
+title = "gates.gt_closed_w.title"
+text = "gates.gt_closed_w.text"
+
+[[dialog.choice]]
+id = "charm"
+text = "gates.gt_closed_w.charm"
+if = [ { has_item = "marsh_charm" } ]
+then = [ { set = "gt_west", value = true } ]
+
+[[dialog.choice]]
+id = "tess"
+text = "gates.gt_closed_w.tess"
+if = [ { var = "tess_joined", value = true } ]
+then = [ { set = "gt_west", value = true } ]
+
+[[dialog.choice]]
+id = "walk"
+text = "gates.gt_closed_w.walk"
+
+# The stones of the open gates: a choice per other open gate, and the way to stay.
+[[dialog]]
+id = "gt_stone_n"
+title = "gates.gt_stone_n.title"
+text = "gates.gt_stone_n.text"
+
+[[dialog.choice]]
+id = "to_e"
+text = "gates.gt_stone_n.to_e"
+if = [ { var = "gt_east", value = true } ]
+then = [ { teleport_hero = [84, 41] }, { add = "taint", value = 1 } ]
+
+[[dialog.choice]]
+id = "to_s"
+text = "gates.gt_stone_n.to_s"
+if = [ { var = "gt_south", value = true } ]
+then = [ { teleport_hero = [33, 62] }, { add = "taint", value = 1 } ]
+
+[[dialog.choice]]
+id = "to_w"
+text = "gates.gt_stone_n.to_w"
+if = [ { var = "gt_west", value = true } ]
+then = [ { teleport_hero = [14, 37] }, { add = "taint", value = 1 } ]
+
+[[dialog.choice]]
+id = "stay"
+text = "gates.gt_stone_n.stay"
+
+[[dialog]]
+id = "gt_stone_e"
+title = "gates.gt_stone_e.title"
+text = "gates.gt_stone_e.text"
+
+[[dialog.choice]]
+id = "to_n"
+text = "gates.gt_stone_e.to_n"
+if = [ { var = "gt_north", value = true } ]
+then = [ { teleport_hero = [51, 14] }, { add = "taint", value = 1 } ]
+
+[[dialog.choice]]
+id = "to_s"
+text = "gates.gt_stone_e.to_s"
+if = [ { var = "gt_south", value = true } ]
+then = [ { teleport_hero = [33, 62] }, { add = "taint", value = 1 } ]
+
+[[dialog.choice]]
+id = "to_w"
+text = "gates.gt_stone_e.to_w"
+if = [ { var = "gt_west", value = true } ]
+then = [ { teleport_hero = [14, 37] }, { add = "taint", value = 1 } ]
+
+[[dialog.choice]]
+id = "stay"
+text = "gates.gt_stone_e.stay"
+
+[[dialog]]
+id = "gt_stone_s"
+title = "gates.gt_stone_s.title"
+text = "gates.gt_stone_s.text"
+
+[[dialog.choice]]
+id = "to_n"
+text = "gates.gt_stone_s.to_n"
+if = [ { var = "gt_north", value = true } ]
+then = [ { teleport_hero = [51, 14] }, { add = "taint", value = 1 } ]
+
+[[dialog.choice]]
+id = "to_e"
+text = "gates.gt_stone_s.to_e"
+if = [ { var = "gt_east", value = true } ]
+then = [ { teleport_hero = [84, 41] }, { add = "taint", value = 1 } ]
+
+[[dialog.choice]]
+id = "to_w"
+text = "gates.gt_stone_s.to_w"
+if = [ { var = "gt_west", value = true } ]
+then = [ { teleport_hero = [14, 37] }, { add = "taint", value = 1 } ]
+
+[[dialog.choice]]
+id = "stay"
+text = "gates.gt_stone_s.stay"
+
+[[dialog]]
+id = "gt_stone_w"
+title = "gates.gt_stone_w.title"
+text = "gates.gt_stone_w.text"
+
+[[dialog.choice]]
+id = "to_n"
+text = "gates.gt_stone_w.to_n"
+if = [ { var = "gt_north", value = true } ]
+then = [ { teleport_hero = [51, 14] }, { add = "taint", value = 1 } ]
+
+[[dialog.choice]]
+id = "to_e"
+text = "gates.gt_stone_w.to_e"
+if = [ { var = "gt_east", value = true } ]
+then = [ { teleport_hero = [84, 41] }, { add = "taint", value = 1 } ]
+
+[[dialog.choice]]
+id = "to_s"
+text = "gates.gt_stone_w.to_s"
+if = [ { var = "gt_south", value = true } ]
+then = [ { teleport_hero = [33, 62] }, { add = "taint", value = 1 } ]
+
+[[dialog.choice]]
+id = "stay"
+text = "gates.gt_stone_w.stay"
+
+# The word of a gate opened (all four use it).
+[[dialog]]
+id = "gt_opened"
+title = "gates.gt_opened.title"
+text = "gates.gt_opened.text"
+
+# The word of a host surging through a stone (the dead pour; the reserve comes through the east).
+[[dialog]]
+id = "gt_surge"
+title = "gates.gt_surge.title"
+text = "gates.gt_surge.text"
+
+# Kord's company turns when it is not paid.
+[[dialog]]
+id = "gt_betrayed"
+title = "gates.gt_betrayed.title"
+text = "gates.gt_betrayed.text"
+speaker = "dt:marauder"
+
+# The wraith messenger's talk with the heretic Ilm: listen to the offer, or send it off.
+[[dialog]]
+id = "gt_messenger"
+title = "gates.gt_messenger.title"
+text = "gates.gt_messenger.text"
+speaker = "dt:ghost"
+
+[[dialog.choice]]
+id = "listen"
+text = "gates.gt_messenger.listen"
+then = [ { set = "grey_bargain_offered", value = true }, { remove_army = "wraith_messenger" } ]
+
+[[dialog.choice]]
+id = "away"
+text = "gates.gt_messenger.away"
+then = [ { remove_army = "wraith_messenger" } ]
+
+# The last gate is open: close the gates, or claim them. Either way the chapter ends.
+[[dialog]]
+id = "gt_last"
+title = "gates.gt_last.title"
+text = "gates.gt_last.text"
+
+[[dialog.choice]]
+id = "close"
+text = "gates.gt_last.close"
+then = [ { add = "dread", value = -2 }, { victory = true } ]
+
+[[dialog.choice]]
+id = "claim"
+text = "gates.gt_last.claim"
+then = [
+    { set_faction = "gate_n", faction = "player", of = "building" },
+    { set_faction = "gate_e", faction = "player", of = "building" },
+    { set_faction = "gate_s", faction = "player", of = "building" },
+    { set_faction = "gate_w", faction = "player", of = "building" },
+    { add = "taint", value = 1 },
+    { victory = true },
+]

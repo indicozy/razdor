@@ -84,3 +84,273 @@ text = "The dead lie down at the ford. Smoke still rises from the burnt mill, an
 [end_mercy]
 title = "The ford holds"
 text = "The dead lie down at the ford. The mill still stands, and the field behind it is green with the first grass. The March will not forget who held it, and will not forgive him if he leaves."
+
+# --- gates ---
+
+[gates.map]
+title = "The Gates"
+description = "Four standing stones in the March. Two of them still wait for a rite."
+won = "The last gate is shut or taken. The barrows have come closer."
+
+[gates.building.gate_n]
+name = "Raven's Gate"
+description = "Stones on a bare hill. The carvings are melted, as if burned from inside."
+
+[gates.building.gate_e]
+name = "Dawn Gate"
+description = "The eastern stones stand in ash. At night a white fire burns on them."
+
+[gates.building.gate_s]
+name = "Reed Gate"
+description = "Stones at the bog's edge. The warden takes a toll for passing, as at the ford."
+
+[gates.building.gate_w]
+name = "Ash Gate"
+description = "Stones in a thin wood. Oaths were sworn here once."
+
+[gates.building.reedmere]
+name = "Reedmere"
+description = "A village on a dry island. They remember who rode past."
+
+[gates.army.guard_n]
+name = "Ravens' Wraiths"
+
+[gates.army.guard_e]
+name = "Dawn's Dead"
+
+[gates.army.guard_s]
+name = "Reed Bandits"
+
+[gates.army.guard_w]
+name = "Crown Deserters"
+
+[gates.army.barrow_reserve]
+name = "The Barrow Host"
+
+[gates.army.wraith_messenger]
+name = "The Wraith Messenger"
+
+[gates.army.sealed_host]
+name = "The Sleeping Host"
+
+[gates.gt_arrive_order]
+title = "The Order's Order"
+text = "The Order's inquisitors wait by the ford. Brother Ilm says nothing. They will follow you while you hold the March, and the Order will not say why."
+
+[gates.gt_arrive_marsh]
+title = "Tess's Paths"
+text = "Tess waits at the edge of the bog with two hunters. \"You will cross the mire by our paths,\" she says. \"My people are faster than your horses. Keep up.\""
+
+[gates.gt_arrive_companies]
+title = "The Company's Contract"
+text = "Kord meets you by the wagons. \"A hundred coins a week, officer, or my men leave. Gold first, words after.\""
+
+[gates.gt_closed_e]
+title = "The Dawn Gate"
+text = "The stones of Dawn have gone dark. Bones in rusted mail lie between them, and white mist hangs over them. The gate is shut: a rite opens it, or the guard falling."
+rite = "Brother Ilm reads the rite"
+walk = "Step back"
+
+[gates.gt_closed_s]
+title = "The Reed Gate"
+text = "The warden in a wet cloak raises his hand. \"The gate is open to those who pay. A hundred coins, and the stones are yours. Or go and speak to my men.\""
+pay = "Pay a hundred coins"
+walk = "Step back"
+
+[gates.gt_closed_w]
+title = "The Ash Gate"
+text = "The stones in the wood are silent. Ash lies under them, and on the ash are footprints that lead nowhere. The gate does not answer."
+charm = "Show the bog charm"
+tess = "Tess leads by her path"
+walk = "Step back"
+
+[gates.gt_stone_n]
+title = "The Raven's Gate"
+text = "The stones of Raven burn blue. From here you can step to any open gate. Every step lays cold on your shoulders."
+to_e = "Step to the Dawn Gate"
+to_s = "Step to the Reed Gate"
+to_w = "Step to the Ash Gate"
+stay = "Stay"
+
+[gates.gt_stone_e]
+title = "The Dawn Gate"
+text = "White fire rises between the stones. The gate is open, and the dead know it."
+to_n = "Step to the Raven's Gate"
+to_s = "Step to the Reed Gate"
+to_w = "Step to the Ash Gate"
+stay = "Stay"
+
+[gates.gt_stone_s]
+title = "The Reed Gate"
+text = "The stones at the bog draw water up from your boots. The way is open."
+to_n = "Step to the Raven's Gate"
+to_e = "Step to the Dawn Gate"
+to_w = "Step to the Ash Gate"
+stay = "Stay"
+
+[gates.gt_stone_w]
+title = "The Ash Gate"
+text = "The ash on the stones is still warm. The gate is open."
+to_n = "Step to the Raven's Gate"
+to_e = "Step to the Dawn Gate"
+to_s = "Step to the Reed Gate"
+stay = "Stay"
+
+[gates.gt_opened]
+title = "A gate opens"
+text = "The stones wake, and the carvings on them glow. The gate is open, and the dead are already stirring behind it."
+
+[gates.gt_surge]
+title = "Out of the gate"
+text = "The dead come out of the stones. They march in rank, and no one leads them."
+
+[gates.gt_betrayed]
+title = "The company is not paid"
+text = "Kord turns his men against you. \"The contract is over, officer. Money runs out first.\""
+
+[gates.gt_messenger]
+title = "A ghost by the stones"
+text = "A grey man with no face stands by the road. He knows Brother Ilm's name and names the terms of the Barrow King. \"This is not slavery but a bargain. A pact that will outlive the March.\""
+listen = "Hear him out"
+away = "Send him off"
+
+[gates.gt_last]
+title = "The last gate"
+text = "The fourth gate is open. The stones wait: they can be sealed or taken. Whatever you choose, the barrows will hear of it."
+close = "Seal the gates: let the dead wait"
+claim = "Take the gates: let the stones serve the March"
+
+# --- barrows ---
+
+[barrows.map]
+title = "The Barrows"
+description = "The Barrow King's country: fields, the river Pepelka and its ford, the dead hills, and a palace on a stony hill under the snow."
+won = "The Barrow King is dead, and the March sleeps. Or does not."
+
+[barrows.building.throne]
+name = "The Barrow King's Palace"
+description = "A stone palace on a hill. Its windows glow without fire."
+
+[barrows.building.ford_fort]
+name = "The Ford Fort"
+description = "The Crown's garrison holds the southern bank."
+
+[barrows.building.watch_keep]
+name = "The Watch Keep"
+description = "A tower over the bogs. Its lights burn all night."
+
+[barrows.building.chapel]
+name = "The Order's Chapel"
+description = "The bell rings without wind."
+
+[barrows.building.marsh_village]
+name = "Reedmere"
+description = "A village on a dry island. Tess knows where to find it."
+
+[barrows.building.camp]
+name = "The Free Companies' Camp"
+description = "Tents, wagons and barrels. Everything is sold here except forgiveness."
+
+[barrows.army.barrow_king]
+name = "The Barrow King"
+
+[barrows.army.sealed_host]
+name = "The Sleeping Host"
+
+[barrows.bw_arrive]
+title = "The barrows call"
+text = "The barrows are silent no longer. Mist rises from under the hills, and the wind carries the voices of those buried here. The King waits in the north, in his palace. He wants you to come yourself."
+
+[barrows.bw_rises]
+title = "The Barrow King"
+text = "A host rises from the hill in the north. Death knights come in an even rank. The King did not send them to buy the March. He sent them to take it."
+
+[barrows.bw_allies]
+title = "The allies march"
+text = "Your allies show on the road to the barrows. They march north, to the palace, and do not look back. The dead see them too."
+
+[barrows.bw_curse]
+title = "A curse"
+text = "A cold wave runs through the host. Banners go dark, horses shy. The curse settles on the garrisons and on your host, and it seems it will not leave."
+
+[barrows.bw_remedy]
+title = "Cleansing"
+text = "There is a way to wash the taint here. Choose before the curse takes root deeper."
+rite = "The Order's rite (Brother Ilm)"
+herbs = "Bog herbs"
+buy = "Pay the company for a brew (60 coins)"
+none = "Do not cleanse"
+
+[barrows.bw_fate_varga]
+title = "Varga"
+text = "Varga stands on the hill with her halberd. \"I will walk to the palace,\" she says. \"Or I will stay here, if that is what is needed.\""
+walk = "Walk together"
+leave = "Leave her to hold the gate"
+
+[barrows.bw_fate_tess]
+title = "Tess"
+text = "Tess sits on a stone in the mire. \"I know the path through the barrows,\" she says. \"No dead there, only water. But I will not go back.\""
+
+[barrows.bw_fate_ilm_inq]
+title = "Brother Ilm"
+text = "Ilm unrolls a scroll. \"The Order will not forgive your mistake, but it will not forgive the dead either. I give you my word, not your fate.\""
+
+[barrows.bw_fate_ilm_heresy]
+title = "Brother Ilm"
+text = "Ilm looks at you without fear. \"The grey man waits by the palace. You know what he offers. Decide for yourself, and I will be the witness.\""
+
+[barrows.bw_fate_kord]
+title = "Kord"
+text = "Kord stands by the wagons. \"The company wants its pay, officer. Give what you promised, or we leave and take what you have not paid for.\""
+pay = "Pay fifty coins"
+shake = "Shake his hand"
+
+[barrows.bw_throne]
+title = "The throne"
+text = "The palace is empty, and the throne stands in the middle of the hall. Cold reaches from it to your shoulders. The Barrow King waits behind the door."
+
+[barrows.bw_grey_throne]
+title = "The Grey Bargain"
+text = "A grey ghost waits by the throne. \"Kneel, and the dead will lower their swords. The March will not be yours, but it will not be a grave either.\""
+kneel = "Kneel before the throne"
+stand = "Stand and fight"
+
+[barrows.bw_king_slain]
+title = "The King is dead"
+text = "The Barrow King lies at the foot of the throne. His host crumbles to dust. The March still breathes, and someone must decide what becomes of it."
+next = "Next"
+
+[barrows.bw_sum_roads]
+title = "Empty roads"
+text = "The caravans never reached the March. The price of salt and bread has doubled, and the farmers count which merchants are to blame."
+next = "Next"
+
+[barrows.bw_sum_fire]
+title = "Ash of the villages"
+text = "The villages are burned, and no house stands in the fields. The farmers look at you as they looked at the barrows."
+next = "Next"
+
+[barrows.bw_council]
+title = "The March's council"
+text = "The barrows are silent. Choose what the March will be: the one that holds to the Crown and the Order, or the one that lives by the companies and the bog. If it holds to neither, there is only ash."
+iron = "The Iron Peace: the Crown and the Order"
+free = "The Free March: the companies and the marsh folk"
+fall = "The fall of the March"
+
+# --- campaign ---
+
+[campaign.end_iron]
+title = "The Iron Peace"
+text = "The March becomes a quiet province of the Crown. The Order raises chapels on the barrows, and blue banners hang on the towers. The March is safe, but not free."
+
+[campaign.end_free]
+title = "The Free March"
+text = "The March belongs to the companies and the bog. The roads are open to whoever pays, and nobody asks where the gold came from. The barrows still stir, but no longer at a king's word."
+
+[campaign.end_grey]
+title = "The Grey Bargain"
+text = "You knelt before the throne, and the dead lowered their swords. Your name is whispered in the barrows now. The March did not burn and is not free: it became a home for those who did not die all the way."
+
+[campaign.end_fall]
+title = "Ash at the ford"
+text = "The barrows came to the ford. You died at the water, and the March fell with you. No one will call it the Ash March again: nothing is left of it."

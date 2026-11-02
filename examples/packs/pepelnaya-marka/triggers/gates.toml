@@ -1,0 +1,331 @@
+# Chapter 4 «Врата»: the four waygates of the March (map `gates`). The hero opens each gate by a quest
+# (a guard beaten, or a shortcut the hero holds: Ilm's rite, a gold toll, the marsh charm, Tess's path),
+# then steps onto an open gate's stone to teleport to another open one. The dead pour through the gates
+# (spawn_army at the stones, teleport_army of the barrow reserve), the hosts march for them (army_goal),
+# and the surge comes when a host arrives at a stone (army_arrives). The branch decides who walks with
+# the hero: the Order's inquisitors (ally 1), Tess's escort on the bog paths (ally 2), Kord's company for
+# gold (ally 3). Ilm the heretic meets a wraith messenger (grey_bargain_offered, chapter 5's third ending).
+# The stones: north (48,14), east (84,44), south (30,62), west (14,40); the arrival cell next to each is
+# where a teleport lands.
+
+[vars]
+gt_north = false               # the north gate is open
+gt_east = false                # the east gate is open
+gt_south = false               # the south gate is open
+gt_west = false                # the west gate is open
+grey_bargain_offered = false   # Ilm the heretic heard the wraith out: chapter 5's Grey Bargain is open
+
+# --- The start: the branch's company walks with the hero. ---
+
+[[trigger]]
+id = "gt_arrive_order"
+map = "gates"
+when = { event = "game_start" }
+if = [ { var = "ally", value = 1 } ]
+then = [
+    { spawn_army = "gt_inq", at = [48, 92], faction = "ally", model = 5, troops = ["dt:inquisitor", "dt:monk", "dt:halberdier"] },
+    { army_goal = "gt_inq", follow = "hero" },
+    { dialog = "gt_arrive_order" },
+]
+
+[[trigger]]
+id = "gt_arrive_marsh"
+map = "gates"
+when = { event = "game_start" }
+if = [ { var = "ally", value = 2 } ]
+then = [
+    { spawn_army = "gt_escort", at = [52, 92], faction = "ally", model = 5, troops = ["dt:hunter", "dt:ranger", "dt:pilgrim"] },
+    { army_goal = "gt_escort", follow = "hero" },
+    { army_speed = "gt_escort", percent = 150 },
+    { dialog = "gt_arrive_marsh" },
+]
+
+[[trigger]]
+id = "gt_arrive_companies"
+map = "gates"
+when = { event = "game_start" }
+if = [ { var = "ally", value = 3 }, { var = "kord", op = ">=", value = 1 }, { var = "kord", op = "!=", value = 2 } ]
+then = [
+    { spawn_army = "gt_company", at = [46, 92], faction = "ally", model = 5, troops = ["dt:marauder", "dt:viking", "dt:crossbowman"] },
+    { army_goal = "gt_company", follow = "hero" },
+    { dialog = "gt_arrive_companies" },
+]
+
+# Ilm is not a heretic yet: the wraith messenger is not in the March.
+[[trigger]]
+id = "gt_messenger_gone"
+map = "gates"
+when = { event = "game_start" }
+if = [ { var = "ilm", op = "<", value = 2 } ]
+then = [ { remove_army = "wraith_messenger" } ]
+
+# --- The quests: a guard beaten opens its gate. ---
+
+[[trigger]]
+id = "gt_guard_n"
+map = "gates"
+when = { event = "army_defeated", army = "guard_n" }
+then = [ { set = "gt_north", value = true } ]
+
+[[trigger]]
+id = "gt_guard_e"
+map = "gates"
+when = { event = "army_defeated", army = "guard_e" }
+then = [ { set = "gt_east", value = true } ]
+
+[[trigger]]
+id = "gt_guard_s"
+map = "gates"
+when = { event = "army_defeated", army = "guard_s" }
+then = [ { set = "gt_south", value = true } ]
+
+[[trigger]]
+id = "gt_guard_w"
+map = "gates"
+when = { event = "army_defeated", army = "guard_w" }
+then = [ { set = "gt_west", value = true } ]
+
+# --- The gates: a closed one offers its shortcut, an open one its stones. ---
+
+[[trigger]]
+id = "gt_enter_n"
+map = "gates"
+when = { event = "hero_enters", at = [48, 14] }
+if = [ { var = "gt_north", value = true } ]
+once = false
+then = [ { dialog = "gt_stone_n" } ]
+
+[[trigger]]
+id = "gt_closed_e"
+map = "gates"
+when = { event = "hero_enters", at = [84, 44] }
+if = [ { var = "gt_east", value = false } ]
+once = false
+then = [ { dialog = "gt_closed_e" } ]
+
+[[trigger]]
+id = "gt_enter_e"
+map = "gates"
+when = { event = "hero_enters", at = [84, 44] }
+if = [ { var = "gt_east", value = true } ]
+once = false
+then = [ { dialog = "gt_stone_e" } ]
+
+[[trigger]]
+id = "gt_closed_s"
+map = "gates"
+when = { event = "hero_enters", at = [30, 62] }
+if = [ { var = "gt_south", value = false } ]
+once = false
+then = [ { dialog = "gt_closed_s" } ]
+
+[[trigger]]
+id = "gt_enter_s"
+map = "gates"
+when = { event = "hero_enters", at = [30, 62] }
+if = [ { var = "gt_south", value = true } ]
+once = false
+then = [ { dialog = "gt_stone_s" } ]
+
+[[trigger]]
+id = "gt_closed_w"
+map = "gates"
+when = { event = "hero_enters", at = [14, 40] }
+if = [ { var = "gt_west", value = false } ]
+once = false
+then = [ { dialog = "gt_closed_w" } ]
+
+[[trigger]]
+id = "gt_enter_w"
+map = "gates"
+when = { event = "hero_enters", at = [14, 40] }
+if = [ { var = "gt_west", value = true } ]
+once = false
+then = [ { dialog = "gt_stone_w" } ]
+
+# --- Opening: the count of open gates, the word, and the last gate's choice. ---
+
+[[trigger]]
+id = "gt_open_n"
+map = "gates"
+when = { event = "var_changed", var = "gt_north" }
+if = [ { var = "gt_north", value = true } ]
+then = [ { add = "gates_open", value = 1 }, { dialog = "gt_opened" } ]
+
+[[trigger]]
+id = "gt_open_e"
+map = "gates"
+when = { event = "var_changed", var = "gt_east" }
+if = [ { var = "gt_east", value = true } ]
+then = [ { add = "gates_open", value = 1 }, { dialog = "gt_opened" } ]
+
+[[trigger]]
+id = "gt_open_s"
+map = "gates"
+when = { event = "var_changed", var = "gt_south" }
+if = [ { var = "gt_south", value = true } ]
+then = [ { add = "gates_open", value = 1 }, { dialog = "gt_opened" } ]
+
+[[trigger]]
+id = "gt_open_w"
+map = "gates"
+when = { event = "var_changed", var = "gt_west" }
+if = [ { var = "gt_west", value = true } ]
+then = [ { add = "gates_open", value = 1 }, { dialog = "gt_opened" } ]
+
+[[trigger]]
+id = "gt_last"
+map = "gates"
+when = { event = "var_changed", var = "gates_open" }
+if = [ { var = "gates_open", value = 4 } ]
+then = [ { dialog = "gt_last" } ]
+
+# --- The dead pour through the open gates (once per gate, from dread 3). ---
+
+[[trigger]]
+id = "gt_pour_n"
+map = "gates"
+when = { event = "week_start" }
+if = [ { var = "gt_north", value = true }, { var = "dread", op = ">=", value = 3 } ]
+then = [ { spawn_army = "gt_pour_n", at = [50, 16], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:ghost"] } ]
+
+[[trigger]]
+id = "gt_pour_e"
+map = "gates"
+when = { event = "week_start" }
+if = [ { var = "gt_east", value = true }, { var = "dread", op = ">=", value = 3 } ]
+then = [ { spawn_army = "gt_pour_e", at = [86, 44], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:ghost"] } ]
+
+[[trigger]]
+id = "gt_pour_s"
+map = "gates"
+when = { event = "week_start" }
+if = [ { var = "gt_south", value = true }, { var = "dread", op = ">=", value = 3 } ]
+then = [ { spawn_army = "gt_pour_s", at = [32, 60], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:ghost"] } ]
+
+[[trigger]]
+id = "gt_pour_w"
+map = "gates"
+when = { event = "week_start" }
+if = [ { var = "gt_west", value = true }, { var = "dread", op = ">=", value = 3 } ]
+then = [ { spawn_army = "gt_pour_w", at = [16, 40], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:ghost"] } ]
+
+# The barrow reserve comes through the east gate once the dread is high (teleport_army to a building).
+[[trigger]]
+id = "gt_reserve_through"
+map = "gates"
+when = { event = "week_start" }
+if = [ { var = "gt_east", value = true }, { var = "dread", op = ">=", value = 4 } ]
+then = [ { teleport_army = "barrow_reserve", to = "gate_e" }, { add = "taint", value = 1 }, { dialog = "gt_surge" } ]
+
+# --- The hosts march for the gates; each surges through when it arrives at its stone. ---
+
+[[trigger]]
+id = "gt_host_a"
+map = "gates"
+when = { event = "week_start" }
+if = [ { var = "dread", op = ">=", value = 3 } ]
+then = [
+    { spawn_army = "gt_host_a", at = [86, 26], faction = "enemy", model = 10, troops = ["dt:death_knight", "dt:ghoul", "dt:ghoul"] },
+    { army_goal = "gt_host_a", go_to = [84, 46] },
+    { add = "taint", value = 1 },
+]
+
+[[trigger]]
+id = "gt_host_b"
+map = "gates"
+when = { event = "week_start" }
+if = [ { var = "dread", op = ">=", value = 5 } ]
+then = [
+    { spawn_army = "gt_host_b", at = [6, 20], faction = "enemy", model = 10, troops = ["dt:death_knight", "dt:ghoul", "dt:ghost"] },
+    { army_goal = "gt_host_b", go_to = [14, 38] },
+    { add = "taint", value = 1 },
+]
+
+[[trigger]]
+id = "gt_host_c"
+map = "gates"
+when = { event = "week_start" }
+if = [ { var = "dread", op = ">=", value = 7 } ]
+then = [
+    { spawn_army = "gt_host_c", at = [40, 84], faction = "enemy", model = 10, troops = ["dt:death_knight", "dt:death_knight", "dt:ghoul"] },
+    { army_goal = "gt_host_c", go_to = [30, 60] },
+    { add = "taint", value = 1 },
+]
+
+[[trigger]]
+id = "gt_surge_e"
+map = "gates"
+when = { event = "army_arrives", army = "gt_host_a", at = [84, 46] }
+then = [
+    { spawn_army = "gt_surge_e", at = [86, 46], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:ghost"] },
+    { dialog = "gt_surge" },
+]
+
+[[trigger]]
+id = "gt_surge_w"
+map = "gates"
+when = { event = "army_arrives", army = "gt_host_b", at = [14, 38] }
+then = [
+    { spawn_army = "gt_surge_w", at = [16, 38], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:ghost"] },
+    { dialog = "gt_surge" },
+]
+
+[[trigger]]
+id = "gt_surge_s"
+map = "gates"
+when = { event = "army_arrives", army = "gt_host_c", at = [30, 60] }
+then = [
+    { spawn_army = "gt_surge_s", at = [32, 58], faction = "enemy", model = 10, troops = ["dt:ghoul", "dt:ghost"] },
+    { dialog = "gt_surge" },
+]
+
+# --- The dread and the taint of the gates. ---
+
+[[trigger]]
+id = "gt_dread_week"
+map = "gates"
+when = { event = "week_start" }
+once = false
+then = [ { add = "dread", value = 1 } ]
+
+# The taint of the dead's gates: a week's curse on the host once the taint reaches 2.
+[[trigger]]
+id = "gt_taint_curse"
+map = "gates"
+when = { event = "week_start" }
+if = [ { var = "taint", op = ">=", value = 2 } ]
+once = false
+then = [ { cast_on_army = "dt:spell/weakness", in = "player", minutes = 10080 } ]
+
+# --- Kord's company: paid each week, or it turns. ---
+
+[[trigger]]
+id = "gt_kord_pay"
+map = "gates"
+when = { event = "week_start" }
+if = [ { var = "ally", value = 3 }, { var = "kord", value = 1 }, { gold = 30, op = ">=" } ]
+once = false
+then = [ { give_gold = -30 } ]
+
+[[trigger]]
+id = "gt_kord_turn"
+map = "gates"
+when = { event = "week_start" }
+if = [ { var = "ally", value = 3 }, { var = "kord", value = 1 }, { gold = 30, op = "<" } ]
+once = false
+then = [
+    { set = "kord", value = 2 },
+    { set_faction = "gt_company", faction = "enemy" },
+    { army_goal = "gt_company", attack = "hero" },
+    { dialog = "gt_betrayed" },
+]
+
+# --- Brother Ilm's heresy: the wraith messenger's talk. ---
+
+[[trigger]]
+id = "gt_messenger"
+map = "gates"
+when = { event = "hero_enters", at = [56, 42, 8, 8] }
+if = [ { var = "ilm", value = 2 }, { var = "grey_bargain_offered", value = false } ]
+then = [ { dialog = "gt_messenger" } ]

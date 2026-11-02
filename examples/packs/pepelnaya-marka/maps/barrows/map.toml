@@ -1,0 +1,190 @@
+# Chapter 5 «Курганы», 200×200: the finale. The green fields of the south, the river Ash across the
+# middle with its one ford under the fort, the burned centre, the marsh and the chapel in the
+# south-west, the dunes in the east, and the barrow country in the north-east, where the King's palace
+# stands on a stony hill under the snow. terrain.png is painted by
+# tools/pepelnaya-marka-terrain-barrows.py. The palace is a neutral building (the hero steps onto it to
+# meet the King's offer); the King's own host is the barrow_king army on the step below it. The map's
+# own victory is a placeholder that never fires: the chapter ends by the story's `ending` (see
+# triggers/barrows.toml and dialogs/barrows.toml).
+title = "barrows.map.title"
+description = "barrows.map.description"
+start_date = "1301-06-01"
+relations = [[3, 3, 0, -3], [3, 3, 0, -3], [0, 0, 3, -3], [-3, -3, -3, 3]]
+
+[hero]
+cell = [100, 192]
+classes = ["knight"]
+gold = 60
+mana = 10
+troops = [{ unit = "dt:militiaman", level = 1, count = 3 }]
+
+# Woods and dead trees in the meadows and the burned centre.
+[[object]]
+kind = "trees"
+cell = [10, 20]
+[[object]]
+kind = "trees"
+cell = [20, 30]
+[[object]]
+kind = "trees"
+cell = [30, 10]
+[[object]]
+kind = "trees"
+cell = [44, 22]
+[[object]]
+kind = "trees"
+cell = [60, 14]
+[[object]]
+kind = "trees"
+cell = [70, 30]
+[[object]]
+kind = "trees"
+cell = [80, 50]
+[[object]]
+kind = "trees"
+cell = [20, 70]
+[[object]]
+kind = "trees"
+cell = [50, 90]
+[[object]]
+kind = "dead_trees"
+cell = [140, 70]
+[[object]]
+kind = "dead_trees"
+cell = [150, 80]
+[[object]]
+kind = "dead_trees"
+cell = [160, 100]
+[[object]]
+kind = "dead_trees"
+cell = [130, 94]
+[[object]]
+kind = "dead_trees"
+cell = [124, 110]
+[[object]]
+kind = "dead_trees"
+cell = [80, 140]
+[[object]]
+kind = "dead_trees"
+cell = [70, 128]
+# The barrow mounds and their standing stones in the north-east, and the hills of the south.
+[[object]]
+kind = "hills"
+cell = [130, 20]
+[[object]]
+kind = "hills"
+cell = [142, 10]
+[[object]]
+kind = "hills"
+cell = [150, 30]
+[[object]]
+kind = "hills"
+cell = [176, 50]
+[[object]]
+kind = "hills"
+cell = [182, 64]
+[[object]]
+kind = "hills"
+cell = [60, 180]
+[[object]]
+kind = "hills"
+cell = [70, 184]
+[[object]]
+kind = "stones"
+cell = [162, 22]
+[[object]]
+kind = "stones"
+cell = [170, 30]
+[[object]]
+kind = "mountains"
+cell = [120, 150]
+[[object]]
+kind = "mountains"
+cell = [126, 160]
+[[object]]
+kind = "thicket"
+cell = [4, 160]
+[[object]]
+kind = "thicket"
+cell = [6, 166]
+
+# The palace on its hill, the Crown's fort at the ford (the hero's), the watch keep, the Order's
+# chapel, the marsh folk's village and the Companies' camp.
+[[building]]
+id = "throne"
+type = "palace"
+name = "barrows.building.throne.name"
+description = "barrows.building.throne.description"
+cell = [166, 26]
+faction = "neighbour"
+[[building]]
+id = "ford_fort"
+type = "fort"
+name = "barrows.building.ford_fort.name"
+description = "barrows.building.ford_fort.description"
+cell = [96, 128]
+faction = "player"
+income = 20
+garrison = [{ unit = "dt:militiaman", level = 1, count = 3 }]
+[[building]]
+id = "watch_keep"
+type = "fort"
+name = "barrows.building.watch_keep.name"
+description = "barrows.building.watch_keep.description"
+cell = [60, 150]
+faction = "player"
+garrison = [{ unit = "dt:militiaman", level = 1, count = 2 }]
+[[building]]
+id = "chapel"
+type = "church"
+name = "barrows.building.chapel.name"
+description = "barrows.building.chapel.description"
+cell = [48, 170]
+faction = "neighbour"
+[[building]]
+id = "marsh_village"
+type = "village"
+name = "barrows.building.marsh_village.name"
+description = "barrows.building.marsh_village.description"
+cell = [16, 176]
+faction = "neighbour"
+[[building]]
+id = "camp"
+type = "tavern"
+name = "barrows.building.camp.name"
+description = "barrows.building.camp.description"
+cell = [176, 160]
+faction = "neighbour"
+
+# The King: his own host on the step below the palace. It never moves by itself; the story sends the
+# other hosts (triggers/barrows.toml).
+[[army]]
+id = "barrow_king"
+name = "barrows.army.barrow_king.name"
+cell = [166, 36]
+faction = "enemy"
+model = "necromancer"
+troops = [
+    { unit = "dt:lich", level = 1, count = 1 },
+    { unit = "dt:death_knight", level = 2, count = 3 },
+]
+
+# The victory's placeholder: it lies in the far corner and is never beaten.
+[[army]]
+id = "sealed_host"
+name = "barrows.army.sealed_host.name"
+cell = [195, 195]
+faction = "enemy"
+model = "inactive"
+troops = [{ unit = "dt:deadman", level = 1, count = 1 }]
+
+# A lantern on the burned road, lit from the start.
+[[point]]
+cell = [100, 104]
+radius = 3
+active = true
+
+[victory]
+kind = "defeat_army"
+army = "sealed_host"
+message = "barrows.map.won"

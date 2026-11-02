@@ -1,0 +1,231 @@
+# Chapter 4 «Врата», 100×100: the four waygates of the March on their stony rings, the road from the
+# south with a branch to each, the marsh and the reedmere island in the south-west, the grass in the
+# north-west, the burned east, and the snow-bound barrow corner in the north-east. terrain.png is
+# painted by tools/pepelnaya-marka-terrain-gates.py. The waygates are obelisks (neutral buildings):
+# the hero steps onto one to choose a stone (triggers/gates.toml). The map's own victory is a
+# placeholder that never fires (the sealed host lies in the snow); the chapter ends by the story's
+# `victory` (after the last gate is shut or taken).
+title = "gates.map.title"
+description = "gates.map.description"
+start_date = "1301-02-01"
+relations = [[3, 3, 0, -3], [3, 3, 0, -3], [0, 0, 3, -3], [-3, -3, -3, 3]]
+
+[hero]
+cell = [50, 94]
+classes = ["knight"]
+gold = 60
+mana = 10
+troops = [{ unit = "dt:militiaman", level = 1, count = 3 }]
+
+# Woods on the north-west meadows.
+[[object]]
+kind = "trees"
+cell = [6, 8]
+[[object]]
+kind = "trees"
+cell = [9, 12]
+[[object]]
+kind = "trees"
+cell = [14, 6]
+[[object]]
+kind = "trees"
+cell = [20, 10]
+[[object]]
+kind = "trees"
+cell = [24, 20]
+[[object]]
+kind = "trees"
+cell = [8, 24]
+[[object]]
+kind = "trees"
+cell = [18, 26]
+[[object]]
+kind = "trees"
+cell = [26, 14]
+# The burned east and the hills of the snow.
+[[object]]
+kind = "dead_trees"
+cell = [66, 40]
+[[object]]
+kind = "dead_trees"
+cell = [70, 52]
+[[object]]
+kind = "dead_trees"
+cell = [74, 62]
+[[object]]
+kind = "dead_trees"
+cell = [68, 78]
+[[object]]
+kind = "dead_trees"
+cell = [80, 70]
+[[object]]
+kind = "dead_trees"
+cell = [90, 58]
+[[object]]
+kind = "dead_trees"
+cell = [88, 36]
+[[object]]
+kind = "dead_trees"
+cell = [64, 88]
+[[object]]
+kind = "hills"
+cell = [66, 18]
+[[object]]
+kind = "hills"
+cell = [72, 26]
+# The marsh's thickets.
+[[object]]
+kind = "thicket"
+cell = [6, 70]
+[[object]]
+kind = "thicket"
+cell = [8, 68]
+[[object]]
+kind = "thicket"
+cell = [20, 70]
+# The stones on the rings of the four gates.
+[[object]]
+kind = "stones"
+cell = [46, 12]
+[[object]]
+kind = "stones"
+cell = [50, 12]
+[[object]]
+kind = "stones"
+cell = [82, 42]
+[[object]]
+kind = "stones"
+cell = [86, 42]
+[[object]]
+kind = "stones"
+cell = [28, 60]
+[[object]]
+kind = "stones"
+cell = [32, 64]
+[[object]]
+kind = "stones"
+cell = [12, 38]
+[[object]]
+kind = "stones"
+cell = [16, 42]
+
+# The four waygates (neutral obelisks) and the marsh village on its island.
+[[building]]
+id = "gate_n"
+type = "obelisk"
+name = "gates.building.gate_n.name"
+description = "gates.building.gate_n.description"
+cell = [48, 14]
+faction = "neighbour"
+[[building]]
+id = "gate_e"
+type = "obelisk"
+name = "gates.building.gate_e.name"
+description = "gates.building.gate_e.description"
+cell = [84, 44]
+faction = "neighbour"
+[[building]]
+id = "gate_s"
+type = "obelisk"
+name = "gates.building.gate_s.name"
+description = "gates.building.gate_s.description"
+cell = [30, 62]
+faction = "neighbour"
+[[building]]
+id = "gate_w"
+type = "obelisk"
+name = "gates.building.gate_w.name"
+description = "gates.building.gate_w.description"
+cell = [14, 40]
+faction = "neighbour"
+[[building]]
+id = "reedmere"
+type = "village"
+name = "gates.building.reedmere.name"
+description = "gates.building.reedmere.description"
+cell = [19, 84]
+faction = "neighbour"
+
+# The quest guards at the foot of each gate. Each one beaten opens its gate (triggers/gates.toml).
+[[army]]
+id = "guard_n"
+name = "gates.army.guard_n.name"
+cell = [46, 16]
+faction = "enemy"
+model = "ghosts"
+troops = [
+    { unit = "dt:ghost", level = 1, count = 3 },
+    { unit = "dt:ghoul", level = 1, count = 1 },
+]
+[[army]]
+id = "guard_e"
+name = "gates.army.guard_e.name"
+cell = [82, 46]
+faction = "enemy"
+model = "necromancer"
+troops = [
+    { unit = "dt:deadman", level = 1, count = 3 },
+    { unit = "dt:dead_warrior", level = 1, count = 2 },
+]
+[[army]]
+id = "guard_s"
+name = "gates.army.guard_s.name"
+cell = [28, 64]
+faction = "enemy"
+model = "bandits"
+gold = 60
+troops = [
+    { unit = "dt:bandit", level = 1, count = 3 },
+    { unit = "dt:archer", level = 1, count = 2 },
+]
+[[army]]
+id = "guard_w"
+name = "gates.army.guard_w.name"
+cell = [12, 42]
+faction = "enemy"
+model = "feudal"
+troops = [
+    { unit = "dt:halberdier", level = 1, count = 2 },
+    { unit = "dt:archer", level = 1, count = 2 },
+]
+
+# The dead of the barrow corner: their reserve, which a gate can be made to pour.
+[[army]]
+id = "barrow_reserve"
+name = "gates.army.barrow_reserve.name"
+cell = [84, 24]
+faction = "enemy"
+model = "necromancer"
+troops = [
+    { unit = "dt:death_knight", level = 1, count = 2 },
+    { unit = "dt:ghoul", level = 1, count = 3 },
+]
+
+# The wraith messenger, who talks to Brother Ilm only if he is a heretic (triggers/gates.toml).
+[[army]]
+id = "wraith_messenger"
+name = "gates.army.wraith_messenger.name"
+cell = [60, 46]
+faction = "neighbour"
+model = "ghosts"
+troops = [{ unit = "dt:ghost", level = 1, count = 1 }]
+
+# The victory's placeholder: it lies far off in the south-east corner and is never beaten.
+[[army]]
+id = "sealed_host"
+name = "gates.army.sealed_host.name"
+cell = [97, 97]
+faction = "enemy"
+model = "inactive"
+troops = [{ unit = "dt:deadman", level = 1, count = 1 }]
+
+# A lantern by the road, lit from the start.
+[[point]]
+cell = [50, 58]
+radius = 3
+active = true
+
+[victory]
+kind = "defeat_army"
+army = "sealed_host"
+message = "gates.map.won"
