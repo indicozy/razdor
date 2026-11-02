@@ -1265,14 +1265,14 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     let bw = 150.0 * k;
     let ok_h = row_h;
     // The column's hints, wrapped first: they set the row pitch, which is the original's 44 px
-    // unless the column would run past the Ok button's top. The column is eleven pitches from its
+    // unless the column would run past the Ok button's top. The column is twelve pitches from its
     // first row to the language row, the hint slot (44 px plus its lines), and the language's
     // description (48 px down, then its lines).
     let ai_hint = wrap(tr("Maximum: before each move the enemy of your battles weighs every move and answer ahead and plays each out to the end of the battle."), rw, 12.0 * k);
     let lang_hint = wrap(super::language::hint(), rw, 12.0 * k);
     let hints_h = 44.0 * k + ai_hint.len() as f32 * 17.0 * k + 48.0 * k + lang_hint.len() as f32 * 17.0 * k;
     let ok_top = inner.h - 16.0 * k - ok_h - 4.0 * k;
-    let mut pitch = right_column_pitch(30.0 * k, ok_top, 11.0, hints_h, 44.0 * k);
+    let mut pitch = right_column_pitch(30.0 * k, ok_top, 12.0, hints_h, 44.0 * k);
     // At a grown size the rows keep a 2 px gap under their grown buttons (at Normal nothing).
     if row_h > 28.0 * k {
         pitch = pitch.max(row_h + 2.0 * k);
@@ -1347,6 +1347,12 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     }
     if row(tr("Minimap army list"), if audio.army_list { tr("On") } else { tr("Off") }, &mut y) {
         audio.army_list = !audio.army_list;
+    }
+    // Razdor's option (the owner's decision, 2026-11-02): the world map's 2.5D view, a tilted
+    // camera with the standing sprites as billboards (`world_view::tilt_view`); off by default.
+    let view_label = if audio.map_tilt { "2.5D" } else { tr("Flat") };
+    if row(tr("Map view"), view_label, &mut y) {
+        audio.map_tilt = !audio.map_tilt;
     }
     // Razdor's options (a player's report: the minimap dragged where it is hard to move back):
     // its corner, cycled clockwise, and «Сбросить» puts its size and place back to the default.

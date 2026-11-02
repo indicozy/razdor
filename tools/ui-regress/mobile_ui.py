@@ -83,6 +83,7 @@ SCREENS = [
     ("map","map:РК1-Начало пути", {}),
     ("minimap", "minimap:РК1-Начало пути", {}),
     ("settings", "settings:РК1-Начало пути", {}),
+    ("advanced", "settings:РК1-Начало пути:advanced", {}),
     ("keys", "settings:РК1-Начало пути:keys", {}),
     ("help", "map:РК1-Начало пути", {"RAZDOR_SCENE_OPEN": "3:keys"}),
     ("save", "save:РК1-Начало пути", {}),
