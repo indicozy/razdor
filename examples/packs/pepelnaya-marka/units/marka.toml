@@ -1,0 +1,8 @@
+# Chapter 2 «Марка»: the dead's own knight, who rises from the barrows with the hosts. A package unit
+# draws the picture of its base, the death knight.
+[[unit]]
+id = "ash_knight"
+base = "dt:death_knight"
+name = "marka.unit.ash_knight.name"
+description = "marka.unit.ash_knight.description"
+cost = 90

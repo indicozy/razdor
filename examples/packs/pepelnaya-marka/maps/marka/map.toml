@@ -1,0 +1,264 @@
+# Chapter 2 «Марка», 100×100: the hub the campaign returns to. The river Pepelka runs from north to
+# south with three fords (north, middle, south). West of it: the ruined abbey in the north-west, the
+# shrine by the old road, the salt marsh with the marsh folk's village Серые Ивы in the south-west.
+# East of it: the garrison town Пепельный Брод at the middle ford, the mill village north-east of it,
+# the barrow hills in the north-east, and the Free Companies' camp in the south-east. Four waygate
+# stones: north-west, north-east (the barrows), south-west (the marsh) and south-east (the camp).
+# terrain.png is painted by tools/pepelnaya-marka-terrain-marka.py.
+#
+# The map's own victory is a reach cell that no hero can step on (inside the snowdrifts). The chapter
+# ends by the story's council (`victory` in triggers/marka.toml), when the player picks an ally.
+title = "marka.map.title"
+description = "marka.map.description"
+start_date = "1300-05-01"
+relations = [[3, 3, 0, -3], [3, 3, 0, -3], [0, 0, 3, -3], [-3, -3, -3, 3]]
+
+[hero]
+cell = [61, 46]
+classes = ["knight"]
+gold = 80
+mana = 10
+troops = [{ unit = "dt:militiaman", level = 1, count = 3 }]
+
+# Woods on the west bank, dead trees on the burned fields, the barrow hills and the mountains.
+[[object]]
+kind = "trees"
+cell = [4, 30]
+[[object]]
+kind = "trees"
+cell = [7, 33]
+[[object]]
+kind = "trees"
+cell = [10, 28]
+[[object]]
+kind = "trees"
+cell = [5, 40]
+[[object]]
+kind = "trees"
+cell = [12, 37]
+[[object]]
+kind = "trees"
+cell = [9, 46]
+[[object]]
+kind = "trees"
+cell = [4, 9]
+[[object]]
+kind = "trees"
+cell = [10, 6]
+[[object]]
+kind = "dead_trees"
+cell = [32, 40]
+[[object]]
+kind = "dead_trees"
+cell = [35, 44]
+[[object]]
+kind = "dead_trees"
+cell = [38, 52]
+[[object]]
+kind = "dead_trees"
+cell = [42, 56]
+[[object]]
+kind = "dead_trees"
+cell = [62, 60]
+[[object]]
+kind = "dead_trees"
+cell = [66, 58]
+[[object]]
+kind = "dead_trees"
+cell = [70, 62]
+[[object]]
+kind = "dead_trees"
+cell = [78, 60]
+[[object]]
+kind = "dead_trees"
+cell = [88, 50]
+[[object]]
+kind = "dead_trees"
+cell = [90, 66]
+[[object]]
+kind = "dead_trees"
+cell = [76, 68]
+[[object]]
+kind = "hills"
+cell = [80, 6]
+[[object]]
+kind = "hills"
+cell = [84, 4]
+[[object]]
+kind = "hills"
+cell = [90, 8]
+[[object]]
+kind = "hills"
+cell = [92, 20]
+[[object]]
+kind = "hills"
+cell = [94, 12]
+[[object]]
+kind = "hills"
+cell = [78, 12]
+[[object]]
+kind = "mountains"
+cell = [95, 46]
+[[object]]
+kind = "mountains"
+cell = [97, 50]
+[[object]]
+kind = "mountains"
+cell = [93, 52]
+[[object]]
+kind = "thicket"
+cell = [22, 54]
+[[object]]
+kind = "thicket"
+cell = [30, 88]
+
+# The four waygate stones: one near each region. The ritual pair is the north-east stone and the
+# south-west one (chapter 2's gate, see triggers/marka.toml).
+[[object]]
+kind = "stones"
+cell = [8, 22]
+[[object]]
+kind = "stones"
+cell = [82, 10]
+[[object]]
+kind = "stones"
+cell = [6, 84]
+[[object]]
+kind = "stones"
+cell = [92, 84]
+
+# The garrison town on the east bank at the middle ford: the Crown's, with its market.
+[[building]]
+id = "ashford"
+type = "town"
+name = "marka.building.ashford.name"
+description = "marka.building.ashford.description"
+cell = [58, 44]
+faction = "ally"
+income = 40
+garrison = [{ unit = "dt:militiaman", level = 1, count = 4 }, { unit = "dt:halberdier", level = 1, count = 2 }]
+
+# The mill village north-east of the town: the first village the dead march on.
+[[building]]
+id = "millspring"
+type = "village"
+name = "marka.building.millspring.name"
+description = "marka.building.millspring.description"
+cell = [70, 30]
+faction = "neighbour"
+income = 15
+garrison = [{ unit = "dt:peasant", level = 1, count = 3 }]
+
+# The marsh folk's village on the dry island in the south-west.
+[[building]]
+id = "greyreed"
+type = "village"
+name = "marka.building.greyreed.name"
+description = "marka.building.greyreed.description"
+cell = [16, 70]
+faction = "neighbour"
+income = 10
+garrison = [{ unit = "dt:peasant", level = 1, count = 2 }]
+
+# The ruined abbey in the north-west: the Order's, with three monks left in its walls.
+[[building]]
+id = "abbey"
+type = "church"
+name = "marka.building.abbey.name"
+description = "marka.building.abbey.description"
+cell = [17, 13]
+faction = "neighbour"
+income = 20
+garrison = [{ unit = "dt:monk", level = 1, count = 3 }]
+
+# The tainted shrine by the old road: the Order's quest. Its guards carry the curse.
+[[building]]
+id = "shrine"
+type = "altar"
+name = "marka.building.shrine.name"
+description = "marka.building.shrine.description"
+cell = [28, 36]
+faction = "neighbour"
+garrison = [{ unit = "dt:ghost", level = 1, count = 2 }, { unit = "dt:ghoul", level = 1, count = 1 }]
+
+# The barrow mound in the north-east: where the dead rise.
+[[building]]
+id = "barrow"
+type = "ruins"
+name = "marka.building.barrow.name"
+description = "marka.building.barrow.description"
+cell = [86, 14]
+faction = "enemy"
+garrison = [{ unit = "dt:ghoul", level = 1, count = 2 }, { unit = "dt:death_knight", level = 1, count = 1 }]
+
+# The Free Companies' camp in the south-east: a fort with its own garrison.
+[[building]]
+id = "camp"
+type = "fort"
+name = "marka.building.camp.name"
+description = "marka.building.camp.description"
+cell = [84, 80]
+faction = "neighbour"
+income = 30
+garrison = [{ unit = "dt:swordsman", level = 1, count = 2 }, { unit = "dt:bandit", level = 1, count = 2 }]
+
+# The Crown's caravan, on the road between the town and the camp (its goal is set at game start).
+[[army]]
+id = "caravan"
+name = "marka.army.caravan.name"
+cell = [58, 50]
+faction = "ally"
+model = "feudal"
+troops = [{ unit = "dt:militiaman", level = 1, count = 2 }, { unit = "dt:swordsman", level = 1, count = 1 }]
+
+# The Crown's patrols on the west road and the north road.
+[[army]]
+id = "patrol_w"
+name = "marka.army.patrol_w.name"
+cell = [52, 47]
+faction = "ally"
+model = "feudal"
+troops = [{ unit = "dt:halberdier", level = 1, count = 2 }, { unit = "dt:militiaman", level = 1, count = 2 }]
+
+[[army]]
+id = "patrol_n"
+name = "marka.army.patrol_n.name"
+cell = [58, 42]
+faction = "ally"
+model = "feudal"
+troops = [{ unit = "dt:militiaman", level = 1, count = 3 }]
+
+# The bandits on the caravan road; they go after the caravan when the second week begins.
+[[army]]
+id = "raiders"
+name = "marka.army.raiders.name"
+cell = [66, 64]
+faction = "enemy"
+model = "bandits"
+gold = 60
+troops = [{ unit = "dt:bandit", level = 1, count = 3 }, { unit = "dt:archer", level = 1, count = 2 }]
+
+# Kord's company, camped beside the fort: hired, betrayed or left alone.
+[[army]]
+id = "kord_band"
+name = "marka.army.kord_band.name"
+cell = [81, 82]
+faction = "neighbour"
+model = "bandits"
+troops = [{ unit = "dt:bandit", level = 1, count = 3 }, { unit = "dt:archer", level = 1, count = 1 }]
+
+# The wraiths hold their lair in the marsh far from Greyreed (model inactive: they do not roam and
+# take the village); Tess's quest sends the hero to them.
+[[army]]
+id = "wraiths"
+name = "marka.army.wraiths.name"
+cell = [30, 84]
+faction = "enemy"
+model = "inactive"
+troops = [{ unit = "dt:ghost", level = 1, count = 3 }, { unit = "dt:ghoul", level = 1, count = 1 }]
+
+# The placeholder victory: a reach cell in the snowdrifts (no hero can step there).
+[victory]
+kind = "reach"
+cell = [98, 2]
+message = "marka.map.won"

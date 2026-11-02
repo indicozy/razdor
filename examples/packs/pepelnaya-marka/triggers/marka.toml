@@ -1,0 +1,545 @@
+# Chapter 2 «Марка»: the hub map, which the campaign returns to between the chapters. Every trigger
+# names its map (`map = "marka"`). The variables shared by the campaign are in triggers/_campaign.toml,
+# chapter 1's (dread, marsh_trust, tower_taken, ...) in triggers/brod.toml; they carry over here.
+#
+# Order matters where a trigger reads a flag that another sets on the same moment: the caravan watch
+# (reset, check, then the loss) runs in this file's order each day.
+
+[vars]
+weeks = 0               # weeks spent on this map (the revisits keep counting)
+quests_done = 0         # envoy quests finished: the council opens at two
+order_quest = 0         # the Order's shrine quest: 0 none, 1 taken, 2 done, 3 refused
+marsh_quest = 0         # Tess's quest: 0 none, 1 taken, 2 done
+raid_started = false    # the bandits went after the caravan
+caravan_out = true      # the caravan is on the road (until it falls)
+caravan_ok = true       # the day's watch: true when the caravan still stands
+host3_risen = false     # each host rises once
+host5_risen = false
+host7_risen = false
+sign = 0                # the new moon's roll: 1 plague, 2 deserters, 3 a merchant prince
+abbey_done = false      # set by chapter 3а (the abbey): the revisit scene plays on the next day
+salt_done = false       # set by chapter 3б (the salt marsh)
+camp_done = false       # set by chapter 3в (the Free Companies' camp)
+
+# ---- the start and the weeks ------------------------------------------------------------------
+
+# The caravan and the patrols take the roads at the start of the story.
+[[trigger]]
+id = "m_setup"
+map = "marka"
+when = { event = "game_start" }
+then = [
+    { army_goal = "caravan", patrol = [[58, 50], [82, 79]] },
+    { army_goal = "patrol_w", patrol = [[52, 47], [17, 47], [17, 64]] },
+    { army_goal = "patrol_n", patrol = [[58, 42], [68, 31]] },
+]
+
+# Each week: one more week counted, and the Dread grows by one (the chapter 1 Dread, carried over).
+[[trigger]]
+id = "m_week"
+map = "marka"
+when = { event = "week_start" }
+once = false
+then = [ { add = "weeks", value = 1 }, { add = "dread", value = 1 } ]
+
+# Each week in which the hero carries the curse, the Dread grows once more, now and then.
+[[trigger]]
+id = "m_taint_week"
+map = "marka"
+when = { event = "week_start" }
+once = false
+if = [ { has_spell = "dt:spell/terrible_curse" } ]
+chance = 50
+then = [ { add = "dread", value = 1 }, { dialog = "taint_week" } ]
+
+# The second week and on: the bandits go after the caravan, once.
+[[trigger]]
+id = "m_raid"
+map = "marka"
+when = { event = "week_start" }
+if = [ { var = "weeks", op = ">=", value = 2 }, { var = "raid_started", value = false }, { var = "caravan_out", value = true } ]
+then = [
+    { set = "raid_started", value = true },
+    { army_goal = "raiders", attack = "caravan" },
+    { dialog = "raid_warning" },
+]
+
+# ---- the caravan and its loss (a watch: the day's reset, the check, then the loss) -------------
+
+[[trigger]]
+id = "m_caravan_reset"
+map = "marka"
+when = { event = "day_start" }
+once = false
+then = [ { set = "caravan_ok", value = false } ]
+
+[[trigger]]
+id = "m_caravan_check"
+map = "marka"
+when = { event = "day_start" }
+once = false
+if = [ { var = "caravan_out", value = true }, { army_alive = "caravan" } ]
+then = [ { set = "caravan_ok", value = true } ]
+
+[[trigger]]
+id = "m_caravan_lost"
+map = "marka"
+when = { event = "day_start" }
+once = false
+if = [ { var = "caravan_out", value = true }, { var = "caravan_ok", value = false } ]
+then = [
+    { set = "caravan_out", value = false },
+    { add = "caravans_lost", value = 1 },
+    { army_goal = "raiders", clear = true },
+    { dialog = "caravan_lost" },
+]
+
+# Every caravan lost raises the market: the town's prices take a bite from the hero's purse.
+[[trigger]]
+id = "m_prices"
+map = "marka"
+when = { event = "var_changed", var = "caravans_lost" }
+once = false
+if = [ { var = "caravans_lost", op = ">=", value = 1 } ]
+then = [ { give_gold = -10 } ]
+
+# The caravan reaches the camp's road: the Crown pays the escort's share, once.
+[[trigger]]
+id = "m_caravan_camp"
+map = "marka"
+when = { event = "army_arrives", army = "caravan", at = [82, 79] }
+then = [ { give_gold = 10 }, { dialog = "caravan_safe" } ]
+
+# The hero beats the bandits: the Companies notice, and a hired company stands as a friend.
+[[trigger]]
+id = "m_raiders_beaten"
+map = "marka"
+when = { event = "army_defeated", army = "raiders" }
+then = [ { add = "companies", value = 1 }, { give_gold = 25 } ]
+
+[[trigger]]
+id = "m_raiders_friend"
+map = "marka"
+when = { event = "army_defeated", army = "raiders" }
+if = [ { var = "kord", value = 1 } ]
+then = [ { set = "kord", value = 3 } ]
+
+# ---- the dead: hosts at the thresholds 3, 5 and 7 of the Dread --------------------------------
+
+# At 3, the first host rises at the barrows and marches on the mill village.
+[[trigger]]
+id = "m_host_3"
+map = "marka"
+when = { event = "var_changed", var = "dread" }
+if = [ { var = "dread", op = ">=", value = 3 }, { var = "host3_risen", value = false } ]
+then = [
+    { set = "host3_risen", value = true },
+    { spawn_army = "host_3", at = [84, 17], faction = "enemy", model = 10, troops = ["ash_knight", "dt:ghoul", "dt:ghost"] },
+    { army_goal = "host_3", go_to_building = "millspring" },
+    { dialog = "host_stir" },
+]
+
+# At 5, the second host rises and marches on the marsh village, unless the waygate is open (below).
+[[trigger]]
+id = "m_host_5"
+map = "marka"
+when = { event = "var_changed", var = "dread" }
+if = [ { var = "dread", op = ">=", value = 5 }, { var = "host5_risen", value = false }, { var = "gates_open", value = 0 } ]
+then = [
+    { set = "host5_risen", value = true },
+    { spawn_army = "host_5", at = [84, 17], faction = "enemy", model = 10, troops = ["ash_knight", "dt:death_knight", "dt:ghoul"] },
+    { army_goal = "host_5", go_to_building = "greyreed" },
+    { dialog = "host_stir" },
+]
+
+# The same host, with the waygate open: the dead use the stones once, and come out in the marsh.
+[[trigger]]
+id = "m_host_5_gate"
+map = "marka"
+when = { event = "var_changed", var = "dread" }
+if = [ { var = "dread", op = ">=", value = 5 }, { var = "host5_risen", value = false }, { var = "gates_open", op = ">=", value = 1 } ]
+then = [
+    { set = "host5_risen", value = true },
+    { spawn_army = "host_5", at = [84, 17], faction = "enemy", model = 10, troops = ["ash_knight", "dt:death_knight", "dt:ghoul"] },
+    { teleport_army = "host_5", at = [6, 84] },
+    { army_goal = "host_5", go_to_building = "greyreed" },
+    { dialog = "host_stir" },
+]
+
+# At 7, the last host rises and comes fast: the barrows' king leads it.
+[[trigger]]
+id = "m_host_7"
+map = "marka"
+when = { event = "var_changed", var = "dread" }
+if = [ { var = "dread", op = ">=", value = 7 }, { var = "host7_risen", value = false } ]
+then = [
+    { set = "host7_risen", value = true },
+    { spawn_army = "host_7", at = [84, 17], faction = "enemy", model = 10, troops = ["ash_knight", "dt:death_knight", "dt:lich", "dt:ghoul"] },
+    { army_figure = "host_7", unit = "dt:death_knight" },
+    { army_speed = "host_7", percent = 150 },
+    { army_goal = "host_7", go_to_building = "millspring" },
+    { dialog = "host_stir" },
+]
+
+# The hosts reach their villages: a siege dialog, once per village.
+[[trigger]]
+id = "m_siege_mill"
+map = "marka"
+when = { event = "army_arrives", army = "host_3", building = "millspring" }
+then = [ { dialog = "siege" } ]
+
+[[trigger]]
+id = "m_siege_marsh"
+map = "marka"
+when = { event = "army_arrives", army = "host_5", building = "greyreed" }
+then = [ { dialog = "siege" } ]
+
+[[trigger]]
+id = "m_siege_last"
+map = "marka"
+when = { event = "army_arrives", army = "host_7", building = "millspring" }
+then = [ { dialog = "siege" } ]
+
+# A host beaten by the hero: the mill village is saved, the Crown pays, and a reward for the hero.
+[[trigger]]
+id = "m_host_3_beaten"
+map = "marka"
+when = { event = "army_defeated", army = "host_3" }
+then = [ { add = "crown", value = 1 }, { give_gold = 30 }, { dialog = "host_beaten" } ]
+
+[[trigger]]
+id = "m_host_5_beaten"
+map = "marka"
+when = { event = "army_defeated", army = "host_5" }
+then = [ { give_xp = 30, to = "player" } ]
+
+[[trigger]]
+id = "m_host_7_beaten"
+map = "marka"
+when = { event = "army_defeated", army = "host_7" }
+then = [ { give_gold = 60 } ]
+
+# A village that falls to the dead: one more burned village, and the Dread grows.
+[[trigger]]
+id = "m_mill_burned"
+map = "marka"
+when = { event = "day_start" }
+if = [ { building_owner = "millspring", faction = "enemy" } ]
+then = [ { add = "villages_burned", value = 1 }, { add = "dread", value = 1 }, { dialog = "mill_fell" } ]
+
+[[trigger]]
+id = "m_marsh_burned"
+map = "marka"
+when = { event = "day_start" }
+if = [ { building_owner = "greyreed", faction = "enemy" } ]
+then = [ { add = "villages_burned", value = 1 }, { add = "dread", value = 1 }, { dialog = "marsh_fell" } ]
+
+# Many burned villages stir the land: a silent rise of the Dread.
+[[trigger]]
+id = "m_villages_dread"
+map = "marka"
+when = { event = "var_changed", var = "villages_burned" }
+if = [ { var = "villages_burned", op = ">=", value = 2 } ]
+then = [ { add = "dread", value = 1 } ]
+
+# ---- the captain and the town -------------------------------------------------------------------
+
+[[trigger]]
+id = "m_captain"
+map = "marka"
+when = { event = "hero_enters_building", building = "ashford" }
+then = [ { dialog = "captain" } ]
+
+# The Crown's trust pays the hero a bonus; its distrust makes the tolls on the Crown's roads cost more.
+[[trigger]]
+id = "m_crown_trust"
+map = "marka"
+when = { event = "var_changed", var = "crown" }
+if = [ { var = "crown", op = ">=", value = 3 } ]
+then = [ { give_gold = 40 } ]
+
+[[trigger]]
+id = "m_crown_price"
+map = "marka"
+when = { event = "var_changed", var = "crown" }
+if = [ { var = "crown", op = "<=", value = -3 } ]
+then = [ { give_gold = -10 } ]
+
+# ---- the Order and the shrine -------------------------------------------------------------------
+
+[[trigger]]
+id = "m_shrine_offer"
+map = "marka"
+when = { event = "hero_enters", at = [24, 32, 8, 8] }
+if = [ { var = "order_quest", value = 0 } ]
+then = [ { dialog = "shrine_offer" } ]
+
+[[trigger]]
+id = "m_order_accept"
+map = "marka"
+when = { event = "dialog_choice", dialog = "shrine_offer", choice = "accept" }
+then = [ { set = "order_quest", value = 1 } ]
+
+[[trigger]]
+id = "m_order_refuse"
+map = "marka"
+when = { event = "dialog_choice", dialog = "shrine_offer", choice = "refuse" }
+then = [ { set = "order_quest", value = 3 }, { add = "order", value = -1 } ]
+
+# The guards beaten and the shrine taken: the inside dialog, where the choice is made.
+[[trigger]]
+id = "m_shrine_taken"
+map = "marka"
+when = { event = "building_captured", building = "shrine" }
+if = [ { var = "order_quest", value = 1 } ]
+then = [ { dialog = "shrine_inside" } ]
+
+# The Order's trust teaches Brother Ilm (the experience of the named novice).
+[[trigger]]
+id = "m_order_trust"
+map = "marka"
+when = { event = "var_changed", var = "order" }
+if = [ { var = "order", op = ">=", value = 3 } ]
+then = [ { give_xp = 30, to = "named:ilm" } ]
+
+# Brother Ilm reads the abbey's walls: when he walks with the hero, the abbey's archive is his to read.
+[[trigger]]
+id = "m_ilm_abbey"
+map = "marka"
+when = { event = "hero_enters", at = [12, 8, 12, 10] }
+if = [ { has_named_unit = "ilm", unit = "dt:pilgrim" } ]
+then = [ { dialog = "ilm_abbey" }, { give_xp = 40, to = "named:ilm" } ]
+
+# The standing stones: their inscriptions, read once each (the north-west and the south-east stones).
+[[trigger]]
+id = "m_stones_nw"
+map = "marka"
+when = { event = "hero_enters", at = [8, 22] }
+then = [ { dialog = "stones_note" } ]
+
+[[trigger]]
+id = "m_stones_se"
+map = "marka"
+when = { event = "hero_enters", at = [92, 84] }
+then = [ { dialog = "stones_note" } ]
+
+# ---- the waygate: a ritual quest opens it, and the hero goes through (stone to stone) ----------
+
+[[trigger]]
+id = "m_ritual_offer"
+map = "marka"
+when = { event = "hero_enters", at = [82, 10] }
+if = [ { var = "order_quest", value = 2 }, { var = "gates_open", value = 0 } ]
+then = [ { dialog = "ritual_offer" } ]
+
+[[trigger]]
+id = "m_ritual_open"
+map = "marka"
+when = { event = "dialog_choice", dialog = "ritual_offer", choice = "open" }
+then = [ { add = "gates_open", value = 1 }, { teleport_hero = [6, 84] } ]
+
+# ---- the marsh folk and Tess --------------------------------------------------------------------
+
+[[trigger]]
+id = "m_marsh_offer"
+map = "marka"
+when = { event = "hero_enters", at = [10, 62, 14, 14] }
+if = [ { var = "marsh_quest", value = 0 } ]
+then = [ { dialog = "marsh_offer" } ]
+
+[[trigger]]
+id = "m_marsh_accept"
+map = "marka"
+when = { event = "dialog_choice", dialog = "marsh_offer", choice = "accept" }
+then = [ { set = "marsh_quest", value = 1 } ]
+
+# The wraiths beaten on Tess's quest: she joins the hero, and the marsh folk's trust grows.
+[[trigger]]
+id = "m_wraiths_quest"
+map = "marka"
+when = { event = "army_defeated", army = "wraiths" }
+if = [ { var = "marsh_quest", value = 1 } ]
+then = [
+    { set = "marsh_quest", value = 2 },
+    { add = "quests_done", value = 1 },
+    { give_unit = "dt:hunter", named = "tess" },
+    { set = "tess_joined", value = true },
+    { add = "marsh_trust", value = 2 },
+    { dialog = "tess_join" },
+]
+
+# The wraiths beaten without the quest: the marsh folk hear of it, and their trust grows a little.
+[[trigger]]
+id = "m_wraiths_free"
+map = "marka"
+when = { event = "army_defeated", army = "wraiths" }
+if = [ { var = "marsh_quest", value = 0 } ]
+then = [ { add = "marsh_trust", value = 1 } ]
+
+# ---- the Free Companies and Kord ----------------------------------------------------------------
+
+[[trigger]]
+id = "m_kord_meet"
+map = "marka"
+when = { event = "hero_enters", at = [78, 72, 12, 8] }
+if = [ { var = "kord", value = 0 } ]
+then = [ { dialog = "kord_offer" } ]
+
+[[trigger]]
+id = "m_kord_hire"
+map = "marka"
+when = { event = "dialog_choice", dialog = "kord_offer", choice = "hire" }
+then = [
+    { set = "kord", value = 1 },
+    { add = "quests_done", value = 1 },
+    { give_gold = -40 },
+    { remove_army = "kord_band" },
+    { give_unit = "dt:swordsman" },
+    { give_unit = "dt:bandit" },
+    { give_unit = "dt:archer" },
+    { give_item = "company_token", to = "player" },
+    { add = "companies", value = 1 },
+]
+
+[[trigger]]
+id = "m_kord_betray"
+map = "marka"
+when = { event = "dialog_choice", dialog = "kord_offer", choice = "betray" }
+then = [
+    { set = "kord", value = 2 },
+    { add = "quests_done", value = 1 },
+    { remove_army = "kord_band" },
+    { add = "crown", value = 2 },
+    { add = "companies", value = -3 },
+]
+
+# The Companies' standing sinks below -3: their camp's men stop trading with the hero.
+[[trigger]]
+id = "m_companies_low"
+map = "marka"
+when = { event = "var_changed", var = "companies" }
+if = [ { var = "companies", op = "<=", value = -3 } ]
+then = [ { give_gold = -20 } ]
+
+# ---- the council: two envoy quests done, the hero chooses (or waits) ----------------------------
+
+[[trigger]]
+id = "m_council"
+map = "marka"
+when = { event = "var_changed", var = "quests_done" }
+if = [ { var = "quests_done", op = ">=", value = 2 } ]
+then = [ { dialog = "council" } ]
+
+[[trigger]]
+id = "m_ally_order"
+map = "marka"
+when = { event = "dialog_choice", dialog = "council", choice = "order" }
+then = [ { set = "ally", value = 1 }, { hero_figure = "default" }, { victory = true } ]
+
+[[trigger]]
+id = "m_ally_marsh"
+map = "marka"
+when = { event = "dialog_choice", dialog = "council", choice = "marsh" }
+then = [ { set = "ally", value = 2 }, { hero_figure = "default" }, { victory = true } ]
+
+[[trigger]]
+id = "m_ally_companies"
+map = "marka"
+when = { event = "dialog_choice", dialog = "council", choice = "companies" }
+then = [ { set = "ally", value = 3 }, { hero_figure = "dt:bandit" }, { victory = true } ]
+
+# "Not yet": the hero rides out to the Companies' camp to look at it, and comes back to this map.
+[[trigger]]
+id = "m_council_later"
+map = "marka"
+when = { event = "dialog_choice", dialog = "council", choice = "later" }
+then = [ { travel = "camp" } ]
+
+# ---- Ilm's path and the new moon ----------------------------------------------------------------
+
+# The new moon: the roll is reset first, then made. Each sign is a value change of `sign`.
+[[trigger]]
+id = "m_sign_reset"
+map = "marka"
+when = { event = "new_moon" }
+once = false
+then = [ { set = "sign", value = 0 } ]
+
+[[trigger]]
+id = "m_sign_roll"
+map = "marka"
+when = { event = "new_moon" }
+once = false
+chance = 60
+then = [ { random_var = "sign", min = 1, max = 3 } ]
+
+[[trigger]]
+id = "m_sign_plague"
+map = "marka"
+when = { event = "var_changed", var = "sign" }
+if = [ { var = "sign", value = 1 } ]
+once = false
+then = [ { add = "dread", value = 1 }, { dialog = "sign_plague" } ]
+
+[[trigger]]
+id = "m_sign_deserters"
+map = "marka"
+when = { event = "var_changed", var = "sign" }
+if = [ { var = "sign", value = 2 } ]
+once = false
+then = [
+    { spawn_army = "deserters", at = [56, 60], faction = "enemy", model = 5, troops = ["dt:bandit", "dt:bandit"] },
+    { dialog = "sign_deserters" },
+]
+
+[[trigger]]
+id = "m_sign_merchant"
+map = "marka"
+when = { event = "var_changed", var = "sign" }
+if = [ { var = "sign", value = 3 } ]
+once = false
+then = [ { give_gold = 30 }, { dialog = "sign_merchant" } ]
+
+# ---- the revisits: a flag set by chapter 3 changes this map on the next day -----------------
+
+# The Order holds the abbey: the Crown's town opens its gates to the Order's garrison.
+[[trigger]]
+id = "m_revisit_abbey"
+map = "marka"
+when = { event = "day_start" }
+if = [ { var = "abbey_done", value = true } ]
+then = [
+    { set_faction = "ashford", faction = "neighbour", of = "building" },
+    { dialog = "revisit_abbey" },
+]
+
+# The marsh folk have their village back: Серые Ивы is the hero's now.
+[[trigger]]
+id = "m_revisit_salt"
+map = "marka"
+when = { event = "day_start" }
+if = [ { var = "salt_done", value = true } ]
+then = [
+    { set_faction = "greyreed", faction = "player", of = "building" },
+    { dialog = "revisit_salt" },
+]
+
+# The Companies' camp has grown: more men and steel behind the palisade.
+[[trigger]]
+id = "m_revisit_camp"
+map = "marka"
+when = { event = "day_start" }
+if = [ { var = "camp_done", value = true } ]
+then = [
+    { add_units = "camp", troops = ["dt:swordsman", "dt:crossbowman"], of = "building" },
+    { dialog = "revisit_camp" },
+]
+
+# ---- the taint: a hero who carries it far makes the Dread worse (silent) -----------------------
+
+[[trigger]]
+id = "m_taint_dread"
+map = "marka"
+when = { event = "var_changed", var = "taint" }
+if = [ { var = "taint", op = ">=", value = 3 } ]
+then = [ { add = "dread", value = 1 } ]

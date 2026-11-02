@@ -1,0 +1,15 @@
+# Chapter 2 «Марка»: the Order's seal (the shrine's reward, the gate's key) and the Free Companies'
+# token (Kord's hire).
+[[item]]
+id = "ash_seal"
+base = "dt:item/holy_cross"
+name = "marka.item.ash_seal.name"
+description = "marka.item.ash_seal.description"
+cost = 60
+
+[[item]]
+id = "company_token"
+base = "dt:item/copper_ring"
+name = "marka.item.company_token.name"
+description = "marka.item.company_token.description"
+cost = 25
