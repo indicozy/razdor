@@ -1,0 +1,67 @@
+Razdor
+Copyright (C) 2026 indicozy
+https://github.com/indicozy/razdor
+
+This program is free software: you can redistribute it and/or modify it under the terms of
+the GNU General Public License as published by the Free Software Foundation, version 3 only
+(GPL-3.0-only), with the additional terms below. The full license text is in LICENSE.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+See the GNU General Public License for more details.
+
+
+ADDITIONAL TERMS UNDER SECTION 7 OF THE GPL-3.0
+
+(b) Attribution. Every covered work, modified or not, must keep the attribution
+
+        Based on Razdor by indicozy — https://github.com/indicozy/razdor
+
+    legible on its authors or credits screen; a covered work that has no such screen must
+    add one, reachable from the program's main menu. The same attribution must also appear
+    in the covered work's README or main documentation.
+
+(e) Names. This license grants no rights to use the name "Razdor" (Russian: «Раздор»), or
+    its logos, as a trademark. A modified version must not use that name as its own name;
+    it may say that it is based on Razdor, as required by term (b).
+
+
+LICENSE HISTORY
+
+Versions of Razdor up to and including 1.2.4 (commits before the one that added this file)
+were released under the MIT License. Those releases remain available under the MIT License;
+everything from this commit on is under GPL-3.0-only with the terms above.
+
+Contributors sign the Contributor License Agreement in CLA.md.
+
+
+CONTRIBUTIONS UNDER THE MIT LICENSE
+
+Code contributed by Eizenvald (eizenvald@gmail.com) in October 2026, before the license
+change (pull request #9 and the user interface commits of 2026-10-12 to 2026-10-19), was
+contributed under the following license and is included here under it:
+
+    Copyright (c) 2026 Eizenvald
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy of this
+    software and associated documentation files (the "Software"), to deal in the Software
+    without restriction, including without limitation the rights to use, copy, modify,
+    merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+    permit persons to whom the Software is furnished to do so, subject to the following
+    conditions:
+
+    The above copyright notice and this permission notice shall be included in all copies
+    or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+    INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+    PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+    HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+    CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR
+    THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+FONTS
+
+The fonts in data/fonts/ keep their own licenses (the *-OFL.txt and *-LICENSE.txt files next
+to them).

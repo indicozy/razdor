@@ -641,7 +641,7 @@ local! {
 /// The players who helped Razdor with bug reports and contributions, by their Discord names
 /// (the owner's wish, 2026-10-22): those with a fixed report (the owner, 2026-10-24), most fixed first; a display name in letters the fonts lack
 /// (Cyrillic Extended-B, Greek, IPA) is given as the Discord tag instead.
-const THANKS: [&str; 10] = ["Нлтчк", "ivantykhonchuk", "Теневой Лорд", "Eisenwald", "! TuttiFrutti", "turgrin", "9ibatnk", "OBANAI77", "nik0N", "Hristos"];
+const THANKS: [&str; 9] = ["Нлтчк", "ivantykhonchuk", "Теневой Лорд", "! TuttiFrutti", "turgrin", "9ibatnk", "OBANAI77", "nik0N", "Hristos"];
 /// The names column beside the credits window (the owner's choice, 2026-10-23): its margin
 /// from the screen's edges and from the window, in px at the UI scale (k).
 const COLUMN_MARGIN: f32 = 16.0;
@@ -671,12 +671,14 @@ impl CreditLine {
     }
 }
 
-/// Razdor's modder, the rest of the credits' names: the role in gold, the name in white.
+/// Razdor's developer, the rest of the credits' names: the role in gold, the name in white.
 fn thanks_lines() -> Vec<CreditLine> {
     let line = |text: &str, size: f32, color: Color, gap: f32| CreditLine { text: text.to_string(), size, color, gap };
     let mut lines = vec![
-        line(tr("RAZDOR modder"), 20.0, chrome::GOLD, 0.0),
+        line(tr("Razdor developer"), 20.0, chrome::GOLD, 0.0),
         line("indicozy", 22.0, WHITE, 0.0),
+        line(tr("Contributors"), 20.0, chrome::GOLD, 14.0),
+        line("Eizenvald", 18.0, WHITE, 0.0),
         line(tr("Thanks to the players"), 20.0, chrome::GOLD, 14.0),
     ];
     lines.extend(THANKS.iter().map(|name| line(name, 18.0, WHITE, 0.0)));

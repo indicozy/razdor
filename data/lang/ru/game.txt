@@ -458,7 +458,8 @@ Razdor {new} is out (you have {old}). Its page has the file: install it with Alt
 Confirm the update = Подтвердите обновление
 Razdor {v} waits for its install = Раздор {v} ждёт установки
 Razdor {v} waits for you to confirm its install on the screen. If Android first asks to allow installs from Razdor, allow them: the update is offered again at the next start. = Раздор {v} ждёт, пока вы подтвердите установку на экране. Если Android сначала спросит разрешение на установку из Раздора, разрешите: обновление предложат снова при следующем запуске.
-RAZDOR modder = Моддер «Раздора»
+Razdor developer = Разработчик «Раздора»
+Contributors = Участники
 Thanks to the players = Спасибо игрокам
 A unique character cannot be moved into a garrison! = Уникальный персонаж не может быть перемещен в гарнизон!
 You cannot change places with the selected character! = Нельзя обменяться местом с выбранным персонажем!
