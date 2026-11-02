@@ -129,8 +129,11 @@ impl Win {
         let r = super::window_layout::title_rect((594.0, video_h)).unwrap_or_else(|| Rect::new((screen_width() - w) / 2.0, (super::chrome::canvas_top() + 190.0 * k).min(screen_height() - h), w, h));
         let (_, closed) = chrome::window(r, title, chrome::Skin::Marble, true);
         // The 634×516 window with its inner frames (ae2520, read by 4d2a30; 0x48d710); the footer's
-        // growth is the window's, and the frames keep their place above it.
-        chrome::window_inner_frames_footed(r, chrome::opx(), 0.0, footer_extra(g, extras) * k);
+        // growth is the window's, and the frames keep their place above it. The upright phone's
+        // list window takes its own boxes (`Portrait`), so the desktop frames would cut through them.
+        if !(fill && upright_dp().is_some()) {
+            chrome::window_inner_frames_footed(r, chrome::opx(), 0.0, footer_extra(g, extras) * k);
+        }
         (Win { r, k, foot_y: video_h - foot_block(g, extras) }, closed)
     }
 
@@ -150,10 +153,98 @@ impl Win {
     }
 
     fn button_at(&self, x: f32, y: f32, w: f32, h: f32, label: &str, enabled: bool) -> bool {
-        let r = self.rect(x, y, w, h);
-        let (_, down, pressed) = button_state(r, enabled);
-        chrome::marble_button(r, label, enabled, down);
-        pressed
+        button_rect(self.rect(x, y, w, h), label, enabled)
+    }
+}
+
+/// A marble button in the screen rectangle `r`: whether it was pressed.
+fn button_rect(r: Rect, label: &str, enabled: bool) -> bool {
+    let (_, down, pressed) = button_state(r, enabled);
+    chrome::marble_button(r, label, enabled, down);
+    pressed
+}
+
+/// The dp of a phone held upright (`None` elsewhere): the scenario window's own layout there (the
+/// owner's order of 2026-11-02, see [`Portrait`]).
+fn upright_dp() -> Option<f32> {
+    let dp = super::display::dp_px()?;
+    (screen_width() < screen_height()).then_some(dp)
+}
+
+/// The scenario window on a phone held upright, in screen pixels (the owner's order, top to bottom:
+/// the map's picture with its description at the top, one row of «Все сценарии», «Как в игре» and
+/// «Добавить карту…», the list full width, and the bottom row «...», «Далее», «Отмена»; a «Мод» row
+/// under the first when mods are installed). Sizes in dp: the texts at 14 to 15 dp (14 sp and up by the
+/// mobile check), the rows 40 and 36 dp tall, the buttons 44 dp.
+struct Portrait {
+    /// The picture's frame's top left, and its scale (`map_frame_rects`'s px).
+    picture: Vec2,
+    picture_px: f32,
+    desc: Rect,
+    filter: Rect,
+    order: Rect,
+    add: Rect,
+    mod_row: Option<Rect>,
+    rows: Rect,
+    dots: Rect,
+    next: Rect,
+    cancel: Rect,
+    head_h: f32,
+    chapter_h: f32,
+    name_px: f32,
+    chapter_px: f32,
+    /// The description's scale: its body text is 12 of these (`12.0 * desc_k`).
+    desc_k: f32,
+}
+
+impl Portrait {
+    fn new(win: &Win, dp: f32, grow: f32, mods: bool) -> Portrait {
+        let r = win.r;
+        let (m, btn_h, gap) = (8.0 * dp, 44.0 * dp, 6.0 * dp);
+        let x0 = r.x + 10.0 * dp;
+        let w = r.w - 20.0 * dp;
+        let top = r.y + 31.0 * win.k + 2.0 * dp;
+        // The top block: the picture (its frame's 295:162) at 44% of the width, the description beside it.
+        let block_h = 150.0 * dp;
+        let picture_w = (w * 0.44).min(block_h * 295.0 / 162.0);
+        let picture_px = picture_w / 295.0;
+        let desc = Rect::new(x0 + picture_w + m, top, w - picture_w - m, block_h);
+        let row_y = top + block_h + m;
+        let bw = (w - 2.0 * gap) / 3.0;
+        let (filter, order, add) = (Rect::new(x0, row_y, bw, btn_h), Rect::new(x0 + bw + gap, row_y, bw, btn_h), Rect::new(x0 + 2.0 * (bw + gap), row_y, bw, btn_h));
+        let mut y = row_y + btn_h + m;
+        let mod_row = mods.then(|| {
+            let rr = Rect::new(x0, y, w, btn_h);
+            y += btn_h + m;
+            rr
+        });
+        let foot_y = r.bottom() - 12.0 * dp - btn_h;
+        let rows = Rect::new(x0, y, w, (foot_y - m - y).max(0.0));
+        let dots_w = 56.0 * dp;
+        let dots = Rect::new(x0, foot_y, dots_w, btn_h);
+        let half = (w - dots_w - 2.0 * m) / 2.0;
+        let next = Rect::new(x0 + dots_w + m, foot_y, half, btn_h);
+        let cancel = Rect::new(next.x + half + m, foot_y, half, btn_h);
+        // The description is 14 dp (its title 16 of its 12 parts), not grown with the text size: its box is small.
+        let desc_body = 14.0 * dp;
+        Portrait {
+            picture: vec2(x0, top),
+            picture_px,
+            desc,
+            filter,
+            order,
+            add,
+            mod_row,
+            rows,
+            dots,
+            next,
+            cancel,
+            head_h: 40.0 * dp * grow,
+            chapter_h: 36.0 * dp * grow,
+            name_px: 15.0 * dp * grow,
+            chapter_px: 14.0 * dp * grow,
+            desc_k: desc_body / 12.0,
+        }
     }
 }
 
@@ -694,6 +785,12 @@ pub fn start_allowed(can: bool, busy: bool) -> bool {
 
 /// The scenario list window. `busy`: a mod is being built on a worker (`App::choose_mod`).
 pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(String, razdor::hub::Text)], active: Option<&str>, busy: bool) -> Option<Screen> {
+    // On the upright phone the screen's texts keep their sizes (the legacy metrics, as the update window's):
+    // its rows and description are in dp, not snapped to the font's native sizes.
+    super::dt_font::legacy_metrics_if(upright_dp().is_some(), || scenario_select_screen(scenarios, has_install, mods, active, busy))
+}
+
+fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(String, razdor::hub::Text)], active: Option<&str>, busy: bool) -> Option<Screen> {
     if RULES_OPEN.with(Cell::get) {
         super::main_menu::backdrop();
         experimental_menu();
@@ -710,6 +807,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
     let _scale = super::window_layout::title_scale((594.0, window_video_h(grow, extras, true)));
     let (win, closed) = Win::open(&own("NewGame", "Title", n_("Scenario for a new game")), extras, true);
     let k = win.k;
+    let pl = upright_dp().map(|dp| Portrait::new(&win, dp, grow, !mods.is_empty()));
     let mut m = marks();
     let (show, order) = (Show::of(m.show), Order::of(m.order));
     // The maps made for the base game under a played mod (1445b) are a group of their own, after
@@ -743,13 +841,13 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
     // and the pane's line up (`window_inner_frames`, 0x48d710). Its bottom is the description
     // box's (`Win::content_bottom`): the room under the list is Razdor's extras row's, moved down
     // below the buttons, so the list takes it (the owner's request, backlog 1458).
-    let rows = win.rect(4.0, 31.0, 278.0, win.content_bottom() - 31.0);
+    let rows = pl.as_ref().map_or_else(|| win.rect(4.0, 31.0, 278.0, win.content_bottom() - 31.0), |p| p.rows);
     chrome::text_box_base(rows);
     // The rows, their bar, the scrollbar and the empty-list line live in `view`: the box's
     // corner ornaments take the columns beside it, so nothing under them.
     let view = list_view(rows, k);
     // Razdor's own: the rows grow with the text size (`button_grow`), so does their text.
-    let (head_h, chapter_h) = (30.0 * k * grow, 18.0 * k * grow);
+    let (head_h, chapter_h) = pl.as_ref().map_or((30.0 * k * grow, 18.0 * k * grow), |p| (p.head_h, p.chapter_h));
     // The base game's header row (1445b) is as tall as a group's head; on a phone at least a finger's
     // size, as a touch target.
     let section_h = match super::display::dp_px() {
@@ -857,8 +955,14 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
         with_face(Face::Subtitle, || {
             // Shrunk to fit the name's room (`fit_size`, 15 px at most), as before the insets; grown
             // with its row (`row_text_size`), cut by its room when the grown name is longer.
-            let normal = fit_size(name, name_w, 15.0 * k);
-            let grown = row_text_size(name, normal, grow, name_w);
+            // On the upright phone the name is 15 dp, cut by its room (`ellipsize`), never shrunk.
+            let (normal, grown) = match &pl {
+                Some(p) => (p.name_px, p.name_px),
+                None => {
+                    let normal = fit_size(name, name_w, 15.0 * k);
+                    (normal, row_text_size(name, normal, grow, name_w))
+                }
+            };
             let is_grown = grown > normal;
             super::dt_font::legacy_metrics_if(is_grown, || {
                 let size = if is_grown { grown } else { normal };
@@ -866,7 +970,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
             });
         });
         // The chapters' size: the Normal 12 px, grown with the row (`row_text_size`).
-        let small_normal = 12.0 * k;
+        let small_normal = pl.as_ref().map_or(12.0 * k, |p| p.chapter_px);
         with_face(Face::Body, || for (n, &c) in chapters.iter().enumerate() {
             let ink = if lit { super::typography::Ink::Plain } else { super::typography::Ink::Orange };
             // Each map of a campaign won has its tick too.
@@ -931,7 +1035,10 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
         let (i, e) = (g.first, &scenarios[g.first]);
         // (Razdor's scenario window draws the frame at the interface scale, 295 × 162 of its
         // own pixels, the picture at the same scale so the two stay in register.)
-        let (frame, inner) = map_frame_rects(win.rect(290.0, 36.0, 0.0, 0.0).point(), k);
+        let (frame, inner) = match &pl {
+            Some(p) => map_frame_rects(p.picture, p.picture_px),
+            None => map_frame_rects(win.rect(290.0, 36.0, 0.0, 0.0).point(), k),
+        };
         // The original copies MapImageFrame (295×162) as it is, then the map's own 267×134
         // picture at its size 14 px in, over the frame's opening (0x4c1c09..0x4c1c63); no
         // line is drawn round either. Without a picture Razdor shows the terrain there.
@@ -952,19 +1059,25 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
         // Under it the description box (0x4d2a30, 65ae00): the name centred in white (ae2498,
         // 0x4c1b4b), the description in the bold SanSerif's orange (ae24f4 over ae2510,
         // 0x4c1bb4), from the box's top.
-        let bottom = win.rect(0.0, win.content_bottom(), 0.0, 0.0).y;
-        let desc = Rect::new(frame.x, frame.y + frame.h + 8.0 * k, frame.w, (bottom - frame.y - frame.h - 8.0 * k).max(0.0));
+        // The description's sizes: its scale `kk` (the window's k, or the phone's dp).
+        let (desc, kk) = match &pl {
+            Some(p) => (p.desc, p.desc_k),
+            None => {
+                let bottom = win.rect(0.0, win.content_bottom(), 0.0, 0.0).y;
+                (Rect::new(frame.x, frame.y + frame.h + 8.0 * k, frame.w, (bottom - frame.y - frame.h - 8.0 * k).max(0.0)), k)
+            }
+        };
         chrome::text_box(desc);
-        let size = 12.0 * k;
+        let size = 12.0 * kk;
         let room = desc.w - 34.0 * k;
         let title_text = format!("^*{}", group_name(scenarios, g).replace(['^', '*', '|', '@'], ""));
-        let mut rows = markup_rows(&title_text, room, 16.0 * k);
+        let mut rows = markup_rows(&title_text, room, 16.0 * kk);
         let title_rows = rows.len();
         // The description is added as plain lines (0x4c1bb4 → 0x47ea80): marks stay as typed,
         // no indent, justified, in ae24f4 over the shadow font ae2510.
         rows.extend(plain_rows_face(&e.scenario.description, room, size, Face::Bold));
-        let line_h = 14.0 * k;
-        let steps = desc_steps(title_rows, rows.len(), k);
+        let line_h = 14.0 * kk;
+        let steps = desc_steps(title_rows, rows.len(), kk);
         // The box is a text list (0x65ae00): the wheel over it scrolls it a line a frame
         // (0x47ede0), down to its last line; a new map starts it at the top (0x47cc90).
         let max_scroll = desc_max_scroll(&steps, desc.h - 20.0 * k);
@@ -991,10 +1104,10 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
             }
             if n < title_rows {
                 // The name in ae2498 over its shadow font ae24b0 (0x4c1b33).
-                draw_markup_row_shadowed(row, desc.x + 17.0 * k, y, room, 16.0 * k, Face::Subtitle, super::typography::Ink::Plain.color());
-                y += 20.0 * k;
+                draw_markup_row_shadowed(row, desc.x + 17.0 * k, y, room, 16.0 * kk, Face::Subtitle, super::typography::Ink::Plain.color());
+                y += 20.0 * kk;
                 if n + 1 == title_rows {
-                    y += 12.0 * k;
+                    y += 12.0 * kk;
                 }
             } else {
                 let orange = with_face(Face::Bold, || super::typography::Ink::Orange.color());
@@ -1010,7 +1123,12 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
     let (x_mod, w_mod) = if both { (306.0, 276.0) } else { (12.0, 570.0) };
     let extras_y = extra_top(win.foot_y, grow);
     let extras_h = EXTRA_ROW_H * grow;
-    add_map_button(&win, has_install && !busy, if both { (12.0, extras_y, 276.0, extras_h) } else { (12.0, extras_y, 570.0, extras_h) });
+    let add_r = match &pl {
+        Some(p) => p.add,
+        None if both => win.rect(12.0, extras_y, 276.0, extras_h),
+        None => win.rect(12.0, extras_y, 570.0, extras_h),
+    };
+    add_map_button(has_install && !busy, add_r);
     // Razdor's filter and order (a players' wish), under the list where the original's window
     // has nothing: each opens a drop-down list; the choice is kept in the settings.
     // The footer (Razdor's own, see `foot_block`): at Normal the original's row, unchanged; at
@@ -1018,8 +1136,12 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
     let two_rows = grow > 1.0;
     let b = FOOT_H * grow;
     let (choice_y, choice_h, choice_w) = if two_rows { (win.foot_y + b + 6.0, b, 140.0 * grow) } else { (win.foot_y - 1.0, FOOT_H, 140.0) };
-    let pick_show = view_choice(&win, (12.0, choice_y, choice_w, choice_h), "razdor:scenario-show", show as i64, &Show::ALL.map(|s| s.label()));
-    let pick_order = view_choice(&win, (12.0 + choice_w + 6.0, choice_y, choice_w, choice_h), "razdor:scenario-order", order as i64, &Order::ALL.map(|o| o.label()));
+    let (show_r, order_r) = match &pl {
+        Some(p) => (p.filter, p.order),
+        None => (win.rect(12.0, choice_y, choice_w, choice_h), win.rect(12.0 + choice_w + 6.0, choice_y, choice_w, choice_h)),
+    };
+    let pick_show = view_choice_at(&win, show_r, "razdor:scenario-show", show as i64, &Show::ALL.map(|s| s.label()));
+    let pick_order = view_choice_at(&win, order_r, "razdor:scenario-order", order as i64, &Order::ALL.map(|o| o.label()));
     if pick_show.is_some() || pick_order.is_some() {
         m.show = pick_show.unwrap_or(m.show);
         m.order = pick_order.unwrap_or(m.order);
@@ -1035,7 +1157,10 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
         labels.extend(mods.iter().map(|(_, title)| format!("{}: {}", tr("Mod"), title.get(i18n::lang()))));
         let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
         let current = active.and_then(|a| mods.iter().position(|(id, _)| id == a)).map_or(0, |i| i + 1);
-        let row = win.rect(x_mod, extras_y, w_mod, extras_h);
+        let row = match &pl {
+            Some(p) => p.mod_row.unwrap_or(Rect::new(0.0, 0.0, 0.0, 0.0)),
+            None => win.rect(x_mod, extras_y, w_mod, extras_h),
+        };
         // While the folder is built the row says so and takes no choice (1441).
         let picked = if busy {
             chrome::marble_button(row, tr("Preparing the mod…"), false, false);
@@ -1057,7 +1182,7 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
     }
     let can = !list.is_empty();
     let start = start_allowed(can, busy);
-    if experimental_rules() != ExperimentalRules::default() {
+    if experimental_rules() != ExperimentalRules::default() && pl.is_none() {
         let label_y = if two_rows { choice_y + b + 2.0 } else { win.foot_y + 27.0 };
         let label = win.rect(12.0, label_y, 306.0, 12.0);
         chrome::shadow_text(tr("Experimental rules enabled"), label.x, label.y + 9.0 * k, 9.0 * k, chrome::ORANGE_TEXT);
@@ -1070,16 +1195,20 @@ pub fn scenario_select(scenarios: &[ScenarioEntry], has_install: bool, mods: &[(
     let next_x = cancel_x - 7.0 - next_w;
     let dots_w = 34.0 * grow;
     let dots_x = next_x - 7.0 - dots_w;
-    if win.button(dots_x, dots_w, "...", can) {
+    let (dots_r, next_r, cancel_r) = match &pl {
+        Some(p) => (p.dots, p.next, p.cancel),
+        None => (win.rect(dots_x, win.foot_y, dots_w, FOOT_H * grow), win.rect(next_x, win.foot_y, next_w, FOOT_H * grow), win.rect(cancel_x, win.foot_y, cancel_w, FOOT_H * grow)),
+    };
+    if button_rect(dots_r, "...", can) {
         RULES_OPEN.with(|p| p.set(true));
         return None;
     }
     let selected_map = campaign_start(&list, picked);
-    if (win.button(next_x, next_w, &own("Buttons", "Next", n_("Next")), start) || (start && key(KeyCode::Enter))) && next.is_none() {
+    if (button_rect(next_r, &own("Buttons", "Next", n_("Next")), start) || (start && key(KeyCode::Enter))) && next.is_none() {
         cue(Cue::Button);
         next = selected_map.map(|i| Screen::ClassSelect { scenario: Some(i) });
     }
-    if win.button(cancel_x, cancel_w, &own("Buttons", "Cancel", n_("Cancel")), true) || closed || key(KeyCode::Escape) {
+    if button_rect(cancel_r, &own("Buttons", "Cancel", n_("Cancel")), true) || closed || key(KeyCode::Escape) {
         return Some(Screen::MainMenu);
     }
     next
@@ -1103,6 +1232,9 @@ fn slots_hint(six_cells: bool) -> &'static str {
 /// The touch target's least side in dp (Razdor's phone rule; the mobile-ui check's limit).
 const TOUCH_DP: f32 = 40.0;
 
+/// The OK button's height in dp on a phone held upright (the owner's note of 2026-11-02).
+const OK_DP: f32 = 44.0;
+
 /// Kept modal so clicks and Enter cannot start a scenario behind the options.
 ///
 /// The window's scale `o` is the pop-ups' (`display::popup_o`), fitted to the screen. Its rows and
@@ -1121,7 +1253,10 @@ fn experimental_menu() {
     let big = o * g;
     let touch = dp.map_or(0.0, |d| TOUCH_DP * d);
     let (row_h, gap) = ((28.0 * big).max(touch), 10.0 * big);
-    let ok_h = (28.0 * big).max(touch);
+    // On the upright phone the OK button is 44 dp tall and wider, its label bigger (the owner's note of
+    // 2026-11-02); the rest of the window stays as it was.
+    let upright = dp.is_some_and(|d| d > 0.0 && sw < sh);
+    let ok_h = (28.0 * big).max(if upright { OK_DP * dp.unwrap_or(0.0) } else { touch });
     let (hint_size, hint_pitch) = (14.0 * tx * g, 21.0 * tx * g);
     let hints = [slots_hint(experimental_rules().six_cells), tr("One weapon per unit always."), tr("Applies to all armies; saved with this playthrough."), tr("The potion limit resets after a battle.")];
     let wrapped = |iw: f32| -> Vec<String> { super::dt_font::legacy_metrics_if(true, || hints.iter().flat_map(|l| wrap_cached(l, iw, hint_size)).collect()) };
@@ -1168,21 +1303,32 @@ fn experimental_menu() {
         // The baseline sits 0.8 of the size below the line's top.
         super::dt_font::legacy_metrics_if(true, || chrome::shadow_text(line, r.x + 20.0 * big, hints_top + i as f32 * hint_pitch + hint_size * 0.8, hint_size, chrome::CREAM));
     }
-    let b = Rect::new(r.center().x - 50.0 * big, r.bottom() - 12.0 * big - ok_h, 100.0 * big, ok_h);
+    let ok_w = match dp {
+        Some(d) if upright => (120.0 * d).max(100.0 * big),
+        _ => 100.0 * big,
+    };
+    let b = Rect::new(r.center().x - ok_w / 2.0, r.bottom() - 12.0 * big - ok_h, ok_w, ok_h);
     let (_, down, pressed) = button_state(b,true);
-    chrome::marble_button(b,tr("OK"),true,down);
+    chrome::marble_button(b,"",true,down);
+    if upright {
+        // Its label at 17 dp (the marble's own size at 44 dp is held to the window's scale).
+        let size = 17.0 * dp.unwrap_or(1.0);
+        let d = measure(tr("OK"), size);
+        super::dt_font::legacy_metrics_if(true, || chrome::shadow_text(tr("OK"), b.center().x - d.width / 2.0, b.y + (b.h + d.offset_y) / 2.0 - 1.0, size, chrome::CREAM));
+    } else {
+        chrome::marble_button(b,tr("OK"),true,down);
+    }
     if close || pressed || key(KeyCode::Escape) || key(KeyCode::Enter) { RULES_OPEN.with(|p| p.set(false)); }
 }
 
 /// Razdor's «Добавить карту…» on the extras row under the buttons (`at`: window units), with the
 /// hint of what it takes as its tooltip (Razdor's own, the owner's request of 2026-10-31): the
 /// platform's picker copies the map (or the archive's maps) into the install (`ui::map_import`).
-fn add_map_button(win: &Win, has_install: bool, at: (f32, f32, f32, f32)) {
+fn add_map_button(has_install: bool, r: Rect) {
     if !map_import::available() {
         return;
     }
     let enabled = has_install && map_import::can_start();
-    let r = win.rect(at.0, at.1, at.2, at.3);
     let (_, down, pressed) = button_state(r, enabled);
     chrome::marble_button(r, tr("Add a map…"), enabled, down);
     if pressed {
@@ -1192,10 +1338,6 @@ fn add_map_button(win: &Win, has_install: bool, at: (f32, f32, f32, f32)) {
     if mouse_in(r.x, r.y, r.w, r.h) {
         tooltip(&[(tr("A .DTm file or a .zip archive: an archive may hold a campaign or several maps.").to_string(), INK)]);
     }
-}
-
-fn view_choice(win: &Win, (x, y, w, h): (f32, f32, f32, f32), key: &str, current: i64, labels: &[&str]) -> Option<i64> {
-    view_choice_at(win, win.rect(x, y, w, h), key, current, labels)
 }
 
 /// [`view_choice`] in the rectangle `r` (screen pixels).
