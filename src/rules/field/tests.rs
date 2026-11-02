@@ -93,13 +93,13 @@ fn a_wall_nobody_can_pass_ends_at_the_turn_limit_with_the_defenders() {
 }
 
 #[test]
-fn a_failing_script_stops_and_the_battle_goes_on_by_the_rules() {
+fn a_failing_script_ends_the_battle_as_a_defenders_win() {
     let (_c, b) = battle(&[1, 6], &[4, 6]);
     let mut fb = FieldBattle::new(b, "broken", 1, &mut Broken);
-    assert!(fb.play_auto(&mut Broken).is_some(), "the battle still ends");
+    assert_eq!(fb.play_auto(&mut Broken), Some(Side::Defenders));
     assert!(fb.state.script_off);
     assert_eq!(fb.state.script_error.as_deref(), Some("scripts/broken.lua:3: boom"));
-    assert!(fb.state.log.iter().any(|l| l.starts_with("the battle script stopped")));
+    assert!(fb.state.log.iter().any(|l| l.key == "field.script_error"));
 }
 
 #[test]
@@ -166,7 +166,7 @@ fn a_unit_cannot_act_out_of_turn() {
 fn shooters_have_a_range() {
     let (_c, b) = battle(&[1, 5], &[4]);
     assert_eq!(shot_range(&b, 0), 0, "a knight does not shoot");
-    assert_eq!(shot_range(&b, 1), 5, "an archer with 14 shot reaches 5 tiles");
+    assert_eq!(shot_range(&b, 1), SHOT_RANGE, "an archer reaches the default 6 tiles");
 }
 
 /// An AI that answers every turn with cells and targets off the board.
@@ -187,7 +187,7 @@ fn an_ai_that_names_cells_off_the_board_waits_and_does_not_panic() {
     let before = fb.state.cells[f];
     fb.act(f, Action { move_to: Some((-1, -1)), attack: None }, &mut OffBoard).unwrap();
     assert_eq!(fb.state.cells[f], before, "the unit waits");
-    assert!(fb.state.log.iter().any(|l| l.contains("cannot reach")));
+    assert!(fb.state.log.iter().any(|l| l.key == "field.cannot_reach"));
     fb.play_auto(&mut OffBoard);
     assert!(fb.outcome().is_some());
 }

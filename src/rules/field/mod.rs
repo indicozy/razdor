@@ -18,6 +18,7 @@
 
 pub mod board;
 pub mod script;
+pub mod text;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -28,12 +29,16 @@ use super::battle::{ActionKind, Battle, Team};
 use super::content::{Content, Stat};
 use super::units::Unit;
 use board::{Board, Tile, BATTLEMENT_RANGE};
-pub use script::{Action, Damage, FieldScript, NoScript, Placement, Snapshot, Step, Target, TurnEdit, UnitView};
+pub use script::{Action, Damage, FieldHost, FieldScript, NoScript, Placement, Snapshot, Step, Target, TurnEdit, UnitView};
+pub use text::LogLine;
 
 /// The turn limit when the script does not set one.
 pub const DEFAULT_MAX_TURNS: u32 = 12;
 /// Lines of the log kept in the save (the battle view shows the last ones).
 const LOG_LINES: usize = 500;
+/// How far a shooter reaches, in tiles, along a clear line of fire (a battlement adds
+/// [`BATTLEMENT_RANGE`]).
+pub const SHOT_RANGE: i32 = 6;
 /// The board of a battle the script does not lay out: 12 × 8 open ground.
 const DEFAULT_W: i32 = 12;
 const DEFAULT_H: i32 = 8;
@@ -98,7 +103,7 @@ pub struct FieldState {
     pub cursor: usize,
     /// The script's variables (`razdor.vars`).
     pub vars: BTreeMap<String, serde_json::Value>,
-    pub log: Vec<String>,
+    pub log: Vec<LogLine>,
     pub outcome: Option<Side>,
     /// A script that failed stops for the rest of the battle; the error is kept for the report.
     pub script_off: bool,
@@ -113,6 +118,17 @@ pub struct FieldBattle {
     pub state: FieldState,
 }
 
+/// The legal moves of one unit this turn (see [`FieldBattle::moves`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Moves {
+    /// Cells the unit can walk to, its own included, row by row.
+    pub cells: Vec<(i32, i32)>,
+    /// Units it can hit from one of those cells (their ids).
+    pub units: Vec<usize>,
+    /// Standing gates next to one of those cells.
+    pub gates: Vec<(i32, i32)>,
+}
+
 /// The shadow DT battle of a fight: the squad (its living units, the hero always) against the
 /// enemy units, begun as a DT battle begins (the shadow's pre-simulation is off).
 pub fn shadow(content: Arc<Content>, squad: &[Unit], enemies: &[Unit]) -> Battle {
@@ -124,13 +140,31 @@ pub fn shadow(content: Arc<Content>, squad: &[Unit], enemies: &[Unit]) -> Battle
     b
 }
 
-/// How far a unit shoots, in tiles: none without an attack of shot; else 2 + shot / 4, at most 8.
+/// The shadow of a fight with explicit sides: `player` (the squad's units with their squad
+/// index), `joiners` (garrison troops that fight for the hero, with no squad index: they are
+/// given the index `usize::MAX` here and the caller clears it) and `enemies`. `attacker` is the
+/// side that attacks (the DT initiative bonus); the enemy is arranged anew, as DT does.
+pub fn shadow_of(content: Arc<Content>, player: &[(usize, &Unit)], joiners: &[Unit], enemies: &[Unit], attacker: Team) -> Battle {
+    let mut all: Vec<(usize, &Unit)> = player.to_vec();
+    all.extend(joiners.iter().map(|u| (usize::MAX, u)));
+    let mut b = Battle::new(content, &all, enemies, attacker);
+    for f in b.fighters.iter_mut() {
+        if f.squad_index == Some(usize::MAX) {
+            f.squad_index = None;
+        }
+    }
+    b.skip_prediction();
+    b.auto_arrange(Team::Enemy);
+    b.begin();
+    b
+}
+
+/// How far a unit shoots, in tiles: none without an attack of shot, else [`SHOT_RANGE`].
 pub fn shot_range(b: &Battle, f: usize) -> i32 {
-    let a = b.fighters[f].base[Stat::AttackShot];
-    if a <= 0 {
+    if b.fighters[f].base[Stat::AttackShot] <= 0 {
         0
     } else {
-        (2 + a / 4).min(8)
+        SHOT_RANGE
     }
 }
 
@@ -199,7 +233,7 @@ impl FieldBattle {
         let winner = self.state.outcome?;
         self.shadow.field_end(winner.team());
         self.shadow.round = self.state.round;
-        self.shadow.log.extend(self.state.log.iter().cloned());
+        self.shadow.log.extend(self.state.log.iter().map(text::english));
         Some(self.shadow)
     }
 
@@ -224,9 +258,10 @@ impl FieldBattle {
         }
     }
 
-    fn log(&mut self, line: String) {
+    /// Adds a line of the log: a text key and its arguments (see [`text`]).
+    fn say(&mut self, key: &str, args: &[String]) {
         if self.state.log.len() < LOG_LINES {
-            self.state.log.push(line);
+            self.state.log.push(LogLine { key: key.to_string(), args: args.to_vec() });
         }
     }
 
@@ -239,8 +274,8 @@ impl FieldBattle {
         (0..self.fighters()).any(|i| self.alive_on_board(i) && self.state.cells[i] == Some((x, y)))
     }
 
-    /// Calls a hook of the script, if it still runs. An error stops the script for good: the
-    /// battle goes on by the Rust rules, and the report names the error.
+    /// Calls a hook of the script, if it still runs. An error ends the battle as a defenders'
+    /// win; the log and the save name the error.
     fn hook<T>(&mut self, hooks: &mut dyn FieldScript, active: Option<usize>, call: impl FnOnce(&mut dyn FieldScript, &mut Snapshot) -> Result<Option<T>, String>) -> Option<T> {
         if self.state.script_off {
             return None;
@@ -249,14 +284,17 @@ impl FieldBattle {
         let out = call(hooks, &mut snap);
         self.state.vars = std::mem::take(&mut snap.vars);
         for line in hooks.take_log() {
-            self.log(line);
+            self.say("field.print", &[line]);
         }
         match out {
             Ok(v) => v,
             Err(e) => {
-                self.log(format!("the battle script stopped: {e}; the battle goes on by the default rules"));
+                // A failing script ends the battle as a defenders' win: the error is in the log and
+                // in the save, and nothing panics.
+                self.say("field.script_error", std::slice::from_ref(&e));
                 self.state.script_off = true;
                 self.state.script_error = Some(e);
+                self.set_outcome(Side::Defenders);
                 None
             }
         }
@@ -302,7 +340,7 @@ impl FieldBattle {
                 if ok {
                     self.state.cells[f] = Some((x, y));
                 } else {
-                    self.log(format!("the script's place for unit {f} at {x},{y} is not on open ground; the default cell is used"));
+                    self.say("field.place_default", &[f.to_string(), format!("{x},{y}")]);
                 }
             }
         }
@@ -322,7 +360,10 @@ impl FieldBattle {
                 let free = slots.iter().copied().find(|&(x, y)| self.state.board.get(x, y).is_some_and(|t| t.cost().is_some()) && !self.occupied(x, y));
                 match free {
                     Some(c) => self.state.cells[f] = Some(c),
-                    None => self.log(format!("no cell for {}: it does not take part", self.label(f))),
+                    None => {
+                        let name = self.label(f);
+                        self.say("field.no_cell", &[name]);
+                    }
                 }
             }
         }
@@ -339,11 +380,11 @@ impl FieldBattle {
         order.sort_by_key(|&f| (-self.shadow.fighters[f].stats[Stat::Initiative], f));
         self.state.order = order;
         self.state.cursor = 0;
-        self.log(format!("turn {}", self.state.round));
+        self.say("field.turn", &[self.state.round.to_string()]);
         if let Some(edit) = self.hook(hooks, None, |h, s| h.on_turn_start(s)) {
             self.apply_tiles(&edit.tiles);
-            for line in edit.log {
-                self.log(line);
+            for key in edit.log {
+                self.say(&key, &[]);
             }
         }
         self.check_end(hooks);
@@ -403,9 +444,15 @@ impl FieldBattle {
         }
         let blocked = self.blocked_except(f);
         let budget = self.shadow.fighters[f].stats[Stat::Manevres];
+        // A cell off the board (a script's) or one with a unit on it is no move: the unit waits.
+        if blocked.contains(&to) {
+            let name = self.label(f);
+            self.say("field.occupied", &[name, format!("{},{}", to.0, to.1)]);
+            return from;
+        }
         let Some(path) = self.state.board.path(from, to, &blocked) else {
             let name = self.label(f);
-            self.log(format!("{name} cannot reach {},{}", to.0, to.1));
+            self.say("field.cannot_reach", &[name, format!("{},{}", to.0, to.1)]);
             return from;
         };
         let mut spent = 0;
@@ -420,7 +467,7 @@ impl FieldBattle {
             let step = Step { unit: f, from: a, to: b, tile };
             if self.hook(hooks, Some(f), |h, s| h.can_enter(s, &step).map(|v| v.map(|allowed| (allowed,)))).is_some_and(|(allowed,)| !allowed) {
                 let name = self.label(f);
-                self.log(format!("{name} is stopped at {},{}", a.0, a.1));
+                self.say("field.stopped", &[name, format!("{},{}", a.0, a.1)]);
                 break;
             }
             spent += cost;
@@ -429,7 +476,7 @@ impl FieldBattle {
         if here != from {
             self.state.cells[f] = Some(here);
             let name = self.label(f);
-            self.log(format!("{name} moves to {},{}", here.0, here.1));
+            self.say("field.moves", &[name, format!("{},{}", here.0, here.1)]);
         }
         here
     }
@@ -457,7 +504,7 @@ impl FieldBattle {
             Target::Unit(t) => {
                 if t >= self.fighters() || !self.reaches(f, at, t) {
                     let name = self.label(f);
-                    self.log(format!("{name} has no target in reach"));
+                    self.say("field.no_target", &[name]);
                     return;
                 }
                 let shot = Board::distance(at, self.state.cells[t].expect("a reached unit is on the board")) > 1;
@@ -472,22 +519,22 @@ impl FieldBattle {
                 self.shadow.fighters[t].taken += dealt;
                 self.shadow.fighters[f].useful += 1;
                 let (a, b) = (self.label(f), self.label(t));
-                let verb = if shot { "shoots" } else { "strikes" };
-                self.log(format!("{a} {verb} {b} for {dealt}"));
+                let key = if shot { "field.shoots" } else { "field.strikes" };
+                self.say(key, &[a, b.clone(), dealt.to_string()]);
                 if self.shadow.fighters[t].hp <= 0 {
-                    self.log(format!("{b} falls"));
+                    self.say("field.falls", &[b]);
                 }
             }
             Target::Tile(x, y) => {
                 let adjacent = Board::distance(at, (x, y)) == 1;
                 let Some(Tile::Gate { hp }) = self.state.board.get(x, y) else {
                     let name = self.label(f);
-                    self.log(format!("{name} has no gate at {x},{y}"));
+                    self.say("field.no_gate", &[name, format!("{x},{y}")]);
                     return;
                 };
                 if !adjacent || hp <= 0 {
                     let name = self.label(f);
-                    self.log(format!("{name} cannot reach the gate at {x},{y}"));
+                    self.say("field.gate_unreached", &[name, format!("{x},{y}")]);
                     return;
                 }
                 let blow = self.shadow.fighters[f].base[Stat::AttackBlow].max(1);
@@ -495,10 +542,10 @@ impl FieldBattle {
                 let name = self.label(f);
                 if left <= 0 {
                     self.state.board.set(x, y, Tile::Rubble);
-                    self.log(format!("{name} breaks the gate at {x},{y}"));
+                    self.say("field.gate_broken", &[name, format!("{x},{y}")]);
                 } else {
                     self.state.board.set(x, y, Tile::Gate { hp: left });
-                    self.log(format!("{name} hits the gate at {x},{y} ({left} left)"));
+                    self.say("field.gate_hit", &[name, format!("{x},{y}"), left.to_string()]);
                 }
             }
         }
@@ -525,22 +572,21 @@ impl FieldBattle {
 
     fn set_outcome(&mut self, w: Side) {
         self.state.outcome = Some(w);
-        let who = match w {
-            Side::Defenders => "the defenders hold the field",
-            Side::Attackers => "the attackers hold the field",
+        let key = match w {
+            Side::Defenders => "field.defenders_hold",
+            Side::Attackers => "field.attackers_hold",
         };
-        self.log(format!("the battle is over: {who}"));
+        self.say(key, &[]);
     }
 
-    /// The end of a round: at the turn limit, the side with more HP left wins (the defenders on
-    /// a tie), unless the battle is over already.
+    /// The end of a round. At the turn limit the script's `check_end` decides (it was asked just
+    /// now); if it says nothing, the defenders win.
     pub fn end_round(&mut self, hooks: &mut dyn FieldScript) {
         self.check_end(hooks);
         if self.state.outcome.is_none() && self.state.round >= self.state.max_turns {
-            let hp = |side: Side, fb: &FieldBattle| -> i32 { (0..fb.fighters()).filter(|&f| fb.side(f) == side).map(|f| fb.shadow.fighters[f].hp.max(0)).sum() };
-            let w = if hp(Side::Attackers, self) > hp(Side::Defenders, self) { Side::Attackers } else { Side::Defenders };
-            self.log(format!("the turn limit of {} is reached", self.state.max_turns));
-            self.set_outcome(w);
+            let max = self.state.max_turns.to_string();
+            self.say("field.turn_limit", &[max]);
+            self.set_outcome(Side::Defenders);
         }
     }
 
@@ -563,6 +609,46 @@ impl FieldBattle {
             self.end_round(hooks);
         }
         self.state.outcome
+    }
+
+    /// What `f` can do this turn from where it stands: the cells it can walk to with its
+    /// manevres (its own cell included), the units it can hit from one of them, and the gates
+    /// next to them it can break. The rules only: a script's `can_enter` is asked when it walks.
+    pub fn moves(&self, f: usize) -> Moves {
+        let Some(at) = self.state.cells[f] else { return Moves::default() };
+        if !self.shadow.fighters[f].alive() {
+            return Moves::default();
+        }
+        let budget = self.shadow.fighters[f].stats[Stat::Manevres];
+        let blocked = self.blocked_except(f);
+        let costs = self.state.board.costs(at, &blocked);
+        let mut out = Moves::default();
+        for y in 0..self.state.board.h {
+            for x in 0..self.state.board.w {
+                if costs[(y * self.state.board.w + x) as usize].is_some_and(|c| c <= budget) {
+                    out.cells.push((x, y));
+                }
+            }
+        }
+        for &c in &out.cells {
+            for t in 0..self.fighters() {
+                if self.reaches(f, c, t) && !out.units.contains(&t) {
+                    out.units.push(t);
+                }
+            }
+            for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                let g = (c.0 + dx, c.1 + dy);
+                if matches!(self.state.board.get(g.0, g.1), Some(Tile::Gate { hp: 1.. })) && !out.gates.contains(&g) {
+                    out.gates.push(g);
+                }
+            }
+        }
+        out
+    }
+
+    /// The units that act this round, and the one to act now (`None`: none left).
+    pub fn order(&self) -> &[usize] {
+        &self.state.order
     }
 
     /// The default AI: a unit that can strike or shoot a unit from where it stands does so (the

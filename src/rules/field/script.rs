@@ -132,3 +132,13 @@ pub trait FieldScript {
 pub struct NoScript;
 
 impl FieldScript for NoScript {}
+
+/// Where a battle's hooks come from: the package's Lua (`src/lua/field.rs`, feature `lua`). The
+/// rules name no Lua; a game holds a host (`Game::field_host`) and opens the hooks of each
+/// battle, and again on a load. Lua globals do not survive a load: a script keeps its state in
+/// `vars` (saved) or in the generator.
+pub trait FieldHost: Send + Sync {
+    /// The hooks of `script` (`scripts/<script>.lua`), with its generator at `rng`. `Err` when the
+    /// script is missing or does not load: the battle then does not open (the caller says so).
+    fn open(&self, script: &str, rng: u64) -> Result<Box<dyn FieldScript>, String>;
+}
