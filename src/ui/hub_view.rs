@@ -334,7 +334,7 @@ pub fn matches_text(query: &str, titles: &[&str], author: &str) -> bool {
 /// for several (`names` in install order, the catalog's own titles).
 pub fn needs_words(lang: Lang, names: &[&str]) -> String {
     let list = names.join(", ");
-    let template = if names.len() == 1 { "Needs mod: {names}" } else { "Needs mods: {names}" };
+    let template = if names.len() == 1 { i18n::n_("Needs mod: {names}") } else { i18n::n_("Needs mods: {names}") };
     i18n::fill(i18n::tr_in(lang, template), &[("names", &list as &dyn std::fmt::Display)])
 }
 
