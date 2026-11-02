@@ -1,1 +1,13 @@
-{"signedContributors": []}
+{
+  "signedContributors": [
+    {
+      "name": "Eizenvald",
+      "id": 181067231,
+      "comment_id": 6573112396,
+      "created_at": "2026-11-02T08:59:58Z",
+      "repoId": 1395519875,
+      "pullRequestNo": 35,
+      "note": "Signed on issue #35 (https://github.com/indicozy/razdor/issues/35#issuecomment-6573112396), recorded by hand; covers all past and future contributions."
+    }
+  ]
+}
