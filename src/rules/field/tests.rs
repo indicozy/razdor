@@ -168,3 +168,26 @@ fn shooters_have_a_range() {
     assert_eq!(shot_range(&b, 0), 0, "a knight does not shoot");
     assert_eq!(shot_range(&b, 1), 5, "an archer with 14 shot reaches 5 tiles");
 }
+
+/// An AI that answers every turn with cells and targets off the board.
+struct OffBoard;
+
+impl FieldScript for OffBoard {
+    fn ai_turn(&mut self, _s: &mut Snapshot) -> Result<Option<Action>, String> {
+        Ok(Some(Action { move_to: Some((99, 99)), attack: Some(Target::Tile(i32::MAX, i32::MIN)) }))
+    }
+}
+
+#[test]
+fn an_ai_that_names_cells_off_the_board_waits_and_does_not_panic() {
+    let (_c, b) = battle(&[1, 6], &[4, 6]);
+    let mut fb = FieldBattle::new(b, "offboard", 1, &mut OffBoard);
+    fb.start_round(&mut OffBoard);
+    let f = fb.current().expect("a unit to act");
+    let before = fb.state.cells[f];
+    fb.act(f, Action { move_to: Some((-1, -1)), attack: None }, &mut OffBoard).unwrap();
+    assert_eq!(fb.state.cells[f], before, "the unit waits");
+    assert!(fb.state.log.iter().any(|l| l.contains("cannot reach")));
+    fb.play_auto(&mut OffBoard);
+    assert!(fb.outcome().is_some());
+}

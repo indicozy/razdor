@@ -78,12 +78,19 @@ impl Board {
     /// Manhattan distance: the number of steps a unit needs on an open board, and the reach of
     /// a melee blow (1).
     pub fn distance(a: (i32, i32), b: (i32, i32)) -> i32 {
-        (a.0 - b.0).abs() + (a.1 - b.1).abs()
+        // In i64 and saturated: a script's cells may be as large as an i32.
+        let d = (a.0 as i64 - b.0 as i64).abs() + (a.1 as i64 - b.1 as i64).abs();
+        d.min(i32::MAX as i64) as i32
     }
 
     /// Whether a shot from `from` reaches `to`. The cells between must not block fire; a shooter
     /// on a battlement shoots over walls and gates. The line is Bresenham's, from the shooter.
     pub fn line_of_fire(&self, from: (i32, i32), to: (i32, i32)) -> bool {
+        // Both ends must be on the board: the line is then at most board-sized (a script's far
+        // cell would otherwise make a long walk).
+        if !self.inside(from.0, from.1) || !self.inside(to.0, to.1) {
+            return false;
+        }
         let over_walls = self.get(from.0, from.1) == Some(Tile::Battlement);
         let (mut x, mut y) = from;
         let dx = (to.0 - x).abs();
@@ -145,6 +152,10 @@ impl Board {
     /// there is none. Ties go to the cell with the lower coordinates, so the path is the same
     /// on every run.
     pub fn path(&self, from: (i32, i32), to: (i32, i32), blocked: &[(i32, i32)]) -> Option<Vec<(i32, i32)>> {
+        // A script can name any cell: an end off the board is no path (never an index).
+        if !self.inside(from.0, from.1) || !self.inside(to.0, to.1) {
+            return None;
+        }
         if from == to {
             return Some(vec![from]);
         }
@@ -226,6 +237,17 @@ mod tests {
         let p = b.path((0, 0), (2, 2), &[]).unwrap();
         assert_eq!(p.len(), 5);
         assert_eq!(p, b.path((0, 0), (2, 2), &[]).unwrap());
+    }
+
+    #[test]
+    fn a_path_off_the_board_is_no_path() {
+        let b = Board::open(12, 8).unwrap();
+        assert_eq!(b.path((0, 0), (99, 99), &[]), None);
+        assert_eq!(b.path((0, 0), (-1, -1), &[]), None);
+        assert_eq!(b.path((-1, -1), (0, 0), &[]), None);
+        assert_eq!(b.path((5, 5), (5, 5), &[]), Some(vec![(5, 5)]));
+        assert!(!b.line_of_fire((0, 0), (i32::MAX, i32::MIN)));
+        assert_eq!(Board::distance((i32::MIN, 0), (i32::MAX, 0)), i32::MAX);
     }
 
     #[test]
