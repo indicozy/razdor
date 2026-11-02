@@ -17,7 +17,7 @@ use crate::dt::install::DtInstall;
 use crate::rules::campaign::{after_victory, enter};
 use crate::rules::content::{Content, HeroClass};
 use crate::rules::game::Game;
-use crate::rules::sim::{self, MapEnd, StoryPlay};
+use crate::rules::sim::{self, FieldFight, MapEnd, StoryPlay};
 use crate::rules::triggers::{Ending, PendingDialog, Trace};
 
 use super::open::Opened;
@@ -132,8 +132,8 @@ pub struct SimResult {
     pub defeat_day: Option<f64>,
     pub ai_battles: u32,
     pub player_battles: usize,
-    /// The field battles of the run: rounds and winner (`None`: none).
-    pub field_battles: Vec<(u32, Option<crate::rules::field::Side>)>,
+    /// The field battles of the run (see [`crate::rules::sim::FieldFight`]).
+    pub field_battles: Vec<crate::rules::sim::FieldFight>,
     /// The map has a story (triggers or dialogs).
     pub story: bool,
     /// What the story did, by day after the start, when the trace was asked for.
@@ -163,13 +163,8 @@ impl SimResult {
             "{}: {status}; {} days, {outcome}; AI battles {}, player battles {}; {:.2} s",
             self.map, self.days, self.ai_battles, self.player_battles, self.seconds
         );
-        for (i, (rounds, winner)) in self.field_battles.iter().enumerate() {
-            let who = match winner {
-                Some(crate::rules::field::Side::Defenders) => "defenders",
-                Some(crate::rules::field::Side::Attackers) => "attackers",
-                None => "no winner",
-            };
-            out.push_str(&format!("\n  field battle {}: {rounds} rounds, {who} win", i + 1));
+        for (i, f) in self.field_battles.iter().enumerate() {
+            out.push_str(&format!("\n  {}", field_text(i + 1, f)));
         }
         out
     }
@@ -203,11 +198,75 @@ impl SimResult {
             "defeat_day": self.defeat_day,
             "ai_battles": self.ai_battles,
             "player_battles": self.player_battles,
+            "field_battles": self.field_battles.iter().map(|f| serde_json::json!({
+                "rounds": f.rounds,
+                "winner": f.winner.map(|w| match w { crate::rules::field::Side::Defenders => "defenders", crate::rules::field::Side::Attackers => "attackers" }),
+                "defenders_hp": [f.defenders_hp.0, f.defenders_hp.1],
+                "defenders_max": f.defenders_max,
+                "gates": f.gates.iter().map(|((x, y), a, b)| serde_json::json!({"x": x, "y": y, "start": a, "end": b})).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
             "story": self.story,
             "trace": trace,
             "seconds": self.seconds,
         })
     }
+}
+
+/// One field battle, for a person: its rounds and winner, the defenders' HP lost, the gates.
+pub fn field_text(n: usize, f: &FieldFight) -> String {
+    let who = match f.winner {
+        Some(crate::rules::field::Side::Defenders) => "defenders",
+        Some(crate::rules::field::Side::Attackers) => "attackers",
+        None => "no winner",
+    };
+    let (before, after) = f.defenders_hp;
+    let lost = if before > 0 { 100 * (before - after).max(0) / before } else { 0 };
+    let mut out = format!("field battle {n}: {} rounds, {who} win; defenders HP {before} -> {after} of {} ({lost}% lost)", f.rounds, f.defenders_max);
+    for ((x, y), hp0, hp) in &f.gates {
+        out.push_str(&format!("; gate ({x},{y}) {hp0} -> {hp}"));
+    }
+    out
+}
+
+/// A developer switch of the campaign (`razdor-pack sim --meet <map>:<army>[@x,y] --squad …`): on
+/// `map`, the hero's squad becomes `squad` (the hero and those troops), he stands in the building
+/// on the cell `at`, and the army `army` (its index in the map's `[[army]]` list) is his foe, so
+/// their field battle is fought with the army he carries. A measurement, not a story.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Meet {
+    pub map: String,
+    pub army: usize,
+    pub at: Option<(i32, i32)>,
+    /// The troops of the squad after the hero, as DT unit aliases and counts (`dt:militiaman`).
+    pub squad: Vec<(String, u32)>,
+}
+
+/// Sets the hero's squad, his building and the foe of `m` (see [`Meet`]).
+fn meet(g: &mut Game, content: &Content, m: &Meet) -> Result<(), String> {
+    use crate::pack::aliases;
+    use crate::pack::refs::DtKind;
+    use crate::rules::formation::{Row, Slot};
+    use crate::rules::game::Foe;
+    use crate::rules::units::Unit;
+    if m.army >= g.world.armies.len() {
+        return Err(format!("--meet {}: the map has {} armies", m.map, g.world.armies.len()));
+    }
+    g.squad.truncate(1);
+    let mut i = 0usize;
+    for (alias, n) in &m.squad {
+        let key = alias.strip_prefix("dt:").unwrap_or(alias);
+        let id = aliases::resolve(DtKind::Unit, key).ok_or_else(|| format!("--squad: no unit `{alias}`"))?;
+        for _ in 0..*n {
+            let slot = if i < 3 { Slot::new(Row::Front, i as u8) } else { Slot::new(Row::Back, (i - 3) as u8) };
+            g.squad.push(Unit::new(content, crate::rules::content::UnitId(id), slot));
+            i += 1;
+        }
+    }
+    if let Some((x, y)) = m.at {
+        g.location = Some(g.world.location_covering((x, y)).ok_or_else(|| format!("--meet {}: no building covers {x},{y}", m.map))?);
+    }
+    g.foe = Some(Foe::Army(m.army));
+    Ok(())
 }
 
 /// One step of the trace, for a person.
@@ -313,6 +372,8 @@ pub struct CampaignOptions {
     pub auto_win_after: Option<u64>,
     /// Variables forced before the campaign's first map starts (`--set var=value`); they carry on.
     pub preset: Vec<(String, VarValue)>,
+    /// A developer switch: the hero meets an army on a map with the squad it names (see [`Meet`]).
+    pub meet: Option<Meet>,
     /// Each map entered a second time is saved and restored first (`rules::save`): the sim's check
     /// that a campaign's save round-trips mid-campaign. A developer switch.
     pub save_on_revisit: bool,
@@ -323,6 +384,8 @@ pub struct CampaignOptions {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CampaignStep {
     pub map: String,
+    /// The field battles the map fought (see [`FieldFight`]).
+    pub fields: Vec<FieldFight>,
     /// The carried values the map was entered with (gold, squad, named characters, variables).
     pub entered_with: String,
     pub end: MapEnd,
@@ -366,6 +429,9 @@ impl CampaignRun {
         for step in &self.steps {
             out.push_str(&format!("{}: {}\n", step.map, step_text(step)));
             out.push_str(&format!("  entered with {}\n", step.entered_with));
+            for (i, f) in step.fields.iter().enumerate() {
+                out.push_str(&format!("  {}\n", field_text(i + 1, f)));
+            }
             for (minute, what) in &step.trace {
                 out.push_str(&format!("  {}\n", trace_line(what, *minute)));
             }
@@ -513,12 +579,17 @@ fn walk(pkg: &Package, base: &Content, open: &mut dyn FnMut(&str) -> Result<Open
         if opts.save_on_revisit && steps.iter().any(|s| s.map == map) {
             g = save_round_trip(g, content.clone()).map_err(|e| (steps.clone(), format!("the save of {map} does not round-trip: {e}")))?;
         }
+        if let Some(m) = opts.meet.as_ref().filter(|m| m.map == map) {
+            meet(&mut g, &content, m).map_err(|e| (steps.clone(), e))?;
+        }
         let entered_with = carried_text(&g);
         let t0 = g.clock.total_minutes();
         let entered_at = t0 as u64;
-        let end = sim::play_campaign_map(&mut g, opts.days, opts.auto_win_after, &mut pick);
+        let mut fields = Vec::new();
+        let end = sim::play_campaign_map(&mut g, opts.days, opts.auto_win_after, &mut pick, &mut fields);
         let mut step = CampaignStep {
             map: map.clone(),
+            fields,
             entered_with,
             end,
             day: (g.clock.total_minutes() - t0) / crate::rules::clock::MINUTES_PER_DAY as f64,
@@ -675,6 +746,7 @@ mod tests {
             auto_win_after: Some(20),
             preset: vec![("quests_done".into(), VarValue::Int(2)), ("order".into(), VarValue::Int(2)), ("crown".into(), VarValue::Int(1))],
             save_on_revisit: true,
+            meet: None,
         };
         let run = sim_campaign(&pkg, &install, &opts).unwrap_or_else(|r| panic!("{}", r.to_text()));
         assert!(run.ok(), "{}", run.text());
@@ -710,6 +782,7 @@ mod tests {
                 auto_win_after: Some(20),
                 preset: preset.iter().map(|(k, v)| (k.to_string(), v.clone())).collect(),
                 save_on_revisit: false,
+                meet: None,
             };
             let run = sim_campaign(&pkg, &install, &opts).unwrap_or_else(|r| panic!("{}", r.to_text()));
             assert!(run.ok(), "{}", run.text());

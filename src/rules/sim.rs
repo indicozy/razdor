@@ -39,9 +39,40 @@ pub struct DaysRun {
     pub defeat_day: Option<f64>,
     /// What the package's story did, by day after the start, when its trace was asked for.
     pub trace: Vec<(u64, Trace)>,
-    /// The field battles the run fought: their rounds and the side that won (`None`: no winner).
-    pub field_battles: Vec<(u32, Option<Side>)>,
+    /// The field battles the run fought (see [`FieldFight`]).
+    pub field_battles: Vec<FieldFight>,
     pub secs: f64,
+}
+
+/// One field battle of a run: its rounds, the side that won (`None`: no winner), the defenders' HP
+/// before and after it (of the whole army, the dead included at 0), and the HP of each gate that
+/// stood at the start, in board order, at its end (0 when it fell).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldFight {
+    pub rounds: u32,
+    pub winner: Option<Side>,
+    pub defenders_hp: (i32, i32),
+    pub defenders_max: i32,
+    pub gates: Vec<((i32, i32), i32, i32)>,
+}
+
+/// The defenders' HP and their maximum, and the gates' cells and HP, of a field battle's snapshot.
+fn field_hp(s: &crate::rules::field::Snapshot) -> (i32, i32, Vec<((i32, i32), i32)>) {
+    use crate::rules::field::board::Tile;
+    let (mut hp, mut max) = (0, 0);
+    for u in s.units.iter().filter(|u| u.side == Side::Defenders) {
+        hp += if u.alive { u.hp.max(0) } else { 0 };
+        max += u.max_hp;
+    }
+    let mut gates = Vec::new();
+    for y in 0..s.board.h {
+        for x in 0..s.board.w {
+            if let Some(Tile::Gate { hp }) = s.board.get(x, y) {
+                gates.push(((x, y), hp));
+            }
+        }
+    }
+    (hp, max, gates)
 }
 
 /// A package's story to run with the scenario: the story itself, whether to keep its trace, and
@@ -55,13 +86,19 @@ pub struct StoryPlay<'a> {
 }
 
 /// Auto-plays the player's pending battle, the AI on both sides. A field battle is played on
-/// the AI too, and its rounds and winner are kept in `fields`.
-fn fight_it_out(g: &mut Game, fields: &mut Vec<(u32, Option<Side>)>) -> Outcome {
+/// the AI too, and what it did is kept in `fields`.
+fn fight_it_out(g: &mut Game, fields: &mut Vec<FieldFight>) -> Outcome {
     let mut b = g.start_battle();
     if g.field_active() {
+        let (start_hp, max, start_gates) = g.field_snapshot().map(|s| field_hp(&s)).unwrap_or_default();
         while g.field_outcome().is_none() && g.field_auto_step().is_ok() {}
         let (rounds, winner) = (g.field_round().unwrap_or(0), g.field_outcome());
-        fields.push((rounds, winner));
+        let end = g.field_snapshot().map(|s| field_hp(&s));
+        let (end_hp, gates) = match end {
+            Some((hp, _, now)) => (hp, start_gates.iter().map(|&(cell, hp0)| (cell, hp0, now.iter().find(|(c, _)| *c == cell).map_or(0, |(_, hp)| *hp))).collect()),
+            None => (start_hp, Vec::new()),
+        };
+        fields.push(FieldFight { rounds, winner, defenders_hp: (start_hp, end_hp), defenders_max: max, gates });
         g.field_finish();
         return if winner == Some(Side::Defenders) { Outcome::Victory } else { Outcome::Defeat };
     }
@@ -99,7 +136,7 @@ pub fn play_days_with(c: &Arc<Content>, s: &Scenario, hero: HeroClass, days: u64
     let mut victory_day = None;
     let mut defeat_day = None;
     let mut calls = 0;
-    let mut field_battles = Vec::new();
+    let mut field_battles: Vec<FieldFight> = Vec::new();
     let day_now = |g: &Game| (g.clock.total_minutes() - start) / MINUTES_PER_DAY as f64;
     while g.clock.total_minutes() < end && calls < 200_000 {
         calls += 1;
@@ -192,7 +229,7 @@ pub enum MapEnd {
 /// map's victory once that many days have passed, so a campaign's graph can be walked without the
 /// hero reaching the victory. Returns how the map's play ended; the caller takes the travel or
 /// the ending from the game.
-pub fn play_campaign_map(g: &mut Game, days: u64, auto_win_after: Option<u64>, pick: &mut dyn FnMut(&PendingDialog) -> Option<String>) -> MapEnd {
+pub fn play_campaign_map(g: &mut Game, days: u64, auto_win_after: Option<u64>, pick: &mut dyn FnMut(&PendingDialog) -> Option<String>, fields: &mut Vec<FieldFight>) -> MapEnd {
     let start = g.clock.total_minutes();
     let end = start + (days * MINUTES_PER_DAY) as f64;
     let day_now = |g: &Game| (g.clock.total_minutes() - start) / MINUTES_PER_DAY as f64;
@@ -220,7 +257,7 @@ pub fn play_campaign_map(g: &mut Game, days: u64, auto_win_after: Option<u64>, p
             continue;
         }
         if g.foe.is_some() {
-            if fight_it_out(g, &mut Vec::new()) == Outcome::Defeat {
+            if fight_it_out(g, fields) == Outcome::Defeat {
                 return MapEnd::Defeat;
             }
             continue;

@@ -5,9 +5,9 @@
 --
 -- Cover: a shot at a unit on a battlement, or behind the wall beside it (the defenders' side), does half damage.
 -- Battlement shooters reach 2 tiles further (the rules do that for a battlement tile).
--- The dead go for the gate. On turn 4, if the gate stands, the wall beside it (6,5) falls to rubble,
+-- The dead go for the gate. On turn 4, if the gate stands, the wall beside it (6,4 and 6,5) falls to rubble,
 -- and from then on the dead walk through the gap or the broken gate into the courtyard.
--- The defenders win when the dead are destroyed, or when 12 turns pass. The dead win when the hero's
+-- The defenders win when the dead are destroyed, or when 16 turns pass. The dead win when the hero's
 -- units are all dead, or when they hold the courtyard (x <= 1) for two turns in a row.
 --
 -- The hooks are the battle's (see docs/reference/rzpack-format.md, «Field battles»). The defenders'
@@ -15,9 +15,9 @@
 
 local GATE = { x = 6, y = 3 }
 local COLLAPSE_TURN = 4
-local COLLAPSE_CELL = { x = 6, y = 5 }
+local COLLAPSE_CELLS = { { x = 6, y = 4 }, { x = 6, y = 5 } }
 local COURTYARD_X = 1
-local TURNS = 12
+local TURNS = 16
 local SIEGE_TURNS_HELD = 2
 
 local function tile_at(s, x, y)
@@ -90,7 +90,7 @@ function setup(s)
   local tiles = {}
   for y = 0, s.board.h - 1 do
     if y == GATE.y then
-      tiles[#tiles + 1] = { x = GATE.x, y = y, tile = "gate", hp = 60 }
+      tiles[#tiles + 1] = { x = GATE.x, y = y, tile = "gate", hp = 40 }
     else
       tiles[#tiles + 1] = { x = GATE.x, y = y, tile = "wall" }
     end
@@ -103,7 +103,9 @@ end
 function on_turn_start(s)
   local log, tiles = {}, {}
   if s.round == COLLAPSE_TURN and gate_hp(s, GATE.x, GATE.y) > 0 then
-    tiles[#tiles + 1] = { x = COLLAPSE_CELL.x, y = COLLAPSE_CELL.y, tile = "rubble" }
+    for _, c in ipairs(COLLAPSE_CELLS) do
+      tiles[#tiles + 1] = { x = c.x, y = c.y, tile = "rubble" }
+    end
     log[#log + 1] = "abbey.siege.wall_falls"
   end
   local inside = 0

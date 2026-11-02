@@ -102,7 +102,7 @@ cell = [96, 30]
 # The abbey on its hill, the Crown's watch on the south hill, and the alder village in the west.
 [[building]]
 id = "abbey"
-type = "church"
+type = "ruins"
 name = "abbey.building.abbey.name"
 description = "abbey.building.abbey.description"
 cell = [50, 40]
@@ -149,7 +149,9 @@ troops = [
 ]
 
 # The dead of the barrows: they walk their patrol until the story sends them at the abbey. Their
-# fight with the hero is the siege (scripts/siege.lua): a field battle on the abbey's wall.
+# fight with the hero is the siege (scripts/siege.lua): a field battle on the abbey's wall. Ghouls and
+# vampires have manevres 2, so they step onto the rubble of the breach; the deadmen and the death knight
+# (manevres 1) follow through it once it is open.
 [[army]]
 id = "dead_wave"
 name = "abbey.army.dead_wave.name"
@@ -158,8 +160,9 @@ faction = "enemy"
 model = "zombies"
 battle = "lua:siege"
 troops = [
-    { unit = "dt:deadman", level = 1, count = 4 },
-    { unit = "dt:ghoul", level = 1, count = 2 },
+    { unit = "dt:deadman", level = 1, count = 2 },
+    { unit = "dt:ghoul", level = 1, count = 4 },
+    { unit = "dt:vampire", level = 1, count = 2 },
     { unit = "dt:death_knight", level = 1, count = 1 },
 ]
 

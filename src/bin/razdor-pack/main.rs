@@ -116,6 +116,8 @@ struct Args {
     campaign: bool,
     auto_win: Option<u64>,
     set: Vec<String>,
+    meet: Option<String>,
+    squad: Option<String>,
     seed: Option<u32>,
 }
 
@@ -142,6 +144,8 @@ fn package_args(cmd: &str, args: &[String], allow_sim: bool) -> Result<Args, Str
             }
             "--choices" if allow_sim => out.choices = Some(it.next().ok_or("--choices needs first, random or dialog=choice,…")?.clone()),
             "--set" if allow_sim => out.set.push(it.next().ok_or("--set needs var=value")?.clone()),
+            "--meet" if allow_sim => out.meet = Some(it.next().ok_or("--meet needs map:army[@x,y]")?.clone()),
+            "--squad" if allow_sim => out.squad = Some(it.next().ok_or("--squad needs alias=count,…")?.clone()),
             flag if flag.starts_with('-') => return Err(format!("unknown option `{flag}` for {cmd}")),
             p if out.path.is_none() => out.path = Some(PathBuf::from(p)),
             _ => return Err(format!("{cmd} takes one folder or .rzpack file")),
@@ -257,6 +261,7 @@ fn sim_campaign_cmd(package: &Package, a: &Args) -> Result<u8, String> {
         auto_win_after: a.auto_win,
         preset,
         save_on_revisit: false,
+        meet: meet_of(&a)?,
     };
     let run = pack::sim::sim_campaign(package, &install, &opts).map_err(|r| r.to_text())?;
     if a.json {
@@ -405,4 +410,27 @@ fn write(path: &Path, text: &str) -> Result<(), String> {
         std::fs::create_dir_all(parent).map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
     }
     std::fs::write(path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))
+}
+
+/// `--meet <map>:<army>[@x,y]` with `--squad <alias>=<n>,…`: the developer switch of the campaign
+/// (`pack::sim::Meet`). Without `--meet`, `--squad` is an error.
+fn meet_of(a: &Args) -> Result<Option<pack::sim::Meet>, String> {
+    let Some(spec) = a.meet.as_deref() else {
+        return if a.squad.is_some() { Err("--squad needs --meet".into()) } else { Ok(None) };
+    };
+    let (map, rest) = spec.split_once(':').ok_or("--meet takes map:army[@x,y]")?;
+    let (army, at) = match rest.split_once('@') {
+        Some((army, cell)) => {
+            let (x, y) = cell.split_once(',').ok_or("--meet: the building's cell is x,y")?;
+            (army, Some((x.trim().parse().map_err(|_| "--meet: x")?, y.trim().parse().map_err(|_| "--meet: y")?)))
+        }
+        None => (rest, None),
+    };
+    let army = army.parse().map_err(|_| format!("--meet: the army is its index in the map's list, not {army}"))?;
+    let mut squad = Vec::new();
+    for part in a.squad.as_deref().unwrap_or("").split(',').filter(|p| !p.trim().is_empty()) {
+        let (alias, n) = part.split_once('=').ok_or("--squad takes alias=count,…")?;
+        squad.push((alias.trim().to_string(), n.trim().parse().map_err(|_| format!("--squad {part}: a count"))?));
+    }
+    Ok(Some(pack::sim::Meet { map: map.to_string(), army, at, squad }))
 }
