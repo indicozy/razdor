@@ -54,6 +54,7 @@ pub mod typography;
 pub mod unit_drag;
 pub mod unit_sheet;
 pub mod update_view;
+pub mod view25;
 #[cfg(target_os = "android")]
 pub mod android;
 #[cfg(target_os = "ios")]

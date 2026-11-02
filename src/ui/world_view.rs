@@ -35,7 +35,10 @@ use super::minimap;
 use super::saves::{self, Back, LoadView, SaveView};
 use super::story;
 use super::widgets::*;
+use super::view25::{self, TiltCamera};
 use super::Screen;
+use macroquad::camera::{set_camera, set_default_camera};
+use macroquad::window::get_internal_gl;
 
 /// Screen pixels per world unit (one cell width) at zoom 1 on the original's 1024×768
 /// screen: its 32 px cells.
@@ -330,7 +333,7 @@ enum GrabStep {
 impl Grab {
     /// The press with the pointer at `at` and the button `down` or not, at `scale` screen
     /// pixels per world unit.
-    fn step(&mut self, at: Vec2, down: bool, scale: f32) -> GrabStep {
+    fn step(&mut self, at: Vec2, down: bool, scale: Vec2) -> GrabStep {
         if !down {
             return if self.moved { GrabStep::Dropped } else { GrabStep::Click };
         }
@@ -359,7 +362,7 @@ fn grab_map(game: &Game, view: &mut MapView, cam: &Camera, off_map: bool) -> boo
         return false;
     };
     let down = is_mouse_button_down(MouseButton::Right) && !input_blocked();
-    match grab.step(m, down, cam.scale) {
+    match grab.step(m, down, cam.screen_scale()) {
         GrabStep::Held => view.grab = Some(grab),
         GrabStep::Drag(at) => {
             // The drag is Razdor's: the system's hand, not one of the original's pointers.
@@ -914,6 +917,119 @@ pub(super) fn faction_color(faction: u8) -> Color {
     }
 }
 
+/// The 2.5D view (`view25`): the setting (`audio::Settings::map_tilt`, pushed by
+/// [`set_tilt_view`]) and the tilt in degrees (PageUp and PageDown change it).
+static TILT_VIEW: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The tilt's bits; NaN until it is set (then `RAZDOR_VIEW_PITCH`, or the default, starts it).
+static TILT_PITCH: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x7fc0_0000);
+/// Degrees per PageUp or PageDown press.
+const TILT_STEP: f32 = 5.0;
+/// The sky above the ground in the 2.5D view (the part of the view with no map).
+const SKY: Color = Color::new(0.06, 0.08, 0.11, 1.0);
+
+/// Whether the world map is drawn in the 2.5D view: the setting, unless `RAZDOR_VIEW` says
+/// `25d` (on) or `flat` (off), which the debug snapshots use.
+pub fn tilt_view() -> bool {
+    static ENV: std::sync::OnceLock<Option<bool>> = std::sync::OnceLock::new();
+    let env = *ENV.get_or_init(|| match std::env::var("RAZDOR_VIEW").ok().as_deref() {
+        Some("25d") => Some(true),
+        Some("flat") => Some(false),
+        _ => None,
+    });
+    env.unwrap_or_else(|| TILT_VIEW.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// Puts the 2.5D view on or off (from the settings, at once).
+pub fn set_tilt_view(on: bool) {
+    TILT_VIEW.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The tilt in degrees: the start's (`RAZDOR_VIEW_PITCH`, else the default) until PageUp or
+/// PageDown sets it.
+fn tilt_pitch() -> f32 {
+    let deg = f32::from_bits(TILT_PITCH.load(std::sync::atomic::Ordering::Relaxed));
+    if deg.is_nan() {
+        return std::env::var("RAZDOR_VIEW_PITCH").ok().and_then(|v| v.parse().ok()).unwrap_or(view25::PITCH_DEFAULT).clamp(view25::PITCH_MIN, view25::PITCH_MAX);
+    }
+    deg
+}
+
+fn set_tilt_pitch(deg: f32) {
+    TILT_PITCH.store(deg.clamp(view25::PITCH_MIN, view25::PITCH_MAX).to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// A 3D view for `set_camera`: depth off (the map is painted back to front, as the flat view
+/// is), no viewport (not every backend has one), the matrix of [`view25::window_matrix`].
+struct View3d(Mat4);
+
+impl macroquad::camera::Camera for View3d {
+    fn matrix(&self) -> Mat4 {
+        self.0
+    }
+    fn depth_enabled(&self) -> bool {
+        false
+    }
+    fn render_pass(&self) -> Option<RenderPass> {
+        None
+    }
+    fn viewport(&self) -> Option<(i32, i32, i32, i32)> {
+        None
+    }
+}
+
+/// Runs `f` on the 2D space of `cam`. A flat camera's is its own; a tilted one's is its cull
+/// footprint ([`Camera::tilted_space`]), drawn with the 3D view set, where [`ground`] and
+/// [`standing`] place each pass. The 2D camera is back after.
+fn in_view(cam: &Camera, f: impl FnOnce(&Camera)) {
+    let Some(tilt) = cam.tilt else { return f(cam) };
+    let (w, h) = (screen_width(), screen_height());
+    set_camera(&View3d(view25::window_matrix(cam.view, w, h) * tilt.cam.view_proj(cam.view)));
+    f(&cam.tilted_space());
+    set_default_camera();
+}
+
+/// Draws the ground pass: under a tilted camera, the 2D space laid flat on the ground
+/// ([`view25::ground_model`]); under a flat one, as drawn.
+fn ground<R>(cam: &Camera, draw: impl FnOnce() -> R) -> R {
+    if cam.tilt.is_none() {
+        return draw();
+    }
+    push_model(view25::ground_model(cam.origin, cam.scale));
+    let r = draw();
+    pop_model();
+    r
+}
+
+/// Draws a standing sprite whose foot is at `foot` (a point of the 2D space) as a billboard
+/// ([`view25::billboard_model`]); under a flat camera, as drawn.
+fn standing<R>(cam: &Camera, foot: Vec2, draw: impl FnOnce() -> R) -> R {
+    let Some(tilt) = cam.tilt else { return draw() };
+    push_model(view25::billboard_model(cam.origin, foot, cam.scale, tilt.cam.pitch_deg));
+    let r = draw();
+    pop_model();
+    r
+}
+
+fn push_model(m: Mat4) {
+    // SAFETY: called on the main thread while macroquad runs, as every draw.
+    unsafe { get_internal_gl() }.quad_gl.push_model_matrix(m);
+}
+
+fn pop_model() {
+    // SAFETY: as `push_model`.
+    unsafe { get_internal_gl() }.quad_gl.pop_model_matrix();
+}
+
+/// A camera's 2.5D view: the tilted camera, the ground the view's frame shows (`plan`, in world
+/// units: the minimap's rectangle) and the ground the drawing culls to (`cull`: the frame and
+/// the strip under the bar).
+#[derive(Clone, Copy)]
+struct Tilt {
+    cam: TiltCamera,
+    plan: Rect,
+    cull: Rect,
+}
+
 struct Camera {
     /// World pixel (at this zoom) at the top-left of the map view.
     origin: Vec2,
@@ -925,6 +1041,10 @@ struct Camera {
     /// Screen pixels per world unit.
     scale: f32,
     grid: Grid,
+    /// The 2.5D view (`tilt_view`), or None for the flat view. The fields above are the 2D space
+    /// the drawing works in ([`Camera::tilted_space`]); [`Camera::to_screen`] is that space, and
+    /// [`Camera::screen_at`] the window's.
+    tilt: Option<Tilt>,
 }
 
 impl Camera {
@@ -948,13 +1068,51 @@ impl Camera {
         origin.x = origin.x.clamp(0.0, (world.x - view.w).max(0.0));
         origin.y = origin.y.clamp(0.0, (world.y - view.h).max(0.0));
         let draw = Rect::new(view.x, view.y, view.w, view.h + bar_h());
-        Camera { origin: origin - pad, view, draw, scale, grid: map.grid }
+        let mut cam = Camera { origin: origin - pad, view, draw, scale, grid: map.grid, tilt: None };
+        // A view with no height (a minimised window) has no perspective: it stays flat.
+        if tilt_view() && view.w >= 1.0 && view.h >= 1.0 {
+            let tilt = TiltCamera::new(Vec2::from(cam.centre()), scale, view, tilt_pitch());
+            cam.tilt = Some(Tilt { cam: tilt, plan: tilt.ground_footprint(view, view), cull: tilt.ground_footprint(view, draw) });
+        }
+        cam
     }
 
     /// The world point at the middle of the view (where the camera really looks, the map's
     /// border taken into account).
     fn centre(&self) -> (f32, f32) {
         ((self.origin + vec2(self.view.w, self.view.h) / 2.0) / self.scale).into()
+    }
+
+    /// The 2D space of a tilted camera: the cull footprint's ground in world pixels, from its
+    /// corner, culled and drawn by the flat functions as the view is ([`in_view`]).
+    fn tilted_space(&self) -> Camera {
+        let cull = self.tilt.map_or(self.draw, |t| t.cull);
+        let size = vec2(cull.w, cull.h) * self.scale;
+        let space = Rect::new(0.0, 0.0, size.x, size.y);
+        Camera { origin: vec2(cull.x, cull.y) * self.scale, view: space, draw: space, scale: self.scale, grid: self.grid, tilt: self.tilt }
+    }
+
+    /// Where a world point is in the window: the projection of the tilted view, else its flat
+    /// position ([`Camera::to_screen`]). For what is drawn on top of the map, not in its 2D space.
+    fn screen_at(&self, p: (f32, f32)) -> Vec2 {
+        match self.tilt {
+            None => self.to_screen(p),
+            Some(t) => t.cam.project(vec3(p.0, 0.0, p.1), self.view).unwrap_or(vec2(-1e5, -1e5)),
+        }
+    }
+
+    /// Where a cell's centre is in the window ([`Camera::screen_at`]).
+    fn screen_cell(&self, t: Tile) -> Vec2 {
+        self.screen_at(self.grid.center(t))
+    }
+
+    /// Pixels per world unit along the window's x and y: the flat scale, and tilted, the rows'
+    /// foreshortened one (a drag's pixels to world units).
+    fn screen_scale(&self) -> Vec2 {
+        match self.tilt {
+            None => Vec2::splat(self.scale),
+            Some(t) => vec2(self.scale, self.scale * t.cam.pitch_deg.to_radians().sin()),
+        }
     }
 
     /// Screen position of a world-space point.
@@ -973,6 +1131,9 @@ impl Camera {
 
     /// The part of the world in view, in world units.
     fn world_rect(&self) -> Rect {
+        if let Some(t) = self.tilt {
+            return t.plan;
+        }
         let o = self.origin / self.scale;
         Rect::new(o.x, o.y, self.view.w / self.scale, self.view.h / self.scale)
     }
@@ -1000,6 +1161,10 @@ impl Camera {
     /// nothing drawn past its edges shows (a map smaller than the window, the overhang of
     /// staggered rows).
     fn draw_fog(&self, game: &Game) {
+        in_view(self, |c| ground(c, || c.draw_fog_flat(game)));
+    }
+
+    fn draw_fog_flat(&self, game: &Game) {
         let (tl, br) = self.fog_corners(game);
         minimap::draw_fog(&game.fog, &game.unshown_cells(), tl, br);
         let v = self.draw;
@@ -1018,6 +1183,10 @@ impl Camera {
     /// Razdor's mark of a place an event shows that was explored already (nothing opens
     /// there): a pulsing red circle of the radius shown, once the camera has arrived.
     fn draw_known_place(&self, s: &Showing, now: f64) {
+        in_view(self, |c| ground(c, || c.draw_known_place_flat(s, now)));
+    }
+
+    fn draw_known_place_flat(&self, s: &Showing, now: f64) {
         let Some((t0, _)) = s.started else { return };
         if s.mask.is_some() {
             return;
@@ -1048,6 +1217,11 @@ impl Camera {
     }
 
     fn draw_showing<'s>(&self, game: &Game, shows: impl IntoIterator<Item = &'s Showing>, now: f64) {
+        let shows: Vec<&'s Showing> = shows.into_iter().collect();
+        in_view(self, |c| ground(c, || c.draw_showing_flat(game, shows, now)));
+    }
+
+    fn draw_showing_flat(&self, game: &Game, shows: Vec<&Showing>, now: f64) {
         let (tl, br) = self.fog_corners(game);
         for s in shows {
             let Some(mask) = &s.mask else { continue };
@@ -1071,8 +1245,12 @@ impl Camera {
     }
 
     fn tile_under_mouse(&self) -> Option<Tile> {
-        let m = Vec2::from(crate::ui::widgets::pointer());
-        if !self.over_map(m) {
+        if !self.over_map(Vec2::from(crate::ui::widgets::pointer())) {
+            return None;
+        }
+        let m = map_pointer(self);
+        // Tilted, a pointer over the sky sees no ground.
+        if self.tilt.is_some() && !m.is_finite() {
             return None;
         }
         let w = (m - vec2(self.draw.x, self.draw.y) + self.origin) / self.scale;
@@ -1088,6 +1266,17 @@ impl Camera {
         let c1 = c0 + (self.draw.w / self.scale) as i32 + 3;
         let r1 = r0 + (self.draw.h / (self.scale * rh)) as i32 + 3;
         ((c0.max(0), c1.min(map.w)), (r0.max(0), r1.min(map.h)))
+    }
+}
+
+/// The map's pointer in the camera's 2D space ([`Camera::to_screen`]). On the flat view it is the
+/// pointer itself. On the 2.5D view it is the point of the ground under the pointer, NaN where
+/// the pointer sees no ground (above the horizon).
+fn map_pointer(cam: &Camera) -> Vec2 {
+    let m = Vec2::from(crate::ui::widgets::pointer());
+    match cam.tilt {
+        None => m,
+        Some(t) => t.cam.pick(m, cam.view).map_or(Vec2::NAN, |g| cam.to_screen((g.x, g.y))),
     }
 }
 
@@ -1268,6 +1457,20 @@ fn object_sprite_origin(o: &Decoration, w: f32, h: f32, cam: &Camera) -> Vec2 {
         _ => (0.0, 0.0),
     };
     corner + vec2(dx - w - 0.5, dy - h - 0.5) * (cam.scale / PX)
+}
+
+/// The foot of a map object's sprite in the 2D space: the bottom-right corner of its cell, where
+/// [`object_sprite_origin`] puts the sprite's bottom edge.
+fn object_foot(o: &Decoration, cam: &Camera) -> Vec2 {
+    let (x, y) = cam.grid.center(o.tile);
+    cam.to_screen((x + 0.5, y + cam.grid.row_height() / 2.0))
+}
+
+/// The foot of a building's sprite in the 2D space: the bottom-right corner of its anchor cell,
+/// where [`building_sprite_origin`] puts the sprite's bottom edge.
+fn building_foot(l: &Location, cam: &Camera) -> Vec2 {
+    let (x, y) = cam.grid.center(l.anchor);
+    cam.to_screen((x + 0.5, y + cam.grid.row_height() / 2.0))
 }
 
 /// The part `src` of `texture` drawn at `at`, `size` big, its top edge moved `lean` px right.
@@ -1514,7 +1717,9 @@ fn figure_under(pointer: Vec2, figures: &[(Tile, Rect, Vec2)]) -> Option<Tile> {
 /// world.md §1.3, 0x4cc583), and on PC the hover pointer shows the army under the mouse.
 fn figure_aim(game: &Game, art: Option<&DtArt>, cam: &Camera, t: Tile, pointer: Vec2) -> Tile {
     let map = &game.world.map;
-    if crate::ui::display::dp_px().is_none() || game.world.armies.iter().any(|a| a.tile(map) == t) {
+    // Tilted (2.5D), the figures' sprite rectangles are not where they are drawn: the cell under
+    // the pointer decides (a simplification of this step).
+    if cam.tilt.is_some() || crate::ui::display::dp_px().is_none() || game.world.armies.iter().any(|a| a.tile(map) == t) {
         return t;
     }
     let figures: Vec<(Tile, Rect, Vec2)> = game
@@ -1657,10 +1862,19 @@ fn first_footprint_cell(l: &razdor::rules::world::Location) -> Tile {
     l.cells().min_by_key(|&(x, y)| (y, x)).unwrap_or(l.anchor)
 }
 
+/// The world map: the flat view as it always was, or the 2.5D view (`tilt_view`), where the
+/// same passes are laid on the ground and stand up as billboards.
 fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<MapHoverLook>) {
+    if cam.tilt.is_some() {
+        draw_rectangle(cam.draw.x, cam.draw.y, cam.draw.w, cam.draw.h, SKY);
+    }
+    in_view(cam, |c| draw_world_in(game, assets, c, preview, spell, hover));
+}
+
+fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile]>, spell: Option<&SpellShow>, hover: Option<MapHoverLook>) {
     let art = assets.dt.as_ref();
     stamp_idle(game, clock_ms());
-    frame_probe::time(Stage::Terrain, || draw_terrain(game, art, cam));
+    frame_probe::time(Stage::Terrain, || ground(cam, || draw_terrain(game, art, cam)));
     let map = &game.world.map;
     let ((c0, c1), (r0, r1)) = cam.visible(map);
     // Sprites stand on their cell and reach up to ~8 cells above it.
@@ -1676,7 +1890,7 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
     for o in map.objects_in_rows(r0 - 1, r1 + below) {
         if o.tile.0 >= c0 - side && o.tile.0 < c1 + side && razdor::rules::map::object_cells(o).any(|t| fog.explored_near(t, minimap::FEATHER)) {
             if (object_class::HILLS..=object_class::ROCKY_HILLS).contains(&o.class) {
-                draw_object(o, art, cam);
+                standing(cam, object_foot(o, cam), || draw_object(o, art, cam));
             } else {
                 items.push((cell_pass_key(o.tile, object_layer(o.class)), Drawable::Object(*o)));
             }
@@ -1685,31 +1899,33 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
     // A spell's layer 1 lies on the ground over the hills, under the marks and every
     // standing sprite (0x4c935b: the cell loop before the marks' 0x4c9459).
     if let Some(s) = spell {
-        draw_spell_layer(s, 1, cam);
+        ground(cam, || draw_spell_layer(s, 1, cam));
     }
     // The marks under the hero and every army (cell byte +0xA, 0x48eeb0: the hero's kind 1,
     // an army's 3) lie on the ground in the same pass, under every tree, building and
     // figure (0x4c9459), so the figures' shadows fall over them. The hover's ring takes the
     // place of the mark of the cell it is on (one mark byte a cell, 0x48eeb0).
     let ring = hover.and_then(|h| Some((h.cell, h.ring?)));
-    for a in game.world.armies.iter().filter(|a| fog.explored(a.tile(map)) && !a.sails()) {
-        if ring.is_none_or(|(t, _)| a.tile(map) != t) {
-            draw_mark(cam, game.army_display_pos(a), "Selection-1", MARK_ARMY);
+    ground(cam, || {
+        for a in game.world.armies.iter().filter(|a| fog.explored(a.tile(map)) && !a.sails()) {
+            if ring.is_none_or(|(t, _)| a.tile(map) != t) {
+                draw_mark(cam, game.army_display_pos(a), "Selection-1", MARK_ARMY);
+            }
         }
-    }
-    if let Some((t, (texture, color))) = ring {
-        draw_mark(cam, map.center(t), texture, color);
-    }
-    if !game.aboard() {
-        draw_mark(cam, game.display_pos(), "Selection-1", MARK_HERO);
-    }
-    // The route being walked, or the one a first click shows, lies on the ground under the
-    // figures (the original's second pass, over the hills).
-    if game.moving() {
-        draw_route(game, &game.path, cam);
-    } else if let Some(path) = preview {
-        draw_route(game, path, cam);
-    }
+        if let Some((t, (texture, color))) = ring {
+            draw_mark(cam, map.center(t), texture, color);
+        }
+        if !game.aboard() {
+            draw_mark(cam, game.display_pos(), "Selection-1", MARK_HERO);
+        }
+        // The route being walked, or the one a first click shows, lies on the ground under the
+        // figures (the original's second pass, over the hills).
+        if game.moving() {
+            draw_route(game, &game.path, cam);
+        } else if let Some(path) = preview {
+            draw_route(game, path, cam);
+        }
+    });
     // The standing scenery and the buildings share one pass over the cells, row by row and
     // left to right (0x4c8864's cell loop): each cell draws its massif object (+0), then its
     // plant (+2), then the building whose footprint covers it (+0xC) if that building is not
@@ -1750,21 +1966,35 @@ fn draw_world(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[Tile
     items.sort_by_key(|a| a.0);
     for d in items.iter().map(|(_, d)| d) {
         match d {
-            Drawable::Object(o) => draw_object(o, art, cam),
-            Drawable::Building(i) => draw_building(&game.world.locations[*i], art, cam, hover.is_some_and(|h| h.building == Some(*i))),
-            Drawable::Army(i) => draw_army(game, &game.world.armies[*i], assets, art, cam),
+            Drawable::Object(o) => standing(cam, object_foot(o, cam), || draw_object(o, art, cam)),
+            Drawable::Building(i) => {
+                let l = &game.world.locations[*i];
+                let outlined = hover.is_some_and(|h| h.building == Some(*i));
+                if l.kind.is_bridge() {
+                    // A bridge lies on the ground (Razdor's), so it is drawn in the ground pass.
+                    ground(cam, || draw_building(l, art, cam, outlined));
+                } else {
+                    standing(cam, building_foot(l, cam), || draw_building(l, art, cam, outlined));
+                }
+            }
+            Drawable::Army(i) => {
+                let a = &game.world.armies[*i];
+                standing(cam, cam.to_screen(game.army_display_pos(a)), || draw_army(game, a, assets, art, cam));
+            }
             Drawable::Ship => {
                 if let Some(ship) = game.ship {
                     let at = map.center(ship.tile);
-                    if !draw_figure(art, ship_stem(razdor::rules::ships::kind::HERO), at, None, 0, cam, Stand::Afloat) {
-                        draw_ship(cam, at, HERO_SAIL);
-                    }
+                    standing(cam, cam.to_screen(at), || {
+                        if !draw_figure(art, ship_stem(razdor::rules::ships::kind::HERO), at, None, 0, cam, Stand::Afloat) {
+                            draw_ship(cam, at, HERO_SAIL);
+                        }
+                    });
                 }
             }
-            Drawable::Hero => draw_hero(game, assets, art, cam),
+            Drawable::Hero => standing(cam, cam.to_screen(game.display_pos()), || draw_hero(game, assets, art, cam)),
             Drawable::Spell(n) => {
                 if let Some(s) = spell {
-                    draw_spell_layer(s, *n, cam);
+                    standing(cam, cam.to_screen(s.at), || draw_spell_layer(s, *n, cam));
                 }
             }
         }
@@ -2237,7 +2467,7 @@ fn hover_tooltip(game: &Game, cam: &Camera) -> Option<Tooltip> {
         return None;
     }
     let near = 22.0 * (cam.scale / PX).max(0.6);
-    let over = |pos: (f32, f32)| (cam.to_screen(pos) - vec2(0.0, 12.0 * cam.scale / PX) - m).length() < near;
+    let over = |pos: (f32, f32)| (cam.screen_at(pos) - vec2(0.0, 12.0 * cam.scale / PX) - m).length() < near;
     // Occupant code 1, the hero, is army 0 to the tooltip (0x4cbf20 → 0x4cc274).
     if over(game.display_pos()) {
         return Some(hero_tooltip(game));
@@ -2260,7 +2490,7 @@ fn hover_tooltip(game: &Game, cam: &Camera) -> Option<Tooltip> {
 pub fn army_pointer(game: &Game, i: usize) -> Option<(f32, f32)> {
     let a = game.world.armies.get(i)?;
     let cam = Camera::looking_at(game, 1.0, game.display_pos());
-    Some((cam.to_screen(game.army_display_pos(a)) - vec2(0.0, 12.0 * cam.scale / PX)).into())
+    Some((cam.screen_at(game.army_display_pos(a)) - vec2(0.0, 12.0 * cam.scale / PX)).into())
 }
 
 /// The original's tooltip of the hero's own army (0x4ca9f0 with army 0): "Отряд героя",
@@ -2805,6 +3035,15 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
         }
     }
     view.zoom = zoom_at(home, view.zoom_steps, locked, lo);
+    // PageUp and PageDown tilt the 2.5D view, 5° a press (the flat view ignores them).
+    if tilt_view() && dialogs.is_empty() {
+        if key(KeyCode::PageUp) {
+            set_tilt_pitch(tilt_pitch() - TILT_STEP);
+        }
+        if key(KeyCode::PageDown) {
+            set_tilt_pitch(tilt_pitch() + TILT_STEP);
+        }
+    }
 
     // M toggles the minimap; F3 Razdor's debug overlay (both as the player has bound them).
     if key(keymap::key(Action::Minimap)) {
@@ -2909,7 +3148,7 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
         if let Some(screen) = hovered.and_then(|t| reopen_here(game, t, message, dialogs, session)) {
             // A click on the building the party stands in opens it again.
             reopened = screen;
-        } else if let Some(target) = hovered.map(|t| figure_aim(game, assets.dt.as_ref(), &cam, t, Vec2::from(pointer()))).filter(|&t| game.can_target(t)) {
+        } else if let Some(target) = hovered.map(|t| figure_aim(game, assets.dt.as_ref(), &cam, t, map_pointer(&cam))).filter(|&t| game.can_target(t)) {
             // Only a target cell counts (explored, open on his map, or his ship): a click
             // anywhere else does nothing, as in the original. The first click shows the
             // route; a second one on the same spot sets off (0x4cc99f).
@@ -3073,14 +3312,14 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
     // A spell's effect over the army it landed on.
     if let Some(SpellFx::Effect { army, art, started: Some(t0) }) = view.spell_fx.front() {
         if let Some(at) = army_pos(game, *army) {
-            let c = cam.to_screen(at);
+            let c = cam.screen_at(at);
             let t = ((now - t0) / SPELL_FX_SECS) as f32;
             super::chrome::effect(art, c, cam.cell_size().x * 3.0, t, WHITE);
         }
     }
     // The shown route's travel time, at its end.
     if let Some(end) = view.preview.as_ref().and_then(|p| p.1.last().map(|&e| (e, game.travel_minutes(&p.1)))) {
-        let c = cam.cell_centre(end.0);
+        let c = cam.screen_cell(end.0);
         let label = duration_label(end.1 as f64);
         let size = (15.0 * super::chrome::k()).round();
         super::chrome::shadow_centered(&label, c.x, c.y - 14.0 * cam.scale / PX, size, ACCENT);
@@ -3114,7 +3353,8 @@ fn map_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &mut
         }
     }
 
-    if view.debug {
+    // The F3 overlay is drawn in the flat view only: its labels are placed on the flat map.
+    if view.debug && cam.tilt.is_none() {
         draw_debug(game, &cam);
     }
     let (bar, toggle_map, timed) = bottom_bar(game, message, view.minimap, time_buttons && !game.waiting());
@@ -3209,7 +3449,7 @@ fn draw_clash_marks(view: &mut MapView, cam: &Camera, now: f64) {
         let Some(tex) = super::chrome::animation("Windows/Swords.ugs").and_then(|f| f.get(frame % f.len().max(1)).cloned()) else {
             return;
         };
-        let c = cam.cell_centre(*tile);
+        let c = cam.screen_cell(*tile);
         let s = cam.cell_size().x * 1.5;
         draw_texture_ex(&tex, c.x - s / 2.0, c.y - s / 2.0, Color { a, ..WHITE }, DrawTextureParams { dest_size: Some(vec2(s, s)), ..Default::default() });
     }
@@ -3978,14 +4218,14 @@ mod tests {
     fn the_right_button_drags_the_map_or_clicks() {
         // Held still: the tooltip; let go: a click (Razdor's stop).
         let mut g = Grab { start: vec2(100.0, 100.0), from: vec2(10.0, 10.0), moved: false };
-        assert_eq!(g.step(vec2(102.0, 101.0), true, 32.0), GrabStep::Held);
-        assert_eq!(g.step(vec2(102.0, 101.0), false, 32.0), GrabStep::Click);
+        assert_eq!(g.step(vec2(102.0, 101.0), true, Vec2::splat(32.0)), GrabStep::Held);
+        assert_eq!(g.step(vec2(102.0, 101.0), false, Vec2::splat(32.0)), GrabStep::Click);
         // Moved past the threshold it drags: the ground follows the mouse, the camera goes
         // the other way, and it stays a drag back at the start.
         let mut g = Grab { start: vec2(100.0, 100.0), from: vec2(10.0, 10.0), moved: false };
-        assert_eq!(g.step(vec2(164.0, 100.0), true, 32.0), GrabStep::Drag(vec2(8.0, 10.0)));
-        assert_eq!(g.step(vec2(100.0, 100.0), true, 32.0), GrabStep::Drag(vec2(10.0, 10.0)));
-        assert_eq!(g.step(vec2(100.0, 100.0), false, 32.0), GrabStep::Dropped, "a drag is no click");
+        assert_eq!(g.step(vec2(164.0, 100.0), true, Vec2::splat(32.0)), GrabStep::Drag(vec2(8.0, 10.0)));
+        assert_eq!(g.step(vec2(100.0, 100.0), true, Vec2::splat(32.0)), GrabStep::Drag(vec2(10.0, 10.0)));
+        assert_eq!(g.step(vec2(100.0, 100.0), false, Vec2::splat(32.0)), GrabStep::Dropped, "a drag is no click");
     }
 
     /// A minimized window (1 pixel high on Windows) left the map view −39 high, and the

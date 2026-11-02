@@ -1042,6 +1042,7 @@ pub fn impossible(audio: &super::audio::Settings) -> bool {
 /// Puts the settings window's choices where the interface reads the install's `[Options]`
 /// (the original writes them back into its ini): the scroll speed, the autosave, the hints.
 pub fn apply_options(audio: &super::audio::Settings) {
+    super::world_view::set_tilt_view(audio.map_tilt);
     chrome::set_option_override("ScrollSpeed", audio.scroll_speed.map(|v| (v.round() as i32).to_string()));
     chrome::set_option_override("OptValue8", audio.autosave.map(|on| if on { "1" } else { "0" }.to_string()));
     set_hints(!hints_off(audio));

@@ -831,6 +831,8 @@ font and language). Razdor's map options «Битвы армий на карте
 `world_view::map_frame` (`draw_clash_marks`, `clash_notice`, from `Game::take_clashes`); the
 army list is `minimap::army_list`, drawn under the minimap window and clicked like its own
 centring (`view.look`); it takes the room above the bar and scrolls with the wheel.
+The 2.5D world map (`Settings::map_tilt`, off by default, no row in the windows yet) is pushed by
+`main_menu::apply_options` into `world_view::set_tilt_view`; see the world map in `assets-and-drawing.md`.
 Two options are read at start only, as the original's: «no music and
 sounds» (`Audio::new`) and «impossible difficulty» (the content's difficulty factor in
 `App::new`).

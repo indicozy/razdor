@@ -217,6 +217,24 @@ with its offset `AiMind::idle_offset`. The offsets come from the loads
 also counts `idle_restarts`); `stamp_idle` stamps each army at the first frame drawn and again when
 its restart count changes, and `MapView::forget_shows` drops the stamps of the last game.
 
+The 2.5D view (step 1 of the v2 design; `src/ui/view25.rs`, off by default: `Settings::map_tilt`,
+or `RAZDOR_VIEW=25d` for snapshots; `RAZDOR_VIEW_PITCH` starts the tilt, PageUp and PageDown change
+it in 5° steps within 35–75°). `looking_in` gives the flat camera a `Tilt`: a `TiltCamera` fitted to
+the view, so the cell under the target is as wide as a flat cell, and the ground the view shows
+(`plan`, the minimap's rectangle) and the ground the drawing culls to (`cull`). Nothing in the
+drawing changes: `draw_world` runs its passes in the flat camera's 2D space, the cull footprint
+from `Camera::tilted_space` (`in_view` sets the 3D view, `View3d`: depth off, no viewport). `ground`
+lays that space flat on the ground for the terrain, the hills' pass and marks, the route, spell
+layer 1, bridges, the fog and the reveal; `standing` makes each sprite a billboard through its foot
+(`view25::billboard_model`: the plane faces the eye, so a sprite keeps its size at the target, where
+a vertical one would shrink with the pitch). Pointer tests use `map_pointer` (the ground under the
+pointer, in the 2D space; the drag scales the screen delta by the rows' foreshortening instead). What
+stands on the window (the tooltip, battle marks, effects, the travel time) is placed with
+`Camera::screen_at`. Simplifications of this step: a figure is picked by its cell (not its sprite),
+the F3 overlay is off in 2.5D, and the setting has no row in the settings windows yet. With the
+setting off, `in_view`, `ground` and `standing` only call their closures, so the flat view is the
+same code path.
+
 ## Sound and music
 
 - `src/dt/sound.rs`: `SoundTable::from_ini` (`_Sounds.ini`: `[Backgrounds]` music keys,
