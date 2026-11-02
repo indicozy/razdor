@@ -93,7 +93,10 @@ impl LuaField {
         lua.globals().get::<Table>("razdor").and_then(|r| r.set("vars", vars)).map_err(fail)?;
         let extra = extra(&lua).map_err(fail)?;
         let out: Option<Value> = self.rt.call(&self.path, func, (ctx, extra)).map_err(|e| e.to_string())?;
-        Ok(out.unwrap_or(Value::Nil))
+        let out = out.unwrap_or(Value::Nil);
+        // The result is read raw from here on: vet it first, before any read can run code.
+        vet(&out, 0).map_err(|m| format!("{}: {func} returned {m}", self.path))?;
+        Ok(out)
     }
 
     /// The table a hook returned, or `None` for nil; anything else is an error.
@@ -122,7 +125,7 @@ impl FieldScript for LuaField {
             }
             p.place.push((unit as usize, int_field(&e, "x", &self.path)?, int_field(&e, "y", &self.path)?));
         }
-        p.max_turns = match t.get::<Value>("max_turns").map_err(|e| e.to_string())? {
+        p.max_turns = match t.raw_get::<Value>("max_turns").map_err(|e| e.to_string())? {
             Value::Nil => None,
             _ => Some(int_field(&t, "max_turns", &self.path)?.max(1) as u32),
         };
@@ -204,7 +207,7 @@ impl FieldScript for LuaField {
             a.move_to = Some((int_field(&m, "x", &self.path)?, int_field(&m, "y", &self.path)?));
         }
         if let Some(at) = opt_table(&t, "attack", &self.path)? {
-            a.attack = Some(match (opt_table(&at, "gate", &self.path)?, at.get::<Value>("unit").map_err(|e| e.to_string())?) {
+            a.attack = Some(match (opt_table(&at, "gate", &self.path)?, at.raw_get::<Value>("unit").map_err(|e| e.to_string())?) {
                 (Some(g), _) => Target::Tile(int_field(&g, "x", &self.path)?, int_field(&g, "y", &self.path)?),
                 (None, Value::Nil) => return Err(format!("{}: ai_turn: attack needs a unit or a gate", self.path)),
                 (None, _) => {
@@ -243,6 +246,40 @@ pub fn check_battle_script(scripts: &Scripts, script: &str) -> Result<(), String
         Ok(())
     } else {
         Err(format!("{path} does not define {}", missing.join(" and ")))
+    }
+}
+
+/// Checks a value a hook returned before the battle reads it: no table may have a metatable (a
+/// `__index` or `__pairs` would run Lua outside the call's budget), every table is at most
+/// [`MAX_ENTRIES`] entries and [`MAX_DEPTH`] levels deep. Keys and values are read raw.
+const MAX_ENTRIES: usize = 4096;
+const MAX_DEPTH: usize = 4;
+
+fn vet(v: &Value, depth: usize) -> Result<(), String> {
+    let Value::Table(t) = v else { return Ok(()) };
+    if depth > MAX_DEPTH {
+        return Err(format!("a table nested deeper than {MAX_DEPTH} levels"));
+    }
+    if t.metatable().is_some() {
+        return Err("a table with a metatable, which is not allowed in a hook's result".into());
+    }
+    let mut seen = 0usize;
+    let mut problem: Option<String> = None;
+    let walked = t.for_each::<Value, Value>(|k, val| {
+        seen += 1;
+        if seen > MAX_ENTRIES {
+            problem = Some(format!("a table of more than {MAX_ENTRIES} entries"));
+        } else if let Err(m) = vet(&k, depth + 1).and_then(|_| vet(&val, depth + 1)) {
+            problem = Some(m);
+        }
+        if problem.is_some() {
+            return Err(mlua::Error::runtime("vet stop"));
+        }
+        Ok(())
+    });
+    match problem {
+        Some(m) => Err(m),
+        None => walked.map_err(|e| e.to_string()),
     }
 }
 
@@ -286,7 +323,7 @@ fn cell_of(v: &Value) -> mlua::Result<(i32, i32)> {
         return Err(mlua::Error::runtime(format!("a cell is {{x = n, y = n}}, not a {}", v.type_name())));
     };
     let get = |k: &str| -> mlua::Result<i32> {
-        whole(&t.get::<Value>(k)?).ok_or_else(|| mlua::Error::runtime(format!("a cell's {k} is not a whole number")))
+        whole(&t.raw_get::<Value>(k)?).ok_or_else(|| mlua::Error::runtime(format!("a cell's {k} is not a whole number")))
     };
     Ok((get("x")?, get("y")?))
 }
@@ -302,13 +339,13 @@ fn whole(v: &Value) -> Option<i32> {
 }
 
 fn int_field(t: &Table, key: &str, path: &str) -> Result<i32, String> {
-    let v = t.get::<Value>(key).map_err(|e| e.to_string())?;
+    let v = t.raw_get::<Value>(key).map_err(|e| e.to_string())?;
     whole(&v).ok_or_else(|| format!("{path}: `{key}` is not a whole number"))
 }
 
 /// The entries of a sequence field (nil: none).
 fn seq(t: &Table, key: &str) -> Result<Vec<Value>, String> {
-    match t.get::<Value>(key).map_err(|e| e.to_string())? {
+    match t.raw_get::<Value>(key).map_err(|e| e.to_string())? {
         Value::Nil => Ok(Vec::new()),
         Value::Table(list) => {
             let mut out = Vec::new();
@@ -322,7 +359,7 @@ fn seq(t: &Table, key: &str) -> Result<Vec<Value>, String> {
 }
 
 fn opt_table(t: &Table, key: &str, path: &str) -> Result<Option<Table>, String> {
-    match t.get::<Value>(key).map_err(|e| e.to_string())? {
+    match t.raw_get::<Value>(key).map_err(|e| e.to_string())? {
         Value::Nil => Ok(None),
         Value::Table(x) => Ok(Some(x)),
         other => Err(format!("{path}: `{key}` is a {}, not a table", other.type_name())),
@@ -333,7 +370,7 @@ fn opt_table(t: &Table, key: &str, path: &str) -> Result<Option<Table>, String> 
 fn tile_entry(v: &Value, path: &str) -> Result<(i32, i32, Tile), String> {
     let Value::Table(t) = v else { return Err(format!("{path}: a tile is {{x, y, tile}}, not a {}", v.type_name())) };
     let (x, y) = (int_field(t, "x", path)?, int_field(t, "y", path)?);
-    let name = match t.get::<Value>("tile").map_err(|e| e.to_string())? {
+    let name = match t.raw_get::<Value>("tile").map_err(|e| e.to_string())? {
         Value::String(s) => s.to_str().map_err(|e| e.to_string())?.to_string(),
         _ => return Err(format!("{path}: a tile needs its `tile` name")),
     };
@@ -374,9 +411,14 @@ fn cell_table(lua: &Lua, c: (i32, i32)) -> mlua::Result<Table> {
 
 /// The `vars` a hook returned, merged into the snapshot's (kept by the battle).
 fn take_vars(t: &Table, s: &mut Snapshot, path: &str) -> Result<(), String> {
-    let Value::Table(v) = t.get::<Value>("vars").map_err(|e| e.to_string())? else { return Ok(()) };
-    for pair in v.pairs::<Value, Value>() {
-        let (k, val) = pair.map_err(|e| e.to_string())?;
+    let Value::Table(v) = t.raw_get::<Value>("vars").map_err(|e| e.to_string())? else { return Ok(()) };
+    let mut found: Vec<(Value, Value)> = Vec::new();
+    v.for_each::<Value, Value>(|k, val| {
+        found.push((k, val));
+        Ok(())
+    })
+    .map_err(|e| e.to_string())?;
+    for (k, val) in found {
         let Value::String(k) = k else { return Err(format!("{path}: vars are named by strings")) };
         let json = match val {
             Value::Boolean(b) => serde_json::Value::Bool(b),

@@ -14,15 +14,6 @@ fn scripts(files: &[(&str, &str)]) -> Arc<BTreeMap<String, String>> {
     Arc::new(files.iter().map(|(name, text)| (format!("scripts/{name}.lua"), text.to_string())).collect())
 }
 
-/// A battle of the builtin units: `squad` (the hero first) against `enemies`.
-fn battle(squad: &[u32], enemies: &[u32]) -> FieldBattle {
-    let c = Arc::new(Content::builtin());
-    let s: Vec<Unit> = squad.iter().enumerate().map(|(i, &id)| Unit::new(&c, UnitId(id), Slot::new(Row::Front, i as u8))).collect();
-    let e: Vec<Unit> = enemies.iter().enumerate().map(|(i, &id)| Unit::new(&c, UnitId(id), Slot::new(Row::Front, i as u8))).collect();
-    let shadow = field::shadow(c, &s, &e);
-    FieldBattle::new(shadow, "", 1, &mut field::NoScript)
-}
-
 /// Opens `name` from `files` and starts its battle (`setup` runs in the constructor).
 fn play(files: &[(&str, &str)], name: &str, squad: &[u32], enemies: &[u32]) -> (FieldBattle, Box<dyn FieldScript>) {
     let host = Host::new(scripts(files));
@@ -212,4 +203,37 @@ fn a_unit_id_outside_the_battle_is_no_target() {
     fb.act(f, a, &mut *h).unwrap();
     assert!(fb.state.log.iter().any(|l| l.key == "field.no_target"));
     let _ = Action { move_to: None, attack: None };
+}
+
+#[test]
+fn a_returned_table_with_a_looping_metatable_is_rejected_at_once() {
+    // The metatable's __index would loop for ever if the battle read it; the result is refused first.
+    let src = "function ai_turn(s)\n  return setmetatable({}, { __index = function() while true do end end })\nend";
+    let (mut fb, mut h) = play(&[("loop", src)], "loop", &[1, 6], &[4, 6]);
+    assert_eq!(fb.play_auto(&mut *h), Some(Side::Defenders));
+    assert!(fb.state.script_error.as_deref().unwrap().contains("metatable"), "{:?}", fb.state.script_error);
+}
+
+#[test]
+fn a_nested_metatable_or_a_looping_pairs_is_rejected_too() {
+    let nested = "function ai_turn(s)\n  return { move = setmetatable({}, { __index = function() while true do end end }) }\nend";
+    let (mut fb, mut h) = play(&[("nested", nested)], "nested", &[1, 6], &[4, 6]);
+    assert_eq!(fb.play_auto(&mut *h), Some(Side::Defenders));
+    assert!(fb.state.script_error.as_deref().unwrap().contains("metatable"));
+
+    let pairs = "function setup(s)\n  return { vars = setmetatable({}, { __pairs = function() while true do end end }) }\nend";
+    let (fb, _h) = play(&[("pairs", pairs)], "pairs", &[1], &[4]);
+    assert!(fb.state.script_error.as_deref().unwrap().contains("metatable"));
+}
+
+#[test]
+fn a_result_too_deep_or_too_long_is_rejected() {
+    let deep = "function ai_turn(s)\n  return { move = { x = { y = { z = { w = { v = 1 } } } } } }\nend";
+    let (mut fb, mut h) = play(&[("deep", deep)], "deep", &[1, 6], &[4, 6]);
+    assert_eq!(fb.play_auto(&mut *h), Some(Side::Defenders));
+    assert!(fb.state.script_error.as_deref().unwrap().contains("nested"));
+
+    let long = "function setup(s)\n  local t = {}\n  for i = 1, 5000 do t[i] = { x = 1, y = 1, tile = 'open' } end\n  return { tiles = t }\nend";
+    let (fb, _h) = play(&[("long", long)], "long", &[1], &[4]);
+    assert!(fb.state.script_error.as_deref().unwrap().contains("entries"));
 }
