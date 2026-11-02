@@ -514,7 +514,7 @@ pub fn spell_tip_card_padded(game: &Game, s: &SpellDef, r: Rect, o: f32, text: f
         // The picture and the text with even room around them: left of the picture, between the
         // picture and the text, and right of the text are the same (the owner's note of 2026-11-02).
         let k = super::chrome::k();
-        let side = tip_side(o);
+        let side = learnt_icon_side(o);
         let room = r.w - 2.0 * pad - side;
         // A little slack over the measured width, so no line wraps that fits the full room.
         let text_w = (card_text_width(game, s, room, text) + 16.0 * k).min(room);
@@ -524,6 +524,12 @@ pub fn spell_tip_card_padded(game: &Game, s: &SpellDef, r: Rect, o: f32, text: f
         super::chrome::spell_icon(s, icon);
         card_text(game, s, Rect::new(icon.x + side + gap, inner.y, text_w, inner.h), true, text);
     });
+}
+
+/// The spell picture's side on the learnt-spell window's card held upright: 1.5 times the pop-up's
+/// (the owner's note of 2026-11-02: a bigger picture).
+pub fn learnt_icon_side(o: f32) -> f32 {
+    tip_side(o) * 1.5
 }
 
 /// The widest line of spell `s`'s card text laid out in `room` (its name and its body lines).

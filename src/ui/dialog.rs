@@ -898,6 +898,8 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         let g = game?;
         let s = g.content.spells.iter().find(|s| s.id == id)?;
         let (cw, ch) = super::spellbook::spell_tip_size(g, s, o, spell_text);
+        // The card's picture is larger here (`learnt_icon_side`): the card is at least as tall.
+        let ch = ch.max(super::spellbook::learnt_icon_side(o));
         Some((cw + 2.0 * card_pad(pad), ch + 2.0 * card_pad(pad)))
     };
     // The window has no text, so the card takes its empty text box's place: the slot adds only what the
