@@ -455,18 +455,22 @@ pub fn spell_card(game: &Game, s: &SpellDef, r: Rect, tint_mana: bool) {
 
 /// [`spell_card`] with its text at the size `text` and its picture `side` px square.
 fn spell_card_at(game: &Game, s: &SpellDef, r: Rect, tint_mana: bool, text: f32, side: f32) {
-    use super::chrome;
     super::typography::Role::Body.with(|| {
-        let k = chrome::k();
         // The card's background (0x49bde4): red-brown over the hero's mana (49be19-49be42), the
         // normal paper otherwise; the sanctuary's tab never tints (`tint_mana` false).
         let red = tint_mana && game.mana < game.cast_cost(s).mana;
         card_paper(r, card_fill(!red, false));
-        let icon = Rect::new(r.x + 6.0 * k, r.y + (r.h - side) / 2.0, side, side);
-        chrome::spell_icon(s, icon);
-        let left = icon.x + icon.w + 2.0 * k;
-        card_text(game, s, Rect::new(left, r.y, r.x + r.w - left, r.h), tint_mana, text);
+        spell_card_content(game, s, r, tint_mana, text, side);
     });
+}
+
+/// A spell card's picture and text in `r`, over a paper already drawn.
+fn spell_card_content(game: &Game, s: &SpellDef, r: Rect, tint_mana: bool, text: f32, side: f32) {
+    let k = super::chrome::k();
+    let icon = Rect::new(r.x + 6.0 * k, r.y + (r.h - side) / 2.0, side, side);
+    super::chrome::spell_icon(s, icon);
+    let left = icon.x + icon.w + 2.0 * k;
+    card_text(game, s, Rect::new(left, r.y, r.x + r.w - left, r.h), tint_mana, text);
 }
 
 /// The picture's side of a spell's pop-up card at the window's scale `o`: the card's height less
@@ -503,9 +507,12 @@ pub fn spell_tip_card_padded(game: &Game, s: &SpellDef, r: Rect, o: f32, text: f
     if pad <= 0.0 {
         return spell_tip_card(game, s, r, o, text);
     }
-    let red = game.mana < game.cast_cost(s).mana;
-    card_paper(r, card_fill(!red, false));
-    spell_card_at(game, s, Rect::new(r.x + pad, r.y + pad, r.w - 2.0 * pad, r.h - 2.0 * pad), true, text, tip_side(o));
+    // One paper (its frame at the card's edge only): the picture and text are inset by `pad` on it.
+    super::typography::Role::Body.with(|| {
+        let red = game.mana < game.cast_cost(s).mana;
+        card_paper(r, card_fill(!red, false));
+        spell_card_content(game, s, Rect::new(r.x + pad, r.y + pad, r.w - 2.0 * pad, r.h - 2.0 * pad), true, text, tip_side(o));
+    });
 }
 
 /// The card's fonts (0x49bde4 → 0x49ba84; the SanSerif tints of 0x4dbc26, white less a delta).
