@@ -18,7 +18,7 @@ use super::load::{Located, Package};
 use super::refs::{valid_id, DtKind, Ref};
 
 /// The events a trigger can wait for (`when`).
-pub const EVENTS: [&str; 10] = [
+pub const EVENTS: [&str; 11] = [
     "game_start",
     "day_start",
     "week_start",
@@ -29,11 +29,12 @@ pub const EVENTS: [&str; 10] = [
     "building_captured",
     "dialog_choice",
     "var_changed",
+    "army_arrives",
 ];
 /// The conditions (`if`). Each is a table with one of these keys (its kind).
 pub const CONDITIONS: [&str; 10] = ["var", "random", "hero_at", "army_at", "has_named_unit", "has_item", "gold", "army_alive", "building_owner", "has_spell"];
 /// The actions (`then`), each a table with one of these keys.
-pub const ACTIONS: [&str; 20] = [
+pub const ACTIONS: [&str; 24] = [
     "set",
     "add",
     "random_var",
@@ -54,12 +55,16 @@ pub const ACTIONS: [&str; 20] = [
     "remove_spell_from_book",
     "victory",
     "defeat",
+    "army_goal",
+    "army_speed",
+    "hero_figure",
+    "army_figure",
 ];
 /// The keys that are arguments, not kinds. A kind key is one of the lists above; a key here
 /// never is.
-const ARGUMENTS: [&str; 24] = [
+const ARGUMENTS: [&str; 32] = [
     "value", "op", "at", "faction", "to", "of", "in", "unit", "named", "class", "spell", "all", "building", "army", "item", "min", "max", "minutes",
-    "permanent", "towards", "troops", "model", "choice", "event",
+    "permanent", "towards", "troops", "model", "choice", "event", "garrison", "percent", "go_to", "go_to_building", "follow", "patrol", "attack", "clear",
 ];
 
 /// A problem with one table: what is wrong, and what to do about it.
@@ -245,14 +250,15 @@ fn cmp_of(s: &str) -> Res<Cmp> {
     })
 }
 
-/// A holder of units, items or spells: the hero's army, the pack, a scenario army (by id), or a
-/// named character of the player's army (`named:<id>`).
+/// A holder of units, items or spells: the hero's army, the pack, a scenario army (by id), a
+/// named character of the player's army (`named:<id>`), or a garrison (`garrison = "<building>"`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Holder {
     Player,
     Pack,
     Army(String),
     Named(String),
+    Garrison(String),
 }
 
 fn holder_of(v: &Value, what: &str) -> Res<Holder> {
@@ -265,6 +271,36 @@ fn holder_of(v: &Value, what: &str) -> Res<Holder> {
             None => Holder::Army(name_of(v, "army")?),
         },
     })
+}
+
+/// The holder a table gives under `key` (`in` or `to`), or the garrison its `garrison` key names
+/// (the two are not both given). Neither: `default`.
+fn holder_key(t: &Table, kind: &str, key: &str, default: Holder) -> Res<Holder> {
+    match (arg(t, key), arg(t, "garrison")) {
+        (Some(_), Some(_)) => bad(format!("`{kind}` takes `{key}` or `garrison`, not both"), "pick one holder"),
+        (None, Some(g)) => Ok(Holder::Garrison(name_of(g, "building")?)),
+        (Some(h), None) => holder_of(h, &format!("`{key}`")),
+        (None, None) => Ok(default),
+    }
+}
+
+/// A holder written as the action's own value: `remove_spells = "garrison"` with the building in
+/// `garrison = "<id>"`; otherwise the value is the holder itself.
+fn positional_holder(t: &Table, kind: &str, v: &Value) -> Res<Holder> {
+    match arg(t, "garrison") {
+        None if v.as_str() == Some("garrison") => bad(format!("`{kind} = \"garrison\"` needs `garrison = \"<building>\"`"), "name the building in `garrison = \"<id>\"`"),
+        None => holder_of(v, &format!("`{kind}`")),
+        Some(g) if v.as_str() == Some("garrison") => Ok(Holder::Garrison(name_of(g, "building")?)),
+        Some(_) => bad(format!("`{kind}` with `garrison` is written `{kind} = \"garrison\"`"), "the building goes in `garrison = \"<id>\"`"),
+    }
+}
+
+/// A goal's target: `"hero"`, or an army's id.
+fn target_of(v: &Value) -> Res<Target> {
+    match v.as_str() {
+        Some("hero") => Ok(Target::Hero),
+        _ => Ok(Target::Army(name_of(v, "army")?)),
+    }
 }
 
 /// A trigger's event (`when`).
@@ -280,6 +316,9 @@ pub enum Event {
     BuildingCaptured(String),
     DialogChoice { dialog: String, choice: String },
     VarChanged(String),
+    /// An army with a goal reaches it: at a cell (`at`), or in a building (`building`); none:
+    /// any arrival of the army at its goal.
+    ArmyArrives { army: String, at: Option<(i32, i32)>, building: Option<String> },
 }
 
 /// A cell or an area of the map: `[x, y]` or `[x, y, w, h]`.
@@ -346,7 +385,7 @@ pub enum Cond {
     Random(u8),
     HeroAt(Place),
     ArmyAt { army: String, at: Place },
-    HasNamed { named: String, unit: Ref },
+    HasNamed { named: String, unit: Ref, holder: Holder },
     HasItem { item: Ref, holder: Holder },
     Gold { amount: i64, cmp: Cmp },
     ArmyAlive(String),
@@ -376,6 +415,30 @@ pub enum Action {
     ForgetSpell(Ref),
     Victory,
     Defeat,
+    ArmyGoal { army: String, goal: GoalSpec },
+    ArmySpeed { army: String, percent: u32 },
+    /// `None`: the hero's own figure (`hero_figure = "default"`).
+    HeroFigure(Option<Ref>),
+    ArmyFigure { army: String, unit: Ref },
+}
+
+/// What an `army_goal` asks for (exactly one key of the action).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum GoalSpec {
+    GoTo((i32, i32)),
+    GoToBuilding(String),
+    Follow(Target),
+    Patrol(Vec<(i32, i32)>),
+    Attack(Target),
+    /// `clear = true`: the army goes back to the original AI.
+    Clear,
+}
+
+/// A goal's target: the hero, or a scenario or package army by its id.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Target {
+    Hero,
+    Army(String),
 }
 
 /// A trigger, as read. `map` scopes it to one map of the package; none applies it to every map.
@@ -515,6 +578,25 @@ pub fn parse_event(t: &Table) -> Res<Event> {
             rest(&["var"])?;
             Ok(Event::VarChanged(name_of(need(t, "var_changed", "var")?, "variable")?))
         }
+        "army_arrives" => {
+            rest(&["army", "at", "building"])?;
+            let army = name_of(need(t, "army_arrives", "army")?, "army")?;
+            let at = match arg(t, "at") {
+                Some(v) => match place_of(v)? {
+                    Place::Cell(x, y) => Some((x, y)),
+                    Place::Area(..) => return bad("an arrival is at one cell", "give `at = [x, y]`"),
+                },
+                None => None,
+            };
+            let building = match arg(t, "building") {
+                Some(b) => Some(name_of(b, "building")?),
+                None => None,
+            };
+            if at.is_some() && building.is_some() {
+                return bad("`army_arrives` takes `at` or `building`, not both", "a cell, or the building the goal names");
+            }
+            Ok(Event::ArmyArrives { army, at, building })
+        }
         other => bad(format!("unknown event `{other}`"), closest(other, EVENTS).map_or_else(|| format!("events are: {}", EVENTS.join(", ")), |n| format!("did you mean `{n}`?"))),
     }
 }
@@ -548,22 +630,18 @@ pub fn parse_cond(t: &Table) -> Res<Cond> {
             Ok(Cond::ArmyAt { army: name_of(v, "army")?, at: at_of(t, kind)? })
         }
         "has_named_unit" => {
-            check_args(t, kind, &["unit", "in"])?;
-            if let Some(h) = arg(t, "in") {
-                if holder_of(h, "`in`")? != Holder::Player {
-                    return bad("`has_named_unit` looks in the player's army only", "named characters of AI armies are not in format 1: leave `in` out");
-                }
+            check_args(t, kind, &["unit", "in", "garrison"])?;
+            let holder = holder_key(t, kind, "in", Holder::Player)?;
+            if matches!(holder, Holder::Pack | Holder::Named(_)) {
+                return bad("`has_named_unit` looks in the player's army, an army or a garrison", "use `in = \"<army id>\"`, `garrison = \"<building>\"` or leave both out");
             }
-            Ok(Cond::HasNamed { named: name_of(v, "named character")?, unit: unit_ref(need(t, kind, "unit")?)? })
+            Ok(Cond::HasNamed { named: name_of(v, "named character")?, unit: unit_ref(need(t, kind, "unit")?)?, holder })
         }
         "has_item" => {
-            check_args(t, kind, &["in"])?;
-            let holder = match arg(t, "in") {
-                Some(h) => holder_of(h, "`in`")?,
-                None => Holder::Player,
-            };
-            if !matches!(holder, Holder::Player | Holder::Pack) {
-                return bad("`has_item` looks in the player's pack and army only", "use `in = \"player\"` or leave it out");
+            check_args(t, kind, &["in", "garrison"])?;
+            let holder = holder_key(t, kind, "in", Holder::Player)?;
+            if matches!(holder, Holder::Named(_)) {
+                return bad("`has_item` looks in the player's pack and army, an army or a garrison", "use `in = \"player\"`, an army id or `garrison = \"<building>\"`");
             }
             Ok(Cond::HasItem { item: item_ref(v)?, holder })
         }
@@ -584,11 +662,8 @@ pub fn parse_cond(t: &Table) -> Res<Cond> {
             Ok(Cond::BuildingOwner { building: name_of(v, "building")?, faction: faction_of(need(t, kind, "faction")?)? })
         }
         "has_spell" => {
-            check_args(t, kind, &["in", "all"])?;
-            let holder = match arg(t, "in") {
-                Some(h) => holder_of(h, "`in`")?,
-                None => Holder::Player,
-            };
+            check_args(t, kind, &["in", "all", "garrison"])?;
+            let holder = holder_key(t, kind, "in", Holder::Player)?;
             let all = match arg(t, "all") {
                 Some(a) => a.as_bool().ok_or_else(|| Problem { message: "`all` is true or false".into(), hint: "e.g. `all = true`".into() })?,
                 None => false,
@@ -638,11 +713,8 @@ pub fn parse_action(t: &Table) -> Res<Action> {
             Ok(Action::GiveGold(int_of(v, "`give_gold`")?))
         }
         "give_item" => {
-            check_args(t, kind, &["to"])?;
-            let to = match arg(t, "to") {
-                Some(h) => holder_of(h, "`to`")?,
-                None => Holder::Pack,
-            };
+            check_args(t, kind, &["to", "garrison"])?;
+            let to = holder_key(t, kind, "to", Holder::Pack)?;
             Ok(Action::GiveItem { item: item_ref(v)?, to })
         }
         "give_unit" => {
@@ -654,11 +726,8 @@ pub fn parse_action(t: &Table) -> Res<Action> {
             Ok(Action::GiveUnit { unit: unit_ref(v)?, named })
         }
         "give_xp" => {
-            check_args(t, kind, &["to"])?;
-            let to = match arg(t, "to") {
-                Some(h) => holder_of(h, "`to`")?,
-                None => Holder::Player,
-            };
+            check_args(t, kind, &["to", "garrison"])?;
+            let to = holder_key(t, kind, "to", Holder::Player)?;
             Ok(Action::GiveXp { amount: int_of(v, "`give_xp`")?, to })
         }
         "spawn_army" => {
@@ -718,15 +787,19 @@ pub fn parse_action(t: &Table) -> Res<Action> {
             Ok(Action::SetRelation { of: entity_of(t, kind, v)?, towards: towards_of(need(t, kind, "towards")?)?, value })
         }
         "add_units" => {
-            check_args(t, kind, &["troops", "of"])?;
-            Ok(Action::AddUnits { of: entity_of(t, kind, v)?, troops: units_of(need(t, kind, "troops")?)? })
+            check_args(t, kind, &["troops", "of", "garrison"])?;
+            let of = match arg(t, "garrison") {
+                None if v.as_str() == Some("garrison") => return bad("`add_units = \"garrison\"` needs `garrison = \"<building>\"`", "name the building in `garrison = \"<id>\"`"),
+                None => entity_of(t, kind, v)?,
+                Some(_) if arg(t, "of").is_some() => return bad("`add_units` takes `of` or `garrison`, not both", "a garrison is `add_units = \"garrison\", garrison = \"<building>\"`"),
+                Some(g) if v.as_str() == Some("garrison") => Entity::Building(name_of(g, "building")?),
+                Some(_) => return bad("`add_units` with `garrison` is written `add_units = \"garrison\"`", "the building goes in `garrison = \"<id>\"`"),
+            };
+            Ok(Action::AddUnits { of, troops: units_of(need(t, kind, "troops")?)? })
         }
         "cast_on_army" => {
-            check_args(t, kind, &["in", "minutes", "permanent"])?;
-            let holder = match arg(t, "in") {
-                Some(h) => holder_of(h, "`in`")?,
-                None => Holder::Player,
-            };
+            check_args(t, kind, &["in", "minutes", "permanent", "garrison"])?;
+            let holder = holder_key(t, kind, "in", Holder::Player)?;
             let permanent = match arg(t, "permanent") {
                 Some(p) => p.as_bool().ok_or_else(|| Problem { message: "`permanent` is true or false".into(), hint: "e.g. `permanent = true`".into() })?,
                 None => false,
@@ -742,12 +815,43 @@ pub fn parse_action(t: &Table) -> Res<Action> {
             Ok(Action::Cast { spell: spell_ref(v)?, holder, until })
         }
         "remove_spells" => {
-            check_args(t, kind, &[])?;
-            Ok(Action::RemoveSpells(holder_of(v, "`remove_spells`")?))
+            check_args(t, kind, &["garrison"])?;
+            Ok(Action::RemoveSpells(positional_holder(t, kind, v)?))
         }
         "remove_spell_from_book" => {
             check_args(t, kind, &[])?;
             Ok(Action::ForgetSpell(spell_ref(v)?))
+        }
+        "army_goal" => {
+            const GOALS: [&str; 6] = ["go_to", "go_to_building", "follow", "patrol", "attack", "clear"];
+            check_args(t, kind, &GOALS)?;
+            let army = name_of(v, "army")?;
+            let given: Vec<&str> = GOALS.into_iter().filter(|k| arg(t, k).is_some()).collect();
+            let goal = match given.as_slice() {
+                [] => return bad("`army_goal` needs one goal", format!("one of: {}", GOALS.join(", "))),
+                [one] => goal_of(t, one)?,
+                _ => return bad(format!("`army_goal` takes one goal, not {}", given.join(" and ")), "split it into one action per goal"),
+            };
+            Ok(Action::ArmyGoal { army, goal })
+        }
+        "army_speed" => {
+            check_args(t, kind, &["percent"])?;
+            let percent = int_of(need(t, kind, "percent")?, "`percent`")?;
+            if !(10..=1000).contains(&percent) {
+                return bad("`percent` is 10 to 1000 (100 is the normal pace)", "e.g. `percent = 150`");
+            }
+            Ok(Action::ArmySpeed { army: name_of(v, "army")?, percent: percent as u32 })
+        }
+        "hero_figure" => {
+            check_args(t, kind, &[])?;
+            match v.as_str() {
+                Some("default") => Ok(Action::HeroFigure(None)),
+                _ => Ok(Action::HeroFigure(Some(unit_ref(v)?))),
+            }
+        }
+        "army_figure" => {
+            check_args(t, kind, &["unit"])?;
+            Ok(Action::ArmyFigure { army: name_of(v, "army")?, unit: unit_ref(need(t, kind, "unit")?)? })
         }
         "victory" | "defeat" => {
             check_args(t, kind, &[])?;
@@ -759,6 +863,40 @@ pub fn parse_action(t: &Table) -> Res<Action> {
         }
         _ => unreachable!("kind_of returns an action"),
     }
+}
+
+/// The goal an `army_goal` action's key names (`key` is the one given).
+fn goal_of(t: &Table, key: &str) -> Res<GoalSpec> {
+    let v = &t[key];
+    Ok(match key {
+        "go_to" => match place_of(v)? {
+            Place::Cell(x, y) => GoalSpec::GoTo((x, y)),
+            Place::Area(..) => return bad("`go_to` is one cell", "give `go_to = [x, y]`"),
+        },
+        "go_to_building" => GoalSpec::GoToBuilding(name_of(v, "building")?),
+        "follow" => GoalSpec::Follow(target_of(v)?),
+        "attack" => GoalSpec::Attack(target_of(v)?),
+        "patrol" => {
+            let Some(a) = v.as_array() else {
+                return bad("`patrol` is a list of cells", "e.g. `patrol = [[4, 5], [9, 5]]`");
+            };
+            let cells = a
+                .iter()
+                .map(|c| match place_of(c)? {
+                    Place::Cell(x, y) => Ok((x, y)),
+                    Place::Area(..) => bad("a patrol point is one cell", "e.g. `patrol = [[4, 5], [9, 5]]`"),
+                })
+                .collect::<Res<Vec<_>>>()?;
+            if cells.len() < 2 {
+                return bad("a patrol has at least two cells", "e.g. `patrol = [[4, 5], [9, 5]]`");
+            }
+            GoalSpec::Patrol(cells)
+        }
+        _ => match v.as_bool() {
+            Some(true) => GoalSpec::Clear,
+            _ => return bad("`clear` is written `clear = true`", "it sends the army back to the original AI"),
+        },
+    })
 }
 
 /// `of = "building"` makes the entity a building; the default is an army.
@@ -1018,8 +1156,10 @@ impl Scope<'_, '_> {
     }
 
     fn holder(&mut self, file: &str, line: u32, h: &Holder) {
-        if let Holder::Army(a) = h {
-            self.army(file, line, a);
+        match h {
+            Holder::Army(a) => self.army(file, line, a),
+            Holder::Garrison(b) => self.building(file, line, b),
+            _ => {}
         }
     }
 
@@ -1035,6 +1175,15 @@ impl Scope<'_, '_> {
             Event::HeroEnters(p) => self.place(file, line, "hero_enters", p),
             Event::HeroEntersBuilding(b) | Event::BuildingCaptured(b) => self.building(file, line, b),
             Event::ArmyDefeated(a) => self.army(file, line, a),
+            Event::ArmyArrives { army, at, building } => {
+                self.army(file, line, army);
+                if let Some((x, y)) = at {
+                    self.cell(file, line, "army_arrives", *x, *y);
+                }
+                if let Some(b) = building {
+                    self.building(file, line, b);
+                }
+            }
             _ => {}
         }
         for c in &t.cond {
@@ -1054,7 +1203,7 @@ impl Scope<'_, '_> {
             }
             Cond::ArmyAlive(a) => self.army(file, line, a),
             Cond::BuildingOwner { building, .. } => self.building(file, line, building),
-            Cond::HasItem { holder, .. } | Cond::HasSpell { holder, .. } => self.holder(file, line, holder),
+            Cond::HasItem { holder, .. } | Cond::HasSpell { holder, .. } | Cond::HasNamed { holder, .. } => self.holder(file, line, holder),
             _ => {}
         }
     }
@@ -1075,6 +1224,25 @@ impl Scope<'_, '_> {
                 }
             }
             Action::SetFaction { of, .. } | Action::SetRelation { of, .. } | Action::AddUnits { of, .. } => self.entity(file, line, of),
+            Action::ArmyGoal { army, goal } => {
+                self.army(file, line, army);
+                match goal {
+                    GoalSpec::GoTo((x, y)) => self.cell(file, line, "army_goal go_to", *x, *y),
+                    GoalSpec::GoToBuilding(b) => self.building(file, line, b),
+                    GoalSpec::Follow(target) | GoalSpec::Attack(target) => {
+                        if let Target::Army(a) = target {
+                            self.army(file, line, a);
+                        }
+                    }
+                    GoalSpec::Patrol(cells) => {
+                        for (x, y) in cells {
+                            self.cell(file, line, "army_goal patrol", *x, *y);
+                        }
+                    }
+                    GoalSpec::Clear => {}
+                }
+            }
+            Action::ArmySpeed { army, .. } | Action::ArmyFigure { army, .. } => self.army(file, line, army),
             _ => {}
         }
     }
@@ -1150,6 +1318,7 @@ impl Ctx<'_> {
                 }
             }
             Action::Cast { spell, .. } | Action::ForgetSpell(spell) => self.spell(r, file, line, spell),
+            Action::HeroFigure(Some(unit)) | Action::ArmyFigure { unit, .. } => self.unit(r, file, line, unit),
             _ => {}
         }
     }
@@ -1350,6 +1519,115 @@ mod tests {
         assert_eq!(closest("hero_at", CONDITIONS), Some("hero_at"));
         assert_eq!(closest("xyzzy", CONDITIONS), None);
         assert_eq!(edit_distance("kitten", "sitting"), 3);
+    }
+}
+
+#[cfg(test)]
+mod wish_reader_tests {
+    use super::*;
+
+    fn table(text: &str) -> Table {
+        toml::from_str(text).unwrap()
+    }
+
+    fn goal(text: &str) -> Res<Action> {
+        parse_action(&table(text))
+    }
+
+    #[test]
+    fn army_goal_reads_each_goal() {
+        assert_eq!(goal("army_goal = \"ghost\"\ngo_to = [4, 5]"), Ok(Action::ArmyGoal { army: "ghost".into(), goal: GoalSpec::GoTo((4, 5)) }));
+        assert_eq!(goal("army_goal = \"ghost\"\ngo_to_building = \"tower\""), Ok(Action::ArmyGoal { army: "ghost".into(), goal: GoalSpec::GoToBuilding("tower".into()) }));
+        assert_eq!(goal("army_goal = \"ghost\"\nfollow = \"hero\""), Ok(Action::ArmyGoal { army: "ghost".into(), goal: GoalSpec::Follow(Target::Hero) }));
+        assert_eq!(goal("army_goal = \"ghost\"\nfollow = \"guard\""), Ok(Action::ArmyGoal { army: "ghost".into(), goal: GoalSpec::Follow(Target::Army("guard".into())) }));
+        assert_eq!(
+            goal("army_goal = \"ghost\"\npatrol = [[4, 5], [9, 5]]"),
+            Ok(Action::ArmyGoal { army: "ghost".into(), goal: GoalSpec::Patrol(vec![(4, 5), (9, 5)]) })
+        );
+        assert_eq!(goal("army_goal = \"ghost\"\nattack = \"hero\""), Ok(Action::ArmyGoal { army: "ghost".into(), goal: GoalSpec::Attack(Target::Hero) }));
+        assert_eq!(goal("army_goal = \"ghost\"\nclear = true"), Ok(Action::ArmyGoal { army: "ghost".into(), goal: GoalSpec::Clear }));
+    }
+
+    #[test]
+    fn army_goal_takes_exactly_one_goal_of_a_known_shape() {
+        assert!(goal("army_goal = \"ghost\"").unwrap_err().message.contains("needs one goal"));
+        let two = goal("army_goal = \"ghost\"\ngo_to = [1, 1]\nclear = true").unwrap_err();
+        assert!(two.message.contains("takes one goal"), "{two:?}");
+        assert!(goal("army_goal = \"ghost\"\npatrol = [[4, 5]]").unwrap_err().message.contains("at least two"));
+        assert!(goal("army_goal = \"ghost\"\ngo_to = [1, 1, 2, 2]").unwrap_err().message.contains("one cell"));
+        assert!(goal("army_goal = \"ghost\"\nclear = false").unwrap_err().message.contains("clear = true"));
+        let typo = goal("army_goal = \"ghost\"\ngo_too = [1, 1]").unwrap_err();
+        assert_eq!(typo.hint, "did you mean `go_to`?", "{typo:?}");
+    }
+
+    #[test]
+    fn army_speed_and_the_figures_read() {
+        assert_eq!(parse_action(&table("army_speed = \"ghost\"\npercent = 150")), Ok(Action::ArmySpeed { army: "ghost".into(), percent: 150 }));
+        assert!(parse_action(&table("army_speed = \"ghost\"\npercent = 5")).unwrap_err().message.contains("10 to 1000"));
+        assert_eq!(parse_action(&table("hero_figure = \"default\"")), Ok(Action::HeroFigure(None)));
+        assert_eq!(parse_action(&table("hero_figure = \"dt:bandit\"")), Ok(Action::HeroFigure(Some(Ref::parse("dt:bandit").unwrap()))));
+        assert_eq!(
+            parse_action(&table("army_figure = \"ghost\"\nunit = \"dt:mage\"")),
+            Ok(Action::ArmyFigure { army: "ghost".into(), unit: Ref::parse("dt:mage").unwrap() })
+        );
+        assert!(parse_action(&table("army_figure = \"ghost\"")).unwrap_err().message.contains("needs `unit`"));
+    }
+
+    #[test]
+    fn army_arrives_reads_a_cell_or_a_building() {
+        assert_eq!(
+            parse_event(&table("event = \"army_arrives\"\narmy = \"ghost\"\nat = [4, 5]")),
+            Ok(Event::ArmyArrives { army: "ghost".into(), at: Some((4, 5)), building: None })
+        );
+        assert_eq!(
+            parse_event(&table("event = \"army_arrives\"\narmy = \"ghost\"\nbuilding = \"tower\"")),
+            Ok(Event::ArmyArrives { army: "ghost".into(), at: None, building: Some("tower".into()) })
+        );
+        assert_eq!(parse_event(&table("event = \"army_arrives\"\narmy = \"ghost\"")), Ok(Event::ArmyArrives { army: "ghost".into(), at: None, building: None }));
+        assert!(parse_event(&table("event = \"army_arrives\"\narmy = \"g\"\nat = [1, 1]\nbuilding = \"t\"")).unwrap_err().message.contains("not both"));
+    }
+
+    #[test]
+    fn a_garrison_is_a_holder_of_spells_items_units_and_named_characters() {
+        assert_eq!(
+            parse_cond(&table("has_spell = \"dt:spell/fireball\"\ngarrison = \"tower\"")),
+            Ok(Cond::HasSpell { spell: Ref::parse("dt:spell/fireball").unwrap(), holder: Holder::Garrison("tower".into()), all: false })
+        );
+        assert_eq!(
+            parse_action(&table("cast_on_army = \"dt:spell/fireball\"\ngarrison = \"tower\"\nminutes = 60")),
+            Ok(Action::Cast { spell: Ref::parse("dt:spell/fireball").unwrap(), holder: Holder::Garrison("tower".into()), until: Until::Minutes(60) })
+        );
+        assert_eq!(
+            parse_action(&table("give_item = \"dt:item/viking_sword\"\ngarrison = \"tower\"")),
+            Ok(Action::GiveItem { item: Ref::parse("dt:item/viking_sword").unwrap(), to: Holder::Garrison("tower".into()) })
+        );
+        assert_eq!(
+            parse_action(&table("give_xp = 40\ngarrison = \"tower\"")),
+            Ok(Action::GiveXp { amount: 40, to: Holder::Garrison("tower".into()) })
+        );
+        assert_eq!(
+            parse_action(&table("add_units = \"garrison\"\ngarrison = \"tower\"\ntroops = [\"dt:swordsman\"]")),
+            Ok(Action::AddUnits { of: Entity::Building("tower".into()), troops: vec![Ref::parse("dt:swordsman").unwrap()] })
+        );
+        assert_eq!(parse_action(&table("remove_spells = \"garrison\"\ngarrison = \"tower\"")), Ok(Action::RemoveSpells(Holder::Garrison("tower".into()))));
+        assert_eq!(
+            parse_cond(&table("has_named_unit = \"ivo\"\nunit = \"dt:knight\"\ngarrison = \"tower\"")),
+            Ok(Cond::HasNamed { named: "ivo".into(), unit: Ref::parse("dt:knight").unwrap(), holder: Holder::Garrison("tower".into()) })
+        );
+        assert_eq!(
+            parse_cond(&table("has_named_unit = \"ivo\"\nunit = \"dt:knight\"\nin = \"guard\"")),
+            Ok(Cond::HasNamed { named: "ivo".into(), unit: Ref::parse("dt:knight").unwrap(), holder: Holder::Army("guard".into()) })
+        );
+    }
+
+    #[test]
+    fn a_holder_is_given_once_and_a_positional_garrison_needs_its_key() {
+        let both = parse_cond(&table("has_spell = \"dt:spell/fireball\"\nin = \"guard\"\ngarrison = \"tower\"")).unwrap_err();
+        assert!(both.message.contains("not both"), "{both:?}");
+        let no_key = parse_action(&table("remove_spells = \"garrison\"")).unwrap_err();
+        assert!(no_key.message.contains("holder") || no_key.message.contains("garrison"), "{no_key:?}");
+        assert!(parse_cond(&table("has_item = \"dt:item/viking_sword\"\nin = \"named:ivo\"")).is_err(), "a named character holds no item lookup");
+        assert!(parse_cond(&table("has_named_unit = \"ivo\"\nunit = \"dt:knight\"\nin = \"pack\"")).is_err());
     }
 }
 
@@ -1563,5 +1841,40 @@ mod map_refs_tests {
     fn spawned_armies_are_known_on_every_map() {
         let story = "[[trigger]]\nid = \"a\"\nwhen = { event = \"week_start\" }\nthen = [ { spawn_army = \"host\", at = [20, 20], faction = \"enemy\", troops = [\"dt:knight\"] } ]\n\n[[trigger]]\nid = \"b\"\nwhen = { event = \"army_defeated\", army = \"host\" }\nthen = [ { victory = true } ]\n";
         assert_eq!(errors(story, ""), "");
+    }
+
+    #[test]
+    fn army_goals_figures_speed_and_arrivals_on_the_map_check_clean() {
+        let story = "[[trigger]]\nid = \"walk\"\nwhen = { event = \"game_start\" }\nthen = [ { army_goal = \"e\", go_to = [12, 12] }, { army_speed = \"e\", percent = 150 }, { hero_figure = \"dt:bandit\" }, { army_figure = \"e\", unit = \"dt:bandit\" } ]\n\n[[trigger]]\nid = \"in\"\nwhen = { event = \"army_arrives\", army = \"e\", building = \"t\" }\nthen = [ { army_goal = \"e\", patrol = [[10, 10], [20, 20]] }, { add_units = \"garrison\", garrison = \"t\", troops = [\"dt:swordsman\"] } ]\n\n[[trigger]]\nid = \"stop\"\nwhen = { event = \"army_arrives\", army = \"e\", at = [12, 12] }\nthen = [ { army_goal = \"e\", clear = true }, { give_item = \"dt:item/viking_sword\", garrison = \"t\" } ]\n\n[[trigger]]\nid = \"chase\"\nwhen = { event = \"day_start\" }\nif = [ { has_spell = \"dt:spell/healing\", garrison = \"t\" } ]\nthen = [ { army_goal = \"e\", follow = \"hero\" }, { army_goal = \"e\", go_to_building = \"t\" }, { army_goal = \"e\", attack = \"e\" } ]\n";
+        assert_eq!(errors(story, ""), "", "every goal, arrival, figure and garrison name is on the map");
+    }
+
+    #[test]
+    fn a_goal_names_a_cell_or_building_the_map_lacks() {
+        let story = "[[trigger]]\nid = \"a\"\nwhen = { event = \"game_start\" }\nthen = [ { army_goal = \"e\", go_to = [60, 3] } ]\n\n[[trigger]]\nid = \"b\"\nwhen = { event = \"day_start\" }\nthen = [ { army_goal = \"e\", patrol = [[1, 1], [3, 99]] } ]\n\n[[trigger]]\nid = \"c\"\nwhen = { event = \"day_start\" }\nthen = [ { army_goal = \"e\", go_to_building = \"keep\" } ]\n";
+        let e = errors(story, "");
+        assert!(e.contains("army_goal go_to at (60, 3) is outside map `m`"), "{e}");
+        assert!(e.contains("army_goal patrol at (3, 99) is outside map `m`"), "{e}");
+        assert!(e.contains("no building `keep` in map `m`"), "{e}");
+    }
+
+    #[test]
+    fn a_goal_or_figure_names_an_army_the_map_lacks() {
+        let story = "[[trigger]]\nid = \"a\"\nwhen = { event = \"game_start\" }\nthen = [ { army_goal = \"ghost\", go_to = [4, 4] }, { army_figure = \"ghost\", unit = \"dt:knight\" } ]\n\n[[trigger]]\nid = \"b\"\nwhen = { event = \"army_arrives\", army = \"ghost\" }\nthen = [ { army_speed = \"ghost\", percent = 50 } ]\n";
+        let e = errors(story, "");
+        assert!(e.contains("no army `ghost` in map `m`"), "{e}");
+        assert!(e.matches("no army `ghost`").count() >= 4, "every use is named: {e}");
+    }
+
+    #[test]
+    fn a_garrison_names_a_building_of_the_map() {
+        let story = "[[trigger]]\nid = \"a\"\nwhen = { event = \"game_start\" }\nthen = [ { cast_on_army = \"dt:spell/healing\", garrison = \"castle\", minutes = 5 } ]\n";
+        assert!(errors(story, "").contains("no building `castle` in map `m`"));
+    }
+
+    #[test]
+    fn a_figure_names_a_unit_the_package_lacks() {
+        let story = "[[trigger]]\nid = \"a\"\nwhen = { event = \"game_start\" }\nthen = [ { hero_figure = \"local:nobody\" } ]\n";
+        assert!(!errors(story, "").is_empty());
     }
 }

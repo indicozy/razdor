@@ -2140,7 +2140,7 @@ impl Game {
             a.walk.points.clear();
             a.walk.points.push(a.pos);
             a.walk.minutes.clear();
-            a.walk.banked = (a.budget + left).min(AI_BUDGET_CAP);
+            a.walk.banked = (a.budget + left).min(crate::rules::ai::goals::budget_cap(a.mind.pace));
             a.arrived = false;
             a.mind.contact = None;
         }

@@ -203,6 +203,7 @@ then = [ { give_gold = -20 } ]                      # optional actions
 | `hero_enters` | `at` | the hero steps onto a cell, or into an area |
 | `hero_enters_building` | `building` | the hero enters a building |
 | `army_defeated` | `army` | the player beats an army (battle end) |
+| `army_arrives` | `army`, and `at` (a cell) or `building` (a building id), either or neither | an army with an `army_goal` reaches its cell (`go_to`, each `patrol` cell) or walks into its building (`go_to_building`); raised at the end of the AI's tick, at the arrival's minute |
 | `building_captured` | `building` | the hero takes a building (walking in, or its garrison beaten) |
 | `dialog_choice` | `dialog`, `choice` | the player picks that choice |
 | `var_changed` | `var` | a variable changes value |
@@ -215,12 +216,12 @@ then = [ { give_gold = -20 } ]                      # optional actions
 | `random` | | true with that percent (the package generator) |
 | `hero_at` | the place: `[x, y]` or `[x, y, w, h]` | the hero stands there |
 | `army_at` | `army` (a spawned or scenario army id), `at` | the army is on the map at that place |
-| `has_named_unit` | `named` (the character's id), `unit` | a named character of that unit type is in the hero's army |
-| `has_item` | `in` (`player`, the default, or `pack`) | the item is in the pack or worn by his army |
+| `has_named_unit` | `named` (the character's id), `unit`, and `in` (the hero's army by default, or an army id) or `garrison` (a building id) | a named character of that unit type is in that army or garrison |
+| `has_item` | `in` (`player`, the default, `pack`, an army id) or `garrison` (a building id) | the item is in the pack or worn by that holder's units (a garrison's pack too) |
 | `gold` | `op` (default `>=`) | the hero's gold compares with the number |
 | `army_alive` | | the army exists and is not beaten |
 | `building_owner` | `faction` (`player`, `ally`, `neighbour`, `enemy`, or 1 to 4) | the building's faction |
-| `has_spell` | `in` (`player` or an army id; default `player`), `all` (default false) | a unit holds the spell (in its slots, not expired); `all` for every unit |
+| `has_spell` | `in` (`player` or an army id; default `player`), or `garrison` (a building id), `all` (default false) | a unit holds the spell (in its slots, not expired); `all` for every unit |
 
 ### Actions (`then`): in order
 
@@ -231,23 +232,42 @@ then = [ { give_gold = -20 } ]                      # optional actions
 | `random_var` | `min`, `max` | a number variable gets a random value in the range |
 | `dialog` | | opens the dialog (its choices visible now) |
 | `give_gold` | | the hero's gold (negative takes; never below 0) |
-| `give_item` | `to` (`pack` default, `player`, an army id: its loot, `named:<id>`: a free worn slot, else the pack) | an item |
+| `give_item` | `to` (`pack` default, `player`, an army id: its loot, `named:<id>`: a free worn slot, else the pack), or `garrison` (a building id: its troops, else its pack) | an item |
 | `give_unit` | `named` (optional character id) | a unit joins the hero's army (a full army drops its weakest unit, as DT) |
-| `give_xp` | `to` (`player` default, an army id, `named:<id>`) | experience |
+| `give_xp` | `to` (`player` default, an army id, `named:<id>`), or `garrison` (a building id) | experience |
 | `spawn_army` | `at = [x, y]`, `faction`, `model` (0 to 12, default 5), `troops` (list of units) | a new army on the map, with its id (its name); an id in use spawns nothing |
 | `remove_army` | | the army leaves the map (it can come back by an event, as DT's) |
 | `teleport_hero` | cell `[x, y]` | the hero's army moves there |
 | `teleport_army` | `at = [x, y]` or `to = "<building>"` | an army moves to a cell or a building |
 | `set_faction` | `faction`, `of` (`army` default, or `building`) | a faction for an army or a building |
 | `set_relation` | `towards` (`player`, `ally`, `neighbour`, `enemy`), `value` (−3 to 3), `of` | the relation of an army or a building towards a side |
-| `add_units` | `troops`, `of` (`army` default, or `building`: a garrison) | units join an army or a garrison |
-| `cast_on_army` | `in` (`player` or an army id), `minutes = n` or `permanent = true` | the spell in each unit's slot (a slot that is free, or the same spell's) |
-| `remove_spells` | the holder (`player` or an army id) | every spell of its units goes |
+| `add_units` | `troops`, and the target: the army's name, `of = "building"` with the building's name, or `"garrison"` with `garrison = "<building>"` | units join an army or a garrison |
+| `cast_on_army` | `in` (`player` or an army id) or `garrison` (a building id), `minutes = n` or `permanent = true` | the spell in each unit's slot (a slot that is free, or the same spell's) |
+| `remove_spells` | the holder (`player` or an army id); or `"garrison"` with `garrison = "<building>"` | every spell of its units goes |
 | `remove_spell_from_book` | the spell | the hero's spell book drops it |
+| `army_goal` | the army is the value; exactly one of: `go_to = [x, y]`, `go_to_building = "<building>"`, `follow = "hero"` or an army id, `patrol = [[x, y], …]` (at least two cells), `attack = "hero"` or an army id, `clear = true` | the army walks to the goal instead of the AI's own choice (see below) |
+| `army_speed` | the army is the value, `percent = n` (10 to 1000, 100 normal) | the army's map steps take 100/n of their time (saved) |
+| `hero_figure` | `"default"` or a unit `dt:<alias>` | the hero is drawn with that unit's map figure (saved) |
+| `army_figure` | the army is the value, `unit = "dt:<alias>"` | the army is drawn with that unit's map figure (saved) |
 | `victory` / `defeat` | `= true` | the scenario ends (after the dialogs shown; the first ending holds) |
 
 Units and items are `dt:<alias>` or the package's own ids; spells are `dt:spell/<alias>`. A
-«holder» is `player`, `pack`, an army id or `named:<id>`.
+«holder» is `player`, `pack`, an army id, `named:<id>` or a garrison (`garrison = "<building>"`).
+Where a table takes `in` or `to`, the `garrison` key is its alternative (not both). Where the
+holder is the action's own value (`remove_spells`, `add_units`), the value is `"garrison"` and the
+key names the building.
+
+**Armies' goals and paces.** `army_goal` gives an AI army a goal: it no longer takes the original
+AI's choice of destination. On each arrival it plans its way to the goal's cell with the AI's own
+routes (land, or the sea for a ship) and walks it on the same step clock, so the speed rules,
+ships, bridges and fog behave as before. A `go_to` army stands on its cell; a `go_to_building`
+army walks into the building and stands there (its arrival rules, as the AI's, take over inside);
+`patrol` loops through its cells; `follow` keeps next to the hero or an army as it moves;
+`attack` walks to the hero or an army and, next to it, attacks as an AI army does (a meeting, or a
+battle). `clear = true` gives the army back to the original AI. A goal whose target is gone or has
+no route drops back to the original AI, and nothing fires. `army_speed` multiplies the time of its
+steps (200 is twice as fast, 50 twice as slow); a slower army banks more of the hero's minutes, so
+every step is still reached. Armies without a goal and paces of 100 are the original's, unchanged.
 
 ### Moments in the game
 
@@ -309,11 +329,9 @@ none), the armies that came onto the map, and the ending. It is kept only while 
 
 ### Not in this step
 
-Wishes of the trigger vocabulary left out of slice 1 step 3 (design: "Trigger vocabulary"):
-AI army speed (5), an AI army's goal (14, the goal half), the hero's map figure (12), branching
-campaigns (10). Garrisons take part only where the table says so: `add_units` and `set_faction` /
-`set_relation` (`of = "building"`). Spells on garrisons (1, 7, 9), named characters in AI armies or
-garrisons (2), items and experience of garrisons (3, 8) are not in format 1 yet.
+Not in format 1 yet: branching campaigns (10). Named characters can be in an army or a garrison
+for `has_named_unit` to find, but no action yet puts one there (only the hero's squad gets named
+units, by `give_unit`). Goals and paces on a demo gang (an army not steered by the AI) do nothing.
 
 ## Maps: `maps/<id>/map.toml` and `maps/<id>/terrain.png`
 

@@ -29,6 +29,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+pub mod goals;
+
 use crate::dt::dtm::Army as DtArmy;
 use crate::frame_probe::{self, Stage};
 
@@ -298,6 +300,14 @@ pub struct AiMind {
     #[cfg(test)]
     #[serde(skip)]
     pub scripted: bool,
+    /// The goal a package's trigger gave it (`army_goal`, [`goals`]); none: the original AI
+    /// chooses its destinations. Not saved while none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal: Option<goals::ArmyGoal>,
+    /// Its pace in percent (`army_speed`): its steps take 100 over this of their time. 0 is the
+    /// normal pace (100), and it is not saved then.
+    #[serde(default, skip_serializing_if = "goals::unpaced")]
+    pub pace: u32,
 }
 
 /// The direction the map load writes into every army record (+0x1710 := 5, south, as the
@@ -383,7 +393,7 @@ pub fn managed(a: &Army) -> bool {
 
 /// A stationary guard: patrols with radius 0. It never steps, plans or arrives.
 pub fn stationary(a: &Army) -> bool {
-    a.patrols && a.patrol_radius == 0
+    a.patrols && a.patrol_radius == 0 && a.mind.goal.is_none()
 }
 
 /// Priorities of one target model (`_Global.ini`, ai.md §1): lower is more urgent.
@@ -1713,7 +1723,7 @@ impl Game {
             if stationary(a) || end <= a.mind.busy_until {
                 continue;
             }
-            a.budget = (a.budget + minutes).min(super::world::AI_BUDGET_CAP);
+            a.budget = (a.budget + minutes).min(goals::budget_cap(a.mind.pace));
             totals.insert(uid, cmin(a.budget));
             let id = a.id;
             if self.is_foe(i) {
@@ -1758,6 +1768,7 @@ impl Game {
             queue.insert((t + play, 0, id, uid));
         }
         self.clock.set_total_minutes(end);
+        self.flush_goal_arrivals();
         midnights
     }
 
@@ -1795,10 +1806,11 @@ impl Game {
             let to = next.unwrap_or(here);
             let left = self.ai_cost(a, here);
             let speed = a.speed.max(1);
+            let pace = goals::pace_of(a.mind.pace);
             let need = match next {
                 _ if a.mind.free_step => 0.0,
-                Some(t) => step_minutes(map.grid, here, t, left, speed),
-                None => left as f32 * speed as f32,
+                Some(t) => goals::paced_minutes(step_minutes(map.grid, here, t, left, speed), pace),
+                None => goals::paced_minutes(left as f32 * speed as f32, pace),
             };
             // With no path the step after is priced on the cell its direction points at
             // (the map load's south, or none).
@@ -1806,7 +1818,7 @@ impl Game {
                 (None, Some(d)) => (here.0 + d.0, here.1 + d.1),
                 _ => to,
             };
-            let raw = self.ai_cost(a, ahead) as i64 * speed as i64 * 100;
+            let raw = goals::paced_centi(self.ai_cost(a, ahead) as i64 * speed as i64 * 100, pace);
             let after = match (next, a.path.get(1)) {
                 // The path goes on from the cell it enters: that step's weight.
                 (Some(t), Some(&u)) => raw * map.grid.weight(t, u) as i64 / 2,
@@ -1909,7 +1921,10 @@ impl Game {
             a.mind.countdown = 0;
             a.mind.walked = 0;
             a.path.clear();
-            self.ai_wander(i);
+            // A goal's army draws no wander points: its goal plans its way at the arrival.
+            if self.world.armies[i].mind.goal.is_none() {
+                self.ai_wander(i);
+            }
         }
     }
 
@@ -1974,7 +1989,9 @@ impl Game {
             }
             dist.push((p, d));
         }
-        if replan {
+        if self.world.armies[i].mind.goal.is_some() {
+            self.goal_walk(uid, hero);
+        } else if replan {
             frame_probe::time(Stage::AiPlan, || self.ai_plan(i, &dist, hero));
         }
         // The step clock ends by setting the direction of the next step from the path, 8
@@ -2218,7 +2235,8 @@ impl Game {
         // 0x75e0c7, 0x4ade3c): not while he waits or stands, nor mid-step.
         // The console's `peace` (`rules::cheats`) drops every attack on him.
         let peace = self.cheats.peace;
-        let result = self.ai_arrive_rules(uid, hero).filter(|c| *c != Contact::Attack || (hero.boundary && !peace));
+        let rules = self.ai_arrive_rules(uid, hero);
+        let result = self.goal_attack(uid, hero).or(rules).filter(|c| *c != Contact::Attack || (hero.boundary && !peace));
         let i = self.army_by_uid(uid)?;
         if self.world.armies[i].mind.fallen {
             self.world.armies[i].mind.fallen = false;

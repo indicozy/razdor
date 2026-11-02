@@ -175,6 +175,10 @@ fn describe(what: &Trace) -> String {
         Trace::Answer { dialog, choice: Some(c) } => format!("the sim answers `{dialog}` with `{c}`"),
         Trace::Answer { dialog, choice: None } => format!("the sim answers `{dialog}` with Далее"),
         Trace::Spawn { army } => format!("army `{army}` comes onto the map"),
+        Trace::Goal { army, goal } if goal == "clear" => format!("army `{army}` goes back to the original AI"),
+        Trace::Goal { army, goal } => format!("army `{army}` takes the goal {goal}"),
+        Trace::Arrive { army, cell: (x, y), building: Some(b) } => format!("army `{army}` arrives in `{b}` at [{x}, {y}]"),
+        Trace::Arrive { army, cell: (x, y), building: None } => format!("army `{army}` arrives at [{x}, {y}]"),
         Trace::End(Ending::Victory) => "the story ends: victory".to_string(),
         Trace::End(Ending::Defeat) => "the story ends: defeat".to_string(),
     }

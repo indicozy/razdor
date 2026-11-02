@@ -78,6 +78,18 @@ ill-disposed castle/fort/ruins with an empty garrison is taken; a village is tak
 crossed. A building is entered on the route's last cell (`arrive_at_end` → `enter_building`), and a
 building whose window waits for an event's window is entered later (`enter_waiting_building`).
 
+**AI goals** (package triggers, `src/rules/ai/goals.rs`). An army with `AiMind::goal` (set by a
+package's army_goal action) does not run `ai_plan` at its arrivals: `goal_walk` plans the path to the
+goal's cell with `army_path` (or the sea steps of a ship) and sets it. The step clock, speed and
+arrival rules are the AI's; only the destination differs. `ai_stepped` draws no wander points for
+it. `goal_attack` runs with the arrival's contacts: an attack goal next to the hero or another army
+gives the AI's own `Contact::Attack`, or `ai_battle`. Arrivals (the go_to and go_to_building goals, each
+`patrol` cell) are queued in `TriggerState::arrivals` and run by `flush_goal_arrivals` at the end of
+`ai_move`, each at its minute, so a trigger never acts while the AI's loop holds its armies. A
+goal drops (`drop_goal`) when its target is gone or unreachable, with no event. `AiMind::pace`
+(the army_speed action) scales the step's cost (`ai_start`), and the bank's cap (`goals::budget_cap`) scales
+with it, so a slow army can still afford its steps.
+
 **Chasing an army.** A click on an army makes it the chased army; `follow_army` re-plans after it
 moves and ends the pursuit (hero stops) only when its new cell is closed or out of reach.
 

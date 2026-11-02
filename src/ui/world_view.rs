@@ -1829,7 +1829,9 @@ fn draw_hero(game: &Game, assets: &Assets, art: Option<&DtArt>, cam: &Camera) {
         }
         return;
     }
-    if !draw_figure(art, figure_stem(model), game.display_pos(), heading, hero_frame(walking), cam, Stand::Feet) {
+    // A package's `hero_figure` gives him another unit's sheet (an index of FIGURES); none: his own.
+    let stem = game.triggers.hero_sheet.and_then(|f| FIGURES.get(f as usize).copied()).unwrap_or_else(|| figure_stem(model));
+    if !draw_figure(art, stem, game.display_pos(), heading, hero_frame(walking), cam, Stand::Feet) {
         assets.draw_unit(game.hero().def, Team::Player, c.x, c.y - 10.0, 30.0);
     }
 }

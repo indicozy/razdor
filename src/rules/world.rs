@@ -806,23 +806,19 @@ impl Army {
     /// editor's picture) is never read. A ship army's figure is set after this
     /// ([`Army::ship_figure`]).
     pub fn figure_for(content: &Content, a: &dtm::Army) -> u8 {
-        let mut figure = match a.behaviour {
+        let figure = match a.behaviour {
             0 => 6,
             1 => 4,
             _ => 5,
         };
-        let t = u32::from(a.leader_unit.saturating_sub(1));
-        let nature = content.try_unit(UnitId(t + 1)).map_or(Nature::Normal, |u| u.nature);
-        if nature == Nature::Undead {
-            figure = match t {
-                42..=44 | 46 => 8,
-                50..=52 => 9,
-                _ => 7,
-            };
-        } else if t < 88 && MAGE_FIGURE_BITS[(t >> 3) as usize] >> (t & 7) & 1 != 0 {
-            figure = 10;
-        }
-        figure
+        special_figure(content, u32::from(a.leader_unit.saturating_sub(1))).unwrap_or(figure)
+    }
+
+    /// The map figure (an index of the 13 sprites, see [`Army::figure`]) of an army led by unit
+    /// `unit`, by the rule of [`Army::figure_for`]: the undead and the mages have their own;
+    /// any other unit gets the knight's (6). Used by a package's `army_figure` and `hero_figure`.
+    pub fn figure_of_unit(content: &Content, unit: UnitId) -> u8 {
+        special_figure(content, unit.0.saturating_sub(1)).unwrap_or(6)
     }
 
     /// The figure of an army loaded afloat, by its ship byte 72 (0x4b4a90): 0 and 1 the
@@ -835,6 +831,23 @@ impl Army {
             3 => 11,
             _ => land,
         }
+    }
+}
+
+/// The figure a leader of type `t` (0-based) has of its own: the undead (Necromant, Zombie,
+/// Ghost) and the mages; None for the others.
+fn special_figure(content: &Content, t: u32) -> Option<u8> {
+    let nature = content.try_unit(UnitId(t + 1)).map_or(Nature::Normal, |u| u.nature);
+    if nature == Nature::Undead {
+        Some(match t {
+            42..=44 | 46 => 8,
+            50..=52 => 9,
+            _ => 7,
+        })
+    } else if t < 88 && MAGE_FIGURE_BITS[(t >> 3) as usize] >> (t & 7) & 1 != 0 {
+        Some(10)
+    } else {
+        None
     }
 }
 
