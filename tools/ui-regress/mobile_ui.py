@@ -105,6 +105,7 @@ SCREENS = [
     ("classes", "classes:РК1-Начало пути", {}),
     ("hub", "hub", {}),
     ("hub-mods", "hub:1:evolution-mock", {}),
+    ("update", "update", {}),
 ]
 
 
