@@ -429,3 +429,19 @@ id = "bw_king_fall"
 map = "barrows"
 when = { event = "army_defeated", army = "barrow_king" }
 then = [ { dialog = "bw_king_slain" } ]
+
+# The sim's last moment (`razdor-pack sim --auto-win-after`: the hero does not walk to the palace, so
+# the council or the grey throne comes here instead). The game never raises sim_victory.
+[[trigger]]
+id = "bw_sim_grey"
+map = "barrows"
+when = { event = "sim_victory" }
+if = [ { var = "ilm", value = 2 }, { var = "grey_bargain_offered", value = true } ]
+then = [ { dialog = "bw_grey_throne" } ]
+
+[[trigger]]
+id = "bw_sim_council"
+map = "barrows"
+when = { event = "sim_victory" }
+if = [ { var = "grey_bargain_offered", value = false } ]
+then = [ { dialog = "bw_council" } ]

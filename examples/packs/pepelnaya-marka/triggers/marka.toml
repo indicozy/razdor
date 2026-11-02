@@ -2,8 +2,7 @@
 # names its map (`map = "marka"`). The variables shared by the campaign are in triggers/_campaign.toml,
 # chapter 1's (dread, marsh_trust, tower_taken, ...) in triggers/brod.toml; they carry over here.
 #
-# Order matters where a trigger reads a flag that another sets on the same moment: the caravan watch
-# (reset, check, then the loss) runs in this file's order each day.
+# A trigger never depends on another trigger's place in this file: each reads the state it needs.
 
 [vars]
 weeks = 0               # weeks spent on this map (the revisits keep counting)
@@ -12,7 +11,6 @@ order_quest = 0         # the Order's shrine quest: 0 none, 1 taken, 2 done, 3 r
 marsh_quest = 0         # Tess's quest: 0 none, 1 taken, 2 done
 raid_started = false    # the bandits went after the caravan
 caravan_out = true      # the caravan is on the road (until it falls)
-caravan_ok = true       # the day's watch: true when the caravan still stands
 host3_risen = false     # each host rises once
 host5_risen = false
 host7_risen = false
@@ -64,29 +62,14 @@ then = [
     { dialog = "raid_warning" },
 ]
 
-# ---- the caravan and its loss (a watch: the day's reset, the check, then the loss) -------------
-
-[[trigger]]
-id = "m_caravan_reset"
-map = "marka"
-when = { event = "day_start" }
-once = false
-then = [ { set = "caravan_ok", value = false } ]
-
-[[trigger]]
-id = "m_caravan_check"
-map = "marka"
-when = { event = "day_start" }
-once = false
-if = [ { var = "caravan_out", value = true }, { army_alive = "caravan" } ]
-then = [ { set = "caravan_ok", value = true } ]
+# ---- the caravan and its loss: the day it is no longer on the map (army_alive = false) --------
 
 [[trigger]]
 id = "m_caravan_lost"
 map = "marka"
 when = { event = "day_start" }
 once = false
-if = [ { var = "caravan_out", value = true }, { var = "caravan_ok", value = false } ]
+if = [ { var = "caravan_out", value = true }, { army_alive = "caravan", value = false } ]
 then = [
     { set = "caravan_out", value = false },
     { add = "caravans_lost", value = 1 },
@@ -115,7 +98,7 @@ then = [ { give_gold = 10 }, { dialog = "caravan_safe" } ]
 id = "m_raiders_beaten"
 map = "marka"
 when = { event = "army_defeated", army = "raiders" }
-then = [ { add = "companies", value = 1 }, { give_gold = 25 } ]
+then = [ { add = "companies", value = 1, min = -5, max = 5 }, { give_gold = 25 } ]
 
 [[trigger]]
 id = "m_raiders_friend"
@@ -205,7 +188,7 @@ then = [ { dialog = "siege" } ]
 id = "m_host_3_beaten"
 map = "marka"
 when = { event = "army_defeated", army = "host_3" }
-then = [ { add = "crown", value = 1 }, { give_gold = 30 }, { dialog = "host_beaten" } ]
+then = [ { add = "crown", value = 1, min = -5, max = 5 }, { give_gold = 30 }, { dialog = "host_beaten" } ]
 
 [[trigger]]
 id = "m_host_5_beaten"
@@ -284,7 +267,7 @@ then = [ { set = "order_quest", value = 1 } ]
 id = "m_order_refuse"
 map = "marka"
 when = { event = "dialog_choice", dialog = "shrine_offer", choice = "refuse" }
-then = [ { set = "order_quest", value = 3 }, { add = "order", value = -1 } ]
+then = [ { set = "order_quest", value = 3 }, { add = "order", value = -1, min = -5, max = 5 } ]
 
 # The guards beaten and the shrine taken: the inside dialog, where the choice is made.
 [[trigger]]
@@ -364,7 +347,7 @@ then = [
     { add = "quests_done", value = 1 },
     { give_unit = "dt:hunter", named = "tess" },
     { set = "tess_joined", value = true },
-    { add = "marsh_trust", value = 2 },
+    { add = "marsh_trust", value = 2, min = -5, max = 5 },
     { dialog = "tess_join" },
 ]
 
@@ -374,7 +357,7 @@ id = "m_wraiths_free"
 map = "marka"
 when = { event = "army_defeated", army = "wraiths" }
 if = [ { var = "marsh_quest", value = 0 } ]
-then = [ { add = "marsh_trust", value = 1 } ]
+then = [ { add = "marsh_trust", value = 1, min = -5, max = 5 } ]
 
 # ---- the Free Companies and Kord ----------------------------------------------------------------
 
@@ -398,7 +381,7 @@ then = [
     { give_unit = "dt:bandit" },
     { give_unit = "dt:archer" },
     { give_item = "company_token", to = "player" },
-    { add = "companies", value = 1 },
+    { add = "companies", value = 1, min = -5, max = 5 },
 ]
 
 [[trigger]]
@@ -409,8 +392,8 @@ then = [
     { set = "kord", value = 2 },
     { add = "quests_done", value = 1 },
     { remove_army = "kord_band" },
-    { add = "crown", value = 2 },
-    { add = "companies", value = -3 },
+    { add = "crown", value = 2, min = -5, max = 5 },
+    { add = "companies", value = -3, min = -5, max = 5 },
 ]
 
 # The Companies' standing sinks below -3: their camp's men stop trading with the hero.
@@ -423,10 +406,11 @@ then = [ { give_gold = -20 } ]
 
 # ---- the council: two envoy quests done, the hero chooses (or waits) ----------------------------
 
+# Checked each midnight, so a count carried from an earlier chapter (or set by the sim) opens it too.
 [[trigger]]
 id = "m_council"
 map = "marka"
-when = { event = "var_changed", var = "quests_done" }
+when = { event = "day_start" }
 if = [ { var = "quests_done", op = ">=", value = 2 } ]
 then = [ { dialog = "council" } ]
 
@@ -446,14 +430,32 @@ then = [ { set = "ally", value = 2 }, { hero_figure = "default" }, { victory = t
 id = "m_ally_companies"
 map = "marka"
 when = { event = "dialog_choice", dialog = "council", choice = "companies" }
-then = [ { set = "ally", value = 3 }, { hero_figure = "dt:bandit" }, { victory = true } ]
+then = [ { set = "ally", value = 3 }, { hero_figure = { model = "bandits" } }, { victory = true } ]
 
-# "Not yet": the hero rides out to the Companies' camp to look at it, and comes back to this map.
+# "Not yet" (the council's last choice) only closes the dialog: the hero keeps playing on this map.
+
+# The hub again, after a chapter's end (its flag is set, and the hero is back here): the chapter ends
+# here, and the campaign goes on to the gates (campaign.toml: the first route whose flag holds).
 [[trigger]]
-id = "m_council_later"
+id = "m_return_abbey"
 map = "marka"
-when = { event = "dialog_choice", dialog = "council", choice = "later" }
-then = [ { travel = "camp" } ]
+when = { event = "day_start" }
+if = [ { var = "abbey_done", value = true } ]
+then = [ { victory = true } ]
+
+[[trigger]]
+id = "m_return_salt"
+map = "marka"
+when = { event = "day_start" }
+if = [ { var = "salt_done", value = true } ]
+then = [ { victory = true } ]
+
+[[trigger]]
+id = "m_return_camp"
+map = "marka"
+when = { event = "day_start" }
+if = [ { var = "camp_done", value = true } ]
+then = [ { victory = true } ]
 
 # ---- Ilm's path and the new moon ----------------------------------------------------------------
 

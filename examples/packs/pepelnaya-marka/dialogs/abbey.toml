@@ -43,7 +43,7 @@ speaker = "dt:priest"
 id = "rite"
 text = "abbey.rite.rite"
 if = [ { gold = 30, op = ">=" } ]
-then = [ { give_gold = -30 }, { remove_spells = "player" }, { set = "taint", value = 0 }, { add = "order", value = 1 } ]
+then = [ { give_gold = -30 }, { remove_spells = "player" }, { set = "taint", value = 0 }, { add = "order", value = 1, min = -5, max = 5 } ]
 
 [[dialog.choice]]
 id = "decline"

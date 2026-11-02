@@ -59,7 +59,7 @@ then = [ { set = "abbey_ilm_met", value = true }, { give_item = "abbey_scripture
 id = "abbey_ilm_leave"
 map = "abbey"
 when = { event = "dialog_choice", dialog = "abbey_ilm_meet", choice = "leave" }
-then = [ { set = "abbey_ilm_met", value = true }, { add = "order", value = 1 } ]
+then = [ { set = "abbey_ilm_met", value = true }, { add = "order", value = 1, min = -5, max = 5 } ]
 
 # The blight east of the abbey: the first step warns, every step curses the army (at most six taints).
 [[trigger]]
@@ -119,7 +119,7 @@ id = "abbey_siege_won"
 map = "abbey"
 when = { event = "army_defeated", army = "dead_wave" }
 if = [ { var = "abbey_siege", value = true } ]
-then = [ { add = "order", value = 2 } ]
+then = [ { add = "order", value = 2, min = -5, max = 5 } ]
 
 # The dead wave beaten (at the siege, or earlier on its patrol): the three endings read Ilm's path.
 # Each sets abbey_done and ends the chapter. They run after abbey_siege_won, which only adds standing.
@@ -149,7 +149,7 @@ then = [ { set = "abbey_done", value = true }, { dialog = "abbey_end_plain" }, {
 id = "abbey_watch_taken"
 map = "abbey"
 when = { event = "building_captured", building = "watch" }
-then = [ { add = "crown", value = -2 } ]
+then = [ { add = "crown", value = -2, min = -5, max = 5 } ]
 
 # Ольховка: the trial, once, with Brother Ilm at the hero's side (a named unit of the monks).
 [[trigger]]
@@ -166,15 +166,15 @@ when = { event = "dialog_choice", dialog = "abbey_trial", choice = "burn" }
 then = [
     { add = "villages_burned", value = 1 },
     { set = "ilm", value = 1 },
-    { add = "order", value = 2 },
-    { add = "crown", value = -1 },
+    { add = "order", value = 2, min = -5, max = 5 },
+    { add = "crown", value = -1, min = -5, max = 5 },
 ]
 
 [[trigger]]
 id = "abbey_trial_spare"
 map = "abbey"
 when = { event = "dialog_choice", dialog = "abbey_trial", choice = "spare" }
-then = [ { set = "ilm", value = 2 }, { add = "order", value = -2 } ]
+then = [ { set = "ilm", value = 2 }, { add = "order", value = -2, min = -5, max = 5 } ]
 
 # The heresy's secret dialog: a midnight after the mercy, with Ilm still in the army. Once.
 [[trigger]]
@@ -220,7 +220,7 @@ then = [ { army_goal = "inquisitors", attack = "hero" }, { dialog = "abbey_inqui
 id = "abbey_inquisitors_fall"
 map = "abbey"
 when = { event = "army_defeated", army = "inquisitors" }
-then = [ { add = "order", value = -3 } ]
+then = [ { add = "order", value = -3, min = -5, max = 5 } ]
 
 # The Order's favour: at 3 standing the monks give gold, once.
 [[trigger]]
@@ -244,14 +244,14 @@ map = "abbey"
 when = { event = "week_start" }
 once = false
 if = [ { var = "taint", op = ">=", value = 3 } ]
-then = [ { add = "order", value = -1 } ]
+then = [ { add = "order", value = -1, min = -5, max = 5 } ]
 
 # Ольховка taken by force: it burns, and the Order counts it.
 [[trigger]]
 id = "abbey_alder_taken"
 map = "abbey"
 when = { event = "building_captured", building = "alder" }
-then = [ { add = "villages_burned", value = 1 }, { add = "order", value = -1 } ]
+then = [ { add = "villages_burned", value = 1 }, { add = "order", value = -1, min = -5, max = 5 } ]
 
 # The abbey's gate in the Order's favour: the monks give alms, once.
 [[trigger]]
@@ -260,3 +260,19 @@ map = "abbey"
 when = { event = "hero_enters_building", building = "abbey" }
 if = [ { var = "order", op = ">=", value = 2 } ]
 then = [ { give_gold = 15 } ]
+
+# The dead take the Order's abbey (a garrison of the Order): the taint spreads through the army.
+[[trigger]]
+id = "abbey_lost"
+map = "abbey"
+when = { event = "building_lost", building = "abbey" }
+then = [ { add = "taint", value = 1 } ]
+
+# The sim's end of the chapter (`razdor-pack sim --auto-win-after`: the hero does not walk, so the
+# chapter's own ending does not come). The flag is set as the real ending sets it; the game never
+# raises sim_victory.
+[[trigger]]
+id = "abbey_sim_end"
+map = "abbey"
+when = { event = "sim_victory" }
+then = [ { set = "abbey_done", value = true } ]

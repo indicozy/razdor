@@ -13,10 +13,10 @@ Update и не содержит файлов самой игры. Идея: `doc
 ```
 brod (1, 50×50)  →  marka (2, 100×100, revisit)
                        ├─ ally 1 → abbey (3а, Орден)    ─┐
-                       ├─ ally 2 → salt  (3б, болото)    ├─ <id>_done → gates
-                       └─ ally 3 → camp  (3в, роты)      ─┘  иначе → marka
+                       ├─ ally 2 → salt  (3б, болото)    ├─ back to marka (the hub)
+                       └─ ally 3 → camp  (3в, роты)      ─┘
                                                               │
-gates (4, 100×100; развилка по союзникам) → barrows (5, 200×200, финал)
+marka (revisit): <id>_done → gates (4, 100×100) → barrows (5, 200×200, финал)
                                                               │
                                   ending: Железный мир / Вольная Марка / Серая сделка / падение
 ```
@@ -24,8 +24,9 @@ gates (4, 100×100; развилка по союзникам) → barrows (5, 20
 - `start = "brod"`. Все переменные (`[carry]`: герой, армия, пакет, золото, переменные) переходят
   от карты к карте.
 - Карта `marka` возвращается: её состояние сохраняется (`revisit`).
-- Ветки (`abbey`, `salt`, `camp`) идут к `gates`, когда их `<id>_done` стало истиной, иначе назад в
-  `marka`. Так граф работает и без триггеров возврата второй главы.
+- Ветки (`abbey`, `salt`, `camp`) возвращаются в `marka`. Когда глава ветки кончилась (`<id>_done`), герой
+  возвращается в хаб, и `marka` по `campaign.toml` (первый маршрут, чей `if` истинен) идёт в `gates`. Триггер
+  `m_return_*` завершает карту, когда флаг стоит.
 - `barrows` не имеет `next`: кампанию заканчивает действие `ending` (концовка-диалог).
 
 ## Главы
@@ -62,17 +63,11 @@ gates (4, 100×100; развилка по союзникам) → barrows (5, 20
 (`triggers/gates.toml`); `bw_iron_ok`, `bw_free_ok` (`triggers/barrows.toml`). Переменные главы 1
 (`dread`, `marsh_trust`, `varga_joined`, …) живут в `triggers/brod.toml` и переходят дальше.
 
-## Что ещё не построено
+## Что ещё не сделано
 
-Часть действий и событий контракта ещё не читается движком (`razdor-pack check` называет их
-ошибками). Они нужны главам 4 и 5, и в пакете используются:
-
-- `army_goal` (цель ИИ: `go_to`, `follow`, `attack`), `army_speed` (скорость армии);
-- событие `army_arrives`;
-- `hero_figure` (фигура героя);
-- `garrison` в действии `cast_on_army`;
-- `ending` (концовка кампании);
-- `campaign.toml` не читается (проверка выдаёт предупреждение).
+Ход игры в симуляции: герой не ходит, поэтому концовки глав 3 и 5 проходят через событие `sim_victory`
+(только для `razdor-pack sim --auto-win-after`; в игре его не бывает). Маршруты проверены тестом
+`pack::sim::tests::the_four_routes_of_pepelnaya_marka_end_on_their_endings`.
 
 ## Проверка
 
@@ -83,7 +78,6 @@ razdor-pack sim examples/packs/pepelnaya-marka --map gates --days 60 --trace
 razdor-pack sim examples/packs/pepelnaya-marka --map barrows --days 60 --trace
 ```
 
-Ошибки `check` сейчас только о не построенных действиях и о том, что их связанные триггеры и
-диалоги не читаются. Всё остальное (переменные, карты, ссылки на армии, здания и диалоги)
-проверено. Карты рисуются скриптами: `python3 -I tools/pepelnaya-marka-terrain.py` (глава 1),
+`check` без ошибок и предупреждений. Всё (переменные, карты, ссылки на армии, здания, диалоги и
+граф кампании) проверено. Карты рисуются скриптами: `python3 -I tools/pepelnaya-marka-terrain.py` (глава 1),
 `tools/pepelnaya-marka-terrain-gates.py` (4), `tools/pepelnaya-marka-terrain-barrows.py` (5).

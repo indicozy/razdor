@@ -12,17 +12,17 @@ speaker = "dt:halberdier"
 [[dialog.choice]]
 id = "serve"
 text = "marka.captain.serve"
-then = [ { add = "crown", value = 1 } ]
+then = [ { add = "crown", value = 1, min = -5, max = 5 } ]
 
 [[dialog.choice]]
 id = "alone"
 text = "marka.captain.alone"
-then = [ { add = "crown", value = -1 } ]
+then = [ { add = "crown", value = -1, min = -5, max = 5 } ]
 
 [[dialog.choice]]
 id = "gold"
 text = "marka.captain.gold"
-then = [ { give_gold = 20 }, { add = "crown", value = -1 } ]
+then = [ { give_gold = 20 }, { add = "crown", value = -1, min = -5, max = 5 } ]
 
 # The Order's monk at the shrine's gate: the first envoy's offer.
 [[dialog]]
@@ -54,7 +54,7 @@ then = [
     { give_unit = "dt:pilgrim", named = "ilm" },
     { set = "ilm", value = 1 },
     { give_item = "ash_seal" },
-    { add = "order", value = 2 },
+    { add = "order", value = 2, min = -5, max = 5 },
     { set = "order_quest", value = 2 },
     { add = "quests_done", value = 1 },
 ]
@@ -67,7 +67,7 @@ then = [
     { set = "ilm", value = 2 },
     { cast_on_army = "dt:spell/terrible_curse", in = "player", permanent = true },
     { add = "taint", value = 2 },
-    { add = "order", value = -2 },
+    { add = "order", value = -2, min = -5, max = 5 },
     { add = "dread", value = 1 },
     { set = "order_quest", value = 2 },
     { add = "quests_done", value = 1 },

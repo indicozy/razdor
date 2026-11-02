@@ -39,7 +39,7 @@ speaker = "dt:witch"
 [[dialog.choice]]
 id = "cure"
 text = "salt.witch.cure"
-then = [ { remove_spells = "player" }, { set = "taint", value = 0 }, { add = "marsh_trust", value = 1 } ]
+then = [ { remove_spells = "player" }, { set = "taint", value = 0 }, { add = "marsh_trust", value = 1, min = -5, max = 5 } ]
 
 [[dialog.choice]]
 id = "blessing"

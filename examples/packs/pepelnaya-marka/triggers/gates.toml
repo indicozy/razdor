@@ -14,6 +14,7 @@ gt_east = false                # the east gate is open
 gt_south = false               # the south gate is open
 gt_west = false                # the west gate is open
 grey_bargain_offered = false   # Ilm the heretic heard the wraith out: chapter 5's Grey Bargain is open
+last_gate = 0                   # the gate opened last: 1 north, 2 east, 3 south, 4 west
 
 # --- The start: the branch's company walks with the hero. ---
 
@@ -150,28 +151,28 @@ id = "gt_open_n"
 map = "gates"
 when = { event = "var_changed", var = "gt_north" }
 if = [ { var = "gt_north", value = true } ]
-then = [ { add = "gates_open", value = 1 }, { dialog = "gt_opened" } ]
+then = [ { set = "last_gate", value = 1 }, { add = "gates_open", value = 1 }, { dialog = "gt_opened" } ]
 
 [[trigger]]
 id = "gt_open_e"
 map = "gates"
 when = { event = "var_changed", var = "gt_east" }
 if = [ { var = "gt_east", value = true } ]
-then = [ { add = "gates_open", value = 1 }, { dialog = "gt_opened" } ]
+then = [ { set = "last_gate", value = 2 }, { add = "gates_open", value = 1 }, { dialog = "gt_opened" } ]
 
 [[trigger]]
 id = "gt_open_s"
 map = "gates"
 when = { event = "var_changed", var = "gt_south" }
 if = [ { var = "gt_south", value = true } ]
-then = [ { add = "gates_open", value = 1 }, { dialog = "gt_opened" } ]
+then = [ { set = "last_gate", value = 3 }, { add = "gates_open", value = 1 }, { dialog = "gt_opened" } ]
 
 [[trigger]]
 id = "gt_open_w"
 map = "gates"
 when = { event = "var_changed", var = "gt_west" }
 if = [ { var = "gt_west", value = true } ]
-then = [ { add = "gates_open", value = 1 }, { dialog = "gt_opened" } ]
+then = [ { set = "last_gate", value = 4 }, { add = "gates_open", value = 1 }, { dialog = "gt_opened" } ]
 
 [[trigger]]
 id = "gt_last"
@@ -179,6 +180,35 @@ map = "gates"
 when = { event = "var_changed", var = "gates_open" }
 if = [ { var = "gates_open", value = 4 } ]
 then = [ { dialog = "gt_last" } ]
+
+# The claim (gt_last) takes the gate opened last, and no other: one trigger per gate.
+[[trigger]]
+id = "gt_claim_n"
+map = "gates"
+when = { event = "dialog_choice", dialog = "gt_last", choice = "claim" }
+if = [ { var = "last_gate", value = 1 } ]
+then = [ { set_faction = "gate_n", faction = "player", of = "building" } ]
+
+[[trigger]]
+id = "gt_claim_e"
+map = "gates"
+when = { event = "dialog_choice", dialog = "gt_last", choice = "claim" }
+if = [ { var = "last_gate", value = 2 } ]
+then = [ { set_faction = "gate_e", faction = "player", of = "building" } ]
+
+[[trigger]]
+id = "gt_claim_s"
+map = "gates"
+when = { event = "dialog_choice", dialog = "gt_last", choice = "claim" }
+if = [ { var = "last_gate", value = 3 } ]
+then = [ { set_faction = "gate_s", faction = "player", of = "building" } ]
+
+[[trigger]]
+id = "gt_claim_w"
+map = "gates"
+when = { event = "dialog_choice", dialog = "gt_last", choice = "claim" }
+if = [ { var = "last_gate", value = 4 } ]
+then = [ { set_faction = "gate_w", faction = "player", of = "building" } ]
 
 # --- The dead pour through the open gates (once per gate, from dread 3). ---
 

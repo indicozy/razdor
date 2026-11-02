@@ -121,7 +121,7 @@ id = "kneel"
 text = "barrows.bw_grey_throne.kneel"
 if = [ { var = "ilm", value = 2 }, { var = "grey_bargain_offered", value = true } ]
 then = [
-    { hero_figure = "dt:death_knight" },
+    { hero_figure = { model = "necromancer" } },
     { remove_army = "barrow_king" },
     { remove_army = "bw_king_1" },
     { remove_army = "bw_king_2" },

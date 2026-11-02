@@ -49,7 +49,7 @@ then = [ { army_speed = "smugglers", percent = 100 }, { army_goal = "smugglers",
 id = "salt_smug_delivered"
 map = "salt"
 when = { event = "army_arrives", army = "smugglers", building = "saltgate" }
-then = [ { remove_army = "smugglers" }, { add = "crown", value = 1 } ]
+then = [ { remove_army = "smugglers" }, { add = "crown", value = 1, min = -5, max = 5 } ]
 
 # The wagon taken on the road: a caravan lost, and its gold is the hero's.
 [[trigger]]
@@ -72,7 +72,7 @@ map = "salt"
 when = { event = "dialog_choice", dialog = "salt_reedmere", choice = "disguise" }
 then = [
     { set = "salt_disguise", value = true },
-    { hero_figure = "dt:bandit" },
+    { hero_figure = { model = "bandits" } },
     { army_goal = "patrol_north", patrol = [[48, 24], [60, 20]] },
     { army_goal = "bounty", patrol = [[62, 44], [66, 46]] },
 ]
@@ -229,7 +229,7 @@ then = [ { set = "salt_done", value = true }, { dialog = "salt_end_alone" }, { v
 id = "salt_watch_taken"
 map = "salt"
 when = { event = "building_captured", building = "watch" }
-then = [ { add = "crown", value = -1 } ]
+then = [ { add = "crown", value = -1, min = -5, max = 5 } ]
 
 # The bandits' den taken: its old fire has a purse under it.
 [[trigger]]
@@ -245,7 +245,7 @@ map = "salt"
 when = { event = "week_start" }
 once = false
 if = [ { var = "taint", op = ">=", value = 3 } ]
-then = [ { add = "marsh_trust", value = -1 } ]
+then = [ { add = "marsh_trust", value = -1, min = -5, max = 5 } ]
 
 # A Crown patrol beaten: the Crown hunts the hero, and its bounty men follow him.
 [[trigger]]
@@ -253,7 +253,16 @@ id = "salt_patrol_hit"
 map = "salt"
 when = { event = "army_defeated", army = "patrol_north" }
 then = [
-    { add = "crown", value = -1 },
+    { add = "crown", value = -1, min = -5, max = 5 },
     { set = "salt_hunting", value = true },
     { army_goal = "bounty", follow = "hero" },
 ]
+
+# The sim's end of the chapter (`razdor-pack sim --auto-win-after`: the hero does not walk, so the
+# chapter's own ending does not come). The flag is set as the real ending sets it; the game never
+# raises sim_victory.
+[[trigger]]
+id = "salt_sim_end"
+map = "salt"
+when = { event = "sim_victory" }
+then = [ { set = "salt_done", value = true } ]

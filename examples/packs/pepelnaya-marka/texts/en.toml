@@ -636,6 +636,7 @@ walk = "Step back"
 title = "The Reed Gate"
 text = "The warden in a wet cloak raises his hand. \"The gate is open to those who pay. A hundred coins, and the stones are yours. Or go and speak to my men.\""
 pay = "Pay a hundred coins"
+varga = "Varga stays at the gate: her halberd holds the leaf"
 walk = "Step back"
 
 [gates.gt_closed_w]
@@ -835,3 +836,13 @@ text = "You knelt before the throne, and the dead lowered their swords. Your nam
 [campaign.end_fall]
 title = "Ash at the ford"
 text = "The barrows came to the ford. You died at the water, and the March fell with you. No one will call it the Ash March again: nothing is left of it."
+
+# --- named characters of the later chapters (the chapter that brings each one first) ---
+[marka.named]
+ilm = "Brother Ilm"
+
+[salt.named]
+tess = "Tess"
+
+[camp.named]
+kord = "Kord"

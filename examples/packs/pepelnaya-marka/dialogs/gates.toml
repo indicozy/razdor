@@ -47,6 +47,13 @@ text = "gates.gt_closed_s.pay"
 if = [ { gold = 100, op = ">=" } ]
 then = [ { give_gold = -100 }, { set = "gt_south", value = true } ]
 
+# Varga stays at the gate: her halberd holds the leaf open, and she leaves the hero's army for good.
+[[dialog.choice]]
+id = "varga"
+text = "gates.gt_closed_s.varga"
+if = [ { has_named_unit = "varga", unit = "dt:halberdier" } ]
+then = [ { remove_unit = "varga" }, { set = "gt_south", value = true } ]
+
 [[dialog.choice]]
 id = "walk"
 text = "gates.gt_closed_s.walk"
@@ -232,11 +239,4 @@ then = [ { add = "dread", value = -2 }, { victory = true } ]
 [[dialog.choice]]
 id = "claim"
 text = "gates.gt_last.claim"
-then = [
-    { set_faction = "gate_n", faction = "player", of = "building" },
-    { set_faction = "gate_e", faction = "player", of = "building" },
-    { set_faction = "gate_s", faction = "player", of = "building" },
-    { set_faction = "gate_w", faction = "player", of = "building" },
-    { add = "taint", value = 1 },
-    { victory = true },
-]
+then = [ { add = "taint", value = 1 }, { victory = true } ]

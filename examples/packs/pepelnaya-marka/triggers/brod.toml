@@ -115,7 +115,7 @@ then = [ { set = "marsh_hunt", value = true } ]
 id = "marsh_ride_on"
 map = "brod"
 when = { event = "dialog_choice", dialog = "marsh_plea", choice = "ride_on" }
-then = [ { add = "marsh_trust", value = -1 } ]
+then = [ { add = "marsh_trust", value = -1, min = -5, max = 5 } ]
 
 # The wraiths beaten: the charm goes to Varga when she fought beside him, else to his pack.
 [[trigger]]
@@ -125,7 +125,7 @@ when = { event = "army_defeated", army = "wraiths" }
 if = [ { has_named_unit = "varga", unit = "dt:halberdier" } ]
 then = [
     { give_item = "marsh_charm", to = "named:varga" },
-    { add = "marsh_trust", value = 2 },
+    { add = "marsh_trust", value = 2, min = -5, max = 5 },
     { dialog = "marsh_thanks" },
 ]
 
@@ -136,7 +136,7 @@ when = { event = "army_defeated", army = "wraiths" }
 if = [ { var = "varga_joined", value = false } ]
 then = [
     { give_item = "marsh_charm" },
-    { add = "marsh_trust", value = 2 },
+    { add = "marsh_trust", value = 2, min = -5, max = 5 },
     { dialog = "marsh_thanks" },
 ]
 

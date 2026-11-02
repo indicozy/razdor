@@ -88,7 +88,7 @@ map = "camp"
 when = { event = "dialog_choice", dialog = "camp_kord", choice = "hire" }
 then = [
     { set = "kord", value = 1 },
-    { add = "companies", value = 1 },
+    { add = "companies", value = 1, min = -5, max = 5 },
     { set_faction = "kord_band", faction = "player" },
 ]
 
@@ -106,7 +106,7 @@ when = { event = "dialog_choice", dialog = "camp_red", choice = "buy" }
 then = [
     { set_faction = "red_company", faction = "player" },
     { set_relation = "red_company", towards = "enemy", value = 3 },
-    { add = "companies", value = 1 },
+    { add = "companies", value = 1, min = -5, max = 5 },
 ]
 
 [[trigger]]
@@ -145,7 +145,7 @@ if = [ { var = "camp_duel", value = true }, { has_named_unit = "varga", unit = "
 then = [
     { set = "camp_duel", value = false },
     { give_item = "camp_axe", to = "named:varga" },
-    { add = "companies", value = 1 },
+    { add = "companies", value = 1, min = -5, max = 5 },
     { dialog = "camp_duel_won" },
 ]
 
@@ -154,7 +154,7 @@ then = [
 id = "camp_duel_lost"
 map = "camp"
 when = { event = "army_defeated", army = "duel_captain" }
-if = [ { var = "camp_duel", value = true } ]
+if = [ { var = "camp_duel", value = true }, { has_named_unit = "varga", unit = "dt:halberdier", value = false } ]
 then = [
     { set = "camp_duel", value = false },
     { set = "varga_alive", value = false },
@@ -182,7 +182,7 @@ then = [
 id = "camp_raid_pass"
 map = "camp"
 when = { event = "dialog_choice", dialog = "camp_raid", choice = "pass" }
-then = [ { add = "crown", value = 1 }, { army_goal = "supply", clear = true } ]
+then = [ { add = "crown", value = 1, min = -5, max = 5 }, { army_goal = "supply", clear = true } ]
 
 # The column beaten: a caravan lost to the Crown, the companies gain, the Crown loses.
 [[trigger]]
@@ -190,9 +190,9 @@ id = "camp_raid_won"
 map = "camp"
 when = { event = "army_defeated", army = "supply" }
 then = [
-    { add = "crown", value = -1 },
+    { add = "crown", value = -1, min = -5, max = 5 },
     { add = "caravans_lost", value = 1 },
-    { add = "companies", value = 1 },
+    { add = "companies", value = 1, min = -5, max = 5 },
     { give_gold = 40 },
 ]
 
@@ -208,7 +208,7 @@ then = [ { dialog = "camp_loot" } ]
 id = "camp_loot_split"
 map = "camp"
 when = { event = "dialog_choice", dialog = "camp_loot", choice = "split" }
-then = [ { set = "kord", value = 3 }, { add = "companies", value = 1 } ]
+then = [ { set = "kord", value = 3 }, { add = "companies", value = 1, min = -5, max = 5 } ]
 
 [[trigger]]
 id = "camp_loot_keep"
@@ -218,7 +218,7 @@ then = [
     { set = "kord", value = 2 },
     { set_faction = "kord_band", faction = "enemy" },
     { army_goal = "kord_band", attack = "hero" },
-    { add = "companies", value = -2 },
+    { add = "companies", value = -2, min = -5, max = 5 },
 ]
 
 # The companies' waygate: the stones can be lit, which opens a gate for chapter 4.
@@ -232,7 +232,7 @@ then = [ { dialog = "camp_gate" } ]
 id = "camp_gate_light"
 map = "camp"
 when = { event = "dialog_choice", dialog = "camp_gate", choice = "light" }
-then = [ { add = "gates_open", value = 1 }, { add = "companies", value = 1 } ]
+then = [ { add = "gates_open", value = 1 }, { add = "companies", value = 1, min = -5, max = 5 } ]
 
 # The companies name the hero their captain once they trust him: gold, once.
 [[trigger]]
@@ -284,4 +284,13 @@ then = [ { give_gold = 30 } ]
 id = "camp_oakford_taken"
 map = "camp"
 when = { event = "building_captured", building = "oakford" }
-then = [ { add = "crown", value = -2 } ]
+then = [ { add = "crown", value = -2, min = -5, max = 5 } ]
+
+# The sim's end of the chapter (`razdor-pack sim --auto-win-after`: the hero does not walk, so the
+# chapter's own ending does not come). The flag is set as the real ending sets it; the game never
+# raises sim_victory.
+[[trigger]]
+id = "camp_sim_end"
+map = "camp"
+when = { event = "sim_victory" }
+then = [ { set = "camp_done", value = true } ]
