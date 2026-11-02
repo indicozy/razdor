@@ -1085,7 +1085,9 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     let up_ok = ok_look(d, up);
     let (bw, bh) = if up_ok { (OK_W_DP * dp, OK_H_DP * dp) } else { (95.0 * o * g, 36.0 * o * g) };
     let foot = 58.0 * o * g;
-    let by = y + h - foot + (foot - bh) / 2.0;
+    // Centred in the window's own footer (`outer`: with the learnt-spell window's padding the footer is
+    // `pad` lower than the content's foot).
+    let by = outer.y + outer.h - foot + (foot - bh) / 2.0;
     // A left or right press on an icon shows its item or spell centred on the press, kept
     // inside the window, until the button is let go (0x4c1fec / 0x4c2048, the frame handler
     // 0x4cd558); the window's buttons wait meanwhile.
