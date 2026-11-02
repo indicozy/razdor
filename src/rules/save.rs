@@ -1569,23 +1569,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_play_statistics_survive_a_save_and_old_saves_load_with_zeros() {
-        // Razdor's own statistics (`PlayStats`), not the original's.
-        let c = demo();
-        let mut g = Game::new(c.clone(), HeroClass::Knight);
-        g.stats = crate::rules::game::PlayStats { income: 120, wages: 40 };
-        let loaded = roundtrip(&g, c.clone(), None);
-        assert_eq!(loaded.stats, g.stats);
-        // A save written before the statistics existed.
-        let meta = meta_of(&g, SaveKind::Manual, "old").unwrap();
-        let mut value = serde_json::to_value(&g).unwrap();
-        value.as_object_mut().unwrap().remove("stats");
-        let old: Game = serde_json::from_value(value).unwrap();
-        let loaded = restore(&meta, old, c, None).unwrap();
-        assert_eq!(loaded.stats, crate::rules::game::PlayStats::default());
-    }
-
-    #[test]
     fn the_journal_history_survives_a_save_and_old_saves_load_without_one() {
         use crate::rules::journal::EntryKind;
         let c = demo();

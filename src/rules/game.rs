@@ -235,16 +235,6 @@ enum ArmyBlock {
     Passable,
 }
 
-/// Razdor's own «just for fun» statistics of a playthrough (a player's request, 2026-11-02; the
-/// original has none). Old saves load with zeros.
-#[derive(Clone, Debug, PartialEq, Default, serde::Serialize, serde::Deserialize)]
-pub struct PlayStats {
-    /// The gold received from the castles' income at noon.
-    pub income: i64,
-    /// The gold paid to the army in wages at noon.
-    pub wages: i64,
-}
-
 /// The whole game state. It is saved with serde (`rules::save`), except the content and the
 /// statics of the world and the event engine, which a load rebuilds from the scenario.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -288,9 +278,6 @@ pub struct Game {
     /// Where the player clicked: the end of the walk under way.
     pub goal: Option<Tile>,
     pub(crate) start_day: u64,
-    /// Razdor's play statistics (`PlayStats`, not the original's); old saves load with zeros.
-    #[serde(default)]
-    pub stats: PlayStats,
     /// The original's one generator (`rules::rng`): not saved; a map load sets it to 1, a
     /// save load starts it from the load sequence (`rules::save`).
     #[serde(skip)]
@@ -677,7 +664,6 @@ impl Game {
             fog: Fog::disabled(0, 0),
             goal: None,
             start_day: clock.day_index(),
-            stats: PlayStats::default(),
             rng: Rng::map_load(),
             event_rng: EventRng::from_clock(),
             music_wait: None,
@@ -1021,11 +1007,6 @@ impl Game {
 
     pub fn moving(&self) -> bool {
         !self.path.is_empty()
-    }
-
-    /// Days since the playthrough began (Razdor's statistic, `PlayStats`; not the original's).
-    pub fn days_in_play(&self) -> u64 {
-        self.clock.day_index().saturating_sub(self.start_day)
     }
 
     /// The game minute the map started: the original's clock counts from it.
@@ -3145,26 +3126,6 @@ mod tests {
     fn cannot_walk_into_the_sea() {
         let mut g = quiet_game(HeroClass::Knight);
         assert!(!g.set_destination((30, 40)), "open sea");
-    }
-
-    #[test]
-    fn noon_adds_the_income_and_the_wages_to_the_play_statistics() {
-        // Razdor's statistics (`PlayStats`), not the original's: the same noon as the test below.
-        let mut g = quiet_game(HeroClass::Knight);
-        g.first_noon_today();
-        g.hire(unit(&g, "spearman")).unwrap();
-        g.hire(unit(&g, "archer")).unwrap();
-        g.gold = 0;
-        let oak = g.world.index_of("Oakford");
-        g.world.locations[oak].tribute_gold = 20;
-        let first = g.days_in_play(); // the first day counts as day 1
-        assert_eq!(g.stats, PlayStats::default());
-        let mut events = Vec::new();
-        g.pass_time(4.0 * 60.0, &mut events); // 08:00 -> 12:00
-        assert_eq!(g.stats, PlayStats { income: 20, wages: 11 });
-        // Days in play count the days since the start, not the noons.
-        let _ = g.clock.advance(3.0 * crate::rules::clock::MINUTES_PER_DAY as f64);
-        assert_eq!(g.days_in_play(), first + 3);
     }
 
     #[test]

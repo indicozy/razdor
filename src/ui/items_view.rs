@@ -1786,12 +1786,10 @@ fn diary_list_reader(game: &Game, rows: &[razdor::rules::journal::Row], lines: &
 const DIARY_PHONE_TEXT: f32 = 13.5;
 
 /// The parts of the phone's diary window (`phone_diary`) inside its marble frame `inner`, at one unit
-/// one dp (`k`) and the text size `g`: the four tabs on top, «Закрыть» at the foot (held sideways, at
-/// the end of the tabs' row), the statistics chips (`chips`), and between them the entry list (`list`,
-/// its scrollbar `list_bar`) and the picked entry (`head`, the heading band, and `entry`, its box,
-/// scrollbar `entry_bar`). Held upright the list takes 40 % of the height over the entry, the chips
-/// sit above «Закрыть»; held sideways the list takes 40 % of the width left of the entry, the chips
-/// sit under it.
+/// one dp (`k`) and the text size `g`: the four tabs in a row on top, «Закрыть» centred at the foot,
+/// and between them the entry list (`list`, its scrollbar `list_bar`) and the picked entry (`head`,
+/// the heading band, and `entry`, its box, scrollbar `entry_bar`). Held upright the list takes 40 %
+/// of the height over the entry; held sideways it takes 40 % of the width left of the entry.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct PhoneDiary {
     tabs: [Rect; 4],
@@ -1801,43 +1799,9 @@ struct PhoneDiary {
     entry: Rect,
     entry_bar: Rect,
     close: Rect,
-    chips: [Rect; 3],
 }
 
-/// The statistics chips (`chip_w` wide each, `h` tall, `gap` apart) centred in `x`..`x + w`, in as
-/// few rows as fit, the last row ending at `bottom`. Returns the chips and the top of the block.
-fn chip_rects(chip_w: [f32; 3], x: f32, w: f32, bottom: f32, h: f32, gap: f32) -> ([Rect; 3], f32) {
-    let mut rows: Vec<Vec<usize>> = Vec::new();
-    let mut used = 0.0;
-    for (i, cw) in chip_w.iter().enumerate() {
-        match rows.last_mut() {
-            Some(row) if used + gap + cw <= w => {
-                row.push(i);
-                used += gap + cw;
-            }
-            _ => {
-                rows.push(vec![i]);
-                used = *cw;
-            }
-        }
-    }
-    let n = rows.len() as f32;
-    let top = bottom - (n * h + (n - 1.0) * gap);
-    let mut rects = [Rect::new(x, top, 0.0, 0.0); 3];
-    let mut y = top;
-    for row in &rows {
-        let total: f32 = row.iter().map(|&i| chip_w[i]).sum::<f32>() + gap * (row.len() - 1) as f32;
-        let mut cx = x + (w - total) / 2.0;
-        for &i in row {
-            rects[i] = Rect::new(cx, y, chip_w[i], h);
-            cx += chip_w[i] + gap;
-        }
-        y += h + gap;
-    }
-    (rects, top)
-}
-
-fn phone_diary_areas(inner: Rect, k: f32, g: f32, upright: bool, chip_w: [f32; 3]) -> PhoneDiary {
+fn phone_diary_areas(inner: Rect, k: f32, g: f32, upright: bool) -> PhoneDiary {
     let pad = 8.0 * k;
     let gap = 6.0 * k;
     // A tab and the close button are 44 dp tall (the owner's touch rule), grown with the text size.
@@ -1856,35 +1820,28 @@ fn phone_diary_areas(inner: Rect, k: f32, g: f32, upright: bool, chip_w: [f32; 3
     let tabs = std::array::from_fn(|i| Rect::new(inner.x + pad + (i % cols) as f32 * (cell + gap), top_y + (i / cols) as f32 * (th + gap), cell, th));
     let tabs_h = rows as f32 * th + (rows as f32 - 1.0) * gap;
     let top = top_y + tabs_h + gap;
-    let chip_h = DIARY_PHONE_TEXT * k * g * 1.8;
-    let side_w = ((w - gap) * 0.4).floor();
-    // The chips: above «Закрыть» held upright (under the list and the entry), under the list sideways.
-    let (close, chips, list_bottom, entry_bottom) = if upright {
+    let (close, bottom) = if upright {
         let close = Rect::new(inner.center().x - close_w / 2.0, inner.bottom() - pad - th, close_w, th);
-        let (chips, chips_top) = chip_rects(chip_w, inner.x + pad, w, close.y - gap, chip_h, gap);
-        let bottom = (chips_top - gap).max(top);
-        (close, chips, bottom, bottom)
+        (close, (close.y - gap).max(top))
     } else {
-        let close = Rect::new(inner.right() - pad - close_w, top_y, close_w, th);
-        let (chips, chips_top) = chip_rects(chip_w, inner.x + pad, side_w, inner.bottom() - pad, chip_h, gap);
-        (close, chips, (chips_top - gap).max(top), (inner.bottom() - pad).max(top))
+        (Rect::new(inner.right() - pad - close_w, top_y, close_w, th), (inner.bottom() - pad).max(top))
     };
     let (list, head, entry) = if upright {
-        let list = Rect::new(inner.x + pad, top, w, ((list_bottom - top) * 0.4).floor());
+        let list = Rect::new(inner.x + pad, top, w, ((bottom - top) * 0.4).floor());
         let head = Rect::new(inner.x + pad, list.bottom() + gap, w, head_h);
-        let entry = Rect::new(inner.x + pad, head.bottom(), w, (entry_bottom - head.bottom()).max(0.0));
+        let entry = Rect::new(inner.x + pad, head.bottom(), w, (bottom - head.bottom()).max(0.0));
         (list, head, entry)
     } else {
-        let list = Rect::new(inner.x + pad, top, side_w, list_bottom - top);
+        let list = Rect::new(inner.x + pad, top, ((w - gap) * 0.4).floor(), bottom - top);
         let x = list.right() + gap;
         let ew = (inner.right() - pad - x).max(0.0);
         // No heading sideways: the entry takes the whole column (`head` is empty).
         let head = Rect::new(x, top, ew, 0.0);
-        let entry = Rect::new(x, top, ew, (entry_bottom - top).max(0.0));
+        let entry = Rect::new(x, top, ew, (bottom - top).max(0.0));
         (list, head, entry)
     };
     let bar_of = |r: Rect| Rect::new(r.right() - bar, r.y, bar, r.h);
-    PhoneDiary { tabs, list, list_bar: bar_of(list), head, entry, entry_bar: bar_of(entry), close, chips }
+    PhoneDiary { tabs, list, list_bar: bar_of(list), head, entry, entry_bar: bar_of(entry), close }
 }
 
 /// A list row's title in at most two lines of `room` at `size` (in the font in use): a longer
@@ -1920,15 +1877,7 @@ fn phone_diary(game: &mut Game, assets: &Assets, view: &mut HeroView, message: &
     let ru = razdor::i18n::lang() == razdor::i18n::Lang::Ru;
     let (inner, closed) = chrome::window(win, tr(n_("Diary")), chrome::Skin::Marble, true);
     let text = DIARY_PHONE_TEXT * k * g;
-    // The statistics chips (Razdor's own, a player's request): the days in play and the money.
-    let stats = [
-        razdor::trf!("Days in play: {n}", n = game.days_in_play()),
-        razdor::trf!("Income: {n}", n = game.stats.income),
-        razdor::trf!("Wages: {n}", n = game.stats.wages),
-    ];
-    let chip_pad = 8.0 * k;
-    let chip_w = legacy_metrics_if(true, || stats.each_ref().map(|t| measure(t, text).width + 2.0 * chip_pad));
-    let a = phone_diary_areas(inner, k, g, window_layout::portrait(), chip_w);
+    let a = phone_diary_areas(inner, k, g, window_layout::portrait());
 
     // The tabs: a marble button each, the picked one ringed in gold.
     let mut switch = None;
@@ -2079,12 +2028,6 @@ fn phone_diary(game: &mut Game, assets: &Assets, view: &mut HeroView, message: &
             draw_markup_row_face(&line.row, entry.x + 8.0 * k, y, body_room, line.size, line.face, Some(line.color));
         }
     });
-
-    for (r, t) in a.chips.iter().zip(&stats) {
-        draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, 0.0, 0.0, 0.35));
-        draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0 * k, Color::new(0.85, 0.70, 0.35, 0.55));
-        legacy_metrics_if(true, || chrome::shadow_centered(t, r.center().x, r.center().y + text * 0.35, text, ink_color(Ink::Plain)));
-    }
 
     let pressed = button(a.close.x, a.close.y, a.close.w, a.close.h, tr("Close"), true);
     // The item held is the pointer; closing the window puts it back in the pack (`App::frame`).
@@ -2863,24 +2806,21 @@ mod tests {
         // A phone's window at 2.75 px a dp: about 363 x 620 dp.
         let inner = Rect::new(10.0, 20.0, 1000.0, 1700.0);
         let k = 2.75;
-        let chips = [120.0 * k, 110.0 * k, 120.0 * k];
-        let up = super::phone_diary_areas(inner, k, 1.0, true, chips);
+        let up = super::phone_diary_areas(inner, k, 1.0, true);
         // The four tabs on top (two rows held upright), «Закрыть» 44 dp tall at the foot, all inside the frame.
         assert!(up.tabs[0].y == up.tabs[1].y && up.tabs[2].y == up.tabs[3].y && up.tabs[2].y > up.tabs[0].y);
         assert!(up.tabs.iter().all(|t| t.bottom() <= up.list.y));
-        let side_tabs = super::phone_diary_areas(inner, k, 1.0, false, chips).tabs;
+        let side_tabs = super::phone_diary_areas(inner, k, 1.0, false).tabs;
         assert!(side_tabs.iter().all(|t| t.y == side_tabs[0].y));
         assert_eq!(up.close.h, 44.0 * k);
         assert!(up.close.bottom() <= inner.bottom() && up.close.y >= up.entry.bottom());
         // The list over the heading and the entry, the list taking 40 % of the height.
         assert!(up.list.bottom() <= up.head.y && up.head.bottom() <= up.entry.y);
         assert!(up.list.h < up.entry.h);
-        let chips_top = up.chips.iter().map(|c| c.y).fold(f32::INFINITY, f32::min);
-        assert!(up.chips.iter().all(|c| c.bottom() <= up.close.y - 6.0 * k + 0.01));
-        let avail = chips_top - 6.0 * k - up.list.y;
+        let avail = up.close.y - 6.0 * k - up.list.y;
         assert!((up.list.h - 0.4 * avail).abs() <= 1.0);
         // Sideways: the list left, 40 % of the width, the entry right, both down to the window's pad.
-        let side = super::phone_diary_areas(inner, k, 1.0, false, chips);
+        let side = super::phone_diary_areas(inner, k, 1.0, false);
         assert!(side.list.right() < side.entry.x);
         assert!((side.list.w - 0.4 * (inner.w - 22.0 * k)).abs() <= 1.0);
         assert_eq!(side.list.y, side.head.y);
@@ -2888,9 +2828,6 @@ mod tests {
         assert!(side.close.y < side.list.y && side.close.right() <= inner.right());
         assert!(side.tabs[3].right() < side.close.x);
         assert!(side.entry.bottom() <= inner.bottom());
-        // The chips sit under the list, inside its width, and end at the window's bottom pad.
-        assert!(side.chips.iter().all(|c| c.y >= side.list.bottom() && c.x >= side.list.x && c.right() <= side.list.right() + 0.5));
-        assert!(side.chips.iter().map(|c| c.bottom()).fold(0.0, f32::max) <= inner.bottom());
         // The scrollbars are 24 dp wide, at the right of their area.
         assert_eq!(up.list_bar.w, 24.0 * k);
         assert_eq!(up.list_bar.right(), up.list.right());
