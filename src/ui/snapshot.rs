@@ -17,7 +17,8 @@
 //! puts the pointer there (`RAZDOR_MOUSE_RIGHT=1` also holds the right button there: the map's tooltips); `RAZDOR_SCENE_SPELLS=<id>,…` puts those spells on every unit; `RAZDOR_SCENE_TARGET=<id>` starts the targeting of that enemy spell on the map; `RAZDOR_SCENE_MANA=<n>` sets the hero's mana in the `spells` scene; `RAZDOR_SCENE_PREVIEW=1` shows the first spell's card at the pointer in the `learnt` scene; `RAZDOR_SCENE_POTION=1` gives every unit of the army a
 //! drunk potion. `RAZDOR_SCENE_LANGUAGE=1` opens the language list (`title`, `options:advanced`, `settings:<map>:advanced`). `replay:<step>` with `RAZDOR_REPLAY=<actions.jsonl>`: the diff
 //! `RAZDOR_SCENE_EXPERIMENTAL=bonuses,rings,amulets` enables selected playthrough rules;
-//! `RAZDOR_SCENE_RULES=1` opens their menu over `scenarios`. `RAZDOR_SCENE_BONUS_ITEMS=1`
+//! `RAZDOR_SCENE_RULES=1` opens their menu over `scenarios`. `RAZDOR_SCENE_CARD=1` opens the picked map's card
+//! in the `scenarios:<map>` scene on a phone held upright (its list view otherwise). `RAZDOR_SCENE_BONUS_ITEMS=1`
 //! equips the hero with available distinct bonus items to exercise the trait scrollbar.
 //! test's action list played to that step. `RAZDOR_SCENE_BATTLE_EXIT=1` opens a battle
 //! scene's leave-battle window, `RAZDOR_SCENE_BATTLE_RESTART=1` the same with its «Рестарт»
@@ -168,6 +169,12 @@ pub fn base_maps_scene() -> Option<bool> {
         "open" => Some(true),
         _ => None,
     }
+}
+
+/// `RAZDOR_SCENE_CARD=1`: the picked map of the `scenarios:<map>` scene opens its card (a phone held
+/// upright; `new_game`).
+pub fn card_scene() -> bool {
+    std::env::var("RAZDOR_SCENE_CARD").is_ok_and(|v| v == "1")
 }
 
 /// `RAZDOR_SCENE_MOD_BUSY=1`: the new-game window shows a mod being built («Готовлю мод…»).

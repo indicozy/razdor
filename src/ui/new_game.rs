@@ -22,6 +22,7 @@ use super::audio::{cue, Cue};
 use super::chrome;
 use super::dt_font::{with_face, Face};
 use super::language;
+use super::hub_view::{hero, pane_scroll, Drag};
 use super::map_import;
 use super::widgets::*;
 use super::{screens, ScenarioEntry, Screen};
@@ -42,6 +43,12 @@ local! {
     /// The description's first shown line, and the group it was scrolled for.
     static DESC_SCROLL: Cell<(usize, usize)> = const { Cell::new((usize::MAX, 0)) };
     static HERO: Cell<usize> = const { Cell::new(0) };
+    /// On a phone held upright a tap on a startable entry opens its card (`card_view`): whether it is
+    /// open, its scroll, the content's height as the last frame drew it, and the drag of its scroll.
+    static CARD: Cell<bool> = const { Cell::new(false) };
+    static CARD_SCROLL: Cell<f32> = const { Cell::new(0.0) };
+    static CARD_H: Cell<f32> = const { Cell::new(0.0) };
+    static CARD_DRAG: Cell<Option<Drag>> = const { Cell::new(None) };
     /// A map to pick when the list opens (the `scenarios:<map>` snapshot scene).
     static PICK: RefCell<Option<String>> = const { RefCell::new(None) };
     /// The «Мод» choice made this frame (`Some(None)`: the base game), for the app to play
@@ -171,30 +178,34 @@ fn upright_dp() -> Option<f32> {
     (screen_width() < screen_height()).then_some(dp)
 }
 
-/// The scenario window on a phone held upright, in screen pixels (the owner's order, top to bottom:
-/// the map's picture with its description at the top, one row of «Все сценарии», «Как в игре» and
-/// «Добавить карту…», the list full width, and the bottom row «...», «Далее», «Отмена»; a «Мод» row
-/// under the first when mods are installed). Sizes in dp: the texts at 14 to 15 dp (14 sp and up by the
-/// mobile check), the rows 40 and 36 dp tall, the buttons 44 dp.
+/// The scenario window on a phone held upright, in screen pixels (the owner's order of 2026-11-02). Its
+/// list view: the top row «Все сценарии», «Как в игре», «Добавить карту…» (and a «Мод» row under it when
+/// mods are installed), the list full width under them, and the bottom row «...» and «Отмена». Its card
+/// view (a tap on a startable entry opens it, `card_view`): the map's picture as the hero with its title
+/// over it, the description under it, and the bottom row «Назад» and «Далее». Sizes in dp: the texts at
+/// 14 to 16 dp (14 sp and up by the mobile check), the rows 36 and 30 dp tall, the buttons 42 dp.
 struct Portrait {
-    /// The picture's frame's top left, and its scale (`map_frame_rects`'s px).
-    picture: Vec2,
-    picture_px: f32,
-    desc: Rect,
+    /// The scale: one dp in screen pixels.
+    dp: f32,
     filter: Rect,
     order: Rect,
     add: Rect,
     mod_row: Option<Rect>,
+    /// The list, under the top rows down to the bottom row.
     rows: Rect,
     dots: Rect,
-    next: Rect,
     cancel: Rect,
+    /// The card: from the top row's place down to the bottom row, the hero and the description in it.
+    card: Rect,
+    back: Rect,
+    next: Rect,
     head_h: f32,
     chapter_h: f32,
     name_px: f32,
     chapter_px: f32,
-    /// The description's scale: its body text is 12 of these (`12.0 * desc_k`).
-    desc_k: f32,
+    /// The card's description: its text, and how far each line moves the next one down.
+    card_px: f32,
+    card_step: f32,
 }
 
 impl Portrait {
@@ -204,15 +215,9 @@ impl Portrait {
         let x0 = r.x + 10.0 * dp;
         let w = r.w - 20.0 * dp;
         let top = r.y + 31.0 * win.k + 2.0 * dp;
-        // The top block: the picture (its frame's 295:162) at 44% of the width, the description beside it.
-        let block_h = 190.0 * dp;
-        let picture_w = (w * 0.38).min(block_h * 295.0 / 162.0);
-        let picture_px = picture_w / 295.0;
-        let desc = Rect::new(x0 + picture_w + m, top, w - picture_w - m, block_h);
-        let row_y = top + block_h + m;
         let bw = (w - 2.0 * gap) / 3.0;
-        let (filter, order, add) = (Rect::new(x0, row_y, bw, btn_h), Rect::new(x0 + bw + gap, row_y, bw, btn_h), Rect::new(x0 + 2.0 * (bw + gap), row_y, bw, btn_h));
-        let mut y = row_y + btn_h + m;
+        let (filter, order, add) = (Rect::new(x0, top, bw, btn_h), Rect::new(x0 + bw + gap, top, bw, btn_h), Rect::new(x0 + 2.0 * (bw + gap), top, bw, btn_h));
+        let mut y = top + btn_h + m;
         let mod_row = mods.then(|| {
             let rr = Rect::new(x0, y, w, btn_h);
             y += btn_h + m;
@@ -222,28 +227,29 @@ impl Portrait {
         let rows = Rect::new(x0, y, w, (foot_y - m - y).max(0.0));
         let dots_w = 56.0 * dp;
         let dots = Rect::new(x0, foot_y, dots_w, btn_h);
-        let half = (w - dots_w - 2.0 * m) / 2.0;
-        let next = Rect::new(x0 + dots_w + m, foot_y, half, btn_h);
-        let cancel = Rect::new(next.x + half + m, foot_y, half, btn_h);
-        // The description is 14 dp (its title 16 of its 12 parts), not grown with the text size: its box is small.
-        let desc_body = 13.0 * dp;
+        let cancel = Rect::new(x0 + dots_w + m, foot_y, w - dots_w - m, btn_h);
+        let card = Rect::new(x0, top, w, (foot_y - m - top).max(0.0));
+        let half = (w - m) / 2.0;
+        let back = Rect::new(x0, foot_y, half, btn_h);
+        let next = Rect::new(x0 + half + m, foot_y, half, btn_h);
         Portrait {
-            picture: vec2(x0, top),
-            picture_px,
-            desc,
+            dp,
             filter,
             order,
             add,
             mod_row,
             rows,
             dots,
-            next,
             cancel,
+            card,
+            back,
+            next,
             head_h: 36.0 * dp * grow,
             chapter_h: 30.0 * dp * grow,
             name_px: 15.0 * dp,
             chapter_px: 14.0 * dp,
-            desc_k: desc_body / 12.0,
+            card_px: 16.0 * dp,
+            card_step: 22.0 * dp,
         }
     }
 }
@@ -589,6 +595,15 @@ pub fn open_list() {
     SCROLL.with(|s| s.set(0.0));
     BASE_OPEN.with(|b| b.set(false));
     MARKS.with(|m| *m.borrow_mut() = None);
+    open_card(false);
+}
+
+/// Opens (or shuts) the card of the picked entry on the upright phone, its scroll at the top.
+fn open_card(on: bool) {
+    CARD.with(|c| c.set(on));
+    CARD_SCROLL.with(|s| s.set(0.0));
+    CARD_H.with(|h| h.set(0.0));
+    CARD_DRAG.with(|d| d.set(None));
 }
 
 /// A five-pointed star centred on `c` (the favourite mark): filled, or its outline.
@@ -832,9 +847,17 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
         if let Some(i) = list.iter().position(|g| std::iter::once(&g.first).chain(&g.chapters).any(|&m| scenarios[m].file.starts_with(&name))) {
             PICKED.with(|p| p.set(i));
             PICKED_MAP.with(|p| p.set(None));
+            if super::snapshot::card_scene() {
+                open_card(true);
+            }
         }
     }
     let mut picked = PICKED.with(|p| p.get()).min(list.len().saturating_sub(1));
+    // A phone held upright with a card open: the card is the whole window's view (`card_view`).
+    if let Some(p) = pl.as_ref().filter(|_| CARD.with(Cell::get) && !list.is_empty()) {
+        PICKED.with(|q| q.set(picked));
+        return card_view(p, scenarios, &list, picked, start_allowed(true, busy), closed);
+    }
     // The list: per group a round icon and the name, and a campaign's chapters under it in
     // small type; the picked group's block is lit. The wheel and the scrollbar scroll it.
     // The box's top left is the window's inner pane frame's corner (4, 31), so its silver edge
@@ -891,6 +914,8 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
         }
     }
     let mut next = None;
+    let upright = pl.is_some();
+    let mut open_card_now = false;
     let mut y = view.y + FIRST_ROW_PX * k - scroll * k;
     for (row, g) in list.iter().enumerate() {
         if base_open && row == main_len {
@@ -986,8 +1011,10 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
         });
         // A campaign heading or individual chapter is selected only on click.
         if head_pressed {
-            if row == picked && PICKED_MAP.with(|p| p.get()).is_none() {
-                next = Some(Screen::ClassSelect { scenario: Some(g.first) });
+            match pick_tap(upright, row == picked && PICKED_MAP.with(|p| p.get()).is_none()) {
+                PickTap::Start => next = Some(Screen::ClassSelect { scenario: Some(g.first) }),
+                PickTap::Card => open_card_now = true,
+                PickTap::Pick => {}
             }
             picked = row;
             PICKED_MAP.with(|p| p.set(None));
@@ -995,8 +1022,10 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
             for (n, &chapter_index) in chapters.iter().enumerate() {
                 let chapter = Rect::new(r.x + 28.0 * k, r.y + head_h + n as f32 * chapter_h, r.w - 28.0 * k, chapter_h);
                 if over_list && chapter.contains(crate::ui::widgets::pointer().into()) && clicked() {
-                    if PICKED_MAP.with(|p| p.get()) == Some(chapter_index) {
-                        next = Some(Screen::ClassSelect { scenario: Some(g.first) });
+                    match pick_tap(upright, PICKED_MAP.with(|p| p.get()) == Some(chapter_index)) {
+                        PickTap::Start => next = Some(Screen::ClassSelect { scenario: Some(g.first) }),
+                        PickTap::Card => open_card_now = true,
+                        PickTap::Pick => {}
                     }
                     picked = row;
                     PICKED_MAP.with(|p| p.set(Some(chapter_index)));
@@ -1004,6 +1033,9 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
                 }
             }
         }
+    }
+    if open_card_now {
+        open_card(true);
     }
     if base_count > 0 {
         let visible = header.y < inside.y + inside.h && header.y + header.h > inside.y;
@@ -1031,14 +1063,11 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
     }
     PICKED.with(|p| p.set(picked));
     // The map and what it is.
-    if let Some(g) = list.get(picked) {
+    if let (None, Some(g)) = (&pl, list.get(picked)) {
         let (i, e) = (g.first, &scenarios[g.first]);
         // (Razdor's scenario window draws the frame at the interface scale, 295 × 162 of its
         // own pixels, the picture at the same scale so the two stay in register.)
-        let (frame, inner) = match &pl {
-            Some(p) => map_frame_rects(p.picture, p.picture_px),
-            None => map_frame_rects(win.rect(290.0, 36.0, 0.0, 0.0).point(), k),
-        };
+        let (frame, inner) = map_frame_rects(win.rect(290.0, 36.0, 0.0, 0.0).point(), k);
         // The original copies MapImageFrame (295×162) as it is, then the map's own 267×134
         // picture at its size 14 px in, over the frame's opening (0x4c1c09..0x4c1c63); no
         // line is drawn round either. Without a picture Razdor shows the terrain there.
@@ -1060,13 +1089,8 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
         // 0x4c1b4b), the description in the bold SanSerif's orange (ae24f4 over ae2510,
         // 0x4c1bb4), from the box's top.
         // The description's sizes: its scale `kk` (the window's k, or the phone's dp).
-        let (desc, kk) = match &pl {
-            Some(p) => (p.desc, p.desc_k),
-            None => {
-                let bottom = win.rect(0.0, win.content_bottom(), 0.0, 0.0).y;
-                (Rect::new(frame.x, frame.y + frame.h + 8.0 * k, frame.w, (bottom - frame.y - frame.h - 8.0 * k).max(0.0)), k)
-            }
-        };
+        let bottom = win.rect(0.0, win.content_bottom(), 0.0, 0.0).y;
+        let (desc, kk) = (Rect::new(frame.x, frame.y + frame.h + 8.0 * k, frame.w, (bottom - frame.y - frame.h - 8.0 * k).max(0.0)), k);
         chrome::text_box(desc);
         let size = 12.0 * kk;
         let room = desc.w - 34.0 * k;
@@ -1084,10 +1108,6 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
         let (for_group, mut first) = DESC_SCROLL.with(|d| d.get());
         if for_group != picked {
             first = 0;
-        }
-        // A phone held upright scrolls it with a finger too (a swipe turns into the wheel's lines).
-        if pl.is_some() {
-            swipe_rows(desc, 14.0 * kk);
         }
         if !input_blocked() && desc.contains(crate::ui::widgets::pointer().into()) {
             let turned = wheel();
@@ -1199,16 +1219,18 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
     let next_x = cancel_x - 7.0 - next_w;
     let dots_w = 34.0 * grow;
     let dots_x = next_x - 7.0 - dots_w;
-    let (dots_r, next_r, cancel_r) = match &pl {
-        Some(p) => (p.dots, p.next, p.cancel),
-        None => (win.rect(dots_x, win.foot_y, dots_w, FOOT_H * grow), win.rect(next_x, win.foot_y, next_w, FOOT_H * grow), win.rect(cancel_x, win.foot_y, cancel_w, FOOT_H * grow)),
+    let (dots_r, cancel_r) = match &pl {
+        Some(p) => (p.dots, p.cancel),
+        None => (win.rect(dots_x, win.foot_y, dots_w, FOOT_H * grow), win.rect(cancel_x, win.foot_y, cancel_w, FOOT_H * grow)),
     };
+    let next_r = win.rect(next_x, win.foot_y, next_w, FOOT_H * grow);
     if button_rect(dots_r, "...", can) {
         RULES_OPEN.with(|p| p.set(true));
         return None;
     }
     let selected_map = campaign_start(&list, picked);
-    if (button_rect(next_r, &own("Buttons", "Next", n_("Next")), start) || (start && key(KeyCode::Enter))) && next.is_none() {
+    // The upright list starts nothing: its card has «Далее».
+    if pl.is_none() && (button_rect(next_r, &own("Buttons", "Next", n_("Next")), start) || (start && key(KeyCode::Enter))) && next.is_none() {
         cue(Cue::Button);
         next = selected_map.map(|i| Screen::ClassSelect { scenario: Some(i) });
     }
@@ -1216,6 +1238,69 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
         return Some(Screen::MainMenu);
     }
     next
+}
+
+/// What a tap on a list row does: on the desktop and a phone held sideways a first tap picks the entry
+/// and a second one on the picked entry (or its chapter) starts it; on a phone held upright a tap picks
+/// it and opens its card, where «Далее» starts it.
+#[derive(Debug, PartialEq)]
+enum PickTap {
+    Start,
+    Pick,
+    Card,
+}
+
+fn pick_tap(upright: bool, already_picked: bool) -> PickTap {
+    if upright {
+        PickTap::Card
+    } else if already_picked {
+        PickTap::Start
+    } else {
+        PickTap::Pick
+    }
+}
+
+/// The card of the picked entry on a phone held upright (the hub's card, the owner's order of
+/// 2026-11-02): the map's picture as the hero with its title over it, its description under it at
+/// 16 dp, scrolled by a swipe, the wheel or the bar, and the bottom row «Назад» (back to the list) and
+/// «Далее» (starts the campaign or the map, as the list's «Далее» did). The window's close and Esc go
+/// back to the list too.
+fn card_view(p: &Portrait, scenarios: &[ScenarioEntry], list: &[Group], picked: usize, start: bool, closed: bool) -> Option<Screen> {
+    let g = &list[picked];
+    let (i, e) = (g.first, &scenarios[g.first]);
+    let (k, card) = (p.dp, p.card);
+    let most = (CARD_H.with(Cell::get) - card.h).max(0.0);
+    let (mut scroll, mut drag) = (CARD_SCROLL.with(Cell::get), CARD_DRAG.with(Cell::get));
+    let room = pane_scroll(&mut scroll, &mut drag, card, most, k, true);
+    CARD_SCROLL.with(|s| s.set(scroll));
+    CARD_DRAG.with(|d| d.set(drag));
+    let r = Rect::new(card.x, card.y - scroll, card.w - room, card.h);
+    let clip = crate::ui::widgets::Clip::new(card);
+    let content_h = super::dt_font::legacy_metrics_if(true, || {
+        let pic = picture(i, e);
+        let hh = hero(r, pic.as_ref(), card.h * 0.45, &group_name(scenarios, g).replace(['^', '*', '|', '@'], ""), k, k);
+        let mut y = r.y + hh + 16.0 * k;
+        let room = r.w - 12.0 * k;
+        let orange = with_face(Face::Bold, || super::typography::Ink::Orange.color());
+        // Left-aligned and wrapped as the hub's text is (justified lines leave wide gaps at this size).
+        let lines = with_face(Face::Bold, || super::hub_view::wrap_long(&e.scenario.description, room, p.card_px));
+        for l in &lines {
+            with_face(Face::Bold, || chrome::shadow_text(l, r.x + 6.0 * k, y, p.card_px, orange));
+            y += p.card_step;
+        }
+        y - r.y + 10.0 * k
+    });
+    drop(clip);
+    CARD_H.with(|h| h.set(content_h));
+    if button_rect(p.back, tr("Back"), true) || closed || key(KeyCode::Escape) {
+        open_card(false);
+        return None;
+    }
+    if button_rect(p.next, &own("Buttons", "Next", n_("Next")), start) || (start && key(KeyCode::Enter)) {
+        cue(Cue::Button);
+        return campaign_start(list, picked).map(|i| Screen::ClassSelect { scenario: Some(i) });
+    }
+    None
 }
 
 pub(super) fn experimental_rules() -> ExperimentalRules { EXPERIMENTAL.with(Cell::get) }
@@ -1689,6 +1774,16 @@ mod tests {
     /// The footer at Normal keeps the original's places: the buttons at 443 and the list and the
     /// description ending at 432, with or without the extras row (1458); the extras row sits under
     /// the buttons and fits the window at Large and Largest too.
+    #[test]
+    fn a_tap_on_a_startable_entry_opens_its_card_only_on_the_upright_phone() {
+        // Upright: any pick opens the card, the second tap included (Далее starts it there).
+        assert_eq!(pick_tap(true, false), PickTap::Card);
+        assert_eq!(pick_tap(true, true), PickTap::Card);
+        // Elsewhere, as before: the first tap picks, the second on the picked entry starts it.
+        assert_eq!(pick_tap(false, false), PickTap::Pick);
+        assert_eq!(pick_tap(false, true), PickTap::Start);
+    }
+
     #[test]
     fn the_footer_keeps_the_original_places_and_the_extras_row_fits() {
         assert_eq!(window_video_h(1.0, false, false), 482.0, "the original's window without the extras");

@@ -84,7 +84,7 @@ struct Preview {
 /// A press on a scrolled area, held until the button comes up: where it began, the scroll it
 /// began at, and whether the pointer has moved past the slop since (then it is a drag).
 #[derive(Clone, Copy, Debug)]
-struct Drag {
+pub(super) struct Drag {
     at: (f32, f32),
     start: f32,
     moved: bool,
@@ -473,7 +473,7 @@ pub fn break_long(line: &str, fits: impl Fn(&str) -> bool) -> Vec<String> {
 
 /// [`wrap_cached`] with the words too wide for `width` broken (`break_long`): a long link wraps
 /// inside the box instead of running off its edge.
-fn wrap_long(s: &str, width: f32, size: f32) -> Vec<String> {
+pub(super) fn wrap_long(s: &str, width: f32, size: f32) -> Vec<String> {
     wrap_cached(s, width, size).iter().flat_map(|l| break_long(l, |t| measure(t, size).width <= width)).collect()
 }
 
@@ -750,6 +750,74 @@ pub fn frame(view: &mut HubView) -> bool {
     close
 }
 
+/// A card's hero on a phone held upright (the hub's details, the scenario card): the picture as
+/// wide as `r` and at most `max_h` tall, its centre band cropped to that height (a dark frame while
+/// it loads, or with no picture), a dark fade over its bottom half, and the title over the fade in the
+/// title font: at most two lines, the last 16 units above the picture's bottom and the first 32 above
+/// that, a longer title cut with an ellipsis. `k` is the window's scale (lines), `s` the text's (`k`
+/// times the text size). Returns the picture's height.
+pub(super) fn hero(r: Rect, picture: Option<&Texture2D>, max_h: f32, title: &str, k: f32, s: f32) -> f32 {
+    let (w, h) = picture.map_or((16.0, 9.0), |t| (t.width(), t.height()));
+    let hh = (r.w * h / w).min(max_h);
+    match picture {
+        Some(t) => {
+            let sh = w * hh / r.w;
+            let sy = (h - sh) / 2.0;
+            draw_texture_ex(t, r.x, r.y, WHITE, DrawTextureParams { dest_size: Some(vec2(r.w, hh)), source: Some(Rect::new(0.0, sy, w, sh)), ..Default::default() });
+        }
+        None => draw_rectangle(r.x, r.y, r.w, hh, Color::new(0.05, 0.04, 0.03, 0.8)),
+    }
+    // A dark fade over the bottom half, from clear to 85% black: one pixel row at a time on
+    // whole pixels, so no seam between bands shows through the title.
+    let (top, bottom) = ((r.y + hh / 2.0).floor(), (r.y + hh).floor());
+    let rows = (bottom - top).max(1.0);
+    let mut py = top;
+    while py < bottom {
+        let a = 0.85 * (py - top + 1.0) / rows;
+        draw_rectangle(r.x, py, r.w, 1.0, Color::new(0.02, 0.03, 0.02, a));
+        py += 1.0;
+    }
+    draw_rectangle_lines(r.x, r.y, r.w, hh, 2.0 * k, Color::new(0.75, 0.72, 0.62, 0.8));
+    // The title in the title font, centered over the fade.
+    let title_px = (28.0 * s).round();
+    let width = r.w - 24.0 * s;
+    super::dt_font::with_face(super::dt_font::Face::Title, || {
+        // The largest size that keeps the title on one line (28, 24, then 20 units), else the
+        // largest that keeps it on two, else three lines at 20; a longer one is cut with an ellipsis.
+        let sizes = [title_px, (24.0 * s).round(), (20.0 * s).round()];
+        let fits = |n: usize| sizes.iter().map(|&z| (z, wrap_long(title, width, z))).find(|(_, l)| l.len() <= n);
+        let (tz, mut lines) = fits(1).or_else(|| fits(2)).unwrap_or_else(|| (sizes[2], wrap_long(title, width, sizes[2])));
+        if lines.len() > 3 {
+            let rest = lines.split_off(2).join(" ");
+            lines.push(ellipsize(&rest, width, tz));
+        }
+        let last = r.y + hh - 16.0 * s;
+        for (i, l) in lines.iter().enumerate() {
+            let up = (lines.len() - 1 - i) as f32;
+            let tx = r.x + (r.w - measure(l, tz).width) / 2.0;
+            chrome::shadow_text(l, tx, last - up * 32.0 * s * tz / title_px, tz, GOLD);
+        }
+    });
+    hh
+}
+
+/// A pane's scroll, as the hub's details pane has it: a swipe or the wheel over it (40 px a notch),
+/// a drag with the finger, and the bar on its right. `most` is the content's height above the pane's
+/// (0 when it fits). Returns the room the bar takes on the pane's right: the content is drawn that
+/// much narrower.
+pub(super) fn pane_scroll(scroll: &mut f32, drag: &mut Option<Drag>, pane: Rect, most: f32, k: f32, phone: bool) -> f32 {
+    let room = if most > 0.0 { bar_room(k, phone) } else { 0.0 };
+    let body = Rect::new(pane.x, pane.y, pane.w - room, pane.h);
+    swipe_rows(body, 40.0 * k);
+    if !input_blocked() && mouse_in(body.x, body.y, body.w, body.h) {
+        *scroll -= wheel() * 40.0 * k;
+    }
+    let (moved, _) = drag_frame(drag, body, *scroll, 1.0, most, drag_slop());
+    *scroll = clamp_scroll(moved, most);
+    scrollbar_px(bar_rect(pane.x + pane.w, pane.y, pane.h, k, phone), scroll, most, pane.h, 40.0 * k);
+    room
+}
+
 /// The picked entry in the details pane `pane`, scrolled by the wheel, a swipe, a drag or the
 /// bar on its right, and clipped to the pane so no text reaches the bottom row. Install or
 /// Remove sits at the bottom right of the window (`lay`), below the pane.
@@ -770,15 +838,7 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
     }
     // The bar and the text's width follow the content's height as the last frame drew it.
     let most = (view.detail_h - pane.h).max(0.0);
-    let room = if most > 0.0 { bar_room(k, lay.phone) } else { 0.0 };
-    let body = Rect::new(pane.x, pane.y, pane.w - room, pane.h);
-    swipe_rows(body, 40.0 * k);
-    if !input_blocked() && mouse_in(body.x, body.y, body.w, body.h) {
-        view.detail_scroll -= wheel() * 40.0 * k;
-    }
-    let (scroll, _) = drag_frame(&mut view.pane_drag, body, view.detail_scroll, 1.0, most, drag_slop());
-    view.detail_scroll = clamp_scroll(scroll, most);
-    scrollbar_px(bar_rect(pane.x + pane.w, pane.y, pane.h, k, lay.phone), &mut view.detail_scroll, most, pane.h, 40.0 * k);
+    let room = pane_scroll(&mut view.detail_scroll, &mut view.pane_drag, pane, most, k, lay.phone);
     let scroll = view.detail_scroll;
 
     // The content, from the pane's top less the scroll, drawn clipped to the pane.
@@ -810,49 +870,8 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
         if lay.narrow {
             if picture {
                 // A phone held upright: the picture is the hero, as wide as the pane and at most 45% of
-                // the pane tall, its centre band cropped to that height. The title sits over its bottom half.
-                let (w, h) = loaded.as_ref().map_or((16.0, 9.0), |t| (t.width(), t.height()));
-                let hh = (r.w * h / w).min(pane.h * 0.45);
-                match &loaded {
-                    Some(t) => {
-                        let sh = w * hh / r.w;
-                        let sy = (h - sh) / 2.0;
-                        draw_texture_ex(t, r.x, r.y, WHITE, DrawTextureParams { dest_size: Some(vec2(r.w, hh)), source: Some(Rect::new(0.0, sy, w, sh)), ..Default::default() });
-                    }
-                    None => draw_rectangle(r.x, r.y, r.w, hh, Color::new(0.05, 0.04, 0.03, 0.8)),
-                }
-                // A dark fade over the bottom half, from clear to 85% black: one pixel row at a time on
-                // whole pixels, so no seam between bands shows through the title.
-                let (top, bottom) = ((r.y + hh / 2.0).floor(), (r.y + hh).floor());
-                let rows = (bottom - top).max(1.0);
-                let mut py = top;
-                while py < bottom {
-                    let a = 0.85 * (py - top + 1.0) / rows;
-                    draw_rectangle(r.x, py, r.w, 1.0, Color::new(0.02, 0.03, 0.02, a));
-                    py += 1.0;
-                }
-                draw_rectangle_lines(r.x, r.y, r.w, hh, 2.0 * k, Color::new(0.75, 0.72, 0.62, 0.8));
-                // The title in the title font, centered over the fade: at most two lines, the last one's
-                // baseline 16 units above the picture's bottom, the first 32 units above that.
-                let width = r.w - 24.0 * s;
-                super::dt_font::with_face(super::dt_font::Face::Title, || {
-                    // The largest size that keeps the title on one line (28, 24, then 20 units), else the
-                    // largest that keeps it on two, else three lines at 20; a longer one is cut with an ellipsis.
-                    let title = e.title.get(lang());
-                    let sizes = [title_px, (24.0 * s).round(), (20.0 * s).round()];
-                    let fits = |n: usize| sizes.iter().map(|&z| (z, wrap_long(title, width, z))).find(|(_, l)| l.len() <= n);
-                    let (tz, mut lines) = fits(1).or_else(|| fits(2)).unwrap_or_else(|| (sizes[2], wrap_long(title, width, sizes[2])));
-                    if lines.len() > 3 {
-                        let rest = lines.split_off(2).join(" ");
-                        lines.push(ellipsize(&rest, width, tz));
-                    }
-                    let last = r.y + hh - 16.0 * s;
-                    for (i, l) in lines.iter().enumerate() {
-                        let up = (lines.len() - 1 - i) as f32;
-                        let tx = r.x + (r.w - measure(l, tz).width) / 2.0;
-                        chrome::shadow_text(l, tx, last - up * 32.0 * s * tz / title_px, tz, GOLD);
-                    }
-                });
+                // the pane tall, its title over its bottom half (`hero`).
+                let hh = hero(r, loaded.as_ref(), pane.h * 0.45, e.title.get(lang()), k, s);
                 y = r.y + hh + 34.0 * s;
             } else {
                 // No picture: the title is centered at the top, each line of it, in the title font.
