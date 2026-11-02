@@ -36,7 +36,7 @@ pub const EVENTS: [&str; 13] = [
 /// The conditions (`if`). Each is a table with one of these keys (its kind).
 pub const CONDITIONS: [&str; 10] = ["var", "random", "hero_at", "army_at", "has_named_unit", "has_item", "gold", "army_alive", "building_owner", "has_spell"];
 /// The actions (`then`), each a table with one of these keys.
-pub const ACTIONS: [&str; 27] = [
+pub const ACTIONS: [&str; 28] = [
     "set",
     "add",
     "random_var",
