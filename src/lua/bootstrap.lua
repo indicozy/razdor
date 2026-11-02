@@ -87,25 +87,79 @@ local function check_time(where)
   end
 end
 
+-- Backtracking items of a pattern: each quantifier (* + - ?) counts once, and so does each
+-- `.` or %class item that a quantifier follows (it is the one that backtracks). A set
+-- ([...]) is one class. Matching cost grows like n^(items+1) in the subject length n, and the
+-- instruction hook does not run inside the matcher, so the length is bounded by that.
+local function backtracking(p)
+  local q, i, n = 0, 1, #p
+  local function quant(pos)
+    local c = p:byte(pos)
+    return c == 42 or c == 43 or c == 45 or c == 63
+  end
+  while i <= n do
+    local c = p:byte(i)
+    local kind
+    if c == 37 then -- %x: a class
+      kind = "any"
+      i = i + 2
+    elseif c == 91 then -- [...]: a set
+      kind = "any"
+      local j = i + 1
+      if p:byte(j) == 94 then j = j + 1 end
+      if p:byte(j) == 93 then j = j + 1 end
+      while j <= n and p:byte(j) ~= 93 do
+        if p:byte(j) == 37 then j = j + 1 end
+        j = j + 1
+      end
+      i = j + 1
+    elseif c == 46 then -- .
+      kind = "any"
+      i = i + 1
+    elseif c == 40 or c == 41 or c == 94 or c == 36 then -- ( ) ^ $: no item
+      i = i + 1
+    elseif quant(i) then -- a quantifier with nothing before it (after a group)
+      q = q + 1
+      i = i + 1
+    else
+      kind = "lit"
+      i = i + 1
+    end
+    if kind and i <= n and quant(i) then
+      q = q + 1
+      if kind == "any" then
+        q = q + 1
+      end
+      i = i + 1
+    end
+  end
+  return q
+end
+
+-- The longest subject a pattern may run on: 2e8 steps at most, n^(items+1) <= 2e8, and the
+-- subject limit in any case.
+local function longest_subject(q)
+  return math.min(limits.subject, math.floor(limits.work ^ (1 / (q + 1))))
+end
+
 local function check_pattern(where, s, p)
   check_time(where)
-  if type(s) == "string" and #s > limits.subject then
-    reject(where, "the subject is longer than " .. limits.subject .. " bytes")
-  end
   if type(p) == "string" then
     if #p > limits.pattern then
       reject(where, "the pattern is longer than " .. limits.pattern .. " bytes")
     end
-    local q = 0
-    for i = 1, #p do
-      local c = p:byte(i)
-      if c == 42 or c == 43 or c == 45 or c == 63 then -- * + - ?
-        q = q + 1
+    local q = backtracking(p)
+    if q > limits.quantifiers then
+      reject(where, "the pattern has more than " .. limits.quantifiers .. " backtracking items")
+    end
+    if type(s) == "string" then
+      local most = longest_subject(q)
+      if #s > most then
+        reject(where, "a subject of " .. #s .. " bytes is too long for this pattern (the limit is " .. most .. " bytes)")
       end
     end
-    if q > limits.quantifiers then
-      reject(where, "the pattern has more than " .. limits.quantifiers .. " quantifiers")
-    end
+  elseif type(s) == "string" and #s > limits.subject then
+    reject(where, "the subject is longer than " .. limits.subject .. " bytes")
   end
 end
 
@@ -118,13 +172,34 @@ string.match = function(s, p, ...)
   check_pattern("string.match", s, p)
   return real_match(s, p, ...)
 end
+-- Every step of the iterator checks the deadline, not only its creation.
 string.gmatch = function(s, p, ...)
   check_pattern("string.gmatch", s, p)
-  return real_gmatch(s, p, ...)
+  local it = real_gmatch(s, p, ...)
+  return function()
+    check_time("string.gmatch")
+    return it()
+  end
 end
-string.gsub = function(s, p, ...)
+-- A function or table replacement runs Lua code between matches, and the deadline is checked
+-- before each one; a string replacement is plain text.
+string.gsub = function(s, p, repl, ...)
   check_pattern("string.gsub", s, p)
-  return real_gsub(s, p, ...)
+  local t = type(repl)
+  if t == "function" then
+    local f = repl
+    repl = function(...)
+      check_time("string.gsub")
+      return f(...)
+    end
+  elseif t == "table" then
+    local tb = repl
+    repl = function(k)
+      check_time("string.gsub")
+      return tb[k]
+    end
+  end
+  return real_gsub(s, p, repl, ...)
 end
 
 local real_rep = string.rep

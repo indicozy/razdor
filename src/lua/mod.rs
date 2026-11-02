@@ -43,7 +43,10 @@ const TIME_LIMIT: std::time::Duration = std::time::Duration::from_secs(2);
 /// Sizes the sandbox's string and table wrappers accept (`bootstrap.lua`).
 pub const SUBJECT_BYTES: usize = 64 << 10;
 pub const PATTERN_BYTES: usize = 256;
-pub const PATTERN_QUANTIFIERS: usize = 8;
+/// Backtracking items a pattern may have (see `backtracking` in `bootstrap.lua`).
+pub const PATTERN_QUANTIFIERS: usize = 4;
+/// The matcher steps a pattern may take on its subject: n^(items+1) must stay within it.
+pub const MATCH_WORK: u64 = 200_000_000;
 pub const REP_BYTES: usize = 1 << 20;
 pub const CONCAT_BYTES: usize = 1 << 20;
 
@@ -118,6 +121,8 @@ pub struct Runtime {
     scripts: Rc<Scripts>,
     /// The wall-clock deadline of the call under way (see [`TIME_LIMIT`]).
     deadline: Rc<Cell<Option<std::time::Instant>>>,
+    /// The limit each call is given (tests set it to zero).
+    time_limit: Cell<std::time::Duration>,
 }
 
 /// A small seeded generator (splitmix64) for `math.random`: the same seed gives the same numbers
@@ -155,7 +160,8 @@ impl SeedRng {
 fn message(e: &mlua::Error) -> String {
     match e {
         mlua::Error::CallbackError { cause, .. } => message(cause),
-        mlua::Error::RuntimeError(text) => text.clone(),
+        // A traceback (added to errors raised in Rust callbacks) is not part of the message.
+        mlua::Error::RuntimeError(text) => text.split("\nstack traceback:").next().unwrap_or_default().to_string(),
         mlua::Error::MemoryError(_) => format!("not enough memory (the limit is {} MB)", MEMORY_LIMIT >> 20),
         mlua::Error::SyntaxError { message, .. } => message.clone(),
         other => other.to_string(),
@@ -324,12 +330,12 @@ impl Runtime {
             })
             .map_err(fail)?;
         let limits = lua.create_table().map_err(fail)?;
-        for (k, v) in [("subject", SUBJECT_BYTES), ("pattern", PATTERN_BYTES), ("quantifiers", PATTERN_QUANTIFIERS), ("rep", REP_BYTES), ("concat", CONCAT_BYTES)] {
+        for (k, v) in [("subject", SUBJECT_BYTES as u64), ("pattern", PATTERN_BYTES as u64), ("quantifiers", PATTERN_QUANTIFIERS as u64), ("rep", REP_BYTES as u64), ("concat", CONCAT_BYTES as u64), ("work", MATCH_WORK)] {
             limits.set(k, v).map_err(fail)?;
         }
         lua.load(BOOTSTRAP).set_name("@razdor/bootstrap.lua").call::<()>((check, overdue, limits)).map_err(fail)?;
 
-        Ok(Runtime { lua, spent, exhausted, rng, log, scripts, deadline })
+        Ok(Runtime { lua, spent, exhausted, rng, log, scripts, deadline, time_limit: Cell::new(TIME_LIMIT) })
     }
 
     /// The Lua state, for the host's own functions (`razdor.path` and the like).
@@ -375,7 +381,7 @@ impl Runtime {
     fn run<T>(&self, script: &str, call: &str, f: impl FnOnce() -> mlua::Result<T>) -> Result<T, ScriptError> {
         self.spent.set(0);
         self.exhausted.set(false);
-        self.deadline.set(Some(std::time::Instant::now() + TIME_LIMIT));
+        self.deadline.set(Some(std::time::Instant::now() + self.time_limit.get()));
         let out = f();
         self.deadline.set(None);
         out.map_err(|e| {

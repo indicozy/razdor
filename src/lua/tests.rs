@@ -204,7 +204,43 @@ fn a_catastrophic_pattern_is_rejected_at_once() {
     let (ok, msg): (bool, String) = r.call("scripts/t.lua", "f", ()).unwrap().unwrap();
     assert!(started.elapsed() < std::time::Duration::from_millis(500), "took {:?}", started.elapsed());
     assert!(!ok);
-    assert!(msg.contains("quantifiers"), "{msg}");
+    assert!(msg.contains("backtracking items"), "{msg}");
+}
+
+#[test]
+fn a_nested_quantifier_is_bounded_by_the_subject_length() {
+    // (a*)*b has two backtracking items: a subject of 60 KB would take about n^3 steps.
+    let src = "function f()\n return pcall(string.find, string.rep('a', 60000), '(a*)*b')\nend\nfunction g()\n return string.find(string.rep('a', 583) .. 'b', '(a*)*b') == nil\nend\n";
+    let r = rt(&[("scripts/t.lua", src)]);
+    r.load_script("scripts/t.lua").unwrap();
+    let (ok, msg): (bool, String) = r.call("scripts/t.lua", "f", ()).unwrap().unwrap();
+    assert!(!ok);
+    assert!(msg.contains("too long for this pattern"), "{msg}");
+    assert_eq!(r.call::<bool>("scripts/t.lua", "g", ()).unwrap(), Some(true), "a pattern within the bound runs");
+}
+
+#[test]
+fn a_normal_pattern_works_on_a_10_kb_subject() {
+    let src = "function f()\n local s = string.rep('x', 10000) .. 'needle'\n return string.find(s, 'needle'), string.match(s, 'x-n')\nend\n";
+    let r = rt(&[("scripts/t.lua", src)]);
+    r.load_script("scripts/t.lua").unwrap();
+    let (at, m): (i64, String) = r.call("scripts/t.lua", "f", ()).unwrap().unwrap();
+    assert_eq!(at, 10001);
+    assert_eq!(m.len(), 10001);
+    assert!(m.ends_with('n') && m.starts_with('x'));
+}
+
+#[test]
+fn gmatch_checks_the_deadline_on_every_step() {
+    let src = "function make(s)\n G = string.gmatch(s, '%a')\nend\nfunction step()\n return G()\nend\n";
+    let r = rt(&[("scripts/t.lua", src)]);
+    r.load_script("scripts/t.lua").unwrap();
+    r.call::<()>("scripts/t.lua", "make", "abc").unwrap();
+    assert_eq!(r.call::<String>("scripts/t.lua", "step", ()).unwrap(), Some("a".to_string()));
+    r.time_limit.set(std::time::Duration::ZERO);
+    let e = r.call::<Value>("scripts/t.lua", "step", ()).unwrap_err();
+    assert!(e.message.contains("time limit"), "{e}");
+    assert!(r.exhausted());
 }
 
 #[test]
