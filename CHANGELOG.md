@@ -14,6 +14,21 @@
 
 ## 1.2.4 — 2026-11-02
 
+Коммит `67913954` (тег `v1.2.4`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+b4d58d86a6aa0fd17020f3857f424ba4e0bfa5c07d20f2a141df716236d30230  razdor
+73e4706a13ebf96aa448d9f5823320ac93818be4851234ead6a028b5510afeff  Razdor.exe
+4880892d013dbc17faa5b729b9847d74cf368b04595c80d0f875cadc2cce0e24  razdor-macos
+e0bc488234c0b85848a42996bff22b99ad6445650a7e9d10da0da609f3c0929a  razdor-translate
+067777ab7bb7bb7e50a32e618606b96f3f129d6e05cd7bf36c90329314764d84  Razdor-translate.exe
+5134e7205d758346c27c7b984eb05df8bcb34c372f0e52eebb213f074afc64b6  razdor-translate-macos
+44cf7843760420b56b80eb7a1a81ad51087740a5d93624087d3cfb7ce07a9d4e  razdor.apk
+55cc00f885da20e324728738275f0045e9fd6a43e911400807f0a657c1fc2614  razdor.ipa
+```
+
 ### Изменено
 
 - Телефон: в «Картах и модах» карточка карты или мода стала крупнее — картинка во всю ширину с названием поверх неё, автор и сведения в рамочках, крупный текст.
