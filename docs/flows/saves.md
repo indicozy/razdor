@@ -8,6 +8,12 @@ takes the map from the install when its bytes hash to the stored FNV-1a hash, el
 save's own bytes when those do, and rebuilds the statics. A save with neither is refused.
 All code is in `src/rules/save.rs`; the windows are `src/ui/saves.rs`.
 
+A game of a content package's map (`razdor --pack`) saves with `ScenarioRef::Pack`: the package's
+id, version, content hash, the path it was read from and the map's id. Its save carries no map
+bytes; a load reopens the package from that path (`ui/pack_play.rs` `ensure_pack`, before
+`save::load`), checks the hash and attaches the package's story again (`rules::save::restore`,
+`SaveError::PackageMissing` when the package is not open or has changed). Saves before it are unchanged.
+
 ## Where saves live
 
 - `save::default_dir`: the platform data folder (`razdor/saves`), or `RAZDOR_SAVE_DIR`

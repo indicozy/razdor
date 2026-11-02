@@ -14,10 +14,16 @@ const HELP: &str = "razdor-pack: content packages (.rzpack) for Razdor 2.0
                              file:line with a hint; --json for agents and tools
                              exit status: 0 no errors, 1 errors, 2 usage or read problem
   razdor-pack sim <folder-or-.rzpack> [--map <id>] [--days <n>=30] [--json]
+                             [--trace] [--choices first|random|<dialog>=<choice>,…]
                              the AI plays a map headless for n days, the community map
                              smoke test's way (RAZDOR_DT_DIR): a panic, a softlock or a
                              check error fails; reports the day of victory or defeat.
                              Without --map every map of the package is played.
+                             The package's story runs with the map: --trace prints each
+                             day's fired triggers, variable changes, dialogs and the
+                             choice taken (--json gives it as data); --choices says how
+                             dialogs are answered (first by default; random is seeded;
+                             dialog=choice forces that choice, the first elsewhere).
                              exit status: 0 all played, 1 a panic, a softlock or errors
   razdor-pack play <folder-or-.rzpack> [--map <id>]
                              opens the package's map in Razdor (`razdor --pack`)
@@ -79,13 +85,16 @@ fn check(args: &[String]) -> Result<u8, String> {
     Ok(if report.has_errors() { 1 } else { 0 })
 }
 
-/// The arguments of `sim` and `play`: a package, `--map <id>`, `--days <n>`, `--json`.
+/// The arguments of `sim` and `play`: a package, `--map <id>`, `--days <n>`, `--json`, `--trace`,
+/// `--choices <spec>`.
 #[derive(Default)]
 struct Args {
     path: Option<PathBuf>,
     map: Option<String>,
     days: Option<u64>,
     json: bool,
+    trace: bool,
+    choices: Option<String>,
 }
 
 fn package_args(cmd: &str, args: &[String], allow_sim: bool) -> Result<Args, String> {
@@ -99,6 +108,8 @@ fn package_args(cmd: &str, args: &[String], allow_sim: bool) -> Result<Args, Str
                 out.days = Some(v.parse().map_err(|_| format!("--days {v}: a whole number of days"))?);
             }
             "--json" if allow_sim => out.json = true,
+            "--trace" if allow_sim => out.trace = true,
+            "--choices" if allow_sim => out.choices = Some(it.next().ok_or("--choices needs first, random or dialog=choice,…")?.clone()),
             flag if flag.starts_with('-') => return Err(format!("unknown option `{flag}` for {cmd}")),
             p if out.path.is_none() => out.path = Some(PathBuf::from(p)),
             _ => return Err(format!("{cmd} takes one folder or .rzpack file")),
@@ -135,17 +146,28 @@ fn sim(args: &[String]) -> Result<u8, String> {
     razdor::dt::install::load_dotenv();
     let dir = razdor::dt::install::locate().ok_or("no Discord Times install found (set RAZDOR_DT_DIR)")?;
     let install = razdor::dt::install::DtInstall::load(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let days = a.days.unwrap_or(30);
+    let opts = pack::sim::SimOptions {
+        days: a.days.unwrap_or(30),
+        choices: match &a.choices {
+            Some(spec) => pack::sim::Choices::parse(spec)?,
+            None => pack::sim::Choices::First,
+        },
+        // The JSON carries the trace too: `--json` is the same data as `--trace`.
+        trace: a.trace || a.json,
+    };
     let mut failed = false;
     let mut json = Vec::new();
     for map in &maps {
-        match pack::sim::sim_map(&package, &install, map, days) {
+        match pack::sim::sim_map(&package, &install, map, &opts) {
             Ok(result) => {
                 failed |= !result.ok();
                 if a.json {
                     json.push(result.json());
                 } else {
                     println!("{}", result.text());
+                    if a.trace {
+                        print!("{}", result.trace_text());
+                    }
                 }
             }
             Err(report) => {

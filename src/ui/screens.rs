@@ -431,10 +431,14 @@ pub(super) fn start_game_with_rules(demo: &Arc<Content>, scenario: Option<(&Scen
         Some((e, c)) => {
             let content = Arc::new(c.with_experimental(rules));
             let mut g = Game::from_scenario(content, &e.scenario, hero);
-            // Saves name the map file, a hash of its bytes, and carry the bytes.
-            match ScenarioRef::of_map(&e.path, &e.file) {
-                Ok((origin, bytes)) => g.set_map(origin, bytes),
-                Err(err) => razdor::diag!("{}: {err}; this game cannot be saved", e.file),
+            match &e.pack {
+                // A package's map: its save names the package, and its story starts with the game.
+                Some(p) => p.start(&mut g),
+                // Saves name the map file, a hash of its bytes, and carry the bytes.
+                None => match ScenarioRef::of_map(&e.path, &e.file) {
+                    Ok((origin, bytes)) => g.set_map(origin, bytes),
+                    Err(err) => razdor::diag!("{}: {err}; this game cannot be saved", e.file),
+                },
             }
             g
         }

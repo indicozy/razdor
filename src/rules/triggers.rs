@@ -61,6 +61,25 @@ pub enum Ending {
     Defeat,
 }
 
+/// One thing a run of the story did, for the trace (`razdor-pack sim --trace`). Kept only while a
+/// trace is asked for ([`TriggerState::trace`]); armies and buildings are named as the story names
+/// them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub enum Trace {
+    /// A trigger ran, at this moment (its `when`, as text).
+    Fired { trigger: String, moment: String },
+    /// A variable got a new value.
+    Var { name: String, value: VarValue },
+    /// A dialog opened, with the choices it shows (none: «Далее»).
+    Dialog { id: String, choices: Vec<String> },
+    /// The player answered a dialog: the choice, or `None` for «Далее».
+    Answer { dialog: String, choice: Option<String> },
+    /// A package army came onto the map.
+    Spawn { army: String },
+    /// The story ended.
+    End(Ending),
+}
+
 /// A moment a trigger can wait for, as the trigger says it (`when`), or as the game raises it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum When {
@@ -188,6 +207,10 @@ pub struct Story {
     pub texts: BTreeMap<String, String>,
     /// The display names of the package's named characters: the k-th is `PACKAGE_BASE + k`.
     pub named: Vec<String>,
+    /// The names (as the story writes them) of the armies and buildings it refers to, by id: for
+    /// the trace.
+    pub army_names: BTreeMap<ArmyId, String>,
+    pub building_names: BTreeMap<u16, String>,
     /// The seed of the package generator (not zero).
     pub seed: u32,
 }
@@ -216,6 +239,10 @@ pub struct TriggerState {
     pub spawned: BTreeSet<ArmyId>,
     /// The story's end, once a `victory` or `defeat` action ran.
     pub ended: Option<Ending>,
+    /// What the run did, with the game minute of each thing, while a trace is asked for
+    /// (`razdor-pack sim --trace`). Never saved.
+    #[serde(skip)]
+    pub trace: Option<Vec<(u64, Trace)>>,
 }
 
 impl TriggerState {
@@ -257,34 +284,75 @@ impl Resolve for NoScenario {
     }
 }
 
-/// Compiles a read package's story for language `lang` (its texts). Errors name the file and the
-/// line of each reference that does not resolve.
-pub fn compile(pkg: &Package, lang: &str, resolve: &dyn Resolve, seed: u32) -> Result<Story, Vec<String>> {
-    let mut b = Builder { pkg, resolve, spawns: BTreeMap::new(), named: BTreeMap::new(), named_order: Vec::new(), at: String::new(), errors: Vec::new() };
+/// Compiles a read package's story for map `map` (its id) in language `lang` (its texts). A
+/// trigger with another map's `map` is left out; the dialogs the map's triggers open (and those
+/// their choices open) are compiled, the rest are not. Errors name the file and the line of each
+/// reference that does not resolve on this map.
+pub fn compile(pkg: &Package, lang: &str, map: &str, resolve: &dyn Resolve, seed: u32) -> Result<Story, Vec<String>> {
+    let mut b = Builder {
+        pkg,
+        resolve,
+        spawns: BTreeMap::new(),
+        named: BTreeMap::new(),
+        named_order: Vec::new(),
+        army_names: BTreeMap::new(),
+        building_names: BTreeMap::new(),
+        at: String::new(),
+        errors: Vec::new(),
+    };
     b.assign_spawns();
     let mut story = Story { seed: seed.max(1), ..Story::default() };
     for v in &pkg.vars {
         story.vars.insert(v.value.name.clone(), (v.value.kind, default_of(&v.value)));
     }
     story.texts = pkg.texts.get(lang).or_else(|| pkg.texts.values().next()).cloned().unwrap_or_default();
-    for t in &pkg.triggers {
+    for t in pkg.triggers.iter().filter(|t| applies(&t.value, map)) {
         b.at = format!("{}:{}", t.file, t.line);
         if let Some(tr) = b.trigger(&t.value) {
             story.triggers.push(tr);
         }
     }
-    for d in &pkg.dialogs {
+    let wanted = opened_dialogs(pkg, map);
+    for d in pkg.dialogs.iter().filter(|d| wanted.contains(&d.value.id)) {
         b.at = format!("{}:{}", d.file, d.line);
         if let Some(dd) = b.dialog(&d.value) {
             story.dialogs.push(dd);
         }
     }
     story.named = b.named_order.iter().map(|id| story.texts.get(&format!("named.{id}")).cloned().unwrap_or_else(|| id.clone())).collect();
+    story.army_names = b.army_names.clone();
+    story.army_names.extend(b.spawns.iter().map(|(name, id)| (*id, name.clone())));
+    story.building_names = b.building_names.clone();
     if b.errors.is_empty() {
         Ok(story)
     } else {
         Err(b.errors)
     }
+}
+
+/// Whether a trigger applies to map `map`: one without `map`, or one naming it.
+fn applies(t: &pt::Trigger, map: &str) -> bool {
+    t.map.as_deref().is_none_or(|m| m == map)
+}
+
+/// The dialogs the triggers of map `map` open, and the dialogs those open in their choices.
+fn opened_dialogs(pkg: &Package, map: &str) -> BTreeSet<String> {
+    let mut todo: Vec<String> = pkg.triggers.iter().filter(|t| applies(&t.value, map)).flat_map(|t| opens(&t.value.then)).collect();
+    let mut seen = BTreeSet::new();
+    while let Some(id) = todo.pop() {
+        if !seen.insert(id.clone()) {
+            continue;
+        }
+        if let Some(d) = pkg.dialogs.iter().find(|d| d.value.id == id) {
+            todo.extend(d.value.choices.iter().flat_map(|c| opens(&c.then)));
+        }
+    }
+    seen
+}
+
+/// The dialogs an action list opens.
+fn opens(then: &[pt::Action]) -> Vec<String> {
+    then.iter().filter_map(|a| if let pt::Action::Dialog(d) = a { Some(d.clone()) } else { None }).collect()
 }
 
 fn default_of(v: &pt::Var) -> VarValue {
@@ -299,6 +367,9 @@ struct Builder<'a> {
     /// Named characters by name, in order of first mention.
     named: BTreeMap<String, u8>,
     named_order: Vec<String>,
+    /// The scenario's armies and buildings the story names, by id, for the trace.
+    army_names: BTreeMap<ArmyId, String>,
+    building_names: BTreeMap<u16, String>,
     /// Where the table being compiled is, for the errors.
     at: String,
     errors: Vec<String>,
@@ -335,7 +406,10 @@ impl Builder<'_> {
             return Some(*id);
         }
         match self.resolve.army(name) {
-            Some(id) => Some(id),
+            Some(id) => {
+                self.army_names.insert(id, name.to_string());
+                Some(id)
+            }
             None => self.fail(format!("no army `{name}`: a spawn_army of this package or a scenario army")),
         }
     }
@@ -355,7 +429,10 @@ impl Builder<'_> {
 
     fn building(&mut self, name: &str) -> Option<u16> {
         match self.resolve.building(name) {
-            Some(id) => Some(id),
+            Some(id) => {
+                self.building_names.insert(id, name.to_string());
+                Some(id)
+            }
             None => self.fail(format!("no building `{name}` in the scenario")),
         }
     }
@@ -539,6 +616,26 @@ impl Builder<'_> {
     }
 }
 
+/// A moment as the trace writes it: the event, with the names the story gives its armies and
+/// buildings.
+fn moment_name(story: &Story, when: &When) -> String {
+    let army = |id: &ArmyId| story.army_names.get(id).cloned().unwrap_or_else(|| format!("#{id}"));
+    let building = |id: &u16| story.building_names.get(id).cloned().unwrap_or_else(|| format!("#{id}"));
+    match when {
+        When::GameStart => "game_start".into(),
+        When::DayStart => "day_start".into(),
+        When::WeekStart => "week_start".into(),
+        When::NewMoon => "new_moon".into(),
+        When::HeroEnters(Place::Cell(x, y)) => format!("hero_enters [{x}, {y}]"),
+        When::HeroEnters(Place::Area(x, y, w, h)) => format!("hero_enters [{x}, {y}, {w}, {h}]"),
+        When::HeroEntersBuilding(b) => format!("hero_enters_building {}", building(b)),
+        When::ArmyDefeated(a) => format!("army_defeated {}", army(a)),
+        When::BuildingCaptured(b) => format!("building_captured {}", building(b)),
+        When::DialogChoice { dialog, choice } => format!("dialog_choice {dialog}.{choice}"),
+        When::VarChanged(v) => format!("var_changed {v}"),
+    }
+}
+
 /// Whether trigger moment `on` is raised `raised`: a cell inside an area, else the same moment.
 fn matches(on: &When, raised: &When) -> bool {
     match (on, raised) {
@@ -641,6 +738,7 @@ impl Game {
         let Some(story) = self.story.clone() else { return Vec::new() };
         let Some(d) = story.dialogs.iter().find(|d| d.id == dialog) else { return Vec::new() };
         let mut queue = VecDeque::new();
+        self.note(Trace::Answer { dialog: dialog.to_string(), choice: choice.map(str::to_string) });
         if let Some(cid) = choice {
             let Some(c) = d.choices.iter().find(|c| c.id == cid) else { return Vec::new() };
             for a in &c.then {
@@ -696,6 +794,7 @@ impl Game {
                 if t.once {
                     self.triggers.fired.insert(t.id.clone());
                 }
+                self.note(Trace::Fired { trigger: t.id.clone(), moment: moment_name(story, &when) });
                 for a in &t.then {
                     self.act(a, story, &mut queue);
                 }
@@ -754,8 +853,17 @@ impl Game {
 
     fn set_var(&mut self, name: &str, value: VarValue, queue: &mut VecDeque<When>) {
         if self.var_value(name).as_ref() != Some(&value) {
+            self.note(Trace::Var { name: name.to_string(), value: value.clone() });
             self.triggers.vars.insert(name.to_string(), value);
             queue.push_back(When::VarChanged(name.to_string()));
+        }
+    }
+
+    /// Records a step of the run for the trace, when one is asked for (see [`TriggerState::trace`]).
+    fn note(&mut self, what: Trace) {
+        let at = self.now();
+        if let Some(log) = self.triggers.trace.as_mut() {
+            log.push((at, what));
         }
     }
 
@@ -837,6 +945,9 @@ impl Game {
             }
             Act::ForgetSpell(s) => self.forget_spell(*s as u8),
             Act::End(e) => {
+                if self.triggers.ended.is_none() {
+                    self.note(Trace::End(*e));
+                }
                 self.triggers.ended.get_or_insert(*e);
             }
         }
@@ -846,6 +957,7 @@ impl Game {
     fn open_dialog(&mut self, id: &str, story: &Story) {
         let Some(d) = story.dialogs.iter().find(|d| d.id == id) else { return };
         let choices: Vec<String> = d.choices.iter().filter(|c| c.cond.iter().all(|x| self.holds(x))).map(|c| c.id.clone()).collect();
+        self.note(Trace::Dialog { id: d.id.clone(), choices: choices.clone() });
         self.triggers.dialogs.push(PendingDialog { id: d.id.clone(), choices });
     }
 
@@ -950,6 +1062,8 @@ impl Game {
         let speed = Army::speed_for(0, troops[0].0);
         self.world.spawn_army(id, at, faction, model, list, speed);
         self.triggers.spawned.insert(id);
+        let name = self.story().and_then(|s| s.army_names.get(&id)).cloned().unwrap_or_else(|| id.to_string());
+        self.note(Trace::Spawn { army: name });
         if let Some(uid) = self.world.armies.last().map(|a| a.uid) {
             self.mark_dirty(uid);
         }
@@ -1021,6 +1135,7 @@ mod tests {
             texts: BTreeMap::new(),
             named: Vec::new(),
             seed: 7,
+            ..Story::default()
         }
     }
 
@@ -1385,7 +1500,7 @@ mod tests {
         ]);
         let report = pack_check::check(&pkg);
         assert!(!report.has_errors(), "{}", report.to_text());
-        let story = compile(&pkg, "en", &NoScenario, 9).unwrap_or_else(|e| panic!("{e:?}"));
+        let story = compile(&pkg, "en", "demo", &NoScenario, 9).unwrap_or_else(|e| panic!("{e:?}"));
         assert_eq!(story.triggers.len(), 4);
         assert_eq!(story.dialogs.len(), 1);
         assert_eq!(story.dialogs[0].speaker, Some(unit("knight")));
@@ -1417,7 +1532,48 @@ mod tests {
             ("texts/en.toml", "[story]\ntitle = \"Story\"\n"),
             ("triggers/main.toml", "[[trigger]]\nid = \"t\"\nwhen = { event = \"army_defeated\", army = \"ghost\" }\nthen = [ { give_gold = 1 } ]\n"),
         ]);
-        let errs = compile(&pkg, "en", &NoScenario, 1).unwrap_err();
+        let errs = compile(&pkg, "en", "demo", &NoScenario, 1).unwrap_err();
         assert!(errs.iter().any(|e| e.contains("no army `ghost`") && e.contains("triggers/main.toml:")), "{errs:?}");
+    }
+
+    #[test]
+    fn a_trigger_scoped_to_a_map_compiles_only_on_that_map() {
+        let manifest = "id = \"demo\"\nversion = \"0.1.0\"\nformat = 1\ntitle = \"story.title\"\nauthor = \"Razdor\"\nlicense = \"MIT\"\n";
+        let pkg = package(&[
+            ("package.toml", manifest),
+            ("texts/en.toml", "[story]\ntitle = \"Story\"\n"),
+            (
+                "triggers/main.toml",
+                "[[trigger]]\nid = \"here\"\nmap = \"one\"\nwhen = { event = \"game_start\" }\nthen = [ { give_gold = 1 } ]\n\n[[trigger]]\nid = \"all\"\nwhen = { event = \"game_start\" }\nthen = [ { give_gold = 2 } ]\n",
+            ),
+        ]);
+        let on_one = compile(&pkg, "en", "one", &NoScenario, 1).unwrap_or_else(|e| panic!("{e:?}"));
+        assert_eq!(on_one.triggers.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["here", "all"]);
+        let on_two = compile(&pkg, "en", "two", &NoScenario, 1).unwrap_or_else(|e| panic!("{e:?}"));
+        assert_eq!(on_two.triggers.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["all"], "the other map's trigger is left out");
+    }
+
+    #[test]
+    fn the_trace_keeps_what_the_run_did_only_when_asked() {
+        let mut g = game();
+        let intro = dialog("intro", vec![choice("take", vec![], vec![Act::Set("dread".into(), VarValue::Int(2))])]);
+        let start = trig("start", When::GameStart, vec![], vec![Act::Dialog("intro".into())]);
+        g.attach_story(story(&[("dread", VarValue::Int(0))], vec![start], vec![intro.clone()]));
+        g.triggers.trace = Some(Vec::new());
+        g.start_story();
+        g.drain_events();
+        g.answer_story_dialog("intro", Some("take"));
+        let log: Vec<Trace> = g.triggers.trace.clone().unwrap_or_default().into_iter().map(|(_, t)| t).collect();
+        assert!(log.contains(&Trace::Fired { trigger: "start".into(), moment: "game_start".into() }));
+        assert!(log.contains(&Trace::Dialog { id: "intro".into(), choices: vec!["take".into()] }));
+        assert!(log.contains(&Trace::Var { name: "dread".into(), value: VarValue::Int(2) }));
+        assert!(log.contains(&Trace::Answer { dialog: "intro".into(), choice: Some("take".into()) }));
+        let json = serde_json::to_string(&g.triggers).unwrap();
+        assert!(!json.contains("trace"), "the trace is never saved");
+
+        let mut plain = game();
+        plain.attach_story(story(&[("dread", VarValue::Int(0))], vec![], vec![intro]));
+        plain.answer_story_dialog("intro", Some("take"));
+        assert!(plain.triggers.trace.is_none(), "nothing is kept unless a trace is asked for");
     }
 }

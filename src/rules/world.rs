@@ -1446,6 +1446,9 @@ impl World {
                         a.ai.garrison_level = f.ai.garrison_level;
                     }
                 }
+                // A package's spawned army (`rules::triggers`): the scenario has no such army, and
+                // the save carries all of it.
+                None if a.id >= super::triggers::PACKAGE_BASE => {}
                 None => return Err(format!("army {} is not on the map", a.id)),
             }
         }

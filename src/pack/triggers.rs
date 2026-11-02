@@ -378,10 +378,11 @@ pub enum Action {
     Defeat,
 }
 
-/// A trigger, as read.
+/// A trigger, as read. `map` scopes it to one map of the package; none applies it to every map.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Trigger {
     pub id: String,
+    pub map: Option<String>,
     pub when: Event,
     pub cond: Vec<Cond>,
     pub then: Vec<Action>,
@@ -433,6 +434,9 @@ pub struct RawTrigger {
     pub once: bool,
     #[serde(default)]
     pub chance: Option<i64>,
+    /// The map this trigger applies to (its id); none: every map of the package.
+    #[serde(default)]
+    pub map: Option<String>,
 }
 
 fn yes() -> bool {
@@ -797,8 +801,14 @@ pub fn parse_trigger(raw: &RawTrigger) -> Res<Trigger> {
         Some(n @ 0..=100) => n as u8,
         Some(_) => return bad("`chance` is a percent, 0 to 100", "e.g. `chance = 50`"),
     };
+    if let Some(m) = &raw.map {
+        if m.is_empty() || !m.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
+            return bad(format!("map `{m}` is not a map id"), "a map id is the name of its folder: maps/<id>/, lowercase letters, digits and -");
+        }
+    }
     Ok(Trigger {
         id: raw.id.clone(),
+        map: raw.map.clone(),
         when: parse_event(&raw.when)?,
         cond: raw.cond.iter().map(parse_cond).collect::<Res<_>>()?,
         then: raw.then.iter().map(parse_action).collect::<Res<_>>()?,
@@ -855,6 +865,11 @@ pub fn check(pkg: &Package, r: &mut Report) {
         if !seen.insert(t.value.id.as_str()) {
             r.error_hint(&t.file, Some(t.line), format!("duplicate trigger id `{}`", t.value.id), "trigger ids are unique in the package");
         }
+        if let Some(m) = &t.value.map {
+            if !pkg.maps.contains_key(m) {
+                r.error_hint(&t.file, Some(t.line), format!("no map `{m}` in the package"), format!("its maps are: {}", pkg.maps.keys().cloned().collect::<Vec<_>>().join(", ")));
+            }
+        }
         if let Event::DialogChoice { dialog, choice } = &t.value.when {
             match dialogs.get(dialog.as_str()) {
                 None => r.error_hint(&t.file, Some(t.line), format!("no dialog `{dialog}`"), dialog_hint(dialog, dialogs.keys().copied())),
@@ -909,6 +924,158 @@ pub fn check(pkg: &Package, r: &mut Report) {
                 format!("dialog `{}` is never opened", d.value.id),
                 "no trigger or choice has `dialog = \"…\"` for it: it can never show",
             );
+        }
+    }
+}
+
+/// The map references of the story, checked against one map (`map_check` calls this for each map,
+/// with its size and its armies and buildings by id). The triggers that apply to the map are those
+/// without `map` and those naming it; the dialogs they open, and the dialogs those open, are
+/// checked too. Spawned armies are the package's own, so every map knows them.
+pub fn check_map_refs(pkg: &Package, map: &str, size: (u32, u32), armies: &BTreeSet<String>, buildings: &BTreeSet<String>, r: &mut Report) {
+    let spawned: BTreeSet<String> = pkg
+        .triggers
+        .iter()
+        .flat_map(|t| t.value.then.iter())
+        .chain(pkg.dialogs.iter().flat_map(|d| d.value.choices.iter()).flat_map(|c| c.then.iter()))
+        .filter_map(|a| if let Action::SpawnArmy { army, .. } = a { Some(army.clone()) } else { None })
+        .collect();
+    let mut scope = Scope { map, size, armies, buildings, spawned: &spawned, opened: Vec::new(), r };
+    for t in pkg.triggers.iter().filter(|t| t.value.map.as_deref().is_none_or(|m| m == map)) {
+        scope.trigger(&t.file, t.line, &t.value);
+    }
+    let mut done = BTreeSet::new();
+    while let Some(id) = scope.opened.pop() {
+        if !done.insert(id.clone()) {
+            continue;
+        }
+        let Some(d) = pkg.dialogs.iter().find(|d| d.value.id == id) else { continue };
+        for c in &d.value.choices {
+            for cond in &c.cond {
+                scope.cond(&d.file, d.line, cond);
+            }
+            for a in &c.then {
+                scope.action(&d.file, d.line, a);
+            }
+        }
+    }
+}
+
+/// The references of one map's story, reported at the line of the trigger or dialog naming them.
+struct Scope<'a, 'r> {
+    map: &'a str,
+    size: (u32, u32),
+    armies: &'a BTreeSet<String>,
+    buildings: &'a BTreeSet<String>,
+    spawned: &'a BTreeSet<String>,
+    /// The dialogs the checked actions open, to be checked in turn.
+    opened: Vec<String>,
+    r: &'r mut Report,
+}
+
+impl Scope<'_, '_> {
+    fn cell(&mut self, file: &str, line: u32, what: &str, x: i32, y: i32) {
+        let (w, h) = (self.size.0 as i32, self.size.1 as i32);
+        if x < 0 || y < 0 || x >= w || y >= h {
+            self.r.error_hint(file, Some(line), format!("{what} at ({x}, {y}) is outside map `{}` ({w}×{h})", self.map), "cells count from 0 at the top left: x to the right, y down");
+        }
+    }
+
+    fn place(&mut self, file: &str, line: u32, what: &str, p: &Place) {
+        match *p {
+            Place::Cell(x, y) => self.cell(file, line, what, x, y),
+            Place::Area(_, _, w, h) if w < 1 || h < 1 => {
+                self.r.error_hint(file, Some(line), format!("{what}: an area is at least 1 by 1 cells"), "give `at = [x, y, w, h]` with w and h of 1 or more");
+            }
+            Place::Area(x, y, w, h) => {
+                self.cell(file, line, what, x, y);
+                self.cell(file, line, what, x + w - 1, y + h - 1);
+            }
+        }
+    }
+
+    fn army(&mut self, file: &str, line: u32, name: &str) {
+        if self.armies.contains(name) || self.spawned.contains(name) {
+            return;
+        }
+        let hint = match closest(name, self.armies.iter().map(String::as_str)) {
+            Some(near) => format!("did you mean `{near}`?"),
+            None if self.armies.is_empty() => format!("map `{}` has no armies: name a spawn_army of the package", self.map),
+            None => format!("the armies of map `{}` are: {}", self.map, self.armies.iter().cloned().collect::<Vec<_>>().join(", ")),
+        };
+        self.r.error_hint(file, Some(line), format!("no army `{name}` in map `{}`", self.map), hint);
+    }
+
+    fn building(&mut self, file: &str, line: u32, name: &str) {
+        if self.buildings.contains(name) {
+            return;
+        }
+        let hint = match closest(name, self.buildings.iter().map(String::as_str)) {
+            Some(near) => format!("did you mean `{near}`?"),
+            None => format!("the buildings of map `{}` are: {}", self.map, self.buildings.iter().cloned().collect::<Vec<_>>().join(", ")),
+        };
+        self.r.error_hint(file, Some(line), format!("no building `{name}` in map `{}`", self.map), hint);
+    }
+
+    fn holder(&mut self, file: &str, line: u32, h: &Holder) {
+        if let Holder::Army(a) = h {
+            self.army(file, line, a);
+        }
+    }
+
+    fn entity(&mut self, file: &str, line: u32, e: &Entity) {
+        match e {
+            Entity::Army(a) => self.army(file, line, a),
+            Entity::Building(b) => self.building(file, line, b),
+        }
+    }
+
+    fn trigger(&mut self, file: &str, line: u32, t: &Trigger) {
+        match &t.when {
+            Event::HeroEnters(p) => self.place(file, line, "hero_enters", p),
+            Event::HeroEntersBuilding(b) | Event::BuildingCaptured(b) => self.building(file, line, b),
+            Event::ArmyDefeated(a) => self.army(file, line, a),
+            _ => {}
+        }
+        for c in &t.cond {
+            self.cond(file, line, c);
+        }
+        for a in &t.then {
+            self.action(file, line, a);
+        }
+    }
+
+    fn cond(&mut self, file: &str, line: u32, c: &Cond) {
+        match c {
+            Cond::HeroAt(p) => self.place(file, line, "hero_at", p),
+            Cond::ArmyAt { army, at } => {
+                self.army(file, line, army);
+                self.place(file, line, "army_at", at);
+            }
+            Cond::ArmyAlive(a) => self.army(file, line, a),
+            Cond::BuildingOwner { building, .. } => self.building(file, line, building),
+            Cond::HasItem { holder, .. } | Cond::HasSpell { holder, .. } => self.holder(file, line, holder),
+            _ => {}
+        }
+    }
+
+    fn action(&mut self, file: &str, line: u32, a: &Action) {
+        match a {
+            Action::Dialog(d) => self.opened.push(d.clone()),
+            Action::GiveItem { to, .. } | Action::GiveXp { to, .. } => self.holder(file, line, to),
+            Action::Cast { holder, .. } | Action::RemoveSpells(holder) => self.holder(file, line, holder),
+            Action::SpawnArmy { at, .. } => self.cell(file, line, "spawn_army", at.0, at.1),
+            Action::RemoveArmy(army) => self.army(file, line, army),
+            Action::TeleportHero(t) => self.cell(file, line, "teleport_hero", t.0, t.1),
+            Action::TeleportArmy { army, to } => {
+                self.army(file, line, army);
+                match to {
+                    Dest::Cell(x, y) => self.cell(file, line, "teleport_army", *x, *y),
+                    Dest::Building(b) => self.building(file, line, b),
+                }
+            }
+            Action::SetFaction { of, .. } | Action::SetRelation { of, .. } | Action::AddUnits { of, .. } => self.entity(file, line, of),
+            _ => {}
         }
     }
 }
@@ -1317,5 +1484,84 @@ mod check_tests {
         assert_eq!((e1.line, e1.hint.as_deref()), (Some(5), Some("did you mean `day_start`?")));
         let e2 = errs.iter().find(|d| d.message.contains("unknown action `give_gld`")).unwrap_or_else(|| panic!("{}", r.to_text()));
         assert_eq!((e2.line, e2.hint.as_deref()), (Some(10), Some("did you mean `give_gold`?")));
+    }
+}
+
+#[cfg(test)]
+mod map_refs_tests {
+    use super::*;
+    use crate::pack::check::check;
+    use crate::pack::files::Files;
+    use crate::pack::terrain::{encode_rgb, DEFAULT_PALETTE};
+
+    /// The map `m`: a 50×50 meadow, a knight hero, an enemy army `e` at (30, 30) and an enemy
+    /// building `t` at (7, 7).
+    const MAP: &str = "title = \"t.x\"\nstart_date = \"1300-04-01\"\nrelations = [[3,3,0,-3],[3,3,0,-3],[0,0,3,-3],[-3,-3,-3,3]]\n\n[hero]\ncell = [5, 5]\nclasses = [\"knight\"]\ngold = 100\ntroops = [{ unit = \"dt:militiaman\", level = 1, count = 3 }]\n\n[[army]]\nid = \"e\"\nname = \"t.x\"\ncell = [30, 30]\nfaction = \"enemy\"\nmodel = \"bandits\"\ntroops = [{ unit = \"dt:bandit\", level = 1, count = 2 }]\n\n[[building]]\nid = \"t\"\ntype = \"town\"\nname = \"t.x\"\ncell = [7, 7]\nfaction = \"enemy\"\n\n[victory]\nkind = \"reach\"\ncell = [45, 45]\nmessage = \"t.x\"\n";
+
+    /// A package with the map `m` and the story (`triggers/main.toml`'s text after its `[vars]`).
+    fn package(story: &str, dialogs: &str) -> Package {
+        let mut f = Files::default();
+        f.insert("package.toml", "id = \"demo\"\nversion = \"0.1.0\"\nformat = 1\ntitle = \"t.x\"\nauthor = \"A\"\nlicense = \"MIT\"\n");
+        f.insert("texts/en.toml", "[t]\nx = \"x\"\n");
+        f.insert("maps/m/map.toml", MAP);
+        f.insert("maps/m/terrain.png", encode_rgb(50, 50, |_, _| DEFAULT_PALETTE[6].1));
+        f.insert("triggers/main.toml", format!("[vars]\nn = 0\n\n{story}"));
+        f.insert("dialogs/d.toml", dialogs);
+        Package::parse(f).0
+    }
+
+    /// The report's errors as text (the checker's lines).
+    fn errors(story: &str, dialogs: &str) -> String {
+        let r = check(&package(story, dialogs));
+        r.diagnostics.iter().filter(|d| d.severity == crate::pack::Severity::Error).map(|d| format!("{}:{}: {} ({})", d.file, d.line.unwrap_or(0), d.message, d.hint.as_deref().unwrap_or(""))).collect::<Vec<_>>().join("\n")
+    }
+
+    #[test]
+    fn a_clean_story_on_a_map_checks_clean() {
+        let story = "[[trigger]]\nid = \"a\"\nwhen = { event = \"hero_enters\", at = [10, 10, 5, 5] }\nif = [ { army_at = \"e\", at = [30, 30] } ]\nthen = [ { spawn_army = \"host\", at = [20, 20], faction = \"enemy\", troops = [\"dt:knight\"] }, { dialog = \"d\" } ]\n\n[[trigger]]\nid = \"b\"\nwhen = { event = \"army_defeated\", army = \"host\" }\nthen = [ { victory = true } ]\n";
+        let dialogs = "[[dialog]]\nid = \"d\"\ntitle = \"t.x\"\ntext = \"t.x\"\n\n[[dialog.choice]]\nid = \"c\"\ntext = \"t.x\"\nthen = [ { teleport_army = \"e\", to = \"t\" } ]\n";
+        assert_eq!(errors(story, dialogs), "", "a story whose names are on the map");
+    }
+
+    #[test]
+    fn an_army_the_map_lacks_is_an_error_naming_the_map() {
+        let story = "[[trigger]]\nid = \"a\"\nwhen = { event = \"army_defeated\", army = \"ee\" }\nthen = [ { give_gold = 1 } ]\n";
+        let e = errors(story, "");
+        assert!(e.contains("no army `ee` in map `m`"), "{e}");
+        assert!(e.contains("did you mean `e`?"), "the closest army is named: {e}");
+    }
+
+    #[test]
+    fn a_building_the_map_lacks_is_an_error() {
+        let story = "[[trigger]]\nid = \"a\"\nwhen = { event = \"building_captured\", building = \"keep\" }\nthen = [ { give_gold = 1 } ]\n";
+        assert!(errors(story, "").contains("no building `keep` in map `m`"));
+    }
+
+    #[test]
+    fn a_cell_outside_the_map_is_an_error_with_the_size() {
+        let story = "[[trigger]]\nid = \"a\"\nwhen = { event = \"hero_enters\", at = [50, 3] }\nthen = [ { give_gold = 1 } ]\n\n[[trigger]]\nid = \"b\"\nwhen = { event = \"day_start\" }\nthen = [ { teleport_hero = [3, 60] } ]\n";
+        let e = errors(story, "");
+        assert!(e.contains("hero_enters at (50, 3) is outside map `m` (50×50)"), "{e}");
+        assert!(e.contains("teleport_hero at (3, 60) is outside"), "{e}");
+    }
+
+    #[test]
+    fn a_dialog_is_checked_on_the_maps_that_open_it() {
+        let story = "[[trigger]]\nid = \"a\"\nwhen = { event = \"game_start\" }\nthen = [ { dialog = \"d\" } ]\n";
+        let dialogs = "[[dialog]]\nid = \"d\"\ntitle = \"t.x\"\ntext = \"t.x\"\n\n[[dialog.choice]]\nid = \"c\"\ntext = \"t.x\"\nthen = [ { remove_army = \"ghost\" } ]\n";
+        let e = errors(story, dialogs);
+        assert!(e.contains("no army `ghost` in map `m`") && e.contains("dialogs/d.toml:"), "{e}");
+    }
+
+    #[test]
+    fn a_map_scope_must_name_a_map_of_the_package() {
+        let story = "[[trigger]]\nid = \"a\"\nmap = \"nowhere\"\nwhen = { event = \"game_start\" }\nthen = [ { give_gold = 1 } ]\n";
+        assert!(errors(story, "").contains("no map `nowhere` in the package"));
+    }
+
+    #[test]
+    fn spawned_armies_are_known_on_every_map() {
+        let story = "[[trigger]]\nid = \"a\"\nwhen = { event = \"week_start\" }\nthen = [ { spawn_army = \"host\", at = [20, 20], faction = \"enemy\", troops = [\"dt:knight\"] } ]\n\n[[trigger]]\nid = \"b\"\nwhen = { event = \"army_defeated\", army = \"host\" }\nthen = [ { victory = true } ]\n";
+        assert_eq!(errors(story, ""), "");
     }
 }

@@ -126,9 +126,13 @@ A content package's map (`maps/<id>/map.toml`, `docs/reference/rzpack-format.md`
 as an install's map, with two differences: `ui/pack_play.rs` compiles it on the install first
 (`pack::compile`: a `DtInstall` and the package's texts give a `Scenario` and the package's units and
 items), and the content gets them (`Content::with_package`). The map joins the scenario list, and the
-game opens on the hero window (`Screen::ClassSelect`). The `--pack` run cannot save: a save needs the
-map's file, which a package does not have. `razdor-pack sim` plays the same compiled map headless
-(`pack::sim`, `rules::sim::play_days`, the community smoke test's loop).
+game opens on the hero window (`Screen::ClassSelect`). The package's story (`pack::open::Opened`, compiled
+for the map by `triggers::compile`) starts with the game: `Opened::start` sets the origin, attaches the
+story and raises the game-start moment, and the opening dialogs wait in `drain_events` as the scenario's do.
+A package game saves: its save names the package (`ScenarioRef::Pack`), and `App::ensure_pack`
+reopens the package from its path on a load (the hash must match, else the load says which package
+is missing or changed). `razdor-pack sim` plays the same story headless (`pack::sim`,
+`rules::sim::play_days_with`, with the trace), the community smoke test's loop.
 
 ## Adding a map («Добавить карту…»)
 

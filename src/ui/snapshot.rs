@@ -416,7 +416,8 @@ pub fn stage(app: &mut App) {
 /// its message names the file.
 fn game_from_save(app: &mut App) -> Result<Option<Game>, String> {
     let Some(path) = std::env::var("RAZDOR_SCENE_SAVE").ok().filter(|p| !p.is_empty()) else { return Ok(None) };
-    let install = app.assets.dt.as_ref().zip(app.dt_content.clone()).map(|(d, content)| razdor::rules::save::Install { dir: &d.install.dir, content });
+    let pack = app.pack.as_ref().map(|p| p.opened.clone());
+    let install = app.assets.dt.as_ref().zip(app.dt_content.clone()).map(|(d, content)| razdor::rules::save::Install { dir: &d.install.dir, content, pack: pack.as_deref() });
     let mut game = razdor::rules::save::load(std::path::Path::new(&path), app.demo.clone(), install.as_ref())
         .map_err(|e| format!("cannot load the save {path}: {e}"))?;
     super::main_menu::follow_settings(&app.audio.settings, &mut game);
@@ -548,6 +549,10 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             let content = app.dt_content.clone().ok_or("no install content")?;
             let content = std::sync::Arc::new(content.with_experimental(super::new_game::experimental_rules()));
             let mut game = Game::from_scenario(content, &app.scenarios[index].scenario, HeroClass::Knight);
+            // A package's map starts with its story, as a new game does (`screens::start_game`).
+            if let Some(p) = app.scenarios[index].pack.clone() {
+                p.start(&mut game);
+            }
             // The event generator's fixed seed (its clock seed would differ on every run).
             game.seed_events(0x5EED);
             game
@@ -920,6 +925,7 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                 texts: texts.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
                 named: Vec::new(),
                 seed: 1,
+                ..Default::default()
             };
             game.attach_story(story);
             game.start_story();

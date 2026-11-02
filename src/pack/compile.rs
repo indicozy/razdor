@@ -29,6 +29,8 @@ use crate::dt::dtm::{
     Scenario, Troop,
 };
 use crate::dt::install::DtInstall;
+use crate::rules::content::{ItemId, UnitId};
+use crate::rules::triggers::Resolve;
 
 // The base game's units end at 102 (1 to 3 are the hero classes) and its items at 167.
 const _: () = assert!(UNIT_BASE > 102 && ITEM_BASE > 167);
@@ -56,6 +58,8 @@ pub struct Compiled {
     pub items: Vec<ArtefactDef>,
     /// `(new unit id, picture frame)` of each package unit with a picture (see the module docs).
     pub pictures: Vec<(u32, usize)>,
+    /// The ids of this map's armies and buildings, and of the package's units and items, by name.
+    pub names: MapNames,
 }
 
 /// The base game a package builds on: its unit and item definitions, and the picture frame of a
@@ -118,7 +122,45 @@ pub fn compile_with(pkg: &Package, base: &Base, lang: &str, map_id: &str) -> Res
     let map = pkg.maps.get(map_id).ok_or_else(|| one_error(format!("no map `{map_id}` in the package: its maps are {}", list(pkg.maps.keys()))))?;
     let spec = map.spec.as_ref().ok_or_else(|| one_error(format!("maps/{map_id}/map.toml does not parse")))?;
     let scenario = scenario_of(pkg, &units, &texts, &map.file, map_id, spec)?;
-    Ok(Compiled { scenario, units: out_units, items: out_items, pictures })
+    // The ids a trigger's name resolves to: the map's armies and buildings in file order (the
+    // scenario's ids: army `i + 1`, building `i + 1`), the package's own units and items.
+    let names = MapNames {
+        units: units.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
+        items: items.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
+        armies: spec.army.iter().enumerate().map(|(i, a)| (a.get_ref().id.clone(), (i + 1) as u8)).collect(),
+        buildings: spec.building.iter().enumerate().map(|(i, b)| (b.get_ref().id.clone(), (i + 1) as u16)).collect(),
+    };
+    Ok(Compiled { scenario, units: out_units, items: out_items, pictures, names })
+}
+
+/// The names of one compiled map's ids: what a package's triggers and dialogs refer to, resolved
+/// to the engine's ids (`rules::triggers::Resolve`). Built by [`compile_with`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MapNames {
+    /// The package's units and items by their local ids.
+    pub units: BTreeMap<String, u32>,
+    pub items: BTreeMap<String, u32>,
+    /// The map's armies and buildings by their ids in `map.toml`.
+    pub armies: BTreeMap<String, u8>,
+    pub buildings: BTreeMap<String, u16>,
+}
+
+impl Resolve for MapNames {
+    fn unit(&self, local: &str) -> Option<UnitId> {
+        self.units.get(local).map(|&u| UnitId(u))
+    }
+
+    fn item(&self, local: &str) -> Option<ItemId> {
+        self.items.get(local).map(|&i| ItemId(i))
+    }
+
+    fn army(&self, name: &str) -> Option<u8> {
+        self.armies.get(name).copied()
+    }
+
+    fn building(&self, name: &str) -> Option<u16> {
+        self.buildings.get(name).copied()
+    }
 }
 
 fn one_error(message: String) -> Report {

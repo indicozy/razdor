@@ -284,6 +284,7 @@ this game's scenario is unknown, it cannot be saved = сценарий этой 
 this save needs your Discord Times install: set RAZDOR_DT_DIR = для этого сохранения нужны ваши «Времена раздора»: задайте RAZDOR_DT_DIR
 the scenario's map file "{m}.DTm" is missing from the game folder (Maps_Rus) = файла карты сценария «{m}.DTm» нет в папке игры (Maps_Rus)
 the map "{m}" has changed since the game was saved = карта «{m}» изменилась после сохранения
+the package {name} that the game plays is missing or has changed: open it again from its file = пакет {name}, в котором играет эта игра, не найден или изменился: откройте его из файла заново
 the save does not fit the map or the data: {e} = сохранение не подходит к карте или данным: {e}
 the map's size differs = размер карты другой
 events saved for the demo = события сохранены для демо

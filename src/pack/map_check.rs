@@ -317,6 +317,14 @@ fn check_map(pkg: &Package, entry: &MapEntry, r: &mut Report) {
             }
         }
     }
+
+    // The package's triggers and dialogs that apply to this map name its armies and buildings, and
+    // their cells lie inside it: the map's size is known only now (`triggers::check_map_refs`).
+    if let Some(t) = &terrain {
+        let armies: BTreeSet<String> = army_ids.keys().map(|k| k.to_string()).collect();
+        let buildings: BTreeSet<String> = building_ids.keys().map(|k| k.to_string()).collect();
+        super::triggers::check_map_refs(pkg, &entry.id, (t.width, t.height), &armies, &buildings, r);
+    }
 }
 
 /// Troop slots: at most six, each with a unit reference and a count; a hero class cannot be a

@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::dt::dtm::Scenario;
 use crate::i18n::tr;
+use crate::pack::Opened;
 use crate::trf;
 
 use super::clock::Clock;
@@ -87,6 +88,10 @@ pub enum ScenarioRef {
     Demo,
     /// A map of the install: its file name without the extension and a hash of its bytes.
     Map { file: String, hash: u64 },
+    /// A map of a content package (`razdor --pack`, `pack::open`): the package's id and version,
+    /// its content hash, the path it was read from and the map's id. A load reads the package
+    /// from that path again and checks the hash; the story is attached again from it.
+    Pack { id: String, version: String, hash: u64, path: String, map: String },
 }
 
 impl ScenarioRef {
@@ -137,6 +142,9 @@ pub enum SaveError {
     NoInstall,
     /// The map file is gone from the install.
     MapMissing(String),
+    /// The content package the game plays (its id and version) is not open, or its files have
+    /// changed since the game was saved.
+    PackageMissing(String),
     /// The map file's bytes differ from the saved game's.
     MapChanged(String),
     /// The saved game does not fit the map or the install's data any more.
@@ -158,6 +166,7 @@ impl std::fmt::Display for SaveError {
             // The scenario's map file (its name without the extension) is gone from Maps_Rus.
             SaveError::MapMissing(m) => f.write_str(&trf!("the scenario's map file \"{m}.DTm\" is missing from the game folder (Maps_Rus)", m)),
             SaveError::MapChanged(m) => f.write_str(&trf!("the map \"{m}\" has changed since the game was saved", m)),
+            SaveError::PackageMissing(name) => f.write_str(&trf!("the package {name} that the game plays is missing or has changed: open it again from its file", name)),
             SaveError::Mismatch(e) => f.write_str(&trf!("the save does not fit the map or the data: {e}", e)),
             SaveError::Pinned => f.write_str(tr("that save is pinned: unpin it first")),
             SaveError::Full => f.write_str(&trf!("there are {n} unpinned saves already: save over one, delete one or pin one", n = MANUAL_SAVES_KEPT)),
@@ -259,6 +268,7 @@ fn claim_old_saves(root: &Path, own: &Path, install: &Path) {
     let ours = |s: &ScenarioRef| match s {
         ScenarioRef::Demo => true,
         ScenarioRef::Map { file, hash } => maps.iter().any(|(f, h)| f == file && h == hash),
+        ScenarioRef::Pack { .. } => false,
     };
     for kind in [SaveKind::Manual, SaveKind::Auto] {
         let (from, to) = (kind_dir(root, kind), kind_dir(own, kind));
@@ -948,10 +958,12 @@ pub fn delete(path: &Path) -> std::io::Result<()> {
     set_pinned(path, false)
 }
 
-/// Where a map save finds its scenario: the install folder and its content.
+/// Where a map save finds its scenario: the install folder and its content (with the content
+/// package's units, for a package game), and the package's map opened, for a package game.
 pub struct Install<'a> {
     pub dir: &'a Path,
     pub content: Arc<Content>,
+    pub pack: Option<&'a Opened>,
 }
 
 /// Reads and restores a save file (see [`restore`]).
@@ -967,6 +979,8 @@ pub fn load(path: &Path, demo: Arc<Content>, install: Option<&Install>) -> Resul
 pub fn restore(meta: &SaveMeta, mut game: Game, demo: Arc<Content>, install: Option<&Install>) -> Result<Game, SaveError> {
     check_version(meta)?;
     let embedded = game.map_bytes.take();
+    // The package's story, attached again once the statics are back (a package game only).
+    let mut story = None;
     // What the load sequence draws from (`rng::Rng::save_load`): the plant layer and the
     // number of armies of the map file.
     let (content, fresh, engine, plants, armies) = match &meta.scenario {
@@ -987,6 +1001,16 @@ pub fn restore(meta: &SaveMeta, mut game: Game, demo: Arc<Content>, install: Opt
             let plants = rng::plant_layer(w, h, scenario.objects.iter().map(|o| (o.x as i32, o.y as i32, o.class, o.sprite)));
             (install.content.clone(), world, Some(EventEngine::new(&scenario)), plants, scenario.armies.len())
         }
+        ScenarioRef::Pack { id, version, .. } => {
+            let install = install.ok_or(SaveError::NoInstall)?;
+            let opened = install.pack.filter(|p| p.origin() == meta.scenario).ok_or_else(|| SaveError::PackageMissing(format!("{id} {version}")))?;
+            let scenario = &opened.scenario;
+            let world = World::from_scenario(scenario, &install.content);
+            let (w, h) = (scenario.header.width as i32, scenario.header.height as i32);
+            let plants = rng::plant_layer(w, h, scenario.objects.iter().map(|o| (o.x as i32, o.y as i32, o.class, o.sprite)));
+            story = Some(opened.story.clone());
+            (install.content.clone(), world, Some(EventEngine::new(scenario)), plants, scenario.armies.len())
+        }
     };
     if (game.fog.w, game.fog.h) != (fresh.map.w, fresh.map.h) {
         return Err(SaveError::Mismatch(tr("the map's size differs").into()));
@@ -996,6 +1020,9 @@ pub fn restore(meta: &SaveMeta, mut game: Game, demo: Arc<Content>, install: Opt
         (Some(e), Some(fresh)) => e.restore_statics(fresh).map_err(SaveError::Mismatch)?,
         (None, _) => {}
         (Some(_), None) => return Err(SaveError::Mismatch(tr("events saved for the demo").into())),
+    }
+    if let Some(story) = story {
+        game.attach_story(story);
     }
     let (rng, idle_offsets, music) = Rng::save_load_draws(game.world.map.w, &plants, armies);
     game.rng = rng;
@@ -1810,7 +1837,7 @@ pub(crate) mod tests {
         let dir = temp_dir("maps");
         let (g, path, content) = map_game(&dir);
         let original = std::fs::read(&path).unwrap();
-        let install = Install { dir: &dir, content: content.clone() };
+        let install = Install { dir: &dir, content: content.clone(), pack: None };
         roundtrip(&g, demo(), Some(&install));
 
         // The install's copy changed: the save still loads with the map it was saved with.
@@ -1819,7 +1846,7 @@ pub(crate) mod tests {
         // The install has no copy at all (another player's install): the save carries it.
         std::fs::remove_file(&path).unwrap();
         let empty = temp_dir("no-maps");
-        let bare = Install { dir: &empty, content: content.clone() };
+        let bare = Install { dir: &empty, content: content.clone(), pack: None };
         let loaded = roundtrip(&g, demo(), Some(&bare));
         assert_eq!(loaded.map_bytes.as_deref(), Some(original.as_slice()), "the map the save carries");
         // Loaded, the game keeps its map: a restart and the next save need no install copy.
@@ -1851,11 +1878,11 @@ pub(crate) mod tests {
         });
         let again = || decode(&tampered).unwrap();
         let bare_dir = temp_dir("maps-tampered-bare");
-        let bare = Install { dir: &bare_dir, content: content.clone() };
+        let bare = Install { dir: &bare_dir, content: content.clone(), pack: None };
         // Nothing to load it from: the install lacks the map, and the save's copy is not the map's.
         assert!(matches!(restore(&again().0, again().1, demo(), Some(&bare)), Err(SaveError::MapMissing(m)) if m == "Test"));
         // The install's own copy has the hash, so that one loads, as before.
-        let install = Install { dir: &dir, content: content.clone() };
+        let install = Install { dir: &dir, content: content.clone(), pack: None };
         assert!(restore(&again().0, again().1, demo(), Some(&install)).is_ok());
         // A tampered save whose install copy is changed too is refused as changed.
         std::fs::write(&path, original.iter().map(|b| b ^ 1).collect::<Vec<u8>>()).unwrap();
@@ -1869,7 +1896,7 @@ pub(crate) mod tests {
         let dir = temp_dir("maps-old");
         let (mut g, path, content) = map_game(&dir);
         let original = std::fs::read(&path).unwrap();
-        let install = Install { dir: &dir, content: content.clone() };
+        let install = Install { dir: &dir, content: content.clone(), pack: None };
         // A save as Razdor wrote them before the map was carried: no bytes in it.
         let carried = g.map_bytes.take();
         let meta = meta_of(&g, SaveKind::Manual, "x").unwrap();
@@ -1900,6 +1927,67 @@ pub(crate) mod tests {
         }
     }
 
+    /// A package game saved in the middle of its story loads with the story attached again, its
+    /// variables and its state, and goes on: the host's defeat is the victory.
+    #[test]
+    fn a_package_game_saved_mid_story_loads_with_its_story() {
+        use crate::pack::open::test_support::{opened, story_package};
+        use crate::rules::triggers::{Ending, When};
+        let opened = opened(&story_package());
+        let demo = demo();
+        let content = Arc::new(demo.with_package(opened.units.clone(), opened.items.clone()));
+        let mut g = Game::from_scenario(content.clone(), &opened.scenario, HeroClass::Knight);
+        opened.start(&mut g);
+        assert_eq!(pending_dialogs(&g.drain_events()), ["intro"], "the arrival dialog opens");
+        g.answer_story_dialog("intro", Some("take"));
+        assert_eq!(g.story_var("dread"), Some(crate::pack::triggers::VarValue::Int(2)));
+        let mut out = Vec::new();
+        g.pass_time(14.0 * 24.0 * 60.0, &mut out);
+        assert!(g.triggers.spawned.contains(&200), "the host came on the map at a week's start");
+
+        let meta = meta_of(&g, SaveKind::Manual, "mid story").unwrap();
+        assert_eq!(meta.scenario, opened.origin(), "the save names the package and its map");
+        let bytes = encode(&meta, &g).unwrap();
+        let install = Install { dir: Path::new("."), content: content.clone(), pack: Some(&opened) };
+        let (m, back) = decode(&bytes).unwrap();
+        let mut loaded = restore(&m, back, demo.clone(), Some(&install)).unwrap();
+        assert!(loaded.story().is_some(), "the story is attached again");
+        assert_eq!(loaded.triggers, g.triggers, "the same state");
+        assert_eq!(loaded.story_var("dread"), Some(crate::pack::triggers::VarValue::Int(2)));
+        let ended = loaded.story_events(When::ArmyDefeated(200));
+        assert!(ended.is_empty());
+        assert_eq!(loaded.story_end(), Some(Ending::Victory), "the loaded story goes on");
+    }
+
+    /// A package game whose package is not open (or changed) does not load: the error names the
+    /// package, and nothing panics.
+    #[test]
+    fn a_package_game_without_its_package_says_which_one() {
+        use crate::pack::open::test_support::{opened, story_package};
+        let opened = opened(&story_package());
+        let content = Arc::new(demo().with_package(opened.units.clone(), opened.items.clone()));
+        let mut g = Game::from_scenario(content.clone(), &opened.scenario, HeroClass::Knight);
+        opened.start(&mut g);
+        let meta = meta_of(&g, SaveKind::Manual, "x").unwrap();
+        let bytes = encode(&meta, &g).unwrap();
+        let bare = Install { dir: Path::new("."), content: content.clone(), pack: None };
+        let (m, back) = decode(&bytes).unwrap();
+        let Err(err) = restore(&m, back, demo(), Some(&bare)) else { panic!("a package game loads without its package") };
+        assert!(matches!(&err, SaveError::PackageMissing(name) if name == "story-test 0.1.0"), "{err}");
+        assert!(err.to_string().contains("story-test 0.1.0"), "{err}");
+        // Another package's hash is no match either.
+        let mut other = opened.clone();
+        other.hash ^= 1;
+        let changed = Install { dir: Path::new("."), content: content.clone(), pack: Some(&other) };
+        let (m, back) = decode(&bytes).unwrap();
+        assert!(matches!(restore(&m, back, demo(), Some(&changed)), Err(SaveError::PackageMissing(_))));
+    }
+
+    /// The ids of the dialogs among `events`.
+    fn pending_dialogs(events: &[crate::rules::game::Event]) -> Vec<String> {
+        events.iter().filter_map(|e| if let crate::rules::game::Event::Package(d) = e { Some(d.id.clone()) } else { None }).collect()
+    }
+
     /// A save whose map is gone: the message names the map file and the folder it is missing from.
     #[test]
     fn a_missing_map_error_names_the_file_and_the_game_folder() {
@@ -1924,11 +2012,11 @@ pub(crate) mod tests {
         let (origin, bytes) = ScenarioRef::of_map(&entry.path, &entry.name).unwrap();
         g.set_map(origin, bytes);
         g.drain_events();
-        let install = Install { dir: &dt.dir, content: content.clone() };
+        let install = Install { dir: &dt.dir, content: content.clone(), pack: None };
         roundtrip(&g, demo(), Some(&install));
         // The save carries its map: it loads with an install that lacks this map file.
         let without_maps = temp_dir("rk1-no-maps");
-        roundtrip(&g, demo(), Some(&Install { dir: &without_maps, content: content.clone() }));
+        roundtrip(&g, demo(), Some(&Install { dir: &without_maps, content: content.clone(), pack: None }));
         let _ = std::fs::remove_dir_all(&without_maps);
         // Walk towards the nearest building, then fight the nearest army.
         let here = g.tile();

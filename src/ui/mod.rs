@@ -135,7 +135,7 @@ pub enum Screen {
 
 fn load_entry(m: &razdor::dt::install::MapEntry) -> Option<ScenarioEntry> {
     match m.load() {
-        Ok(scenario) => Some(ScenarioEntry { file: m.name.clone(), path: m.path.clone(), scenario, base_game: false }),
+        Ok(scenario) => Some(ScenarioEntry { file: m.name.clone(), path: m.path.clone(), scenario, base_game: false, pack: None }),
         Err(e) => {
             razdor::diag!("{}: {e}", m.name);
             None
@@ -222,6 +222,7 @@ fn finished<T>(job: &std::sync::mpsc::Receiver<T>) -> Option<Result<T, ()>> {
 pub(super) fn play_game_line(game: &Game, how: &str) -> String {
     let map = match &game.origin {
         Some(save::ScenarioRef::Map { file, .. }) => file.clone(),
+        Some(save::ScenarioRef::Pack { id, map, .. }) => format!("{id}/{map}"),
         Some(save::ScenarioRef::Demo) | None => "demo".into(),
     };
     format!(
@@ -243,6 +244,9 @@ pub struct ScenarioEntry {
     /// A hub map made for the base game, listed while a mod is played (1445b): under the new-game
     /// list's «Карты обычной игры» group. False for every other map.
     pub base_game: bool,
+    /// The content package's map this entry is (`pack_play`), opened: its story starts with the game.
+    /// None for every map of the install.
+    pub pack: Option<Arc<razdor::pack::Opened>>,
 }
 
 /// The map music's rotation as the original runs it (interface.md §13): the last pick, when
@@ -622,7 +626,11 @@ impl App {
     /// same map file only). A pending battle starts again; a pending question is asked again.
     /// The battle under way played again from the game as it began (`BattleView::restart_state`).
     fn restart_battle(&mut self, meta: &save::SaveMeta, bytes: &[u8]) {
-        let install = self.assets.dt.as_ref().zip(self.dt_content.clone()).map(|(d, content)| Install { dir: &d.install.dir, content });
+        if let Err(e) = self.ensure_pack(&meta.scenario) {
+            self.message = Some(razdor::trf!("Cannot load: {e}.", e));
+            return;
+        }
+        let install = self.assets.dt.as_ref().zip(self.dt_content.clone()).map(|(d, content)| Install { dir: &d.install.dir, content, pack: self.pack.as_ref().map(|p| p.opened.as_ref()) });
         let restored = save::decode(bytes).and_then(|(_, game)| save::restore(meta, game, self.demo.clone(), install.as_ref()));
         match restored {
             Ok(mut game) => {
@@ -637,7 +645,13 @@ impl App {
     }
 
     fn load(&mut self, path: &std::path::Path) {
-        let install = self.assets.dt.as_ref().zip(self.dt_content.clone()).map(|(d, content)| Install { dir: &d.install.dir, content });
+        if let Ok(meta) = save::read_meta(path) {
+            if let Err(e) = self.ensure_pack(&meta.scenario) {
+                self.load_error = Some(razdor::trf!("Cannot load: {e}.", e));
+                return;
+            }
+        }
+        let install = self.assets.dt.as_ref().zip(self.dt_content.clone()).map(|(d, content)| Install { dir: &d.install.dir, content, pack: self.pack.as_ref().map(|p| p.opened.as_ref()) });
         match save::load(path, self.demo.clone(), install.as_ref()) {
             Ok(mut game) => {
                 main_menu::follow_settings(&self.audio.settings, &mut game);
@@ -691,6 +705,17 @@ impl App {
                 let g = old.restart(c, scenario);
                 razdor::diag::play(&g.clock.label(), &play_game_line(&g, "restart"));
                 g
+            }
+            // A package's map starts again from its beginning, with its story.
+            Some(save::ScenarioRef::Pack { .. }) => {
+                let name = old.hero_name.clone().unwrap_or_default();
+                let entry = self.scenarios.iter().find(|e| e.pack.as_ref().is_some_and(|p| Some(p.origin()) == old.origin));
+                let (Some(entry), Some(c)) = (entry, self.dt_content.clone()) else {
+                    self.message = Some(tr("The map of this game is not in the install.").into());
+                    self.screen = Screen::WorldMap;
+                    return;
+                };
+                screens::start_game_with_rules(&self.demo, Some((entry, &c)), old.start_class(), &name, old.experimental)
             }
             _ => {
                 let name = old.hero_name.clone().unwrap_or_default();

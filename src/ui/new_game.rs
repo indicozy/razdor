@@ -1806,7 +1806,7 @@ mod tests {
         let Some(dir) = std::env::var_os(razdor::dt::install::ENV_VAR) else { return };
         let dt = razdor::dt::install::DtInstall::load(std::path::Path::new(&dir)).unwrap();
         let sc: Vec<ScenarioEntry> =
-            dt.maps.iter().filter(|m| !razdor::translate::job::is_translated_file(&m.name)).map(|m| ScenarioEntry { file: m.name.clone(), path: m.path.clone(), scenario: m.load().unwrap(), base_game: false }).collect();
+            dt.maps.iter().filter(|m| !razdor::translate::job::is_translated_file(&m.name)).map(|m| ScenarioEntry { file: m.name.clone(), path: m.path.clone(), scenario: m.load().unwrap(), base_game: false, pack: None }).collect();
         let maps: Vec<(&str, u8, &str)> = sc.iter().map(|e| (e.file.as_str(), e.scenario.header.scenario_kind, e.scenario.next_map.as_str())).collect();
         let list = groups(&maps);
         let rk: Vec<&Group> = list.iter().filter(|g| g.chapters.iter().any(|&c| sc[c].file.starts_with("РК6"))).collect();

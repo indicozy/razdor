@@ -138,6 +138,7 @@ ford_held = false            # true or false
 
 [[trigger]]
 id = "ford_guard"
+# map = "first-light"        # optional: the map this trigger applies to (its id); none: every map
 when = { event = "hero_enters", at = [12, 7] }     # a cell; or at = [x, y, w, h] an area
 if = [ { var = "ford_held", value = false }, { random = 50 } ]   # all must hold
 then = [ { set = "ford_held", value = true }, { dialog = "ford" } ]
@@ -240,7 +241,40 @@ Unknown events, conditions, actions and keys (with the closest name); undeclared
 values of the wrong type; unknown dialogs and choices; a dialog that no trigger or choice opens
 (a warning); more than five choices; a text key missing in every language; unknown `dt:` units,
 items and spells; a package that is not in `requires`; a variable declared twice; a trigger id
-used twice. The cell bounds are not checked yet: the map's size is known only once maps are read.
+used twice; a `map` that is not in the package.
+
+Per map (the map checker, once the map's size is known; `triggers::check_map_refs`). The triggers
+that apply to a map are those without `map` and those naming it; the dialogs they open, and the
+dialogs those open, are checked on that map too. On each such map: every army and building a
+trigger or a dialog names is on the map (its `[[army]]` or `[[building]]` id), or is a
+`spawn_army` of the package (spawned armies are known on every map); every cell lies inside the
+map (`hero_enters` and `hero_at` places, `army_at`, `teleport_hero`, `spawn_army`, `teleport_army`).
+A trigger without `map` is therefore checked on every map of the package.
+
+### Running a story
+
+A story attaches to its map when a game of that map starts (`pack::open::Opened::start`: the
+origin is set, the story is attached and its `game_start` moment raised, so the opening dialogs
+wait in `drain_events`, as the scenario's opening events do). `pack::compile` gives the ids a
+story names (`MapNames`, the `rules::triggers::Resolve` of a compiled map): a map's army is its
+`[[army]]` position + 1 and a building its `[[building]]` position + 1, as the scenario numbers
+them; the package's units and items are their compiled ids; a `spawn_army` name is a package army
+from 200 up, in order of first mention. The story's `army_names` and `building_names` name them in
+the trace.
+
+**Saves.** A package game saves like the others: its save names the package (`ScenarioRef::Pack`:
+id, version, content hash, the path it was read from, and the map's id). The hash is FNV-1a over
+the package's files (`pack::open::package_hash`). A load reads the package from that path again
+(`ui/pack_play.rs` `ensure_pack`), checks the hash and the map, attaches the story and keeps the
+saved state (variables, fired triggers, the dread's generator, spawned armies). A package that is
+gone or changed refuses the load with «the package {id} {version} … is missing or has changed: open
+it again from its file», and nothing panics. A save of a map of the install is unchanged, and an
+older save has no package field.
+
+**The trace.** `razdor-pack sim --trace` keeps what the story did, with the game minute of each step
+(`TriggerState::trace`, never saved): the triggers that fired and on which moment, the variables'
+changes, the dialogs that opened with their visible choices, the choice the sim took («Далее» for
+none), the armies that came onto the map, and the ending. It is kept only while asked for.
 
 ### Not in this step
 
@@ -371,16 +405,23 @@ game's own limits apply: 32 named characters, 255 armies, 6 troop slots per list
 
 - `razdor-pack check <folder-or-.rzpack> [--json]`: the rules above; exit 0 with no errors, 1 with
   errors, 2 on a usage or read problem.
-- `razdor-pack sim <folder-or-.rzpack> [--map <id>] [--days <n>=30] [--json]`: the AI plays the map
-  headless for N days, as the community map smoke test does (`rules::sim`, shared with it). It
-  reports the day of victory or defeat, a panic (caught) or a softlock. Without `--map` every map
-  is played. Needs `RAZDOR_DT_DIR`. Exit 1 on a panic, a softlock or a check error.
+- `razdor-pack sim <folder-or-.rzpack> [--map <id>] [--days <n>=30] [--json] [--trace]
+  [--choices first|random|<dialog>=<choice>,…]`: the AI plays the map headless for N days, as the
+  community map smoke test does (`rules::sim`, shared with it), with the package's story attached.
+  It reports the day of victory or defeat (the scenario's or the story's), a panic (caught) or a
+  softlock. Without `--map` every map is played. `--trace` prints every day (`day 3: fired …`,
+  `x = 2`, `dialog … opens: a, b`, `the sim answers … with a`, `army … comes onto the map`, `the
+  story ends: victory`); `--json` gives the same as data, its `trace` a list of `{day, what}`.
+  `--choices` answers the dialogs: `first` (the default: the first choice shown, «Далее» when
+  none), `random` (a seeded rule: the same answers every run), or `dialog=choice,…` (the choice
+  named, if it shows, else the first). Needs `RAZDOR_DT_DIR`. Exit 1 on a panic, a softlock or a
+  check error.
 - `razdor-pack play <folder-or-.rzpack> [--map <id>]`: runs `razdor --pack <path> [--map <id>]`, the
   `razdor` binary next to this one.
 - `razdor --pack <folder-or-.rzpack> [--map <id>]` (or `RAZDOR_PACK`, `RAZDOR_PACK_MAP`): starts a
   new game on the package's map, after the install's map list. The package is checked and compiled
-  on the install; the game opens on the hero window. A package game cannot be saved yet (a save
-  names the map's file, and a package has none).
+  on the install; the game opens on the hero window, and the package's story starts with it. A
+  package game saves: its save names the package (see «Running a story»), and a load reopens it.
 
 Off-screen: `RAZDOR_PACK=<path> RAZDOR_SCENE=map:<map-id>` renders the package's map (the
 `offscreen-snapshot` skill).
@@ -388,7 +429,6 @@ Off-screen: `RAZDOR_PACK=<path> RAZDOR_SCENE=map:<map-id>` renders the package's
 ## Not in format 1
 
 `art/` and `scripts/` are reserved: they are allowed at the top but not
-read yet. Also not yet: `render`, `pack` (the `.rzpack` builder), the Hub, saves of a package game,
-the other packages' units in maps, and `defeat_all` with more than two enemy armies.
+read yet. Also not yet: `render`, `pack` (the `.rzpack` builder), the Hub, the other packages' units in maps, and `defeat_all` with more than two enemy armies.
 
 The example's terrain is painted by `tools/pack-example-terrain.py` (stdlib only).
