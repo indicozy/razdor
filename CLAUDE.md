@@ -11,6 +11,12 @@ Update, Evolution Mod, user maps) play well, on desktop and phones. The goal is 
 project is in maintenance mode. The work is QoL, bug fixes (above all for community maps) and
 mobile support; there is no roadmap and nothing else is started unless the owner asks.
 
+Razdor 2.0 (the owner's decision, 2026-11-02) ends maintenance mode: content packages
+(`.rzpack`: maps, stories, units, items, mechanics made with the creator's own AI agent) and
+an engine cut into replaceable systems with Lua seams. `.DTm` maps, Community Update and
+Evolution Mod must play exactly as before; every step keeps the difftests, the community map
+smoke test and `max_bench` green. Design: `docs/superpowers/specs/2026-11-02-v2-packages-design.md`.
+
 **Before working on a feature, read `docs/flows/README.md` and the flow for that area.**
 
 ## Commands
