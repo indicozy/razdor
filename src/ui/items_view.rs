@@ -754,7 +754,7 @@ pub fn squad(
     let win = window_layout::window();
     let title = chrome::ui_text("Army", "Title").filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| tr("The hero's characteristics and army").to_string());
     let (_, close) = chrome::window(win, &title, chrome::Skin::Marble, true);
-    let close = close_button(win) || close;
+    let close = close_button(win, true) || close;
     window_layout::panel_frame(window_layout::upper(win));
     window_layout::panel_frame(window_layout::lower(win));
     let at = |x: f32, y: f32, w: f32, h: f32| window_layout::at(win, x, y, w, h);
@@ -1241,11 +1241,13 @@ pub(super) fn class_wage(c: &Content, id: UnitId) -> i32 {
 /// or filled, is drawn on the previewed type's card.
 /// The stacked army and hero windows' «Закрыть» under the formation, in thumb reach: the same
 /// close as the title's cross (`true` when pressed). Landscape has none.
-fn close_button(win: Rect) -> bool {
+/// `army`: the army window, whose phone «Закрыть» is the owner's normal 44 dp button (2026-11-02);
+/// the hero window keeps its row as it was.
+fn close_button(win: Rect, army: bool) -> bool {
     if !window_layout::portrait() {
         return false;
     }
-    let Some(r) = bottom_row_rects(win).close else { return false };
+    let Some(r) = bottom_row_rects(win, army).close else { return false };
     super::widgets::button(r.x, r.y, r.w, r.h, tr("Close"), true)
 }
 
@@ -1262,7 +1264,7 @@ struct BottomRow {
 /// (`window_layout::army_close`), on the close's line when held upright and at the window's foot
 /// when sideways. Sideways they stack under the diary's column ([`sideways_row`]), so they never
 /// cover the hero's panel.
-fn bottom_row_rects(win: Rect) -> BottomRow {
+fn bottom_row_rects(win: Rect, army: bool) -> BottomRow {
     let k = chrome::k();
     let base = window_layout::army_close(win);
     // The buttons grow with the text size (`button_grow`, the owner's decision of 2026-10-31): their
@@ -1273,7 +1275,7 @@ fn bottom_row_rects(win: Rect) -> BottomRow {
         // A phone's «Закрыть» is a normal button (44 dp tall, the owner's notes of 2026-11-02), a little
         // wider than the desktop's share, its label bigger with it; the desktop keeps the grown size.
         // The widget grows its height with the text size too, so the height is divided by that growth.
-        let phone = super::display::dp_px().map(|dp| (44.0 * dp / super::display::button_grow(), 0.44));
+        let phone = super::display::dp_px().filter(|_| army).map(|dp| (44.0 * dp / super::display::button_grow(), 0.44));
         let (h, share) = phone.unwrap_or((h, 0.36));
         let (whole, close, expand) = bottom_row(win, bottom - h, h, 12.0 * k, 8.0 * k, share);
         return BottomRow { whole, close: Some(close), expand };
@@ -1803,7 +1805,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     let win = window_layout::window();
     let title = own("Title", n_("The hero's characteristics and inventory"));
     let (_, close) = chrome::window(win, &title, chrome::Skin::Marble, true);
-    let close = close_button(win) || close;
+    let close = close_button(win, false) || close;
     // The original's right side, window-relative.
     let s = HERO_S * k;
     // Its origin is the right side's (248, 28) as the window places it (below the left column when stacked).
@@ -1875,7 +1877,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     // Sideways a phone's bottom buttons stack under the diary's right column (no «Закрыть» there):
     // the entry box gives up that strip, so «Весь список» does not cover its text.
     if phone && !window_layout::portrait() {
-        column.entry = entry_above_row(column.entry, &bottom_row_rects(win), k);
+        column.entry = entry_above_row(column.entry, &bottom_row_rects(win, false), k);
     }
     if let Some(desc) = column.desc {
         heading("ItemDescript", n_("Item description"), desc);
@@ -2066,7 +2068,7 @@ pub fn hero_window(game: &mut Game, assets: &Assets, view: &mut HeroView, messag
     // (portrait), «Развернуть» (the picked entry in its reader) right; sideways «Весь список» stands
     // above «Развернуть». Drawn before the readers, which cover them while they are open.
     if phone {
-        let row = bottom_row_rects(win);
+        let row = bottom_row_rects(win, false);
         let (left, right) = (row.whole, row.expand);
         if button(left.x, left.y, left.w, left.h, tr("Whole list"), whole_list_enabled(rows.len())) {
             view.list_reader = true;
