@@ -1658,6 +1658,39 @@ mod tests {
     }
 
     #[test]
+    fn a_window_event_during_a_real_time_cast_lands_the_spell_at_once() {
+        // The same through the UI's path (`begin_cast` then `tick`, as the wait ticks play):
+        // an event that opens its window during the reading ends the wait, and the spell lands
+        // at once, after 1 h here, not after its 4 h (0x4ae4e9–0x4ae4f0, 0x4ae4f2).
+        use crate::rules::content::{testkit as ck, Content, SpellDef};
+        use crate::rules::magic::{CastOutcome, CastTarget};
+        let mut e = ev(EventKind::Global);
+        e.start_time = 624_354_300 + 60;
+        let s = world(vec![e]);
+        let base = content();
+        let heal = SpellDef { time_cast: Some(4), cost_mana: 10, delta_fixed_hits: Some(10), ..ck::spell(1, 0) };
+        let c = Content::new(base.units.clone(), base.items.clone(), vec![heal], base.options.clone(), base.formation);
+        let mut g = Game::from_scenario(Arc::new(c), &s, HeroClass::Knight);
+        read(&mut g);
+        (g.mana, g.spells) = (100, vec![1]);
+        g.squad[1].hp = 5;
+        let t0 = g.clock.total_minutes();
+        assert_eq!(g.begin_cast(1, CastTarget::Own), Ok(None));
+        let mut events = Vec::new();
+        for _ in 0..10_000 {
+            events.extend(g.tick(0.05));
+            if g.reading().is_none() {
+                break;
+            }
+        }
+        assert!(g.reading().is_none(), "the reading ends");
+        assert_eq!(fired(&events), vec![1], "the window event fired during the reading");
+        let done = CastOutcome::Done { hits: 10, killed: 0, destroyed: false };
+        assert!(events.contains(&Event::SpellCast { spell: 1, target: CastTarget::Own, outcome: done }), "{events:?}");
+        assert_eq!((g.clock.total_minutes() - t0, g.mana, g.squad[1].hp), (60.0, 90, 15));
+    }
+
+    #[test]
     fn an_event_teaches_spells_past_the_15th() {
         // 0x49c144 has no limit; the 16th is known and castable in Razdor (`rules::magic`).
         use crate::rules::events::EventWorld;
