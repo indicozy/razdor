@@ -15,7 +15,7 @@ const HELP: &str = "razdor-pack: content packages (.rzpack) for Razdor 2.0
                              exit status: 0 no errors, 1 errors, 2 usage or read problem
   razdor-pack sim <folder-or-.rzpack> [--map <id>] [--days <n>=30] [--json]
                              [--trace] [--choices first|random|<dialog>=<choice>,…]
-                             [--set var=value]… [--campaign [--auto-win-after <days>]]
+                             [--set var=value]… [--seed <n>] [--campaign [--auto-win-after <days>]]
                              --set forces a story variable before the story starts (a
                              developer switch to drive branches; repeatable; on a campaign it
                              is set for its first map and carries on).
@@ -116,6 +116,7 @@ struct Args {
     campaign: bool,
     auto_win: Option<u64>,
     set: Vec<String>,
+    seed: Option<u32>,
 }
 
 fn package_args(cmd: &str, args: &[String], allow_sim: bool) -> Result<Args, String> {
@@ -131,6 +132,10 @@ fn package_args(cmd: &str, args: &[String], allow_sim: bool) -> Result<Args, Str
             "--json" if allow_sim => out.json = true,
             "--trace" if allow_sim => out.trace = true,
             "--campaign" if allow_sim => out.campaign = true,
+            "--seed" if allow_sim => {
+                let v = it.next().ok_or("--seed needs a number")?;
+                out.seed = Some(v.parse().map_err(|_| format!("--seed {v}: a whole number"))?);
+            }
             "--auto-win-after" if allow_sim => {
                 let v = it.next().ok_or("--auto-win-after needs a number of days")?;
                 out.auto_win = Some(v.parse().map_err(|_| format!("--auto-win-after {v}: a whole number of days"))?);
@@ -189,6 +194,7 @@ fn sim(args: &[String]) -> Result<u8, String> {
         // The JSON carries the trace too: `--json` is the same data as `--trace`.
         trace: a.trace || a.json,
         preset: preset.clone(),
+        seed: a.seed,
     };
     let mut failed = false;
     let mut json = Vec::new();

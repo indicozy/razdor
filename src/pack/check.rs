@@ -48,7 +48,59 @@ pub fn check(pkg: &Package) -> Report {
     super::campaign::check(pkg, &mut r);
     check_limits(pkg, &mut r);
     map_check::check_maps(pkg, &mut r);
+    check_scripts(pkg, &mut r);
     r
+}
+
+/// The package's scripts (`scripts/*.lua`): each one parses, with its syntax errors and their
+/// lines. A battle that names a script (`[[army]] battle` and a trigger's `start_battle` with
+/// `rules = "lua:<name>"`) needs a script that loads and defines `setup` and `check_end` (the
+/// field battle's hooks). Without the Lua runtime (`--no-default-features`) the syntax is not
+/// checked, and a battle's script is only looked for.
+fn check_scripts(pkg: &Package, r: &mut Report) {
+    let scripts = super::open::package_scripts(&pkg.files);
+    #[cfg(feature = "lua")]
+    for e in crate::lua::check_scripts(&scripts) {
+        r.error(&e.script, None, e.message);
+    }
+    for (id, entry) in &pkg.maps {
+        let Some(m) = &entry.spec else { continue };
+        for a in &m.army {
+            if let Some(rules) = &a.get_ref().battle {
+                if let Some(problem) = rules_problem(&scripts, rules) {
+                    r.error_hint(&entry.file, None, format!("map `{id}`, army `{}`: {problem}", a.get_ref().id), "a battle is `dt` or `lua:<script>` with scripts/<script>.lua in the package");
+                }
+            }
+        }
+    }
+    let triggers = pkg.triggers.iter().map(|t| (&t.file, t.line, &t.value.then)).chain(pkg.dialogs.iter().flat_map(|d| d.value.choices.iter().map(|c| (&d.file, d.line, &c.then))));
+    for (file, line, actions) in triggers {
+        for a in actions {
+            if let super::triggers::Action::StartBattle { rules, .. } = a {
+                if let Some(problem) = rules_problem(&scripts, rules) {
+                    r.error_hint(file, Some(line), problem, "a battle is `dt` or `lua:<script>` with scripts/<script>.lua in the package");
+                }
+            }
+        }
+    }
+}
+
+/// Why a battle's `rules` do not name a usable script, if they do not.
+fn rules_problem(scripts: &BTreeMap<String, String>, rules: &str) -> Option<String> {
+    if rules == "dt" {
+        return None;
+    }
+    let Some(name) = rules.strip_prefix("lua:").filter(|n| !n.is_empty()) else {
+        return Some(format!("the battle `{rules}` is not `dt` or `lua:<script>`"));
+    };
+    #[cfg(feature = "lua")]
+    {
+        crate::lua::field::check_battle_script(scripts, name).err()
+    }
+    #[cfg(not(feature = "lua"))]
+    {
+        (!scripts.contains_key(&format!("scripts/{name}.lua"))).then(|| format!("the package has no scripts/{name}.lua"))
+    }
 }
 
 /// The package's units and items must fit the ids a troop slot and an event hold (`compile`).

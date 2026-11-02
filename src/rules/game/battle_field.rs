@@ -144,9 +144,11 @@ impl Game {
         self.story.as_ref()?.battles.get(&id).and_then(|r| script_of(r)).map(str::to_string)
     }
 
-    /// The seed of a new field battle: the clock and the battle count (never the wall clock).
+    /// The seed of a new field battle: the story's seed (the package's, or the sim's `--seed`),
+    /// the clock and the battle count. Never the wall clock.
     fn field_seed(&self) -> u64 {
-        (self.clock.total_minutes() as u64) ^ self.battles.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        let story = self.story.as_ref().map_or(0, |s| s.seed as u64);
+        (self.clock.total_minutes() as u64) ^ self.battles.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (story << 32)
     }
 
     /// Opens the hooks and the battle: a new one (set up, round 1) or the saved state resumed.
@@ -338,7 +340,7 @@ mod tests {
 
     /// The game of the package's map, started, with the army `e` as the foe.
     fn game(script: &str) -> Game {
-        let pkg = package(script);
+        let pkg = package(&format!("function setup(s) end\nfunction check_end(s) return nil end\n{script}"));
         let o = test_support::opened(&pkg);
         let content = Arc::new(Content::builtin().with_package(o.units.clone(), o.items.clone()));
         let mut g = Game::from_scenario(content, &o.scenario, HeroClass::Knight);

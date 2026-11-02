@@ -87,6 +87,9 @@ pub struct SimOptions {
     pub trace: bool,
     /// Variables forced at the start (`--set var=value`).
     pub preset: Vec<(String, VarValue)>,
+    /// The story's seed (`--seed`): the package generator's and the field battles' draws. None:
+    /// the package's own (from its hash).
+    pub seed: Option<u32>,
 }
 
 /// Reads `--set var=value`: a whole number, or `true` / `false`.
@@ -129,6 +132,8 @@ pub struct SimResult {
     pub defeat_day: Option<f64>,
     pub ai_battles: u32,
     pub player_battles: usize,
+    /// The field battles of the run: rounds and winner (`None`: none).
+    pub field_battles: Vec<(u32, Option<crate::rules::field::Side>)>,
     /// The map has a story (triggers or dialogs).
     pub story: bool,
     /// What the story did, by day after the start, when the trace was asked for.
@@ -154,10 +159,19 @@ impl SimResult {
             (None, true) => "STALLED (softlock)".to_string(),
             (None, false) => "ok".to_string(),
         };
-        format!(
+        let mut out = format!(
             "{}: {status}; {} days, {outcome}; AI battles {}, player battles {}; {:.2} s",
             self.map, self.days, self.ai_battles, self.player_battles, self.seconds
-        )
+        );
+        for (i, (rounds, winner)) in self.field_battles.iter().enumerate() {
+            let who = match winner {
+                Some(crate::rules::field::Side::Defenders) => "defenders",
+                Some(crate::rules::field::Side::Attackers) => "attackers",
+                None => "no winner",
+            };
+            out.push_str(&format!("\n  field battle {}: {rounds} rounds, {who} win", i + 1));
+        }
+        out
     }
 
     /// The trace for a person: every day of the run, with what the story did that day.
@@ -239,7 +253,11 @@ pub fn sim_map(pkg: &Package, install: &DtInstall, map: &str, opts: &SimOptions)
     let start = std::time::Instant::now();
     let mut state = 0x9E37_79B9u32;
     let mut pick = |d: &PendingDialog| opts.choices.pick(&mut state, d);
-    let play = StoryPlay { story: opened.story.clone(), trace: opts.trace, preset: opts.preset.clone(), pick: &mut pick };
+    let mut story = opened.story.clone();
+    if let Some(seed) = opts.seed {
+        story.seed = seed.max(1);
+    }
+    let play = StoryPlay { story, trace: opts.trace, preset: opts.preset.clone(), pick: &mut pick };
     let run = std::panic::catch_unwind(AssertUnwindSafe(|| sim::play_days_with(&content, &opened.scenario, class, opts.days, Some(play))));
     let seconds = start.elapsed().as_secs_f64();
     Ok(match run {
@@ -252,6 +270,7 @@ pub fn sim_map(pkg: &Package, install: &DtInstall, map: &str, opts: &SimOptions)
             defeat_day: run.defeat_day,
             ai_battles: run.ai.battles,
             player_battles: run.player_battles,
+            field_battles: run.field_battles,
             story: story_on,
             trace: run.trace,
             seconds,
@@ -265,6 +284,7 @@ pub fn sim_map(pkg: &Package, install: &DtInstall, map: &str, opts: &SimOptions)
             defeat_day: None,
             ai_battles: 0,
             player_battles: 0,
+            field_battles: Vec::new(),
             story: story_on,
             trace: Vec::new(),
             seconds,
@@ -577,7 +597,7 @@ mod tests {
     }
 
     fn options(days: u64) -> SimOptions {
-        SimOptions { days, choices: Choices::First, trace: false, preset: Vec::new() }
+        SimOptions { days, choices: Choices::First, trace: false, preset: Vec::new(), seed: None }
     }
 
     #[test]

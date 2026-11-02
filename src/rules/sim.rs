@@ -12,6 +12,7 @@ use crate::rules::ai::AiStats;
 use crate::rules::battle::Outcome;
 use crate::rules::clock::MINUTES_PER_DAY;
 use crate::rules::content::{Content, HeroClass};
+use crate::rules::field::Side;
 use crate::rules::game::{Event, Game};
 use crate::rules::script::ScriptEnd;
 use crate::rules::triggers::When;
@@ -38,6 +39,8 @@ pub struct DaysRun {
     pub defeat_day: Option<f64>,
     /// What the package's story did, by day after the start, when its trace was asked for.
     pub trace: Vec<(u64, Trace)>,
+    /// The field battles the run fought: their rounds and the side that won (`None`: no winner).
+    pub field_battles: Vec<(u32, Option<Side>)>,
     pub secs: f64,
 }
 
@@ -51,9 +54,17 @@ pub struct StoryPlay<'a> {
     pub pick: &'a mut dyn FnMut(&PendingDialog) -> Option<String>,
 }
 
-/// Auto-plays the player's pending battle, the AI on both sides.
-fn fight_it_out(g: &mut Game) -> Outcome {
+/// Auto-plays the player's pending battle, the AI on both sides. A field battle is played on
+/// the AI too, and its rounds and winner are kept in `fields`.
+fn fight_it_out(g: &mut Game, fields: &mut Vec<(u32, Option<Side>)>) -> Outcome {
     let mut b = g.start_battle();
+    if g.field_active() {
+        while g.field_outcome().is_none() && g.field_auto_step().is_ok() {}
+        let (rounds, winner) = (g.field_round().unwrap_or(0), g.field_outcome());
+        fields.push((rounds, winner));
+        g.field_finish();
+        return if winner == Some(Side::Defenders) { Outcome::Victory } else { Outcome::Defeat };
+    }
     b.auto_play_to_end();
     g.resolve_battle(&b);
     b.outcome()
@@ -88,6 +99,7 @@ pub fn play_days_with(c: &Arc<Content>, s: &Scenario, hero: HeroClass, days: u64
     let mut victory_day = None;
     let mut defeat_day = None;
     let mut calls = 0;
+    let mut field_battles = Vec::new();
     let day_now = |g: &Game| (g.clock.total_minutes() - start) / MINUTES_PER_DAY as f64;
     while g.clock.total_minutes() < end && calls < 200_000 {
         calls += 1;
@@ -98,7 +110,7 @@ pub fn play_days_with(c: &Arc<Content>, s: &Scenario, hero: HeroClass, days: u64
         }
         if g.foe.is_some() {
             player_battles += 1;
-            if fight_it_out(&mut g) == Outcome::Defeat {
+            if fight_it_out(&mut g, &mut field_battles) == Outcome::Defeat {
                 // The game would be over; the world goes on without the player.
                 player_lost = true;
                 defeat_day.get_or_insert_with(|| day_now(&g));
@@ -118,6 +130,7 @@ pub fn play_days_with(c: &Arc<Content>, s: &Scenario, hero: HeroClass, days: u64
     let day0 = start as u64 / MINUTES_PER_DAY;
     let trace = g.triggers.trace.take().unwrap_or_default().into_iter().map(|(at, what)| (at / MINUTES_PER_DAY - day0, what)).collect();
     DaysRun {
+        field_battles,
         ai: g.ai_stats,
         armies,
         armies_after: g.world.armies.len(),
@@ -207,7 +220,7 @@ pub fn play_campaign_map(g: &mut Game, days: u64, auto_win_after: Option<u64>, p
             continue;
         }
         if g.foe.is_some() {
-            if fight_it_out(g) == Outcome::Defeat {
+            if fight_it_out(g, &mut Vec::new()) == Outcome::Defeat {
                 return MapEnd::Defeat;
             }
             continue;
