@@ -1,0 +1,91 @@
+# TEMPLATE, not active. It lives in Razdor's repository on purpose: it runs in the community repository
+# (indicozy/razdor-community) as .github/workflows/package-pr.yml, once the owner turns uploads on
+# (tools/community-pack/README.md, "Uploads"). Pin every action to a commit SHA there, as cla.yml does.
+#
+# A pull request that adds a package (packages/<id>-<version>.rzpack):
+#   1. builds razdor-pack from Razdor at a pinned ref (RAZDOR_REF below);
+#   2. runs package_ci.py on the files the PR adds (size, game files, install hashes, razdor-pack
+#      check, sim when the runner has an install, the author of a new version);
+#   3. writes the summary to the job page and, when it can, as a comment on the PR;
+#   4. enables auto-merge on green (the repository's auto-merge setting must be on).
+# A fork's pull request gets a read-only token: the comment step is then skipped (continue-on-error)
+# and the summary is still on the job page; the owner reviews those.
+name: Package PR
+
+on:
+  pull_request:
+    paths:
+      - "packages/**"
+
+permissions:
+  contents: read
+
+env:
+  # The Razdor commit (or tag) the tool is built from. The owner sets it when Razdor's tool changes.
+  RAZDOR_REF: "REPLACE-WITH-A-RAZDOR-COMMIT-OR-TAG"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Check out the community repository (the pull request)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Check out Razdor (the tool's source)
+        uses: actions/checkout@v5
+        with:
+          repository: indicozy/razdor
+          ref: ${{ env.RAZDOR_REF }}
+          path: razdor
+
+      - name: Build razdor-pack
+        working-directory: razdor
+        run: cargo build --release --bin razdor-pack
+
+      - name: Read the current catalog (the authors of its ids)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The latest catalog release's index.json; none yet on the first package.
+          gh release download --pattern index.json --dir . --clobber || echo "no catalog yet: every id is new"
+
+      - name: Check the packages this pull request adds
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -uo pipefail
+          added=$(git diff --name-only --diff-filter=A "$BASE_SHA" "$HEAD_SHA" -- 'packages/*.rzpack')
+          hashes=""
+          if [ -f dt-hashes.txt ]; then hashes="--hashes dt-hashes.txt"; fi
+          index=""
+          if [ -f index.json ]; then index="--index index.json"; fi
+          # --sim auto runs the sim only on a runner that has the install (RAZDOR_DT_DIR set); hosted runners do not.
+          # shellcheck disable=SC2086
+          python3 -I razdor/tools/community-pack/package_ci.py check \
+            --razdor-pack razdor/target/release/razdor-pack \
+            --sim auto $hashes $index \
+            --summary summary.md \
+            $added | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment the summary on the pull request
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          test -f summary.md && gh pr comment "$PR_NUMBER" --body-file summary.md
+
+      - name: Enable auto-merge on green
+        if: success()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge "$PR_URL" --auto --squash

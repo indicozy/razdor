@@ -295,7 +295,7 @@ fn hub_real_catalog() {
     let t0 = Instant::now();
     let scratch = std::env::var_os("RAZDOR_HUB_TEST_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir);
     let temp = TempHub(scratch.join(format!("razdor-hub-real-{}", std::process::id())));
-    let hub = crate::hub::Hub { source: crate::hub::Source::Dir(catalog_dir.clone()), local: temp.0.clone() };
+    let hub = crate::hub::Hub { source: crate::hub::Source::Dir(catalog_dir.clone()), local: temp.0.clone(), trust_dir: None };
     let catalog = hub.catalog().unwrap_or_else(|e| panic!("the catalog does not parse: {e}"));
     let count = |k| catalog.entries.iter().filter(|e| e.kind == k).count();
     let (mods, campaigns, maps) = (count(crate::hub::Kind::Mod), count(crate::hub::Kind::Campaign), count(crate::hub::Kind::Map));

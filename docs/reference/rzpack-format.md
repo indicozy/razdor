@@ -42,8 +42,9 @@ read from (`ScenarioRef::Pack`). The path is a hint. A load opens a package only
 - the list `packages.json` in Razdor's data folder (`platform::app_dir()`, `pack::trust`): every
   package the player opened with `razdor --pack` (or `RAZDOR_PACK`), with its canonical path, id,
   version and hash, the newest first, at most 512 entries;
-- the Hub's `packages/` folder (`<hub>/packages/`): its folders and `.rzpack` files. Format 1 does
-  not install packages there yet, so the folder is empty in practice.
+- the Hub's `packages/` folder (`<hub>/packages/`): its folders and `.rzpack` files. The Hub installs a
+  catalog package there (`<id>-<version>.rzpack`) or imports a file the player picks, and records it in the
+  trusted list too.
 
 A candidate is opened and must match the save's id, version, hash and map (`Opened::same_package`;
 the path is not compared). The save's path is opened only when it canonicalises to a listed path of
@@ -479,6 +480,18 @@ Off-screen: `RAZDOR_PACK=<path> RAZDOR_SCENE=map:<map-id>` renders the package's
 ## Not in format 1
 
 `art/` and `scripts/` are reserved: they are allowed at the top but not
-read yet. Also not yet: `render`, `pack` (the `.rzpack` builder), the Hub, the other packages' units in maps, and `defeat_all` with more than two enemy armies.
+read yet. Also not yet: `render`, the other packages' units in maps, and `defeat_all` with more than two enemy armies.
+
+## Packing, the Hub and uploads
+
+- `razdor-pack pack <folder> [-o out.rzpack]` runs `check` (an error refuses it) and zips the folder
+  deterministically: entries in path order, one timestamp, deflate, fixed modes. The same folder gives the same
+  bytes and SHA-256 (`pack::archive`; test `the_same_folder_packs_to_the_same_bytes_and_sha256`).
+- `razdor-pack info <folder-or-.rzpack>` prints the manifest, the maps, the size and the SHA-256.
+- The Hub (`docs/flows/app-and-ui.md`, «Content packages»): a catalog entry `kind = "package"`, a `.rzpack`
+  installed to `<hub>/packages/`, «Импорт пакета…» for a file (checked, marked not checked by the Hub),
+  Play from the card, the report button (clipboard and the Discord invite), `status = "unlisted"` hidden from the list.
+- Uploads (`tools/community-pack/`: `package_ci.py`, `build.py --packages`, the inactive workflow in
+  `ci/package-pr.yml`, and the owner's steps in its README): the gate on a pull request to razdor-community.
 
 The example's terrain is painted by `tools/pack-example-terrain.py` (stdlib only).

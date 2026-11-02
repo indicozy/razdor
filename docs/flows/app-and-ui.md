@@ -781,6 +781,26 @@ Leaving the window after a change re-reads the hub's maps into `App::scenarios` 
 the install is read again while a mod is played, so its folder is rebuilt or the base is back), after
 the install's, so they show in the new-game list. Snapshot scene: `hub[:<tab>[:<id>]]`.
 
+**Content packages** (`hub/packages.rs`, `ui/hub_pack.rs`; the format is `docs/reference/rzpack-format.md`).
+A catalog entry with `kind = "package"` has one `.rzpack` file. `Hub::install` downloads it (size and SHA-256
+checked as any file, at most `MAX_PACKAGE_BYTES`), then `write_package` runs `pack::check` and requires the id
+and version the catalog names; the file is written atomically to `<hub>/packages/<id>-<version>.rzpack`, and an
+older version is removed only after that (install_plan). `Hub::import_package` (the «Импорт пакета…» button,
+the picker `hub_pack::start_pick`: the desktop dialog, the Android document picker; a `.rzpack` named on the
+command line, `ui::hub_pack::import_args`) does the same checks on a file the player picks, marks the record
+`unchecked` and keeps its own `entry` (the card's data), so `hub::with_imported` lists it beside the catalog.
+A refusal is a notice (`hub_pack::import_notice`) with `razdor-pack check`'s diagnostics in a scrollable list.
+`installed.json` records the file; `store_package` remembers it in the trusted list (`pack::trust`,
+`Hub::trust_dir`: Razdor's data folder, not set in snapshot runs or tests).
+Play: `Hub::play_path` gives the installed file; the card's «Играть» sets `HubView::play`, the window closes,
+and `App::pending_pack` opens it with `open_pack` (the game's `razdor --pack` path). The card's «Пожаловаться»
+opens a report window: the text goes to the clipboard, `hub::REPORTS_LINK` (the Discord invite; the reports
+thread's own link is not in the repository) opens in the browser. `Status::Unlisted` (`status = "unlisted"`)
+hides an entry from the list (`hub::listed`) unless the player has it installed. While a notice or the report
+window is open, the hub's own buttons and list picks take no click (`modal` in `hub_view::frame`).
+Off-screen: `hub-installed`, `hub-report`, `hub-refused` and `hub:0:hello-story` (the mock hub's example package,
+`mock::build`'s `a_package`); each needs its own `RAZDOR_HUB_DIR` (two cases building the mock at once race).
+
 ## Text
 
 - Razdor's own texts: `razdor::i18n::tr("English text")` and `trf!` with named

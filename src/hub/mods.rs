@@ -609,6 +609,8 @@ mod tests {
             title: Text { ru: id.into(), en: String::new() },
             requires: requires.iter().map(|r| r.to_string()).collect(),
             files: files.iter().map(|(rel, _)| format!("mods/{id}/files/{rel}")).collect(),
+            unchecked: false,
+            entry: None,
         };
         installed.entries.insert(id.into(), record);
         std::fs::create_dir_all(local).unwrap();
@@ -721,13 +723,15 @@ mod tests {
                 title: Text::default(),
                 requires: vec!["evo".into()],
                 files: vec!["maps/Hub_Rotten.DTm".into()],
+                unchecked: false,
+                entry: None,
             },
         );
         installed.entries.insert(
             "ford".into(),
-            super::super::InstalledEntry { version: "1".into(), kind: Kind::Map, lang: String::new(), title: Text::default(), requires: vec![], files: vec!["maps/Hub_Ford.DTm".into()] },
+            super::super::InstalledEntry { version: "1".into(), kind: Kind::Map, lang: String::new(), title: Text::default(), requires: vec![], files: vec!["maps/Hub_Ford.DTm".into()], unchecked: false, entry: None },
         );
-        installed.entries.insert("evo".into(), super::super::InstalledEntry { version: "1".into(), kind: Kind::Mod, lang: String::new(), title: Text::default(), requires: vec![], files: vec![] });
+        installed.entries.insert("evo".into(), super::super::InstalledEntry { version: "1".into(), kind: Kind::Mod, lang: String::new(), title: Text::default(), requires: vec![], files: vec![], unchecked: false, entry: None });
         std::fs::create_dir_all(&local).unwrap();
         std::fs::write(local.join("installed.json"), serde_json::to_vec(&installed).unwrap()).unwrap();
         assert!(MapGate::read(&local).group("Hub_Rotten.DTm", false) == MapGroup::Hidden, "no mod is active");

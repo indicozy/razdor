@@ -209,6 +209,11 @@ async fn main() {
     if std::env::args().skip(1).any(|a| a == "--editor") {
         app.open_editor();
     }
+    // A `.rzpack` named on the command line is imported into the Hub (checked, not from the list).
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    for notice in ui::hub_pack::import_args(&args) {
+        ui::map_import::notice(&notice.title, notice.lines);
+    }
     // `--pack <folder-or-.rzpack> [--map <id>]` (or RAZDOR_PACK): the package's map as a new game.
     if let Some((path, map)) = ui::pack_play::requested() {
         if let Err(e) = app.open_pack(&path, map.as_deref()) {

@@ -509,6 +509,19 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   drawn from Btn3. Check which art the original uses for which button size and pick by the
   button's own size.
 
+- **Package reports: the reports thread's link** (2026-11-02). The report button opens the Discord
+  invite (`hub::REPORTS_LINK`), not the reports thread: the thread's link is the owner's (the Discord MCP reads
+  it from `DISCORD_REPORTS_CHANNEL`, which is not in the repository). Set the constant when it is decided.
+- **Package sim on uploads** (2026-11-02). A hosted runner has no install, so `package_ci.py`'s sim runs only with
+  a self-hosted runner that has `RAZDOR_DT_DIR`; otherwise the owner reviews each package's sim by hand (`ci/package-pr.yml`).
+- **Package «open with»** (2026-11-02). Only the command line (`razdor FILE.rzpack`) imports a package; no file
+  association exists yet (none for `.DTm` either). iPhone cannot pick a file for the import.
+- **Packages tab** (2026-11-02). Packages show under «Все» only: a fifth tab does not fit the desktop's 380 units.
+- **Phone sideways: no search field when the bottom row is full** (2026-11-02). The import button takes the room it
+  can; the search field hides under 80 units of room (`search_room` in `hub_view::frame`).
+- **Crowded findings under the report window** (2026-11-02). The mobile check lists the hub's buttons under the report
+  window as crowded; they are disabled while the window is open, so the finding is a probe artefact.
+
 ## Settled
 
 - **Author names in letters the bundled fonts lack** (2026-10-31, a player's report, 1438). A name

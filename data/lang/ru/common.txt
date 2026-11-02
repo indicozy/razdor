@@ -155,3 +155,25 @@ Install (+{n}) = Установить (+{n})
 Install = Установить
 Can't be installed: the hub has no mod «{m}». = Не установить: в хабе нет мода «{m}».
 Can't be installed: mods need each other («{m}»). = Не установить: моды требуют друг друга («{m}»).
+
+# Content packages in the Hub (the card, the import, the report window)
+Package = Пакет
+Taken off the list = Снят со списка
+Not checked by the Hub = Не проверен Хабом
+Base: {base} = База: {base}
+Not checked by the Hub: it came from a file, not from the list. = Не проверен Хабом: он из файла, а не из списка.
+Play = Играть
+Report a problem = Пожаловаться
+Report a problem: {title} = Пожаловаться: {title}
+What is wrong? The text is copied, and Discord opens: paste it into the reports thread. = Что не так? Текст скопируется, откроется Discord: вставьте его в тред о проблемах.
+Copied: paste it into the reports thread on Discord. = Текст скопирован: вставьте его в тред о проблемах в Discord.
+Send = Отправить
+Play starts the package's map as a new game. = «Играть» начинает карту пакета новой игрой.
+Import a package… = Импорт пакета…
+Importing a package is not possible on iPhone yet. = Импорт пакетов на iPhone пока не работает.
+Imported: {names} = Импортирован: {names}
+The package is not imported = Пакет не импортирован
+hint = подсказка
+The package does not pass the check (errors: {n}), so it is not imported. = Пакет не проходит проверку (ошибок: {n}), поэтому он не импортирован.
+Razdor packages = Пакеты Razdor
+Import… = Импорт…

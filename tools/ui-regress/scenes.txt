@@ -156,6 +156,15 @@ hub-1280 | hub | 1280x800 |
 hub-mods-1280 | hub:1 | 1280x800 |
 hub-entry-1280 | hub:1:evolution-mock | 1280x800 |
 hub-800 | hub | 800x600 |
+# Content packages in the Hub (the mock hub's example package): its card, the card installed (Play and
+# the report button), the report window, and the notice of a refused import. Each has its own hub folder
+# (RAZDOR_HUB_DIR, one per case: two cases building the mock hub in one folder race) so an install in one
+# case does not change another's list.
+hub-package-1280 | hub:0:hello-story | 1280x800 | RAZDOR_HUB_DIR=/mnt/ai_models/razdor-scratch/v2-hubpack/snap-hub-package-1280
+hub-package-800 | hub:0:hello-story | 800x600 | RAZDOR_HUB_DIR=/mnt/ai_models/razdor-scratch/v2-hubpack/snap-hub-package-800
+hub-installed-1280 | hub-installed | 1280x800 | RAZDOR_HUB_DIR=/mnt/ai_models/razdor-scratch/v2-hubpack/snap-hub-installed-1280
+hub-report-1280 | hub-report | 1280x800 | RAZDOR_HUB_DIR=/mnt/ai_models/razdor-scratch/v2-hubpack/snap-hub-report-1280
+hub-refused-1280 | hub-refused | 1280x800 | RAZDOR_HUB_DIR=/mnt/ai_models/razdor-scratch/v2-hubpack/snap-hub-refused-1280
 # The map editor (desktop only): the map open, and its find window over the properties of a building.
 editor-1280 | editor:РК1-Начало пути | 1280x800 |
 editor-find-props-1280 | editor:РК1-Начало пути:Казарм | 1280x800 |

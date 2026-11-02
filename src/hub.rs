@@ -26,8 +26,10 @@
 //! which is also the phones' storage).
 
 mod mods;
+mod packages;
 
 pub use mods::*;
+pub use packages::*;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -198,6 +200,8 @@ pub enum Kind {
     Map,
     Campaign,
     Mod,
+    /// A content package (`.rzpack`): its file is installed under `<hub>/packages/`.
+    Package,
 }
 
 /// How well an entry works, as its author or the hub's checks say.
@@ -213,6 +217,9 @@ pub enum Status {
     /// Not checked yet.
     #[default]
     Unknown,
+    /// Taken off the list by its author or the hub: hidden from the list, but a copy the player
+    /// has still shows and plays (`packages::listed`).
+    Unlisted,
 }
 
 /// One file of an entry.
@@ -371,6 +378,9 @@ impl Catalog {
                     return Err(format!("index.json: {}: only a mod may be an archive", e.id));
                 }
             }
+            if e.kind == Kind::Package && (e.files.len() != 1 || e.files[0].archive || !e.files[0].name.to_ascii_lowercase().ends_with(".rzpack")) {
+                return Err(format!("index.json: {}: a package is one .rzpack file", e.id));
+            }
             for (what, slot) in [("preview", &mut e.preview), ("picture", &mut e.picture)] {
                 if let Some(p) = slot {
                     if !safe_location(&p.path) {
@@ -478,6 +488,12 @@ pub struct InstalledEntry {
     pub requires: Vec<String>,
     /// Relative to the hub folder.
     pub files: Vec<String>,
+    /// An imported package the Hub has not checked (`packages::Hub::import_package`); the card says so.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unchecked: bool,
+    /// An imported package's own entry for the list (the catalog has none of it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry: Option<Entry>,
 }
 
 impl Installed {
@@ -634,6 +650,9 @@ pub fn read_cache(local: &Path, source: &str) -> Option<Catalog> {
 pub struct Hub {
     pub source: Source,
     pub local: PathBuf,
+    /// The folder of the trusted list (`pack::trust`, Razdor's data folder): a package installed or
+    /// imported here is remembered in it. None: not remembered (the tests).
+    pub trust_dir: Option<PathBuf>,
 }
 
 impl Hub {
@@ -760,10 +779,11 @@ impl Hub {
             // All files are fetched and checked before any is written.
             let mut got: Vec<(&FileRef, Got)> = Vec::new();
             for (n, &f) in files.iter().enumerate() {
-                if f.archive {
+                if f.archive || e.kind == Kind::Package {
                     std::fs::create_dir_all(downloads).map_err(|err| format!("downloads: {err}"))?;
                     let part = downloads.join(format!("{}-{n}.zip", e.id));
-                    self.download(&f.path, &part, MAX_ARCHIVE_DOWNLOAD)?;
+                    let max = if e.kind == Kind::Package { MAX_PACKAGE_BYTES } else { MAX_ARCHIVE_DOWNLOAD };
+                    self.download(&f.path, &part, max)?;
                     Hub::check_file(&part, f)?;
                     got.push((f, Got::Zip(part)));
                 } else {
@@ -775,6 +795,10 @@ impl Hub {
                 }
             }
             let written = match e.kind {
+                Kind::Package => match got.as_slice() {
+                    [(_, Got::Zip(part))] => self.write_package(e, part)?,
+                    _ => return Err(format!("{}: a package is one file", e.id)),
+                },
                 Kind::Mod => self.write_mod(&e.id, &got)?,
                 Kind::Map | Kind::Campaign => {
                     let mut written = Vec::new();
@@ -787,8 +811,16 @@ impl Hub {
                     written
                 }
             };
+            // A package's older version goes once the new one is written (a reinstall of a new version).
+            if e.kind == Kind::Package {
+                if let Some(old) = installed.entries.get(&e.id) {
+                    for rel in old.files.iter().filter(|r| !written.contains(r) && safe_path(r)) {
+                        let _ = std::fs::remove_file(self.local.join(rel));
+                    }
+                }
+            }
             let lang = files.iter().find_map(|f| f.lang.clone()).unwrap_or_default();
-            let record = InstalledEntry { version: e.version.clone(), kind: e.kind, lang, title: e.title.clone(), requires: e.requires.clone(), files: written };
+            let record = InstalledEntry { version: e.version.clone(), kind: e.kind, lang, title: e.title.clone(), requires: e.requires.clone(), files: written, unchecked: false, entry: None };
             installed.entries.insert(e.id.clone(), record);
             self.save_installed(&installed)?;
         }
@@ -950,6 +982,49 @@ pub mod mock {
             Ok(())
         }
 
+        /// The example package (`examples/packs/hello-story`, Razdor's own MIT content), packed as a
+        /// `.rzpack`: the card, its install and its play are shown with it.
+        fn a_package(&mut self) -> std::io::Result<()> {
+            const FILES: [(&str, &[u8]); 7] = [
+                ("package.toml", include_bytes!("../examples/packs/hello-story/package.toml")),
+                ("texts/en.toml", include_bytes!("../examples/packs/hello-story/texts/en.toml")),
+                ("texts/ru.toml", include_bytes!("../examples/packs/hello-story/texts/ru.toml")),
+                ("units/heroes.toml", include_bytes!("../examples/packs/hello-story/units/heroes.toml")),
+                ("items/relics.toml", include_bytes!("../examples/packs/hello-story/items/relics.toml")),
+                ("maps/first-light/map.toml", include_bytes!("../examples/packs/hello-story/maps/first-light/map.toml")),
+                ("maps/first-light/terrain.png", include_bytes!("../examples/packs/hello-story/maps/first-light/terrain.png")),
+            ];
+            let mut files = crate::pack::Files::default();
+            for (path, bytes) in FILES {
+                files.insert(path, bytes);
+            }
+            let zipped = crate::pack::archive::zip(&files).map_err(std::io::Error::other)?;
+            let name = package_file("hello-story", "0.1.0");
+            let f = self.file(format!("packages/{name}"), &name, None, &zipped)?;
+            self.entries.push(Entry {
+                id: "hello-story".into(),
+                kind: Kind::Package,
+                title: Text { ru: "Привет, история".into(), en: "Hello, story".into() },
+                author: "Razdor".into(),
+                version: "0.1.0".into(),
+                description: Text { ru: "Пример пакета: одна карта, герой и диалоги.".into(), en: "An example package: one map, a hero and dialogs.".into() },
+                about: Text::default(),
+                languages: vec!["ru".into(), "en".into()],
+                machine_translated: false,
+                requires: Vec::new(),
+                source_url: String::new(),
+                added: "2026-11-02".into(),
+                status: Status::Full,
+                status_note: Text::default(),
+                preview: None,
+                picture: None,
+                base: "community-update".into(),
+                rating: None,
+                files: vec![f],
+            });
+            Ok(())
+        }
+
         /// A mod: a manifest only (a mock mod carries no game data).
         #[allow(clippy::too_many_arguments)]
         fn a_mod(&mut self, id: &str, title: (&str, &str), author: &str, version: &str, about: (&str, &str), requires: &[&str], added: &str) -> std::io::Result<()> {
@@ -1097,6 +1172,7 @@ pub mod mock {
             "2026-10-08",
             &[map("Hub_Isle", ("Забытый остров", "The Forgotten Isle"), ("Найдите остров.", "Find the isle."), 30, 2)],
         )?;
+        o.a_package()?;
         // The mock's votes: a few rated entries (two that tie on score, told apart by votes), the rest unrated.
         let votes = [("ford-outpost", 12, 1), ("north-march", 5, 0), ("rotten-castle", 7, 3), ("merc-road", 5, 1), ("evolution-mock", 20, 2)];
         for e in &mut o.entries {
@@ -1119,7 +1195,7 @@ mod tests {
     }
 
     fn mock_hub(tag: &str) -> (Hub, Catalog) {
-        let hub = Hub { source: Source::Mock, local: temp(tag) };
+        let hub = Hub { source: Source::Mock, local: temp(tag), trust_dir: None };
         let c = hub.catalog().unwrap();
         (hub, c)
     }
@@ -1128,7 +1204,7 @@ mod tests {
     fn the_mock_catalog_reads_back_and_its_maps_parse() {
         let (hub, c) = mock_hub("parse");
         assert!(c.entries.len() >= 8);
-        for e in c.entries.iter().filter(|e| e.kind != Kind::Mod) {
+        for e in c.entries.iter().filter(|e| matches!(e.kind, Kind::Map | Kind::Campaign)) {
             for f in &e.files {
                 let bytes = std::fs::read(hub.local.join("mock-hub").join(&f.path)).unwrap();
                 let s = Scenario::from_file_bytes(&bytes).unwrap();
@@ -1160,7 +1236,7 @@ mod tests {
         assert_eq!(plan_install(&c, &none, "ford-outpost").unwrap(), ["ford-outpost"]);
         assert_eq!(plan_install(&c, &none, "lost-update"), Err(PlanError::Missing("community-update".into())));
         let mut some = Installed::default();
-        some.entries.insert("evolution-mock".into(), InstalledEntry { version: "9.0".into(), kind: Kind::Mod, lang: String::new(), title: Text::default(), requires: vec![], files: vec![] });
+        some.entries.insert("evolution-mock".into(), InstalledEntry { version: "9.0".into(), kind: Kind::Mod, lang: String::new(), title: Text::default(), requires: vec![], files: vec![], unchecked: false, entry: None });
         assert_eq!(plan_install(&c, &some, "merc-road").unwrap(), ["evolution-mercs", "merc-road"]);
     }
 
@@ -1363,7 +1439,7 @@ mod tests {
     #[test]
     fn a_mod_zip_installs_its_entries_from_a_folder_hub() {
         let (root, local, _, _) = zip_hub("zip-install");
-        let hub = Hub { source: Source::Dir(root.clone()), local: local.clone() };
+        let hub = Hub { source: Source::Dir(root.clone()), local: local.clone(), trust_dir: None };
         let catalog = hub.catalog().unwrap();
         assert_eq!(hub.install(&catalog, "pack", Lang::Ru).unwrap(), ["pack"]);
         assert_eq!(std::fs::read(local.join("mods/pack/files/data/units.ini")).unwrap(), b"units");
@@ -1381,7 +1457,7 @@ mod tests {
         let json = std::fs::read_to_string(root.join(INDEX)).unwrap();
         let wrong = json.replace(&crate::update::sha256_hex(&std::fs::read(root.join("mods/pack/pack.zip")).unwrap()), &"0".repeat(64));
         std::fs::write(root.join(INDEX), wrong).unwrap();
-        let hub = Hub { source: Source::Dir(root.clone()), local: local.clone() };
+        let hub = Hub { source: Source::Dir(root.clone()), local: local.clone(), trust_dir: None };
         let catalog = hub.catalog().unwrap();
         assert!(hub.install(&catalog, "pack", Lang::Ru).is_err());
         assert!(!local.join("mods/pack/files").exists());
@@ -1441,7 +1517,7 @@ mod tests {
         let png = mock::preview_png(320, 180);
         std::fs::write(root.join("previews/p.png"), &png).unwrap();
         let f = FileRef { path: "previews/p.png".into(), name: "p.png".into(), lang: None, size: png.len() as u64, sha256: crate::update::sha256_hex(&png), archive: false };
-        let hub = Hub { source: Source::Dir(root.clone()), local: local.clone() };
+        let hub = Hub { source: Source::Dir(root.clone()), local: local.clone(), trust_dir: None };
         let path = hub.cache_preview(&f).unwrap();
         assert_eq!(path, preview_path(&local, &f));
         std::fs::remove_file(root.join("previews/p.png")).unwrap();

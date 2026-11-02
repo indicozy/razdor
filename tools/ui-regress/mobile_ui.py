@@ -106,6 +106,10 @@ SCREENS = [
     ("classes", "classes:РК1-Начало пути", {}),
     ("hub", "hub", {}),
     ("hub-mods", "hub:1:evolution-mock", {}),
+    ("hub-package", "hub:0:hello-story", {"RAZDOR_HUB_DIR": "/mnt/ai_models/razdor-scratch/v2-hubpack/snap-mobile-hub-package"}),
+    ("hub-installed", "hub-installed", {"RAZDOR_HUB_DIR": "/mnt/ai_models/razdor-scratch/v2-hubpack/snap-mobile-hub-installed"}),
+    ("hub-report", "hub-report", {"RAZDOR_HUB_DIR": "/mnt/ai_models/razdor-scratch/v2-hubpack/snap-mobile-hub-report"}),
+    ("hub-refused", "hub-refused", {"RAZDOR_HUB_DIR": "/mnt/ai_models/razdor-scratch/v2-hubpack/snap-mobile-hub-refused"}),
     ("update", "update", {}),
 ]
 

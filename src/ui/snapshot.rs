@@ -508,7 +508,32 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             }
             return Ok(());
         }
-        // `hub[:<tab 0-3>[:<entry id>]]`: "Maps and mods" on that tab with that entry picked.
+        // `hub-refused`: "Maps and mods" with the notice of a refused package import (a sample's diagnostics).
+        "hub-refused" => {
+            let mut view = super::hub_view::HubView::new();
+            view.stage(0, Some("hello-story"));
+            view.stage_notice(super::hub_pack::import_notice(&razdor::hub::ImportError::Refused(super::hub_pack::sample_refusal())));
+            app.screen = Screen::Hub(Box::new(view));
+            return Ok(());
+        }
+        // `hub-installed`: "Maps and mods" with the example package installed and picked (its Play and report).
+        "hub-installed" => {
+            super::hub_view::install_for_snapshot("hello-story");
+            let mut view = super::hub_view::HubView::new();
+            view.stage(0, Some("hello-story"));
+            app.screen = Screen::Hub(Box::new(view));
+            return Ok(());
+        }
+        // `hub-report`: "Maps and mods" with the example package installed and the report window open.
+        "hub-report" => {
+            super::hub_view::install_for_snapshot("hello-story");
+            let mut view = super::hub_view::HubView::new();
+            view.stage(0, Some("hello-story"));
+            view.stage_report(super::hub_pack::ReportForm { id: "hello-story".into(), version: "0.1.0".into(), title: "Привет, история".into(), text: "второй бой не начинается".into() });
+            app.screen = Screen::Hub(Box::new(view));
+            return Ok(());
+        }
+        // `hub[:<tab 0-3>[:<entry id>]]`, `hub-installed` (a package installed and picked: its Play and report), `hub-report` (that package's report window), `hub-refused` (the notice of a refused import): "Maps and mods" on that tab with that entry picked.
         "hub" => {
             let mut view = super::hub_view::HubView::new();
             let tab = parts.next().and_then(|t| t.parse().ok()).unwrap_or(0);

@@ -2,6 +2,7 @@
 //! macroquad here; the format is documented in `docs/reference/rzpack-format.md`.
 
 pub mod aliases;
+pub mod archive;
 pub mod check;
 pub mod compile;
 pub mod content;

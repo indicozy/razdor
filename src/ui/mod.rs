@@ -18,6 +18,7 @@ pub mod gamepad;
 pub mod gestures;
 pub mod hall_ink;
 pub mod hotkeys;
+pub mod hub_pack;
 pub mod hub_view;
 pub mod input;
 pub mod item_filter;
@@ -276,6 +277,8 @@ pub struct App {
     pub map_view: MapView,
     /// A save file the load window picked: loaded after the frame.
     pub pending_load: Option<PathBuf>,
+    /// A package the Hub's card asked to play: opened at the frame's end (`open_pack`).
+    pub pending_pack: Option<PathBuf>,
     /// Why the last load failed (shown in the load window).
     pub load_error: Option<String>,
     pub audio: Audio,
@@ -386,6 +389,7 @@ impl App {
             dialogs: VecDeque::new(),
             map_view: MapView::default(),
             pending_load: None,
+            pending_pack: None,
             load_error: None,
             audio,
             map_music: MapMusic::default(),
@@ -1445,10 +1449,13 @@ impl App {
                 }
             }
             (Screen::Hub(view), _) => {
-                if hub_view::frame(view) {
+                let closed = hub_view::frame(view);
+                let play = view.play.take();
+                if closed || play.is_some() {
                     if view.changed {
                         self.reload_hub_maps();
                     }
+                    self.pending_pack = play;
                     Some(Screen::MainMenu)
                 } else {
                     None
@@ -1719,6 +1726,15 @@ impl App {
         razdor::frame_probe::time(razdor::frame_probe::Stage::Session, || self.session.tick(self.game.as_ref(), session_ok, crate::ui::clock::now()));
         if let Some(path) = self.pending_load.take() {
             self.load(&path);
+            return;
+        }
+        // A package the Hub's card plays: its map is the new game (the hero window); a package that
+        // does not open says why, and the game stays on the main menu.
+        if let Some(path) = self.pending_pack.take() {
+            if let Err(e) = self.open_pack(&path, None) {
+                self.message = Some(e);
+                self.screen = Screen::MainMenu;
+            }
             return;
         }
         // Leaving a test play (main menu, or "new game" on an end screen) returns to the editor.

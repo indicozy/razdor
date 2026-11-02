@@ -179,3 +179,74 @@ gh release create catalog-YYYY-MM-DD <out>/* --repo indicozy/razdor-community --
 ```
 
 Tag the release with the date of the build.
+
+## Uploads: content packages (`.rzpack`)
+
+A package is a pull request to `razdor-community`: it adds `packages/<id>-<version>.rzpack` (made
+with `razdor-pack pack`, see `docs/reference/rzpack-format.md`). Nothing here is active yet: the
+workflow is a template, and the owner turns it on (below).
+
+**The gate** (`package_ci.py`, stdlib only): on the files the pull request adds, it checks
+- the size (at most 50 MB), and that every member is a path inside the package;
+- the manifest: `license = "MIT"` and an author;
+- no game file by extension (ini, dtm, ugs, lit, spi, exe, dll);
+- no packed file that is a file of the Discord Times install: its SHA-256 against the install's
+  hash list (`dt-hashes.txt`, made by `package_ci.py hashes <install>`: hashes only, no file leaves
+  the install; empty files are not compared);
+- `razdor-pack check --json` has no error, and `razdor-pack sim --json` passes when the runner has
+  the install (`RAZDOR_DT_DIR`; `--sim auto|yes|no`);
+- a new version of an id already in the catalog comes from the same author (`--index`, the current
+  `index.json`).
+
+It prints a Markdown summary (one row per check), written to `--summary` for the pull request's comment.
+
+```sh
+# the install's hash list, once (the owner's machine; the list goes into the repository's root)
+python3 -I tools/community-pack/package_ci.py hashes "<your Discord Times install>" > dt-hashes.txt
+# the gate, as the workflow runs it
+python3 -I tools/community-pack/package_ci.py check --razdor-pack target/release/razdor-pack \
+  --hashes dt-hashes.txt --index index.json --sim auto --summary summary.md packages/hello-story-0.1.0.rzpack
+```
+
+Exit 0 when every package passes, 1 when one fails, 2 on a usage problem. The tests (offline, a fake
+`razdor-pack`; set `RAZDOR_PACK_BIN` to also run the real `check` on the example):
+
+```sh
+python3 -I tools/community-pack/test_package_ci.py
+```
+
+**The catalog.** `build.py --packages <community repo>/packages` adds one entry per package (kind
+`package`): its title and description in Russian and English from its texts, its author and version,
+its requires (the ids before the `@`), its base, and its `.rzpack` as an asset. `packages/status.json`
+sets a package's status by id; `unlisted` takes it off the list (a copy the player has still plays):
+
+```json
+{ "hello-story": { "status": "unlisted", "note": { "ru": "Снят по просьбе автора.", "en": "" }, "added": "2026-11-02" } }
+```
+
+Statuses: `full`, `partial`, `broken`, `unknown` (the default), `unlisted`. A package whose file is not
+`<id>-<version>.rzpack` is refused, as is one over 50 MB or with a game file (the selftest covers each).
+
+**The workflow** (`ci/package-pr.yml`, a template): it builds `razdor-pack` from Razdor at `RAZDOR_REF`,
+runs the gate on the added packages, writes the summary to the job page and as a comment, and enables
+auto-merge on green. Its comment step is skipped on a fork's pull request (read-only token).
+
+**To turn uploads on (the owner):**
+1. In `razdor-community`: a `packages/` folder, and `dt-hashes.txt` at the root (made from the install
+   on the owner's machine: `package_ci.py hashes`).
+2. Copy `ci/package-pr.yml` to `.github/workflows/package-pr.yml` there, pin its actions to commit SHAs
+   (as `cla.yml` does), and set `RAZDOR_REF` to a Razdor commit with `razdor-pack` (the `pack`, `info`
+   and `check` commands).
+3. Turn on auto-merge in the repository's settings.
+4. The sim: hosted runners have no install (and may not get one: the game's files never go to GitHub).
+   Either run the sim on a self-hosted runner that has `RAZDOR_DT_DIR`, or accept that the owner reviews
+   each package's sim result by hand. Until one of these is chosen, `--sim auto` marks the sim as skipped.
+5. A catalog rebuild after a merge: run `build.py` with `--packages` and publish the catalog release
+   (the `community-pack` skill's steps). The workflow does not publish the catalog.
+
+**Design note, the Discord `/publish` command (not built; it needs a running bot service).** A member
+attaches a `.rzpack` to a message the bot reads (at most 50 MB). The bot downloads it, checks the file
+name and size, opens a pull request on `razdor-community` that adds `packages/<id>-<version>.rzpack` on
+a branch of its own, and credits the Discord name in the pull request's body and, when it is the
+author, in the manifest's `author` (the gate checks it). The bot then posts the pull request's link in
+the thread. The gate and the catalog are the same as above; the bot only moves the file to the PR.

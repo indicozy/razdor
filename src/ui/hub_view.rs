@@ -16,12 +16,14 @@ use std::sync::mpsc::{channel, Receiver};
 
 use macroquad::prelude::*;
 
-use razdor::hub::{self, Catalog, Entry, FileRef, Hub, Installed, Kind, PlanError, Source, Status};
+use razdor::hub::{self, Catalog, Entry, FileRef, Hub, ImportError, Installed, Kind, PlanError, Source, Status};
 use razdor::i18n::{lang, tr};
+use razdor::platform;
 use razdor::trf;
 
 use super::audio::{cue, Cue};
 use super::chrome::{self, CREAM, GOLD, RED_TEXT};
+use super::hub_pack::{self, Answer, Notice, Pick, ReportAnswer, ReportForm};
 use super::input::{is_mouse_button_down, is_mouse_button_pressed};
 use super::widgets::*;
 
@@ -70,6 +72,15 @@ pub struct HubView {
     pub changed: bool,
     /// The picked entry's picture (`ensure_preview`).
     preview: Option<Preview>,
+    /// «Импорт пакета…»: the file picker while it is open, and the import on its thread.
+    picker: Option<Pick>,
+    import: Option<Receiver<Result<String, ImportError>>>,
+    /// A notice over the window: a refused import, or a picker that cannot be opened.
+    notice: Option<Notice>,
+    /// The report window of a package's card, while it is open.
+    report: Option<ReportForm>,
+    /// A package to play: the window closes and the game opens its map (`App::open_pack`).
+    pub play: Option<PathBuf>,
 }
 
 /// The picture of an entry: its texture once it is in the cache, and the download on its way
@@ -145,7 +156,9 @@ fn load_texture(path: &Path) -> Option<Texture2D> {
 
 impl HubView {
     pub fn new() -> HubView {
-        let hub = hub::local_dir().map(|local| Hub { source: Source::from_env(), local });
+        // A snapshot run never writes the trusted list: its installs stay in the snapshot's own hub folder.
+        let trust_dir = if std::env::var_os("RAZDOR_SNAPSHOT").is_some() { None } else { platform::app_dir() };
+        let hub = hub::local_dir().map(|local| Hub { source: Source::from_env(), local, trust_dir });
         let mut v = HubView {
             hub,
             catalog: None,
@@ -166,10 +179,26 @@ impl HubView {
             note: None,
             changed: false,
             preview: None,
+            picker: None,
+            import: None,
+            notice: None,
+            report: None,
+            play: None,
         };
         v.reload();
         v
     }
+
+    /// A snapshot's setup: a notice over the window (`ui::snapshot`).
+    pub fn stage_notice(&mut self, notice: Notice) {
+        self.notice = Some(notice);
+    }
+
+    /// A snapshot's setup: the report window open.
+    pub fn stage_report(&mut self, form: ReportForm) {
+        self.report = Some(form);
+    }
+
 
     /// A snapshot's setup (`ui::snapshot`): the tab and the picked entry.
     pub fn stage(&mut self, tab: usize, pick: Option<&str>) {
@@ -251,6 +280,30 @@ impl HubView {
             self.fetching = None;
             self.landed(fetched);
         }
+        // «Импорт пакета…»: the picker's answer starts the import; the import's answer is a notice
+        // when it is refused, else the package is listed and picked.
+        match hub_pack::poll_pick(&mut self.picker) {
+            Some(Answer::Picked(path, cached)) => self.start_import(path, cached),
+            Some(Answer::Failed(why)) => self.notice = Some(Notice::new(tr("Import a package…"), vec![why])),
+            Some(Answer::Cancelled) | None => {}
+        }
+        if let Some(done) = self.import.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            self.import = None;
+            match done {
+                Ok(id) => {
+                    cue(Cue::Button);
+                    if let Some(h) = &self.hub {
+                        self.installed = h.installed();
+                    }
+                    self.changed = true;
+                    let names = self.installed.entries.get(&id).map_or_else(|| id.clone(), |r| r.title.get(lang()).to_string());
+                    self.note = Some((trf!("Imported: {names}", names), false));
+                    self.picked = Some(id);
+                    self.detail_for = None;
+                }
+                Err(e) => self.notice = Some(hub_pack::import_notice(&e)),
+            }
+        }
         let Some(done) = self.job.as_ref().and_then(|rx| rx.try_recv().ok()) else { return };
         self.job = None;
         let refresh = |v: &mut HubView| {
@@ -278,9 +331,35 @@ impl HubView {
         }
     }
 
+    /// Imports the picked file on a thread (`Hub::import_package`); a cached copy (Android's) goes
+    /// once it is read.
+    fn start_import(&mut self, path: PathBuf, cached: bool) {
+        let Some(hub) = self.hub.clone() else { return };
+        let (tx, rx) = channel();
+        std::thread::spawn(move || {
+            let done = hub.import_package(&path);
+            if cached {
+                let _ = std::fs::remove_file(&path);
+            }
+            let _ = tx.send(done);
+        });
+        self.import = Some(rx);
+    }
+
     fn titles(&self, ids: &[String]) -> String {
         let c = self.catalog.as_ref().and_then(|c| c.as_ref().ok());
         ids.iter().map(|id| c.and_then(|c| c.entry(id)).map_or(id.as_str(), |e| e.title.get(lang()))).collect::<Vec<_>>().join(", ")
+    }
+}
+
+/// A snapshot's setup (`ui::snapshot`): the entry installed first, from the mock hub of the
+/// snapshot's hub folder. It runs before the window is made, so the mock hub is built here, once,
+/// and not by the window's catalog thread at the same time.
+pub fn install_for_snapshot(id: &str) {
+    let Some(local) = hub::local_dir() else { return };
+    let hub = Hub { source: Source::from_env(), local, trust_dir: None };
+    if let Ok(c) = hub.catalog() {
+        let _ = hub.install(&c, id, lang());
     }
 }
 
@@ -295,6 +374,7 @@ fn kind_label(k: Kind) -> &'static str {
         Kind::Map => tr("Map"),
         Kind::Campaign => tr("Campaign"),
         Kind::Mod => tr("Mod"),
+        Kind::Package => tr("Package"),
     }
 }
 
@@ -308,9 +388,16 @@ pub fn keep_pick(picked: Option<&str>, c: &Catalog) -> Option<String> {
 }
 
 /// The tab's entries that match the search, best rated first (`hub::by_rating`).
-fn shown<'a>(c: &'a Catalog, tab: usize, query: &str) -> Vec<&'a Entry> {
+fn shown<'a>(c: &'a Catalog, tab: usize, query: &str, installed: &Installed) -> Vec<&'a Entry> {
     let want = [None, Some(Kind::Map), Some(Kind::Campaign), Some(Kind::Mod)][tab.min(3)];
-    let mut list: Vec<&Entry> = c.entries.iter().filter(|e| want.is_none_or(|k| e.kind == k)).filter(|e| matches(e, query)).collect();
+    // An unlisted entry is hidden, unless the player has it (`hub::listed`).
+    let mut list: Vec<&Entry> = c
+        .entries
+        .iter()
+        .filter(|e| want.is_none_or(|k| e.kind == k))
+        .filter(|e| hub::listed(e, installed))
+        .filter(|e| matches(e, query))
+        .collect();
     list.sort_by(|a, b| hub::by_rating(a, b));
     list
 }
@@ -350,6 +437,7 @@ fn status_line(e: &Entry) -> (String, Color) {
         Status::Partial => (trf!("Works partly: {note}", note = note), GOLD),
         Status::Broken => (trf!("Does not start: {note}", note = note), RED_TEXT),
         Status::Unknown => (tr("Not checked yet").into(), Color::new(0.85, 0.80, 0.68, 1.0)),
+        Status::Unlisted => (tr("Taken off the list").into(), Color::new(0.85, 0.80, 0.68, 1.0)),
     }
 }
 
@@ -547,6 +635,15 @@ pub fn frame(view: &mut HubView) -> bool {
     let detail = narrow && view.detail && view.picked.is_some();
     let back_w = 140.0 * k * g;
     let bw = if narrow { lw - back_w - gap } else { 220.0 * k * g };
+    // The bottom row beside the list (not held upright): Back, Refresh, the import button, the search
+    // field, then Install. The import button takes its label's width (190 units) or what the row has left
+    // before Install; the search field is left out when less than 80 units would be left for it.
+    let step_d = 150.0 * k * g;
+    let bx_d = inner.x + inner.w - 10.0 * k - bw;
+    let import_w = if narrow { 0.0 } else { (190.0 * k * g).min(bx_d - gap - (lx + 2.0 * step_d)).max(60.0 * k * g) };
+    let search_room = narrow || bx_d - gap - (lx + 2.0 * step_d + import_w + gap) >= 80.0 * k * g;
+    // A notice or the report window is over the window: the buttons under it take no click.
+    let modal = view.notice.is_some() || view.report.is_some();
     let lay = Lay { k, g, size, small, by, bh, bw, phone, narrow };
     if !detail {
         chrome::text_box(list);
@@ -558,7 +655,7 @@ pub fn frame(view: &mut HubView) -> bool {
         for (i, t) in tabs.iter().enumerate() {
             let (x, y) = if narrow { (lx + (i % 2) as f32 * tab_w, ty + (i / 2) as f32 * (th + gap)) } else { (lx + i as f32 * tab_w, ty) };
             let w = tab_w - gap;
-            let clicked = if phone { tab_button(x, y, w, th, t, view.tab == i) } else { toggle_button(x, y, w, th, t, view.tab == i) };
+            let clicked = (if phone { tab_button(x, y, w, th, t, view.tab == i) } else { toggle_button(x, y, w, th, t, view.tab == i) }) && !modal;
             if clicked && view.tab != i {
                 view.tab = i;
                 view.scroll = 0;
@@ -569,10 +666,10 @@ pub fn frame(view: &mut HubView) -> bool {
     // The search field (a tap in it types; the phone's keyboard comes only then, as the
     // dropdowns' filter does) and its clear button: above the list in portrait, in the bottom row
     // between «Обновить» and «Установить» elsewhere.
-    let search_esc = if !detail {
+    let search_esc = if !detail && search_room {
         let step = 150.0 * k * g;
         let bx = inner.x + inner.w - 10.0 * k - bw;
-        let x0 = lx + step + back_w + gap;
+        let x0 = lx + 2.0 * step + import_w + gap;
         let (fx, fy, fh, avail) = if narrow { (lx, field_y, th, lw) } else { (x0, by, bh, bx - gap - x0) };
         // The clear control is a square as tall as the field (44 dp on a phone, grown with the
         // text size), drawn with the window's own close cross (`chrome::close_button`).
@@ -601,7 +698,8 @@ pub fn frame(view: &mut HubView) -> bool {
         view.scroll = 0;
     }
 
-    let catalog = view.catalog.clone();
+    // The list shows the catalog and the packages imported from files (`hub::with_imported`).
+    let catalog = view.catalog.clone().map(|r| r.map(|c| hub::with_imported(&c, &view.installed)));
     match &catalog {
         None if !detail => chrome::shadow_text(tr("Reading the hub…"), lx + 12.0 * k, list.y + 26.0 * k, size, CREAM),
         None => {}
@@ -612,7 +710,7 @@ pub fn frame(view: &mut HubView) -> bool {
         }
         Some(Err(_)) => {}
         Some(Ok(c)) => {
-            let entries = shown(c, view.tab, &view.query);
+            let entries = shown(c, view.tab, &view.query, &view.installed);
             let max_scroll = entries.len().saturating_sub(rows);
             if !detail {
                 // The bar takes room only when the list scrolls.
@@ -628,6 +726,7 @@ pub fn frame(view: &mut HubView) -> bool {
                     }
                 }
                 let (scroll, click) = drag_frame(&mut view.list_drag, area, view.scroll as f32, row_h, max_scroll as f32, drag_slop());
+                let click = if modal { None } else { click };
                 view.scroll = (clamp_scroll(scroll, max_scroll as f32).round() as usize).min(max_scroll);
                 scrollbar(bar_rect(lx + lw, list.y, list.h, k, phone), &mut view.scroll, rows, entries.len());
                 // A tap (or a press released without a drag) picks the row it began on.
@@ -679,22 +778,34 @@ pub fn frame(view: &mut HubView) -> bool {
     }
 
     // The bottom row: the list's Back and Refresh, or a phone's details' «To the list».
-    let mut close = closed || (key(KeyCode::Escape) && !search_esc);
+    // Esc closes the window only when no notice or report is over it (their own Esc closes them).
+    let mut close = closed || (key(KeyCode::Escape) && !search_esc && !modal);
     if close {
         // Closing the window hides the keyboard the search field may have.
         clear_focus();
     }
     if detail {
-        if button(lx, by, back_w, bh, tr("To the list"), true) {
+        if button(lx, by, back_w, bh, tr("To the list"), !modal) {
             view.detail = false;
         }
     } else {
-        let (w_b, step) = if narrow { ((lw - gap) / 2.0, (lw - gap) / 2.0 + gap) } else { (back_w, 150.0 * k * g) };
-        if button(lx, by, w_b, bh, tr("Back"), true) {
+        let third = (lw - 2.0 * gap) / 3.0;
+        let (w_b, step) = if narrow { (third, third + gap) } else { (back_w, 150.0 * k * g) };
+        if button(lx, by, w_b, bh, tr("Back"), !modal) {
             close = true;
         }
-        if button(lx + step, by, w_b, bh, tr("Refresh"), view.job.is_none() && view.fetching.is_none()) {
+        if button(lx + step, by, w_b, bh, tr("Refresh"), view.job.is_none() && view.fetching.is_none() && !modal) {
             view.reload();
+        }
+        let importing = view.picker.is_some() || view.import.is_some();
+        // A phone held upright has a third of the row: its label is the short one.
+        let imp_w = if narrow { third } else { import_w };
+        let imp_label = if narrow { tr("Import…") } else { tr("Import a package…") };
+        if button(lx + 2.0 * step, by, imp_w, bh, imp_label, view.job.is_none() && !importing && !modal) {
+            match hub_pack::start_pick() {
+                Ok(pick) => view.picker = Some(pick),
+                Err(why) => view.notice = Some(Notice::new(tr("Import a package…"), vec![why])),
+            }
         }
     }
     // The job's word and where the hub is: beside the buttons, or over them on a phone held upright.
@@ -717,6 +828,26 @@ pub fn frame(view: &mut HubView) -> bool {
     } else if let (false, false, Some(h)) = (narrow, phone, &view.hub) {
         let from = trf!("Hub: {place}", place = h.source.label());
         text_fit(&from, lx, under, lw, small, Color::new(0.85, 0.80, 0.68, 0.8));
+    }
+    // A package's play closes the window: the game opens it.
+    if view.play.is_some() {
+        close = true;
+    }
+    if let Some(form) = view.report.as_mut() {
+        match hub_pack::report_window(form) {
+            ReportAnswer::Open => {}
+            ReportAnswer::Cancel => view.report = None,
+            ReportAnswer::Send(text) => {
+                hub_pack::send_report(&text);
+                view.report = None;
+                view.note = Some((tr("Copied: paste it into the reports thread on Discord.").into(), false));
+            }
+        }
+    }
+    if let Some(n) = view.notice.as_mut() {
+        if hub_pack::notice_window(n) {
+            view.notice = None;
+        }
     }
     close
 }
@@ -755,6 +886,9 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
     // The content, from the pane's top less the scroll, drawn clipped to the pane.
     let r = Rect::new(pane.x, pane.y - scroll, pane.w - room, pane.h);
     let installed = view.installed.has(&e.id);
+    let unchecked = view.installed.entries.get(&e.id).is_some_and(|rec| rec.unchecked);
+    let play_path = view.hub.as_ref().and_then(|h| h.play_path(&e.id));
+    let idle = view.job.is_none() && view.import.is_none() && view.report.is_none() && view.notice.is_none();
     let users = if installed { hub::needed_by(c, &view.installed, &e.id) } else { Vec::new() };
     let plan = (!installed).then(|| hub::plan_install(c, &view.installed, &e.id));
     let clip = Clip::new(pane);
@@ -861,7 +995,16 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
                 Status::Partial => (tr("Works partly").into(), GOLD),
                 Status::Broken => (tr("Does not start").into(), RED_TEXT),
                 Status::Unknown => (tr("Not checked yet").into(), dim),
+                Status::Unlisted => (tr("Taken off the list").into(), dim),
             });
+            if e.kind == Kind::Package {
+                if unchecked {
+                    chips.push((tr("Not checked by the Hub").into(), GOLD));
+                }
+                if !e.base.trim().is_empty() {
+                    chips.insert(1, (trf!("Base: {base}", base = e.base), dim));
+                }
+            }
             let ch = (info_px * 1.8).round();
             let pad = 10.0 * s;
             let gap = 8.0 * s;
@@ -940,7 +1083,18 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
             text_fit(&trf!("Chapters: {n}", n = e.map_count()), r.x, y, r.w, info_px, dim);
             y += info_step;
         }
-        if e.kind != Kind::Mod {
+        // The base and the unchecked note are chips on a phone held upright (above), lines here.
+        if e.kind == Kind::Package && !lay.narrow {
+            if !e.base.trim().is_empty() {
+                text_fit(&trf!("Base: {base}", base = e.base), r.x, y, r.w, info_px, dim);
+                y += info_step;
+            }
+            if unchecked {
+                text_fit(tr("Not checked by the Hub: it came from a file, not from the list."), r.x, y, r.w, info_px, GOLD);
+                y += info_step;
+            }
+        }
+        if !matches!(e.kind, Kind::Mod | Kind::Package) {
             let langs: Vec<&str> = e
                 .languages
                 .iter()
@@ -983,6 +1137,24 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
             }
         }
 
+        // A package's own actions: play its installed copy, and report a problem with it. Each is drawn
+        // only where it is inside the pane (a scrolled-away one takes no click).
+        if e.kind == Kind::Package {
+            y += 10.0 * s;
+            let pw = ((r.w - 8.0 * s) / 2.0).min(220.0 * k * lay.g);
+            let visible = |y: f32| y >= pane.y && y + bh <= pane.y + pane.h;
+            let mut x = r.x;
+            if installed && visible(y) && button(x, y, pw, bh, tr("Play"), idle) {
+                view.play = play_path.clone();
+            }
+            if installed {
+                x += pw + 8.0 * s;
+            }
+            if visible(y) && button(x, y, pw, bh, tr("Report a problem"), idle) {
+                view.report = Some(ReportForm { id: e.id.clone(), version: e.version.clone(), title: e.title.get(lang()).to_string(), text: String::new() });
+            }
+            y += bh + 10.0 * s;
+        }
         // The description, whole (scrolled, not cut): its long words wrap at the pane's width.
         // The map's own story (`about`) comes first; the post's text (`description`) follows it under a
         // heading. Without a story the description is drawn alone, as before.
@@ -1038,10 +1210,17 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
                 y += if lay.narrow { info_step } else { 16.0 * s };
             }
         }
-        if e.kind != Kind::Mod && installed {
+        if matches!(e.kind, Kind::Map | Kind::Campaign) && installed {
             y += 8.0 * s;
             text_fit(tr("Its maps are in the new game's list."), r.x, y, r.w, info_px, GREEN_TEXT);
             y += info_step;
+        }
+        if e.kind == Kind::Package && installed {
+            y += 8.0 * s;
+            for l in wrap_long(tr("Play starts the package's map as a new game."), r.w, info_px).iter() {
+                chrome::shadow_text(l, r.x, y, info_px, dim);
+                y += if lay.narrow { info_step } else { 16.0 * s };
+            }
         }
         if !users.is_empty() {
             y += 8.0 * s;
@@ -1058,7 +1237,7 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
     let busy = view.job.is_some();
     let bx = pane.x + pane.w - bw;
     if installed {
-        if button(bx, by, bw, bh, tr("Remove"), !busy && users.is_empty()) {
+        if button(bx, by, bw, bh, tr("Remove"), !busy && users.is_empty() && idle) {
             let id = e.id.clone();
             view.start(move |hub, c| Done::Removed(hub.remove(&c, &id).map(|_| id)));
         }
@@ -1067,7 +1246,7 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
     match plan {
         Some(Ok(plan)) => {
             let label = if plan.len() > 1 { trf!("Install (+{n})", n = plan.len() - 1) } else { tr("Install").into() };
-            if button(bx, by, bw, bh, &label, !busy) {
+            if button(bx, by, bw, bh, &label, !busy && idle) {
                 let id = e.id.clone();
                 let lang_code = lang();
                 view.start(move |hub, c| Done::Installed(hub.install(&c, &id, lang_code)));
@@ -1151,7 +1330,7 @@ mod tests {
     fn mock_catalog(tag: &str) -> Catalog {
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
         let local = std::env::temp_dir().join(format!("razdor-hubview-{tag}-{}-{nanos}", std::process::id()));
-        Hub { source: Source::Mock, local }.catalog().unwrap()
+        Hub { source: Source::Mock, local, trust_dir: None }.catalog().unwrap()
     }
 
     /// A window with its catalog and pick set; no thread, no drawing (the tests call the pure parts).
@@ -1176,6 +1355,11 @@ mod tests {
             note: None,
             changed: false,
             preview: None,
+            picker: None,
+            import: None,
+            notice: None,
+            report: None,
+            play: None,
         }
     }
 
@@ -1183,7 +1367,7 @@ mod tests {
 
     fn hub_at(source: Source, tag: &str) -> Hub {
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-        Hub { source, local: std::env::temp_dir().join(format!("razdor-hubview-{tag}-{}-{nanos}", std::process::id())) }
+        Hub { source, local: std::env::temp_dir().join(format!("razdor-hubview-{tag}-{}-{nanos}", std::process::id())), trust_dir: None }
     }
 
     /// A swap keeps the entry picked when the new catalog still has it, and takes the first when not.
@@ -1245,7 +1429,7 @@ mod tests {
         assert_eq!(v.catalog, Some(Ok(c.clone())));
         assert_eq!(v.picked.as_deref(), Some(first.as_str()), "the first entry is picked");
 
-        let other = Hub { source: Source::Url("https://example.org/other".into()), local: mine.local.clone() };
+        let other = Hub { source: Source::Url("https://example.org/other".into()), local: mine.local.clone(), trust_dir: None };
         let mut v = window(Some(other.clone()), None, None);
         v.show_cache(&other);
         assert_eq!(v.catalog, None, "another address's cache is not shown");

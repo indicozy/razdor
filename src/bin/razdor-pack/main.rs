@@ -27,13 +27,20 @@ const HELP: &str = "razdor-pack: content packages (.rzpack) for Razdor 2.0
                              exit status: 0 all played, 1 a panic, a softlock or errors
   razdor-pack play <folder-or-.rzpack> [--map <id>]
                              opens the package's map in Razdor (`razdor --pack`)
+  razdor-pack pack <folder> [-o <out.rzpack>]
+                             checks the folder (as check does; an error refuses it), then
+                             zips it deterministically: the same folder gives the same
+                             bytes and SHA-256. Writes <folder-name>.rzpack in the current
+                             folder unless -o names the file; prints its size and SHA-256
+  razdor-pack info <folder-or-.rzpack>
+                             the manifest, the maps, the size and SHA-256 of a package
   razdor-pack gen-aliases [--out <path>]
                              write the dt: alias table of the install (RAZDOR_DT_DIR, or
                              the one Razdor finds) with Razdor's English names
                              (default data/pack/dt-aliases.toml)
   --help                     this text
 
-Not built yet: render (pictures of a package), pack (folder to .rzpack).";
+Not built yet: render (pictures of a package).";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -58,6 +65,8 @@ fn run(args: &[String]) -> Result<u8, String> {
         Some("sim") => sim(&args[1..]),
         Some("play") => play(&args[1..]),
         Some("gen-aliases") => gen_aliases(&args[1..]),
+        Some("pack") => pack_cmd(&args[1..]),
+        Some("info") => info_cmd(&args[1..]),
         Some(other) => Err(format!("unknown command `{other}`")),
     }
 }
@@ -214,6 +223,83 @@ fn play(args: &[String]) -> Result<u8, String> {
     }
     let status = cmd.status().map_err(|e| format!("cannot start razdor: {e}"))?;
     Ok(if status.success() { 0 } else { 1 })
+}
+
+/// `pack <folder> [-o out]`: the package checked and zipped (`pack::archive`).
+fn pack_cmd(args: &[String]) -> Result<u8, String> {
+    let mut out: Option<PathBuf> = None;
+    let mut folder: Option<PathBuf> = None;
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "-o" | "--out" => out = Some(PathBuf::from(it.next().ok_or("-o needs a file name")?)),
+            flag if flag.starts_with('-') => return Err(format!("unknown option `{flag}` for pack")),
+            p if folder.is_none() => folder = Some(PathBuf::from(p)),
+            _ => return Err("pack takes one folder".into()),
+        }
+    }
+    let folder = folder.ok_or("pack needs a package folder")?;
+    let out = match out {
+        Some(o) => o,
+        None => {
+            let name = folder.file_name().map(|n| n.to_string_lossy().trim_end_matches(".rzpack").to_string()).unwrap_or_else(|| "package".into());
+            PathBuf::from(format!("{name}.rzpack"))
+        }
+    };
+    let packed = match pack::archive::pack(&folder) {
+        Ok(p) => p,
+        Err(text) => {
+            eprint!("{text}");
+            eprintln!("razdor-pack: {} is not packed: fix the errors above", folder.display());
+            return Ok(1);
+        }
+    };
+    std::fs::write(&out, &packed.bytes).map_err(|e| format!("cannot write {}: {e}", out.display()))?;
+    println!("wrote {}: {} bytes", out.display(), packed.bytes.len());
+    println!("sha256 {}", packed.sha256);
+    Ok(0)
+}
+
+/// `info <folder-or-.rzpack>`: the manifest, the maps and the size of a package.
+fn info_cmd(args: &[String]) -> Result<u8, String> {
+    let [path] = args else { return Err("info takes one folder or .rzpack file".into()) };
+    let path = PathBuf::from(path);
+    let files = Files::load(&path)?;
+    let size = match std::fs::metadata(&path) {
+        Ok(m) if m.is_file() => m.len(),
+        _ => files.iter().map(|(_, b)| b.len() as u64).sum(),
+    };
+    let (package, _) = Package::parse(files);
+    let Some(m) = package.manifest.as_ref() else {
+        print!("{}", pack::check(&package).to_text());
+        return Ok(1);
+    };
+    let ru = |key: &str| package.texts.get("ru").and_then(|t| t.get(key)).cloned().unwrap_or_else(|| key.to_string());
+    println!("package {} {} (format {})", m.id, m.version, m.format);
+    println!("title: {}", ru(&m.title));
+    if let Some(d) = &m.description {
+        println!("description: {}", ru(d));
+    }
+    println!("author: {}", m.author);
+    println!("license: {}", m.license);
+    println!("base: {}", m.base);
+    println!("rules: {}", m.rules);
+    println!("requires: {}", if m.requires.is_empty() { "none".into() } else { m.requires.join(", ") });
+    if package.maps.is_empty() {
+        println!("maps: none");
+    } else {
+        println!("maps:");
+        for id in package.maps.keys() {
+            println!("  {id}");
+        }
+    }
+    println!("campaign: none (format 1 has none)");
+    println!("size: {size} bytes");
+    if path.is_file() {
+        let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        println!("sha256: {}", razdor::update::sha256_hex(&bytes));
+    }
+    Ok(0)
 }
 
 fn gen_aliases(args: &[String]) -> Result<u8, String> {

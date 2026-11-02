@@ -13,6 +13,9 @@ files it names. The assets become the files of a GitHub release on indicozy/razd
   it has several map files; the maps of a mod the catalog carries, requiring it). `maps-le` is
   not read.
 - One entry per archive map that no forum entry and no Community Update map already covers.
+- One entry per content package (`--packages DIR`: the community repo's `packages/`, see
+  `package_entries`): kind `package`, its `.rzpack` kept as the asset, its manifest and texts read from
+  the zip; `packages/status.json` sets a package's status (`unlisted` takes it off the list).
 - A preview picture per entry (the first image of the post), and for a map its own picture as
   `picture` (the LIT picture embedded in the `.DTm`, made by `razdor --map-picture`), when
   ImageMagick or ffmpeg is installed. A map's own story (its `.DTm` description) goes in as `about`.
@@ -46,6 +49,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import tomllib
 import wave
 import unicodedata
 import zipfile
@@ -82,7 +86,11 @@ PROGRAM_EXT = (".exe", ".dll")
 # The notes stay in their threads; the Hub shows the first post.
 GAME_EXT = frozenset({".lit", ".ugs", ".bmp", ".tga", ".spi", ".wav", ".raw", ".dtm", ".ini"})
 SKIP_DIRS = ("saves/", "logs/")
-ASSET_RE = re.compile(r"^[0-9a-f]{16}\.(zip|dtm|png)$")
+ASSET_RE = re.compile(r"^[0-9a-f]{16}\.(zip|dtm|png|rzpack)$")
+PACKAGE_EXT = ".rzpack"
+PACKAGE_MAX_BYTES = 50 * 1024 * 1024  # the catalog's rule for a package (package_ci.py checks it on the PR too)
+PACKAGE_STATUSES = ("full", "partial", "broken", "unknown", "unlisted")
+PACKAGE_GAME_EXT = ("ini", "dtm", "ugs", "lit", "spi", "exe", "dll")  # a package never carries the game's files
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 TITLE_TAIL_RE = re.compile(r"\s*\[[^\[\]]*\]\s*$")
@@ -1562,6 +1570,10 @@ class Pack:
             e["status_note"] = {"ru": ru, "en": ""}
             self.chain_log.append(f"{e['id']}: ends after chapter {n} (status partial)")
 
+    def add_packages(self, folder):
+        """The content packages of `folder` (see `package_entries`), added to the entries and their files to the assets."""
+        self.entries.extend(package_entries(folder, self.assets))
+
     def write(self):
         """report.md always; index.json only when every mod rebuilt from its chain and every campaign link resolves."""
         if not self.mismatches and not self.failures:
@@ -1572,7 +1584,7 @@ class Pack:
             f.write(self.report_text())
 
     def report_text(self):
-        kinds = ("map", "campaign", "mod")
+        kinds = ("map", "campaign", "mod", "package")
         statuses = ("full", "partial", "broken", "unknown")
         sizes, owners = self.assets.sizes, self.assets.owners
         total = sum(sizes.values())
@@ -1655,7 +1667,7 @@ def verify_folder(folder, entries):
         raise Fail("the asset list in report.md differs from the folder")
 
 
-def build(src, archive, base_dir, out, forum_maps=True, extra=None, fixes=None, reactions=None, razdor=RAZDOR_BIN):
+def build(src, archive, base_dir, out, forum_maps=True, extra=None, fixes=None, reactions=None, razdor=RAZDOR_BIN, packages=None):
     """Builds the catalog in `<out>.tmp` and swaps it in for `out` only when it is complete and checked. A build
     that fails leaves `out` as it was and keeps its folder as `<out>.failed` (report.md) for reading."""
     final = os.path.abspath(out)
@@ -1676,6 +1688,8 @@ def build(src, archive, base_dir, out, forum_maps=True, extra=None, fixes=None, 
         pack.add_archive_maps()
         pack.resolve_chains()
         pack.check()
+        if packages:
+            pack.add_packages(packages)
         pack.write()
     except BaseException:
         shutil.rmtree(work, ignore_errors=True)
@@ -1700,6 +1714,158 @@ def build(src, archive, base_dir, out, forum_maps=True, extra=None, fixes=None, 
     os.rename(tmp, final)
     shutil.rmtree(old, ignore_errors=True)
     return pack
+
+
+# ---------------------------------------------------------------- content packages
+
+def flat_texts(table, prefix=""):
+    """A TOML texts table as dotted keys (`[unit.knight] name = ...` is `unit.knight.name`)."""
+    out = {}
+    for key, value in table.items():
+        if isinstance(value, dict):
+            out.update(flat_texts(value, f"{prefix}{key}."))
+        else:
+            out[f"{prefix}{key}"] = str(value)
+    return out
+
+
+def read_package(path):
+    """A package's manifest and texts (`{lang: {key: text}}`), read from its zip. Refused: a member with a path out
+    of the package, a backslash or a colon, or a game file (the rules `razdor-pack check` applies)."""
+    with zipfile.ZipFile(path) as z:
+        names = z.namelist()
+        for name in names:
+            if name.startswith("/") or ".." in name.split("/") or "\\" in name or ":" in name:
+                raise Fail(f"{os.path.basename(path)}: the member {name!r} is not a package path")
+            if name.rsplit(".", 1)[-1].lower() in PACKAGE_GAME_EXT:
+                raise Fail(f"{os.path.basename(path)}: {name} is a game file; a package never carries one")
+        if "package.toml" not in names:
+            raise Fail(f"{os.path.basename(path)}: no package.toml")
+        manifest = tomllib.loads(z.read("package.toml").decode("utf-8"))
+        texts = {}
+        for name in names:
+            m = re.match(r"^texts/([a-z]{2})\.toml$", name)
+            if m:
+                texts[m.group(1)] = flat_texts(tomllib.loads(z.read(name).decode("utf-8")))
+    return manifest, texts
+
+
+def read_package_status(folder):
+    """`packages/status.json`: {id: {"status": ..., "note": {"ru", "en"}, "added": "YYYY-MM-DD"}}; none is {}."""
+    path = os.path.join(folder, "status.json")
+    if not os.path.isfile(path):
+        return {}
+    status = load_json(path)
+    rows = {pid: row for pid, row in status.items() if not pid.startswith("_")}
+    for pid, row in rows.items():
+        if not isinstance(row, dict) or row.get("status", "unknown") not in PACKAGE_STATUSES:
+            raise Fail(f"status.json: {pid}: the status must be one of {', '.join(PACKAGE_STATUSES)}")
+    return rows
+
+
+def package_entries(folder, assets):
+    """One catalog entry per `.rzpack` in `folder` (the community repo's `packages/`), sorted by id. The file is the
+    asset (`assets.add`); its name must be `<id>-<version>.rzpack`, and it is at most 50 MB. The texts are the
+    package's (Russian and English). The entry's requires are the ids before the `@` in its manifest's requires."""
+    if not os.path.isdir(folder):
+        raise Fail(f"{folder} is not a folder")
+    status = read_package_status(folder)
+    entries = []
+    for name in sorted(os.listdir(folder)):
+        if not name.endswith(PACKAGE_EXT):
+            continue
+        path = os.path.join(folder, name)
+        size = os.path.getsize(path)
+        if size > PACKAGE_MAX_BYTES:
+            raise Fail(f"{name}: {size} bytes, more than the 50 MB a package may be")
+        manifest, texts = read_package(path)
+        pid, version = manifest.get("id", ""), manifest.get("version", "")
+        if not ID_RE.match(pid) or name != f"{pid}-{version}{PACKAGE_EXT}":
+            raise Fail(f"{name}: the file must be named <id>-<version>{PACKAGE_EXT} (its manifest says {pid} {version})")
+        row = status.get(pid, {})
+        requires = [r.split("@", 1)[0] for r in manifest.get("requires", [])]
+        if not all(ID_RE.match(r) for r in requires):
+            raise Fail(f"{name}: a require is not an id")
+
+        def text(key):
+            return {lang: texts.get(lang, {}).get(key, "") for lang in ("ru", "en")} if key else {"ru": "", "en": ""}
+
+        title = text(manifest.get("title"))
+        if not title["ru"]:
+            title["ru"] = title["en"] or pid
+        asset = assets.add(path, PACKAGE_EXT, pid)
+        note = row.get("note", {})
+        entries.append({
+            "id": pid,
+            "kind": "package",
+            "title": title,
+            "author": manifest.get("author", ""),
+            "version": version,
+            "description": text(manifest.get("description")),
+            "languages": [lang for lang in ("ru", "en") if lang in texts],
+            "machine_translated": False,
+            "requires": requires,
+            "source_url": "",
+            "added": row.get("added", ""),
+            "status": row.get("status", "unknown"),
+            "status_note": {"ru": note.get("ru", ""), "en": note.get("en", "")},
+            "base": manifest.get("base", "community-update"),
+            "files": [file_ref(asset, name)],
+        })
+    return sorted(entries, key=lambda e: e["id"])
+
+
+def package_selftest():
+    """Offline checks of the package entries: a good package and its status, a game file, a size over the limit."""
+    global PACKAGE_MAX_BYTES
+    with tempfile.TemporaryDirectory() as d:
+        folder, out = os.path.join(d, "packages"), os.path.join(d, "out")
+        os.makedirs(folder)
+        os.makedirs(out)
+
+        def package(name, members):
+            with zipfile.ZipFile(os.path.join(folder, name), "w") as z:
+                for member, text in members.items():
+                    z.writestr(member, text)
+
+        good = {
+            "package.toml": 'id = "hello"\nversion = "0.1.0"\nformat = 1\ntitle = "t.title"\nauthor = "Автор"\n'
+                            'license = "MIT"\nbase = "community-update"\nrequires = []\nrules = "dt"\n',
+            "texts/ru.toml": '[t]\ntitle = "Привет"\n',
+            "texts/en.toml": '[t]\ntitle = "Hello"\n',
+        }
+        package("hello-0.1.0.rzpack", good)
+        with open(os.path.join(folder, "status.json"), "w", encoding="utf-8") as f:
+            json.dump({"hello": {"status": "unlisted", "note": {"ru": "Снят", "en": ""}}}, f)
+        assets = Assets(out)
+        entries = package_entries(folder, assets)
+        check_selftest("packages: one entry per .rzpack, kind package, its texts in both languages",
+                       len(entries) == 1 and entries[0]["kind"] == "package" and entries[0]["title"] == {"ru": "Привет", "en": "Hello"})
+        e = entries[0]
+        check_selftest("packages: the status file sets the status and the note, the file is the asset",
+                       e["status"] == "unlisted" and e["status_note"]["ru"] == "Снят"
+                       and e["files"][0]["name"] == "hello-0.1.0.rzpack"
+                       and os.path.isfile(os.path.join(out, e["files"][0]["path"]))
+                       and e["files"][0]["sha256"] == sha256_file(os.path.join(folder, "hello-0.1.0.rzpack")))
+        os.remove(os.path.join(folder, "hello-0.1.0.rzpack"))
+        package("bad-0.1.0.rzpack", dict(good, **{"DiscordTimes.exe": "MZ"}))
+        refused = False
+        try:
+            package_entries(folder, Assets(out))
+        except Fail as err:
+            refused = "game file" in str(err)
+        check_selftest("packages: a package with a game file is refused", refused)
+        os.remove(os.path.join(folder, "bad-0.1.0.rzpack"))
+        package("hello-0.1.0.rzpack", good)
+        PACKAGE_MAX_BYTES = 10
+        big = False
+        try:
+            package_entries(folder, Assets(out))
+        except Fail as err:
+            big = "50 MB" in str(err)
+        finally:
+            PACKAGE_MAX_BYTES = 50 * 1024 * 1024
+        check_selftest("packages: a package over the size limit is refused", big)
 
 
 # ---------------------------------------------------------------- self-test
@@ -2315,6 +2481,7 @@ def selftest():
                        map_picture(os.path.join(d, "no-such-binary"), os.path.join(d, "ok.DTm"), out, notes) is None
                        and len(notes) == 3)
     check_sound_packages()
+    package_selftest()
     print("selftest: all checks passed")
     return 0
 
@@ -2338,6 +2505,8 @@ def main(argv=None):
     ap.add_argument("--razdor", metavar="PATH", default=RAZDOR_BIN,
                     help="the game binary that writes each map's own picture (razdor --map-picture; default: "
                          "target/release/razdor in the repo; missing, the posts' images are used)")
+    ap.add_argument("--packages", metavar="DIR",
+                    help="the community repo's packages/ folder: each <id>-<version>.rzpack becomes a package entry (and status.json sets its status)")
     ap.add_argument("--selftest", action="store_true", help="run the offline checks and exit")
     a = ap.parse_args(argv)
     fixes = {}
@@ -2357,7 +2526,7 @@ def main(argv=None):
         ap.error("missing " + ", ".join("--" + m.replace("_", "-") for m in missing))
     try:
         pack = build(a.src, a.archive_maps, a.base, a.out, forum_maps=not a.no_forum_maps, extra=extra, fixes=fixes,
-                     reactions=a.reactions, razdor=a.razdor)
+                     reactions=a.reactions, razdor=a.razdor, packages=a.packages)
         saved = sum(s for _, s in pack.sound_log.values())
         print(f"sounds: {sum(n for n, _ in pack.sound_log.values())} files of {len(pack.sound_log)} mods packed as "
               f"Ogg Vorbis, {saved} bytes saved")
