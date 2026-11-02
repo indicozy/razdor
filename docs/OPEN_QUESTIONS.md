@@ -484,6 +484,11 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   drawn from Btn3. Check which art the original uses for which button size and pick by the
   button's own size.
 
+- **Scrollbar knob narrower than a finger on phones** (2026-11-02, report 1476). The knob is the
+  drawn 24 dp strip (`widgets::scrollbar`, `bar_px`), under the 40 dp touch rule; a press beside it
+  misses. The hold-then-drag failure was fixed by `SwipeKind::Grab`. Whether the knob's hit area
+  should grow (it needs room the list gives up) is the owner's call, a Razdor choice.
+
 ## Settled
 
 - **Author names in letters the bundled fonts lack** (2026-10-31, a player's report, 1438). A name
