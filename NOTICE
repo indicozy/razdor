@@ -35,30 +35,11 @@ everything from this commit on is under GPL-3.0-only with the terms above.
 Contributors sign the Contributor License Agreement in CLA.md.
 
 
-CONTRIBUTIONS UNDER THE MIT LICENSE
+CONTRIBUTORS
 
-Code contributed by Eizenvald (eizenvald@gmail.com) in October 2026, before the license
-change (pull request #9 and the user interface commits of 2026-10-12 to 2026-10-19), was
-contributed under the following license and is included here under it:
-
-    Copyright (c) 2026 Eizenvald
-
-    Permission is hereby granted, free of charge, to any person obtaining a copy of this
-    software and associated documentation files (the "Software"), to deal in the Software
-    without restriction, including without limitation the rights to use, copy, modify,
-    merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
-    permit persons to whom the Software is furnished to do so, subject to the following
-    conditions:
-
-    The above copyright notice and this permission notice shall be included in all copies
-    or substantial portions of the Software.
-
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
-    INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-    PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
-    HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
-    CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR
-    THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+Eizenvald's contributions of October 2026 (pull request #9 and the user interface commits
+of 2026-10-12 to 2026-10-19), first made under the MIT License, are covered by the CLA he
+signed on 2026-11-02 (https://github.com/indicozy/razdor/issues/35).
 
 
 FONTS

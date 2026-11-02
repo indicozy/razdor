@@ -86,7 +86,7 @@ fn windows_resources() {
                VALUE \"FileVersion\", \"{version}\"\n\
                VALUE \"ProductVersion\", \"{version}\"\n\
                VALUE \"OriginalFilename\", \"Razdor.exe\"\n\
-               VALUE \"LegalCopyright\", \"MIT License\"\n\
+               VALUE \"LegalCopyright\", \"Copyright (C) 2026 indicozy. GPL-3.0-only\"\n\
              END\n\
            END\n\
            BLOCK \"VarFileInfo\"\n\
