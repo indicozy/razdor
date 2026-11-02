@@ -144,7 +144,7 @@ pub fn foot_map(files: &Files, map: &str, w: i32, h: i32, codes: &[u8]) -> Resul
 pub fn unreached<'a>(foot: &TileMap, hero: Cell, story: &'a Story) -> Vec<&'a Site> {
     let mut floods: HashMap<Cell, Vec<bool>> = HashMap::new();
     let mut out = Vec::new();
-    for site in &story.sites {
+    for site in story.sites.iter().filter(|s| on_map(foot, s)) {
         let origin = site.from.unwrap_or(hero);
         let seen = floods.entry(origin).or_insert_with(|| flood(foot, origin));
         if !met(foot, seen, site) {
@@ -177,7 +177,31 @@ fn met(foot: &TileMap, seen: &[bool], site: &Site) -> bool {
     match site.named {
         Named::Cell(c) if site.strict => reached(c),
         Named::Cell(c) => (-1..=1).any(|dy| (-1..=1).any(|dx| reached((c.0 + dx, c.1 + dy)))),
-        Named::Area(x, y, w, h) => (y..y + h).any(|yy| (x..x + w).any(|xx| reached((xx, yy)))),
+        Named::Area(x, y, w, h) => {
+            let (x0, x1) = span(x, w, foot.w);
+            let (y0, y1) = span(y, h, foot.h);
+            (y0..y1).any(|yy| (x0..x1).any(|xx| reached((xx, yy))))
+        }
+    }
+}
+
+/// The cells `start..start + len` of an area along an axis of `size` cells, clipped to the map. An
+/// area is package input: its size may be far beyond the map (or overflow), so it is never walked
+/// past the map's edge. An empty range (`lo >= hi`) means no cell of the area is on the map.
+fn span(start: i32, len: i32, size: i32) -> (i32, i32) {
+    (start.max(0), start.saturating_add(len).min(size))
+}
+
+/// Whether the site names at least one cell of the map. A site wholly off the map is an error
+/// that the map's own checks report, so the walk leaves it out.
+fn on_map(foot: &TileMap, site: &Site) -> bool {
+    match site.named {
+        Named::Cell(c) => foot.in_bounds(c),
+        Named::Area(x, y, w, h) => {
+            let (x0, x1) = span(x, w, foot.w);
+            let (y0, y1) = span(y, h, foot.h);
+            x0 < x1 && y0 < y1
+        }
     }
 }
 
@@ -315,6 +339,18 @@ mod tests {
         let story = super::story(&files, "m").unwrap();
         let foot = foot_map(&files, "m", 6, 3, &codes).unwrap();
         assert!(unreached(&foot, story.hero, &story).is_empty(), "a bridge on the river is walked");
+    }
+
+    #[test]
+    fn a_huge_area_is_clipped_to_the_map_and_a_site_off_the_map_is_skipped() {
+        let (files, codes) = river(true);
+        let mut story = super::story(&files, "m").unwrap();
+        let foot = foot_map(&files, "m", 6, 3, &codes).unwrap();
+        let area = |x: i32, y: i32, w: i32, h: i32| Site { what: "huge".into(), file: "f".into(), named: Named::Area(x, y, w, h), strict: true, from: None };
+        story.sites = vec![area(0, 0, 2_000_000_000, 2_000_000_000), area(2_000_000_000, 2_000_000_000, 2_000_000_000, 2_000_000_000), area(-5, -5, i32::MAX, 1)];
+        let started = std::time::Instant::now();
+        assert!(unreached(&foot, story.hero, &story).is_empty(), "the first area holds reached cells; the others are off the map and skipped");
+        assert!(started.elapsed() < std::time::Duration::from_secs(1), "an area is clipped, not walked");
     }
 
     #[test]
