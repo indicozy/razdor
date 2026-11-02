@@ -96,19 +96,16 @@ pub fn hub_packages(local: &Path) -> Vec<PathBuf> {
 }
 
 /// The paths a save's package may be read from, in the order they are tried: the list's entries
-/// with the save's id, version and hash (the save's own path first, when it canonicalises to one
-/// of them: the hint), then the Hub's packages. Nothing else; a save's path is never read as it
-/// is. Each candidate is opened and must match the save ([`Opened::same_package`]).
+/// with the save's id, version and hash, the entry whose stored path equals the save's path
+/// first (a text comparison only: the save's path is never canonicalised or touched), then the
+/// others; then the Hub's packages. Nothing else. Each candidate is opened and must match the
+/// save ([`Opened::same_package`]).
 pub fn candidates(list: &[Entry], origin: &ScenarioRef, hub: &[PathBuf]) -> Vec<PathBuf> {
     let ScenarioRef::Pack { id, version, hash, path, .. } = origin else { return Vec::new() };
-    let matching: Vec<PathBuf> = list.iter().filter(|e| e.id == *id && e.version == *version && e.hash == *hash).map(|e| PathBuf::from(&e.path)).collect();
-    let mut out = Vec::new();
-    if let Ok(hint) = canonical_local(Path::new(path)) {
-        if matching.contains(&hint) {
-            out.push(hint);
-        }
-    }
-    for p in matching {
+    let matching: Vec<&Entry> = list.iter().filter(|e| e.id == *id && e.version == *version && e.hash == *hash).collect();
+    let mut out: Vec<PathBuf> = Vec::new();
+    for e in matching.iter().filter(|e| e.path == *path).chain(matching.iter()) {
+        let p = PathBuf::from(&e.path);
         if !out.contains(&p) {
             out.push(p);
         }
@@ -154,6 +151,25 @@ mod tests {
         let origin = pack_origin("/elsewhere/evil.rzpack", 7);
         let list = [entry(&listed.display().to_string(), 7)];
         assert_eq!(candidates(&list, &origin, &[]), vec![PathBuf::from(&list[0].path)]);
+    }
+
+    #[test]
+    fn a_listed_entry_equal_to_the_save_path_goes_first() {
+        let origin = pack_origin("/packs/b", 7);
+        let list = [entry("/packs/a", 7), entry("/packs/b", 7), entry("/packs/c", 9)];
+        assert_eq!(candidates(&list, &origin, &[]), vec![PathBuf::from("/packs/b"), PathBuf::from("/packs/a")]);
+        // No equal path: the matching entries keep the list's order.
+        let origin = pack_origin("/packs/x", 7);
+        assert_eq!(candidates(&list, &origin, &[]), vec![PathBuf::from("/packs/a"), PathBuf::from("/packs/b")]);
+    }
+
+    #[test]
+    fn a_save_path_is_compared_as_text_and_never_opened() {
+        // A device-style hint only orders the list's entries as text: it is never opened, and
+        // the candidates are the list's stored paths alone.
+        let origin = pack_origin(r"\\?\UNC\evil-host\share\pkg.rzpack", 7);
+        let list = [entry("/packs/a", 7)];
+        assert_eq!(candidates(&list, &origin, &[]), vec![PathBuf::from("/packs/a")]);
     }
 
     #[test]

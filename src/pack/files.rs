@@ -141,26 +141,32 @@ impl Files {
 }
 
 /// Why a path must not be opened, decided from its text alone, before the file system is
-/// touched: a network share (`\\host\share`, `//host/share`, `\\?\UNC\…`), which Windows reaches
-/// with the player's credentials, or a device (`\\.\…`, `\\?\` that is not a drive). `None` for
-/// a local path, including `\\?\C:\…`, the form `canonicalize` gives on Windows.
+/// touched. Deny by default: `/` is read as `\`, and a path that starts with two separators is
+/// refused (a network share, `\\host\share`, `//host/share`, or a device, `\\.\X`), as is any
+/// path that starts with `\??\` (the NT namespace, which can reach a share too). The one local
+/// form with two separators is the drive path `\\?\X:\…`, the form `canonicalize` gives on
+/// Windows. `None` for a local path: `C:\…`, a relative path, a unix absolute path.
 pub fn refused_path(path: &str) -> Option<&'static str> {
     let p: String = path.chars().map(|c| if c == '/' { '\\' } else { c }).collect();
+    if let Some(rest) = p.strip_prefix(r"\??\") {
+        return Some(if is_unc(rest) { "a network share" } else { "a device path" });
+    }
     if let Some(rest) = p.strip_prefix(r"\\?\") {
-        let drive = rest.as_bytes().get(1) == Some(&b':') && rest.as_bytes().first().is_some_and(u8::is_ascii_alphabetic);
-        if drive {
+        let b = rest.as_bytes();
+        if b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'\\' {
             return None;
         }
-        let unc = rest.get(..4).is_some_and(|s| s.eq_ignore_ascii_case("UNC\\"));
-        return Some(if unc { "a network share" } else { "a device path" });
-    }
-    if p.starts_with(r"\\.\") {
-        return Some("a device path");
+        return Some(if is_unc(rest) { "a network share" } else { "a device path" });
     }
     if p.starts_with(r"\\") {
-        return Some("a network share");
+        return Some(if p.starts_with(r"\\.\") { "a device path" } else { "a network share" });
     }
     None
+}
+
+/// Whether `rest` (a path after its prefix) names a UNC share: `UNC\host\share`.
+fn is_unc(rest: &str) -> bool {
+    rest.get(..4).is_some_and(|s| s.eq_ignore_ascii_case("UNC\\"))
 }
 
 /// What a package read has admitted so far, against the limits.
@@ -228,12 +234,16 @@ fn collect(root: &Path, dir: &Path, prefix: &str, depth: usize, files: &mut File
         let path = entry.path();
         let rel = format!("{prefix}{name}");
         let kind = entry.file_type().map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-        if kind.is_symlink() {
-            // Refused unless it is a file inside the package (`canonicalize` resolves it).
-            let inside = std::fs::canonicalize(&path).ok().filter(|t| t.starts_with(root) && t.is_file());
-            if inside.is_none() {
-                refuse(files, &rel, "a symbolic link out of the package folder (or to a folder) is not read");
-                continue;
+        // The file that is opened. A symlink is refused unless its canonical target is a file
+        // inside the package; that target is opened, never the link path, so the file that
+        // was checked is the one read (no swap between the check and the read).
+        let target = if kind.is_symlink() {
+            match std::fs::canonicalize(&path).ok().filter(|t| t.starts_with(root)) {
+                Some(t) => t,
+                None => {
+                    refuse(files, &rel, "a symbolic link out of the package folder is not read");
+                    continue;
+                }
             }
         } else if kind.is_dir() {
             collect(root, &path, &format!("{rel}/"), depth + 1, files, budget)?;
@@ -241,15 +251,23 @@ fn collect(root: &Path, dir: &Path, prefix: &str, depth: usize, files: &mut File
         } else if !kind.is_file() {
             refuse(files, &rel, "not a regular file (a device, a pipe or a socket) is not read");
             continue;
+        } else {
+            path.clone()
+        };
+        // A pre-open filter, so that a device or a pipe is never opened (opening a pipe blocks).
+        // The size and the kind are then taken from the opened handle, below.
+        if !std::fs::metadata(&target).is_ok_and(|m| m.is_file()) {
+            refuse(files, &rel, "not a regular file is not read");
+            continue;
         }
-        let meta = std::fs::metadata(&path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        let file = std::fs::File::open(&target).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        let meta = file.metadata().map_err(|e| format!("cannot read {}: {e}", path.display()))?;
         if !meta.is_file() {
             refuse(files, &rel, "not a regular file is not read");
             continue;
         }
         budget.admit(&rel, meta.len())?;
-        let file = std::fs::File::open(&path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-        let data = budget.finish(&rel, meta.len(), file)?;
+        let data = budget.finish(&rel, meta.len(), &file)?;
         files.insert(&rel, data);
     }
     Ok(())
@@ -348,6 +366,21 @@ mod tests {
     }
 
     #[test]
+    fn the_nt_namespace_and_separator_pairs_are_refused_by_default() {
+        assert_eq!(refused_path(r"\??\UNC\host\share"), Some("a network share"));
+        assert_eq!(refused_path(r"\??\C:\x"), Some("a device path"));
+        assert_eq!(refused_path("//host/share"), Some("a network share"));
+        assert_eq!(refused_path(r"\\host\share"), Some("a network share"));
+        assert_eq!(refused_path(r"\/host/share"), Some("a network share"));
+        assert_eq!(refused_path("/??/C:/x"), Some("a device path"), "/ is read as \\");
+        assert_eq!(refused_path(r"\\?\C:"), Some("a device path"), "a drive path needs its \\");
+        assert_eq!(refused_path(r"\\?\C:\ok"), None);
+        assert_eq!(refused_path("//?/C:/ok"), None, "/ is read as \\");
+        assert_eq!(refused_path("/home/user/x"), None);
+        assert_eq!(refused_path(r"C:\x"), None);
+    }
+
+    #[test]
     fn load_refuses_a_network_or_device_path_before_touching_it() {
         let err = Files::load(Path::new(r"\\no-such-host.invalid\share\pkg.rzpack")).unwrap_err();
         assert!(err.contains("a network share"), "{err}");
@@ -428,6 +461,24 @@ mod tests {
         std::os::unix::fs::symlink(pkg.join("units/real.toml"), pkg.join("alias.toml")).unwrap();
         let files = Files::from_dir(&pkg).unwrap();
         assert_eq!(files.get("alias.toml"), Some(&b"real"[..]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_inside_the_package_reads_its_target() {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("razdor-files-inside-{}-{nanos}", std::process::id()));
+        let pkg = dir.join("pkg");
+        std::fs::create_dir_all(pkg.join("units")).unwrap();
+        std::fs::write(pkg.join("units/real.toml"), "real").unwrap();
+        std::os::unix::fs::symlink(pkg.join("units/real.toml"), pkg.join("alias.toml")).unwrap();
+        std::os::unix::fs::symlink("units", pkg.join("folder-link")).unwrap();
+        let files = Files::from_dir(&pkg).unwrap();
+        assert_eq!(files.get("alias.toml"), Some(&b"real"[..]));
+        assert_eq!(files.get("units/real.toml"), Some(&b"real"[..]));
+        assert!(files.get("folder-link").is_none(), "a link to a folder is not read as a file");
+        assert!(files.problems.iter().any(|d| d.file == "folder-link"), "{:?}", files.problems);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
