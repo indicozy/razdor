@@ -67,6 +67,9 @@ pub enum Cheat {
     Spell(String),
     Unit(String, Option<i32>),
     Time(u32),
+    /// `event N`: fires map event N now, its conditions ignored (`EventEngine::force`); N is
+    /// the event's number as the map editor shows it (1-based, `EventId`).
+    Event(u32),
     Win,
     Lose,
     God,
@@ -77,7 +80,7 @@ pub enum Cheat {
 }
 
 /// The commands for `help`: (name and arguments, what it does).
-pub const COMMANDS: [(&str, &str); 18] = [
+pub const COMMANDS: [(&str, &str); 19] = [
     ("help", n_("this list")),
     ("gold N", n_("gives N gold (a negative N takes it)")),
     ("mana N", n_("gives N mana (a negative N takes it)")),
@@ -89,6 +92,7 @@ pub const COMMANDS: [(&str, &str); 18] = [
     ("spell <id | name>", n_("writes the spell into the book")),
     ("unit <id | name> [level]", n_("the unit joins the army, if there is room")),
     ("time H", n_("lets H hours pass, as a wait")),
+    ("event N", n_("fires the map's event N now, its conditions ignored")),
     ("win", n_("in battle: the enemy falls, you win")),
     ("lose", n_("in battle: your army falls, you lose")),
     ("god", n_("on / off: your army takes no damage in battle")),
@@ -163,6 +167,7 @@ pub fn parse(line: &str) -> Result<Cheat, ParseError> {
             }
         }
         "time" => Cheat::Time(number(1, MAX_HOURS as i64)? as u32),
+        "event" => Cheat::Event(number(1, u16::MAX as i64)? as u32),
         "win" => none().map(|_| Cheat::Win)?,
         "lose" => none().map(|_| Cheat::Lose)?,
         "god" => none().map(|_| Cheat::God)?,
@@ -374,7 +379,7 @@ pub fn run(cheat: &Cheat, game: Option<&mut Game>, battle: Option<&mut Battle>) 
         _ => {}
     }
     let Some(game) = game else { return Err(tr("Only in a game (not in a custom battle).").into()) };
-    if in_battle && matches!(cheat, Cheat::Heal | Cheat::Xp(_) | Cheat::Level(_) | Cheat::Unit(..) | Cheat::Time(_)) {
+    if in_battle && matches!(cheat, Cheat::Heal | Cheat::Xp(_) | Cheat::Level(_) | Cheat::Unit(..) | Cheat::Time(_) | Cheat::Event(_)) {
         return Err(tr("Not during a battle: the army is fighting.").into());
     }
     let done = run_on_game(cheat, game)?;
@@ -472,6 +477,21 @@ fn run_on_game(cheat: &Cheat, game: &mut Game) -> Result<Done, String> {
             let events = game.wait(*h);
             Done { lines: vec![trf!("Time passes: {from} → {to}.", from, to = game.clock.label())], events }
         }
+        Cheat::Event(n) => {
+            let refused = match game.script() {
+                None => Some(tr("This game has no events.")),
+                Some(engine) if engine.event(*n as u16).is_none() => return Err(trf!("Nothing has event {n}.", n)),
+                Some(engine) if engine.ended().is_some() => Some(tr("The scenario is over.")),
+                Some(engine) if engine.holds_window() => Some(tr("An event's window is open: close it first.")),
+                Some(_) if game.pending_question().is_some() => Some(tr("A question is waiting for an answer.")),
+                Some(_) => None,
+            };
+            if let Some(why) = refused {
+                return Err(why.into());
+            }
+            let events = game.force_event(*n as u16);
+            Done { lines: vec![trf!("Event {n} fired.", n)], events }
+        }
         Cheat::Speed(n) => {
             game.cheats.speed = *n;
             Done::line(trf!("The hero walks {n} times faster.", n))
@@ -559,11 +579,20 @@ mod tests {
         assert_eq!(parse("peace now"), Err(ParseError::Usage("peace")));
         assert_eq!(parse("Routes"), Ok(Cheat::Routes));
         assert_eq!(parse("routes on"), Err(ParseError::Usage("routes")));
-        assert_eq!(COMMANDS.len(), 18);
+        assert_eq!(COMMANDS.len(), 19);
         for (u, _) in COMMANDS {
             let name = u.split(' ').next().unwrap();
             assert!(!matches!(parse(name), Err(ParseError::Unknown(_))), "{name} is a command");
         }
+    }
+
+    #[test]
+    fn event_parses_a_number_and_refuses_the_rest() {
+        assert_eq!(parse("event 3"), Ok(Cheat::Event(3)));
+        assert_eq!(parse("EVENT 221"), Ok(Cheat::Event(221)));
+        assert_eq!(parse("event"), Err(ParseError::Usage("event N")));
+        assert_eq!(parse("event x"), Err(ParseError::Usage("event N")));
+        assert_eq!(parse("event 0"), Err(ParseError::Usage("event N")));
     }
 
     #[test]
@@ -659,6 +688,33 @@ mod tests {
             cheat(&mut g, &format!("unit {}", unit.id)).unwrap();
         }
         assert!(cheat(&mut g, &format!("unit {}", unit.id)).is_err(), "no room");
+    }
+
+    /// A scenario with one global event that asks for at least 1000 gold (the hero has 100):
+    /// its conditions fail, so the scan never fires it.
+    fn game_with_an_event_that_cannot_fire() -> Game {
+        use crate::dt::dtm::{Event as DtEvent, EventKind};
+        use crate::rules::world::testkit::{content, hero, scenario, troop};
+        let mut s = scenario(16, 12);
+        s.header.heroes[0] = hero(2, 2, 100, &[troop(4, 0, 1)]);
+        let mut e = DtEvent { kind: EventKind::Global as u8, repeat: 1440, duration: 1440, once: 1, ..DtEvent::default() };
+        (e.conditions.stats_check, e.conditions.gold) = (1, 1000);
+        s.events = vec![e];
+        Game::from_scenario(Arc::new(content()), &s, HeroClass::Knight)
+    }
+
+    #[test]
+    fn event_fires_an_event_whose_conditions_fail() {
+        use crate::rules::events::EventOutcome;
+        let mut g = game_with_an_event_that_cannot_fire();
+        assert_eq!(g.script().map(|s| s.times_fired(1)), Some(0), "its conditions keep it from firing");
+        let done = cheat(&mut g, "event 1").unwrap();
+        assert_eq!(done.lines, vec!["Event 1 fired.".to_string()]);
+        assert!(done.events.contains(&Event::Script(EventOutcome::Fired { event: 1, message: false })), "{:?}", done.events);
+        assert_eq!(g.script().map(|s| s.times_fired(1)), Some(1));
+        assert!(g.cheats.used, "a cheat that worked marks the game");
+        assert!(cheat(&mut g, "event 2").is_err(), "no event 2 in this scenario");
+        assert!(cheat(&mut game(), "event 1").unwrap_err().contains("no events"), "a game without events");
     }
 
     #[test]
