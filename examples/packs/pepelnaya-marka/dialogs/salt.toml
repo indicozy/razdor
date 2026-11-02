@@ -1,0 +1,88 @@
+# Chapter 3б «Солончаки»: the dialogs. Their texts are text keys (texts/<lang>.toml). A choice's
+# actions run when it is picked; the triggers that read the choice (`dialog_choice`) run after.
+
+[[dialog]]
+id = "salt_arrival"
+title = "salt.arrival.title"
+text = "salt.arrival.text"
+
+[[dialog]]
+id = "salt_reedmere"
+title = "salt.reedmere.title"
+text = "salt.reedmere.text"
+speaker = "dt:hunter"
+
+[[dialog.choice]]
+id = "disguise"
+text = "salt.reedmere.disguise"
+
+[[dialog.choice]]
+id = "openly"
+text = "salt.reedmere.openly"
+
+[[dialog]]
+id = "salt_caught"
+title = "salt.caught.title"
+text = "salt.caught.text"
+speaker = "dt:guardsman"
+
+[[dialog.choice]]
+id = "draw"
+text = "salt.caught.draw"
+
+[[dialog]]
+id = "salt_witch"
+title = "salt.witch.title"
+text = "salt.witch.text"
+speaker = "dt:witch"
+
+[[dialog.choice]]
+id = "cure"
+text = "salt.witch.cure"
+then = [ { remove_spells = "player" }, { set = "taint", value = 0 }, { add = "marsh_trust", value = 1 } ]
+
+[[dialog.choice]]
+id = "blessing"
+text = "salt.witch.blessing"
+if = [ { gold = 20, op = ">=" } ]
+then = [ { give_gold = -20 }, { cast_on_army = "dt:spell/blessing", minutes = 1440 } ]
+
+[[dialog.choice]]
+id = "page"
+text = "salt.witch.page"
+then = [ { remove_spell_from_book = "dt:spell/terrible_curse" } ]
+
+[[dialog]]
+id = "salt_bog"
+title = "salt.bog.title"
+text = "salt.bog.text"
+
+[[dialog]]
+id = "salt_tess"
+title = "salt.tess.title"
+text = "salt.tess.text"
+speaker = "dt:hunter"
+
+[[dialog.choice]]
+id = "take"
+text = "salt.tess.take"
+then = [ { give_unit = "dt:hunter", named = "tess" } ]
+
+[[dialog.choice]]
+id = "leave"
+text = "salt.tess.leave"
+
+[[dialog]]
+id = "salt_trail"
+title = "salt.trail.title"
+text = "salt.trail.text"
+
+[[dialog]]
+id = "salt_end_marsh"
+title = "salt.end_marsh.title"
+text = "salt.end_marsh.text"
+
+[[dialog]]
+id = "salt_end_alone"
+title = "salt.end_alone.title"
+text = "salt.end_alone.text"

@@ -1,0 +1,203 @@
+# Chapter 3б «Солончаки», 100×100: the salt marsh of the west and the salt flats of the east.
+# A causeway runs north through the marsh from the smugglers' way to the watch; the marsh folk
+# keep Reedmere on its dry island and the witch her hut on the next. The Salt Gate on the flats
+# guards the Crown's salt. terrain.png is painted by tools/pepelnaya-marka-terrain-salt.py. The
+# map's own victory is a placeholder that never fires: the chapter ends by the story's `victory`
+# (see triggers/salt.toml).
+title = "salt.map.title"
+description = "salt.map.description"
+start_date = "1300-05-01"
+relations = [[3, 3, 0, -3], [3, 3, 0, -3], [0, 0, 3, -3], [-3, -3, -3, 3]]
+
+[hero]
+cell = [88, 84]
+classes = ["knight"]
+gold = 60
+mana = 10
+troops = [
+    { unit = "dt:militiaman", level = 1, count = 3 },
+    { unit = "dt:archer", level = 1, count = 2 },
+]
+
+# Dead trees on the marsh and the flats, and the hills of the east.
+[[object]]
+kind = "trees"
+cell = [6, 8]
+[[object]]
+kind = "trees"
+cell = [12, 14]
+[[object]]
+kind = "trees"
+cell = [26, 6]
+[[object]]
+kind = "trees"
+cell = [44, 10]
+[[object]]
+kind = "dead_trees"
+cell = [20, 40]
+[[object]]
+kind = "dead_trees"
+cell = [26, 70]
+[[object]]
+kind = "dead_trees"
+cell = [40, 30]
+[[object]]
+kind = "dead_trees"
+cell = [44, 64]
+[[object]]
+kind = "dead_trees"
+cell = [52, 50]
+[[object]]
+kind = "dead_trees"
+cell = [30, 20]
+[[object]]
+kind = "dead_trees"
+cell = [40, 90]
+[[object]]
+kind = "dead_trees"
+cell = [70, 20]
+[[object]]
+kind = "dead_trees"
+cell = [80, 60]
+[[object]]
+kind = "dead_trees"
+cell = [90, 30]
+[[object]]
+kind = "hills"
+cell = [76, 20]
+[[object]]
+kind = "hills"
+cell = [84, 30]
+[[object]]
+kind = "hills"
+cell = [88, 60]
+[[object]]
+kind = "stones"
+cell = [80, 14]
+[[object]]
+kind = "stones"
+cell = [94, 22]
+
+# The marsh folk's Reedmere on its island, the witch's hut on the next, the Crown's Salt Gate on
+# the flats (a garrison town), the watch at the causeway's north end, and the bandits' ruined den.
+[[building]]
+id = "reedmere"
+type = "village"
+name = "salt.building.reedmere.name"
+description = "salt.building.reedmere.description"
+cell = [22, 60]
+faction = "ally"
+income = 15
+
+[[building]]
+id = "witch"
+type = "altar"
+name = "salt.building.witch.name"
+description = "salt.building.witch.description"
+cell = [10, 40]
+faction = "ally"
+
+[[building]]
+id = "saltgate"
+type = "town"
+name = "salt.building.saltgate.name"
+description = "salt.building.saltgate.description"
+cell = [70, 40]
+faction = "enemy"
+income = 60
+garrison = [
+    { unit = "dt:guardsman", level = 1, count = 4 },
+    { unit = "dt:halberdier", level = 1, count = 2 },
+    { unit = "dt:archer", level = 1, count = 2 },
+]
+
+[[building]]
+id = "watch"
+type = "fort"
+name = "salt.building.watch.name"
+description = "salt.building.watch.description"
+cell = [56, 18]
+faction = "enemy"
+income = 25
+garrison = [
+    { unit = "dt:guardsman", level = 1, count = 2 },
+    { unit = "dt:archer", level = 1, count = 2 },
+]
+
+[[building]]
+id = "den"
+type = "ruins"
+name = "salt.building.den.name"
+description = "salt.building.den.description"
+cell = [48, 72]
+faction = "neighbour"
+
+# The smugglers' salt wagon: it walks the marsh slowly, the causeway fast, then to the Salt Gate.
+[[army]]
+id = "smugglers"
+name = "salt.army.smugglers.name"
+cell = [8, 92]
+faction = "neighbour"
+model = "bandits"
+gold = 60
+troops = [
+    { unit = "dt:bandit", level = 1, count = 3 },
+    { unit = "dt:robber", level = 1, count = 2 },
+]
+
+# The Crown's patrol on the north road: it walks its loop while the hero is in disguise.
+[[army]]
+id = "patrol_north"
+name = "salt.army.patrol_north.name"
+cell = [48, 24]
+faction = "enemy"
+model = "feudal"
+troops = [
+    { unit = "dt:guardsman", level = 1, count = 2 },
+    { unit = "dt:archer", level = 1, count = 2 },
+]
+
+# The bounty men at the Salt Gate: they walk near it while the hero is in disguise, and follow him
+# when he is found out.
+[[army]]
+id = "bounty"
+name = "salt.army.bounty.name"
+cell = [64, 44]
+faction = "enemy"
+model = "feudal"
+troops = [
+    { unit = "dt:guardsman", level = 1, count = 3 },
+    { unit = "dt:halberdier", level = 1, count = 2 },
+]
+
+# The ghosts of the bog: their fog curses whoever walks through it (the story's bog curse).
+[[army]]
+id = "bog_ghosts"
+name = "salt.army.bog_ghosts.name"
+cell = [12, 82]
+faction = "enemy"
+model = "ghosts"
+troops = [
+    { unit = "dt:ghost", level = 1, count = 3 },
+    { unit = "dt:ghoul", level = 1, count = 1 },
+]
+
+# The placeholder of the map's victory: it stays inactive (the story ends the chapter).
+[[army]]
+id = "unmarked"
+name = "salt.army.unmarked.name"
+cell = [96, 4]
+faction = "enemy"
+model = "inactive"
+troops = [{ unit = "dt:death_knight", level = 1, count = 1 }]
+
+# A lantern on the causeway, lit from the start.
+[[point]]
+cell = [34, 50]
+radius = 3
+active = true
+
+[victory]
+kind = "defeat_army"
+army = "unmarked"
+message = "salt.map.won"

@@ -1,0 +1,15 @@
+# Chapter 3а «Аббатство»: the items of the Order. Ilm's book comes with him; the holy water is the
+# Order's price for the rite.
+[[item]]
+id = "abbey_scripture"
+base = "dt:item/holy_scripture"
+name = "item.abbey_scripture.name"
+description = "item.abbey_scripture.description"
+cost = 60
+
+[[item]]
+id = "abbey_water"
+base = "dt:item/holy_water"
+name = "item.abbey_water.name"
+description = "item.abbey_water.description"
+cost = 30

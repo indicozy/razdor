@@ -1,0 +1,137 @@
+# Chapter 3в «Лагерь рот»: the dialogs. Their texts are text keys (texts/<lang>.toml). A choice's
+# actions run when it is picked; the triggers that read the choice (`dialog_choice`) run after.
+
+[[dialog]]
+id = "camp_arrival"
+title = "camp.arrival.title"
+text = "camp.arrival.text"
+speaker = "dt:viking"
+
+[[dialog]]
+id = "camp_kord"
+title = "camp.kord.title"
+text = "camp.kord.text"
+speaker = "dt:viking"
+
+[[dialog.choice]]
+id = "hire"
+text = "camp.kord.hire"
+if = [ { gold = 60, op = ">=" } ]
+then = [ { give_gold = -60 }, { give_unit = "dt:viking", named = "kord" } ]
+
+[[dialog.choice]]
+id = "turn"
+text = "camp.kord.turn"
+
+[[dialog]]
+id = "camp_red"
+title = "camp.red.title"
+text = "camp.red.text"
+speaker = "dt:brigand"
+
+[[dialog.choice]]
+id = "buy"
+text = "camp.red.buy"
+if = [ { gold = 100, op = ">=" } ]
+then = [ { give_gold = -100 } ]
+
+[[dialog.choice]]
+id = "leave"
+text = "camp.red.leave"
+
+[[dialog]]
+id = "camp_duel"
+title = "camp.duel.title"
+text = "camp.duel.text"
+speaker = "dt:captain_of_the_guard"
+
+[[dialog.choice]]
+id = "accept"
+text = "camp.duel.accept"
+
+[[dialog.choice]]
+id = "refuse"
+text = "camp.duel.refuse"
+
+[[dialog]]
+id = "camp_duel_won"
+title = "camp.duel_won.title"
+text = "camp.duel_won.text"
+
+[[dialog]]
+id = "camp_duel_lost"
+title = "camp.duel_lost.title"
+text = "camp.duel_lost.text"
+
+[[dialog]]
+id = "camp_raid"
+title = "camp.raid.title"
+text = "camp.raid.text"
+speaker = "dt:guardsman"
+
+[[dialog.choice]]
+id = "hit"
+text = "camp.raid.hit"
+if = [ { var = "kord", op = ">=", value = 1 }, { var = "kord", op = "!=", value = 2 } ]
+
+[[dialog.choice]]
+id = "pass"
+text = "camp.raid.pass"
+
+[[dialog]]
+id = "camp_loot"
+title = "camp.loot.title"
+text = "camp.loot.text"
+speaker = "dt:viking"
+
+[[dialog.choice]]
+id = "split"
+text = "camp.loot.split"
+
+[[dialog.choice]]
+id = "keep"
+text = "camp.loot.keep"
+
+[[dialog]]
+id = "camp_gate"
+title = "camp.gate.title"
+text = "camp.gate.text"
+
+[[dialog.choice]]
+id = "light"
+text = "camp.gate.light"
+
+[[dialog.choice]]
+id = "leave"
+text = "camp.gate.leave"
+
+[[dialog]]
+id = "camp_relief"
+title = "camp.relief.title"
+text = "camp.relief.text"
+speaker = "dt:halberdier"
+
+[[dialog]]
+id = "camp_trust"
+title = "camp.trust.title"
+text = "camp.trust.text"
+
+[[dialog]]
+id = "camp_end_friend"
+title = "camp.end_friend.title"
+text = "camp.end_friend.text"
+
+[[dialog]]
+id = "camp_end_hired"
+title = "camp.end_hired.title"
+text = "camp.end_hired.text"
+
+[[dialog]]
+id = "camp_end_betrayed"
+title = "camp.end_betrayed.title"
+text = "camp.end_betrayed.text"
+
+[[dialog]]
+id = "camp_end_alone"
+title = "camp.end_alone.title"
+text = "camp.end_alone.text"

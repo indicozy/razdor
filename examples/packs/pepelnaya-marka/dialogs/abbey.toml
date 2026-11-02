@@ -1,0 +1,115 @@
+# Chapter 3а «Аббатство»: the dialogs. Their texts are text keys (texts/<lang>.toml). A choice's
+# actions run when it is picked; the triggers that read the choice (`dialog_choice`) run after.
+
+[[dialog]]
+id = "abbey_arrival"
+title = "abbey.arrival.title"
+text = "abbey.arrival.text"
+speaker = "dt:swordsman"
+
+[[dialog]]
+id = "abbey_inquisitors"
+title = "abbey.inquisitors.title"
+text = "abbey.inquisitors.text"
+speaker = "dt:inquisitor"
+
+[[dialog]]
+id = "abbey_ilm_meet"
+title = "abbey.ilm_meet.title"
+text = "abbey.ilm_meet.text"
+speaker = "dt:monk"
+
+[[dialog.choice]]
+id = "take"
+text = "abbey.ilm_meet.take"
+then = [ { give_unit = "dt:monk", named = "ilm" } ]
+
+[[dialog.choice]]
+id = "leave"
+text = "abbey.ilm_meet.leave"
+
+[[dialog]]
+id = "abbey_blight"
+title = "abbey.blight.title"
+text = "abbey.blight.text"
+
+[[dialog]]
+id = "abbey_rite"
+title = "abbey.rite.title"
+text = "abbey.rite.text"
+speaker = "dt:priest"
+
+[[dialog.choice]]
+id = "rite"
+text = "abbey.rite.rite"
+if = [ { gold = 30, op = ">=" } ]
+then = [ { give_gold = -30 }, { remove_spells = "player" }, { set = "taint", value = 0 }, { add = "order", value = 1 } ]
+
+[[dialog.choice]]
+id = "decline"
+text = "abbey.rite.decline"
+
+[[dialog]]
+id = "abbey_walls"
+title = "abbey.walls.title"
+text = "abbey.walls.text"
+
+[[dialog]]
+id = "abbey_siege"
+title = "abbey.siege.title"
+text = "abbey.siege.text"
+speaker = "dt:death_knight"
+
+[[dialog]]
+id = "abbey_trial"
+title = "abbey.trial.title"
+text = "abbey.trial.text"
+speaker = "dt:inquisitor"
+
+[[dialog.choice]]
+id = "burn"
+text = "abbey.trial.burn"
+
+[[dialog.choice]]
+id = "spare"
+text = "abbey.trial.spare"
+
+[[dialog.choice]]
+id = "ride"
+text = "abbey.trial.ride"
+
+[[dialog]]
+id = "abbey_heresy"
+title = "abbey.heresy.title"
+text = "abbey.heresy.text"
+speaker = "dt:heretic"
+
+[[dialog.choice]]
+id = "accept"
+text = "abbey.heresy.accept"
+then = [ { cast_on_army = "dt:spell/evil_sorcery", permanent = true } ]
+
+[[dialog.choice]]
+id = "refuse"
+text = "abbey.heresy.refuse"
+
+[[dialog]]
+id = "abbey_inquisition"
+title = "abbey.inquisition.title"
+text = "abbey.inquisition.text"
+speaker = "dt:inquisitor"
+
+[[dialog]]
+id = "abbey_end_inquisitor"
+title = "abbey.end_inquisitor.title"
+text = "abbey.end_inquisitor.text"
+
+[[dialog]]
+id = "abbey_end_heretic"
+title = "abbey.end_heretic.title"
+text = "abbey.end_heretic.text"
+
+[[dialog]]
+id = "abbey_end_plain"
+title = "abbey.end_plain.title"
+text = "abbey.end_plain.text"

@@ -1,0 +1,262 @@
+# Chapter 3а «Аббатство» (the Order of the Ash, ally = 1): the variables and the triggers of the map
+# `abbey`. Every trigger names its map. Triggers that share a moment run in file order, and each
+# condition reads the state as the earlier ones left it, so the order below matters where noted.
+#
+# Taint: the dead's curse sticks to the hero's army (`cast_on_army`) in the blighted ground and to
+# the abbey's garrison when the dead reach its walls; the Order's rite takes it off (`remove_spells`).
+# The engine has no event for a lost battle, so "the dead win fights" is read as the dead walking
+# into the abbey (`army_arrives`) and the blight's own curse.
+#
+# Brother Ilm's crossroads: at Ольховка, a trial (burn the tainted village: ilm = 1) or mercy, which
+# plants the heresy (ilm = 2) and a secret dialog on a later midnight.
+
+[vars]
+abbey_week = 0              # weeks since the chapter began
+abbey_ilm_met = false       # Brother Ilm's offer has been answered
+abbey_blight_seen = false   # the hero has been warned of the blight
+abbey_siege = false         # the dead have been sent at the abbey
+
+# The story starts: the Order's letter, the inquisitors ride to the abbey, the dead walk their patrol.
+[[trigger]]
+id = "abbey_arrival"
+map = "abbey"
+when = { event = "game_start" }
+then = [
+    { dialog = "abbey_arrival" },
+    { army_goal = "inquisitors", go_to_building = "abbey" },
+    { army_goal = "dead_wave", patrol = [[84, 44], [90, 30], [78, 30]] },
+]
+
+# Each week counts (before the siege's check below, which reads it).
+[[trigger]]
+id = "abbey_week"
+map = "abbey"
+when = { event = "week_start" }
+once = false
+then = [ { add = "abbey_week", value = 1 } ]
+
+[[trigger]]
+id = "abbey_inquisitors_arrive"
+map = "abbey"
+when = { event = "army_arrives", army = "inquisitors", building = "abbey" }
+then = [ { dialog = "abbey_inquisitors" } ]
+
+# Brother Ilm at the south gate: a novice with a borrowed sword and a gift in his hands.
+[[trigger]]
+id = "abbey_ilm_meet"
+map = "abbey"
+when = { event = "hero_enters", at = [46, 49, 8, 3] }
+if = [ { var = "abbey_ilm_met", value = false } ]
+then = [ { dialog = "abbey_ilm_meet" } ]
+
+[[trigger]]
+id = "abbey_ilm_take"
+map = "abbey"
+when = { event = "dialog_choice", dialog = "abbey_ilm_meet", choice = "take" }
+then = [ { set = "abbey_ilm_met", value = true }, { give_item = "abbey_scripture", to = "named:ilm" } ]
+
+[[trigger]]
+id = "abbey_ilm_leave"
+map = "abbey"
+when = { event = "dialog_choice", dialog = "abbey_ilm_meet", choice = "leave" }
+then = [ { set = "abbey_ilm_met", value = true }, { add = "order", value = 1 } ]
+
+# The blight east of the abbey: the first step warns, every step curses the army (at most six taints).
+[[trigger]]
+id = "abbey_blight_warn"
+map = "abbey"
+when = { event = "hero_enters", at = [56, 28, 14, 14] }
+if = [ { var = "abbey_blight_seen", value = false } ]
+then = [ { set = "abbey_blight_seen", value = true }, { dialog = "abbey_blight" } ]
+
+[[trigger]]
+id = "abbey_blight_curse"
+map = "abbey"
+when = { event = "hero_enters", at = [56, 28, 14, 14] }
+once = false
+if = [ { var = "taint", op = "<", value = 6 } ]
+then = [ { cast_on_army = "dt:spell/terrible_curse", minutes = 480 }, { add = "taint", value = 1 } ]
+
+# The Order's rite: the monks take the curse off the army for a price. Offered whenever the hero
+# comes to the abbey tainted.
+[[trigger]]
+id = "abbey_rite_offer"
+map = "abbey"
+when = { event = "hero_enters_building", building = "abbey" }
+once = false
+if = [ { var = "taint", op = ">=", value = 1 } ]
+then = [ { dialog = "abbey_rite" } ]
+
+# The dead reach the abbey's walls: the garrison is cursed as they arrive (garrison target).
+[[trigger]]
+id = "abbey_walls_cursed"
+map = "abbey"
+when = { event = "army_arrives", army = "dead_wave", building = "abbey" }
+then = [
+    { cast_on_army = "dt:spell/terrible_curse", garrison = "abbey", minutes = 600 },
+    { dialog = "abbey_walls" },
+]
+
+# The siege: from the second week the dead are sent at the abbey. This is the one big battle of the
+# chapter, a DT battle with an `attack` goal; the Lua siege (format 2.0.0, slice 3) replaces it.
+[[trigger]]
+id = "abbey_siege_start"
+map = "abbey"
+when = { event = "week_start" }
+if = [
+    { var = "abbey_week", op = ">=", value = 2 },
+    { var = "abbey_siege", value = false },
+    { army_alive = "dead_wave" },
+]
+then = [
+    { set = "abbey_siege", value = true },
+    { dialog = "abbey_siege" },
+    { army_goal = "dead_wave", go_to_building = "abbey" },
+]
+
+[[trigger]]
+id = "abbey_siege_won"
+map = "abbey"
+when = { event = "army_defeated", army = "dead_wave" }
+if = [ { var = "abbey_siege", value = true } ]
+then = [ { add = "order", value = 2 } ]
+
+# The dead wave beaten (at the siege, or earlier on its patrol): the three endings read Ilm's path.
+# Each sets abbey_done and ends the chapter. They run after abbey_siege_won, which only adds standing.
+[[trigger]]
+id = "abbey_end_inquisitor"
+map = "abbey"
+when = { event = "army_defeated", army = "dead_wave" }
+if = [ { var = "ilm", value = 1 } ]
+then = [ { set = "abbey_done", value = true }, { dialog = "abbey_end_inquisitor" }, { victory = true } ]
+
+[[trigger]]
+id = "abbey_end_heretic"
+map = "abbey"
+when = { event = "army_defeated", army = "dead_wave" }
+if = [ { var = "ilm", value = 2 } ]
+then = [ { set = "abbey_done", value = true }, { dialog = "abbey_end_heretic" }, { victory = true } ]
+
+[[trigger]]
+id = "abbey_end_plain"
+map = "abbey"
+when = { event = "army_defeated", army = "dead_wave" }
+if = [ { var = "ilm", value = 0 } ]
+then = [ { set = "abbey_done", value = true }, { dialog = "abbey_end_plain" }, { victory = true } ]
+
+# The Crown's watch taken: the Crown's standing falls.
+[[trigger]]
+id = "abbey_watch_taken"
+map = "abbey"
+when = { event = "building_captured", building = "watch" }
+then = [ { add = "crown", value = -2 } ]
+
+# Ольховка: the trial, once, with Brother Ilm at the hero's side (a named unit of the monks).
+[[trigger]]
+id = "abbey_trial"
+map = "abbey"
+when = { event = "hero_enters", at = [14, 58, 8, 8] }
+if = [ { var = "ilm", value = 0 }, { has_named_unit = "ilm", unit = "dt:monk" } ]
+then = [ { dialog = "abbey_trial" } ]
+
+[[trigger]]
+id = "abbey_trial_burn"
+map = "abbey"
+when = { event = "dialog_choice", dialog = "abbey_trial", choice = "burn" }
+then = [
+    { add = "villages_burned", value = 1 },
+    { set = "ilm", value = 1 },
+    { add = "order", value = 2 },
+    { add = "crown", value = -1 },
+]
+
+[[trigger]]
+id = "abbey_trial_spare"
+map = "abbey"
+when = { event = "dialog_choice", dialog = "abbey_trial", choice = "spare" }
+then = [ { set = "ilm", value = 2 }, { add = "order", value = -2 } ]
+
+# The heresy's secret dialog: a midnight after the mercy, with Ilm still in the army. Once.
+[[trigger]]
+id = "abbey_heresy_offer"
+map = "abbey"
+when = { event = "day_start" }
+if = [ { var = "ilm", value = 2 }, { has_named_unit = "ilm", unit = "dt:monk" } ]
+then = [ { dialog = "abbey_heresy" } ]
+
+[[trigger]]
+id = "abbey_heresy_accept"
+map = "abbey"
+when = { event = "dialog_choice", dialog = "abbey_heresy", choice = "accept" }
+then = [ { add = "taint", value = 1 } ]
+
+# The heretic's path wears on the army: each week of it leaves a little taint.
+[[trigger]]
+id = "abbey_heretic_week"
+map = "abbey"
+when = { event = "week_start" }
+once = false
+if = [ { var = "ilm", value = 2 } ]
+then = [ { add = "taint", value = 1 } ]
+
+# Ilm's zeal on the inquisitor's path: the Order pays alms to the army each week.
+[[trigger]]
+id = "abbey_zeal_week"
+map = "abbey"
+when = { event = "week_start" }
+once = false
+if = [ { var = "ilm", value = 1 } ]
+then = [ { give_gold = 10 } ]
+
+# The Order's verdict: a tainted army in the Order's disfavour is judged at the abbey's gate.
+[[trigger]]
+id = "abbey_inquisition"
+map = "abbey"
+when = { event = "day_start" }
+if = [ { var = "taint", op = ">=", value = 4 }, { var = "order", op = "<=", value = -2 } ]
+then = [ { army_goal = "inquisitors", attack = "hero" }, { dialog = "abbey_inquisition" } ]
+
+[[trigger]]
+id = "abbey_inquisitors_fall"
+map = "abbey"
+when = { event = "army_defeated", army = "inquisitors" }
+then = [ { add = "order", value = -3 } ]
+
+# The Order's favour: at 3 standing the monks give gold, once.
+[[trigger]]
+id = "abbey_favour"
+map = "abbey"
+when = { event = "var_changed", var = "order" }
+if = [ { var = "order", op = ">=", value = 3 } ]
+then = [ { give_gold = 40 } ]
+
+# The rite's gift: the monks hand over holy water when the curse is taken off (see the dialog).
+[[trigger]]
+id = "abbey_rite_done"
+map = "abbey"
+when = { event = "dialog_choice", dialog = "abbey_rite", choice = "rite" }
+then = [ { give_item = "abbey_water", to = "pack" } ]
+
+# A tainted army that goes unshriven for a week loses the Order's trust a little each week.
+[[trigger]]
+id = "abbey_taint_week"
+map = "abbey"
+when = { event = "week_start" }
+once = false
+if = [ { var = "taint", op = ">=", value = 3 } ]
+then = [ { add = "order", value = -1 } ]
+
+# Ольховка taken by force: it burns, and the Order counts it.
+[[trigger]]
+id = "abbey_alder_taken"
+map = "abbey"
+when = { event = "building_captured", building = "alder" }
+then = [ { add = "villages_burned", value = 1 }, { add = "order", value = -1 } ]
+
+# The abbey's gate in the Order's favour: the monks give alms, once.
+[[trigger]]
+id = "abbey_alms"
+map = "abbey"
+when = { event = "hero_enters_building", building = "abbey" }
+if = [ { var = "order", op = ">=", value = 2 } ]
+then = [ { give_gold = 15 } ]

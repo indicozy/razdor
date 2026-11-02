@@ -1,0 +1,7 @@
+# Chapter 3в «Лагерь рот»: Varga's reward for the duel with the captain of the Crown's guard.
+[[item]]
+id = "camp_axe"
+base = "dt:item/konung_s_axe"
+name = "item.camp_axe.name"
+description = "item.camp_axe.description"
+cost = 80
