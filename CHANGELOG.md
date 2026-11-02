@@ -17,6 +17,21 @@
 - «Карты и моды»: у карт теперь своя картинка и своя история из самой карты; пост автора показан ниже, под заголовком «Из поста автора».
 ## 1.2.3 — 2026-11-02
 
+Коммит `d72e4d19` (тег `v1.2.3`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+ec5a0a20981225a1acc326a25c99c3756d34ff1712d0b260aac460bd6bff94ab  razdor
+a171d40d0188761a438d0098e4c4e050905776c76f42d464a5b25d2a524e5628  Razdor.exe
+a256af876de6cd91ec7faa3cf363636ca2e548a0bc281341dcde69e3c9bd41c4  razdor-macos
+42c1c5e884ed71e320be4f8f17a9991ae92c15d678256ed4cd1868e13e44b552  razdor-translate
+70d5f13668454d734cdc8b6e36d007a7f60d1c9980cf591f05340dbb61c964b0  Razdor-translate.exe
+daf2e5142fc866fcaf67b773234732c9497b6ba83c9a5ccd7f79fb1b3613ff16  razdor-translate-macos
+a45e3ee8718250bac348537f10301d7b35862fbcd3b49a220a23511e74bc08c7  razdor.apk
+13c9bcf89f3699b51bfa15c94f5b4bed5350e5144a7325468a6fa15efb467086  razdor.ipa
+```
+
 ### Изменено
 
 - Заклинания на карте теперь можно накладывать на любые армии, в том числе с суши на корабли и обратно.
@@ -27,6 +42,21 @@
 - Окно победы и событий: кнопка «Ок» больше не пропадает, когда наводишь на предметы или листаешь награды.
 - Телефон: текст подсказки к заклинаниям стал крупнее и растёт с размером текста.
 ## 1.2.2 — 2026-11-01
+
+Коммит `0234fb5e` (тег `v1.2.2`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+fbe1922047baa4786d79ad22626f9ef1f01b0728b46b0c9e1aefc4559c128a98  razdor
+533abb3f60a94e49f1036c1cd711c18443a31158a0ea293acdfdef6fa6ab82bc  Razdor.exe
+c31655d00af67db7c7716b09f0bb86eceaf87f53ce446b58d03cbdfaf9411e65  razdor-macos
+024096d51cf7b0ce1aa7510a6f97bcb3e280f5ae80b59e91cf8f2be8eb9e9cb3  razdor-translate
+0ac3f621cff222e6fef0d30d273f0fda366c25541570aabafd25d2669112cacd  Razdor-translate.exe
+66d2231117cdfca2cc3f86f1e6a0fd50c0edb0a20eaccb244fd99b73d06360e0  razdor-translate-macos
+cd8e47982e8fae365f1b70051c07c1a60dba095cbe6cb51a5fb2c2cda9ae00b0  razdor.apk
+fabc247c0549de14f66a99c80e9458a8bee8b54e1646bb45f5b2e1649be856c8  razdor.ipa
+```
 
 ### Изменено
 
