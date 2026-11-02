@@ -267,3 +267,20 @@ fn a_result_with_many_entries_across_tables_is_capped_in_total() {
     let (fb, _h) = play(&[("total", src)], "total", &[1], &[4]);
     assert!(fb.state.script_error.as_deref().unwrap_or("").contains("entries"), "{:?}", fb.state.script_error);
 }
+
+#[test]
+fn helpers_take_the_views_own_cells() {
+    // The view's cells are read-only proxies: a helper given one must still read its x and y.
+    let src = r#"
+        function check_end(s)
+          local a, b = s.units[1].at, s.units[2].at
+          if razdor.distance(a, b) > 0 and razdor.line_of_fire(a, b) ~= nil and razdor.path(a, b) then
+            return "defenders"
+          end
+          return nil
+        end
+    "#;
+    let (fb, _h) = play(&[("proxy", src)], "proxy", &[1, 6], &[4]);
+    assert!(fb.state.script_error.is_none(), "{:?}", fb.state.script_error);
+    assert_eq!(fb.outcome(), Some(Side::Defenders));
+}

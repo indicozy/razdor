@@ -342,7 +342,8 @@ fn cell_of(v: &Value) -> mlua::Result<(i32, i32)> {
         return Err(mlua::Error::runtime(format!("a cell is {{x = n, y = n}}, not a {}", v.type_name())));
     };
     let get = |k: &str| -> mlua::Result<i32> {
-        whole(&t.raw_get::<Value>(k)?).ok_or_else(|| mlua::Error::runtime(format!("a cell's {k} is not a whole number")))
+        // Helpers run inside the call, so their argument may be a view proxy: read it with get.
+        whole(&t.get::<Value>(k)?).ok_or_else(|| mlua::Error::runtime(format!("a cell's {k} is not a whole number")))
     };
     Ok((get("x")?, get("y")?))
 }
