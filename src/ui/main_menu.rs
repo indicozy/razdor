@@ -588,9 +588,15 @@ fn chip_links(m: &PortraitMenu, k: f32) -> Option<Pick> {
     let margin = 12.0 * dp;
     let gap = 8.0 * dp;
     let w = (screen_width() - 2.0 * margin - 3.0 * gap) / 4.0;
-    // The labels grow with the text size (`button_grow`), and shrink to the tile's width.
-    let base = 14.0 * dp * super::display::button_grow();
     let marble = chrome::win("Win-marble");
+    // One size for all four labels (grown by `button_grow`): the largest that fits the widest one.
+    let size = super::dt_font::legacy_metrics_if(true, || {
+        let base = 14.0 * dp * super::display::button_grow();
+        labels.iter().fold(base, |size, l| {
+            let tw = measure(l, size).width;
+            if tw > w - 8.0 * dp { size * (w - 8.0 * dp) / tw } else { size }
+        })
+    });
     let (mut lang_tile, mut lang_pressed) = (Rect::new(0.0, 0.0, 0.0, 0.0), false);
     for (j, label) in labels.iter().enumerate() {
         let r = Rect::new(margin + j as f32 * (w + gap), m.chip_top, w, m.chip_h);
@@ -605,11 +611,6 @@ fn chip_links(m: &PortraitMenu, k: f32) -> Option<Pick> {
         let color = if down || hover { chrome::GOLD } else { Color::new(0.95, 0.88, 0.72, 1.0) };
         // The label is drawn at its own size, not snapped to the original's bitmap sizes (phones).
         super::dt_font::legacy_metrics_if(true, || {
-            let mut size = base;
-            let tw = measure(label, size).width;
-            if tw > w - 8.0 * dp {
-                size *= (w - 8.0 * dp) / tw;
-            }
             let tw = measure(label, size).width;
             let text_y = match icons[j].and_then(|n| chrome::win_fx(n, Fx::Glow)) {
                 Some(t) => {
@@ -618,6 +619,7 @@ fn chip_links(m: &PortraitMenu, k: f32) -> Option<Pick> {
                     chrome::tex(&t, Rect::new(r.x + (r.w - iw) / 2.0, r.y + 7.0 * dp, iw, ih), WHITE);
                     r.y + r.h - 9.0 * dp
                 }
+                // Without an icon the label is centred in the tile.
                 None => r.y + r.h / 2.0 + size * 0.35,
             };
             chrome::shadow_text(label, r.x + (r.w - tw) / 2.0, text_y, size, color);
@@ -1425,15 +1427,50 @@ fn settings_button(r: Rect, label: &str) -> bool {
     pressed
 }
 
-/// One of the original's slider rows (0x4d01c9: 32 px boxes 40 apart from 45 px under the
-/// window's top, 18 px in from its sides, a dark fill and a frame, the label 8 px in): the
-/// label on the left, ◀ the track ▶ on the right. Returns the new value (0..1) when moved.
-fn option_slider(r: Rect, label: &str, value: f32) -> Option<f32> {
+/// A phone held upright: a slider row with its label on its own line over ◀ the track ▶, which
+/// takes the row's whole width (a long label is never cut by the track).
+fn option_slider_stacked(r: Rect, label: &str, value: f32, size: f32) -> Option<f32> {
     let k = chrome::k();
     draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, 0.0, 0.0, 0.35));
     chrome::silver_frame(r, 1.0);
     super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
-        chrome::shadow_text(label, r.x + 8.0 * k, r.y + r.h * 0.5 + 6.0 * k, 15.0 * k, OPTION_INK);
+        chrome::shadow_text(label, r.x + 8.0 * k, r.y + 6.0 * k + size, size, OPTION_INK);
+    });
+    let a = 22.0 * k;
+    let y = r.y + r.h - 6.0 * k - a;
+    let left = Rect::new(r.x + 8.0 * k, y, a, a);
+    let right = Rect::new(r.x + r.w - 8.0 * k - a, y, a, a);
+    let track = Rect::new(left.x + left.w, y, right.x - left.x - left.w, a);
+    for (art, ar) in [("HArrowLeft", left), ("HArrowRight", right)] {
+        match chrome::win(art) {
+            Some(t) => chrome::tex(&t, ar, WHITE),
+            None => draw_rectangle(ar.x, ar.y, ar.w, ar.h, chrome::SILVER),
+        }
+    }
+    let over = |ar: Rect| ar.contains(crate::ui::widgets::pointer().into()) && !input_blocked();
+    if over(left) && clicked() {
+        return Some((value - 0.05).max(0.0));
+    }
+    if over(right) && clicked() {
+        return Some((value + 0.05).min(1.0));
+    }
+    slider(track, value)
+}
+
+/// One of the original's slider rows (0x4d01c9: 32 px boxes 40 apart from 45 px under the
+/// window's top, 18 px in from its sides, a dark fill and a frame, the label 8 px in): the
+/// label on the left, ◀ the track ▶ on the right. Returns the new value (0..1) when moved.
+fn option_slider(r: Rect, label: &str, value: f32) -> Option<f32> {
+    option_slider_sized(r, label, value, 15.0 * chrome::k())
+}
+
+/// [`option_slider`] with its label at `size` px (the phone's 14 sp).
+fn option_slider_sized(r: Rect, label: &str, value: f32, size: f32) -> Option<f32> {
+    let k = chrome::k();
+    draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.0, 0.0, 0.0, 0.35));
+    chrome::silver_frame(r, 1.0);
+    super::dt_font::with_face(super::dt_font::Face::Subtitle, || {
+        chrome::shadow_text(label, r.x + 8.0 * k, r.y + r.h * 0.5 + 6.0 * k, size, OPTION_INK);
     });
     let a = 17.0 * k;
     let left = Rect::new(r.x + r.w * 0.505, r.y + (r.h - a) / 2.0, a, a);
@@ -1681,6 +1718,258 @@ fn keys_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     closed || ok_pressed || (!was_waiting && key(KeyCode::Escape))
 }
 
+// The settings window's scroll on a phone held upright, in dp.
+local! {
+    static PHONE_SCROLL: std::cell::Cell<f32> = const { std::cell::Cell::new(0.0) };
+}
+
+/// Cuts the drawing off outside `clip` (screen px), or lifts the cut (`None`).
+fn phone_clip(clip: Option<Rect>) {
+    let dpi = screen_dpi_scale();
+    let gl = unsafe { get_internal_gl() }.quad_gl;
+    gl.scissor(clip.map(|r| ((r.x * dpi) as i32, (r.y * dpi) as i32, (r.w * dpi).ceil() as i32, (r.h * dpi).ceil() as i32)));
+}
+
+/// The words of `label` in lines of at most `max_w` px at `size` (a word never splits).
+fn wrap_label(label: &str, max_w: f32, size: f32) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut cur = String::new();
+    for word in label.split(' ') {
+        let cand = if cur.is_empty() { word.to_string() } else { format!("{cur} {word}") };
+        if !cur.is_empty() && measure(&cand, size).width > max_w {
+            lines.push(std::mem::take(&mut cur));
+            cur = word.to_string();
+        } else {
+            cur = cand;
+        }
+    }
+    if !cur.is_empty() {
+        lines.push(cur);
+    }
+    lines
+}
+
+/// A checkbox row whose label may wrap: the box stays on the first line. True when clicked.
+fn option_check_lines(x: f32, y: f32, width: f32, lines: &[String], on: bool, ink: Color, u: f32) -> bool {
+    let b = Rect::new(x, y, 26.0 * u, 26.0 * u);
+    let (art, mask) = if on { ("CBoxChecked", "CBoxChecked-Alpha") } else { ("CBoxUn", "CBoxUn-Alpha") };
+    match chrome::win_masked(art, mask) {
+        Some(t) => chrome::tex(&t, b, WHITE),
+        None => {
+            draw_rectangle(b.x, b.y, b.w, b.h, Color::new(0.0, 0.0, 0.0, 0.5));
+            chrome::silver_frame(b, 1.0);
+            if on {
+                draw_line(b.x + 3.0 * u, b.y + 9.0 * u, b.x + 8.0 * u, b.y + 15.0 * u, 2.5 * u, GREEN);
+                draw_line(b.x + 8.0 * u, b.y + 15.0 * u, b.x + 16.0 * u, b.y + 2.0 * u, 2.5 * u, GREEN);
+            }
+        }
+    }
+    let tx = x + 34.0 * u;
+    for (i, line) in lines.iter().enumerate() {
+        chrome::shadow_text(line, tx, y + 19.0 * u + i as f32 * 18.0 * u, 14.0 * u, ink);
+    }
+    let h = (10.0 + lines.len() as f32 * 18.0) * u;
+    let hit = Rect::new(x, y, width, h.max(26.0 * u));
+    let clicked_it = hit.contains(crate::ui::widgets::pointer().into()) && !input_blocked() && clicked();
+    if clicked_it {
+        cue(Cue::Button);
+    }
+    clicked_it
+}
+
+/// The options window on a phone held upright, in dp: the window takes the phone's width and
+/// the room from the top inset to the bar (over a map) or to the title's foot; one unit is one
+/// dp, so the labels are 14 units (14 sp) and the rows 40 units. A long checkbox label wraps to a
+/// second line; the rows scroll when they are taller than the window. Desktop and sideways keep
+/// [`options_window`]'s own layout. Returns true when closed.
+fn phone_options(audio: &mut super::audio::Settings, install_wide: bool, over_map: bool, u: f32) -> bool {
+    super::dt_font::legacy_metrics_if(true, || {
+        let (sw, sh) = (screen_width(), screen_height());
+        let top = super::display::safe_area().top + 8.0 * u;
+        let bottom = if over_map { sh - chrome::bar_height() - 8.0 * u } else { window_layout::title_bottom() - 8.0 * u };
+        let _scale = super::display::enter_window_scale(Some(u));
+        let title = own("Options", "Title", n_("Sound, graphics and gameplay settings"));
+        let rect = Rect::new(8.0 * u, top, sw - 16.0 * u, (bottom - top).max(200.0 * u));
+        let (inner, closed) = chrome::window(rect, &title, chrome::Skin::Marble, true);
+        let pad = 12.0 * u;
+        let x0 = inner.x + pad;
+        let cw = inner.w - 2.0 * pad;
+        // The list between the window's top and the buttons row (44 units high, 10 above its bottom).
+        let list = Rect::new(inner.x, inner.y + 6.0 * u, inner.w, inner.h - 6.0 * u - 66.0 * u);
+        let row_h = 40.0 * u;
+        let pitch = 46.0 * u;
+        // A slider row stacks its label over its track, so a long label is never cut by the track.
+        let (slider_h, slider_pitch) = (58.0 * u, 64.0 * u);
+        let mod_rows = chrome::install_option("Option0").is_some() && chrome::install_option("OptionSld0").is_none();
+        let slider_label = |n: usize, ours: &'static str| own("Options", &if mod_rows { format!("Option{n}") } else { format!("OptionSld{n}") }, ours);
+        let anim_label = if mod_rows { tr(n_("Battle animation speed")).to_string() } else { slider_label(4, n_("Battle animation speed")) };
+        let slider_rows: [(String, f32); 5] = [
+            (slider_label(0, n_("Background music volume")), audio.music_volume),
+            (slider_label(1, n_("Sound effects volume")), audio.sfx_volume),
+            (slider_label(2, n_("Map scroll speed")), scroll_speed(audio) / 100.0),
+            (slider_label(3, n_("Hero's walking speed")), walk_speed(audio) / razdor::rules::game::WALK_SPEED_MAX as f32),
+            (anim_label, anim_speed(audio).unwrap_or(0.0) / 99.0),
+        ];
+        let touch_row = super::touchpad::MOBILE;
+        let orientation_row = cfg!(target_os = "android");
+        let checks: Vec<(&'static str, String, bool, Color)> = {
+            let mut c = vec![
+                ("Option4", own("Options", "Option4", n_("Do not load music and sounds (needs a restart)")), no_sound(audio), CHECK_ORANGE),
+                ("Option5", own("Options", "Option5", n_("Show FPS")), audio.show_fps, CHECK_INK),
+                ("Option6", own("Options", "Option6", n_("Turn off hints")), hints_off(audio), CHECK_INK),
+                ("Option7", own("Options", "Option7", n_("Automatically pursue the chosen army")), pursue(audio), CHECK_INK),
+                ("Option8", own("Options", "Option8", n_("Automatically save the current game")), autosave(audio), CHECK_INK),
+                ("Option9", own("Options", "Option9", n_("Improved enemy AI in battle")), expert_ai(audio), CHECK_INK),
+                ("Option10", own("Options", "Option10", n_("Impossible difficulty (needs a restart)")), impossible(audio), CHECK_INK),
+                ("Option11", own("Options", "Option11", n_("Wide front row in battle (for new games)")), wide_row(audio, install_wide), CHECK_INK),
+            ];
+            if touch_row {
+                c.push(("RazdorTouchpad", own("Options", "RazdorTouchpad", n_("Touchpad mode (the screen moves a cursor)")), audio.touchpad.unwrap_or(false), CHECK_INK));
+            }
+            c
+        };
+        // Each checkbox's lines, and the content's height in units from the list's top.
+        let check_lines: Vec<Vec<String>> = checks.iter().map(|c| wrap_label(&c.1, cw - 34.0 * u, 14.0 * u)).collect();
+        let check_h: Vec<f32> = check_lines.iter().map(|l| (10.0 + l.len() as f32 * 18.0).max(38.0) * u).collect();
+        let slider_top = 0.0;
+        let checks_top = slider_top + slider_rows.len() as f32 * slider_pitch + 6.0 * u;
+        let mut check_y = Vec::with_capacity(checks.len());
+        let mut y = checks_top;
+        for h in &check_h {
+            check_y.push(y);
+            y += h;
+        }
+        let mut rest_y = y + 6.0 * u;
+        let orient_y = rest_y;
+        if orientation_row {
+            rest_y += pitch;
+        }
+        let text_y = rest_y;
+        let large_y = text_y + pitch;
+        let import_y = large_y + pitch;
+        let content = import_y + row_h;
+
+        // Scroll: the wheel and the bar at the list's right edge.
+        let view = list.h;
+        let most = (content - view).max(0.0);
+        let mut scroll = PHONE_SCROLL.with(|c| c.get()).clamp(0.0, most);
+        if most > 0.0 {
+            if crate::ui::widgets::mouse_in(list.x, list.y, list.w, list.h) {
+                scroll = (scroll - wheel() * 24.0 * u).clamp(0.0, most);
+            }
+            let bar = Rect::new(list.x + list.w - 9.0 * u, list.y, 6.0 * u, view);
+            super::widgets::scrollbar_px(bar, &mut scroll, most, view, 24.0 * u);
+        }
+        PHONE_SCROLL.with(|c| c.set(scroll));
+        // A row's screen top, and whether it is on the list at all.
+        let on_list = |cy: f32, h: f32| cy + h > 0.0 && cy < view;
+        let at = |cy: f32| list.y + cy - scroll;
+
+        phone_clip(Some(list));
+        for (i, (label, value)) in slider_rows.iter().enumerate() {
+            let cy = slider_top + i as f32 * slider_pitch;
+            if !on_list(cy - scroll, slider_h) {
+                continue;
+            }
+            let r = Rect::new(x0 - pad + 2.0 * u, at(cy), inner.w - 4.0 * u, slider_h);
+            if let Some(v) = option_slider_stacked(r, label, *value, 14.0 * u) {
+                match i {
+                    0 | 1 => {
+                        let steps = ((v - value) / super::audio::VOLUME_STEP).round() as i32;
+                        if i == 0 {
+                            audio.music_muted = false;
+                            audio.step_music(steps);
+                        } else {
+                            audio.sfx_muted = false;
+                            audio.step_sfx(steps);
+                        }
+                    }
+                    2 => audio.scroll_speed = Some((v * 100.0).round()),
+                    3 => audio.walk_speed = Some((v * razdor::rules::game::WALK_SPEED_MAX as f32).round()),
+                    _ => audio.anim_speed = Some((v * 99.0).round()),
+                }
+            }
+        }
+        for (i, (key, _, on, ink)) in checks.iter().enumerate() {
+            let cy = check_y[i];
+            let h = check_h[i];
+            if !on_list(cy - scroll, h) {
+                continue;
+            }
+            if option_check_lines(x0, at(cy), cw, &check_lines[i], *on, *ink, u) {
+                match *key {
+                    "Option4" => audio.no_sound = Some(!on),
+                    "Option5" => audio.show_fps = !on,
+                    "Option6" => audio.hints_off = Some(!on),
+                    "Option7" => audio.pursue = Some(!on),
+                    "Option8" => audio.autosave = Some(!on),
+                    "Option9" => toggle_expert_ai(audio),
+                    "Option10" => audio.impossible = Some(!on),
+                    "Option11" => audio.wide_row = Some(!on),
+                    _ => audio.touchpad = Some(!on),
+                }
+            }
+        }
+        if orientation_row && on_list(orient_y - scroll, row_h) {
+            let y = at(orient_y);
+            chrome::shadow_text(tr("Screen orientation"), x0, y + 26.0 * u, 14.0 * u, chrome::CREAM);
+            let r = Rect::new(inner.x + inner.w - pad - 150.0 * u, y + 4.0 * u, 150.0 * u, 36.0 * u);
+            if row_button(r, orientation_label(audio.orientation)) {
+                audio.orientation = match audio.orientation {
+                    None => Some(super::audio::Orientation::Landscape),
+                    Some(super::audio::Orientation::Landscape) => Some(super::audio::Orientation::Portrait),
+                    Some(super::audio::Orientation::Portrait) => None,
+                };
+            }
+        }
+        if on_list(text_y - scroll, row_h) {
+            let y = at(text_y);
+            chrome::shadow_text(tr("Text size"), x0, y + 26.0 * u, 14.0 * u, chrome::CREAM);
+            let r = Rect::new(inner.x + inner.w - pad - 150.0 * u, y + 4.0 * u, 150.0 * u, 36.0 * u);
+            if row_button(r, super::display::text_size_label(audio.text_size)) {
+                audio.text_size = super::display::next_text_size(audio.text_size);
+            }
+        }
+        if on_list(large_y - scroll, row_h) {
+            let y = at(large_y);
+            chrome::shadow_text(tr("Large message windows"), x0, y + 26.0 * u, 14.0 * u, chrome::CREAM);
+            let r = Rect::new(inner.x + inner.w - pad - 150.0 * u, y + 4.0 * u, 150.0 * u, 36.0 * u);
+            if row_button(r, if audio.large_windows { tr("On") } else { tr("Off") }) {
+                audio.large_windows = !audio.large_windows;
+            }
+        }
+        if on_list(import_y - scroll, row_h) {
+            super::game_import::settings_row(Rect::new(x0, at(import_y), cw, row_h), over_map);
+        }
+        phone_clip(None);
+
+        // The buttons row: «Ещё…» at the left, «Принять» and «Отмена» at the right, 44 units high.
+        let bh = 40.0 * u;
+        let by = inner.y + inner.h - 12.0 * u - bh;
+        let advanced = Rect::new(x0, by, 120.0 * u, bh);
+        let cancel = Rect::new(inner.x + inner.w - pad - 110.0 * u, by, 110.0 * u, bh);
+        let apply = Rect::new(cancel.x - 8.0 * u - 110.0 * u, by, 110.0 * u, bh);
+        if row_button(advanced, tr("Advanced…")) {
+            ADVANCED.with(|a| a.set(true));
+            return false;
+        }
+        let (apply_label, cancel_label) = (own("Buttons", "Apply", n_("Apply")), own("Buttons", "Cancel", n_("Cancel")));
+        let apply_pressed = settings_button(apply, &apply_label);
+        let cancel_pressed = settings_button(cancel, &cancel_label);
+        if apply_pressed || key(KeyCode::Enter) {
+            OPENED_WITH.with(|o| *o.borrow_mut() = None);
+            return true;
+        }
+        if cancel_pressed || closed || key(KeyCode::Escape) {
+            if let Some(before) = OPENED_WITH.with(|o| o.take()) {
+                *audio = before;
+            }
+            return true;
+        }
+        false
+    })
+}
+
 pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, over_map: bool) -> bool {
     if ADVANCED.with(|a| a.get()) {
         // The keys window stands over the advanced one, which takes no input meanwhile.
@@ -1707,6 +1996,10 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     }
     if OPENED_WITH.with(|o| o.borrow().is_none()) {
         OPENED_WITH.with(|o| *o.borrow_mut() = Some(audio.clone()));
+    }
+    // A phone held upright: its own layout (`phone_options`).
+    if let Some(u) = upright_dp() {
+        return phone_options(audio, install_wide, over_map, u);
     }
     let title = own("Options", "Title", n_("Sound, graphics and gameplay settings"));
     let h = options_h();
