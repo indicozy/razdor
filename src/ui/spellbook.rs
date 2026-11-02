@@ -540,7 +540,7 @@ fn card_text(game: &Game, s: &SpellDef, area: Rect, tint_mana: bool, text: f32) 
         }
         let joined: String = line.iter().map(|(t, _)| t.as_str()).collect();
         probe_text(&joined, tx, y, laid.size);
-        shadow_coloured(line, tx, y, laid.size, true);
+        shadow_coloured(line, tx, y, area.w - 12.0 * k, laid.size, true);
         y += laid.line_h;
     }
 }

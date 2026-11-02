@@ -8,6 +8,15 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **Right-to-left text in the editing and search parts** (2026-11-02, the RTL work of 2.0). A
+  line with Arabic or Hebrew is drawn in visual order (`ui/bidi.rs`), but the parts that place
+  text by character position still count in logical order: the caret and the selection of a
+  field (`text_edit::caret_xs` over per-character widths), the search highlight (`widgets::text_marked`
+  splits the line at logical bytes), and a justified markup row's word gaps (`glyph_width` sums
+  per character, not shaped widths). Plain wrapped lines drawn at a left edge (screens, building
+  descriptions, help) are not right-aligned either: only markup rows and coloured lines use
+  `widgets::line_x`. Settled by making each of these bidi-aware, with snapshots of an Arabic field.
+
 - **The event window's OK label under 12 sp on a small portrait phone** (2026-10-31, backlog 1453's
   check). The mobile UI check measures «Ок» at 11.4 sp on the 1080×2400 phone in portrait, in the
   victory window too (it was there before 1453's fix): the label follows the window's scale `o`

@@ -1,14 +1,17 @@
 //! Text in any script (a Razdor feature, not the original's: its fonts hold Latin and
 //! Cyrillic only). A character the current font lacks comes from a fallback chain: PT Sans,
 //! the bundled Noto Sans (Latin, Greek, Cyrillic extended) and Noto Sans Devanagari, then a
-//! system font found at run time (fontconfig on Linux, the Windows and macOS font folders)
-//! for anything else, e.g. Chinese and Japanese. Text the current font covers takes no
+//! system font found at run time for anything else, e.g. Chinese and Japanese: fontconfig on
+//! Linux, the Windows and macOS font folders, and on Android the font files of `/system/fonts`
+//! and `/product/fonts`, the script's own first ([`android_order`]). iOS cannot list the system's
+//! fonts, so an iPhone draws only the bundled ones. Text the current font covers takes no
 //! detour (`runs` gives `None`), so Russian and English look exactly as before.
 //!
 //! A run of fallback characters is shaped with rustybuzz (Devanagari's conjuncts and its
 //! vowel sign ि before its consonant, Arabic's joining) and its glyphs are rasterised by
 //! index into cached textures, laid on the same baseline at the same pixel size as the
-//! main font, with the same `dpi_scale` handling as macroquad's own text.
+//! main font, with the same `dpi_scale` handling as macroquad's own text. A line with
+//! right-to-left text is cut into its pieces in visual order by [`visual_pieces`] (`bidi`).
 
 use razdor::local;
 use std::cell::RefCell;
@@ -401,6 +404,31 @@ pub fn runs(primary: &'static [u8], s: &str) -> Option<Vec<(Range<usize>, Pick)>
     })
 }
 
+/// The pieces of `s`, a line with right-to-left text (`bidi::has_rtl`), in the order they stand
+/// on screen from left to right, each with the font that draws it. A visual run of `s`
+/// (`bidi::visual_order`) is cut into its font runs (`runs`, from the current font `primary`,
+/// none for `None`); a right-to-left run gives its pieces in reverse, and the current font's
+/// pieces reversed and mirrored (`bidi::mirror`), as macroquad draws them left to right. A
+/// fallback piece is shaped already in visual order, so it keeps its text.
+pub fn visual_pieces(primary: Option<&'static [u8]>, s: &str) -> Vec<(String, Pick)> {
+    let mut out = Vec::new();
+    for (range, rtl) in super::bidi::visual_order(s) {
+        let part = &s[range];
+        let mut pieces: Vec<(&str, Pick)> = match primary.and_then(|p| runs(p, part)) {
+            Some(found) => found.into_iter().map(|(r, pick)| (&part[r], pick)).collect(),
+            None => vec![(part, Pick::Primary)],
+        };
+        if rtl {
+            pieces.reverse();
+        }
+        for (text, pick) in pieces {
+            let text = if rtl && pick == Pick::Primary { text.chars().rev().map(super::bidi::mirror).collect() } else { text.to_string() };
+            out.push((text, pick));
+        }
+    }
+    out
+}
+
 
 /// The raster size for a text size: macroquad's own (`text::draw_text_ex`), so a fallback run
 /// is as big as the main font's beside it on any display.
@@ -438,12 +466,84 @@ pub fn chain_names() -> Vec<String> {
     with_chain(|chain| chain.order.iter().map(|&i| chain.fonts[i].name.clone()).collect())
 }
 
+#[cfg_attr(not(any(target_os = "android", test)), allow(dead_code))]
+/// The name prefixes of the Android system fonts that may draw the character `u` (a code point),
+/// the script's own first: Noto's families for the script, the CJK ones for Han, Kana and
+/// Hangul. Empty for a character no listed script has.
+fn script_prefixes(u: u32) -> &'static [&'static str] {
+    match u {
+        0x0590..=0x05FF | 0xFB1D..=0xFB4F => &["NotoSansHebrew"],
+        0x0600..=0x06FF | 0x0750..=0x077F | 0x08A0..=0x08FF | 0xFB50..=0xFDFF | 0xFE70..=0xFEFF => &["NotoNaskhArabic", "NotoSansArabic"],
+        0x0530..=0x058F => &["NotoSansArmenian"],
+        0x10A0..=0x10FF | 0x2D00..=0x2D2F => &["NotoSansGeorgian"],
+        0x1200..=0x137F => &["NotoSansEthiopic"],
+        0x0E00..=0x0E7F => &["NotoSansThai"],
+        0x0980..=0x09FF => &["NotoSansBengali", "NotoSerifBengali"],
+        0x0A00..=0x0A7F => &["NotoSansGurmukhi", "NotoSerifGurmukhi"],
+        0x0A80..=0x0AFF => &["NotoSansGujarati", "NotoSerifGujarati"],
+        0x0B00..=0x0B7F => &["NotoSansOriya", "NotoSerifOriya"],
+        0x0B80..=0x0BFF => &["NotoSansTamil", "NotoSerifTamil"],
+        0x0C00..=0x0C7F => &["NotoSansTelugu", "NotoSerifTelugu"],
+        0x0C80..=0x0CFF => &["NotoSansKannada", "NotoSerifKannada"],
+        0x0D00..=0x0D7F => &["NotoSansMalayalam", "NotoSerifMalayalam"],
+        0x0D80..=0x0DFF => &["NotoSansSinhala", "NotoSerifSinhala"],
+        0x3000..=0x303F | 0x3040..=0x30FF | 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xAC00..=0xD7AF | 0xF900..=0xFAFF | 0xFF00..=0xFFEF | 0x20000..=0x2FA1F => {
+            &["NotoSansCJK", "DroidSansFallback"]
+        }
+        _ => &[],
+    }
+}
+
+#[cfg_attr(not(any(target_os = "android", test)), allow(dead_code))]
+/// The indices of `names` (the Android system's font file names) that may draw `c`, best first:
+/// those whose name starts with one of the script's prefixes (`script_prefixes`, in that order),
+/// then every other file in its listed order. Pure, so it is tested on a list of names.
+pub fn android_order(c: char, names: &[&str]) -> Vec<usize> {
+    let mut order: Vec<usize> = Vec::with_capacity(names.len());
+    for prefix in script_prefixes(c as u32) {
+        for (i, name) in names.iter().enumerate() {
+            if name.starts_with(prefix) && !order.contains(&i) {
+                order.push(i);
+            }
+        }
+    }
+    let rest: Vec<usize> = (0..names.len()).filter(|i| !order.contains(i)).collect();
+    order.extend(rest);
+    order
+}
+
+/// The font files of Android's system folders (`/system/fonts`, `/product/fonts`: `.ttf`, `.otf`,
+/// `.ttc`), listed once for the run.
+#[cfg(target_os = "android")]
+fn android_fonts() -> &'static [PathBuf] {
+    static FILES: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
+    FILES.get_or_init(|| {
+        let mut files: Vec<PathBuf> = ["/system/fonts", "/product/fonts"]
+            .iter()
+            .filter_map(|dir| std::fs::read_dir(dir).ok())
+            .flatten()
+            .filter_map(|entry| entry.ok().map(|e| e.path()))
+            .filter(|p| p.extension().and_then(|e| e.to_str()).is_some_and(|e| matches!(e.to_ascii_lowercase().as_str(), "ttf" | "otf" | "ttc")))
+            .collect();
+        files.sort();
+        files
+    })
+}
+
 /// System font files that may have `c`, best first: fontconfig's sorted matches on Linux
-/// (then the usual places), the fonts folder's script fonts on Windows and macOS.
+/// (then the usual places), the fonts folder's script fonts on Windows and macOS, the script's
+/// files of Android's system folders ([`android_order`]).
 fn system_candidates(c: char) -> Vec<(PathBuf, u32)> {
     #[cfg_attr(any(target_os = "android", target_os = "ios"), allow(unused_mut))]
     let mut found = Vec::new();
-    // Android and iOS have no fontconfig and no such font files: none found, the bundled fonts only.
+    // iOS has no listing of the system's fonts (an app sees none of them): the bundled fonts only.
+    #[cfg(target_os = "android")]
+    {
+        let files = android_fonts();
+        let names: Vec<&str> = files.iter().map(|p| p.file_name().and_then(|n| n.to_str()).unwrap_or("")).collect();
+        found.extend(android_order(c, &names).into_iter().map(|i| (files[i].clone(), 0)));
+    }
+    // Linux and the other unixes: fontconfig (not on Android, and not on iOS, which has none).
     #[cfg(all(unix, not(any(target_os = "macos", target_os = "android", target_os = "ios"))))]
     {
         let pattern = format!(":charset={:x}", c as u32);
@@ -595,6 +695,48 @@ mod tests {
         // Devanagari); Latin, Cyrillic, Greek and Chinese are not complex.
         assert!(complex('ि') && complex('ह') && complex('ب'));
         assert!(!complex('a') && !complex('ж') && !complex('λ') && !complex('中'));
+    }
+
+    #[test]
+    fn android_files_of_the_script_come_first_then_the_rest_in_order() {
+        let names = [
+            "Roboto-Regular.ttf",
+            "NotoSans-Regular.ttf",
+            "NotoNaskhArabic-Regular.ttf",
+            "NotoSansArabicUI-Regular.ttf",
+            "NotoSansCJK-Regular.ttc",
+            "DroidSansFallback.ttf",
+            "NotoSansHebrew-Regular.ttf",
+            "NotoSansBengali-Regular.ttf",
+            "NotoSerifBengali-Regular.ttf",
+            "NotoColorEmoji.ttf",
+        ];
+        // Arabic: the Naskh family, then the Sans one, then the rest as listed.
+        assert_eq!(android_order('ب', &names), vec![2, 3, 0, 1, 4, 5, 6, 7, 8, 9]);
+        // Han: the CJK file, then the Droid fallback; Hebrew: its own file.
+        assert_eq!(android_order('中', &names)[..2], [4, 5]);
+        assert_eq!(android_order('ש', &names)[0], 6);
+        // Bengali: Sans before Serif.
+        assert_eq!(android_order('ক', &names)[..2], [7, 8]);
+        // A character no listed script has: every file, in order.
+        assert_eq!(android_order('😀', &names), (0..names.len()).collect::<Vec<_>>());
+        // Every file once.
+        let mut sorted = android_order('ب', &names);
+        sorted.sort();
+        assert_eq!(sorted, (0..names.len()).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn right_to_left_text_is_cut_into_pieces_in_visual_order() {
+        // No font given: every piece is the current font's, so the order alone is tested.
+        // Hebrew with a bracketed word and digits: the digits first on screen, then the
+        // Hebrew run reversed, its brackets mirrored.
+        let pieces: Vec<(String, Pick)> = visual_pieces(None, "שלום (עולם) 123");
+        let text: String = pieces.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(text, "123 (םלוע) םולש");
+        assert!(pieces.iter().all(|(_, p)| *p == Pick::Primary));
+        // A left-to-right text is its own pieces, unchanged.
+        assert_eq!(visual_pieces(None, "abc (d)"), vec![("abc (d)".to_string(), Pick::Primary)]);
     }
 
     #[test]

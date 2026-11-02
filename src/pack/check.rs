@@ -3,6 +3,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use rustybuzz::Face;
+
 use super::aliases;
 use super::content::{ItemSpec, UnitSpec};
 use super::diag::Report;
@@ -15,6 +17,19 @@ const TOP_DIRS: [&str; 8] = ["texts", "units", "items", "maps", "dialogs", "trig
 /// Files a package may have at its top.
 const TOP_FILES: [&str; 3] = ["package.toml", "README.md", "LICENSE"];
 
+/// The TrueType fonts Razdor ships (`data/fonts`): a text's character none of them draws needs a
+/// system font to show (`check_text_chars`).
+const BUNDLED_FONTS: [&[u8]; 8] = [
+    include_bytes!("../../data/fonts/Becker-Medium.ttf"),
+    include_bytes!("../../data/fonts/Kurale-Regular.ttf"),
+    include_bytes!("../../data/fonts/NotoSans-Regular.ttf"),
+    include_bytes!("../../data/fonts/NotoSansDevanagari-Regular.ttf"),
+    include_bytes!("../../data/fonts/PT_Sans-Bold.ttf"),
+    include_bytes!("../../data/fonts/PT_Sans-Regular.ttf"),
+    include_bytes!("../../data/fonts/PT_Serif-Bold.ttf"),
+    include_bytes!("../../data/fonts/PT_Serif-Regular.ttf"),
+];
+
 /// Every rule of the format, plus the reading errors.
 pub fn check(pkg: &Package) -> Report {
     let mut r = pkg.problems.clone();
@@ -22,6 +37,7 @@ pub fn check(pkg: &Package) -> Report {
     check_manifest(pkg, &mut r);
     check_texts_present(pkg, &mut r);
     check_text_keys(pkg, &mut r);
+    check_text_chars(pkg, &mut r);
     let units = index_ids(&pkg.units, |u| u.id.as_str(), "unit", &mut r);
     let items = index_ids(&pkg.items, |i| i.id.as_str(), "item", &mut r);
     check_bases(pkg, &units, &items, &mut r);
@@ -149,6 +165,66 @@ fn check_text_keys(pkg: &Package, r: &mut Report) {
             );
         }
     }
+}
+
+/// Rule 4 (a warning): a text's characters that none of the bundled fonts draws. The text still
+/// shows on a device with a system font for them; one warning per key, in the first language
+/// that has the problem.
+fn check_text_chars(pkg: &Package, r: &mut Report) {
+    let faces: Vec<Face> = BUNDLED_FONTS.iter().filter_map(|d| Face::from_slice(d, 0)).collect();
+    let mut warned: BTreeSet<&str> = BTreeSet::new();
+    for (lang, texts) in &pkg.texts {
+        let file = format!("texts/{lang}.toml");
+        let source = pkg.files.text(&file).unwrap_or("");
+        for (key, value) in texts {
+            if warned.contains(key.as_str()) {
+                continue;
+            }
+            let missing = uncovered(value, &faces);
+            if missing.is_empty() {
+                continue;
+            }
+            warned.insert(key.as_str());
+            let shown: String = missing.iter().take(5).collect();
+            r.warning(
+                &file,
+                text_line(source, key),
+                format!("text \"{key}\" uses characters Razdor's own fonts lack ({shown}): they need a system font and may not show on every device"),
+            );
+        }
+    }
+}
+
+/// The characters of `text` that none of `faces` draws, each once, in their order. Whitespace,
+/// controls and the invisible joiners need no glyph.
+fn uncovered(text: &str, faces: &[Face]) -> Vec<char> {
+    let mut out: Vec<char> = Vec::new();
+    for c in text.chars() {
+        let invisible = matches!(c, '\u{00AD}' | '\u{200B}'..='\u{200F}' | '\u{2060}'..='\u{206F}' | '\u{FEFF}');
+        if c.is_whitespace() || c.is_control() || invisible || out.contains(&c) {
+            continue;
+        }
+        if !faces.iter().any(|f| f.glyph_index(c).filter(|g| g.0 != 0).is_some_and(|g| f.glyph_bounding_box(g).is_some())) {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// The line of `key` in a texts file: its `name = …` under the `[table]` header of its dotted
+/// key (`unit.knight2.name` under `[unit.knight2]`), or the file's top level.
+fn text_line(source: &str, key: &str) -> Option<u32> {
+    let (table, last) = key.rsplit_once('.').unwrap_or(("", key));
+    let mut in_table = table.is_empty();
+    for (i, line) in source.lines().enumerate() {
+        let t = line.trim();
+        if let Some(header) = t.strip_prefix('[') {
+            in_table = header.trim_end_matches(']').trim() == table;
+        } else if in_table && t.strip_prefix(last).is_some_and(|rest| rest.trim_start().starts_with('=')) {
+            return Some(i as u32 + 1);
+        }
+    }
+    None
 }
 
 /// The TOML for a dotted key, as the author writes it (`[unit.x]` and `name = "…"`).
@@ -298,7 +374,7 @@ fn check_cycles(units: &BTreeMap<&str, &Located<UnitSpec>>, r: &mut Report) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pack::diag::Severity;
+    use crate::pack::diag::{Diagnostic, Severity};
     use crate::pack::files::Files;
 
     fn package(files: &[(&str, &str)]) -> Package {
@@ -340,6 +416,26 @@ mod tests {
 
     fn assert_clean(r: &Report) {
         assert!(r.diagnostics.is_empty(), "{}", r.to_text());
+    }
+
+    #[test]
+    fn a_character_no_bundled_font_draws_is_a_warning_once_per_key() {
+        // 中 is in no bundled font; Cyrillic and Latin are, so the default package stays clean.
+        assert_clean(&check_pairs(&with(&[])));
+        let en = "[story]\ntitle = \"Story\"\n\n[unit.knight2]\nname = \"Рыцарь 中文中\"\n\n[item.relic]\nname = \"Relic\"\n";
+        // The same key in a second language is not a second warning.
+        let ru = "[unit.knight2]\nname = \"Рыцарь 中\"\n";
+        let r = check_pairs(&with(&[("texts/en.toml", en), ("texts/ru.toml", ru)]));
+        assert!(!r.has_errors(), "{}", r.to_text());
+        let warned: Vec<&Diagnostic> = r.diagnostics.iter().filter(|d| d.message.contains("uses characters")).collect();
+        assert_eq!(warned.len(), 1, "{}", r.to_text());
+        assert_eq!(warned[0].severity, Severity::Warning);
+        assert_eq!(warned[0].file, "texts/en.toml");
+        assert_eq!(warned[0].line, Some(5));
+        assert_eq!(
+            warned[0].message,
+            "text \"unit.knight2.name\" uses characters Razdor's own fonts lack (中文): they need a system font and may not show on every device"
+        );
     }
 
     #[test]

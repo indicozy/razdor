@@ -444,6 +444,10 @@ pub fn with_current<R>(f: impl FnOnce(&BitmapFont) -> R) -> Option<R> {
 /// down and right, darkening what is under it. False when the text is not drawn from a
 /// sheet or the install has no shadow sheet for it.
 pub fn draw_shadow(s: &str, x: f32, y: f32, size: f32, alpha: f32) -> bool {
+    // A right-to-left line is drawn whole in the TrueType font (`widgets::text_exact`), with no sheet shadow.
+    if super::bidi::has_rtl(s) {
+        return false;
+    }
     let face = FACE.with(|c| c.get());
     let size = native_size(face, size);
     with_current(|font| {

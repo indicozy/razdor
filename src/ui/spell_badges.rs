@@ -129,7 +129,7 @@ pub fn flush() {
     chrome::shadow_text(&h.spell.name, r.x + tx, ty, title, chrome::CREAM);
     ty += 6.0 * k + body;
     for l in lines {
-        shadow_coloured(&l, r.x + tx, ty, body, false);
+        shadow_coloured(&l, r.x + tx, ty, room, body, false);
         ty += body + 3.0 * k;
     }
 }

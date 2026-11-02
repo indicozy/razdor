@@ -38,6 +38,7 @@ pub mod rest;
 pub mod saves;
 pub mod screens;
 pub mod session;
+pub mod bidi;
 pub mod script_font;
 pub mod snapshot;
 pub mod spell_badges;

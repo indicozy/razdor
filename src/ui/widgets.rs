@@ -197,17 +197,40 @@ fn ttf_size(size: f32) -> u16 {
     if n > 14 { n & !1 } else { n }
 }
 
+/// The size of one piece of a line (`script_font::runs` or `visual_pieces`): the current font's
+/// as macroquad measures it, a fallback font's as `script_font` does.
+fn piece_size(font: Option<&Font>, px: u16, s: &str, pick: super::script_font::Pick) -> TextDimensions {
+    match pick {
+        super::script_font::Pick::Primary => measure_text(s, font, px, 1.0),
+        super::script_font::Pick::Fallback(i) => super::script_font::measure(i, s, px),
+    }
+}
+
+/// Draws one piece of a line at the pen `x` on the baseline `y`; returns its width (the same
+/// font and size as [`piece_size`]).
+fn draw_piece(font: Option<&Font>, px: u16, s: &str, pick: super::script_font::Pick, x: f32, y: f32, color: Color) -> f32 {
+    match pick {
+        super::script_font::Pick::Primary => {
+            let w = measure_text(s, font, px, 1.0).width;
+            draw_text_ex(s, x, y, TextParams { font, font_size: px, color, ..Default::default() });
+            w
+        }
+        super::script_font::Pick::Fallback(i) => super::script_font::draw(i, s, x, y, px, color),
+    }
+}
+
 pub fn measure_ttf(s: &str, size: f32) -> TextDimensions {
     let size = size * if super::dt_font::current_ttf().is_some() { face_scale() } else { 1.0 };
     with_font(s, |font, data, s| {
         let px = ttf_size(size);
+        // A line with right-to-left text is measured in its visual pieces (`bidi`), as drawn.
+        if super::bidi::has_rtl(s) {
+            return joined(super::script_font::visual_pieces(data, s).iter().map(|(t, pick)| piece_size(font, px, t, *pick)));
+        }
         // A character the font lacks comes from the fallback chain (`script_font`).
         match data.and_then(|d| super::script_font::runs(d, s)) {
             None => measure_text(s, font, px, 1.0),
-            Some(runs) => joined(runs.into_iter().map(|(r, pick)| match pick {
-                super::script_font::Pick::Primary => measure_text(&s[r], font, px, 1.0),
-                super::script_font::Pick::Fallback(i) => super::script_font::measure(i, &s[r], px),
-            })),
+            Some(runs) => joined(runs.into_iter().map(|(r, pick)| piece_size(font, px, &s[r], pick))),
         }
     })
 }
@@ -216,20 +239,20 @@ fn text_ttf(s: &str, x: f32, y: f32, size: f32, color: Color) {
     let size = size * if super::dt_font::current_ttf().is_some() { face_scale() } else { 1.0 };
     with_font(s, |font, data, s| {
         let px = ttf_size(size);
+        // A line with right-to-left text is drawn in its visual pieces, left to right (`bidi`).
+        if super::bidi::has_rtl(s) {
+            let mut pen = x;
+            for (t, pick) in super::script_font::visual_pieces(data, s) {
+                pen += draw_piece(font, px, &t, pick, pen, y, color);
+            }
+            return;
+        }
         if let Some(runs) = data.and_then(|d| super::script_font::runs(d, s)) {
             // Runs side by side, each moving the pen by its measured width, so the text is
             // as wide as `measure_ttf` says.
             let mut pen = x;
             for (r, pick) in runs {
-                let run = &s[r];
-                pen += match pick {
-                    super::script_font::Pick::Primary => {
-                        let w = measure_text(run, font, px, 1.0).width;
-                        draw_text_ex(run, pen, y, TextParams { font, font_size: px, color, ..Default::default() });
-                        w
-                    }
-                    super::script_font::Pick::Fallback(i) => super::script_font::draw(i, run, pen, y, px, color),
-                };
+                pen += draw_piece(font, px, &s[r], pick, pen, y, color);
             }
             return;
         }
@@ -252,12 +275,24 @@ pub fn measure(s: &str, size: f32) -> TextDimensions {
 /// measures and draws (`text_exact`) at the same size. Equal to `measure` outside native
 /// metrics.
 pub fn measure_exact(s: &str, size: f32) -> TextDimensions {
-    let bitmap = super::dt_font::with_current(|f| {
-        let width = f.width(s, size, &|run| measure_ttf(run, size).width);
-        let cap = f.cap_height(size);
-        TextDimensions { width, height: size, offset_y: cap }
-    });
+    // A right-to-left line is measured as it is drawn: whole, in the TrueType font (see `text_exact`).
+    let bitmap = if super::bidi::has_rtl(s) {
+        None
+    } else {
+        super::dt_font::with_current(|f| {
+            let width = f.width(s, size, &|run| measure_ttf(run, size).width);
+            let cap = f.cap_height(size);
+            TextDimensions { width, height: size, offset_y: cap }
+        })
+    };
     bitmap.unwrap_or_else(|| measure_ttf(s, size))
+}
+
+/// The x of a line of a wrapped paragraph drawn from `left` in a box `width` wide: at its left
+/// edge, or at its right one when the paragraph reads right to left (the line's first strong
+/// character, `bidi::base_rtl`). A left-to-right line is `left` as it always was.
+pub fn line_x(line: &str, left: f32, width: f32, size: f32) -> f32 {
+    if super::bidi::base_rtl(line) { left + width - measure(line, size).width } else { left }
 }
 
 local! {
@@ -1063,12 +1098,18 @@ pub fn text_exact(s: &str, x: f32, y: f32, size: f32, color: Color) {
         super::text_probe::record(s, x, y, measure_exact(s, size).width, size, cap);
     }
     let color = super::typography::color(color);
-    let drawn = super::dt_font::with_current(|f| {
-        f.draw(s, x, y, size, color, &|run, px, py| {
-            text_ttf(run, px, py, size, color);
-            measure_ttf(run, size).width
+    // A right-to-left line is not drawn from the original's sheets: its visual order spans the
+    // sheet's characters too (`bidi`), so it is drawn whole in the TrueType font.
+    let drawn = if super::bidi::has_rtl(s) {
+        None
+    } else {
+        super::dt_font::with_current(|f| {
+            f.draw(s, x, y, size, color, &|run, px, py| {
+                text_ttf(run, px, py, size, color);
+                measure_ttf(run, size).width
+            })
         })
-    });
+    };
     if drawn.is_none() {
         text_ttf(s, x, y, size, color);
     }
@@ -1220,17 +1261,24 @@ pub fn wrap_coloured(parts: &[(String, Color)], width: f32, size: f32) -> Vec<Ve
     lines
 }
 
-/// Draws a line of coloured words from [`wrap_coloured`] with the shadow, its left end at
-/// `x` (or centred on `x` when `centred`), the words a space apart.
-pub fn shadow_coloured(line: &[(String, Color)], x: f32, y: f32, size: f32, centred: bool) {
+/// Draws a line of coloured words from [`wrap_coloured`] with the shadow in a box `room` wide:
+/// its left end at `x` (or centred on `x` when `centred`), the words a space apart. A line that
+/// reads right to left ([`line_x`]) stands at the box's right end, its words from there.
+pub fn shadow_coloured(line: &[(String, Color)], x: f32, y: f32, room: f32, size: f32, centred: bool) {
     let all: Vec<&str> = line.iter().map(|w| w.0.as_str()).collect();
     let all = all.join(" ");
-    let left = if centred { x - measure(&all, size).width / 2.0 } else { x };
+    let left = if centred { x - measure(&all, size).width / 2.0 } else { line_x(&all, x, room, size) };
+    // The words in their order on screen: a right-to-left line's words in reverse.
+    let mut words: Vec<&(String, Color)> = line.iter().collect();
+    if super::bidi::base_rtl(&all) {
+        words.reverse();
+    }
     let mut before = String::new();
-    for (w, c) in line {
+    for word in words {
+        let (w, c) = (&word.0, word.1);
         // The word starts where the text before it and the word end, less the word.
         let at = measure(&format!("{before}{w}"), size).width - measure(w, size).width;
-        super::chrome::shadow_text(w, left + at, y, size, *c);
+        super::chrome::shadow_text(w, left + at, y, size, c);
         before.push_str(w);
         before.push(' ');
     }
@@ -1338,9 +1386,12 @@ fn draw_markup_row_in_face(row: &MarkupRow, x: f32, y: f32, room: f32, size: f32
             let w: f32 = row.text.chars().map(|c| glyph_width(c, size)).sum();
             text(&shown, x + ((room - w) / 2.0).trunc(), y);
         }
-        Align::Justify if row.last || !row.text.contains(' ') => text(&shown, x, y),
+        Align::Justify if row.last || !row.text.contains(' ') => text(&shown, line_x(&shown, x, room, size), y),
         Align::Justify => {
             let xs = razdor::dt::markup::justify(&row.text, room, |c| glyph_width(c, size));
+            // A right-to-left row's words are the justified layout mirrored: the first word at
+            // the right edge.
+            let rtl = super::bidi::base_rtl(&row.text);
             let chars: Vec<char> = shown.chars().collect();
             let raw: Vec<char> = row.text.chars().collect();
             let mut i = 0;
@@ -1351,7 +1402,8 @@ fn draw_markup_row_in_face(row: &MarkupRow, x: f32, y: f32, room: f32, size: f32
                 }
                 let j = (i..raw.len()).find(|&j| raw[j] == ' ').unwrap_or(raw.len());
                 let word: String = chars[i..j].iter().collect();
-                text(&word, x + xs[i], y);
+                let at = if rtl { x + room - xs[i] - measure(&word, size).width } else { x + xs[i] };
+                text(&word, at, y);
                 i = j;
             }
         }

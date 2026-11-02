@@ -269,6 +269,17 @@ All text goes through `widgets::measure` / `widgets::text` in the current face
   original's mode `BitmapFont::pieces` hands the sheet's missing characters to the fallback
   as whole runs, not one by one. The `fonts` snapshot scene (`snapshot::draw_overlay`) shows
   samples in many scripts in each face with their measured widths underlined.
+- Right to left (`ui/bidi.rs`, `unicode-bidi`): a line with a strong R or AL character
+  (`bidi::has_rtl`) is drawn whole in the TrueType font (the sheet is bypassed in `text_exact`,
+  `measure_exact`, `dt_font::draw_shadow`), in the pieces of `script_font::visual_pieces`, left to
+  right on screen. An RTL run's current-font pieces are reversed and mirrored (`bidi::mirror`); a
+  fallback piece is already in visual order. `widgets::line_x` right-aligns a line whose
+  paragraph reads RTL (`bidi::base_rtl`); markup rows and coloured lines use it.
+- System fonts on Android: `script_font::android_order` puts the files of `/system/fonts` and
+  `/product/fonts` whose name starts with the script's family first (`script_prefixes`, by
+  Unicode block); the list is read once (`android_fonts`). iOS lists no system fonts: bundled only.
+- `razdor-pack check` warns (`pack::check::check_text_chars`) about a text character none of the
+  bundled `data/fonts` draws: it shows only on a device with a system font for it.
 
 Traps: never call `widgets::measure`/`text` from inside a `with_current` closure (it holds the
 sheet cache's borrow; use `measure_ttf`). Sheet widths change with the mode, so lay text out

@@ -70,6 +70,9 @@ const FONT_SAMPLES: &[&str] = &[
     "中文: 英雄进入了城镇。",
     "日本語: 勇者は町に入った。カタカナ",
     "Tiếng Việt: Người anh hùng vào thành phố.",
+    "مرحبا بك في Razdor 2.0 اليوم",
+    "שלום (עולם) 123",
+    "中文: 欢迎来到 Razdor 2.0，祝你玩得愉快。",
 ];
 
 /// Draws the `fonts` scene over the frame: the samples in each of the interface's faces,
@@ -92,7 +95,7 @@ pub fn draw_overlay() {
     for (face, size) in [(Face::Body, 18.0), (Face::Title, 18.0), (Face::Subtitle, 16.0)] {
         with_face(face, || {
             for (i, s) in FONT_SAMPLES.iter().enumerate() {
-                y += size * 1.35;
+                y += size * 1.25;
                 let x = if i % 2 == 0 { 10.0 } else { 20.0 };
                 let w = widgets::measure(s, size).width;
                 draw_line(x, y + 3.0, x + w, y + 3.0, 1.0, Color::new(0.9, 0.3, 0.2, 0.8));
@@ -104,15 +107,16 @@ pub fn draw_overlay() {
             }
         });
     }
-    // Centred and shortened to a box: the box's edges must hold the text.
-    y += 30.0;
+    // Shortened to a box, and centred in a wider one: the box's edges must hold the text. In a
+    // column on the right, beside the samples (which fill the screen's height).
     for (i, s) in FONT_SAMPLES.iter().enumerate().skip(4).take(3) {
-        let bx = 10.0;
-        let by = y + (i - 4) as f32 * 26.0;
+        let bx = 720.0;
+        let by = 60.0 + (i - 4) as f32 * 26.0;
         draw_rectangle_lines(bx, by - 18.0, 260.0, 24.0, 1.0, widgets::DIM);
         widgets::text_fit(s, bx + 2.0, by, 256.0, 18.0, widgets::ACCENT);
-        draw_rectangle_lines(300.0, by - 18.0, 400.0, 24.0, 1.0, widgets::DIM);
-        widgets::text_centered(s, 500.0, by, 18.0, widgets::ACCENT);
+        let cy = by + 100.0;
+        draw_rectangle_lines(bx, cy - 18.0, 540.0, 24.0, 1.0, widgets::DIM);
+        widgets::text_centered(s, bx + 270.0, cy, 18.0, widgets::ACCENT);
     }
 }
 
