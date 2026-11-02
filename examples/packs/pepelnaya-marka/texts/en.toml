@@ -266,3 +266,303 @@ text = "The Free Companies have brought more men and weapons into the camp. The 
 [marka.stones_note]
 title = "The inscription"
 text = "The standing stone is covered in an old script. Brother Ilm reads it aloud: “Whoever walks on the stone does not touch the ground.” The stone says nothing more."
+# --- abbey ---
+[abbey.map]
+title = "The Abbey"
+description = "A ruined abbey on a stony hill. The barrows come from the east, the inquisition from the north."
+won = "The abbey held. The Order has written your name in its book."
+
+[abbey.building.abbey]
+name = "The Abbey of Saint Ansel"
+description = "Cracked walls, the bell taken down. The monks hold the gate for as long as they can."
+
+[abbey.building.watch]
+name = "The Crown's watchtower"
+description = "The Crown's garrison kept the Order out. Now it is quiet here."
+
+[abbey.building.alder]
+name = "Alder"
+description = "A village by the bog. At night you can hear someone singing the dead's songs."
+
+[abbey.army.inquisitors]
+name = "The Order's inquisition"
+
+[abbey.army.dead_wave]
+name = "Barrow host"
+
+[abbey.army.unmarked]
+name = "Old watch"
+
+[item.abbey_scripture]
+name = "Ilm's book"
+description = "The Order's rule, copied out by hand. In the margins, in small script, the names of graves."
+
+[item.abbey_water]
+name = "The Order's holy water"
+description = "Water from the well under the abbey. It helps against the dead, until it runs out."
+
+[abbey.arrival]
+title = "The Order's summons"
+text = "The abbey of Saint Ansel is under siege. The Order asks for help, and the Crown orders you to stay out. You are to choose a side, and the choice cannot be undone. The inquisitors have set out from the north."
+
+[abbey.inquisitors]
+title = "The inquisitors"
+text = "The inquisitors ride through the gate with their visors up. Their eldest says the Order will remember everyone who stood by the walls, and everyone who stood aside."
+
+[abbey.ilm_meet]
+title = "The novice"
+text = "A novice sits by the gate with a borrowed sword across his knees. His name is Ilm. He says he can read graves: 'Take me, and I will show you which of them are still people.'"
+take = "Take him into the company"
+leave = "Send him back to the abbey"
+
+[abbey.blight]
+title = "Cold"
+text = "The grass here is grey and cracks under the hooves. The soldiers are cold even in their armour. To go on is to ride under a curse."
+
+[abbey.walls]
+title = "A curse on the walls"
+text = "The dead have reached the walls. Where they struck, the stone went black, and the monks fall to their knees in prayer. The abbey's garrison is cursed."
+
+[abbey.siege]
+title = "The barrows advance"
+text = "The barrow host climbs the slope and does not stop. They come for the abbey, and no one leads them but an old order."
+
+[abbey.trial]
+title = "Alder"
+text = "Everyone in the village is well, and everyone whispers. Ilm looks at the houses: 'This is corruption. The Order says burn it. Or spare them, if you are sure.'"
+burn = "Burn the village: the Order commands it"
+spare = "Spare the people: let them go"
+ride = "Ride past without interfering"
+
+[abbey.heresy]
+title = "Ilm's whisper"
+text = "At night Ilm comes alone. 'The Order burns because it is afraid. There is another way: take what comes from the dead and do not burn. Do you want to know how?'"
+accept = "Listen, and accept the gift"
+refuse = "Refuse and leave"
+
+[abbey.rite]
+title = "The rite of cleansing"
+text = "The monks are ready to lift the curse. The rite costs money: candles, holy water, a night of prayer."
+rite = "Undergo the rite (30 gold)"
+decline = "No need, I will manage"
+
+[abbey.inquisition]
+title = "The sentence"
+text = "The inquisitors lower their banners. 'You are defiled, and you came here anyway,' says their eldest. 'Then we finish it here.' They charge."
+
+[abbey.end_inquisitor]
+title = "Fire and order"
+text = "The dead lie at the abbey's walls. Ilm stands over burnt Alder and does not look away. The Order writes: 'Cleansed'. The March will remember the fires."
+
+[abbey.end_heretic]
+title = "Grey light"
+text = "The dead lie at the walls, but Ilm is not looking at them. He is looking at you. The Order will not forgive heresy, but for now it needs you, and Ilm knows it."
+
+[abbey.end_plain]
+title = "The abbey held"
+text = "The barrow host lies at the walls. The monks sing over the dead, and you ride out of the gate without a companion and without promises. The March knows now that you came."
+
+# --- salt ---
+[salt.map]
+title = "The Salt Marsh"
+description = "A marsh of white salt, a causeway through the bog, and the Crown's Salt Gate to the east."
+won = "The Salt Gate is taken. The March remembers who opened the road."
+
+[salt.building.reedmere]
+name = "Reedmere"
+description = "A village on a dry island. Here they know the paths through the bog."
+
+[salt.building.witch]
+name = "The witch's hut"
+description = "Bundles of herbs above the door and bones on a cord. Tess's mother does not ask why you came."
+
+[salt.building.saltgate]
+name = "The Salt Gate"
+description = "The Crown's garrison guards the salt. Everything sold in the March goes through these gates."
+
+[salt.building.watch]
+name = "The watch post"
+description = "Two dozen spears and a dry well at the causeway's north end."
+
+[salt.building.den]
+name = "The bandits' den"
+description = "Old piles and a fire that burns all winter."
+
+[salt.army.smugglers]
+name = "The salt wagon"
+
+[salt.army.patrol_north]
+name = "The Crown's patrol"
+
+[salt.army.bounty]
+name = "Bounty men"
+
+[salt.army.bog_ghosts]
+name = "Ghosts of the bog"
+
+[salt.army.unmarked]
+name = "Old watch"
+
+[item.salt_bow]
+name = "Tess's bow"
+description = "A hunting bow of yew. Tess cut the mark of her trail into it."
+
+[item.salt_salve]
+name = "Bog salve"
+description = "A thick salve of the marsh folk's herbs. It smells of smoke and hops."
+
+[salt.arrival]
+title = "The salt marsh"
+text = "A causeway through the bog leads to the Salt Gate. The Crown pays for salt, and the March pays for the Crown. The wagon has already left the marsh. If it reaches the gate, the Crown will be fed and the March will go hungry."
+
+[salt.reedmere]
+title = "Reedmere"
+text = "The marsh folk meet you with spears, but they do not shoot. Tess, the witch's daughter, stands in front. 'The Crown is looking for you on the roads,' she says. 'Ride as a bandit and no one will touch you. Or ride as an officer, and we will see.'"
+disguise = "Dress as a bandit"
+openly = "Ride openly"
+
+[salt.caught]
+title = "The gate"
+text = "They know you at the gate. A guard lowers his spear: 'A bandit with an officer's bearing. Wait here until the men come.'"
+draw = "Draw your blade"
+
+[salt.witch]
+title = "The witch's hut"
+text = "Tess's mother looks at your company, then at what sits in it. 'The curse clings to you like bog mud. I can lift it, for herbs or gold. And if there is an Order's page in your book, I will burn it in front of you.'"
+cure = "Lift the curse"
+blessing = "Ask for a blessing (20 gold)"
+page = "Burn the page from the book"
+
+[salt.bog]
+title = "The bog"
+text = "Mist lies on the water. The ghosts look at you with empty eyes, and a cold stays on your skin. This is only the start."
+
+[salt.tess]
+title = "Tess"
+text = "Tess lowers her eyes. 'Mother says I know the paths, but not the road back. If I go with you, be honest with the bog.' She holds out her hand."
+take = "Take Tess into the company"
+leave = "Not yet"
+
+[salt.trail]
+title = "The trail"
+text = "Tess leads the company through the bog by a trail that is not on any map. The water holds while she walks. An hour later you come out at the eastern hills, on the white salt."
+
+[salt.end_marsh]
+title = "Salt and bog"
+text = "The gate is open. Tess is the first into the salt store, and the marsh folk come for their share. The March knows now that the salt belongs to those who dig it."
+
+[salt.end_alone]
+title = "The Salt Gate"
+text = "The gate is taken, and the garrison rides south. The marsh folk watch from afar and do not dare come closer. You are alone in the town that held the Crown. Will you hold it?"
+
+# --- camp ---
+[camp.map]
+title = "The Companies' Camp"
+description = "The camp of the free companies in the lowland of the March. The Crown's road runs past it, and the Crown needs guarding."
+won = "The companies' camp holds. The companies remember who came to them first."
+
+[camp.building.waygate]
+name = "The camp stones"
+description = "A standing stone by the company's fire. Old rune marks can still be read on it."
+
+[camp.building.hall]
+name = "The Empty Mug inn"
+description = "Here the companies drink, play dice and decide whom to serve."
+
+[camp.building.oakford]
+name = "Oakford"
+description = "A market town on the road. The Crown's garrison holds the gates, but the walls are low."
+
+[camp.army.kord_band]
+name = "Kord's company"
+
+[camp.army.red_company]
+name = "The Red Cloaks"
+
+[camp.army.supply]
+name = "The Crown's supply column"
+
+[camp.army.duel_captain]
+name = "The captain's guard"
+
+[camp.army.unmarked]
+name = "Old watch"
+
+[camp.captain]
+name = "Captain of the Crown's guard"
+
+[item.camp_axe]
+name = "The captain's axe"
+description = "A heavy axe of the Crown's guard. Varga said she would take it if she won."
+
+[camp.arrival]
+title = "The companies"
+text = "The free companies camp in the lowland, between the Crown and the barrows. They are not waiting for you, and they do not love the Crown. They say everyone here has a price, and whoever has none is already dead. A Crown supply column is on the road."
+
+[camp.kord]
+title = "Kord"
+text = "The company's captain in a leather cloak raises his mug. 'I am Kord. My men follow whoever pays, and they keep their word as long as the pay keeps coming. Sixty gold, and we are with you. Or walk on.'"
+hire = "Hire the company (60 gold)"
+turn = "Refuse"
+
+[camp.red]
+title = "The Red Cloaks"
+text = "A second company, in faded red cloaks, pitches its tents at the edge of the camp. Its captain says he serves whoever pays most, and does not believe in the Crown."
+buy = "Buy the company (100 gold)"
+leave = "Not now"
+
+[camp.duel]
+title = "The challenge"
+text = "The captain of the Crown's guard stands in the arena and looks at your halberdier. 'Varga,' he says. 'They say you are a coward who sold the Crown for a crust of bread. Come out, if you are not afraid.'"
+accept = "Let Varga fight the duel"
+refuse = "Keep her out of it"
+
+[camp.duel_won]
+title = "The duel"
+text = "The captain lies in the arena. Varga stands over him with her halberd lowered and wipes her face. She takes his axe and thanks no one."
+
+[camp.duel_lost]
+title = "Varga"
+text = "The arena is empty. Varga is not in the ranks: they carried her away, or she fell and did not rise. The companies are silent, and no one says her name."
+
+[camp.raid]
+title = "The Crown's column"
+text = "The Crown's supply column comes down the road with sacks of grain and barrels of salt. The guard is covered in dust and does not expect an ambush. You can strike from behind the stones, or let it pass."
+hit = "Send the companies out of the camp"
+pass = "Let the column pass"
+
+[camp.loot]
+title = "The spoils"
+text = "Kord divides the loot. 'My men are owed their share,' he says. 'Split it fairly and we are brothers. Keep it all, and I will remember.'"
+split = "Split it evenly"
+keep = "Keep the spoils"
+
+[camp.gate]
+title = "The standing stone"
+text = "An old sentry by the stone points at the marks. 'At night it glows if you light fires on all four sides. So they say. Try it?'"
+light = "Light the fires"
+leave = "Leave the stone in the dark"
+
+[camp.relief]
+title = "The Crown's relief"
+text = "The Crown's guard comes from the north-east. Their banner is still new, and they march on the camp as if on parade."
+
+[camp.trust]
+title = "The companies' captain"
+text = "The companies gather at the fire and raise their mugs. Everyone has heard your name. Gold passes from hand to hand, and no one asks where it came from."
+
+[camp.end_friend]
+title = "The free company"
+text = "The Crown's guard lies before the camp. Kord sits beside you and watches the fire. 'You kept your word, and we keep yours. Let the Crown look for another.'"
+
+[camp.end_hired]
+title = "The mercenary"
+text = "The Crown's guard lies before the camp. Kord takes his pay and rides on to the next employer. You owe him nothing now, and he owes you nothing."
+
+[camp.end_betrayed]
+title = "Betrayal"
+text = "The Crown's guard lies before the camp, but Kord's company has ridden off into the steppe with the spoils. Kord swore he would come back, and the companies remember who refused to share first."
+
+[camp.end_alone]
+title = "The companies' camp"
+text = "The Crown's guard lies before the camp. The companies raise their mugs to those who came. Without Kord and without Varga you are alone with them, and no one knows who you will ride with next."

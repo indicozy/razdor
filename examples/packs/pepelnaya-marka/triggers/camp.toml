@@ -1,0 +1,287 @@
+# Chapter 3в «Лагерь рот» (the Free Companies, ally = 3): the variables and the triggers of the map
+# `camp`. Every trigger names its map. Triggers that share a moment run in file order, and each
+# condition reads the state the earlier ones left.
+#
+# Kord: kord = 0 unmet, 1 hired (his company joins the hero), 2 betrayed (his company hunts the hero),
+# 3 friend. Buying the red company changes its side on the map, and Oakford with it.
+#
+# The duel: Varga fights the captain of the Crown's guard. The engine has no test for "the named
+# unit is gone", so the duel is read in two steps: the win (Varga is still with the hero) comes first
+# in this file; a duel that ends with no Varga in the army sets varga_alive = false.
+
+[vars]
+camp_week = 0              # weeks since the chapter began
+camp_duel = false          # Varga has accepted the duel with the captain
+
+# The start: the companies patrol the lowland, the Crown's supply column comes to the ambush point.
+[[trigger]]
+id = "camp_arrival"
+map = "camp"
+when = { event = "game_start" }
+then = [
+    { dialog = "camp_arrival" },
+    { army_goal = "kord_band", patrol = [[30, 52], [36, 62], [30, 62]] },
+    { army_goal = "supply", go_to = [60, 71] },
+]
+
+[[trigger]]
+id = "camp_week"
+map = "camp"
+when = { event = "week_start" }
+once = false
+then = [ { add = "camp_week", value = 1 } ]
+
+# Kord's men are paid while they walk in the companies' ranks: ten gold each week.
+[[trigger]]
+id = "camp_upkeep"
+map = "camp"
+when = { event = "week_start" }
+once = false
+if = [ { var = "kord", op = ">=", value = 1 }, { var = "kord", op = "!=", value = 2 } ]
+then = [ { give_gold = -10 } ]
+
+# The Crown's relief: from the third week it marches on the camp's hall.
+[[trigger]]
+id = "camp_relief"
+map = "camp"
+when = { event = "week_start" }
+if = [ { var = "camp_week", op = ">=", value = 3 } ]
+then = [
+    { dialog = "camp_relief" },
+    {
+        spawn_army = "camp_relief",
+        at = [94, 8],
+        faction = "enemy",
+        model = 5,
+        troops = ["dt:halberdier", "dt:mounted_sergeant", "dt:guardsman"],
+    },
+    { army_goal = "camp_relief", go_to_building = "hall" },
+]
+
+# The Crown in bad standing sends a bounty company to the stony hills.
+[[trigger]]
+id = "camp_bounty"
+map = "camp"
+when = { event = "var_changed", var = "crown" }
+if = [ { var = "crown", op = "<=", value = -3 } ]
+then = [
+    {
+        spawn_army = "camp_bounty",
+        at = [88, 14],
+        faction = "enemy",
+        model = 5,
+        troops = ["dt:guardsman", "dt:guardsman", "dt:archer"],
+    },
+]
+
+# Kord: met on the lowland, the offer of his company; the hire.
+[[trigger]]
+id = "camp_kord_offer"
+map = "camp"
+when = { event = "hero_enters", at = [42, 54, 14, 12] }
+if = [ { var = "kord", value = 0 } ]
+then = [ { dialog = "camp_kord" } ]
+
+[[trigger]]
+id = "camp_kord_hire"
+map = "camp"
+when = { event = "dialog_choice", dialog = "camp_kord", choice = "hire" }
+then = [
+    { set = "kord", value = 1 },
+    { add = "companies", value = 1 },
+    { set_faction = "kord_band", faction = "player" },
+]
+
+# The red company: bought for gold, it changes sides on the map and Oakford with it.
+[[trigger]]
+id = "camp_red_offer"
+map = "camp"
+when = { event = "hero_enters", at = [72, 42, 8, 8] }
+then = [ { dialog = "camp_red" } ]
+
+[[trigger]]
+id = "camp_red_buy"
+map = "camp"
+when = { event = "dialog_choice", dialog = "camp_red", choice = "buy" }
+then = [
+    { set_faction = "red_company", faction = "player" },
+    { set_relation = "red_company", towards = "enemy", value = 3 },
+    { add = "companies", value = 1 },
+]
+
+[[trigger]]
+id = "camp_oakford_flip"
+map = "camp"
+when = { event = "dialog_choice", dialog = "camp_red", choice = "buy" }
+then = [
+    { set_faction = "oakford", faction = "ally", of = "building" },
+    { set_relation = "oakford", towards = "enemy", value = 3, of = "building" },
+]
+
+# The duel: Varga, halberdier of the hero's army, against the captain in the arena.
+[[trigger]]
+id = "camp_duel_offer"
+map = "camp"
+when = { event = "hero_enters", at = [80, 80, 8, 8] }
+if = [
+    { var = "camp_duel", value = false },
+    { var = "varga_alive", value = true },
+    { has_named_unit = "varga", unit = "dt:halberdier" },
+]
+then = [ { dialog = "camp_duel" } ]
+
+[[trigger]]
+id = "camp_duel_accept"
+map = "camp"
+when = { event = "dialog_choice", dialog = "camp_duel", choice = "accept" }
+then = [ { set = "camp_duel", value = true }, { army_goal = "duel_captain", attack = "hero" } ]
+
+# The win: Varga is still in the army. Her axe is the captain's, and the Companies talk of her.
+[[trigger]]
+id = "camp_duel_won"
+map = "camp"
+when = { event = "army_defeated", army = "duel_captain" }
+if = [ { var = "camp_duel", value = true }, { has_named_unit = "varga", unit = "dt:halberdier" } ]
+then = [
+    { set = "camp_duel", value = false },
+    { give_item = "camp_axe", to = "named:varga" },
+    { add = "companies", value = 1 },
+    { dialog = "camp_duel_won" },
+]
+
+# The loss: the duel's captain is beaten, and Varga is not in the army any more. She has fallen.
+[[trigger]]
+id = "camp_duel_lost"
+map = "camp"
+when = { event = "army_defeated", army = "duel_captain" }
+if = [ { var = "camp_duel", value = true } ]
+then = [
+    { set = "camp_duel", value = false },
+    { set = "varga_alive", value = false },
+    { dialog = "camp_duel_lost" },
+]
+
+# The Crown's supply column reaches the ambush point: the hit, or the column goes on.
+[[trigger]]
+id = "camp_raid_open"
+map = "camp"
+when = { event = "army_arrives", army = "supply", at = [60, 71] }
+then = [ { dialog = "camp_raid" } ]
+
+# The hit: the companies come out of the camp's waygate and fall on the column.
+[[trigger]]
+id = "camp_raid_hit"
+map = "camp"
+when = { event = "dialog_choice", dialog = "camp_raid", choice = "hit" }
+then = [
+    { teleport_army = "kord_band", to = "waygate" },
+    { army_goal = "kord_band", attack = "supply" },
+]
+
+[[trigger]]
+id = "camp_raid_pass"
+map = "camp"
+when = { event = "dialog_choice", dialog = "camp_raid", choice = "pass" }
+then = [ { add = "crown", value = 1 }, { army_goal = "supply", clear = true } ]
+
+# The column beaten: a caravan lost to the Crown, the companies gain, the Crown loses.
+[[trigger]]
+id = "camp_raid_won"
+map = "camp"
+when = { event = "army_defeated", army = "supply" }
+then = [
+    { add = "crown", value = -1 },
+    { add = "caravans_lost", value = 1 },
+    { add = "companies", value = 1 },
+    { give_gold = 40 },
+]
+
+# The loot: with Kord's company hired, he asks his share. Split it, or keep it and he turns.
+[[trigger]]
+id = "camp_loot_offer"
+map = "camp"
+when = { event = "army_defeated", army = "supply" }
+if = [ { var = "kord", op = ">=", value = 1 }, { var = "kord", op = "!=", value = 2 } ]
+then = [ { dialog = "camp_loot" } ]
+
+[[trigger]]
+id = "camp_loot_split"
+map = "camp"
+when = { event = "dialog_choice", dialog = "camp_loot", choice = "split" }
+then = [ { set = "kord", value = 3 }, { add = "companies", value = 1 } ]
+
+[[trigger]]
+id = "camp_loot_keep"
+map = "camp"
+when = { event = "dialog_choice", dialog = "camp_loot", choice = "keep" }
+then = [
+    { set = "kord", value = 2 },
+    { set_faction = "kord_band", faction = "enemy" },
+    { army_goal = "kord_band", attack = "hero" },
+    { add = "companies", value = -2 },
+]
+
+# The companies' waygate: the stones can be lit, which opens a gate for chapter 4.
+[[trigger]]
+id = "camp_gate_offer"
+map = "camp"
+when = { event = "hero_enters", at = [46, 58, 5, 5] }
+then = [ { dialog = "camp_gate" } ]
+
+[[trigger]]
+id = "camp_gate_light"
+map = "camp"
+when = { event = "dialog_choice", dialog = "camp_gate", choice = "light" }
+then = [ { add = "gates_open", value = 1 }, { add = "companies", value = 1 } ]
+
+# The companies name the hero their captain once they trust him: gold, once.
+[[trigger]]
+id = "camp_trust"
+map = "camp"
+when = { event = "var_changed", var = "companies" }
+if = [ { var = "companies", op = ">=", value = 3 } ]
+then = [ { give_gold = 30 }, { dialog = "camp_trust" } ]
+
+# The relief beaten: the chapter ends by Kord's state. Four endings, the first that holds wins.
+[[trigger]]
+id = "camp_end_friend"
+map = "camp"
+when = { event = "army_defeated", army = "camp_relief" }
+if = [ { var = "kord", value = 3 } ]
+then = [ { set = "camp_done", value = true }, { dialog = "camp_end_friend" }, { victory = true } ]
+
+[[trigger]]
+id = "camp_end_hired"
+map = "camp"
+when = { event = "army_defeated", army = "camp_relief" }
+if = [ { var = "kord", value = 1 } ]
+then = [ { set = "camp_done", value = true }, { dialog = "camp_end_hired" }, { victory = true } ]
+
+[[trigger]]
+id = "camp_end_betrayed"
+map = "camp"
+when = { event = "army_defeated", army = "camp_relief" }
+if = [ { var = "kord", value = 2 } ]
+then = [ { set = "camp_done", value = true }, { dialog = "camp_end_betrayed" }, { victory = true } ]
+
+[[trigger]]
+id = "camp_end_alone"
+map = "camp"
+when = { event = "army_defeated", army = "camp_relief" }
+if = [ { var = "kord", value = 0 } ]
+then = [ { set = "camp_done", value = true }, { dialog = "camp_end_alone" }, { victory = true } ]
+
+# Kord as a friend: his company shares its purse with the hero, once.
+[[trigger]]
+id = "camp_friend_gift"
+map = "camp"
+when = { event = "var_changed", var = "kord" }
+if = [ { var = "kord", value = 3 } ]
+then = [ { give_gold = 30 } ]
+
+# Oakford taken: the Crown's town falls, and the Crown's standing with it.
+[[trigger]]
+id = "camp_oakford_taken"
+map = "camp"
+when = { event = "building_captured", building = "oakford" }
+then = [ { add = "crown", value = -2 } ]

@@ -1,0 +1,182 @@
+# Chapter 3а «Аббатство», 100×100: the ruined abbey on its stony hill in the middle of the March.
+# The dead of the barrows (north-east) come for it; the Order's inquisitors come down the north road
+# to hold it. The south road is the hero's way in from Marka. terrain.png is painted by
+# tools/pepelnaya-marka-terrain-abbey.py. The map's own victory is a placeholder that never fires:
+# the chapter ends by the story's `victory` (see triggers/abbey.toml).
+title = "abbey.map.title"
+description = "abbey.map.description"
+start_date = "1300-05-01"
+relations = [[3, 3, 0, -3], [3, 3, 0, -3], [0, 0, 3, -3], [-3, -3, -3, 3]]
+
+[hero]
+cell = [50, 92]
+classes = ["knight"]
+gold = 80
+mana = 10
+troops = [
+    { unit = "dt:militiaman", level = 1, count = 3 },
+    { unit = "dt:archer", level = 1, count = 2 },
+]
+
+# Woods on the north meadow, dead trees in the burned fields and the blight.
+[[object]]
+kind = "trees"
+cell = [8, 4]
+[[object]]
+kind = "trees"
+cell = [14, 9]
+[[object]]
+kind = "trees"
+cell = [24, 3]
+[[object]]
+kind = "trees"
+cell = [33, 10]
+[[object]]
+kind = "trees"
+cell = [41, 5]
+[[object]]
+kind = "trees"
+cell = [62, 7]
+[[object]]
+kind = "trees"
+cell = [72, 11]
+[[object]]
+kind = "trees"
+cell = [85, 4]
+[[object]]
+kind = "dead_trees"
+cell = [8, 24]
+[[object]]
+kind = "dead_trees"
+cell = [16, 34]
+[[object]]
+kind = "dead_trees"
+cell = [24, 28]
+[[object]]
+kind = "dead_trees"
+cell = [12, 42]
+[[object]]
+kind = "dead_trees"
+cell = [58, 30]
+[[object]]
+kind = "dead_trees"
+cell = [64, 36]
+[[object]]
+kind = "dead_trees"
+cell = [60, 44]
+[[object]]
+kind = "dead_trees"
+cell = [68, 44]
+[[object]]
+kind = "dead_trees"
+cell = [70, 64]
+[[object]]
+kind = "dead_trees"
+cell = [78, 70]
+[[object]]
+kind = "dead_trees"
+cell = [86, 78]
+[[object]]
+kind = "dead_trees"
+cell = [74, 80]
+# The barrow hills and their standing stones in the north-east.
+[[object]]
+kind = "hills"
+cell = [88, 10]
+[[object]]
+kind = "hills"
+cell = [94, 18]
+[[object]]
+kind = "hills"
+cell = [90, 26]
+[[object]]
+kind = "stones"
+cell = [80, 22]
+[[object]]
+kind = "stones"
+cell = [84, 30]
+[[object]]
+kind = "stones"
+cell = [96, 30]
+
+# The abbey on its hill, the Crown's watch on the south hill, and the alder village in the west.
+[[building]]
+id = "abbey"
+type = "church"
+name = "abbey.building.abbey.name"
+description = "abbey.building.abbey.description"
+cell = [50, 40]
+faction = "ally"
+income = 20
+garrison = [
+    { unit = "dt:monk", level = 1, count = 3 },
+    { unit = "dt:pilgrim", level = 1, count = 2 },
+]
+
+[[building]]
+id = "watch"
+type = "fort"
+name = "abbey.building.watch.name"
+description = "abbey.building.watch.description"
+cell = [62, 74]
+faction = "neighbour"
+income = 25
+garrison = [
+    { unit = "dt:guardsman", level = 1, count = 3 },
+    { unit = "dt:archer", level = 1, count = 2 },
+]
+
+[[building]]
+id = "alder"
+type = "village"
+name = "abbey.building.alder.name"
+description = "abbey.building.alder.description"
+cell = [18, 62]
+faction = "neighbour"
+income = 10
+
+# The inquisitors come down the north road to the abbey (the story sends them).
+[[army]]
+id = "inquisitors"
+name = "abbey.army.inquisitors.name"
+cell = [50, 4]
+faction = "ally"
+model = "feudal"
+troops = [
+    { unit = "dt:inquisitor", level = 1, count = 2 },
+    { unit = "dt:priest", level = 1, count = 2 },
+    { unit = "dt:monk", level = 1, count = 2 },
+]
+
+# The dead of the barrows: they walk their patrol until the story sends them at the abbey.
+[[army]]
+id = "dead_wave"
+name = "abbey.army.dead_wave.name"
+cell = [84, 44]
+faction = "enemy"
+model = "zombies"
+troops = [
+    { unit = "dt:deadman", level = 1, count = 4 },
+    { unit = "dt:ghoul", level = 1, count = 2 },
+    { unit = "dt:death_knight", level = 1, count = 1 },
+]
+
+# The placeholder of the map's victory: it stays inactive (the story ends the chapter).
+[[army]]
+id = "unmarked"
+name = "abbey.army.unmarked.name"
+cell = [6, 6]
+faction = "enemy"
+model = "inactive"
+troops = [{ unit = "dt:death_knight", level = 1, count = 1 }]
+
+# A lantern at the abbey's south gate, lit from the start.
+[[point]]
+cell = [50, 46]
+radius = 3
+active = true
+
+[victory]
+kind = "defeat_army"
+army = "unmarked"
+message = "abbey.map.won"

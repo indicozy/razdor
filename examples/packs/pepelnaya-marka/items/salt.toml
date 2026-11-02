@@ -1,0 +1,15 @@
+# Chapter 3б «Солончаки»: the marsh folk's gifts. Tess's bow goes with her; the salve is the marsh
+# folk's thanks for trust.
+[[item]]
+id = "salt_bow"
+base = "dt:item/hunter_bow"
+name = "item.salt_bow.name"
+description = "item.salt_bow.description"
+cost = 50
+
+[[item]]
+id = "salt_salve"
+base = "dt:item/healing_mixture"
+name = "item.salt_salve.name"
+description = "item.salt_salve.description"
+cost = 25

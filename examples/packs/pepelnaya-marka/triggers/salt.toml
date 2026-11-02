@@ -1,0 +1,259 @@
+# Chapter 3б «Солончаки» (the marsh folk, ally = 2): the variables and the triggers of the map `salt`.
+# Every trigger names its map. Triggers that share a moment run in file order, and each condition
+# reads the state the earlier ones left.
+#
+# Disguise: the hero rides as a bandit (`hero_figure`). While he is disguised the Crown's patrols
+# walk their loops (`army_goal ... patrol`) and do not seek him; at the Salt Gate, or when he is
+# found out, they turn on him (`attack`), and the bounty men follow him (`follow`).
+#
+# Salt roads: the smugglers' wagon walks the marsh slowly and the causeway fast (`army_speed` at each
+# stop); it is hunted or it delivers its salt to the Salt Gate.
+#
+# Tess: she joins when the marsh folk trust the hero (marsh_trust 2 or more). Her trail through the
+# bog is open only while she walks with him (`has_named_unit`).
+
+[vars]
+salt_disguise = false      # the hero rides as a bandit
+salt_bog_seen = false      # the hero has been warned of the bog's fog
+salt_hunting = false       # the bounty men follow the hero
+salt_hunt_days = 0         # days they have followed him
+
+# The start: the wagon sets out from the marsh, slow in the bog. (80 percent: at 70 or less the
+# engine's step clock never gets the wagon off the marsh.)
+[[trigger]]
+id = "salt_arrival"
+map = "salt"
+when = { event = "game_start" }
+then = [
+    { dialog = "salt_arrival" },
+    { army_speed = "smugglers", percent = 80 },
+    { army_goal = "smugglers", go_to = [34, 88] },
+]
+
+# The causeway's south end: the wagon reaches the road and goes fast up it.
+[[trigger]]
+id = "salt_smug_causeway"
+map = "salt"
+when = { event = "army_arrives", army = "smugglers", at = [34, 88] }
+then = [ { army_speed = "smugglers", percent = 150 }, { army_goal = "smugglers", go_to = [34, 12] } ]
+
+# The causeway's north end: the dry road to the Salt Gate, at a walk.
+[[trigger]]
+id = "salt_smug_north"
+map = "salt"
+when = { event = "army_arrives", army = "smugglers", at = [34, 12] }
+then = [ { army_speed = "smugglers", percent = 100 }, { army_goal = "smugglers", go_to_building = "saltgate" } ]
+
+# The salt delivered: the Crown's garrison has its salt, and the Crown's standing grows a little.
+[[trigger]]
+id = "salt_smug_delivered"
+map = "salt"
+when = { event = "army_arrives", army = "smugglers", building = "saltgate" }
+then = [ { remove_army = "smugglers" }, { add = "crown", value = 1 } ]
+
+# The wagon taken on the road: a caravan lost, and its gold is the hero's.
+[[trigger]]
+id = "salt_smug_hit"
+map = "salt"
+when = { event = "army_defeated", army = "smugglers" }
+then = [ { add = "caravans_lost", value = 1 }, { give_gold = 30 } ]
+
+# Reedmere: the marsh folk's first word. Once.
+[[trigger]]
+id = "salt_reedmere"
+map = "salt"
+when = { event = "hero_enters", at = [14, 52, 18, 16] }
+then = [ { dialog = "salt_reedmere" } ]
+
+# Disguised: the hero rides as a bandit, and the Crown's patrols walk their loops.
+[[trigger]]
+id = "salt_disguise_on"
+map = "salt"
+when = { event = "dialog_choice", dialog = "salt_reedmere", choice = "disguise" }
+then = [
+    { set = "salt_disguise", value = true },
+    { hero_figure = "dt:bandit" },
+    { army_goal = "patrol_north", patrol = [[48, 24], [60, 20]] },
+    { army_goal = "bounty", patrol = [[62, 44], [66, 46]] },
+]
+
+# The Salt Gate while disguised: the guards know him, the dialog, then the fight.
+[[trigger]]
+id = "salt_gate_caught"
+map = "salt"
+when = { event = "hero_enters", at = [66, 36, 8, 8] }
+if = [ { var = "salt_disguise", value = true } ]
+then = [ { dialog = "salt_caught" } ]
+
+# Found out: the figure is the hero's again, the patrols attack, the bounty men follow him.
+[[trigger]]
+id = "salt_caught_reveal"
+map = "salt"
+when = { event = "dialog_choice", dialog = "salt_caught", choice = "draw" }
+then = [
+    { set = "salt_disguise", value = false },
+    { set = "salt_hunting", value = true },
+    { hero_figure = "default" },
+    { army_goal = "patrol_north", attack = "hero" },
+    { army_goal = "bounty", follow = "hero" },
+]
+
+# The chase: each midnight the bounty men keep following; after three days they attack.
+[[trigger]]
+id = "salt_hunt_tick"
+map = "salt"
+when = { event = "day_start" }
+once = false
+if = [ { var = "salt_hunting", value = true } ]
+then = [ { add = "salt_hunt_days", value = 1 } ]
+
+[[trigger]]
+id = "salt_hunt_attack"
+map = "salt"
+when = { event = "day_start" }
+if = [ { var = "salt_hunting", value = true }, { var = "salt_hunt_days", op = ">=", value = 3 } ]
+then = [ { army_goal = "bounty", attack = "hero" } ]
+
+[[trigger]]
+id = "salt_hunt_end"
+map = "salt"
+when = { event = "army_defeated", army = "bounty" }
+then = [ { set = "salt_hunting", value = false }, { give_gold = 40 } ]
+
+# The witch's hut: a hero with the taint in him comes to her; the cure, the blessing or the page.
+[[trigger]]
+id = "salt_witch"
+map = "salt"
+when = { event = "hero_enters", at = [10, 40, 1, 1] }
+once = false
+if = [ { var = "taint", op = ">=", value = 1 } ]
+then = [ { dialog = "salt_witch" } ]
+
+# The bog's fog: the first step warns, every step curses the army (at most six taints).
+[[trigger]]
+id = "salt_bog_warn"
+map = "salt"
+when = { event = "hero_enters", at = [4, 72, 16, 12] }
+if = [ { var = "salt_bog_seen", value = false } ]
+then = [ { set = "salt_bog_seen", value = true }, { dialog = "salt_bog" } ]
+
+[[trigger]]
+id = "salt_bog_curse"
+map = "salt"
+when = { event = "hero_enters", at = [4, 72, 16, 12] }
+once = false
+if = [ { var = "taint", op = "<", value = 6 } ]
+then = [ { cast_on_army = "dt:spell/weakness", minutes = 360 }, { add = "taint", value = 1 } ]
+
+# The marsh folk's trust: the gift of the salve, and Tess's offer to walk with the hero.
+[[trigger]]
+id = "salt_gift"
+map = "salt"
+when = { event = "hero_enters", at = [14, 52, 18, 16] }
+if = [ { var = "marsh_trust", op = ">=", value = 2 } ]
+then = [ { give_item = "salt_salve", to = "pack" } ]
+
+[[trigger]]
+id = "salt_tess_offer"
+map = "salt"
+when = { event = "hero_enters", at = [14, 52, 18, 16] }
+if = [ { var = "tess_joined", value = false }, { var = "marsh_trust", op = ">=", value = 2 } ]
+then = [ { dialog = "salt_tess" } ]
+
+# Tess takes the road with the hero: her unit, and her bow.
+[[trigger]]
+id = "salt_tess_take"
+map = "salt"
+when = { event = "dialog_choice", dialog = "salt_tess", choice = "take" }
+then = [ { set = "tess_joined", value = true }, { give_item = "salt_bow", to = "named:tess" } ]
+
+# Tess's trail: with her in the army, the hero goes through the bog and comes out on the flats.
+[[trigger]]
+id = "salt_trail"
+map = "salt"
+when = { event = "hero_enters", at = [44, 52, 4, 4] }
+if = [ { has_named_unit = "tess", unit = "dt:hunter" } ]
+then = [ { dialog = "salt_trail" }, { teleport_hero = [62, 38] } ]
+
+# The marsh folk's trust is a gold reward when it runs high. Once.
+[[trigger]]
+id = "salt_trust_reward"
+map = "salt"
+when = { event = "var_changed", var = "marsh_trust" }
+if = [ { var = "marsh_trust", op = ">=", value = 3 } ]
+then = [ { give_gold = 25 } ]
+
+# Each week the folk who trust the hero send him a little in return.
+[[trigger]]
+id = "salt_week_marsh"
+map = "salt"
+when = { event = "week_start" }
+once = false
+if = [ { var = "marsh_trust", op = ">=", value = 2 } ]
+then = [ { give_gold = 10 } ]
+
+# A Crown in bad standing sends its hunters to the causeway.
+[[trigger]]
+id = "salt_hunters_spawn"
+map = "salt"
+when = { event = "week_start" }
+if = [ { var = "crown", op = "<=", value = -2 } ]
+then = [
+    {
+        spawn_army = "salt_hunters",
+        at = [60, 64],
+        faction = "enemy",
+        model = 5,
+        troops = ["dt:guardsman", "dt:archer", "dt:halberdier"],
+    },
+]
+
+# The Salt Gate taken with Tess at his side: the marsh folk's ending.
+[[trigger]]
+id = "salt_gate_taken_marsh"
+map = "salt"
+when = { event = "building_captured", building = "saltgate" }
+if = [ { var = "tess_joined", value = true } ]
+then = [ { set = "salt_done", value = true }, { dialog = "salt_end_marsh" }, { victory = true } ]
+
+# The Salt Gate taken alone: the same gate, without the marsh folk's word.
+[[trigger]]
+id = "salt_gate_taken_alone"
+map = "salt"
+when = { event = "building_captured", building = "saltgate" }
+if = [ { var = "tess_joined", value = false } ]
+then = [ { set = "salt_done", value = true }, { dialog = "salt_end_alone" }, { victory = true } ]
+
+# The Crown's watch taken: its standing falls.
+[[trigger]]
+id = "salt_watch_taken"
+map = "salt"
+when = { event = "building_captured", building = "watch" }
+then = [ { add = "crown", value = -1 } ]
+
+# The bandits' den taken: its old fire has a purse under it.
+[[trigger]]
+id = "salt_den_taken"
+map = "salt"
+when = { event = "building_captured", building = "den" }
+then = [ { give_gold = 25 } ]
+
+# A hero heavy with the taint loses the marsh folk's trust, a week at a time.
+[[trigger]]
+id = "salt_marsh_fever"
+map = "salt"
+when = { event = "week_start" }
+once = false
+if = [ { var = "taint", op = ">=", value = 3 } ]
+then = [ { add = "marsh_trust", value = -1 } ]
+
+# A Crown patrol beaten: the Crown hunts the hero, and its bounty men follow him.
+[[trigger]]
+id = "salt_patrol_hit"
+map = "salt"
+when = { event = "army_defeated", army = "patrol_north" }
+then = [
+    { add = "crown", value = -1 },
+    { set = "salt_hunting", value = true },
+    { army_goal = "bounty", follow = "hero" },
+]

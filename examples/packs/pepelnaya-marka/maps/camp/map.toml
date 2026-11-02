@@ -1,0 +1,166 @@
+# Chapter 3в «Лагерь рот», 100×100: the Free Companies' camp in the lowland of the middle, with the
+# camp's waygate (an obelisk). The Crown's supply road runs across the map from west to east and
+# the Crown's relief comes from the north-east. Oakford, the town of the red company's side, lies
+# in the west. terrain.png is painted by tools/pepelnaya-marka-terrain-camp.py. The map's own
+# victory is a placeholder that never fires: the chapter ends by the story's `victory` (see
+# triggers/camp.toml).
+title = "camp.map.title"
+description = "camp.map.description"
+start_date = "1300-05-01"
+relations = [[3, 3, 0, -3], [3, 3, 0, -3], [0, 0, 3, -3], [-3, -3, -3, 3]]
+
+[hero]
+cell = [94, 72]
+classes = ["knight"]
+gold = 150
+mana = 10
+troops = [
+    { unit = "dt:militiaman", level = 1, count = 3 },
+    { unit = "dt:archer", level = 1, count = 2 },
+]
+
+# Forest in the north-west, dead trees around the camp, the hills and stones of the north-east.
+[[object]]
+kind = "trees"
+cell = [8, 6]
+[[object]]
+kind = "trees"
+cell = [20, 12]
+[[object]]
+kind = "trees"
+cell = [30, 20]
+[[object]]
+kind = "trees"
+cell = [38, 8]
+[[object]]
+kind = "dead_trees"
+cell = [10, 84]
+[[object]]
+kind = "dead_trees"
+cell = [22, 90]
+[[object]]
+kind = "dead_trees"
+cell = [60, 88]
+[[object]]
+kind = "dead_trees"
+cell = [70, 60]
+[[object]]
+kind = "dead_trees"
+cell = [84, 64]
+[[object]]
+kind = "dead_trees"
+cell = [90, 58]
+[[object]]
+kind = "hills"
+cell = [76, 14]
+[[object]]
+kind = "hills"
+cell = [84, 20]
+[[object]]
+kind = "hills"
+cell = [92, 26]
+[[object]]
+kind = "stones"
+cell = [80, 30]
+[[object]]
+kind = "stones"
+cell = [90, 36]
+
+# The camp's waygate, the companies' hall, and Oakford (the town the red company can turn).
+[[building]]
+id = "waygate"
+type = "obelisk"
+name = "camp.building.waygate.name"
+description = "camp.building.waygate.description"
+cell = [48, 60]
+faction = "neighbour"
+
+[[building]]
+id = "hall"
+type = "tavern"
+name = "camp.building.hall.name"
+description = "camp.building.hall.description"
+cell = [56, 56]
+faction = "neighbour"
+
+[[building]]
+id = "oakford"
+type = "town"
+name = "camp.building.oakford.name"
+description = "camp.building.oakford.description"
+cell = [20, 40]
+faction = "enemy"
+income = 30
+garrison = [
+    { unit = "dt:guardsman", level = 1, count = 2 },
+    { unit = "dt:archer", level = 1, count = 1 },
+]
+
+# Kord's company, roaming the lowland's west edge until the hero comes to it or it turns.
+[[army]]
+id = "kord_band"
+name = "camp.army.kord_band.name"
+cell = [30, 52]
+faction = "neighbour"
+model = "bandits"
+gold = 50
+troops = [
+    { unit = "dt:bandit", level = 1, count = 3 },
+    { unit = "dt:robber", level = 1, count = 2 },
+]
+
+# The red company, camped east of the lowland: it can be bought.
+[[army]]
+id = "red_company"
+name = "camp.army.red_company.name"
+cell = [76, 46]
+faction = "neighbour"
+model = "bandits"
+gold = 40
+troops = [
+    { unit = "dt:marauder", level = 1, count = 3 },
+    { unit = "dt:brigand", level = 1, count = 2 },
+]
+
+# The Crown's supply column on the road: the story sends it to the ambush point.
+[[army]]
+id = "supply"
+name = "camp.army.supply.name"
+cell = [14, 71]
+faction = "enemy"
+model = "feudal"
+gold = 120
+troops = [
+    { unit = "dt:guardsman", level = 1, count = 3 },
+    { unit = "dt:archer", level = 1, count = 2 },
+]
+
+# The captain of the Crown's guard in the arena: he fights the duel when Varga accepts.
+[[army]]
+id = "duel_captain"
+name = "camp.army.duel_captain.name"
+cell = [84, 84]
+faction = "enemy"
+model = "feudal"
+leader = { unit = "dt:captain_of_the_guard", level = 2, name = "camp.captain.name" }
+troops = [{ unit = "dt:guardsman", level = 1, count = 2 }]
+
+# The placeholder of the map's victory: it stays inactive (the story ends the chapter).
+[[army]]
+id = "unmarked"
+name = "camp.army.unmarked.name"
+cell = [6, 6]
+faction = "enemy"
+model = "inactive"
+troops = [{ unit = "dt:death_knight", level = 1, count = 1 }]
+
+# A lantern at the camp's centre, lit from the start.
+[[point]]
+cell = [50, 62]
+radius = 3
+active = true
+
+[victory]
+kind = "defeat_army"
+army = "unmarked"
+message = "camp.map.won"
