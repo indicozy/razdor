@@ -85,6 +85,9 @@ const STACK_W: f32 = 590.0;
 const STACK_BAND_Y: f32 = 76.0;
 const STACK_QUICK_GAP: f32 = 3.0;
 const STACK_QUICK_H: f32 = 30.0;
+/// A custom battle's stacked quick buttons: 68 design px, about 44 dp on the reference phone
+/// (2.75 px per dp at the window's scale); the custom battle's own, the battle screen keeps 30.
+const STACK_QUICK_H_CUSTOM: f32 = 68.0;
 const STACK_GRID_GAP: f32 = 9.0;
 const STRIP_H: f32 = 20.0;
 const STRIP_GAP: f32 = 10.0;
@@ -103,29 +106,30 @@ fn grid_height(f: Formation) -> f32 {
 
 /// The stacked quick buttons' height in design px: 30, grown with the text size (`button_grow`,
 /// Razdor's own, the owner's decision of 2026-10-31); at Normal 30.
-fn stack_quick_h() -> f32 {
-    STACK_QUICK_H * super::display::button_grow()
+fn stack_quick_h(custom: bool) -> f32 {
+    let h = if custom { STACK_QUICK_H_CUSTOM } else { STACK_QUICK_H };
+    h * super::display::button_grow()
 }
 
 /// The stacked window's strip top and its height, in design px (see [`STACK_BAND_Y`]).
-fn stacked_rows(f: Formation) -> (f32, f32) {
+fn stacked_rows(f: Formation, custom: bool) -> (f32, f32) {
     let g = grid_height(f);
-    let enemy_top = STACK_BAND_Y + window_layout::BAND_H + STACK_QUICK_GAP + stack_quick_h() + STACK_GRID_GAP;
+    let enemy_top = STACK_BAND_Y + window_layout::BAND_H + STACK_QUICK_GAP + stack_quick_h(custom) + STACK_GRID_GAP;
     let strip_y = enemy_top + g + STACK_GRID_GAP;
     (strip_y, strip_y + STRIP_H + STRIP_GAP + g + STACK_BOTTOM)
 }
 
 /// The stacked window's size for `f` in design px: what `window_layout::game_rect` fits.
-fn stacked_video(f: Formation) -> (f32, f32) {
-    (STACK_W, stacked_rows(f).1)
+fn stacked_video(f: Formation, custom: bool) -> (f32, f32) {
+    (STACK_W, stacked_rows(f, custom).1)
 }
 
 impl Layout {
-    fn new(battle: &Battle) -> Layout {
+    fn new(battle: &Battle, custom: bool) -> Layout {
         let (f, k) = (battle.formation, chrome::k());
         let dp = super::display::dp_px();
-        match (window_layout::game_rect(stacked_video(f)), dp) {
-            (Some(win), Some(_)) => Layout::upright(k, win, f),
+        match (window_layout::game_rect(stacked_video(f, custom)), dp) {
+            (Some(win), Some(_)) => Layout::upright(k, win, f, custom),
             _ => {
                 let (sw, safe) = (screen_width(), super::display::safe_area());
                 Layout::landscape(k, (sw, screen_height()), chrome::bar_height(), f, dp, safe.top)
@@ -161,11 +165,11 @@ impl Layout {
     /// The stacked window (a phone held upright) at `k`, `win` as `window_layout::game_rect` fits
     /// it: the unit's band on top, the quick buttons under it, the enemy's grid, the strip, and the
     /// player's grid. Its title strip is the window's own (taller on a phone, growing upward).
-    fn upright(k: f32, win: Rect, f: Formation) -> Layout {
+    fn upright(k: f32, win: Rect, f: Formation, custom: bool) -> Layout {
         let c = card_scale(f);
-        let (strip_y, _) = stacked_rows(f);
+        let (strip_y, _) = stacked_rows(f, custom);
         let band = Rect::new(win.x + 2.0 * k, win.y + STACK_BAND_Y * k, 586.0 * k, window_layout::BAND_H * k);
-        let quick = Rect::new(band.x + 10.0 * k, band.bottom() + STACK_QUICK_GAP * k, band.w - 20.0 * k, stack_quick_h() * k);
+        let quick = Rect::new(band.x + 10.0 * k, band.bottom() + STACK_QUICK_GAP * k, band.w - 20.0 * k, stack_quick_h(custom) * k);
         let strip = Rect::new(win.x + 2.0 * k, win.y + strip_y * k, 586.0 * k, STRIP_H * k);
         let card = vec2(88.0 * c * k, 128.0 * c * k).round();
         let pitch = vec2(96.0 * c * k, 133.0 * c * k);
@@ -949,8 +953,8 @@ impl BattleView {
 
     pub fn frame(&mut self, game: &mut Game, assets: &Assets, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) -> Option<Screen> {
         // A phone held upright stacks the window at its own scale (`window_layout::game_scale`).
-        let _window = window_layout::game_scale(stacked_video(self.battle.formation));
-        let l = Layout::new(&self.battle);
+        let _window = window_layout::game_scale(stacked_video(self.battle.formation, self.custom));
+        let l = Layout::new(&self.battle, self.custom);
         // Input the app holds back (the cheat console) stays held for the exit window too.
         let outer = input_blocked();
         let (over, just_opened) = self.advance(&l);
@@ -1000,8 +1004,8 @@ impl BattleView {
     /// A frame of a custom battle, over the main menu's ruins: the round is counted in
     /// `session` when its result shows. Esc asks before leaving for the setup.
     pub fn frame_custom(&mut self, assets: &Assets, session: &mut Session) -> Option<CustomEnd> {
-        let _window = window_layout::game_scale(stacked_video(self.battle.formation));
-        let l = Layout::new(&self.battle);
+        let _window = window_layout::game_scale(stacked_video(self.battle.formation, self.custom));
+        let l = Layout::new(&self.battle, self.custom);
         // Input the app holds back (the cheat console) stays held for the exit window too.
         let outer = input_blocked();
         let (over, just_opened) = self.advance(&l);
@@ -1693,8 +1697,8 @@ mod tests {
 
     /// The stacked window of a 1080×2400 phone at 2.75 px per dp, a 60 px top inset and a 90 px bar.
     fn upright(f: Formation) -> Layout {
-        let (k, win) = window_layout::portrait_game((1080.0, 2400.0), Some(2.75), 60.0, 90.0, 1.125, stacked_video(f)).expect("held upright");
-        Layout::upright(k, win, f)
+        let (k, win) = window_layout::portrait_game((1080.0, 2400.0), Some(2.75), 60.0, 90.0, 1.125, stacked_video(f, false)).expect("held upright");
+        Layout::upright(k, win, f, false)
     }
 
     /// Every cell of both armies on `l`'s formation, with its team and rectangle.
@@ -1759,6 +1763,17 @@ mod tests {
         let l = Layout::landscape(1.0, (836.0, 1080.0), 90.0, Formation::default(), Some(dp), 150.0);
         assert!(l.win.y >= 150.0 + grow - 1e-3, "{:?} under the safe top 150 and the growth {grow}", l.win);
         assert!(l.win.bottom() <= 1080.0 - 90.0 + 1e-3, "{:?} above the bar", l.win);
+    }
+
+    /// A custom battle's quick buttons are 44 dp tall on a phone held upright; the battle screen's
+    /// stay as they were (30 design px, the owner's note 22: no change to the battle).
+    #[test]
+    fn a_custom_battle_s_quick_buttons_are_44_dp_on_a_phone_and_the_battle_s_are_as_before() {
+        let (k, win) = window_layout::portrait_game((1080.0, 2400.0), Some(2.75), 60.0, 90.0, 1.125, stacked_video(Formation::default(), true)).expect("held upright");
+        let custom = Layout::upright(k, win, Formation::default(), true);
+        assert!(custom.quick.h >= 44.0 * 2.75 - 0.5, "{:?}", custom.quick);
+        let battle = upright(Formation::default());
+        assert!((battle.quick.h - STACK_QUICK_H * k).abs() <= 0.5, "{:?}", battle.quick);
     }
 
     #[test]
