@@ -1302,7 +1302,7 @@ impl App {
         };
         widgets::set_outside_tap(outside);
         let mut next = match (&mut self.screen, &mut self.game) {
-            (Screen::MainMenu, _) => match main_menu::frame(self.dt_content.is_none()) {
+            (Screen::MainMenu, _) => match main_menu::frame(self.dt_content.is_none(), &self.mods, self.active_mod.as_deref(), self.mod_switch.is_some()) {
                 Some(main_menu::Pick::NewGame) if new_game::tutorial_map(&self.scenarios).is_some() => {
                     new_game::open_list();
                     Some(Screen::TutorialOffer)
@@ -1433,6 +1433,11 @@ impl App {
             }
             (_, None) => Some(Screen::MainMenu),
         };
+        // A mod picked from the title's link (`main_menu::frame`) is played from the next frame, as
+        // a pick in the new-game window is.
+        if let Some(id) = new_game::take_mod_request() {
+            self.choose_mod(id);
+        }
         // A spell badge's hint over the screen that drew it (under the dialogs).
         spell_badges::flush();
         widgets::set_input_blocked(false);

@@ -266,6 +266,7 @@ column, never above the safe inset (the column moves down if it must); the links
 in one row at the bottom, touch targets of 48 dp; the version and copyright lines and an installed update's
 notice sit just above the chips; the not-found block (no install) sits above the logo. Landscape and desktop keep
 the original column and the corner links (`main_menu::landscape_buttons`, `corner_links`).
+With a mod installed the title shows the mod played (the owner's request, 2026-11-02): a «Мод: <title>» link between «Карты и моды» and Discord (desktop), or a full-width tile above the four chips (upright, which lifts the foot lines and the column by its height and gap, `portrait_menu`'s `mod_row`). A click opens the same «Мод» list as the new-game window (`new_game::mod_choice`, `request_mod`, key `razdor:menu-mod`); the app plays the pick (`take_mod_request` after `main_menu::frame`). Without a mod nothing changes.
 Title windows held upright (the owner's request, 1080×2376: the scenario list and the new-hero window, the load
 window, the settings window and its «Ещё…» page, the keys window over it, the authors window and the custom battle
 setup): `window_layout::portrait_title` (pure, with unit tests) gives the window's own scale and rectangle: the

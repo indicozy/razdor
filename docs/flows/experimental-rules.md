@@ -132,6 +132,8 @@ keep the item and show the existing refusal. All equipment rules and potion limi
 
 ## The rules window (new_game.rs `experimental_menu`)
 
+The choice is remembered (the owner's yes, 2026-11-02): when the window closes (OK, Esc, Enter or its close button) and when a game starts, the six switches are written to `settings.json` (`language::Settings::experimental_rules`, all off on an older file). `open_list` starts from them, so the scenario list's «Экспериментальные правила включены» label shows a remembered choice too.
+
 Opened from the scenario list's «Экспериментальные правила» button. Its scale is `display::popup_o`
 fitted to the screen. Its six rows and OK are touch targets (40 dp on a phone); its texts are one
 px per dp on a phone, grown with the text size (`button_grow`) and never under Normal; the hints

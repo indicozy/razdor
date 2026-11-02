@@ -567,6 +567,58 @@ fn keep_marks(m: Marks) {
     MARKS.with(|c| *c.borrow_mut() = Some(m));
 }
 
+/// The experimental rules the player last set in the rules window, kept in `settings.json`
+/// (`language::Settings::experimental_rules`; all off on a file without them). `for_new_game()`
+/// is all off and carries nothing per game, so the whole set is remembered.
+fn remembered_rules() -> ExperimentalRules {
+    super::language::Settings::load().experimental_rules
+}
+
+/// Keeps `rules` as the remembered choice (the rules window closes; a game starts).
+fn keep_rules(rules: ExperimentalRules) {
+    let s = super::language::Settings::load();
+    if s.experimental_rules != rules {
+        super::language::Settings { experimental_rules: rules, ..s }.save();
+    }
+}
+
+/// The «Мод» choice as the new-game row and the title's link show it: the labels (the base game
+/// first, then each mod as «Мод: <title>»), the index of the mod played and whether its folder is
+/// being built (`busy`, 1441: the row and the link say so and take no choice).
+pub(super) struct ModChoice {
+    pub labels: Vec<String>,
+    pub current: i64,
+    pub busy: bool,
+}
+
+impl ModChoice {
+    /// The text shown: the mod played, or the build's notice while it is being built.
+    pub(super) fn shown(&self) -> &str {
+        if self.busy { tr("Preparing the mod…") } else { &self.labels[self.current as usize] }
+    }
+}
+
+pub(super) fn mod_choice(mods: &[(String, razdor::hub::Text)], active: Option<&str>, busy: bool) -> ModChoice {
+    let mut labels = vec![format!("{}: {}", tr("Mod"), tr("No mod"))];
+    labels.extend(mods.iter().map(|(_, title)| format!("{}: {}", tr("Mod"), title.get(i18n::lang()))));
+    let current = active.and_then(|a| mods.iter().position(|(id, _)| id == a)).map_or(0, |i| i + 1) as i64;
+    ModChoice { labels, current, busy }
+}
+
+/// The mod id of a choice's index (`None`: the base game, index 0).
+pub(super) fn mod_id_at(mods: &[(String, razdor::hub::Text)], index: i64) -> Option<String> {
+    (index > 0).then(|| mods.get(index as usize - 1).map(|(id, _)| id.clone())).flatten()
+}
+
+/// Asks the app to play `id` (`take_mod_request`; `None`: the base game) and starts the list
+/// over, as any new choice does.
+pub(super) fn request_mod(id: Option<String>) {
+    MOD_REQUEST.with_borrow_mut(|r| *r = Some(id));
+    PICKED.with(|p| p.set(0));
+    PICKED_MAP.with(|p| p.set(None));
+    SCROLL.with(|s| s.set(0.0));
+}
+
 fn listed(names: &[String], file: &str) -> bool {
     names.iter().any(|n| n.to_lowercase() == file.to_lowercase())
 }
@@ -588,7 +640,7 @@ fn facts_of(scenarios: &[ScenarioEntry], g: &Group, m: &Marks, active: Option<&s
 /// The scenario list opens on its first row, scrolled to the top (the original's list
 /// starts on row 0 each time). The player's marks are read again (a map won since).
 pub fn open_list() {
-    EXPERIMENTAL.with(|p| p.set(ExperimentalRules::for_new_game()));
+    EXPERIMENTAL.with(|p| p.set(remembered_rules()));
     RULES_OPEN.with(|p| p.set(false));
     PICKED.with(|p| p.set(0));
     PICKED_MAP.with(|p| p.set(None));
@@ -1177,31 +1229,25 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
     // Razdor's «Мод» (a players' wish): the base game or an installed mod, which the app plays and
     // whose maps the list then shows. Only once a mod is installed.
     if !mods.is_empty() {
-        let mut labels = vec![format!("{}: {}", tr("Mod"), tr("No mod"))];
-        labels.extend(mods.iter().map(|(_, title)| format!("{}: {}", tr("Mod"), title.get(i18n::lang()))));
-        let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
-        let current = active.and_then(|a| mods.iter().position(|(id, _)| id == a)).map_or(0, |i| i + 1);
+        let choice = mod_choice(mods, active, busy);
+        let refs: Vec<&str> = choice.labels.iter().map(String::as_str).collect();
         let row = match &pl {
             Some(p) => p.mod_row.unwrap_or(Rect::new(0.0, 0.0, 0.0, 0.0)),
             None => win.rect(x_mod, extras_y, w_mod, extras_h),
         };
         // While the folder is built the row says so and takes no choice (1441).
-        let picked = if busy {
-            chrome::marble_button(row, tr("Preparing the mod…"), false, false);
+        let picked = if choice.busy {
+            chrome::marble_button(row, choice.shown(), false, false);
             None
         } else {
-            view_choice_at(&win, row, "razdor:scenario-mod", current as i64, &refs)
+            view_choice_at(&win, row, "razdor:scenario-mod", choice.current, &refs)
         };
-        if !busy && super::snapshot::open_mod_list() {
-            let options: Vec<(i64, String)> = labels.iter().enumerate().map(|(i, l)| (i as i64, l.clone())).collect();
-            super::widgets::open_list("razdor:scenario-mod", row, current as i64, &options, win.k);
+        if !choice.busy && super::snapshot::open_mod_list() {
+            let options: Vec<(i64, String)> = choice.labels.iter().enumerate().map(|(i, l)| (i as i64, l.clone())).collect();
+            super::widgets::open_list("razdor:scenario-mod", row, choice.current, &options, win.k);
         }
         if let Some(v) = picked {
-            let id = (v > 0).then(|| mods[v as usize - 1].0.clone());
-            MOD_REQUEST.with_borrow_mut(|r| *r = Some(id));
-            PICKED.with(|p| p.set(0));
-            PICKED_MAP.with(|p| p.set(None));
-            SCROLL.with(|s| s.set(0.0));
+            request_mod(mod_id_at(mods, v));
         }
     }
     let can = !list.is_empty();
@@ -1408,7 +1454,10 @@ fn experimental_menu() {
     } else {
         chrome::marble_button(b,tr("OK"),true,down);
     }
-    if close || pressed || key(KeyCode::Escape) || key(KeyCode::Enter) { RULES_OPEN.with(|p| p.set(false)); }
+    if close || pressed || key(KeyCode::Escape) || key(KeyCode::Enter) {
+        RULES_OPEN.with(|p| p.set(false));
+        keep_rules(rules);
+    }
 }
 
 /// Razdor's «Добавить карту…» on the extras row under the buttons (`at`: window units), with the
@@ -1678,6 +1727,7 @@ pub fn class_select(game: &mut Option<Game>, demo: &Arc<Content>, scenario: Opti
     if hero_button(start_x, start_w, &own("NewHero", "Start", n_("Start"))) || enter {
         cue(Cue::Button);
         super::items_view::reset_pack_view();
+        keep_rules(experimental_rules());
         *game = Some(screens::start_game(demo, Some((e, &content)), hero, &name));
         return leave_hero_window(Screen::WorldMap);
     }
@@ -1816,6 +1866,33 @@ mod tests {
         assert!(ticked(Some("evolution"), "Осада"), "Evolution's own tick");
         assert!(!ticked(None, "Осада"), "and not with no mod");
         assert!(!ticked(Some("other"), "Осада"), "another mod shows none");
+    }
+
+    /// The «Мод» choice the row and the title's link share: the base game first, the mod played
+    /// selected, an unknown or no active mod is the base game, and the id of each index.
+    #[test]
+    fn the_mod_choice_lists_the_base_game_then_the_mods_and_selects_the_one_played() {
+        let text = |ru: &str| razdor::hub::Text { ru: ru.into(), en: ru.into() };
+        let mods = vec![("evolution".to_string(), text("Эволюция")), ("siege".to_string(), text("Осада"))];
+        let c = mod_choice(&mods, Some("siege"), false);
+        assert_eq!(c.labels.len(), 3);
+        assert_eq!(c.labels[0], format!("{}: {}", tr("Mod"), tr("No mod")));
+        assert_eq!(c.labels[2], format!("{}: Осада", tr("Mod")));
+        assert_eq!(c.current, 2);
+        assert_eq!(c.shown(), c.labels[2], "the link shows the mod played");
+        assert_eq!(mod_choice(&mods, None, false).current, 0);
+        assert_eq!(mod_choice(&mods, Some("gone"), false).current, 0, "a mod that is gone is the base game");
+        assert_eq!(mod_id_at(&mods, 0), None);
+        assert_eq!(mod_id_at(&mods, 1).as_deref(), Some("evolution"));
+        assert_eq!(mod_id_at(&mods, 5), None, "an index past the list is the base game");
+    }
+
+    #[test]
+    fn a_mod_being_built_shows_the_build_and_no_choice() {
+        let mods = vec![("evolution".to_string(), razdor::hub::Text { ru: "Эволюция".into(), en: String::new() })];
+        let c = mod_choice(&mods, Some("evolution"), true);
+        assert!(c.busy);
+        assert_eq!(c.shown(), tr("Preparing the mod…"));
     }
 
     /// The equipment hint follows the six-cell switch alone, in both languages.
