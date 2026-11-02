@@ -220,6 +220,13 @@ fn icon_text_shift(indent_w: f32, base: f32) -> f32 {
     (need - indent_w).max(0.0)
 }
 
+/// Where a list row's string starts, from the list's left `list_x` (12 px in): a row with an icon
+/// starts past it (`icon_text_shift`), the others where they were. Both columns draw with it: the
+/// band (the phone held upright) and the landscape panel, which had no shift (a player's report 1477).
+fn row_text_x(list_x: f32, row: &ListRow, indent_w: f32, base: f32) -> f32 {
+    list_x + if row.icon.is_some() { icon_text_shift(indent_w, base) } else { 0.0 }
+}
+
 /// One row of the panel's description list (0x667bdc): its text, ink and the icon drawn
 /// beside it (the first row of a trait).
 #[derive(Clone, Debug, PartialEq)]
@@ -233,16 +240,17 @@ struct ListRow {
 /// hero), then each trait (0x492e70): an empty row first when the list already has rows
 /// (0x47e944), then its text, its icon by its first row. Every text but an empty one
 /// starts with [`INDENT`]; each is word-wrapped to `room` as TextList.AddText 0x47e46c does
-/// (`width`: a character's advance), left aligned.
-fn list_rows(desc: Option<&str>, traits: &[(String, String, Color)], room: f32, width: impl Fn(char) -> f32 + Copy) -> Vec<ListRow> {
+/// (`width`: a character's advance), left aligned; the traits wrap to `trait_room` (their room
+/// less [`icon_text_shift`] where the icon moves their text).
+fn list_rows(desc: Option<&str>, traits: &[(String, String, Color)], room: f32, trait_room: f32, width: impl Fn(char) -> f32 + Copy) -> Vec<ListRow> {
     let indented = |t: &str| if t.is_empty() { String::new() } else { format!("{INDENT}{t}") };
-    let wrap = |t: &str| razdor::dt::markup::wrap(&indented(t), room, width).into_iter().map(|r| r.text);
-    let mut rows: Vec<ListRow> = desc.map(|d| wrap(d).map(|text| ListRow { text, ink: CREAM, icon: None }).collect()).unwrap_or_default();
+    let wrap = |t: &str, room: f32| razdor::dt::markup::wrap(&indented(t), room, width).into_iter().map(|r| r.text).collect::<Vec<String>>();
+    let mut rows: Vec<ListRow> = desc.map(|d| wrap(d, room).into_iter().map(|text| ListRow { text, ink: CREAM, icon: None }).collect()).unwrap_or_default();
     for (art, text, ink) in traits {
         if !rows.is_empty() {
             rows.push(ListRow { text: String::new(), ink: *ink, icon: None });
         }
-        for (i, text) in wrap(text).enumerate() {
+        for (i, text) in wrap(text, trait_room).into_iter().enumerate() {
             rows.push(ListRow { text, ink: *ink, icon: (i == 0).then(|| art.clone()) });
         }
     }
@@ -900,7 +908,7 @@ fn band_text_fits(s: &Sheet, content: &Content, txt: Rect, base: f32, px: f32) -
     });
     let width = |c: char| measure(c.encode_utf8(&mut [0; 4]), size).width;
     let shift = icon_text_shift(measure(INDENT, size).width, base);
-    let trait_rows = list_rows(None, &traits_of(s), 238.0 * base - shift, width).len();
+    let trait_rows = list_rows(None, &traits_of(s), 238.0 * base - shift, 238.0 * base - shift, width).len();
     let row_h = 14.0 * px;
     // The name's block (34 px) under its top and the level line (13 px) above the first stat row.
     let stat_y = txt.y + 46.0 * px;
@@ -961,10 +969,10 @@ fn draw_band_in_face(assets: &Assets, content: &Content, band: Rect, s: &Sheet, 
     let desc = s.hero.is_none().then(|| content.unit(s.kind).description.as_str());
     let width = |c: char| measure(c.encode_utf8(&mut [0; 4]), size).width;
     let room = 238.0 * base;
-    let desc_rows = list_rows(desc, &[], room, width);
+    let desc_rows = list_rows(desc, &[], room, room, width);
     // A trait's text starts after its icon (`icon_text_shift`): its wrap room shrinks by the same.
     let shift = icon_text_shift(measure(INDENT, size).width, base);
-    let trait_rows = list_rows(None, &traits, room - shift, width);
+    let trait_rows = list_rows(None, &traits, room - shift, room - shift, width);
     let rows_n = stats.len() + s.status.len();
     let natural_end = stat_y + rows_n as f32 * row_h;
     let avail = ((txt.bottom() - 16.0 * px - natural_end) / row_h).floor().max(0.0) as usize;
@@ -1044,11 +1052,15 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, background: Rect, s
     let desc = s.hero.is_none().then(|| content.unit(s.kind).description.as_str());
     let width = |c: char| measure(c.encode_utf8(&mut [0; 4]), size).width;
     let list_width = (238.0 - if simultaneous { 16.0 } else { 0.0 }) * px;
-    let mut rows = list_rows(desc, &traits, list_width, width);
+    // A trait's text starts after its icon (`icon_text_shift`), as in the band: its wrap room
+    // shrinks by the same (a wide phone held sideways had the text under the icons, 1477).
+    let indent_w = measure(INDENT, size).width;
+    let shift = icon_text_shift(indent_w, px);
+    let mut rows = list_rows(desc, &traits, list_width, list_width - shift, width);
     let stats = stat_lines(content, s);
     let stat_rows = stats.len() + s.status.len();
     // The description's rows are the first of the list, as wrapped at the list's width.
-    let mut desc_rows = desc.map_or(0, |d| list_rows(Some(d), &[], list_width, width).len());
+    let mut desc_rows = desc.map_or(0, |d| list_rows(Some(d), &[], list_width, list_width, width).len());
     let trait_rows = rows.len() - desc_rows;
     // The original stacks it all up from the bottom with no limit. Razdor keeps the name
     // under the top quarter: a mod's long texts cut the description short (a choice). The
@@ -1129,7 +1141,7 @@ fn draw_in_face(assets: &Assets, content: &Content, r: Rect, background: Rect, s
     }
     for (i, row) in rows.iter().enumerate().skip(desc_rows) {
         if !row.text.trim().is_empty() {
-            shadow_text(&row.text, list_x, line(row_top(i)), size, row.ink);
+            shadow_text(&row.text, row_text_x(list_x, row, indent_w, px), line(row_top(i)), size, row.ink);
         }
     }
     clicked
@@ -1178,6 +1190,34 @@ mod tests {
         assert_eq!(icon_text_shift(32.0, 1.0), 0.0);
         assert_eq!(icon_text_shift(60.0, 1.0), 0.0);
         assert!((icon_text_shift(0.0, 2.0) - 64.0).abs() < 1e-4, "scales with the band's base");
+    }
+
+    /// The landscape column (`draw_in_face`, a wide phone held sideways): a trait row's text starts
+    /// past its icon at a narrow indent (27 px here, under the icon's 32), wraps in the room that
+    /// leaves, and its visible text (after the indent's spaces) clears the icon's right edge by 3 px.
+    /// A row without an icon, and a wide indent, do not move.
+    #[test]
+    fn the_landscape_column_moves_its_trait_text_past_its_icon() {
+        let base = 2.7;
+        let char_w = 4.5 * base;
+        let width = |_c: char| char_w;
+        let indent_w = 6.0 * char_w;
+        let list_x = 12.0 * base;
+        let room = 238.0 * base;
+        let shift = icon_text_shift(indent_w, base);
+        assert!(shift > 0.0);
+        let traits = vec![("Bonus15".to_string(), "Гарнизон - персонаж находясь в замке и защищает его".to_string(), RED_TEXT)];
+        let rows = list_rows(None, &traits, room, room - shift, width);
+        assert!(rows.len() > 1, "the text wraps");
+        assert_eq!(rows[0].icon.as_deref(), Some("Bonus15"));
+        assert!(list_x + shift + indent_w >= 44.0 * base - 1e-3, "the visible text clears the icon");
+        assert!((row_text_x(list_x, &rows[0], indent_w, base) - (list_x + shift)).abs() < 1e-4);
+        for row in &rows {
+            assert!(row.text.chars().count() as f32 * char_w <= room - shift + 1e-3, "{:?} fits the room left", row.text);
+        }
+        let plain = ListRow { text: "      Knows".to_string(), ink: CREAM, icon: None };
+        assert_eq!(row_text_x(list_x, &plain, indent_w, base), list_x);
+        assert_eq!(row_text_x(list_x, &rows[0], 32.0 * base, base), list_x);
     }
 
     /// Razdor's deviation: a negative vampirism reads «Кровопотеря», a positive one keeps the
@@ -1527,14 +1567,14 @@ mod tests {
             ("Bonus15".to_string(), "Garrison text".to_string(), RED_TEXT),
             ("Bonus-NoPayment".to_string(), String::new(), BLUE_TEXT),
         ];
-        let rows = list_rows(Some("Knows every corner"), &traits, 14.0, width);
+        let rows = list_rows(Some("Knows every corner"), &traits, 14.0, 14.0, width);
         let texts: Vec<&str> = rows.iter().map(|r| r.text.as_str()).collect();
         assert_eq!(texts, ["      Knows", "every corner", "", "      Garrison", "text", "", ""]);
         assert_eq!(rows[3].icon.as_deref(), Some("Bonus15"));
         assert_eq!(rows[4].icon, None);
         assert_eq!(rows[6].icon.as_deref(), Some("Bonus-NoPayment"));
         // A hero has no description: its first trait opens the list without an empty row.
-        let hero = list_rows(None, &traits[..1], 100.0, width);
+        let hero = list_rows(None, &traits[..1], 100.0, 100.0, width);
         assert_eq!(hero[0].text, "      Garrison text");
     }
 
