@@ -1495,6 +1495,12 @@ pub const RED_TEXT: Color = Color::new(1.0, 0.33, 0.25, 1.0);
 /// less 152 and blue less 159 (4dc051), so white ink becomes (255, 103, 96).
 pub const WARNING_INK: Color = Color::new(1.0, 103.0 / 255.0, 96.0 / 255.0, 1.0);
 pub const ORANGE_TEXT: Color = Color::new(1.0, 0.70, 0.25, 1.0);
+/// The town's parchment tab inks (`building_view::tab_button`): the picked tab in red, the others
+/// in the parchment's brown. The diary's tab strip (`tab_strip`) draws its labels in the same inks.
+pub const PARCHMENT_INK: Color = Color::new(0.45, 0.28, 0.14, 1.0);
+pub const TAB_RED: Color = Color::new(0.75, 0.18, 0.12, 1.0);
+/// A parchment tab's label under the pointer: the parchment brown a step darker and redder.
+pub const TAB_INK_HOVER: Color = Color::new(0.34, 0.18, 0.09, 1.0);
 
 /// A window's or panel's background.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1636,8 +1642,10 @@ pub fn fit_tab_size(size: f32, min: f32, widths: &[f32], avail: f32) -> f32 {
 }
 
 /// A strip of tabs on a parchment panel with a silver frame (the desktop diary's tabs in the phone's
-/// style): `labels` one per tab in the diary's bold face, the `picked` one in gold with a gold
-/// underline, the others dim and ink under the pointer; thin gold dividers between the tabs. The
+/// style): `labels` one per tab in the diary's bold face, the `picked` one in the town's red
+/// (`TAB_RED`) with a red underline, the others in the parchment brown (`PARCHMENT_INK`), a darker
+/// one under the pointer (`TAB_INK_HOVER`); the labels are drawn as the town's tabs draw theirs (a
+/// cream highlight under the ink, no dark shadow). Thin gold dividers between the tabs. The
 /// labels take `size` px, shrunk together to fit the narrowest tab but never below `min`. Returns
 /// the tab a tap landed on (its finger area, `widgets::finger_hit`), if any. Draw it at the caller's
 /// legacy metrics (`dt_font::legacy_metrics_if`), so its sizes stick.
@@ -1658,13 +1666,17 @@ pub fn tab_strip(r: Rect, labels: &[&str], picked: usize, size: f32, min: f32) -
     for (i, (label, cell)) in labels.iter().zip(&cells).enumerate() {
         let over = !input_blocked() && mouse_in(cell.x, cell.y, cell.w, cell.h);
         let tap = !input_blocked() && tapped_in(finger_hit(*cell));
-        let ink = if i == picked { super::widgets::ACCENT } else if over { super::widgets::INK } else { super::widgets::DIM };
+        let ink = if i == picked { TAB_RED } else if over { TAB_INK_HOVER } else { PARCHMENT_INK };
         let (cx, base) = (cell.x + cell.w / 2.0, cell.y + cell.h / 2.0 + size * 0.35);
         with_original_face(Face::Bold, || {
-            shadow_centered(label, cx, base, size, ink);
+            // The town's tab text (`building_view::tab_button`): `text`, a cream highlight a step
+            // down and right of the ink, no dark shadow.
+            let w = measure(label, size).width;
+            let x = cx - w / 2.0;
+            text(label, x + 1.5 * k, base + 1.5 * k, size, Color::new(1.0, 0.95, 0.85, 0.5));
+            text(label, x, base, size, ink);
             if i == picked {
-                let w = measure(label, size).width;
-                draw_line(cx - w / 2.0, cell.bottom() - 4.0 * k, cx + w / 2.0, cell.bottom() - 4.0 * k, 2.0 * k, GOLD);
+                draw_line(cx - w / 2.0, cell.bottom() - 4.0 * k, cx + w / 2.0, cell.bottom() - 4.0 * k, 2.0 * k, TAB_RED);
             }
         });
         if i > 0 {
