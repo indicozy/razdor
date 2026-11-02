@@ -789,4 +789,176 @@ mod tests {
             assert_eq!(run.ending.as_deref(), Some(ending), "{}", run.text());
         }
     }
+
+    /// A cell the map or its story names: one cell, or an area `(x, y, w, h)`.
+    enum Named {
+        Cell((i32, i32)),
+        Area(i32, i32, i32, i32),
+    }
+
+    fn pair(v: &toml::Value) -> Option<(i32, i32)> {
+        let a = v.as_array()?;
+        match a.as_slice() {
+            [x, y] => Some((x.as_integer()? as i32, y.as_integer()? as i32)),
+            _ => None,
+        }
+    }
+
+    fn quad(v: &toml::Value) -> Option<(i32, i32, i32, i32)> {
+        let a = v.as_array()?;
+        match a.as_slice() {
+            [x, y, w, h] => Some((x.as_integer()? as i32, y.as_integer()? as i32, w.as_integer()? as i32, h.as_integer()? as i32)),
+            _ => None,
+        }
+    }
+
+    /// The cells a story names, walked through its tables: `at` of a `hero_enters` is strict (the
+    /// hero stands there), `hero_at` too, an area is strict; every other cell (army cells, goals,
+    /// patrols, spawns, teleports) is loose: the cell or one next to it.
+    fn walk_cells(v: &toml::Value, label: &str, out: &mut Vec<(String, Named, bool)>) {
+        match v {
+            toml::Value::Table(t) => {
+                let enters = t.get("event").and_then(|e| e.as_str()) == Some("hero_enters");
+                for (k, val) in t {
+                    if let Some(c) = pair(val) {
+                        out.push((format!("{label}: `{k}`"), Named::Cell(c), (k == "at" && enters) || k == "hero_at"));
+                    } else if let Some(a) = quad(val) {
+                        if k == "at" || k == "hero_at" {
+                            out.push((format!("{label}: area `{k}`"), Named::Area(a.0, a.1, a.2, a.3), true));
+                        }
+                    } else if let Some(list) = val.as_array().filter(|l| !l.is_empty() && l.iter().all(|p| pair(p).is_some())) {
+                        for p in list {
+                            out.push((format!("{label}: `{k}`"), Named::Cell(pair(p).unwrap()), false));
+                        }
+                    } else {
+                        walk_cells(val, label, out);
+                    }
+                }
+            }
+            toml::Value::Array(a) => {
+                for x in a {
+                    walk_cells(x, label, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Every cell the map names: its buildings, armies and `[[point]]`s, and the cells of the
+    /// triggers that apply to it (a trigger with `map` only on that map).
+    fn named_cells(root: &std::path::Path, map: &str) -> Vec<(String, Named, bool)> {
+        let mut out = Vec::new();
+        let text = std::fs::read_to_string(root.join("maps").join(map).join("map.toml")).unwrap();
+        let spec: toml::Value = toml::from_str(&text).unwrap();
+        for (table, strict) in [("building", true), ("army", false), ("point", true)] {
+            for item in spec.get(table).and_then(|v| v.as_array()).into_iter().flatten() {
+                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                let cell = pair(item.get("cell").unwrap()).unwrap();
+                out.push((format!("{table} `{id}`"), Named::Cell(cell), strict));
+            }
+        }
+        let mut files: Vec<_> = std::fs::read_dir(root.join("triggers")).unwrap().map(|e| e.unwrap().path()).collect();
+        files.sort();
+        for file in files.iter().filter(|f| f.extension().is_some_and(|e| e == "toml")) {
+            let spec: toml::Value = toml::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
+            for trigger in spec.get("trigger").and_then(|v| v.as_array()).into_iter().flatten() {
+                let on = trigger.get("map").and_then(|v| v.as_str());
+                if on.is_some_and(|m| m != map) {
+                    continue;
+                }
+                let id = trigger.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+                walk_cells(trigger, &format!("trigger `{id}`"), &mut out);
+            }
+        }
+        out
+    }
+
+    /// The cells of the seven campaign maps of «Пепельная Марка» that the hero's start cannot reach on
+    /// foot, as `map: what` (sorted). They lie beyond a river's fords: the engine blocks walking on
+    /// fords (`docs/reference/original-mechanics/world.md`, the terrain table: shallows / fords, on
+    /// foot blocked), and these maps have no bridge building yet. The list is pinned: an unreached
+    /// cell that is not in it fails the test, and a line that is no longer unreached (a bridge) must be
+    /// taken out. Brod's reedmere and marsh plea, Marka's east-bank sites, and the barrow palace of
+    /// chapter 5 are the ones it holds.
+    const UNREACHED_ACROSS_FORDS: &[&str] = &[
+        "barrows: army `barrow_king`",
+        "barrows: building `throne`",
+        "barrows: point ``",
+        "barrows: trigger `bw_arrive_companies`: `at`",
+        "barrows: trigger `bw_arrive_marsh`: `at`",
+        "barrows: trigger `bw_arrive_order`: `at`",
+        "barrows: trigger `bw_fate_ilm_heresy`: area `at`",
+        "barrows: trigger `bw_fate_ilm_inq`: area `at`",
+        "barrows: trigger `bw_fate_kord`: area `at`",
+        "barrows: trigger `bw_fate_tess`: area `at`",
+        "barrows: trigger `bw_fate_varga`: area `at`",
+        "barrows: trigger `bw_grey_throne`: `at`",
+        "barrows: trigger `bw_hill_1`: area `at`",
+        "barrows: trigger `bw_hill_2`: area `at`",
+        "barrows: trigger `bw_hill_3`: area `at`",
+        "barrows: trigger `bw_hill_4`: area `at`",
+        "barrows: trigger `bw_host_1`: `at`",
+        "barrows: trigger `bw_host_2`: `at`",
+        "barrows: trigger `bw_host_4`: `at`",
+        "barrows: trigger `bw_host_6`: `at`",
+        "barrows: trigger `bw_host_7`: `at`",
+        "barrows: trigger `bw_march_companies`: `go_to`",
+        "barrows: trigger `bw_march_marsh`: `go_to`",
+        "barrows: trigger `bw_march_order`: `go_to`",
+        "barrows: trigger `bw_throne`: `at`",
+        "brod: army `wraiths`",
+        "brod: building `reedmere`",
+        "brod: trigger `marsh_plea`: area `at`",
+        "marka: army `wraiths`",
+        "marka: building `abbey`",
+        "marka: building `greyreed`",
+        "marka: building `shrine`",
+        "marka: trigger `m_host_5_gate`: `at`",
+        "marka: trigger `m_ilm_abbey`: area `at`",
+        "marka: trigger `m_marsh_offer`: area `at`",
+        "marka: trigger `m_ritual_offer`: `at`",
+        "marka: trigger `m_ritual_open`: `teleport_hero`",
+        "marka: trigger `m_setup`: `patrol`",
+        "marka: trigger `m_setup`: `patrol`",
+        "marka: trigger `m_shrine_offer`: area `at`",
+        "marka: trigger `m_stones_nw`: `at`",
+        "marka: trigger `m_stones_se`: `at`",
+    ];
+
+    /// The cells of the seven campaign maps of «Пепельная Марка» the hero's start reaches on foot, by
+    /// the engine's own path (`TileMap::path`) on the compiled scenario: a building's cell, a point and
+    /// a `hero_enters` cell strictly; an area on any of its cells; the other named cells on the cell or
+    /// one next to it. Skipped without `RAZDOR_DT_DIR`.
+    #[test]
+    fn the_cells_of_the_campaign_maps_of_pepelnaya_marka_are_reachable_from_the_hero() {
+        let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+        let install = DtInstall::load(Path::new(&dir)).unwrap();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/packs/pepelnaya-marka");
+        let pkg = Package::parse(Files::from_dir(&root).unwrap()).0;
+        let mut failures = Vec::new();
+        for map in ["brod", "marka", "abbey", "salt", "camp", "gates", "barrows"] {
+            let compiled = compile::compile(&pkg, &install, "en", map).unwrap_or_else(|r| panic!("{}", r.to_text()));
+            let opened = open::build(&pkg, open::package_hash(&pkg.files), Path::new(""), map, compiled, "en").unwrap_or_else(|e| panic!("{map}: {e}"));
+            let content = Arc::new(Content::from_dt(&install).with_package(opened.units.clone(), opened.items.clone()));
+            let class = opened.scenario.header.first_offered_class().map_or(HeroClass::Knight, |k| HeroClass::ALL[k]);
+            let game = Game::from_scenario(content, &opened.scenario, class);
+            let foot = &game.world.map;
+            let start = game.tile();
+            let reached = |t: (i32, i32)| t == start || !foot.path(start, t).is_empty();
+            for (what, named, strict) in named_cells(&root, map) {
+                let ok = match named {
+                    Named::Cell(c) if strict => reached(c),
+                    Named::Cell(c) => (-1..=1).any(|dy| (-1..=1).any(|dx| reached((c.0 + dx, c.1 + dy)))),
+                    Named::Area(x, y, w, h) => (y..y + h).any(|yy| (x..x + w).any(|xx| reached((xx, yy)))),
+                };
+                if !ok {
+                    failures.push(format!("{map}: {what}"));
+                }
+            }
+        }
+        failures.sort();
+        let mut known: Vec<String> = UNREACHED_ACROSS_FORDS.iter().map(|k| k.to_string()).collect();
+        known.sort();
+        assert_eq!(failures, known, "the unreached cells differ from UNREACHED_ACROSS_FORDS: a new one, or a pinned one now reached");
+    }
 }

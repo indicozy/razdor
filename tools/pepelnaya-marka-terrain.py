@@ -75,7 +75,58 @@ def paint():
     fill(40, 23, 40, 28, "road")
     fill(11, 23, 22, 23, "road")
     fill(11, 23, 11, 36, "road")
-    return cells
+    return blend(cells, [("dry_plain", "clay_soil", 0.62, 7, 101), ("dry_plain", "scorched_land", 0.70, 9, 103), ("scorched_land", "dry_plain", 0.64, 8, 107), ("grass_lowland", "grass_plain", 0.55, 8, 109)], ("dry_plain", "sand_dunes", 211))
+
+
+# Terrain variety: natural patches in the big uniform fields, and a ragged beach where land meets
+# water. Only passable land kinds change into each other (never a road, water, marsh or impassable
+# kind), so the routes, fords and story cells stay as they are. The noise is value noise, stdlib only.
+def _hash01(x, y, salt):
+    h = ((x * 73856093) ^ (y * 19349663) ^ (salt * 83492791)) & 0xFFFFFFFF
+    h = ((h ^ (h >> 13)) * 0x5BD1E995) & 0xFFFFFFFF
+    h ^= h >> 15
+    h = (h * 0x27D4EB2D) & 0xFFFFFFFF
+    h ^= h >> 15
+    return h / 4294967296.0
+
+
+def _noise(x, y, size, salt):
+    """Value noise in [0, 1] at a scale of `size` cells (bilinear, smoothed)."""
+    gx, gy = x / size, y / size
+    ix, iy = int(gx), int(gy)
+    fx, fy = gx - ix, gy - iy
+    fx, fy = fx * fx * (3 - 2 * fx), fy * fy * (3 - 2 * fy)
+    a, b = _hash01(ix, iy, salt), _hash01(ix + 1, iy, salt)
+    c, d = _hash01(ix, iy + 1, salt), _hash01(ix + 1, iy + 1, salt)
+    top, bottom = a + (b - a) * fx, c + (d - c) * fx
+    return top + (bottom - top) * fy
+
+
+def blend(cells, rules, shore):
+    """`rules`: (base, into, threshold, size, salt): where the noise is above the threshold, a `base`
+    cell takes the kind `into` (patches of clay in the dry plain, forest floor in the grass). `shore`:
+    (base, into, salt): a `base` cell next to water takes `into` where the noise is high (a ragged beach)."""
+    h, w = len(cells), len(cells[0])
+    for base, into, threshold, size, salt in rules:
+        b, t = CODE[base], CODE[into]
+        out = [row[:] for row in cells]
+        for y in range(h):
+            for x in range(w):
+                if cells[y][x] == b and _noise(x, y, size, salt) > threshold:
+                    out[y][x] = t
+        cells = out
+    water = {CODE[k] for k in ("coastal_water", "deep_sea", "shallows_fords")}
+    base, into, salt = shore
+    b, t = CODE[base], CODE[into]
+    out = [row[:] for row in cells]
+    for y in range(h):
+        for x in range(w):
+            if cells[y][x] != b or _noise(x, y, 2.5, salt) < 0.45:
+                continue
+            if any(0 <= y + dy < h and 0 <= x + dx < w and cells[y + dy][x + dx] in water
+                   for dy in (-1, 0, 1) for dx in (-1, 0, 1)):
+                out[y][x] = t
+    return out
 
 
 def png(cells):
