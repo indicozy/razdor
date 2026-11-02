@@ -45,6 +45,44 @@ pub enum Stack {
     /// (`building_picture`), where a selected or pointed unit's card shows, then the same panes
     /// and tab row as `Building`, all moved down by the picture pane (`shift_of`).
     Tall,
+    /// The market on a phone held upright (the owner's layout): the item description as a
+    /// full-width strip on top, then the list's titles and category row, the list, one row of
+    /// money and buttons, then the town's tab row and Exit (`market_panes`). The city's
+    /// description panel is not drawn in this layout.
+    Market,
+}
+/// The market's stacked layout (design px, H the window's height): the heading at 28, the
+/// description strip from 48 (its height `MARKET_STRIP_BASE`, plus 30% of the window's extra
+/// height), the list's titles, the category row, the list (rows of `PHONE_ROW_H`, about 42 dp at
+/// the phone's scale, as many as fit: at least `PHONE_MIN_ROWS`), the money and buttons row
+/// (H − 210 to H − 146), then the tab row (H − 140) and Exit.
+const MARKET_STRIP_BASE: f32 = 180.0;
+/// The list's row height in design px, and the fewest rows it shows.
+const PHONE_ROW_H: f32 = 64.0;
+const PHONE_MIN_ROWS: usize = 4;
+/// The market window's lowest height (design px): the four rows at the base strip.
+const MARKET_MIN_PH: f32 = 792.0;
+/// A few dp kept clear above and below the market window (the status bar's inset, the bottom bar).
+const MARKET_MARGIN_DP: f32 = 4.0;
+
+/// The market window's top on a phone: the top safe area and a few dp under it (px).
+fn market_top() -> f32 {
+    super::display::safe_area().top + MARKET_MARGIN_DP * super::display::dp_px().unwrap_or(0.0)
+}
+
+/// The market window's height in design px: the phone's height from its top to a few dp above the
+/// bottom bar, at the width's scale (`PW`), never below `MARKET_MIN_PH`.
+fn market_height() -> f32 {
+    // The unit tests have no window: the lowest height (their geometry is the fixed one).
+    if cfg!(test) {
+        return MARKET_MIN_PH;
+    }
+    let (sw, sh) = (screen_width(), screen_height());
+    if sw <= 0.0 || sh <= 0.0 {
+        return MARKET_MIN_PH;
+    }
+    let avail = sh - market_top() - chrome::bar_height() - MARKET_MARGIN_DP * super::display::dp_px().unwrap_or(0.0);
+    (avail / (sw / PW)).max(MARKET_MIN_PH)
 }
 /// The building window's height: the panes at the landscape height, then the tab row and Exit
 /// under them (746 design px; the 1080×2376 phone's window at the width's scale).
@@ -100,6 +138,7 @@ fn height_of(st: Stack) -> f32 {
         Stack::Building => building_ph(),
         Stack::Army => ARMY_PH,
         Stack::Tall => building_ph() + shift_of(Stack::Tall),
+        Stack::Market => market_height(),
     }
 }
 
@@ -109,6 +148,7 @@ fn shift_of(st: Stack) -> f32 {
         Stack::Building => 0.0,
         Stack::Army => BAND_H,
         Stack::Tall => picture_h() + PICTURE_GAP,
+        Stack::Market => 0.0,
     }
 }
 
@@ -126,6 +166,62 @@ pub fn portrait() -> bool {
 /// a phone held upright).
 pub fn tall() -> bool {
     portrait() && stack() == Stack::Tall
+}
+
+/// Whether the window drawn now is the market on a phone held upright (`Stack::Market`).
+pub fn market_stacked() -> bool {
+    portrait() && stack() == Stack::Market
+}
+
+/// The market's rectangles in the stacked layout (`Stack::Market`), absolute on the screen.
+pub struct MarketPanes {
+    /// The heading's centre line.
+    pub heading_y: f32,
+    /// The item description strip, full width.
+    pub strip: Rect,
+    /// The list's titles (their filter line takes the same place).
+    pub head: Rect,
+    /// The category row of group buttons.
+    pub group: Rect,
+    /// The list's frame: `rows` rows of `row_h` design px each.
+    pub list: Rect,
+    /// How many rows the list shows, and each row's height in design px.
+    pub rows: usize,
+    pub row_h: f32,
+    /// The money and buttons row: «Инвентарь», the money, «Купить», «Торговая лавка».
+    pub buttons: [Rect; 4],
+}
+
+/// The market's panes of the window `win` at scale `k` (see [`MarketPanes`]).
+pub fn market_panes(win: Rect) -> MarketPanes { market_panes_in(win, chrome::k()) }
+
+fn market_panes_in(win: Rect, k: f32) -> MarketPanes {
+    let r = |x: f32, y: f32, w: f32, h: f32| Rect::new(win.x + x * k, win.y + y * k, w * k, h * k);
+    // The window's height in design px: the extra over the lowest height goes 30% to the strip, 70% to the list.
+    let h = win.h / k;
+    let extra = (h - MARKET_MIN_PH).max(0.0);
+    let strip_h = MARKET_STRIP_BASE + 0.3 * extra;
+    let head_y = 48.0 + strip_h + 6.0;
+    let group_y = head_y + 21.0;
+    let list_top = group_y + 65.0;
+    let buttons_y = h - 210.0;
+    let list_h = (buttons_y - 6.0) - list_top;
+    let rows = ((list_h / PHONE_ROW_H).floor() as usize).max(PHONE_MIN_ROWS);
+    MarketPanes {
+        heading_y: win.y + 45.0 * k,
+        strip: r(2.0, 48.0, 586.0, strip_h),
+        head: r(2.0, head_y, 586.0, 18.0),
+        group: r(2.0, group_y, 586.0, 60.0),
+        list: r(2.0, list_top, 586.0, list_h),
+        rows,
+        row_h: list_h / rows as f32,
+        buttons: [
+            r(2.0, buttons_y, 130.0, 64.0),
+            r(146.0, buttons_y, 112.0, 64.0),
+            r(272.0, buttons_y, 104.0, 64.0),
+            r(390.0, buttons_y, 198.0, 64.0),
+        ],
+    }
 }
 
 /// A design position moved for the stacked layout: the right side (x ≥ 247) goes from its
@@ -171,7 +267,13 @@ fn left_in(win: Rect, k: f32, portrait: bool) -> Rect {
     }
     rect_in(win, k, 2.0, 27.0, 244.0, 571.0, portrait)
 }
-fn upper_in(win: Rect, k: f32, portrait: bool) -> Rect { rect_in(win, k, 248.0, 28.0, 586.0, upper_height(), portrait) }
+fn upper_in(win: Rect, k: f32, portrait: bool) -> Rect {
+    // The market stacked: its description strip is the top pane.
+    if portrait && stack() == Stack::Market {
+        return market_panes_in(win, k).strip;
+    }
+    rect_in(win, k, 248.0, 28.0, 586.0, upper_height(), portrait)
+}
 fn divider_in(win: Rect, k: f32, portrait: bool) -> Rect { rect_in(win, k, 248.0, 28.0 + upper_height(), 586.0, DIVIDER, portrait) }
 fn lower_in(win: Rect, k: f32, portrait: bool) -> Rect { rect_in(win, k, 248.0, lower_y(), 586.0, lower_height(), portrait) }
 
@@ -187,6 +289,7 @@ fn portrait_k_for(st: Stack) -> f32 {
 fn top_of(st: Stack) -> f32 {
     match st {
         Stack::Tall => super::display::safe_area().top,
+        Stack::Market => market_top(),
         _ => 0.0,
     }
 }
@@ -511,6 +614,11 @@ pub fn window() -> Rect {
             let y = (top + ((sh - top - chrome::bar_height() - h) / 2.0).max(2.0)).round();
             return Rect::new(((sw - w) / 2.0).round(), y, w, h);
         }
+        if stack() == Stack::Market {
+            // The phone's full height: from the top safe area (a few dp in) to a few dp above the bottom bar.
+            let sw = screen_width();
+            return Rect::new(((sw - w) / 2.0).round(), market_top().round(), w, h);
+        }
         return centred(w, h);
     }
     landscape_window()
@@ -635,6 +743,12 @@ pub fn frame(win: Rect) {
     // The caller's window is the one it gave `chrome::window_with_title_color`: on a phone that
     // strip grew upward, and the frame follows it.
     chrome::window_frames_titled(win, px);
+    if market_stacked() {
+        // The market's one line: under its description strip, across the window.
+        let y = market_panes_in(win, k).strip.bottom();
+        chrome::silver_line(vec2(win.x + 2.0 * k, y), vec2(win.right() - 2.0 * px, y), 2.0 * px);
+        return;
+    }
     let strip = divider(win);
     let from = if portrait() {
         seam(win);
@@ -823,7 +937,31 @@ mod tests {
         assert_eq!(at_in(w, 1.0, 100.0, 100.0, 10.0, 10.0, true).x, 10.0 + 271.0, "the old left remap");
     }
 
-    fn tall_win() -> Rect { Rect::new(10.0, 20.0, 590.0, height_of(Stack::Tall)) }
+    /// The phone market (`Stack::Market`): its panes stack in order above the tab row, the list
+    /// holds its rows at 40 dp or more of the phone's scale (58 design px at 1.43 design px per
+    /// dp), the buttons row is 44 dp or more, and the window's height ends under Exit.
+    #[test]
+    fn the_phone_market_stacks_its_panes_above_the_tabs() {
+        let w = Rect::new(0.0, 0.0, 590.0, height_of(Stack::Market));
+        let p = within(Stack::Market, || market_panes_in(w, 1.0));
+        let tabs = within(Stack::Market, tabs_top);
+        assert!(p.strip.y >= 28.0 && p.strip.bottom() < p.head.y, "the strip is above the list's titles");
+        assert!(p.head.bottom() < p.group.y && p.group.bottom() < p.list.y, "titles, then the category row, then the list");
+        assert!((p.rows as f32 * p.row_h - p.list.h).abs() < 0.01, "the rows fill the list");
+        assert!(p.rows >= PHONE_MIN_ROWS && p.row_h >= 40.0 * 1.43, "at least four rows, 40 dp or more each");
+        assert!(p.list.bottom() < p.buttons[0].y, "the buttons row is under the list");
+        assert!(p.buttons.iter().all(|b| b.y == p.buttons[0].y && b.h >= 44.0 * 1.43 - 1.0), "the buttons row is one row, 44 dp or more");
+        assert!(p.buttons[3].right() <= 588.0 + 0.01, "the four buttons stay in the window's width");
+        assert!(p.buttons[0].bottom() + EDGE <= tabs + 0.01, "the tab row is under the buttons");
+        assert_eq!(height_of(Stack::Market), tabs + 2.0 * TAB_H + 2.0 * EDGE, "the window ends under Exit");
+        // A taller window (the phone's full height) shows more rows, and the strip grows a little.
+        let tall = Rect::new(0.0, 0.0, 590.0, MARKET_MIN_PH + 300.0);
+        let q = within(Stack::Market, || market_panes_in(tall, 1.0));
+        assert!(q.rows > p.rows && q.strip.h > p.strip.h, "the extra height goes to the list and the strip");
+        assert!(q.buttons[0].bottom() + EDGE <= MARKET_MIN_PH + 300.0 - 2.0 * TAB_H - 2.0 * EDGE + 0.01, "the buttons stay above the tabs");
+    }
+
+    fn tall_win() -> Rect {Rect::new(10.0, 20.0, 590.0, height_of(Stack::Tall)) }
 
     /// The tall building window (barracks and garrison, stacked): a picture pane on top, then the
     /// panes and the tab row as the building window has them, moved down by the picture pane.
