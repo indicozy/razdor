@@ -511,16 +511,18 @@ pub fn spell_tip_card_padded(game: &Game, s: &SpellDef, r: Rect, o: f32, text: f
     super::typography::Role::Body.with(|| {
         let red = game.mana < game.cast_cost(s).mana;
         card_paper(r, card_fill(!red, false));
-        // The picture and the text as one block, centred on the card: equal room left and right.
+        // The picture and the text with even room around them: left of the picture, between the
+        // picture and the text, and right of the text are the same (the owner's note of 2026-11-02).
         let k = super::chrome::k();
         let side = tip_side(o);
-        let inner_w = r.w - 2.0 * pad;
-        let room = inner_w - 8.0 * k - side;
+        let room = r.w - 2.0 * pad - side;
         // A little slack over the measured width, so no line wraps that fits the full room.
         let text_w = (card_text_width(game, s, room, text) + 16.0 * k).min(room);
-        let block_w = 8.0 * k + side + text_w;
-        let x = r.x + (r.w - block_w) / 2.0 - 6.0 * k;
-        spell_card_content(game, s, Rect::new(x, r.y + pad, block_w + 6.0 * k, r.h - 2.0 * pad), true, text, side);
+        let gap = ((r.w - side - text_w) / 3.0).max(0.0);
+        let inner = Rect::new(r.x, r.y + pad, r.w, r.h - 2.0 * pad);
+        let icon = Rect::new(r.x + gap, inner.y + (inner.h - side) / 2.0, side, side);
+        super::chrome::spell_icon(s, icon);
+        card_text(game, s, Rect::new(icon.x + side + gap, inner.y, text_w, inner.h), true, text);
     });
 }
 
