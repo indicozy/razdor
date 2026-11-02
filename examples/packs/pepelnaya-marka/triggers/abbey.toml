@@ -98,7 +98,8 @@ then = [
 ]
 
 # The siege: from the second week the dead are sent at the abbey. This is the one big battle of the
-# chapter, a DT battle with an `attack` goal; the Lua siege (format 2.0.0, slice 3) replaces it.
+# chapter: the dead army's `battle = "lua:siege"` (maps/abbey/map.toml) makes it a field battle on
+# the abbey's wall (scripts/siege.lua), with the `attack` goal below.
 [[trigger]]
 id = "abbey_siege_start"
 map = "abbey"

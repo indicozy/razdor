@@ -148,13 +148,15 @@ troops = [
     { unit = "dt:monk", level = 1, count = 2 },
 ]
 
-# The dead of the barrows: they walk their patrol until the story sends them at the abbey.
+# The dead of the barrows: they walk their patrol until the story sends them at the abbey. Their
+# fight with the hero is the siege (scripts/siege.lua): a field battle on the abbey's wall.
 [[army]]
 id = "dead_wave"
 name = "abbey.army.dead_wave.name"
 cell = [84, 44]
 faction = "enemy"
 model = "zombies"
+battle = "lua:siege"
 troops = [
     { unit = "dt:deadman", level = 1, count = 4 },
     { unit = "dt:ghoul", level = 1, count = 2 },

@@ -1,0 +1,6 @@
+# The siege's test map (maps/siege-test): the field battle «lua:siege» starts at the game's start.
+[[trigger]]
+id = "siege_test_start"
+map = "siege-test"
+when = { event = "game_start" }
+then = [ { start_battle = "dead", rules = "lua:siege" } ]

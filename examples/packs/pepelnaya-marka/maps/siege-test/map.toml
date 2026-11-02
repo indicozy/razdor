@@ -1,0 +1,33 @@
+# The siege's test map: a 20×12 meadow with the hero's army and one dead army. The trigger
+# (triggers/siege_test.toml) starts the field battle «lua:siege» at the first step of the game,
+# so `razdor-pack sim --map siege-test` plays the siege without a campaign.
+title = "siegetest.map.title"
+description = "siegetest.map.description"
+start_date = "1300-05-01"
+relations = [[3, 3, 0, -3], [3, 3, 0, -3], [0, 0, 3, -3], [-3, -3, -3, 3]]
+
+[hero]
+cell = [4, 6]
+classes = ["knight"]
+gold = 0
+mana = 0
+troops = [
+    { unit = "dt:militiaman", level = 1, count = 3 },
+    { unit = "dt:archer", level = 1, count = 2 },
+]
+
+[[army]]
+id = "dead"
+name = "siegetest.army.dead.name"
+cell = [17, 6]
+faction = "enemy"
+model = "zombies"
+troops = [
+    { unit = "dt:deadman", level = 1, count = 4 },
+    { unit = "dt:ghoul", level = 1, count = 2 },
+]
+
+[victory]
+kind = "defeat_army"
+army = "dead"
+message = "siegetest.map.won"

@@ -327,6 +327,9 @@ text = "The dead have reached the walls. Where they struck, the stone went black
 title = "The barrows advance"
 text = "The barrow host climbs the slope and does not stop. They come for the abbey, and no one leads them but an old order."
 
+wall_falls = "The wall beside the gate cracks and falls: the dead pour into the gap."
+courtyard_warning = "The dead stand in the courtyard. Hold them, or the abbey falls."
+
 [abbey.trial]
 title = "Alder"
 text = "Everyone in the village is well, and everyone whispers. Ilm looks at the houses: 'This is corruption. The Order says burn it. Or spare them, if you are sure.'"
@@ -846,3 +849,11 @@ tess = "Tess"
 
 [camp.named]
 kord = "Kord"
+
+[siegetest.map]
+title = "Siege test"
+description = "A short field battle for the siege script."
+won = "The dead are beaten."
+
+[siegetest.army.dead]
+name = "The dead"
