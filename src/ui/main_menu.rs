@@ -1482,7 +1482,128 @@ fn keys_layout(g: f32) -> (f32, f32, f32) {
     (pitch, row_h, height)
 }
 
+/// The keys window on a phone held upright (the owner's notes, 2026-11-02; Razdor's own, not in the
+/// original): it takes the phone's width and is laid out in dp (`dp` px per dp, so one unit is one
+/// dp and a 14 px label is 14 sp). Two columns of actions, each with its key button (52 × 44 dp),
+/// the hint under the rows, «По умолчанию» and «Ok» (44 dp) at the bottom. A label that takes more
+/// than two lines is set at 13 sp, else 12 sp. The desktop keeps [`keys_window`]'s layout.
+fn keys_window_upright(audio: &mut super::audio::Settings, over_map: bool, dp: f32) -> bool {
+    let _scale = super::display::enter_window_scale(Some(dp));
+    let k = chrome::k();
+    let g = super::display::button_grow();
+    let (sw, sh) = (screen_width(), screen_height());
+    let margin = 8.0 * k;
+    let w = sw - 2.0 * margin;
+    let row_h = 44.0 * g * k;
+    let pitch = row_h + 4.0 * k;
+    let bh = 44.0 * g * k;
+    let hint = tr("Click a key, then press the new one. Esc cancels; a key another action has goes to that action.");
+    let hint_size = 14.0 * k;
+    let hint_lines = super::dt_font::legacy_metrics_if(true, || wrap(hint, w - 4.0 * k - 20.0 * k, hint_size));
+    let rows_h = 9.0 * pitch - 4.0 * k;
+    let hint_h = hint_lines.len().max(1) as f32 * 19.0 * k;
+    let content = 10.0 * k + rows_h + 12.0 * k + hint_h + 12.0 * k + bh + 10.0 * k;
+    let h = content + 44.0 * k;
+    // Between the top inset and the bottom bar (over the map) or the title screen's footer.
+    let safe = super::display::safe_area();
+    let top = safe.top + 8.0 * k;
+    let bottom = if over_map { sh - chrome::bar_height() - 8.0 * k } else { window_layout::title_bottom() - 8.0 * k };
+    let h = h.min(bottom - top);
+    let y = top + ((bottom - top - h) / 2.0).max(0.0);
+    let (inner, closed) = chrome::window(Rect::new(margin, y, w, h), tr("Keys"), chrome::Skin::Marble, true);
+    let waiting = keymap::listening();
+    let was_waiting = waiting.is_some();
+    let col_gap = 12.0 * k;
+    let col_w = (inner.w - 20.0 * k - col_gap) / 2.0;
+    let key_w = 52.0 * k;
+    let mut started = false;
+    super::dt_font::legacy_metrics_if(true, || {
+        for (i, a) in keymap::ALL.into_iter().enumerate() {
+            let x = inner.x + 10.0 * k + (i / 9) as f32 * (col_w + col_gap);
+            let y = inner.y + 10.0 * k + (i % 9) as f32 * pitch;
+            let (size, lines) = upright_label(tr(a.label()), col_w - key_w - 8.0 * k, k);
+            if lines.len() == 1 {
+                text_fit(&lines[0], x, y + row_h / 2.0 + size * 0.35, col_w - key_w - 8.0 * k, size, chrome::CREAM);
+            } else {
+                let top = y + (row_h - lines.len() as f32 * size * 1.15) / 2.0 + size * 0.85;
+                for (n, line) in lines.iter().enumerate() {
+                    chrome::shadow_text(line, x, top + n as f32 * size * 1.15, size, chrome::CREAM);
+                }
+            }
+        }
+    });
+    for (i, a) in keymap::ALL.into_iter().enumerate() {
+        let x = inner.x + 10.0 * k + (i / 9) as f32 * (col_w + col_gap);
+        let y = inner.y + 10.0 * k + (i % 9) as f32 * pitch;
+        let br = Rect::new(x + col_w - key_w, y, key_w, row_h);
+        let shown = if waiting == Some(a) { tr("press a key…").to_string() } else { keymap::display(keymap::key(a)) };
+        if row_button(br, &shown) && waiting != Some(a) {
+            keymap::listen(Some(a));
+            started = true;
+        }
+    }
+    super::dt_font::legacy_metrics_if(true, || {
+        for (n, line) in hint_lines.iter().enumerate() {
+            chrome::shadow_text(line, inner.x + 10.0 * k, inner.y + 10.0 * k + rows_h + 12.0 * k + hint_size * 0.85 + n as f32 * 19.0 * k, hint_size, WHITE);
+        }
+    });
+    take_new_key(audio, waiting, started);
+    let by = inner.bottom() - 10.0 * k - bh;
+    let ok_w = 120.0 * k;
+    let defaults = Rect::new(inner.x + 10.0 * k, by, inner.w - 20.0 * k - ok_w - 10.0 * k, bh);
+    let ok = Rect::new(inner.right() - 10.0 * k - ok_w, by, ok_w, bh);
+    if settings_button(defaults, tr("Defaults")) {
+        reset_keys(audio);
+    }
+    let ok_label = own("Buttons", "Ok", n_("OK"));
+    let ok_pressed = settings_button(ok, &ok_label);
+    closed || ok_pressed || (!was_waiting && key(KeyCode::Escape))
+}
+
+/// A key action's label on a phone's keys window: 14 px (sp at one unit per dp), set at 13 or 12
+/// when 14 would take more than two lines of `width`; one line at 12 when even that does not fit
+/// (the caller ellipsizes it). Returns the size and the lines.
+fn upright_label(s: &str, width: f32, k: f32) -> (f32, Vec<String>) {
+    for n in [14.0, 13.0, 12.0] {
+        let size = n * k;
+        let lines = wrap(s, width, size);
+        if lines.len() <= 2 {
+            return (size, lines);
+        }
+    }
+    (12.0 * k, vec![s.to_string()])
+}
+
+/// The new key for the action waiting for one (`keymap::listen`): the key pressed, unless the
+/// click on a key button just started the wait (`started`) or Esc or a click cancels it. The keys
+/// are swallowed while waiting.
+fn take_new_key(audio: &mut super::audio::Settings, waiting: Option<keymap::Action>, started: bool) {
+    if let Some(a) = waiting {
+        // The key pressed is the new binding: no shortcut fires on it (`hotkeys`, `mod`).
+        if !started {
+            if key(KeyCode::Escape) || clicked() {
+                keymap::listen(None);
+            } else if let Some(pressed) = get_keys_pressed().into_iter().find(|&k| keymap::bindable(k)) {
+                keymap::set(a, pressed);
+                keymap::listen(None);
+                audio.keys = keymap::overrides();
+            }
+        }
+        swallow_input();
+    }
+}
+
+/// «По умолчанию»: every key back to its default, and no wait.
+fn reset_keys(audio: &mut super::audio::Settings) {
+    keymap::reset();
+    keymap::listen(None);
+    audio.keys = keymap::overrides();
+}
+
 fn keys_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
+    if let Some(dp) = super::display::dp_px().filter(|_| window_layout::portrait()) {
+        return keys_window_upright(audio, over_map, dp);
+    }
     // The rows grow with the text size, unless that only makes the window's scale smaller (a phone
     // held sideways fits the window to its height): then they keep their Normal size, and the
     // window's text stays as large as before.
@@ -1515,19 +1636,7 @@ fn keys_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
             started = true;
         }
     }
-    if let Some(a) = waiting {
-        // The key pressed is the new binding: no shortcut fires on it (`hotkeys`, `mod`).
-        if !started {
-            if key(KeyCode::Escape) || clicked() {
-                keymap::listen(None);
-            } else if let Some(pressed) = get_keys_pressed().into_iter().find(|&k| keymap::bindable(k)) {
-                keymap::set(a, pressed);
-                keymap::listen(None);
-                audio.keys = keymap::overrides();
-            }
-            swallow_input();
-        }
-    }
+    take_new_key(audio, waiting, started);
     let hint = tr("Click a key, then press the new one. Esc cancels; a key another action has goes to that action.");
     let hint_y = 16.0 + 8.0 * pitch + row_h + 18.0;
     text_fit(hint, inner.x + 20.0 * k, inner.y + hint_y * k, inner.w - 40.0 * k, 12.0 * k, WHITE);
@@ -1535,9 +1644,7 @@ fn keys_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     let defaults = Rect::new(inner.x + 20.0 * k, inner.y + inner.h - 14.0 * k - bh, 150.0 * k, bh);
     let ok = Rect::new(inner.x + inner.w - 120.0 * k, inner.y + inner.h - 14.0 * k - bh, 96.0 * k, bh);
     if settings_button(defaults, tr("Defaults")) {
-        keymap::reset();
-        keymap::listen(None);
-        audio.keys = keymap::overrides();
+        reset_keys(audio);
     }
     let ok_label = own("Buttons", "Ok", n_("OK"));
     let ok_pressed = settings_button(ok, &ok_label);

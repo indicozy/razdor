@@ -397,13 +397,26 @@ pub fn keys_button_on(place: Place) -> bool {
 pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
     let (sw, sh) = (screen_width(), screen_height());
     draw_rectangle(0.0, 0.0, sw, sh, Color::new(0.0, 0.0, 0.0, 0.45));
+    // A phone held upright (the owner's notes, 2026-11-02): the list is laid out in dp (the window
+    // scale is one dp per unit), its text at 14 sp, its foot button 44 dp, the other keys one under
+    // the other. Razdor's own, not in the original; the desktop and a phone held sideways keep the
+    // layout below.
+    let upright = super::window_layout::portrait();
+    let _scale = upright.then(|| super::display::enter_window_scale(super::display::dp_px()));
     // The layout's base: on a phone the phone's text base (one original px per dp, as the message
     // windows); on the desktop the interface scale.
-    let k = super::display::text_base(chrome::k(), super::dialog::TEXT_REF);
+    let k = if upright { chrome::k() } else { super::display::text_base(chrome::k(), super::dialog::TEXT_REF) };
     // The text's scale: on a phone the phone's text (with «Размер текста»), drawn under the legacy
     // metrics so the sizes are not shrunk to the sheet fonts' own; on the desktop `k`, as before.
+    // Upright, 16 units of text are 14 sp (one unit per dp).
     let phone = super::display::dp_px().is_some();
-    let t = if phone { super::display::text_for(chrome::k(), super::dialog::TEXT_REF) } else { k };
+    let t = if upright {
+        14.0 / 16.0 * chrome::k() * super::display::text_size()
+    } else if phone {
+        super::display::text_for(chrome::k(), super::dialog::TEXT_REF)
+    } else {
+        k
+    };
     // A phone folds the keys that have a button on the screen into a list under the grid (a phone
     // choice, not in the original); the desktop shows every key in the grid, as before.
     let (grid, folded) = if phone { split_screen_buttons(place, tiles(place)) } else { (tiles(place), Vec::new()) };
@@ -412,7 +425,7 @@ pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
     // The foot under the list: on the map a button to the keys window, elsewhere a line that says
     // where the keys are changed. A phone's button is at least 40 dp high.
     let button = keys_button_on(place);
-    let foot_h = if button { (34.0 * k * super::display::button_grow()).max(40.0 * k) } else { 24.0 * t };
+    let foot_h = if button { (34.0 * k * super::display::button_grow()).max(if upright { 44.0 } else { 40.0 } * k) } else { 24.0 * t };
     let cols = if sw < sh || sw < 760.0 { 2 } else { 3 };
     let (pad, gap) = (14.0 * k, 8.0 * k);
     let w = if cols == 2 { sw - 16.0 } else { (880.0 * k).min(sw - 40.0) };
@@ -421,7 +434,7 @@ pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
     let size = 18.0 * t;
     // A tile's words wrap to its width: at most two lines on the desktop, three on a phone; a
     // longer text shrinks (to 60 %) until it fits those lines.
-    let max_lines = if phone { 3 } else { 2 };
+    let max_lines = if upright { 4 } else if phone { 3 } else { 2 };
     let fit = |list: &[Tile]| -> Vec<(f32, Vec<String>)> {
         super::dt_font::legacy_metrics_if(phone, || list.iter().map(|tl| fit_words(tr(tl.what), tile_w - 16.0 * t, size, max_lines)).collect())
     };
@@ -442,7 +455,8 @@ pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
         (true, false) => toggle_y + tile_h,
         (true, true) => folded_y + rows(folded.len()),
     };
-    let line = 24.0 * t;
+    // Upright, a key's other keys take two lines each (the key, then its action): see below.
+    let line = if upright { 42.0 * t } else { 24.0 * t };
     let info_h = if info.is_empty() { 0.0 } else { 30.0 * t + info.len() as f32 * line + 6.0 * k };
     let content = after + 6.0 * k + info_h;
     // The foot (its button or line) stays in view under the scrolled body, with its gap.
@@ -541,8 +555,14 @@ pub fn help_overlay(place: Place, guard: Guard, fresh: bool) -> bool {
                     break;
                 }
                 if ly >= body.y - line {
-                    text_fit(tr(&fill_keys(key)), inner.x + pad + 8.0 * k, ly + 16.0 * t, dx - inner.x - pad - 16.0 * k, 16.0 * t, INK);
-                    text_fit(tr(what), dx, ly + 16.0 * t, inner.right() - dx - pad, 16.0 * t, DIM);
+                    if upright {
+                        let width = inner.w - 2.0 * pad - 16.0 * k;
+                        text_fit(tr(&fill_keys(key)), inner.x + pad + 8.0 * k, ly + 17.0 * t, width, 16.0 * t, INK);
+                        text_fit(tr(what), inner.x + pad + 8.0 * k, ly + 36.0 * t, width, 16.0 * t, DIM);
+                    } else {
+                        text_fit(tr(&fill_keys(key)), inner.x + pad + 8.0 * k, ly + 16.0 * t, dx - inner.x - pad - 16.0 * k, 16.0 * t, INK);
+                        text_fit(tr(what), dx, ly + 16.0 * t, inner.right() - dx - pad, 16.0 * t, DIM);
+                    }
                 }
                 ly += line;
             }
