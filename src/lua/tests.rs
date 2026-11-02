@@ -1,0 +1,180 @@
+use super::*;
+
+fn scripts(files: &[(&str, &str)]) -> Scripts {
+    files.iter().map(|(p, s)| (p.to_string(), s.to_string())).collect()
+}
+
+fn rt(files: &[(&str, &str)]) -> Runtime {
+    Runtime::new(7, scripts(files)).expect("the sandbox starts")
+}
+
+#[test]
+fn the_sandbox_has_only_the_allowed_libraries() {
+    let r = rt(&[(
+        "scripts/t.lua",
+        "function probe()\n return { type(io), type(os), type(package), type(debug), type(coroutine), type(dofile), type(loadfile),\n  type(string.dump), type(math.random), type(utf8), type(table), type(require), type(load), type(print), type(collectgarbage) }\nend\n",
+    )]);
+    r.load_script("scripts/t.lua").unwrap();
+    let got: Vec<String> = r.call::<Table>("scripts/t.lua", "probe", ()).unwrap().unwrap().sequence_values::<String>().map(|v| v.unwrap()).collect();
+    assert_eq!(got, ["nil", "nil", "nil", "nil", "nil", "nil", "nil", "nil", "function", "table", "table", "function", "function", "function", "function"]);
+}
+
+#[test]
+fn io_and_os_are_blocked_in_use() {
+    let r = rt(&[("scripts/t.lua", "function f() return os.time() end\n")]);
+    r.load_script("scripts/t.lua").unwrap();
+    let e = r.call::<Value>("scripts/t.lua", "f", ()).unwrap_err();
+    assert!(e.message.contains("scripts/t.lua:1:"), "{e}");
+    assert!(e.to_string().contains("(in f of scripts/t.lua)"), "{e}");
+}
+
+#[test]
+fn binary_chunks_are_refused() {
+    let r = rt(&[("scripts/t.lua", "function f() local a, b = load('\\27Lua') return a, b end\n")]);
+    r.load_script("scripts/t.lua").unwrap();
+    let out: (Value, String) = r.call("scripts/t.lua", "f", ()).unwrap().unwrap();
+    assert!(out.0.is_nil(), "a binary chunk loads");
+    assert!(out.1.contains("binary"), "{}", out.1);
+}
+
+#[test]
+fn collectgarbage_is_only_count() {
+    let r = rt(&[("scripts/t.lua", "function ok() return collectgarbage('count') > 0 end\nfunction bad() collectgarbage('collect') end\n")]);
+    r.load_script("scripts/t.lua").unwrap();
+    assert_eq!(r.call::<bool>("scripts/t.lua", "ok", ()).unwrap(), Some(true));
+    let e = r.call::<()>("scripts/t.lua", "bad", ()).unwrap_err();
+    assert!(e.message.contains("only \"count\""), "{e}");
+}
+
+#[test]
+fn the_budget_stops_an_endless_loop() {
+    let r = rt(&[("scripts/loop.lua", "function setup()\n  while true do end\nend\n")]);
+    r.load_script("scripts/loop.lua").unwrap();
+    let e = r.call::<()>("scripts/loop.lua", "setup", ()).unwrap_err();
+    assert!(e.script == "scripts/loop.lua" && e.call == "setup", "{e:?}");
+    assert!(e.message.contains("instruction budget"), "{e}");
+    assert!(r.exhausted());
+}
+
+#[test]
+fn pcall_cannot_swallow_the_budget() {
+    let r = rt(&[("scripts/loop.lua", "function setup()\n  while true do pcall(function() while true do end end) end\nend\n")]);
+    r.load_script("scripts/loop.lua").unwrap();
+    let e = r.call::<()>("scripts/loop.lua", "setup", ()).unwrap_err();
+    assert!(e.message.contains("instruction budget"), "{e}");
+}
+
+#[test]
+fn pcall_catches_ordinary_errors() {
+    let r = rt(&[("scripts/t.lua", "function f() local ok, msg = pcall(error, 'boom') return ok, msg end\n")]);
+    r.load_script("scripts/t.lua").unwrap();
+    let (ok, msg): (bool, String) = r.call("scripts/t.lua", "f", ()).unwrap().unwrap();
+    assert!(!ok);
+    assert_eq!(msg, "boom");
+}
+
+#[test]
+fn the_memory_limit_stops_a_growing_table() {
+    let r = rt(&[("scripts/mem.lua", "function grow()\n  local t = {}\n  while true do t[#t + 1] = string.rep('x', 4096) end\nend\n")]);
+    r.load_script("scripts/mem.lua").unwrap();
+    let e = r.call::<()>("scripts/mem.lua", "grow", ()).unwrap_err();
+    assert!(e.message.contains("not enough memory"), "{e}");
+    assert_eq!(e.call, "grow");
+}
+
+#[test]
+fn require_loads_the_packages_own_scripts() {
+    let r = rt(&[
+        ("scripts/main.lua", "local h = require('helpers')\nfunction value() return h.double(21) end\n"),
+        ("scripts/helpers.lua", "local M = {}\nfunction M.double(x) return x * 2 end\nreturn M\n"),
+    ]);
+    r.load_script("scripts/main.lua").unwrap();
+    assert_eq!(r.call::<i64>("scripts/main.lua", "value", ()).unwrap(), Some(42));
+}
+
+#[test]
+fn require_refuses_a_missing_or_a_circular_module() {
+    let r = rt(&[
+        ("scripts/a.lua", "require('nowhere')\n"),
+        ("scripts/loop.lua", "require('loop')\n"),
+        ("scripts/bad name.lua", "x = 1\n"),
+    ]);
+    let e = r.load_script("scripts/a.lua").unwrap_err();
+    assert!(e.message.contains("module 'nowhere' not found"), "{e}");
+    let e = r.load_script("scripts/loop.lua").unwrap_err();
+    assert!(e.message.contains("circular require") || e.message.contains("not found"), "{e}");
+}
+
+#[test]
+fn require_does_not_read_the_disk() {
+    let r = rt(&[("scripts/t.lua", "function f() return pcall(require, '../../etc/passwd') end\n")]);
+    r.load_script("scripts/t.lua").unwrap();
+    let (ok, _): (bool, Value) = r.call("scripts/t.lua", "f", ()).unwrap().unwrap();
+    assert!(!ok);
+}
+
+#[test]
+fn random_is_the_same_for_the_same_seed() {
+    let src = "function roll() local t = {} for i = 1, 8 do t[i] = math.random(1, 6) end return t end\n";
+    let a = Runtime::new(99, scripts(&[("scripts/r.lua", src)])).unwrap();
+    let b = Runtime::new(99, scripts(&[("scripts/r.lua", src)])).unwrap();
+    let c = Runtime::new(100, scripts(&[("scripts/r.lua", src)])).unwrap();
+    for r in [&a, &b, &c] {
+        r.load_script("scripts/r.lua").unwrap();
+    }
+    let va: Vec<i64> = a.call::<Table>("scripts/r.lua", "roll", ()).unwrap().unwrap().sequence_values().map(|v| v.unwrap()).collect();
+    let vb: Vec<i64> = b.call::<Table>("scripts/r.lua", "roll", ()).unwrap().unwrap().sequence_values().map(|v| v.unwrap()).collect();
+    let vc: Vec<i64> = c.call::<Table>("scripts/r.lua", "roll", ()).unwrap().unwrap().sequence_values().map(|v| v.unwrap()).collect();
+    assert_eq!(va, vb);
+    assert_ne!(va, vc);
+    assert!(va.iter().all(|v| (1..=6).contains(v)));
+}
+
+#[test]
+fn math_randomseed_is_refused() {
+    let r = rt(&[("scripts/t.lua", "function f() math.randomseed(1) end\n")]);
+    r.load_script("scripts/t.lua").unwrap();
+    let e = r.call::<()>("scripts/t.lua", "f", ()).unwrap_err();
+    assert!(e.message.contains("seed comes from the game"), "{e}");
+}
+
+#[test]
+fn sorted_pairs_visits_keys_in_order() {
+    let src = "function keys()\n local t = { b = 1, a = 2, [3] = 0, [1] = 0, [true] = 0 }\n local out = {}\n for k in razdor.sorted_pairs(t) do out[#out + 1] = tostring(k) end\n return table.concat(out, ',')\nend\n";
+    let r = rt(&[("scripts/t.lua", src)]);
+    r.load_script("scripts/t.lua").unwrap();
+    assert_eq!(r.call::<String>("scripts/t.lua", "keys", ()).unwrap(), Some("true,1,3,a,b".to_string()));
+}
+
+#[test]
+fn print_goes_to_the_log_not_stdout() {
+    let r = rt(&[("scripts/t.lua", "print('hello', 2, nil)\n")]);
+    r.load_script("scripts/t.lua").unwrap();
+    assert_eq!(r.take_log(), vec!["hello\t2\tnil".to_string()]);
+}
+
+#[test]
+fn a_syntax_error_names_its_line_and_calls_nothing() {
+    let files = scripts(&[("scripts/ok.lua", "function f() return 1 end\n"), ("scripts/bad.lua", "local x = 1\nlocal y = = 2\n")]);
+    let errs = check_scripts(&files);
+    assert_eq!(errs.len(), 1, "{errs:?}");
+    assert_eq!(errs[0].script, "scripts/bad.lua");
+    assert!(errs[0].message.starts_with("scripts/bad.lua:2:"), "{}", errs[0].message);
+}
+
+#[test]
+fn a_missing_hook_is_not_an_error() {
+    let r = rt(&[("scripts/t.lua", "x = 1\n")]);
+    r.load_script("scripts/t.lua").unwrap();
+    assert_eq!(r.call::<()>("scripts/t.lua", "setup", ()).unwrap(), None);
+    assert!(!r.defines("setup"));
+}
+
+#[test]
+fn the_budget_resets_for_each_call() {
+    let r = rt(&[("scripts/t.lua", "function f() local s = 0 for i = 1, 200000 do s = s + i end return s end\n")]);
+    r.load_script("scripts/t.lua").unwrap();
+    for _ in 0..5 {
+        assert_eq!(r.call::<i64>("scripts/t.lua", "f", ()).unwrap(), Some(20000100000));
+    }
+}

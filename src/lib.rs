@@ -4,6 +4,9 @@ pub mod frame_probe;
 pub mod local;
 pub mod difftest;
 pub mod i18n;
+/// The Lua runtime of content packages (feature `lua`).
+#[cfg(feature = "lua")]
+pub mod lua;
 #[cfg(target_os = "android")]
 pub mod jni;
 pub mod pack;

@@ -26,6 +26,7 @@ png = "0.17"
 sevenz-rust2 = { version = "0.20.2", default-features = false, features = ["ppmd"] }
 zip = { version = "9.1.0", default-features = false, features = ["deflate-flate2"] }
 unicode-bidi = "0.3"
+mlua = { version = "0.12", features = ["lua54", "vendored"], optional = true }
 
 [dev-dependencies]
 # The tests of `dt::unpack` write a 7z archive; the game itself only reads them.
@@ -37,13 +38,17 @@ sevenz-rust2 = { version = "0.20.2", default-features = false, features = ["comp
 rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
 
 [features]
-default = ["audio", "gamepad"]
+default = ["audio", "gamepad", "lua"]
 # Sound and music (macroquad's quad-snd; on Linux it links ALSA's libasound).
 # Build with `--no-default-features` for a silent game without it.
 audio = ["macroquad/audio"]
 # Gamepads (gilrs): the sticks and buttons drive the pointer, its clicks and some keys
 # (`ui::gamepad`). On Linux it links libudev. Without it the game is mouse and keyboard only.
 gamepad = ["dep:gilrs"]
+# Lua 5.4 scripts of a package (`src/lua`): the sandboxed runtime behind the field battles and
+# the `scripts/` folder. Vendored (compiled from source by the `lua-src` crate); a build without it
+# drops the runtime and the Lua-driven battles.
+lua = ["dep:mlua"]
 
 # Line tables only: backtraces keep file and line, and the debug build stays several times
 # smaller on disk (full debug info made target/debug grow past 30 GB).
