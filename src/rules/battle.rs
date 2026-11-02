@@ -1245,6 +1245,20 @@ impl Battle {
         }
     }
 
+    /// The end of a field battle (`rules::field`): the side that lost falls where it stands,
+    /// as [`Battle::force_end`] makes it fall, but without a new deployment or a cheat's line in
+    /// the log. The battle has begun already.
+    pub fn field_end(&mut self, winner: Team) {
+        let loser = winner.other();
+        for f in self.fighters.iter_mut().filter(|f| f.team == loser && f.listed()) {
+            let hp = f.hp.max(0);
+            f.lost += hp;
+            self.turn_lost[loser.index()] += hp as i64;
+            f.hp = 0;
+            f.suicided = false;
+        }
+    }
+
     /// Fighter whose turn it is; `None` while deploying or once the battle is over.
     pub fn active(&self) -> Option<usize> {
         if self.deploying || self.outcome() != Outcome::Ongoing {

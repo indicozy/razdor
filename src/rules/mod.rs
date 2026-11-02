@@ -10,6 +10,7 @@ pub mod custom_code;
 pub mod economy;
 pub mod events;
 pub mod experience;
+pub mod field;
 pub mod fog;
 pub mod formation;
 pub mod game;
