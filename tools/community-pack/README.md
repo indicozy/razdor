@@ -47,8 +47,20 @@ repo and the output holds game content, so it lives only in the scratch folder.
   (both ids are printed): the player would see one map twice.
 - **Archive maps** (`maps.tsv` and `report.tsv` of the archive folder): one `map` entry per
   map that no forum entry and no Community Update map already covers (dedupe by sha256).
-- **Previews**: the first image of the first post, as a PNG at most 480x270 (ImageMagick
-  `magick` or `convert`, else `ffmpeg`). Without one of them, entries have no preview.
+- **Previews**: `preview` is the first image of the first post, as a PNG at most 480x270 (ImageMagick
+  `magick` or `convert`, else `ffmpeg`), as before. Without one of them, entries have no preview.
+- **Picture**: a map's own picture, as `picture` (`picture.png`, the same 480x270 box). It is the LIT
+  picture embedded in the `.DTm`, written by the game (`razdor --map-picture <map.DTm> <png>`,
+  `src/hub.rs` `export_cli`; exit 0 written, 2 the map has none, 1 an error). The map's file is the
+  entry's first one (a campaign's first chapter: the one no other chapter names as its next map).
+  Newer clients show `picture` in place of `preview`; older ones ignore it. The game binary is
+  `target/release/razdor` in the repo (`--razdor PATH` names another); without it no entry has a
+  `picture` (a note in report.md). A failed or slow (over 60 s) export is a note too.
+- **About**: a map's own story, its `.DTm` description, as `"about": {"ru": ..., "en": ...}`
+  (font-safe, emoji gone, cut like a post). A campaign's is its first chapter's; a language pair's
+  takes each language from its own file. An entry whose maps have no description, and every mod,
+  has no `about` key. The descriptions are read with the same reader as the names (`dtm_strings`).
+  report.md counts the entries with a map's own picture and with an `about`.
 - **Ratings**: an entry made from a forum thread (a mod, a forum map, a campaign) gets
   `"rating": {"up": U, "down": D}` from the reactions on the thread's first post. U is the count of
   👍 and its skin-tone variants (👍🏻 👍🏼 👍🏽 👍🏾 👍🏿), D the same for 👎; every other emoji and
@@ -146,6 +158,7 @@ nice -n 19 taskset -c 8-19 python3 -I tools/community-pack/build.py \
   --extra 1155867978567516210=/mnt/ai_models/razdor-scratch/community-pack/maps/external/erzgess/Stinger-Paramount_War.zip
 # --no-forum-maps leaves the forum maps out (for a build before maps/test.tsv exists)
 # --reactions defaults to <--src>/discord/reactions.json
+# --razdor defaults to target/release/razdor in the repo (build it first: cargo build --release)
 ```
 
 The run is deterministic: sorted entries, sorted zip members, fixed zip times and modes, so

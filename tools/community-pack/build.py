@@ -13,7 +13,9 @@ files it names. The assets become the files of a GitHub release on indicozy/razd
   it has several map files; the maps of a mod the catalog carries, requiring it). `maps-le` is
   not read.
 - One entry per archive map that no forum entry and no Community Update map already covers.
-- A preview picture per entry, when ImageMagick or ffmpeg is installed.
+- A preview picture per entry (the first image of the post), and for a map its own picture as
+  `picture` (the LIT picture embedded in the `.DTm`, made by `razdor --map-picture`), when
+  ImageMagick or ffmpeg is installed. A map's own story (its `.DTm` description) goes in as `about`.
 
 Inputs (read only): under `--src`: `discord/threads/<forum>/<id>.json`, `mods/status.tsv`,
 `mods/<slug>/mod.json` and `mods/<slug>/game*/`, and for the forum maps `maps/files.tsv`,
@@ -25,6 +27,7 @@ Outputs (`--out`, cleared of its own old files first): `index.json`, `<sha256 fi
 assets and `report.md`. Deterministic: the same inputs give the same bytes.
 
 Run:      python3 -I tools/community-pack/build.py --src DIR --archive-maps DIR --base DIR --out DIR
+          (--razdor PATH: the game binary for the maps' pictures, default target/release/razdor)
 Checks:   python3 -I tools/community-pack/build.py --selftest
 """
 
@@ -57,6 +60,11 @@ UNKNOWN_AUTHOR = "неизвестен"
 TEXT_LIMIT = 1500
 DTM_HEADER_SIZE = 0x12F  # src/dt/dtm.rs HEADER_SIZE
 PREVIEW_BOX = "480x270"
+# The game binary that writes a map's own picture (`razdor --map-picture <map> <png>`, src/hub.rs `export_cli`):
+# exit 0 written, 2 the map has none, 1 an error. The repo's release build by default.
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+RAZDOR_BIN = os.path.join(REPO_ROOT, "target", "release", "razdor")
+MAP_PICTURE_TIMEOUT = 60
 # A mod's Sounds files go in as Ogg Vorbis (the engine plays a same-stem .ogg in place of the named file).
 # `.raw` is headerless s16le mono 22050 Hz; `.wav` is read from its header. A `.wav` changes only when its
 # ogg is under half its size. The encodes of one mod run in parallel; the CPU pin keeps them off the desktop.
@@ -832,6 +840,71 @@ def make_preview(conv, src, work):
     return out if os.path.isfile(out) else None
 
 
+def map_picture(razdor, dtm_path, out, notes, timeout=MAP_PICTURE_TIMEOUT):
+    """The map's own picture as the PNG `out`, written by the game (`razdor --map-picture`). Returns `out` when it
+    was written; None when the map has no picture (exit 2), or the game could not give one (exit 1, no answer in
+    time, no binary): then a line goes into `notes`."""
+    # a raw cp866 name can hold bytes UTF-8 cannot: the note keeps them escaped, the report stays UTF-8
+    name = os.path.basename(dtm_path).encode("utf-8", "backslashreplace").decode("utf-8")
+    try:
+        done = subprocess.run([razdor, "--map-picture", dtm_path, out], capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        notes.append(f"No picture for {name}: razdor gave none in {timeout} s.")
+        return None
+    except (OSError, subprocess.SubprocessError) as e:
+        notes.append(f"No picture for {name}: {e}.")
+        return None
+    if done.returncode == 2:
+        return None
+    if done.returncode == 0 and os.path.isfile(out):
+        return out
+    why = done.stderr.decode("utf-8", "replace").strip().splitlines()
+    notes.append(f"No picture for {name}: razdor exit {done.returncode}" + (f" ({why[-1]})" if why else "") + ".")
+    return None
+
+
+def first_chapter(names, paths):
+    """The place (0-based) of a campaign's first chapter: the first one no other chapter names as its next map (the
+    start of the chain, see chain_position); the first chapter when every chapter is named."""
+    named = {game_ref_key(dtm_next_map(p) or "") for p in paths}
+    starts = [i for i, n in enumerate(names) if game_name_key(n) not in named]
+    return starts[0] if starts else 0
+
+
+def first_file(kind, idx, names, paths):
+    """The index of the file an entry shows (its picture, its story): a campaign's first chapter, else the entry's
+    first file. `idx` are indexes into `names` and `paths`."""
+    if kind != "campaign":
+        return idx[0]
+    return idx[first_chapter([names[i] for i in idx], [paths[i] for i in idx])]
+
+
+def map_about(path):
+    """A map's own story: its description (the `.DTm`'s second string), with the emoji and the stray spaces gone and
+    the letters the hub's fonts lack replaced, cut like a post's text; "" for a file that is not a map."""
+    strings = dtm_strings(path)
+    if not strings:
+        return ""
+    plain = strip_emoji(strings[1]).replace("\r\n", "\n").replace("\r", "\n")
+    plain = re.sub(r"[ \t]+", " ", plain)
+    plain = re.sub(r"(?m)^[ \t]+|[ \t]+$", "", plain)
+    plain = re.sub(r"\n{3,}", "\n\n", plain).strip()
+    return cut_text(font_safe(plain))
+
+
+def about_of(paths, langs):
+    """An entry's `about` as {lang: text} (see map_about): for a language pair, each language's text from the first of
+    `paths` in that language; else the text of paths[0] as Russian. None when neither has a text."""
+    if len(langs) > 1:
+        texts = {}
+        for lang in langs:
+            path = next((p for p in paths if map_language(p) == lang), None)
+            texts[lang] = map_about(path) if path else ""
+    else:
+        texts = {"ru": map_about(paths[0])}
+    return texts if any(texts.values()) else None
+
+
 # ---------------------------------------------------------------- entries
 
 def file_ref(asset, name, lang=None, archive=False):
@@ -867,7 +940,8 @@ def font_safe(text):
     return "".join(font_safe_char(c) for c in text)
 
 
-def make_entry(eid, kind, meta, version, languages, requires, status, note, files, base="", preview=None):
+def make_entry(eid, kind, meta, version, languages, requires, status, note, files, base="", preview=None, picture=None,
+               about=None):
     entry = {
         "id": eid,
         "kind": kind,
@@ -889,6 +963,10 @@ def make_entry(eid, kind, meta, version, languages, requires, status, note, file
         entry["rating"] = meta["rating"]
     if preview:
         entry["preview"] = preview
+    if picture:
+        entry["picture"] = picture
+    if about and any(about.values()):
+        entry["about"] = {"ru": about.get("ru", ""), "en": about.get("en", "")}
     return entry
 
 
@@ -968,8 +1046,9 @@ def archive_path(adir, row):
 class Pack:
     """The catalog being built: its entries, asset store, skip, rename and note lists."""
 
-    def __init__(self, src, archive, base_dir, out, work, extra=None, fixes=None, reactions=None):
+    def __init__(self, src, archive, base_dir, out, work, extra=None, fixes=None, reactions=None, razdor=None):
         self.src = src
+        self.picture_ids = set()  # entries whose preview is their map's own picture, for report.md
         self.reactions = reactions  # thread id -> {emoji key: count}, or None: no ratings (see load_reactions)
         self.archive = archive
         self.base_dir = base_dir
@@ -1002,6 +1081,10 @@ class Pack:
         self.cu_maps = None
         if self.conv is None:
             self.notes.append("No image converter (magick, convert or ffmpeg) was found: no entry has a preview.")
+        self.razdor = razdor if razdor and os.path.isfile(razdor) else None
+        if self.razdor is None:
+            self.notes.append(f"No razdor binary at {razdor}: no map has its own picture (the posts' images are used). "
+                              "Build it with `cargo build --release`, or pass --razdor.")
 
     def skip(self, what, reason):
         self.skipped.append((what, reason))
@@ -1041,18 +1124,45 @@ class Pack:
             local.add(key)
         self.names |= local
 
-    def preview(self, image, owner):
+    def preview(self, image, owner, name="preview"):
+        """A picture as the PNG asset `name` of an entry (480x270 at most), or None: no image, no converter, or the
+        converter failed (a note then)."""
         if image is None or self.conv is None:
             return None
         out = make_preview(self.conv, image, self.work)
         if out is None:
-            self.notes.append(f"No preview for {owner}: the converter failed on {os.path.basename(image)}.")
+            self.notes.append(f"No {name} for {owner}: the converter failed on {os.path.basename(image)}.")
             return None
         ext = os.path.splitext(out)[1]
         asset = self.assets.add(out, ext, owner)
         os.remove(out)
-        return {"path": asset["path"], "name": "preview" + ext, "size": asset["size"],
+        return {"path": asset["path"], "name": name + ext, "size": asset["size"],
                 "sha256": asset["sha256"], "archive": False}
+
+    def own_picture(self, dtm):
+        """The map's own picture as a PNG in the work folder (map_picture), or None: no game binary, or no picture."""
+        if self.razdor is None:
+            return None
+        digest = sha256_file(dtm)[:16]
+        src = dtm
+        try:
+            dtm.encode("utf-8")
+        except UnicodeEncodeError:
+            # a raw cp866 name the game cannot take as an argument (std::env::args panics on it): a copy under an
+            # ASCII name in the work folder
+            src = os.path.join(self.work, "map-" + digest + ".DTm")
+            shutil.copyfile(dtm, src)
+        out = os.path.join(self.work, "picture-" + digest + ".png")
+        return map_picture(self.razdor, src, out, self.notes)
+
+    def picture_ref(self, map_file, eid):
+        """The `picture` of a map entry: its own picture as a 480x270 PNG asset (`picture.png`), or None when the map
+        has none. `preview` is never this: it stays the post's first image, for the older clients."""
+        picture = self.own_picture(map_file)
+        ref = self.preview(picture, eid, "picture") if picture else None
+        if ref:
+            self.picture_ids.add(eid)
+        return ref
 
     def thread_fields(self, t, title, author):
         """Title, author, description, date and link of a thread (its first post); `title` and `author`
@@ -1297,8 +1407,14 @@ class Pack:
             # installs only the files of one language when the files carry one (Entry.files_for), and all of
             # them must be installed and listed.
             refs.append(file_ref(asset, names[i], lang=None if len(langs) > 1 or len(idx) > 1 else "ru"))
+        # the picture and the story are the entry's first file's (a campaign's first chapter); a language pair's
+        # story takes each language's text from its own file
+        first = first_file(kind, idx, names, paths)
+        about_paths = [paths[i] for i in idx] if len(langs) > 1 else [paths[first]]
         self.add_entry(make_entry(eid, kind, meta, "", langs, requires, status, note, refs,
-                                  preview=self.preview(meta["image"], eid)))
+                                  preview=self.preview(meta["image"], eid),
+                                  picture=self.picture_ref(paths[first], eid),
+                                  about=about_of(about_paths, langs)))
 
     def extra_rows(self, tid, path):
         """The .dtm files of a zip given with --extra, extracted into the work folder, as files.tsv rows."""
@@ -1371,7 +1487,8 @@ class Pack:
         meta = {"title": archive_title(base, prefix), "author": author, "description": "",
                 "added": file_date(path), "source_url": ""}
         self.add_entry(make_entry(eid, "map", meta, "", ["ru"], [], status, note,
-                                  [file_ref(asset, base, lang="ru")]))
+                                  [file_ref(asset, base, lang="ru")],
+                                  picture=self.picture_ref(path, eid), about=about_of([path], ["ru"])))
 
     # output
 
@@ -1471,7 +1588,12 @@ class Pack:
             lines.append(f"| {kind} | " + " | ".join(str(c) for c in counts) + f" | {sum(counts)} |")
         previews = sum(1 for e in self.entries if "preview" in e)
         rated = [e for e in self.entries if "rating" in e]
+        pictured = sum(1 for e in self.entries if e["id"] in self.picture_ids)
+        told = sum(1 for e in self.entries if "about" in e)
         lines += ["", f"Entries with a preview: {previews} of {len(self.entries)}.", "",
+                  f"Entries with the map's own picture (`picture`): {pictured} of {len(self.entries)} "
+                  "(`preview` is the post's first image, as before).", "",
+                  f"Entries with the map's own story (about): {told} of {len(self.entries)}.", "",
                   f"Entries with a rating: {len(rated)} of {len(self.entries)} (reactions on the forum thread's first post).", "",
                   "## Top 10 by up minus down", "", "| entry | title | up | down |", "|---|---|---:|---:|"]
         top = sorted(rated, key=lambda e: (-(e["rating"]["up"] - e["rating"]["down"]), -e["rating"]["up"], e["id"]))[:10]
@@ -1519,7 +1641,7 @@ class Pack:
 def verify_folder(folder, entries):
     """The folder holds exactly index.json, report.md and the assets the index names, and the asset list in
     report.md is that same set. Fail otherwise (nothing is published then)."""
-    refs = {f["path"] for e in entries for f in e["files"] + ([e["preview"]] if "preview" in e else [])}
+    refs = {f["path"] for e in entries for f in e["files"] + [e[k] for k in ("preview", "picture") if k in e]}
     listing = set(os.listdir(folder))
     want = refs | {"index.json", "report.md"}
     if listing != want:
@@ -1533,7 +1655,7 @@ def verify_folder(folder, entries):
         raise Fail("the asset list in report.md differs from the folder")
 
 
-def build(src, archive, base_dir, out, forum_maps=True, extra=None, fixes=None, reactions=None):
+def build(src, archive, base_dir, out, forum_maps=True, extra=None, fixes=None, reactions=None, razdor=RAZDOR_BIN):
     """Builds the catalog in `<out>.tmp` and swaps it in for `out` only when it is complete and checked. A build
     that fails leaves `out` as it was and keeps its folder as `<out>.failed` (report.md) for reading."""
     final = os.path.abspath(out)
@@ -1545,7 +1667,7 @@ def build(src, archive, base_dir, out, forum_maps=True, extra=None, fixes=None, 
     try:
         if reactions is None:
             reactions = os.path.join(src, "discord", "reactions.json")
-        pack = Pack(src, archive, base_dir, tmp, work, extra, fixes, load_reactions(reactions))
+        pack = Pack(src, archive, base_dir, tmp, work, extra, fixes, load_reactions(reactions), razdor)
         pack.add_mods()
         if forum_maps:
             pack.add_forum_maps()
@@ -1654,7 +1776,8 @@ def write_fixture(root):
     write_file(os.path.join(src, "mods", "status.tsv"),
                "slug\tstatus\tdownload ok?\tnote\n"
                "modA\tfull\tyes\t\nmodC\tpartial\tpartial (1 of 2)\tfixture\nmodB\tmissing\tyes\tfixture\n")
-    dtm = {"old": fake_dtm("c1.DTm"), "c1": fake_dtm("c2.DTm"), "c2": fake_dtm(""), "cu": b"cu map",
+    dtm = {"old": fake_dtm("c1.DTm"), "c1": fake_dtm("c2.DTm", "Глава", "Первая глава"),
+           "c2": fake_dtm("", "Глава", "Вторая глава"), "cu": b"cu map",
            "veil_ru": fake_dtm("", "Церковь", "Русская карта"), "veil_en": fake_dtm("", "Church", "An English map"),
            "alpha": fake_dtm("", "Альфа", "Первый сценарий"), "beta": fake_dtm("", "Бета", "Второй сценарий"),
            "v1": fake_dtm("", "Версия", "Первая"), "v2": fake_dtm("", "Версия", "Вторая"),
@@ -1855,6 +1978,14 @@ def selftest():
             write_bytes(path, content or fake_dtm(next_name, title, description))
             return scenario_file(name, path, msg)
 
+        p2 = mk("ch2.DTm", "ch1.DTm", "Глава", "Вторая")
+        p1 = mk("ch1.DTm", "", "Глава", "Первая")
+        text = os.path.join(d, "text.DTm")
+        write_bytes(text, b"not a map")
+        check_selftest("campaign: the first chapter is the one no other names, whatever the order, and its story is read",
+                       first_chapter(["ch2.DTm", "ch1.DTm"], [p2, p1]) == 0
+                       and first_chapter(["ch1.DTm", "ch2.DTm"], [p1, p2]) == 1
+                       and map_about(p2) == "Вторая" and map_about(text) == "")
         chained, _ = forum_groups([sf("a.DTm", "b.DTm", "Один", "Глава", 1),
                                    sf("b.DTm", "", "Два", "Глава", 1)], False)
         pair, _ = forum_groups([sf("ru.DTm", "", "Карта", "Русское описание", 1),
@@ -1987,7 +2118,8 @@ def selftest():
         with tempfile.TemporaryDirectory() as root:
             src, cu, adir = write_fixture(root)
             out1, out2, out3 = (os.path.join(root, n) for n in ("out1", "out2", "out3"))
-            pack = build(src, adir, cu, out1)
+            no_razdor = os.path.join(root, "no-razdor")  # no game binary: the posts' images only, as a build without one
+            pack = build(src, adir, cu, out1, razdor=no_razdor)
             with open(os.path.join(out1, "index.json"), encoding="utf-8") as f:
                 cat = json.load(f)
             by_id = {e["id"]: e for e in cat["entries"]}
@@ -2032,6 +2164,23 @@ def selftest():
             check_selftest("build: EASY and HARD are one entry with both files, no lang, the thread's title",
                            variants is not None and sorted(f["name"] for f in variants["files"]) == ["easy.DTm", "hard.DTm"]
                            and all("lang" not in f for f in variants["files"]) and variants["title"]["ru"] == "Сложность")
+            abouts = {e["id"]: e.get("about") for e in cat["entries"]}
+            check_selftest("build: a language pair's story takes each language from its own file",
+                           abouts["map-310"] == {"ru": "Русская карта", "en": "An English map"})
+            check_selftest("build: a campaign's story is its first chapter's, a map's its own, a mod has none",
+                           abouts["campaign-300"] == {"ru": "Первая глава", "en": ""}
+                           and abouts["map-320-1"] == {"ru": "Первый сценарий", "en": ""}
+                           and "about" not in by_id["modA"])
+            check_selftest("build: archive maps that are no maps have no story and no picture (no binary)",
+                           all("about" not in e and "picture" not in e
+                               for e in cat["entries"] if e["id"].startswith("arc-")))
+            check_selftest("build: preview is the post's image as before, no entry of the fixture has one",
+                           all("preview" not in e for e in cat["entries"]))
+            with open(os.path.join(out1, "report.md"), encoding="utf-8") as f:
+                picture_report = f.read()
+            check_selftest("report: no game binary is a note, no entry has a map's own picture",
+                           "No razdor binary" in picture_report
+                           and "Entries with the map's own picture (`picture`): 0 of" in picture_report)
             check_selftest("build: a thread whose kind changed is listed in report.md",
                            "Forum threads whose kind changed (4 threads)" in open(
                                os.path.join(out1, "report.md"), encoding="utf-8").read())
@@ -2070,7 +2219,7 @@ def selftest():
             write_file(os.path.join(bcu, "Extra", "old.ini"), "only in Community Update")
             refused = False
             try:
-                build(bsrc, badir, bcu, os.path.join(bad_root, "out"))
+                build(bsrc, badir, bcu, os.path.join(bad_root, "out"), razdor=no_razdor)
             except Fail as e:
                 refused = "rebuild" in str(e)
             with open(os.path.join(bad_root, "out.failed", "report.md"), encoding="utf-8") as f:
@@ -2083,26 +2232,27 @@ def selftest():
             write_bytes(os.path.join(csrc, "maps", "unpacked", "300", "c2.DTm"), fake_dtm("Gone.DTm"))
             refused = False
             try:
-                build(csrc, cadir, ccu, os.path.join(chain_root, "out"))
+                build(csrc, cadir, ccu, os.path.join(chain_root, "out"), razdor=no_razdor)
             except Fail as e:
                 refused = "Gone.DTm" in str(e)
             check_selftest("chain: a link to a missing chapter fails the build unless the campaign is marked break",
                            refused and not os.path.exists(os.path.join(chain_root, "out", "index.json")))
-            cpack = build(csrc, cadir, ccu, os.path.join(chain_root, "out2"), fixes={"300": {"break": True}})
+            cpack = build(csrc, cadir, ccu, os.path.join(chain_root, "out2"), fixes={"300": {"break": True}},
+                          razdor=no_razdor)
             camp = [e for e in cpack.entries if e["id"] == "campaign-300"][0]
             check_selftest("chain: a campaign marked break ends there, partial, with the note",
                            camp["status"] == "partial" and "Gone.DTm" in camp["status_note"]["ru"]
                            and "после главы 2" in camp["status_note"]["ru"])
             os.makedirs(out2)
             write_file(os.path.join(out2, "0000000000000000.zip"), "stale")
-            build(src, adir, cu, out2)
+            build(src, adir, cu, out2, razdor=no_razdor)
             names = ["index.json", "report.md"] + sorted({f["path"] for e in cat["entries"] for f in e["files"]})
             same = all(open(os.path.join(out1, n), "rb").read() == open(os.path.join(out2, n), "rb").read()
                        for n in names)
             check_selftest("build: the same inputs give the same bytes", same)
             check_selftest("build: a stale asset of an earlier build is cleared",
                            not os.path.exists(os.path.join(out2, "0000000000000000.zip")))
-            build(src, adir, cu, out3, forum_maps=False)
+            build(src, adir, cu, out3, forum_maps=False, razdor=no_razdor)
             with open(os.path.join(out3, "index.json"), encoding="utf-8") as f:
                 cat3 = json.load(f)
             check_selftest("build: --no-forum-maps leaves the forum maps out",
@@ -2136,6 +2286,34 @@ def selftest():
         clash.entries = [entry_of("map-1", "Мятежные земли", []), entry_of("map-2", "Мятежные земли", ["evolution"])]
         clash.check()
         check_selftest("check: one title with other requires is allowed", True)
+    with tempfile.TemporaryDirectory() as d:
+        # a stand-in game binary: its exit code follows the map's name (ok, none, bad, slow)
+        fake = os.path.join(d, "razdor")
+        write_file(fake, "#!/usr/bin/env python3\n"
+                         "import sys, time\n"
+                         "name = sys.argv[2].rsplit('/', 1)[-1]\n"
+                         "if name.startswith('slow'):\n"
+                         "    time.sleep(5)\n"
+                         "if name.startswith('none'):\n"
+                         "    sys.exit(2)\n"
+                         "if name.startswith('bad'):\n"
+                         "    sys.exit('cannot read ' + name)\n"
+                         "open(sys.argv[3], 'wb').write(b'\\x89PNG stand-in')\n")
+        os.chmod(fake, 0o755)
+        out, notes = os.path.join(d, "out.png"), []
+        check_selftest("picture: a written PNG is the result, with no note",
+                       map_picture(fake, os.path.join(d, "ok.DTm"), out, notes) == out
+                       and os.path.isfile(out) and notes == [])
+        check_selftest("picture: a map with no picture (exit 2) gives none, with no note",
+                       map_picture(fake, os.path.join(d, "none.DTm"), out, notes) is None and notes == [])
+        check_selftest("picture: an error (exit 1) gives none, with a note",
+                       map_picture(fake, os.path.join(d, "bad.DTm"), out, notes) is None
+                       and len(notes) == 1 and "exit 1" in notes[0])
+        check_selftest("picture: no answer in time gives none, with a note",
+                       map_picture(fake, os.path.join(d, "slow.DTm"), out, notes, timeout=1) is None and len(notes) == 2)
+        check_selftest("picture: a missing binary gives none, with a note",
+                       map_picture(os.path.join(d, "no-such-binary"), os.path.join(d, "ok.DTm"), out, notes) is None
+                       and len(notes) == 3)
     check_sound_packages()
     print("selftest: all checks passed")
     return 0
@@ -2157,6 +2335,9 @@ def main(argv=None):
     ap.add_argument("--reactions", metavar="JSON",
                     help="the reactions on the forum threads' first posts (default: <src>/discord/reactions.json; "
                          "without the file no entry gets a rating)")
+    ap.add_argument("--razdor", metavar="PATH", default=RAZDOR_BIN,
+                    help="the game binary that writes each map's own picture (razdor --map-picture; default: "
+                         "target/release/razdor in the repo; missing, the posts' images are used)")
     ap.add_argument("--selftest", action="store_true", help="run the offline checks and exit")
     a = ap.parse_args(argv)
     fixes = {}
@@ -2176,7 +2357,7 @@ def main(argv=None):
         ap.error("missing " + ", ".join("--" + m.replace("_", "-") for m in missing))
     try:
         pack = build(a.src, a.archive_maps, a.base, a.out, forum_maps=not a.no_forum_maps, extra=extra, fixes=fixes,
-                     reactions=a.reactions)
+                     reactions=a.reactions, razdor=a.razdor)
         saved = sum(s for _, s in pack.sound_log.values())
         print(f"sounds: {sum(n for n, _ in pack.sound_log.values())} files of {len(pack.sound_log)} mods packed as "
               f"Ogg Vorbis, {saved} bytes saved")

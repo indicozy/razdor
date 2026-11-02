@@ -79,6 +79,101 @@ pub fn preview_ok(bytes: &[u8]) -> bool {
     (1..=PREVIEW_MAX_W).contains(&w) && (1..=PREVIEW_MAX_H).contains(&h)
 }
 
+/// A PNG of `width` x `height` pixels from `rgba` (`width * height * 4` bytes, row by row): colour
+/// type 6 (RGBA, 8 bit), filter 0 on every row, stored deflate blocks (no compression).
+pub fn png_rgba(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
+    let row = width as usize * 4;
+    assert_eq!(rgba.len(), row * height as usize, "pixels for a {width}x{height} picture");
+    let mut raw = Vec::with_capacity(rgba.len() + height as usize);
+    for line in rgba.chunks(row.max(1)) {
+        raw.push(0);
+        raw.extend_from_slice(line);
+    }
+    let mut z = vec![0x78, 0x01];
+    let blocks: Vec<&[u8]> = raw.chunks(65535).collect();
+    for (i, block) in blocks.iter().enumerate() {
+        z.push(u8::from(i + 1 == blocks.len()));
+        let len = block.len() as u16;
+        z.extend_from_slice(&len.to_le_bytes());
+        z.extend_from_slice(&(!len).to_le_bytes());
+        z.extend_from_slice(block);
+    }
+    z.extend_from_slice(&adler32(&raw).to_be_bytes());
+    let mut header = Vec::new();
+    header.extend_from_slice(&width.to_be_bytes());
+    header.extend_from_slice(&height.to_be_bytes());
+    header.extend_from_slice(&[8, 6, 0, 0, 0]);
+    let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+    png_chunk(&mut png, b"IHDR", &header);
+    png_chunk(&mut png, b"IDAT", &z);
+    png_chunk(&mut png, b"IEND", &[]);
+    png
+}
+
+fn png_chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
+    out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+    let mut body = kind.to_vec();
+    body.extend_from_slice(data);
+    out.extend_from_slice(&body);
+    out.extend_from_slice(&crc32(&body).to_be_bytes());
+}
+
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = !0u32;
+    for &b in bytes {
+        crc ^= u32::from(b);
+        for _ in 0..8 {
+            crc = if crc & 1 != 0 { 0xEDB8_8320 ^ (crc >> 1) } else { crc >> 1 };
+        }
+    }
+    !crc
+}
+
+fn adler32(bytes: &[u8]) -> u32 {
+    let (mut a, mut b) = (1u32, 0u32);
+    for &x in bytes {
+        a = (a + u32::from(x)) % 65521;
+        b = (b + a) % 65521;
+    }
+    (b << 16) | a
+}
+
+/// `razdor --map-picture <map.DTm> <out.png>` (the catalog pack asks for it, see
+/// `tools/community-pack/build.py`): writes the map's own picture, the LIT picture it carries, as
+/// a PNG, and exits without a window. Returns `None` for other arguments, else the exit code: 0
+/// written, 2 the map has no picture (nothing is written), 1 an error.
+pub fn export_cli(args: &[String]) -> Option<i32> {
+    if args.first().map(String::as_str) != Some("--map-picture") {
+        return None;
+    }
+    let (Some(map), Some(out)) = (args.get(1), args.get(2)) else {
+        eprintln!("--map-picture needs a map file and a PNG file to write");
+        return Some(1);
+    };
+    match map_picture(Path::new(map), Path::new(out)) {
+        Ok(true) => Some(0),
+        Ok(false) => Some(2),
+        Err(e) => {
+            eprintln!("{map}: {e}");
+            Some(1)
+        }
+    }
+}
+
+/// Writes the picture of the map at `map` to `out` as a PNG; `Ok(false)` when the map has none.
+fn map_picture(map: &Path, out: &Path) -> Result<bool, String> {
+    let scenario = crate::dt::dtm::Scenario::load(map).map_err(|e| e.to_string())?;
+    let Some(lit) = scenario.scenario_picture.as_deref() else {
+        return Ok(false);
+    };
+    let img = crate::dt::gfx::decode_lit(lit).map_err(|e| format!("the picture: {e}"))?;
+    if img.width == 0 || img.height == 0 || img.rgba.len() != img.width as usize * img.height as usize * 4 {
+        return Err("the picture has no pixels".into());
+    }
+    std::fs::write(out, png_rgba(img.width, img.height, &img.rgba)).map_err(|e| format!("{}: {e}", out.display()))?;
+    Ok(true)
+}
+
 /// A text in both interface languages.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Text {
@@ -181,6 +276,10 @@ pub struct Entry {
     pub version: String,
     #[serde(default)]
     pub description: Text,
+    /// The map's own story (the `.DTm`'s description; a campaign's first chapter), when the catalog
+    /// has it. The window does not draw it yet (it shows `description`, the post's text).
+    #[serde(default)]
+    pub about: Text,
     /// The languages its maps come in; `en` beyond the author's `ru` came from the import's
     /// machine translation when `machine_translated` is set.
     #[serde(default)]
@@ -204,6 +303,10 @@ pub struct Entry {
     /// A picture for the window, when the hub has one (shown in the picked entry's place).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview: Option<FileRef>,
+    /// The map's own picture (the `.DTm`'s embedded one; a campaign's first chapter), when the
+    /// catalog has it: newer clients show it in place of `preview`, older ones ignore it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub picture: Option<FileRef>,
     /// For a mod: the base install it is made for (e.g. "Community Update 1.2"). Nothing checks it.
     #[serde(default)]
     pub base: String,
@@ -268,14 +371,16 @@ impl Catalog {
                     return Err(format!("index.json: {}: only a mod may be an archive", e.id));
                 }
             }
-            if let Some(p) = &mut e.preview {
-                if !safe_location(&p.path) {
-                    return Err(format!("index.json: {}: bad preview path", e.id));
+            for (what, slot) in [("preview", &mut e.preview), ("picture", &mut e.picture)] {
+                if let Some(p) = slot {
+                    if !safe_location(&p.path) {
+                        return Err(format!("index.json: {}: bad {what} path", e.id));
+                    }
+                    if !safe_sha256(&p.sha256) {
+                        return Err(format!("index.json: {}: the {what}'s SHA-256 is not 64 hex digits", e.id));
+                    }
+                    p.sha256 = p.sha256.to_ascii_lowercase();
                 }
-                if !safe_sha256(&p.sha256) {
-                    return Err(format!("index.json: {}: the preview's SHA-256 is not 64 hex digits", e.id));
-                }
-                p.sha256 = p.sha256.to_ascii_lowercase();
             }
         }
         Ok(c)
@@ -828,6 +933,7 @@ pub mod mock {
                 author: author.into(),
                 version: "1.0".into(),
                 description: Text { ru: about.0.into(), en: about.1.into() },
+                about: chapters.first().map_or_else(Text::default, |ch| Text { ru: ch.about.0.into(), en: ch.about.1.into() }),
                 languages: langs.iter().map(|l| l.to_string()).collect(),
                 machine_translated: langs.contains(&"en"),
                 requires: requires.iter().map(|r| r.to_string()).collect(),
@@ -836,6 +942,7 @@ pub mod mock {
                 status,
                 status_note: Text { ru: note.0.into(), en: note.1.into() },
                 preview: None,
+                picture: None,
                 base: String::new(),
                 rating: None,
                 files,
@@ -861,6 +968,7 @@ pub mod mock {
                 author: author.into(),
                 version: version.into(),
                 description: Text { ru: about.0.into(), en: about.1.into() },
+                about: Text::default(),
                 languages: vec!["ru".into()],
                 machine_translated: false,
                 requires: requires.iter().map(|r| r.to_string()).collect(),
@@ -869,6 +977,7 @@ pub mod mock {
                 status,
                 status_note: Text { ru: note.0.into(), en: note.1.into() },
                 preview: None,
+                picture: None,
                 base: "Community Update 1.2".into(),
                 rating: None,
                 files: vec![f],
@@ -877,62 +986,15 @@ pub mod mock {
         }
     }
 
-    /// A PNG of `width` x `height` (a gradient), made here: stored deflate blocks, no compression.
+    /// A PNG of `width` x `height` (a gradient), made here by [`png_rgba`].
     pub fn preview_png(width: u32, height: u32) -> Vec<u8> {
-        let mut raw = Vec::new();
+        let mut rgba = Vec::with_capacity(width as usize * height as usize * 4);
         for y in 0..height {
-            raw.push(0);
             for x in 0..width {
-                raw.extend_from_slice(&[(x * 255 / width.max(1)) as u8, (y * 255 / height.max(1)) as u8, 120]);
+                rgba.extend_from_slice(&[(x * 255 / width.max(1)) as u8, (y * 255 / height.max(1)) as u8, 120, 255]);
             }
         }
-        let mut z = vec![0x78, 0x01];
-        let blocks: Vec<&[u8]> = raw.chunks(65535).collect();
-        for (i, block) in blocks.iter().enumerate() {
-            z.push(u8::from(i + 1 == blocks.len()));
-            let len = block.len() as u16;
-            z.extend_from_slice(&len.to_le_bytes());
-            z.extend_from_slice(&(!len).to_le_bytes());
-            z.extend_from_slice(block);
-        }
-        z.extend_from_slice(&adler32(&raw).to_be_bytes());
-        let mut header = Vec::new();
-        header.extend_from_slice(&width.to_be_bytes());
-        header.extend_from_slice(&height.to_be_bytes());
-        header.extend_from_slice(&[8, 2, 0, 0, 0]);
-        let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
-        png_chunk(&mut png, b"IHDR", &header);
-        png_chunk(&mut png, b"IDAT", &z);
-        png_chunk(&mut png, b"IEND", &[]);
-        png
-    }
-
-    fn png_chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
-        out.extend_from_slice(&(data.len() as u32).to_be_bytes());
-        let mut body = kind.to_vec();
-        body.extend_from_slice(data);
-        out.extend_from_slice(&body);
-        out.extend_from_slice(&crc32(&body).to_be_bytes());
-    }
-
-    fn crc32(bytes: &[u8]) -> u32 {
-        let mut crc = !0u32;
-        for &b in bytes {
-            crc ^= u32::from(b);
-            for _ in 0..8 {
-                crc = if crc & 1 != 0 { 0xEDB8_8320 ^ (crc >> 1) } else { crc >> 1 };
-            }
-        }
-        !crc
-    }
-
-    fn adler32(bytes: &[u8]) -> u32 {
-        let (mut a, mut b) = (1u32, 0u32);
-        for &x in bytes {
-            a = (a + u32::from(x)) % 65521;
-            b = (b + a) % 65521;
-        }
-        (b << 16) | a
+        png_rgba(width, height, &rgba)
     }
 
     /// Writes the mock hub (its files and `index.json`) into `dir`.
@@ -1213,6 +1275,26 @@ mod tests {
         assert_eq!(c.entries[0].preview.as_ref().unwrap().sha256, "ab".repeat(32));
     }
 
+    /// A `picture` is checked as a `preview` is: a path out of the hub or a bad SHA-256 refuses the whole
+    /// catalog; a good one reads back (lower case), and a catalog without it reads with none.
+    #[test]
+    fn a_bad_picture_is_refused_like_a_bad_preview() {
+        let entry = |picture: &str| {
+            format!(
+                r#"{{"format":1,"entries":[{{"id":"m","kind":"map","title":{{"ru":"x"}},"author":"a","version":"1","files":[],"picture":{picture}}}]}}"#
+            )
+        };
+        let good = format!(r#"{{"path":"pictures/p.png","name":"picture.png","size":1,"sha256":"{}"}}"#, "AB".repeat(32));
+        let c = Catalog::parse(entry(&good).as_bytes()).unwrap();
+        assert_eq!(c.entries[0].picture.as_ref().unwrap().sha256, "ab".repeat(32));
+        assert!(Catalog::parse(entry(r#"{"path":"pictures/p.png","name":"p.png","size":1,"sha256":"ab"}"#).as_bytes()).is_err());
+        assert!(Catalog::parse(entry(r#"{"path":"../../x.png","name":"p.png","size":1,"sha256":"ab"}"#).as_bytes()).is_err());
+        let bad_sum = format!(r#"{{"path":"pictures/p.png","name":"p.png","size":1,"sha256":"{}"}}"#, "g".repeat(64));
+        assert!(Catalog::parse(entry(&bad_sum).as_bytes()).is_err());
+        let none = Catalog::parse(entry("null").as_bytes()).unwrap();
+        assert!(none.entries[0].picture.is_none());
+    }
+
     #[test]
     fn an_address_path_is_fetched_as_it_is_and_never_joined_onto_a_folder() {
         let sum = "ab".repeat(32);
@@ -1318,6 +1400,37 @@ mod tests {
         assert!(!preview_ok(b"GIF89a................................"));
         let img = macroquad::texture::Image::from_file_with_format(&png, None).expect("the mock's PNG decodes");
         assert_eq!((img.width, img.height), (480, 270));
+    }
+
+    #[test]
+    fn a_rgba_picture_is_written_as_a_png_that_decodes_back() {
+        let pixels: Vec<u8> = (0..3 * 2 * 4).map(|i| (i * 17) as u8).collect();
+        let png = png_rgba(3, 2, &pixels);
+        assert!(preview_ok(&png));
+        let img = macroquad::texture::Image::from_file_with_format(&png, None).expect("the PNG decodes");
+        assert_eq!((img.width, img.height), (3, 2));
+        assert_eq!(img.bytes, pixels);
+    }
+
+    /// `--map-picture` is for its own arguments only; the other command lines start the game.
+    #[test]
+    fn export_cli_takes_only_its_own_flag() {
+        assert_eq!(export_cli(&[]), None);
+        assert_eq!(export_cli(&["--replay".into(), "actions.jsonl".into()]), None);
+        assert_eq!(export_cli(&["--map-picture".into()]), Some(1), "a map and a PNG are needed");
+    }
+
+    /// A mock map has no picture: `--map-picture` says so (exit 2) and writes nothing.
+    #[test]
+    fn a_map_without_a_picture_exports_nothing() {
+        let (hub, c) = mock_hub("export");
+        let f = &c.entries.iter().find(|e| e.kind == Kind::Map).unwrap().files[0];
+        let map = hub.local.join("mock-hub").join(&f.path);
+        let out = hub.local.join("picture.png");
+        let args = ["--map-picture".to_string(), map.display().to_string(), out.display().to_string()];
+        assert_eq!(export_cli(&args), Some(2));
+        assert!(!out.exists());
+        let _ = std::fs::remove_dir_all(&hub.local);
     }
 
     #[test]

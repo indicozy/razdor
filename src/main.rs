@@ -53,6 +53,11 @@ fn conf() -> Conf {
     if let Some(code) = razdor::difftest::cli(&args) {
         std::process::exit(code);
     }
+    // `--map-picture <map.DTm> <out.png>`: the catalog pack's export of a map's own picture, no window
+    // (`razdor::hub::export_cli`).
+    if let Some(code) = razdor::hub::export_cli(&args) {
+        std::process::exit(code);
+    }
     // The log of this start (`razdor.log`, see `razdor::diag`), before anything can fail.
     razdor::diag::init();
     // `RAZDOR_DT_DIR` and the other settings may come from a `.env` file.

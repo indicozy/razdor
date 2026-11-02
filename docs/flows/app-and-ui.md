@@ -662,7 +662,10 @@ mod still needed and removes a mod's whole folder. Each entry carries `status` (
 `broken`, `unknown`, with `status_note`) shown as the window's state line, an optional `preview` (a PNG
 no bigger than 480x270, read from its header; macroquad decodes PNG and TGA only, so no WebP), cached
 once in `<hub>/previews/<sha256>.png` and drawn at the top of the right panel (`ui/hub_view.rs`
-`ensure_preview`), and, for a mod, `base` (the base it is made for; nothing checks it). An optional `rating`
+`ensure_preview`), and, for a mod, `base` (the base it is made for; nothing checks it). An optional `picture`
+(the map's own LIT picture in the `.DTm`, made by `razdor --map-picture`, `hub::export_cli`; the same checks and
+caching as `preview`) is what newer clients show in its place; older ones ignore it. An optional `about` ({ru, en}: the map's own story, its `.DTm` description, a
+campaign's first chapter's) is read into `Entry::about` but not drawn yet (the window shows `description` only). An optional `rating`
 ({up, down}: the 👍/👎 on its Discord post, absent when it has none) shows in the row (`· +up / -down`) and in the
 panel («Оценка в Discord»); the list is sorted by `hub::by_rating`: rated first by score (up minus down), then by
 votes, unrated after, ties by the Russian title. A mod file
