@@ -457,7 +457,6 @@ pub fn resource_icon(r: Resource, cx: f32, cy: f32, s: f32) {
 /// 0x48efd0 / 0x48d830), with no ring or frame. A row grows the window by its icons, 8, the
 /// 16 of its caption and 8 more (0x4a9650: 0x2f + 8 + 0x10 + 8).
 const UNIT_ICON: f32 = 46.0;
-const UNIT_ROW: f32 = 79.0;
 /// The side picture of a unit: its bust (type record +0x14, 92 × 92: 0x48efd0).
 const UNIT_BUST: f32 = 92.0;
 
@@ -467,9 +466,10 @@ const UNIT_BUST: f32 = 92.0;
 /// `win_w` is the window's width in its own design pixels: the original's window is always
 /// 634 wide (`EVENT_W`), and Razdor's phone and large windows are not, so the row follows
 /// the window it is in.
-fn unit_cells(n: usize, win_w: i32) -> Vec<f32> {
+fn unit_cells(n: usize, win_w: i32, rs: f32) -> Vec<f32> {
     let n = n.min(4) as i32;
-    (0..n).map(|i| ((win_w * (i + 1)) / (n + 1) - 23) as f32).collect()
+    let half = (23.0 * rs).round() as i32;
+    (0..n).map(|i| ((win_w * (i + 1)) / (n + 1) - half) as f32).collect()
 }
 
 /// Razdor's scrollbar beside a scrolled event text (not in the original): 12 of the window's
@@ -540,6 +540,48 @@ const EVENT_MAX_BOX: f32 = 499.0;
 /// The window's height besides the box and the rows under it (0x4aa929: + 0x77).
 const EVENT_REST: f32 = 119.0;
 
+/// A phone held upright (Razdor's, the owner's notes of 2026-11-02, for the victory, event and
+/// story windows): their OK is a normal centred button of 120 × 44 dp with a 15.2 dp label; a
+/// reward window's text is 1.1 times its size, its picture 1.25 times, its reward icons 1.3 times
+/// (`REWARD_ICON`). The learnt-spell window keeps its OK and its size and only gets
+/// [`LEARNT_PAD_DP`] of padding on every side.
+const OK_W_DP: f32 = 120.0;
+const OK_H_DP: f32 = 44.0;
+const OK_LABEL_DP: f32 = 13.8;
+const BIG_TEXT: f32 = 1.05;
+const BIG_PICTURE: f32 = 1.25;
+const REWARD_ICON: f32 = 1.3;
+const LEARNT_PAD_DP: f32 = 14.0;
+
+/// The learnt-spell window: spells and no text (the game's «Выучены новые заклинания»).
+fn learnt_look(d: &Dialog) -> bool {
+    !d.spells.is_empty() && d.marked.is_none() && d.text.is_empty()
+}
+
+/// The reward look (see [`OK_W_DP`]): a phone held upright, an event or victory window with a
+/// picture or rewards. Not the defeat, the questions, the noon report or the learnt-spell one.
+fn big_look(d: &Dialog, up: bool) -> bool {
+    up && !d.defeat && !d.question && !d.resource_report && !learnt_look(d)
+        && (d.picture.is_some() || !d.resources.is_empty() || !d.items.is_empty() || !d.joined.is_empty() || !d.left.is_empty() || !d.lost.is_empty() || !d.spells.is_empty())
+}
+
+/// Whether the OK is the phone's large one: a phone held upright, not the defeat, a question, the
+/// noon report or the learnt-spell window.
+fn ok_look(d: &Dialog, up: bool) -> bool {
+    up && !d.defeat && !d.question && !d.resource_report && !learnt_look(d)
+}
+
+/// A resource row's pitch in the original's pixels: the report's [`REPORT_ROW`], and for the reward
+/// look (`rs` = 1 is the original's: 34 + 70 = 104) the icon's size as `rs` grows it.
+fn res_pitch(rs: f32, o: f32, report: bool) -> f32 {
+    if report { REPORT_ROW * o } else { (34.0 + 70.0 * rs) * o }
+}
+
+/// A units row's height in the original's pixels (`rs` = 1: 33 + 46 = 79, [`UNIT_ROW`]).
+fn unit_row(rs: f32) -> f32 {
+    33.0 + UNIT_ICON * rs
+}
+
 /// The message the phone's text base is read for (`display::text_base`): the smallest large
 /// window, its box at its minimum and no picture. Tooltips and titles read it too, so that a
 /// phone's text is one scale everywhere.
@@ -603,6 +645,8 @@ struct EventLayout {
     below: f32,
     f: EventFrame,
     shown: usize,
+    /// The reward icons' size factor (`REWARD_ICON` in the reward look, else 1).
+    rs: f32,
 }
 
 /// A text row's height: the defeat report's empty row is the gap font's (0x47e46c), shorter
@@ -696,16 +740,20 @@ fn event_layout(d: &Dialog, o: f32, t: f32, w: f32, fit: bool) -> EventLayout {
     let sh = screen_height();
     let size = super::dt_font::sheet_size(super::dt_font::Face::Subtitle, t);
     let line = EVENT_LINE * t;
+    // The reward look (`big_look`): its picture and reward icons grow (`pk`, `rs`).
+    let up = fit && super::window_layout::portrait();
+    let big = big_look(d, up);
+    let (pk, rs) = if big { (BIG_PICTURE, REWARD_ICON) } else { (1.0, 1.0) };
     // A picture at the side takes its width and 14 more from the text box.
     let side = match &d.picture {
         // A unit's 92 × 92 bust (type record +0x14, 0x4a8ae8; Icons.ugs, 0x48efd0).
-        Some(Picture::Unit(_)) => Some((UNIT_BUST, UNIT_BUST)),
+        Some(Picture::Unit(_)) => Some((UNIT_BUST * pk, UNIT_BUST * pk)),
         Some(Picture::Image(t)) => {
-            let scale = (128.0 / t.height()).min(220.0 / t.width());
+            let scale = (128.0 / t.height()).min(220.0 / t.width()) * pk;
             Some((t.width() * scale, t.height() * scale))
         }
-        Some(Picture::Side(t)) => Some((t.width(), t.height())),
-        Some(Picture::Still(t)) => Some((t.width(), t.height())),
+        Some(Picture::Side(t)) => Some((t.width() * pk, t.height() * pk)),
+        Some(Picture::Still(t)) => Some((t.width() * pk, t.height() * pk)),
         _ => None,
     };
     let side_w = side.map_or(0.0, |(pw, _)| pw + 14.0);
@@ -718,18 +766,18 @@ fn event_layout(d: &Dialog, o: f32, t: f32, w: f32, fit: bool) -> EventLayout {
     let total = lines.len() + rows.len();
     let full_h = lines.len() as f32 * line + rows.iter().map(|r| event_row_h(d.defeat, line, t, r)).sum::<f32>();
     // One row of labels per [`report_label_rows`]: the box grows by a row's height for each.
-    let res_h = report_label_rows(d.resource_report, super::window_layout::portrait(), d.resources.len()) as f32 * REPORT_ROW * o;
+    let res_h = report_label_rows(d.resource_report, super::window_layout::portrait(), d.resources.len()) as f32 * res_pitch(rs, o, d.resource_report);
     // An icon row grows the window by its caption and icons (0x4a8e66: 87 for items, 82
-    // for spells).
-    let items_h = if d.items.is_empty() { 0.0 } else { 87.0 * o };
+    // for spells); the reward look's icons grow with `rs` and the rows with them.
+    let items_h = if d.items.is_empty() { 0.0 } else { (32.0 + 55.0 * rs) * o };
     // The lost row is laid out as the gained one (0x4a8fe5: the same 0x37 / 0x18 / 8 steps).
-    let lost_h = if d.lost.is_empty() { 0.0 } else { 87.0 * o };
-    let spells_h = if d.spells.is_empty() { 0.0 } else { 82.0 * o };
+    let lost_h = if d.lost.is_empty() { 0.0 } else { (32.0 + 55.0 * rs) * o };
+    let spells_h = if d.spells.is_empty() { 0.0 } else { (32.0 + 50.0 * rs) * o };
     // The quest line's row (0x4a8dbf: 16 above the line, 8 under it), measured against the
     // original's opening event as 30 of Razdor's layout.
     let notice_h = if d.notice.is_some() { 30.0 * o } else { 0.0 };
     let pic_h = if d.picture.is_some() && side.is_none() { 140.0 * o } else { 0.0 };
-    let units_h = [&d.joined, &d.left].iter().filter(|u| !u.is_empty()).count() as f32 * UNIT_ROW * o;
+    let units_h = [&d.joined, &d.left].iter().filter(|u| !u.is_empty()).count() as f32 * unit_row(rs) * o;
     let below = pic_h + res_h + items_h + lost_h + spells_h + units_h + notice_h;
     // The box stops at 499 (and short of the screen): the text scrolls in it, the buttons
     // stay in sight.
@@ -746,7 +794,7 @@ fn event_layout(d: &Dialog, o: f32, t: f32, w: f32, fit: bool) -> EventLayout {
     };
     let f = event_frame(side, full_h / o, below_vis, max_box, w);
     let shown = if full_h / o + 2.0 * EVENT_PAD <= f.box_h { total } else { (((f.box_h - 2.0 * EVENT_PAD) * o / line).floor().max(1.0) as usize).min(total) };
-    EventLayout { o, t, size, line, side, room, lines, rows, total, pic_h, res_h, items_h, lost_h, spells_h, below, f, shown }
+    EventLayout { o, t, size, line, side, room, lines, rows, total, pic_h, res_h, items_h, lost_h, spells_h, below, f, shown, rs }
 }
 
 /// Draws `d` over the map; returns how it was closed: OK (or Enter, Escape), or for a
@@ -804,6 +852,11 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     let large = super::display::large_windows();
     // The phone layout needs the large windows on: off, a phone takes the original's path.
     let phone = large && super::display::dp_px().is_some();
+    let up = phone && super::window_layout::portrait();
+    let big = big_look(d, up);
+    // The reward look's text is larger (`BIG_TEXT`); the learnt-spell window's padding (`LEARNT_PAD_DP`).
+    let t = if big { t * BIG_TEXT } else { t };
+    let pad = if up && learnt_look(d) { LEARNT_PAD_DP * super::display::dp_px().unwrap_or(0.0) } else { 0.0 };
     let mut o = plain;
     if large {
         let min_w = if phone { EVENT_MIN_W } else { EVENT_W };
@@ -831,29 +884,33 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         event_layout(d, o, t, EVENT_W, false)
     };
     chrome::under_message();
-    let EventLayout { o, t, size, line, side, room, lines, rows, total, pic_h, res_h, items_h, lost_h, spells_h, below, f, shown, .. } = lay;
+    let EventLayout { o, t, size, line, side, room, lines, rows, total, pic_h, res_h, items_h, lost_h, spells_h, below, f, shown, rs, .. } = lay;
     let row_h = |r: &MarkupRow| event_row_h(defeat, line, t, r);
     // The title strip's growth: the window is taller by it, and its frame and content move down.
     let grow = chrome::title_grow();
     let (w, h) = (f.w * o, f.h * o + grow + footer_grow(o));
-    let (x, y) = event_origin(sw, sh, chrome::bar_height(), w, h);
+    // The window is the content plus `pad` on every side (the learnt-spell window, phone upright).
+    let (x, y) = event_origin(sw, sh, chrome::bar_height(), w + 2.0 * pad, h + 2.0 * pad);
+    let (x, y) = (x + pad, y + pad);
+    let outer = Rect::new(x - pad, y - pad, w + 2.0 * pad, h + 2.0 * pad);
     // The defeat look is the red marble (the original's window after a lost battle).
     let skin = if d.defeat { chrome::Skin::Red } else { chrome::Skin::Marble };
     if d.defeat || d.resource_report {
-        chrome::window_with_title_color_grown(Rect::new(x, y, w, h), &d.title, skin, false, Color::from_rgba(255, 255, 255, 255));
+        chrome::window_with_title_color_grown(outer, &d.title, skin, false, Color::from_rgba(255, 255, 255, 255));
     } else {
-        chrome::window_grown(Rect::new(x, y, w, h), &d.title, skin, false);
+        chrome::window_grown(outer, &d.title, skin, false);
     }
     let edge = o.max(1.0);
     // The event window's inner frames (0x4aaa4b, 0x4aaa79), as 0x48d710's.
-    chrome::window_inner_frames_footed(Rect::new(x, y, w, h), o, grow, footer_grow(o));
+    chrome::window_inner_frames_footed(outer, o, grow, footer_grow(o));
     let top = y + EVENT_BOX_TOP * o + grow;
     let mut cy = top;
     match &d.picture {
         Some(Picture::Unit(u)) => {
             // Left of the text box, as the original's portrait (the box starts at 19 +
             // picture + 14).
-            let r = Rect::new(x + 20.0 * o, top + o, UNIT_BUST * o, UNIT_BUST * o);
+            let (pw, _) = side.unwrap_or((UNIT_BUST, UNIT_BUST));
+            let r = Rect::new(x + 20.0 * o, top + o, pw * o, pw * o);
             assets.draw_portrait(*u, Team::Player, r);
             chrome::silver_frame(r, 1.5 * o);
         }
@@ -863,9 +920,13 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
             draw_texture_ex(tex, r.x, r.y, WHITE, DrawTextureParams { dest_size: Some(vec2(r.w, r.h)), ..Default::default() });
             draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0 * o, MARBLE_EDGE);
         }
-        Some(Picture::Still(tex)) => chrome::tex(tex, Rect::new(x + 20.0 * o, top + o, tex.width() * o, tex.height() * o), WHITE),
+        Some(Picture::Still(tex)) => {
+            let (pw, ph) = side.unwrap_or((tex.width(), tex.height()));
+            chrome::tex(tex, Rect::new(x + 20.0 * o, top + o, pw * o, ph * o), WHITE)
+        }
         Some(Picture::Side(tex)) => {
-            let r = Rect::new(x + 20.0 * o, top + o, tex.width() * o, tex.height() * o);
+            let (pw, ph) = side.unwrap_or((tex.width(), tex.height()));
+            let r = Rect::new(x + 20.0 * o, top + o, pw * o, ph * o);
             chrome::tex(tex, r, WHITE);
             draw_rectangle_lines(r.x - 1.0, r.y - 1.0, r.w + 2.0, r.h + 2.0, 1.0, WHITE);
         }
@@ -916,13 +977,14 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     if !d.resources.is_empty() {
         let cols = report_label_cols(d.resource_report, super::window_layout::portrait(), d.resources.len());
         let places = report_label_grid(d.resources.len(), cols, x, w, o, cy);
+        let pitch = res_pitch(rs, o, d.resource_report);
         for (i, ((r, label), &(cx, baseline))) in d.resources.iter().zip(&places).enumerate() {
             // The original's caption face, every label in its green font ae249c (0x4d6114 sets
             // it on all four places), the mana's too.
             let c = if d.resource_report { report_label_ink(*r) } else { CAPTION };
             super::dt_font::with_original_face(super::dt_font::Face::Subtitle, || chrome::shadow_centered(label, cx, baseline, size, c));
             let row = (i / cols) as f32;
-            resource_icon(*r, cx, cy + 62.0 * o + row * REPORT_ROW * o, 70.0 * o);
+            resource_icon(*r, cx, cy + (27.0 + 35.0 * rs) * o + row * pitch, 70.0 * rs * o);
         }
         cy += res_h;
     }
@@ -939,7 +1001,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         caption("NewSpell", razdor::i18n::n_("New spells learnt:"), cy);
         let n = d.spells.len().min(4);
         for (i, &s) in d.spells.iter().enumerate().take(4) {
-            let r = Rect::new(spread(n, i) - 25.0 * o, cy + 26.0 * o, 50.0 * o, 50.0 * o);
+            let r = Rect::new(spread(n, i) - 25.0 * rs * o, cy + 26.0 * o, 50.0 * rs * o, 50.0 * rs * o);
             if let Some(def) = game.and_then(|g| g.content.spells.iter().find(|x| x.id == s)) {
                 chrome::spell_icon(def, r);
                 chrome::silver_frame(r, edge);
@@ -955,10 +1017,10 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
             continue;
         }
         caption(key, ours, cy);
-        for (&u, left) in units.iter().zip(unit_cells(units.len(), (w / o).round() as i32)) {
-            assets.draw_portrait(u, Team::Player, Rect::new(x + left * o, cy + 26.0 * o, UNIT_ICON * o, UNIT_ICON * o));
+        for (&u, left) in units.iter().zip(unit_cells(units.len(), (w / o).round() as i32, rs)) {
+            assets.draw_portrait(u, Team::Player, Rect::new(x + left * o, cy + 26.0 * o, UNIT_ICON * rs * o, UNIT_ICON * rs * o));
         }
-        cy += UNIT_ROW * o;
+        cy += unit_row(rs) * o;
     }
     // The lost row sits above the gained one (the original stacks its rows from the bottom
     // up: 0x4a8fe5 builds the gained row first, then the lost one, the units above them).
@@ -968,7 +1030,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         // (0x4a8fe5, 0x4d5884's 0x37 picture cells).
         let n = d.lost.len().min(4);
         for (i, &item) in d.lost.iter().enumerate().take(4) {
-            let r = Rect::new(spread(n, i) - 27.0 * o, cy + 26.0 * o, 55.0 * o, 55.0 * o);
+            let r = Rect::new(spread(n, i) - 27.0 * rs * o, cy + 26.0 * o, 55.0 * rs * o, 55.0 * rs * o);
             assets.draw_item(item, r.x, r.y, r.w);
             icons.push((false, item.0, r));
         }
@@ -978,7 +1040,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         caption("AddItem", razdor::i18n::n_("Items received:"), cy);
         let n = d.items.len().min(8);
         for (i, &item) in d.items.iter().enumerate().take(8) {
-            let r = Rect::new(spread(n, i) - 27.0 * o, cy + 26.0 * o, 55.0 * o, 55.0 * o);
+            let r = Rect::new(spread(n, i) - 27.0 * rs * o, cy + 26.0 * o, 55.0 * rs * o, 55.0 * rs * o);
             assets.draw_item(item, r.x, r.y, r.w);
             icons.push((false, item.0, r));
         }
@@ -996,7 +1058,9 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     // The buttons, 95 × 36, 45 from the window's bottom; Razdor's own: they grow with the text
     // size (`button_grow`), centred in the footer, which grows with them (`footer_grow`).
     let g = super::display::button_grow();
-    let (bw, bh) = (95.0 * o * g, 36.0 * o * g);
+    let dp = super::display::dp_px().unwrap_or(1.0);
+    let up_ok = ok_look(d, up);
+    let (bw, bh) = if up_ok { (OK_W_DP * dp, OK_H_DP * dp) } else { (95.0 * o * g, 36.0 * o * g) };
     let foot = 58.0 * o * g;
     let by = y + h - foot + (foot - bh) / 2.0;
     // A left or right press on an icon shows its item or spell centred on the press, kept
@@ -1084,6 +1148,8 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
                 super::audio::cue(super::audio::Cue::Button);
             }
             pressed
+        } else if up_ok {
+            ok_button_large(ok_r, &ok_label, ok_on, dp)
         } else {
             button(ok_r.x, ok_r.y, bw, bh, &ok_label, ok_on)
         };
@@ -1100,6 +1166,17 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         return Some(Close::LoadLast);
     }
     (ok || (d.key_down.get() && super::widgets::ok_key_released())).then_some(Close::Ok)
+}
+
+/// The phone's large OK (`ok_look`): a marble button whose label is [`OK_LABEL_DP`] dp, drawn at
+/// the window's own position; pressed as [`button`] is.
+fn ok_button_large(r: Rect, label: &str, enabled: bool, dp: f32) -> bool {
+    let (_, down, pressed) = button_state(r, enabled);
+    chrome::marble_button_sized(r, label, enabled, down, OK_LABEL_DP * dp);
+    if pressed {
+        super::audio::cue(super::audio::Cue::Button);
+    }
+    pressed
 }
 
 /// The item or spell card shown over a window (`draw_content`, `draw_village_event`): a spell's
@@ -1501,13 +1578,13 @@ mod tests {
     /// 92 × 92 bust, the text box after it and 14 more.
     #[test]
     fn the_units_rows_stand_as_the_original_s() {
-        assert_eq!(unit_cells(1, 634), vec![294.0]);
-        assert_eq!(unit_cells(2, 634), vec![188.0, 399.0]);
-        assert_eq!(unit_cells(3, 634), vec![135.0, 294.0, 452.0]);
-        assert_eq!(unit_cells(4, 634), vec![103.0, 230.0, 357.0, 484.0]);
-        assert_eq!(unit_cells(6, 634).len(), 4);
-        assert_eq!((UNIT_ICON, UNIT_ROW), (46.0, 79.0));
-        let f = event_frame(Some((UNIT_BUST, UNIT_BUST)), 19.0, UNIT_ROW, EVENT_MAX_BOX, EVENT_W);
+        assert_eq!(unit_cells(1, 634, 1.0), vec![294.0]);
+        assert_eq!(unit_cells(2, 634, 1.0), vec![188.0, 399.0]);
+        assert_eq!(unit_cells(3, 634, 1.0), vec![135.0, 294.0, 452.0]);
+        assert_eq!(unit_cells(4, 634, 1.0), vec![103.0, 230.0, 357.0, 484.0]);
+        assert_eq!(unit_cells(6, 634, 1.0).len(), 4);
+        assert_eq!((UNIT_ICON, unit_row(1.0)), (46.0, 79.0));
+        let f = event_frame(Some((UNIT_BUST, UNIT_BUST)), 19.0, unit_row(1.0), EVENT_MAX_BOX, EVENT_W);
         assert_eq!(f, EventFrame { w: 634.0, h: 92.0 + 79.0 + 119.0, box_x: 125.0, box_w: 490.0, box_h: 92.0 });
     }
 
@@ -1517,7 +1594,7 @@ mod tests {
     fn the_units_row_is_centred_in_a_window_of_any_width() {
         for win_w in [480, 634, 860, 900] {
             for n in 1..=4 {
-                let cells = unit_cells(n, win_w);
+                let cells = unit_cells(n, win_w, 1.0);
                 assert_eq!(cells.len(), n);
                 let first = cells[0] + 23.0;
                 let last = cells[n - 1] + 23.0;
@@ -1525,8 +1602,8 @@ mod tests {
                 assert!((mid - win_w as f32 / 2.0).abs() <= 1.0, "width {win_w}, n {n}: the row's middle at {mid}");
             }
         }
-        assert_eq!(unit_cells(2, 900), vec![277.0, 577.0]);
-        assert_eq!(unit_cells(2, 480), vec![137.0, 297.0]);
+        assert_eq!(unit_cells(2, 900, 1.0), vec![277.0, 577.0]);
+        assert_eq!(unit_cells(2, 480, 1.0), vec![137.0, 297.0]);
     }
 
     #[test]
