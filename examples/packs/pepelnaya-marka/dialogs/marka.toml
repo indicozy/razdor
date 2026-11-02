@@ -1,0 +1,261 @@
+# Chapter 2 «Марка»: the dialogs of the hub. A choice's actions run when it is picked; a choice with no
+# actions of its own is followed by its `dialog_choice` trigger in triggers/marka.toml, which does the
+# rest (set the quest, end the chapter, travel). Texts: the `marka.*` keys in texts/<lang>.toml.
+
+# The captain of the Crown's garrison, when the hero first rides into the town.
+[[dialog]]
+id = "captain"
+title = "marka.captain.title"
+text = "marka.captain.text"
+speaker = "dt:halberdier"
+
+[[dialog.choice]]
+id = "serve"
+text = "marka.captain.serve"
+then = [ { add = "crown", value = 1 } ]
+
+[[dialog.choice]]
+id = "alone"
+text = "marka.captain.alone"
+then = [ { add = "crown", value = -1 } ]
+
+[[dialog.choice]]
+id = "gold"
+text = "marka.captain.gold"
+then = [ { give_gold = 20 }, { add = "crown", value = -1 } ]
+
+# The Order's monk at the shrine's gate: the first envoy's offer.
+[[dialog]]
+id = "shrine_offer"
+title = "marka.shrine_offer.title"
+text = "marka.shrine_offer.text"
+speaker = "dt:monk"
+
+[[dialog.choice]]
+id = "accept"
+text = "marka.shrine_offer.accept"
+
+[[dialog.choice]]
+id = "refuse"
+text = "marka.shrine_offer.refuse"
+
+# Inside the shrine, once the guards are beaten: the quest's choice, and Brother Ilm joins.
+[[dialog]]
+id = "shrine_inside"
+title = "marka.shrine_inside.title"
+text = "marka.shrine_inside.text"
+speaker = "dt:pilgrim"
+
+[[dialog.choice]]
+id = "cleanse"
+text = "marka.shrine_inside.cleanse"
+then = [
+    { remove_spells = "garrison", garrison = "shrine" },
+    { give_unit = "dt:pilgrim", named = "ilm" },
+    { set = "ilm", value = 1 },
+    { give_item = "ash_seal" },
+    { add = "order", value = 2 },
+    { set = "order_quest", value = 2 },
+    { add = "quests_done", value = 1 },
+]
+
+[[dialog.choice]]
+id = "take"
+text = "marka.shrine_inside.take"
+then = [
+    { give_unit = "dt:pilgrim", named = "ilm" },
+    { set = "ilm", value = 2 },
+    { cast_on_army = "dt:spell/terrible_curse", in = "player", permanent = true },
+    { add = "taint", value = 2 },
+    { add = "order", value = -2 },
+    { add = "dread", value = 1 },
+    { set = "order_quest", value = 2 },
+    { add = "quests_done", value = 1 },
+]
+
+# The waygate's ritual at the barrow stone: the Order's seal opens it, and the hero goes through.
+[[dialog]]
+id = "ritual_offer"
+title = "marka.ritual_offer.title"
+text = "marka.ritual_offer.text"
+speaker = "dt:pilgrim"
+
+[[dialog.choice]]
+id = "open"
+text = "marka.ritual_offer.open"
+if = [ { has_item = "ash_seal" } ]
+
+[[dialog.choice]]
+id = "walk"
+text = "marka.ritual_offer.walk"
+
+# The marsh folk's plea, at the edge of the marsh: the second envoy's offer.
+[[dialog]]
+id = "marsh_offer"
+title = "marka.marsh_offer.title"
+text = "marka.marsh_offer.text"
+speaker = "dt:hunter"
+
+[[dialog.choice]]
+id = "accept"
+text = "marka.marsh_offer.accept"
+
+[[dialog.choice]]
+id = "later"
+text = "marka.marsh_offer.later"
+
+# Tess joins the hero after the wraiths are beaten (the trigger gives her to the army).
+[[dialog]]
+id = "tess_join"
+title = "marka.tess_join.title"
+text = "marka.tess_join.text"
+speaker = "dt:hunter"
+
+# Kord's company: hire it for gold, betray Kord to the Crown, or walk away.
+[[dialog]]
+id = "kord_offer"
+title = "marka.kord_offer.title"
+text = "marka.kord_offer.text"
+speaker = "dt:bandit"
+
+[[dialog.choice]]
+id = "hire"
+text = "marka.kord_offer.hire"
+if = [ { gold = 40, op = ">=" } ]
+
+[[dialog.choice]]
+id = "betray"
+text = "marka.kord_offer.betray"
+
+[[dialog.choice]]
+id = "walk"
+text = "marka.kord_offer.walk"
+
+# The council: two envoy quests done. Each ally is offered only when its standing is at least 1.
+[[dialog]]
+id = "council"
+title = "marka.council.title"
+text = "marka.council.text"
+
+[[dialog.choice]]
+id = "order"
+text = "marka.council.order"
+if = [ { var = "order", op = ">=", value = 1 } ]
+
+[[dialog.choice]]
+id = "marsh"
+text = "marka.council.marsh"
+if = [ { var = "marsh_trust", op = ">=", value = 1 } ]
+
+[[dialog.choice]]
+id = "companies"
+text = "marka.council.companies"
+if = [ { var = "companies", op = ">=", value = 1 } ]
+
+[[dialog.choice]]
+id = "later"
+text = "marka.council.later"
+
+# The Crown's bandit warning: the caravan goes out with the raiders behind it.
+[[dialog]]
+id = "raid_warning"
+title = "marka.raid_warning.title"
+text = "marka.raid_warning.text"
+speaker = "dt:bandit"
+
+# A caravan lost on the roads: the market rises (the gold is taken by the trigger `m_prices`).
+[[dialog]]
+id = "caravan_lost"
+title = "marka.caravan_lost.title"
+text = "marka.caravan_lost.text"
+
+# A caravan reaches the camp: the Crown's share of the escort's pay.
+[[dialog]]
+id = "caravan_safe"
+title = "marka.caravan_safe.title"
+text = "marka.caravan_safe.text"
+
+# The mill village falls to the dead, and the marsh village too.
+[[dialog]]
+id = "mill_fell"
+title = "marka.mill_fell.title"
+text = "marka.mill_fell.text"
+
+[[dialog]]
+id = "marsh_fell"
+title = "marka.marsh_fell.title"
+text = "marka.marsh_fell.text"
+
+# The barrows open: a host rises (the three thresholds of the Dread share this text).
+[[dialog]]
+id = "host_stir"
+title = "marka.host_stir.title"
+text = "marka.host_stir.text"
+speaker = "dt:death_knight"
+
+# A host at a village's edge: the siege.
+[[dialog]]
+id = "siege"
+title = "marka.siege.title"
+text = "marka.siege.text"
+speaker = "dt:ghoul"
+
+# The host beaten at the mill village: the village stands, and the Crown pays for the report.
+[[dialog]]
+id = "host_beaten"
+title = "marka.host_beaten.title"
+text = "marka.host_beaten.text"
+
+# Brother Ilm reads the abbey's walls, with the hero.
+[[dialog]]
+id = "ilm_abbey"
+title = "marka.ilm_abbey.title"
+text = "marka.ilm_abbey.text"
+speaker = "dt:pilgrim"
+
+# The new moon's signs: a plague, a band of deserters, a merchant prince.
+[[dialog]]
+id = "sign_plague"
+title = "marka.sign_plague.title"
+text = "marka.sign_plague.text"
+
+[[dialog]]
+id = "sign_deserters"
+title = "marka.sign_deserters.title"
+text = "marka.sign_deserters.text"
+
+[[dialog]]
+id = "sign_merchant"
+title = "marka.sign_merchant.title"
+text = "marka.sign_merchant.text"
+
+# The curse in the hero's blood (a week's warning, now and then).
+[[dialog]]
+id = "taint_week"
+title = "marka.taint_week.title"
+text = "marka.taint_week.text"
+
+# The revisits: a chapter's flag changes the hub on the next day.
+[[dialog]]
+id = "revisit_abbey"
+title = "marka.revisit_abbey.title"
+text = "marka.revisit_abbey.text"
+speaker = "dt:monk"
+
+[[dialog]]
+id = "revisit_salt"
+title = "marka.revisit_salt.title"
+text = "marka.revisit_salt.text"
+speaker = "dt:hunter"
+
+[[dialog]]
+id = "revisit_camp"
+title = "marka.revisit_camp.title"
+text = "marka.revisit_camp.text"
+speaker = "dt:swordsman"
+
+# The inscription on a waygate stone (the north-west stone and the south-east stone share it).
+[[dialog]]
+id = "stones_note"
+title = "marka.stones_note.title"
+text = "marka.stones_note.text"

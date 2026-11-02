@@ -84,3 +84,185 @@ text = "The dead lie down at the ford. Smoke still rises from the burnt mill, an
 [end_mercy]
 title = "The ford holds"
 text = "The dead lie down at the ford. The mill still stands, and the field behind it is green with the first grass. The March will not forget who held it, and will not forgive him if he leaves."
+
+# --- marka ---
+[marka.map]
+title = "The March"
+description = "The river Pepelka and its three fords. The abbey to the north-west, the salt marsh to the south-west, the Companies' camp to the south-east, the barrows to the north-east."
+won = "The March has chosen its side. The roads lead on."
+
+[marka.building.ashford]
+name = "Ashford"
+description = "A market town at the middle ford. The Crown's garrison still holds the gate, but its captain looks at you without trust."
+
+[marka.building.millspring]
+name = "Millspring"
+description = "A village north of the town. The mill wheel still turns, but the gates are shut."
+
+[marka.building.greyreed]
+name = "Greyreed"
+description = "A village on a dry island in the salt marsh. The marsh folk live here."
+
+[marka.building.abbey]
+name = "The ruined abbey"
+description = "The abbey walls are black with fire. The Order holds the bell tower and wants no one to touch it."
+
+[marka.building.shrine]
+name = "Shrine of Ash"
+description = "An altar by the old road. It smells of wet earth and something sweet."
+
+[marka.building.barrow]
+name = "The barrows"
+description = "Mounds above the standing stones. The ground here is warm and hums."
+
+[marka.building.camp]
+name = "The Companies' camp"
+description = "A palisade, campfires and a banner without a crest. Here they trade in whatever can be sold."
+
+[marka.army.caravan]
+name = "The Crown's caravan"
+
+[marka.army.patrol_w]
+name = "Crown patrol (west)"
+
+[marka.army.patrol_n]
+name = "Crown patrol (north)"
+
+[marka.army.raiders]
+name = "Raiders on the road"
+
+[marka.army.kord_band]
+name = "Kord's company"
+
+[marka.army.wraiths]
+name = "Wraiths of the marsh"
+
+[marka.unit.ash_knight]
+name = "Ash knight"
+description = "A knight raised from a barrow. His armour is burnt through."
+
+[marka.item.ash_seal]
+name = "Seal of Ash"
+description = "A copper seal of the Order with a burnt circle on it. It opens the standing gate, if you remember how."
+
+[marka.item.company_token]
+name = "Company token"
+description = "A token of the Free Companies. Every camp lets its bearer in without a question."
+
+[marka.captain]
+title = "The garrison captain"
+text = "The captain does not rise from his table. “You are the one they sent without men and without money. The Crown needs officers, not exiles. Well?”"
+serve = "I serve the Crown"
+alone = "I answer to no one"
+gold = "Ask for gold for the garrison"
+
+[marka.shrine_offer]
+title = "The shrine"
+text = "A monk of the Order waits by the old road. “The altar is defiled: darkness seeps out of it at night. Cleanse it, and the Order will remember you.” The dead, they say, stand inside."
+accept = "I will cleanse it"
+refuse = "Not my business"
+
+[marka.shrine_inside]
+title = "Inside the shrine"
+text = "The altar is cracked, and on it lies a rusted hoop with foreign runes. Brother Ilm, a novice in a torn habit, prays and does not look at you. “Cleanse it by the rite,” he says, “or take the black power before the dead do?”"
+cleanse = "Cleanse it by the rite (the Order)"
+take = "Take the power of the curse (heresy)"
+
+[marka.ritual_offer]
+title = "The gate"
+text = "The standing stone hums under your hand. Brother Ilm waits at its foot: “The Seal of Ash will open the gate. One road, one night, and the host of the dead loses its way to the ford.”"
+open = "Open the gate with the seal"
+walk = "Not now"
+
+[marka.marsh_offer]
+title = "The marsh folk"
+text = "Tess, a huntress from the far edge of the marsh, stands at the gate of Greyreed. “Wraiths come up out of the water. Find their lair and burn it. Then I will ride with you.”"
+accept = "I will go into the marsh"
+later = "Later"
+
+[marka.tess_join]
+title = "Tess"
+text = "The wraiths broke apart into mist. Tess wipes her knife on the grass. “The debt is paid. I ride with you until I say otherwise.”"
+
+[marka.kord_offer]
+title = "Kord"
+text = "Kord, captain of the Free Companies, sits on a beer barrel. “My company is cheap, but it fights dear. Forty coins and it is yours. Or would you rather hand me to the Crown for a reward?”"
+hire = "Hire the company: forty coins"
+betray = "Hand Kord over to the Crown"
+walk = "Walk away"
+
+[marka.council]
+title = "The March's council"
+text = "Two of the three tasks are done. The March waits to see whom you will swear to. Choose only those who trust you."
+order = "The Order of Ash"
+marsh = "The marsh folk"
+companies = "The Free Companies"
+later = "Not yet"
+
+[marka.raid_warning]
+title = "Raiders"
+text = "A caravan of salt and flour has left Ashford. Someone among the raiders knows its route. Three men with spears have gone after it."
+
+[marka.caravan_lost]
+title = "The caravan is gone"
+text = "The caravan never reached the camp. The empty wagon was found by the road, and the carters were not. Salt and flour cost twice as much in Ashford by morning."
+
+[marka.caravan_safe]
+title = "The caravan arrived"
+text = "The caravan reached the camp of the Free Companies. The Crown paid the guides, and you were given your share."
+
+[marka.mill_fell]
+title = "Millspring has fallen"
+text = "The barrow men walked into the village at dawn. The mill burns, and the bell is silent: the bell-ringer went to the dead. Fear grows in the March."
+
+[marka.marsh_fell]
+title = "Greyreed has fallen"
+text = "The salt flats caught fire at night. Greyreed burned to the ground, and the marsh folk fled into the bog. Tess did not come to the gathering."
+
+[marka.host_stir]
+title = "The barrows open"
+text = "The hills in the north-east stir. Knights in rusted armour rise from the earth, and beasts that crawl on four legs. They walk toward the village, and no one leads them."
+
+[marka.siege]
+title = "The siege"
+text = "The dead stand at the edge of the village. The people have barred their doors, and shadows walk over the roofs. One more night, and there will be no village."
+
+[marka.host_beaten]
+title = "The host lies down"
+text = "The knights lay down at the edge of the village and did not rise again. The villagers come out of their houses and thank you. The Crown has paid for the report."
+
+[marka.ilm_abbey]
+title = "The abbey"
+text = "Brother Ilm walks among the ruins, touching the walls. “There was an archive here,” he whispers. “It may say how to close the gate.”"
+
+[marka.sign_plague]
+title = "Plague"
+text = "The new moon. Birds lie by the wells with their beaks open. People say it is the breath of the barrows."
+
+[marka.sign_deserters]
+title = "Deserters"
+text = "A band of deserters has appeared on the old trade road. They ran from the Crown, and now they follow whoever pays. Merchants go around them."
+
+[marka.sign_merchant]
+title = "The merchant prince"
+text = "A merchant in a silk cloak rode through the March in the night and left a purse on your doorstep: “For keeping the road open.”"
+
+[marka.taint_week]
+title = "The taint"
+text = "The curse in your blood does not sleep. At night you hear bells ringing under the earth, and the Dread grows with them."
+
+[marka.revisit_abbey]
+title = "The Order's banner"
+text = "A black and white banner flies over the abbey. The Order has sent its priest to Ashford, and the garrison has given him the gate. The captain says nothing."
+
+[marka.revisit_salt]
+title = "Greyreed returns"
+text = "The marsh folk came back to their village with fish and salt. The houses are rebuilt and the gate stands open. Greyreed is yours now, and the people ask only one thing: do not sell it."
+
+[marka.revisit_camp]
+title = "The camp has grown"
+text = "The Free Companies have brought more men and weapons into the camp. The palisade is higher, and there are more fires. They wait for your word."
+
+[marka.stones_note]
+title = "The inscription"
+text = "The standing stone is covered in an old script. Brother Ilm reads it aloud: “Whoever walks on the stone does not touch the ground.” The stone says nothing more."
