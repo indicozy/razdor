@@ -138,6 +138,11 @@ cell = [14, 0]
 sprite = 5
 
 [[object]]
+kind = "trees"
+cell = [15, 0]
+sprite = 6
+
+[[object]]
 kind = "dead_trees"
 cell = [16, 0]
 sprite = 116
@@ -306,11 +311,6 @@ sprite = 65
 kind = "dead_trees"
 cell = [22, 1]
 sprite = 115
-
-[[object]]
-kind = "trees"
-cell = [26, 1]
-sprite = 1
 
 [[object]]
 kind = "dead_trees"
@@ -963,16 +963,6 @@ cell = [21, 7]
 sprite = 109
 
 [[object]]
-kind = "trees"
-cell = [22, 7]
-sprite = 48
-
-[[object]]
-kind = "trees"
-cell = [26, 7]
-sprite = 1
-
-[[object]]
 kind = "dead_trees"
 cell = [28, 7]
 sprite = 108
@@ -1034,11 +1024,6 @@ sprite = 114
 
 [[object]]
 kind = "dead_trees"
-cell = [22, 8]
-sprite = 109
-
-[[object]]
-kind = "dead_trees"
 cell = [32, 8]
 sprite = 116
 
@@ -1086,11 +1071,6 @@ sprite = 110
 kind = "dead_trees"
 cell = [21, 9]
 sprite = 109
-
-[[object]]
-kind = "dead_trees"
-cell = [22, 9]
-sprite = 116
 
 [[object]]
 kind = "trees"
@@ -2098,11 +2078,6 @@ cell = [21, 24]
 sprite = 6
 
 [[object]]
-kind = "dead_trees"
-cell = [26, 24]
-sprite = 113
-
-[[object]]
 kind = "trees"
 cell = [38, 24]
 sprite = 6
@@ -2819,11 +2794,6 @@ sprite = 6
 
 [[object]]
 kind = "dead_trees"
-cell = [26, 39]
-sprite = 114
-
-[[object]]
-kind = "dead_trees"
 cell = [27, 39]
 sprite = 113
 
@@ -3345,6 +3315,73 @@ name = "building.reedmere.name"
 description = "building.reedmere.description"
 cell = [9, 38]
 faction = "neighbour"
+# The fords' bridges: 1x1 pieces across each ford, in a row along the crossing (the original's
+# bridges are 1x1 pieces too). The middle one lies on the road to the mill. Nothing stands on a bridge or
+# next to it (the dresser keeps a ring of one cell clear of every building).
+
+[[building]]
+id = "north_ford_1"
+type = "wooden_bridge"
+name = "brod.bridge.north.name"
+faction = "neighbour"
+cell = [23, 8]
+
+[[building]]
+id = "north_ford_2"
+type = "wooden_bridge"
+name = "brod.bridge.north.name"
+faction = "neighbour"
+cell = [24, 8]
+
+[[building]]
+id = "north_ford_3"
+type = "wooden_bridge"
+name = "brod.bridge.north.name"
+faction = "neighbour"
+cell = [25, 8]
+
+[[building]]
+id = "mill_ford_1"
+type = "wooden_bridge"
+name = "brod.bridge.mill.name"
+faction = "neighbour"
+cell = [23, 23]
+
+[[building]]
+id = "mill_ford_2"
+type = "wooden_bridge"
+name = "brod.bridge.mill.name"
+faction = "neighbour"
+cell = [24, 23]
+
+[[building]]
+id = "mill_ford_3"
+type = "wooden_bridge"
+name = "brod.bridge.mill.name"
+faction = "neighbour"
+cell = [25, 23]
+
+[[building]]
+id = "south_ford_1"
+type = "wooden_bridge"
+name = "brod.bridge.south.name"
+faction = "neighbour"
+cell = [23, 38]
+
+[[building]]
+id = "south_ford_2"
+type = "wooden_bridge"
+name = "brod.bridge.south.name"
+faction = "neighbour"
+cell = [24, 38]
+
+[[building]]
+id = "south_ford_3"
+type = "wooden_bridge"
+name = "brod.bridge.south.name"
+faction = "neighbour"
+cell = [25, 38]
+
 
 # The ford toll: a bandit band on the road, just past the river.
 [[army]]

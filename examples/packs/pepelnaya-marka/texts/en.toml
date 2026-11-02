@@ -28,6 +28,17 @@ description = "A stone tower over the ford. The Crown's men left it when the dea
 name = "Reedmere"
 description = "A village on a dry island in the bog."
 
+# --- brod bridges ---
+
+[brod.bridge.north]
+name = "The north ford"
+
+[brod.bridge.mill]
+name = "The mill ford"
+
+[brod.bridge.south]
+name = "The south ford"
+
 [army.toll]
 name = "Bandits at the ford"
 
@@ -90,6 +101,17 @@ text = "The dead lie down at the ford. The mill still stands, and the field behi
 title = "The March"
 description = "The river Pepelka and its three fords. The abbey to the north-west, the salt marsh to the south-west, the Companies' camp to the south-east, the barrows to the north-east."
 won = "The March has chosen its side. The roads lead on."
+
+# --- marka bridges ---
+
+[marka.bridge.north]
+name = "The north ford"
+
+[marka.bridge.ashford]
+name = "The bridge of Ashford"
+
+[marka.bridge.south]
+name = "The south ford"
 
 [marka.building.ashford]
 name = "Ashford"
@@ -711,6 +733,11 @@ claim = "Take the gates: let the stones serve the March"
 title = "The Barrows"
 description = "The Barrow King's country: fields, the river Pepelka and its ford, the dead hills, and a palace on a stony hill under the snow."
 won = "The Barrow King is dead, and the March sleeps. Or does not."
+
+# --- barrows bridges ---
+
+[barrows.bridge.barrow]
+name = "The barrow ford"
 
 [barrows.building.throne]
 name = "The Barrow King's Palace"

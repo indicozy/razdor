@@ -19,6 +19,9 @@ won = "The raiders are scattered. The first light falls on a quiet valley."
 name = "Dawnwatch"
 description = "A small town on the western bank of the river."
 
+[bridge.ford]
+name = "The ford bridge"
+
 [army.raiders]
 name = "Raiders of the ford"
 

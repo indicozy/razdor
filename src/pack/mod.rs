@@ -12,6 +12,7 @@ pub mod files;
 pub mod load;
 pub mod manifest;
 pub mod map;
+pub mod reach;
 pub mod map_check;
 pub mod open;
 pub mod refs;

@@ -136,7 +136,7 @@ map = "barrows"
 when = { event = "week_start" }
 if = [ { var = "dread", op = ">=", value = 16 } ]
 then = [
-    { spawn_army = "bw_king_6", at = [150, 120], faction = "enemy", model = 10, troops = ["dt:archlich", "dt:lich", "dt:death_knight", "dt:death_knight", "dt:ghoul"] },
+    { spawn_army = "bw_king_6", at = [150, 117], faction = "enemy", model = 10, troops = ["dt:archlich", "dt:lich", "dt:death_knight", "dt:death_knight", "dt:ghoul"] },
     { army_goal = "bw_king_6", attack = "hero" },
     { add = "taint", value = 1 },
 ]

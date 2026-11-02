@@ -446,7 +446,9 @@ changes one kind's colour; two kinds may not share a colour.
 **Placement rules** (`razdor-pack check`). The hero, a town and a reach cell stand on land. An
 object is not on water. Only bridges (`stone_bridge`, `wooden_bridge`) stand on water among the
 buildings. An army on water needs a ship; a ship sails water. No cell is outside the map, and no two
-buildings share one.
+buildings share one. A cell of the story the hero's start cannot reach on foot is a warning (`reach`): a
+building's entrance, a `hero_enters` or other trigger cell, a teleport, a patrol or goal cell (from its army's
+cell), a travel point (a `[[point]]` with an `id`). A lantern without an `id` is not walked to.
 
 **Ids and units of a package.** A package's units are numbered from 200 in `units/` order, its items
 from 200 in `items/` order (`src/pack/compile.rs`). The base game's units end at 102 and its items at

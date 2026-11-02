@@ -324,6 +324,8 @@ fn check_map(pkg: &Package, entry: &MapEntry, r: &mut Report) {
         let armies: BTreeSet<String> = army_ids.keys().map(|k| k.to_string()).collect();
         let buildings: BTreeSet<String> = building_ids.keys().map(|k| k.to_string()).collect();
         super::triggers::check_map_refs(pkg, &entry.id, (t.width, t.height), &armies, &buildings, r);
+        // Walking: every named cell the hero's start reaches on foot (`reach`).
+        super::reach::check_map(&pkg.files, &entry.id, t, r);
     }
 }
 

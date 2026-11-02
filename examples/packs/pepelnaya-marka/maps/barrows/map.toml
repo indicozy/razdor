@@ -30764,6 +30764,11 @@ sprite = 114
 
 [[object]]
 kind = "trees"
+cell = [20, 99]
+sprite = 5
+
+[[object]]
+kind = "trees"
 cell = [22, 99]
 sprite = 65
 
@@ -35934,11 +35939,6 @@ sprite = 111
 
 [[object]]
 kind = "dead_trees"
-cell = [150, 116]
-sprite = 116
-
-[[object]]
-kind = "dead_trees"
 cell = [153, 116]
 sprite = 114
 
@@ -36153,11 +36153,6 @@ cell = [98, 117]
 sprite = 109
 
 [[object]]
-kind = "dead_trees"
-cell = [99, 117]
-sprite = 110
-
-[[object]]
 kind = "stones"
 cell = [105, 117]
 sprite = 25
@@ -36231,11 +36226,6 @@ sprite = 110
 kind = "trees"
 cell = [146, 117]
 sprite = 2
-
-[[object]]
-kind = "trees"
-cell = [151, 117]
-sprite = 16
 
 [[object]]
 kind = "dead_trees"
@@ -58561,6 +58551,59 @@ name = "barrows.building.camp.name"
 description = "barrows.building.camp.description"
 cell = [176, 160]
 faction = "neighbour"
+# The barrow ford: the river Pepelka runs across the whole map here, seven cells deep. The bridge is
+# a column of 1x1 pieces over the ford's shallows on the north-south road. Nothing stands on it or next
+# to it (the dresser keeps a ring of one cell clear of every building).
+
+[[building]]
+id = "barrow_ford_1"
+type = "wooden_bridge"
+name = "barrows.bridge.barrow.name"
+faction = "neighbour"
+cell = [100, 118]
+
+[[building]]
+id = "barrow_ford_2"
+type = "wooden_bridge"
+name = "barrows.bridge.barrow.name"
+faction = "neighbour"
+cell = [100, 119]
+
+[[building]]
+id = "barrow_ford_3"
+type = "wooden_bridge"
+name = "barrows.bridge.barrow.name"
+faction = "neighbour"
+cell = [100, 120]
+
+[[building]]
+id = "barrow_ford_4"
+type = "wooden_bridge"
+name = "barrows.bridge.barrow.name"
+faction = "neighbour"
+cell = [100, 121]
+
+[[building]]
+id = "barrow_ford_5"
+type = "wooden_bridge"
+name = "barrows.bridge.barrow.name"
+faction = "neighbour"
+cell = [100, 122]
+
+[[building]]
+id = "barrow_ford_6"
+type = "wooden_bridge"
+name = "barrows.bridge.barrow.name"
+faction = "neighbour"
+cell = [100, 123]
+
+[[building]]
+id = "barrow_ford_7"
+type = "wooden_bridge"
+name = "barrows.bridge.barrow.name"
+faction = "neighbour"
+cell = [100, 124]
+
 
 # The King: his own host on the step below the palace. It never moves by itself; the story sends the
 # other hosts (triggers/barrows.toml).

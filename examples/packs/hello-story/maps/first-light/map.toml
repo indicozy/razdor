@@ -68,6 +68,30 @@ recruit = [
     { unit = "dawn_knight", start = 2, max = 4 },
     { unit = "dt:militiaman", start = 4, max = 8 },
 ]
+# The ford's bridge: three 1x1 wooden pieces across the ford, on the road. Walkers cross the
+# river only on a bridge, so the raiders and the bandits can come to the town.
+
+[[building]]
+id = "ford_bridge_1"
+type = "wooden_bridge"
+name = "bridge.ford.name"
+faction = "neighbour"
+cell = [24, 24]
+
+[[building]]
+id = "ford_bridge_2"
+type = "wooden_bridge"
+name = "bridge.ford.name"
+faction = "neighbour"
+cell = [25, 24]
+
+[[building]]
+id = "ford_bridge_3"
+type = "wooden_bridge"
+name = "bridge.ford.name"
+faction = "neighbour"
+cell = [26, 24]
+
 
 # The raiders: the package's unit and the base game's.
 [[army]]
