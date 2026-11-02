@@ -511,8 +511,28 @@ pub fn spell_tip_card_padded(game: &Game, s: &SpellDef, r: Rect, o: f32, text: f
     super::typography::Role::Body.with(|| {
         let red = game.mana < game.cast_cost(s).mana;
         card_paper(r, card_fill(!red, false));
-        spell_card_content(game, s, Rect::new(r.x + pad, r.y + pad, r.w - 2.0 * pad, r.h - 2.0 * pad), true, text, tip_side(o));
+        // The picture and the text as one block, centred on the card: equal room left and right.
+        let k = super::chrome::k();
+        let side = tip_side(o);
+        let inner_w = r.w - 2.0 * pad;
+        let room = inner_w - 8.0 * k - side;
+        // A little slack over the measured width, so no line wraps that fits the full room.
+        let text_w = (card_text_width(game, s, room, text) + 16.0 * k).min(room);
+        let block_w = 8.0 * k + side + text_w;
+        let x = r.x + (r.w - block_w) / 2.0 - 6.0 * k;
+        spell_card_content(game, s, Rect::new(x, r.y + pad, block_w + 6.0 * k, r.h - 2.0 * pad), true, text, side);
     });
+}
+
+/// The widest line of spell `s`'s card text laid out in `room` (its name and its body lines).
+fn card_text_width(game: &Game, s: &SpellDef, room: f32, text: f32) -> f32 {
+    use super::typography::Role;
+    let t = card_layout(game, s, room, true, text);
+    let names = Role::Name.with(|| t.names.iter().map(|n| measure(n, t.name_size).width).fold(0.0, f32::max));
+    let body = Role::Body.with(|| {
+        t.lines.iter().map(|l| l.iter().map(|(seg, _)| measure(seg, t.size).width).sum::<f32>()).fold(0.0, f32::max)
+    });
+    names.max(body)
 }
 
 /// The card's fonts (0x49bde4 → 0x49ba84; the SanSerif tints of 0x4dbc26, white less a delta).
