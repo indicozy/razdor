@@ -1238,10 +1238,243 @@ fn row_button(r: Rect, label: &str) -> bool {
     settings_button(r, label)
 }
 
+/// One row of the advanced window (Razdor's rules and screen settings). Its button and what a click
+/// does are `rule`, the same in both layouts; its title and explanation are `rule_title` and
+/// `rule_hint`. The desktop and sideways layout places them in two columns, a phone held upright in
+/// one (`phone_advanced`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Rule {
+    Friends,
+    Bridges,
+    Updates,
+    CheckNow,
+    Zoom,
+    Formation,
+    Screen,
+    Scale,
+    Font,
+    Strength,
+    Benching,
+    AvoidArmies,
+    KeepFormation,
+    MaxGuard,
+    BattleMarks,
+    ArmyList,
+    Corner,
+    MinimapReset,
+    Keys,
+    Language,
+}
+
+/// The row's title (empty for the check-now row, which sits under the updates row and shows its status).
+fn rule_title(which: Rule) -> &'static str {
+    match which {
+        Rule::Friends => tr("Stepping onto a friendly army"),
+        Rule::Bridges => tr("Armies on bridges"),
+        Rule::Updates => tr("Updates"),
+        Rule::CheckNow => "",
+        Rule::Zoom => tr("Map zoom"),
+        Rule::Formation => tr("Army arrangement"),
+        Rule::Screen => {
+            if super::display::dp_px().is_some() {
+                tr("Screen")
+            } else {
+                tr("Screen (Alt+Enter)")
+            }
+        }
+        Rule::Scale => tr("Interface scale"),
+        Rule::Font => tr("Font"),
+        Rule::Strength => tr("Battle AI strength"),
+        Rule::Benching => tr("Unit battle participation"),
+        Rule::AvoidArmies => tr("Route around armies"),
+        Rule::KeepFormation => tr("Keep formation after battle"),
+        Rule::MaxGuard => tr("Max guards casters"),
+        Rule::BattleMarks => tr("Battles on the map"),
+        Rule::ArmyList => tr("Minimap army list"),
+        Rule::Corner => tr("Minimap corner"),
+        Rule::MinimapReset => tr("Minimap size and place"),
+        Rule::Keys => tr("Keyboard shortcuts"),
+        Rule::Language => tr("Language"),
+    }
+}
+
+/// The row's explanation, if it has one (the language's comes from the language list).
+fn rule_hint(which: Rule) -> Option<String> {
+    let hint = match which {
+        Rule::Friends => tr("With no event of the map for the meeting, the original opens a battle against a friendly army the hero steps onto; Razdor can let him pass instead. An army chosen by a click is still fought."),
+        Rule::Bridges => tr("The original stops the hero at any army on a bridge. Razdor can let him through those only passing by; guards, enemies and the army clicked still meet him."),
+        Rule::Updates => tr("Ask: a newer release is offered in a window. Always: it is downloaded and starts the next time. The check never holds up the game."),
+        Rule::Zoom => tr("The zoom the map plays at. The wheel steps away from it and the 0 key comes back to it; locked, the map always shows it."),
+        Rule::Formation => tr("Clicks: the first click picks a unit or an item, the second places it. Dragging: a click only selects, and units and items are moved by dragging. Both: clicks and dragging at once."),
+        Rule::Strength => tr("Maximum: before each move the enemy of your battles weighs every move and answer ahead and plays each out to the end of the battle."),
+        Rule::Language => return Some(super::language::hint().to_string()),
+        _ => return None,
+    };
+    Some(hint.to_string())
+}
+
+/// A switch row: its button shows `on` or `off` and a click flips it.
+fn switch_row(r: Rect, on: &mut bool, yes: &str, no: &str) -> bool {
+    let clicked = row_button(r, if *on { yes } else { no });
+    if clicked {
+        *on = !*on;
+    }
+    clicked
+}
+
+/// The row's button at `r`: its label from the settings, and what a click does (the same in both
+/// layouts). True when clicked.
+fn rule(audio: &mut super::audio::Settings, which: Rule, r: Rect) -> bool {
+    let phone = super::display::dp_px().is_some();
+    match which {
+        Rule::Friends => switch_row(r, &mut audio.friends_let_pass, tr("Let pass"), tr("Battle (original)")),
+        Rule::Bridges => switch_row(r, &mut audio.pass_on_bridges, tr("Let pass"), tr("Stop (original)")),
+        Rule::Updates => {
+            let mode = match audio.updates {
+                razdor::update::Mode::Ask => tr("Ask"),
+                razdor::update::Mode::Always => tr("Always"),
+                razdor::update::Mode::Off => tr("Off"),
+            };
+            let clicked = row_button(r, mode);
+            if clicked {
+                audio.updates = audio.updates.next();
+            }
+            clicked
+        }
+        Rule::CheckNow => {
+            let clicked = row_button(r, tr("Check now"));
+            if clicked {
+                super::update_view::check_by_hand();
+            }
+            // The status sits to the left of the button.
+            let k = chrome::k();
+            let state = super::update_view::status_label();
+            let sw = measure(&state, 13.0 * k).width;
+            chrome::shadow_text(&state, r.x - 16.0 * k - sw, r.y + 19.0 * k, 13.0 * k, chrome::GOLD);
+            clicked
+        }
+        Rule::Zoom => switch_row(r, &mut audio.zoom_locked, tr("Locked"), tr("Wheel and +/-")),
+        Rule::Formation => {
+            let label = match audio.formation_controls {
+                super::unit_drag::Controls::Clicks => tr("Clicks"),
+                super::unit_drag::Controls::Drag => tr("Dragging"),
+                super::unit_drag::Controls::Both => tr("Both"),
+            };
+            let clicked = row_button(r, label);
+            if clicked {
+                audio.formation_controls = audio.formation_controls.next();
+            }
+            clicked
+        }
+        Rule::Screen => {
+            let clicked = row_button(r, audio.display.for_device(phone).label());
+            if clicked {
+                audio.display = audio.display.next_on(phone);
+            }
+            clicked
+        }
+        Rule::Scale => {
+            // The interface scale: Auto (the largest that fits) or a fixed one, kept to the fit (a
+            // scale above it is kept to the fit: players got stuck with the settings off-screen in 1.0.0).
+            let fit = chrome::fit_k();
+            let clicked = row_button(r, &super::display::scale_label(audio.ui_scale, fit));
+            if clicked {
+                audio.ui_scale = super::display::next_scale(audio.ui_scale, fit);
+            }
+            clicked
+        }
+        Rule::Font => {
+            // The interface's fonts (Razdor's choice): the original's sheets from the install, or PT Serif; at once.
+            let label = match audio.font {
+                super::dt_font::FontMode::Original => tr("As in the original"),
+                super::dt_font::FontMode::Modern => tr("Modern"),
+            };
+            let clicked = row_button(r, label);
+            if clicked {
+                audio.font = audio.font.next();
+            }
+            clicked
+        }
+        Rule::Strength => {
+            // The battle AI's strength (Razdor's): the original's, its improved level, or «Максимум».
+            let strength = ai_strength(audio);
+            let label = match strength {
+                AiStrength::Original => tr("As in the original"),
+                AiStrength::Improved => tr("Improved"),
+                AiStrength::Max => tr("Maximum (Razdor)"),
+            };
+            let clicked = row_button(r, label);
+            if clicked {
+                set_ai_strength(audio, strength.next());
+            }
+            clicked
+        }
+        Rule::Benching => switch_row(r, &mut audio.allow_unit_benching, tr("On"), tr("Off")),
+        Rule::AvoidArmies => switch_row(r, &mut audio.avoid_armies, tr("On"), tr("Off")),
+        Rule::KeepFormation => switch_row(r, &mut audio.keep_formation, tr("On"), tr("Off")),
+        Rule::MaxGuard => switch_row(r, &mut audio.max_guard, tr("On"), tr("Off")),
+        Rule::BattleMarks => switch_row(r, &mut audio.battle_marks, tr("On"), tr("Off")),
+        Rule::ArmyList => switch_row(r, &mut audio.army_list, tr("On"), tr("Off")),
+        Rule::Corner => {
+            // Razdor's options (a player's report: the minimap dragged where it is hard to move back):
+            // its corner, cycled clockwise, and «Сбросить» puts its size and place back to the default.
+            let label = match minimap::corner() {
+                minimap::Corner::TopRight => tr("Top right"),
+                minimap::Corner::BottomRight => tr("Bottom right"),
+                minimap::Corner::BottomLeft => tr("Bottom left"),
+                minimap::Corner::TopLeft => tr("Top left"),
+            };
+            let clicked = row_button(r, label);
+            if clicked {
+                minimap::set_corner(minimap::corner().next());
+            }
+            clicked
+        }
+        Rule::MinimapReset => {
+            let clicked = row_button(r, tr("Reset"));
+            if clicked {
+                minimap::reset();
+            }
+            clicked
+        }
+        Rule::Keys => {
+            // The keys window (Razdor's, the owner's request): every action's key, rebound by a click.
+            let clicked = row_button(r, tr("Keys…"));
+            if clicked {
+                KEYS_OPEN.with(|o| o.set(true));
+            }
+            clicked
+        }
+        Rule::Language => {
+            // The language list (Razdor's): Russian, English and the translations of the data found
+            // in the install; the button opens it.
+            let clicked = row_button(r, &super::language::current_label()) || super::snapshot::open_language_list();
+            if clicked {
+                super::language::open_list(r, chrome::k());
+            }
+            clicked
+        }
+    }
+}
+
+/// The map zoom's slider on `track` (its value at the right): moved, it sets the zoom in steps of 0.05.
+fn zoom_track(audio: &mut super::audio::Settings, track: Rect) {
+    let k = chrome::k();
+    let (lo, hi) = super::world_view::ZOOM_RANGE;
+    let value = format!("×{:.2}", audio.map_zoom);
+    chrome::shadow_text(&value, track.x + track.w + 16.0 * k, track.y + 14.0 * k, 14.0 * k, chrome::GOLD);
+    if let Some(v) = slider(track, (audio.map_zoom - lo) / (hi - lo)) {
+        audio.map_zoom = ((lo + v * (hi - lo)) / 0.05).round() * 0.05;
+    }
+}
+
 /// Razdor's advanced settings (the settings window's "Ещё…"): rules where Razdor can differ
 /// from the original on the left, the screen, the interface scale, the font and the
-/// language on the right. Returns true when closed.
+/// language on the right. Held upright on a phone, one column (`phone_advanced`). Returns true when closed.
 fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
+    if let Some(u) = upright_dp() {
+        return phone_advanced(audio, over_map, u);
+    }
     // 650 high since «Расстановка армии» joined the left column (it still fits the 682 px
     // view above the bar).
     let (ww, wh) = (900.0, 650.0);
@@ -1263,29 +1496,15 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     };
     // The left column: the rules, each with its explanation.
     let col = Rect::new(inner.x, inner.y, 560.0 * k, inner.h);
+    let hint_w = col.w - 48.0 * k;
     let y = col.y + 30.0 * k;
-    chrome::shadow_text(tr("Stepping onto a friendly army"), col.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
     let br = Rect::new(col.x + col.w - 24.0 * k - 170.0 * k, y, 170.0 * k, row_h);
-    let label = if audio.friends_let_pass { tr("Let pass") } else { tr("Battle (original)") };
-    if row_button(br, label) {
-        audio.friends_let_pass = !audio.friends_let_pass;
-    }
-    let hint = tr("With no event of the map for the meeting, the original opens a battle against a friendly army the hero steps onto; Razdor can let him pass instead. An army chosen by a click is still fought.");
-    for (i, line) in wrap(hint, col.w - 48.0 * k, 12.0 * k).iter().enumerate() {
-        chrome::shadow_text(line, col.x + 24.0 * k, y + 56.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
-    }
+    left_row(Rule::Friends, col.x + 24.0 * k, y, hint_w, 56.0 * k);
+    rule(audio, Rule::Friends, br);
     // Armies only passing by on a bridge (Razdor's): the original meets each one.
     let y = y + 100.0 * k;
-    chrome::shadow_text(tr("Armies on bridges"), col.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
-    let pr = Rect::new(br.x, y, br.w, br.h);
-    let label = if audio.pass_on_bridges { tr("Let pass") } else { tr("Stop (original)") };
-    if row_button(pr, label) {
-        audio.pass_on_bridges = !audio.pass_on_bridges;
-    }
-    let hint = tr("The original stops the hero at any army on a bridge. Razdor can let him through those only passing by; guards, enemies and the army clicked still meet him.");
-    for (i, line) in wrap(hint, col.w - 48.0 * k, 12.0 * k).iter().enumerate() {
-        chrome::shadow_text(line, col.x + 24.0 * k, y + 56.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
-    }
+    left_row(Rule::Bridges, col.x + 24.0 * k, y, hint_w, 56.0 * k);
+    rule(audio, Rule::Bridges, Rect::new(br.x, y, br.w, br.h));
     // Updates from the GitHub releases (`razdor::update`): offered, put in place quietly, or
     // not looked for; "Check now" asks at once and shows the answer.
     // Phones have their own update window (Android installs through the system, iOS opens the
@@ -1295,66 +1514,23 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
         y
     } else {
         let y = y + 100.0 * k;
-        chrome::shadow_text(tr("Updates"), col.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
+        left_row(Rule::Updates, col.x + 24.0 * k, y, hint_w, 92.0 * k);
         let ur = Rect::new(br.x, y, br.w, br.h);
-        let mode = match audio.updates {
-            razdor::update::Mode::Ask => tr("Ask"),
-            razdor::update::Mode::Always => tr("Always"),
-            razdor::update::Mode::Off => tr("Off"),
-        };
-        if row_button(ur, mode) {
-            audio.updates = audio.updates.next();
-        }
-        let cr = Rect::new(ur.x, y + 40.0 * k, ur.w, ur.h);
-        if row_button(cr, tr("Check now")) {
-            super::update_view::check_by_hand();
-        }
-        let state = super::update_view::status_label();
-        let sw = measure(&state, 13.0 * k).width;
-        chrome::shadow_text(&state, cr.x - 16.0 * k - sw, cr.y + 19.0 * k, 13.0 * k, chrome::GOLD);
-        let hint = tr("Ask: a newer release is offered in a window. Always: it is downloaded and starts the next time. The check never holds up the game.");
-        for (i, line) in wrap(hint, col.w - 48.0 * k, 12.0 * k).iter().enumerate() {
-            chrome::shadow_text(line, col.x + 24.0 * k, y + 92.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
-        }
+        rule(audio, Rule::Updates, ur);
+        rule(audio, Rule::CheckNow, Rect::new(ur.x, y + 40.0 * k, ur.w, ur.h));
         y + 40.0 * k
     };
     // The map's own zoom (Razdor's): the wheel steps from it, 0 comes back to it; locked, the
     // wheel and +/- leave it alone.
     let y = y + 100.0 * k;
-    chrome::shadow_text(tr("Map zoom"), col.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
-    let zr = Rect::new(br.x, y, br.w, br.h);
-    let lock_label = if audio.zoom_locked { tr("Locked") } else { tr("Wheel and +/-") };
-    if row_button(zr, lock_label) {
-        audio.zoom_locked = !audio.zoom_locked;
-    }
-    let (lo, hi) = super::world_view::ZOOM_RANGE;
-    let value = format!("×{:.2}", audio.map_zoom);
-    let track = Rect::new(col.x + 24.0 * k, y + 44.0 * k, col.w - 48.0 * k - 70.0 * k, 18.0 * k);
-    chrome::shadow_text(&value, track.x + track.w + 16.0 * k, track.y + 14.0 * k, 14.0 * k, chrome::GOLD);
-    if let Some(v) = slider(track, (audio.map_zoom - lo) / (hi - lo)) {
-        audio.map_zoom = ((lo + v * (hi - lo)) / 0.05).round() * 0.05;
-    }
-    let hint = tr("The zoom the map plays at. The wheel steps away from it and the 0 key comes back to it; locked, the map always shows it.");
-    for (i, line) in wrap(hint, col.w - 48.0 * k, 12.0 * k).iter().enumerate() {
-        chrome::shadow_text(line, col.x + 24.0 * k, y + 80.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
-    }
+    left_row(Rule::Zoom, col.x + 24.0 * k, y, hint_w, 80.0 * k);
+    rule(audio, Rule::Zoom, Rect::new(br.x, y, br.w, br.h));
+    zoom_track(audio, Rect::new(col.x + 24.0 * k, y + 44.0 * k, col.w - 48.0 * k - 70.0 * k, 18.0 * k));
     // The army's arrangement outside battle (Razdor's, the owner's decision after players'
     // reports): clicks only (the original's, 0x4c346c), dragging only, or both (`unit_drag::Controls`).
     let y = y + 136.0 * k;
-    chrome::shadow_text(tr("Army arrangement"), col.x + 24.0 * k, y + 18.0 * k, 14.0 * k, chrome::CREAM);
-    let ar = Rect::new(br.x, y, br.w, br.h);
-    let label = match audio.formation_controls {
-        super::unit_drag::Controls::Clicks => tr("Clicks"),
-        super::unit_drag::Controls::Drag => tr("Dragging"),
-        super::unit_drag::Controls::Both => tr("Both"),
-    };
-    if row_button(ar, label) {
-        audio.formation_controls = audio.formation_controls.next();
-    }
-    let hint = tr("Clicks: the first click picks a unit or an item, the second places it. Dragging: a click only selects, and units and items are moved by dragging. Both: clicks and dragging at once.");
-    for (i, line) in wrap(hint, col.w - 48.0 * k, 12.0 * k).iter().enumerate() {
-        chrome::shadow_text(line, col.x + 24.0 * k, y + 56.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
-    }
+    left_row(Rule::Formation, col.x + 24.0 * k, y, hint_w, 56.0 * k);
+    rule(audio, Rule::Formation, Rect::new(br.x, y, br.w, br.h));
     // The right column: how Razdor shows the game.
     let rx = inner.x + 580.0 * k;
     let rw = inner.x + inner.w - 24.0 * k - rx;
@@ -1364,8 +1540,8 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     // unless the column would run past the Ok button's top. The column is eleven pitches from its
     // first row to the language row, the hint slot (44 px plus its lines), and the language's
     // description (48 px down, then its lines).
-    let ai_hint = wrap(tr("Maximum: before each move the enemy of your battles weighs every move and answer ahead and plays each out to the end of the battle."), rw, 12.0 * k);
-    let lang_hint = wrap(super::language::hint(), rw, 12.0 * k);
+    let ai_hint = wrap(&rule_hint(Rule::Strength).unwrap_or_default(), rw, 12.0 * k);
+    let lang_hint = wrap(&rule_hint(Rule::Language).unwrap_or_default(), rw, 12.0 * k);
     let hints_h = 44.0 * k + ai_hint.len() as f32 * 17.0 * k + 48.0 * k + lang_hint.len() as f32 * 17.0 * k;
     let ok_top = inner.h - 16.0 * k - ok_h - 4.0 * k;
     let mut pitch = right_column_pitch(30.0 * k, ok_top, 11.0, hints_h, 44.0 * k);
@@ -1374,44 +1550,16 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
         pitch = pitch.max(row_h + 2.0 * k);
     }
     let mut y = inner.y + 30.0 * k;
-    let row = |label: &str, value: &str, y: &mut f32| -> bool {
-        chrome::shadow_text(label, rx, *y + 18.0 * k, 14.0 * k, chrome::CREAM);
+    let row = |which: Rule, y: &mut f32, audio: &mut super::audio::Settings| -> bool {
+        chrome::shadow_text(rule_title(which), rx, *y + 18.0 * k, 14.0 * k, chrome::CREAM);
         let r = Rect::new(rx + rw - bw, *y, bw, row_h);
         *y += pitch;
-        row_button(r, value)
+        rule(audio, which, r)
     };
-    // Windowed, borderless or full screen, set at once (`display::follow_settings`). A phone
-    // has two: windowed (the bars shown) and full screen (the bars hidden).
-    let phone = super::display::dp_px().is_some();
-    let screen_label = if phone { tr("Screen") } else { tr("Screen (Alt+Enter)") };
-    if row(screen_label, audio.display.for_device(phone).label(), &mut y) {
-        audio.display = audio.display.next_on(phone);
-    }
-    // The interface scale: Auto (the largest that fits) or a fixed one, kept to the fit (a
-    // scale above it is kept to the fit: players got stuck with the settings off-screen in 1.0.0).
-    let fit = chrome::fit_k();
-    if row(tr("Interface scale"), &super::display::scale_label(audio.ui_scale, fit), &mut y) {
-        audio.ui_scale = super::display::next_scale(audio.ui_scale, fit);
-    }
-    // The interface's fonts (Razdor's choice): the original's sheets from the install, or PT
-    // Serif; at once.
-    let font_label = match audio.font {
-        super::dt_font::FontMode::Original => tr("As in the original"),
-        super::dt_font::FontMode::Modern => tr("Modern"),
-    };
-    if row(tr("Font"), font_label, &mut y) {
-        audio.font = audio.font.next();
-    }
-    // The battle AI's strength (Razdor's): the original's, its improved level, or «Максимум».
-    let strength = ai_strength(audio);
-    let strength_label = match strength {
-        AiStrength::Original => tr("As in the original"),
-        AiStrength::Improved => tr("Improved"),
-        AiStrength::Max => tr("Maximum (Razdor)"),
-    };
-    if row(tr("Battle AI strength"), strength_label, &mut y) {
-        set_ai_strength(audio, strength.next());
-    }
+    row(Rule::Screen, &mut y, audio);
+    row(Rule::Scale, &mut y, audio);
+    row(Rule::Font, &mut y, audio);
+    row(Rule::Strength, &mut y, audio);
     // The hint sits 8 px under the fourth row's button and the next row 8 px under the hint (the
     // original's 44 px pitch: the hint's top at 4 × 44 - 8 px).
     let hint_top = y - pitch + 36.0 * k;
@@ -1419,63 +1567,195 @@ fn advanced_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
         chrome::shadow_text(line, rx, hint_top + i as f32 * 17.0 * k, 12.0 * k, WHITE);
     }
     y = hint_top + ai_hint.len() as f32 * 17.0 * k + 8.0 * k;
-    if row(tr("Unit battle participation"), if audio.allow_unit_benching { tr("On") } else { tr("Off") }, &mut y) {
-        audio.allow_unit_benching = !audio.allow_unit_benching;
-    }
+    row(Rule::Benching, &mut y, audio);
     // Razdor's option: the route closes every army's cell (off: the original's route).
-    if row(tr("Route around armies"), if audio.avoid_armies { tr("On") } else { tr("Off") }, &mut y) {
-        audio.avoid_armies = !audio.avoid_armies;
-    }
+    row(Rule::AvoidArmies, &mut y, audio);
     // Razdor's deviation (the owner's request): after a battle every unit goes back to its cell
     // from before it (`Game::keep_formation`); off, the original's write-back.
-    if row(tr("Keep formation after battle"), if audio.keep_formation { tr("On") } else { tr("Off") }, &mut y) {
-        audio.keep_formation = !audio.keep_formation;
-    }
-    // «Максимум бережёт магов» (`Battle::set_max_guard`), on by default (the owner's decision, 2026-10-31):
-    // off by default, a gameplay change of «Максимум».
-    if row(tr("Max guards casters"), if audio.max_guard { tr("On") } else { tr("Off") }, &mut y) {
-        audio.max_guard = !audio.max_guard;
-    }
+    row(Rule::KeepFormation, &mut y, audio);
+    // «Максимум бережёт магов» (`Battle::set_max_guard`), on by default (the owner's decision, 2026-10-31).
+    row(Rule::MaxGuard, &mut y, audio);
     // Razdor's options: a battle between armies on the map shows a mark and a notice (on by
     // default); the armies the player sees are listed under the minimap (off by default).
-    if row(tr("Battles on the map"), if audio.battle_marks { tr("On") } else { tr("Off") }, &mut y) {
-        audio.battle_marks = !audio.battle_marks;
-    }
-    if row(tr("Minimap army list"), if audio.army_list { tr("On") } else { tr("Off") }, &mut y) {
-        audio.army_list = !audio.army_list;
-    }
-    // Razdor's options (a player's report: the minimap dragged where it is hard to move back):
-    // its corner, cycled clockwise, and «Сбросить» puts its size and place back to the default.
-    let corner_label = match minimap::corner() {
-        minimap::Corner::TopRight => tr("Top right"),
-        minimap::Corner::BottomRight => tr("Bottom right"),
-        minimap::Corner::BottomLeft => tr("Bottom left"),
-        minimap::Corner::TopLeft => tr("Top left"),
-    };
-    if row(tr("Minimap corner"), corner_label, &mut y) {
-        minimap::set_corner(minimap::corner().next());
-    }
-    if row(tr("Minimap size and place"), tr("Reset"), &mut y) {
-        minimap::reset();
-    }
-    // The keys window (Razdor's, the owner's request): every action's key, rebound by a click.
-    if row(tr("Keyboard shortcuts"), tr("Keys…"), &mut y) {
-        KEYS_OPEN.with(|o| o.set(true));
-    }
-    // The language list (Razdor's): Russian, English and the translations of the data found
-    // in the install; the button opens it.
-    chrome::shadow_text(tr("Language"), rx, y + 18.0 * k, 14.0 * k, chrome::CREAM);
+    row(Rule::BattleMarks, &mut y, audio);
+    row(Rule::ArmyList, &mut y, audio);
+    row(Rule::Corner, &mut y, audio);
+    row(Rule::MinimapReset, &mut y, audio);
+    row(Rule::Keys, &mut y, audio);
+    // The language list's row: its title and a wider button (the row's own width).
+    chrome::shadow_text(rule_title(Rule::Language), rx, y + 18.0 * k, 14.0 * k, chrome::CREAM);
     let lw = (rw - 100.0 * k).max(bw);
-    let lr = Rect::new(rx + rw - lw, y, lw, row_h);
-    if row_button(lr, &super::language::current_label()) || super::snapshot::open_language_list() {
-        super::language::open_list(lr, k);
-    }
+    rule(audio, Rule::Language, Rect::new(rx + rw - lw, y, lw, row_h));
     for (i, line) in lang_hint.iter().enumerate() {
         chrome::shadow_text(line, rx, y + 48.0 * k + i as f32 * 17.0 * k, 12.0 * k, WHITE);
     }
     let ok = Rect::new(inner.x + inner.w - 120.0 * k, inner.y + inner.h - 16.0 * k - ok_h, 96.0 * k, ok_h);
     let ok_label = own("Buttons", "Ok", n_("OK"));
     closed || key(KeyCode::Escape) || key(KeyCode::Enter) || settings_button(ok, &ok_label)
+}
+
+/// A left-column row of the landscape window: its title at `(x, y + 18)`, and its explanation's lines
+/// from `(x, y + dy)` on, 17 px apart at 12 px (the original's sizes; `k` is the window's scale).
+fn left_row(which: Rule, x: f32, y: f32, width: f32, dy: f32) {
+    let k = chrome::k();
+    chrome::shadow_text(rule_title(which), x, y + 18.0 * k, 14.0 * k, chrome::CREAM);
+    if let Some(hint) = rule_hint(which) {
+        for (i, line) in wrap(&hint, width, 12.0 * k).iter().enumerate() {
+            chrome::shadow_text(line, x, y + dy + i as f32 * 17.0 * k, 12.0 * k, WHITE);
+        }
+    }
+}
+
+local! {
+    /// The advanced window's scroll on a phone held upright, in dp.
+    static PHONE_ADV_SCROLL: std::cell::Cell<f32> = const { std::cell::Cell::new(0.0) };
+}
+
+/// A row of the advanced window on a phone held upright, in content units (dp from the list's top):
+/// its title lines, its height (`row_h`: at least the 44 dp button), the explanation's lines and where
+/// they start (`hint_dy`), the map zoom's track (`track`, its top) and the block's whole height.
+#[derive(Clone, Debug)]
+struct AdvSlot {
+    rule: Rule,
+    y: f32,
+    row_h: f32,
+    title: Vec<String>,
+    track: Option<f32>,
+    hint: Vec<String>,
+    hint_dy: f32,
+    block: f32,
+}
+
+/// The advanced rows in one column for a phone held upright (`lw` px wide, `u` px per dp): the
+/// landscape's order, the left column's rows then the right's (the updates' check row follows the
+/// updates row, its explanation under it; the phone's own update window has no updates row). Each
+/// row's title wraps to the room left of its 160 dp button; its explanation wraps full width at 13 dp.
+fn phone_advanced_rows(lw: f32, u: f32, width: &dyn Fn(&str, f32) -> f32) -> Vec<AdvSlot> {
+    let mut order = vec![Rule::Friends, Rule::Bridges];
+    if !razdor::platform::MOBILE {
+        order.extend([Rule::Updates, Rule::CheckNow]);
+    }
+    order.extend([
+        Rule::Zoom,
+        Rule::Formation,
+        Rule::Screen,
+        Rule::Scale,
+        Rule::Font,
+        Rule::Strength,
+        Rule::Benching,
+        Rule::AvoidArmies,
+        Rule::KeepFormation,
+        Rule::MaxGuard,
+        Rule::BattleMarks,
+        Rule::ArmyList,
+        Rule::Corner,
+        Rule::MinimapReset,
+        Rule::Keys,
+        Rule::Language,
+    ]);
+    let bw = bw_of(u);
+    let mut out = Vec::with_capacity(order.len());
+    let mut y = 0.0;
+    for which in order {
+        let title = rule_title(which);
+        let title_lines = if title.is_empty() { Vec::new() } else { wrap_by(title, lw - bw - 12.0 * u, 14.0 * u, width) };
+        let row_h = (44.0 * u).max(title_lines.len() as f32 * 18.0 * u + 8.0 * u);
+        // The zoom's slider row sits under its button; the explanation under that.
+        let track = (which == Rule::Zoom).then_some(row_h + 10.0 * u);
+        let hint = rule_hint(which).map_or_else(Vec::new, |t| wrap_by(&t, lw, 13.0 * u, width));
+        let hint_dy = match track {
+            Some(t) => t + 32.0 * u,
+            None => row_h + 6.0 * u,
+        };
+        let block = if hint.is_empty() { row_h } else { hint_dy + hint.len() as f32 * 18.0 * u };
+        out.push(AdvSlot { rule: which, y, row_h, title: title_lines, track, hint, hint_dy, block });
+        y += block + 14.0 * u;
+    }
+    out
+}
+
+/// Razdor's advanced settings on a phone held upright (in dp, `u` px per dp): ONE column in the
+/// phone's window, as the settings window's pages, a list of every row the landscape window has, in
+/// its order. Each row: its title at the left, its button at the right (44 dp tall), its explanation
+/// wrapped full width under it. «Ок» stays at the foot, outside the scroll; the scrollbar is 24 dp
+/// wide. Desktop and sideways keep [`advanced_window`]'s layout. Returns true when closed.
+fn phone_advanced(audio: &mut super::audio::Settings, over_map: bool, u: f32) -> bool {
+    super::dt_font::legacy_metrics_if(true, || {
+        let (sw, sh) = (screen_width(), screen_height());
+        let top = super::display::safe_area().top + 8.0 * u;
+        let bottom = if over_map { sh - chrome::bar_height() - 8.0 * u } else { window_layout::title_bottom() - 8.0 * u };
+        let _scale = super::display::enter_window_scale(Some(u));
+        let rect = Rect::new(8.0 * u, top, sw - 16.0 * u, (bottom - top).max(200.0 * u));
+        let (inner, closed) = chrome::window(rect, tr("Advanced settings"), chrome::Skin::Marble, true);
+        let pad = 12.0 * u;
+        // «Ок» at the foot, 44 dp tall, 12 above the bottom: outside the scroll.
+        let ok = Rect::new(inner.right() - pad - 120.0 * u, inner.bottom() - 12.0 * u - 44.0 * u, 120.0 * u, 44.0 * u);
+        let list_top = inner.y + 8.0 * u;
+        let list = Rect::new(inner.x, list_top, inner.w - 24.0 * u, (ok.y - 8.0 * u - list_top).max(0.0));
+        let lw = list.w - 2.0 * pad;
+        let rows = phone_advanced_rows(lw, u, &|s, size| measure(s, size).width);
+        let content = rows.last().map_or(0.0, |s| s.y + s.block);
+
+        // Scroll: a swipe, the wheel and the bar at the list's right edge (only when the rows are taller).
+        let view = list.h;
+        let most = (content - view).max(0.0);
+        let mut scroll = PHONE_ADV_SCROLL.with(|c| c.get()).clamp(0.0, most);
+        swipe_rows(list, 44.0 * u);
+        if most > 0.0 {
+            if crate::ui::widgets::mouse_in(list.x, list.y, list.w, list.h) {
+                scroll = (scroll - wheel() * 24.0 * u).clamp(0.0, most);
+            }
+            let bar = Rect::new(list.right(), list.y, 24.0 * u, view);
+            super::widgets::scrollbar_px(bar, &mut scroll, most, view, 24.0 * u);
+        }
+        PHONE_ADV_SCROLL.with(|c| c.set(scroll));
+        let on_list = |cy: f32, h: f32| cy + h > 0.0 && cy < view;
+
+        phone_clip(Some(list));
+        for s in &rows {
+            if !on_list(s.y - scroll, s.block) {
+                continue;
+            }
+            let top = list.y + s.y - scroll;
+            let x = list.x + pad;
+            let n = s.title.len() as f32;
+            for (i, line) in s.title.iter().enumerate() {
+                let baseline = top + s.row_h / 2.0 + 5.0 * u + (i as f32 - (n - 1.0) / 2.0) * 18.0 * u;
+                chrome::shadow_text(line, x, baseline, 14.0 * u, chrome::CREAM);
+            }
+            // A control is handled only where it lies whole inside the list: a half-scrolled one would
+            // take taps its clipped drawing hides (on «Ок», say).
+            let whole = |r: Rect| r.y >= list.y && r.bottom() <= list.bottom();
+            let button = Rect::new(x + lw - bw_of(u), top + (s.row_h - 44.0 * u) / 2.0, bw_of(u), 44.0 * u);
+            if whole(button) {
+                rule(audio, s.rule, button);
+            }
+            if let Some(t) = s.track {
+                let track = Rect::new(x, top + t + 13.0 * u, lw - 70.0 * u, 18.0 * u);
+                if whole(track) {
+                    zoom_track(audio, track);
+                }
+            }
+            for (i, line) in s.hint.iter().enumerate() {
+                chrome::shadow_text(line, x, top + s.hint_dy + 13.0 * u + i as f32 * 18.0 * u, 13.0 * u, WHITE);
+            }
+        }
+        phone_clip(None);
+
+        let ok_label = own("Buttons", "Ok", n_("OK"));
+        let ok_pressed = settings_button(ok, &ok_label);
+        if closed || key(KeyCode::Escape) || key(KeyCode::Enter) || ok_pressed {
+            PHONE_ADV_SCROLL.with(|c| c.set(0.0));
+            return true;
+        }
+        false
+    })
+}
+
+/// The width of a phone row's button (190 dp at `u` px per dp: the longest value, «Бой (как в
+/// оригинале)», keeps its 14 sp label).
+fn bw_of(u: f32) -> f32 {
+    190.0 * u
 }
 
 /// The right column's row pitch in the advanced window (px at its scale): `max` (the original's
@@ -1783,9 +2063,22 @@ fn keys_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
     closed || ok_pressed || (!was_waiting && key(KeyCode::Escape))
 }
 
-// The settings window's scroll on a phone held upright, in dp.
+// The settings window's scroll and page on a phone held upright, in dp (the page: 0 «Звук и
+// скорость», 1 «Игра»; it opens on the first).
 local! {
     static PHONE_SCROLL: std::cell::Cell<f32> = const { std::cell::Cell::new(0.0) };
+    static PHONE_PAGE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The settings window opens on its first page again (when it closes).
+fn reset_options_page() {
+    PHONE_PAGE.with(|c| c.set(0));
+    PHONE_SCROLL.with(|c| c.set(0.0));
+}
+
+/// Opens the settings window on its page `p` (0 «Звук и скорость», 1 «Игра»; a snapshot scene).
+pub fn open_options_page(p: usize) {
+    PHONE_PAGE.with(|c| c.set(p.min(1)));
 }
 
 /// Cuts the drawing off outside `clip` (screen px), or lifts the cut (`None`).
@@ -1797,11 +2090,17 @@ fn phone_clip(clip: Option<Rect>) {
 
 /// The words of `label` in lines of at most `max_w` px at `size` (a word never splits).
 fn wrap_label(label: &str, max_w: f32, size: f32) -> Vec<String> {
+    wrap_by(label, max_w, size, &|s, size| measure(s, size).width)
+}
+
+/// [`wrap_label`] with the text's width given by `width` (text and size → px), so the layout can be
+/// tested without a window.
+fn wrap_by(label: &str, max_w: f32, size: f32, width: &dyn Fn(&str, f32) -> f32) -> Vec<String> {
     let mut lines = Vec::new();
     let mut cur = String::new();
     for word in label.split(' ') {
         let cand = if cur.is_empty() { word.to_string() } else { format!("{cur} {word}") };
-        if !cur.is_empty() && measure(&cand, size).width > max_w {
+        if !cur.is_empty() && width(&cand, size) > max_w {
             lines.push(std::mem::take(&mut cur));
             cur = word.to_string();
         } else {
@@ -1844,9 +2143,13 @@ fn option_check_lines(x: f32, y: f32, width: f32, lines: &[String], on: bool, in
 
 /// The options window on a phone held upright, in dp: the window takes the phone's width and
 /// the room from the top inset to the bar (over a map) or to the title's foot; one unit is one
-/// dp, so the labels are 14 units (14 sp) and the rows 40 units. A long checkbox label wraps to a
-/// second line; the rows scroll when they are taller than the window. Desktop and sideways keep
-/// [`options_window`]'s own layout. Returns true when closed.
+/// dp, so the labels are 14 units (14 sp) and the rows 40 units. Two pages under a tab strip
+/// (the owner's proposal, 2026-11-03): «Звук и скорость» has the five sliders, «Игра» the eight
+/// checkboxes and the rows under them (the touchpad, the orientation, the text size, the large
+/// windows, the import). A long checkbox label wraps to a second line; a page scrolls only when it
+/// is taller than the room (a small phone). The page stays as it was left while the window is open
+/// and opens on the first one. Desktop and sideways keep [`options_window`]'s own layout. Returns
+/// true when closed.
 fn phone_options(audio: &mut super::audio::Settings, install_wide: bool, over_map: bool, u: f32) -> bool {
     super::dt_font::legacy_metrics_if(true, || {
         let (sw, sh) = (screen_width(), screen_height());
@@ -1858,9 +2161,23 @@ fn phone_options(audio: &mut super::audio::Settings, install_wide: bool, over_ma
         let (inner, closed) = chrome::window(rect, &title, chrome::Skin::Marble, true);
         let pad = 12.0 * u;
         let x0 = inner.x + pad;
-        let cw = inner.w - 2.0 * pad;
-        // The list between the window's top and the buttons row (44 units high, 10 above its bottom).
-        let list = Rect::new(inner.x, inner.y + 6.0 * u, inner.w, inner.h - 6.0 * u - 66.0 * u);
+        // The footer: «Ещё…» at the left, «Принять» and «Отмена» at the right, 40 units high, 12 above the bottom.
+        let bh = 40.0 * u;
+        let by = inner.y + inner.h - 12.0 * u - bh;
+        // The page tabs (`chrome::tab_strip`), 44 units high under the window's top.
+        let tabs = Rect::new(x0, inner.y + 8.0 * u, inner.w - 2.0 * pad, 44.0 * u);
+        let mut page = PHONE_PAGE.with(|p| p.get()).min(1);
+        if let Some(p) = chrome::tab_strip(tabs, &[tr("Sound and speed"), tr("Game")], page, 14.0 * u, 12.0 * u) {
+            if p != page {
+                PHONE_PAGE.with(|c| c.set(p));
+                PHONE_SCROLL.with(|c| c.set(0.0));
+                page = p;
+            }
+        }
+        // The page's list under the tabs, down to the footer; its scrollbar is 24 units wide at the right.
+        let list_top = tabs.bottom() + 6.0 * u;
+        let list = Rect::new(inner.x, list_top, inner.w - 24.0 * u, (by - 6.0 * u - list_top).max(0.0));
+        let cw = list.w - 2.0 * pad;
         let row_h = 40.0 * u;
         let pitch = 46.0 * u;
         // A slider row stacks its label over its track, so a long label is never cut by the track.
@@ -1893,13 +2210,11 @@ fn phone_options(audio: &mut super::audio::Settings, install_wide: bool, over_ma
             }
             c
         };
-        // Each checkbox's lines, and the content's height in units from the list's top.
+        // Each checkbox's lines, and the game page's rows in units from the list's top.
         let check_lines: Vec<Vec<String>> = checks.iter().map(|c| wrap_label(&c.1, cw - 34.0 * u, 14.0 * u)).collect();
         let check_h: Vec<f32> = check_lines.iter().map(|l| (10.0 + l.len() as f32 * 18.0).max(38.0) * u).collect();
-        let slider_top = 0.0;
-        let checks_top = slider_top + slider_rows.len() as f32 * slider_pitch + 6.0 * u;
         let mut check_y = Vec::with_capacity(checks.len());
-        let mut y = checks_top;
+        let mut y = 0.0;
         for h in &check_h {
             check_y.push(y);
             y += h;
@@ -1912,17 +2227,18 @@ fn phone_options(audio: &mut super::audio::Settings, install_wide: bool, over_ma
         let text_y = rest_y;
         let large_y = text_y + pitch;
         let import_y = large_y + pitch;
-        let content = import_y + row_h;
+        let content = if page == 0 { slider_rows.len() as f32 * slider_pitch } else { import_y + row_h };
 
-        // Scroll: the wheel and the bar at the list's right edge.
+        // Scroll: a swipe, the wheel and the bar at the list's right edge (only when the page is taller).
         let view = list.h;
         let most = (content - view).max(0.0);
         let mut scroll = PHONE_SCROLL.with(|c| c.get()).clamp(0.0, most);
+        swipe_rows(list, row_h);
         if most > 0.0 {
             if crate::ui::widgets::mouse_in(list.x, list.y, list.w, list.h) {
                 scroll = (scroll - wheel() * 24.0 * u).clamp(0.0, most);
             }
-            let bar = Rect::new(list.x + list.w - 9.0 * u, list.y, 6.0 * u, view);
+            let bar = Rect::new(list.right(), list.y, 24.0 * u, view);
             super::widgets::scrollbar_px(bar, &mut scroll, most, view, 24.0 * u);
         }
         PHONE_SCROLL.with(|c| c.set(scroll));
@@ -1931,86 +2247,87 @@ fn phone_options(audio: &mut super::audio::Settings, install_wide: bool, over_ma
         let at = |cy: f32| list.y + cy - scroll;
 
         phone_clip(Some(list));
-        for (i, (label, value)) in slider_rows.iter().enumerate() {
-            let cy = slider_top + i as f32 * slider_pitch;
-            if !on_list(cy - scroll, slider_h) {
-                continue;
-            }
-            let r = Rect::new(x0 - pad + 2.0 * u, at(cy), inner.w - 4.0 * u, slider_h);
-            if let Some(v) = option_slider_stacked(r, label, *value, 14.0 * u) {
-                match i {
-                    0 | 1 => {
-                        let steps = ((v - value) / super::audio::VOLUME_STEP).round() as i32;
-                        if i == 0 {
-                            audio.music_muted = false;
-                            audio.step_music(steps);
-                        } else {
-                            audio.sfx_muted = false;
-                            audio.step_sfx(steps);
+        if page == 0 {
+            for (i, (label, value)) in slider_rows.iter().enumerate() {
+                let cy = i as f32 * slider_pitch;
+                if !on_list(cy - scroll, slider_h) {
+                    continue;
+                }
+                let r = Rect::new(list.x + 2.0 * u, at(cy), list.w - 4.0 * u, slider_h);
+                if let Some(v) = option_slider_stacked(r, label, *value, 14.0 * u) {
+                    match i {
+                        0 | 1 => {
+                            let steps = ((v - value) / super::audio::VOLUME_STEP).round() as i32;
+                            if i == 0 {
+                                audio.music_muted = false;
+                                audio.step_music(steps);
+                            } else {
+                                audio.sfx_muted = false;
+                                audio.step_sfx(steps);
+                            }
                         }
+                        2 => audio.scroll_speed = Some((v * 100.0).round()),
+                        3 => audio.walk_speed = Some((v * razdor::rules::game::WALK_SPEED_MAX as f32).round()),
+                        _ => audio.anim_speed = Some((v * 99.0).round()),
                     }
-                    2 => audio.scroll_speed = Some((v * 100.0).round()),
-                    3 => audio.walk_speed = Some((v * razdor::rules::game::WALK_SPEED_MAX as f32).round()),
-                    _ => audio.anim_speed = Some((v * 99.0).round()),
                 }
             }
-        }
-        for (i, (key, _, on, ink)) in checks.iter().enumerate() {
-            let cy = check_y[i];
-            let h = check_h[i];
-            if !on_list(cy - scroll, h) {
-                continue;
-            }
-            if option_check_lines(x0, at(cy), cw, &check_lines[i], *on, *ink, u) {
-                match *key {
-                    "Option4" => audio.no_sound = Some(!on),
-                    "Option5" => audio.show_fps = !on,
-                    "Option6" => audio.hints_off = Some(!on),
-                    "Option7" => audio.pursue = Some(!on),
-                    "Option8" => audio.autosave = Some(!on),
-                    "Option9" => toggle_expert_ai(audio),
-                    "Option10" => audio.impossible = Some(!on),
-                    "Option11" => audio.wide_row = Some(!on),
-                    _ => audio.touchpad = Some(!on),
+        } else {
+            for (i, (key, _, on, ink)) in checks.iter().enumerate() {
+                let cy = check_y[i];
+                let h = check_h[i];
+                if !on_list(cy - scroll, h) {
+                    continue;
+                }
+                if option_check_lines(x0, at(cy), cw, &check_lines[i], *on, *ink, u) {
+                    match *key {
+                        "Option4" => audio.no_sound = Some(!on),
+                        "Option5" => audio.show_fps = !on,
+                        "Option6" => audio.hints_off = Some(!on),
+                        "Option7" => audio.pursue = Some(!on),
+                        "Option8" => audio.autosave = Some(!on),
+                        "Option9" => toggle_expert_ai(audio),
+                        "Option10" => audio.impossible = Some(!on),
+                        "Option11" => audio.wide_row = Some(!on),
+                        _ => audio.touchpad = Some(!on),
+                    }
                 }
             }
-        }
-        if orientation_row && on_list(orient_y - scroll, row_h) {
-            let y = at(orient_y);
-            chrome::shadow_text(tr("Screen orientation"), x0, y + 26.0 * u, 14.0 * u, chrome::CREAM);
-            let r = Rect::new(inner.x + inner.w - pad - 150.0 * u, y + 4.0 * u, 150.0 * u, 36.0 * u);
-            if row_button(r, orientation_label(audio.orientation)) {
-                audio.orientation = match audio.orientation {
-                    None => Some(super::audio::Orientation::Landscape),
-                    Some(super::audio::Orientation::Landscape) => Some(super::audio::Orientation::Portrait),
-                    Some(super::audio::Orientation::Portrait) => None,
-                };
+            if orientation_row && on_list(orient_y - scroll, row_h) {
+                let y = at(orient_y);
+                chrome::shadow_text(tr("Screen orientation"), x0, y + 26.0 * u, 14.0 * u, chrome::CREAM);
+                let r = Rect::new(list.x + list.w - pad - 150.0 * u, y + 4.0 * u, 150.0 * u, 36.0 * u);
+                if row_button(r, orientation_label(audio.orientation)) {
+                    audio.orientation = match audio.orientation {
+                        None => Some(super::audio::Orientation::Landscape),
+                        Some(super::audio::Orientation::Landscape) => Some(super::audio::Orientation::Portrait),
+                        Some(super::audio::Orientation::Portrait) => None,
+                    };
+                }
             }
-        }
-        if on_list(text_y - scroll, row_h) {
-            let y = at(text_y);
-            chrome::shadow_text(tr("Text size"), x0, y + 26.0 * u, 14.0 * u, chrome::CREAM);
-            let r = Rect::new(inner.x + inner.w - pad - 150.0 * u, y + 4.0 * u, 150.0 * u, 36.0 * u);
-            if row_button(r, super::display::text_size_label(audio.text_size)) {
-                audio.text_size = super::display::next_text_size(audio.text_size);
+            if on_list(text_y - scroll, row_h) {
+                let y = at(text_y);
+                chrome::shadow_text(tr("Text size"), x0, y + 26.0 * u, 14.0 * u, chrome::CREAM);
+                let r = Rect::new(list.x + list.w - pad - 150.0 * u, y + 4.0 * u, 150.0 * u, 36.0 * u);
+                if row_button(r, super::display::text_size_label(audio.text_size)) {
+                    audio.text_size = super::display::next_text_size(audio.text_size);
+                }
             }
-        }
-        if on_list(large_y - scroll, row_h) {
-            let y = at(large_y);
-            chrome::shadow_text(tr("Large message windows"), x0, y + 26.0 * u, 14.0 * u, chrome::CREAM);
-            let r = Rect::new(inner.x + inner.w - pad - 150.0 * u, y + 4.0 * u, 150.0 * u, 36.0 * u);
-            if row_button(r, if audio.large_windows { tr("On") } else { tr("Off") }) {
-                audio.large_windows = !audio.large_windows;
+            if on_list(large_y - scroll, row_h) {
+                let y = at(large_y);
+                chrome::shadow_text(tr("Large message windows"), x0, y + 26.0 * u, 14.0 * u, chrome::CREAM);
+                let r = Rect::new(list.x + list.w - pad - 150.0 * u, y + 4.0 * u, 150.0 * u, 36.0 * u);
+                if row_button(r, if audio.large_windows { tr("On") } else { tr("Off") }) {
+                    audio.large_windows = !audio.large_windows;
+                }
             }
-        }
-        if on_list(import_y - scroll, row_h) {
-            super::game_import::settings_row(Rect::new(x0, at(import_y), cw, row_h), over_map);
+            if on_list(import_y - scroll, row_h) {
+                super::game_import::settings_row(Rect::new(x0, at(import_y), cw, row_h), over_map);
+            }
         }
         phone_clip(None);
 
-        // The buttons row: «Ещё…» at the left, «Принять» and «Отмена» at the right, 44 units high.
-        let bh = 40.0 * u;
-        let by = inner.y + inner.h - 12.0 * u - bh;
+        // The footer's buttons.
         let advanced = Rect::new(x0, by, 120.0 * u, bh);
         let cancel = Rect::new(inner.x + inner.w - pad - 110.0 * u, by, 110.0 * u, bh);
         let apply = Rect::new(cancel.x - 8.0 * u - 110.0 * u, by, 110.0 * u, bh);
@@ -2023,12 +2340,14 @@ fn phone_options(audio: &mut super::audio::Settings, install_wide: bool, over_ma
         let cancel_pressed = settings_button(cancel, &cancel_label);
         if apply_pressed || key(KeyCode::Enter) {
             OPENED_WITH.with(|o| *o.borrow_mut() = None);
+            reset_options_page();
             return true;
         }
         if cancel_pressed || closed || key(KeyCode::Escape) {
             if let Some(before) = OPENED_WITH.with(|o| o.take()) {
                 *audio = before;
             }
+            reset_options_page();
             return true;
         }
         false
@@ -2229,6 +2548,7 @@ pub fn close_options_kept() {
     ADVANCED.with(|a| a.set(false));
     KEYS_OPEN.with(|o| o.set(false));
     OPENED_WITH.with(|o| *o.borrow_mut() = None);
+    reset_options_page();
 }
 
 #[cfg(test)]
@@ -2411,5 +2731,24 @@ mod tests {
         assert!((32.0..44.0).contains(&p), "pitch {p}");
         assert!(top + 9.0 * p + hints <= ok_top + 1e-3, "the language description ends above Ok");
         assert_eq!(right_column_pitch(top, inner_h + 200.0, 9.0, hints, 44.0), 44.0);
+    }
+
+    /// Held upright the advanced rows are one column in the landscape order, each row's button at least
+    /// 44 dp tall and the rows never overlapping (a phone of 2.75 px per dp, 340 dp of room).
+    #[test]
+    fn advanced_rows_are_one_column_of_touch_sized_rows() {
+        let u = 2.75;
+        let rows = phone_advanced_rows(340.0 * u, u, &|s, size| s.chars().count() as f32 * size * 0.5);
+        assert_eq!(rows.first().map(|s| s.rule), Some(Rule::Friends));
+        assert_eq!(rows.last().map(|s| s.rule), Some(Rule::Language));
+        assert!(rows.iter().all(|s| s.row_h >= 44.0 * u));
+        for pair in rows.windows(2) {
+            assert!(pair[0].y + pair[0].block <= pair[1].y + 1e-3, "{:?} overlaps {:?}", pair[0].rule, pair[1].rule);
+        }
+        // The map zoom's slider sits under its button, inside its own block.
+        let zoom = rows.iter().find(|s| s.rule == Rule::Zoom).expect("the zoom row");
+        assert!(zoom.track.is_some_and(|t| t >= zoom.row_h && t + 18.0 * u <= zoom.block));
+        // Every row keeps its title wrapped inside the room left of the button.
+        assert!(rows.iter().all(|s| s.title.len() <= 2));
     }
 }

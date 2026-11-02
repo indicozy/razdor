@@ -1792,7 +1792,8 @@ const DIARY_PHONE_TEXT: f32 = 13.5;
 /// of the height over the entry; held sideways it takes 40 % of the width left of the entry.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct PhoneDiary {
-    tabs: [Rect; 4],
+    /// The strip of the four tabs (`chrome::tab_strip`), one row both ways.
+    tabs: Rect,
     list: Rect,
     list_bar: Rect,
     head: Rect,
@@ -1810,16 +1811,14 @@ fn phone_diary_areas(inner: Rect, k: f32, g: f32, upright: bool) -> PhoneDiary {
     let head_h = DIARY_PHONE_TEXT * k * g * 1.6;
     let w = (inner.w - 2.0 * pad).max(0.0);
     let top_y = inner.y + pad;
-    // Held upright the four tabs lie two by two, so each keeps its word whole at the text size
-    // (the hub's narrow layout); sideways they are one row.
+    // The four tabs are one strip both ways (`chrome::tab_strip`, the labels shrink to fit a tab):
+    // upright across the window, sideways with «Закрыть» at its end.
     let close_w = (140.0 * k).min(w);
     // Sideways «Закрыть» ends the tabs' row (the four tabs share the rest of it), and the lists run
     // down to the window's bottom pad.
-    let (cols, rows, tabs_w) = if upright { (2, 2, w) } else { (4, 1, w - close_w - gap) };
-    let cell = ((tabs_w - (cols as f32 - 1.0) * gap) / cols as f32).max(0.0);
-    let tabs = std::array::from_fn(|i| Rect::new(inner.x + pad + (i % cols) as f32 * (cell + gap), top_y + (i / cols) as f32 * (th + gap), cell, th));
-    let tabs_h = rows as f32 * th + (rows as f32 - 1.0) * gap;
-    let top = top_y + tabs_h + gap;
+    let tabs_w = if upright { w } else { w - close_w - gap };
+    let tabs = Rect::new(inner.x + pad, top_y, tabs_w.max(0.0), th);
+    let top = top_y + th + gap;
     let (close, bottom) = if upright {
         let close = Rect::new(inner.center().x - close_w / 2.0, inner.bottom() - pad - th, close_w, th);
         (close, (close.y - gap).max(top))
@@ -1879,20 +1878,12 @@ fn phone_diary(game: &mut Game, assets: &Assets, view: &mut HeroView, message: &
     let text = DIARY_PHONE_TEXT * k * g;
     let a = phone_diary_areas(inner, k, g, window_layout::portrait());
 
-    // The tabs: a marble button each, the picked one ringed in gold.
-    let mut switch = None;
-    for (i, tab) in Tab::ALL.into_iter().enumerate() {
-        let r = a.tabs[i];
-        let over = !input_blocked() && mouse_in(r.x, r.y, r.w, r.h);
-        // At the entry text's size; the button's label is cut only if a word is wider than its tab.
-        chrome::marble_button_sized(r, tr(diary_tab_label(tab)), true, over, text);
-        if tab == view.tab {
-            draw_rectangle_lines(r.x, r.y, r.w, r.h, 3.0 * k, chrome::GOLD);
-        }
-        if over && clicked() {
-            switch = Some(tab);
-        }
-    }
+    // The tabs: one strip in the desktop diary's style (`chrome::tab_strip`), the picked one in gold;
+    // the labels shrink together to fit the narrowest tab, never below 12 sp.
+    let labels: Vec<&str> = Tab::ALL.into_iter().map(|t| tr(diary_tab_label(t))).collect();
+    let picked = Tab::ALL.iter().position(|&t| t == view.tab).unwrap_or(0);
+    let tapped = legacy_metrics_if(true, || chrome::tab_strip(a.tabs, &labels, picked, 14.0 * k * g, 12.0 * k * g));
+    let mut switch = tapped.map(|i| Tab::ALL[i]);
     let at = Tab::ALL.iter().position(|&t| t == view.tab).unwrap_or(0);
     if key(KeyCode::Right) {
         switch = Some(Tab::ALL[(at + 1) % Tab::ALL.len()]);
@@ -2807,11 +2798,10 @@ mod tests {
         let inner = Rect::new(10.0, 20.0, 1000.0, 1700.0);
         let k = 2.75;
         let up = super::phone_diary_areas(inner, k, 1.0, true);
-        // The four tabs on top (two rows held upright), «Закрыть» 44 dp tall at the foot, all inside the frame.
-        assert!(up.tabs[0].y == up.tabs[1].y && up.tabs[2].y == up.tabs[3].y && up.tabs[2].y > up.tabs[0].y);
-        assert!(up.tabs.iter().all(|t| t.bottom() <= up.list.y));
-        let side_tabs = super::phone_diary_areas(inner, k, 1.0, false).tabs;
-        assert!(side_tabs.iter().all(|t| t.y == side_tabs[0].y));
+        // The four tabs are one strip on top, 44 dp tall, each tab 44 dp wide at least, «Закрыть» 44 dp tall at the foot.
+        let cells = super::chrome::tab_cells(up.tabs, 4);
+        assert!(cells.iter().all(|t| t.y == up.tabs.y && t.w >= 44.0 * k && t.h == 44.0 * k));
+        assert!(up.tabs.bottom() <= up.list.y);
         assert_eq!(up.close.h, 44.0 * k);
         assert!(up.close.bottom() <= inner.bottom() && up.close.y >= up.entry.bottom());
         // The list over the heading and the entry, the list taking 40 % of the height.
@@ -2826,7 +2816,7 @@ mod tests {
         assert_eq!(side.list.y, side.head.y);
         assert_eq!(side.close.h, 44.0 * k);
         assert!(side.close.y < side.list.y && side.close.right() <= inner.right());
-        assert!(side.tabs[3].right() < side.close.x);
+        assert!(side.tabs.right() < side.close.x && side.tabs.y == side.close.y);
         assert!(side.entry.bottom() <= inner.bottom());
         // The scrollbars are 24 dp wide, at the right of their area.
         assert_eq!(up.list_bar.w, 24.0 * k);

@@ -317,7 +317,7 @@ desktop and sideways pixel-identical, texts drawn under `dt_font::legacy_metrics
   hub's hero (`hub_view::hero`, shared with the hub's card) with the title over it, the description centred, scrolled
   by `hub_view::pane_scroll`, «Назад»/«Далее». `RAZDOR_SCENE_CARD=1` opens it in a snapshot;
 - the hero window on a phone (both orientations) is the diary-only window «Дневник» (`items_view::phone_diary`,
-  `phone_diary_areas`): four tab buttons, the entry list, the picked entry's text centred; upright the list over the
+  `phone_diary_areas`): four tabs in one strip (`chrome::tab_strip`, the desktop diary's style, on parchment), the entry list, the picked entry's text centred; upright the list over the
   text and «Закрыть» at the foot, sideways the list left and the text right with «Закрыть» in the tabs row. The
   desktop keeps the original hero window;
 - market (`window_layout::market_panes`, `Stack::Market`): the item description strip on top (`ItemBox::MarketStrip`),
@@ -341,6 +341,11 @@ desktop and sideways pixel-identical, texts drawn under `dt_font::legacy_metrics
   Beside the text (desktop, sideways) nothing changes.
 
 The mobile check (`tools/ui-regress/mobile_ui.py`) has the `update`, `diary` and `scenarios-card` screens.
+- Upright phone layouts after the owner's three phone items (2026-11-03; only a phone held upright changes, except the diary, which is phone-only in both orientations):
+  - the diary (`items_view::phone_diary`, `phone_diary_areas`): its four tabs are one strip (`chrome::tab_strip`: parchment, silver frame, gold dividers, the picked tab in gold with an underline; the labels shrink together to the narrowest tab, never below 12 sp), 44 dp tall; the list and the entry take the rest;
+  - the settings window (`main_menu::phone_options`): a tab strip with two pages, «Звук и скорость» (the five sliders) and «Игра» (the checkboxes and the rows under them); a page scrolls only when it is taller than the room (a 24 dp scrollbar); the page is kept while the window is open and opens on the first; the footer is as before;
+  - «Дополнительные настройки» (`main_menu::advanced_window`, then `phone_advanced`): one column of every row in the landscape order, each row's button and click shared with the landscape layout (`main_menu::rule`, `Rule`): the title at the left, the button 190 dp wide and 44 dp tall, the explanation wrapped full width under it at 13 dp; the list scrolls on a 24 dp bar, «Ок» stays at the foot; a control only partly in view takes no tap.
+The mobile check (`tools/ui-regress/mobile_ui.py`) has the `update`, `diary`, `scenarios-card`, `options-game` and `options-advanced` screens.
 
 The minimap (`minimap::window`) in
 portrait stands inside the safe area (`in_safe_area`, `inset_view`). It has no close cross on a phone (the owner's request, 2026-10-28,

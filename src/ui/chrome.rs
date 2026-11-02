@@ -1615,6 +1615,68 @@ pub fn surface(r: Rect, skin: Skin) {
     surface_alpha(r, skin, 1.0);
 }
 
+/// The cells of a tab strip `r` with `n` tabs: equal cells that split its width, the last ending at
+/// its right edge (pure; `tab_strip` draws and tests them).
+pub fn tab_cells(r: Rect, n: usize) -> Vec<Rect> {
+    if n == 0 {
+        return Vec::new();
+    }
+    let w = r.w / n as f32;
+    (0..n).map(|i| Rect::new(r.x + i as f32 * w, r.y, w, r.h)).collect()
+}
+
+/// The size the tabs' labels are drawn at (pure): `size` when the widest label, measured at `size`
+/// (`widths`), fits `avail`; else all of them shrink together by the same factor, never below `min`.
+pub fn fit_tab_size(size: f32, min: f32, widths: &[f32], avail: f32) -> f32 {
+    let widest = widths.iter().copied().fold(0.0, f32::max);
+    if widest <= avail || widest <= 0.0 {
+        return size;
+    }
+    (size * avail / widest).clamp(min.min(size), size)
+}
+
+/// A strip of tabs on a parchment panel with a silver frame (the desktop diary's tabs in the phone's
+/// style): `labels` one per tab in the diary's bold face, the `picked` one in gold with a gold
+/// underline, the others dim and ink under the pointer; thin gold dividers between the tabs. The
+/// labels take `size` px, shrunk together to fit the narrowest tab but never below `min`. Returns
+/// the tab a tap landed on (its finger area, `widgets::finger_hit`), if any. Draw it at the caller's
+/// legacy metrics (`dt_font::legacy_metrics_if`), so its sizes stick.
+pub fn tab_strip(r: Rect, labels: &[&str], picked: usize, size: f32, min: f32) -> Option<usize> {
+    use super::dt_font::{with_original_face, Face};
+    use super::widgets::{finger_hit, input_blocked, mouse_in, tapped_in};
+    let k = k();
+    paper_panel(r);
+    silver_frame(r, 1.0);
+    let cells = tab_cells(r, labels.len());
+    let pad = 6.0 * k;
+    let size = with_original_face(Face::Bold, || {
+        let widths: Vec<f32> = labels.iter().map(|l| measure(l, size).width).collect();
+        let narrowest = cells.first().map_or(0.0, |c| c.w);
+        fit_tab_size(size, min, &widths, narrowest - 2.0 * pad)
+    });
+    let mut tapped = None;
+    for (i, (label, cell)) in labels.iter().zip(&cells).enumerate() {
+        let over = !input_blocked() && mouse_in(cell.x, cell.y, cell.w, cell.h);
+        let tap = !input_blocked() && tapped_in(finger_hit(*cell));
+        let ink = if i == picked { super::widgets::ACCENT } else if over { super::widgets::INK } else { super::widgets::DIM };
+        let (cx, base) = (cell.x + cell.w / 2.0, cell.y + cell.h / 2.0 + size * 0.35);
+        with_original_face(Face::Bold, || {
+            shadow_centered(label, cx, base, size, ink);
+            if i == picked {
+                let w = measure(label, size).width;
+                draw_line(cx - w / 2.0, cell.bottom() - 4.0 * k, cx + w / 2.0, cell.bottom() - 4.0 * k, 2.0 * k, GOLD);
+            }
+        });
+        if i > 0 {
+            draw_line(cell.x, r.y + pad, cell.x, r.bottom() - pad, k.max(1.0), Color::new(GOLD.r, GOLD.g, GOLD.b, 0.6));
+        }
+        if tap {
+            tapped = Some(i);
+        }
+    }
+    tapped
+}
+
 /// Keeps the paper grain at its normal scale. Alternating mirrored tiles meet at the
 /// same source edge, avoiding the top-to-bottom seam without stretching the parchment.
 pub fn paper_panel(r: Rect) {
@@ -3434,5 +3496,37 @@ mod tests {
         assert_eq!(cover_source((1024.0, 768.0), (1920.0, 1080.0)), None);
         assert_eq!(cover_source((1024.0, 768.0), (2160.0, 1080.0)), None);
         assert_eq!(cover_source((1024.0, 768.0), (800.0, 800.0)), None);
+    }
+
+    /// The phone's tab strip (a phone choice of 2.75 px per dp): four tabs split the window's width,
+    /// each at least 44 dp wide, and their cells tile the strip.
+    #[test]
+    fn tab_cells_split_the_strip_and_keep_44_dp() {
+        let dp = 2.75;
+        let strip = Rect::new(20.0, 30.0, 990.0, 44.0 * dp);
+        let cells = tab_cells(strip, 4);
+        assert_eq!(cells.len(), 4);
+        assert!(cells.iter().all(|c| c.w >= 44.0 * dp && c.y == strip.y && c.h == strip.h));
+        assert_eq!(cells[0].x, strip.x);
+        assert!((cells[3].right() - strip.right()).abs() < 1e-3);
+        for pair in cells.windows(2) {
+            assert!((pair[0].right() - pair[1].x).abs() < 1e-3);
+        }
+        assert!(tab_cells(strip, 0).is_empty());
+    }
+
+    /// The labels shrink together to the narrowest tab, never below the floor, and stay put when
+    /// they fit.
+    #[test]
+    fn tab_labels_shrink_together_and_never_below_the_floor() {
+        // Fits: unchanged.
+        assert_eq!(fit_tab_size(14.0, 12.0, &[60.0, 80.0], 90.0), 14.0);
+        // The widest (80 at 14) must fit 40: all shrink by 40/80, to 7, which the floor lifts to 12.
+        assert_eq!(fit_tab_size(14.0, 12.0, &[60.0, 80.0], 40.0), 12.0);
+        assert!((fit_tab_size(14.0, 6.0, &[60.0, 80.0], 40.0) - 7.0).abs() < 1e-4);
+        // Far too wide: the floor holds.
+        assert_eq!(fit_tab_size(14.0, 12.0, &[200.0], 10.0), 12.0);
+        // No labels: nothing to shrink.
+        assert_eq!(fit_tab_size(14.0, 12.0, &[], 10.0), 14.0);
     }
 }

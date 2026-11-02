@@ -449,9 +449,12 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
         }
         "options" => {
             app.screen = Screen::Options;
-            // `options:advanced`: Razdor's advanced settings over it.
-            if parts.next() == Some("advanced") {
-                super::main_menu::open_advanced();
+            // `options:advanced`: Razdor's advanced settings over it; `options:game`: the phone's
+            // «Игра» page (upright) of the settings.
+            match parts.next() {
+                Some("advanced") => super::main_menu::open_advanced(),
+                Some("game") => super::main_menu::open_options_page(1),
+                _ => {}
             }
             return Ok(());
         }
@@ -948,6 +951,8 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                 super::main_menu::open_advanced();
             } else if arg == Some("keys") {
                 super::main_menu::open_keys();
+            } else if arg == Some("game") {
+                super::main_menu::open_options_page(1);
             }
             Screen::Settings
         }

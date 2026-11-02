@@ -77,6 +77,8 @@ EVENT_TEXT = ("Зайдя внутрь церкви, вы обнаружили �
 SCREENS = [
     ("title", "title", {}),
     ("options", "options", {}),
+    ("options-game", "options:game", {}),
+    ("options-advanced", "options:advanced", {}),
     ("scenarios", "scenarios:РК1-Начало пути", {}),
     # The scenario card (the owner's order of 2026-11-02): the picked map's picture, description and «Далее».
     ("scenarios-card", "scenarios:РК1-Начало пути", {"RAZDOR_SCENE_CARD": "1"}),
