@@ -328,6 +328,18 @@ desktop and sideways pixel-identical, texts drawn under `dt_font::legacy_metrics
   OK 120 × 44 dp and larger text (`dialog::OK_W_DP`, `BIG_TEXT`); the learnt-spell window padded, its spell card in
   the empty text box's place (`learnt_slot`, `spellbook::spell_tip_card_padded`); the army window's «Закрыть» a
   normal 44 dp button; custom battle's quick buttons 44 dp.
+- the town windows (the building, the barracks and garrison, the market; `window_layout::town_rect_in`, `town_k_in`, pure,
+  with unit tests): one bottom edge (the market's old one, a few dp above the bottom bar) and one scale (the smallest of
+  their three stacked scales), so the tab row and Выход stay where they are between sections (a player's report);
+  the tab row and Exit are measured from the window's own bottom (`building_tabs`, `building_exit`);
+- the spellbook held upright (`spellbook::phone_foot`, `controls`): «Закрыть» at the foot beside the filter button, both
+  44 dp tall with 14 dp labels; the page arrows and "N / M" on a row above them, always reserved so the rows do not change
+  with the page count; the corner cross stays; desktop and landscape keep the bottom row of arrows (`bottom_row`);
+- the event and talk windows held upright with a picture (`dialog::event_frame` with `stacked`, `stacked_top`,
+  `picture_x`, pure): the picture centred across the top at its own size, the text box under it across the full inner
+  width, the window taller by the picture; the box gives up its height first when the window does not fit (`phone_fit`).
+  Beside the text (desktop, sideways) nothing changes.
+
 The mobile check (`tools/ui-regress/mobile_ui.py`) has the `update`, `diary` and `scenarios-card` screens.
 
 The minimap (`minimap::window`) in
