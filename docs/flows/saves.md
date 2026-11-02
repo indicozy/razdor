@@ -10,9 +10,13 @@ All code is in `src/rules/save.rs`; the windows are `src/ui/saves.rs`.
 
 A game of a content package's map (`razdor --pack`) saves with `ScenarioRef::Pack`: the package's
 id, version, content hash, the path it was read from and the map's id. Its save carries no map
-bytes; a load reopens the package from that path (`ui/pack_play.rs` `ensure_pack`, before
-`save::load`), checks the hash and attaches the package's story again (`rules::save::restore`,
-`SaveError::PackageMissing` when the package is not open or has changed). Saves before it are unchanged.
+bytes. A load finds the package again (`ui/pack_play.rs` `ensure_pack`, before `save::load`): only
+among the packages the player opened (`packages.json` in the data folder, written by `open_pack`,
+`pack::trust`) and the Hub's `packages/` folder, matched by id, version, hash and map. The save's
+path is never opened as it is; it is a hint only when it canonicalises to a listed path. The package
+is read with its limits and path checks (`pack::files`, `docs/reference/rzpack-format.md`). Then
+`rules::save::restore` attaches the package's story again; `SaveError::PackageMissing` when no
+candidate matches. Saves before it are unchanged.
 
 ## Where saves live
 

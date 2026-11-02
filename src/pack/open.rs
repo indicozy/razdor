@@ -1,7 +1,8 @@
 //! Opening a package's map as a game: the package read from its folder or `.rzpack`, checked, its
 //! map compiled on the install, its story compiled for that map, and the package's hash. The game
 //! (`ui::pack_play`, `rules::save`) plays the result; a save names the map by [`Opened::origin`] and
-//! finds the package again by its path, which it checks against the hash.
+//! finds the package again among the packages the player opened (`trust`), by its hash, never from
+//! the save's path as it is.
 
 use std::path::{Path, PathBuf};
 
@@ -114,6 +115,13 @@ impl Opened {
         g.set_origin(self.origin());
         g.attach_story(self.story.clone());
         g.start_story();
+    }
+
+    /// Whether this is the package a save names: the same id, version, content hash and map. The
+    /// path does not count: a save's path is a hint, and the package is found again by its hash
+    /// (`trust`).
+    pub fn same_package(&self, origin: &ScenarioRef) -> bool {
+        matches!(origin, ScenarioRef::Pack { id, version, hash, map, .. } if *id == self.id && *version == self.version && *hash == self.hash && *map == self.map)
     }
 
     /// The package's name for a person: its id and version.

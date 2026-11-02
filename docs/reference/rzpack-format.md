@@ -20,6 +20,37 @@ Anything not listed here is not read yet. The code is `src/pack/`; the tool is `
   `ugs`, `lit`, `spi`, `exe` or `dll` (any case). A package refers to the base game with `dt:`
   references and never ships the game's files.
 
+## Reading limits and paths
+
+- A package holds at most 64 MiB of files in all (uncompressed), 4,096 files and 32 MiB per file
+  (`pack::files`, `MAX_PACKAGE_BYTES`, `MAX_FILES`, `MAX_FILE_BYTES`). Past one of them the read is
+  refused with a message that names the limit. A `.rzpack` above 64 MiB is refused before it is read;
+  its entries' declared sizes are checked before any is read, and each read stops at the file limit
+  whatever the archive declares (a zip bomb is refused, not unpacked).
+- A folder package nests at most 32 levels. A symbolic link in it is read only when it points to a
+  file inside the folder. A link out of the folder, to a folder, or to a device is left out with a
+  problem, so the package does not check.
+- A path to a network share (`\\host\share`, `//host/share`, `\\?\UNC\…`) or to a device (`\\.\…`)
+  is refused before anything touches the file system (`files::refused_path`): a package is read from
+  this computer only.
+
+## How a save finds its package
+
+A save of a package game names the package by its id, version, content hash, map and the path it was
+read from (`ScenarioRef::Pack`). The path is a hint. A load opens a package only from:
+
+- the list `packages.json` in Razdor's data folder (`platform::app_dir()`, `pack::trust`): every
+  package the player opened with `razdor --pack` (or `RAZDOR_PACK`), with its canonical path, id,
+  version and hash, the newest first, at most 512 entries;
+- the Hub's `packages/` folder (`<hub>/packages/`): its folders and `.rzpack` files. Format 1 does
+  not install packages there yet, so the folder is empty in practice.
+
+A candidate is opened and must match the save's id, version, hash and map (`Opened::same_package`;
+the path is not compared). The save's path is opened only when it canonicalises to a listed path of
+that same package. When no candidate matches, the load says that the package is missing and asks
+the player to open it first (`razdor --pack <path>`). A save made before the list existed needs one
+`razdor --pack` run of its package before it loads.
+
 ## `package.toml`
 
 Unknown fields are errors.
@@ -421,7 +452,8 @@ game's own limits apply: 32 named characters, 255 armies, 6 troop slots per list
 - `razdor --pack <folder-or-.rzpack> [--map <id>]` (or `RAZDOR_PACK`, `RAZDOR_PACK_MAP`): starts a
   new game on the package's map, after the install's map list. The package is checked and compiled
   on the install; the game opens on the hero window, and the package's story starts with it. A
-  package game saves: its save names the package (see «Running a story»), and a load reopens it.
+  package game saves: its save names the package (see «Running a story» and «How a save finds its
+  package»), and a load finds it again among the packages the player opened.
 
 Off-screen: `RAZDOR_PACK=<path> RAZDOR_SCENE=map:<map-id>` renders the package's map (the
 `offscreen-snapshot` skill).

@@ -8,14 +8,17 @@
 //! hero window, as a map of the install does; `ScenarioSelect` lists the package's map too.
 //!
 //! A package game saves like the others: its save names the package (id, version, hash and the
-//! path it was read from) and the map, and a load opens the package from that path again
-//! ([`App::ensure_pack`]). A package that is gone or changed refuses the load, naming it.
+//! path it was read from) and the map. A load finds the package again among the packages the
+//! player opened (`pack::trust`, recorded by [`App::open_pack`]), by its hash, never from the
+//! save's path as it is ([`App::ensure_pack`]). A package that is gone or changed refuses the
+//! load, naming it.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use razdor::pack::{self, compile, Opened};
+use razdor::pack::{self, compile, trust, Opened};
 use razdor::rules::save::{ScenarioRef, SaveError};
+use razdor::{hub, platform};
 
 use super::{App, Screen, ScenarioEntry};
 
@@ -40,12 +43,21 @@ pub fn requested() -> Option<(PathBuf, Option<String>)> {
 
 impl App {
     /// Opens `map` of the package at `path` (the first map when none is named) as a new game: the
-    /// hero window comes up. An error names what is wrong; nothing changes then.
+    /// hero window comes up. An error names what is wrong; nothing changes then. The package
+    /// is then remembered (`trust`): a save of it finds it again by its hash, from this path.
     pub fn open_pack(&mut self, path: &Path, map: Option<&str>) -> Result<(), String> {
+        let path = trust::canonical_local(path)?;
         let opened = {
             let install = self.assets.dt.as_ref().map(|d| &d.install).ok_or("no Discord Times install (set RAZDOR_DT_DIR)")?;
-            pack::open::open(path, map, pack::open::lang(), install)?
+            pack::open::open(&path, map, pack::open::lang(), install)?
         };
+        if let Some(dir) = platform::app_dir() {
+            // Without the record a save of this package cannot find it again: the game still
+            // plays, and such a save names the package as missing.
+            if let Err(e) = trust::remember(&dir, trust::Entry::from_opened(&opened)) {
+                razdor::diag!("packages: {e}");
+            }
+        }
         self.adopt_pack(opened);
         let index = self.scenarios.iter().position(|e| e.pack.is_some()).ok_or("the package's map is not in the list")?;
         self.screen = Screen::ClassSelect { scenario: Some(index) };
@@ -66,21 +78,24 @@ impl App {
         self.dt_content = self.install_content();
     }
 
-    /// A save names a package game's package: it is open as the game plays (a load opens it from
-    /// its path, unless it is open already). A package that cannot be found or does not match the
-    /// save's hash is the error [`SaveError::PackageMissing`] gives, and the game keeps the package
-    /// it had.
+    /// A save names a package game's package: it is open as the game plays. The package is found
+    /// only among the packages the player opened (`trust`) and the Hub's, by the save's id,
+    /// version and hash; the save's path is never opened as it is. A package that cannot be found
+    /// or does not match is the error [`SaveError::PackageMissing`] gives, and the game keeps the
+    /// package it had.
     pub(super) fn ensure_pack(&mut self, origin: &ScenarioRef) -> Result<(), String> {
-        let ScenarioRef::Pack { id, version, path, map, .. } = origin else { return Ok(()) };
-        if self.pack.as_ref().is_some_and(|p| p.opened.origin() == *origin) {
+        let ScenarioRef::Pack { id, version, map, .. } = origin else { return Ok(()) };
+        if self.pack.as_ref().is_some_and(|p| p.opened.same_package(origin)) {
             return Ok(());
         }
         let install = self.assets.dt.as_ref().map(|d| &d.install).ok_or_else(|| SaveError::NoInstall.to_string())?;
         let missing = || SaveError::PackageMissing(format!("{id} {version}")).to_string();
-        let opened = pack::open::open(Path::new(path), Some(map), pack::open::lang(), install).map_err(|_| missing())?;
-        if opened.origin() != *origin {
-            return Err(missing());
-        }
+        let list = platform::app_dir().map(|dir| trust::read(&dir)).unwrap_or_default();
+        let hub_packages = hub::local_dir().map(|local| trust::hub_packages(&local)).unwrap_or_default();
+        let opened = trust::candidates(&list, origin, &hub_packages)
+            .into_iter()
+            .find_map(|path| pack::open::open(&path, Some(map.as_str()), pack::open::lang(), install).ok().filter(|o| o.same_package(origin)))
+            .ok_or_else(missing)?;
         self.adopt_pack(opened);
         Ok(())
     }

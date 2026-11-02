@@ -1,4 +1,10 @@
 //! The files of a content package, in memory: a folder or a `.rzpack` (a zip of the folder).
+//!
+//! A package is read from a path a save names, so the reading is bounded: the package's size,
+//! its file count and each file's size are capped (`MAX_*`); a zip's declared sizes are checked
+//! before anything is read and its reads stop at the caps, whatever it declares; a folder's
+//! symlinks stay inside it; and a path to a network share or a device is refused before the file
+//! system is touched ([`refused_path`]).
 
 use std::collections::BTreeMap;
 use std::io::Read;
@@ -6,12 +12,22 @@ use std::path::Path;
 
 use super::diag::{Diagnostic, Severity};
 
+/// The most a package's files may hold in all, uncompressed. The Hub takes uploads of 50 MB.
+pub const MAX_PACKAGE_BYTES: u64 = 64 << 20;
+/// The most files a package may have.
+pub const MAX_FILES: usize = 4096;
+/// The most a single file may hold.
+pub const MAX_FILE_BYTES: u64 = 32 << 20;
+/// How deep a folder package may nest.
+const MAX_DEPTH: usize = 32;
+
 /// Package-relative path (`/` separators) to the file's bytes.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Files {
     entries: BTreeMap<String, Vec<u8>>,
-    /// Problems met while reading (unsafe archive paths, names that are not UTF-8). The
-    /// entries concerned are left out; `Package::parse` reports them.
+    /// Problems met while reading (unsafe archive paths, names that are not UTF-8, symlinks out
+    /// of a folder, files that are not regular). The entries concerned are left out;
+    /// `Package::parse` reports them.
     pub problems: Vec<Diagnostic>,
 }
 
@@ -42,17 +58,34 @@ impl Files {
         self.iter().filter(move |(p, _)| p.starts_with(dir))
     }
 
-    /// Reads a folder recursively.
+    /// Reads a folder recursively, within the limits. Symlinks to files inside the folder are
+    /// read; a symlink to anything outside it, or to a folder, is a problem and is left out.
     pub fn from_dir(dir: &Path) -> Result<Files, String> {
+        let root = std::fs::canonicalize(dir).map_err(|e| format!("cannot read {}: {e}", dir.display()))?;
         let mut files = Files::default();
-        collect(dir, "", &mut files)?;
+        let mut budget = Budget::default();
+        collect(&root, &root, "", 0, &mut files, &mut budget)?;
         Ok(files)
     }
 
-    /// Reads a `.rzpack`: a zip whose entries are the package's files.
+    /// Reads a `.rzpack`: a zip whose entries are the package's files, within the limits. The
+    /// declared sizes are checked before any entry is read, and each read stops at the cap.
     pub fn from_zip(bytes: &[u8]) -> Result<Files, String> {
         let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| format!("not a zip archive: {e}"))?;
+        if archive.len() > MAX_FILES {
+            return Err(format!("the package has more than {MAX_FILES} entries"));
+        }
+        // The declared sizes first: a package that declares more than the limits is refused
+        // without reading a byte of it.
+        let mut declared = Budget::default();
+        for i in 0..archive.len() {
+            let entry = archive.by_index_raw(i).map_err(|e| format!("cannot read entry {i}: {e}"))?;
+            if !entry.is_dir() {
+                declared.admit(&String::from_utf8_lossy(entry.name_raw()), entry.size())?;
+            }
+        }
         let mut files = Files::default();
+        let mut budget = Budget::default();
         for i in 0..archive.len() {
             let mut entry = archive.by_index(i).map_err(|e| format!("cannot read entry {i}: {e}"))?;
             if entry.is_dir() {
@@ -72,27 +105,111 @@ impl Files {
                 });
                 continue;
             };
-            let mut data = Vec::new();
-            entry.read_to_end(&mut data).map_err(|e| format!("cannot read {name}: {e}"))?;
+            let size = entry.size();
+            budget.admit(&name, size)?;
+            let data = budget.finish(&name, size, &mut entry)?;
             files.insert(&path, data);
         }
         Ok(files)
     }
 
-    /// A folder or a `.rzpack` file.
+    /// A folder or a `.rzpack` file. A path to a network share or a device is refused before
+    /// anything is read ([`refused_path`]); a file that is not a regular file is refused; a
+    /// `.rzpack` above [`MAX_PACKAGE_BYTES`] is refused before it is read.
     pub fn load(path: &Path) -> Result<Files, String> {
-        if path.is_dir() {
+        if let Some(why) = refused_path(&path.to_string_lossy()) {
+            return Err(format!("{} is {why}: a package is read from this computer only", path.display()));
+        }
+        let meta = std::fs::metadata(path).map_err(|_| format!("no such package folder or file: {}", path.display()))?;
+        if meta.is_dir() {
             Files::from_dir(path)
-        } else if path.is_file() {
-            let bytes = std::fs::read(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        } else if meta.is_file() {
+            if meta.len() > MAX_PACKAGE_BYTES {
+                return Err(format!("{} is larger than {} MiB", path.display(), MAX_PACKAGE_BYTES >> 20));
+            }
+            let file = std::fs::File::open(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+            let mut bytes = Vec::new();
+            file.take(MAX_PACKAGE_BYTES + 1).read_to_end(&mut bytes).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+            if bytes.len() as u64 > MAX_PACKAGE_BYTES {
+                return Err(format!("{} is larger than {} MiB", path.display(), MAX_PACKAGE_BYTES >> 20));
+            }
             Files::from_zip(&bytes)
         } else {
-            Err(format!("no such package folder or file: {}", path.display()))
+            Err(format!("{} is not a package folder or a .rzpack file", path.display()))
         }
     }
 }
 
-fn collect(dir: &Path, prefix: &str, files: &mut Files) -> Result<(), String> {
+/// Why a path must not be opened, decided from its text alone, before the file system is
+/// touched: a network share (`\\host\share`, `//host/share`, `\\?\UNC\…`), which Windows reaches
+/// with the player's credentials, or a device (`\\.\…`, `\\?\` that is not a drive). `None` for
+/// a local path, including `\\?\C:\…`, the form `canonicalize` gives on Windows.
+pub fn refused_path(path: &str) -> Option<&'static str> {
+    let p: String = path.chars().map(|c| if c == '/' { '\\' } else { c }).collect();
+    if let Some(rest) = p.strip_prefix(r"\\?\") {
+        let drive = rest.as_bytes().get(1) == Some(&b':') && rest.as_bytes().first().is_some_and(u8::is_ascii_alphabetic);
+        if drive {
+            return None;
+        }
+        let unc = rest.get(..4).is_some_and(|s| s.eq_ignore_ascii_case("UNC\\"));
+        return Some(if unc { "a network share" } else { "a device path" });
+    }
+    if p.starts_with(r"\\.\") {
+        return Some("a device path");
+    }
+    if p.starts_with(r"\\") {
+        return Some("a network share");
+    }
+    None
+}
+
+/// What a package read has admitted so far, against the limits.
+#[derive(Default)]
+struct Budget {
+    files: usize,
+    bytes: u64,
+}
+
+impl Budget {
+    /// Admits a file of `declared` bytes before it is read: its count, its size and the
+    /// package's size so far plus it must stay within the limits. The size is then reserved.
+    fn admit(&mut self, name: &str, declared: u64) -> Result<(), String> {
+        if self.files >= MAX_FILES {
+            return Err(format!("the package has more than {MAX_FILES} files (at {name})"));
+        }
+        if declared > MAX_FILE_BYTES {
+            return Err(format!("{name} is larger than {} MiB", MAX_FILE_BYTES >> 20));
+        }
+        if self.bytes.saturating_add(declared) > MAX_PACKAGE_BYTES {
+            return Err(format!("the package is larger than {} MiB (at {name})", MAX_PACKAGE_BYTES >> 20));
+        }
+        self.files += 1;
+        self.bytes += declared;
+        Ok(())
+    }
+
+    /// Reads an admitted file. The reader is cut at the file limit, so a file that holds more
+    /// than it declared fails here; the reservation is then replaced by the real size.
+    fn finish(&mut self, name: &str, declared: u64, reader: impl Read) -> Result<Vec<u8>, String> {
+        let mut data = Vec::new();
+        reader.take(MAX_FILE_BYTES + 1).read_to_end(&mut data).map_err(|e| format!("cannot read {name}: {e}"))?;
+        let actual = data.len() as u64;
+        if actual > MAX_FILE_BYTES {
+            return Err(format!("{name} is larger than {} MiB (more than its declared size)", MAX_FILE_BYTES >> 20));
+        }
+        self.bytes = self.bytes.saturating_sub(declared) + actual;
+        if self.bytes > MAX_PACKAGE_BYTES {
+            return Err(format!("the package is larger than {} MiB (at {name})", MAX_PACKAGE_BYTES >> 20));
+        }
+        Ok(data)
+    }
+}
+
+/// Reads folder `dir` (inside the canonical `root`) into `files`.
+fn collect(root: &Path, dir: &Path, prefix: &str, depth: usize, files: &mut Files, budget: &mut Budget) -> Result<(), String> {
+    if depth > MAX_DEPTH {
+        return Err(format!("the package's folders nest deeper than {MAX_DEPTH} levels (at {prefix})"));
+    }
     let read = std::fs::read_dir(dir).map_err(|e| format!("cannot read {}: {e}", dir.display()))?;
     let mut entries: Vec<_> = read.flatten().collect();
     entries.sort_by_key(|e| e.file_name());
@@ -110,14 +227,37 @@ fn collect(dir: &Path, prefix: &str, files: &mut Files) -> Result<(), String> {
         };
         let path = entry.path();
         let rel = format!("{prefix}{name}");
-        if path.is_dir() {
-            collect(&path, &format!("{rel}/"), files)?;
-        } else {
-            let bytes = std::fs::read(&path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-            files.insert(&rel, bytes);
+        let kind = entry.file_type().map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        if kind.is_symlink() {
+            // Refused unless it is a file inside the package (`canonicalize` resolves it).
+            let inside = std::fs::canonicalize(&path).ok().filter(|t| t.starts_with(root) && t.is_file());
+            if inside.is_none() {
+                refuse(files, &rel, "a symbolic link out of the package folder (or to a folder) is not read");
+                continue;
+            }
+        } else if kind.is_dir() {
+            collect(root, &path, &format!("{rel}/"), depth + 1, files, budget)?;
+            continue;
+        } else if !kind.is_file() {
+            refuse(files, &rel, "not a regular file (a device, a pipe or a socket) is not read");
+            continue;
         }
+        let meta = std::fs::metadata(&path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        if !meta.is_file() {
+            refuse(files, &rel, "not a regular file is not read");
+            continue;
+        }
+        budget.admit(&rel, meta.len())?;
+        let file = std::fs::File::open(&path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        let data = budget.finish(&rel, meta.len(), file)?;
+        files.insert(&rel, data);
     }
     Ok(())
+}
+
+/// Records a file of a folder that is left out.
+fn refuse(files: &mut Files, rel: &str, message: &str) {
+    files.problems.push(Diagnostic { severity: Severity::Error, file: rel.to_string(), line: None, message: message.into(), hint: None });
 }
 
 /// The package-relative path of a zip entry name, or `None` when it would leave the package.
@@ -141,6 +281,38 @@ fn safe_path(name: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// A zip of `entries` (deflated, the default).
+    fn zip_bytes(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        use std::io::Write;
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for (name, data) in entries {
+            zip.start_file(*name, zip::write::SimpleFileOptions::default()).unwrap();
+            zip.write_all(data).unwrap();
+        }
+        zip.finish().unwrap().into_inner()
+    }
+
+    /// Rewrites the declared uncompressed size of entry `name`, in its local and its central
+    /// header: the archive then lies about the entry's size.
+    fn declare_size(bytes: &mut [u8], name: &[u8], size: u32) {
+        // (signature, offset of the size, offset of the name length, offset of the name)
+        let headers: [(&[u8; 4], usize, usize, usize); 2] = [(b"PK\x03\x04", 22, 26, 30), (b"PK\x01\x02", 24, 28, 46)];
+        let mut patched = 0;
+        for (sig, size_at, name_len_at, name_at) in headers {
+            let mut i = 0;
+            while let Some(pos) = bytes[i..].windows(4).position(|w| w == sig) {
+                let h = i + pos;
+                let len = u16::from_le_bytes([bytes[h + name_len_at], bytes[h + name_len_at + 1]]) as usize;
+                if &bytes[h + name_at..h + name_at + len] == name {
+                    bytes[h + size_at..h + size_at + 4].copy_from_slice(&size.to_le_bytes());
+                    patched += 1;
+                }
+                i = h + 4;
+            }
+        }
+        assert_eq!(patched, 2, "the local and the central header");
+    }
+
     #[test]
     fn safe_paths() {
         assert_eq!(safe_path("units/a.toml").as_deref(), Some("units/a.toml"));
@@ -161,5 +333,101 @@ mod tests {
         assert_eq!(f.text("package.toml"), Some("id = \"x\""));
         assert_eq!(f.text("bin.dat"), None);
         assert_eq!(f.under("package").count(), 1);
+    }
+
+    #[test]
+    fn network_and_device_paths_are_refused_and_local_ones_are_not() {
+        for p in [r"\\host\share\pkg.rzpack", "//host/share/pkg.rzpack", r"\\?\UNC\host\share\pkg.rzpack", r"\\?\unc\host\share", r"\\server", r"\\.\PhysicalDrive0", r"\\?\Volume{1234}\x", r"\\?\GLOBALROOT\Device\x"] {
+            assert!(refused_path(p).is_some(), "{p} must be refused");
+        }
+        assert_eq!(refused_path(r"\\?\UNC\host\share\pkg.rzpack"), Some("a network share"));
+        assert_eq!(refused_path(r"\\.\NUL"), Some("a device path"));
+        for p in [r"\\?\C:\packs\x.rzpack", "C:\\packs\\x", "/home/u/packs/x.rzpack", "packs/x", "relative.rzpack", "/"] {
+            assert_eq!(refused_path(p), None, "{p} is local");
+        }
+    }
+
+    #[test]
+    fn load_refuses_a_network_or_device_path_before_touching_it() {
+        let err = Files::load(Path::new(r"\\no-such-host.invalid\share\pkg.rzpack")).unwrap_err();
+        assert!(err.contains("a network share"), "{err}");
+        let err = Files::load(Path::new(r"\\.\NUL")).unwrap_err();
+        assert!(err.contains("a device path"), "{err}");
+    }
+
+    #[test]
+    fn a_zip_round_trips() {
+        let bytes = zip_bytes(&[("package.toml", b"id = \"x\""), ("units/a.toml", b"u")]);
+        let files = Files::from_zip(&bytes).unwrap();
+        assert_eq!(files.text("package.toml"), Some("id = \"x\""));
+        assert_eq!(files.get("units/a.toml"), Some(&b"u"[..]));
+    }
+
+    #[test]
+    fn a_package_with_too_many_files_is_refused() {
+        let names: Vec<String> = (0..=MAX_FILES).map(|i| format!("f{i}.txt")).collect();
+        let entries: Vec<(&str, &[u8])> = names.iter().map(|n| (n.as_str(), &b"x"[..])).collect();
+        let err = Files::from_zip(&zip_bytes(&entries)).unwrap_err();
+        assert!(err.contains("more than 4096"), "{err}");
+        assert_eq!(Files::from_zip(&zip_bytes(&entries[..MAX_FILES])).unwrap().paths().count(), MAX_FILES);
+    }
+
+    #[test]
+    fn a_file_over_the_file_limit_is_refused() {
+        let big = vec![0u8; MAX_FILE_BYTES as usize + 1];
+        let err = Files::from_zip(&zip_bytes(&[("maps/big/terrain.png", &big)])).unwrap_err();
+        assert!(err.contains("larger than 32 MiB"), "{err}");
+        let max = vec![0u8; MAX_FILE_BYTES as usize];
+        assert!(Files::from_zip(&zip_bytes(&[("maps/big/terrain.png", &max)])).is_ok(), "exactly the limit is read");
+    }
+
+    #[test]
+    fn a_package_over_the_size_limit_is_refused_before_it_is_read() {
+        let part = vec![0u8; 22 << 20];
+        let err = Files::from_zip(&zip_bytes(&[("a.bin", &part), ("b.bin", &part), ("c.bin", &part)])).unwrap_err();
+        assert!(err.contains("larger than 64 MiB"), "{err}");
+        assert!(Files::from_zip(&zip_bytes(&[("a.bin", &part), ("b.bin", &part)])).is_ok(), "44 MiB is read");
+    }
+
+    #[test]
+    fn a_zip_bomb_is_stopped_at_the_file_limit() {
+        // 40 MiB of zeros deflates to a few dozen KB; the headers then declare 100 bytes.
+        let mut bytes = zip_bytes(&[("maps/bomb/terrain.png", &vec![0u8; 40 << 20])]);
+        declare_size(&mut bytes, b"maps/bomb/terrain.png", 100);
+        // The zip reader stops an entry at its declared size, so the read fails; were it not
+        // to, the file cap would. Either way nothing of the 40 MiB is kept.
+        let err = Files::from_zip(&bytes).unwrap_err();
+        assert!(err.contains("maps/bomb/terrain.png"), "{err}");
+    }
+
+    #[test]
+    fn a_zip_declaring_more_than_the_limits_is_refused_before_any_read() {
+        let mut bytes = zip_bytes(&[("maps/x/terrain.png", b"x")]);
+        declare_size(&mut bytes, b"maps/x/terrain.png", (MAX_FILE_BYTES + 1) as u32);
+        let err = Files::from_zip(&bytes).unwrap_err();
+        assert!(err.contains("larger than 32 MiB"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_out_of_the_folder_is_refused() {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("razdor-files-link-{}-{nanos}", std::process::id()));
+        let pkg = dir.join("pkg");
+        std::fs::create_dir_all(pkg.join("units")).unwrap();
+        std::fs::write(dir.join("secret.toml"), "secret").unwrap();
+        std::fs::write(pkg.join("package.toml"), "id = \"x\"").unwrap();
+        std::os::unix::fs::symlink(dir.join("secret.toml"), pkg.join("units/a.toml")).unwrap();
+        std::os::unix::fs::symlink("/dev/zero", pkg.join("zero.toml")).unwrap();
+        let files = Files::from_dir(&pkg).unwrap();
+        assert_eq!(files.paths().collect::<Vec<_>>(), vec!["package.toml"]);
+        assert!(files.problems.iter().any(|d| d.file == "units/a.toml"), "{:?}", files.problems);
+        assert!(files.problems.iter().any(|d| d.file == "zero.toml"), "{:?}", files.problems);
+        // A link to a file inside the folder is read.
+        std::fs::write(pkg.join("units/real.toml"), "real").unwrap();
+        std::os::unix::fs::symlink(pkg.join("units/real.toml"), pkg.join("alias.toml")).unwrap();
+        let files = Files::from_dir(&pkg).unwrap();
+        assert_eq!(files.get("alias.toml"), Some(&b"real"[..]));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

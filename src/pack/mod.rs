@@ -16,6 +16,7 @@ pub mod refs;
 pub mod sim;
 pub mod terrain;
 pub mod texts;
+pub mod trust;
 pub mod triggers;
 
 pub use check::check;

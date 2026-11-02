@@ -89,8 +89,9 @@ pub enum ScenarioRef {
     /// A map of the install: its file name without the extension and a hash of its bytes.
     Map { file: String, hash: u64 },
     /// A map of a content package (`razdor --pack`, `pack::open`): the package's id and version,
-    /// its content hash, the path it was read from and the map's id. A load reads the package
-    /// from that path again and checks the hash; the story is attached again from it.
+    /// its content hash, the path it was read from (a hint: a load finds the package among the
+    /// packages the player opened, by the hash, see `pack::trust`) and the map's id. The story is
+    /// attached again from the package.
     Pack { id: String, version: String, hash: u64, path: String, map: String },
 }
 
@@ -1003,7 +1004,7 @@ pub fn restore(meta: &SaveMeta, mut game: Game, demo: Arc<Content>, install: Opt
         }
         ScenarioRef::Pack { id, version, .. } => {
             let install = install.ok_or(SaveError::NoInstall)?;
-            let opened = install.pack.filter(|p| p.origin() == meta.scenario).ok_or_else(|| SaveError::PackageMissing(format!("{id} {version}")))?;
+            let opened = install.pack.filter(|p| p.same_package(&meta.scenario)).ok_or_else(|| SaveError::PackageMissing(format!("{id} {version}")))?;
             let scenario = &opened.scenario;
             let world = World::from_scenario(scenario, &install.content);
             let (w, h) = (scenario.header.width as i32, scenario.header.height as i32);

@@ -709,7 +709,7 @@ impl App {
             // A package's map starts again from its beginning, with its story.
             Some(save::ScenarioRef::Pack { .. }) => {
                 let name = old.hero_name.clone().unwrap_or_default();
-                let entry = self.scenarios.iter().find(|e| e.pack.as_ref().is_some_and(|p| Some(p.origin()) == old.origin));
+                let entry = self.scenarios.iter().find(|e| e.pack.as_ref().is_some_and(|p| old.origin.as_ref().is_some_and(|o| p.same_package(o))));
                 let (Some(entry), Some(c)) = (entry, self.dt_content.clone()) else {
                     self.message = Some(tr("The map of this game is not in the install.").into());
                     self.screen = Screen::WorldMap;
