@@ -154,6 +154,28 @@ gaps to close:
 4. `razdor-pack check` warns when a text uses characters no bundled font covers (it may not
    show on phones).
 
+## 2.5D view and 3D models (decisions 18-20, 2026-11-02)
+
+- **What (18):** a 2.5D camera over the world map: a tilted perspective view with zoom; the
+  original's art stands up as billboards; packages may give units, buildings and objects glTF
+  models. A `.DTm` can be viewed this way too, as an option; the flat view stays the default
+  and unchanged. Battles stay 2D (a 3D battle view may come later as a replaceable system).
+  Rules never see the view: they stay on the grid.
+- **How (19):** on macroquad/miniquad: the `gltf` crate for models, Razdor's own shaders (lit
+  models, billboards, terrain), GPU skinning. The renderer sits behind its own system
+  interface in v2.
+- **Model rules (20):** glTF 2.0 binary (`.glb`), textures embedded; Y up, facing +Z, one map
+  cell = 1.0, pivot at the feet in the cell's centre (a unit ~0.8 tall, a building up to 3x3
+  cells). Budgets: unit <= 5,000 triangles, object <= 3,000, building <= 20,000; textures
+  <= 1024x1024, at most 2 per model; at most 40 bones. Clips: `idle` required for units,
+  `walk` on the map (else the model glides); `attack`, `hit`, `die` reserved for a 3D battle.
+  `units/*.toml` gets `model = "art/models/x.glb"`; without one the sprite is a billboard.
+  `razdor-pack check` checks conventions, budgets and clips; `razdor-pack render` makes a
+  turntable PNG.
+- **Steps:** (1) the tilted camera with billboards and picking, behind a setting, off by
+  default; (2) static glTF models (load, budget check, lit shader, turntable render);
+  (3) skinned animation (`idle`, `walk`); later camera rotation (needs depth sorting).
+
 ## Open (not yet discussed; defaults proposed)
 
 - **Example packages**: (1) a plain story map; (2) one with a non-DT mechanic, proposed: a
