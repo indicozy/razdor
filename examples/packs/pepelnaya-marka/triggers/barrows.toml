@@ -1,0 +1,431 @@
+# Chapter 5 «Курганы», the finale (map `barrows`, 200×200). The Dread decides the King's hosts: each
+# threshold sends one more host at the hero (army_goal attack), and each beaten host costs the dead
+# a little of their Dread. The hero's allies march on the palace (army_goal go_to) and the Dread falls
+# when they arrive. The taint peaks: the King curses the garrisons, then the hero's host; the remedies
+# depend on the branch (the Order's rite, the marsh herbs, the Companies' brew) and on Ilm. The
+# companions meet their fates on the road (Varga, Tess, Ilm, Kord). The King's throne is the palace on
+# the hill: a heretic who heard the wraith (grey_bargain_offered) can kneel there, which is the third
+# ending. Otherwise the King's own host is beaten and the council picks the Iron Peace, the Free March,
+# or, with neither standing, the fall. The endings are dialogs (`ending = "<dialog-id>"`).
+
+[vars]
+bw_iron_ok = false   # the Iron Peace may be chosen: the Crown at 1 or more and the Order at 2 or more
+bw_free_ok = false   # the Free March may be chosen: the Companies at 2 or more, or the marsh folk at 3 or more
+
+# --- The start: the standings decide which endings the council may offer. ---
+
+[[trigger]]
+id = "bw_arrive"
+map = "barrows"
+when = { event = "game_start" }
+then = [ { dialog = "bw_arrive" } ]
+
+[[trigger]]
+id = "bw_flag_iron"
+map = "barrows"
+when = { event = "game_start" }
+if = [ { var = "crown", op = ">=", value = 1 }, { var = "order", op = ">=", value = 2 } ]
+then = [ { set = "bw_iron_ok", value = true } ]
+
+[[trigger]]
+id = "bw_flag_free_companies"
+map = "barrows"
+when = { event = "game_start" }
+if = [ { var = "companies", op = ">=", value = 2 } ]
+then = [ { set = "bw_free_ok", value = true } ]
+
+[[trigger]]
+id = "bw_flag_free_marsh"
+map = "barrows"
+when = { event = "game_start" }
+if = [ { var = "marsh_trust", op = ">=", value = 3 } ]
+then = [ { set = "bw_free_ok", value = true } ]
+
+# --- The Dread: one a week, and the taint of the dead's country from dread 8 on. ---
+
+[[trigger]]
+id = "bw_dread_week"
+map = "barrows"
+when = { event = "week_start" }
+once = false
+then = [ { add = "dread", value = 1 } ]
+
+[[trigger]]
+id = "bw_taint_week"
+map = "barrows"
+when = { event = "week_start" }
+if = [ { var = "dread", op = ">=", value = 8 } ]
+once = false
+then = [ { add = "taint", value = 1 } ]
+
+[[trigger]]
+id = "bw_dread_peak"
+map = "barrows"
+when = { event = "var_changed", var = "dread" }
+if = [ { var = "dread", op = ">=", value = 12 } ]
+then = [ { add = "taint", value = 1 } ]
+
+[[trigger]]
+id = "bw_taint_peak"
+map = "barrows"
+when = { event = "var_changed", var = "taint" }
+if = [ { var = "taint", op = ">=", value = 6 } ]
+then = [ { add = "dread", value = 1 } ]
+
+# --- The King's hosts by threshold: each one marches on the hero. ---
+
+[[trigger]]
+id = "bw_host_1"
+map = "barrows"
+when = { event = "week_start" }
+if = [ { var = "dread", op = ">=", value = 4 } ]
+then = [
+    { spawn_army = "bw_king_1", at = [150, 70], faction = "enemy", model = 10, troops = ["dt:ghost", "dt:ghoul", "dt:ghoul"] },
+    { army_goal = "bw_king_1", attack = "hero" },
+    { add = "taint", value = 1 },
+    { dialog = "bw_rises" },
+]
+
+[[trigger]]
+id = "bw_host_2"
+map = "barrows"
+when = { event = "week_start" }
+if = [ { var = "dread", op = ">=", value = 6 } ]
+then = [
+    { spawn_army = "bw_king_2", at = [60, 100], faction = "enemy", model = 10, troops = ["dt:death_knight", "dt:ghoul", "dt:ghoul"] },
+    { army_goal = "bw_king_2", attack = "hero" },
+    { add = "taint", value = 1 },
+]
+
+[[trigger]]
+id = "bw_host_3"
+map = "barrows"
+when = { event = "week_start" }
+if = [ { var = "dread", op = ">=", value = 8 } ]
+then = [
+    { spawn_army = "bw_king_3", at = [130, 150], faction = "enemy", model = 10, troops = ["dt:death_knight", "dt:death_knight", "dt:ghost"] },
+    { army_goal = "bw_king_3", attack = "hero" },
+    { add = "taint", value = 1 },
+]
+
+[[trigger]]
+id = "bw_host_4"
+map = "barrows"
+when = { event = "week_start" }
+if = [ { var = "dread", op = ">=", value = 10 } ]
+then = [
+    { spawn_army = "bw_king_4", at = [170, 60], faction = "enemy", model = 10, troops = ["dt:death_knight", "dt:lich", "dt:ghoul"] },
+    { army_goal = "bw_king_4", attack = "hero" },
+    { add = "taint", value = 1 },
+]
+
+[[trigger]]
+id = "bw_host_5"
+map = "barrows"
+when = { event = "week_start" }
+if = [ { var = "dread", op = ">=", value = 13 } ]
+then = [
+    { spawn_army = "bw_king_5", at = [110, 160], faction = "enemy", model = 10, troops = ["dt:lich", "dt:death_knight", "dt:death_knight", "dt:ghoul"] },
+    { army_goal = "bw_king_5", attack = "hero" },
+    { add = "taint", value = 1 },
+]
+
+[[trigger]]
+id = "bw_host_6"
+map = "barrows"
+when = { event = "week_start" }
+if = [ { var = "dread", op = ">=", value = 16 } ]
+then = [
+    { spawn_army = "bw_king_6", at = [150, 120], faction = "enemy", model = 10, troops = ["dt:archlich", "dt:lich", "dt:death_knight", "dt:death_knight", "dt:ghoul"] },
+    { army_goal = "bw_king_6", attack = "hero" },
+    { add = "taint", value = 1 },
+]
+
+[[trigger]]
+id = "bw_host_7"
+map = "barrows"
+when = { event = "week_start" }
+if = [ { var = "dread", op = ">=", value = 20 } ]
+then = [
+    { spawn_army = "bw_king_7", at = [92, 104], faction = "enemy", model = 10, troops = ["dt:archlich", "dt:death_knight", "dt:death_knight", "dt:ghoul"] },
+    { army_goal = "bw_king_7", attack = "hero" },
+    { add = "taint", value = 1 },
+]
+
+# Each host beaten costs the dead a little Dread, and the hero a little gold from the dead's pockets.
+[[trigger]]
+id = "bw_loot_1"
+map = "barrows"
+when = { event = "army_defeated", army = "bw_king_1" }
+then = [ { add = "dread", value = -1 }, { give_gold = 20 } ]
+
+[[trigger]]
+id = "bw_loot_2"
+map = "barrows"
+when = { event = "army_defeated", army = "bw_king_2" }
+then = [ { add = "dread", value = -1 }, { give_gold = 20 } ]
+
+[[trigger]]
+id = "bw_loot_3"
+map = "barrows"
+when = { event = "army_defeated", army = "bw_king_3" }
+then = [ { add = "dread", value = -1 }, { give_gold = 20 } ]
+
+[[trigger]]
+id = "bw_loot_4"
+map = "barrows"
+when = { event = "army_defeated", army = "bw_king_4" }
+then = [ { add = "dread", value = -1 }, { give_gold = 20 } ]
+
+[[trigger]]
+id = "bw_loot_5"
+map = "barrows"
+when = { event = "army_defeated", army = "bw_king_5" }
+then = [ { add = "dread", value = -1 }, { give_gold = 20 } ]
+
+[[trigger]]
+id = "bw_loot_6"
+map = "barrows"
+when = { event = "army_defeated", army = "bw_king_6" }
+then = [ { add = "dread", value = -1 }, { give_gold = 20 } ]
+
+[[trigger]]
+id = "bw_loot_7"
+map = "barrows"
+when = { event = "army_defeated", army = "bw_king_7" }
+then = [ { add = "dread", value = -1 }, { give_gold = 20 } ]
+
+# --- The allies march on the palace, one branch each; they break the dead's hold when they arrive. ---
+
+[[trigger]]
+id = "bw_march_order"
+map = "barrows"
+when = { event = "week_start" }
+if = [ { var = "ally", value = 1 }, { var = "dread", op = ">=", value = 2 } ]
+then = [
+    { spawn_army = "bw_order", at = [44, 186], faction = "ally", model = 5, troops = ["dt:inquisitor", "dt:monk", "dt:halberdier"] },
+    { army_goal = "bw_order", go_to = [160, 44] },
+    { dialog = "bw_allies" },
+]
+
+[[trigger]]
+id = "bw_march_marsh"
+map = "barrows"
+when = { event = "week_start" }
+if = [ { var = "ally", value = 2 }, { var = "dread", op = ">=", value = 2 } ]
+then = [
+    { spawn_army = "bw_marsh", at = [22, 186], faction = "ally", model = 5, troops = ["dt:hunter", "dt:ranger", "dt:pilgrim"] },
+    { army_goal = "bw_marsh", go_to = [160, 44] },
+    { dialog = "bw_allies" },
+]
+
+[[trigger]]
+id = "bw_march_companies"
+map = "barrows"
+when = { event = "week_start" }
+if = [ { var = "ally", value = 3 }, { var = "dread", op = ">=", value = 2 } ]
+then = [
+    { spawn_army = "bw_companies", at = [176, 176], faction = "ally", model = 5, troops = ["dt:viking", "dt:marauder", "dt:crossbowman"] },
+    { army_goal = "bw_companies", go_to = [160, 44] },
+    { dialog = "bw_allies" },
+]
+
+[[trigger]]
+id = "bw_arrive_order"
+map = "barrows"
+when = { event = "army_arrives", army = "bw_order", at = [160, 44] }
+then = [ { add = "dread", value = -2 } ]
+
+[[trigger]]
+id = "bw_arrive_marsh"
+map = "barrows"
+when = { event = "army_arrives", army = "bw_marsh", at = [160, 44] }
+then = [ { add = "dread", value = -2 } ]
+
+[[trigger]]
+id = "bw_arrive_companies"
+map = "barrows"
+when = { event = "army_arrives", army = "bw_companies", at = [160, 44] }
+then = [ { add = "dread", value = -2 } ]
+
+# Kord's company, when it marches with the Companies, is paid each week or turns on the hero.
+[[trigger]]
+id = "bw_companies_fee"
+map = "barrows"
+when = { event = "week_start" }
+if = [ { var = "ally", value = 3 }, { var = "kord", value = 1 }, { var = "dread", op = ">=", value = 3 }, { gold = 40, op = ">=" } ]
+once = false
+then = [ { give_gold = -40 } ]
+
+[[trigger]]
+id = "bw_companies_turn"
+map = "barrows"
+when = { event = "week_start" }
+if = [ { var = "ally", value = 3 }, { var = "kord", value = 1 }, { var = "dread", op = ">=", value = 3 }, { gold = 40, op = "<" } ]
+once = false
+then = [
+    { set = "kord", value = 2 },
+    { set_faction = "bw_companies", faction = "enemy" },
+    { army_goal = "bw_companies", attack = "hero" },
+]
+
+# --- The taint peaks: the King curses the garrisons, then the hero's host. ---
+
+[[trigger]]
+id = "bw_curse_garrisons"
+map = "barrows"
+when = { event = "week_start" }
+if = [ { var = "taint", op = ">=", value = 3 } ]
+then = [
+    { cast_on_army = "dt:spell/curse_weakening", garrison = "ford_fort", minutes = 10080 },
+    { cast_on_army = "dt:spell/loss_of_reaction", garrison = "watch_keep", minutes = 10080 },
+    { dialog = "bw_curse" },
+]
+
+[[trigger]]
+id = "bw_curse_host"
+map = "barrows"
+when = { event = "week_start" }
+if = [ { var = "taint", op = ">=", value = 5 } ]
+then = [
+    { cast_on_army = "dt:spell/terrible_curse", in = "player", minutes = 4320 },
+    { dialog = "bw_curse" },
+]
+
+[[trigger]]
+id = "bw_curse_host_week"
+map = "barrows"
+when = { event = "week_start" }
+if = [ { var = "taint", op = ">=", value = 8 } ]
+once = false
+then = [ { cast_on_army = "dt:spell/weakness", in = "player", minutes = 10080 } ]
+
+[[trigger]]
+id = "bw_curse_garrison_week"
+map = "barrows"
+when = { event = "week_start" }
+if = [ { var = "taint", op = ">=", value = 7 } ]
+once = false
+then = [ { cast_on_army = "dt:spell/decay_of_armor", garrison = "watch_keep", minutes = 10080 } ]
+
+# --- The remedies, by branch: the Order's rite (Ilm's rite is open to an inquisitor only), the marsh
+# herbs, the Companies' brew for gold. A heretic's taint is not washed by the Order's chapel. ---
+
+[[trigger]]
+id = "bw_remedy_order"
+map = "barrows"
+when = { event = "hero_enters_building", building = "chapel" }
+if = [ { var = "ally", value = 1 } ]
+once = false
+then = [ { dialog = "bw_remedy" } ]
+
+[[trigger]]
+id = "bw_heresy_chapel"
+map = "barrows"
+when = { event = "hero_enters_building", building = "chapel" }
+if = [ { var = "ilm", value = 2 } ]
+once = false
+then = [ { add = "taint", value = 1 } ]
+
+[[trigger]]
+id = "bw_remedy_marsh"
+map = "barrows"
+when = { event = "hero_enters_building", building = "marsh_village" }
+if = [ { var = "ally", value = 2 } ]
+once = false
+then = [ { dialog = "bw_remedy" } ]
+
+[[trigger]]
+id = "bw_remedy_camp"
+map = "barrows"
+when = { event = "hero_enters_building", building = "camp" }
+if = [ { var = "ally", value = 3 } ]
+once = false
+then = [ { dialog = "bw_remedy" } ]
+
+# --- The companions' fates, on the road: each in its own place, so one step meets one of them. ---
+
+[[trigger]]
+id = "bw_fate_varga"
+map = "barrows"
+when = { event = "hero_enters", at = [96, 88, 10, 8] }
+if = [ { has_named_unit = "varga", unit = "dt:halberdier" }, { var = "varga_alive", value = true } ]
+then = [ { dialog = "bw_fate_varga" } ]
+
+[[trigger]]
+id = "bw_fate_tess"
+map = "barrows"
+when = { event = "hero_enters", at = [96, 110, 10, 6] }
+if = [ { var = "tess_joined", value = true } ]
+then = [ { dialog = "bw_fate_tess" } ]
+
+[[trigger]]
+id = "bw_fate_ilm_inq"
+map = "barrows"
+when = { event = "hero_enters", at = [148, 46, 8, 8] }
+if = [ { var = "ilm", value = 1 } ]
+then = [ { dialog = "bw_fate_ilm_inq" } ]
+
+[[trigger]]
+id = "bw_fate_ilm_heresy"
+map = "barrows"
+when = { event = "hero_enters", at = [148, 46, 8, 8] }
+if = [ { var = "ilm", value = 2 } ]
+then = [ { dialog = "bw_fate_ilm_heresy" } ]
+
+[[trigger]]
+id = "bw_fate_kord"
+map = "barrows"
+when = { event = "hero_enters", at = [94, 121, 12, 3] }
+if = [ { var = "kord", op = ">=", value = 1 }, { var = "kord", op = "!=", value = 2 } ]
+then = [ { dialog = "bw_fate_kord" } ]
+
+# --- The barrow hills: the old mounds give up a little of their learning. ---
+
+[[trigger]]
+id = "bw_hill_1"
+map = "barrows"
+when = { event = "hero_enters", at = [128, 18, 4, 4] }
+then = [ { give_xp = 100 } ]
+
+[[trigger]]
+id = "bw_hill_2"
+map = "barrows"
+when = { event = "hero_enters", at = [140, 8, 4, 4] }
+then = [ { give_xp = 100 } ]
+
+[[trigger]]
+id = "bw_hill_3"
+map = "barrows"
+when = { event = "hero_enters", at = [148, 28, 4, 4] }
+then = [ { give_xp = 100 } ]
+
+[[trigger]]
+id = "bw_hill_4"
+map = "barrows"
+when = { event = "hero_enters", at = [174, 48, 4, 4] }
+then = [ { give_xp = 100 } ]
+
+# --- The palace on the hill: the throne, and the kneeling offer. ---
+
+[[trigger]]
+id = "bw_throne"
+map = "barrows"
+when = { event = "hero_enters", at = [166, 26] }
+if = [ { var = "grey_bargain_offered", value = false } ]
+then = [ { dialog = "bw_throne" } ]
+
+[[trigger]]
+id = "bw_grey_throne"
+map = "barrows"
+when = { event = "hero_enters", at = [166, 26] }
+if = [ { var = "ilm", value = 2 }, { var = "grey_bargain_offered", value = true } ]
+once = false
+then = [ { dialog = "bw_grey_throne" } ]
+
+# The King's own host beaten: the story goes to the council.
+[[trigger]]
+id = "bw_king_fall"
+map = "barrows"
+when = { event = "army_defeated", army = "barrow_king" }
+then = [ { dialog = "bw_king_slain" } ]

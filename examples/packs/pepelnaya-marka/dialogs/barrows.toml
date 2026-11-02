@@ -1,0 +1,235 @@
+# Chapter 5 «Курганы»: the dialogs, and the four endings. Their texts are text keys
+# (texts/<lang>.toml: `barrows.<dialog>.*` for the chapter, `campaign.<ending>.*` for the endings).
+# The King's slaying leads through the summary dialogs (the roads, the fires) to the council, which
+# offers the endings the standings allow; the grey throne is the third ending, taken at the throne.
+
+[[dialog]]
+id = "bw_arrive"
+title = "barrows.bw_arrive.title"
+text = "barrows.bw_arrive.text"
+speaker = "dt:death_knight"
+
+[[dialog]]
+id = "bw_rises"
+title = "barrows.bw_rises.title"
+text = "barrows.bw_rises.text"
+speaker = "dt:death_knight"
+
+[[dialog]]
+id = "bw_allies"
+title = "barrows.bw_allies.title"
+text = "barrows.bw_allies.text"
+
+[[dialog]]
+id = "bw_curse"
+title = "barrows.bw_curse.title"
+text = "barrows.bw_curse.text"
+speaker = "dt:lich"
+
+# The remedy: the Order's rite for an inquisitor's branch, the marsh herbs, the Companies' brew for gold.
+[[dialog]]
+id = "bw_remedy"
+title = "barrows.bw_remedy.title"
+text = "barrows.bw_remedy.text"
+
+[[dialog.choice]]
+id = "rite"
+text = "barrows.bw_remedy.rite"
+if = [ { var = "ally", value = 1 }, { var = "ilm", op = ">=", value = 1 } ]
+then = [ { remove_spells = "player" }, { add = "taint", value = -2 } ]
+
+[[dialog.choice]]
+id = "herbs"
+text = "barrows.bw_remedy.herbs"
+if = [ { var = "ally", value = 2 } ]
+then = [ { remove_spells = "player" }, { add = "taint", value = -1 } ]
+
+[[dialog.choice]]
+id = "buy"
+text = "barrows.bw_remedy.buy"
+if = [ { var = "ally", value = 3 }, { gold = 60, op = ">=" } ]
+then = [ { give_gold = -60 }, { remove_spells = "player" }, { add = "taint", value = -1 } ]
+
+[[dialog.choice]]
+id = "none"
+text = "barrows.bw_remedy.none"
+
+[[dialog]]
+id = "bw_fate_varga"
+title = "barrows.bw_fate_varga.title"
+text = "barrows.bw_fate_varga.text"
+speaker = "dt:halberdier"
+
+[[dialog.choice]]
+id = "walk"
+text = "barrows.bw_fate_varga.walk"
+
+[[dialog.choice]]
+id = "leave"
+text = "barrows.bw_fate_varga.leave"
+then = [ { set = "varga_alive", value = false } ]
+
+[[dialog]]
+id = "bw_fate_tess"
+title = "barrows.bw_fate_tess.title"
+text = "barrows.bw_fate_tess.text"
+speaker = "dt:hunter"
+
+[[dialog]]
+id = "bw_fate_ilm_inq"
+title = "barrows.bw_fate_ilm_inq.title"
+text = "barrows.bw_fate_ilm_inq.text"
+speaker = "dt:inquisitor"
+
+[[dialog]]
+id = "bw_fate_ilm_heresy"
+title = "barrows.bw_fate_ilm_heresy.title"
+text = "barrows.bw_fate_ilm_heresy.text"
+speaker = "dt:heretic"
+
+[[dialog]]
+id = "bw_fate_kord"
+title = "barrows.bw_fate_kord.title"
+text = "barrows.bw_fate_kord.text"
+speaker = "dt:marauder"
+
+[[dialog.choice]]
+id = "pay"
+text = "barrows.bw_fate_kord.pay"
+if = [ { var = "kord", value = 1 }, { gold = 50, op = ">=" } ]
+then = [ { give_gold = -50 }, { set = "kord", value = 3 } ]
+
+[[dialog.choice]]
+id = "shake"
+text = "barrows.bw_fate_kord.shake"
+
+# The throne, for anyone who comes to the palace without the wraith's offer.
+[[dialog]]
+id = "bw_throne"
+title = "barrows.bw_throne.title"
+text = "barrows.bw_throne.text"
+
+# The grey throne: the heretic who heard the wraith may kneel. Kneeling is the third ending.
+[[dialog]]
+id = "bw_grey_throne"
+title = "barrows.bw_grey_throne.title"
+text = "barrows.bw_grey_throne.text"
+speaker = "dt:lich"
+
+[[dialog.choice]]
+id = "kneel"
+text = "barrows.bw_grey_throne.kneel"
+if = [ { var = "ilm", value = 2 }, { var = "grey_bargain_offered", value = true } ]
+then = [
+    { hero_figure = "dt:death_knight" },
+    { remove_army = "barrow_king" },
+    { remove_army = "bw_king_1" },
+    { remove_army = "bw_king_2" },
+    { remove_army = "bw_king_3" },
+    { remove_army = "bw_king_4" },
+    { remove_army = "bw_king_5" },
+    { remove_army = "bw_king_6" },
+    { remove_army = "bw_king_7" },
+    { ending = "end_grey" },
+]
+
+[[dialog.choice]]
+id = "stand"
+text = "barrows.bw_grey_throne.stand"
+
+# The King is slain: the summaries, by the caravans lost and the villages burned.
+[[dialog]]
+id = "bw_king_slain"
+title = "barrows.bw_king_slain.title"
+text = "barrows.bw_king_slain.text"
+speaker = "dt:lich"
+
+[[dialog.choice]]
+id = "next_roads"
+text = "barrows.bw_king_slain.next"
+if = [ { var = "caravans_lost", op = ">=", value = 3 } ]
+then = [ { dialog = "bw_sum_roads" } ]
+
+[[dialog.choice]]
+id = "next_fire"
+text = "barrows.bw_king_slain.next"
+if = [ { var = "caravans_lost", op = "<", value = 3 }, { var = "villages_burned", op = ">=", value = 3 } ]
+then = [ { dialog = "bw_sum_fire" } ]
+
+[[dialog.choice]]
+id = "next_council"
+text = "barrows.bw_king_slain.next"
+if = [ { var = "caravans_lost", op = "<", value = 3 }, { var = "villages_burned", op = "<", value = 3 } ]
+then = [ { dialog = "bw_council" } ]
+
+[[dialog]]
+id = "bw_sum_roads"
+title = "barrows.bw_sum_roads.title"
+text = "barrows.bw_sum_roads.text"
+
+[[dialog.choice]]
+id = "next_fire"
+text = "barrows.bw_sum_roads.next"
+if = [ { var = "villages_burned", op = ">=", value = 3 } ]
+then = [ { dialog = "bw_sum_fire" } ]
+
+[[dialog.choice]]
+id = "next_council"
+text = "barrows.bw_sum_roads.next"
+if = [ { var = "villages_burned", op = "<", value = 3 } ]
+then = [ { dialog = "bw_council" } ]
+
+[[dialog]]
+id = "bw_sum_fire"
+title = "barrows.bw_sum_fire.title"
+text = "barrows.bw_sum_fire.text"
+
+[[dialog.choice]]
+id = "next_council"
+text = "barrows.bw_sum_fire.next"
+then = [ { dialog = "bw_council" } ]
+
+# The council: the endings the standings allow. With neither standing, the grim fallback.
+[[dialog]]
+id = "bw_council"
+title = "barrows.bw_council.title"
+text = "barrows.bw_council.text"
+
+[[dialog.choice]]
+id = "iron"
+text = "barrows.bw_council.iron"
+if = [ { var = "bw_iron_ok", value = true } ]
+then = [ { ending = "end_iron" } ]
+
+[[dialog.choice]]
+id = "free"
+text = "barrows.bw_council.free"
+if = [ { var = "bw_free_ok", value = true } ]
+then = [ { ending = "end_free" } ]
+
+[[dialog.choice]]
+id = "fall"
+text = "barrows.bw_council.fall"
+if = [ { var = "bw_iron_ok", value = false }, { var = "bw_free_ok", value = false } ]
+then = [ { ending = "end_fall" } ]
+
+# The endings: each is the campaign's last dialog (its title and text are campaign.<id>.*).
+[[dialog]]
+id = "end_iron"
+title = "campaign.end_iron.title"
+text = "campaign.end_iron.text"
+
+[[dialog]]
+id = "end_free"
+title = "campaign.end_free.title"
+text = "campaign.end_free.text"
+
+[[dialog]]
+id = "end_grey"
+title = "campaign.end_grey.title"
+text = "campaign.end_grey.text"
+
+[[dialog]]
+id = "end_fall"
+title = "campaign.end_fall.title"
+text = "campaign.end_fall.text"

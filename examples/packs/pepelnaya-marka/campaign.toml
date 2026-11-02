@@ -1,0 +1,65 @@
+# The campaign graph of «Пепельная Марка», seven maps (docs/superpowers/specs/2026-11-02-campaign-contract.md).
+# The first `next` whose `if` holds is taken; none: the campaign ends with the map's victory.
+# Chapter 2 («Марка») is the hub: its state is kept (revisit), and the branches go back to it. Each branch
+# (abbey, salt, camp) goes to the gates once its `<id>_done` is set, else back to the hub; the hub's own
+# revisit trigger offers the gates too. The gates end with the victory, the barrows with an ending.
+
+start = "brod"
+
+[carry]
+hero = true
+army = true
+pack = true
+gold = true
+vars = true
+
+[[map]]
+id = "brod"
+[[map.next]]
+to = "marka"
+
+[[map]]
+id = "marka"
+revisit = true
+[[map.next]]
+to = "abbey"
+if = [ { var = "ally", op = "==", value = 1 } ]
+[[map.next]]
+to = "salt"
+if = [ { var = "ally", op = "==", value = 2 } ]
+[[map.next]]
+to = "camp"
+if = [ { var = "ally", op = "==", value = 3 } ]
+
+[[map]]
+id = "abbey"
+[[map.next]]
+to = "gates"
+if = [ { var = "abbey_done", op = "==", value = true } ]
+[[map.next]]
+to = "marka"
+
+[[map]]
+id = "salt"
+[[map.next]]
+to = "gates"
+if = [ { var = "salt_done", op = "==", value = true } ]
+[[map.next]]
+to = "marka"
+
+[[map]]
+id = "camp"
+[[map.next]]
+to = "gates"
+if = [ { var = "camp_done", op = "==", value = true } ]
+[[map.next]]
+to = "marka"
+
+[[map]]
+id = "gates"
+[[map.next]]
+to = "barrows"
+
+# The finale: no next. The campaign ends by the story's `ending` (triggers/barrows.toml).
+[[map]]
+id = "barrows"
