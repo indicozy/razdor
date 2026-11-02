@@ -111,6 +111,49 @@ The exact schema of the implemented subset is in [`docs/reference/rzpack-format.
 - Local: any `.rzpack` opens directly (Hub "Import", drag and drop, "open with"), marked as
   unchecked.
 
+## Trigger vocabulary: what mapmakers asked for
+
+Triggers (TOML) must cover everything DT's events and the Community patch's opcodes do (a
+package converted from a `.DTm` loses nothing), plus a mapmaker's wishlist (Discord,
+2026-11-02, answering the owner's call for engine ideas). Mapmakers on the server also
+asked that the Community patch's planned functions and current maps be studied first.
+
+| # | Kind | Wish |
+|---|---|---|
+| 1 | result | remove spells from the player's army, an AI army or a garrison |
+| 2 | condition | a named unit of a given class is present (e.g. infantryman Ivan, not any Ivan) in the player's army, an AI army or a garrison |
+| 3 | result | give or replace personal or ordinary items of a given unit (player, AI army, garrison) |
+| 4 | result | add or change named or ordinary units in any AI army or garrison |
+| 5 | result | change an AI army's speed |
+| 6 | result | change the faction of an AI army or building, and its individual relations |
+| 7 | result | cast or change spells (permanent or timed) on a whole army or garrison, or one unit (the player's too) |
+| 8 | result | give or change experience of AI armies and garrisons |
+| 9 | condition | spells on units, a whole army (player, AI) or a garrison |
+| 10 | campaign | branching campaigns (several possible next scenarios) |
+| 11 | result | remove spells from the player's spell book |
+| 12 | result | change the map figure of the hero or an AI army (knight, bandit, undead, ...) |
+| 13 | result | a random value for a flag or counter |
+| 14 | condition / result | an AI army's position; set an AI army's goal |
+| 15 | result | teleport the player's or an AI army to a cell or a building |
+
+All of these fit the declarative trigger layer (slice 1 for those on the map, slice 2 for
+branching campaigns); none needs Lua.
+
+## Text in any script
+
+Package texts may be in any language and script (the owner, 2026-11-02): Cyrillic, Latin,
+Indic scripts, Arabic and Hebrew, Chinese and Japanese, and so on. Razdor already shapes
+complex scripts and falls back to bundled and system fonts (`src/ui/script_font.rs`); the
+gaps to close:
+
+1. Right-to-left: bidi reordering of mixed lines (Arabic + digits + Latin), right-aligned
+   RTL paragraphs, wrapping in visual order.
+2. Phones: look up system fonts on Android (`/system/fonts`) and iOS, or bundle Noto subsets
+   for the major scripts, so Arabic, CJK and other Indic scripts don't vanish there.
+3. Typing such text in input fields (save names, chat-like fields, the future editor).
+4. `razdor-pack check` warns when a text uses characters no bundled font covers (it may not
+   show on phones).
+
 ## Open (not yet discussed; defaults proposed)
 
 - **Example packages**: (1) a plain story map; (2) one with a non-DT mechanic, proposed: a
