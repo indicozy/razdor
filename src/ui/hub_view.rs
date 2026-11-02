@@ -368,7 +368,7 @@ fn status_line(e: &Entry) -> (String, Color) {
 
 /// A row's wash: the blue bar when picked, a warm wash under the mouse. The click is
 /// `drag_frame`'s, so a drag over the row picks nothing.
-fn row_paint(r: Rect, picked: bool) {
+pub(super) fn row_paint(r: Rect, picked: bool) {
     let over = !input_blocked() && mouse_in(r.x, r.y, r.w, r.h);
     if picked {
         draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.12, 0.2, 0.62, 0.75));

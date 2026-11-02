@@ -154,3 +154,4 @@ Install (+{n}) = Установить (+{n})
 Install = Установить
 Can't be installed: the hub has no mod «{m}». = Не установить: в хабе нет мода «{m}».
 Can't be installed: mods need each other («{m}»). = Не установить: моды требуют друг друга («{m}»).
+Diary = Дневник
