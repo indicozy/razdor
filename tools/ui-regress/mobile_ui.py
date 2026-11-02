@@ -51,6 +51,8 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 HERE = Path(__file__).resolve().parent
+# The example package the field-battle cases open (its abbey, the hero as a knight).
+PACK_SIEGE = {"RAZDOR_PACK": str(HERE.parent.parent / "examples" / "packs" / "pepelnaya-marka"), "RAZDOR_PACK_MAP": "abbey", "RAZDOR_PACK_CLASS": "knight"}
 sys.path.insert(0, str(HERE))
 import ui_regress  # noqa: E402
 
@@ -104,9 +106,11 @@ SCREENS = [
     ("spells", "spells:РК1-Начало пути", {}),
     ("battle", "battle:РК1-Начало пути:0", {}),
     ("classes", "classes:РК1-Начало пути", {}),
-    ("field-siege", "field:siege", {}),
-    ("field-siege-mid", "field:siege:6", {}),
-    ("field-siege-end", "field:siege:end", {}),
+    # The abbey's siege (chapter 3а of «Пепельная Марка»): the package's field battle, at the start,
+    # after six actions, and at its end (`field:game`, `RAZDOR_PACK`).
+    ("field-siege", "field:game", PACK_SIEGE),
+    ("field-siege-mid", "field:game:6", PACK_SIEGE),
+    ("field-siege-end", "field:game:end", PACK_SIEGE),
     ("hub", "hub", {}),
     ("hub-mods", "hub:1:evolution-mock", {}),
     ("hub-package", "hub:0:hello-story", {"RAZDOR_HUB_DIR": "/mnt/ai_models/razdor-scratch/v2-hubpack/snap-mobile-hub-package"}),

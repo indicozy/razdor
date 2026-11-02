@@ -386,7 +386,7 @@ pub struct Game {
     /// Community opcode 17 on the player changes it (0xc28650). `None`: the start class's model
     /// (saves before this field). Opcode 7 never writes it.
     #[serde(default)]
-    pub(crate) hero_figure: Option<u8>,
+    pub hero_figure: Option<u8>,
     /// The minutes of the hero's next orthogonal step as the original works them out when he
     /// comes onto his cell (0x497c68: the cell's cost × his speed, ×1.5 at the step if it is
     /// diagonal), on the map his at-sea flag chose *before* that arrival updated it: coming

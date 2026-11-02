@@ -23,6 +23,27 @@ use razdor::{hub, platform};
 
 use super::{items_view, App, Screen, ScenarioEntry};
 
+/// The hero class of a snapshot run of a package's map (`RAZDOR_PACK_CLASS`), if any.
+pub fn snapshot_class() -> Option<razdor::rules::content::HeroClass> {
+    use razdor::rules::content::HeroClass;
+    match std::env::var("RAZDOR_PACK_CLASS").ok()?.trim().to_ascii_lowercase().as_str() {
+        "knight" => Some(HeroClass::Knight),
+        "archmage" => Some(HeroClass::Archmage),
+        "ranger" => Some(HeroClass::Ranger),
+        _ => None,
+    }
+}
+
+/// The story variables a snapshot run presets (`RAZDOR_PACK_VARS=name=value,…`, numbers or
+/// true/false), as the sim's `--set` does before the story starts.
+fn snapshot_vars() -> Vec<(String, razdor::pack::triggers::VarValue)> {
+    std::env::var("RAZDOR_PACK_VARS")
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(|spec| razdor::pack::sim::parse_set(spec.trim()).ok())
+        .collect()
+}
+
 /// The package's map the run plays: the opened package (`pack::open`).
 pub struct PackPlay {
     pub opened: Arc<Opened>,
@@ -61,6 +82,35 @@ impl App {
         }
         self.adopt_pack(opened);
         let index = self.scenarios.iter().position(|e| e.pack.is_some()).ok_or("the package's map is not in the list")?;
+        // A snapshot run (`RAZDOR_PACK_CLASS=knight|archmage|ranger`): the map starts with that
+        // hero, past the hero window, as its «Start» does (the off-screen shots of a package's maps).
+        if let Some(hero) = snapshot_class() {
+            let content = self.dt_content.clone().ok_or("no install content")?;
+            let content = std::sync::Arc::new(content.with_experimental(super::new_game::experimental_rules()));
+            // The hero has no name typed in: the window's default (its «no name» text). The story's
+            // variables are preset first (`RAZDOR_PACK_VARS=name=value,…`, as the sim's `--set`).
+            let name = razdor::i18n::tr("(no name)").to_string();
+            let mut game = razdor::rules::game::Game::from_scenario(content.clone(), &self.scenarios[index].scenario, hero);
+            for (var, value) in snapshot_vars() {
+                game.triggers.vars.insert(var, value);
+            }
+            if let Some(p) = self.scenarios[index].pack.clone() {
+                p.start(&mut game);
+            }
+            game.set_hero_name(&name);
+            // A disguised hero (`salt_disguise`, as the salt trigger's `hero_figure`) rides as a bandit.
+            if matches!(game.triggers.vars.get("salt_disguise"), Some(razdor::pack::triggers::VarValue::Bool(true))) {
+                game.hero_figure = razdor::pack::triggers::model_code("bandits").ok();
+            }
+            // `RAZDOR_PACK_REVEAL=1`: the map is revealed (the cheat «reveal»), to judge its layout in a shot.
+            if std::env::var("RAZDOR_PACK_REVEAL").is_ok_and(|v| v == "1") {
+                let _ = razdor::rules::cheats::run(&razdor::rules::cheats::Cheat::Reveal, Some(&mut game), None);
+            }
+            self.game = Some(game);
+            self.map_view.reset();
+            self.screen = Screen::WorldMap;
+            return Ok(());
+        }
         self.screen = Screen::ClassSelect { scenario: Some(index) };
         Ok(())
     }

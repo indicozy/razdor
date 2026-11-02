@@ -72,6 +72,12 @@ impl Game {
         f
     }
 
+    /// The terrain surface code of the ground the battle is on: the hero's cell (the DT battle is
+    /// drawn over the map's terrain there). `None` when no battle is under way.
+    pub fn field_ground(&self) -> Option<u8> {
+        self.field.as_ref().map(|_| self.world.map.surface_code(self.tile()))
+    }
+
     /// The DT unit a battle unit is drawn as.
     pub fn field_kind(&mut self, unit: usize) -> Option<UnitId> {
         self.field_live()?.fb.shadow.fighters.get(unit).map(|f| f.unit)

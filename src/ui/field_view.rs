@@ -64,9 +64,18 @@ pub trait FieldSource {
     fn outcome(&mut self) -> Option<Side>;
     /// The round of the battle (0 when none).
     fn round(&mut self) -> u32;
+    /// The terrain surface code of the ground the battle is on (the DT battle's background is the
+    /// map's terrain there); `None` for a battle with no ground of its own (the screen's green).
+    fn ground(&self) -> Option<u8> {
+        None
+    }
 }
 
 impl FieldSource for Game {
+    fn ground(&self) -> Option<u8> {
+        self.field_ground()
+    }
+
     fn snapshot(&mut self) -> Option<Snapshot> {
         self.field_snapshot()
     }
@@ -210,13 +219,14 @@ pub struct Grid {
 }
 
 impl Grid {
-    /// The largest square cells that fit `area` for a `bw × bh` board (turned or not), at the
-    /// top left of it, centred across.
+    /// The largest square cells that fit `area` for a `bw × bh` board (turned or not), centred
+    /// in it (turned: at the top).
     pub fn fit(area: Rect, bw: i32, bh: i32, turn: bool) -> Grid {
         let (w, h) = if turn { (bh, bw) } else { (bw, bh) };
         let cell = (area.w / w as f32).min(area.h / h as f32).max(1.0);
         let x0 = area.x + (area.w - cell * w as f32) / 2.0;
-        let y0 = area.y;
+        // Centred across and down, unless turned (a phone upright: the board sits at the top).
+        let y0 = if turn { area.y } else { area.y + (area.h - cell * h as f32) / 2.0 };
         Grid { x0, y0, cell, w, h, turn, bw, bh }
     }
 
@@ -406,10 +416,11 @@ impl FieldView {
     /// (`Game::field_finish`).
     pub fn frame(&mut self, src: &mut dyn FieldSource, assets: &Assets) -> bool {
         let k = unit_px();
-        display::with_window_scale(Some(k), || self.frame_at_scale(src, assets))
+        let ground = src.ground();
+        display::with_window_scale(Some(k), || self.frame_at_scale(src, assets, ground))
     }
 
-    fn frame_at_scale(&mut self, src: &mut dyn FieldSource, assets: &Assets) -> bool {
+    fn frame_at_scale(&mut self, src: &mut dyn FieldSource, assets: &Assets, ground: Option<u8>) -> bool {
         let k = unit_px();
         let (sw, sh) = (screen_width(), screen_height());
         let phone_upright = display::dp_px().is_some() && sh > sw;
@@ -440,8 +451,8 @@ impl FieldView {
         let opts = Options::of(&legal, self.planned);
         let marks = Marks { cells: if player_due.is_some() { opts.cells.clone() } else { Vec::new() }, planned: self.planned, targets: opts.targets.iter().filter_map(|a| a.attack).collect() };
 
-        draw_background(sw, sh);
-        draw_board(&snap, &lay, assets, &kinds, actor, &marks);
+        draw_background(sw, sh, assets, ground);
+        draw_board(&snap, &lay, assets, &kinds, actor, &marks, ground);
 
         if player_due.is_some() && widgets::tapped_in(lay.grid.rect()) {
             let p = widgets::pointer();
@@ -496,7 +507,7 @@ impl FieldView {
 }
 
 /// The board: ground, tiles, highlights, units.
-fn draw_board(snap: &Snapshot, lay: &Layout, assets: &Assets, kinds: &[Option<UnitId>], actor: Option<usize>, marks: &Marks) {
+fn draw_board(snap: &Snapshot, lay: &Layout, assets: &Assets, kinds: &[Option<UnitId>], actor: Option<usize>, marks: &Marks, ground: Option<u8>) {
     let grid = lay.grid;
     let board = &snap.board;
     let rect = grid.rect();
@@ -505,7 +516,7 @@ fn draw_board(snap: &Snapshot, lay: &Layout, assets: &Assets, kinds: &[Option<Un
     for y in 0..board.h {
         for x in 0..board.w {
             let r = grid.tile_rect(x, y);
-            draw_ground(assets, r);
+            draw_ground(assets, r, ground);
             draw_tile(assets, board.get(x, y).unwrap_or(Tile::Open), r);
         }
     }
@@ -648,13 +659,28 @@ fn draw_end(lay: &Layout, winner: Side) -> bool {
     widgets::button(cx - bw / 2.0, by + bh_box - BUTTON_H * k - 12.0 * k, bw, BUTTON_H * k, tr("Next"), true)
 }
 
-fn draw_background(sw: f32, sh: f32) {
+/// The screen's background: the battle's terrain texture tiled over the screen (the DT battle's
+/// background, the map's terrain there), else a dark plain.
+fn draw_background(sw: f32, sh: f32, assets: &Assets, ground: Option<u8>) {
     draw_rectangle(0.0, 0.0, sw, sh, Color::new(0.06, 0.05, 0.04, 1.0));
+    let Some(tex) = ground.and_then(|code| assets.dt.as_ref()?.terrain(code)) else { return };
+    let (tw, th) = (tex.width().max(1.0), tex.height().max(1.0));
+    let mut y = 0.0;
+    while y < sh {
+        let mut x = 0.0;
+        while x < sw {
+            draw_texture_ex(&tex, x, y, WHITE, DrawTextureParams { dest_size: Some(vec2(tw, th)), ..Default::default() });
+            x += tw;
+        }
+        y += th;
+    }
 }
 
-/// The ground of a tile: the DT plain's texture when the install has it, else a plain green.
-fn draw_ground(assets: &Assets, r: Rect) {
-    match assets.dt.as_ref().and_then(|d| d.terrain(5)) {
+/// The ground of a tile: the battle's terrain texture (`ground`), else the DT plain's, else a
+/// plain green.
+fn draw_ground(assets: &Assets, r: Rect, ground: Option<u8>) {
+    let tex = assets.dt.as_ref().and_then(|d| d.terrain(ground.unwrap_or(5)));
+    match tex {
         Some(tex) => draw_texture_ex(&tex, r.x, r.y, WHITE, DrawTextureParams { dest_size: Some(vec2(r.w, r.h)), ..Default::default() }),
         None => draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.24, 0.32, 0.18, 1.0)),
     }
@@ -675,7 +701,7 @@ fn draw_tile(assets: &Assets, tile: Tile, r: Rect) {
     let dt = assets.dt.as_ref();
     match tile {
         Tile::Open => {}
-        Tile::Wall => match dt.and_then(|d| d.building(4, 2)) {
+        Tile::Wall => match dt.and_then(|d| d.building(4, 4)) {
             Some(tex) => draw_sprite(&tex, r),
             None => {
                 draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.46, 0.42, 0.37, 1.0));

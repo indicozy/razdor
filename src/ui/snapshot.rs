@@ -555,15 +555,45 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             return Ok(());
         }
         // `field:siege[:n|end]`: the demo siege of the field battle (`field_view`), at the start,
-        // after n unit actions by the AI, or played to its end.
+        // after n unit actions by the AI, or played to its end. `field:game[:n|end]`: the field battle
+        // of the game on screen (a package's map, `RAZDOR_PACK`): its first army with a script's battle
+        // is met, and the battle is played as far as `n` actions or to its end.
         "field" => {
-            let _scene = parts.next();
+            let scene = parts.next();
+            if scene == Some("game") {
+                let game = app.game.as_mut().ok_or("field:game needs a game on screen (RAZDOR_PACK)")?;
+                let army = game.world.armies.iter().position(|a| game.story.as_ref().is_some_and(|s| s.battles.get(&a.id).is_some_and(|r| r.strip_prefix("lua:").is_some_and(|n| !n.is_empty()))));
+                let army = army.ok_or("the game has no army with a field battle")?;
+                game.foe = Some(Foe::Army(army));
+                game.start_battle();
+                if !game.field_active() {
+                    return Err("the field battle does not open".into());
+                }
+                match parts.next() {
+                    None => {}
+                    Some("end") => {
+                        while game.field_outcome().is_none() && game.field_auto_step().is_ok() {}
+                    }
+                    Some(n) => {
+                        let n: u32 = n.parse().map_err(|_| format!("field:game takes a number of actions or end, not {n}"))?;
+                        for _ in 0..n {
+                            if game.field_auto_step().is_err() {
+                                break;
+                            }
+                        }
+                    }
+                }
+                app.screen = Screen::Field(Box::new(super::field_view::FieldScreen::default()));
+                return Ok(());
+            }
             let content = app.dt_content.clone().unwrap_or_else(|| std::sync::Arc::new(razdor::rules::content::Content::builtin()));
             app.assets.set_content(content.clone());
             let screen = super::field_view::siege_screen(content, parts.next())?;
             app.screen = Screen::Field(Box::new(screen));
             return Ok(());
         }
+        // `pack`: the game the package opened (`RAZDOR_PACK`, `RAZDOR_PACK_CLASS`) stays as it is.
+        "pack" => return Ok(()),
         "replay" => return stage_replay(app, parts.next()),
         _ => {}
     }
