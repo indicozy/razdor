@@ -20,6 +20,8 @@ serde_json = { version = "1.0.151", features = ["float_roundtrip"] }
 sha2 = "0.10.9"
 # The `.rzpack` package format (`pack`): its manifest, texts and content files.
 toml = { version = "0.9", features = ["serde"] }
+# The terrain picture of a package map (`maps/<id>/terrain.png`): indexed or RGB, 8-bit after decoding.
+png = "0.17"
 # Unpacking the game archive on the phones (`dt::unpack`): pure Rust, no deflate C code.
 sevenz-rust2 = { version = "0.20.2", default-features = false, features = ["ppmd"] }
 zip = { version = "9.1.0", default-features = false, features = ["deflate-flate2"] }

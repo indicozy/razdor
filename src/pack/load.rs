@@ -10,6 +10,7 @@ use super::diag::{Report, Severity};
 use super::files::Files;
 use super::manifest::Manifest;
 use super::triggers::{self, Dialog, DialogFile, Trigger, TriggerFile, Var};
+use super::map::{MapEntry, MapFile};
 
 /// Something read from one file, with where it was.
 #[derive(Clone, Debug, PartialEq)]
@@ -34,6 +35,8 @@ pub struct Package {
     pub vars: Vec<Located<Var>>,
     pub triggers: Vec<Located<Trigger>>,
     pub dialogs: Vec<Located<Dialog>>,
+    /// Maps by folder id (`maps/<id>/`).
+    pub maps: BTreeMap<String, MapEntry>,
     pub problems: Report,
 }
 
@@ -63,7 +66,7 @@ pub fn key_line(text: &str, key: &str) -> Option<u32> {
 }
 
 /// Parses a TOML file into `T`; a failure becomes an error with its line.
-fn parse_toml<T: DeserializeOwned>(file: &str, text: &str, report: &mut Report) -> Option<T> {
+pub(super) fn parse_toml<T: DeserializeOwned>(file: &str, text: &str, report: &mut Report) -> Option<T> {
     match toml::from_str::<T>(text) {
         Ok(v) => Some(v),
         Err(e) => {
@@ -88,6 +91,7 @@ impl Package {
             vars: Vec::new(),
             triggers: Vec::new(),
             dialogs: Vec::new(),
+            maps: BTreeMap::new(),
             problems: Report::default(),
         };
         // Game files are never read; `check` reports them.
@@ -175,6 +179,24 @@ impl Package {
                     Err(p) => report.error_hint(path, Some(line), p.message, p.hint),
                 }
             }
+        }
+        // maps/<id>/map.toml; the other files of a map folder are read by `check` (the terrain).
+        for path in paths.iter().filter(|p| p.starts_with("maps/")) {
+            let Some((id, rest)) = path.strip_prefix("maps/").and_then(|r| r.split_once('/')) else {
+                if !is_game_file(path) {
+                    report.warning(path, None, "not read: a map is maps/<id>/map.toml with maps/<id>/terrain.png");
+                }
+                continue;
+            };
+            if rest.contains('/') {
+                report.warning(path, None, "not read: a map's files sit directly in its folder");
+                continue;
+            }
+            if rest != "map.toml" {
+                continue;
+            }
+            let spec = text_of(&files, path, &mut report).and_then(|text| parse_toml::<MapFile>(path, text, &mut report));
+            package.maps.insert(id.to_string(), MapEntry { id: id.to_string(), file: path.clone(), spec });
         }
 
         package.problems = report.clone();

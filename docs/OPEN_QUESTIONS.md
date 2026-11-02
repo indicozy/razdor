@@ -8,6 +8,22 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **Package maps: relations and the defaults of a map** (2026-11-02, slice 1 step 2 of 2.0). `map.toml`
+  requires the four-by-four faction relation matrix; the example's values are a guess, not a shipped
+  map's. The original's typical matrix (a shipped map's header at 0xDE) would make a better default.
+  Also: the hero's mana is one value for every offered class (the original's presets differ by class),
+  and a building's «neutral owner» name is the building's name. Settled by a survey of the shipped
+  maps' relations and the per-class mana, with the format doc updated.
+- **Package games cannot be saved yet** (2026-11-02, `razdor --pack`). A save records the map's file and
+  its hash; a package map has no file of its own. Settled with the package save format (slice 2 or 3).
+- **`defeat_all` counts at most two enemy armies** (2026-11-02). One victory event checks two armies
+  (`beaten_armies`); a map with three or more enemy armies is an error for now. The way out is a chain
+  of events with flags (the title's `%+flag` and `%=flag`), not written: it has to be checked against
+  the events engine's silent-event behaviour first.
+- **`reach` is an event point with a local victory event** (2026-11-02). It relies on the original's
+  rule that a point's listed events fire whatever their type (`events.md` §2). Not yet seen in play; the
+  `sim` run reaches it only if the AI walks onto the cell.
+
 - **Right-to-left text in the editing and search parts** (2026-11-02, the RTL work of 2.0). A
   line with Arabic or Hebrew is drawn in visual order (`ui/bidi.rs`), but the parts that place
   text by character position still count in logical order: the caret and the selection of a

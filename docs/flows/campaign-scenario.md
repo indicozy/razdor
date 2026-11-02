@@ -120,6 +120,16 @@ dropped); flags always carry over. Named characters travel with the army (`set_n
 `name_chapter`), newest first; Razdor keeps the history across maps (an addition; the original's
 journal is per map).
 
+## Packages (`razdor --pack`)
+
+A content package's map (`maps/<id>/map.toml`, `docs/reference/rzpack-format.md`) starts the same way
+as an install's map, with two differences: `ui/pack_play.rs` compiles it on the install first
+(`pack::compile`: a `DtInstall` and the package's texts give a `Scenario` and the package's units and
+items), and the content gets them (`Content::with_package`). The map joins the scenario list, and the
+game opens on the hero window (`Screen::ClassSelect`). The `--pack` run cannot save: a save needs the
+map's file, which a package does not have. `razdor-pack sim` plays the same compiled map headless
+(`pack::sim`, `rules::sim::play_days`, the community smoke test's loop).
+
 ## Adding a map («Добавить карту…»)
 
 The new-game window's button (`ui/new_game.rs`, `add_map_button`, under the list) opens the

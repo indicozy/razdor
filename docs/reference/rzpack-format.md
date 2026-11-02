@@ -2,8 +2,8 @@
 
 This is the implemented subset of the package format of Razdor 2.0 (slice 1). The design is in
 [`docs/superpowers/specs/2026-11-02-v2-packages-design.md`](../superpowers/specs/2026-11-02-v2-packages-design.md).
-Anything not listed here is not read yet. The code is `src/pack/`; the checker is
-`razdor-pack check` (`src/bin/razdor-pack/`). Example: `examples/packs/hello-story/`.
+Anything not listed here is not read yet. The code is `src/pack/`; the tool is `razdor-pack`
+(`src/bin/razdor-pack/`). Example: `examples/packs/hello-story/`.
 
 ## Files
 
@@ -14,8 +14,8 @@ Anything not listed here is not read yet. The code is `src/pack/`; the checker i
 - Text files are UTF-8; configuration is TOML.
 - Top level: the files `package.toml`, `README.md`, `LICENSE`, and the folders `texts/`,
   `units/`, `items/`, `maps/`, `dialogs/`, `triggers/`, `art/`, `scripts/`. Any other top-level
-  entry is a warning and is not read. Read in format 1: `texts/`, `units/`, `items/`, `triggers/`
-  and `dialogs/` (the last two in the section below).
+  entry is a warning and is not read. Read in format 1: `texts/`, `units/`, `items/`, `maps/`,
+  `triggers/` and `dialogs/` (the last two in the section below).
 - Game files are an error anywhere in a package: any file whose extension is `ini`, `dtm`,
   `ugs`, `lit`, `spi`, `exe` or `dll` (any case). A package refers to the base game with `dt:`
   references and never ships the game's files.
@@ -250,7 +250,145 @@ campaigns (10). Garrisons take part only where the table says so: `add_units` an
 `set_relation` (`of = "building"`). Spells on garrisons (1, 7, 9), named characters in AI armies or
 garrisons (2), items and experience of garrisons (3, 8) are not in format 1 yet.
 
+## Maps: `maps/<id>/map.toml` and `maps/<id>/terrain.png`
+
+A map is a folder: `map.toml` (below) and `terrain.png`. The id is `[a-z0-9-]+` (the folder name).
+Any other file in a map folder is a warning and is not read. A map folder without `map.toml` is
+an error. Numbers in cells count from 0 at the top left (`[x, y]`, x to the right, y down).
+
+```toml
+title = "first_light.title"          # text key: the map's name in the list
+description = "first_light.description"   # text key, optional
+start_date = "1300-04-01"           # YYYY-MM-DD on the game's clock (30-day months, 12-month years)
+relations = [[3, 3, 0, -3], [3, 3, 0, -3], [0, 0, 3, -3], [-3, -3, -3, 3]]   # player, ally, neighbour, enemy; −3..3
+
+[terrain_palette]                   # optional: the colours that differ from the default palette
+grass_plain = "#60a040"
+
+[hero]
+cell = [12, 26]                     # the start cell, the same for every offered class
+classes = ["knight", "archmage"]    # knight, archmage, ranger (the others are not offered)
+gold = 300
+mana = 20
+troops = [{ unit = "dawn_knight", level = 1, count = 3 }]   # up to six slots
+
+[[object]]                          # hills, mountains, stones, trees, dead_trees, thicket
+kind = "trees"
+cell = [33, 28]
+
+[[building]]                        # id unique; type from the list below
+id = "dawnwatch"
+type = "town"
+name = "town.dawnwatch.name"        # text keys
+description = "town.dawnwatch.description"   # optional
+cell = [10, 24]
+faction = "player"                  # player, ally, neighbour, enemy
+income = 40                         # gold a day
+garrison = [{ unit = "dawn_knight", level = 1, count = 4 }]     # up to six
+recruit = [{ unit = "dt:militiaman", start = 4, max = 8 }]      # up to six
+
+[[army]]                            # id unique among the armies
+id = "raiders"
+name = "army.raiders.name"
+cell = [33, 17]
+faction = "enemy"
+model = "feudal"                    # feudal, bandits, peasants, inactive, necromancer, ghosts, zombies
+ship = "pirate"                     # optional: none (default), hero, pirate, merchant; an army on water needs one
+gold = 150
+troops = [{ unit = "dt:swordsman", level = 1, count = 2 }]      # one to six
+leader = { unit = "dt:mounted_knight", level = 2, name = "leader.raider_chief.name" }   # optional named leader
+
+[[point]]                           # a lantern
+cell = [25, 20]
+radius = 3                          # 0 to 24
+active = true                       # lit from the start
+
+[victory]                           # required: see the kinds below
+kind = "defeat_all"
+message = "first_light.won"         # text key of the victory window, optional
+```
+
+A unit reference is a `dt:` alias or a unit of the package (the same grammar as above). A troop
+slot's `level` is the level the game shows (1 is the first); the file stores it from 0. A count of 0
+is an error. A hero class cannot be a troop (the engine reads unit ids 1 to 3 as the hero classes).
+Another package's units are not loaded yet.
+
+**Victory** (`kind`). Defeat is always the original's: the hero falls with his army.
+
+| `kind` | Fields | Compiles to | Note |
+|---|---|---|---|
+| `defeat_all` | `message` | a global event: `beaten_armies` = the enemy armies (faction `enemy`) | at most **two** enemy armies (one event checks two); more are an error for now |
+| `defeat_army` | `army`, `message` | a global event: `beaten_armies` = that army | the army is beaten when the player defeats it |
+| `capture` | `building`, `message` | a global event: `buildings` = that building, owner the player | the building must not be the player's from the start |
+| `reach` | `cell`, `message` | a local event on an event point (model 9) at the cell | fires when the hero steps onto the cell |
+
+The victory event shows its window in the victory look (its title is the map's name with `#VICTORY`),
+which the game uses when the map has no next map.
+
+**Terrain.** Every pixel's colour is one terrain kind (exact RGB). The map's size is the picture's:
+50, 100 or 200 cells on each side. Any other colour is an error that names the pixel: `pixel (x, y)
+is #rrggbb: not a terrain colour`. The default palette, one colour per engine surface:
+
+| kind | colour | kind | colour |
+|---|---|---|---|
+| `shallows_fords` | `#8fd0e0` | `marsh` | `#5f7a4a` |
+| `coastal_water` | `#3a7fbf` | `impassable_swamp` | `#3d4f32` |
+| `deep_sea` | `#1d4f8a` | `sand_dunes` | `#e6d28a` |
+| `lava_fields` | `#c83a1a` | `clay_soil` | `#a0704a` |
+| `road` | `#b08850` | `stony_soil` | `#8a8a80` |
+| `grass_lowland` | `#9cc46a` | `scorched_land` | `#4a3a33` |
+| `grass_plain` | `#6fa84a` | `snowy_ground` | `#f0f4f8` |
+| `dry_plain` | `#c9b56a` | `impassable_snowdrifts` | `#c8d8e8` |
+
+Forests are objects (`trees`) over grass, not a terrain kind. Water (`shallows_fords`, `coastal_water`,
+`deep_sea`) is for ships; a walker crosses only the ford. Lava, the impassable swamp and the
+impassable snowdrifts block everything. A `[terrain_palette]` entry changes one kind's colour; two
+kinds may not share a colour.
+
+**Placement rules** (`razdor-pack check`). The hero, a town and a reach cell stand on land. An
+object is not on water. Only bridges (`stone_bridge`, `wooden_bridge`) stand on water among the
+buildings. An army on water needs a ship; a ship sails water. No cell is outside the map, and no two
+buildings share one.
+
+**Ids and units of a package.** A package's units are numbered from 200 in `units/` order, its items
+from 200 in `items/` order (`src/pack/compile.rs`). The base game's units end at 102 and its items at
+167. A troop slot holds a unit in one byte, so a package has at most **55 units** (200 to 254; 255 and
+254 are the removal codes of the engine's events); an event holds an item in one byte, so at most
+**56 items** (200 to 255). A package unit draws the picture of its root base unit.
+
+**Building types:** palace, town, village, castle, fort, tavern, market, church, smithy, shipyard,
+altar, dungeon_entrance, ruins, stone_bridge, wooden_bridge, obelisk.
+**Object kinds:** hills (class 1, sprite 10), mountains (5, 10), stones (8, 10), trees (9, 0),
+dead_trees (10, 108), thicket (11, 0, impassable); `sprite` overrides the sprite.
+
+**Compiling.** The map compiles to a `.DTm` scenario in memory (`pack::compile`): the header
+(size, start date, the hero presets of the offered classes, relations), the terrain, objects,
+buildings (their names and garrisons), armies (named leaders become named characters), points, and
+the one victory event. A compiled scenario survives `to_payload` and `parse_payload` unchanged. The
+game's own limits apply: 32 named characters, 255 armies, 6 troop slots per list.
+
+## Commands
+
+- `razdor-pack check <folder-or-.rzpack> [--json]`: the rules above; exit 0 with no errors, 1 with
+  errors, 2 on a usage or read problem.
+- `razdor-pack sim <folder-or-.rzpack> [--map <id>] [--days <n>=30] [--json]`: the AI plays the map
+  headless for N days, as the community map smoke test does (`rules::sim`, shared with it). It
+  reports the day of victory or defeat, a panic (caught) or a softlock. Without `--map` every map
+  is played. Needs `RAZDOR_DT_DIR`. Exit 1 on a panic, a softlock or a check error.
+- `razdor-pack play <folder-or-.rzpack> [--map <id>]`: runs `razdor --pack <path> [--map <id>]`, the
+  `razdor` binary next to this one.
+- `razdor --pack <folder-or-.rzpack> [--map <id>]` (or `RAZDOR_PACK`, `RAZDOR_PACK_MAP`): starts a
+  new game on the package's map, after the install's map list. The package is checked and compiled
+  on the install; the game opens on the hero window. A package game cannot be saved yet (a save
+  names the map's file, and a package has none).
+
+Off-screen: `RAZDOR_PACK=<path> RAZDOR_SCENE=map:<map-id>` renders the package's map (the
+`offscreen-snapshot` skill).
+
 ## Not in format 1
 
-`maps/`, `art/` and `scripts/` are reserved: they are allowed at the top but not read yet. Also not
-yet: `render`, `sim`, `play`, `pack` (the `.rzpack` builder), the Hub.
+`art/` and `scripts/` are reserved: they are allowed at the top but not
+read yet. Also not yet: `render`, `pack` (the `.rzpack` builder), the Hub, saves of a package game,
+the other packages' units in maps, and `defeat_all` with more than two enemy armies.
+
+The example's terrain is painted by `tools/pack-example-terrain.py` (stdlib only).

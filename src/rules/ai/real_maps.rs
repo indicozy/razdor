@@ -7,7 +7,7 @@ use super::*;
 use crate::dt::dtm::Scenario;
 use crate::dt::install::{DtInstall, MapEntry};
 use crate::rules::content::HeroClass;
-use crate::rules::game::BattleResult;
+use crate::rules::sim;
 
 /// Days simulated on every map.
 const DAYS: u64 = 30;
@@ -21,103 +21,6 @@ fn release_budget_secs() -> f64 {
     RELEASE_BUDGET_SECS * scale.unwrap_or(1.0)
 }
 
-/// Auto-plays the player's pending battle, the AI on both sides.
-fn fight_it_out(g: &mut Game) -> Outcome {
-    let mut b = g.start_battle();
-    b.auto_play_to_end();
-    g.resolve_battle(&b);
-    b.outcome()
-}
-
-/// Quick battle against the first armies of every shipped map: each reaches an outcome and
-/// resolves (XP, loot, capture, events) as a battle played to its end.
-#[test]
-fn quick_battles_against_real_armies() {
-    let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
-    let dt = DtInstall::load(std::path::Path::new(&dir)).unwrap();
-    let c = Arc::new(Content::from_dt(&dt));
-    let mut fought = 0;
-    for m in &dt.maps {
-        let s = m.load().unwrap();
-        let g0 = Game::from_scenario(c.clone(), &s, HeroClass::Knight);
-        for i in 0..g0.world.armies.len().min(4) {
-            let mut g = Game::from_scenario(c.clone(), &s, HeroClass::Knight);
-            g.drain_events();
-            g.foe = Some(Foe::Army(i));
-            let mut b = g.start_battle();
-            let outcome = b.auto_play_to_end();
-            assert_ne!(outcome, Outcome::Ongoing, "{}: army {i}", m.name);
-            let result = g.resolve_battle(&b);
-            match outcome {
-                Outcome::Victory => assert!(matches!(result, BattleResult::Victory { .. }), "{}: army {i}", m.name),
-                _ => assert!(matches!(result, BattleResult::Defeat | BattleResult::Withdrew { .. }), "{}: army {i}", m.name),
-            }
-            fought += 1;
-        }
-    }
-    assert!(fought > 0);
-}
-
-/// What [`play_days`] saw on one map.
-struct DaysRun {
-    /// The AI's counts over the run.
-    ai: AiStats,
-    /// Armies at the start and at the end of the run.
-    armies: usize,
-    armies_after: usize,
-    /// Armies waiting to respawn at the end.
-    waiting: usize,
-    player_battles: usize,
-    /// The hero lost a battle (the world went on without him).
-    player_lost: bool,
-    /// The clock did not reach the end within the call budget (a softlock).
-    stalled: bool,
-    secs: f64,
-}
-
-/// Plays `days` days of `s` with the hero standing at his start: he fights whoever comes and
-/// answers yes to every question.
-fn play_days(c: &Arc<Content>, s: &Scenario, days: u64) -> DaysRun {
-    let t0 = Instant::now();
-    let mut g = Game::from_scenario(c.clone(), s, HeroClass::Knight);
-    let end = g.clock.total_minutes() + (days * MINUTES_PER_DAY) as f64;
-    let armies = g.world.armies.len();
-    let mut player_battles = 0;
-    let mut player_lost = false;
-    let mut calls = 0;
-    while g.clock.total_minutes() < end && calls < 200_000 {
-        calls += 1;
-        if g.pending_question().is_some() {
-            g.answer_question(true);
-            continue;
-        }
-        if g.foe.is_some() {
-            player_battles += 1;
-            if fight_it_out(&mut g) == Outcome::Defeat {
-                // The game would be over; the world goes on without the player.
-                player_lost = true;
-                g.world.armies.iter_mut().for_each(|a| a.ignore_until = f64::MAX);
-            }
-            continue;
-        }
-        if player_lost {
-            g.world.armies.iter_mut().for_each(|a| a.ignore_until = f64::MAX);
-        }
-        g.drain_events();
-        g.wait(4);
-    }
-    DaysRun {
-        ai: g.ai_stats,
-        armies,
-        armies_after: g.world.armies.len(),
-        waiting: g.world.respawns.len(),
-        player_battles,
-        player_lost,
-        stalled: g.clock.total_minutes() < end,
-        secs: t0.elapsed().as_secs_f64(),
-    }
-}
-
 /// Every shipped map for 30 days with the hero standing at his start (he fights whoever
 /// comes, answers yes to every question): no panic, every map within the time budget
 /// (release builds), and the AI does something.
@@ -129,7 +32,7 @@ fn thirty_days_on_every_map() {
     let mut totals = AiStats::default();
     for m in &dt.maps {
         let s = m.load().unwrap();
-        let r = play_days(&c, &s, DAYS);
+        let r = sim::play_days(&c, &s, HeroClass::Knight, DAYS);
         let st = r.ai;
         println!(
             "{:<28} {:>3}x{:<3} armies {:>2}→{:>2} waiting {:>2}: AI battles {:>3}, captures {:>2}, respawns {:>2}, hired {:>3}, bought {:>2}, routes {:>5}; player battles {:>2}{}; {:.2} s",
@@ -287,9 +190,9 @@ fn community_maps_smoke() {
             played += 1;
             let label = format!("{name}/{}", m.name);
             let t0 = Instant::now();
-            let outcome = std::panic::catch_unwind(AssertUnwindSafe(|| -> Result<DaysRun, String> {
+            let outcome = std::panic::catch_unwind(AssertUnwindSafe(|| -> Result<sim::DaysRun, String> {
                 let s = m.load().map_err(|e| format!("does not load: {e}"))?;
-                Ok(play_days(&c, &s, DAYS))
+                Ok(sim::play_days(&c, &s, HeroClass::Knight, DAYS))
             }));
             let wall = t0.elapsed().as_secs_f64();
             let why = match outcome {
@@ -360,7 +263,7 @@ fn install_mod_and_play(hub: &crate::hub::Hub, catalog: &crate::hub::Catalog, ba
     let c = Arc::new(Content::from_dt(&dt));
     let first = dt.maps.first().ok_or("the install has no map to play")?;
     let s = first.load().map_err(|e| format!("{}: does not load: {e}", first.name))?;
-    let run = std::panic::catch_unwind(AssertUnwindSafe(|| play_days(&c, &s, 3))).map_err(|p| format!("{}: panic: {}", first.name, panic_text(&*p)))?;
+    let run = std::panic::catch_unwind(AssertUnwindSafe(|| sim::play_days(&c, &s, HeroClass::Knight, 3))).map_err(|p| format!("{}: panic: {}", first.name, panic_text(&*p)))?;
     if run.stalled {
         return Err(format!("{}: stalled (softlock) over 3 days", first.name));
     }

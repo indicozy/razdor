@@ -1,0 +1,107 @@
+# The first map of the example story: a meadow, a river with a ford, a road across it, a forest
+# to the east and a small town of the player's in the west. Two enemy armies come from the east.
+# Terrain: terrain.png (tools/pack-example-terrain.py paints it).
+title = "first_light.title"
+description = "first_light.description"
+# The game's clock: the day the map starts (30-day months).
+start_date = "1300-04-01"
+# Faction relations, rows and columns: player, ally, neighbour, enemy; −3..3.
+relations = [[3, 3, 0, -3], [3, 3, 0, -3], [0, 0, 3, -3], [-3, -3, -3, 3]]
+
+[hero]
+cell = [12, 26]
+# The classes the hero window offers (the other presets are left out).
+classes = ["knight", "archmage"]
+gold = 300
+mana = 20
+troops = [
+    { unit = "dawn_knight", level = 1, count = 3 },
+    { unit = "dt:militiaman", level = 1, count = 4 },
+]
+
+# Woods on the eastern meadow.
+[[object]]
+kind = "trees"
+cell = [33, 28]
+[[object]]
+kind = "trees"
+cell = [35, 29]
+[[object]]
+kind = "trees"
+cell = [37, 27]
+[[object]]
+kind = "trees"
+cell = [34, 31]
+[[object]]
+kind = "trees"
+cell = [36, 33]
+[[object]]
+kind = "trees"
+cell = [39, 30]
+[[object]]
+kind = "trees"
+cell = [38, 35]
+[[object]]
+kind = "trees"
+cell = [41, 32]
+[[object]]
+kind = "dead_trees"
+cell = [42, 26]
+[[object]]
+kind = "hills"
+cell = [16, 12]
+[[object]]
+kind = "stones"
+cell = [8, 5]
+
+# The town on the western bank, held by the player.
+[[building]]
+id = "dawnwatch"
+type = "town"
+name = "town.dawnwatch.name"
+description = "town.dawnwatch.description"
+cell = [10, 24]
+faction = "player"
+income = 40
+garrison = [{ unit = "dawn_knight", level = 1, count = 4 }]
+recruit = [
+    { unit = "dawn_knight", start = 2, max = 4 },
+    { unit = "dt:militiaman", start = 4, max = 8 },
+]
+
+# The raiders: the package's unit and the base game's.
+[[army]]
+id = "raiders"
+name = "army.raiders.name"
+cell = [33, 17]
+faction = "enemy"
+model = "feudal"
+gold = 150
+troops = [
+    { unit = "dawn_knight", level = 1, count = 4 },
+    { unit = "dt:swordsman", level = 1, count = 2 },
+]
+leader = { unit = "dt:mounted_knight", level = 2, name = "leader.raider_chief.name" }
+
+# The bandits in the forest.
+[[army]]
+id = "bandits"
+name = "army.bandits.name"
+cell = [40, 37]
+faction = "enemy"
+model = "bandits"
+gold = 60
+troops = [
+    { unit = "dt:bandit", level = 1, count = 5 },
+    { unit = "dt:archer", level = 1, count = 3 },
+]
+
+# A lantern at the ford, lit from the start.
+[[point]]
+cell = [25, 20]
+radius = 3
+active = true
+
+[victory]
+kind = "defeat_all"
+message = "first_light.won"

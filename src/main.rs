@@ -209,6 +209,13 @@ async fn main() {
     if std::env::args().skip(1).any(|a| a == "--editor") {
         app.open_editor();
     }
+    // `--pack <folder-or-.rzpack> [--map <id>]` (or RAZDOR_PACK): the package's map as a new game.
+    if let Some((path, map)) = ui::pack_play::requested() {
+        if let Err(e) = app.open_pack(&path, map.as_deref()) {
+            eprintln!("razdor: {e}");
+            exit_now(&mut app);
+        }
+    }
     ui::snapshot::stage(&mut app);
     let snapshot = ui::snapshot::target();
     let quiet = ui::snapshot::quiet();

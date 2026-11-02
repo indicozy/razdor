@@ -27,6 +27,7 @@ pub mod save;
 #[cfg(test)]
 mod replay;
 pub mod script;
+pub mod sim;
 pub mod ships;
 pub mod spell_hint;
 pub mod town;

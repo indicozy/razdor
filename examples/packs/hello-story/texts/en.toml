@@ -9,3 +9,21 @@ description = "A knight who fights best at sunrise."
 [item.dawn_sun]
 name = "Dawn Sun"
 description = "A blade that keeps the morning light."
+
+[first_light]
+title = "First Light"
+description = "A river, a ford and a small town at dawn. Beat the raiders on the meadow."
+won = "The raiders are scattered. The first light falls on a quiet valley."
+
+[town.dawnwatch]
+name = "Dawnwatch"
+description = "A small town on the western bank of the river."
+
+[army.raiders]
+name = "Raiders of the ford"
+
+[army.bandits]
+name = "Forest bandits"
+
+[leader.raider_chief]
+name = "Vorn the Red"

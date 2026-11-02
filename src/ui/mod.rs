@@ -32,6 +32,7 @@ pub mod main_menu;
 pub mod map_import;
 pub mod minimap;
 pub mod new_game;
+pub mod pack_play;
 pub mod pan;
 pub mod popup;
 pub mod rest;
@@ -316,6 +317,8 @@ pub struct App {
     active_mod: Option<String>,
     /// A mod switch whose folder is built on a worker (`choose_mod`, 1441), until it is applied.
     mod_switch: Option<ModSwitch>,
+    /// The content package's map this run plays (`--pack`, see `pack_play`).
+    pack: Option<pack_play::PackPlay>,
 }
 
 /// The install's content for the new-game windows (`None` without an install).
@@ -401,6 +404,7 @@ impl App {
             mods: hub_mods(),
             active_mod: hub_active(),
             mod_switch: None,
+            pack: None,
         };
         app.follow_row_setting();
         app
@@ -474,8 +478,9 @@ impl App {
         }
         if let Some(install) = built.install {
             self.assets.adopt_install(dt_art::DtArt::load(install));
-            self.dt_content = dt_content_of(&self.assets, self.audio.settings.impossible);
+            self.dt_content = self.install_content();
             self.scenarios = built.scenarios;
+            self.keep_pack_map();
         }
         self.refresh_mods();
         if self.active_mod != id {
@@ -574,6 +579,7 @@ impl App {
             }
         }
         self.scenarios = scenarios_of(self.assets.dt.as_ref().map(|d| &d.install));
+        self.keep_pack_map();
         if let Some(first) = written.first() {
             new_game::pick_map(first.rsplit_once('.').map_or(first.as_str(), |(stem, _)| stem));
         }
@@ -1061,8 +1067,9 @@ impl App {
         razdor::dt::preload::forget_ready();
         if let Some(dt) = dt_art::DtArt::from_env() {
             self.assets.adopt_install(dt);
-            self.dt_content = dt_content_of(&self.assets, self.audio.settings.impossible);
+            self.dt_content = self.install_content();
             self.scenarios = scenarios_of(self.assets.dt.as_ref().map(|d| &d.install));
+            self.keep_pack_map();
         }
         // The install read may have dropped a stale mod choice.
         self.refresh_mods();
@@ -1104,8 +1111,9 @@ impl App {
             razdor::diag::reopen_log();
             // The settings as they are now (nothing changed them on the title screen).
             self.audio = Audio::new(self.assets.dt.as_ref().map(|d| &d.install));
-            self.dt_content = dt_content_of(&self.assets, self.audio.settings.impossible);
+            self.dt_content = self.install_content();
             self.scenarios = scenarios_of(self.assets.dt.as_ref().map(|d| &d.install));
+            self.keep_pack_map();
             // The saves are the install's now: its session slot is looked for again.
             self.session_checked = false;
         }

@@ -6,6 +6,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use rustybuzz::Face;
 
 use super::aliases;
+use super::compile::{ITEM_LIMIT, UNIT_LIMIT};
+use super::map_check;
 use super::content::{ItemSpec, UnitSpec};
 use super::diag::Report;
 use super::load::{is_game_file, key_line, Located, Package};
@@ -43,7 +45,29 @@ pub fn check(pkg: &Package) -> Report {
     check_bases(pkg, &units, &items, &mut r);
     check_cycles(&units, &mut r);
     super::triggers::check(pkg, &mut r);
+    check_limits(pkg, &mut r);
+    map_check::check_maps(pkg, &mut r);
     r
+}
+
+/// The package's units and items must fit the ids a troop slot and an event hold (`compile`).
+fn check_limits(pkg: &Package, r: &mut Report) {
+    if let Some(extra) = pkg.units.get(UNIT_LIMIT) {
+        r.error_hint(
+            &extra.file,
+            Some(extra.line),
+            format!("the package has {} units: {UNIT_LIMIT} at most", pkg.units.len()),
+            "a troop slot holds a unit id in one byte, so a package's units are ids 200 to 254",
+        );
+    }
+    if let Some(extra) = pkg.items.get(ITEM_LIMIT) {
+        r.error_hint(
+            &extra.file,
+            Some(extra.line),
+            format!("the package has {} items: {ITEM_LIMIT} at most", pkg.items.len()),
+            "an event and a hero hold an item id in one byte, so a package's items are ids 200 to 255",
+        );
+    }
 }
 
 /// Rules 6 and 7: the package's top level, and no game files.
@@ -151,6 +175,10 @@ fn check_text_keys(pkg: &Package, r: &mut Report) {
         for c in &value.choices {
             used.push((c.text.as_str(), file, Some(*line)));
         }
+    }
+    let map_keys = map_check::text_keys(pkg);
+    for (key, file, line) in &map_keys {
+        used.push((key.as_str(), file.as_str(), *line));
     }
     let mut seen = BTreeSet::new();
     for (key, file, line) in used {
@@ -587,11 +615,17 @@ mod tests {
     }
 
     fn zip_of(entries: &[(&str, &str)]) -> Vec<u8> {
+        let bytes: Vec<(&str, &[u8])> = entries.iter().map(|(n, t)| (*n, t.as_bytes())).collect();
+        zip_bytes(&bytes)
+    }
+
+    /// A zip of files as bytes (a picture is not text).
+    fn zip_bytes(entries: &[(&str, &[u8])]) -> Vec<u8> {
         use std::io::Write;
         let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
-        for (name, text) in entries {
+        for (name, data) in entries {
             zip.start_file(*name, zip::write::SimpleFileOptions::default()).unwrap();
-            zip.write_all(text.as_bytes()).unwrap();
+            zip.write_all(data).unwrap();
         }
         zip.finish().unwrap().into_inner()
     }
@@ -600,12 +634,8 @@ mod tests {
     fn a_zip_round_trip_matches_the_folder() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/packs/hello-story");
         let folder = Files::from_dir(&dir).unwrap();
-        let entries: Vec<(String, String)> = folder
-            .iter()
-            .map(|(p, b)| (p.to_string(), String::from_utf8(b.to_vec()).unwrap()))
-            .collect();
-        let refs: Vec<(&str, &str)> = entries.iter().map(|(p, t)| (p.as_str(), t.as_str())).collect();
-        let bytes = zip_of(&refs);
+        let entries: Vec<(&str, &[u8])> = folder.iter().collect();
+        let bytes = zip_bytes(&entries);
         let from_zip = Files::from_zip(&bytes).unwrap();
         assert_eq!(from_zip, folder);
         assert_eq!(check(&Package::parse(from_zip).0), check(&Package::parse(folder).0));

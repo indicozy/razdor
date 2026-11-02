@@ -239,6 +239,16 @@ impl Content {
         Content { formation, tactical: TacticalCache::default(), ..self.clone() }
     }
 
+    /// This content with a content package's units and items added (their ids are the package's,
+    /// see `pack::compile`). The ids must be new: a later definition of an id wins in the index.
+    pub fn with_package(&self, units: Vec<UnitDef>, items: Vec<ArtefactDef>) -> Content {
+        let mut all_units = self.units.clone();
+        all_units.extend(units);
+        let mut all_items = self.items.clone();
+        all_items.extend(items);
+        Content { experimental: self.experimental, ..Content::new(all_units, all_items, self.spells.clone(), self.options.clone(), self.formation) }
+    }
+
     /// Content read from a Discord Times install. The formation is the Community wide row
     /// (2 × 6) when the player's `OptValue11` is on (as in his install), else the vanilla
     /// 3 × 4 (0x4b8974: 6 or 4 per row).
