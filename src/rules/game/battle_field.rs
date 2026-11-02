@@ -103,10 +103,7 @@ impl Game {
     /// The end of a decided field battle: its shadow goes to [`Game::resolve_battle`], as a DT
     /// battle's does (deaths, experience, loot, the campaign). `None` while it is undecided.
     pub fn field_finish(&mut self) -> Option<BattleResult> {
-        let p = self.field_live()?;
-        if p.fb.outcome().is_none() {
-            return None;
-        }
+        self.field_live()?.fb.outcome()?;
         let p = self.field_play.take()?;
         self.field = None;
         self.field_garrison = None;
