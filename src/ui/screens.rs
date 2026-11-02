@@ -549,6 +549,8 @@ fn end_event(game: &Option<Game>) -> Option<String> {
     let g = game.as_ref()?;
     let id = match g.script_end()? {
         ScriptEnd::Victory(id) | ScriptEnd::Defeat(id) => id,
+        // A package's ending has no event window to name it by.
+        ScriptEnd::Package(_) => return None,
     };
     Some(super::story::event_title(g, id))
 }

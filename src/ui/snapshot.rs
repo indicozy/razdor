@@ -890,6 +890,46 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
             app.dialogs.push_back(d);
             Screen::WorldMap
         }
+        "package" => {
+            // `package:<map>`: a package dialog with choices, as a trigger opens it (`rules::triggers`):
+            // a made-up story whose texts are ours. `RAZDOR_SCENE_CHOICES=<n>` sets its choices (2 by
+            // default, at most 5; 0 is the «Далее» window); its speaker is the hero's unit.
+            use razdor::rules::triggers::{Act, Choice, DialogDef, Story, Trigger, When};
+            let count = std::env::var("RAZDOR_SCENE_CHOICES").ok().and_then(|v| v.trim().parse::<usize>().ok()).unwrap_or(2).min(5);
+            let texts = [
+                ("ford.title", "The ford"),
+                ("ford.text", "A rider waits on the far bank. He wants a toll for the road through the marsh,\nand says he knows the way, if he is paid."),
+                ("ford.pay", "Pay the toll"),
+                ("ford.ask", "Ask about the marsh"),
+                ("ford.ride", "Ride on"),
+                ("ford.wait", "Wait for him to go"),
+                ("ford.leave", "Turn back"),
+            ];
+            let choices = ["ford.pay", "ford.ask", "ford.ride", "ford.wait", "ford.leave"]
+                .iter()
+                .take(count)
+                .enumerate()
+                .map(|(k, key)| Choice { id: format!("c{k}"), text: key.to_string(), cond: Vec::new(), then: Vec::<Act>::new() })
+                .collect();
+            let open = Trigger { id: "open".into(), when: When::GameStart, cond: Vec::new(), then: vec![Act::Dialog("ford".into())], once: true, chance: 100 };
+            let dialog = DialogDef { id: "ford".into(), title: "ford.title".into(), text: "ford.text".into(), speaker: game.squad.first().map(|u| u.def), choices };
+            let story = Story {
+                vars: Default::default(),
+                triggers: vec![open],
+                dialogs: vec![dialog],
+                texts: texts.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+                named: Vec::new(),
+                seed: 1,
+            };
+            game.attach_story(story);
+            game.start_story();
+            for event in game.drain_events() {
+                if let razdor::rules::game::Event::Package(pd) = event {
+                    app.dialogs.push_back(super::story::package_dialog(&game, &pd));
+                }
+            }
+            Screen::WorldMap
+        }
         "event" => {
             // `event:<map>:<n>`: the map's event n as its window opens (story::event_dialog),
             // with the lost row of the items in `RAZDOR_SCENE_LOST=<id>,…` (what the engine

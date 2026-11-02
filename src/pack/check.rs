@@ -42,6 +42,7 @@ pub fn check(pkg: &Package) -> Report {
     let items = index_ids(&pkg.items, |i| i.id.as_str(), "item", &mut r);
     check_bases(pkg, &units, &items, &mut r);
     check_cycles(&units, &mut r);
+    super::triggers::check(pkg, &mut r);
     r
 }
 
@@ -142,6 +143,13 @@ fn check_text_keys(pkg: &Package, r: &mut Report) {
         used.push((value.name.as_str(), file, Some(*line)));
         if let Some(d) = &value.description {
             used.push((d.as_str(), file, Some(*line)));
+        }
+    }
+    for Located { file, line, value } in &pkg.dialogs {
+        used.push((value.title.as_str(), file, Some(*line)));
+        used.push((value.text.as_str(), file, Some(*line)));
+        for c in &value.choices {
+            used.push((c.text.as_str(), file, Some(*line)));
         }
     }
     let mut seen = BTreeSet::new();

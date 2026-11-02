@@ -13,6 +13,7 @@ use razdor::trf;
 use razdor::rules::events::{EventId, EventOutcome, PICTURE_DEFEAT, PICTURE_VICTORY};
 use razdor::rules::game::Game;
 use razdor::rules::journal::Tab;
+use razdor::rules::triggers::PendingDialog;
 
 use super::dialog::{Dialog, Picture, Resource};
 
@@ -87,6 +88,21 @@ pub fn event_dialog(game: &Game, id: EventId, asking: bool) -> Dialog {
     }
     if r.experience != 0 {
         d.resources.push((Resource::Experience, trf!("Experience {n}", n = signed(r.experience))));
+    }
+    d
+}
+
+/// A package's dialog (`rules::triggers`) as its window: its title and text, the speaker's
+/// picture, and one button per visible choice (none: a «Далее» button).
+pub fn package_dialog(game: &Game, pd: &PendingDialog) -> Dialog {
+    let def = game.story_dialog(&pd.id);
+    let title = def.map_or_else(|| pd.id.clone(), |d| game.story_text(&d.title));
+    let mut d = Dialog::new(title);
+    d.package = Some(pd.id.clone());
+    if let Some(def) = def {
+        d.text = game.story_text(&def.text).lines().map(str::to_string).collect();
+        d.picture = def.speaker.map(Picture::Unit);
+        d.choices = pd.choices.iter().filter_map(|id| def.choices.iter().find(|c| &c.id == id)).map(|c| (c.id.clone(), game.story_text(&c.text))).collect();
     }
     d
 }

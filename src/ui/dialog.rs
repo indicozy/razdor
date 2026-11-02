@@ -97,6 +97,8 @@ pub enum Close {
     Ok,
     Yes,
     No,
+    /// A package dialog's choice (its index in [`Dialog::choices`]).
+    Choice(usize),
     /// The defeat report's «Загрузить последнее сохранение» (Razdor's, the owner's request).
     LoadLast,
 }
@@ -123,6 +125,10 @@ pub struct Dialog {
     pub event: Option<u16>,
     /// The event's yes/no question: the dialog has Yes and No buttons.
     pub question: bool,
+    /// A package's dialog (`rules::triggers`): its id; the answer goes to the story.
+    pub package: Option<String>,
+    /// A package dialog's visible choices: (id, label). None: its one «Далее» button.
+    pub choices: Vec<(String, String)>,
     /// The question is a village's offer (0x4aca80): its answer goes to the village
     /// (`building_view::answer_offer`), not to the event engine.
     pub offer: bool,
@@ -178,6 +184,8 @@ impl Dialog {
             notice: None,
             event: None,
             question: false,
+            package: None,
+            choices: Vec::new(),
             offer: false,
             village_event: false,
             picture: None,
@@ -614,6 +622,19 @@ fn event_row_h(defeat: bool, line: f32, t: f32, r: &MarkupRow) -> f32 {
 /// The footer's extra height at the scale `o` (screen px): the buttons' footer of 58 (Razdor's
 /// own, the owner's decision of 2026-10-31) grows with the text size (`button_grow`), and the
 /// window with it, so its buttons grow with their labels. Zero at Normal.
+/// A package dialog's choice buttons: the height of one, and the gap between them (at scale `o`).
+const CHOICE_GAP: f32 = 6.0;
+
+/// A choice button's height: the window's button height, and on a phone at least 44 dp (the
+/// touch target's minimum, the owner's phone sizes).
+fn choice_button_h(o: f32) -> f32 {
+    let base = 36.0 * o * super::display::button_grow();
+    match super::display::dp_px() {
+        Some(dp) => base.max(44.0 * dp),
+        None => base,
+    }
+}
+
 fn footer_grow(o: f32) -> f32 {
     58.0 * o * (super::display::button_grow() - 1.0)
 }
@@ -835,7 +856,9 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     let row_h = |r: &MarkupRow| event_row_h(defeat, line, t, r);
     // The title strip's growth: the window is taller by it, and its frame and content move down.
     let grow = chrome::title_grow();
-    let (w, h) = (f.w * o, f.h * o + grow + footer_grow(o));
+    // A package dialog's choices stack above the footer, a button each, in the window's height.
+    let choice_h = if d.choices.is_empty() { 0.0 } else { d.choices.len() as f32 * (choice_button_h(o) + CHOICE_GAP * o) + CHOICE_GAP * o };
+    let (w, h) = (f.w * o, f.h * o + grow + footer_grow(o) + choice_h);
     let (x, y) = event_origin(sw, sh, chrome::bar_height(), w, h);
     // The defeat look is the red marble (the original's window after a lost battle).
     let skin = if d.defeat { chrome::Skin::Red } else { chrome::Skin::Marble };
@@ -1058,6 +1081,20 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     // now «Выйти в главное меню» (0x4c206c → 0x4bfb34). Its keyboard close is the exit too.
     // Any other window keeps the OK, the language file's `[Buttons] Ok` («Ок»); in the defeat
     // look the button is the red one (0x4aa263).
+    if !d.choices.is_empty() {
+        let (bw, bh) = (95.0 * o * super::display::button_grow(), choice_button_h(o));
+        let cw = (w * 0.8).max(bw);
+        let mut picked = None;
+        for (k, (_, label)) in d.choices.iter().enumerate() {
+            let r = Rect::new(x + (w - cw) / 2.0, y + h - foot - choice_h + CHOICE_GAP * o + k as f32 * (bh + CHOICE_GAP * o), cw, bh);
+            let on = !tip_covers(tip.map(|t| t.2), p, r);
+            if button(r.x, r.y, r.w, r.h, label, on) && picked.is_none() {
+                picked = Some(k);
+            }
+        }
+        draw_tip(tip, game, assets, o);
+        return picked.map(Close::Choice);
+    }
     let (ok, load) = if d.defeat && d.event.is_none() {
         let load_label = tr("Load the last save");
         let exit_label = tr("Exit to main menu");
@@ -1074,7 +1111,12 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         }
         (exit_pressed, load_pressed)
     } else {
-        let ok_label = chrome::ui_text("Buttons", "Ok").filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| "OK".to_string());
+        // A package dialog with no choices has one «Далее» button (the catalog's `Next`).
+        let ok_label = if d.package.is_some() {
+            tr("Next").to_string()
+        } else {
+            chrome::ui_text("Buttons", "Ok").filter(|_| razdor::i18n::lang() == razdor::i18n::Lang::Ru).unwrap_or_else(|| "OK".to_string())
+        };
         let ok_r = Rect::new(x + (w - bw) / 2.0, by, bw, bh);
         let ok_on = !tip_covers(tip.map(|t| t.2), p, ok_r);
         let ok = if d.defeat {

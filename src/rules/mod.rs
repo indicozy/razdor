@@ -30,5 +30,6 @@ pub mod script;
 pub mod ships;
 pub mod spell_hint;
 pub mod town;
+pub mod triggers;
 pub mod units;
 pub mod world;

@@ -28,6 +28,8 @@ const SHOW_ARMY_RADIUS: i32 = 3;
 pub enum ScriptEnd {
     Victory(EventId),
     Defeat(EventId),
+    /// A package's `victory` or `defeat` action (`rules::triggers`).
+    Package(super::triggers::Ending),
 }
 
 /// A line of a main hall's list (0x4beaac): the building's quests and rumours that pass
@@ -56,6 +58,8 @@ impl Event {
             Event::Script(_) => true,
             // An event's spell stops the walk on its cell (0x4ab1ec clears the route).
             Event::EventSpell { .. } => true,
+            // A package's dialog is a window: the walk stops for it, as for a message.
+            Event::Package(_) => true,
             _ => false,
         }
     }
@@ -69,6 +73,9 @@ impl Game {
 
     /// Victory or defeat by a scenario event.
     pub fn script_end(&self) -> Option<ScriptEnd> {
+        if let Some(end) = self.story_end() {
+            return Some(ScriptEnd::Package(end));
+        }
         match self.script()?.ended()? {
             EventOutcome::Victory(id) => Some(ScriptEnd::Victory(*id)),
             EventOutcome::Defeat(id) => Some(ScriptEnd::Defeat(*id)),
@@ -387,6 +394,12 @@ impl Game {
 
     /// The name shown for unit `u`: a named character's own name, else its class.
     pub fn unit_label(&self, u: &Unit) -> String {
+        // A package's named character (`rules::triggers`): ids from PACKAGE_BASE up.
+        if u.named >= super::triggers::PACKAGE_BASE {
+            if let Some(n) = self.story().and_then(|s| s.named.get((u.named - super::triggers::PACKAGE_BASE) as usize)) {
+                return n.clone();
+            }
+        }
         let named = (u.named as usize).checked_sub(1).and_then(|k| self.world.named_characters.get(k));
         match named {
             Some(n) if !n.is_empty() => n.clone(),
@@ -1183,7 +1196,7 @@ impl Game {
     /// victory or when the scenario names no next map.
     pub fn next_map(&self) -> Option<NextMap> {
         let engine = self.script()?;
-        if !matches!(self.script_end(), Some(ScriptEnd::Victory(_))) {
+        if !matches!(self.script_end(), Some(ScriptEnd::Victory(_) | ScriptEnd::Package(super::triggers::Ending::Victory))) {
             return None;
         }
         let branch = engine.campaign_branch();

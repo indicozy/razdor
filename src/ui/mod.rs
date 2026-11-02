@@ -1526,6 +1526,16 @@ impl App {
                         }
                     }
                 }
+                // A package dialog's answer goes to its story: the choice's actions, then its triggers.
+                if let (Some(id), Some(game)) = (closed.as_ref().and_then(|d| d.package.clone()), self.game.as_mut()) {
+                    let choice = match close {
+                        Close::Choice(k) => closed.as_ref().and_then(|d| d.choices.get(k)).map(|c| c.0.clone()),
+                        _ => None,
+                    };
+                    let events = game.answer_story_dialog(&id, choice.as_deref());
+                    let after = world_view::handle_events(game, events, &mut self.message, &mut self.dialogs);
+                    next = next.or(after);
+                }
                 let read = closed.as_ref().is_some_and(|d| d.event.is_some() && !d.question);
                 // The defeat report's OK ends the game: back to the main menu (0x4c206c with
                 // the defeat mark 0xae6d23 → 0x4bfb34). Razdor's «Загрузить последнее
@@ -1627,7 +1637,7 @@ impl App {
                 // With no next map (not a campaign map, or its next map not in the install)
                 // the original goes to the main menu once the window is read (0x4aba30 →
                 // 0x4bfb34); Razdor's victory screen stays for the editor's test play.
-                Some(ScriptEnd::Victory(_)) if !matches!(self.screen, Screen::Victory) => {
+                Some(ScriptEnd::Victory(_) | ScriptEnd::Package(razdor::rules::triggers::Ending::Victory)) if !matches!(self.screen, Screen::Victory) => {
                     // The scenario list marks the map as won under the mod played (Razdor's, kept in the settings).
                     if let Some(razdor::rules::save::ScenarioRef::Map { file, .. }) = self.game.as_ref().and_then(|g| g.origin.as_ref()).filter(|_| !self.test_play) {
                         language::mark_completed(self.active_mod.as_deref(), file);
@@ -1651,7 +1661,7 @@ impl App {
                 }
                 // The map's defeat event: its window was the last thing shown; the game
                 // returns to the main menu (events.md §11, 0x4bfb34).
-                Some(ScriptEnd::Defeat(_)) => {
+                Some(ScriptEnd::Defeat(_) | ScriptEnd::Package(razdor::rules::triggers::Ending::Defeat)) => {
                     self.game = None;
                     next = Some(Screen::MainMenu);
                 }

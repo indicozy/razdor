@@ -14,7 +14,8 @@ Anything not listed here is not read yet. The code is `src/pack/`; the checker i
 - Text files are UTF-8; configuration is TOML.
 - Top level: the files `package.toml`, `README.md`, `LICENSE`, and the folders `texts/`,
   `units/`, `items/`, `maps/`, `dialogs/`, `triggers/`, `art/`, `scripts/`. Any other top-level
-  entry is a warning and is not read. Only `texts/`, `units/` and `items/` are read in format 1.
+  entry is a warning and is not read. Read in format 1: `texts/`, `units/`, `items/`, `triggers/`
+  and `dialogs/` (the last two in the section below).
 - Game files are an error anywhere in a package: any file whose extension is `ini`, `dtm`,
   `ugs`, `lit`, `spi`, `exe` or `dll` (any case). A package refers to the base game with `dt:`
   references and never ships the game's files.
@@ -119,7 +120,137 @@ Output: one line per diagnostic, `error: units/a.toml:12: message (hint: …)`, 
 line. With `--json`: `{"ok": …, "diagnostics": [{"severity", "file", "line", "message", "hint"}]}`.
 Exit status: `0` no errors, `1` errors, `2` a usage or read problem.
 
+## Triggers and dialogs
+
+Story logic in TOML: `triggers/*.toml` (variables and `[[trigger]]`) and `dialogs/*.toml`
+(`[[dialog]]` with choices). The runtime is `src/rules/triggers.rs`, the reader and checks
+`src/pack/triggers.rs`. Every condition, action and event is an inline table with one **kind key**
+(`{ var = "dread", op = ">=", value = 3 }`); its other keys are its arguments. A wrong key is an
+error with the closest name (`did you mean …`). Numbers are whole numbers.
+
+### Shape
+
+```toml
+# triggers/ford.toml
+[vars]                       # declared once per package, any triggers/*.toml file
+dread = 0                    # a whole number
+ford_held = false            # true or false
+
+[[trigger]]
+id = "ford_guard"
+when = { event = "hero_enters", at = [12, 7] }     # a cell; or at = [x, y, w, h] an area
+if = [ { var = "ford_held", value = false }, { random = 50 } ]   # all must hold
+then = [ { set = "ford_held", value = true }, { dialog = "ford" } ]
+# once = false             # repeat (the default is once)
+# chance = 80              # percent, rolled after the conditions hold
+```
+
+```toml
+# dialogs/ford.toml
+[[dialog]]
+id = "ford"
+title = "ford.title"         # text keys (texts/<lang>.toml)
+text = "ford.text"
+speaker = "dt:swordsman"     # optional: its portrait
+
+[[dialog.choice]]            # 0 to 5 choices; none means one «Далее» button
+id = "pay"
+text = "ford.pay"
+if = [ { var = "dread", op = "<", value = 3 } ]    # optional: shown only then
+then = [ { give_gold = -20 } ]                      # optional actions
+```
+
+### Events (`when`)
+
+| Event | Keys | Fires |
+|---|---|---|
+| `game_start` | | when the story starts (`Game::start_story`) |
+| `day_start` | | each midnight |
+| `week_start` | | each midnight of a day that is a multiple of 7 from year 0 (the clock has no week) |
+| `new_moon` | | each midnight of a day that is a multiple of 28 from year 0 (no moon is modelled) |
+| `hero_enters` | `at` | the hero steps onto a cell, or into an area |
+| `hero_enters_building` | `building` | the hero enters a building |
+| `army_defeated` | `army` | the player beats an army (battle end) |
+| `building_captured` | `building` | the hero takes a building (walking in, or its garrison beaten) |
+| `dialog_choice` | `dialog`, `choice` | the player picks that choice |
+| `var_changed` | `var` | a variable changes value |
+
+### Conditions (`if`): all must hold, checked in order
+
+| Kind | Arguments | Meaning |
+|---|---|---|
+| `var` | `op` (default `==`; `==`, `!=`, `<`, `<=`, `>`, `>=`), `value` | a variable against a value (flags: only `==` and `!=`) |
+| `random` | | true with that percent (the package generator) |
+| `hero_at` | the place: `[x, y]` or `[x, y, w, h]` | the hero stands there |
+| `army_at` | `army` (a spawned or scenario army id), `at` | the army is on the map at that place |
+| `has_named_unit` | `named` (the character's id), `unit` | a named character of that unit type is in the hero's army |
+| `has_item` | `in` (`player`, the default, or `pack`) | the item is in the pack or worn by his army |
+| `gold` | `op` (default `>=`) | the hero's gold compares with the number |
+| `army_alive` | | the army exists and is not beaten |
+| `building_owner` | `faction` (`player`, `ally`, `neighbour`, `enemy`, or 1 to 4) | the building's faction |
+| `has_spell` | `in` (`player` or an army id; default `player`), `all` (default false) | a unit holds the spell (in its slots, not expired); `all` for every unit |
+
+### Actions (`then`): in order
+
+| Kind | Arguments | Effect |
+|---|---|---|
+| `set` | `value` | a variable gets a value (its change fires `var_changed`) |
+| `add` | `value` | a number variable grows |
+| `random_var` | `min`, `max` | a number variable gets a random value in the range |
+| `dialog` | | opens the dialog (its choices visible now) |
+| `give_gold` | | the hero's gold (negative takes; never below 0) |
+| `give_item` | `to` (`pack` default, `player`, an army id: its loot, `named:<id>`: a free worn slot, else the pack) | an item |
+| `give_unit` | `named` (optional character id) | a unit joins the hero's army (a full army drops its weakest unit, as DT) |
+| `give_xp` | `to` (`player` default, an army id, `named:<id>`) | experience |
+| `spawn_army` | `at = [x, y]`, `faction`, `model` (0 to 12, default 5), `troops` (list of units) | a new army on the map, with its id (its name); an id in use spawns nothing |
+| `remove_army` | | the army leaves the map (it can come back by an event, as DT's) |
+| `teleport_hero` | cell `[x, y]` | the hero's army moves there |
+| `teleport_army` | `at = [x, y]` or `to = "<building>"` | an army moves to a cell or a building |
+| `set_faction` | `faction`, `of` (`army` default, or `building`) | a faction for an army or a building |
+| `set_relation` | `towards` (`player`, `ally`, `neighbour`, `enemy`), `value` (−3 to 3), `of` | the relation of an army or a building towards a side |
+| `add_units` | `troops`, `of` (`army` default, or `building`: a garrison) | units join an army or a garrison |
+| `cast_on_army` | `in` (`player` or an army id), `minutes = n` or `permanent = true` | the spell in each unit's slot (a slot that is free, or the same spell's) |
+| `remove_spells` | the holder (`player` or an army id) | every spell of its units goes |
+| `remove_spell_from_book` | the spell | the hero's spell book drops it |
+| `victory` / `defeat` | `= true` | the scenario ends (after the dialogs shown; the first ending holds) |
+
+Units and items are `dt:<alias>` or the package's own ids; spells are `dt:spell/<alias>`. A
+«holder» is `player`, `pack`, an army id or `named:<id>`.
+
+### Moments in the game
+
+| Moment | Where (the game's own events run first) |
+|---|---|
+| `game_start` | `Game::start_story`: the events wait in `drain_events` |
+| `day_start`, `week_start`, `new_moon` | `Game::pass_slice`, after the noon report, per midnight (`story_midnight`) |
+| `hero_enters` | `Game::tick`, after each step that moved him (`hero_step`) |
+| `hero_enters_building` | `Game::enter_building`, after `Arrived` and the tribute |
+| `building_captured` | `Game::hero_step` (walking in), `Game::resolve_battle` (a garrison beaten) |
+| `army_defeated` | `Game::resolve_battle`, for each army newly beaten by the player |
+| `dialog_choice` | `Game::answer_story_dialog`, after the choice's actions |
+| `var_changed` | inside the moment that changed the variable; a loop guard of 200 runs |
+
+A story with no triggers and no dialogs attaches nothing: no draw, no state, no save field. The
+package generator is its own (`TriggerState::rng`, seeded from the story); `rules::rng` is never
+drawn for a package. Package armies and named characters take the ids 200 up (56 each at most).
+
+### Checks (`razdor-pack check`)
+
+Unknown events, conditions, actions and keys (with the closest name); undeclared variables;
+values of the wrong type; unknown dialogs and choices; a dialog that no trigger or choice opens
+(a warning); more than five choices; a text key missing in every language; unknown `dt:` units,
+items and spells; a package that is not in `requires`; a variable declared twice; a trigger id
+used twice. The cell bounds are not checked yet: the map's size is known only once maps are read.
+
+### Not in this step
+
+Wishes of the trigger vocabulary left out of slice 1 step 3 (design: "Trigger vocabulary"):
+AI army speed (5), an AI army's goal (14, the goal half), the hero's map figure (12), branching
+campaigns (10). Garrisons take part only where the table says so: `add_units` and `set_faction` /
+`set_relation` (`of = "building"`). Spells on garrisons (1, 7, 9), named characters in AI armies or
+garrisons (2), items and experience of garrisons (3, 8) are not in format 1 yet.
+
 ## Not in format 1
 
-`maps/`, `dialogs/`, `triggers/`, `art/` and `scripts/` are reserved: they are allowed at the top
-but not read yet. Also not yet: `render`, `sim`, `play`, `pack` (the `.rzpack` builder), the Hub.
+`maps/`, `art/` and `scripts/` are reserved: they are allowed at the top but not read yet. Also not
+yet: `render`, `sim`, `play`, `pack` (the `.rzpack` builder), the Hub.

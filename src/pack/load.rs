@@ -9,6 +9,7 @@ use super::content::{ItemFile, ItemSpec, UnitFile, UnitSpec};
 use super::diag::{Report, Severity};
 use super::files::Files;
 use super::manifest::Manifest;
+use super::triggers::{self, Dialog, DialogFile, Trigger, TriggerFile, Var};
 
 /// Something read from one file, with where it was.
 #[derive(Clone, Debug, PartialEq)]
@@ -29,6 +30,10 @@ pub struct Package {
     pub texts: BTreeMap<String, BTreeMap<String, String>>,
     pub units: Vec<Located<UnitSpec>>,
     pub items: Vec<Located<ItemSpec>>,
+    /// `[vars]` of the `triggers/*.toml` files.
+    pub vars: Vec<Located<Var>>,
+    pub triggers: Vec<Located<Trigger>>,
+    pub dialogs: Vec<Located<Dialog>>,
     pub problems: Report,
 }
 
@@ -80,6 +85,9 @@ impl Package {
             texts: BTreeMap::new(),
             units: Vec::new(),
             items: Vec::new(),
+            vars: Vec::new(),
+            triggers: Vec::new(),
+            dialogs: Vec::new(),
             problems: Report::default(),
         };
         // Game files are never read; `check` reports them.
@@ -134,6 +142,41 @@ impl Package {
             }
         }
 
+        // triggers/*.toml: variables and triggers. A table that does not read is reported at its
+        // line and left out; `check` reads the rest.
+        for path in paths.iter().filter(|p| p.starts_with("triggers/") && p.ends_with(".toml")) {
+            let Some(text) = story_text(&files, path, &mut report) else { continue };
+            let Some(f) = parse_toml::<TriggerFile>(path, text, &mut report) else { continue };
+            match triggers::parse_vars(&f.vars) {
+                Ok(vars) => {
+                    for v in vars {
+                        let line = key_line(text, &v.name);
+                        package.vars.push(Located { file: path.clone(), line: line.unwrap_or(1), value: v });
+                    }
+                }
+                Err(p) => report.error_hint(path, key_line(text, "vars").or(Some(1)), p.message, p.hint),
+            }
+            for t in f.trigger {
+                let line = line_of(text, t.span().start);
+                match triggers::parse_trigger(t.get_ref()) {
+                    Ok(trigger) => package.triggers.push(Located { file: path.clone(), line, value: trigger }),
+                    Err(p) => report.error_hint(path, Some(line), p.message, p.hint),
+                }
+            }
+        }
+        // dialogs/*.toml: dialog windows with their choices.
+        for path in paths.iter().filter(|p| p.starts_with("dialogs/") && p.ends_with(".toml")) {
+            let Some(text) = story_text(&files, path, &mut report) else { continue };
+            let Some(f) = parse_toml::<DialogFile>(path, text, &mut report) else { continue };
+            for d in f.dialog {
+                let line = line_of(text, d.span().start);
+                match triggers::parse_dialog(d.get_ref()) {
+                    Ok(dialog) => package.dialogs.push(Located { file: path.clone(), line, value: dialog }),
+                    Err(p) => report.error_hint(path, Some(line), p.message, p.hint),
+                }
+            }
+        }
+
         package.problems = report.clone();
         package.files = files;
         (package, report)
@@ -152,6 +195,14 @@ fn text_of<'a>(files: &'a Files, path: &str, report: &mut Report) -> Option<&'a 
             }
         },
     }
+}
+
+/// The text of a triggers or dialogs file: TOML, else reported and not read.
+fn story_text<'a>(files: &'a Files, path: &str, report: &mut Report) -> Option<&'a str> {
+    if is_game_file(path) {
+        return None;
+    }
+    text_of(files, path, report)
 }
 
 /// Content files are TOML; other files there are not read (a game file is `check`'s error).

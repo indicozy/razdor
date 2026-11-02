@@ -938,7 +938,7 @@ pub const GANG_REWARD: i32 = 30;
 /// What the demo calls its roaming gangs.
 const GANG_NAME: &str = n_("Bandit gang");
 /// Uids above the scenario's army ids (1..=255) go to the demo's gangs.
-const FIRST_GANG_UID: u32 = 256;
+pub(crate) const FIRST_GANG_UID: u32 = 256;
 /// Demo gangs carry this much gold; the victor takes `VictoryGoldDiv` of it.
 const GANG_GOLD: i32 = 2 * GANG_REWARD;
 /// A little slower than the hero.
@@ -1547,6 +1547,46 @@ impl World {
             ship: 0,
             // A gang pays the player's XP in full (a map's army gives its byte 71).
             ai: AiProfile { exp_correction: 100, ..AiProfile::default() },
+            mind: AiMind::default(),
+        });
+    }
+
+    /// A package army (`rules::triggers`): on the map at `at`, with its own id and a fresh uid.
+    /// Hostile unless it is the player's (attitude −3, or 3 for the player's faction).
+    pub(crate) fn spawn_army(&mut self, id: u8, at: Tile, faction: u8, model: u8, troops: Vec<Troop>, speed: u32) {
+        self.next_uid = self.next_uid.max(FIRST_GANG_UID) + 1;
+        self.armies.push(Army {
+            id,
+            uid: self.next_uid,
+            name: String::new(),
+            leader_name: String::new(),
+            description: String::new(),
+            model,
+            figure: model,
+            pos: self.map.center(at),
+            home: None,
+            post: at,
+            box_centre: None,
+            patrols: false,
+            patrol_radius: 0,
+            troops,
+            faction,
+            attitude: if faction == 1 { 3 } else { -3 },
+            gold: 0,
+            items: Vec::new(),
+            speed,
+            budget: 0.0,
+            walk: Walk::default(),
+            path: Vec::new(),
+            chasing: false,
+            ignore_until: 0.0,
+            talk: 0,
+            arrived: false,
+            rest_until: 0.0,
+            named: 0,
+            old_effects: Vec::new(),
+            ship: 0,
+            ai: AiProfile::default(),
             mind: AiMind::default(),
         });
     }

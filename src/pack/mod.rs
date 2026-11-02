@@ -10,6 +10,7 @@ pub mod load;
 pub mod manifest;
 pub mod refs;
 pub mod texts;
+pub mod triggers;
 
 pub use check::check;
 pub use diag::{Diagnostic, Report, Severity};

@@ -20,6 +20,8 @@ use super::save::ScenarioRef;
 use super::ships::Ship;
 use super::map::{is_water, step_minutes, Tile, TileMap};
 use super::rng::{EventRng, Rng, WORLD_MUSIC_DRAW};
+use super::triggers::{PendingDialog, TriggerState, When};
+use crate::pack::triggers::Place;
 use super::units::{PromoteError, Unit};
 use super::world::{Army, LocationKind, Stationed, Troop, World, AI_BUDGET_CAP};
 
@@ -214,6 +216,8 @@ pub enum Event {
     /// A scenario event cast `spell` on the hero's army (0x4ab1ec): its effect plays over him
     /// and his walk ends on this cell; no window opens.
     EventSpell { spell: u32 },
+    /// A package's dialog (`rules::triggers`): its window, with the choices it shows.
+    Package(PendingDialog),
 }
 
 /// Who the next battle is against.
@@ -584,6 +588,14 @@ pub struct Game {
     /// The cheat console's marks and switches (`rules::cheats`); none in older saves.
     #[serde(default)]
     pub cheats: super::cheats::CheatState,
+    /// The package triggers' state (`rules::triggers`). Saved only while a story is in play:
+    /// a game without one writes no such field, as before.
+    #[serde(default, skip_serializing_if = "TriggerState::is_empty")]
+    pub triggers: TriggerState,
+    /// The attached package's static story (`rules::triggers`): not saved; the caller attaches
+    /// it again after a load.
+    #[serde(skip)]
+    pub story: Option<std::sync::Arc<super::triggers::Story>>,
 }
 
 /// What an AI army's step needs of the hero: the cells it may not enter (his logical cell
@@ -646,6 +658,8 @@ impl Game {
         let clock = world.start;
         let wide_row = content.formation == super::formation::Formation::WIDE;
         let mut g = Game {
+            triggers: TriggerState::default(),
+            story: None,
             experimental: content.experimental,
             squad,
             gold: 0,
@@ -1644,7 +1658,15 @@ impl Game {
             let stepping = self.moving();
             let go = if stepping {
                 walked = true;
-                self.hero_step(&mut events)
+                let from = self.tile();
+                let go = self.hero_step(&mut events);
+                // A package's cell moment runs after the step's own events (`rules::triggers`).
+                let to = self.tile();
+                if to != from {
+                    let story = self.story_events(When::HeroEnters(Place::Cell(to.0, to.1)));
+                    events.extend(story);
+                }
+                go
             } else {
                 waited = true;
                 match self.endless_wait.as_mut() {
@@ -1755,6 +1777,9 @@ impl Game {
                 if !self.world.locations[l].owned() {
                     self.world.give_to_player(l);
                     events.push(Event::Captured(l));
+                    let id = self.world.locations[l].id;
+                    let story = self.story_events(When::BuildingCaptured(id));
+                    events.extend(story);
                 }
             }
             None => {}
@@ -1955,6 +1980,9 @@ impl Game {
         self.recount_hero();
         events.push(Event::Arrived(l));
         events.extend(self.auto_tribute(l));
+        let id = self.world.locations[l].id;
+        let story = self.story_events(When::HeroEntersBuilding(id));
+        events.extend(story);
     }
 
     /// What stops or changes the hero's step onto `next` (world.md §4.2, 0x4ad94c), in this
@@ -2150,6 +2178,7 @@ impl Game {
             Tick::Noon(_) => None,
         }).collect();
         frame_probe::time(Stage::Armies, || self.move_armies(minutes, start, &midnights, events));
+        let days: Vec<u64> = ticks.iter().filter_map(|t| if let Tick::Midnight(d) = t { Some(*d) } else { None }).collect();
         for tick in ticks {
             match tick {
                 Tick::Midnight(_) => {}
@@ -2176,6 +2205,11 @@ impl Game {
                 // with no report (no wages, no income) writes none (0x4abfbc).
                 self.autosave_due = Some(super::save::date_name(&self.clock));
             }
+        }
+        // Package moments of each midnight, after the scenario's events (`rules::triggers`).
+        for day in days {
+            let story = self.story_midnight(day);
+            events.extend(story);
         }
     }
 
@@ -2474,6 +2508,7 @@ impl Game {
     /// [`Game::drain_events`].
     pub fn resolve_battle(&mut self, battle: &Battle) -> BattleResult {
         crate::diag::play(&self.clock.label(), &format!("BATTLE log:\n  {}\nBATTLE ends: {:?} after {} turns", battle.log.join("\n  "), battle.outcome(), battle.round));
+        let before = self.story_battle_snapshot();
         let result = self.settle_battle(battle);
         // A building taken from its garrison is not entered: he fought it from the cell
         // before it and stays there, outside it (the original's entered building 0x68dc74
@@ -2481,6 +2516,10 @@ impl Game {
         // under Wine on РК1's ruins).
         let after = self.run_script();
         self.pending.extend(after);
+        if let Some(before) = before {
+            let events = self.story_battle_end(before);
+            self.pending.extend(events);
+        }
         result
     }
 

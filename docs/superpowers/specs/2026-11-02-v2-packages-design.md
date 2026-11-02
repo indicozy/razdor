@@ -191,3 +191,11 @@ gaps to close:
   breaking changes, older formats keep loading.
 - **Visual editor**: creation is agent + text for now; the map editor may open packages later.
 - **Wiki**: ru/en pages for creators once slice 1 ships.
+- **Trigger wishes left out of slice 1 step 3 (2026-11-02)**: AI army speed (wish 5), an AI army's
+  goal (14, the goal half: the army's position is in), the hero's map figure (12), branching
+  campaigns (10, slice 2). Garrisons only where `add_units`, `set_faction` and `set_relation`
+  take `of = "building"`: spells on garrisons (1, 7, 9), named characters in AI armies and
+  garrisons (2), items and experience of garrisons (3, 8). Their holders need the garrison's
+  troops as a holder kind in `rules::triggers` (the code has the troops, not yet the holder).
+  What the runtime needs to meet a real map: the map format's army and building ids (`Resolve`),
+  and the save's package id and version (a saved story is attached again after a load).

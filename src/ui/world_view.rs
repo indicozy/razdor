@@ -2681,7 +2681,7 @@ fn play_event(game: &Game, event: &Event) {
 fn describe(event: &Event, game: &Game) -> Option<String> {
     match event {
         // An event's spell writes nothing: the original shows only its effect.
-        Event::NewDay(_) | Event::Captured(_) | Event::Script(_) | Event::EventSpell { .. } => None,
+        Event::NewDay(_) | Event::Captured(_) | Event::Script(_) | Event::EventSpell { .. } | Event::Package(_) => None,
         Event::SpellCast { spell, target, outcome } => game.spell(*spell).map(|s| super::spellbook::landed(s, *target, *outcome)),
         Event::Tribute { paid, mana, .. } => Some(match paid {
             razdor::rules::game::Tribute::Gold(g) => trf!("The village pays its tribute: {g} gold and {mana} mana.", g, mana),
@@ -2766,6 +2766,8 @@ pub(super) fn handle_events(game: &mut Game, events: Vec<Event>, message: &mut O
             // A level gained is silent: `Unit-Upgrade` is the promotion screen's (0x4b1af8).
             Event::LevelUp(..) => {}
             Event::Script(o) => story::show(game, &o, dialogs),
+            // A package's dialog (`rules::triggers`): its window, answered in `App::frame`.
+            Event::Package(pd) => dialogs.push_back(story::package_dialog(game, &pd)),
         }
     }
     if let Some(Screen::Building(v)) = next.as_mut() {
