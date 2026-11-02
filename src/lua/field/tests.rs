@@ -237,3 +237,33 @@ fn a_result_too_deep_or_too_long_is_rejected() {
     let (fb, _h) = play(&[("long", long)], "long", &[1], &[4]);
     assert!(fb.state.script_error.as_deref().unwrap().contains("entries"));
 }
+
+#[test]
+fn a_table_shared_many_times_or_cyclic_is_rejected_quickly() {
+    // One table reached through 1,000 references at depth 2: the second reach is refused.
+    let shared = "function ai_turn(s)\n  local t = { x = 1, y = 1 }\n  local r = {}\n  for i = 1, 1000 do r[i] = t end\n  return { move = r }\nend";
+    let (mut fb, mut h) = play(&[("shared", shared)], "shared", &[1, 6], &[4, 6]);
+    assert_eq!(fb.play_auto(&mut *h), Some(Side::Defenders));
+    assert!(fb.state.script_error.as_deref().unwrap().contains("twice"));
+
+    let cyclic = "function ai_turn(s)\n  local t = {}\n  t.move = t\n  return t\nend";
+    let (mut fb, mut h) = play(&[("cyclic", cyclic)], "cyclic", &[1, 6], &[4, 6]);
+    assert_eq!(fb.play_auto(&mut *h), Some(Side::Defenders));
+    assert!(fb.state.script_error.as_deref().unwrap().contains("twice"));
+}
+
+#[test]
+fn a_result_with_many_entries_across_tables_is_capped_in_total() {
+    // Four levels of 16 tables of 16 entries each would be 65,536 entries: the total cap refuses it.
+    let src = r#"
+        function setup(s)
+          local tiles = {}
+          for i = 1, 4000 do tiles[i] = { x = 1, y = 1, tile = 'open' } end
+          local other = {}
+          for i = 1, 4000 do other[i] = i end
+          return { tiles = tiles, log = other }
+        end
+    "#;
+    let (fb, _h) = play(&[("total", src)], "total", &[1], &[4]);
+    assert!(fb.state.script_error.as_deref().unwrap_or("").contains("entries"), "{:?}", fb.state.script_error);
+}

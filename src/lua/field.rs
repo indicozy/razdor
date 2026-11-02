@@ -253,23 +253,42 @@ pub fn check_battle_script(scripts: &Scripts, script: &str) -> Result<(), String
 /// `__index` or `__pairs` would run Lua outside the call's budget), every table is at most
 /// [`MAX_ENTRIES`] entries and [`MAX_DEPTH`] levels deep. Keys and values are read raw.
 const MAX_ENTRIES: usize = 4096;
+const MAX_TOTAL: usize = 16_384;
 const MAX_DEPTH: usize = 4;
 
+/// The walk of a result: the entries counted across the whole result, and the tables seen (a
+/// table reached twice, shared or cyclic, is refused).
+#[derive(Default)]
+struct Walk {
+    total: usize,
+    seen: std::collections::HashSet<usize>,
+}
+
 fn vet(v: &Value, depth: usize) -> Result<(), String> {
+    vet_in(v, depth, &mut Walk::default())
+}
+
+fn vet_in(v: &Value, depth: usize, walk: &mut Walk) -> Result<(), String> {
     let Value::Table(t) = v else { return Ok(()) };
     if depth > MAX_DEPTH {
         return Err(format!("a table nested deeper than {MAX_DEPTH} levels"));
     }
+    if !walk.seen.insert(t.to_pointer() as usize) {
+        return Err("a table that appears twice in the result (shared or cyclic), which is not allowed".into());
+    }
     if t.metatable().is_some() {
         return Err("a table with a metatable, which is not allowed in a hook's result".into());
     }
-    let mut seen = 0usize;
+    let mut count = 0usize;
     let mut problem: Option<String> = None;
     let walked = t.for_each::<Value, Value>(|k, val| {
-        seen += 1;
-        if seen > MAX_ENTRIES {
+        count += 1;
+        walk.total += 1;
+        if count > MAX_ENTRIES {
             problem = Some(format!("a table of more than {MAX_ENTRIES} entries"));
-        } else if let Err(m) = vet(&k, depth + 1).and_then(|_| vet(&val, depth + 1)) {
+        } else if walk.total > MAX_TOTAL {
+            problem = Some(format!("a result of more than {MAX_TOTAL} entries"));
+        } else if let Err(m) = vet_in(&k, depth + 1, walk).and_then(|_| vet_in(&val, depth + 1, walk)) {
             problem = Some(m);
         }
         if problem.is_some() {
