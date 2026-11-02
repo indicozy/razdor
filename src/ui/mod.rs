@@ -676,7 +676,7 @@ impl App {
                 // A field battle saved under way reopens its screen (its state is the game's; the
                 // placeholder battle is not played); a DT battle pending starts as before.
                 self.screen = if game.field_active() {
-                    Screen::Field(Box::new(field_view::FieldScreen::default()))
+                    Screen::Field(Box::default())
                 } else if game.foe.is_some() {
                     Screen::Battle(Box::new(BattleView::new(game.start_battle())))
                 } else {

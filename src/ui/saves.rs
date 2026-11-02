@@ -252,7 +252,7 @@ pub fn battle(game: &mut Game, session: Option<&mut super::session::Keeper>) -> 
     let placeholder = game.start_battle();
     // A field battle (the package's script) is driven by its own screen; the placeholder is not played.
     if game.field_active() {
-        return Screen::Field(Box::new(super::field_view::FieldScreen::default()));
+        return Screen::Field(Box::default());
     }
     let mut view = BattleView::new(placeholder);
     view.restart_state = state;

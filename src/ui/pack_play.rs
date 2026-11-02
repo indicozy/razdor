@@ -102,6 +102,20 @@ impl App {
             if matches!(game.triggers.vars.get("salt_disguise"), Some(razdor::pack::triggers::VarValue::Bool(true))) {
                 game.hero_figure = razdor::pack::triggers::model_code("bandits").ok();
             }
+            // `RAZDOR_PACK_NODIALOG=1`: the story's opening events are dropped, so no dialog is up (the 2.5D
+            // view is drawn only with no dialog open). `RAZDOR_PACK_DIALOG=<id>`: that dialog is open, with
+            // all its choices (a shot of a dialog the story reaches later, e.g. the council).
+            if std::env::var("RAZDOR_PACK_NODIALOG").is_ok_and(|v| v == "1") {
+                let _ = game.drain_events();
+            }
+            if let Ok(id) = std::env::var("RAZDOR_PACK_DIALOG") {
+                if let Some(def) = game.story_dialog(&id) {
+                    let choices = def.choices.iter().map(|c| c.id.clone()).collect();
+                    let pd = razdor::rules::triggers::PendingDialog { id: id.clone(), choices };
+                    self.dialogs.clear();
+                    self.dialogs.push_back(super::story::package_dialog(&game, &pd));
+                }
+            }
             // `RAZDOR_PACK_REVEAL=1`: the map is revealed (the cheat «reveal»), to judge its layout in a shot.
             if std::env::var("RAZDOR_PACK_REVEAL").is_ok_and(|v| v == "1") {
                 let _ = razdor::rules::cheats::run(&razdor::rules::cheats::Cheat::Reveal, Some(&mut game), None);

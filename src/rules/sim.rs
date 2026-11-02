@@ -56,8 +56,11 @@ pub struct FieldFight {
     pub gates: Vec<((i32, i32), i32, i32)>,
 }
 
+/// The HP of each gate tile, by its cell.
+type GateHps = Vec<((i32, i32), i32)>;
+
 /// The defenders' HP and their maximum, and the gates' cells and HP, of a field battle's snapshot.
-fn field_hp(s: &crate::rules::field::Snapshot) -> (i32, i32, Vec<((i32, i32), i32)>) {
+fn field_hp(s: &crate::rules::field::Snapshot) -> (i32, i32, GateHps) {
     use crate::rules::field::board::Tile;
     let (mut hp, mut max) = (0, 0);
     for u in s.units.iter().filter(|u| u.side == Side::Defenders) {

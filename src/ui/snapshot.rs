@@ -583,7 +583,7 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
                         }
                     }
                 }
-                app.screen = Screen::Field(Box::new(super::field_view::FieldScreen::default()));
+                app.screen = Screen::Field(Box::default());
                 return Ok(());
             }
             let content = app.dt_content.clone().unwrap_or_else(|| std::sync::Arc::new(razdor::rules::content::Content::builtin()));

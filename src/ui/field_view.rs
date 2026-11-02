@@ -991,7 +991,7 @@ mod tests {
         }
         assert!(d.outcome().is_some(), "a side holds the field");
         assert!(!d.auto_step(), "nothing is played after the end");
-        assert!(d.log(40, "en").iter().any(|l| l.contains("the battle is over")));
+        assert!(d.log(40, "en").iter().any(|l| l.contains("hold the field")), "the outcome is in the log");
     }
 
     #[test]
