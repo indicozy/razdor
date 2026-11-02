@@ -242,6 +242,12 @@ mod tests {
     use crate::rules::triggers::{Ending, Trace, When};
     use std::sync::Arc;
 
+    /// The story seed the chapter tests play with. A package's own seed comes from its hash (every
+    /// file), so any content edit would re-roll chapter 1's dread and omens; the tests pin this one
+    /// (the value the package had when they were written), so only a change to the story itself can
+    /// move them.
+    const CHAPTER_ONE_SEED: u32 = 2517464231;
+
     /// Chapter 1 «Брод» of the reference package, on the install (skipped without `RAZDOR_DT_DIR`).
     /// The moments are raised the way the hero's steps and the battles raise them: `story_events`
     /// for a step onto a cell, `story_battle_end` for a battle the army lost (its `beaten_armies`
@@ -250,7 +256,8 @@ mod tests {
         let dir = std::env::var_os(crate::dt::install::ENV_VAR)?;
         let install = DtInstall::load(Path::new(&dir)).unwrap_or_else(|e| panic!("{e}"));
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/packs/pepelnaya-marka");
-        let opened = open(&root, Some("brod"), "en", &install).unwrap_or_else(|e| panic!("{e}"));
+        let mut opened = open(&root, Some("brod"), "en", &install).unwrap_or_else(|e| panic!("{e}"));
+        opened.story.seed = CHAPTER_ONE_SEED;
         let content = Arc::new(Content::from_dt(&install).with_package(opened.units.clone(), opened.items.clone()));
         let mut g = Game::from_scenario(content, &opened.scenario, HeroClass::Knight);
         g.triggers.trace = Some(Vec::new());
