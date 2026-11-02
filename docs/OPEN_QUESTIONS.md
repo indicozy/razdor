@@ -8,6 +8,13 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **Siege balance: the dead cannot reach the breach** (2026-11-02, the abbey siege, `scripts/siege.lua`). With
+  the spec's rules (rubble costs 2 manevres, the dead have 1, the breach is one cell), the defenders win every
+  sim seed at the turn limit (seeds 1 to 5: 5 of 5). Gate HP 20 and 120, a collapse to open ground and a
+  two-tile collapse did not move it. Owner's call: a unit with its full manevres may always step onto one
+  rubble tile (a rules change in `rules::field::board`), or a wider breach, or rubble costs 1. Until then the
+  siege is a defenders' fight in practice.
+
 - **Package maps: relations and the defaults of a map** (2026-11-02, slice 1 step 2 of 2.0). `map.toml`
   requires the four-by-four faction relation matrix; the example's values are a guess, not a shipped
   map's. The original's typical matrix (a shipped map's header at 0xDE) would make a better default.

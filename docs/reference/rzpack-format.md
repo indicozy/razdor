@@ -262,6 +262,7 @@ then = [ { give_gold = -20 } ]                      # optional actions
 | `victory` | `= true`, `next = "<map>"` | the same victory, and the campaign goes to that map (the override of `campaign.toml`, «Campaigns») |
 | `travel` | `= "<map>"`, `at = "<point-id>"` (optional) | the campaign leaves this map for that one, at its point (else its start), once the dialogs are read («Campaigns») |
 | `ending` | `= "<dialog-id>"` | the dialog shows, then the campaign ends with it («Campaigns») |
+| `start_battle` | the army is the value, `rules = "dt"` or `"lua:<script>"` | the army meets the hero now, in that battle (a field battle for a script; «Field battles») |
 
 Units and items are `dt:<alias>` or the package's own ids; spells are `dt:spell/<alias>`. A
 «holder» is `player`, `pack`, an army id, `named:<id>` or a garrison (`garrison = "<building>"`).
@@ -632,4 +633,87 @@ does not run inside it, and its cost grows like n^(items+1) in the subject lengt
 or a table. A single C call that is already running is not interrupted.
 
 The field battle hooks (`setup`, `on_turn_start`, `on_damage`, `can_enter`, `check_end`, `ai_turn`)
-are described under «Field battles» once the battle is in place.
+are described under «Field battles» below.
+
+## Field battles
+
+A field battle replaces the DT battle for one fight: a small board, the same DT units (their stats
+and the DT damage formula), and the package's Lua deciding the terrain and, when it asks, the
+actions. The rules are `src/rules/field/` (no Lua), the Lua side `src/lua/field.rs`, the game's seam
+`src/rules/game/battle_field.rs`; the flow is in `docs/flows/field-battle.md`.
+
+**Choosing it.** An army's battle in its map: `battle = "dt"` (the default) or `battle = "lua:<script>"`
+(`[[army]]` in `map.toml`). A trigger's action `{ start_battle = "<army>", rules = "dt" | "lua:<script>" }`
+starts the meeting with that army now and overrides the army's own. `razdor-pack check` reads both
+and requires the script to load and to define `setup` and `check_end`.
+
+**The script.** `scripts/<script>.lua` in the package, the same sandbox as the rest of the package's
+Lua (its libraries, its budgets, `require` of the package's own scripts). Each hook is a global
+function, and each is optional:
+
+| Hook | Called | Returns |
+|---|---|---|
+| `setup(s)` | once, when the battle opens | nil, or `{ tiles = {…}, place = {…}, max_turns = n, vars = {…} }` |
+| `on_turn_start(s)` | at the start of each turn, after the order is set | nil, or `{ tiles = {…}, log = {"text.key", …}, vars = {…} }` |
+| `on_damage(s, d)` | before each blow or shot lands | nil (the DT damage), or the damage as a whole number |
+| `can_enter(s, m)` | before a unit steps onto a cell | nil, or `false` to refuse the step |
+| `check_end(s)` | after each action, and at the turn limit | nil (play on), `"defenders"`, or `"attackers"` |
+| `ai_turn(s)` | when an AI unit (`s.active`) acts, for both sides | nil (the Rust AI), or `{ move = {x,y}, attack = {unit = id} \| {gate = {x,y}} }` |
+
+**The view `s`** (read only: a write is a Lua error; the tables are proxies):
+
+| Field | Meaning |
+|---|---|
+| `s.round`, `s.max_turns` | the turn now, and the turn limit (12 unless `setup` sets it) |
+| `s.active` | the id of the unit that acts (nil outside a unit's action) |
+| `s.board.w`, `s.board.h` | the board's size (at most 12 × 10) |
+| `s.board.tiles` | the tiles as names, row by row: the tile at `x, y` is `tiles[y * w + x + 1]` |
+| `s.board.gates` | `{x, y, hp}` for each standing gate |
+| `s.units` | the units, `s.units[id + 1]` is unit `id` (0 to n-1, defenders and attackers together) |
+| `s.vars` | the package's variables the battle keeps (see below) |
+
+A unit: `id`, `side` (`"defenders"` = the hero's side, `"attackers"`), `name`, `level`, `hp`, `max_hp`,
+`attack_blow`, `attack_shot`, `defence_blow`, `defence_shot`, `initiative`, `manevres`, `shot_range`
+(the farthest shot in tiles, 6 for a shooter; a battlement adds 2 more when the shooter stands on one),
+`at` (`{x, y}`, nil when off the board) and `alive`.
+
+**Tiles.** `"open"` (1 manevre a step), `"wall"` (blocks movement and fire), `"gate"` with `hp` (blocks
+until broken: a blow takes the unit's blow off its HP, and at 0 it is rubble), `"battlement"` (walkable;
+a shooter on it shoots over walls and reaches 2 tiles further), `"rubble"` (2 manevres a step). A
+`setup` or `on_turn_start` entry is `{x = n, y = n, tile = "wall"}`, and a gate is `{…, tile = "gate", hp = 60}`.
+
+**Helpers** (in `razdor`; they read the board as it is now, and avoid the cells units stand on):
+
+| Helper | Gives |
+|---|---|
+| `razdor.path({x,y}, {x,y})` | the cheapest path as a list of `{x, y}` (both ends included), or nil |
+| `razdor.distance(a, b)` | the Manhattan distance, a whole number |
+| `razdor.line_of_fire(a, b)` | whether a shot from `a` reaches `b` (a clear line; a battlement shoots over walls) |
+| `razdor.vars` | the package variables (read only; the same as `s.vars`) |
+| `razdor.sorted_pairs(t)` | `pairs` in a fixed order (as elsewhere in the package) |
+
+**Variables.** `vars = {name = value}` returned by a hook is kept by the battle and saved with it;
+the next hook sees it in `s.vars`. A script keeps its memory this way, not in Lua globals (a load
+starts a new Lua state). Values are numbers, strings or booleans.
+
+**Rules the script does not change.** A move costs the unit's manevres (rubble 2, a unit cannot pass
+another, a cell with a unit on it cannot be entered). Melee is a blow on an adjacent unit or gate; a
+shot needs a clear line within the shooter's range. The side with nobody standing loses. At the turn
+limit `check_end` decides, and if it says nothing the defenders win. A unit that cannot act (its move or
+target is off the board, blocked or out of reach) waits.
+
+**Errors.** A hook that raises an error, returns a value of the wrong kind, or returns a table with a
+metatable, nested deeper than 4 levels, with more than 4,096 entries in one table or 16,384 in all, or
+with a table that appears twice, ends the battle as a defenders' win. The log and the save hold the
+error with its script and line (`scripts/siege.lua:12: …`). Nothing panics.
+
+**The end.** When the battle is decided, the game settles it as a DT battle does (`resolve_battle`):
+deaths, experience, loot and the campaign. The units' HP is written back after each action.
+
+**Checks (`razdor-pack check`).** Every `scripts/*.lua` must load (a syntax error names its line). A
+battle that names a script must find it, and it must define `setup` and `check_end`.
+
+**Sim (`razdor-pack sim`).** A field battle is played on the AI (both sides) when it starts. With
+`--trace` the sim prints each field battle's rounds and winner; `--seed <n>` sets the seed of the
+story (and so of the field battles). The example `siege-test` map is the test: `razdor-pack sim
+examples/packs/pepelnaya-marka --map siege-test --trace --seed 1`.

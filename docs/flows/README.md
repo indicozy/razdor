@@ -21,6 +21,7 @@ Razdor implements them.
 | Saving and loading, the load window, adding state that must survive a save | [saves.md](saves.md) |
 | Tests, real-data tests and difftests, offscreen screenshots, profiling a hitch, releases, updates, the editor | [testing-and-tools.md](testing-and-tools.md) |
 | Experimental scenario rules (the `...` button on the scenario screen), noncombatants, the Shift shortcuts, the route option «Обход армий на пути» | [experimental-rules.md](experimental-rules.md) |
+| A field battle (a package's own battle run by Lua: the board, its hooks, the siege), the battle screen's field methods | [field-battle.md](field-battle.md), then [battle.md](battle.md) |
 | A player's report | the `player-report` skill, then the flow of the area |
 
 ## Where the truth is
