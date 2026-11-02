@@ -889,10 +889,28 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     // The title strip's growth: the window is taller by it, and its frame and content move down.
     let grow = chrome::title_grow();
     let (w, h) = (f.w * o, f.h * o + grow + footer_grow(o));
-    // The window is the content plus `pad` on every side (the learnt-spell window, phone upright).
-    let (x, y) = event_origin(sw, sh, chrome::bar_height(), w + 2.0 * pad, h + 2.0 * pad);
-    let (x, y) = (x + pad, y + pad);
-    let outer = Rect::new(x - pad, y - pad, w + 2.0 * pad, h + 2.0 * pad);
+    // The learnt-spell window held upright keeps a slot above its content for the spell card (the
+    // owner's note of 2026-11-02, the mockup's card under the title): `pad` clear of the title strip,
+    // the window's sides and the content below it. The card shown there is the tapped spell's, else
+    // the first one learnt.
+    let spell_text = super::display::spell_tip_text_for(chrome::k(), o, TEXT_REF);
+    let card_size = |id: u32| -> Option<(f32, f32)> {
+        let g = game?;
+        let s = g.content.spells.iter().find(|s| s.id == id)?;
+        let (cw, ch) = super::spellbook::spell_tip_size(g, s, o, spell_text);
+        Some((cw + 2.0 * card_pad(pad), ch + 2.0 * card_pad(pad)))
+    };
+    // The window has no text, so the card takes its empty text box's place: the slot adds only what the
+    // card needs beyond the box (and the box's gap under it).
+    let box_room = (f.box_h + 10.0) * o;
+    let card_h = d.spells.iter().filter_map(|&id| card_size(id)).map(|c| c.1).fold(0.0, f32::max);
+    let slot_h = if pad > 0.0 { (card_h + pad - box_room).max(0.0) } else { 0.0 };
+    let card_slot = pad > 0.0;
+    // The window is the content plus `pad` on every side (the learnt-spell window, phone upright),
+    // and the card's slot above the content.
+    let (x, y) = event_origin(sw, sh, chrome::bar_height(), w + 2.0 * pad, h + 2.0 * pad + slot_h);
+    let (x, y) = (x + pad, y + pad + slot_h);
+    let outer = Rect::new(x - pad, y - pad - slot_h, w + 2.0 * pad, h + 2.0 * pad + slot_h);
     // The defeat look is the red marble (the original's window after a lost battle).
     let skin = if d.defeat { chrome::Skin::Red } else { chrome::Skin::Marble };
     if d.defeat || d.resource_report {
@@ -934,7 +952,10 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     }
     cy += pic_h;
     let tb = Rect::new(x + f.box_x * o, cy, f.box_w * o, f.box_h * o);
-    chrome::text_box(tb);
+    // The learnt-spell window held upright draws its spell card there instead of the empty box.
+    if !card_slot {
+        chrome::text_box(tb);
+    }
     let first = scrolled(d, total, shown, tb, o);
     let shown_h = lines.iter().skip(first).take(shown).map(|_| line).sum::<f32>() + rows.iter().skip(first).take(shown).map(row_h).sum::<f32>();
     let mut ty = tb.y + ((tb.h - shown_h) / 2.0).max(EVENT_PAD * o).floor() + EVENT_BASELINE * t;
@@ -1093,23 +1114,17 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
             } else {
                 super::item_text::tooltip_size(game, ItemId(id), o)
             };
+            // The learnt-spell window held upright: the card's paper gets `card_pad` around its content.
+            let (pw, ph) = if pad > 0.0 && spell { (pw + 2.0 * card_pad(pad), ph + 2.0 * card_pad(pad)) } else { (pw, ph) };
             let px = (at.x - pw / 2.0).clamp(x + 10.0, (x + w - 10.0 - pw).max(x + 10.0));
             let py = (at.y - ph / 2.0).clamp(y + 10.0, (y + h - 10.0 - ph).max(y + 10.0));
             // On a phone the card goes above the finger, clear of it (`popup::placed`).
             let card = super::popup::placed(Rect::new(px, py, pw, ph), (at.x, at.y), (pw, ph));
-            // The learnt-spell window held upright: the card stays inside the window, `pad` clear of
-            // its sides and of its title strip (the owner's note of 2026-11-02, the mockup's inset card).
-            let card = if pad > 0.0 {
-                let inset = pad + 4.0 * o;
-                let top = outer.y + 31.0 * o + grow + pad;
-                let cx = card.x.clamp(outer.x + inset, (outer.x + outer.w - inset - card.w).max(outer.x + inset));
-                let cy = card.y.clamp(top, (outer.y + outer.h - inset - card.h).max(top));
-                Rect::new(cx, cy, card.w, card.h)
-            } else {
-                card
-            };
+            let card = if pad > 0.0 && spell { learnt_slot(outer, o, grow, pad, (card.w, card.h)) } else { card };
             Some((spell, id, card))
         }
+        // The learnt-spell window held upright: the first spell's card fills the slot until one is tapped.
+        _ if card_slot => d.spells.first().and_then(|&id| card_size(id).map(|c| (true, id, learnt_slot(outer, o, grow, pad, c)))),
         _ => None,
     };
     if d.question {
@@ -1119,7 +1134,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
         let (yes_x, no_x) = question_buttons_x(x, w, bw);
         let yes = button(yes_x, by, bw, bh, tr("Yes"), !tip_covers(tip.map(|t| t.2), p, Rect::new(yes_x, by, bw, bh))) || answer == Some(true);
         let no = button(no_x, by, bw, bh, tr("No"), !tip_covers(tip.map(|t| t.2), p, Rect::new(no_x, by, bw, bh))) || answer == Some(false);
-        draw_tip(tip, game, assets, o);
+        draw_tip_padded(tip, game, assets, o, card_pad(pad));
         return if yes {
             Some(Close::Yes)
         } else if no {
@@ -1172,7 +1187,7 @@ fn draw_content(d: &Dialog, assets: &Assets, game: Option<&Game>) -> Option<Clos
     if super::widgets::ok_key_pressed() {
         d.key_down.set(true);
     }
-    draw_tip(tip, game, assets, o);
+    draw_tip_padded(tip, game, assets, o, card_pad(pad));
     if load {
         return Some(Close::LoadLast);
     }
@@ -1192,14 +1207,31 @@ fn ok_button_large(r: Rect, label: &str, enabled: bool, dp: f32) -> bool {
 
 /// The item or spell card shown over a window (`draw_content`, `draw_village_event`): a spell's
 /// card or an item's tooltip, its rectangle `card` (already placed), drawn with its shadow.
+/// The spell card's place in the learnt-spell window held upright: centred under the title strip,
+/// `pad` below it, no wider than the window less `pad` on each side.
+fn learnt_slot(outer: Rect, o: f32, grow: f32, pad: f32, (w, h): (f32, f32)) -> Rect {
+    let w = w.min(outer.w - 2.0 * (pad + 4.0 * o));
+    Rect::new(outer.x + (outer.w - w) / 2.0, outer.y + 31.0 * o + grow + pad, w, h)
+}
+
+/// The inner padding of the spell card in the learnt-spell window held upright (0 elsewhere).
+fn card_pad(window_pad: f32) -> f32 {
+    window_pad * 0.8
+}
+
 fn draw_tip(tip: Option<(bool, u32, Rect)>, game: Option<&Game>, assets: &Assets, o: f32) {
+    draw_tip_padded(tip, game, assets, o, 0.0)
+}
+
+/// [`draw_tip`] with the spell card's inner padding `pad` (the learnt-spell window held upright).
+fn draw_tip_padded(tip: Option<(bool, u32, Rect)>, game: Option<&Game>, assets: &Assets, o: f32, pad: f32) {
     let (Some((spell, id, card)), Some(game)) = (tip, game) else {
         return;
     };
     draw_rectangle(card.x + 8.0, card.y + 8.0, card.w, card.h, Color::new(0.0, 0.0, 0.0, 0.45));
     if spell {
         if let Some(s) = game.content.spells.iter().find(|s| s.id == id) {
-            super::spellbook::spell_tip_card(game, s, card, o, super::display::spell_tip_text_for(chrome::k(), o, TEXT_REF));
+            super::spellbook::spell_tip_card_padded(game, s, card, o, super::display::spell_tip_text_for(chrome::k(), o, TEXT_REF), pad);
         }
     } else {
         super::item_text::draw(game, assets, ItemId(id), card, super::item_text::ItemBox::Tooltip, o);

@@ -497,6 +497,17 @@ pub fn spell_tip_card(game: &Game, s: &SpellDef, r: Rect, o: f32, text: f32) {
     spell_card_at(game, s, r, true, text, tip_side(o));
 }
 
+/// [`spell_tip_card`] with `pad` px of the card's paper around its picture and text (the learnt-spell
+/// window held upright on a phone, Razdor's: the owner's note of 2026-11-02, the mockup's inset card).
+pub fn spell_tip_card_padded(game: &Game, s: &SpellDef, r: Rect, o: f32, text: f32, pad: f32) {
+    if pad <= 0.0 {
+        return spell_tip_card(game, s, r, o, text);
+    }
+    let red = game.mana < game.cast_cost(s).mana;
+    card_paper(r, card_fill(!red, false));
+    spell_card_at(game, s, Rect::new(r.x + pad, r.y + pad, r.w - 2.0 * pad, r.h - 2.0 * pad), true, text, tip_side(o));
+}
+
 /// The card's fonts (0x49bde4 → 0x49ba84; the SanSerif tints of 0x4dbc26, white less a delta).
 /// 0xae24c0, less (25, 25, 125): the effect text of a spell on the enemy; Razdor's bad entries.
 const EFFECT_YELLOW: Color = Color::new(230.0 / 255.0, 230.0 / 255.0, 130.0 / 255.0, 1.0);
