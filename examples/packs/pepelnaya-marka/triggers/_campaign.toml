@@ -1,0 +1,15 @@
+# Variables shared by every chapter of «Пепельная Марка»
+# (docs/superpowers/specs/2026-11-02-campaign-contract.md). They carry from map to map.
+[vars]
+ally = 0              # 0 none, 1 the Order of the Ash, 2 the marsh folk, 3 the Free Companies
+crown = 0             # standing with the Crown's garrison, -5..5
+order = 0             # standing with the Order of the Ash, -5..5
+companies = 0         # standing with the Free Companies, -5..5
+kord = 0              # Kord: 0 unmet, 1 hired, 2 betrayed, 3 friend
+ilm = 0               # Brother Ilm: 0 novice, 1 inquisitor path, 2 heretic path
+tess_joined = false   # Tess walks with the hero
+varga_alive = true    # Varga lives
+gates_open = 0        # waygates opened so far
+caravans_lost = 0     # caravans lost on the roads
+villages_burned = 0   # villages burned by anyone
+taint = 0             # how far the hero's host is tainted
