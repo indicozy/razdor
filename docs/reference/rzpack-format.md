@@ -438,9 +438,10 @@ is #rrggbb: not a terrain colour`. The default palette, one colour per engine su
 | `dry_plain` | `#c9b56a` | `impassable_snowdrifts` | `#c8d8e8` |
 
 Forests are objects (`trees`) over grass, not a terrain kind. Water (`shallows_fords`, `coastal_water`,
-`deep_sea`) is for ships; a walker crosses only the ford. Lava, the impassable swamp and the
-impassable snowdrifts block everything. A `[terrain_palette]` entry changes one kind's colour; two
-kinds may not share a colour.
+`deep_sea`) is for ships. Water is never walkable, fords included: a walker crosses a river only on a bridge
+(`stone_bridge`, `wooden_bridge`), one 1×1 building on each water cell of the crossing, in a row along it.
+Lava, the impassable swamp and the impassable snowdrifts block everything. A `[terrain_palette]` entry
+changes one kind's colour; two kinds may not share a colour.
 
 **Placement rules** (`razdor-pack check`). The hero, a town and a reach cell stand on land. An
 object is not on water. Only bridges (`stone_bridge`, `wooden_bridge`) stand on water among the
