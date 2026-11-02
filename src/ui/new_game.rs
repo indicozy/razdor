@@ -1282,10 +1282,11 @@ fn card_view(p: &Portrait, scenarios: &[ScenarioEntry], list: &[Group], picked: 
         let mut y = r.y + hh + 16.0 * k;
         let room = r.w - 12.0 * k;
         let orange = with_face(Face::Bold, || super::typography::Ink::Orange.color());
-        // Left-aligned and wrapped as the hub's text is (justified lines leave wide gaps at this size).
+        // Wrapped as the hub's text is, each line centred (the owner's note of 2026-11-02; justified
+        // lines leave wide gaps at this size).
         let lines = with_face(Face::Bold, || super::hub_view::wrap_long(&e.scenario.description, room, p.card_px));
         for l in &lines {
-            with_face(Face::Bold, || chrome::shadow_text(l, r.x + 6.0 * k, y, p.card_px, orange));
+            with_face(Face::Bold, || chrome::shadow_centered(l, r.x + r.w / 2.0, y, p.card_px, orange));
             y += p.card_step;
         }
         y - r.y + 10.0 * k
