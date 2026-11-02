@@ -114,7 +114,8 @@ pub fn page_count(spells: usize, per_page: usize) -> usize {
 /// least [`CARD_MIN_H`] tall with the 8 px gaps between and around them (a grid as tall as the
 /// landscape one gives its 5 rows).
 fn upright_rows(grid_h: f32) -> usize {
-    (((grid_h + 8.0) / (CARD_MIN_H + 8.0)).floor() as usize).max(1)
+    // n cards and n + 1 gaps: each card is (grid_h - (n + 1) * 8) / n tall, so n is at most (grid_h - 8) / 104.
+    (((grid_h - 8.0) / (CARD_MIN_H + 8.0)).floor() as usize).max(1)
 }
 
 /// The page `delta` pages from `page`, kept within the `pages` there are.
@@ -240,7 +241,12 @@ pub fn frame(
     // The bottom row (the filter button, and with more than one page the arrows and "N / M")
     // always leaves its 41 px under the grid, above the message line; its buttons grow with the
     // text size (`button_grow`, the owner's decision of 2026-10-31), and the grid gives them room.
-    let grid = Rect::new(inner.x, inner.y, inner.w, inner.h - 23.0 * k - bottom_row_h(k));
+    // Held upright the foot is [`phone_foot`]: a row of the filter and «Закрыть», and above it the page row.
+    let foot = upright.and_then(|_| super::display::dp_px()).map(|dp| phone_foot(inner, r.y + r.h, k, dp, super::display::button_grow()));
+    let grid = match foot {
+        Some(f) => f.grid,
+        None => Rect::new(inner.x, inner.y, inner.w, inner.h - 23.0 * k - bottom_row_h(k)),
+    };
     // The page's grid: 3 × 5 cells, or upright 2 columns and as many rows as the height keeps tall.
     let (cols, rows) = if upright.is_some() { (UPRIGHT_COLS, upright_rows(grid.h / k)) } else { (COLS, ROWS) };
     let per_page = cols * rows;
@@ -250,7 +256,9 @@ pub fn frame(
     // The filter's list: its book indices, paged; a new filter starts on its first page.
     let listed = shown(&enemy, *filter);
     let pages = page_count(listed.len(), per_page);
-    if bottom_row(r, inner, gap, k, pages, page, filter) {
+    let c = controls(r, inner, gap, k, foot);
+    let (filter_changed, close_pressed) = bottom_row(r, c, foot.map(|f| f.text), pages, page, filter);
+    if filter_changed {
         *page = 0;
     }
     *page = (*page).min(pages - 1);
@@ -346,7 +354,7 @@ pub fn frame(
             next = self::cast(game, s.id, CastTarget::Own, message);
         }
     }
-    if closed || key(KeyCode::Escape) || key(keymap::key(Action::SpellBook)) {
+    if closed || close_pressed || key(KeyCode::Escape) || key(keymap::key(Action::SpellBook)) {
         next = next.or(Some(Screen::WorldMap));
     }
     if let Some(m) = message.as_ref().filter(|_| next.is_none()) {
@@ -361,33 +369,116 @@ fn bottom_row_h(k: f32) -> f32 {
     18.0 * k * super::display::button_grow()
 }
 
+/// A held-upright book's foot (px): the grid, the page row above the bottom row, and the bottom row
+/// (the filter and «Закрыть»). `dp` is the phone's density, `text` the label's size.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PhoneFoot {
+    grid: Rect,
+    pages: Rect,
+    row: Rect,
+    dp: f32,
+    text: f32,
+}
+
+/// The held-upright foot's sizes (a phone choice): its buttons are 44 dp tall, 6 dp apart, the
+/// page arrows 72 dp wide, the filter takes 55% of the row's width, the labels 14 dp (grown with
+/// the text size). The page row is always kept, so the grid's rows do not change with the page count.
+const PHONE_BUTTON_DP: f32 = 44.0;
+const PHONE_GAP_DP: f32 = 6.0;
+const PHONE_ARROW_DP: f32 = 72.0;
+const PHONE_FILTER_SHARE: f32 = 0.55;
+const PHONE_TEXT_DP: f32 = 14.0;
+
+/// The held-upright book's foot in the window's `inner` rectangle (px), whose bottom is `bottom`:
+/// the bottom row 26 px (design, at scale `k`) above `bottom`, the page row above it, the grid
+/// above both with the 8 px gap. `grow` is the text size's button growth. Pure.
+fn phone_foot(inner: Rect, bottom: f32, k: f32, dp: f32, grow: f32) -> PhoneFoot {
+    let h = PHONE_BUTTON_DP * dp * grow;
+    let gap = PHONE_GAP_DP * dp;
+    let row = Rect::new(inner.x, bottom - 26.0 * k - h, inner.w, h);
+    let pages = Rect::new(inner.x, row.y - gap - h, inner.w, h);
+    let grid = Rect::new(inner.x, inner.y, inner.w, pages.y - 8.0 * k - inner.y);
+    PhoneFoot { grid, pages, row, dp, text: PHONE_TEXT_DP * dp * grow }
+}
+
+/// The book's controls and where they are: the filter button, the page arrows and the page label
+/// (its centre x, baseline y and size), and «Закрыть» (held upright only).
+struct Controls {
+    filter: Rect,
+    prev: Rect,
+    next: Rect,
+    label: (f32, f32, f32),
+    close: Option<Rect>,
+}
+
+/// The controls' places: on the desktop the bottom row (the filter at its left, the arrows at its
+/// right, "N / M" between them); held upright ([`PhoneFoot`]) the filter and «Закрыть» on the bottom
+/// row and the arrows and label on the page row above it.
+fn controls(r: Rect, inner: Rect, gap: f32, k: f32, foot: Option<PhoneFoot>) -> Controls {
+    match foot {
+        Some(f) => {
+            let row = f.row;
+            let filter = Rect::new(row.x + gap, row.y, ((row.w - 2.0 * gap) * PHONE_FILTER_SHARE).round(), row.h);
+            let close_x = filter.right() + gap;
+            let close = Rect::new(close_x, row.y, (row.right() - gap - close_x).max(0.0), row.h);
+            let p = f.pages;
+            let aw = PHONE_ARROW_DP * f.dp;
+            let prev = Rect::new(p.x + gap, p.y, aw, p.h);
+            let next = Rect::new(p.right() - gap - aw, p.y, aw, p.h);
+            Controls { filter, prev, next, label: (p.center().x, p.center().y + f.text * 0.36, f.text), close: Some(close) }
+        }
+        None => {
+            let row_h = bottom_row_h(k);
+            // The row's bottom edge stays 26 px above the window's bottom (at Normal: 44 px from it).
+            let row_y = r.y + r.h - 26.0 * k - row_h;
+            let aw = 26.0 * k;
+            let next = Rect::new(inner.right() - gap - aw, row_y, aw, row_h);
+            let prev = Rect::new(next.x - 6.0 * k - aw, row_y, aw, row_h);
+            let filter = Rect::new(inner.x + gap, row_y, 150.0 * k, row_h);
+            Controls { filter, prev, next, label: (inner.x + inner.w / 2.0, row_y + row_h * 0.72, 13.0 * k), close: None }
+        }
+    }
+}
+
+/// A book button: the desktop's [`button`], or held upright ([`PhoneFoot`]) a marble button with
+/// its label at `text` px (the dialogs' large OK's look). True when clicked this frame.
+fn book_button(b: Rect, label: &str, enabled: bool, text: Option<f32>) -> bool {
+    match text {
+        None => button(b.x, b.y, b.w, b.h, label, enabled),
+        Some(px) => {
+            let (_, down, pressed) = button_state(b, enabled);
+            super::chrome::marble_button_sized(b, label, enabled, down, px);
+            if pressed {
+                cue(Cue::Button);
+            }
+            pressed
+        }
+    }
+}
+
 /// The bottom row under the grid: the filter button at its left end (Razdor's choice, the
 /// owner's 2026-10-22), and with `pages` > 1 the two arrows at the right and "N / M" between
-/// them. The arrows, the wheel over the window, PageUp/PageDown and Left/Right turn `page` (the
-/// wheel up is the previous page); the filter button cycles `filter`. Returns true when the
-/// filter changed, so the caller starts its first page.
-fn bottom_row(r: Rect, inner: Rect, gap: f32, k: f32, pages: usize, page: &mut usize, filter: &mut BookFilter) -> bool {
+/// them; held upright also «Закрыть» (see [`controls`]). The arrows, the wheel over the window,
+/// PageUp/PageDown and Left/Right turn `page` (the wheel up is the previous page); the filter
+/// button cycles `filter`. Returns (the filter changed, so the caller starts its first page;
+/// «Закрыть» was pressed).
+fn bottom_row(r: Rect, c: Controls, text: Option<f32>, pages: usize, page: &mut usize, filter: &mut BookFilter) -> (bool, bool) {
     use super::chrome;
-    let row_h = bottom_row_h(k);
-    // The row's bottom edge stays 26 px above the window's bottom (at Normal: 44 px from it).
-    let row_y = r.y + r.h - 26.0 * k - row_h;
-    let fw = 150.0 * k;
     let mut changed = false;
-    if button(inner.x + gap, row_y, fw, row_h, filter.label(), true) {
+    if book_button(c.filter, filter.label(), true, text) {
         *filter = filter.next();
         changed = true;
     }
+    let close = c.close.is_some_and(|b| book_button(b, tr("Close"), true, text));
     if pages <= 1 {
-        return changed;
+        return (changed, close);
     }
-    let aw = 26.0 * k;
-    let next = Rect::new(inner.right() - gap - aw, row_y, aw, row_h);
-    let prev = Rect::new(next.x - 6.0 * k - aw, row_y, aw, row_h);
+    let (prev, next) = (c.prev, c.next);
     let mut delta: isize = 0;
-    if button(prev.x, prev.y, prev.w, prev.h, "<", *page > 0) {
+    if book_button(prev, "<", *page > 0, text) {
         delta -= 1;
     }
-    if button(next.x, next.y, next.w, next.h, ">", *page + 1 < pages) {
+    if book_button(next, ">", *page + 1 < pages, text) {
         delta += 1;
     }
     if mouse_in(r.x, r.y, r.w, r.h) {
@@ -406,8 +497,9 @@ fn bottom_row(r: Rect, inner: Rect, gap: f32, k: f32, pages: usize, page: &mut u
     }
     *page = page_turn(*page, pages, delta);
     let label = format!("{} / {}", *page + 1, pages);
-    chrome::shadow_centered(&label, inner.x + inner.w / 2.0, row_y + row_h * 0.72, 13.0 * k, chrome::CREAM);
-    changed
+    let (lx, ly, size) = c.label;
+    chrome::shadow_centered(&label, lx, ly, size, chrome::CREAM);
+    (changed, close)
 }
 
 /// Casts `spell` on `target`: the hero reads it on the map, and it lands when the reading is
@@ -755,21 +847,55 @@ mod tests {
     /// The upright book is 2 columns with as many rows as keep the cards as tall as the landscape's
     /// (96 px), so a 1080 × 2400 phone holds 2 × 10 cards per page; a grid as tall as the landscape's
     /// (530 px) gives its 5 rows, and no grid gives fewer than one row.
-    #[test]
-    fn a_phone_spellbook_in_portrait_has_two_columns_and_rows_that_fill_the_height() {
+    /// The held-upright book's window and its foot at a 1080 × 2400 phone: the window's rectangle
+    /// (`portrait_game`), its inner rectangle under a 26 px title strip, and the foot (`phone_foot`).
+    fn phone_book_foot() -> (f32, f32, Rect, PhoneFoot) {
         let dp = 2.75;
         let (sw, sh, top, bar, base) = (1080.0, 2400.0, 60.0, 150.0, 1.0);
         let video = super::window_layout::upright_book_video_at((sw, sh), Some(dp), top, bar, base, UPRIGHT_W).expect("held upright");
-        // The grid's design height: the window less the title strip (26 px), the bottom row (41 px).
-        let rows = upright_rows(video.1 - 26.0 - 3.0 - 41.0);
+        let (k, r) = super::window_layout::portrait_game((sw, sh), Some(dp), top, bar, base, video).expect("held upright");
+        let inner = Rect::new(r.x, r.y + 26.0 * k, r.w, r.h - 26.0 * k);
+        (k, dp, inner, phone_foot(inner, r.y + r.h, k, dp, 1.0))
+    }
+
+    /// The upright book is 2 columns with as many rows as keep the cards as tall as the landscape's
+    /// (96 px): the grid is the foot's, so a 1080 × 2400 phone's grid holds whole rows of cards at
+    /// least `CARD_MIN_H` tall, and no grid gives fewer than one row.
+    #[test]
+    fn a_phone_spellbook_in_portrait_has_two_columns_and_rows_that_fill_the_height() {
+        let (k, _, _, foot) = phone_book_foot();
+        let grid_h = foot.grid.h / k;
+        let rows = upright_rows(grid_h);
         assert_eq!(UPRIGHT_COLS, 2);
-        assert_eq!(rows, 10, "a 2400 px phone's grid holds 10 rows");
-        assert!((video.1 - 26.0 - 3.0 - 41.0 - 11.0 * 8.0) / rows as f32 >= CARD_MIN_H, "every card is at least as tall as the landscape's");
+        assert_eq!(rows, 8, "a 2400 px phone's grid holds 8 rows (16 cards) above the page row and the bottom row");
+        assert!((grid_h - (rows as f32 + 1.0) * 8.0) / rows as f32 >= CARD_MIN_H, "every card is at least as tall as the landscape's");
         assert_eq!(upright_rows(530.0), 5, "as tall as the landscape grid, the landscape's 5 rows");
         assert_eq!(upright_rows(0.0), 1, "never fewer than one row");
         // A phone's card is wider than tall, as the paper is (286 × 112): 2 columns of the 556 px grid.
         let cw = (UPRIGHT_W - 4.0 - 3.0 * 8.0) / UPRIGHT_COLS as f32;
         assert!(cw / CARD_MIN_H >= 2.0, "wide cards: {cw} × {CARD_MIN_H}");
+    }
+
+    /// Held upright, the book has «Закрыть» at the foot and a big filter button on the same row: both
+    /// are at least 44 dp tall, the row is under the page row and the page row under the grid, so no
+    /// button overlaps the grid, and the filter and «Закрыть» do not overlap each other.
+    #[test]
+    fn the_phone_spellbook_has_a_big_filter_and_a_close_button_under_the_grid() {
+        let (k, dp, inner, foot) = phone_book_foot();
+        let c = controls(Rect::new(inner.x, inner.y, inner.w, inner.h), inner, 8.0 * k, k, Some(foot));
+        let close = c.close.expect("held upright: a close button");
+        for (name, b) in [("filter", c.filter), ("close", close), ("prev", c.prev), ("next", c.next)] {
+            assert!(b.h >= 44.0 * dp - 0.01, "{name} is 44 dp tall or more: {} px", b.h);
+        }
+        assert!(c.filter.w > close.w && c.filter.w >= 150.0 * dp, "the filter is the big one: {} px", c.filter.w);
+        assert!(c.filter.right() < close.x, "the filter and Close do not overlap");
+        assert!(close.right() <= inner.right() && c.filter.x >= inner.x, "both inside the window's width");
+        assert_eq!(c.filter.y, close.y, "one row");
+        assert!(foot.grid.bottom() <= foot.pages.y, "the grid ends above the page row");
+        assert!(foot.pages.bottom() <= foot.row.y, "the page row is above the bottom row");
+        assert!(c.filter.y >= foot.grid.bottom() && close.y >= foot.grid.bottom(), "nothing overlaps the grid");
+        assert!(c.prev.x >= inner.x && c.next.right() <= inner.right(), "the page arrows inside the window");
+        assert!(c.prev.right() < c.label.0 && c.next.x > c.label.0, "the page label is between the arrows");
     }
 
     /// The desktop's book keeps its size: the landscape rectangle and the book's video size, and the
