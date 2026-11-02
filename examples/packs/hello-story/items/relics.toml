@@ -1,0 +1,7 @@
+# Items of the story: based on an item of the base game.
+[[item]]
+id = "dawn_sun"
+base = "dt:item/viking_sword"
+name = "item.dawn_sun.name"
+description = "item.dawn_sun.description"
+cost = 500

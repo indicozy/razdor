@@ -18,6 +18,8 @@ rustybuzz = "0.20"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["float_roundtrip"] }
 sha2 = "0.10.9"
+# The `.rzpack` package format (`pack`): its manifest, texts and content files.
+toml = { version = "0.9", features = ["serde"] }
 # Unpacking the game archive on the phones (`dt::unpack`): pure Rust, no deflate C code.
 sevenz-rust2 = { version = "0.20.2", default-features = false, features = ["ppmd"] }
 zip = { version = "9.1.0", default-features = false, features = ["deflate-flate2"] }
@@ -48,6 +50,13 @@ debug = "line-tables-only"
 [profile.dev.package."*"]
 opt-level = 2
 debug = false
+
+# The content package tool (src/bin/razdor-pack): checks a package folder or `.rzpack` and
+# generates the Latin alias table of the base game's content (`pack::aliases`).
+[[bin]]
+name = "razdor-pack"
+path = "src/bin/razdor-pack/main.rs"
+test = false
 
 # The map translator (src/bin/razdor-translate): its own window, built on Razdor's ui module.
 # Its unit tests are the library's (`razdor::translate`); the ui module's run with the game.

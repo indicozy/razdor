@@ -54,7 +54,7 @@ my-story/
   scripts/*.lua       # slice 3
 ```
 
-The exact schema is written in `docs/reference/rzpack-format.md` with the first code.
+The exact schema of the implemented subset is in [`docs/reference/rzpack-format.md`](../../reference/rzpack-format.md).
 
 ## The `razdor-pack` tool
 

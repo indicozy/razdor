@@ -1,0 +1,9 @@
+# Units of the story: based on a unit of the base game, with a few stats changed.
+[[unit]]
+id = "dawn_knight"
+base = "dt:knight"
+name = "unit.dawn_knight.name"
+description = "unit.dawn_knight.description"
+cost = 120
+hits = 14
+attack_blow = 3

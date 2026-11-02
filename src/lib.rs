@@ -6,6 +6,7 @@ pub mod difftest;
 pub mod i18n;
 #[cfg(target_os = "android")]
 pub mod jni;
+pub mod pack;
 pub mod platform;
 pub mod rules;
 pub mod search;

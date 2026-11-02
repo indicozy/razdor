@@ -1,0 +1,11 @@
+[story]
+title = "Hello, story"
+description = "A first package: one unit of the base game, changed, and one relic."
+
+[unit.dawn_knight]
+name = "Dawn Knight"
+description = "A knight who fights best at sunrise."
+
+[item.dawn_sun]
+name = "Dawn Sun"
+description = "A blade that keeps the morning light."
