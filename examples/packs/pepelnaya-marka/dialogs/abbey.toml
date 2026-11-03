@@ -22,7 +22,7 @@ speaker = "dt:monk"
 [[dialog.choice]]
 id = "take"
 text = "abbey.ilm_meet.take"
-then = [ { give_unit = "dt:monk", named = "ilm" } ]
+then = [ { give_unit = "dt:pilgrim", named = "ilm" } ]
 
 [[dialog.choice]]
 id = "leave"

@@ -4,8 +4,8 @@
 #
 # Taint: the dead's curse sticks to the hero's army (`cast_on_army`) in the blighted ground and to
 # the abbey's garrison when the dead reach its walls; the Order's rite takes it off (`remove_spells`).
-# The engine has no event for a lost battle, so "the dead win fights" is read as the dead walking
-# into the abbey (`army_arrives`) and the blight's own curse.
+# The engine has no event for a lost battle, so "the dead win fights" is read as the dead reaching the
+# abbey's gate (`army_arrives`) and the blight's own curse.
 #
 # Brother Ilm's crossroads: at Ольховка, a trial (burn the tainted village: ilm = 1) or mercy, which
 # plants the heresy (ilm = 2) and a secret dialog on a later midnight.
@@ -15,6 +15,7 @@ abbey_week = 0              # weeks since the chapter began
 abbey_ilm_met = false       # Brother Ilm's offer has been answered
 abbey_blight_seen = false   # the hero has been warned of the blight
 abbey_siege = false         # the dead have been sent at the abbey
+abbey_siege_fight = false   # the siege battle has begun (once)
 
 # The story starts: the Order's letter, the inquisitors ride to the abbey, the dead walk their patrol.
 [[trigger]]
@@ -41,12 +42,14 @@ map = "abbey"
 when = { event = "army_arrives", army = "inquisitors", building = "abbey" }
 then = [ { dialog = "abbey_inquisitors" } ]
 
-# Brother Ilm at the south gate: a novice with a borrowed sword and a gift in his hands.
+# Brother Ilm at the south gate: a novice with a borrowed sword and a gift in his hands. He comes only
+# to a hero who has no Ilm yet: the Order's shrine in Marka (`ilm` 1 or 2) gives him already, as a
+# pilgrim, and then the crossroads below is decided.
 [[trigger]]
 id = "abbey_ilm_meet"
 map = "abbey"
 when = { event = "hero_enters", at = [46, 49, 8, 3] }
-if = [ { var = "abbey_ilm_met", value = false } ]
+if = [ { var = "abbey_ilm_met", value = false }, { var = "ilm", value = 0 } ]
 then = [ { dialog = "abbey_ilm_meet" } ]
 
 [[trigger]]
@@ -91,15 +94,18 @@ then = [ { dialog = "abbey_rite" } ]
 [[trigger]]
 id = "abbey_walls_cursed"
 map = "abbey"
-when = { event = "army_arrives", army = "dead_wave", building = "abbey" }
+when = { event = "army_arrives", army = "dead_wave", at = [52, 44] }
 then = [
     { cast_on_army = "dt:spell/terrible_curse", garrison = "abbey", minutes = 600 },
     { dialog = "abbey_walls" },
 ]
 
-# The siege: from the second week the dead are sent at the abbey. This is the one big battle of the
-# chapter: the dead army's `battle = "lua:siege"` (maps/abbey/map.toml) makes it a field battle on
-# the abbey's wall (scripts/siege.lua), with the `attack` goal below.
+# The siege: from the second week the dead march on the abbey and stop at its south gate, the cell
+# (52, 44), four cells south of the abbey. This is the one big battle of the chapter: the dead army's
+# `battle = "lua:siege"` (maps/abbey/map.toml) makes it a field battle on the abbey's wall
+# (scripts/siege.lua). An AI army attacks only on the hero's step, so the battle is started by the
+# story instead: when the dead stand at the gate and the hero is inside the abbey (the garrison
+# joins him there, `hero_at` the abbey's footprint). The two triggers below cover either order.
 [[trigger]]
 id = "abbey_siege_start"
 map = "abbey"
@@ -112,8 +118,32 @@ if = [
 then = [
     { set = "abbey_siege", value = true },
     { dialog = "abbey_siege" },
-    { army_goal = "dead_wave", go_to_building = "abbey" },
+    { army_goal = "dead_wave", go_to = [52, 44] },
 ]
+
+# The dead at the gate while the hero stands in the abbey: the siege battle.
+[[trigger]]
+id = "abbey_siege_meet"
+map = "abbey"
+when = { event = "army_arrives", army = "dead_wave", at = [52, 44] }
+if = [
+    { var = "abbey_siege", value = true },
+    { var = "abbey_siege_fight", value = false },
+    { hero_at = [49, 39, 2, 2] },
+]
+then = [ { set = "abbey_siege_fight", value = true }, { start_battle = "dead_wave", rules = "lua:siege" } ]
+
+# The hero walks into the abbey while the dead wait at the gate: the siege battle.
+[[trigger]]
+id = "abbey_siege_enter"
+map = "abbey"
+when = { event = "hero_enters_building", building = "abbey" }
+if = [
+    { var = "abbey_siege", value = true },
+    { var = "abbey_siege_fight", value = false },
+    { army_at = "dead_wave", at = [52, 44] },
+]
+then = [ { set = "abbey_siege_fight", value = true }, { start_battle = "dead_wave", rules = "lua:siege" } ]
 
 [[trigger]]
 id = "abbey_siege_won"
@@ -152,12 +182,12 @@ map = "abbey"
 when = { event = "building_captured", building = "watch" }
 then = [ { add = "crown", value = -2, min = -5, max = 5 } ]
 
-# Ольховка: the trial, once, with Brother Ilm at the hero's side (a named unit of the monks).
+# Ольховка: the trial, once, with Brother Ilm at the hero's side (the named pilgrim).
 [[trigger]]
 id = "abbey_trial"
 map = "abbey"
 when = { event = "hero_enters", at = [14, 58, 8, 8] }
-if = [ { var = "ilm", value = 0 }, { has_named_unit = "ilm", unit = "dt:monk" } ]
+if = [ { var = "ilm", value = 0 }, { has_named_unit = "ilm", unit = "dt:pilgrim" } ]
 then = [ { dialog = "abbey_trial" } ]
 
 [[trigger]]
@@ -182,7 +212,7 @@ then = [ { set = "ilm", value = 2 }, { add = "order", value = -2, min = -5, max 
 id = "abbey_heresy_offer"
 map = "abbey"
 when = { event = "day_start" }
-if = [ { var = "ilm", value = 2 }, { has_named_unit = "ilm", unit = "dt:monk" } ]
+if = [ { var = "ilm", value = 2 }, { has_named_unit = "ilm", unit = "dt:pilgrim" } ]
 then = [ { dialog = "abbey_heresy" } ]
 
 [[trigger]]

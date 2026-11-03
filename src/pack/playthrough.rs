@@ -21,7 +21,7 @@ use crate::rules::content::{Content, HeroClass};
 use crate::rules::game::{Event, Foe, Game, STEP_SECONDS};
 use crate::rules::map::Tile;
 use crate::rules::rng::Rng;
-use crate::rules::sim::fight_it_out;
+use crate::rules::sim::{fight_it_out, FieldFight};
 use crate::rules::triggers::{Ending, PendingDialog};
 
 /// One battle the hero fought.
@@ -70,6 +70,8 @@ pub struct Run {
     pub choices: HashMap<String, String>,
     /// The battles fought so far, oldest first.
     pub battles: Vec<Fight>,
+    /// The field battles among them (a package's `lua:<script>` battle): rounds, winner, the defenders' HP.
+    pub fields: Vec<FieldFight>,
     start: f64,
 }
 
@@ -95,7 +97,7 @@ impl Run {
         g.triggers.trace = Some(Vec::new());
         o.start(&mut g);
         let start = g.clock.total_minutes();
-        let mut run = Run { g, log: Vec::new(), choices: choices.iter().map(|(d, c)| (d.to_string(), c.to_string())).collect(), battles: Vec::new(), start };
+        let mut run = Run { g, log: Vec::new(), choices: choices.iter().map(|(d, c)| (d.to_string(), c.to_string())).collect(), battles: Vec::new(), fields: Vec::new(), start };
         run.service()?;
         Ok(run)
     }
@@ -108,7 +110,7 @@ impl Run {
         // The option «Let pass»: the planner may cross a friendly army, and a step onto it is no battle.
         g.friends_let_pass = true;
         let start = g.clock.total_minutes();
-        let mut run = Run { g, log: Vec::new(), choices: choices.iter().map(|(d, c)| (d.to_string(), c.to_string())).collect(), battles: Vec::new(), start };
+        let mut run = Run { g, log: Vec::new(), choices: choices.iter().map(|(d, c)| (d.to_string(), c.to_string())).collect(), battles: Vec::new(), fields: Vec::new(), start };
         run.service()?;
         Ok(run)
     }
@@ -225,7 +227,7 @@ impl Run {
         let squad = self.g.squad.len();
         let hp: Vec<i32> = self.g.squad.iter().map(|u| u.hp).collect();
         self.note(format!("battle with {enemy} starts; squad hp {hp:?}"));
-        let outcome = fight_it_out(&mut self.g, &mut Vec::new());
+        let outcome = fight_it_out(&mut self.g, &mut self.fields);
         let day = self.day();
         self.battles.push(Fight { enemy: enemy.clone(), outcome, day, squad });
         self.note(format!("battle vs {enemy}: {outcome:?} ({squad} in the squad)"));
