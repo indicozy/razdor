@@ -1,7 +1,7 @@
 # Flow: the app, its screens and windows
 
 **Read this first.** Razdor is one macroquad program (`src/main.rs`) over a library
-(`src/lib.rs`: `dt`, `rules`, `difftest`, `editor`, …). The library holds every rule and
+(`src/lib.rs`: `dt`, `rules`, `difftest`, `studio`, …). The library holds every rule and
 decoder and has no macroquad; `src/ui/` is the only layer that draws or reads input. One
 `App` (`src/ui/mod.rs`) owns the game and a single `Screen` enum value; every frame
 `App::frame` runs the current screen's function, which draws *and* handles input
@@ -78,7 +78,7 @@ The APK is built by `scripts/dist-android.sh` (cargo-quad-apk, pinned in its hea
 see `[package.metadata.android]` in `Cargo.toml`). The launcher icon is `android/res/mipmap-*/ic_launcher.png`
 (Razdor's own icon, `data/icon/razdor.png` resized to 48–192 px; `res` and `icon` in `Cargo.toml`).
 Per-platform paths live in one place:
-`src/platform.rs` (`app_dir` for saves, log, editor maps, translation jobs; `cache_dir` for the picture cache;
+`src/platform.rs` (`app_dir` for saves, log, hub maps, translation jobs; `cache_dir` for the picture cache;
 `config_dir` for the remembered install; `install_roots` for the search). On Android they are
 `/storage/emulated/0/Razdor` (survives an uninstall) and the search starts with `DiscordTimes`
 in internal storage; desktop keeps the platform's data and config folders.
@@ -620,7 +620,7 @@ Building a window (`src/ui/chrome.rs`):
   (`game_bar::draw_with_time`), the map under a window (`world_view::window_backdrop`,
   `backdrop_lit`), the title's background (`main_menu::background`) and the map alone where
   they are; `pan::end_frame` (`main.rs`) puts the FPS counter, keyboard strip and pointer back
-  on the screen. Not panned: the editor, the map with no dialog open.
+  on the screen. Not panned: the map with no dialog open.
 - The bar over a window (`pan::cover_bar`, called after the bar is drawn in `world_view::backdrop_lit`
   and `window_backdrop`): when the canvas overflows, the frame's drawing is cut off above the bar
   (a scissor, also in `widgets::Clip`) and the window's controls take no hover or press over it
@@ -875,7 +875,7 @@ Off-screen: `hub-installed`, `hub-report`, `hub-refused` and `hub:0:hello-story`
   «Русский» and English for every other entry (`language::interface_of`). Saved in
   `settings.json` as "ru", "en" or the prefix (`language::code_of`, `language::initial`; a
   prefix whose files are gone becomes English, `language::resolve`). The main menu's corner
-  link and the advanced settings' «Язык» button open it (`language::open_list`, the editor's
+  link and the advanced settings' «Язык» button open it (`language::open_list`, the
   drop-down list `widgets::open_list` drawn by `widgets::draw_popup` at the end of
   `App::frame`; while it is open the screen takes no input); `App::follow_language` takes the
   pick (`language::follow_pick`); F2 steps through it (`language::cycle`).
@@ -967,7 +967,7 @@ wait and the quick save may share F5). The overrides are saved as (action, key) 
 window «Клавиши» (`main_menu::keys_window`) opens from the advanced settings: a click on a key
 waits for the new one (`keymap::listen`); while it waits no shortcut fires. The F1 list fills
 its `{Action}` tokens with the keys (`hotkeys::fill_keys`). Fixed keys (dialogs, arrows, +/-,
-0, Space, the editor's) stay literal.
+0, Space) stay literal.
 
 **The F1 list as buttons (an experiment, main only).** `hotkeys::tiles(place)` makes a tile of
 each key of the list's rows: an `{Action}` (its bound key), or a literal key (Esc, Enter, Backspace,

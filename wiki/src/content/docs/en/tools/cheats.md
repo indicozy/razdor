@@ -50,7 +50,7 @@ Command names are written in English. Case does not matter. If you enter the nam
 | `noclip` | Toggles the ability to pass through obstacles |
 | `peace` | Toggles peace mode (enemies will not attack the hero, but the hero can attack them) |
 | `routes` | Toggles the display of enemy army paths on the minimap |
-| `event N` | Triggers map event number N immediately; its conditions are not checked. The number is the same as in the map editor, starting from 1. Used for map testing. |
+| `event N` | Triggers map event number N immediately; its conditions are not checked. The number is the same as in DTMapEdit (the original's map editor), starting from 1. Used for map testing. |
 
 :::caution
 The `peace` command does not affect garrisons, building guards, or battles scripted within scenario events.

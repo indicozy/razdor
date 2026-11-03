@@ -195,12 +195,22 @@ Other diagnostics: `razdor.log` in the data folder (`razdor::diag`, `RAZDOR_LOG=
   These paths are checked by `cargo check --target aarch64-linux-android` and
   `aarch64-apple-ios` only; the install itself was not run on a device.
 
-## The map editor (briefly)
+## Razdor Studio (briefly)
 
-`src/editor/` is the model (pure, tested): `doc` (the scenario document), `command`
-(undoable edits), `validate`, `files` (writes `.DTm` byte-identical for an unchanged map).
-The window is `src/ui/editor/`. Started with `--editor` (the menus have no button for it). Its
-parity work with the original DTMapEdit is paused.
+The editor for `.rzpack` packages (`razdor --studio [<folder>]`; the main menu's «Редактор»
+opens the package played last, or the start page: open a folder, or make a new one). Desktop
+builds only (the `studio` feature). The old `.DTm` editor is gone (1.x and DTMapEdit still edit
+`.DTm`). Modules: `src/studio/` is the model without macroquad (`Workspace` and `open`/`check`,
+`edit` for the format-preserving TOML writes (the toml_edit crate), `history` for undo, `map` for the Map tab's
+compiled map and its `serial`, `geometry` for the canvas's cell rectangle and footprint outline,
+`newpkg` for the new package's template, `build` and `worker` for the rebuild on a thread,
+`reconcile` for outside changes). `src/ui/studio/` is the window: `mod.rs` (docks, screen),
+`map_tab.rs` (the Map tab's input and overlays), `canvas.rs` (camera and the game's map renderer),
+`forms.rs` and `inspector.rs`, `scene.rs`, `watch.rs` (`notify`), `start.rs` (the start page).
+Files are the truth: each open file is a document, a visual edit patches its TOML text, the
+model is parsed again from that text, and one undo stack covers every change. Snapshots:
+`studio:<folder>[:<map>[:<army>[:<option>…]]]` and `studio-start` (`ui::snapshot`, the
+offscreen-snapshot skill).
 
 ## The map translator (`razdor-translate`)
 

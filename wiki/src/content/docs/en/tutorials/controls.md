@@ -10,7 +10,7 @@ sidebar:
 Press **F1** on any screen to see its list of keys.
 
 :::note
-Keys do nothing while you type text (the hero's name, a save name, the editor field) or while a dialog or question is open. In a dialog, **N** means "No", and any other key except Tab, Alt and the up and down arrows means "Yes".
+Keys do nothing while you type text (the hero's name, a save name, a text field) or while a dialog or question is open. In a dialog, **N** means "No", and any other key except Tab, Alt and the up and down arrows means "Yes".
 :::
 
 ### Common keys

@@ -4,8 +4,8 @@ sidebar:
   order: 0
 ---
 
-Редактор карт, переводчик карт и консоль читов.
+Razdor Studio, переводчик карт и консоль читов.
 
-- [Редактор карт](/razdor/wiki/tools/map-editor/): создание и правка карт `.DTm`.
+- [Razdor Studio](/razdor/wiki/tools/map-editor/): редактор пакетов.
 - [Переводчик карт](/razdor/wiki/tools/map-translator/): перевод карт и данных игры с помощью языковой модели.
 - [Консоль читов](/razdor/wiki/tools/cheats/): команды консоли и их действие.
