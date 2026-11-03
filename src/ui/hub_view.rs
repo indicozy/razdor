@@ -172,6 +172,11 @@ impl HubView {
     }
 
     /// A snapshot's setup (`ui::snapshot`): the tab and the picked entry.
+    /// Types `q` into the search field (the off-screen scene `hub:<tab>:<id>:<search>`).
+    pub fn search_for_snapshot(&mut self, q: &str) {
+        self.query = q.into();
+    }
+
     pub fn stage(&mut self, tab: usize, pick: Option<&str>) {
         self.tab = tab.min(3);
         self.picked = pick.map(Into::into);
@@ -310,15 +315,24 @@ pub fn keep_pick(picked: Option<&str>, c: &Catalog) -> Option<String> {
 /// The tab's entries that match the search, best rated first (`hub::by_rating`).
 fn shown<'a>(c: &'a Catalog, tab: usize, query: &str) -> Vec<&'a Entry> {
     let want = [None, Some(Kind::Map), Some(Kind::Campaign), Some(Kind::Mod)][tab.min(3)];
-    let mut list: Vec<&Entry> = c.entries.iter().filter(|e| want.is_none_or(|k| e.kind == k)).filter(|e| matches(e, query)).collect();
+    let mut list: Vec<&Entry> = c.entries.iter().filter(|e| want.is_none_or(|k| e.kind == k)).filter(|e| matches(c, e, query)).collect();
     list.sort_by(|a, b| hub::by_rating(a, b));
     list
 }
 
-/// Whether an entry matches the search `query`: its Russian or English title, or its author,
-/// contains it, ignoring case. An empty query (or only spaces) matches everything.
-pub fn matches(e: &Entry, query: &str) -> bool {
-    matches_text(query, &[&e.title.ru, &e.title.en], &e.author)
+/// Whether an entry matches the search `query`: its Russian or English title, its author, or the
+/// title or id of a mod it requires (so «evolu» finds every map made for Evolution) contains it,
+/// ignoring case. An empty query (or only spaces) matches everything.
+pub fn matches(c: &Catalog, e: &Entry, query: &str) -> bool {
+    let mut titles: Vec<&str> = vec![e.title.ru.as_str(), e.title.en.as_str()];
+    for id in &e.requires {
+        titles.push(id.as_str());
+        if let Some(m) = c.entry(id) {
+            titles.push(m.title.ru.as_str());
+            titles.push(m.title.en.as_str());
+        }
+    }
+    matches_text(query, &titles, &e.author)
 }
 
 /// [`matches`] on the texts: `titles` are the entry's titles in each language, `author` its author.
@@ -330,29 +344,51 @@ pub fn matches_text(query: &str, titles: &[&str], author: &str) -> bool {
     titles.iter().any(|t| t.to_lowercase().contains(&q)) || author.to_lowercase().contains(&q)
 }
 
-/// The words that name the mods an entry still needs: «Нужен мод: A» for one, «Нужны моды: A, B»
-/// for several (`names` in install order, the catalog's own titles).
-pub fn needs_words(lang: Lang, names: &[&str]) -> String {
+/// «Нужно модов: N»: the count of mods an entry still needs (some are not installed yet).
+pub fn missing_words(lang: Lang, missing: usize) -> String {
+    let count = missing.to_string();
+    i18n::fill(i18n::tr_in(lang, i18n::n_("Needs mods: {count}")), &[("count", &count as &dyn std::fmt::Display)])
+}
+
+/// «Для мода: A» for one mod, «Для модов: A, B» for several (`names` in install order, the
+/// catalog's own titles): the mod an entry is made for, shown once its mods are installed.
+pub fn for_mods_words(lang: Lang, names: &[&str]) -> String {
     let list = names.join(", ");
-    let template = if names.len() == 1 { i18n::n_("Needs mod: {names}") } else { i18n::n_("Needs mods: {names}") };
+    let template = if names.len() == 1 { i18n::n_("For mod: {names}") } else { i18n::n_("For mods: {names}") };
     i18n::fill(i18n::tr_in(lang, template), &[("names", &list as &dyn std::fmt::Display)])
 }
 
-/// A row's state: its words and ink.
+/// The words of a row whose entry needs mods: the count while `missing` of them are still to be
+/// installed, else the names of the mods it is made for. None when it needs no mod (`names` empty).
+pub fn mod_row_words(lang: Lang, missing: usize, names: &[&str]) -> Option<String> {
+    if names.is_empty() {
+        None
+    } else if missing > 0 {
+        Some(missing_words(lang, missing))
+    } else {
+        Some(for_mods_words(lang, names))
+    }
+}
+
+/// A row's state: its words and ink. An entry that needs mods always says which (its count
+/// while some are missing, else the mod it is made for), so it still tells after the install.
 fn state(c: &Catalog, inst: &Installed, e: &Entry) -> (String, Color) {
-    if inst.has(&e.id) {
-        return (tr("Installed").into(), GREEN_TEXT);
+    if e.requires.is_empty() {
+        return if inst.has(&e.id) { (tr("Installed").into(), GREEN_TEXT) } else { (String::new(), CREAM) };
     }
-    match hub::plan_install(c, inst, &e.id) {
-        Err(_) => (tr("Can't be installed").into(), RED_TEXT),
-        Ok(plan) if plan.len() > 1 => {
-            // The plan ends with the entry itself; the rest are the mods it needs, by their titles.
-            let names: Vec<String> = plan[..plan.len() - 1].iter().map(|id| c.entry(id).map_or(id.clone(), |m| m.title.get(lang()).to_string())).collect();
-            let refs: Vec<&str> = names.iter().map(String::as_str).collect();
-            (needs_words(lang(), &refs), GOLD)
+    // The mods still to install: the plan's, which ends with the entry itself (none when it is installed).
+    let missing = if inst.has(&e.id) {
+        0
+    } else {
+        match hub::plan_install(c, inst, &e.id) {
+            Err(_) => return (tr("Can't be installed").into(), RED_TEXT),
+            Ok(plan) => plan.len().saturating_sub(1),
         }
-        Ok(_) => (String::new(), CREAM),
-    }
+    };
+    let names: Vec<String> = e.requires.iter().map(|id| c.entry(id).map_or(id.clone(), |m| m.title.get(lang()).to_string())).collect();
+    let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    let words = mod_row_words(lang(), missing, &refs).unwrap_or_default();
+    (words, if missing > 0 { GOLD } else { CREAM })
 }
 
 /// The entry's state as its author or the hub's checks say it: the words and their ink.
@@ -597,12 +633,15 @@ pub fn frame(view: &mut HubView) -> bool {
         let field_w = avail - sq - gap;
         let was_typing = has_focus(SEARCH_KEY);
         let before = view.query.clone();
-        text_field(SEARCH_KEY, fx, fy, field_w, fh, &mut view.query, false);
+        // The typed text and its hint: the hub's text size on a phone (as its other text), the
+        // desktop's 17 as before.
+        let field_px = if phone { size } else { 17.0 };
+        text_field_sized(SEARCH_KEY, fx, fy, field_w, fh, &mut view.query, false, field_px);
         if view.query != before {
             view.scroll = 0;
         }
         if view.query.is_empty() && !has_focus(SEARCH_KEY) {
-            text_fit(tr("Search…"), fx + 8.0 * k, fy + fh / 2.0 + small * 0.35, field_w - 16.0 * k, small, Color::new(0.85, 0.80, 0.68, 0.7));
+            text_fit(tr("Search…"), fx + 8.0 * k, fy + fh / 2.0 + field_px * 0.35, field_w - 16.0 * k, field_px, Color::new(0.85, 0.80, 0.68, 0.7));
         }
         if !view.query.is_empty() && chrome::close_button(fx + field_w + gap, fy, sq, false) {
             view.query.clear();
@@ -1133,11 +1172,29 @@ mod tests {
 
     /// The mods an entry needs are named: one («Нужен мод»), or several («Нужны моды», comma-separated).
     #[test]
-    fn needs_words_name_the_mods() {
-        assert_eq!(needs_words(Lang::Ru, &["Evolution"]), "Нужен мод: Evolution");
-        assert_eq!(needs_words(Lang::Ru, &["A", "B"]), "Нужны моды: A, B");
-        assert_eq!(needs_words(Lang::En, &["Evolution"]), "Needs mod: Evolution");
-        assert_eq!(needs_words(Lang::En, &["A", "B", "C"]), "Needs mods: A, B, C");
+    fn a_row_of_a_map_that_needs_mods_says_the_count_or_the_mod() {
+        assert_eq!(mod_row_words(Lang::Ru, 1, &["Evolution"]).as_deref(), Some("Нужно модов: 1"), "missing: the count");
+        assert_eq!(mod_row_words(Lang::Ru, 2, &["A", "B"]).as_deref(), Some("Нужно модов: 2"));
+        assert_eq!(mod_row_words(Lang::Ru, 0, &["Evolution"]).as_deref(), Some("Для мода: Evolution"), "installed: the mod's name");
+        assert_eq!(mod_row_words(Lang::Ru, 0, &["A", "B"]).as_deref(), Some("Для модов: A, B"));
+        assert_eq!(mod_row_words(Lang::En, 1, &["Evolution"]).as_deref(), Some("Needs mods: 1"));
+        assert_eq!(mod_row_words(Lang::En, 0, &["Evolution"]).as_deref(), Some("For mod: Evolution"));
+        assert_eq!(mod_row_words(Lang::Ru, 0, &[]), None, "no mod needed: no words");
+    }
+
+    /// The search finds an entry by the title or the id of a mod it requires, not only its own.
+    #[test]
+    fn the_search_finds_the_maps_made_for_a_mod() {
+        let c = mock_catalog("evolu-search");
+        let castle = c.entry("rotten-castle").unwrap();
+        let merc = c.entry("merc-road").unwrap();
+        let ford = c.entry("ford-outpost").unwrap();
+        assert!(matches(&c, castle, "evolu"), "its mod's English title");
+        assert!(matches(&c, merc, "evolu"), "its mod's title and the mercenaries' add-on");
+        assert!(matches(&c, merc, "mercenaries"), "the add-on's own title");
+        assert!(matches(&c, castle, "evolution-mock"), "the mod's id");
+        assert!(!matches(&c, ford, "evolu"), "a map with no mod");
+        assert!(matches(&c, castle, "Осада"), "its own title still counts");
     }
 
     /// A scroll stays between nothing to scroll and the most.

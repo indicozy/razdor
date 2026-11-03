@@ -1965,6 +1965,12 @@ pub fn edit_rows(id: u64, s: &str, ed: &mut TextEdit, active: bool, r: Rect, siz
 /// ends a one-line field or breaks the line in a multi-line one; Esc or a click elsewhere
 /// ends typing. Edits `value` as it is typed; true when it changed.
 pub fn text_field(key: &str, x: f32, y: f32, w: f32, h: f32, value: &mut String, multiline: bool) -> bool {
+    text_field_sized(key, x, y, w, h, value, multiline, 17.0)
+}
+
+/// [`text_field`] with its text at `size` (a one-line field's text is centred in its height).
+#[allow(clippy::too_many_arguments)]
+pub fn text_field_sized(key: &str, x: f32, y: f32, w: f32, h: f32, value: &mut String, multiline: bool, size: f32) -> bool {
     let id = field_id(key);
     let hover = mouse_in(x, y, w, h);
     if hover && clicked() {
@@ -1986,13 +1992,13 @@ pub fn text_field(key: &str, x: f32, y: f32, w: f32, h: f32, value: &mut String,
     let active = focused(id);
     draw_rectangle(x, y, w, h, FIELD_BG);
     draw_rectangle_lines(x, y, w, h, if active { 2.0 } else { 1.0 }, if active { ACCENT } else if hover { INK } else { DIM });
-    let size = 17.0;
     if multiline {
         edit_rows(id, value, &mut ed, active, Rect::new(x + 5.0, y + 3.0, w - 10.0, h - 6.0), size, 19.0, INK);
     } else {
-        // A long line shows its end, or the part around the caret while typed in.
+        // A long line shows its end, or the part around the caret while typed in. Its baseline
+        // puts the capitals' middle at the box's middle (0.35 of the size below it).
         let look = LineLook { size, color: INK, centred: false, shadow: false };
-        edit_line(id, value, &mut ed, active, true, Rect::new(x + 5.0, y, w - 10.0, h), y + (h + 12.0) / 2.0, look);
+        edit_line(id, value, &mut ed, active, true, Rect::new(x + 5.0, y, w - 10.0, h), y + h / 2.0 + size * 0.35, look);
     }
     store_edit(id, ed);
     changed
