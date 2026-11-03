@@ -2239,7 +2239,8 @@ pub fn checkbox_row(r: Rect, size: f32, label: &str, value: bool) -> Option<bool
 pub fn dropdown(key: &str, x: f32, y: f32, w: f32, current: i64, options: &[(i64, String)]) -> Option<i64> {
     let picked = take_pick(key);
     let h = 24.0;
-    let hover = mouse_in(x, y, w, h);
+    // Opens on the release (`button_state`), not the press: see `version_picker` in hub_view.rs.
+    let (hover, _, pressed) = button_state(Rect::new(x, y, w, h), true);
     let label = options.iter().find(|o| o.0 == current).map_or(format!("#{current}"), |o| o.1.clone());
     draw_rectangle(x, y, w, h, FIELD_BG);
     draw_rectangle_lines(x, y, w, h, 1.0, if hover { INK } else { DIM });
@@ -2249,7 +2250,7 @@ pub fn dropdown(key: &str, x: f32, y: f32, w: f32, current: i64, options: &[(i64
     }
     text(&shown, x + 5.0, y + 17.0, 16.0, INK);
     draw_triangle(vec2(x + w - 15.0, y + 9.0), vec2(x + w - 5.0, y + 9.0), vec2(x + w - 10.0, y + 16.0), DIM);
-    if hover && clicked() {
+    if pressed {
         open_list(key, Rect::new(x, y, w, h), current, options, 1.0);
     }
     picked.filter(|v| *v != current)

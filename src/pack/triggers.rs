@@ -36,7 +36,7 @@ pub const EVENTS: [&str; 13] = [
 /// The conditions (`if`). Each is a table with one of these keys (its kind).
 pub const CONDITIONS: [&str; 10] = ["var", "random", "hero_at", "army_at", "has_named_unit", "has_item", "gold", "army_alive", "building_owner", "has_spell"];
 /// The actions (`then`), each a table with one of these keys.
-pub const ACTIONS: [&str; 28] = [
+pub const ACTIONS: [&str; 30] = [
     "set",
     "add",
     "random_var",
@@ -65,6 +65,8 @@ pub const ACTIONS: [&str; 28] = [
     "remove_unit",
     "travel",
     "ending",
+    "quest",
+    "complete_quest",
 ];
 /// The keys that are arguments, not kinds. A kind key is one of the lists above; a key here
 /// never is.
@@ -456,6 +458,11 @@ pub enum Action {
     Travel { map: String, at: Option<String> },
     /// `ending = "<dialog>"`: the dialog shows, then the campaign ends.
     Ending(String),
+    /// `quest = "<id>", title = "<key>", text = "<key>"`: an active diary entry, or its texts
+    /// updated when the id is already active. The texts are text keys, shown in the game's language.
+    Quest { id: String, title: String, text: String },
+    /// `complete_quest = "<id>"`: the active diary entry of that id is completed (a no-op otherwise).
+    CompleteQuest(String),
 }
 
 /// A map figure: a unit's (its kind's picture, `dt:<alias>`) or an army model's (`model = "bandits"`).
@@ -989,6 +996,18 @@ pub fn parse_action(t: &Table) -> Res<Action> {
             check_args(t, kind, &[])?;
             Ok(Action::Ending(name_of(v, "dialog")?))
         }
+        "quest" => {
+            check_args(t, kind, &["title", "text"])?;
+            Ok(Action::Quest {
+                id: name_of(v, "quest")?,
+                title: str_of(need(t, kind, "title")?, "`title`")?.to_string(),
+                text: str_of(need(t, kind, "text")?, "`text`")?.to_string(),
+            })
+        }
+        "complete_quest" => {
+            check_args(t, kind, &[])?;
+            Ok(Action::CompleteQuest(name_of(v, "quest")?))
+        }
         _ => unreachable!("kind_of returns an action"),
     }
 }
@@ -1115,6 +1134,19 @@ pub fn parse_dialog(raw: &RawDialog) -> Res<Dialog> {
 /// names is declared, with a type that fits; every dialog a trigger or choice opens exists, and
 /// every choice a `dialog_choice` event names; no dialog is unreachable; the choices stay within
 /// [`MAX_CHOICES`]; references to units, items and spells resolve.
+/// Every action of the package's triggers and of its dialog choices, with the file and line of its
+/// table (the checks and the text keys walk them).
+pub fn actions(pkg: &Package) -> Vec<(&str, u32, &Action)> {
+    let mut out = Vec::new();
+    for t in &pkg.triggers {
+        out.extend(t.value.then.iter().map(|a| (t.file.as_str(), t.line, a)));
+    }
+    for d in &pkg.dialogs {
+        out.extend(d.value.choices.iter().flat_map(|c| c.then.iter()).map(|a| (d.file.as_str(), d.line, a)));
+    }
+    out
+}
+
 pub fn check(pkg: &Package, r: &mut Report) {
     let mut declared = BTreeSet::new();
     for v in &pkg.vars {
@@ -1180,6 +1212,20 @@ pub fn check(pkg: &Package, r: &mut Report) {
         }
         if let Some(s) = &d.value.speaker {
             ctx.unit(r, &d.file, d.line, s);
+        }
+    }
+    // A `complete_quest` names a quest some `quest` action adds (a typo is an error).
+    let acts = actions(pkg);
+    let added: BTreeSet<&str> = acts.iter().filter_map(|(_, _, a)| if let Action::Quest { id, .. } = a { Some(id.as_str()) } else { None }).collect();
+    for (file, line, a) in &acts {
+        if let Action::CompleteQuest(id) = a {
+            if !added.contains(id.as_str()) {
+                let hint = match closest(id, added.iter().copied()) {
+                    Some(near) => format!("did you mean `{near}`?"),
+                    None => "a `quest` action with this id adds it: check the spelling".to_string(),
+                };
+                r.error_hint(file, Some(*line), format!("`complete_quest` of quest `{id}`, which no `quest` action adds"), hint);
+            }
         }
     }
     for d in &pkg.dialogs {
@@ -2045,5 +2091,44 @@ mod map_refs_tests {
     fn a_figure_names_a_unit_the_package_lacks() {
         let story = "[[trigger]]\nid = \"a\"\nwhen = { event = \"game_start\" }\nthen = [ { hero_figure = \"local:nobody\" } ]\n";
         assert!(!errors(story, "").is_empty());
+    }
+
+    // The diary's actions: `quest` and `complete_quest` read, and their checks.
+
+    fn diary_table(text: &str) -> Table {
+        toml::from_str(text).unwrap()
+    }
+
+    #[test]
+    fn quest_and_complete_quest_read() {
+        assert_eq!(
+            parse_action(&diary_table("quest = \"ford\"\ntitle = \"t.a\"\ntext = \"t.b\"")),
+            Ok(Action::Quest { id: "ford".into(), title: "t.a".into(), text: "t.b".into() })
+        );
+        assert_eq!(parse_action(&diary_table("complete_quest = \"ford\"")), Ok(Action::CompleteQuest("ford".into())));
+    }
+
+    #[test]
+    fn a_quest_needs_its_title_and_text_and_hints_a_typo() {
+        assert!(parse_action(&diary_table("quest = \"ford\"\ntitle = \"t.a\"")).is_err(), "no text");
+        let e = parse_action(&diary_table("quest = \"ford\"\ntitle = \"t.a\"\ntexy = \"t.b\"")).unwrap_err();
+        assert_eq!(e.hint, "did you mean `text`?", "{e:?}");
+    }
+
+    #[test]
+    fn a_complete_quest_must_name_a_quest_some_action_adds() {
+        let story = "[[trigger]]\nid = \"a\"\nwhen = { event = \"game_start\" }\nthen = [ { quest = \"ford\", title = \"t.x\", text = \"t.x\" } ]\n\n[[trigger]]\nid = \"b\"\nwhen = { event = \"day_start\" }\nthen = [ { complete_quest = \"fotd\" } ]\n";
+        let errs = errors(story, "");
+        assert!(errs.contains("`complete_quest` of quest `fotd`, which no `quest` action adds"), "{errs}");
+        assert!(errs.contains("did you mean `ford`?"), "{errs}");
+    }
+
+    #[test]
+    fn a_quest_added_in_a_choice_completes_and_a_text_key_is_checked() {
+        let dialogs = "[[dialog]]\nid = \"d\"\ntitle = \"t.x\"\ntext = \"t.x\"\n\n[[dialog.choice]]\nid = \"take\"\ntext = \"t.x\"\nthen = [ { quest = \"ford\", title = \"t.x\", text = \"t.x\" } ]\n";
+        let story = "[[trigger]]\nid = \"a\"\nwhen = { event = \"game_start\" }\nthen = [ { dialog = \"d\" } ]\n\n[[trigger]]\nid = \"b\"\nwhen = { event = \"dialog_choice\", dialog = \"d\", choice = \"take\" }\nthen = [ { complete_quest = \"ford\" } ]\n";
+        assert_eq!(errors(story, dialogs), "", "a choice's quest is one a trigger may complete");
+        let missing = "[[trigger]]\nid = \"a\"\nwhen = { event = \"game_start\" }\nthen = [ { quest = \"ford\", title = \"t.nope\", text = \"t.x\" } ]\n";
+        assert!(errors(missing, "").contains("text key `t.nope` has no text in any language"), "a quest's title is a text key");
     }
 }

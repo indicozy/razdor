@@ -8,7 +8,10 @@
 //! live only in his saves.
 //!
 //! Campaigns: the history carries over to the next map; each map is a new *chapter*, so the
-//! event numbers of two maps never mix.
+//! event numbers of two maps never mix. A package's own quests (`quest` and `complete_quest`
+//! actions) and the dialogs it shows are entries too, with the package's id (`Entry::story`) and
+//! their texts as keys, shown in the game's language. An active package quest stays active when
+//! the campaign goes on to the next map (the original's journal empties per map; ours keeps it).
 
 use serde::{Deserialize, Serialize};
 
@@ -35,7 +38,12 @@ pub enum EntryKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Entry {
     pub kind: EntryKind,
+    /// The original's event (0 for a package's entry, which has `story` instead).
     pub event: EventId,
+    /// A package's quest or dialog, by its id in the story; `None` for the original's events.
+    /// Its `title` and `text` are then text keys of the story.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub story: Option<String>,
     /// The campaign map it came from (0: the first one played).
     pub chapter: u32,
     /// In-game minutes when it happened ([`Clock::at_minutes`]).
@@ -67,11 +75,53 @@ impl History {
     /// Adds an entry of the current chapter. The same event reported twice in the same
     /// minute with the same text is kept once.
     pub fn record(&mut self, kind: EntryKind, event: EventId, minutes: u64, title: &str, text: &str) {
-        let e = Entry { kind, event, chapter: self.chapter, minutes, title: title.to_string(), text: text.to_string() };
-        if self.entries.iter().rev().take_while(|x| x.minutes == minutes).any(|x| *x == e) {
+        self.push(Entry { kind, event, story: None, chapter: self.chapter, minutes, title: title.to_string(), text: text.to_string() });
+    }
+
+    /// Adds an entry, unless the same one was made in the same minute (see [`History::record`]).
+    fn push(&mut self, e: Entry) {
+        if self.entries.iter().rev().take_while(|x| x.minutes == e.minutes).any(|x| *x == e) {
             return;
         }
         self.entries.push(e);
+    }
+
+    /// A package's quest `id` is added as an active entry, or, when the id is already active, its
+    /// texts and chapter are updated in place (its date stays: no duplicate). `title` and `text`
+    /// are text keys of the story.
+    pub fn story_quest(&mut self, id: &str, minutes: u64, title: &str, text: &str) {
+        let chapter = self.chapter;
+        if let Some(e) = self.entries.iter_mut().rev().find(|e| e.kind == EntryKind::Quest && e.story.as_deref() == Some(id)) {
+            e.title = title.to_string();
+            e.text = text.to_string();
+            e.chapter = chapter;
+            return;
+        }
+        self.push(Entry { kind: EntryKind::Quest, event: 0, story: Some(id.to_string()), chapter, minutes, title: title.to_string(), text: text.to_string() });
+    }
+
+    /// The active entry of package quest `id` is completed, dated `minutes`. It moves to the end of
+    /// the history, so the completed tab lists it by when it was completed. Returns false when no
+    /// quest of that id is active (nothing changes).
+    pub fn story_quest_done(&mut self, id: &str, minutes: u64) -> bool {
+        let Some(at) = self.entries.iter().rposition(|e| e.kind == EntryKind::Quest && e.story.as_deref() == Some(id)) else {
+            return false;
+        };
+        let mut e = self.entries.remove(at);
+        e.kind = EntryKind::Completed;
+        e.minutes = minutes;
+        e.chapter = self.chapter;
+        self.entries.push(e);
+        true
+    }
+
+    /// A package's dialog `id` was shown: a message of the current chapter (`title` and `text` are
+    /// text keys). A dialog shown twice in the same minute is kept once.
+    pub fn story_message(&mut self, id: &str, minutes: u64, title: &str, text: &str) {
+        if text.trim().is_empty() {
+            return;
+        }
+        self.push(Entry { kind: EntryKind::Message, event: 0, story: Some(id.to_string()), chapter: self.chapter, minutes, title: title.to_string(), text: text.to_string() });
     }
 
     /// Whether the quest's latest entry of this chapter is its completion: a closing event that
@@ -81,7 +131,7 @@ impl History {
         self.entries
             .iter()
             .rev()
-            .find(|e| e.chapter == self.chapter && e.event == quest && matches!(e.kind, EntryKind::Quest | EntryKind::Completed))
+            .find(|e| e.story.is_none() && e.chapter == self.chapter && e.event == quest && matches!(e.kind, EntryKind::Quest | EntryKind::Completed))
             .is_some_and(|e| e.kind == EntryKind::Completed)
     }
 
@@ -90,9 +140,9 @@ impl History {
         self.entries.iter().rev().filter(move |e| e.kind == kind)
     }
 
-    /// The latest entry of `kind` for event `id` of the current chapter.
+    /// The latest entry of `kind` for event `id` of the current chapter (not a package's entry).
     pub fn find(&self, kind: EntryKind, id: EventId) -> Option<&Entry> {
-        self.newest(kind).find(|e| e.event == id && e.chapter == self.chapter)
+        self.newest(kind).find(|e| e.story.is_none() && e.event == id && e.chapter == self.chapter)
     }
 
     /// The next campaign map begins.
@@ -221,10 +271,17 @@ impl Game {
     }
 
     /// The lines of a journal tab, newest first. Active quests are the engine's journal (with
-    /// their date from the history); completed ones the history's, then any the engine lists
-    /// that the history lacks (older saves).
+    /// their date from the history), then the package's active quests (whose time is since they
+    /// were received); completed ones the history's, then any the engine lists that the history
+    /// lacks (older saves). A package's texts are resolved through the story (the game's language).
     pub fn journal_rows(&self, tab: Tab) -> Vec<Row> {
-        let shown = |e: &Entry| Row { title: self.fill_title(&e.title), text: self.fill_text(&e.text), date: Some(e.date()), elapsed: None, chapter: e.chapter };
+        let shown = |e: &Entry| {
+            let (title, text) = match e.story {
+                Some(_) => (self.story_text(&e.title), self.story_text(&e.text)),
+                None => (e.title.clone(), e.text.clone()),
+            };
+            Row { title: self.fill_title(&title), text: self.fill_text(&text), date: Some(e.date()), elapsed: None, chapter: e.chapter }
+        };
         let from_engine = |id: EventId, kind: EntryKind| match self.journal.find(kind, id) {
             Some(e) => shown(e),
             None => {
@@ -234,8 +291,19 @@ impl Game {
         };
         let (active, done) = self.script().map_or((&[][..], &[][..]), |s| (s.journal(), s.completed_quests()));
         match tab {
-            // The engine's journal, an entry each time a quest was received.
-            Tab::Active => active.iter().rev().map(|&id| self.quest_row(id)).collect(),
+            // The engine's journal, an entry each time a quest was received; the package's quests
+            // come after it in the list (the Active tab shows its list oldest first, so they end it).
+            Tab::Active => {
+                let now = self.clock.total_minutes() as u64;
+                let mut rows: Vec<Row> = self
+                    .journal
+                    .newest(EntryKind::Quest)
+                    .filter(|e| e.story.is_some())
+                    .map(|e| Row { elapsed: Some(now.saturating_sub(e.minutes)), ..shown(e) })
+                    .collect();
+                rows.extend(active.iter().rev().map(|&id| self.quest_row(id)));
+                rows
+            }
             Tab::Completed => {
                 let mut rows: Vec<Row> = self.journal.newest(EntryKind::Completed).map(shown).collect();
                 let missing = done.iter().rev().filter(|&&id| self.journal.find(EntryKind::Completed, id).is_none());

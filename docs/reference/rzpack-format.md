@@ -264,6 +264,8 @@ then = [ { give_gold = -20 } ]                      # optional actions
 | `victory` | `= true`, `next = "<map>"` | the same victory, and the campaign goes to that map (the override of `campaign.toml`, «Campaigns») |
 | `travel` | `= "<map>"`, `at = "<point-id>"` (optional) | the campaign leaves this map for that one, at its point (else its start), once the dialogs are read («Campaigns») |
 | `ending` | `= "<dialog-id>"` | the dialog shows, then the campaign ends with it («Campaigns») |
+| `quest` | `= "<quest-id>"`, `title = "<text key>"`, `text = "<text key>"` | an active diary entry («Активные»): added, or its texts updated when the id is already active (its date stays, no duplicate); the texts are shown in the game's language (`story_text`) |
+| `complete_quest` | `= "<quest-id>"` | that quest's entry moves to «Выполненные», dated now; a quest not active (or unknown) does nothing |
 | `start_battle` | the army is the value, `rules = "dt"` or `"lua:<script>"` | the army meets the hero now, in that battle (a field battle for a script; «Field battles») |
 
 Units and items are `dt:<alias>` or the package's own ids; spells are `dt:spell/<alias>`. A
@@ -306,9 +308,16 @@ drawn for a package. Package armies and named characters take the ids 200 up (56
 
 Unknown events, conditions, actions and keys (with the closest name); undeclared variables;
 values of the wrong type; unknown dialogs and choices; a dialog that no trigger or choice opens
-(a warning); more than five choices; a text key missing in every language; unknown `dt:` units,
-items and spells; a package that is not in `requires`; a variable declared twice; a trigger id
-used twice; a `map` that is not in the package.
+(a warning); more than five choices; a text key missing in every language (a `quest`'s title and
+text too); a `complete_quest` of a quest id that no `quest` action adds (with the closest id); unknown
+`dt:` units, items and spells; a package that is not in `requires`; a variable declared twice; a
+trigger id used twice; a `map` that is not in the package.
+
+**The diary.** A `quest` and a `complete_quest` are the package's journal entries (`rules::journal`,
+`Entry::story`). Every dialog that is shown is also recorded in «Сообщения», with its title and text,
+so a closed dialog can be reread (the same dialog in the same minute is kept once). Across maps an
+active quest stays active (the original's journal empties per map; the package's does not), and a
+`quest` of that id on the next map updates it and lists it under that map. Saves keep all of it.
 
 Per map (the map checker, once the map's size is known; `triggers::check_map_refs`). The triggers
 that apply to a map are those without `map` and those naming it; the dialogs they open, and the
