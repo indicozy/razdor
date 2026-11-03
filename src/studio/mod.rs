@@ -27,8 +27,11 @@ use crate::pack::reach::Site;
 use crate::pack::terrain::Palette;
 
 pub mod brush;
+pub mod campaign_graph;
+pub mod characters;
 pub mod build;
 pub mod claude;
+pub mod doc;
 pub mod edit;
 pub mod history;
 pub mod map;
@@ -40,6 +43,8 @@ pub mod geometry;
 pub mod newpkg;
 pub mod overlay;
 pub mod region;
+pub mod scenario;
+pub mod texts;
 pub mod vars;
 pub mod worker;
 /// The Claude dock's pseudo-terminal (desktop, with the studio's feature).
@@ -232,9 +237,19 @@ impl Workspace {
         let rel = safe_rel(path)?;
         let full = self.root.join(&rel);
         let not_saved = |why: &str| format!("cannot save {path}: {why}");
-        let meta = fs::symlink_metadata(&full).map_err(|e| not_saved(&e.to_string()))?;
-        if meta.file_type().is_symlink() || !meta.is_file() {
-            return Err(not_saved("not a regular file of the package"));
+        // A file that is not there yet (a new campaign, `create_text_file`) is made, in a folder of
+        // the package; an existing one must be a regular file, not a link.
+        match fs::symlink_metadata(&full) {
+            Ok(meta) => {
+                if meta.file_type().is_symlink() || !meta.is_file() {
+                    return Err(not_saved("not a regular file of the package"));
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let parent = full.parent().ok_or_else(|| not_saved("no folder"))?;
+                fs::create_dir_all(parent).map_err(|e| not_saved(&e.to_string()))?;
+            }
+            Err(e) => return Err(not_saved(&e.to_string())),
         }
         let root = self.canon_root()?;
         let parent = full.parent().ok_or_else(|| not_saved("no folder"))?;
@@ -375,6 +390,84 @@ impl Workspace {
         self.docs[idx].text = after.clone();
         self.record(Step::text(file, before, after, label));
         Ok(())
+    }
+
+    /// Applies table edits to one text file (a package file, opened if it is not) as one undo step
+    /// named `label`. Refused when the file does not parse (the banner's text) or an edit does not
+    /// fit the file; then nothing changes.
+    pub fn apply_doc(&mut self, file: &str, label: &str, edits: &[doc::DocEdit]) -> Result<(), String> {
+        self.apply_docs(label, vec![(file.to_string(), edits.to_vec())])
+    }
+
+    /// Applies table edits to several text files as one undo step (a rename across files). Every
+    /// file is computed before any changes, so a failure in one leaves them all as they were.
+    pub fn apply_docs(&mut self, label: &str, files: Vec<(String, Vec<doc::DocEdit>)>) -> Result<(), String> {
+        self.end_text_edit();
+        let mut changes = Vec::new();
+        for (file, edits) in files {
+            let idx = self.open_doc(&file)?;
+            let before = self.docs[idx].text.clone();
+            if let Some((line, message)) = edit::parse_error(&before) {
+                return Err(format!("stale: {file} line {line}: {message}"));
+            }
+            let after = doc::apply_all(&before, &edits)?;
+            changes.push((file, after));
+        }
+        self.set_texts(label, changes)
+    }
+
+    /// Puts new texts into open text files as one undo step named `label` (the texts are already
+    /// computed; each must parse). A file whose text is the same is left out.
+    pub fn set_texts(&mut self, label: &str, files: Vec<(String, String)>) -> Result<(), String> {
+        self.end_text_edit();
+        let mut members = Vec::new();
+        for (file, after) in files {
+            let idx = self.open_doc(&file)?;
+            let before = self.docs[idx].text.clone();
+            if before == after {
+                continue;
+            }
+            self.docs[idx].text = after.clone();
+            members.push(Change::Text { path: file, before, after });
+        }
+        match members.len() {
+            0 => {}
+            1 => {
+                let Some(Change::Text { path, before, after }) = members.pop() else { unreachable!("one text change") };
+                self.record(Step::text(path, before, after, label));
+            }
+            _ => self.record(Step { label: label.to_string(), change: Change::Group(members) }),
+        }
+        Ok(())
+    }
+
+    /// Creates a text file of the package (its text is `text`; not on disk until saved). Refused
+    /// when the file exists or the path is not a package path. One undo step: undo empties it.
+    pub fn create_text_file(&mut self, file: &str, text: &str, label: &str) -> Result<(), String> {
+        if self.root.join(file).exists() || self.docs.iter().any(|d| d.path == file) {
+            return Err(format!("{file} already exists"));
+        }
+        safe_rel(file)?;
+        self.end_text_edit();
+        self.docs.push(Doc { path: file.to_string(), text: text.to_string(), saved: String::new() });
+        self.record(Step::text(file, "", text, label));
+        Ok(())
+    }
+
+    /// Writes a file under `.editor/` of the package (the studio's own data, never a package file:
+    /// the reader skips the folder). The folder is made when missing. Not an undo step.
+    pub fn write_editor_file(&self, rel: &str, bytes: &[u8]) -> Result<(), String> {
+        let path = format!(".editor/{rel}");
+        let full = self.root.join(safe_rel(&path)?);
+        if let Some(parent) = full.parent() {
+            fs::create_dir_all(parent).map_err(|e| format!("cannot make {}: {e}", parent.display()))?;
+        }
+        fs::write(&full, bytes).map_err(|e| format!("cannot write {path}: {e}"))
+    }
+
+    /// Reads a file under `.editor/` (`None` when it is not there).
+    pub fn read_editor_file(&self, rel: &str) -> Option<Vec<u8>> {
+        fs::read(self.root.join(".editor").join(rel)).ok()
     }
 
     /// Opens a map's terrain for painting: its picture is read and decoded with the map's palette.

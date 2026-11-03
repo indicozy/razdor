@@ -21,6 +21,16 @@ pub const MAX_FILE_BYTES: u64 = 32 << 20;
 /// How deep a folder package may nest.
 const MAX_DEPTH: usize = 32;
 
+/// The top-level folders that are never read or packed: the studio's own data (`.editor/`: layout,
+/// stamps), a repository (`.git/`) and the author's agent settings (`.claude/`). Only at the
+/// package's top level; a folder of the same name deeper in the package is a folder like any other.
+pub const SKIPPED_TOP_FOLDERS: [&str; 3] = [".editor", ".git", ".claude"];
+
+/// Whether a package-relative path lies in one of [`SKIPPED_TOP_FOLDERS`] (at the top level).
+pub fn is_skipped_top(path: &str) -> bool {
+    path.split_once('/').is_some_and(|(top, _)| SKIPPED_TOP_FOLDERS.contains(&top))
+}
+
 /// Package-relative path (`/` separators) to the file's bytes.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Files {
@@ -104,7 +114,8 @@ impl Files {
         let mut declared = Budget::default();
         for i in 0..archive.len() {
             let entry = archive.by_index_raw(i).map_err(|e| format!("cannot read entry {i}: {e}"))?;
-            if !entry.is_dir() {
+            let skipped = safe_path(&String::from_utf8_lossy(entry.name_raw())).is_some_and(|p| is_skipped_top(&p));
+            if !entry.is_dir() && !skipped {
                 declared.admit(&String::from_utf8_lossy(entry.name_raw()), entry.size())?;
             }
         }
@@ -129,6 +140,9 @@ impl Files {
                 });
                 continue;
             };
+            if is_skipped_top(&path) {
+                continue;
+            }
             let size = entry.size();
             budget.admit(&name, size)?;
             let data = budget.finish(&name, size, &mut entry)?;
@@ -245,6 +259,9 @@ fn collect(root: &Path, dir: &Path, prefix: &str, depth: usize, files: &mut File
     entries.sort_by_key(|e| e.file_name());
     for entry in entries {
         let name = entry.file_name();
+        if prefix.is_empty() && name.to_str().is_some_and(|n| SKIPPED_TOP_FOLDERS.contains(&n)) && entry.path().is_dir() {
+            continue;
+        }
         let Some(name) = name.to_str() else {
             files.problems.push(Diagnostic {
                 severity: Severity::Error,

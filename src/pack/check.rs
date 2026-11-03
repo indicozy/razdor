@@ -140,7 +140,8 @@ fn check_entries(pkg: &Package, r: &mut Report) {
             Some((top, _)) => (top, true),
             None => (path, false),
         };
-        // `.editor/` holds the studio's own data (layout, stamps): the engine ignores it.
+        // Hidden top-level files (`.gitignore`, `.DS_Store`) are not package files. The folders
+        // `.editor/`, `.git/` and `.claude/` are not read at all (`pack::files::SKIPPED_TOP_FOLDERS`).
         if top.starts_with('.') {
             continue;
         }
@@ -205,7 +206,10 @@ fn check_texts_present(pkg: &Package, r: &mut Report) {
 }
 
 /// Rule 3: every text key used exists, in one language at least and in every language.
-fn check_text_keys(pkg: &Package, r: &mut Report) {
+/// The text keys the package uses, as `(key, file, line)`: the manifest's, the units' and items'
+/// names and descriptions, the dialogs' texts and choices, and the maps' (`map_check::text_keys`).
+/// Shared by the checker and the studio's texts table.
+pub fn used_keys(pkg: &Package) -> Vec<(String, String, Option<u32>)> {
     let mut used: Vec<(&str, &str, Option<u32>)> = Vec::new();
     if let Some(m) = &pkg.manifest {
         let text = pkg.files.text("package.toml").unwrap_or("");
@@ -237,8 +241,14 @@ fn check_text_keys(pkg: &Package, r: &mut Report) {
     for (key, file, line) in &map_keys {
         used.push((key.as_str(), file.as_str(), *line));
     }
+    used.into_iter().map(|(k, f, l)| (k.to_string(), f.to_string(), l)).collect()
+}
+
+fn check_text_keys(pkg: &Package, r: &mut Report) {
+    let used = used_keys(pkg);
     let mut seen = BTreeSet::new();
-    for (key, file, line) in used {
+    for (key, file, line) in &used {
+        let (key, file, line) = (key.as_str(), file.as_str(), *line);
         if !seen.insert(key) {
             continue;
         }
